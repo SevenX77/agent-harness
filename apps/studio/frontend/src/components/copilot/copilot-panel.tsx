@@ -214,7 +214,7 @@ export function CopilotPanel({
 
   useEffect(() => {
     setDraftJudgeContext((current) => nextDraftJudgeContext(draft, current, { skillId, view, judgeRefs }))
-  }, [draft, skillId, view, judgeRefs?.runResultsRef, judgeRefs?.baselineRef])
+  }, [draft, skillId, view, judgeRefs])
 
   useEffect(() => {
     let cancelled = false

@@ -91,12 +91,12 @@
       "id": "six-state",
       "term": "6 态（route 级状态体系，six-state）",
       "category": "后端能力",
-      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
-      "explain": "每条 route（某模型在某 endpoint 上的一条连接路线）的状态用 6 种表达，三个页面颜色一致：🟢 ready=真测通了；🔵 historical_ready=以前联通过（来自 Probe Knowledge Catalog 历史回填，当前没真测）；⚪ untested=没测；🔴 failed=出错要修（含配置缺口 缺 key/URL/协议、和 真测失败，用 reason 区分，红但不挡进可用列表）；⚪+倒计时 cooling_down=临时失败熔断中、倒计时后重试；⚪+不可选 off=被禁用。这套「6 态标准总结」按设计是 ③b 公共能力内核（gateway 客观状态 + 熔断的最佳总结）；现码 project_provider_model_state 只产 5 态（把配置缺口和测试失败揉成一个 needs_setup 灰态、没蓝态），在 ③a 待下沉并补齐。③a 只把 6 态转成颜色/文案 DTO（应用加工）。",
+      "owner": "③b gateway（设计；Studio 当前通过后端适配壳消费，公共内核仍按模块边界继续收敛）",
+      "explain": "每条 route（某模型在某 endpoint 上的一条连接路线）的状态用 6 种表达，三个页面颜色一致：🟢 ready=真测通了；🔵 historical_ready=以前联通过（credentials route 已保存 probe-verified 历史 evidence_refs，当前没真测）；⚪ untested=没测；🔴 failed=出错要修（含配置缺口 缺 key/URL/协议、和 真测失败，用 reason 区分，红但不挡进可用列表）；⚪+倒计时 cooling_down=临时失败熔断中、倒计时后重试；⚪+不可选 off=被禁用。这套「6 态标准总结」按设计是 ③b 公共能力内核（gateway 客观状态 + 熔断的最佳总结）；Studio API Keys 现在已经消费后端 6 态 DTO,蓝态只从 credentials route.metadata.evidence_refs 投影,不从 catalog cache 直读。",
       "detail": [
         [
           "定义层",
-          "③b gateway（6 态标准总结 + 熔断；现码在 ③a project_provider_model_state 待下沉，需取消 needs_setup、补蓝态）"
+          "③b gateway（6 态标准总结 + 熔断；Studio 当前通过后端 DTO 消费,后续只保留模块边界收敛工作）"
         ],
         [
           "复用范围",
@@ -108,8 +108,8 @@
       "id": "probe-catalog",
       "term": "Probe Knowledge Catalog（探测知识库）",
       "category": "后端能力",
-      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
-      "explain": "每个 provider 的历史探测知识库，双向用：读（赋能）——把过去已证实的模型清单和能力回填到当前列表，不用重探，对应 🔵 蓝态；写（写回）——本次探测发现的新模型/新能力（含失败记录，如哪些模型抖动/超时）沉淀回本机，下次批量探测可优先跳过历史失败的、优先试历史成功的。这套「Probe Knowledge Catalog 内核（记录/复用探测证据）」按设计是 ③b 公共能力；③a 只做远端只读源选择、存储介质、本地导出/脱敏（应用加工）。MVP1 不自动上传社区 catalog。现码 llm_import_drafts.py / ProviderImportDraft 是 legacy 命名，Import Draft（待导入草稿→apply）不属于 MVP1 主线。",
+      "owner": "③b gateway（设计；Studio 负责远端只读源、缓存存储和 HTTP 适配壳）",
+      "explain": "每个 provider 的历史探测知识库，双向用：读（赋能）——给 Test 提供过去已证实的模型清单、能力和探测优先级；写（沉淀）——本次用户触发测试发现的新模型/新能力/失败记录沉淀回本机。远端 community catalog 同步只进入 disposable verified cache,展示为 advisory,不会自动 applied to your keys;只有用户按 Test 时,匹配的 probe-verified 记录才会晋升进 credentials route.metadata.evidence_refs,再由 credentials 投影出 🔵 historical_ready。MVP1 不自动上传社区 catalog。Import Draft（待导入草稿→apply）不属于 MVP1 主线。",
       "detail": [
         [
           "定义层",
@@ -117,7 +117,7 @@
         ],
         [
           "复用范围",
-          "回填蓝态 + 喂批量探测的历史优先级；③a 做远端只读源配置、本地导出和脱敏"
+          "给 Test 提供历史能力/清单/优先级;Test 才能把匹配证据晋升进 credentials 出蓝；③a 做远端只读源配置、本地导出和脱敏"
         ]
       ]
     },

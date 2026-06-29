@@ -214,12 +214,15 @@ def test_cooling_down_projection_carries_retry_at_without_failed_reason() -> Non
     assert projection.reason_code is None
 
 
-def test_credential_evidence_refs_project_historical_ready_with_evidence_ref() -> None:
+@pytest.mark.parametrize("endpoint_status", ["verified", "failed"])
+def test_credential_evidence_refs_project_historical_ready_with_evidence_ref(
+    endpoint_status: str,
+) -> None:
     from graph_agent_gateway.state_projection import project_route_state
 
     projection = project_route_state(
         route_id="openai:gpt-5",
-        endpoint_status="verified",
+        endpoint_status=endpoint_status,
         route_status="unverified_manual",
         credential_available=True,
         credential_evidence_refs=["probe-openai-gpt5"],
@@ -371,7 +374,7 @@ def test_credential_evidence_refs_do_not_override_terminal_or_cooling_states(
 
 def test_role_materialization_uses_credential_evidence_refs_for_historical_ready(monkeypatch) -> None:
     import graph_agent_gateway.role_materialization as role_materialization
-    from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderRoute
+    from graph_agent_gateway.registry.schema import EvidenceRecord, ProviderEndpoint
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
     from graph_agent_gateway.state_projection import ProviderModelStateProjection
 
@@ -408,14 +411,23 @@ def test_role_materialization_uses_credential_evidence_refs_for_historical_ready
                     )
                 },
                 provider_routes={
-                    "openai:gpt-5": ProviderRoute(
+                    "openai:gpt-5": SimpleNamespace(
                         route_id="openai:gpt-5",
                         endpoint_id="openai",
                         route_slug="gpt-5",
                         provider_model_id="gpt-5",
                         canonical_id="gpt-5",
                         status="unverified_manual",
-                        metadata={"evidence_refs": ["probe-openai-gpt5"]},
+                        capabilities={},
+                        verified_profiles=[],
+                        metadata={},
+                        evidence=[
+                            EvidenceRecord(
+                                evidence_id="probe-openai-gpt5",
+                                evidence_type="probe",
+                                trust_state="probe-verified",
+                            )
+                        ],
                     )
                 },
             ),

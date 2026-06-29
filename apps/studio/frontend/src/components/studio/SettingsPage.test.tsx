@@ -68,6 +68,25 @@ const credentials: CredentialsState = {
   ],
 }
 
+const probeCatalog: CredentialsState['probe_catalog'] = {
+  local_evidence_records_count: 3,
+  local_verified_records_count: 2,
+  local_failed_records_count: 1,
+  local_route_candidates_count: 0,
+  community_catalog: {
+    synced: true,
+    generated_at: '2026-06-20T23:00:00+00:00',
+    protocol_major: 1,
+    record_count: 5,
+    entries: [],
+  },
+  sharing: {
+    mode: 'local_export_only',
+    auto_upload_enabled: false,
+    message: 'Local probe evidence is recorded on this machine.',
+  },
+}
+
 const rolesData: RolesData = {
   models: {
     CL46T: {
@@ -121,6 +140,7 @@ function baseViewProps(
     credentialsLoading: false,
     credentialsError: null,
     drafts: draftsFromCredentials(credentials),
+    pendingAddProviderId: null,
     saveStatus: 'idle',
     rolesData,
     modelGroups,
@@ -145,7 +165,10 @@ function baseViewProps(
     onProviderFieldChange: vi.fn(),
     onGetProviderModels: vi.fn(),
     onDeleteProvider: vi.fn(),
+    onDeleteProviderEndpoints: vi.fn(),
+    onBeginAddProvider: vi.fn(),
     onAddProvider: vi.fn(),
+    onCancelAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
     onRolesDataChange: vi.fn(),
     onDeleteRole: vi.fn(),
@@ -377,6 +400,36 @@ describe('Add Provider flow helpers', () => {
       isTesting: false,
       testingAction: null,
     })
+  })
+
+  it('creates one base URL row per Add Provider URL submission', () => {
+    const draft = draftFromAddProviderSubmission({
+      providerCode: 'my-openrouter',
+      name: 'My OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      baseUrls: [
+        'https://openrouter.ai/api/v1',
+        'https://backup-openrouter.example/v1',
+      ],
+      apiKey: 'sk-openrouter',
+      type: 'third-party',
+    }, 'custom-test')
+
+    expect(draft.base_url).toBe('https://openrouter.ai/api/v1')
+    expect(draft.base_urls).toEqual([
+      {
+        id: 'custom-test',
+        value: 'https://openrouter.ai/api/v1',
+        provider_type: 'openai_compatible',
+        endpoint_ids: { openai_compatible: 'custom-test' },
+      },
+      {
+        id: 'custom-test-url-2',
+        value: 'https://backup-openrouter.example/v1',
+        provider_type: 'openai_compatible',
+        endpoint_ids: { openai_compatible: 'custom-test-url-2' },
+      },
+    ])
   })
 
   it('keeps ark_runtime scoped to the official Ark provider, not third-party URLs', () => {
@@ -697,6 +750,33 @@ describe('Add Provider flow helpers', () => {
     ])
   })
 
+  it('preserves registry-level probe catalog state during provider-only updates', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+    const current: CredentialsState = { providers: [], probe_catalog: probeCatalog }
+
+    expect(upsertProviderTestResponse(current, draft!, {
+      status: 'ok',
+      message: 'Connected',
+      available_models: [{ id: 'gpt-5' }],
+      available_sdks: ['openai_compatible'],
+    }).probe_catalog).toEqual(probeCatalog)
+
+    expect(upsertProviderModelsListResponse(current, draft!, {
+      status: 'ok',
+      message: 'Catalog loaded.',
+      available_models: [{ id: 'gpt-5' }],
+      available_sdks: ['openai_compatible'],
+    }).probe_catalog).toEqual(probeCatalog)
+
+    expect(upsertProviderModels(
+      current,
+      draft,
+      'openai-official',
+      [{ id: 'gpt-5' }],
+    ).probe_catalog).toEqual(probeCatalog)
+  })
+
   it('merges Get Models responses into the existing model list by diff', () => {
     const draft = providerDraftForAction([], 'openai-official')
     expect(draft).not.toBeNull()
@@ -952,17 +1032,6 @@ describe('SettingsPageContent (api_keys)', () => {
               local_verified_records_count: 2,
               local_failed_records_count: 1,
               local_route_candidates_count: 0,
-              remote_catalog_source: {
-                enabled: true,
-                source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
-                fetched_at: '2026-06-20T23:00:00+00:00',
-                etag: 'W/test',
-                cache: false,
-                route_candidates_count: 7,
-                evidence_records_count: 11,
-                new_records_count: 4,
-                last_error: null,
-              },
               community_catalog: {
                 synced: true,
                 generated_at: '2026-06-20T23:00:00+00:00',
@@ -990,7 +1059,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).not.toContain('Pull Request')
   })
 
-  it('surfaces verified community catalog routes as a separate advisory layer', () => {
+  it('summarizes verified community catalog routes without listing them in API Keys', () => {
     const html = renderToStaticMarkup(
       <SettingsPageContent
         {...baseViewProps({
@@ -1001,7 +1070,6 @@ describe('SettingsPageContent (api_keys)', () => {
               local_verified_records_count: 1,
               local_failed_records_count: 0,
               local_route_candidates_count: 0,
-              remote_catalog_source: null,
               community_catalog: {
                 synced: true,
                 generated_at: '2026-06-26T14:40:44Z',
@@ -1009,15 +1077,15 @@ describe('SettingsPageContent (api_keys)', () => {
                 record_count: 2,
                 entries: [
                   {
-                    public_base_url: 'https://api.deepseek.com',
-                    model_id: 'deepseek-v4-pro',
+                    public_base_url: 'https://catalog-only-one.example',
+                    model_id: 'catalog-only-model-one',
                     capability_family: 'language_reasoning',
                     method_id: 'deepseek_chat_completions',
                     observed_at: '2026-06-26T09:33:40+00:00',
                   },
                   {
-                    public_base_url: 'https://api.moonshot.cn/v1',
-                    model_id: 'kimi-k2',
+                    public_base_url: 'https://catalog-only-two.example/v1',
+                    model_id: 'catalog-only-model-two',
                     capability_family: 'language_reasoning',
                     method_id: 'openai_chat_completions',
                     observed_at: '2026-06-25T08:00:00+00:00',
@@ -1039,13 +1107,14 @@ describe('SettingsPageContent (api_keys)', () => {
     // Verified read path drives the synced badge (not the legacy remote source).
     expect(html).toContain('Remote catalog synced')
     expect(html).toContain('2 community-verified')
-    // Advisory layer: community-observed, explicitly not the user's own routes.
-    expect(html).toContain('Community-verified routes')
-    expect(html).toContain('advisory')
-    expect(html).toContain('https://api.deepseek.com')
-    expect(html).toContain('deepseek-v4-pro')
-    expect(html).toContain('https://api.moonshot.cn/v1')
-    expect(html).toContain('kimi-k2')
+    // Route-level advisory details live in the General truth-source runtime log,
+    // not in the API Keys header where a large catalog would overwhelm the form.
+    expect(html).not.toContain('Community-verified routes')
+    expect(html).not.toContain('community-catalog-entries')
+    expect(html).not.toContain('catalog-only-one.example')
+    expect(html).not.toContain('catalog-only-model-one')
+    expect(html).not.toContain('catalog-only-two.example')
+    expect(html).not.toContain('catalog-only-model-two')
   })
 
   it('renders API key inputs as explicit masked text values (never native password) with password-manager ignore attributes', () => {
@@ -1060,7 +1129,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).not.toContain('value="sk-deepseek"')
     expect(html).toContain(`value="${'•'.repeat('sk-deepseek'.length)}"`)
     expect(html).toContain('name="provider-secret-DS"')
-    expect(html).toContain('readOnly=""')
+    expect(html).not.toContain('readOnly=""')
     expect(html).toContain('autoComplete="off"')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')

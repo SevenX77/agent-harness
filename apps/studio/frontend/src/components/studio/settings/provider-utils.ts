@@ -48,10 +48,9 @@ export function draftsFromCredentials(credentials: CredentialsState): ProviderDr
   }
 
   for (const providers of thirdPartyGroups.values()) {
-    const orderedProviders = [...providers].sort(compareCredentialProviderProtocol)
-    const [primary] = orderedProviders
+    const [primary] = providers
     if (!primary) continue
-    const baseUrls = baseUrlRowsFromCredentialProviders(orderedProviders)
+    const baseUrls = baseUrlRowsFromCredentialProviders(providers)
     drafts.push({
       ...providerDraftFromCredential(primary),
       base_url: baseUrls[0]?.value ?? "",
@@ -97,15 +96,44 @@ export function draftFromAddProviderSubmission(
   data: AddProviderFormSubmission,
   id: string = data.providerCode || newProviderId(),
 ): ProviderDraft {
-  const baseUrl = data.baseUrl.trim()
+  const submittedBaseUrls = (data.baseUrls?.length ? data.baseUrls : [data.baseUrl]).map((value) => value.trim())
+  const baseUrls = submittedBaseUrls.some(Boolean) ? submittedBaseUrls.filter(Boolean) : [""]
+  const baseUrl = baseUrls[0] ?? ""
   const providerType = inferProviderType(data.providerCode, baseUrl, data.name)
+  const baseUrlRows: NonNullable<ProviderDraft["base_urls"]> = baseUrls.map((value, index) => {
+    const rowId = index === 0 ? id : `${id}-url-${index + 1}`
+    return {
+      id: rowId,
+      value,
+      provider_type: providerType,
+      endpoint_ids: { [providerType]: rowId },
+    }
+  })
   return {
     id,
     name: data.name,
     provider_type: providerType,
     base_url: baseUrl,
-    base_urls: [{ id, value: baseUrl, provider_type: providerType, endpoint_ids: { [providerType]: id } }],
+    base_urls: baseUrlRows,
     api_key: data.apiKey,
+    isTesting: false,
+    testingAction: null,
+  }
+}
+
+export function blankThirdPartyProviderDraft(id: string = `custom-${newProviderId()}`): ProviderDraft {
+  return {
+    id,
+    name: "",
+    provider_type: "openai_compatible",
+    base_url: "",
+    base_urls: [{
+      id,
+      value: "",
+      provider_type: "openai_compatible",
+      endpoint_ids: { openai_compatible: id },
+    }],
+    api_key: "",
     isTesting: false,
     testingAction: null,
   }
@@ -286,74 +314,21 @@ function baseUrlRowsFromCredentialProviders(providers: CredentialProviderState[]
     groups.set(key, [...(groups.get(key) ?? []), provider])
   }
   return [...groups.values()].map((group) => {
-    const ordered = [...group].sort(compareCredentialProviderProtocol)
-    const [primary] = ordered
-    const displayBaseUrl = preferredDisplayBaseUrl(ordered)
+    const [primary] = group
     const endpointIds: Partial<Record<ProviderType, string>> = {}
-    for (const providerType of thirdPartyProtocolCandidates) {
-      const protocolProviders = ordered
-        .filter((provider) => credentialProviderProtocolSlot(provider) === providerType)
-        .sort((left, right) => compareEndpointCandidateForProtocol(left, right, providerType))
-      const bestProvider = protocolProviders[0]
-      if (bestProvider) endpointIds[providerType] = bestProvider.id
+    for (const provider of group) {
+      const providerType = credentialProviderProtocolSlot(provider)
+      if (!thirdPartyProtocolCandidates.includes(providerType)) continue
+      endpointIds[providerType] ??= provider.id
     }
     const primaryType = primary ? credentialProviderProtocolSlot(primary) : "openai_compatible"
     return {
-      id: endpointIds.openai_compatible ?? primary?.id ?? "",
-      value: displayBaseUrl,
+      id: primary?.id ?? "",
+      value: primary?.base_url ?? "",
       provider_type: primaryType,
       endpoint_ids: endpointIds,
     }
   })
-}
-
-function compareEndpointCandidateForProtocol(
-  left: CredentialProviderState,
-  right: CredentialProviderState,
-  providerType: ProviderType,
-): number {
-  return endpointIdProtocolAffinity(left.id, providerType) - endpointIdProtocolAffinity(right.id, providerType) ||
-    providerLastTestStatusRank(left.last_test_status) - providerLastTestStatusRank(right.last_test_status) ||
-    rightLastTestAtRank(right.last_test_at) - rightLastTestAtRank(left.last_test_at) ||
-    left.id.localeCompare(right.id)
-}
-
-function endpointIdProtocolAffinity(endpointId: string, providerType: ProviderType): number {
-  const suffix = providerTypeEndpointSuffix(providerType)
-  const normalized = endpointId.toLowerCase()
-  return normalized.includes(`-${suffix}-`) || normalized.endsWith(`-${suffix}`) ? 0 : 1
-}
-
-function providerLastTestStatusRank(status: CredentialProviderState["last_test_status"]): number {
-  if (status === "ok") return 0
-  if (status && status !== "untested") return 1
-  return 2
-}
-
-function rightLastTestAtRank(value: string | undefined): number {
-  if (!value) return 0
-  const time = Date.parse(value)
-  return Number.isFinite(time) ? time : 0
-}
-
-function preferredDisplayBaseUrl(providers: CredentialProviderState[]): string {
-  const withVersionPath = providers.find((provider) => (
-    normalizeBaseUrlForProviderMatch(provider.base_url ?? "").endsWith("/v1")
-  ))
-  return withVersionPath?.base_url ?? providers[0]?.base_url ?? ""
-}
-
-function compareCredentialProviderProtocol(
-  left: CredentialProviderState,
-  right: CredentialProviderState,
-): number {
-  return providerTypeRank(credentialProviderProtocolSlot(left)) - providerTypeRank(credentialProviderProtocolSlot(right))
-    || left.id.localeCompare(right.id)
-}
-
-function providerTypeRank(providerType?: ProviderType | null): number {
-  const index = thirdPartyProtocolCandidates.indexOf((providerType ?? "openai_compatible") as ProviderType)
-  return index === -1 ? thirdPartyProtocolCandidates.length : index
 }
 
 function providerTypeEndpointSuffix(providerType: ProviderType): string {

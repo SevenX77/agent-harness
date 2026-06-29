@@ -145,6 +145,15 @@ describe('canvas authoring helpers', () => {
     expect(subgraph.fileContent).toContain('outputs:')
   })
 
+  it('defaults a new subgraph phase path to the skill-root subgraph/<phaseId> landing', () => {
+    const detail = skillDetail()
+    // graph-authoring F4 / engine FORMAT-GROUND-TRUTH §4: a fresh subgraph phase
+    // points at its auto-scaffolded child graph under subgraph/<phaseId>.
+    expect(createPhaseDraft(detail, 'subgraph').fileContent).toContain('path: subgraph/subgraph')
+    expect(createPhaseDraft(detail, 'subgraph', [], 'producer_review').fileContent)
+      .toContain('path: subgraph/producer_review')
+  })
+
   it('creates a phase draft with a submitted safe node name', () => {
     const detail = skillDetail({
       phases: [

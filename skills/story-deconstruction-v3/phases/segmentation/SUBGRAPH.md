@@ -1,26 +1,30 @@
 ---
 name: segmentation
 path: subgraph/text-segmentation
-validator: false
-iterate:
-  mode: batch
-  over: chapters
-  item_var: chapter
-  concurrency: 10
 io:
   inputs:
     type: object
-    required: [chapters, chapter]
+    required:
+      - chapters
+      - chapter
     properties:
       chapters:
         type: array
-        items: {type: object}
-      chapter: {type: object}
+        items:
+          type: object
+      chapter:
+        type: object
   outputs:
     type: object
-    required: [segmentation_result]
+    required:
+      - segmentation_result
     properties:
       segmentation_result:
         type: array
-        items: {type: object}
+        items:
+          type: object
+iterate:
+  mode: batch
+  over: chapter_event_timeline
+  item_var: chapter
 ---

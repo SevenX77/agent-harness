@@ -57,7 +57,7 @@ from app.models.skills import (
 )
 from app.services.canvas_data_gap import build_phase_io_index, compute_field_supply
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
-from app.services.file_watcher import record_api_write
+from app.services.file_watcher import record_api_write, register_workspace
 from app.services.git_local import initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
 from app.services.skill_resolver import build_studio_skill_resolver
@@ -190,6 +190,10 @@ async def get_skill_detail(
 ) -> SkillDetail:
     """Compile one skill into a Studio SkillDetail response."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    # Follow whatever the user opens: watch this skill's actual directory (from any
+    # path), not just the app's built-in skills dirs, so external file changes push
+    # live skill_changed events. Idempotent — a no-op once already watched.
+    register_workspace(skill_dir, skill_id)
     lint = lint_result or lint_skill_path(skill_dir)
     if lint.status == "failed":
         return await _broken_detail_from_files_async(
@@ -223,11 +227,73 @@ def lint_skill_path(skill_path: Path) -> LintResult:
         compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
     except (GraphCompileError, ResourceNotFoundError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc, skill_path)])
+    # Studio-layer config-consistency check layered on a successful compile: the engine
+    # treats llm_role as an opaque string (it does not know about gateway roles), so
+    # "role not configured" is surfaced here as a NON-FATAL warning on the llm_role field
+    # — compile still passes; the Properties panel / node badge / editor underline light
+    # up from this same diagnostic.
+    role_warnings = _llm_role_lint_errors(compiled, _configured_role_names())
     return LintResult(
         status="passed",
-        errors=[],
+        errors=role_warnings,
         phases_summary=_phase_summary_from_compiled(compiled),
     )
+
+
+def _configured_role_names() -> set[str]:
+    """Role names configured in the global llm_roles.yaml (empty if absent/unreadable)."""
+    from app.services.llm_roles import load_roles_file, roles_path
+
+    path = roles_path()
+    if not path.exists():
+        return set()
+    try:
+        data = load_roles_file(path)
+    except Exception:  # noqa: BLE001 - a malformed roles file must never break linting
+        return set()
+    return set(data.roles.keys())
+
+
+def _frontmatter_llm_role_value(frontmatter: dict[str, Any]) -> str | None:
+    value = frontmatter.get("llm_role")
+    if not isinstance(value, str):
+        return None
+    value = value.strip().strip('"').strip("'").strip()
+    return value or None
+
+
+def _unconfigured_role_error(file: str, role: str, phase_name: str | None) -> LintError:
+    return LintError(
+        file=file,
+        line=None,
+        column=None,
+        error_code="STUDIO_LLM_ROLE_NOT_CONFIGURED",
+        severity="warning",
+        message=(
+            f"llm_role '{role}' is not a configured role. "
+            "Configure it in Settings > LLM Roles, or pick an existing role."
+        ),
+        phase_name=phase_name,
+        field_path="llm_role",
+        source_path=file,
+    )
+
+
+def _llm_role_lint_errors(compiled: CompiledSkill, role_names: set[str]) -> list[LintError]:
+    """Warn for any llm_role (graph default or an agent SKILL.md) not in role_names."""
+    errors: list[LintError] = []
+    graph_raw = compiled.raw.get("graph")
+    graph_frontmatter = graph_raw.get("frontmatter", {}) if isinstance(graph_raw, dict) else {}
+    graph_role = _frontmatter_llm_role_value(graph_frontmatter if isinstance(graph_frontmatter, dict) else {})
+    if graph_role and graph_role not in role_names:
+        errors.append(_unconfigured_role_error("GRAPH.md", graph_role, None))
+    for phase in compiled.nodes:
+        if phase.mode != "agent":
+            continue
+        role = _frontmatter_llm_role_value(phase.frontmatter)
+        if role and role not in role_names:
+            errors.append(_unconfigured_role_error(f"phases/{phase.phase_name}/SKILL.md", role, phase.phase_name))
+    return errors
 
 
 def lint_skill_changed_markdown(
@@ -815,6 +881,30 @@ async def resolve_skill_dir_async(
     if await storage.exists(str(public_dir)):
         return public_dir
     _raise_skill_not_found(safe_skill_id)
+
+
+async def _resolve_canvas_serialize_dir(
+    user_id: str,
+    skill_id: str,
+    workspace_root: str | None,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> Path:
+    """Resolve the directory whose GRAPH.md a canvas topology-save targets.
+
+    A drilled subgraph is identified by its ABSOLUTE PATH (MVP1 design: subgraph
+    identity is a path, not a registry id). When the canvas passes that path as
+    ``workspace_root`` we read/serialize THAT GRAPH.md directly, so a subgraph
+    whose bare name collides with another skill (e.g. a top-level skill of the
+    same name) is never mis-resolved through the global index / public dir.
+    Without a path we fall back to bare-id resolution for the parent graph.
+    """
+    if workspace_root:
+        skill_dir = Path(workspace_root)
+        if skill_dir.is_absolute() and await storage.exists(str(skill_dir / "GRAPH.md")):
+            return skill_dir
+        _raise_skill_not_found(skill_id)
+    return await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
 
 
 async def latest_run_metadata_async(
@@ -1409,7 +1499,9 @@ async def serialize_skill_graph_markdown(
 ) -> SerializeGraphRes:
     """Serialize a Canvas topology snapshot against the latest on-disk GRAPH.md."""
     started = time.perf_counter()
-    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    skill_dir = await _resolve_canvas_serialize_dir(
+        user_id, skill_id, request.workspace_root, storage, metadata
+    )
     graph_path = skill_dir / "GRAPH.md"
     original_md = await storage.read_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)

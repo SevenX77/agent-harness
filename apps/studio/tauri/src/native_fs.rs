@@ -758,6 +758,12 @@ enum AllowedDeleteTarget {
     TestInputJson,
     GoldenBaselineDir,
     PhaseDir,
+    // Root `subgraph/<child_skill_name>` directory — the standard nested child-graph
+    // landing (engine skill-spec 00-FORMAT-GROUND-TRUTH §1). Studio auto-scaffolds
+    // one when a subgraph phase is created, and removes it when that phase is
+    // deleted, so its delete surface mirrors `phases/<id>` exactly (one level deep,
+    // same safe-name rules).
+    SubgraphChildDir,
 }
 
 fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
@@ -797,6 +803,10 @@ fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
 
     if parts.len() == 2 && parts[0] == "phases" && is_safe_phase_dir_name(&parts[1]) {
         return Ok(AllowedDeleteTarget::PhaseDir);
+    }
+
+    if parts.len() == 2 && parts[0] == "subgraph" && is_safe_phase_dir_name(&parts[1]) {
+        return Ok(AllowedDeleteTarget::SubgraphChildDir);
     }
 
     Err(format!("delete path not allowed: {trimmed}"))
@@ -855,8 +865,9 @@ fn is_safe_phase_dir_name(name: &str) -> bool {
 
 /// Delete only the native-fs surfaces currently exposed by Studio:
 /// `.workspace/test_inputs/<safe>.json` files and `.workspace/golden/<safe-id>`
-/// baseline directories, plus root `phases/<safe-id>` directories. This avoids
-/// exposing a general recursive delete.
+/// baseline directories, plus root `phases/<safe-id>` directories and root
+/// `subgraph/<safe-id>` child-graph directories (the auto-scaffolded subgraph
+/// landing). This avoids exposing a general recursive delete.
 pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<(), String> {
     let allowed = allowed_delete_target(path)?;
     let root = PathBuf::from(workspace_root.trim());
@@ -877,7 +888,9 @@ pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<()
             }
             std::fs::remove_file(&target).map_err(|error| format!("cannot remove file: {error}"))
         }
-        AllowedDeleteTarget::GoldenBaselineDir | AllowedDeleteTarget::PhaseDir => {
+        AllowedDeleteTarget::GoldenBaselineDir
+        | AllowedDeleteTarget::PhaseDir
+        | AllowedDeleteTarget::SubgraphChildDir => {
             if !file_type.is_dir() {
                 return Err(format!("delete path must be a directory: {path}"));
             }
@@ -2241,6 +2254,39 @@ mod tests {
         assert!(!root.join(".workspace/test_inputs/case.json").exists());
         assert!(!root.join(".workspace/golden/run-1").exists());
         assert!(!root.join("phases/review").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_workspace_path_allows_root_subgraph_child_dir() {
+        let root = temp_root("delete-subgraph-child");
+        std::fs::create_dir_all(root.join("subgraph/producer_review/phases/init")).unwrap();
+        std::fs::write(
+            root.join("subgraph/producer_review/GRAPH.md"),
+            "---\nname: producer_review\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("subgraph/producer_review/phases/init/SKILL.md"),
+            "---\n---\n",
+        )
+        .unwrap();
+
+        delete_workspace_path_impl(root.to_str().unwrap(), "subgraph/producer_review")
+            .expect("delete subgraph child dir");
+        assert!(!root.join("subgraph/producer_review").exists());
+
+        // Only the one-level `subgraph/<safe-id>` shape is deletable; a nested path or
+        // the `subgraph/` container itself is refused, mirroring `phases/<id>`.
+        std::fs::create_dir_all(root.join("subgraph/other/phases/init")).unwrap();
+        let nested_error =
+            delete_workspace_path_impl(root.to_str().unwrap(), "subgraph/other/phases")
+                .expect_err("nested subgraph path rejected");
+        assert!(
+            nested_error.contains("not allowed"),
+            "unexpected nested error: {nested_error}"
+        );
+        assert!(root.join("subgraph/other/phases").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

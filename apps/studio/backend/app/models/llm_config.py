@@ -82,6 +82,11 @@ class ProviderRoute(GatewayProviderRoute):
     """Studio-owned route DTO with optional admin/display label."""
 
     display_name: str | None = None
+    # Studio LLM credentials/catalog SSOT: the evidence body lives ON the route —
+    # its single persisted home — embedded as the gateway ``EvidenceRecord`` so it
+    # is wire-isomorphic with the community catalog. Stripped from the gateway
+    # runtime route projection (see ``_gateway_route``).
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
 
 
 class ModelProfile(GatewayModelProfile):
@@ -98,7 +103,7 @@ def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
 
 def _gateway_route(route: ProviderRoute) -> GatewayProviderRoute:
     return GatewayProviderRoute.model_validate(
-        route.model_dump(mode="python", exclude={"display_name"})
+        route.model_dump(mode="python", exclude={"display_name", "evidence"})
     )
 
 
@@ -164,15 +169,30 @@ def _gateway_model_bundle(bundle: ModelBundle) -> GatewayModelBundle:
     )
 
 
+class RemoteCatalogSyncMarker(BaseModel):
+    """Minimal remote verified-catalog sync metadata (Studio SSOT, R1.4).
+
+    Three scalars only — NEVER a full catalog cache, upload queue, or receipt
+    history. Updated after a verified sync merges evidence into credentials.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    etag: str | None = None
+    generated_at: str | None = None
+    last_synced_at: str | None = None
+
+
 class LLMCredentialsFile(BaseModel):
     """Schema stored at the active Studio LLM credentials path."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     provider_endpoints: dict[str, ProviderEndpoint] = Field(default_factory=dict)
     provider_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
     runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
+    last_remote_catalog_sync: RemoteCatalogSyncMarker | None = None
 
     def endpoint_fingerprint(self, endpoint_id: str) -> str:
         """Return the gateway-owned credential fingerprint for one endpoint."""

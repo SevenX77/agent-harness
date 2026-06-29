@@ -18,14 +18,12 @@ internal ``"probe"``); see :mod:`app.services.community_catalog` round-trip.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict
 
 from app.core.adapters.gateway import EvidenceRecord
-from app.models.llm_config import LLMCredentialsFile
 
 WIRE_EVIDENCE_TYPE: Literal["probe_result"] = "probe_result"
 INTERNAL_PROBE_EVIDENCE_TYPE = "probe"
@@ -220,7 +218,7 @@ def parse_catalog_evidence(wire_record: dict[str, Any]) -> EvidenceRecord:
     internal_type = from_wire_evidence_type(str(wire_record.get("evidence_type")))
 
     metadata: dict[str, Any] = {"provenance": COMMUNITY_PROVENANCE}
-    for carried in ("normalized_public_base_url", "endpoint_fingerprint", "route_key"):
+    for carried in ("endpoint_fingerprint", "route_key"):
         value = wire_record.get(carried)
         if value is not None:
             metadata[carried] = value
@@ -241,91 +239,12 @@ def parse_catalog_evidence(wire_record: dict[str, Any]) -> EvidenceRecord:
             "input_modalities": list(wire_record.get("input_modalities", [])),
             "output_modalities": list(wire_record.get("output_modalities", [])),
             "probe_status": wire_record.get("probe_status"),
+            # Phase 5: endpoint public identity is a FORMAL field so content_hash and
+            # route matching read it from the record, not from free-form metadata.
+            "normalized_public_base_url": wire_record.get("normalized_public_base_url"),
             "metadata": metadata,
         }
     )
-
-
-def apply_community_evidence_to_credentials(
-    credentials: LLMCredentialsFile,
-    community_records: list[EvidenceRecord],
-) -> int:
-    """Carry probe-verified community evidence INTO credentials (the single source
-    of truth) so the registry can project matching routes as ``historical_ready``.
-
-    The catalog is a data carrier, not a parallel truth: this writes the community
-    evidence id onto an EXISTING credential route's ``metadata['evidence_refs']``,
-    after which the standard projection (verified endpoint + evidence_refs →
-    ``historical_ready`` blue) lights the route up. Matching is host-tolerant — the
-    record's published ``normalized_public_base_url`` host must equal the route's
-    endpoint host (so a trailing ``/v1`` does not break the match) and the model
-    must equal the route's ``provider_model_id``.
-
-    Only ``probe-verified`` records contribute; a ``provider-list-observed`` record
-    never does (per the community catalog design). It NEVER sets a route to
-    ``verified``/green and never creates new endpoints or routes — community
-    evidence stays advisory. Mutates ``credentials`` in place; returns the number
-    of route writes performed.
-    """
-    routes_by_key: dict[tuple[str, str], list[Any]] = {}
-    for route in credentials.provider_routes.values():
-        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
-        if endpoint is None:
-            continue
-        host = endpoint_host(endpoint.base_url)
-        if host is None:
-            continue
-        routes_by_key.setdefault((host, route.provider_model_id), []).append(route)
-
-    updated = 0
-    for record in community_records:
-        if record.trust_state != UPLOADABLE_TRUST_STATE:
-            continue
-        model_id = record.provider_model_id or record.model_id
-        published = record.metadata.get("normalized_public_base_url")
-        if not model_id or not isinstance(published, str):
-            continue
-        host = endpoint_host(published)
-        if host is None:
-            continue
-        for route in routes_by_key.get((host, model_id), []):
-            existing = route.metadata.get("evidence_refs")
-            refs = [ref for ref in existing if isinstance(ref, str)] if isinstance(
-                existing, list
-            ) else []
-            if record.evidence_id in refs:
-                continue
-            refs.append(record.evidence_id)
-            route.metadata = {
-                **route.metadata,
-                "evidence_refs": refs,
-                # Provenance marker so this is never confused with a local probe.
-                "community_evidence": True,
-            }
-            updated += 1
-    return updated
-
-
-def promote_community_evidence_into_credentials(
-    *,
-    community_records: list[EvidenceRecord],
-    path: Path | None = None,
-) -> int:
-    """Load credentials, carry community evidence into matching routes (see
-    :func:`apply_community_evidence_to_credentials`), persist when something
-    changed, and return the number of route writes performed."""
-    from app.services.llm_credentials import (
-        credentials_path,
-        load_credentials,
-        save_credentials,
-    )
-
-    target = path or credentials_path()
-    credentials = load_credentials(target)
-    updated = apply_community_evidence_to_credentials(credentials, community_records)
-    if updated:
-        save_credentials(credentials, target)
-    return updated
 
 
 __all__ = [
@@ -333,11 +252,9 @@ __all__ = [
     "PUBLIC_PROVIDER_HOST_ALLOWLIST",
     "WIRE_EVIDENCE_TYPE",
     "EvidenceUpload",
-    "apply_community_evidence_to_credentials",
     "build_upload_record",
     "endpoint_fingerprint",
     "endpoint_host",
-    "promote_community_evidence_into_credentials",
     "from_wire_evidence_type",
     "is_public_allowlisted",
     "is_uploadable",

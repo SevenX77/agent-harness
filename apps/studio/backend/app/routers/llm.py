@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -35,10 +36,8 @@ from app.core.adapters.gateway import (
     VerifiedProfile,
     build_runtime_setting_descriptors,
     canonicalize_model,
-    known_model_ids_for_endpoint,
     lint_role_routes,
     normalize_route_capabilities,
-    promotable_route_update,
     select_verified_profile,
 )
 from app.core.adapters.gateway import (
@@ -60,41 +59,31 @@ from app.core.adapters.transport_factory import build_gateway_adapter
 from app.core.backends import get_backend_config, get_metadata
 from app.models.llm_config import (
     CapabilityValue,
-    CommunityCatalogEntry,
     CommunityCatalogSummary,
     EvidenceRecord,
-    FieldSource,
     LLMCredentialsFile,
     ModelBundle,
     ModelProfile,
     ProbeCatalogSummary,
     ProviderEndpoint,
-    ProviderImportDraft,
     ProviderRoute,
     ProviderType,
     RegistryResponse,
     RoleEntry,
     RoleRouteEntry,
     RolesData,
-    RouteCandidate,
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
-from app.services.community_catalog import (
-    apply_community_evidence_to_credentials,
-)
+from app.services.community_catalog import COMMUNITY_PROVENANCE
+from app.services.community_catalog_runtime import sync_verified_community_catalog_into_credentials
 from app.services.community_catalog_sync import (
-    DisposableCatalogCacheStore,
     VerifiedSyncError,
-    make_httpx_fetcher,
-    sync_verified_catalog,
 )
 from app.services.community_catalog_upload import (
     CommunityUploadClient,
-    OfflineUploadQueue,
-    UploadDeferred,
+    CommunityUploadError,
     batch_idempotency_key,
-    collect_uploadable_uploads,
     community_upload_configured,
 )
 from app.services.copilot_test import (
@@ -107,7 +96,6 @@ from app.services.copilot_test import (
 )
 from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.gateway_resolver import build_gateway_route_runtime
-from app.services.github_catalog import GitHubCatalogApiError, GitHubCatalogClient
 from app.services.llm_credentials import (
     _route_slug,
     credentials_path,
@@ -119,6 +107,15 @@ from app.services.llm_credentials import (
     upsert_endpoints,
     upsert_routes,
 )
+from app.services.llm_credentials_evidence import (
+    collect_uploadable,
+    endpoint_listed_model_ids,
+    endpoint_probe_priority,
+    merge_route_evidence,
+    probe_evidence_counts,
+    route_is_probe_verified,
+)
+from app.services.llm_evidence_ids import new_evidence_id
 from app.services.llm_health_store import RuntimeCircuit, SqliteLlmHealthStore
 from app.services.llm_model_groups import (
     normalize_model_group_key,
@@ -126,18 +123,6 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
-from app.services.llm_paths import (
-    community_catalog_cache_path,
-    community_upload_queue_path,
-)
-from app.services.llm_probe_catalog import (
-    append_evidence_record,
-    load_evidence_library,
-    load_remote_catalog_source_metadata,
-    new_evidence_id,
-    remember_remote_catalog_source,
-    sync_remote_probe_catalog_with_metadata,
-)
 from app.services.llm_role_test_results import (
     load_all as load_role_test_results,
 )
@@ -162,6 +147,7 @@ from app.services.official_capability_sources import (
     official_doc_source_urls,
     provider_doc_limit_rules,
 )
+from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
@@ -189,17 +175,16 @@ async def _autoshare_after_probe_best_effort() -> None:
         settings = await get_metadata().read_app_settings()
         if not settings.remote_model_catalog_enabled:
             return
-        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        uploads = collect_uploadable(load_credentials())
         if not uploads:
             return
         client = CommunityUploadClient(
             gate_url=cfg.community_gate_url,
             protocol_major=cfg.community_protocol_major,
         )
-        queue = OfflineUploadQueue(community_upload_queue_path())
-        await client.upload_batch(
-            uploads, idempotency_key=batch_idempotency_key(uploads), queue=queue
-        )
+        # Phase 6: no offline queue. If the upload fails it just raises (swallowed
+        # below); the next probe re-derives candidates from credentials and retries.
+        await client.upload_batch(uploads, idempotency_key=batch_idempotency_key(uploads))
     except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
         logger.warning("post-probe community auto-share failed", exc_info=True)
 
@@ -438,18 +423,6 @@ class EndpointModelTestResponse(BaseModel):
     results: list[EndpointModelTestResult]
 
 
-def _remote_catalog_sync_inputs() -> tuple[dict[str, Any] | None, str | None]:
-    """Return the configured remote catalog payload or raw URL for sync."""
-    cfg = get_backend_config()
-    if cfg.github_owner.strip():
-        owner = cfg.github_owner.strip()
-        repo = cfg.llm_catalog_repo.strip() or "studio-llm-model-catalog"
-        branch = cfg.llm_catalog_branch.strip() or "main"
-        catalog_path = cfg.llm_catalog_path.strip() or "llm_probe_catalog.json"
-        return None, f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{catalog_path}"
-    return None, None
-
-
 @router.get("/registry", response_model=RegistryResponse)
 async def get_llm_registry() -> RegistryResponse:
     """Return the joined redacted endpoint/route/role registry."""
@@ -482,6 +455,16 @@ async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretRespon
 async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, Any]:
     """Upsert endpoints; absent endpoint IDs are retained."""
     data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="upsert_endpoints",
+        message="Saved provider endpoint settings.",
+        changes={
+            "endpoint_ids": sorted(request.provider_endpoints),
+            "endpoint_count": len(data.provider_endpoints),
+            "route_count": len(data.provider_routes),
+        },
+    )
     return serialize_for_response(data)
 
 
@@ -498,77 +481,80 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
             _remove_route_references_from_roles(roles, route_ids),
             known_route_ids=set(credentials.provider_routes) - route_ids,
         )
+        record_runtime_activity(
+            source_id="llm_roles",
+            action="remove_endpoint_route_references",
+            message="Removed role references to routes owned by a deleted endpoint.",
+            changes={"endpoint_id": endpoint_id, "route_ids": sorted(route_ids)},
+        )
     data = delete_endpoint(endpoint_id)
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="delete_endpoint",
+        message="Deleted a provider endpoint and its owned routes.",
+        changes={
+            "endpoint_id": endpoint_id,
+            "removed_route_ids": sorted(route_ids),
+            "remaining_endpoint_count": len(data.provider_endpoints),
+            "remaining_route_count": len(data.provider_routes),
+        },
+    )
     return serialize_for_response(data)
 
 
 @router.post("/catalog/sync")
 async def sync_catalog() -> dict[str, Any]:
-    """Pull the remote evidence library and merge it locally."""
-    try:
-        data, url = _remote_catalog_sync_inputs()
-        result = await sync_remote_probe_catalog_with_metadata(data=data, url=url)
-        remember_remote_catalog_source(result.catalog_source)
-        updated = result.draft
-        return {
-            "status": "success",
-            "message": "Catalog synced successfully with remote repository.",
-            "route_candidates_count": len(updated.route_candidates),
-            "evidence_records_count": len(updated.evidence_records),
-            "new_records_count": result.catalog_source.new_records_count,
-            "catalog_source": result.catalog_source.model_dump(mode="json"),
-        }
-    except GitHubCatalogApiError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"GitHub catalog API failed: {exc.status_code}",
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to sync catalog: {exc}",
-        ) from exc
+    """Retired (R9.6): the legacy remote probe-catalog sync is no longer a runtime path.
 
-
-def ensure_catalog_repository() -> dict[str, Any]:
-    """Ensure the configured GitHub remote catalog repository exists."""
-    cfg = get_backend_config()
-    result = GitHubCatalogClient(
-        token=cfg.github_token,
-        owner=cfg.github_owner,
-        repo=cfg.llm_catalog_repo,
-        branch=cfg.llm_catalog_branch,
-        catalog_path=cfg.llm_catalog_path,
-    ).ensure_repository()
-    return {"status": "success", **result.model_dump(mode="json")}
+    Evidence is owned by ``credentials.provider_routes[*].evidence`` (SSOT); community
+    evidence arrives via the verified sync (``/catalog/sync-verified`` → route.evidence,
+    Phase 5). This endpoint is a no-op kept only so the existing UI button does not 404;
+    it neither reads nor writes ``llm_probe_catalog.json``.
+    """
+    return {
+        "status": "disabled",
+        "message": "The legacy remote probe-catalog sync is retired. Evidence lives in "
+        "credentials route.evidence; community evidence arrives via verified sync.",
+        "route_candidates_count": 0,
+        "evidence_records_count": 0,
+        "new_records_count": 0,
+        "catalog_source": None,
+    }
 
 
 @router.post("/catalog/repository/ensure")
 async def ensure_catalog_repository_endpoint() -> dict[str, Any]:
-    """Create or validate the GitHub-backed remote model catalog repository."""
-    try:
-        return ensure_catalog_repository()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except GitHubCatalogApiError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"GitHub catalog API failed: {exc.status_code}",
-        ) from exc
+    """Retired (Phase 9): the GitHub-repo probe-catalog concept no longer exists.
+
+    Evidence lives in credentials ``route.evidence`` and community evidence arrives via
+    verified sync; there is no remote ``llm_probe_catalog.json`` repository to create.
+    Kept as a disabled no-op so any older client that still calls it gets a clean,
+    networkless reply instead of a 404.
+    """
+    return {
+        "status": "disabled",
+        "message": (
+            "The GitHub-backed remote catalog repository is retired. Evidence lives in "
+            "credentials route.evidence; community evidence arrives via verified sync."
+        ),
+    }
 
 
 @router.post("/catalog/share")
 async def share_catalog() -> dict[str, Any]:
     """Export and return all local successful evidence records ready to be shared with the community."""
     try:
-        library = load_evidence_library()
+        credentials = load_credentials()
+        # Shareable evidence is derived from credentials route.evidence (SSOT) — local
+        # probe-verified, excluding community-provenance (no remote→local→remote loop).
         probed_records = [
             rec.model_dump(mode="json")
-            for rec in library.evidence_records
-            if rec.evidence_type == "probe" and rec.trust_state == "probe-verified"
+            for route in credentials.provider_routes.values()
+            for rec in route.evidence
+            if rec.evidence_type == "probe"
+            and rec.trust_state == "probe-verified"
+            and rec.metadata.get("provenance") != COMMUNITY_PROVENANCE
         ]
-
-        credentials = load_credentials()
         verified_routes_count = sum(1 for r in credentials.provider_routes.values() if r.status == "verified")
 
         return {
@@ -605,6 +591,12 @@ async def contribute_catalog() -> dict[str, Any]:
         gate_url=cfg.community_gate_url,
         enabled=cfg.community_upload_enabled,
     ):
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="contribute_catalog_skipped",
+            message="Skipped community catalog contribution because upload is disabled or unconfigured.",
+            changes={"auto_upload_enabled": False},
+        )
         return {
             "status": "disabled",
             "sharing_mode": "local_export_only",
@@ -616,8 +608,14 @@ async def contribute_catalog() -> dict[str, Any]:
         }
 
     try:
-        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        uploads = collect_uploadable(load_credentials())
         if not uploads:
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="contribute_catalog_noop",
+                message="Checked community catalog contribution; no probe-verified evidence was available.",
+                changes={"records_submitted": 0},
+            )
             return {
                 "status": "success",
                 "auto_upload_enabled": True,
@@ -628,18 +626,43 @@ async def contribute_catalog() -> dict[str, Any]:
             gate_url=cfg.community_gate_url,
             protocol_major=cfg.community_protocol_major,
         )
-        queue = OfflineUploadQueue(community_upload_queue_path())
         key = batch_idempotency_key(uploads)
         try:
-            ack = await client.upload_batch(uploads, idempotency_key=key, queue=queue)
-        except UploadDeferred:
+            ack = await client.upload_batch(uploads, idempotency_key=key)
+        except CommunityUploadError:
+            # Phase 6: no local queue. The evidence stays in credentials; the next
+            # probe / contribute re-derives the SAME batch (content-derived key) and
+            # retries at the gate — so a failure is "not yet", not data loss.
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="contribute_catalog_failed",
+                message=(
+                    "Community catalog upload failed; the evidence stays in credentials and "
+                    "will be re-derived and retried on the next probe or contribute."
+                ),
+                changes={"records_pending": len(uploads)},
+            )
             return {
-                "status": "deferred",
+                "status": "failed",
                 "auto_upload_enabled": True,
-                "queued": True,
-                "records_queued": len(uploads),
-                "message": "Gate unreachable; the batch was queued locally for retry.",
+                "queued": False,
+                "records_pending": len(uploads),
+                "message": (
+                    "Upload failed (the gate was unreachable). The evidence stays in your "
+                    "credentials and will be re-derived and retried automatically on the next "
+                    "probe or contribute."
+                ),
             }
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="contribute_catalog_uploaded",
+            message="Uploaded sanitized local evidence to the community catalog gate.",
+            changes={
+                "records_submitted": len(uploads),
+                "accepted": ack.accepted,
+                "rejected": ack.rejected,
+            },
+        )
         return {
             "status": "success",
             "auto_upload_enabled": True,
@@ -659,58 +682,22 @@ async def contribute_catalog() -> dict[str, Any]:
 
 @router.post("/catalog/sync-verified")
 async def sync_verified_community_catalog() -> dict[str, Any]:
-    """Pull the signed community catalog into a disposable, verified cache (R4).
+    """Pull the signed community catalog and merge verified evidence into credentials (R4).
 
     Dormant unless a manifest URL and a signing public key are configured. The
     sync is fail-closed: a bad signature, shard digest, or incompatible protocol
-    surfaces as an error and the disposable cache is left untouched.
+    surfaces as an error and credentials are left untouched.
 
-    This endpoint is read/cache only. Credentials remain the route truth, and
-    cached community evidence is applied later during endpoint Test, once the
-    matching routes exist locally.
+    Phase 5: no disposable cache. Verified records are merged straight onto matching
+    ``route.evidence`` (SSOT) and only a tiny last-sync marker is persisted; routes
+    that do not exist yet simply pick the evidence up on a later sync.
     """
-    cfg = get_backend_config()
-    manifest_url = cfg.community_catalog_manifest_url.strip()
-    public_key_hex = cfg.community_catalog_signing_pubkey.strip()
-    if not manifest_url or not public_key_hex:
-        return {
-            "status": "disabled",
-            "verified_sync_enabled": False,
-            "message": (
-                "Verified community sync is not configured. Set a manifest URL and a signing "
-                "public key to enable the verified read path."
-            ),
-        }
-
-    cache_store = DisposableCatalogCacheStore(community_catalog_cache_path())
-    prev_etag = cache_store.load().manifest_etag
-    signature_url = f"{manifest_url}.sig"
-    shard_base_url = manifest_url.rsplit("/", 1)[0] + "/"
     try:
-        outcome = await sync_verified_catalog(
-            manifest_url=manifest_url,
-            signature_url=signature_url,
-            shard_base_url=shard_base_url,
-            public_key_hex=public_key_hex,
-            client_protocol_major=cfg.community_protocol_major,
-            cache_store=cache_store,
-            fetch=make_httpx_fetcher(),
-            prev_etag=prev_etag,
-        )
+        return await sync_verified_community_catalog_into_credentials(trigger="api")
     except VerifiedSyncError as exc:
         raise HTTPException(status_code=502, detail=f"Verified catalog sync failed: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Verified catalog sync error: {exc}") from exc
-
-    return {
-        "status": "success",
-        "verified_sync_enabled": True,
-        "sync_status": outcome.status,
-        "record_count": outcome.record_count,
-        "manifest_etag": outcome.manifest_etag,
-        "protocol_major": outcome.protocol_major,
-        "promoted_route_count": 0,
-    }
 
 
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
@@ -761,6 +748,12 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         )
         latest_credentials.provider_endpoints[endpoint_id] = updated
         save_credentials(latest_credentials)
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="endpoint_test_discarded",
+            message="Endpoint test result was discarded because credentials changed during the run.",
+            changes={"endpoint_id": endpoint_id, "status": "unverified_manual"},
+        )
         return EndpointTestResponse(
             registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             tested_endpoint_id=endpoint_id,
@@ -768,6 +761,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         )
     endpoint_update: dict[str, Any] = {}
     if model_list_reached:
+        # model-list truth = routes (R3.4): capture the previously-listed models
+        # from credentials BEFORE upserting, so the added/removed diff is real.
+        previous_model_ids = set(endpoint_listed_model_ids(latest_credentials, endpoint_id))
         route_ids_by_model: dict[str, str] = {}
         latest_credentials, route_ids_by_model = _upsert_discovered_routes(
             latest_credentials,
@@ -776,11 +772,20 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             verified=False,
             raw_capabilities_by_model=raw_capabilities_by_model,
         )
-        _append_model_list_observation_evidence(
-            latest_endpoint,
-            discovered_model_ids,
-            raw_capabilities_by_model,
-            route_ids_by_model,
+        observed_set = set(discovered_model_ids)
+        # model-list dissolves into routes: no provider-list-observed evidence is
+        # produced; only the diff is recorded as runtime-activity diagnostics.
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="model_list_observed",
+            message="Recorded model-list diff from an endpoint test.",
+            changes={
+                "endpoint_id": endpoint_id,
+                "model_count": len(discovered_model_ids),
+                "added_model_ids": sorted(observed_set - previous_model_ids),
+                "removed_model_ids": sorted(previous_model_ids - observed_set),
+                "unchanged_model_ids": sorted(observed_set & previous_model_ids),
+            },
         )
         if latest_endpoint.provider_kind == "official":
             # Official endpoints are operator-controlled: a reachable get-models
@@ -801,7 +806,6 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 latest_endpoint,
                 discovered_model_ids,
                 raw_capabilities_by_model,
-                verified_model_ids=verified_model_ids,
             )
             status = verification.status
             message = verification.message
@@ -818,7 +822,8 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                     verified=True,
                     raw_capabilities_by_model=verification.probe_capabilities,
                 )
-                _append_model_probe_evidence(
+                _merge_probe_evidence_into_route(
+                    latest_credentials,
                     latest_endpoint,
                     ModelProbeResult(
                         model_id=verification.verified_model_id,
@@ -845,6 +850,24 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                     "Endpoint reachable; reusing previously verified model "
                     f"{retained_model_id}. No new model verified this run."
                 )
+            if verification.status != "verified" and verification.failed_probe is not None:
+                # Persist the REAL failed model's outcome as probe-failed evidence
+                # (R3.1-AC3 / codex-3): upsert its route, then merge the record.
+                # This holds even when the endpoint stays verified via reuse above —
+                # the model genuinely failed, so its route records that diagnostically.
+                failed_result = _model_probe_result_from_route_probe(verification.failed_probe)
+                latest_credentials, failed_route_ids = _upsert_third_party_model_probe_routes(
+                    latest_credentials,
+                    endpoint=latest_endpoint,
+                    probe_results=(failed_result,),
+                    raw_capabilities_by_model={},
+                )
+                _merge_probe_evidence_into_route(
+                    latest_credentials,
+                    latest_endpoint,
+                    failed_result,
+                    route_id=failed_route_ids.get(failed_result.model_id),
+                )
     elif endpoint.provider_kind != "official" and result.status not in _STRUCTURAL_PROBE_STATUSES:
         probe_results = await _probe_third_party_models_for_endpoint(endpoint, ())
         if probe_results:
@@ -855,7 +878,8 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 raw_capabilities_by_model={},
             )
             for probe_result in probe_results:
-                _append_model_probe_evidence(
+                _merge_probe_evidence_into_route(
+                    latest_credentials,
                     latest_endpoint,
                     probe_result,
                     route_id=probed_route_ids.get(probe_result.model_id),
@@ -871,8 +895,18 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     )
     updated = latest_endpoint.model_copy(update=endpoint_update)
     latest_credentials.provider_endpoints[endpoint_id] = updated
-    _apply_cached_community_evidence(latest_credentials)
     save_credentials(latest_credentials)
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="endpoint_test",
+        message="Saved endpoint test result with probe evidence on credentials routes.",
+        changes={
+            "endpoint_id": endpoint_id,
+            "status": status,
+            "message": message,
+            "discovered_model_count": len(discovered_model_ids),
+        },
+    )
     return EndpointTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         tested_endpoint_id=endpoint_id,
@@ -971,7 +1005,27 @@ async def test_endpoint_models(
                     profile_results=tuple(failed_profile_results),
                 )
                 route_ids_by_model.update(failed_route_ids)
+            # Return-and-merge BEFORE the single save (R3.3): official profile probe
+            # evidence (verified + failed) lands on its route, not the probe catalog.
+            for result in official_results:
+                _merge_official_profile_evidence_into_route(
+                    latest_credentials,
+                    latest_endpoint,
+                    result,
+                    route_id=route_ids_by_model.get(result.model_id),
+                )
             save_credentials(latest_credentials)
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="manual_model_probe",
+                message="Saved official manual model probe results.",
+                changes={
+                    "endpoint_id": endpoint_id,
+                    "requested_model_count": len(requested_model_ids),
+                    "verified_model_count": len(successful_model_ids),
+                    "failed_model_count": len(failed_profile_results),
+                },
+            )
         results = [
             EndpointModelTestResult(
                 model_id=result.model_id,
@@ -981,11 +1035,15 @@ async def test_endpoint_models(
             )
             for result in official_results
         ]
-        for result in official_results:
-            _append_official_profile_probe_evidence(
-                endpoint,
-                result,
-                route_id=route_ids_by_model.get(result.model_id),
+        if official_results:
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="manual_model_probe_evidence",
+                message="Recorded official manual model probe evidence on credentials routes.",
+                changes={
+                    "endpoint_id": endpoint_id,
+                    "model_ids": sorted(requested_model_ids),
+                },
             )
         await _autoshare_after_probe_best_effort()
         return EndpointModelTestResponse(
@@ -1035,6 +1093,15 @@ async def test_endpoint_models(
                 for model_id in successful_model_ids
             },
         )
+        # Return-and-merge BEFORE the single save (R3.3): build each probe result's
+        # evidence and assign it back onto its route (verified or failed).
+        for probe_result in probe_results:
+            _merge_probe_evidence_into_route(
+                latest_credentials,
+                latest_endpoint,
+                probe_result,
+                route_id=route_ids_by_model.get(probe_result.model_id),
+            )
         status = _endpoint_status_from_model_probe_results(probe_results)
         message = _endpoint_message_from_model_probe_results(probe_results)
         latest_endpoint = latest_endpoint.model_copy(
@@ -1046,6 +1113,18 @@ async def test_endpoint_models(
         )
         latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
         save_credentials(latest_credentials)
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="manual_model_probe",
+            message="Saved manual model probe results.",
+            changes={
+                "endpoint_id": endpoint_id,
+                "status": status,
+                "requested_model_count": len(requested_model_ids),
+                "successful_model_count": len(successful_model_ids),
+                "failed_model_count": len(probe_results) - len(successful_model_ids),
+            },
+        )
     else:
         latest_credentials = load_credentials()
         latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
@@ -1081,11 +1160,15 @@ async def test_endpoint_models(
         )
         for probe_result in probe_results
     ]
-    for probe_result in probe_results:
-        _append_model_probe_evidence(
-            endpoint,
-            probe_result,
-            route_id=route_ids_by_model.get(probe_result.model_id),
+    if probe_results:
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="manual_model_probe_evidence",
+            message="Recorded manual model probe evidence on credentials routes.",
+            changes={
+                "endpoint_id": endpoint_id,
+                "model_ids": sorted(result.model_id for result in probe_results),
+            },
         )
     await _autoshare_after_probe_best_effort()
     return EndpointModelTestResponse(
@@ -1150,6 +1233,12 @@ async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> Pro
         }
     )
     upsert_routes({route_id: updated})
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="update_route_metadata",
+        message="Updated editable route metadata.",
+        changes={"route_id": route_id, "status": request.status},
+    )
     return updated
 
 
@@ -1165,6 +1254,15 @@ async def delete_registry_route(route_id: str) -> dict[str, Any]:
             {"route_id": route_id, **refs},
         )
     data = delete_route(route_id)
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="delete_route",
+        message="Deleted a provider route.",
+        changes={
+            "route_id": route_id,
+            "remaining_route_count": len(data.provider_routes),
+        },
+    )
     return serialize_for_response(data)
 
 
@@ -1189,6 +1287,16 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     materialized = _materialize_roles_for_response(merged, credentials)
     saved = _save_roles_with_active_routes(materialized)
     await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="upsert_roles",
+        message="Saved LLM roles, model profiles, and model bundles.",
+        changes={
+            "role_count": len(saved.roles),
+            "model_profile_count": len(saved.model_profiles),
+            "model_bundle_count": len(saved.model_bundles),
+        },
+    )
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1242,6 +1350,12 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     schema_version = 3 if role.model_groups else data.schema_version
     saved = _save_roles_with_active_routes(data.model_copy(update={"schema_version": schema_version, "roles": roles}))
     await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="upsert_role",
+        message="Saved one LLM role.",
+        changes={"role_name": role_name, "schema_version": schema_version},
+    )
     return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
@@ -1256,6 +1370,12 @@ async def delete_llm_role(role_name: str) -> RolesData:
     credentials = load_credentials()
     saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
     await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="delete_role",
+        message="Deleted one LLM role.",
+        changes={"role_name": role_name, "remaining_role_count": len(saved.roles)},
+    )
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1796,6 +1916,12 @@ def _persist_completed_role_test_result(role_name: str, result: dict[str, Any]) 
             status=status,
             message=message if isinstance(message, str) else None,
         )
+        record_runtime_activity(
+            source_id="llm_role_test_results",
+            action="role_test_result_saved",
+            message="Saved the latest role or copilot test result.",
+            changes={"role_name": role_name, "status": status},
+        )
     except Exception as exc:  # noqa: BLE001 — persistence is best-effort, never fail the job
         logger.warning(
             "role test result persist failed (non-fatal) role=%s: %s", role_name, exc
@@ -1955,10 +2081,9 @@ def _registry_response(
                 cast(list[GatewayProviderRoute], role_routes),
             )
     )
-    catalog_source = load_remote_catalog_source_metadata()
-    probe_catalog = _probe_catalog_summary(
-        catalog_source.model_dump(mode="json") if catalog_source is not None else None
-    )
+    # R9.6: the legacy remote-probe-catalog source is retired — the registry no longer
+    # projects it (catalog_source stays None below).
+    probe_catalog = _probe_catalog_summary()
     return RegistryResponse(
         provider_endpoints=credentials.provider_endpoints,
         provider_routes=credentials.provider_routes,
@@ -1979,64 +2104,39 @@ def _registry_response(
             route_id: build_runtime_setting_descriptors(route)
             for route_id, route in credentials.provider_routes.items()
         },
-        catalog_source=catalog_source.model_dump(mode="json") if catalog_source is not None else None,
+        catalog_source=None,
         probe_catalog=probe_catalog,
         role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )
 
 
-def _community_catalog_summary() -> CommunityCatalogSummary:
-    """Project the disposable verified community cache for the Settings UI.
-
-    Advisory, read-only view of community-observed evidence (the verified read
-    path's `community_catalog_cache.json`). These records are never merged into
-    local evidence nor auto-applied to credentials; the public endpoint identity
-    lives in each record's metadata (see ``parse_catalog_evidence``).
-    """
-    cache = DisposableCatalogCacheStore(community_catalog_cache_path()).load()
-    entries = [
-        CommunityCatalogEntry(
-            public_base_url=record.metadata.get("normalized_public_base_url"),
-            model_id=record.model_id,
-            capability_family=record.capability_family,
-            method_id=record.method_id,
-            observed_at=record.observed_at,
-        )
-        for record in cache.records
-    ]
-    return CommunityCatalogSummary(
-        synced=cache.generated_at is not None or bool(cache.records),
-        generated_at=cache.generated_at,
-        protocol_major=cache.protocol_major,
-        record_count=len(cache.records),
-        entries=entries,
+def _probe_catalog_summary() -> ProbeCatalogSummary:
+    # Counts derive from credentials route.evidence (SSOT, R9.2) — probe-only, so a
+    # migrated provider-list-observed record never inflates "Local probe evidence".
+    credentials = load_credentials()
+    counts = probe_evidence_counts(credentials)
+    # Phase 5: the community summary is also derived from credentials — record_count is
+    # the number of community-provenance evidence records actually MERGED into routes
+    # (not a remote total), and synced/generated_at come from the last-sync marker.
+    community_count = sum(
+        1
+        for route in credentials.provider_routes.values()
+        for ev in route.evidence
+        if ev.metadata.get("provenance") == COMMUNITY_PROVENANCE
     )
-
-
-def _apply_cached_community_evidence(credentials: LLMCredentialsFile) -> int:
-    cache = DisposableCatalogCacheStore(community_catalog_cache_path()).load()
-    if not cache.records:
-        return 0
-    return apply_community_evidence_to_credentials(credentials, cache.records)
-
-
-def _probe_catalog_summary(remote_catalog_source: dict[str, Any] | None) -> ProbeCatalogSummary:
-    library = load_evidence_library()
-    probe_records = [
-        record for record in library.evidence_records if record.evidence_type == "probe"
-    ]
+    marker = credentials.last_remote_catalog_sync
     return ProbeCatalogSummary(
-        local_evidence_records_count=len(library.evidence_records),
-        local_verified_records_count=sum(
-            1 for record in probe_records if record.trust_state == "probe-verified"
+        local_evidence_records_count=counts.probe_records,
+        local_verified_records_count=counts.verified,
+        local_failed_records_count=counts.failed,
+        local_route_candidates_count=counts.routes,
+        remote_catalog_source=None,  # R9.6: legacy remote probe-catalog source retired
+        community_catalog=CommunityCatalogSummary(
+            synced=marker is not None,
+            generated_at=marker.generated_at if marker else None,
+            record_count=community_count,
         ),
-        local_failed_records_count=sum(
-            1 for record in probe_records if record.trust_state == "probe-failed"
-        ),
-        local_route_candidates_count=len(library.route_candidates),
-        remote_catalog_source=remote_catalog_source,
-        community_catalog=_community_catalog_summary(),
     )
 
 
@@ -2719,21 +2819,11 @@ async def _ensure_official_role_test_verified_profile(
             endpoint,
             profile_result,
         )
-        _append_official_profile_probe_evidence(
-            endpoint,
-            profile_result,
-            route_id=updated_route.route_id,
-        )
         return (
             updated_route,
             profile_result,
         )
-    updated_route = _persist_official_role_test_profile_failure(route, profile_result)
-    _append_official_profile_probe_evidence(
-        endpoint,
-        profile_result,
-        route_id=updated_route.route_id,
-    )
+    updated_route = _persist_official_role_test_profile_failure(route, endpoint, profile_result)
     return (
         updated_route,
         profile_result,
@@ -2777,12 +2867,17 @@ def _persist_official_role_test_verified_profile(
         cleaned_metadata["probe_attempts"] = profile_result.probe_attempts
     updated_route = updated_route.model_copy(update={"metadata": cleaned_metadata})
     credentials.provider_routes[updated_route.route_id] = updated_route
+    # Merge the profile-probe evidence into the SAME save (R3.3-AC2), not the catalog.
+    _merge_official_profile_evidence_into_route(
+        credentials, latest_endpoint, profile_result, route_id=updated_route.route_id
+    )
     save_credentials(credentials)
-    return updated_route
+    return credentials.provider_routes[updated_route.route_id]
 
 
 def _persist_official_role_test_profile_failure(
     route: ProviderRoute,
+    endpoint: ProviderEndpoint,
     profile_result: OfficialModelProfileProbeResult,
 ) -> ProviderRoute:
     credentials = load_credentials()
@@ -2798,8 +2893,12 @@ def _persist_official_role_test_profile_failure(
         metadata["probe_attempts"] = profile_result.probe_attempts
     updated_route = current_route.model_copy(update={"metadata": metadata})
     credentials.provider_routes[updated_route.route_id] = updated_route
+    # Merge the probe-failed evidence into the SAME save (R3.3-AC2), not the catalog.
+    _merge_official_profile_evidence_into_route(
+        credentials, endpoint, profile_result, route_id=updated_route.route_id
+    )
     save_credentials(credentials)
-    return updated_route
+    return credentials.provider_routes[updated_route.route_id]
 
 
 def _official_role_test_profile_probe_failure_message(
@@ -2808,19 +2907,19 @@ def _official_role_test_profile_probe_failure_message(
     return profile_result.last_probe_message or NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE
 
 
-def _append_official_profile_probe_evidence(
+def _build_official_profile_probe_evidence(
     endpoint: ProviderEndpoint,
     profile_result: OfficialModelProfileProbeResult,
     *,
     route_id: str | None,
-) -> None:
+) -> EvidenceRecord:
     profile = _selected_evidence_profile(profile_result.profiles)
     first_attempt = _first_probe_attempt(profile_result.probe_attempts)
     model_id = profile_result.model_id
     verified = bool(profile_result.profiles)
     reason = None if verified else _official_role_test_profile_probe_failure_message(profile_result)
     catalog_capabilities = _official_catalog_capabilities(endpoint, model_id)
-    append_evidence_record(
+    return (
         EvidenceRecord(
             evidence_id=new_evidence_id("probe"),
             evidence_type="probe",
@@ -2878,12 +2977,34 @@ def _append_official_profile_probe_evidence(
     )
 
 
-def _append_model_probe_evidence(
+def _merge_official_profile_evidence_into_route(
+    credentials: LLMCredentialsFile,
+    endpoint: ProviderEndpoint,
+    profile_result: OfficialModelProfileProbeResult,
+    *,
+    route_id: str | None,
+) -> None:
+    """Build official profile-probe evidence and merge it into its credentials route.
+
+    Return-and-merge (design §5): the record is assigned back to
+    ``credentials.provider_routes[route_id]`` so it lands in the SAME save as the
+    profile — never the probe catalog. No-op when the route is unknown/absent.
+    """
+    if route_id is None:
+        return
+    route = credentials.provider_routes.get(route_id)
+    if route is None:
+        return
+    record = _build_official_profile_probe_evidence(endpoint, profile_result, route_id=route_id)
+    credentials.provider_routes[route_id] = merge_route_evidence(route, record)
+
+
+def _build_model_probe_evidence(
     endpoint: ProviderEndpoint,
     result: ModelProbeResult,
     *,
     route_id: str | None,
-) -> None:
+) -> EvidenceRecord:
     verified = result.status == "ok"
     reason = None if verified else _model_probe_failure_message(result)
     capability_values = (
@@ -2896,7 +3017,7 @@ def _append_model_probe_evidence(
         if verified
         else {}
     )
-    append_evidence_record(
+    return (
         EvidenceRecord(
             evidence_id=new_evidence_id("probe"),
             evidence_type="probe",
@@ -2932,102 +3053,26 @@ def _append_model_probe_evidence(
     )
 
 
-def _append_model_list_observation_evidence(
+def _merge_probe_evidence_into_route(
+    credentials: LLMCredentialsFile,
     endpoint: ProviderEndpoint,
-    model_ids: tuple[str, ...],
-    raw_capabilities_by_model: dict[str, dict[str, Any]],
-    route_ids_by_model: dict[str, str],
+    result: ModelProbeResult,
+    *,
+    route_id: str | None,
 ) -> None:
-    library = load_evidence_library()
-    previous_model_ids = {
-        candidate.provider_model_id
-        for candidate in library.route_candidates.values()
-        if candidate.endpoint_id == endpoint.endpoint_id
-    }
-    observed_model_ids = list(model_ids)
-    observed_set = set(observed_model_ids)
-    added_model_ids = [model_id for model_id in observed_model_ids if model_id not in previous_model_ids]
-    removed_model_ids = sorted(previous_model_ids - observed_set)
-    unchanged_model_ids = [model_id for model_id in observed_model_ids if model_id in previous_model_ids]
-    route_candidates = {
-        route_id: _route_candidate_from_model_list(
-            endpoint,
-            model_id,
-            route_id,
-            raw_capabilities_by_model.get(model_id, {}),
-        )
-        for model_id, route_id in route_ids_by_model.items()
-    }
-    append_evidence_record(
-        EvidenceRecord(
-            evidence_id=new_evidence_id("model-list"),
-            evidence_type="model_list_observation",
-            trust_state="provider-list-observed",
-            observed_at=_now_iso(),
-            endpoint_id=endpoint.endpoint_id,
-            provider_id=endpoint.endpoint_id,
-            scope={"endpoint_id": endpoint.endpoint_id},
-            model_list_observation={
-                "base_url_fingerprint": _redacted_base_url_fingerprint(endpoint.base_url),
-                "observed_model_ids": observed_model_ids,
-                "added_model_ids": added_model_ids,
-                "removed_model_ids": removed_model_ids,
-                "unchanged_model_ids": unchanged_model_ids,
-            },
-            metadata={"model_count": len(observed_model_ids)},
-        ),
-        route_candidates=route_candidates,
-    )
+    """Build probe evidence for a model and merge it into its credentials route.
 
-
-def _route_candidate_from_model_list(
-    endpoint: ProviderEndpoint,
-    model_id: str,
-    route_id: str,
-    raw_capabilities: dict[str, Any],
-) -> RouteCandidate:
-    route_slug = route_id.split(":", 1)[1] if ":" in route_id else _route_slug(model_id)
-    canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=route_slug)
-    capabilities = (
-        {
-            **_official_model_type_capability_values(
-                endpoint,
-                model_id,
-                source="api_list",
-            ),
-            **_provider_doc_limit_capability_values(endpoint, model_id),
-            **_official_normalized_route_capabilities(endpoint, model_id, raw_capabilities),
-        }
-        if endpoint.provider_kind == "official"
-        else _third_party_route_capability_values(
-            endpoint,
-            model_id,
-            raw_capabilities,
-            source="api_list",
-        )
-    )
-    return RouteCandidate(
-        endpoint_id=endpoint.endpoint_id,
-        route_slug=route_slug,
-        provider_model_id=model_id,
-        canonical_id=canonical.canonical_id,
-        display_name=model_id,
-        capabilities=capabilities,
-        field_sources={
-            "provider_model_id": FieldSource(source="api_list"),
-            "capabilities": FieldSource(source="api_list"),
-        },
-        metadata={
-            "trust_state": "provider-list-observed",
-            "route_id": route_id,
-            "provider_kind": endpoint.provider_kind,
-        },
-    )
-
-
-def _redacted_base_url_fingerprint(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    Return-and-merge (design §4.1/§5): the record is built then assigned back to
+    ``credentials.provider_routes[route_id]`` — never written to the probe catalog.
+    No-op when the route is unknown/absent so callers can pass a best-effort id.
+    """
+    if route_id is None:
+        return
+    route = credentials.provider_routes.get(route_id)
+    if route is None:
+        return
+    record = _build_model_probe_evidence(endpoint, result, route_id=route_id)
+    credentials.provider_routes[route_id] = merge_route_evidence(route, record)
 
 
 def _selected_evidence_profile(
@@ -4360,18 +4405,16 @@ def _compact_model_info_for_listed_official_route(
         if verified_profiles
         else _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
     )
-    library = load_evidence_library()
-    is_probe_verified = any(
-        rec.endpoint_id == endpoint.endpoint_id and rec.model_id == model_id and rec.trust_state == "probe-verified"
-        for rec in library.evidence_records
-    )
+    # is_probe_verified derives from the route's own evidence (SSOT, R9.3); with no
+    # route there is no evidence, so the model is untested rather than probe-verified.
+    is_probe_verified = route is not None and route_is_probe_verified(route)
     model_status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"]
     if route is not None:
         model_status = route.status
         if model_status == "unverified_manual" and is_probe_verified:
             model_status = "probe-verified"
     else:
-        model_status = "probe-verified" if is_probe_verified else "unverified_manual"
+        model_status = "unverified_manual"
 
     return EndpointTestCompactModelInfo(
         id=model_id,
@@ -4567,6 +4610,10 @@ class ThirdPartyEndpointVerification:
     # True when the failure is protocol-agnostic (invalid_key / quota_exceeded):
     # the endpoint itself is broken, so a prior verified route must NOT be reused.
     failure_is_structural: bool = False
+    # The actual failing probe (model_id/status/latency/message) so the Test flow
+    # can build a probe-failed evidence record for that real model (R3.1-AC3 /
+    # codex-3) — not just a human message.
+    failed_probe: RouteProbeResult | None = None
 
 
 def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
@@ -4578,91 +4625,82 @@ def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[Provid
     return tuple(ordered)
 
 
-def _endpoint_probe_model_ids_by_trust(
-    library: ProviderImportDraft,
-    endpoint_id: str,
-    trust_state: str,
-) -> set[str]:
-    """Model ids with a probe evidence record of ``trust_state`` for one endpoint."""
-    result: set[str] = set()
-    for record in library.evidence_records:
-        if (
-            record.evidence_type != "probe"
-            or record.trust_state != trust_state
-            or record.endpoint_id != endpoint_id
-        ):
-            continue
-        model_id = record.model_id or record.provider_model_id
-        if model_id is not None:
-            result.add(model_id)
-    return result
+def _base_url_hostname(base_url: str) -> str:
+    raw_url = base_url.strip()
+    if not raw_url:
+        return ""
+    try:
+        parsed = urlsplit(raw_url)
+        if parsed.hostname is None and "://" not in raw_url:
+            parsed = urlsplit(f"//{raw_url}")
+    except ValueError:
+        return ""
+    return (parsed.hostname or "").lower().strip(".")
 
 
-def _endpoint_probe_order(
-    library: ProviderImportDraft,
-    endpoint_id: str,
+def _hostname_matches_registered_domain(hostname: str, registered_domain: str) -> bool:
+    return hostname == registered_domain or hostname.endswith(f".{registered_domain}")
+
+
+def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
+    text_haystack = " ".join(
+        [
+            endpoint.endpoint_id,
+            endpoint.display_name or "",
+        ]
+    ).lower()
+    hostname = _base_url_hostname(endpoint.base_url)
+    if "qiniu" in text_haystack or _hostname_matches_registered_domain(hostname, "qnaigc.com"):
+        return "qiniu"
+    if "openrouter" in text_haystack or _hostname_matches_registered_domain(hostname, "openrouter.ai"):
+        return "openrouter"
+    return _endpoint_probe_backend(endpoint)
+
+
+def _prioritize_notable_probe_models(
+    endpoint: ProviderEndpoint,
     candidate_model_ids: Sequence[str],
-    *,
-    verified_model_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Order probe candidates so an endpoint Test confirms reachability fastest.
-
-    An endpoint Test only needs to prove the *endpoint* connects, so it leads
-    with the model most likely to succeed and stops on the first ``ok``:
-
-    1. models with a currently-verified route (green) — the surest bet,
-    2. models that connected before (probe-verified evidence / historical "blue"),
-    3. untried models,
-    4. known-failed models last.
-
-    This deliberately differs from gateway ``probe_priority`` (which *skips*
-    already-verified models to discover *new* capabilities); leading with a
-    known-good model is what an endpoint Test wants — fewest attempts to a green.
-    """
-    historical = _endpoint_probe_model_ids_by_trust(library, endpoint_id, "probe-verified")
-    failed = _endpoint_probe_model_ids_by_trust(library, endpoint_id, "probe-failed")
-    tier_current: list[str] = []
-    tier_historical: list[str] = []
-    tier_unknown: list[str] = []
-    tier_failed: list[str] = []
-    for model_id in candidate_model_ids:
-        if model_id in verified_model_ids:
-            tier_current.append(model_id)
-        elif model_id in historical:
-            tier_historical.append(model_id)
-        elif model_id in failed:
-            tier_failed.append(model_id)
-        else:
-            tier_unknown.append(model_id)
-    return [*tier_current, *tier_historical, *tier_unknown, *tier_failed]
+    requested = _requested_model_ids(candidate_model_ids)
+    if not requested:
+        return []
+    notable = notable_model_ids(_endpoint_notable_provider_key(endpoint))
+    if not notable:
+        return requested
+    requested_set = set(requested)
+    prioritized = [model_id for model_id in notable if model_id in requested_set]
+    prioritized_set = set(prioritized)
+    return [
+        *prioritized,
+        *(model_id for model_id in requested if model_id not in prioritized_set),
+    ]
 
 
 def _third_party_probe_model_ids(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
-    *,
-    verified_model_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Pick the model ids to drive the batch inference probe.
 
     Discovered ids (from the get-models call) drive the candidate set; when the
     endpoint exposes no list API we fall back to the doc-maintained notable ids
     for its probe backend so an unlistable-but-generating endpoint can still
-    verify. The candidates are then ordered by :func:`_endpoint_probe_order` so
-    the probe leads with a known-good model and confirms the endpoint in as few
-    attempts as possible.
+    verify. The candidates are then ordered by ``endpoint_probe_priority`` (R9.4)
+    so the probe leads with a known-good model and confirms the endpoint in as
+    few attempts as possible — all derived from credentials, not the catalog.
     """
-    library = load_evidence_library()
+    credentials = load_credentials()
     candidates = list(discovered_model_ids)
     if not candidates:
-        candidates = known_model_ids_for_endpoint(library, endpoint.endpoint_id)
+        # model-list truth = routes (R3.4): fall back to the endpoint's known routes.
+        candidates = endpoint_listed_model_ids(credentials, endpoint.endpoint_id)
     if not candidates:
         candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
-    ordered = _endpoint_probe_order(
-        library,
+    prioritized_candidates = _prioritize_notable_probe_models(endpoint, candidates)
+    ordered = endpoint_probe_priority(
+        credentials,
         endpoint.endpoint_id,
-        _requested_model_ids(candidates),
-        verified_model_ids=verified_model_ids,
+        prioritized_candidates,
     )
     return ordered[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
 
@@ -4732,12 +4770,29 @@ async def _detect_third_party_protocol(
     return None, last_result
 
 
+async def _detect_third_party_protocol_for_models(
+    endpoint: ProviderEndpoint,
+    probe_model_ids: Sequence[str],
+) -> tuple[ProviderType | None, RouteProbeResult | None]:
+    """Detect protocol using the same batch model set used for verification."""
+    last_probe: RouteProbeResult | None = None
+    for probe_model_id in probe_model_ids:
+        detected_protocol, detection_probe = await _detect_third_party_protocol(
+            endpoint,
+            probe_model_id,
+        )
+        if detected_protocol is not None:
+            return detected_protocol, detection_probe
+        last_probe = detection_probe
+        if detection_probe is not None and detection_probe.status in _STRUCTURAL_PROBE_STATUSES:
+            return None, detection_probe
+    return None, last_probe
+
+
 async def _verify_third_party_endpoint_by_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
-    *,
-    verified_model_ids: frozenset[str] = frozenset(),
 ) -> ThirdPartyEndpointVerification:
     """Run protocol auto-detect + batch inference probing for a third-party endpoint.
 
@@ -4751,7 +4806,6 @@ async def _verify_third_party_endpoint_by_probe(
     probe_model_ids = _third_party_probe_model_ids(
         endpoint,
         discovered_model_ids,
-        verified_model_ids=verified_model_ids,
     )
     if not probe_model_ids:
         return ThirdPartyEndpointVerification(
@@ -4761,8 +4815,8 @@ async def _verify_third_party_endpoint_by_probe(
             message="Endpoint reachable but no model ids were available to probe.",
         )
 
-    detected_protocol, detection_probe = await _detect_third_party_protocol(
-        endpoint, probe_model_ids[0]
+    detected_protocol, detection_probe = await _detect_third_party_protocol_for_models(
+        endpoint, probe_model_ids
     )
     if detected_protocol is None:
         structural = (
@@ -4772,7 +4826,7 @@ async def _verify_third_party_endpoint_by_probe(
         message = (
             _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
             if structural and detection_probe is not None
-            else "Could not auto-detect a working protocol for this endpoint."
+            else _protocol_detection_failure_message(probe_model_ids, detection_probe)
         )
         return ThirdPartyEndpointVerification(
             status="failed",
@@ -4780,16 +4834,18 @@ async def _verify_third_party_endpoint_by_probe(
             verified_model_id=None,
             message=message,
             failure_is_structural=structural,
+            failed_probe=detection_probe,
         )
 
     assert detection_probe is not None  # detected_protocol set => probe present
     first_probe = detection_probe
+    first_probe_model_id = first_probe.model_id
     detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
 
     last_failure: RouteProbeResult = first_probe
-    for index, model_id in enumerate(probe_model_ids):
-        if index == 0:
-            # The first model was already probed during protocol detection.
+    for model_id in probe_model_ids:
+        if model_id == first_probe_model_id:
+            # This model was already probed during protocol detection.
             probe = first_probe
         else:
             probe = await _gateway_test_provider_route(
@@ -4832,7 +4888,27 @@ async def _verify_third_party_endpoint_by_probe(
             _model_probe_result_from_route_probe(last_failure)
         ),
         failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
+        failed_probe=last_failure,
     )
+
+
+def _protocol_detection_failure_message(
+    probe_model_ids: Sequence[str],
+    detection_probe: RouteProbeResult | None,
+) -> str:
+    message = (
+        "Could not auto-detect a working protocol for this endpoint "
+        f"after probing {len(probe_model_ids)} candidate models."
+    )
+    if detection_probe is None:
+        return message
+    detail = (
+        f" Last probe: {detection_probe.backend} / {detection_probe.model_id} "
+        f"returned {detection_probe.status}"
+    )
+    if detection_probe.message:
+        detail += f" ({detection_probe.message})"
+    return f"{message}{detail}"
 
 
 async def _probe_third_party_models_for_endpoint(
@@ -5007,7 +5083,6 @@ def _upsert_discovered_routes(
 ) -> tuple[LLMCredentialsFile, dict[str, str]]:
     routes = dict(credentials.provider_routes)
     route_ids_by_model: dict[str, str] = {}
-    library = load_evidence_library()
     for model_id in model_ids:
         route_id = _route_id(endpoint.endpoint_id, model_id, routes)
         route_ids_by_model[model_id] = route_id
@@ -5024,7 +5099,7 @@ def _upsert_discovered_routes(
                 probe_attempts=(probe_attempts_by_model or {}).get(model_id, []),
                 raw_capabilities=(raw_capabilities_by_model or {}).get(model_id, {}),
             )
-            routes[route_id] = _apply_promotable_route_update(route, library)
+            routes[route_id] = route
             continue
         updates: dict[str, Any] = {}
         if verified:
@@ -5072,7 +5147,7 @@ def _upsert_discovered_routes(
         if verified_profiles_by_model and model_id in verified_profiles_by_model:
             updates["verified_profiles"] = verified_profiles_by_model[model_id]
         route = existing.model_copy(update=updates) if updates else existing
-        routes[route_id] = _apply_promotable_route_update(route, library)
+        routes[route_id] = route
     if replace_endpoint_routes:
         discovered_model_ids = set(model_ids)
         routes = {
@@ -5171,48 +5246,6 @@ def _upsert_failed_official_model_routes(
     return credentials.model_copy(update={"provider_routes": routes}), route_ids_by_model
 
 
-def _apply_promotable_route_update(
-    route: ProviderRoute,
-    library: ProviderImportDraft,
-) -> ProviderRoute:
-    update = promotable_route_update(library, route)
-    if not update.capabilities and not update.verified_profiles and not update.evidence_refs:
-        return route
-    profiles = list(route.verified_profiles)
-    profile_keys = {
-        (profile.method_id, profile.request_mapper_id)
-        for profile in profiles
-    }
-    for profile in update.verified_profiles:
-        key = (profile.method_id, profile.request_mapper_id)
-        if key in profile_keys:
-            continue
-        profiles.append(profile)
-        profile_keys.add(key)
-    metadata = dict(route.metadata)
-    if update.evidence_refs:
-        existing_refs = metadata.get("evidence_refs")
-        merged_refs = [
-            ref
-            for ref in [
-                *(existing_refs if isinstance(existing_refs, list) else []),
-                *update.evidence_refs,
-            ]
-            if isinstance(ref, str)
-        ]
-        metadata["evidence_refs"] = list(dict.fromkeys(merged_refs))
-    return route.model_copy(
-        update={
-            "capabilities": {
-                **route.capabilities,
-                **update.capabilities,
-            },
-            "verified_profiles": profiles,
-            "metadata": metadata,
-        }
-    )
-
-
 def _provider_route(
     *,
     endpoint: ProviderEndpoint,
@@ -5303,7 +5336,7 @@ def _route_id(
     return f"{endpoint_id}:{base_slug}-{suffix}"
 
 
-def _requested_model_ids(model_ids: list[str]) -> list[str]:
+def _requested_model_ids(model_ids: Sequence[str]) -> list[str]:
     seen: set[str] = set()
     requested: list[str] = []
     for model_id in model_ids:
@@ -5699,6 +5732,16 @@ async def _legacy_endpoint_probe_adapter(endpoint: ProviderEndpoint) -> Endpoint
     backend = _endpoint_probe_backend(endpoint)
     base_url = _endpoint_probe_base_url(endpoint)
     api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
+    if not base_url:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="error",
+            message="Base URL is empty.",
+            error_code="missing_config",
+        )
     if not api_key:
         return EndpointProbeResult(
             endpoint_id=endpoint.endpoint_id,

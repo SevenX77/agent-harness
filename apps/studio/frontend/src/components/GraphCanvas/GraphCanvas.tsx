@@ -2,12 +2,14 @@ import '@xyflow/react/dist/style.css'
 
 import {
   Background,
+  MiniMap,
   Panel,
   ReactFlow,
   addEdge,
   reconnectEdge,
   useEdgesState,
   useNodesState,
+  useUpdateNodeInternals,
   type Connection,
   type Edge,
   type FinalConnectionState,
@@ -21,16 +23,15 @@ import { AxiosError } from 'axios'
 import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, SkillDetail } from '@/api/types'
 import { getChildGraphTopology, getSkillDetail, type ResumeRunOptions } from '@/api/client'
 import { isTauriRuntime } from '@/config/runtime'
-import { resolveWorkspaceIdentity } from '@/components/studio/workspace-identity'
+import { resolveWorkspaceIdentity, topLevelSkillIdFromWorkspaceRoot } from '@/components/studio/workspace-identity'
 import { Spinner } from '@/components/ui/spinner'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
+  ContextMenuShortcut,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
@@ -40,7 +41,7 @@ import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
 import { buildEdges, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
-import { buildSubgraphExpansion, isSubgraphPreviewId, positionedParentNodes, type ExpandedSubgraphView, type SubgraphExpansionRequest, type SubgraphExpansionResult } from '@/components/GraphCanvas/subgraph-expansion'
+import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
@@ -79,6 +80,13 @@ import {
   updateStableLayoutPositionsFromNodeChanges,
 } from './canvas-projection'
 
+export interface ChildDetailPatch {
+  skillId: string
+  workspaceRoot: string | null
+  detail: SkillDetail
+  revision: number
+}
+
 interface GraphCanvasProps {
   skillId: string
   // n2-canvas #14: the parent skill's absolute workspace root (its own skill dir).
@@ -86,14 +94,38 @@ interface GraphCanvasProps {
   // editable workspace) or READ-ONLY (a bundled/public skill); see isDrilledChildEditable.
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
+  childDetailPatch?: ChildDetailPatch | null
   isLoading?: boolean
   error?: unknown
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   onNodeDeselect?: () => void
+  /**
+   * Reveal something inside a subgraph's inline topology, driven by clicking a
+   * file in the Assets trees. `phaseChain` is the root→leaf chain of phase ids;
+   * `nonce` makes repeated requests re-fire.
+   * - `select-child`: expand ancestors + select/highlight the leaf child node.
+   * - `expand-subgraph`: expand the subgraph's own inline preview and DESELECT
+   *   any node (driven by clicking the subgraph's GRAPH.md).
+   * Either way the targeted node is centered in the canvas viewport.
+   */
+  revealRequest?: { phaseChain: string[]; intent: 'select-child' | 'expand-subgraph'; nonce: number } | null
+  /**
+   * Center the canvas viewport on a root-graph node (at the current zoom),
+   * driven by clicking that node's file in the Assets "Skill Files" tree. `nonce`
+   * makes repeated requests re-fire. Canvas clicks never set this — selecting a
+   * node ON the canvas must not move the viewport.
+   */
+  focusNodeRequest?: { nodeId: string; nonce: number } | null
   onNodeFileOpen?: (file: FileOpenInput) => void
   onPanelChange?: (panel: PanelKind | null) => void
-  onCreatePhase?: (kind: NewPhaseKind, phaseId?: string) => Promise<void> | void
+  // Clicking an already-selected node opens the LAST panel the user had open
+  // (recorded by the host), not a hard-coded Properties panel. Falls back to
+  // 'properties' when the host does not provide it.
+  onOpenSelectedNodePanel?: () => void
+  // Clicking empty canvas closes any open side panel AND the file editor(s).
+  onCloseEditors?: () => void
+  onCreatePhase?: (kind: NewPhaseKind, phaseId?: string, target?: ChildSaveTarget) => Promise<void> | void
   onDeletePhase?: (phaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   // n2-canvas #14: every save handler takes an optional drilled-child `target`. When
   // editing INSIDE a drilled subgraph the canvas passes the child's own identity +
@@ -164,83 +196,118 @@ const HIDDEN_INITIAL_VIEWPORT_CLASS = 'opacity-0 pointer-events-none'
 const useCanvasLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 const MINI_MAP_WIDTH = 200
 const MINI_MAP_HEIGHT = 120
-const MINI_MAP_PADDING = 48
+const MINI_MAP_NODE_WIDTH = 240
+const MINI_MAP_NODE_HEIGHT = 64
+
+type SkillMiniMapNodeProps = {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  className: string
+  color?: string
+  selected: boolean
+  onClick?: (event: MouseEvent, id: string) => void
+}
 
 function overwriteConflictKey(conflict: Pick<OverwriteConflict, 'nodeId' | 'fieldName' | 'ancestorNodeId'>): string {
   return `${conflict.nodeId}\0${conflict.fieldName}\0${conflict.ancestorNodeId}`
 }
 
-function miniMapNodeSize(type: string | undefined): { width: number; height: number } {
-  if (type === 'globalInput' || type === 'globalOutput') {
-    return { width: 220, height: 80 }
+function miniMapNodeColor(node: { type?: string; selected?: boolean }): string {
+  if (node.type === 'subgraphGroup') {
+    return 'transparent'
   }
-  return { width: 260, height: 120 }
+  if (node.selected) {
+    return 'color-mix(in oklab, var(--studio-canvas-accent) 72%, var(--color-foreground))'
+  }
+  if (node.type === 'globalInput' || node.type === 'globalOutput') {
+    return 'var(--color-muted-foreground)'
+  }
+  return 'color-mix(in oklab, var(--color-foreground) 78%, var(--studio-canvas-accent) 22%)'
 }
 
-function SkillMiniMap({ nodes }: { nodes: GraphCanvasNode[] }) {
-  const miniNodes = useMemo(() => nodes
-    .filter((node) => node.type !== 'subgraphGroup')
-    .map((node) => {
-      const size = miniMapNodeSize(node.type)
-      return {
-        id: node.id,
-        type: node.type,
-        selected: node.selected === true,
-        x: node.position.x - size.width / 2,
-        y: node.position.y - size.height / 2,
-        width: size.width,
-        height: size.height,
-      }
-    }), [nodes])
+function miniMapNodeClassName(node: { type?: string }): string {
+  return node.type === 'subgraphGroup' ? 'skill-mini-map-node--group' : 'skill-mini-map-node--phase'
+}
 
-  if (miniNodes.length === 0) {
-    return null
+function SkillMiniMapNode({ id, x, y, width, height, className, color, selected, onClick }: SkillMiniMapNodeProps) {
+  if (className.includes('skill-mini-map-node--group')) {
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={10}
+        fill="transparent"
+        stroke="color-mix(in oklab, var(--studio-canvas-accent-muted) 64%, transparent)"
+        strokeWidth={4}
+        vectorEffect="non-scaling-stroke"
+        className={className}
+        onClick={onClick ? (event) => onClick(event, id) : undefined}
+      />
+    )
   }
 
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (const node of miniNodes) {
-    minX = Math.min(minX, node.x)
-    minY = Math.min(minY, node.y)
-    maxX = Math.max(maxX, node.x + node.width)
-    maxY = Math.max(maxY, node.y + node.height)
-  }
-  const viewBox = [
-    minX - MINI_MAP_PADDING,
-    minY - MINI_MAP_PADDING,
-    Math.max(1, maxX - minX + MINI_MAP_PADDING * 2),
-    Math.max(1, maxY - minY + MINI_MAP_PADDING * 2),
-  ].join(' ')
-
+  const nodeWidth = Math.min(width, MINI_MAP_NODE_WIDTH)
+  const nodeHeight = Math.min(height, MINI_MAP_NODE_HEIGHT)
   return (
-    <Panel
-      position="bottom-right"
-      className="react-flow__minimap skill-mini-map"
-      style={{ height: MINI_MAP_HEIGHT, width: MINI_MAP_WIDTH }}
-    >
-      <svg
-        className="skill-mini-map__svg"
-        viewBox={viewBox}
-        role="img"
-        aria-label="Main graph overview"
-      >
-        {miniNodes.map((node) => (
-          <rect
-            key={node.id}
-            x={node.x}
-            y={node.y}
-            width={node.width}
-            height={node.height}
-            rx={8}
-            fill={node.selected ? 'var(--primary, #6366f1)' : node.type === 'skill' ? 'var(--color-foreground)' : 'var(--color-muted-foreground)'}
-            opacity={node.type === 'skill' ? 0.88 : 0.45}
-          />
-        ))}
-      </svg>
-    </Panel>
+    <rect
+      x={x + (width - nodeWidth) / 2}
+      y={y + (height - nodeHeight) / 2}
+      width={nodeWidth}
+      height={nodeHeight}
+      rx={8}
+      fill={color}
+      opacity={selected ? 0.95 : 0.78}
+      className={className}
+      onClick={onClick ? (event) => onClick(event, id) : undefined}
+    />
   )
+}
+
+function SkillMiniMap({ visible }: { visible: boolean }) {
+  return (
+    <MiniMap
+      position="bottom-right"
+      className={`react-flow__minimap skill-mini-map ${visible ? 'skill-mini-map--visible' : 'skill-mini-map--hidden'}`}
+      style={{ height: MINI_MAP_HEIGHT, width: MINI_MAP_WIDTH }}
+      nodeColor={miniMapNodeColor}
+      nodeClassName={miniMapNodeClassName}
+      nodeComponent={SkillMiniMapNode}
+      maskColor="color-mix(in oklab, var(--color-background) 76%, transparent)"
+      maskStrokeColor="color-mix(in oklab, var(--studio-canvas-accent-muted) 46%, transparent)"
+      maskStrokeWidth={2}
+      offsetScale={12}
+      pannable
+      zoomable
+      ariaLabel="Main graph overview"
+      aria-hidden={!visible}
+    />
+  )
+}
+
+function SubgraphBridgeInternalsUpdater({ nodes }: { nodes: GraphCanvasNode[] }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  const bridgeAnchorNodeIds = useMemo(() => nodes
+    .filter((node) => (
+      node.type === 'subgraphGroup'
+      || (node.type === 'skill' && (node.data as SkillGraphNodeData).isExpanded === true)
+    ))
+    .map((node) => node.id), [nodes])
+
+  useCanvasLayoutEffect(() => {
+    if (bridgeAnchorNodeIds.length === 0) return
+
+    const frame = window.requestAnimationFrame(() => {
+      bridgeAnchorNodeIds.forEach((nodeId) => updateNodeInternals(nodeId))
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [bridgeAnchorNodeIds, updateNodeInternals])
+
+  return null
 }
 
 export function layoutViewportSignature(nodes: GraphCanvasNode[], edges: Edge<ContextEdgeData>[]): string {
@@ -318,8 +385,41 @@ function phaseIdFromCanvasNodeId(nodeId: string): string {
   return nodeId.startsWith(prefix) ? nodeId.slice(prefix.length) : nodeId
 }
 
-export function topologyOwnerSkillIdForNode(node: SkillGraphNode, rootSkillId: string): string {
-  return node.data.topologyOwnerSkillId || rootSkillId
+interface CanvasScope {
+  parentNodeId: string | null
+}
+
+function canvasScopeForEndpoints(source: string, target: string): CanvasScope | null {
+  const sourceParentId = previewNodeParentId(source)
+  const targetParentId = previewNodeParentId(target)
+  if (sourceParentId !== targetParentId) {
+    return null
+  }
+  return { parentNodeId: sourceParentId }
+}
+
+function localConnectionEndpoints(connection: { source: string; target: string }): { source: string; target: string } {
+  return {
+    source: phaseIdFromCanvasNodeId(connection.source),
+    target: phaseIdFromCanvasNodeId(connection.target),
+  }
+}
+
+export function topologyOwnerSkillIdForWorkspace(skillId: string, workspaceRoot?: string | null): string {
+  return topLevelSkillIdFromWorkspaceRoot(workspaceRoot) || skillId
+}
+
+export function topologyOwnerSkillIdForNode(
+  node: SkillGraphNode,
+  rootSkillId: string,
+  workspaceRoot?: string | null,
+): string {
+  return (
+    topLevelSkillIdFromWorkspaceRoot(node.data.workspaceRoot)
+    || topLevelSkillIdFromWorkspaceRoot(workspaceRoot)
+    || node.data.topologyOwnerSkillId
+    || rootSkillId
+  )
 }
 
 function isEdgeContextTarget(target: EventTarget | null): boolean {
@@ -379,17 +479,60 @@ function childGraphErrorMessage(error: unknown, path: string): string {
   return `Failed to load subgraph at ${path}`
 }
 
+// Fit-view must frame the graph inside the VISIBLE canvas area, not the full
+// container — the side panel / copilot / file editor float ON TOP of the canvas.
+// The host already maintains those overlay sizes as CSS custom properties; we
+// resolve them to pixels with a throwaway probe so calc()/rem/% are computed by
+// the browser. Left/right insets are width-based (rem). The file editor overlay
+// is anchored at the TOP of the canvas (`.studio-editor-overlay` is `top-3`) and
+// its `min(52%, …)` height is height-relative, so its inset is measured as a
+// height and applied to the TOP. Returns zeros when the vars are absent (e.g.
+// the compact canvas).
+function readCanvasSafeInsets(host: HTMLElement): { left: number; right: number; top: number } {
+  if (typeof document === 'undefined') return { left: 0, right: 0, top: 0 }
+  const probe = document.createElement('div')
+  probe.style.position = 'absolute'
+  probe.style.visibility = 'hidden'
+  probe.style.pointerEvents = 'none'
+  probe.style.top = '0'
+  probe.style.left = '0'
+  probe.style.width = '0px'
+  probe.style.height = '0px'
+  host.appendChild(probe)
+  try {
+    const widthOf = (varName: string): number => {
+      probe.style.width = `var(${varName}, 0px)`
+      const value = probe.getBoundingClientRect().width
+      probe.style.width = '0px'
+      return Number.isFinite(value) ? value : 0
+    }
+    const left = widthOf('--studio-canvas-left-safe-area')
+    const right = widthOf('--studio-canvas-right-safe-area')
+    probe.style.height = 'var(--studio-canvas-editor-safe-area, 0px)'
+    const topRaw = probe.getBoundingClientRect().height
+    const top = Number.isFinite(topRaw) ? topRaw : 0
+    return { left, right, top }
+  } finally {
+    host.removeChild(probe)
+  }
+}
+
 export function GraphCanvas({
   skillId,
   workspaceRoot,
   skillDetail,
+  childDetailPatch = null,
   isLoading = false,
   error,
   selectedNodeId,
   onNodeSelect,
   onNodeDeselect,
+  revealRequest,
+  focusNodeRequest,
   onNodeFileOpen,
   onPanelChange,
+  onOpenSelectedNodePanel,
+  onCloseEditors,
   onCreatePhase,
   onDeletePhase,
   onPersistConnection,
@@ -478,16 +621,26 @@ export function GraphCanvas({
     result: { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null }
   } | null>(null)
   const stableLayoutPositionsRef = useRef<Map<string, GraphCanvasNode['position']>>(new Map())
-  const pendingNodeFileOpenRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Where the last pane right-click landed, in flow coordinates — used to drop a
+  // newly-created node AT the cursor instead of the auto-layout's default slot.
+  const lastPaneContextFlowPositionRef = useRef<{ x: number; y: number } | null>(null)
+  // Positions to force onto nodes as soon as they appear (keyed by phase id). A
+  // created node may not exist in the graph yet when we capture its placement, so
+  // we hold the position here until the rebuild surfaces it, then apply + clear.
+  const pendingCreatePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  // Deferred single-click action (open the recorded panel on the SECOND click of
+  // an already-selected node). Held in a timeout so a double-click can cancel it
+  // and open the editor instead of flashing a panel open.
+  const pendingNodeClickActionRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const cancelPendingNodeFileOpen = useCallback(() => {
-    if (pendingNodeFileOpenRef.current) {
-      clearTimeout(pendingNodeFileOpenRef.current)
-      pendingNodeFileOpenRef.current = null
+  const cancelPendingNodeClickAction = useCallback(() => {
+    if (pendingNodeClickActionRef.current) {
+      clearTimeout(pendingNodeClickActionRef.current)
+      pendingNodeClickActionRef.current = null
     }
   }, [])
 
-  useEffect(() => cancelPendingNodeFileOpen, [cancelPendingNodeFileOpen])
+  useEffect(() => cancelPendingNodeClickAction, [cancelPendingNodeClickAction])
 
   const applySelectionOverride = useCallback((nodeId: string | null) => {
     const next = { active: true, nodeId }
@@ -496,6 +649,15 @@ export function GraphCanvas({
   }, [])
 
   useEffect(() => {
+    const override = selectionOverrideRef.current
+    if (
+      override.active
+      && override.nodeId
+      && selectedNodeId
+      && phaseIdFromCanvasNodeId(override.nodeId) === selectedNodeId
+    ) {
+      return
+    }
     const next = { active: false, nodeId: null }
     selectionOverrideRef.current = next
     setSelectionOverride(next)
@@ -505,6 +667,11 @@ export function GraphCanvas({
     const override = selectionOverrideRef.current
     return override.active ? override.nodeId : selectedNodeId
   }, [selectedNodeId])
+
+  const isCanvasNodeSelected = useCallback((nodeId: string) => (
+    currentActiveSelectedNodeId() === nodeId
+    || nodesRef.current.some((node) => node.id === nodeId && node.selected)
+  ), [currentActiveSelectedNodeId])
 
   const updateViewportReady = useCallback((ready: boolean) => {
     viewportReadyRef.current = ready
@@ -671,12 +838,67 @@ export function GraphCanvas({
   const handleZoomOut = useCallback(() => {
     void reactFlowInstanceRef.current?.zoomOut()
   }, [])
-  const handleFitView = useCallback(() => {
-    void (fitViewRef.current?.() ?? reactFlowInstanceRef.current?.fitView({ padding: 0.2 }))
+  // Fit the graph into the area NOT covered by the open panel / copilot / editor
+  // overlays. Base breathing room plus the live overlay insets, per side.
+  const runFitView = useCallback(() => {
+    const instance = reactFlowInstanceRef.current
+    if (!instance) return
+    const host = canvasRef.current
+    const insets = host ? readCanvasSafeInsets(host) : { left: 0, right: 0, top: 0 }
+    const BASE = 32
+    return instance.fitView({
+      padding: {
+        top: `${insets.top + BASE}px`,
+        left: `${insets.left + BASE}px`,
+        right: `${insets.right + BASE}px`,
+        bottom: `${BASE}px`,
+      },
+    })
   }, [])
+  const handleFitView = useCallback(() => {
+    void (fitViewRef.current?.() ?? runFitView())
+  }, [runFitView])
   const handleToggleCanvasLock = useCallback(() => {
     setCanvasLocked((locked) => !locked)
   }, [])
+  // #3.2: keyboard shortcuts for the high-frequency canvas actions (shown in the
+  // right-click menu). Window-level but ignored while typing in a field; zoom/fit
+  // honor the canvas lock (the lock toggle itself always works). Modified combos
+  // are left to the browser/OS.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      // Require the platform modifier (Ctrl on Win/Linux, Cmd on macOS) so the
+      // shortcuts can never fire from plain typing. Ignore other modifier combos.
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+      switch (event.key) {
+        case '=':
+        case '+':
+          if (canvasLocked) return
+          handleZoomIn()
+          break
+        case '-':
+        case '_':
+          if (canvasLocked) return
+          handleZoomOut()
+          break
+        case '0':
+          if (canvasLocked) return
+          handleFitView()
+          break
+        case 'l':
+        case 'L':
+          handleToggleCanvasLock()
+          break
+        default:
+          return
+      }
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canvasLocked, handleFitView, handleToggleCanvasLock, handleZoomIn, handleZoomOut])
   const fitInitialViewportOnce = useCallback((hasLayoutNodes: boolean) => {
     const fitView = fitViewRef.current
     if (!shouldRunInitialViewportFit({
@@ -750,6 +972,25 @@ export function GraphCanvas({
     [onPhaseFileSave],
   )
 
+  const handleExpandedPreviewStepsSave = useCallback(
+    async (_nodeId: string, filePath: string, currentBody: string, nextBody: string, parentNodeId: string) => {
+      if (!onPhaseFileSave) return
+      const target = expandedChildSaveTarget(parentNodeId)
+      if (!target) {
+        toast.error('Could not save steps: child subgraph is not ready')
+        return
+      }
+      try {
+        const expectedHash = await sha256Hex(currentBody)
+        await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash }, target)
+        updateExpandedPhaseFile(parentNodeId, filePath, nextBody)
+      } catch (saveError) {
+        toast.error(`Could not save steps: ${errorMessage(saveError)}`)
+      }
+    },
+    [expandedChildSaveTarget, onPhaseFileSave, updateExpandedPhaseFile],
+  )
+
   // R9: drill INTO a subgraph node (push a focus level). The drilled child
   // topology is fetched by the effect below.
   const drillInto = useCallback((path: string, label: string) => {
@@ -763,6 +1004,10 @@ export function GraphCanvas({
   const drilledLevel = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null
   const drilledPath = drilledLevel?.path ?? null
   const viewportScopeKey = `${skillId}\0${drilledPath ?? ''}`
+  const topologyRootSkillId = useMemo(
+    () => topologyOwnerSkillIdForWorkspace(skillId, workspaceRoot),
+    [skillId, workspaceRoot],
+  )
   useCanvasLayoutEffect(() => {
     if (viewportScopeKeyRef.current === null) {
       viewportScopeKeyRef.current = viewportScopeKey
@@ -788,7 +1033,7 @@ export function GraphCanvas({
     setIsChildGraphLoading(true)
     setChildGraphError(null)
     try {
-      const topology = await getChildGraphTopology(skillId, path)
+      const topology = await getChildGraphTopology(topologyRootSkillId, path)
       if (signal.cancelled) return
       setChildGraph(topology)
       const childSkillId = resolveWorkspaceIdentity(`local:${topology.path}`).skillId
@@ -816,7 +1061,7 @@ export function GraphCanvas({
       setChildGraphError(childGraphErrorMessage(error, path))
       setIsChildGraphLoading(false)
     }
-  }, [skillId])
+  }, [topologyRootSkillId])
 
   // Fetch the drilled child graph whenever the focused path changes. Empty
   // stack clears the child state so the root graph renders unchanged.
@@ -914,6 +1159,47 @@ export function GraphCanvas({
   useEffect(() => {
     drilledChildTargetRef.current = drilledChildTarget
   }, [drilledChildTarget])
+  useEffect(() => {
+    if (!childDetailPatch) return
+    const patchedPhaseRefs = phaseRefsFromSkillDetail(childDetailPatch.detail)
+    const patchedPhaseIds = patchedPhaseRefs.map((phase) => phase.id)
+    const patchedGraphTopology = childDetailPatch.detail.graph_topology
+    setExpandedTopologies((current) => {
+      let changed = false
+      const next: typeof current = {}
+      for (const [nodeId, entry] of Object.entries(current)) {
+        const entrySkillId = entry.childSkillId ?? resolveWorkspaceIdentity(`local:${entry.path}`).skillId
+        const entryWorkspaceRoot = entry.path
+        if (
+          entry.view.status === 'loaded'
+          && entrySkillId === childDetailPatch.skillId
+          && entryWorkspaceRoot === childDetailPatch.workspaceRoot
+        ) {
+          next[nodeId] = {
+            ...entry,
+            view: {
+              ...entry.view,
+              phases: patchedPhaseIds.length > 0 ? patchedPhaseIds : entry.view.phases,
+              graphTopology: patchedGraphTopology ?? entry.view.graphTopology,
+              detail: childDetailPatch.detail,
+            },
+          }
+          changed = true
+        } else {
+          next[nodeId] = entry
+        }
+      }
+      return changed ? next : current
+    })
+    const drilledTarget = drilledChildTargetRef.current
+    if (
+      drilledTarget
+      && drilledTarget.skillId === childDetailPatch.skillId
+      && drilledTarget.workspaceRoot === childDetailPatch.workspaceRoot
+    ) {
+      setChildDetail(childDetailPatch.detail)
+    }
+  }, [childDetailPatch])
   // n2-canvas #14: connect/reconnect affordances are live when the canvas is the
   // main (non-compact) editor AND, if drilled, the child is editable (not a
   // read-only bundled/public subgraph). A read-only drilled child renders but
@@ -969,14 +1255,12 @@ export function GraphCanvas({
     _event: MouseEvent,
     connection: { source: string; target: string },
   ) => {
+    const localConnection = localConnectionEndpoints(connection)
     if (
-      connection.source === INPUT_ID
-      || connection.source === OUTPUT_ID
-      || connection.target === INPUT_ID
-      || connection.target === OUTPUT_ID
-      // Inline-expanded subgraph edges are read-only, so no disconnect menu.
-      || isSubgraphPreviewId(connection.source)
-      || isSubgraphPreviewId(connection.target)
+      localConnection.source === INPUT_ID
+      || localConnection.source === OUTPUT_ID
+      || localConnection.target === INPUT_ID
+      || localConnection.target === OUTPUT_ID
     ) {
       setEdgeMenuConnection(null)
       return
@@ -1046,9 +1330,19 @@ export function GraphCanvas({
   }, [compactRatio, layoutCanvasHeight, layoutSignature, rawNodes, topologyEdges])
   const baseLayout = useMemo(() => {
     const stableLayout = mergeStableLayoutPositions(rawNodes, layoutResult.nodes, stableLayoutPositionsRef.current)
+    // Drop right-click-created nodes at the captured cursor position the moment
+    // they materialize, overriding the auto-layout slot. Consumed once applied.
+    const pending = pendingCreatePositionsRef.current
+    const positionedNodes = pending.size === 0 ? stableLayout.nodes : stableLayout.nodes.map((node) => {
+      const placement = pending.get(node.id)
+      if (!placement) return node
+      pending.delete(node.id)
+      stableLayout.positions.set(node.id, placement)
+      return { ...node, position: placement }
+    })
     stableLayoutPositionsRef.current = stableLayout.positions
     return {
-      nodes: stableLayout.nodes,
+      nodes: positionedNodes,
       edges: rawEdges,
     }
   }, [layoutResult.nodes, rawEdges, rawNodes])
@@ -1059,7 +1353,9 @@ export function GraphCanvas({
   // canvas pipeline. The base layout signature is visible-node based: editing
   // dependency edges redraws lines, but it must not rerun dagre or move nodes.
   const subgraphExpansion = useMemo(() => {
-    if (isDrilled) return { nodes: [], edges: [] } satisfies SubgraphExpansionResult
+    // Inline subgraph expansion works the SAME at root depth and inside a drilled
+    // child graph — expanding a subgraph node previews its topology beside it
+    // either way (no isDrilled short-circuit).
     const nodes: GraphCanvasNode[] = []
     const edges: Edge<ContextEdgeData>[] = []
     const processed = new Set<string>()
@@ -1092,7 +1388,7 @@ export function GraphCanvas({
           parentNodeId: node.id,
           parentLabel: node.data.label,
           path,
-          topologyOwnerSkillId: topologyOwnerSkillIdForNode(node, skillId),
+          topologyOwnerSkillId: topologyOwnerSkillIdForNode(node, topologyRootSkillId, workspaceRoot),
           childSkillId: entry?.childSkillId ?? childIdentity?.skillId ?? undefined,
           view,
         })
@@ -1102,13 +1398,33 @@ export function GraphCanvas({
       const partial = buildSubgraphExpansion(parentNodes, requests, {
         expandedSubgraphs,
         onToggleSubgraph: toggleSubgraph,
+        expandedSteps,
+        onToggleSteps: toggleSteps,
+        onStepsSave: handleExpandedPreviewStepsSave,
       })
-      nodes.push(...partial.nodes)
+      // The expanded subgraph board carries an "open child canvas" button
+      // (drill-in). Double-clicking the subgraph node now opens its file instead.
+      nodes.push(...partial.nodes.map((node) => (
+        node.type === 'subgraphGroup'
+          ? { ...node, data: { ...node.data, onOpenCanvas: drillInto } }
+          : node
+      )))
       edges.push(...partial.edges)
     }
 
     return { nodes, edges }
-  }, [baseLayout.nodes, expandedSubgraphs, expandedTopologies, isDrilled, skillId, toggleSubgraph])
+  }, [
+    baseLayout.nodes,
+    drillInto,
+    expandedSteps,
+    expandedSubgraphs,
+    expandedTopologies,
+    handleExpandedPreviewStepsSave,
+    topologyRootSkillId,
+    toggleSteps,
+    toggleSubgraph,
+    workspaceRoot,
+  ])
   const composedLayout = useMemo(
     () => {
       const composedNodes = subgraphExpansion.nodes.length > 0
@@ -1167,17 +1483,16 @@ export function GraphCanvas({
   // embedded child roots, otherwise a same-name global skill can be picked as the
   // parent boundary and reject a valid nested child path.
   const expandedPathPairs = useMemo(() => {
-    if (isDrilled) return [] as Array<{ id: string; path: string; ownerSkillId: string }>
     return composedLayout.nodes
       .filter((node): node is SkillGraphNode => node.type === 'skill' && expandedSubgraphs.has(node.id))
       .map((node) => ({
         id: node.id,
         path: resolveSubgraphPath(node.data.subgraphPath, node.data.workspaceRoot),
-        ownerSkillId: topologyOwnerSkillIdForNode(node, skillId),
+        ownerSkillId: topologyOwnerSkillIdForNode(node, topologyRootSkillId, workspaceRoot),
       }))
       .filter((pair): pair is { id: string; path: string; ownerSkillId: string } => Boolean(pair.path))
       .sort((a, b) => a.id.localeCompare(b.id))
-  }, [composedLayout.nodes, expandedSubgraphs, isDrilled, skillId])
+  }, [composedLayout.nodes, expandedSubgraphs, topologyRootSkillId, workspaceRoot])
   const expandedPathKey = useMemo(
     () => expandedPathPairs.map((pair) => `${pair.id}\0${pair.ownerSkillId}\0${pair.path}`).join('|'),
     [expandedPathPairs],
@@ -1277,8 +1592,193 @@ export function GraphCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(composedLayout.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(decoratedComposedEdges)
   nodesRef.current = nodes
+
+  const syncCanvasSelection = useCallback((nodeId: string | null) => {
+    applySelectionOverride(nodeId)
+    setNodes((currentNodes) => {
+      let changed = false
+      const nextNodes = currentNodes.map((node) => {
+        const selected = node.id === nodeId
+        if (node.selected === selected) {
+          return node
+        }
+        changed = true
+        return { ...node, selected }
+      })
+      return changed ? nextNodes : currentNodes
+    })
+  }, [applySelectionOverride, setNodes])
+
+  // Bring a node into the visible canvas, accounting for the panel/copilot/editor
+  // overlay insets (the editor is anchored at the canvas top, so its height is the
+  // top inset — focus never lands under it). Used only for Assets-driven reveals;
+  // selecting a node ON the canvas must leave the viewport untouched.
+  //  - default (pan-only): keep the current zoom, just center the node. For
+  //    selecting a specific node, where a zoom jump would be jarring.
+  //  - fit: zoom OUT if needed so a whole panel fits, but never zoom IN past
+  //    current. For expanding a subgraph, where the goal is to see the full group.
+  const focusNodeOnCanvas = useCallback((nodeId: string, opts?: { fit?: boolean }): boolean => {
+    const instance = reactFlowInstanceRef.current
+    if (!instance || !instance.getNode(nodeId)) return false
+    const zoom = instance.getZoom()
+    const host = canvasRef.current
+    const insets = host ? readCanvasSafeInsets(host) : { left: 0, right: 0, top: 0 }
+    const BASE = 48
+    void instance.fitView({
+      nodes: [{ id: nodeId }],
+      duration: 400,
+      maxZoom: zoom,
+      ...(opts?.fit ? {} : { minZoom: zoom }),
+      padding: {
+        top: `${insets.top + BASE}px`,
+        left: `${insets.left + BASE}px`,
+        right: `${insets.right + BASE}px`,
+        bottom: `${BASE}px`,
+      },
+    })
+    return true
+  }, [])
+
+  // Reveal (Assets trees → canvas): two intents, both retried as the live `nodes`
+  // update because nested preview nodes only exist after their parent expands +
+  // the child topology resolves asynchronously.
+  //  - select-child: expand ancestors, then select+highlight the leaf child node.
+  //  - expand-subgraph: expand the subgraph's own inline preview, deselecting any
+  //    node (clicking a subgraph's GRAPH.md).
+  const pendingChildSelectRef = useRef<{ expandIds: string[]; selectId: string } | null>(null)
+  const pendingExpandRef = useRef<string[] | null>(null)
+  // `onNodeSelect`/`onNodeDeselect` are NOT memoized by the parent (new ref every
+  // render). Read them (and syncCanvasSelection) through refs so the try* helpers
+  // are STABLE callbacks — otherwise the reveal effects would re-run every render,
+  // perpetually re-arm + re-select, and setState in an infinite loop.
+  const onNodeSelectRef = useRef(onNodeSelect)
+  onNodeSelectRef.current = onNodeSelect
+  const onNodeDeselectRef = useRef(onNodeDeselect)
+  onNodeDeselectRef.current = onNodeDeselect
+  const syncCanvasSelectionRef = useRef(syncCanvasSelection)
+  syncCanvasSelectionRef.current = syncCanvasSelection
+  const trySelectPendingChild = useCallback(() => {
+    const pending = pendingChildSelectRef.current
+    if (!pending) return
+    // Expand each subgraph ancestor as it surfaces. A nested preview node only
+    // exists once its parent is expanded AND the child topology resolves, so we
+    // walk the chain progressively across `nodes` updates (deeper levels appear
+    // on later passes). Each step only flips state when it actually changes
+    // something, so this can never feed an infinite loop.
+    for (const id of pending.expandIds) {
+      const exists = nodesRef.current.some((candidate) => candidate.type === 'skill' && candidate.id === id)
+      if (exists) {
+        setExpandedSubgraphs((current) => (current.has(id) ? current : nextExpandedSubgraphs(current, id)))
+      }
+    }
+    const node = nodesRef.current.find(
+      (candidate): candidate is SkillGraphNode => candidate.type === 'skill' && candidate.id === pending.selectId,
+    )
+    if (!node) return
+    pendingChildSelectRef.current = null
+    syncCanvasSelectionRef.current(pending.selectId)
+    onNodeSelectRef.current?.({ id: skillNodePhaseId(node), data: node.data })
+    focusNodeOnCanvas(pending.selectId)
+  }, [focusNodeOnCanvas])
+  const tryExpandPending = useCallback(() => {
+    const ids = pendingExpandRef.current
+    if (!ids || ids.length === 0) return
+    for (const id of ids) {
+      const exists = nodesRef.current.some((candidate) => candidate.type === 'skill' && candidate.id === id)
+      if (exists) {
+        setExpandedSubgraphs((current) => (current.has(id) ? current : nextExpandedSubgraphs(current, id)))
+      }
+    }
+    // Focus the expanded GROUP container (the child topology box), not the small
+    // subgraph chip — the chip sits to the LEFT of the group, so centering on it
+    // would leave the topology off to the right. The group node only exists once
+    // the subgraph is expanded + its layout composes, so wait for it (retried on
+    // each `nodes` update). Loading/error states also render a group node.
+    const groupId = subgraphGroupNodeId(ids[ids.length - 1])
+    const group = nodesRef.current.find((candidate) => candidate.id === groupId)
+    if (!group) return // expansion / deeper level still resolving; retry next update
+    // Wait until the child topology has LOADED — while loading the group is a tiny
+    // 300×132 placeholder, so centering on it then would frame the header, not the
+    // full panel. Once loaded (or errored) it has its real size; fit the WHOLE
+    // group centered. Keep retrying on each `nodes` update until then.
+    if ((group.data as { status?: string }).status === 'loading') return
+    if (focusNodeOnCanvas(groupId, { fit: true })) {
+      pendingExpandRef.current = null
+    }
+  }, [focusNodeOnCanvas])
+  // Arm pending state ONLY when a new request (nonce) arrives — never on a plain
+  // re-render — so the reveal can't feed back into re-arming.
+  const handledRevealNonceRef = useRef(0)
+  useEffect(() => {
+    if (!revealRequest || revealRequest.nonce === handledRevealNonceRef.current) return
+    handledRevealNonceRef.current = revealRequest.nonce
+    if (revealRequest.intent === 'expand-subgraph') {
+      const ids = subgraphNodeIdChain(revealRequest.phaseChain)
+      if (ids.length === 0) return
+      pendingChildSelectRef.current = null
+      pendingExpandRef.current = ids
+      // Deselect any node — opening a subgraph's GRAPH.md is a graph-level action.
+      syncCanvasSelectionRef.current(null)
+      onNodeDeselectRef.current?.()
+      tryExpandPending()
+      return
+    }
+    const resolved = subgraphRevealNodeIds(revealRequest.phaseChain)
+    if (!resolved) return
+    pendingExpandRef.current = null
+    pendingChildSelectRef.current = resolved
+    // Already-expanded case: ancestors/preview node may exist right now.
+    trySelectPendingChild()
+  }, [revealRequest, trySelectPendingChild, tryExpandPending])
+  useEffect(() => {
+    // Retry as expansion + child topology resolve surface the target node. Once
+    // handled, pending is cleared so this is a no-op until the next request.
+    trySelectPendingChild()
+    tryExpandPending()
+  }, [nodes, trySelectPendingChild, tryExpandPending])
+  // Root-graph node focus (Assets "Skill Files" → canvas): pan to the node a file
+  // click selected, without touching selection (the parent owns that).
+  const handledFocusNonceRef = useRef(0)
+  useEffect(() => {
+    if (!focusNodeRequest || focusNodeRequest.nonce === handledFocusNonceRef.current) return
+    handledFocusNonceRef.current = focusNodeRequest.nonce
+    focusNodeOnCanvas(focusNodeRequest.nodeId)
+  }, [focusNodeRequest, focusNodeOnCanvas])
+
+  // Selection is OWNED by the app (selectedNodeId + override), never by React
+  // Flow's internal selection. `stampSelection` flips ONLY the `selected` flag
+  // from the active id, read through a ref so the layout-rebuild effect can apply
+  // it WITHOUT depending on selection — otherwise every select (e.g. starting to
+  // drag another node) would re-run that effect and snap dragged nodes back to
+  // their stale composed-layout positions.
+  const activeSelectionRef = useRef<string | null>(null)
+  const stampSelection = useCallback((list: GraphCanvasNode[]): GraphCanvasNode[] => {
+    const activeId = activeSelectionRef.current
+    let changed = false
+    const next = list.map((node) => {
+      if (node.type === 'subgraphGroup') return node
+      const selected = node.id === activeId
+      if (node.selected === selected) return node
+      changed = true
+      return { ...node, selected }
+    })
+    return changed ? next : list
+  }, [])
+
+  // Re-apply selection to the LIVE nodes whenever the active selection changes.
+  // Only `selected` is touched, so any in-progress drag positions are preserved.
+  useEffect(() => {
+    activeSelectionRef.current = currentActiveSelectedNodeId() ?? null
+    setNodes((current) => stampSelection(current))
+  }, [currentActiveSelectedNodeId, setNodes, stampSelection])
+
   const handleNodesChange = useCallback((changes: NodeChange<GraphCanvasNode>[]) => {
-    onNodesChange(changes)
+    // Drop React Flow's own selection changes — the app is the single source of
+    // truth for selection (so the highlight can never drift from selectedNodeId).
+    const nonSelectChanges = changes.filter((change) => change.type !== 'select')
+    if (nonSelectChanges.length > 0) {
+      onNodesChange(nonSelectChanges)
+    }
     stableLayoutPositionsRef.current = updateStableLayoutPositionsFromNodeChanges(
       stableLayoutPositionsRef.current,
       changes,
@@ -1288,10 +1788,10 @@ export function GraphCanvas({
   const hasLayoutNodes = baseLayout.nodes.length > 0
 
   useCanvasLayoutEffect(() => {
-    setNodes(composedLayout.nodes)
+    setNodes(stampSelection(composedLayout.nodes))
     setEdges(decoratedComposedEdges)
     fitInitialViewportOnce(hasLayoutNodes)
-  }, [composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
+  }, [stampSelection, composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {
@@ -1369,30 +1869,48 @@ export function GraphCanvas({
       toast.error('Connection endpoints are required')
       return
     }
-    if (source === target) {
+    const scope = canvasScopeForEndpoints(source, target)
+    if (!scope) {
+      toast.error('Connect nodes within the same graph.')
+      return
+    }
+    const localConnection = localConnectionEndpoints({ source, target })
+    if (localConnection.source === localConnection.target) {
       toast.error('A phase cannot depend on itself')
       return
     }
-    const sourceNode = phaseNodes.find((node) => node.id === source)
-    const targetNode = phaseNodes.find((node) => node.id === target)
-    const isGraphInputConnection = source === INPUT_ID && Boolean(targetNode)
-    const isGraphOutputConnection = Boolean(sourceNode) && target === OUTPUT_ID
+    const visibleNodes = nodesRef.current
+    const sourceNode = visibleNodes.find((node): node is SkillGraphNode => node.id === source && node.type === 'skill')
+    const targetNode = visibleNodes.find((node): node is SkillGraphNode => node.id === target && node.type === 'skill')
+    const isGraphInputConnection = localConnection.source === INPUT_ID && Boolean(targetNode)
+    const isGraphOutputConnection = Boolean(sourceNode) && localConnection.target === OUTPUT_ID
     const isPhaseDependencyConnection = Boolean(sourceNode) && Boolean(targetNode)
     if (!isGraphInputConnection && !isGraphOutputConnection && !isPhaseDependencyConnection) {
       toast.error('Connect Input to a phase, phase to phase, or phase to Output')
       return
     }
-    const dependencySource = source === INPUT_ID ? 'input' : source
+    const dependencySource = localConnection.source === INPUT_ID ? 'input' : localConnection.source
     if (targetNode && targetNode.data.dependsOn.includes(dependencySource)) {
       toast.error('This dependency already exists')
       return
     }
-    if (sourceNode && target === OUTPUT_ID && sourceNode.data.isOutput === true) {
+    if (sourceNode && localConnection.target === OUTPUT_ID && sourceNode.data.isOutput === true) {
       toast.error('This output marker already exists')
       return
     }
-    if (blockDrilledEditIfUnwritable()) {
-      return
+    let childArgs: readonly [ChildSaveTarget] | readonly []
+    if (scope.parentNodeId) {
+      const childTarget = expandedChildSaveTarget(scope.parentNodeId)
+      if (!childTarget) {
+        toast.error('Loading subgraph. Try again in a moment.')
+        return
+      }
+      childArgs = [childTarget]
+    } else {
+      if (blockDrilledEditIfUnwritable()) {
+        return
+      }
+      childArgs = drilledChildTarget ? [drilledChildTarget] : []
     }
 
     setEdges((current) => addEdge(decorateContextEdge({
@@ -1433,17 +1951,13 @@ export function GraphCanvas({
       return node
     }))
     if (onPersistConnection) {
-      // n2-canvas #14: pass the drilled-child target ONLY when drilled; at root
-      // depth the call is the original single-arg form (byte-identical, no
-      // trailing undefined), so root persist behavior is unchanged.
-      const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
-      Promise.resolve(onPersistConnection(connection, ...childArgs)).catch((persistError: unknown) => {
+      Promise.resolve(onPersistConnection({ ...connection, ...localConnection }, ...childArgs)).catch((persistError: unknown) => {
         toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
         setEdges(decoratedComposedEdges)
         setNodes(composedLayout.nodes)
       })
     }
-  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, edgeHandlers, onPersistConnection, phaseNodes, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, edgeHandlers, expandedChildSaveTarget, onPersistConnection, setEdges, setNodes])
 
   // R4 + n2-canvas #8: drag an existing edge endpoint to a new node = remove the
   // old dependency + add the new one. planEdgeReconnect owns the DECISION (global
@@ -1459,9 +1973,21 @@ export function GraphCanvas({
   // defensive path for any future surface that mounts GraphCanvas without it.
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
     reconnectLandedRef.current = true
+    if (!newConnection.source || !newConnection.target) {
+      toast.error('Edge endpoints must be phase nodes to reconnect.')
+      return
+    }
+    const oldScope = canvasScopeForEndpoints(oldEdge.source, oldEdge.target)
+    const newScope = canvasScopeForEndpoints(newConnection.source, newConnection.target)
+    if (!oldScope || !newScope || oldScope.parentNodeId !== newScope.parentNodeId) {
+      toast.error('Reconnect nodes within the same graph.')
+      return
+    }
+    const localOldConnection = localConnectionEndpoints({ source: oldEdge.source, target: oldEdge.target })
+    const localNewConnection = localConnectionEndpoints({ source: newConnection.source, target: newConnection.target })
     const plan = planEdgeReconnect(
-      { source: oldEdge.source, target: oldEdge.target },
-      { source: newConnection.source, target: newConnection.target },
+      localOldConnection,
+      localNewConnection,
     )
     if (!plan.ok) {
       if (plan.reason !== 'no-op') {
@@ -1469,13 +1995,26 @@ export function GraphCanvas({
       }
       return
     }
-    const targetNode = phaseNodes.find((node) => node.id === plan.connect.target)
+    const targetNode = nodesRef.current.find((node): node is SkillGraphNode => (
+      node.id === newConnection.target && node.type === 'skill'
+    ))
     if (targetNode && targetNode.data.dependsOn.includes(plan.connect.source)) {
       toast.error('This dependency already exists')
       return
     }
-    if (blockDrilledEditIfUnwritable()) {
-      return
+    let childArgs: readonly [ChildSaveTarget] | readonly []
+    if (newScope.parentNodeId) {
+      const childTarget = expandedChildSaveTarget(newScope.parentNodeId)
+      if (!childTarget) {
+        toast.error('Loading subgraph. Try again in a moment.')
+        return
+      }
+      childArgs = [childTarget]
+    } else {
+      if (blockDrilledEditIfUnwritable()) {
+        return
+      }
+      childArgs = drilledChildTarget ? [drilledChildTarget] : []
     }
 
     // Optimistically move the edge to its new endpoints before the write lands.
@@ -1485,10 +2024,6 @@ export function GraphCanvas({
       setEdges(decoratedComposedEdges)
       setNodes(composedLayout.nodes)
     }
-    // n2-canvas #14: spread the child target ONLY when drilled; at root depth
-    // these stay the original arg forms (no trailing undefined), so the existing
-    // root reconnect/disconnect contract is byte-identical.
-    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
     if (onReconnectConnection) {
       Promise.resolve(onReconnectConnection(plan.disconnect, plan.connect, ...childArgs)).catch(rollback)
       return
@@ -1497,9 +2032,13 @@ export function GraphCanvas({
       return
     }
     Promise.resolve(onDisconnectConnection(plan.disconnect, ...childArgs))
-      .then(() => onPersistConnection({ ...newConnection, source: plan.connect.source, target: plan.connect.target }, ...childArgs))
+      .then(() => onPersistConnection({
+        ...newConnection,
+        source: plan.connect.source,
+        target: plan.connect.target,
+      }, ...childArgs))
       .catch(rollback)
-  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, onDisconnectConnection, onPersistConnection, onReconnectConnection, phaseNodes, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection, onPersistConnection, onReconnectConnection, setEdges, setNodes])
 
   const onReconnectStart = useCallback(() => {
     reconnectLandedRef.current = false
@@ -1511,23 +2050,50 @@ export function GraphCanvas({
   // child is blocked. At root depth this is the plain parent disconnect, unchanged.
   const handleMenuDisconnect = useCallback((connection: { source: string; target: string }) => {
     if (!onDisconnectConnection) return
-    if (blockDrilledEditIfUnwritable()) return
-    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
-    void Promise.resolve(onDisconnectConnection(connection, ...childArgs))
+    const scope = canvasScopeForEndpoints(connection.source, connection.target)
+    if (!scope) {
+      toast.error('Disconnect nodes within the same graph.')
+      return
+    }
+    let childArgs: readonly [ChildSaveTarget] | readonly []
+    if (scope.parentNodeId) {
+      const childTarget = expandedChildSaveTarget(scope.parentNodeId)
+      if (!childTarget) {
+        toast.error('Loading subgraph. Try again in a moment.')
+        return
+      }
+      childArgs = [childTarget]
+    } else {
+      if (blockDrilledEditIfUnwritable()) return
+      childArgs = drilledChildTarget ? [drilledChildTarget] : []
+    }
+    void Promise.resolve(onDisconnectConnection(localConnectionEndpoints(connection), ...childArgs))
       .catch((disconnectError: unknown) => {
         toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
       })
-  }, [blockDrilledEditIfUnwritable, drilledChildTarget, onDisconnectConnection])
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection])
 
-  const handleMenuDeletePhase = useCallback((phaseId: string) => {
+  const handleMenuDeletePhase = useCallback((nodeId: string) => {
     if (!onDeletePhase) return
-    if (blockDrilledEditIfUnwritable()) return
-    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
+    const parentNodeId = previewNodeParentId(nodeId)
+    const phaseId = phaseIdFromCanvasNodeId(nodeId)
+    let childArgs: readonly [ChildSaveTarget] | readonly []
+    if (parentNodeId) {
+      const childTarget = expandedChildSaveTarget(parentNodeId)
+      if (!childTarget) {
+        toast.error('Loading subgraph. Try again in a moment.')
+        return
+      }
+      childArgs = [childTarget]
+    } else {
+      if (blockDrilledEditIfUnwritable()) return
+      childArgs = drilledChildTarget ? [drilledChildTarget] : []
+    }
     void Promise.resolve(onDeletePhase(phaseId, ...childArgs))
       .catch((deleteError: unknown) => {
         toast.error(deleteError instanceof Error ? deleteError.message : 'Could not delete node')
       })
-  }, [blockDrilledEditIfUnwritable, drilledChildTarget, onDeletePhase])
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, expandedChildSaveTarget, onDeletePhase])
 
   const handleOpenCreatePhaseDialog = useCallback((kind: NewPhaseKind) => {
     if (blockDrilledEditIfUnwritable()) return
@@ -1551,33 +2117,57 @@ export function GraphCanvas({
     if (reconnectLandedRef.current || connectionState.isValid === true) {
       return
     }
-    if (edge.source === INPUT_ID || edge.source === OUTPUT_ID || edge.target === INPUT_ID || edge.target === OUTPUT_ID) {
+    const localConnection = localConnectionEndpoints({ source: edge.source, target: edge.target })
+    if (
+      localConnection.source === INPUT_ID
+      || localConnection.source === OUTPUT_ID
+      || localConnection.target === INPUT_ID
+      || localConnection.target === OUTPUT_ID
+    ) {
       return
     }
     if (!onDisconnectConnection) {
       return
     }
-    if (blockDrilledEditIfUnwritable()) {
+    const scope = canvasScopeForEndpoints(edge.source, edge.target)
+    if (!scope) {
+      toast.error('Disconnect nodes within the same graph.')
       return
     }
+    let childArgs: readonly [ChildSaveTarget] | readonly []
+    if (scope.parentNodeId) {
+      const childTarget = expandedChildSaveTarget(scope.parentNodeId)
+      if (!childTarget) {
+        toast.error('Loading subgraph. Try again in a moment.')
+        return
+      }
+      childArgs = [childTarget]
+    } else {
+      if (blockDrilledEditIfUnwritable()) {
+        return
+      }
+      childArgs = drilledChildTarget ? [drilledChildTarget] : []
+    }
     setEdges((current) => current.filter((candidate) => candidate.id !== edge.id))
-    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
-    Promise.resolve(onDisconnectConnection({ source: edge.source, target: edge.target }, ...childArgs))
+    Promise.resolve(onDisconnectConnection(localConnection, ...childArgs))
       .catch((disconnectError: unknown) => {
         toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
         setEdges(decoratedComposedEdges)
         setNodes(composedLayout.nodes)
       })
-  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, onDisconnectConnection, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection, setEdges, setNodes])
 
   const handlePaneClick = useCallback(() => {
-    cancelPendingNodeFileOpen()
-    applySelectionOverride(null)
+    cancelPendingNodeClickAction()
+    syncCanvasSelection(null)
     onNodeDeselect?.()
     setEdgeMenuConnection(null)
     setNodeMenuPhaseId(null)
-    onPanelChange?.('properties')
-  }, [applySelectionOverride, cancelPendingNodeFileOpen, onNodeDeselect, onPanelChange])
+    // Clicking empty canvas clears the workspace: close the open side panel AND
+    // the file editor(s). It no longer opens the graph.md panel.
+    onPanelChange?.(null)
+    onCloseEditors?.()
+  }, [cancelPendingNodeClickAction, onCloseEditors, onNodeDeselect, onPanelChange, syncCanvasSelection])
 
   return (
     <ContextMenu>
@@ -1601,7 +2191,7 @@ export function GraphCanvas({
           editor split uses normal canvas mode so authoring behaviour stays the
           same when the canvas is squeezed into the lower pane. */}
       <ReactFlow
-        className={isViewportReady ? undefined : HIDDEN_INITIAL_VIEWPORT_CLASS}
+        className={[isViewportReady ? '' : HIDDEN_INITIAL_VIEWPORT_CLASS, canvasLocked ? 'canvas-locked' : ''].filter(Boolean).join(' ') || undefined}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -1624,6 +2214,12 @@ export function GraphCanvas({
           if (isEdgeContextTarget(event.target)) {
             return
           }
+          // Remember where the menu opened (flow coords) so "Add node" can place
+          // the new node right here instead of the auto-layout default.
+          const instance = reactFlowInstanceRef.current
+          lastPaneContextFlowPositionRef.current = instance
+            ? instance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+            : null
           setEdgeMenuConnection(null)
           setNodeMenuPhaseId(null)
         }}
@@ -1631,8 +2227,8 @@ export function GraphCanvas({
         onNodeContextMenu={(_, node) => {
           setEdgeMenuConnection(null)
           setNodeMenuPhaseId(
-            node.type === 'skill' && !isSubgraphPreviewId(node.id)
-              ? skillNodePhaseId(node)
+            node.type === 'skill'
+              ? node.id
               : null,
           )
         }}
@@ -1646,9 +2242,9 @@ export function GraphCanvas({
         }}
         onNodeClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          cancelPendingNodeFileOpen()
-          const wasSelected = currentActiveSelectedNodeId() === node.id
-          applySelectionOverride(node.id)
+          cancelPendingNodeClickAction()
+          const wasSelected = isCanvasNodeSelected(node.id)
+          syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
             onNodeDeselect?.()
             onPanelChange?.('input')
@@ -1656,19 +2252,24 @@ export function GraphCanvas({
           }
           if (node.type === 'skill') {
             onNodeSelect?.({ id: skillNodePhaseId(node), data: node.data })
+            // First click selects/highlights only. The SECOND click on an
+            // already-selected node opens the last-recorded panel (deferred so a
+            // double-click opens the editor instead of flashing the panel open).
             if (wasSelected) {
-              pendingNodeFileOpenRef.current = setTimeout(() => {
-                pendingNodeFileOpenRef.current = null
-                openNodeFile(node)
+              pendingNodeClickActionRef.current = setTimeout(() => {
+                pendingNodeClickActionRef.current = null
+                if (onOpenSelectedNodePanel) {
+                  onOpenSelectedNodePanel()
+                } else {
+                  onPanelChange?.('properties')
+                }
               }, 220)
-            } else {
-              onPanelChange?.('properties')
             }
           }
         }}
         onNodeDragStart={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          applySelectionOverride(node.id)
+          syncCanvasSelection(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: skillNodePhaseId(node), data: node.data })
           }
@@ -1676,8 +2277,8 @@ export function GraphCanvas({
         selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          cancelPendingNodeFileOpen()
-          applySelectionOverride(node.id)
+          cancelPendingNodeClickAction()
+          syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
             onNodeDeselect?.()
             onPanelChange?.('input')
@@ -1685,36 +2286,25 @@ export function GraphCanvas({
           }
           if (node.type === 'skill') {
             const phaseId = skillNodePhaseId(node)
-            // R9: double-clicking a NESTED subgraph node focuses INTO its child
-            // graph in-place (drill DEEPER); non-subgraph phases open their source
-            // file as before. Unchanged at any depth.
-            const subgraphPath = resolveSubgraphPath(node.data.subgraphPath, node.data.workspaceRoot)
-            if (subgraphPath) {
-              drillInto(subgraphPath, node.data.label)
-              return
-            }
-            // n2-canvas #14 (edit write-back): while drilled, a leaf (non-subgraph)
-            // child node belongs to the CHILD subgraph and is edited IN PLACE; no
-            // project switch. The node's data.skillId is already the CHILD's own id
-            // (the drilled build keys nodes to the child identity) and its filePath
-            // is child-relative, so opening `${node.data.skillId}/<filePath>`
-            // resolves the child's real file. The removed pushNavSkill escape hatch
-            // (which swapped the whole Workspace to the child as a standalone
-            // project) is gone; drilled editing stays on the same canvas.
+            // Double-click opens the node's source file in the editor — for BOTH
+            // subgraph nodes (their SUBGRAPH.md) and leaf phases. Drilling INTO a
+            // child graph now lives on the expanded subgraph board's "open canvas"
+            // button (see SubgraphGroupNode), not on this double-click.
             onNodeSelect?.({ id: phaseId, data: node.data })
             openNodeFile(node)
-            onPanelChange?.('properties')
           }
         }}
         onInit={(instance) => {
           reactFlowInstanceRef.current = instance
-          fitViewRef.current = () => instance.fitView({ padding: 0.2 })
+          fitViewRef.current = runFitView
           fitInitialViewportOnce(hasLayoutNodes)
         }}
         nodeOrigin={CENTER_NODE_ORIGIN}
         minZoom={0.35}
         maxZoom={1.4}
+        proOptions={{ hideAttribution: true }}
       >
+        <SubgraphBridgeInternalsUpdater nodes={nodes} />
         <Background gap={18} size={1} />
         {/* F4: node-anchored HitL input. Reads the live run stream from the
             workspace context (same array the edges already consume) and anchors
@@ -1737,7 +2327,7 @@ export function GraphCanvas({
           resumeLoading={resumeLoading}
           onResumeNode={onResumeNode}
         />
-        {!compact && !hideMiniMap ? <SkillMiniMap nodes={nodes} /> : null}
+        {!compact ? <SkillMiniMap visible={!hideMiniMap} /> : null}
         {drillStack.length > 0 || isChildGraphLoading || childGraphError ? (
           <Panel position="top-left" className="studio-canvas-top-left-panel">
             <div className="flex flex-col items-start gap-2">
@@ -1773,7 +2363,7 @@ export function GraphCanvas({
         onZoomOut={handleZoomOut}
         onFitView={handleFitView}
         onToggleCanvasLock={handleToggleCanvasLock}
-        onCreatePhase={isDrilled ? undefined : handleOpenCreatePhaseDialog}
+        onCreatePhase={canEditCanvas ? handleOpenCreatePhaseDialog : undefined}
         onDeletePhase={handleMenuDeletePhase}
         onDisconnectConnection={handleMenuDisconnect}
         onCloseEdgeMenu={() => {
@@ -1796,7 +2386,17 @@ export function GraphCanvas({
           const kind = createPhaseKind
           if (!kind || !onCreatePhase) return
           setCreatePhaseKind(null)
-          void Promise.resolve(onCreatePhase(kind, phaseId))
+          // Same drilled-child routing as delete/connect: a read-only drilled child
+          // is blocked with a toast; an editable one routes the create to its target
+          // so the new node writes the CHILD's GRAPH.md.
+          if (blockDrilledEditIfUnwritable()) return
+          // Drop the new node where the user right-clicked (if captured).
+          const placement = lastPaneContextFlowPositionRef.current
+          if (placement) {
+            pendingCreatePositionsRef.current.set(phaseId, placement)
+            lastPaneContextFlowPositionRef.current = null
+          }
+          void Promise.resolve(onCreatePhase(kind, phaseId, drilledChildTarget ?? undefined))
             .catch((createError: unknown) => {
               toast.error(createError instanceof Error ? createError.message : 'Could not create phase')
             })
@@ -1811,6 +2411,9 @@ const ADD_PHASE_OPTIONS: ReadonlyArray<{ kind: NewPhaseKind; label: string }> = 
   { kind: 'logic', label: 'Logic Phase' },
   { kind: 'subgraph', label: 'Subgraph Phase' },
 ]
+
+// Display label for the canvas shortcut modifier: ⌘ on macOS, Ctrl+ elsewhere.
+const SHORTCUT_MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
 export function CanvasContextMenuContent({
   edgeMenuConnection,
@@ -1845,18 +2448,26 @@ export function CanvasContextMenuContent({
     return null
   }
   return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={onZoomIn}>
+    // No scroll: show the whole menu (override the default available-height clamp).
+    // Wider min-width so the label and the right-aligned shortcut aren't cramped.
+    <ContextMenuContent className="min-w-52 max-h-none overflow-visible">
+      {/* Zoom / Fit are no-ops while the canvas is locked. Shortcuts mirror the
+          window-level keydown handler in GraphCanvas (#3.2). */}
+      <ContextMenuItem onSelect={onZoomIn} disabled={canvasLocked}>
         Zoom in
+        <ContextMenuShortcut>{SHORTCUT_MOD}=</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem onSelect={onZoomOut}>
+      <ContextMenuItem onSelect={onZoomOut} disabled={canvasLocked}>
         Zoom out
+        <ContextMenuShortcut>{SHORTCUT_MOD}−</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem onSelect={onFitView}>
+      <ContextMenuItem onSelect={onFitView} disabled={canvasLocked}>
         Fit view
+        <ContextMenuShortcut>{SHORTCUT_MOD}0</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={onToggleCanvasLock}>
         {canvasLocked ? 'Unlock canvas' : 'Lock canvas'}
+        <ContextMenuShortcut>{SHORTCUT_MOD}L</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuSeparator />
       {edgeMenuConnection ? (
@@ -1872,19 +2483,19 @@ export function CanvasContextMenuContent({
         <ContextMenuItem variant="destructive" onSelect={() => { void onDeletePhase(nodeMenuPhaseId) }}>
           <Trash2 className="size-3.5" />
           Delete node
+          <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
-      ) : (
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>Add Phase Node</ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            {ADD_PHASE_OPTIONS.map((option) => (
-              <ContextMenuItem key={option.kind} onSelect={() => { void onCreatePhase?.(option.kind) }}>
-                {option.label}
-              </ContextMenuItem>
-            ))}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-      )}
+      ) : onCreatePhase ? (
+        // Add-node options flattened directly into the menu (no nested submenu).
+        <>
+          <ContextMenuLabel>Add node</ContextMenuLabel>
+          {ADD_PHASE_OPTIONS.map((option) => (
+            <ContextMenuItem key={option.kind} onSelect={() => { void onCreatePhase?.(option.kind) }}>
+              {option.label}
+            </ContextMenuItem>
+          ))}
+        </>
+      ) : null}
     </ContextMenuContent>
   )
 }

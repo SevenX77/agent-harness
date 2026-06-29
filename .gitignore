@@ -81,6 +81,10 @@ tmp/
 .workspace/
 .workspace
 
+# Node / frontend caches
+/node_modules/
+/.vite/
+
 # OS
 .DS_Store
 Thumbs.db

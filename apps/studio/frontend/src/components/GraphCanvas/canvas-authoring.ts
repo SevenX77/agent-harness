@@ -1,6 +1,7 @@
 import type { GraphPhaseMode, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID } from '@/components/nodes'
 import { parsePhaseFrontmatter } from '../studio/panels/phase-frontmatter'
+import { defaultSubgraphChildDir } from '../studio/subgraph-scaffold'
 import yaml from 'js-yaml'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
@@ -153,10 +154,15 @@ export function createPhaseDraft(
     depends_on: [],
     mode: kind,
   }
+  // A new subgraph phase defaults its `path:` to the skill-root-relative
+  // `subgraph/<phaseId>` landing (graph-authoring F4 / engine FORMAT-GROUND-TRUTH
+  // §4). The matching child skill folder is scaffolded by the Workspace create
+  // handler so the reference resolves immediately.
+  const subgraphPath = kind === 'subgraph' ? defaultSubgraphChildDir(phaseId) : undefined
   return {
     phaseId,
     filePath,
-    fileContent: defaultPhaseMarkdown(phaseId, kind),
+    fileContent: defaultPhaseMarkdown(phaseId, kind, subgraphPath),
     phaseRef,
     phases: [...phases, phaseRef],
   }

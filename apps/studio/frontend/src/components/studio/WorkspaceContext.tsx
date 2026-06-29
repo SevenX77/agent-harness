@@ -56,6 +56,19 @@ export interface WorkspaceContextValue {
   activeFileDetails: Partial<Record<EditorSide, OpenFile>>
   splitMode: boolean
   onFileOpen: (fileOrPath: FileOpenInput, side?: EditorSide) => void
+  /** Reverse of node→file reveal: select the canvas node a node-definition file
+   * belongs to. No-op for files that are not a phase node file or that belong to
+   * a graph not on the root canvas. */
+  onRevealNodeForFile?: (file: FileMeta) => void
+  /** Reveal a node inside a subgraph's inline canvas topology: expand every
+   * subgraph ancestor and select the leaf child phase node. `phaseChain` is the
+   * root→leaf chain of phase ids (e.g. ["timeline", "extraction", "review"]).
+   * Driven by clicking a subgraph child file in the Assets trees. */
+  onRevealSubgraphChildNode?: (phaseChain: string[]) => void
+  /** Expand a subgraph's own inline canvas topology and deselect any node.
+   * `phaseChain` is the root→here chain of phase ids identifying the subgraph.
+   * Driven by clicking the subgraph's GRAPH.md in the Assets trees. */
+  onRevealSubgraphGraph?: (phaseChain: string[]) => void
   openSplitEditor: () => void
   closeFile: (side: EditorSide) => void
   updateFileContent: (side: EditorSide, content: string) => void

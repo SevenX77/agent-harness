@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { GeneralTab } from "./GeneralTab"
+import { GeneralTab, TruthSourcesPanel } from "./GeneralTab"
+import type { TruthSourceSection } from "@/api/client"
 import type { SettingsPageContentProps } from "./types"
 
 /**
@@ -137,9 +138,57 @@ describe("GeneralTab render contract", () => {
     const html = renderTab({ remoteModelCatalogEnabled: true })
     expect(html).toContain("Community model catalog")
     expect(html).toContain(
-      "Read the community catalog to improve route suggestions, and anonymously contribute your sanitized probe results back to it. Turn off to stop both.",
+      "Download the verified community catalog for local route evidence and allow sanitized successful probe evidence to be contributed back. Turn off to stop both read and contribute paths.",
     )
     expect(html).toContain('data-slot="switch"')
     expect(html).toContain('aria-label="Community model catalog"')
+  })
+
+  it("renders grouped runtime truth sources with paths and recent logs", () => {
+    const sections: TruthSourceSection[] = [
+      {
+        id: "llm_runtime",
+        label: "LLM runtime truth",
+        description: "Credential and route stores.",
+        sources: [
+          {
+            id: "llm_credentials",
+            label: "LLM credentials",
+            path: "C:\\Users\\test\\AppData\\Roaming\\AgentStudio\\llm\\llm_credentials.json",
+            kind: "json",
+            description: "Credential truth.",
+            open_mode: "file",
+            exists: true,
+            size_bytes: 2048,
+            updated_at: "2026-06-28T11:45:00+08:00",
+            can_preview: true,
+            logs: [
+              {
+                id: "log-1",
+                recorded_at: "2026-06-28T11:46:10+08:00",
+                source_id: "llm_credentials",
+                action: "endpoint_test",
+                message: "Saved endpoint test result and applied matching cached community evidence.",
+                changes: {
+                  endpoint_id: "deepseek-official",
+                  promoted_catalog_records: 2,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      <TruthSourcesPanel sections={sections} onOpenSource={vi.fn()} />,
+    )
+
+    expect(html).toContain("LLM credentials")
+    expect(html).toContain("llm_credentials.json")
+    expect(html).toContain("Runtime log (1)")
+    expect(html).toContain("endpoint_test")
+    expect(html).toContain('data-state="closed"')
+    expect(html).not.toContain("promoted_catalog_records")
   })
 })

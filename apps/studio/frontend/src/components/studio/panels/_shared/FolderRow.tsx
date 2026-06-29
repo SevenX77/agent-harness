@@ -7,6 +7,8 @@ export function FolderRow({
   children,
   endAdornment,
   defaultExpanded = false,
+  expanded: controlledExpanded,
+  onExpandedChange,
   rowClassName,
   buttonClassName,
   labelClassName,
@@ -15,18 +17,32 @@ export function FolderRow({
   children: ReactNode
   endAdornment?: ReactNode
   defaultExpanded?: boolean
+  /** Controlled expansion. When provided, internal state is bypassed and the
+   * caller owns expand/collapse (used by the Assets panel to reveal a node's
+   * file). Omit for the default uncontrolled behaviour. */
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
   rowClassName?: string
   buttonClassName?: string
   labelClassName?: string
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [internalExpanded, setInternalExpanded] = useState(defaultExpanded)
+  const isControlled = controlledExpanded !== undefined
+  const expanded = isControlled ? controlledExpanded : internalExpanded
+  const toggleExpanded = () => {
+    const next = !expanded
+    if (!isControlled) {
+      setInternalExpanded(next)
+    }
+    onExpandedChange?.(next)
+  }
 
   return (
     <div className="w-full min-w-0">
       <div className={cn("flex min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-accent", rowClassName)}>
         <button
           type="button"
-          onClick={() => setExpanded((value) => !value)}
+          onClick={toggleExpanded}
           title={name}
           className={cn(
             "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",

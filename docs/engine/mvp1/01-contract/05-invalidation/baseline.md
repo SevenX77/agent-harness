@@ -67,4 +67,4 @@ N/A —— checkpoint 失效的 `[Resume]` 置灰是 studio 侧消费,engine 只
 cache: `core/cache.py`(`compute_cache_key` → `_skill_file_metadata`/`_collect_skill_files`)→ `core/compiler.py:compile_skill`(:57-65)。golden hash 比对(退役):`core/runner.py:_warn_on_stale_golden_hashes_sdk`(:127 → 调用 :246;hash 来自 `_predict_internal/hash.py`)。统一 `diff_skill`:待实施。
 
 ## 交叉引用(链接, 不复制)
-[mvp1-alignment](./mvp1-alignment.md)(目标:变更轴+消费者矩阵)· `05-run-inner/06-golden-eval`(golden 失效 eval 期落点)· `04-run-outer/03-checkpoint`(checkpoint 失效)· `02-mechanism/01-compile`(cache 实现)· `03-compile-rules`(CR3 golden-stale 码归属)· `_migration-src/records/change-invalidation-model`(轴①留底,§2 反转前内容勿用)
+[mvp1-alignment](./mvp1-alignment.md)(目标:变更轴+消费者矩阵)· `05-run-inner/06-golden-eval`(golden 失效 eval 期落点)· `04-run-outer/03-checkpoint`(checkpoint 失效)· `02-mechanism/01-compile`(cache 实现)· `03-compile-rules`(CR3 golden-stale 码归属)

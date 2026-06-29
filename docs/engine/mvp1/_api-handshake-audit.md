@@ -70,4 +70,4 @@ codex 跑了 13 测试(`test_predict_e2e` / `test_workspace_dir_contract_red` / 
 7. resume/per-node golden → **2026-06-10 更新**:studio resume 仍 501,但 engine 已有 public `resume_skill`;per-node golden Engine eval 已有 `evaluate_golden_baseline`,Studio 仍需薄接。
 
 ## 交叉引用
-`03-api-contract/mvp1-alignment.md`(U10 ◆)· `_migration-src/api-engine-studio-contract.md`(17 块契约源)· `docs/studio/mvp1/04_platform/engine/mvp1-alignment.md`(studio 侧 F1-F6 期望)· `02-observability`(U9,V4 trace 目标)
+`03-api-contract/mvp1-alignment.md`(U10 ◆, engine↔Studio API 契约 SSOT)· `docs/studio/mvp1/04_platform/engine/mvp1-alignment.md`(studio 侧 F1-F6 期望)· `02-observability`(U9,V4 trace 目标)

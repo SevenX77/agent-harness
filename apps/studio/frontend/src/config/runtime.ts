@@ -125,7 +125,6 @@ export async function subscribeToSidecarRestart(
   try {
     const { listen } = await import('@tauri-apps/api/event')
     const unlisten = await listen<SidecarConfig>(SIDECAR_RESTARTED_EVENT, (event) => {
-      // eslint-disable-next-line no-console
       console.info(
         'phase=runtime action=sidecar-restarted-event port=%d',
         normalizeSidecarConfig(event.payload).port,
@@ -137,7 +136,6 @@ export async function subscribeToSidecarRestart(
     // Listener wiring failed (e.g. Tauri event API not yet ready). Surface the
     // error rather than swallowing — the WS reconnect will eventually toast on
     // its own 4401 threshold, but operators need to know the listener is gone.
-    // eslint-disable-next-line no-console
     console.error('phase=runtime action=sidecar-restarted-listen-failed error=%o', error)
     return () => {}
   }

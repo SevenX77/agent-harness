@@ -90,11 +90,6 @@ def project_route_state(
             route_id=route_id, ui_state="failed", reason_code="missing_config"
         )
 
-    if endpoint_status == "failed":
-        return ProviderModelStateProjection(
-            route_id=route_id, ui_state="failed", reason_code="endpoint_unreachable"
-        )
-
     if route_status == "failed":
         return ProviderModelStateProjection(
             route_id=route_id, ui_state="failed", reason_code="model_failed"
@@ -108,11 +103,16 @@ def project_route_state(
     if endpoint_status == "verified" and route_status == "verified":
         return ProviderModelStateProjection(route_id=route_id, ui_state="ready")
 
-    if endpoint_status == "verified" and evidence_refs:
+    if evidence_refs:
         return ProviderModelStateProjection(
             route_id=route_id,
             ui_state="historical_ready",
             evidence_refs=evidence_refs,
+        )
+
+    if endpoint_status == "failed":
+        return ProviderModelStateProjection(
+            route_id=route_id, ui_state="failed", reason_code="endpoint_unreachable"
         )
 
     return ProviderModelStateProjection(route_id=route_id, ui_state="untested")

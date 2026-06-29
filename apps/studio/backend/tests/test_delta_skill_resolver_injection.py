@@ -257,7 +257,7 @@ def test_delta4_lint_skill_path_passes_skill_resolver(
 
     def fake_compile_skill(skill_path: Path, **kwargs: Any) -> Any:
         calls.append({"skill_path": skill_path, **kwargs})
-        return SimpleNamespace(manifest=SimpleNamespace(phases=[]), nodes=[])
+        return SimpleNamespace(manifest=SimpleNamespace(phases=[]), nodes=[], raw={"graph": {"frontmatter": {}}})
 
     monkeypatch.setattr(skills_module, "compile_skill", fake_compile_skill)
 

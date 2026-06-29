@@ -74,4 +74,4 @@ RunResult/ErrorPayload/CompiledSkill 形状归 `data-contracts`;事件 schema �
 入口 `runner.py:376/163`、`compiler.py:41` → 返回 `result.py:68` → 错误目录 `core/error_registry.py:export_error_catalog` → 事件 `callbacks/events.py`+`emit.py` → studio 暴露 `routers/runs.py`/`skills.py`/`websockets.py`。
 
 ## 交叉引用(链接, 不复制)
-[mvp1-alignment](./mvp1-alignment.md)(签名/端点全表 + Golden/Iterate-Resume/Compile API 面)· `02-mechanism/07-runtime`(入口实现)· `06-seam/02-observability`(事件流)· `01-contract/04-data-contracts`(RunResult/ErrorPayload)· `_migration-src/api-engine-studio-contract.md`(迁移源,已 consolidate)
+[mvp1-alignment](./mvp1-alignment.md)(签名/端点全表 + Golden/Iterate-Resume/Compile API 面)· `02-mechanism/07-runtime`(入口实现)· `06-seam/02-observability`(事件流)· `01-contract/04-data-contracts`(RunResult/ErrorPayload)

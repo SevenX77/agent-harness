@@ -94,12 +94,12 @@
       "diagram": "",
       "rules": [
         "证据 append-only:append_evidence_record 只追加、不覆盖旧证据，连失败结果也记(失败也是「别再白试」的知识)。",
-        "赋能① 回填能力:读 Probe Knowledge Catalog，把以前真探连通过的模型能力回填进当前 model list——不是拿本次 get-models 的实时能力顶替。",
+        "赋能① 回填能力:Test 时读 Probe Knowledge Catalog，把以前真探连通过的模型能力晋升进 credentials route——不是拿本次 get-models 的实时能力顶替，也不是页面加载时直接改 credentials。",
         "赋能② 清单兜底:get-models 拿不到模型清单(空 / 失败)时，用 Probe Knowledge Catalog 里这个 provider / endpoint 的已知模型补出清单——别让「列不出模型」变成死路。",
         "赋能③ 免盲测:批量探测前先读 Probe Knowledge Catalog，已知通过的优先信 / 可跳、已知失败的往后排——不再从头一个一个盲试(这正是拉云端知识库的意义:跳过全量重测)。",
         "出蓝态红线:只有已晋升进 credentials 的 route.metadata.evidence_refs 才让 route 出蓝(historical_ready);catalog 中孤立的 probe-verified 记录只是候选知识,不能被 UI/status 直接读取。只被 get-models 清单看到过(provider-list-observed)=仅观测，停留灰(untested)，绝不出蓝。「看到 ≠ 连通过」。",
         "写回方向:本次用户触发的测试先写 credentials 的 endpoint/route 状态、capabilities、verified_profiles、metadata.evidence_refs;当 credentials 出现 evidence 相关写入时,同步 append 进 Probe Knowledge Catalog，沉淀成下次的历史。",
-        "同步/导出方向:merge_evidence_library 合并远端只读知识库时按 evidence_id 去重;远端同步应在后端启动时跑一次(现状错放在进设置页才跑，见「后端实现状态」)。/catalog/share 在 MVP1 只做本地脱敏导出(local_export_only),不自动上传社区证据。",
+        "同步/导出方向:merge_evidence_library 合并远端只读知识库时按 evidence_id 去重;远端同步在后端启动时 best-effort 跑一次,Settings 页 sync-verified 也只是刷新 disposable verified cache,都不直接写 credentials。/catalog/share 在 MVP1 只做本地脱敏导出(local_export_only),不自动上传社区证据。",
         "candidate 物化:catalog candidate 只能经由 credentials 补出 route 候选，默认 status=unverified_manual / untested；只有当前本机真 probe 通才能让 credentials route 变 verified。",
         "D6.5 已把这套内核从 Studio 下沉到 gateway；代码层已提供 canonical ProbeCatalogStore / llm_probe_catalog.py，底层 legacy 容器仍待后续迁移。"
       ],
@@ -647,7 +647,7 @@
       "item": "知识库证据 → 配置档案晋升规则",
       "d12": "D6.5",
       "status": "ok",
-      "note": "已落地。gateway 新增纯函数 promotable_route_update:从 Probe Knowledge Catalog 里 probe-verified 的记录算出该 route 应晋升到 credentials 的 capabilities + verified_profiles + evidence_refs;backend 在 _upsert_discovered_routes 对新建/已存 route 都调 _apply_promotable_route_update 写回。红线:只晋升能力 / 档案 / 证据引用,绝不改 route.status 假绿——状态仍由真探结果决定。测试见 backend test_endpoint_test_promotes_probe_verified_draft_capabilities_and_profiles、test_registry_does_not_project_historical_ready_from_catalog_without_credential_promotion、test_registry_and_role_materialization_use_credentials_evidence_refs_for_historical_ready。",
+      "note": "已落地。Test 路径从 Probe Knowledge Catalog / disposable verified cache 里取 probe-verified 记录,把匹配 route 应晋升的 capabilities + verified_profiles + evidence_refs 写入 credentials;sync-verified 本身保持 cache-only,不写 credentials。红线:只晋升能力 / 档案 / 证据引用,绝不改 route.status 假绿——状态仍由真探结果决定。测试见 backend test_endpoint_test_promotes_probe_verified_draft_capabilities_and_profiles、test_endpoint_test_carries_cached_community_evidence_for_new_routes、test_registry_does_not_project_historical_ready_from_catalog_without_credential_promotion、test_registry_and_role_materialization_use_credentials_evidence_refs_for_historical_ready。",
       "ref": "d6"
     }
   ],

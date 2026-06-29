@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildCopilotSendPayload } from './useCopilot'
+import { buildCopilotSendPayload, visibleCopilotSocketError } from './useCopilot'
 
 describe('buildCopilotSendPayload', () => {
   it('includes only the user message when no override or role is given', () => {
@@ -62,5 +62,17 @@ describe('buildCopilotSendPayload', () => {
 
   it('omits empty role and override values', () => {
     expect(buildCopilotSendPayload('hello', '', '', '   ')).toEqual({ user_message: 'hello' })
+  })
+})
+
+describe('visibleCopilotSocketError', () => {
+  it('does not surface transient websocket reconnects as a red panel error', () => {
+    expect(visibleCopilotSocketError('reconnecting', 'Copilot WebSocket failed')).toBeNull()
+    expect(visibleCopilotSocketError('open', 'Copilot WebSocket failed')).toBeNull()
+  })
+
+  it('surfaces only stable socket error text', () => {
+    expect(visibleCopilotSocketError('error', 'Copilot WebSocket failed')).toBe('Copilot WebSocket failed')
+    expect(visibleCopilotSocketError('error', null)).toBeNull()
   })
 })

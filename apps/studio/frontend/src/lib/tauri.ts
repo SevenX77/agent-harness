@@ -68,6 +68,38 @@ export async function revealInFileManager(path: string) {
   }
 }
 
+export async function openLocalPath(path: string): Promise<boolean> {
+  const targetPath = path.trim()
+  if (!targetPath) {
+    toast.error('No path available')
+    return false
+  }
+
+  if (isTauriRuntime()) {
+    if (!nativeHelpersAreAvailable()) {
+      toastDesktopRuntimeUnavailable()
+      return false
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_path', { path: targetPath })
+      return true
+    } catch (error) {
+      const description = error instanceof Error ? error.message : String(error)
+      toast.error('Failed to open path', { description })
+      return false
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(targetPath)
+    toast.success('Path copied to clipboard', { description: targetPath })
+  } catch {
+    toast.info('Desktop-only feature', { description: targetPath })
+  }
+  return false
+}
+
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {
   if (!isTauriRuntime()) {
     toast.info('Desktop only')

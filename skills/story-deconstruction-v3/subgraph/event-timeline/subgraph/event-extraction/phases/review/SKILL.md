@@ -37,11 +37,10 @@ tools:
 max_iterations: 20
 validator: true
 allow_sequential_overwrite:
-  - parsed_events
-  - events_raw
   - event_timeline
+  - events_raw
+  - parsed_events
 ---
-
 <role>
 你是专业的小说编辑。你的任务是审查已初步提取的事件时间线，做两项核验。
 

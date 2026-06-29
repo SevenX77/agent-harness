@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPhaseName,
   applyPhaseFrontmatterForm,
+  applyPhaseValidator,
   EMPTY_FORM,
   parsePhaseFrontmatter,
   phaseFrontmatterToForm,
@@ -428,5 +429,193 @@ describe('phase frontmatter helpers', () => {
     const parsed = parsePhaseFrontmatter(source)
     expect(parsed.ok).toBe(false)
     expect(applyPhaseFrontmatterForm(source, EMPTY_FORM, 'logic').ok).toBe(false)
+  })
+
+  it('reads and round-trips agent validator + max_iterations', () => {
+    const source = [
+      '---',
+      'name: review_chapter',
+      'llm_role: analyst',
+      'validator: true',
+      'max_iterations: 20',
+      'x_internal: keep-me',
+      '---',
+      '<role>Reviewer</role>',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.validator).toBe(true)
+    expect(form.maxIterations).toBe('20')
+
+    // Toggle validator off (default → drop) and lower max_iterations.
+    const next = applyPhaseFrontmatterForm(source, { ...form, validator: false, maxIterations: '5' }, 'agent')
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).not.toContain('validator:')
+    expect(next.markdown).toContain('max_iterations: 5')
+    // Non-form keys + body preserved.
+    expect(next.markdown).toContain('llm_role: analyst')
+    expect(next.markdown).toContain('x_internal: keep-me')
+    expect(next.markdown).toContain('<role>Reviewer</role>')
+  })
+
+  it('drops max_iterations when cleared and ignores non-integer input', () => {
+    const source = [
+      '---',
+      'name: review',
+      'max_iterations: 12',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.maxIterations).toBe('12')
+
+    const cleared = applyPhaseFrontmatterForm(source, { ...form, maxIterations: '' }, 'agent')
+    expect(cleared.ok).toBe(true)
+    if (!cleared.ok) return
+    expect(cleared.markdown).not.toContain('max_iterations:')
+
+    const garbage = applyPhaseFrontmatterForm(source, { ...form, maxIterations: '10abc' }, 'agent')
+    expect(garbage.ok).toBe(true)
+    if (!garbage.ok) return
+    expect(garbage.markdown).not.toContain('max_iterations:')
+  })
+
+  it('parses and round-trips agent subgraphs (name/path/description)', () => {
+    const source = [
+      '---',
+      'name: review',
+      'subgraphs:',
+      '  - name: evidence_pipeline',
+      '    path: /abs/subgraph/evidence',
+      '    description: Extract supporting evidence',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.subgraphs).toEqual([
+      { name: 'evidence_pipeline', path: '/abs/subgraph/evidence', description: 'Extract supporting evidence' },
+    ])
+
+    const next = applyPhaseFrontmatterForm(source, {
+      ...form,
+      subgraphs: [...form.subgraphs, { name: 'extra_graph', path: '/abs/subgraph/extra', description: 'More work' }],
+    }, 'agent')
+
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).toContain('name: evidence_pipeline')
+    expect(next.markdown).toContain('path: /abs/subgraph/evidence')
+    expect(next.markdown).toContain('name: extra_graph')
+    expect(next.markdown).toContain('path: /abs/subgraph/extra')
+  })
+
+  it('parses and round-trips agent references and examples (id/path/summary)', () => {
+    const source = [
+      '---',
+      'name: review',
+      'references:',
+      '  - id: R1',
+      '    path: references/style.md',
+      '    summary: Style and scoring rules',
+      'examples:',
+      '  - id: E2',
+      '    path: examples/boundary_case.md',
+      '    summary: Boundary case example',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.references).toEqual([{ id: 'R1', path: 'references/style.md', summary: 'Style and scoring rules' }])
+    expect(form.examples).toEqual([{ id: 'E2', path: 'examples/boundary_case.md', summary: 'Boundary case example' }])
+
+    const next = applyPhaseFrontmatterForm(source, {
+      ...form,
+      references: [...form.references, { id: 'R2', path: 'references/scoring.md', summary: 'Scoring detail' }],
+    }, 'agent')
+
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).toContain('id: R1')
+    expect(next.markdown).toContain('id: R2')
+    expect(next.markdown).toContain('path: references/scoring.md')
+    // examples untouched by a references-only edit.
+    expect(next.markdown).toContain('id: E2')
+  })
+
+  it('keeps agent-only fields out of logic/subgraph saves even if the form carries them', () => {
+    const source = [
+      '---',
+      'name: normalize',
+      'actions:',
+      '  - strip_noise',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = {
+      ...phaseFrontmatterToForm(parsed.frontmatter),
+      subgraphs: [{ name: 'x', path: '/abs/x', description: 'd' }],
+      references: [{ id: 'R1', path: 'references/s.md', summary: 's' }],
+      examples: [{ id: 'E1', path: 'examples/e.md', summary: 's' }],
+      maxIterations: '9',
+    }
+
+    const next = applyPhaseFrontmatterForm(source, form, 'logic')
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).not.toContain('subgraphs:')
+    expect(next.markdown).not.toContain('references:')
+    expect(next.markdown).not.toContain('examples:')
+    expect(next.markdown).not.toContain('max_iterations:')
+  })
+
+  it('toggles the validator flag in place, preserving other keys and body', () => {
+    const source = [
+      '---',
+      'name: segment',
+      'actions:',
+      '  - strip',
+      'x_internal: keep-me',
+      '---',
+      '<action>strip</action>',
+    ].join('\n')
+
+    const on = applyPhaseValidator(source, true)
+    expect(on.ok).toBe(true)
+    if (!on.ok) return
+    expect(on.markdown).toContain('validator: true')
+    expect(on.markdown).toContain('name: segment')
+    expect(on.markdown).toContain('x_internal: keep-me')
+    expect(on.markdown).toContain('<action>strip</action>')
+
+    // Turning it off drops the key (default false), leaving everything else intact.
+    const off = applyPhaseValidator(on.markdown, false)
+    expect(off.ok).toBe(true)
+    if (!off.ok) return
+    expect(off.markdown).not.toContain('validator:')
+    expect(off.markdown).toContain('x_internal: keep-me')
   })
 })

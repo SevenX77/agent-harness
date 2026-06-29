@@ -42,11 +42,6 @@ class BackendConfig(BaseSettings):
     gitea_token: str = ""
     registry_host: str = ""
     registry_token: str = ""
-    github_token: str = ""
-    github_owner: str = ""
-    llm_catalog_repo: str = "studio-llm-model-catalog"
-    llm_catalog_branch: str = "main"
-    llm_catalog_path: str = "llm_probe_catalog.json"
     # Community Probe Catalog (Phase 2a) — ships ON by default with zero config.
     # The gate is a CLEAN OPEN API: the client sends only sanitized records and
     # NO token (all auth/abuse control is server-side). The gate URL, read-path

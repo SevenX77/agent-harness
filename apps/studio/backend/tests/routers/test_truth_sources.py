@@ -68,3 +68,30 @@ def test_truth_source_content_rejects_unknown_source(client) -> None:
     response = client.get("/api/system/truth-sources/not-real/content")
 
     assert response.status_code == 404
+
+
+def test_community_catalog_config_reflects_backend_config(client, monkeypatch) -> None:
+    # R-G3 / R10: the endpoint exposes the baked-in manifest URL + signing pubkey
+    # (public, no secret) so the UI can show them read-only. It faithfully reflects
+    # backend config (here monkeypatched, since tests run with these blanked out).
+    from types import SimpleNamespace
+
+    from app.routers import system as system_router
+
+    monkeypatch.setattr(
+        system_router,
+        "get_backend_config",
+        lambda: SimpleNamespace(
+            community_catalog_manifest_url="https://example.test/manifest.json",
+            community_catalog_signing_pubkey="ab" * 32,
+        ),
+    )
+
+    response = client.get("/api/system/community-catalog-config")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "manifest_url": "https://example.test/manifest.json",
+        "signing_pubkey": "ab" * 32,
+    }

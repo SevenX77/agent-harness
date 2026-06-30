@@ -38,7 +38,13 @@
     },
     "remoteModelCatalog": {
       "label": "社区模型目录",
-      "description": "下载已验证的社区 catalog 作为本地路由证据，并允许把脱敏后的成功探测证据贡献回社区；关闭后读取和贡献路径都会停止。"
+      "description": "下载已验证的社区 catalog 作为本地路由证据，并允许把脱敏后的成功探测证据贡献回社区；关闭后读取和贡献路径都会停止。",
+      "configNote": "系统默认值（公开、无密钥），可用 STUDIO_COMMUNITY_CATALOG_* 环境变量覆盖。",
+      "manifestUrlLabel": "Manifest URL",
+      "signingPubkeyLabel": "签名公钥",
+      "copy": "复制{{label}}",
+      "copied": "{{label}}已复制",
+      "copyFailed": "复制失败"
     },
     "language": {
       "label": "语言",

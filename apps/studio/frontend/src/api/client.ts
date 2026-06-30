@@ -201,6 +201,17 @@ export async function getTruthSourceContent(sourceId: string): Promise<TruthSour
   return response.data
 }
 
+export interface CommunityCatalogConfig {
+  manifest_url: string
+  signing_pubkey: string
+}
+
+/** Read-only, baked-in community catalog config (manifest URL + signing pubkey). */
+export async function getCommunityCatalogConfig(): Promise<CommunityCatalogConfig> {
+  const response = await api.get<CommunityCatalogConfig>('/system/community-catalog-config')
+  return response.data
+}
+
 export async function getAppSettings(): Promise<AppSettings> {
   const response = await api.get<AppSettings>('/settings')
   return response.data

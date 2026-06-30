@@ -38,7 +38,13 @@
     },
     "remoteModelCatalog": {
       "label": "Community model catalog",
-      "description": "Download the verified community catalog for local route evidence and allow sanitized successful probe evidence to be contributed back. Turn off to stop both read and contribute paths."
+      "description": "Download the verified community catalog for local route evidence and allow sanitized successful probe evidence to be contributed back. Turn off to stop both read and contribute paths.",
+      "configNote": "System defaults (public, no secret) — override via STUDIO_COMMUNITY_CATALOG_* environment variables.",
+      "manifestUrlLabel": "Manifest URL",
+      "signingPubkeyLabel": "Signing public key",
+      "copy": "Copy {{label}}",
+      "copied": "{{label}} copied",
+      "copyFailed": "Copy failed"
     },
     "language": {
       "label": "Language",

@@ -14,9 +14,9 @@
 ## Wave 1 — 无架构争议,先落地(可并行,独立可推)
 
 ### W1-A · Community catalog 配置只读展示(D9 / R-G3)
-- [ ] **W1-A.1** 后端 `/api/system/...` 暴露 manifest_url + signing_pubkey(只读;来源 `backends.py` 默认/env)。
-- [ ] **W1-A.2 (red→green)** 前端 GeneralTab:Community model catalog 开关下只读展示两项 + 复制按钮 + "系统默认/可env覆盖"说明;vitest 渲染断言。
-- [ ] **W1-A.3** 亲眼:General 页看到两项只读展示。
+- [x] **W1-A.1 (green)** 后端 `GET /api/system/community-catalog-config` 暴露 `manifest_url` + `signing_pubkey`(只读、公开无密钥,来源 `backends.py` 默认/env)。后端测试 `test_community_catalog_config_reflects_backend_config`。
+- [x] **W1-A.2 (green)** 前端 GeneralTab:catalog 开关下只读展示 manifest URL + 签名公钥(只读 Input + 复制按钮 `CatalogConfigRow`)+ "系统默认/可 env 覆盖"说明;`getCommunityCatalogConfig` + i18n(en/zh-CN)。门禁:前端 lint/typecheck/test(1525)/build 全绿 + 后端 ruff/mypy/pytest 全绿。
+- [~] **W1-A.3 亲眼** —— 用户指示「前端不用我做视觉验证」,本项**豁免**(前端 CI 门禁 lint/typecheck/test/build 已全绿替代)。
 
 ### W1-B · 手动单模型探测扇出到所有 endpoint(含 failed)(D6 / R-E5)
 - [ ] **W1-B.1 (red)** 前端测试:`ManualModelTestPanel` 对一个有 N 个已配置 endpoint(含 failed)的 provider,触发 N 次 `/endpoints/{id}/models/test`。

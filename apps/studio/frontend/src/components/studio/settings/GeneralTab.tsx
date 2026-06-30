@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown, ExternalLink, FolderOpen, RotateCcw } from "lucide-react"
+import { ChevronDown, Copy, ExternalLink, FolderOpen, RotateCcw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import {
+  type CommunityCatalogConfig,
+  getCommunityCatalogConfig,
   getTruthSourceContent,
   getTruthSources,
   type RuntimeActivityLogEntry,
@@ -69,6 +71,7 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
   const [truthSourcesLoading, setTruthSourcesLoading] = useState(false)
   const [truthSourcesError, setTruthSourcesError] = useState<string | null>(null)
   const [preview, setPreview] = useState<TruthSourceContentResponse | null>(null)
+  const [catalogConfig, setCatalogConfig] = useState<CommunityCatalogConfig | null>(null)
   const fallbackDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(null) ?? ""
   const currentDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(appSettings.defaultSkillsDirectory)
 
@@ -87,6 +90,18 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
       .finally(() => {
         if (active) setTruthSourcesLoading(false)
       })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    getCommunityCatalogConfig()
+      .then((config) => {
+        if (active) setCatalogConfig(config)
+      })
+      .catch(() => undefined)
     return () => {
       active = false
     }
@@ -217,6 +232,21 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 className="shrink-0"
               />
             </div>
+            {catalogConfig ? (
+              <div className="mt-2 space-y-2 rounded-md border border-border/60 bg-muted/10 p-3">
+                <p className="text-xs/relaxed text-muted-foreground">
+                  {t("general.remoteModelCatalog.configNote")}
+                </p>
+                <CatalogConfigRow
+                  label={t("general.remoteModelCatalog.manifestUrlLabel")}
+                  value={catalogConfig.manifest_url}
+                />
+                <CatalogConfigRow
+                  label={t("general.remoteModelCatalog.signingPubkeyLabel")}
+                  value={catalogConfig.signing_pubkey}
+                />
+              </div>
+            ) : null}
           </Field>
 
           <Field>
@@ -291,6 +321,39 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
           ) : null}
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function CatalogConfigRow({ label, value }: { label: string; value: string }) {
+  const { t } = useTranslation("settings")
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Input
+          readOnly
+          value={value}
+          title={value}
+          aria-label={label}
+          className="h-8 overflow-x-auto whitespace-nowrap text-clip text-xs text-muted-foreground"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          aria-label={t("general.remoteModelCatalog.copy", { label })}
+          onClick={() => {
+            void navigator.clipboard
+              .writeText(value)
+              .then(() => toast.success(t("general.remoteModelCatalog.copied", { label })))
+              .catch(() => toast.error(t("general.remoteModelCatalog.copyFailed")))
+          }}
+        >
+          <Copy className="size-3.5" />
+        </Button>
+      </div>
     </div>
   )
 }

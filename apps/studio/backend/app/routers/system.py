@@ -8,6 +8,7 @@ import signal
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.core.backends import get_backend_config
 from app.services.runtime_truth_sources import (
     build_truth_source_sections,
     read_truth_source_content,
@@ -32,6 +33,20 @@ async def truth_source_content(source_id: str) -> dict[str, object]:
     if content is None:
         raise HTTPException(status_code=404, detail="truth source content unavailable")
     return content
+
+
+@router.get("/api/system/community-catalog-config")
+async def community_catalog_config() -> dict[str, str]:
+    """Read-only view of the baked-in community catalog config (R-G3 / R10).
+
+    Both the manifest URL and the ed25519 signing public key ship as public
+    defaults (no secrets) and are env-overridable; the UI shows them read-only.
+    """
+    cfg = get_backend_config()
+    return {
+        "manifest_url": cfg.community_catalog_manifest_url,
+        "signing_pubkey": cfg.community_catalog_signing_pubkey,
+    }
 
 
 @router.post("/shutdown")

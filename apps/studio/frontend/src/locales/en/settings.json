@@ -212,6 +212,7 @@
       "modelWord": "model",
       "apiKeyLabel": "API Key",
       "apiKeyShort": "API key",
+      "providerIdTooltip": "Provider id: {{id}} (registrable domain of the base URL)",
       "apiKeyPlaceholder": "Enter your {{providerName}} API Key",
       "apiKeyRequired": "API key is required.",
       "baseUrlLabel": "Base URL",

@@ -466,6 +466,43 @@ class RunManager:
         self.worker: Any = _run_worker_main
         self.git_service: GitLocalService = GitLocalService()
 
+    @staticmethod
+    def _release_run_process(process: Any, process_queue: Any) -> None:
+        """Stop a run's child process and release its OS resources.
+
+        A real ``multiprocessing.Process`` child and its ``multiprocessing.Queue`` feeder
+        thread must be explicitly terminated + closed — merely dropping the references
+        orphans them, and the leaked feeder threads / zombie children then SIGSEGV during
+        interpreter or coverage teardown (the flaky ``exit 139`` after "N passed"). Every
+        step is guarded so mock factories (``InlineProcess`` / ``queue.Queue``) used in
+        tests are harmless no-ops.
+        """
+        with contextlib.suppress(Exception):
+            if hasattr(process, "is_alive") and process.is_alive():
+                process.terminate()
+        with contextlib.suppress(Exception):
+            if hasattr(process, "join"):
+                process.join(timeout=2)
+        with contextlib.suppress(Exception):
+            if hasattr(process_queue, "close"):
+                process_queue.close()
+        with contextlib.suppress(Exception):
+            if hasattr(process_queue, "join_thread"):
+                process_queue.join_thread()
+
+    def reset_for_tests(self) -> None:
+        """Synchronously stop every in-memory run and release its OS resources.
+
+        The test fixture used to just clear ``_runs``, which orphaned real child
+        processes and their Queue feeder threads (flaky SIGSEGV on teardown). Stop them
+        properly instead.
+        """
+        for record in list(self._runs.values()):
+            self._release_run_process(record.process, record.process_queue)
+        self._runs.clear()
+        self._batches.clear()
+        self._tasks.clear()
+
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
         skill_dir = resolve_skill_dir(skill_id)
 

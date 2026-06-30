@@ -25,6 +25,8 @@ class ProviderIdentity(NamedTuple):
     display_alias: str
     keywords: tuple[str, ...]
     registrable_domains: tuple[str, ...]
+    official_hosts: tuple[str, ...]
+    official_endpoint_id: str | None
 
 
 @lru_cache(maxsize=1)
@@ -39,6 +41,12 @@ def provider_identities() -> tuple[ProviderIdentity, ...]:
             keywords=tuple(str(keyword).lower() for keyword in entry.get("keywords", [])),
             registrable_domains=tuple(
                 str(domain).lower() for domain in entry.get("registrable_domains", [])
+            ),
+            official_hosts=tuple(
+                str(host).lower() for host in entry.get("official_hosts", [])
+            ),
+            official_endpoint_id=(
+                str(entry["official_endpoint_id"]) if entry.get("official_endpoint_id") else None
             ),
         )
         for entry in providers
@@ -63,4 +71,19 @@ def notable_provider_key_for(text_haystack: str, hostname: str) -> str | None:
             return identity.key
         if any(_host_in_domain(host, domain) for domain in identity.registrable_domains):
             return identity.key
+    return None
+
+
+def official_endpoint_id_for_host(hostname: str) -> str | None:
+    """Return the stable official endpoint id for an official-provider host, or ``None``.
+
+    Matched by the endpoint ``hostname`` falling within a configured ``official_hosts``
+    entry (host == value or host endswith .value). Case-insensitive.
+    """
+    host = hostname.lower()
+    for identity in provider_identities():
+        if identity.official_endpoint_id is None:
+            continue
+        if any(_host_in_domain(host, official) for official in identity.official_hosts):
+            return identity.official_endpoint_id
     return None

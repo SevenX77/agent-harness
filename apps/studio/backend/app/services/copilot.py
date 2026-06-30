@@ -1,4 +1,4 @@
-﻿"""Studio Copilot service - Claude Agent SDK integration.
+"""Studio Copilot service - Claude Agent SDK integration.
 
 NOTE (T0.1 base_url verify, 2026-05-09):
 - claude-agent-sdk version: 0.1.80

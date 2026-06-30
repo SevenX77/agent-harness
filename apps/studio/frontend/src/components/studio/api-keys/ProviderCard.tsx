@@ -59,6 +59,7 @@ type AggregatedRouteSummary = {
   failure_scope?: RouteFailureScope
 }
 type BaseUrlReachabilityState = "connected" | "failed" | "testing" | "unknown"
+type ApiKeyReachabilityState = "valid" | "invalid" | "testing" | "unknown"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid w-full grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-center gap-2"
@@ -315,16 +316,44 @@ function FieldCopyButton({ value, label, className }: { value: string; label: st
   )
 }
 
-function FieldReachabilityCheck({ label }: { label: string }) {
+function ApiKeyReachabilityIcon({ state, label }: { state: ApiKeyReachabilityState; label: string }) {
   const { t } = useTranslation("settings")
-  const text = t("apiKeys.card.fieldReachable", { label })
+  if (state === "unknown") return null
+  if (state === "testing") {
+    const text = t("apiKeys.card.apiKeyTesting", { label })
+    return (
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+        title={text}
+        aria-label={text}
+        data-api-key-status="testing"
+      >
+        <Loader2 className="size-3.5 animate-spin" />
+      </span>
+    )
+  }
+  if (state === "valid") {
+    const text = t("apiKeys.card.apiKeyValid", { label })
+    return (
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center text-success"
+        title={text}
+        aria-label={text}
+        data-api-key-status="valid"
+      >
+        <CheckCircle2 className="size-3.5" />
+      </span>
+    )
+  }
+  const invalidText = t("apiKeys.card.apiKeyInvalid", { label })
   return (
     <span
-      className="inline-flex size-4 shrink-0 items-center justify-center text-success"
-      title={text}
-      aria-label={text}
+      className="inline-flex size-4 shrink-0 items-center justify-center text-destructive"
+      title={invalidText}
+      aria-label={invalidText}
+      data-api-key-status="invalid"
     >
-      <CheckCircle2 className="size-3.5" />
+      <XCircle className="size-3.5" />
     </span>
   )
 }
@@ -1579,6 +1608,19 @@ export function ProviderCard({
     ),
   )
   const hasEmptyModelListWarning = hasReachableModelList && !hasAvailableModels
+  // W2-C: L1 api-key reachability is its OWN tri-state (✓ valid / ✗ invalid /
+  // testing), not just "show a ✓ once models loaded". get_models succeeding proves
+  // the key; an invalid_api_key code proves it was rejected; anything else is unknown
+  // (e.g. the base_url itself was unreachable, so the key was never really tested).
+  const apiKeyReachabilityState: ApiKeyReachabilityState = !hasRequiredConfig
+    ? "unknown"
+    : isGettingModels
+      ? "testing"
+      : hasReachableModelList
+        ? "valid"
+        : matchedErrorCode === "invalid_api_key"
+          ? "invalid"
+          : "unknown"
   const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"
     : draft.isTesting
@@ -1854,7 +1896,7 @@ export function ProviderCard({
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Label htmlFor={`api-key-${draft.id}`}>{t("apiKeys.card.apiKeyLabel")}</Label>
-            {hasReachableModelList ? <FieldReachabilityCheck label={t("apiKeys.card.apiKeyShort")} /> : null}
+            <ApiKeyReachabilityIcon state={apiKeyReachabilityState} label={t("apiKeys.card.apiKeyShort")} />
           </div>
           <div className={fieldRowClassName}>
             <div className="flex flex-1 min-w-0 items-center gap-1.5">

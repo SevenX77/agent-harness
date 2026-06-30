@@ -43,8 +43,8 @@
 - [ ] **W2-B.4 (red→green)** 一 model 多 route 聚合(R-A4):model 标签态 = 名下 routes 归一态聚合(任一 ready 则可用);贯穿 model 标签 + role 内 endpoint/route 标签。
 
 ### W2-C · L1/L2 指示器按层重做(D10 / R-A2)
-- [ ] **W2-C.1 (red)** 前端:api_key / base_url 各自独立连通态(get_models 成功=两者通;失败按 T9 归因或落"未知",**不武断标红**)。
-- [ ] **W2-C.2 (green)** 重做两指示器(api_key 支持绿/红/未知,base_url 不再复用 endpoint 派生态)。
+- [x] **W2-C.1 (red→green)** L1 api_key 独立三态归因:get_models 成功=valid(✓);结构化 `invalid_api_key`=invalid(✗);其它失败(如 base_url 不通,key 根本没真正被测)=unknown(**不武断标红**)。L2 base_url 经 `resultLooksReachable` 本就独立于 endpoint 通过/失败态判连通。
+- [x] **W2-C.2 (green)** L1 指示器从只会显示 ✓ 的 `FieldReachabilityCheck` 重做为三态 `ApiKeyReachabilityIcon`(✓success / ✗destructive / spinner / null),镜像 L2 的 `BaseUrlReachabilityIcon`;en/zh-CN i18n(apiKeyValid/Invalid/Testing)。门禁:前端 lint/typecheck/test(1525)/build 全绿。
 
 ### W2-D · 没模型不猜 + invalid_key⇒disabled(D2/D3 · R-E1/R-E2)
 - [x] **W2-D.1 (red)** 后端:get_models 空表且无已知 route ⇒ **不调 `notable_model_ids` 探测**;endpoint=untested(**非 failed**)。

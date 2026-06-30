@@ -830,6 +830,43 @@ describe("ProviderCard provider capabilities", () => {
     expect(idleTag).not.toContain("api-route-tag-border-flow")
   })
 
+  it("animates third-party model chips while the endpoint test runs (R-G2)", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({
+          id: "qiniu",
+          name: "Qiniu",
+          base_url: "https://api.qnaigc.com/v1",
+          isTesting: true,
+          testingAction: "models",
+        })}
+        persisted={makePersisted({
+          id: "qiniu",
+          name: "Qiniu",
+          base_url: "https://api.qnaigc.com/v1",
+          available_models: [
+            {
+              id: "deepseek-v3",
+              status: "unverified_manual",
+              last_probe_message: null,
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    // R-G2: while the endpoint test runs, a third-party model chip pulses even though
+    // its own status is still "unverified_manual" — the whole endpoint is being verified.
+    const tag = routeTagHtml(html, "deepseek-v3")
+    expect(tag).toContain("api-route-tag-border-flow")
+  })
+
   it("renders generated multimodal route candidates with a default border and shadcn-only tooltip", () => {
     const html = renderToStaticMarkup(
       <ProviderCard

@@ -1,0 +1,71 @@
+{
+  "_comment": "Data-driven DYNAMIC probe candidates (W3-A / T2), interpreted by services/provider_probe_rules.py. Per backend: 'classes' are named model-class matchers (any_of disjunction; each matcher conjoins prefix/contains/equals), 'rules' are tried in order (first whose 'when' class is true, or 'default') and emit candidate specs (kwargs for routers/llm.py::_candidate). A candidate with {'reasoning': <method>} expands the reasoning-effort ladder via 'reasoning'; runtime:'reasoning_if_high' means the responses candidate only carries reasoning runtime for the high class.",
+  "dynamic_probe_candidates": {
+    "openai": {
+      "classes": {
+        "instruct": {"any_of": [{"prefix": "gpt-3.5-turbo-instruct"}]},
+        "pro_reasoning": {"any_of": [{"prefix": "gpt-5", "contains": "-pro"}]},
+        "high_reasoning": {"any_of": [{"prefix": "gpt-5-pro"}]}
+      },
+      "reasoning": {
+        "high_class": "high_reasoning",
+        "pro_class": "pro_reasoning",
+        "efforts_when_high": ["high"],
+        "efforts_default": ["low", "medium", "high"],
+        "max_tokens_when_pro": 64,
+        "max_tokens_default": 16,
+        "request_mappers": {
+          "openai_responses": "openai_responses_reasoning",
+          "openai_chat_completions": "openai_chat_completions_reasoning"
+        },
+        "retry_group": "openai:reasoning:{model}"
+      },
+      "rules": [
+        {
+          "when": "instruct",
+          "candidates": [
+            {"method_id": "openai_completions", "profile_id": "text:openai_completions", "capability": "text_chat", "request_mapper_id": "openai_completions_text", "rank": [10, 1]}
+          ]
+        },
+        {
+          "when": "pro_reasoning",
+          "candidates": [
+            {"method_id": "openai_responses", "profile_id": "text:openai_responses", "capability": "text_chat", "request_mapper_id": "openai_responses_text", "rank": [10, 1], "runtime": "reasoning_if_high"},
+            {"reasoning": "openai_responses", "rank": [5, 1]}
+          ]
+        },
+        {
+          "default": true,
+          "candidates": [
+            {"method_id": "openai_responses", "profile_id": "text:openai_responses", "capability": "text_chat", "request_mapper_id": "openai_responses_text", "rank": [10, 1]},
+            {"method_id": "openai_chat_completions", "profile_id": "text:openai_chat_completions", "capability": "text_chat", "request_mapper_id": "openai_chat_completions_text", "rank": [20, 2]},
+            {"reasoning": "openai_responses", "rank": [5, 1]},
+            {"reasoning": "openai_chat_completions", "rank": [25, 2]}
+          ]
+        }
+      ]
+    },
+    "gemini": {
+      "classes": {
+        "thinking_level": {"any_of": [{"prefix": "gemini-3"}, {"prefix": "deep-research"}, {"prefix": "antigravity"}, {"equals": "aqa"}]}
+      },
+      "rules": [
+        {
+          "when": "thinking_level",
+          "candidates": [
+            {"method_id": "gemini_generate_content", "profile_id": "text:gemini_generate_content:minimal_thinking", "capability": "text_chat", "request_mapper_id": "gemini_generate_content_text", "rank": [10, 1], "runtime": {"max_output_tokens": 16, "reasoning": {"enabled": true, "effort": "minimal"}}},
+            {"method_id": "gemini_generate_content", "profile_id": "thinking:gemini_generate_content:level_low", "capability": "thinking", "request_mapper_id": "gemini_generate_content_thinking_level_low", "rank": [5, 1], "runtime": {"max_output_tokens": 16, "reasoning": {"enabled": true, "effort": "low"}}}
+          ]
+        },
+        {
+          "default": true,
+          "candidates": [
+            {"method_id": "gemini_generate_content", "profile_id": "text:gemini_generate_content:no_thinking", "capability": "text_chat", "request_mapper_id": "gemini_generate_content_text", "rank": [10, 1], "runtime": {"max_output_tokens": 16, "reasoning": {"enabled": false, "budget_tokens": 0}}},
+            {"method_id": "gemini_generate_content", "profile_id": "thinking:gemini_generate_content:budget_128", "capability": "thinking", "request_mapper_id": "gemini_generate_content_thinking_budget_128", "rank": [5, 1], "runtime": {"max_output_tokens": 256, "reasoning": {"enabled": true, "budget_tokens": 128}}},
+            {"method_id": "gemini_generate_content", "profile_id": "thinking:gemini_generate_content:budget_512", "capability": "thinking", "request_mapper_id": "gemini_generate_content_thinking_budget_512", "rank": [6, 2], "runtime": {"max_output_tokens": 768, "reasoning": {"enabled": true, "budget_tokens": 512}}}
+          ]
+        }
+      ]
+    }
+  }
+}

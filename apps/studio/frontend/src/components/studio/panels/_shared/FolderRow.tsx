@@ -1,9 +1,13 @@
 import { ChevronDown, ChevronRight, Folder } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
+import { AssetPathContextMenu } from "./AssetPathContextMenu"
+import { RootPathSuffix } from "./RootPathSuffix"
 
 export function FolderRow({
   name,
+  rootPath,
+  absolutePath,
   children,
   endAdornment,
   defaultExpanded = false,
@@ -14,6 +18,8 @@ export function FolderRow({
   labelClassName,
 }: {
   name: string
+  rootPath?: string | null
+  absolutePath?: string | null
   children: ReactNode
   endAdornment?: ReactNode
   defaultExpanded?: boolean
@@ -36,23 +42,31 @@ export function FolderRow({
     }
     onExpandedChange?.(next)
   }
+  const rootPathText = rootPath?.trim() || null
+  const accessibleLabel = rootPathText ? `${name} (${rootPathText})` : undefined
+  const rowButton = (
+    <button
+      type="button"
+      onClick={toggleExpanded}
+      aria-label={accessibleLabel}
+      className={cn(
+        "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
+        buttonClassName,
+      )}
+    >
+      {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+      <Folder className="size-4 shrink-0" strokeWidth={1.5} />
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span className={cn("truncate", rootPathText ? "shrink-0" : undefined, labelClassName)}>{name}</span>
+        {rootPathText ? <RootPathSuffix path={rootPathText} className="flex-1" /> : null}
+      </span>
+    </button>
+  )
 
   return (
     <div className="w-full min-w-0">
       <div className={cn("flex min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-accent", rowClassName)}>
-        <button
-          type="button"
-          onClick={toggleExpanded}
-          title={name}
-          className={cn(
-            "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
-            buttonClassName,
-          )}
-        >
-          {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
-          <Folder className="size-4 shrink-0" strokeWidth={1.5} />
-          <span className={cn("truncate", labelClassName)}>{name}</span>
-        </button>
+        <AssetPathContextMenu absolutePath={absolutePath}>{rowButton}</AssetPathContextMenu>
         {endAdornment ? <div className="ml-auto flex shrink-0 items-center justify-end pr-1">{endAdornment}</div> : null}
       </div>
       {expanded ? <div className="pl-4">{children}</div> : null}

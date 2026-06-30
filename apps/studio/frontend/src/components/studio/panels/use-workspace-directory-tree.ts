@@ -22,6 +22,7 @@ export interface DirectoryTreeState {
 
 export interface WorkspaceDirectoryTree {
   isNative: boolean
+  workspaceRoot?: string | null
   root: DirectoryTreeState
   getDirectory: (path: string) => DirectoryTreeState
   ensureDirectory: (path: string) => void
@@ -364,9 +365,10 @@ export function useWorkspaceDirectoryTree({
 
   return useMemo(() => ({
     isNative: native,
+    workspaceRoot: resolvedRoot,
     root: snapshots[""] ?? EMPTY_DIRECTORY,
     getDirectory,
     ensureDirectory,
     reloadDirectory,
-  }), [getDirectory, ensureDirectory, native, reloadDirectory, snapshots])
+  }), [getDirectory, ensureDirectory, native, reloadDirectory, resolvedRoot, snapshots])
 }

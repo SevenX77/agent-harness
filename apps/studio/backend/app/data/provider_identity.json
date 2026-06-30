@@ -1,5 +1,5 @@
 {
-  "_comment": "Data-driven provider identity (W3-A / T2). Replaces hardcoded keyword/domain matches in routers/llm.py so a new provider is added here, not in code. 'key' indexes docs/development/llm_provider_notes/<key>.md for notable models. An endpoint matches by a keyword in its id/display-name (lowercased) OR by its host's registrable domain (host == domain or host endswith .domain). 'display_alias' is the human name for the provider.",
+  "_comment": "Data-driven provider identity (W3-A / T2). Replaces hardcoded provider matches across the studio backend so a new provider is a config edit, not code. 'key' indexes docs/development/llm_provider_notes/<key>.md. THIRD-PARTY endpoints match by a keyword in their id/display-name (lowercased) OR their host's registrable domain -> 'key' (notable-model lookup). OFFICIAL endpoints match by 'official_hosts' -> 'official_endpoint_id' (stable-id auto-detection). Host matching everywhere is: host == value OR host endswith .value. 'display_alias' is the human provider name.",
   "providers": [
     {
       "key": "qiniu",
@@ -18,6 +18,36 @@
       "display_alias": "WaveSpeed",
       "keywords": ["wavespeed"],
       "registrable_domains": ["wavespeed.ai"]
+    },
+    {
+      "key": "openai",
+      "display_alias": "OpenAI",
+      "official_hosts": ["api.openai.com"],
+      "official_endpoint_id": "openai-official"
+    },
+    {
+      "key": "anthropic",
+      "display_alias": "Anthropic",
+      "official_hosts": ["api.anthropic.com"],
+      "official_endpoint_id": "anthropic-official"
+    },
+    {
+      "key": "deepseek",
+      "display_alias": "DeepSeek",
+      "official_hosts": ["api.deepseek.com"],
+      "official_endpoint_id": "deepseek-official"
+    },
+    {
+      "key": "gemini",
+      "display_alias": "Gemini",
+      "official_hosts": ["generativelanguage.googleapis.com"],
+      "official_endpoint_id": "gemini-official"
+    },
+    {
+      "key": "ark",
+      "display_alias": "ARK",
+      "official_hosts": ["volces.com"],
+      "official_endpoint_id": "ark-official"
     }
   ]
 }

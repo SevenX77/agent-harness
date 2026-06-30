@@ -153,6 +153,7 @@ from app.services.provider_config import (
     notable_provider_key_for,
     static_probe_candidate_specs,
 )
+from app.services.provider_probe_rules import dynamic_probe_candidate_specs
 from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -3462,194 +3463,18 @@ def _official_language_probe_candidates(
     if not _is_official_language_model_candidate(endpoint, model_id):
         return []
     backend = _endpoint_probe_backend(endpoint)
-    if backend == "openai":
-        model = model_id.lower()
-        if model.startswith("gpt-3.5-turbo-instruct"):
-            return [
-                _candidate(
-                    "openai_completions",
-                    "text:openai_completions",
-                    "text_chat",
-                    "openai_completions_text",
-                    10,
-                    1,
-                ),
-            ]
-        reasoning_runtime_settings = _openai_reasoning_probe_runtime_settings(model_id)
-        reasoning_candidates = _openai_reasoning_probe_candidates(
-            method_id="openai_responses",
-            model_id=model_id,
-            default_rank=5,
-            fallback_rank=1,
-        )
-        if _openai_prefers_responses_only(model_id):
-            return [
-                _candidate(
-                    "openai_responses",
-                    "text:openai_responses",
-                    "text_chat",
-                    "openai_responses_text",
-                    10,
-                    1,
-                    runtime_settings=reasoning_runtime_settings
-                    if _openai_requires_high_reasoning_model(model_id)
-                    else None,
-                ),
-                *reasoning_candidates,
-            ]
-        return [
-            _candidate(
-                "openai_responses",
-                "text:openai_responses",
-                "text_chat",
-                "openai_responses_text",
-                10,
-                1,
-            ),
-            _candidate(
-                "openai_chat_completions",
-                "text:openai_chat_completions",
-                "text_chat",
-                "openai_chat_completions_text",
-                20,
-                2,
-            ),
-            *reasoning_candidates,
-            *_openai_reasoning_probe_candidates(
-                method_id="openai_chat_completions",
-                model_id=model_id,
-                default_rank=25,
-                fallback_rank=2,
-            ),
-        ]
-    if backend == "gemini":
-        if _gemini_prefers_thinking_level(model_id):
-            return [
-                _candidate(
-                    "gemini_generate_content",
-                    "text:gemini_generate_content:minimal_thinking",
-                    "text_chat",
-                    "gemini_generate_content_text",
-                    10,
-                    1,
-                    runtime_settings={
-                        "max_output_tokens": 16,
-                        "reasoning": {"enabled": True, "effort": "minimal"},
-                    },
-                ),
-                _candidate(
-                    "gemini_generate_content",
-                    "thinking:gemini_generate_content:level_low",
-                    "thinking",
-                    "gemini_generate_content_thinking_level_low",
-                    5,
-                    1,
-                    runtime_settings={
-                        "max_output_tokens": 16,
-                        "reasoning": {"enabled": True, "effort": "low"},
-                    },
-                ),
-            ]
-        return [
-            _candidate(
-                "gemini_generate_content",
-                "text:gemini_generate_content:no_thinking",
-                "text_chat",
-                "gemini_generate_content_text",
-                10,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": False, "budget_tokens": 0},
-                },
-            ),
-            _candidate(
-                "gemini_generate_content",
-                "thinking:gemini_generate_content:budget_128",
-                "thinking",
-                "gemini_generate_content_thinking_budget_128",
-                5,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 256,
-                    "reasoning": {"enabled": True, "budget_tokens": 128},
-                },
-            ),
-            _candidate(
-                "gemini_generate_content",
-                "thinking:gemini_generate_content:budget_512",
-                "thinking",
-                "gemini_generate_content_thinking_budget_512",
-                6,
-                2,
-                runtime_settings={
-                    "max_output_tokens": 768,
-                    "reasoning": {"enabled": True, "budget_tokens": 512},
-                },
-            ),
-        ]
-    # claude / deepseek / ark have fixed (model-independent) candidate lists -> these are
-    # data-driven now (app/data/probe_candidates.json); each spec is _candidate() kwargs.
-    # openai + gemini above pick candidates from the model id, so they stay in code.
+    # openai + gemini pick candidates from the model id (reasoning-effort ladders,
+    # thinking tiers) -> data-driven via the rules interpreter
+    # (app/data/probe_candidates_dynamic.json), NOT hardcoded if/else.
+    dynamic_specs = dynamic_probe_candidate_specs(backend, model_id)
+    if dynamic_specs is not None:
+        return [_candidate(**spec) for spec in dynamic_specs]
+    # claude / deepseek / ark have fixed (model-independent) candidate lists -> static
+    # config (app/data/probe_candidates.json). Each spec is _candidate() kwargs.
     specs = static_probe_candidate_specs(backend)
     if specs is not None:
         return [_candidate(**spec) for spec in specs]
     return []
-
-
-def _openai_reasoning_probe_runtime_settings(model_id: str) -> dict[str, Any]:
-    return _openai_reasoning_runtime_settings(
-        model_id,
-        "high" if _openai_requires_high_reasoning_model(model_id) else "low",
-    )
-
-
-def _openai_reasoning_probe_candidates(
-    *,
-    method_id: OfficialCallMethod,
-    model_id: str,
-    default_rank: int,
-    fallback_rank: int,
-) -> list[OfficialLanguageProbeCandidate]:
-    efforts = ("high",) if _openai_requires_high_reasoning_model(model_id) else ("low", "medium", "high")
-    request_mapper_id = (
-        "openai_responses_reasoning" if method_id == "openai_responses" else "openai_chat_completions_reasoning"
-    )
-    retry_group = f"openai:reasoning:{model_id.lower()}"
-    return [
-        _candidate(
-            method_id,
-            f"reasoning:{method_id}:{effort}",
-            "reasoning",
-            request_mapper_id,
-            default_rank + index,
-            fallback_rank,
-            runtime_settings=_openai_reasoning_runtime_settings(model_id, effort),
-            retry_group=retry_group,
-        )
-        for index, effort in enumerate(efforts)
-    ]
-
-
-def _openai_reasoning_runtime_settings(model_id: str, effort: str) -> dict[str, Any]:
-    model = model_id.lower()
-    return {
-        "max_output_tokens": 64 if _openai_is_pro_reasoning_model(model) else 16,
-        "reasoning": {"enabled": True, "effort": effort},
-    }
-
-
-def _openai_requires_high_reasoning_model(model_id: str) -> bool:
-    return model_id.lower().startswith("gpt-5-pro")
-
-
-def _openai_is_pro_reasoning_model(model_id: str) -> bool:
-    model = model_id.lower()
-    return model.startswith("gpt-5") and "-pro" in model
-
-
-def _openai_prefers_responses_only(model_id: str) -> bool:
-    return _openai_is_pro_reasoning_model(model_id)
 
 
 def _candidate(
@@ -3676,16 +3501,6 @@ def _candidate(
         input_modalities=input_modalities,
         output_modalities=output_modalities,
         retry_group=retry_group,
-    )
-
-
-def _gemini_prefers_thinking_level(model_id: str) -> bool:
-    model = model_id.lower()
-    return (
-        model.startswith("gemini-3")
-        or model.startswith("deep-research")
-        or model.startswith("antigravity")
-        or model == "aqa"
     )
 
 

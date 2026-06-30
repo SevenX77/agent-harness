@@ -28,6 +28,8 @@ class ProviderIdentity(NamedTuple):
     registrable_domains: tuple[str, ...]
     official_hosts: tuple[str, ...]
     official_endpoint_id: str | None
+    language_model_prefixes: tuple[str, ...]
+    non_language_model_tokens: tuple[str, ...]
 
 
 @lru_cache(maxsize=1)
@@ -48,6 +50,12 @@ def provider_identities() -> tuple[ProviderIdentity, ...]:
             ),
             official_endpoint_id=(
                 str(entry["official_endpoint_id"]) if entry.get("official_endpoint_id") else None
+            ),
+            language_model_prefixes=tuple(
+                str(prefix).lower() for prefix in entry.get("language_model_prefixes", [])
+            ),
+            non_language_model_tokens=tuple(
+                str(token).lower() for token in entry.get("non_language_model_tokens", [])
             ),
         )
         for entry in providers
@@ -106,3 +114,16 @@ def static_probe_candidate_specs(backend: str) -> tuple[dict[str, Any], ...] | N
     candidates from the model id and stay in ``routers/llm.py``.
     """
     return _probe_candidate_table().get(backend)
+
+
+def language_model_classification(key: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Return ``(language_prefixes, non_language_tokens)`` for a provider, or ``None`` if it
+    has no configured language-model classifier.
+
+    A model is a language model when it contains NONE of the non-language tokens AND
+    starts with one of the language prefixes (the model id is matched lowercased).
+    """
+    for identity in provider_identities():
+        if identity.key == key and identity.language_model_prefixes:
+            return identity.language_model_prefixes, identity.non_language_model_tokens
+    return None

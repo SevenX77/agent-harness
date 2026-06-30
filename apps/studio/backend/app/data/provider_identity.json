@@ -47,7 +47,9 @@
       "key": "ark",
       "display_alias": "ARK",
       "official_hosts": ["volces.com"],
-      "official_endpoint_id": "ark-official"
+      "official_endpoint_id": "ark-official",
+      "language_model_prefixes": ["doubao-", "deepseek-", "glm-", "kimi-", "mistral-", "qwen", "seed-", "ep-"],
+      "non_language_model_tokens": ["seedream", "seedance", "wan", "embedding", "translate", "translation", "tts", "audio", "video", "3d"]
     }
   ]
 }

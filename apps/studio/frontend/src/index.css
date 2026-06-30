@@ -219,6 +219,12 @@
     }
 }
 
+/*
+ * Global text-selection guard (Tauri WebView2). The JS event side lives in
+ * useNativeDoubleClickGuard.ts; this CSS re-enables `user-select: text` for the
+ * allow-listed surfaces. The selectors below MUST mirror TEXT_SELECTION_ALLOWLIST
+ * in that hook — keep the two lists in sync when adding a new selectable surface.
+ */
 html[data-native-double-click-guard="true"] body {
   -webkit-user-select: none;
   user-select: none;
@@ -232,6 +238,8 @@ html[data-native-double-click-guard="true"] [contenteditable="true"],
 html[data-native-double-click-guard="true"] [role="textbox"],
 html[data-native-double-click-guard="true"] .monaco-editor,
 html[data-native-double-click-guard="true"] .monaco-editor *,
+html[data-native-double-click-guard="true"] [data-allow-text-selection],
+html[data-native-double-click-guard="true"] [data-allow-text-selection] *,
 html[data-native-double-click-guard="true"] [data-allow-native-double-click],
 html[data-native-double-click-guard="true"] [data-allow-native-double-click] * {
   -webkit-user-select: text;

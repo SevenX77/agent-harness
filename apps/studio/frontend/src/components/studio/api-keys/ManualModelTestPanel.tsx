@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import i18n from "@/i18n"
 import { composeRequestErrorMessage } from "@/lib/llm-error-messages"
-import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResult, type ProviderUiState } from "../../../api/llm"
+import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResponse, type ProviderModelTestResult, type ProviderUiState } from "../../../api/llm"
 import { ProviderStateBadge } from "../settings/llm-roles/provider-state-badge"
 
 interface Props {
   providerKey: string
+  // W1-B: every configured endpoint id of this provider, so a manual model test probes
+  // all of them (not just `providerKey`). Falls back to [providerKey] when omitted/empty.
+  endpointIds?: string[]
   notableProviderKey: string
   onModelsUpdated: (models: ModelInfo[]) => void
   defaultExpanded?: boolean
@@ -107,6 +110,43 @@ export function mergeModelLists(existing: ModelInfo[], incoming: ModelInfo[]): M
   return [...byId.values()]
 }
 
+// W1-B / R-E5: a manual model test fans out across EVERY configured endpoint of the
+// provider (including failed/disabled). Collapse the per-endpoint results to one row per
+// model, preferring a success — a model that works on at least one base_url is usable.
+export function aggregateModelResults(results: ProviderModelTestResult[]): ProviderModelTestResult[] {
+  const byModel = new Map<string, ProviderModelTestResult>()
+  for (const result of results) {
+    const existing = byModel.get(result.model_id)
+    if (!existing || (result.status === "ok" && existing.status !== "ok")) {
+      byModel.set(result.model_id, result)
+    }
+  }
+  return [...byModel.values()]
+}
+
+// Probe the requested models against each endpoint id in turn; one endpoint erroring
+// records a failure for its models but never aborts the rest.
+export async function probeModelsAcrossEndpoints(
+  endpointIds: string[],
+  modelIds: string[],
+  probe: (endpointId: string, modelIds: string[]) => Promise<ProviderModelTestResponse>,
+): Promise<{ results: ProviderModelTestResult[]; models: ModelInfo[] }> {
+  const collected: ProviderModelTestResult[] = []
+  let models: ModelInfo[] = []
+  for (const endpointId of endpointIds) {
+    try {
+      const response = await probe(endpointId, modelIds)
+      collected.push(...response.results)
+      models = mergeModelLists(models, response.available_models)
+    } catch {
+      for (const modelId of modelIds) {
+        collected.push({ model_id: modelId, status: "error", message: null })
+      }
+    }
+  }
+  return { results: aggregateModelResults(collected), models }
+}
+
 export function manualModelCandidateErrorMessage(error: unknown): string {
   return composeRequestErrorMessage(error, i18n.t("apiKeys.manualTest.candidateLoadError"))
 }
@@ -162,7 +202,7 @@ export function ManualModelResultList({ results }: { results: ProviderModelTestR
   )
 }
 
-export function ManualModelTestPanel({ providerKey, notableProviderKey, onModelsUpdated, defaultExpanded = false }: Props) {
+export function ManualModelTestPanel({ providerKey, endpointIds, notableProviderKey, onModelsUpdated, defaultExpanded = false }: Props) {
   const { t } = useTranslation("settings")
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [modelIds, setModelIds] = useState([""])
@@ -203,6 +243,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
 
   async function runModelTests() {
     if (trimmedModelIds.length === 0) return
+    const targetEndpointIds = endpointIds && endpointIds.length > 0 ? endpointIds : [providerKey]
     setTesting(true)
     setError(null)
     setResults([])
@@ -210,13 +251,14 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
     const toastId = `manual-model-test-${providerKey}`
     toast.loading(t("apiKeys.manualTest.testingLoading"), { id: toastId })
     try {
-      const response = await testProviderModels({
-        provider_id: providerKey,
-        model_ids: trimmedModelIds,
-      })
-      setResults(response.results)
-      onModelsUpdated(response.available_models)
-      const summary = manualModelToastSummary(response.results)
+      const { results, models } = await probeModelsAcrossEndpoints(
+        targetEndpointIds,
+        trimmedModelIds,
+        (endpointId, modelIds) => testProviderModels({ provider_id: endpointId, model_ids: modelIds }),
+      )
+      setResults(results)
+      onModelsUpdated(models)
+      const summary = manualModelToastSummary(results)
       toast[summary.kind](summary.title, { id: toastId, description: summary.description })
     } catch (testError) {
       setResults([])

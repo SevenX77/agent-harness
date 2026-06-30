@@ -3,9 +3,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def build_scene_stream(context) -> dict:
+def build_scene_stream(inputs) -> dict:
     """Build unified event stream and assemble scenes."""
-    batch_outputs = context.get("batch_outputs", [])
+    batch_outputs = inputs.get("batch_outputs", [])
 
     all_events = []
     for batch in batch_outputs:

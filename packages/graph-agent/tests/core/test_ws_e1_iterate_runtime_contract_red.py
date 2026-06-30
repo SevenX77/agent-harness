@@ -120,8 +120,8 @@ batch:
   concurrency: 2
 """,
         action_body="""
-            def worker(context):
-                return {"seen": context["item"]}
+            def worker(inputs):
+                return {"seen": inputs["item"]}
         """,
     )
 
@@ -148,8 +148,8 @@ iterate:
   concurrency: 2
 """,
         action_body="""
-            def worker(context):
-                return {"seen": context["item"]}
+            def worker(inputs):
+                return {"seen": inputs["item"]}
         """,
     )
 
@@ -167,9 +167,9 @@ iterate:
             ["a", "b", "c"],
             [],
             """
-            def worker(context):
-                assert isinstance(context, dict)
-                return {"piece": context["item"]}
+            def worker(inputs):
+                assert isinstance(inputs, dict)
+                return {"piece": inputs["item"]}
             """,
             ["a", "b", "c"],
         ),
@@ -178,9 +178,9 @@ iterate:
             ["a", "b", "c"],
             [],
             """
-            def worker(context):
-                assert isinstance(context, dict)
-                return {"piece": [context["item"]]}
+            def worker(inputs):
+                assert isinstance(inputs, dict)
+                return {"piece": [inputs["item"]]}
             """,
             ["a", "b", "c"],
         ),
@@ -189,8 +189,8 @@ iterate:
             [{"key": "a", "value": 1}, {"key": "b", "value": 2}],
             {},
             """
-            def worker(context):
-                item = context["item"]
+            def worker(inputs):
+                item = inputs["item"]
                 return {"piece": {item["key"]: item["value"]}}
             """,
             {"a": 1, "b": 2},
@@ -200,8 +200,8 @@ iterate:
             ["draft", "final"],
             "",
             """
-            def worker(context):
-                return {"piece": context["item"]}
+            def worker(inputs):
+                return {"piece": inputs["item"]}
             """,
             "final",
         ),
@@ -265,10 +265,10 @@ iterate:
     merge: replace
 """,
         action_body="""
-            def worker(context):
-                assert isinstance(context, dict)
-                previous = list(context["collected"])
-                return {"piece": previous + [context["item"]]}
+            def worker(inputs):
+                assert isinstance(inputs, dict)
+                previous = list(inputs["collected"])
+                return {"piece": previous + [inputs["item"]]}
         """,
     )
 
@@ -319,8 +319,8 @@ iterate:
     merge: append
 """,
         action_body="""
-            def worker(context):
-                return {"piece": context["item"]}
+            def worker(inputs):
+                return {"piece": inputs["item"]}
         """,
     )
 
@@ -347,8 +347,8 @@ iterate:
   item_var: item
 """,
         action_body="""
-            def worker(context):
-                return {"seen": context["item"]}
+            def worker(inputs):
+                return {"seen": inputs["item"]}
         """,
     )
 
@@ -375,7 +375,7 @@ iterate:
   item_var: item
 """,
         action_body="""
-            def worker(context):
+            def worker(inputs):
                 raise AssertionError("batch body must not run for an empty iterate list")
         """,
     )
@@ -408,7 +408,7 @@ iterate:
     merge: replace
 """,
         action_body="""
-            def worker(context):
+            def worker(inputs):
                 raise AssertionError("loop body must not run for an empty iterate list")
         """,
     )
@@ -436,8 +436,8 @@ iterate:
   concurrency: 2
 """,
         action_body="""
-            def worker(context):
-                return {"doubled": context["item"] * 2}
+            def worker(inputs):
+                return {"doubled": inputs["item"] * 2}
         """,
     )
 
@@ -473,9 +473,9 @@ iterate:
     merge: replace
 """,
         action_body="""
-            def worker(context):
-                assert isinstance(context, dict)
-                return {"count": context["count"] + context["round"]}
+            def worker(inputs):
+                assert isinstance(inputs, dict)
+                return {"count": inputs["count"] + inputs["round"]}
         """,
     )
 

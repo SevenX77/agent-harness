@@ -47,15 +47,6 @@ class AgentRegistryItem(BaseModel):
     path: str = Field(min_length=1)
     description: str = Field(min_length=1)
 
-    @field_validator("path")
-    @classmethod
-    def _path_must_be_absolute(cls, value: str) -> str:
-        from pathlib import Path
-
-        if not Path(value).is_absolute():
-            raise ValueError("subgraph path must be absolute")
-        return value
-
 
 class ReferenceSpec(BaseModel):
     """Reference resource declared on an Agent."""

@@ -1,27 +1,26 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [batch_outputs]
-      properties:
-        batch_outputs:
-          type: array
-          items:
-            type: object
-    outputs:
-      type: object
-      required: [retroactive_corrections]
-      properties:
-        retroactive_corrections:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  max_iterations: 10
-  validator: true
+io:
+  inputs:
+    type: object
+    required: [batch_outputs]
+    properties:
+      batch_outputs:
+        type: array
+        items:
+          type: object
+  outputs:
+    type: object
+    required: [retroactive_corrections]
+    properties:
+      retroactive_corrections:
+        type: array
+        items:
+          type: object
+tools:
+  - finish_task
+max_iterations: 10
+validator: true
 ---
 
 <role>

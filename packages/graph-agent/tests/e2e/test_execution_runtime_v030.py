@@ -65,17 +65,27 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
-phase_config:
-  tools:
-    - finish_task
-  references:
-    - id: R1
-      path: refs/r1.md
-      summary: Runtime reference
-  examples:
-    - id: E2
-      path: examples/e2.md
-      summary: Runtime document example
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - finish_task
+references:
+  - id: R1
+    path: refs/r1.md
+    summary: Runtime reference
+examples:
+  - id: E2
+    path: examples/e2.md
+    summary: Runtime document example
 ---
 <role>
 Executor.
@@ -190,10 +200,10 @@ io:
     )
     _write(
         child / "phases" / "inspect" / "actions" / "inspect.py",
-        "def inspect(context):\n"
+        "def inspect(inputs):\n"
         "    return {\n"
-        "        'answer': context.get('public'),\n"
-        "        'saw_parent_secret': context.get('parent_secret') is not None,\n"
+        "        'answer': inputs.get('public'),\n"
+        "        'saw_parent_secret': inputs.get('parent_secret') is not None,\n"
         "    }\n",
     )
 

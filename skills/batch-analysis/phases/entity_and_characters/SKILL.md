@@ -1,33 +1,32 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [batch_events_text, accumulated_context_text, batch_chapter_range, dynamic_dimensions_hint]
-      properties:
-        batch_events_text:
-          type: string
-        accumulated_context_text:
-          type: string
-        batch_chapter_range:
-          type: string
-        dynamic_dimensions_hint:
-          type: string
-    outputs:
-      type: object
-      required: [entity_registry, character_results]
-      properties:
-        entity_registry:
+io:
+  inputs:
+    type: object
+    required: [batch_events_text, accumulated_context_text, batch_chapter_range, dynamic_dimensions_hint]
+    properties:
+      batch_events_text:
+        type: string
+      accumulated_context_text:
+        type: string
+      batch_chapter_range:
+        type: string
+      dynamic_dimensions_hint:
+        type: string
+  outputs:
+    type: object
+    required: [entity_registry, character_results]
+    properties:
+      entity_registry:
+        type: object
+      character_results:
+        type: array
+        items:
           type: object
-        character_results:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  max_iterations: 15
-  validator: true
+tools:
+  - finish_task
+max_iterations: 15
+validator: true
 ---
 
 <role>

@@ -84,9 +84,9 @@ validator: false
         root / "phases" / "score" / "actions" / "score.py",
         dedent(
             f"""
-            def score(context):
+            def score(inputs):
                 return {{
-                    "answer": f"score:{{context['topic']}}",
+                    "answer": f"score:{{inputs['topic']}}",
                     {confidence_line}
                 }}
             """

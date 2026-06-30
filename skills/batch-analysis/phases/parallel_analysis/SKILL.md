@@ -1,51 +1,50 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [batch_events_text, accumulated_context_text, batch_chapter_range, batch_event_count]
-      properties:
-        batch_events_text:
-          type: string
-        accumulated_context_text:
-          type: string
-        batch_chapter_range:
-          type: string
-        batch_event_count:
-          type: integer
-    outputs:
-      type: object
-      required: [tension_results, system_results, prop_results, arc_results, foreshadowing_results, spatiotemporal_results]
-      properties:
-        tension_results:
-          type: array
-          items:
-            type: object
-        system_results:
-          type: array
-          items:
-            type: object
-        prop_results:
-          type: array
-          items:
-            type: object
-        arc_results:
-          type: array
-          items:
-            type: object
-        foreshadowing_results:
-          type: array
-          items:
-            type: object
-        spatiotemporal_results:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  max_iterations: 20
-  validator: true
+io:
+  inputs:
+    type: object
+    required: [batch_events_text, accumulated_context_text, batch_chapter_range, batch_event_count]
+    properties:
+      batch_events_text:
+        type: string
+      accumulated_context_text:
+        type: string
+      batch_chapter_range:
+        type: string
+      batch_event_count:
+        type: integer
+  outputs:
+    type: object
+    required: [tension_results, system_results, prop_results, arc_results, foreshadowing_results, spatiotemporal_results]
+    properties:
+      tension_results:
+        type: array
+        items:
+          type: object
+      system_results:
+        type: array
+        items:
+          type: object
+      prop_results:
+        type: array
+        items:
+          type: object
+      arc_results:
+        type: array
+        items:
+          type: object
+      foreshadowing_results:
+        type: array
+        items:
+          type: object
+      spatiotemporal_results:
+        type: array
+        items:
+          type: object
+tools:
+  - finish_task
+max_iterations: 20
+validator: true
 ---
 
 <role>

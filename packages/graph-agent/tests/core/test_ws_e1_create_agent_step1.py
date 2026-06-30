@@ -61,16 +61,15 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  max_iterations: {max_iterations}
-  llm_role: graph_agent
-  tools:
-    - lookup
-    - finish_task
-  references:
-    - id: Guide
-      path: refs/guide.md
-      summary: Primary guide.
+max_iterations: {max_iterations}
+llm_role: graph_agent
+tools:
+  - lookup
+  - finish_task
+references:
+  - id: Guide
+    path: refs/guide.md
+    summary: Primary guide.
 ---
 <role>
 Boundary verifier.
@@ -113,9 +112,8 @@ phases:
     _write(
         root / "phases" / "child" / "SKILL.md",
         """---
-phase_config:
-  max_iterations: 1
-  llm_role: graph_agent
+max_iterations: 1
+llm_role: graph_agent
 ---
 <role>
 Child expert.
@@ -151,13 +149,12 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  max_iterations: 3
-  llm_role: graph_agent
-  subagents:
-    - name: child_expert
-      target_skill: {target_skill}
-      description: Echoes text from a child expert skill.
+max_iterations: 3
+llm_role: graph_agent
+subagents:
+  - name: child_expert
+    target_skill: {target_skill}
+    description: Echoes text from a child expert skill.
 ---
 <role>
 Parent coordinator.

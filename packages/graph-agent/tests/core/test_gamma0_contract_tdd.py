@@ -63,9 +63,9 @@ Return via finish_task.
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-{validator_line}phase_config:
-  tools:
-    - finish_task
+{validator_line}
+tools:
+  - finish_task
 ---
 <role>
 Research assistant.

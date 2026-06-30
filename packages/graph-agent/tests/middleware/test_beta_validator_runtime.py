@@ -51,14 +51,32 @@ def test_validator_return_none_accepts_finish_task_output() -> None:
     assert result.feedback is None
 
 
-def test_validator_return_dict_or_exception_becomes_agent_validator_failed_feedback() -> None:
-    """Unit: validator failure must become [F-v3-agent-validator-failed] retry feedback."""
+def test_validator_return_dict_accepts_and_exposes_enriched_output() -> None:
+    """Unit: dict return means validation passed with enriched/corrected output."""
 
     from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 
     invoke_validator = CognitiveFlowMiddleware.invoke_validator_with_contract
     dict_result = invoke_validator(
-        validator=lambda output, state_slice, **kwargs: {"reason": "too short"},
+        validator=lambda output, state_slice, **kwargs: {"answer": "ok", "score": 1},
+        output={"answer": "ok"},
+        state_slice={"inputs": {"question": "q"}},
+        phase_name="main",
+    )
+
+    assert dict_result.accepted is True
+    assert dict_result.output == {"answer": "ok", "score": 1}
+    assert dict_result.feedback is None
+
+
+def test_validator_non_dict_or_exception_becomes_agent_validator_failed_feedback() -> None:
+    """Unit: explicit contract failure must become [F-v3-agent-validator-failed] feedback."""
+
+    from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
+
+    invoke_validator = CognitiveFlowMiddleware.invoke_validator_with_contract
+    explicit_failure = invoke_validator(
+        validator=lambda output, state_slice, **kwargs: False,
         output={"answer": "ok"},
         state_slice={"inputs": {"question": "q"}},
         phase_name="main",
@@ -76,9 +94,9 @@ def test_validator_return_dict_or_exception_becomes_agent_validator_failed_feedb
         phase_name="main",
     )
 
-    assert dict_result.accepted is False
-    assert dict_result.error_code == "[F-v3-agent-validator-failed]"
-    assert "too short" in dict_result.feedback
+    assert explicit_failure.accepted is False
+    assert explicit_failure.error_code == "[F-v3-agent-validator-failed]"
+    assert "false" in explicit_failure.feedback
     assert exception_result.accepted is False
     assert exception_result.error_code == "[F-v3-agent-validator-failed]"
     assert "bad answer" in exception_result.feedback

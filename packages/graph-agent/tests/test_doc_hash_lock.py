@@ -21,7 +21,8 @@ HASH_LOCK_REMEDIATION = (
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    content = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _is_sha256_hex(value: str) -> bool:

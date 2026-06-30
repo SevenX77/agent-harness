@@ -102,10 +102,10 @@ validator: false
         root / "phases" / "reader" / "actions" / "reader.py",
         dedent(
             """
-            def reader(context):
+            def reader(inputs):
                 return {
-                    "summary": f"{context['prefix']}::{context['document_text']}",
-                    "seen_keys": sorted(context),
+                    "summary": f"{inputs['prefix']}::{inputs['document_text']}",
+                    "seen_keys": sorted(inputs),
                 }
             """
         ).lstrip(),
@@ -163,7 +163,7 @@ validator: false
     )
     _write(
         root / "phases" / "guard" / "actions" / "guard.py",
-        "def guard(context):\n    raise RuntimeError('guard stopped before reader')\n",
+        "def guard(inputs):\n    raise RuntimeError('guard stopped before reader')\n",
     )
     _write(
         root / "phases" / "reader" / "LOGIC.md",
@@ -181,7 +181,7 @@ validator: false
     )
     _write(
         root / "phases" / "reader" / "actions" / "reader.py",
-        "def reader(context):\n    return {'summary': context['document_text']}\n",
+        "def reader(inputs):\n    return {'summary': inputs['document_text']}\n",
     )
 
 

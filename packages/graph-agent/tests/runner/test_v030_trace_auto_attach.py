@@ -75,14 +75,14 @@ io:
         )
         if phase_id == "draft":
             body = (
-                "def draft(context):\n"
-                "    topic = context.get('topic', 'missing')\n"
+                "def draft(inputs):\n"
+                "    topic = inputs.get('topic', 'missing')\n"
                 "    return {'answer': f'draft:{topic}'}\n"
             )
         else:
             body = (
-                f"def {phase_id}(context):\n"
-                "    answer = context.get('answer', 'missing')\n"
+                f"def {phase_id}(inputs):\n"
+                "    answer = inputs.get('answer', 'missing')\n"
                 f"    return {{'review': '{phase_id}:' + answer}}\n"
             )
         _write(root / "phases" / phase_id / "actions" / f"{phase_id}.py", body)
@@ -117,8 +117,7 @@ def _read_trace_events(trace_path: Path) -> list[dict[str, Any]]:
 def _make_draft_phase_crash(skill_root: Path) -> None:
     _write(
         skill_root / "phases" / "draft" / "actions" / "draft.py",
-        "def draft(context):\n"
-        "    del context\n"
+        "def draft(inputs):\n"
         "    raise RuntimeError('intentional trace crash')\n",
     )
 

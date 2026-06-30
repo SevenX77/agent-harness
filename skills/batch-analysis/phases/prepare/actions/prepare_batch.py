@@ -14,9 +14,9 @@ class BatchAccumulator:
         self.location_registry = {}
 
 
-def prepare_batch(context) -> dict:
+def prepare_batch(inputs) -> dict:
     """Prepare accumulated states and format texts for batch analysis."""
-    acc_data = context.get("accumulated_context", {})
+    acc_data = inputs.get("accumulated_context", {})
 
     # 1. Load accumulated state
     if not acc_data:
@@ -41,8 +41,6 @@ def prepare_batch(context) -> dict:
         if hasattr(acc, "location_registry") and "location_registry" in acc_data:
             acc.location_registry = acc_data["location_registry"]
 
-    context["accumulator"] = acc
-
     # 2. Build batch context text
     if hasattr(acc, "build_context_text"):
         accumulated_context_text = acc.build_context_text()
@@ -58,10 +56,8 @@ def prepare_batch(context) -> dict:
             lines.append(f"Active Arcs: {acc.active_arcs}")
         accumulated_context_text = "\n".join(lines)
 
-    context["accumulated_context_text"] = accumulated_context_text
-
     # 3. Format batch events
-    events = context.get("batch_events", [])
+    events = inputs.get("batch_events", [])
     event_lines = []
     for ev in events:
         ev_id = ev.get("event_id", "unknown")
@@ -70,10 +66,8 @@ def prepare_batch(context) -> dict:
         event_lines.append(f"[{ev_id}] ({ev_type}): {content}")
 
     batch_events_text = "\n".join(event_lines)
-    context["batch_events_text"] = batch_events_text
-
     # 4. Format dynamic dimensions hint
-    dimensions = context.get("dynamic_dimensions", [])
+    dimensions = inputs.get("dynamic_dimensions", [])
     if not dimensions:
         dynamic_dimensions_hint = ""
     else:
@@ -85,15 +79,10 @@ def prepare_batch(context) -> dict:
         dim_lines.append("在分析角色状态变化时，请特别关注上述维度的变化。")
         dynamic_dimensions_hint = "\n".join(dim_lines)
 
-    context["dynamic_dimensions_hint"] = dynamic_dimensions_hint
-
     # 5. Format chapter range
-    chapter_range = context.get("chapter_range", [0, 0])
+    chapter_range = inputs.get("chapter_range", [0, 0])
     batch_chapter_range = f"{chapter_range[0]}-{chapter_range[1]}"
-    context["batch_chapter_range"] = batch_chapter_range
-
     batch_event_count = len(events)
-    context["batch_event_count"] = batch_event_count
 
     return {
         "accumulated_context_text": accumulated_context_text,

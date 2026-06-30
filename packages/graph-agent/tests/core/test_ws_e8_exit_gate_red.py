@@ -151,22 +151,21 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  max_iterations: {max_iterations}
-  io:
-    inputs:
-      type: object
-      properties:
-        topic:
-          type: string
-    outputs:
-      type: object
-      properties:
-        answer:
-          type: string
-  tools:
-    - lookup
-    - finish_task
+max_iterations: {max_iterations}
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - lookup
+  - finish_task
 ---
 <role>
 Exit gate verifier.

@@ -79,11 +79,10 @@ def _parent_skill(root: Path, target_skill: str) -> None:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  subagents:
-    - name: child_expert
-      target_skill: {target_skill}
-      description: Resolve child by skill id.
+subagents:
+  - name: child_expert
+    target_skill: {target_skill}
+    description: Resolve child by skill id.
 io:
   inputs:
     type: object

@@ -1,2 +1,2 @@
-def build(context):
-    return {"report": context["brief"]}
+def build(inputs):
+    return {"report": inputs["brief"]}

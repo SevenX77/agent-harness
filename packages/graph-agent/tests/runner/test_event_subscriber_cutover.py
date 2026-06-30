@@ -147,8 +147,8 @@ io:
     )
     _write(
         parent / "phases" / "prepare" / "actions" / "prepare.py",
-        "def prepare(context):\n"
-        "    return {'prep_note': 'prepared:' + context.get('topic', '')}\n",
+        "def prepare(inputs):\n"
+        "    return {'prep_note': 'prepared:' + inputs.get('topic', '')}\n",
     )
     _write(
         parent / "phases" / "delegate" / "SUBGRAPH.md",
@@ -169,21 +169,20 @@ io:
     _write(
         parent / "phases" / "agent" / "SKILL.md",
         """---
-phase_config:
-  io:
-    inputs:
-      type: object
-      properties:
-        topic:
-          type: string
-    outputs:
-      type: object
-      properties:
-        answer:
-          type: string
-  tools:
-    - inspect_payload
-    - finish_task
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - inspect_payload
+  - finish_task
 ---
 <role>
 Trace exerciser.
@@ -242,8 +241,7 @@ io:
     )
     _write(
         child / "phases" / "inspect" / "actions" / "inspect.py",
-        "def inspect(context):\n"
-        "    del context\n"
+        "def inspect(inputs):\n"
         "    return {'child_answer': 'child-ok'}\n",
     )
 

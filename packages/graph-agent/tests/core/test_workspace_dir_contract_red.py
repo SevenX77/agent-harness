@@ -60,8 +60,8 @@ io:
     )
     _write(
         root / "phases" / "draft" / "actions" / "draft.py",
-        "def draft(context):\n"
-        "    topic = context.get('topic', 'missing')\n"
+        "def draft(inputs):\n"
+        "    topic = inputs.get('topic', 'missing')\n"
         "    return {'answer': f'draft:{topic}'}\n",
     )
 
@@ -183,8 +183,8 @@ def test_run_skill_pathless_file_output_defaults_to_run_artifacts_dir(
     )
     action_path = skill_root / "phases" / "draft" / "actions" / "draft.py"
     action_path.write_text(
-        "def draft(context):\n"
-        "    topic = context.get('topic', 'missing')\n"
+        "def draft(inputs):\n"
+        "    topic = inputs.get('topic', 'missing')\n"
         "    return {\n"
         "        'answer': f'draft:{topic}',\n"
         "        'artifact_payload': {'topic': topic},\n"

@@ -1,2 +1,2 @@
-def assemble(context):
+def assemble(inputs):
     return None

@@ -49,10 +49,20 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
-phase_config:
-  max_iterations: 2
-  tools:
-    - finish_task
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+max_iterations: 2
+tools:
+  - finish_task
 ---
 <role>
 Executor.

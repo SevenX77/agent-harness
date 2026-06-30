@@ -1,20 +1,19 @@
 ---
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [note]
-      properties:
-        note:
-          type: string
-    outputs:
-      type: object
-      required: [echoed]
-      properties:
-        echoed:
-          type: string
-  tools:
-    - finish_task
+io:
+  inputs:
+    type: object
+    required: [note]
+    properties:
+      note:
+        type: string
+  outputs:
+    type: object
+    required: [echoed]
+    properties:
+      echoed:
+        type: string
+tools:
+  - finish_task
 ---
 <role>
 You echo a concise review note for the parent segmentation editor.

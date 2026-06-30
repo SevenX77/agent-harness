@@ -70,17 +70,27 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  tools:
-    - finish_task
-  references:
-    - id: R1
-      path: {reference_path}
-      summary: Primary reference
-  examples:
-    - id: E2
-      path: {example_path}
-      summary: Example document
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - finish_task
+references:
+  - id: R1
+    path: {reference_path}
+    summary: Primary reference
+examples:
+  - id: E2
+    path: {example_path}
+    summary: Example document
 ---
 <role>
 Resource reader.

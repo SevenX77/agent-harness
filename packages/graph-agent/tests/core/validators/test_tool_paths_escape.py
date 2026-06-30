@@ -51,7 +51,7 @@ io:
 
 
 def test_in_tree_action_reference_still_loads(tmp_path: Path, mock_skill_resolver: object) -> None:
-    _write_minimal_graph(tmp_path, "def prepare(context):\n    return {}\n")
+    _write_minimal_graph(tmp_path, "def prepare(inputs):\n    return {}\n")
 
     compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
@@ -61,7 +61,7 @@ def test_in_tree_action_reference_still_loads(tmp_path: Path, mock_skill_resolve
 def test_action_local_write_fatals_as_purity_violation(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_minimal_graph(
         tmp_path,
-        "def prepare(context):\n    open('out.txt', 'w').write('bad')\n    return {}\n",
+        "def prepare(inputs):\n    open('out.txt', 'w').write('bad')\n    return {}\n",
     )
 
     with pytest.raises(SkillLoadError) as exc_info:
@@ -70,7 +70,7 @@ def test_action_local_write_fatals_as_purity_violation(tmp_path: Path, mock_skil
 
 
 def test_root_level_actions_directory_is_rejected(tmp_path: Path, mock_skill_resolver: object) -> None:
-    _write_minimal_graph(tmp_path, "def prepare(context):\n    return {}\n")
+    _write_minimal_graph(tmp_path, "def prepare(inputs):\n    return {}\n")
     (tmp_path / "actions").mkdir()
 
     with pytest.raises(SkillLoadError, match="root-level actions/ is not allowed"):

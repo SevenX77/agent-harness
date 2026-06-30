@@ -3,9 +3,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def extract_all_events(context) -> dict:
+def extract_all_events(inputs) -> dict:
     """Collect event entries from segmentation records without nested skill calls."""
-    all_segmentations = context.get("all_segmentations", [])
+    all_segmentations = inputs.get("all_segmentations", [])
     all_events = []
 
     for seg_data in all_segmentations:

@@ -71,8 +71,8 @@ validator: false
         root / "phases" / "report" / "actions" / "report.py",
         dedent(
             """
-            def report(context):
-                return {"report_md": f"## {context['title']}\\n\\n{context['body']}"}
+            def report(inputs):
+                return {"report_md": f"## {inputs['title']}\\n\\n{inputs['body']}"}
             """
         ).lstrip(),
     )
@@ -124,7 +124,7 @@ validator: false
     )
     _write(
         root / "phases" / "report" / "actions" / "report.py",
-        "def report(context):\n    return {'report_md': context['body']}\n",
+        "def report(inputs):\n    return {'report_md': inputs['body']}\n",
     )
 
 

@@ -165,3 +165,60 @@ async def test_autoshare_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(llm_router, "CommunityUploadClient", BoomClient)
     # Must not raise — a probe never fails because background sharing did.
     await llm_router._autoshare_after_probe_best_effort()
+
+
+@pytest.mark.anyio
+async def test_autoshare_logs_uploaded_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    # W2-E.1c: a successful auto-share records an `autoshare_uploaded` activity with
+    # the contributed count, so General settings can show the upload happened.
+    monkeypatch.setattr(llm_router, "get_backend_config", _enabled_config)
+    _patch_metadata(monkeypatch, catalog_enabled=True)
+    monkeypatch.setattr(llm_router, "load_credentials", lambda: object())
+    monkeypatch.setattr(llm_router, "collect_uploadable", lambda *a, **k: [object(), object()])
+    monkeypatch.setattr(llm_router, "batch_idempotency_key", lambda uploads: "key-1")
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def upload_batch(self, records: object, *, idempotency_key: str) -> object:
+            return object()
+
+    monkeypatch.setattr(llm_router, "CommunityUploadClient", FakeClient)
+    logged: list[dict[str, object]] = []
+    monkeypatch.setattr(llm_router, "record_runtime_activity", lambda **k: logged.append(k))
+
+    await llm_router._autoshare_after_probe_best_effort()
+
+    uploaded = [event for event in logged if event["action"] == "autoshare_uploaded"]
+    assert len(uploaded) == 1
+    assert uploaded[0]["source_id"] == "llm_credentials"
+    assert uploaded[0]["changes"] == {"uploaded_count": 2}
+
+
+@pytest.mark.anyio
+async def test_autoshare_logs_failed_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    # W2-E.1c: a failed upload records an `autoshare_failed` activity (and still never
+    # propagates out of the best-effort hook).
+    monkeypatch.setattr(llm_router, "get_backend_config", _enabled_config)
+    _patch_metadata(monkeypatch, catalog_enabled=True)
+    monkeypatch.setattr(llm_router, "load_credentials", lambda: object())
+    monkeypatch.setattr(llm_router, "collect_uploadable", lambda *a, **k: [object()])
+    monkeypatch.setattr(llm_router, "batch_idempotency_key", lambda uploads: "key-1")
+
+    class BoomClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def upload_batch(self, records: object, *, idempotency_key: str) -> object:
+            raise RuntimeError("gate down")
+
+    monkeypatch.setattr(llm_router, "CommunityUploadClient", BoomClient)
+    logged: list[dict[str, object]] = []
+    monkeypatch.setattr(llm_router, "record_runtime_activity", lambda **k: logged.append(k))
+
+    await llm_router._autoshare_after_probe_best_effort()  # must not raise
+
+    failed = [event for event in logged if event["action"] == "autoshare_failed"]
+    assert len(failed) == 1
+    assert failed[0]["changes"]["attempted_count"] == 1

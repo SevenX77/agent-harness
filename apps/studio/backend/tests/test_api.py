@@ -1470,8 +1470,7 @@ io:
 ---
 <action>prepare</action>
 """,
-        "phases/setup/actions/prepare.py": """def prepare(context):
-    context.set("prepared", True)
+        "phases/setup/actions/prepare.py": """def prepare(inputs):
     return {"prepared": True}
 """,
     }

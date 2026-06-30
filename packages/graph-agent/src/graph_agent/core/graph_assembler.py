@@ -3,8 +3,10 @@
 import asyncio
 import contextvars
 import copy
+import importlib.util
 import json
 import logging
+import sys
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
@@ -68,6 +70,7 @@ from graph_agent.core.subagents import (
     current_subagent_depth,
     validate_subagent_tool_args,
 )
+from graph_agent.core.validator_contract import VALIDATOR_SIGNATURE
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
@@ -250,6 +253,7 @@ def _build_phase_node(
             ast,
             _build_logic_node(phase_id, ast, compiled),
             node_kind="logic",
+            source_path=phase_doc.path,
             callbacks=callbacks,
         )
     if isinstance(ast, SubgraphNodeAST):
@@ -271,6 +275,7 @@ def _build_phase_node(
                 predict_context=predict_context,
             ),
             node_kind="subgraph",
+            source_path=phase_doc.path,
             callbacks=callbacks,
         )
     if isinstance(ast, AgentNodeAST):
@@ -294,6 +299,7 @@ def _build_phase_node(
                 predict_context=predict_context,
             ),
             node_kind="agent",
+            source_path=phase_doc.path,
             callbacks=callbacks,
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
@@ -874,6 +880,37 @@ def _build_loop_iterate_phase(
     return _loop_phase
 
 
+def _phase_uses_batch_item_outputs(phase_ast: Any) -> bool:
+    iterate = getattr(phase_ast, "iterate", None)
+    return getattr(phase_ast, "batch", None) is not None or (
+        iterate is not None and getattr(iterate, "mode", None) == "batch"
+    )
+
+
+def _batch_item_output_schema(output_schema: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(output_schema, dict):
+        return output_schema
+    properties = output_schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(output_schema)
+
+    item_properties: dict[str, Any] = {}
+    for key, prop_schema in properties.items():
+        if not isinstance(prop_schema, dict):
+            item_properties[key] = prop_schema
+            continue
+        items_schema = prop_schema.get("items")
+        if prop_schema.get("type") == "array" and isinstance(items_schema, dict):
+            item_properties[key] = items_schema
+        else:
+            item_properties[key] = prop_schema
+
+    item_schema = dict(output_schema)
+    item_schema["properties"] = item_properties
+    item_schema.pop("required", None)
+    return item_schema
+
+
 def _iteration_config(config: RunnableConfig | None, iteration_index: int) -> RunnableConfig:
     inner_config: dict[str, Any] = dict(config or {})
     configurable = dict(inner_config.get("configurable", {}))
@@ -1007,13 +1044,23 @@ def _wrap_phase_runtime_node(
     node: Any,
     *,
     node_kind: str,
+    source_path: Path,
     callbacks: Any | None,
 ) -> Any:
     io = getattr(phase_ast, "io", None)
     input_schema = getattr(io, "inputs", None) if io is not None else None
     output_schema = getattr(io, "outputs", None) if io is not None else None
+    mapper_output_schema = output_schema
+    if _phase_uses_batch_item_outputs(phase_ast):
+        mapper_output_schema = _batch_item_output_schema(output_schema)
 
-    mapper = StateMapper(input_schema, output_schema, phase_id=phase_id)
+    mapper = StateMapper(input_schema, mapper_output_schema, phase_id=phase_id)
+    validator = _load_phase_validator(
+        phase_id=phase_id,
+        source_path=source_path,
+        node_kind=node_kind,
+        enabled=bool(getattr(phase_ast, "validator", False)),
+    )
 
     def _node_with_lifecycle(state: WorkflowState) -> dict[str, Any]:
         _safe_emit_event(
@@ -1033,7 +1080,12 @@ def _wrap_phase_runtime_node(
                 ),
             )
 
-    phase_runner = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
+    phase_runner = PhaseWrapper(
+        mapper,
+        node_kind=node_kind,
+        validator=validator,
+        validator_error_code=f"[F-v3-{node_kind}-validator-failed]",
+    ).wrap(_node_with_lifecycle)
 
     def _dispatch_and_run(state: WorkflowState) -> WorkflowState:
         _emit_input_dispatch(callbacks, phase_id=phase_id, mapper=mapper, state=state)
@@ -1062,6 +1114,78 @@ def _wrap_phase_runtime_node(
             output_schema,
         )
     return wrapped
+
+
+def _load_phase_validator(
+    *,
+    phase_id: str,
+    source_path: Path,
+    node_kind: str,
+    enabled: bool,
+) -> Callable[..., dict[str, Any] | None] | None:
+    if not enabled:
+        return None
+    validator_path = source_path.parent / "validator.py"
+    if not validator_path.is_file():
+        _phase_validator_fatal(
+            phase_id=phase_id,
+            node_kind=node_kind,
+            detail=f"{validator_path} missing; expected {VALIDATOR_SIGNATURE}",
+            source_path=validator_path,
+        )
+    module_name = f"_graph_agent_validator_{abs(hash(validator_path.resolve()))}"
+    previous_write_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location(module_name, validator_path)
+        if spec is None or spec.loader is None:
+            _phase_validator_fatal(
+                phase_id=phase_id,
+                node_kind=node_kind,
+                detail=f"{validator_path} could not create import spec",
+                source_path=validator_path,
+            )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except GraphAgentFatalError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - validator import failure is a validator failure
+        _phase_validator_fatal(
+            phase_id=phase_id,
+            node_kind=node_kind,
+            detail=f"{validator_path} validator import failed: {type(exc).__name__}: {exc}",
+            source_path=validator_path,
+        )
+    finally:
+        sys.dont_write_bytecode = previous_write_bytecode
+    validate = getattr(module, "validate", None)
+    if not callable(validate):
+        _phase_validator_fatal(
+            phase_id=phase_id,
+            node_kind=node_kind,
+            detail=f"{validator_path} must define {VALIDATOR_SIGNATURE}",
+            source_path=validator_path,
+        )
+    return cast(Callable[..., dict[str, Any] | None], validate)
+
+
+def _phase_validator_fatal(
+    *,
+    phase_id: str,
+    node_kind: str,
+    detail: str,
+    source_path: Path,
+) -> NoReturn:
+    code = f"[F-v3-{node_kind}-validator-failed]"
+    raise GraphAgentFatalError(
+        detail,
+        payload=make_error_payload(
+            code,
+            detail,
+            phase_id=phase_id,
+            source_path=source_path,
+        ),
+    )
 
 
 def _wrap_declared_input_files(
@@ -1545,7 +1669,7 @@ def _build_skill_node(
         chat_model=phase_chat_model,
     )
 
-    output_schema = _terminal_output_schema(phase_id, compiled)
+    output_schema = phase_ast.io.outputs if phase_ast.io is not None else None
     finish_task = _build_agent_finish_task_tool(
         output_schema,
         chat_model=phase_chat_model,
@@ -1676,13 +1800,18 @@ def _build_skill_node(
     all_tools = [*rewired_business_tools, *framework_tools, finish_task]
 
     # Coerce output_schema if it's a dict to SchemaObject, then get Pydantic model
-    from graph_agent.core.schema_engine import SchemaEngine
+    from pydantic import BaseModel
+
+    from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+
     engine = SchemaEngine()
-    coerced_schema = output_schema
-    if isinstance(output_schema, dict):
+    coerced_schema: SchemaObject | None = None
+    if isinstance(output_schema, SchemaObject):
+        coerced_schema = output_schema
+    elif isinstance(output_schema, dict):
         coerced_schema = engine.parse_from_md(json.dumps(output_schema, ensure_ascii=False))
 
-    current_phase_schema = coerced_schema
+    current_phase_schema: type[BaseModel] | SchemaObject | None = coerced_schema
     if coerced_schema is not None:
         current_phase_schema = engine.get_pydantic_model(coerced_schema)
 

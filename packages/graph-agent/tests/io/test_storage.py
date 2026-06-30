@@ -89,7 +89,7 @@ class TestStorageManagerBasics:
             mgr_query.load_latest(phase=None, name="report.md")
 
         assert exc_info.value.error_code == "artifact.legacy_storage_forbidden"
-        assert exc_info.value.details["path"].endswith("20260401/report.md")
+        assert Path(exc_info.value.details["path"]).parts[-2:] == ("20260401", "report.md")
 
     def test_load_latest_legacy_returns_newest_run_for_migration(self, workspace: Path) -> None:
         # Seed two runs; the lexicographically greater name should win.

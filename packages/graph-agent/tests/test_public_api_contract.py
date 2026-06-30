@@ -473,7 +473,7 @@ EXEMPTION_ID_PATTERN = re.compile(r"^EX-[0-9]{4}-[a-z0-9-]+$")
 
 
 def _load_contract_exemptions(path: Path = EXEMPTIONS_PATH) -> list[dict[str, object]]:
-    data = yaml.safe_load(path.read_text()) or {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     exemptions = data.get("exemptions", [])
     assert isinstance(exemptions, list), "contract exemptions must be a list"
 

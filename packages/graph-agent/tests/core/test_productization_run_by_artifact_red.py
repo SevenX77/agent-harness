@@ -144,8 +144,8 @@ io:
     )
     _write_text(
         root / "phases" / "prepare" / "actions" / "prepare.py",
-        "def prepare(context):\n"
-        "    return {'prepared': 'prepared:' + str(context.get('topic', 'missing'))}\n",
+        "def prepare(inputs):\n"
+        "    return {'prepared': 'prepared:' + str(inputs.get('topic', 'missing'))}\n",
     )
     _write_text(
         root / "phases" / "draft" / "LOGIC.md",
@@ -167,8 +167,8 @@ io:
     )
     _write_text(
         root / "phases" / "draft" / "actions" / "draft.py",
-        "def draft(context):\n"
-        "    return {'answer': 'answer:' + str(context.get('prepared', 'missing'))}\n",
+        "def draft(inputs):\n"
+        "    return {'answer': 'answer:' + str(inputs.get('prepared', 'missing'))}\n",
     )
 
 
@@ -199,22 +199,21 @@ phases:
         root / "phases" / "draft" / "SKILL.md",
         """---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      properties:
-        topic:
-          type: string
-    outputs:
-      type: object
-      required: [answer]
-      properties:
-        answer:
-          type: string
-  tools:
-    - finish_task
-  max_iterations: 2
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    required: [answer]
+    properties:
+      answer:
+        type: string
+tools:
+  - finish_task
+max_iterations: 2
 ---
 <role>
 You draft a short answer.
@@ -498,7 +497,11 @@ def test_predict_graph_resolves_engine_predict_model_before_live_provider(
     class _Agent:
         def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
             del config, kwargs
-            return input
+            return {
+                "data": {"answer": "mocked"},
+                "flow": input.get("flow", {}),
+                "messages": input.get("messages", []),
+            }
 
     def fake_create_agent(**kwargs: Any) -> _Agent:
         captured["model"] = kwargs["model"]
@@ -541,7 +544,11 @@ def test_predict_graph_predict_context_overrides_explicit_chat_model(
     class _Agent:
         def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
             del config, kwargs
-            return input
+            return {
+                "data": {"answer": "mocked"},
+                "flow": input.get("flow", {}),
+                "messages": input.get("messages", []),
+            }
 
     def fake_create_agent(**kwargs: Any) -> _Agent:
         captured["model"] = kwargs["model"]

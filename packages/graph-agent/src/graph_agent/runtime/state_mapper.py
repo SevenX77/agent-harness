@@ -8,10 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 
 logger = logging.getLogger(__name__)
+PhaseValidator = Callable[..., dict[str, Any] | None]
 
 def schema_properties(schema: dict[str, Any] | None) -> set[str]:
     if not isinstance(schema, dict):
@@ -31,6 +35,29 @@ def filter_runtime_inputs(
     if not keys:
         return dict(raw_inputs)
     return {key: raw_inputs[key] for key in keys if key in raw_inputs}
+
+
+def _project_full_data_to_phase_updates(
+    after_data: dict[str, Any],
+    before_data: dict[str, Any],
+    output_schema: dict[str, Any] | None,
+    phase_id: str,
+) -> dict[str, Any]:
+    phase_outputs = after_data.get("phase_outputs")
+    if isinstance(phase_outputs, dict):
+        own_outputs = phase_outputs.get(phase_id)
+        if isinstance(own_outputs, dict):
+            return dict(own_outputs)
+
+    output_keys = schema_properties(output_schema)
+    if output_keys:
+        return {key: after_data[key] for key in output_keys if key in after_data}
+
+    return {
+        key: value
+        for key, value in after_data.items()
+        if key != "phase_outputs" and before_data.get(key) != value
+    }
 
 
 @dataclass(frozen=True)
@@ -79,7 +106,15 @@ class StateMapper:
             messages=list(state.get("messages", [])),
         )
 
-    def wrap_phase_output(self, state: WorkflowState, updates: dict[str, Any] | WorkflowState) -> WorkflowState:
+    def wrap_phase_output(
+        self,
+        state: WorkflowState,
+        updates: dict[str, Any] | WorkflowState,
+        *,
+        state_slice: dict[str, Any] | None = None,
+        validator: PhaseValidator | None = None,
+        validator_error_code: str | None = None,
+    ) -> WorkflowState:
         """Validate updates against the output schema and merge into WorkflowState."""
         data_obj = state.get("data")
         if isinstance(data_obj, dict):
@@ -108,6 +143,7 @@ class StateMapper:
             flow=flow_obj,
             messages=list(state.get("messages", [])),
         )
+        before_data = data_obj.model_dump()
 
         is_workflow_state = (
             isinstance(updates, dict)
@@ -117,7 +153,18 @@ class StateMapper:
             and not isinstance(updates.get("data"), dict)
         )
         if is_workflow_state:
-            return cast(WorkflowState, updates)
+            workflow_updates = cast(WorkflowState, updates)
+            after_data = workflow_updates["data"].model_dump()
+            updates = {
+                "data": _project_full_data_to_phase_updates(
+                    after_data,
+                    before_data,
+                    self.output_schema,
+                    self.phase_id,
+                ),
+                "flow": workflow_updates["flow"],
+                "messages": workflow_updates["messages"],
+            }
 
         if not isinstance(updates, dict):
             return state
@@ -127,33 +174,44 @@ class StateMapper:
         if not isinstance(updates_dict, dict):
             updates_dict = {}
 
-        # Drop the reserved phase_outputs meta-accumulator from a node/subgraph's
-        # returned updates: a child graph's internal phase_outputs must not cross the
-        # subgraph IO boundary into the parent's business namespace or output-schema
-        # validation. The child's declared outputs remain as top-level flat fields,
-        # so nothing real is lost; this phase's phase_outputs is re-derived below.
-        if "phase_outputs" in updates_dict:
-            updates_dict = {k: v for k, v in updates_dict.items() if k != "phase_outputs"}
-
         if "phase_outputs" in updates_dict or "inputs" in updates_dict:
             flat_updates = {}
             if "phase_outputs" in updates_dict and isinstance(updates_dict["phase_outputs"], dict):
-                for p_val in updates_dict["phase_outputs"].values():
-                    if isinstance(p_val, dict):
-                        flat_updates.update(p_val)
-            if "inputs" in updates_dict and isinstance(updates_dict["inputs"], dict):
+                own_outputs = updates_dict["phase_outputs"].get(self.phase_id)
+                if isinstance(own_outputs, dict):
+                    flat_updates.update(own_outputs)
+                elif schema_properties(self.output_schema):
+                    flat_updates.update(
+                        {
+                            key: updates_dict[key]
+                            for key in schema_properties(self.output_schema)
+                            if key in updates_dict
+                        }
+                    )
+                else:
+                    for p_val in updates_dict["phase_outputs"].values():
+                        if isinstance(p_val, dict):
+                            flat_updates.update(p_val)
+            if not flat_updates and "inputs" in updates_dict and isinstance(updates_dict["inputs"], dict):
                 flat_updates.update(updates_dict["inputs"])
             updates_dict = flat_updates
 
-        allowed = schema_properties(self.output_schema)
-        if allowed:
-            invalid = sorted(key for key in updates_dict if key not in allowed)
-            if invalid:
-                detail = "phase wrote undeclared keys: " + ", ".join(invalid)
-                raise GraphAgentFatalError(
-                    detail,
-                    payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
-                )
+        _validate_phase_updates_against_schema(
+            updates_dict,
+            self.output_schema,
+            code="[F-v3-runtime-state-mapping-failed]",
+            phase_id=self.phase_id,
+        )
+
+        if validator is not None:
+            updates_dict = _run_phase_validator(
+                validator,
+                output=updates_dict,
+                state_slice=state_slice or {},
+                phase_id=self.phase_id,
+                output_schema=self.output_schema,
+                code=validator_error_code or "[F-v3-agent-validator-failed]",
+            )
 
         # Merge updates type-safely into the business data namespace
         new_state = StateManager.update_business(state, **updates_dict)
@@ -197,6 +255,97 @@ class StateMapper:
         return new_state
 
 
+def _validate_phase_updates_against_schema(
+    updates: dict[str, Any],
+    schema: dict[str, Any] | None,
+    *,
+    code: str,
+    phase_id: str,
+) -> None:
+    allowed = schema_properties(schema)
+    if allowed:
+        invalid = sorted(key for key in updates if key not in allowed)
+        if invalid:
+            _phase_mapping_fatal(
+                "phase wrote undeclared keys: " + ", ".join(invalid),
+                code=code,
+                phase_id=phase_id,
+                field_path=invalid[0],
+            )
+    if not isinstance(schema, dict) or not schema:
+        return
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        _phase_mapping_fatal(
+            f"phase output schema invalid: {exc.message}",
+            code=code,
+            phase_id=phase_id,
+        )
+    errors = sorted(Draft202012Validator(schema).iter_errors(updates), key=str)
+    if errors:
+        first = errors[0]
+        path = ".".join(str(part) for part in first.path) or None
+        _phase_mapping_fatal(
+            f"phase output schema validation failed: {first.message}",
+            code=code,
+            phase_id=phase_id,
+            field_path=path,
+        )
+
+
+def _run_phase_validator(
+    validator: PhaseValidator,
+    *,
+    output: dict[str, Any],
+    state_slice: dict[str, Any],
+    phase_id: str,
+    output_schema: dict[str, Any] | None,
+    code: str,
+) -> dict[str, Any]:
+    try:
+        result = validator(dict(output), dict(state_slice), phase_name=phase_id)
+    except Exception as exc:  # noqa: BLE001 - user validator failures become runtime contract errors
+        _phase_mapping_fatal(
+            f"phase validator failed: {type(exc).__name__}: {exc}",
+            code=code,
+            phase_id=phase_id,
+        )
+    if result is None:
+        return dict(output)
+    if not isinstance(result, dict):
+        _phase_mapping_fatal(
+            f"phase validator returned {type(result).__name__}, expected None or dict",
+            code=code,
+            phase_id=phase_id,
+        )
+    _validate_phase_updates_against_schema(
+        result,
+        output_schema,
+        code=code,
+        phase_id=phase_id,
+    )
+    return dict(result)
+
+
+def _phase_mapping_fatal(
+    detail: str,
+    *,
+    code: str,
+    phase_id: str,
+    field_path: str | None = None,
+) -> None:
+    raise GraphAgentFatalError(
+        detail,
+        payload=make_error_payload(
+            code,
+            detail,
+            phase_id=phase_id,
+            field_path=field_path,
+        ),
+    )
+
+
 def phase_inputs_from_state(state: WorkflowState) -> dict[str, Any]:
     return state["data"].model_dump()
 
@@ -222,6 +371,8 @@ class PhaseWrapper:
 
     mapper: StateMapper
     node_kind: str = "unknown"
+    validator: PhaseValidator | None = None
+    validator_error_code: str | None = None
 
     def wrap(
         self,
@@ -242,7 +393,13 @@ class PhaseWrapper:
                 # Execute the phase node
                 result = node(phase_input)
                 # Map outputs type-safely back to WorkflowState
-                return self.mapper.wrap_phase_output(state, result)
+                return self.mapper.wrap_phase_output(
+                    state,
+                    result,
+                    state_slice=phase_input["data"].model_dump(),
+                    validator=self.validator,
+                    validator_error_code=self.validator_error_code,
+                )
             except GraphAgentFatalError:
                 raise
             except Exception as exc:

@@ -1,7 +1,7 @@
-"""γ0 validator contract placeholders.
+"""Shared v0.3.0 phase validator runtime contract.
 
-Runtime validator loading is implemented in later PRs. This module only pins
-the signature and error-code contract so compile/runtime work cannot drift.
+The compiler/runtime use this module as the single place for the sibling
+``validator.py`` signature and fatal error-code contract.
 """
 
 from __future__ import annotations

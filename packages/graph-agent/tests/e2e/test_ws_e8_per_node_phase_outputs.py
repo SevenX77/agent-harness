@@ -77,8 +77,8 @@ validator: false
         root / "phases" / "segment" / "actions" / "segment.py",
         dedent(
             """
-            def segment(context):
-                return {"segments": context["topic"] + "::seg"}
+            def segment(inputs):
+                return {"segments": inputs["topic"] + "::seg"}
             """
         ).lstrip(),
     )
@@ -106,8 +106,8 @@ validator: false
         root / "phases" / "expand" / "actions" / "expand.py",
         dedent(
             """
-            def expand(context):
-                return {"report": context["segments"] + "::report"}
+            def expand(inputs):
+                return {"report": inputs["segments"] + "::report"}
             """
         ).lstrip(),
     )
@@ -205,8 +205,8 @@ batch:
     (logic_dir / "actions" / "worker.py").write_text(
         dedent(
             """
-            def worker(context):
-                return {"seen": context["item"]}
+            def worker(inputs):
+                return {"seen": inputs["item"]}
             """
         ).lstrip(),
         encoding="utf-8",

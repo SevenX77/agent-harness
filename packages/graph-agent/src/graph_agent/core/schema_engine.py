@@ -358,9 +358,20 @@ def _descriptor_from_json_value(value: Any) -> Any:
         descriptor, _ = _parse_declared_type(value)
         return descriptor
     if isinstance(value, dict):
-        if "type" in value and set(value).issubset({"type", "description"}):
-            descriptor, _ = _parse_declared_type(str(value["type"]))
+        schema_type = value.get("type")
+        if schema_type == "array":
+            items = value.get("items", {})
+            item_descriptor = Any if items == {} else _descriptor_from_json_value(items)
+            return ListType(item_descriptor)
+        if schema_type == "object":
+            if isinstance(value.get("properties"), dict):
+                return _schema_from_mapping(cast(dict[str, Any], value))
+            return dict[str, Any]
+        if isinstance(schema_type, str) and set(value).issubset({"type", "description"}):
+            descriptor, _ = _parse_declared_type(schema_type)
             return descriptor
+        if isinstance(value.get("properties"), dict):
+            return _schema_from_mapping(cast(dict[str, Any], value))
         return _schema_from_mapping(cast(dict[str, Any], value))
     if isinstance(value, list):
         if len(value) != 1:

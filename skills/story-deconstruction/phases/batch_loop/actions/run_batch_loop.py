@@ -3,9 +3,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def run_batch_loop(context) -> dict:
+def run_batch_loop(inputs) -> dict:
     """Group flattened events into deterministic batches without nested skill calls."""
-    all_events = context.get("all_events", [])
+    all_events = inputs.get("all_events", [])
 
     flat_events = []
     for ch in all_events:
@@ -47,5 +47,5 @@ def run_batch_loop(context) -> dict:
     return {
         "batch_outputs": all_batch_results,
         "accumulated_context": accumulated_context,
-        "entity_registry": accumulated_context.get("entity_registry", {}),
+        "entity_registry": accumulated_inputs.get("entity_registry", {}),
     }

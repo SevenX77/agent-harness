@@ -13,6 +13,7 @@ Public API:
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import re
 import sys
@@ -300,7 +301,11 @@ def parse_md(md_text: str, schema: type[BaseModel]) -> list[ParsedBlock]:
 
     parsed: list[ParsedBlock] = []
     for item_id, block_lines in blocks:
-        data = _parse_block_data(block_lines, annotations)
+        json_data = _parse_json_block(block_lines)
+        if json_data is _JSON_BLOCK_MISSING:
+            data = _parse_block_data(block_lines, annotations)
+        else:
+            data = _data_from_json_block(item_id, json_data, annotations)
         parsed.append(ParsedBlock(meta=BlockMeta(id=item_id), data=data))
 
     logger.info("parse_md: schema=%s parsed=%d items", schema.__name__, len(parsed))
@@ -327,6 +332,50 @@ def _split_into_blocks(md_text: str) -> list[tuple[str, list[str]]]:
         blocks.append((current_id, current_lines))
 
     return blocks
+
+
+_JSON_BLOCK_MISSING = object()
+
+
+def _parse_json_block(lines: list[str]) -> Any:
+    meaningful = [line.strip() for line in lines if line.strip()]
+    if not meaningful:
+        return _JSON_BLOCK_MISSING
+
+    if meaningful[0].startswith("```") and meaningful[-1] == "```":
+        payload = "\n".join(meaningful[1:-1]).strip()
+    else:
+        payload = "\n".join(meaningful).strip()
+
+    if not (
+        (payload.startswith("{") and payload.endswith("}"))
+        or (payload.startswith("[") and payload.endswith("]"))
+    ):
+        return _JSON_BLOCK_MISSING
+
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        logger.warning("parse_md: invalid JSON block, falling back to line parser")
+        return _JSON_BLOCK_MISSING
+
+
+def _data_from_json_block(
+    item_id: str,
+    json_data: Any,
+    annotations: dict[str, Any],
+) -> dict[str, Any]:
+    if isinstance(json_data, dict):
+        if item_id in annotations and item_id not in json_data:
+            return {item_id: json_data}
+        return json_data
+    if item_id in annotations:
+        return {item_id: json_data}
+    logger.warning(
+        "parse_md: JSON block under %r is not an object and cannot be mapped to schema",
+        item_id,
+    )
+    return {}
 
 
 def _parse_block_data(

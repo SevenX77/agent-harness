@@ -86,7 +86,7 @@ def _assert_compile_purity_fatal(
             """
             from graph_agent import run_skill
 
-            def prepare(context):
+            def prepare(inputs):
                 run_skill("child.skill", workspace_dir="workspace")
                 return {}
             """,
@@ -94,7 +94,7 @@ def _assert_compile_purity_fatal(
         ),
         (
             """
-            def prepare(context):
+            def prepare(inputs):
                 open("input.txt").read()
                 return {}
             """,
@@ -102,7 +102,7 @@ def _assert_compile_purity_fatal(
         ),
         (
             """
-            def prepare(context):
+            def prepare(inputs):
                 open("out.txt", "w").write("bad")
                 return {}
             """,
@@ -112,7 +112,7 @@ def _assert_compile_purity_fatal(
             """
             import sys
 
-            def prepare(context):
+            def prepare(inputs):
                 sys.path.append("../outside")
                 return {}
             """,
@@ -122,7 +122,7 @@ def _assert_compile_purity_fatal(
             """
             import sys
 
-            def prepare(context):
+            def prepare(inputs):
                 sys.path = ["../outside"]
                 return {}
             """,
@@ -132,7 +132,7 @@ def _assert_compile_purity_fatal(
             """
             import sys
 
-            def prepare(context):
+            def prepare(inputs):
                 sys.path[0] = "../outside"
                 return {}
             """,
@@ -142,7 +142,7 @@ def _assert_compile_purity_fatal(
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 Path("input.txt").exists()
                 return {}
             """,
@@ -152,7 +152,7 @@ def _assert_compile_purity_fatal(
             """
             import glob
 
-            def prepare(context):
+            def prepare(inputs):
                 glob.glob("*.txt")
                 return {}
             """,
@@ -162,7 +162,7 @@ def _assert_compile_purity_fatal(
             """
             import importlib
 
-            def prepare(context):
+            def prepare(inputs):
                 runner = importlib.import_module("graph_agent.core.runner")
                 runner.run_skill("child.skill", workspace_dir="workspace")
                 return {}
@@ -194,7 +194,7 @@ def test_pure_action_still_compiles_under_le2_purity(
         """
         import json
 
-        def prepare(context):
+        def prepare(inputs):
             payload = json.loads("{}")
             value = str(payload.get("value", "ok")).strip()
             return {}

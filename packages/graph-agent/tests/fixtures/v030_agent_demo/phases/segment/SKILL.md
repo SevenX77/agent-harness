@@ -1,37 +1,36 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [chapter_content]
-      properties:
-        chapter_content:
-          type: string
-    outputs:
-      type: object
-      required: [segments]
-      properties:
-        segments:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  subagents:
-    - name: echo_expert
-      target_skill: demo.echo_agent
-      description: Echoes a short review note for smoke coverage.
-  subgraphs: []
-  references:
-    - id: R1
-      path: references/architecture_guide.md
-      summary: Narrative segmentation decision rules.
-  examples:
-    - id: E2
-      path: examples/long_crossover_example.md
-      summary: Long mixed timeline segmentation example.
-  max_iterations: 10
+io:
+  inputs:
+    type: object
+    required: [chapter_content]
+    properties:
+      chapter_content:
+        type: string
+  outputs:
+    type: object
+    required: [segments]
+    properties:
+      segments:
+        type: array
+        items:
+          type: object
+tools:
+  - finish_task
+subagents:
+  - name: echo_expert
+    target_skill: demo.echo_agent
+    description: Echoes a short review note for smoke coverage.
+subgraphs: []
+references:
+  - id: R1
+    path: references/architecture_guide.md
+    summary: Narrative segmentation decision rules.
+examples:
+  - id: E2
+    path: examples/long_crossover_example.md
+    summary: Long mixed timeline segmentation example.
+max_iterations: 10
 ---
 <role>
 You are a narrative segmentation editor.

@@ -59,21 +59,21 @@ phases:
         "prepare",
         inputs=graph_input,
         outputs=_schema({"prepared": {"type": "string"}}, required=["prepared"]),
-        action_body='return {"prepared": f"prepared:{context[\'topic\']}"}',
+        action_body='return {"prepared": f"prepared:{inputs[\'topic\']}"}',
     )
     _logic_phase(
         root,
         "branch_a",
         inputs=_schema({"prepared": {"type": "string"}}, required=["prepared"]),
         outputs=_schema({"a": {"type": "string"}}, required=["a"]),
-        action_body='return {"a": f"a:{context[\'prepared\']}"}',
+        action_body='return {"a": f"a:{inputs[\'prepared\']}"}',
     )
     _logic_phase(
         root,
         "branch_b",
         inputs=_schema({"prepared": {"type": "string"}}, required=["prepared"]),
         outputs=_schema({"b": {"type": "string"}}, required=["b"]),
-        action_body='return {"b": f"b:{context[\'prepared\']}"}',
+        action_body='return {"b": f"b:{inputs[\'prepared\']}"}',
     )
     _logic_phase(
         root,
@@ -83,7 +83,7 @@ phases:
             required=["a", "b"],
         ),
         outputs=_schema({"summary": {"type": "string"}}, required=["summary"]),
-        action_body='return {"summary": f"{context[\'a\']}|{context[\'b\']}"}',
+        action_body='return {"summary": f"{inputs[\'a\']}|{inputs[\'b\']}"}',
     )
 
 
@@ -113,7 +113,7 @@ validator: false
         root / "phases" / phase_id / "actions" / f"{phase_id}.py",
         dedent(
             f"""
-            def {phase_id}(context):
+            def {phase_id}(inputs):
                 {action_body}
             """
         ).lstrip(),

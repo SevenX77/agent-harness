@@ -47,7 +47,7 @@ io:
             encoding="utf-8",
         )
         (root / "phases" / phase_id / "actions" / f"{phase_id}.py").write_text(
-            f"def {phase_id}(context):\n    return {{}}\n",
+            f"def {phase_id}(inputs):\n    return {{}}\n",
             encoding="utf-8",
         )
 

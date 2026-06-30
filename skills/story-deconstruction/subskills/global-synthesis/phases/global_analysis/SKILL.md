@@ -1,39 +1,38 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [batch_outputs, accumulated_context, entity_registry]
-      properties:
-        batch_outputs:
-          type: array
-          items:
-            type: object
-        accumulated_context:
+io:
+  inputs:
+    type: object
+    required: [batch_outputs, accumulated_context, entity_registry]
+    properties:
+      batch_outputs:
+        type: array
+        items:
           type: object
-        entity_registry:
+      accumulated_context:
+        type: object
+      entity_registry:
+        type: object
+  outputs:
+    type: object
+    required: [climax_ranking, character_ranking, foreshadowing_closure]
+    properties:
+      climax_ranking:
+        type: array
+        items:
           type: object
-    outputs:
-      type: object
-      required: [climax_ranking, character_ranking, foreshadowing_closure]
-      properties:
-        climax_ranking:
-          type: array
-          items:
-            type: object
-        character_ranking:
-          type: array
-          items:
-            type: object
-        foreshadowing_closure:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  max_iterations: 15
-  validator: true
+      character_ranking:
+        type: array
+        items:
+          type: object
+      foreshadowing_closure:
+        type: array
+        items:
+          type: object
+tools:
+  - finish_task
+max_iterations: 15
+validator: true
 ---
 
 <role>

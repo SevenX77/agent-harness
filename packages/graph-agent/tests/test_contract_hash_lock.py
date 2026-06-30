@@ -30,11 +30,12 @@ EXPECTED_CONTRACT_HASHES = {
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    content = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _load_hash_exemptions() -> set[str]:
-    data = yaml.safe_load(EXEMPTIONS_PATH.read_text()) or {}
+    data = yaml.safe_load(EXEMPTIONS_PATH.read_text(encoding="utf-8")) or {}
     exemptions = data.get("exemptions", [])
     assert isinstance(exemptions, list), "contract exemptions must be a list"
 

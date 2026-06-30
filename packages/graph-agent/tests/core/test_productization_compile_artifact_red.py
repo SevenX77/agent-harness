@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -60,8 +61,8 @@ io:
     )
     _write_text(
         root / "phases" / "draft" / "actions" / "draft.py",
-        "def draft(context):\n"
-        "    return {'answer': 'draft:' + str(context.get('topic', ''))}\n",
+        "def draft(inputs):\n"
+        "    return {'answer': 'draft:' + str(inputs.get('topic', ''))}\n",
     )
 
 
@@ -176,8 +177,8 @@ io:
     )
     _write_text(
         second_root / "phases" / "review" / "actions" / "review.py",
-        "def review(context):\n"
-        "    return {'topic': context.get('topic', '')}\n",
+        "def review(inputs):\n"
+        "    return {'topic': inputs.get('topic', '')}\n",
     )
 
     first = _compile_artifact(first_root, skill_resolver=mock_skill_resolver)
@@ -221,8 +222,8 @@ def test_execution_fingerprint_changes_when_action_code_changes(
 
     action_path = second_root / "phases" / "draft" / "actions" / "draft.py"
     action_path.write_text(
-        "def draft(context):\n"
-        "    return {'answer': 'changed:' + str(context.get('topic', ''))}\n",
+        "def draft(inputs):\n"
+        "    return {'answer': 'changed:' + str(inputs.get('topic', ''))}\n",
         encoding="utf-8",
     )
 
@@ -281,4 +282,4 @@ def test_compile_artifact_does_not_write_manifest_side_effects_into_source_root(
 def _file_uri_path(ref: str) -> Path:
     parsed = urlparse(ref)
     assert parsed.scheme == "file"
-    return Path(unquote(parsed.path))
+    return Path(url2pathname(unquote(parsed.path)))

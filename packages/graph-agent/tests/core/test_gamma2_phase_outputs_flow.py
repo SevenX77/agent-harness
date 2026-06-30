@@ -89,15 +89,15 @@ def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(
         tmp_path,
         "segment",
         "segment",
-        "def segment(context):\n    return {'segments_summary': 'chapter summary'}\n",
+        "def segment(inputs):\n    return {'segments_summary': 'chapter summary'}\n",
         outputs=["segments_summary"],
     )
     _logic_action(
         tmp_path,
         "review",
         "review",
-        "def review(context):\n"
-        "    return {'review_input': context.get('segments_summary', 'missing')}\n",
+        "def review(inputs):\n"
+        "    return {'review_input': inputs.get('segments_summary', 'missing')}\n",
         outputs=["review_input"],
     )
 

@@ -128,7 +128,7 @@ validator: {validator}
     )
     _write(
         root / "phases" / phase_id / "actions" / "run.py",
-        f"def run(context):\n    return {{'result': context['{input_field}']}}\n",
+        f"def run(inputs):\n    return {{'result': inputs['{input_field}']}}\n",
     )
 
 

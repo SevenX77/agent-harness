@@ -66,9 +66,9 @@ validator: false
     )
     _write(
         root / "phases" / "score" / "actions" / "score.py",
-        "def score(context):\n"
-        "    segments = context['segments']\n"
-        "    return {'report': f'{type(context).__name__}:scored {len(segments)} segments'}\n",
+        "def score(inputs):\n"
+        "    segments = inputs['segments']\n"
+        "    return {'report': f'{type(inputs).__name__}:scored {len(segments)} segments'}\n",
     )
 
 

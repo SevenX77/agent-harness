@@ -3,7 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def export_story_framework(context) -> dict:
+def export_story_framework(inputs) -> dict:
     """Export story framework and perform final global synthesis validation."""
 
     def _validate_global_synthesis(ctx: dict) -> tuple[bool, list[str]]:
@@ -45,18 +45,16 @@ def export_story_framework(context) -> dict:
 
     # 1. build the final story framework dictionary
     framework = {
-        "climax_ranking": context.get("climax_ranking", []),
-        "foreshadowing_closure": context.get("foreshadowing_closure", []),
-        "character_ranking": context.get("character_ranking", []),
-        "scenes": context.get("scenes", []),
-        "unified_event_stream": context.get("unified_event_stream", []),
-        "entity_registry": context.get("entity_registry", {}),
+        "climax_ranking": inputs.get("climax_ranking", []),
+        "foreshadowing_closure": inputs.get("foreshadowing_closure", []),
+        "character_ranking": inputs.get("character_ranking", []),
+        "scenes": inputs.get("scenes", []),
+        "unified_event_stream": inputs.get("unified_event_stream", []),
+        "entity_registry": inputs.get("entity_registry", {}),
     }
 
-    context["story_framework"] = framework
-
     # 2. validate framework quality
-    is_valid, errors = _validate_global_synthesis(context)
+    is_valid, errors = _validate_global_synthesis(inputs)
     if not is_valid:
         raise ValueError(
             f"Global synthesis quality validation failed: {'; '.join(errors)}"

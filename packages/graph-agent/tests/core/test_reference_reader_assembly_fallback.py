@@ -64,13 +64,23 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  tools:
-    - finish_task
-  references:
-    - id: Guide
-      path: {reference_path}
-      summary: Guide reference
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - finish_task
+references:
+  - id: Guide
+    path: {reference_path}
+    summary: Guide reference
 ---
 <role>
 Reader.

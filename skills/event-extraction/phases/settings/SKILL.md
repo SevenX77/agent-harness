@@ -1,28 +1,27 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [formatted_paragraphs, events_raw, chapter_number]
-      properties:
-        formatted_paragraphs:
-          type: string
-        events_raw:
-          type: string
-        chapter_number:
-          type: integer
-    outputs:
-      type: object
-      required: [event_timeline]
-      properties:
-        event_timeline:
-          type: object
-  allow_sequential_overwrite: [event_timeline]
-  tools:
-    - finish_task
-  max_iterations: 10
-  validator: true
+io:
+  inputs:
+    type: object
+    required: [formatted_paragraphs, events_raw, chapter_number]
+    properties:
+      formatted_paragraphs:
+        type: string
+      events_raw:
+        type: string
+      chapter_number:
+        type: integer
+  outputs:
+    type: object
+    required: [event_timeline]
+    properties:
+      event_timeline:
+        type: object
+allow_sequential_overwrite: [event_timeline]
+tools:
+  - finish_task
+max_iterations: 10
+validator: true
 ---
 
 <role>

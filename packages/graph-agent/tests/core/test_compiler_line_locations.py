@@ -59,7 +59,7 @@ phases:
         encoding="utf-8",
     )
     (root / "phases" / "prepare" / "actions" / "prepare.py").write_text(
-        "def prepare(context):\n    return {'answer': 'ok'}\n",
+        "def prepare(inputs):\n    return {'answer': 'ok'}\n",
         encoding="utf-8",
     )
 
@@ -221,14 +221,14 @@ def test_locate_line_returns_none_for_plain_dict() -> None:
 # body begins at file line 12. Keep this in lockstep with the line asserts.
 _AGENT_SKILL_FRONTMATTER = """---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      properties: {}
-    outputs:
-      type: object
-      properties: {}
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+
 ---
 """
 _AGENT_BODY_START_LINE = 12

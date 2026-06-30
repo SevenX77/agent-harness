@@ -1,40 +1,39 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [chapter_content]
-      properties:
-        chapter_content:
-          type: string
-    outputs:
-      type: object
-      required: [segments]
-      properties:
-        segments:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  subagents:
-    - name: echo_helper
-      target_skill: e2e.echo
-      description: Echoes a concise review note when a boundary is ambiguous.
-  subgraphs:
-    - name: deep_dive
-      path: /Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased/packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander
-      description: Delegates deep expansion to the expander subgraph skill.
-  references:
-    - id: R1
-      path: references/segmentation_guide.md
-      summary: Narrative segmentation decision rules.
-  examples:
-    - id: E2
-      path: examples/long_case.md
-      summary: Long mixed timeline segmentation example.
-  max_iterations: 8
+io:
+  inputs:
+    type: object
+    required: [chapter_content]
+    properties:
+      chapter_content:
+        type: string
+  outputs:
+    type: object
+    required: [segments]
+    properties:
+      segments:
+        type: array
+        items:
+          type: object
+tools:
+  - finish_task
+subagents:
+  - name: echo_helper
+    target_skill: e2e.echo
+    description: Echoes a concise review note when a boundary is ambiguous.
+subgraphs:
+  - name: deep_dive
+    path: registry/expander
+    description: Delegates deep expansion to the expander subgraph skill.
+references:
+  - id: R1
+    path: references/segmentation_guide.md
+    summary: Narrative segmentation decision rules.
+examples:
+  - id: E2
+    path: examples/long_case.md
+    summary: Long mixed timeline segmentation example.
+max_iterations: 8
 ---
 <role>
 You are a narrative segmentation editor.

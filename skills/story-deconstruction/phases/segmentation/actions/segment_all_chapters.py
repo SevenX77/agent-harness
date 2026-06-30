@@ -3,9 +3,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def segment_all_chapters(context) -> dict:
+def segment_all_chapters(inputs) -> dict:
     """Build deterministic segmentation records without nested skill orchestration."""
-    chapters = context.get("chapters", [])
+    chapters = inputs.get("chapters", [])
     all_segmentations = []
 
     for chapter in chapters:

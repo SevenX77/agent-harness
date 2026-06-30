@@ -32,13 +32,13 @@ def _write_two_phase_skill(skill_dir: Path) -> None:
     (skill_dir / "phases" / "a" / "actions").mkdir(parents=True)
     (skill_dir / "phases" / "a" / "actions" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "phases" / "a" / "actions" / "make.py").write_text(
-        "def make(context):\n    context.set('alpha', '1')\n    return {'alpha': '1'}\n",
+        "def make(inputs):\n    return {'alpha': '1'}\n",
         encoding="utf-8",
     )
     (skill_dir / "phases" / "b" / "actions").mkdir(parents=True)
     (skill_dir / "phases" / "b" / "actions" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "phases" / "b" / "actions" / "use.py").write_text(
-        "def use(context):\n    context.set('done', True)\n    return {'done': True}\n",
+        "def use(inputs):\n    return {'done': True}\n",
         encoding="utf-8",
     )
     (skill_dir / "GRAPH.md").write_text(

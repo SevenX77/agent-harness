@@ -6,7 +6,7 @@ import pytest
 
 from graph_agent.core.actions import ActionRegistry
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 
 
@@ -77,7 +77,7 @@ def test_runtime_dynamic_return_key_must_use_v030_output_field_error(
     _logic_skill(
         tmp_path,
         "write_value",
-        "def write_value(context):\n    key = 'missing'\n    return {key: 1}\n",
+        "def write_value(inputs):\n    key = 'missing'\n    return {key: 1}\n",
     )
     compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     graph = assemble_graph(compiled, skill_resolver=mock_skill_resolver).graph
@@ -94,7 +94,7 @@ def test_action_returning_non_dict_is_runtime_fatal(
     _logic_skill(
         tmp_path,
         "write_value",
-        "def write_value(context):\n    return ['not', 'a', 'dict']\n",
+        "def write_value(inputs):\n    return ['not', 'a', 'dict']\n",
     )
     compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     graph = assemble_graph(compiled, skill_resolver=mock_skill_resolver).graph
@@ -104,22 +104,16 @@ def test_action_returning_non_dict_is_runtime_fatal(
     assert exc_info.value.payload.code == "[F-v3-logic-action-return-invalid]"
 
 
-def test_context_style_mutation_is_not_a_logic_output_channel(
+def test_inputs_mutation_is_compile_fatal(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
     _logic_skill(
         tmp_path,
         "write_value",
-        "def write_value(context):\n    context.set('foo', 99)\n    return {}\n",
+        "def write_value(inputs):\n    inputs.set('foo', 99)\n    return {}\n",
     )
-    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
-    graph = assemble_graph(compiled, skill_resolver=mock_skill_resolver).graph
 
-    try:
-        result = graph.invoke(
-            {"data": {"inputs": {"foo": 1}}, "flow": {}, "messages": [], "run_id": "r1"}
-        )
-    except GraphAgentFatalError:
-        return
+    with pytest.raises(SkillLoadError) as exc_info:
+        compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
 
-    assert result["data"].model_dump()["foo"] == 1
+    assert exc_info.value.payload.code == "[F-v3-logic-action-purity-violation]"

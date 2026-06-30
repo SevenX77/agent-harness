@@ -1,52 +1,51 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [chapter_with_line_numbers, chapter_lines, chapter_number]
-      properties:
-        chapter_with_line_numbers:
+io:
+  inputs:
+    type: object
+    required: [chapter_with_line_numbers, chapter_lines, chapter_number]
+    properties:
+      chapter_with_line_numbers:
+        type: string
+      chapter_lines:
+        type: array
+        items:
           type: string
-        chapter_lines:
-          type: array
-          items:
-            type: string
-        chapter_number:
-          type: integer
-    outputs:
-      type: object
-      required: [parsed_segments, segments, segmentation_result, segments_summary]
-      properties:
-        parsed_segments:
-          type: array
-          items:
-            type: object
-            required: [index, type, start_line, end_line, description]
-            properties:
-              index:
-                type: integer
-              type:
-                type: string
-                enum: [A, B, C]
-              start_line:
-                type: integer
-              end_line:
-                type: integer
-              description:
-                type: string
-        segments:
-          type: array
-          items:
-            type: object
-        segmentation_result:
+      chapter_number:
+        type: integer
+  outputs:
+    type: object
+    required: [parsed_segments, segments, segmentation_result, segments_summary]
+    properties:
+      parsed_segments:
+        type: array
+        items:
           type: object
-        segments_summary:
-          type: string
-  tools:
-    - finish_task
-  max_iterations: 20
-  validator: true
+          required: [index, type, start_line, end_line, description]
+          properties:
+            index:
+              type: integer
+            type:
+              type: string
+              enum: [A, B, C]
+            start_line:
+              type: integer
+            end_line:
+              type: integer
+            description:
+              type: string
+      segments:
+        type: array
+        items:
+          type: object
+      segmentation_result:
+        type: object
+      segments_summary:
+        type: string
+tools:
+  - finish_task
+max_iterations: 20
+validator: true
 ---
 <role>
 你是专业的小说编辑。你的任务是将章节按叙事功能分段。

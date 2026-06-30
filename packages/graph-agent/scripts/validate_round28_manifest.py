@@ -67,7 +67,7 @@ def _glob_repo_files(patterns: list[str]) -> set[str]:
     files: set[str] = set()
     for pattern in patterns:
         files.update(
-            str(path.relative_to(REPO_ROOT))
+            path.relative_to(REPO_ROOT).as_posix()
             for path in REPO_ROOT.glob(pattern)
             if path.is_file()
         )
@@ -107,7 +107,7 @@ def _runtime_compat_files() -> set[str]:
     files: set[str] = set()
     patches_root = PACKAGE_ROOT / "src/graph_agent/patches"
     if patches_root.exists():
-        files.update(str(path.relative_to(REPO_ROOT)) for path in patches_root.rglob("*.py"))
+        files.update(path.relative_to(REPO_ROOT).as_posix() for path in patches_root.rglob("*.py"))
     return files
 
 

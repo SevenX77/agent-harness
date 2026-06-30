@@ -29,6 +29,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _is_executable(path: Path) -> bool:
+    if os.name == "nt" and path.suffix == ".sh":
+        return path.read_text(encoding="utf-8").startswith("#!")
     return bool(os.stat(path).st_mode & 0o111)
 
 

@@ -164,6 +164,7 @@ async def _autoshare_after_probe_best_effort() -> None:
     path OR the single community model-catalog toggle
     (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
     """
+    uploads: list[Any] = []
     try:
         cfg = get_backend_config()
         if not community_upload_configured(
@@ -186,8 +187,25 @@ async def _autoshare_after_probe_best_effort() -> None:
         # Phase 6: no offline queue. If the upload fails it just raises (swallowed
         # below); the next probe re-derives candidates from credentials and retries.
         await client.upload_batch(uploads, idempotency_key=batch_idempotency_key(uploads))
-    except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
+        # W2-E.1c / R-F4: record the post-probe upload outcome so General settings
+        # shows how many evidence records were contributed and that it succeeded.
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="autoshare_uploaded",
+            message="Auto-shared probe-verified evidence to the community catalog gate.",
+            changes={"uploaded_count": len(uploads)},
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort: sharing must never fail a probe
         logger.warning("post-probe community auto-share failed", exc_info=True)
+        try:
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="autoshare_failed",
+                message="Post-probe community auto-share failed (best-effort; retried on next probe).",
+                changes={"attempted_count": len(uploads), "error": str(exc)},
+            )
+        except Exception:  # noqa: BLE001 — recording the failure must also never raise
+            logger.warning("failed to record auto-share failure", exc_info=True)
 
 
 OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4

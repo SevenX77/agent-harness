@@ -1,0 +1,23 @@
+{
+  "_comment": "Data-driven provider identity (W3-A / T2). Replaces hardcoded keyword/domain matches in routers/llm.py so a new provider is added here, not in code. 'key' indexes docs/development/llm_provider_notes/<key>.md for notable models. An endpoint matches by a keyword in its id/display-name (lowercased) OR by its host's registrable domain (host == domain or host endswith .domain). 'display_alias' is the human name for the provider.",
+  "providers": [
+    {
+      "key": "qiniu",
+      "display_alias": "Qiniu",
+      "keywords": ["qiniu"],
+      "registrable_domains": ["qnaigc.com"]
+    },
+    {
+      "key": "openrouter",
+      "display_alias": "OpenRouter",
+      "keywords": ["openrouter"],
+      "registrable_domains": ["openrouter.ai"]
+    },
+    {
+      "key": "wavespeed",
+      "display_alias": "WaveSpeed",
+      "keywords": ["wavespeed"],
+      "registrable_domains": ["wavespeed.ai"]
+    }
+  ]
+}

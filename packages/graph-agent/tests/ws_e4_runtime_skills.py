@@ -98,8 +98,8 @@ def write_serial_two_phase_skill(root: Path, *, name: str = "ws-e4-runtime-seria
         outputs={"prepared": {"type": "string"}},
         required=["source"],
         action_body="""
-            def prepare(context):
-                return {"prepared": f"{context['source']}:prepared"}
+            def prepare(inputs):
+                return {"prepared": f"{inputs['source']}:prepared"}
         """,
     )
     write_logic_phase(
@@ -109,8 +109,8 @@ def write_serial_two_phase_skill(root: Path, *, name: str = "ws-e4-runtime-seria
         outputs={"answer": {"type": "string"}},
         required=["prepared"],
         action_body="""
-            def finish(context):
-                return {"answer": f"{context['prepared']}:done"}
+            def finish(inputs):
+                return {"answer": f"{inputs['prepared']}:done"}
         """,
     )
 
@@ -142,8 +142,8 @@ iterate:
     merge: append
 """,
         action_body="""
-            def collect(context):
-                return {"piece": context["item"]}
+            def collect(inputs):
+                return {"piece": inputs["item"]}
         """,
     )
 
@@ -171,8 +171,8 @@ iterate:
   concurrency: 2
 """,
         action_body="""
-            def worker(context):
-                return {"seen": context["item"]}
+            def worker(inputs):
+                return {"seen": inputs["item"]}
         """,
     )
 
@@ -201,7 +201,7 @@ def write_file_input_skill(root: Path) -> None:
         outputs={"answer": {"type": "string"}},
         required=["title", "body"],
         action_body="""
-            def reader(context):
-                return {"answer": f"{context['title']}::{context['body']}"}
+            def reader(inputs):
+                return {"answer": f"{inputs['title']}::{inputs['body']}"}
         """,
     )

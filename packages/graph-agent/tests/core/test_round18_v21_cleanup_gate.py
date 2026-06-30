@@ -196,7 +196,7 @@ validator: false
     )
     _write(
         root / "phases" / "main" / "actions" / "echo.py",
-        "def echo(context):\n    return {'answer': context.get('text')}\n",
+        "def echo(inputs):\n    return {'answer': inputs.get('text')}\n",
     )
 
 

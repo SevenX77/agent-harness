@@ -8,8 +8,9 @@ import inspect
 import logging
 import os
 import re
+import sys
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -19,7 +20,6 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
 from pydantic import BaseModel, ValidationError
 
-from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.manifest import (
@@ -201,9 +201,7 @@ class SkillLoader:
         )
         io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
         io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
-        input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
-
         discovered = _discover_phase_files(root)
         phase_docs: list[PhaseDocument] = []
         # Collect-all: one broken node must not hide another's defects, so each
@@ -238,8 +236,6 @@ class SkillLoader:
         _validate_logic_action_return_keys(
             phase_docs,
             actions,
-            input_schema_keys,
-            output_schema_keys,
             validate_context_writes=self.validate_context_writes,
         )
         subagents_by_phase = _compile_subagent_metadata(
@@ -796,7 +792,7 @@ def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocu
             path = Path(reference.path)
             if path.is_absolute():
                 detail = (
-                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'phase_config')} "
+                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'references')} "
                     f"reference {reference.id!r} path escapes skill root"
                 )
                 raise SkillLoadError(
@@ -813,7 +809,7 @@ def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocu
                 candidate.relative_to(root_resolved)
             except ValueError as exc:
                 detail = (
-                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'phase_config')} "
+                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'references')} "
                     f"reference {reference.id!r} path escapes skill root"
                 )
                 raise SkillLoadError(
@@ -850,7 +846,7 @@ def _compile_subagent_metadata(
             if not isinstance(input_schema, dict) or not input_schema:
                 _fatal(
                     doc.path,
-                    _frontmatter_key_line(doc.path, "phase_config"),
+                    _frontmatter_key_line(doc.path, "subagents"),
                     "subagent "
                     f"{spec.name!r} at {spec.target_skill!r} must declare "
                     "a non-empty io.inputs schema",
@@ -864,7 +860,7 @@ def _compile_subagent_metadata(
             except ValueError as exc:
                 _fatal(
                     doc.path,
-                    _frontmatter_key_line(doc.path, "phase_config"),
+                    _frontmatter_key_line(doc.path, "subagents"),
                     f"subagent {spec.name!r} io.inputs schema is unsupported: {exc}",
                     code="[F-v3-agent-subagent-invalid]",
                 )
@@ -1007,7 +1003,9 @@ def _raise_on_purity_violations(path: Path) -> None:
 
 def _load_python_module(path: Path) -> ModuleType:
     module_name = f"_graph_agent_v21_{abs(hash(path.resolve()))}"
+    previous_write_bytecode = sys.dont_write_bytecode
     try:
+        sys.dont_write_bytecode = True
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
             _actions_fatal(
@@ -1027,6 +1025,8 @@ def _load_python_module(path: Path) -> ModuleType:
             f"module load failed: {exc}\n{tb}",
             code="[F-v3-logic-action-entrypoint-missing]",
         )
+    finally:
+        sys.dont_write_bytecode = previous_write_bytecode
     return module
 
 
@@ -1041,29 +1041,21 @@ def _module_functions(module: ModuleType) -> list[Callable[..., object]]:
 def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
     signature = inspect.signature(func)
     params = list(signature.parameters.values())
-    if not params or params[0].name not in {"context", "ctx"}:
+    if (
+        len(params) != 1
+        or params[0].name != "inputs"
+        or params[0].kind
+        not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }
+    ):
         _actions_fatal(
             path,
             1,
-            f"action {func.__name__!r} must accept context/ctx as first parameter",
+            f"action {func.__name__!r} must accept exactly one inputs parameter",
             code="[F-v3-logic-action-entrypoint-missing]",
         )
-    annotation = params[0].annotation
-    if annotation is inspect.Parameter.empty:
-        return
-    if annotation is Context:
-        return
-    if isinstance(annotation, str) and annotation in {
-        "Context",
-        "graph_agent.cognitive.context_facade.Context",
-    }:
-        return
-    _actions_fatal(
-        path,
-        1,
-        f"action {func.__name__!r} first parameter must be Context-compatible",
-        code="[F-v3-logic-action-entrypoint-missing]",
-    )
 
 
 def _validate_tool_signature(path: Path, func: Callable[..., object]) -> None:
@@ -1557,16 +1549,20 @@ def _iterate_fields_fatal(path: Path, missing: str) -> NoReturn:
     )
 
 
-class _ActionReturnKeyVisitor(ast.NodeVisitor):
-    def __init__(
-        self,
-        path: Path,
-        allowed_return_keys: set[str],
-        allowed_context_keys: set[str] | None,
-    ) -> None:
+_INPUT_MUTATION_METHODS = {
+    "clear",
+    "pop",
+    "popitem",
+    "set",
+    "setdefault",
+    "update",
+}
+
+
+class _ActionContractVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path, allowed_return_keys: set[str] | None) -> None:
         self.path = path
         self.allowed_return_keys = allowed_return_keys
-        self.allowed_context_keys = allowed_context_keys
 
     def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
         value = node.value
@@ -1574,7 +1570,7 @@ class _ActionReturnKeyVisitor(ast.NodeVisitor):
             for key_node in value.keys:
                 if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
                     continue
-                if key_node.value not in self.allowed_return_keys:
+                if self.allowed_return_keys is not None and key_node.value not in self.allowed_return_keys:
                     line = getattr(key_node, "lineno", node.lineno)
                     _actions_keys_fatal(
                         self.path,
@@ -1584,74 +1580,81 @@ class _ActionReturnKeyVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
-        if not _is_context_method_call(node, "update"):
-            self.generic_visit(node)
-            return
-        if self.allowed_context_keys is None:
-            self.generic_visit(node)
-            return
-        for keyword in node.keywords:
-            if keyword.arg is None:
-                continue
-            if keyword.arg not in self.allowed_context_keys:
-                _actions_keys_fatal(
-                    self.path,
-                    getattr(keyword, "lineno", node.lineno),
-                    f"action writes undeclared output key {keyword.arg!r}",
-                )
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "inputs"
+            and func.attr in _INPUT_MUTATION_METHODS
+        ):
+            _purity_fatal(
+                self.path,
+                getattr(func, "lineno", node.lineno),
+                f"{func.attr} mutates read-only inputs",
+            )
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        _raise_on_inputs_mutation_targets(self.path, node.targets, node.lineno, "item_assignment")
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+        _raise_on_inputs_mutation_targets(self.path, [node.target], node.lineno, "item_assignment")
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
+        _raise_on_inputs_mutation_targets(self.path, [node.target], node.lineno, "item_assignment")
+        self.generic_visit(node)
+
+    def visit_Delete(self, node: ast.Delete) -> None:  # noqa: N802
+        _raise_on_inputs_mutation_targets(self.path, node.targets, node.lineno, "delete")
         self.generic_visit(node)
 
 
-def _is_context_method_call(node: ast.Call, method: str) -> bool:
-    func = node.func
-    if not isinstance(func, ast.Attribute) or func.attr != method:
-        return False
-    return isinstance(func.value, ast.Name) and func.value.id in {"context", "ctx"}
+def _raise_on_inputs_mutation_targets(
+    path: Path,
+    targets: Sequence[ast.AST],
+    line: int,
+    mutation: str,
+) -> None:
+    for target in targets:
+        if _target_mutates_inputs(target):
+            _purity_fatal(path, line, f"{mutation} mutates read-only inputs")
+
+
+def _target_mutates_inputs(target: ast.AST) -> bool:
+    if isinstance(target, ast.Name) and target.id == "inputs":
+        return True
+    if isinstance(target, ast.Subscript):
+        return _target_mutates_inputs(target.value)
+    if isinstance(target, ast.Attribute):
+        return _target_mutates_inputs(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_target_mutates_inputs(item) for item in target.elts)
+    return False
 
 
 def _validate_logic_action_return_keys(
     phase_docs: list[PhaseDocument],
     actions: ActionRegistry,
-    input_schema_keys: set[str] | None,
-    output_schema_keys: set[str] | None,
     *,
     validate_context_writes: bool,
 ) -> None:
-    if not validate_context_writes:
-        return
+    del validate_context_writes
     for doc in phase_docs:
         if not isinstance(doc.ast, LogicNodeAST):
             continue
         phase_output_schema_keys = _extract_output_schema_keys(doc.ast.io.outputs)
-        if phase_output_schema_keys is None:
-            continue
-        context_keys = set(phase_output_schema_keys)
-        if input_schema_keys is not None:
-            context_keys.update(input_schema_keys)
         for action_name in doc.ast.actions:
             action_def = actions.for_phase(doc.phase_name).get(action_name)
             if action_def is None:
                 continue
-            _validate_action_return_keys(
-                action_def.path,
-                phase_output_schema_keys,
-                context_keys,
-                validate_context_writes=validate_context_writes
-                and _should_validate_context_writes(phase_docs),
-            )
-
-
-def _should_validate_context_writes(phase_docs: list[PhaseDocument]) -> bool:
-    logic_count = sum(1 for doc in phase_docs if isinstance(doc.ast, LogicNodeAST))
-    return logic_count == 1
+            _validate_action_return_keys(action_def.path, phase_output_schema_keys)
 
 
 def _validate_action_return_keys(
     path: Path,
-    output_schema_keys: set[str],
-    context_schema_keys: set[str],
-    *,
-    validate_context_writes: bool,
+    output_schema_keys: set[str] | None,
 ) -> None:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -1659,11 +1662,7 @@ def _validate_action_return_keys(
         _actions_keys_fatal(path, exc.lineno or 1, f"could not parse action source: {exc.msg}")
     except OSError as exc:
         _actions_keys_fatal(path, 1, f"could not read action source: {exc}")
-    _ActionReturnKeyVisitor(
-        path,
-        output_schema_keys,
-        context_schema_keys if validate_context_writes else None,
-    ).visit(tree)
+    _ActionContractVisitor(path, output_schema_keys).visit(tree)
 
 
 def _build_phase_document(
@@ -1687,8 +1686,6 @@ def _build_phase_document(
     data.setdefault("name", phase_name)
     data["mode"] = mode
     is_agent = path.name == "SKILL.md"
-    if is_agent:
-        data = _normalize_skill_node_frontmatter(path, data)
 
     try:
         if mode == "logic":
@@ -1729,48 +1726,6 @@ def _build_phase_document(
         raw_blocks=blocks,
         ast=ast,
     )
-def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[str, Any]:
-    phase_config = data.pop("phase_config", None)
-    if phase_config is None:
-        return data
-    if not isinstance(phase_config, dict):
-        _fatal(
-            path,
-            _frontmatter_key_line(path, "phase_config"),
-            "phase_config must be an object",
-            code="[F-v3-agent-schema-unknown-field]",
-            field_path="phase_config",
-        )
-    merged = dict(data)
-    if "tools" in phase_config:
-        merged.setdefault("tools", phase_config["tools"])
-    phase_config_keys = (
-        "tools",
-        "subagents",
-        "subgraphs",
-        "references",
-        "examples",
-        "io",
-        "max_iterations",
-        "llm_role",
-        "validator",
-        "allow_sequential_overwrite",
-        "batch",
-        "iterate",
-    )
-    for key in phase_config_keys[1:]:
-        if key in phase_config:
-            merged[key] = phase_config[key]
-    extra_keys = sorted(set(phase_config) - set(phase_config_keys))
-    if extra_keys:
-        _fatal(
-            path,
-            _frontmatter_key_line(path, "phase_config"),
-            "unsupported phase_config keys: " + ", ".join(extra_keys),
-            code="[F-v3-agent-schema-unknown-field]",
-            field_path=f"phase_config.{extra_keys[0]}",
-        )
-    return merged
 
 def _phase_validation_fatal(
     path: Path,

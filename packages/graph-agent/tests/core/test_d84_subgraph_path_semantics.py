@@ -64,7 +64,7 @@ io:
 <action>identity</action>
 """,
     )
-    _write(root / "phases" / "done" / "actions" / "identity.py", "def identity(context):\n    return {}\n")
+    _write(root / "phases" / "done" / "actions" / "identity.py", "def identity(inputs):\n    return {}\n")
 
 
 def _subgraph_parent(root: Path, child_path: str) -> None:

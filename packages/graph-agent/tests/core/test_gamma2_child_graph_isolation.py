@@ -138,11 +138,11 @@ def test_subgraph_child_starts_from_explicit_inputs_only(
         child,
         "inspect",
         "inspect",
-        "def inspect(context):\n"
+        "def inspect(inputs):\n"
         "    return {\n"
-        "        'seen_public': context.get('public'),\n"
-        "        'saw_parent_secret': context.get('parent_secret') is not None,\n"
-        "        'saw_parent_message': context.get('parent_message') is not None,\n"
+        "        'seen_public': inputs.get('public'),\n"
+        "        'saw_parent_secret': inputs.get('parent_secret') is not None,\n"
+        "        'saw_parent_message': inputs.get('parent_message') is not None,\n"
         "    }\n",
     )
 
@@ -178,12 +178,12 @@ def test_subgraph_child_outputs_are_deterministic_across_child_phases(
         '<phase id="first" src="phases/first" depends_on="" />\n'
         '<phase id="second" src="phases/second" depends_on="first" />\n',
     )
-    _logic_action(child, "first", "first", "def first(context):\n    return {'seen_public': 'a'}\n", outputs=["seen_public"])
+    _logic_action(child, "first", "first", "def first(inputs):\n    return {'seen_public': 'a'}\n", outputs=["seen_public"])
     _logic_action(
         child,
         "second",
         "second",
-        "def second(context):\n"
+        "def second(inputs):\n"
         "    return {'saw_parent_secret': False, 'saw_parent_message': False}\n",
         outputs=["saw_parent_secret", "saw_parent_message"],
     )

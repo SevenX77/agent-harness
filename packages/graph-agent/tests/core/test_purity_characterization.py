@@ -86,7 +86,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from graph_agent import run_skill
 
-            def prepare(context):
+            def prepare(inputs):
                 run_skill("child.skill", workspace_dir="workspace")
                 return {}
             """,
@@ -96,7 +96,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from graph_agent.core.runner import run_skill as call_child
 
-            def prepare(context):
+            def prepare(inputs):
                 call_child("child.skill", workspace_dir="workspace")
                 return {}
             """,
@@ -104,7 +104,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
         ),
         (
             """
-            def prepare(context):
+            def prepare(inputs):
                 open("input.txt").read()
                 return {}
             """,
@@ -114,7 +114,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 Path("input.txt").read_text(encoding="utf-8")
                 return {}
             """,
@@ -124,7 +124,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 Path("input.txt").replace("output.txt")
                 return {}
             """,
@@ -134,7 +134,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 Path("input.txt").unlink()
                 return {}
             """,
@@ -144,7 +144,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 Path("input.txt").exists()
                 return {}
             """,
@@ -154,7 +154,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 path = Path("input.txt")
                 path.exists()
                 return {}
@@ -165,7 +165,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 Path("input.txt").stat()
                 return {}
             """,
@@ -175,7 +175,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from pathlib import Path
 
-            def prepare(context):
+            def prepare(inputs):
                 list(Path(".").iterdir())
                 return {}
             """,
@@ -185,7 +185,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import os
 
-            def prepare(context):
+            def prepare(inputs):
                 os.listdir(".")
                 return {}
             """,
@@ -195,7 +195,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import os
 
-            def prepare(context):
+            def prepare(inputs):
                 os.path.exists("input.txt")
                 return {}
             """,
@@ -205,7 +205,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import os
 
-            def prepare(context):
+            def prepare(inputs):
                 os.stat("input.txt")
                 return {}
             """,
@@ -215,7 +215,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import glob
 
-            def prepare(context):
+            def prepare(inputs):
                 glob.glob("*.txt")
                 return {}
             """,
@@ -225,7 +225,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import sys
 
-            def prepare(context):
+            def prepare(inputs):
                 sys.path.insert(0, "../outside")
                 return {}
             """,
@@ -235,7 +235,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import sys
 
-            def prepare(context):
+            def prepare(inputs):
                 sys.path = ["../outside"]
                 return {}
             """,
@@ -245,7 +245,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import sys
 
-            def prepare(context):
+            def prepare(inputs):
                 sys.path[0] = "../outside"
                 return {}
             """,
@@ -255,7 +255,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             import importlib
 
-            def prepare(context):
+            def prepare(inputs):
                 importlib.import_module("graph_agent.core.runner")
                 return {}
             """,
@@ -265,7 +265,7 @@ def test_violation_for_call_current_non_violations(source: str, aliases: dict[st
             """
             from importlib import util
 
-            def prepare(context):
+            def prepare(inputs):
                 util.spec_from_file_location("escape", "../outside.py")
                 return {}
             """,
@@ -287,8 +287,8 @@ def test_scan_python_purity_allows_pure_data_transformations(tmp_path: Path) -> 
         """
         import json
 
-        def prepare(context):
-            payload = context.get("payload", "{}")
+        def prepare(inputs):
+            payload = inputs.get("payload", "{}")
             parsed = json.loads(payload)
             title = str(parsed.get("title", "")).strip().upper()
             return {"title": title}
@@ -302,8 +302,8 @@ def test_scan_python_purity_allows_string_replace_transformation(tmp_path: Path)
     path = _write_python(
         tmp_path,
         """
-        def prepare(context):
-            raw_title = str(context.get("title", ""))
+        def prepare(inputs):
+            raw_title = str(inputs.get("title", ""))
             normalized = raw_title.replace("-", " ").strip().upper()
             return {"title": normalized}
         """,
@@ -320,7 +320,7 @@ def test_scan_python_purity_allows_plain_object_exists_method(tmp_path: Path) ->
             def exists(self):
                 return True
 
-        def prepare(context):
+        def prepare(inputs):
             record = Record()
             return {"exists": record.exists()}
         """,

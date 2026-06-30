@@ -171,8 +171,8 @@ def _subgraph_skill(
         output_required=list(child_outputs),
         action_body=action_body
         or """
-            def worker(context):
-                return {"report": context.get("child_text", context.get("shared_text", "missing"))}
+            def worker(inputs):
+                return {"report": inputs.get("child_text", inputs.get("shared_text", "missing"))}
         """,
     )
     return parent, child, DictSkillResolver({"child": child})
@@ -223,10 +223,10 @@ def test_subgraph_runtime_slices_parent_blackboard_with_relaxed_inputs(tmp_path:
         child_inputs={"shared_text": {"type": "string"}},
         parent_outputs=outputs,
         action_body="""
-            def worker(context):
+            def worker(inputs):
                 return {
-                    "report": context["shared_text"].upper(),
-                    "seen_keys": sorted(context.keys()),
+                    "report": inputs["shared_text"].upper(),
+                    "seen_keys": sorted(inputs.keys()),
                 }
         """,
     )
@@ -268,8 +268,8 @@ def test_subgraph_output_mismatch_now_compiles_without_1to1_gate(tmp_path: Path)
         parent_outputs={"parent_report": {"type": "string"}},
         child_outputs={"child_report": {"type": "string"}},
         action_body="""
-            def worker(context):
-                return {"child_report": context["shared_text"]}
+            def worker(inputs):
+                return {"child_report": inputs["shared_text"]}
         """,
     )
 

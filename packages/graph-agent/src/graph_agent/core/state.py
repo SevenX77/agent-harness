@@ -89,8 +89,21 @@ class BusinessData(BaseModel):
     def __getitem__(self, key: str) -> Any:
         values = self.model_dump()
         if key == "phase_outputs":
+            raw_stored_outputs = values.get("phase_outputs")
+            stored_outputs: dict[str, Any] = (
+                raw_stored_outputs if isinstance(raw_stored_outputs, dict) else {}
+            )
+
             class PhaseOutputsCompat(dict[str, Any]):
                 def __getitem__(self, k: str) -> Any:
+                    if k in stored_outputs:
+                        if (
+                            k == "score"
+                            and isinstance(stored_outputs[k], dict)
+                            and "report" in stored_outputs[k]
+                        ):
+                            return {"report": stored_outputs[k]["report"]}
+                        return stored_outputs[k]
                     filtered = {}
                     for field_name, field_val in values.items():
                         if k == "score" and field_name != "report":
@@ -112,14 +125,24 @@ class BusinessData(BaseModel):
                         filtered[field_name] = field_val
                     return filtered
                 def get(self, k: str, default: Any = None) -> Any:
-                    return self[k]
+                    if k in stored_outputs:
+                        return stored_outputs[k]
+                    return self[k] if k in self else default
                 def __contains__(self, k: object) -> bool:
+                    if k in stored_outputs:
+                        return True
                     return True
                 def items(self) -> Any:
+                    if stored_outputs:
+                        return stored_outputs.items()
                     return {"main": values}.items()
                 def keys(self) -> Any:
+                    if stored_outputs:
+                        return stored_outputs.keys()
                     return {"main": values}.keys()
                 def values(self) -> Any:
+                    if stored_outputs:
+                        return stored_outputs.values()
                     return {"main": values}.values()
             return PhaseOutputsCompat()
         elif key == "inputs":

@@ -1,2 +1,2 @@
-def write_a(context):
+def write_a(inputs):
     return {"a_out": 1}

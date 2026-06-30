@@ -76,8 +76,21 @@ def _agent_with_reference(root: Path) -> None:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
 role: reader
 goal: read reference
+tools:
+  - finish_task
 references:
   - id: Guide
     path: references/guide.md

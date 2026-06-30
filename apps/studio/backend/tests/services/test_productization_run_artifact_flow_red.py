@@ -3560,8 +3560,8 @@ io:
     )
     _write_text(
         root / "phases" / "draft" / "actions" / "draft.py",
-        "def draft(context):\n"
-        "    return {'answer': 'draft:' + str(context.get('topic', ''))}\n",
+        "def draft(inputs):\n"
+        "    return {'answer': 'draft:' + str(inputs.get('topic', ''))}\n",
     )
 
 

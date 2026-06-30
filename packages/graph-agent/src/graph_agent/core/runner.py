@@ -35,6 +35,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from langchain_core.messages import ToolMessage
 
 from graph_agent.callbacks.emit import (
@@ -1749,6 +1751,7 @@ def _finalize_successful_v030_run(
     output_schema = (
         compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
     )
+    _validate_v030_root_outputs(output_schema, final_context)
     _save_v030_declared_file_outputs(
         output_schema,
         output_context,
@@ -1765,6 +1768,33 @@ def _finalize_successful_v030_run(
         ),
     )
     return cast(dict[str, Any], final_context)
+
+
+def _validate_v030_root_outputs(output_schema: Any, final_context: dict[str, Any]) -> None:
+    if not isinstance(output_schema, dict) or not output_schema:
+        return
+    try:
+        Draft202012Validator.check_schema(output_schema)
+    except SchemaError as exc:
+        detail = f"root io.outputs schema invalid: {exc.message}"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
+        ) from exc
+    errors = sorted(Draft202012Validator(output_schema).iter_errors(final_context), key=str)
+    if not errors:
+        return
+    first = errors[0]
+    field_path = ".".join(str(part) for part in first.path) or None
+    detail = f"root io.outputs validation failed: {first.message}"
+    raise GraphAgentFatalError(
+        detail,
+        payload=make_error_payload(
+            "[F-v3-runtime-state-mapping-failed]",
+            detail,
+            field_path=field_path,
+        ),
+    )
 
 
 def _resume_failed_result(

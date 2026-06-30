@@ -84,8 +84,8 @@ validator: false
         root / "phases" / "prepare" / "actions" / "prepare.py",
         dedent(
             """
-            def prepare(context):
-                return {"draft": f"draft:{context['topic']}"}
+            def prepare(inputs):
+                return {"draft": f"draft:{inputs['topic']}"}
             """
         ).lstrip(),
     )
@@ -107,8 +107,8 @@ validator: false
         root / "phases" / "finish" / "actions" / "finish.py",
         dedent(
             """
-            def finish(context):
-                return {"final": f"final:{context['draft']}"}
+            def finish(inputs):
+                return {"final": f"final:{inputs['draft']}"}
             """
         ).lstrip(),
     )
@@ -149,17 +149,17 @@ phases:
         "alpha": (
             _schema({"topic": {"type": "string"}}, required=["topic"]),
             _schema({"a": {"type": "string"}}, required=["a"]),
-            'return {"a": f"a:{context[\'topic\']}"}',
+            'return {"a": f"a:{inputs[\'topic\']}"}',
         ),
         "beta": (
             _schema({"a": {"type": "string"}}, required=["a"]),
             _schema({"b": {"type": "string"}}, required=["b"]),
-            'return {"b": f"b:{context[\'a\']}"}',
+            'return {"b": f"b:{inputs[\'a\']}"}',
         ),
         "gamma": (
             _schema({"b": {"type": "string"}}, required=["b"]),
             _schema({"c": {"type": "string"}}, required=["c"]),
-            'return {"c": f"c:{context[\'b\']}"}',
+            'return {"c": f"c:{inputs[\'b\']}"}',
         ),
     }
     for phase_name, (inputs_schema, outputs_schema, return_line) in phase_specs.items():
@@ -181,7 +181,7 @@ validator: false
             root / "phases" / phase_name / "actions" / f"{phase_name}.py",
             dedent(
                 f"""
-                def {phase_name}(context):
+                def {phase_name}(inputs):
                     {return_line}
                 """
             ).lstrip(),

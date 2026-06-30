@@ -14,7 +14,7 @@ supersedes:
 规则很简单：
 
 - 本文列出的字段是合法字段集合；除非某节明确允许扩展，否则未列字段都是非法字段。
-- 本规范只定义当前合法字段。`batch:`、phase frontmatter `mode:`、phase frontmatter `phase_id:`、phase frontmatter `node_type:`、`io_inputs_ref`、`io_outputs_ref`、SUBGRAPH `target_skill`、Agent `subgraphs[].target_skill` 均为非法字段。
+- 本规范只定义当前合法字段。`batch:`、phase frontmatter `mode:`、phase frontmatter `phase_id:`、phase frontmatter `phase_config:`、phase frontmatter `node_type:`、`io_inputs_ref`、`io_outputs_ref`、SUBGRAPH `target_skill`、Agent `subgraphs[].target_skill` 均为非法字段。
 - phase 类型由物理文件名决定：`LOGIC.md`、`SUBGRAPH.md`、`SKILL.md`。作者不写 `mode`。
 - phase id 由目录名决定：`phases/<phase_id>/`。作者不在 frontmatter 里写 `phase_id`。
 - `io.inputs` / `io.outputs` 是对黑板数据的读写边界。画布和属性面板只忠实展示/编辑这些声明，compile 负责判断声明是否合法。
@@ -200,6 +200,8 @@ iterate:
 
 body `<action>` 必须与 frontmatter `actions` 完全一致，并决定实际执行顺序。
 
+LOGIC action 源文件位于 `phases/<phase_id>/actions/<action_name>.py`。文件必须导出同名函数，签名严格为 `def <action_name>(inputs) -> dict`。`inputs` 是只读的 phase-local 输入快照：action 不接收 `context` / `ctx`，不得通过修改 `inputs` 或任何 context 对象写黑板；唯一输出通道是 `return dict`。返回 dict 的 key 必须属于本 phase 的 `io.outputs.properties`。编译期导入 action 不得在 skill 源码目录生成 `__pycache__`。
+
 ## 4. SUBGRAPH.md
 
 `SUBGRAPH.md` 定义一个调用子图的普通 phase 节点。它和其他节点一样有 name、IO、validator、iterate；区别只是它用 `path` 指向另一个完整 graph skill 根目录。
@@ -342,6 +344,8 @@ iterate:
 | `allow_sequential_overwrite` | no | list[string], default `[]` | 允许本 phase 顺序覆盖上游同名输出字段的白名单，格式见第 10 节 |
 | `iterate` | no | IterateSpec | 节点级迭代声明，格式见第 7 节 |
 
+Agent phase 必须通过 `finish_task` 写出本 phase 的 `io.outputs`。非终端 Agent 也会把自己的 phase output 写回黑板与 `phase_outputs[phase_id]`；终端 phase 完成后，整图还必须满足 `GRAPH.md` 根 `io.outputs`。
+
 `subagents` 与 `subgraphs` 不是一回事：
 
 ```yaml
@@ -371,6 +375,14 @@ body 顶层标签：
 | `<example id="...">` | no | 0..N | inline 示例 |
 
 禁止写 `<steps>` / `<protocols>` / `<examples>` 外壳标签；禁止在 `SKILL.md` body 写 `<exit_contract>`。
+
+### Validator runtime contract
+
+`LOGIC.md`、`SUBGRAPH.md`、`SKILL.md` 的 `validator: true` 表示运行期加载同级 `validator.py`。该文件必须导出 `validate(output: dict, state_slice: dict, **kwargs) -> None | dict`。
+
+- 返回 `None` 表示通过，输出保持不变。
+- 返回 `dict` 表示通过并富集/修正输出；该 dict 必须再次通过本 phase 的 `io.outputs` schema gate，且不得写出未声明 key。
+- 抛出异常、返回非 `None`/`dict`，或返回 dict 未通过 schema gate，均转成对应节点类型的 `[F-v3-*-validator-failed]` fatal。
 
 ## 6. IO Schema
 

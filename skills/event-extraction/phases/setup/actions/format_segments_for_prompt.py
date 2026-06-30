@@ -3,9 +3,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def format_segments_for_prompt(context) -> dict:
+def format_segments_for_prompt(inputs) -> dict:
     """Format segmented paragraphs as markdown for LLM prompt."""
-    segmentation = context.get("segmentation_result", {})
+    segmentation = inputs.get("segmentation_result", {})
     paragraphs = segmentation.get("paragraphs", [])
 
     lines = []

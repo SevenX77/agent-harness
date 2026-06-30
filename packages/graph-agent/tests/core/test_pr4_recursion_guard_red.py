@@ -70,11 +70,11 @@ phases:
 def _write_agent_phase(root: Path, phase: str, *, target_skill: str | None = None) -> None:
     subagents = ""
     if target_skill is not None:
-        subagents = f"""phase_config:
-  subagents:
-    - name: child_{phase}
-      target_skill: {target_skill}
-      description: Shared child.
+        subagents = f"""
+subagents:
+  - name: child_{phase}
+    target_skill: {target_skill}
+    description: Shared child.
 """
     _write(
         root / "phases" / phase / "SKILL.md",

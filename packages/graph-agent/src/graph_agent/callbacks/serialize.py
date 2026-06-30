@@ -120,7 +120,7 @@ def _jsonable_base_model(data: BaseModel) -> Any:
 
 def _jsonable_scalar(data: Any) -> str | None:
     if isinstance(data, Path):
-        return str(data)
+        return data.as_posix()
     if isinstance(data, datetime):
         return data.isoformat()
     if isinstance(data, UUID):

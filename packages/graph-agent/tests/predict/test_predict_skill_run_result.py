@@ -50,7 +50,7 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
         encoding="utf-8",
     )
     (actions_dir / "draft.py").write_text(
-        "def draft(context):\n"
+        "def draft(inputs):\n"
         "    return {'text': 'hello'}\n",
         encoding="utf-8",
     )

@@ -68,7 +68,7 @@ io:
     )
     _write(
         root / "phases" / "done" / "actions" / "identity.py",
-        "def identity(context):\n    return {}\n",
+        "def identity(inputs):\n    return {}\n",
     )
 
 

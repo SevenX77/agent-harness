@@ -80,8 +80,8 @@ validator: false
         root / "phases" / "draft" / "actions" / "draft.py",
         dedent(
             """
-            def draft(context):
-                return {"draft": f"draft:{context['topic']}"}
+            def draft(inputs):
+                return {"draft": f"draft:{inputs['topic']}"}
             """
         ).lstrip(),
     )
@@ -103,8 +103,8 @@ validator: false
         root / "phases" / "finish" / "actions" / "finish.py",
         dedent(
             """
-            def finish(context):
-                return {"final": f"final:{context['draft']}"}
+            def finish(inputs):
+                return {"final": f"final:{inputs['draft']}"}
             """
         ).lstrip(),
     )

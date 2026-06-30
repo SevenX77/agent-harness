@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 
 
@@ -97,8 +97,8 @@ def test_logic_action_receives_plain_dict_inputs_and_writes_only_returned_output
         output_properties={"report": {"type": "string"}},
         actions={
             "score": """
-                def score(context):
-                    return {"report": f"{type(context).__name__}:{context['text']}"}
+                def score(inputs):
+                    return {"report": f"{type(inputs).__name__}:{inputs['text']}"}
             """,
         },
     )
@@ -118,8 +118,8 @@ def test_logic_action_sees_only_declared_phase_inputs(
         output_properties={"report": {"type": "string"}},
         actions={
             "score": """
-                def score(context):
-                    return {"report": ",".join(sorted(context.keys()))}
+                def score(inputs):
+                    return {"report": ",".join(sorted(inputs.keys()))}
             """,
         },
     )
@@ -148,12 +148,12 @@ def test_logic_action_chain_reads_previous_returned_outputs_as_input_increment(
         },
         actions={
             "normalize": """
-                def normalize(context):
-                    return {"normalized": context["text"].strip().upper()}
+                def normalize(inputs):
+                    return {"normalized": inputs["text"].strip().upper()}
             """,
             "score": """
-                def score(context):
-                    return {"report": context.get("normalized", "missing")}
+                def score(inputs):
+                    return {"report": inputs.get("normalized", "missing")}
             """,
         },
     )
@@ -170,38 +170,38 @@ def test_logic_action_chain_reads_previous_returned_outputs_as_input_increment(
         (
             "set",
             """
-            def score(context):
-                context.set("report", "from-set")
+            def score(inputs):
+                inputs.set("report", "from-set")
                 return {}
             """,
         ),
         (
             "update",
             """
-            def score(context):
-                context.update(report="from-update")
+            def score(inputs):
+                inputs.update(report="from-update")
                 return {}
             """,
         ),
         (
             "item_assignment",
             """
-            def score(context):
-                context["report"] = "from-item"
+            def score(inputs):
+                inputs["report"] = "from-item"
                 return {}
             """,
         ),
         (
             "setdefault",
             """
-            def score(context):
-                context.setdefault("report", "from-setdefault")
+            def score(inputs):
+                inputs.setdefault("report", "from-setdefault")
                 return {}
             """,
         ),
     ],
 )
-def test_context_style_mutation_is_not_a_blackboard_output_channel(
+def test_action_inputs_mutation_is_compile_fatal(
     tmp_path: Path,
     mock_skill_resolver: object,
     case_name: str,
@@ -214,12 +214,57 @@ def test_context_style_mutation_is_not_a_blackboard_output_channel(
         actions={"score": mutation_body},
     )
 
-    try:
-        result = _invoke(tmp_path, mock_skill_resolver, {"inputs": {"text": case_name}})
-    except GraphAgentFatalError:
-        return
+    with pytest.raises(SkillLoadError) as exc_info:
+        compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
 
-    assert "report" not in _business_data(result)
+    assert case_name in str(exc_info.value)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-purity-violation]"
+
+
+@pytest.mark.parametrize("param_name", ["context", "ctx"])
+def test_logic_action_context_or_ctx_parameter_is_compile_fatal(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+    param_name: str,
+) -> None:
+    _logic_skill(
+        tmp_path,
+        input_properties={"text": {"type": "string"}},
+        output_properties={"report": {"type": "string"}},
+        actions={
+            "score": f"""
+                def score({param_name}):
+                    return {{"report": {param_name}["text"]}}
+            """,
+        },
+    )
+
+    with pytest.raises(SkillLoadError) as exc_info:
+        compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+
+    assert exc_info.value.payload.code == "[F-v3-logic-action-entrypoint-missing]"
+    assert "inputs" in str(exc_info.value)
+
+
+def test_compile_importing_actions_does_not_write_pycache_under_skill_source(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    _logic_skill(
+        tmp_path,
+        input_properties={"text": {"type": "string"}},
+        output_properties={"report": {"type": "string"}},
+        actions={
+            "score": """
+                def score(inputs):
+                    return {"report": inputs["text"]}
+            """,
+        },
+    )
+
+    compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+
+    assert list(tmp_path.rglob("__pycache__")) == []
 
 
 def test_undeclared_return_key_still_uses_logic_output_field_error(
@@ -231,8 +276,8 @@ def test_undeclared_return_key_still_uses_logic_output_field_error(
         output_properties={"report": {"type": "string"}},
         actions={
             "score": """
-                def score(context):
-                    return {"missing": context["text"]}
+                def score(inputs):
+                    return {"missing": inputs["text"]}
             """,
         },
     )
@@ -253,7 +298,7 @@ def test_non_dict_return_still_uses_logic_action_return_invalid_error(
         output_properties={"report": {"type": "string"}},
         actions={
             "score": """
-                def score(context):
+                def score(inputs):
                     return ["not", "a", "dict"]
             """,
         },

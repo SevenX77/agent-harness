@@ -1,29 +1,28 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [batch_chapter_range, character_latest_states_text, batch_character_changes_text]
-      properties:
-        batch_chapter_range:
-          type: string
-        character_latest_states_text:
-          type: string
-        batch_character_changes_text:
-          type: string
-    outputs:
-      type: object
-      required: [continuity_warnings]
-      properties:
-        continuity_warnings:
-          type: array
-          items:
-            type: object
-  tools:
-    - finish_task
-  max_iterations: 10
-  validator: true
+io:
+  inputs:
+    type: object
+    required: [batch_chapter_range, character_latest_states_text, batch_character_changes_text]
+    properties:
+      batch_chapter_range:
+        type: string
+      character_latest_states_text:
+        type: string
+      batch_character_changes_text:
+        type: string
+  outputs:
+    type: object
+    required: [continuity_warnings]
+    properties:
+      continuity_warnings:
+        type: array
+        items:
+          type: object
+tools:
+  - finish_task
+max_iterations: 10
+validator: true
 ---
 
 <role>

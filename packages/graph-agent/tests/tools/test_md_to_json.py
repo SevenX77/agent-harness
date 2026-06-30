@@ -35,6 +35,21 @@ class NestedPayload(BaseModel):
     title: str
 
 
+class ParagraphPayload(BaseModel):
+    paragraph_id: str
+    text: str
+
+
+class SegmentationResultPayload(BaseModel):
+    paragraphs: list[ParagraphPayload]
+
+
+class SegmentationOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segmentation_result: SegmentationResultPayload
+
+
 def test_parse_md_separates_framework_meta_from_user_data() -> None:
     blocks = parse_md(
         """
@@ -54,6 +69,25 @@ def test_parse_md_separates_framework_meta_from_user_data() -> None:
         "content": "opening beat",
     }
     assert "_md_id" not in blocks[0].data
+
+
+def test_parse_md_maps_fenced_json_block_to_matching_schema_field() -> None:
+    blocks = parse_md(
+        """
+## segmentation_result
+```json
+{"paragraphs": [{"paragraph_id": "p1", "text": "Alpha beta."}]}
+```
+""",
+        SegmentationOutput,
+    )
+
+    assert blocks[0].data == {
+        "segmentation_result": {
+            "paragraphs": [{"paragraph_id": "p1", "text": "Alpha beta."}]
+        }
+    }
+    assert diagnose(blocks, SegmentationOutput).all_valid
 
 
 def test_diagnose_validates_data_only_with_extra_forbid() -> None:

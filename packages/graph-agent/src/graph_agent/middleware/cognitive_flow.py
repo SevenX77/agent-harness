@@ -177,7 +177,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> ValidatorRuntimeResult:
         """Run the PR β validator contract after schema validation passes."""
         if validator is None:
-            return ValidatorRuntimeResult(True, None, None, None)
+            return ValidatorRuntimeResult(True, None, None, None, output=output)
 
         try:
             result = validator(output, state_slice, phase_name=phase_name, **kwargs)
@@ -189,7 +189,10 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             )
 
         if result is None:
-            return ValidatorRuntimeResult(True, None, None, None)
+            return ValidatorRuntimeResult(True, None, None, None, output=output)
+
+        if isinstance(result, dict):
+            return ValidatorRuntimeResult(True, None, None, None, output=result)
 
         feedback = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
         logger.warning("validator rejected: phase=%s feedback=%s", phase_name, feedback)
@@ -841,6 +844,7 @@ class ValidatorRuntimeResult:
     payload: ErrorPayload | None
     feedback: str | None
     tool_message: ToolMessage | None = None
+    output: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

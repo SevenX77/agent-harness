@@ -1,53 +1,52 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [segments_summary, chapter_with_line_numbers, chapter_lines, chapter_number]
-      properties:
-        segments_summary:
+io:
+  inputs:
+    type: object
+    required: [segments_summary, chapter_with_line_numbers, chapter_lines, chapter_number]
+    properties:
+      segments_summary:
+        type: string
+      chapter_with_line_numbers:
+        type: string
+      chapter_lines:
+        type: array
+        items:
           type: string
-        chapter_with_line_numbers:
-          type: string
-        chapter_lines:
-          type: array
-          items:
-            type: string
-        chapter_number:
-          type: integer
-    outputs:
-      type: object
-      required: [parsed_segments, segments, segmentation_result]
-      properties:
-        parsed_segments:
-          type: array
-          items:
-            type: object
-            required: [index, type, start_line, end_line, description]
-            properties:
-              index:
-                type: integer
-              type:
-                type: string
-                enum: [A, B, C]
-              start_line:
-                type: integer
-              end_line:
-                type: integer
-              description:
-                type: string
-        segments:
-          type: array
-          items:
-            type: object
-        segmentation_result:
+      chapter_number:
+        type: integer
+  outputs:
+    type: object
+    required: [parsed_segments, segments, segmentation_result]
+    properties:
+      parsed_segments:
+        type: array
+        items:
           type: object
-  tools:
-    - finish_task
-  max_iterations: 20
-  allow_sequential_overwrite: [parsed_segments, segments, segmentation_result]
-  validator: true
+          required: [index, type, start_line, end_line, description]
+          properties:
+            index:
+              type: integer
+            type:
+              type: string
+              enum: [A, B, C]
+            start_line:
+              type: integer
+            end_line:
+              type: integer
+            description:
+              type: string
+      segments:
+        type: array
+        items:
+          type: object
+      segmentation_result:
+        type: object
+tools:
+  - finish_task
+max_iterations: 20
+allow_sequential_overwrite: [parsed_segments, segments, segmentation_result]
+validator: true
 ---
 <role>
 你是专业的小说编辑。你的任务是检查并修正已有的分段结果。

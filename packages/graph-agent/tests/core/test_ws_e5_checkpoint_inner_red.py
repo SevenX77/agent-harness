@@ -100,11 +100,25 @@ io:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
-phase_config:
-  max_iterations: 3
-  llm_role: graph_agent
-  tools:
-    - finish_task
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      topics:
+        type: array
+        items:
+          type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+max_iterations: 3
+llm_role: graph_agent
+tools:
+  - finish_task
 ---
 <role>
 Checkpoint boundary verifier.

@@ -24,6 +24,6 @@ def finalize_outputs(inputs) -> dict:
         )
 
     return {
-        "entity_registry": accumulated_context.get("entity_registry", {}),
+        "entity_registry": accumulated_inputs.get("entity_registry", {}),
         "batch_outputs": batch_outputs,
     }

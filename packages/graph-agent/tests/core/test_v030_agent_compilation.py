@@ -46,25 +46,24 @@ def _agent(root: Path, body_extra: str = "") -> None:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-phase_config:
-  io:
-    inputs:
-      type: object
-      properties:
-        topic:
-          type: string
-      required: [topic]
-    outputs:
-      type: object
-      properties:
-        answer:
-          type: string
-  tools:
-    - finish_task
-  references:
-    - id: R1
-      path: refs/r1.md
-      summary: Primary reference.
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+    required: [topic]
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - finish_task
+references:
+  - id: R1
+    path: refs/r1.md
+    summary: Primary reference.
 ---
 <role>
 Research assistant.

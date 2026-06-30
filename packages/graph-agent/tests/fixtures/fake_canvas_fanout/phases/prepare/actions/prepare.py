@@ -1,2 +1,2 @@
-def prepare(context):
+def prepare(inputs):
     return None

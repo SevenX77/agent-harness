@@ -132,24 +132,23 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
-phase_config:
-  io:
-    inputs:
-      type: object
-      properties:
-        topic:
-          type: string
-        request_id:
-          type: string
-      required: [topic, request_id]
-    outputs:
-      type: object
-      properties:
-        answer:
-          type: string
-  tools:
-    - inspect_payload
-    - finish_task
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      request_id:
+        type: string
+    required: [topic, request_id]
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+tools:
+  - inspect_payload
+  - finish_task
 ---
 <role>
 Trace exerciser.

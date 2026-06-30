@@ -14,7 +14,7 @@ class BatchAccumulator:
         self.location_registry = {}
 
 
-def assemble_batch(context) -> dict:
+def assemble_batch(inputs) -> dict:
     """Assemble all parallel analysis results and save accumulated state."""
     def _validate_batch_analysis(ctx: dict) -> tuple[bool, list[str]]:
         errors = []
@@ -35,29 +35,29 @@ def assemble_batch(context) -> dict:
         is_valid = len(errors) == 0
         return is_valid, errors
 
-    events = context.get("batch_events", [])
+    events = inputs.get("batch_events", [])
     if not events:
         batch_result = []
     else:
         tension = {
-            r.get("event_id", ""): r for r in context.get("tension_results", [])
+            r.get("event_id", ""): r for r in inputs.get("tension_results", [])
         }
         system = {
-            r.get("event_id", ""): r for r in context.get("system_results", [])
+            r.get("event_id", ""): r for r in inputs.get("system_results", [])
         }
         character = {
             r.get("event_id", ""): r
-            for r in context.get("character_results", [])
+            for r in inputs.get("character_results", [])
         }
-        prop = {r.get("event_id", ""): r for r in context.get("prop_results", [])}
-        arc = {r.get("event_id", ""): r for r in context.get("arc_results", [])}
+        prop = {r.get("event_id", ""): r for r in inputs.get("prop_results", [])}
+        arc = {r.get("event_id", ""): r for r in inputs.get("arc_results", [])}
         foreshadowing = {
             r.get("event_id", ""): r
-            for r in context.get("foreshadowing_results", [])
+            for r in inputs.get("foreshadowing_results", [])
         }
         spatiotemporal = {
             r.get("event_id", ""): r
-            for r in context.get("spatiotemporal_results", [])
+            for r in inputs.get("spatiotemporal_results", [])
         }
 
         batch_result = []
@@ -86,13 +86,10 @@ def assemble_batch(context) -> dict:
             }
             batch_result.append(merged_ev)
 
-    context["batch_result"] = batch_result
-
     # 2. Update accumulator state
-    acc = context.get("accumulator")
+    acc = inputs.get("accumulator")
     if not acc:
         acc = BatchAccumulator()
-        context["accumulator"] = acc
 
     if not hasattr(acc, "known_characters"):
         acc.known_characters = {}
@@ -109,11 +106,11 @@ def assemble_batch(context) -> dict:
     if not hasattr(acc, "location_registry"):
         acc.location_registry = {}
 
-    char_results = context.get("character_results", [])
-    prop_results = context.get("prop_results", [])
-    fore_results = context.get("foreshadowing_results", [])
-    arc_results = context.get("arc_results", [])
-    spatiotemporal_results = context.get("spatiotemporal_results", [])
+    char_results = inputs.get("character_results", [])
+    prop_results = inputs.get("prop_results", [])
+    fore_results = inputs.get("foreshadowing_results", [])
+    arc_results = inputs.get("arc_results", [])
+    spatiotemporal_results = inputs.get("spatiotemporal_results", [])
 
     for r in char_results:
         char_id = r.get("character_id") or r.get("entity_id")
@@ -172,10 +169,8 @@ def assemble_batch(context) -> dict:
         if hasattr(acc, attr):
             updated_accumulated[attr] = getattr(acc, attr)
 
-    context["updated_accumulated"] = updated_accumulated
-
     # 4. Validate results quality
-    is_valid, errors = _validate_batch_analysis(context)
+    is_valid, errors = _validate_batch_analysis(inputs)
     if not is_valid:
         raise ValueError(
             f"Batch analysis quality validation failed: {'; '.join(errors)}"

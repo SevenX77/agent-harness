@@ -1,31 +1,30 @@
 ---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [formatted_paragraphs, chapter_number]
-      properties:
-        formatted_paragraphs:
-          type: string
-        chapter_number:
-          type: integer
-        prev_chapter_last_event:
+io:
+  inputs:
+    type: object
+    required: [formatted_paragraphs, chapter_number]
+    properties:
+      formatted_paragraphs:
+        type: string
+      chapter_number:
+        type: integer
+      prev_chapter_last_event:
+        type: object
+  outputs:
+    type: object
+    required: [parsed_events, event_timeline]
+    properties:
+      parsed_events:
+        type: array
+        items:
           type: object
-    outputs:
-      type: object
-      required: [parsed_events, event_timeline]
-      properties:
-        parsed_events:
-          type: array
-          items:
-            type: object
-        event_timeline:
-          type: object
-  tools:
-    - finish_task
-  max_iterations: 20
-  validator: true
+      event_timeline:
+        type: object
+tools:
+  - finish_task
+max_iterations: 20
+validator: true
 ---
 
 <role>

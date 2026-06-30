@@ -40,7 +40,7 @@
         },
         {
           "endpoint": "Rust select_directory / ensure_workspace_support_dirs",
-          "purpose": "Studio Rust 后端的目录选择器命令 + 建 .gemini 等支持目录命令(已实现);打开文件夹的目录选择与支持目录创建走它们。",
+          "purpose": "Studio Rust 后端的目录选择器命令 + 建 .workspace/copilot 等支持目录命令(已实现);打开文件夹的目录选择与支持目录创建走它们。",
           "mechanism_ref": "n1_mech_nativefs",
           "iface_ref": "iface-dirpick"
         },

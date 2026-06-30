@@ -58,6 +58,13 @@ supersedes:
     test_inputs/
       <input_id>.json
       index.json
+    copilot/
+      sessions/
+        <skill_id>/
+          <session_id>.json
+          _active.json
+      checkpoints/
+        <sha(path)>.json
 ```
 
 合法 phase 文件三选一：同一个 `phases/<phase_id>/` 下只能存在 `LOGIC.md`、`SUBGRAPH.md`、`SKILL.md` 其中一个作为节点定义文件。
@@ -70,6 +77,8 @@ supersedes:
 - 可复用输入样本放在 `<workspace_dir>/test_inputs/`。
 - Predict 没有专属 `predict/` 或 `latest_predict.json`。
 - golden 是会失效的临时优化产物，不能写进 `phases/<phase_id>/`，也不能作为 skill 源码字段参与 compile。
+
+- Studio Copilot support files live under `<workspace_dir>/copilot/`: sessions in `sessions/<skill_id>/` and edit checkpoints in `checkpoints/`. They are runtime state, not compile input.
 
 ## 2. GRAPH.md
 

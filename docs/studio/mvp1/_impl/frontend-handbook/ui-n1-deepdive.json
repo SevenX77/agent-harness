@@ -28,8 +28,8 @@
       ["writeWorkspaceFile 通过 Tauri invoke('write_workspace_file') 调到 Rust", "apps/studio/frontend/src/lib/tauri.ts:155"],
       ["Rust write_workspace_file 命令即 D12 唯一写者实现(乐观 expected-hash + 临时文件+rename 原子写)", "apps/studio/tauri/src/native_fs.rs:1233"],
       ["native_fs.rs 文件头注释明确声明 D12:所有 skill/graph/copilot 写经这些命令,单一写者拥有本地文件系统,禁止 Python+Rust 双写", "apps/studio/tauri/src/native_fs.rs:1-8"],
-      ["打开文件夹时『有』写盘动作:openSkill 会 ensureWorkspaceSupportDirs(创建 .gemini/copilot/sessions),这条走 Rust", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:321"],
-      ["ensureWorkspaceSupportDirs → Rust 命令 ensure_workspace_support_dirs,在 workspace 下 create_dir_all .gemini/copilot/sessions", "apps/studio/tauri/src/native_fs.rs:1393"],
+      ["打开文件夹时『有』写盘动作:openSkill 会 ensureWorkspaceSupportDirs(创建 .workspace/copilot/sessions),这条走 Rust", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:321"],
+      ["ensureWorkspaceSupportDirs → Rust 命令 ensure_workspace_support_dirs,在 workspace 下 create_dir_all .workspace/copilot/sessions", "apps/studio/tauri/src/native_fs.rs:1393"],
       ["打开文件夹还会触发 POST /skills 注册(见 open_folder_chain),那一步的写盘(若 import 进 repair state)由 Python 处理,不经 Rust", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:303"],
       ["Recent/MRU 存储字段:absolutePath、displayName、identity(=`local:<path>`)、lastOpenedAt,共 4 字段;无 phaseCount/lastRunAt(这些是渲染时从 skills 列表 join 出来的,不进 recent 存储)", "apps/studio/frontend/src/hooks/useRecentSkills.ts:3-8"],
       ["Recent 主存:浏览器 localStorage 键 'recentWorkspaces',最多 10 条,按 identity 去重", "apps/studio/frontend/src/hooks/useRecentSkills.ts:40-41"],
@@ -76,9 +76,9 @@
   },
 
   "copilot_persistence": {
-    "summary": "copilotStore 不是纯内存:它有真正的落盘与冷启动恢复。会话以 <id>.json 写到 workspace 下 .gemini/copilot/sessions/<skillId>/,最后活跃 tab 写 _active.json,全部经 Rust native-fs(writeWorkspaceFile)。冷启动 hydrate() 用 listWorkspaceDir+readWorkspaceFile 从盘读回并合并(内存 session 在 id 冲突时赢)。切 skill:有 workspaceRoot 时 setContext+hydrate(不 reset,保留每 context 会话);无 workspaceRoot(web 降级)才 reset+newSession。回 Home(skillId=null)时 useCopilot 的 effect 直接 return,不动 store。D8『退出再进恢复』基本已实现(含恢复上次活跃 tab),后端无需持久化接口 —— 持久化在前端经 Rust 落到 workspace 内。仍有边角:web/非 Tauri 运行时落盘 inert(writeWorkspaceFile 抛 Desktop only,被吞进 persistenceError),即纯浏览器态不持久。",
+    "summary": "copilotStore 不是纯内存:它有真正的落盘与冷启动恢复。会话以 <id>.json 写到 workspace 下 .workspace/copilot/sessions/<skillId>/,最后活跃 tab 写 _active.json,全部经 Rust native-fs(writeWorkspaceFile)。冷启动 hydrate() 用 listWorkspaceDir+readWorkspaceFile 从盘读回并合并(内存 session 在 id 冲突时赢)。切 skill:有 workspaceRoot 时 setContext+hydrate(不 reset,保留每 context 会话);无 workspaceRoot(web 降级)才 reset+newSession。回 Home(skillId=null)时 useCopilot 的 effect 直接 return,不动 store。D8『退出再进恢复』基本已实现(含恢复上次活跃 tab),后端无需持久化接口 —— 持久化在前端经 Rust 落到 workspace 内。仍有边角:web/非 Tauri 运行时落盘 inert(writeWorkspaceFile 抛 Desktop only,被吞进 persistenceError),即纯浏览器态不持久。",
     "findings": [
-      ["会话落盘:persistSessionToDisk → writeWorkspaceFile 写 .gemini/copilot/sessions/<skillId>/<id>.json(经 Rust native-fs)", "apps/studio/frontend/src/store/copilotStore.ts:148-162"],
+      ["会话落盘:persistSessionToDisk → writeWorkspaceFile 写 .workspace/copilot/sessions/<skillId>/<id>.json(经 Rust native-fs)", "apps/studio/frontend/src/store/copilotStore.ts:148-162"],
       ["appendMessage(开新一轮)与 updateMessage(turn settle 后)都会触发 persistSessionToDisk,保证完整 transcript 落盘(R16/D8 注释:修过『重启只剩用户问、AI 答空白』)", "apps/studio/frontend/src/store/copilotStore.ts:283-286, 316-325"],
       ["最后活跃 tab 落盘:persistActiveSession 写 _active.json", "apps/studio/frontend/src/store/copilotStore.ts:127-135"],
       ["冷启动恢复:hydrate() 用 loadCopilotSessionsFromDisk 读盘并 merge,内存 session id 冲突时赢;每 context 只读盘一次(hydratedKeys)", "apps/studio/frontend/src/store/copilotStore.ts:201-246"],
@@ -93,11 +93,11 @@
   "three_module_dataflow": {
     "summary": "N1 五个操作跨三模块。①前端 = React(WelcomePage/Workspace/copilotStore);③a studio 后端 = Python FastAPI /api/skills(注册表/聚合/lint);native-fs = Rust Tauri 命令(本地文件唯一写者 + recent.json + 目录选择器)。交接点:前端→后端用 HTTP api client(契约 = CreateSkillReq/SkillSummary);前端→Rust 用 Tauri invoke(契约 = workspaceRoot+relativePath+content/expected_hash)。",
     "steps": [
-      ["新建 skill", "WelcomePage.submitNewSkill 收集 name → buildSkillCreatePayload → api.post('/skills') → 拿 SkillSummary 后 openSkill", "create_new_skill 校验去重 + write_skill_files_atomic 落脚手架 + save_skill_index_entry/save_skill_summary 注册", "不参与脚手架写;仅 openSkill 时 ensureWorkspaceSupportDirs 建 .gemini 目录", "契约: POST /api/skills CreateSkillReq{skill_id,directory_path?} → 201 SkillSummary{id,directory_path,phase_count,...}"],
+      ["新建 skill", "WelcomePage.submitNewSkill 收集 name → buildSkillCreatePayload → api.post('/skills') → 拿 SkillSummary 后 openSkill", "create_new_skill 校验去重 + write_skill_files_atomic 落脚手架 + save_skill_index_entry/save_skill_summary 注册", "不参与脚手架写;仅 openSkill 时 ensureWorkspaceSupportDirs 建 .workspace/copilot 目录", "契约: POST /api/skills CreateSkillReq{skill_id,directory_path?} → 201 SkillSummary{id,directory_path,phase_count,...}"],
       ["打开文件夹", "Open folder → selectSkillDirectory(Rust)→ openSkill → resolveBackendSkillIdForWorkspace 调 POST /skills(import)", "create_new_skill import 分支:缺 manifest warning 放行进 repair,save 注册条目,返回 SkillSummary", "select_directory 弹目录选择器;ensure_workspace_support_dirs 建支持目录;add_recent_workspace 写 recent.json", "前端→Rust invoke('select_directory',{defaultPath});前端→后端 POST /api/skills import_existing=true"],
       ["Recent 列表", "useRecentSkills 读 localStorage 'recentWorkspaces' 渲染;与 useSkills(/api/skills)join 出 phaseCount/badge", "GET /api/skills 提供 phase_count/has_golden/config_mismatch 供卡片 badge", "addRecentWorkspace/list/remove 写 recent_workspaces.json(当前 Home 未用 list 作渲染源)", "前端读 localStorage(主) + GET /api/skills(聚合 join);Rust recent.json 为副写"],
       ["进入 workspace 外壳", "App.setCurrentSkillId(selection) → Workspace 用 resolveWorkspaceIdentity 拆出 skillId/workspaceRoot,渲染顶栏/Toolbar/三栏", "useSkills(currentSkillId) 拉 GET /api/skills/{id} detail(GRAPH/phases/files)", "后续文件保存 doWriteSkillFile→writeWorkspaceFile(Rust 唯一写者)", "selection 字符串契约 createLocalWorkspaceSelection(skillId, root);保存契约 write_workspace_file{workspaceRoot,relativePath,content,expectedHash}"],
-      ["copilot 对话", "useCopilot.setContext/hydrate;CopilotPanel 渲染;消息流经 copilotStore append/update", "copilot 路由(/api 下,WS)负责对话推理(N1 仅外壳,内容属后续节点)", "会话/活跃tab 落盘与读回:writeWorkspaceFile/readWorkspaceFile/listWorkspaceDir 全经 Rust", "前端→Rust write/read/list workspace 命令,路径 .gemini/copilot/sessions/<skillId>/"]
+      ["copilot 对话", "useCopilot.setContext/hydrate;CopilotPanel 渲染;消息流经 copilotStore append/update", "copilot 路由(/api 下,WS)负责对话推理(N1 仅外壳,内容属后续节点)", "会话/活跃tab 落盘与读回:writeWorkspaceFile/readWorkspaceFile/listWorkspaceDir 全经 Rust", "前端→Rust write/read/list workspace 命令,路径 .workspace/copilot/sessions/<skillId>/"]
     ]
   },
 

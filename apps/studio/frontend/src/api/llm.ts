@@ -41,6 +41,7 @@ export interface ProviderEndpoint {
   last_test_at?: string | null
   last_test_message?: string | null
   last_error_code?: string | null
+  registrable_provider_name?: string | null
   provider_kind?: ProviderKind
   rate_limit_bucket?: string | null
   timeout_seconds: number
@@ -308,6 +309,7 @@ export interface CredentialProviderState {
   last_test_at?: string
   last_test_message?: string
   last_error_code?: string
+  registrable_provider_name?: string | null
   available_models?: ModelInfo[]
   available_sdks?: string[]
   test_results?: ProviderTestResult[]
@@ -1096,6 +1098,7 @@ function endpointToCredential(
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
     last_error_code: verdict.errorCode ?? '',
+    registrable_provider_name: endpoint.registrable_provider_name ?? null,
     available_models: activeModels,
     available_sdks: activeSdks,
     test_results: testResults,

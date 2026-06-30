@@ -2,18 +2,21 @@ import { useEffect, useRef } from "react"
 import { FileText, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { FileMeta } from "../../file-types"
+import { AssetPathContextMenu } from "./AssetPathContextMenu"
 
 export function FileRow({
   file,
   icon: Icon = FileText,
   onOpen,
   active = false,
+  absolutePath,
 }: {
   file: FileMeta
   icon?: LucideIcon
   onOpen: (file: FileMeta) => void
   /** Highlight + scroll into view — the file for the canvas-selected node. */
   active?: boolean
+  absolutePath?: string | null
 }) {
   const filename = file.path.split("/").pop() ?? file.path
   const ref = useRef<HTMLButtonElement>(null)
@@ -24,12 +27,11 @@ export function FileRow({
     }
   }, [active])
 
-  return (
+  const rowButton = (
     <button
       ref={ref}
       type="button"
       onClick={() => onOpen(file)}
-      title={file.path}
       aria-current={active ? "true" : undefined}
       className={cn(
         "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1 text-left text-xs outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
@@ -40,4 +42,6 @@ export function FileRow({
       <span className="truncate">{filename}</span>
     </button>
   )
+
+  return <AssetPathContextMenu absolutePath={absolutePath}>{rowButton}</AssetPathContextMenu>
 }

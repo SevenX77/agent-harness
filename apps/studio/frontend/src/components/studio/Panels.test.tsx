@@ -356,6 +356,39 @@ describe('AssetsPanel', () => {
     expect(html).not.toContain('phases/setup')
   })
 
+  it('uses styled path affordances without native titles and exposes absolute root paths', () => {
+    const skillRoot = '/abs/skills/story-deconstruction'
+    const subgraphRoot = '/abs/skills/story-deconstruction/subgraph/text-segmentation'
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillId="story-deconstruction"
+          workspaceRoot={skillRoot}
+          skillDetail={{
+            ...skillDetailWithFiles({
+              'SKILL.md': '# Skill',
+              'phases/segment/SUBGRAPH.md': '---\nname: segment\npath: subgraph/text-segmentation\n---\n',
+            }),
+            graph_topology: [
+              {
+                id: 'segment',
+                src: 'phases/segment',
+                depends_on: [],
+                mode: 'subgraph',
+                path: subgraphRoot,
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).not.toContain('title=')
+    expect(html).toContain(`aria-label="story-deconstruction (${skillRoot})"`)
+    expect(html).toContain(`aria-label="segment (${subgraphRoot})"`)
+  })
+
   it('keeps each subgraph folder collapsed by default', () => {
     const html = renderToStaticMarkup(
       <WorkspaceProvider value={workspaceContextStub}>
@@ -444,8 +477,8 @@ describe('AssetsPanel', () => {
         )
       })
 
-      const first = container.querySelector<HTMLButtonElement>('button[title="segmentation"]')
-      const second = container.querySelector<HTMLButtonElement>('button[title="event_extraction"]')
+      const first = container.querySelector<HTMLButtonElement>('button[aria-label="segmentation (/abs/skills/segmentation)"]')
+      const second = container.querySelector<HTMLButtonElement>('button[aria-label="event_extraction (/abs/skills/event_extraction)"]')
       expect(first).not.toBeNull()
       expect(second).not.toBeNull()
       expect(container.querySelectorAll('[data-subgraph-folder-contents="true"]')).toHaveLength(0)

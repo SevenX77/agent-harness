@@ -18,9 +18,11 @@ import { readWorkspaceFile, selectSkillDirectory, writeWorkspaceFile } from "@/l
 import { errorMessage } from "@/utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import type { FileMeta } from "../file-types"
+import { AssetPathContextMenu, absoluteAssetPath } from "./_shared/AssetPathContextMenu"
 import { FileRow } from "./_shared/FileRow"
 import { FolderRow } from "./_shared/FolderRow"
 import { PanelHeader } from "./_shared/PanelHeader"
+import { RootPathSuffix } from "./_shared/RootPathSuffix"
 import { applyPhaseFrontmatterForm, parsePhaseFrontmatter, phaseFrontmatterToForm } from "./phase-frontmatter"
 import {
   ancestorDirsForFile,
@@ -73,14 +75,17 @@ function AssetTreeRows({
   onOpen,
   emptyLabel,
   reveal,
+  workspaceRoot,
 }: {
   directoryTree: WorkspaceDirectoryTree
   directoryPath: string
   onOpen: (file: FileMeta) => void
   emptyLabel?: string
   reveal?: AssetTreeReveal
+  workspaceRoot?: string | null
 }) {
   const directory = directoryTree.getDirectory(directoryPath)
+  const treeRoot = workspaceRoot ?? directoryTree.workspaceRoot ?? null
 
   if (directory.status === "loading" && directory.entries.length === 0) {
     return <TreeStatusLine state={directory} />
@@ -99,10 +104,12 @@ function AssetTreeRows({
       <TreeStatusLine state={directory} subtle />
       {directory.entries.map((child) => {
         if (child.kind === "dir") {
+          const childAbsolutePath = absoluteAssetPath(treeRoot, child.path)
           return (
             <FolderRow
               key={child.path}
               name={child.name}
+              absolutePath={childAbsolutePath}
               expanded={reveal ? reveal.expandedDirs.has(child.path) : undefined}
               onExpandedChange={(expanded) => {
                 if (expanded) {
@@ -117,12 +124,14 @@ function AssetTreeRows({
                 onOpen={onOpen}
                 emptyLabel="Empty folder"
                 reveal={reveal}
+                workspaceRoot={treeRoot}
               />
             </FolderRow>
           )
         }
+        const fileAbsolutePath = absoluteAssetPath(child.file?.workspaceRoot ?? treeRoot, child.path)
         return child.file
-          ? <FileRow key={child.path} file={child.file} onOpen={onOpen} active={reveal?.highlightPath === child.path} />
+          ? <FileRow key={child.path} file={child.file} onOpen={onOpen} active={reveal?.highlightPath === child.path} absolutePath={fileAbsolutePath} />
           : null
       })}
     </>
@@ -153,11 +162,13 @@ function skillRootLabel({
 
 function SkillRootTree({
   rootLabel,
+  rootPath,
   directoryTree,
   onOpen,
   reveal,
 }: {
   rootLabel: string
+  rootPath?: string | null
   directoryTree: WorkspaceDirectoryTree
   onOpen: (file: FileMeta) => void
   reveal?: AssetTreeReveal
@@ -177,6 +188,8 @@ function SkillRootTree({
   return (
     <FolderRow
       name={rootLabel}
+      rootPath={rootPath}
+      absolutePath={rootPath}
       defaultExpanded
       expanded={reveal ? reveal.expandedDirs.has("") : undefined}
       onExpandedChange={(expanded) => reveal?.setDirExpanded("", expanded)}
@@ -184,7 +197,14 @@ function SkillRootTree({
       buttonClassName="py-1.5"
       labelClassName="font-medium text-foreground"
     >
-      <AssetTreeRows directoryTree={directoryTree} directoryPath="" onOpen={onOpen} emptyLabel="No files" reveal={reveal} />
+      <AssetTreeRows
+        directoryTree={directoryTree}
+        directoryPath=""
+        onOpen={onOpen}
+        emptyLabel="No files"
+        reveal={reveal}
+        workspaceRoot={rootPath ?? directoryTree.workspaceRoot}
+      />
     </FolderRow>
   )
 }
@@ -436,6 +456,46 @@ function SubgraphFilesBlock({
     }
   }, [onOpen, onRevealChildNode, onRevealSubgraphGraph, subgraph.id])
   const levelClassName = subgraphLevelTagClassName(subgraph.level)
+  const rootPath = subgraph.path?.trim() || null
+  const rootAriaLabel = rootPath ? `${subgraph.label} (${rootPath})` : undefined
+  const rootButton = (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      aria-label={rootAriaLabel}
+      onClick={onToggle}
+      className="grid min-w-0 cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+      <span
+        className={cn(
+          "grid h-4 w-6 min-w-6 max-w-6 shrink-0 grid-cols-[auto_auto] items-center justify-center gap-px overflow-hidden rounded-sm px-0.5 text-[9px] leading-none",
+          levelClassName,
+        )}
+        data-subgraph-level-tag="true"
+        aria-label={`Recursive level ${subgraph.level}`}
+      >
+        <span
+          data-subgraph-level-prefix="true"
+          className="justify-self-center text-center font-medium"
+        >
+          L
+        </span>
+        <span
+          data-subgraph-level-number="true"
+          className="justify-self-center text-center font-semibold tabular-nums"
+        >
+          {subgraph.level}
+        </span>
+      </span>
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span data-subgraph-name="true" className={cn("truncate font-medium text-foreground", rootPath ? "shrink-0" : undefined)}>
+          {subgraph.label}
+        </span>
+        {rootPath ? <RootPathSuffix path={rootPath} className="flex-1" /> : null}
+      </span>
+    </button>
+  )
   const endAdornment = (
     <div
       data-subgraph-status-slot="true"
@@ -457,37 +517,7 @@ function SubgraphFilesBlock({
         data-subgraph-row-grid="true"
         className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent"
       >
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={onToggle}
-          title={subgraph.label}
-          className="grid min-w-0 cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
-          <span
-            className={cn(
-              "grid h-4 w-6 min-w-6 max-w-6 shrink-0 grid-cols-[auto_auto] items-center justify-center gap-px overflow-hidden rounded-sm px-0.5 text-[9px] leading-none",
-              levelClassName,
-            )}
-            data-subgraph-level-tag="true"
-            aria-label={`Recursive level ${subgraph.level}`}
-          >
-            <span
-              data-subgraph-level-prefix="true"
-              className="justify-self-center text-center font-medium"
-            >
-              L
-            </span>
-            <span
-              data-subgraph-level-number="true"
-              className="justify-self-center text-center font-semibold tabular-nums"
-            >
-              {subgraph.level}
-            </span>
-          </span>
-          <span data-subgraph-name="true" className="truncate font-medium text-foreground">{subgraph.label}</span>
-        </button>
+        <AssetPathContextMenu absolutePath={rootPath}>{rootButton}</AssetPathContextMenu>
         <div className="min-w-max justify-self-end">{endAdornment}</div>
       </div>
       {expanded ? (
@@ -504,6 +534,7 @@ function SubgraphFilesBlock({
               directoryPath=""
               onOpen={openInnerFile}
               emptyLabel="Empty subgraph folder"
+              workspaceRoot={rootPath ?? directoryTree.workspaceRoot}
               reveal={{
                 expandedDirs: innerExpandedDirs,
                 setDirExpanded: setInnerDirExpanded,
@@ -843,7 +874,13 @@ export function AssetsPanel({
             <AssetExplorerSection sectionId="skill-files" label="Skill Files">
               <ScrollArea className="h-full min-h-0">
                 <div className="space-y-0.5 px-0.5 py-1 text-xs">
-                  <SkillRootTree rootLabel={rootLabel} directoryTree={directoryTree} onOpen={openFile} reveal={skillReveal} />
+                  <SkillRootTree
+                    rootLabel={rootLabel}
+                    rootPath={rootTarget}
+                    directoryTree={directoryTree}
+                    onOpen={openFile}
+                    reveal={skillReveal}
+                  />
                 </div>
               </ScrollArea>
             </AssetExplorerSection>

@@ -1934,6 +1934,8 @@ def test_endpoint_test_third_party_no_models_does_not_guess_notable_models(
     # Reachable but unverifiable-without-a-model => untested, NOT failed.
     assert endpoint["status"] != "failed"
     assert endpoint["status"] == "unverified_manual"
+    # W2-D.4: structured "no model" reason so the UI can warn + suggest manual test.
+    assert endpoint["last_error_code"] == "no_model_available"
 
 
 def test_endpoint_test_third_party_retains_verified_when_reachable_and_previously_verified(

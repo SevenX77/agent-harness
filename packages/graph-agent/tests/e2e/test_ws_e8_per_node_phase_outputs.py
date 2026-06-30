@@ -175,7 +175,8 @@ phases:
     )
     logic_dir = root / "phases" / "worker"
     logic_dir.mkdir(parents=True, exist_ok=True)
-    # NOTE: io.outputs is a bare object with no `properties` → open output schema.
+    # Batch node outputs declare the per-item business value; runtime aggregation
+    # must not leak reserved metadata into that value.
     (logic_dir / "LOGIC.md").write_text(
         """---
 io:
@@ -190,6 +191,9 @@ io:
         type: string
   outputs:
     type: object
+    properties:
+      seen:
+        type: string
 actions: [worker]
 validator: false
 batch:

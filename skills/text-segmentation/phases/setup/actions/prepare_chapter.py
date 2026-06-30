@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 def prepare_chapter(inputs) -> dict:
     """Prepare chapter text with line numbers for LLM segmentation.
 
-    Reads chapter_content and chapter_number from context, adds line numbers,
-    and stores preparation metadata back in context.
+    Reads chapter_content and chapter_number from inputs and returns line-numbered
+    preparation metadata.
     """
     chapter_content = inputs.get("chapter_content", "")
     chapter_number = inputs.get("chapter_number", 0)

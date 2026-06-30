@@ -43,6 +43,7 @@ phases:
 
 
 def _agent(root: Path, body_extra: str = "") -> None:
+    _write(root / "refs" / "r1.md", "Reference body.")
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
@@ -149,7 +150,6 @@ def test_v030_agent_runtime_uses_cognitive_template_and_resource_tools(
 ) -> None:
     _graph(tmp_path)
     _agent(tmp_path)
-    _write(tmp_path / "refs" / "r1.md", "Reference body.")
     chat = FakeAgentChatModel()
 
     compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)

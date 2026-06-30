@@ -9,6 +9,8 @@ import logging
 import os
 import re
 import shutil
+import stat
+import sys
 import tempfile
 import time
 import uuid
@@ -164,9 +166,37 @@ def write_skill_files_atomic(skill_dir: Path, files: dict[str, str]) -> None:
         raise
     finally:
         if backup_dir.exists():
-            shutil.rmtree(backup_dir)
+            _rmtree_with_retry(backup_dir)
         if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
+            _rmtree_with_retry(tmp_dir)
+
+
+def _rmtree_with_retry(path: Path, *, attempts: int = 20, delay_seconds: float = 0.05) -> None:
+    for attempt in range(attempts):
+        try:
+            _rmtree_once(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay_seconds)
+
+
+def _rmtree_once(path: Path) -> None:
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_rmtree_chmod_and_retry)
+    else:
+        shutil.rmtree(path, onerror=_rmtree_chmod_and_retry)
+
+
+def _rmtree_chmod_and_retry(function: Any, path: str, _excinfo: object) -> None:
+    try:
+        os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+    except OSError:
+        pass
+    function(path)
 
 
 def _scaffold_files_for(skill_id: str) -> dict[str, str]:
@@ -1741,6 +1771,8 @@ def _lint_str_attr(exc: Exception, name: str) -> str | None:
     value = getattr(exc, name, None)
     if not isinstance(value, str) or not value:
         return None
+    if name == "source_path":
+        return value.replace("\\", "/")
     return value
 
 
@@ -1757,6 +1789,7 @@ def _lint_file_from_payload(payload: object, skill_dir: Path | None = None) -> s
     source_path = getattr(payload, "source_path", None)
     if not isinstance(source_path, str) or not source_path:
         return None
+    source_path = source_path.replace("\\", "/")
     relative = _relative_compile_path(source_path, skill_dir) if skill_dir is not None else None
     if relative and "/" in relative:
         return relative

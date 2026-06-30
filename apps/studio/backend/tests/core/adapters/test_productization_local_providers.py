@@ -638,7 +638,7 @@ def test_runtime_state_store_rejects_unsafe_run_id_segments(tmp_path: Path, run_
     assert _error_code(restore_error.value) == "state.invalid_run_id"
 
     assert not (tmp_path.parent / "bad").exists()
-    assert not (tmp_path / "runs" / "..").exists()
+    assert not (tmp_path / "runs").exists()
 
 
 def test_runtime_state_store_rejects_second_owner_while_lease_is_active(tmp_path: Path) -> None:
@@ -1509,14 +1509,14 @@ def _runtime_state_slow_expired_takeover_worker(
 
 
 def _runtime_state_file_lock_holder(run_dir: Path, ready: Any, release: Any) -> None:
-    import fcntl
+    from app.core.adapters.runtime_state_store_local import _platform_lock_file, _platform_unlock_file
 
     lock_path = run_dir / ".runtime_state.lock"
-    with lock_path.open("a+") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with lock_path.open("a+b") as lock_file:
+        _platform_lock_file(lock_file)
         ready.put("locked")
         release.wait(timeout=5)
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        _platform_unlock_file(lock_file)
 
 
 def _runtime_state_ready_acquire_worker(

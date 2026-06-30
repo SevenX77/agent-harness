@@ -92,6 +92,11 @@ def _agent_phase(
         root / "phases" / phase_id / "SKILL.md",
         f"""---
 validator: false
+io:
+  inputs:
+    {_schema_yaml("text")}
+  outputs:
+    {_schema_yaml("result")}
 tools: [finish_task]
 references:
   - {{id: R1, path: references/r1.md, summary: "Reference"}}
@@ -101,8 +106,8 @@ examples:
 {phase_body}
 """,
     )
-    _write(root / "phases" / phase_id / "references" / "r1.md", "reference\n")
-    _write(root / "phases" / phase_id / "examples" / "e2.md", "example\n")
+    _write(root / "references" / "r1.md", "reference\n")
+    _write(root / "examples" / "e2.md", "example\n")
 
 
 def _logic_phase(
@@ -110,6 +115,7 @@ def _logic_phase(
     phase_id: str = "main",
     *,
     input_field: str = "text",
+    output_field: str = "result",
     validator: str = "false",
 ) -> None:
     _write(
@@ -119,7 +125,7 @@ io:
   inputs:
     {_schema_yaml(input_field)}
   outputs:
-    {_schema_yaml("result")}
+    {_schema_yaml(output_field)}
 actions: [run]
 validator: {validator}
 ---
@@ -128,7 +134,7 @@ validator: {validator}
     )
     _write(
         root / "phases" / phase_id / "actions" / "run.py",
-        f"def run(inputs):\n    return {{'result': inputs['{input_field}']}}\n",
+        f"def run(inputs):\n    return {{'{output_field}': inputs['{input_field}']}}\n",
     )
 
 
@@ -380,15 +386,14 @@ def test_unreachable_phase_uses_island_code(tmp_path: Path, mock_skill_resolver:
     assert exc.value.payload.field_path == "orphan.depends_on"
 
 
-def test_missing_output_phase_uses_leaf_terminal_fallback(tmp_path: Path, mock_skill_resolver: object) -> None:
+def test_missing_output_phase_is_compile_fatal(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, body='<phase depends_on="input">main</phase>')
     _agent_phase(tmp_path)
 
-    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
-    assert compiled.raw["graph_topology"]["phases"] == [
-        {"name": "main", "depends_on": ["input"], "output": False},
-    ]
+    _expect_code(exc, "[F-v3-graph-dataflow-source-missing]")
 
 
 def test_bare_body_phase_missing_depends_on_is_rejected(
@@ -485,7 +490,7 @@ def test_missing_mention_target_is_rejected(tmp_path: Path, mock_skill_resolver:
 def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
     child = parent / "subgraphs" / "child"
-    _graph(parent)
+    _graph(parent, inputs_field="parent_input")
     _subgraph_phase(parent, child_path=child, input_field="parent_input", output_field="result")
     _graph(child, inputs_field="child_input", outputs_field="result")
     _logic_phase(child, input_field="child_input")
@@ -502,10 +507,10 @@ def test_subgraph_io_output_mismatch_is_allowed_at_compile_time(tmp_path: Path, 
     # no [F-v3-subgraph-io-mismatch] at compile time.
     parent = tmp_path / "parent"
     child = parent / "subgraphs" / "child"
-    _graph(parent)
+    _graph(parent, outputs_field="parent_output")
     _subgraph_phase(parent, child_path=child, input_field="text", output_field="parent_output")
     _graph(child, inputs_field="text", outputs_field="child_output")
-    _logic_phase(child)
+    _logic_phase(child, output_field="child_output")
 
     compiled = SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
 

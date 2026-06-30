@@ -10,11 +10,11 @@ import os
 import re
 import sys
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NoReturn, get_origin
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
@@ -201,6 +201,7 @@ class SkillLoader:
         )
         io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
         io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
+        input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
         discovered = _discover_phase_files(root)
         phase_docs: list[PhaseDocument] = []
@@ -221,7 +222,7 @@ class SkillLoader:
                 node_errors.append(exc)
         if node_errors:
             _raise_collected_node_errors(node_errors)
-        _validate_agent_reference_paths(root, phase_docs)
+        _validate_agent_resource_paths(root, phase_docs)
         _validate_subgraph_io_contracts(
             root,
             phase_docs,
@@ -230,14 +231,10 @@ class SkillLoader:
             _compilation_cache=_compilation_cache,
         )
         _validate_iterate_compile_contracts(phase_docs)
+        _validate_static_dataflow(graph_path, graph_topology, phase_docs, io_inputs, io_outputs)
         _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs)
 
         actions, tools = _discover_actions_and_tools(root, discovered)
-        _validate_logic_action_return_keys(
-            phase_docs,
-            actions,
-            validate_context_writes=self.validate_context_writes,
-        )
         subagents_by_phase = _compile_subagent_metadata(
             phase_docs,
             skill_resolver=skill_resolver,
@@ -245,6 +242,14 @@ class SkillLoader:
             _compilation_cache=_compilation_cache,
         )
         tools = _inject_subagent_tools(tools, subagents_by_phase)
+        _validate_agent_declared_tools(phase_docs, tools)
+        _validate_logic_action_return_keys(
+            phase_docs,
+            actions,
+            input_schema_keys,
+            output_schema_keys,
+            validate_context_writes=self.validate_context_writes,
+        )
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
@@ -352,9 +357,14 @@ def _fatal(
 
 
 def _io_fatal(
-    path: Path, line: int, message: str, *, field_path: str | None = None
+    path: Path,
+    line: int,
+    message: str,
+    *,
+    field_path: str | None = None,
+    code: str = "[F-v3-graph-io-schema-invalid]",
 ) -> NoReturn:
-    code, clean = _split_code_message("[F-v3-graph-io-schema-invalid]", message)
+    code, clean = _split_code_message(code, message)
     detail = f"{path}:{line} {clean}"
     raise SkillLoadError(
         detail,
@@ -783,44 +793,135 @@ def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str)
     return resolved
 
 
-def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocument]) -> None:
+def _validate_agent_resource_paths(skill_root: Path, phase_docs: list[PhaseDocument]) -> None:
     root_resolved = skill_root.resolve()
     for doc in phase_docs:
         if not isinstance(doc.ast, AgentNodeAST):
             continue
         for reference in doc.ast.references:
-            path = Path(reference.path)
-            if path.is_absolute():
-                detail = (
-                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'references')} "
-                    f"reference {reference.id!r} path escapes skill root"
-                )
-                raise SkillLoadError(
-                    detail,
-                    payload=make_error_payload(
-                        "[F-v3-resource-reference-path-invalid]",
-                        detail,
-                        field_path="references",
-                        source_path=_payload_source_path(doc.path),
-                    ),
-                )
-            candidate = (skill_root / path).resolve()
-            try:
-                candidate.relative_to(root_resolved)
-            except ValueError as exc:
-                detail = (
-                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'references')} "
-                    f"reference {reference.id!r} path escapes skill root"
-                )
-                raise SkillLoadError(
-                    detail,
-                    payload=make_error_payload(
-                        "[F-v3-resource-reference-path-invalid]",
-                        detail,
-                        field_path="references",
-                        source_path=_payload_source_path(doc.path),
-                    ),
-                ) from exc
+            _validate_declared_resource_path(
+                skill_root,
+                root_resolved,
+                doc.path,
+                kind="reference",
+                item_id=reference.id,
+                value=reference.path,
+                field_path="references",
+                code="[F-v3-resource-reference-path-invalid]",
+            )
+        for example in doc.ast.examples:
+            _validate_declared_resource_path(
+                skill_root,
+                root_resolved,
+                doc.path,
+                kind="example",
+                item_id=example.id,
+                value=example.path,
+                field_path="examples",
+                code="[F-v3-resource-example-path-invalid]",
+            )
+
+
+def _validate_declared_resource_path(
+    skill_root: Path,
+    root_resolved: Path,
+    source_path: Path,
+    *,
+    kind: str,
+    item_id: str,
+    value: str,
+    field_path: str,
+    code: str,
+) -> None:
+    relative_parts = _portable_resource_path_parts(
+        source_path,
+        kind=kind,
+        item_id=item_id,
+        value=value,
+        field_path=field_path,
+        code=code,
+    )
+    if not _declared_resource_file_is_readable(skill_root, relative_parts, code):
+        detail = (
+            f"{source_path}:{_frontmatter_key_line(source_path, field_path)} "
+            f"{kind} {item_id!r} path {value!r} is not a readable file inside the skill root"
+        )
+        raise SkillLoadError(
+            detail,
+            payload=make_error_payload(
+                code,
+                detail,
+                field_path=field_path,
+                source_path=_payload_source_path(source_path),
+            ),
+        )
+
+
+def _declared_resource_file_is_readable(
+    skill_root: Path,
+    relative_parts: tuple[str, ...],
+    code: str,
+) -> bool:
+    from graph_agent.tools.builtin.read_reference import read_resource_file
+
+    try:
+        read_resource_file(
+            root=skill_root,
+            relative_path=PurePosixPath(*relative_parts).as_posix(),
+            code=code,
+        )
+    except GraphAgentFatalError:
+        return False
+    return True
+
+
+def _portable_resource_path_parts(
+    source_path: Path,
+    *,
+    kind: str,
+    item_id: str,
+    value: str,
+    field_path: str,
+    code: str,
+) -> tuple[str, ...]:
+    if re.fullmatch(r"[A-Za-z0-9._/-]+", value) is None:
+        detail = (
+            f"{source_path}:{_frontmatter_key_line(source_path, field_path)} "
+            f"{kind} {item_id!r} path must use portable characters: A-Z a-z 0-9 . _ - /"
+        )
+        raise SkillLoadError(
+            detail,
+            payload=make_error_payload(
+                code,
+                detail,
+                field_path=field_path,
+                source_path=_payload_source_path(source_path),
+            ),
+        )
+    path = PurePosixPath(value)
+    parts = path.parts
+    if (
+        not parts
+        or path.is_absolute()
+        or "\\" in value
+        or any(part in {"", ".", ".."} or ":" in part for part in parts)
+    ):
+        detail = (
+            f"{source_path}:{_frontmatter_key_line(source_path, field_path)} "
+            f"{kind} {item_id!r} path must be a portable relative path inside the skill root"
+        )
+        raise SkillLoadError(
+            detail,
+            payload=make_error_payload(
+                code,
+                detail,
+                field_path=field_path,
+                source_path=_payload_source_path(source_path),
+            ),
+        )
+    return parts
+
+
 def _compile_subagent_metadata(
     phase_docs: list[PhaseDocument],
     *,
@@ -902,6 +1003,32 @@ def _inject_subagent_tools(
             existing_names.add(tool_name)
             phase_tools.append(_subagent_tool_def(phase_id, subagent, tool_name))
     return ToolRegistry(root_tools=registry.root_tools, by_phase=by_phase)
+
+
+def _validate_agent_declared_tools(phase_docs: list[PhaseDocument], registry: ToolRegistry) -> None:
+    root_tool_names = {tool.id for tool in registry.root_tools}
+    framework_tool_names = {"finish_task", "read_reference", "read_example", "log_ambiguity"}
+    for doc in phase_docs:
+        if not isinstance(doc.ast, AgentNodeAST):
+            continue
+        phase_tool_names = {tool.id for tool in registry.by_phase.get(doc.phase_name, [])}
+        available = root_tool_names | phase_tool_names | framework_tool_names
+        for tool_name in doc.ast.tools:
+            if tool_name in available or _is_critic_tool_name(tool_name):
+                continue
+            _fatal(
+                doc.path,
+                _frontmatter_key_line(doc.path, "tools"),
+                "[F-v3-agent-tool-unknown] "
+                f"tool {tool_name!r} in SKILL phase {doc.phase_name!r} is not declared",
+                code="[F-v3-agent-tool-unknown]",
+                field_path=f"tools.{tool_name}",
+            )
+
+
+def _is_critic_tool_name(name: str) -> bool:
+    lower = name.lower()
+    return any(keyword in lower for keyword in ("critic", "reviewer", "auditor"))
 
 
 def _subagent_tool_def(
@@ -1003,9 +1130,9 @@ def _raise_on_purity_violations(path: Path) -> None:
 
 def _load_python_module(path: Path) -> ModuleType:
     module_name = f"_graph_agent_v21_{abs(hash(path.resolve()))}"
-    previous_write_bytecode = sys.dont_write_bytecode
+    previous_dont_write_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
-        sys.dont_write_bytecode = True
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
             _actions_fatal(
@@ -1026,7 +1153,7 @@ def _load_python_module(path: Path) -> ModuleType:
             code="[F-v3-logic-action-entrypoint-missing]",
         )
     finally:
-        sys.dont_write_bytecode = previous_write_bytecode
+        sys.dont_write_bytecode = previous_dont_write_bytecode
     return module
 
 
@@ -1056,6 +1183,21 @@ def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
             f"action {func.__name__!r} must accept exactly one inputs parameter",
             code="[F-v3-logic-action-entrypoint-missing]",
         )
+    annotation = params[0].annotation
+    if annotation is inspect.Parameter.empty:
+        return
+    if annotation is dict:
+        return
+    if get_origin(annotation) is dict:
+        return
+    if isinstance(annotation, str) and annotation in {"dict", "dict[str, Any]", "Dict[str, Any]"}:
+        return
+    _actions_fatal(
+        path,
+        1,
+        f"action {func.__name__!r} first parameter must be dict-compatible inputs",
+        code="[F-v3-logic-action-entrypoint-missing]",
+    )
 
 
 def _validate_tool_signature(path: Path, func: Callable[..., object]) -> None:
@@ -1494,10 +1636,23 @@ def _topological_order(adjacency: dict[str, list[str]], phases: list[str]) -> li
     return order
 
 
-def _validate_inline_io_schema(path: Path, schema: dict[str, Any], kind: str) -> dict[str, Any]:
+def _validate_inline_io_schema(
+    path: Path,
+    schema: dict[str, Any],
+    kind: str,
+    *,
+    domain: str = "graph",
+) -> dict[str, Any]:
     field_path = f"io.{kind}s"
+    invalid_code = _io_schema_error_code(domain)
     if not isinstance(schema, dict):
-        _io_fatal(path, 1, f"inline {kind} schema must be an object", field_path=field_path)
+        _io_fatal(
+            path,
+            1,
+            f"inline {kind} schema must be an object",
+            field_path=field_path,
+            code="[F-v3-graph-io-not-object]" if domain == "graph" else invalid_code,
+        )
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
@@ -1506,8 +1661,69 @@ def _validate_inline_io_schema(path: Path, schema: dict[str, Any], kind: str) ->
             1,
             f"invalid inline {kind} JSON Schema: {exc.message}",
             field_path=field_path,
+            code=invalid_code,
         )
+    if schema.get("type") != "object":
+        _io_fatal(
+            path,
+            1,
+            f"inline {kind} schema must declare type: object",
+            field_path=f"{field_path}.type",
+            code="[F-v3-graph-io-not-object]" if domain == "graph" else invalid_code,
+        )
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        _io_fatal(
+            path,
+            1,
+            f"inline {kind} schema must declare object properties",
+            field_path=f"{field_path}.properties",
+            code=invalid_code,
+        )
+    required = schema.get("required", [])
+    if required is None:
+        required = []
+    if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+        _io_fatal(
+            path,
+            1,
+            f"inline {kind} schema required must be a list of field names",
+            field_path=f"{field_path}.required",
+            code=invalid_code,
+        )
+    missing_required = sorted(set(required) - set(properties))
+    if missing_required:
+        _io_fatal(
+            path,
+            1,
+            f"inline {kind} schema required fields are missing from properties: "
+            + ", ".join(missing_required),
+            field_path=f"{field_path}.required",
+            code=invalid_code,
+        )
+    for field_name, field_schema in properties.items():
+        if not isinstance(field_name, str) or not isinstance(field_schema, dict):
+            continue
+        if field_schema.get("source") != "file":
+            continue
+        source_path = field_schema.get("path")
+        if not isinstance(source_path, str) or not source_path.strip():
+            _io_fatal(
+                path,
+                1,
+                f"inline {kind} field {field_name!r} has source: file but no path",
+                field_path=f"{field_path}.properties.{field_name}.path",
+                code=invalid_code,
+            )
     return schema
+
+
+def _io_schema_error_code(domain: str) -> str:
+    return {
+        "agent": "[F-v3-agent-io-schema-invalid]",
+        "logic": "[F-v3-logic-io-schema-invalid]",
+        "subgraph": "[F-v3-subgraph-io-schema-invalid]",
+    }.get(domain, "[F-v3-graph-io-schema-invalid]")
 
 
 def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
@@ -1548,19 +1764,135 @@ def _iterate_fields_fatal(path: Path, missing: str) -> NoReturn:
         field_path="iterate",
     )
 
+def _validate_static_dataflow(
+    graph_path: Path,
+    graph_topology: dict[str, Any],
+    phase_docs: list[PhaseDocument],
+    root_inputs: dict[str, Any],
+    root_outputs: dict[str, Any],
+) -> None:
+    docs_by_phase = {doc.phase_name: doc for doc in phase_docs}
+    rows = graph_topology.get("phases")
+    deps_by_phase: dict[str, list[str]] = {}
+    output_phases: set[str] = set()
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            phase_name = row.get("name")
+            depends_on = row.get("depends_on")
+            if isinstance(phase_name, str) and isinstance(depends_on, list):
+                deps_by_phase[phase_name] = [dep for dep in depends_on if isinstance(dep, str)]
+            if isinstance(phase_name, str) and row.get("output") is True:
+                output_phases.add(phase_name)
+    raw_order = graph_topology.get("order")
+    order = [name for name in raw_order if isinstance(name, str)] if isinstance(raw_order, list) else []
+    if not order:
+        order = [doc.phase_name for doc in phase_docs]
 
-_INPUT_MUTATION_METHODS = {
-    "clear",
-    "pop",
-    "popitem",
-    "set",
-    "setdefault",
-    "update",
-}
+    root_input_keys = _schema_property_keys(root_inputs)
+    available_after: dict[str, set[str]] = {}
+    for phase_name in order:
+        doc = docs_by_phase.get(phase_name)
+        if doc is None:
+            continue
+        available = set()
+        for dep in deps_by_phase.get(phase_name, []):
+            if dep == "input":
+                available.update(root_input_keys)
+            else:
+                available.update(available_after.get(dep, set()))
+        input_schema = _phase_input_schema(doc)
+        for required_key in _schema_required_keys(input_schema):
+            if (
+                required_key in available
+                or _schema_field_has_file_source(input_schema, required_key)
+                or _schema_field_has_iterate_source(doc, required_key)
+            ):
+                continue
+            _fatal(
+                doc.path,
+                _frontmatter_key_line(doc.path, "io"),
+                "[F-v3-graph-dataflow-source-missing] "
+                f"phase {phase_name!r} required input {required_key!r} has no root, upstream, "
+                "or source:file provider",
+                code="[F-v3-graph-dataflow-source-missing]",
+                field_path=f"{phase_name}.io.inputs.required.{required_key}",
+            )
+        available_after[phase_name] = available | _schema_property_keys(_phase_output_schema(doc))
+
+    terminal_output_keys: set[str] = set()
+    for phase_name in output_phases:
+        terminal_output_keys.update(available_after.get(phase_name, set()))
+    for required_key in _schema_required_keys(root_outputs):
+        if required_key in terminal_output_keys:
+            continue
+        _fatal(
+            graph_path,
+            _frontmatter_key_line(graph_path, "io"),
+            "[F-v3-graph-dataflow-source-missing] "
+            f"required root output {required_key!r} is not produced by an output phase",
+            code="[F-v3-graph-dataflow-source-missing]",
+            field_path=f"io.outputs.required.{required_key}",
+        )
 
 
-class _ActionContractVisitor(ast.NodeVisitor):
-    def __init__(self, path: Path, allowed_return_keys: set[str] | None) -> None:
+def _phase_input_schema(doc: PhaseDocument) -> dict[str, Any]:
+    io = getattr(doc.ast, "io", None)
+    if io is None:
+        return {}
+    inputs = io.inputs
+    return inputs if isinstance(inputs, dict) else {}
+
+
+def _phase_output_schema(doc: PhaseDocument) -> dict[str, Any]:
+    io = getattr(doc.ast, "io", None)
+    if io is None:
+        return {}
+    outputs = io.outputs
+    return outputs if isinstance(outputs, dict) else {}
+
+
+def _schema_property_keys(schema: dict[str, Any]) -> set[str]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return set()
+    return {key for key in properties if isinstance(key, str)}
+
+
+def _schema_required_keys(schema: dict[str, Any]) -> set[str]:
+    required = schema.get("required", [])
+    if not isinstance(required, list):
+        return set()
+    return {key for key in required if isinstance(key, str)}
+
+
+def _schema_field_has_file_source(schema: dict[str, Any], field: str) -> bool:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    field_schema = properties.get(field)
+    return isinstance(field_schema, dict) and field_schema.get("source") == "file"
+
+
+def _schema_field_has_iterate_source(doc: PhaseDocument, field: str) -> bool:
+    batch = getattr(doc.ast, "batch", None)
+    if batch is not None and field == batch.item_var:
+        return True
+    iterate = getattr(doc.ast, "iterate", None)
+    if iterate is None:
+        return False
+    if field == iterate.item_var:
+        return True
+    return iterate.accumulate is not None and field == iterate.accumulate.var
+
+
+class _ActionReturnKeyVisitor(ast.NodeVisitor):
+    def __init__(
+        self,
+        path: Path,
+        allowed_return_keys: set[str] | None,
+    ) -> None:
         self.path = path
         self.allowed_return_keys = allowed_return_keys
 
@@ -1579,47 +1911,45 @@ class _ActionContractVisitor(ast.NodeVisitor):
                     )
         self.generic_visit(node)
 
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "inputs"
-            and func.attr in _INPUT_MUTATION_METHODS
-        ):
-            _purity_fatal(
-                self.path,
-                getattr(func, "lineno", node.lineno),
-                f"{func.attr} mutates read-only inputs",
-            )
-        self.generic_visit(node)
-
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
-        _raise_on_inputs_mutation_targets(self.path, node.targets, node.lineno, "item_assignment")
+        for target in node.targets:
+            _validate_inputs_not_mutated(self.path, target)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
-        _raise_on_inputs_mutation_targets(self.path, [node.target], node.lineno, "item_assignment")
+        _validate_inputs_not_mutated(self.path, node.target)
         self.generic_visit(node)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
-        _raise_on_inputs_mutation_targets(self.path, [node.target], node.lineno, "item_assignment")
+        _validate_inputs_not_mutated(self.path, node.target)
         self.generic_visit(node)
 
     def visit_Delete(self, node: ast.Delete) -> None:  # noqa: N802
-        _raise_on_inputs_mutation_targets(self.path, node.targets, node.lineno, "delete")
+        for target in node.targets:
+            _validate_inputs_not_mutated(self.path, target)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        mutation = _inputs_mutating_method_name(node)
+        if mutation is not None:
+            _actions_fatal(
+                self.path,
+                getattr(node, "lineno", 1),
+                f"{mutation} mutates read-only inputs; return declared output keys instead",
+                code="[F-v3-logic-action-purity-violation]",
+            )
         self.generic_visit(node)
 
 
-def _raise_on_inputs_mutation_targets(
-    path: Path,
-    targets: Sequence[ast.AST],
-    line: int,
-    mutation: str,
-) -> None:
-    for target in targets:
-        if _target_mutates_inputs(target):
-            _purity_fatal(path, line, f"{mutation} mutates read-only inputs")
+def _validate_inputs_not_mutated(path: Path, target: ast.AST) -> None:
+    if not _target_mutates_inputs(target):
+        return
+    _actions_fatal(
+        path,
+        getattr(target, "lineno", 1),
+        "item_assignment mutates read-only inputs; return declared output keys instead",
+        code="[F-v3-logic-action-purity-violation]",
+    )
 
 
 def _target_mutates_inputs(target: ast.AST) -> bool:
@@ -1634,17 +1964,32 @@ def _target_mutates_inputs(target: ast.AST) -> bool:
     return False
 
 
+def _inputs_mutating_method_name(node: ast.Call) -> str | None:
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return None
+    if func.attr not in {"clear", "pop", "popitem", "set", "setdefault", "update", "__setitem__"}:
+        return None
+    if isinstance(func.value, ast.Name) and func.value.id == "inputs":
+        return func.attr
+    return None
+
+
 def _validate_logic_action_return_keys(
     phase_docs: list[PhaseDocument],
     actions: ActionRegistry,
+    input_schema_keys: set[str] | None,
+    output_schema_keys: set[str] | None,
     *,
     validate_context_writes: bool,
 ) -> None:
-    del validate_context_writes
+    del input_schema_keys, output_schema_keys, validate_context_writes
     for doc in phase_docs:
         if not isinstance(doc.ast, LogicNodeAST):
             continue
         phase_output_schema_keys = _extract_output_schema_keys(doc.ast.io.outputs)
+        if phase_output_schema_keys is None:
+            continue
         for action_name in doc.ast.actions:
             action_def = actions.for_phase(doc.phase_name).get(action_name)
             if action_def is None:
@@ -1662,7 +2007,7 @@ def _validate_action_return_keys(
         _actions_keys_fatal(path, exc.lineno or 1, f"could not parse action source: {exc.msg}")
     except OSError as exc:
         _actions_keys_fatal(path, 1, f"could not read action source: {exc}")
-    _ActionContractVisitor(path, output_schema_keys).visit(tree)
+    _ActionReturnKeyVisitor(path, output_schema_keys).visit(tree)
 
 
 def _build_phase_document(
@@ -1686,6 +2031,8 @@ def _build_phase_document(
     data.setdefault("name", phase_name)
     data["mode"] = mode
     is_agent = path.name == "SKILL.md"
+    if is_agent:
+        data = _normalize_skill_node_frontmatter(path, data)
 
     try:
         if mode == "logic":
@@ -1718,6 +2065,7 @@ def _build_phase_document(
     except ValidationError as exc:
         _phase_validation_fatal(path, mode, frontmatter, exc)
 
+    _validate_phase_io_schemas(path, mode, ast)
     return PhaseDocument(
         phase_name=phase_name,
         path=path,
@@ -1726,6 +2074,28 @@ def _build_phase_document(
         raw_blocks=blocks,
         ast=ast,
     )
+
+
+def _validate_phase_io_schemas(path: Path, mode: str, ast: PhaseAST) -> None:
+    io = getattr(ast, "io", None)
+    if io is None:
+        return
+    _validate_inline_io_schema(path, io.inputs, "input", domain=mode)
+    _validate_inline_io_schema(path, io.outputs, "output", domain=mode)
+
+
+def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    if "phase_config" not in data:
+        return data
+    _fatal(
+        path,
+        _frontmatter_key_line(path, "phase_config"),
+        "[F-v3-agent-schema-unknown-field] phase_config is not supported; "
+        "declare Agent fields at top level",
+        code="[F-v3-agent-schema-unknown-field]",
+        field_path="phase_config",
+    )
+
 
 def _phase_validation_fatal(
     path: Path,

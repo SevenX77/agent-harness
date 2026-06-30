@@ -7,7 +7,7 @@ import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 
@@ -282,4 +282,4 @@ def test_compile_artifact_does_not_write_manifest_side_effects_into_source_root(
 def _file_uri_path(ref: str) -> Path:
     parsed = urlparse(ref)
     assert parsed.scheme == "file"
-    return Path(url2pathname(unquote(parsed.path)))
+    return Path(url2pathname(parsed.path))

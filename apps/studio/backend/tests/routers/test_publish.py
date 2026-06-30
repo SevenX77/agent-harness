@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,30 @@ from app.services.git_local import (
     run_git,
 )
 from fastapi.testclient import TestClient
+
+
+def _rmtree_with_retry(path: Path) -> None:
+    for attempt in range(20):
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_rmtree_chmod_and_retry)
+            else:
+                shutil.rmtree(path, onerror=_rmtree_chmod_and_retry)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
+
+
+def _rmtree_chmod_and_retry(function: Any, path: str, _excinfo: object) -> None:
+    try:
+        os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+    except OSError:
+        pass
+    function(path)
 
 
 def test_publish_skill_success(client: TestClient) -> None:
@@ -196,7 +224,7 @@ def test_release_run_starts_from_committed_product_artifact_without_recompiling_
     assert release is not None
     release_artifact_ref = release["artifact_ref"]
     expected_artifact_ref = {**release_artifact_ref, "version": "1.0.0"}
-    shutil.rmtree(studio_roots[0] / "text-segmentation")
+    _rmtree_with_retry(studio_roots[0] / "text-segmentation")
 
     class FailIfCompileAdapter:
         def compile(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -266,7 +294,7 @@ def test_release_run_missing_product_blob_returns_typed_artifact_not_found_witho
     assert release is not None
     artifact_ref = release["artifact_ref"]
     store.blob_path(artifact_ref["content_hash"]).unlink()
-    shutil.rmtree(studio_roots[0] / "text-segmentation")
+    _rmtree_with_retry(studio_roots[0] / "text-segmentation")
 
     class FailIfCompileAdapter:
         def compile(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -397,7 +425,7 @@ def test_publish_success_adds_release_snapshot_to_local_history_without_run_deta
         '{"release_version":"9.9.9","artifact_ref":{"artifact_id":"stage-only"}}',
         encoding="utf-8",
     )
-    shutil.rmtree(runs_dir)
+    _rmtree_with_retry(runs_dir)
 
     history_response = client.get("/api/skills/text-segmentation/history")
 
@@ -993,7 +1021,7 @@ def test_publish_skill_retry_reuses_committed_release_for_owned_skill_when_sourc
     skill_dir = Path(create_response.json()["directory_path"])
 
     first = client.post("/api/skills/owned-release/publish", json={})
-    shutil.rmtree(skill_dir)
+    _rmtree_with_retry(skill_dir)
     retry = client.post("/api/skills/owned-release/publish", json={})
 
     assert first.status_code == 200
@@ -1016,7 +1044,7 @@ def test_publish_skill_retry_rejects_source_missing_release_without_current_user
     _write_settings(client, user_id="alice")
 
     first = client.post("/api/skills/text-segmentation/publish", json={})
-    shutil.rmtree(studio_roots[0] / "text-segmentation")
+    _rmtree_with_retry(studio_roots[0] / "text-segmentation")
     retry = client.post("/api/skills/text-segmentation/publish", json={})
 
     assert first.status_code == 200

@@ -626,11 +626,13 @@ def _find_file(ref: str) -> Path:
 
 
 def _safe_ref_path(ref: str) -> Path:
-    if not ref or "\\" in ref:
+    if not ref:
         raise ValueError(f"Invalid artifact ref: {ref}")
     ref_path = Path(ref)
     if ref_path.is_absolute():
         return ref_path.resolve(strict=False)
+    if "\\" in ref:
+        raise ValueError(f"Invalid artifact ref: {ref}")
     posix_path = PurePosixPath(ref)
     if posix_path.is_absolute() or any(part in {"", ".", ".."} for part in posix_path.parts):
         raise ValueError(f"Invalid artifact ref: {ref}")
@@ -663,7 +665,7 @@ def _storage_root() -> Path:
 
 
 def _baseline_id(baseline_ref: str) -> str:
-    match = re.search(r"golden/([^/]+)", baseline_ref)
+    match = re.search(r"golden[\\/]+([^\\/]+)", baseline_ref)
     if match:
         return match.group(1)
     path = Path(baseline_ref)

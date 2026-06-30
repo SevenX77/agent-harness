@@ -128,8 +128,21 @@ def validate(output: dict, state_slice: dict, **kwargs) -> dict:
         }
         character_results.append(result_dict)
 
+    latest_states_text = "\n".join(
+        f"- {item['character_id']} {item['name']}: {item['current_state']}"
+        for item in character_results
+    )
+    changes_text = "\n".join(
+        f"- {item['event_id']} {item['character_id']}: "
+        + "; ".join(item.get("changes", []))
+        for item in character_results
+        if item.get("changes")
+    )
+
     return {
         "entity_registry": registry,
         "entity_aliases": aliases,
         "character_results": character_results,
+        "character_latest_states_text": latest_states_text or "No character state updates.",
+        "batch_character_changes_text": changes_text or "No character changes.",
     }

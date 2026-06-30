@@ -85,7 +85,7 @@ def _public_api_symbols() -> set[str]:
 
 
 def _src_python_files() -> set[str]:
-    return {str(path.relative_to(REPO_ROOT)) for path in (PACKAGE_ROOT / "src/graph_agent").rglob("*.py")}
+    return {path.relative_to(REPO_ROOT).as_posix() for path in (PACKAGE_ROOT / "src/graph_agent").rglob("*.py")}
 
 
 def _sha256(path: Path) -> str:
@@ -318,7 +318,7 @@ def test_cutover_discipline_quantifies_overlap() -> None:
 
 def test_runtime_compat_features_cover_all_patches() -> None:
     patch_like_files = sorted(
-        str(path.relative_to(REPO_ROOT))
+        path.relative_to(REPO_ROOT).as_posix()
         for path in (PACKAGE_ROOT / "src/graph_agent").rglob("*.py")
         if "patch" in path.parts or "patch" in path.name or "compat" in path.name
     )

@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 import pytest
 
@@ -2602,7 +2603,8 @@ def test_engine_adapter_run_artifact_snapshots_runtime_state_for_owner_run_id_wh
     snapshot_run_id, snapshot_state = runtime_state_store.snapshot_calls[0]
     assert snapshot_run_id == "run-123"
     assert snapshot_state["run_id"] == "run-123"
-    assert snapshot_state["checkpointer_spec"] == f"sqlite:{workspace_dir / 'runs' / 'run-123' / 'checkpoints.db'}"
+    expected_checkpointer = (workspace_dir / "runs" / "run-123" / "checkpoints.db").as_posix()
+    assert snapshot_state["checkpointer_spec"] == f"sqlite:{expected_checkpointer}"
     assert snapshot_state["checkpoint_id"] == "checkpoint-1"
     assert snapshot_state["checkpoint_ns"] == ""
     assert snapshot_state["result_ref"] == expected_result_ref
@@ -3606,7 +3608,8 @@ def _storage_root(tmp_path: Path) -> Path:
 def _read_json_ref(ref: str) -> dict[str, Any]:
     parsed = urlparse(ref)
     assert parsed.scheme == "file"
-    path = Path(unquote(parsed.path))
+    raw_path = f"//{parsed.netloc}{parsed.path}" if parsed.netloc else parsed.path
+    path = Path(url2pathname(unquote(raw_path)))
     assert path.is_file()
     return json.loads(path.read_text(encoding="utf-8"))
 

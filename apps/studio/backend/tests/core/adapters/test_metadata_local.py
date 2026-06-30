@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import stat
 from pathlib import Path
 
@@ -60,6 +61,7 @@ async def test_app_settings_recovers_from_corrupt_json(
 
 
 @pytest.mark.anyio
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not model Windows ACLs")
 async def test_app_settings_file_permissions_0o600(
     metadata_store: LocalJsonMetadataStore,
     tmp_path: Path,

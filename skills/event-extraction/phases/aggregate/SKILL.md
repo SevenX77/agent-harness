@@ -13,7 +13,7 @@ io:
         type: object
   outputs:
     type: object
-    required: [parsed_events, event_timeline]
+    required: [parsed_events, event_timeline, events_raw]
     properties:
       parsed_events:
         type: array
@@ -21,6 +21,8 @@ io:
           type: object
       event_timeline:
         type: object
+      events_raw:
+        type: string
 tools:
   - finish_task
 max_iterations: 20

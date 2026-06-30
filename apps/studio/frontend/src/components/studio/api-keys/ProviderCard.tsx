@@ -640,24 +640,9 @@ function providerTestResultFailureScope(result: ProviderTestResult | null | unde
   ) {
     return "endpoint"
   }
-  const text = result.last_test_message?.toLowerCase() ?? ""
-  if (text.includes("invalid_model") || text.includes("model_not_found") || text.includes("no available channels for model")) {
-    return "model"
-  }
-  if (
-    text.includes("invalid api key") ||
-    text.includes("authentication_error") ||
-    text.includes("direct access to") ||
-    text.includes("use /v1/messages") ||
-    text.includes("chat/completions is not allowed") ||
-    text.includes("upstream_error") ||
-    text.includes("processing_error") ||
-    text.includes("service temporarily unavailable") ||
-    text.includes("timeout") ||
-    text.includes("network")
-  ) {
-    return "endpoint"
-  }
+  // W2-B.3: the failure scope is derived from the STRUCTURED error code
+  // (`endpointErrorCode` now prefers the backend's persisted code, falling back to
+  // parsing the message there). We no longer text-match `last_test_message` here.
   return undefined
 }
 

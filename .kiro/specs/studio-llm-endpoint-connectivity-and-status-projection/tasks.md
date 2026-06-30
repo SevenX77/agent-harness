@@ -74,9 +74,9 @@
 ## Wave 3 — 身份与配置 data-driven(D11/D12/D13 + T2/T6/T7)
 
 ### W3-A · provider 配置文件(data-driven,替代硬编码)(T2)
-- [ ] **W3-A.1** 定结构化 provider 配置(协议/method/官方 host→id/别名/notable models);定位与格式(YAML/JSON,落 `apps/studio/backend/app/data/` 或扩 `docs/development/llm_provider_notes/`)。
-- [ ] **W3-A.2 (red→green)** 代码改读配置:移除 `_endpoint_notable_provider_key` 硬编码 qiniu/openrouter、official host 映射、ark 协议硬编码。
-- [ ] **W3-A.3** ark 多协议(R-E4)经配置补齐(openai 形 + anthropic 形 + responses);若需 gateway probe 改动→先取授权。
+- [x] **W3-A.1 (green)** 结构化 provider 配置落地:JSON(无 yaml 依赖)`apps/studio/backend/app/data/provider_identity.json`(per-provider `key`/`display_alias`/`keywords`/`registrable_domains`)+ loader `app/services/provider_config.py::notable_provider_key_for`(`Path(__file__).parents[1]/"data"`,镜像 `templates.py` 加载、vendoring-safe,`lru_cache`)。
+- [~] **W3-A.2 (red→green,进行中)** 已迁移 `_endpoint_notable_provider_key` 读配置(去 qiniu/openrouter 硬编码 + 删死 helper `_hostname_matches_registered_domain` + **补 wavespeed**:之前有 `wavespeed.md` 却没接、落到 backend 读 openai.md,现一行配置接上)。TDD:`test_provider_config.py`(关键词/域/大小写/未配回退/alias 5 测)。门禁:ruff/mypy(114)/registry 105/identity+evidence 7 全绿。**剩余**:official host→endpoint_id(`llm_credentials.py:299-305`)、ark 方法表(`llm.py` `_official_language_probe_candidates`)、默认 base_url(`copilot_test.py`)、模型前缀过滤——后续 PR 续迁。
+- [x] **W3-A.3(Q6 订正:已覆盖)** **论据**:ARK Primary Protocol 本就是 `openai_compatible`([ark.md:10](docs/development/llm_provider_notes/ark.md:10));gateway `ark_chat`([provider_probe.py:447](packages/graph-agent-gateway/src/graph_agent_gateway/registry/provider_probe.py:447))**已**用标准 OpenAI 消息格式 POST `/api/v3/chat/completions`——即 ARK 的 openai chat 协议**已在探测**(连同 `ark_responses` + `ark_anthropic_messages` = 用户说的"至少 3 种")。结论:**无需**再加重复的 ark-openai 方法;若将来要让 ARK 也跑通用 `openai_chat_completions` 的现代语义(`max_completion_tokens`/`reasoning_effort`)做标准 SDK 兼容性校验,再单列(已取得 gateway 授权)。
 
 ### W3-B · provider 身份 = 注册域派生 + alias(D12)
 - [x] **W3-B.1/.2 (red→green)** 新建 `services/llm_provider_identity.py::registrable_provider_name(base_url)` —— eTLD+1 派生(T6 定:**内置精简多级后缀表**,无新依赖、不过 pip-audit 风险):`api.qnaigc.com`→`qnaigc`、`api./llm.wavespeed.ai`→同一 `wavespeed`、`ark.cn-beijing.volces.com`→`volces`、裸 IP/单标签/`foo.com.cn`→`foo`/None。15 参数化单测。

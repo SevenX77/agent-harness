@@ -148,6 +148,7 @@ from app.services.official_capability_sources import (
     official_doc_source_urls,
     provider_doc_limit_rules,
 )
+from app.services.provider_config import notable_provider_key_for
 from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -4746,22 +4747,15 @@ def _base_url_hostname(base_url: str) -> str:
     return (parsed.hostname or "").lower().strip(".")
 
 
-def _hostname_matches_registered_domain(hostname: str, registered_domain: str) -> bool:
-    return hostname == registered_domain or hostname.endswith(f".{registered_domain}")
-
-
 def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
-    text_haystack = " ".join(
-        [
-            endpoint.endpoint_id,
-            endpoint.display_name or "",
-        ]
-    ).lower()
+    # W3-A / T2: the qiniu / openrouter / wavespeed keyword+domain matches are
+    # data-driven now (app/data/provider_identity.json) — a new provider is a config
+    # edit, not a code change. Falls back to the probe backend for unconfigured hosts.
+    text_haystack = " ".join([endpoint.endpoint_id, endpoint.display_name or ""])
     hostname = _base_url_hostname(endpoint.base_url)
-    if "qiniu" in text_haystack or _hostname_matches_registered_domain(hostname, "qnaigc.com"):
-        return "qiniu"
-    if "openrouter" in text_haystack or _hostname_matches_registered_domain(hostname, "openrouter.ai"):
-        return "openrouter"
+    matched = notable_provider_key_for(text_haystack, hostname)
+    if matched is not None:
+        return matched
     return _endpoint_probe_backend(endpoint)
 
 

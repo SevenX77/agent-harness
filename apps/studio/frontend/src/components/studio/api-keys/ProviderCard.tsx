@@ -1813,7 +1813,10 @@ export function ProviderCard({
         size="xs"
         className={cn(
           isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",
-          status === "testing" && "api-route-tag-border-flow",
+          // R-G2: a model chip pulses while its own route reports status="testing"
+          // (official, per-route), OR — for third-party providers — while the whole
+          // endpoint test runs, so the user sees every listed model being verified.
+          (status === "testing" || (isGettingModels && !isOfficial && !isDisabled)) && "api-route-tag-border-flow",
         )}
       >
         <button

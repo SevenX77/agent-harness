@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.services.provider_config import (
+    language_model_classification,
     notable_provider_key_for,
     official_endpoint_id_for_host,
     provider_identities,
@@ -81,3 +82,30 @@ def test_probe_candidate_specs_match_the_static_tables() -> None:
     for specs in (claude, deepseek, ark):
         for spec in specs:
             assert required <= set(spec)
+
+
+def test_language_model_classification_only_for_configured_providers() -> None:
+    assert language_model_classification("ark") is not None
+    # identity-only / dynamic-code providers have no configured classifier.
+    assert language_model_classification("qiniu") is None
+    assert language_model_classification("openai") is None
+    assert language_model_classification("unknown") is None
+
+
+def test_ark_classification_accepts_language_models_and_rejects_media() -> None:
+    classification = language_model_classification("ark")
+    assert classification is not None
+    prefixes, non_language_tokens = classification
+
+    def is_language(model: str) -> bool:
+        lowered = model.lower()
+        if any(token in lowered for token in non_language_tokens):
+            return False
+        return any(lowered.startswith(prefix) for prefix in prefixes)
+
+    assert is_language("doubao-seed-1-6") is True
+    assert is_language("qwen-max") is True
+    assert is_language("ep-20240101120000") is True
+    assert is_language("doubao-seedream-3-0") is False  # image token
+    assert is_language("doubao-embedding-large") is False
+    assert is_language("gpt-4o") is False  # not an ARK prefix

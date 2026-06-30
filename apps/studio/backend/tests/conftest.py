@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
@@ -94,7 +95,14 @@ def client(studio_roots: tuple[Path, Path]) -> Iterator[TestClient]:
     test_client.headers["Authorization"] = f"Bearer {_TEST_TOKEN}"
     with test_client:
         yield test_client
-    run_manager._runs.clear()
+    # Properly stop background runs/terminals before dropping references. Clearing the
+    # dicts alone orphaned real multiprocessing.Process children + their Queue feeder
+    # threads (and pty processes), which then SIGSEGV during interpreter/coverage
+    # teardown — the flaky `exit 139 after "N passed"` on quality-gates.
+    run_manager.reset_for_tests()
+    for term_id in list(terminal_manager._sessions):
+        with contextlib.suppress(Exception):
+            terminal_manager.close(term_id)
     terminal_manager._sessions.clear()
     clear_backend_caches()
 

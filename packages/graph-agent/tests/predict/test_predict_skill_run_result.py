@@ -20,8 +20,10 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
         "schema_version: \"v0.3.0\"\n"
         "io:\n"
         "  inputs:\n"
+        "    type: object\n"
         "    properties: {}\n"
         "  outputs:\n"
+        "    type: object\n"
         "    properties:\n"
         "      text:\n"
         "        type: string\n"
@@ -39,8 +41,10 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
         "---\n"
         "io:\n"
         "  inputs:\n"
+        "    type: object\n"
         "    properties: {}\n"
         "  outputs:\n"
+        "    type: object\n"
         "    properties:\n"
         "      text:\n"
         "        type: string\n"
@@ -87,7 +91,7 @@ def test_run_result_success_derives_from_path_diff() -> None:
         success=True,  # Will be set or derived
         run_id="test-1",
         skill_id="test-skill",
-        context={},
+        inputs={},
         source="predict",
         path_diff=diff_ok,
         phases=[],
@@ -108,7 +112,7 @@ def test_run_result_success_derives_from_path_diff() -> None:
         success=False,
         run_id="test-2",
         skill_id="test-skill",
-        context={},
+        inputs={},
         source="predict",
         path_diff=diff_fail,
         phases=[],

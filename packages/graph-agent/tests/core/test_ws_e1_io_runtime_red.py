@@ -312,13 +312,13 @@ def test_markdown_artifact_uses_validated_business_data_md_instead_of_parsed_jso
             ]
         }
     )
-    context = {
+    inputs = {
         "current_phase": "main",
         "report": {"answer": "raw ok", "note": "keep spacing"},
         "business_data_md": RAW_BUSINESS_MD,
     }
 
-    saved_paths = io_manager.save_outputs(context, storage_manager=storage)
+    saved_paths = io_manager.save_outputs(inputs, storage_manager=storage)
 
     expected_path = workspace_dir / "runs" / "ws-e1-io" / "raw-md-run" / "phases" / "main" / "report.md"
     assert saved_paths == [str(expected_path)]

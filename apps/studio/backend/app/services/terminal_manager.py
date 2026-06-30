@@ -89,13 +89,13 @@ class TerminalManager:
         self._sessions[term_id] = TerminalRecord(
             term_id=term_id,
             process=process,
-            cwd=str(skill_dir),
+            cwd=skill_dir.as_posix(),
             expires_at=time.monotonic() + config.TERMINAL_SESSION_TTL_SECONDS,
         )
         return TerminalSession(
             term_id=term_id,
             ws_url=f"/ws/terminal/{term_id}",
-            cwd=str(skill_dir),
+            cwd=skill_dir.as_posix(),
             ttl_seconds=config.TERMINAL_SESSION_TTL_SECONDS,
         )
 

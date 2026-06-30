@@ -389,6 +389,7 @@ def test_load_credentials_repairs_legacy_catalog_candidate_failed_status(tmp_pat
     ]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not model Windows ACLs")
 def test_save_credentials_chmods_file_0600_and_parent_0700(tmp_path: Path) -> None:
     path = tmp_path / ".studio" / "llm_credentials.json"
 

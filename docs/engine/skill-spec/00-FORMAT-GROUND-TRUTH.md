@@ -1,11 +1,22 @@
 ---
 status: FROZEN
 ssot: graph_skill_format_templates
-updated: 2026-06-29
+updated: 2026-06-30
+
 supersedes:
   - docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md inline templates
   - docs/engine/mvp1/_migration-src/
 ---
+
+## 2026-06-30 Strict Compile Gate Addendum
+
+- `phase_config` is not a legal field or compatibility layer. Agent phase settings are declared directly in `phases/<id>/SKILL.md` frontmatter.
+- Every `io.inputs` and `io.outputs` block is a Draft 2020-12 JSON Schema object: top-level `type: object`, `properties` is required, and every `required` entry must exist in `properties`.
+- Compile validates static dataflow before run: every required phase input must come from root input, an upstream phase output, an explicit `source: file`, or an iterator-injected field; every required root output must be available at an output-marked terminal phase.
+- LOGIC actions must be declared as `def <action_name>(inputs) -> dict`; `inputs` is read-only, and actions produce values only by returning keys declared in the phase `io.outputs.properties`.
+- Declared Agent tools must resolve during compile, except for framework-provided tools and generated subagent/critic tools.
+- Declared `references[].path` and `examples[].path` are compile-time source resources: paths must be portable POSIX-style relative paths using only `A-Z a-z 0-9 . _ - /`, must not escape the skill root, and must point to readable files. Runtime reader fallback is only for reader processing failures after the source path has passed compile.
+- `llm_role` reachability is host/gateway truth. Pure source compile accepts the string shape; Studio strict compile/run preflight may inject a role resolver and fail early when the configured role is unavailable.
 
 # graph_skill 文件格式模板唯一真相源
 

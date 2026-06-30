@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from graph_agent import (
     CompiledSkill as CompiledSkill,
@@ -405,7 +406,7 @@ def _runtime_state_checkpointer_spec(execution_context: dict[str, Any], run_id: 
     workspace_dir = execution_context.get("workspace_dir")
     if not isinstance(workspace_dir, str) or not workspace_dir or "/" in run_id or "\\" in run_id:
         return None
-    return f"sqlite:{Path(workspace_dir) / 'runs' / run_id / 'checkpoints.db'}"
+    return f"sqlite:{(Path(workspace_dir) / 'runs' / run_id / 'checkpoints.db').as_posix()}"
 
 
 def _runtime_state_artifact_ref(restored_state: dict[str, Any], *, skill_id: str) -> dict[str, Any]:
@@ -701,7 +702,8 @@ def _file_uri_to_path(ref: str) -> Path:
     parsed = urlparse(ref)
     if parsed.scheme != "file":
         raise ValueError(f"Expected file URI ref, got: {ref}")
-    return Path(unquote(parsed.path))
+    raw_path = f"//{parsed.netloc}{parsed.path}" if parsed.netloc else parsed.path
+    return Path(url2pathname(unquote(raw_path)))
 
 
 class EngineAdapter:

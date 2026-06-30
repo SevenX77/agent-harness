@@ -52,7 +52,7 @@ Ask @subagent:echo_helper for a concise review note when a boundary is ambiguous
 </step>
 
 <step id="S3" name="finish">
-Optionally delegate to @subgraph:deep_dive, then call @tool:finish_task with structured segment data.
+Call @tool:finish_task with structured segment data.
 </step>
 
 <protocol id="P1">

@@ -7,6 +7,7 @@ and existing Dependabot weekly ecosystem configuration.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,16 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _is_executable(path: Path) -> bool:
-    if os.name == "nt" and path.suffix == ".sh":
-        return path.read_text(encoding="utf-8").startswith("#!")
+    if os.name == "nt":
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        result = subprocess.run(
+            ["git", "ls-files", "-s", relative],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return result.stdout.startswith("100755 ")
     return bool(os.stat(path).st_mode & 0o111)
 
 

@@ -255,7 +255,7 @@ def test_resume_from_checkpoint_applies_business_context_overrides_without_rerun
 ) -> None:
     skill_root = tmp_path / "skill"
     workspace_dir = tmp_path / "workspace"
-    run_id = "ws-e7-resume-context"
+    run_id = "ws-e7-resume-inputs"
     _resume_logic_skill(skill_root)
     reset_checkpointer()
     try:

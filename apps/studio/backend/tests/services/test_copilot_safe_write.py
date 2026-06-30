@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +38,14 @@ def _register_sink(skill_id: str, workspace: Path) -> asyncio.Queue[object]:
         queue=queue, workspace_root=workspace
     )
     return queue
+
+
+def _write_text_command(filename: str, content: str) -> str:
+    code = (
+        "from pathlib import Path; "
+        f"Path({filename!r}).write_text({content!r}, encoding='utf-8')"
+    )
+    return f'"{sys.executable}" -c "{code}"'
 
 
 def _sha256_text(content: str) -> str:
@@ -245,7 +254,7 @@ def test_approved_bash_command_executes_once_in_workspace(tmp_path: Path) -> Non
     asyncio.run(
         cb(
             "Bash",
-            {"command": "printf approved > approved.txt"},
+            {"command": _write_text_command("approved.txt", "approved")},
             ToolPermissionContext(tool_use_id="tu-approve"),
         )
     )
@@ -282,7 +291,7 @@ def test_reset_session_clears_pending_bash_approval(tmp_path: Path) -> None:
     asyncio.run(
         cb(
             "Bash",
-            {"command": "printf stale > stale.txt"},
+            {"command": _write_text_command("stale.txt", "stale")},
             ToolPermissionContext(tool_use_id="tu-stale"),
         )
     )
@@ -323,7 +332,7 @@ def test_stream_end_keeps_pending_bash_approval_resolvable_once(
             del session_id
             await self.options.can_use_tool(
                 "Bash",
-                {"command": "printf approved-after-stream > after-stream.txt"},
+                {"command": _write_text_command("after-stream.txt", "approved-after-stream")},
                 ToolPermissionContext(tool_use_id="tu-after-stream"),
             )
 
@@ -370,7 +379,7 @@ def test_rejected_bash_command_never_executes(tmp_path: Path) -> None:
     asyncio.run(
         cb(
             "Bash",
-            {"command": "printf denied > denied.txt"},
+            {"command": _write_text_command("denied.txt", "denied")},
             ToolPermissionContext(tool_use_id="tu-reject"),
         )
     )

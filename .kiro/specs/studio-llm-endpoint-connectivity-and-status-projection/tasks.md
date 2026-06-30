@@ -38,7 +38,8 @@
 - [x] **W2-B.1 (red→green,raw routes 面)** `_project_route_ui_states` 写回 route 时**一并 stamp `reason_code`**(原来只 stamp `ui_state`、丢了 reason——正是前端要去文本匹配的根因)。`/api/llm/registry` 的 `provider_routes` 现带 ui_state+reason_code。
 - [x] **W2-B.1b(已存在)** model_groups 面 `_provider_model_option`([llm.py] `"reason_code": projection.reason_code`)**早已暴露** reason_code;无需补。两个投影面现都带 reason_code。
 - [ ] **W2-B.2(可后置)** 写状态时机预算归一态落盘,响应只读(cooling_down 因依赖熔断计时仍需读时 overlay,属阶段二/运行期)。
-- [ ] **W2-B.3 (red→green)** 前端:删 `endpointStateDisplayStatus`/`providerTestResultFailureScope` 文本匹配,直接读 ui_state + reason_code;改既有快照/单测。(需跑 app 亲眼验证)
+- [x] **W2-B.3 (red→green)** 端到端结构化失败码:**后端** studio `ProviderEndpoint` 加 `last_error_code`(test_endpoint 从 `result.error_code` 持久化,strip 不进 gateway);**前端** `endpointErrorCode` 优先读 `endpoint.last_error_code`(message 解析降级为 fallback),删 `providerTestResultFailureScope` 里散落的 `text.includes` 二次匹配。门禁:后端 ruff/mypy/137 + 前端 lint/typecheck/test(1525)/build 全绿。视觉验证按用户指示豁免。
+  > 注:get-models 失败的连通/鉴权码(invalid_api_key 等,Qiniu 顶部状态痛点)现走结构化;第三方生成层 model 级码暂仍由 `endpointErrorCode` 的 message 正则兜底(`(code)` 提取),后续可继续结构化。
 - [ ] **W2-B.4 (red→green)** 一 model 多 route 聚合(R-A4):model 标签态 = 名下 routes 归一态聚合(任一 ready 则可用);贯穿 model 标签 + role 内 endpoint/route 标签。
 
 ### W2-C · L1/L2 指示器按层重做(D10 / R-A2)

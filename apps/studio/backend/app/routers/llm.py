@@ -730,6 +730,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     status: Literal["verified", "unverified_manual", "failed", "disabled"] = "failed"
     message = "API key is empty."
     auth_failed = False
+    last_error_code: str | None = None
     probe_attempts_log: list[dict[str, Any]] = []
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
@@ -755,6 +756,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         # R-E2: an invalid API key means the endpoint is unusable until the key is
         # fixed — record it so we can disable (not just "fail") the endpoint below.
         auth_failed = result.status == "invalid_key"
+        # W2-B.3: persist the STRUCTURED error code so the frontend reads it directly
+        # instead of parsing the human last_test_message.
+        last_error_code = result.error_code
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -939,6 +943,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             "status": status,
             "last_test_at": _now_iso(),
             "last_test_message": message,
+            "last_error_code": last_error_code,
         }
     )
     updated = latest_endpoint.model_copy(update=endpoint_update)

@@ -40,6 +40,7 @@ export interface ProviderEndpoint {
   status: RouteStatus
   last_test_at?: string | null
   last_test_message?: string | null
+  last_error_code?: string | null
   provider_kind?: ProviderKind
   rate_limit_bucket?: string | null
   timeout_seconds: number
@@ -1321,6 +1322,9 @@ function endpointMessageFailureScope(message: string | null | undefined): Endpoi
 }
 
 function endpointErrorCode(endpoint: ProviderEndpoint): string | undefined {
+  // W2-B.3: prefer the STRUCTURED error code the backend now persists; only fall
+  // back to parsing the human last_test_message for older / missing data.
+  if (endpoint.last_error_code) return endpoint.last_error_code
   const message = endpoint.last_test_message ?? ''
   const normalized = message.toLowerCase()
   const match = [...message.matchAll(/\(([a-z][a-z0-9_:-]+)\)/gi)]

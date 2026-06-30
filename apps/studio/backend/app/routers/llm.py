@@ -848,6 +848,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             # endpoint's untested physical status, never "failed".
             if verification.status == "no_model":
                 status = "unverified_manual"
+                # W2-D.4: structured reason so the UI can warn "no model to test,
+                # add a model id and run a single-model test" without parsing text.
+                last_error_code = "no_model_available"
             else:
                 status = verification.status
             message = verification.message

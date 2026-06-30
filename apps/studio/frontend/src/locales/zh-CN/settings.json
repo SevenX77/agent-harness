@@ -304,6 +304,7 @@
         "runtimeUrl": "运行时 URL：{{url}}",
         "protocol": "协议：{{protocol}}",
         "status": "状态：{{status}}",
+        "noModelWarning": "⚠ 没有可测的模型——请手动输入模型名做单模型测试。",
         "routes": "路由：{{n}}",
         "profiles": "档案：{{n}}",
         "methods": "方法：{{methods}}",

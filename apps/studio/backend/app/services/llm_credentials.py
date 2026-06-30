@@ -28,6 +28,7 @@ from app.core.adapters.gateway import (
 )
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
+from app.services.provider_config import official_endpoint_id_for_host
 
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK
@@ -291,18 +292,9 @@ def _persisted_endpoint_id(
 
 
 def _official_endpoint_id_for_base_url(base_url: str) -> str | None:
-    base_host = _url_hostname(base_url)
-    if base_host == "api.anthropic.com":
-        return "anthropic-official"
-    if base_host == "api.openai.com":
-        return "openai-official"
-    if base_host == "api.deepseek.com":
-        return "deepseek-official"
-    if base_host == "generativelanguage.googleapis.com":
-        return "gemini-official"
-    if _host_matches(base_host, "volces.com"):
-        return "ark-official"
-    return None
+    # W3-A / T2: official host -> stable endpoint id is data-driven now
+    # (app/data/provider_identity.json) — a new official provider is a config edit.
+    return official_endpoint_id_for_host(_url_hostname(base_url))
 
 
 def _normalize_loaded_credentials(data: LLMCredentialsFile) -> LLMCredentialsFile:
@@ -476,11 +468,6 @@ def _url_hostname(raw_url: str) -> str:
         return ""
     parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
     return (parsed.hostname or "").lower().rstrip(".")
-
-
-def _host_matches(hostname: str, domain: str) -> bool:
-    normalized_domain = domain.lower().rstrip(".")
-    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
 
 
 def _route_slug(provider_model_id: str) -> str:

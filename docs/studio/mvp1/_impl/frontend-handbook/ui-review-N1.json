@@ -120,7 +120,7 @@
       "status": "ok",
       "problem": "退出再进同一 skill,copilot 对话是否一模一样恢复(D8)——原审查标为『纯内存全丢』的缺口,本次深挖核实该结论已不成立,实际已实现",
       "design": "D8 MUST:退出再进恢复对话;其余工作态(面板/分屏)可丢(Q3)",
-      "current": "已实现:会话经 Rust native-fs 落 .gemini/copilot/sessions/<skillId>/<id>.json,冷启动 hydrate() 读回合并并恢复上次活跃 tab(copilotStore.ts:148-246);回 Home(skillId=null)时 useCopilot effect 直接 return、不清 store(useCopilot.ts:131-134)",
+      "current": "已实现:会话经 Rust native-fs 落 .workspace/copilot/sessions/<skillId>/<id>.json,冷启动 hydrate() 读回合并并恢复上次活跃 tab(copilotStore.ts:148-246);回 Home(skillId=null)时 useCopilot effect 直接 return、不清 store(useCopilot.ts:131-134)",
       "fix": "无需改。唯一边角:纯浏览器/非 Tauri 运行时落盘 inert(writeWorkspaceFile 抛 Desktop only 被吞进 persistenceError),web 态不持久——MVP1 桌面优先,可接受",
       "auto": ["与 copilot 对话后回 Home 再进同一 skill,断言历史消息(含 AI 回答)与上次活跃 tab 恢复"],
       "manual": ["进 skill → 与 copilot 对几句 → 回 Home → 再进同一 skill → 应看到原对话与上次活跃 tab → 不应是空白会话"],

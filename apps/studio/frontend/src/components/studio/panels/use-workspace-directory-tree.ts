@@ -261,7 +261,7 @@ export function useWorkspaceDirectoryTree({
         }))
         // Eager (non-lazy) load: pull every source subdirectory up front so the
         // whole tree is loaded without expanding folder by folder. Runtime/hidden
-        // dirs (.workspace runs, .gemini, .git, ...) are skipped — they can be huge
+        // dirs (.workspace runtime state, .git, ...) are skipped — they can be huge
         // and stay on-demand via ensureDirectory when actually expanded.
         for (const entry of entries) {
           if (entry.kind === "dir" && !entry.name.startsWith(".")) {

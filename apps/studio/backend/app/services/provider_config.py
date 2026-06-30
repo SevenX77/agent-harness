@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "provider_identity.json"
+_PROBE_CANDIDATES_PATH = Path(__file__).resolve().parents[1] / "data" / "probe_candidates.json"
 
 
 class ProviderIdentity(NamedTuple):
@@ -87,3 +88,21 @@ def official_endpoint_id_for_host(hostname: str) -> str | None:
         if any(_host_in_domain(host, official) for official in identity.official_hosts):
             return identity.official_endpoint_id
     return None
+
+
+@lru_cache(maxsize=1)
+def _probe_candidate_table() -> dict[str, tuple[dict[str, Any], ...]]:
+    raw = json.loads(_PROBE_CANDIDATES_PATH.read_text(encoding="utf-8"))
+    table = raw.get("probe_candidates", {})
+    return {str(backend): tuple(specs) for backend, specs in table.items()}
+
+
+def static_probe_candidate_specs(backend: str) -> tuple[dict[str, Any], ...] | None:
+    """Return the static ``_candidate(**spec)`` kwargs for a backend's official
+    language-model probe, or ``None`` if that backend computes candidates in code.
+
+    Only backends whose candidate list is fixed (model-independent) are configured in
+    ``app/data/probe_candidates.json`` (claude / deepseek / ark). openai and gemini pick
+    candidates from the model id and stay in ``routers/llm.py``.
+    """
+    return _probe_candidate_table().get(backend)

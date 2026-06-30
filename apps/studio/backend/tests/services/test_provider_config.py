@@ -6,6 +6,7 @@ from app.services.provider_config import (
     notable_provider_key_for,
     official_endpoint_id_for_host,
     provider_identities,
+    static_probe_candidate_specs,
 )
 
 
@@ -52,3 +53,31 @@ def test_non_official_host_returns_none() -> None:
     # Third-party identity providers have no official endpoint id.
     assert official_endpoint_id_for_host("api.qnaigc.com") is None
     assert official_endpoint_id_for_host("") is None
+
+
+def test_probe_candidates_configured_only_for_static_backends() -> None:
+    assert static_probe_candidate_specs("claude") is not None
+    assert static_probe_candidate_specs("deepseek") is not None
+    assert static_probe_candidate_specs("ark") is not None
+    # openai + gemini pick candidates from the model id, so they stay in code.
+    assert static_probe_candidate_specs("openai") is None
+    assert static_probe_candidate_specs("gemini") is None
+    assert static_probe_candidate_specs("unknown") is None
+
+
+def test_probe_candidate_specs_match_the_static_tables() -> None:
+    claude = static_probe_candidate_specs("claude")
+    deepseek = static_probe_candidate_specs("deepseek")
+    ark = static_probe_candidate_specs("ark")
+    assert claude is not None and deepseek is not None and ark is not None
+    assert (len(claude), len(deepseek), len(ark)) == (3, 4, 6)
+    # ARK's primary chat candidate is rank 10 / fallback 2.
+    assert ark[0]["method_id"] == "ark_chat"
+    assert ark[0]["profile_id"] == "text:ark_chat"
+    assert ark[0]["default_rank"] == 10
+    assert ark[0]["fallback_rank"] == 2
+    # Every spec carries the keyword args _candidate() requires.
+    required = {"method_id", "profile_id", "capability", "request_mapper_id", "default_rank", "fallback_rank"}
+    for specs in (claude, deepseek, ark):
+        for spec in specs:
+            assert required <= set(spec)

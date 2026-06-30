@@ -148,7 +148,7 @@ from app.services.official_capability_sources import (
     official_doc_source_urls,
     provider_doc_limit_rules,
 )
-from app.services.provider_config import notable_provider_key_for
+from app.services.provider_config import notable_provider_key_for, static_probe_candidate_specs
 from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -3518,41 +3518,6 @@ def _official_language_probe_candidates(
                 fallback_rank=2,
             ),
         ]
-    if backend == "claude":
-        return [
-            _candidate(
-                "anthropic_messages",
-                "text:anthropic_messages",
-                "text_chat",
-                "anthropic_text",
-                10,
-                1,
-            ),
-            _candidate(
-                "anthropic_messages",
-                "thinking:anthropic_messages:adaptive",
-                "thinking",
-                "anthropic_thinking_adaptive",
-                5,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 1025,
-                    "reasoning": {"enabled": True, "type": "adaptive", "effort": "low"},
-                },
-            ),
-            _candidate(
-                "anthropic_messages",
-                "thinking:anthropic_messages:manual",
-                "thinking",
-                "anthropic_thinking_manual_budget",
-                6,
-                2,
-                runtime_settings={
-                    "max_output_tokens": 1025,
-                    "reasoning": {"enabled": True, "budget_tokens": 1024},
-                },
-            ),
-        ]
     if backend == "gemini":
         if _gemini_prefers_thinking_level(model_id):
             return [
@@ -3619,120 +3584,12 @@ def _official_language_probe_candidates(
                 },
             ),
         ]
-    if backend == "deepseek":
-        return [
-            _candidate(
-                "deepseek_chat_completions",
-                "text:deepseek_chat_completions",
-                "text_chat",
-                "deepseek_chat_completions_text",
-                10,
-                1,
-            ),
-            _candidate(
-                "deepseek_chat_completions",
-                "reasoning:deepseek_chat_completions",
-                "reasoning",
-                "deepseek_chat_completions_reasoning_effort",
-                5,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": True, "effort": "low"},
-                },
-            ),
-            _candidate(
-                "deepseek_anthropic_messages",
-                "text:deepseek_anthropic_messages",
-                "text_chat",
-                "deepseek_anthropic_messages_text",
-                15,
-                2,
-            ),
-            _candidate(
-                "deepseek_anthropic_messages",
-                "thinking:deepseek_anthropic_messages",
-                "thinking",
-                "deepseek_anthropic_messages_thinking",
-                6,
-                2,
-                runtime_settings={
-                    "max_output_tokens": 1025,
-                    "reasoning": {"enabled": True, "budget_tokens": 1024},
-                },
-            ),
-        ]
-    if backend == "ark":
-        return [
-            _candidate(
-                "ark_chat",
-                "text:ark_chat",
-                "text_chat",
-                "ark_chat_text",
-                10,
-                2,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": False},
-                },
-            ),
-            _candidate(
-                "ark_responses",
-                "text:ark_responses",
-                "text_chat",
-                "ark_responses_text",
-                8,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": False},
-                },
-            ),
-            _candidate(
-                "ark_chat",
-                "thinking:ark_chat",
-                "thinking",
-                "ark_chat_thinking_enabled",
-                6,
-                2,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": True},
-                },
-            ),
-            _candidate(
-                "ark_responses",
-                "thinking:ark_responses",
-                "thinking",
-                "ark_responses_thinking_enabled",
-                5,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": True},
-                },
-            ),
-            _candidate(
-                "ark_anthropic_messages",
-                "text:ark_anthropic_messages",
-                "text_chat",
-                "ark_anthropic_messages_text",
-                12,
-                3,
-            ),
-            _candidate(
-                "ark_anthropic_messages",
-                "thinking:ark_anthropic_messages",
-                "thinking",
-                "ark_anthropic_messages_thinking",
-                7,
-                3,
-                runtime_settings={
-                    "max_output_tokens": 1025,
-                    "reasoning": {"enabled": True, "budget_tokens": 1024},
-                },
-            ),
-        ]
+    # claude / deepseek / ark have fixed (model-independent) candidate lists -> these are
+    # data-driven now (app/data/probe_candidates.json); each spec is _candidate() kwargs.
+    # openai + gemini above pick candidates from the model id, so they stay in code.
+    specs = static_probe_candidate_specs(backend)
+    if specs is not None:
+        return [_candidate(**spec) for spec in specs]
     return []
 
 

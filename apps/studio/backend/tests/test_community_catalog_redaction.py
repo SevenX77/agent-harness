@@ -110,7 +110,7 @@ def test_normalize_base_url(raw: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("base_url", "publishable"),
+    ("url", "publishable"),
     [
         # Open contribution (W3-D): any public provider host publishes — no fixed
         # allowlist. A brand-new provider (e.g. wavespeed.ai) is contributable.
@@ -127,11 +127,12 @@ def test_normalize_base_url(raw: str, expected: str) -> None:
         ("https://user:tok@api.openai.com/v1", False),
     ],
 )
-def test_open_contribution_publish_safety_gate(base_url: str, publishable: bool) -> None:
+def test_open_contribution_publish_safety_gate(url: str, publishable: bool) -> None:
     # R-C1+R-C2: the fixed host allowlist is replaced by a safety gate — public DNS
     # hosts / public IPs publish; private/LAN/loopback/raw private IPs, bare
-    # single-label hosts, and userinfo-bearing URLs never do.
-    assert is_safe_to_publish(base_url) is publishable
-    upload = build_upload_record(_probe_record(), base_url=base_url)
+    # single-label hosts, and userinfo-bearing URLs never do. (Param named `url`,
+    # not `base_url`, to avoid colliding with the session-scoped pytest base_url fixture.)
+    assert is_safe_to_publish(url) is publishable
+    upload = build_upload_record(_probe_record(), base_url=url)
     assert (upload.normalized_public_base_url is not None) is publishable
     assert (upload.endpoint_fingerprint is not None) is publishable

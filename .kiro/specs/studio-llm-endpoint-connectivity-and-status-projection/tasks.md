@@ -58,7 +58,8 @@
   改 `test_endpoint`:加 `auth_failed`(get-models `invalid_key`)、status 类型加 `disabled`、disable cascade + revive sweep。
   更新旧测 `test_endpoint_test_rejects_invalid_api_key`(failed→disabled+route cascade)+ 新增 revive 测试。门禁:122 passed · ruff · mypy 全绿(完整后端套件确认中)。
   > 注:本刀只判 get-models 的 `invalid_key`(主路径,Qiniu/WaveSpeed 截图即此);第三方"生成探测返回 invalid_key"的边缘场景留待 W2-A/B 归一时统一。reason 子码同样并入 W2-A/B。
-- [ ] **W2-D.4 (red→green)** 前端:untested+`no_model_available` 的 endpoint tooltip 显示 ⚠ + 文案;测试触发 toast。
+- [x] **W2-D.4 (red→green)** 后端 test_endpoint 的 `no_model` 分支落结构化 `last_error_code="no_model_available"`;前端 endpoint chip 显示 ⚠(TriangleAlert/text-warning)+ tooltip 加"没有可测模型,手动输入模型名单测"提示行(en/zh-CN i18n);`EndpointSummary.errorCode` 经 `persisted.last_error_code` 自动 plumb。门禁:后端 ruff/mypy/pytest + 前端 lint/typecheck/test(1525)/build 全绿。
+  > 「测试触发 toast」那半留作小 follow-up(持久的 chip ⚠ + tooltip 已覆盖"提示没有模型可测"的核心,toast 是瞬态附加)。
 
 ### W2-E · 诊断日志补齐(D7 / R-F)
 - [x] **W2-E.1a (red→green)** `endpoint_test` 记录补 `reachable`(get-models 是否到达)+ `discovered_model_ids`(实际 model id 列表,原来只有 count)。归 `llm_credentials` 源。

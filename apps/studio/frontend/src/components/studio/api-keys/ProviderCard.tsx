@@ -416,6 +416,9 @@ function AvailableEndpointSummary({ endpoints }: { endpoints: EndpointSummary[] 
                     data-endpoint-status={endpoint.status}
                   >
                     {endpoint.status === "testing" ? <Loader2 className="size-2.5 animate-spin" aria-hidden="true" /> : null}
+                    {endpoint.errorCode === "no_model_available" ? (
+                      <TriangleAlert className="size-2.5 shrink-0 text-warning" aria-hidden="true" />
+                    ) : null}
                     <span className="min-w-0 truncate">{endpointLabel}</span>
                     {endpoint.methodIds.length > 0 ? (
                       <span className="shrink-0 font-sans text-muted-foreground">
@@ -467,6 +470,9 @@ function endpointTooltipLines(endpoint: EndpointSummary): string[] {
     ...(runtimeBaseUrl && runtimeBaseUrl !== endpoint.baseUrl ? [i18n.t("apiKeys.card.tooltip.runtimeUrl", { url: runtimeBaseUrl })] : []),
     i18n.t("apiKeys.card.tooltip.protocol", { protocol: endpointProtocolLabel(endpoint.protocol) }),
     i18n.t("apiKeys.card.tooltip.status", { status: endpointStatusLabel(endpoint.status) }),
+    ...(endpoint.errorCode === "no_model_available"
+      ? [i18n.t("apiKeys.card.tooltip.noModelWarning")]
+      : []),
     i18n.t("apiKeys.card.tooltip.routes", { n: endpoint.routeCount }),
     i18n.t("apiKeys.card.tooltip.profiles", { n: endpoint.profileCount }),
     endpoint.methodIds.length > 0

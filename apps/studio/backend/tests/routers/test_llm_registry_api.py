@@ -413,6 +413,48 @@ def test_community_evidence_merges_matching_route_to_historical_ready(
     assert provider_models["deepseek-official:deepseek-v4-pro"]["ui_state"] == "historical_ready"
 
 
+def test_registry_stamps_route_reason_code(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # W2-A: the registry stamps the authoritative ui_state AND reason_code onto each
+    # route so the frontend reads them directly instead of re-deriving the failure
+    # scope by matching message text. A failed route projects reason_code=model_failed.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "oai": ProviderEndpoint(
+                    endpoint_id="oai",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "oai:gpt-5": ProviderRoute(
+                    route_id="oai:gpt-5",
+                    endpoint_id="oai",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="failed",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    routes = client.get("/api/llm/registry").json()["provider_routes"]
+    assert routes["oai:gpt-5"]["ui_state"] == "failed"
+    assert routes["oai:gpt-5"]["reason_code"] == "model_failed"
+
+
 def test_community_evidence_skips_unmatched_host_and_observed_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1832,6 +1874,68 @@ def test_endpoint_test_third_party_failed_inference_probe_stays_failed(
     assert endpoint["status"] == "failed"
 
 
+def test_endpoint_test_third_party_no_models_does_not_guess_notable_models(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # W2-D / R-E1: when get-models returns an EMPTY list and the endpoint has no
+    # known routes, the Test must NOT fall back to doc-maintained notable model
+    # ids (e.g. o3-mini) and probe a guessed phantom model. get-models reaching
+    # the provider already proves key+URL connectivity, so with no real model to
+    # verify, the endpoint stays reachable-but-untested (the user manually probes
+    # a model id) and must NOT regress to "failed" on a guessed model.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "oai-empty": ProviderEndpoint(
+                    endpoint_id="oai-empty",
+                    display_name="Empty-list OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        # Reachable + authenticated, but the provider lists no models.
+        return PingResult(latency_ms=42, model_ids=())
+
+    probe_calls: list[str] = []
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        probe_calls.append(model_id)
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            message="The model does not exist or you do not have access to it.",
+        )
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/oai-empty/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["oai-empty"]
+    # No guessed-notable model was probed.
+    assert probe_calls == []
+    # Reachable but unverifiable-without-a-model => untested, NOT failed.
+    assert endpoint["status"] != "failed"
+    assert endpoint["status"] == "unverified_manual"
+
+
 def test_endpoint_test_third_party_retains_verified_when_reachable_and_previously_verified(
     client: TestClient,
     tmp_path: Path,
@@ -2779,63 +2883,52 @@ def test_endpoint_test_rejects_invalid_api_key(
     endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
     assert body["tested_endpoint_id"] == "openai-direct"
     assert body["discovered_model_count"] == 0
-    assert endpoint["status"] == "failed"
+    # R-E2: an invalid API key makes the endpoint unusable => disabled (not a
+    # transient "failed"), and its routes are disabled too (cascade).
+    assert endpoint["status"] == "disabled"
     assert "Invalid API key" in endpoint["last_test_message"]
     assert "invalid_api_key" in endpoint["last_test_message"]
+    assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
 
 
-def test_endpoint_test_third_party_empty_model_list_falls_back_to_notable_probe(
+def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    # apikeys#25: when get-models returns no ids the third-party Test falls back to
-    # doc-maintained notable model ids for the inference probe. If none generate
-    # AND the endpoint was never verified before, it is NOT verified (get-models
-    # reachability alone is insufficient). Uses a fresh endpoint with no prior
-    # verified route so the reachability-alone invariant is tested in isolation.
-    settings_dir = tmp_path / "settings"
-    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "oai-fresh": ProviderEndpoint(
-                    endpoint_id="oai-fresh",
-                    display_name="Fresh OpenAI",
-                    protocol="openai_compatible",
-                    base_url="https://api.openai.example/v1",
-                    api_key="secret",
-                )
-            },
-        ),
-        credentials_path(),
-    )
-    probe_calls: list[str] = []
+    # R-E2: an invalid key disables the endpoint + its routes, but that is NOT a
+    # terminal lock — fixing the key and re-testing successfully revives them.
+    _seed(tmp_path, monkeypatch)
 
-    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
-        return PingResult(latency_ms=42, model_ids=())
+    async def bad_key(backend: str, api_key: str, base_url: str) -> PingResult:
+        raise _Unauthorized("bad key", error_code="invalid_api_key")
 
-    async def fake_probe_model(
+    monkeypatch.setattr(llm_router, "_ping_provider", bad_key)
+    first = client.post("/api/llm/endpoints/openai-direct/test")
+    assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "disabled"
+    assert first_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
+
+    async def good_key(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5",))
+
+    async def ok_probe(
         backend: copilot_test.CopilotProvider,
         api_key: str,
         base_url: str,
         model_id: str,
     ) -> ModelProbeResult:
-        probe_calls.append(model_id)
-        return ModelProbeResult(model_id=model_id, status="invalid_model", message="no such model")
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
-
-    response = client.post("/api/llm/endpoints/oai-fresh/test")
-
-    assert response.status_code == 200
-    body = response.json()
-    endpoint = body["registry"]["provider_endpoints"]["oai-fresh"]
-    assert body["discovered_model_count"] == 0
-    assert endpoint["status"] == "failed"
-    # notable openai model ids were probed (fallback fired) and none generated.
-    assert probe_calls
+    monkeypatch.setattr(llm_router, "_ping_provider", good_key)
+    monkeypatch.setattr(llm_router, "_probe_model", ok_probe)
+    second = client.post("/api/llm/endpoints/openai-direct/test")
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "verified"
+    # the previously-disabled route is revived (here re-verified via the probe).
+    assert second_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
 
 
 def test_official_endpoint_test_records_model_list_without_generation_probes(

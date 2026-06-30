@@ -1,0 +1,66 @@
+"""Data-driven provider identity config (W3-A / T2).
+
+The router used to hardcode provider keyword/domain matches (``"qiniu"`` /
+``"qnaigc.com"`` -> ``"qiniu"``, ``"openrouter"`` -> ``"openrouter"``). That meant
+teaching Studio about a new provider required a code change. This module reads those
+mappings from ``app/data/provider_identity.json`` instead, so a new provider is a config
+edit. The ``key`` indexes ``docs/development/llm_provider_notes/<key>.md`` for notable
+model suggestions.
+"""
+
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from pathlib import Path
+from typing import NamedTuple
+
+_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "provider_identity.json"
+
+
+class ProviderIdentity(NamedTuple):
+    """One configured provider's identity-matching rules."""
+
+    key: str
+    display_alias: str
+    keywords: tuple[str, ...]
+    registrable_domains: tuple[str, ...]
+
+
+@lru_cache(maxsize=1)
+def provider_identities() -> tuple[ProviderIdentity, ...]:
+    """Load (and cache) the provider-identity config."""
+    raw = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    providers = raw.get("providers", [])
+    return tuple(
+        ProviderIdentity(
+            key=str(entry["key"]),
+            display_alias=str(entry.get("display_alias", entry["key"])),
+            keywords=tuple(str(keyword).lower() for keyword in entry.get("keywords", [])),
+            registrable_domains=tuple(
+                str(domain).lower() for domain in entry.get("registrable_domains", [])
+            ),
+        )
+        for entry in providers
+    )
+
+
+def _host_in_domain(host: str, domain: str) -> bool:
+    return host == domain or host.endswith(f".{domain}")
+
+
+def notable_provider_key_for(text_haystack: str, hostname: str) -> str | None:
+    """Return the configured provider key matching this endpoint, or ``None``.
+
+    Matched by a keyword in ``text_haystack`` (the endpoint id + display name) or by the
+    endpoint ``hostname`` falling within a configured registrable domain. Both inputs are
+    matched case-insensitively.
+    """
+    haystack = text_haystack.lower()
+    host = hostname.lower()
+    for identity in provider_identities():
+        if any(keyword in haystack for keyword in identity.keywords):
+            return identity.key
+        if any(_host_in_domain(host, domain) for domain in identity.registrable_domains):
+            return identity.key
+    return None

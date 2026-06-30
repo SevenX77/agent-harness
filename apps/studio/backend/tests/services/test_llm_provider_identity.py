@@ -7,7 +7,7 @@ from app.services.llm_provider_identity import registrable_provider_name
 
 
 @pytest.mark.parametrize(
-    ("base_url", "expected"),
+    ("url", "expected"),
     [
         ("https://api.qnaigc.com/v1", "qnaigc"),
         ("https://anthropic.qnaigc.com", "qnaigc"),
@@ -29,8 +29,10 @@ from app.services.llm_provider_identity import registrable_provider_name
         ("not a url", None),
     ],
 )
-def test_registrable_provider_name(base_url: str, expected: str | None) -> None:
-    assert registrable_provider_name(base_url) == expected
+def test_registrable_provider_name(url: str, expected: str | None) -> None:
+    # Param named `url` (not `base_url`) to avoid colliding with the session-scoped
+    # pytest base_url fixture, which raises ScopeMismatch under the full suite.
+    assert registrable_provider_name(url) == expected
 
 
 def test_model_probe_evidence_is_attributed_to_registrable_provider() -> None:

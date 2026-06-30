@@ -708,8 +708,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
     starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
-    status: Literal["verified", "unverified_manual", "failed"] = "failed"
+    status: Literal["verified", "unverified_manual", "failed", "disabled"] = "failed"
     message = "API key is empty."
+    auth_failed = False
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
@@ -731,6 +732,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             raw_capabilities_by_model = result.model_capabilities
     else:
         message = _endpoint_probe_failure_message(result)
+        # R-E2: an invalid API key means the endpoint is unusable until the key is
+        # fixed — record it so we can disable (not just "fail") the endpoint below.
+        auth_failed = result.status == "invalid_key"
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -761,6 +765,14 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         )
     endpoint_update: dict[str, Any] = {}
     if model_list_reached:
+        # R-E2 auto-revive: get-models succeeded, so the key works again. Clear any
+        # routes this endpoint had disabled by a prior invalid key BEFORE upsert/verify
+        # so they participate normally (and can be re-promoted to verified).
+        for revive_route_id, revive_route in list(latest_credentials.provider_routes.items()):
+            if revive_route.endpoint_id == endpoint_id and revive_route.status == "disabled":
+                latest_credentials.provider_routes[revive_route_id] = revive_route.model_copy(
+                    update={"status": "unverified_manual"}
+                )
         # model-list truth = routes (R3.4): capture the previously-listed models
         # from credentials BEFORE upserting, so the added/removed diff is real.
         previous_model_ids = set(endpoint_listed_model_ids(latest_credentials, endpoint_id))
@@ -807,7 +819,12 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 discovered_model_ids,
                 raw_capabilities_by_model,
             )
-            status = verification.status
+            # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
+            # endpoint's untested physical status, never "failed".
+            if verification.status == "no_model":
+                status = "unverified_manual"
+            else:
+                status = verification.status
             message = verification.message
             if verification.status == "verified" and verification.verified_model_id is not None:
                 if verification.detected_protocol != latest_endpoint.protocol:
@@ -886,6 +903,16 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 )
             status = _endpoint_status_from_model_probe_results(probe_results)
             message = _endpoint_message_from_model_probe_results(probe_results)
+    if auth_failed:
+        # R-E2: an invalid API key makes the whole endpoint unusable until the key
+        # is fixed => disable the endpoint AND all its routes (not a transient
+        # "failed"). A later successful Test revives them (see the revive sweep).
+        status = "disabled"
+        for route_id, route in list(latest_credentials.provider_routes.items()):
+            if route.endpoint_id == endpoint_id and route.status != "disabled":
+                latest_credentials.provider_routes[route_id] = route.model_copy(
+                    update={"status": "disabled"}
+                )
     endpoint_update.update(
         {
             "status": status,
@@ -2177,10 +2204,20 @@ def _project_route_ui_states(
                 "now": now,
             }
         )
-        if projection.ui_state == route.ui_state:
+        if (
+            projection.ui_state == route.ui_state
+            and projection.reason_code == route.reason_code
+        ):
             projected_routes[route_id] = route
             continue
-        projected_routes[route_id] = route.model_copy(update={"ui_state": projection.ui_state})
+        # W2-A: stamp the authoritative ui_state AND its companion reason_code so the
+        # frontend reads them directly (no message-text re-derivation).
+        projected_routes[route_id] = route.model_copy(
+            update={
+                "ui_state": projection.ui_state,
+                "reason_code": projection.reason_code,
+            }
+        )
         changed = True
     if not changed:
         return credentials
@@ -4602,7 +4639,10 @@ class ThirdPartyEndpointVerification:
     third-party endpoints (apikeys#25).
     """
 
-    status: Literal["verified", "failed"]
+    # "no_model": get-models reached the provider (key+URL connectivity proven)
+    # but there is no real model to verify generation — reachable-but-untested,
+    # NOT a failure (W2-D / R-E1). The user adds a model id and single-model-tests.
+    status: Literal["verified", "failed", "no_model"]
     detected_protocol: ProviderType
     verified_model_id: str | None
     message: str
@@ -4682,20 +4722,26 @@ def _third_party_probe_model_ids(
 ) -> list[str]:
     """Pick the model ids to drive the batch inference probe.
 
-    Discovered ids (from the get-models call) drive the candidate set; when the
-    endpoint exposes no list API we fall back to the doc-maintained notable ids
-    for its probe backend so an unlistable-but-generating endpoint can still
-    verify. The candidates are then ordered by ``endpoint_probe_priority`` (R9.4)
-    so the probe leads with a known-good model and confirms the endpoint in as
-    few attempts as possible — all derived from credentials, not the catalog.
+    Discovered ids (from the get-models call) drive the candidate set, falling
+    back to the endpoint's own known routes. We do NOT invent candidates from the
+    doc-maintained notable ids (W2-D / R-E1): an endpoint that lists no models and
+    has no known routes returns an empty candidate set, so the Test stays
+    reachable-but-untested rather than probing a guessed phantom model. The real
+    candidates are then ordered by ``endpoint_probe_priority`` (R9.4) so the probe
+    leads with a known-good model — all derived from credentials, not the catalog.
     """
     credentials = load_credentials()
     candidates = list(discovered_model_ids)
     if not candidates:
         # model-list truth = routes (R3.4): fall back to the endpoint's known routes.
         candidates = endpoint_listed_model_ids(credentials, endpoint.endpoint_id)
+    # W2-D / R-E1: NO doc-maintained "notable" fallback. If get-models returned no
+    # models and the endpoint has no known routes, there is nothing real to probe —
+    # return empty so the endpoint Test stays reachable-but-untested (the user adds
+    # a model id and single-model-tests) instead of probing a guessed phantom model
+    # (this is what wrongly drove WaveSpeed to "failed" on a guessed o3-mini).
     if not candidates:
-        candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
+        return []
     prioritized_candidates = _prioritize_notable_probe_models(endpoint, candidates)
     ordered = endpoint_probe_priority(
         credentials,
@@ -4808,11 +4854,17 @@ async def _verify_third_party_endpoint_by_probe(
         discovered_model_ids,
     )
     if not probe_model_ids:
+        # W2-D / R-E1: get-models reached the provider (connectivity proven) but no
+        # real model is available to verify generation. Reachable-but-untested, NOT
+        # failed — the user adds a model id and runs a single-model test.
         return ThirdPartyEndpointVerification(
-            status="failed",
+            status="no_model",
             detected_protocol=endpoint.protocol,
             verified_model_id=None,
-            message="Endpoint reachable but no model ids were available to probe.",
+            message=(
+                "Endpoint reachable, but it returned no models to verify. "
+                "Add a model id and run a single-model test."
+            ),
         )
 
     detected_protocol, detection_probe = await _detect_third_party_protocol_for_models(

@@ -60,7 +60,10 @@
 - [ ] **W2-D.4 (red→green)** 前端:untested+`no_model_available` 的 endpoint tooltip 显示 ⚠ + 文案;测试触发 toast。
 
 ### W2-E · 诊断日志补齐(D7 / R-F)
-- [ ] **W2-E.1 (red→green)** `endpoint_test`/`model_list_observed` 记结构化:get_models 原始(可达/model id 列表/空表/是否触发保底=否)、探测的 protocol×url×model 组合及成败、更新的 route evidence/capabilities 计数+id、测后上传选取与结果。归 `llm_credentials` 源。
+- [x] **W2-E.1a (red→green)** `endpoint_test` 记录补 `reachable`(get-models 是否到达)+ `discovered_model_ids`(实际 model id 列表,原来只有 count)。归 `llm_credentials` 源。
+  (`test_endpoint_test_logs_discovered_models_and_reachability`)。`model_list_observed` 已记 added/removed/unchanged。
+- [ ] **W2-E.1b** 探测的 protocol×model 组合及各自成败(thread `_verify_third_party_endpoint_by_probe` 的 probe attempts 上来)。
+- [ ] **W2-E.1c** 更新的 route evidence/capabilities 计数+id;测后上传(autoshare)选取与成败记录。
 
 ---
 

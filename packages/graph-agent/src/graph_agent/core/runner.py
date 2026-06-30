@@ -71,7 +71,10 @@ from graph_agent.core.exceptions import (
 )
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.llm_provider import LLMProvider, LLMProviderError
-from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
+from graph_agent.core.local_workspace_resolver import (
+    LocalWorkspaceResolver,
+    default_local_resolver_for_skill,
+)
 from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import BusinessData
@@ -216,7 +219,7 @@ def predict_skill(  # noqa: C901
     thread_id: str | None = None,
     unattended: bool = True,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None = None,
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     copilot_predict: Callable[..., Any] | None = None,
@@ -234,7 +237,7 @@ def predict_skill(  # noqa: C901
     from graph_agent.core.graph_assembler import assemble_graph
     from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
-    resolver = require_skill_resolver(skill_resolver, caller="predict_skill")
+    resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
     workspace_root = _validate_workspace_dir(workspace_dir)
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
@@ -395,14 +398,14 @@ def run_skill(
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None = None,
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     **inputs: Any,
 ) -> RunResult:
     """Execute a SKILL.md and return a typed workflow result."""
     mock_llm = inputs.pop("mock_llm", _NO_MOCK_LLM)
-    resolver = require_skill_resolver(skill_resolver, caller="run_skill")
+    resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
     workspace_root = _validate_workspace_dir(workspace_dir)
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
@@ -482,7 +485,7 @@ def resume_skill(
     checkpointer: Any | None = None,
     context_overrides: dict[str, Any] | None = None,
     human_response: dict[str, Any] | None = None,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None = None,
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
@@ -495,7 +498,7 @@ def resume_skill(
     _validate_resume_node_selector(resume_from_node_id, "resume_from_node_id")
     _validate_resume_node_selector(resume_to_node_id, "resume_to_node_id")
 
-    resolver = require_skill_resolver(skill_resolver, caller="resume_skill")
+    resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
@@ -652,7 +655,7 @@ def evaluate_golden_baseline(
     *,
     workspace_dir: Path,
     baseline_id: str,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None = None,
     model_resolver: Any | None = None,
 ) -> dict[str, Any]:
     """Evaluate skill outputs against golden baseline test cases."""
@@ -662,7 +665,7 @@ def evaluate_golden_baseline(
         skill_path,
         workspace_dir=workspace_dir,
         baseline_id=baseline_id,
-        skill_resolver=skill_resolver,
+        skill_resolver=skill_resolver or default_local_resolver_for_skill(skill_path),
         model_resolver=model_resolver,
     )
 

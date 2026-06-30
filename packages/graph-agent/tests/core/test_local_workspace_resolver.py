@@ -63,6 +63,28 @@ def test_local_workspace_resolver_resolves_dotted_id(tmp_path: Path) -> None:
     assert resolver.resolve_skill("acme.echo") == skill_root
 
 
+def test_local_workspace_resolver_canonicalizes_search_paths(tmp_path: Path) -> None:
+    LocalWorkspaceResolver = _local_workspace_resolver_class()
+    workspace = tmp_path / "workspace"
+    skills = workspace / "skills"
+    skills.mkdir(parents=True)
+
+    resolver = LocalWorkspaceResolver(search_paths=[workspace / "." / "skills" / ".." / "skills"])
+
+    assert resolver.search_paths == (skills.resolve(),)
+
+
+def test_default_local_resolver_canonicalizes_skill_entrypoint(tmp_path: Path) -> None:
+    from graph_agent.core.local_workspace_resolver import default_local_resolver_for_skill
+
+    parent = _write_graph(tmp_path / "workspace" / "parent")
+
+    resolver = default_local_resolver_for_skill(parent / ".." / "parent" / "GRAPH.md")
+
+    assert all(path == path.resolve() for path in resolver.search_paths)
+    assert parent.resolve() in resolver.search_paths
+
+
 def test_local_workspace_resolver_fails_loud_on_ambiguous_skill_id(tmp_path: Path) -> None:
     LocalWorkspaceResolver = _local_workspace_resolver_class()
     literal_root = _write_graph(tmp_path / "acme.echo")

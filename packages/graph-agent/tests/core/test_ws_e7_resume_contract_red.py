@@ -228,7 +228,7 @@ def test_resume_skill_public_api_signature_is_locked() -> None:
     assert "resume_to_node_id" in signature.parameters
     assert "context_overrides" in signature.parameters
     assert "human_response" in signature.parameters
-    assert signature.parameters["skill_resolver"].default is inspect.Signature.empty
+    assert signature.parameters["skill_resolver"].default is None
 
 
 def test_resume_rejects_relative_workspace_dir(

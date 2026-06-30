@@ -479,7 +479,7 @@ pub fn publish_package_writer_impl(
 // before-state; later edits before review do not overwrite it, so Reject always
 // rewinds to before the whole pending change. Accept clears the checkpoint.
 
-const CHECKPOINT_DIR: &str = ".gemini/copilot/checkpoints";
+const CHECKPOINT_DIR: &str = ".workspace/copilot/checkpoints";
 
 #[derive(Serialize, Deserialize, Debug)]
 struct CheckpointRecord {
@@ -507,7 +507,7 @@ pub struct RestoreOutcome {
     pub content: String,
 }
 
-/// Checkpoint record location: `<root>/.gemini/copilot/checkpoints/<sha(path)>.json`.
+/// Checkpoint record location: `<root>/.workspace/copilot/checkpoints/<sha(path)>.json`.
 /// Keyed by the hash of the relative path so any path maps to a safe filename.
 fn checkpoint_path(root: &Path, rel: &str) -> PathBuf {
     root.join(checkpoint_relative_path(rel))
@@ -947,7 +947,7 @@ pub struct WorkspaceDirEntry {
 
 /// List entries directly under `<workspace_root>/<relative_dir>` (non-recursive).
 /// A missing directory is surfaced as an empty list rather than an error so
-/// callers can probe optional dirs (e.g. `.gemini/copilot/sessions/<skill>`)
+/// callers can probe optional dirs (e.g. `.workspace/copilot/sessions/<skill>`)
 /// without `if exists` ceremony — distinguishing "missing" from "empty" isn't
 /// useful for the hydrate path that consumes this.
 pub fn list_workspace_dir_impl(
@@ -1203,8 +1203,10 @@ pub fn clear_workspace_checkpoint(workspace_root: String, path: String) -> Resul
 pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<(), String> {
     let config_dir = crate::resolve_config_dir();
     let root = resolve_workspace_root(&workspace_root, &config_dir)?;
-    let sessions = root.join(".gemini").join("copilot").join("sessions");
-    std::fs::create_dir_all(&sessions)
+    let copilot = root.join(".workspace").join("copilot");
+    std::fs::create_dir_all(copilot.join("sessions"))
+        .map_err(|error| format!("cannot create support dirs: {error}"))?;
+    std::fs::create_dir_all(copilot.join("checkpoints"))
         .map_err(|error| format!("cannot create support dirs: {error}"))
 }
 
@@ -2088,9 +2090,14 @@ mod tests {
         let root = temp_root("support");
         ensure_workspace_support_dirs(root.to_str().unwrap().to_string()).unwrap();
         assert!(root
-            .join(".gemini")
+            .join(".workspace")
             .join("copilot")
             .join("sessions")
+            .is_dir());
+        assert!(root
+            .join(".workspace")
+            .join("copilot")
+            .join("checkpoints")
             .is_dir());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2439,13 +2446,25 @@ mod tests {
     #[test]
     fn list_workspace_dir_treats_missing_dir_as_empty() {
         let root = temp_root("list-missing");
-        // Optional dirs (e.g. `.gemini/copilot/sessions/<skill>` on first
+        // Optional dirs (e.g. `.workspace/copilot/sessions/<skill>` on first
         // launch) should produce an empty list, not an error — callers can
         // hydrate without a pre-flight `exists()` check.
-        let entries = list_workspace_dir_impl(root.to_str().unwrap(), ".gemini/copilot/sessions")
-            .expect("missing dir maps to empty list");
+        let entries =
+            list_workspace_dir_impl(root.to_str().unwrap(), ".workspace/copilot/sessions")
+                .expect("missing dir maps to empty list");
         assert!(entries.is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn checkpoint_records_live_under_workspace_copilot_dir() {
+        assert_eq!(
+            checkpoint_relative_path("GRAPH.md"),
+            format!(
+                ".workspace/copilot/checkpoints/{}.json",
+                sha256_hex("GRAPH.md")
+            )
+        );
     }
 
     #[test]
@@ -2660,7 +2679,7 @@ mod tests {
         let root = temp_root("ckpt-seed-existing-parent-symlink-escape");
         let outside = temp_root("ckpt-seed-existing-parent-symlink-outside");
         let rs = root.to_str().unwrap();
-        symlink_path(&outside, &root.join(".gemini"));
+        symlink_path(&outside, &root.join(".workspace"));
         let outside_ckpt = outside
             .join("copilot")
             .join("checkpoints")
@@ -2766,7 +2785,7 @@ mod tests {
         let root = temp_root("ckpt-clear-parent-symlink-escape");
         let outside = temp_root("ckpt-clear-parent-symlink-outside");
         let rs = root.to_str().unwrap();
-        symlink_path(&outside, &root.join(".gemini"));
+        symlink_path(&outside, &root.join(".workspace"));
         let outside_ckpt = checkpoint_path(&outside, "GRAPH.md");
         std::fs::create_dir_all(outside_ckpt.parent().unwrap()).unwrap();
         std::fs::write(&outside_ckpt, "{}").unwrap();

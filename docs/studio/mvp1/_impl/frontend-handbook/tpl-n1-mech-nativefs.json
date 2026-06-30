@@ -10,7 +10,7 @@
     "dataflow": [
       "打开文件夹 / 新建选目录 → 前端 selectSkillDirectory → Rust select_directory 弹 OS 目录选择器",
       "Reveal → 前端 revealInFileManager → Rust reveal_in_file_manager 在 Finder/Explorer 定位(浏览器降级复制路径)",
-      "copilot 对话(D8)→ copilotStore.persistSessionToDisk → 前端 writeWorkspaceFile → Rust write_workspace_file 落 .gemini/copilot/sessions/<skillId>/<id>.json;再进 / 冷启动 → hydrate → readWorkspaceFile / listWorkspaceDir 读回",
+      "copilot 对话(D8)→ copilotStore.persistSessionToDisk → 前端 writeWorkspaceFile → Rust write_workspace_file 落 .workspace/copilot/sessions/<skillId>/<id>.json;再进 / 冷启动 → hydrate → readWorkspaceFile / listWorkspaceDir 读回",
       "目标(D12 缺口,方向锁于平台 spec native-rust-writer)新建/打开落盘 → create_skill_workspace / open_skill_workspace 命令(现无,仍走 Python POST /api/skills;命令级契约见本页 gap 组)",
       "失效 Recent 自动移除 → workspace_path_exists 路径存在性检查(现 pruneMissingRecentWorkspaces 的 exists 谓词无 Rust 接入)"
     ]
@@ -25,7 +25,7 @@
       "rules": [
         "select_directory:弹 OS 目录选择器、返回选中目录或 null(打开文件夹 / 选新建父目录用)。",
         "reveal_in_file_manager:在系统文件管理器定位路径;浏览器态降级复制路径到剪贴板。",
-        "write_workspace_file / read_workspace_file / list_workspace_dir / ensure_workspace_support_dirs:工作区内文件写 / 读 / 列目录 / 建 .gemini 等支持目录——copilot 会话落盘 / 读回(D8)经它们。",
+        "write_workspace_file / read_workspace_file / list_workspace_dir / ensure_workspace_support_dirs:工作区内文件写 / 读 / 列目录 / 建 .workspace/copilot 等支持目录——copilot 会话落盘 / 读回(D8)经它们。",
         "add_recent_workspace / remove_recent_workspace:原生最近工作区 MRU 写(注:listRecentWorkspaces 原生读回无调用方,渲染用的是 localStorage MRU——原生 MRU 是只写不读的冗余,待并)。"
       ],
       "do": ["选目录 / 定位 / 工作区文件读写 / 建支持目录"],
@@ -100,7 +100,7 @@
       "endpoint": "write_workspace_file / read_workspace_file / list_workspace_dir / ensure_workspace_support_dirs",
       "req": "workspaceId + 相对路径(写还带内容)",
       "resp": "写:无;读:文件内容;列目录:条目列表;建支持目录:无。非桌面态写抛 Desktop only(被吞)、读/列返回空",
-      "purpose": "工作区内文件读写 / 列目录 / 建 .gemini 支持目录。copilot 会话落盘 / 读回(D8,#22)经它们:写 .gemini/copilot/sessions/<skillId>/<id>.json,hydrate 列目录 + 读回。",
+      "purpose": "工作区内文件读写 / 列目录 / 建 .workspace/copilot 支持目录。copilot 会话落盘 / 读回(D8,#22)经它们:写 .workspace/copilot/sessions/<skillId>/<id>.json,hydrate 列目录 + 读回。",
       "provider": "Studio Rust 后端(native_fs.rs);前端桥 writeWorkspaceFile / readWorkspaceFile / listWorkspaceDir / ensureWorkspaceSupportDirs",
       "id": "iface-wsfile"
     },
@@ -159,7 +159,7 @@
       "item": "native-fs 文件读写 / 支持目录命令",
       "d12": "D12「本地写经 native-fs」+ D8「copilot 退出恢复」落点",
       "status": "ok",
-      "note": "write/read/list workspace file + ensure_workspace_support_dirs 已实现;copilot 会话落盘 .gemini/copilot/sessions/<skillId>/<id>.json + hydrate 读回(D8,#22)直接用、已验证桌面态可恢复。",
+      "note": "write/read/list workspace file + ensure_workspace_support_dirs 已实现;copilot 会话落盘 .workspace/copilot/sessions/<skillId>/<id>.json + hydrate 读回(D8,#22)直接用、已验证桌面态可恢复。",
       "ref": "d8"
     },
     {

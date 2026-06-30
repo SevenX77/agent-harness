@@ -78,7 +78,7 @@
       "n": 22,
       "cap": "copilot-exit-restore",
       "design_ref": "atom-22",
-      "current": "现状:桌面态已实现且符合(D8),纠正旧审计稿/spec 滞后标注。copilotStore(Copilot 会话内存 store)的 persistSessionToDisk(写盘唯一函数)经 writeWorkspaceFile(Rust native-fs 封装)落 .gemini/copilot/sessions/<skillId>/<会话id>.json,由 appendMessage 与 updateMessage(status 离开 running/pending 即结算时)触发;persistActiveSession 写 _active.json 记上次活跃 tab。再进/冷启动 hydrate 从盘读回按 id 合并(内存优先)、并按 _active.json 恢复上次活跃 tab;useCopilot 的 context effect 在 skillId 为 null(回 Home)时早返回、不清 store(reset 仅 web/无 workspace 身份的兜底分支调)。故对话跨退出/再进/冷启动恢复一致。Web/非桌面态 writeWorkspaceFile 抛 Desktop only(被吞进 persistenceError)、读/列返回空 → 内存优先、刷新即丢。",
+      "current": "现状:桌面态已实现且符合(D8),纠正旧审计稿/spec 滞后标注。copilotStore(Copilot 会话内存 store)的 persistSessionToDisk(写盘唯一函数)经 writeWorkspaceFile(Rust native-fs 封装)落 .workspace/copilot/sessions/<skillId>/<会话id>.json,由 appendMessage 与 updateMessage(status 离开 running/pending 即结算时)触发;persistActiveSession 写 _active.json 记上次活跃 tab。再进/冷启动 hydrate 从盘读回按 id 合并(内存优先)、并按 _active.json 恢复上次活跃 tab;useCopilot 的 context effect 在 skillId 为 null(回 Home)时早返回、不清 store(reset 仅 web/无 workspace 身份的兜底分支调)。故对话跨退出/再进/冷启动恢复一致。Web/非桌面态 writeWorkspaceFile 抛 Desktop only(被吞进 persistenceError)、读/列返回空 → 内存优先、刷新即丢。",
       "gap": "符合设计(桌面态)。以真代码为准:旧审计稿 surfaces_table「纯内存全丢=缺口」已过时,01_init.md 仍标 target-design 属 spec 滞后于代码。Web 态内存优先=MVP1 桌面优先设计边界(可接受),无需改。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -280,7 +280,7 @@
       ],
       "fe_status": "符合",
       "layer1": [
-        "mock native-fs 读写,与 copilot 对话(含 AI 回答)→ 断言 persistSessionToDisk 把会话写到 .gemini/copilot/sessions/<skillId>/<id>.json、_active.json 记活跃 tab。",
+        "mock native-fs 读写,与 copilot 对话(含 AI 回答)→ 断言 persistSessionToDisk 把会话写到 .workspace/copilot/sessions/<skillId>/<id>.json、_active.json 记活跃 tab。",
         "回 Home(skillId=null)→ 断言 useCopilot effect 早返回、copilotStore 未 reset。",
         "再进同一 skill → 断言 hydrate 读回会话(含 AI 回答)并恢复上次活跃 tab。",
         "断言 web/非桌面态 writeWorkspaceFile 抛 Desktop only 被吞进 persistenceError、不崩。"

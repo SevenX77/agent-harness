@@ -19,6 +19,7 @@ vi.mock('../lib/tauri', () => ({
 
 const WS = '/abs/workspace'
 const SKILL = 'demo-skill'
+const SESSION_DIR = `.workspace/copilot/sessions/${SKILL}`
 
 function diskSession(id: string, text: string): CopilotSession {
   return { id, messages: [{ id: `m-${id}`, role: 'user', content: text } as never] }
@@ -62,7 +63,7 @@ describe('loadCopilotSessionsFromDisk', () => {
     const sessions = await loadCopilotSessionsFromDisk(WS, SKILL)
 
     expect(sessions.map((s) => s.id)).toEqual(['session-1', 'session-2'])
-    expect(listWorkspaceDir).toHaveBeenCalledWith(WS, `.gemini/copilot/sessions/${SKILL}`)
+    expect(listWorkspaceDir).toHaveBeenCalledWith(WS, SESSION_DIR)
   })
 
   it('returns empty when the sessions dir is missing (listWorkspaceDir -> [])', async () => {
@@ -184,6 +185,23 @@ function lastWrittenSession(sessionId: string): CopilotSession | null {
 }
 
 describe('copilotStore streamed-turn persistence (R16/D8)', () => {
+  it('persists sessions under the .workspace copilot support tree', async () => {
+    listWorkspaceDir.mockResolvedValue([])
+    copilotStore.setContext(WS, SKILL)
+    const sessionId = copilotStore.newSession()
+
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
+
+    expect(writeWorkspaceFile).toHaveBeenCalledWith(
+      WS,
+      `${SESSION_DIR}/${sessionId}.json`,
+      expect.any(String),
+    )
+    expect(
+      writeWorkspaceFile.mock.calls.some(([, path]) => String(path).startsWith('.gemini/')),
+    ).toBe(false)
+  })
+
   it('flushes the full assistant message to disk when the turn completes', async () => {
     listWorkspaceDir.mockResolvedValue([])
     copilotStore.setContext(WS, SKILL)

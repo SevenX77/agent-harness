@@ -7,6 +7,7 @@ import {
 } from '../lib/tauri'
 
 type Listener = () => void
+const COPILOT_SESSION_ROOT = '.workspace/copilot/sessions'
 
 export interface CopilotSession {
   id: string
@@ -14,7 +15,7 @@ export interface CopilotSession {
 }
 
 function sessionsDir(skillId: string): string {
-  return `.gemini/copilot/sessions/${skillId}`
+  return `${COPILOT_SESSION_ROOT}/${skillId}`
 }
 
 function isCopilotSession(value: unknown): value is CopilotSession {
@@ -30,11 +31,7 @@ function isCopilotSession(value: unknown): value is CopilotSession {
  * file is skipped with a warning rather than aborting the whole hydrate —
  * losing one history shouldn't hide the rest.
  */
-export async function loadCopilotSessionsFromDisk(
-  workspaceId: string,
-  skillId: string,
-): Promise<CopilotSession[]> {
-  const dir = sessionsDir(skillId)
+async function loadSessionsFromDir(workspaceId: string, dir: string): Promise<CopilotSession[]> {
   const entries = await listWorkspaceDir(workspaceId, dir)
   const sessions: CopilotSession[] = []
   for (const entry of entries) {
@@ -61,6 +58,13 @@ export async function loadCopilotSessionsFromDisk(
   return sessions
 }
 
+export async function loadCopilotSessionsFromDisk(
+  workspaceId: string,
+  skillId: string,
+): Promise<CopilotSession[]> {
+  return loadSessionsFromDir(workspaceId, sessionsDir(skillId))
+}
+
 function activeMarkerPath(skillId: string): string {
   return `${sessionsDir(skillId)}/_active.json`
 }
@@ -81,7 +85,7 @@ export async function loadActiveCopilotSessionId(
       return (parsed as { activeSessionId: string }).activeSessionId
     }
   } catch {
-    // No marker yet (first run) or unreadable — fall back to newest session.
+    // No marker yet (first run) or unreadable; fall back to newest session.
   }
   return null
 }
@@ -152,7 +156,7 @@ async function persistSessionToDisk(
 ): Promise<void> {
   try {
     await ensureWorkspaceSupportDirs(workspaceId)
-    const relativePath = `.gemini/copilot/sessions/${skillId}/${session.id}.json`
+    const relativePath = `${sessionsDir(skillId)}/${session.id}.json`
     await writeWorkspaceFile(workspaceId, relativePath, JSON.stringify(session, null, 2))
     state.persistenceError = null
   } catch (err: unknown) {

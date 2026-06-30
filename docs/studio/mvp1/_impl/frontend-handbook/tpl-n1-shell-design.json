@@ -130,7 +130,7 @@
       "module": "Copilot 与启动",
       "func": "设计(D8 MUST):退出再进同一个 skill,Copilot 对话要一模一样恢复——历史消息(含 AI 回答)与上次活跃的会话 tab 都回来;其余工作态(面板/分屏)可丢。",
       "action": "无显式动作(回 Home 再进同一 skill,或冷启动后进同一 skill,对话自动恢复)。",
-      "fe_design": "桌面态已按 D8(copilot 退出恢复决策:退出再进恢复对话一模一样)实现:copilotStore(Copilot 会话内存 store)的 persistSessionToDisk(把整条会话写盘的唯一函数)经 writeWorkspaceFile(Studio Rust 后端 native-fs 写文件的封装)把会话落到 .gemini/copilot/sessions/<skillId>/<会话id>.json,由 appendMessage(新增消息)与 updateMessage(流式结算)触发;另写 _active.json 记上次活跃 tab。再进 / 冷启动时 hydrate(从盘读回并按 id 合并的函数)恢复全部会话(含 AI 回答),并按 _active.json 恢复上次活跃 tab;useCopilot(把 store 接进面板的 hook)的 context effect 在回 Home(skillId 为 null)时是早返回、不清 store——故对话跨退出/再进不丢。设计意图(D8):Copilot 对话是用户的资产,退出再进必须原样恢复;工作态(面板/分屏)按 Q3 可丢。Web/非桌面态没有 native-fs,会话退化为内存、刷新即丢——这是 MVP1 桌面优先的设计边界(可接受)。",
+      "fe_design": "桌面态已按 D8(copilot 退出恢复决策:退出再进恢复对话一模一样)实现:copilotStore(Copilot 会话内存 store)的 persistSessionToDisk(把整条会话写盘的唯一函数)经 writeWorkspaceFile(Studio Rust 后端 native-fs 写文件的封装)把会话落到 .workspace/copilot/sessions/<skillId>/<会话id>.json,由 appendMessage(新增消息)与 updateMessage(流式结算)触发;另写 _active.json 记上次活跃 tab。再进 / 冷启动时 hydrate(从盘读回并按 id 合并的函数)恢复全部会话(含 AI 回答),并按 _active.json 恢复上次活跃 tab;useCopilot(把 store 接进面板的 hook)的 context effect 在回 Home(skillId 为 null)时是早返回、不清 store——故对话跨退出/再进不丢。设计意图(D8):Copilot 对话是用户的资产,退出再进必须原样恢复;工作态(面板/分屏)按 Q3 可丢。Web/非桌面态没有 native-fs,会话退化为内存、刷新即丢——这是 MVP1 桌面优先的设计边界(可接受)。",
       "fe_modules": [],
       "be_contract": [
         {
@@ -142,7 +142,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计(桌面态:copilotStore 经 Rust native-fs 把会话落 .gemini/copilot/sessions/<skillId>/<id>.json,hydrate 读回恢复对话+上次活跃 tab,回 Home 不清 store)。此结论以真代码为准,纠正旧审计稿「纯内存全丢」与 spec 滞后的「未实现」标注。Web 态内存优先、刷新即丢=桌面优先设计边界(可接受)。",
+      "gap_brief": "符合设计(桌面态:copilotStore 经 Rust native-fs 把会话落 .workspace/copilot/sessions/<skillId>/<id>.json,hydrate 读回恢复对话+上次活跃 tab,回 Home 不清 store)。此结论以真代码为准,纠正旧审计稿「纯内存全丢」与 spec 滞后的「未实现」标注。Web 态内存优先、刷新即丢=桌面优先设计边界(可接受)。",
       "impl_ref": "fn-22"
     },
     {

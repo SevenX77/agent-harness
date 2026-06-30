@@ -11,6 +11,7 @@ import {
   ManualModelTestPanel,
   mergeModelLists,
   modelIdPlaceholder,
+  probeModelsAcrossEndpoints,
 } from "./ManualModelTestPanel"
 
 describe("ManualModelTestPanel", () => {
@@ -66,6 +67,43 @@ describe("ManualModelTestPanel", () => {
     expect(modelIdPlaceholder("wavespeed", ["anthropic/claude-opus-4"], 0)).toBe("e.g. anthropic/claude-opus-4")
     expect(modelIdPlaceholder("qiniu", [], 0)).toBe("e.g. deepseek-r1")
     expect(modelIdPlaceholder("openai", undefined, 0)).toBe("e.g. gpt-5")
+  })
+
+  it("probes every endpoint and keeps the best result per model (W1-B)", async () => {
+    const calls: string[] = []
+    const probe = vi.fn(async (endpointId: string, modelIds: string[]) => {
+      calls.push(endpointId)
+      const results = modelIds.map((model_id) => ({
+        model_id,
+        // m1 only works on ep-b; m2 fails everywhere.
+        status: (endpointId === "ep-b" && model_id === "m1" ? "ok" : "invalid_model") as "ok" | "invalid_model",
+        message: null,
+      }))
+      return { results, available_models: [] }
+    })
+
+    const { results } = await probeModelsAcrossEndpoints(["ep-a", "ep-b"], ["m1", "m2"], probe)
+
+    expect(probe).toHaveBeenCalledTimes(2)
+    expect(calls).toEqual(["ep-a", "ep-b"])
+    expect(results.find((r) => r.model_id === "m1")?.status).toBe("ok")
+    expect(results.find((r) => r.model_id === "m2")?.status).toBe("invalid_model")
+    expect(results).toHaveLength(2)
+  })
+
+  it("keeps probing the remaining endpoints when one throws (W1-B)", async () => {
+    const probe = vi.fn(async (endpointId: string, modelIds: string[]) => {
+      if (endpointId === "ep-a") throw new Error("network down")
+      return {
+        results: modelIds.map((model_id) => ({ model_id, status: "ok" as const, message: null })),
+        available_models: [],
+      }
+    })
+
+    const { results } = await probeModelsAcrossEndpoints(["ep-a", "ep-b"], ["m1"], probe)
+
+    expect(probe).toHaveBeenCalledTimes(2)
+    expect(results.find((r) => r.model_id === "m1")?.status).toBe("ok")
   })
 
   it("can render collapsed when automatic model listing already returned models", () => {

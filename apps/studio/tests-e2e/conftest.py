@@ -102,7 +102,7 @@ def _write_minimal_text_segmentation(skill_dir: Path) -> None:
     (skill_dir / "script").mkdir(parents=True)
     (skill_dir / "script" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "script" / "logic.py").write_text(
-        "def prepare(context):\n    context['prepared'] = True\n    return 'ok'\n",
+        "def prepare(inputs):\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
     (skill_dir / "SKILL.md").write_text(

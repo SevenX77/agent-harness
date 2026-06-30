@@ -18,7 +18,7 @@ io:
         type: array
   outputs:
     type: object
-    required: [batch_events_text, accumulated_context_text, batch_chapter_range, dynamic_dimensions_hint, batch_event_count]
+    required: [batch_events_text, accumulated_context_text, batch_chapter_range, dynamic_dimensions_hint, batch_event_count, accumulator]
     properties:
       batch_events_text:
         type: string
@@ -30,6 +30,8 @@ io:
         type: string
       batch_event_count:
         type: integer
+      accumulator:
+        type: object
 ---
 
 <action>prepare_batch</action>

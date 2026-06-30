@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 def export_story_framework(inputs) -> dict:
     """Export story framework and perform final global synthesis validation."""
 
-    def _validate_global_synthesis(ctx: dict) -> tuple[bool, list[str]]:
+    def _validate_global_synthesis(inputs: dict) -> tuple[bool, list[str]]:
         errors = []
 
         # L1: Check core synthesis outputs exist and are non-empty
@@ -17,24 +17,24 @@ def export_story_framework(inputs) -> dict:
         ]
 
         for key, label in required_items:
-            if key not in ctx:
+            if key not in inputs:
                 errors.append(f"L1: Missing {label} ({key})")
-            elif not ctx[key]:
+            elif not inputs[key]:
                 errors.append(f"L1: Empty {label} ({key})")
 
         # L2: Check unified event stream and scenes
-        if "unified_event_stream" not in ctx:
+        if "unified_event_stream" not in inputs:
             errors.append("L2: Missing unified_event_stream")
-        elif not ctx["unified_event_stream"]:
+        elif not inputs["unified_event_stream"]:
             errors.append("L2: Empty unified_event_stream")
 
-        if "scenes" not in ctx:
+        if "scenes" not in inputs:
             errors.append("L2: Missing scenes")
-        elif not ctx["scenes"]:
+        elif not inputs["scenes"]:
             errors.append("L2: Empty scenes")
 
         # L3: Flag abandoned foreshadowing items
-        fore_closure = ctx.get("foreshadowing_closure", [])
+        fore_closure = inputs.get("foreshadowing_closure", [])
         for item in fore_closure:
             if item.get("status") == "abandoned":
                 fore_id = item.get("foreshadowing_id", "unknown")

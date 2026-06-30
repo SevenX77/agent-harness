@@ -217,8 +217,8 @@ def test_locate_line_returns_none_for_plain_dict() -> None:
 # (file-absolute), not the body-relative ``_xml_line`` output.                 #
 # --------------------------------------------------------------------------- #
 
-# Fixed agent SKILL.md frontmatter: closing ``---`` on file line 11, so the
-# body begins at file line 12. Keep this in lockstep with the line asserts.
+# Fixed agent SKILL.md frontmatter: closing ``---`` on file line 10, so the
+# body begins at file line 11. Keep this in lockstep with the line asserts.
 _AGENT_SKILL_FRONTMATTER = """---
 llm_role: analyst
 io:
@@ -228,10 +228,9 @@ io:
   outputs:
     type: object
     properties: {}
-
 ---
 """
-_AGENT_BODY_START_LINE = 12
+_AGENT_BODY_START_LINE = 11
 
 
 def _write_agent_skill(root: Path, *, body: str, phase: str = "act") -> Path:
@@ -268,7 +267,7 @@ def _error_line(exc: SkillLoadError, filename: str) -> int:
 def test_empty_role_tag_points_to_tag_line_not_one(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
-    # <goal> on file line 12, empty <role> on file line 13.
+    # <goal> on file line 11, empty <role> on file line 12.
     _write_agent_skill(tmp_path, body="<goal>Done.</goal>\n<role></role>\n")
 
     with pytest.raises(SkillLoadError) as excinfo:
@@ -276,7 +275,7 @@ def test_empty_role_tag_points_to_tag_line_not_one(
 
     assert excinfo.value.payload is not None
     assert excinfo.value.payload.code == "[F-v3-agent-role-missing]"
-    assert _error_line(excinfo.value, "SKILL.md") == 13
+    assert _error_line(excinfo.value, "SKILL.md") == 12
 
 
 def test_missing_role_points_to_body_start_not_one(
@@ -295,7 +294,7 @@ def test_missing_role_points_to_body_start_not_one(
 def test_empty_goal_tag_points_to_tag_line_not_one(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
-    # <role> on file line 12, empty <goal> on file line 13.
+    # <role> on file line 11, empty <goal> on file line 12.
     _write_agent_skill(tmp_path, body="<role>R</role>\n<goal></goal>\n")
 
     with pytest.raises(SkillLoadError) as excinfo:
@@ -303,7 +302,7 @@ def test_empty_goal_tag_points_to_tag_line_not_one(
 
     assert excinfo.value.payload is not None
     assert excinfo.value.payload.code == "[F-v3-agent-goal-missing]"
-    assert _error_line(excinfo.value, "SKILL.md") == 13
+    assert _error_line(excinfo.value, "SKILL.md") == 12
 
 
 def test_missing_goal_points_to_body_start_not_one(
@@ -347,7 +346,7 @@ def test_unknown_body_tag_points_to_tag_file_line(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
     # Sibling of role/goal: the unknown-tag diagnostic must share the file-absolute
-    # axis too. role L12, goal L13, unknown <bogus> on file line 14.
+    # axis too. role L11, goal L12, unknown <bogus> on file line 13.
     _write_agent_skill(
         tmp_path, body="<role>R</role>\n<goal>G</goal>\n<bogus>x</bogus>\n"
     )
@@ -357,14 +356,14 @@ def test_unknown_body_tag_points_to_tag_file_line(
 
     assert excinfo.value.payload is not None
     assert excinfo.value.payload.code == "[F-v3-agent-body-tag-unknown]"
-    assert _error_line(excinfo.value, "SKILL.md") == 14
+    assert _error_line(excinfo.value, "SKILL.md") == 13
 
 
 def test_forbidden_topology_tag_in_body_points_to_file_line(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
     # scan_forbidden_topology_tags (parser) was the last body diagnostic still on
-    # the body-relative axis. role L12, goal L13, forbidden <edge> on file line 14.
+    # the body-relative axis. role L11, goal L12, forbidden <edge> on file line 13.
     _write_agent_skill(
         tmp_path, body="<role>R</role>\n<goal>G</goal>\n<edge>x</edge>\n"
     )
@@ -373,7 +372,7 @@ def test_forbidden_topology_tag_in_body_points_to_file_line(
         SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert "forbidden" in str(excinfo.value)
-    assert _error_line(excinfo.value, "SKILL.md") == 14
+    assert _error_line(excinfo.value, "SKILL.md") == 13
 
 
 def _write_graph_with_solo_phase(root: Path, *, depends_on: str) -> None:

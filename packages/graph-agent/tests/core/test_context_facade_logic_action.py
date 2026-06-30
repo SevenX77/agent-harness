@@ -18,7 +18,7 @@ def _score_logic_skill(root: Path) -> None:
         root / "GRAPH.md",
         """---
 schema_version: "v0.3.0"
-name: context-facade-score
+name: inputs-facade-score
 io:
   inputs:
     type: object

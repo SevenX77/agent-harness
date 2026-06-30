@@ -11,7 +11,7 @@ io:
         type: string
   outputs:
     type: object
-    required: [parsed_events, event_timeline]
+    required: [parsed_events, event_timeline, events_raw]
     properties:
       parsed_events:
         type: array
@@ -19,7 +19,9 @@ io:
           type: object
       event_timeline:
         type: object
-allow_sequential_overwrite: [event_timeline, parsed_events]
+      events_raw:
+        type: string
+allow_sequential_overwrite: [event_timeline, parsed_events, events_raw]
 tools:
   - finish_task
 max_iterations: 20

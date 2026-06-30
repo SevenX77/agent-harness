@@ -15,7 +15,7 @@ io:
         type: string
   outputs:
     type: object
-    required: [entity_registry, character_results]
+    required: [entity_registry, character_results, character_latest_states_text, batch_character_changes_text]
     properties:
       entity_registry:
         type: object
@@ -23,6 +23,10 @@ io:
         type: array
         items:
           type: object
+      character_latest_states_text:
+        type: string
+      batch_character_changes_text:
+        type: string
 tools:
   - finish_task
 max_iterations: 15

@@ -130,7 +130,7 @@ class LocalProductArtifactStore:
             )
 
         try:
-            fd = os.open(stage_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            fd = os.open(stage_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError as exc:
             staged_manifest = self._read_conflicting_release_manifest(
                 stage_file,
@@ -159,6 +159,9 @@ class LocalProductArtifactStore:
             if release_file.exists():
                 return self._read_release_manifest(release_file, skill_id, release_version)
             if stage_file.exists():
+                if time.monotonic() < deadline:
+                    time.sleep(0.01)
+                    continue
                 try:
                     return self._read_release_manifest(stage_file, skill_id, release_version)
                 except FileNotFoundError:
@@ -180,25 +183,79 @@ class LocalProductArtifactStore:
         try:
             os.link(stage_file, release_file)
         except FileExistsError as exc:
-            try:
-                with open(stage_file, encoding="utf-8") as f:
-                    request = json.load(f)
-            except Exception:
-                request = {}
-            try:
-                stage_file.unlink()
-            except FileNotFoundError:
-                pass
-            raise self._release_conflict_error(
+            self._discard_conflicting_stage(
+                stage_file,
+                release_file,
                 skill_id,
                 release_version,
-                request if isinstance(request, dict) else {},
-                existing=self._read_release_manifest(release_file, skill_id, release_version),
-            ) from exc
+                cause=exc,
+            )
         except OSError:
-            raise
+            try:
+                self._exclusive_copy_stage_to_release(stage_file, release_file)
+            except FileExistsError as exc:
+                self._discard_conflicting_stage(
+                    stage_file,
+                    release_file,
+                    skill_id,
+                    release_version,
+                    cause=exc,
+                )
         else:
-            stage_file.unlink()
+            self._unlink_stage_file(stage_file)
+
+    def _exclusive_copy_stage_to_release(self, stage_file: Path, release_file: Path) -> None:
+        """Fallback for filesystems that do not support hard links."""
+        payload = stage_file.read_text(encoding="utf-8")
+        fd = os.open(release_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            try:
+                release_file.unlink()
+            except FileNotFoundError:
+                pass
+            raise
+        self._unlink_stage_file(stage_file)
+
+    def _discard_conflicting_stage(
+        self,
+        stage_file: Path,
+        release_file: Path,
+        skill_id: str,
+        release_version: str,
+        *,
+        cause: Exception,
+    ) -> None:
+        try:
+            with open(stage_file, encoding="utf-8") as f:
+                request = json.load(f)
+        except Exception:
+            request = {}
+        try:
+            self._unlink_stage_file(stage_file)
+        except FileNotFoundError:
+            pass
+        raise self._release_conflict_error(
+            skill_id,
+            release_version,
+            request if isinstance(request, dict) else {},
+            existing=self._read_release_manifest(release_file, skill_id, release_version),
+        ) from cause
+
+    def _unlink_stage_file(self, stage_file: Path) -> None:
+        deadline = time.monotonic() + 0.5
+        while True:
+            try:
+                stage_file.unlink()
+                return
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
     def rollback_release(self, skill_id: str, release_version: str) -> None:
         stage_file = self._release_file(skill_id, release_version, ".stage")

@@ -139,7 +139,7 @@ def test_full_pipeline_skill_compiles_into_expected_products(pipeline_root: Path
     }
 
     # Agent phase products: role/goal, ordered steps, protocols, references,
-    # document + inline examples, declared tools, subagent + subgraph registry.
+    # document + inline examples, declared tools, and subagent registry.
     segment = next(node.ast for node in compiled.nodes if node.phase_name == "segment")
     assert isinstance(segment, AgentNodeAST)
     assert segment.role == "You are a narrative segmentation editor."
@@ -165,7 +165,7 @@ def test_full_pipeline_skill_compiles_into_expected_products(pipeline_root: Path
     assert score.actions == ["score"]
     assert score.validator is False
     assert sorted(score.io.inputs["properties"]) == ["segments"]
-    assert sorted(score.io.outputs["properties"]) == ["report"]
+    assert sorted(score.io.outputs["properties"]) == ["brief"]
     assert "score" in compiled.actions.for_phase("score")
 
     # Subgraph phase products: in-skill relative path + phase IO (which the

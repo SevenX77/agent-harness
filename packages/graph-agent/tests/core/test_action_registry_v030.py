@@ -110,7 +110,7 @@ def test_inputs_mutation_is_compile_fatal(
     _logic_skill(
         tmp_path,
         "write_value",
-        "def write_value(inputs):\n    inputs.set('foo', 99)\n    return {}\n",
+        "def write_value(inputs):\n    inputs['foo'] = 99\n    return {}\n",
     )
 
     with pytest.raises(SkillLoadError) as exc_info:

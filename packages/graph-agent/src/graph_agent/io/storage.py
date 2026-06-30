@@ -50,7 +50,7 @@ class LegacyRunArtifactReadForbiddenError(Exception):
     def __init__(self, message: str, *, path: Path | None = None) -> None:
         super().__init__(message)
         self.error_code = "artifact.legacy_storage_forbidden"
-        self.details = {"path": str(path)} if path is not None else {}
+        self.details = {"path": path.as_posix()} if path is not None else {}
 
 
 def _dir_size_bytes(path: Path) -> int:

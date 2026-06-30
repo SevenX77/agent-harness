@@ -215,10 +215,9 @@ def test_example_path_escape_is_blocked_without_leaking_external_file(
     outside.write_text("SHOULD_NOT_LEAK", encoding="utf-8")
     _resource_skill(tmp_path, example_path="../secret-example.md")
     _write(tmp_path / "references" / "r1.md", "# Reference\n")
-    tools = _bound_tools(tmp_path, mock_skill_resolver)
 
-    with pytest.raises(GraphAgentFatalError) as exc:
-        tools["read_example"].invoke({"example_id": "E2"})
+    with pytest.raises(SkillLoadError) as exc:
+        compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     assert exc.value.payload.code == "[F-v3-resource-example-path-invalid]"
 
     assert "SHOULD_NOT_LEAK" not in str(exc.value)

@@ -10,9 +10,9 @@ io:
           type: object
   outputs:
     type: object
-    required: [report]
+    required: [brief]
     properties:
-      report:
+      brief:
         type: string
 actions: [score]
 validator: false

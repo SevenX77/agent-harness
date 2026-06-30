@@ -16,7 +16,7 @@ class BatchAccumulator:
 
 def assemble_batch(inputs) -> dict:
     """Assemble all parallel analysis results and save accumulated state."""
-    def _validate_batch_analysis(ctx: dict) -> tuple[bool, list[str]]:
+    def _validate_batch_analysis(inputs: dict) -> tuple[bool, list[str]]:
         errors = []
         required_results = [
             "tension_results",
@@ -29,7 +29,7 @@ def assemble_batch(inputs) -> dict:
         ]
 
         for key in required_results:
-            if key not in ctx or not ctx[key]:
+            if key not in inputs or not inputs[key]:
                 errors.append(f"Layer 1: Missing or empty {key}")
 
         is_valid = len(errors) == 0

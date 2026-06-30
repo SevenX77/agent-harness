@@ -11,7 +11,7 @@ APP_DIR_NAME = "AgentStudio"
 
 def resource_dir_from_env(environ: Mapping[str, str], fallback: Path) -> Path:
     raw = environ.get("STUDIO_RESOURCE_DIR")
-    return Path(raw).resolve() if raw else fallback.resolve()
+    return Path(raw).resolve() if raw else fallback
 
 
 def app_settings_dir(
@@ -29,7 +29,8 @@ def app_settings_dir(
         return default_config_dir(Path(raw).resolve())
 
     system = platform or sys.platform
-    user_home = (home or Path.home()).resolve()
+    raw_home = home or Path.home()
+    user_home = raw_home if platform is not None else raw_home.resolve()
     if system == "darwin":
         return user_home / "Library" / "Application Support" / APP_DIR_NAME
     if system == "win32":

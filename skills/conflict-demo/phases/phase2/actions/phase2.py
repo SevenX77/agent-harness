@@ -1,2 +1,2 @@
-def run(inputs):
+def phase2(inputs):
     return {"summary": "world"}

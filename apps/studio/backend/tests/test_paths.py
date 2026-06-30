@@ -46,7 +46,7 @@ def test_resource_dir_uses_fallback_without_env() -> None:
 def test_app_settings_dir_uses_linux_default() -> None:
     settings_dir = paths.app_settings_dir({}, platform="linux", home=Path("/home/user"))
 
-    assert settings_dir == Path("/home/user").resolve() / ".local/share/AgentStudio"
+    assert settings_dir == Path("/home/user") / ".local/share/AgentStudio"
     assert paths.skill_index_path(settings_dir) == settings_dir / "skill_index.json"
     assert paths.default_skills_root(settings_dir) == settings_dir / "Skills"
     assert paths.default_workspaces_dir(settings_dir) == settings_dir / "workspaces"

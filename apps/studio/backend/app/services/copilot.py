@@ -93,8 +93,8 @@ BASE_SYSTEM_PROMPT_TEMPLATE = """
   (多依赖空格/逗号分隔)，终点加 `output`。三处名字必须一致：
   frontmatter `phases` = body `<phase>` = `phases/<name>/` 目录。
 - **每个 phase 目录恰好一个模式文件**：`LOGIC.md`(确定性 Python，最常见)= frontmatter `io:` +
-  body `<action>name</action>` -> `phases/<name>/actions/<name>.py`
-  (signature `def name(inputs): ...`; write phase outputs via return dict).
+  body `<action>名</action>` → `phases/<name>/actions/<名>.py`
+  (签名 `def 名(inputs): ...`，读上游、返回本 phase 输出，不修改 inputs)。
   另两种模式是 `SUBGRAPH.md`(子图) / `SKILL.md`(委派子 skill)；
   agent 等行为、精确语法与错误码以**挂载的 skill-spec 为准**。
 
@@ -253,7 +253,7 @@ def _resolve_safe_write_target(
             exc,
         )
         return None
-    return target_resolved, str(relative_path)
+    return target_resolved, relative_path.as_posix()
 
 
 def _compute_after_content(

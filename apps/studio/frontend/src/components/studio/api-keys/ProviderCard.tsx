@@ -2115,6 +2115,7 @@ export function ProviderCard({
         {showManualModelPanel ? (
           <ManualModelTestPanel
             providerKey={draft.id}
+            endpointIds={endpointSummaries.map((endpoint) => endpoint.id)}
             notableProviderKey={notableProviderKey ?? draft.id.split(/[-_]/, 1)[0].toLowerCase()}
             onModelsUpdated={(models) => onModelsUpdated?.(models)}
             defaultExpanded={false}

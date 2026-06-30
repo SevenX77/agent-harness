@@ -19,9 +19,9 @@
 - [~] **W1-A.3 亲眼** —— 用户指示「前端不用我做视觉验证」,本项**豁免**(前端 CI 门禁 lint/typecheck/test/build 已全绿替代)。
 
 ### W1-B · 手动单模型探测扇出到所有 endpoint(含 failed)(D6 / R-E5)
-- [ ] **W1-B.1 (red)** 前端测试:`ManualModelTestPanel` 对一个有 N 个已配置 endpoint(含 failed)的 provider,触发 N 次 `/endpoints/{id}/models/test`。
-- [ ] **W1-B.2 (green)** 前端:`runModelTests` 改为遍历该 provider 下所有 key+base_url 齐的 endpoint(含 failed/disabled),各发一次、分别回写;聚合结果展示。
-- [ ] **W1-B.3** 亲眼:WaveSpeed 这类多 endpoint provider,手动单测覆盖全部 endpoint。
+- [x] **W1-B.1/.2 (red→green)** 前端抽出纯 helper `probeModelsAcrossEndpoints(endpointIds, modelIds, probe)`:遍历 provider 下**所有**已配置 endpoint(`ProviderCard` 传 `endpointSummaries.map(e=>e.id)`,含 failed/disabled)、各发一次 `/endpoints/{id}/models/test`、`aggregateModelResults` 按模型聚合最优态(任一 endpoint ok 即 usable)、`mergeModelLists` 合并 models;一个 endpoint 抛错记失败但不中断其余。`ManualModelTestPanel` 加 `endpointIds` prop(缺省回退 `[providerKey]`)。TDD:`probes every endpoint and keeps the best result per model` + `keeps probing the remaining endpoints when one throws`。门禁:前端 lint/typecheck/test/build 全绿。
+  > 模型 chip 本就按 route 聚合(W2-B.4),所以测全 endpoint 后,某模型只在一个 base_url 可用也会被发现、chip 显示聚合 ready。
+- [~] **W1-B.3 亲眼** —— 按用户「前端不做视觉验证」豁免(`probeModelsAcrossEndpoints` 单测 + 前端 CI 门禁替代)。
 
 ---
 

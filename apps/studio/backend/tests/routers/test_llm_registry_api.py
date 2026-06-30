@@ -2931,6 +2931,40 @@ def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
     assert second_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
 
 
+def test_endpoint_test_logs_discovered_models_and_reachability(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # W2-E diagnostics: the endpoint_test runtime-activity record carries the actual
+    # discovered model ids and whether get-models reached the provider — not just a
+    # count — so General settings can show what the Test actually saw.
+    from app.services.runtime_activity import load_runtime_activity
+
+    _seed(tmp_path, monkeypatch)
+
+    async def fake_ping(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+
+    async def fake_probe(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe)
+
+    assert client.post("/api/llm/endpoints/openai-direct/test").status_code == 200
+
+    records = load_runtime_activity(source_id="llm_credentials", limit=50)
+    test_rec = next(r for r in records if r["action"] == "endpoint_test")
+    assert test_rec["changes"]["reachable"] is True
+    assert test_rec["changes"]["discovered_model_ids"] == ["gpt-5", "gpt-5-mini"]
+
+
 def test_official_endpoint_test_records_model_list_without_generation_probes(
     client: TestClient,
     tmp_path: Path,

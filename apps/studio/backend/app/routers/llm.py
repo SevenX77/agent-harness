@@ -931,7 +931,11 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             "endpoint_id": endpoint_id,
             "status": status,
             "message": message,
+            # W2-E diagnostics: record what the Test actually saw — whether get-models
+            # reached the provider and the exact model ids it returned (not just a count).
+            "reachable": model_list_reached,
             "discovered_model_count": len(discovered_model_ids),
+            "discovered_model_ids": list(discovered_model_ids),
         },
     )
     return EndpointTestResponse(

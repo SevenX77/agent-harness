@@ -1,8 +1,9 @@
-"""Phase 2a R2: client-side redaction + public-host allowlist drop.
+"""Phase 2a R2 + W3-D: client-side redaction + safe-to-publish host gate.
 
 Red-line: an upload payload must never carry secrets, private base URLs, local
-paths, raw prompt/IO, or a bare un-salted hash of a private endpoint. Non-
-allowlisted hosts drop their endpoint identity entirely before upload.
+paths, raw prompt/IO, or a bare un-salted hash of a private endpoint. Open
+contribution (W3-D): ANY public provider host may publish its endpoint identity;
+private / LAN / identity-bearing hosts drop it entirely before upload.
 """
 
 from __future__ import annotations
@@ -11,9 +12,9 @@ import hashlib
 
 import pytest
 from app.services.community_catalog import (
-    PUBLIC_PROVIDER_HOST_ALLOWLIST,
     EvidenceUpload,
     build_upload_record,
+    is_safe_to_publish,
     is_uploadable,
     normalize_base_url,
 )
@@ -21,7 +22,7 @@ from app.services.community_catalog import (
 from tests.helpers_community_catalog import probe_record as _probe_record  # type: ignore[import-not-found]
 
 
-def test_non_allowlisted_host_drops_endpoint_identity() -> None:
+def test_private_internal_host_drops_endpoint_identity() -> None:
     record = _probe_record()
     upload = build_upload_record(record, base_url="https://llm.mycompany.internal/v1")
     assert upload is not None
@@ -29,7 +30,7 @@ def test_non_allowlisted_host_drops_endpoint_identity() -> None:
     assert upload.endpoint_fingerprint is None
 
 
-def test_allowlisted_host_publishes_normalized_url_and_fingerprint() -> None:
+def test_public_host_publishes_normalized_url_and_fingerprint() -> None:
     record = _probe_record()
     upload = build_upload_record(record, base_url="https://API.OpenAI.com/v1/")
     assert upload is not None
@@ -38,13 +39,11 @@ def test_allowlisted_host_publishes_normalized_url_and_fingerprint() -> None:
     assert upload.endpoint_fingerprint == expected
 
 
-def test_public_transit_aggregator_hosts_are_allowlisted() -> None:
-    # A public AI transit/aggregator (anyone can register and connect) is the same
-    # class as openrouter.ai, which is already allowlisted: its base URL is a public
-    # domain carrying no user identity, so connectivity evidence routed through it is
-    # publishable — another client on the same transit can act on it. 七牛 (Qiniu) AI
-    # 中转 (api.qnaigc.com / anthropic.qnaigc.com) is such a transit and must keep its
-    # endpoint identity rather than being dropped as if it were a private host.
+def test_public_transit_aggregator_hosts_publish() -> None:
+    # A public AI transit/aggregator (anyone can register and connect) carries a
+    # public domain with no user identity, so its connectivity evidence is
+    # publishable — another client on the same transit can act on it. Under open
+    # contribution (W3-D) such hosts keep their endpoint identity.
     for base in ("https://api.qnaigc.com/v1", "https://anthropic.qnaigc.com"):
         upload = build_upload_record(_probe_record(), base_url=base)
         assert upload is not None, base
@@ -53,13 +52,13 @@ def test_public_transit_aggregator_hosts_are_allowlisted() -> None:
 
 
 def test_fingerprint_never_published_without_plaintext() -> None:
-    # A bare un-salted hash of a private host must never leak. When the host is
-    # not allowlisted, neither the plaintext nor any fingerprint is present.
+    # A bare un-salted hash of a private host must never leak: for a private host
+    # neither the plaintext URL nor any fingerprint is emitted.
     record = _probe_record()
-    upload = build_upload_record(record, base_url="https://secret-host.example.org/v1")
+    upload = build_upload_record(record, base_url="https://10.1.2.3/v1")
     assert upload is not None
-    if upload.endpoint_fingerprint is not None:
-        assert upload.normalized_public_base_url is not None
+    assert upload.endpoint_fingerprint is None
+    assert upload.normalized_public_base_url is None
 
 
 def test_forbidden_fields_never_reach_upload_payload() -> None:
@@ -110,14 +109,29 @@ def test_normalize_base_url(raw: str, expected: str) -> None:
     assert normalize_base_url(raw) == expected
 
 
-def test_allowlist_contains_known_public_providers() -> None:
-    # Subset check via set operators rather than `str in ...`: membership in this
-    # frozenset is exact and safe, but CodeQL misreads `"host" in <name>` as
-    # URL-substring sanitization (a false positive). The production host check
-    # (`is_public_allowlisted`) extracts the hostname via urlsplit and matches the
-    # set exactly, so `api.openai.com.evil.com` cannot pass.
-    assert {
-        "api.openai.com",
-        "api.anthropic.com",
-        "api.deepseek.com",
-    } <= PUBLIC_PROVIDER_HOST_ALLOWLIST
+@pytest.mark.parametrize(
+    ("base_url", "publishable"),
+    [
+        # Open contribution (W3-D): any public provider host publishes — no fixed
+        # allowlist. A brand-new provider (e.g. wavespeed.ai) is contributable.
+        ("https://llm.wavespeed.ai/v1", True),
+        ("https://api.openai.com/v1", True),
+        ("https://some-new-provider.example.com/v1", True),
+        # Private / LAN / loopback / raw private IP / bare single-label → dropped.
+        ("https://llm.mycompany.internal/v1", False),
+        ("http://localhost:8080/v1", False),
+        ("https://10.1.2.3/v1", False),
+        ("https://192.168.0.5:11434/v1", False),
+        ("https://intranet/v1", False),
+        # Userinfo (identity-bearing) → dropped even on a public host.
+        ("https://user:tok@api.openai.com/v1", False),
+    ],
+)
+def test_open_contribution_publish_safety_gate(base_url: str, publishable: bool) -> None:
+    # R-C1+R-C2: the fixed host allowlist is replaced by a safety gate — public DNS
+    # hosts / public IPs publish; private/LAN/loopback/raw private IPs, bare
+    # single-label hosts, and userinfo-bearing URLs never do.
+    assert is_safe_to_publish(base_url) is publishable
+    upload = build_upload_record(_probe_record(), base_url=base_url)
+    assert (upload.normalized_public_base_url is not None) is publishable
+    assert (upload.endpoint_fingerprint is not None) is publishable

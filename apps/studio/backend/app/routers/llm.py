@@ -148,7 +148,11 @@ from app.services.official_capability_sources import (
     official_doc_source_urls,
     provider_doc_limit_rules,
 )
-from app.services.provider_config import notable_provider_key_for, static_probe_candidate_specs
+from app.services.provider_config import (
+    language_model_classification,
+    notable_provider_key_for,
+    static_probe_candidate_specs,
+)
 from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -3703,33 +3707,16 @@ def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: 
     if backend == "deepseek":
         return model.startswith("deepseek-")
     if backend == "ark":
-        ark_non_language_tokens = (
-            "seedream",
-            "seedance",
-            "wan",
-            "embedding",
-            "translate",
-            "translation",
-            "tts",
-            "audio",
-            "video",
-            "3d",
-        )
-        if any(token in model for token in ark_non_language_tokens):
-            return False
-        return any(
-            model.startswith(prefix)
-            for prefix in (
-                "doubao-",
-                "deepseek-",
-                "glm-",
-                "kimi-",
-                "mistral-",
-                "qwen",
-                "seed-",
-                "ep-",
-            )
-        )
+        # W3-A / T2: ARK's language-model prefixes + non-language tokens are data-driven
+        # (app/data/provider_identity.json -> ark). A model is a language model when it
+        # has no non-language token and starts with a configured prefix.
+        classification = language_model_classification("ark")
+        if classification is not None:
+            prefixes, non_language_tokens = classification
+            if any(token in model for token in non_language_tokens):
+                return False
+            return any(model.startswith(prefix) for prefix in prefixes)
+        return False
     if any(
         token in model
         for token in (

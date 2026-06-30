@@ -1,5 +1,7 @@
-import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it, vi } from "vitest"
+// @vitest-environment jsdom
+import { act } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   CompileErrorDrawer,
   buildCompileErrorClipboardText,
@@ -63,49 +65,78 @@ describe("buildCompileErrorClipboardText", () => {
   })
 })
 
+// The drawer is built on the shared shadcn Sheet, which portals its overlay +
+// content into document.body — so these mount into a real (jsdom) DOM and assert
+// against the portaled markup rather than SSR output.
 describe("CompileErrorDrawer rendering", () => {
+  let container: HTMLDivElement
+  let root: Root
+
+  beforeEach(() => {
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    container.remove()
+    document.body.innerHTML = ""
+  })
+
+  function render(open: boolean) {
+    act(() => {
+      root.render(<CompileErrorDrawer errors={errors} open={open} onOpenChange={() => {}} />)
+    })
+  }
+
   it("lists every error as file:line - field - message when open", () => {
-    const html = renderToStaticMarkup(
-      <CompileErrorDrawer errors={errors} open onOpenChange={() => {}} />,
-    )
-    expect(html).toContain("phases/draft/SKILL.md")
-    expect(html).toContain(":12")
-    expect(html).toContain("model")
-    expect(html).toContain("Unknown model alias")
-    expect(html).toContain("Dangling edge")
-    expect(html).toContain("Compile request failed")
-    expect(html).toContain("3 compile errors")
+    render(true)
+    const text = document.body.textContent ?? ""
+    expect(text).toContain("phases/draft/SKILL.md")
+    expect(text).toContain(":12")
+    expect(text).toContain("model")
+    expect(text).toContain("Unknown model alias")
+    expect(text).toContain("Dangling edge")
+    expect(text).toContain("Compile request failed")
+    expect(text).toContain("3 compile errors")
   })
 
   it("exposes a copy-all-errors button", () => {
-    const html = renderToStaticMarkup(
-      <CompileErrorDrawer errors={errors} open onOpenChange={() => {}} />,
-    )
-    expect(html).toContain("Copy all errors")
-    expect(html).toContain('aria-label="Copy all compile errors"')
+    render(true)
+    expect(
+      document.body.querySelector('[aria-label="Copy all compile errors"]'),
+    ).not.toBeNull()
   })
 
   it("renders nothing when closed", () => {
-    const html = renderToStaticMarkup(
-      <CompileErrorDrawer errors={errors} open={false} onOpenChange={() => {}} />,
-    )
-    expect(html).toBe("")
+    render(false)
+    expect(document.body.querySelector('[data-slot="compile-drawer-content"]')).toBeNull()
   })
 
-  it("is canvas-scoped: uses absolute positioning, never fixed inset-0", () => {
-    const html = renderToStaticMarkup(
-      <CompileErrorDrawer errors={errors} open onOpenChange={() => {}} />,
-    )
-    // The canvas-scoped content must stay inside the canvas container, so the
-    // drawer must NOT use the viewport-blanketing `fixed inset-0` that the local
-    // ui/sheet.tsx (and bare Radix Portal dialog) would apply.
-    expect(html).not.toContain("fixed inset-0")
-    expect(html).not.toContain("fixed")
-    // Content is clipped to the (relative) canvas container and pinned to its
-    // bottom edge via absolute inset-x-0 bottom-0 — never to the viewport.
-    expect(html).toContain("absolute inset-x-0 bottom-0")
+  it("marks the error list as natively selectable so messages can be copied by hand", () => {
+    // The app-wide text-selection guard disables user-select / selectstart / copy
+    // on the body; the error content opts back in via the data-allow-text-selection
+    // allow-list entry (see useNativeDoubleClickGuard / TEXT_SELECTION_ALLOWLIST).
+    render(true)
+    const content = document.body.querySelector('[data-slot="compile-drawer-content"]')
+    const selectable = content?.querySelector("[data-allow-text-selection]")
+    expect(selectable).not.toBeNull()
+    expect(selectable?.textContent).toContain("Unknown model alias")
   })
 
+  it("covers the whole UI: a viewport overlay dims the page behind the bottom sheet", () => {
+    // The drawer deliberately covers the canvas + the center action bar beneath it:
+    // a full-viewport modal overlay, and a bottom-anchored content panel. Clicking
+    // the overlay (the blank area above) dismisses it via Radix's modal behavior.
+    render(true)
+    const overlay = document.body.querySelector('[data-slot="sheet-overlay"]')
+    expect(overlay).not.toBeNull()
+    expect(overlay?.className).toContain("fixed")
+    expect(overlay?.className).toContain("inset-0")
+    const content = document.body.querySelector('[data-slot="compile-drawer-content"]')
+    expect(content?.getAttribute("data-side")).toBe("bottom")
+  })
 })
 
 describe("CompileErrorDrawer copy behavior", () => {

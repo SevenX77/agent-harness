@@ -711,6 +711,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     status: Literal["verified", "unverified_manual", "failed", "disabled"] = "failed"
     message = "API key is empty."
     auth_failed = False
+    probe_attempts_log: list[dict[str, Any]] = []
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
@@ -819,6 +820,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 discovered_model_ids,
                 raw_capabilities_by_model,
             )
+            probe_attempts_log = verification.probe_attempts
             # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
             # endpoint's untested physical status, never "failed".
             if verification.status == "no_model":
@@ -936,6 +938,8 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             "reachable": model_list_reached,
             "discovered_model_count": len(discovered_model_ids),
             "discovered_model_ids": list(discovered_model_ids),
+            # W2-E.1b: which protocol×model combos were generation-probed and how each fared.
+            "probe_attempts": probe_attempts_log,
         },
     )
     return EndpointTestResponse(
@@ -4658,6 +4662,10 @@ class ThirdPartyEndpointVerification:
     # can build a probe-failed evidence record for that real model (R3.1-AC3 /
     # codex-3) — not just a human message.
     failed_probe: RouteProbeResult | None = None
+    # W2-E.1b diagnostics: every generation probe attempted, as
+    # {protocol, model, status} — surfaced in the endpoint_test runtime-activity log
+    # so the user can see which protocol×model combos were tried and how each fared.
+    probe_attempts: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
@@ -4853,6 +4861,7 @@ async def _verify_third_party_endpoint_by_probe(
     on the first ``ok`` and short-circuiting structural errors. The endpoint is
     promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
     """
+    probe_attempts: list[dict[str, Any]] = []
     probe_model_ids = _third_party_probe_model_ids(
         endpoint,
         discovered_model_ids,
@@ -4869,11 +4878,21 @@ async def _verify_third_party_endpoint_by_probe(
                 "Endpoint reachable, but it returned no models to verify. "
                 "Add a model id and run a single-model test."
             ),
+            probe_attempts=probe_attempts,
         )
 
     detected_protocol, detection_probe = await _detect_third_party_protocol_for_models(
         endpoint, probe_model_ids
     )
+    if detection_probe is not None:
+        # W2-E.1b: record the protocol-detection probe as the first attempt.
+        probe_attempts.append(
+            {
+                "protocol": detected_protocol or endpoint.protocol,
+                "model": detection_probe.model_id,
+                "status": detection_probe.status,
+            }
+        )
     if detected_protocol is None:
         structural = (
             detection_probe is not None
@@ -4891,6 +4910,7 @@ async def _verify_third_party_endpoint_by_probe(
             message=message,
             failure_is_structural=structural,
             failed_probe=detection_probe,
+            probe_attempts=probe_attempts,
         )
 
     assert detection_probe is not None  # detected_protocol set => probe present
@@ -4901,12 +4921,15 @@ async def _verify_third_party_endpoint_by_probe(
     last_failure: RouteProbeResult = first_probe
     for model_id in probe_model_ids:
         if model_id == first_probe_model_id:
-            # This model was already probed during protocol detection.
+            # This model was already probed (and recorded) during protocol detection.
             probe = first_probe
         else:
             probe = await _gateway_test_provider_route(
                 detected_endpoint,
                 _gateway_probe_route(detected_endpoint, model_id),
+            )
+            probe_attempts.append(
+                {"protocol": detected_protocol, "model": model_id, "status": probe.status}
             )
         if probe.status == "ok":
             logger.info(
@@ -4926,6 +4949,7 @@ async def _verify_third_party_endpoint_by_probe(
                         raw_capabilities_by_model.get(model_id),
                     )
                 },
+                probe_attempts=probe_attempts,
             )
         last_failure = probe
         if probe.status in _STRUCTURAL_PROBE_STATUSES:
@@ -4945,6 +4969,7 @@ async def _verify_third_party_endpoint_by_probe(
         ),
         failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
         failed_probe=last_failure,
+        probe_attempts=probe_attempts,
     )
 
 

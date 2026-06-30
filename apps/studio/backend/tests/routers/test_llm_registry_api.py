@@ -2965,6 +2965,43 @@ def test_endpoint_test_logs_discovered_models_and_reachability(
     assert test_rec["changes"]["discovered_model_ids"] == ["gpt-5", "gpt-5-mini"]
 
 
+def test_endpoint_test_logs_probe_attempts(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # W2-E.1b: the endpoint_test record lists every protocol×model generation probe
+    # attempted and its status, so the user can see what the Test actually exercised.
+    from app.services.runtime_activity import load_runtime_activity
+
+    _seed(tmp_path, monkeypatch)
+
+    async def fake_ping(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+
+    async def fake_probe(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe)
+
+    assert client.post("/api/llm/endpoints/openai-direct/test").status_code == 200
+
+    records = load_runtime_activity(source_id="llm_credentials", limit=50)
+    test_rec = next(r for r in records if r["action"] == "endpoint_test")
+    attempts = test_rec["changes"]["probe_attempts"]
+    assert isinstance(attempts, list) and len(attempts) >= 1
+    assert any(
+        a["model"] == "gpt-5" and a["status"] == "ok" and a["protocol"] == "openai_compatible"
+        for a in attempts
+    )
+
+
 def test_official_endpoint_test_records_model_list_without_generation_probes(
     client: TestClient,
     tmp_path: Path,

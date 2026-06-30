@@ -1,4 +1,4 @@
-"""Studio Copilot service - Claude Agent SDK integration.
+﻿"""Studio Copilot service - Claude Agent SDK integration.
 
 NOTE (T0.1 base_url verify, 2026-05-09):
 - claude-agent-sdk version: 0.1.80
@@ -93,7 +93,8 @@ BASE_SYSTEM_PROMPT_TEMPLATE = """
   (多依赖空格/逗号分隔)，终点加 `output`。三处名字必须一致：
   frontmatter `phases` = body `<phase>` = `phases/<name>/` 目录。
 - **每个 phase 目录恰好一个模式文件**：`LOGIC.md`(确定性 Python，最常见)= frontmatter `io:` +
-  body `<action>名</action>` → `phases/<name>/actions/<名>.py`(签名 `def 名(context): ...`，读上游、写本 phase 输出)。
+  body `<action>name</action>` -> `phases/<name>/actions/<name>.py`
+  (signature `def name(inputs): ...`; write phase outputs via return dict).
   另两种模式是 `SUBGRAPH.md`(子图) / `SKILL.md`(委派子 skill)；
   agent 等行为、精确语法与错误码以**挂载的 skill-spec 为准**。
 

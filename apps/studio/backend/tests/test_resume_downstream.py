@@ -26,7 +26,7 @@ def _write_fanout_skill(skill_dir: Path) -> None:
         actions.mkdir(parents=True)
         (actions / "__init__.py").write_text("", encoding="utf-8")
         (actions / "step.py").write_text(
-            f"def step(context):\n    context.set('{phase}_out', True)\n    return {{'{phase}_out': True}}\n",
+            f"def step(inputs):\n    return {{'{phase}_out': True}}\n",
             encoding="utf-8",
         )
         (skill_dir / "phases" / phase / "LOGIC.md").write_text(

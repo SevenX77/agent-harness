@@ -66,26 +66,25 @@ phases:
     (skill_dir / "phases" / "segment" / "SKILL.md").write_text(
         f"""---
 llm_role: analyst
-phase_config:
-  io:
-    inputs:
-      type: object
-      required: [chapter_content]
-      properties:
-        chapter_content:
-          type: string
-    outputs:
-      type: object
-      required: {required_outputs}
-      properties:
-        segments:
-          type: array
-          items:
-            type: object
-        headline:
-          type: string
-  tools: []
-  max_iterations: 5
+io:
+  inputs:
+    type: object
+    required: [chapter_content]
+    properties:
+      chapter_content:
+        type: string
+  outputs:
+    type: object
+    required: {required_outputs}
+    properties:
+      segments:
+        type: array
+        items:
+          type: object
+      headline:
+        type: string
+tools: []
+max_iterations: 5
 ---
 <role>seg editor</role>
 <goal>segment</goal>

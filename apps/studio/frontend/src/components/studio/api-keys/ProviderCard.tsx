@@ -1659,6 +1659,11 @@ export function ProviderCard({
       }
     })
   const showAvailableEndpoint = endpointSummaries.length > 0
+  // W3-B.4: the provider's registrable-domain id (eTLD+1 of base_url), shown under
+  // the display alias in the title tooltip. Backend-stamped so it matches evidence.
+  const providerIdentity = endpointStates
+    .map((state) => state.persisted?.registrable_provider_name)
+    .find((name): name is string => Boolean(name)) ?? null
 
   const baseUrlReachabilityState = (rowId: string): BaseUrlReachabilityState => {
     const states = endpointStatesByBaseUrlRow.get(rowId) ?? []
@@ -1843,7 +1848,23 @@ export function ProviderCard({
   return (
     <Card data-provider-id={draft.id}>
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
-        <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">{displayName}</div>
+        {providerIdentity ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className="min-w-0 max-w-xs cursor-help truncate text-sm font-semibold text-foreground"
+                  data-provider-identity={providerIdentity}
+                >
+                  {displayName}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>{t("apiKeys.card.providerIdTooltip", { id: providerIdentity })}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">{displayName}</div>
+        )}
         {providerKind && !isOfficial ? (
           <Badge variant="outline" className="text-[10px] text-muted-foreground">
             {t("apiKeys.card.thirdPartyBadge")}

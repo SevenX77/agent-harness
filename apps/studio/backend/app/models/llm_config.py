@@ -81,6 +81,11 @@ class ProviderEndpoint(GatewayProviderEndpoint):
     # human ``last_test_message`` text. Studio-only presentation field: stripped from
     # the gateway runtime endpoint (see ``_gateway_endpoint``).
     last_error_code: str | None = None
+    # W3-B.4: the provider's registrable-domain identity (eTLD+1 of ``base_url``, e.g.
+    # "qnaigc" / "wavespeed" / "volces"), so the UI can show the provider id under its
+    # display alias. DERIVED from base_url in the registry projection — not persisted
+    # truth. Studio-only presentation field: stripped from the gateway runtime endpoint.
+    registrable_provider_name: str | None = None
 
 
 class ProviderRoute(GatewayProviderRoute):
@@ -108,7 +113,10 @@ class ModelProfile(GatewayModelProfile):
 
 def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
     return GatewayProviderEndpoint.model_validate(
-        endpoint.model_dump(mode="python", exclude={"display_name", "last_error_code"})
+        endpoint.model_dump(
+            mode="python",
+            exclude={"display_name", "last_error_code", "registrable_provider_name"},
+        )
     )
 
 

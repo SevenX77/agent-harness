@@ -212,6 +212,7 @@
       "modelWord": "模型",
       "apiKeyLabel": "API Key",
       "apiKeyShort": "API Key",
+      "providerIdTooltip": "Provider id：{{id}}(base URL 的注册域)",
       "apiKeyPlaceholder": "请输入 {{providerName}} 的 API Key",
       "apiKeyRequired": "请填写 API Key。",
       "baseUrlLabel": "Base URL",

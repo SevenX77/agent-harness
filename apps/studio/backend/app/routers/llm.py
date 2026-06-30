@@ -2117,6 +2117,30 @@ async def apply_model_profile(
     return _save_roles_with_active_routes(data.model_copy(update={"roles": roles})).roles[role_name]
 
 
+def _project_endpoint_provider_identities(
+    credentials: LLMCredentialsFile,
+) -> LLMCredentialsFile:
+    """Stamp each endpoint's registrable-domain provider identity (W3-B.4 / R-B7).
+
+    Derived from ``base_url`` (eTLD+1) at projection time — the SAME function that
+    attributes probe evidence — so the UI can show the provider id under its display
+    alias and it is guaranteed to match the evidence. Never persisted.
+    """
+    projected = {
+        endpoint_id: endpoint.model_copy(
+            update={
+                "registrable_provider_name": (
+                    registrable_provider_name(endpoint.base_url)
+                    if endpoint.base_url
+                    else None
+                )
+            }
+        )
+        for endpoint_id, endpoint in credentials.provider_endpoints.items()
+    }
+    return credentials.model_copy(update={"provider_endpoints": projected})
+
+
 def _registry_response(
     credentials: LLMCredentialsFile,
     roles: RolesData,
@@ -2125,6 +2149,7 @@ def _registry_response(
 ) -> RegistryResponse:
     credentials = _normalize_credentials_for_registry_response(credentials)
     credentials = _project_route_ui_states(credentials)
+    credentials = _project_endpoint_provider_identities(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():

@@ -40,7 +40,7 @@
 - [ ] **W2-B.2(可后置)** 写状态时机预算归一态落盘,响应只读(cooling_down 因依赖熔断计时仍需读时 overlay,属阶段二/运行期)。
 - [x] **W2-B.3 (red→green)** 端到端结构化失败码:**后端** studio `ProviderEndpoint` 加 `last_error_code`(test_endpoint 从 `result.error_code` 持久化,strip 不进 gateway);**前端** `endpointErrorCode` 优先读 `endpoint.last_error_code`(message 解析降级为 fallback),删 `providerTestResultFailureScope` 里散落的 `text.includes` 二次匹配。门禁:后端 ruff/mypy/137 + 前端 lint/typecheck/test(1525)/build 全绿。视觉验证按用户指示豁免。
   > 注:get-models 失败的连通/鉴权码(invalid_api_key 等,Qiniu 顶部状态痛点)现走结构化;第三方生成层 model 级码暂仍由 `endpointErrorCode` 的 message 正则兜底(`(code)` 提取),后续可继续结构化。
-- [ ] **W2-B.4 (red→green)** 一 model 多 route 聚合(R-A4):model 标签态 = 名下 routes 归一态聚合(任一 ready 则可用);贯穿 model 标签 + role 内 endpoint/route 标签。
+- [x] **W2-B.4 (已现成 / verified)** 一 model 多 route 聚合(R-A4)代码里已实现,无需改动:[`ProviderCard.tsx:1480-1501`](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:1480) 按 `model.id` 跨 endpoint 分组 → [`aggregateSummaryUiState`(:895)](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:895) 按优先级数组 [:737](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:737) `[ready, historical_ready, cooling_down, failed, untested, off]` 取最高态 =「任一 ready→ready;无 ready 任一 historical_ready→蓝」;每个 endpoint 具体态由 [`aggregateRoutesTooltipText`(:974)](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:974) 逐条写进 tooltip。
 
 ### W2-C · L1/L2 指示器按层重做(D10 / R-A2)
 - [x] **W2-C.1 (red→green)** L1 api_key 独立三态归因:get_models 成功=valid(✓);结构化 `invalid_api_key`=invalid(✗);其它失败(如 base_url 不通,key 根本没真正被测)=unknown(**不武断标红**)。L2 base_url 经 `resultLooksReachable` 本就独立于 endpoint 通过/失败态判连通。
@@ -82,7 +82,7 @@
 - [x] **W3-B.1/.2 (red→green)** 新建 `services/llm_provider_identity.py::registrable_provider_name(base_url)` —— eTLD+1 派生(T6 定:**内置精简多级后缀表**,无新依赖、不过 pip-audit 风险):`api.qnaigc.com`→`qnaigc`、`api./llm.wavespeed.ai`→同一 `wavespeed`、`ark.cn-beijing.volces.com`→`volces`、裸 IP/单标签/`foo.com.cn`→`foo`/None。15 参数化单测。
 - [x] **W3-B.3a (green)** catalog `provider_id` 系统填充:`_build_model_probe_evidence` + `_build_official_profile_probe_evidence` 两个 probe-evidence 构建点 `provider_id=registrable_provider_name(endpoint.base_url)`(R-B7)。门禁:ruff · mypy · 121+35 pytest 全绿。
 - [ ] **W3-B.3b** 前端 provider 分组键统一到注册域(T5)+ alias 展示表(`qnaigc`→Qiniu / `volces`→ARK,data-driven)——**前端 + 配置文件**,归 W3-A/前端批。
-- [ ] **W3-B.4** provider 标题 tooltip 显示 provider 名(D8/R-G1)——前端。
+- [x] **W3-B.4** provider 标题 tooltip 显示 provider id(D8/R-G1):后端 `_project_endpoint_provider_identities` 在 registry 投影时把 `registrable_provider_name(base_url)`(eTLD+1,与 evidence provider_id 同源、同一函数)stamp 进 endpoint DTO(展示字段,`_gateway_endpoint` strip 不进 gateway);前端标题包 tooltip 显示该 id(en/zh-CN)。`display_name` 本就是人类 alias(Qiniu/ARK),tooltip 补底层 id。门禁:后端 ruff/mypy/pytest + 前端 lint/typecheck/test(1525)/build。
   > 注:`_endpoint_notable_provider_key` 的 qiniu/openrouter 硬编码是 **notes-file 查找别名**(qnaigc→qiniu.md),与 provider 分类身份是两回事,留待 W3-A provider 配置文件统一(届时 alias 表 + notes-key 一起入配置)。
 
 ### W3-C · evidence 匹配身份统一(D11)

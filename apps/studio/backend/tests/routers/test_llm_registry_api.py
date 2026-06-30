@@ -231,6 +231,9 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     assert response.status_code == 200
     body = response.json()
     assert body["provider_endpoints"]["openai-direct"]["api_key"] == "**********"
+    # W3-B.4: the registry projection stamps the provider's registrable-domain id
+    # (eTLD+1 of base_url) so the UI can show it under the display alias.
+    assert body["provider_endpoints"]["openai-direct"]["registrable_provider_name"] == "openai"
     assert body["canonical_groups"][0]["canonical_id"] == "gpt-5"
 
     put_response = client.put(

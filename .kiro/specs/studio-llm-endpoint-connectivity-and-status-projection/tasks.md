@@ -86,8 +86,8 @@
 - [ ] **W3-C.2 (green)** 抽一个匹配身份函数,三处共用;回填匹配从 host+model 收敛到统一键。
 
 ### W3-D · 社区贡献开放:allowlist→安全闸(D13)
-- [ ] **W3-D.1 (red)** 测试:公网新 provider(如 wavespeed.ai)evidence 可上传;私有 host(RFC1918/localhost/裸IP/.local)+ 带密钥 URL 被拦。
-- [ ] **W3-D.2 (green)** 移除 `PUBLIC_PROVIDER_HOST_ALLOWLIST` 准入名单,换安全闸(T7 细则);api_key 永不外传不变。
+- [x] **W3-D.1/.2 (red→green)** 移除 `PUBLIC_PROVIDER_HOST_ALLOWLIST` 固定准入名单,换 `is_safe_to_publish` 安全闸:公网 DNS host / 公网 IP 可发布(wavespeed.ai 这类新 provider 现可贡献);私有(RFC1918/裸私有IP)/ LAN(`.local/.internal/.lan/.home/.corp/.intranet`)/ loopback / 单标签 host / RFC6761 保留 TLD(`.test/.example/.invalid/.localhost`)/ 带 userinfo 的 URL 一律不发布。api_key 永不外传不变(脱敏字段集没动)。
+  (T7 细则定稿如上;`is_public_allowlisted` + 常量 + `build_upload_record` 的 allowlist 参数全删,redaction 测试改成参数化安全闸覆盖)。门禁:84 community/evidence pytest · ruff · mypy 全绿。
 
 ---
 

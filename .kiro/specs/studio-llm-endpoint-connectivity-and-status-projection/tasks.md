@@ -98,7 +98,7 @@
 ## 阶段二(后置)— 运行期回写 + 探测动画
 
 - [ ] **S2-A** engine 真实调用结果经事件总线回流 studio 写归一态(R-D5;gateway 不直接写盘,T3 事件设计)。
-- [ ] **S2-B** 逐模型探测进度事件 → 模型标签 testing 动画(复用 `.api-route-tag-border-flow`)+ 测试期自动展开模型列表(R-G2)。
+- [~] **S2-B (R-G2)** **测试期自动展开模型列表**已落地(ProviderCard `useEffect`:`isGettingModels` 时 `setShowAllModels(true)`;前端 lint/typecheck/test(1525)/build 全绿)。**逐模型 testing 动画**待定:现 endpoint 测试是前端按 endpoint 循环、逐模型探测在后端一次调用内跑完只回最终态,测试窗口内无人标 `status="testing"`(且 `ProviderCard.test.tsx:830` 锁定「仅 `status="testing"` 才动画」的设计)。要实时动画需前端改按候选模型循环、复用现成 `testProviderModels`→`/models/test`——属改核心测试主流程 + 视觉/时序特性,建议对齐机制 + 亲眼验证后再动。
 
 ---
 

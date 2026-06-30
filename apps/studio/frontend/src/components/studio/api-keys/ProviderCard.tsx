@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement, type WheelEvent } from "react"
+import { useEffect, useRef, useState, type ReactElement, type WheelEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import {
@@ -1544,6 +1544,11 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
+  // R-G2: auto-expand the full model list when an endpoint test starts, so the user
+  // can watch every model being probed instead of only the first few.
+  useEffect(() => {
+    if (isGettingModels) setShowAllModels(true)
+  }, [isGettingModels])
   const endpointStates = endpointDrafts.map((endpointDraft) => {
     const row = { id: endpointDraft.id, value: endpointDraft.base_url, provider_type: endpointDraft.provider_type }
     const rowPersisted = persistedEndpoints?.[endpointDraft.id] ?? (endpointDraft.id === draft.id ? persisted : null)

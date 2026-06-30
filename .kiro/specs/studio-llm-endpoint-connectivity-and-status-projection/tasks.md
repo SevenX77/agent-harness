@@ -62,7 +62,8 @@
 ### W2-E · 诊断日志补齐(D7 / R-F)
 - [x] **W2-E.1a (red→green)** `endpoint_test` 记录补 `reachable`(get-models 是否到达)+ `discovered_model_ids`(实际 model id 列表,原来只有 count)。归 `llm_credentials` 源。
   (`test_endpoint_test_logs_discovered_models_and_reachability`)。`model_list_observed` 已记 added/removed/unchanged。
-- [ ] **W2-E.1b** 探测的 protocol×model 组合及各自成败(thread `_verify_third_party_endpoint_by_probe` 的 probe attempts 上来)。
+- [x] **W2-E.1b (red→green)** `ThirdPartyEndpointVerification` 加 `probe_attempts`(每个 {protocol, model, status}),在协议探测 + 批量循环里采集、4 个 return 点带回;`endpoint_test` 记录加 `probe_attempts`。
+  (`test_endpoint_test_logs_probe_attempts`)。门禁:105 passed · ruff · mypy 全绿。
 - [ ] **W2-E.1c** 更新的 route evidence/capabilities 计数+id;测后上传(autoshare)选取与成败记录。
 
 ---

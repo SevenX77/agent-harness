@@ -1,0 +1,175 @@
+{
+  "_comment": "Data-driven STATIC official language-model probe candidates (W3-A / T2). Each entry is **kwargs for routers/llm.py::_candidate(...)** — method_id, profile_id, capability, request_mapper_id, default_rank, fallback_rank, and optional runtime_settings/input_modalities/output_modalities/retry_group (omitted => _candidate defaults: runtime_settings {max_output_tokens:16}, modalities (text,), retry_group None). Only the backends whose candidate list is STATIC live here (claude/deepseek/ark); openai and gemini stay in code because they pick candidates dynamically from the model id.",
+  "probe_candidates": {
+    "claude": [
+      {
+        "method_id": "anthropic_messages",
+        "profile_id": "text:anthropic_messages",
+        "capability": "text_chat",
+        "request_mapper_id": "anthropic_text",
+        "default_rank": 10,
+        "fallback_rank": 1
+      },
+      {
+        "method_id": "anthropic_messages",
+        "profile_id": "thinking:anthropic_messages:adaptive",
+        "capability": "thinking",
+        "request_mapper_id": "anthropic_thinking_adaptive",
+        "default_rank": 5,
+        "fallback_rank": 1,
+        "runtime_settings": {
+          "max_output_tokens": 1025,
+          "reasoning": {
+            "enabled": true,
+            "type": "adaptive",
+            "effort": "low"
+          }
+        }
+      },
+      {
+        "method_id": "anthropic_messages",
+        "profile_id": "thinking:anthropic_messages:manual",
+        "capability": "thinking",
+        "request_mapper_id": "anthropic_thinking_manual_budget",
+        "default_rank": 6,
+        "fallback_rank": 2,
+        "runtime_settings": {
+          "max_output_tokens": 1025,
+          "reasoning": {
+            "enabled": true,
+            "budget_tokens": 1024
+          }
+        }
+      }
+    ],
+    "deepseek": [
+      {
+        "method_id": "deepseek_chat_completions",
+        "profile_id": "text:deepseek_chat_completions",
+        "capability": "text_chat",
+        "request_mapper_id": "deepseek_chat_completions_text",
+        "default_rank": 10,
+        "fallback_rank": 1
+      },
+      {
+        "method_id": "deepseek_chat_completions",
+        "profile_id": "reasoning:deepseek_chat_completions",
+        "capability": "reasoning",
+        "request_mapper_id": "deepseek_chat_completions_reasoning_effort",
+        "default_rank": 5,
+        "fallback_rank": 1,
+        "runtime_settings": {
+          "max_output_tokens": 16,
+          "reasoning": {
+            "enabled": true,
+            "effort": "low"
+          }
+        }
+      },
+      {
+        "method_id": "deepseek_anthropic_messages",
+        "profile_id": "text:deepseek_anthropic_messages",
+        "capability": "text_chat",
+        "request_mapper_id": "deepseek_anthropic_messages_text",
+        "default_rank": 15,
+        "fallback_rank": 2
+      },
+      {
+        "method_id": "deepseek_anthropic_messages",
+        "profile_id": "thinking:deepseek_anthropic_messages",
+        "capability": "thinking",
+        "request_mapper_id": "deepseek_anthropic_messages_thinking",
+        "default_rank": 6,
+        "fallback_rank": 2,
+        "runtime_settings": {
+          "max_output_tokens": 1025,
+          "reasoning": {
+            "enabled": true,
+            "budget_tokens": 1024
+          }
+        }
+      }
+    ],
+    "ark": [
+      {
+        "method_id": "ark_chat",
+        "profile_id": "text:ark_chat",
+        "capability": "text_chat",
+        "request_mapper_id": "ark_chat_text",
+        "default_rank": 10,
+        "fallback_rank": 2,
+        "runtime_settings": {
+          "max_output_tokens": 16,
+          "reasoning": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "method_id": "ark_responses",
+        "profile_id": "text:ark_responses",
+        "capability": "text_chat",
+        "request_mapper_id": "ark_responses_text",
+        "default_rank": 8,
+        "fallback_rank": 1,
+        "runtime_settings": {
+          "max_output_tokens": 16,
+          "reasoning": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "method_id": "ark_chat",
+        "profile_id": "thinking:ark_chat",
+        "capability": "thinking",
+        "request_mapper_id": "ark_chat_thinking_enabled",
+        "default_rank": 6,
+        "fallback_rank": 2,
+        "runtime_settings": {
+          "max_output_tokens": 16,
+          "reasoning": {
+            "enabled": true
+          }
+        }
+      },
+      {
+        "method_id": "ark_responses",
+        "profile_id": "thinking:ark_responses",
+        "capability": "thinking",
+        "request_mapper_id": "ark_responses_thinking_enabled",
+        "default_rank": 5,
+        "fallback_rank": 1,
+        "runtime_settings": {
+          "max_output_tokens": 16,
+          "reasoning": {
+            "enabled": true
+          }
+        }
+      },
+      {
+        "method_id": "ark_anthropic_messages",
+        "profile_id": "text:ark_anthropic_messages",
+        "capability": "text_chat",
+        "request_mapper_id": "ark_anthropic_messages_text",
+        "default_rank": 12,
+        "fallback_rank": 3
+      },
+      {
+        "method_id": "ark_anthropic_messages",
+        "profile_id": "thinking:ark_anthropic_messages",
+        "capability": "thinking",
+        "request_mapper_id": "ark_anthropic_messages_thinking",
+        "default_rank": 7,
+        "fallback_rank": 3,
+        "runtime_settings": {
+          "max_output_tokens": 1025,
+          "reasoning": {
+            "enabled": true,
+            "budget_tokens": 1024
+          }
+        }
+      }
+    ]
+  }
+}

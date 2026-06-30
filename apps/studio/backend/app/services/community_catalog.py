@@ -6,10 +6,10 @@ This module owns the privacy red-line for community evidence sharing:
   :class:`EvidenceRecord` using a strict field **allowlist** (``extra="forbid"``),
   so secrets, credential refs, local paths, raw prompt/IO, and free-form probe
   blobs can never reach the wire by construction.
-- Endpoint identity is published **only** for an allowlist of well-known public
-  providers (normalized base URL + its fingerprint). Every other host drops its
-  endpoint identity entirely; a bare un-salted hash of a private host is never
-  emitted.
+- Endpoint identity is published **only** when the host is safe to publish — a
+  public DNS host / public IP with no userinfo (``is_safe_to_publish``). Private /
+  LAN / identity-bearing hosts drop their endpoint identity entirely; a bare
+  un-salted hash of a private host is never emitted.
 
 The wire ``evidence_type`` is ``"probe_result"`` (mapped from the gateway's
 internal ``"probe"``); see :mod:`app.services.community_catalog` round-trip.
@@ -18,6 +18,7 @@ internal ``"probe"``); see :mod:`app.services.community_catalog` round-trip.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
@@ -31,35 +32,6 @@ UPLOADABLE_TRUST_STATE = "probe-verified"
 # Provenance marker so ingested community evidence is never confused with
 # locally verified evidence (and is never auto-applied to credentials).
 COMMUNITY_PROVENANCE = "community-catalog"
-
-# Public provider endpoints whose base URLs are safe to publish in plaintext.
-# This covers two same-risk classes: official first-party endpoints AND public AI
-# transit/aggregators that anyone can register and connect to. In both cases the
-# base URL is a public domain that carries no user identity, so connectivity
-# evidence routed through it is publishable and actionable by other clients.
-# Any host NOT on this list drops its endpoint identity before upload.
-PUBLIC_PROVIDER_HOST_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        # Official first-party provider endpoints.
-        "api.openai.com",
-        "api.anthropic.com",
-        "generativelanguage.googleapis.com",
-        "ark.cn-beijing.volces.com",
-        "api.deepseek.com",
-        "api.mistral.ai",
-        "api.groq.com",
-        "api.together.xyz",
-        "api.x.ai",
-        "dashscope.aliyuncs.com",
-        "open.bigmodel.cn",
-        "api.moonshot.cn",
-        # Public AI transit / aggregators — anyone can register and connect; the
-        # base URL is a public domain carrying no user identity.
-        "openrouter.ai",
-        "api.qnaigc.com",  # 七牛 Qiniu AI 中转 (OpenAI-compatible)
-        "anthropic.qnaigc.com",  # 七牛 Qiniu AI 中转 (Anthropic-compatible)
-    }
-)
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -83,20 +55,66 @@ def endpoint_host(base_url: str) -> str | None:
     return (urlsplit(base_url.strip()).hostname or "").lower() or None
 
 
-def is_public_allowlisted(
-    base_url: str,
-    *,
-    allowlist: frozenset[str] = PUBLIC_PROVIDER_HOST_ALLOWLIST,
-) -> bool:
-    """Return whether the base URL's host is a known public provider."""
-    host = endpoint_host(base_url)
-    return host is not None and host in allowlist
+_NON_PUBLIC_HOST_SUFFIXES = (
+    # Private / LAN / corporate-intranet host suffixes.
+    ".local",
+    ".internal",
+    ".lan",
+    ".home",
+    ".corp",
+    ".intranet",
+    # RFC 6761 special-use TLDs that never resolve publicly — publishing them is
+    # noise, never a real provider endpoint.
+    ".test",
+    ".example",
+    ".invalid",
+    ".localhost",
+)
+
+
+def _is_publishable_public_host(host: str) -> bool:
+    """Whether a hostname is a public DNS name (or globally-routable IP) safe to
+    publish — not localhost / a private-or-LAN host / a bare single-label host."""
+    normalized = host.strip().lower().rstrip(".")
+    if (
+        not normalized
+        or normalized == "localhost"
+        or normalized.endswith(_NON_PUBLIC_HOST_SUFFIXES)
+    ):
+        return False
+    try:
+        ip = ipaddress.ip_address(normalized)
+    except ValueError:
+        # A DNS name: require a dot so a bare single-label intranet host is dropped.
+        return "." in normalized
+    # A raw IP literal: only a globally-routable public address may be published.
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_unspecified
+        or ip.is_multicast
+    )
+
+
+def is_safe_to_publish(base_url: str) -> bool:
+    """Whether a base URL's endpoint identity is safe to publish to the community
+    catalog (R-C1/R-C2): a public DNS host (or public IP) with no embedded
+    userinfo. Replaces the old fixed host allowlist so ANY public provider can
+    contribute connectivity evidence, while private / LAN / identity-bearing
+    endpoints are never leaked."""
+    split = urlsplit(base_url.strip())
+    if split.username or split.password:
+        return False
+    host = (split.hostname or "").lower()
+    return bool(host) and _is_publishable_public_host(host)
 
 
 def endpoint_fingerprint(normalized_base_url: str) -> str:
     """Return a SHA-256 fingerprint of an already-normalized base URL.
 
-    Only ever published alongside the plaintext URL (allowlisted hosts), so it
+    Only ever published alongside the plaintext URL (safe-to-publish hosts), so it
     never leaks a private host as a bare hash.
     """
     return hashlib.sha256(normalized_base_url.encode("utf-8")).hexdigest()
@@ -144,18 +162,18 @@ def build_upload_record(
     record: EvidenceRecord,
     *,
     base_url: str | None,
-    allowlist: frozenset[str] = PUBLIC_PROVIDER_HOST_ALLOWLIST,
 ) -> EvidenceUpload:
     """Build a sanitized upload payload from a local probe evidence record.
 
     Endpoint identity (normalized URL + fingerprint) is included only when
-    ``base_url`` belongs to an allowlisted public provider; otherwise it is
-    dropped. Only an explicit set of safe scalar fields is copied — free-form
-    blobs (metadata/probe attempts/agent notes/URLs/local IDs) are never copied.
+    ``base_url`` is safe to publish — a public DNS host / public IP with no
+    embedded userinfo (see ``is_safe_to_publish``); private / LAN / identity-bearing
+    endpoints drop it. Only an explicit set of safe scalar fields is copied —
+    free-form blobs (metadata/probe attempts/agent notes/URLs/local IDs) are never copied.
     """
     normalized_url: str | None = None
     fingerprint: str | None = None
-    if base_url and is_public_allowlisted(base_url, allowlist=allowlist):
+    if base_url and is_safe_to_publish(base_url):
         normalized_url = normalize_base_url(base_url)
         fingerprint = endpoint_fingerprint(normalized_url)
 
@@ -249,14 +267,13 @@ def parse_catalog_evidence(wire_record: dict[str, Any]) -> EvidenceRecord:
 
 __all__ = [
     "COMMUNITY_PROVENANCE",
-    "PUBLIC_PROVIDER_HOST_ALLOWLIST",
     "WIRE_EVIDENCE_TYPE",
     "EvidenceUpload",
     "build_upload_record",
     "endpoint_fingerprint",
     "endpoint_host",
     "from_wire_evidence_type",
-    "is_public_allowlisted",
+    "is_safe_to_publish",
     "is_uploadable",
     "normalize_base_url",
     "parse_catalog_evidence",

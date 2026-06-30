@@ -76,6 +76,11 @@ class ProviderEndpoint(GatewayProviderEndpoint):
     """Studio-owned endpoint DTO with user-facing provider label."""
 
     display_name: str
+    # W2-B.3: the STRUCTURED failure reason from the last endpoint test (e.g.
+    # "invalid_api_key"), so the frontend reads it directly instead of matching the
+    # human ``last_test_message`` text. Studio-only presentation field: stripped from
+    # the gateway runtime endpoint (see ``_gateway_endpoint``).
+    last_error_code: str | None = None
 
 
 class ProviderRoute(GatewayProviderRoute):
@@ -103,7 +108,7 @@ class ModelProfile(GatewayModelProfile):
 
 def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
     return GatewayProviderEndpoint.model_validate(
-        endpoint.model_dump(mode="python", exclude={"display_name"})
+        endpoint.model_dump(mode="python", exclude={"display_name", "last_error_code"})
     )
 
 

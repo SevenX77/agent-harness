@@ -2888,6 +2888,8 @@ def test_endpoint_test_rejects_invalid_api_key(
     assert endpoint["status"] == "disabled"
     assert "Invalid API key" in endpoint["last_test_message"]
     assert "invalid_api_key" in endpoint["last_test_message"]
+    # W2-B.3: the STRUCTURED error code is persisted so the frontend reads it directly.
+    assert endpoint["last_error_code"] == "invalid_api_key"
     assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
 
 

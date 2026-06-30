@@ -76,10 +76,11 @@
 - [ ] **W3-A.3** ark 多协议(R-E4)经配置补齐(openai 形 + anthropic 形 + responses);若需 gateway probe 改动→先取授权。
 
 ### W3-B · provider 身份 = 注册域派生 + alias(D12)
-- [ ] **W3-B.1 (red)** 测试:`api.qnaigc.com`/`*.wavespeed.ai` → 注册域 → provider 名;双 base_url 收敛同一 provider;qnaigc≠qiniu。
-- [ ] **W3-B.2 (green)** eTLD+1 派生(PSL 选型 T6:库 or 内置精简表,过 pip-audit)+ alias 表(配置)。
-- [ ] **W3-B.3 (green)** catalog `provider_id` 系统填充 provider 规范名(R-B7);前端 provider 分组键统一到此(T5)。
-- [ ] **W3-B.4 (red→green)** provider 标题 tooltip 显示 provider 名 + 聚合 endpoint id(D8/R-G1)。
+- [x] **W3-B.1/.2 (red→green)** 新建 `services/llm_provider_identity.py::registrable_provider_name(base_url)` —— eTLD+1 派生(T6 定:**内置精简多级后缀表**,无新依赖、不过 pip-audit 风险):`api.qnaigc.com`→`qnaigc`、`api./llm.wavespeed.ai`→同一 `wavespeed`、`ark.cn-beijing.volces.com`→`volces`、裸 IP/单标签/`foo.com.cn`→`foo`/None。15 参数化单测。
+- [x] **W3-B.3a (green)** catalog `provider_id` 系统填充:`_build_model_probe_evidence` + `_build_official_profile_probe_evidence` 两个 probe-evidence 构建点 `provider_id=registrable_provider_name(endpoint.base_url)`(R-B7)。门禁:ruff · mypy · 121+35 pytest 全绿。
+- [ ] **W3-B.3b** 前端 provider 分组键统一到注册域(T5)+ alias 展示表(`qnaigc`→Qiniu / `volces`→ARK,data-driven)——**前端 + 配置文件**,归 W3-A/前端批。
+- [ ] **W3-B.4** provider 标题 tooltip 显示 provider 名(D8/R-G1)——前端。
+  > 注:`_endpoint_notable_provider_key` 的 qiniu/openrouter 硬编码是 **notes-file 查找别名**(qnaigc→qiniu.md),与 provider 分类身份是两回事,留待 W3-A provider 配置文件统一(届时 alias 表 + notes-key 一起入配置)。
 
 ### W3-C · evidence 匹配身份统一(D11)
 - [ ] **W3-C.1 (red)** 测试:本地存/wire 传/回填三处用同一"匹配身份"派生(endpoint=base_url+protocol、route=+model;不含 method)。

@@ -123,6 +123,7 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
+from app.services.llm_provider_identity import registrable_provider_name
 from app.services.llm_role_test_results import (
     load_all as load_role_test_results,
 )
@@ -2972,6 +2973,8 @@ def _build_official_profile_probe_evidence(
             observed_at=_now_iso(),
             attempted_at=_now_iso(),
             endpoint_id=endpoint.endpoint_id,
+            # W3-B / R-B7: attribute evidence to the provider's registrable-domain name.
+            provider_id=registrable_provider_name(endpoint.base_url),
             route_id=route_id,
             model_id=model_id,
             provider_model_id=model_id,
@@ -3070,6 +3073,8 @@ def _build_model_probe_evidence(
             observed_at=_now_iso(),
             attempted_at=_now_iso(),
             endpoint_id=endpoint.endpoint_id,
+            # W3-B / R-B7: attribute evidence to the provider's registrable-domain name.
+            provider_id=registrable_provider_name(endpoint.base_url),
             route_id=route_id,
             model_id=result.model_id,
             provider_model_id=result.model_id,

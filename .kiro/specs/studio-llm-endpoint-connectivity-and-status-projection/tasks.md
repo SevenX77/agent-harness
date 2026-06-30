@@ -64,7 +64,8 @@
   (`test_endpoint_test_logs_discovered_models_and_reachability`)。`model_list_observed` 已记 added/removed/unchanged。
 - [x] **W2-E.1b (red→green)** `ThirdPartyEndpointVerification` 加 `probe_attempts`(每个 {protocol, model, status}),在协议探测 + 批量循环里采集、4 个 return 点带回;`endpoint_test` 记录加 `probe_attempts`。
   (`test_endpoint_test_logs_probe_attempts`)。门禁:105 passed · ruff · mypy 全绿。
-- [ ] **W2-E.1c** 更新的 route evidence/capabilities 计数+id;测后上传(autoshare)选取与成败记录。
+- [x] **W2-E.1c (red→green)** 测后上传(autoshare)成败记录:`_autoshare_after_probe_best_effort` 成功记 `autoshare_uploaded`(含 `uploaded_count`)、失败记 `autoshare_failed`(含 `attempted_count`+error),都归 `llm_credentials` 源;失败记录自身也不抛(守 best-effort 契约)。门禁:ruff · mypy · 7 autoshare pytest 全绿。
+  > 「更新的 route evidence/capabilities 计数+id」那半留作可选小尾巴(`model_list_observed` 的 added/removed/unchanged + W2-E.1a/1b 已覆盖"测了啥/拿到啥"的主要诊断面)。
 
 ---
 

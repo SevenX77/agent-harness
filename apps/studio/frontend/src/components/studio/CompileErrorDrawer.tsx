@@ -1,31 +1,30 @@
 import { useEffect, useState } from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Check, Copy, X } from "lucide-react"
 
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { allowTextSelectionProps } from "@/hooks/useNativeDoubleClickGuard"
 import type { CompileError } from "@/api/types"
 
 /**
- * Canvas-scoped Compile error drawer (N3 · COMPILE_LINT-1).
+ * Compile-error drawer (N3 · COMPILE_LINT-1).
  *
  * When `compile-skill` returns a 422 `CompileFailure`, its `CompileError[]` are
  * surfaced here as a bottom drawer that **auto-opens on compile failure** and
- * lists every error as `file:line - field - message`, with a top "copy all"
- * button that writes a human-readable digest to the clipboard (to paste into
- * Copilot / an issue).
+ * lists every error as `file:line - field - message`, with a "copy all" button
+ * that writes a human-readable digest to the clipboard (to paste into Copilot /
+ * an issue).
  *
- * IMPORTANT — canvas-scoped, NOT viewport-scoped. The local `ui/sheet.tsx`
- * (and the bare Radix `Dialog.Portal` + `fixed inset-0` pattern) cover the whole
- * viewport, which would blanket the left file-tree and right Copilot sidebars and
- * violate the "only cover the canvas" requirement. This variant therefore:
- *   - renders WITHOUT a Portal, so the content stays inside the canvas DOM
- *     subtree (the parent `<div className="relative size-full">`);
- *   - is `modal={false}`, so it does NOT trap interaction or dim the page — the
- *     user can keep operating the file tree / canvas while reading the errors;
- *   - pins the content with `absolute inset-x-0 bottom-0`, so it is clipped to
- *     the canvas container and pinned to its bottom edge, never the viewport.
- * Radix Dialog still provides Escape-to-close and focus management.
+ * Built on the shared shadcn `Sheet` (`side="bottom"`): the modal overlay dims
+ * and blurs the whole UI, the center action bar (Compile/Predict/Run) stays put
+ * underneath and is covered rather than nudged, and clicking the blank area above
+ * — or pressing Escape — dismisses the drawer. A fixed `min-h` keeps the panel a
+ * comfortable height even for a single error.
  */
 
 export function formatCompileErrorLine(error: CompileError): string {
@@ -79,21 +78,18 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
   const errorCount = errors.length
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
-      <DialogPrimitive.Content
-        data-slot="compile-drawer-content"
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
         aria-describedby={undefined}
-        onInteractOutside={(event) => event.preventDefault()}
-        className={cn(
-          "absolute inset-x-0 bottom-0 z-40 flex max-h-[60%] flex-col",
-          "border-t border-destructive/40 bg-popover text-popover-foreground shadow-lg",
-          "data-open:animate-in data-open:slide-in-from-bottom-10 data-closed:animate-out data-closed:slide-out-to-bottom-10",
-        )}
+        data-slot="compile-drawer-content"
+        className="max-h-[80vh] min-h-[360px] gap-0 border-t-destructive/40 p-0"
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
-          <DialogPrimitive.Title className="text-sm font-medium text-destructive">
+          <SheetTitle className="text-sm font-medium text-destructive">
             {errorCount} compile error{errorCount === 1 ? "" : "s"}
-          </DialogPrimitive.Title>
+          </SheetTitle>
           <div className="flex items-center gap-1">
             <Button
               type="button"
@@ -105,7 +101,7 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
               {copied ? <Check /> : <Copy />}
               {copied ? "Copied" : "Copy all errors"}
             </Button>
-            <DialogPrimitive.Close asChild>
+            <SheetClose asChild>
               <Button
                 type="button"
                 variant="ghost"
@@ -114,10 +110,19 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
               >
                 <X />
               </Button>
-            </DialogPrimitive.Close>
+            </SheetClose>
           </div>
         </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-auto px-4 py-3">
+        {/*
+          The app-wide text-selection guard disables user-select/selectstart/copy
+          everywhere; opt this read-only error list back in (via the allow-list
+          helper) so users can select & copy individual messages natively,
+          alongside the "copy all" button. See useNativeDoubleClickGuard.
+        */}
+        <div
+          {...allowTextSelectionProps()}
+          className="min-h-0 flex-1 space-y-2 overflow-auto px-4 py-3 select-text"
+        >
           {errors.map((error, index) => (
             <div
               key={`${error.file ?? "compile"}-${error.line ?? "x"}-${index}`}
@@ -132,7 +137,7 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
             </div>
           ))}
         </div>
-      </DialogPrimitive.Content>
-    </DialogPrimitive.Root>
+      </SheetContent>
+    </Sheet>
   )
 }

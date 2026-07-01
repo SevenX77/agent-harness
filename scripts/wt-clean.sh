@@ -33,6 +33,8 @@ while IFS= read -r wt; do
   fi
   git worktree remove "$wt"
   git branch -D "$br" >/dev/null 2>&1 || true
+  # drop the background npm-ci log/pid left by wt-new.sh
+  rm -f "$repo_root/.worktrees/.$(basename "$wt").npm-ci."* 2>/dev/null || true
   echo "✓ removed merged worktree: $wt ($br)"
   removed=$((removed + 1))
 done < <(git worktree list --porcelain | awk '/^worktree /{print $2}' | grep "/.worktrees/" || true)

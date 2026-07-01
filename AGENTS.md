@@ -33,8 +33,12 @@ way and nothing drifts onto stray branches/worktrees.
 
 1. **Start** — `scripts/wt-new.sh <type>/<short-desc>` cuts a fresh worktree +
    branch from `origin/main` under `.worktrees/<type>-<desc>/` (first tidying any
-   already-merged worktrees).
+   already-merged worktrees). It also kicks off `npm ci` for
+   `apps/studio/frontend` **in the background** (skip: `WT_SKIP_NPM=1`) — npm
+   only writes into `node_modules/`, so start coding immediately; only
+   dev/lint/test need it finished.
 2. **Code** — work inside that worktree; run the CI Gates locally before shipping.
+   Frontend preview: `scripts/wt-fe-dev.sh` (see "Studio Frontend UI" below).
 3. **Ship** — `scripts/wt-ship.sh ["PR title"]` pushes the branch, opens a PR to
    `main`, and arms GitHub **auto-merge** (squash).
 4. **CI + merge** — CI runs on the PR. When the 5 required checks pass
@@ -179,6 +183,16 @@ one-page orientation, not the full design.
   interactive workflow, including the main success path and obvious cancel/error
   states when feasible, and report that manual verification; tests and builds
   alone are not enough.
+- **Parallel frontend tasks: one worktree per task, preview via
+  `scripts/wt-fe-dev.sh`.** The repo root runs the ONE full app
+  (`studio-dev.ps1`: Tauri + sidecar :8787 + Vite 5173, showing `main`'s code).
+  Each worktree starts its own lightweight Vite (auto-picks a free port in
+  5174-5199, proxies `/api`/`/ws` to that shared sidecar; requests stay
+  same-origin via `VITE_STUDIO_API_BASE_URL=/api`, so no CORS setup needed).
+  Verify YOUR changes on YOUR port (`http://localhost:<port>/#tkn=<token>`),
+  never on 5173. Do not start a second Tauri/sidecar from a worktree. Shared
+  files (design tokens, `components/ui/`, regenerated handbook `index.html`)
+  conflict across parallel PRs — sequence those changes or assign one owner.
 
 ## Studio Tauri Dev
 

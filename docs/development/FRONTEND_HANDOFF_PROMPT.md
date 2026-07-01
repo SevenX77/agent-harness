@@ -51,20 +51,24 @@
   乐观值,否则页面有没做完的部分却显绿(规则见方法论 handbook-operations-schema-
   lifecycle.md §5.3)。
 
-- 改完必须把 app 真跑起来、亲眼点过受影响界面才报「完成」;typecheck/diff 通过不算
-  视觉验证。当前快速迭代阶段优先复用主仓根已启动的 Studio app / Vite 热更新做验证;
-  确实没 app 时再按 apps/studio/tauri/README.md 启动。不要为小改另开第二套长期
-  dev server;需要查端口用 lsof -nP -iTCP -sTCP:LISTEN,只处理自己确认属于旧 Studio
-  实例的 PID。
+- 一任务一 worktree:开工先 scripts/wt-new.sh <type>/<short-desc> 从 origin/main
+  切本任务专属 worktree(它会后台预装前端 node_modules,建好即可开始改代码)。所有
+  改动只发生在自己的 worktree 里;不动主仓根工作区、不动其他 agent 的 worktree,
+  也不要因为别处不干净去 reset / checkout / pull。本轮只碰被指派的前端文件和必要
+  手册切片;design token、components/ui/ 封装、手册 index.html 重生成这类共享文件
+  并行必冲突,要动它们先跟我对调度。
 
-- 当前快速迭代阶段直接在主仓根 main 改,不开 worktree。开工前用
-  git status --short --branch 识别已有未提交改动,把它们当作同仓协作上下文保留原样;
-  不要为了干净工作区去 reset / checkout / pull / 新开 worktree。本轮只碰被指派的
-  前端文件和必要手册切片。
+- 改完必须把 app 真跑起来、亲眼点过受影响界面才报「完成」;typecheck/diff 通过不算
+  视觉验证。验证方式:主仓根跑着唯一一套完整 app(studio-dev.ps1: Tauri + sidecar
+  :8787 + Vite 5173,展示的是 main 的代码、不含你的改动);在自己 worktree 里跑
+  scripts/wt-fe-dev.sh 起本任务专属 Vite(自动挑 5174-5199 空闲端口,/api、/ws 代理
+  到主仓 sidecar,同源无 CORS),浏览器开 http://localhost:<port>/#tkn=<sidecar-token>
+  验证自己这棵树。不要在 5173 上"验证"自己的活,也不要在 worktree 里另起第二套
+  Tauri/sidecar;主仓没 app 在跑时按 AGENTS.md「Studio Tauri Dev」标准启动。
 
 - 推送前在 apps/studio/frontend 下本地跑通 npm run lint / typecheck / test / build
-  四件套全绿。准备发 PR 时,再从当前核对过的改动创建普通分支并推送 PR;远端 main
-  仍 protected,不要直接 push。
+  四件套全绿。然后 scripts/wt-ship.sh ["PR title"] 推分支、开 PR、上 auto-merge;
+  远端 main 仍 protected,不要直接 push。合并后 scripts/wt-clean.sh 清理 worktree。
 
 任务:<在这里写你这次要做的前端改动>
 

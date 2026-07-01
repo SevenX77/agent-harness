@@ -22,6 +22,7 @@ from pydantic import BaseModel, ValidationError
 
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
+from graph_agent.core.local_workspace_resolver import default_local_resolver_for_skill
 from graph_agent.core.manifest import (
     AgentNodeAST,
     GraphManifest,
@@ -153,11 +154,12 @@ class SkillLoader:
         self,
         skill_root: str | Path,
         *,
-        skill_resolver: SkillResolverProtocol,
+        skill_resolver: SkillResolverProtocol | None = None,
         _loading_stack: tuple[str, ...] = (),
         _compilation_cache: dict[str, CompiledSkill] | None = None,
     ) -> CompiledSkill:
         root = Path(skill_root)
+        resolver = skill_resolver or default_local_resolver_for_skill(root)
         root_key = str(root.resolve())
         if root_key in _loading_stack:
             detail = f"recursive skill compilation cycle detected at {root_key}"
@@ -226,7 +228,7 @@ class SkillLoader:
         _validate_subgraph_io_contracts(
             root,
             phase_docs,
-            skill_resolver=skill_resolver,
+            skill_resolver=resolver,
             _loading_stack=loading_stack,
             _compilation_cache=_compilation_cache,
         )
@@ -237,7 +239,7 @@ class SkillLoader:
         actions, tools = _discover_actions_and_tools(root, discovered)
         subagents_by_phase = _compile_subagent_metadata(
             phase_docs,
-            skill_resolver=skill_resolver,
+            skill_resolver=resolver,
             _loading_stack=loading_stack,
             _compilation_cache=_compilation_cache,
         )

@@ -24,7 +24,7 @@ resolver = 把子图引用(`SUBGRAPH.md` / agent `subgraphs[]` 的 **`path`**,�
 - 输入:`path`(相对 skill root 或绝对) + host 提供的 skill root 边界;输出:子图 root(`Path`)。
 - 接缝**保留**(host 注入边界),但语义从"id→registry→root"变为"**path → 边界/合法性校验 → root**"。
 - **DI 显式、不全局化**:中间件消费 `_build_skill_node` 已备好的 runtime map,不自己找 resolver(见 `07-subagent`)。
-- **DI 接缝协议形状 = 契约,归本域(非 kiro)**:上面「输入(path + skill root 边界)→ 输出(子图 root)+ 失败(越界 / 非目录 / 缺 `GRAPH.md` → raise)」就是 `SkillResolverProtocol` 的 mvp1 协议形状(mvp0 曾是 FROZEN 专文 `10-skill-resolver-protocol-spec`,path 版承接它)——**这是 engine↔studio 的 DI 契约,不是 kiro 实现细节**。`run_skill`/`compile_skill` 带 `skill_resolver` 必填参数这件事归 [`03-api-contract`](../../03-api-contract/mvp1-alignment.md)(只引用、不复制);**仅默认实现的内部函数体**(具体怎么查边界 / 合法性)归 kiro。
+- **DI 接缝协议形状 = 契约,归本域(非 kiro)**:上面「输入(path + skill root 边界)→ 输出(子图 root)+ 失败(越界 / 非目录 / 缺 `GRAPH.md` → raise)」就是 `SkillResolverProtocol` 的 mvp1 协议形状(mvp0 曾是 FROZEN 专文 `10-skill-resolver-protocol-spec`,path 版承接它)——**这是 engine↔studio 的 DI 契约,不是 kiro 实现细节**。`run_skill`/`compile_skill` 带可选 `skill_resolver` 覆盖参数这件事归 [`03-api-contract`](../../03-api-contract/mvp1-alignment.md)(只引用、不复制);省略时 engine 用默认 `LocalWorkspaceResolver`,Studio 等宿主拥有 registry/边界真相时仍显式注入。**默认实现的内部函数体**(具体怎么查边界 / 合法性)归 kiro。
 
 ## 4. 设计决策基础(用户原话)
 > 子图 path(PM 2026-06-02):"subgraph.md里面写path, 直接解析就好了, 随便放哪里。唯一要注意的是copilot 的工作目录范围要把subgraph的子图path 加进去。"

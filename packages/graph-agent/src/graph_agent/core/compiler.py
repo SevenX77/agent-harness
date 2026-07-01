@@ -8,7 +8,8 @@ from typing import Any
 
 from graph_agent.core.cache import compute_cache_key, load_from_cache, save_to_cache
 from graph_agent.core.loader import CompiledSkill, SkillLoader
-from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
+from graph_agent.core.local_workspace_resolver import default_local_resolver_for_skill
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
 
 @dataclass
@@ -43,7 +44,7 @@ def compile_skill(
     *,
     chat_model: Any = None,
     cache: bool = True,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None = None,
 ) -> CompiledSkill:
     """Compile a V2.1 skill root into a CompiledSkill.
 
@@ -52,8 +53,8 @@ def compile_skill(
     """
 
     del chat_model
-    resolver = require_skill_resolver(skill_resolver, caller="compile_skill")
     skill_root = Path(root)
+    resolver = skill_resolver or default_local_resolver_for_skill(skill_root)
     if cache:
         key = compute_cache_key(skill_root)
         cached = load_from_cache(key, skill_root)

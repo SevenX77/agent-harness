@@ -7,7 +7,7 @@ status: audited-ready（现状对齐 pinned 代码 7cd4b9c；DI 接缝 = Protoco
 # 02-resolver — Baseline(当下代码实现逻辑)
 
 > **Scope**: 把 skill 引用(SUBGRAPH `target_skill`、subagent 目标、registry id)解析成本地 skill root 的 DI 接缝:`skill_resolver_protocol.py`(协议+校验+缺失防护)、`local_workspace_resolver.py`(本地实现)。
-> **现状一句话**:接口是 `SkillResolverProtocol`(`skill_resolver_protocol.py:33`),引擎只认协议、由调用方(studio)注入实现;引擎自带 `LocalWorkspaceResolver`(`local_workspace_resolver.py:15`)按搜索路径解析。缺 resolver → `require_skill_resolver` 抛 `[F-v3-resolver-missing]`。
+> **现状一句话**:接口是 `SkillResolverProtocol`(`skill_resolver_protocol.py:33`),引擎只认协议、Studio 等宿主可注入实现;公共入口省略 resolver 时使用引擎自带 `LocalWorkspaceResolver`(`local_workspace_resolver.py:15`)按 skill/cwd 周边搜索路径解析。内部 helper 仍保留 `require_skill_resolver` 缺失防护(`[F-v3-resolver-missing]`)。
 
 ## UI/UX
 N/A。
@@ -22,7 +22,7 @@ N/A —— studio 注入 resolver 实现(registry 真相源在 studio);引擎只
 > **DI(依赖注入)第一次出现需定义**:引擎不硬编码 registry,由宿主(studio)传入 resolver 实现,引擎只调协议——这样引擎不知道 studio 存在、可独立测试。
 - `validate_skill_id(skill_id)`(`:40`):非法 id → `[F-v3-resolver-skill-id-invalid]`(`:47`)。
 - `resolve_skill_root(resolver, skill_id)`(`:51`):调 `resolver.resolve_skill`(`:59`)→ 校验路径 → 非法 `[F-v3-resolver-path-invalid]`(`:69/:75`)。
-- `require_skill_resolver(resolver, ...)`(`:80`):缺 resolver → `[F-v3-resolver-missing]`(`:91`)。
+- `require_skill_resolver(resolver, ...)`(`:80`):内部 helper 的缺失防护;公共入口会先补默认 resolver,所以普通 SDK 调用不应因省略 resolver 触发 `[F-v3-resolver-missing]`。
 
 ### 2. 本地实现(local_workspace_resolver.py)
 `LocalWorkspaceResolver`(`:15`,实现 `SkillResolverProtocol`)按 `search_paths`(`:18`)把 skill_id 解析成本地 root,`resolve_skill`(`:22`)。它是引擎内置的默认实现(公开导出,见 `data-contracts` `__all__` 的 `LocalWorkspaceResolver`)。
@@ -32,7 +32,7 @@ loader 在编译 SUBGRAPH / AgentNode subagent 时,经 resolver 递归解析 chi
 
 ## API
 - `SkillResolverProtocol.resolve_skill(skill_id) -> str | Path`(`:36`)——producer=studio 实现,consumer=engine loader。
-- `require_skill_resolver(resolver) -> SkillResolverProtocol`(`:80`)——缺失防护。
+- `require_skill_resolver(resolver) -> SkillResolverProtocol`(`:80`)——内部缺失防护;公共入口使用默认本地 resolver。
 - `LocalWorkspaceResolver(search_paths)`(`local_workspace_resolver.py:15`)——引擎内置实现。
 
 ## Data Model / State
@@ -49,7 +49,7 @@ loader 在编译 SUBGRAPH / AgentNode subagent 时,经 resolver 递归解析 chi
 | resolver 职责 | id→root 寻址 + 本地 search_paths 查找 | 只剩**边界校验 + 合法性校验**(RS2) |
 | DI 纪律 | 代码已显式注入 | 文档明确"不全局化"(RS4) |
 
-> **验**:缺 resolver → `[F-v3-resolver-missing]`;SUBGRAPH/subagent target 递归解析正确 + 循环引用防护;中间件不绕过 resolver 重新解析。
+> **验**:公共入口省略 resolver → 使用默认本地 resolver;无法命中目标 skill 时是 `[F-v3-skill-not-registered]` 而不是 `[F-v3-resolver-missing]`;SUBGRAPH/subagent target 递归解析正确 + 循环引用防护;中间件不绕过 resolver 重新解析。
 
 ## 读代码主路径提示
 协议 `skill_resolver_protocol.py:33` → 缺失防护 `:80` → 本地实现 `local_workspace_resolver.py:15` → 消费方 loader(见 `01-compile`)。

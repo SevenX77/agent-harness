@@ -351,7 +351,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | `[F-v3-skill-id-ambiguous]` | 编译期 / 装配期 | resolver 命中多个 skill root | 收窄 search paths 或移除重复 skill root | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-skill-not-registered]` | 编译期 / 装配期 | resolver 找不到目标 skill | 注册或重连目标 skill root | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-resolver-interface-invalid]` | 编译期 | resolver 暴露非决议接口 | 实现单方法 `resolve_skill` | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
-| `[F-v3-resolver-missing]` | 运行期 | 需要 resolver 但未注入 | 调用入口传入 resolver | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
+| `[F-v3-resolver-missing]` | 运行期 | 内部 resolver helper 收到空 resolver | 公共入口省略 resolver 会自动补默认本地 resolver;内部调用点应传入已解析 resolver | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 
 ### cognitive / tool / runtime domain
 

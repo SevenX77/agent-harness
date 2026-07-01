@@ -436,9 +436,11 @@ def test_unresolvable_subagent_target_raises_skill_not_registered(corrupt_root: 
     _assert_unique_defect_code(exc.value, "[F-v3-skill-not-registered]")
 
 
-def test_missing_resolver_raises_resolver_missing(corrupt_root: Path) -> None:
-    # The skill declares a subgraph + subagent, so a resolver is mandatory.
+def test_missing_resolver_uses_default_local_resolver(corrupt_root: Path) -> None:
+    # Omitting the resolver now uses the SDK's local resolver. The fixture's
+    # subagent registry intentionally needs an explicit mapping, so the failure
+    # is target resolution rather than a missing dependency injection seam.
     with pytest.raises(SkillResolutionError) as exc:
-        SkillLoader().compile_skill(corrupt_root, skill_resolver=None)
+        SkillLoader().compile_skill(corrupt_root)
 
-    _assert_unique_defect_code(exc.value, "[F-v3-resolver-missing]")
+    _assert_unique_defect_code(exc.value, "[F-v3-skill-not-registered]")

@@ -30,7 +30,7 @@ Family mapping summary:
 - **Source module**: `graph_agent`
 - **Consumer files**: apps/studio/backend/app/services/predictor.py:11; apps/studio/backend/app/services/run_manager.py:20; apps/studio/tauri/vendor/backend/app/services/predictor.py:10; apps/studio/tauri/vendor/backend/app/services/run_manager.py:18; apps/studio/tauri/vendor/resources/skills/_v2_pending/story-deconstruction/script/orchestrator.py:14; apps/studio/tauri/vendor/resources/skills/_v2_pending/story-deconstruction/script/orchestrator.py:46; apps/studio/tauri/vendor/resources/skills/_v2_pending/story-deconstruction/script/orchestrator.py:167; scripts/run_e2e_test_enhanced.py:22
 - **Contract status**: `@stable`
-- **Signature**: `run_skill(skill_path: str | Path, *, workspace_dir: Path, thread_id: str | None = None, unattended: bool = False, event_subscriber: Callable[[CallbackEvent], None] | None = None, artifact_saver: Any | None = None, initial_context: dict[str, Any] | None = None, cleanup_checkpoints_on_finish: bool = True, skill_resolver: SkillResolverProtocol, model_resolver: Any | None = None, **inputs: Any) -> RunResult`
+- **Signature**: `run_skill(skill_path: str | Path, *, workspace_dir: Path, thread_id: str | None = None, unattended: bool = False, event_subscriber: Callable[[CallbackEvent], None] | None = None, artifact_saver: Any | None = None, initial_context: dict[str, Any] | None = None, cleanup_checkpoints_on_finish: bool = True, skill_resolver: SkillResolverProtocol | None = None, model_resolver: Any | None = None, **inputs: Any) -> RunResult`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -40,7 +40,7 @@ Family mapping summary:
 - **Source module**: `graph_agent`
 - **Consumer files**: apps/studio/backend/app/services/predictor.py
 - **Contract status**: `@stable`
-- **Signature**: `predict_skill(skill_path: str | Path, *, workspace_dir: Path, thread_id: str | None = None, unattended: bool = True, event_subscriber: Callable[[CallbackEvent], None] | None = None, skill_resolver: SkillResolverProtocol, model_resolver: Any | None = None, copilot_predict: Callable | None = None, **inputs: Any) -> RunResult`
+- **Signature**: `predict_skill(skill_path: str | Path, *, workspace_dir: Path, thread_id: str | None = None, unattended: bool = True, event_subscriber: Callable[[CallbackEvent], None] | None = None, skill_resolver: SkillResolverProtocol | None = None, model_resolver: Any | None = None, copilot_predict: Callable | None = None, **inputs: Any) -> RunResult`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -80,7 +80,7 @@ Family mapping summary:
 - **Source module**: `graph_agent`
 - **Consumer files**: apps/studio/backend/app/services/skills.py:19; apps/studio/tauri/vendor/backend/app/services/skills.py:13; apps/studio/tauri/vendor/backend/app/services/validator.py:13
 - **Contract status**: `@stable`
-- **Signature**: `compile_skill(root: str | Path, *, chat_model: Any = None, cache: bool = True, skill_resolver: SkillResolverProtocol) -> CompiledSkill`
+- **Signature**: `compile_skill(root: str | Path, *, chat_model: Any = None, cache: bool = True, skill_resolver: SkillResolverProtocol | None = None) -> CompiledSkill`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -100,7 +100,7 @@ Family mapping summary:
 - **Source module**: `graph_agent`
 - **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
 - **Contract status**: `@stable`
-- **Signature**: `assemble_graph(compiled: CompiledSkill, *, chat_model: Any = None, model_resolver: Any = None, max_patch_attempts: int = 3, callbacks: list[Any] | None = None, skill_resolver: SkillResolverProtocol, _loading_stack: tuple[str, ...] = (), _compilation_cache: dict[str, graph_agent.core.loader.CompiledSkill] | None = None) -> CompiledStateGraph`
+- **Signature**: `assemble_graph(compiled: CompiledSkill, *, chat_model: Any = None, model_resolver: Any = None, max_patch_attempts: int = 3, callbacks: list[Any] | None = None, skill_resolver: SkillResolverProtocol | None = None, _loading_stack: tuple[str, ...] = (), _compilation_cache: dict[str, graph_agent.core.loader.CompiledSkill] | None = None) -> CompiledStateGraph`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.

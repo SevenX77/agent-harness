@@ -18,7 +18,7 @@ N/A —— public API surface 被 studio / 外部 SDK 消费者依赖。
 ## 后端功能
 
 ### 1. 顶层入口(runner.py)
-- `run_skill(skill_path, *, workspace_dir, thread_id?, unattended?, event_subscriber?, skill_resolver(必填), model_resolver?, **inputs) -> RunResult`(`:376`)——真跑。
+- `run_skill(skill_path, *, workspace_dir, thread_id?, unattended?, event_subscriber?, skill_resolver=None, model_resolver?, **inputs) -> RunResult`(`:376`)——真跑;省略 resolver 时使用围绕 skill/cwd 的默认本地 resolver。
 - `predict_skill(...)`(`:163`)——干跑(换 mock model 的同一图执行)。
 - 两者经 `_run_skill_dict`(`:456`)→ V0.3.0 走 `_run_v030_skill_dict`(`:623`)。
 > **run/predict 是两个执行模式,不是独立域**:同一张图,predict 换 mock model(归 `06-seam/01-models`)。

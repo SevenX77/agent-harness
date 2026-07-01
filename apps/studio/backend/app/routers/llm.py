@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 
-import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -86,14 +85,6 @@ from app.services.community_catalog_upload import (
     batch_idempotency_key,
     community_upload_configured,
 )
-from app.services.copilot_test import (
-    ModelProbeResult,
-    PingResult,
-    _NetworkError,
-    _QuotaExceeded,
-    _RateLimited,
-    _Unauthorized,
-)
 from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.llm_credentials import (
@@ -142,6 +133,7 @@ from app.services.llm_route_capabilities import (
     route_effective_capabilities,
     verified_profile_route_capabilities,
 )
+from app.services.model_probe import ModelProbeResult
 from app.services.official_capability_sources import (
     OfficialCapabilityRule,
     official_api_list_source_urls,
@@ -225,42 +217,6 @@ _THINKING_CAPABILITY_KEYS = (
     "reasoning",
     "supports_thinking",
 )
-
-
-async def _ping_provider(
-    backend: ProviderProbeBackend,
-    api_key: str,
-    base_url: str,
-) -> PingResult:
-    del backend, api_key, base_url
-    raise RuntimeError("Studio no longer owns provider endpoint probes; use Gateway provider_probe.")
-
-
-async def _probe_model(
-    backend: ProviderProbeBackend,
-    api_key: str,
-    base_url: str,
-    model_id: str,
-    runtime_settings: dict[str, Any] | None = None,
-) -> ModelProbeResult:
-    del backend, api_key, base_url, model_id, runtime_settings
-    raise RuntimeError("Studio no longer owns provider route probes; use Gateway provider_probe.")
-
-
-async def _probe_official_call_method_request(
-    method_id: OfficialCallMethod,
-    api_key: str,
-    base_url: str,
-    model_id: str,
-    runtime_settings: dict[str, Any] | None = None,
-) -> ModelProbeResult:
-    del method_id, api_key, base_url, model_id, runtime_settings
-    raise RuntimeError("Studio no longer owns official provider route probes; use Gateway provider_probe.")
-
-
-_ORIGINAL_PING_PROVIDER = _ping_provider
-_ORIGINAL_PROBE_MODEL = _probe_model
-_ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST = _probe_official_call_method_request
 
 
 @dataclass(frozen=True)
@@ -5513,81 +5469,7 @@ def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
 
 
 async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-    if _ping_provider is not _ORIGINAL_PING_PROVIDER:
-        return await _legacy_endpoint_probe_adapter(endpoint)
     return await _gateway_test_provider_endpoint_request(endpoint)
-
-
-async def _legacy_endpoint_probe_adapter(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-    backend = _endpoint_probe_backend(endpoint)
-    base_url = _endpoint_probe_base_url(endpoint)
-    api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
-    if not base_url:
-        return EndpointProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            provider_kind=endpoint.provider_kind,
-            backend=backend,
-            base_url=base_url,
-            status="error",
-            message="Base URL is empty.",
-            error_code="missing_config",
-        )
-    if not api_key:
-        return EndpointProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            provider_kind=endpoint.provider_kind,
-            backend=backend,
-            base_url=base_url,
-            status="invalid_key",
-            message="API key is empty.",
-        )
-    try:
-        result = await _ping_provider(backend, api_key, base_url)
-    except _Unauthorized as exc:
-        return _endpoint_probe_error_result(endpoint, backend, base_url, "invalid_key", exc)
-    except _RateLimited as exc:
-        return _endpoint_probe_error_result(endpoint, backend, base_url, "rate_limited", exc)
-    except _QuotaExceeded as exc:
-        return _endpoint_probe_error_result(endpoint, backend, base_url, "quota_exceeded", exc)
-    except httpx.TimeoutException:
-        return EndpointProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            provider_kind=endpoint.provider_kind,
-            backend=backend,
-            base_url=base_url,
-            status="timeout",
-            message="Endpoint test timed out.",
-        )
-    except _NetworkError as exc:
-        return _endpoint_probe_error_result(endpoint, backend, base_url, "network_error", exc)
-    return EndpointProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        provider_kind=endpoint.provider_kind,
-        backend=backend,
-        base_url=base_url,
-        status="ok",
-        latency_ms=result.latency_ms,
-        model_ids=result.model_ids,
-        model_capabilities=result.model_capabilities,
-    )
-
-
-def _endpoint_probe_error_result(
-    endpoint: ProviderEndpoint,
-    backend: ProviderProbeBackend,
-    base_url: str,
-    status: Literal["invalid_key", "rate_limited", "quota_exceeded", "network_error"],
-    exc: BaseException,
-) -> EndpointProbeResult:
-    return EndpointProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        provider_kind=endpoint.provider_kind,
-        backend=backend,
-        base_url=base_url,
-        status=status,
-        message=str(exc) or None,
-        error_code=getattr(exc, "error_code", "") or status,
-    )
 
 
 async def _gateway_test_provider_model(
@@ -5613,18 +5495,6 @@ async def _gateway_test_provider_route(
     *,
     runtime_settings: dict[str, Any] | None = None,
 ) -> RouteProbeResult:
-    if _probe_model is not _ORIGINAL_PROBE_MODEL:
-        probe_kwargs: dict[str, Any] = {}
-        if runtime_settings is not None:
-            probe_kwargs["runtime_settings"] = runtime_settings
-        result = await _probe_model(
-            _endpoint_probe_backend(endpoint),
-            endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
-            _endpoint_probe_base_url(endpoint),
-            route.provider_model_id,
-            **probe_kwargs,
-        )
-        return _route_probe_result_from_model_probe(endpoint, route, result)
     return await _gateway_test_provider_route_request(
         endpoint,
         route,
@@ -5640,14 +5510,6 @@ async def _gateway_probe_official_call_method(
     *,
     runtime_settings: dict[str, Any] | None = None,
 ) -> ModelProbeResult:
-    if _probe_official_call_method_request is not _ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST:
-        return await _probe_official_call_method_request(
-            method_id,
-            api_key,
-            base_url,
-            model_id,
-            runtime_settings=runtime_settings,
-        )
     result = await _gateway_probe_official_call_method_request(
         method_id,
         api_key,
@@ -5656,24 +5518,6 @@ async def _gateway_probe_official_call_method(
         runtime_settings=runtime_settings,
     )
     return _model_probe_result_from_route_probe(result)
-
-
-def _route_probe_result_from_model_probe(
-    endpoint: ProviderEndpoint,
-    route: ProviderRoute,
-    result: ModelProbeResult,
-) -> RouteProbeResult:
-    return RouteProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        route_id=route.route_id,
-        provider_kind=endpoint.provider_kind,
-        backend=_endpoint_probe_backend(endpoint),
-        base_url=_endpoint_probe_base_url(endpoint),
-        model_id=result.model_id,
-        status=result.status,
-        latency_ms=result.latency_ms,
-        message=result.message,
-    )
 
 
 def _model_probe_result_from_route_probe(result: RouteProbeResult) -> ModelProbeResult:
@@ -5685,7 +5529,7 @@ def _model_probe_result_from_route_probe(result: RouteProbeResult) -> ModelProbe
     )
 
 
-def _endpoint_success_message(result: PingResult | EndpointProbeResult) -> str:
+def _endpoint_success_message(result: EndpointProbeResult) -> str:
     message = f"Connected in {result.latency_ms}ms."
     if result.model_seen:
         message = f"{message} Model seen: {result.model_seen}."

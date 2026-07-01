@@ -8,6 +8,7 @@ import {
   clearWorkspaceCheckpoint,
   createSkillWorkspace,
   deleteWorkspacePath,
+  openClaudeCode,
   openSkillWorkspace,
   readWorkspaceFile,
   restoreWorkspaceFile,
@@ -27,6 +28,7 @@ vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),
     info: vi.fn(),
+    success: vi.fn(),
   },
 }))
 
@@ -131,6 +133,30 @@ describe('desktop shell helpers', () => {
       path: '/tmp/workspace',
     })
     expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('opens Claude Code through the native ah launcher', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue(undefined)
+
+    await expect(openClaudeCode('/tmp/workspace')).resolves.toBe(true)
+
+    expect(mockInvoke).toHaveBeenCalledWith('open_claude_code', {
+      workspaceRoot: '/tmp/workspace',
+    })
+  })
+
+  it('does not invoke the Claude Code launcher outside desktop runtime', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    await resetRuntimeForTest()
+
+    await expect(openClaudeCode('/tmp/workspace')).resolves.toBe(false)
+
+    expect(mockInvoke).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
+      description: '/tmp/workspace',
+    })
   })
 })
 

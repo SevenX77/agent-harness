@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getRegistry: vi.fn(),
   getRoles: vi.fn(),
   prepareCopilotJudgeContext: vi.fn(),
+  openClaudeCode: vi.fn(),
   buttonProps: [] as Array<Record<string, unknown>>,
 }))
 
@@ -29,6 +30,10 @@ vi.mock('../../hooks/useCopilot', () => ({
 
 vi.mock('../../hooks/useTemplates', () => ({
   useTemplates: mocks.useTemplates,
+}))
+
+vi.mock('../../lib/tauri', () => ({
+  openClaudeCode: mocks.openClaudeCode,
 }))
 
 vi.mock('./analysis-bar', () => ({
@@ -68,6 +73,8 @@ describe('buildCopilotJudgeDraft', () => {
     mocks.getRegistry.mockResolvedValue({ roles: {} })
     mocks.getRoles.mockResolvedValue({})
     mocks.prepareCopilotJudgeContext.mockReset()
+    mocks.openClaudeCode.mockReset()
+    mocks.openClaudeCode.mockResolvedValue(true)
     mocks.buttonProps.length = 0
     mocks.useTemplates.mockReturnValue({ templates: [], templatesLoading: false })
     mocks.useCopilot.mockReturnValue(copilotState())
@@ -131,6 +138,49 @@ describe('buildCopilotJudgeDraft', () => {
     expect(html).toContain('studio-copilot-panel')
     expect(html).toContain('studio-canvas-panel')
     expect(html).toContain('studio-copilot-input')
+  })
+
+  it('opens the current workspace in Claude Code through ah', async () => {
+    renderToStaticMarkup(
+      React.createElement(CopilotPanel, {
+        skillId: 'text-segmentation',
+        workspaceRoot: '/tmp/text-segmentation',
+      }),
+    )
+
+    const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open in Claude Code')
+    expect(openButton).toBeTruthy()
+
+    ;(openButton?.onClick as (() => void) | undefined)?.()
+
+    await vi.waitFor(() => {
+      expect(mocks.openClaudeCode).toHaveBeenCalledWith('/tmp/text-segmentation')
+    })
+  })
+
+  it('renders chat messages as marker rows instead of boxed cards', () => {
+    mocks.useCopilot.mockReturnValue(copilotState({
+      messages: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'Streaming answer',
+          events: [],
+          status: 'running',
+          createdAt: 1,
+        },
+      ],
+    }))
+
+    const html = renderToStaticMarkup(
+      React.createElement(CopilotPanel, {
+        skillId: 'text-segmentation',
+      }),
+    )
+
+    expect(html).toContain('data-copilot-message-role="assistant"')
+    expect(html).toContain('data-slot="marker"')
+    expect(html).toContain('Streaming answer')
   })
 
   it('lifts judged refs to the parent after Ask Copilot Judge prepares context', async () => {

@@ -1,4 +1,11 @@
-import type { CredentialsState, ModelGroup, ProviderModelOption, RoleEntry, RolesData } from '@/api/llm'
+import type {
+  CredentialsState,
+  ModelGroup,
+  ProviderModelOption,
+  RoleEntry,
+  RoleRouteEntry,
+  RolesData,
+} from '@/api/llm'
 
 /**
  * R-F8: an eligible copilot route is one whose backend `call_method_id` is in
@@ -50,6 +57,15 @@ export interface CopilotRolePreview {
   activeRouteIds: string[]
   availableRoutes: CopilotRoutePreview[]
   routes: CopilotRoutePreview[]
+}
+
+export interface CopilotDisplayRole {
+  id: string
+  title: string
+  description: string
+  source: 'built_in' | 'third_party'
+  modelGroupId: string
+  fallback_chain: RoleRouteEntry[]
 }
 
 /**
@@ -136,6 +152,83 @@ export function pickDefaultCopilotGroupIds(candidates: CopilotRolePreview[]): st
   }
 
   return defaults
+}
+
+export function copilotRoleTitleFromName(roleName: string): string {
+  return roleName.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+export function isBrokenLegacyCopilotRole(role: RoleEntry): boolean {
+  // MVP1 §3.1: a copilot role must bind to one model group. A record with no
+  // model binding but a populated fallback_chain is a stale pre-translator role;
+  // Settings hides it, so other consumers must not offer it as selectable.
+  const hasModelsProjection = Object.keys(role.models ?? {}).length > 0
+  const hasModelGroups = (role.model_groups ?? []).length > 0
+  const hasFallbackChain = (role.fallback_chain ?? []).length > 0
+  return !hasModelsProjection && !hasModelGroups && hasFallbackChain
+}
+
+export function deriveActiveCopilotRoles(
+  data: RolesData | null,
+  realCopilotRoles: CopilotRolePreview[],
+): CopilotDisplayRole[] {
+  return data
+    ? Object.entries(data.roles)
+        .filter(([, role]) => role.role_kind === 'copilot')
+        .filter(([, role]) => !isBrokenLegacyCopilotRole(role))
+        .map(([name, role]) => {
+          const activeModelGroupId = Object.keys(role.models ?? {})[0] || role.active_model || name
+          const modelGroup = realCopilotRoles.find((candidate) => candidate.id === activeModelGroupId)
+          const fallbackChainRoutes =
+            role.models?.[activeModelGroupId]?.providers ??
+            role.fallback_chain?.map((entry) => entry.route_id) ??
+            []
+
+          return {
+            id: name,
+            title: modelGroup?.title ?? copilotRoleTitleFromName(name),
+            description: modelGroup?.description ?? 'Coding copilot role.',
+            source: modelGroup?.source ?? ('third_party' as const),
+            modelGroupId: activeModelGroupId,
+            fallback_chain: fallbackChainRoutes.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
+          }
+        })
+    : []
+}
+
+export function deriveFloatedCopilotRoles(
+  realCopilotRoles: CopilotRolePreview[],
+): CopilotDisplayRole[] {
+  return pickDefaultCopilotGroupIds(realCopilotRoles)
+    .map((id) => realCopilotRoles.find((candidate) => candidate.id === id))
+    .filter((group): group is CopilotRolePreview => Boolean(group))
+    .map((group) => ({
+      id: group.id,
+      title: group.title,
+      description: group.description,
+      source: group.source,
+      modelGroupId: group.id,
+      fallback_chain: buildCopilotRoleEntry(group).fallback_chain ?? [],
+    }))
+}
+
+export function deriveCopilotDisplayRolesFromCandidates(
+  data: RolesData | null,
+  realCopilotRoles: CopilotRolePreview[],
+): CopilotDisplayRole[] {
+  const activeRoles = deriveActiveCopilotRoles(data, realCopilotRoles)
+  return activeRoles.length > 0 ? activeRoles : deriveFloatedCopilotRoles(realCopilotRoles)
+}
+
+export function deriveCopilotDisplayRoles(
+  data: RolesData | null,
+  modelGroups: ModelGroup[],
+  credentials: CredentialsState,
+): CopilotDisplayRole[] {
+  return deriveCopilotDisplayRolesFromCandidates(
+    data,
+    deriveCopilotCandidateGroups(modelGroups, credentials),
+  )
 }
 
 /**

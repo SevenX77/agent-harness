@@ -73,6 +73,8 @@ const BROWSER_WRITE_FALLBACK_CONFIG = {
 let currentApiBaseURL = API_BASE_URL
 let currentApiToken: string | null = null
 
+export const apiClientConfigChangedEvent = 'studio-api-client-config-changed'
+
 export const api = axios.create({
   baseURL: currentApiBaseURL,
 })
@@ -80,6 +82,7 @@ export const api = axios.create({
 export function configureApiBaseURL(baseURL: string): void {
   currentApiBaseURL = baseURL
   api.defaults.baseURL = baseURL
+  notifyApiClientConfigChanged()
 }
 
 export function getApiBaseURL(): string {
@@ -88,10 +91,21 @@ export function getApiBaseURL(): string {
 
 export function configureApiToken(token: string | null): void {
   currentApiToken = token
+  notifyApiClientConfigChanged()
 }
 
 export function currentApiTokenIsSet(): boolean {
   return Boolean(currentApiToken)
+}
+
+export function authenticatedApiReady(): boolean {
+  return !isTauriRuntime() || currentApiTokenIsSet()
+}
+
+function notifyApiClientConfigChanged(): void {
+  if (typeof window === 'undefined') return
+  if (typeof window.dispatchEvent !== 'function') return
+  window.dispatchEvent(new Event(apiClientConfigChangedEvent))
 }
 
 api.interceptors.request.use((config) => {

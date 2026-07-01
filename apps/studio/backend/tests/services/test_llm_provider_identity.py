@@ -40,7 +40,7 @@ def test_model_probe_evidence_is_attributed_to_registrable_provider() -> None:
     # the community catalog can attribute it to a provider (api.qnaigc.com -> qnaigc).
     from app.models.llm_config import ProviderEndpoint
     from app.routers.llm import _build_model_probe_evidence
-    from app.services.copilot_test import ModelProbeResult
+    from app.services.model_probe import ModelProbeResult
 
     endpoint = ProviderEndpoint(
         endpoint_id="ep-qnaigc",

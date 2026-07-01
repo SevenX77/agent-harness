@@ -5,8 +5,8 @@ These drive the real endpoint/manual Test handlers through the FastAPI client an
 assert the evidence lands on the route in credentials. The legacy probe catalog
 (``llm_probe_catalog.json``) is retired (A1.3), so there is no parallel store to check.
 
-Harness: third-party Test mocks ``_ping_provider`` (get-models) and
-``_probe_model`` (generation) on the router (see test_llm_registry_api.py).
+Harness: third-party Test mocks the gateway wrappers ``_gateway_test_provider_endpoint``
+(get-models) and ``_gateway_test_provider_route`` (generation) on the router.
 """
 
 from __future__ import annotations
@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 from app.core import config
-from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
+from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.routers import llm as llm_router
-from app.services.copilot_test import ModelProbeResult, PingResult
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from fastapi.testclient import TestClient
+from graph_agent_gateway.registry.provider_probe import EndpointProbeResult, RouteProbeResult
 
 
 def _seed_third_party_endpoint(
@@ -52,19 +52,37 @@ def _mock_probes(
     model_ids: tuple[str, ...],
     probe_status: str = "ok",
 ) -> None:
-    async def fake_ping(backend: str, api_key: str, base_url: str) -> PingResult:
-        return PingResult(latency_ms=42, model_ids=model_ids)
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=llm_router._endpoint_probe_backend(endpoint),
+            base_url=llm_router._endpoint_probe_base_url(endpoint),
+            status="ok",
+            latency_ms=42,
+            model_ids=model_ids,
+        )
 
-    async def fake_probe(backend: str, api_key: str, base_url: str, model_id: str) -> ModelProbeResult:
-        return ModelProbeResult(
-            model_id=model_id,
-            status=probe_status,
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend=llm_router._endpoint_probe_backend(endpoint),
+            base_url=llm_router._endpoint_probe_base_url(endpoint),
+            model_id=route.provider_model_id,
+            status=probe_status,  # type: ignore[arg-type]
             latency_ms=21,
             message=None if probe_status == "ok" else "generation failed for this endpoint",
         )
 
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping)
-    monkeypatch.setattr(llm_router, "_probe_model", fake_probe)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
 
 def _route_probe_states(creds: LLMCredentialsFile, route_id: str) -> list[str]:

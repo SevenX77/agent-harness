@@ -31,6 +31,17 @@ export interface SettingsPageProps {
   initialTab?: SettingsTab
 }
 
+export interface SettingsPageController extends Omit<
+  SettingsPageContentProps,
+  "activeTab" | "onClose" | "onTabChange" | "onNavigateToApiKeys"
+> {
+  ensureCredentialsHydrated: () => void
+}
+
+export interface SettingsPageViewProps extends SettingsPageProps {
+  controller: SettingsPageController
+}
+
 export interface SettingsPageContentProps {
   activeTab: SettingsTab
   credentials: CredentialsState

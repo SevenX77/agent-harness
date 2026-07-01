@@ -40,6 +40,10 @@ export interface StudioEventStreamCallbacks {
 
 const CONNECTION_LOST_TICK_MS = 1_000
 
+interface StudioEventStreamOptions {
+  enabled?: boolean
+}
+
 interface StudioEventStreamState {
   connectionLost: boolean
 }
@@ -58,13 +62,21 @@ interface StudioEventStreamState {
  * `WS_AUTH_FAILURE_GIVEUP_THRESHOLD` consecutive 4401 closes the hook stops
  * reconnecting and toasts the user instead of silently spinning forever.
  */
-export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): StudioEventStreamState {
+export function useStudioEventStream(
+  callbacks: StudioEventStreamCallbacks,
+  options: StudioEventStreamOptions = {},
+): StudioEventStreamState {
   const callbacksRef = useRef(callbacks)
   callbacksRef.current = callbacks
+  const enabled = options.enabled ?? true
 
   const [connectionLost, setConnectionLost] = useState(false)
 
   useEffect(() => {
+    if (!enabled) {
+      setConnectionLost(false)
+      return undefined
+    }
     let cancelled = false
     let socket: WebSocket | null = null
     let attempt = 0
@@ -239,7 +251,7 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
         socket.close()
       }
     }
-  }, [])
+  }, [enabled])
 
   return { connectionLost }
 }

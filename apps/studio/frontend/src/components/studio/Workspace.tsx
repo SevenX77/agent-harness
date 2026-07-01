@@ -46,7 +46,7 @@ import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
-import { SettingsPage, type SettingsTab } from "./SettingsPage"
+import { SettingsPageView, useSettingsPageController, type SettingsTab } from "./SettingsPage"
 import { Toolbar, type PanelKind } from "./Toolbar"
 import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
 import { WorkspaceLeftPanelOverlay } from "./WorkspaceLeftPanelOverlay"
@@ -326,6 +326,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [splitMode, setSplitMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("general")
+  const settingsController = useSettingsPageController()
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
   const [childDetailPatch, setChildDetailPatch] = useState<ChildDetailPatch | null>(null)
@@ -2463,7 +2464,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             showCloseButton={false}
           >
             <DialogTitle className="sr-only">Settings</DialogTitle>
-            <SettingsPage initialTab={settingsInitialTab} onClose={() => setSettingsOpen(false)} />
+            <SettingsPageView
+              controller={settingsController}
+              initialTab={settingsInitialTab}
+              onClose={() => setSettingsOpen(false)}
+            />
           </DialogContent>
         </Dialog>
       </div>

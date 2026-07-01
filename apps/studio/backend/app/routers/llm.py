@@ -2229,15 +2229,17 @@ def _project_route_ui_states(
         if (
             projection.ui_state == route.ui_state
             and projection.reason_code == route.reason_code
+            and projection.retry_at == route.retry_at
         ):
             projected_routes[route_id] = route
             continue
-        # W2-A: stamp the authoritative ui_state AND its companion reason_code so the
-        # frontend reads them directly (no message-text re-derivation).
+        # W2-A: stamp the authoritative ui_state AND its companions reason_code / retry_at
+        # so the frontend reads them directly (no message-text re-derivation).
         projected_routes[route_id] = route.model_copy(
             update={
                 "ui_state": projection.ui_state,
                 "reason_code": projection.reason_code,
+                "retry_at": projection.retry_at,
             }
         )
         changed = True

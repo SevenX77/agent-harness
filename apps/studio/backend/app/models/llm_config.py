@@ -98,11 +98,13 @@ class ProviderRoute(GatewayProviderRoute):
     # runtime route projection (see ``_gateway_route``).
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     # W2-A status normalization: the route carries the authoritative UI status the
-    # frontend reads DIRECTLY — ``ui_state`` (inherited 6-state) plus its companion
-    # ``reason_code``. Stamped by the registry projection so the UI never re-derives a
-    # failure scope from message text. Studio-only presentation field: stripped from
-    # the gateway runtime route (see ``_gateway_route``).
+    # frontend reads DIRECTLY — ``ui_state`` (inherited 6-state) plus its companions
+    # ``reason_code`` and (for cooling_down) ``retry_at`` — an ISO-8601 timestamp of
+    # when the circuit reopens. Stamped by the registry projection so the UI never
+    # re-derives a failure scope from message text. Studio-only presentation fields:
+    # stripped from the gateway runtime route (see ``_gateway_route``).
     reason_code: str | None = None
+    retry_at: str | None = None
 
 
 class ModelProfile(GatewayModelProfile):
@@ -124,7 +126,7 @@ def _gateway_route(route: ProviderRoute) -> GatewayProviderRoute:
     return GatewayProviderRoute.model_validate(
         route.model_dump(
             mode="python",
-            exclude={"display_name", "evidence", "reason_code"},
+            exclude={"display_name", "evidence", "reason_code", "retry_at"},
         )
     )
 

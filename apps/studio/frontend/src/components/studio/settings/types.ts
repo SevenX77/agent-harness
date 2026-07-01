@@ -28,6 +28,7 @@ export interface ProviderDraftChangeOptions {
 
 export interface SettingsPageProps {
   onClose: () => void
+  initialTab?: SettingsTab
 }
 
 export interface SettingsPageContentProps {

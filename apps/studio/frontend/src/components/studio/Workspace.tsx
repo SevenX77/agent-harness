@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import useSWR from "swr"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
@@ -45,7 +46,7 @@ import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
-import { SettingsPage } from "./SettingsPage"
+import { SettingsPage, type SettingsTab } from "./SettingsPage"
 import { Toolbar, type PanelKind } from "./Toolbar"
 import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
 import { WorkspaceLeftPanelOverlay } from "./WorkspaceLeftPanelOverlay"
@@ -324,6 +325,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [activeFileDetails, setActiveFileDetails] = useState<Partial<Record<EditorSide, OpenFile>>>({})
   const [splitMode, setSplitMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("general")
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
   const [childDetailPatch, setChildDetailPatch] = useState<ChildDetailPatch | null>(null)
@@ -753,6 +755,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         toast.error(errorMessage(error))
       })
   }, [splitMode, toOpenFile])
+
+  const openSettings = useCallback((tab: SettingsTab = "general") => {
+    setSettingsInitialTab(tab)
+    setSettingsOpen(true)
+  }, [])
+
+  const handleSettingsToggle = useCallback(() => {
+    if (settingsOpen) {
+      setSettingsOpen(false)
+      return
+    }
+    openSettings("general")
+  }, [openSettings, settingsOpen])
 
   const closeFile = useCallback((side: EditorSide) => {
     setActiveFileDetails((current) => {
@@ -2268,6 +2283,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         compareTabs={compareTabs}
         activeCandidateId={compareCandidateId}
         onSelectCandidate={handleSelectCandidate}
+        onOpenSettings={openSettings}
       />
     </WorkspaceLeftPanelOverlay>
   ) : null
@@ -2310,7 +2326,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onSyncSuccess={() => {
           void mutateSkillDetail()
         }}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettings("general")}
       />
 
       <div className="relative flex min-h-0 flex-1">
@@ -2318,7 +2334,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           activePanel={activePanel}
           onPanelChange={setActivePanel}
           settingsOpen={settingsOpen}
-          onSettingsToggle={() => setSettingsOpen((open) => !open)}
+          onSettingsToggle={handleSettingsToggle}
         />
 
         <ResizablePanelGroup
@@ -2329,11 +2345,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           <ResizablePanel id="canvas" defaultSize="100%" minSize="30%">
             <div className="relative size-full" style={currentSkillId ? workspaceOverlayStyle : undefined}>
               {currentSkillId === null ? (
-                settingsOpen ? (
-                  <SettingsPage onClose={() => setSettingsOpen(false)} />
-                ) : (
-                  <WelcomePage onSelectSkill={onSelectSkill} />
-                )
+                <WelcomePage onSelectSkill={onSelectSkill} />
               ) : (
                 <>
                   <div
@@ -2385,11 +2397,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     <WorkspaceEditorOverlay onResizeHeight={setEditorHeight} />
                     {rightPanelOverlay}
                   </div>
-                  {settingsOpen ? (
-                    <div className="absolute inset-0 z-50 bg-background">
-                      <SettingsPage onClose={() => setSettingsOpen(false)} />
-                    </div>
-                  ) : null}
                 </>
               )}
               {currentSkillId && !settingsOpen ? (
@@ -2445,6 +2452,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           </ResizablePanel>
 
         </ResizablePanelGroup>
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogContent
+            // grid-rows-[minmax(0,1fr)]: DialogContent is display:grid with a fixed
+            // height; without a constrained row the implicit `auto` row grows to the
+            // content height and the size-full child (SettingsPage) grows with it, so
+            // the inner ScrollArea never gets a bounded height and can't scroll. Pin
+            // the single row to the container height so the child is bounded.
+            className="grid-rows-[minmax(0,1fr)] h-[min(92vh,56rem)] w-[min(96vw,88rem)] max-w-none overflow-hidden p-0 sm:max-w-none"
+            showCloseButton={false}
+          >
+            <DialogTitle className="sr-only">Settings</DialogTitle>
+            <SettingsPage initialTab={settingsInitialTab} onClose={() => setSettingsOpen(false)} />
+          </DialogContent>
+        </Dialog>
       </div>
       <ConflictDialog
         conflict={conflict}

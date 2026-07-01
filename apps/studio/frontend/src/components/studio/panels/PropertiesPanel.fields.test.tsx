@@ -1,8 +1,18 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import type { ModelGroup, RolesData } from '@/api/llm'
 import type { SkillDetail } from '@/api/types'
 import type { SkillGraphNodeData } from '@/components/GraphCanvas'
-import { PropertiesPanel } from './PropertiesPanel'
+import {
+  compareModelGroupsForPicker,
+  graphAgentRoleNamesForProperties,
+  llmCompareModelGroupFilter,
+  llmCompareModelGroupSearchValue,
+  llmRoleSelectOptionState,
+  modelGroupRouteOptions,
+  PropertiesPanel,
+  roleEndpointRouteOptions,
+} from './PropertiesPanel'
 
 // Deprecated / FROZEN-violating frontmatter fields must never be EDITABLE in the
 // Properties form (any node kind). Asserted via their rendered field labels.
@@ -26,6 +36,43 @@ function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
     dependsOn: [],
     ...overrides,
   }
+}
+
+function providerModel(overrides: Partial<ModelGroup['provider_models'][number]> = {}): ModelGroup['provider_models'][number] {
+  return {
+    route_id: 'qiniu-main:llama3',
+    endpoint_id: 'qiniu-main',
+    provider_label: 'Qiniu',
+    provider_kind: 'custom',
+    provider_model_id: 'llama3',
+    ui_state: 'ready',
+    capability_state: 'known',
+    capabilities: {},
+    ...overrides,
+  } as ModelGroup['provider_models'][number]
+}
+
+function modelGroup(overrides: Partial<ModelGroup> = {}): ModelGroup {
+  return {
+    canonical_id: 'llama3',
+    display_name: 'Llama 3',
+    provider_models: [providerModel()],
+    status_summary: {
+      ready: 1,
+      historical_ready: 0,
+      untested: 0,
+      cooling_down: 0,
+      failed: 0,
+      off: 0,
+    },
+    capability_summary: {
+      capability_known_count: 0,
+      thinking: 'unknown',
+      tools: 'unknown',
+      structured_output: 'unknown',
+    },
+    ...overrides,
+  } as ModelGroup
 }
 
 function renderPanel(args: {
@@ -408,6 +455,156 @@ describe('PropertiesPanel - editable-only surface', () => {
   })
 })
 
+describe('PropertiesPanel - node compare model group picker', () => {
+  it('filters invalid model groups so the picker never renders a blank option', () => {
+    const groups = compareModelGroupsForPicker([
+      modelGroup({ canonical_id: '', display_name: '', provider_models: [providerModel()] }),
+      modelGroup({ canonical_id: 'empty-routes', display_name: 'Empty routes', provider_models: [] }),
+      modelGroup({ canonical_id: 'blank-route', display_name: 'Blank route', provider_models: [providerModel({ route_id: ' ' })] }),
+      modelGroup({ canonical_id: 'claude-sonnet', display_name: 'Claude Sonnet' }),
+    ])
+
+    expect(groups.map((group) => group.canonical_id)).toEqual(['claude-sonnet'])
+  })
+
+  it('searches model groups by name, id, provider, endpoint, and route', () => {
+    const group = modelGroup({
+      canonical_id: 'claude-sonnet-4-5',
+      display_name: 'Claude Sonnet 4.5',
+      provider_models: [
+        providerModel({
+          route_id: 'qiniu-main:claude-sonnet-4-5',
+          endpoint_id: 'qiniu-main',
+          provider_model_id: 'claude-sonnet-4-5',
+        }),
+      ],
+    })
+    const value = llmCompareModelGroupSearchValue(group)
+
+    expect(llmCompareModelGroupFilter(value, 'sonnet qiniu')).toBe(1)
+    expect(llmCompareModelGroupFilter(value, 'claude-sonnet-4-5')).toBe(1)
+    expect(llmCompareModelGroupFilter(value, 'qiniu-main')).toBe(1)
+    expect(llmCompareModelGroupFilter(value, 'openai qiniu')).toBe(0)
+  })
+
+  it('sorts model groups by the same family section used by LLM Roles available models', () => {
+    const groups = compareModelGroupsForPicker([
+      modelGroup({
+        canonical_id: 'deepseek-v4',
+        display_name: 'A DeepSeek via proxy',
+        provider_models: [
+          providerModel({
+            route_id: 'anthropic-proxy:deepseek-v4',
+            endpoint_id: 'anthropic-proxy',
+            provider_label: 'Qiniu',
+            provider_model_id: 'deepseek-v4',
+          }),
+        ],
+      }),
+      modelGroup({
+        canonical_id: 'claude-opus-4-8',
+        display_name: 'Z Claude Opus 4.8',
+        provider_models: [
+          providerModel({
+            route_id: 'anthropic:claude-opus-4-8',
+            endpoint_id: 'anthropic',
+            provider_label: 'Anthropic Official',
+            provider_model_id: 'claude-opus-4.8',
+          }),
+        ],
+      }),
+    ])
+
+    expect(groups.map((group) => group.canonical_id)).toEqual([
+      'claude-opus-4-8',
+      'deepseek-v4',
+    ])
+  })
+
+  it('deduplicates endpoint options, shows readable names, and keeps endpoint details for tooltip', () => {
+    const group = modelGroup({
+      provider_models: [
+        providerModel({ route_id: 'qiniu-main:llama3', endpoint_id: 'qiniu-main' }),
+        providerModel({ route_id: 'qiniu-main:llama3', endpoint_id: 'qiniu-main' }),
+        providerModel({ route_id: 'qiniu-backup:llama3', endpoint_id: 'qiniu-backup' }),
+        providerModel({ route_id: ' ', endpoint_id: 'empty' }),
+      ],
+    })
+
+    expect(modelGroupRouteOptions(group)).toEqual([
+      {
+        value: 'route:qiniu-main:llama3',
+        label: 'Qiniu',
+        detail: 'Endpoint: qiniu-main\nModel: llama3\nRoute: qiniu-main:llama3',
+      },
+      {
+        value: 'route:qiniu-backup:llama3',
+        label: 'Qiniu',
+        detail: 'Endpoint: qiniu-backup\nModel: llama3\nRoute: qiniu-backup:llama3',
+      },
+    ])
+  })
+
+  it('derives endpoint options for a configured role from its fallback chain', () => {
+    const group = modelGroup({
+      provider_models: [
+        providerModel({ route_id: 'wavespeed:claude-opus-4-8', endpoint_id: 'wavespeed', provider_label: 'WaveSpeed', provider_model_id: 'anthropic/claude-opus-4.8' }),
+        providerModel({ route_id: 'anthropic:claude-opus-4-8', endpoint_id: 'anthropic', provider_label: 'Anthropic Official', provider_model_id: 'claude-opus-4.8' }),
+      ],
+    })
+
+    expect(roleEndpointRouteOptions({
+      model_fallback_enabled: true,
+      active_model: 'claude-opus-4-8',
+      models: {},
+      fallback_chain: [
+        { route_id: 'wavespeed:claude-opus-4-8' },
+        { route_id: 'anthropic:claude-opus-4-8' },
+      ],
+    }, [group])).toEqual([
+      {
+        value: 'route:wavespeed:claude-opus-4-8',
+        label: 'WaveSpeed',
+        detail: 'Endpoint: wavespeed\nModel: anthropic/claude-opus-4.8\nRoute: wavespeed:claude-opus-4-8',
+      },
+      {
+        value: 'route:anthropic:claude-opus-4-8',
+        label: 'Anthropic Official',
+        detail: 'Endpoint: anthropic\nModel: claude-opus-4.8\nRoute: anthropic:claude-opus-4-8',
+      },
+    ])
+  })
+})
+
+describe('PropertiesPanel - role options', () => {
+  it('hides copilot roles from llm_role while keeping graph-agent roles with copilot-like names', () => {
+    const data = {
+      roles: {
+        'loop pm': { role_kind: 'graph_agent' },
+        copilot_claude_opus_4_8: { role_kind: 'copilot' },
+        copilot_named_graph_agent: { role_kind: 'graph_agent' },
+      },
+    } as unknown as Pick<RolesData, 'roles'>
+
+    expect(graphAgentRoleNamesForProperties(data)).toEqual([
+      'copilot_named_graph_agent',
+      'loop pm',
+    ])
+  })
+
+  it('marks yaml llm_role values that are not configured', () => {
+    expect(llmRoleSelectOptionState('reviewer', false)).toEqual({
+      label: 'reviewer (not configured)',
+      title: 'reviewer is not configured in LLM Roles',
+      unconfigured: true,
+    })
+    expect(llmRoleSelectOptionState('loop pm', true)).toEqual({
+      label: 'loop pm',
+      unconfigured: false,
+    })
+  })
+})
+
 describe('PropertiesPanel - node role Test control (R23)', () => {
   it('agent node renders a Test button next to the llm_role field', () => {
     const html = renderPanel({
@@ -418,7 +615,33 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     })
 
     expect(html).toContain('llm_role')
+    expect(html).toContain('id="phase-llm-role"')
+    expect(html).toContain('role="combobox"')
+    expect(html).toContain('>Run role<')
+    expect(html).toContain('>Compare LLMs<')
+    expect(html).not.toContain('id="phase-llm-endpoint"')
+    expect(html).toContain('data-llm-role-settings-trigger="true"')
+    expect(html).toContain('aria-label="Open LLM Roles settings"')
     expect(html).toContain('>Test<')
+  })
+
+  it('agent node renders the MVP1 node-scoped multi-LLM compare trigger next to llm_role', () => {
+    const html = renderPanel({
+      id: 'review',
+      data: baseData({ mode: 'llm', filePath: 'phases/review/SKILL.md' }),
+      filePath: 'phases/review/SKILL.md',
+      content: ['---', 'name: review', 'llm_role: reviewer', '---', '<role>r</role>'].join('\n'),
+    })
+
+    expect(html).toContain('llm_role')
+    expect(html).toContain('data-llm-role-compare-trigger="true"')
+    expect(html).toContain('aria-label="Add LLM compare candidate"')
+    expect(html).toContain('No compare LLMs yet.')
+    expect(html).toContain('Add compare LLM</button>')
+    expect(html).not.toContain('Add temporary candidates for this node only')
+    expect(html).not.toContain('>Model bundle<')
+    expect(html).not.toContain('Node LLM compare')
+    expect(html).not.toContain('Node-scoped runner')
   })
 
   it('logic node has no role Test control', () => {
@@ -430,6 +653,7 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     })
 
     expect(html).not.toContain('>Test<')
+    expect(html).not.toContain('data-llm-role-compare-trigger="true"')
   })
 
   it('subgraph node has no role Test control', () => {
@@ -441,5 +665,6 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     })
 
     expect(html).not.toContain('>Test<')
+    expect(html).not.toContain('data-llm-role-compare-trigger="true"')
   })
 })

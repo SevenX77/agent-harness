@@ -522,7 +522,6 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   padding: 0.875rem 1rem;
 }
 
-.studio-left-panel-overlay [data-studio-panel-body="true"] > form,
 .studio-left-panel-overlay [data-studio-panel-body="true"] > section:not([data-studio-panel-section="true"]) {
   border-bottom: 1px solid var(--studio-canvas-border-soft);
 }
@@ -545,6 +544,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+  border-top: 1px solid var(--studio-canvas-border-soft);
   padding: 0.875rem 1rem 1rem;
 }
 

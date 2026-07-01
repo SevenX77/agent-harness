@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { AxiosError } from "axios"
-import { AlertTriangle, ChevronsUpDown, CircleHelp, FolderOpen, Loader2, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, Loader2, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -51,17 +51,18 @@ import type { ResumeRunOptions } from "@/api/client"
 import { isPathInsideWorkspaceRoot, subgraphPathFieldState, subgraphPathValueFromSelection } from "@/components/studio/subgraph-path"
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
 import { getChildGraphTopology } from "@/api/client"
-import { getModelGroups, getRoles, type RoleEntry, type RolesData, type ModelGroup } from "@/api/llm"
+import { getModelGroups, getRoles, startCompareCandidateTestJob, type ModelGroup, type RoleEntry, type RolesData, type RoleTestResponse, type RoleTestStatus } from "@/api/llm"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { cn } from "@/lib/utils"
 import { errorMessage } from "@/utils/errors"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
+import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus } from "../settings/llm-roles/role-route-status"
 import type { SettingsTab } from "../SettingsPage"
 import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
-import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
+import { roleTestDetailsFromResult, roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
 import {
   applyPhaseFrontmatterForm,
   parsePhaseFrontmatter,
@@ -559,10 +560,15 @@ export function PropertiesPanel({
     setRoleTest({ running: true, status: null, error: null })
     try {
       const result = await runRoleTestJobToResult(trimmed)
-      setRoleTest({ running: false, status: result.status, error: null })
+      setRoleTest({
+        running: false,
+        status: result.status,
+        error: null,
+        details: roleTestDetailsFromResult(result),
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Role test failed"
-      setRoleTest({ running: false, status: null, error: message })
+      setRoleTest({ running: false, status: null, error: message, details: [message] })
       toast.error(message)
     }
   }, [])
@@ -2259,7 +2265,7 @@ function IterateField({
   )
 }
 
-function RoleTestControl({
+export function RoleTestControl({
   roleName,
   roleTest,
   onRoleTest,
@@ -2270,25 +2276,81 @@ function RoleTestControl({
 }) {
   const badge = roleTestStatusBadge(roleTest)
   const showBadge = badge.running || roleTest.status != null || Boolean(roleTest.error)
+  const details = roleTestTooltipDetails(roleTest)
+  const tooltipLabel = [badge.label, ...details].join("\n")
+  const badgeNode = showBadge ? (
+    <Badge
+      variant={badge.variant}
+      className="h-6 max-w-48"
+      aria-label={details.length > 0 ? tooltipLabel : undefined}
+    >
+      {badge.running ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+      <span className="truncate">{badge.label}</span>
+    </Badge>
+  ) : null
   return (
     <div className="flex shrink-0 items-center gap-2">
-      {showBadge ? (
-        <Badge variant={badge.variant} className="h-6">
-          {badge.running ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
-          {badge.label}
-        </Badge>
-      ) : null}
+      {badgeNode && details.length > 0 ? (
+        <span data-role-test-status-tooltip="true">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>{badgeNode}</TooltipTrigger>
+              <TooltipContent className="max-w-sm">
+                <div className="space-y-1 whitespace-normal">
+                  <div className="font-medium">{badge.label}</div>
+                  {details.map((detail) => (
+                    <div key={detail} className="break-words text-background/90">
+                      {detail}
+                    </div>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </span>
+      ) : (
+        badgeNode
+      )}
       <Button
         type="button"
-        size="sm"
-        variant="secondary"
+        size="icon-sm"
+        variant="default"
+        data-llm-role-test-trigger="true"
+        aria-label={roleName.trim() ? `Test LLM role ${roleName}` : "Test LLM role"}
         disabled={badge.running || roleName.trim().length === 0}
         onClick={() => onRoleTest(roleName)}
       >
-        Test
+        {badge.running
+          ? <Loader2 data-llm-role-test-icon="true" className="size-3 animate-spin" aria-hidden />
+          : <FlaskConical data-llm-role-test-icon="true" className="size-3.5" aria-hidden />}
       </Button>
     </div>
   )
+}
+
+function roleTestTooltipDetails(roleTest: RoleTestStatusInput): string[] {
+  const details = uniqueStrings([
+    ...(roleTest.details ?? []),
+    roleTest.error ?? null,
+  ].filter((detail): detail is string => Boolean(detail?.trim())))
+  if (details.length > 0) return details
+  if (roleTest.status === "warning") {
+    return ["One or more provider routes need attention; rerun the test for provider diagnostics."]
+  }
+  if (roleTest.status === "blocked" || roleTest.status === "failed") {
+    return ["The selected role has no currently usable provider route."]
+  }
+  return []
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const normalized = value.trim()
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
 }
 
 // validator gates on whether the sibling validator.py EXISTS. No file 鈫?there is no
@@ -2623,6 +2685,62 @@ interface LlmCompareCandidateDraft {
   route: string
 }
 
+export interface LlmCompareTestResult {
+  status: RoleTestStatus
+  summary: string
+  details: string[]
+}
+
+export interface LlmCompareTestState {
+  running: boolean
+  result?: LlmCompareTestResult
+  error?: string
+}
+
+const EMPTY_COMPARE_TEST_STATE: LlmCompareTestState = { running: false }
+
+function compareCandidateRouteId(route: string): string | null {
+  const trimmed = route.trim()
+  return trimmed.startsWith("route:") ? trimmed.replace(/^route:/, "").trim() || null : null
+}
+
+async function runCompareCandidateTest(
+  modelGroupId: string,
+  route: string,
+): Promise<LlmCompareTestResult> {
+  const routeId = compareCandidateRouteId(route)
+  const result = await runRoleTestJobToResult(modelGroupId, {
+    startJob: () => startCompareCandidateTestJob({
+      canonical_id: modelGroupId,
+      route_id: routeId,
+    }),
+  })
+  return compareTestResultFromRoleTest(result)
+}
+
+function compareTestResultFromRoleTest(result: RoleTestResponse): LlmCompareTestResult {
+  return {
+    status: result.status,
+    summary: compareTestSummary(result.status),
+    details: roleTestDetailsFromResult(result),
+  }
+}
+
+function compareTestSummary(status: RoleTestStatus): string {
+  if (status === "ok") return "Test passed"
+  if (status === "warning") return "Needs Attention"
+  return "Test failed"
+}
+
+function compareStatusToRouteStatus(state: LlmCompareTestState | undefined): RoleRouteStatus | null {
+  if (state?.running) return "testing"
+  if (state?.error) return "blocked"
+  if (state?.result?.status === "ok") return "runnable"
+  if (state?.result?.status === "warning") return "limited"
+  if (state?.result?.status === "blocked" || state?.result?.status === "failed") return "blocked"
+  return "limited"
+}
+
 function LlmNodeCompareField({
   modelGroups,
 }: {
@@ -2633,10 +2751,13 @@ function LlmNodeCompareField({
   const [candidates, setCandidates] = useState<LlmCompareCandidateDraft[]>([])
   const [draftModelGroupId, setDraftModelGroupId] = useState("")
   const [draftRoute, setDraftRoute] = useState("auto")
+  const [draftTestState, setDraftTestState] = useState<LlmCompareTestState>(EMPTY_COMPARE_TEST_STATE)
   const [editOpen, setEditOpen] = useState(false)
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null)
   const [editModelGroupId, setEditModelGroupId] = useState("")
   const [editRoute, setEditRoute] = useState("auto")
+  const [editTestState, setEditTestState] = useState<LlmCompareTestState>(EMPTY_COMPARE_TEST_STATE)
+  const [compareTests, setCompareTests] = useState<Record<string, LlmCompareTestState>>({})
   const modelOptions = useMemo<SearchableComboboxOption[]>(
     () => modelGroups.map((group) => {
       const option: SearchableComboboxOption = {
@@ -2692,14 +2813,19 @@ function LlmNodeCompareField({
   const addCandidate = () => {
     if (!draftGroup) return
     nextCandidateId.current += 1
+    const candidateId = `compare-${nextCandidateId.current}`
     setCandidates((current) => [
       ...current,
       {
-        id: `compare-${nextCandidateId.current}`,
+        id: candidateId,
         modelGroupId: draftGroup.canonical_id,
         route: draftRoute,
       },
     ])
+    if (draftTestState.result || draftTestState.error || draftTestState.running) {
+      setCompareTests((current) => ({ ...current, [candidateId]: draftTestState }))
+    }
+    setDraftTestState(EMPTY_COMPARE_TEST_STATE)
     setOpen(false)
   }
 
@@ -2707,6 +2833,7 @@ function LlmNodeCompareField({
     setEditingCandidateId(candidate.id)
     setEditModelGroupId(candidate.modelGroupId)
     setEditRoute(candidate.route)
+    setEditTestState(compareTests[candidate.id] ?? EMPTY_COMPARE_TEST_STATE)
     setEditOpen(true)
   }
 
@@ -2717,12 +2844,64 @@ function LlmNodeCompareField({
         ? { ...candidate, modelGroupId: editGroup.canonical_id, route: editRoute }
         : candidate
     )))
+    setCompareTests((current) => {
+      if (editTestState.result || editTestState.error || editTestState.running) {
+        return { ...current, [editingCandidateId]: editTestState }
+      }
+      const next = { ...current }
+      delete next[editingCandidateId]
+      return next
+    })
     setEditOpen(false)
     setEditingCandidateId(null)
+    setEditTestState(EMPTY_COMPARE_TEST_STATE)
   }
 
   const removeCandidate = (candidateId: string) => {
     setCandidates((current) => current.filter((candidate) => candidate.id !== candidateId))
+    setCompareTests((current) => {
+      const next = { ...current }
+      delete next[candidateId]
+      return next
+    })
+  }
+
+  const runDraftCompareTest = async () => {
+    if (!draftGroup) return
+    setDraftTestState({ running: true })
+    try {
+      const result = await runCompareCandidateTest(draftGroup.canonical_id, draftRoute)
+      setDraftTestState({ running: false, result })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Compare LLM test failed"
+      setDraftTestState({ running: false, error: message })
+      toast.error(message)
+    }
+  }
+
+  const runEditCompareTest = async () => {
+    if (!editGroup) return
+    setEditTestState({ running: true })
+    try {
+      const result = await runCompareCandidateTest(editGroup.canonical_id, editRoute)
+      setEditTestState({ running: false, result })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Compare LLM test failed"
+      setEditTestState({ running: false, error: message })
+      toast.error(message)
+    }
+  }
+
+  const runCandidateCompareTest = async (candidate: LlmCompareCandidateDraft) => {
+    setCompareTests((current) => ({ ...current, [candidate.id]: { running: true } }))
+    try {
+      const result = await runCompareCandidateTest(candidate.modelGroupId, candidate.route)
+      setCompareTests((current) => ({ ...current, [candidate.id]: { running: false, result } }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Compare LLM test failed"
+      setCompareTests((current) => ({ ...current, [candidate.id]: { running: false, error: message } }))
+      toast.error(message)
+    }
   }
 
   return (
@@ -2735,6 +2914,8 @@ function LlmNodeCompareField({
               key={candidate.id}
               candidate={candidate}
               modelGroups={modelGroups}
+              testState={compareTests[candidate.id]}
+              onTest={runCandidateCompareTest}
               onEdit={openEditCandidate}
               onRemove={removeCandidate}
             />
@@ -2771,6 +2952,7 @@ function LlmNodeCompareField({
                 onChange={(next) => {
                   setDraftModelGroupId(next)
                   setDraftRoute("auto")
+                  setDraftTestState(EMPTY_COMPARE_TEST_STATE)
                 }}
                 ariaLabel="Compare model"
                 placeholder={modelOptions.length > 0 ? "Choose model" : "No models"}
@@ -2786,7 +2968,10 @@ function LlmNodeCompareField({
               <SearchableOptionCombobox
                 value={draftRoute}
                 options={draftEndpointOptions}
-                onChange={setDraftRoute}
+                onChange={(next) => {
+                  setDraftRoute(next)
+                  setDraftTestState(EMPTY_COMPARE_TEST_STATE)
+                }}
                 ariaLabel="Compare model endpoint"
                 placeholder="Auto fallback"
                 emptyLabel="No endpoint found."
@@ -2794,8 +2979,21 @@ function LlmNodeCompareField({
                 disabled={!draftGroup}
               />
             </Field>
+            <LlmCompareTestResultPanel state={draftTestState} />
           </div>
           <DialogFooter>
+            <Button
+              type="button"
+              variant="default"
+              disabled={!draftGroup || draftTestState.running}
+              data-llm-compare-dialog-test-trigger="true"
+              onClick={runDraftCompareTest}
+            >
+              {draftTestState.running
+                ? <Loader2 data-llm-compare-test-icon="true" className="size-3 animate-spin" aria-hidden />
+                : <FlaskConical data-llm-compare-test-icon="true" className="size-3.5" aria-hidden />}
+              Test
+            </Button>
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               Cancel
             </Button>
@@ -2810,7 +3008,10 @@ function LlmNodeCompareField({
         open={editOpen}
         onOpenChange={(next) => {
           setEditOpen(next)
-          if (!next) setEditingCandidateId(null)
+          if (!next) {
+            setEditingCandidateId(null)
+            setEditTestState(EMPTY_COMPARE_TEST_STATE)
+          }
         }}
       >
         <DialogContent className="min-w-0 overflow-hidden sm:max-w-md">
@@ -2829,6 +3030,7 @@ function LlmNodeCompareField({
                 onChange={(next) => {
                   setEditModelGroupId(next)
                   setEditRoute("auto")
+                  setEditTestState(EMPTY_COMPARE_TEST_STATE)
                 }}
                 ariaLabel="Edit compare model"
                 placeholder={modelOptions.length > 0 ? "Choose model" : "No models"}
@@ -2844,7 +3046,10 @@ function LlmNodeCompareField({
               <SearchableOptionCombobox
                 value={editRoute}
                 options={editEndpointOptions}
-                onChange={setEditRoute}
+                onChange={(next) => {
+                  setEditRoute(next)
+                  setEditTestState(EMPTY_COMPARE_TEST_STATE)
+                }}
                 ariaLabel="Edit compare model endpoint"
                 placeholder="Auto fallback"
                 emptyLabel="No endpoint found."
@@ -2852,8 +3057,21 @@ function LlmNodeCompareField({
                 disabled={!editGroup}
               />
             </Field>
+            <LlmCompareTestResultPanel state={editTestState} />
           </div>
           <DialogFooter>
+            <Button
+              type="button"
+              variant="default"
+              disabled={!editGroup || editTestState.running}
+              data-llm-compare-dialog-test-trigger="true"
+              onClick={runEditCompareTest}
+            >
+              {editTestState.running
+                ? <Loader2 data-llm-compare-test-icon="true" className="size-3 animate-spin" aria-hidden />
+                : <FlaskConical data-llm-compare-test-icon="true" className="size-3.5" aria-hidden />}
+              Test
+            </Button>
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
@@ -2867,14 +3085,58 @@ function LlmNodeCompareField({
   )
 }
 
-function LlmCompareCandidateRow({
+export function LlmCompareTestResultPanel({
+  state,
+}: {
+  state?: LlmCompareTestState
+}) {
+  if (!state || (!state.running && !state.result && !state.error)) return null
+  const badge = state.running
+    ? roleTestStatusBadge({ running: true })
+    : roleTestStatusBadge({
+      running: false,
+      status: state.result?.status ?? (state.error ? "failed" : null),
+      error: state.error ?? null,
+    })
+  const summary = state.running ? "Testing compare LLM" : state.result?.summary ?? state.error ?? "Test failed"
+  const details = state.result?.details ?? (state.error ? [state.error] : [])
+  return (
+    <div
+      data-llm-compare-test-result="true"
+      className="rounded-md border border-border/70 bg-muted/25 px-2 py-2 text-xs text-muted-foreground"
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant={badge.variant} className="h-5">
+          {badge.running ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+          {badge.label}
+        </Badge>
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{summary}</span>
+      </div>
+      {details.length > 0 ? (
+        <ul className="mt-1 space-y-0.5">
+          {details.map((detail) => (
+            <li key={detail} className="break-words">
+              {detail}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
+export function LlmCompareCandidateRow({
   candidate,
   modelGroups,
+  testState,
+  onTest,
   onEdit,
   onRemove,
 }: {
   candidate: LlmCompareCandidateDraft
   modelGroups: ModelGroup[]
+  testState?: LlmCompareTestState
+  onTest: (candidate: LlmCompareCandidateDraft) => void
   onEdit: (candidate: LlmCompareCandidateDraft) => void
   onRemove: (candidateId: string) => void
 }) {
@@ -2887,41 +3149,73 @@ function LlmCompareCandidateRow({
   const routeLabel = candidate.route === "auto"
     ? "Auto fallback"
     : routeOptions.find((option) => option.value === candidate.route)?.label ?? "Selected endpoint"
+  const routeStatus = compareStatusToRouteStatus(testState)
+  const statusDetail = compareCandidateStatusDetail(testState)
 
   return (
-    <div className="flex items-center justify-between gap-2 text-xs text-foreground" data-llm-compare-row="true">
-      <span className="min-w-0 flex-1 truncate">
-        <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
-        <span className="mr-1.5 rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          Model
-        </span>
-        {modelLabel}
-        <span className="text-muted-foreground"> - {routeLabel}</span>
-      </span>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          type="button"
-          size="icon"
-          variant="secondary"
-          className={YAML_ICON_BUTTON_CLASS}
-          aria-label={`Edit compare LLM ${modelLabel}`}
-          onClick={() => onEdit(candidate)}
-        >
-          <Settings2 className="size-3.5" aria-hidden />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
-          variant="secondary"
-          className={YAML_ICON_BUTTON_CLASS}
-          aria-label="Remove compare LLM"
-          onClick={() => onRemove(candidate.id)}
-        >
-          <Trash2 className="size-3.5" aria-hidden />
-        </Button>
+    <div className="space-y-1.5" data-llm-compare-row="true">
+      <div
+        data-llm-compare-model-card="true"
+        className={cn(
+          "flex min-h-9 items-center gap-2 rounded-md border border-border/70 bg-muted/35 px-2 py-1.5 text-xs text-muted-foreground",
+          roleRouteStatusSurfaceClass(routeStatus),
+        )}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-foreground">{modelLabel}</div>
+          <div className="truncate">{routeLabel}</div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {routeStatus ? (
+            <span data-llm-compare-status-light="true">
+              <RoleRouteStatusLight status={routeStatus} detail={statusDetail} showTooltip={false} />
+            </span>
+          ) : null}
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="default"
+            data-llm-compare-test-trigger="true"
+            aria-label={`Test compare LLM ${modelLabel}`}
+            disabled={testState?.running}
+            onClick={() => onTest(candidate)}
+          >
+            {testState?.running
+              ? <Loader2 data-llm-compare-test-icon="true" className="size-3 animate-spin" aria-hidden />
+              : <FlaskConical data-llm-compare-test-icon="true" className="size-3.5" aria-hidden />}
+          </Button>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="secondary"
+            className={YAML_ICON_BUTTON_CLASS}
+            aria-label={`Edit compare LLM ${modelLabel}`}
+            onClick={() => onEdit(candidate)}
+          >
+            <Settings2 className="size-3.5" aria-hidden />
+          </Button>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="secondary"
+            className={YAML_ICON_BUTTON_CLASS}
+            aria-label="Remove compare LLM"
+            onClick={() => onRemove(candidate.id)}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+          </Button>
+        </div>
       </div>
+      <LlmCompareTestResultPanel state={testState} />
     </div>
   )
+}
+
+function compareCandidateStatusDetail(state: LlmCompareTestState | undefined): string | null {
+  if (state?.running) return "Testing this compare route."
+  if (state?.error) return state.error
+  if (!state?.result) return "Test has not run yet."
+  return [state.result.summary, ...state.result.details].join(" ") || null
 }
 
 function SearchableOptionCombobox({

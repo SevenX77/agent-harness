@@ -13,7 +13,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
-import { Bot, ChevronDown, Cog, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Bot, ChevronDown, Cog, FlaskConical, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -253,7 +253,9 @@ export const RoleCard = memo(function RoleCard({
               disabled={testChainRunning}
               onClick={handleRunTestChain}
             >
-              {testChainRunning ? <Loader2 className="size-3 animate-spin" /> : null}
+              {testChainRunning
+                ? <Loader2 data-role-test-icon="true" className="size-3 animate-spin" />
+                : <FlaskConical data-role-test-icon="true" className="size-3.5" />}
               {testChainRunning ? "Testing" : "Test"}
             </Button>
             <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>

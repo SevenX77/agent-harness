@@ -122,3 +122,35 @@ def test_bundle_test_job_targets_bundle_routes_without_touching_role_store(
     assert reloaded.roles == {}
     # The job is registered in the same in-memory job store role tests use.
     assert job.job_id in llm_router._role_test_jobs
+
+
+def test_compare_candidate_test_job_targets_temporary_model_group_without_touching_role_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    from app.routers import llm as llm_router
+    from app.routers.llm import (
+        CompareCandidateTestRequest,
+        start_compare_candidate_test_job,
+    )
+
+    before = roles_path().read_text(encoding="utf-8")
+
+    job = asyncio.run(
+        start_compare_candidate_test_job(
+            CompareCandidateTestRequest(
+                canonical_id="gpt-5",
+                route_id="openai-direct:gpt-5",
+            )
+        )
+    )
+
+    assert job.role_name.startswith("__compare__")
+    assert job.status in {"queued", "running"}
+    assert [progress.route_id for progress in job.provider_statuses] == [
+        "openai-direct:gpt-5"
+    ]
+    after = roles_path().read_text(encoding="utf-8")
+    assert before == after
+    assert "__compare__" not in load_roles_file(roles_path()).roles
+    assert job.job_id in llm_router._role_test_jobs

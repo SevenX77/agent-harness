@@ -1789,6 +1789,21 @@ export async function startBundleTestJob(bundleId: string): Promise<RoleTestJobR
   return response.data
 }
 
+export interface CompareCandidateTestRequest {
+  canonical_id: string
+  route_id?: string | null
+}
+
+export async function startCompareCandidateTestJob(
+  request: CompareCandidateTestRequest,
+): Promise<RoleTestJobResponse> {
+  const response = await api.post<RoleTestJobResponse>(
+    '/llm/model-groups/test-jobs',
+    request,
+  )
+  return response.data
+}
+
 export async function getRoleTestJob(jobId: string): Promise<RoleTestJobResponse> {
   const response = await api.get<RoleTestJobResponse>(`/llm/role-test-jobs/${segment(jobId)}`)
   return response.data

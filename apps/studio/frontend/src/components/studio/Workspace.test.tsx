@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   panelsProps: null as null | {
     onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
     workspaceRoot?: string | null
+    onOpenSettings?: (tab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot') => void
   },
   graphCanvasProps: null as null | {
     skillId?: string | null
@@ -91,6 +92,10 @@ const mocks = vi.hoisted(() => ({
   runStreamEvents: [] as EventEnvelope[],
   fetchRunDetail: vi.fn(),
   refreshLocalHistory: vi.fn(),
+  settingsPageProps: null as null | {
+    initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
+    onClose?: () => void
+  },
 }))
 
 const toastMocks = vi.hoisted(() => ({
@@ -284,7 +289,13 @@ vi.mock('./Panels', () => ({
 }))
 
 vi.mock('./SettingsPage', () => ({
-  SettingsPage: () => <div data-testid="settings" />,
+  SettingsPage: (props: {
+    initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
+    onClose?: () => void
+  }) => {
+    mocks.settingsPageProps = props
+    return <div data-testid="settings" data-initial-tab={props.initialTab} />
+  },
 }))
 
 vi.mock('./LazyMonacoPanel', () => ({
@@ -371,6 +382,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.refreshLocalHistory.mockReset()
     toastMocks.warning.mockReset()
     mocks.panelsProps = null
+    mocks.settingsPageProps = null
     mocks.graphCanvasProps = null
     mocks.centerActionBarProps = null
     mocks.conflictDialogProps = null
@@ -1205,17 +1217,48 @@ describe('Workspace WS-1 local writer contracts', () => {
 
       const toggle = container.querySelector('[data-testid="settings-toggle"]')
       expect(toggle).not.toBeNull()
-      expect(container.querySelector('[data-testid="settings"]')).toBeNull()
+      expect(document.body.querySelector('[data-testid="settings"]')).toBeNull()
 
       act(() => {
         toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
-      expect(container.querySelector('[data-testid="settings"]')).not.toBeNull()
+      expect(document.body.querySelector('[data-testid="settings"]')).not.toBeNull()
+      expect(mocks.settingsPageProps?.initialTab).toBe('general')
 
       act(() => {
         toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
-      expect(container.querySelector('[data-testid="settings"]')).toBeNull()
+      expect(document.body.querySelector('[data-testid="settings"]')).toBeNull()
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('opens Settings modal on the LLM Roles tab when requested by a panel field', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+
+      expect(mocks.panelsProps?.onOpenSettings).toBeTypeOf('function')
+      act(() => {
+        mocks.panelsProps?.onOpenSettings?.('llm_roles')
+      })
+
+      expect(document.body.querySelector('[data-testid="settings"]')).not.toBeNull()
+      expect(mocks.settingsPageProps?.initialTab).toBe('llm_roles')
     } finally {
       act(() => {
         root.unmount()

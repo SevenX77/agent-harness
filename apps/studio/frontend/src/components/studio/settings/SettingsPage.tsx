@@ -397,9 +397,9 @@ export function upsertProviderModels(
   )
 }
 
-export function SettingsPage({ onClose }: SettingsPageProps) {
+export function SettingsPage({ onClose, initialTab = "general" }: SettingsPageProps) {
   const appSettings = useAppSettings()
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general")
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
   const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
@@ -438,6 +438,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         : { ...draft, isTesting: false, testingAction: null }
     })
   }, [drafts, pendingAddProviderDraft, providerTestingActions])
+
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
 
   const handleSaved = useCallback((next: CredentialsState) => {
     const nextCredentials: CredentialsState = {

@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { AxiosError } from "axios"
-import { AlertTriangle, CircleHelp, FolderOpen, Loader2, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FolderOpen, Loader2, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import {
   Dialog,
   DialogContent,
@@ -23,6 +31,7 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -42,11 +51,13 @@ import type { ResumeRunOptions } from "@/api/client"
 import { isPathInsideWorkspaceRoot, subgraphPathFieldState, subgraphPathValueFromSelection } from "@/components/studio/subgraph-path"
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
 import { getChildGraphTopology } from "@/api/client"
-import { getRoles } from "@/api/llm"
+import { getModelGroups, getRoles, type RoleEntry, type RolesData, type ModelGroup } from "@/api/llm"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
+import { cn } from "@/lib/utils"
 import { errorMessage } from "@/utils/errors"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
+import type { SettingsTab } from "../SettingsPage"
 import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
@@ -103,6 +114,188 @@ interface AllowOverwriteCandidate {
   upstreamPhaseIds: string[]
 }
 
+interface LlmCompareRouteOption {
+  value: string
+  label: string
+  detail?: string
+}
+
+interface SearchableComboboxOption {
+  value: string
+  label: string
+  section?: string
+  searchValue?: string
+  detail?: string
+  unconfigured?: boolean
+}
+
+export function graphAgentRoleNamesForProperties(data: Pick<RolesData, "roles">): string[] {
+  return Object.entries(data.roles)
+    .filter(([, role]: [string, RoleEntry]) => role.role_kind !== "copilot")
+    .map(([name]) => name)
+    .sort((left, right) => left.localeCompare(right))
+}
+
+function modelGroupPickerLabel(group: ModelGroup): string {
+  return group.display_name.trim() || group.canonical_id.trim()
+}
+
+function modelGroupSectionLabel(group: ModelGroup): string {
+  const explicit = group.section_label?.trim()
+  if (explicit) return explicit
+  const haystack = [
+    group.display_name,
+    group.canonical_id,
+    ...group.provider_models.flatMap((providerModel) => [
+      providerModel.provider_label,
+      providerModel.provider_model_id,
+    ]),
+  ].join(" ").toLowerCase()
+
+  if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic"
+  if (haystack.includes("deepseek")) return "deepseek"
+  if (haystack.includes("openai") || /\bgpt[-_\s.]?\d/.test(haystack)) return "openai"
+  if (haystack.includes("gemini") || haystack.includes("antigravity") || /\baqa\b/.test(haystack)) return "gemini"
+  if (haystack.includes("qwen") || haystack.includes("dashscope") || haystack.includes("alibaba")) return "qwen"
+  if (haystack.includes("doubao") || haystack.includes("volcengine") || haystack.includes("ark")) return "ark"
+  return group.canonical_id.split(/[-_.]/)[0] || "unknown"
+}
+
+export function compareModelGroupsForPicker(groups: readonly ModelGroup[]): ModelGroup[] {
+  return [...groups]
+    .filter((group) => {
+      const id = group.canonical_id.trim()
+      const label = modelGroupPickerLabel(group)
+      const hasRoute = group.provider_models.some((model) => model.route_id.trim().length > 0)
+      return Boolean(id && label && hasRoute)
+    })
+    .sort((left, right) => (
+      modelGroupSectionLabel(left).localeCompare(modelGroupSectionLabel(right), undefined, { numeric: true, sensitivity: "base" })
+      || modelGroupPickerLabel(left).localeCompare(modelGroupPickerLabel(right), undefined, { numeric: true, sensitivity: "base" })
+    ))
+}
+
+export function modelGroupRouteOptions(group: ModelGroup | null): LlmCompareRouteOption[] {
+  const seen = new Set<string>()
+  const options: LlmCompareRouteOption[] = []
+  for (const model of group?.provider_models ?? []) {
+    const routeId = model.route_id.trim()
+    if (!routeId || seen.has(routeId)) {
+      continue
+    }
+    seen.add(routeId)
+    const endpointId = model.endpoint_id?.trim()
+    const providerLabel = model.provider_label.trim()
+    const providerModelId = model.provider_model_id.trim()
+    options.push({
+      value: `route:${routeId}`,
+      label: providerLabel || endpointId || routeId,
+      detail: [
+        endpointId ? `Endpoint: ${endpointId}` : null,
+        providerModelId ? `Model: ${providerModelId}` : null,
+        `Route: ${routeId}`,
+      ].filter(Boolean).join("\n"),
+    })
+  }
+  return options
+}
+
+function providerModelsByRouteId(modelGroups: readonly ModelGroup[]): Map<string, ModelGroup["provider_models"][number]> {
+  const byRouteId = new Map<string, ModelGroup["provider_models"][number]>()
+  for (const group of modelGroups) {
+    for (const providerModel of group.provider_models) {
+      byRouteId.set(providerModel.route_id, providerModel)
+    }
+  }
+  return byRouteId
+}
+
+function routeOptionFromRouteId(
+  routeId: string,
+  providerModelByRouteId: ReadonlyMap<string, ModelGroup["provider_models"][number]>,
+): LlmCompareRouteOption | null {
+  const trimmedRouteId = routeId.replace(/^route:/, "").trim()
+  if (!trimmedRouteId) return null
+  const providerModel = providerModelByRouteId.get(trimmedRouteId)
+  const endpointId = providerModel?.endpoint_id?.trim()
+  const providerLabel = providerModel?.provider_label.trim()
+  const providerModelId = providerModel?.provider_model_id.trim()
+  return {
+    value: `route:${trimmedRouteId}`,
+    label: providerLabel || endpointId || trimmedRouteId,
+    detail: [
+      endpointId ? `Endpoint: ${endpointId}` : null,
+      providerModelId ? `Model: ${providerModelId}` : null,
+      `Route: ${trimmedRouteId}`,
+    ].filter(Boolean).join("\n"),
+  }
+}
+
+export function roleEndpointRouteOptions(
+  role: RoleEntry | null | undefined,
+  modelGroups: readonly ModelGroup[],
+): LlmCompareRouteOption[] {
+  const routeIds = role?.fallback_chain?.length
+    ? role.fallback_chain.map((entry) => entry.route_id)
+    : Object.values(role?.models ?? {}).flatMap((model) => model.providers)
+  const providerModelByRouteId = providerModelsByRouteId(modelGroups)
+  const seen = new Set<string>()
+  const options: LlmCompareRouteOption[] = []
+  for (const routeId of routeIds) {
+    const option = routeOptionFromRouteId(routeId, providerModelByRouteId)
+    if (!option || seen.has(option.value)) continue
+    seen.add(option.value)
+    options.push(option)
+  }
+  return options
+}
+
+function endpointComboboxOptions(options: readonly LlmCompareRouteOption[]): SearchableComboboxOption[] {
+  return [
+    { value: "auto", label: "Auto fallback", searchValue: "auto fallback" },
+    ...options.map((option) => {
+      const next: SearchableComboboxOption = {
+        value: option.value,
+        label: option.label,
+        searchValue: [option.label, option.detail ?? "", option.value].join(" "),
+      }
+      if (option.detail) {
+        next.detail = option.detail
+      }
+      return next
+    }),
+  ]
+}
+
+export function normalizeCompareSearch(value: string): string {
+  return value.toLowerCase().replace(/[\s\-_.:/()]+/g, "")
+}
+
+export function llmCompareModelGroupSearchValue(group: ModelGroup): string {
+  return [
+    modelGroupPickerLabel(group),
+    group.canonical_id,
+    ...group.provider_models.flatMap((model) => [
+      model.provider_label,
+      model.provider_model_id,
+      model.endpoint_id ?? "",
+      model.route_id,
+    ]),
+  ].join(" ")
+}
+
+export function llmCompareModelGroupFilter(value: string, search: string): number {
+  const tokens = search
+    .split(/\s+/)
+    .map((token) => normalizeCompareSearch(token))
+    .filter(Boolean)
+  if (tokens.length === 0) {
+    return 1
+  }
+  const haystack = normalizeCompareSearch(value)
+  return tokens.every((token) => haystack.includes(token)) ? 1 : 0
+}
+
 export function subagentSkillFilePath(skillId: string, subagent: SubagentRef): string {
   return `${skillId}/${subagent.path}/SKILL.md`
 }
@@ -133,6 +326,7 @@ interface PropertiesPanelProps {
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   /** Per-node golden promote (atom #32): write golden for just this node from the active run. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
+  onOpenSettings?: (tab?: SettingsTab) => void
 }
 
 export function PropertiesPanel({
@@ -155,23 +349,34 @@ export function PropertiesPanel({
   onValidatorCreate,
   onResumeNode,
   onPromoteNode,
+  onOpenSettings,
 }: PropertiesPanelProps) {
 
   // Configured LLM roles for the llm_role dropdown (GET /llm/roles). Fetched once on
   // mount; a stale list just means the author may need to reopen after editing roles
-  // in Settings. On failure it stays empty — the field still shows (graph default)
+  // in Settings. On failure it stays empty 鈥?the field still shows (graph default)
   // plus the current value, so nothing is lost.
   const [roleNames, setRoleNames] = useState<string[]>([])
+  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([])
   useEffect(() => {
     let cancelled = false
     getRoles()
       .then((data) => {
         if (!cancelled) {
-          setRoleNames(Object.keys(data.roles).sort((a, b) => a.localeCompare(b)))
+          setRoleNames(graphAgentRoleNamesForProperties(data))
         }
       })
       .catch(() => {
-        // Roles unavailable (backend not ready / none configured) — leave empty.
+        // Roles unavailable (backend not ready / none configured) 鈥?leave empty.
+      })
+    getModelGroups()
+      .then((data) => {
+        if (!cancelled) {
+          setModelGroups(compareModelGroupsForPicker(data))
+        }
+      })
+      .catch(() => {
+        // Model groups unavailable; compare source selector can still offer roles.
       })
     return () => {
       cancelled = true
@@ -210,6 +415,7 @@ export function PropertiesPanel({
       ? graphDraft ?? graphFormState.form
       : graphFormState.form
     : null
+  const graphDefaultRole = activeGraphDraft?.llmRole.trim() || null
   const graphDirty = Boolean(activeGraphDraft && graphFormState.ok && !graphFormsEqual(activeGraphDraft, graphFormState.form))
   const graphCanSave = Boolean(onPhaseFileSave && graphContent !== undefined && activeGraphDraft && graphFormState.ok && graphDirty && !graphSaving)
 
@@ -343,7 +549,7 @@ export function PropertiesPanel({
 
   // Reuses the settings role-test job runner (runRoleTestJobToResult) verbatim so
   // the node Properties Test button verifies the same backend job + status the
-  // Settings page does (settings-ux-spec §2.7). No re-implementation.
+  // Settings page does (settings-ux-spec 搂2.7). No re-implementation.
   const handleRoleTest = useCallback(async (roleName: string) => {
     const trimmed = roleName.trim()
     if (!trimmed) {
@@ -361,7 +567,7 @@ export function PropertiesPanel({
     }
   }, [])
 
-  // Subgraph "import folder" affordance (n2-properties #20 / F4·R5): when the
+  // Subgraph "import folder" affordance (n2-properties #20 / F4-R5): when the
   // child-graph path is missing/unresolvable, let the author pick the child
   // graph root via the native OS directory picker (Rust `select_directory`,
   // Desktop-only with a graceful toast off-desktop) and write the chosen
@@ -432,6 +638,8 @@ export function PropertiesPanel({
                 canReset={dirty && !saving}
                 roleTest={roleTest}
                 roleNames={roleNames}
+                modelGroups={modelGroups}
+                graphDefaultRole={graphDefaultRole}
                 fieldErrors={fieldErrors}
                 allowOverwriteCandidates={allowOverwriteCandidates}
                 skillId={skillId}
@@ -452,6 +660,7 @@ export function PropertiesPanel({
                 onRoleTest={(roleName) => {
                   void handleRoleTest(roleName)
                 }}
+                onOpenSettings={onOpenSettings}
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -484,6 +693,7 @@ export function PropertiesPanel({
                 onSave={() => {
                   void handleGraphSave()
                 }}
+                onOpenSettings={onOpenSettings}
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -629,6 +839,7 @@ function GraphFrontmatterForm({
   onFieldChange,
   onReset,
   onSave,
+  onOpenSettings,
 }: {
   value: GraphFrontmatterFormData
   roleNames: string[]
@@ -638,11 +849,21 @@ function GraphFrontmatterForm({
   onFieldChange: <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => void
   onReset: () => void
   onSave: () => void
+  onOpenSettings?: (tab?: SettingsTab) => void
 }) {
   const trimmedGraphRole = value.llmRole.trim()
-  const graphRoleOptions = trimmedGraphRole && !roleNames.includes(trimmedGraphRole)
-    ? [trimmedGraphRole, ...roleNames]
-    : roleNames
+  const graphComboboxOptions = useMemo<SearchableComboboxOption[]>(
+    () => {
+      const graphRoleOptions = trimmedGraphRole && !roleNames.includes(trimmedGraphRole)
+        ? [trimmedGraphRole, ...roleNames]
+        : roleNames
+      return [
+        { value: GRAPH_LLM_ROLE_NONE_SENTINEL, label: "(none)", searchValue: "none" },
+        ...graphRoleOptions.map((name) => llmRoleComboboxOption(name, roleNames.includes(name))),
+      ]
+    },
+    [roleNames, trimmedGraphRole],
+  )
   return (
     <form
       className="space-y-2"
@@ -681,34 +902,32 @@ function GraphFrontmatterForm({
                   Manage roles in Settings &rsaquo; LLM Roles.
                 </HelpTooltip>
               </YamlFieldLabel>
-              <Select
-                value={trimmedGraphRole || GRAPH_LLM_ROLE_NONE_SENTINEL}
-                onValueChange={(next) => onFieldChange("llmRole", next === GRAPH_LLM_ROLE_NONE_SENTINEL ? "" : next)}
-              >
-                <SelectTrigger id="graph-llm-role" aria-label="llm_role" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={GRAPH_LLM_ROLE_NONE_SENTINEL}>(none)</SelectItem>
-                  {graphRoleOptions.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {roleNames.includes(name) ? name : `${name} (not configured)`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <SearchableOptionCombobox
+                  id="graph-llm-role"
+                  value={trimmedGraphRole || GRAPH_LLM_ROLE_NONE_SENTINEL}
+                  options={graphComboboxOptions}
+                  onChange={(next) => onFieldChange("llmRole", next === GRAPH_LLM_ROLE_NONE_SENTINEL ? "" : next)}
+                  ariaLabel="llm_role"
+                  placeholder="Select a role"
+                  searchPlaceholder="Search roles"
+                  emptyLabel="No role found."
+                  triggerClassName="min-w-0 flex-1"
+                />
+                <LlmRoleSettingsButton onOpenSettings={onOpenSettings} />
+              </div>
             </Field>
           </PanelFieldRow>
         </FieldGroup>
-        <PanelActions>
-          <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
-            Reset
-          </Button>
-          <Button type="submit" size="sm" disabled={!canSave}>
-            {saving ? "Saving" : "Save"}
-          </Button>
-        </PanelActions>
       </FieldSet>
+      <PanelActions>
+        <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
+          Reset
+        </Button>
+        <Button type="submit" size="sm" disabled={!canSave}>
+          {saving ? "Saving" : "Save"}
+        </Button>
+      </PanelActions>
     </form>
   )
 }
@@ -1003,6 +1222,8 @@ function PhaseFrontmatterForm({
   canReset,
   roleTest,
   roleNames,
+  modelGroups,
+  graphDefaultRole,
   fieldErrors,
   allowOverwriteCandidates,
   skillId,
@@ -1019,6 +1240,7 @@ function PhaseFrontmatterForm({
   onReset,
   onSave,
   onRoleTest,
+  onOpenSettings,
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
@@ -1027,6 +1249,8 @@ function PhaseFrontmatterForm({
   canReset: boolean
   roleTest: RoleTestStatusInput
   roleNames: string[]
+  modelGroups: ModelGroup[]
+  graphDefaultRole: string | null
   fieldErrors: Record<string, LintError[]>
   allowOverwriteCandidates: AllowOverwriteCandidate[]
   skillId: string | null
@@ -1043,6 +1267,7 @@ function PhaseFrontmatterForm({
   onReset: () => void
   onSave: () => void
   onRoleTest: (roleName: string) => void
+  onOpenSettings?: (tab?: SettingsTab) => void
 }) {
   return (
     <form
@@ -1067,10 +1292,13 @@ function PhaseFrontmatterForm({
                   key={phaseId}
                   value={value.llmRole}
                   roleNames={roleNames}
+                  modelGroups={modelGroups}
+                  graphDefaultRole={graphDefaultRole}
                   roleTest={roleTest}
                   errors={fieldErrors.llm_role}
                   onChange={(next) => onFieldChange("llmRole", next)}
                   onRoleTest={onRoleTest}
+                  onOpenSettings={onOpenSettings}
                 />
               </PanelFieldRow>
               <PanelFieldRow>
@@ -1223,15 +1451,15 @@ function PhaseFrontmatterForm({
             />
           </PanelFieldRow>
         </FieldGroup>
-        <PanelActions>
-          <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
-            Reset
-          </Button>
-          <Button type="submit" size="sm" disabled={!canSave}>
-            {saving ? "Saving" : "Save"}
-          </Button>
-        </PanelActions>
       </FieldSet>
+      <PanelActions>
+        <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
+          Reset
+        </Button>
+        <Button type="submit" size="sm" disabled={!canSave}>
+          {saving ? "Saving" : "Save"}
+        </Button>
+      </PanelActions>
     </form>
   )
 }
@@ -1302,13 +1530,13 @@ function ActionsField({
           ))}
         </div>
       ) : (
-        <FieldDescription>No actions yet — add one to scaffold its file.</FieldDescription>
+        <FieldDescription>No actions yet 鈥?add one to scaffold its file.</FieldDescription>
       )}
       {onActionCreate ? (
         <AddActionDialog existing={[...declared, ...orphans]} onAdd={(name) => onActionCreate(phaseId, name)} />
       ) : null}
       {/* n2-properties #19: an action's writeable outputs are bounded by io.outputs,
-          edited in the I/O panel — surfaced here as a non-blocking hint. */}
+          edited in the I/O panel 鈥?surfaced here as a non-blocking hint. */}
       <FieldDescription>
         Output fields an action writes are bounded by io.outputs - edit those field boundaries in the I/O panel (toolbar tab 3).
       </FieldDescription>
@@ -1456,7 +1684,7 @@ function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
             <FieldDescription>
-              A Python identifier — becomes <span className="font-mono">def &lt;name&gt;(context)</span>.
+              A Python identifier 鈥?becomes <span className="font-mono">def &lt;name&gt;(context)</span>.
             </FieldDescription>
             {invalid ? (
               <p className="text-xs text-destructive">Use letters, digits, underscore; not starting with a digit.</p>
@@ -1832,9 +2060,9 @@ function IterateField({
         <YamlNestedFieldLabel htmlFor="phase-iterate-mode">
           mode
           <HelpTooltip label="About iterate mode">
-            <p><span className="font-mono">off</span> — run once.</p>
-            <p><span className="font-mono">batch</span> — map over the array concurrently, each item independent.</p>
-            <p><span className="font-mono">loop</span> — iterate serially and accumulate results across rounds.</p>
+            <p><span className="font-mono">off</span> 鈥?run once.</p>
+            <p><span className="font-mono">batch</span> 鈥?map over the array concurrently, each item independent.</p>
+            <p><span className="font-mono">loop</span> 鈥?iterate serially and accumulate results across rounds.</p>
           </HelpTooltip>
         </YamlNestedFieldLabel>
         <Select
@@ -1998,10 +2226,10 @@ function IterateField({
                         accumulate.merge
                         <HelpTooltip label="About accumulate.merge">
                           <p>How each increment joins the accumulator:</p>
-                          <p><span className="font-mono">append</span> — add the increment as one item.</p>
-                          <p><span className="font-mono">extend</span> — concatenate a list of items.</p>
-                          <p><span className="font-mono">merge</span> — merge objects key by key.</p>
-                          <p><span className="font-mono">replace</span> — overwrite with the latest value.</p>
+                          <p><span className="font-mono">append</span> 鈥?add the increment as one item.</p>
+                          <p><span className="font-mono">extend</span> 鈥?concatenate a list of items.</p>
+                          <p><span className="font-mono">merge</span> 鈥?merge objects key by key.</p>
+                          <p><span className="font-mono">replace</span> 鈥?overwrite with the latest value.</p>
                         </HelpTooltip>
                       </YamlNestedFieldLabel>
                       <Select
@@ -2063,9 +2291,9 @@ function RoleTestControl({
   )
 }
 
-// validator gates on whether the sibling validator.py EXISTS. No file → there is no
+// validator gates on whether the sibling validator.py EXISTS. No file 鈫?there is no
 // switch, only a "Create validator.py" action (scaffolds a passing stub + flips the
-// flag on). File present → the on/off switch plus an Edit button. Mirrors the user's
+// flag on). File present 鈫?the on/off switch plus an Edit button. Mirrors the user's
 // rule that the toggle is only meaningful once the file backing it exists.
 function ValidatorField({
   value,
@@ -2247,35 +2475,40 @@ function SubagentsField({
   )
 }
 
-// llm_role as a dropdown of CONFIGURED roles (GET /llm/roles), gated by a "Use graph
-// default" toggle. Empty frontmatter = inherit the graph's llm_role (toggle on, dropdown
-// disabled); a written value = a specific role (toggle off). A value not among the
-// configured roles (hand-typed or since-deleted) is still surfaced so saving never drops
-// it. Remounts per node (key={phaseId}) so the toggle reflects the selected node.
+// llm_role as a dropdown of CONFIGURED roles (GET /llm/roles). "Use graph default"
+// is a local run override and must not rewrite the node's frontmatter value; the
+// combobox always reflects the exact llm_role stored in the node markdown.
 function LlmRoleField({
   value,
   roleNames,
+  modelGroups,
+  graphDefaultRole,
   roleTest,
   errors,
   onChange,
   onRoleTest,
+  onOpenSettings,
 }: {
   value: string
   roleNames: string[]
+  modelGroups: ModelGroup[]
+  graphDefaultRole: string | null
   roleTest: RoleTestStatusInput
   errors?: LintError[]
   onChange: (next: string) => void
   onRoleTest: (roleName: string) => void
+  onOpenSettings?: (tab?: SettingsTab) => void
 }) {
   const trimmed = value.trim()
-  // A written role is always "custom"; while empty, this local flag distinguishes
-  // "mid-selecting a custom role" from "using the graph default" (both are empty
-  // frontmatter until a role is picked).
-  const [customizing, setCustomizing] = useState(trimmed !== "")
-  const isCustom = trimmed !== "" || customizing
+  const [useGraphDefault, setUseGraphDefault] = useState(trimmed === "")
+  const runtimeRole = useGraphDefault ? graphDefaultRole?.trim() || "" : trimmed
   const options = useMemo(
     () => (trimmed && !roleNames.includes(trimmed) ? [trimmed, ...roleNames] : roleNames),
     [roleNames, trimmed],
+  )
+  const roleComboboxOptions = useMemo<SearchableComboboxOption[]>(
+    () => options.map((name) => llmRoleComboboxOption(name, roleNames.includes(name))),
+    [options, roleNames],
   )
 
   return (
@@ -2299,50 +2532,533 @@ function LlmRoleField({
         <Switch
           id="phase-llm-role-default"
           size="sm"
-          checked={!isCustom}
+          checked={useGraphDefault}
           aria-label="Use graph default llm_role"
-          onCheckedChange={(useDefault) => {
-            if (useDefault) {
-              setCustomizing(false)
-              onChange("")
-            } else {
-              setCustomizing(true)
-            }
-          }}
+          onCheckedChange={setUseGraphDefault}
         />
       </Field>
-      <div className="flex items-center gap-2">
-        <Select
-          value={trimmed || undefined}
-          disabled={!isCustom}
-          onValueChange={(next) => onChange(next)}
-        >
-          <SelectTrigger id="phase-llm-role" aria-label="llm_role" className="min-w-0 flex-1">
-            <SelectValue placeholder="Select a role" />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((name) => (
-              <SelectItem key={name} value={name}>
-                {roleNames.includes(name) ? name : `${name} (not configured)`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <RoleTestControl
-          roleName={value}
-          roleTest={roleTest}
-          onRoleTest={onRoleTest}
-        />
+      <div className="space-y-2">
+        <div className="space-y-1">
+          <YamlNestedFieldLabel htmlFor="phase-llm-role">Run role</YamlNestedFieldLabel>
+          <div className="flex items-center gap-2">
+            <SearchableOptionCombobox
+              id="phase-llm-role"
+              value={trimmed}
+              options={roleComboboxOptions}
+              onChange={(next) => {
+                setUseGraphDefault(false)
+                onChange(next)
+              }}
+              ariaLabel="llm_role"
+              placeholder="No node role"
+              searchPlaceholder="Search roles"
+              emptyLabel="No role found."
+              triggerClassName="min-w-0 flex-1"
+            />
+            <LlmRoleSettingsButton onOpenSettings={onOpenSettings} />
+            <RoleTestControl
+              roleName={runtimeRole}
+              roleTest={roleTest}
+              onRoleTest={onRoleTest}
+            />
+          </div>
+        </div>
       </div>
+      <LlmNodeCompareField
+        modelGroups={modelGroups}
+      />
     </Field>
   )
 }
 
+function llmRoleComboboxOption(name: string, configured: boolean): SearchableComboboxOption {
+  const option = llmRoleSelectOptionState(name, configured)
+  const next: SearchableComboboxOption = {
+    value: name,
+    label: option.label,
+    searchValue: `${name} ${option.label}`,
+    unconfigured: option.unconfigured,
+  }
+  if (option.title) {
+    next.detail = option.title
+  }
+  return next
+}
+
+function LlmRoleSettingsButton({ onOpenSettings }: { onOpenSettings?: (tab?: SettingsTab) => void }) {
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="secondary"
+      className={YAML_ICON_BUTTON_CLASS}
+      title="Open LLM Roles settings"
+      aria-label="Open LLM Roles settings"
+      data-llm-role-settings-trigger="true"
+      onClick={() => onOpenSettings?.("llm_roles")}
+    >
+      <Settings2 className="size-3.5" aria-hidden />
+    </Button>
+  )
+}
+
+export function llmRoleSelectOptionState(name: string, configured: boolean): {
+  label: string
+  title?: string
+  unconfigured: boolean
+} {
+  if (configured) {
+    return { label: name, unconfigured: false }
+  }
+  return {
+    label: `${name} (not configured)`,
+    title: `${name} is not configured in LLM Roles`,
+    unconfigured: true,
+  }
+}
+
+interface LlmCompareCandidateDraft {
+  id: string
+  modelGroupId: string
+  route: string
+}
+
+function LlmNodeCompareField({
+  modelGroups,
+}: {
+  modelGroups: ModelGroup[]
+}) {
+  const nextCandidateId = useRef(0)
+  const [open, setOpen] = useState(false)
+  const [candidates, setCandidates] = useState<LlmCompareCandidateDraft[]>([])
+  const [draftModelGroupId, setDraftModelGroupId] = useState("")
+  const [draftRoute, setDraftRoute] = useState("auto")
+  const [editOpen, setEditOpen] = useState(false)
+  const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null)
+  const [editModelGroupId, setEditModelGroupId] = useState("")
+  const [editRoute, setEditRoute] = useState("auto")
+  const modelOptions = useMemo<SearchableComboboxOption[]>(
+    () => modelGroups.map((group) => {
+      const option: SearchableComboboxOption = {
+        value: group.canonical_id,
+        label: modelGroupPickerLabel(group),
+        searchValue: llmCompareModelGroupSearchValue(group),
+      }
+      option.section = modelGroupSectionLabel(group)
+      return option
+    }),
+    [modelGroups],
+  )
+  const defaultModelGroupId = modelGroups[0]?.canonical_id ?? ""
+  const draftGroup = modelGroups.find((group) => group.canonical_id === draftModelGroupId) ?? null
+  const draftEndpointOptions = useMemo<SearchableComboboxOption[]>(
+    () => endpointComboboxOptions(modelGroupRouteOptions(draftGroup)),
+    [draftGroup],
+  )
+  const editGroup = modelGroups.find((group) => group.canonical_id === editModelGroupId) ?? null
+  const editEndpointOptions = useMemo<SearchableComboboxOption[]>(
+    () => endpointComboboxOptions(modelGroupRouteOptions(editGroup)),
+    [editGroup],
+  )
+
+  useEffect(() => {
+    if (!draftModelGroupId || !modelGroups.some((group) => group.canonical_id === draftModelGroupId)) {
+      setDraftModelGroupId(defaultModelGroupId)
+      setDraftRoute("auto")
+    }
+  }, [defaultModelGroupId, draftModelGroupId, modelGroups])
+
+  useEffect(() => {
+    if (!draftEndpointOptions.some((option) => option.value === draftRoute)) {
+      setDraftRoute("auto")
+    }
+  }, [draftEndpointOptions, draftRoute])
+
+  useEffect(() => {
+    if (!editOpen) return
+    if (!editModelGroupId || !modelGroups.some((group) => group.canonical_id === editModelGroupId)) {
+      setEditModelGroupId(defaultModelGroupId)
+      setEditRoute("auto")
+    }
+  }, [defaultModelGroupId, editModelGroupId, editOpen, modelGroups])
+
+  useEffect(() => {
+    if (!editOpen) return
+    if (!editEndpointOptions.some((option) => option.value === editRoute)) {
+      setEditRoute("auto")
+    }
+  }, [editEndpointOptions, editOpen, editRoute])
+
+  const addCandidate = () => {
+    if (!draftGroup) return
+    nextCandidateId.current += 1
+    setCandidates((current) => [
+      ...current,
+      {
+        id: `compare-${nextCandidateId.current}`,
+        modelGroupId: draftGroup.canonical_id,
+        route: draftRoute,
+      },
+    ])
+    setOpen(false)
+  }
+
+  const openEditCandidate = (candidate: LlmCompareCandidateDraft) => {
+    setEditingCandidateId(candidate.id)
+    setEditModelGroupId(candidate.modelGroupId)
+    setEditRoute(candidate.route)
+    setEditOpen(true)
+  }
+
+  const saveCandidateEdit = () => {
+    if (!editingCandidateId || !editGroup) return
+    setCandidates((current) => current.map((candidate) => (
+      candidate.id === editingCandidateId
+        ? { ...candidate, modelGroupId: editGroup.canonical_id, route: editRoute }
+        : candidate
+    )))
+    setEditOpen(false)
+    setEditingCandidateId(null)
+  }
+
+  const removeCandidate = (candidateId: string) => {
+    setCandidates((current) => current.filter((candidate) => candidate.id !== candidateId))
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <YamlNestedFieldLabel>Compare LLMs</YamlNestedFieldLabel>
+      <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2" aria-label="LLM compare candidates">
+        {candidates.length > 0
+          ? candidates.map((candidate) => (
+            <LlmCompareCandidateRow
+              key={candidate.id}
+              candidate={candidate}
+              modelGroups={modelGroups}
+              onEdit={openEditCandidate}
+              onRemove={removeCandidate}
+            />
+          ))
+          : <FieldDescription>No compare LLMs yet.</FieldDescription>}
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            data-llm-role-compare-trigger="true"
+            aria-label="Add LLM compare candidate"
+            className="mt-1 w-full"
+          >
+            <Plus className="size-3.5" aria-hidden />
+            Add compare LLM
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="min-w-0 overflow-hidden sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add compare LLM</DialogTitle>
+            <DialogDescription>
+              Choose a temporary model candidate for this node. This does not write to SKILL.md.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-w-0 space-y-3">
+            <Field className="min-w-0">
+              <FieldLabel>Model</FieldLabel>
+              <SearchableOptionCombobox
+                value={draftModelGroupId}
+                options={modelOptions}
+                onChange={(next) => {
+                  setDraftModelGroupId(next)
+                  setDraftRoute("auto")
+                }}
+                ariaLabel="Compare model"
+                placeholder={modelOptions.length > 0 ? "Choose model" : "No models"}
+                searchPlaceholder="Search models"
+                emptyLabel="No model found."
+                disabled={modelOptions.length === 0}
+                dataSelectAttribute="data-llm-compare-model-group-select"
+                dataSearchAttribute="data-llm-compare-model-group-search"
+              />
+            </Field>
+            <Field className="min-w-0">
+              <FieldLabel>Endpoint</FieldLabel>
+              <SearchableOptionCombobox
+                value={draftRoute}
+                options={draftEndpointOptions}
+                onChange={setDraftRoute}
+                ariaLabel="Compare model endpoint"
+                placeholder="Auto fallback"
+                emptyLabel="No endpoint found."
+                searchable={false}
+                disabled={!draftGroup}
+              />
+            </Field>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={!draftGroup} onClick={addCandidate}>
+              <Plus className="size-3.5" aria-hidden />
+              Add candidate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={editOpen}
+        onOpenChange={(next) => {
+          setEditOpen(next)
+          if (!next) setEditingCandidateId(null)
+        }}
+      >
+        <DialogContent className="min-w-0 overflow-hidden sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit compare LLM</DialogTitle>
+            <DialogDescription>
+              Update the temporary model candidate for this node. This does not write to SKILL.md.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-w-0 space-y-3">
+            <Field className="min-w-0">
+              <FieldLabel>Model</FieldLabel>
+              <SearchableOptionCombobox
+                value={editModelGroupId}
+                options={modelOptions}
+                onChange={(next) => {
+                  setEditModelGroupId(next)
+                  setEditRoute("auto")
+                }}
+                ariaLabel="Edit compare model"
+                placeholder={modelOptions.length > 0 ? "Choose model" : "No models"}
+                searchPlaceholder="Search models"
+                emptyLabel="No model found."
+                disabled={modelOptions.length === 0}
+                dataSelectAttribute="data-llm-compare-model-group-select"
+                dataSearchAttribute="data-llm-compare-model-group-search"
+              />
+            </Field>
+            <Field className="min-w-0">
+              <FieldLabel>Endpoint</FieldLabel>
+              <SearchableOptionCombobox
+                value={editRoute}
+                options={editEndpointOptions}
+                onChange={setEditRoute}
+                ariaLabel="Edit compare model endpoint"
+                placeholder="Auto fallback"
+                emptyLabel="No endpoint found."
+                searchable={false}
+                disabled={!editGroup}
+              />
+            </Field>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={!editGroup} onClick={saveCandidateEdit}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function LlmCompareCandidateRow({
+  candidate,
+  modelGroups,
+  onEdit,
+  onRemove,
+}: {
+  candidate: LlmCompareCandidateDraft
+  modelGroups: ModelGroup[]
+  onEdit: (candidate: LlmCompareCandidateDraft) => void
+  onRemove: (candidateId: string) => void
+}) {
+  const selectedGroup = modelGroups.find((group) => group.canonical_id === candidate.modelGroupId) ?? null
+  const routeOptions = useMemo(
+    () => modelGroupRouteOptions(selectedGroup),
+    [selectedGroup],
+  )
+  const modelLabel = selectedGroup ? modelGroupPickerLabel(selectedGroup) : "Missing model"
+  const routeLabel = candidate.route === "auto"
+    ? "Auto fallback"
+    : routeOptions.find((option) => option.value === candidate.route)?.label ?? "Selected endpoint"
+
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs text-foreground" data-llm-compare-row="true">
+      <span className="min-w-0 flex-1 truncate">
+        <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
+        <span className="mr-1.5 rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          Model
+        </span>
+        {modelLabel}
+        <span className="text-muted-foreground"> - {routeLabel}</span>
+      </span>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className={YAML_ICON_BUTTON_CLASS}
+          aria-label={`Edit compare LLM ${modelLabel}`}
+          onClick={() => onEdit(candidate)}
+        >
+          <Settings2 className="size-3.5" aria-hidden />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className={YAML_ICON_BUTTON_CLASS}
+          aria-label="Remove compare LLM"
+          onClick={() => onRemove(candidate.id)}
+        >
+          <Trash2 className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function SearchableOptionCombobox({
+  id,
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+  searchPlaceholder,
+  emptyLabel,
+  searchable = true,
+  disabled = false,
+  dataSelectAttribute,
+  dataSearchAttribute,
+  triggerClassName,
+}: {
+  id?: string
+  value: string
+  options: SearchableComboboxOption[]
+  onChange: (value: string) => void
+  ariaLabel: string
+  placeholder: string
+  searchPlaceholder?: string
+  emptyLabel: string
+  searchable?: boolean
+  disabled?: boolean
+  dataSelectAttribute?: string
+  dataSearchAttribute?: string
+  triggerClassName?: string
+}) {
+  const [open, setOpen] = useState(false)
+  // Dialog scroll lock sees this portaled popover as outside the dialog subtree.
+  // Stop wheel bubbling at the list so CommandList keeps its native overflow scroll.
+  const unlockDialogWheelScroll = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return undefined
+    const stopWheel = (event: WheelEvent) => event.stopPropagation()
+    node.addEventListener("wheel", stopWheel, { passive: true })
+    return () => node.removeEventListener("wheel", stopWheel)
+  }, [])
+  const selected = options.find((option) => option.value === value) ?? null
+  const groupedOptions = groupedSearchableOptions(options)
+  const triggerDataAttributes = dataSelectAttribute ? { [dataSelectAttribute]: "true" } : {}
+  const searchDataAttributes = dataSearchAttribute ? { [dataSearchAttribute]: "true" } : {}
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          aria-label={ariaLabel}
+          disabled={disabled}
+          title={selected?.detail ?? selected?.label}
+          {...triggerDataAttributes}
+          className={cn("w-full min-w-0 justify-between", triggerClassName)}
+        >
+          {selected?.unconfigured ? <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden /> : null}
+          <span className={cn(
+            "min-w-0 truncate",
+            selected ? null : "text-muted-foreground",
+            selected?.unconfigured ? "text-destructive" : null,
+          )}>
+            {selected ? selected.label : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] gap-0 p-0">
+        <Command filter={llmCompareModelGroupFilter}>
+          {searchable ? <CommandInput placeholder={searchPlaceholder ?? "Search"} {...searchDataAttributes} /> : null}
+          <CommandList ref={unlockDialogWheelScroll}>
+            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            {groupedOptions.map((group) => (
+              <CommandGroup key={group.key} heading={group.heading}>
+                {group.options.map((option) => (
+                  <CommandItem
+                    key={option.value}
+                    value={option.searchValue ? `${option.value} ${option.searchValue} ${option.section ?? ""}` : `${option.value} ${option.label} ${option.section ?? ""}`}
+                    data-checked={option.value === value ? "true" : undefined}
+                    data-llm-role-unconfigured={option.unconfigured ? "true" : undefined}
+                    title={option.detail ?? option.label}
+                    onSelect={() => {
+                      onChange(option.value)
+                      setOpen(false)
+                    }}
+                  >
+                    {option.unconfigured ? <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden /> : null}
+                    <span className={cn("min-w-0 truncate", option.unconfigured ? "text-destructive" : null)}>
+                      {option.label}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function groupedSearchableOptions(options: SearchableComboboxOption[]): Array<{
+  key: string
+  heading?: string
+  options: SearchableComboboxOption[]
+}> {
+  const groups: Array<{ key: string; heading?: string; options: SearchableComboboxOption[] }> = []
+  const indexBySection = new Map<string, number>()
+  for (const option of options) {
+    const section = option.section?.trim() ?? ""
+    let index = indexBySection.get(section)
+    if (index === undefined) {
+      index = groups.length
+      indexBySection.set(section, index)
+      const group: { key: string; heading?: string; options: SearchableComboboxOption[] } = {
+        key: section || "__default__",
+        options: [],
+      }
+      if (section) {
+        group.heading = section
+      }
+      groups.push(group)
+    }
+    groups[index]?.options.push(option)
+  }
+  return groups
+}
+
 // Engine built-in tools (loader.py scan_mentions tool set) are always available to an
-// agent — they must NOT be declared in `tools`. Adding them is blocked below.
+// agent 鈥?they must NOT be declared in `tools`. Adding them is blocked below.
 const RESERVED_TOOL_NAMES = new Set(["finish_task", "read_reference", "read_example", "log_ambiguity"])
 
-// Agent `tools` as a managed name list — same flat-card idiom as LOGIC actions, minus
+// Agent `tools` as a managed name list 鈥?same flat-card idiom as LOGIC actions, minus
 // the file scaffolding (a tool name is just a declaration the body references via
 // @tool:<name>, no sibling file to create or open). Add/remove edit the form draft.
 function ToolsField({
@@ -2397,11 +3113,11 @@ function ToolsField({
           ))}
         </div>
       ) : (
-        <FieldDescription>No tools yet — add one this agent can call.</FieldDescription>
+        <FieldDescription>No tools yet 鈥?add one this agent can call.</FieldDescription>
       )}
       <AddToolDialog existing={tools} onAdd={add} />
       <FieldDescription>
-        Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available — don&rsquo;t list them here.
+        Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available 鈥?don&rsquo;t list them here.
       </FieldDescription>
     </Field>
   )
@@ -2465,7 +3181,7 @@ function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: 
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
             {duplicate ? <p className="text-xs text-destructive">{name} is already declared.</p> : null}
-            {reserved ? <p className="text-xs text-destructive">{name} is a built-in tool — always available, no need to declare it.</p> : null}
+            {reserved ? <p className="text-xs text-destructive">{name} is a built-in tool 鈥?always available, no need to declare it.</p> : null}
           </form>
         </Field>
         <DialogFooter>

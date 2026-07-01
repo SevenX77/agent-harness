@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
+import { apiClientConfigChangedEvent, authenticatedApiReady } from "@/api/client"
 import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
@@ -10,10 +11,26 @@ import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
-import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageProps, SettingsTab } from "./types"
+import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController, SettingsPageProps, SettingsPageViewProps, SettingsTab } from "./types"
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
+
+function useAuthenticatedApiReady(): boolean {
+  const [ready, setReady] = useState(() => authenticatedApiReady())
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined
+    const handleConfigChange = () => setReady(authenticatedApiReady())
+    window.addEventListener(apiClientConfigChangedEvent, handleConfigChange)
+    handleConfigChange()
+    return () => {
+      window.removeEventListener(apiClientConfigChangedEvent, handleConfigChange)
+    }
+  }, [])
+
+  return ready
+}
 
 export async function refreshLoadedLlmRolesProjection({
   loadModelGroups = getModelGroups,
@@ -397,9 +414,9 @@ export function upsertProviderModels(
   )
 }
 
-export function SettingsPage({ onClose, initialTab = "general" }: SettingsPageProps) {
+export function useSettingsPageController(): SettingsPageController {
   const appSettings = useAppSettings()
-  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
+  const apiReady = useAuthenticatedApiReady()
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
   const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
@@ -421,7 +438,9 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
   const dirtyProviderIdsRef = useRef<Set<string>>(new Set())
   const deletedProviderIdsRef = useRef<Set<string>>(new Set())
+  const controllerMountedRef = useRef(true)
   const credentialsHydratedRef = useRef(false)
+  const credentialsHydratingRef = useRef(false)
   const pendingRoleProjectionRefreshRef = useRef(false)
   // #6: a roles_changed event arrived while the Roles/Copilot tab had never been
   // opened (rolesData still null). Instead of dropping it, set this flag so the
@@ -440,8 +459,10 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
   }, [drafts, pendingAddProviderDraft, providerTestingActions])
 
   useEffect(() => {
-    setActiveTab(initialTab)
-  }, [initialTab])
+    return () => {
+      controllerMountedRef.current = false
+    }
+  }, [])
 
   const handleSaved = useCallback((next: CredentialsState) => {
     const nextCredentials: CredentialsState = {
@@ -501,6 +522,7 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
   })
 
   useEffect(() => {
+    if (!apiReady) return undefined
     const handleFocus = () => {
       getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
         .then((next) => {
@@ -509,7 +531,7 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
         })
         .catch(() => {})
 
-      if ((activeTab === "llm_roles" || activeTab === "copilot") && rolesDataRef.current) {
+      if (rolesDataRef.current) {
         Promise.all([getRoles(), getModelGroups()])
           .then(([next, nextModelGroups]) => {
             setRolesData(next)
@@ -522,7 +544,7 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
     return () => {
       window.removeEventListener("focus", handleFocus)
     }
-  }, [activeTab])
+  }, [apiReady])
 
   // R-F19.2 — when the Tauri shell intercepts `WindowEvent::CloseRequested`
   // (Cmd+Q / window close / Quit menu) it emits `before-quit` and blocks the
@@ -627,9 +649,10 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
     onRegistryChanged: refetchCredentialsFromEvent,
     onRolesChanged: handleRolesChangedEvent,
     onResync: handleEventResync,
-  })
+  }, { enabled: apiReady })
 
   useEffect(() => {
+    if (!apiReady) return
     const enabled = appSettings.settings.remote_model_catalog_enabled
     if (!enabled) {
       remoteModelCatalogSyncedRef.current = false
@@ -651,37 +674,16 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
         console.warn("phase=settings-catalog action=verified-community-catalog-sync-failed error=%o", error)
       })
   }, [
+    apiReady,
     appSettings.isLoading,
     appSettings.settings.remote_model_catalog_enabled,
     refetchCredentialsFromEvent,
   ])
 
   useEffect(() => {
+    if (!apiReady) return
     let cancelled = false
-    getCredentials({ hydrateSecrets: false })
-      .then((next) => {
-        if (cancelled) return
-        invalidatedTestOutcomeIdsRef.current.clear()
-        setCredentialsError(null)
-        setCredentials(next)
-        setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
-        setCredentialsLoading(false)
-      })
-      .catch((error) => {
-        if (cancelled) return
-        const message = error instanceof Error ? error.message : "Load failed"
-        setCredentialsError(message)
-        toast.error(`API Keys load failed: ${message}`)
-        setCredentialsLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
-    if (activeTab !== "api_keys" || credentialsHydratedRef.current) return
-    let cancelled = false
+    credentialsHydratingRef.current = true
     getCredentials()
       .then((next) => {
         if (cancelled) return
@@ -699,13 +701,43 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
         toast.error(`API Keys load failed: ${message}`)
         setCredentialsLoading(false)
       })
+      .finally(() => {
+        credentialsHydratingRef.current = false
+      })
     return () => {
       cancelled = true
     }
-  }, [activeTab])
+  }, [apiReady])
+
+  const ensureCredentialsHydrated = useCallback(() => {
+    if (!apiReady) return
+    if (credentialsHydratedRef.current || credentialsHydratingRef.current) return
+    credentialsHydratingRef.current = true
+    getCredentials()
+      .then((next) => {
+        if (!controllerMountedRef.current) return
+        credentialsHydratedRef.current = true
+        invalidatedTestOutcomeIdsRef.current.clear()
+        setCredentialsError(null)
+        setCredentials(next)
+        setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
+        setCredentialsLoading(false)
+      })
+      .catch((error) => {
+        if (!controllerMountedRef.current) return
+        const message = error instanceof Error ? error.message : "Load failed"
+        setCredentialsError(message)
+        toast.error(`API Keys load failed: ${message}`)
+        setCredentialsLoading(false)
+      })
+      .finally(() => {
+        credentialsHydratingRef.current = false
+      })
+  }, [apiReady])
 
   useEffect(() => {
-    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || rolesData) return
+    if (!apiReady) return
+    if (rolesData) return
     let cancelled = false
     // #6: clear any pending roles-dirty flag — this lazy load IS the refetch the
     // dropped roles_changed event was waiting for.
@@ -725,10 +757,11 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
     return () => {
       cancelled = true
     }
-  }, [activeTab, rolesData])
+  }, [apiReady, rolesData])
 
   useEffect(() => {
-    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || !rolesData) return
+    if (!apiReady) return
+    if (!rolesData) return
     if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
     void refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
@@ -736,7 +769,7 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
       setRolesData,
       setRolesError,
     })
-  }, [activeTab, credentials, modelGroups, rolesData])
+  }, [apiReady, credentials, modelGroups, rolesData])
 
   function scheduleSave() {
     queueSave(() => buildPutPayload(draftsRef.current))
@@ -1042,52 +1075,77 @@ export function SettingsPage({ onClose, initialTab = "general" }: SettingsPagePr
     })
   }, [])
 
+  return {
+    credentials,
+    credentialsLoading,
+    credentialsError,
+    drafts: visibleDrafts,
+    pendingAddProviderId,
+    saveStatus,
+    rolesData,
+    modelGroups,
+    rolesSaveStatus,
+    rolesError,
+    appSettings: {
+      userId: appSettings.settings.user_id,
+      giteaHost: appSettings.settings.gitea_host,
+      defaultSkillsDirectory: appSettings.settings.default_skills_directory,
+      language: appSettings.settings.language,
+      remoteModelCatalogEnabled: appSettings.settings.remote_model_catalog_enabled,
+      isLoading: appSettings.isLoading,
+      saveStatus: appSettings.saveStatus,
+      setUserId: appSettings.setUserId,
+      setGiteaHost: appSettings.setGiteaHost,
+      setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
+      setLanguage: appSettings.setLanguage,
+      setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
+    },
+    connectionLost,
+    ensureCredentialsHydrated,
+    onProviderFieldChange: updateProviderField,
+    onGetProviderModels: (providerId) => void runProviderGetModels(providerId),
+    onDeleteProvider: deleteProvider,
+    onDeleteProviderEndpoints: (endpointIds) => void deleteProviderEndpoints(endpointIds),
+    onBeginAddProvider: beginAddProvider,
+    onAddProvider: addProviderWithData,
+    onCancelAddProvider: cancelAddProvider,
+    onProviderModelsUpdated: updateProviderModels,
+    onRolesDataChange: updateRolesData,
+    onDeleteRole: deleteRoleByName,
+    onDeleteModelBundle: deleteModelBundleById,
+    onBeforeRoleTest: flushRolesSave,
+    onAfterRoleTest: refreshRolesProjection,
+  }
+}
+
+export function SettingsPageView({ onClose, initialTab = "general", controller }: SettingsPageViewProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
+  const { ensureCredentialsHydrated } = controller
+
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
+
+  useEffect(() => {
+    if (activeTab === "api_keys") {
+      ensureCredentialsHydrated()
+    }
+  }, [activeTab, ensureCredentialsHydrated])
+
   return (
     <SettingsPageContent
+      {...controller}
       activeTab={activeTab}
-      credentials={credentials}
-      credentialsLoading={credentialsLoading}
-      credentialsError={credentialsError}
-      drafts={visibleDrafts}
-      pendingAddProviderId={pendingAddProviderId}
-      saveStatus={saveStatus}
-      rolesData={rolesData}
-      modelGroups={modelGroups}
-      rolesSaveStatus={rolesSaveStatus}
-      rolesError={rolesError}
-      appSettings={{
-        userId: appSettings.settings.user_id,
-        giteaHost: appSettings.settings.gitea_host,
-        defaultSkillsDirectory: appSettings.settings.default_skills_directory,
-        language: appSettings.settings.language,
-        remoteModelCatalogEnabled: appSettings.settings.remote_model_catalog_enabled,
-        isLoading: appSettings.isLoading,
-        saveStatus: appSettings.saveStatus,
-        setUserId: appSettings.setUserId,
-        setGiteaHost: appSettings.setGiteaHost,
-        setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
-        setLanguage: appSettings.setLanguage,
-        setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
-      }}
-      connectionLost={connectionLost}
       onClose={onClose}
       onTabChange={setActiveTab}
-      onProviderFieldChange={updateProviderField}
-      onGetProviderModels={(providerId) => void runProviderGetModels(providerId)}
-      onDeleteProvider={deleteProvider}
-      onDeleteProviderEndpoints={(endpointIds) => void deleteProviderEndpoints(endpointIds)}
-      onBeginAddProvider={beginAddProvider}
-      onAddProvider={addProviderWithData}
-      onCancelAddProvider={cancelAddProvider}
-      onProviderModelsUpdated={updateProviderModels}
-      onRolesDataChange={updateRolesData}
-      onDeleteRole={deleteRoleByName}
-      onDeleteModelBundle={deleteModelBundleById}
-      onBeforeRoleTest={flushRolesSave}
-      onAfterRoleTest={refreshRolesProjection}
       onNavigateToApiKeys={() => setActiveTab("api_keys")}
     />
   )
+}
+
+export function SettingsPage(props: SettingsPageProps) {
+  const controller = useSettingsPageController()
+  return <SettingsPageView {...props} controller={controller} />
 }
 
 function providerEndpointIdentityMatches(left: ProviderDraft, right: ProviderDraft): boolean {

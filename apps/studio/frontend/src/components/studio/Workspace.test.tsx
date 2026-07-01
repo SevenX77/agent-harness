@@ -95,7 +95,10 @@ const mocks = vi.hoisted(() => ({
   settingsPageProps: null as null | {
     initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
     onClose?: () => void
+    controller?: unknown
   },
+  settingsControllerHookCalls: 0,
+  settingsController: { source: 'app-level-settings-controller' } as const,
 }))
 
 const toastMocks = vi.hoisted(() => ({
@@ -289,9 +292,14 @@ vi.mock('./Panels', () => ({
 }))
 
 vi.mock('./SettingsPage', () => ({
-  SettingsPage: (props: {
+  useSettingsPageController: () => {
+    mocks.settingsControllerHookCalls += 1
+    return mocks.settingsController
+  },
+  SettingsPageView: (props: {
     initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
     onClose?: () => void
+    controller?: unknown
   }) => {
     mocks.settingsPageProps = props
     return <div data-testid="settings" data-initial-tab={props.initialTab} />
@@ -383,6 +391,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     toastMocks.warning.mockReset()
     mocks.panelsProps = null
     mocks.settingsPageProps = null
+    mocks.settingsControllerHookCalls = 0
     mocks.graphCanvasProps = null
     mocks.centerActionBarProps = null
     mocks.conflictDialogProps = null
@@ -1200,6 +1209,13 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(mocks.conflictDialogProps?.onOverwriteRetry).toBeTypeOf('function')
   })
 
+  it('starts the Settings backend controller with the Workspace, before the dialog opens', () => {
+    renderWorkspace()
+
+    expect(mocks.settingsControllerHookCalls).toBeGreaterThan(0)
+    expect(document.body.querySelector('[data-testid="settings"]')).toBeNull()
+  })
+
   it('toggles the settings page off from the same toolbar button that opened it', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -1224,6 +1240,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       })
       expect(document.body.querySelector('[data-testid="settings"]')).not.toBeNull()
       expect(mocks.settingsPageProps?.initialTab).toBe('general')
+      expect(mocks.settingsPageProps?.controller).toBe(mocks.settingsController)
 
       act(() => {
         toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1259,6 +1276,7 @@ describe('Workspace WS-1 local writer contracts', () => {
 
       expect(document.body.querySelector('[data-testid="settings"]')).not.toBeNull()
       expect(mocks.settingsPageProps?.initialTab).toBe('llm_roles')
+      expect(mocks.settingsPageProps?.controller).toBe(mocks.settingsController)
     } finally {
       act(() => {
         root.unmount()

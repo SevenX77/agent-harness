@@ -1,6 +1,6 @@
-export { SettingsPage, SettingsPageContent, CopilotTab, LlmRolesTab } from "./settings"
+export { SettingsPage, SettingsPageView, SettingsPageContent, CopilotTab, LlmRolesTab, useSettingsPageController } from "./settings"
 export { getModelAvailability } from "./settings"
-export type { ModelAvailability, ProviderDraft, SettingsPageContentProps, SettingsTab } from "./settings"
+export type { ModelAvailability, ProviderDraft, SettingsPageContentProps, SettingsPageController, SettingsTab } from "./settings"
 export { isStaleRouteReferenceError, modelGroupsReferenceMissingCredentialProviders, refreshLoadedLlmRolesProjection, shouldSyncRemoteModelCatalog, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./settings"
 export { officialProviderTestSummary } from "./settings"
 export { draftsFromCredentials, draftFromAddProviderSubmission, endpointIdForBaseUrlProtocol, inferProviderKind, inferProviderType, notableProviderKeyForDraft, officialProviderDrafts, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch, shouldShowManualModelPanel, thirdPartyProtocolCandidates, thirdPartyProviderDrafts } from "./settings"

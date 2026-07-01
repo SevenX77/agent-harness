@@ -8,6 +8,7 @@ import type { CompareTab } from "../run-compare"
 import { useSkills } from "@/hooks/useSkills"
 import { useThemeValue } from "@/store/themeStore"
 import type { PanelKind } from "../Toolbar"
+import type { SettingsTab } from "../SettingsPage"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { AssetsPanel } from "./AssetsPanel"
 import { HistoryPanel } from "./HistoryPanel"
@@ -67,6 +68,7 @@ interface PanelsProps {
   compareTabs?: CompareTab[]
   activeCandidateId?: string | null
   onSelectCandidate?: (candidateId: string) => void
+  onOpenSettings?: (tab?: SettingsTab) => void
 }
 
 export function Panels({
@@ -107,6 +109,7 @@ export function Panels({
   compareTabs,
   activeCandidateId,
   onSelectCandidate,
+  onOpenSettings,
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const isDarkMode = useThemeValue() === "dark"
@@ -272,6 +275,7 @@ export function Panels({
         onValidatorCreate={propertiesValidatorCreate}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
+        onOpenSettings={onOpenSettings}
       />
     )
   }

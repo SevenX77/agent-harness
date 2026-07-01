@@ -1,13 +1,16 @@
-import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
+import { ArrowUp, Bot, CircleAlert, CircleUserRound, Paperclip, Plus, SquareTerminal } from 'lucide-react'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, type RegistryResponse, type RoleEntry, type RolesData } from '../../api/llm'
 import { useCopilot, type CopilotJudgeContext } from '../../hooks/useCopilot'
+import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
+import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
+import { Marker, MarkerContent, MarkerIcon } from '../ui/marker'
 import { BACKEND_UNAVAILABLE_MESSAGE, errorMessage } from '@/utils/errors'
 import { AnalysisBar } from './analysis-bar'
 import { BashApprovalCard } from './bash-approval-card'
@@ -28,83 +31,93 @@ interface ChatMessageItemProps {
 function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }: ChatMessageItemProps) {
   const isUser = message.role === 'user'
   return (
-    <article className={`rounded-md border p-3 text-sm ${isUser ? 'border-primary/30 bg-primary/10' : 'border-border bg-background'}`}>
-      <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span className="font-medium">{isUser ? 'You' : 'Copilot'}</span>
-        <span>{message.status}</span>
-      </div>
-      <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
+    <article
+      data-copilot-message-role={message.role}
+      className={`py-1.5 text-sm ${isUser ? 'text-muted-foreground' : 'text-foreground'}`}
+    >
+      <Marker role={message.status === 'running' ? 'status' : undefined} className="px-0">
+        <MarkerIcon className={isUser ? 'text-primary' : 'text-[color:var(--studio-canvas-accent)]'}>
+          {isUser ? <CircleUserRound /> : <Bot />}
+        </MarkerIcon>
+        <MarkerContent className="flex items-center gap-2 truncate font-medium text-foreground">
+          <span>{isUser ? 'You' : 'Copilot'}</span>
+          <span className="text-[0.625rem] font-normal text-muted-foreground">{message.status}</span>
+        </MarkerContent>
+      </Marker>
+      <div className="prose prose-sm max-w-none pl-6 text-sm leading-snug text-current dark:prose-invert prose-p:my-1 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
         <ReactMarkdown>{message.content || (message.status === 'running' ? 'Thinking...' : '')}</ReactMarkdown>
       </div>
-      {message.events.map((event) => {
-        if (event.type === 'tool_use_start') {
-          return <ToolCallBubble key={event.id} event={event} />
-        }
-        if (event.type === 'tool_use_result') {
-          return (
-            <div key={event.id}>
-              <ToolCallBubble event={event} />
-              <DiffBubble event={event} />
-            </div>
-          )
-        }
-        if (event.type === 'error') {
-          return (
-            <div key={event.id} className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
-              <div className="flex items-center gap-2 font-medium">
-                <CircleAlert className="size-3.5" />
-                Copilot error
+      <div className="mt-1 space-y-1 pl-6">
+        {message.events.map((event) => {
+          if (event.type === 'tool_use_start') {
+            return <ToolCallBubble key={event.id} event={event} />
+          }
+          if (event.type === 'tool_use_result') {
+            return (
+              <div key={event.id}>
+                <ToolCallBubble event={event} />
+                <DiffBubble event={event} />
               </div>
-              <p className="mt-1 whitespace-pre-wrap">{event.message}</p>
-            </div>
-          )
-        }
-        if (event.type === 'patch_proposed') {
-          return (
-            <PatchProposedBubble
-              key={event.id}
-              event={event}
-              skillId={skillId}
-              workspaceRoot={workspaceRoot}
-              onFileChanged={onFileChanged}
-            />
-          )
-        }
-        if (event.type === 'bash_approval_required') {
-          return <BashApprovalCard key={event.id} event={event} skillId={skillId} />
-        }
-        if (event.type === 'context_resolved') {
-          return (
-            <details key={event.id} className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
-              <summary className="cursor-pointer font-medium text-foreground">{event.summary}</summary>
-              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2">
-                {event.detail}
-              </pre>
-            </details>
-          )
-        }
-        if (event.type === 'thinking_delta') {
-          return (
-            <details key={event.id} className="mt-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-              <summary className="cursor-pointer font-medium text-foreground">Thought</summary>
-              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2">
-                {event.content}
-              </pre>
-            </details>
-          )
-        }
-        if (event.type === 'unknown') {
-          return (
-            <details key={event.id} className="mt-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-              <summary className="cursor-pointer font-medium text-foreground">Unknown Copilot event</summary>
-              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2">
-                {JSON.stringify(event.payload, null, 2)}
-              </pre>
-            </details>
-          )
-        }
-        return null
-      })}
+            )
+          }
+          if (event.type === 'error') {
+            return (
+              <div key={event.id} className="border-l border-destructive/50 py-1 pl-3 text-xs text-destructive">
+                <div className="flex items-center gap-2 font-medium">
+                  <CircleAlert className="size-3.5" />
+                  Copilot error
+                </div>
+                <p className="mt-1 whitespace-pre-wrap leading-snug">{event.message}</p>
+              </div>
+            )
+          }
+          if (event.type === 'patch_proposed') {
+            return (
+              <PatchProposedBubble
+                key={event.id}
+                event={event}
+                skillId={skillId}
+                workspaceRoot={workspaceRoot}
+                onFileChanged={onFileChanged}
+              />
+            )
+          }
+          if (event.type === 'bash_approval_required') {
+            return <BashApprovalCard key={event.id} event={event} skillId={skillId} />
+          }
+          if (event.type === 'context_resolved') {
+            return (
+              <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
+                <summary className="cursor-pointer font-medium text-foreground">{event.summary}</summary>
+                <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+                  {event.detail}
+                </pre>
+              </details>
+            )
+          }
+          if (event.type === 'thinking_delta') {
+            return (
+              <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
+                <summary className="cursor-pointer font-medium text-foreground">Thought</summary>
+                <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+                  {event.content}
+                </pre>
+              </details>
+            )
+          }
+          if (event.type === 'unknown') {
+            return (
+              <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
+                <summary className="cursor-pointer font-medium text-foreground">Unknown Copilot event</summary>
+                <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+                  {JSON.stringify(event.payload, null, 2)}
+                </pre>
+              </details>
+            )
+          }
+          return null
+        })}
+      </div>
     </article>
   )
 }
@@ -187,10 +200,15 @@ export function CopilotPanel({
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [selectedRole, setSelectedRole] = useState(DEFAULT_COPILOT_ROLE)
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
+  const [openingClaudeCode, setOpeningClaudeCode] = useState(false)
   const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId, workspaceRoot)
   const inEvalView = view === 'eval'
-  const roleOptions = useMemo(() => copilotRoleOptions(rolesData), [rolesData])
+  const roleOptions = useMemo(
+    () => copilotRoleOptions(rolesData, registry?.model_groups ?? []),
+    [rolesData, registry],
+  )
+  const claudeCodeWorkspace = workspaceRoot?.trim() || null
 
   async function askCopilotJudge() {
     if (!skillId || !judgeRefs) {
@@ -215,6 +233,35 @@ export function CopilotPanel({
   useEffect(() => {
     setDraftJudgeContext((current) => nextDraftJudgeContext(draft, current, { skillId, view, judgeRefs }))
   }, [draft, skillId, view, judgeRefs])
+
+  const refreshRegistry = useCallback(() => {
+    getRegistry()
+      .then((nextRegistry) => {
+        setRegistry(nextRegistry)
+      })
+      .catch((error) => {
+        toast.error(copilotBackendErrorMessage(error, 'Copilot route config unavailable'))
+      })
+  }, [])
+
+  const refreshRoles = useCallback(() => {
+    getRoles()
+      .then((nextRoles) => {
+        setRolesData(nextRoles)
+      })
+      .catch((error) => {
+        toast.error(copilotBackendErrorMessage(error, 'Copilot roles unavailable'))
+      })
+  }, [])
+
+  useStudioEventStream({
+    onRegistryChanged: refreshRegistry,
+    onRolesChanged: refreshRoles,
+    onResync: () => {
+      refreshRegistry()
+      refreshRoles()
+    },
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -258,12 +305,39 @@ export function CopilotPanel({
     }
   }, [])
 
+  useEffect(() => {
+    if (roleOptions.length === 0) {
+      return
+    }
+    if (roleOptions.some((option) => option.role === selectedRole)) {
+      return
+    }
+    setSelectedRole(
+      roleOptions.find((option) => option.role === DEFAULT_COPILOT_ROLE)?.role ?? roleOptions[0].role,
+    )
+  }, [roleOptions, selectedRole])
+
+  useEffect(() => {
+    const role = registry?.roles[selectedRole] ?? registry?.roles[DEFAULT_COPILOT_ROLE] ?? null
+    setRoleData(role)
+    setSelectedRouteId(role?.fallback_chain?.[0]?.route_id ?? '')
+  }, [registry, selectedRole])
+
   function selectRoute(routeId: string) {
     if (routeId === selectedRouteId) {
       return
     }
     setSelectedRouteId(routeId)
     toast.info('Route switched. Future messages will use it.')
+  }
+
+  async function handleOpenClaudeCode() {
+    setOpeningClaudeCode(true)
+    try {
+      await openClaudeCode(claudeCodeWorkspace)
+    } finally {
+      setOpeningClaudeCode(false)
+    }
   }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -283,9 +357,25 @@ export function CopilotPanel({
   return (
     <aside className="studio-copilot-panel studio-canvas-panel z-copilot flex h-full min-h-0 flex-col border-l text-foreground">
       <header className="studio-canvas-panel-header border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Bot className="size-4 text-[color:var(--studio-canvas-accent)]" />
-          <h2 className="text-sm font-semibold">Copilot</h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Bot className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
+            <h2 className="truncate text-sm font-semibold">Copilot</h2>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={openingClaudeCode || !claudeCodeWorkspace}
+            aria-label="Open in Claude Code"
+            onClick={() => {
+              void handleOpenClaudeCode()
+            }}
+            className="studio-canvas-input-surface shrink-0"
+          >
+            <SquareTerminal data-icon="inline-start" />
+            Open in Claude Code
+          </Button>
         </div>
         <p className="mt-1 inline-flex rounded border border-border/60 bg-background/30 px-1.5 py-0.5 text-xs text-muted-foreground">
           {copilot.connectionStatus}
@@ -317,7 +407,7 @@ export function CopilotPanel({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {copilot.messages.length > 0 ? (
           copilot.messages.map((message) => (
             <ChatMessageItem

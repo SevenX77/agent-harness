@@ -1,5 +1,6 @@
 import { UserCog } from 'lucide-react'
-import type { RolesData } from '../../api/llm'
+import type { CredentialsState, ModelGroup, RolesData } from '../../api/llm'
+import { deriveCopilotDisplayRoles } from '../studio/settings/copilot/copilot-role-derivation'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -16,23 +17,24 @@ export interface CopilotRoleOption {
 
 /** Default copilot role the composer falls back to when nothing is selected. */
 export const DEFAULT_COPILOT_ROLE = 'copilot_chat'
+const emptyCredentials: CredentialsState = { providers: [] }
 
 /**
- * Filter the roles registry down to copilot-kind roles (each is its own model
- * group). Returns one option per role, labelled from its name (snake_case →
- * Title Case), mirroring the Copilot settings tab derivation.
+ * Filter the roles registry down to the active Copilot roles shown in Settings.
+ * Labels come from the bound model group when available, so the composer menu
+ * stays aligned with the Copilot settings cards.
  */
-export function copilotRoleOptions(data: RolesData | null): CopilotRoleOption[] {
+export function copilotRoleOptions(
+  data: RolesData | null,
+  modelGroups: ModelGroup[] = [],
+  credentials: CredentialsState = emptyCredentials,
+): CopilotRoleOption[] {
   if (!data) {
     return []
   }
-  return Object.entries(data.roles)
-    .filter(([, role]) => role.role_kind === 'copilot')
-    .map(([role]) => ({ role, label: roleLabel(role) }))
-}
-
-function roleLabel(role: string): string {
-  return role.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())
+  return deriveCopilotDisplayRoles(data, modelGroups, credentials)
+    .filter((role) => Boolean(data.roles[role.id]))
+    .map((role) => ({ role: role.id, label: role.title }))
 }
 
 interface RolePickerProps {

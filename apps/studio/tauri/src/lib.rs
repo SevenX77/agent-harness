@@ -1,6 +1,8 @@
 mod native_fs;
 mod sidecar;
 
+use sha2::{Digest, Sha256};
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
@@ -149,6 +151,254 @@ fn existing_path(path: &str) -> Result<PathBuf, String> {
         return Err(format!("path does not exist: {}", target.display()));
     }
     Ok(target)
+}
+
+fn existing_directory(path: &str) -> Result<PathBuf, String> {
+    let target = existing_path(path)?;
+    if !target.is_dir() {
+        return Err(format!("path is not a directory: {}", target.display()));
+    }
+    Ok(target)
+}
+
+fn find_ah_config(start_dir: &Path) -> Option<PathBuf> {
+    let mut current = if start_dir.is_file() {
+        start_dir.parent()?.to_path_buf()
+    } else {
+        start_dir.to_path_buf()
+    };
+    loop {
+        let candidate = current.join("ah.toml");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn workspace_hash(workspace_root: &Path) -> String {
+    let canonical = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.display().to_string().as_bytes());
+    let digest = hasher.finalize();
+    digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn transient_ah_config_path(workspace_root: &Path) -> PathBuf {
+    std::env::temp_dir()
+        .join("skill-studio-ah")
+        .join(workspace_hash(workspace_root))
+        .join("ah.toml")
+}
+
+fn transient_ah_config_content() -> &'static str {
+    // ah v1 requires at least one agent; Studio only attaches the Claude master pane here.
+    r#"version = "1"
+
+[master]
+enabled = true
+cmd = "claude --dangerously-skip-permissions --continue /remote-control"
+
+[agents.studio]
+provider = "bash"
+"#
+}
+
+fn ah_config_for_workspace(workspace_root: &Path) -> Result<PathBuf, String> {
+    if let Some(config) = find_ah_config(workspace_root) {
+        return Ok(config);
+    }
+    let config = transient_ah_config_path(workspace_root);
+    let parent = config
+        .parent()
+        .ok_or_else(|| format!("cannot resolve ah config parent: {}", config.display()))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create transient ah config dir: {error}"))?;
+    std::fs::write(&config, transient_ah_config_content())
+        .map_err(|error| format!("failed to write transient ah config: {error}"))?;
+    Ok(config)
+}
+
+fn powershell_single_quote(value: &Path) -> String {
+    format!("'{}'", value.display().to_string().replace('\'', "''"))
+}
+
+fn sh_single_quote(value: &Path) -> String {
+    format!("'{}'", value.display().to_string().replace('\'', "'\\''"))
+}
+
+fn windows_claude_code_launcher_script(workspace_root: &Path, config_path: &Path) -> String {
+    format!(
+        r#"$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath {workspace}
+$ah = Get-Command ah -ErrorAction SilentlyContinue
+if (-not $ah) {{
+  Write-Host "ah CLI was not found on PATH."
+  Write-Host "Install ah 1.0.0 from https://github.com/SevenX77/ccbd-rust/releases/tag/v1.0.0, then reopen Studio."
+  Read-Host "Press Enter to close"
+  exit 1
+}}
+Write-Host "Starting Claude Code through ah..."
+& $ah.Source --config {config} start --wait
+if ($LASTEXITCODE -ne 0) {{
+  Read-Host "ah start failed. Press Enter to close"
+  exit $LASTEXITCODE
+}}
+& $ah.Source --config {config} attach master
+if ($LASTEXITCODE -ne 0) {{
+  Read-Host "ah attach failed. Press Enter to close"
+}}
+"#,
+        workspace = powershell_single_quote(workspace_root),
+        config = powershell_single_quote(config_path),
+    )
+}
+
+fn unix_claude_code_launcher_script(workspace_root: &Path, config_path: &Path) -> String {
+    format!(
+        r#"#!/bin/sh
+set -u
+cd {workspace}
+if ! command -v ah >/dev/null 2>&1; then
+  printf '%s\n' "ah CLI was not found on PATH."
+  printf '%s\n' "Install ah 1.0.0 from https://github.com/SevenX77/ccbd-rust/releases/tag/v1.0.0, then reopen Studio."
+  exec "${{SHELL:-/bin/sh}}"
+fi
+printf '%s\n' "Starting Claude Code through ah..."
+ah --config {config} start --wait
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf 'ah start failed with exit code %s\n' "$status"
+  exec "${{SHELL:-/bin/sh}}"
+fi
+ah --config {config} attach master
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf 'ah attach failed with exit code %s\n' "$status"
+  exec "${{SHELL:-/bin/sh}}"
+fi
+"#,
+        workspace = sh_single_quote(workspace_root),
+        config = sh_single_quote(config_path),
+    )
+}
+
+fn launcher_script_path(workspace_root: &Path) -> PathBuf {
+    let extension = if cfg!(target_os = "windows") {
+        "ps1"
+    } else if cfg!(target_os = "macos") {
+        "command"
+    } else {
+        "sh"
+    };
+    std::env::temp_dir()
+        .join("skill-studio-ah")
+        .join(workspace_hash(workspace_root))
+        .join(format!("open-claude-code.{extension}"))
+}
+
+fn write_claude_code_launcher_script(
+    workspace_root: &Path,
+    config_path: &Path,
+) -> Result<PathBuf, String> {
+    let script_path = launcher_script_path(workspace_root);
+    let parent = script_path
+        .parent()
+        .ok_or_else(|| format!("cannot resolve launcher parent: {}", script_path.display()))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create launcher script dir: {error}"))?;
+    let content = if cfg!(target_os = "windows") {
+        windows_claude_code_launcher_script(workspace_root, config_path)
+    } else {
+        unix_claude_code_launcher_script(workspace_root, config_path)
+    };
+    std::fs::write(&script_path, content)
+        .map_err(|error| format!("failed to write Claude Code launcher: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&script_path)
+            .map_err(|error| format!("failed to stat Claude Code launcher: {error}"))?
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&script_path, permissions)
+            .map_err(|error| format!("failed to chmod Claude Code launcher: {error}"))?;
+    }
+    Ok(script_path)
+}
+
+fn spawn_linux_terminal(script_path: &Path) -> Result<(), String> {
+    let script = script_path.display().to_string();
+    let candidates: [(&str, Vec<&str>); 7] = [
+        ("x-terminal-emulator", vec!["-e", script.as_str()]),
+        ("gnome-terminal", vec!["--", script.as_str()]),
+        ("konsole", vec!["-e", script.as_str()]),
+        ("xfce4-terminal", vec!["-e", script.as_str()]),
+        ("kitty", vec![script.as_str()]),
+        ("alacritty", vec!["-e", script.as_str()]),
+        ("xterm", vec!["-e", script.as_str()]),
+    ];
+    let mut errors = Vec::new();
+    for (program, args) in candidates {
+        match Command::new(program).args(args).spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    Err(format!(
+        "failed to open a terminal; tried x-terminal-emulator, gnome-terminal, konsole, xfce4-terminal, kitty, alacritty, xterm ({})",
+        errors.join("; ")
+    ))
+}
+
+fn spawn_terminal_with_launcher(script_path: &Path) -> Result<(), String> {
+    if cfg!(target_os = "windows") {
+        return Command::new("cmd")
+            .args([
+                "/C",
+                "start",
+                "Claude Code",
+                "powershell.exe",
+                "-NoExit",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(script_path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open PowerShell: {error}"));
+    }
+
+    if cfg!(target_os = "macos") {
+        return Command::new("open")
+            .args(["-a", "Terminal"])
+            .arg(script_path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open Terminal.app: {error}"));
+    }
+
+    if cfg!(target_os = "linux") {
+        return spawn_linux_terminal(script_path);
+    }
+
+    Err("opening Claude Code is not supported on this platform".to_string())
+}
+
+#[tauri::command]
+fn open_claude_code(workspace_root: String) -> Result<(), String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    let config_path = ah_config_for_workspace(&workspace_root)?;
+    let launcher = write_claude_code_launcher_script(&workspace_root, &config_path)?;
+    spawn_terminal_with_launcher(&launcher)
 }
 
 #[tauri::command]
@@ -356,6 +606,7 @@ pub fn run() {
             select_directory,
             reveal_in_file_manager,
             open_path,
+            open_claude_code,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
             native_fs::read_workspace_file,
@@ -562,6 +813,73 @@ mod tests {
             source.contains("open_path,"),
             "open_path must be registered in the Tauri invoke handler"
         );
+    }
+
+    #[test]
+    fn invoke_handler_registers_open_claude_code_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("open_claude_code,"),
+            "open_claude_code must be registered in the Tauri invoke handler"
+        );
+    }
+
+    #[test]
+    fn transient_ah_config_starts_claude_master() {
+        let config = transient_ah_config_content();
+
+        assert!(config.contains("version = \"1\""));
+        assert!(config.contains("[master]"));
+        assert!(config.contains(
+            "cmd = \"claude --dangerously-skip-permissions --continue /remote-control\""
+        ));
+        assert!(config.contains("[agents.studio]"));
+        assert!(config.contains("provider = \"bash\""));
+    }
+
+    #[test]
+    fn find_ah_config_walks_up_from_workspace() {
+        let root = temp_path("ah-config-root");
+        let child = root.join("child").join("nested");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(root.join("ah.toml"), transient_ah_config_content()).unwrap();
+
+        let found = find_ah_config(&child).expect("ah config found");
+
+        assert_eq!(found, root.join("ah.toml"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn windows_launcher_runs_ah_start_then_attach_master() {
+        let script = windows_claude_code_launcher_script(
+            Path::new(r"C:\Users\Test User\skill"),
+            Path::new(r"C:\Users\Test User\AppData\Local\Temp\ah.toml"),
+        );
+
+        assert!(script.contains("Set-Location -LiteralPath 'C:\\Users\\Test User\\skill'"));
+        assert!(script.contains("Get-Command ah"));
+        assert!(script.contains(
+            "--config 'C:\\Users\\Test User\\AppData\\Local\\Temp\\ah.toml' start --wait"
+        ));
+        assert!(script.contains(
+            "--config 'C:\\Users\\Test User\\AppData\\Local\\Temp\\ah.toml' attach master"
+        ));
+    }
+
+    #[test]
+    fn unix_launcher_runs_ah_start_then_attach_master() {
+        let script = unix_claude_code_launcher_script(
+            Path::new("/tmp/skill root"),
+            Path::new("/tmp/studio ah/ah.toml"),
+        );
+
+        assert!(script.starts_with("#!/bin/sh"));
+        assert!(script.contains("cd '/tmp/skill root'"));
+        assert!(script.contains("command -v ah"));
+        assert!(script.contains("ah --config '/tmp/studio ah/ah.toml' start --wait"));
+        assert!(script.contains("ah --config '/tmp/studio ah/ah.toml' attach master"));
     }
 
     #[test]

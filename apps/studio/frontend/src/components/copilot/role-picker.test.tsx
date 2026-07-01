@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps, ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import type { RoleEntry, RolesData } from '../../api/llm'
+import type { CredentialsState, ModelGroup, RoleEntry, RolesData } from '../../api/llm'
 import { DEFAULT_COPILOT_ROLE, RolePicker, copilotRoleOptions } from './role-picker'
 
 vi.mock('../ui/button', () => ({
@@ -42,7 +42,7 @@ vi.mock('../ui/dropdown-menu', () => ({
   ),
 }))
 
-function role(roleKind: RoleEntry['role_kind']): RoleEntry {
+function role(roleKind: RoleEntry['role_kind'], overrides: Partial<RoleEntry> = {}): RoleEntry {
   return {
     role_kind: roleKind,
     model_fallback_enabled: true,
@@ -51,7 +51,51 @@ function role(roleKind: RoleEntry['role_kind']): RoleEntry {
     system_prompt_prefix: '',
     fallback_chain: [],
     lint_requirements: {},
+    ...overrides,
   }
+}
+
+function routeGroup(canonicalId: string, displayName: string): ModelGroup {
+  return {
+    canonical_id: canonicalId,
+    display_name: displayName,
+    provider_models: [
+      {
+        route_id: `anthropic-official:${canonicalId}`,
+        endpoint_id: 'anthropic-official',
+        provider_label: 'Anthropic Official',
+        provider_kind: 'official',
+        provider_model_id: canonicalId,
+        ui_state: 'ready',
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: 'known',
+        capabilities: {},
+        call_method_id: 'anthropic_messages',
+      },
+    ],
+    status_summary: { ready: 1, historical_ready: 0, untested: 0, cooling_down: 0, failed: 0, off: 0 },
+    capability_summary: {
+      capability_known_count: 1,
+      thinking: 'unknown',
+      tools: 'unknown',
+      structured_output: 'unknown',
+      max_context_tokens: null,
+      max_output_tokens: null,
+    },
+  }
+}
+
+const credentials: CredentialsState = {
+  providers: [
+    {
+      id: 'anthropic-official',
+      name: 'Anthropic Official',
+      provider_type: 'anthropic_compatible',
+      api_key: '**********',
+    },
+  ],
 }
 
 const rolesData: RolesData = {
@@ -82,6 +126,42 @@ describe('copilotRoleOptions', () => {
 
   it('returns an empty list for null data', () => {
     expect(copilotRoleOptions(null)).toEqual([])
+  })
+
+  it('mirrors Copilot settings labels and skips broken legacy copilot roles', () => {
+    const settingsRoles: RolesData = {
+      ...rolesData,
+      roles: {
+        copilot_claude_opus_4_8: role('copilot', {
+          active_model: 'claude-opus-4.8',
+          models: {
+            'claude-opus-4.8': { providers: ['anthropic-official:claude-opus-4.8'] },
+          },
+          fallback_chain: [{ route_id: 'anthropic-official:claude-opus-4.8', runtime_settings: {} }],
+        }),
+        copilot_claude_opus_4_7: role('copilot', {
+          active_model: 'claude-opus-4.7',
+          models: {
+            'claude-opus-4.7': { providers: ['anthropic-official:claude-opus-4.7'] },
+          },
+          fallback_chain: [{ route_id: 'anthropic-official:claude-opus-4.7', runtime_settings: {} }],
+        }),
+        copilot_custom_1: role('copilot', {
+          fallback_chain: [{ route_id: 'stale-provider:stale-model', runtime_settings: {} }],
+        }),
+        copilot_custom_2: role('copilot'),
+        graph_planner: role('graph_agent'),
+      },
+    }
+
+    expect(copilotRoleOptions(settingsRoles, [
+      routeGroup('claude-opus-4.8', 'Claude Opus 4.8'),
+      routeGroup('claude-opus-4.7', 'Claude Opus 4.7'),
+    ], credentials)).toEqual([
+      { role: 'copilot_claude_opus_4_8', label: 'Claude Opus 4.8' },
+      { role: 'copilot_claude_opus_4_7', label: 'Claude Opus 4.7' },
+      { role: 'copilot_custom_2', label: 'Copilot Custom 2' },
+    ])
   })
 
   it('defaults to copilot_chat', () => {

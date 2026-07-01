@@ -38,10 +38,10 @@ function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {
       // Failures stay open so the user sees them without a click; everything
       // else folds (click the summary to expand the full input/output).
       open={failed}
-      className={`mt-2 rounded-md border p-2 text-xs ${
+      className={`border-l py-1 pl-3 text-xs ${
         failed
-          ? 'border-destructive/30 bg-destructive/10 text-destructive'
-          : 'border-border bg-muted/45 text-muted-foreground'
+          ? 'border-destructive/50 text-destructive'
+          : 'border-border/70 text-muted-foreground'
       }`}
     >
       <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground">
@@ -56,11 +56,11 @@ function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {
         <span>{label}</span>
       </summary>
       {event.type === 'tool_use_start' ? (
-        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2 text-[11px] text-muted-foreground">
+        <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
           {JSON.stringify(event.tool_input, null, 2)}
         </pre>
       ) : event.result_summary ? (
-        <p className="mt-2 whitespace-pre-wrap leading-relaxed">
+        <p className="mt-1.5 whitespace-pre-wrap leading-snug">
           {event.result_summary.split('\n').slice(0, 4).join('\n')}
         </p>
       ) : null}

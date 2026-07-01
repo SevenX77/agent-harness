@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -22,24 +22,10 @@ import { appendModelGroupToBundle, removeModelBundle, visibleModelBundleEntries 
 import { appendModelGroupToRoleWithResult, attachBundleReferenceToRole, BUNDLE_DRAG_PREFIX, modelDropFailureMessage, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
+import { AvailableModelDragPreview, useAvailableModelPointerDrag } from "./available-model-pointer-drag"
 
 export { RoleSettingsPanel, RoleSettingsFields, roleIntentFromSettingsDraft } from "./llm-roles/RoleSettingsDialog"
-
-interface AvailableModelPointerDrag {
-  dragging: boolean
-  previewVisible: boolean
-  modelId: string
-  startX: number
-  startY: number
-}
-
-export interface AvailableModelDragPreviewState {
-  dragging: true
-  modelId: string
-  label: string
-  x: number
-  y: number
-}
+export { AvailableModelDragPreview, availableModelDragPreviewTransform, type AvailableModelDragPreviewState } from "./available-model-pointer-drag"
 
 export function LlmRolesTab({
   data,
@@ -145,14 +131,6 @@ export function LlmRolesTab({
   useEffect(() => {
     void seedPersistedRoleTestResults()
   }, [])
-  const activeAvailableModelDragRef = useRef<string | null>(null)
-  const availableModelPointerDragRef = useRef<AvailableModelPointerDrag | null>(null)
-  const availableModelDragPreviewNodeRef = useRef<HTMLDivElement | null>(null)
-  const availableModelDragPreviewFrameRef = useRef<number | null>(null)
-  const availableModelDragPreviewPointRef = useRef<{ x: number; y: number } | null>(null)
-  const suppressAvailableModelDragClickRef = useRef(false)
-  const availableModelDragReleaseTimerRef = useRef<number | null>(null)
-  const [availableModelDragPreview, setAvailableModelDragPreview] = useState<AvailableModelDragPreviewState | null>(null)
   const modelGroupsByIdRef = useRef<Map<string, ModelGroup>>(new Map())
   const baseModelGroupsByIdRef = useRef<Map<string, ModelGroup>>(new Map())
   const normalizedDataRef = useRef<RolesData | null>(normalizedData)
@@ -185,148 +163,36 @@ export function LlmRolesTab({
     }
   }, [data, normalizedData, onChange])
 
-  const handleAvailableModelPointerDown = useCallback((
-    modelId: string,
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) => {
-    if (event.button !== 0) return
-    activeAvailableModelDragRef.current = modelId
-    availableModelPointerDragRef.current = {
-      dragging: false,
-      previewVisible: false,
-      modelId,
-      startX: event.clientX,
-      startY: event.clientY,
-    }
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    } catch {
-      // Pointer capture is a progressive enhancement; window listeners still handle the fallback.
-    }
-  }, [])
-
-  const updateAvailableModelDragPreviewPosition = useCallback((x: number, y: number) => {
-    availableModelDragPreviewPointRef.current = { x, y }
-    if (availableModelDragPreviewFrameRef.current !== null) return
-
-    availableModelDragPreviewFrameRef.current = window.requestAnimationFrame(() => {
-      availableModelDragPreviewFrameRef.current = null
-      const point = availableModelDragPreviewPointRef.current
-      availableModelDragPreviewPointRef.current = null
-      const node = availableModelDragPreviewNodeRef.current
-      if (!point || !node) return
-      node.style.transform = availableModelDragPreviewTransform(point.x, point.y)
-    })
-  }, [])
-
-  useEffect(() => {
-    const movementThreshold = 6
-
-    function clearDragClickSuppression() {
-      suppressAvailableModelDragClickRef.current = false
-      if (availableModelDragReleaseTimerRef.current !== null) {
-        window.clearTimeout(availableModelDragReleaseTimerRef.current)
-        availableModelDragReleaseTimerRef.current = null
-      }
-    }
-
-    function releaseDragUi() {
-      document.documentElement.removeAttribute("data-available-model-dragging")
-    }
-
-    function releaseDragPreview({ clearState = true }: { clearState?: boolean } = {}) {
-      if (clearState) {
-        setAvailableModelDragPreview(null)
-      }
-      availableModelDragPreviewPointRef.current = null
-      if (availableModelDragPreviewFrameRef.current !== null) {
-        window.cancelAnimationFrame(availableModelDragPreviewFrameRef.current)
-        availableModelDragPreviewFrameRef.current = null
-      }
-    }
-
-    function scheduleDragSuppressionRelease() {
-      suppressAvailableModelDragClickRef.current = true
-      if (availableModelDragReleaseTimerRef.current !== null) {
-        window.clearTimeout(availableModelDragReleaseTimerRef.current)
-      }
-      availableModelDragReleaseTimerRef.current = window.setTimeout(() => {
-        clearDragClickSuppression()
-      }, 1000)
-    }
-
-    function clearPointerDrag({ suppressClick = false }: { suppressClick?: boolean } = {}) {
-      activeAvailableModelDragRef.current = null
-      availableModelPointerDragRef.current = null
-      releaseDragPreview()
-      releaseDragUi()
-      if (suppressClick) {
-        scheduleDragSuppressionRelease()
-      } else {
-        clearDragClickSuppression()
-      }
-    }
-
-    function previewLabel(modelId: string): string {
+  const {
+    availableModelDragPreview,
+    availableModelDragPreviewNodeRef,
+    getActiveAvailableModelDragId,
+    handleAvailableModelPointerDown,
+  } = useAvailableModelPointerDrag({
+    getPreviewLabel: useCallback((modelId: string) => {
       const modelGroup = modelGroupsByIdRef.current.get(modelId)
       return modelGroup?.display_name || modelGroup?.canonical_id || modelId
-    }
-
-    function handlePointerMove(event: PointerEvent) {
-      const drag = availableModelPointerDragRef.current
-      if (!drag) return
-      const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY)
-      if (distance >= movementThreshold) {
-        drag.dragging = true
-        document.documentElement.dataset.availableModelDragging = "true"
-      }
-      if (drag.dragging) {
-        if (!drag.previewVisible) {
-          drag.previewVisible = true
-          setAvailableModelDragPreview({
-            dragging: true,
-            modelId: drag.modelId,
-            label: previewLabel(drag.modelId),
-            x: event.clientX,
-            y: event.clientY,
-          })
-        } else {
-          updateAvailableModelDragPreviewPosition(event.clientX, event.clientY)
-        }
-        event.preventDefault()
-      }
-    }
-
-    function handlePointerUp(event: PointerEvent) {
-      const drag = availableModelPointerDragRef.current
-      if (!drag?.dragging) {
-        clearPointerDrag()
-        return
-      }
-
-      const target = document.elementFromPoint(event.clientX, event.clientY)
-      const dropZone = target instanceof Element ? target.closest("[data-model-drop-zone]") : null
+    }, []),
+    onDrop: useCallback(({ modelId, target }) => {
+      const dropZone = target?.closest("[data-model-drop-zone]") ?? null
       const roleElement = dropZone?.closest<HTMLElement>("[data-role-name]")
       const bundleElement = dropZone?.closest<HTMLElement>("[data-model-bundle-id]")
       const roleName = roleElement?.dataset.roleName
       const bundleId = bundleElement?.dataset.modelBundleId
       const latestData = normalizedDataRef.current
-      event.preventDefault()
-      event.stopPropagation()
-      clearPointerDrag({ suppressClick: true })
       if (!latestData) return
       if (roleName) {
         // #51: a dragged bundle attaches as a LIVE REFERENCE (bundle_id), not a
         // snapshot copy — so editing the bundle later reflects on every role that
         // links to it after re-projection.
-        if (drag.modelId.startsWith(BUNDLE_DRAG_PREFIX)) {
-          onChangeRef.current(attachBundleReferenceToRole(latestData, roleName, drag.modelId))
+        if (modelId.startsWith(BUNDLE_DRAG_PREFIX)) {
+          onChangeRef.current(attachBundleReferenceToRole(latestData, roleName, modelId))
           return
         }
-        const modelGroup = modelGroupsByIdRef.current.get(drag.modelId)
+        const modelGroup = modelGroupsByIdRef.current.get(modelId)
         if (!modelGroup) {
           toast.error(modelDropFailureMessage({
-            modelId: drag.modelId,
+            modelId,
             destination: roleName,
             reason: "source is no longer available",
           }))
@@ -345,18 +211,18 @@ export function LlmRolesTab({
         return
       }
       if (bundleId) {
-        if (drag.modelId.startsWith("bundle:")) {
+        if (modelId.startsWith("bundle:")) {
           toast.error(modelDropFailureMessage({
-            modelId: drag.modelId,
+            modelId,
             destination: "model bundle",
             reason: "model bundles cannot be nested",
           }))
           return
         }
-        const modelGroup = baseModelGroupsByIdRef.current.get(drag.modelId)
+        const modelGroup = baseModelGroupsByIdRef.current.get(modelId)
         if (!modelGroup) {
           toast.error(modelDropFailureMessage({
-            modelId: drag.modelId,
+            modelId,
             destination: "model bundle",
             reason: "source is no longer available",
           }))
@@ -370,43 +236,12 @@ export function LlmRolesTab({
         return
       }
       toast.error(modelDropFailureMessage({
-        modelId: drag.modelId,
+        modelId,
         destination: "LLM Roles",
         reason: "drop target was not recognized",
       }))
-    }
-
-    function handleClickCapture(event: MouseEvent) {
-      if (!suppressAvailableModelDragClickRef.current) return
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-      clearDragClickSuppression()
-    }
-
-    function handlePointerCancel() {
-      clearPointerDrag()
-    }
-
-    window.addEventListener("pointermove", handlePointerMove, { passive: false })
-    window.addEventListener("pointerup", handlePointerUp)
-    window.addEventListener("pointercancel", handlePointerCancel)
-    window.addEventListener("click", handleClickCapture, true)
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove)
-      window.removeEventListener("pointerup", handlePointerUp)
-      window.removeEventListener("pointercancel", handlePointerCancel)
-      window.removeEventListener("click", handleClickCapture, true)
-      releaseDragUi()
-      releaseDragPreview({ clearState: false })
-      clearDragClickSuppression()
-    }
-  }, [updateAvailableModelDragPreviewPosition])
-
-  const getActiveAvailableModelDragId = useCallback(
-    () => activeAvailableModelDragRef.current,
-    [],
-  )
+    }, []),
+  })
   const getAvailableModelGroup = useCallback(
     (modelGroupId: string) => modelGroupsById.get(modelGroupId) ?? null,
     [modelGroupsById],
@@ -515,35 +350,6 @@ export function LlmRolesTab({
 }
 
 export { modelDropFailureMessage } from "./role-utils"
-
-export function AvailableModelDragPreview({
-  drag,
-  nodeRef,
-}: {
-  drag: AvailableModelDragPreviewState | null
-  nodeRef: RefObject<HTMLDivElement | null>
-}) {
-  if (!drag?.dragging) return null
-
-  return (
-    <div
-      ref={nodeRef}
-      data-available-model-drag-preview="true"
-      data-preview-update-mode="imperative-transform"
-      aria-hidden="true"
-      className="pointer-events-none fixed left-0 top-0 z-50 max-w-72 select-none rounded-md border border-border bg-popover px-3 py-2 text-left shadow-lg ring-2 ring-primary/40"
-      style={{
-        transform: availableModelDragPreviewTransform(drag.x, drag.y),
-      }}
-    >
-      <div className="truncate text-xs font-medium text-foreground">{drag.label}</div>
-    </div>
-  )
-}
-
-export function availableModelDragPreviewTransform(x: number, y: number): string {
-  return `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
-}
 
 function LlmRolesLayout({ children, sidebar }: { children: ReactNode; sidebar: ReactNode }) {
   return (

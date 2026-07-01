@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react"
 import { toast } from "sonner"
 import {
   closestCenter,
@@ -39,7 +39,6 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { CredentialsState, MaterializationReportEntry, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
-  AVAILABLE_MODEL_DRAG_TYPE,
   appendModelGroupToRoleWithResult,
   modelDropFailureMessage,
   renameRole,
@@ -47,6 +46,7 @@ import {
   toggleModelFallback,
   updateRoleIntent,
 } from "../role-utils"
+import { handleAvailableModelDragOver, readAvailableModelDropId } from "../available-model-pointer-drag"
 import { ModelItem } from "./ModelItem"
 import { RoleNameDialog } from "./RoleNameDialog"
 import { RoleSettingsPanel, type RoleTokenLimitSummary } from "./RoleSettingsDialog"
@@ -133,18 +133,8 @@ export const RoleCard = memo(function RoleCard({
     onRunTestChain(roleName)
   }, [onRunTestChain, roleName])
 
-  function handleAvailableModelDragOver(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = "copy"
-  }
-
-  function handleAvailableModelDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    const modelId = event.dataTransfer.getData(AVAILABLE_MODEL_DRAG_TYPE) ||
-      event.dataTransfer.getData("text/plain") ||
-      getActiveAvailableModelDragId()
+  function handleAvailableModelDrop(event: Parameters<typeof readAvailableModelDropId>[0]) {
+    const modelId = readAvailableModelDropId(event, getActiveAvailableModelDragId)
     const modelGroup = modelId ? getAvailableModelGroup(modelId) : null
     if (!modelGroup) {
       toast.error(modelDropFailureMessage({

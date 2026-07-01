@@ -69,6 +69,8 @@ from app.models.llm_config import (
     ProviderType,
     RegistryResponse,
     RoleEntry,
+    RoleModelGroup,
+    RoleProviderModel,
     RoleRouteEntry,
     RolesData,
     overlay_bundle_reference_chain,
@@ -313,6 +315,15 @@ class RoleTestResultsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     results: dict[str, PersistedRoleTestResult] = Field(default_factory=dict)
+
+
+class CompareCandidateTestRequest(BaseModel):
+    """Transient node compare-candidate test request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_id: str = Field(min_length=1)
+    route_id: str | None = None
 
 
 _role_test_jobs: dict[str, RoleTestJobResponse] = {}
@@ -1475,6 +1486,35 @@ async def start_bundle_test_job(bundle_id: str) -> RoleTestJobResponse:
     return job
 
 
+@router.post("/model-groups/test-jobs", response_model=RoleTestJobResponse)
+async def start_compare_candidate_test_job(request: CompareCandidateTestRequest) -> RoleTestJobResponse:
+    """Start a transient node compare-candidate test job without persisting a role."""
+    credentials = load_credentials()
+    role = _compare_candidate_role(request, credentials)
+    materialized = _materialize_role_for_response(role, credentials)
+    targets = _build_role_test_targets(materialized, credentials)
+    if not targets:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No testable route found for compare candidate: {request.canonical_id}",
+        )
+    job_id = str(uuid.uuid4())
+    job_role_name = compare_candidate_role_name(request)
+    job = RoleTestJobResponse(
+        job_id=job_id,
+        role_name=job_role_name,
+        status="queued",
+        message="Queued compare candidate test.",
+        provider_statuses=[_role_test_provider_progress(target, "queued") for target in targets],
+    )
+    async with _role_test_jobs_lock:
+        _role_test_jobs[job_id] = job
+    _spawn_background_task(
+        _run_role_test_job_impl(job_id, job_role_name, targets, persist_result=False)
+    )
+    return job
+
+
 @router.get("/role-test-jobs/{job_id}", response_model=RoleTestJobResponse)
 async def get_role_test_job(job_id: str) -> RoleTestJobResponse:
     """Return compact status for a role test job."""
@@ -1592,6 +1632,8 @@ async def _run_role_test_job_impl(
     job_id: str,
     role_name: str,
     targets: list[RoleTestTarget],
+    *,
+    persist_result: bool = True,
 ) -> None:
     await _update_role_test_job(
         job_id,
@@ -1621,7 +1663,8 @@ async def _run_role_test_job_impl(
         )
         return
 
-    _persist_completed_role_test_result(role_name, result)
+    if persist_result:
+        _persist_completed_role_test_result(role_name, result)
     await _update_role_test_job(
         job_id,
         status="completed",
@@ -5251,6 +5294,78 @@ def bundle_role_name(bundle_id: str) -> str:
     """The __bundle__ job key (#50b): keeps bundle test results out of the role
     results namespace; mirrors the frontend bundleRoleName(bundleId)."""
     return f"__bundle__{bundle_id}"
+
+
+def compare_candidate_role_name(request: CompareCandidateTestRequest) -> str:
+    """Ephemeral job key for a node compare candidate."""
+    raw = request.route_id or request.canonical_id
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip("-") or "candidate"
+    return f"__compare__{slug}"
+
+
+def _compare_candidate_role(
+    request: CompareCandidateTestRequest,
+    credentials: LLMCredentialsFile,
+) -> RoleEntry:
+    routes = _compare_candidate_routes(request, credentials)
+    display_name = _model_group_identity(request.canonical_id, routes, credentials)["display_name"]
+    return RoleEntry(
+        model_groups=[
+            RoleModelGroup(
+                canonical_id=request.canonical_id,
+                display_name=display_name,
+                provider_models=[
+                    RoleProviderModel(route_id=route.route_id)
+                    for route in sorted(routes, key=lambda route: route.route_id)
+                ],
+            )
+        ],
+    )
+
+
+def _compare_candidate_routes(
+    request: CompareCandidateTestRequest,
+    credentials: LLMCredentialsFile,
+) -> list[ProviderRoute]:
+    canonical_id = request.canonical_id.strip()
+    requested_route_id = request.route_id.strip().removeprefix("route:").strip() if request.route_id else None
+    if not canonical_id:
+        raise HTTPException(status_code=400, detail="Compare candidate canonical_id is required.")
+
+    normalized_id = normalize_model_group_key(canonical_id)
+    routes_by_identity: dict[str, list[ProviderRoute]] = {}
+    for route in credentials.provider_routes.values():
+        if not _include_route_in_model_groups(route, credentials):
+            continue
+        routes_by_identity.setdefault(
+            _model_group_identity_key(route, credentials),
+            [],
+        ).append(route)
+
+    candidate_groups: list[list[ProviderRoute]] = []
+    for identity_key, routes in routes_by_identity.items():
+        representative = _representative_canonical_id(routes, credentials)
+        route_canonical_ids = {route.canonical_id for route in routes if route.canonical_id}
+        if (
+            identity_key == normalized_id
+            or normalize_model_group_key(representative) == normalized_id
+            or canonical_id in route_canonical_ids
+        ):
+            candidate_groups.append(routes)
+
+    if not candidate_groups:
+        raise HTTPException(status_code=404, detail=f"Unknown model group: {canonical_id}")
+
+    routes = [
+        route
+        for group in candidate_groups
+        for route in group
+        if requested_route_id is None or route.route_id == requested_route_id
+    ]
+    if not routes:
+        detail = f"Unknown route for model group {canonical_id}: {requested_route_id}"
+        raise HTTPException(status_code=404, detail=detail)
+    return routes
 
 
 def _materialize_bundle_for_response(

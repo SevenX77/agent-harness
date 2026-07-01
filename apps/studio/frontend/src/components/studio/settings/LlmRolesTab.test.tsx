@@ -1089,6 +1089,31 @@ describe("LlmRolesTab controls", () => {
     expect(providerCardTag).toContain("relative")
   })
 
+  it("renders the LLM role Test trigger with the flask icon", () => {
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={rolesData}
+        category="graph-agent"
+        credentialsByCode={credentialsByProviderCode(rolesData, { providers: credentials.providers })}
+        modelDisplayNamesByCode={new Map([["CL46T", "Claude Sonnet 4.6 Thinking"]])}
+        ownedProviderCodesByModel={new Map([["CL46T", new Set(["anthropic"])]])}
+        roleName="copilot_chat"
+        testStatuses={{}}
+        testChainRunning={false}
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('data-role-test-trigger="true"')
+    expect(html).toContain('data-role-test-icon="true"')
+    expect(html).toContain('data-variant="default"')
+    expect(html).toContain('>Test</button>')
+  })
+
   it("does not render persisted role test reports inside the role card", () => {
     const html = renderToStaticMarkup(
       <RoleCard

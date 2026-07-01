@@ -6,11 +6,14 @@ import type { SkillGraphNodeData } from '@/components/GraphCanvas'
 import {
   compareModelGroupsForPicker,
   graphAgentRoleNamesForProperties,
+  LlmCompareCandidateRow,
+  LlmCompareTestResultPanel,
   llmCompareModelGroupFilter,
   llmCompareModelGroupSearchValue,
   llmRoleSelectOptionState,
   modelGroupRouteOptions,
   PropertiesPanel,
+  RoleTestControl,
   roleEndpointRouteOptions,
 } from './PropertiesPanel'
 
@@ -574,6 +577,52 @@ describe('PropertiesPanel - node compare model group picker', () => {
       },
     ])
   })
+
+  it('renders compare candidates as provider-style blocks with Test and no Model label', () => {
+    const html = renderToStaticMarkup(
+      <LlmCompareCandidateRow
+        candidate={{ id: 'compare-1', modelGroupId: 'llama3', route: 'route:qiniu-main:llama3' }}
+        modelGroups={[modelGroup()]}
+        testState={{
+          running: false,
+          result: {
+            status: 'ok',
+            summary: 'Qiniu route passed.',
+            details: ['Provider Qiniu responded successfully.'],
+          },
+        }}
+        onTest={() => undefined}
+        onEdit={() => undefined}
+        onRemove={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('data-llm-compare-model-card="true"')
+    expect(html).toContain('data-llm-compare-test-trigger="true"')
+    expect(html).toContain('data-llm-compare-test-icon="true"')
+    expect(html).toContain('data-llm-compare-status-light="true"')
+    expect(html).toContain('Qiniu route passed.')
+    expect(html).not.toContain('>Model<')
+  })
+
+  it('renders compare Test results with warning details', () => {
+    const html = renderToStaticMarkup(
+      <LlmCompareTestResultPanel
+        state={{
+          running: false,
+          result: {
+            status: 'warning',
+            summary: 'Needs Attention',
+            details: ['Provider skipped this route because thinking capability is unknown.'],
+          },
+        }}
+      />,
+    )
+
+    expect(html).toContain('data-llm-compare-test-result="true"')
+    expect(html).toContain('Needs Attention')
+    expect(html).toContain('Provider skipped this route because thinking capability is unknown.')
+  })
 })
 
 describe('PropertiesPanel - role options', () => {
@@ -606,7 +655,7 @@ describe('PropertiesPanel - role options', () => {
 })
 
 describe('PropertiesPanel - node role Test control (R23)', () => {
-  it('agent node renders a Test button next to the llm_role field', () => {
+  it('agent node renders a compact primary Test icon next to the llm_role field', () => {
     const html = renderPanel({
       id: 'review',
       data: baseData({ mode: 'llm', filePath: 'phases/review/SKILL.md' }),
@@ -622,7 +671,27 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     expect(html).not.toContain('id="phase-llm-endpoint"')
     expect(html).toContain('data-llm-role-settings-trigger="true"')
     expect(html).toContain('aria-label="Open LLM Roles settings"')
-    expect(html).toContain('>Test<')
+    expect(html).toContain('data-llm-role-test-trigger="true"')
+    expect(html).toContain('data-variant="default"')
+    expect(html).toContain('data-llm-role-test-icon="true"')
+  })
+
+  it('role Test status badge exposes detailed diagnostics in a tooltip', () => {
+    const html = renderToStaticMarkup(
+      <RoleTestControl
+        roleName="reviewer"
+        roleTest={{
+          running: false,
+          status: 'warning',
+          details: ['Thinking capability is unknown for Qiniu.'],
+        }}
+        onRoleTest={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('data-role-test-status-tooltip="true"')
+    expect(html).toContain('Needs Attention')
+    expect(html).toContain('Thinking capability is unknown for Qiniu.')
   })
 
   it('agent node renders the MVP1 node-scoped multi-LLM compare trigger next to llm_role', () => {

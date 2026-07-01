@@ -191,6 +191,7 @@ export function Panels({
         selectedNode={selectedNode}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
+        onFileOpen={onFileOpen}
       />
     )
   }

@@ -93,8 +93,9 @@ describe("studio panel internal layout", () => {
     )
 
     expect(html).toContain('data-studio-panel-body="true"')
-    expect(html).toContain('data-studio-panel-section="true"')
-    expect(html).toContain("Input Schema")
-    expect(html).toContain("Output Schema")
+    expect(html).not.toContain('data-studio-panel-section="true"')
+    expect(html).toContain('data-studio-panel-field-row="true"')
+    expect(html).toContain("Input")
+    expect(html).toContain("Output")
   })
 })

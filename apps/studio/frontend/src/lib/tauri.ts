@@ -100,6 +100,34 @@ export async function openLocalPath(path: string): Promise<boolean> {
   return false
 }
 
+export async function openClaudeCode(workspaceRoot: string | null | undefined): Promise<boolean> {
+  const targetPath = workspaceRoot?.trim() ?? ''
+  if (!targetPath) {
+    toast.error('No workspace path available')
+    return false
+  }
+
+  if (!isTauriRuntime()) {
+    toast.info('Desktop-only feature', { description: targetPath })
+    return false
+  }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
+    return false
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_claude_code', { workspaceRoot: targetPath })
+    toast.success('Opening Claude Code')
+    return true
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error)
+    toast.error('Failed to open Claude Code', { description })
+    return false
+  }
+}
+
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {
   if (!isTauriRuntime()) {
     toast.info('Desktop only')

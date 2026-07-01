@@ -74,6 +74,28 @@ io:
     )
 
 
+def _logic_skill(root: Path) -> None:
+    _base(root, name="logic-only", phase="done")
+    _write(
+        root / "phases" / "done" / "LOGIC.md",
+        """---
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+---
+<action>identity</action>
+""",
+    )
+    _write(
+        root / "phases" / "done" / "actions" / "identity.py",
+        "def identity(inputs):\n    return {}\n",
+    )
+
+
 def _parent_skill(root: Path, target_skill: str) -> None:
     _base(root)
     _write(
@@ -129,31 +151,35 @@ def test_compile_skill_facade_passes_skill_resolver(tmp_path: Path) -> None:
     assert compiled.subagents_by_phase["main"][0].target_skill == "demo.child"
 
 
-def test_target_skill_requires_resolver(tmp_path: Path) -> None:
+def test_target_skill_uses_default_local_resolver(tmp_path: Path) -> None:
     parent = tmp_path / "parent"
+    child = tmp_path / "demo" / "child"
     _parent_skill(parent, "demo.child")
+    _child_skill(child)
 
-    with pytest.raises(SkillResolutionError) as exc_info:
-        SkillLoader().compile_skill(parent, skill_resolver=None)
-    assert exc_info.value.payload.code == "[F-v3-resolver-missing]"
+    compiled = SkillLoader().compile_skill(parent)
+
+    assert compiled.subagents_by_phase["main"][0].root == child
 
 
-def test_compile_skill_facade_requires_resolver_v3_code(tmp_path: Path) -> None:
+def test_compile_skill_facade_uses_default_local_resolver(tmp_path: Path) -> None:
     parent = tmp_path / "parent"
+    child = tmp_path / "demo" / "child"
     _parent_skill(parent, "demo.child")
+    _child_skill(child)
 
-    with pytest.raises(SkillResolutionError) as exc_info:
-        compile_skill(parent, cache=False, skill_resolver=None)
-    assert exc_info.value.payload.code == "[F-v3-resolver-missing]"
+    compiled = compile_skill(parent, cache=False)
+
+    assert compiled.subagents_by_phase["main"][0].root == child
 
 
-def test_run_skill_requires_resolver_v3_code(tmp_path: Path) -> None:
-    parent = tmp_path / "parent"
-    _parent_skill(parent, "demo.child")
+def test_run_skill_uses_default_local_resolver(tmp_path: Path) -> None:
+    skill_root = tmp_path / "logic-only"
+    _logic_skill(skill_root)
 
-    with pytest.raises(SkillResolutionError) as exc_info:
-        run_skill(parent, workspace_dir=tmp_path / "workspace", skill_resolver=None)
-    assert exc_info.value.payload.code == "[F-v3-resolver-missing]"
+    result = run_skill(skill_root, workspace_dir=(tmp_path / "workspace").resolve())
+
+    assert result.success is True
 
 
 def test_invalid_skill_id_raises_v3_code() -> None:

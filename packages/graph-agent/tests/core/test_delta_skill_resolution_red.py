@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -13,7 +11,7 @@ from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, SubagentSpec, SubgraphNodeAST
 from graph_agent.core.runner import run_skill
-from graph_agent.core.skill_resolver_protocol import SkillResolutionError, SkillResolverProtocol
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
 
 class DictSkillResolver:
@@ -51,14 +49,35 @@ phases:
 
 
 def _logic_skill(root: Path) -> None:
-    _graph(root, name="child", phase="done")
+    _write(
+        root / "GRAPH.md",
+        """---
+schema_version: "v0.3.0"
+name: child
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - done
+---
+<phase depends_on="input" output>done</phase>
+""",
+    )
     _write(
         root / "phases" / "done" / "LOGIC.md",
         """---
 io:
   inputs:
     type: object
-    properties: {}
+    properties:
+      text:
+        type: string
   outputs:
     type: object
     properties: {}
@@ -90,16 +109,54 @@ io:
     )
 
 
-def _assert_required_keyword(func: Any, name: str) -> None:
-    parameter = inspect.signature(func).parameters[name]
-    assert parameter.default is inspect.Parameter.empty
+def _subagent_parent(root: Path, target_skill: str) -> None:
+    _graph(root, name="parent", phase="main")
+    _write(
+        root / "phases" / "main" / "SKILL.md",
+        f"""---
+subagents:
+  - name: child_expert
+    target_skill: {target_skill}
+    description: Resolve child by skill id.
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties: {{}}
+---
+<role>Parent</role>
+<goal>Parent work.</goal>
+""",
+    )
 
 
-def test_delta3_compile_and_runtime_entrypoints_require_skill_resolver() -> None:
-    _assert_required_keyword(compile_skill, "skill_resolver")
-    _assert_required_keyword(SkillLoader.compile_skill, "skill_resolver")
-    _assert_required_keyword(assemble_graph, "skill_resolver")
-    _assert_required_keyword(run_skill, "skill_resolver")
+def test_delta3_compile_and_runtime_entrypoints_default_local_skill_resolver(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "parent"
+    child = tmp_path / "demo" / "child"
+    _subagent_parent(parent, "demo.child")
+    _logic_skill(child)
+
+    compiled = compile_skill(parent, cache=False)
+
+    assembled = assemble_graph(compiled)
+    assert assembled.graph is not None
+    assert compiled.subagents_by_phase["main"][0].root == child
+
+
+def test_delta3_run_skill_defaults_local_skill_resolver(tmp_path: Path) -> None:
+    skill_root = tmp_path / "standalone"
+    _logic_skill(skill_root)
+
+    result = run_skill(
+        skill_root,
+        workspace_dir=(tmp_path / "workspace").resolve(),
+    )
+
+    assert result.success is True
 
 
 def test_delta2_subagent_spec_rejects_legacy_path_field() -> None:
@@ -160,18 +217,20 @@ def test_delta5_subgraph_path_compile_smoke(tmp_path: Path) -> None:
     assert graph.phase_ids == ["child"]
 
 
-def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -> None:
+def test_delta1_assemble_graph_defaults_local_resolver(tmp_path: Path) -> None:
+    child = tmp_path / "parent" / "subgraphs" / "child"
+    _logic_skill(child)
     phase_ast = SubgraphNodeAST.model_validate(
         {
             "mode": "subgraph",
             "name": "child",
-            "path": str(tmp_path / "parent" / "subgraphs" / "child"),
+            "path": str(child),
             "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
         }
     )
     compiled = CompiledSkill(
         raw={
-            "graph_topology": {"phases": [{"id": "child", "depends_on": ["input"], "output": True}]}
+            "graph_topology": {"phases": [{"name": "child", "depends_on": ["input"], "output": True}]}
         },
         manifest=GraphManifest(
             schema_version="v0.3.0",
@@ -191,6 +250,6 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
         ],
     )
 
-    with pytest.raises(SkillResolutionError) as exc_info:
-        assemble_graph(compiled, skill_resolver=None)
-    assert exc_info.value.payload.code == "[F-v3-resolver-missing]"
+    assembled = assemble_graph(compiled)
+
+    assert assembled.graph is not None

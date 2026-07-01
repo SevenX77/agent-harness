@@ -133,7 +133,7 @@ def test_evaluate_golden_baseline_public_api_signature_is_locked() -> None:
     assert signature.parameters["workspace_dir"].default is inspect.Signature.empty
     assert signature.parameters["baseline_id"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["baseline_id"].default is inspect.Signature.empty
-    assert signature.parameters["skill_resolver"].default is inspect.Signature.empty
+    assert signature.parameters["skill_resolver"].default is None
 
 
 def test_evaluate_golden_rejects_relative_workspace_dir(

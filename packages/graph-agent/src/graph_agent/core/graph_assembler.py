@@ -51,6 +51,7 @@ from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.llm_provider import LLMProvider, LLMProviderChatModel
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
+from graph_agent.core.local_workspace_resolver import default_local_resolver_for_compiled
 from graph_agent.core.manifest import (
     AgentNodeAST,
     BatchSpec,
@@ -61,7 +62,6 @@ from graph_agent.core.manifest import (
 )
 from graph_agent.core.skill_resolver_protocol import (
     SkillResolverProtocol,
-    require_skill_resolver,
 )
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 from graph_agent.core.subagents import (
@@ -156,7 +156,7 @@ def assemble_graph(
     model_resolver: Any = None,
     max_patch_attempts: int = 3,
     callbacks: list[Any] | None = None,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None = None,
     llm_provider: LLMProvider | None = None,
     checkpointer: Any = None,
     predict_context: Any = None,
@@ -165,7 +165,7 @@ def assemble_graph(
 ) -> CompiledStateGraph:
     """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
 
-    resolver = require_skill_resolver(skill_resolver, caller="assemble_graph")
+    resolver = skill_resolver or default_local_resolver_for_compiled(compiled)
     if _compilation_cache is None:
         _compilation_cache = {}
     builder = StateGraph(WorkflowState)

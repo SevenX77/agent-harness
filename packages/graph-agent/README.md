@@ -63,13 +63,10 @@ Run the hello_world example from repo root:
 
 ```bash
 uv run python3 -c "
-from pathlib import Path
-from graph_agent import LocalWorkspaceResolver, run_skill
+from graph_agent import run_skill
 
-resolver = LocalWorkspaceResolver(search_paths=[Path.cwd(), Path.cwd() / 'skills'])
 result = run_skill(
     'path/to/v030-skill-root',
-    skill_resolver=resolver,
     user_name='Developer',
 )
 print('Success:', result.success)
@@ -78,7 +75,7 @@ print('Success:', result.success)
 
 ### 4. Choose Entry Point
 
-- `run_skill(...)` — Most common entry point for direct V0.3 skill-root execution; pass an explicit resolver with `skill_resolver=...`.
+- `run_skill(...)` — Most common entry point for direct V0.3 skill-root execution; uses a local resolver by default, or accepts `skill_resolver=...` when a host owns the skill registry.
 - `compile_skill(...)` — Static validation; used by Studio Frontend's lint flow.
 - `LocalWorkspaceResolver(...)` — Standard local filesystem resolver for CLI-like and host-project usage.
 
@@ -171,7 +168,8 @@ from pathlib import Path
 from graph_agent import GraphCompileError, GraphExecutionError, LocalWorkspaceResolver
 from graph_agent import RunResult, run_skill
 
-# 3. Run
+# 3. Run. The SDK supplies a local resolver by default; host integrations can
+# override it when they own registry/search-path policy.
 resolver = LocalWorkspaceResolver(search_paths=[Path.cwd(), Path.cwd() / "skills"])
 
 def my_subscriber(event):
@@ -185,9 +183,11 @@ result: RunResult = run_skill(
 )
 ```
 
-`skill_resolver` is required for filesystem skill lookup. Tests and host
-integrations should construct an explicit resolver instead of relying on
-pytest or framework-level default injection.
+`skill_resolver` is optional for direct SDK use. When omitted, engine builds a
+`LocalWorkspaceResolver` rooted around the skill path and common local folders
+such as `skills/` and `registry/`. Studio and other host integrations should
+still pass an explicit resolver when they own registry truth or workspace
+boundaries.
 
 Do not import from internal sub-modules (`graph_agent.core.*`, `graph_agent.io.*`, etc.) in production host code; those are subject to change.
 

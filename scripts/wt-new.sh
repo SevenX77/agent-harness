@@ -28,7 +28,26 @@ fi
 
 git worktree add -b "$branch" "$dir" origin/main
 
+# Pre-install frontend deps in the background so npm run dev / lint / test are
+# ready by the time they're needed. npm ci only writes into node_modules/ and
+# never touches src, so coding can start immediately. scripts/wt-fe-dev.sh
+# waits for this install (marker: node_modules/.wt-install-done).
+# Skip with WT_SKIP_NPM=1 (e.g. for backend-only tasks).
+fe_dir="$dir/apps/studio/frontend"
+if [ -z "${WT_SKIP_NPM:-}" ] && [ -f "$fe_dir/package.json" ]; then
+  wt_name="$(basename "$dir")"
+  npm_log="$repo_root/.worktrees/.$wt_name.npm-ci.log"
+  npm_pid="$repo_root/.worktrees/.$wt_name.npm-ci.pid"
+  (
+    cd "$fe_dir"
+    nohup sh -c 'npm ci && touch node_modules/.wt-install-done' >"$npm_log" 2>&1 &
+    echo $! >"$npm_pid"
+  )
+  echo "• npm ci running in background (log: $npm_log)"
+fi
+
 echo
 echo "✓ worktree ready: $repo_root/$dir"
 echo "  branch '$branch' cut from origin/main"
 echo "  next: cd \"$repo_root/$dir\"  →  write code  →  scripts/wt-ship.sh"
+echo "  frontend preview: scripts/wt-fe-dev.sh  (own Vite port, shares the main repo's sidecar)"

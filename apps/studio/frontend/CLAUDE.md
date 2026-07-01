@@ -30,7 +30,16 @@
    npm run build     # tsc -b && vite build
    ```
    四个全绿才推。绿了再推,别把 `main` 弄红。
-3. **当前快速迭代阶段:直接在主仓根 `main` 改** —— 不再为前端小步快跑开 worktree。开工前用 `git status --short --branch` 识别当前 `main` 上已有改动,把它们视为同仓协作上下文,不要重置、不要拉新、不要为了追求干净工作区去挪 worktree;本轮只碰被指派的前端文件/手册切片。已有 app 在跑时优先复用热更新做视觉验证,不要另起第二套长期 dev 实例。需要发 PR 时,再从当前核对过的改动创建普通分支并推送 PR;`main` 仍是 protected,不要直接 push 到远端 `main`。
+3. **多 agent 并行阶段:一任务一 worktree,预览共享主仓 sidecar** —— 用
+   `scripts/wt-new.sh <type>/<short-desc>` 开工;它会**后台**预装前端
+   `node_modules`(npm ci 只写 `node_modules/`,不碰 `src/`,worktree 建好即可开始改代码,
+   只有跑 dev/lint/test 时才需要装完)。主仓根保持**唯一一套完整 app**
+   (Tauri + sidecar + Vite 5173,`scripts/studio-dev.ps1` 启动);每个 worktree 里用
+   `scripts/wt-fe-dev.sh` 起自己的轻量 Vite(自动挑 5174-5199 空闲端口,`/api`、`/ws`
+   走代理指向同一个 sidecar,浏览器视角同源、无 CORS 问题),在
+   `http://localhost:<port>/#tkn=<sidecar-token>` 亲眼验证**自己这棵树**的改动。
+   不要在 worktree 里再起第二套 Tauri/sidecar,也不要动主仓根工作区或其他 agent 的
+   worktree。发 PR 用 `scripts/wt-ship.sh`;`main` 仍是 protected,不要直接 push。
 
 ## 三、样式/布局判断基准
 
@@ -39,7 +48,7 @@
   - **入口读它 + 缺了向上补**:动手前读被指派节点/surface 的设计页(应该长啥样)+ 实施页/测试页(当前状态);**手册设计页缺/不全/和 MVP1 设计文档打架,就去设计源补对**(完整级联见下「四」Phase 2)。手册设计页是 MVP1 设计文档的**派生视图**,不是设计真相本身。
   - **它的状态标签会滞后代码**:`fe_status`/`be_status`/`be_dep` 是手维护的,默认当它可能过时,**用代码核对**再信(见根记忆 `feedback_no_overclaim_verify_status_against_code`)。
   - **出口回写它**:改了代码就在同一轮改动里把对应切片状态改对 + 重生成 `index.html`(见下「四」Phase 6)。
-  - **唯一真相源 + 唯一网络出口 = `main` 主仓根**:手册(切片 + `screenshots/` 真机图 + `index.html`)只认 `main` 这一份。前端快速迭代阶段也在主仓根直接改手册,**不在 worktree / `/tmp` 留第二份手册副本、也不为它单开第二条隧道**;对外网页固定从主仓根伺服。截图必须随切片一起进 git(不许只烤进 `index.html` 而源 PNG 不入库)。伺服配方见 `docs/development/RUN_AND_SCREENSHOT.md` §4。
+  - **唯一真相源 + 唯一网络出口 = `main` 主仓根**:手册(切片 + `screenshots/` 真机图 + `index.html`)只认 `main` 这一份。改手册跟改代码一样:在**自己的 worktree** 里改切片 / 加截图 / 重生成,随同一个 PR 合进 `main` —— **不把 worktree / `/tmp` 里的中间产物当第二份手册对外、也不为它单开第二条隧道**;对外网页固定从主仓根伺服,合并后主仓根 `git pull` 即刷新。截图必须随切片一起进 git(不许只烤进 `index.html` 而源 PNG 不入库)。伺服配方见 `docs/development/RUN_AND_SCREENSHOT.md` §4。
   - 手册的看/改/何时改/截图/字段 schema/配色,全在 `docs/studio/mvp1/handbook-methodology/` 两份方法论文档(`frontend-page-authoring-methodology.md` + `handbook-operations-schema-lifecycle.md`)。
 - **`docs/development/FRONTEND_UI_SPEC.md` 为样式/组件唯一真相**,改前先读,**尤其 §2「UI 组件与样式基准规范」**。
 - 优先复用 `src/components/ui/` 下已有的 shadcn/ui / Radix 封装;缺哪个原语就先在 `src/components/ui/` 补 shadcn 风格封装再用。
@@ -58,8 +67,15 @@
 - 读三样:① 本 SOP ② `FRONTEND_UI_SPEC.md`(尤其 §2,样式真相)③ 【手册触点】手册里这个节点/surface 的**设计页**(应该长啥样)+ **实施页/测试页**(当前状态)。
 - 【手册触点·关键】手册自带的状态标签可能滞后代码 → **这一步就用代码核对一遍现状**(grep 前端/后端确认动作到底接没接、后端能力建没建),否则会基于旧状态做错判断。核对范围**含机制卡的 `backend_status[].status`**——它现在直接进导航状态点圆点(圆点 = 该页全部徽章取最差,见方法论 `handbook-operations-schema-lifecycle.md` §5.3),据真实代码老实标,别留乐观值。
 
-**Phase 1 · 确认当前 `main` 工作区边界**
-- 不开 worktree。开工前在主仓根执行 `git status --short --branch`,确认当前分支与已有未提交改动,并把非本任务改动当作用户/其他协作者上下文保留原样。不要因为工作区不干净就 `git reset`、`git checkout --`、`git pull` 或新开 worktree;只在本任务范围内做最小前端改动、视觉验证和必要的手册回写。
+**Phase 1 · 开 worktree,锁定任务边界**
+- 用 `scripts/wt-new.sh <type>/<short-desc>` 从 `origin/main` 切本任务专属 worktree。它会后台预装
+  `apps/studio/frontend/node_modules`(只写 `node_modules/`,不碰 `src/`,建好即可开始改代码;
+  跑 dev/lint/test 才需要装完,`scripts/wt-fe-dev.sh` 会自动等它)。
+- 本任务的**所有**改动只发生在自己的 worktree 里:不动主仓根工作区,不动其他 agent 的 worktree,
+  更不要因为别处工作区不干净就 `git reset` / `git checkout --` / `git pull` 别人的树。
+- **共享基础设施要先对调度**:design token、`components/ui/` 封装、手册 `index.html` 重生成这类
+  多任务都会碰的文件,并行改必然在合并时冲突——发现要动它们时先跟 PM/用户排队或指定单一 owner;
+  `index.html` 是生成物,合并冲突时在合并侧重跑 `build_template_slice.py` 重生成,不手工解。
 
 **Phase 2 · 设计对齐:先把权威设计立起来,再动手** 【手册触点·核心前置】
 - **铁律:绝不对着"缺失的设计"或"自己临时编的设计"写代码。** 设计真相在 MVP1 设计文档,手册设计页只是它的**派生视图**。动手前按这条级联把"它应该长啥样"确立成权威设计:
@@ -76,7 +92,14 @@
 
 **Phase 4 · 亲眼验证(顺手产出手册要用的真机图)**
 - 跑 app 亲眼点过受影响界面(主成功路径 + 取消/错误态);agent reply / diff / typecheck 通过都**不等于**视觉验证。
-- **当前只认主仓根这一份 app**:如果已有 Studio app 在跑,优先复用它的 Vite 热更新和当前 Tauri 壳做验证;不要为了本轮小改另开第二套长期 dev server。确实没 app 时,启动前用 `lsof -nP -iTCP -sTCP:LISTEN` 核对旧 Vite/Tauri/sidecar 端口,只清自己确认属于旧 Studio 实例的 PID,绝不 `pkill -f 'cargo tauri dev'`。标准启动仍是 `cd apps/studio/tauri && cargo tauri dev`;Tauri 自己拉起 Vite 和动态端口 FastAPI sidecar。若 5173 被占用,优先复用/停旧实例,不要为了绕端口再开第二套长期 dev server。
+- **验证用自己 worktree 的 Vite,后端共享主仓 sidecar**:主仓根跑着**唯一一套**完整 app
+  (`scripts/studio-dev.ps1` 启动的 Tauri + sidecar :8787 + Vite 5173)。在自己的 worktree 里跑
+  `scripts/wt-fe-dev.sh` 起本任务专属 Vite(自动挑 5174-5199 空闲端口,`/api`、`/ws` 代理到主仓
+  sidecar,同源无 CORS),浏览器开 `http://localhost:<port>/#tkn=<sidecar-token>` 验证。
+  注意:主仓的 5173 展示的是 `main` 的代码、**不含你 worktree 的改动**,别在那上面"验证"自己的活;
+  也不要在 worktree 里另起第二套 Tauri/sidecar。若任务同时涉及后端改动,共享 sidecar 不会反映它——
+  那已超出本 SOP 边界,退回全局流程处理。主仓没 app 在跑时,先按标准启动把主仓 app 拉起来
+  (见 `AGENTS.md`「Studio Tauri Dev」),不要绕过 launcher 直接 `cargo tauri dev`。
 - 【手册触点】这一步的截图**就是手册测试页要挂的真机图** → 按 ops 文档 §4 命名(`n<节点>-<序号>-<语义>.png`,特写 `-closeup`)存进 handbook 的 `screenshots/`;截不到的(系统对话框/文件管理器/瞬态帧)记下来,Phase 6 在切片标 `shot_na` + 原因。
 
 **Phase 5 · 本地 CI 门禁(改了前端 src 才需要)**
@@ -89,7 +112,11 @@
 - 生成自检:无蓝点(`grep -c 'status-dot review'`=0)、无死链、截图数对得上。字段 schema / 枚举 / 配色锁定见 ops 文档 §2 §3 §5。
 
 **Phase 7 · 发 PR & 合并**
-- 快速迭代先在本地 `main` 完成实现、视觉验证和手册回写。准备发 PR 时,从当前干净核对过的改动创建普通分支并推送 PR;**PR 同时含 前端 src + 切片 JSON + 重生成的 index.html**(若 Phase 2 改了 MVP1 设计源,也一并带上)。远端 `main` 仍 protected,不得直接 push。
+- 在 worktree 里完成实现、视觉验证和手册回写后,`scripts/wt-ship.sh ["PR title"]` 推分支、开 PR、
+  上 auto-merge;**PR 同时含 前端 src + 切片 JSON + 重生成的 index.html**(若 Phase 2 改了 MVP1
+  设计源,也一并带上)。你发出去的 PR 内容就是你验证过的那棵树——不需要再从脏工作区里挑 hunk。
+  远端 `main` 仍 protected,不得直接 push。合并后 `scripts/wt-clean.sh` 清理本地 worktree,
+  主仓根 `git pull` 让 5173 和对外手册网页刷新到最新。
 
 **Phase 8 · 沉淀(同一次改动里,别只留对话)**
 - 可复用**样式规则** → `FRONTEND_UI_SPEC.md`;**手册方法论/坑** → 方法论文档;**行为类教训** → 记忆。

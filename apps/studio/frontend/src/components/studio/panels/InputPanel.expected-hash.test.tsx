@@ -3,66 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
-import { writeSkillFile } from "@/api/client"
-import { isTauriRuntime } from "@/config/runtime"
-import { sha256Hex } from "@/lib/hash"
-import { InputPanel } from "./InputPanel"
+import { InputPanel, __test__ } from "./InputPanel"
 
 const buttonProps = vi.hoisted((): Array<Record<string, unknown>> => [])
-const testInputsSectionProps = vi.hoisted((): Array<Record<string, unknown>> => [])
-
-vi.mock("@/api/client", () => ({
-  writeSkillFile: vi.fn(async () => ({ path: "GRAPH.md", hash: "next-hash" })),
-}))
-
-vi.mock("@/config/runtime", () => ({
-  isTauriRuntime: vi.fn(),
-}))
-
-vi.mock("@/lib/hash", () => ({
-  sha256Hex: vi.fn(async () => "current-graph-hash"),
-}))
 
 vi.mock("@/components/ui/button", () => ({
   Button: (props: Record<string, unknown> & { children?: ReactNode }) => {
     buttonProps.push(props)
-    return <button aria-label={props["aria-label"] as string | undefined}>{props.children}</button>
+    return <button>{props.children}</button>
   },
-}))
-
-vi.mock("@/components/ui/input", () => ({
-  Input: (props: Record<string, unknown>) => (
-    <input aria-label={props["aria-label"] as string | undefined} value={props.value as string | undefined} readOnly />
-  ),
 }))
 
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  SelectContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  SelectItem: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  SelectTrigger: ({ children }: { children?: ReactNode }) => <button>{children}</button>,
-  SelectValue: ({ placeholder }: { placeholder?: ReactNode }) => <span>{placeholder}</span>,
-}))
-
-vi.mock("@/components/ui/textarea", () => ({
-  Textarea: (props: Record<string, unknown>) => (
-    <textarea aria-label={props["aria-label"] as string | undefined} value={props.value as string | undefined} readOnly />
-  ),
-}))
-
-vi.mock("./GoldenSection", () => ({
-  GoldenSection: () => null,
-}))
-
-vi.mock("./TestInputsSection", () => ({
-  TestInputsSection: (props: Record<string, unknown>) => {
-    testInputsSectionProps.push(props)
-    return null
-  },
 }))
 
 const graphMd = [
@@ -70,56 +23,53 @@ const graphMd = [
   "io:",
   "  inputs:",
   "    type: object",
+  "    required: [chapter_content, chapter_number]",
   "    properties:",
-  "      title:",
+  "      chapter_content:",
   "        type: string",
+  "      chapter_number:",
+  "        type: integer",
   "  outputs:",
   "    type: object",
+  "    required: [segmentation_result]",
   "    properties:",
-  "      result:",
-  "        type: string",
+  "      segmentation_result:",
+  "        type: object",
+  "        properties:",
+  "          paragraphs:",
+  "            type: array",
+  "            items:",
+  "              type: object",
+  "              properties:",
+  "                type:",
+  "                  type: string",
+  "                  enum: [A, B, C]",
   "---",
-  "input:",
-  "  kind: input",
+  '<phase depends_on="input">setup</phase>',
 ].join("\n")
 
-function skillDetailWithGraph(content: string): SkillDetail {
-  return {
-    files: {
-      "GRAPH.md": content,
-    },
-  } as unknown as SkillDetail
-}
-
-// A phase file (phases/<id>/SKILL.md) with its OWN frontmatter io, distinct from
-// the graph-level io, so a per-node edit can be verified to land on the phase
-// file's io.inputs (not GRAPH.md's). Field name `phase_field` is unique to the
-// phase so the remove-button lookup is unambiguous.
 const phaseSkillMd = [
   "---",
-  "llm_role: analyst",
   "io:",
   "  inputs:",
   "    type: object",
   "    properties:",
-  "      phase_field:",
+  "      phase_only:",
   "        type: string",
   "  outputs:",
   "    type: object",
   "    properties:",
   "      phase_result:",
-  "        type: string",
+  "        type: integer",
   "---",
   "<role>phase</role>",
 ].join("\n")
 
-const PHASE_FILE_PATH = "phases/analyze/SKILL.md"
-
-function skillDetailWithPhase(graphContent: string, phaseContent: string): SkillDetail {
+function skillDetail(): SkillDetail {
   return {
     files: {
-      "GRAPH.md": graphContent,
-      [PHASE_FILE_PATH]: phaseContent,
+      "GRAPH.md": graphMd,
+      "phases/analyze/SKILL.md": phaseSkillMd,
     },
   } as unknown as SkillDetail
 }
@@ -133,225 +83,104 @@ function selectedPhaseNode(): { id: string; data: SkillGraphNodeData } {
       mode: "agent",
       status: "idle",
       dependsOn: [],
-      filePath: PHASE_FILE_PATH,
+      filePath: "phases/analyze/SKILL.md",
     },
   }
 }
 
-async function flushPromises(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-}
-
-describe("InputPanel GRAPH.md writes", () => {
+describe("InputPanel example view", () => {
   beforeEach(() => {
     buttonProps.length = 0
-    testInputsSectionProps.length = 0
-    vi.mocked(writeSkillFile).mockClear()
-    vi.mocked(isTauriRuntime).mockReturnValue(true)
-    vi.mocked(sha256Hex).mockClear()
   })
 
-  it("passes the current GRAPH.md hash when removing an input field", async () => {
+  it("renders GRAPH.md input/output generated examples without raw schema definitions", () => {
+    const html = renderToStaticMarkup(<InputPanel skillId="demo-skill" skillDetail={skillDetail()} />)
+
+    expect(html).toContain("GRAPH.md")
+    expect(html).toContain("Input")
+    expect(html).toContain("Output")
+    expect(html).toContain("chapter_content")
+    expect(html).toContain("chapter_number")
+    expect(html).toContain("segmentation_result")
+    expect(html).toContain("paragraphs")
+    expect(html).not.toContain("&quot;required&quot;")
+  })
+
+  it("renders the selected phase file input/output examples when a phase is selected", () => {
+    const html = renderToStaticMarkup(
+      <InputPanel skillId="demo-skill" skillDetail={skillDetail()} selectedNode={selectedPhaseNode()} />,
+    )
+
+    expect(html).toContain("phases/analyze/SKILL.md")
+    expect(html).toContain("phase_only")
+    expect(html).toContain("phase_result")
+    expect(html).not.toContain("chapter_content")
+  })
+
+  it("opens GRAPH.md when editing graph-level examples", () => {
+    const onFileOpen = vi.fn()
     renderToStaticMarkup(
-      <InputPanel skillId="demo-skill" skillDetail={skillDetailWithGraph(graphMd)} />,
+      <InputPanel skillId="demo-skill" skillDetail={skillDetail()} onFileOpen={onFileOpen} />,
     )
 
-    const removeButton = buttonProps.find(
-      (props) => props["aria-label"] === "Remove inputs field title",
-    )
-    expect(removeButton).toBeTruthy()
+    expect(buttonProps).toHaveLength(2)
+    ;(buttonProps[0].onClick as () => void)()
+    ;(buttonProps[1].onClick as () => void)()
 
-    ;(removeButton?.onClick as () => void)()
-    await flushPromises()
-
-    expect(writeSkillFile).toHaveBeenCalledTimes(1)
-    expect(writeSkillFile).toHaveBeenCalledWith(
-      "demo-skill",
-      "GRAPH.md",
-      expect.any(String),
-      "current-graph-hash",
-    )
-    expect(sha256Hex).toHaveBeenCalledWith(graphMd)
+    expect(onFileOpen).toHaveBeenCalledTimes(2)
+    expect(onFileOpen).toHaveBeenNthCalledWith(1, "GRAPH.md")
+    expect(onFileOpen).toHaveBeenNthCalledWith(2, "GRAPH.md")
   })
 
-  it("uses the imported workspace root and current GRAPH.md hash in the Tauri runtime", async () => {
-    vi.mocked(isTauriRuntime).mockReturnValue(true)
-
-    renderToStaticMarkup(
-      <InputPanel
-        skillId="demo-skill"
-        workspaceRoot="/Users/sevenx/Projects/imported-skill"
-        skillDetail={skillDetailWithGraph(graphMd)}
-      />,
-    )
-
-    const removeButton = buttonProps.find(
-      (props) => props["aria-label"] === "Remove inputs field title",
-    )
-    expect(removeButton).toBeTruthy()
-
-    ;(removeButton?.onClick as () => void)()
-    await flushPromises()
-
-    expect(writeSkillFile).toHaveBeenCalledTimes(1)
-    expect(writeSkillFile).toHaveBeenCalledWith(
-      "/Users/sevenx/Projects/imported-skill",
-      "GRAPH.md",
-      expect.any(String),
-      "current-graph-hash",
-    )
-    expect(sha256Hex).toHaveBeenCalledWith(graphMd)
-  })
-
-  it("uses the backend skill id instead of imported workspace root outside the Tauri runtime", async () => {
-    vi.mocked(isTauriRuntime).mockReturnValue(false)
-
+  it("opens the selected phase md when editing phase-level examples", () => {
+    const onFileOpen = vi.fn()
     renderToStaticMarkup(
       <InputPanel
         skillId="demo-skill"
-        workspaceRoot="/Users/sevenx/Projects/imported-skill"
-        skillDetail={skillDetailWithGraph(graphMd)}
+        skillDetail={skillDetail()}
+        selectedNode={selectedPhaseNode()}
+        onFileOpen={onFileOpen}
       />,
     )
 
-    const removeButton = buttonProps.find(
-      (props) => props["aria-label"] === "Remove inputs field title",
-    )
-    expect(removeButton).toBeTruthy()
+    expect(buttonProps).toHaveLength(2)
+    ;(buttonProps[0].onClick as () => void)()
 
-    ;(removeButton?.onClick as () => void)()
-    await flushPromises()
-
-    expect(writeSkillFile).toHaveBeenCalledTimes(1)
-    expect(writeSkillFile).toHaveBeenCalledWith(
-      "demo-skill",
-      "GRAPH.md",
-      expect.any(String),
-      "current-graph-hash",
-    )
-    expect(writeSkillFile).not.toHaveBeenCalledWith(
-      "/Users/sevenx/Projects/imported-skill",
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-    )
-    expect(sha256Hex).toHaveBeenCalledWith(graphMd)
+    expect(onFileOpen).toHaveBeenCalledTimes(1)
+    expect(onFileOpen).toHaveBeenCalledWith("phases/analyze/SKILL.md")
   })
 
-  it("passes the imported workspace root to TestInputsSection", () => {
-    renderToStaticMarkup(
-      <InputPanel
-        skillId="demo-skill"
-        workspaceRoot="/Users/sevenx/Projects/imported-skill"
-        skillDetail={skillDetailWithGraph(graphMd)}
-      />,
-    )
-
-    expect(testInputsSectionProps[0]).toMatchObject({
-      skillId: "demo-skill",
-      workspaceRoot: "/Users/sevenx/Projects/imported-skill",
+  it("converts nested JSON schema into a readable example object", () => {
+    expect(__test__.jsonExampleFromSchema({
+      type: "object",
+      properties: {
+        chapter_content: { type: "string" },
+        chapter_number: { type: "integer" },
+        paragraphs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["A", "B", "C"] },
+              description: { type: "string" },
+            },
+          },
+        },
+      },
+    })).toEqual({
+      chapter_content: "",
+      chapter_number: 0,
+      paragraphs: [{ type: "A", description: "" }],
     })
   })
 
-  // Atom #27 (per-node i/o): selecting a phase node makes the panel edit THAT
-  // phase file's frontmatter io, writing back to phases/<id>/SKILL.md (not
-  // GRAPH.md), hashed over the phase file's own content.
-  it("writes a selected phase node's io edit back to the phase file, not GRAPH.md", async () => {
-    renderToStaticMarkup(
-      <InputPanel
-        skillId="demo-skill"
-        skillDetail={skillDetailWithPhase(graphMd, phaseSkillMd)}
-        selectedNode={selectedPhaseNode()}
-      />,
-    )
-
-    // The row exists because the panel read the PHASE file's io.inputs, whose
-    // field is `phase_field` (GRAPH.md's input field is `title`).
-    const removeButton = buttonProps.find(
-      (props) => props["aria-label"] === "Remove inputs field phase_field",
-    )
-    expect(removeButton).toBeTruthy()
-    expect(
-      buttonProps.find((props) => props["aria-label"] === "Remove inputs field title"),
-    ).toBeFalsy()
-
-    ;(removeButton?.onClick as () => void)()
-    await flushPromises()
-
-    expect(writeSkillFile).toHaveBeenCalledTimes(1)
-    expect(writeSkillFile).toHaveBeenCalledWith(
-      "demo-skill",
-      PHASE_FILE_PATH,
-      expect.any(String),
-      "current-graph-hash",
-    )
-    // Optimistic-lock hash is over the PHASE file's current content.
-    expect(sha256Hex).toHaveBeenCalledWith(phaseSkillMd)
-    expect(sha256Hex).not.toHaveBeenCalledWith(graphMd)
-    // The written content drops the removed field from the phase io.inputs.
-    const writtenContent = vi.mocked(writeSkillFile).mock.calls[0][2] as string
-    expect(writtenContent).not.toContain("phase_field")
-  })
-
-  it("targets a selected phase node's artifact-path save to the phase file", async () => {
-    const phaseWithArtifact = phaseSkillMd.replace(
-      "      phase_result:\n        type: string",
-      "      phase_result:\n        type: string\n        path: out.json",
-    )
-
-    renderToStaticMarkup(
-      <InputPanel
-        skillId="demo-skill"
-        skillDetail={skillDetailWithPhase(graphMd, phaseWithArtifact)}
-        selectedNode={selectedPhaseNode()}
-      />,
-    )
-
-    const saveButton = buttonProps.find(
-      (props) => props["aria-label"] === "Save artifact path for output phase_result",
-    )
-    expect(saveButton).toBeTruthy()
-
-    ;(saveButton?.onClick as () => void)()
-    await flushPromises()
-
-    expect(writeSkillFile).toHaveBeenCalledTimes(1)
-    expect(writeSkillFile).toHaveBeenCalledWith(
-      "demo-skill",
-      PHASE_FILE_PATH,
-      expect.any(String),
-      "current-graph-hash",
-    )
-    expect(sha256Hex).toHaveBeenCalledWith(phaseWithArtifact)
-  })
-
-  // Regression guard: with no node selected the panel still edits GRAPH.md's
-  // graph-level io (the global input/output node selection is handled the same
-  // way inside resolveIoEditTarget).
-  it("still writes graph-level io to GRAPH.md when no node is selected", async () => {
-    renderToStaticMarkup(
-      <InputPanel
-        skillId="demo-skill"
-        skillDetail={skillDetailWithPhase(graphMd, phaseSkillMd)}
-        selectedNode={null}
-      />,
-    )
-
-    const removeButton = buttonProps.find(
-      (props) => props["aria-label"] === "Remove inputs field title",
-    )
-    expect(removeButton).toBeTruthy()
-
-    ;(removeButton?.onClick as () => void)()
-    await flushPromises()
-
-    expect(writeSkillFile).toHaveBeenCalledWith(
-      "demo-skill",
-      "GRAPH.md",
-      expect.any(String),
-      "current-graph-hash",
-    )
-    expect(sha256Hex).toHaveBeenCalledWith(graphMd)
+  it("parses CRLF frontmatter for Windows-authored skill files", () => {
+    expect(__test__.parseFrontmatter("---\r\nio:\r\n  inputs:\r\n    type: object\r\n---\r\nbody")).toEqual({
+      io: {
+        inputs: {
+          type: "object",
+        },
+      },
+    })
   })
 })

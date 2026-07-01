@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
-import { ChevronsUpDown, FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -18,26 +18,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SectionTitle } from "../shared"
+import { AvailableModelsSidebar } from "../llm-roles/AvailableModelsSidebar"
+import { modelDropFailureMessage } from "../role-utils"
+import {
+  AvailableModelDragPreview,
+  handleAvailableModelDragOver,
+  readAvailableModelDropId,
+  useAvailableModelPointerDrag,
+} from "../available-model-pointer-drag"
 import { agentStatusForRoute, CopilotModelGroupCard } from "./CopilotModelGroupCard"
 import {
   deriveCopilotCandidateGroups,
@@ -58,7 +51,7 @@ import {
 } from "./copilot-role-test"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getRoleTestResults } from "@/api/client"
-import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
+import type { CredentialsState, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
 /**
@@ -129,6 +122,42 @@ export function copilotBackendReadyCount(
   ).length
 }
 
+function copilotRoutePreviewFromProviderModel(pm: ProviderModelOption): CopilotRoutePreview {
+  return {
+    id: pm.route_id,
+    route_id: pm.route_id,
+    endpointId: pm.endpoint_id || "",
+    providerLabel: pm.provider_label,
+    providerKind: pm.provider_kind || "official",
+    providerModelId: pm.provider_model_id,
+    uiState: pm.ui_state,
+    agentStatus: pm.ui_state,
+    capabilities: pm.capabilities || {},
+    provider: pm.provider_label,
+    modelId: pm.provider_model_id,
+    methodId: pm.call_method_id ?? null,
+    note: (pm as unknown as Record<string, unknown>).note as string | null || null,
+  }
+}
+
+function copilotPreviewFromModelGroup(
+  group: ModelGroup,
+  source: "built_in" | "third_party" = "third_party",
+): CopilotRolePreview {
+  const availableRoutes = (group.provider_models || []).map(copilotRoutePreviewFromProviderModel)
+  return {
+    id: group.canonical_id,
+    title: group.display_name,
+    description: group.display_name,
+    source,
+    modelLabel: group.display_name,
+    sdkId: "claude-agent-sdk",
+    activeRouteIds: availableRoutes.filter((route) => route.uiState === "ready").map((route) => route.id),
+    availableRoutes,
+    routes: availableRoutes,
+  }
+}
+
 export function CopilotTab({
   data = null,
   credentials = { providers: [] },
@@ -172,6 +201,20 @@ export function CopilotTab({
   }, [modelGroups, credentials])
 
   const claudeModelGroups = realCopilotRoles
+  const realCopilotRolesById = useMemo(
+    () => new Map(realCopilotRoles.map((candidate) => [candidate.id, candidate])),
+    [realCopilotRoles],
+  )
+  const allModelGroupPreviews = useMemo<CopilotRolePreview[]>(() => (
+    modelGroups.map((group) => copilotPreviewFromModelGroup(
+      group,
+      realCopilotRolesById.get(group.canonical_id)?.source ?? "third_party",
+    ))
+  ), [modelGroups, realCopilotRolesById])
+  const allModelGroupPreviewsById = useMemo(
+    () => new Map(allModelGroupPreviews.map((group) => [group.id, group])),
+    [allModelGroupPreviews],
+  )
 
   const activeRoles = useMemo(() => {
     return data
@@ -196,7 +239,7 @@ export function CopilotTab({
           .map(([name, role]) => {
             const activeModelGroupId = Object.keys(role.models ?? {})[0] || role.active_model || name
 
-            const mockData = realCopilotRoles.find((r) => r.id === activeModelGroupId)
+            const mockData = allModelGroupPreviewsById.get(activeModelGroupId)
             const fallbackChainRoutes = role.models?.[activeModelGroupId]?.providers ??
               role.fallback_chain?.map(e => e.route_id) ?? []
 
@@ -210,7 +253,7 @@ export function CopilotTab({
             }
           })
       : []
-  }, [data, realCopilotRoles])
+  }, [data, allModelGroupPreviewsById])
 
   // #56 dynamic float: when the user has never created a copilot role, surface
   // the family-ladder defaults (Claude opus-4.8→4.7, DeepSeek v4-pro→v3.2-pro)
@@ -235,20 +278,6 @@ export function CopilotTab({
     [activeRoles, floatedRoles],
   )
 
-  const selectedModelGroupIds = useMemo(
-    () =>
-      new Set(
-        displayRoles
-          .map((role) => role.modelGroupId)
-          .filter((id): id is string => typeof id === "string" && id !== null),
-      ),
-    [displayRoles],
-  )
-  const modelGroupOptions = useMemo(
-    () => claudeModelGroups.filter((modelGroup) => !selectedModelGroupIds.has(modelGroup.id)),
-    [claudeModelGroups, selectedModelGroupIds],
-  )
-
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
   // R-F21: per-route cooldown countdown (seconds remaining). Populated by the
@@ -256,6 +285,23 @@ export function CopilotTab({
   // disables while any compatible route has a positive value so users can't
   // hammer the upstream during a 429 cooldown window.
   const [routeCooldowns, setRouteCooldowns] = useState<Record<string, number>>({})
+  const dataRef = useRef<RolesData | null>(data)
+  const claudeModelGroupsRef = useRef<CopilotRolePreview[]>(claudeModelGroups)
+  const allModelGroupPreviewsRef = useRef<CopilotRolePreview[]>(allModelGroupPreviews)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
+
+  useEffect(() => {
+    claudeModelGroupsRef.current = claudeModelGroups
+  }, [claudeModelGroups])
+
+  useEffect(() => {
+    allModelGroupPreviewsRef.current = allModelGroupPreviews
+  }, [allModelGroupPreviews])
 
   // R20: on mount, seed copilot route lights from the persisted last-known test
   // results so they show prior status after a remount/restart instead of
@@ -313,9 +359,75 @@ export function CopilotTab({
     return () => window.clearInterval(interval)
   }, [routeCooldowns])
 
+  const dropCopilotModelOnRole = useCallback((roleId: string, modelGroupId: string): boolean => {
+    const current = dataRef.current
+    if (!current) return false
+    const modelGroup = allModelGroupPreviewsRef.current.find((candidate) => candidate.id === modelGroupId)
+    if (!modelGroup) {
+      toast.error(modelDropFailureMessage({
+        modelId: modelGroupId || "unknown model",
+        destination: roleId,
+        reason: "source is no longer available",
+      }))
+      return false
+    }
+
+    let nextData = current
+    let targetRoleId = roleId
+    if (!nextData.roles[targetRoleId]) {
+      const floatedGroup = claudeModelGroupsRef.current.find((candidate) => candidate.id === roleId)
+      if (!floatedGroup) {
+        toast.error(modelDropFailureMessage({
+          modelId: modelGroupId,
+          destination: roleId,
+          reason: "role was not found",
+        }))
+        return false
+      }
+      targetRoleId = copilotKeyForGroupId(roleId)
+      nextData = {
+        ...nextData,
+        roles: {
+          ...nextData.roles,
+          [targetRoleId]: buildCopilotRoleEntry(floatedGroup),
+        },
+      }
+    }
+
+    onChangeRef.current(
+      applyCopilotModelGroupSelection(nextData, targetRoleId, modelGroup.id, modelGroup.availableRoutes),
+    )
+    return true
+  }, [])
+
+  const {
+    availableModelDragPreview,
+    availableModelDragPreviewNodeRef,
+    getActiveAvailableModelDragId,
+    handleAvailableModelPointerDown,
+  } = useAvailableModelPointerDrag({
+    getPreviewLabel: useCallback((modelId: string) => {
+      const modelGroup = allModelGroupPreviewsRef.current.find((candidate) => candidate.id === modelId)
+      return modelGroup?.modelLabel || modelGroup?.id || modelId
+    }, []),
+    onDrop: useCallback(({ modelId, target }) => {
+      const roleId = copilotRoleIdFromModelDropTarget(target)
+
+      if (roleId) {
+        dropCopilotModelOnRole(roleId, modelId)
+        return
+      }
+      toast.error(modelDropFailureMessage({
+        modelId,
+        destination: "Copilot",
+        reason: "drop target was not recognized",
+      }))
+    }, [dropCopilotModelOnRole]),
+  })
+
   if (!data) {
     return (
-      <div data-copilot-settings-page="true" className="max-w-3xl min-w-0">
+      <CopilotRolesLayout sidebar={<CopilotAvailableModelsSidebarSkeleton />}>
         <SectionTitle
           title={t("copilot.title")}
           description={t("copilot.description")}
@@ -353,7 +465,7 @@ export function CopilotTab({
             </Card>
           ))}
         </div>
-      </div>
+      </CopilotRolesLayout>
     )
   }
 
@@ -429,15 +541,6 @@ export function CopilotTab({
       }
     }
     onChange({ ...data, roles: nextRoles })
-  }
-
-  function selectModelGroup(roleId: string, modelGroupId: string) {
-    if (!data) return
-    const modelGroup = claudeModelGroups.find((candidate) => candidate.id === modelGroupId)
-    if (!modelGroup) return
-
-    const nextData = applyCopilotModelGroupSelection(data, roleId, modelGroupId, modelGroup.availableRoutes)
-    onChange(nextData)
   }
 
   function requestDeleteCopilotRole(role: { id: string; title: string }) {
@@ -529,140 +632,146 @@ export function CopilotTab({
     }
   }
 
-  // R-F14: Add-model defrag — if the user already has an in-progress empty
-  // draft card (no model_groups, no models, no fallback_chain), disable Add
-  // and explain via Tooltip so we don't accumulate duplicate empties.
-  const hasEmptyDraftCard = displayRoles.some((displayed) => {
-    const persistedKey = resolvePersistedKey(data, displayed.id)
-    const role = data?.roles?.[persistedKey]
-    if (!role) return false
-    const noModels = Object.keys(role.models ?? {}).length === 0
-    const noModelGroups = (role.model_groups ?? []).length === 0
-    const noFallbackChain = (role.fallback_chain ?? []).length === 0
-    return noModels && noModelGroups && noFallbackChain
-  })
-
   // R-F12: empty-state with API Keys CTA when there are no eligible candidates
   // (no anthropic-messages route configured anywhere) AND no copilot role is
   // bound (displayRoles only contained floated defaults, but those are also
   // gone when claudeModelGroups is empty).
-  const showEmptyState = displayRoles.length === 0 && claudeModelGroups.length === 0
+  const showEmptyState = displayRoles.length === 0 && allModelGroupPreviews.length === 0
 
   return (
-    <div data-copilot-settings-page="true" className="max-w-3xl min-w-0">
-      <SectionTitle
-        title={t("copilot.title")}
-        description={t("copilot.description")}
-        // R-F15: shared SaveStatusBadge already wired here (idle hides; pending/
-        // saving spins; saved checks; error triangle). Kept consistent with the
-        // LlmRolesTab badge so users see one status convention across both tabs.
-        trailing={<SaveStatusBadge status={saveStatus} />}
-      />
-      {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
+    <>
+      <CopilotRolesLayout
+        sidebar={(
+          <div data-copilot-available-models-sidebar="true" className="min-w-0 lg:h-full">
+            <AvailableModelsSidebar
+              modelGroups={modelGroups}
+              onModelPointerDown={handleAvailableModelPointerDown}
+              onNavigateToApiKeys={onNavigateToApiKeys}
+            />
+          </div>
+        )}
+      >
+        <SectionTitle
+          title={t("copilot.title")}
+          description={t("copilot.description")}
+          // R-F15: shared SaveStatusBadge already wired here (idle hides; pending/
+          // saving spins; saved checks; error triangle). Kept consistent with the
+          // LlmRolesTab badge so users see one status convention across both tabs.
+          trailing={<SaveStatusBadge status={saveStatus} />}
+        />
+        {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
 
-      {showEmptyState ? (
-        <EmptyCopilotState onNavigateToApiKeys={onNavigateToApiKeys} />
-      ) : null}
+        {showEmptyState ? (
+          <EmptyCopilotState onNavigateToApiKeys={onNavigateToApiKeys} />
+        ) : null}
 
-      <CatalogAccordion type="multiple" defaultValue={["claude-agent-sdk"]}>
-        <CatalogAccordionItem value="claude-agent-sdk">
-          <CatalogAccordionTrigger>
-            {t("copilot.claudeAgentSdk")}
-          </CatalogAccordionTrigger>
-          <CatalogAccordionContent className="space-y-4 pb-5">
-            {displayRoles.map((role) => {
-              const modelGroup = role.modelGroupId
-                ? claudeModelGroups.find((candidate) => candidate.id === role.modelGroupId)
-                : null
-              if (!modelGroup) {
+        <CatalogAccordion type="multiple" defaultValue={["claude-agent-sdk"]}>
+          <CatalogAccordionItem value="claude-agent-sdk">
+            <CatalogAccordionTrigger>
+              {t("copilot.claudeAgentSdk")}
+            </CatalogAccordionTrigger>
+            <CatalogAccordionContent className="space-y-4 pb-5">
+              {displayRoles.map((role) => {
+                const modelGroup = role.modelGroupId
+                  ? allModelGroupPreviewsById.get(role.modelGroupId)
+                  : null
+                if (!modelGroup) {
+                  return (
+                    <EmptyCopilotRoleCard
+                      key={role.id}
+                      role={role}
+                      getActiveAvailableModelDragId={getActiveAvailableModelDragId}
+                      onDropModel={(modelGroupId) => dropCopilotModelOnRole(role.id, modelGroupId)}
+                      onDeleteRole={() => requestDeleteCopilotRole(role)}
+                    />
+                  )
+                }
+                const visibleRoutes = compatibleRoutesForRole(modelGroup)
+                const routeOrder = role.fallback_chain.map((entry) => entry.route_id)
+                const chainRoutes = routeOrder
+                  .map((routeId) => visibleRoutes.find((route) => route.id === routeId))
+                  .filter(isCopilotRoute)
+                const appendableRoutes = visibleRoutes.filter((route) => !routeOrder.includes(route.id))
+
                 return (
-                  <EmptyCopilotRoleCard
+                  <CopilotRoleCard
                     key={role.id}
                     role={role}
-                    modelGroups={modelGroupOptions}
-                    onSelectModelGroup={(modelGroupId) => selectModelGroup(role.id, modelGroupId)}
+                    modelGroup={modelGroup}
+                    routeOrder={routeOrder}
+                    chainRoutes={chainRoutes}
+                    appendableRoutes={appendableRoutes}
+                    routeStatusOverrides={routeStatusOverrides}
+                    routeCooldowns={routeCooldowns}
+                    isTesting={testingRoleIds.has(role.id)}
+                    saveStatus={saveStatus}
+                    getActiveAvailableModelDragId={getActiveAvailableModelDragId}
+                    onDropModel={(modelGroupId) => dropCopilotModelOnRole(role.id, modelGroupId)}
+                    onTest={() => testRoleRoutes(role)}
                     onDeleteRole={() => requestDeleteCopilotRole(role)}
+                    onUpdateRouteOrder={(nextOrder) => updateRouteOrder(role.id, nextOrder)}
+                    onRemoveModelGroup={() => removeModelGroup(role.id)}
+                    onNavigateToApiKeys={onNavigateToApiKeys}
                   />
                 )
-              }
-              const visibleRoutes = compatibleRoutesForRole(modelGroup)
-              const routeOrder = role.fallback_chain.map((entry) => entry.route_id)
-              const chainRoutes = routeOrder
-                .map((routeId) => visibleRoutes.find((route) => route.id === routeId))
-                .filter(isCopilotRoute)
-              const appendableRoutes = visibleRoutes.filter((route) => !routeOrder.includes(route.id))
+              })}
+              <AddCopilotModelButton onClick={addDraftCopilotRole} />
+            </CatalogAccordionContent>
+          </CatalogAccordionItem>
+        </CatalogAccordion>
+      </CopilotRolesLayout>
+      <AvailableModelDragPreview drag={availableModelDragPreview} nodeRef={availableModelDragPreviewNodeRef} />
+    </>
+  )
+}
 
-              return (
-                <CopilotRoleCard
-                  key={role.id}
-                  role={role}
-                  modelGroup={modelGroup}
-                  routeOrder={routeOrder}
-                  chainRoutes={chainRoutes}
-                  appendableRoutes={appendableRoutes}
-                  routeStatusOverrides={routeStatusOverrides}
-                  routeCooldowns={routeCooldowns}
-                  isTesting={testingRoleIds.has(role.id)}
-                  saveStatus={saveStatus}
-                  onTest={() => testRoleRoutes(role)}
-                  onDeleteRole={() => requestDeleteCopilotRole(role)}
-                  onUpdateRouteOrder={(nextOrder) => updateRouteOrder(role.id, nextOrder)}
-                  onRemoveModelGroup={() => removeModelGroup(role.id)}
-                  onNavigateToApiKeys={onNavigateToApiKeys}
-                />
-              )
-            })}
-            <AddCopilotModelButton
-              disabled={hasEmptyDraftCard}
-              onClick={addDraftCopilotRole}
-            />
-          </CatalogAccordionContent>
-        </CatalogAccordionItem>
-      </CatalogAccordion>
+function CopilotRolesLayout({ children, sidebar }: { children: ReactNode; sidebar: ReactNode }) {
+  return (
+    <div
+      data-copilot-settings-page="true"
+      className="grid min-h-full min-w-0 gap-4 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(14rem,20vw)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden 2xl:grid-cols-[minmax(0,1fr)_minmax(14rem,18rem)]"
+    >
+      <ScrollArea className="min-h-0 min-w-0 overflow-hidden lg:h-full [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0 [&_[data-slot=scroll-area-viewport]>div]:!w-full">
+        <div className="pr-2">
+          {children}
+        </div>
+      </ScrollArea>
+      {sidebar}
     </div>
   )
 }
 
-/**
- * R-F14 Add-model button with defrag Tooltip when an empty draft card already
- * exists. Extracted so the button stays a single render (no double-mount of
- * Tooltip when toggling disabled).
- */
-function AddCopilotModelButton({
-  disabled,
-  onClick,
-}: {
-  disabled: boolean
-  onClick: () => void
-}) {
-  const { t } = useTranslation("settings")
-  const button = (
+function CopilotAvailableModelsSidebarSkeleton() {
+  return (
+    <aside className="min-w-0 lg:sticky lg:top-0 lg:h-full lg:min-h-0 lg:self-start">
+      <div className="flex min-h-0 flex-col gap-3 lg:h-full">
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-8 w-full" />
+        </div>
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function AddCopilotModelButton({ onClick }: { onClick: () => void }) {
+  return (
     <Button
       type="button"
       variant="default"
       data-copilot-model-add-trigger="true"
-      data-disabled={disabled ? "true" : "false"}
+      data-disabled="false"
       className="gap-1"
-      disabled={disabled}
       onClick={onClick}
     >
       <Plus data-role-icon="true" className="size-3.5 text-primary-foreground/80" />
       Add model
     </Button>
-  )
-  if (!disabled) return button
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        {/* asChild needs a wrapper because disabled Buttons don't fire mouse events. */}
-        <TooltipTrigger asChild>
-          <span tabIndex={0}>{button}</span>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          {t("copilot.addModelTooltip")}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   )
 }
 
@@ -714,6 +823,8 @@ function CopilotRoleCard({
   routeCooldowns,
   isTesting,
   saveStatus,
+  getActiveAvailableModelDragId,
+  onDropModel,
   onTest,
   onDeleteRole,
   onUpdateRouteOrder,
@@ -734,6 +845,8 @@ function CopilotRoleCard({
   // wait for it to settle before sending the SDK probe so the gateway sees
   // the latest yaml snapshot.
   saveStatus?: SaveStatus
+  getActiveAvailableModelDragId: () => string | null
+  onDropModel: (modelGroupId: string) => void
   onTest: () => void
   onDeleteRole: () => void
   onUpdateRouteOrder: (nextOrder: string[]) => void
@@ -759,12 +872,31 @@ function CopilotRoleCard({
   const showUntestedWarning =
     readyCount === 0 && compatibleRoutes.length > 0
 
+  function handleAvailableModelDrop(event: Parameters<typeof readAvailableModelDropId>[0]) {
+    const modelId = readAvailableModelDropId(event, getActiveAvailableModelDragId)
+    if (!modelId) {
+      toast.error(modelDropFailureMessage({
+        modelId: "unknown model",
+        destination: role.id,
+        reason: "source is no longer available",
+      }))
+      return
+    }
+    onDropModel(modelId)
+  }
+
   return (
     <Card
       size="sm"
       className="min-w-0 rounded-md"
       data-copilot-role-card="true"
       data-copilot-role-source={role.source}
+      data-role-name={role.id}
+      data-copilot-role-id={role.id}
+      data-model-drop-zone="true"
+      data-model-drop-fallback="active-drag-ref"
+      onDragOver={handleAvailableModelDragOver}
+      onDrop={handleAvailableModelDrop}
     >
       <CardHeader className="!grid-cols-1 items-start gap-2 sm:!grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
@@ -869,25 +1001,41 @@ function CopilotRoleCard({
 
 function EmptyCopilotRoleCard({
   role,
-  modelGroups,
-  onSelectModelGroup,
+  getActiveAvailableModelDragId,
+  onDropModel,
   onDeleteRole,
 }: {
   role: { id: string; title: string; source: "built_in" | "third_party" }
-  modelGroups: CopilotRolePreview[]
-  onSelectModelGroup: (modelGroupId: string) => void
+  getActiveAvailableModelDragId: () => string | null
+  onDropModel: (modelGroupId: string) => void
   onDeleteRole: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const hasGroups = modelGroups.length > 0
+  function handleAvailableModelDrop(event: Parameters<typeof readAvailableModelDropId>[0]) {
+    const modelId = readAvailableModelDropId(event, getActiveAvailableModelDragId)
+    if (!modelId) {
+      toast.error(modelDropFailureMessage({
+        modelId: "unknown model",
+        destination: role.id,
+        reason: "source is no longer available",
+      }))
+      return
+    }
+    onDropModel(modelId)
+  }
 
   return (
     <Card
       size="sm"
-      className="min-w-0 rounded-md border-dashed bg-card/70"
+      className="min-w-0 rounded-md"
       data-copilot-empty-role-card="true"
       data-copilot-role-card="true"
       data-copilot-role-source={role.source}
+      data-role-name={role.id}
+      data-copilot-role-id={role.id}
+      data-model-drop-zone="true"
+      data-model-drop-fallback="active-drag-ref"
+      onDragOver={handleAvailableModelDragOver}
+      onDrop={handleAvailableModelDrop}
     >
       <CardHeader className="!grid-cols-1 items-start gap-2 sm:!grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
@@ -895,7 +1043,6 @@ function EmptyCopilotRoleCard({
             {role.title}
             <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
-          <CardDescription>Select one model group to configure the Copilot fallback chain.</CardDescription>
         </div>
         {role.source === "third_party" ? (
           <CardAction className="row-start-2 justify-self-start sm:row-start-1 sm:justify-self-end">
@@ -913,82 +1060,29 @@ function EmptyCopilotRoleCard({
           </CardAction>
         ) : null}
       </CardHeader>
-      <CardContent>
-        <FieldGroup>
-          <Field orientation="responsive" className="items-start">
-            <FieldContent>
-              <FieldLabel>Model group</FieldLabel>
-              <FieldDescription>Only groups with Anthropic-compatible routes are listed.</FieldDescription>
-            </FieldContent>
-            <Popover open={open} onOpenChange={setOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  role="combobox"
-                  aria-expanded={open}
-                  disabled={!hasGroups}
-                  data-copilot-model-group-select="true"
-                  className="w-full min-w-0 justify-between font-normal sm:w-64"
-                >
-                  <span className="truncate text-muted-foreground">
-                    {hasGroups ? "Choose model group" : "No compatible model groups"}
-                  </span>
-                  <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-[min(20rem,var(--radix-popover-trigger-width))] p-0">
-                <Command filter={copilotGroupComboboxFilter}>
-                  <CommandInput placeholder="Search model groups…" data-copilot-model-group-search="true" />
-                  <CommandList>
-                    <CommandEmpty>No model group found.</CommandEmpty>
-                    <CommandGroup>
-                      {modelGroups.map((modelGroup) => (
-                        <CommandItem
-                          key={modelGroup.id}
-                          value={copilotGroupSearchValue(modelGroup)}
-                          data-copilot-model-option={modelGroup.id}
-                          onSelect={() => {
-                            onSelectModelGroup(modelGroup.id)
-                            setOpen(false)
-                          }}
-                        >
-                          {modelGroup.modelLabel}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </Field>
-        </FieldGroup>
+      <CardContent className="space-y-4">
+        <Empty
+          aria-label={`Drop model into ${role.title}`}
+          data-model-drop-target="true"
+          data-model-drop-zone="true"
+          data-model-drop-fallback="active-drag-ref"
+          onDragOver={handleAvailableModelDragOver}
+          onDrop={handleAvailableModelDrop}
+          className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-border bg-muted/10 p-3 text-muted-foreground transition-colors hover:bg-muted/20"
+        >
+          <EmptyHeader className="max-w-none gap-0">
+            <EmptyTitle className="text-xs font-medium text-muted-foreground">Drop model</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       </CardContent>
     </Card>
   )
 }
 
-/** Compact, separator-insensitive normalization for combobox matching (§2.1 parity). */
-export function normalizeForSearch(value: string): string {
-  return value.toLowerCase().replace(/[\s\-_./:]+/g, "")
-}
-
-/** Searchable haystack for a copilot group: display name + canonical id + provider labels + model ids (atom-63 ②). */
-export function copilotGroupSearchValue(group: CopilotRolePreview): string {
-  return [
-    group.modelLabel,
-    group.id,
-    ...group.availableRoutes.flatMap((route) => [route.providerLabel, route.providerModelId]),
-  ].join(" ")
-}
-
-/** cmdk filter: every search token must appear in the haystack (multi-token AND, separator-insensitive). */
-export function copilotGroupComboboxFilter(value: string, search: string): number {
-  const haystack = normalizeForSearch(value)
-  const tokens = search.toLowerCase().split(/\s+/).filter(Boolean)
-  if (tokens.length === 0) return 1
-  return tokens.every((token) => haystack.includes(normalizeForSearch(token))) ? 1 : 0
+export function copilotRoleIdFromModelDropTarget(target: Element | null): string | null {
+  const dropZone = target?.closest<HTMLElement>("[data-model-drop-zone]") ?? null
+  const roleElement = dropZone?.closest<HTMLElement>("[data-role-name]") ?? null
+  return roleElement?.dataset.roleName ?? null
 }
 
 function compatibleRoutesForRole(role: CopilotRolePreview): CopilotRoutePreview[] {

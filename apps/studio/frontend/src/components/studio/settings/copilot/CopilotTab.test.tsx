@@ -4,9 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   CopilotTab,
   copilotBackendReadyCount,
-  copilotGroupComboboxFilter,
-  copilotGroupSearchValue,
   copilotKeyForGroupId,
+  copilotRoleIdFromModelDropTarget,
   nextCopilotCustomIndex,
   rebuildFallbackChainPreservingRuntime,
 } from "./CopilotTab"
@@ -15,7 +14,6 @@ import {
   copilotRouteStatusesFromPersistedResult,
   type CopilotRouteJobStatus,
 } from "./copilot-role-test"
-import type { CopilotRolePreview, CopilotRoutePreview } from "./copilot-role-derivation"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 
 vi.mock("react-i18next", () => ({
@@ -87,6 +85,45 @@ function registryModelGroups(): ModelGroup[] {
       },
     },
   ]
+}
+
+function openAiModelGroup(): ModelGroup {
+  return {
+    canonical_id: "gpt-4.1",
+    display_name: "GPT 4.1",
+    provider_models: [
+      {
+        route_id: "openai-official:gpt-4.1",
+        endpoint_id: "openai-official",
+        provider_label: "OpenAI Official",
+        provider_kind: "official",
+        provider_model_id: "gpt-4.1",
+        ui_state: "ready",
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: "known",
+        capabilities: {},
+        call_method_id: "openai_responses",
+      },
+    ],
+    status_summary: {
+      ready: 1,
+      untested: 0,
+      cooling_down: 0,
+      historical_ready: 0,
+      failed: 0,
+      off: 0,
+    },
+    capability_summary: {
+      capability_known_count: 1,
+      thinking: "unknown",
+      tools: "unknown",
+      structured_output: "unknown",
+      max_context_tokens: null,
+      max_output_tokens: null,
+    },
+  }
 }
 
 function credentials(): CredentialsState {
@@ -312,8 +349,9 @@ describe("CopilotTab #56 dynamic float of built-in defaults", () => {
       />,
     )
     expect(html).toContain("Claude Opus 4.8")
-    // 4.7 is not the floated default, so it is NOT surfaced as a built-in card
-    expect(html).not.toContain("Claude Opus 4.7")
+    // 4.7 remains visible in the right-side model library, but it is NOT surfaced as a built-in role card.
+    expect(html).toContain('data-role-name="claude-opus-4.8"')
+    expect(html).not.toContain('data-role-name="claude-opus-4.7"')
   })
 
   it("floats nothing (and seeds no mock) when no ladder model is available", () => {
@@ -374,65 +412,100 @@ describe("CopilotTab #61 model-group remove control", () => {
   })
 })
 
-describe("CopilotTab #63 searchable model-group combobox", () => {
-  it("renders a combobox trigger (not a native select) on the empty draft card", () => {
+describe("CopilotTab #63 LLM Roles drag-in parity", () => {
+  it("does not render a model selector on the empty draft card", () => {
     const html = renderToStaticMarkup(
       <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={registryModelGroups()} />,
     )
-    const trigger = html.match(/<button[^>]*data-copilot-model-group-select="true"[^>]*>/)
-    expect(trigger).not.toBeNull()
-    expect(trigger?.[0]).toContain('role="combobox"')
+    expect(html).toContain('data-copilot-empty-role-card="true"')
+    expect(html).toContain("Drop model")
+    expect(html).not.toContain('data-copilot-model-group-select="true"')
+    expect(html).not.toContain('role="combobox"')
+    expect(html).not.toContain("Choose model group")
+  })
+
+  it("resolves a nested Drop model target back to the outer role card like LLM Roles", () => {
+    const roleElement = { dataset: { roleName: "copilot_custom_2" } } as unknown as HTMLElement
+    const dropZone = {
+      closest: (selector: string) => {
+        if (selector === "[data-model-drop-zone]") return dropZone
+        if (selector === "[data-role-name]") return roleElement
+        return null
+      },
+    } as unknown as Element
+    const nestedTarget = {
+      closest: (selector: string) => selector === "[data-model-drop-zone]" ? dropZone : null,
+    } as unknown as Element
+    const outsideTarget = {
+      closest: () => null,
+    } as unknown as Element
+
+    expect(copilotRoleIdFromModelDropTarget(nestedTarget)).toBe("copilot_custom_2")
+    expect(copilotRoleIdFromModelDropTarget(dropZone)).toBe("copilot_custom_2")
+    expect(copilotRoleIdFromModelDropTarget(outsideTarget)).toBeNull()
   })
 })
 
-describe("copilotGroupComboboxFilter — searchable picker matching (atom-63 ②)", () => {
-  function previewRoute(providerLabel: string, providerModelId: string): CopilotRoutePreview {
-    return {
-      id: `${providerLabel}:${providerModelId}`,
-      route_id: `${providerLabel}:${providerModelId}`,
-      endpointId: providerLabel,
-      providerLabel,
-      providerKind: "third_party",
-      providerModelId,
-      uiState: "ready",
-      agentStatus: "ready",
-      capabilities: {},
-      provider: providerLabel,
-      modelId: providerModelId,
-      methodId: null,
-      note: null,
+describe("CopilotTab available model drag-in", () => {
+  it("matches the LLM Roles layout with a right-side draggable model library containing all model groups", () => {
+    const html = renderToStaticMarkup(
+      <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={[...registryModelGroups(), openAiModelGroup()]} />,
+    )
+
+    expect(html).toContain('data-copilot-settings-page="true"')
+    expect(html).toContain('data-copilot-available-models-sidebar="true"')
+    expect(html).toContain("Available Models")
+    expect(html).toContain("Claude Opus 4.7")
+    expect(html).toContain("GPT 4.1")
+    expect(html).toContain('data-available-model-drag-source="true"')
+    expect(html).toContain('data-available-model-pointer-drag-source="true"')
+  })
+
+  it("makes both empty and configured Copilot role cards available-model drop zones", () => {
+    const emptyHtml = renderToStaticMarkup(
+      <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={registryModelGroups()} />,
+    )
+    expect(emptyHtml).toMatch(/data-copilot-empty-role-card="true"[^>]*data-model-drop-zone="true"/)
+    expect(emptyHtml).toContain('data-model-drop-fallback="active-drag-ref"')
+
+    const configuredHtml = renderToStaticMarkup(
+      <CopilotTab data={roles()} credentials={credentials()} modelGroups={registryModelGroups()} />,
+    )
+    expect(configuredHtml).toMatch(/data-copilot-role-card="true"[^>]*data-model-drop-zone="true"/)
+  })
+
+  it("renders a non-Claude model group as a configured Copilot role after drag-in selection", () => {
+    const data: RolesData = {
+      ...roles(),
+      roles: {
+        copilot_custom_1: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "gpt-4.1",
+          models: {
+            "gpt-4.1": {
+              providers: ["openai-official:gpt-4.1"],
+            },
+          },
+          fallback_chain: [
+            { route_id: "openai-official:gpt-4.1", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+      },
     }
-  }
-  const preview: CopilotRolePreview = {
-    id: "claude-opus-4.8",
-    title: "Claude Opus 4.8",
-    description: "Claude Opus 4.8",
-    source: "built_in",
-    modelLabel: "Claude Opus 4.8",
-    sdkId: "claude-agent-sdk",
-    activeRouteIds: [],
-    availableRoutes: [previewRoute("Qiniu Anthropic", "claude-opus-4-8")],
-    routes: [],
-  }
-  const haystack = copilotGroupSearchValue(preview)
 
-  it("requires every token to match (multi-token AND)", () => {
-    expect(copilotGroupComboboxFilter(haystack, "claude opus")).toBe(1)
-    expect(copilotGroupComboboxFilter(haystack, "claude gpt")).toBe(0)
-  })
+    const html = renderToStaticMarkup(
+      <CopilotTab data={data} credentials={credentials()} modelGroups={[...registryModelGroups(), openAiModelGroup()]} />,
+    )
 
-  it("matches compactly, ignoring separators", () => {
-    expect(copilotGroupComboboxFilter(haystack, "opus-4.8")).toBe(1)
-    expect(copilotGroupComboboxFilter(haystack, "opus4.8")).toBe(1)
-  })
-
-  it("searches canonical id, provider label and provider model id — not just the display name", () => {
-    expect(copilotGroupComboboxFilter(haystack, "qiniu")).toBe(1) // provider label
-    expect(copilotGroupComboboxFilter(haystack, "claude-opus-4-8")).toBe(1) // provider model id
-  })
-
-  it("shows every option for an empty query", () => {
-    expect(copilotGroupComboboxFilter(haystack, "")).toBe(1)
+    expect(html).toContain('data-copilot-role-card="true"')
+    expect(html).not.toContain('data-copilot-empty-role-card="true"')
+    expect(html).toContain("GPT 4.1")
+    expect(html).toContain("OpenAI Official")
   })
 })
 
@@ -545,15 +618,15 @@ describe("R-F12 empty-state CTA + per-card untested warning", () => {
   })
 })
 
-describe("R-F14 Add-model defrag", () => {
-  it("disables Add when there is already an empty draft card", () => {
+describe("Copilot Add model parity with LLM Roles", () => {
+  it("keeps Add enabled when there is already an empty draft card", () => {
     const html = renderToStaticMarkup(
       <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={registryModelGroups()} />,
     )
     const addBtn = html.match(/<button[^>]*data-copilot-model-add-trigger="true"[^>]*>/)
     expect(addBtn).not.toBeNull()
-    expect(addBtn?.[0]).toContain('disabled=""')
-    expect(addBtn?.[0]).toContain('data-disabled="true"')
+    expect(addBtn?.[0]).not.toContain('disabled=""')
+    expect(addBtn?.[0]).toContain('data-disabled="false"')
   })
 
   it("keeps Add enabled when every existing card is bound to a model group", () => {
@@ -564,6 +637,15 @@ describe("R-F14 Add-model defrag", () => {
     expect(addBtn).not.toBeNull()
     expect(addBtn?.[0]).not.toContain('disabled=""')
     expect(addBtn?.[0]).toContain('data-disabled="false"')
+  })
+
+  it("renders the empty draft as an LLM Roles-style drop target", () => {
+    const html = renderToStaticMarkup(
+      <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={registryModelGroups()} />,
+    )
+    expect(html).toContain('data-copilot-empty-role-card="true"')
+    expect(html).toContain('data-model-drop-target="true"')
+    expect(html).toContain("Drop model")
   })
 })
 

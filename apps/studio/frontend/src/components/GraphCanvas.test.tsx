@@ -1,17 +1,21 @@
-import { isValidElement, type ReactElement, type ReactNode } from 'react'
+// @vitest-environment jsdom
+import { act, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
 import { layoutViewportSignature, nextExpandedSubgraphs, topologyOwnerSkillIdForNode } from './GraphCanvas/GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
-import type { Edge, Node } from '@xyflow/react'
+import { addEdge, type Edge, type Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData } from './nodes'
 
-const { reactFlowPropsRef, contextMenuItems } = vi.hoisted(() => ({
+const { reactFlowPropsRef, contextMenuItems, setEdgesMock, setNodesMock } = vi.hoisted(() => ({
   reactFlowPropsRef: { current: null as null | Record<string, unknown> },
   contextMenuItems: [] as Array<{ label: string; onSelect?: () => void }>,
+  setEdgesMock: vi.fn(),
+  setNodesMock: vi.fn(),
 }))
 
 vi.mock('@xyflow/react', () => ({
@@ -27,9 +31,8 @@ vi.mock('@xyflow/react', () => ({
     return <div data-testid="react-flow" data-node-origin={JSON.stringify(props.nodeOrigin)}>{props.children}</div>
   },
   addEdge: vi.fn((edge, edges) => [...edges, edge]),
-  reconnectEdge: vi.fn((_oldEdge, newConnection, edges) => [...edges, newConnection]),
-  useEdgesState: vi.fn((initialEdges) => [initialEdges, vi.fn(), vi.fn()]),
-  useNodesState: vi.fn((initialNodes) => [initialNodes, vi.fn(), vi.fn()]),
+  useEdgesState: vi.fn((initialEdges) => [initialEdges, setEdgesMock, vi.fn()]),
+  useNodesState: vi.fn((initialNodes) => [initialNodes, setNodesMock, vi.fn()]),
   useReactFlow: vi.fn(() => ({
     flowToScreenPosition: (position: { x: number; y: number }) => position,
   })),
@@ -96,6 +99,9 @@ vi.mock('sonner', () => ({
 }))
 
 const layoutMock = vi.mocked(getAutoLayoutedElements)
+
+// React 19's act() warns unless the environment opts in.
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 function phaseNode(id: string, dependsOn: string[] = [], isOutput = false): SkillGraphNode {
   return {
@@ -195,7 +201,7 @@ function edgeIds(nodes: SkillGraphNode[]): string[] {
   return buildEdges(nodes).map((edge) => `${edge.source}->${edge.target}`)
 }
 
-function graphSkillDetail(phases: Array<{ id: string; src: string; depends_on: string[] }>): SkillDetail {
+function graphSkillDetail(phases: Array<{ id: string; src: string; depends_on: string[]; output?: boolean }>): SkillDetail {
   return {
     manifest: {
       schema_version: CURRENT_SCHEMA_VERSION,
@@ -232,12 +238,41 @@ function expectContextEdges(nodes: SkillGraphNode[]) {
   }
 }
 
+function renderGraphCanvasDom(element: ReactElement): () => void {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  act(() => {
+    root.render(element)
+  })
+  return () => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+    document.body.innerHTML = ''
+  }
+}
+
+function latestContextMenuItem(label: string): { label: string; onSelect?: () => void } | undefined {
+  return [...contextMenuItems].reverse().find((item) => item.label === label)
+}
+
 describe('GraphCanvas', () => {
   beforeEach(() => {
     reactFlowPropsRef.current = null
     contextMenuItems.length = 0
     layoutMock.mockReset()
     layoutMock.mockImplementation((nodes: Node[], edges: Edge[]) => ({ nodes, edges }))
+    setEdgesMock.mockReset()
+    setEdgesMock.mockImplementation((updater: Edge[] | ((current: Edge[]) => Edge[])) => (
+      typeof updater === 'function' ? updater([]) : updater
+    ))
+    setNodesMock.mockReset()
+    setNodesMock.mockImplementation((updater: Node[] | ((current: Node[]) => Node[])) => (
+      typeof updater === 'function' ? updater([]) : updater
+    ))
+    vi.mocked(addEdge).mockClear()
   })
 
   it('does not render the redundant edit graph title block', () => {
@@ -655,6 +690,35 @@ describe('GraphCanvas', () => {
     expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: OUTPUT_ID })
   })
 
+  it('creates graph input and output optimistic edges without a transient context dot', () => {
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        ])}
+        onPersistConnection={vi.fn()}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onConnect?: (connection: { source: string; target: string }) => void
+    } | null
+    props?.onConnect?.({ source: INPUT_ID, target: 'draft' })
+    props?.onConnect?.({ source: 'draft', target: OUTPUT_ID })
+
+    expect(vi.mocked(addEdge).mock.calls[0]?.[0]).toMatchObject({
+      source: INPUT_ID,
+      target: 'draft',
+      data: expect.objectContaining({ showContextControl: false }),
+    })
+    expect(vi.mocked(addEdge).mock.calls[1]?.[0]).toMatchObject({
+      source: 'draft',
+      target: OUTPUT_ID,
+      data: expect.objectContaining({ showContextControl: false }),
+    })
+  })
+
   it('does not persist invalid phase node connections', () => {
     const onPersistConnection = vi.fn()
     renderToStaticMarkup(
@@ -679,6 +743,83 @@ describe('GraphCanvas', () => {
     expect(onPersistConnection).not.toHaveBeenCalled()
   })
 
+  it('does not flash the edge back to its pre-write state while GRAPH.md is being written', async () => {
+    // Repro for the drop "flash": on a connect, writing GRAPH.md synchronously
+    // clears the stale compile projection, which re-renders the canvas with a
+    // fresh compileErrorsByNodeId reference WHILE skillDetail is still the
+    // pre-write value. The layout-reconcile effect must NOT slam the optimistic
+    // edge back to that stale composed layout mid-write; it resumes only once the
+    // write settles and skillDetail has refetched.
+    let resolvePersist: (() => void) | null = null
+    const onPersistConnection = vi.fn(
+      () => new Promise<void>((resolve) => {
+        resolvePersist = resolve
+      }),
+    )
+    const staleDetail = graphSkillDetail([
+      { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      { id: 'review', src: 'phases/review/LOGIC.md', depends_on: [] },
+    ])
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const renderCanvas = (compileErrorsByNodeId: Record<string, never>, skillDetail: SkillDetail) => {
+      act(() => {
+        root.render(
+          <GraphCanvas
+            skillId="demo-skill"
+            skillDetail={skillDetail}
+            onPersistConnection={onPersistConnection}
+            compileErrorsByNodeId={compileErrorsByNodeId}
+          />,
+        )
+      })
+    }
+
+    try {
+      renderCanvas({}, staleDetail)
+
+      const props = reactFlowPropsRef.current as {
+        onConnect?: (connection: { source: string; target: string }) => void
+      } | null
+      // Optimistic connect; the persist promise stays pending → write "in flight".
+      act(() => {
+        props?.onConnect?.({ source: 'draft', target: 'review' })
+      })
+      expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+
+      // clearStaleCompileProjection churn: a new compileErrorsByNodeId reference
+      // while skillDetail is still the pre-write value. The reconcile effect must
+      // not reset the live edges here (doing so is the flash).
+      setEdgesMock.mockClear()
+      renderCanvas({}, staleDetail)
+      expect(setEdgesMock).not.toHaveBeenCalled()
+
+      // The write settles and skillDetail refetches to the post-write graph
+      // (review now depends on draft). The reconcile effect resumes and syncs the
+      // authoritative edges — the gate must release, not freeze the canvas.
+      await act(async () => {
+        resolvePersist?.()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      const settledDetail = graphSkillDetail([
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+      ])
+      setEdgesMock.mockClear()
+      renderCanvas({}, settledDetail)
+      expect(setEdgesMock).toHaveBeenCalled()
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      document.body.innerHTML = ''
+    }
+  })
+
   it('opens an edge context menu action for disconnecting phase dependencies', () => {
     const onDisconnectConnection = vi.fn()
     renderToStaticMarkup(
@@ -691,6 +832,46 @@ describe('GraphCanvas', () => {
     contextMenuItems.find((item) => item.label === 'Disconnect')?.onSelect?.()
 
     expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
+  it('opens the same disconnect menu for graph input and output boundary edges', () => {
+    const onDisconnectConnection = vi.fn()
+    const cleanup = renderGraphCanvasDom(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: ['input'], output: true },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+      />,
+    )
+
+    try {
+      const props = reactFlowPropsRef.current as {
+        onEdgeContextMenu?: (event: unknown, edge: Edge) => void
+      } | null
+
+      contextMenuItems.length = 0
+      act(() => {
+        props?.onEdgeContextMenu?.({}, { id: `${INPUT_ID}->draft`, type: 'contextEdge', source: INPUT_ID, target: 'draft' } as Edge)
+      })
+      act(() => {
+        latestContextMenuItem('Disconnect')?.onSelect?.()
+      })
+      expect(onDisconnectConnection).toHaveBeenCalledWith({ source: INPUT_ID, target: 'draft' })
+
+      onDisconnectConnection.mockClear()
+      contextMenuItems.length = 0
+      act(() => {
+        props?.onEdgeContextMenu?.({}, { id: `draft->${OUTPUT_ID}`, type: 'contextEdge', source: 'draft', target: OUTPUT_ID } as Edge)
+      })
+      act(() => {
+        latestContextMenuItem('Disconnect')?.onSelect?.()
+      })
+      expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: OUTPUT_ID })
+    } finally {
+      cleanup()
+    }
   })
 
   it('opens a destructive node context menu action for deleting phase nodes', () => {
@@ -790,6 +971,96 @@ describe('GraphCanvas', () => {
     )
   })
 
+  it('reconnects optimistic graph output edges without inheriting the old context dot', async () => {
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const oldEdge = {
+      id: 'draft->review',
+      source: 'draft',
+      target: 'review',
+      type: 'contextEdge',
+      data: {
+        hasTraceData: false,
+        sourcePhaseId: 'draft',
+        targetPhaseId: 'review',
+        showContextControl: true,
+      },
+    } as Edge
+    setEdgesMock.mockImplementationOnce((updater: Edge[] | ((current: Edge[]) => Edge[])) => (
+      typeof updater === 'function' ? updater([oldEdge]) : updater
+    ))
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: Edge, newConnection: { source: string; target: string }) => void
+    } | null
+    props?.onReconnect?.(oldEdge, { source: 'draft', target: OUTPUT_ID })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(setEdgesMock.mock.results[0]?.value).toEqual([
+      expect.objectContaining({
+        id: `draft->${OUTPUT_ID}`,
+        source: 'draft',
+        target: OUTPUT_ID,
+        data: expect.objectContaining({ showContextControl: false }),
+      }),
+    ])
+  })
+
+  it('reconnects optimistic phase edges with a context dot when the new target is another phase', async () => {
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const oldEdge = {
+      id: `draft->${OUTPUT_ID}`,
+      source: 'draft',
+      target: OUTPUT_ID,
+      type: 'contextEdge',
+      data: {
+        hasTraceData: false,
+        sourcePhaseId: 'draft',
+        targetPhaseId: OUTPUT_ID,
+        showContextControl: false,
+      },
+    } as Edge
+    setEdgesMock.mockImplementationOnce((updater: Edge[] | ((current: Edge[]) => Edge[])) => (
+      typeof updater === 'function' ? updater([oldEdge]) : updater
+    ))
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], output: true },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: [] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: Edge, newConnection: { source: string; target: string }) => void
+    } | null
+    props?.onReconnect?.(oldEdge, { source: 'draft', target: 'review' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(setEdgesMock.mock.results[0]?.value).toEqual([
+      expect.objectContaining({
+        id: 'draft->review',
+        source: 'draft',
+        target: 'review',
+        data: expect.objectContaining({ showContextControl: true }),
+      }),
+    ])
+  })
+
   it('reconnects phase edges onto graph Input through the same atomic reconnect path', async () => {
     const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
     renderToStaticMarkup(
@@ -849,6 +1120,7 @@ describe('GraphCanvas', () => {
 
   it('disconnects an edge dropped off a handle via onReconnectEnd', () => {
     const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const edge = { id: 'draft->review', source: 'draft', target: 'review', type: 'contextEdge' } as Edge
     renderToStaticMarkup(
       <GraphCanvas
         skillId="demo-skill"
@@ -861,7 +1133,7 @@ describe('GraphCanvas', () => {
     )
 
     const props = reactFlowPropsRef.current as {
-      onReconnectStart?: () => void
+      onReconnectStart?: (event: unknown, edge: Edge, handleType: 'source' | 'target') => void
       onReconnectEnd?: (
         event: unknown,
         edge: { id: string; source: string; target: string },
@@ -870,10 +1142,108 @@ describe('GraphCanvas', () => {
       ) => void
     } | null
     // Start the drag (no landing), then release off any handle (isValid null).
-    props?.onReconnectStart?.()
-    props?.onReconnectEnd?.({}, { id: 'draft->review', source: 'draft', target: 'review' }, 'target', { isValid: null })
+    props?.onReconnectStart?.({}, edge, 'target')
+    props?.onReconnectEnd?.({}, edge, 'target', { isValid: null })
 
     expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
+  it('removes the dragged edge immediately on reconnect start so it cannot snap back before disconnecting', () => {
+    const edge = { id: 'draft->review', source: 'draft', target: 'review', type: 'contextEdge' } as Edge
+    setEdgesMock.mockImplementationOnce((updater: Edge[] | ((current: Edge[]) => Edge[])) => (
+      typeof updater === 'function' ? updater([edge]) : updater
+    ))
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onDisconnectConnection={vi.fn()}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: (event: unknown, edge: Edge, handleType: 'source' | 'target') => void
+    } | null
+    props?.onReconnectStart?.({}, edge, 'target')
+
+    expect(setEdgesMock.mock.results[0]?.value).toEqual([])
+  })
+
+  it('optimistically removes disconnected dependencies from node data before the persisted graph reloads', () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const edge = { id: 'draft->review', source: 'draft', target: 'review', type: 'contextEdge' } as Edge
+    const draft = phaseNode('draft')
+    const review = phaseNode('review', ['draft'])
+    setNodesMock.mockImplementationOnce((updater: Node[] | ((current: Node[]) => Node[])) => (
+      typeof updater === 'function' ? updater([draft, review]) : updater
+    ))
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: (event: unknown, edge: Edge, handleType: 'source' | 'target') => void
+      onReconnectEnd?: (
+        event: unknown,
+        edge: Edge,
+        handleType: 'source' | 'target',
+        connectionState: { isValid: boolean | null },
+      ) => void
+    } | null
+    props?.onReconnectStart?.({}, edge, 'target')
+    props?.onReconnectEnd?.({}, edge, 'target', { isValid: null })
+
+    expect(setNodesMock.mock.results[0]?.value).toEqual([
+      draft,
+      expect.objectContaining({
+        id: 'review',
+        data: expect.objectContaining({ dependsOn: [] }),
+      }),
+    ])
+  })
+
+  it('disconnects graph input and output boundary edges dropped off a handle via onReconnectEnd', () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const inputEdge = { id: `${INPUT_ID}->draft`, source: INPUT_ID, target: 'draft', type: 'contextEdge' } as Edge
+    const outputEdge = { id: `draft->${OUTPUT_ID}`, source: 'draft', target: OUTPUT_ID, type: 'contextEdge' } as Edge
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: ['input'], output: true },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: (event: unknown, edge: Edge, handleType: 'source' | 'target') => void
+      onReconnectEnd?: (
+        event: unknown,
+        edge: { id: string; source: string; target: string },
+        handleType: 'source' | 'target',
+        connectionState: { isValid: boolean | null },
+      ) => void
+    } | null
+
+    props?.onReconnectStart?.({}, inputEdge, 'target')
+    props?.onReconnectEnd?.({}, inputEdge, 'target', { isValid: null })
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: INPUT_ID, target: 'draft' })
+
+    onDisconnectConnection.mockClear()
+    props?.onReconnectStart?.({}, outputEdge, 'source')
+    props?.onReconnectEnd?.({}, outputEdge, 'source', { isValid: null })
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: OUTPUT_ID })
   })
 
   it('does not disconnect on onReconnectEnd when the edge landed on a valid handle', () => {
@@ -893,8 +1263,8 @@ describe('GraphCanvas', () => {
     )
 
     const props = reactFlowPropsRef.current as {
-      onReconnectStart?: () => void
-      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+      onReconnectStart?: (event: unknown, edge: Edge, handleType: 'source' | 'target') => void
+      onReconnect?: (oldEdge: Edge, newConnection: { source: string; target: string }) => void
       onReconnectEnd?: (
         event: unknown,
         edge: { id: string; source: string; target: string },
@@ -903,10 +1273,11 @@ describe('GraphCanvas', () => {
       ) => void
     } | null
     // A successful reconnect fires onReconnect (landed=true) before onReconnectEnd.
-    props?.onReconnectStart?.()
+    const edge = { id: 'draft->review', source: 'draft', target: 'review', type: 'contextEdge' } as Edge
+    props?.onReconnectStart?.({}, edge, 'target')
     onDisconnectConnection.mockClear()
-    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
-    props?.onReconnectEnd?.({}, { id: 'draft->review', source: 'draft', target: 'review' }, 'target', { isValid: true })
+    props?.onReconnect?.(edge, { source: 'draft', target: 'publish' })
+    props?.onReconnectEnd?.({}, edge, 'target', { isValid: true })
 
     // onReconnectEnd must NOT add a second disconnect for the already-moved edge.
     expect(onDisconnectConnection).toHaveBeenCalledTimes(1)

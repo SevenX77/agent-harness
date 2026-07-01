@@ -281,15 +281,20 @@ describe('buildSubgraphExpansion', () => {
   it('uses normal contextEdge connectors for the expanded child topology', () => {
     const { edges } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
     const internal = edges.filter((edge) => isSubgraphPreviewId(edge.source) && isSubgraphPreviewId(edge.target))
+    const inputEdge = internal.find((edge) => edge.source.includes('__global_input__') && edge.target.includes('plan'))
+    const phaseEdge = internal.find((edge) => edge.source.includes('plan') && edge.target.includes('write'))
+    const outputEdge = internal.find((edge) => edge.source.includes('write') && edge.target.includes('__global_output__'))
 
     expect(internal).toHaveLength(3)
     expect(internal.every((edge) => edge.type === 'contextEdge')).toBe(true)
-    expect(internal.every((edge) => edge.data?.showContextControl !== false)).toBe(true)
+    expect(inputEdge?.data?.showContextControl).toBe(false)
+    expect(phaseEdge?.data?.showContextControl).toBe(true)
+    expect(outputEdge?.data?.showContextControl).toBe(false)
     expect(internal.every((edge) => edge.data?.sourcePhaseId === edge.source)).toBe(true)
     expect(internal.every((edge) => edge.data?.targetPhaseId === edge.target)).toBe(true)
-    expect(internal.some((edge) => edge.source.includes('__global_input__') && edge.target.includes('plan'))).toBe(true)
-    expect(internal.some((edge) => edge.source.includes('plan') && edge.target.includes('write'))).toBe(true)
-    expect(internal.some((edge) => edge.source.includes('write') && edge.target.includes('__global_output__'))).toBe(true)
+    expect(inputEdge).toBeDefined()
+    expect(phaseEdge).toBeDefined()
+    expect(outputEdge).toBeDefined()
   })
 
   it('emits the parent bridge as a visual-only handle-to-handle edge', () => {

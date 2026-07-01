@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ def default_local_resolver_for_compiled(compiled: Any) -> LocalWorkspaceResolver
         path = getattr(node, "path", None)
         if path is None:
             continue
-        phase_path = _canonical_search_path(path)
+        phase_path = _normalize_path(path)
         try:
             roots.append(phase_path.parents[2])
         except IndexError:
@@ -94,7 +95,7 @@ def _default_search_paths(root: Path) -> tuple[Path, ...]:
 
 
 def _skill_root_from_entrypoint(skill_path: str | Path) -> Path:
-    entrypoint = _canonical_search_path(skill_path)
+    entrypoint = _normalize_path(skill_path)
     if entrypoint.name in {"GRAPH.md", "SKILL.md"}:
         return entrypoint.parent
     return entrypoint
@@ -110,17 +111,16 @@ def _candidate_under_base(base: Path, relative: Path) -> Path | None:
     return candidate
 
 
-def _canonical_search_path(path: str | Path) -> Path:
-    # codeql[py/path-injection] explicit SDK resolver roots are canonicalized before child joins.
-    return Path(path).expanduser().resolve()
+def _normalize_path(path: str | Path) -> Path:
+    return Path(os.path.normpath(os.fspath(path)))
 
 
 def _dedupe_paths(paths: Iterable[str | Path]) -> tuple[Path, ...]:
     unique: list[Path] = []
     seen: set[str] = set()
     for path in paths:
-        resolved = _canonical_search_path(path)
-        key = str(resolved)
+        resolved = _normalize_path(path)
+        key = os.path.normcase(os.fspath(resolved))
         if key in seen:
             continue
         seen.add(key)

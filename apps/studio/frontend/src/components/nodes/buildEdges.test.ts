@@ -72,6 +72,25 @@ describe("buildEdges", () => {
     ])
   })
 
+  it("keeps context controls on phase edges but folds boundary controls into the IO nodes", () => {
+    const edges = buildEdges([node("entry", ["input"]), node("final", ["entry"], true)])
+
+    expect(edges.find((edge) => edge.source === INPUT_ID)?.data?.showContextControl).toBe(false)
+    expect(edges.find((edge) => edge.source === "entry" && edge.target === "final")?.data?.showContextControl).toBe(true)
+    expect(edges.find((edge) => edge.target === OUTPUT_ID)?.data?.showContextControl).toBe(false)
+  })
+
+  it("keeps IO boundary edges reconnectable like ordinary canvas edges", () => {
+    const edges = buildEdges([node("entry", ["input"]), node("final", ["entry"], true)])
+    const inputEdge = edges.find((edge) => edge.source === INPUT_ID)
+    const outputEdge = edges.find((edge) => edge.target === OUTPUT_ID)
+
+    expect(inputEdge?.reconnectable).toBeUndefined()
+    expect(inputEdge?.deletable).toBeUndefined()
+    expect(outputEdge?.reconnectable).toBeUndefined()
+    expect(outputEdge?.deletable).toBeUndefined()
+  })
+
   it("preserves real phase->phase fan-in", () => {
     const ids = edgeIds(
       buildEdges([

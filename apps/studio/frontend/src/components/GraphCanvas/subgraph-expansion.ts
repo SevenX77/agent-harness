@@ -351,7 +351,7 @@ function inlineChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edg
       hasTraceData: false,
       sourcePhaseId: source,
       targetPhaseId: target,
-      showContextControl: true,
+      showContextControl: edge.data?.showContextControl !== false,
     },
   }
 }

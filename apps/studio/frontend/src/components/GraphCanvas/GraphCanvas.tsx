@@ -6,7 +6,6 @@ import {
   Panel,
   ReactFlow,
   addEdge,
-  reconnectEdge,
   useEdgesState,
   useNodesState,
   useUpdateNodeInternals,
@@ -39,7 +38,7 @@ import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
-import { buildEdges, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
 import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
@@ -405,6 +404,78 @@ function localConnectionEndpoints(connection: { source: string; target: string }
   }
 }
 
+function removeConnectionFromLiveNodes(
+  current: GraphCanvasNode[],
+  connection: { source: string; target: string },
+  localConnection: { source: string; target: string },
+): GraphCanvasNode[] {
+  let changed = false
+  const dependencySource = localConnection.source === INPUT_ID ? 'input' : localConnection.source
+  const next = current.map((node) => {
+    if (node.type !== 'skill') {
+      return node
+    }
+    if (node.id === connection.target && node.data.dependsOn.includes(dependencySource)) {
+      changed = true
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          dependsOn: node.data.dependsOn.filter((source) => source !== dependencySource),
+        },
+      }
+    }
+    if (node.id === connection.source && localConnection.target === OUTPUT_ID && node.data.isOutput === true) {
+      changed = true
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          isOutput: false,
+        },
+      }
+    }
+    return node
+  })
+  return changed ? next : current
+}
+
+function addConnectionToLiveNodes(
+  current: GraphCanvasNode[],
+  connection: { source: string; target: string },
+  localConnection: { source: string; target: string },
+): GraphCanvasNode[] {
+  let changed = false
+  const dependencySource = localConnection.source === INPUT_ID ? 'input' : localConnection.source
+  const next = current.map((node) => {
+    if (node.type !== 'skill') {
+      return node
+    }
+    if (node.id === connection.target && !node.data.dependsOn.includes(dependencySource)) {
+      changed = true
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          dependsOn: [...node.data.dependsOn, dependencySource],
+        },
+      }
+    }
+    if (node.id === connection.source && localConnection.target === OUTPUT_ID && node.data.isOutput !== true) {
+      changed = true
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          isOutput: true,
+        },
+      }
+    }
+    return node
+  })
+  return changed ? next : current
+}
+
 export function topologyOwnerSkillIdForWorkspace(skillId: string, workspaceRoot?: string | null): string {
   return topLevelSkillIdFromWorkspaceRoot(workspaceRoot) || skillId
 }
@@ -462,6 +533,76 @@ function decorateContextEdges(edges: Edge<ContextEdgeData>[], handlers: ContextE
   return edges.map((edge) => (
     edge.type === 'contextEdge' ? decorateContextEdge(edge, handlers) : edge
   ))
+}
+
+function edgeSemanticKey(edge: Edge<ContextEdgeData>): string {
+  return JSON.stringify({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    sourceHandle: edge.sourceHandle ?? null,
+    targetHandle: edge.targetHandle ?? null,
+    type: edge.type,
+    hasTraceData: edge.data?.hasTraceData === true,
+    showContextControl: edge.data?.showContextControl !== false,
+    sourcePhaseId: edge.data?.sourcePhaseId ?? edge.source,
+    targetPhaseId: edge.data?.targetPhaseId ?? edge.target,
+    contextJson: edge.data?.contextJson,
+  })
+}
+
+function edgeListsSemanticallyEqual(current: Edge<ContextEdgeData>[], next: Edge<ContextEdgeData>[]): boolean {
+  if (current.length !== next.length) return false
+  const currentKeys = current.map(edgeSemanticKey).sort()
+  const nextKeys = next.map(edgeSemanticKey).sort()
+  return currentKeys.every((key, index) => key === nextKeys[index])
+}
+
+const OPTIONAL_FALSE_NODE_DATA_KEYS = new Set(['isConflictCancelled'])
+
+function semanticJsonValue(value: unknown, key?: string): unknown {
+  if (typeof value === 'function') {
+    return undefined
+  }
+  if (key && OPTIONAL_FALSE_NODE_DATA_KEYS.has(key) && value === false) {
+    return undefined
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => semanticJsonValue(item))
+  }
+  if (value && typeof value === 'object') {
+    const sorted: Record<string, unknown> = {}
+    for (const [key, nestedValue] of Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) {
+      const semanticValue = semanticJsonValue(nestedValue, key)
+      if (semanticValue !== undefined) {
+        sorted[key] = semanticValue
+      }
+    }
+    return sorted
+  }
+  return value
+}
+
+function nodeSemanticKey(node: GraphCanvasNode): string {
+  return JSON.stringify({
+    id: node.id,
+    type: node.type,
+    position: node.position,
+    width: node.width ?? null,
+    height: node.height ?? null,
+    parentId: node.parentId ?? null,
+    extent: node.extent ?? null,
+    selected: node.selected === true,
+    hidden: node.hidden === true,
+    data: semanticJsonValue(node.data),
+  })
+}
+
+function nodeListsSemanticallyEqual(current: GraphCanvasNode[], next: GraphCanvasNode[]): boolean {
+  if (current.length !== next.length) return false
+  const currentKeys = current.map(nodeSemanticKey).sort()
+  const nextKeys = next.map(nodeSemanticKey).sort()
+  return currentKeys.every((key, index) => key === nextKeys[index])
 }
 
 /** Map a child-topology resolver failure to a human-readable drill error. */
@@ -606,6 +747,23 @@ export function GraphCanvas({
   // (reconnect, already handled) apart from "dropped off any handle"
   // (drag-disconnect). Reset on every reconnect start.
   const reconnectLandedRef = useRef(false)
+  const reconnectingEdgeRef = useRef<Edge<ContextEdgeData> | null>(null)
+  // Drop-flash guard: how many structural graph edits (connect / disconnect /
+  // reconnect) have their optimistic mutation applied but their GRAPH.md write
+  // still in flight. While > 0 the layout-reconcile effect skips resetting the
+  // live nodes/edges from the composed layout. Without this, the synchronous
+  // clearStaleCompileProjection re-render (still on the PRE-write skillDetail)
+  // recomputes the composed edges from stale data and the reconcile slams the
+  // optimistic edge back to its old state until the refetch lands — the flash
+  // the user sees on drop. A ref (not state) so begin/end never triggers a
+  // render on its own; the effect re-runs off the real data changes.
+  const pendingGraphEditsRef = useRef(0)
+  const beginGraphEdit = useCallback(() => {
+    pendingGraphEditsRef.current += 1
+  }, [])
+  const endGraphEdit = useCallback(() => {
+    pendingGraphEditsRef.current = Math.max(0, pendingGraphEditsRef.current - 1)
+  }, [])
 
   const [warningQueue, setWarningQueue] = useState<OverwriteConflict[]>([])
   const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
@@ -1255,16 +1413,6 @@ export function GraphCanvas({
     _event: MouseEvent,
     connection: { source: string; target: string },
   ) => {
-    const localConnection = localConnectionEndpoints(connection)
-    if (
-      localConnection.source === INPUT_ID
-      || localConnection.source === OUTPUT_ID
-      || localConnection.target === INPUT_ID
-      || localConnection.target === OUTPUT_ID
-    ) {
-      setEdgeMenuConnection(null)
-      return
-    }
     setEdgeMenuConnection(connection)
   }, [])
   const handleInspectEdge = useCallback<NonNullable<ContextEdgeData['onInspectEdge']>>(({ id, source, target, contextJson }) => {
@@ -1788,8 +1936,21 @@ export function GraphCanvas({
   const hasLayoutNodes = baseLayout.nodes.length > 0
 
   useCanvasLayoutEffect(() => {
-    setNodes(stampSelection(composedLayout.nodes))
-    setEdges(decoratedComposedEdges)
+    // While a structural edit's GRAPH.md write is in flight, the optimistic
+    // nodes/edges are the source of truth until the refetch lands. Reconciling
+    // against the (still pre-write) composed layout here would flash the edit
+    // back to its old state, so skip the reset until the write settles.
+    if (pendingGraphEditsRef.current === 0) {
+      const nextNodes = stampSelection(composedLayout.nodes)
+      setNodes((current) => {
+        const equal = nodeListsSemanticallyEqual(current, nextNodes)
+        return equal ? current : nextNodes
+      })
+      setEdges((current) => {
+        const equal = edgeListsSemanticallyEqual(current, decoratedComposedEdges)
+        return equal ? current : decoratedComposedEdges
+      })
+    }
     fitInitialViewportOnce(hasLayoutNodes)
   }, [stampSelection, composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
 
@@ -1913,51 +2074,22 @@ export function GraphCanvas({
       childArgs = drilledChildTarget ? [drilledChildTarget] : []
     }
 
-    setEdges((current) => addEdge(decorateContextEdge({
-      ...connection,
-      id: `${source}->${target}`,
-      source,
-      target,
-      type: 'contextEdge',
-      data: {
-        hasTraceData: false,
-        sourcePhaseId: source,
-        targetPhaseId: target,
-      },
-      style: { strokeWidth: 1.5 },
-    }, edgeHandlers), current))
-    setNodes((current) => current.map((node) => {
-      if (node.type !== 'skill') {
-        return node
-      }
-      if (node.id === targetNode?.id && !node.data.dependsOn.includes(dependencySource)) {
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            dependsOn: [...node.data.dependsOn, dependencySource],
-          }
-        }
-      }
-      if (node.id === sourceNode?.id && target === OUTPUT_ID) {
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            isOutput: true,
-          }
-        }
-      }
-      return node
-    }))
+    setEdges((current) => addEdge(
+      decorateContextEdge(createContextEdge(source, target), edgeHandlers),
+      current,
+    ))
+    setNodes((current) => addConnectionToLiveNodes(current, { source, target }, localConnection))
     if (onPersistConnection) {
-      Promise.resolve(onPersistConnection({ ...connection, ...localConnection }, ...childArgs)).catch((persistError: unknown) => {
-        toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
-        setEdges(decoratedComposedEdges)
-        setNodes(composedLayout.nodes)
-      })
+      beginGraphEdit()
+      Promise.resolve(onPersistConnection({ ...connection, ...localConnection }, ...childArgs))
+        .catch((persistError: unknown) => {
+          toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
+          setEdges(decoratedComposedEdges)
+          setNodes(composedLayout.nodes)
+        })
+        .finally(endGraphEdit)
     }
-  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, edgeHandlers, expandedChildSaveTarget, onPersistConnection, setEdges, setNodes])
+  }, [beginGraphEdit, blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, edgeHandlers, endGraphEdit, expandedChildSaveTarget, onPersistConnection, setEdges, setNodes])
 
   // R4 + n2-canvas #8: drag an existing edge endpoint to a new node = remove the
   // old dependency + add the new one. planEdgeReconnect owns the DECISION (global
@@ -1971,16 +2103,26 @@ export function GraphCanvas({
   // real consumers (main canvas + compact SplitEditor canvas) now wire
   // onReconnectConnection; the legacy chained fallback below is kept only as a
   // defensive path for any future surface that mounts GraphCanvas without it.
+  const restoreReconnectingEdge = useCallback((edge: Edge<ContextEdgeData>) => {
+    reconnectingEdgeRef.current = null
+    setEdges((current) => (
+      current.some((candidate) => candidate.id === edge.id) ? current : [...current, edge]
+    ))
+  }, [setEdges])
+
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
-    reconnectLandedRef.current = true
     if (!newConnection.source || !newConnection.target) {
       toast.error('Edge endpoints must be phase nodes to reconnect.')
+      reconnectLandedRef.current = true
+      restoreReconnectingEdge(oldEdge)
       return
     }
     const oldScope = canvasScopeForEndpoints(oldEdge.source, oldEdge.target)
     const newScope = canvasScopeForEndpoints(newConnection.source, newConnection.target)
     if (!oldScope || !newScope || oldScope.parentNodeId !== newScope.parentNodeId) {
       toast.error('Reconnect nodes within the same graph.')
+      reconnectLandedRef.current = true
+      restoreReconnectingEdge(oldEdge)
       return
     }
     const localOldConnection = localConnectionEndpoints({ source: oldEdge.source, target: oldEdge.target })
@@ -1993,6 +2135,8 @@ export function GraphCanvas({
       if (plan.reason !== 'no-op') {
         toast.error(plan.message)
       }
+      reconnectLandedRef.current = true
+      restoreReconnectingEdge(oldEdge)
       return
     }
     const targetNode = nodesRef.current.find((node): node is SkillGraphNode => (
@@ -2000,6 +2144,8 @@ export function GraphCanvas({
     ))
     if (targetNode && targetNode.data.dependsOn.includes(plan.connect.source)) {
       toast.error('This dependency already exists')
+      reconnectLandedRef.current = true
+      restoreReconnectingEdge(oldEdge)
       return
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
@@ -2007,30 +2153,50 @@ export function GraphCanvas({
       const childTarget = expandedChildSaveTarget(newScope.parentNodeId)
       if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
+        reconnectLandedRef.current = true
+        restoreReconnectingEdge(oldEdge)
         return
       }
       childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) {
+        reconnectLandedRef.current = true
+        restoreReconnectingEdge(oldEdge)
         return
       }
       childArgs = drilledChildTarget ? [drilledChildTarget] : []
     }
 
     // Optimistically move the edge to its new endpoints before the write lands.
-    setEdges((current) => reconnectEdge(oldEdge, newConnection, current))
+    // Use the same factory as persisted edges so IO boundary dots never flash
+    // while waiting for GRAPH.md to be written and reloaded.
+    const optimisticEdge = decorateContextEdge(createContextEdge(newConnection.source, newConnection.target), edgeHandlers)
+    reconnectLandedRef.current = true
+    reconnectingEdgeRef.current = null
+    setEdges((current) => (
+      current.some((candidate) => candidate.id === oldEdge.id)
+        ? current.map((candidate) => (candidate.id === oldEdge.id ? optimisticEdge : candidate))
+        : [...current, optimisticEdge]
+    ))
+    setNodes((current) => addConnectionToLiveNodes(
+      removeConnectionFromLiveNodes(current, oldEdge, plan.disconnect),
+      { source: newConnection.source, target: newConnection.target },
+      plan.connect,
+    ))
     const rollback = (reconnectError: unknown) => {
       toast.error(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect dependency')
       setEdges(decoratedComposedEdges)
       setNodes(composedLayout.nodes)
     }
     if (onReconnectConnection) {
-      Promise.resolve(onReconnectConnection(plan.disconnect, plan.connect, ...childArgs)).catch(rollback)
+      beginGraphEdit()
+      Promise.resolve(onReconnectConnection(plan.disconnect, plan.connect, ...childArgs)).catch(rollback).finally(endGraphEdit)
       return
     }
     if (!onDisconnectConnection || !onPersistConnection) {
       return
     }
+    beginGraphEdit()
     Promise.resolve(onDisconnectConnection(plan.disconnect, ...childArgs))
       .then(() => onPersistConnection({
         ...newConnection,
@@ -2038,11 +2204,17 @@ export function GraphCanvas({
         target: plan.connect.target,
       }, ...childArgs))
       .catch(rollback)
-  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection, onPersistConnection, onReconnectConnection, setEdges, setNodes])
+      .finally(endGraphEdit)
+  }, [beginGraphEdit, blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, edgeHandlers, endGraphEdit, expandedChildSaveTarget, onDisconnectConnection, onPersistConnection, onReconnectConnection, restoreReconnectingEdge, setEdges, setNodes])
 
-  const onReconnectStart = useCallback(() => {
+  const onReconnectStart = useCallback((
+    _event: globalThis.MouseEvent | MouseEvent,
+    edge: Edge<ContextEdgeData>,
+  ) => {
     reconnectLandedRef.current = false
-  }, [])
+    reconnectingEdgeRef.current = edge
+    setEdges((current) => current.filter((candidate) => candidate.id !== edge.id))
+  }, [setEdges])
 
   // n2-canvas #14: the right-click "Disconnect" menu path. Routes through the same
   // drilled-child target + read-only block as the drag-disconnect path so a menu
@@ -2067,11 +2239,20 @@ export function GraphCanvas({
       if (blockDrilledEditIfUnwritable()) return
       childArgs = drilledChildTarget ? [drilledChildTarget] : []
     }
-    void Promise.resolve(onDisconnectConnection(localConnectionEndpoints(connection), ...childArgs))
+    const localConnection = localConnectionEndpoints(connection)
+    setEdges((current) => current.filter((candidate) => (
+      candidate.source !== connection.source || candidate.target !== connection.target
+    )))
+    setNodes((current) => removeConnectionFromLiveNodes(current, connection, localConnection))
+    beginGraphEdit()
+    void Promise.resolve(onDisconnectConnection(localConnection, ...childArgs))
       .catch((disconnectError: unknown) => {
         toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
+        setEdges(decoratedComposedEdges)
+        setNodes(composedLayout.nodes)
       })
-  }, [blockDrilledEditIfUnwritable, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection])
+      .finally(endGraphEdit)
+  }, [beginGraphEdit, blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, endGraphEdit, expandedChildSaveTarget, onDisconnectConnection, setEdges, setNodes])
 
   const handleMenuDeletePhase = useCallback((nodeId: string) => {
     if (!onDeletePhase) return
@@ -2114,24 +2295,22 @@ export function GraphCanvas({
     _handleType: 'source' | 'target',
     connectionState: FinalConnectionState,
   ) => {
-    if (reconnectLandedRef.current || connectionState.isValid === true) {
+    if (reconnectLandedRef.current) {
+      return
+    }
+    if (connectionState.isValid === true) {
+      restoreReconnectingEdge(edge)
       return
     }
     const localConnection = localConnectionEndpoints({ source: edge.source, target: edge.target })
-    if (
-      localConnection.source === INPUT_ID
-      || localConnection.source === OUTPUT_ID
-      || localConnection.target === INPUT_ID
-      || localConnection.target === OUTPUT_ID
-    ) {
-      return
-    }
     if (!onDisconnectConnection) {
+      restoreReconnectingEdge(edge)
       return
     }
     const scope = canvasScopeForEndpoints(edge.source, edge.target)
     if (!scope) {
       toast.error('Disconnect nodes within the same graph.')
+      restoreReconnectingEdge(edge)
       return
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
@@ -2139,23 +2318,29 @@ export function GraphCanvas({
       const childTarget = expandedChildSaveTarget(scope.parentNodeId)
       if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
+        restoreReconnectingEdge(edge)
         return
       }
       childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) {
+        restoreReconnectingEdge(edge)
         return
       }
       childArgs = drilledChildTarget ? [drilledChildTarget] : []
     }
+    reconnectingEdgeRef.current = null
     setEdges((current) => current.filter((candidate) => candidate.id !== edge.id))
+    setNodes((current) => removeConnectionFromLiveNodes(current, edge, localConnection))
+    beginGraphEdit()
     Promise.resolve(onDisconnectConnection(localConnection, ...childArgs))
       .catch((disconnectError: unknown) => {
         toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
         setEdges(decoratedComposedEdges)
         setNodes(composedLayout.nodes)
       })
-  }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection, setEdges, setNodes])
+      .finally(endGraphEdit)
+  }, [beginGraphEdit, blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, endGraphEdit, expandedChildSaveTarget, onDisconnectConnection, restoreReconnectingEdge, setEdges, setNodes])
 
   const handlePaneClick = useCallback(() => {
     cancelPendingNodeClickAction()

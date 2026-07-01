@@ -1804,6 +1804,32 @@ def test_registry_returns_cooling_down_provider_when_route_circuit_is_active(
     assert provider_model["retry_at"] == retry_at.isoformat()
 
 
+def test_registry_stamps_route_retry_at_on_cooling_down_route(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # W2-A / Part D status normalization: the route's normalized state must carry
+    # ``retry_at`` alongside ``reason_code`` for a cooling_down route, so the frontend
+    # can read it straight off the route (symmetric with reason_code) instead of only
+    # via the aggregated provider_models view. The projection stamps it from the active
+    # circuit; ``_gateway_route`` strips it from the gateway runtime route.
+    _seed(tmp_path, monkeypatch)
+    retry_at = datetime.now(UTC) + timedelta(seconds=60)
+    _open_runtime_circuit(
+        route_id="openai-direct:gpt-5",
+        retry_at=retry_at,
+        reason_code="rate_limited",
+        message="provider returned 429",
+    )
+
+    routes = client.get("/api/llm/registry").json()["provider_routes"]
+
+    assert routes["openai-direct:gpt-5"]["ui_state"] == "cooling_down"
+    assert routes["openai-direct:gpt-5"]["reason_code"] == "rate_limited"
+    assert routes["openai-direct:gpt-5"]["retry_at"] == retry_at.isoformat()
+
+
 def test_registry_endpoint_secret_reveal_is_v4_scoped(
     client: TestClient,
     tmp_path: Path,

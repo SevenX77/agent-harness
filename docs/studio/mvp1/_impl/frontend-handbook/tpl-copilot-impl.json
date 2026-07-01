@@ -2,13 +2,13 @@
   "id": "copilot_impl",
   "title": "Copilot · 实施详情",
   "design_ref": "copilot_design",
-  "intro": "本页是 Copilot tab 前端的现状/差距/实施计划/测试,1:1 对应设计页 copilot_design(原子 #54–#65)。设计已说清『应该怎样』,这里写『现在怎样、差多少、按什么顺序补、怎么测』。代码一律按『文件名 + 函数/对象名』引用(可全局搜索定位,不写行号——行号会漂、名字稳定);copilot 前端文件在 apps/studio/frontend/src/components/studio/settings/copilot/ 下(CopilotTab.tsx / copilot-role-derivation.ts / copilot-role-test.ts / CopilotModelGroupCard.tsx),后端 copilot SDK 驱动在 apps/studio/backend/app/services/copilot.py(即 gateway 后端的 sidecar 侧),SDK 测试 job 编排在 routers/llm.py。底层依赖的 route 解析/SDK 测试机制见 copilot_mech_route。重要现状定性:spec §7.4 把这页定性为『桩/mock/假测试最多』,但 §7.4 是较早的审计快照;以现码为准,§7.4 列的多数桩/mock/假测试/分流 bug 在现码已修(去 mock、真 SDK 测试、role_kind 分流、统一保存状态徽章 SaveStatusBadge)。**2026-06-20 更新**:四项残留偏差（动态浮出未挂载、可搜索选组器缺、model-group Remove 占位、Built-in 元数据启发式）随 copilot-settings-mvp1-conformance Wave A+B 已全部落地,#54-#65 全部 fe_status=符合;Wave C 系列收尾项（共享状态灯 / WS reconnect / i18n toast / a11y / 键盘传感器 / quit flush / cooling / shell-role）追加在 §7.5 续做,均不属于 #54-#65 原子范畴。",
+  "intro": "本页是 Copilot tab 前端的现状/差距/实施计划/测试,1:1 对应设计页 copilot_design(原子 #54–#65)。设计已说清『应该怎样』,这里写『现在怎样、差多少、按什么顺序补、怎么测』。代码一律按『文件名 + 函数/对象名』引用(可全局搜索定位,不写行号——行号会漂、名字稳定);copilot 前端文件在 apps/studio/frontend/src/components/studio/settings/copilot/ 下(CopilotTab.tsx / copilot-role-derivation.ts / copilot-role-test.ts / CopilotModelGroupCard.tsx),后端 copilot SDK 驱动在 apps/studio/backend/app/services/copilot.py(即 gateway 后端的 sidecar 侧),SDK 测试 job 编排在 routers/llm.py。底层依赖的 route 解析/SDK 测试机制见 copilot_mech_route。重要现状定性:spec §7.4 把这页定性为『桩/mock/假测试最多』,但 §7.4 是较早的审计快照;以现码为准,§7.4 列的多数桩/mock/假测试/分流 bug 在现码已修(去 mock、真 SDK 测试、role_kind 分流、统一保存状态徽章 SaveStatusBadge)。**2026-06-20 更新**:四项残留偏差（动态浮出未挂载、模型配置入口缺、model-group Remove 占位、Built-in 元数据启发式）随 copilot-settings-mvp1-conformance Wave A+B 已全部落地,#54-#65 全部 fe_status=符合;Wave C 系列收尾项（共享状态灯 / WS reconnect / i18n toast / a11y / 键盘传感器 / quit flush / cooling / shell-role）追加在 §7.5 续做,均不属于 #54-#65 原子范畴。**2026-07-01 更新**:Copilot 页面壳层对齐 LLM Roles,新增右侧 Available Models 模型库;Add model 创建空 Copilot 角色后,用户可把右侧模型卡拖入空/已配置的 Copilot 角色卡来设置或替换唯一 model group。",
   "functions": [
     {
       "n": 54,
       "cap": "copilot-tab-shell",
       "design_ref": "atom-54",
-      "current": "现状:已实现且符合。CopilotTab(CopilotTab.tsx)用 SectionTitle 渲染标题区,trailing 槽位放共用 SaveStatusBadge(components/ui/save-status-badge.tsx);data(roles)为 null 时返回骨架分支(2 张 Skeleton 卡),data 到后渲染真实角色卡;error 非空时标题下渲染错误条(t('llmRoles.validationFailed'))。旧的写死装饰徽章『Backend Integration』在现码已不存在(全文件无此字符串)。",
+      "current": "现状:已实现且符合。CopilotTab(CopilotTab.tsx)用 CopilotRolesLayout 渲染和 LLM Roles 同形的两列布局:左侧 ScrollArea 放 SectionTitle + 角色卡,右侧复用 AvailableModelsSidebar(components/studio/settings/llm-roles/AvailableModelsSidebar.tsx)显示完整后端 Model Groups,不再按 Claude/Anthropic-compatible 预过滤;trailing 槽位放共用 SaveStatusBadge(components/ui/save-status-badge.tsx)。data(roles)为 null 时左侧返回 Skeleton 卡、右侧返回 CopilotAvailableModelsSidebarSkeleton;data 到后渲染真实角色卡和可拖拽模型库;error 非空时标题下渲染错误条(t('llmRoles.validationFailed'))。旧的写死装饰徽章『Backend Integration』在现码已不存在(全文件无此字符串)。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。GET /api/llm/registry 返回 roles + model_groups 快照已实现;后端 route 解析 D5 收口=ok。"
@@ -90,8 +90,8 @@
       "n": 63,
       "cap": "copilot-config-model-group",
       "design_ref": "atom-63",
-      "current": "现状:分流 bug 已修,选组器仍非可搜索(偏差)。EmptyCopilotRoleCard(CopilotTab.tsx)的选组走 onValueChange → selectModelGroup → applyCopilotModelGroupSelection(copilot-role-derivation.ts):保留 roleId 作 key(不改名)、写 active_model=modelGroupId + models[modelGroupId].providers + fallback_chain(默认选 ready 的 route)——role key 与 role_kind 不变,后端据 role_kind 归 copilot,不会错存成 graph-agent。偏差点:选组器是裸 shadcn Select(SelectTrigger/SelectContent/SelectItem),不是可搜索选项卡。",
-      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "current": "Current: implemented and aligned. EmptyCopilotRoleCard(CopilotTab.tsx) matches LLM Roles: the outer shell is a normal role card and the body is a dashed `Drop model` target. It is not a form/select card and no longer renders any model group select or combobox. The drag gesture is owned by the shared useAvailableModelPointerDrag hook(available-model-pointer-drag.tsx) used by both LLM Roles and Copilot. The Copilot-specific drop path is AvailableModelsSidebar -> handleAvailableModelPointerDown -> pointerup over data-model-drop-zone -> copilotRoleIdFromModelDropTarget walking up to data-role-name -> dropCopilotModelOnRole -> applyCopilotModelGroupSelection(copilot-role-derivation.ts). The write keeps roleId as the key and updates active_model, models[modelGroupId].providers, and fallback_chain. Dropping onto a configured role replaces its single model group and rebuilds the route chain. The entry uses the full backend Model Groups list, supports non-Claude groups such as Doubao/GPT/DeepSeek, preserves role key and role_kind, and keeps the role under Copilot rather than graph-agent.",
+      "gap": "Conforms. Add model matches the LLM Roles add-entry behavior and stays enabled when empty cards already exist. The in-card select/combobox has been removed; the only model assignment entry is dragging from Available Models. The right-side model library uses the full backend Model Groups list, so it is not limited to Claude/Anthropic-compatible filtered cards.",
       "fe_status": "符合",
       "be_dep": "已就绪可接(后端不需改)。选组保存走 PUT /llm/roles(已实现);后端按 role_kind 分流已实现。"
     },
@@ -131,9 +131,9 @@
     },
     {
       "step": 3,
-      "what": "✅ 已落地：#63 copilot-config-model-group(可搜索选组器)。EmptyCopilotRoleCard 的裸 shadcn Select 已换成可搜索选组器(shadcn Popover+Command 模式,带搜索框),候选多时可输入过滤;沿用 shadcn、不自造。",
-      "depends_on": "前端依赖:沿用 shadcn 组件;选组逻辑复用现有 applyCopilotModelGroupSelection(分流 bug 已修)。后端不动。",
-      "why": "纯前端、后端契约不变;补齐 C10 #1『可搜索选组』,与 LLM Roles 搜索体验对齐。",
+      "what": "Done: #63 copilot-config-model-group now uses the LLM Roles-style empty card drop target plus right-side model drag-in. EmptyCopilotRoleCard renders a dashed `Drop model` target and no in-card select/combobox. Add model stays enabled when empty cards already exist. CopilotRolesLayout reuses the LLM Roles AvailableModelsSidebar with the full backend Model Groups list. Model cards can be dragged into empty or configured Copilot role cards to set or replace the single model group. SettingsPageContent uses the same fixed-height split shell as LLM Roles so the right model library scroll does not move the left role area out of view.",
+      "depends_on": "Frontend dependency: reuse the LLM Roles AvailableModelsSidebar plus the shared useAvailableModelPointerDrag gesture controller and the data-model-drop-zone/data-role-name drag contract. Persist selection through the existing applyCopilotModelGroupSelection path. Backend unchanged.",
+      "why": "Pure frontend change with unchanged backend contract. #63 is now reduced to the same drag model as LLM Roles instead of Copilot owning a second select/combobox entry.",
       "block": "✅ 完成"
     },
     {
@@ -160,17 +160,17 @@
         "data 到后 → 断言渲染真实角色卡、无骨架。",
         "断言全文件不含『Backend Integration』写死徽章字符串。"
       ],
-    "layer2": [
-      "进 Settings→Copilot,看标题 + save 徽章 + 角色卡。",
-      "慢网络下看骨架屏。"
-    ],
-    "screenshots": [
-      {
-        "file": "n0-copilot-english-empty-state.png",
-        "caption": "2026-06-24 真机验证:Language=en 且无 Anthropic Messages 兼容 route 时,Copilot 空态使用英文文案与 API Keys CTA,无中文硬编码泄漏。"
-      }
-    ]
-  },
+      "layer2": [
+        "进 Settings→Copilot,看标题 + save 徽章 + 角色卡。",
+        "慢网络下看骨架屏。"
+      ],
+      "screenshots": [
+        {
+          "file": "n0-copilot-english-empty-state.png",
+          "caption": "2026-06-24 真机验证:Language=en 且无 Anthropic Messages 兼容 route 时,Copilot 空态使用英文文案与 API Keys CTA,无中文硬编码泄漏。"
+        }
+      ]
+    },
     {
       "covers": "#55 copilot-role-list(元数据后端驱动)",
       "atoms": [
@@ -332,33 +332,51 @@
         "后端契约测:put_llm_roles 按 role_kind 归类 copilot(不靠 key 前缀)。"
       ],
       "layer2": [
-        "点 Add model,看新空卡出现且为 Third-party。"
+        "点 Add model,看新空卡出现且为 Third-party,且 Add model 仍保持可点击。"
       ]
     },
     {
-      "covers": "#63 copilot-config-model-group(可搜索选组 + 保前缀)",
+      "covers": "#63 copilot-config-model-group(model drag-in + role key preservation)",
       "atoms": [
         63
       ],
       "shots": [
-        "选组器可输入搜索过滤候选组",
-        "选组后角色仍归 copilot(role key 不变)"
+        "Empty card body is the same LLM Roles Drop model target",
+        "Empty card does not render an in-card select or combobox",
+        "Right-side Available Models cards can be dragged into an empty Copilot role card",
+        "After drag-in the role remains a copilot role and keeps the same role key"
       ],
       "fe_status": "符合",
       "layer1": [
-        "RED:当前选组器是裸 Select、不可搜索 → 断言『选组器含搜索输入框』失败。",
-        "GREEN:断言选组器为可搜索 Combobox,输入关键词能过滤候选组。",
-        "回归(分流 bug 已修):选组后 → 断言 applyCopilotModelGroupSelection 保留 role key、写 active_model/models/fallback_chain,role_kind 仍 copilot(不改成裸 modelGroupId)。",
-        "后端契约测:选组后保存 → 角色按 role_kind 仍归 copilot、不错存 graph-agent。"
+        "GREEN: assert the empty Copilot role card renders data-model-drop-target and Drop model, not a form/select card.",
+        "GREEN: assert the empty card does not render data-copilot-model-group-select, combobox, or Choose model group.",
+        "GREEN: assert copilotRoleIdFromModelDropTarget resolves from a nested Drop model node to the outer data-role-name like LLM Roles.",
+        "GREEN: assert Add model remains enabled when an empty card already exists.",
+        "GREEN: assert CopilotTab renders data-copilot-available-models-sidebar, right-side model cards expose data-available-model-drag-source / data-available-model-pointer-drag-source, and non-Claude model groups such as GPT 4.1 or Doubao are not filtered out.",
+        "GREEN: assert SettingsPageContent uses the same max-w-6xl + lg:overflow-hidden/lg:h-full fixed-height shell as LLM Roles, instead of a normal whole-page ScrollArea.",
+        "GREEN: assert empty and configured Copilot role cards expose data-model-drop-zone and can receive right-side model drag-in.",
+        "Regression: after drag-in, applyCopilotModelGroupSelection preserves role key, writes active_model/models/fallback_chain, and keeps role_kind as copilot.",
+        "Regression: a dragged-in non-Claude model group renders as a full CopilotRoleCard and does not fall back to EmptyCopilotRoleCard.",
+        "Backend contract test: after drag-in save, the role still belongs to Copilot by role_kind and is not stored as graph-agent."
       ],
       "layer2": [
-        "空卡选组器输入关键词过滤,选一个组。",
-        "选组后保存,确认角色仍在 Copilot tab(没被错存到 LLM Roles)。"
+        "Drag a model from the right-side Available Models list into the empty Copilot role card created by Add model; the empty card becomes a configured role card and shows the route grid.",
+        "Drag a model from the right-side Available Models list into an already configured Copilot role card; its single model group is replaced and the route chain is rebuilt.",
+        "Scroll the right-side Available Models list to later providers and confirm the left Copilot role area remains visible in the same viewport.",
+        "After drag-in save, confirm the role remains in the Copilot tab and is not stored under LLM Roles."
       ],
       "screenshots": [
         {
-          "file": "copilot-63-combobox.png",
-          "caption": "空卡可搜索选组器(shadcn Command 组合框,输入 opus 实时过滤候选组)"
+          "file": "copilot-63-drag-model.png",
+          "caption": "2026-07-01 真机验证:Copilot 页复用 LLM Roles 右侧完整 Available Models;搜索 Doubao 后把 Ark 模型卡拖入 Add model 产生的空 Copilot 角色,空卡变完整 Doubao 角色卡并显示 route grid。"
+        },
+        {
+          "file": "copilot-63-layout-scroll.png",
+          "caption": "2026-07-01 真机验证:Copilot Settings 使用 LLM Roles 同款固定高度 split shell;右侧 Available Models 滚到 Ark/Doubao 段后,左侧 Copilot role 列表仍保持可见,不会被页面级滚动卷走。"
+        },
+        {
+          "file": "copilot-63-add-empty-drop.png",
+          "caption": "2026-07-01 真机验证:已有空 Copilot card 时 Add model 仍可点击;再次新增后空卡使用 LLM Roles 同款 Drop model 投放区,可继续从右侧 Available Models 拖入模型。"
         }
       ]
     },

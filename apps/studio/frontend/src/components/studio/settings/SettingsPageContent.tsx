@@ -93,8 +93,8 @@ export function SettingsPageContent({
             </div>
           </div>
         ) : activeTab === "copilot" ? (
-          <ScrollArea className="flex-1">
-            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
+          <div className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden">
+            <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
               <SettingsErrorBoundary label="Copilot">
                 {rolesData === null && !rolesError ? (
                   <RolesTabSkeleton />
@@ -119,7 +119,7 @@ export function SettingsPageContent({
                 )}
               </SettingsErrorBoundary>
             </div>
-          </ScrollArea>
+          </div>
 
         ) : (
           <ScrollArea className="flex-1">

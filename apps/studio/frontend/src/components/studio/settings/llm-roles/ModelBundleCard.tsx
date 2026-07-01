@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, type DragEvent } from "react"
+import { memo, useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
   closestCenter,
@@ -39,10 +39,10 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { CredentialsState, MaterializationReportEntry, ModelBundleEntry, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
-  AVAILABLE_MODEL_DRAG_TYPE,
   modelDropFailureMessage,
   reorderModelInRole,
 } from "../role-utils"
+import { handleAvailableModelDragOver, readAvailableModelDropId } from "../available-model-pointer-drag"
 import {
   appendModelGroupToBundle,
   bundleRoleName,
@@ -154,18 +154,8 @@ export const ModelBundleCard = memo(function ModelBundleCard({
     onChange(commitBundleRoleData(data, bundleId, nextRoleData))
   }
 
-  function handleAvailableModelDragOver(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = "copy"
-  }
-
-  function handleAvailableModelDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    const modelId = event.dataTransfer.getData(AVAILABLE_MODEL_DRAG_TYPE) ||
-      event.dataTransfer.getData("text/plain") ||
-      getActiveAvailableModelDragId()
+  function handleAvailableModelDrop(event: Parameters<typeof readAvailableModelDropId>[0]) {
+    const modelId = readAvailableModelDropId(event, getActiveAvailableModelDragId)
     if (modelId?.startsWith("bundle:")) {
       toast.error(modelDropFailureMessage({
         modelId,

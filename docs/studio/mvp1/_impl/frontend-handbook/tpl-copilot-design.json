@@ -2,16 +2,16 @@
   "page_id": "copilot_design",
   "title": "Copilot 设置页 · 操作设计",
   "region": "settings:copilot",
-  "intro": "本页是 Copilot（助手配置）tab 各操作的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(copilot_impl),依赖的 route 解析/SDK 测试机制见 copilot 机制页(copilot_mech_route)。Copilot 与 LLM Roles 同构(角色配置 + 拖 route 兜底 + 测试回写),两点不同:① copilot 角色只能配一个 model group(不像 graph role 可多组);② 测试与真实对话都走 copilot 自己的 Claude Agent SDK 调用(spawn claude CLI 子进程、base_url 经 env 注入),不是普通 LLM 的 HTTP 调用——所以 copilot 的『测试』和『真实运行』本应是同一条路、不存在假测试。",
+  "intro": "本页是 Copilot（助手配置）tab 各操作的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(copilot_impl),依赖的 route 解析/SDK 测试机制见 copilot 机制页(copilot_mech_route)。Copilot 与 LLM Roles 同构(角色配置 + 右侧可用模型库 + 拖 route 兜底 + 测试回写),两点不同:① copilot 角色只能配一个 model group(不像 graph role 可多组);② 测试与真实对话都走 copilot 自己的 Claude Agent SDK 调用(spawn claude CLI 子进程、base_url 经 env 注入),不是普通 LLM 的 HTTP 调用——所以 copilot 的『测试』和『真实运行』本应是同一条路、不存在假测试。",
   "atoms": [
     {
       "n": 54,
       "cap": "copilot-tab-shell",
       "track": "共",
       "module": "壳层与保存反馈",
-      "func": "设计:进 Copilot tab 看到标题 + 统一保存状态徽章 + copilot 角色卡;数据没到先骨架屏,不让用户对着空白。",
+      "func": "设计:进 Copilot tab 看到标题 + 统一保存状态徽章 + copilot 角色卡;右侧按 LLM Roles 同款显示可拖拽的 Available Models;数据没到先骨架屏,不让用户对着空白。",
       "action": "用户切到 Copilot tab(首次进入自动加载,无需点按钮)。",
-      "fe_design": "进 tab → 渲染标题区(标题 + 描述 + trailing 槽位放统一保存状态徽章(SaveStatusBadge,把 SaveStatus 渲染成统一徽章的共享 UI 组件))→ 数据(roles)未到时显示 2 张骨架卡 → 数据到后渲染真实 copilot 角色卡。trailing 槽位用的是四页共用的同一个保存状态徽章组件(General / API Keys / LLM Roles / Copilot 同款,已在 Shell 登记、本页复用),不是写死的装饰徽章。校验失败时标题下显式显示错误条(不静默)。",
+      "fe_design": "进 tab → 渲染两列布局:左侧是 Copilot 角色配置主区,右侧复用 LLM Roles 的 AvailableModelsSidebar(完整可用模型库,直接吃后端 Model Groups,不按 Claude/Anthropic-compatible 预过滤)→ 标题区渲染标题 + 描述 + trailing 槽位统一保存状态徽章(SaveStatusBadge,把 SaveStatus 渲染成统一徽章的共享 UI 组件)→ 数据(roles)未到时左侧显示 2 张骨架卡、右侧显示模型库骨架 → 数据到后渲染真实 copilot 角色卡和右侧可拖拽模型卡。trailing 槽位用的是四页共用的同一个保存状态徽章组件(General / API Keys / LLM Roles / Copilot 同款,已在 Shell 登记、本页复用),不是写死的装饰徽章。校验失败时标题下显式显示错误条(不静默)。",
       "fe_modules": [
         {
           "name": "保存状态徽章（SaveStatusBadge）",
@@ -28,7 +28,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。trailing 已用共用 SaveStatusBadge,旧『Backend Integration』写死装饰徽章已不存在。",
+      "gap_brief": "符合设计。trailing 已用共用 SaveStatusBadge,右侧已复用 LLM Roles 的 AvailableModelsSidebar 呈现可拖拽模型库,旧『Backend Integration』写死装饰徽章已不存在。",
       "impl_ref": "fn-54"
     },
     {
@@ -223,7 +223,7 @@
       "module": "角色增删",
       "func": "设计:点 Add model 新建一张第三方 copilot 角色草稿卡,id 带 copilot_ 前缀语义(copilot_custom_N),让用户自建助手角色。",
       "action": "用户点 `Add model` 按钮。",
-      "fe_design": "点 Add model → 生成 id=copilot_custom_{N}(N 按已有 copilot_custom_ 角色数递增)、role_kind='copilot' 的空草稿角色 → 渲染成待选组的空卡 → 入队保存。新建即带 copilot 语义(role_kind + copilot_custom_ id),后端据 role_kind 归为 copilot 角色。",
+      "fe_design": "点 Add model → 生成 id=copilot_custom_{N}(N 按已有 copilot_custom_ 角色数递增)、role_kind='copilot' 的空草稿角色 → 渲染成普通 role card,卡内主体优先显示 LLM Roles 同款 dashed `Drop model` 投放区 → 入队保存。Add model 与 LLM Roles 新增入口一致,不因已有空草稿卡而 disabled;需要多个待配置 Copilot role 时可连续新增。新建即带 copilot 语义(role_kind + copilot_custom_ id),后端据 role_kind 归为 copilot 角色。",
       "fe_modules": [],
       "be_contract": [
         {
@@ -243,9 +243,9 @@
       "cap": "copilot-config-model-group",
       "track": "三",
       "module": "角色增删",
-      "func": "设计:空卡下拉选一个 Model group → 角色变可配置(自动挂兜底链),且选组器应可搜索;选组后角色仍归 copilot、不被错存成 graph-agent。",
-      "action": "用户在空 copilot 卡的 Model group 选择器里选一个组。",
-      "fe_design": "空卡选 Model group → 把该组的兼容 route 作默认兜底链挂上(默认选 ready 的)、角色变完整可配置卡 → 保存。\n\n可搜索选组器(C10 #1)的精确设计,对齐 §2.1『可用模型搜索』体验:① 触发——空卡的选组控件是带搜索输入框的选项卡(shadcn Command/Combobox 模式),不是裸下拉;② 搜什么——输入实时纯前端过滤候选 copilot 组,匹配字段同 §2.1:组的归一化显示名(display_name)、canonical_id、组内各 route 的 provider 标签、provider model id;支持多 token 全含 + 紧凑匹配(忽略分隔符);③ 候选范围——只列『anthropic 兼容(eligible)且当前角色还没选』的 copilot 候选组(与 #60 Add route 的 eligible 判据同源);④ 过滤纯前端不发请求,选中一个组即落选。\n\n关键(分流不变量):选组只改角色的 active_model + models + fallback_chain,角色 key 保持不变(仍是 copilot_custom_N、role_kind 仍 copilot),后端据 role_kind 归 copilot——绝不把 role key 改成裸 modelGroupId 而丢掉 copilot 语义。",
+      "func": "Design: drag a model card from the right-side Available Models list into an empty or configured copilot role card. The role becomes configured, or its single model group is replaced, while the role remains a copilot role.",
+      "action": "The user drags a model card from Available Models onto an empty or configured copilot role card.",
+      "fe_design": "The empty card has one primary operation: drag a model card from the right-side Available Models list into the role. The dropped model group's provider routes become the default fallback chain and the card becomes a configured role. Dropping onto a configured role replaces that role's single model group and rebuilds fallback_chain.\n\nThe empty card must match LLM Roles: an ordinary role card with a dashed `Drop model` target. It is not a label/description/control form card, and it must not render an in-card select or combobox for choosing a model.\n\nThe right side reuses the LLM Roles AvailableModelsSidebar with the full backend Model Groups list. The page shell also follows the LLM Roles fixed-height split layout: desktop Settings content uses overflow-hidden, the inner container uses max-w-6xl + lg:h-full, and the left Copilot roles column plus right Available Models column scroll independently. The drag source carries modelGroupId; Copilot role cards expose data-model-drop-zone; target resolution follows LLM Roles by walking from the hit drop zone up to data-role-name, then calling applyCopilotModelGroupSelection. SDK compatibility affects later route readiness, Test results, and diagnostics only; it does not block dragging a model into a Copilot role.\n\nRouting invariant: selection only updates active_model, models, and fallback_chain. The role key remains copilot_custom_N and role_kind remains copilot. Never rename the role key to the raw modelGroupId.",
       "fe_modules": [
         {
           "name": "copilot 角色派生",
@@ -262,7 +262,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "分流 bug 已修(applyCopilotModelGroupSelection 保留 role key、只写 active_model/models/fallback_chain,后端认 role_kind 字段)——spec §3.5 标的『选组后 role key 丢 copilot_ 前缀致误判』在现码已不复现。仍偏差的是选组器:现状是裸 shadcn Select、非可搜索选项卡(C10 #1 要求可搜索),需替换为可搜索选组器。",
+      "gap_brief": "Conforms. Empty Copilot cards now use the LLM Roles-style dashed Drop model target. Add model stays enabled even when empty cards already exist. The in-card select/combobox entry has been removed. Available Models reuses the LLM Roles sidebar and can be dragged into empty or configured Copilot role cards. The pointer drag gesture is shared with LLM Roles through useAvailableModelPointerDrag; Copilot only owns the role-specific drop callback. Drop target resolution follows LLM Roles by walking from data-model-drop-zone to data-role-name. The Settings shell uses the LLM Roles fixed-height split layout. Drag-in uses applyCopilotModelGroupSelection, preserves the role key, writes only active_model/models/fallback_chain, and keeps role_kind as copilot.",
       "impl_ref": "fn-63"
     },
     {

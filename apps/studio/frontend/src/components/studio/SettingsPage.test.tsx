@@ -942,8 +942,9 @@ describe('SettingsPageContent (api_keys)', () => {
     const rolesHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'llm_roles' })} />)
     expect(rolesHtml).toContain('max-w-6xl')
     const copilotHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
-    expect(copilotHtml).toContain('max-w-5xl')
-    expect(copilotHtml).toContain('max-w-3xl')
+    expect(copilotHtml).toContain('max-w-6xl')
+    expect(copilotHtml).toContain('lg:overflow-hidden')
+    expect(copilotHtml).toContain('lg:h-full')
   })
 
   it('renders provider skeletons while credentials are loading', () => {

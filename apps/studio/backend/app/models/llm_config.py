@@ -8,6 +8,7 @@ and API-facing helper models.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from graph_agent_gateway.registry.resolver import materialize_role_entry
@@ -76,16 +77,6 @@ class ProviderEndpoint(GatewayProviderEndpoint):
     """Studio-owned endpoint DTO with user-facing provider label."""
 
     display_name: str
-    # W2-B.3: the STRUCTURED failure reason from the last endpoint test (e.g.
-    # "invalid_api_key"), so the frontend reads it directly instead of matching the
-    # human ``last_test_message`` text. Studio-only presentation field: stripped from
-    # the gateway runtime endpoint (see ``_gateway_endpoint``).
-    last_error_code: str | None = None
-    # W3-B.4: the provider's registrable-domain identity (eTLD+1 of ``base_url``, e.g.
-    # "qnaigc" / "wavespeed" / "volces"), so the UI can show the provider id under its
-    # display alias. DERIVED from base_url in the registry projection — not persisted
-    # truth. Studio-only presentation field: stripped from the gateway runtime endpoint.
-    registrable_provider_name: str | None = None
 
 
 class ProviderRoute(GatewayProviderRoute):
@@ -99,10 +90,11 @@ class ProviderRoute(GatewayProviderRoute):
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     # W2-A status normalization: the route carries the authoritative UI status the
     # frontend reads DIRECTLY — ``ui_state`` (inherited 6-state) plus its companion
-    # ``reason_code``. Stamped by the registry projection so the UI never re-derives a
-    # failure scope from message text. Studio-only presentation field: stripped from
-    # the gateway runtime route (see ``_gateway_route``).
+    # ``reason_code``/``retry_at``. Stamped by the registry projection so the UI never
+    # re-derives a failure scope from message text. Studio-only presentation fields:
+    # stripped from the gateway runtime route (see ``_gateway_route``).
     reason_code: str | None = None
+    retry_at: datetime | None = None
 
 
 class ModelProfile(GatewayModelProfile):
@@ -113,10 +105,7 @@ class ModelProfile(GatewayModelProfile):
 
 def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
     return GatewayProviderEndpoint.model_validate(
-        endpoint.model_dump(
-            mode="python",
-            exclude={"display_name", "last_error_code", "registrable_provider_name"},
-        )
+        endpoint.model_dump(mode="python", exclude={"display_name"})
     )
 
 
@@ -124,7 +113,7 @@ def _gateway_route(route: ProviderRoute) -> GatewayProviderRoute:
     return GatewayProviderRoute.model_validate(
         route.model_dump(
             mode="python",
-            exclude={"display_name", "evidence", "reason_code"},
+            exclude={"display_name", "evidence", "reason_code", "retry_at"},
         )
     )
 

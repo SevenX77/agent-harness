@@ -25,83 +25,19 @@ from app.models.llm_config import (
     RolesData,
 )
 from app.routers import llm as llm_router
+from app.services import copilot_test
 from app.services.community_catalog import parse_catalog_evidence
 from app.services.community_catalog_runtime import (
     promote_community_evidence_into_credentials,
 )
+from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
-from app.services.model_probe import ModelProbeResult
 from fastapi.testclient import TestClient
 from graph_agent_gateway.registry import provider_probe as gateway_provider_probe
 from graph_agent_gateway.registry.provider_probe import EndpointProbeResult, RouteProbeResult
 from graph_agent_gateway.registry.schema import EvidenceRecord, VerifiedProfile
-
-
-def _endpoint_probe_ok(
-    endpoint: ProviderEndpoint,
-    *,
-    latency_ms: int = 10,
-    model_ids: tuple[str, ...] = (),
-    model_capabilities: dict[str, dict[str, object]] | None = None,
-) -> EndpointProbeResult:
-    """Build the gateway EndpointProbeResult a successful endpoint Test returns."""
-    return EndpointProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        provider_kind=endpoint.provider_kind,
-        backend=llm_router._endpoint_probe_backend(endpoint),
-        base_url=llm_router._endpoint_probe_base_url(endpoint),
-        status="ok",
-        latency_ms=latency_ms,
-        model_ids=model_ids,
-        model_capabilities=model_capabilities or {},
-    )
-
-
-def _endpoint_probe(
-    endpoint: ProviderEndpoint,
-    *,
-    status: str,
-    message: str | None = None,
-    error_code: str | None = None,
-    latency_ms: int | None = None,
-    model_ids: tuple[str, ...] = (),
-) -> EndpointProbeResult:
-    """Build a gateway EndpointProbeResult with an explicit status/error."""
-    return EndpointProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        provider_kind=endpoint.provider_kind,
-        backend=llm_router._endpoint_probe_backend(endpoint),
-        base_url=llm_router._endpoint_probe_base_url(endpoint),
-        status=status,  # type: ignore[arg-type]
-        latency_ms=latency_ms,
-        model_ids=model_ids,
-        message=message,
-        error_code=error_code,
-    )
-
-
-def _route_probe(
-    endpoint: ProviderEndpoint,
-    route: ProviderRoute,
-    *,
-    status: str,
-    latency_ms: int | None = None,
-    message: str | None = None,
-) -> RouteProbeResult:
-    """Build the gateway RouteProbeResult a route generation probe returns."""
-    return RouteProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        route_id=route.route_id,
-        provider_kind=endpoint.provider_kind,
-        backend=llm_router._endpoint_probe_backend(endpoint),
-        base_url=llm_router._endpoint_probe_base_url(endpoint),
-        model_id=route.provider_model_id,
-        status=status,  # type: ignore[arg-type]
-        latency_ms=latency_ms,
-        message=message,
-    )
 
 
 def _seed(
@@ -295,9 +231,6 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     assert response.status_code == 200
     body = response.json()
     assert body["provider_endpoints"]["openai-direct"]["api_key"] == "**********"
-    # W3-B.4: the registry projection stamps the provider's registrable-domain id
-    # (eTLD+1 of base_url) so the UI can show it under the display alias.
-    assert body["provider_endpoints"]["openai-direct"]["registrable_provider_name"] == "openai"
     assert body["canonical_groups"][0]["canonical_id"] == "gpt-5"
 
     put_response = client.put(
@@ -480,7 +413,7 @@ def test_community_evidence_merges_matching_route_to_historical_ready(
     assert provider_models["deepseek-official:deepseek-v4-pro"]["ui_state"] == "historical_ready"
 
 
-def test_registry_stamps_route_reason_code(
+def test_registry_stamps_route_reason_code_and_retry_at(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -520,6 +453,8 @@ def test_registry_stamps_route_reason_code(
     routes = client.get("/api/llm/registry").json()["provider_routes"]
     assert routes["oai:gpt-5"]["ui_state"] == "failed"
     assert routes["oai:gpt-5"]["reason_code"] == "model_failed"
+    # retry_at is only set for cooling_down; a plain failed route carries none.
+    assert routes["oai:gpt-5"]["retry_at"] is None
 
 
 def test_community_evidence_skips_unmatched_host_and_observed_only(
@@ -1850,24 +1785,24 @@ def test_endpoint_test_third_party_runs_inference_probe_to_verify(
     # then runs a real generation probe (protocol auto-detect + batch inference)
     # and only reaches `verified` when a generation probe actually succeeds.
     _seed(tmp_path, monkeypatch)
-    endpoint_calls: list[ProviderEndpoint] = []
-    route_calls: list[ProviderRoute] = []
+    calls: list[tuple[str, str, str]] = []
+    probe_calls: list[tuple[str, str, str, str]] = []
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        endpoint_calls.append(endpoint)
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        calls.append((backend, api_key, base_url))
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        route_calls.append(route)
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        probe_calls.append((backend, api_key, base_url, model_id))
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -1884,10 +1819,10 @@ def test_endpoint_test_third_party_runs_inference_probe_to_verify(
     assert routes["openai-direct:gpt-5"]["display_name"] == "GPT-5"
     assert routes["openai-direct:gpt-5-mini"]["provider_model_id"] == "gpt-5-mini"
     assert routes["openai-direct:gpt-5-mini"]["route_slug"] == "gpt-5-mini"
-    # the endpoint is tested once; the first probed model (gpt-5) verified, so the
-    # batch loop stops there and gpt-5-mini is never probed.
-    assert [e.endpoint_id for e in endpoint_calls] == ["openai-direct"]
-    assert [r.provider_model_id for r in route_calls] == ["gpt-5"]
+    # get-models reached once; the first probed model (gpt-5) verified, so the
+    # batch loop stops there.
+    assert calls == [("openai", "secret", "https://api.openai.example/v1")]
+    assert probe_calls == [("openai", "secret", "https://api.openai.example/v1", "gpt-5")]
 
 
 def test_endpoint_test_third_party_failed_inference_probe_stays_failed(
@@ -1915,24 +1850,23 @@ def test_endpoint_test_third_party_failed_inference_probe_stays_failed(
         credentials_path(),
     )
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(
-            endpoint,
-            route,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(
+            model_id=model_id,
             status="invalid_model",
             message="generation failed for endpoint protocol/base_url combination",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/oai-fresh/test")
 
@@ -1970,28 +1904,27 @@ def test_endpoint_test_third_party_no_models_does_not_guess_notable_models(
         credentials_path(),
     )
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         # Reachable + authenticated, but the provider lists no models.
-        return _endpoint_probe_ok(endpoint, latency_ms=42)
+        return PingResult(latency_ms=42, model_ids=())
 
-    route_calls: list[ProviderRoute] = []
+    probe_calls: list[str] = []
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        route_calls.append(route)
-        return _route_probe(
-            endpoint,
-            route,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        probe_calls.append(model_id)
+        return ModelProbeResult(
+            model_id=model_id,
             status="invalid_model",
             message="The model does not exist or you do not have access to it.",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/oai-empty/test")
 
@@ -1999,12 +1932,10 @@ def test_endpoint_test_third_party_no_models_does_not_guess_notable_models(
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["oai-empty"]
     # No guessed-notable model was probed.
-    assert [r.provider_model_id for r in route_calls] == []
+    assert probe_calls == []
     # Reachable but unverifiable-without-a-model => untested, NOT failed.
     assert endpoint["status"] != "failed"
     assert endpoint["status"] == "unverified_manual"
-    # W2-D.4: structured "no model" reason so the UI can warn + suggest manual test.
-    assert endpoint["last_error_code"] == "no_model_available"
 
 
 def test_endpoint_test_third_party_retains_verified_when_reachable_and_previously_verified(
@@ -2019,24 +1950,23 @@ def test_endpoint_test_third_party_retains_verified_when_reachable_and_previousl
     # its verified status by reusing the previously verified model.
     _seed(tmp_path, monkeypatch)  # seeds a verified openai-direct:gpt-5 route
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(
-            endpoint,
-            route,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(
+            model_id=model_id,
             status="invalid_model",
             message="generation failed for endpoint protocol/base_url combination",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -2077,26 +2007,23 @@ def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
     )
     probed_backends: list[str] = []
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("claude-x",))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("claude-x",))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        # Protocol rotation clones the endpoint per candidate, so the endpoint's
-        # backend identifies the transport being tried.
-        backend = llm_router._endpoint_probe_backend(endpoint)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
         probed_backends.append(backend)
         # Only the anthropic (claude) transport is accepted by this endpoint.
         if backend == "claude":
-            return _route_probe(endpoint, route, status="ok", latency_ms=21)
-        return _route_probe(endpoint, route, status="error", message="protocol mismatch")
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
+        return ModelProbeResult(model_id=model_id, status="error", message="protocol mismatch")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/mystery/test")
 
@@ -2120,20 +2047,20 @@ def test_endpoint_test_third_party_invalid_key_short_circuits_protocol_detect(
     _seed(tmp_path, monkeypatch)
     probe_count = {"n": 0}
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5",))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5",))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
         probe_count["n"] += 1
-        return _route_probe(endpoint, route, status="invalid_key", message="bad key")
+        return ModelProbeResult(model_id=model_id, status="invalid_key", message="bad key")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -2173,13 +2100,13 @@ def test_third_party_models_test_capabilities_come_from_list_models_not_hardcode
             },
         )
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=33)
+    async def fake_probe_model(
+        backend: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=33)
 
     monkeypatch.setattr(
         llm_router,
@@ -2187,7 +2114,7 @@ def test_third_party_models_test_capabilities_come_from_list_models_not_hardcode
         fake_gateway_test_provider_endpoint,
         raising=False,
     )
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post(
         "/api/llm/endpoints/openai-direct/models/test",
@@ -2593,12 +2520,16 @@ def test_endpoint_test_delegates_unified_provider_probe_to_gateway(
             model_ids=("gpt-5",),
         )
 
+    async def fail_studio_probe(*_args: object, **_kwargs: object) -> PingResult:
+        raise AssertionError("Studio llm.py must forward endpoint test to Gateway.")
+
     monkeypatch.setattr(
         llm_router,
         "_gateway_test_provider_endpoint",
         fake_gateway_test_provider_endpoint,
         raising=False,
     )
+    monkeypatch.setattr(llm_router, "_ping_provider", fail_studio_probe)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -2633,34 +2564,34 @@ def test_endpoint_test_third_party_probes_discovered_models_after_models_list(
         ),
         credentials_path(),
     )
-    model_list_calls: list[ProviderEndpoint] = []
-    model_probe_calls: list[ProviderRoute] = []
+    model_list_calls: list[tuple[str, str, str]] = []
+    model_probe_calls: list[tuple[str, str, str, str]] = []
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        model_list_calls.append(endpoint)
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("claude-qiniu",))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        model_list_calls.append((backend, api_key, base_url))
+        return PingResult(latency_ms=42, model_ids=("claude-qiniu",))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        model_probe_calls.append(route)
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        model_probe_calls.append((backend, api_key, base_url, model_id))
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
 
     assert response.status_code == 200
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["qiniu"]
-    # One list-models against the endpoint's base_url, one generation probe of the
-    # discovered model — backend/key resolution is now the gateway's job.
-    assert [e.base_url for e in model_list_calls] == ["https://anthropic.qnaigc.com/v1"]
-    assert [r.provider_model_id for r in model_probe_calls] == ["claude-qiniu"]
+    assert model_list_calls == [("openai", "secret", "https://anthropic.qnaigc.com/v1")]
+    assert model_probe_calls == [
+        ("openai", "secret", "https://anthropic.qnaigc.com/v1", "claude-qiniu")
+    ]
     assert endpoint["status"] == "verified"
     assert "Generation verified" in endpoint["last_test_message"]
     assert body["discovered_model_count"] == 1
@@ -2697,26 +2628,23 @@ def test_endpoint_test_uses_endpoint_protocol_and_base_url_for_probe(
         ),
         credentials_path(),
     )
-    endpoint_calls: list[ProviderEndpoint] = []
+    calls: list[tuple[str, str, str]] = []
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        endpoint_calls.append(endpoint)
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("claude-qiniu",))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        calls.append((backend, api_key, base_url))
+        return PingResult(latency_ms=42, model_ids=("claude-qiniu",))
 
     async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
         del endpoint, candidate
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
 
     assert response.status_code == 200
-    # The endpoint's declared anthropic protocol (→ claude backend) and base_url are
-    # used for the probe; backend/key resolution is the gateway's job.
-    assert [llm_router._endpoint_probe_backend(e) for e in endpoint_calls] == ["claude"]
-    assert [e.base_url for e in endpoint_calls] == ["https://anthropic.qnaigc.com/v1"]
+    assert calls == [("claude", "secret", "https://anthropic.qnaigc.com/v1")]
     routes = response.json()["registry"]["provider_routes"]
     assert list(routes) == ["qiniu:claude-qiniu"]
 
@@ -2758,16 +2686,16 @@ def test_endpoint_test_preserves_protocol_version_path_for_provider_probe(
             request=httpx.Request("GET", f"{base_url}/models"),
         )
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
     monkeypatch.setattr(gateway_provider_probe, "_request_models", fake_request_models)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
 
@@ -2797,25 +2725,23 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
         ),
         credentials_path(),
     )
-    endpoint_calls: list[ProviderEndpoint] = []
+    calls: list[tuple[str, str, str]] = []
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        endpoint_calls.append(endpoint)
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("ep-20260316142940-b74bm",))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        calls.append((backend, api_key, base_url))
+        return PingResult(latency_ms=42, model_ids=("ep-20260316142940-b74bm",))
 
     async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
         del endpoint, candidate
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
 
     response = client.post("/api/llm/endpoints/ark-official/test")
 
     assert response.status_code == 200
-    # The ark_runtime endpoint (→ ark backend) and its base_url drive the probe.
-    assert [llm_router._endpoint_probe_backend(e) for e in endpoint_calls] == ["ark"]
-    assert [e.base_url for e in endpoint_calls] == ["https://ark.cn-beijing.volces.com/api/v3"]
+    assert calls == [("ark", "secret", "https://ark.cn-beijing.volces.com/api/v3")]
     assert "ark-official:ep-20260316142940-b74bm" in response.json()["registry"]["provider_routes"]
 
 
@@ -2841,11 +2767,13 @@ def test_endpoint_test_lists_ark_official_catalog_models_without_generation_prob
         credentials_path(),
     )
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        assert llm_router._endpoint_probe_backend(endpoint) == "ark"
-        assert endpoint.base_url == "https://ark.cn-beijing.volces.com/api/v3"
-        return _endpoint_probe_ok(
-            endpoint,
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == (
+            "ark",
+            "secret",
+            "https://ark.cn-beijing.volces.com/api/v3",
+        )
+        return PingResult(
             latency_ms=42,
             model_ids=(
                 "doubao-lite-128k-240428",
@@ -2857,7 +2785,7 @@ def test_endpoint_test_lists_ark_official_catalog_models_without_generation_prob
         del endpoint, model_id, candidate
         raise AssertionError("Provider-level Test must not generation-probe catalog models.")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
 
     response = client.post("/api/llm/endpoints/ark-official/test")
@@ -2915,19 +2843,19 @@ def test_endpoint_test_preserves_existing_routes_and_adds_discovered_models(
         credentials_path(),
     )
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("new-anthropic-model",))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("new-anthropic-model",))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
 
@@ -2945,15 +2873,10 @@ def test_endpoint_test_rejects_invalid_api_key(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe(
-            endpoint,
-            status="invalid_key",
-            message="bad key",
-            error_code="invalid_api_key",
-        )
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        raise _Unauthorized("bad key", error_code="invalid_api_key")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -2967,8 +2890,6 @@ def test_endpoint_test_rejects_invalid_api_key(
     assert endpoint["status"] == "disabled"
     assert "Invalid API key" in endpoint["last_test_message"]
     assert "invalid_api_key" in endpoint["last_test_message"]
-    # W2-B.3: the STRUCTURED error code is persisted so the frontend reads it directly.
-    assert endpoint["last_error_code"] == "invalid_api_key"
     assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
 
 
@@ -2981,111 +2902,35 @@ def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
     # terminal lock — fixing the key and re-testing successfully revives them.
     _seed(tmp_path, monkeypatch)
 
-    async def bad_key(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe(
-            endpoint,
-            status="invalid_key",
-            message="bad key",
-            error_code="invalid_api_key",
-        )
+    async def bad_key(backend: str, api_key: str, base_url: str) -> PingResult:
+        raise _Unauthorized("bad key", error_code="invalid_api_key")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", bad_key)
+    monkeypatch.setattr(llm_router, "_ping_provider", bad_key)
     first = client.post("/api/llm/endpoints/openai-direct/test")
     assert first.status_code == 200
     first_body = first.json()
     assert first_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "disabled"
     assert first_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
 
-    async def good_key(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5",))
+    async def good_key(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5",))
 
     async def ok_probe(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", good_key)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", ok_probe)
+    monkeypatch.setattr(llm_router, "_ping_provider", good_key)
+    monkeypatch.setattr(llm_router, "_probe_model", ok_probe)
     second = client.post("/api/llm/endpoints/openai-direct/test")
     assert second.status_code == 200
     second_body = second.json()
     assert second_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "verified"
     # the previously-disabled route is revived (here re-verified via the probe).
     assert second_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
-
-
-def test_endpoint_test_logs_discovered_models_and_reachability(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    # W2-E diagnostics: the endpoint_test runtime-activity record carries the actual
-    # discovered model ids and whether get-models reached the provider — not just a
-    # count — so General settings can show what the Test actually saw.
-    from app.services.runtime_activity import load_runtime_activity
-
-    _seed(tmp_path, monkeypatch)
-
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
-
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
-
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
-
-    assert client.post("/api/llm/endpoints/openai-direct/test").status_code == 200
-
-    records = load_runtime_activity(source_id="llm_credentials", limit=50)
-    test_rec = next(r for r in records if r["action"] == "endpoint_test")
-    assert test_rec["changes"]["reachable"] is True
-    assert test_rec["changes"]["discovered_model_ids"] == ["gpt-5", "gpt-5-mini"]
-
-
-def test_endpoint_test_logs_probe_attempts(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    # W2-E.1b: the endpoint_test record lists every protocol×model generation probe
-    # attempted and its status, so the user can see what the Test actually exercised.
-    from app.services.runtime_activity import load_runtime_activity
-
-    _seed(tmp_path, monkeypatch)
-
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
-
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
-
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
-
-    assert client.post("/api/llm/endpoints/openai-direct/test").status_code == 200
-
-    records = load_runtime_activity(source_id="llm_credentials", limit=50)
-    test_rec = next(r for r in records if r["action"] == "endpoint_test")
-    attempts = test_rec["changes"]["probe_attempts"]
-    assert isinstance(attempts, list) and len(attempts) >= 1
-    assert any(
-        a["model"] == "gpt-5" and a["status"] == "ok" and a["protocol"] == "openai_compatible"
-        for a in attempts
-    )
 
 
 def test_official_endpoint_test_records_model_list_without_generation_probes(
@@ -3132,11 +2977,9 @@ def test_official_endpoint_test_records_model_list_without_generation_probes(
         credentials_path(),
     )
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        assert llm_router._endpoint_probe_backend(endpoint) == "openai"
-        assert endpoint.base_url == "https://api.openai.com/v1"
-        return _endpoint_probe_ok(
-            endpoint,
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
+        return PingResult(
             latency_ms=42,
             model_ids=("gpt-5", "gpt-image-1"),
             model_capabilities={
@@ -3156,7 +2999,7 @@ def test_official_endpoint_test_records_model_list_without_generation_probes(
         del endpoint, model_id
         raise AssertionError("Provider-level Test must not generation-probe every model.")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(
         llm_router,
         "_probe_official_model_profile_result",
@@ -3623,26 +3466,25 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     monkeypatch,
 ) -> None:
     _seed(tmp_path, monkeypatch)
-    route_calls: list[ProviderRoute] = []
+    calls: list[tuple[str, str, str, str]] = []
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        route_calls.append(route)
-        if route.provider_model_id == "gpt-5-mini":
-            return _route_probe(endpoint, route, status="ok", latency_ms=33)
-        return _route_probe(
-            endpoint,
-            route,
+    async def fake_probe_model(
+        backend: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        calls.append((backend, api_key, base_url, model_id))
+        if model_id == "gpt-5-mini":
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=33)
+        return ModelProbeResult(
+            model_id=model_id,
             status="invalid_model",
             latency_ms=34,
             message="Provider rejected model.",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post(
         "/api/llm/endpoints/openai-direct/models/test",
@@ -3673,9 +3515,10 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     assert routes["openai-direct:gpt-5-mini"]["provider_model_id"] == "gpt-5-mini"
     assert routes["openai-direct:missing-model"]["status"] == "failed"
     assert routes["openai-direct:missing-model"]["provider_model_id"] == "missing-model"
-    # Only gpt-5-mini + missing-model were probed, in that order — the duplicate
-    # gpt-5-mini and the empty id were skipped. Backend/key resolution is the gateway's job.
-    assert [r.provider_model_id for r in route_calls] == ["gpt-5-mini", "missing-model"]
+    assert calls == [
+        ("openai", "secret", "https://api.openai.example/v1", "gpt-5-mini"),
+        ("openai", "secret", "https://api.openai.example/v1", "missing-model"),
+    ]
     # Evidence now lives on the credentials routes (SSOT), not the probe catalog.
     persisted = load_credentials(credentials_path())
     ok_evidence = [
@@ -3762,7 +3605,7 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
             ],
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_generic_probe)
+    monkeypatch.setattr(llm_router, "_probe_model", unexpected_generic_probe)
     monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_probe)
 
     response = client.post(
@@ -3819,13 +3662,13 @@ def test_endpoint_test_does_not_resurrect_secret_cleared_during_probe(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         raw = json.loads(credentials_path().read_text(encoding="utf-8"))
         raw["provider_endpoints"]["openai-direct"]["api_key"] = None
         credentials_path().write_text(json.dumps(raw), encoding="utf-8")
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5-mini",))
+        return PingResult(latency_ms=42, model_ids=("gpt-5-mini",))
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -3845,18 +3688,18 @@ def test_manual_model_test_does_not_resurrect_secret_cleared_during_probe(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
+    async def fake_probe_model(
+        backend: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
         raw = json.loads(credentials_path().read_text(encoding="utf-8"))
         raw["provider_endpoints"]["openai-direct"]["api_key"] = None
         credentials_path().write_text(json.dumps(raw), encoding="utf-8")
-        return _route_probe(endpoint, route, status="ok", latency_ms=33)
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=33)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post(
         "/api/llm/endpoints/openai-direct/models/test",
@@ -3884,26 +3727,25 @@ def test_manual_model_failed_probe_does_not_mark_changed_endpoint_failed(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
+    async def fake_probe_model(
+        backend: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
         raw = json.loads(credentials_path().read_text(encoding="utf-8"))
-        stored = raw["provider_endpoints"]["openai-direct"]
-        stored["api_key"] = None
-        stored["base_url"] = "https://changed.example/v1"
+        endpoint = raw["provider_endpoints"]["openai-direct"]
+        endpoint["api_key"] = None
+        endpoint["base_url"] = "https://changed.example/v1"
         credentials_path().write_text(json.dumps(raw), encoding="utf-8")
-        return _route_probe(
-            endpoint,
-            route,
+        return ModelProbeResult(
+            model_id=model_id,
             status="invalid_model",
             latency_ms=33,
             message="old endpoint rejected this model",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post(
         "/api/llm/endpoints/openai-direct/models/test",
@@ -3933,19 +3775,19 @@ def test_discovered_route_slug_collision_uses_deterministic_suffix(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("foo/bar", "foo.bar"))
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("foo/bar", "foo.bar"))
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
@@ -4282,31 +4124,31 @@ def test_route_probe_force_true_calls_real_provider_probe(
     _seed(tmp_path, monkeypatch)
     calls: list[dict[str, str]] = []
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
         calls.append(
             {
-                "endpoint_id": endpoint.endpoint_id,
-                "base_url": endpoint.base_url,
-                "model_id": route.provider_model_id,
+                "backend": backend,
+                "api_key": api_key,
+                "base_url": base_url,
+                "model_id": model_id,
             }
         )
-        return _route_probe(endpoint, route, status="ok")
+        return ModelProbeResult(model_id=model_id, status="ok")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
     assert response.status_code == 200
-    # force=true probes the specific route against its endpoint's base_url + model;
-    # backend/key resolution is the gateway's job.
     assert calls == [
         {
-            "endpoint_id": "openai-direct",
+            "backend": "openai",
+            "api_key": "secret",
             "base_url": "https://api.openai.example/v1",
             "model_id": "gpt-5",
         }
@@ -4339,12 +4181,16 @@ def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
             latency_ms=12,
         )
 
+    async def fail_studio_route_probe(*_args: object, **_kwargs: object) -> ModelProbeResult:
+        raise AssertionError("Studio llm.py must forward route probe to Gateway.")
+
     monkeypatch.setattr(
         llm_router,
         "_gateway_test_provider_route",
         fake_gateway_test_provider_route,
         raising=False,
     )
+    monkeypatch.setattr(llm_router, "_probe_model", fail_studio_route_probe)
 
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
@@ -4362,15 +4208,16 @@ def test_route_probe_force_true_success_closes_active_route_circuit(
     retry_at = datetime.now(UTC) + timedelta(seconds=60)
     _open_runtime_circuit(route_id="openai-direct:gpt-5", retry_at=retry_at)
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(endpoint, route, status="ok", latency_ms=12)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=12)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
@@ -4402,20 +4249,20 @@ def test_route_probe_force_true_transient_failure_refreshes_route_circuit(
         message="previous timeout",
     )
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(
-            endpoint,
-            route,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
+        return ModelProbeResult(
+            model_id=model_id,
             status="timeout",
             message="forced probe timed out",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
@@ -4449,20 +4296,20 @@ def test_route_probe_force_true_hard_failure_projects_needs_setup(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        return _route_probe(
-            endpoint,
-            route,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
+        return ModelProbeResult(
+            model_id=model_id,
             status="invalid_model",
             message="provider rejected model",
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
@@ -4668,17 +4515,18 @@ def test_role_test_uses_persisted_role_and_ignores_draft_payload(
     _seed(tmp_path, monkeypatch)
     calls: list[str] = []
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
         runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        del runtime_settings
-        calls.append(route.provider_model_id)
-        return _route_probe(endpoint, route, status="ok")
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, runtime_settings
+        calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="ok")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post(
         "/api/llm/roles/graph_agent/test",
@@ -4710,18 +4558,19 @@ def test_role_test_job_reports_active_route_progress(
     started = threading.Event()
     release = threading.Event()
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
         runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        del runtime_settings
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, runtime_settings
         started.set()
         await asyncio.to_thread(release.wait)
-        return _route_probe(endpoint, route, status="ok")
+        return ModelProbeResult(model_id=model_id, status="ok")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     start = client.post("/api/llm/roles/graph_agent/test-jobs")
     assert start.status_code == 200
@@ -4925,21 +4774,22 @@ def test_role_test_probes_role_routes_concurrently(
     inflight = 0
     max_inflight = 0
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
         runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
+    ) -> ModelProbeResult:
         nonlocal inflight, max_inflight
-        del runtime_settings
+        del backend, api_key, base_url, runtime_settings
         inflight += 1
         max_inflight = max(max_inflight, inflight)
         await asyncio.sleep(0.01)
         inflight -= 1
-        return _route_probe(endpoint, route, status="ok")
+        return ModelProbeResult(model_id=model_id, status="ok")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 
@@ -4993,17 +4843,18 @@ def test_role_test_reports_materialized_not_fit_provider_diagnostics(
     save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
     calls: list[str] = []
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
         runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        del runtime_settings
-        calls.append(route.provider_model_id)
-        return _route_probe(endpoint, route, status="ok")
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, runtime_settings
+        calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="ok")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     put_response = client.put(
         "/api/llm/roles/analyst",
@@ -5080,17 +4931,19 @@ def test_role_test_probes_needs_test_provider_at_click_time(
     save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
     calls: list[str] = []
 
-    async def fake_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
         runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
         assert runtime_settings == {"reasoning": {"enabled": True}}
-        calls.append(route.provider_model_id)
-        return _route_probe(endpoint, route, status="ok")
+        calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="ok")
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     put_response = client.put(
         "/api/llm/roles/analyst",
@@ -5218,7 +5071,7 @@ def test_official_role_test_profile_ensure_writes_evidence_to_route_not_catalog(
         return ModelProbeResult(model_id=model_id, status="ok")
 
     monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_probe)
-    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fake_official_call_method)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method_request", fake_official_call_method)
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 
@@ -5327,16 +5180,17 @@ def test_role_test_uses_verified_profile_call_method_for_official_routes(
         return ModelProbeResult(model_id=model_id, status="ok")
 
     async def fail_generic_probe(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
         runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        del endpoint, route, runtime_settings
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, model_id, runtime_settings
         raise AssertionError("Role Test must use the verified official call method.")
 
-    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fake_official_call_method)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fail_generic_probe)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method_request", fake_official_call_method)
+    monkeypatch.setattr(llm_router, "_probe_model", fail_generic_probe)
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 
@@ -5463,12 +5317,12 @@ def test_role_test_probes_missing_official_verified_profile_and_persists_route(
         )
         return ModelProbeResult(model_id=model_id, status="ok")
 
-    async def fail_generic_probe(*_args, **_kwargs) -> RouteProbeResult:
+    async def fail_generic_probe(*_args, **_kwargs) -> ModelProbeResult:
         raise AssertionError("Official role tests must not use the generic probe.")
 
     monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_probe)
-    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fake_official_call_method)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fail_generic_probe)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method_request", fake_official_call_method)
+    monkeypatch.setattr(llm_router, "_probe_model", fail_generic_probe)
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 
@@ -5580,7 +5434,7 @@ def test_role_test_reports_missing_official_verified_profile_probe_failure(
         raise AssertionError("Role Test should stop when profile probing fails.")
 
     monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_probe)
-    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fail_official_call_method)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method_request", fail_official_call_method)
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 

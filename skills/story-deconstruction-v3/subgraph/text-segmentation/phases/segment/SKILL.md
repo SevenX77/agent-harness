@@ -1,9 +1,12 @@
 ---
-llm_role: analyst
+llm_role: loop pm
 io:
   inputs:
     type: object
-    required: [chapter_with_line_numbers, chapter_lines, chapter_number]
+    required:
+      - chapter_with_line_numbers
+      - chapter_lines
+      - chapter_number
     properties:
       chapter_with_line_numbers:
         type: string
@@ -15,19 +18,31 @@ io:
         type: integer
   outputs:
     type: object
-    required: [parsed_segments, segments, segmentation_result, segments_summary]
+    required:
+      - parsed_segments
+      - segments
+      - segmentation_result
+      - segments_summary
     properties:
       parsed_segments:
         type: array
         items:
           type: object
-          required: [index, type, start_line, end_line, description]
+          required:
+            - index
+            - type
+            - start_line
+            - end_line
+            - description
           properties:
             index:
               type: integer
             type:
               type: string
-              enum: [A, B, C]
+              enum:
+                - A
+                - B
+                - C
             start_line:
               type: integer
             end_line:

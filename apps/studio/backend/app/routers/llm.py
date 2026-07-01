@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -85,6 +86,14 @@ from app.services.community_catalog_upload import (
     batch_idempotency_key,
     community_upload_configured,
 )
+from app.services.copilot_test import (
+    ModelProbeResult,
+    PingResult,
+    _NetworkError,
+    _QuotaExceeded,
+    _RateLimited,
+    _Unauthorized,
+)
 from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.llm_credentials import (
@@ -114,7 +123,6 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
-from app.services.llm_provider_identity import registrable_provider_name
 from app.services.llm_role_test_results import (
     load_all as load_role_test_results,
 )
@@ -133,19 +141,12 @@ from app.services.llm_route_capabilities import (
     route_effective_capabilities,
     verified_profile_route_capabilities,
 )
-from app.services.model_probe import ModelProbeResult
 from app.services.official_capability_sources import (
     OfficialCapabilityRule,
     official_api_list_source_urls,
     official_doc_source_urls,
     provider_doc_limit_rules,
 )
-from app.services.provider_config import (
-    language_model_classification,
-    notable_provider_key_for,
-    static_probe_candidate_specs,
-)
-from app.services.provider_probe_rules import dynamic_probe_candidate_specs
 from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -162,7 +163,6 @@ async def _autoshare_after_probe_best_effort() -> None:
     path OR the single community model-catalog toggle
     (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
     """
-    uploads: list[Any] = []
     try:
         cfg = get_backend_config()
         if not community_upload_configured(
@@ -185,25 +185,8 @@ async def _autoshare_after_probe_best_effort() -> None:
         # Phase 6: no offline queue. If the upload fails it just raises (swallowed
         # below); the next probe re-derives candidates from credentials and retries.
         await client.upload_batch(uploads, idempotency_key=batch_idempotency_key(uploads))
-        # W2-E.1c / R-F4: record the post-probe upload outcome so General settings
-        # shows how many evidence records were contributed and that it succeeded.
-        record_runtime_activity(
-            source_id="llm_credentials",
-            action="autoshare_uploaded",
-            message="Auto-shared probe-verified evidence to the community catalog gate.",
-            changes={"uploaded_count": len(uploads)},
-        )
-    except Exception as exc:  # noqa: BLE001 — best-effort: sharing must never fail a probe
+    except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
         logger.warning("post-probe community auto-share failed", exc_info=True)
-        try:
-            record_runtime_activity(
-                source_id="llm_credentials",
-                action="autoshare_failed",
-                message="Post-probe community auto-share failed (best-effort; retried on next probe).",
-                changes={"attempted_count": len(uploads), "error": str(exc)},
-            )
-        except Exception:  # noqa: BLE001 — recording the failure must also never raise
-            logger.warning("failed to record auto-share failure", exc_info=True)
 
 
 OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4
@@ -217,6 +200,42 @@ _THINKING_CAPABILITY_KEYS = (
     "reasoning",
     "supports_thinking",
 )
+
+
+async def _ping_provider(
+    backend: ProviderProbeBackend,
+    api_key: str,
+    base_url: str,
+) -> PingResult:
+    del backend, api_key, base_url
+    raise RuntimeError("Studio no longer owns provider endpoint probes; use Gateway provider_probe.")
+
+
+async def _probe_model(
+    backend: ProviderProbeBackend,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    del backend, api_key, base_url, model_id, runtime_settings
+    raise RuntimeError("Studio no longer owns provider route probes; use Gateway provider_probe.")
+
+
+async def _probe_official_call_method_request(
+    method_id: OfficialCallMethod,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    del method_id, api_key, base_url, model_id, runtime_settings
+    raise RuntimeError("Studio no longer owns official provider route probes; use Gateway provider_probe.")
+
+
+_ORIGINAL_PING_PROVIDER = _ping_provider
+_ORIGINAL_PROBE_MODEL = _probe_model
+_ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST = _probe_official_call_method_request
 
 
 @dataclass(frozen=True)
@@ -692,8 +711,6 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     status: Literal["verified", "unverified_manual", "failed", "disabled"] = "failed"
     message = "API key is empty."
     auth_failed = False
-    last_error_code: str | None = None
-    probe_attempts_log: list[dict[str, Any]] = []
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
@@ -718,9 +735,6 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         # R-E2: an invalid API key means the endpoint is unusable until the key is
         # fixed — record it so we can disable (not just "fail") the endpoint below.
         auth_failed = result.status == "invalid_key"
-        # W2-B.3: persist the STRUCTURED error code so the frontend reads it directly
-        # instead of parsing the human last_test_message.
-        last_error_code = result.error_code
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -805,14 +819,10 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 discovered_model_ids,
                 raw_capabilities_by_model,
             )
-            probe_attempts_log = verification.probe_attempts
             # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
             # endpoint's untested physical status, never "failed".
             if verification.status == "no_model":
                 status = "unverified_manual"
-                # W2-D.4: structured reason so the UI can warn "no model to test,
-                # add a model id and run a single-model test" without parsing text.
-                last_error_code = "no_model_available"
             else:
                 status = verification.status
             message = verification.message
@@ -908,7 +918,6 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             "status": status,
             "last_test_at": _now_iso(),
             "last_test_message": message,
-            "last_error_code": last_error_code,
         }
     )
     updated = latest_endpoint.model_copy(update=endpoint_update)
@@ -922,13 +931,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             "endpoint_id": endpoint_id,
             "status": status,
             "message": message,
-            # W2-E diagnostics: record what the Test actually saw — whether get-models
-            # reached the provider and the exact model ids it returned (not just a count).
-            "reachable": model_list_reached,
             "discovered_model_count": len(discovered_model_ids),
-            "discovered_model_ids": list(discovered_model_ids),
-            # W2-E.1b: which protocol×model combos were generation-probed and how each fared.
-            "probe_attempts": probe_attempts_log,
         },
     )
     return EndpointTestResponse(
@@ -2079,30 +2082,6 @@ async def apply_model_profile(
     return _save_roles_with_active_routes(data.model_copy(update={"roles": roles})).roles[role_name]
 
 
-def _project_endpoint_provider_identities(
-    credentials: LLMCredentialsFile,
-) -> LLMCredentialsFile:
-    """Stamp each endpoint's registrable-domain provider identity (W3-B.4 / R-B7).
-
-    Derived from ``base_url`` (eTLD+1) at projection time — the SAME function that
-    attributes probe evidence — so the UI can show the provider id under its display
-    alias and it is guaranteed to match the evidence. Never persisted.
-    """
-    projected = {
-        endpoint_id: endpoint.model_copy(
-            update={
-                "registrable_provider_name": (
-                    registrable_provider_name(endpoint.base_url)
-                    if endpoint.base_url
-                    else None
-                )
-            }
-        )
-        for endpoint_id, endpoint in credentials.provider_endpoints.items()
-    }
-    return credentials.model_copy(update={"provider_endpoints": projected})
-
-
 def _registry_response(
     credentials: LLMCredentialsFile,
     roles: RolesData,
@@ -2111,7 +2090,6 @@ def _registry_response(
 ) -> RegistryResponse:
     credentials = _normalize_credentials_for_registry_response(credentials)
     credentials = _project_route_ui_states(credentials)
-    credentials = _project_endpoint_provider_identities(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
@@ -2229,15 +2207,17 @@ def _project_route_ui_states(
         if (
             projection.ui_state == route.ui_state
             and projection.reason_code == route.reason_code
+            and projection.retry_at == route.retry_at
         ):
             projected_routes[route_id] = route
             continue
-        # W2-A: stamp the authoritative ui_state AND its companion reason_code so the
-        # frontend reads them directly (no message-text re-derivation).
+        # W2-A: stamp the authoritative ui_state AND its companion reason_code/retry_at
+        # so the frontend reads them directly (no message-text re-derivation).
         projected_routes[route_id] = route.model_copy(
             update={
                 "ui_state": projection.ui_state,
                 "reason_code": projection.reason_code,
+                "retry_at": projection.retry_at,
             }
         )
         changed = True
@@ -2986,8 +2966,6 @@ def _build_official_profile_probe_evidence(
             observed_at=_now_iso(),
             attempted_at=_now_iso(),
             endpoint_id=endpoint.endpoint_id,
-            # W3-B / R-B7: attribute evidence to the provider's registrable-domain name.
-            provider_id=registrable_provider_name(endpoint.base_url),
             route_id=route_id,
             model_id=model_id,
             provider_model_id=model_id,
@@ -3086,8 +3064,6 @@ def _build_model_probe_evidence(
             observed_at=_now_iso(),
             attempted_at=_now_iso(),
             endpoint_id=endpoint.endpoint_id,
-            # W3-B / R-B7: attribute evidence to the provider's registrable-domain name.
-            provider_id=registrable_provider_name(endpoint.base_url),
             route_id=route_id,
             model_id=result.model_id,
             provider_model_id=result.model_id,
@@ -3419,18 +3395,337 @@ def _official_language_probe_candidates(
     if not _is_official_language_model_candidate(endpoint, model_id):
         return []
     backend = _endpoint_probe_backend(endpoint)
-    # openai + gemini pick candidates from the model id (reasoning-effort ladders,
-    # thinking tiers) -> data-driven via the rules interpreter
-    # (app/data/probe_candidates_dynamic.json), NOT hardcoded if/else.
-    dynamic_specs = dynamic_probe_candidate_specs(backend, model_id)
-    if dynamic_specs is not None:
-        return [_candidate(**spec) for spec in dynamic_specs]
-    # claude / deepseek / ark have fixed (model-independent) candidate lists -> static
-    # config (app/data/probe_candidates.json). Each spec is _candidate() kwargs.
-    specs = static_probe_candidate_specs(backend)
-    if specs is not None:
-        return [_candidate(**spec) for spec in specs]
+    if backend == "openai":
+        model = model_id.lower()
+        if model.startswith("gpt-3.5-turbo-instruct"):
+            return [
+                _candidate(
+                    "openai_completions",
+                    "text:openai_completions",
+                    "text_chat",
+                    "openai_completions_text",
+                    10,
+                    1,
+                ),
+            ]
+        reasoning_runtime_settings = _openai_reasoning_probe_runtime_settings(model_id)
+        reasoning_candidates = _openai_reasoning_probe_candidates(
+            method_id="openai_responses",
+            model_id=model_id,
+            default_rank=5,
+            fallback_rank=1,
+        )
+        if _openai_prefers_responses_only(model_id):
+            return [
+                _candidate(
+                    "openai_responses",
+                    "text:openai_responses",
+                    "text_chat",
+                    "openai_responses_text",
+                    10,
+                    1,
+                    runtime_settings=reasoning_runtime_settings
+                    if _openai_requires_high_reasoning_model(model_id)
+                    else None,
+                ),
+                *reasoning_candidates,
+            ]
+        return [
+            _candidate(
+                "openai_responses",
+                "text:openai_responses",
+                "text_chat",
+                "openai_responses_text",
+                10,
+                1,
+            ),
+            _candidate(
+                "openai_chat_completions",
+                "text:openai_chat_completions",
+                "text_chat",
+                "openai_chat_completions_text",
+                20,
+                2,
+            ),
+            *reasoning_candidates,
+            *_openai_reasoning_probe_candidates(
+                method_id="openai_chat_completions",
+                model_id=model_id,
+                default_rank=25,
+                fallback_rank=2,
+            ),
+        ]
+    if backend == "claude":
+        return [
+            _candidate(
+                "anthropic_messages",
+                "text:anthropic_messages",
+                "text_chat",
+                "anthropic_text",
+                10,
+                1,
+            ),
+            _candidate(
+                "anthropic_messages",
+                "thinking:anthropic_messages:adaptive",
+                "thinking",
+                "anthropic_thinking_adaptive",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "type": "adaptive", "effort": "low"},
+                },
+            ),
+            _candidate(
+                "anthropic_messages",
+                "thinking:anthropic_messages:manual",
+                "thinking",
+                "anthropic_thinking_manual_budget",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "budget_tokens": 1024},
+                },
+            ),
+        ]
+    if backend == "gemini":
+        if _gemini_prefers_thinking_level(model_id):
+            return [
+                _candidate(
+                    "gemini_generate_content",
+                    "text:gemini_generate_content:minimal_thinking",
+                    "text_chat",
+                    "gemini_generate_content_text",
+                    10,
+                    1,
+                    runtime_settings={
+                        "max_output_tokens": 16,
+                        "reasoning": {"enabled": True, "effort": "minimal"},
+                    },
+                ),
+                _candidate(
+                    "gemini_generate_content",
+                    "thinking:gemini_generate_content:level_low",
+                    "thinking",
+                    "gemini_generate_content_thinking_level_low",
+                    5,
+                    1,
+                    runtime_settings={
+                        "max_output_tokens": 16,
+                        "reasoning": {"enabled": True, "effort": "low"},
+                    },
+                ),
+            ]
+        return [
+            _candidate(
+                "gemini_generate_content",
+                "text:gemini_generate_content:no_thinking",
+                "text_chat",
+                "gemini_generate_content_text",
+                10,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": False, "budget_tokens": 0},
+                },
+            ),
+            _candidate(
+                "gemini_generate_content",
+                "thinking:gemini_generate_content:budget_128",
+                "thinking",
+                "gemini_generate_content_thinking_budget_128",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 256,
+                    "reasoning": {"enabled": True, "budget_tokens": 128},
+                },
+            ),
+            _candidate(
+                "gemini_generate_content",
+                "thinking:gemini_generate_content:budget_512",
+                "thinking",
+                "gemini_generate_content_thinking_budget_512",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 768,
+                    "reasoning": {"enabled": True, "budget_tokens": 512},
+                },
+            ),
+        ]
+    if backend == "deepseek":
+        return [
+            _candidate(
+                "deepseek_chat_completions",
+                "text:deepseek_chat_completions",
+                "text_chat",
+                "deepseek_chat_completions_text",
+                10,
+                1,
+            ),
+            _candidate(
+                "deepseek_chat_completions",
+                "reasoning:deepseek_chat_completions",
+                "reasoning",
+                "deepseek_chat_completions_reasoning_effort",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True, "effort": "low"},
+                },
+            ),
+            _candidate(
+                "deepseek_anthropic_messages",
+                "text:deepseek_anthropic_messages",
+                "text_chat",
+                "deepseek_anthropic_messages_text",
+                15,
+                2,
+            ),
+            _candidate(
+                "deepseek_anthropic_messages",
+                "thinking:deepseek_anthropic_messages",
+                "thinking",
+                "deepseek_anthropic_messages_thinking",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "budget_tokens": 1024},
+                },
+            ),
+        ]
+    if backend == "ark":
+        return [
+            _candidate(
+                "ark_chat",
+                "text:ark_chat",
+                "text_chat",
+                "ark_chat_text",
+                10,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": False},
+                },
+            ),
+            _candidate(
+                "ark_responses",
+                "text:ark_responses",
+                "text_chat",
+                "ark_responses_text",
+                8,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": False},
+                },
+            ),
+            _candidate(
+                "ark_chat",
+                "thinking:ark_chat",
+                "thinking",
+                "ark_chat_thinking_enabled",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True},
+                },
+            ),
+            _candidate(
+                "ark_responses",
+                "thinking:ark_responses",
+                "thinking",
+                "ark_responses_thinking_enabled",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True},
+                },
+            ),
+            _candidate(
+                "ark_anthropic_messages",
+                "text:ark_anthropic_messages",
+                "text_chat",
+                "ark_anthropic_messages_text",
+                12,
+                3,
+            ),
+            _candidate(
+                "ark_anthropic_messages",
+                "thinking:ark_anthropic_messages",
+                "thinking",
+                "ark_anthropic_messages_thinking",
+                7,
+                3,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "budget_tokens": 1024},
+                },
+            ),
+        ]
     return []
+
+
+def _openai_reasoning_probe_runtime_settings(model_id: str) -> dict[str, Any]:
+    return _openai_reasoning_runtime_settings(
+        model_id,
+        "high" if _openai_requires_high_reasoning_model(model_id) else "low",
+    )
+
+
+def _openai_reasoning_probe_candidates(
+    *,
+    method_id: OfficialCallMethod,
+    model_id: str,
+    default_rank: int,
+    fallback_rank: int,
+) -> list[OfficialLanguageProbeCandidate]:
+    efforts = ("high",) if _openai_requires_high_reasoning_model(model_id) else ("low", "medium", "high")
+    request_mapper_id = (
+        "openai_responses_reasoning" if method_id == "openai_responses" else "openai_chat_completions_reasoning"
+    )
+    retry_group = f"openai:reasoning:{model_id.lower()}"
+    return [
+        _candidate(
+            method_id,
+            f"reasoning:{method_id}:{effort}",
+            "reasoning",
+            request_mapper_id,
+            default_rank + index,
+            fallback_rank,
+            runtime_settings=_openai_reasoning_runtime_settings(model_id, effort),
+            retry_group=retry_group,
+        )
+        for index, effort in enumerate(efforts)
+    ]
+
+
+def _openai_reasoning_runtime_settings(model_id: str, effort: str) -> dict[str, Any]:
+    model = model_id.lower()
+    return {
+        "max_output_tokens": 64 if _openai_is_pro_reasoning_model(model) else 16,
+        "reasoning": {"enabled": True, "effort": effort},
+    }
+
+
+def _openai_requires_high_reasoning_model(model_id: str) -> bool:
+    return model_id.lower().startswith("gpt-5-pro")
+
+
+def _openai_is_pro_reasoning_model(model_id: str) -> bool:
+    model = model_id.lower()
+    return model.startswith("gpt-5") and "-pro" in model
+
+
+def _openai_prefers_responses_only(model_id: str) -> bool:
+    return _openai_is_pro_reasoning_model(model_id)
 
 
 def _candidate(
@@ -3460,6 +3755,16 @@ def _candidate(
     )
 
 
+def _gemini_prefers_thinking_level(model_id: str) -> bool:
+    model = model_id.lower()
+    return (
+        model.startswith("gemini-3")
+        or model.startswith("deep-research")
+        or model.startswith("antigravity")
+        or model == "aqa"
+    )
+
+
 def _is_gemini_interactions_only_model(model: str) -> bool:
     return model.startswith("antigravity") or model.startswith("deep-research") or model == "aqa"
 
@@ -3478,16 +3783,33 @@ def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: 
     if backend == "deepseek":
         return model.startswith("deepseek-")
     if backend == "ark":
-        # W3-A / T2: ARK's language-model prefixes + non-language tokens are data-driven
-        # (app/data/provider_identity.json -> ark). A model is a language model when it
-        # has no non-language token and starts with a configured prefix.
-        classification = language_model_classification("ark")
-        if classification is not None:
-            prefixes, non_language_tokens = classification
-            if any(token in model for token in non_language_tokens):
-                return False
-            return any(model.startswith(prefix) for prefix in prefixes)
-        return False
+        ark_non_language_tokens = (
+            "seedream",
+            "seedance",
+            "wan",
+            "embedding",
+            "translate",
+            "translation",
+            "tts",
+            "audio",
+            "video",
+            "3d",
+        )
+        if any(token in model for token in ark_non_language_tokens):
+            return False
+        return any(
+            model.startswith(prefix)
+            for prefix in (
+                "doubao-",
+                "deepseek-",
+                "glm-",
+                "kimi-",
+                "mistral-",
+                "qwen",
+                "seed-",
+                "ep-",
+            )
+        )
     if any(
         token in model
         for token in (
@@ -4334,10 +4656,6 @@ class ThirdPartyEndpointVerification:
     # can build a probe-failed evidence record for that real model (R3.1-AC3 /
     # codex-3) — not just a human message.
     failed_probe: RouteProbeResult | None = None
-    # W2-E.1b diagnostics: every generation probe attempted, as
-    # {protocol, model, status} — surfaced in the endpoint_test runtime-activity log
-    # so the user can see which protocol×model combos were tried and how each fared.
-    probe_attempts: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
@@ -4362,15 +4680,22 @@ def _base_url_hostname(base_url: str) -> str:
     return (parsed.hostname or "").lower().strip(".")
 
 
+def _hostname_matches_registered_domain(hostname: str, registered_domain: str) -> bool:
+    return hostname == registered_domain or hostname.endswith(f".{registered_domain}")
+
+
 def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
-    # W3-A / T2: the qiniu / openrouter / wavespeed keyword+domain matches are
-    # data-driven now (app/data/provider_identity.json) — a new provider is a config
-    # edit, not a code change. Falls back to the probe backend for unconfigured hosts.
-    text_haystack = " ".join([endpoint.endpoint_id, endpoint.display_name or ""])
+    text_haystack = " ".join(
+        [
+            endpoint.endpoint_id,
+            endpoint.display_name or "",
+        ]
+    ).lower()
     hostname = _base_url_hostname(endpoint.base_url)
-    matched = notable_provider_key_for(text_haystack, hostname)
-    if matched is not None:
-        return matched
+    if "qiniu" in text_haystack or _hostname_matches_registered_domain(hostname, "qnaigc.com"):
+        return "qiniu"
+    if "openrouter" in text_haystack or _hostname_matches_registered_domain(hostname, "openrouter.ai"):
+        return "openrouter"
     return _endpoint_probe_backend(endpoint)
 
 
@@ -4526,7 +4851,6 @@ async def _verify_third_party_endpoint_by_probe(
     on the first ``ok`` and short-circuiting structural errors. The endpoint is
     promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
     """
-    probe_attempts: list[dict[str, Any]] = []
     probe_model_ids = _third_party_probe_model_ids(
         endpoint,
         discovered_model_ids,
@@ -4543,21 +4867,11 @@ async def _verify_third_party_endpoint_by_probe(
                 "Endpoint reachable, but it returned no models to verify. "
                 "Add a model id and run a single-model test."
             ),
-            probe_attempts=probe_attempts,
         )
 
     detected_protocol, detection_probe = await _detect_third_party_protocol_for_models(
         endpoint, probe_model_ids
     )
-    if detection_probe is not None:
-        # W2-E.1b: record the protocol-detection probe as the first attempt.
-        probe_attempts.append(
-            {
-                "protocol": detected_protocol or endpoint.protocol,
-                "model": detection_probe.model_id,
-                "status": detection_probe.status,
-            }
-        )
     if detected_protocol is None:
         structural = (
             detection_probe is not None
@@ -4575,7 +4889,6 @@ async def _verify_third_party_endpoint_by_probe(
             message=message,
             failure_is_structural=structural,
             failed_probe=detection_probe,
-            probe_attempts=probe_attempts,
         )
 
     assert detection_probe is not None  # detected_protocol set => probe present
@@ -4586,15 +4899,12 @@ async def _verify_third_party_endpoint_by_probe(
     last_failure: RouteProbeResult = first_probe
     for model_id in probe_model_ids:
         if model_id == first_probe_model_id:
-            # This model was already probed (and recorded) during protocol detection.
+            # This model was already probed during protocol detection.
             probe = first_probe
         else:
             probe = await _gateway_test_provider_route(
                 detected_endpoint,
                 _gateway_probe_route(detected_endpoint, model_id),
-            )
-            probe_attempts.append(
-                {"protocol": detected_protocol, "model": model_id, "status": probe.status}
             )
         if probe.status == "ok":
             logger.info(
@@ -4614,7 +4924,6 @@ async def _verify_third_party_endpoint_by_probe(
                         raw_capabilities_by_model.get(model_id),
                     )
                 },
-                probe_attempts=probe_attempts,
             )
         last_failure = probe
         if probe.status in _STRUCTURAL_PROBE_STATUSES:
@@ -4634,7 +4943,6 @@ async def _verify_third_party_endpoint_by_probe(
         ),
         failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
         failed_probe=last_failure,
-        probe_attempts=probe_attempts,
     )
 
 
@@ -5469,7 +5777,81 @@ def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
 
 
 async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    if _ping_provider is not _ORIGINAL_PING_PROVIDER:
+        return await _legacy_endpoint_probe_adapter(endpoint)
     return await _gateway_test_provider_endpoint_request(endpoint)
+
+
+async def _legacy_endpoint_probe_adapter(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    backend = _endpoint_probe_backend(endpoint)
+    base_url = _endpoint_probe_base_url(endpoint)
+    api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
+    if not base_url:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="error",
+            message="Base URL is empty.",
+            error_code="missing_config",
+        )
+    if not api_key:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="invalid_key",
+            message="API key is empty.",
+        )
+    try:
+        result = await _ping_provider(backend, api_key, base_url)
+    except _Unauthorized as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "invalid_key", exc)
+    except _RateLimited as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "rate_limited", exc)
+    except _QuotaExceeded as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "quota_exceeded", exc)
+    except httpx.TimeoutException:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="timeout",
+            message="Endpoint test timed out.",
+        )
+    except _NetworkError as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "network_error", exc)
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=backend,
+        base_url=base_url,
+        status="ok",
+        latency_ms=result.latency_ms,
+        model_ids=result.model_ids,
+        model_capabilities=result.model_capabilities,
+    )
+
+
+def _endpoint_probe_error_result(
+    endpoint: ProviderEndpoint,
+    backend: ProviderProbeBackend,
+    base_url: str,
+    status: Literal["invalid_key", "rate_limited", "quota_exceeded", "network_error"],
+    exc: BaseException,
+) -> EndpointProbeResult:
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=backend,
+        base_url=base_url,
+        status=status,
+        message=str(exc) or None,
+        error_code=getattr(exc, "error_code", "") or status,
+    )
 
 
 async def _gateway_test_provider_model(
@@ -5495,6 +5877,18 @@ async def _gateway_test_provider_route(
     *,
     runtime_settings: dict[str, Any] | None = None,
 ) -> RouteProbeResult:
+    if _probe_model is not _ORIGINAL_PROBE_MODEL:
+        probe_kwargs: dict[str, Any] = {}
+        if runtime_settings is not None:
+            probe_kwargs["runtime_settings"] = runtime_settings
+        result = await _probe_model(
+            _endpoint_probe_backend(endpoint),
+            endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
+            _endpoint_probe_base_url(endpoint),
+            route.provider_model_id,
+            **probe_kwargs,
+        )
+        return _route_probe_result_from_model_probe(endpoint, route, result)
     return await _gateway_test_provider_route_request(
         endpoint,
         route,
@@ -5510,6 +5904,14 @@ async def _gateway_probe_official_call_method(
     *,
     runtime_settings: dict[str, Any] | None = None,
 ) -> ModelProbeResult:
+    if _probe_official_call_method_request is not _ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST:
+        return await _probe_official_call_method_request(
+            method_id,
+            api_key,
+            base_url,
+            model_id,
+            runtime_settings=runtime_settings,
+        )
     result = await _gateway_probe_official_call_method_request(
         method_id,
         api_key,
@@ -5518,6 +5920,24 @@ async def _gateway_probe_official_call_method(
         runtime_settings=runtime_settings,
     )
     return _model_probe_result_from_route_probe(result)
+
+
+def _route_probe_result_from_model_probe(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    result: ModelProbeResult,
+) -> RouteProbeResult:
+    return RouteProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        route_id=route.route_id,
+        provider_kind=endpoint.provider_kind,
+        backend=_endpoint_probe_backend(endpoint),
+        base_url=_endpoint_probe_base_url(endpoint),
+        model_id=result.model_id,
+        status=result.status,
+        latency_ms=result.latency_ms,
+        message=result.message,
+    )
 
 
 def _model_probe_result_from_route_probe(result: RouteProbeResult) -> ModelProbeResult:
@@ -5529,7 +5949,7 @@ def _model_probe_result_from_route_probe(result: RouteProbeResult) -> ModelProbe
     )
 
 
-def _endpoint_success_message(result: EndpointProbeResult) -> str:
+def _endpoint_success_message(result: PingResult | EndpointProbeResult) -> str:
     message = f"Connected in {result.latency_ms}ms."
     if result.model_seen:
         message = f"{message} Model seen: {result.model_seen}."

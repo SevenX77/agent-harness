@@ -14,14 +14,14 @@
 ## Wave 1 — 无架构争议,先落地(可并行,独立可推)
 
 ### W1-A · Community catalog 配置只读展示(D9 / R-G3)
-- [x] **W1-A.1 (green)** 后端 `GET /api/system/community-catalog-config` 暴露 `manifest_url` + `signing_pubkey`(只读、公开无密钥,来源 `backends.py` 默认/env)。后端测试 `test_community_catalog_config_reflects_backend_config`。
-- [x] **W1-A.2 (green)** 前端 GeneralTab:catalog 开关下只读展示 manifest URL + 签名公钥(只读 Input + 复制按钮 `CatalogConfigRow`)+ "系统默认/可 env 覆盖"说明;`getCommunityCatalogConfig` + i18n(en/zh-CN)。门禁:前端 lint/typecheck/test(1525)/build 全绿 + 后端 ruff/mypy/pytest 全绿。
-- [~] **W1-A.3 亲眼** —— 用户指示「前端不用我做视觉验证」,本项**豁免**(前端 CI 门禁 lint/typecheck/test/build 已全绿替代)。
+- [ ] **W1-A.1** 后端 `/api/system/...` 暴露 manifest_url + signing_pubkey(只读;来源 `backends.py` 默认/env)。
+- [ ] **W1-A.2 (red→green)** 前端 GeneralTab:Community model catalog 开关下只读展示两项 + 复制按钮 + "系统默认/可env覆盖"说明;vitest 渲染断言。
+- [ ] **W1-A.3** 亲眼:General 页看到两项只读展示。
 
 ### W1-B · 手动单模型探测扇出到所有 endpoint(含 failed)(D6 / R-E5)
-- [x] **W1-B.1/.2 (red→green)** 前端抽出纯 helper `probeModelsAcrossEndpoints(endpointIds, modelIds, probe)`:遍历 provider 下**所有**已配置 endpoint(`ProviderCard` 传 `endpointSummaries.map(e=>e.id)`,含 failed/disabled)、各发一次 `/endpoints/{id}/models/test`、`aggregateModelResults` 按模型聚合最优态(任一 endpoint ok 即 usable)、`mergeModelLists` 合并 models;一个 endpoint 抛错记失败但不中断其余。`ManualModelTestPanel` 加 `endpointIds` prop(缺省回退 `[providerKey]`)。TDD:`probes every endpoint and keeps the best result per model` + `keeps probing the remaining endpoints when one throws`。门禁:前端 lint/typecheck/test/build 全绿。
-  > 模型 chip 本就按 route 聚合(W2-B.4),所以测全 endpoint 后,某模型只在一个 base_url 可用也会被发现、chip 显示聚合 ready。
-- [~] **W1-B.3 亲眼** —— 按用户「前端不做视觉验证」豁免(`probeModelsAcrossEndpoints` 单测 + 前端 CI 门禁替代)。
+- [ ] **W1-B.1 (red)** 前端测试:`ManualModelTestPanel` 对一个有 N 个已配置 endpoint(含 failed)的 provider,触发 N 次 `/endpoints/{id}/models/test`。
+- [ ] **W1-B.2 (green)** 前端:`runModelTests` 改为遍历该 provider 下所有 key+base_url 齐的 endpoint(含 failed/disabled),各发一次、分别回写;聚合结果展示。
+- [ ] **W1-B.3** 亲眼:WaveSpeed 这类多 endpoint provider,手动单测覆盖全部 endpoint。
 
 ---
 
@@ -29,22 +29,20 @@
 
 ### W2-A · 归一状态数据模型(D1/D10)
 > **发现订正**:gateway `ProviderRoute` **已有** `ui_state`(6 态,`schema.py:24/221`),studio route 继承——**被持久化但每次响应被重算覆盖**。故无需"加 6 态字段 / v5→v6 迁移";W2-A 实为「把计算从读时挪到写时落盘 + 补齐 reason companion」。按用户认可框架:gateway `route.status`(4 值物理态)保留作路由输入,studio 加**展示态** companion。
-- [x] **W2-A.1/.2 (red→green)** studio `ProviderRoute` 加持久 studio-only `reason_code: str|None`(`ui_state` 已继承);`_gateway_route` strip 它(连同 display_name/evidence)不进冻结区 gateway。**无 schema 升级**(可选字段默认优雅兼容旧文件)。门禁:ruff · mypy(strict)· LLM 域 pytest 全绿(干净 main 基线;唯一失败=Windows chmod 预存环境)。
-  (`test_registry_stamps_route_reason_code`)
-  > **retry_at 推迟阶段二**:它是熔断计时的瞬态值(cooling_down),持久化会触发 datetime/str 序列化告警且语义不对。本刀只落 `reason_code`(稳定可持久,正是干掉前端文本匹配所需);retry_at 随运行期回写(R-D5)一起设计。
+- [x] **W2-A.1/.2 (red→green)** studio `ProviderRoute` 加持久 studio-only `reason_code: str|None` + `retry_at: datetime|None`(`ui_state` 已继承);`_gateway_route` strip 这两者(连同 display_name/evidence)不进冻结区 gateway。**无 schema 升级**(可选字段默认优雅兼容旧文件)。门禁:152 passed(唯一失败=Windows chmod 预存环境)· ruff · mypy 全绿。
+  (`test_registry_stamps_route_reason_code_and_retry_at`)
 - [ ] **W2-A.3** `endpoint_probe_priority` 等读 `route.status` 处——评估是否改读归一态(route.status 仍是 gateway 路由字段,多数读点应保留;逐一甄别)。
 
 ### W2-B · 投影坍缩到单字段(D1 R-D1/R-D2)
-- [x] **W2-B.1 (red→green,raw routes 面)** `_project_route_ui_states` 写回 route 时**一并 stamp `reason_code`**(原来只 stamp `ui_state`、丢了 reason——正是前端要去文本匹配的根因)。`/api/llm/registry` 的 `provider_routes` 现带 ui_state+reason_code。
-- [x] **W2-B.1b(已存在)** model_groups 面 `_provider_model_option`([llm.py] `"reason_code": projection.reason_code`)**早已暴露** reason_code;无需补。两个投影面现都带 reason_code。
+- [x] **W2-B.1 (red→green,raw routes 面)** `_project_route_ui_states` 写回 route 时**一并 stamp `reason_code` + `retry_at`**(原来只 stamp `ui_state`、丢了 reason——正是前端要去文本匹配的根因)。`/api/llm/registry` 的 `provider_routes` 现带 ui_state+reason_code+retry_at。
+- [ ] **W2-B.1b** model_groups 面(`_provider_model_option`/`provider_models`)同样暴露 reason_code/retry_at(前端 model 标签读这个面)。
 - [ ] **W2-B.2(可后置)** 写状态时机预算归一态落盘,响应只读(cooling_down 因依赖熔断计时仍需读时 overlay,属阶段二/运行期)。
-- [x] **W2-B.3 (red→green)** 端到端结构化失败码:**后端** studio `ProviderEndpoint` 加 `last_error_code`(test_endpoint 从 `result.error_code` 持久化,strip 不进 gateway);**前端** `endpointErrorCode` 优先读 `endpoint.last_error_code`(message 解析降级为 fallback),删 `providerTestResultFailureScope` 里散落的 `text.includes` 二次匹配。门禁:后端 ruff/mypy/137 + 前端 lint/typecheck/test(1525)/build 全绿。视觉验证按用户指示豁免。
-  > 注:get-models 失败的连通/鉴权码(invalid_api_key 等,Qiniu 顶部状态痛点)现走结构化;第三方生成层 model 级码暂仍由 `endpointErrorCode` 的 message 正则兜底(`(code)` 提取),后续可继续结构化。
-- [x] **W2-B.4 (已现成 / verified)** 一 model 多 route 聚合(R-A4)代码里已实现,无需改动:[`ProviderCard.tsx:1480-1501`](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:1480) 按 `model.id` 跨 endpoint 分组 → [`aggregateSummaryUiState`(:895)](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:895) 按优先级数组 [:737](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:737) `[ready, historical_ready, cooling_down, failed, untested, off]` 取最高态 =「任一 ready→ready;无 ready 任一 historical_ready→蓝」;每个 endpoint 具体态由 [`aggregateRoutesTooltipText`(:974)](apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:974) 逐条写进 tooltip。
+- [ ] **W2-B.3 (red→green)** 前端:删 `endpointStateDisplayStatus`/`providerTestResultFailureScope` 文本匹配,直接读 ui_state + reason_code;改既有快照/单测。(需跑 app 亲眼验证)
+- [ ] **W2-B.4 (red→green)** 一 model 多 route 聚合(R-A4):model 标签态 = 名下 routes 归一态聚合(任一 ready 则可用);贯穿 model 标签 + role 内 endpoint/route 标签。
 
 ### W2-C · L1/L2 指示器按层重做(D10 / R-A2)
-- [x] **W2-C.1 (red→green)** L1 api_key 独立三态归因:get_models 成功=valid(✓);结构化 `invalid_api_key`=invalid(✗);其它失败(如 base_url 不通,key 根本没真正被测)=unknown(**不武断标红**)。L2 base_url 经 `resultLooksReachable` 本就独立于 endpoint 通过/失败态判连通。
-- [x] **W2-C.2 (green)** L1 指示器从只会显示 ✓ 的 `FieldReachabilityCheck` 重做为三态 `ApiKeyReachabilityIcon`(✓success / ✗destructive / spinner / null),镜像 L2 的 `BaseUrlReachabilityIcon`;en/zh-CN i18n(apiKeyValid/Invalid/Testing)。门禁:前端 lint/typecheck/test(1525)/build 全绿。
+- [ ] **W2-C.1 (red)** 前端:api_key / base_url 各自独立连通态(get_models 成功=两者通;失败按 T9 归因或落"未知",**不武断标红**)。
+- [ ] **W2-C.2 (green)** 重做两指示器(api_key 支持绿/红/未知,base_url 不再复用 endpoint 派生态)。
 
 ### W2-D · 没模型不猜 + invalid_key⇒disabled(D2/D3 · R-E1/R-E2)
 - [x] **W2-D.1 (red)** 后端:get_models 空表且无已知 route ⇒ **不调 `notable_model_ids` 探测**;endpoint=untested(**非 failed**)。
@@ -58,49 +56,40 @@
   改 `test_endpoint`:加 `auth_failed`(get-models `invalid_key`)、status 类型加 `disabled`、disable cascade + revive sweep。
   更新旧测 `test_endpoint_test_rejects_invalid_api_key`(failed→disabled+route cascade)+ 新增 revive 测试。门禁:122 passed · ruff · mypy 全绿(完整后端套件确认中)。
   > 注:本刀只判 get-models 的 `invalid_key`(主路径,Qiniu/WaveSpeed 截图即此);第三方"生成探测返回 invalid_key"的边缘场景留待 W2-A/B 归一时统一。reason 子码同样并入 W2-A/B。
-- [x] **W2-D.4 (red→green)** 后端 test_endpoint 的 `no_model` 分支落结构化 `last_error_code="no_model_available"`;前端 endpoint chip 显示 ⚠(TriangleAlert/text-warning)+ tooltip 加"没有可测模型,手动输入模型名单测"提示行(en/zh-CN i18n);`EndpointSummary.errorCode` 经 `persisted.last_error_code` 自动 plumb。门禁:后端 ruff/mypy/pytest + 前端 lint/typecheck/test(1525)/build 全绿。
-  > 「测试触发 toast」那半留作小 follow-up(持久的 chip ⚠ + tooltip 已覆盖"提示没有模型可测"的核心,toast 是瞬态附加)。
+- [ ] **W2-D.4 (red→green)** 前端:untested+`no_model_available` 的 endpoint tooltip 显示 ⚠ + 文案;测试触发 toast。
 
 ### W2-E · 诊断日志补齐(D7 / R-F)
-- [x] **W2-E.1a (red→green)** `endpoint_test` 记录补 `reachable`(get-models 是否到达)+ `discovered_model_ids`(实际 model id 列表,原来只有 count)。归 `llm_credentials` 源。
-  (`test_endpoint_test_logs_discovered_models_and_reachability`)。`model_list_observed` 已记 added/removed/unchanged。
-- [x] **W2-E.1b (red→green)** `ThirdPartyEndpointVerification` 加 `probe_attempts`(每个 {protocol, model, status}),在协议探测 + 批量循环里采集、4 个 return 点带回;`endpoint_test` 记录加 `probe_attempts`。
-  (`test_endpoint_test_logs_probe_attempts`)。门禁:105 passed · ruff · mypy 全绿。
-- [x] **W2-E.1c (red→green)** 测后上传(autoshare)成败记录:`_autoshare_after_probe_best_effort` 成功记 `autoshare_uploaded`(含 `uploaded_count`)、失败记 `autoshare_failed`(含 `attempted_count`+error),都归 `llm_credentials` 源;失败记录自身也不抛(守 best-effort 契约)。门禁:ruff · mypy · 7 autoshare pytest 全绿。
-  > 「更新的 route evidence/capabilities 计数+id」那半留作可选小尾巴(`model_list_observed` 的 added/removed/unchanged + W2-E.1a/1b 已覆盖"测了啥/拿到啥"的主要诊断面)。
+- [ ] **W2-E.1 (red→green)** `endpoint_test`/`model_list_observed` 记结构化:get_models 原始(可达/model id 列表/空表/是否触发保底=否)、探测的 protocol×url×model 组合及成败、更新的 route evidence/capabilities 计数+id、测后上传选取与结果。归 `llm_credentials` 源。
 
 ---
 
 ## Wave 3 — 身份与配置 data-driven(D11/D12/D13 + T2/T6/T7)
 
 ### W3-A · provider 配置文件(data-driven,替代硬编码)(T2)
-- [x] **W3-A.1 (green)** 结构化 provider 配置落地:JSON(无 yaml 依赖)`apps/studio/backend/app/data/provider_identity.json`(per-provider `key`/`display_alias`/`keywords`/`registrable_domains`)+ loader `app/services/provider_config.py::notable_provider_key_for`(`Path(__file__).parents[1]/"data"`,镜像 `templates.py` 加载、vendoring-safe,`lru_cache`)。
-- [x] **W3-A.2 (red→green)** router/credentials 里的硬编码 provider 配置**已全部 config 化**(无 provider 专属 if-else 残留):① `_endpoint_notable_provider_key`(去 qiniu/openrouter 硬编码 + 删死 helper + 补 wavespeed);② **official host→endpoint_id**(`llm_credentials.py::_official_endpoint_id_for_base_url` 改读 `official_endpoint_id_for_host`,8 个 provider 的 official_hosts 进配置,删死 `_host_matches`,**不留旧硬编码**)。`provider_identity.json` schema 扩 `official_hosts`/`official_endpoint_id`;③ **静态探测方法表**(`_official_language_probe_candidates` 的 claude/deepseek/ark 三个 backend 是 model 无关静态表)搬进 `app/data/probe_candidates.json`(每条=`_candidate()` kwargs)+ loader `static_probe_candidate_specs`;**零风险落地**:写脚本跑原函数→序列化候选→`_candidate(**spec)` 重建→断言 `ROUNDTRIP OK` 后才删硬编码(非手抄)。④ **ARK 语言模型前缀过滤**(`_is_official_language_model_candidate` 的 ark 分支:8 个语言前缀 doubao-/glm-/qwen… + 10 个非语言 token seedream/video/3d…)搬进 `provider_identity.json` 的 ark 条目(`language_model_prefixes`/`non_language_model_tokens`)+ loader `language_model_classification`;claude/deepseek 单 startswith。⑤ **openai/gemini 动态候选 config 化**(此前误判"留代码"——经用户指正:if-else 本质是数据,本项目本就用 `.md` 驱动复杂逻辑):新增**通用规则解释器** `provider_probe_rules.py`(model-class 匹配器 + 有序规则 + reasoning 阶梯展开,零 if-else)+ 配置 `probe_candidates_dynamic.json`(openai 谓词 instruct/pro_reasoning/high_reasoning + reasoning 模板,gemini thinking_level 二分);删死 helper 簇 65 行。**`_official_language_probe_candidates` 现已无任何 provider 专属 if-else。** 零风险:dump 原函数对 15 个代表模型输出 → 解释器重建 → `ROUNDTRIP OK`(`test_provider_probe_rules.py`)。门禁:ruff/mypy(115)/probe_rules+registry+api 全绿。
-  > **剩余只有 copilot `DEFAULT_BASE_URLS`**——经查实它是被 gateway 取代的 **legacy 直连探测路**(`_legacy_endpoint_probe_adapter`,仅当 `_ping_provider` 被 4 处端点测试 monkeypatch 时触发;生产走 `_gateway_test_provider_endpoint_request`)。copilot 运行时 + role 测试**已走 role+gateway**。所以这不是"活配置"、config 化无意义;正确动作是**删 legacy 路**(`copilot_test.py` 的 `_ping_provider`/`DEFAULT_BASE_URLS`/`CopilotProvider` + 迁那 4 测试到 mock gateway)——属独立 legacy 清理,待定。
-- [x] **W3-A.3(Q6 订正:已覆盖)** **论据**:ARK Primary Protocol 本就是 `openai_compatible`([ark.md:10](docs/development/llm_provider_notes/ark.md:10));gateway `ark_chat`([provider_probe.py:447](packages/graph-agent-gateway/src/graph_agent_gateway/registry/provider_probe.py:447))**已**用标准 OpenAI 消息格式 POST `/api/v3/chat/completions`——即 ARK 的 openai chat 协议**已在探测**(连同 `ark_responses` + `ark_anthropic_messages` = 用户说的"至少 3 种")。结论:**无需**再加重复的 ark-openai 方法;若将来要让 ARK 也跑通用 `openai_chat_completions` 的现代语义(`max_completion_tokens`/`reasoning_effort`)做标准 SDK 兼容性校验,再单列(已取得 gateway 授权)。
+- [ ] **W3-A.1** 定结构化 provider 配置(协议/method/官方 host→id/别名/notable models);定位与格式(YAML/JSON,落 `apps/studio/backend/app/data/` 或扩 `docs/development/llm_provider_notes/`)。
+- [ ] **W3-A.2 (red→green)** 代码改读配置:移除 `_endpoint_notable_provider_key` 硬编码 qiniu/openrouter、official host 映射、ark 协议硬编码。
+- [ ] **W3-A.3** ark 多协议(R-E4)经配置补齐(openai 形 + anthropic 形 + responses);若需 gateway probe 改动→先取授权。
 
 ### W3-B · provider 身份 = 注册域派生 + alias(D12)
-- [x] **W3-B.1/.2 (red→green)** 新建 `services/llm_provider_identity.py::registrable_provider_name(base_url)` —— eTLD+1 派生(T6 定:**内置精简多级后缀表**,无新依赖、不过 pip-audit 风险):`api.qnaigc.com`→`qnaigc`、`api./llm.wavespeed.ai`→同一 `wavespeed`、`ark.cn-beijing.volces.com`→`volces`、裸 IP/单标签/`foo.com.cn`→`foo`/None。15 参数化单测。
-- [x] **W3-B.3a (green)** catalog `provider_id` 系统填充:`_build_model_probe_evidence` + `_build_official_profile_probe_evidence` 两个 probe-evidence 构建点 `provider_id=registrable_provider_name(endpoint.base_url)`(R-B7)。门禁:ruff · mypy · 121+35 pytest 全绿。
-- [ ] **W3-B.3b** 前端 provider 分组键统一到注册域(T5)+ alias 展示表(`qnaigc`→Qiniu / `volces`→ARK,data-driven)——**前端 + 配置文件**,归 W3-A/前端批。
-- [x] **W3-B.4** provider 标题 tooltip 显示 provider id(D8/R-G1):后端 `_project_endpoint_provider_identities` 在 registry 投影时把 `registrable_provider_name(base_url)`(eTLD+1,与 evidence provider_id 同源、同一函数)stamp 进 endpoint DTO(展示字段,`_gateway_endpoint` strip 不进 gateway);前端标题包 tooltip 显示该 id(en/zh-CN)。`display_name` 本就是人类 alias(Qiniu/ARK),tooltip 补底层 id。门禁:后端 ruff/mypy/pytest + 前端 lint/typecheck/test(1525)/build。
-  > 注:`_endpoint_notable_provider_key` 的 qiniu/openrouter 硬编码是 **notes-file 查找别名**(qnaigc→qiniu.md),与 provider 分类身份是两回事,留待 W3-A provider 配置文件统一(届时 alias 表 + notes-key 一起入配置)。
+- [ ] **W3-B.1 (red)** 测试:`api.qnaigc.com`/`*.wavespeed.ai` → 注册域 → provider 名;双 base_url 收敛同一 provider;qnaigc≠qiniu。
+- [ ] **W3-B.2 (green)** eTLD+1 派生(PSL 选型 T6:库 or 内置精简表,过 pip-audit)+ alias 表(配置)。
+- [ ] **W3-B.3 (green)** catalog `provider_id` 系统填充 provider 规范名(R-B7);前端 provider 分组键统一到此(T5)。
+- [ ] **W3-B.4 (red→green)** provider 标题 tooltip 显示 provider 名 + 聚合 endpoint id(D8/R-G1)。
 
 ### W3-C · evidence 匹配身份统一(D11)
 - [ ] **W3-C.1 (red)** 测试:本地存/wire 传/回填三处用同一"匹配身份"派生(endpoint=base_url+protocol、route=+model;不含 method)。
 - [ ] **W3-C.2 (green)** 抽一个匹配身份函数,三处共用;回填匹配从 host+model 收敛到统一键。
 
 ### W3-D · 社区贡献开放:allowlist→安全闸(D13)
-- [x] **W3-D.1/.2 (red→green)** 移除 `PUBLIC_PROVIDER_HOST_ALLOWLIST` 固定准入名单,换 `is_safe_to_publish` 安全闸:公网 DNS host / 公网 IP 可发布(wavespeed.ai 这类新 provider 现可贡献);私有(RFC1918/裸私有IP)/ LAN(`.local/.internal/.lan/.home/.corp/.intranet`)/ loopback / 单标签 host / RFC6761 保留 TLD(`.test/.example/.invalid/.localhost`)/ 带 userinfo 的 URL 一律不发布。api_key 永不外传不变(脱敏字段集没动)。
-  (T7 细则定稿如上;`is_public_allowlisted` + 常量 + `build_upload_record` 的 allowlist 参数全删,redaction 测试改成参数化安全闸覆盖)。门禁:84 community/evidence pytest · ruff · mypy 全绿。
+- [ ] **W3-D.1 (red)** 测试:公网新 provider(如 wavespeed.ai)evidence 可上传;私有 host(RFC1918/localhost/裸IP/.local)+ 带密钥 URL 被拦。
+- [ ] **W3-D.2 (green)** 移除 `PUBLIC_PROVIDER_HOST_ALLOWLIST` 准入名单,换安全闸(T7 细则);api_key 永不外传不变。
 
 ---
 
 ## 阶段二(后置)— 运行期回写 + 探测动画
 
 - [ ] **S2-A** engine 真实调用结果经事件总线回流 studio 写归一态(R-D5;gateway 不直接写盘,T3 事件设计)。
-- [x] **S2-B (R-G2)** 两半均落地:① **测试期自动展开模型列表**(ProviderCard `useEffect`:`isGettingModels` 时 `setShowAllModels(true)`)[#255](https://github.com/SevenX77/agent-harness/pull/255);② **测试期模型标签动画**——模型 chip 的 `api-route-tag-border-flow` 条件加 `|| (isGettingModels && !isOfficial && !isDisabled)`:第三方 provider 在 endpoint 测试期间所有(非禁用)模型 chip 脉冲(由真实后端测试 `isGettingModels` 驱动、finally 必清,无卡死);official 维持「仅 `status="testing"` 逐 route 动画」(`ProviderCard.test.tsx:830` 设计不变)。新增 TDD 测试 `animates third-party model chips while the endpoint test runs`。门禁:前端 lint/typecheck/test/build 全绿。
-  > 注:取「测试期第三方全模型脉冲」而非「后端逐模型进度事件精确顺序」——后者要 SSE/逐模型循环重构核心测试主流程,边际视觉收益小;现方案纯前端、低风险、由真实后端测试驱动(诚实)。若将来要精确逐模型进度,再上 `testProviderModels`→`/models/test` 循环或 SSE。
+- [ ] **S2-B** 逐模型探测进度事件 → 模型标签 testing 动画(复用 `.api-route-tag-border-flow`)+ 测试期自动展开模型列表(R-G2)。
 
 ---
 

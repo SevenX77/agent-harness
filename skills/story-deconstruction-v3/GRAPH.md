@@ -26,15 +26,83 @@ phases:
   - event_timeline
   - story_analysis
   - global_synthesis
-  - subgraph
-  - logic
-  - agent
 ---
 
 <phase depends_on="input">segmentation</phase>
 <phase depends_on="segmentation">event_timeline</phase>
 <phase depends_on="event_timeline">story_analysis</phase>
 <phase depends_on="story_analysis" output>global_synthesis</phase>
-<phase>subgraph</phase>
-<phase>logic</phase>
-<phase>agent</phase>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

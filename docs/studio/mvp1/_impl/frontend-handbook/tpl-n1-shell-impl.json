@@ -158,7 +158,7 @@
    "n": 30,
    "cap": "copilot-role-slot-loading",
    "design_ref": "atom-30",
-   "current": "现状:已实现且符合。registrySettled/rolesSettled 在 finally 落定(成功失败都撤骨架);设置行按 settled 切 Skeleton↔pickers;RolePicker 图标 BrainCircuit。",
+   "current": "现状:已实现且符合。registrySettled/rolesSettled 在 finally 落定(成功失败都撤骨架);设置行按 settled 切 Skeleton↔pickers;RolePicker 图标 BrainCircuit。R6-1(2026-07-02):RolePicker 永不返回 null——0 个→禁用态「No copilot role」空锚点,≥1 个→下拉(1 个也可见);实机验证:删到只剩浮出的 Claude Opus 4.8 单角色,锚点仍显示(n1-32-role-anchor-single.png)。",
    "gap": "无。",
    "fe_status": "符合",
    "be_status": "n/a",
@@ -570,10 +570,10 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "role-picker 既有 8 例随图标替换全绿(无视觉细节锁死测试,SOP 纯视觉不加新单测)。"
+    "role-picker.test.tsx:R6-1 锚点用例——1 个角色仍渲染(never vanishes)、0 个角色渲染「No copilot role」空锚点;既有多选下拉与 onSelect 用例随之保留。"
    ],
    "layer2": [
-    "真机 Playwright 双路径:①带 token 成功路径——加载即见 Skeleton(aria-label=Loading copilot roles),settle 后骨架消失、role picker 出现且 svg.lucide-brain-circuit 在;②无 token 失败路径——roles/registry 401 落定后骨架同样撤下,不永挂。"
+    "真机 Playwright 双路径:①带 token 成功路径——加载即见 Skeleton(aria-label=Loading copilot roles),settle(~56s)后骨架消失、role picker 出现且 svg.lucide-brain-circuit 在;②无 token 失败路径——roles/registry 401 落定后骨架同样撤下,不永挂。R6-1:删到只剩单个浮出角色时锚点(Claude Opus 4.8)仍显示,不消失。"
    ],
    "screenshots": [
     {
@@ -583,6 +583,10 @@
     {
      "file": "n1-29-role-slot-settled.png",
      "caption": "2026-07-02 真机(R5-C):配置就绪后原地换成 route/role 选择器(BrainCircuit 图标)"
+    },
+    {
+     "file": "n1-32-role-anchor-single.png",
+     "caption": "2026-07-02 真机(R6-1):删到只剩单个角色时 role 锚点(Claude Opus 4.8)仍可见,不再消失"
     }
    ]
   },

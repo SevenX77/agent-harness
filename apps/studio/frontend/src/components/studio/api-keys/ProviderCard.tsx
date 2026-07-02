@@ -26,7 +26,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
+import { useDeleteConfirm, type DeleteConfirmRequest } from "@/components/ui/delete-confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tag } from "@/components/ui/tag"
@@ -263,18 +263,18 @@ function directPersistedTestResult(
   }
 }
 
+/**
+ * R6-2: the destructive confirm is now an AlertDialog owned by the parent
+ * (a nested dismissable layer that no longer collapses the Settings modal, the
+ * way a body-level toast did). This button stays hook-free — tests invoke it as
+ * a plain function — so it only signals intent via `onRequestDelete`; the parent
+ * turns that into `confirmDelete(buildProviderDeleteRequest(...))`.
+ */
 export function ProviderDeleteButton({
-  draftName,
-  onDelete,
+  onRequestDelete,
 }: {
-  draftName: string
-  onDelete: () => void
+  onRequestDelete: () => void
 }) {
-  // Tests invoke ProviderDeleteButton() directly as a plain function (not inside
-  // a React render tree), so it must use the global i18n.t singleton rather than
-  // the useTranslation() hook — the hook needs a live React dispatcher.
-  const displayName = draftName.trim() || i18n.t("apiKeys.card.thisProvider")
-
   return (
     <Button
       type="button"
@@ -283,18 +283,24 @@ export function ProviderDeleteButton({
       aria-label={i18n.t("apiKeys.card.aria.deleteProvider")}
       data-delete-toast-trigger={true}
       className="text-muted-foreground/70 hover:text-muted-foreground"
-      onClick={() => {
-        requestDeleteConfirmationToast({
-          id: `delete-provider-${displayName}`,
-          title: i18n.t("apiKeys.card.deleteConfirm.title", { displayName }),
-          description: i18n.t("apiKeys.card.deleteConfirm.description"),
-          onConfirm: onDelete,
-        })
-      }}
+      onClick={onRequestDelete}
     >
       <Trash2 className="size-4" />
     </Button>
   )
+}
+
+/** Confirm-request builder shared by every provider delete affordance. */
+export function buildProviderDeleteRequest(
+  draftName: string,
+  onDelete: () => void,
+): DeleteConfirmRequest {
+  const displayName = draftName.trim() || i18n.t("apiKeys.card.thisProvider")
+  return {
+    title: i18n.t("apiKeys.card.deleteConfirm.title", { displayName }),
+    description: i18n.t("apiKeys.card.deleteConfirm.description"),
+    onConfirm: onDelete,
+  }
 }
 
 function FieldCopyButton({ value, label, className }: { value: string; label: string; className?: string }) {
@@ -1579,6 +1585,7 @@ export function ProviderCard({
   onForceEndpointTest?: (endpointId: string) => void
 }) {
   const { t } = useTranslation("settings")
+  const { confirm: confirmDelete, dialog: deleteDialog } = useDeleteConfirm()
   const [visible, setVisible] = useState(false)
   const [apiKeyEditing, setApiKeyEditing] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
@@ -1782,10 +1789,10 @@ export function ProviderCard({
       removeRow()
       return
     }
-    requestDeleteConfirmationToast({
-      id: `delete-base-url-${draft.id}-${rowId}`,
+    confirmDelete({
       title: `Remove ${removedUrl}?`,
       description: "This will remove this Base URL and its generated endpoints from the provider.",
+      confirmLabel: "Remove",
       onConfirm: removeRow,
     })
   }
@@ -1905,6 +1912,7 @@ export function ProviderCard({
 
   return (
     <Card data-provider-id={draft.id}>
+      {deleteDialog}
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
         {providerIdentity ? (
           <TooltipProvider>
@@ -1956,12 +1964,7 @@ export function ProviderCard({
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => {
-                  requestDeleteConfirmationToast({
-                    id: `delete-provider-${draft.name}`,
-                    title: t("apiKeys.card.deleteConfirm.title", { displayName: draft.name }),
-                    description: t("apiKeys.card.deleteConfirm.description"),
-                    onConfirm: onDelete,
-                  })
+                  confirmDelete(buildProviderDeleteRequest(draft.name, onDelete))
                 }}
               >
                 <Trash2 className="size-3.5 mr-2" />

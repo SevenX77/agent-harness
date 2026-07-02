@@ -9,10 +9,13 @@ import {
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
+  endpointTooltipLines,
   representativeProviderUiState,
   routeTooltipLineStatus,
   sortOfficialRouteInfos,
   sortModelInfos,
+  verifiedSiblingProtocolsOnSameHost,
+  type EndpointSummary,
 } from "./ProviderCard"
 import type { CredentialsState, ModelInfo, TestStatus } from "../../../api/llm"
 import { providerTestParamsFingerprint } from "../settings/provider-utils"
@@ -1827,5 +1830,139 @@ describe("ProviderCard delete confirmation", () => {
 
     expect(html).toContain("Protocol not supported")
     expect(html).toContain("Re-probe protocol")
+  })
+})
+
+function makeEndpointSummary(overrides: Partial<EndpointSummary>): EndpointSummary {
+  return {
+    id: "endpoint",
+    label: "Qiniu",
+    baseUrl: "https://api.qnaigc.com/v1",
+    protocol: "openai_compatible",
+    status: "ok",
+    routeCount: 0,
+    sdkCount: 0,
+    profileCount: 0,
+    methodIds: [],
+    requestMapperIds: [],
+    profileCapabilities: [],
+    toolProtocol: "not_listed",
+    ...overrides,
+  }
+}
+
+describe("verifiedSiblingProtocolsOnSameHost", () => {
+  // Design §1.2 protocol matrix point 9: a protocol_unsupported cell is not a
+  // dead end — the capability lives in a verified sibling protocol on the SAME
+  // host (anthropic.qnaigc.com × OpenAI → same host × Anthropic). The tooltip
+  // must point there so the muted cell doesn't read as "this key/host is dead".
+  it("points an unsupported cell to the verified sibling protocol on the same host", () => {
+    const unsupported = makeEndpointSummary({
+      id: "an-openai",
+      baseUrl: "https://anthropic.qnaigc.com",
+      protocol: "openai_compatible",
+      status: "protocol_unsupported",
+    })
+    const endpoints = [
+      unsupported,
+      makeEndpointSummary({
+        id: "an-anthropic",
+        baseUrl: "https://anthropic.qnaigc.com",
+        protocol: "anthropic_compatible",
+        status: "ok",
+      }),
+    ]
+    expect(verifiedSiblingProtocolsOnSameHost(unsupported, endpoints)).toEqual([
+      "anthropic_compatible",
+    ])
+  })
+
+  it("lists every verified sibling protocol on the same host, de-duplicated and path-agnostic", () => {
+    const unsupported = makeEndpointSummary({
+      id: "api-gemini",
+      baseUrl: "https://api.qnaigc.com/v1",
+      protocol: "google_genai",
+      status: "protocol_unsupported",
+    })
+    const endpoints = [
+      unsupported,
+      makeEndpointSummary({
+        id: "api-openai",
+        baseUrl: "https://api.qnaigc.com/v1",
+        protocol: "openai_compatible",
+        status: "ok",
+      }),
+      // Same host, different path — still the same host.
+      makeEndpointSummary({
+        id: "api-anthropic",
+        baseUrl: "https://api.qnaigc.com",
+        protocol: "anthropic_compatible",
+        status: "ok",
+      }),
+    ]
+    expect(verifiedSiblingProtocolsOnSameHost(unsupported, endpoints)).toEqual([
+      "openai_compatible",
+      "anthropic_compatible",
+    ])
+  })
+
+  it("excludes a different host and any non-verified sibling", () => {
+    const unsupported = makeEndpointSummary({
+      id: "an-openai",
+      baseUrl: "https://anthropic.qnaigc.com",
+      protocol: "openai_compatible",
+      status: "protocol_unsupported",
+    })
+    const endpoints = [
+      unsupported,
+      // Different host — the redirect must stay on the SAME host.
+      makeEndpointSummary({
+        id: "other-host",
+        baseUrl: "https://api.qnaigc.com/v1",
+        protocol: "anthropic_compatible",
+        status: "ok",
+      }),
+      // Same host but itself unsupported — not a live route to redirect to.
+      makeEndpointSummary({
+        id: "an-gemini",
+        baseUrl: "https://anthropic.qnaigc.com",
+        protocol: "google_genai",
+        status: "protocol_unsupported",
+      }),
+    ]
+    expect(verifiedSiblingProtocolsOnSameHost(unsupported, endpoints)).toEqual([])
+  })
+})
+
+describe("endpointTooltipLines protocol_unsupported guidance", () => {
+  it("appends a redirect line naming the verified sibling protocol", () => {
+    const unsupported = makeEndpointSummary({
+      id: "an-openai",
+      baseUrl: "https://anthropic.qnaigc.com",
+      protocol: "openai_compatible",
+      status: "protocol_unsupported",
+    })
+    const joined = endpointTooltipLines(unsupported, ["anthropic_compatible"]).join(" ")
+    expect(joined).toContain("does not serve")
+    expect(joined).toContain("Anthropic-compatible")
+    expect(joined).toContain("use its")
+  })
+
+  it("falls back to a no-route line when the host serves no other protocol", () => {
+    const unsupported = makeEndpointSummary({
+      id: "solo",
+      baseUrl: "https://solo.example",
+      protocol: "google_genai",
+      status: "protocol_unsupported",
+    })
+    const joined = endpointTooltipLines(unsupported, []).join(" ")
+    expect(joined).toContain("does not serve")
+    expect(joined).not.toContain("use its")
+  })
+
+  it("adds no guidance line for a verified cell", () => {
+    const verified = makeEndpointSummary({ status: "ok" })
+    const joined = endpointTooltipLines(verified, []).join(" ")
+    expect(joined).not.toContain("does not serve")
   })
 })

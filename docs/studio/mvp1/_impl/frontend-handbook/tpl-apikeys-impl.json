@@ -333,19 +333,22 @@
    ],
    "shots": [
     "状态 untested→testing→verified(真模型调用真跑、验通才 verified)",
-    "unsupported 格子灰显 'Protocol not supported' + Re-probe 按钮(不再假报 Untested/Invalid API key)"
+    "unsupported 格子灰显 'Protocol not supported' + Re-probe 按钮(不再假报 Untested/Invalid API key)",
+    "unsupported 格子 tooltip 指路同域名活协议('This host does not serve the X protocol — use its Y route on the same host instead')"
    ],
    "fe_status": "符合",
    "layer1": [
     "契约测:断言官方卡与第三方卡的 Test 都打 POST /endpoints/{id}/test(官三都不再走『get-models 可达=ok』弱判定)。",
     "后端契约测:格子只用自身协议探测且失败不改写 protocol(test_endpoint_test_probes_only_its_own_protocol_and_never_rewrites_it);protocol_unsupported → 清 routes + 剥 role 引用(..._removes_routes_and_role_refs);半衰期门 30 天内跳过、force 绕过、31 天后自动复测(..._is_gated_within_half_life / ..._gate_expires_after_half_life);unsupported 不复用旧 verified(..._does_not_reuse_previously_verified);upsert 改协议 422、新建重复组合 422、存量重复容忍更新(test_upsert_endpoints_*)。",
     "gateway 契约测:裸 404/405 与 'Use /v1/messages instead' 指引 → protocol_unsupported;provider 错误体包裹的 404 仍 invalid_model(test_provider_probe.py)。",
-    "前端测:protocol_unsupported 直达 endpoint 状态、不再被 model-scope 掩成 untested(llm.test.ts);槽位按持久化协议、不按 id slug(SettingsPage.test.tsx);unsupported 芯片 + Re-probe 按钮渲染(ProviderCard.test.tsx)。"
+    "前端测:protocol_unsupported 直达 endpoint 状态、不再被 model-scope 掩成 untested(llm.test.ts);槽位按持久化协议、不按 id slug(SettingsPage.test.tsx);unsupported 芯片 + Re-probe 按钮渲染(ProviderCard.test.tsx)。",
+    "前端测(指路 tooltip,设计 §1.2 矩阵第 9 点):verifiedSiblingProtocolsOnSameHost 只挑同 hostname、status=ok、异协议的兄弟并去重(跨域名/未验证/自身协议全排除);endpointTooltipLines 对 unsupported 格子追加指路行(有兄弟→redirect 具名、无兄弟→no-route),verified 格子不加(ProviderCard.test.tsx)。"
    ],
    "layer2": [
     "真跑(真 qiniu key):点 Test 看 2 URL × 3 协议矩阵——4 个 verified 绿格子、google 格子 'Protocol not supported' 灰显、routes 清空。",
     "真跑:连点两轮 Test,确认 openai 格子协议零翻转、第二轮 unsupported 格子被跳过(runtime log endpoint_test_skipped + recheck 日期)。",
-    "真跑:点 unsupported 格子的 Re-probe 按钮,确认强制复测真打 provider 并刷新观察时间。"
+    "真跑:点 unsupported 格子的 Re-probe 按钮,确认强制复测真打 provider 并刷新观察时间。",
+    "真跑(真 qiniu key,headless Playwright 驱主 sidecar):hover 两个 unsupported 格子,aria-label/tooltip 指路——Gemini/api.qnaigc → 'use its OpenAI-compatible / Anthropic-compatible route'(两兄弟);OpenAI/anthropic.qnaigc → 'use its Anthropic-compatible route'(单兄弟);跨域名不串。"
    ],
    "screenshots": [
     {
@@ -359,9 +362,13 @@
     {
      "file": "n0-apikeys-25-unsupported-reprobe-closeup.png",
      "caption": "特写:unsupported 格子 muted 样式 + 单格子 Re-probe 按钮(?force=true 绕过 30 天半衰期门)"
+    },
+    {
+     "file": "n0-apikeys-25-unsupported-redirect-tooltip.png",
+     "caption": "特写(真 qiniu key):hover Gemini/api.qnaigc 灰格子,tooltip 在 Status 下方指路——'This host does not serve the Google GenAI protocol — use its OpenAI-compatible / Anthropic-compatible route on the same host instead',让用户看懂能力在同域名隔壁绿格子、不是这把 key 废了(设计 §1.2 矩阵第 9 点)"
     }
    ],
-   "fe_resync": "协议探测矩阵 + 半衰期门真机验证(2026-07-02)"
+   "fe_resync": "协议探测矩阵 + 半衰期门 + unsupported 指路 tooltip 真机验证(2026-07-02)"
   },
   {
    "covers": "#26 available-endpoints-summary",

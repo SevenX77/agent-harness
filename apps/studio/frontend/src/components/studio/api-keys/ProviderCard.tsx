@@ -424,7 +424,7 @@ function BaseUrlReachabilityIcon({ state, url }: { state: BaseUrlReachabilitySta
   )
 }
 
-type EndpointSummary = {
+export type EndpointSummary = {
   id: string
   label: string
   baseUrl: string
@@ -459,7 +459,15 @@ function AvailableEndpointSummary({
         <TooltipProvider>
           {endpoints.map((endpoint) => {
             const endpointLabel = `${endpointProtocolShortLabel(endpoint.protocol)} / ${endpointHostLabel(endpoint.baseUrl || endpoint.id)}`
-            const ariaLabel = endpointTooltipText(endpoint)
+            // Design §1.2 matrix point 9: an unsupported cell points to the
+            // verified sibling protocol on the SAME host, so its muted state
+            // reads as "the capability is in the neighbouring route", not
+            // "this key/host is dead".
+            const siblingProtocols =
+              endpoint.status === "protocol_unsupported"
+                ? verifiedSiblingProtocolsOnSameHost(endpoint, endpoints)
+                : []
+            const ariaLabel = endpointTooltipText(endpoint, siblingProtocols)
             return (
               <span key={endpoint.id} className="inline-flex max-w-full items-center gap-0.5">
                 <Tooltip>
@@ -491,7 +499,7 @@ function AvailableEndpointSummary({
                     className={diagnosticTooltipContentClassName}
                     data-allow-native-double-click
                   >
-                    <EndpointTooltipContent endpoint={endpoint} />
+                    <EndpointTooltipContent endpoint={endpoint} siblingProtocols={siblingProtocols} />
                   </TooltipContent>
                 </Tooltip>
                 {endpoint.status === "protocol_unsupported" && onForceEndpointTest ? (
@@ -519,8 +527,14 @@ function AvailableEndpointSummary({
   )
 }
 
-function EndpointTooltipContent({ endpoint }: { endpoint: EndpointSummary }) {
-  const lines = endpointTooltipLines(endpoint)
+function EndpointTooltipContent({
+  endpoint,
+  siblingProtocols = [],
+}: {
+  endpoint: EndpointSummary
+  siblingProtocols?: ProviderType[]
+}) {
+  const lines = endpointTooltipLines(endpoint, siblingProtocols)
   return (
     <div className="flex min-w-0 max-w-full select-text flex-col gap-0.5 whitespace-pre-wrap text-left">
       {lines.map((line) => (
@@ -530,11 +544,54 @@ function EndpointTooltipContent({ endpoint }: { endpoint: EndpointSummary }) {
   )
 }
 
-function endpointTooltipText(endpoint: EndpointSummary): string {
-  return endpointTooltipLines(endpoint).join(". ")
+function endpointTooltipText(endpoint: EndpointSummary, siblingProtocols: ProviderType[] = []): string {
+  return endpointTooltipLines(endpoint, siblingProtocols).join(". ")
 }
 
-function endpointTooltipLines(endpoint: EndpointSummary): string[] {
+/**
+ * Verified sibling protocols served by the SAME host as `endpoint`.
+ *
+ * Design §1.2 protocol matrix point 9: a `protocol_unsupported` cell is not a
+ * dead end — the provider's own signal ("Use /v1/messages instead") points at a
+ * sibling protocol on the same host. Host identity is the hostname alone (path
+ * is irrelevant: `api.qnaigc.com/v1` and `api.qnaigc.com` are the same host);
+ * `anthropic.qnaigc.com` and `api.qnaigc.com` are DIFFERENT hosts. Only
+ * `status === "ok"` (verified) cells are live redirect targets, and the
+ * endpoint's own protocol is excluded.
+ */
+export function verifiedSiblingProtocolsOnSameHost(
+  endpoint: EndpointSummary,
+  allEndpoints: EndpointSummary[],
+): ProviderType[] {
+  const host = endpointHostname(endpoint.baseUrl)
+  if (!host) return []
+  const seen = new Set<ProviderType>()
+  const result: ProviderType[] = []
+  for (const other of allEndpoints) {
+    if (other.id === endpoint.id) continue
+    if (other.status !== "ok") continue
+    if (!other.protocol || other.protocol === endpoint.protocol) continue
+    if (endpointHostname(other.baseUrl) !== host) continue
+    if (seen.has(other.protocol)) continue
+    seen.add(other.protocol)
+    result.push(other.protocol)
+  }
+  return result
+}
+
+function endpointHostname(value: string): string {
+  if (!value) return ""
+  try {
+    return new URL(value).hostname.toLowerCase()
+  } catch {
+    return value.replace(/^https?:\/\//, "").replace(/[/:?#].*$/, "").toLowerCase()
+  }
+}
+
+export function endpointTooltipLines(
+  endpoint: EndpointSummary,
+  siblingProtocols: ProviderType[] = [],
+): string[] {
   const inputBaseUrl = endpoint.baseUrl || i18n.t("apiKeys.card.tooltip.notSet")
   const runtimeBaseUrl = endpoint.runtimeBaseUrl || endpoint.baseUrl || ""
   const toolProtocolStatus = endpoint.toolProtocol === "supported"
@@ -547,6 +604,18 @@ function endpointTooltipLines(endpoint: EndpointSummary): string[] {
     ...(runtimeBaseUrl && runtimeBaseUrl !== endpoint.baseUrl ? [i18n.t("apiKeys.card.tooltip.runtimeUrl", { url: runtimeBaseUrl })] : []),
     i18n.t("apiKeys.card.tooltip.protocol", { protocol: endpointProtocolLabel(endpoint.protocol) }),
     i18n.t("apiKeys.card.tooltip.status", { status: endpointStatusLabel(endpoint.status) }),
+    ...(endpoint.status === "protocol_unsupported"
+      ? [
+          siblingProtocols.length > 0
+            ? i18n.t("apiKeys.card.tooltip.protocolUnsupportedRedirect", {
+                protocol: endpointProtocolLabel(endpoint.protocol),
+                siblings: siblingProtocols.map((protocol) => endpointProtocolLabel(protocol)).join(" / "),
+              })
+            : i18n.t("apiKeys.card.tooltip.protocolUnsupportedNoRoute", {
+                protocol: endpointProtocolLabel(endpoint.protocol),
+              }),
+        ]
+      : []),
     ...(endpoint.errorCode === "no_model_available"
       ? [i18n.t("apiKeys.card.tooltip.noModelWarning")]
       : []),

@@ -1,10 +1,16 @@
 ---
 doc: task-spec-standard
 status: drafted（v1;2026-06-06 建立,gateway 实施首用）
-applies_to: 所有由 Codex 写测试/审查、由 Gemini 实现的实施任务书
+applies_to: 走全局重型多 agent 流水线的实施任务书(见下「适用边界」;Studio 功能开发不走本标准)
 ---
 
 # 任务书写作标准(Task-Spec Authoring Standard)v1
+
+> **适用边界(2026-07-02 收窄)**:本标准只约束**退回全局重型多 agent 流水线**的任务——
+> 纯 engine/gateway 内部重构、Rust 层(`apps/studio/tauri`)、顶层架构调整。
+> **Studio 功能开发(前端驱动、允许全栈)不走本流水线**:按
+> `apps/studio/frontend/CLAUDE.md` 单 agent SOP 直接实施,不产需求书 / kiro spec /
+> 实施任务书(交接模板见 `docs/development/FRONTEND_HANDOFF_PROMPT.md`)。
 
 > **谁用**:Claude(架构师)写**需求书**的统一格式;实施任务书(kiro `tasks.md`)由 Codex 在契约门后写,**不是** Claude 的产物。
 > **两个产物别混**:① **需求书** = Claude 写,流水线**输入**(意图/范围/owns_files/SSOT/测试须覆盖什么),不含实现步骤拆分;② **实施任务书** = Codex 写,契约门过后据**已批准测试**拆实现步骤,并生成给 Gemini 的可复制实施 prompt。

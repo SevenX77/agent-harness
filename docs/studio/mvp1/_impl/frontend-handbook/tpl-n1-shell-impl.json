@@ -143,6 +143,16 @@
    "fe_status": "符合",
    "be_status": "已实现",
    "be_dep": "已就绪:全部在 studio 后端 copilot.py,无 engine/gateway 改动。"
+  },
+  {
+   "n": 29,
+   "cap": "copilot-tab-strip-wheel",
+   "design_ref": "atom-29",
+   "current": "现状:已实现且符合。consumeHorizontalWheel 纯函数 + viewport 原生 wheel 监听(passive:false);ScrollBar horizontal hover 型细条(h-1.5)取代 R3 全隐;SessionTabs/SessionTabsView 拆分保住无 testing-library 的元素树测试。",
+   "gap": "无。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "无后端依赖。"
   }
  ],
  "plan": [
@@ -501,6 +511,25 @@
     {
      "file": "n1-27-true-streaming-tools.png",
      "caption": "2026-07-02 真机(R5):工具调用按时序逐个转录(Glob/Read/Grep 各带开始+完成卡),文本段与工具卡交错"
+    }
+   ]
+  },
+  {
+   "covers": "#29 copilot-tab-strip-wheel",
+   "atoms": [
+    29
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "session-tabs 单测(14 例):consumeHorizontalWheel 纵滚转横滚且消费/无溢出不动/横向手势放行;既有 label/close/switch/new 测试随 View 拆分继续绿。"
+   ],
+   "layer2": [
+    "真机 Playwright(worktree Vite,store 造 8 tab 溢出 630>306):WheelEvent deltaY=120 → scrollLeft 0→120 且事件被消费(页面不纵滚);deltaY=-50 → 120→70;deltaX 主导的手势不拦截;悬停出 6px 横向滚动条(data-state=visible)。"
+   ],
+   "screenshots": [
+    {
+     "file": "n1-28-tab-strip-wheel-hover.png",
+     "caption": "2026-07-02 真机(R5-B):多 tab 溢出时悬停显示细横向滚动条,每 tab 带关闭按钮"
     }
    ]
   }

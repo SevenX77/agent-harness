@@ -1,7 +1,8 @@
+import React, { useEffect, useRef } from 'react'
 import { Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { CopilotSession } from '../../store/copilotStore'
@@ -44,6 +45,27 @@ export function sessionTabs(
   }))
 }
 
+/**
+ * R5-B (F1): translate a dominant VERTICAL wheel gesture into horizontal strip
+ * scroll. Returns whether the event was consumed (caller preventDefaults then).
+ * Native horizontal gestures (trackpad pans, |deltaX| >= |deltaY|) and strips
+ * without overflow are left to the browser. Pure + exported for unit tests.
+ */
+export function consumeHorizontalWheel(
+  viewport: { scrollLeft: number; scrollWidth: number; clientWidth: number },
+  deltaX: number,
+  deltaY: number,
+): boolean {
+  if (viewport.scrollWidth <= viewport.clientWidth) {
+    return false
+  }
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    return false
+  }
+  viewport.scrollLeft += deltaY
+  return true
+}
+
 interface SessionTabsProps {
   sessions: CopilotSession[]
   activeSessionId: string | null
@@ -58,7 +80,40 @@ interface SessionTabsProps {
  * non-empty conversation — a single empty chat needs no switcher. Reuses the
  * shadcn Button; no bespoke UI.
  */
-export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew, onClose }: SessionTabsProps) {
+export function SessionTabs(props: SessionTabsProps) {
+  const stripRef = useRef<HTMLDivElement | null>(null)
+
+  // R5-B: vertical wheel over the strip scrolls it horizontally. Native wheel
+  // listener (not React onWheel) because preventDefault needs passive:false.
+  // No dep array: the viewport mounts/unmounts with the strip's own visibility
+  // rule, so rebinding per render keeps the listener attached to the live node.
+  useEffect(() => {
+    const viewport = stripRef.current?.querySelector<HTMLElement>('[data-slot=scroll-area-viewport]')
+    if (!viewport) {
+      return
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (consumeHorizontalWheel(viewport, event.deltaX, event.deltaY)) {
+        event.preventDefault()
+      }
+    }
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  })
+
+  return <SessionTabsView {...props} stripRef={stripRef} />
+}
+
+/** Hook-free presentational strip — kept separate so interaction tests can walk
+ * the element tree by calling it directly (project has no testing-library). */
+export function SessionTabsView({
+  sessions,
+  activeSessionId,
+  onSwitch,
+  onNew,
+  onClose,
+  stripRef,
+}: SessionTabsProps & { stripRef?: React.Ref<HTMLDivElement> }) {
   const tabs = sessionTabs(sessions, activeSessionId)
   const hasContent = sessions.some((session) => session.messages.length > 0)
   if (tabs.length <= 1 && !hasContent) {
@@ -67,9 +122,13 @@ export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew, onClos
 
   return (
     <div className="flex items-center gap-1 border-b border-sidebar-border px-2 py-1.5">
-      {/* R3: ScrollArea keeps the strip a single horizontal lane with the native
-          scrollbar hidden (never a system scrollbar widget inside the bar). */}
-      <ScrollArea className="min-w-0 flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!flex [&_[data-slot=scroll-area-viewport]>div]:items-center [&_[data-slot=scroll-area-viewport]>div]:gap-1">
+      {/* R3: ScrollArea keeps the strip a single horizontal lane (never a system
+          scrollbar widget). R5-B: a THIN hover-only horizontal ScrollBar replaces
+          the old fully-hidden one — overflow must be discoverable. */}
+      <ScrollArea
+        ref={stripRef}
+        className="min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!flex [&_[data-slot=scroll-area-viewport]>div]:items-center [&_[data-slot=scroll-area-viewport]>div]:gap-1"
+      >
         {tabs.map((tab) => (
           <span
             key={tab.id}
@@ -106,6 +165,10 @@ export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew, onClos
             </Button>
           </span>
         ))}
+        <ScrollBar
+          orientation="horizontal"
+          className="data-horizontal:h-1.5 data-horizontal:border-t-0"
+        />
       </ScrollArea>
       <Tooltip>
         <TooltipTrigger asChild>

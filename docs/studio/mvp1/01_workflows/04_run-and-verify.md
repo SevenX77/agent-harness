@@ -75,6 +75,7 @@
 ## D. trace-observability(去黑盒)
 ### 核心概念:线上 dot = 节点间状态机转移点
 dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后、下节点 start 前的所有操作**(黑板 reduce/聚合、输入文件注入、输出落盘、截断/摘要/存储)。点 dot → ① 看该刻黑板内容 ② 看"上节点 end→下节点 start"的全部操作记录。并联线从 dot 出发 = 并联节点输入由此黑板统一筛选分发。
+**dot 双态(PM 2026-07-02 扩充)**:未跑之前 dot 也要像 node 的 io 一样给出**静态黑板字段推断**("跑到这个 dot 时黑板上应该有哪些字段",逐边不同,随 io 声明/拓扑编辑即时更新);跑后切换为该 run 的真实快照/操作记录。原话与推导规则留底于 [`trace-observability` F4](../02_capabilities/trace-observability/mvp1-alignment.md)。
 
 ### 看 trace 两态(P2)
 - **run 时**:自动开面板,事件流式进;**agent 输出流式 + 分类折叠摘要**(参考 agent IDE「Worked for ▾ / Explored ▾ / Thought ▾」,一行摘要点开看详情 + 末尾自然语言总结);节点灯随跑。
@@ -88,7 +89,7 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 | D3 | run 概要(focus 空画布=全局) | target-design |
 | D4 | 看完整 trace:timeline + 只读编辑器(人读格式) | target-design |
 | D5 | focus 某节点 → 只显该节点 trace + 编辑器跳该节点范围 | orphan(过滤)+ target(跳) |
-| D6 | 点线上 dot → 黑板状态机内容 + "上节点 end→下节点 start"操作记录 | placeholder(定义已明确) |
+| D6 | 点线上 dot → 双态:未跑=静态黑板字段推断;跑后=黑板状态机内容 + "上节点 end→下节点 start"操作记录 | placeholder(定义已明确;双态见核心概念) |
 | D7 | 点状态 → 编辑器只读看完整黑板详情(深层可折叠) | target-design |
 | D8 | Prompt 透视:点 llm_call → 模板/喂入变量/渲染后 三视图 | orphan(PromptInspector) |
 | D9 | agent 节点 '+' 内联展开执行子树 | target-design |

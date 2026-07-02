@@ -24,6 +24,61 @@ def test_filter_runtime_inputs_uses_declared_schema_properties() -> None:
     assert filter_runtime_inputs({"topic": "A", "extra": True}, schema) == {"topic": "A"}
 
 
+def test_build_phase_input_missing_required_field_raises_state_mapping_fatal() -> None:
+    """MVP1 contract (compile-rules §2.3 / graph-exec §3): slicing must fail fast
+    when a declared-required input field is absent from the blackboard, instead
+    of silently dropping it and letting the phase run on partial input."""
+    mapper = StateMapper(
+        input_schema={
+            "type": "object",
+            "required": ["topic", "chapter"],
+            "properties": {"topic": {"type": "string"}, "chapter": {"type": "object"}},
+        },
+        phase_id="analyze",
+    )
+    state = WorkflowState(
+        data=BusinessData.model_validate({"topic": "A"}),
+        flow=FrameworkState(),
+        messages=[],
+    )
+
+    with pytest.raises(GraphAgentFatalError) as exc_info:
+        mapper.build_phase_input(state)
+
+    assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
+    assert exc_info.value.payload.phase_id == "analyze"
+    assert "chapter" in str(exc_info.value)
+
+
+def test_build_phase_input_passes_when_required_fields_present() -> None:
+    mapper = StateMapper(
+        input_schema={
+            "type": "object",
+            "required": ["topic"],
+            "properties": {"topic": {"type": "string"}},
+        },
+        phase_id="analyze",
+    )
+    state = WorkflowState(
+        data=BusinessData.model_validate({"topic": "A", "extra": True}),
+        flow=FrameworkState(),
+        messages=[],
+    )
+
+    phase_input = mapper.build_phase_input(state)
+
+    assert phase_input["data"].model_dump() == {"topic": "A"}
+
+
+def test_ensure_no_input_write_stub_is_deleted() -> None:
+    """The no-op ensure_no_input_write stub (documented code debt) must be gone,
+    not silently exported as if it protected anything."""
+    import graph_agent.runtime.state_mapper as state_mapper_module
+
+    assert not hasattr(state_mapper_module, "ensure_no_input_write")
+    assert "ensure_no_input_write" not in state_mapper_module.__all__
+
+
 def test_state_mapper_rejects_undeclared_output_keys() -> None:
     mapper = StateMapper(output_schema={"type": "object", "properties": {"answer": {}}})
     state = WorkflowState(data=BusinessData(), flow=FrameworkState(), messages=[])

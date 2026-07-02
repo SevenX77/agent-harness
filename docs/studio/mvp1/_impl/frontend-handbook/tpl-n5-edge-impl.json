@@ -2,7 +2,7 @@
  "id": "n5_edge_impl",
  "title": "N5.3 边 dot Context 篡改 · 实施详情",
  "design_ref": "n5_edge_design",
- "intro": "本页是 N5.3(边 dot 篡改面)前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_edge_design(原子 #7–#9)。代码按「文件名 + 函数/对象名」引用。核心结论:只读黑板查看(#7)与篡改续跑链路(#9)已打通,唯一偏差是**篡改编辑器组件**——现状用 Textarea,spec 决策 Q3 要复用可写 Monaco(trace 只读编辑器切 readOnly)。续跑/事件机制见 mech_n5_resume / mech_n5_events。 UI 技术债(触碰时改):ContextEdge.tsx 现有 #27272a / var(--primary,#6366f1) 等硬编码十六进制 + zinc class,违 FRONTEND_UI_SPEC 语义 token 原则——改边篡改 UI 时一并换语义 token。",
+ "intro": "本页是 dot 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_edge_design(原子 #7–#9 + #14)。代码按「文件名 + 函数/对象名」引用。核心结论:运行期只读黑板查看(#7)、篡改编辑(#8,Monaco 已达成 Q3)与篡改续跑链路(#9)已打通;**2026-07-02 新增目标 #14 dot 静态推断**(未跑时按拓扑+io 声明推导该边字段,替代空态)未实施。续跑/事件机制见 mech_n5_resume / mech_n5_events。",
  "functions": [
   {
    "n": 7,
@@ -35,14 +35,26 @@
    "fe_status": "符合",
    "be_status": "契约问题",
    "be_dep": "context_overrides 注入后端已实现;⚠ 但 edge checkpoint_id/ns 来自事件 payload,而 input_dispatch 等事件不带该字段(sidecar 不 enrich)——真跑篡改续跑会缺 checkpoint、退化为最近 checkpoint,定位不稳。需 engine 事件携带或 sidecar enrich(见 mech_n5_events)。"
+  },
+  {
+   "n": 14,
+   "cap": "edge-dot-static-inference",
+   "design_ref": "atom-14",
+   "current": "现状:已实现且符合。staticEdgeInference 纯函数(根 io.inputs ∪ 祖先 io.outputs(最近祖先覆盖)∪ target source:'file' 注入;终端边→root io.outputs 为消费者;字段真相读 files frontmatter、拓扑用 graph_topology.depends_on)+ EdgeContextView StaticInferenceBody(隐藏 Tamper/Resume/Operations)+ GraphCanvas 无事件回退 + tooltip 语义;6 例纯函数测试 + 1 例视图测试。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "无后端依赖(前端按拓扑+io 声明推导;engine graph-exec E4 把 canvas 黑板可视化划给前端)。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "2026-07-02:未实施→符合(同轮实施 + 真机验证)"
   }
  ],
  "plan": [
   {
    "step": 1,
-   "what": "#8 edge-blackboard-tamper-edit:把边 Context 面板的篡改编辑器从 Textarea 换成复用 trace 的可写 Monaco(LazyMonacoPanel 切 readOnly=false),达成决策 Q3;保留 tampering 开关 + edgeTamperResumeOptionsFromJson 校验 + diff/审计。",
-   "depends_on": "前端:接入已有 Monaco(LazyMonacoPanel)替换 Textarea,复用现有校验/续跑链。后端不动。",
-   "why": "纯前端组件替换、零后端依赖;只读查看(#7)与下游续跑(#9)已符合,本节点唯一实质改动就是编辑器组件对齐 Q3。",
+   "what": "#14 edge-dot-static-inference:新增静态黑板推断纯选择器(TDD:拓扑+io 声明→逐边字段集,含 source:'file' 注入与顺序覆盖语义)→ EdgeContextView 双态(无运行事件=静态推断视图,有=真实快照)→ ContextEdge tooltip 语义更新。",
+   "depends_on": "前端独立(推导数据全在 skillDetail;无后端依赖)。",
+   "why": "2026-07-02 PM 新增目标:dot 在没跑之前也要像 node 的 io 一样给出 schema 推断;#7-#9 运行期链路已符合,本节点当前唯一实质工程就是这条。",
    "block": "前端独立"
   }
  ],
@@ -54,12 +66,12 @@
    ],
    "shots": [
     "点边 dot 展开该边真实黑板快照(只读)+ changed_keys 高亮",
-    "无匹配事件时显示空态(非 mock 假数据)"
+    "无匹配事件时不回退 mock(#14 落地后该态显示静态推断)"
    ],
    "fe_status": "符合",
    "layer1": [
     "喂含该边 input_dispatch 的事件流 → 断言 edgeContextFromEvents 取出 blackboard_snapshot/changed_keys/checkpoint,EdgeContextView 只读渲键值 + changed_keys 高亮。",
-    "无匹配事件 → 断言返回 null、面板显空态(不回退 mock)。"
+    "无匹配事件 → 断言返回 null、不回退 mock(该态的展示升级为静态推断,归 #14)。"
    ],
    "layer2": [
     "真跑:真跑后点一条边 dot,确认展开的是该边上轮真实黑板、变更键高亮,截图。"
@@ -102,6 +114,31 @@
    ],
    "layer2": [
     "真跑(关键):真跑后点一条边 dot,改黑板某业务字段存盘,点下游 Resume,核对下游确实拿到篡改后的值(后端 _apply_resume_context_overrides 合并),截图。"
+   ]
+  },
+  {
+   "covers": "#14 edge-dot-static-inference(dot 静态推断)",
+   "atoms": [
+    14
+   ],
+   "shots": [
+    "未跑时点不同边的 dot,各自显示该边的静态字段推断(逐边不同)",
+    "改某节点 io 声明/拓扑后,dot 推断即时更新;选中某次 run 后切回真实快照"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:断言静态推断选择器存在且对样例拓扑推导正确(现状函数不存在先红)。",
+    "GREEN:断言逐边字段集 = 根 io.inputs ∪ 祖先 io.outputs ∪ source:'file' 注入;同名顺序覆盖取最近祖先;下游 io.inputs 切片字段被标出;并联分支各自独立。",
+    "断言 EdgeContextView 无运行事件时渲染静态推断视图(非空态),有事件时保持真实视图;ContextEdge hasTraceData=false 态 tooltip 为字段推断语义。"
+   ],
+   "layer2": [
+    "真跑:未跑先点几条边核对推断;跑一次后再点同一条边核对切换为真实快照,截图前后对比。"
+   ],
+   "screenshots": [
+    {
+     "file": "n5-14-dot-static-inference.png",
+     "caption": "未跑时点 segmentation→event_timeline 边 dot:静态推断列出 segmentation_result(from segmentation,标 → event_timeline input)、chapters/project_id(from input)"
+    }
    ]
   }
  ]

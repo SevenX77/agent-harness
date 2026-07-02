@@ -198,6 +198,7 @@ export function Panels({
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
         onFileOpen={onFileOpen}
+        onPhaseFileSave={onPhaseFileSave}
       />
     )
   }

@@ -12,7 +12,7 @@
       "artifact 配置：applyOutputArtifactPathToGraph 给 io.outputs.<字段> 写 {target:'artifact', path} → serialize 落盘（配置期）",
       "artifact 落盘（运行期）：引擎 io/manager 认 target='artifact' 走 artifact_saver → 解析到 .workspace/runs/<id>/artifacts/<path>",
       "子图引用：subgraph phase 的 path（绝对路径）→ resolveSubgraphReference 判 resolved/missing/migration-required → GET child-graph-topology 拉子图真实拓扑预览",
-      "子图 io 校验(编译期):引擎 loader 取父/子图 io.outputs,parent_outputs ≠ child_outputs 报 F-v3-subgraph-io-mismatch(仅比 outputs 集合是否相等)——G2 要求删此校验;子图本身已按绝对 path 解析"
+      "子图 io 校验(编译期):旧 outputs 1:1 fatal(F-v3-subgraph-io-mismatch)已删——loader _validate_subgraph_io_contracts 只做递归子图编译;子图像普通节点由 StateMapper 按各自 io 声明切片/合并(G2 已落);子图按绝对 path 解析"
     ]
   },
   "submodules": [
@@ -25,9 +25,9 @@
       "diagram": "",
       "rules": [
         "io.inputs/io.outputs 各是一份 properties 字段表（字段名 + 类型）；它是 GRAPH.md frontmatter 的一部分，随 serialize 落盘，无独立 io 端点。",
-        "前端字段增删/改名/改类型直写 GRAPH.md io.inputs.properties；inputContractView 只读投影 + 出种子 JSON 供 schema-infer 文本框预填。",
+        "面板不做 schema 字段表单(D-IO-PREVIEW 2026-07-02):i/o 面板显示按声明 schema 推导的实例预览(jsonExampleFromSchema,只读),schema 本体编辑走 copilot 或直接打开源文件。",
         "旧版投影的 input/schema.json、input/sample.json 假文件（磁盘上不存在、autosave 写死路径丢数据）已删。",
-        "拖入 JSON 文本经 inferJsonSchemaFromText 推断 schema → applyInputSchemaToGraph 写回（R3 input files 导入）。"
+        "lib/schema-infer.ts 纯函数保留(inferJsonSchemaFromText / applyInputSchemaToGraph / applyImportedFileFieldToGraph / applyOutputArtifactPathToGraph),供面板 input files / output artifacts 区的导入与路径入口调用(UI 入口按设计页 #26/#28/#29 补回)。"
       ],
       "do": [
         "io 字段直写 GRAPH.md inline schema",
@@ -37,7 +37,7 @@
         "不投影磁盘不存在的假文件",
         "不在前端持第二份 io 真相"
       ],
-      "deviation": "逐节点 io（每个节点都挂 i/o 面板编辑 io+artifact）的完整 target 形态仍在收敛（见设计页 #27）；『任一 i/o 界面导入文件=导入字段进状态机』(G2) 现仅 input 节点侧（#28）。"
+      "deviation": "面板已是 per-node 实例预览(#25/#27 符合);缺口 = input files 区(测试输入 #26 + source:file 导入 #28)、output artifacts 路径入口(#29)、golden 入口(#31)未挂载——PR #268 简化面板时移除/未接,按 2026-07-02 新设计补回。"
     },
     {
       "name": "artifact 落盘（G3）",

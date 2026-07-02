@@ -176,7 +176,7 @@ describe('ModelPicker', () => {
     expect(html).toContain('data-slot="button"')
   })
 
-  it('shows a disabled placeholder without role data', () => {
+  it('renders nothing without role data (no dead placeholder controls)', () => {
     const html = renderToStaticMarkup(
       <ModelPicker
         role={null}
@@ -186,8 +186,20 @@ describe('ModelPicker', () => {
       />,
     )
 
-    expect(html).toContain('disabled=""')
-    expect(html).toContain('Copilot route config unavailable')
+    expect(html).toBe('')
+  })
+
+  it('hides the icon variant when the chain has a single route (F6: nothing to choose)', () => {
+    const html = renderToStaticMarkup(
+      <ModelPicker
+        role={{ fallback_chain: [{ route_id: 'anthropic-official:claude-sonnet', runtime_settings: {} }] }}
+        registry={registry}
+        selectedRouteId="anthropic-official:claude-sonnet"
+        onSelect={() => undefined}
+      />,
+    )
+
+    expect(html).toBe('')
   })
 
   it('returns the first available route', () => {

@@ -531,8 +531,8 @@ export function CopilotPanel({
         </div>
       ) : null}
 
-      <form onSubmit={submit} className="p-3 shrink-0">
-        <div className="studio-copilot-input studio-canvas-input-surface flex flex-col gap-2 rounded-md border px-2.5 py-2 transition-colors focus-within:[border-color:var(--studio-canvas-accent-muted)]">
+      <form onSubmit={submit} className="shrink-0 space-y-1.5 p-3 pt-2">
+        <div className="studio-copilot-input studio-canvas-input-surface flex flex-col gap-1 rounded-md border px-2.5 py-2 transition-colors focus-within:[border-color:var(--studio-canvas-accent-muted)]">
           <textarea
             value={draft}
             onChange={(event) => {
@@ -545,20 +545,9 @@ export function CopilotPanel({
             className="min-h-[60px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
             placeholder="Use '@' to mention nodes..."
           />
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-0.5">
-              <ModelPicker
-                role={pickerRole}
-                registry={registry}
-                selectedRouteId={selectedRouteId || defaultRouteId}
-                onSelect={selectRoute}
-              />
-              <RolePicker
-                options={roleOptions}
-                selectedRole={selectedRoleKey}
-                onSelect={setSelectedRole}
-              />
-            </div>
+          {/* F6: inside the bordered box only the send action lives (stop joins it
+              with F7-③ interrupt); every settings control sits BELOW the box. */}
+          <div className="flex items-center justify-end">
             <button
               type="submit"
               disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
@@ -572,6 +561,21 @@ export function CopilotPanel({
               <ArrowUp className={`size-3.5 ${!draft.trim() ? 'text-muted-foreground' : ''}`} />
             </button>
           </div>
+        </div>
+        {/* F7 context actions (attach / @mention) join the left side of this row
+            once they are functional — no dead placeholders. */}
+        <div className="flex items-center justify-end gap-0.5">
+          <ModelPicker
+            role={pickerRole}
+            registry={registry}
+            selectedRouteId={selectedRouteId || defaultRouteId}
+            onSelect={selectRoute}
+          />
+          <RolePicker
+            options={roleOptions}
+            selectedRole={selectedRoleKey}
+            onSelect={setSelectedRole}
+          />
         </div>
       </form>
     </aside>

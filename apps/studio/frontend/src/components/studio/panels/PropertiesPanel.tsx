@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import useSWR from "swr"
 import { AxiosError } from "axios"
-import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, Loader2, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -2331,7 +2331,7 @@ export function RoleTestControl({
       )}
       <Button
         type="button"
-        size="icon-sm"
+        size="icon"
         variant="default"
         data-llm-role-test-trigger="true"
         aria-label={roleName.trim() ? `Test LLM role ${roleName}` : "Test LLM role"}
@@ -2606,38 +2606,38 @@ function LlmRoleField({
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
       <Field orientation="horizontal" className="items-center justify-between gap-3">
-        <YamlNestedFieldLabel
-          htmlFor="phase-llm-role-default"
-          className="min-w-0"
-          onClick={(event) => event.preventDefault()}
-        >
-          Use graph default
-        </YamlNestedFieldLabel>
-        <div className="flex items-center gap-2">
-          <Switch
-            id="phase-llm-role-default"
-            size="sm"
-            checked={useGraphDefault}
-            aria-label="Use graph default llm_role"
-            onCheckedChange={onUseGraphDefaultChange}
-          />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="secondary"
-                className={YAML_ICON_BUTTON_CLASS}
-                aria-label="Open graph properties"
-                data-llm-role-graph-trigger="true"
-                onClick={() => onSelectGraph?.()}
-              >
-                <Settings2 className="size-3.5" aria-hidden />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open graph properties</TooltipContent>
-          </Tooltip>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <YamlNestedFieldLabel
+            htmlFor="phase-llm-role-default"
+            className="min-w-0"
+            onClick={(event) => event.preventDefault()}
+          >
+            Use graph default
+          </YamlNestedFieldLabel>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="Open graph properties"
+                  data-llm-role-graph-trigger="true"
+                  onClick={() => onSelectGraph?.()}
+                >
+                  <Settings className="size-3.5" aria-hidden />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Open graph properties</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
+        <Switch
+          id="phase-llm-role-default"
+          size="sm"
+          checked={useGraphDefault}
+          aria-label="Use graph default llm_role"
+          onCheckedChange={onUseGraphDefaultChange}
+        />
       </Field>
       <div className="space-y-2">
         <div
@@ -3233,7 +3233,7 @@ export function LlmCompareCandidateRow({
           ) : null}
           <Button
             type="button"
-            size="icon-sm"
+            size="icon"
             variant="default"
             data-llm-compare-test-trigger="true"
             aria-label={`Test compare LLM ${modelLabel}`}
@@ -3246,7 +3246,7 @@ export function LlmCompareCandidateRow({
           </Button>
           <Button
             type="button"
-            size="icon-sm"
+            size="icon"
             variant="secondary"
             className={YAML_ICON_BUTTON_CLASS}
             aria-label={`Edit compare LLM ${modelLabel}`}
@@ -3256,7 +3256,7 @@ export function LlmCompareCandidateRow({
           </Button>
           <Button
             type="button"
-            size="icon-sm"
+            size="icon"
             variant="secondary"
             className={YAML_ICON_BUTTON_CLASS}
             aria-label="Remove compare LLM"

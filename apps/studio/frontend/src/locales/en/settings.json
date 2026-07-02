@@ -309,6 +309,8 @@
         "runtimeUrl": "Runtime URL: {{url}}",
         "protocol": "Protocol: {{protocol}}",
         "status": "Status: {{status}}",
+        "protocolUnsupportedRedirect": "This host does not serve the {{protocol}} protocol — use its {{siblings}} route on the same host instead.",
+        "protocolUnsupportedNoRoute": "This host does not serve the {{protocol}} protocol.",
         "noModelWarning": "⚠ No model available to test — add a model id and run a single-model test.",
         "routes": "Routes: {{n}}",
         "profiles": "Profiles: {{n}}",

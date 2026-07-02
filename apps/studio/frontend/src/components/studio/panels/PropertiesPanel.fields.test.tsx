@@ -737,3 +737,76 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     expect(html).not.toContain('data-llm-role-compare-trigger="true"')
   })
 })
+
+describe('PropertiesPanel - use_graph_llm_role switch', () => {
+  const agentArgs = (frontmatterLines: string[]) => ({
+    id: 'review',
+    data: baseData({ mode: 'llm', filePath: 'phases/review/SKILL.md' }),
+    filePath: 'phases/review/SKILL.md',
+    content: ['---', ...frontmatterLines, '---', '<role>r</role>'].join('\n'),
+  })
+
+  it('reflects the persisted switch and disables the whole Run role row when on', () => {
+    const html = renderPanel(agentArgs(['name: review', 'llm_role: analyst', 'use_graph_llm_role: true']))
+    expect(html).toContain('aria-checked="true"')
+    expect(html).toContain('data-llm-role-row-disabled="true"')
+    // The node's own role stays visible (preserved, just inactive).
+    expect(html).toContain('analyst')
+  })
+
+  it('leaves the Run role row enabled when the switch is off (default)', () => {
+    const html = renderPanel(agentArgs(['name: review', 'llm_role: analyst']))
+    expect(html).toContain('aria-checked="false"')
+    expect(html).not.toContain('data-llm-role-row-disabled="true"')
+  })
+
+  it('offers a gear on the switch row that jumps to the graph properties', () => {
+    const html = renderPanel(agentArgs(['name: review', 'llm_role: analyst']))
+    expect(html).toContain('data-llm-role-graph-trigger="true"')
+    expect(html).toContain('aria-label="Open graph properties"')
+  })
+})
+
+describe('PropertiesPanel - graph form role test', () => {
+  it('graph llm_role row renders its own Test control', () => {
+    const skillDetail = {
+      files: {
+        'GRAPH.md': [
+          '---',
+          'schema_version: "v0.3.0"',
+          'name: demo',
+          'llm_role: fast',
+          'phases: []',
+          '---',
+          '',
+        ].join('\n'),
+      },
+      graph_topology: [],
+    } as unknown as SkillDetail
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={skillDetail}
+        selectedNode={null}
+      />,
+    )
+    expect(html).toContain('id="graph-llm-role"')
+    expect(html).toContain('data-llm-role-test-trigger="true"')
+  })
+})
+
+describe('PropertiesPanel - compare candidate status light', () => {
+  it('shows no status light for a candidate that has never been tested', () => {
+    const html = renderToStaticMarkup(
+      <LlmCompareCandidateRow
+        candidate={{ id: 'compare-1', modelGroupId: 'llama3', route: 'auto' }}
+        modelGroups={[]}
+        onTest={() => undefined}
+        onEdit={() => undefined}
+        onRemove={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('data-llm-compare-status-light')
+  })
+})

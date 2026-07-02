@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import useSWR from "swr"
 import { AxiosError } from "axios"
 import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, Loader2, Pencil, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
@@ -328,6 +329,8 @@ interface PropertiesPanelProps {
   /** Per-node golden promote (atom #32): write golden for just this node from the active run. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
   onOpenSettings?: (tab?: SettingsTab) => void
+  /** Deselect the node so the panel shows the graph (GRAPH.md) properties. */
+  onSelectGraph?: () => void
 }
 
 export function PropertiesPanel({
@@ -351,38 +354,23 @@ export function PropertiesPanel({
   onResumeNode,
   onPromoteNode,
   onOpenSettings,
+  onSelectGraph,
 }: PropertiesPanelProps) {
 
-  // Configured LLM roles for the llm_role dropdown (GET /llm/roles). Fetched once on
-  // mount; a stale list just means the author may need to reopen after editing roles
-  // in Settings. On failure it stays empty 鈥?the field still shows (graph default)
-  // plus the current value, so nothing is lost.
-  const [roleNames, setRoleNames] = useState<string[]>([])
-  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([])
-  useEffect(() => {
-    let cancelled = false
-    getRoles()
-      .then((data) => {
-        if (!cancelled) {
-          setRoleNames(graphAgentRoleNamesForProperties(data))
-        }
-      })
-      .catch(() => {
-        // Roles unavailable (backend not ready / none configured) 鈥?leave empty.
-      })
-    getModelGroups()
-      .then((data) => {
-        if (!cancelled) {
-          setModelGroups(compareModelGroupsForPicker(data))
-        }
-      })
-      .catch(() => {
-        // Model groups unavailable; compare source selector can still offer roles.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // Configured LLM roles for the llm_role dropdown (GET /llm/roles) via SWR so
+  // the list revalidates (focus/reconnect + shared-key mutations) instead of
+  // going permanently stale after one on-mount fetch. On failure both stay
+  // empty — the field still shows the current stored value, nothing is lost.
+  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false })
+  const roleNames = useMemo(
+    () => (rolesData ? graphAgentRoleNamesForProperties(rolesData) : []),
+    [rolesData],
+  )
+  const { data: modelGroupsData } = useSWR("llm/model-groups", getModelGroups, { shouldRetryOnError: false })
+  const modelGroups = useMemo(
+    () => (modelGroupsData ? compareModelGroupsForPicker(modelGroupsData) : []),
+    [modelGroupsData],
+  )
 
   const graphContent = skillDetail?.files?.["GRAPH.md"]
   const graphFormState = useMemo(() => {
@@ -416,7 +404,6 @@ export function PropertiesPanel({
       ? graphDraft ?? graphFormState.form
       : graphFormState.form
     : null
-  const graphDefaultRole = activeGraphDraft?.llmRole.trim() || null
   const graphDirty = Boolean(activeGraphDraft && graphFormState.ok && !graphFormsEqual(activeGraphDraft, graphFormState.form))
   const graphCanSave = Boolean(onPhaseFileSave && graphContent !== undefined && activeGraphDraft && graphFormState.ok && graphDirty && !graphSaving)
 
@@ -492,6 +479,8 @@ export function PropertiesPanel({
   ))
   const [saving, setSaving] = useState(false)
   const [roleTest, setRoleTest] = useState<RoleTestStatusInput>({ running: false })
+  // Separate test state for the GRAPH.md default role (graph panel flask).
+  const [graphRoleTest, setGraphRoleTest] = useState<RoleTestStatusInput>({ running: false })
 
   useEffect(() => {
     setLoadedFormKey(phaseFormState.key)
@@ -550,17 +539,21 @@ export function PropertiesPanel({
 
   // Reuses the settings role-test job runner (runRoleTestJobToResult) verbatim so
   // the node Properties Test button verifies the same backend job + status the
-  // Settings page does (settings-ux-spec 搂2.7). No re-implementation.
-  const handleRoleTest = useCallback(async (roleName: string) => {
+  // Settings page does (settings-ux-spec §2.7). No re-implementation. The node
+  // form and the graph form each keep their own status state via `setState`.
+  const runRoleTest = useCallback(async (
+    roleName: string,
+    setState: (next: RoleTestStatusInput) => void,
+  ) => {
     const trimmed = roleName.trim()
     if (!trimmed) {
       toast.error("Set an LLM role before testing.")
       return
     }
-    setRoleTest({ running: true, status: null, error: null })
+    setState({ running: true, status: null, error: null })
     try {
       const result = await runRoleTestJobToResult(trimmed)
-      setRoleTest({
+      setState({
         running: false,
         status: result.status,
         error: null,
@@ -568,10 +561,18 @@ export function PropertiesPanel({
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Role test failed"
-      setRoleTest({ running: false, status: null, error: message, details: [message] })
+      setState({ running: false, status: null, error: message, details: [message] })
       toast.error(message)
     }
   }, [])
+  const handleRoleTest = useCallback(
+    (roleName: string) => runRoleTest(roleName, setRoleTest),
+    [runRoleTest],
+  )
+  const handleGraphRoleTest = useCallback(
+    (roleName: string) => runRoleTest(roleName, setGraphRoleTest),
+    [runRoleTest],
+  )
 
   // Subgraph "import folder" affordance (n2-properties #20 / F4-R5): when the
   // child-graph path is missing/unresolvable, let the author pick the child
@@ -645,7 +646,6 @@ export function PropertiesPanel({
                 roleTest={roleTest}
                 roleNames={roleNames}
                 modelGroups={modelGroups}
-                graphDefaultRole={graphDefaultRole}
                 fieldErrors={fieldErrors}
                 allowOverwriteCandidates={allowOverwriteCandidates}
                 skillId={skillId}
@@ -667,6 +667,7 @@ export function PropertiesPanel({
                   void handleRoleTest(roleName)
                 }}
                 onOpenSettings={onOpenSettings}
+                onSelectGraph={onSelectGraph}
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -694,10 +695,14 @@ export function PropertiesPanel({
                 saving={graphSaving}
                 canSave={graphCanSave}
                 canReset={graphDirty && !graphSaving}
+                roleTest={graphRoleTest}
                 onFieldChange={setGraphField}
                 onReset={handleGraphReset}
                 onSave={() => {
                   void handleGraphSave()
+                }}
+                onRoleTest={(roleName) => {
+                  void handleGraphRoleTest(roleName)
                 }}
                 onOpenSettings={onOpenSettings}
               />
@@ -842,9 +847,11 @@ function GraphFrontmatterForm({
   saving,
   canSave,
   canReset,
+  roleTest,
   onFieldChange,
   onReset,
   onSave,
+  onRoleTest,
   onOpenSettings,
 }: {
   value: GraphFrontmatterFormData
@@ -852,9 +859,11 @@ function GraphFrontmatterForm({
   saving: boolean
   canSave: boolean
   canReset: boolean
+  roleTest: RoleTestStatusInput
   onFieldChange: <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => void
   onReset: () => void
   onSave: () => void
+  onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
 }) {
   const trimmedGraphRole = value.llmRole.trim()
@@ -921,6 +930,11 @@ function GraphFrontmatterForm({
                   triggerClassName="min-w-0 flex-1"
                 />
                 <LlmRoleSettingsButton onOpenSettings={onOpenSettings} />
+                <RoleTestControl
+                  roleName={trimmedGraphRole}
+                  roleTest={roleTest}
+                  onRoleTest={onRoleTest}
+                />
               </div>
             </Field>
           </PanelFieldRow>
@@ -1229,7 +1243,6 @@ function PhaseFrontmatterForm({
   roleTest,
   roleNames,
   modelGroups,
-  graphDefaultRole,
   fieldErrors,
   allowOverwriteCandidates,
   skillId,
@@ -1247,6 +1260,7 @@ function PhaseFrontmatterForm({
   onSave,
   onRoleTest,
   onOpenSettings,
+  onSelectGraph,
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
@@ -1256,7 +1270,6 @@ function PhaseFrontmatterForm({
   roleTest: RoleTestStatusInput
   roleNames: string[]
   modelGroups: ModelGroup[]
-  graphDefaultRole: string | null
   fieldErrors: Record<string, LintError[]>
   allowOverwriteCandidates: AllowOverwriteCandidate[]
   skillId: string | null
@@ -1274,6 +1287,7 @@ function PhaseFrontmatterForm({
   onSave: () => void
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
+  onSelectGraph?: () => void
 }) {
   return (
     <form
@@ -1297,14 +1311,16 @@ function PhaseFrontmatterForm({
                 <LlmRoleField
                   key={phaseId}
                   value={value.llmRole}
+                  useGraphDefault={value.useGraphLlmRole}
                   roleNames={roleNames}
                   modelGroups={modelGroups}
-                  graphDefaultRole={graphDefaultRole}
                   roleTest={roleTest}
                   errors={fieldErrors.llm_role}
                   onChange={(next) => onFieldChange("llmRole", next)}
+                  onUseGraphDefaultChange={(next) => onFieldChange("useGraphLlmRole", next)}
                   onRoleTest={onRoleTest}
                   onOpenSettings={onOpenSettings}
+                  onSelectGraph={onSelectGraph}
                 />
               </PanelFieldRow>
               <PanelFieldRow>
@@ -2269,10 +2285,12 @@ export function RoleTestControl({
   roleName,
   roleTest,
   onRoleTest,
+  disabled = false,
 }: {
   roleName: string
   roleTest: RoleTestStatusInput
   onRoleTest: (roleName: string) => void
+  disabled?: boolean
 }) {
   const badge = roleTestStatusBadge(roleTest)
   const showBadge = badge.running || roleTest.status != null || Boolean(roleTest.error)
@@ -2317,7 +2335,7 @@ export function RoleTestControl({
         variant="default"
         data-llm-role-test-trigger="true"
         aria-label={roleName.trim() ? `Test LLM role ${roleName}` : "Test LLM role"}
-        disabled={badge.running || roleName.trim().length === 0}
+        disabled={disabled || badge.running || roleName.trim().length === 0}
         onClick={() => onRoleTest(roleName)}
       >
         {badge.running
@@ -2537,33 +2555,36 @@ function SubagentsField({
   )
 }
 
-// llm_role as a dropdown of CONFIGURED roles (GET /llm/roles). "Use graph default"
-// is a local run override and must not rewrite the node's frontmatter value; the
-// combobox always reflects the exact llm_role stored in the node markdown.
+// llm_role as a dropdown of CONFIGURED roles (GET /llm/roles). "Use graph
+// default" is the PERSISTED use_graph_llm_role frontmatter switch: on = the
+// graph-level default role wins at run time and the whole Run role row is
+// disabled; the node's own llm_role value stays in the markdown untouched.
 function LlmRoleField({
   value,
+  useGraphDefault,
   roleNames,
   modelGroups,
-  graphDefaultRole,
   roleTest,
   errors,
   onChange,
+  onUseGraphDefaultChange,
   onRoleTest,
   onOpenSettings,
+  onSelectGraph,
 }: {
   value: string
+  useGraphDefault: boolean
   roleNames: string[]
   modelGroups: ModelGroup[]
-  graphDefaultRole: string | null
   roleTest: RoleTestStatusInput
   errors?: LintError[]
   onChange: (next: string) => void
+  onUseGraphDefaultChange: (next: boolean) => void
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
+  onSelectGraph?: () => void
 }) {
   const trimmed = value.trim()
-  const [useGraphDefault, setUseGraphDefault] = useState(trimmed === "")
-  const runtimeRole = useGraphDefault ? graphDefaultRole?.trim() || "" : trimmed
   const options = useMemo(
     () => (trimmed && !roleNames.includes(trimmed) ? [trimmed, ...roleNames] : roleNames),
     [roleNames, trimmed],
@@ -2578,8 +2599,9 @@ function LlmRoleField({
       <YamlFieldLabel htmlFor="phase-llm-role">
         llm_role
         <HelpTooltip label="About llm_role">
-          The configured LLM role this agent runs as. Keep &ldquo;Use graph default&rdquo; on to inherit the
-          graph&rsquo;s llm_role; turn it off to pick a specific role. Manage roles in Settings &rsaquo; LLM Roles.
+          The configured LLM role this agent runs as. Turn &ldquo;Use graph default&rdquo; on to run with the
+          graph&rsquo;s llm_role (the node&rsquo;s own pick is kept, just inactive). Manage roles in
+          Settings &rsaquo; LLM Roles; test the graph default in the graph properties.
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -2591,37 +2613,58 @@ function LlmRoleField({
         >
           Use graph default
         </YamlNestedFieldLabel>
-        <Switch
-          id="phase-llm-role-default"
-          size="sm"
-          checked={useGraphDefault}
-          aria-label="Use graph default llm_role"
-          onCheckedChange={setUseGraphDefault}
-        />
+        <div className="flex items-center gap-2">
+          <Switch
+            id="phase-llm-role-default"
+            size="sm"
+            checked={useGraphDefault}
+            aria-label="Use graph default llm_role"
+            onCheckedChange={onUseGraphDefaultChange}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            className={YAML_ICON_BUTTON_CLASS}
+            title="Open graph properties"
+            aria-label="Open graph properties"
+            data-llm-role-graph-trigger="true"
+            onClick={() => onSelectGraph?.()}
+          >
+            <Settings2 className="size-3.5" aria-hidden />
+          </Button>
+        </div>
       </Field>
       <div className="space-y-2">
-        <div className="space-y-1">
-          <YamlNestedFieldLabel htmlFor="phase-llm-role">Run role</YamlNestedFieldLabel>
+        <div
+          className="space-y-1"
+          {...(useGraphDefault ? { "data-llm-role-row-disabled": "true" } : {})}
+        >
+          <YamlNestedFieldLabel
+            htmlFor="phase-llm-role"
+            className={useGraphDefault ? "opacity-50" : undefined}
+          >
+            Run role
+          </YamlNestedFieldLabel>
           <div className="flex items-center gap-2">
             <SearchableOptionCombobox
               id="phase-llm-role"
               value={trimmed}
               options={roleComboboxOptions}
-              onChange={(next) => {
-                setUseGraphDefault(false)
-                onChange(next)
-              }}
+              onChange={onChange}
               ariaLabel="llm_role"
               placeholder="No node role"
               searchPlaceholder="Search roles"
               emptyLabel="No role found."
               triggerClassName="min-w-0 flex-1"
+              disabled={useGraphDefault}
             />
-            <LlmRoleSettingsButton onOpenSettings={onOpenSettings} />
+            <LlmRoleSettingsButton onOpenSettings={onOpenSettings} disabled={useGraphDefault} />
             <RoleTestControl
-              roleName={runtimeRole}
+              roleName={trimmed}
               roleTest={roleTest}
               onRoleTest={onRoleTest}
+              disabled={useGraphDefault}
             />
           </div>
         </div>
@@ -2647,7 +2690,13 @@ function llmRoleComboboxOption(name: string, configured: boolean): SearchableCom
   return next
 }
 
-function LlmRoleSettingsButton({ onOpenSettings }: { onOpenSettings?: (tab?: SettingsTab) => void }) {
+function LlmRoleSettingsButton({
+  onOpenSettings,
+  disabled = false,
+}: {
+  onOpenSettings?: (tab?: SettingsTab) => void
+  disabled?: boolean
+}) {
   return (
     <Button
       type="button"
@@ -2657,6 +2706,7 @@ function LlmRoleSettingsButton({ onOpenSettings }: { onOpenSettings?: (tab?: Set
       title="Open LLM Roles settings"
       aria-label="Open LLM Roles settings"
       data-llm-role-settings-trigger="true"
+      disabled={disabled}
       onClick={() => onOpenSettings?.("llm_roles")}
     >
       <Settings2 className="size-3.5" aria-hidden />
@@ -2738,7 +2788,9 @@ function compareStatusToRouteStatus(state: LlmCompareTestState | undefined): Rol
   if (state?.result?.status === "ok") return "runnable"
   if (state?.result?.status === "warning") return "limited"
   if (state?.result?.status === "blocked" || state?.result?.status === "failed") return "blocked"
-  return "limited"
+  // Never tested -> no light at all (a "limited" amber here would misread as
+  // a degraded test result).
+  return null
 }
 
 function LlmNodeCompareField({

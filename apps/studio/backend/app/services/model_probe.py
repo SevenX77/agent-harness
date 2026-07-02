@@ -21,6 +21,7 @@ class ModelProbeResult:
         "ok",
         "invalid_model",
         "invalid_key",
+        "protocol_unsupported",
         "rate_limited",
         "quota_exceeded",
         "network_error",

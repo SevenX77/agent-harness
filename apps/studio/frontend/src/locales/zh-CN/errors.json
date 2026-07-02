@@ -48,6 +48,7 @@
     "ok": "已连接",
     "error": "测试失败",
     "invalid_key": "API key 无效",
+    "protocol_unsupported": "协议不支持",
     "rate_limited": "已限流",
     "quota_exceeded": "额度耗尽",
     "network_error": "网络错误",

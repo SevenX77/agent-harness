@@ -224,7 +224,7 @@
    "module": "测试与模型探测",
    "func": "设计(修订 2026-07-01):官方卡点 Test 验证 endpoint 真可用——先拉模型目录(get-models),再打一次最小生成探测,生成 ok 才 verified;若本地已缓存远端 community catalog 的真探历史证据,则在 Test 写 credentials 时把匹配 evidence 一并挂到 route 上。",
    "action": "用户在官方卡点 `Test` 按钮。",
-   "fe_design": "官方卡点 Test → 前端触发统一后端 endpoint test → 后端读取 provider model list / route candidates 并写回 credentials。远端 community catalog 的读取是 cache-only:后端启动或 Settings 页同步只把签名 catalog 拉进 disposable verified cache,不直接改 credentials,也不直接点亮蓝态。只有用户按 Test 时,后端才把缓存中与本 endpoint/route 匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs;状态投影仍只信 credentials DTO。Catalog-only 孤立证据只显示在页面顶部 community-verified advisory 区,不 applied to your keys、不出蓝;Test 后已挂 evidence_refs 且当前非绿的 route 才显示 historical_ready 蓝态。官方 Test = get-models + 一次最小生成探测(设计源 00_settings-ux-spec.md §1.1 修订 2026-07-01;原「只需 get-models 连通」作废——实证欠费账户 get-models 照常 200 但所有生成被 400 拒,连通≠能生成):候选过滤为语言模型、按 probe 优先级取一个打推理端点,生成 ok 才 verified;结构性失败(invalid_key/欠费类 quota_exceeded)→ endpoint failed 并常驻展示 provider 原文。官方不做协议轮换(协议固定);逐模型能力级 profile probe 仍留给 Manual model probing 或 Role Test。",
+   "fe_design": "官方卡点 Test → 前端触发统一后端 endpoint test → 后端读取 provider model list / route candidates 并写回 credentials。远端 community catalog 的读取是 cache-only:后端启动或 Settings 页同步只把签名 catalog 拉进 disposable verified cache,不直接改 credentials,也不直接点亮蓝态。只有用户按 Test 时,后端才把缓存中与本 endpoint/route 匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs;状态投影仍只信 credentials DTO。Catalog-only 孤立证据只显示在页面顶部 community-verified advisory 区,不 applied to your keys、不出蓝;Test 后已挂 evidence_refs 且当前非绿的 route 才显示 historical_ready 蓝态。官方 Test = get-models + 一次最小生成探测(设计源 00_settings-ux-spec.md §1.1 修订 2026-07-01;原「只需 get-models 连通」作废——实证欠费账户 get-models 照常 200 但所有生成被 400 拒,连通≠能生成):候选过滤为语言模型、按 probe 优先级取一个打推理端点,生成 ok 才 verified;结构性失败(invalid_key/欠费类 quota_exceeded)→ endpoint failed 并常驻展示 provider 原文。协议轮换机制已整体作废(2026-07-02 矩阵修订,见 #25)——官/三都只用 endpoint 自身协议探测;逐模型能力级 profile probe 仍留给 Manual model probing 或 Role Test。",
    "fe_modules": [
     {
      "name": "状态投影",
@@ -247,7 +247,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(2026-07-01 修订后)。官/三测试入口已统一为 POST /endpoints/{id}/test,官方卡只有一个 Test 动作;官方 Test 现走 get-models + 一次最小生成探测(_verify_endpoint_by_generation_probe,detect_protocol=False,候选过滤语言模型):真机验证 anthropic-official 返回 'Generation verified via anthropic_compatible. Model: claude-sonnet-5.',probe_attempts 记入 endpoint_test runtime-activity。欠费类 HTTP 400 由 gateway 归类 quota_exceeded(结构性,短路批量、不复用旧 verified)。远端 community catalog 同步是 cache-only,不会在页面加载或 sync-verified 时写 credentials;Test 保存 endpoint/route 结果时,才把匹配的 probe-verified catalog evidence 写入 credentials route.metadata.evidence_refs,由 credentials 投影出 historical_ready 蓝态。Catalog-only evidence 不直接出蓝。",
+   "gap_brief": "符合设计(2026-07-01 修订后)。官/三测试入口已统一为 POST /endpoints/{id}/test,官方卡只有一个 Test 动作;官方 Test 现走 get-models + 一次最小生成探测(_verify_endpoint_by_generation_probe,候选过滤语言模型;2026-07-02 起该函数不再有 detect_protocol 参数,官/三都只用 endpoint 自身协议):真机验证 anthropic-official 返回 'Generation verified via anthropic_compatible. Model: claude-sonnet-5.',probe_attempts 记入 endpoint_test runtime-activity。欠费类 HTTP 400 由 gateway 归类 quota_exceeded(结构性,短路批量、不复用旧 verified)。远端 community catalog 同步是 cache-only,不会在页面加载或 sync-verified 时写 credentials;Test 保存 endpoint/route 结果时,才把匹配的 probe-verified catalog evidence 写入 credentials route.metadata.evidence_refs,由 credentials 投影出 historical_ready 蓝态。Catalog-only evidence 不直接出蓝。",
    "impl_ref": "fn-24"
   },
   {
@@ -255,9 +255,9 @@
    "cap": "tp-getmodels",
    "track": "三",
    "module": "测试与模型探测",
-   "func": "设计:第三方卡点 Test 验证 endpoint——每条 URL 展开多协议 endpoint 后逐个跑模型探测,真能生成才判对应 endpoint 可用。",
+   "func": "设计(修订 2026-07-02,协议探测矩阵):第三方卡点 Test 验证 endpoint——每条 URL × 候选协议是一个身份不可变的矩阵格子,每个格子用自己的协议真打推理端点;协议不通是一等事实(protocol_unsupported),带 30 天半衰期复测门,格子永不删除、可单独强制复测。",
    "action": "用户在第三方卡点 `Test` 按钮(填好 URL+key 后)。",
-   "fe_design": "第三方卡点 Test → 前端把每条 Base URL 展开成 OpenAI-compatible / Anthropic-compatible / Google GenAI 三个 endpoint 候选(第三方不包含 Ark)并逐个触发统一 endpoint test;每个 endpoint 内部用单模型测试同一套模型 probe 流程,只是多了一层「候选 endpoint 生成 / 结果汇总」前后处理。一个 URL 可能同时兼容多个 protocol,因此多个 endpoint 可同时保留为可用;失败候选也保留红态和错误信息,不吞掉。模型 probe 遇 model invalid 要把该模型 route 写成 failed 并继续尝试其它候选模型,有任一模型真能生成才判该 endpoint 可用。设计统一为「官/三同一套 endpoint test + 批量生成探测」(修订 2026-07-01):get-models 只证 key+URL 可达、不证协议匹配/能生成,官方与第三方都必须真打一次推理端点才升 verified;差别只剩第三方多协议轮换探测、官方协议固定且候选过滤为语言模型。前端只触发 + 显示进度,探测策略归后端(mech_cred)。",
+   "fe_design": "第三方卡点 Test → 前端把每条 Base URL 展开成 OpenAI-compatible / Anthropic-compatible / Google GenAI 三个矩阵格子(第三方不含 Ark)并逐个触发统一 endpoint test。格子身份 = (canonical base_url, protocol),protocol 创建后不可变:后端 upsert 拒绝改协议(422),前端槽位只读持久化 provider_type(id slug 反推已删除),每个格子只用自己的协议探测——协议轮换机(轮换选边并改写 endpoint.protocol)已作废删除(设计源 00_settings-ux-spec.md §1.2 修订记录 2026-07-02;实证:轮换曾把 qiniu `-openai-` 格子改写成anthropic 重复格子、瞬时失败让 google 的 404 赢下检测、同一 Test 连点两次持久真相不同)。路径级 404/405 与 wrong-endpoint 指引(如 'Use /v1/messages instead')由 gateway 归类protocol_unsupported(与 invalid_model 严格区分);该观察写 last_error_code 并清空该格子 routes(协议都不通的格子上不存在模型清单)。UI 上 unsupported 格子显示 muted 'Protocol not supported' 芯片(非红——无需用户修复)+ 单格子 Re-probe 按钮(?force=true 绕过半衰期门);日常 Test 对 30 天内的unsupported 格子跳过探测并记 endpoint_test_skipped 日志,到期自动补测——提供商哪天支持了会被重新发现。verified 仍只认真实生成 ok;结构性失败(invalid_key/quota/protocol_unsupported)短路批量且不复用旧 verified。前端只触发 + 显示进度,探测策略归后端(mech_cred)。",
    "fe_modules": [
     {
      "name": "状态投影",
@@ -267,20 +267,20 @@
    "be_contract": [
     {
      "endpoint": "POST /api/llm/endpoints/{endpoint_id}/test",
-     "purpose": "官/三统一入口:第三方在此跑协议自动探测 + 批量模型探测真打推理端点,验通才升 verified。",
+     "purpose": "官/三统一入口:每个格子用自身 protocol 跑批量生成探测,验通才升 verified;unsupported 格子在半衰期内被跳过(response.skipped=true),`?force=true` 立即复测。",
      "mechanism_ref": "mech_cred",
      "iface_ref": "iface-4"
     },
     {
      "endpoint": "PUT /api/llm/registry/endpoints",
-     "purpose": "测试前置 upsert 落 endpoint(base_url 归一化)。",
+     "purpose": "测试前置 upsert 落 endpoint(base_url 归一化)。protocol 不可变(改协议 422)、(base_url, protocol) 组合唯一(新建重复格子 422);status/last_test_*/last_error_code 为事实字段,upsert 保留不覆盖。",
      "mechanism_ref": "mech_cred",
      "iface_ref": "iface-2"
     }
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计。2026-07-01:探测函数改名并官/三共用——_verify_endpoint_by_generation_probe(detect_protocol 参数区分):第三方 detect_protocol=True 走(1)协议自动探测(_detect_third_party_protocol,遇结构性错配短路)+(2)批量推理探测,首个 ok 即停,仅真 ok 生成才升 'verified';官方 detect_protocol=False 跳过协议轮换。欠费类 400(provider 报文含 credit/billing 标记)由 gateway _probe_status 归类结构性 quota_exceeded。前端按 status==='verified' 判连通,探测到的协议回写。官/三同一套入口。",
+   "gap_brief": "符合设计(2026-07-02 矩阵修订后)。轮换机(_detect_third_party_protocol* / _THIRD_PARTY_PROTOCOL_CANDIDATES)已删除,_verify_endpoint_by_generation_probe 不再有 detect_protocol 参数、只用 endpoint 自身协议;gateway _probe_status 新增 protocol_unsupported(裸 404/405、wrong-endpoint 指引);upsert 强制 protocol不可变 + 组合唯一(存量重复格子容忍更新、由确定性 id 重键自然融解);unsupported → 清 routes + 30 天门(_protocol_unsupported_recheck_at),force 参数绕过。真机验证(2026-07-02,真 qiniu key):google 格子从假'Untested' 变为 'Protocol not supported' 且 routes 清空;api.qnaigc.com openai 格子连测三轮协议零翻转;昨日被轮换改坏的重复 anthropic 格子经重键自动并入正身,腾出的 openai 格子真探测判 unsupported;第二轮 Test 命中半衰期门(endpoint_test_skipped,recheck 2026-08-01);runtime log 时间戳改 UTC。",
    "impl_ref": "fn-25"
   },
   {

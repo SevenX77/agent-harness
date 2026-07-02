@@ -141,6 +141,18 @@ def serialize_for_response(data: LLMCredentialsFile, *_args: Any, **_kwargs: Any
     return data.model_dump(mode="json")
 
 
+class EndpointInvariantViolation(ValueError):
+    """An endpoint upsert would break a storage invariant of the protocol matrix.
+
+    Design §1.2 (protocol matrix, 2026-07-02): ``(canonical base_url, protocol)``
+    is an endpoint's immutable identity and must be unique across the store.
+    """
+
+
+def _endpoint_combo_key(base_url: str, protocol: str) -> tuple[str, str]:
+    return (base_url.strip().rstrip("/").lower(), protocol)
+
+
 def upsert_endpoints(
     endpoint_payloads: dict[str, dict[str, Any] | ProviderEndpoint],
     *,
@@ -160,6 +172,32 @@ def upsert_endpoints(
                 canonical_base_url=canonical_base_url,
             )
             current = endpoints.get(persisted_endpoint_id) or endpoints.get(endpoint_id)
+            if current is not None and current.protocol != incoming.protocol:
+                raise EndpointInvariantViolation(
+                    f"Endpoint {current.endpoint_id} cannot change protocol from "
+                    f"{current.protocol!r} to {incoming.protocol!r}: protocol is part of the "
+                    "(base_url, protocol) endpoint identity. Create a separate endpoint "
+                    "for the other protocol instead."
+                )
+            combo = _endpoint_combo_key(canonical_base_url, incoming.protocol)
+            # Uniqueness guards against CREATING a new duplicate cell (or moving
+            # an endpoint onto an occupied combo). Pre-existing duplicates from
+            # the retired rotation bug keep accepting same-combo updates so the
+            # Test flow stays usable until the corrupt record is deleted.
+            combo_changed = (
+                current is None
+                or _endpoint_combo_key(current.base_url, current.protocol) != combo
+            )
+            if combo_changed:
+                for other_id, other in endpoints.items():
+                    if other_id in (persisted_endpoint_id, endpoint_id):
+                        continue
+                    if _endpoint_combo_key(other.base_url, other.protocol) == combo:
+                        raise EndpointInvariantViolation(
+                            f"Endpoint {other_id} already covers base_url {combo[0]!r} via "
+                            f"protocol {incoming.protocol!r}; (base_url, protocol) must be "
+                            f"unique, so {persisted_endpoint_id} cannot be saved."
+                        )
             api_key = _preserved_secret(incoming, current)
             updates: dict[str, Any] = {
                 "endpoint_id": persisted_endpoint_id,
@@ -168,6 +206,10 @@ def upsert_endpoints(
                 "status": current.status if current is not None else "unverified_manual",
                 "last_test_at": current.last_test_at if current is not None else None,
                 "last_test_message": current.last_test_message if current is not None else None,
+                # last_error_code is a test FACT like status/last_test_*: the
+                # protocol_unsupported half-life gate reads it, so the pre-test
+                # upsert must not wipe the observation.
+                "last_error_code": current.last_error_code if current is not None else None,
             }
             curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(persisted_endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
@@ -249,7 +291,7 @@ def _endpoint_from_payload(payload: dict[str, Any] | ProviderEndpoint) -> Provid
 
 
 def _endpoint_authoring_payload(payload: dict[str, Any] | ProviderEndpoint) -> dict[str, Any] | ProviderEndpoint:
-    fact_fields = {"status", "last_test_at", "last_test_message"}
+    fact_fields = {"status", "last_test_at", "last_test_message", "last_error_code"}
     if isinstance(payload, dict):
         return {key: value for key, value in payload.items() if key not in fact_fields}
     return payload.model_copy(
@@ -257,6 +299,7 @@ def _endpoint_authoring_payload(payload: dict[str, Any] | ProviderEndpoint) -> d
             "status": "unverified_manual",
             "last_test_at": None,
             "last_test_message": None,
+            "last_error_code": None,
         }
     )
 

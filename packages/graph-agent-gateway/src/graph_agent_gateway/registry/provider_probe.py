@@ -207,8 +207,14 @@ async def probe_official_call_method(
     runtime_settings: Mapping[str, Any] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float | None = None,
+    multimodal: bool = False,
 ) -> RouteProbeResult:
-    """Probe one official provider API method for one concrete model."""
+    """Probe one official provider API method for one concrete model.
+
+    ``multimodal=True`` 在探测消息里加一张测试图(#11):provider 接受(2xx)=该模型
+    接受图像输入(input_modalities 含 image),4xx 拒绝=不支持。老式 completions
+    接口无多模态能力,``multimodal=True`` 时直接 ``ValueError``。
+    """
 
     normalized_base_url = base_url.rstrip("/")
     started = time.perf_counter()
@@ -224,6 +230,7 @@ async def probe_official_call_method(
                 normalized_base_url,
                 model_id,
                 runtime_settings=runtime_settings,
+                multimodal=multimodal,
             )
     except httpx.TimeoutException:
         status: ProviderProbeStatus = "timeout"
@@ -366,6 +373,46 @@ async def _request_model_generation(
     )
 
 
+# 多模态探测(#11):最小合法 1x1 PNG。只为验证 provider 是否**接受**图像输入
+# payload —— 接受(2xx)= 该模型 input_modalities 含 image;不支持 vision 的模型
+# 会以 4xx 拒绝图块。不要求模型"看懂"图,只看它收不收(与文本探测"成功=可达"同构)。
+_PROBE_TEXT = "Reply with one short word."
+_PROBE_IMAGE_MEDIA_TYPE = "image/png"
+_PROBE_IMAGE_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+_PROBE_IMAGE_DATA_URI = f"data:{_PROBE_IMAGE_MEDIA_TYPE};base64,{_PROBE_IMAGE_BASE64}"
+
+
+def _openai_chat_content(multimodal: bool) -> object:
+    """OpenAI/ARK chat 消息 content:文本用裸字符串,多模态用 text+image_url 块。"""
+    if not multimodal:
+        return _PROBE_TEXT
+    return [
+        {"type": "text", "text": _PROBE_TEXT},
+        {"type": "image_url", "image_url": {"url": _PROBE_IMAGE_DATA_URI}},
+    ]
+
+
+def _openai_responses_content_blocks(multimodal: bool) -> list[dict[str, object]]:
+    """OpenAI/ARK responses 的 content 块(input_text [+ input_image])。"""
+    blocks: list[dict[str, object]] = [{"type": "input_text", "text": _PROBE_TEXT}]
+    if multimodal:
+        blocks.append({"type": "input_image", "image_url": _PROBE_IMAGE_DATA_URI})
+    return blocks
+
+
+def _gemini_parts(multimodal: bool) -> list[dict[str, object]]:
+    """Gemini `contents[].parts`:文本 part [+ inline_data 图 part]。"""
+    parts: list[dict[str, object]] = [{"text": _PROBE_TEXT}]
+    if multimodal:
+        parts.append(
+            {"inline_data": {"mime_type": _PROBE_IMAGE_MEDIA_TYPE, "data": _PROBE_IMAGE_BASE64}}
+        )
+    return parts
+
+
 async def _request_official_call_method_generation(
     client: httpx.AsyncClient,
     method_id: OfficialCallMethod,
@@ -374,14 +421,23 @@ async def _request_official_call_method_generation(
     model_id: str,
     *,
     runtime_settings: Mapping[str, Any] | None = None,
+    multimodal: bool = False,
 ) -> httpx.Response:
     max_tokens = _runtime_max_output_tokens(runtime_settings, default=16)
     reasoning = _runtime_reasoning_settings(runtime_settings)
     effort = _runtime_reasoning_effort(reasoning)
+    if method_id == "openai_completions" and multimodal:
+        # 老式 /v1/completions 是纯 prompt 文本接口,没有图像通道 → 诚实报错,
+        # 不静默发一个没图的探测把 text-only 误判成多模态。
+        raise ValueError("openai_completions 不支持多模态探测(纯文本 prompt 接口)")
     if method_id == "openai_responses":
         payload: dict[str, object] = {
             "model": model_id,
-            "input": "Reply with one short word.",
+            "input": (
+                [{"role": "user", "content": _openai_responses_content_blocks(True)}]
+                if multimodal
+                else _PROBE_TEXT
+            ),
             "max_output_tokens": max_tokens,
         }
         if effort or _runtime_reasoning_enabled(reasoning):
@@ -394,7 +450,7 @@ async def _request_official_call_method_generation(
     if method_id == "openai_chat_completions":
         payload = {
             "model": model_id,
-            "messages": [{"role": "user", "content": "Reply with one short word."}],
+            "messages": [{"role": "user", "content": _openai_chat_content(multimodal)}],
             "max_completion_tokens": max_tokens,
         }
         if effort or _runtime_reasoning_enabled(reasoning):
@@ -410,7 +466,7 @@ async def _request_official_call_method_generation(
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": model_id,
-                "prompt": "Reply with one short word.",
+                "prompt": _PROBE_TEXT,
                 "max_tokens": max_tokens,
             },
         )
@@ -418,7 +474,7 @@ async def _request_official_call_method_generation(
         return await client.post(
             _join_base_url_and_endpoint(base_url, "/v1/messages"),
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-            json=_anthropic_messages_payload(model_id, max_tokens, reasoning),
+            json=_anthropic_messages_payload(model_id, max_tokens, reasoning, multimodal=multimodal),
         )
     if method_id == "gemini_generate_content":
         generation_config: dict[str, object] = {"maxOutputTokens": max_tokens}
@@ -429,7 +485,7 @@ async def _request_official_call_method_generation(
             _join_base_url_and_endpoint(base_url, f"/v1beta/models/{model_id}:generateContent"),
             params={"key": api_key},
             json={
-                "contents": [{"parts": [{"text": "Reply with one short word."}]}],
+                "contents": [{"parts": _gemini_parts(multimodal)}],
                 "generationConfig": generation_config,
             },
         )
@@ -437,18 +493,22 @@ async def _request_official_call_method_generation(
         return await client.post(
             _deepseek_anthropic_messages_url(base_url),
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-            json=_anthropic_messages_payload(model_id, max_tokens, reasoning, content_as_blocks=True),
+            json=_anthropic_messages_payload(
+                model_id, max_tokens, reasoning, content_as_blocks=True, multimodal=multimodal
+            ),
         )
     if method_id == "ark_anthropic_messages":
         return await client.post(
             _ark_anthropic_messages_url(base_url),
             headers={"Authorization": f"Bearer {api_key}", "anthropic-version": "2023-06-01"},
-            json=_anthropic_messages_payload(model_id, max_tokens, reasoning, content_as_blocks=True),
+            json=_anthropic_messages_payload(
+                model_id, max_tokens, reasoning, content_as_blocks=True, multimodal=multimodal
+            ),
         )
     if method_id == "ark_chat":
         payload = {
             "model": model_id,
-            "messages": [{"role": "user", "content": "Reply with one short word."}],
+            "messages": [{"role": "user", "content": _openai_chat_content(multimodal)}],
             "max_tokens": max_tokens,
         }
         thinking = _ark_thinking_payload(reasoning)
@@ -462,7 +522,7 @@ async def _request_official_call_method_generation(
     if method_id == "ark_responses":
         payload = {
             "model": model_id,
-            "input": [{"role": "user", "content": [{"type": "input_text", "text": "Reply with one short word."}]}],
+            "input": [{"role": "user", "content": _openai_responses_content_blocks(multimodal)}],
             "max_output_tokens": max_tokens,
         }
         thinking = _ark_thinking_payload(reasoning)
@@ -475,7 +535,7 @@ async def _request_official_call_method_generation(
         )
     payload = {
         "model": model_id,
-        "messages": [{"role": "user", "content": "Reply with one short word."}],
+        "messages": [{"role": "user", "content": _openai_chat_content(multimodal)}],
         "max_tokens": max_tokens,
     }
     if effort or _runtime_reasoning_enabled(reasoning):
@@ -493,12 +553,26 @@ def _anthropic_messages_payload(
     reasoning: Mapping[str, Any],
     *,
     content_as_blocks: bool = False,
+    multimodal: bool = False,
 ) -> dict[str, object]:
-    content: object = (
-        [{"type": "text", "text": "Reply with one short word."}]
-        if content_as_blocks
-        else "Reply with one short word."
-    )
+    if multimodal:
+        # 多模态必须用 content 块形式携带图块,忽略 content_as_blocks(它只区分
+        # 纯文本的 str vs 单 text 块,与是否带图无关)。
+        content: object = [
+            {"type": "text", "text": _PROBE_TEXT},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": _PROBE_IMAGE_MEDIA_TYPE,
+                    "data": _PROBE_IMAGE_BASE64,
+                },
+            },
+        ]
+    else:
+        content = (
+            [{"type": "text", "text": _PROBE_TEXT}] if content_as_blocks else _PROBE_TEXT
+        )
     payload: dict[str, object] = {
         "model": model_id,
         "max_tokens": max_tokens,

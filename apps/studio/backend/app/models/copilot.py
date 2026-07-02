@@ -6,7 +6,6 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CopilotToolName: TypeAlias = Literal["Read", "Write", "Edit", "Bash"]
 CopilotView: TypeAlias = Literal[
     "WelcomeScreen",
     "Edit",
@@ -73,8 +72,16 @@ class CopilotEventText(CopilotEventBase):
 
 
 class CopilotEventToolUseStart(CopilotEventBase):
+    """F8: transcribes EVERY tool call the SDK reports, by its real name.
+
+    Tool policy (what may run) is enforced at the SDK layer (allowed_tools /
+    can_use_tool) — the transcript never editorializes, so `tool_name` is an
+    open string, not the pre-allowed subset (the model legitimately runs
+    read-only tools like Glob/Grep outside that list).
+    """
+
     type: Literal["tool_use_start"] = "tool_use_start"
-    tool_name: CopilotToolName
+    tool_name: str
     tool_input: dict[str, Any]
 
 

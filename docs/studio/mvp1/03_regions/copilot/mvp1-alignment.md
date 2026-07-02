@@ -79,7 +79,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
   4. **不渲染任何无功能占位按钮**——附件/@/停止只在真实可用后出现(本文件历史教训:死占位按钮误导 PM)。
   5. Enter 发送、Shift+Enter 换行;IME 组合输入(`isComposing`)期间 Enter 不发送。
   6. **消息布局(2026-07-02 R3,PM 原话「不需要空一栏给图标,也不需要分 you 和 copilot,左右布局就能分辨」)**:左右气泡布局——用户消息右对齐、`bg-muted` 圆角气泡、纯文本 pre-wrap;助手消息左对齐、无气泡纯排版(markdown);**不渲染 You/Copilot 名字标签、状态文字和头像列**。落地用本地 `components/ui/message.tsx`(shadcn message 原语,align start/end)。
-  7. **等待可见(thinking)**:从发送瞬间到首个正文 token 之间必须有可见等待指示(shadcn **shimmer** 文字 Thinking…,官方 loading-text 处理)——覆盖两段:①助手消息尚未创建的事件前空窗;②助手消息已建但 `status=running` 且无正文(冷启动 spawn 可达 10-30s;事件不清除它——首事件恒为 context_resolved 回显,工具活动而无正文仍算等待)。正文一到即撤。
+  7. **等待可见(thinking)**:从发送瞬间到首个可见活动之间必须有可见等待指示(shadcn **shimmer** 文字 Thinking…,官方 loading-text 处理)——覆盖两段:①助手消息尚未创建的事件前空窗;②助手消息已建但 `status=running` 且无可见活动(冷启动 spawn 可达 10-30s;context_resolved 回显不算可见活动、不清除它)。F8 真流式落地后,**thinking 增量内容本身就是等待可见性的主体**:首个 thinking token 或正文 token 一到,shimmer 即撤,由实时转录接棒。
   8. 排版:消息与 composer 正文用 `text-sm leading-relaxed`(此前 text-xs/leading-snug 过挤);消息区视口 `p-4`、消息间距 `gap-3`(R4,PM「左边边距窄」;参照官方 message-scroller 示例 `p-6/gap-4` 按窄面板收敛一档)。
   9. 前端引入 `shadcn` tailwind 工具包(`@import "shadcn/tailwind.css"`):激活 shimmer 与 ui/message-scroller 自带的 scrollbar-*/scroll-fade-* 工具类(此前这些类是死类)。
 - 决策: 聊天区的滚动/输入行为向官方 message-scroller 契约看齐,不自造第二套滚动启发式。
@@ -99,6 +99,23 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - 测试: @ 键入弹出/选中插入 token/context POST 含 mentions;附件选择/拖拽/粘贴后 chips 呈现、payload 带内容块、非 vision 降级提示;流式中点停止 → 流即断、消息态落 stopped。
 - Status: target-design(2026-07-02,分 PR 落地)。
 - 归属: region `copilot`; capability `copilot-assist`(附件链路含 studio 后端)。
+
+### F8. 真流式输出(token-level streaming,2026-07-02 R5 新增)
+
+- 机制(wire 协议语义锁定:`text_delta` / `thinking_delta` 事件名本来就是**增量片段**;把一整块当一个"delta"发 = 违反本契约):
+  1. **后端逐 token 翻译**:`ClaudeAgentOptions` 开 `include_partial_messages=True`;SDK `StreamEvent`(raw Anthropic stream event)中 `content_block_delta` 的 `text_delta` → `CopilotEventText`、`thinking_delta` → `CopilotEventThinking`,按到达顺序立即入流;`signature_delta` / `input_json_delta` / 生命周期事件(message_start 等)不产生 UI 事件;带 `parent_tool_use_id` 的子流不进主转录。
+  1a. **thinking display 必须显式 `"summarized"`**:CLI 的 thinking display 只有 `summarized | omitted` 两档(**不存在 "full"**,旧实现注释"默认 full"是误认知);不设 display 时 ThinkingBlock 到达即被剥空(`thinking=""`,探针实证 2026-07-02)——这是 R5「thinking 从来不显示」的最终根因。`{"type":"adaptive","display":"summarized"}` 下推理内容以 thinking_delta 逐段流出(实测 17 deltas / 722 chars),是 CLI 能提供的最大暴露,即 F1「不省略」在 CLI 约束下的落地上限。
+  2. **完整消息去重**:开启 partial 后,同一条助手消息流完仍会收到完整 `AssistantMessage`——翻译器是**有状态**的:该消息已流出过 text/thinking 增量时,完整消息里的 TextBlock/ThinkingBlock 不再重复发;`ToolUseBlock` 恒从完整消息发 `tool_use_start`(工具入参只有整块才有;它在工具执行前到达,满足「每个工具调用实时出现」),工具结果仍从后续 UserMessage 的 ToolResultBlock 发。
+  3. **无流降级**:某轮若没有收到任何 partial 增量(异构 anthropic-compat 端点不吐 stream event),完整消息按整块发——宁整块勿丢字。
+  3a. **转录如实,政策在 SDK 层**:翻译器对**每一个** `ToolUseBlock` 按真实工具名登记并发 `tool_use_start`,不设翻译层白名单——SDK 实际会执行预允许清单之外的只读工具(live 证据 2026-07-02:模型用了 Glob/Grep 且真的执行了),旧的「V1 不支持工具 X」error 是在对既成事实撒谎,还令后续 tool_result 因名字未登记只能显示裸 `toolu_…` id。允许/拦截哪些工具由 SDK 选项(`allowed_tools` / `can_use_tool`)决定,转录层永不编造。
+  3b. **error 语义收窄(事件契约)**:`CopilotEventError` **只保留给终结流的致命错误**(route 解析失败、SDK 连接失败等,发出后本轮流即结束);**工具失败是可恢复事实**(模型通常会绕过重试),一律走 `tool_use_result(success=false)`。前端因此可以放心把 error 事件作为消息状态机的终结输入——旧行为里一条中途工具报错会把助手消息切断、后续事件漂进新消息。
+  4. **前端消息状态机**:助手消息 `status` 是消息级生命周期 `running → success | error`,**只由终结事件(done/error)驱动**;中间事件(context_resolved / tool_* / thinking)一律不得覆盖消息 status(R5 根因:context_resolved 事件级 status=success 把消息翻成 success,thinking 指示当场消失)。
+  5. **前端实时转录渲染**:events 数组保存了完整到达时序(text_delta 也入 events)——助手消息按 events 重建分段转录:连续 text 增量合并为一个 markdown 段、连续 thinking 增量合并为一个 Thought 块、工具卡片按时序插在段间;不再把整段 `content` 渲染在事件区上方(时序错乱),`content` 仍作为持久化与纯文本真相累积。增量入 store 按 ~75ms 窗口合并(text 与 thinking 同一队列),避免逐 token 重渲染与 events 无界膨胀。
+- 决策: 流式是聊天面板的基础可用性,不是视觉糖;去重靠翻译器状态而不是靠猜 provider 行为,降级路径保证异构端点不丢内容。
+- 原话/来源: PM 2026-07-02 R5:「我输入hello之后,只有spec已挂载,完全没有thinking之类的提示,结果也是一下子出现的,完全没有流式输出」;PM 补充:「thinking...只是状态,真正的thinking/reasoning内容也要流式输出,每个工具调用也要流式输出」。
+- 测试: 后端 translator 单测(StreamEvent delta→事件、同消息完整块去重、无流降级整块发、忽略 signature/input_json/子流);前端单测(中间事件不覆盖消息 status;delta 队列合并;events→分段转录:text/thinking 归并、工具按时序插段);live 私有 sidecar 验证短问题逐 token、thinking 内容实时、工具调用逐个出现。
+- Status: 设计定稿(2026-07-02)→ 实施中。
+- 归属: region `copilot`; capability `copilot-assist`(后端 translator 在 studio 后端)。
 
 ## 3. 接口契约
 - Inputs: current skill id, current view context, copilot role route data, websocket events.

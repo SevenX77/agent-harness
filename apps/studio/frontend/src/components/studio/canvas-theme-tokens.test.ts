@@ -22,7 +22,9 @@ describe("Studio canvas theme tokens", () => {
       "--studio-canvas-surface": "var(--card)",
       "--studio-canvas-surface-elevated": "var(--card)",
       "--studio-canvas-surface-muted": "var(--muted)",
-      "--studio-canvas-edge": "var(--border)",
+      // Light needs a stronger edge line than the near-invisible light --border;
+      // --ring is the semantic mid-gray. .dark overrides back to var(--border).
+      "--studio-canvas-edge": "var(--ring)",
       "--studio-canvas-edge-dot-fill": "var(--background)",
       "--studio-canvas-edge-dot-muted": "var(--muted-foreground)",
     }

@@ -52,7 +52,10 @@ export function usePhaseSync({
         isWholeLine: true,
         className: 'phase-form-highlight',
         overviewRuler: {
-          color: '#0ea5e9',
+          // Monaco's ruler accepts any CSS color string, including the live
+          // oklch(...) token — read at decoration-build time (same
+          // theme-read-on-mount pattern as MonacoPanel/EdgeTamperEditor).
+          color: getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(),
           position: monaco.editor.OverviewRulerLane.Right,
         },
       },

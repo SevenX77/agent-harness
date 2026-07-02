@@ -77,32 +77,48 @@
     --studio-canvas-accent: var(--primary);
     --studio-canvas-accent-muted: var(--primary);
     --studio-canvas-accent-soft: transparent;
-    --studio-canvas-border: var(--border);
-    --studio-canvas-border-soft: var(--border);
+    --studio-canvas-border: var(--surface-outline);
+    --studio-canvas-border-soft: var(--surface-outline);
     --studio-canvas-surface: var(--card);
     --studio-canvas-surface-elevated: var(--card);
     --studio-canvas-surface-muted: var(--muted);
     --studio-canvas-edge: var(--ring);
     --studio-canvas-edge-dot-fill: var(--background);
     --studio-canvas-edge-dot-muted: var(--muted-foreground);
+    --studio-canvas-dot: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
     /*
-     * Theme-scoped canvas chrome depth. Light follows the shadcn light
-     * convention — surfaces separate through a visible border plus soft
-     * layered shadows, no white inset highlight; the canvas pane is muted
-     * gray so white cards/panels read against it. Dark keeps the heavy
-     * elevation shadows + faint white inset (overridden in .dark below).
-     * All values stay derived from product semantic tokens or plain
-     * black/white alpha — never a second palette.
+     * shadcn light convention: a resting surface (card/docked panel) separates
+     * from its backdrop with a crisp 1px foreground-tinted ring, NOT a shadow —
+     * this is exactly how shadcn's own Card computes its border
+     * (oklab(<foreground> / 10%)), so it reduces to the theme's real --border
+     * value in dark (already a white/10% ring) without a separate override.
+     * Elevation shadows are reserved for genuinely floating surfaces (drawers,
+     * popovers, the floating toolbar) — see the --shadow-* scale below.
      */
+    --surface-outline: color-mix(in oklab, var(--foreground) 10%, transparent);
+    /*
+     * Base elevation scale (shadcn "compact, negative-spread" light shadows).
+     * Only floating surfaces use these; resting chrome uses --surface-outline
+     * instead of a shadow. .dark overrides with the heavier dark-mode weights
+     * validated in the previous light-theme pass — never a literal box-shadow
+     * on a chrome rule again, always one of these four.
+     */
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.08);
+    --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+    --shadow-lg: 0 12px 24px -6px rgb(0 0 0 / 0.12), 0 4px 8px -4px rgb(0 0 0 / 0.06);
     --studio-canvas-pane: var(--muted);
-    --studio-shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.10), 0 2px 8px rgb(0 0 0 / 0.06);
-    --studio-shadow-panel: 0 8px 24px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
-    --studio-shadow-minimap: 0 8px 24px rgb(0 0 0 / 0.10);
-    --studio-shadow-frame: 0 10px 28px rgb(0 0 0 / 0.10);
+    --studio-shadow-overlay: var(--shadow-lg);
+    --studio-shadow-panel: none;
+    --studio-shadow-toolbar: var(--shadow-md);
+    --studio-shadow-minimap: var(--shadow-sm);
+    --studio-shadow-frame: var(--shadow-xs);
     --studio-inset-highlight: 0 0 0 0 transparent;
     --studio-inset-soft: 0 0 0 0 transparent;
-    --studio-panel-card-bg: color-mix(in oklab, var(--muted) 60%, var(--background));
-    --studio-panel-card-bg-strong: var(--muted);
+    --studio-panel-card-bg: var(--muted);
+    --studio-panel-card-bg-strong: color-mix(in oklab, var(--muted) 92%, var(--foreground) 8%);
+    --studio-subgraph-wash: transparent;
+    --studio-subgraph-blur: none;
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -222,17 +238,26 @@
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
     /* Dark canvas chrome: heavy elevation shadows + faint white inset
-       highlight; low-alpha border needs no extra edge contrast. */
+       highlight; low-alpha border needs no extra edge contrast (--surface-outline
+       reduces to var(--border) here since --foreground is near-white). */
     --studio-canvas-edge: var(--border);
     --studio-canvas-pane: var(--background);
-    --studio-shadow-overlay: 0 18px 52px rgb(0 0 0 / 0.42);
-    --studio-shadow-panel: 0 18px 48px rgb(0 0 0 / 0.32);
-    --studio-shadow-minimap: 0 16px 38px rgb(0 0 0 / 0.32);
-    --studio-shadow-frame: 0 18px 42px rgb(0 0 0 / 0.22);
+    --studio-canvas-dot: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.24);
+    --shadow-sm: 0 6px 16px rgb(0 0 0 / 0.30);
+    --shadow-md: 0 14px 32px rgb(0 0 0 / 0.34);
+    --shadow-lg: 0 18px 52px rgb(0 0 0 / 0.42);
+    --studio-shadow-overlay: var(--shadow-lg);
+    --studio-shadow-panel: none;
+    --studio-shadow-toolbar: var(--shadow-md);
+    --studio-shadow-minimap: var(--shadow-md);
+    --studio-shadow-frame: var(--shadow-sm);
     --studio-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.04);
     --studio-inset-soft: inset 0 1px 0 rgb(255 255 255 / 0.03);
-    --studio-panel-card-bg: color-mix(in oklab, var(--background) 78%, black);
-    --studio-panel-card-bg-strong: color-mix(in oklab, var(--background) 70%, black);
+    --studio-panel-card-bg: var(--background);
+    --studio-panel-card-bg-strong: var(--muted);
+    --studio-subgraph-wash: color-mix(in oklab, var(--studio-canvas-surface) 30%, transparent);
+    --studio-subgraph-blur: blur(1px);
 }
 
 @layer base {
@@ -396,7 +421,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background: var(--color-card) !important;
   border: 1px solid var(--color-border) !important;
   border-radius: var(--radius-md) !important;
-  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+  box-shadow: var(--shadow-xs) !important;
   overflow: hidden !important;
 }
 
@@ -472,11 +497,14 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   top: calc(var(--studio-canvas-editor-safe-area, 0px) + 1rem) !important;
 }
 
+/* Docked chrome (attached to the viewport edge via border-l, never floating
+   over content): border + opaque surface separate it, shadcn Sidebar
+   convention — no elevation shadow, no backdrop-filter (the surface is
+   already opaque, so blur was dead weight). */
 .studio-canvas-panel {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow: var(--studio-shadow-panel), var(--studio-inset-highlight);
-  backdrop-filter: blur(18px);
+  box-shadow: none;
 }
 
 .studio-canvas-panel-header {
@@ -496,11 +524,13 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   box-shadow: var(--studio-inset-soft);
 }
 
+/* Floating drawer over the canvas — genuinely elevated, so it keeps a real
+   shadow (shadcn Sheet convention). The surface is opaque var(--card), so
+   backdrop-filter had nothing translucent to blur; dropped as dead weight. */
 .studio-left-panel-overlay {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
   box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
-  backdrop-filter: blur(18px);
 }
 
 .studio-editor-overlay {
@@ -511,7 +541,6 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
   box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
-  backdrop-filter: blur(18px);
 }
 
 .studio-editor-overlay > section,
@@ -523,7 +552,6 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
   box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
-  backdrop-filter: blur(18px);
 }
 
 .studio-right-panel-overlay .studio-copilot-panel {
@@ -655,12 +683,14 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   display: block !important;
 }
 
+/* Floating pill toolbar over the canvas — genuinely elevated, its own
+   shadow weight (was incorrectly sharing --studio-shadow-panel, the docked
+   panel's now-`none` value). Opaque surface, so no backdrop-filter. */
 .studio-center-action-bar {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
   width: max-content;
-  box-shadow: var(--studio-shadow-panel), var(--studio-inset-highlight);
-  backdrop-filter: blur(18px);
+  box-shadow: var(--studio-shadow-toolbar), var(--studio-inset-highlight);
 }
 
 .studio-center-action-button {
@@ -683,9 +713,14 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   color: var(--primary-foreground);
 }
 
+/* Light: a translucent white wash + blur over the light dotted canvas reads
+   as a milky haze, not a "layer above" — so light gets a flat transparent
+   fill (the primary-color ring alone marks the boundary). Dark has the
+   contrast headroom for the wash to actually read as elevation; kept as
+   validated (values now live in --studio-subgraph-wash/-blur, themed below). */
 .studio-subgraph-frame {
-  backdrop-filter: blur(1px);
-  background: color-mix(in oklab, var(--studio-canvas-surface) 30%, transparent);
+  backdrop-filter: var(--studio-subgraph-blur);
+  background: var(--studio-subgraph-wash);
   border: 0;
   box-shadow:
     inset 0 0 0 1.5px var(--primary),

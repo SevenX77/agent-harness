@@ -366,11 +366,14 @@ def test_graph_cycle_uses_dedicated_code(tmp_path: Path, mock_skill_resolver: ob
 
 
 def test_unreachable_phase_uses_island_code(tmp_path: Path, mock_skill_resolver: object) -> None:
+    # A bare <phase> (no depends_on) is the canonical island. (Depending on an
+    # unknown phase is attributed to [F-v3-graph-depends-unknown] instead; the
+    # island it causes is a suppressed cascade.)
     _graph(
         tmp_path,
         phases=["first", "orphan"],
         body="""<phase depends_on="input" output>first</phase>
-<phase depends_on="missing">orphan</phase>""",
+<phase>orphan</phase>""",
     )
     _agent_phase(tmp_path, "first")
     _agent_phase(tmp_path, "orphan")
@@ -384,6 +387,33 @@ def test_unreachable_phase_uses_island_code(tmp_path: Path, mock_skill_resolver:
     # node badge (the same node-id-prefix channel the manual Compile path uses).
     assert exc.value.payload is not None
     assert exc.value.payload.field_path == "orphan.depends_on"
+
+
+def test_unknown_dep_attributed_to_depends_unknown_not_island(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
+    # depends_on an unknown phase: the root defect is the unknown dependency;
+    # the resulting unreachability must NOT add a cascade island diagnostic.
+    _graph(
+        tmp_path,
+        phases=["first", "orphan"],
+        body="""<phase depends_on="input" output>first</phase>
+<phase depends_on="missing">orphan</phase>""",
+    )
+    _agent_phase(tmp_path, "first")
+    _agent_phase(tmp_path, "orphan")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+
+    _expect_code(exc, "[F-v3-graph-depends-unknown]")
+    assert exc.value.payload is not None
+    assert exc.value.payload.field_path == "orphan.depends_on"
+    issues = getattr(getattr(exc.value, "compile_result", None), "issues", None) or []
+    island_issues = [
+        issue for issue in issues if getattr(issue, "rule_id", "") == "[F-v3-graph-phase-island]"
+    ]
+    assert not island_issues, f"cascade island must be suppressed, got: {island_issues}"
 
 
 def test_missing_output_phase_is_compile_fatal(tmp_path: Path, mock_skill_resolver: object) -> None:

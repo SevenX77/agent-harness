@@ -104,6 +104,69 @@ def test_changed_markdown_diagnostic_keeps_typed_engine_code(
     assert first.file == "GRAPH.md"
 
 
+def test_lint_surfaces_every_defect_of_one_pass(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """compile-lint F6: lint expands the engine's FULL aggregated defect set.
+
+    One body carrying two independent defects — a topology island AND a broken
+    io.inputs schema — must produce BOTH diagnostics in LintResult.errors, not
+    just the primary payload (the old single-error realtime-lint assumption).
+    """
+    skills_dir, _workspaces = studio_roots
+    skill_id = "text-segmentation"
+    original = _disk_graph_text(skills_dir, skill_id)
+    broken = original.replace(
+        '<phase depends_on="input" output>setup</phase>',
+        "<phase>setup</phase>",
+    ).replace("  inputs:\n    type: object\n", "  inputs:\n    type: banana\n")
+    assert broken != original
+
+    result = skill_service.lint_skill_changed_markdown(skill_id, broken)
+
+    assert result.status == "failed"
+    codes = {error.error_code for error in result.errors}
+    assert "F-v3-graph-phase-island" in codes, f"island missing from {codes}"
+    assert "F-v3-graph-io-schema-invalid" in codes, f"io defect missing from {codes}"
+    island = next(e for e in result.errors if e.error_code == "F-v3-graph-phase-island")
+    # Explicit axes survive the seam: file/line for the editor marker, field_path
+    # for the node badge / properties projection.
+    assert island.file == "GRAPH.md"
+    assert isinstance(island.line, int) and island.line > 1
+    assert island.field_path == "setup.depends_on"
+    assert _disk_graph_text(skills_dir, skill_id) == original
+
+
+def test_lint_on_disk_with_workspace_root_reflects_disk_truth(
+    studio_roots: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """03_compile A13: a canvas topology write settles to disk BEFORE the relint
+    fires, so the on-disk tree is the source truth — no markdown body round-trip.
+    ``lint_skill_on_disk`` must lint the workspace-root dir, not the global store.
+    """
+    import shutil
+
+    skills_dir, _workspaces = studio_roots
+    ws_skill = tmp_path / "ws" / "demo-skill"
+    shutil.copytree(skills_dir / "text-segmentation", ws_skill)
+    graph = ws_skill / "GRAPH.md"
+    graph.write_text(
+        graph.read_text(encoding="utf-8").replace(
+            '<phase depends_on="input" output>setup</phase>',
+            "<phase>setup</phase>",
+        ),
+        encoding="utf-8",
+    )
+
+    result = skill_service.lint_skill_on_disk("demo-skill", workspace_root=str(ws_skill))
+
+    assert result.status == "failed"
+    codes = {error.error_code for error in result.errors}
+    assert "F-v3-graph-phase-island" in codes
+    # The global-store skill of the same family is untouched and still passes.
+    assert skill_service.lint_skill_on_disk("text-segmentation").status == "passed"
+
+
 def test_body_lint_diverges_from_stale_disk_state(
     studio_roots: tuple[Path, Path],
 ) -> None:

@@ -225,7 +225,7 @@ export function InputConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Input — {targetLabel}</DialogTitle>
           <DialogDescription>
@@ -378,7 +378,7 @@ export function OutputConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Output artifacts — GRAPH.md io</DialogTitle>
           <DialogDescription>
@@ -408,14 +408,14 @@ export function OutputConfigDialog({
                   <button
                     type="button"
                     onClick={() => updateRow(index, { mode: "single" })}
-                    className={`px-2 py-0.5 ${row.mode === "single" ? "bg-foreground text-background" : "text-muted-foreground"}`}
+                    className={`whitespace-nowrap px-2 py-0.5 ${row.mode === "single" ? "bg-foreground text-background" : "text-muted-foreground"}`}
                   >
                     single
                   </button>
                   <button
                     type="button"
                     onClick={() => updateRow(index, { mode: "per-item" })}
-                    className={`px-2 py-0.5 ${row.mode === "per-item" ? "bg-foreground text-background" : "text-muted-foreground"}`}
+                    className={`whitespace-nowrap px-2 py-0.5 ${row.mode === "per-item" ? "bg-foreground text-background" : "text-muted-foreground"}`}
                   >
                     per-item{perItemCount ? ` ×${perItemCount}` : ""}
                   </button>

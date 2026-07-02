@@ -7,9 +7,13 @@ const listWorkspaceDir = vi.fn()
 const readWorkspaceFile = vi.fn()
 const writeWorkspaceFile = vi.fn()
 
+const deleteWorkspacePath = vi.fn()
+
 vi.mock('../lib/tauri', () => ({
   writeWorkspaceFile: (workspaceRoot: string, path: string, content: string) =>
     writeWorkspaceFile(workspaceRoot, path, content),
+  deleteWorkspacePath: (workspaceRoot: string, path: string) =>
+    deleteWorkspacePath(workspaceRoot, path),
   ensureWorkspaceSupportDirs: vi.fn().mockResolvedValue(undefined),
   readWorkspaceFile: (workspaceRoot: string, path: string) =>
     readWorkspaceFile(workspaceRoot, path),
@@ -35,6 +39,8 @@ beforeEach(() => {
   readWorkspaceFile.mockReset()
   writeWorkspaceFile.mockReset()
   writeWorkspaceFile.mockResolvedValue({ path: '', content: '', hash: '' })
+  deleteWorkspacePath.mockReset()
+  deleteWorkspacePath.mockResolvedValue(undefined)
 })
 
 describe('loadCopilotSessionsFromDisk', () => {
@@ -264,5 +270,55 @@ describe('copilotStore streamed-turn persistence (R16/D8)', () => {
       .sessions.find((s) => s.id === sessionId)
       ?.messages.find((m) => m.id === 'a1')
     expect(restored?.content).toBe('streamed answer')
+  })
+})
+
+
+// R3: chat tabs get a close button — closeSession removes the session, deletes
+// its transcript file, and keeps a sane active session.
+describe('closeSession', () => {
+  function seedThree(): string[] {
+    copilotStore.setContext(WS, SKILL)
+    const a = copilotStore.newSession()
+    const b = copilotStore.newSession()
+    const c = copilotStore.newSession()
+    return [a, b, c]
+  }
+
+  it('closing a non-active session keeps the active one and deletes the file', async () => {
+    const [a, , c] = seedThree()
+    await copilotStore.closeSession(a)
+
+    const snapshot = copilotStore.getSnapshot()
+    expect(snapshot.sessions.map((s) => s.id)).not.toContain(a)
+    expect(snapshot.activeSessionId).toBe(c)
+    expect(deleteWorkspacePath).toHaveBeenCalledWith(WS, `${SESSION_DIR}/${a}.json`)
+  })
+
+  it('closing the active session activates its previous neighbor', async () => {
+    const [a, b, c] = seedThree()
+    await copilotStore.closeSession(c)
+
+    const snapshot = copilotStore.getSnapshot()
+    expect(snapshot.sessions.map((s) => s.id)).toEqual([a, b])
+    expect(snapshot.activeSessionId).toBe(b)
+  })
+
+  it('closing the last remaining session leaves one fresh empty chat', async () => {
+    copilotStore.setContext(WS, SKILL)
+    const only = copilotStore.newSession()
+    await copilotStore.closeSession(only)
+
+    const snapshot = copilotStore.getSnapshot()
+    expect(snapshot.sessions).toHaveLength(1)
+    expect(snapshot.sessions[0].id).not.toBe(only)
+    expect(snapshot.sessions[0].messages).toEqual([])
+    expect(snapshot.activeSessionId).toBe(snapshot.sessions[0].id)
+  })
+
+  it('ignores unknown session ids', async () => {
+    const [a, b, c] = seedThree()
+    await copilotStore.closeSession('nope')
+    expect(copilotStore.getSnapshot().sessions.map((s) => s.id)).toEqual([a, b, c])
   })
 })

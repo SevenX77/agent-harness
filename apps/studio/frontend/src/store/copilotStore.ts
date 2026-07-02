@@ -1,6 +1,7 @@
 import type { CopilotMessage } from '../types/copilot'
 import {
   writeWorkspaceFile,
+  deleteWorkspacePath,
   ensureWorkspaceSupportDirs,
   readWorkspaceFile,
   listWorkspaceDir,
@@ -268,6 +269,47 @@ export const copilotStore = {
     state.activeSessionId = id
     if (state.workspaceId && state.skillId) {
       persistActiveSession(state.workspaceId, state.skillId, id)
+    }
+    emit()
+  },
+  /**
+   * R3: close a chat tab. Removes the session, deletes its transcript file
+   * (D8 truth lives on disk — a closed chat must not resurrect on hydrate),
+   * and keeps a sane active session: previous neighbor when the active one is
+   * closed, or a fresh empty chat when the last one goes.
+   */
+  async closeSession(id: string) {
+    const index = state.sessions.findIndex((session) => session.id === id)
+    if (index < 0) {
+      return
+    }
+    const closedActive = state.activeSessionId === id
+    const nextSessions = state.sessions.filter((session) => session.id !== id)
+    state.sessions = nextSessions
+    if (closedActive) {
+      state.activeSessionId = nextSessions.length > 0
+        ? nextSessions[Math.min(Math.max(index - 1, 0), nextSessions.length - 1)].id
+        : null
+    }
+    if (state.workspaceId && state.skillId) {
+      const key = `${state.workspaceId}::${state.skillId}`
+      sessionsByContext[key] = nextSessions
+      if (closedActive && state.activeSessionId) {
+        persistActiveSession(state.workspaceId, state.skillId, state.activeSessionId)
+      }
+      try {
+        await deleteWorkspacePath(state.workspaceId, `${sessionsDir(state.skillId)}/${id}.json`)
+        state.persistenceError = null
+      } catch (err: unknown) {
+        // Web mode has no native fs (file never existed) — same swallow-to-state
+        // convention as persistSessionToDisk.
+        state.persistenceError = err instanceof Error ? err.message : String(err)
+      }
+    }
+    if (state.sessions.length === 0) {
+      emit()
+      this.newSession()
+      return
     }
     emit()
   },

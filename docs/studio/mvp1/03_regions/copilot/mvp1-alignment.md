@@ -20,6 +20,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 ### F1. Chat Panel And Connection State
 
 - 机制: show connection status, reconnect delay, messages, errors, and composer in the side panel.
+- 约束(2026-07-02 R3):连接状态**不占独立一行**——连接正常(open)时什么都不显示;仅断连/重连时在标题旁显示紧凑提示 chip(含 retry 倒计时)。会话 tab 条 = 单行横向滚动(本地 ScrollArea,隐藏原生滚动条,绝不出现系统滚动条控件),**每个 tab 带关闭按钮**:关闭 = 删除该会话及其落盘文件(D8 真相在盘上,关掉的对话不得在 hydrate 时复活);关到最后一个时留一个全新空会话;关闭当前活跃 tab 时激活其前一个邻居。
 - 决策: Copilot is a side assistant, not a blocking modal.
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot configuration and runtime dependency.
 - 测试: closed websocket disables send; reconnect updates status; switching skills resets messages/context.
@@ -76,10 +77,13 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
   3. route 下拉 = 在选中角色兜底链内临时指定本次对话优先线路(model_override);**兜底链 ≤1 条时隐藏**,不渲染禁用占位。
   4. **不渲染任何无功能占位按钮**——附件/@/停止只在真实可用后出现(本文件历史教训:死占位按钮误导 PM)。
   5. Enter 发送、Shift+Enter 换行;IME 组合输入(`isComposing`)期间 Enter 不发送。
+  6. **消息布局(2026-07-02 R3,PM 原话「不需要空一栏给图标,也不需要分 you 和 copilot,左右布局就能分辨」)**:左右气泡布局——用户消息右对齐、`bg-muted` 圆角气泡、纯文本 pre-wrap;助手消息左对齐、无气泡纯排版(markdown);**不渲染 You/Copilot 名字标签、状态文字和头像列**。落地用本地 `components/ui/message.tsx`(shadcn message 原语,align start/end)。
+  7. **等待可见(thinking)**:从发送瞬间到首个正文 token 之间必须有可见等待指示(Spinner + Thinking…)——覆盖两段:①助手消息尚未创建的事件前空窗;②助手消息已建但 `status=running` 且无正文(冷启动 spawn 可达 10-30s;事件不清除它——首事件恒为 context_resolved 回显,工具活动而无正文仍算等待)。正文一到即撤。
+  8. 排版:消息与 composer 正文用 `text-sm leading-relaxed`(此前 text-xs/leading-snug 过挤)。
 - 决策: 聊天区的滚动/输入行为向官方 message-scroller 契约看齐,不自造第二套滚动启发式。
 - 原话/来源: PM 2026-07-01(本轮任务原话):「参考这个官方组件 ui,优化现在的 copilot 面板」「下方的输入窗口默认只有一行有点太小了」「我比较喜欢 Claude code 的布局方式,功能在输入框下方」。
 - 测试: 流式输出时列表贴底;上滚后新增内容不抢滚、出现回底按钮;点击回底恢复跟随;composer 默认高度≈3 行;Enter 发送/Shift+Enter 换行/IME 不误发;占位按钮不存在。
-- Status: live(2026-07-01 滚动+三行落地;2026-07-02 布局按 PM 截图纠正:发送入盒内、设置移盒外、route ≤1 隐藏)。
+- Status: live(2026-07-01 滚动+三行;2026-07-02 布局纠正 + R3 气泡左右布局/thinking 可见/排版/状态条收敛/会话 tab 关闭)。
 - 归属: region `copilot`; capability `copilot-assist`.
 
 ### F7. Composer 上下文与控制(2026-07-02 新增,target-design)

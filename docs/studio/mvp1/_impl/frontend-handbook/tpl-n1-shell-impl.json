@@ -123,6 +123,16 @@
       "fe_status": "未实施",
       "be_status": "未实现",
       "be_dep": "mentions 注入已就绪;interrupt 与附件内容块待后端新增(ws 契约扩展)。"
+    },
+    {
+      "n": 27,
+      "cap": "copilot-panel-visual-r3",
+      "design_ref": "atom-27",
+      "current": "现状:已实现且符合。header 状态行删除、断连 chip 内联标题旁(copilot-panel.tsx);SessionTabs 用 ScrollArea 单行横滚 + 每 tab 关闭按钮(session-tabs.tsx),copilotStore.closeSession 删内存会话 + deleteWorkspacePath 删盘上 json、活跃邻居切换、最后一个补新空会话;消息用 ui/message.tsx 左右布局(用户右气泡/助手左排版,无标签无头像列);ThinkingRow 双覆盖(事件前空窗 + running 无正文,首事件 context_resolved 不清除);排版 text-sm leading-relaxed。",
+      "gap": "无。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:Rust delete_workspace_path 已有;无后端新增。"
     }
   ],
   "plan": [
@@ -420,6 +430,34 @@
       ],
       "shots": [
         "待 F7 各 PR 落地后补"
+      ]
+    },
+    {
+      "covers": "#27 copilot-panel-visual-r3",
+      "atoms": [
+        27
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "closeSession 单测(copilotStore.test.ts):非活跃关闭保活跃+删文件;关活跃激活前邻居;关最后一个留全新空会话;未知 id 不动。",
+        "面板单测:running 无正文渲染 thinking;transcript 以用户消息结尾渲染 thinking;有正文即撤;消息行 data-slot=message + align;tab 渲染 Close 按钮。"
+      ],
+      "layer2": [
+        "真机 Playwright:header 无 open 行;发送后 +0ms 起 Thinking 可见至首正文;用户气泡贴右;无 You/Copilot 标签;新建 tab 出关闭按钮、单行不出竖向滚动、点关闭即移除。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-24-visual-r3-bubbles.png",
+          "caption": "2026-07-02 真机:用户消息右对齐气泡、助手左对齐排版,无名字标签;tab 条带关闭按钮"
+        },
+        {
+          "file": "n1-24-visual-r3-thinking.png",
+          "caption": "2026-07-02 真机:发送后首 token 前的 Thinking 指示"
+        },
+        {
+          "file": "n1-24-visual-r3-tabs.png",
+          "caption": "2026-07-02 真机:多 chat tab 单行横向排布,各带 × 关闭,无系统滚动条"
+        }
       ]
     }
   ]

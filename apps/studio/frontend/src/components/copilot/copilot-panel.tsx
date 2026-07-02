@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, Bot, CircleAlert, CircleUserRound, SquareTerminal } from 'lucide-react'
+import { ArrowUp, Bot, CircleAlert, SquareTerminal } from 'lucide-react'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
@@ -11,7 +11,8 @@ import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
-import { Marker, MarkerContent, MarkerIcon } from '../ui/marker'
+import { Message, MessageContent } from '../ui/message'
+import { Spinner } from '../ui/spinner'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -39,24 +40,29 @@ interface ChatMessageItemProps {
 
 function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }: ChatMessageItemProps) {
   const isUser = message.role === 'user'
+  // F6 R3: waiting for the first ANSWER token (spawn + model latency) must be
+  // visible. Events don't clear it — the stream's first event is always the
+  // context_resolved echo, and tool activity without text still IS waiting.
+  const waiting = !isUser && message.status === 'running' && !message.content
+  if (isUser) {
+    return (
+      <Message align="end" data-copilot-message-role="user">
+        <MessageContent>
+          <div className="max-w-[85%] self-end rounded-lg bg-muted px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
+            {message.content}
+          </div>
+        </MessageContent>
+      </Message>
+    )
+  }
   return (
-    <article
-      data-copilot-message-role={message.role}
-      className={`py-1.5 text-sm ${isUser ? 'text-muted-foreground' : 'text-foreground'}`}
-    >
-      <Marker role={message.status === 'running' ? 'status' : undefined} className="px-0">
-        <MarkerIcon className={isUser ? 'text-primary' : 'text-[color:var(--studio-canvas-accent)]'}>
-          {isUser ? <CircleUserRound /> : <Bot />}
-        </MarkerIcon>
-        <MarkerContent className="flex items-center gap-2 truncate font-medium text-foreground">
-          <span>{isUser ? 'You' : 'Copilot'}</span>
-          <span className="text-[0.625rem] font-normal text-muted-foreground">{message.status}</span>
-        </MarkerContent>
-      </Marker>
-      <div className="prose prose-sm max-w-none pl-6 text-sm leading-snug text-current dark:prose-invert prose-p:my-1 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
-        <ReactMarkdown>{message.content || (message.status === 'running' ? 'Thinking...' : '')}</ReactMarkdown>
-      </div>
-      <div className="mt-1 space-y-1 pl-6">
+    <Message align="start" data-copilot-message-role="assistant">
+      <MessageContent>
+        {waiting ? <ThinkingRow /> : null}
+        <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert prose-p:my-1.5 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-pre:my-2">
+          <ReactMarkdown>{message.content}</ReactMarkdown>
+        </div>
+      <div className="mt-1 space-y-1">
         {message.events.map((event) => {
           if (event.type === 'tool_use_start') {
             return <ToolCallBubble key={event.id} event={event} />
@@ -127,11 +133,22 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
           return null
         })}
       </div>
-    </article>
+      </MessageContent>
+    </Message>
   )
 }
 
 export const ChatMessageItem = React.memo(ChatMessageItemBase)
+
+/** F6 R3: visible wait for the first answer token (cold spawns take 10-30s). */
+function ThinkingRow() {
+  return (
+    <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground" data-copilot-thinking="true">
+      <Spinner className="size-3.5" />
+      Thinking…
+    </div>
+  )
+}
 
 interface CopilotPanelProps {
   skillId: string | null
@@ -408,6 +425,12 @@ export function CopilotPanel({
           <div className="flex min-w-0 items-center gap-2">
             <Bot className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
             <h2 className="truncate text-sm font-semibold">Copilot</h2>
+            {copilot.connectionStatus !== 'open' ? (
+              <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                {copilot.connectionStatus}
+                {copilot.reconnectInMs ? ` · retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
+              </span>
+            ) : null}
           </div>
           <Button
             type="button"
@@ -424,10 +447,6 @@ export function CopilotPanel({
             Open in Claude Code
           </Button>
         </div>
-        <p className="mt-1 inline-flex rounded border border-border/60 bg-background/30 px-1.5 py-0.5 text-xs text-muted-foreground">
-          {copilot.connectionStatus}
-          {copilot.reconnectInMs ? `, retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
-        </p>
       </header>
 
       <SessionTabs
@@ -435,6 +454,7 @@ export function CopilotPanel({
         activeSessionId={copilot.activeSessionId}
         onSwitch={copilot.switchSession}
         onNew={copilot.newSession}
+        onClose={copilot.closeSession}
       />
 
       {inEvalView && judgeRefs ? (
@@ -459,16 +479,25 @@ export function CopilotPanel({
           <MessageScrollerViewport className="p-3">
             <MessageScrollerContent className="gap-2">
         {copilot.messages.length > 0 ? (
-          copilot.messages.map((message) => (
-            <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={message.role === 'user'}>
-              <ChatMessageItem
-                message={message}
-                skillId={skillId}
-                workspaceRoot={workspaceRoot}
-                onFileChanged={onFileChanged}
-              />
-            </MessageScrollerItem>
-          ))
+          <>
+            {copilot.messages.map((message) => (
+              <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={message.role === 'user'}>
+                <ChatMessageItem
+                  message={message}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
+                  onFileChanged={onFileChanged}
+                />
+              </MessageScrollerItem>
+            ))}
+            {copilot.messages[copilot.messages.length - 1]?.role === 'user' ? (
+              // Pre-event gap: the assistant message only exists once the first
+              // ws event lands; until then the wait must still be visible.
+              <MessageScrollerItem messageId="__thinking__">
+                <ThinkingRow />
+              </MessageScrollerItem>
+            ) : null}
+          </>
         ) : (
           <div className="studio-canvas-input-surface rounded-md border border-dashed p-3 text-sm text-muted-foreground">
             <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
@@ -542,7 +571,7 @@ export function CopilotPanel({
             }}
             onKeyDown={handleComposerKeyDown}
             rows={3}
-            className="min-h-[60px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
+            className="min-h-[60px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
             placeholder="Use '@' to mention nodes..."
           />
           {/* F6: inside the bordered box only the send action lives (stop joins it

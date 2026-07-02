@@ -41,6 +41,8 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/edge-static-inference.ts
 !apps/studio/frontend/src/lib/edge-static-inference.test.ts
 !apps/studio/frontend/src/lib/io-declarations.ts
+!apps/studio/frontend/src/lib/io-config.ts
+!apps/studio/frontend/src/lib/io-config.test.ts
 lib64/
 parts/
 sdist/

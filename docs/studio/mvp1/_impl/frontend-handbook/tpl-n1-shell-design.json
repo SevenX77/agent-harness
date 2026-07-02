@@ -279,6 +279,33 @@
       "be_status": "未实现",
       "gap_brief": "target-design:前端三个控制均未实施;后端 mentions 层已就绪,interrupt 通道与附件内容块通路未实现。按 F7 分三个 PR 落地。",
       "impl_ref": "fn-26"
+    },
+    {
+      "n": 27,
+      "cap": "copilot-panel-visual-r3",
+      "track": "copilot-assist",
+      "module": "Copilot 面板",
+      "func": "设计(R3,PM 2026-07-02 视觉反馈):① 连接状态不占独立一行(open 时不显示,断连才在标题旁显示紧凑 chip);② 会话 tab 条单行横向滚动(ScrollArea 隐藏原生滚动条)+ 每个 tab 关闭按钮(关闭删会话及落盘文件,关最后一个留全新空会话,关活跃 tab 激活前邻居);③ 消息左右气泡布局(用户右对齐 bg-muted 气泡,助手左对齐纯排版,无 You/Copilot 标签/状态字/头像列);④ 发送到首个正文 token 之间必须有 Thinking 指示(事件前空窗 + running 无正文两段都盖);⑤ 排版 text-sm leading-relaxed。",
+      "action": "用户在面板收发消息/切换与关闭 chat tab;断连时看到标题旁提示。",
+      "fe_design": "设计源 03_regions/copilot F1(状态 chip + tab 条)与 F6-⑥⑦⑧(气泡/thinking/排版)。落地组件:components/ui/message.tsx(shadcn message 原语,align start/end)、ui/spinner、ui/scroll-area;store 新增 closeSession(删除 .workspace/copilot/sessions/<skillId>/<id>.json,经 native-fs delete_workspace_path)。",
+      "fe_modules": [
+        {
+          "name": "消息滚动器(MessageScroller)",
+          "ref": "femod-message-scroller"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "Rust delete_workspace_path",
+          "purpose": "关闭 chat 时删除该会话的落盘 transcript(已有命令,无新增)。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-wsfile"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(本轮落地)。真机验证:header 无 open 行;用户气泡贴右(gapRight 12px vs gapLeft 173px);无 You/Copilot 标签;tab 条单行(sh==ch==24)带关闭按钮、关闭即移除;Thinking 从发送 +0ms 可见到首正文 token(暖会话 ~440ms,冷启动覆盖 spawn 全程)。",
+      "impl_ref": "fn-27"
     }
   ]
 }

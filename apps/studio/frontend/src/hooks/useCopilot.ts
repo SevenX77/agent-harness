@@ -268,5 +268,6 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     sessions: snapshot.sessions,
     newSession: () => copilotStore.newSession(),
     switchSession: (id: string) => copilotStore.switchSession(id),
+    closeSession: (id: string) => { void copilotStore.closeSession(id) },
   }
 }

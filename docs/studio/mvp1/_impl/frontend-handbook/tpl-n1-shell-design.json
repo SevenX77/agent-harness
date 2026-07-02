@@ -346,6 +346,21 @@
    "be_status": "n/a",
    "gap_brief": "无。",
    "impl_ref": "fn-29"
+  },
+  {
+   "n": 30,
+   "cap": "copilot-role-slot-loading",
+   "track": "studio-settings",
+   "module": "Copilot 面板",
+   "func": "role/route 槽位加载态 + 图标语义(F3 约束 5/6,PM 2026-07-02 R5-C):roles+registry 两个请求都落定前,设置行槽位渲染 shadcn Skeleton 占位(registry 冷启动可达 ~45s,空槽会被误读成没有 role 功能);失败也算落定,骨架必须撤;role picker 图标 UserCog → BrainCircuit(选的是模型 persona,不是用户配置)。",
+   "action": "启动 app 打开 skill:输入框下方右侧先出现骨架占位闪烁;roles/registry 就绪后原地换成 route + role 选择器(BrainCircuit 图标);请求失败时骨架撤下、选择器按既有规则隐藏。",
+   "fe_design": "copilot-panel.tsx:registrySettled/rolesSettled 两个布尔在各自 fetch 的 finally 落定;设置行 `settled ? <ModelPicker/>+<RolePicker/> : <Skeleton aria-label=\"Loading copilot roles\" h-7 w-32/>`;role-picker.tsx 图标 BrainCircuit(lucide)。设计源:docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F3 约束 5/6。",
+   "fe_modules": [],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "无。",
+   "impl_ref": "fn-30"
   }
  ]
 }

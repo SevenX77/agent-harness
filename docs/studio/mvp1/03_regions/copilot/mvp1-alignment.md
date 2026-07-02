@@ -46,6 +46,8 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
   2. 无任何持久化 copilot 角色时,Settings 浮出的内置默认(atom-56 语义,rendered-not-persisted)**同样出现在 composer**;首次用它发消息 = "动了" → 前端先按 Settings 同一物化路径(`buildCopilotRoleEntry` + `copilot_<slug>` key,PUT /api/llm/roles)落库,再以持久化 key 发送。
   3. 默认选中 = 派生列表第一项;**删除前端写死的 `copilot_chat` 默认常量**(旧路径,不向后兼容);后端 ws 契约里 `role` 缺省仍按约定名解析,但面板一律显式传 role。
   4. `roles_changed` / `registry_changed` 事件驱动刷新,Settings 改完 composer 实时跟上。
+  5. **加载态可见(2026-07-02 R5-C,PM「启动时下方 copilot role 没读出来时,加一个 skeleton 占位或 loading 状态」)**:roles + registry 两个请求**都落定**(成功或失败)之前,设置行的 role/route 槽位渲染 shadcn Skeleton 占位(registry 冷启动探测可达 ~45s,空槽会被误读为"没有 role 功能");失败也算落定——骨架必须撤下(picker 按既有规则隐藏),不许永挂。
+  6. **图标语义(R5-C,PM「UserCog 违和,他不是一个真的 role」)**:role picker 触发器图标 = lucide `BrainCircuit`——选的是"这次对话背后的模型 persona/脑子",不是用户配置齿轮。
 - 决策: route/role config comes from Settings; chat only consumes it — consuming 的派生函数也必须同一份,不许面板自养第二套判定。
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot settings; `01_workflows/00_settings-ux-spec.md:395` assigns role mapping; 浮出/物化语义见 settings copilot 设计 atom-55/56(`docs/studio/mvp1/_impl/frontend-handbook/tpl-copilot-design.json` 派生视图,源头 `00_settings-ux-spec.md` §3.2)。
 - 测试: composer 选项集合 == Settings displayRoles(配置完成子集);空草稿不出现;浮出角色首发消息触发物化并用持久化 key;changing route affects future messages; unavailable config shows scoped error; Settings 增删/换组后 composer 经事件刷新对齐。

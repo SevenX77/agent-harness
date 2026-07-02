@@ -1,4 +1,4 @@
-import { UserCog } from 'lucide-react'
+import { BrainCircuit } from 'lucide-react'
 import type { CredentialsState, ModelGroup, RoleRouteEntry, RolesData } from '../../api/llm'
 import { deriveCopilotDisplayRoles } from '../studio/settings/copilot/copilot-role-derivation'
 import { Button } from '../ui/button'
@@ -77,7 +77,9 @@ export function RolePicker({ options, selectedRole, onSelect }: RolePickerProps)
               aria-label="Select copilot role"
               className="h-7 gap-1 px-2 text-xs text-muted-foreground"
             >
-              <UserCog className="size-3.5" />
+              {/* R5-C: the picker chooses which model persona backs THIS chat —
+                  a brain, not a user-settings gear (UserCog read as "配置用户"). */}
+              <BrainCircuit className="size-3.5" />
               <span className="min-w-0 truncate">{selectedLabel}</span>
             </Button>
           </DropdownMenuTrigger>

@@ -2369,7 +2369,7 @@ export function GraphCanvas({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <section ref={canvasRef} className="relative h-full min-h-0 bg-background">
+        <section ref={canvasRef} className="studio-canvas-pane-bg relative h-full min-h-0">
       {error ? (
         <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">

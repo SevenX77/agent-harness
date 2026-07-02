@@ -82,9 +82,27 @@
     --studio-canvas-surface: var(--card);
     --studio-canvas-surface-elevated: var(--card);
     --studio-canvas-surface-muted: var(--muted);
-    --studio-canvas-edge: var(--border);
+    --studio-canvas-edge: var(--ring);
     --studio-canvas-edge-dot-fill: var(--background);
     --studio-canvas-edge-dot-muted: var(--muted-foreground);
+    /*
+     * Theme-scoped canvas chrome depth. Light follows the shadcn light
+     * convention — surfaces separate through a visible border plus soft
+     * layered shadows, no white inset highlight; the canvas pane is muted
+     * gray so white cards/panels read against it. Dark keeps the heavy
+     * elevation shadows + faint white inset (overridden in .dark below).
+     * All values stay derived from product semantic tokens or plain
+     * black/white alpha — never a second palette.
+     */
+    --studio-canvas-pane: var(--muted);
+    --studio-shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.10), 0 2px 8px rgb(0 0 0 / 0.06);
+    --studio-shadow-panel: 0 8px 24px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
+    --studio-shadow-minimap: 0 8px 24px rgb(0 0 0 / 0.10);
+    --studio-shadow-frame: 0 10px 28px rgb(0 0 0 / 0.10);
+    --studio-inset-highlight: 0 0 0 0 transparent;
+    --studio-inset-soft: 0 0 0 0 transparent;
+    --studio-panel-card-bg: color-mix(in oklab, var(--muted) 60%, var(--background));
+    --studio-panel-card-bg-strong: var(--muted);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -203,6 +221,18 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    /* Dark canvas chrome: heavy elevation shadows + faint white inset
+       highlight; low-alpha border needs no extra edge contrast. */
+    --studio-canvas-edge: var(--border);
+    --studio-canvas-pane: var(--background);
+    --studio-shadow-overlay: 0 18px 52px rgb(0 0 0 / 0.42);
+    --studio-shadow-panel: 0 18px 48px rgb(0 0 0 / 0.32);
+    --studio-shadow-minimap: 0 16px 38px rgb(0 0 0 / 0.32);
+    --studio-shadow-frame: 0 18px 42px rgb(0 0 0 / 0.22);
+    --studio-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.04);
+    --studio-inset-soft: inset 0 1px 0 rgb(255 255 255 / 0.03);
+    --studio-panel-card-bg: color-mix(in oklab, var(--background) 78%, black);
+    --studio-panel-card-bg-strong: color-mix(in oklab, var(--background) 70%, black);
 }
 
 @layer base {
@@ -389,9 +419,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background-color: var(--color-card) !important;
   border: 1px solid var(--color-border) !important;
   border-radius: var(--radius-md) !important;
-  box-shadow:
-    0 16px 38px rgb(0 0 0 / 0.32),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-minimap), var(--studio-inset-highlight);
 }
 
 .react-flow .skill-mini-map {
@@ -447,9 +475,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-canvas-panel {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 48px rgb(0 0 0 / 0.32),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-panel), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -458,18 +484,22 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   border-color: var(--studio-canvas-border-soft);
 }
 
+/* Canvas pane background: muted in light so white node cards / floating
+   panels separate from the pane; plain background in dark (see .dark). */
+.studio-canvas-pane-bg {
+  background: var(--studio-canvas-pane);
+}
+
 .studio-canvas-input-surface {
   background: var(--studio-canvas-surface-muted);
   border-color: var(--studio-canvas-border-soft);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: var(--studio-inset-soft);
 }
 
 .studio-left-panel-overlay {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 52px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -480,9 +510,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   max-height: calc(100% - 1.5rem);
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 52px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -494,9 +522,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-right-panel-overlay {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 52px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -597,7 +623,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-left-panel-overlay [data-studio-panel-body="true"] :where([data-slot="input"], [data-slot="textarea"], button[role="combobox"]) {
   background: var(--studio-canvas-surface-muted);
   border-color: var(--studio-canvas-border-soft);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: var(--studio-inset-soft);
 }
 
 .studio-left-panel-overlay [data-studio-panel-body="true"] :where([data-slot="textarea"]) {
@@ -605,20 +631,20 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 }
 
 .studio-left-panel-overlay [data-studio-panel-body="true"] :where(.rounded-md.border.bg-background, .rounded-md.border.bg-card) {
-  background: color-mix(in oklab, var(--background) 70%, black);
+  background: var(--studio-panel-card-bg-strong);
   border-color: var(--studio-canvas-border-soft);
 }
 
 .studio-left-panel-overlay [data-studio-panel-body="true"] section > .rounded-md.border,
 .studio-left-panel-overlay [data-studio-panel-body="true"] section > .space-y-2 > .rounded-md.border,
 .studio-left-panel-overlay [data-studio-panel-body="true"] section > .space-y-1 > .rounded-md.border {
-  background: color-mix(in oklab, var(--background) 78%, black);
+  background: var(--studio-panel-card-bg);
 }
 
 .studio-left-panel-overlay :where(.rounded-md.border.bg-card, .rounded-md.border.bg-background) {
   background: var(--studio-canvas-surface-muted);
   border-color: var(--studio-canvas-border-soft);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: var(--studio-inset-soft);
 }
 
 .studio-left-panel-overlay :where(input, textarea, button[role="combobox"]) {
@@ -633,9 +659,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
   width: max-content;
-  box-shadow:
-    0 16px 38px rgb(0 0 0 / 0.36),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-panel), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -665,7 +689,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   border: 0;
   box-shadow:
     inset 0 0 0 1.5px var(--primary),
-    0 18px 42px rgb(0 0 0 / 0.22);
+    var(--studio-shadow-frame);
 }
 
 .studio-subgraph-header {

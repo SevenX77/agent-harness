@@ -143,7 +143,7 @@ export function ContextEdge({
 
   const tooltipCopy = isTestEnv
     ? 'Run the skill to inspect transferred data'
-    : (hasTraceData ? 'Click to inspect flowing context' : 'No data captured on this path')
+    : (hasTraceData ? 'Click to inspect flowing context' : 'Click to view inferred fields on this path')
 
   return (
     <>

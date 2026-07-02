@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { ResumeRunOptions } from "@/api/client"
+import { isStaticEdgeInference, type StaticEdgeField } from "@/lib/edge-static-inference"
 import type { EdgeOperation, SelectedEdge } from "../WorkspaceContext"
 import { edgeTamperResumeOptionsFromJson } from "./edge-tamper"
 import { EdgeTamperEditor } from "./EdgeTamperEditor"
@@ -93,7 +94,10 @@ export function EdgeContextView({
   onResumeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
   resumeLoading?: boolean
 }) {
-  const hasTransition = selectedEdge.contextJson != null
+  // n5 atom #14: a static (pre-run) inference renders the declared-fields view
+  // instead of the runtime transition body.
+  const staticInference = isStaticEdgeInference(selectedEdge.contextJson) ? selectedEdge.contextJson : null
+  const hasTransition = !staticInference && selectedEdge.contextJson != null
   const blackboard = blackboardOf(selectedEdge.contextJson)
   const tamperDiff = tamperDiffOf(selectedEdge.contextJson)
   const tamperAudit = tamperAuditOf(selectedEdge.contextJson)
@@ -153,11 +157,15 @@ export function EdgeContextView({
               </span>
             </div>
             <div className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Blackboard state dispatched across this edge during the run.
+              {staticInference
+                ? "Fields inferred from the graph's io declarations — this edge has not run yet."
+                : "Blackboard state dispatched across this edge during the run."}
             </div>
           </div>
 
-          {!hasTransition ? (
+          {staticInference ? (
+            <StaticInferenceBody fields={staticInference.fields} target={selectedEdge.target} />
+          ) : !hasTransition ? (
             <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
               No transition recorded for this edge in the current run. Run the skill to capture the
               dispatched blackboard.
@@ -303,6 +311,58 @@ export function EdgeContextView({
           )}
         </div>
       </ScrollArea>
+    </div>
+  )
+}
+
+/**
+ * n5 atom #14 static-inference body: which fields SHOULD be on the blackboard
+ * when the run reaches this dot, derived purely from declarations (root
+ * io.inputs ∪ ancestor io.outputs ∪ the target's source:'file' injections).
+ */
+function StaticInferenceBody({ fields, target }: { fields: StaticEdgeField[]; target: string }) {
+  return (
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Inferred blackboard fields
+      </div>
+      <div className="mb-3 text-xs text-muted-foreground">
+        Root inputs, upstream outputs and file imports expected on the blackboard when the run
+        reaches this dot. Run the skill to see the real dispatched values.
+      </div>
+      {fields.length > 0 ? (
+        <dl className="space-y-2">
+          {fields.map((field) => (
+            <div key={field.name} className="flex flex-col gap-1">
+              <dt className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-foreground">
+                {field.name}
+                {field.type ? (
+                  <Badge variant="outline" className="px-1 py-0 text-[8px]">
+                    {field.type}
+                  </Badge>
+                ) : null}
+                {field.via_file ? (
+                  <Badge variant="outline" className="px-1 py-0 text-[8px]">
+                    file
+                  </Badge>
+                ) : null}
+                {field.consumed_by_target ? (
+                  <Badge variant="outline" className="px-1 py-0 text-[8px]">
+                    → {target} input
+                  </Badge>
+                ) : null}
+              </dt>
+              <dd className="break-all rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                from {field.from}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <div className="text-xs text-muted-foreground">
+          No fields are expected on the blackboard at this edge.
+        </div>
+      )}
     </div>
   )
 }

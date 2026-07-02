@@ -1,7 +1,7 @@
 ---
 module: 03_regions/canvas
 doc: mvp1-alignment
-status: FROZEN（React Flow 画布 live；node status 仍非真实 run 态，edge dot 用 mock 黑板，inline subgraph 用 mock rows ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07-02 按代码核对:edge dot 已接真实事件派生(edgeContextFromEvents,mock 已删),缺静态推断态;node status / inline subgraph 现状以代码为准 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown, run-execution-node-status, trace-dot-blackboard]
 aligns_with: 01_workflows/02_authoring.md（canvas authoring）· 01_workflows/04_run-and-verify.md（node status / dot）
@@ -57,13 +57,13 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: placeholder/stale.
 - 归属: region `canvas`; capability `skill-workspace`, `graph-authoring`.
 
-### F5. Edge Dot Hit Target
+### F5. Edge Dot Hit Target(双态)
 
-- 机制: the line/dot between nodes is clickable and opens blackboard transition data for the selected run.
-- 决策: dot represents operations between upstream end and downstream start.
-- 原话/来源: `01_workflows/04_run-and-verify.md:76` defines dot; `01_workflows/04_run-and-verify.md:109` preserves the PM quote.
-- 测试: dot opens real transition context; parallel branch dot shows shared filtered blackboard.
-- Status: mock/target-design.
+- 机制: the line/dot between nodes is clickable;**双态**:未跑前打开该边的**静态黑板字段推断**(根 `io.inputs` ∪ 上游祖先 `io.outputs` ∪ `source: file` 注入,前端按拓扑 + io 声明推导,逐边不同、随编辑即时更新);跑后(选中某次 run)打开真实 blackboard transition data(边事件快照 + 操作记录)。完整语义与数据契约归 `trace-observability` F4,canvas 只渲染。
+- 决策: dot represents operations between upstream end and downstream start;**未跑前也要像 node 的 io 一样给出 schema 推断**(PM 2026-07-02)。
+- 原话/来源: `01_workflows/04_run-and-verify.md:76` defines dot; `01_workflows/04_run-and-verify.md:109` preserves the PM quote;静态推断原话留底于 `trace-observability` F4(PM 2026-07-02)。
+- 测试: 未跑时 dot opens per-edge static field inference(随 io 声明/拓扑变化更新);跑后 dot opens real transition context; parallel branch dot shows shared filtered blackboard.
+- Status: mock/target-design(静态推断 = 2026-07-02 新增目标)。
 - 归属: region `canvas`; capability `trace-observability`.
 
 ## 3. 接口契约
@@ -78,12 +78,12 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 | ID | 决策 | 动机 |
 |---|---|---|
 | CANVAS-1 | 节点态 | 单元 `run-execution-node-status`（消费；owner=run-execution/state-engine）；**为什么**：节点灯/边由 run events 经 state-engine 投影，canvas 只渲染 |
-| CANVAS-2 | dot 黑板 | 单元 `trace-dot-blackboard`；**为什么**：边 dot 渲染真实黑板字段切片，非假数据 |
+| CANVAS-2 | dot 黑板 | 单元 `trace-dot-blackboard`；**为什么**：边 dot 双态——未跑渲染静态字段推断(拓扑+io 声明前端推导),跑后渲染真实黑板字段切片,非假数据 |
 | CANVAS-3 | 子图 inline | 单元 `subgraph-path-inline-drilldown`；**为什么**：主画布 inline 展开子拓扑 + 下钻并存，虚线容器靠父图最右 |
 
 ## 6. 测试关键点
 1. 节点态: baseline 现状为 Workspace 未传真实 `statusByNodeId`，buildNodes 有默认假态 ⚠️；目标为 节点灯来自真实 run/predict/state-engine 投影。
-2. dot 黑板: baseline 现状为 `ContextEdge:getMockEdgeContext` 生成 mock JSON ⚠️；目标为 edge dot 点击打开真实 blackboard transition。
+2. dot 黑板: baseline 现状为 真实事件派生已 live(GraphCanvas 用 edgeContextFromEvents,mock 已删),但未跑时无内容(空态)⚠️；目标为 edge dot 双态——未跑显示静态字段推断,跑后打开真实 blackboard transition。
 3. 子图 inline: baseline 现状为 `SubgraphInline` 是 mock rows ⚠️；目标为 解析绝对 `path` 后 inline 展开/下钻/面包屑可用。
 
 ## 7. 涉及 region / platform
@@ -91,7 +91,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 
 ## 8. gaps / 报警
 - 🚨 节点态: Workspace 未传真实 `statusByNodeId`，buildNodes 有默认假态 ⚠️；目标 节点灯来自真实 run/predict/state-engine 投影。
-- 🚨 dot 黑板: `ContextEdge:getMockEdgeContext` 生成 mock JSON ⚠️；目标 edge dot 点击打开真实 blackboard transition。
+- 🚨 dot 黑板: 真实事件派生已 live(mock 已删),未跑时仅空态、无静态推断 ⚠️；目标 edge dot 双态(未跑静态字段推断 + 跑后真实 blackboard transition)。
 - 🚨 子图 inline: `SubgraphInline` 是 mock rows ⚠️；目标 解析绝对 `path` 后 inline 展开/下钻/面包屑可用。
 
 ## 交叉引用（链接, 不复制）

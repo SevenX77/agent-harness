@@ -49,6 +49,7 @@ import { ResumeNodeToolbar } from '@/components/studio/ResumeNodeToolbar'
 import type { TraceHitlResumeRequest } from '@/components/studio/hitl-prompt'
 import { resolveSubgraphPath } from '@/components/studio/subgraph-path'
 import { edgeContextFromEvents } from '@/lib/edge-context'
+import { staticEdgeInference } from '@/lib/edge-static-inference'
 import { errorMessage } from '@/utils/errors'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
@@ -704,6 +705,12 @@ export function GraphCanvas({
   useEffect(() => {
     workspaceRef.current = workspace
   }, [workspace])
+  // n5 atom #14: the dot's static (pre-run) inference derives from the current
+  // skill declarations; a ref keeps handleInspectEdge dependency-free.
+  const skillDetailRef = useRef(skillDetail)
+  useEffect(() => {
+    skillDetailRef.current = skillDetail
+  }, [skillDetail])
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   // N2 atom #13 (subgraph-inline-preview): resolved child topology per expanded
   // subgraph node, keyed by the parent node id. Drives the canvas-level inline
@@ -1429,8 +1436,12 @@ export function GraphCanvas({
     if (!currentWorkspace?.setSelectedEdge || !currentWorkspace?.onPanelChange) {
       return
     }
+    // Runtime transition first (real dispatched blackboard); before any run
+    // exists fall back to the static declared-fields inference (n5 atom #14).
     const resolvedContextJson = contextJson === undefined
-      ? edgeContextFromEvents(currentWorkspace.traceEvents ?? [], source, target) ?? undefined
+      ? edgeContextFromEvents(currentWorkspace.traceEvents ?? [], source, target)
+        ?? staticEdgeInference(skillDetailRef.current, source, target)
+        ?? undefined
       : contextJson as EdgeContextJson
     currentWorkspace.setSelectedEdge({
       id,

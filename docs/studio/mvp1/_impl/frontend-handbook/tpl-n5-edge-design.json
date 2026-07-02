@@ -1,82 +1,100 @@
 {
-  "page_id": "n5_edge_design",
-  "title": "边 dot · Context 查看与篡改续跑 · 操作设计",
-  "region": "debug:edge",
-  "intro": "本页是「调试续跑」里**场景 C(篡改 Context 续跑)**这块交互面的 MVP1 设计(应该怎样):点一条边上的 dot(边中点圆点)展开这条边上轮传递的真实黑板(Context,节点间传的业务数据),默认只读查看;显式进入篡改模式后用可写编辑器手改 JSON、存盘,再点下游续跑——下游拿被篡改的伪造数据跑,上游 checkpoint 不重跑、原 trace 不变。每张卡只描述操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。注:边黑板数据来自运行事件流(EventEnvelope 的 input_dispatch 事件,一次边转移派发的扁平快照)派生,只读底座已绿;篡改续跑对接 engine 后端经 sidecar 暴露的 resume 端点的 context_overrides(覆盖黑板业务字段)。",
-  "atoms": [
+ "page_id": "n5_edge_design",
+ "title": "边 dot · Context 查看与篡改续跑 · 操作设计",
+ "region": "debug:edge",
+ "intro": "本页是 dot 面板(边中点圆点)交互面的 MVP1 设计:**dot 双态**(PM 2026-07-02,trace-observability F4)——未跑前显示该边的静态黑板字段推断(#14),跑后展开该边上轮传递的真实黑板(#7),显式进入篡改模式手改 JSON 再点下游续跑(#8/#9,场景 C:下游拿伪造数据跑、上游 checkpoint 不重跑、原 trace 不变)。每张卡只描述操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。注:运行期边黑板数据来自事件流(input_dispatch 等边操作事件的 blackboard_snapshot)派生;静态推断由前端按拓扑 + 各节点 io 声明推导,无后端依赖。",
+ "atoms": [
+  {
+   "n": 7,
+   "cap": "edge-blackboard-readonly-view",
+   "track": "C",
+   "module": "边黑板查看",
+   "func": "设计(只读底座,spec F6 前半):点边 dot 展开这条边上轮真实传递的黑板快照(只读),看清这条边把哪些业务字段派发给了下游、哪些键这轮变了(changed_keys),作为篡改的前提——先看清真实数据,再决定改什么。",
+   "action": "用户点画布上一条边中点的 dot(圆点)。",
+   "fe_design": "点边 dot(ContextEdge,带可点 dot 的边组件)→ setSelectedEdge(记下选中边)+ 切到 timeline 面板 → 边 Context 派生(edgeContextFromEvents,edge-context.ts 里在事件流扫该边最后一条匹配 from_phase→to_phase 的 input_dispatch/edge_transition 事件取黑板快照的纯选择器)从同一份运行事件流取该边的 blackboard_snapshot(派发进下游的扁平字典)+ changed_keys(这轮变了的键)+ checkpoint 元数据 → EdgeContextView(边上下文面板组件)以只读键值 + changed_keys 高亮徽章展示。设计意图:数据源是**历史运行事件**(派发已发生、本身不可改),所以默认只读;它是篡改(#8)的真实底座——不先看清真实黑板就改 = 瞎改。无匹配事件则显示空态(非回退 mock 假数据)。",
+   "fe_modules": [
     {
-      "n": 7,
-      "cap": "edge-blackboard-readonly-view",
-      "track": "C",
-      "module": "边黑板查看",
-      "func": "设计(只读底座,spec F6 前半):点边 dot 展开这条边上轮真实传递的黑板快照(只读),看清这条边把哪些业务字段派发给了下游、哪些键这轮变了(changed_keys),作为篡改的前提——先看清真实数据,再决定改什么。",
-      "action": "用户点画布上一条边中点的 dot(圆点)。",
-      "fe_design": "点边 dot(ContextEdge,带可点 dot 的边组件)→ setSelectedEdge(记下选中边)+ 切到 timeline 面板 → 边 Context 派生(edgeContextFromEvents,edge-context.ts 里在事件流扫该边最后一条匹配 from_phase→to_phase 的 input_dispatch/edge_transition 事件取黑板快照的纯选择器)从同一份运行事件流取该边的 blackboard_snapshot(派发进下游的扁平字典)+ changed_keys(这轮变了的键)+ checkpoint 元数据 → EdgeContextView(边上下文面板组件)以只读键值 + changed_keys 高亮徽章展示。设计意图:数据源是**历史运行事件**(派发已发生、本身不可改),所以默认只读;它是篡改(#8)的真实底座——不先看清真实黑板就改 = 瞎改。无匹配事件则显示空态(非回退 mock 假数据)。",
-      "fe_modules": [
-        {
-          "name": "运行事件流订阅（useRunStream）"
-        },
-        {
-          "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "WS /ws/runs/{run_id}",
-          "purpose": "订阅事件流,从 input_dispatch 事件取该边的 blackboard_snapshot/changed_keys/checkpoint 元数据渲染只读黑板。",
-          "mechanism_ref": "mech_n5_events",
-          "iface_ref": "iface-stream"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计:edgeContextFromEvents 从 EventEnvelope 的 input_dispatch/edge_transition 取真实黑板快照(非 mock),EdgeContextView 以只读键值 + changed_keys 高亮展示,无匹配时显示空态。只读查看底座(后端 D11.5 已绿)对得上。",
-      "impl_ref": "fn-7"
+     "name": "运行事件流订阅（useRunStream）"
     },
     {
-      "n": 8,
-      "cap": "edge-blackboard-tamper-edit",
-      "track": "C",
-      "module": "边黑板篡改",
-      "func": "设计(spec F6 + 决策 Q3):点边 dot 展开真实 Context 后,显式进入篡改模式,**复用 Monaco 编辑器(由 trace 只读编辑器切 readOnly=false 得到)**把黑板 JSON 改成想要的伪造值,带 JSON 校验,改完存盘。Q3 明确「可写 Monaco = trace 只读编辑器切 readonly」。",
-      "action": "用户在边 Context 面板点[Tamper/篡改]进入编辑态 → 在编辑器里手改黑板 JSON。",
-      "fe_design": "在只读黑板视图(#7)上点 Tamper → 切到可写编辑态(readOnly=false)→ 编辑器载入当前黑板 JSON 文本 → 用户手改 → 改动经边篡改校验(edgeTamperResumeOptionsFromJson,edge-tamper.ts 里把编辑后的 JSON 解析+校验成 resumeRun 选项的函数)解析校验:JSON 非法则就地报错不让续跑、合法则准备成 contextOverrides。设计意图:① 编辑器要**复用 trace 的只读编辑器切可写**(Q3),保持同一编辑体验、不另造;② 篡改是显式开关(默认只读,避免误改),并保留篡改前后 diff(tamper_diff)/审计(tamper_audit)让改动可追溯。",
-      "fe_modules": [
-        {
-          "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
-        }
-      ],
-      "be_contract": [],
-      "fe_status": "符合",
-      "be_status": "n/a",
-      "gap_brief": "符合设计(篡改编辑器已是可写 Monaco,Q3 达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。Textarea→Monaco 已切:EdgeTamperEditor(EdgeTamperEditor.tsx)import 与 MonacoPanel/LazyMonacoPanel 同一个 @monaco-editor/react(:2),defaultLanguage='json'(:116),options.readOnly=!writable(:132)——篡改开关一开就把只读 trace 编辑面切成可写,正是 Q3『可写 Monaco = trace 只读编辑器切 readonly』;实时校验复用共享 validateTamperJson(edge-tamper.ts:37,:4/:60-63)。EdgeContextView.tsx:248-267 接 tampering 开关,edge-tamper.ts:50 edgeTamperResumeOptionsFromJson 校验,篡改 diff/审计区(EdgeContextView.tsx:214-246)。grep 确认两文件零 Textarea。EdgeTamperEditor.test.tsx 断言挂的是项目 Monaco(非纯 textarea)、readOnly 随篡改开关翻转、非法 JSON 报错,7 tests 全过。",
-      "impl_ref": "fn-8"
-    },
-    {
-      "n": 9,
-      "cap": "edge-tamper-resume-downstream",
-      "track": "C",
-      "module": "篡改续跑",
-      "func": "设计(spec F7):篡改保存后点[Resume downstream/下游续跑]→ 把篡改后的黑板作为 context_overrides(覆盖黑板业务字段)发给 resume,从这条边的下游节点续跑,下游拿伪造 JSON 跑;上游 checkpoint 不重跑、原 trace 不变。",
-      "action": "用户篡改保存后点[Resume downstream](下游续跑)按钮。",
-      "fe_design": "点 Resume downstream → handleResumeDownstream(把篡改 JSON 打包成续跑请求的回调)→ edgeTamperResumeOptionsFromJson 产出 resumeRun 的 options:resumeFromNodeId=selectedEdge.target(从这条边的下游节点续)+ contextOverrides=被篡改的黑板 + checkpoint 元数据 → 调 resumeRun(skillId, runId, options)→ 后端 resume 端点把 context_overrides 透传给引擎,引擎先 _validate_resume_context_overrides(只许业务字段,拒 messages/tool_calls/checkpoint_ns/configurable/runtime/callbacks/compiled_graph 等保留键)再 _apply_resume_context_overrides(取 checkpoint 当前黑板 BusinessData、用 overrides 合并校验后 update_state 写回)→ 续跑时下游读到的就是篡改后的黑板。设计意图:篡改只覆盖**业务字段**(系统保留键被引擎拒),从下游节点续(resumeFromNodeId=边的 target),上游不动。",
-      "fe_modules": [
-        {
-          "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
-          "purpose": "携带 context_overrides(篡改后黑板)+ resume_from_node_id(边 target)从下游续跑;引擎校验只允许业务字段后合并写回黑板。",
-          "mechanism_ref": "mech_n5_resume",
-          "iface_ref": "iface-resume"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "契约问题",
-      "gap_brief": "篡改续跑链路前端已通(handleResumeEdgeDownstream 带 contextOverrides + resumeFromNodeId=edge.target);context_overrides 注入后端已实现(_validate/_apply_resume_context_overrides)。⚠ 但 checkpoint 定位有缺口:edge-context 透传的 checkpoint_id/ns 来自事件 payload,而 callbacks/events.py 的 input_dispatch 等事件**不带 checkpoint_id/ns**(sidecar 不 enrich)——真跑时篡改续跑会缺 checkpoint、退化为最近 checkpoint,定位语义不稳(见 mech_n5_events)。体验偏差在上游 #8 编辑器组件(Textarea vs Monaco)。",
-      "impl_ref": "fn-9"
+     "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
     }
-  ]
+   ],
+   "be_contract": [
+    {
+     "endpoint": "WS /ws/runs/{run_id}",
+     "purpose": "订阅事件流,从 input_dispatch 事件取该边的 blackboard_snapshot/changed_keys/checkpoint 元数据渲染只读黑板。",
+     "mechanism_ref": "mech_n5_events",
+     "iface_ref": "iface-stream"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计:edgeContextFromEvents 从 EventEnvelope 的 input_dispatch/edge_transition 取真实黑板快照(非 mock),EdgeContextView 以只读键值 + changed_keys 高亮展示,无匹配时显示空态。只读查看底座(后端 D11.5 已绿)对得上。",
+   "impl_ref": "fn-7"
+  },
+  {
+   "n": 8,
+   "cap": "edge-blackboard-tamper-edit",
+   "track": "C",
+   "module": "边黑板篡改",
+   "func": "设计(spec F6 + 决策 Q3):点边 dot 展开真实 Context 后,显式进入篡改模式,**复用 Monaco 编辑器(由 trace 只读编辑器切 readOnly=false 得到)**把黑板 JSON 改成想要的伪造值,带 JSON 校验,改完存盘。Q3 明确「可写 Monaco = trace 只读编辑器切 readonly」。",
+   "action": "用户在边 Context 面板点[Tamper/篡改]进入编辑态 → 在编辑器里手改黑板 JSON。",
+   "fe_design": "在只读黑板视图(#7)上点 Tamper → 切到可写编辑态(readOnly=false)→ 编辑器载入当前黑板 JSON 文本 → 用户手改 → 改动经边篡改校验(edgeTamperResumeOptionsFromJson,edge-tamper.ts 里把编辑后的 JSON 解析+校验成 resumeRun 选项的函数)解析校验:JSON 非法则就地报错不让续跑、合法则准备成 contextOverrides。设计意图:① 编辑器要**复用 trace 的只读编辑器切可写**(Q3),保持同一编辑体验、不另造;② 篡改是显式开关(默认只读,避免误改),并保留篡改前后 diff(tamper_diff)/审计(tamper_audit)让改动可追溯。",
+   "fe_modules": [
+    {
+     "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
+    }
+   ],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "符合设计(篡改编辑器已是可写 Monaco,Q3 达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。Textarea→Monaco 已切:EdgeTamperEditor(EdgeTamperEditor.tsx)import 与 MonacoPanel/LazyMonacoPanel 同一个 @monaco-editor/react(:2),defaultLanguage='json'(:116),options.readOnly=!writable(:132)——篡改开关一开就把只读 trace 编辑面切成可写,正是 Q3『可写 Monaco = trace 只读编辑器切 readonly』;实时校验复用共享 validateTamperJson(edge-tamper.ts:37,:4/:60-63)。EdgeContextView.tsx:248-267 接 tampering 开关,edge-tamper.ts:50 edgeTamperResumeOptionsFromJson 校验,篡改 diff/审计区(EdgeContextView.tsx:214-246)。grep 确认两文件零 Textarea。EdgeTamperEditor.test.tsx 断言挂的是项目 Monaco(非纯 textarea)、readOnly 随篡改开关翻转、非法 JSON 报错,7 tests 全过。",
+   "impl_ref": "fn-8"
+  },
+  {
+   "n": 9,
+   "cap": "edge-tamper-resume-downstream",
+   "track": "C",
+   "module": "篡改续跑",
+   "func": "设计(spec F7):篡改保存后点[Resume downstream/下游续跑]→ 把篡改后的黑板作为 context_overrides(覆盖黑板业务字段)发给 resume,从这条边的下游节点续跑,下游拿伪造 JSON 跑;上游 checkpoint 不重跑、原 trace 不变。",
+   "action": "用户篡改保存后点[Resume downstream](下游续跑)按钮。",
+   "fe_design": "点 Resume downstream → handleResumeDownstream(把篡改 JSON 打包成续跑请求的回调)→ edgeTamperResumeOptionsFromJson 产出 resumeRun 的 options:resumeFromNodeId=selectedEdge.target(从这条边的下游节点续)+ contextOverrides=被篡改的黑板 + checkpoint 元数据 → 调 resumeRun(skillId, runId, options)→ 后端 resume 端点把 context_overrides 透传给引擎,引擎先 _validate_resume_context_overrides(只许业务字段,拒 messages/tool_calls/checkpoint_ns/configurable/runtime/callbacks/compiled_graph 等保留键)再 _apply_resume_context_overrides(取 checkpoint 当前黑板 BusinessData、用 overrides 合并校验后 update_state 写回)→ 续跑时下游读到的就是篡改后的黑板。设计意图:篡改只覆盖**业务字段**(系统保留键被引擎拒),从下游节点续(resumeFromNodeId=边的 target),上游不动。",
+   "fe_modules": [
+    {
+     "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
+     "purpose": "携带 context_overrides(篡改后黑板)+ resume_from_node_id(边 target)从下游续跑;引擎校验只允许业务字段后合并写回黑板。",
+     "mechanism_ref": "mech_n5_resume",
+     "iface_ref": "iface-resume"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "契约问题",
+   "gap_brief": "篡改续跑链路前端已通(handleResumeEdgeDownstream 带 contextOverrides + resumeFromNodeId=edge.target);context_overrides 注入后端已实现(_validate/_apply_resume_context_overrides)。⚠ 但 checkpoint 定位有缺口:edge-context 透传的 checkpoint_id/ns 来自事件 payload,而 callbacks/events.py 的 input_dispatch 等事件**不带 checkpoint_id/ns**(sidecar 不 enrich)——真跑时篡改续跑会缺 checkpoint、退化为最近 checkpoint,定位语义不稳(见 mech_n5_events)。体验偏差在上游 #8 编辑器组件(Textarea vs Monaco)。",
+   "impl_ref": "fn-9"
+  },
+  {
+   "n": 14,
+   "cap": "edge-dot-static-inference",
+   "module": "dot 静态推断",
+   "func": "设计(PM 2026-07-02,trace-observability F4 / canvas F5):**没跑之前**,dot 也要像 node 的 io 一样给出黑板 schema 推断——『graph 跑到这个 dot 时黑板上应该有哪些字段』。推导与编译期数据流校验同源:该边可用字段 = 根 io.inputs ∪ 下游节点全部上游祖先 phase 的 io.outputs ∪ 已声明的 source:'file' 注入字段;同名顺序覆盖取最近祖先;并标出下游节点将按其 io.inputs 切走哪些字段。逐边不同,随拓扑/io 声明编辑即时更新。",
+   "action": "用户在未跑(或未选中某次 run)时点一条边的 dot,看到该边的静态字段推断;选中某次 run 后同一面板切为真实快照(#7)。",
+   "fe_design": "新增静态推断纯选择器(按 skillDetail 拓扑 + 各节点 io 声明推导每条边的字段集,前端推导、无后端依赖——engine graph-exec E4 已把 canvas 黑板可视化划给前端)→ EdgeContextView 无匹配运行事件时渲染静态推断视图(字段名 + 类型 + 来源节点 + 下游将切走标记)替代空态;有运行事件时保持 #7 真实视图。ContextEdge 的 hasTraceData=false 态 tooltip 同步改为『查看该边字段推断』语义。",
+   "fe_modules": [
+    {
+     "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）"
+    }
+   ],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "符合设计(2026-07-02 实施):staticEdgeInference(lib/edge-static-inference.ts)按 files 声明真相(GRAPH.md 根 io + 逐 phase 节点文件 frontmatter)+ topology depends_on 推导;EdgeContextView 无运行事件时渲染静态视图;ContextEdge tooltip 已改字段推断语义。注:io_fields/manifest.io 投影在编译错时降级为空,推断特意不依赖它们。",
+   "impl_ref": "fn-14"
+  }
+ ]
 }

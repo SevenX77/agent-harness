@@ -16,7 +16,7 @@
 | 动作 | 最终决策 / status | 能力·区域 | 依据(file:line)+ FROZEN |
 |---|---|---|---|
 | M1 头部 `name/schema_version/llm_role/description/phases`(**无 type**) | **target-design**:需结构化表单,现无 panel 只能裸编辑 GRAPH.md(旧 doc 写 type=stale) | graph-authoring · canvas | `GraphCanvas.tsx:397-405,423-429`;FROZEN `02-graph-md-spec.md:12-20` |
-| M2+M3 io 内联手写 JSON Schema / schema-infer | **stale-code**:双击 IO 开 GRAPH.md=live;InputPanel 投影 io 成假文件 + schema-infer 只读不写回=stale(违 inline-io) | file-editing · input | `GraphCanvas.tsx:423-429`/`panel-files.ts:70-97`/`InputPanel.tsx:18-70`;FROZEN `02-graph:60,86-87` |
+| M2+M3 io schema 展示与编辑入口 | **target-design(D-IO-PREVIEW,PM 2026-07-02)**:i/o 面板 = 按声明 schema 推导的**实例预览**(清爽只读,"大致会得到什么")+ 编辑入口跳 copilot/直接开文件;**面板内不做 schema 表单/推断展示**。双击 IO 开 GRAPH.md=live 保留;现状 InputPanel 投影假文件 + schema-infer 只读不写回=stale,一并废弃 | file-editing · input | `GraphCanvas.tsx:423-429`/`panel-files.ts:70-97`/`InputPanel.tsx:18-70`;FROZEN `02-graph:60,86-87`;原话见 §3 D-IO-PREVIEW |
 | i/o panel 改名 + artifact 逐节点设 | **target-design**(PM 锁:input→i/o panel,每节点 io+artifact 可设) | phase-editing · input(→i/o panel) | `InputPanel.tsx:78`。**FROZEN/G3**:io.outputs 顶层加文件路径+schema,默认落 `.workspace/artifacts`;md 源=最终 validated `business_data_md`(不回转) |
 | M4 起点 Input / 终点 Output = 画布独立节点 | **live**(已渲染、可双击开 GRAPH.md) | graph-authoring · canvas | `build-nodes.ts:203-217`;FROZEN `02-graph:44` |
 | REQ-1 纵向 TB 布局 | **target-design**:现 LR 挤瘪面板,目标 TB | graph-authoring · canvas | `lib/layout.ts:31`(rankdir LR)/`SkillNode.tsx:82,132` |
@@ -39,6 +39,7 @@
 - **G2 删子图 io 严格 1:1**(FROZEN-1)> "数据流应该是单向不可逆的, 所以没有回写一说. 父子图的io关系不用绑死(伪需求), 和其他节点一样, 子图的input是从state状态机过滤字段拿的; 另外增加一点, 你可以在任何一个i/o界面导入文件, 就和第一个input节点导入文件一样. 导入文件就相当于导入这个文件的字段进状态机";导入时机 = **a 跑到该节点才注入**(后续锁定,非 G2 原句)。
 - **G3 artifact 落盘**(FROZEN-2)> "黑板肯定都得进. 落盘是并行需求不影响状态机. 落盘的写法就在io.outputs 的schema顶层再加一个文件路径, xx/xx/xx.json(或者md), 下面是这个文件的schema; 也可以连续两个路径不同文件...一个schema落两个文件; 也可以不同路径各自下面加schema...不同schema落不同文件; 默认不用写前面的路径,只要写一个文件名,代表直接落盘在.workspace的artifacts(artifacts默认怎么组织也要想清楚); 格式:文字只允许md和json";md 用最终 validated `business_data_md` 不回转(后续锁定)。
 - **REQ-10 Properties 白名单对齐 FROZEN**(官方确认 batch-2 stale 表单结论);**REQ-1 TB 布局**;**REQ-2 黑板可视化连线**(FROZEN-4,删类型相等红、改 io.inputs 字段勾选)。
+- **D-IO-PREVIEW i/o 面板实例预览**(PM 2026-07-02)> "原设计在panel里面做这步太复杂了,有太多的字段以及字段嵌套,会把人搞晕的,还不如清爽的让用户看到这里按照现在的schema大致会得到什么,然后用copilot或者自己直接去改文件"——面板显示 schema 推导的实例预览(只读),schema 编辑走 copilot/编辑器;golden JSON 与该预览同构("golden输出的json和现在推测的json没有区别"),schema→实例生成器与 predict 占位 mock、golden 空模板共用。细化落 `03_regions/input` F2/F5。
 - **D12 写全量 Rust**;**D-1-4 脚手架 logic→agent 模板**;**R3** i/o panel 加 input files 导入(FROZEN-3);**R4** 连线四操作;**R5** assets 同步 + 子图 path 标红导入。
 - **Half B 现在设计**(不留实现期):三类节点字段集 + 子图 path 引用 + io.outputs artifact + 删子图 io 1:1,已落能力文档 [phase-editing](../02_capabilities/phase-editing/mvp1-alignment.md)。
 
@@ -49,7 +50,7 @@
 
 ## 5. 测试关键点
 - 新建 phase 脚手架产出**合 FROZEN**(logic/agent,无 mode/system_prompt/exit_contract/python_callable),可直接编译。
-- io 内联手写 JSON Schema(非投影假文件);schema-infer 弃用或改写回 io。
+- i/o 面板显示 schema 推导的实例预览(非投影假文件、无 schema 表单);schema 编辑经 copilot/打开文件完成(D-IO-PREVIEW);旧 schema-infer 展示弃用。
 - 子图 io 改动**不**触发严格 1:1 校验(G2);子图按 path 解析、path 找不到→标红+导入入口。
 - artifact:io.outputs 配文件路径 → 跑时落 `.workspace/artifacts`;md 取 `business_data_md` 不回转。
 - 所有写(serialize_graph/mutate_phase_body/新建 phase/Properties 保存)走 **Rust** 文件命令(非 Python)。

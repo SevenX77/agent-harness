@@ -71,4 +71,4 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
 | 开发（worktree 工作流） | ✅ Git Bash | ✅ | ✅ |
 | CI 必需检查 | —（ubuntu 上跑） | — | ✅ |
 | CI smoke（非必需） | ✅ | ✅ | ✅ |
-| Studio 启动器 | ✅ `studio-dev.ps1` | ⚠️ `studio-dev.sh` 已就位（与 .ps1 同为 `dev_studio.js` 的薄壳，runtime 下载本就分 triple；真机启动验证待 macOS 硬件） | ⚠️ `studio-dev.sh` 已就位（真机验证待 Linux 桌面环境；需 webkit2gtk 系依赖，见 tauri README） |
+| Studio 启动器 | ✅ `studio-dev.ps1` | ⚠️ `studio-dev.sh` 已就位（与 .ps1 同为 `dev_studio.js` 的薄壳，runtime 下载本就分 triple；真机启动验证待 macOS 硬件） | ✅ `studio-dev.sh`（2026-07-02 于 Ubuntu 22.04.5 x86_64 真机验证：Xvfb 无头启动，窗口无红 banner、Vite 5173/​sidecar 8787 双 200、技能画布可用、sidecar 环境含 `PYTHONUTF8=1` 且中文经 sidecar 往返无乱码、关窗无孤儿 uvicorn） |

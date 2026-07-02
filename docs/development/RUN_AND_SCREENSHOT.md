@@ -57,10 +57,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1
 Notes:
 - The vendored interpreter path is platform-specific; the Linux x86_64 triple is
   `x86_64-unknown-linux-gnu` (replace for other hosts).
-- In a debug build the sidecar prefers the **live** backend source at
-  `apps/studio/backend` (it checks `app/main.py` exists), and loads dependencies
-  from `vendor/site-packages`. So you can edit backend code without re-vendoring;
-  you only re-run `build_vendor.py` when **dependencies** change.
+- In a debug build the sidecar prefers the **live** FastAPI backend source at
+  `apps/studio/backend` (it checks `app/main.py` exists) — so you can edit
+  `apps/studio/backend/app/**` without re-vendoring. But `graph_agent` /
+  `graph_agent_gateway` are ALWAYS imported from `vendor/site-packages` (dev
+  builds included), and those two are vendored as pre-built wheels from
+  `packages/graph-agent` / `packages/graph-agent-gateway` — so any SOURCE
+  change to those two packages, not just a dependency-manifest change, leaves
+  the running app on stale engine/gateway code until you re-run
+  `build_vendor.py` (+ re-warm `.pyc`) and restart. See `AGENTS.md`
+  "Workflow Pipeline" step 7 for the exact recipe and the close-app-first
+  Windows file-lock gotcha.
 - Symptoms → cause: `No module named uvicorn` = step 2 never ran
   (`vendor/site-packages` missing). Banner stays red for ~30s+ then the sidecar
   dies = step 3 never ran (cold `.pyc` compile exceeded the health check).

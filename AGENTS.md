@@ -60,6 +60,35 @@ way and nothing drifts onto stray branches/worktrees.
    runs (lesson 2026-07-02: `@shadcn/react`). If Vite was already running when
    you install, `touch apps/studio/frontend/vite.config.ts` to make it restart
    in place and re-resolve.
+7. **Post-merge vendor rebuild (engine/gateway SOURCE changes, not just
+   deps)** — the desktop app's Python sidecar (`apps/studio/tauri/sidecar.rs`)
+   ALWAYS imports `graph_agent` / `graph_agent_gateway` from the frozen
+   `apps/studio/tauri/vendor/site-packages` snapshot, in dev builds too (only
+   the FastAPI backend `.py` files are loaded live from `apps/studio/backend`
+   in dev; the SDK packages are not). So a PR that only changes
+   `packages/graph-agent` or `packages/graph-agent-gateway` SOURCE — no
+   `pyproject.toml`/`uv.lock` touch at all — still leaves the running desktop
+   app on stale engine/gateway code: new fields get rejected as
+   `extra_forbidden`, fixed bugs stay unfixed, no matter how many times you
+   save/retry in the UI (lesson 2026-07-02: `use_graph_llm_role` merged but
+   invisible until vendor rebuilt). After merging ANY PR touching those two
+   packages, close the running desktop app first (Windows locks the vendor
+   `.pyd`/`.dll` files while the sidecar process holds them — a rebuild
+   attempt while it's running fails with "拒绝访问"/access-denied), then from
+   the repo root:
+   ```bash
+   uv run python apps/studio/backend/scripts/build_vendor.py
+   PYBIN=apps/studio/tauri/vendor/python/<host-triple>/python.exe   # e.g. x86_64-pc-windows-msvc on Windows
+   "$PYBIN" -m compileall -q -j 4 \
+     apps/studio/tauri/vendor/site-packages \
+     apps/studio/tauri/vendor/backend \
+     apps/studio/backend/app
+   ```
+   then restart the app via the standard launcher. Full context:
+   `docs/development/RUN_AND_SCREENSHOT.md` §"fresh machine" (that doc's "you
+   only re-run build_vendor.py when dependencies change" caveat is INCOMPLETE
+   — local workspace packages are vendored as built wheels, so their source
+   changing is exactly the case that needs a rebuild too).
 
 **Repo settings backing this** (already configured): `main` protected with
 `enforce_admins` on (no bypass), PR required with **0** approvals, the 5 checks

@@ -370,3 +370,106 @@ def test_gateway_official_call_method_timeout_allows_slow_openai_pro_responses()
     )
 
     assert timeout == 180.0
+
+
+# ── 多模态能力真探测(#11 slice A) ──────────────────────────────────────────
+# 判据:多模态探测 = 在文本探测的用户消息里加一张测试图,provider 接受(2xx)=
+# 该模型接受图像输入(input_modalities 含 image);不支持 vision 的模型会 4xx。
+# 各协议图块格式不同,逐协议断言 payload 结构正确。
+
+
+def _capture_multimodal_payload(method_id: str, model_id: str = "vision-model") -> dict[str, object]:
+    import asyncio
+
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content.decode()))
+        return httpx.Response(200, json={"id": "ok"}, request=request)
+
+    result = asyncio.run(
+        provider_probe.probe_official_call_method(
+            method_id,  # type: ignore[arg-type]
+            "secret",
+            "https://api.example.com",
+            model_id,
+            transport=httpx.MockTransport(handler),
+            multimodal=True,
+        )
+    )
+    assert result.status == "ok"
+    return captured
+
+
+def test_multimodal_probe_openai_chat_embeds_image_url_block() -> None:
+    payload = _capture_multimodal_payload("openai_chat_completions")
+    content = payload["messages"][0]["content"]  # type: ignore[index]
+    assert isinstance(content, list)
+    kinds = {block["type"] for block in content}
+    assert kinds == {"text", "image_url"}
+    image_block = next(b for b in content if b["type"] == "image_url")
+    assert image_block["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_multimodal_probe_anthropic_embeds_image_block() -> None:
+    payload = _capture_multimodal_payload("anthropic_messages")
+    content = payload["messages"][0]["content"]  # type: ignore[index]
+    assert isinstance(content, list)
+    image_block = next(b for b in content if b["type"] == "image")
+    assert image_block["source"]["type"] == "base64"
+    assert image_block["source"]["media_type"] == "image/png"
+    assert image_block["source"]["data"]
+
+
+def test_multimodal_probe_gemini_embeds_inline_data_part() -> None:
+    payload = _capture_multimodal_payload("gemini_generate_content")
+    parts = payload["contents"][0]["parts"]  # type: ignore[index]
+    inline = next(p for p in parts if "inline_data" in p)
+    assert inline["inline_data"]["mime_type"] == "image/png"
+    assert inline["inline_data"]["data"]
+
+
+def test_multimodal_probe_openai_responses_embeds_input_image() -> None:
+    payload = _capture_multimodal_payload("openai_responses")
+    content = payload["input"][0]["content"]  # type: ignore[index]
+    kinds = {block["type"] for block in content}
+    assert kinds == {"input_text", "input_image"}
+
+
+def test_multimodal_probe_rejects_completions_method() -> None:
+    import asyncio
+
+    # 老式 /v1/completions 无多模态能力 → 诚实报错,不静默发一个没图的探测。
+    with pytest.raises(ValueError, match="completions"):
+        asyncio.run(
+            provider_probe.probe_official_call_method(
+                "openai_completions",
+                "secret",
+                "https://api.example.com",
+                "text-model",
+                transport=httpx.MockTransport(lambda r: httpx.Response(200, request=r)),
+                multimodal=True,
+            )
+        )
+
+
+def test_text_probe_unchanged_when_not_multimodal() -> None:
+    # 回归:multimodal=False 时 payload 与既有文本探测完全一致(不带图)。
+    import asyncio
+
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content.decode()))
+        return httpx.Response(200, json={"id": "ok"}, request=request)
+
+    asyncio.run(
+        provider_probe.probe_official_call_method(
+            "openai_chat_completions",
+            "secret",
+            "https://api.example.com",
+            "text-model",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    assert captured["messages"][0]["content"] == "Reply with one short word."  # type: ignore[index]

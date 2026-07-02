@@ -1,6 +1,7 @@
-import { Plus } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import type { CopilotSession } from '../../store/copilotStore'
 
@@ -47,6 +48,7 @@ interface SessionTabsProps {
   activeSessionId: string | null
   onSwitch: (id: string) => void
   onNew: () => void
+  onClose: (id: string) => void
 }
 
 /**
@@ -55,7 +57,7 @@ interface SessionTabsProps {
  * non-empty conversation — a single empty chat needs no switcher. Reuses the
  * shadcn Button; no bespoke UI.
  */
-export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew }: SessionTabsProps) {
+export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew, onClose }: SessionTabsProps) {
   const tabs = sessionTabs(sessions, activeSessionId)
   const hasContent = sessions.some((session) => session.messages.length > 0)
   if (tabs.length <= 1 && !hasContent) {
@@ -64,22 +66,42 @@ export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew }: Sess
 
   return (
     <div className="flex items-center gap-1 border-b border-sidebar-border px-2 py-1.5">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      {/* R3: ScrollArea keeps the strip a single horizontal lane with the native
+          scrollbar hidden (never a system scrollbar widget inside the bar). */}
+      <ScrollArea className="min-w-0 flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!flex [&_[data-slot=scroll-area-viewport]>div]:items-center [&_[data-slot=scroll-area-viewport]>div]:gap-1">
         {tabs.map((tab) => (
-          <Button
+          <span
             key={tab.id}
-            type="button"
-            size="sm"
-            variant={tab.isActive ? 'secondary' : 'ghost'}
-            aria-current={tab.isActive ? 'true' : undefined}
-            title={tab.label}
-            onClick={() => onSwitch(tab.id)}
-            className={cn('max-w-[12rem] shrink-0', tab.isActive ? '' : 'text-muted-foreground')}
+            data-copilot-session-tab={tab.id}
+            className={cn(
+              'group/tab inline-flex shrink-0 items-center rounded-md',
+              tab.isActive ? 'bg-secondary' : '',
+            )}
           >
-            <span className="truncate">{tab.label}</span>
-          </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-current={tab.isActive ? 'true' : undefined}
+              title={tab.label}
+              onClick={() => onSwitch(tab.id)}
+              className={cn('max-w-[10rem] rounded-e-none pe-1', tab.isActive ? '' : 'text-muted-foreground')}
+            >
+              <span className="truncate">{tab.label}</span>
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Close ${tab.label}`}
+              onClick={() => onClose(tab.id)}
+              className="size-6 rounded-s-none text-muted-foreground opacity-60 hover:text-foreground group-hover/tab:opacity-100"
+            >
+              <X className="size-3" />
+            </Button>
+          </span>
         ))}
-      </div>
+      </ScrollArea>
       <Button
         type="button"
         size="icon-sm"

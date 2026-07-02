@@ -19,20 +19,25 @@ gets its own artifacts directory for free.
 from __future__ import annotations
 
 import shutil
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import yaml
-from graph_agent.core.compiler import compile_skill
-from graph_agent.core.manifest import AgentNodeAST, effective_llm_role
 
+from app.core.adapters.engine import AgentNodeAST, compile_skill, effective_llm_role
 from app.models.llm_config import RolesData
 from app.models.model_compare import CompareCandidate
 
 
 class CompareNodeInputMissingError(Exception):
     """Raised when the base run has no input_dispatch event for the node."""
+
+
+def new_compare_group_id() -> str:
+    """Stable id shared by every candidate side-run in one compare group."""
+    return f"cmp-{uuid.uuid4().hex[:12]}"
 
 
 def extract_node_input(events: Sequence[Any], node_id: str) -> dict[str, Any]:

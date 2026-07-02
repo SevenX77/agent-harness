@@ -23,33 +23,26 @@ class TokensMetrics(BaseModel):
     wall_time_sec: float | None = None
 
 
-class RunCandidate(BaseModel):
-    """One model/role candidate in a P8 model-compare run (n4-trace#23).
-
-    ``role_name`` references a role that already exists in the active
-    ``llm_roles.yaml`` -- the candidate runs the same compiled artifact but
-    resolves its agent node(s) through this role. ``target_role`` optionally
-    narrows the override to a single role the skill's phases bind to; when
-    omitted, the candidate role overrides every graph_agent role.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    candidate_id: str = Field(..., min_length=1)
-    role_name: str = Field(..., min_length=1)
-    target_role: str | None = None
-
-
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     input_data: dict[str, Any] | None = None
     golden_id: str | None = None
     paste_json: str | None = None
-    # n4-trace#23: when present, fan the run out across candidate roles. Each
-    # candidate spawns its own worker (same artifact/inputs) tagged with a shared
-    # compare-group id, so the frontend Trace can tab between per-model results.
-    candidates: list[RunCandidate] | None = None
+
+
+class NodeCompareRunRequest(BaseModel):
+    """PR2 node-level Compare LLMs trigger.
+
+    Launches, off a completed base run, one isolated single-node side-run per
+    persisted candidate of ``node_id`` (candidates read from the skill's
+    compare-candidates store). Each side-run feeds the node the exact input the
+    base run gave it, swapping only the model — never touches the base run.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(..., min_length=1)
 
 
 class PredictRunRequest(BaseModel):
@@ -87,11 +80,13 @@ class RunMetadata(BaseModel):
     artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
     execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    # n4-trace#23: model-compare grouping. Set only on compare-fanned runs so the
-    # frontend can group/tab the per-candidate results; omitted on ordinary runs.
+    # PR2 node-compare grouping. Set only on candidate side-runs so the frontend
+    # can group/tab per-candidate results under the compared node; omitted on
+    # ordinary runs. ``candidate_label`` is the human tab label (model group).
     compare_group_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    compare_node_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     candidate_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    candidate_role_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    candidate_label: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RunListResponse(BaseModel):
@@ -102,26 +97,28 @@ class RunListResponse(BaseModel):
 
 
 class CompareCandidateRun(BaseModel):
-    """One candidate's spawned run within a model-compare group (n4-trace#23)."""
+    """One candidate's isolated single-node side-run within a compare group."""
 
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
-    role_name: str
+    label: str
     metadata: RunMetadata
 
 
 class CompareRunResponse(BaseModel):
-    """POST response: the compare group and the per-candidate runs it spawned."""
+    """POST response: the compare group + the per-candidate side-runs it spawned."""
 
     model_config = ConfigDict(extra="forbid")
 
     compare_group_id: str
+    node_id: str
+    base_run_id: str
     runs: list[CompareCandidateRun]
 
 
 class CompareRunGroupResponse(BaseModel):
-    """GET response: per-candidate runs for one compare group, for Trace tabs."""
+    """GET response: per-candidate side-runs for one compare group, for Trace tabs."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -128,11 +128,11 @@
       "n": 27,
       "cap": "copilot-panel-visual-r3",
       "design_ref": "atom-27",
-      "current": "现状:已实现且符合。header 状态行删除、断连 chip 内联标题旁(copilot-panel.tsx);SessionTabs 用 ScrollArea 单行横滚 + 每 tab 关闭按钮(session-tabs.tsx),copilotStore.closeSession 删内存会话 + deleteWorkspacePath 删盘上 json、活跃邻居切换、最后一个补新空会话;消息用 ui/message.tsx 左右布局(用户右气泡/助手左排版,无标签无头像列);ThinkingRow 双覆盖(事件前空窗 + running 无正文,首事件 context_resolved 不清除);排版 text-sm leading-relaxed。",
+      "current": "现状:已实现且符合。header 状态行删除、断连 chip 内联标题旁(copilot-panel.tsx);SessionTabs 用 ScrollArea 单行横滚 + 每 tab 关闭按钮(session-tabs.tsx),copilotStore.closeSession 删内存会话 + deleteWorkspacePath 删盘上 json、活跃邻居切换、最后一个补新空会话;消息用 ui/message.tsx 左右布局(用户右气泡/助手左排版,无标签无头像列);ThinkingRow 双覆盖(事件前空窗 + running 无正文,首事件 context_resolved 不清除);排版 text-sm leading-relaxed。 R4:ThinkingRow 改 shimmer 文字;视口 p-4/消息 gap-3/composer px-4;index.css 引入 shadcn/tailwind.css(shimmer+scrollbar 工具类激活);后端 BASE_SYSTEM_PROMPT_TEMPLATE 加语言跟随规则。",
       "gap": "无。",
       "fe_status": "符合",
       "be_status": "已实现",
-      "be_dep": "已就绪:Rust delete_workspace_path 已有;无后端新增。"
+      "be_dep": "已就绪:语言规则落在 studio 后端系统提示词(test_copilot_system_prompt 新断言);Rust delete_workspace_path 已有。"
     }
   ],
   "plan": [
@@ -440,10 +440,12 @@
       "fe_status": "符合",
       "layer1": [
         "closeSession 单测(copilotStore.test.ts):非活跃关闭保活跃+删文件;关活跃激活前邻居;关最后一个留全新空会话;未知 id 不动。",
-        "面板单测:running 无正文渲染 thinking;transcript 以用户消息结尾渲染 thinking;有正文即撤;消息行 data-slot=message + align;tab 渲染 Close 按钮。"
+        "面板单测:running 无正文渲染 thinking;transcript 以用户消息结尾渲染 thinking;有正文即撤;消息行 data-slot=message + align;tab 渲染 Close 按钮。",
+        "后端单测(test_copilot_system_prompt):系统提示词含「语言跟随用户」规则。"
       ],
       "layer2": [
-        "真机 Playwright:header 无 open 行;发送后 +0ms 起 Thinking 可见至首正文;用户气泡贴右;无 You/Copilot 标签;新建 tab 出关闭按钮、单行不出竖向滚动、点关闭即移除。"
+        "真机 Playwright:header 无 open 行;发送后 +0ms 起 Thinking 可见至首正文;用户气泡贴右;无 You/Copilot 标签;新建 tab 出关闭按钮、单行不出竖向滚动、点关闭即移除。",
+        "真机(R4,私有 sidecar):hello 得到全英文回复(cjk=0);shimmer 动画 tw-shimmer 生效;视口 padding 16px。"
       ],
       "screenshots": [
         {
@@ -457,6 +459,14 @@
         {
           "file": "n1-24-visual-r3-tabs.png",
           "caption": "2026-07-02 真机:多 chat tab 单行横向排布,各带 × 关闭,无系统滚动条"
+        },
+        {
+          "file": "n1-25-visual-r4-shimmer.png",
+          "caption": "2026-07-02 真机(R4):shimmer Thinking… 等待指示与 p-4 边距"
+        },
+        {
+          "file": "n1-25-visual-r4-padding.png",
+          "caption": "2026-07-02 真机(R4):消息区 p-4/gap-3 放宽后的对话视图"
         }
       ]
     }

@@ -12,7 +12,6 @@ import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
 import { Message, MessageContent } from '../ui/message'
-import { Spinner } from '../ui/spinner'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -140,12 +139,12 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
 
 export const ChatMessageItem = React.memo(ChatMessageItemBase)
 
-/** F6 R3: visible wait for the first answer token (cold spawns take 10-30s). */
+/** F6 R3/R4: visible wait for the first answer token (cold spawns take 10-30s).
+ * shadcn `shimmer` utility — the official loading-text treatment. */
 function ThinkingRow() {
   return (
-    <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground" data-copilot-thinking="true">
-      <Spinner className="size-3.5" />
-      Thinking…
+    <div className="py-1 text-sm text-muted-foreground" data-copilot-thinking="true">
+      <span className="shimmer">Thinking…</span>
     </div>
   )
 }
@@ -476,8 +475,8 @@ export function CopilotPanel({
 
       <MessageScrollerProvider autoScroll>
         <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport className="p-3">
-            <MessageScrollerContent className="gap-2">
+          <MessageScrollerViewport className="p-4">
+            <MessageScrollerContent className="gap-3">
         {copilot.messages.length > 0 ? (
           <>
             {copilot.messages.map((message) => (
@@ -549,7 +548,7 @@ export function CopilotPanel({
       </MessageScrollerProvider>
 
       {skillId && completedRunId && completedRunId !== dismissedRunId ? (
-        <div className="px-3 pt-1 shrink-0">
+        <div className="px-4 pt-1 shrink-0">
           <AnalysisBar
             skillId={skillId}
             runId={completedRunId}
@@ -560,7 +559,7 @@ export function CopilotPanel({
         </div>
       ) : null}
 
-      <form onSubmit={submit} className="shrink-0 space-y-1.5 p-3 pt-2">
+      <form onSubmit={submit} className="shrink-0 space-y-1.5 px-4 pb-4 pt-2">
         <div className="studio-copilot-input studio-canvas-input-surface flex flex-col gap-1 rounded-md border px-2.5 py-2 transition-colors focus-within:[border-color:var(--studio-canvas-accent-muted)]">
           <textarea
             value={draft}

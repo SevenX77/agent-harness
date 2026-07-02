@@ -309,6 +309,8 @@
         "runtimeUrl": "运行时 URL：{{url}}",
         "protocol": "协议：{{protocol}}",
         "status": "状态：{{status}}",
+        "protocolUnsupportedRedirect": "此域名不支持 {{protocol}} 协议——请改用同域名下的 {{siblings}} 路由。",
+        "protocolUnsupportedNoRoute": "此域名不支持 {{protocol}} 协议。",
         "noModelWarning": "⚠ 没有可测的模型——请手动输入模型名做单模型测试。",
         "routes": "路由：{{n}}",
         "profiles": "档案：{{n}}",

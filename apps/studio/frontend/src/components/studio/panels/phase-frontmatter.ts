@@ -42,6 +42,9 @@ export interface PhaseIterateFormData {
 export interface PhaseFrontmatterFormData {
   // agent (SKILL.md)
   llmRole: string
+  // Priority switch: true = the graph-level default llm_role wins over this
+  // node's own llmRole; the node value itself is preserved untouched.
+  useGraphLlmRole: boolean
   tools: string
   subagents: PhaseSubagentRef[]
   subgraphs: PhaseSubgraphRef[]
@@ -79,6 +82,7 @@ export type ApplyPhaseFrontmatterResult =
 
 export const EMPTY_FORM: PhaseFrontmatterFormData = {
   llmRole: '',
+  useGraphLlmRole: false,
   tools: '',
   subagents: [],
   subgraphs: [],
@@ -123,6 +127,7 @@ export function parsePhaseFrontmatter(markdown: string): ParsePhaseFrontmatterRe
 export function phaseFrontmatterToForm(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterFormData {
   return {
     llmRole: stringValue(frontmatter.llm_role),
+    useGraphLlmRole: booleanValue(frontmatter.use_graph_llm_role),
     tools: linesValue(frontmatter.tools),
     subagents: subagentsValue(frontmatter.subagents),
     subgraphs: subgraphsValue(frontmatter.subgraphs),
@@ -242,6 +247,7 @@ function frontmatterFromForm(
 
   if (kind === 'agent') {
     setOptionalString(next, 'llm_role', form.llmRole)
+    setBoolean(next, 'use_graph_llm_role', form.useGraphLlmRole)
     setOptionalList(next, 'tools', form.tools)
     setSubagents(next, form.subagents)
     setSubgraphs(next, form.subgraphs)

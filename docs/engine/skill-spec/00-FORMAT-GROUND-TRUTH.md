@@ -17,6 +17,7 @@ supersedes:
 - Declared Agent tools must resolve during compile, except for framework-provided tools and generated subagent/critic tools.
 - Declared `references[].path` and `examples[].path` are compile-time source resources: paths must be portable POSIX-style relative paths using only `A-Z a-z 0-9 . _ - /`, must not escape the skill root, and must point to readable files. Runtime reader fallback is only for reader processing failures after the source path has passed compile.
 - `llm_role` reachability is host/gateway truth. Pure source compile accepts the string shape; Studio strict compile/run preflight may inject a role resolver and fail early when the configured role is unavailable.
+- Agent phase 生效角色判定链（engine `manifest.effective_llm_role`）：`use_graph_llm_role: true` → 图默认 `llm_role` → 兜底；`false`（默认）→ 节点 `llm_role` → 图默认 `llm_role` → 兜底。兜底 = 约定角色名 `graph_agent`（去 host 的角色注册表按此名解析）。
 
 # graph_skill 文件格式模板唯一真相源
 
@@ -342,7 +343,8 @@ iterate:
 | field | required | type | purpose |
 | --- | --- | --- | --- |
 | `name` | yes | string | 节点展示名。默认应等于目录 phase id；改名/重命名由 Studio 同步目录完成 |
-| `llm_role` | no | string | 覆盖整图默认 LLM 角色 |
+| `llm_role` | no | string | 节点自己的 LLM 角色（`use_graph_llm_role` 关闭时生效，覆盖整图默认） |
+| `use_graph_llm_role` | no | boolean, default `false` | 优先级开关：`true` = 整图默认 `llm_role` 压过本节点的 `llm_role`，且**不改写/不清除**节点自己的值（覆盖靠开关，不销毁设置本体） |
 | `validator` | no | boolean, default `false` | 是否运行同级 `validator.py` |
 | `max_iterations` | no | integer, default `10` | Agent 内层最多轮数 |
 | `io.inputs` | yes | JSON Schema object | Agent 可读黑板字段 |

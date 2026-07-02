@@ -206,7 +206,7 @@ def test_build_options_uses_default_endpoint_when_base_url_is_empty(tmp_path: Pa
 
     assert Path(options.cwd) == tmp_path
     assert options.env == {"ANTHROPIC_API_KEY": "claude-key"}
-    assert options.allowed_tools == ["Read", "Write", "Edit", "Bash"]
+    assert options.allowed_tools == ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
     assert options.permission_mode == "acceptEdits"
 
 
@@ -216,7 +216,7 @@ def test_build_options_sets_provider_base_url(tmp_path: Path) -> None:
     assert Path(options.cwd) == tmp_path
     assert options.env["ANTHROPIC_API_KEY"] == "provider-key"
     assert options.env["ANTHROPIC_BASE_URL"] == "https://provider.example/anthropic"
-    assert options.allowed_tools == ["Read", "Write", "Edit", "Bash"]
+    assert options.allowed_tools == ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
     assert options.permission_mode == "acceptEdits"
 
 
@@ -231,20 +231,33 @@ def test_build_options_enables_summarized_thinking(tmp_path: Path) -> None:
     assert options.thinking == {"type": "adaptive", "display": "summarized"}
 
 
-def test_build_options_mounts_skill_spec(tmp_path: Path) -> None:
-    # F3: the authoritative graph_skill spec is mounted so the copilot can Read it.
-    # The spec dir exists in this repo, so add_dirs must include it.
+def test_build_options_mounts_reference_doc_dirs(tmp_path: Path) -> None:
+    # F3 渐进暴露: skill-spec + engine 契约 + gateway 概念 + studio 配置地图
+    # 全部挂载,copilot 按需 Read;这些目录同时是读护栏的放行集。
     options = copilot.build_options(None, "claude-key", tmp_path)
 
-    assert any("02-skill-syntax" in entry for entry in options.add_dirs), options.add_dirs
+    entries = [str(entry) for entry in options.add_dirs]
+    assert any("02-skill-syntax" in entry for entry in entries), entries
+    assert any(entry.endswith("01-contract") for entry in entries), entries
+    assert any("graph-agent-gateway" in entry for entry in entries), entries
+    assert any("mounted" in entry for entry in entries), entries
 
 
-def test_build_system_prompt_has_skill_authoring_brain() -> None:
-    # F3: the prompt must teach the v0.3.0 graph_skill format (not the old 3-line
-    # generic prompt) and point to the mounted spec.
-    prompt = copilot.build_system_prompt("nonexistent-skill")
+def test_build_options_carries_session_system_prompt(tmp_path: Path) -> None:
+    # 规则文档走 SDK 的 system_prompt 参数(会话级),不再拼进用户消息。
+    options = copilot.build_options(None, "claude-key", tmp_path)
 
+    assert options.system_prompt == copilot.build_session_system_prompt()
+    prompt = str(options.system_prompt)
     assert "graph_skill" in prompt
     assert "v0.3.0" in prompt
-    assert "phases" in prompt
     assert "skill-spec" in prompt  # mounted-spec pointer
+
+
+def test_build_options_isolates_filesystem_settings(tmp_path: Path) -> None:
+    # setting_sources 缺省 = 加载全部文件系统配置(开发机 ~/.claude 渗入 copilot);
+    # 必须显式 [] + strict_mcp_config 才是 SDK 隔离模式。
+    options = copilot.build_options(None, "claude-key", tmp_path)
+
+    assert options.setting_sources == []
+    assert options.strict_mcp_config is True

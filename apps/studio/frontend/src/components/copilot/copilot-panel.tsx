@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, Bot, CircleAlert, SquareTerminal } from 'lucide-react'
+import { ArrowUp, CircleAlert, SquareTerminal, Waypoints } from 'lucide-react'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
@@ -11,6 +11,7 @@ import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
+import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
 import { Skeleton } from '../ui/skeleton'
 import {
@@ -23,7 +24,7 @@ import {
 } from '../ui/message-scroller'
 import { BACKEND_UNAVAILABLE_MESSAGE, errorMessage } from '@/utils/errors'
 import { AnalysisBar } from './analysis-bar'
-import { BashApprovalCard } from './bash-approval-card'
+import { ToolApprovalCard } from './tool-approval-card'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
@@ -42,12 +43,14 @@ interface ChatMessageItemProps {
 function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }: ChatMessageItemProps) {
   const isUser = message.role === 'user'
   if (isUser) {
+    // chat.md contract: the colored message surface is Bubble, never a styled
+    // div with bg-muted and hand-managed corners.
     return (
       <Message align="end" data-copilot-message-role="user">
         <MessageContent>
-          <div className="max-w-[85%] self-end rounded-lg bg-muted px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
-            {message.content}
-          </div>
+          <Bubble variant="muted" align="end" className="text-sm">
+            <BubbleContent>{message.content}</BubbleContent>
+          </Bubble>
         </MessageContent>
       </Message>
     )
@@ -68,10 +71,7 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
           {segments.map((segment) => {
             if (segment.kind === 'text') {
               return (
-                <div
-                  key={segment.id}
-                  className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert prose-p:my-1.5 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-pre:my-2"
-                >
+                <div key={segment.id} className="copilot-prose text-sm leading-relaxed text-foreground">
                   <ReactMarkdown>{segment.content}</ReactMarkdown>
                 </div>
               )
@@ -85,7 +85,7 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
                   open={streaming}
                   className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground"
                 >
-                  <summary className="cursor-pointer font-medium text-foreground">Thought</summary>
+                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Thought</summary>
                   <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
                     {segment.content}
                   </pre>
@@ -126,13 +126,13 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
                 />
               )
             }
-            if (event.type === 'bash_approval_required') {
-              return <BashApprovalCard key={event.id} event={event} skillId={skillId} />
+            if (event.type === 'tool_approval_required') {
+              return <ToolApprovalCard key={event.id} event={event} skillId={skillId} />
             }
             if (event.type === 'context_resolved') {
               return (
                 <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-medium text-foreground">{event.summary}</summary>
+                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">{event.summary}</summary>
                   <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
                     {event.detail}
                   </pre>
@@ -142,7 +142,7 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
             if (event.type === 'unknown') {
               return (
                 <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-medium text-foreground">Unknown Copilot event</summary>
+                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Unknown Copilot event</summary>
                   <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
                     {JSON.stringify(event.payload, null, 2)}
                   </pre>
@@ -457,8 +457,15 @@ export function CopilotPanel({
       <header className="studio-canvas-panel-header border-b px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <Bot className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
-            <h2 className="truncate text-sm font-semibold">Copilot</h2>
+            {/* R5-E identity: 织女 (Zhinü) — the weaver goddess who turns loose
+                threads into brocade, as this copilot weaves phases into a DAG.
+                Waypoints = nodes joined by threads. PM can veto with one word. */}
+            <Waypoints className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
+            {/* shrink-0: the short name must never be squeezed out by the
+                reconnect chip (the chip truncates instead). */}
+            <h2 className="shrink-0 text-sm font-semibold">
+              织女 <span className="font-normal text-muted-foreground">Zhinü</span>
+            </h2>
             {copilot.connectionStatus !== 'open' ? (
               <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
                 {copilot.connectionStatus}
@@ -534,7 +541,7 @@ export function CopilotPanel({
           </>
         ) : (
           <div className="studio-canvas-input-surface rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
+            <div className="copilot-prose text-sm text-muted-foreground">
               <ReactMarkdown>
                 {skillId
                   ? inEvalView

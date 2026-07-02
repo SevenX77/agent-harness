@@ -2,7 +2,6 @@
 /* shadcn tailwind utilities: shimmer, scrollbar-*, scroll-fade-* (used by ui/message-scroller) */
 @import "shadcn/tailwind.css";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/noto-sans-sc";
@@ -83,9 +82,27 @@
     --studio-canvas-surface: var(--card);
     --studio-canvas-surface-elevated: var(--card);
     --studio-canvas-surface-muted: var(--muted);
-    --studio-canvas-edge: var(--border);
+    --studio-canvas-edge: var(--ring);
     --studio-canvas-edge-dot-fill: var(--background);
     --studio-canvas-edge-dot-muted: var(--muted-foreground);
+    /*
+     * Theme-scoped canvas chrome depth. Light follows the shadcn light
+     * convention — surfaces separate through a visible border plus soft
+     * layered shadows, no white inset highlight; the canvas pane is muted
+     * gray so white cards/panels read against it. Dark keeps the heavy
+     * elevation shadows + faint white inset (overridden in .dark below).
+     * All values stay derived from product semantic tokens or plain
+     * black/white alpha — never a second palette.
+     */
+    --studio-canvas-pane: var(--muted);
+    --studio-shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.10), 0 2px 8px rgb(0 0 0 / 0.06);
+    --studio-shadow-panel: 0 8px 24px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
+    --studio-shadow-minimap: 0 8px 24px rgb(0 0 0 / 0.10);
+    --studio-shadow-frame: 0 10px 28px rgb(0 0 0 / 0.10);
+    --studio-inset-highlight: 0 0 0 0 transparent;
+    --studio-inset-soft: 0 0 0 0 transparent;
+    --studio-panel-card-bg: color-mix(in oklab, var(--muted) 60%, var(--background));
+    --studio-panel-card-bg-strong: var(--muted);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -204,6 +221,18 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    /* Dark canvas chrome: heavy elevation shadows + faint white inset
+       highlight; low-alpha border needs no extra edge contrast. */
+    --studio-canvas-edge: var(--border);
+    --studio-canvas-pane: var(--background);
+    --studio-shadow-overlay: 0 18px 52px rgb(0 0 0 / 0.42);
+    --studio-shadow-panel: 0 18px 48px rgb(0 0 0 / 0.32);
+    --studio-shadow-minimap: 0 16px 38px rgb(0 0 0 / 0.32);
+    --studio-shadow-frame: 0 18px 42px rgb(0 0 0 / 0.22);
+    --studio-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.04);
+    --studio-inset-soft: inset 0 1px 0 rgb(255 255 255 / 0.03);
+    --studio-panel-card-bg: color-mix(in oklab, var(--background) 78%, black);
+    --studio-panel-card-bg-strong: color-mix(in oklab, var(--background) 70%, black);
 }
 
 @layer base {
@@ -390,9 +419,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background-color: var(--color-card) !important;
   border: 1px solid var(--color-border) !important;
   border-radius: var(--radius-md) !important;
-  box-shadow:
-    0 16px 38px rgb(0 0 0 / 0.32),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-minimap), var(--studio-inset-highlight);
 }
 
 .react-flow .skill-mini-map {
@@ -448,9 +475,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-canvas-panel {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 48px rgb(0 0 0 / 0.32),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-panel), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -459,18 +484,22 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   border-color: var(--studio-canvas-border-soft);
 }
 
+/* Canvas pane background: muted in light so white node cards / floating
+   panels separate from the pane; plain background in dark (see .dark). */
+.studio-canvas-pane-bg {
+  background: var(--studio-canvas-pane);
+}
+
 .studio-canvas-input-surface {
   background: var(--studio-canvas-surface-muted);
   border-color: var(--studio-canvas-border-soft);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: var(--studio-inset-soft);
 }
 
 .studio-left-panel-overlay {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 52px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -481,9 +510,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   max-height: calc(100% - 1.5rem);
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 52px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -495,9 +522,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-right-panel-overlay {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  box-shadow:
-    0 18px 52px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-overlay), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -598,7 +623,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-left-panel-overlay [data-studio-panel-body="true"] :where([data-slot="input"], [data-slot="textarea"], button[role="combobox"]) {
   background: var(--studio-canvas-surface-muted);
   border-color: var(--studio-canvas-border-soft);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: var(--studio-inset-soft);
 }
 
 .studio-left-panel-overlay [data-studio-panel-body="true"] :where([data-slot="textarea"]) {
@@ -606,20 +631,20 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 }
 
 .studio-left-panel-overlay [data-studio-panel-body="true"] :where(.rounded-md.border.bg-background, .rounded-md.border.bg-card) {
-  background: color-mix(in oklab, var(--background) 70%, black);
+  background: var(--studio-panel-card-bg-strong);
   border-color: var(--studio-canvas-border-soft);
 }
 
 .studio-left-panel-overlay [data-studio-panel-body="true"] section > .rounded-md.border,
 .studio-left-panel-overlay [data-studio-panel-body="true"] section > .space-y-2 > .rounded-md.border,
 .studio-left-panel-overlay [data-studio-panel-body="true"] section > .space-y-1 > .rounded-md.border {
-  background: color-mix(in oklab, var(--background) 78%, black);
+  background: var(--studio-panel-card-bg);
 }
 
 .studio-left-panel-overlay :where(.rounded-md.border.bg-card, .rounded-md.border.bg-background) {
   background: var(--studio-canvas-surface-muted);
   border-color: var(--studio-canvas-border-soft);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: var(--studio-inset-soft);
 }
 
 .studio-left-panel-overlay :where(input, textarea, button[role="combobox"]) {
@@ -634,9 +659,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
   width: max-content;
-  box-shadow:
-    0 16px 38px rgb(0 0 0 / 0.36),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: var(--studio-shadow-panel), var(--studio-inset-highlight);
   backdrop-filter: blur(18px);
 }
 
@@ -666,7 +689,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   border: 0;
   box-shadow:
     inset 0 0 0 1.5px var(--primary),
-    0 18px 42px rgb(0 0 0 / 0.22);
+    var(--studio-shadow-frame);
 }
 
 .studio-subgraph-header {
@@ -801,4 +824,105 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .mask-input::placeholder {
   font-family: var(--font-sans);
   -webkit-text-security: none;
+}
+
+/* ── Copilot markdown typography (R5-D) ─────────────────────────────────────
+   Assistant markdown styling on semantic tokens. The old `prose prose-sm …`
+   classes were DEAD — @tailwindcss/typography was never installed, so copilot
+   answers rendered with raw browser defaults (headings same size as body,
+   naked code blocks, lost list numbering). Scoped here instead of installing
+   the plugin: the plugin ships its own gray palette, which is exactly the
+   "different world" the app must not have. */
+.copilot-prose > * + * {
+  margin-top: 0.4375rem;
+}
+.copilot-prose p {
+  line-height: 1.625;
+}
+.copilot-prose ul {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+}
+.copilot-prose ol {
+  list-style: decimal;
+  padding-inline-start: 1.25rem;
+}
+.copilot-prose li + li {
+  margin-top: 0.1875rem;
+}
+.copilot-prose li > ul,
+.copilot-prose li > ol {
+  margin-top: 0.1875rem;
+}
+.copilot-prose h1,
+.copilot-prose h2,
+.copilot-prose h3,
+.copilot-prose h4 {
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.4;
+}
+.copilot-prose > h1:not(:first-child),
+.copilot-prose > h2:not(:first-child),
+.copilot-prose > h3:not(:first-child),
+.copilot-prose > h4:not(:first-child) {
+  margin-top: 0.875rem;
+}
+.copilot-prose h1 { font-size: 1.0625rem; }
+.copilot-prose h2 { font-size: 1rem; }
+.copilot-prose h3 { font-size: 0.9375rem; }
+.copilot-prose h4 { font-size: 0.875rem; }
+.copilot-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.8125em;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  padding: 0.125rem 0.3125rem;
+}
+.copilot-prose pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.75rem;
+  overflow-x: auto;
+}
+.copilot-prose pre code {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.copilot-prose blockquote {
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 0.75rem;
+  color: var(--muted-foreground);
+}
+.copilot-prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.copilot-prose strong {
+  font-weight: 600;
+}
+.copilot-prose hr {
+  border-color: var(--border);
+  margin-block: 0.75rem;
+}
+.copilot-prose table {
+  font-size: 0.8125rem;
+  border-collapse: collapse;
+}
+.copilot-prose th,
+.copilot-prose td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  text-align: start;
+}
+.copilot-prose th {
+  background: var(--muted);
+  font-weight: 600;
 }

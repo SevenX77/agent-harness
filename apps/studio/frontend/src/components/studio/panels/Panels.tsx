@@ -69,6 +69,8 @@ interface PanelsProps {
   activeCandidateId?: string | null
   onSelectCandidate?: (candidateId: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
+  /** Deselect the node so Properties falls back to the graph (GRAPH.md) form. */
+  onSelectGraph?: () => void
 }
 
 export function Panels({
@@ -110,6 +112,7 @@ export function Panels({
   activeCandidateId,
   onSelectCandidate,
   onOpenSettings,
+  onSelectGraph,
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const isDarkMode = useThemeValue() === "dark"
@@ -277,6 +280,7 @@ export function Panels({
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
         onOpenSettings={onOpenSettings}
+        onSelectGraph={onSelectGraph}
       />
     )
   }

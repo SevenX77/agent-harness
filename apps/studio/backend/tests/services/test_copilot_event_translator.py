@@ -154,6 +154,48 @@ def test_translate_tool_use_start_event() -> None:
     assert translator.tool_names == {"tool-1": "Read"}
 
 
+def test_translate_renders_search_tools_instead_of_fake_failures() -> None:
+    """Glob/Grep 由权限层放行并真实执行;翻译器若报「不支持工具」= 执行成功
+    UI 报失败的口径不一致(实测过的假失败主因),必须按真名转写而不是报错。"""
+    translator = copilot.SdkMessageTranslator()
+
+    events = translator.translate(
+        AssistantMessage(
+            content=[
+                ToolUseBlock(id="tool-g", name="Glob", input={"pattern": "**/*.md"}),
+                ToolUseBlock(id="tool-r", name="Grep", input={"pattern": "phase"}),
+            ],
+            model="claude",
+        ),
+    )
+
+    assert events == [
+        CopilotEventToolUseStart(tool_name="Glob", tool_input={"pattern": "**/*.md"}),
+        CopilotEventToolUseStart(tool_name="Grep", tool_input={"pattern": "phase"}),
+    ]
+    assert translator.tool_names == {"tool-g": "Glob", "tool-r": "Grep"}
+
+
+def test_translate_renders_studio_mcp_tools() -> None:
+    # studio MCP 工具(mcp__studio__<tool>)与其他工具一样按真名转写。
+    translator = copilot.SdkMessageTranslator()
+
+    events = translator.translate(
+        AssistantMessage(
+            content=[
+                ToolUseBlock(id="tool-m", name="mcp__studio__compile_skill", input={"skill_id": "s"})
+            ],
+            model="claude",
+        ),
+    )
+
+    assert events == [
+        CopilotEventToolUseStart(
+            tool_name="mcp__studio__compile_skill", tool_input={"skill_id": "s"}
+        )
+    ]
+
+
 def test_translate_tool_result_event() -> None:
     translator = copilot.SdkMessageTranslator()
     translator.tool_names["tool-1"] = "Read"
@@ -505,7 +547,13 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     client = FakeClient(
         messages=[AssistantMessage(content=[TextBlock(text="hello")], model="claude")]
     )
-    monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
+    captured_options: list[object] = []
+
+    def factory(options: object) -> FakeClient:
+        captured_options.append(options)
+        return client
+
+    monkeypatch.setattr(copilot, "_session_factory", factory)
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
@@ -520,8 +568,10 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     assert events[0].summary.startswith("本轮注入")
     assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
-    assert "聚焦 Studio 上下文" in client.queries[0]
-    assert "user text" in client.queries[0]
+    # 规则文档在会话级 system_prompt,不随每轮 query 重发;无 view context 时
+    # query 就是裸用户消息。
+    assert "聚焦 Studio 上下文" in str(getattr(captured_options[0], "system_prompt", ""))
+    assert client.queries[0] == "user text"
 
 
 async def _collect(stream: AsyncIterator[object]) -> list[object]:

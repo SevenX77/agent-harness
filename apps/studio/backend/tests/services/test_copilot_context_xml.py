@@ -59,10 +59,10 @@ def test_omits_empty_layers() -> None:
     assert xml.count("<skill>") == 1
 
 
-def test_build_system_prompt_uses_xml_not_json_dump() -> None:
+def test_turn_prompt_uses_xml_not_json_dump() -> None:
     import asyncio
 
     asyncio.run(copilot.set_view_context("xml-skill", "Edit", {"lint_status": "error"}, 1))
-    prompt = copilot.build_system_prompt("xml-skill")
+    prompt = copilot._prompt_with_turn_context("xml-skill", "hi")
     assert "<copilot_context>" in prompt
     assert "<lint_status>error</lint_status>" in prompt

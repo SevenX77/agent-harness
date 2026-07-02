@@ -443,28 +443,25 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
   return response.data
 }
 
-export interface CopilotBashApprovalRequest {
+export interface CopilotToolApprovalRequest {
   toolUseId: string
   approve: boolean
 }
 
-export interface CopilotBashApprovalResponse {
+export interface CopilotToolApprovalResponse {
   tool_use_id: string
   approved: boolean
-  executed: boolean
-  success: boolean
-  stdout: string
-  stderr: string
-  returncode: number | null
+  /** False when the approval no longer exists (resolved/timed out/reset). */
+  resolved: boolean
   message: string | null
 }
 
-export async function resolveCopilotBashApproval(
+export async function resolveCopilotToolApproval(
   skillId: string,
-  request: CopilotBashApprovalRequest,
-): Promise<CopilotBashApprovalResponse> {
-  const response = await api.post<CopilotBashApprovalResponse>(
-    `/skills/${skillId}/copilot/bash-approval`,
+  request: CopilotToolApprovalRequest,
+): Promise<CopilotToolApprovalResponse> {
+  const response = await api.post<CopilotToolApprovalResponse>(
+    `/skills/${skillId}/copilot/tool-approval`,
     {
       tool_use_id: request.toolUseId,
       approve: request.approve,

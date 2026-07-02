@@ -226,11 +226,12 @@ export interface RunMetadata {
   artifact_ref?: ArtifactRef | null
   source_map_ref?: string | null
   execution_fingerprint?: string | null
-  // n4-trace#23 (model-compare): set only on compare-fanned runs so the Trace
-  // can group/tab the per-candidate results; omitted on ordinary runs.
+  // PR2 node-compare: set only on candidate side-runs so the Trace can group/tab
+  // per-candidate results under the compared node; omitted on ordinary runs.
   compare_group_id?: string | null
+  compare_node_id?: string | null
   candidate_id?: string | null
-  candidate_role_name?: string | null
+  candidate_label?: string | null
 }
 
 export interface RunListResponse {
@@ -239,32 +240,42 @@ export interface RunListResponse {
 }
 
 /**
- * n4-trace#23 (model-compare, P8): one candidate in a compare run. Each candidate
- * references a role that already exists in the active llm_roles.yaml (built in
- * Settings); the backend runs the same compiled artifact through that role.
- * `target_role` optionally narrows the override to a single graph_agent role the
- * skill's phases bind to (omitted = override every role).
+ * PR2 node-level Compare LLMs: one model candidate for a node. Model-only —
+ * a model group + one endpoint route ("auto" = let the group's fallback decide).
+ * Persisted per skill+node in the studio backend (not SKILL.md).
  */
-export interface RunCandidate {
+export interface CompareCandidate {
   candidate_id: string
-  role_name: string
-  target_role?: string | null
+  model_group_id: string
+  route: string
 }
 
-/** n4-trace#23: one candidate's spawned run inside a compare group. */
+/** PUT body / per-node response: a node's candidate list. */
+export interface NodeCompareCandidates {
+  candidates: CompareCandidate[]
+}
+
+/** GET response: node id -> its candidate list (only non-empty nodes). */
+export interface CompareCandidatesMap {
+  nodes: Record<string, CompareCandidate[]>
+}
+
+/** PR2: one candidate's isolated single-node side-run inside a compare group. */
 export interface CompareCandidateRun {
   candidate_id: string
-  role_name: string
+  label: string
   metadata: RunMetadata
 }
 
-/** n4-trace#23 POST response: the compare group + the per-candidate runs it spawned. */
+/** PR2 POST response: the compare group + the per-candidate side-runs it spawned. */
 export interface CompareRunResponse {
   compare_group_id: string
+  node_id: string
+  base_run_id: string
   runs: CompareCandidateRun[]
 }
 
-/** n4-trace#23 GET response: per-candidate runs for one compare group, for Trace tabs. */
+/** PR2 GET response: per-candidate side-runs for one compare group, for Trace tabs. */
 export interface CompareRunGroupResponse {
   compare_group_id: string
   runs: CompareCandidateRun[]

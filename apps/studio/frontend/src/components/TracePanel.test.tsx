@@ -388,38 +388,38 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
   })
 })
 
-describe('TracePanel model-compare tabs (n4-trace#23)', () => {
+describe('TracePanel model-compare tabs (PR2 node-compare)', () => {
   const compareTabs = [
-    { candidateId: 'writer', roleName: 'writer', runId: 'run-w', failed: false, running: false },
-    { candidateId: 'editor', roleName: 'editor', runId: 'run-e', failed: true, running: false },
+    { candidateId: 'fast', label: 'deepseek-v4', runId: 'run-f', failed: false, running: false },
+    { candidateId: 'slow', label: 'claude-opus', runId: 'run-s', failed: true, running: false },
   ]
 
   it('renders one tab per candidate, marking the failed candidate', () => {
-    const html = render({ compareTabs, activeCandidateId: 'writer' })
+    const html = render({ compareTabs, activeCandidateId: 'fast' })
     expect(html).toContain('aria-label="Model compare candidates"')
-    expect(html).toContain('aria-label="Candidate writer"')
+    expect(html).toContain('aria-label="Candidate deepseek-v4"')
     // The failed candidate's tab carries the failure in its accessible name.
-    expect(html).toContain('aria-label="Candidate editor (failed)"')
-    expect(html).toContain('>writer<')
-    expect(html).toContain('>editor<')
+    expect(html).toContain('aria-label="Candidate claude-opus (failed)"')
+    expect(html).toContain('>deepseek-v4<')
+    expect(html).toContain('>claude-opus<')
   })
 
   it('marks the active candidate tab as selected', () => {
-    const html = render({ compareTabs, activeCandidateId: 'editor' })
-    const editorIdx = html.indexOf('aria-label="Candidate editor (failed)"')
+    const html = render({ compareTabs, activeCandidateId: 'slow' })
+    const slowIdx = html.indexOf('aria-label="Candidate claude-opus (failed)"')
     // aria-selected="true" lives on the active tab's button (same element as the label).
-    expect(html.slice(editorIdx - 120, editorIdx)).toContain('aria-selected="true"')
-    const writerIdx = html.indexOf('aria-label="Candidate writer"')
-    expect(html.slice(writerIdx - 120, writerIdx)).toContain('aria-selected="false"')
+    expect(html.slice(slowIdx - 120, slowIdx)).toContain('aria-selected="true"')
+    const fastIdx = html.indexOf('aria-label="Candidate deepseek-v4"')
+    expect(html.slice(fastIdx - 120, fastIdx)).toContain('aria-selected="false"')
   })
 
   it('renders the tab strip even while a candidate run has no events yet', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} compareTabs={compareTabs} activeCandidateId="writer" />,
+      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} compareTabs={compareTabs} activeCandidateId="fast" />,
     )
     // Empty-state still shows the candidate tabs so the user can switch.
     expect(html).toContain('aria-label="Model compare candidates"')
-    expect(html).toContain('aria-label="Candidate writer"')
+    expect(html).toContain('aria-label="Candidate deepseek-v4"')
     expect(html).toContain('Waiting for run events')
   })
 

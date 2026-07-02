@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import useSWR from "swr"
 import { AxiosError } from "axios"
-import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -51,7 +51,8 @@ import { isSafePhaseId } from "@/components/GraphCanvas/canvas-authoring"
 import type { ResumeRunOptions } from "@/api/client"
 import { isPathInsideWorkspaceRoot, subgraphPathFieldState, subgraphPathValueFromSelection } from "@/components/studio/subgraph-path"
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
-import { getChildGraphTopology } from "@/api/client"
+import { getChildGraphTopology, getCompareCandidates, putNodeCompareCandidates } from "@/api/client"
+import type { CompareCandidate } from "@/api/types"
 import { getModelGroups, getRoles, startCompareCandidateTestJob, type ModelGroup, type RoleEntry, type RolesData, type RoleTestResponse, type RoleTestStatus } from "@/api/llm"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
@@ -331,6 +332,8 @@ interface PropertiesPanelProps {
   onOpenSettings?: (tab?: SettingsTab) => void
   /** Deselect the node so the panel shows the graph (GRAPH.md) properties. */
   onSelectGraph?: () => void
+  /** Launch this node's Compare LLMs off the current base run. */
+  onStartNodeCompare?: (nodeId: string) => void
 }
 
 export function PropertiesPanel({
@@ -355,6 +358,7 @@ export function PropertiesPanel({
   onPromoteNode,
   onOpenSettings,
   onSelectGraph,
+  onStartNodeCompare,
 }: PropertiesPanelProps) {
 
   // Configured LLM roles for the llm_role dropdown (GET /llm/roles) via SWR so
@@ -668,6 +672,7 @@ export function PropertiesPanel({
                 }}
                 onOpenSettings={onOpenSettings}
                 onSelectGraph={onSelectGraph}
+                onStartNodeCompare={onStartNodeCompare}
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1261,6 +1266,7 @@ function PhaseFrontmatterForm({
   onRoleTest,
   onOpenSettings,
   onSelectGraph,
+  onStartNodeCompare,
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
@@ -1288,6 +1294,7 @@ function PhaseFrontmatterForm({
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
+  onStartNodeCompare?: (nodeId: string) => void
 }) {
   return (
     <form
@@ -1316,11 +1323,14 @@ function PhaseFrontmatterForm({
                   modelGroups={modelGroups}
                   roleTest={roleTest}
                   errors={fieldErrors.llm_role}
+                  skillId={skillId}
+                  nodeId={phaseId}
                   onChange={(next) => onFieldChange("llmRole", next)}
                   onUseGraphDefaultChange={(next) => onFieldChange("useGraphLlmRole", next)}
                   onRoleTest={onRoleTest}
                   onOpenSettings={onOpenSettings}
                   onSelectGraph={onSelectGraph}
+                  onStartNodeCompare={onStartNodeCompare}
                 />
               </PanelFieldRow>
               <PanelFieldRow>
@@ -2566,11 +2576,14 @@ function LlmRoleField({
   modelGroups,
   roleTest,
   errors,
+  skillId,
+  nodeId,
   onChange,
   onUseGraphDefaultChange,
   onRoleTest,
   onOpenSettings,
   onSelectGraph,
+  onStartNodeCompare,
 }: {
   value: string
   useGraphDefault: boolean
@@ -2578,11 +2591,14 @@ function LlmRoleField({
   modelGroups: ModelGroup[]
   roleTest: RoleTestStatusInput
   errors?: LintError[]
+  skillId?: string | null
+  nodeId?: string | null
   onChange: (next: string) => void
   onUseGraphDefaultChange: (next: boolean) => void
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
+  onStartNodeCompare?: (nodeId: string) => void
 }) {
   const trimmed = value.trim()
   const options = useMemo(
@@ -2675,6 +2691,9 @@ function LlmRoleField({
       </div>
       <LlmNodeCompareField
         modelGroups={modelGroups}
+        skillId={skillId}
+        nodeId={nodeId}
+        onStartNodeCompare={onStartNodeCompare}
       />
     </Field>
   )
@@ -2801,14 +2820,68 @@ function compareStatusToRouteStatus(state: LlmCompareTestState | undefined): Rol
   return null
 }
 
+function draftToApiCandidate(draft: LlmCompareCandidateDraft): CompareCandidate {
+  return { candidate_id: draft.id, model_group_id: draft.modelGroupId, route: draft.route || "auto" }
+}
+
+function apiToDraftCandidate(candidate: CompareCandidate): LlmCompareCandidateDraft {
+  return { id: candidate.candidate_id, modelGroupId: candidate.model_group_id, route: candidate.route || "auto" }
+}
+
 function LlmNodeCompareField({
   modelGroups,
+  skillId = null,
+  nodeId = null,
+  onStartNodeCompare,
 }: {
   modelGroups: ModelGroup[]
+  skillId?: string | null
+  nodeId?: string | null
+  onStartNodeCompare?: (nodeId: string) => void
 }) {
   const nextCandidateId = useRef(0)
   const [open, setOpen] = useState(false)
   const [candidates, setCandidates] = useState<LlmCompareCandidateDraft[]>([])
+
+  // Load this node's persisted compare candidates (studio backend, per skill+node).
+  useEffect(() => {
+    if (!skillId || !nodeId) {
+      setCandidates([])
+      return
+    }
+    let cancelled = false
+    void getCompareCandidates(skillId)
+      .then((map) => {
+        if (cancelled) return
+        const stored = map.nodes[nodeId] ?? []
+        setCandidates(stored.map(apiToDraftCandidate))
+        // Seed the id counter past any loaded `compare-N` id so new adds never collide.
+        const maxN = stored.reduce((acc, c) => {
+          const match = /^compare-(\d+)$/.exec(c.candidate_id)
+          return match ? Math.max(acc, Number(match[1])) : acc
+        }, 0)
+        nextCandidateId.current = maxN
+      })
+      .catch(() => {
+        if (!cancelled) setCandidates([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [skillId, nodeId])
+
+  // Persist the node's full candidate list (an empty list clears the node).
+  const persistCandidates = useCallback(
+    (next: LlmCompareCandidateDraft[]) => {
+      if (!skillId || !nodeId) return
+      void putNodeCompareCandidates(skillId, nodeId, next.map(draftToApiCandidate)).catch((error) => {
+        toast.error(
+          error instanceof Error ? error.message : "Could not save compare candidates",
+        )
+      })
+    },
+    [skillId, nodeId],
+  )
   const [draftModelGroupId, setDraftModelGroupId] = useState("")
   const [draftRoute, setDraftRoute] = useState("auto")
   const [draftTestState, setDraftTestState] = useState<LlmCompareTestState>(EMPTY_COMPARE_TEST_STATE)
@@ -2874,14 +2947,16 @@ function LlmNodeCompareField({
     if (!draftGroup) return
     nextCandidateId.current += 1
     const candidateId = `compare-${nextCandidateId.current}`
-    setCandidates((current) => [
-      ...current,
+    const next = [
+      ...candidates,
       {
         id: candidateId,
         modelGroupId: draftGroup.canonical_id,
         route: draftRoute,
       },
-    ])
+    ]
+    setCandidates(next)
+    persistCandidates(next)
     if (draftTestState.result || draftTestState.error || draftTestState.running) {
       setCompareTests((current) => ({ ...current, [candidateId]: draftTestState }))
     }
@@ -2899,11 +2974,13 @@ function LlmNodeCompareField({
 
   const saveCandidateEdit = () => {
     if (!editingCandidateId || !editGroup) return
-    setCandidates((current) => current.map((candidate) => (
+    const next = candidates.map((candidate) => (
       candidate.id === editingCandidateId
         ? { ...candidate, modelGroupId: editGroup.canonical_id, route: editRoute }
         : candidate
-    )))
+    ))
+    setCandidates(next)
+    persistCandidates(next)
     setCompareTests((current) => {
       if (editTestState.result || editTestState.error || editTestState.running) {
         return { ...current, [editingCandidateId]: editTestState }
@@ -2918,11 +2995,13 @@ function LlmNodeCompareField({
   }
 
   const removeCandidate = (candidateId: string) => {
-    setCandidates((current) => current.filter((candidate) => candidate.id !== candidateId))
+    const next = candidates.filter((candidate) => candidate.id !== candidateId)
+    setCandidates(next)
+    persistCandidates(next)
     setCompareTests((current) => {
-      const next = { ...current }
-      delete next[candidateId]
-      return next
+      const rest = { ...current }
+      delete rest[candidateId]
+      return rest
     })
   }
 
@@ -3000,7 +3079,7 @@ function LlmNodeCompareField({
           <DialogHeader>
             <DialogTitle>Add compare LLM</DialogTitle>
             <DialogDescription>
-              Choose a temporary model candidate for this node. This does not write to SKILL.md.
+              Choose a model candidate for this node. Saved with the node in the workspace, not SKILL.md.
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">
@@ -3064,6 +3143,20 @@ function LlmNodeCompareField({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {candidates.length > 0 && onStartNodeCompare && nodeId ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-llm-compare-run-trigger="true"
+          aria-label="Run model compare for this node"
+          className="w-full"
+          onClick={() => onStartNodeCompare(nodeId)}
+        >
+          <GitCompareArrows className="size-3.5" aria-hidden />
+          Run compare
+        </Button>
+      ) : null}
       <Dialog
         open={editOpen}
         onOpenChange={(next) => {
@@ -3078,7 +3171,7 @@ function LlmNodeCompareField({
           <DialogHeader>
             <DialogTitle>Edit compare LLM</DialogTitle>
             <DialogDescription>
-              Update the temporary model candidate for this node. This does not write to SKILL.md.
+              Update this node's model candidate. Saved with the node in the workspace, not SKILL.md.
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">

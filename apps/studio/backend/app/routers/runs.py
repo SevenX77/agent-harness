@@ -15,6 +15,7 @@ from app.models.runs import (
     BatchRunStatus,
     CompareRunGroupResponse,
     CompareRunResponse,
+    NodeCompareRunRequest,
     PredictDiagnosticExport,
     PredictRunRequest,
     ResumeReq,
@@ -39,16 +40,20 @@ async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
 
 
 @router.post(
-    "/compare",
+    "/{base_run_id}/compare",
     response_model=CompareRunResponse,
     status_code=202,
-    responses={422: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
 )
-async def create_compare_run(skill_id: str, request: RunRequest) -> CompareRunResponse:
-    # n4-trace#23: P8 model-compare fan-out. Each request.candidates[] entry runs
-    # the same compiled artifact through a different role; the response carries the
-    # compare_group_id the frontend polls via GET /compare/{compare_group_id}.
-    return await run_manager.start_compare_run(skill_id, request)
+async def create_node_compare_run(
+    skill_id: str,
+    base_run_id: str,
+    request: NodeCompareRunRequest,
+) -> CompareRunResponse:
+    # PR2: launch isolated single-node side-runs for node_id's persisted compare
+    # candidates, off the completed base run. Each side-run feeds the node the base
+    # run's exact input and swaps only the model. Poll via GET /compare/{group_id}.
+    return await run_manager.start_node_compare_run(skill_id, base_run_id, request.node_id)
 
 
 @router.get(

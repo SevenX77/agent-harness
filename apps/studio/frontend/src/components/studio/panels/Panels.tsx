@@ -68,6 +68,8 @@ interface PanelsProps {
   compareTabs?: CompareTab[]
   activeCandidateId?: string | null
   onSelectCandidate?: (candidateId: string) => void
+  /** Launch the focused node's Compare LLMs off the current base run. */
+  onStartNodeCompare?: (nodeId: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
   /** Deselect the node so Properties falls back to the graph (GRAPH.md) form. */
   onSelectGraph?: () => void
@@ -111,6 +113,7 @@ export function Panels({
   compareTabs,
   activeCandidateId,
   onSelectCandidate,
+  onStartNodeCompare,
   onOpenSettings,
   onSelectGraph,
 }: PanelsProps) {
@@ -281,6 +284,7 @@ export function Panels({
         onPromoteNode={onPromoteNode}
         onOpenSettings={onOpenSettings}
         onSelectGraph={onSelectGraph}
+        onStartNodeCompare={onStartNodeCompare}
       />
     )
   }

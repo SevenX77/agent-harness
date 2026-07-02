@@ -20,7 +20,7 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, GoldenBaseline, GraphTopologyItem, LintResult, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
@@ -2021,6 +2021,28 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [compareRuns, clearCopilotJudgeResult],
   )
 
+  // Launch the node's Compare LLMs: off the current base run, spawn one isolated
+  // single-node side-run per persisted candidate (each fed the node's real input,
+  // only the model swapped). The returned group drives the Trace top tabs.
+  const handleStartNodeCompare = useCallback(
+    async (nodeId: string) => {
+      if (!currentSkillId) return
+      if (!runId) {
+        toast.error("Run the skill first, then compare this node's models.")
+        return
+      }
+      try {
+        const group = await startNodeCompareRun(currentSkillId, runId, nodeId)
+        setCompareGroupId(group.compare_group_id)
+        setCompareRuns(group.runs)
+        setCompareCandidateId(group.runs[0]?.candidate_id ?? null)
+      } catch (error) {
+        toast.error(`Could not start model compare: ${errorMessage(error)}`)
+      }
+    },
+    [currentSkillId, runId],
+  )
+
   // Poll the compare group while any candidate is still running so the tabs reflect
   // per-candidate completion / failure (metadata.status). Stops once all candidates
   // settle or the group is cleared.
@@ -2293,6 +2315,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         compareTabs={compareTabs}
         activeCandidateId={compareCandidateId}
         onSelectCandidate={handleSelectCandidate}
+        onStartNodeCompare={handleStartNodeCompare}
         onOpenSettings={openSettings}
         onSelectGraph={handleNodeDeselect}
       />

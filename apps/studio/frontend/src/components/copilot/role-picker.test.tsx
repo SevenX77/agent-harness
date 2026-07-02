@@ -251,7 +251,10 @@ describe('RolePicker', () => {
     expect(html).toContain('Copilot role')
   })
 
-  it('hides the picker when only one copilot role is available', () => {
+  // R6-1 (PM 2026-07-02, overrides the old F6 "render nothing" rule): the role
+  // anchor must NEVER vanish — the PM deleted roles down to one floated default
+  // and the whole model selector disappeared. One option still renders visibly.
+  it('still shows the single role as a visible anchor (never vanishes)', () => {
     const html = renderToStaticMarkup(
       <RolePicker
         options={[option('copilot_claude_opus_4_8', 'Claude Opus 4.8')]}
@@ -260,7 +263,19 @@ describe('RolePicker', () => {
       />,
     )
 
-    expect(html).toBe('')
+    expect(html).not.toBe('')
+    expect(html).toContain('Claude Opus 4.8')
+  })
+
+  // R6-1: with zero configured/floated roles the anchor still renders an
+  // explicit empty state (not an empty row) so the user knows where to look.
+  it('renders an empty-state anchor when there are no roles at all', () => {
+    const html = renderToStaticMarkup(
+      <RolePicker options={[]} selectedRole="" onSelect={() => undefined} />,
+    )
+
+    expect(html).not.toBe('')
+    expect(html).toContain('No copilot role')
   })
 
   it('calls onSelect with the chosen role when a menu item is selected', () => {

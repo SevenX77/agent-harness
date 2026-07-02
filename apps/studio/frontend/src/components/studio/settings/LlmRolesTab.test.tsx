@@ -11,7 +11,7 @@ import {
 } from "./llm-roles/AvailableModelsSidebar"
 import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
 import { ModelBundleCard } from "./llm-roles/ModelBundleCard"
-import { requestRoleDeleteConfirmation, RoleCard } from "./llm-roles/RoleCard"
+import { buildRoleDeleteRequest, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { roleTestStatusesByRole, __resetRoleTestStoreForTests, __setRoleTestStoreForTests } from "./llm-roles/role-test-store"
 import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, attachBundleReferenceToRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
@@ -1926,35 +1926,26 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain(">Edit</button>")
   })
 
-  it("uses a shadcn sonner confirmation toast before deleting a role", () => {
+  // R6-2: the delete confirmation is now a Radix AlertDialog request (rendered
+  // inside the Settings dialog tree, not a body-level sonner toast that closed
+  // the modal on click). buildRoleDeleteRequest is the pure request builder.
+  it("builds an AlertDialog delete request without deleting yet", () => {
     const onDeleteRole = vi.fn()
 
-    requestRoleDeleteConfirmation("copilot_chat", onDeleteRole)
+    const request = buildRoleDeleteRequest("copilot_chat", onDeleteRole)
 
-    expect(toastMock).toHaveBeenCalledWith(
-      "Delete copilot_chat?",
-      expect.objectContaining({
-        description: "Remove copilot_chat and its model fallback chain.",
-        duration: Infinity,
-        action: expect.objectContaining({ label: "Delete" }),
-        cancel: expect.objectContaining({ label: "Cancel" }),
-        classNames: expect.objectContaining({
-          actionButton: expect.stringContaining("!bg-destructive"),
-        }),
-      }),
-    )
+    expect(request).toMatchObject({
+      title: "Delete copilot_chat?",
+      description: "Remove copilot_chat and its model fallback chain.",
+    })
     expect(onDeleteRole).not.toHaveBeenCalled()
   })
 
-  it("wires the sonner role delete action to persisted role deletion", () => {
+  it("wires the confirm request onConfirm to persisted role deletion", () => {
     const onDeleteRole = vi.fn()
 
-    requestRoleDeleteConfirmation("copilot_chat", onDeleteRole)
-    const options = toastMock.mock.calls.at(-1)?.[1] as {
-      action?: { onClick?: () => void }
-    }
-
-    options.action?.onClick?.()
+    const request = buildRoleDeleteRequest("copilot_chat", onDeleteRole)
+    void request.onConfirm()
 
     expect(onDeleteRole).toHaveBeenCalledWith("copilot_chat")
   })

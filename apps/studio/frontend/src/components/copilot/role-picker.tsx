@@ -58,9 +58,31 @@ interface RolePickerProps {
 }
 
 export function RolePicker({ options, selectedRole, onSelect }: RolePickerProps) {
-  // Hide the picker entirely when there is nothing to choose between.
-  if (options.length <= 1) {
-    return null
+  // R6-1 (PM 2026-07-02, overrides the old F6 "render nothing until there is a
+  // role" rule): the model/role anchor is ALWAYS visible. Deleting roles down
+  // to a single floated default used to make the whole selector vanish, which
+  // read as "the model picker is gone". With zero roles we show an explicit
+  // empty state; with one we still show the active role (no dropdown affordance
+  // to switch, but the anchor never disappears).
+  if (options.length === 0) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled
+            aria-label="No copilot role"
+            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+          >
+            <BrainCircuit className="size-3.5" />
+            <span className="min-w-0 truncate">No copilot role</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Add a Copilot role in Settings → Copilot</TooltipContent>
+      </Tooltip>
+    )
   }
 
   const selectedLabel = options.find((option) => option.role === selectedRole)?.label ?? selectedRole

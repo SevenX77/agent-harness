@@ -170,7 +170,6 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 placeholder={t("general.defaultSkillFolder.placeholder")}
                 className="h-8 min-w-0 flex-1 text-xs"
                 aria-label={t("general.defaultSkillFolder.label")}
-                title={appSettings.defaultSkillsDirectory}
               />
               <Button
                 type="button"
@@ -334,7 +333,6 @@ function CatalogConfigRow({ label, value }: { label: string; value: string }) {
         <Input
           readOnly
           value={value}
-          title={value}
           aria-label={label}
           className="h-8 overflow-x-auto whitespace-nowrap text-clip text-xs text-muted-foreground"
         />
@@ -450,7 +448,6 @@ function TruthSourceCard({
                 readOnly
                 value={source.path}
                 aria-label={t("general.truthSources.pathLabel", { label })}
-                title={source.path}
                 className={truthSourceScrollableInputClassName}
               />
             </div>

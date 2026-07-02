@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { Route } from 'lucide-react'
 import type { RegistryResponse, RoleEntry } from '../../api/llm'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,31 +66,44 @@ interface ModelPickerMenuProps {
 export function ModelPickerMenu({ options, selectedRouteId, onSelect, onClose }: ModelPickerMenuProps) {
   return (
     <>
-      {options.map((option) => (
-        <Button
-          key={option.routeId}
-          type="button"
-          disabled={!option.available}
-          variant={selectedRouteId === option.routeId ? 'default' : 'ghost'}
-          size="sm"
-          title={option.available ? `Use ${option.routeId}` : option.unavailableReason}
-          aria-label={`Select route ${option.routeId}`}
-          onClick={option.available ? () => {
-            onSelect(option.routeId)
-            onClose?.()
-          } : undefined}
-          className={`h-7 w-full justify-between px-2 text-left ${
-            selectedRouteId === option.routeId
-              ? 'bg-primary text-primary-foreground'
-              : 'text-foreground hover:bg-accent'
-          } disabled:cursor-not-allowed disabled:opacity-45`}
-        >
-          <span className="min-w-0 truncate">{option.routeId}</span>
-          {!option.available ? (
-            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">Off</span>
-          ) : null}
-        </Button>
-      ))}
+      {options.map((option) => {
+        const routeButton = (
+          <Button
+            type="button"
+            disabled={!option.available}
+            variant={selectedRouteId === option.routeId ? 'default' : 'ghost'}
+            size="sm"
+            aria-label={`Select route ${option.routeId}`}
+            onClick={option.available ? () => {
+              onSelect(option.routeId)
+              onClose?.()
+            } : undefined}
+            className={`h-7 w-full justify-between px-2 text-left ${
+              selectedRouteId === option.routeId
+                ? 'bg-primary text-primary-foreground'
+                : 'text-foreground hover:bg-accent'
+            } disabled:cursor-not-allowed disabled:opacity-45`}
+          >
+            <span className="min-w-0 truncate">{option.routeId}</span>
+            {!option.available ? (
+              <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">Off</span>
+            ) : null}
+          </Button>
+        )
+        if (option.available || !option.unavailableReason) {
+          return <span key={option.routeId} className="w-full">{routeButton}</span>
+        }
+        // Disabled buttons swallow pointer events, so the diagnostic tooltip
+        // triggers from a wrapping span instead.
+        return (
+          <Tooltip key={option.routeId}>
+            <TooltipTrigger asChild>
+              <span className="w-full">{routeButton}</span>
+            </TooltipTrigger>
+            <TooltipContent>{option.unavailableReason}</TooltipContent>
+          </Tooltip>
+        )
+      })}
     </>
   )
 }
@@ -101,7 +115,6 @@ function ModelPickerDropdownItems({ options, selectedRouteId, onSelect }: ModelP
         <DropdownMenuItem
           key={option.routeId}
           disabled={!option.available}
-          title={option.available ? `Use ${option.routeId}` : option.unavailableReason}
           aria-label={`Select route ${option.routeId}`}
           onSelect={() => onSelect(option.routeId)}
           className={`justify-between ${
@@ -157,17 +170,21 @@ export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          title={effectiveRouteId ? `Route: ${effectiveRouteId}` : 'Select route'}
-          aria-label="Select Copilot route"
-        >
-          <Route className="size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Select Copilot route"
+            >
+              <Route className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{effectiveRouteId ? `Route: ${effectiveRouteId}` : 'Select route'}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" side="top" className="w-64">
         <DropdownMenuLabel>Route</DropdownMenuLabel>
         <ModelPickerDropdownItems

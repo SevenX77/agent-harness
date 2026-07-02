@@ -10,6 +10,7 @@ import { errorMessage, isRecord } from '../../utils/errors'
 import { joinDirectoryPath } from '../../utils/skill-paths'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import {
   Card,
   CardFooter,
@@ -306,12 +307,18 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
               <Plus />
               {creating ? 'Creating' : 'New skill'}
             </Button>
-            <p
-              title={defaultSkillParentDirectory ?? undefined}
-              className="mt-1 truncate text-xs text-muted-foreground"
-            >
-              {defaultSkillParentDirectory ? `Default: ${defaultSkillParentDirectory}` : 'Default: AgentStudio/Skills'}
-            </p>
+            {defaultSkillParentDirectory ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    Default: {defaultSkillParentDirectory}
+                  </p>
+                </TooltipTrigger>
+                <TooltipContent>{defaultSkillParentDirectory}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <p className="mt-1 truncate text-xs text-muted-foreground">Default: AgentStudio/Skills</p>
+            )}
           </div>
           <div>
             <Button

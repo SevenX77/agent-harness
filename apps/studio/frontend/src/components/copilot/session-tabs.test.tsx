@@ -116,6 +116,22 @@ describe('SessionTabs', () => {
     expect(html).toContain('aria-label="New chat"')
   })
 
+  // Buttons are wrapped in Tooltip/TooltipTrigger now, so interaction tests walk
+  // the element tree instead of hardcoding children indices.
+  type AnyElement = { key?: string | null; props?: Record<string, unknown> & { children?: unknown } }
+
+  function collectElements(node: unknown, out: AnyElement[] = []): AnyElement[] {
+    if (Array.isArray(node)) {
+      node.forEach((child) => collectElements(child, out))
+      return out
+    }
+    if (!node || typeof node !== 'object') return out
+    const el = node as AnyElement
+    out.push(el)
+    if (el.props && 'children' in el.props) collectElements(el.props.children, out)
+    return out
+  }
+
   it('calls onSwitch with the chosen session id', () => {
     const onSwitch = vi.fn()
     const element = SessionTabs({
@@ -126,14 +142,10 @@ describe('SessionTabs', () => {
       onClose: () => undefined,
     })
 
-    // <div> > [<ScrollArea>{tab spans}</ScrollArea>, <Button new />]; each tab
-    // span = [label Button, close Button].
-    const props = (element as { props: { children: unknown[] } }).props
-    const scrollArea = props.children[0] as {
-      props: { children: Array<{ key: string; props: { children: Array<{ props: { onClick?: () => void } }> } }> }
-    }
-    const secondTab = scrollArea.props.children.find((tab) => tab.key === 's2')
-    secondTab?.props.children[0]?.props.onClick?.()
+    const all = collectElements(element)
+    const secondTab = all.find((el) => el.key === 's2')
+    const labelButton = collectElements(secondTab).find((el) => typeof el.props?.onClick === 'function')
+    ;(labelButton?.props?.onClick as () => void)?.()
 
     expect(onSwitch).toHaveBeenCalledWith('s2')
   })
@@ -148,9 +160,8 @@ describe('SessionTabs', () => {
       onClose: () => undefined,
     })
 
-    const props = (element as { props: { children: unknown[] } }).props
-    const newButton = props.children[1] as { props: { onClick?: () => void } }
-    newButton.props.onClick?.()
+    const newButton = collectElements(element).find((el) => el.props?.['aria-label'] === 'New chat')
+    ;(newButton?.props?.onClick as () => void)?.()
 
     expect(onNew).toHaveBeenCalledTimes(1)
   })

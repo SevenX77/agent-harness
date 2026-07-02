@@ -74,13 +74,13 @@ function TerminalEmulator({ session, onStatusChange }: TerminalEmulatorProps) {
     }
   }, [onStatusChange, session.ws_url])
 
-  return <div ref={containerRef} className="h-full w-full bg-slate-950 p-2" />
+  return <div ref={containerRef} className="h-full w-full bg-background p-2" />
 }
 
 export function TerminalPanel({ session, status, onStatusChange }: TerminalPanelProps) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-card px-3 py-2 text-xs text-muted-foreground">
         <span>{session ? session.cwd : 'No CLI session'}</span>
         <span className="font-medium">{status}</span>
       </div>
@@ -88,7 +88,7 @@ export function TerminalPanel({ session, status, onStatusChange }: TerminalPanel
         {session ? (
           <TerminalEmulator session={session} onStatusChange={onStatusChange} />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Open a CLI session for the active skill
           </div>
         )}

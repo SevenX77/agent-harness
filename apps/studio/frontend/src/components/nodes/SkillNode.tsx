@@ -46,7 +46,7 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
   },
   success: {
     label: 'Success',
-    className: 'border-emerald-500/45 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    className: 'border-success-border/60 bg-success/10 text-success',
     icon: CheckCircle2,
   },
   error: {
@@ -56,12 +56,12 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
   },
   paused: {
     label: 'Paused',
-    className: 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    className: 'border-warning-border/60 bg-warning/10 text-warning',
     icon: Pause,
   },
   breakpoint: {
     label: 'Breakpoint',
-    className: 'border-fuchsia-500/45 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300',
+    className: 'border-primary/45 bg-primary/10 text-primary',
     icon: Workflow,
   },
 }
@@ -119,7 +119,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         data.isConflictCancelled
           ? 'border-destructive ring-2 ring-destructive/30'
           : data.activeConflict
-          ? 'border-amber-500 ring-2 ring-amber-500/30'
+          ? 'border-warning ring-2 ring-warning/30'
           : selected
           ? 'border-primary ring-2 ring-primary/30'
           : 'border-border',
@@ -182,7 +182,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                 <TooltipTrigger asChild>
                   <span
                     aria-label="Golden captured"
-                    className="inline-flex size-5 items-center justify-center rounded-md border border-emerald-500/45 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-success-border/60 bg-success/10 text-success"
                   >
                     <ShieldCheck className="size-3" />
                   </span>
@@ -194,7 +194,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                 <TooltipTrigger asChild>
                   <span
                     aria-label="Logic OK (predict ran, no golden yet)"
-                    className="inline-flex size-5 items-center justify-center rounded-md border border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-warning-border/60 bg-warning/10 text-warning"
                   >
                     <ShieldHalf className="size-3" />
                   </span>
@@ -311,11 +311,11 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         </PopoverAnchor>
         <PopoverContent portalled={false} side="top" align="center" avoidCollisions={false} className="w-[280px] p-3 bg-popover border border-border rounded-md text-foreground shadow-xl z-50">
           <div className="flex items-start gap-2.5">
-            <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
+            <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
             <div className="flex-1 min-w-0">
               <h4 className="text-xs font-semibold text-foreground">Sequential Overwrite Detected</h4>
               <p className="mt-1 text-[11px] text-muted-foreground leading-normal">
-                Field <code className="text-amber-400 font-mono text-[10px] px-1 py-0.5 bg-zinc-900 rounded">{data.activeConflict.fieldName}</code> is also output by upstream node <span className="font-semibold">{data.activeConflict.ancestorNodeId}</span> and will be overwritten.
+                Field <code className="text-warning font-mono text-[10px] px-1 py-0.5 bg-muted/60 rounded">{data.activeConflict.fieldName}</code> is also output by upstream node <span className="font-semibold">{data.activeConflict.ancestorNodeId}</span> and will be overwritten.
               </p>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <Button
@@ -333,7 +333,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                   <Button
                     size="sm"
                     variant="default"
-                    className="h-7 text-[11px] px-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-md"
+                    className="h-7 text-[11px] px-2.5 bg-warning hover:bg-warning/85 text-warning-foreground font-medium rounded-md"
                     onClick={() => data.onAllowSequentialOverwrite?.(
                       data.activeConflict!.nodeId,
                       data.activeConflict!.fieldName,

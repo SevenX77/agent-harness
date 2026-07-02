@@ -13,8 +13,8 @@ interface TraceFilterProps {
 
 function chipClass(selected: boolean): string {
   return selected
-    ? 'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
-    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-slate-800 dark:bg-slate-900 dark:text-gray-400 dark:hover:bg-slate-800'
+    ? 'border-primary/60 bg-primary/10 text-primary'
+    : 'border-border bg-card text-muted-foreground hover:bg-muted/40'
 }
 
 export function TraceFilter({
@@ -30,13 +30,13 @@ export function TraceFilter({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">
-          Filters {activePhase ? <span className="normal-case text-sky-600 dark:text-sky-400">active phase: {activePhase}</span> : null}
+        <div className="text-xs font-semibold uppercase text-muted-foreground">
+          Filters {activePhase ? <span className="normal-case text-primary">active phase: {activePhase}</span> : null}
         </div>
         <button
           type="button"
           onClick={onClear}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-100"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         >
           <FilterX className="h-3.5 w-3.5" />
           Clear

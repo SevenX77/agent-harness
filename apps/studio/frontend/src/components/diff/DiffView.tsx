@@ -59,8 +59,8 @@ function fieldButton(
       onClick={() => setSelectedPath(field.field_path)}
       className={`block w-full rounded-md border px-2 py-2 text-start text-xs ${
         isSelected
-          ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
-          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+          ? 'border-primary/60 bg-primary/10 text-primary'
+          : 'border-border bg-card text-muted-foreground hover:bg-muted/40'
       }`}
     >
       <div className="truncate font-mono font-semibold">{field.field_path}</div>
@@ -98,11 +98,11 @@ export function DiffView({
 
   if (!result && !loading && !error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-slate-50 p-6 text-center dark:bg-slate-950">
-        <GitCompareArrows className="h-9 w-9 text-slate-400" />
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background p-6 text-center">
+        <GitCompareArrows className="h-9 w-9 text-muted-foreground" />
         <div>
-          <h3 className="font-bold text-slate-800 dark:text-slate-100">Golden Diff</h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <h3 className="font-bold text-foreground">Golden Diff</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
             Compare the latest run output against the active golden baseline.
           </p>
         </div>
@@ -111,7 +111,7 @@ export function DiffView({
             type="button"
             disabled={!canCompare}
             onClick={onCompare}
-            className="flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
+            className="flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <GitCompareArrows className="h-4 w-4" />
             Compare to Golden
@@ -120,7 +120,7 @@ export function DiffView({
             type="button"
             disabled={!canPromote}
             onClick={onPromote}
-            className="flex items-center gap-2 rounded-md border border-amber-300 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/40"
+            className="flex items-center gap-2 rounded-md border border-warning-border px-3 py-1.5 text-sm font-medium text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <BadgeCheck className="h-4 w-4" />
             Promote to Golden
@@ -131,12 +131,12 @@ export function DiffView({
   }
 
   return (
-    <div className="flex h-full flex-col bg-slate-50 dark:bg-slate-950">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+    <div className="flex h-full flex-col bg-background">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-3">
           <DiffScore score={result?.total_score ?? 0} />
           <div>
-            <h3 className="font-bold text-slate-800 dark:text-slate-100">Golden Diff</h3>
+            <h3 className="font-bold text-foreground">Golden Diff</h3>
             <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
               {result ? (
                 <>
@@ -166,7 +166,7 @@ export function DiffView({
             type="button"
             disabled={!canCompare || loading}
             onClick={onCompare}
-            className="flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+            className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Compare
@@ -175,7 +175,7 @@ export function DiffView({
             type="button"
             disabled={!canPromote}
             onClick={onPromote}
-            className="flex items-center gap-2 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-amber-300"
+            className="flex items-center gap-2 rounded-md bg-warning px-3 py-1.5 text-xs font-medium text-warning-foreground hover:bg-warning/85 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <BadgeCheck className="h-3.5 w-3.5" />
             Promote
@@ -184,15 +184,15 @@ export function DiffView({
       </div>
 
       {error ? (
-        <div className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+        <div className="m-4 rounded-md border border-destructive-border/60 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-[14rem_1fr]">
-        <div className="overflow-y-auto border-e border-slate-200 p-3 dark:border-slate-800">
+        <div className="overflow-y-auto border-e border-border p-3">
           {allFields.length === 0 && nodeGroups.length === 0 ? (
-            <div className="text-sm text-slate-500 dark:text-slate-400">
+            <div className="text-sm text-muted-foreground">
               {loading ? 'Loading diff...' : 'No fields to compare.'}
             </div>
           ) : null}
@@ -201,24 +201,24 @@ export function DiffView({
               {nodeGroups.map((group) => (
                 <div key={group.nodeId}>
                   <div className="mb-1 flex items-center justify-between gap-2 px-1">
-                    <span className="truncate font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    <span className="truncate font-mono text-xs font-semibold text-foreground">
                       {group.nodeId}
                     </span>
                     <span className="flex items-center gap-1.5 text-[11px]">
                       <span
                         className={`rounded px-1.5 py-0.5 font-semibold uppercase ${
                           group.verdict === 'pass'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                            : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                            ? 'bg-success/15 text-success'
+                            : 'bg-destructive/15 text-destructive'
                         }`}
                       >
                         {group.verdict}
                       </span>
-                      <span className="text-slate-500 dark:text-slate-400">{Math.round(group.score * 100)}%</span>
+                      <span className="text-muted-foreground">{Math.round(group.score * 100)}%</span>
                     </span>
                   </div>
                   {group.fields.length === 0 ? (
-                    <div className="px-1 pb-1 text-[11px] text-slate-400 dark:text-slate-500">No differences</div>
+                    <div className="px-1 pb-1 text-[11px] text-muted-foreground">No differences</div>
                   ) : (
                     <div className="space-y-1">{group.fields.map((field) => fieldButton(field, selectedField, setSelectedPath))}</div>
                   )}

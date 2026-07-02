@@ -6,6 +6,7 @@ import type { ExportFormat } from '../../utils/reportTemplates'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { TableCell, TableRow } from '../ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 interface RunHistoryRowProps {
   run: RunMetadata
@@ -86,30 +87,40 @@ export function RunHistoryRow({
       </TableCell>
       <TableCell className="px-3 py-2">
         <div className="flex items-center justify-end gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={(event) => {
-              event.stopPropagation()
-              onReplay(run.run_id)
-            }}
-            title="Replay run"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={(event) => {
-              event.stopPropagation()
-              onCompare(run.run_id)
-            }}
-            title="Compare run"
-          >
-            <GitCompareArrows className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Replay run"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onReplay(run.run_id)
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Replay run</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Compare run"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onCompare(run.run_id)
+                }}
+              >
+                <GitCompareArrows className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Compare run</TooltipContent>
+          </Tooltip>
           <span onClick={(event) => event.stopPropagation()}>
             <ExportButton
               compact
@@ -118,18 +129,23 @@ export function RunHistoryRow({
               buildContent={(format) => onExport(run.run_id, format)}
             />
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={(event) => {
-              event.stopPropagation()
-              onDelete(run.run_id)
-            }}
-            title="Delete run"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Delete run"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onDelete(run.run_id)
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete run</TooltipContent>
+          </Tooltip>
         </div>
       </TableCell>
     </TableRow>

@@ -74,7 +74,6 @@ export function NewSkillDialog({
                   readOnly
                   value={currentParentDirectory}
                   placeholder="Select a parent folder"
-                  title={currentParentDirectory || undefined}
                   className="min-w-0 font-mono text-xs"
                   aria-label="Parent folder"
                 />

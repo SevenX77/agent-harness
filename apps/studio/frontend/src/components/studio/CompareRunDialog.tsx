@@ -3,6 +3,7 @@ import { GitCompareArrows } from "lucide-react"
 import { getRoles } from "@/api/llm"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Dialog,
   DialogContent,
@@ -77,19 +78,23 @@ export function CompareRunDialog({ disabled = false, starting = false, onStartCo
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-          aria-label="Compare models"
-          title="Run this skill across multiple Settings roles and compare results"
-        >
-          <GitCompareArrows className="size-4" />
-          Compare models
-        </Button>
-      </DialogTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              aria-label="Compare models"
+            >
+              <GitCompareArrows className="size-4" />
+              Compare models
+            </Button>
+          </DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Run this skill across multiple Settings roles and compare results</TooltipContent>
+      </Tooltip>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Compare models</DialogTitle>

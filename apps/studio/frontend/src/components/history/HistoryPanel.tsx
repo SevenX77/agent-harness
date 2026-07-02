@@ -5,6 +5,8 @@ import type { GitHistoryItem } from '../../api/types'
 import { useLocalHistory } from '../../hooks/useRunHistory'
 import { errorMessage } from '../../utils/errors'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { PanelHeader } from '../studio/panels/_shared/PanelHeader'
 
 interface HistoryPanelProps {
   skillId: string | null
@@ -66,22 +68,26 @@ export function LocalHistoryPanelView({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
-        <div>
-          <h3 className="text-xs font-medium text-foreground">Local History</h3>
-          <p className="text-[11px] text-muted-foreground">{history.length} snapshots</p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          onClick={onRefresh}
-          aria-label="Refresh local history"
-          title="Refresh local history"
-        >
-          <RefreshCw className="size-4" />
-        </Button>
-      </div>
+      <PanelHeader
+        title="Local History"
+        extra={<span className="text-[11px] text-muted-foreground">{history.length} snapshots</span>}
+        right={(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                onClick={onRefresh}
+                aria-label="Refresh local history"
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh local history</TooltipContent>
+          </Tooltip>
+        )}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {error ? (

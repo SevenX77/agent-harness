@@ -2,6 +2,7 @@ import { Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { CopilotSession } from '../../store/copilotStore'
 
@@ -78,17 +79,21 @@ export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew, onClos
               tab.isActive ? 'bg-secondary' : '',
             )}
           >
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              aria-current={tab.isActive ? 'true' : undefined}
-              title={tab.label}
-              onClick={() => onSwitch(tab.id)}
-              className={cn('max-w-[10rem] rounded-e-none pe-1', tab.isActive ? '' : 'text-muted-foreground')}
-            >
-              <span className="truncate">{tab.label}</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  aria-current={tab.isActive ? 'true' : undefined}
+                  onClick={() => onSwitch(tab.id)}
+                  className={cn('max-w-[10rem] rounded-e-none pe-1', tab.isActive ? '' : 'text-muted-foreground')}
+                >
+                  <span className="truncate">{tab.label}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{tab.label}</TooltipContent>
+            </Tooltip>
             <Button
               type="button"
               size="icon-sm"
@@ -102,17 +107,21 @@ export function SessionTabs({ sessions, activeSessionId, onSwitch, onNew, onClos
           </span>
         ))}
       </ScrollArea>
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        aria-label="New chat"
-        title="New chat"
-        onClick={onNew}
-        className="shrink-0 text-muted-foreground"
-      >
-        <Plus />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label="New chat"
+            onClick={onNew}
+            className="shrink-0 text-muted-foreground"
+          >
+            <Plus />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>New chat</TooltipContent>
+      </Tooltip>
     </div>
   )
 }

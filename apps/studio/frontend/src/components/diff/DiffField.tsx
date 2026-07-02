@@ -78,14 +78,14 @@ export function DiffField({
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h4 className="truncate font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">
+          <h4 className="truncate font-mono text-xs font-semibold text-foreground">
             {path}
           </h4>
           <div className="mt-1 flex items-center gap-2">
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-muted-foreground">
               {type}
             </span>
-            <span className={`text-[11px] font-semibold ${changed ? 'text-amber-600 dark:text-amber-300' : 'text-green-600 dark:text-green-400'}`}>
+            <span className={`text-[11px] font-semibold ${changed ? 'text-warning' : 'text-success'}`}>
               {changed ? 'Changed' : 'Unchanged'}
             </span>
           </div>
@@ -115,7 +115,7 @@ export function DiffField({
         />
       ) : null}
       {type === 'null' || type === 'unknown' || depth >= 5 ? (
-        <pre className="max-h-40 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">
+        <pre className="max-h-40 overflow-auto rounded-md bg-muted/30 p-3 text-xs text-foreground">
           {valuePreview(current)}
         </pre>
       ) : null}

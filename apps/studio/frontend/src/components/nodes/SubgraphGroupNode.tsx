@@ -3,6 +3,7 @@ import { FileCode2, GripHorizontal, Maximize2 } from 'lucide-react'
 import { SUBGRAPH_BRIDGE_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { SubgraphGroupNodeData } from './types'
 import { Spinner } from '../ui/spinner'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 type SubgraphGroupNode = Node<SubgraphGroupNodeData, 'subgraphGroup'>
 
@@ -41,19 +42,23 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
             subgraph
           </span>
           {typeof data.onOpenCanvas === 'function' ? (
-            <button
-              type="button"
-              aria-label="Open subgraph canvas"
-              title="Open subgraph canvas"
-              onClick={(event) => {
-                event.stopPropagation()
-                data.onOpenCanvas?.(data.path, title)
-              }}
-              onDoubleClick={(event) => event.stopPropagation()}
-              className="nodrag nopan pointer-events-auto inline-flex size-5 shrink-0 items-center justify-center rounded border border-border bg-card text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
-            >
-              <Maximize2 className="size-3" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Open subgraph canvas"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    data.onOpenCanvas?.(data.path, title)
+                  }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  className="nodrag nopan pointer-events-auto inline-flex size-5 shrink-0 items-center justify-center rounded border border-border bg-card text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+                >
+                  <Maximize2 className="size-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Open subgraph canvas</TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
         {data.status === 'loading' ? (

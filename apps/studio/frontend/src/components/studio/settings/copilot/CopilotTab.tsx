@@ -901,7 +901,7 @@ function CopilotRoleCard({
             <button
               type="button"
               data-copilot-untested-warning="true"
-              className="mt-1 inline-flex items-center gap-1 text-xs text-amber-600 underline-offset-2 hover:underline disabled:cursor-default disabled:no-underline"
+              className="mt-1 inline-flex items-center gap-1 text-xs text-warning underline-offset-2 hover:underline disabled:cursor-default disabled:no-underline"
               onClick={onNavigateToApiKeys}
               disabled={!onNavigateToApiKeys}
             >

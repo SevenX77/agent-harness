@@ -10,7 +10,9 @@ import { useRunHistory } from "../../../hooks/useRunHistory"
 import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { Button } from "../../ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip"
 import { EdgeContextView } from "./EdgeContextView"
+import { PanelHeader } from "./_shared/PanelHeader"
 
 const formatDuration = (sec?: number | null) => {
   if (sec == null) return "n/a"
@@ -155,22 +157,26 @@ export function TimelinePanel() {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
-        <div>
-          <h3 className="text-xs font-medium text-foreground">Timeline</h3>
-          <p className="text-[11px] text-muted-foreground">{runs.length} runs</p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          onClick={() => void refresh()}
-          aria-label="Refresh timeline"
-          title="Refresh timeline"
-        >
-          <RefreshCw className="size-4" />
-        </Button>
-      </div>
+      <PanelHeader
+        title="Timeline"
+        extra={<span className="text-[11px] text-muted-foreground">{runs.length} runs</span>}
+        right={(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                onClick={() => void refresh()}
+                aria-label="Refresh timeline"
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh timeline</TooltipContent>
+          </Tooltip>
+        )}
+      />
 
       <ScrollArea className="flex-1">
         <div className="space-y-1 px-2 py-2">
@@ -204,7 +210,7 @@ export function TimelinePanel() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   {run.status === "success" ? (
-                    <CheckCircle2 className="size-4 text-emerald-500" />
+                    <CheckCircle2 className="size-4 text-success" />
                   ) : (
                     <AlertCircle className="size-4 text-destructive" />
                   )}

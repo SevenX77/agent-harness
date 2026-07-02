@@ -9,9 +9,9 @@ export function BoolField({ input, value, error, onChange }: FieldProps) {
           type="checkbox"
           checked={value === true}
           onChange={(event) => onChange(event.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+          className="h-4 w-4 rounded border-border accent-primary"
         />
-        <span className="text-sm text-gray-600 dark:text-gray-400">{value === true ? 'true' : 'false'}</span>
+        <span className="text-sm text-muted-foreground">{value === true ? 'true' : 'false'}</span>
       </span>
     </FieldWrapper>
   )

@@ -2,6 +2,7 @@ import { UserCog } from 'lucide-react'
 import type { CredentialsState, ModelGroup, RoleRouteEntry, RolesData } from '../../api/llm'
 import { deriveCopilotDisplayRoles } from '../studio/settings/copilot/copilot-role-derivation'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,25 +67,28 @@ export function RolePicker({ options, selectedRole, onSelect }: RolePickerProps)
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          title={selectedRole ? `Role: ${selectedRole}` : 'Select copilot role'}
-          aria-label="Select copilot role"
-          className="h-7 gap-1 px-2 text-xs text-muted-foreground"
-        >
-          <UserCog className="size-3.5" />
-          <span className="min-w-0 truncate">{selectedLabel}</span>
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Select copilot role"
+              className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+            >
+              <UserCog className="size-3.5" />
+              <span className="min-w-0 truncate">{selectedLabel}</span>
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{selectedRole ? `Role: ${selectedRole}` : 'Select copilot role'}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" side="top" className="w-56">
         <DropdownMenuLabel>Copilot role</DropdownMenuLabel>
         {options.map((option) => (
           <DropdownMenuItem
             key={option.role}
-            title={`Use ${option.role}`}
             aria-label={`Select role ${option.role}`}
             onSelect={() => onSelect(option.role)}
             className={`justify-between ${

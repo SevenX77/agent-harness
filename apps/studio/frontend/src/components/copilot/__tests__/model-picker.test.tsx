@@ -150,12 +150,26 @@ describe('ModelPicker', () => {
     const onSelect = vi.fn()
     const options = getRouteOptions(role, registry)
     const element = ModelPickerMenu({ options, selectedRouteId: 'openrouter:anthropic-claude-sonnet', onSelect })
-    const buttons: MenuButtonElement[] = Array.isArray(element.props.children)
+    // Each route renders as a keyed wrapper (span, or Tooltip for disabled
+    // routes) around the Button — walk down to the first element with onClick.
+    const wrappers: MenuButtonElement[] = Array.isArray(element.props.children)
       ? element.props.children
       : [element.props.children]
-    const route = buttons.find((button) => button.key === 'anthropic-official:claude-sonnet')
-
-    route?.props.onClick?.()
+    const findClickable = (node: unknown): { onClick?: () => void } | null => {
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const hit = findClickable(child)
+          if (hit) return hit
+        }
+        return null
+      }
+      if (!node || typeof node !== 'object') return null
+      const el = node as { props?: { onClick?: () => void; children?: unknown } }
+      if (typeof el.props?.onClick === 'function') return el.props
+      return findClickable(el.props?.children)
+    }
+    const route = wrappers.find((wrapper) => wrapper.key === 'anthropic-official:claude-sonnet')
+    findClickable(route)?.onClick?.()
 
     expect(onSelect).toHaveBeenCalledWith('anthropic-official:claude-sonnet')
   })

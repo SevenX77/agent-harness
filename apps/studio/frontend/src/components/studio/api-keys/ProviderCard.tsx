@@ -214,23 +214,20 @@ export function TestMessage({
     return <Badge variant="secondary">{t("apiKeys.card.notConfigured")}</Badge>
   }
 
-  if (status === "error") {
+  if (status === "error" || ["invalid_key", "rate_limited", "quota_exceeded", "network_error", "timeout"].includes(status)) {
     const detail = translateErrorCode(errorCode)
-    return (
-      <Badge variant="destructive" className="gap-1" title={detail || undefined}>
+    const badge = (
+      <Badge variant="destructive" className="gap-1">
         <XCircle className="size-3" />
         {translateTestStatus(status)}
       </Badge>
     )
-  }
-
-  if (["invalid_key", "rate_limited", "quota_exceeded", "network_error", "timeout"].includes(status)) {
-    const detail = translateErrorCode(errorCode)
+    if (!detail) return badge
     return (
-      <Badge variant="destructive" className="gap-1" title={detail || undefined}>
-        <XCircle className="size-3" />
-        {translateTestStatus(status)}
-      </Badge>
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent>{detail}</TooltipContent>
+      </Tooltip>
     )
   }
 
@@ -316,45 +313,71 @@ function FieldCopyButton({ value, label, className }: { value: string; label: st
   )
 }
 
+function ReachabilityStatusIcon({
+  text,
+  tone,
+  dataAttrs,
+  children,
+}: {
+  text: string
+  tone: "muted" | "success" | "destructive"
+  dataAttrs: Record<string, string>
+  children: React.ReactNode
+}) {
+  const toneClass = tone === "success"
+    ? "text-success"
+    : tone === "destructive"
+      ? "text-destructive"
+      : "text-muted-foreground"
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn("inline-flex size-4 shrink-0 items-center justify-center", toneClass)}
+          aria-label={text}
+          {...dataAttrs}
+        >
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 function ApiKeyReachabilityIcon({ state, label }: { state: ApiKeyReachabilityState; label: string }) {
   const { t } = useTranslation("settings")
   if (state === "unknown") return null
   if (state === "testing") {
-    const text = t("apiKeys.card.apiKeyTesting", { label })
     return (
-      <span
-        className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-        title={text}
-        aria-label={text}
-        data-api-key-status="testing"
+      <ReachabilityStatusIcon
+        text={t("apiKeys.card.apiKeyTesting", { label })}
+        tone="muted"
+        dataAttrs={{ "data-api-key-status": "testing" }}
       >
         <Loader2 className="size-3.5 animate-spin" />
-      </span>
+      </ReachabilityStatusIcon>
     )
   }
   if (state === "valid") {
-    const text = t("apiKeys.card.apiKeyValid", { label })
     return (
-      <span
-        className="inline-flex size-4 shrink-0 items-center justify-center text-success"
-        title={text}
-        aria-label={text}
-        data-api-key-status="valid"
+      <ReachabilityStatusIcon
+        text={t("apiKeys.card.apiKeyValid", { label })}
+        tone="success"
+        dataAttrs={{ "data-api-key-status": "valid" }}
       >
         <CheckCircle2 className="size-3.5" />
-      </span>
+      </ReachabilityStatusIcon>
     )
   }
-  const invalidText = t("apiKeys.card.apiKeyInvalid", { label })
   return (
-    <span
-      className="inline-flex size-4 shrink-0 items-center justify-center text-destructive"
-      title={invalidText}
-      aria-label={invalidText}
-      data-api-key-status="invalid"
+    <ReachabilityStatusIcon
+      text={t("apiKeys.card.apiKeyInvalid", { label })}
+      tone="destructive"
+      dataAttrs={{ "data-api-key-status": "invalid" }}
     >
       <XCircle className="size-3.5" />
-    </span>
+    </ReachabilityStatusIcon>
   )
 }
 
@@ -362,41 +385,35 @@ function BaseUrlReachabilityIcon({ state, url }: { state: BaseUrlReachabilitySta
   const { t } = useTranslation("settings")
   if (state === "unknown") return null
   if (state === "testing") {
-    const text = t("apiKeys.card.baseUrlTesting", { url: url || t("apiKeys.card.baseUrlFallback") })
     return (
-      <span
-        className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-        title={text}
-        aria-label={text}
-        data-base-url-status="testing"
+      <ReachabilityStatusIcon
+        text={t("apiKeys.card.baseUrlTesting", { url: url || t("apiKeys.card.baseUrlFallback") })}
+        tone="muted"
+        dataAttrs={{ "data-base-url-status": "testing" }}
       >
         <Loader2 className="size-3.5 animate-spin" />
-      </span>
+      </ReachabilityStatusIcon>
     )
   }
   if (state === "connected") {
-    const text = t("apiKeys.card.baseUrlConnected", { url })
     return (
-      <span
-        className="inline-flex size-4 shrink-0 items-center justify-center text-success"
-        title={text}
-        aria-label={text}
-        data-base-url-status="connected"
+      <ReachabilityStatusIcon
+        text={t("apiKeys.card.baseUrlConnected", { url })}
+        tone="success"
+        dataAttrs={{ "data-base-url-status": "connected" }}
       >
         <CheckCircle2 className="size-3.5" />
-      </span>
+      </ReachabilityStatusIcon>
     )
   }
-  const failedText = t("apiKeys.card.baseUrlFailed", { url })
   return (
-    <span
-      className="inline-flex size-4 shrink-0 items-center justify-center text-destructive"
-      title={failedText}
-      aria-label={failedText}
-      data-base-url-status="failed"
+    <ReachabilityStatusIcon
+      text={t("apiKeys.card.baseUrlFailed", { url })}
+      tone="destructive"
+      dataAttrs={{ "data-base-url-status": "failed" }}
     >
       <XCircle className="size-3.5" />
-    </span>
+    </ReachabilityStatusIcon>
   )
 }
 

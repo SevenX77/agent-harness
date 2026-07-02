@@ -118,7 +118,7 @@ function GoldenBaselineRow({
         onClick={() => setOpen((value) => !value)}
         className="flex w-full items-center gap-2 px-2 py-1 text-left"
         aria-expanded={open}
-        title={baseline.content_path}
+        aria-label={baseline.content_path}
       >
         {open ? (
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
@@ -204,7 +204,7 @@ export function GoldenCaseEditor({
   return (
     <div className="rounded-md border border-border bg-card px-2 py-1.5">
       <div className="flex items-center gap-1.5 text-xs text-foreground">
-        <ShieldCheck className="size-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <ShieldCheck className="size-3 shrink-0 text-success" />
         <span className="truncate">{goldenCase.node_id}</span>
       </div>
       <Textarea
@@ -288,7 +288,7 @@ function GoldenTemplateRow({
     <div className="rounded-md border border-border bg-card px-2 py-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-foreground">
-          <ShieldHalf className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+          <ShieldHalf className="size-3 shrink-0 text-warning" />
           {nodeId}
         </span>
         {draft === null ? (

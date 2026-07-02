@@ -5,6 +5,7 @@ import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
 import type { JsonObject, TestInputMetadata } from "@/api/types"
 import { useBatchRun } from "@/hooks/useBatchRun"
 import { errorMessage, isJsonObject } from "@/utils/errors"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { SectionHeading } from "./_shared/SectionHeading"
 
 type PrepareResult =
@@ -198,18 +199,22 @@ export function TestInputsSection({
                   aria-label={`Select test input ${item.id} for batch`}
                   className="size-3.5 shrink-0 rounded border-border"
                 />
-                <button
-                  type="button"
-                  // F4: select this input as the Predict/Run payload (toggle off
-                  // to fall back to empty).
-                  onClick={() => onSelect?.(isSelected ? null : item.id)}
-                  aria-pressed={isSelected}
-                  aria-label={`Select test input ${item.id}`}
-                  title={item.content_preview}
-                  className="min-w-0 flex-1 truncate text-left text-xs text-foreground"
-                >
-                  {item.name}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      // F4: select this input as the Predict/Run payload (toggle off
+                      // to fall back to empty).
+                      onClick={() => onSelect?.(isSelected ? null : item.id)}
+                      aria-pressed={isSelected}
+                      aria-label={`Select test input ${item.id}`}
+                      className="min-w-0 flex-1 truncate text-left text-xs text-foreground"
+                    >
+                      {item.name}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{item.content_preview}</TooltipContent>
+                </Tooltip>
                 <button
                   type="button"
                   onClick={() => void handleDelete(item.id)}

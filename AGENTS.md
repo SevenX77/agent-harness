@@ -34,11 +34,11 @@ way and nothing drifts onto stray branches/worktrees.
 1. **Start** — `scripts/wt-new.sh <type>/<short-desc>` cuts a fresh worktree +
    branch from `origin/main` under `.worktrees/<type>-<desc>/` (first tidying any
    already-merged worktrees). It also kicks off `npm ci` for
-   `apps/studio/frontend` **in the background** (skip: `WT_SKIP_NPM=1`) — npm
-   only writes into `node_modules/`, so start coding immediately; only
-   dev/lint/test need it finished.
+   `apps/studio/frontend` AND `uv sync` for the Python workspace **in the
+   background** (skip: `WT_SKIP_NPM=1` / `WT_SKIP_UV=1`) — neither touches
+   src, so start coding immediately; only dev/lint/test need them finished.
 2. **Code** — work inside that worktree; run the CI Gates locally before shipping.
-   Frontend preview: `scripts/wt-fe-dev.sh` (see "Studio Frontend UI" below).
+   Preview: `scripts/wt-dev.sh` (see "Studio Feature Development" below).
 3. **Ship** — `scripts/wt-ship.sh ["PR title"]` pushes the branch, opens a PR to
    `main`, and arms GitHub **auto-merge** (squash).
 4. **CI + merge** — CI runs on the PR. When the 5 required checks pass
@@ -76,6 +76,34 @@ before you push or you WILL turn `main` red:
   pinned versions accrue new upstream CVEs over time — bump within constraints
   when flagged).
 
+## Development Principles (pre-release: first principles, no backward compat)
+
+These rank ABOVE convenience and speed. Violating them is a review-blocking
+defect even when all tests pass.
+
+- **No backward compatibility — nothing is released, no external users exist.**
+  Any spec / schema / API / file format may be changed outright, and ALL
+  persisted data is disposable. Never write migration shims, legacy aliases,
+  deprecated-but-kept fields, dual-format readers, or version-sniffing
+  branches — replace the old design and DELETE the old path in the same
+  change. If existing on-disk data doesn't fit the new shape, the fix is
+  "regenerate / drop the data", not "support both shapes".
+- **First-principles fixes, not patches.** Dig to the layer where the broken
+  logic actually lives and redesign it there. Symptom patches — special-casing
+  one caller, try/except-ing a bad state into silence, post-hoc fixups of
+  wrong data, copy-pasting a workaround — are rejected even when they make the
+  test green. Ask "why can this state exist at all?" before "how do I make
+  the error go away?".
+- **Module boundaries say WHERE a fix lands — they are never a reason to put
+  it somewhere worse.** If root-cause analysis shows the correct change is
+  inside `packages/graph-agent` (engine) or `packages/graph-agent-gateway`
+  (gateway), make it THERE — aligned to that module's MVP1 design, with its
+  tests and strict gates — instead of contorting the studio layer to avoid
+  touching the SDKs. A studio-layer workaround built to dodge an engine/gateway
+  change is itself a defect. What stays forbidden is the reverse: leaking
+  studio-specific concerns INTO the SDKs, or bypassing the adapters out of
+  convenience.
+
 ## Three-Module Architecture (division of labor)
 
 Two pure-SDK libraries + a desktop shell. Respect the boundaries; the
@@ -98,9 +126,13 @@ one-page orientation, not the full design.
 - **Single source of truth (底座一)**: config truth (credentials / roles /
   settings) lives in exactly ONE place; never side-cache changing config truth.
   Writes flow frontend → FastAPI → gateway truth.
-- **KEEP-MAIN**: treat `packages/graph-agent` and `packages/graph-agent-gateway`
-  as frozen unless the change is explicitly scoped to the engine/gateway —
-  studio-layer work must go through the adapters, not by editing the SDKs.
+- **Boundaries, not locks**: engine and gateway are stable foundations with
+  strict gates (`mypy --strict` + full module test suites), NOT no-go zones.
+  Routine studio plumbing flows through the adapters (`app/core/adapters/`);
+  but when first-principles analysis says the correct fix or extension lives
+  in the engine/gateway, change the SDK itself — never bolt a studio-layer
+  workaround on top to avoid it (see "Development Principles"). The reverse
+  stays forbidden: no studio-specific concerns inside the SDKs.
 
 ## Standard Documents
 
@@ -138,10 +170,11 @@ one-page orientation, not the full design.
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).
-- **Frontend handoff prompt (template, single source)**:
+- **Feature handoff prompt (template, single source)**:
   `docs/development/FRONTEND_HANDOFF_PROMPT.md` — the canonical copy-paste brief
-  for handing an `apps/studio/frontend` UI task to an agent (必读清单 + 边界纪律 +
-  收尾回写手册/状态点)。Rule changes update this file via PR, not chat.
+  for handing a Studio feature task (frontend-driven, full-stack) to an agent
+  (必读清单 + 开发原则 + 边界纪律 + 收尾回写手册/状态点)。Rule changes update
+  this file via PR, not chat.
 - **Handbook authoring methodology**: `docs/studio/mvp1/handbook-methodology/` —
   `frontend-page-authoring-methodology.md` (内容/页面骨架/写作规则/一色一义) +
   `handbook-operations-schema-lifecycle.md` (怎么看/怎么改/何时改跟代码 reconcile/
@@ -152,15 +185,21 @@ one-page orientation, not the full design.
   — NOT committed, exists only on the authoring machine. Follow the committed N6
   handbook above instead.
 
-## Studio Frontend UI
+## Studio Feature Development
 
-- **Load the frontend SOP FIRST.** Before planning or touching
-  `apps/studio/frontend`, read `apps/studio/frontend/CLAUDE.md` — a
-  directory-scoped override that replaces the global heavy multi-agent PM
-  workflow with a lightweight single-agent loop for frontend work. Claude Code
-  only auto-loads that nested file *lazily* (once you read a file in that
-  subtree), so a session starting at the repo root won't have it until then —
-  read it explicitly at the start of any frontend task.
+Feature work is frontend-DRIVEN but full-stack: a UI-facing feature routinely
+reaches into `apps/studio/backend`, and — when the correct design demands it —
+into the engine/gateway SDKs (see "Development Principles"). Do not split a
+coherent feature into a "frontend part now, backend part someday" pair, and do
+not water a feature down to keep it frontend-only.
+
+- **Load the feature SOP FIRST.** Before planning or touching Studio feature
+  code, read `apps/studio/frontend/CLAUDE.md` — the single-agent SOP for
+  frontend-driven full-stack feature work (it replaces the heavy multi-agent
+  PM workflow). Claude Code only auto-loads that nested file *lazily* (once
+  you read a file in that subtree), so a session starting at the repo root
+  won't have it until then — read it explicitly at the start of any Studio
+  feature task.
 - Before planning, reviewing, or changing `apps/studio/frontend` UI, read
   `docs/development/FRONTEND_UI_SPEC.md`, especially section 2. Treat it as the
   source of truth for Studio frontend layout, interaction, and verification rules.
@@ -183,15 +222,21 @@ one-page orientation, not the full design.
   interactive workflow, including the main success path and obvious cancel/error
   states when feasible, and report that manual verification; tests and builds
   alone are not enough.
-- **Parallel frontend tasks: one worktree per task, preview via
-  `scripts/wt-fe-dev.sh`.** The repo root runs the ONE full app
-  (`studio-dev.ps1`: Tauri + sidecar :8787 + Vite 5173, showing `main`'s code).
-  Each worktree starts its own lightweight Vite (auto-picks a free port in
-  5174-5199, proxies `/api`/`/ws` to that shared sidecar; requests stay
-  same-origin via `VITE_STUDIO_API_BASE_URL=/api`, so no CORS setup needed).
+- **Parallel tasks: one worktree per task, preview via `scripts/wt-dev.sh`.**
+  The repo root runs the ONE full app (`studio-dev.ps1`: Tauri + sidecar
+  :8787 + Vite 5173, showing `main`'s code). Each worktree starts its own
+  lightweight Vite (auto-picks a free port in 5174-5199; requests stay
+  same-origin via `VITE_STUDIO_API_BASE_URL=/api`, so no CORS setup needed):
+  - **Frontend-only change** → `scripts/wt-dev.sh` proxies `/api`/`/ws` to the
+    shared main sidecar (:8787).
+  - **Task touches backend/engine/gateway** → `scripts/wt-dev.sh --backend`
+    additionally starts a PRIVATE sidecar from THIS worktree's Python code
+    (free port in 8788-8799, fresh `STUDIO_API_TOKEN` printed for `#tkn=`),
+    so backend changes are verified against your own tree — never "verified"
+    against `main`'s backend by accident.
   Verify YOUR changes on YOUR port (`http://localhost:<port>/#tkn=<token>`),
-  never on 5173. Do not start a second Tauri/sidecar from a worktree. Shared
-  files (design tokens, `components/ui/`, regenerated handbook `index.html`)
+  never on 5173. Do not start a second Tauri from a worktree. Shared files
+  (design tokens, `components/ui/`, regenerated handbook `index.html`)
   conflict across parallel PRs — sequence those changes or assign one owner.
 
 ## Studio Tauri Dev

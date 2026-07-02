@@ -77,6 +77,27 @@ Phase 类型由物理文件名决定：
 
 每个节点自己的 `io.inputs` 声明从黑板读取哪些字段，`io.outputs` 声明允许写回哪些字段。父图和子图 IO 不需要字段全集一一相等。
 
+节点 `io.inputs` 的字段可带 `source: 'file'` + `path`：该字段不来自黑板，而是运行到本节点时从文件惰性注入、**追加**为黑板字段（黑板是主源，文件只是追加——PM 2026-07-02 r3）。
+
+### 3.4.1 artifacts 清单（GRAPH.md io 落盘声明）
+
+GRAPH.md 的 `io` 下可声明 `artifacts:` 清单——要落盘哪些文件、每个文件装黑板的哪些字段：
+
+```yaml
+io:
+  inputs: {…}
+  outputs: {…}
+  artifacts:
+    - stem: story_framework
+      mode: single            # single | per-item
+      fields: [story_framework, unified_event_stream]
+    - stem: abc_segmentation
+      mode: per-item          # iterate 每轮一个编号文件
+      fields: [segmentation_result]
+```
+
+一个文件可装多个字段、一个字段可进多个文件（G3「一 schema 多文件 / 多 schema 多文件」的成型态）。落盘命名固定格式（`<stem>_latest_<ts>` + `history/` + per-item 编号继承输入批量），见 physical-layout §2.2.2。**per-field `target:'artifact'` 与 `artifact_manager` 别名不是规范字段**——由本清单整体替换，不留兼容。
+
 ### 3.5 Iterate 只认 iterate
 
 循环声明统一写 `iterate`，其标准字段见 skill-spec。

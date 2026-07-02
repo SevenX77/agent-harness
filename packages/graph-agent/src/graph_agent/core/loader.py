@@ -273,6 +273,9 @@ class SkillLoader:
             "io": {
                 "inputs": io_inputs,
                 "outputs": io_outputs,
+                "artifacts": [spec.model_dump() for spec in manifest.io.artifacts]
+                if manifest.io.artifacts
+                else None,
                 "output_schema_keys": sorted(output_schema_keys)
                 if output_schema_keys is not None
                 else None,
@@ -2165,6 +2168,16 @@ def _validate_phase_io_schemas(path: Path, mode: str, ast: PhaseAST) -> None:
     io = getattr(ast, "io", None)
     if io is None:
         return
+    if getattr(io, "artifacts", None):
+        raise SkillLoadError(
+            f"{path}: io.artifacts is a graph-boundary declaration and only "
+            "valid on GRAPH.md, not on phase files",
+            payload=make_error_payload(
+                f"[F-v3-{mode}-io-schema-invalid]",
+                "io.artifacts declared on a phase file; move it to GRAPH.md io",
+                source_path=f"{path}:{_frontmatter_key_line(path, 'io')}",
+            ),
+        )
     _validate_inline_io_schema(path, io.inputs, "input", domain=mode)
     _validate_inline_io_schema(path, io.outputs, "output", domain=mode)
 

@@ -81,13 +81,7 @@ validator: false
 def _write_artifact_logic_skill(root: Path) -> None:
     graph_inputs = _schema_yaml({"body": {"type": "string"}}, required=["body"])
     graph_outputs = _schema_yaml(
-        {
-            "report_md": {
-                "type": "string",
-                "target": "artifact",
-                "path": "report.md",
-            }
-        },
+        {"report_md": {"type": "string"}},
         required=["report_md"],
     )
     phase_inputs = _schema_yaml({"body": {"type": "string"}}, required=["body"])
@@ -102,6 +96,11 @@ io:
     {graph_inputs}
   outputs:
     {graph_outputs}
+  artifacts:
+    - stem: report
+      mode: single
+      format: md
+      fields: [report_md]
 phases:
   - report
 ---
@@ -149,7 +148,7 @@ def test_real_run_imports_workspace_file_into_phase_input(
     assert result.context["report_md"] == "## Runtime IO\n\nImported body."
 
 
-def test_real_run_declared_artifact_target_writes_run_artifact(
+def test_real_run_manifest_artifact_writes_fixed_format_file(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
@@ -166,6 +165,8 @@ def test_real_run_declared_artifact_target_writes_run_artifact(
         body="## Artifact\n\nEngine-owned output.",
     )
 
-    artifact_path = workspace_dir / "runs" / run_id / "artifacts" / "report.md"
     assert result.success is True
-    assert artifact_path.read_text(encoding="utf-8") == "## Artifact\n\nEngine-owned output."
+    artifacts_dir = workspace_dir / "runs" / run_id / "artifacts"
+    latest = sorted(artifacts_dir.glob("report_latest_*.md"))
+    assert len(latest) == 1, list(artifacts_dir.iterdir())
+    assert latest[0].read_text(encoding="utf-8") == "## Artifact\n\nEngine-owned output."

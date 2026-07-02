@@ -8,16 +8,15 @@ Supported input sources:
 - ``file``     — loaded from a file path
 
 Supported output targets:
-- ``artifact_manager`` — saved via caller-injected artifact_saver callback
-- ``file``             — written to a specified path
+- ``file`` — written to a specified path. (Artifact persistence is declared
+  via the GRAPH.md ``io.artifacts`` manifest — see
+  ``graph_agent.io.artifact_manifest`` — not per-field targets.)
 """
 
 from __future__ import annotations
 
-import inspect
 import json
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +29,7 @@ class IOManager:
     The constructor receives the raw ``io`` mapping from SKILL.md frontmatter
     and splits it into cached input/output specifications.
 
-    ``IOManager`` intentionally stays storage-agnostic. When an output targets
-    ``artifact_manager``, the actual persistence is delegated to a caller-
-    injected ``artifact_saver`` callback instead of importing host-project code.
+    ``IOManager`` intentionally stays storage-agnostic.
     """
 
     def __init__(self, io_config: dict[str, Any]) -> None:
@@ -110,25 +107,12 @@ class IOManager:
         context: dict[str, Any],
         *,
         output_dir: str | Path | None = None,
-        project_id: str | None = None,
-        artifact_saver: Callable[..., Any] | None = None,
-        storage_manager: Any | None = None,
     ) -> list[str]:
         """Save output data based on declared output targets.
 
         Args:
             context: The final workflow context containing output data.
             output_dir: Base directory for file outputs.
-            project_id: Project identifier for artifact_manager outputs.
-            artifact_saver: Optional callback injected by the caller to persist
-                ``artifact_manager`` outputs outside the framework layer.
-                This keeps graph_agent portable across projects that use
-                different artifact registries or file management abstractions.
-            storage_manager: Optional ``StorageManager`` instance used as a
-                *default* saver when ``artifact_saver`` is not provided. The
-                caller-supplied ``artifact_saver`` still wins if both are set,
-                preserving the Kitchen-Pass red line (host projects keep full
-                control over persistence).
 
         Returns:
             List of saved file paths.
@@ -155,44 +139,7 @@ class IOManager:
                 self._record_io_error(legacy_message)
                 raise ValueError(message)
 
-            # Cohesion plan 方针 1.5 (2026-04-26): the schema's canonical
-            # value is "artifact" (IoOutput.target: Literal["file", "artifact"]).
-            # The legacy "artifact_manager" wording is kept as an in-process
-            # alias so older io_config dicts and the docstring above keep
-            # working — but new SKILL.md files write "artifact".
-            if target in ("artifact", "artifact_manager"):
-                if artifact_saver is None and storage_manager is not None:
-                    # Kitchen-Pass default: no caller-supplied saver, so fall
-                    # back to the framework's built-in StorageManager.
-                    phase = context.get("current_phase") or context.get("phase")
-                    artifact_name = self._resolve_artifact_name(output_spec, context, name)
-                    path = storage_manager.save_artifact(artifact_name, data, phase=phase)
-                    saved_paths.append(str(path))
-                    logger.info(
-                        "[IOManager] Output '%s' saved via StorageManager fallback: %s",
-                        name,
-                        path,
-                    )
-                elif artifact_saver is None and output_dir is not None:
-                    file_path = self._resolve_output_file_path(
-                        output_spec,
-                        context,
-                        output_dir=output_dir,
-                        default_name=name,
-                        default_suffix="",
-                    )
-                    self._save_file(file_path, data)
-                    saved_paths.append(str(file_path))
-                else:
-                    paths = self._save_via_artifact_saver(
-                        name,
-                        data,
-                        artifact_saver=artifact_saver,
-                        project_id=project_id,
-                    )
-                    saved_paths.extend(paths)
-
-            elif target == "file":
+            if target == "file":
                 if not output_spec.get("path") and not output_spec.get("filename") and not output_dir:
                     raise ValueError(
                         f"Output '{name}' has target='file' but no path could be determined"
@@ -210,7 +157,8 @@ class IOManager:
             else:
                 raise ValueError(
                     f"Unknown output target '{target}' for output '{name}'. "
-                    f"Supported: file, artifact (legacy alias: artifact_manager)"
+                    f"Supported: file. Artifact persistence is declared via the "
+                    f"GRAPH.md io.artifacts manifest, not per-field targets."
                 )
 
         return saved_paths
@@ -232,18 +180,6 @@ class IOManager:
         ):
             return context.get("business_data_md")
         return context.get(name)
-
-    @staticmethod
-    def _resolve_artifact_name(
-        output_spec: dict[str, Any],
-        context: dict[str, Any],
-        name: str,
-    ) -> str:
-        declared = output_spec.get("path") or output_spec.get("filename") or name
-        resolved = IOManager._resolve_path_template(str(declared), context)
-        if not resolved:
-            raise ValueError(f"Output '{name}' resolved to an empty artifact path")
-        return resolved
 
     @staticmethod
     def _resolve_output_file_path(
@@ -328,64 +264,6 @@ class IOManager:
             path.write_text(str(data), encoding="utf-8")
 
         logger.info("[IOManager] Saved output to %s", path)
-
-    def _save_via_artifact_saver(
-        self,
-        name: str,
-        data: Any,
-        *,
-        artifact_saver: Callable[..., Any] | None,
-        project_id: str | None = None,
-    ) -> list[str]:
-        """Save data via caller-injected artifact callback."""
-        if artifact_saver is None:
-            self._record_io_error(f"Artifact target output '{name}' has no saver")
-            raise ValueError(
-                f"Artifact target output '{name}' has no saver; if this output "
-                "is optional, mark it so in IoOutput schema"
-            )
-
-        try:
-            sig = inspect.signature(artifact_saver)
-            accepts_project_id = "project_id" in sig.parameters or any(
-                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-            )
-            if accepts_project_id and project_id is not None:
-                raw_result = artifact_saver(name, data, project_id=project_id)
-            else:
-                raw_result = artifact_saver(name, data)
-            paths = IOManager._normalize_saved_paths(raw_result)
-            logger.info(
-                "[IOManager] Saved '%s' via artifact_saver: %s",
-                name,
-                paths,
-            )
-            return paths
-        except Exception as exc:
-            self._record_io_error(f"artifact_saver failed for '{name}': {exc}")
-            raise
-
-    @staticmethod
-    def _normalize_saved_paths(result: Any) -> list[str]:
-        """Normalize artifact_saver return values to list[str]."""
-        if result is None:
-            return []
-        if isinstance(result, Path):
-            return [str(result)]
-        if isinstance(result, str):
-            return [result]
-        if isinstance(result, (list, tuple)):
-            normalized: list[str] = []
-            for item in result:
-                if isinstance(item, Path):
-                    normalized.append(str(item))
-                elif isinstance(item, str):
-                    normalized.append(item)
-                else:
-                    normalized.append(str(item))
-            return normalized
-        return [str(result)]
-
     def _record_io_error(self, message: str) -> None:
         """Append ``message`` to the instance-level io_errors accumulator.
 

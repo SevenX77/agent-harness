@@ -155,11 +155,11 @@ def test_translate_tool_use_start_event() -> None:
 
 
 def test_translate_renders_search_tools_instead_of_fake_failures() -> None:
-    """Glob/Grep 由权限层放行并真实执行;翻译器再报「V1 不支持工具」= 执行成功
-    UI 报失败的三处口径不一致(实测过的假失败主因),必须渲染而不是报错。"""
-    tool_names: dict[str, str] = {}
+    """Glob/Grep 由权限层放行并真实执行;翻译器若报「不支持工具」= 执行成功
+    UI 报失败的口径不一致(实测过的假失败主因),必须按真名转写而不是报错。"""
+    translator = copilot.SdkMessageTranslator()
 
-    events = copilot._translate_sdk_message(
+    events = translator.translate(
         AssistantMessage(
             content=[
                 ToolUseBlock(id="tool-g", name="Glob", input={"pattern": "**/*.md"}),
@@ -167,27 +167,26 @@ def test_translate_renders_search_tools_instead_of_fake_failures() -> None:
             ],
             model="claude",
         ),
-        tool_names,
     )
 
     assert events == [
         CopilotEventToolUseStart(tool_name="Glob", tool_input={"pattern": "**/*.md"}),
         CopilotEventToolUseStart(tool_name="Grep", tool_input={"pattern": "phase"}),
     ]
-    assert tool_names == {"tool-g": "Glob", "tool-r": "Grep"}
+    assert translator.tool_names == {"tool-g": "Glob", "tool-r": "Grep"}
 
 
 def test_translate_renders_studio_mcp_tools() -> None:
-    tool_names: dict[str, str] = {}
+    # studio MCP 工具(mcp__studio__<tool>)与其他工具一样按真名转写。
+    translator = copilot.SdkMessageTranslator()
 
-    events = copilot._translate_sdk_message(
+    events = translator.translate(
         AssistantMessage(
             content=[
                 ToolUseBlock(id="tool-m", name="mcp__studio__compile_skill", input={"skill_id": "s"})
             ],
             model="claude",
         ),
-        tool_names,
     )
 
     assert events == [

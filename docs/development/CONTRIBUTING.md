@@ -1,48 +1,34 @@
 ---
 status: Living
-target_goal: "定义向本仓库贡献代码的基础准则、起步命令及测试规范"
-linked_code_paths:
-  - apps/studio/frontend/package.json
-  - Makefile
+target_goal: "贡献流程入口指路——唯一真相源是根目录 AGENTS.md,本文件不复述其内容"
+linked_code_paths: []
 linked_specs: []
-last_updated: 2026-05-19
+last_updated: 2026-07-02
 ---
 
 # 贡献指南 (Contributing Guide)
 
-## 1. 环境准备与包管理
-我们使用 `uv` 维护统一的 Python Monorepo 依赖，使用 `npm` 管理前端。
-```bash
-# 全局安装 uv (如已安装则跳过)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+本仓库的贡献流程只有一份真相源:**根目录 [`AGENTS.md`](../../AGENTS.md)**。
+本文件不重复它的内容(重复 = 双份真相,必然漂移),只做入口指路:
 
-# 在根目录同步并生成虚拟环境
-uv sync
-```
-
-## 2. 研发端启动命令
-对于二次开发者，你通常需要拉起全栈的 Studio：
-```bash
-# 启动前端 (包含热重载)
-cd apps/studio/frontend
-npm install
-npm run dev
-
-# 启动伴生后端服务
-cd apps/studio/backend
-uv run uvicorn app.main:app --reload --port 8000
-```
-> **注意**: 生产环境会由 Tauri 自动把打包好的后端编译成可执行文件拉起。开发期你需要分别在两个 Terminal 跑。
-
-## 3. Git 流与提交规范
-- 所有开发请在新分支进行，命名采用 `<type>/<issue-id>-<brief>` (例 `feat/123-add-nudge-trace`)。
-- 提交前请确保运行通过 `uv run ruff check .` 和前端的 `npm run lint`。
-- Commit message 遵循 Conventional Commits (`feat(engine): ...`)。
-
-## 4. 远程 GUI 测试最佳实践
-在跑包含 Tauri 界面 E2E (如 Playwright) 的自动化测试时，针对无头服务器环境：
-1. 确保系统安装了 `xvfb`。
-2. 使用包裹命令运行，例如：`xvfb-run npm run playwright` 以模拟虚假的 X11 屏幕缓冲，防止崩溃。
-
-## 相关 Spec
-本指南无直接的 Active 施工单，请在遵守以上契约的前提下随意发起 PR 完善基建。
+- **环境与依赖** → AGENTS.md「Baseline & Working Environment」:Python 是单一 uv
+  workspace(`uv sync --all-packages --all-extras --group dev`,单一根 `uv.lock`),
+  前端用 npm。
+- **启动 app** → AGENTS.md「Studio Tauri Dev」:从仓库根跑
+  `scripts/studio-dev.ps1`(Windows)/ `scripts/studio-dev.sh`(macOS/Linux),
+  launcher 统一拉起 Tauri + Vite + FastAPI sidecar 并钉住 sidecar 端口。
+  **不要**手动分别起 Vite 和 uvicorn,也不要绕过 launcher 直接 `cargo tauri dev`。
+- **分支、PR 与合并** → AGENTS.md「Workflow Pipeline」:一任务一 worktree
+  (`scripts/wt-new.sh <type>/<short-desc>` 从 `origin/main` 切),`main` 是
+  protected、PR-only;`scripts/wt-ship.sh` 推分支 + 开 PR + auto-merge,合并后
+  `scripts/wt-clean.sh` 清理。Commit message 遵循 Conventional
+  Commits(`feat(engine): ...`)。
+- **推送前门禁** → AGENTS.md「CI Gates」:ruff / mypy(SDK 用 `--strict`)/
+  pytest×3 / 前端 lint+typecheck+test+build / pip-audit,**全部**本地跑绿再推。
+- **Studio 功能开发**(前端驱动、允许全栈)→ 先读
+  [`apps/studio/frontend/CLAUDE.md`](../../apps/studio/frontend/CLAUDE.md)
+  (单 agent 功能 SOP);交接模板见
+  [`FRONTEND_HANDOFF_PROMPT.md`](FRONTEND_HANDOFF_PROMPT.md)。
+- **跑 app / worktree 预览 / 无头验证与截图** →
+  [`RUN_AND_SCREENSHOT.md`](RUN_AND_SCREENSHOT.md)。
+- **跨平台与编码铁律** → [`CROSS_PLATFORM.md`](CROSS_PLATFORM.md)。

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CompareCandidateRun, RunMetadata } from '@/api/types'
-import { candidatesFromRoleNames, compareTabsFromGroup } from './run-compare'
+import { compareTabsFromGroup } from './run-compare'
 
 function metadata(runId: string, status: RunMetadata['status']): RunMetadata {
   return {
@@ -12,46 +12,31 @@ function metadata(runId: string, status: RunMetadata['status']): RunMetadata {
   }
 }
 
-function candidateRun(candidateId: string, roleName: string, status: RunMetadata['status'], runId: string): CompareCandidateRun {
-  return { candidate_id: candidateId, role_name: roleName, metadata: metadata(runId, status) }
+function candidateRun(
+  candidateId: string,
+  label: string,
+  status: RunMetadata['status'],
+  runId: string,
+): CompareCandidateRun {
+  return { candidate_id: candidateId, label, metadata: metadata(runId, status) }
 }
 
-describe('candidatesFromRoleNames (n4-trace#23 request shape)', () => {
-  it('maps each role name to a candidate keyed by the role name', () => {
-    expect(candidatesFromRoleNames(['writer', 'editor'])).toEqual([
-      { candidate_id: 'writer', role_name: 'writer' },
-      { candidate_id: 'editor', role_name: 'editor' },
-    ])
-  })
-
-  it('drops blank and duplicate role names so the request never carries an empty/repeated candidate', () => {
-    expect(candidatesFromRoleNames([' writer ', 'writer', '', '   ', 'editor'])).toEqual([
-      { candidate_id: 'writer', role_name: 'writer' },
-      { candidate_id: 'editor', role_name: 'editor' },
-    ])
-  })
-
-  it('returns an empty list for no usable names', () => {
-    expect(candidatesFromRoleNames(['', '  '])).toEqual([])
-  })
-})
-
 describe('compareTabsFromGroup (per-candidate Trace tabs)', () => {
-  it('projects each candidate run into a tab with its run id and status flags', () => {
+  it('projects each candidate side-run into a tab with its label, run id and status flags', () => {
     const tabs = compareTabsFromGroup([
-      candidateRun('writer', 'writer', 'success', 'run-w'),
-      candidateRun('editor', 'editor', 'failed', 'run-e'),
-      candidateRun('critic', 'critic', 'running', 'run-c'),
+      candidateRun('fast', 'deepseek-v4', 'success', 'run-f'),
+      candidateRun('slow', 'claude-opus', 'failed', 'run-s'),
+      candidateRun('mid', 'gpt-x', 'running', 'run-m'),
     ])
     expect(tabs).toEqual([
-      { candidateId: 'writer', roleName: 'writer', runId: 'run-w', failed: false, running: false },
-      { candidateId: 'editor', roleName: 'editor', runId: 'run-e', failed: true, running: false },
-      { candidateId: 'critic', roleName: 'critic', runId: 'run-c', failed: false, running: true },
+      { candidateId: 'fast', label: 'deepseek-v4', runId: 'run-f', failed: false, running: false },
+      { candidateId: 'slow', label: 'claude-opus', runId: 'run-s', failed: true, running: false },
+      { candidateId: 'mid', label: 'gpt-x', runId: 'run-m', failed: false, running: true },
     ])
   })
 
   it('reads per-candidate failure straight from metadata.status', () => {
-    const [tab] = compareTabsFromGroup([candidateRun('editor', 'editor', 'failed', 'run-e')])
+    const [tab] = compareTabsFromGroup([candidateRun('slow', 'claude-opus', 'failed', 'run-s')])
     expect(tab.failed).toBe(true)
   })
 })

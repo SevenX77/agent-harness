@@ -170,7 +170,7 @@ export function TracePanel({
             type="button"
             role="tab"
             aria-selected={isActive}
-            aria-label={`Candidate ${tab.roleName}${tab.failed ? ' (failed)' : ''}`}
+            aria-label={`Candidate ${tab.label}${tab.failed ? ' (failed)' : ''}`}
             onClick={() => onSelectCandidate?.(tab.candidateId)}
             className={[
               'flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs font-semibold transition-colors',
@@ -184,7 +184,7 @@ export function TracePanel({
             {tab.running ? (
               <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-primary" />
             ) : null}
-            <span className="max-w-[140px] truncate">{tab.roleName}</span>
+            <span className="max-w-[140px] truncate">{tab.label}</span>
           </button>
         )
       })}

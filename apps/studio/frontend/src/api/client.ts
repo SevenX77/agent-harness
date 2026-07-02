@@ -4,8 +4,11 @@ import type {
   AppSettings,
   ChildGraphTopology,
   CollaborateResult,
+  CompareCandidate,
+  CompareCandidatesMap,
   CompareRunGroupResponse,
   CompareRunResponse,
+  NodeCompareCandidates,
   CompileFailure,
   CompileResult,
   CompileSuccess,
@@ -19,7 +22,6 @@ import type {
   PublishResult,
   PublishSkillReq,
   ReleaseManifest,
-  RunCandidate,
   RunDetail,
   RunMetadata,
   ResumeValidityResponse,
@@ -710,30 +712,52 @@ export async function getRunDetail(skillId: string, runId: string): Promise<RunD
 }
 
 /**
- * n4-trace#23 (P8 model-compare): start one run per candidate against the same
- * compiled artifact/inputs. Each `candidates[]` entry references a role that
- * already exists in Settings (llm_roles.yaml); the backend fans the run out,
- * tags each spawned run with a shared `compare_group_id` + the candidate id, and
- * returns the group so the Trace can tab between per-model results. Drives the
- * real `POST /skills/{id}/runs/compare` → CompareRunResponse contract.
+ * PR2 node-level Compare LLMs: read every node's persisted compare candidates for
+ * a skill. GET `/skills/{id}/compare-candidates` → CompareCandidatesMap.
  */
-export async function startCompareRun(
-  skillId: string,
-  inputData: JsonObject,
-  candidates: RunCandidate[],
-): Promise<CompareRunResponse> {
-  const response = await api.post<CompareRunResponse>(`/skills/${skillId}/runs/compare`, {
-    input_data: inputData,
-    candidates,
-  })
+export async function getCompareCandidates(skillId: string): Promise<CompareCandidatesMap> {
+  const response = await api.get<CompareCandidatesMap>(`/skills/${skillId}/compare-candidates`)
   return response.data
 }
 
 /**
- * n4-trace#23: fetch the per-candidate runs for one compare group so the Trace
- * top tabs can render one tab per candidate (per-candidate failure read from
- * each run's `metadata.status`). Reads the real
- * `GET /skills/{id}/runs/compare/{compare_group_id}` → CompareRunGroupResponse.
+ * PR2: replace one node's compare candidates (an empty list clears the node).
+ * PUT `/skills/{id}/nodes/{node_id}/compare-candidates` → NodeCompareCandidates.
+ */
+export async function putNodeCompareCandidates(
+  skillId: string,
+  nodeId: string,
+  candidates: CompareCandidate[],
+): Promise<NodeCompareCandidates> {
+  const response = await api.put<NodeCompareCandidates>(
+    `/skills/${skillId}/nodes/${encodeURIComponent(nodeId)}/compare-candidates`,
+    { candidates },
+  )
+  return response.data
+}
+
+/**
+ * PR2: launch isolated single-node side-runs for a node's persisted candidates,
+ * off a completed base run. Each side-run feeds the node the base run's exact
+ * input and swaps only the model. POST `/skills/{id}/runs/{base_run_id}/compare`
+ * → CompareRunResponse (poll via getCompareGroup).
+ */
+export async function startNodeCompareRun(
+  skillId: string,
+  baseRunId: string,
+  nodeId: string,
+): Promise<CompareRunResponse> {
+  const response = await api.post<CompareRunResponse>(
+    `/skills/${skillId}/runs/${encodeURIComponent(baseRunId)}/compare`,
+    { node_id: nodeId },
+  )
+  return response.data
+}
+
+/**
+ * PR2: fetch the per-candidate side-runs for one compare group so the Trace top
+ * tabs can render one tab per candidate (per-candidate failure read from each
+ * run's `metadata.status`). GET `/skills/{id}/runs/compare/{compare_group_id}`.
  */
 export async function getCompareGroup(
   skillId: string,

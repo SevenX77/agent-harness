@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import useSWR from "swr"
 import { AxiosError } from "axios"
-import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -332,6 +332,8 @@ interface PropertiesPanelProps {
   onOpenSettings?: (tab?: SettingsTab) => void
   /** Deselect the node so the panel shows the graph (GRAPH.md) properties. */
   onSelectGraph?: () => void
+  /** Launch this node's Compare LLMs off the current base run. */
+  onStartNodeCompare?: (nodeId: string) => void
 }
 
 export function PropertiesPanel({
@@ -356,6 +358,7 @@ export function PropertiesPanel({
   onPromoteNode,
   onOpenSettings,
   onSelectGraph,
+  onStartNodeCompare,
 }: PropertiesPanelProps) {
 
   // Configured LLM roles for the llm_role dropdown (GET /llm/roles) via SWR so
@@ -669,6 +672,7 @@ export function PropertiesPanel({
                 }}
                 onOpenSettings={onOpenSettings}
                 onSelectGraph={onSelectGraph}
+                onStartNodeCompare={onStartNodeCompare}
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1262,6 +1266,7 @@ function PhaseFrontmatterForm({
   onRoleTest,
   onOpenSettings,
   onSelectGraph,
+  onStartNodeCompare,
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
@@ -1289,6 +1294,7 @@ function PhaseFrontmatterForm({
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
+  onStartNodeCompare?: (nodeId: string) => void
 }) {
   return (
     <form
@@ -1324,6 +1330,7 @@ function PhaseFrontmatterForm({
                   onRoleTest={onRoleTest}
                   onOpenSettings={onOpenSettings}
                   onSelectGraph={onSelectGraph}
+                  onStartNodeCompare={onStartNodeCompare}
                 />
               </PanelFieldRow>
               <PanelFieldRow>
@@ -2576,6 +2583,7 @@ function LlmRoleField({
   onRoleTest,
   onOpenSettings,
   onSelectGraph,
+  onStartNodeCompare,
 }: {
   value: string
   useGraphDefault: boolean
@@ -2590,6 +2598,7 @@ function LlmRoleField({
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
+  onStartNodeCompare?: (nodeId: string) => void
 }) {
   const trimmed = value.trim()
   const options = useMemo(
@@ -2684,6 +2693,7 @@ function LlmRoleField({
         modelGroups={modelGroups}
         skillId={skillId}
         nodeId={nodeId}
+        onStartNodeCompare={onStartNodeCompare}
       />
     </Field>
   )
@@ -2822,10 +2832,12 @@ function LlmNodeCompareField({
   modelGroups,
   skillId = null,
   nodeId = null,
+  onStartNodeCompare,
 }: {
   modelGroups: ModelGroup[]
   skillId?: string | null
   nodeId?: string | null
+  onStartNodeCompare?: (nodeId: string) => void
 }) {
   const nextCandidateId = useRef(0)
   const [open, setOpen] = useState(false)
@@ -3067,7 +3079,7 @@ function LlmNodeCompareField({
           <DialogHeader>
             <DialogTitle>Add compare LLM</DialogTitle>
             <DialogDescription>
-              Choose a temporary model candidate for this node. This does not write to SKILL.md.
+              Choose a model candidate for this node. Saved with the node in the workspace, not SKILL.md.
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">
@@ -3131,6 +3143,20 @@ function LlmNodeCompareField({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {candidates.length > 0 && onStartNodeCompare && nodeId ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-llm-compare-run-trigger="true"
+          aria-label="Run model compare for this node"
+          className="w-full"
+          onClick={() => onStartNodeCompare(nodeId)}
+        >
+          <GitCompareArrows className="size-3.5" aria-hidden />
+          Run compare
+        </Button>
+      ) : null}
       <Dialog
         open={editOpen}
         onOpenChange={(next) => {
@@ -3145,7 +3171,7 @@ function LlmNodeCompareField({
           <DialogHeader>
             <DialogTitle>Edit compare LLM</DialogTitle>
             <DialogDescription>
-              Update the temporary model candidate for this node. This does not write to SKILL.md.
+              Update this node's model candidate. Saved with the node in the workspace, not SKILL.md.
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">

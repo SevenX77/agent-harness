@@ -22,6 +22,7 @@ from app.core.middleware import configure_cors
 from app.routers import (
     audit,
     compare,
+    compare_candidates,
     copilot,
     debug,
     golden,
@@ -143,6 +144,7 @@ def create_app() -> FastAPI:
     studio_app.include_router(test_inputs.router)
     studio_app.include_router(golden.router)
     studio_app.include_router(compare.router)
+    studio_app.include_router(compare_candidates.router)
     studio_app.include_router(copilot.router)
     studio_app.include_router(llm.router)
     studio_app.include_router(loopback.router)

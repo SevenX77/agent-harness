@@ -189,3 +189,54 @@ jobs:
         run: |
           uv run pytest apps/studio/tests-e2e \
             --tb=short -q
+
+  cross-platform-smoke:
+    # Windows/macOS observation signal (docs/development/CROSS_PLATFORM.md,
+    # layer 5). NOT a required check — a red run here never blocks a merge;
+    # it exists so platform-specific breakage is visible instead of unknown.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      # Self-contained UTF-8 bottom line (also set workflow-wide) so this job
+      # behaves the same even when run from a branch predating that env.
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync workspace dependencies
+        run: uv sync --all-packages --all-extras --group dev
+
+      - name: pytest studio backend
+        run: uv run pytest apps/studio/backend/tests --tb=short -q
+
+      - name: pytest graph-agent-gateway
+        run: uv run pytest packages/graph-agent-gateway/tests --tb=short -q
+
+      - name: pytest graph-agent
+        run: uv run pytest packages/graph-agent/tests --tb=short -q -o faulthandler_timeout=120
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/studio/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/studio/frontend
+        run: npm ci
+
+      - name: frontend build
+        run: npm --prefix apps/studio/frontend run build

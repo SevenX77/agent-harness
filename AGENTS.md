@@ -23,8 +23,9 @@
   three modules. Refresh with `uv sync --all-packages --all-extras --group dev`.
   Never hand-edit `uv.lock`; change a module's `pyproject.toml`, then `uv lock`.
 - **Run the app**: from repo root run `powershell -ExecutionPolicy Bypass -File
-  .\scripts\studio-dev.ps1` (pins the sidecar port for both Tauri and Vite,
-  then runs `cargo tauri dev`). Details in `apps/studio/tauri/README.md`.
+  .\scripts\studio-dev.ps1` (Windows) or `scripts/studio-dev.sh` (macOS/Linux) —
+  both pin the sidecar port for Tauri + Vite, then run `cargo tauri dev`.
+  Details in `apps/studio/tauri/README.md`.
 
 ## Workflow Pipeline (branch → PR → auto-merge → cleanup)
 

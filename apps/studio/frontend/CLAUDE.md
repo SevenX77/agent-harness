@@ -41,7 +41,7 @@
 
 ## 三、这套流程保留什么(不可省)
 
-1. **改完亲眼看再报 done** —— 前端改动**必须**我自己把 app 跑起来,在浏览器或 Tauri 壳里点过受影响的界面(主成功路径 + 明显的取消/错误态),**看到效果**才向你说「完成」。agent reply / filesystem diff / typecheck 通过 **都不等于**视觉验证。
+1. **改完亲眼看再报 done;报 done ≠ 收敛,PM 在 app 里确认完才算收敛** —— 前端改动**必须**我自己把 app 跑起来,在浏览器或 Tauri 壳里点过受影响的界面(主成功路径 + 明显的取消/错误态),**看到效果**才向你说「完成」。agent reply / filesystem diff / typecheck 通过 **都不等于**视觉验证。且我的自验只是**前置条件**:前端任务的**收敛条件是 PM 亲自在主 app 里确认过效果**(PM 决策 2026-07-02)——报 done 时要把"在哪个界面、怎么点、该看到什么"交代清楚,并把主仓 app 保障到能直接看的状态(见第 4 条),然后等 PM 确认;PM 没确认前不算收敛,PM 指出的问题继续在本任务内修。
 2. **推送前 CI Gates 本地全绿** —— 改了前端,在 `apps/studio/frontend` 下必须跑通:
    ```bash
    npm run lint
@@ -66,6 +66,13 @@
    浏览器开 `http://localhost:<port>/#tkn=<token>` 亲眼验证**自己这棵树**。
    不要在 worktree 里再起第二套 Tauri,也不要动主仓根工作区或其他 agent 的
    worktree。发 PR 用 `scripts/wt-ship.sh`;`main` 仍是 protected,不要直接 push。
+4. **合并后主仓依赖跟上,把 app 保障到 PM 能直接看** —— PR 合并后主仓根 `git pull`;
+   **若 PR 改了依赖清单必须在主仓补装**:`package.json`/`package-lock.json` 变了 →
+   在 `apps/studio/frontend` 跑 `npm install`;`pyproject.toml`/`uv.lock` 变了 →
+   `uv sync --all-packages --all-extras --group dev`。跑着的主 app(Tauri + Vite
+   5173 + sidecar)解析的是**主仓根**的 node_modules/venv,不补装就会在新依赖上
+   直接报 unresolved import 红屏(2026-07-02 `@shadcn/react` 教训)。Vite 已在跑时,
+   装完 `touch apps/studio/frontend/vite.config.ts` 让它原地重启重新解析。
 
 ## 四、样式/布局判断基准
 
@@ -154,11 +161,16 @@
   上 auto-merge;**PR 同时含 前端 src + 切片 JSON + 重生成的 index.html**(若 Phase 2 改了 MVP1
   设计源,也一并带上)。你发出去的 PR 内容就是你验证过的那棵树——不需要再从脏工作区里挑 hunk。
   远端 `main` 仍 protected,不得直接 push。合并后 `scripts/wt-clean.sh` 清理本地 worktree,
-  主仓根 `git pull` 让 5173 和对外手册网页刷新到最新。
+  主仓根 `git pull` 让 5173 和对外手册网页刷新到最新;**PR 若改了依赖清单,主仓根还必须补装**
+  (`package.json` 变 → `apps/studio/frontend` 里 `npm install`;`uv.lock` 变 → `uv sync`),
+  否则跑着的主 app 在新依赖上直接红屏(「三、保留什么」第 4 条)。
 
 **Phase 8 · 沉淀(同一次改动里,别只留对话)**
 - 可复用**样式规则** → `FRONTEND_UI_SPEC.md`;**手册方法论/坑** → 方法论文档;**行为类教训** → 记忆。
 - 报 done:自然语言 + 附**亲眼验证的截图/描述**,对齐「设计是什么 / 是否按设计做到 / 做完什么效果」三段;不问「是否继续」。
+- **等 PM 收敛确认**:报 done 前先把主仓 app 保障到能直接看(Phase 7 依赖补装),然后附上
+  「在哪个界面、怎么操作、该看到什么」的确认指引,等 PM 在 app 里亲自确认;**PM 确认前任务
+  不算收敛**,PM 反馈的问题在本任务内继续修(小修可直接开后续 PR,不另起任务)。
 
 ---
 

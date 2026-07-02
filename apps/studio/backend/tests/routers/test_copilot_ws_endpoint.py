@@ -25,18 +25,18 @@ from graph_agent_gateway.registry.schema import Protocol, ResolvedRoute
 from pydantic import SecretStr
 
 
-def test_copilot_bash_approval_endpoint_forwards_decision(
+def test_copilot_tool_approval_endpoint_forwards_decision(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
 
-    async def resolve_bash_approval(
+    def resolve_tool_approval(
         skill_id: str,
         tool_use_id: str,
         *,
         approve: bool,
-    ) -> copilot_service.BashApprovalResult:
+    ) -> copilot_service.ToolApprovalResolution:
         calls.append(
             {
                 "skill_id": skill_id,
@@ -44,20 +44,17 @@ def test_copilot_bash_approval_endpoint_forwards_decision(
                 "approve": approve,
             }
         )
-        return copilot_service.BashApprovalResult(
+        return copilot_service.ToolApprovalResolution(
             tool_use_id=tool_use_id,
             approved=approve,
-            executed=approve,
-            success=True,
-            stdout="ok\n",
-            stderr="",
-            returncode=0,
+            resolved=True,
+            message=None,
         )
 
-    monkeypatch.setattr(copilot_router, "resolve_bash_approval", resolve_bash_approval)
+    monkeypatch.setattr(copilot_router, "resolve_tool_approval", resolve_tool_approval)
 
     response = client.post(
-        "/api/skills/text-segmentation/copilot/bash-approval",
+        "/api/skills/text-segmentation/copilot/tool-approval",
         json={"tool_use_id": "tu-approve", "approve": True},
     )
 
@@ -65,11 +62,7 @@ def test_copilot_bash_approval_endpoint_forwards_decision(
     assert response.json() == {
         "tool_use_id": "tu-approve",
         "approved": True,
-        "executed": True,
-        "success": True,
-        "stdout": "ok\n",
-        "stderr": "",
-        "returncode": 0,
+        "resolved": True,
         "message": None,
     }
     assert calls == [
@@ -202,7 +195,7 @@ def test_copilot_ws_forwards_structured_judge_context(
 
 
 def test_copilot_prompt_renders_structured_judge_context() -> None:
-    prompt = copilot_service._prompt_with_system_context(
+    prompt = copilot_service._prompt_with_turn_context(
         "text-segmentation",
         "judge it",
         judge_context={

@@ -14,66 +14,90 @@ def clear_view_contexts() -> Iterator[None]:
     copilot._view_contexts.clear()
 
 
-def test_base_system_prompt_is_skill_authoring_brain() -> None:
-    # F3: the prompt teaches the v0.3.0 graph_skill format (replacing the old
-    # 3-line generic prompt) while keeping "answer any reasonable question".
-    template = copilot.BASE_SYSTEM_PROMPT_TEMPLATE
-    assert "graph_skill" in template
-    assert "v0.3.0" in template
-    assert "phases" in template
-    assert "聚焦 Studio 上下文" in template
-    assert "不拒答" in template
+def test_rules_document_is_skill_authoring_brain() -> None:
+    # 恒定规则层独立成文档(app/prompts/copilot-rules.md),仍是 F3 的 skill-authoring
+    # 心智模型 + R4 语言硬规则,不因抽离丢内容。
+    rules = copilot.load_copilot_rules()
+    assert "graph_skill" in rules
+    assert "v0.3.0" in rules
+    assert "phases" in rules
+    assert "聚焦 Studio 上下文" in rules
+    assert "不拒答" in rules
+    assert "语言跟随用户" in rules
 
 
-def test_build_system_prompt_without_view_context_has_brain_and_mounted_spec() -> None:
-    # F3: with no view context, the prompt is the brain + the mounted-spec pointer
-    # (the spec dir exists in this repo), and no view section.
-    prompt = copilot.build_system_prompt("skill-a")
+def test_rules_document_covers_tools_and_context_contract() -> None:
+    # 新增章节:工具边界(四工具白名单/workspace 圈定/Bash 审批语义)与上下文契约
+    # (<copilot_context> 各层语义),让模型不再靠猜。
+    rules = copilot.load_copilot_rules()
+    assert "工具与边界" in rules
+    assert "Read / Glob / Grep" in rules
+    assert "Write / Edit" in rules
+    assert "workspace" in rules
+    assert "不要原样重发" in rules
+    assert "<copilot_context>" in rules
+    assert "<mentions>" in rules
+    assert "只读" in rules
+    assert "mcp__studio__" in rules
+    assert "get_llm_roles" in rules
+    assert "compile_skill" in rules
 
-    assert prompt.startswith(copilot.BASE_SYSTEM_PROMPT_TEMPLATE.strip())
-    assert "已挂载 skill-spec" in prompt
-    assert "## 当前 View" not in prompt
+
+def test_rules_hash_is_stable_short_hex() -> None:
+    digest = copilot.copilot_rules_hash()
+    assert len(digest) == 8
+    int(digest, 16)  # valid hex
+    assert digest == copilot.copilot_rules_hash()
 
 
-def test_build_system_prompt_injects_small_view_context() -> None:
-    async def scenario() -> None:
-        await copilot.set_view_context(
-            "skill-a",
-            "Edit",
-            {"skill_md_text": "hello", "dirty": True},
-            100,
-        )
+def test_session_system_prompt_has_rules_and_spec_but_never_view_context() -> None:
+    # 会话级 system prompt = 规则 + 挂载 spec 指针;运行时 view context 绝不进来
+    # (它每轮都变,属于 turn prompt)。
+    asyncio.run(copilot.set_view_context("skill-a", "Edit", {"dirty": True}, 100))
 
-    asyncio.run(scenario())
+    prompt = copilot.build_session_system_prompt()
 
-    prompt = copilot.build_system_prompt("skill-a")
+    assert prompt.startswith(copilot.load_copilot_rules())
+    # 渐进暴露:system prompt 只带挂载目录的一行式路由表,重内容靠 Read。
+    assert "已挂载参考目录" in prompt
+    assert "02-skill-syntax" in prompt
+    assert "graph-agent-gateway" in prompt
+    assert "Studio 配置文件地图" in prompt
+    assert "## 当前上下文" not in prompt
+    # 规则文档的「上下文契约」章节会提到 <copilot_context> 标签名,所以这里断言的是
+    # 渲染出来的具体上下文内容不在场,而不是标签字样。
+    assert '<skill>{"id": "skill-a"' not in prompt
 
-    assert prompt.startswith(copilot.BASE_SYSTEM_PROMPT_TEMPLATE.strip())
-    # F4: context now renders as structured 4-layer XML, not a flat JSON dump.
+
+def test_turn_prompt_injects_small_view_context() -> None:
+    asyncio.run(
+        copilot.set_view_context("skill-a", "Edit", {"skill_md_text": "hello", "dirty": True}, 100)
+    )
+
+    prompt = copilot._prompt_with_turn_context("skill-a", "why?")
+
+    # F4: context renders as structured XML before the user message; the rules
+    # document itself must NOT be re-sent per turn.
     assert "## 当前上下文" in prompt
     assert '<skill>{"id": "skill-a", "view": "Edit"}</skill>' in prompt
     assert '"skill_md_text": "hello"' in prompt
     assert '"dirty": true' in prompt
+    assert prompt.rstrip().endswith("## 用户消息\nwhy?")
+    assert "graph_skill 格式心智模型" not in prompt
 
 
-def test_build_system_prompt_truncates_large_file_context() -> None:
-    async def scenario() -> None:
-        await copilot.set_view_context(
+def test_turn_prompt_truncates_large_file_context() -> None:
+    asyncio.run(
+        copilot.set_view_context(
             "skill-a",
             "Edit",
-            {
-                "file_path": "/tmp/SKILL.md",
-                "skill_md_text": "x" * 6144,
-                "dirty": False,
-            },
+            {"file_path": "/tmp/SKILL.md", "skill_md_text": "x" * 6144, "dirty": False},
             100,
         )
+    )
 
-    asyncio.run(scenario())
+    prompt = copilot._prompt_with_turn_context("skill-a", "check")
 
-    prompt = copilot.build_system_prompt("skill-a")
-
-    assert "## 当前上下文" in prompt
     assert "<copilot_context>" in prompt
     assert "x" * 300 in prompt
     assert "x" * 301 not in prompt
@@ -82,9 +106,10 @@ def test_build_system_prompt_truncates_large_file_context() -> None:
     assert '"dirty": false' in prompt
 
 
-def test_system_prompt_pins_reply_language_to_the_user() -> None:
-    """R4 (PM 2026-07-02): typing "hello" must not get a Chinese reply just
-    because the system prompt itself is written in Chinese — the prompt must
-    carry an explicit follow-the-user's-language rule."""
-    prompt = copilot.build_system_prompt("any-skill")
-    assert "语言跟随用户" in prompt
+def test_turn_prompt_without_context_is_plain_user_message() -> None:
+    assert copilot._prompt_with_turn_context("no-context-skill", "hello") == "hello"
+
+
+def test_context_resolved_event_echoes_rules_hash() -> None:
+    event = copilot._context_resolved_event("skill-a")
+    assert f"rules@{copilot.copilot_rules_hash()}" in event.summary

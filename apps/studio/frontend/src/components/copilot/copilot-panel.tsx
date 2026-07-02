@@ -24,7 +24,7 @@ import {
 } from '../ui/message-scroller'
 import { BACKEND_UNAVAILABLE_MESSAGE, errorMessage } from '@/utils/errors'
 import { AnalysisBar } from './analysis-bar'
-import { BashApprovalCard } from './bash-approval-card'
+import { ToolApprovalCard } from './tool-approval-card'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
@@ -126,8 +126,8 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
                 />
               )
             }
-            if (event.type === 'bash_approval_required') {
-              return <BashApprovalCard key={event.id} event={event} skillId={skillId} />
+            if (event.type === 'tool_approval_required') {
+              return <ToolApprovalCard key={event.id} event={event} skillId={skillId} />
             }
             if (event.type === 'context_resolved') {
               return (

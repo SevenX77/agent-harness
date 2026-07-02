@@ -17,9 +17,11 @@ import inspect
 import json
 import logging
 import secrets
+import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, cast
 from xml.sax.saxutils import escape
@@ -36,6 +38,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import (
     AssistantMessage,
+    McpServerConfig,
     ResultMessage,
     StreamEvent,
     TextBlock,
@@ -54,16 +57,17 @@ from app.core.adapters.gateway import (
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.copilot import (
     CopilotEvent,
-    CopilotEventBashApprovalRequired,
     CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventPatchProposed,
     CopilotEventText,
     CopilotEventThinking,
+    CopilotEventToolApprovalRequired,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
+from app.services.copilot_tools import build_copilot_mcp_servers
 
 SessionKey = tuple[str, str, str]
 SessionCacheKey = tuple[str, str, str, str]
@@ -71,7 +75,7 @@ logger = logging.getLogger(__name__)
 
 MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
-_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash"]
+_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
 _FILE_CONTENT_KEYS = {
     "content",
     "file_content",
@@ -81,35 +85,21 @@ _FILE_CONTENT_KEYS = {
 }
 _FILE_PATH_KEYS = ("absolute_file_path", "file_path", "path")
 
-BASE_SYSTEM_PROMPT_TEMPLATE = """
-你是 Studio Copilot —— 精通 graph_skill 搭建的助手，在 Studio 工作台帮用户设计 / 编辑 / 理解 / 验证 / 运行当前 skill。
+_PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
-## 回复语言（硬规则，优先级最高）
-**语言跟随用户**：永远用用户**最后一条消息**的语言回复。用户写英文 → 整段回复用英文；写中文 → 用中文。
-本提示词和注入上下文是中文，**不代表**回复用中文。例：用户发 "hello" → 用英文回复。代码、标识符、错误码原样保留。
 
-## graph_skill 格式心智模型 (schema v0.3.0)
-一个 skill = 根 `GRAPH.md` + 每个 phase 一个目录 `phases/<name>/`：
-- **GRAPH.md** frontmatter 必含：`schema_version: "v0.3.0"`(精确)、`name`(`^[a-z][a-z0-9_-]*$`)、
-  `phases: [名字列表]`、`io:`(根输入/输出 JSON schema)；可选 `description` / `llm_role`。
-- **GRAPH.md body** 用 `<phase>` XML 画 DAG：入口 `depends_on="input"`，下游引用上游 phase 名
-  (多依赖空格/逗号分隔)，终点加 `output`。三处名字必须一致：
-  frontmatter `phases` = body `<phase>` = `phases/<name>/` 目录。
-- **每个 phase 目录恰好一个模式文件**：`LOGIC.md`(确定性 Python，最常见)= frontmatter `io:` +
-  body `<action>名</action>` → `phases/<name>/actions/<名>.py`
-  (签名 `def 名(inputs): ...`，读上游、返回本 phase 输出，不修改 inputs)。
-  另两种模式是 `SUBGRAPH.md`(子图) / `SKILL.md`(委派子 skill)；
-  agent 等行为、精确语法与错误码以**挂载的 skill-spec 为准**。
+@lru_cache(maxsize=1)
+def load_copilot_rules() -> str:
+    """恒定规则层:app/prompts/copilot-rules.md —— 单一真相文档,SDK 直连路在这里
+    装载;ah 拉起路经其 rules 注入机制装载同一份。规则变更改文档、走 PR,不改代码。"""
+    return (_PROMPTS_DIR / "copilot-rules.md").read_text(encoding="utf-8").strip()
 
-## 生命周期
-Compile(校验 DAG + schema)→ Predict(测试输入空跑)→ Run(真跑)。编译/lint 错误码形如 `[F-v3-...]`。
 
-## 工作方式
-- **先 Read 后改**：动文件前先读完整内容，别凭空猜；改完该编译就编译验证。
-- **主动诊断**：用户问"为啥编译失败"或出现 `[F-v3-...]` → 读相关文件定位根因、给具体修法，不空谈。
-- 权威格式细节已挂载(见下)，用 Read 查阅；业务领域知识靠你自带 + 用户喂的文档，不编造领域事实。
-- 聚焦 Studio 上下文，但允许任何合理通用问题，不拒答。
-""".strip()
+@lru_cache(maxsize=1)
+def copilot_rules_hash() -> str:
+    """规则文档指纹(sha256 前 8 位),回显进 context_resolved 事件,让用户能核对
+    本轮会话吃的是哪一版规则(anti hidden-prompt-magic,与上下文回显同一纪律)。"""
+    return hashlib.sha256(load_copilot_rules().encode("utf-8")).hexdigest()[:8]
 
 
 def _skill_spec_dir() -> Path | None:
@@ -117,6 +107,63 @@ def _skill_spec_dir() -> Path | None:
     Read (F3 渐进暴露). Returns None when absent (e.g. a bundled app without docs)."""
     candidate = Path(__file__).resolve().parents[5] / "docs/engine/mvp1/01-contract/02-skill-syntax"
     return candidate if candidate.is_dir() else None
+
+
+_SKILLS_SRC_DIR = _PROMPTS_DIR / "skills"
+
+
+def copilot_skill_names() -> list[str]:
+    """Names of the copilot scenario skills shipped with the backend
+    (app/prompts/skills/<name>/SKILL.md),按名排序;缺目录时为空。"""
+
+    if not _SKILLS_SRC_DIR.is_dir():
+        return []
+    return sorted(
+        entry.name for entry in _SKILLS_SRC_DIR.iterdir() if (entry / "SKILL.md").is_file()
+    )
+
+
+def _materialize_copilot_skills(workspace_dir: str | Path) -> list[str]:
+    """把随包的场景技能物化进 workspace 的 .claude/skills/,供 CLI 发现。
+
+    每次会话创建都覆盖写(以随包版本为准,幂等);`.claude/` 是 Studio 的运行时
+    供给目录,不属于 D12「skill 源文件唯一写者」管辖的 skills/ 用户源文件。"""
+
+    names = copilot_skill_names()
+    if not names:
+        return []
+    dest_root = Path(workspace_dir) / ".claude" / "skills"
+    for name in names:
+        shutil.copytree(_SKILLS_SRC_DIR / name, dest_root / name, dirs_exist_ok=True)
+    return names
+
+
+def _mounted_doc_dirs() -> list[tuple[str, Path]]:
+    """挂载给 copilot 只读查阅的参考目录(渐进暴露:重内容放 Read 后面,system
+    prompt 里只留一行路由)。仓库 docs 缺席时(打包版)对应条目自动省略。
+
+    (领域说明, 目录) 对;目录同时进 add_dirs 与读护栏放行集。"""
+
+    repo_root = Path(__file__).resolve().parents[5]
+    candidates = [
+        (
+            "graph_skill 精确语法 / 字段 / 错误码(权威 skill-spec)",
+            repo_root / "docs/engine/mvp1/01-contract/02-skill-syntax",
+        ),
+        (
+            "engine 契约:物理布局 / 编译规则 / 数据契约 / 失效规则",
+            repo_root / "docs/engine/mvp1/01-contract",
+        ),
+        (
+            "LLM 概念:roles / routes / fallback_chain / 能力与探测",
+            repo_root / "docs/graph-agent-gateway/mvp1",
+        ),
+        (
+            "Studio 配置文件地图(哪个文件是什么、能否手改)",
+            _PROMPTS_DIR / "mounted",
+        ),
+    ]
+    return [(label, path) for label, path in candidates if path.is_dir()]
 
 
 @dataclass(frozen=True)
@@ -158,16 +205,19 @@ def _default_gateway_adapter_factory() -> GatewayAdapter:
 _gateway_adapter_factory: Callable[[], GatewayAdapter] = _default_gateway_adapter_factory
 
 
-# ── F5 safe-write (model B) ──────────────────────────────────────────────────
+# ── F5 safe-write + 读护栏 + 挂起式审批 ─────────────────────────────────────
 #
 # The SDK consults ``can_use_tool`` only for tools NOT pre-allowed via
-# ``allowed_tools`` (verified by PoC). So safe-write keeps only Read pre-allowed
-# and routes Write/Edit/Bash through the callback: Write/Edit emit a
-# ``patch_proposed`` event (apply-then-review, non-blocking) then ALLOW; Bash is
-# held for human approval (the interactive approve round-trip needs a
-# bidirectional WS channel, not yet wired) and surfaced as
-# ``bash_approval_required``. The callback feeds events into the active query's
-# queue via a per-skill registry — one active query per skill.
+# ``allowed_tools`` (verified by PoC), so NOTHING is pre-allowed and every tool
+# flows through the callback:
+# - Write/Edit: workspace 圈定(出界拒绝) + ``patch_proposed`` diff 事件后放行。
+# - Read/Glob/Grep: workspace + 挂载 spec 目录内直接放行;出圈挂起等用户审批。
+# - Bash: 一律挂起等审批。批准 = callback 返回 Allow → CLI 自己执行,结果回到
+#   模型上下文(旧「先拒绝 + 后端代跑」已删:代跑输出只到前端,模型看到的是
+#   deny,断掉了基于结果的续推)。审批经 ``tool_approval_required`` 事件 →
+#   前端卡片 → POST /copilot/tool-approval → resolve_tool_approval。
+# The callback feeds events into the active query's queue via a per-skill
+# registry — one active query per skill.
 
 
 @dataclass
@@ -177,40 +227,31 @@ class _SafeWriteSink:
 
 
 @dataclass(frozen=True)
-class _PendingBashApproval:
-    command: str
-    workspace_root: Path
+class ToolApprovalResolution:
+    """Outcome of resolving a held tool approval (no execution here — approval
+    flows back into the awaiting ``can_use_tool`` and the CLI runs the tool
+    itself, so its result lands in the model's context)."""
 
-
-@dataclass(frozen=True)
-class BashApprovalResult:
     tool_use_id: str
     approved: bool
-    executed: bool
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    returncode: int | None = None
+    resolved: bool
     message: str | None = None
 
 
 _safe_write_sinks: dict[str, _SafeWriteSink] = {}
-_pending_bash_approvals: dict[tuple[str, str], _PendingBashApproval] = {}
+_pending_tool_approvals: dict[tuple[str, str], asyncio.Future[bool]] = {}
 
 _STREAM_SENTINEL = object()
 
 
-def _cleanup_pending_bash_approvals(skill_id: str | None = None) -> int:
-    """Drop held Bash approvals that no longer belong to a live session."""
+def _cleanup_pending_tool_approvals(skill_id: str | None = None) -> int:
+    """Deny-and-drop held tool approvals that no longer belong to a live session."""
 
-    if skill_id is None:
-        count = len(_pending_bash_approvals)
-        _pending_bash_approvals.clear()
-        return count
-
-    keys = [key for key in _pending_bash_approvals if key[0] == skill_id]
+    keys = [key for key in _pending_tool_approvals if skill_id is None or key[0] == skill_id]
     for key in keys:
-        _pending_bash_approvals.pop(key, None)
+        future = _pending_tool_approvals.pop(key, None)
+        if future is not None and not future.done():
+            future.set_result(False)
     return len(keys)
 
 
@@ -233,8 +274,78 @@ async def _drain_sdk_response(
     finally:
         await queue.put(_STREAM_SENTINEL)
 
-_BASH_HELD_MESSAGE = "Bash 命令需用户审批（审批 UI 待接入，命令已暂缓执行）"
 _SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit 目标必须位于 workspace 内"
+_TOOL_APPROVAL_TIMEOUT_S = 120.0
+_READ_FENCED_TOOLS = ("Read", "Glob", "Grep")
+
+
+def _read_target(tool_name: str, tool_input: Mapping[str, Any]) -> str | None:
+    """The path a read-class tool is aimed at (None = tool defaults to cwd)."""
+
+    raw = tool_input.get("file_path") if tool_name == "Read" else tool_input.get("path")
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw)
+
+
+def _read_allowed(raw_path: str, workspace_root: Path) -> bool:
+    """读护栏:workspace 与挂载参考目录内自动放行,其余走审批。"""
+
+    if _resolve_safe_write_target(raw_path, workspace_root) is not None:
+        return True
+    target = Path(raw_path)
+    if not target.is_absolute():
+        return False
+    resolved = target.resolve(strict=False)
+    for _label, mounted_dir in _mounted_doc_dirs():
+        try:
+            resolved.relative_to(mounted_dir.resolve(strict=False))
+        except (OSError, RuntimeError, ValueError):
+            continue
+        return True
+    return False
+
+
+async def _hold_for_tool_approval(
+    skill_id: str,
+    sink: _SafeWriteSink,
+    *,
+    tool_name: str,
+    detail: str,
+    tool_use_id: str,
+) -> PermissionResultAllow | PermissionResultDeny:
+    """挂起式审批:await 前端批复后才返回 Allow/Deny。批准 = 返回 Allow,由 CLI
+    自己执行、结果回到模型上下文 —— 取代旧的「先拒绝 + 后端代跑」(代跑输出只到
+    前端、模型永远看到 deny,是缺陷)。超时视为拒绝。"""
+
+    if not tool_use_id:
+        return PermissionResultDeny(
+            message=f"{tool_name} 请求缺少 tool_use_id,无法进入审批", interrupt=False
+        )
+    future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+    _pending_tool_approvals[(skill_id, tool_use_id)] = future
+    logger.info(
+        "phase=copilot_guardrail action=approval_held tool=%s detail=%s", tool_name, detail
+    )
+    await sink.queue.put(
+        CopilotEventToolApprovalRequired(
+            tool_use_id=tool_use_id, tool_name=tool_name, detail=detail
+        )
+    )
+    try:
+        approved = await asyncio.wait_for(future, _TOOL_APPROVAL_TIMEOUT_S)
+    except TimeoutError:
+        return PermissionResultDeny(
+            message=(
+                f"{tool_name} 在 {int(_TOOL_APPROVAL_TIMEOUT_S)}s 内未获用户批准,视为拒绝"
+            ),
+            interrupt=False,
+        )
+    finally:
+        _pending_tool_approvals.pop((skill_id, tool_use_id), None)
+    if approved:
+        return PermissionResultAllow()
+    return PermissionResultDeny(message=f"用户拒绝了本次 {tool_name} 调用", interrupt=False)
 
 
 def _resolve_safe_write_target(
@@ -368,84 +479,54 @@ def _make_safe_write_can_use_tool(
                     )
                     await sink.queue.put(event)
             return PermissionResultAllow()
+        if tool_name in _READ_FENCED_TOOLS:
+            if sink is None:
+                return PermissionResultAllow()
+            target = _read_target(tool_name, tool_input)
+            if target is None or _read_allowed(target, sink.workspace_root):
+                return PermissionResultAllow()
+            return await _hold_for_tool_approval(
+                skill_id, sink, tool_name=tool_name, detail=target, tool_use_id=tool_use_id
+            )
         if tool_name == "Bash":
             command = str(tool_input.get("command", ""))
-            logger.info("phase=copilot_safe_write action=bash_held command=%s", command)
-            if sink is not None:
-                if tool_use_id:
-                    _pending_bash_approvals[(skill_id, tool_use_id)] = _PendingBashApproval(
-                        command=command,
-                        workspace_root=sink.workspace_root,
-                    )
-                await sink.queue.put(
-                    CopilotEventBashApprovalRequired(tool_use_id=tool_use_id, command=command)
+            if sink is None:
+                return PermissionResultDeny(
+                    message="Bash 需要用户批准,但当前没有活跃的会话流", interrupt=False
                 )
-            return PermissionResultDeny(message=_BASH_HELD_MESSAGE, interrupt=False)
+            return await _hold_for_tool_approval(
+                skill_id, sink, tool_name="Bash", detail=command, tool_use_id=tool_use_id
+            )
         return PermissionResultAllow()
 
     return can_use_tool
 
 
-async def resolve_bash_approval(
+def resolve_tool_approval(
     skill_id: str,
     tool_use_id: str,
     *,
     approve: bool,
-    timeout_s: float = 30.0,
-) -> BashApprovalResult:
-    """Resolve a held Copilot Bash command exactly once."""
+) -> ToolApprovalResolution:
+    """Resolve a held Copilot tool call exactly once.
 
-    pending = _pending_bash_approvals.pop((skill_id, tool_use_id), None)
-    if pending is None:
-        return BashApprovalResult(
+    只负责把批复喂给正在 await 的 ``can_use_tool``;批准后的执行由 CLI 自己完成,
+    工具结果因此回到模型上下文(旧的后端代跑路径已删除)。"""
+
+    future = _pending_tool_approvals.get((skill_id, tool_use_id))
+    if future is None or future.done():
+        return ToolApprovalResolution(
             tool_use_id=tool_use_id,
             approved=approve,
-            executed=False,
-            success=False,
+            resolved=False,
             message="approval_not_found",
         )
-    if not approve:
-        return BashApprovalResult(
-            tool_use_id=tool_use_id,
-            approved=False,
-            executed=False,
-            success=True,
-            message="rejected",
-        )
-
-    process = await asyncio.create_subprocess_shell(
-        pending.command,
-        cwd=pending.workspace_root,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout_s)
-    except TimeoutError:
-        process.kill()
-        stdout_bytes, stderr_bytes = await process.communicate()
-        return BashApprovalResult(
-            tool_use_id=tool_use_id,
-            approved=True,
-            executed=True,
-            success=False,
-            stdout=stdout_bytes.decode("utf-8", errors="replace"),
-            stderr=stderr_bytes.decode("utf-8", errors="replace"),
-            returncode=process.returncode,
-            message="timeout",
-        )
-
-    stdout = stdout_bytes.decode("utf-8", errors="replace")
-    stderr = stderr_bytes.decode("utf-8", errors="replace")
-    return BashApprovalResult(
+    future.set_result(approve)
+    return ToolApprovalResolution(
         tool_use_id=tool_use_id,
-        approved=True,
-        executed=True,
-        success=process.returncode == 0,
-        stdout=stdout,
-        stderr=stderr,
-        returncode=process.returncode,
-        message=None if process.returncode == 0 else "command_failed",
+        approved=approve,
+        resolved=True,
+        message=None,
     )
 
 
@@ -509,25 +590,45 @@ def build_options(
     if env_overrides:
         env.update(env_overrides)
 
-    # F3: mount the authoritative graph_skill spec so the copilot can Read it for
-    # exact format/error-code ground-truth (渐进暴露). Skipped if absent.
-    spec_dir = _skill_spec_dir()
-    add_dirs: list[str | Path] = [str(spec_dir)] if spec_dir is not None else []
+    # F3 渐进暴露: mount the reference doc dirs (engine contract / gateway
+    # concepts / studio config map) so the copilot Reads ground truth on demand;
+    # the session system prompt carries only a one-line-per-dir routing table.
+    add_dirs: list[str | Path] = [str(path) for _label, path in _mounted_doc_dirs()]
     permission_mode: Literal["default", "acceptEdits"]
+    skills: list[str]
+    mcp_servers: dict[str, McpServerConfig]
     if can_use_tool is not None:
-        # Pre-allowing a tool makes the SDK skip can_use_tool for it, so keep only
-        # Read pre-allowed; Write/Edit/Bash flow through the safe-write callback.
-        allowed_tools = ["Read"]
+        # Pre-allowing a tool makes the SDK skip can_use_tool for it, so pre-allow
+        # NOTHING: Read/Glob/Grep 走读护栏(出圈挂审批),Write/Edit 走 workspace
+        # 圈定,Bash 走挂起式审批 —— 全部经 can_use_tool;studio MCP 工具由后端
+        # 实现并校验,回调默认放行(零审批)。
+        allowed_tools = []
         permission_mode = "default"
+        # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
+        # (SDK 会自动配好 Skill 工具,types.py skills 文档)。
+        skills = copilot_skill_names()
+        mcp_servers = build_copilot_mcp_servers()
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
+        # SDK probe 路要确定性输出,压掉技能与 MCP 工具。
+        skills = []
+        mcp_servers = {}
     return ClaudeAgentOptions(
         cwd=workspace_dir,
         permission_mode=permission_mode,
         allowed_tools=allowed_tools,
         env=env,
         can_use_tool=can_use_tool,
+        # 恒定规则层走会话级 system prompt(单一真相 = app/prompts/copilot-rules.md);
+        # 运行时上下文走每轮 turn prompt,见 _prompt_with_turn_context。
+        system_prompt=build_session_system_prompt(),
+        # SDK 隔离模式:不加载开发机 ~/.claude 等文件系统配置,copilot 行为不随
+        # 宿主机个人配置漂移;MCP 只认显式传入的(当前为空)。
+        setting_sources=[],
+        strict_mcp_config=True,
+        skills=skills,
+        mcp_servers=mcp_servers,
         # F1/F8: enable extended thinking so the SDK emits ThinkingBlocks.
         # Adaptive lets the model size its own reasoning per task. display MUST
         # be "summarized": the CLI only offers summarized|omitted (there is no
@@ -637,24 +738,20 @@ def render_copilot_context_xml(skill_id: str, view: str, context: dict[str, Any]
     return "<copilot_context>\n" + "\n".join(layers) + "\n</copilot_context>"
 
 
-def build_system_prompt(skill_id: str) -> str:
-    """Build the Copilot system prompt: skill-authoring brain + mounted-spec
-    pointer + the latest view context (structured 4-layer XML)."""
+def build_session_system_prompt() -> str:
+    """会话级 system prompt = 规则文档 + 挂载 spec 指针(都是会话内不变的静态层)。
 
-    prompt = BASE_SYSTEM_PROMPT_TEMPLATE
-    spec_dir = _skill_spec_dir()
-    if spec_dir is not None:
+    运行时 view/judge context 每轮都变,走 ``_prompt_with_turn_context`` 注入到
+    当轮消息,绝不进会话级 —— 三层分离:恒定规则 / 链路装载 / 运行时上下文。"""
+
+    prompt = load_copilot_rules()
+    mounted = _mounted_doc_dirs()
+    if mounted:
+        routing = "\n".join(f"- {label} → `{path}`" for label, path in mounted)
         prompt += (
-            f"\n\n## 已挂载 skill-spec(权威格式规范)\n{spec_dir}\n"
-            "需要精确字段 / 语法 / 错误码时用 Read 查阅该目录下的 .md。"
+            "\n\n## 已挂载参考目录(只读,按需用 Read/Glob/Grep 查阅,不整段复述)\n"
+            + routing
         )
-
-    view_context = get_view_context(skill_id)
-    if view_context is not None:
-        prompt += "\n\n## 当前上下文\n" + render_copilot_context_xml(
-            skill_id, view_context.view, view_context.context
-        )
-
     return prompt
 
 
@@ -682,7 +779,8 @@ def _context_resolved_event(
         detail_lines.append(render_copilot_judge_context_xml(judge_context))
     if spec_mounted:
         parts.append("skill-spec 已挂载")
-    summary = "本轮注入: " + (" · ".join(parts) if parts else "仅 skill-authoring 基础上下文")
+    parts.append(f"rules@{copilot_rules_hash()}")
+    summary = "本轮注入: " + " · ".join(parts)
     return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
 
 
@@ -913,7 +1011,7 @@ async def stream_query(
             await _ensure_client_connected(client)
 
             # F5: register the safe-write sink so the can_use_tool callback can
-            # interleave patch_proposed / bash_approval_required events into this
+            # interleave patch_proposed / tool_approval_required events into this
             # query's stream, then drain translated messages + callback events
             # from one queue (preserving arrival order).
             queue: asyncio.Queue[CopilotEvent | object] = asyncio.Queue()
@@ -923,7 +1021,7 @@ async def stream_query(
             consumer: asyncio.Task[None] | None = None
             try:
                 await client.query(
-                    _prompt_with_system_context(
+                    _prompt_with_turn_context(
                         skill_id,
                         user_message,
                         judge_context=judge_context,
@@ -1080,6 +1178,7 @@ async def get_or_create_session(
     async with _session_lock:
         session = _sessions.get(session_key)
         if session is None:
+            _materialize_copilot_skills(workspace_dir)
             session = _session_factory(
                 build_options(
                     cast(str | None, base_url),
@@ -1110,9 +1209,9 @@ async def reset_session(
 
     await _close_sessions(sessions)
     if skill_id is None:
-        _cleanup_pending_bash_approvals()
+        _cleanup_pending_tool_approvals()
     else:
-        _cleanup_pending_bash_approvals(skill_id)
+        _cleanup_pending_tool_approvals(skill_id)
     return len(sessions)
 
 
@@ -1123,7 +1222,7 @@ async def cleanup_all_sessions() -> None:
         sessions = list(_sessions.values())
         _sessions.clear()
 
-    _cleanup_pending_bash_approvals()
+    _cleanup_pending_tool_approvals()
     await _close_sessions(sessions)
 
 
@@ -1148,16 +1247,29 @@ async def _ensure_client_connected(client: ClaudeSDKClient) -> None:
     await client.connect()
 
 
-def _prompt_with_system_context(
+def _prompt_with_turn_context(
     skill_id: str,
     user_message: str,
     *,
     judge_context: dict[str, Any] | None = None,
 ) -> str:
-    prompt = build_system_prompt(skill_id)
+    """当轮 prompt = 运行时上下文层 + 用户消息。规则文档在会话级 system_prompt
+    (build_options),不随每轮重发。无任何上下文时就是裸用户消息。"""
+
+    layers: list[str] = []
+    view_context = get_view_context(skill_id)
+    if view_context is not None:
+        layers.append(
+            "## 当前上下文\n"
+            + render_copilot_context_xml(skill_id, view_context.view, view_context.context)
+        )
     if judge_context is not None:
-        prompt += "\n\n## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
-    return f"{prompt}\n\n## 用户消息\n{user_message}"
+        layers.append(
+            "## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
+        )
+    if not layers:
+        return user_message
+    return "\n\n".join(layers) + f"\n\n## 用户消息\n{user_message}"
 
 
 class SdkMessageTranslator:

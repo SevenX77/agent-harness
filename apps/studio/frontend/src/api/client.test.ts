@@ -15,7 +15,7 @@ import {
   prepareCopilotJudgeContext,
   postPredictRun,
   publishSkill,
-  resolveCopilotBashApproval,
+  resolveCopilotToolApproval,
   resumeRun,
   saveGoldenBaseline,
   saveManualGolden,
@@ -505,10 +505,10 @@ describe('api client auth token', () => {
     ).resolves.toEqual({ path: 'GRAPH.md', hash: 'next-hash' })
   })
 
-  it('posts Copilot Bash approval decisions to the safe-write endpoint', async () => {
+  it('posts Copilot tool approval decisions to the approval endpoint', async () => {
     api.defaults.adapter = async (config): Promise<AxiosResponse> => {
       expect(config.method).toBe('post')
-      expect(config.url).toBe('/skills/text-segmentation/copilot/bash-approval')
+      expect(config.url).toBe('/skills/text-segmentation/copilot/tool-approval')
       expect(JSON.parse(String(config.data))).toEqual({
         tool_use_id: 'tu-approve',
         approve: true,
@@ -517,11 +517,7 @@ describe('api client auth token', () => {
         data: {
           tool_use_id: 'tu-approve',
           approved: true,
-          executed: true,
-          success: true,
-          stdout: 'ok\n',
-          stderr: '',
-          returncode: 0,
+          resolved: true,
           message: null,
         },
         status: 200,
@@ -532,18 +528,14 @@ describe('api client auth token', () => {
     }
 
     await expect(
-      resolveCopilotBashApproval('text-segmentation', {
+      resolveCopilotToolApproval('text-segmentation', {
         toolUseId: 'tu-approve',
         approve: true,
       }),
     ).resolves.toEqual({
       tool_use_id: 'tu-approve',
       approved: true,
-      executed: true,
-      success: true,
-      stdout: 'ok\n',
-      stderr: '',
-      returncode: 0,
+      resolved: true,
       message: null,
     })
   })

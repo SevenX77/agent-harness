@@ -331,6 +331,21 @@
    "be_status": "已实现",
    "gap_brief": "无。thinking 为 CLI summarized 档(能拿到的最大暴露);后续停止按钮(F7-③)基于同一 ws 流。",
    "impl_ref": "fn-28"
+  },
+  {
+   "n": 29,
+   "cap": "copilot-tab-strip-wheel",
+   "track": "copilot-assist",
+   "module": "Copilot 面板",
+   "func": "会话 tab 条滚轮横滚 + 溢出可见(F1 R5-B 约束,PM 2026-07-02「多chat没有出现横向滚动条,鼠标滚轮操作应该横向滚动」):纵向滚轮在 tab 条上直接驱动横向滚动;悬停时显示细横向滚动条,替代 R3 的完全隐藏——溢出必须可发现。",
+   "action": "tab 多到溢出后:鼠标停在 tab 条上滚滚轮 = 条横向滚动(页面不跟着纵滚);触控板原生横向手势不被拦截;悬停条上出现 6px 细横向滚动条,移开消失;无溢出时滚轮不拦、条不出现。",
+   "fe_design": "session-tabs.tsx:纯函数 consumeHorizontalWheel(仅在有横向溢出且 |deltaY|>|deltaX| 时把 deltaY 加到 scrollLeft 并消费事件);SessionTabs 以原生 wheel 监听(passive:false 才能 preventDefault)接到 ScrollArea viewport;溢出可见性用本地 ui/scroll-area 的 ScrollBar(orientation=horizontal,Radix type=hover 悬停才出)细样式 h-1.5;组件拆 SessionTabsView(无 hooks 纯展示)供元素树交互测试。设计源:docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F1 R5-B 约束。",
+   "fe_modules": [],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "无。",
+   "impl_ref": "fn-29"
   }
  ]
 }

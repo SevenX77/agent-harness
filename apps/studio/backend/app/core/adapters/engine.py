@@ -57,9 +57,6 @@ from graph_agent.core.manifest import (
     GraphManifest as GraphManifest,
 )
 from graph_agent.core.manifest import (
-    effective_llm_role as effective_llm_role,
-)
-from graph_agent.core.manifest import (
     GraphPhaseRef as GraphPhaseRef,
 )
 from graph_agent.core.manifest import (
@@ -73,6 +70,9 @@ from graph_agent.core.manifest import (
 )
 from graph_agent.core.manifest import (
     SubgraphNodeAST as SubgraphNodeAST,
+)
+from graph_agent.core.manifest import (
+    effective_llm_role as effective_llm_role,
 )
 from graph_agent.core.result import (
     PathDiff as PathDiff,

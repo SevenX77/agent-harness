@@ -2,7 +2,7 @@
  "id": "n3_lint_impl",
  "title": "实时 lint 与就近投影 · 实施详情",
  "design_ref": "n3_lint_design",
- "intro": "本页是「实时 lint 与编译错误就近投影」surface 前端的现状/差距/实施计划/测试,1:1 对应设计页 n3_lint_design(原子 #1–#6)。代码按「文件名 + 函数/对象名」引用(可全局搜索)。后端 /lint endpoint 已就绪(routers/lint.py),changed-markdown 契约已落地——routers/lint.py 判 body.markdown 非空即走 lint_skill_changed_markdown,消费请求体里编辑中的内容(原 body drift 已闭合)。前端实时 lint hook 接线 + 三处就近投影(节点徽章 / 属性字段标记 / 编辑器行内 marker)均已实现,并于 2026-06-23 真机实测通过(PR #180);本页 fe_status/be_status 据当前代码核验为「符合/已实现」。",
+ "intro": "本页是「实时 lint 与编译错误就近投影」surface 前端的现状/差距/实施计划/测试,1:1 对应设计页 n3_lint_design(原子 #1–#8)。代码按「文件名 + 函数/对象名」引用(可全局搜索)。后端 /lint endpoint 已就绪(routers/lint.py),两种触发形状共用:body.markdown 非空 → lint_skill_changed_markdown(编辑器 changed-markdown);无 markdown → lint_skill_on_disk(画布写盘后的磁盘真相,workspace_root 定位)。前端实时 lint hook 接线 + 三处就近投影(节点徽章 / 属性字段标记 / 编辑器行内 marker)于 2026-06-23 真机实测通过(PR #180);画布拓扑改动触发 relint(#7)+ lint 聚合完整性(#8)于 2026-07-02 实现并真机验证。本页 fe_status/be_status 据当前代码核验为「符合/已实现」。",
  "functions": [
   {
    "n": 1,
@@ -73,6 +73,26 @@
    "be_dep": "基本就绪。LintError 带 line/column 但可为 null(后端 _lint_error_from_exception 从异常 message 正则尽力解析),CompileError 带 line/field;有 line 落 marker、无 line 降级文件级。后端无需改。",
    "fe_status_prev": "未实施",
    "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 7,
+   "cap": "lint-canvas-trigger",
+   "design_ref": "atom-7",
+   "current": "现状:已实现。Workspace.tsx 的 refreshLintAfterSourceWrite(清旧投影 + relintSkillFromDisk)挂在全部源写路径之后:writeGraphEdit(连线/断线/重连)、handleCreatePhase/handleDeletePhase/handleRenamePhase、handlePhaseFileSave(panel 保存,root+child 双分支)、handleActionCreate/Delete、handleValidatorCreate。relintSkillFromDisk(hooks/useDebouncedLint.ts)发无 markdown 的 POST /lint(workspace_root 定位),结果经 lintStatusEvent/lintResultEvent 广播——与编辑器防抖 lint 同一通道,三处投影统一替换。后端 routers/lint.py 无 body.markdown → services/skills.py lint_skill_on_disk(磁盘真相)。配套修复 GraphCanvas.tsx 调和屏障:endGraphEdit 归零时 bump graphEditsSettledTick 重跑 reconcile effect(否则编辑 in-flight 期间到达的徽章数据永不上屏——2026-07-02 真机走查抓到的缺口)。",
+   "gap": "无差距。2026-07-02 真机走查(dev-harness + wt-dev --backend 私有 sidecar):断线 → 节点立即亮 island 徽章;再断第二条 → 两徽章同亮;拖线重连 → 徽章消除。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪(2026-07-02)。routers/lint.py 按 body 形状路由:无 markdown → lint_skill_on_disk(skill_id, workspace_root);服务层测试 test_lint_on_disk_with_workspace_root_reflects_disk_truth 锁磁盘真相语义。"
+  },
+  {
+   "n": 8,
+   "cap": "lint-completeness",
+   "design_ref": "atom-8",
+   "current": "现状:已实现。engine loader.py:拓扑阶段全量收集(全部孤岛/未知依赖/自依赖/环/output/phase 目录,_collect_graph_dependencies/_validate_no_islands 等吃 diags 列表),拓扑 + 根 IO schema + 逐节点三段在屏障统一 _raise_collected_errors;级联抑制(flagged/cycle 节点种子化可达性遍历,不重复报孤岛);CompileIssue 换显式四轴 source_path/line/field_path/severity(compiler.py,删 location 字符串)。studio services/skills.py:lint_skill_path 经 _lint_errors_from_exception 展开 exc.compile_result.issues 全量(_lint_error_from_issue 逐条映射轴),与手动 Compile drawer(_compile_error_from_issue,同样直读轴)同语义。前端投影消费完整列表,无需改。",
+   "gap": "无差距。真机:双孤岛同时亮徽章(截图 n3-lint-07);后端直连验证一次返回全部缺陷(a.depends_on L17 + b.depends_on L18)。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪(2026-07-02)。engine 测试:双孤岛/双未知依赖一次报齐、拓扑缺陷不遮蔽节点缺陷、未知依赖归因 depends-unknown 且抑制级联孤岛;后端测试:test_lint_surfaces_every_defect_of_one_pass(island + io-schema 两独立缺陷同返,轴齐全)。"
   }
  ],
  "plan": [
@@ -221,6 +241,43 @@
    ],
    "fe_status_prev": "未实施",
    "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  },
+  {
+   "covers": "#7 lint-canvas-trigger + #8 lint-completeness",
+   "atoms": [
+    7,
+    8
+   ],
+   "shots": [
+    "画布断线 → 出错节点立即亮 island 徽章(无需打开编辑器)",
+    "两个独立缺陷(双孤岛)同时各自亮徽章,不是修一个冒一个",
+    "拖线重连 → 该节点徽章消除(新结果替换旧投影)"
+   ],
+   "screenshots": [
+    {
+     "file": "n3-lint-06-canvas-disconnect-island.png",
+     "caption": "真机(dev-harness 挂真 Workspace + wt-dev --backend 私有 sidecar,真引擎无 mock):断开 input→a 写盘后自动 relint,节点 a 立即亮 ⚠1,tooltip 逐条展开「a.depends_on · L17 — phase 'a' declares no depends_on (every phase must connect to \"input\" or an upstream phase)」。"
+    },
+    {
+     "file": "n3-lint-07-canvas-two-islands.png",
+     "caption": "真机:再断开 a→b,两个孤岛(a、b)各自的 ⚠1 徽章同时亮(引擎同阶段聚合 + lint 全量展开);c 依赖 b 未被误标(级联抑制)。"
+    },
+    {
+     "file": "n3-lint-08-canvas-reconnect-clean.png",
+     "caption": "真机:拖线重连 input→a 后,a 的徽章消除、b 的保留——relint 新结果整体替换旧投影,双向(出错亮 / 修好灭)都即时。"
+    }
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "relintSkillFromDisk:立即 POST(无防抖、无 markdown body)、广播 status+result、workspace_root 透传、请求失败降级 failed+null(useDebouncedLint.test.ts『relintSkillFromDisk』describe)。",
+    "Workspace:画布连线写盘成功后调 relintSkillFromDisk(skillId, workspaceRoot)且仍不自动 compile(Workspace.test.tsx『does not auto-compile after a canvas connection』)。",
+    "engine:双孤岛/双未知依赖一次报齐、拓扑缺陷不遮蔽节点缺陷、未知依赖不级联报孤岛(test_compiler_line_locations.py + test_round14_skill_compilation_cutover.py)。",
+    "后端:lint 展开全部 issues 且轴齐全(test_lint_surfaces_every_defect_of_one_pass);无 body → lint 磁盘真相(test_lint_on_disk_with_workspace_root_reflects_disk_truth)。"
+   ],
+   "layer2": [
+    "真机走查(2026-07-02,Playwright 驱动 dev-harness + 本 worktree 私有 sidecar):基线 0 徽章 → 断线 1 徽章 → 再断 2 徽章 → 重连回落 1 徽章;lintResultEvent 每轮携带该轮全量错误。",
+    "后端直连取证:断线后的磁盘树 POST /lint 一次返回全部孤岛(a.depends_on L17 + b.depends_on L18)。"
+   ]
   }
  ]
 }

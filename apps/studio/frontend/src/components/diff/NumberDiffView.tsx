@@ -17,21 +17,21 @@ export function NumberDiffView({ currentValue, goldenValue }: NumberDiffViewProp
 
   return (
     <div className="grid grid-cols-3 gap-2 text-sm">
-      <div className="rounded-md bg-slate-100 p-3 dark:bg-slate-800">
-        <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Golden</div>
-        <div className="mt-1 font-mono text-slate-800 dark:text-slate-100">{golden ?? 'n/a'}</div>
+      <div className="rounded-md bg-muted/40 p-3">
+        <div className="text-xs font-semibold uppercase text-muted-foreground">Golden</div>
+        <div className="mt-1 font-mono text-foreground">{golden ?? 'n/a'}</div>
       </div>
-      <div className="rounded-md bg-slate-100 p-3 dark:bg-slate-800">
-        <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Current</div>
-        <div className="mt-1 font-mono text-slate-800 dark:text-slate-100">{current ?? 'n/a'}</div>
+      <div className="rounded-md bg-muted/40 p-3">
+        <div className="text-xs font-semibold uppercase text-muted-foreground">Current</div>
+        <div className="mt-1 font-mono text-foreground">{current ?? 'n/a'}</div>
       </div>
-      <div className={`rounded-md p-3 ${delta === 0 ? 'bg-green-50 dark:bg-green-950/40' : 'bg-amber-50 dark:bg-amber-950/40'}`}>
-        <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Delta</div>
-        <div className="mt-1 font-mono text-slate-800 dark:text-slate-100">
+      <div className={`rounded-md p-3 ${delta === 0 ? 'bg-success/10' : 'bg-warning/10'}`}>
+        <div className="text-xs font-semibold uppercase text-muted-foreground">Delta</div>
+        <div className="mt-1 font-mono text-foreground">
           {delta === null ? 'n/a' : `${delta > 0 ? '+' : ''}${delta}`}
         </div>
         {percent !== null ? (
-          <div className="text-xs text-slate-500 dark:text-slate-400">
+          <div className="text-xs text-muted-foreground">
             {percent > 0 ? '+' : ''}{percent.toFixed(1)}%
           </div>
         ) : null}

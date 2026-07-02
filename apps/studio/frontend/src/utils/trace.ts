@@ -43,21 +43,21 @@ export function eventMessage(event: CallbackEvent): string {
 
 export function eventColor(eventType: string): string {
   if (eventType === 'predict_chain_start') {
-    return 'bg-amber-500'
+    return 'bg-warning'
   }
   if (eventType === 'phase_start') {
-    return 'bg-blue-500'
+    return 'bg-multimodal-border'
   }
   if (eventType === 'phase_end' || eventType === 'run_ended') {
-    return 'bg-green-500'
+    return 'bg-success'
   }
   if (eventType === 'llm_call' || eventType === 'prompt_captured') {
-    return 'bg-violet-500'
+    return 'bg-primary'
   }
   if (eventType === 'internal_error' || eventType === 'validation_fail') {
-    return 'bg-red-500'
+    return 'bg-destructive'
   }
-  return 'bg-slate-400'
+  return 'bg-muted-foreground'
 }
 
 export function isPredictRootEvent(event: CallbackEvent): boolean {
@@ -93,15 +93,15 @@ export function mockedSourceLabel(source: MockedSource): string {
 
 export function mockedSourceClass(source: MockedSource): string {
   if (source === 'golden_case') {
-    return 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+    return 'border-warning-border bg-warning/10 text-warning'
   }
   if (source === 'copilot') {
-    return 'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-300'
+    return 'border-multimodal-border bg-multimodal-border/10 text-foreground'
   }
   if (source === 'manual') {
-    return 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
+    return 'border-success-border bg-success/10 text-success'
   }
-  return 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-300'
+  return 'border-primary/50 bg-primary/10 text-primary'
 }
 
 export interface RetryBadge {

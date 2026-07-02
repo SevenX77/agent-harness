@@ -303,7 +303,7 @@
         },
         {
           "file": "n1-13-remove-toast.png",
-          "caption": "② 后态:点 Remove from recent → 右上成功 toast「Removed …」+ 该卡从 Recent 移除(盘上文件不删,只是不再出现在最近列表)。"
+          "caption": "② 后态:点 Remove from recent → 右下成功 toast「Removed …」+ 该卡从 Recent 移除(盘上文件不删,只是不再出现在最近列表)。注:本图摄于 toast 还在右上的版本;2026-07-02 起全局 toast 移至右下(PM 决策),流程本身未变。"
         },
         {
           "file": "n1-13b-toast-closeup.png",

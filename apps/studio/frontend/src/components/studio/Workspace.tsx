@@ -11,7 +11,7 @@ import { copilotFileActionEffects, type CopilotFileAction } from "@/components/c
 import { PromptInspector } from "@/components/PromptInspector"
 import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
-import { lintResultEvent, lintStatusEvent, readLintStatus } from "@/hooks/useDebouncedLint"
+import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistory } from "@/hooks/useRunHistory"
@@ -1015,6 +1015,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setCompileDrawerOpen(false)
   }, [])
 
+  // 03_compile A13 / compile-lint F1+F6: a SETTLED source write (canvas topology
+  // edit, panel save, phase create/delete/rename) must REPLACE the lint projection
+  // with a fresh engine verdict of the on-disk truth — clearing alone leaves a
+  // broken graph (e.g. a just-disconnected edge) looking healthier than before.
+  const refreshLintAfterSourceWrite = useCallback((targetSkillId: string, workspaceRoot?: string | null) => {
+    clearStaleCompileProjection(targetSkillId)
+    void relintSkillFromDisk(targetSkillId, workspaceRoot)
+  }, [clearStaleCompileProjection])
+
   const handlePhaseFileSave = useCallback(async ({
     path,
     content,
@@ -1057,9 +1066,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           revision: Date.now(),
         })
         toast.success("Saved phase properties")
-        clearStaleCompileProjection(target.skillId)
+        refreshLintAfterSourceWrite(target.skillId, target.workspaceRoot)
         if (currentSkillId && currentSkillId !== target.skillId) {
-          clearStaleCompileProjection(currentSkillId)
+          refreshLintAfterSourceWrite(currentSkillId, currentWorkspaceRoot)
         }
       } catch (error) {
         if (isReadOnlySkillError(error)) {
@@ -1086,9 +1095,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       return next
     })
     toast.success("Saved phase properties")
-    clearStaleCompileProjection(currentSkillId)
+    refreshLintAfterSourceWrite(currentSkillId, currentWorkspaceRoot)
     void mutateSkillDetail()
-  }, [clearStaleCompileProjection, currentSkillId, doWriteSkillFile, mutateSkillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doWriteSkillFile, mutateSkillDetail, refreshLintAfterSourceWrite])
 
   // Add a LOGIC action: scaffold `phases/<id>/actions/<name>.py` (one action per
   // file, function name = action name — project convention, copilot.py), keep the
@@ -1129,7 +1138,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await doWriteSkillFile(pyPath, actionStubContent(trimmed), null, override, { createIfAbsent: true })
       createdPy = true
       await doWriteSkillFile(logicPath, applied.markdown, await sha256Hex(logicContent), override)
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       toast.success(`Created action ${trimmed}`)
       // Open the new file in the SAME skill the node lives in (child subgraph when
       // drilled) — pass skillId/workspaceRoot so it doesn't resolve against root.
@@ -1154,7 +1163,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (target) void target.onSettled()
       else void mutateSkillDetail()
     }
-  }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, refreshLintAfterSourceWrite, skillDetail])
 
   // Create a phase validator: scaffold the sibling `phases/<id>/validator.py` from a
   // passing stub (engine `def validate(output, state_slice, **kwargs)` contract) AND
@@ -1191,7 +1200,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await doWriteSkillFile(pyPath, validatorStubContent(), null, override, { createIfAbsent: true })
       createdPy = true
       await doWriteSkillFile(phasePath, enabled.markdown, await sha256Hex(phaseContent), override)
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       toast.success("Created validator.py")
       handleFileOpen({
         path: pyPath,
@@ -1214,7 +1223,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (target) void target.onSettled()
       else void mutateSkillDetail()
     }
-  }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, refreshLintAfterSourceWrite, skillDetail])
 
   // Delete a LOGIC action: drop it from LOGIC.md frontmatter + body (kept in sync)
   // and remove its `actions/<name>.py` file when present.
@@ -1245,7 +1254,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (hasFile) {
         await doDeleteWorkspacePath(pyPath, override)
       }
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       toast.success(`Deleted action ${name}`)
       if (target) await target.onSettled()
       else await mutateSkillDetail()
@@ -1254,7 +1263,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (target) void target.onSettled()
       else void mutateSkillDetail()
     }
-  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, refreshLintAfterSourceWrite, skillDetail])
 
   const handleCreatePhase = useCallback(async (kind: NewPhaseKind, requestedPhaseId?: string, target?: ChildSaveTarget) => {
     // Drilled-child create mirrors handleDeletePhase: when a child target is given,
@@ -1296,7 +1305,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         ? await serializeSkillGraph(targetSkillId, draft.phases, graphHash, override.workspaceRoot)
         : await serializeSkillGraph(targetSkillId, draft.phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       toast.success(`Created ${draft.phaseId}`)
       if (target) await target.onSettled()
       else await mutateSkillDetail()
@@ -1313,7 +1322,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (target) void target.onSettled()
       else void mutateSkillDetail()
     }
-  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, readGraphHash, skillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, readGraphHash, refreshLintAfterSourceWrite, skillDetail])
 
   const handleDeletePhase = useCallback(async (phaseId: string, target?: ChildSaveTarget) => {
     const editDetail = target?.detail ?? skillDetail
@@ -1387,7 +1396,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         }
         return next
       })
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       toast.success(`Deleted ${phaseId}`)
       if (target) {
         await target.onSettled()
@@ -1405,7 +1414,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
       toast.error(errorMessage(error))
     }
-  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doListWorkspaceDir, doReadWorkspaceFile, doWriteSkillFile, mutateSkillDetail, readGraphHash, skillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doListWorkspaceDir, doReadWorkspaceFile, doWriteSkillFile, mutateSkillDetail, readGraphHash, refreshLintAfterSourceWrite, skillDetail])
 
   const handleRenamePhase = useCallback(async (phaseId: string, nextPhaseId: string, target?: ChildSaveTarget) => {
     const editDetail = target?.detail ?? skillDetail
@@ -1529,7 +1538,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         })
       }
       toast.success(`Renamed ${phaseId} to ${nextId}`)
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       if (target) {
         await target.onSettled()
       } else {
@@ -1556,7 +1565,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         void mutateSkillDetail()
       }
     }
-  }, [clearStaleCompileProjection, currentSkillId, doMoveWorkspacePath, doWriteSkillFile, mutateSkillDetail, readGraphHash, skillDetail])
+  }, [currentSkillId, currentWorkspaceRoot, doMoveWorkspacePath, doWriteSkillFile, mutateSkillDetail, readGraphHash, refreshLintAfterSourceWrite, skillDetail])
 
   // Shared serialize -> write GRAPH.md -> settle tail for graph-structure edits
   // (connect / disconnect / reconnect). Compile stays an explicit user action so
@@ -1575,7 +1584,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         ? await serializeSkillGraph(targetSkillId, phases, graphHash, override.workspaceRoot)
         : await serializeSkillGraph(targetSkillId, phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
-      clearStaleCompileProjection(targetSkillId)
+      refreshLintAfterSourceWrite(targetSkillId, override ? override.workspaceRoot : currentWorkspaceRoot)
       if (target) {
         await target.onSettled()
       } else {
@@ -1592,7 +1601,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
       throw error
     }
-  }, [clearStaleCompileProjection, doWriteSkillFile, mutateSkillDetail, readGraphHash])
+  }, [currentWorkspaceRoot, doWriteSkillFile, mutateSkillDetail, readGraphHash, refreshLintAfterSourceWrite])
 
   const handlePersistConnection = useCallback(async (connection: Connection, target?: ChildSaveTarget) => {
     const editDetail = target?.detail ?? skillDetail

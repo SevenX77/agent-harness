@@ -316,7 +316,9 @@ describe("ProviderCard test status badge", () => {
     })
 
     expect(html).toContain("Invalid API key")
-    expect(html).toContain("API key is invalid")
+    // The error-code detail moved from a native title into the badge's Radix
+    // tooltip; the badge renders as the tooltip trigger.
+    expect(html).toContain('data-slot="tooltip-trigger" data-variant="destructive"')
   })
 })
 

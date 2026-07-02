@@ -44,7 +44,14 @@ function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {
           : 'border-border/70 text-muted-foreground'
       }`}
     >
-      <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground">
+      {/* R5-D: tool activity is SECONDARY info — one shade dimmer than the
+          answer text (PM: 挂载/工具调用结果都用淡一号的字); hover restores
+          full contrast for affordance. Failures keep the destructive color. */}
+      <summary
+        className={`flex cursor-pointer items-center gap-2 font-medium transition-colors ${
+          failed ? 'text-destructive' : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
         {event.type === 'tool_use_start' ? (
           <Loader2 className="size-3.5 animate-spin" />
         ) : failed ? (

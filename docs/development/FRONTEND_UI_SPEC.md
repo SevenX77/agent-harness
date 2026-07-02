@@ -62,6 +62,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - **核心风格**: deep indigo-violet primary on neutral grays, light + dark mode, 0.625rem radius, Inter Variable + JetBrains Mono Variable fonts, lucide icons。
 - 设计 tokens 已 100% 推导自 demo computed CSS, 详细 token 矩阵见 [`.kiro/specs/_archive/studio-uikit-redesign/tokens.md`](../../.kiro/specs/_archive/studio-uikit-redesign/tokens.md), 当前已沉淀至本地主题 CSS (`apps/studio/frontend/src/index.css`)。
 - **中文字形必须打包字体兜底**: `--font-sans` 在 `Inter Variable`(拉丁)之后、系统 CJK(`PingFang SC`/`Microsoft YaHei`)之后,必须以**打包的 webfont** `Noto Sans SC Variable`(`@fontsource-variable/noto-sans-sc`,随 `index.css` `@import`)收尾。原因:Tauri 壳用 WebKitGTK,目标机常无系统中文字体,只靠系统字体会渲染成豆腐块;打包字体保证任何环境中文都出字。新增字体不要只改字体栈而漏装 `@fontsource` 依赖。
+- **markdown 排版**: 渲染 markdown(ReactMarkdown)一律用 `index.css` 的 `.copilot-prose`(全语义 token + `--font-mono` 代码块)。**禁止**使用 `prose*` 类——`@tailwindcss/typography` 未安装,这些类是死类(2026-07-02 R5-D 教训:copilot 面板 markdown 因此裸奔了数轮);也不要通过安装该插件来"救活"它们,插件自带灰阶调色会引入第二套颜色世界。聊天类 UI 的气泡/系统注记优先用本地 `ui/bubble.tsx` / shadcn chat 原语,不手搓 `div.bg-muted`。
 - **颜色原则**: 开发人员写新组件时, **严禁 Hardcode 任何十六进制颜色码或 Tailwind 具体色值** (如 `bg-gray-800`)。必须使用语义化的 CSS 变量类 (如 `bg-background`, `text-muted-foreground`, `border-border`)。
 
 ### 2.3 暗黑极客主题 (Dark Theme Only)
@@ -91,6 +92,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 数据密集型侧栏（例如模型库、资源列表、引用列表）应避免外层再套装饰性 Card；侧栏本身是布局区域，只有单个 repeated item、弹窗或真正独立的工具面板才使用 Card。
 - `ScrollArea` 不应让 scrollbar 占用内容宽度；需要隐藏 scrollbar 时使用本地 `ScrollArea` wrapper 的 slot selector，且必须验证内容宽度没有被挤压。
 - 本地 `ScrollArea` wrapper 必须在根节点裁剪溢出，并在 viewport 上隐藏浏览器原生 scrollbar；业务面板不要再用裸 `overflow-y-auto` 承担主滚动。
+- 系统原生 scrollbar 外观由 `index.css` `@layer base` 的全局规则统一接管（`scrollbar-width: thin` + token 化 `scrollbar-color`，附 `::-webkit-scrollbar` 兜底旧 WebKit）：`pre` 代码块、局部 `overflow-auto` 容器等剩余原生滚动一律走这套细滚动条，不要在单个组件里再写一次性 `::-webkit-scrollbar` 覆写或引入第二套滚动条外观。
 - 流式追加的消息/日志列表（Copilot 聊天、未来 trace 流）必须使用本地 `components/ui/message-scroller.tsx`（封装 shadcn radix message-scroller primitive）：流式时贴底跟随、用户上滚即释放跟随并浮现回到底部按钮、用户轮次 `scrollAnchor` 锚定；不要为流式列表手写 scrollTop 启发式或再造第二套贴底逻辑。注意 markdown 会把单个 `
 ` 折叠成同一段落——验证“长回复溢出滚动”时要用列表/多段内容，不要用单换行文本。
 - 任何固定宽度或最小宽度都必须有响应式约束。窄面板下卡片、ring、badge、按钮和长文本不能横向溢出，也不能被父级裁掉关键反馈。
@@ -185,7 +187,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 后台 Playwright smoke test 如果需要临时启动 Vite/backend，必须记录自己启动的 PID 并只清理这些 PID；不得用宽泛的 `pgrep`/`kill` 模式清理 `cargo tauri dev`、Studio Vite 或 Tauri dynamic sidecar，否则会把仍在使用的桌面窗口后端端口杀掉，造成 Settings 等页面持续请求 stale sidecar port。
 - 必须覆盖被改动的主成功路径和明显的取消/清空/错误/空状态。对于搜索、选择、复制、显示/隐藏、展开/折叠等交互，要逐一点击验证。
 - 手动验证应包含窄宽度视口。至少检查页面级、侧栏级、卡片级没有横向溢出；选中 ring、hover/active、badge overflow 和按钮点击目标不能被裁剪或被其它元素拦截。
-- 全局 Sonner toast 不能占用固定底部主操作区；Studio 有底部居中的 action bar 时，通知默认放在顶部右侧，避免 success/error toast 拦截 Compile/Predict/Run 等连续点击路径。
+- 全局 Sonner toast 固定放在**右下角**（PM 决策 2026-07-01），且不能占用固定底部主操作区：Studio 的底部 action bar 是居中的，右下角通知不与 Compile/Predict/Run 等连续点击路径重叠；如未来右下角出现常驻操作件，再评估位置。toast 状态图标必须用语义 token 着色（success=`text-success`、warning=`text-warning`、error=`text-destructive`、info=`text-primary`、loading=`text-muted-foreground`），不允许全白图标弱化状态语义。
 - 如果变更涉及 Tauri 文件系统能力（目录选择、Reveal、终端、外部编辑器、原生菜单等），必须在 Tauri 环境或等价的 Tauri bridge 路径下验证，不能只用普通浏览器 fallback 得出结论；只有这类 Playwright 无法覆盖的原生 shell 行为才允许使用桌面控制工具，并且最终说明必须写清楚为什么不能用后台 Playwright 覆盖。
 
 ### 2.11 全局文字选择守卫与允许选择白名单 (Text-selection guard & allow-list)

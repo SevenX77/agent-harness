@@ -141,11 +141,11 @@ export function VirtualTraceList({
       onKeyDown={handleKeyDown}
       data-predict-trace={predictTrace ? 'true' : undefined}
       data-virtualized-count={events.length}
-      className={`min-h-0 flex-1 overflow-y-auto pr-1 outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-800 ${
-        predictTrace ? 'border-l border-amber-200 pl-2 dark:border-amber-900/50' : ''
+      className={`min-h-0 flex-1 overflow-y-auto pr-1 outline-none focus:ring-2 focus:ring-ring/50 ${
+        predictTrace ? 'border-l border-warning-border/50 pl-2' : ''
       }`}
     >
-      <div className="relative ml-3 border-l-2 border-gray-200 dark:border-slate-800" style={{ height: virtual.totalHeight }}>
+      <div className="relative ml-3 border-l-2 border-border" style={{ height: virtual.totalHeight }}>
         <div
           className="absolute left-0 right-0 top-0 space-y-5"
           style={{ transform: `translateY(${virtual.offsetTop}px)` }}

@@ -11,7 +11,9 @@ import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
+import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
+import { Skeleton } from '../ui/skeleton'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -29,6 +31,7 @@ import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bu
 import { RolePicker, copilotRoleOptions } from './role-picker'
 import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
+import { buildAssistantTranscript } from './transcript'
 
 interface ChatMessageItemProps {
   message: CopilotMessage
@@ -39,99 +42,116 @@ interface ChatMessageItemProps {
 
 function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }: ChatMessageItemProps) {
   const isUser = message.role === 'user'
-  // F6 R3: waiting for the first ANSWER token (spawn + model latency) must be
-  // visible. Events don't clear it — the stream's first event is always the
-  // context_resolved echo, and tool activity without text still IS waiting.
-  const waiting = !isUser && message.status === 'running' && !message.content
   if (isUser) {
+    // chat.md contract: the colored message surface is Bubble, never a styled
+    // div with bg-muted and hand-managed corners.
     return (
       <Message align="end" data-copilot-message-role="user">
         <MessageContent>
-          <div className="max-w-[85%] self-end rounded-lg bg-muted px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
-            {message.content}
-          </div>
+          <Bubble variant="muted" align="end" className="text-sm">
+            <BubbleContent>{message.content}</BubbleContent>
+          </Bubble>
         </MessageContent>
       </Message>
     )
   }
+  const segments = buildAssistantTranscript(message)
+  const streaming = message.status === 'running'
+  // F6-7/F8: the wait shimmer covers everything up to the first VISIBLE
+  // activity — the first thinking or answer token. context_resolved / tool
+  // events alone don't clear it; once thinking streams, the live transcript
+  // takes over as the waiting indicator.
+  const waiting =
+    streaming && !message.content && !message.events.some((event) => event.type === 'thinking_delta')
   return (
     <Message align="start" data-copilot-message-role="assistant">
       <MessageContent>
         {waiting ? <ThinkingRow /> : null}
-        <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert prose-p:my-1.5 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-pre:my-2">
-          <ReactMarkdown>{message.content}</ReactMarkdown>
-        </div>
-      <div className="mt-1 space-y-1">
-        {message.events.map((event) => {
-          if (event.type === 'tool_use_start') {
-            return <ToolCallBubble key={event.id} event={event} />
-          }
-          if (event.type === 'tool_use_result') {
-            return (
-              <div key={event.id}>
-                <ToolCallBubble event={event} />
-                <DiffBubble event={event} />
-              </div>
-            )
-          }
-          if (event.type === 'error') {
-            return (
-              <div key={event.id} className="border-l border-destructive/50 py-1 pl-3 text-xs text-destructive">
-                <div className="flex items-center gap-2 font-medium">
-                  <CircleAlert className="size-3.5" />
-                  Copilot error
+        <div className="space-y-1.5">
+          {segments.map((segment) => {
+            if (segment.kind === 'text') {
+              return (
+                <div key={segment.id} className="copilot-prose text-sm leading-relaxed text-foreground">
+                  <ReactMarkdown>{segment.content}</ReactMarkdown>
                 </div>
-                <p className="mt-1 whitespace-pre-wrap leading-snug">{event.message}</p>
-              </div>
-            )
-          }
-          if (event.type === 'patch_proposed') {
-            return (
-              <PatchProposedBubble
-                key={event.id}
-                event={event}
-                skillId={skillId}
-                workspaceRoot={workspaceRoot}
-                onFileChanged={onFileChanged}
-              />
-            )
-          }
-          if (event.type === 'bash_approval_required') {
-            return <BashApprovalCard key={event.id} event={event} skillId={skillId} />
-          }
-          if (event.type === 'context_resolved') {
-            return (
-              <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                <summary className="cursor-pointer font-medium text-foreground">{event.summary}</summary>
-                <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
-                  {event.detail}
-                </pre>
-              </details>
-            )
-          }
-          if (event.type === 'thinking_delta') {
-            return (
-              <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                <summary className="cursor-pointer font-medium text-foreground">Thought</summary>
-                <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
-                  {event.content}
-                </pre>
-              </details>
-            )
-          }
-          if (event.type === 'unknown') {
-            return (
-              <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                <summary className="cursor-pointer font-medium text-foreground">Unknown Copilot event</summary>
-                <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
-                  {JSON.stringify(event.payload, null, 2)}
-                </pre>
-              </details>
-            )
-          }
-          return null
-        })}
-      </div>
+              )
+            }
+            if (segment.kind === 'thinking') {
+              // F8: reasoning streams live — open while the turn is running so
+              // the trace is visible as it arrives, collapsed once settled.
+              return (
+                <details
+                  key={segment.id}
+                  open={streaming}
+                  className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground"
+                >
+                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Thought</summary>
+                  <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+                    {segment.content}
+                  </pre>
+                </details>
+              )
+            }
+            const event = segment.event
+            if (event.type === 'tool_use_start') {
+              return <ToolCallBubble key={event.id} event={event} />
+            }
+            if (event.type === 'tool_use_result') {
+              return (
+                <div key={event.id}>
+                  <ToolCallBubble event={event} />
+                  <DiffBubble event={event} />
+                </div>
+              )
+            }
+            if (event.type === 'error') {
+              return (
+                <div key={event.id} className="border-l border-destructive/50 py-1 pl-3 text-xs text-destructive">
+                  <div className="flex items-center gap-2 font-medium">
+                    <CircleAlert className="size-3.5" />
+                    Copilot error
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap leading-snug">{event.message}</p>
+                </div>
+              )
+            }
+            if (event.type === 'patch_proposed') {
+              return (
+                <PatchProposedBubble
+                  key={event.id}
+                  event={event}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
+                  onFileChanged={onFileChanged}
+                />
+              )
+            }
+            if (event.type === 'bash_approval_required') {
+              return <BashApprovalCard key={event.id} event={event} skillId={skillId} />
+            }
+            if (event.type === 'context_resolved') {
+              return (
+                <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">{event.summary}</summary>
+                  <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+                    {event.detail}
+                  </pre>
+                </details>
+              )
+            }
+            if (event.type === 'unknown') {
+              return (
+                <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Unknown Copilot event</summary>
+                  <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+                    {JSON.stringify(event.payload, null, 2)}
+                  </pre>
+                </details>
+              )
+            }
+            return null
+          })}
+        </div>
       </MessageContent>
     </Message>
   )
@@ -231,6 +251,11 @@ export function CopilotPanel({
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
   const [selectedRouteId, setSelectedRouteId] = useState('')
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
+  // R5-C: the role/route slot shows a skeleton until BOTH config fetches settle
+  // (registry can take ~45s on cold probe). Settled = resolved OR failed — a
+  // failed fetch must drop the skeleton (picker hides as before), never park it.
+  const [registrySettled, setRegistrySettled] = useState(false)
+  const [rolesSettled, setRolesSettled] = useState(false)
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [openingClaudeCode, setOpeningClaudeCode] = useState(false)
@@ -308,6 +333,11 @@ export function CopilotPanel({
       .catch((error) => {
         toast.error(copilotBackendErrorMessage(error, 'Copilot route config unavailable'))
       })
+      .finally(() => {
+        if (!cancelled) {
+          setRegistrySettled(true)
+        }
+      })
     return () => {
       cancelled = true
     }
@@ -324,6 +354,11 @@ export function CopilotPanel({
       })
       .catch((error) => {
         toast.error(copilotBackendErrorMessage(error, 'Copilot roles unavailable'))
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRolesSettled(true)
+        }
       })
     return () => {
       cancelled = true
@@ -499,7 +534,7 @@ export function CopilotPanel({
           </>
         ) : (
           <div className="studio-canvas-input-surface rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
+            <div className="copilot-prose text-sm text-muted-foreground">
               <ReactMarkdown>
                 {skillId
                   ? inEvalView
@@ -593,17 +628,25 @@ export function CopilotPanel({
         {/* F7 context actions (attach / @mention) join the left side of this row
             once they are functional — no dead placeholders. */}
         <div className="flex items-center justify-end gap-0.5">
-          <ModelPicker
-            role={pickerRole}
-            registry={registry}
-            selectedRouteId={selectedRouteId || defaultRouteId}
-            onSelect={selectRoute}
-          />
-          <RolePicker
-            options={roleOptions}
-            selectedRole={selectedRoleKey}
-            onSelect={setSelectedRole}
-          />
+          {registrySettled && rolesSettled ? (
+            <>
+              <ModelPicker
+                role={pickerRole}
+                registry={registry}
+                selectedRouteId={selectedRouteId || defaultRouteId}
+                onSelect={selectRoute}
+              />
+              <RolePicker
+                options={roleOptions}
+                selectedRole={selectedRoleKey}
+                onSelect={setSelectedRole}
+              />
+            </>
+          ) : (
+            // R5-C: role/route slot placeholder while config loads (cold registry
+            // probe can take ~45s) — shadcn Skeleton, sized like the picker chip.
+            <Skeleton aria-label="Loading copilot roles" className="h-7 w-32 rounded-md" />
+          )}
         </div>
       </form>
     </aside>

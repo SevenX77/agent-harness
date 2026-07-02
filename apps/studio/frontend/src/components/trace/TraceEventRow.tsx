@@ -14,6 +14,7 @@ import {
   tokenText,
   toolCallSummary,
 } from '../../utils/trace'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { EventTypeBadge } from './EventTypeBadge'
 
 interface TraceEventRowProps {
@@ -58,7 +59,7 @@ export function TraceEventRow({
 
   return (
     <div className="relative pl-6" style={{ minHeight: TRACE_EVENT_ROW_HEIGHT - 20 }}>
-      <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-white dark:border-slate-900 ${eventColor(event.event_type)}`} />
+      <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-background ${eventColor(event.event_type)}`} />
       <button
         type="button"
         data-trace-event-id={eventId}
@@ -74,38 +75,44 @@ export function TraceEventRow({
         }}
         className={`block w-full rounded-md border p-3 text-left shadow-sm transition-colors ${
           selected
-            ? 'border-sky-300 bg-sky-50 dark:border-sky-700 dark:bg-sky-900/30'
+            ? 'border-primary/60 bg-primary/10'
             : highlighted
-              ? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20'
+              ? 'border-warning-border bg-warning/10'
               : isError
-                ? 'border-red-200 bg-red-50 hover:border-red-400 dark:border-red-800 dark:bg-red-900/20 dark:hover:border-red-600'
-                : 'border-gray-200 bg-white hover:border-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700'
+                ? 'border-destructive-border/60 bg-destructive/10 hover:border-destructive-border'
+                : 'border-border bg-card hover:border-muted-foreground/40'
         }`}
       >
         <div className="mb-1 flex items-center justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2">
-            {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
             <EventTypeBadge eventType={event.event_type} />
           </span>
           {tokens ? (
-            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">
+            <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
               <Hash className="h-3 w-3" />
               {tokens}
             </span>
           ) : null}
           {retry ? (
-            <span
-              aria-label={`Retry attempt ${retry.label}`}
-              title={retry.exhausted ? `Final attempt (${retry.label})` : `Retry attempt ${retry.label}`}
-              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                retry.exhausted
-                  ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300'
-                  : 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-              }`}
-            >
-              <RotateCcw className="h-3 w-3" />
-              {retry.label}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  aria-label={`Retry attempt ${retry.label}`}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                    retry.exhausted
+                      ? 'border-destructive-border bg-destructive/10 text-destructive'
+                      : 'border-warning-border bg-warning/10 text-warning'
+                  }`}
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  {retry.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {retry.exhausted ? `Final attempt (${retry.label})` : `Retry attempt ${retry.label}`}
+              </TooltipContent>
+            </Tooltip>
           ) : null}
           {mockedSource ? (
             <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${mockedSourceClass(mockedSource)}`}>
@@ -113,10 +120,10 @@ export function TraceEventRow({
             </span>
           ) : null}
         </div>
-        <div className="text-xs font-medium uppercase text-gray-400 dark:text-gray-500">{eventPhase(event)}</div>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{eventMessage(event)}</p>
+        <div className="text-xs font-medium uppercase text-muted-foreground">{eventPhase(event)}</div>
+        <p className="mt-1 text-sm text-muted-foreground">{eventMessage(event)}</p>
         {isError && typeof event.error_message === 'string' ? (
-          <p className="mt-2 rounded border border-red-200 bg-white px-2 py-1 text-xs text-red-700 dark:border-red-800 dark:bg-slate-950 dark:text-red-300">
+          <p className="mt-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive">
             {event.error_message}
           </p>
         ) : null}
@@ -135,7 +142,7 @@ export function TraceEventRow({
                 onSelectPrompt(index)
               }
             }}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             Inspect prompt <ChevronRight className="h-3 w-3" />
@@ -144,13 +151,13 @@ export function TraceEventRow({
         {toolCall ? (
           <span className="mt-2 flex items-center gap-2 text-xs">
             {toolCall.toolName === 'Bash' ? (
-              <TerminalSquare className="h-3.5 w-3.5 text-emerald-500" />
+              <TerminalSquare className="h-3.5 w-3.5 text-success" />
             ) : (
-              <Wrench className="h-3.5 w-3.5 text-emerald-500" />
+              <Wrench className="h-3.5 w-3.5 text-success" />
             )}
-            <span className="font-medium text-gray-700 dark:text-gray-200">{toolCall.headline}</span>
+            <span className="font-medium text-foreground">{toolCall.headline}</span>
             {toolCall.durationLabel ? (
-              <span className="text-gray-400 dark:text-gray-500">{toolCall.durationLabel}</span>
+              <span className="text-muted-foreground">{toolCall.durationLabel}</span>
             ) : null}
             <span
               role="button"
@@ -167,7 +174,7 @@ export function TraceEventRow({
                   setSubtreeOpen((open) => !open)
                 }
               }}
-              className="inline-flex items-center gap-1 rounded border border-emerald-300 px-1.5 py-0.5 font-medium text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+              className="inline-flex items-center gap-1 rounded border border-success-border px-1.5 py-0.5 font-medium text-success hover:bg-success/10"
             >
               {subtreeOpen ? <ListTree className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
               {subtreeOpen ? 'Subtree' : 'Expand'}
@@ -187,8 +194,8 @@ export function TraceEventRow({
 // a single failed attempt (validation_fail.errors).
 function ErrorStack({ failures }: { failures: string[] }) {
   return (
-    <div className="mt-2 rounded border border-red-200 bg-red-50/70 p-2 dark:border-red-800 dark:bg-red-900/20">
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-red-700 dark:text-red-300">
+    <div className="mt-2 rounded border border-destructive-border/60 bg-destructive/10 p-2">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-destructive">
         <AlertOctagon className="h-3.5 w-3.5" />
         Error Stack ({failures.length})
       </div>
@@ -196,9 +203,9 @@ function ErrorStack({ failures }: { failures: string[] }) {
         {failures.map((reason, position) => (
           <li
             key={`${position}-${reason.slice(0, 24)}`}
-            className="flex gap-2 rounded border border-red-200 bg-white px-2 py-1 text-xs text-red-700 dark:border-red-800 dark:bg-slate-950 dark:text-red-300"
+            className="flex gap-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive"
           >
-            <span className="font-mono text-red-400 dark:text-red-500">#{position + 1}</span>
+            <span className="font-mono text-destructive/70">#{position + 1}</span>
             <span className="whitespace-pre-wrap">{reason}</span>
           </li>
         ))}
@@ -212,23 +219,23 @@ function ErrorStack({ failures }: { failures: string[] }) {
 // is not a black box and the user never has to read raw JSON.
 function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof toolCallSummary>> }) {
   return (
-    <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-2 text-xs dark:border-emerald-900/60 dark:bg-emerald-900/15">
-      <div className="flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-300">
+    <div className="mt-2 rounded-md border border-success-border/60 bg-success/10 p-2 text-xs">
+      <div className="flex items-center gap-1.5 font-medium text-success">
         <ListTree className="h-3.5 w-3.5" />
         {summary.headline}
       </div>
       {summary.args ? (
         <div className="mt-1.5">
-          <div className="text-[10px] font-semibold uppercase text-emerald-600/80 dark:text-emerald-400/80">Input</div>
-          <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] text-gray-700 dark:bg-slate-950 dark:text-slate-200">
+          <div className="text-[10px] font-semibold uppercase text-success/80">Input</div>
+          <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
             {summary.args}
           </pre>
         </div>
       ) : null}
       {summary.resultSummary ? (
         <div className="mt-1.5">
-          <div className="text-[10px] font-semibold uppercase text-emerald-600/80 dark:text-emerald-400/80">Result</div>
-          <p className="mt-0.5 whitespace-pre-wrap leading-relaxed text-gray-700 dark:text-slate-200">{summary.resultSummary}</p>
+          <div className="text-[10px] font-semibold uppercase text-success/80">Result</div>
+          <p className="mt-0.5 whitespace-pre-wrap leading-relaxed text-foreground">{summary.resultSummary}</p>
         </div>
       ) : null}
     </div>
@@ -253,7 +260,7 @@ function GenericPayload({ event }: { event: CallbackEvent }) {
   const body = showFull ? JSON.stringify(event, null, 2) : preview.text
   return (
     <div className="mt-2">
-      <pre className="max-h-40 overflow-auto rounded-md border border-gray-200 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 shadow-sm dark:border-slate-800">
+      <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground shadow-sm">
         {body}
       </pre>
       {preview.truncated ? (
@@ -263,7 +270,7 @@ function GenericPayload({ event }: { event: CallbackEvent }) {
             clickEvent.stopPropagation()
             setShowFull((open) => !open)
           }}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
         >
           {showFull ? 'Collapse payload' : `Show full payload (${preview.sizeLabel})`}
         </button>

@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { CopilotSession } from '../../store/copilotStore'
-import { SessionTabs, sessionTabLabel, sessionTabs } from './session-tabs'
+import { SessionTabs, SessionTabsView, consumeHorizontalWheel, sessionTabLabel, sessionTabs } from './session-tabs'
 
 vi.mock('@/components/ui/button', () => ({
   Button: ({
@@ -116,9 +116,25 @@ describe('SessionTabs', () => {
     expect(html).toContain('aria-label="New chat"')
   })
 
+  // Buttons are wrapped in Tooltip/TooltipTrigger now, so interaction tests walk
+  // the element tree instead of hardcoding children indices.
+  type AnyElement = { key?: string | null; props?: Record<string, unknown> & { children?: unknown } }
+
+  function collectElements(node: unknown, out: AnyElement[] = []): AnyElement[] {
+    if (Array.isArray(node)) {
+      node.forEach((child) => collectElements(child, out))
+      return out
+    }
+    if (!node || typeof node !== 'object') return out
+    const el = node as AnyElement
+    out.push(el)
+    if (el.props && 'children' in el.props) collectElements(el.props.children, out)
+    return out
+  }
+
   it('calls onSwitch with the chosen session id', () => {
     const onSwitch = vi.fn()
-    const element = SessionTabs({
+    const element = SessionTabsView({
       sessions: [session('s1', [{ role: 'user', content: 'a' }]), session('s2', [{ role: 'user', content: 'b' }])],
       activeSessionId: 's1',
       onSwitch,
@@ -126,21 +142,17 @@ describe('SessionTabs', () => {
       onClose: () => undefined,
     })
 
-    // <div> > [<ScrollArea>{tab spans}</ScrollArea>, <Button new />]; each tab
-    // span = [label Button, close Button].
-    const props = (element as { props: { children: unknown[] } }).props
-    const scrollArea = props.children[0] as {
-      props: { children: Array<{ key: string; props: { children: Array<{ props: { onClick?: () => void } }> } }> }
-    }
-    const secondTab = scrollArea.props.children.find((tab) => tab.key === 's2')
-    secondTab?.props.children[0]?.props.onClick?.()
+    const all = collectElements(element)
+    const secondTab = all.find((el) => el.key === 's2')
+    const labelButton = collectElements(secondTab).find((el) => typeof el.props?.onClick === 'function')
+    ;(labelButton?.props?.onClick as () => void)?.()
 
     expect(onSwitch).toHaveBeenCalledWith('s2')
   })
 
   it('calls onNew when the New chat control is activated', () => {
     const onNew = vi.fn()
-    const element = SessionTabs({
+    const element = SessionTabsView({
       sessions: [session('s1', [{ role: 'user', content: 'a' }]), session('s2', [{ role: 'user', content: 'b' }])],
       activeSessionId: 's1',
       onSwitch: () => undefined,
@@ -148,14 +160,40 @@ describe('SessionTabs', () => {
       onClose: () => undefined,
     })
 
-    const props = (element as { props: { children: unknown[] } }).props
-    const newButton = props.children[1] as { props: { onClick?: () => void } }
-    newButton.props.onClick?.()
+    const newButton = collectElements(element).find((el) => el.props?.['aria-label'] === 'New chat')
+    ;(newButton?.props?.onClick as () => void)?.()
 
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 })
 
+
+// R5-B: vertical wheel on the tab strip scrolls it horizontally (F1 constraint).
+describe('consumeHorizontalWheel', () => {
+  function viewport(overrides: Partial<{ scrollLeft: number; scrollWidth: number; clientWidth: number }> = {}) {
+    return { scrollLeft: 0, scrollWidth: 400, clientWidth: 200, ...overrides }
+  }
+
+  it('translates dominant vertical wheel into horizontal scroll and consumes it', () => {
+    const vp = viewport()
+    expect(consumeHorizontalWheel(vp, 0, 40)).toBe(true)
+    expect(vp.scrollLeft).toBe(40)
+    expect(consumeHorizontalWheel(vp, 0, -15)).toBe(true)
+    expect(vp.scrollLeft).toBe(25)
+  })
+
+  it('does nothing when the strip has no horizontal overflow', () => {
+    const vp = viewport({ scrollWidth: 200 })
+    expect(consumeHorizontalWheel(vp, 0, 40)).toBe(false)
+    expect(vp.scrollLeft).toBe(0)
+  })
+
+  it('leaves native horizontal wheel gestures to the browser', () => {
+    const vp = viewport()
+    expect(consumeHorizontalWheel(vp, 40, 10)).toBe(false)
+    expect(vp.scrollLeft).toBe(0)
+  })
+})
 
 describe('SessionTabs close button', () => {
   it('renders a close control per tab', () => {

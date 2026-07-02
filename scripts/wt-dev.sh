@@ -41,11 +41,15 @@ free_port() { # free_port <from> <to>
     const [from, to] = [Number(process.argv[1]), Number(process.argv[2])];
     (async () => {
       for (let p = from; p <= to; p++) {
+        // Probe the SAME address the consumers bind (sidecar: uvicorn --host
+        // 127.0.0.1). On Windows a 127.0.0.1 listener does not block a 0.0.0.0
+        // probe, so probing 0.0.0.0 reports "free" for a port that another
+        // worktree sidecar already holds on loopback.
         const free = await new Promise((resolve) => {
           const s = net.createServer()
             .once("error", () => resolve(false))
             .once("listening", () => s.close(() => resolve(true)))
-            .listen(p, "0.0.0.0");
+            .listen(p, "127.0.0.1");
         });
         if (free) { console.log(p); return; }
       }

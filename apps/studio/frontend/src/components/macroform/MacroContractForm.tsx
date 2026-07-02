@@ -115,7 +115,7 @@ export function MacroContractForm({
               <button
                 type="button"
                 onClick={() => removePhase(phaseId)}
-                title={`Remove ${phaseId}`}
+                aria-label={`Remove ${phaseId}`}
                 className="rounded-sm text-muted-foreground hover:text-foreground"
               >
                 <X className="h-3 w-3" />

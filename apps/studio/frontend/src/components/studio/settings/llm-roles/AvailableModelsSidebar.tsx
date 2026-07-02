@@ -404,15 +404,21 @@ function ProviderLabelBadges({
               data-provider-state={provider.state}
               aria-label={providerStateAriaLabel(provider)}
               className={cn(
-                "max-w-full justify-start font-sans",
-                expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
+                "min-w-0 max-w-full shrink justify-start font-sans",
+                expanded ? "h-auto min-h-5 whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
               )}
             >
-              <span>{provider.label}</span>
+              {/* Narrow sidebar: the state text ellipsizes first (higher shrink),
+                  then the provider name — the pill border never gets hard-clipped
+                  at the card edge. */}
+              <span className={expanded ? undefined : "min-w-0 truncate"}>{provider.label}</span>
               {stateLabel ? (
                 <span
                   data-provider-state-text="true"
-                  className="text-[0.5625rem] font-medium opacity-80"
+                  className={cn(
+                    "text-[0.5625rem] font-medium opacity-80",
+                    !expanded && "min-w-0 shrink-[4] truncate",
+                  )}
                 >
                   {stateLabel}
                 </span>

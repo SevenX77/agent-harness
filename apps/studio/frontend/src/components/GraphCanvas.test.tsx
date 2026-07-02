@@ -1353,10 +1353,32 @@ describe('GraphCanvas', () => {
     expect(topologyOwnerSkillIdForNode(nested, 'event-timeline')).toBe('story-deconstruction-v3')
   })
 
-  it('keeps the error overlay', () => {
+  it('keeps the full error overlay when there is no graph to show', () => {
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" error={new Error('failed')} />)
 
     expect(html).toContain('Failed to load skill graph.')
+    expect(html).toContain('bg-background/80')
+  })
+
+  it('never veils a rendered graph on a failed refresh — non-blocking chip instead', () => {
+    // SWR keeps the last good skillDetail when a background revalidation fails
+    // (e.g. the sidecar restarted mid-session), so `error` + stale data is a
+    // normal state. Painting the full bg-background/80 veil over a perfectly
+    // usable graph washed the whole canvas white AND blocked pointer events
+    // (2026-07-02 亮色"光晕"根因). With data on screen the failure must be a
+    // corner chip, like the Loading chip — never a canvas-wide overlay.
+    const detail = graphSkillDetail([
+      { id: 'analyze', src: 'phases/analyze/LOGIC.md', depends_on: [] },
+    ])
+    const html = renderToStaticMarkup(
+      <GraphCanvas skillId="demo-skill" skillDetail={detail} error={new Error('revalidate failed')} />,
+    )
+
+    expect(html).not.toContain('bg-background/80')
+    expect(html).not.toContain('Failed to load skill graph.')
+    expect(html).toContain('Graph refresh failed')
+    const props = reactFlowPropsRef.current as { nodes?: unknown[] } | null
+    expect(props?.nodes?.length).toBeGreaterThan(0)
   })
 
   it('keeps rendering the graph when auto-layout detects a cycle', () => {

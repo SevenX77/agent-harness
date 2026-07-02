@@ -133,20 +133,10 @@ export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant
     }
   }, [effectiveRouteId, fallbackRoute, onSelect, options, role])
 
+  // F6: no dead placeholder controls — render nothing until there is a role,
+  // and hide the picker when the chain has nothing to choose between.
   if (!role) {
-    return (
-      <Button
-        type="button"
-        disabled
-        variant="ghost"
-        size="icon"
-        title="Copilot route config unavailable"
-        aria-label="Select Copilot route"
-        className="opacity-45"
-      >
-        <Route className="size-3.5" />
-      </Button>
-    )
+    return null
   }
 
   if (variant === 'full') {
@@ -159,6 +149,10 @@ export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant
         />
       </div>
     )
+  }
+
+  if (options.length <= 1) {
+    return null
   }
 
   return (

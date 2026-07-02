@@ -33,7 +33,7 @@ def test_rules_document_covers_tools_and_context_contract() -> None:
     assert "工具与边界" in rules
     assert "Read / Write / Edit / Bash" in rules
     assert "workspace" in rules
-    assert "不要重发同一命令" in rules
+    assert "不要原样重发" in rules
     assert "<copilot_context>" in rules
     assert "<mentions>" in rules
     assert "只读" in rules

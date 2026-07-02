@@ -55,13 +55,13 @@ from app.core.adapters.gateway import (
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.copilot import (
     CopilotEvent,
-    CopilotEventBashApprovalRequired,
     CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventPatchProposed,
     CopilotEventText,
     CopilotEventThinking,
+    CopilotEventToolApprovalRequired,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
@@ -145,16 +145,19 @@ def _default_gateway_adapter_factory() -> GatewayAdapter:
 _gateway_adapter_factory: Callable[[], GatewayAdapter] = _default_gateway_adapter_factory
 
 
-# ── F5 safe-write (model B) ──────────────────────────────────────────────────
+# ── F5 safe-write + 读护栏 + 挂起式审批 ─────────────────────────────────────
 #
 # The SDK consults ``can_use_tool`` only for tools NOT pre-allowed via
-# ``allowed_tools`` (verified by PoC). So safe-write keeps only Read pre-allowed
-# and routes Write/Edit/Bash through the callback: Write/Edit emit a
-# ``patch_proposed`` event (apply-then-review, non-blocking) then ALLOW; Bash is
-# held for human approval (the interactive approve round-trip needs a
-# bidirectional WS channel, not yet wired) and surfaced as
-# ``bash_approval_required``. The callback feeds events into the active query's
-# queue via a per-skill registry — one active query per skill.
+# ``allowed_tools`` (verified by PoC), so NOTHING is pre-allowed and every tool
+# flows through the callback:
+# - Write/Edit: workspace 圈定(出界拒绝) + ``patch_proposed`` diff 事件后放行。
+# - Read/Glob/Grep: workspace + 挂载 spec 目录内直接放行;出圈挂起等用户审批。
+# - Bash: 一律挂起等审批。批准 = callback 返回 Allow → CLI 自己执行,结果回到
+#   模型上下文(旧「先拒绝 + 后端代跑」已删:代跑输出只到前端,模型看到的是
+#   deny,断掉了基于结果的续推)。审批经 ``tool_approval_required`` 事件 →
+#   前端卡片 → POST /copilot/tool-approval → resolve_tool_approval。
+# The callback feeds events into the active query's queue via a per-skill
+# registry — one active query per skill.
 
 
 @dataclass
@@ -164,40 +167,31 @@ class _SafeWriteSink:
 
 
 @dataclass(frozen=True)
-class _PendingBashApproval:
-    command: str
-    workspace_root: Path
+class ToolApprovalResolution:
+    """Outcome of resolving a held tool approval (no execution here — approval
+    flows back into the awaiting ``can_use_tool`` and the CLI runs the tool
+    itself, so its result lands in the model's context)."""
 
-
-@dataclass(frozen=True)
-class BashApprovalResult:
     tool_use_id: str
     approved: bool
-    executed: bool
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    returncode: int | None = None
+    resolved: bool
     message: str | None = None
 
 
 _safe_write_sinks: dict[str, _SafeWriteSink] = {}
-_pending_bash_approvals: dict[tuple[str, str], _PendingBashApproval] = {}
+_pending_tool_approvals: dict[tuple[str, str], asyncio.Future[bool]] = {}
 
 _STREAM_SENTINEL = object()
 
 
-def _cleanup_pending_bash_approvals(skill_id: str | None = None) -> int:
-    """Drop held Bash approvals that no longer belong to a live session."""
+def _cleanup_pending_tool_approvals(skill_id: str | None = None) -> int:
+    """Deny-and-drop held tool approvals that no longer belong to a live session."""
 
-    if skill_id is None:
-        count = len(_pending_bash_approvals)
-        _pending_bash_approvals.clear()
-        return count
-
-    keys = [key for key in _pending_bash_approvals if key[0] == skill_id]
+    keys = [key for key in _pending_tool_approvals if skill_id is None or key[0] == skill_id]
     for key in keys:
-        _pending_bash_approvals.pop(key, None)
+        future = _pending_tool_approvals.pop(key, None)
+        if future is not None and not future.done():
+            future.set_result(False)
     return len(keys)
 
 
@@ -220,8 +214,75 @@ async def _drain_sdk_response(
     finally:
         await queue.put(_STREAM_SENTINEL)
 
-_BASH_HELD_MESSAGE = "Bash 命令需用户审批（审批 UI 待接入，命令已暂缓执行）"
 _SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit 目标必须位于 workspace 内"
+_TOOL_APPROVAL_TIMEOUT_S = 120.0
+_READ_FENCED_TOOLS = ("Read", "Glob", "Grep")
+
+
+def _read_target(tool_name: str, tool_input: Mapping[str, Any]) -> str | None:
+    """The path a read-class tool is aimed at (None = tool defaults to cwd)."""
+
+    raw = tool_input.get("file_path") if tool_name == "Read" else tool_input.get("path")
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw)
+
+
+def _read_allowed(raw_path: str, workspace_root: Path) -> bool:
+    """读护栏:workspace 与挂载的 spec 目录内自动放行,其余走审批。"""
+
+    if _resolve_safe_write_target(raw_path, workspace_root) is not None:
+        return True
+    spec_dir = _skill_spec_dir()
+    if spec_dir is None:
+        return False
+    try:
+        Path(raw_path).resolve(strict=False).relative_to(spec_dir.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+async def _hold_for_tool_approval(
+    skill_id: str,
+    sink: _SafeWriteSink,
+    *,
+    tool_name: str,
+    detail: str,
+    tool_use_id: str,
+) -> PermissionResultAllow | PermissionResultDeny:
+    """挂起式审批:await 前端批复后才返回 Allow/Deny。批准 = 返回 Allow,由 CLI
+    自己执行、结果回到模型上下文 —— 取代旧的「先拒绝 + 后端代跑」(代跑输出只到
+    前端、模型永远看到 deny,是缺陷)。超时视为拒绝。"""
+
+    if not tool_use_id:
+        return PermissionResultDeny(
+            message=f"{tool_name} 请求缺少 tool_use_id,无法进入审批", interrupt=False
+        )
+    future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+    _pending_tool_approvals[(skill_id, tool_use_id)] = future
+    logger.info(
+        "phase=copilot_guardrail action=approval_held tool=%s detail=%s", tool_name, detail
+    )
+    await sink.queue.put(
+        CopilotEventToolApprovalRequired(
+            tool_use_id=tool_use_id, tool_name=tool_name, detail=detail
+        )
+    )
+    try:
+        approved = await asyncio.wait_for(future, _TOOL_APPROVAL_TIMEOUT_S)
+    except TimeoutError:
+        return PermissionResultDeny(
+            message=(
+                f"{tool_name} 在 {int(_TOOL_APPROVAL_TIMEOUT_S)}s 内未获用户批准,视为拒绝"
+            ),
+            interrupt=False,
+        )
+    finally:
+        _pending_tool_approvals.pop((skill_id, tool_use_id), None)
+    if approved:
+        return PermissionResultAllow()
+    return PermissionResultDeny(message=f"用户拒绝了本次 {tool_name} 调用", interrupt=False)
 
 
 def _resolve_safe_write_target(
@@ -355,84 +416,54 @@ def _make_safe_write_can_use_tool(
                     )
                     await sink.queue.put(event)
             return PermissionResultAllow()
+        if tool_name in _READ_FENCED_TOOLS:
+            if sink is None:
+                return PermissionResultAllow()
+            target = _read_target(tool_name, tool_input)
+            if target is None or _read_allowed(target, sink.workspace_root):
+                return PermissionResultAllow()
+            return await _hold_for_tool_approval(
+                skill_id, sink, tool_name=tool_name, detail=target, tool_use_id=tool_use_id
+            )
         if tool_name == "Bash":
             command = str(tool_input.get("command", ""))
-            logger.info("phase=copilot_safe_write action=bash_held command=%s", command)
-            if sink is not None:
-                if tool_use_id:
-                    _pending_bash_approvals[(skill_id, tool_use_id)] = _PendingBashApproval(
-                        command=command,
-                        workspace_root=sink.workspace_root,
-                    )
-                await sink.queue.put(
-                    CopilotEventBashApprovalRequired(tool_use_id=tool_use_id, command=command)
+            if sink is None:
+                return PermissionResultDeny(
+                    message="Bash 需要用户批准,但当前没有活跃的会话流", interrupt=False
                 )
-            return PermissionResultDeny(message=_BASH_HELD_MESSAGE, interrupt=False)
+            return await _hold_for_tool_approval(
+                skill_id, sink, tool_name="Bash", detail=command, tool_use_id=tool_use_id
+            )
         return PermissionResultAllow()
 
     return can_use_tool
 
 
-async def resolve_bash_approval(
+def resolve_tool_approval(
     skill_id: str,
     tool_use_id: str,
     *,
     approve: bool,
-    timeout_s: float = 30.0,
-) -> BashApprovalResult:
-    """Resolve a held Copilot Bash command exactly once."""
+) -> ToolApprovalResolution:
+    """Resolve a held Copilot tool call exactly once.
 
-    pending = _pending_bash_approvals.pop((skill_id, tool_use_id), None)
-    if pending is None:
-        return BashApprovalResult(
+    只负责把批复喂给正在 await 的 ``can_use_tool``;批准后的执行由 CLI 自己完成,
+    工具结果因此回到模型上下文(旧的后端代跑路径已删除)。"""
+
+    future = _pending_tool_approvals.get((skill_id, tool_use_id))
+    if future is None or future.done():
+        return ToolApprovalResolution(
             tool_use_id=tool_use_id,
             approved=approve,
-            executed=False,
-            success=False,
+            resolved=False,
             message="approval_not_found",
         )
-    if not approve:
-        return BashApprovalResult(
-            tool_use_id=tool_use_id,
-            approved=False,
-            executed=False,
-            success=True,
-            message="rejected",
-        )
-
-    process = await asyncio.create_subprocess_shell(
-        pending.command,
-        cwd=pending.workspace_root,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout_s)
-    except TimeoutError:
-        process.kill()
-        stdout_bytes, stderr_bytes = await process.communicate()
-        return BashApprovalResult(
-            tool_use_id=tool_use_id,
-            approved=True,
-            executed=True,
-            success=False,
-            stdout=stdout_bytes.decode("utf-8", errors="replace"),
-            stderr=stderr_bytes.decode("utf-8", errors="replace"),
-            returncode=process.returncode,
-            message="timeout",
-        )
-
-    stdout = stdout_bytes.decode("utf-8", errors="replace")
-    stderr = stderr_bytes.decode("utf-8", errors="replace")
-    return BashApprovalResult(
+    future.set_result(approve)
+    return ToolApprovalResolution(
         tool_use_id=tool_use_id,
-        approved=True,
-        executed=True,
-        success=process.returncode == 0,
-        stdout=stdout,
-        stderr=stderr,
-        returncode=process.returncode,
-        message=None if process.returncode == 0 else "command_failed",
+        approved=approve,
+        resolved=True,
+        message=None,
     )
 
 
@@ -502,9 +533,10 @@ def build_options(
     add_dirs: list[str | Path] = [str(spec_dir)] if spec_dir is not None else []
     permission_mode: Literal["default", "acceptEdits"]
     if can_use_tool is not None:
-        # Pre-allowing a tool makes the SDK skip can_use_tool for it, so keep only
-        # Read pre-allowed; Write/Edit/Bash flow through the safe-write callback.
-        allowed_tools = ["Read"]
+        # Pre-allowing a tool makes the SDK skip can_use_tool for it, so pre-allow
+        # NOTHING: Read/Glob/Grep 走读护栏(出圈挂审批),Write/Edit 走 workspace
+        # 圈定,Bash 走挂起式审批 —— 全部经 can_use_tool。
+        allowed_tools = []
         permission_mode = "default"
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
@@ -903,7 +935,7 @@ async def stream_query(
             await _ensure_client_connected(client)
 
             # F5: register the safe-write sink so the can_use_tool callback can
-            # interleave patch_proposed / bash_approval_required events into this
+            # interleave patch_proposed / tool_approval_required events into this
             # query's stream, then drain translated messages + callback events
             # from one queue (preserving arrival order).
             queue: asyncio.Queue[CopilotEvent | object] = asyncio.Queue()
@@ -1100,9 +1132,9 @@ async def reset_session(
 
     await _close_sessions(sessions)
     if skill_id is None:
-        _cleanup_pending_bash_approvals()
+        _cleanup_pending_tool_approvals()
     else:
-        _cleanup_pending_bash_approvals(skill_id)
+        _cleanup_pending_tool_approvals(skill_id)
     return len(sessions)
 
 
@@ -1113,7 +1145,7 @@ async def cleanup_all_sessions() -> None:
         sessions = list(_sessions.values())
         _sessions.clear()
 
-    _cleanup_pending_bash_approvals()
+    _cleanup_pending_tool_approvals()
     await _close_sessions(sessions)
 
 

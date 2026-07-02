@@ -114,19 +114,19 @@ class CopilotEventPatchProposed(CopilotEventBase):
     checkpoint_id: str
 
 
-class CopilotEventBashApprovalRequired(CopilotEventBase):
-    """F5: a copilot Bash command gated for human-in-the-loop approval.
+class CopilotEventToolApprovalRequired(CopilotEventBase):
+    """A copilot tool call held for human-in-the-loop approval (挂起式).
 
-    The interactive approve/reject round-trip needs a bidirectional WS control
-    channel (not yet wired), so the command is held — surfaced for visibility but
-    not executed. ``blocked`` distinguishes "held pending approval" from a future
-    "approved" state.
+    Bash 一律审批;Read/Glob/Grep 仅在目标越出 workspace + 挂载目录时审批。
+    ``can_use_tool`` awaits the user's verdict — approving lets the CLI run the
+    tool itself so its result reaches the model's context. ``detail`` is the
+    Bash command text or the out-of-fence path being read.
     """
 
-    type: Literal["bash_approval_required"] = "bash_approval_required"
+    type: Literal["tool_approval_required"] = "tool_approval_required"
     tool_use_id: str
-    command: str
-    blocked: bool = True
+    tool_name: str
+    detail: str
 
 
 class CopilotEventDone(CopilotEventBase):
@@ -147,7 +147,7 @@ CopilotEvent: TypeAlias = Annotated[
     | CopilotEventToolUseStart
     | CopilotEventToolUseResult
     | CopilotEventPatchProposed
-    | CopilotEventBashApprovalRequired
+    | CopilotEventToolApprovalRequired
     | CopilotEventDone
     | CopilotEventError,
     Field(discriminator="type"),
@@ -174,8 +174,8 @@ class ContextUpdateResponse(BaseModel):
     summary: str | None = None
 
 
-class CopilotBashApprovalRequest(BaseModel):
-    """Approve or reject a held Copilot Bash tool request."""
+class CopilotToolApprovalRequest(BaseModel):
+    """Approve or reject a held Copilot tool call."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -183,16 +183,17 @@ class CopilotBashApprovalRequest(BaseModel):
     approve: bool
 
 
-class CopilotBashApprovalResponse(BaseModel):
-    """Result of resolving a held Copilot Bash tool request."""
+class CopilotToolApprovalResponse(BaseModel):
+    """Result of resolving a held Copilot tool call.
+
+    ``resolved`` is False when the approval no longer exists (already resolved,
+    timed out, or session reset). Execution happens in the CLI after approval,
+    so there is no stdout/stderr here by design.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     tool_use_id: str
     approved: bool
-    executed: bool
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    returncode: int | None = None
+    resolved: bool
     message: str | None = None

@@ -67,12 +67,14 @@ export interface CopilotPatchProposedEvent extends CopilotEventBase {
   review: 'pending' | 'accepted' | 'rejected'
 }
 
-/** F5: a copilot Bash command held for human approval (not executed). */
-export interface CopilotBashApprovalRequiredEvent extends CopilotEventBase {
-  type: 'bash_approval_required'
+/** A copilot tool call held for human approval (Bash / out-of-fence read).
+ * Approving lets the CLI execute the tool itself; `detail` is the Bash
+ * command text or the out-of-fence path being read. */
+export interface CopilotToolApprovalRequiredEvent extends CopilotEventBase {
+  type: 'tool_approval_required'
   toolUseId: string
-  command: string
-  blocked: boolean
+  toolName: string
+  detail: string
 }
 
 export interface CopilotUnknownEvent extends CopilotEventBase {
@@ -87,7 +89,7 @@ export type CopilotEvent =
   | CopilotToolUseStartEvent
   | CopilotToolUseResultEvent
   | CopilotPatchProposedEvent
-  | CopilotBashApprovalRequiredEvent
+  | CopilotToolApprovalRequiredEvent
   | CopilotDoneEvent
   | CopilotErrorEvent
   | CopilotUnknownEvent
@@ -182,16 +184,20 @@ export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {
       review: 'pending',
     }
   }
-  if (record.type === 'bash_approval_required' && typeof record.command === 'string') {
+  if (
+    record.type === 'tool_approval_required' &&
+    typeof record.tool_name === 'string' &&
+    typeof record.detail === 'string'
+  ) {
     return {
       id,
-      type: 'bash_approval_required',
+      type: 'tool_approval_required',
       status: 'pending',
       receivedAt,
       raw,
       toolUseId: typeof record.tool_use_id === 'string' ? record.tool_use_id : '',
-      command: record.command,
-      blocked: record.blocked !== false,
+      toolName: record.tool_name,
+      detail: record.detail,
     }
   }
   if (record.type === 'done') {

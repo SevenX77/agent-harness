@@ -1,20 +1,21 @@
-"""F5 safe-write (model B): can_use_tool routes Write/Edit to patch_proposed and
-holds Bash for approval. Verifies the diff payload + the apply-then-review/allow
-vs hold/deny decisions without spawning a real SDK client."""
+"""F5 safe-write + 读护栏 + 挂起式审批: can_use_tool routes Write/Edit to
+patch_proposed, fences Read/Glob/Grep to workspace+spec, and holds Bash /
+out-of-fence reads awaiting user approval. Approval flows back into the
+awaiting callback (Allow -> CLI executes itself); the old backend re-execution
+path is gone by design."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from app.models.copilot import (
-    CopilotEventBashApprovalRequired,
     CopilotEventPatchProposed,
+    CopilotEventToolApprovalRequired,
 )
 from app.services import copilot
 from claude_agent_sdk import (
@@ -40,14 +41,6 @@ def _register_sink(skill_id: str, workspace: Path) -> asyncio.Queue[object]:
     return queue
 
 
-def _write_text_command(filename: str, content: str) -> str:
-    code = (
-        "from pathlib import Path; "
-        f"Path({filename!r}).write_text({content!r}, encoding='utf-8')"
-    )
-    return f'"{sys.executable}" -c "{code}"'
-
-
 def _sha256_text(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
@@ -57,22 +50,46 @@ def _checkpoint_id(skill_id: str, tool_use_id: str, path: str) -> str:
     return f"patch:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
 
+async def _held_call(
+    skill_id: str,
+    queue: asyncio.Queue[object],
+    tool_name: str,
+    tool_input: dict[str, object],
+    tool_use_id: str,
+    *,
+    approve: bool,
+) -> tuple[object, CopilotEventToolApprovalRequired, copilot.ToolApprovalResolution]:
+    """Run one held tool call: start the callback, catch the approval event,
+    resolve it, and return (permission result, event, resolution)."""
+
+    cb = copilot._make_safe_write_can_use_tool(skill_id)
+    task = asyncio.create_task(
+        cb(tool_name, tool_input, ToolPermissionContext(tool_use_id=tool_use_id))
+    )
+    event = await asyncio.wait_for(queue.get(), 5)
+    assert isinstance(event, CopilotEventToolApprovalRequired)
+    resolution = copilot.resolve_tool_approval(skill_id, tool_use_id, approve=approve)
+    result = await asyncio.wait_for(task, 5)
+    return result, event, resolution
+
+
 @pytest.fixture(autouse=True)
 def _clear_sinks():
     copilot._safe_write_sinks.clear()
-    copilot._pending_bash_approvals.clear()
+    copilot._pending_tool_approvals.clear()
     yield
     copilot._safe_write_sinks.clear()
-    copilot._pending_bash_approvals.clear()
+    copilot._pending_tool_approvals.clear()
 
 
-def test_build_options_safe_write_routes_writes_through_callback() -> None:
+def test_build_options_safe_write_routes_everything_through_callback() -> None:
     async def cb(name, tool_input, ctx):  # noqa: ANN001
         return PermissionResultAllow()
 
     opts = copilot.build_options("https://x", "key", "/ws", can_use_tool=cb)
-    # Only Read pre-allowed so Write/Edit/Bash reach can_use_tool; default mode.
-    assert opts.allowed_tools == ["Read"]
+    # NOTHING pre-allowed: Read/Glob/Grep 读护栏、Write/Edit 圈定、Bash 审批
+    # 全部要经过 can_use_tool(预放行的工具会跳过回调)。
+    assert opts.allowed_tools == []
     assert opts.permission_mode == "default"
     assert opts.can_use_tool is cb
 
@@ -227,95 +244,229 @@ def test_edit_through_workspace_symlink_escape_is_denied(tmp_path: Path) -> None
     assert outside.read_text(encoding="utf-8") == "outside original"
 
 
-def test_bash_is_held_for_approval_and_denied(tmp_path: Path) -> None:
-    queue = _register_sink("skill-3", tmp_path)
-    cb = copilot._make_safe_write_can_use_tool("skill-3")
-
-    result = asyncio.run(
-        cb(
-            "Bash",
-            {"command": "rm -rf build", "description": "clean"},
-            ToolPermissionContext(tool_use_id="tu-3"),
-        )
-    )
-
-    # Held, not executed — destructive Bash must not run without approval.
-    assert isinstance(result, PermissionResultDeny)
-    event = _drain(queue)[0]
-    assert isinstance(event, CopilotEventBashApprovalRequired)
-    assert event.command == "rm -rf build"
-    assert event.blocked is True
-    assert event.tool_use_id == "tu-3"
+# ── Bash 挂起式审批 ──────────────────────────────────────────────────────────
 
 
-def test_approved_bash_command_executes_once_in_workspace(tmp_path: Path) -> None:
+def test_approved_bash_returns_allow_and_backend_runs_nothing(tmp_path: Path) -> None:
     queue = _register_sink("skill-approve", tmp_path)
-    cb = copilot._make_safe_write_can_use_tool("skill-approve")
-    asyncio.run(
-        cb(
+
+    async def scenario() -> None:
+        result, event, resolution = await _held_call(
+            "skill-approve",
+            queue,
             "Bash",
-            {"command": _write_text_command("approved.txt", "approved")},
-            ToolPermissionContext(tool_use_id="tu-approve"),
+            {"command": "echo hi > approved.txt", "description": "write"},
+            "tu-approve",
+            approve=True,
         )
-    )
-    assert isinstance(_drain(queue)[0], CopilotEventBashApprovalRequired)
+        # 批准 = Allow 回给 SDK,由 CLI 自己执行;后端绝不代跑。
+        assert isinstance(result, PermissionResultAllow)
+        assert event.tool_name == "Bash"
+        assert event.detail == "echo hi > approved.txt"
+        assert resolution.resolved is True
+
+    asyncio.run(scenario())
+    assert not (tmp_path / "approved.txt").exists()
+
+
+def test_rejected_bash_returns_deny(tmp_path: Path) -> None:
+    queue = _register_sink("skill-reject", tmp_path)
+
+    async def scenario() -> None:
+        result, _event, resolution = await _held_call(
+            "skill-reject",
+            queue,
+            "Bash",
+            {"command": "rm -rf build"},
+            "tu-reject",
+            approve=False,
+        )
+        assert isinstance(result, PermissionResultDeny)
+        assert "拒绝" in result.message
+        assert resolution.resolved is True
+
+    asyncio.run(scenario())
+
+
+def test_bash_approval_times_out_to_deny(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(copilot, "_TOOL_APPROVAL_TIMEOUT_S", 0.01)
+    queue = _register_sink("skill-timeout", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("skill-timeout")
 
     result = asyncio.run(
-        copilot.resolve_bash_approval(
-            "skill-approve",
-            "tu-approve",
-            approve=True,
+        cb(
+            "Bash",
+            {"command": "echo never"},
+            ToolPermissionContext(tool_use_id="tu-timeout"),
         )
     )
 
-    assert result.executed is True
-    assert result.success is True
-    assert result.tool_use_id == "tu-approve"
-    assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "approved"
+    assert isinstance(result, PermissionResultDeny)
+    assert "未获用户批准" in result.message
+    assert isinstance(_drain(queue)[0], CopilotEventToolApprovalRequired)
+    # 超时后审批号已清理,再批复报 not found。
+    late = copilot.resolve_tool_approval("skill-timeout", "tu-timeout", approve=True)
+    assert late.resolved is False
+    assert late.message == "approval_not_found"
 
-    second = asyncio.run(
-        copilot.resolve_bash_approval(
-            "skill-approve",
-            "tu-approve",
+
+def test_resolve_twice_reports_not_found(tmp_path: Path) -> None:
+    queue = _register_sink("skill-twice", tmp_path)
+
+    async def scenario() -> None:
+        await _held_call(
+            "skill-twice",
+            queue,
+            "Bash",
+            {"command": "echo once"},
+            "tu-twice",
             approve=True,
         )
-    )
-    assert second.executed is False
-    assert second.success is False
-    assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "approved"
+        second = copilot.resolve_tool_approval("skill-twice", "tu-twice", approve=True)
+        assert second.resolved is False
+        assert second.message == "approval_not_found"
+
+    asyncio.run(scenario())
 
 
-def test_reset_session_clears_pending_bash_approval(tmp_path: Path) -> None:
+def test_reset_session_denies_pending_approval(tmp_path: Path) -> None:
     queue = _register_sink("skill-reset", tmp_path)
     cb = copilot._make_safe_write_can_use_tool("skill-reset")
-    asyncio.run(
+
+    async def scenario() -> None:
+        task = asyncio.create_task(
+            cb(
+                "Bash",
+                {"command": "echo stale"},
+                ToolPermissionContext(tool_use_id="tu-stale"),
+            )
+        )
+        await asyncio.wait_for(queue.get(), 5)
+        await copilot.reset_session("skill-reset")
+        result = await asyncio.wait_for(task, 5)
+        # 会话重置 = 在挂的审批一律按拒绝收尾,不留悬挂 future。
+        assert isinstance(result, PermissionResultDeny)
+        late = copilot.resolve_tool_approval("skill-reset", "tu-stale", approve=True)
+        assert late.resolved is False
+
+    asyncio.run(scenario())
+
+
+# ── 读护栏:workspace + 挂载 spec 内放行,出圈审批 ───────────────────────────
+
+
+def test_read_inside_workspace_is_allowed_without_events(tmp_path: Path) -> None:
+    queue = _register_sink("skill-4", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("skill-4")
+
+    result = asyncio.run(
         cb(
-            "Bash",
-            {"command": _write_text_command("stale.txt", "stale")},
-            ToolPermissionContext(tool_use_id="tu-stale"),
+            "Read",
+            {"file_path": str(tmp_path / "GRAPH.md")},
+            ToolPermissionContext(tool_use_id="tu-4"),
         )
     )
-    assert isinstance(_drain(queue)[0], CopilotEventBashApprovalRequired)
 
-    asyncio.run(copilot.reset_session("skill-reset"))
+    assert isinstance(result, PermissionResultAllow)
+    assert _drain(queue) == []
+
+
+def test_read_of_mounted_spec_dir_is_allowed(tmp_path: Path) -> None:
+    spec_dir = copilot._skill_spec_dir()
+    assert spec_dir is not None, "repo spec dir expected in this checkout"
+    queue = _register_sink("skill-spec-read", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("skill-spec-read")
+
     result = asyncio.run(
-        copilot.resolve_bash_approval(
-            "skill-reset",
-            "tu-stale",
+        cb(
+            "Read",
+            {"file_path": str(spec_dir / "mvp1-alignment.md")},
+            ToolPermissionContext(tool_use_id="tu-spec"),
+        )
+    )
+
+    assert isinstance(result, PermissionResultAllow)
+    assert _drain(queue) == []
+
+
+def test_read_outside_workspace_is_held_then_follows_verdict(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secret.md"
+    outside.write_text("secret", encoding="utf-8")
+    queue = _register_sink("skill-read-out", workspace)
+
+    async def scenario() -> None:
+        result, event, _resolution = await _held_call(
+            "skill-read-out",
+            queue,
+            "Read",
+            {"file_path": str(outside)},
+            "tu-read-out",
             approve=True,
         )
+        assert isinstance(result, PermissionResultAllow)
+        assert event.tool_name == "Read"
+        assert event.detail == str(outside)
+
+        denied, _event2, _res2 = await _held_call(
+            "skill-read-out",
+            queue,
+            "Read",
+            {"file_path": str(outside)},
+            "tu-read-out-2",
+            approve=False,
+        )
+        assert isinstance(denied, PermissionResultDeny)
+
+    asyncio.run(scenario())
+
+
+def test_glob_outside_workspace_is_held(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    queue = _register_sink("skill-glob-out", workspace)
+
+    async def scenario() -> None:
+        result, event, _resolution = await _held_call(
+            "skill-glob-out",
+            queue,
+            "Glob",
+            {"pattern": "**/*.py", "path": str(tmp_path)},
+            "tu-glob-out",
+            approve=False,
+        )
+        assert isinstance(result, PermissionResultDeny)
+        assert event.tool_name == "Glob"
+
+    asyncio.run(scenario())
+
+
+def test_glob_without_path_defaults_to_cwd_and_is_allowed(tmp_path: Path) -> None:
+    queue = _register_sink("skill-glob-cwd", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("skill-glob-cwd")
+
+    result = asyncio.run(
+        cb(
+            "Glob",
+            {"pattern": "**/*.md"},
+            ToolPermissionContext(tool_use_id="tu-glob-cwd"),
+        )
     )
 
-    assert result.executed is False
-    assert result.success is False
-    assert result.message == "approval_not_found"
-    assert not (tmp_path / "stale.txt").exists()
+    assert isinstance(result, PermissionResultAllow)
+    assert _drain(queue) == []
 
 
-def test_stream_end_keeps_pending_bash_approval_resolvable_once(
+def test_approval_event_streams_and_resolves_mid_stream(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """End-to-end: an approval raised during SDK drain is yielded on the ws
+    stream, and approving mid-stream unblocks the awaiting callback."""
+
     class CredentialProvider:
         def get(self, _ref: str) -> SecretStr:
             return SecretStr("key")
@@ -324,19 +475,20 @@ def test_stream_end_keeps_pending_bash_approval_resolvable_once(
         def __init__(self, options: object) -> None:
             self.options = options
             self.connected = False
+            self.permission: object | None = None
 
         async def connect(self) -> None:
             self.connected = True
 
         async def query(self, _prompt: str, session_id: str = "default") -> None:
             del session_id
-            await self.options.can_use_tool(
-                "Bash",
-                {"command": _write_text_command("after-stream.txt", "approved-after-stream")},
-                ToolPermissionContext(tool_use_id="tu-after-stream"),
-            )
 
         async def receive_response(self) -> AsyncIterator[object]:
+            self.permission = await self.options.can_use_tool(
+                "Bash",
+                {"command": "echo mid-stream"},
+                ToolPermissionContext(tool_use_id="tu-mid-stream"),
+            )
             if False:
                 yield object()
 
@@ -355,64 +507,20 @@ def test_stream_end_keeps_pending_bash_approval_resolvable_once(
         lambda _model_override, role="copilot_chat": ([route], CredentialProvider()),
     )
 
-    events = asyncio.run(
-        _collect(copilot.stream_query("skill-after-stream", "run it", workspace_dir=tmp_path))
-    )
+    async def scenario() -> list[object]:
+        events: list[object] = []
+        async for event in copilot.stream_query(
+            "skill-mid-stream", "run it", workspace_dir=tmp_path
+        ):
+            events.append(event)
+            if isinstance(event, CopilotEventToolApprovalRequired):
+                resolution = copilot.resolve_tool_approval(
+                    "skill-mid-stream", event.tool_use_id, approve=True
+                )
+                assert resolution.resolved is True
+        return events
 
-    assert any(isinstance(event, CopilotEventBashApprovalRequired) for event in events)
-    result = asyncio.run(
-        copilot.resolve_bash_approval(
-            "skill-after-stream",
-            "tu-after-stream",
-            approve=True,
-        )
-    )
-
-    assert result.executed is True
-    assert result.success is True
-    assert (tmp_path / "after-stream.txt").read_text(encoding="utf-8") == "approved-after-stream"
-
-
-def test_rejected_bash_command_never_executes(tmp_path: Path) -> None:
-    queue = _register_sink("skill-reject", tmp_path)
-    cb = copilot._make_safe_write_can_use_tool("skill-reject")
-    asyncio.run(
-        cb(
-            "Bash",
-            {"command": _write_text_command("denied.txt", "denied")},
-            ToolPermissionContext(tool_use_id="tu-reject"),
-        )
-    )
-    assert isinstance(_drain(queue)[0], CopilotEventBashApprovalRequired)
-
-    result = asyncio.run(
-        copilot.resolve_bash_approval(
-            "skill-reject",
-            "tu-reject",
-            approve=False,
-        )
-    )
-
-    assert result.executed is False
-    assert result.success is True
-    assert not (tmp_path / "denied.txt").exists()
-
-
-def test_read_is_allowed_without_emitting(tmp_path: Path) -> None:
-    queue = _register_sink("skill-4", tmp_path)
-    cb = copilot._make_safe_write_can_use_tool("skill-4")
-
-    result = asyncio.run(
-        cb(
-            "Read",
-            {"file_path": str(tmp_path / "GRAPH.md")},
-            ToolPermissionContext(tool_use_id="tu-4"),
-        )
-    )
-
-    assert isinstance(result, PermissionResultAllow)
-    assert _drain(queue) == []
-
-
-async def _collect(stream: AsyncIterator[object]) -> list[object]:
-    return [event async for event in stream]
+    events = asyncio.run(scenario())
+    approval_events = [e for e in events if isinstance(e, CopilotEventToolApprovalRequired)]
+    assert len(approval_events) == 1
+    assert approval_events[0].detail == "echo mid-stream"

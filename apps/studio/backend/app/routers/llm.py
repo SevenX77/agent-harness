@@ -1345,6 +1345,53 @@ async def probe_route(
     return updated
 
 
+def _multimodal_probe_candidate(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> OfficialLanguageProbeCandidate | None:
+    """挑一条能带图探测的调用方式:取默认候选,跳过纯文本的 openai_completions
+    (gateway 对它 multimodal=True 会 ValueError)。无可用候选时返回 None。"""
+    candidates = [
+        candidate
+        for candidate in _official_language_probe_candidates(endpoint, model_id)
+        if candidate.method_id != "openai_completions"
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda candidate: (candidate.default_rank, candidate.profile_id))
+
+
+@router.post("/routes/{route_id}/probe-multimodal", response_model=ProviderRoute)
+async def probe_route_multimodal(route_id: str) -> ProviderRoute:
+    """真塞一张测试图探测该 route 的模型是否**接受**图像输入(#11)。
+
+    provider 接受(2xx)= 该模型 input_modalities 含 image → 把 input_modalities/
+    vision 记为 probed_verified 证据;不支持 vision 的模型 4xx 拒绝 → probe-failed。
+    catalog 声称(provider_doc)只是"可能带多模态"的提示,这里给出实测判据。
+    """
+    credentials = load_credentials()
+    route = credentials.provider_routes.get(route_id)
+    if route is None:
+        raise HTTPException(status_code=404, detail=f"Unknown route: {route_id}")
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {route.endpoint_id}")
+    candidate = _multimodal_probe_candidate(endpoint, route.provider_model_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=422,
+            detail="该 endpoint / 模型没有可用于多模态探测的调用方式",
+        )
+    result = await _probe_official_call_method(
+        endpoint, route.provider_model_id, candidate, multimodal=True
+    )
+    _merge_probe_evidence_into_route(
+        credentials, endpoint, result, route_id=route_id, multimodal=True
+    )
+    save_credentials(credentials)
+    return credentials.provider_routes[route_id]
+
+
 @router.put("/routes/{route_id}", response_model=ProviderRoute)
 async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> ProviderRoute:
     """Replace editable route metadata without changing identity."""
@@ -3237,14 +3284,20 @@ def _build_model_probe_evidence(
     result: ModelProbeResult,
     *,
     route_id: str | None,
+    multimodal: bool = False,
 ) -> EvidenceRecord:
     verified = result.status == "ok"
     reason = None if verified else _model_probe_failure_message(result)
+    probe_capabilities = (
+        _successful_multimodal_probe_capabilities()
+        if multimodal
+        else _successful_generation_probe_capabilities()
+    )
     capability_values = (
         _third_party_route_capability_values(
             endpoint,
             result.model_id,
-            _successful_generation_probe_capabilities(),
+            probe_capabilities,
             source="probed_verified",
         )
         if verified
@@ -3294,19 +3347,23 @@ def _merge_probe_evidence_into_route(
     result: ModelProbeResult,
     *,
     route_id: str | None,
+    multimodal: bool = False,
 ) -> None:
     """Build probe evidence for a model and merge it into its credentials route.
 
     Return-and-merge (design §4.1/§5): the record is built then assigned back to
     ``credentials.provider_routes[route_id]`` — never written to the probe catalog.
     No-op when the route is unknown/absent so callers can pass a best-effort id.
+    ``multimodal=True`` 记录含 image 的 input_modalities(probed_verified)。
     """
     if route_id is None:
         return
     route = credentials.provider_routes.get(route_id)
     if route is None:
         return
-    record = _build_model_probe_evidence(endpoint, result, route_id=route_id)
+    record = _build_model_probe_evidence(
+        endpoint, result, route_id=route_id, multimodal=multimodal
+    )
     credentials.provider_routes[route_id] = merge_route_evidence(route, record)
 
 
@@ -3568,6 +3625,8 @@ async def _probe_official_call_method(
     endpoint: ProviderEndpoint,
     model_id: str,
     candidate: OfficialLanguageProbeCandidate,
+    *,
+    multimodal: bool = False,
 ) -> ModelProbeResult:
     if not endpoint.api_key or not endpoint.api_key.get_secret_value():
         return ModelProbeResult(
@@ -3581,6 +3640,7 @@ async def _probe_official_call_method(
         _endpoint_probe_base_url(endpoint),
         model_id,
         runtime_settings=candidate.runtime_settings,
+        multimodal=multimodal,
     )
 
 
@@ -4455,6 +4515,17 @@ def _successful_generation_probe_capabilities() -> dict[str, Any]:
         "model_type": "language_reasoning",
         "capability_family": "language_reasoning",
         "input_modalities": ["text"],
+        "output_modalities": ["text"],
+    }
+
+
+def _successful_multimodal_probe_capabilities() -> dict[str, Any]:
+    """成功的多模态探测(provider 接受图输入)断言 input_modalities 含 image;
+    normalize_route_capabilities 会据此自动派生 vision=True(capabilities.py)。"""
+    return {
+        "model_type": "language_reasoning",
+        "capability_family": "language_reasoning",
+        "input_modalities": ["text", "image"],
         "output_modalities": ["text"],
     }
 
@@ -5626,6 +5697,7 @@ async def _gateway_probe_official_call_method(
     model_id: str,
     *,
     runtime_settings: dict[str, Any] | None = None,
+    multimodal: bool = False,
 ) -> ModelProbeResult:
     result = await _gateway_probe_official_call_method_request(
         method_id,
@@ -5633,6 +5705,7 @@ async def _gateway_probe_official_call_method(
         base_url,
         model_id,
         runtime_settings=runtime_settings,
+        multimodal=multimodal,
     )
     return _model_probe_result_from_route_probe(result)
 

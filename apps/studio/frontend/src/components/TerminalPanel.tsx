@@ -1,10 +1,26 @@
 import { useEffect, useRef } from 'react'
 import { FitAddon } from 'xterm-addon-fit'
-import { Terminal as XTermTerminal } from 'xterm'
+import { Terminal as XTermTerminal, type ITheme } from 'xterm'
 import 'xterm/css/xterm.css'
 import { wsUrl } from '../api/client'
 import type { TerminalSession } from '../api/types'
 import type { TerminalStatus } from '../types/studio'
+import { useThemeValue } from '../store/themeStore'
+
+// xterm draws to a canvas, so it ignores the container's `bg-background` class —
+// it needs actual color VALUES. Read the live oklch(...) tokens (any valid CSS
+// color string works here) so the terminal follows the active theme instead of
+// staying a hardcoded dark island when the app is in light mode.
+function terminalThemeFromTokens(): ITheme {
+  const style = getComputedStyle(document.documentElement)
+  const read = (name: string) => style.getPropertyValue(name).trim()
+  return {
+    background: read('--background'),
+    foreground: read('--foreground'),
+    cursor: read('--primary'),
+    selectionBackground: read('--muted'),
+  }
+}
 
 interface TerminalPanelProps {
   session: TerminalSession | null
@@ -19,6 +35,8 @@ interface TerminalEmulatorProps {
 
 function TerminalEmulator({ session, onStatusChange }: TerminalEmulatorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const terminalRef = useRef<XTermTerminal | null>(null)
+  const theme = useThemeValue()
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -29,11 +47,9 @@ function TerminalEmulator({ session, onStatusChange }: TerminalEmulatorProps) {
       cursorBlink: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 13,
-      theme: {
-        background: '#0f172a',
-        foreground: '#e2e8f0',
-      },
+      theme: terminalThemeFromTokens(),
     })
+    terminalRef.current = terminal
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
     terminal.open(containerRef.current)
@@ -71,8 +87,18 @@ function TerminalEmulator({ session, onStatusChange }: TerminalEmulatorProps) {
       dataDisposable.dispose()
       socket.close()
       terminal.dispose()
+      terminalRef.current = null
     }
   }, [onStatusChange, session.ws_url])
+
+  // Live theme toggle: update the existing terminal's palette in place —
+  // deliberately NOT in the construction effect above, which would tear
+  // down and reconnect the WebSocket session on every theme flip.
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.theme = terminalThemeFromTokens()
+    }
+  }, [theme])
 
   return <div ref={containerRef} className="h-full w-full bg-background p-2" />
 }

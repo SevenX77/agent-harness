@@ -2381,7 +2381,14 @@ export function GraphCanvas({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <section ref={canvasRef} className="studio-canvas-pane-bg relative h-full min-h-0">
-      {error ? (
+      {/* SWR keeps the last good skillDetail when a background revalidation
+          fails (sidecar restart / transient network), so `error` + stale data
+          is a normal state. The full-canvas bg-background/80 veil is ONLY for
+          "nothing to show" — over a rendered graph it washed the entire canvas
+          white and blocked pointer events (2026-07-02 亮色"光晕"根因). With
+          data on screen the failure downgrades to a corner chip, mirroring the
+          Loading chip below. */}
+      {error && !skillDetail ? (
         <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
             Failed to load skill graph.
@@ -2389,8 +2396,23 @@ export function GraphCanvas({
         </div>
       ) : null}
 
+      {/* Both corner chips shift left of the right drawer overlay (z-30 covers
+          a plain right-4 chip when Copilot is open) — same safe-area offset
+          the minimap already uses. */}
+      {error && skillDetail ? (
+        <div
+          className="absolute top-4 z-10 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-sm"
+          style={{ right: 'calc(var(--studio-canvas-right-safe-area, 0px) + 1rem)' }}
+        >
+          Graph refresh failed — showing the last loaded graph.
+        </div>
+      ) : null}
+
       {isLoading ? (
-        <div className="absolute right-4 top-4 z-10 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm">
+        <div
+          className="absolute top-4 z-10 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm"
+          style={{ right: 'calc(var(--studio-canvas-right-safe-area, 0px) + 1rem)' }}
+        >
           Loading graph...
         </div>
       ) : null}

@@ -64,12 +64,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 
 ### F6. Model Compare Tabs
 
-- 机制: top tabs switch between different model results for comparison.
-- 决策: P8 model comparison uses top tabs.
-- 原话/来源: `01_workflows/04_run-and-verify.md:98` and `01_workflows/04_run-and-verify.md:105` define this.
-- 测试: tabs preserve scroll/focus and show correct model result.
-- Status: target-design.
-- 归属: region `timeline`; capability `trace-observability`.
+- 机制: top tabs switch between different model results for comparison。**对比源 = 节点级候选的旁路单节点多跑**（不是整图按角色扇出）：focus 对比节点时，顶部 tab = 基准输出 + 该节点各候选的独立 run 输出；候选 = model group + route（`properties` F5 配置、Studio 后端按 skill+node 持久化）。
+- 决策: P8 model comparison uses top tabs。**运行机制重定（PM 2026-07-02）**：主图用基准模型跑一次；Studio 抓对比节点在主 run 的 `InputDispatchEvent` 输入切片，把该单个 phase 物化成 `depends_on=input` 单节点临时 skill 变体 + 候选临时 roles，走现成 `run_artifact` 各跑一遍——独立单节点 run ⇒ 不改 engine 执行、永不写主黑板、per-candidate artifacts 分目录。**旧整图按角色扇出链（`CompareRunDialog` + `POST /runs/compare` fan-out + `run_compare.py`）删除**（实证坐实引擎跑不了图内并联，见 `00_settings-ux-spec.md §2.8`）。
+- 原话/来源: `01_workflows/04_run-and-verify.md:98`、`01_workflows/04_run-and-verify.md:105`（顶部 tab）+ PM 2026-07-01/07-02 对比机制拍板。
+- 测试: tabs preserve scroll/focus and show correct model result；对比运行产基准 + 各候选独立 run；候选 run 不改主 run final_state。
+- Status: target-design（PR2 实现候选持久化 + 旁路单节点运行 + tab 接线）。
+- 归属: region `timeline`; capabilities `trace-observability`、`run-execution`；候选配置 UI 归 `properties` F5。
 
 ## 3. 接口契约
 - Inputs: current skill id, selected run id, live websocket events, persisted trace.

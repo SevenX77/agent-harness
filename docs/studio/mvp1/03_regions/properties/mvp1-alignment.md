@@ -53,10 +53,22 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 - Status: target-design。
 - 归属: region `input`(I/O); region `editor`; capability `golden-eval`。
 
+### F5. Node Compare LLMs Candidates（节点级对比候选配置）
+
+- 机制: 节点 Properties 面板保留 `Compare LLMs` 区块，作者在此为**该节点**登记若干**对比候选**；每个候选 = 一个 model group + 一条 endpoint route（"auto" 或具体 route）。**候选只选模型，不做 role / bundle**（有意简化：对比 = 同节点同输入、只换底层模型）。
+- 决策（PM 2026-07-02）:
+  - **候选持久化在 Studio 后端**，按 `skill + node` 归属，**不写进 SKILL.md**（对比是运行期实验配置，不是 skill 源文件的一部分）；节点改名 → 后端存储 key 同步迁移。
+  - **运行机制 = 旁路单节点多跑**（详见 `01_workflows/00_settings-ux-spec.md §2.8` + `timeline` F6）：主图用基准模型照常跑一次；Studio 抓对比节点在主 run 的 `InputDispatchEvent` 输入切片，对每个候选把**该单个 phase** 物化成 `depends_on=input` 的单节点临时 skill 变体 + 候选临时 roles，走现成 `run_artifact` 各跑一遍。独立单节点 run ⇒ **不改 engine 执行、永不写主黑板、per-candidate artifacts 各自分目录**。
+  - **旧整图按角色扇出链删除**：`CompareRunDialog` + `POST /runs/compare` role fan-out + `run_compare.py` 整图 roles 物化同批清掉。
+- 原话/来源: PM 2026-07-01「跑对比是在整图真的 run 的时候跑的……直接在这个节点加一个平行的 node，同样的输入和其他配置，除了 llm 不同」+ 2026-07-02 实证"引擎跑不了并联"后 PM 批准的旁路单节点等价方案。
+- 测试: 候选增删改持久化按 skill+node 存取；对比运行产出基准 + 各候选独立 run（各自 artifacts 目录）；候选 run 不改主 run 的 final_state（零黑板污染）；Trace 顶部 tab 显示基准 + 候选。
+- Status: target-design（PR2 实现）。
+- 归属: region `properties`（候选配置 UI）; capabilities `run-execution`、`trace-observability`（结果 tab 归 `timeline` F6）。
+
 ## 3. 接口契约
-- Inputs: selected node/edge, skill detail, diagnostics.（golden **不在** Properties，见 F4/§4）
-- Outputs: phase file save, file open requests, panel focus changes.
-- Capability links: `phase-editing`, `compile-lint`, `trace-observability`, `golden-eval`（**负向边界**：golden 不在 Properties）。
+- Inputs: selected node/edge, skill detail, diagnostics, **节点级对比候选（后端按 skill+node 存取）**。（golden **不在** Properties，见 F4/§4）
+- Outputs: phase file save, file open requests, panel focus changes, **对比候选持久化写入 + 触发对比运行**。
+- Capability links: `phase-editing`, `compile-lint`, `trace-observability`, `run-execution`, `golden-eval`（**负向边界**：golden 不在 Properties）。
 
 ## 4. 设计决策基础（PM 原话）
 - **golden 完全不在 Properties**:设置/文件/摘要归 **I/O output**,完整 diff 在**编辑器分屏(Monaco diff)**。Properties 只剩 frontmatter 属性 + 字段级编译标记。

@@ -96,7 +96,7 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 | D10 | Validator 重试 Nudge:2/3 徽章 + 失败 Error Stack | target-design |
 | D11 | 检索/筛选(事件类型 + 关键字) | orphan |
 | D12 | 失败节点亮红灯(Timeline 停 + Error Message) | placeholder |
-| D13 | 模型对比:**顶部 tab** 切换看不同 llm 结果(P8) | target-design |
+| D13 | 模型对比:**顶部 tab** 切换看不同 llm 结果(P8);候选=节点级 model+route,运行=旁路单节点多跑(见决策) | target-design |
 | D14 | 净化 PropertiesPanel(移除 selectedEdge JSON 倾倒,dot 改道本能力) | stale-code(清理) |
 | D15 | 失败退路:空态 / payload 截断 / live→history 源切换以 runId 重置 | target-design |
 | D16 | (引擎)推流运行态微观事件 Payload schema + 结构化前后态 diff(REQ-7) | target-design,依赖引擎 |
@@ -104,6 +104,7 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 ### 决策
 - 完整 trace 文档 = **人能读、轻度格式化**(非原始 jsonl);agent 输出**流式 + 分类折叠摘要**(参考 agent IDE)。
 - **dot = 节点间状态机转移点**;P8 模型对比 = **顶部 tab**;概要=run_id 概要,focus 空画布=全局 / focus 节点=该节点 trace。
+- **P8 对比运行机制(PM 2026-07-02 重定)**:候选在**节点 Properties 面板**配置(只选 model group + route,不做 role/bundle),Studio 后端按 skill+node 持久化。对比在真 run 时跑,但**不往图里注入并联节点**(实证坐实当前引擎跑不了任意"两节点同超步并联",`WorkflowState.data` 无 reducer)——改为**旁路单节点多跑**:主图用基准模型照常跑一次;Studio 抓对比节点在主 run 的 `InputDispatchEvent` 输入切片,对每个候选把**该单个 phase** 物化成 `depends_on=input` 单节点临时 skill 变体 + 候选临时 roles,走现成 `run_artifact` 各跑一遍。独立单节点 run ⇒ 不改 engine 执行、永不写主黑板、per-candidate artifacts 各自分目录。旧整图按角色扇出链(`CompareRunDialog` + `POST /runs/compare` fan-out + `run_compare.py`)删除。细节见 `00_settings-ux-spec.md §2.8` + `03_regions/properties` F5 + `03_regions/timeline` F6。
 - Q4:"事件→节点态"派生器归 **trace**(run 节点灯 + debug 红灯共用)。
 
 ### 原话(留底)

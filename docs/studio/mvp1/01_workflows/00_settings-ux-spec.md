@@ -182,9 +182,16 @@
 - **节点 Properties 面板**（作者 / 运行期给节点指定 `llm_role` 的地方）**每个 role 旁加 Test 键** + **展示 role 状态**——快捷验"能不能用"，**不必切到 Settings 再测**。
 - 复用 §2.5 role 测试 + §2.4 role-fit 状态投影；**跨 region**：Roles 能力的测试/状态投影进 `phase-editing` / properties region 协同（非本页独占）。
 
-### 2.8 P8 跨页：run 模型对比测试复用 model-group/bundle → 临时 role〔#11 认可〕
-- run 的"模型对比测试"可选 role / model-group / bundle → endpoint/fallback，**解析成临时（未保存）包装的 role**。
-- **复用同一套 materializer**（`llm_role_materializer.py`）+ 新增一条"临时 role"解析路径；run 页**引用 settings 里建好的 bundle/group**，不在 run 页另存。详细归 run/predict region，本页只登记"model-group/bundle 多了 run 这个消费方"。
+### 2.8 P8 跨页：节点级 Compare LLMs — 候选只选模型 + 旁路单节点多跑〔#11 认可；2026-07-02 重定〕
+> **改动说明（2026-07-02，PM 拍板）**：旧文案是"run 模型对比测试可选 role / model-group / bundle → 解析成临时 role、整图按角色扇出多跑"。**这条已作废**，原因有二：① 候选**只选模型**（model group + endpoint route），**不做 role / bundle**——有意简化，对比的语义就是"同一个节点、同样输入配置、只换底层模型"，牵进 role/bundle 会把"换模型"和"换角色定义"混成一件事；② 对比**不再整图按角色扇出**，改成节点级旁路单节点多跑（见下）。旧的整图扇出链（`CompareRunDialog` + `POST /runs/compare` 按角色 fan-out + `run_compare.py` 整图 roles 物化）**同批删除**。
+
+- **候选 = 模型**：在**节点 Properties 面板**的 `Compare LLMs` 区块配置，每个候选 = 一个 model group + 一条 endpoint route（"auto" 或具体 route）。候选**持久化在 Studio 后端**，按 `skill + node` 归属（不写进 SKILL.md——对比是运行期实验配置，不是 skill 源文件的一部分）。节点改名时后端存储的 key 要同步迁移。
+- **运行机制 = 旁路单节点多跑（不改 engine，不写主黑板）**：对比在真 run 时发生，但**不往图里注入并联节点**——实证坐实当前 V0.3.0 引擎跑不了任意"两节点同超步并联"（`WorkflowState.data` 是无 reducer 的 LastValue 通道，同步写就 `InvalidUpdateError`；连死胡同影子节点都炸）。改为:
+  1. 主图照常用**基准模型**跑一次，完全不动；
+  2. Studio 从主 run 的 `InputDispatchEvent`（引擎在每个节点入口发的事件，携带喂给该节点的确切黑板输入切片）抓到对比节点的真实输入；
+  3. 对每个候选，把**这一个 phase** 物化成一个单节点临时 skill 变体（`depends_on=input`，把切片当输入）+ 一份候选临时 roles，走**现成的 `run_artifact`** 跑一遍。
+- **天然满足三条边界**：单节点独立 run ⇒ 没有并联通道冲突（不改 engine 执行逻辑）；物理上是独立 run、碰不到主运行的状态机（**永不写主黑板**）；每个候选自带独立 run 目录（**per-candidate artifacts 各自落盘、分目录**，白送）。仅底层 llm 不同，输入/其他配置与基准一致。
+- **结果展示**：进 Trace **顶部 tab**（[D13](../04_run-and-verify.md)）——focus 对比节点时，基准输出 + 各候选输出并排切换。详细归 `timeline` / properties region，本页只登记"model group + route 多了'节点级对比候选'这个消费方，且对比运行机制 = 旁路单节点"。
 
 ### 2.9 测试关键点（§5 硬栏，写测试时必须验证）
 - **failed 仍在可用**：构造一条 route probe 失败（非弃用类）→ 断言它**仍出现在可用模型、标红、可拖**（防回归成"失败即消失"）。

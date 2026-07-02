@@ -167,6 +167,10 @@ one-page orientation, not the full design.
     提交进 git(不许只烤进 `index.html` 而源 PNG 不入库)。操作配方见
     `docs/development/RUN_AND_SCREENSHOT.md` §4。
 - **Frontend UI spec**: `docs/development/FRONTEND_UI_SPEC.md`
+- **Cross-platform / encoding policy**: `docs/development/CROSS_PLATFORM.md` —
+  三平台（Windows/macOS/Linux）兼容铁律：文本一律 UTF-8 + LF、`subprocess`/文件
+  I/O 必须显式 `encoding="utf-8"`、禁止仅大小写不同的路径。写文件、起子进程、
+  加脚本、动 CI 前必读。
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).

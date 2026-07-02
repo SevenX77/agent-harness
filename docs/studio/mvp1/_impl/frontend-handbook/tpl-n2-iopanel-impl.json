@@ -37,7 +37,7 @@
    "n": 32,
    "cap": "input-config-tree",
    "design_ref": "n2-atom-32",
-   "current": "现状:符合(r3 新建)。InputConfigDialog(shadcn Dialog/Checkbox/Input/Button):blackboardAtNode 复用 staticEdgeInference 出黑板行(勾选=io.inputs 消费);Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 candidatesFromScanEntries 出字段候选;applyIoInputChecks 重建 io.inputs(黑板消费 + source:'file' 单文件/批量 dir+pattern)写回,乐观 hash 锁。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。",
+   "current": "现状:符合(r3 新建)。InputConfigDialog(shadcn Dialog/Checkbox/Input/Button):blackboardAtNode 复用 staticEdgeInference 出黑板行(勾选=io.inputs 消费);Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 candidatesFromScanEntries 出字段候选;applyIoInputChecks 重建 io.inputs(黑板消费 + source:'file' 单文件/批量 dir+pattern)写回,乐观 hash 锁。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。 r4:reconcileInputFields 三态(matched/available/missing),MissingFieldRow 置顶报错、FieldCheckRow highlighted 竖条+accent。",
    "gap": "符合设计。",
    "fe_status": "符合",
    "be_dep": "已就绪:POST /api/io/scan + /io/import(纯读/拷贝,7 后端测试绿)。",
@@ -48,7 +48,7 @@
    "n": 33,
    "cap": "output-artifacts-config",
    "design_ref": "n2-atom-33",
-   "current": "现状:符合(r3 新建)。OutputConfigDialog:blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,每个 artifact 卡同一套勾选;applyGraphArtifacts 写 GRAPH.md io.artifacts 清单;single/per-item 分段钮 + iterate range 推断 ×N;固定命名预览随 stem/mode 变。",
+   "current": "现状:符合(r3 新建)。OutputConfigDialog:blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,每个 artifact 卡同一套勾选;applyGraphArtifacts 写 GRAPH.md io.artifacts 清单;single/per-item 分段钮 + iterate range 推断 ×N;固定命名预览随 stem/mode 变。 r4:reconcileOutputFields 三态,missing dialog 级置顶,matched(io.outputs 成员)高亮。",
    "gap": "符合设计;旧 per-field target 已删。",
    "fe_status": "符合",
    "be_dep": "已就绪:engine io.artifacts writer(固定格式,1438 engine 测试绿)。",
@@ -148,7 +148,8 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + source:'file' 单/批量);candidatesFromScanEntries 展平扫描结果(io-config.test)。"
+    "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + source:'file' 单/批量);candidatesFromScanEntries 展平扫描结果(io-config.test)。",
+    "reconcileInputFields:声明+黑板有=matched、黑板有未声明=available、io.inputs 声明但黑板无=missing(source:'file' 永不 missing);missing 不写回(io-config.test)。"
    ],
    "layer2": [
     "真机:segmentation 黑板树 chapters 勾选;GRAPH.md=Input 伪节点 files-only『No fields yet』;导入 material-prep 识别 timestamp/run_id/... 字段。"
@@ -161,6 +162,10 @@
     {
      "file": "n2-43-input-import-recognition.png",
      "caption": "导入 material-prep 文件夹:新文件组带灰色真实路径,识别出的字段逐个列出并标 source: file(类型识别对)"
+    },
+    {
+     "file": "n2-44-input-reconcile-missing-matched.png",
+     "caption": "r4 输入对账:glossary(io.inputs 声明、上游无供应)置顶红底+⚠+删除线『not supplied by upstream』;segments 匹配=蓝勾+左侧主色竖条+accent 高亮;chapters/project_id 可用普通行"
     }
    ]
   },
@@ -174,7 +179,8 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "blackboardAtOutput 聚合根 io.inputs ∪ 各 phase io.outputs 带来源;applyGraphArtifacts 写 io.artifacts 清单;graphArtifactsOf 读回(io-config.test)。"
+    "blackboardAtOutput 聚合根 io.inputs ∪ 各 phase io.outputs 带来源;applyGraphArtifacts 写 io.artifacts 清单;graphArtifactsOf 读回(io-config.test)。",
+    "reconcileOutputFields:io.outputs 成员=matched、universe 其余=available、io.outputs 声明但 universe 无=missing(io-config.test)。"
    ],
    "layer2": [
     "真机:Add artifact 卡显示 chapters/project_id/segmentation_result/.../story_framework 全字段带来源;single/per-item 分段钮;<stem>_latest_<ts>.json · history/ 预览。"
@@ -183,6 +189,10 @@
     {
      "file": "n2-42-output-artifacts-config.png",
      "caption": "输出 artifacts 配置:一个文件卡 + 黑板全字段全集(每字段带类型 + from 来源)+ single/per-item 分段钮 + 固定命名预览"
+    },
+    {
+     "file": "n2-45-output-reconcile-missing-matched.png",
+     "caption": "r4 输出对账:final_manifest(io.outputs 声明、无 phase 产出)dialog 级置顶红底+⚠;report_doc(io.outputs 成员)左侧主色竖条+accent 高亮;其余可用普通行"
     }
    ]
   },

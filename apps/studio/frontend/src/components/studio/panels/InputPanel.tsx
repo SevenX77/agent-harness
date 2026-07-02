@@ -9,10 +9,10 @@ import { sha256Hex } from "@/lib/hash"
 import {
   applyGraphArtifacts,
   applyIoInputChecks,
-  blackboardAtNode,
-  blackboardAtOutput,
   fileFieldsOf,
   graphArtifactsOf,
+  reconcileInputFields,
+  reconcileOutputFields,
   type ArtifactRow,
   type FileFieldDecl,
   type IoInputChecks,
@@ -310,9 +310,10 @@ export function InputPanel({
   const [inputConfigOpen, setInputConfigOpen] = useState(false)
   const [outputConfigOpen, setOutputConfigOpen] = useState(false)
 
-  // Blackboard context: empty for GRAPH.md (the Input pseudo-node has no
-  // blackboard — its checked file fields BECOME the graph entry fields).
-  const blackboard = view.isGraphLevel ? [] : blackboardAtNode(skillDetail, selectedNode?.id ?? "")
+  // Blackboard context (reconciled: matched/available/missing): empty for
+  // GRAPH.md (the Input pseudo-node has no blackboard — its checked file
+  // fields BECOME the graph entry fields).
+  const blackboard = view.isGraphLevel ? [] : reconcileInputFields(skillDetail, selectedNode?.id ?? "")
   const declaredFiles = fileFieldsOf(view.content)
   const artifacts = graphArtifactsOf(skillDetail)
   const graphContent = skillDetail?.files?.["GRAPH.md"] ?? ""
@@ -404,7 +405,7 @@ export function InputPanel({
       <OutputConfigDialog
         open={outputConfigOpen}
         onOpenChange={setOutputConfigOpen}
-        universe={blackboardAtOutput(skillDetail)}
+        universe={reconcileOutputFields(skillDetail)}
         artifacts={artifacts}
         perItemCount={perItemCount}
         onSave={handleArtifactsSave}

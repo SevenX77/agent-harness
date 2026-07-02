@@ -50,6 +50,16 @@ way and nothing drifts onto stray branches/worktrees.
 5. **Cleanup** — on merge GitHub deletes the remote branch; `scripts/wt-clean.sh`
    then removes the orphaned local worktree + branch (it also runs at the start
    of the next `wt-new`).
+6. **Post-merge root refresh (依赖必须跟上)** — after the merge, `git pull` the
+   repo root; **if the PR changed dependency manifests, install them in the
+   ROOT too**: `package.json`/`package-lock.json` changed → `npm install` in
+   `apps/studio/frontend`; `pyproject.toml`/`uv.lock` changed → `uv sync
+   --all-packages --all-extras --group dev`. The running dev app (Tauri + Vite
+   5173 + sidecar) resolves from the ROOT's `node_modules`/venv — a merged PR
+   that added a dep crashes it with unresolved-import overlays until this step
+   runs (lesson 2026-07-02: `@shadcn/react`). If Vite was already running when
+   you install, `touch apps/studio/frontend/vite.config.ts` to make it restart
+   in place and re-resolve.
 
 **Repo settings backing this** (already configured): `main` protected with
 `enforce_admins` on (no bypass), PR required with **0** approvals, the 5 checks
@@ -213,6 +223,9 @@ not water a feature down to keep it frontend-only.
   lesson only in chat.
 - First search `apps/studio/frontend/src/components/ui/` for an existing
   shadcn/ui or Radix wrapper. Prefer those components over custom interaction code.
+- The official **shadcn/ui agent skill** is committed at `.claude/skills/shadcn`
+  (installed via `npx skills add shadcn/ui`, pinned in `skills-lock.json`) — use
+  it for component/CLI/theming lookups when doing frontend UI work.
 - If a needed primitive is missing, add the shadcn/ui-style wrapper under
   `src/components/ui/` before using it in business components.
 - Use semantic design tokens and existing component variants. Do not hardcode hex

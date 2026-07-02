@@ -626,7 +626,7 @@
       "item": "测试时读 Probe Knowledge Catalog 回填 / 清单兜底 / 免盲测",
       "d12": "D6.5",
       "status": "ok",
-      "note": "已落地(三条子能力全做 + TDD 测试)。gateway 侧通过 Probe Knowledge Catalog 提供 known_verified_capabilities / known_model_ids_for_endpoint / probe_priority(无 IO);backend 侧在 _upsert_discovered_routes 回填 Catalog 已证实能力(子①)、_third_party_probe_model_ids 用 Catalog 已知模型补清单(子②)并按 probe_priority 跳过已 verified / 把已 failed 排后(子③免盲测)。注:子③有候选就绝不返回空(避免历史全验过的 endpoint 复测误判失败)。测试见 gateway test_probe_catalog.py / legacy test_import_draft_derivation.py + backend test_llm_registry_api.py。",
+      "note": "已落地(三条子能力全做 + TDD 测试)。gateway 侧通过 Probe Knowledge Catalog 提供 known_verified_capabilities / known_model_ids_for_endpoint / probe_priority(无 IO);backend 侧在 _upsert_discovered_routes 回填 Catalog 已证实能力(子①)、_endpoint_generation_probe_model_ids 用 Catalog 已知模型补清单(子②)并按 probe_priority 跳过已 verified / 把已 failed 排后(子③免盲测)。注:子③有候选就绝不返回空(避免历史全验过的 endpoint 复测误判失败)。测试见 gateway test_probe_catalog.py / legacy test_import_draft_derivation.py + backend test_llm_registry_api.py。",
       "ref": "d6"
     },
     {

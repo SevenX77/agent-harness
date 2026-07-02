@@ -222,9 +222,9 @@
    "cap": "official-test-job",
    "track": "官",
    "module": "测试与模型探测",
-   "func": "设计:官方卡点 Test 验证 endpoint 可连通——拉一遍模型目录(get-models),连通即验证通过；若本地已缓存远端 community catalog 的真探历史证据，则在 Test 写 credentials 时把匹配 evidence 一并挂到 route 上。",
+   "func": "设计(修订 2026-07-01):官方卡点 Test 验证 endpoint 真可用——先拉模型目录(get-models),再打一次最小生成探测,生成 ok 才 verified;若本地已缓存远端 community catalog 的真探历史证据,则在 Test 写 credentials 时把匹配 evidence 一并挂到 route 上。",
    "action": "用户在官方卡点 `Test` 按钮。",
-   "fe_design": "官方卡点 Test → 前端触发统一后端 endpoint test → 后端读取 provider model list / route candidates 并写回 credentials。远端 community catalog 的读取是 cache-only:后端启动或 Settings 页同步只把签名 catalog 拉进 disposable verified cache,不直接改 credentials,也不直接点亮蓝态。只有用户按 Test 时,后端才把缓存中与本 endpoint/route 匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs;状态投影仍只信 credentials DTO。Catalog-only 孤立证据只显示在页面顶部 community-verified advisory 区,不 applied to your keys、不出蓝;Test 后已挂 evidence_refs 且当前非绿的 route 才显示 historical_ready 蓝态。官方因 endpoint 可控,只需 get-models 连通即可,不强制逐模型 generation probe;单模型 generation/profile probe 留给 Manual model probing 或 Role Test。",
+   "fe_design": "官方卡点 Test → 前端触发统一后端 endpoint test → 后端读取 provider model list / route candidates 并写回 credentials。远端 community catalog 的读取是 cache-only:后端启动或 Settings 页同步只把签名 catalog 拉进 disposable verified cache,不直接改 credentials,也不直接点亮蓝态。只有用户按 Test 时,后端才把缓存中与本 endpoint/route 匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs;状态投影仍只信 credentials DTO。Catalog-only 孤立证据只显示在页面顶部 community-verified advisory 区,不 applied to your keys、不出蓝;Test 后已挂 evidence_refs 且当前非绿的 route 才显示 historical_ready 蓝态。官方 Test = get-models + 一次最小生成探测(设计源 00_settings-ux-spec.md §1.1 修订 2026-07-01;原「只需 get-models 连通」作废——实证欠费账户 get-models 照常 200 但所有生成被 400 拒,连通≠能生成):候选过滤为语言模型、按 probe 优先级取一个打推理端点,生成 ok 才 verified;结构性失败(invalid_key/欠费类 quota_exceeded)→ endpoint failed 并常驻展示 provider 原文。官方不做协议轮换(协议固定);逐模型能力级 profile probe 仍留给 Manual model probing 或 Role Test。",
    "fe_modules": [
     {
      "name": "状态投影",
@@ -247,7 +247,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计。官/三测试入口已统一为 POST /endpoints/{id}/test,官方卡只有一个 Test 动作;官方因 endpoint 可控,Test 拉 provider model list 即可验证 endpoint 连通,不逐模型 generation probe。远端 community catalog 同步是 cache-only,不会在页面加载或 sync-verified 时写 credentials;Test 保存 endpoint/route 结果时,才把匹配的 probe-verified catalog evidence 写入 credentials route.metadata.evidence_refs,由 credentials 投影出 historical_ready 蓝态。Catalog-only evidence 不直接出蓝。",
+   "gap_brief": "符合设计(2026-07-01 修订后)。官/三测试入口已统一为 POST /endpoints/{id}/test,官方卡只有一个 Test 动作;官方 Test 现走 get-models + 一次最小生成探测(_verify_endpoint_by_generation_probe,detect_protocol=False,候选过滤语言模型):真机验证 anthropic-official 返回 'Generation verified via anthropic_compatible. Model: claude-sonnet-5.',probe_attempts 记入 endpoint_test runtime-activity。欠费类 HTTP 400 由 gateway 归类 quota_exceeded(结构性,短路批量、不复用旧 verified)。远端 community catalog 同步是 cache-only,不会在页面加载或 sync-verified 时写 credentials;Test 保存 endpoint/route 结果时,才把匹配的 probe-verified catalog evidence 写入 credentials route.metadata.evidence_refs,由 credentials 投影出 historical_ready 蓝态。Catalog-only evidence 不直接出蓝。",
    "impl_ref": "fn-24"
   },
   {
@@ -257,7 +257,7 @@
    "module": "测试与模型探测",
    "func": "设计:第三方卡点 Test 验证 endpoint——每条 URL 展开多协议 endpoint 后逐个跑模型探测,真能生成才判对应 endpoint 可用。",
    "action": "用户在第三方卡点 `Test` 按钮(填好 URL+key 后)。",
-   "fe_design": "第三方卡点 Test → 前端把每条 Base URL 展开成 OpenAI-compatible / Anthropic-compatible / Google GenAI 三个 endpoint 候选(第三方不包含 Ark)并逐个触发统一 endpoint test;每个 endpoint 内部用单模型测试同一套模型 probe 流程,只是多了一层「候选 endpoint 生成 / 结果汇总」前后处理。一个 URL 可能同时兼容多个 protocol,因此多个 endpoint 可同时保留为可用;失败候选也保留红态和错误信息,不吞掉。模型 probe 遇 model invalid 要把该模型 route 写成 failed 并继续尝试其它候选模型,有任一模型真能生成才判该 endpoint 可用。设计统一为「官/三同一套 endpoint test + 批量探测」:官方因可控只需 get-models 连通,第三方必须用模型打推理端点才算验通(get-models 只证 key+URL 可达、不证协议匹配/能生成)。前端只触发 + 显示进度,探测策略归后端(mech_cred)。",
+   "fe_design": "第三方卡点 Test → 前端把每条 Base URL 展开成 OpenAI-compatible / Anthropic-compatible / Google GenAI 三个 endpoint 候选(第三方不包含 Ark)并逐个触发统一 endpoint test;每个 endpoint 内部用单模型测试同一套模型 probe 流程,只是多了一层「候选 endpoint 生成 / 结果汇总」前后处理。一个 URL 可能同时兼容多个 protocol,因此多个 endpoint 可同时保留为可用;失败候选也保留红态和错误信息,不吞掉。模型 probe 遇 model invalid 要把该模型 route 写成 failed 并继续尝试其它候选模型,有任一模型真能生成才判该 endpoint 可用。设计统一为「官/三同一套 endpoint test + 批量生成探测」(修订 2026-07-01):get-models 只证 key+URL 可达、不证协议匹配/能生成,官方与第三方都必须真打一次推理端点才升 verified;差别只剩第三方多协议轮换探测、官方协议固定且候选过滤为语言模型。前端只触发 + 显示进度,探测策略归后端(mech_cred)。",
    "fe_modules": [
     {
      "name": "状态投影",
@@ -280,7 +280,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。第三方路径已调 _verify_third_party_endpoint_by_probe(llm.py:588,定义 4287-4367):(1)协议自动探测——对每个候选协议各拿一个模型发真生成调用判定(_detect_third_party_protocol,4224-4284,遇结构性错配短路);(2)批量推理探测,首个 ok 即停,仅在真 ok 生成才升 'verified'(4332-4350)。弱 get-models 判定被取代:前端按 status==='verified' 判连通(llm.ts:1367),按钮文案 'Get Models'→'Test'(ProviderCard.tsx:1035),探测到的协议回写(llm.py:596-600)。已与官方同一套入口。",
+   "gap_brief": "符合设计。2026-07-01:探测函数改名并官/三共用——_verify_endpoint_by_generation_probe(detect_protocol 参数区分):第三方 detect_protocol=True 走(1)协议自动探测(_detect_third_party_protocol,遇结构性错配短路)+(2)批量推理探测,首个 ok 即停,仅真 ok 生成才升 'verified';官方 detect_protocol=False 跳过协议轮换。欠费类 400(provider 报文含 credit/billing 标记)由 gateway _probe_status 归类结构性 quota_exceeded。前端按 status==='verified' 判连通,探测到的协议回写。官/三同一套入口。",
    "impl_ref": "fn-25"
   },
   {

@@ -215,6 +215,58 @@ def test_studio_maps_failed_endpoint_reason_and_detail_onto_gateway_state(monkey
     assert result.ui_detail == "DNS lookup failed"
 
 
+def test_studio_maps_failed_route_probe_reason_onto_ui_detail(monkeypatch) -> None:
+    def _spy(**kwargs: Any) -> GatewayProjection:
+        return GatewayProjection(
+            route_id=kwargs["route_id"], ui_state="failed", reason_code="model_failed"
+        )
+
+    monkeypatch.setattr(gateway_module, "gateway_project_route_state", _spy)
+
+    adapter = GatewayAdapter(transport="in_process")
+    now = datetime.now(UTC)
+    endpoint = _endpoint(status="verified")
+    stale_failed_evidence = EvidenceRecord(
+        evidence_id="probe-ep1-gpt5-failed-old",
+        evidence_type="probe",
+        trust_state="probe-failed",
+        route_id="ep-1:gpt-5",
+        endpoint_id="ep-1",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        probe_status="error",
+        reason="An older, superseded failure.",
+        observed_at="2026-06-01T00:00:00+00:00",
+    )
+    failed_evidence = EvidenceRecord(
+        evidence_id="probe-ep1-gpt5-failed",
+        evidence_type="probe",
+        trust_state="probe-failed",
+        route_id="ep-1:gpt-5",
+        endpoint_id="ep-1",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        probe_status="invalid_model",
+        reason="Provider returned HTTP 404 (not_found_error). GPT-5 is not available.",
+        observed_at="2026-06-30T00:01:02+00:00",
+    )
+    route = _route(
+        status="failed",
+        evidence=[_evidence_record(), stale_failed_evidence, failed_evidence],
+    )
+
+    result = _project(adapter, endpoint=endpoint, route=route, circuits=[], now=now)
+
+    assert result.ui_state == "failed"
+    assert result.reason_code == "model_failed"
+    # The route's own probe evidence carries the human-readable failure reason —
+    # the tooltip must surface it instead of the generic fallback copy, and the
+    # NEWEST probe-failed record wins.
+    assert result.ui_detail == (
+        "Provider returned HTTP 404 (not_found_error). GPT-5 is not available."
+    )
+
+
 def test_six_states_project_through_gateway_for_their_canonical_inputs() -> None:
     # End-to-end (no spy): the real gateway projector must still produce each of
     # the six states for the same inputs the old inline copy handled.

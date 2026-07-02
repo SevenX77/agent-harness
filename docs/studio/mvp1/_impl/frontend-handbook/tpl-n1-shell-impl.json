@@ -98,8 +98,8 @@
       "n": 24,
       "cap": "copilot-composer-scroll",
       "design_ref": "atom-24",
-      "current": "现状:已实现且符合。消息区 = MessageScrollerProvider autoScroll + MessageScroller + Viewport + Content + Item(scrollAnchor=user)+ MessageScrollerButton(components/ui/message-scroller.tsx,包 @shadcn/react 的 message-scroller primitive,shadcn CLI 拉入);composer textarea rows=3 + min-h-[60px] + max-h-[160px] field-sizing-content;isComposerSendKey(copilot-panel.tsx)裁决 Enter 发送/Shift+Enter 换行/isComposing 不发;占位 Paperclip/Plus 按钮已删,操作行=ModelPicker+RolePicker(左)+发送(右)。",
-      "gap": "无。滚动行为由 primitive 提供,真机 Playwright 断言贴底/释放/回底全过。",
+      "current": "现状:已实现且符合。消息区 = MessageScrollerProvider autoScroll + MessageScroller + Viewport + Content + Item(scrollAnchor=user)+ MessageScrollerButton(components/ui/message-scroller.tsx,包 @shadcn/react 的 message-scroller primitive,shadcn CLI 拉入);composer textarea rows=3 + min-h-[60px] + max-h-[160px] field-sizing-content;isComposerSendKey(copilot-panel.tsx)裁决 Enter 发送/Shift+Enter 换行/isComposing 不发;占位按钮已删;2026-07-02 布局纠正:发送按钮在输入框盒内右下,ModelPicker(≤1 条链隐藏)+RolePicker 在盒外下方一行右侧。",
+      "gap": "无。滚动行为由 primitive 提供;布局已按 PM 2026-07-02 截图纠正并真机验证。",
       "fe_status": "符合",
       "be_status": "n/a",
       "be_dep": "n/a(纯前端;ws 发送契约不动)。"
@@ -113,6 +113,26 @@
       "fe_status": "符合",
       "be_status": "已实现",
       "be_dep": "已就绪:GET/PUT /api/llm/roles、GET /api/llm/registry、roles_changed/registry_changed 事件均已实现,后端不动。"
+    },
+    {
+      "n": 26,
+      "cap": "copilot-composer-context-controls",
+      "design_ref": "atom-26",
+      "current": "现状:三个控制均未实施——@ 键入无弹出(placeholder 文案先行);无附件入口;流式期间无停止。后端:mentions XML 层已实现(app/services/copilot.py),ws 无 interrupt 通道,无 ImageContent 内容块通路。",
+      "gap": "按 F7 分三个 PR:① @mention 弹出器+mentions 采集(纯前端+既有 context 端点);② ws interrupt + 停止按钮(前后端);③ 附件选择/拖拽/粘贴+内容块通路(前后端,量最大)。",
+      "fe_status": "未实施",
+      "be_status": "未实现",
+      "be_dep": "mentions 注入已就绪;interrupt 与附件内容块待后端新增(ws 契约扩展)。"
+    },
+    {
+      "n": 27,
+      "cap": "copilot-panel-visual-r3",
+      "design_ref": "atom-27",
+      "current": "现状:已实现且符合。header 状态行删除、断连 chip 内联标题旁(copilot-panel.tsx);SessionTabs 用 ScrollArea 单行横滚 + 每 tab 关闭按钮(session-tabs.tsx),copilotStore.closeSession 删内存会话 + deleteWorkspacePath 删盘上 json、活跃邻居切换、最后一个补新空会话;消息用 ui/message.tsx 左右布局(用户右气泡/助手左排版,无标签无头像列);ThinkingRow 双覆盖(事件前空窗 + running 无正文,首事件 context_resolved 不清除);排版 text-sm leading-relaxed。 R4:ThinkingRow 改 shimmer 文字;视口 p-4/消息 gap-3/composer px-4;index.css 引入 shadcn/tailwind.css(shimmer+scrollbar 工具类激活);后端 BASE_SYSTEM_PROMPT_TEMPLATE 加语言跟随规则。",
+      "gap": "无。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:语言规则落在 studio 后端系统提示词(test_copilot_system_prompt 新断言);Rust delete_workspace_path 已有。"
     }
   ],
   "plan": [
@@ -350,7 +370,8 @@
         "滚动行为本身由 @shadcn/react message-scroller primitive 提供(上游已测),本仓不重复单测滚动数学,以真机 layer2 断言为准。"
       ],
       "layer2": [
-        "真机 Playwright(Vite 5174 + 主仓 sidecar):发送 80 项 markdown 列表 → 流式期间视口贴底(st+ch==sh);上滚 600px → 新内容不抢滚、回底按钮 data-active=true;点击回底 → 恢复贴底。占位按钮计数=0;textarea 默认高 60px。"
+        "真机 Playwright(Vite 5174 + 主仓 sidecar):发送 80 项 markdown 列表 → 流式期间视口贴底(st+ch==sh);上滚 600px → 新内容不抢滚、回底按钮 data-active=true;点击回底 → 恢复贴底。占位按钮计数=0;textarea 默认高 60px。",
+        "真机 Playwright(2026-07-02 布局纠正):发送按钮矩形完全在输入框盒内、role 下拉位于盒外下方、route 下拉在单条兜底链时不渲染。"
       ],
       "screenshots": [
         {
@@ -364,6 +385,10 @@
         {
           "file": "n1-21-copilot-scroll-release.png",
           "caption": "2026-07-01 真机:上滚翻旧消息后跟随释放,右下浮现回到底部按钮"
+        },
+        {
+          "file": "n1-23-composer-r2.png",
+          "caption": "2026-07-02 真机:布局按 PM 截图纠正——盒内仅输入+发送,role 选择在盒外下方一行,单 route 链时 route 下拉隐藏"
         }
       ]
     },
@@ -388,6 +413,60 @@
         {
           "file": "n1-22-copilot-settings-cards.png",
           "caption": "2026-07-01 真机:Settings Copilot tab 同一时刻的三张角色卡,与 composer 菜单一致"
+        }
+      ]
+    },
+    {
+      "covers": "#26 copilot-composer-context-controls",
+      "atoms": [
+        26
+      ],
+      "fe_status": "未实施",
+      "layer1": [
+        "(target)@ 弹出/选中插 token/context POST 带 mentions;附件 chips/payload 内容块/非 vision 降级;停止断流。"
+      ],
+      "layer2": [
+        "(target)真机:@ 选节点后提问引用该节点;附件发图收到理解回复;长回复中点停止立即停。"
+      ],
+      "shots": [
+        "待 F7 各 PR 落地后补"
+      ]
+    },
+    {
+      "covers": "#27 copilot-panel-visual-r3",
+      "atoms": [
+        27
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "closeSession 单测(copilotStore.test.ts):非活跃关闭保活跃+删文件;关活跃激活前邻居;关最后一个留全新空会话;未知 id 不动。",
+        "面板单测:running 无正文渲染 thinking;transcript 以用户消息结尾渲染 thinking;有正文即撤;消息行 data-slot=message + align;tab 渲染 Close 按钮。",
+        "后端单测(test_copilot_system_prompt):系统提示词含「语言跟随用户」规则。"
+      ],
+      "layer2": [
+        "真机 Playwright:header 无 open 行;发送后 +0ms 起 Thinking 可见至首正文;用户气泡贴右;无 You/Copilot 标签;新建 tab 出关闭按钮、单行不出竖向滚动、点关闭即移除。",
+        "真机(R4,私有 sidecar):hello 得到全英文回复(cjk=0);shimmer 动画 tw-shimmer 生效;视口 padding 16px。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-24-visual-r3-bubbles.png",
+          "caption": "2026-07-02 真机:用户消息右对齐气泡、助手左对齐排版,无名字标签;tab 条带关闭按钮"
+        },
+        {
+          "file": "n1-24-visual-r3-thinking.png",
+          "caption": "2026-07-02 真机:发送后首 token 前的 Thinking 指示"
+        },
+        {
+          "file": "n1-24-visual-r3-tabs.png",
+          "caption": "2026-07-02 真机:多 chat tab 单行横向排布,各带 × 关闭,无系统滚动条"
+        },
+        {
+          "file": "n1-25-visual-r4-shimmer.png",
+          "caption": "2026-07-02 真机(R4):shimmer Thinking… 等待指示与 p-4 边距"
+        },
+        {
+          "file": "n1-25-visual-r4-padding.png",
+          "caption": "2026-07-02 真机(R4):消息区 p-4/gap-3 放宽后的对话视图"
         }
       ]
     }

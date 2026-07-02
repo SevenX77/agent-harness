@@ -20,6 +20,8 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 ### F1. Chat Panel And Connection State
 
 - 机制: show connection status, reconnect delay, messages, errors, and composer in the side panel.
+- 约束(2026-07-02 R4):**回复语言跟随用户输入语言**——用户写英文回英文、写中文回中文;系统提示词自身语言不决定回复语言(落点:后端 `BASE_SYSTEM_PROMPT_TEMPLATE` 显式语言规则,`test_copilot_system_prompt` 锁存在性)。
+- 约束(2026-07-02 R3):连接状态**不占独立一行**——连接正常(open)时什么都不显示;仅断连/重连时在标题旁显示紧凑提示 chip(含 retry 倒计时)。会话 tab 条 = 单行横向滚动(本地 ScrollArea,隐藏原生滚动条,绝不出现系统滚动条控件),**每个 tab 带关闭按钮**:关闭 = 删除该会话及其落盘文件(D8 真相在盘上,关掉的对话不得在 hydrate 时复活);关到最后一个时留一个全新空会话;关闭当前活跃 tab 时激活其前一个邻居。
 - 决策: Copilot is a side assistant, not a blocking modal.
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot configuration and runtime dependency.
 - 测试: closed websocket disables send; reconnect updates status; switching skills resets messages/context.
@@ -70,16 +72,33 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 ### F6. Message Scrolling & Composer（2026-07-01 新增）
 
 - 机制: 消息区滚动遵循 shadcn radix **message-scroller** 交互契约(`https://ui.shadcn.com/docs/components/radix/message-scroller`):流式回复时贴底自动跟随(live edge);用户上滚离开底部即释放跟随、绝不抢滚;露出「回到底部」按钮;新一轮用户消息锚定在视口顶部附近(turn anchoring);布局变化(markdown 展开/图加载)保持阅读位置。落地为 `src/components/ui/message-scroller.tsx` 的 shadcn 风格封装(缺原语先补 ui/ 再用,FRONTEND_UI_SPEC §2.1),面板消息区不再用裸 `overflow-y-auto` 承担主滚动(§2.6)。
-- Composer:
+- Composer(布局按 PM 2026-07-02 截图纠正:**发送在输入框盒内,设置在盒外**):
   1. 输入框默认可视高度 **≈3 行**(单行太小,PM 2026-07-01),随内容自增到上限(~160px)后内部滚动。
-  2. 操作行固定在**输入框下方**(Claude Code 式布局,PM 2026-07-01 "功能在输入框下方,更加清晰"):左侧 route 选择 + role 选择,右侧发送按钮。
-  3. **不渲染 Attach file / Add context 占位按钮**(本文件 §4 已决:上下文统一走 @mention;图片走拖拽/粘贴)。占位死按钮当场删,不留。
-  4. Enter 发送、Shift+Enter 换行;IME 组合输入(`isComposing`)期间 Enter 不发送。
+  2. **边框盒内只有 textarea + 右下角发送按钮**(流式期间应变为停止按钮,依赖 F7-③ interrupt,未落地前保持发送禁用态);**所有设置控件在边框盒外的下方一行**(Claude Code 布局,PM 2026-07-02「text area 里面只有发送和停止的按钮。其他设置按钮在 text area 的下方」):左侧 = 上下文动作(附件 / @mention,F7,可用后才渲染),右侧 = role 选择 + route 选择。
+  3. route 下拉 = 在选中角色兜底链内临时指定本次对话优先线路(model_override);**兜底链 ≤1 条时隐藏**,不渲染禁用占位。
+  4. **不渲染任何无功能占位按钮**——附件/@/停止只在真实可用后出现(本文件历史教训:死占位按钮误导 PM)。
+  5. Enter 发送、Shift+Enter 换行;IME 组合输入(`isComposing`)期间 Enter 不发送。
+  6. **消息布局(2026-07-02 R3,PM 原话「不需要空一栏给图标,也不需要分 you 和 copilot,左右布局就能分辨」)**:左右气泡布局——用户消息右对齐、`bg-muted` 圆角气泡、纯文本 pre-wrap;助手消息左对齐、无气泡纯排版(markdown);**不渲染 You/Copilot 名字标签、状态文字和头像列**。落地用本地 `components/ui/message.tsx`(shadcn message 原语,align start/end)。
+  7. **等待可见(thinking)**:从发送瞬间到首个正文 token 之间必须有可见等待指示(shadcn **shimmer** 文字 Thinking…,官方 loading-text 处理)——覆盖两段:①助手消息尚未创建的事件前空窗;②助手消息已建但 `status=running` 且无正文(冷启动 spawn 可达 10-30s;事件不清除它——首事件恒为 context_resolved 回显,工具活动而无正文仍算等待)。正文一到即撤。
+  8. 排版:消息与 composer 正文用 `text-sm leading-relaxed`(此前 text-xs/leading-snug 过挤);消息区视口 `p-4`、消息间距 `gap-3`(R4,PM「左边边距窄」;参照官方 message-scroller 示例 `p-6/gap-4` 按窄面板收敛一档)。
+  9. 前端引入 `shadcn` tailwind 工具包(`@import "shadcn/tailwind.css"`):激活 shimmer 与 ui/message-scroller 自带的 scrollbar-*/scroll-fade-* 工具类(此前这些类是死类)。
 - 决策: 聊天区的滚动/输入行为向官方 message-scroller 契约看齐,不自造第二套滚动启发式。
 - 原话/来源: PM 2026-07-01(本轮任务原话):「参考这个官方组件 ui,优化现在的 copilot 面板」「下方的输入窗口默认只有一行有点太小了」「我比较喜欢 Claude code 的布局方式,功能在输入框下方」。
 - 测试: 流式输出时列表贴底;上滚后新增内容不抢滚、出现回底按钮;点击回底恢复跟随;composer 默认高度≈3 行;Enter 发送/Shift+Enter 换行/IME 不误发;占位按钮不存在。
-- Status: live(2026-07-01 落地:ui/message-scroller.tsx 封装 @shadcn/react primitive,composer 三行 + Enter/Shift+Enter/IME 语义,占位按钮已删)。
+- Status: live(2026-07-01 滚动+三行;2026-07-02 布局纠正 + R3 气泡左右布局/thinking 可见/排版/状态条收敛/会话 tab 关闭)。
 - 归属: region `copilot`; capability `copilot-assist`.
+
+### F7. Composer 上下文与控制(2026-07-02 新增,target-design)
+
+- 机制: composer 的三个待落地控制,各自独立成 PR、全栈落地(不做前端假按钮):
+  1. **@mention 弹出器**:textarea 中键入 `@` 在光标处弹节点选择 popover(数据源=当前 skill 图节点),选中插入 `@<node_id>` token 并把该节点加入 mentions;发送前 mentions 随 view-context POST `/skills/{id}/copilot/context` 注入——**后端 mentions 层已就绪**(`app/services/copilot.py` context 压缩已渲染 `mentions` XML 层),缺的只是前端选择器与采集链路。
+  2. **附件(外部文件/图片)**:PM 2026-07-02 决策反转本文件 §4 旧条目「砍掉 Attach file」——**附件按钮要保留且做真**:「添加附件还是要的啊,添加外部的文件、图片等,和 @mention 是两码事」。@mention=图内节点上下文,附件=外部文件输入,二者并存。入口三个:附件按钮(系统文件选择)+ 拖拽 + 粘贴;格式与大小约束沿用 §4(Claude 原生组:PNG/JPEG/GIF/WebP ≤~5MB / PDF / 文本类);链路 = 前端把附件(base64+media_type)放进 ws send payload → studio 后端转 `claude_agent_sdk` 内容块(ImageContent 等)→ 非 vision 模型给「不支持图片」降级提示。后端目前无此通路(copilot.py 无 ImageContent),需后端新增。
+  3. **停止按钮**:流式期间发送按钮变停止;ws 增加控制消息(如 `{"type":"interrupt"}`)→ 后端对当前 `ClaudeSDKClient` 调 `interrupt()`。后端 ws 循环目前无 interrupt 通道,需后端新增。
+- 决策: 三个控制都是「可用才渲染」;各自单独 PR 排队(mention → interrupt → attach,按后端工作量升序),不把 composer 布局修正(F6)拖在一起。
+- 原话/来源: PM 2026-07-02 本轮反馈原话(见上);mentions 后端座:`apps/studio/backend/app/services/copilot.py` context 压缩 `mentions` 层。
+- 测试: @ 键入弹出/选中插入 token/context POST 含 mentions;附件选择/拖拽/粘贴后 chips 呈现、payload 带内容块、非 vision 降级提示;流式中点停止 → 流即断、消息态落 stopped。
+- Status: target-design(2026-07-02,分 PR 落地)。
+- 归属: region `copilot`; capability `copilot-assist`(附件链路含 studio 后端)。
 
 ## 3. 接口契约
 - Inputs: current skill id, current view context, copilot role route data, websocket events.
@@ -88,7 +107,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - Platform link: `gateway`.
 
 ## 4. 设计决策基础（PM 原话）
-- 砍掉旧 Attach file / Add context 占位按钮(上下文统一走 F4 @mention)。
+- ~~砍掉旧 Attach file / Add context 占位按钮(上下文统一走 F4 @mention)~~ **已被 PM 2026-07-02 反转**:「添加附件还是要的啊,添加外部的文件、图片等,和@mention 是两码事」——附件按钮保留且必须做真(外部文件/图片入口,F7-②);@mention 负责图内节点上下文(F7-①)。仍然成立的部分:**无功能的占位死按钮不许渲染**。
 - **composer 新增图片附加**:① 拖拽图片文件;② 粘贴剪贴板图片(= "截图后加载":系统截图到剪贴板再 ⌘V)。**可行性已核**:`claude_agent_sdk` 有 `ImageContent` 输入类型 + `query` 收 message dict(含图)+ Claude 多模态 → 收图 OK;拖拽/粘贴纯前端、无需新 Tauri 插件。
 - **不做应用内截图按钮**:截图统一靠系统快捷键 + 粘贴(② 已覆盖)——Mac `⌘⌃⇧4` / Windows `Win+Shift+S` 都框选到剪贴板、跨平台都简单;应用内 capture 要写三套原生代码、不值。
 - **文件格式**:仅支持 Claude 原生组——图片(PNG/JPEG/GIF/WebP,单张 ≤~5MB)/ PDF / 文本类(md/code/json/csv 当文本读);**不支持格式给清晰提示**(转 PDF/图片/文本)。**自动转格式不在 copilot 做**,归 DEF-012(引擎内置转换 tools)、技能图按需调。

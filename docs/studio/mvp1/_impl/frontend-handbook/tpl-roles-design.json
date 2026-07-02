@@ -315,7 +315,7 @@
    "module": "状态投影",
    "func": "设计:悬停 provider 行的状态灯看 role-match(Can Run / Limited / Blocked)+ 诊断,一眼知道这条 route 对本角色合不合适。",
    "action": "用户鼠标悬停某 provider 行的 role-route 状态灯。",
-   "fe_design": "每个 provider 行显一个 role-route 状态灯(Can Run 绿 / Limited 黄 / Blocked 红 / Testing),由 deriveRoleRouteStatus 把后端 materialization_report 的 role_fit(using/downgraded/needs_test/not_fit)+ 该 route 的 6 态 ui_state + 实时测试态合成 → 悬停显单一顶层 tooltip:route 模型名 + role-match 诊断行(fail/downgrade 原因)+ 能力/token 上限。role_fit 权威来自后端 materialize report,前端只渲染、不自己判 fit。tooltip 是单层顶层(无嵌套、无独立 panel)。",
+   "fe_design": "每个 provider 行显一个 role-route 状态灯(Can Run 绿 / Limited 黄 / Blocked 红 / Testing),由 deriveRoleRouteStatus 把后端 materialization_report 的 role_fit(using/downgraded/needs_test/not_fit)+ 该 route 的 6 态 ui_state + 实时测试态合成 → 悬停显单一顶层 tooltip:route 模型名 + role-match 诊断行(fail/downgrade 原因)+ 能力/token 上限。诊断必须是可读原文而非笼统报错(设计源 00_settings-ux-spec.md §2.4「UI 据此给可读诊断」):route 级失败的 detail 由后端投影自该 route 最新 probe-failed evidence 的 reason(ui_detail),endpoint 级失败用 endpoint.last_test_message;'Failed:'/'Warning:' 状态标签由 tooltip 行拼装器统一加一次,detail 本体不带前缀。role_fit 权威来自后端 materialize report,前端只渲染、不自己判 fit。tooltip 是单层顶层(无嵌套、无独立 panel)。",
    "fe_modules": [
     {
      "name": "role 测试态投影",
@@ -332,7 +332,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计:role_fit 来自后端 materialize report,灯 + 单一顶层 tooltip 已实现(无独立 RoleTestResultPanel、无嵌套 tooltip)。",
+   "gap_brief": "符合设计:role_fit 来自后端 materialize report,灯 + 单一顶层 tooltip 已实现(无独立 RoleTestResultPanel、无嵌套 tooltip)。2026-07-01 补齐 route 级失败诊断:adapter _map_gateway_projection 把 route 最新 probe-failed evidence 的 reason 装进 ui_detail,failed 路由 hover 显示 provider 原文(真机验证:fable-5 × Anthropic Official 显示 HTTP 404 'Claude Fable 5 is not available. Please use Opus 4.8')而非兜底文案;并修掉 'Failed: Failed:' 双前缀(providerUiStateDetail 不再自带标签)。",
    "impl_ref": "fn-45"
   },
   {

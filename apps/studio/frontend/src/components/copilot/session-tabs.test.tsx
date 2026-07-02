@@ -78,6 +78,7 @@ describe('SessionTabs', () => {
         activeSessionId="s1"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onClose={() => undefined}
       />,
     )
 
@@ -93,6 +94,7 @@ describe('SessionTabs', () => {
         activeSessionId="s1"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onClose={() => undefined}
       />,
     )
 
@@ -106,6 +108,7 @@ describe('SessionTabs', () => {
         activeSessionId="s1"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onClose={() => undefined}
       />,
     )
 
@@ -120,13 +123,17 @@ describe('SessionTabs', () => {
       activeSessionId: 's1',
       onSwitch,
       onNew: () => undefined,
+      onClose: () => undefined,
     })
 
-    // <div> > [<div>{tab buttons}</div>, <Button new />]
+    // <div> > [<ScrollArea>{tab spans}</ScrollArea>, <Button new />]; each tab
+    // span = [label Button, close Button].
     const props = (element as { props: { children: unknown[] } }).props
-    const tabsWrapper = props.children[0] as { props: { children: Array<{ key: string; props: { onClick?: () => void } }> } }
-    const secondTab = tabsWrapper.props.children.find((tab) => tab.key === 's2')
-    secondTab?.props.onClick?.()
+    const scrollArea = props.children[0] as {
+      props: { children: Array<{ key: string; props: { children: Array<{ props: { onClick?: () => void } }> } }> }
+    }
+    const secondTab = scrollArea.props.children.find((tab) => tab.key === 's2')
+    secondTab?.props.children[0]?.props.onClick?.()
 
     expect(onSwitch).toHaveBeenCalledWith('s2')
   })
@@ -138,6 +145,7 @@ describe('SessionTabs', () => {
       activeSessionId: 's1',
       onSwitch: () => undefined,
       onNew,
+      onClose: () => undefined,
     })
 
     const props = (element as { props: { children: unknown[] } }).props
@@ -145,5 +153,25 @@ describe('SessionTabs', () => {
     newButton.props.onClick?.()
 
     expect(onNew).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe('SessionTabs close button', () => {
+  it('renders a close control per tab', () => {
+    const html = renderToStaticMarkup(
+      <SessionTabs
+        sessions={[
+          session('a', [{ role: 'user', content: 'hello world' }]),
+          session('b', []),
+        ]}
+        activeSessionId="a"
+        onSwitch={() => undefined}
+        onNew={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+    expect(html).toContain('aria-label="Close hello world"')
+    expect(html).toContain('aria-label="Close Chat 2"')
   })
 })

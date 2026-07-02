@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from app.routers import llm
 from app.services import llm_role_test_results
+from app.services.runtime_activity import load_runtime_activity
 
 
 def _completed_graph_agent_job(job_id: str, role_name: str) -> None:
@@ -63,6 +64,67 @@ def test_persist_completed_role_test_result_writes_through(
     assert persisted is not None
     assert persisted["status"] == "ok"
     assert persisted["result"]["sdk_evidence"]["passed"] == 1
+
+
+def test_persist_completed_role_test_result_logs_per_route_detail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime-activity entry must carry the SAME per-route facts as the
+    persisted truth file — the General-settings Runtime log is the diagnostic
+    trail, so "analyst failed" without the failing routes/messages is useless."""
+    store = tmp_path / "llm_role_test_results.json"
+    monkeypatch.setenv("STUDIO_LLM_ROLE_TEST_RESULTS_PATH", str(store))
+    log_path = tmp_path / "runtime_activity.jsonl"
+    monkeypatch.setenv("STUDIO_RUNTIME_ACTIVITY_LOG_PATH", str(log_path))
+
+    result = {
+        "role_name": "analyst",
+        "status": "failed",
+        "warnings": [],
+        "model_groups": [
+            {
+                "canonical_id": "claude-fable-5",
+                "provider_results": [
+                    {
+                        "route_id": "qiniu:anthropic.claude-fable-5",
+                        "provider_label": "Qiniu",
+                        "status": "failed",
+                        "message": "Provider returned HTTP 502 (processing_error).",
+                    },
+                    {
+                        "route_id": "anthropic-official:claude-fable-5",
+                        "provider_label": "Anthropic Official",
+                        "status": "ok",
+                        "message": None,
+                    },
+                ],
+            }
+        ],
+    }
+    llm._persist_completed_role_test_result("analyst", result)
+
+    entries = load_runtime_activity(source_id="llm_role_test_results")
+    assert entries, "expected a runtime-activity entry for the saved role test"
+    changes = entries[0]["changes"]
+    assert changes["role_name"] == "analyst"
+    assert changes["status"] == "failed"
+    assert changes["route_results"] == [
+        {
+            "canonical_id": "claude-fable-5",
+            "route_id": "qiniu:anthropic.claude-fable-5",
+            "provider": "Qiniu",
+            "status": "failed",
+            "message": "Provider returned HTTP 502 (processing_error).",
+        },
+        {
+            "canonical_id": "claude-fable-5",
+            "route_id": "anthropic-official:claude-fable-5",
+            "provider": "Anthropic Official",
+            "status": "ok",
+            "message": None,
+        },
+    ]
 
 
 def test_persist_is_best_effort_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:

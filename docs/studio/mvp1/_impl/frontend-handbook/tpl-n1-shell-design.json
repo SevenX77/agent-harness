@@ -198,9 +198,9 @@
       "cap": "copilot-composer-scroll",
       "track": "copilot-assist",
       "module": "Copilot 面板",
-      "func": "设计(F6,PM 2026-07-01):Copilot 面板消息区滚动遵循 shadcn radix message-scroller 交互契约——流式回复贴底自动跟随、用户上滚即释放跟随并露出「回到底部」按钮、新一轮用户消息锚定视口顶部附近;composer 输入框默认可视高度约 3 行,操作行固定在输入框下方(Claude Code 式布局)。",
+      "func": "设计(F6,PM 2026-07-01 + 2026-07-02 布局纠正):消息区滚动遵循 shadcn radix message-scroller 契约(贴底跟随/上滚释放+回底按钮/轮次锚定);composer 输入框默认约 3 行;**边框盒内只有 textarea + 右下角发送(将来 + 停止)按钮,所有设置控件在盒外下方一行**(Claude Code 布局);route 下拉兜底链 ≤1 条时隐藏;不渲染任何无功能占位按钮。",
       "action": "用户在 Copilot 面板收发消息:流式输出时不动=贴底跟随;上滚翻旧消息=释放跟随+回底按钮;点回底按钮恢复跟随。输入:Enter 发送、Shift+Enter 换行(IME 组合中 Enter 不发送)。",
-      "fe_design": "消息区用 src/components/ui/message-scroller.tsx 的 shadcn 风格封装(MessageScrollerProvider autoScroll + Viewport + Content + Item(scrollAnchor=用户消息) + 回底 Button),面板不再用裸 overflow-y-auto 承担主滚动(FRONTEND_UI_SPEC §2.6)。composer:textarea 默认 min-height≈3 行、field-sizing-content 自增到 ~160px 后内部滚动;下方操作行左侧 route 下拉(ModelPicker)+ role 下拉(RolePicker)、右侧发送按钮;Attach file / Add context 占位死按钮按设计源 §4 决策删除(上下文统一走 @mention,图片走拖拽/粘贴,后者不在本原子范围)。设计源:docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F6。",
+      "fe_design": "消息区用 src/components/ui/message-scroller.tsx 的 shadcn 风格封装(MessageScrollerProvider autoScroll + Viewport + Content + Item(scrollAnchor=用户消息) + 回底 Button),面板不再用裸 overflow-y-auto 承担主滚动(FRONTEND_UI_SPEC §2.6)。composer:textarea 默认 min-height≈3 行、field-sizing-content 自增到 ~160px 后内部滚动;**盒内**右下角发送按钮;**盒外下方一行**右侧 = route 下拉(ModelPicker,兜底链 ≤1 隐藏)+ role 下拉(RolePicker),左侧预留给 F7 附件/@mention(可用才渲染);Attach file / Add context 占位死按钮按设计源 §4 决策删除(上下文统一走 @mention,图片走拖拽/粘贴,后者不在本原子范围)。设计源:docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F6。",
       "fe_modules": [
         {
           "name": "消息滚动器(MessageScroller)",
@@ -210,7 +210,7 @@
       "be_contract": [],
       "fe_status": "符合",
       "be_status": "n/a",
-      "gap_brief": "符合设计(本轮落地):消息区改用 ui/message-scroller.tsx(@shadcn/react primitive 封装,MessageScrollerProvider autoScroll + Item scrollAnchor=用户消息 + 回底 Button),裸 overflow-y-auto 已删;textarea rows=3 / min-h-[60px];isComposerSendKey 实现 Enter/Shift+Enter/isComposing 语义;Paperclip/Plus 占位按钮已删。真机 Playwright 验证:流式贴底 / 上滚释放 + 回底按钮 / 点击回底恢复全部通过。",
+      "gap_brief": "符合设计(2026-07-02 布局按 PM 截图纠正:发送移入输入框盒内、route/role 移到盒外下方、ModelPicker 无 role 或 ≤1 条链时不再渲染禁用占位)。滚动/三行/Enter 语义沿 2026-07-01 落地。",
       "impl_ref": "fn-24"
     },
     {
@@ -251,6 +251,61 @@
       "be_status": "已实现",
       "gap_brief": "符合设计(本轮收敛):copilotRoleOptions 改为 deriveCopilotDisplayRoles 配置完成子集(fallback_chain 非空,空草稿排除、浮出内置保留);标题查找扩到全量 model_groups(非 anthropic 候选组也按 display_name 显示,与 Settings 卡一致);route 下拉吃选中显示角色 fallbackChain + registry provider_routes 投影,registry.roles 第二真相读取已删;resolveCopilotSendRole 在首发消息时物化浮出角色(copilot_<slug> + buildCopilotRoleEntry,PUT /api/llm/roles);DEFAULT_COPILOT_ROLE=copilot_chat 常量已删。真机验证:composer 菜单 = Settings 卡(Claude Opus 4.8 / 4.7 / Sonnet 4.5)完全一致。",
       "impl_ref": "fn-25"
+    },
+    {
+      "n": 26,
+      "cap": "copilot-composer-context-controls",
+      "track": "copilot-assist",
+      "module": "Copilot 面板",
+      "func": "设计(F7,PM 2026-07-02,target-design):composer 三个待落地控制,各自独立 PR 全栈落地——① @mention 弹出器(@ 触发节点选择 popover,选中插入 token + mentions 进 context POST;后端 mentions XML 层已就绪);② 附件按钮(外部文件/图片:文件选择+拖拽+粘贴 → ws payload 内容块 → 后端转 claude_agent_sdk ImageContent;§4 旧「砍掉 Attach file」已被 PM 反转);③ 停止按钮(流式中发送变停止,ws interrupt 控制消息 → ClaudeSDKClient.interrupt())。可用才渲染,不留死占位。",
+      "action": "@ 键入弹节点选择;点附件按钮选外部文件(或拖拽/粘贴);流式期间点停止中断回复。",
+      "fe_design": "设计源 docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F7(三条机制与链路、格式约束、降级提示)。落地顺序按后端工作量升序:mention(后端已就绪)→ interrupt(ws 控制消息)→ attach(内容块通路)。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/copilot/context",
+          "purpose": "@mention:mentions 随 view-context 注入(后端 mentions 层已实现)。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        },
+        {
+          "endpoint": "WS /api/skills/{skill_id}/copilot/ws",
+          "purpose": "附件内容块 + interrupt 控制消息(两者后端均未实现,待新增)。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        }
+      ],
+      "fe_status": "未实施",
+      "be_status": "未实现",
+      "gap_brief": "target-design:前端三个控制均未实施;后端 mentions 层已就绪,interrupt 通道与附件内容块通路未实现。按 F7 分三个 PR 落地。",
+      "impl_ref": "fn-26"
+    },
+    {
+      "n": 27,
+      "cap": "copilot-panel-visual-r3",
+      "track": "copilot-assist",
+      "module": "Copilot 面板",
+      "func": "设计(R3,PM 2026-07-02 视觉反馈):① 连接状态不占独立一行(open 时不显示,断连才在标题旁显示紧凑 chip);② 会话 tab 条单行横向滚动(ScrollArea 隐藏原生滚动条)+ 每个 tab 关闭按钮(关闭删会话及落盘文件,关最后一个留全新空会话,关活跃 tab 激活前邻居);③ 消息左右气泡布局(用户右对齐 bg-muted 气泡,助手左对齐纯排版,无 You/Copilot 标签/状态字/头像列);④ 发送到首个正文 token 之间必须有 Thinking 指示(事件前空窗 + running 无正文两段都盖);⑤ 排版 text-sm leading-relaxed。 R4 追加:thinking 用 shadcn shimmer 文字;视口 p-4/gap-3 放宽边距;引入 shadcn tailwind 工具包激活 shimmer/scrollbar/scroll-fade;后端系统提示词加「语言跟随用户」规则(hello 不再回中文)。",
+      "action": "用户在面板收发消息/切换与关闭 chat tab;断连时看到标题旁提示。",
+      "fe_design": "设计源 03_regions/copilot F1(状态 chip + tab 条)与 F6-⑥⑦⑧(气泡/thinking/排版)。落地组件:components/ui/message.tsx(shadcn message 原语,align start/end)、ui/spinner、ui/scroll-area;store 新增 closeSession(删除 .workspace/copilot/sessions/<skillId>/<id>.json,经 native-fs delete_workspace_path)。",
+      "fe_modules": [
+        {
+          "name": "消息滚动器(MessageScroller)",
+          "ref": "femod-message-scroller"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "Rust delete_workspace_path",
+          "purpose": "关闭 chat 时删除该会话的落盘 transcript(已有命令,无新增)。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-wsfile"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(本轮落地)。真机验证:header 无 open 行;用户气泡贴右(gapRight 12px vs gapLeft 173px);无 You/Copilot 标签;tab 条单行(sh==ch==24)带关闭按钮、关闭即移除;Thinking 从发送 +0ms 可见到首正文 token(暖会话 ~440ms,冷启动覆盖 spawn 全程)。 R4:shimmer thinking、p-4/gap-3、语言规则(test_copilot_system_prompt 锁)已落地。",
+      "impl_ref": "fn-27"
     }
   ]
 }

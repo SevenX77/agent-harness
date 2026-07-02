@@ -80,3 +80,11 @@ def test_build_system_prompt_truncates_large_file_context() -> None:
     assert "[Content truncated due to length. Use 'Read' tool" in prompt
     assert "/tmp/SKILL.md" in prompt
     assert '"dirty": false' in prompt
+
+
+def test_system_prompt_pins_reply_language_to_the_user() -> None:
+    """R4 (PM 2026-07-02): typing "hello" must not get a Chinese reply just
+    because the system prompt itself is written in Chinese — the prompt must
+    carry an explicit follow-the-user's-language rule."""
+    prompt = copilot.build_system_prompt("any-skill")
+    assert "语言跟随用户" in prompt

@@ -176,7 +176,45 @@ describe('buildCopilotJudgeDraft', () => {
     })
   })
 
-  it('renders chat messages as marker rows instead of boxed cards', () => {
+  it('shows the thinking indicator while an assistant turn is running with no text yet', () => {
+    mocks.useCopilot.mockReturnValue(copilotState({
+      messages: [
+        { id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 },
+        { id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 },
+      ],
+    }))
+    const html = renderToStaticMarkup(
+      React.createElement(CopilotPanel, { skillId: 'text-segmentation' }),
+    )
+    expect(html).toContain('data-copilot-thinking="true"')
+  })
+
+  it('shows the thinking indicator in the pre-event gap (transcript ends on a user turn)', () => {
+    mocks.useCopilot.mockReturnValue(copilotState({
+      messages: [
+        { id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 },
+      ],
+    }))
+    const html = renderToStaticMarkup(
+      React.createElement(CopilotPanel, { skillId: 'text-segmentation' }),
+    )
+    expect(html).toContain('data-copilot-thinking="true"')
+  })
+
+  it('hides the thinking indicator once assistant text streams', () => {
+    mocks.useCopilot.mockReturnValue(copilotState({
+      messages: [
+        { id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 },
+        { id: 'a1', role: 'assistant', content: 'partial answer', events: [], status: 'running', createdAt: 2 },
+      ],
+    }))
+    const html = renderToStaticMarkup(
+      React.createElement(CopilotPanel, { skillId: 'text-segmentation' }),
+    )
+    expect(html).not.toContain('data-copilot-thinking="true"')
+  })
+
+  it('renders chat messages as aligned message rows (assistant start-aligned)', () => {
     mocks.useCopilot.mockReturnValue(copilotState({
       messages: [
         {
@@ -197,7 +235,8 @@ describe('buildCopilotJudgeDraft', () => {
     )
 
     expect(html).toContain('data-copilot-message-role="assistant"')
-    expect(html).toContain('data-slot="marker"')
+    expect(html).toContain('data-slot="message"')
+    expect(html).toContain('data-align="start"')
     expect(html).toContain('Streaming answer')
   })
 

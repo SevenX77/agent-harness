@@ -62,6 +62,26 @@ describe("LLM role state badges", () => {
     expect(html).not.toContain("Not Fit")
   })
 
+  it("does not double the Failed label when the failed route detail feeds the tooltip", () => {
+    const detail = roleRouteStatusDetail({
+      providerModel: providerModel("failed", {
+        ui_detail:
+          "Endpoint model probe failed (invalid_model). Provider returned HTTP 404 (not_found_error).",
+      }),
+    })
+    const tooltip = roleProviderRouteTooltip({
+      status: "blocked",
+      providerModel: providerModel("failed"),
+      fallbackProviderModelId: null,
+      detail,
+    })
+
+    // The status label is added exactly once by the tooltip line builder — the
+    // route detail itself must stay unlabelled.
+    expect(tooltip).toContain("Failed: Endpoint model probe failed (invalid_model).")
+    expect(tooltip).not.toContain("Failed: Failed:")
+  })
+
   it("builds provider row tooltip from the real model name, capabilities, and role fit", () => {
     const tooltip = roleProviderRouteTooltip({
       status: "runnable",

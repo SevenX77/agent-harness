@@ -453,6 +453,10 @@ class GatewayAdapter:
                 ui_detail = endpoint.last_test_message
             elif route.status == "failed":
                 reason_code = str(route.metadata.get("reason_code") or reason_code or "model_failed")
+                # The route's own probe evidence carries the human-readable failure
+                # reason — surface it so the frontend tooltip shows the provider's
+                # actual error instead of the generic fallback copy.
+                ui_detail = _route_failed_probe_reason(route)
             return ProviderModelStateProjection(
                 ui_state="failed",
                 reason_code=reason_code,
@@ -604,6 +608,28 @@ def _put_config_if_absent(
         if exc.error_code != "config.not_found":
             raise
     return str(config_store.put_config(user_id, key, value, if_none_match="*"))
+
+
+def _route_failed_probe_reason(route: Any) -> str | None:
+    """Return the newest probe-failed evidence reason embedded on the route.
+
+    Route-level failure detail lives in ``route.evidence`` (credentials SSOT);
+    the newest ``probe-failed`` record's human-readable ``reason`` is what the
+    UI tooltip should show for a failed route.
+    """
+    latest_reason: str | None = None
+    latest_observed = ""
+    for evidence in getattr(route, "evidence", None) or []:
+        if getattr(evidence, "trust_state", None) != "probe-failed":
+            continue
+        reason = getattr(evidence, "reason", None)
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        observed = getattr(evidence, "observed_at", None) or getattr(evidence, "attempted_at", None) or ""
+        if latest_reason is None or str(observed) >= latest_observed:
+            latest_reason = reason
+            latest_observed = str(observed)
+    return latest_reason
 
 
 def _provider_projection_from_response(response: Any) -> ProviderModelStateProjection:

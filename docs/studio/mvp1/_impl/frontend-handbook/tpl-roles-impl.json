@@ -125,10 +125,10 @@
    "n": 45,
    "cap": "role-route-status-light",
    "design_ref": "atom-45",
-   "current": "现状:已实现且符合。ProviderTag(ProviderChain.tsx)用 deriveRoleRouteStatus(role-route-status.tsx)把后端 materialization_report 的 role_fit(roleFitByRouteId,来自 role.materialization_report.entries)+ 该 route 的 6 态 ui_state + 实时测试态合成 runnable/limited/blocked/testing → RoleRouteStatusLight(role-route-status.tsx)渲染灯 → 单一顶层 Tooltip 包整行显 roleProviderRouteTooltip(模型名 + role-match 诊断 + 能力/token 上限)。role_fit 权威来自后端 report,前端只渲染。无独立 RoleTestResultPanel、无嵌套 tooltip(已是单顶层)。",
-   "gap": "符合设计(role_fit 来自后端、灯 + 单顶层 tooltip),无需改。",
+   "current": "现状:已实现且符合。ProviderTag(ProviderChain.tsx)用 deriveRoleRouteStatus(role-route-status.tsx)把后端 materialization_report 的 role_fit(roleFitByRouteId,来自 role.materialization_report.entries)+ 该 route 的 6 态 ui_state + 实时测试态合成 runnable/limited/blocked/testing → RoleRouteStatusLight(role-route-status.tsx)渲染灯 → 单一顶层 Tooltip 包整行显 roleProviderRouteTooltip(模型名 + role-match 诊断 + 能力/token 上限)。role_fit 权威来自后端 report,前端只渲染。无独立 RoleTestResultPanel、无嵌套 tooltip(已是单顶层)。2026-07-01 补齐失败诊断:route 级 failed 的 ui_detail 由 adapter(_map_gateway_projection + _route_failed_probe_reason,adapters/gateway.py)从 route 最新 probe-failed evidence 的 reason 投影,tooltip 显示 provider 原文;providerUiStateDetail(role-route-status.tsx)不再自带 'Failed:' 前缀(标签由 roleMatchTooltipLine 加一次)。",
+   "gap": "符合设计(route 级失败诊断已从 evidence 投影,真机验证 fable-5 tooltip 显示 HTTP 404 原文),无需改。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。角色已 materialize,materialization_report.entries 内嵌 role_fit + warnings(D6.2/6.3 收口=ok)。"
+   "be_dep": "已就绪可接。角色已 materialize,materialization_report.entries 内嵌 role_fit + warnings(D6.2/6.3 收口=ok);route 级失败 detail 由 credentials route.evidence 投影(probe-failed reason → ui_detail)。"
   },
   {
    "n": 46,
@@ -504,16 +504,22 @@
    "layer1": [
     "喂 materialization_report(role_fit using/downgraded/needs_test/not_fit)+ 各 ui_state → 断言 deriveRoleRouteStatus 合成对应灯(runnable/limited/blocked/testing)。",
     "断言悬停只有一个顶层 tooltip(无嵌套)、无 RoleTestResultPanel 面板。",
-    "断言 tooltip 含模型名 + role-match 诊断 + 能力/token 上限。"
+    "断言 tooltip 含模型名 + role-match 诊断 + 能力/token 上限。",
+    "喂 failed providerModel(ui_detail=evidence reason)→ 断言 tooltip 显 'Failed: <原文>' 且不出现 'Failed: Failed:' 双前缀(state-badges.test.tsx);后端侧 adapter 测试断言 route 级 failed 的 ui_detail 取最新 probe-failed evidence reason(test_productization_route_state_delegation.py)。"
    ],
    "layer2": [
     "悬停一个 downgraded route 的灯看 tooltip。",
+    "悬停一条 failed route(fable-5 × Anthropic Official)确认 tooltip 显示 provider 404 原文而非兜底文案。",
     "确认没有独立测试结果面板。"
    ],
    "screenshots": [
     {
      "file": "roles-card.png",
      "caption": "角色卡(Premium):model + provider 行状态灯(绿=可用)+ 单顶层 tooltip;右侧可用模型侧栏 6 态色"
+    },
+    {
+     "file": "n0-roles-45-failed-route-evidence-tooltip.png",
+     "caption": "真机(worktree 私有 sidecar):analyst 卡 Claude Fable 5 × Anthropic Official 失败路由 hover——tooltip 红字显示 route evidence 的完整 404 原因(Claude Fable 5 is not available. Please use Opus 4.8),单个 Failed: 前缀,不再是笼统兜底文案"
     }
    ]
   },

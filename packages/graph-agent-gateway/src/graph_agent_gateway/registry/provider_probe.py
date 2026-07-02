@@ -512,6 +512,38 @@ def _anthropic_messages_payload(
     return payload
 
 
+# Providers report an exhausted balance in provider-specific ways that do not
+# follow the 402/403 status convention — Anthropic answers HTTP 400
+# invalid_request_error with "credit balance is too low". A billing failure hits
+# every model on the endpoint, so it must classify as structural quota_exceeded,
+# never as a model-level invalid_model.
+_BILLING_ERROR_MARKERS = (
+    "credit balance",
+    "insufficient balance",
+    "insufficient credit",
+    "insufficient_quota",
+    "quota exceeded",
+    "billing",
+)
+
+
+def _is_billing_error(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    source = error if isinstance(error, dict) else payload
+    text = " ".join(
+        str(value).lower()
+        for value in (source.get("type"), source.get("code"), source.get("message"))
+        if value is not None
+    )
+    return any(marker in text for marker in _BILLING_ERROR_MARKERS)
+
+
 def _probe_status(
     response: httpx.Response,
     *,
@@ -527,6 +559,8 @@ def _probe_status(
     if code in (402, 403):
         return "quota_exceeded"
     if code in (400, 404):
+        if _is_billing_error(response):
+            return "quota_exceeded"
         return model_not_found_status
     return "error"
 

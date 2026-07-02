@@ -25,17 +25,19 @@
 **页面职责一句话**：确认每个 endpoint 可连通，并用 Probe Knowledge Catalog（探测知识库）回填模型清单的已知信息。真正"保证某模型能用"的测试在 role 页面做（见 §4.3）。
 
 ### 1.1 Official provider（官方，比较可控）
-**动机**：官方 endpoint 可控，只要 API key 能连通就够，不必逐模型 probe。
+**动机**：官方 endpoint 可控，协议固定、模型清单可信，**不必逐模型 probe**；但"能连通"不等于"能生成"（PM 拍板修订 2026-07-01，见下）。
 **步骤**：
 1. 用户填入 **API key**。
 2. 直接点 **Test**。
-3. 系统调 `GET /models`（获取模型列表）—— **只要这一步能连通，endpoint 即验证通过，不做逐模型 probe**。
+3. 系统调 `GET /models`（获取模型列表），**再打一次最小生成探测**（在语言模型候选里按 probe 优先级挑一个、打推理端点、`max_tokens` 最小）——**生成探测成功才判 verified**；get-models 通、生成探测遇结构性失败（invalid_key / 欠费类 quota）→ endpoint 判 failed 并展示 provider 原文。
+   - **修订记录（PM 2026-07-01）**：原设计为"get-models 连通即 verified、不做逐模型 probe"。实证推翻：Anthropic 账户**欠费**时 `GET /models` 照常 200（endpoint 显示 Connected/verified），但**所有**生成调用被 `HTTP 400 "credit balance is too low"` 拒绝 —— role 测试全红、API keys 页却全绿，两页真相矛盾。结论与第三方 §1.2 的论证同源：**get-models 只证明 key+URL 可达，不证明能生成**；官方与第三方在"必须真打一次生成"上对称，差别只剩官方**不需要协议轮换探测**（协议固定）、且候选**过滤为语言模型**（官方清单混着 image/audio/embedding 模型）。欠费类 HTTP 400（provider 报文含 credit/billing 标记）由 gateway 归类为结构性 `quota_exceeded`，短路批量循环，不误判为 `invalid_model`。
+   - 逐模型的**能力级** probe（profiles / thinking）仍不在 endpoint Test 里做——那是 role 页与 Manual probing 的职责;endpoint Test 的生成探测只为证明"这个账户当下真能出字"。
 4. **读取 Probe Knowledge Catalog**（该 provider 的历史探测知识库），把当前 `GET /models` 结果与 catalog 的 provider/endpoint/model 画像 **做 diff**。
    - **边界（PM 补充 2026-06-02，术语更新）**：若 `GET /models` 返回 **200 但 `models=[]`（空清单）**，仍与 catalog 做 diff，**用 catalog 里的已知模型填充 model list** —— 空响应不代表没有模型（有的 provider 不返回清单），以历史探测知识为候选来源。
 5. **把 catalog 中已证实的资料回填给 model list**（历史已验证的能力/元数据填进当前清单，带 provenance/evidence_ref）。
 6. model list 的标签变 **蓝色 =「以前联通过」**（历史连通标记）。
 7. diff 出的**新模型 / 新 capability**（anthropic 在 get-model 时就会返回 capability）**写回 Probe Knowledge Catalog**（沉淀历史知识）。
-- **official 只需要 get models**，到此 endpoint 验证完成。
+- **official = get models + 一次最小生成探测**（修订 2026-07-01，原"只需要 get models"作废），到此 endpoint 验证完成。
 
 ### 1.2 Third-party provider（第三方）
 与 official **唯一的区别**：
@@ -60,7 +62,7 @@
    - **各 endpoint 独立**：canonical base_url（按协议归一）、protocol、status、routes、capabilities。
 
 ### 1.3 页面定位（重要边界）
-- API Keys 页面**必须验证 endpoint**（official：API key 连通 / get-models；third-party：再加一次模型探测）。
+- API Keys 页面**必须验证 endpoint**（official：get-models + 一次最小生成探测；third-party：协议轮换 + 批量模型探测）。
 - **但它不是"测试模型连通性"的主战场** —— 逐模型"保证能用"的 probe 在 role 页面做。
 - 不过这里**留了入口，可以批量对单个模型做 probe**（escape hatch：需要时在 API key 页也能批量探单模型）。
 
@@ -539,6 +541,9 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 14 | Reset 还原默认目录(回 runtime 默认 `configDir/Skills`) | skills-dir-reset | ✅ runtime config 不可用时 disabled |
 | 15 | 任意字段即填即存(300ms debounce `PUT /api/settings`)+ 徽章 | appsettings-save | ✅ |
 | 15.1 | 切界面语言(English / 简体中文 下拉, `i18n.changeLanguage`) | settings-language | ⚠️ 新增原子(2026-06-18 PM:语言**算 Settings**、之前漏写)。现仅切界面、**不持久化**;目标=和其它字段一样存进 `app_settings`(重开恢复上次语言),走同一条 `PUT /api/settings` + 即填即存 |
+| 15.2 | 展开 Runtime truth source files → 每个运行时真相文件一张卡(路径 + Open + 存在性/大小/更新时间)+ 每卡 Runtime log 折叠列表 | runtime-truth-sources | ✅ 补写设计(2026-07-01 PM:此前设计漏写此区) |
+
+> **Runtime log 设计原则(PM 拍板 2026-07-01)**:runtime activity log(`logs/studio_runtime_activity.jsonl`,append-only,按 `source_id` 归到各真相文件卡)是**审计明细账,不是一句话流水**。每条 entry = `recorded_at / action / message / changes`,其中 **`changes` 必须承载与真相 json 文件一致的事实明细**——用户在 Runtime log 里展开 Details 看到的内容,要与打开对应 json 文件看到的关键事实一致,不许只记 "analyst / failed" 这类概要:`endpoint_test` 带 status/message/discovered_model_ids/**probe_attempts**(每次生成探测的 protocol×model×status);`role_test_result_saved` 带**逐路由 `route_results`**(canonical_id / route_id / provider / status / **message 失败原文**)。前端 GeneralTab 的 RuntimeLogItem 通用渲染 `changes` 全部字段(数组逐行、对象 JSON 行),不挑字段白名单——写入侧记全,展示侧全展。
 
 > **机制**：三字段整体 PUT(无字段级 PATCH),`GET/PUT /api/settings`→`app_settings.json`。Gitea host 只是 publish 鉴权链的一半(token/凭据走另一套 credentials,且为 env-only `STUDIO_*`,见 [00_settings §git](./00_settings.md))。选目录是 settings 里唯一的 Rust 本地操作。**写入归属铁律**:credentials/roles/settings 走 gateway Python(`~/.studio/` + `routers/llm.py`),**settings 不适用 D12「写全量 Rust」**(那是 skill 源文件)——唯一 native 操作就是这条选目录。
 

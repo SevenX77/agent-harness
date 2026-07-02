@@ -96,14 +96,19 @@ describe('normalizeCopilotEvent', () => {
     })
   })
 
-  it('maps a bash_approval_required payload to a held command event', () => {
+  it('maps a tool_approval_required payload to a held tool event', () => {
     const event = normalizeCopilotEvent(
-      { type: 'bash_approval_required', tool_use_id: 'tu-10', command: 'rm -rf x', blocked: true },
-      'evt-bash',
+      {
+        type: 'tool_approval_required',
+        tool_use_id: 'tu-10',
+        tool_name: 'Bash',
+        detail: 'rm -rf x',
+      },
+      'evt-held',
     )
 
-    expect(event.type).toBe('bash_approval_required')
-    expect(event).toMatchObject({ command: 'rm -rf x', blocked: true, status: 'pending' })
+    expect(event.type).toBe('tool_approval_required')
+    expect(event).toMatchObject({ toolName: 'Bash', detail: 'rm -rf x', status: 'pending' })
   })
 
   it('falls back to unknown for patch_proposed with a non-Write/Edit tool', () => {

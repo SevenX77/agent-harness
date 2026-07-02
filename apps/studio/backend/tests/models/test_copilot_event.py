@@ -39,6 +39,14 @@ def test_tool_use_start_accepts_any_tool_name() -> None:
     assert event.tool_name == "Glob"
 
 
+def test_tool_use_start_accepts_studio_mcp_tool_names() -> None:
+    # studio MCP 工具名(mcp__studio__<tool>)是动态的,同样按真名转写。
+    event = CopilotEventToolUseStart(
+        tool_name="mcp__studio__compile_skill", tool_input={"skill_id": "s"}
+    )
+    assert event.tool_name == "mcp__studio__compile_skill"
+
+
 @pytest.mark.parametrize(
     "event",
     [

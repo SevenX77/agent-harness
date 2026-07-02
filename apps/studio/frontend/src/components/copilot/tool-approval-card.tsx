@@ -1,58 +1,51 @@
 import { useState } from 'react'
-import { Check, TerminalSquare, X } from 'lucide-react'
+import { Check, FileSearch, TerminalSquare, X } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { resolveCopilotBashApproval, type CopilotBashApprovalResponse } from '../../api/client'
-import type { CopilotBashApprovalRequiredEvent } from '../../types/copilot'
+import { resolveCopilotToolApproval, type CopilotToolApprovalResponse } from '../../api/client'
+import type { CopilotToolApprovalRequiredEvent } from '../../types/copilot'
 import { Button } from '../ui/button'
 
-interface ResolveBashApprovalDecisionInput {
+interface ResolveToolApprovalDecisionInput {
   skillId: string
-  event: CopilotBashApprovalRequiredEvent
+  event: CopilotToolApprovalRequiredEvent
   approve: boolean
 }
 
-interface ResolveBashApprovalDecisionResult {
+interface ResolveToolApprovalDecisionResult {
   label: string
-  response: CopilotBashApprovalResponse
+  response: CopilotToolApprovalResponse
 }
 
-function formatBashApprovalFailure(response: CopilotBashApprovalResponse): string {
-  const reason =
-    response.message ??
-    (response.returncode !== null ? `return code ${response.returncode}` : 'unknown error')
-  return `Command approval failed: ${reason}`
-}
-
-export async function resolveBashApprovalDecision({
+export async function resolveToolApprovalDecision({
   skillId,
   event,
   approve,
-}: ResolveBashApprovalDecisionInput): Promise<ResolveBashApprovalDecisionResult> {
-  const response = await resolveCopilotBashApproval(skillId, {
+}: ResolveToolApprovalDecisionInput): Promise<ResolveToolApprovalDecisionResult> {
+  const response = await resolveCopilotToolApproval(skillId, {
     toolUseId: event.toolUseId,
     approve,
   })
 
-  if (!response.success || (response.returncode !== null && response.returncode !== 0)) {
-    throw new Error(formatBashApprovalFailure(response))
+  if (!response.resolved) {
+    // The hold no longer exists: already resolved, timed out, or session reset.
+    throw new Error(`Approval expired: ${response.message ?? 'approval_not_found'}`)
   }
 
   if (!approve) {
-    return { label: 'Command rejected.', response }
+    return { label: `${event.toolName} rejected.`, response }
   }
-  if (response.executed) {
-    return { label: 'Command approved and executed.', response }
-  }
-  return { label: 'Command approved.', response }
+  // Approved -> the CLI executes the tool itself; its result streams back into
+  // the conversation (no backend re-execution).
+  return { label: `${event.toolName} approved.`, response }
 }
 
-interface BashApprovalCardProps {
-  event: CopilotBashApprovalRequiredEvent
+interface ToolApprovalCardProps {
+  event: CopilotToolApprovalRequiredEvent
   skillId: string | null
 }
 
-export function BashApprovalCard({ event, skillId }: BashApprovalCardProps) {
+export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
   const [decisionLabel, setDecisionLabel] = useState<string | null>(null)
   const [errorLabel, setErrorLabel] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
@@ -64,12 +57,12 @@ export function BashApprovalCard({ event, skillId }: BashApprovalCardProps) {
 
     setIsResolving(true)
     try {
-      const result = await resolveBashApprovalDecision({ skillId, event, approve })
+      const result = await resolveToolApprovalDecision({ skillId, event, approve })
       setErrorLabel(null)
       setDecisionLabel(result.label)
       toast.success(result.label)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to resolve Bash approval.'
+      const message = error instanceof Error ? error.message : 'Unable to resolve tool approval.'
       setErrorLabel(message)
       toast.error(message)
     } finally {
@@ -78,13 +71,18 @@ export function BashApprovalCard({ event, skillId }: BashApprovalCardProps) {
   }
 
   const disabled = !skillId || isResolving || Boolean(decisionLabel)
+  const isBash = event.toolName === 'Bash'
+  const Icon = isBash ? TerminalSquare : FileSearch
+  const title = isBash
+    ? 'Bash held for approval'
+    : `${event.toolName} outside workspace held for approval`
 
   return (
     <div className="mt-2 rounded-md border border-border bg-card p-2 text-xs ring-1 ring-foreground/10 ring-inset">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
-          <TerminalSquare className="size-3.5 text-primary" />
-          <span>Bash held for approval</span>
+          <Icon className="size-3.5 text-primary" />
+          <span>{title}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Button
@@ -92,7 +90,7 @@ export function BashApprovalCard({ event, skillId }: BashApprovalCardProps) {
             size="sm"
             onClick={() => void decide(true)}
             disabled={disabled}
-            aria-label="Approve Bash command"
+            aria-label={`Approve ${event.toolName}`}
           >
             <Check data-icon="inline-start" />
             Approve
@@ -103,7 +101,7 @@ export function BashApprovalCard({ event, skillId }: BashApprovalCardProps) {
             size="sm"
             onClick={() => void decide(false)}
             disabled={disabled}
-            aria-label="Reject Bash command"
+            aria-label={`Reject ${event.toolName}`}
           >
             <X data-icon="inline-start" />
             Reject
@@ -111,10 +109,10 @@ export function BashApprovalCard({ event, skillId }: BashApprovalCardProps) {
         </div>
       </div>
       <pre className="mt-1.5 max-h-40 overflow-auto rounded-md bg-background p-2 font-mono text-foreground">
-        {event.command}
+        {event.detail}
       </pre>
       <p className={`mt-1 ${errorLabel ? 'text-destructive' : 'text-muted-foreground'}`}>
-        {errorLabel ?? decisionLabel ?? (event.blocked ? 'Waiting for approval.' : 'Approved.')}
+        {errorLabel ?? decisionLabel ?? 'Waiting for approval.'}
       </p>
     </div>
   )

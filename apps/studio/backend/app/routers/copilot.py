@@ -10,8 +10,8 @@ from app.core.exceptions import raise_not_implemented
 from app.models.copilot import (
     ContextUpdateRequest,
     ContextUpdateResponse,
-    CopilotBashApprovalRequest,
-    CopilotBashApprovalResponse,
+    CopilotToolApprovalRequest,
+    CopilotToolApprovalResponse,
     CopilotWsRequestPayload,
 )
 from app.models.errors import ErrorResponse
@@ -19,7 +19,7 @@ from app.models.golden import CopilotJudgeRequest, CopilotJudgeResponse
 from app.services.copilot import (
     get_view_context,
     reset_session,
-    resolve_bash_approval,
+    resolve_tool_approval,
     set_view_context,
     stream_query,
 )
@@ -78,28 +78,26 @@ async def prepare_copilot_judge_context(
 
 
 @router.post(
-    "/api/skills/{skill_id}/copilot/bash-approval",
-    response_model=CopilotBashApprovalResponse,
+    "/api/skills/{skill_id}/copilot/tool-approval",
+    response_model=CopilotToolApprovalResponse,
 )
-async def post_copilot_bash_approval(
+async def post_copilot_tool_approval(
     skill_id: str,
-    request: CopilotBashApprovalRequest,
-) -> CopilotBashApprovalResponse:
-    """Resolve a Bash command held by Copilot safe-write."""
+    request: CopilotToolApprovalRequest,
+) -> CopilotToolApprovalResponse:
+    """Resolve a held Copilot tool call (Bash / out-of-fence read).
 
-    result = await resolve_bash_approval(
+    批复喂给正在 await 的 can_use_tool;批准后由 CLI 自己执行,结果回模型上下文。"""
+
+    result = resolve_tool_approval(
         skill_id,
         request.tool_use_id,
         approve=request.approve,
     )
-    return CopilotBashApprovalResponse(
+    return CopilotToolApprovalResponse(
         tool_use_id=result.tool_use_id,
         approved=result.approved,
-        executed=result.executed,
-        success=result.success,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        returncode=result.returncode,
+        resolved=result.resolved,
         message=result.message,
     )
 

@@ -153,6 +153,16 @@
    "fe_status": "符合",
    "be_status": "n/a",
    "be_dep": "无后端依赖。"
+  },
+  {
+   "n": 30,
+   "cap": "copilot-role-slot-loading",
+   "design_ref": "atom-30",
+   "current": "现状:已实现且符合。registrySettled/rolesSettled 在 finally 落定(成功失败都撤骨架);设置行按 settled 切 Skeleton↔pickers;RolePicker 图标 BrainCircuit。",
+   "gap": "无。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "无后端依赖。"
   }
  ],
  "plan": [
@@ -530,6 +540,29 @@
     {
      "file": "n1-28-tab-strip-wheel-hover.png",
      "caption": "2026-07-02 真机(R5-B):多 tab 溢出时悬停显示细横向滚动条,每 tab 带关闭按钮"
+    }
+   ]
+  },
+  {
+   "covers": "#30 copilot-role-slot-loading",
+   "atoms": [
+    30
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "role-picker 既有 8 例随图标替换全绿(无视觉细节锁死测试,SOP 纯视觉不加新单测)。"
+   ],
+   "layer2": [
+    "真机 Playwright 双路径:①带 token 成功路径——加载即见 Skeleton(aria-label=Loading copilot roles),settle 后骨架消失、role picker 出现且 svg.lucide-brain-circuit 在;②无 token 失败路径——roles/registry 401 落定后骨架同样撤下,不永挂。"
+   ],
+   "screenshots": [
+    {
+     "file": "n1-29-role-slot-skeleton.png",
+     "caption": "2026-07-02 真机(R5-C):启动加载期设置行右侧的 Skeleton 占位"
+    },
+    {
+     "file": "n1-29-role-slot-settled.png",
+     "caption": "2026-07-02 真机(R5-C):配置就绪后原地换成 route/role 选择器(BrainCircuit 图标)"
     }
    ]
   }

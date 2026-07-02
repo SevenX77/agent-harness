@@ -12,6 +12,7 @@ import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
 import { Message, MessageContent } from '../ui/message'
+import { Skeleton } from '../ui/skeleton'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -250,6 +251,11 @@ export function CopilotPanel({
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
   const [selectedRouteId, setSelectedRouteId] = useState('')
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
+  // R5-C: the role/route slot shows a skeleton until BOTH config fetches settle
+  // (registry can take ~45s on cold probe). Settled = resolved OR failed — a
+  // failed fetch must drop the skeleton (picker hides as before), never park it.
+  const [registrySettled, setRegistrySettled] = useState(false)
+  const [rolesSettled, setRolesSettled] = useState(false)
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [openingClaudeCode, setOpeningClaudeCode] = useState(false)
@@ -327,6 +333,11 @@ export function CopilotPanel({
       .catch((error) => {
         toast.error(copilotBackendErrorMessage(error, 'Copilot route config unavailable'))
       })
+      .finally(() => {
+        if (!cancelled) {
+          setRegistrySettled(true)
+        }
+      })
     return () => {
       cancelled = true
     }
@@ -343,6 +354,11 @@ export function CopilotPanel({
       })
       .catch((error) => {
         toast.error(copilotBackendErrorMessage(error, 'Copilot roles unavailable'))
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRolesSettled(true)
+        }
       })
     return () => {
       cancelled = true
@@ -612,17 +628,25 @@ export function CopilotPanel({
         {/* F7 context actions (attach / @mention) join the left side of this row
             once they are functional — no dead placeholders. */}
         <div className="flex items-center justify-end gap-0.5">
-          <ModelPicker
-            role={pickerRole}
-            registry={registry}
-            selectedRouteId={selectedRouteId || defaultRouteId}
-            onSelect={selectRoute}
-          />
-          <RolePicker
-            options={roleOptions}
-            selectedRole={selectedRoleKey}
-            onSelect={setSelectedRole}
-          />
+          {registrySettled && rolesSettled ? (
+            <>
+              <ModelPicker
+                role={pickerRole}
+                registry={registry}
+                selectedRouteId={selectedRouteId || defaultRouteId}
+                onSelect={selectRoute}
+              />
+              <RolePicker
+                options={roleOptions}
+                selectedRole={selectedRoleKey}
+                onSelect={setSelectedRole}
+              />
+            </>
+          ) : (
+            // R5-C: role/route slot placeholder while config loads (cold registry
+            // probe can take ~45s) — shadcn Skeleton, sized like the picker chip.
+            <Skeleton aria-label="Loading copilot roles" className="h-7 w-32 rounded-md" />
+          )}
         </div>
       </form>
     </aside>

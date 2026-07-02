@@ -138,6 +138,9 @@ class GraphManifest(BaseModel):
     schema_version: Literal["v0.3.0"]
     name: str = Field(min_length=1, max_length=128)
     description: str = ""
+    # Whole-graph default LLM role; agent phases inherit it unless they set
+    # their own llm_role (skill-spec 00-FORMAT-GROUND-TRUTH §2).
+    llm_role: str | None = None
     io: PhaseIOSchema
     phases: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -220,6 +223,10 @@ class AgentNodeAST(_BaseNodeAST):
     examples_inline: list[AgentExample] = Field(default_factory=list)
     max_iterations: int = Field(default=10, ge=1, le=50)
     llm_role: str | None = None
+    # Priority switch: true makes the graph-level default llm_role win over
+    # this node's own llm_role, WITHOUT rewriting/erasing the node value
+    # (skill-spec 00-FORMAT-GROUND-TRUTH §5).
+    use_graph_llm_role: bool = False
     system_prompt: str = ""
 
     @model_validator(mode="after")
@@ -236,6 +243,24 @@ class AgentNodeAST(_BaseNodeAST):
                 parts.append("Protocols:\n" + protocol_lines)
             self.system_prompt = "\n\n".join(parts)
         return self
+
+
+# Conventional fallback role looked up in the host's role registry when
+# neither the node nor the graph names one (skill-spec 00-FORMAT-GROUND-TRUTH).
+DEFAULT_LLM_ROLE = "graph_agent"
+
+
+def effective_llm_role(phase_ast: AgentNodeAST, graph_llm_role: str | None) -> str:
+    """Resolve the role an agent phase actually runs as.
+
+    ``use_graph_llm_role`` on -> the graph-level default wins (the node's own
+    ``llm_role`` stays in the file but is inactive). Off -> the node's own
+    value wins, inheriting the graph default when the node has none. When
+    neither names a role, fall back to ``DEFAULT_LLM_ROLE``.
+    """
+    if phase_ast.use_graph_llm_role:
+        return graph_llm_role or DEFAULT_LLM_ROLE
+    return phase_ast.llm_role or graph_llm_role or DEFAULT_LLM_ROLE
 
 
 PhaseAST = Annotated[

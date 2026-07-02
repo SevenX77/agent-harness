@@ -2,167 +2,152 @@
  "page_id": "n2_iopanel_design",
  "title": "i/o 面板 · 操作设计",
  "region": "authoring:input(→i/o panel)",
- "intro": "本页是 i/o 面板(逐节点查看 io 输入输出 + 管理输入文件/artifact/golden 的面板)各操作的 MVP1 设计。2026-07-02 D-IO-PREVIEW 定稿(02_authoring §3 / input region F2):面板主体 = 按当前声明的 io schema 推导出的**实例预览**(『按现在的 schema 大致会得到什么』的示例 JSON,清爽只读);**schema 本体不在面板内编辑**——面板只留两个编辑入口:打开源文件(editor)/ 唤起 copilot。面板另设三个数据区:input files(测试输入管理 + source:file 文件导入)、output artifacts(落盘路径)、golden 入口(与实例预览同构的期望输出 JSON)。现状/差距见实施页;io 契约 / artifact / 子图引用机制见 mech_io。",
+ "intro": "本页是 i/o 面板的 MVP1 设计。2026-07-02 r3(PM 三轮确认,input region F2/F3/F5/F7/F8):数据主干是黑板,不是文件——节点输入本来自黑板,import file 只是往黑板上追加字段。面板 = 实例预览(只读)+ Configure 按钮进配置弹窗 + 用面板 list 行列出输入文件/输出 artifact 文件(名字 + 灰色路径)。输入配置弹窗 = 黑板优先的字段勾选树(黑板 context 第一行 = io.inputs 消费,Add file 导入文件/文件夹并追加 source:'file' 字段;Input 伪节点无黑板只有文件)。输出配置弹窗 = artifacts 文件清单(Add artifact,每文件同一套黑板全字段勾选,single/per-item + iterate range 推断数量,固定命名 <stem>_latest_<ts> + history/,engine writer 落盘)。golden 区移出面板(与推导实例同构,两连点无意义;golden 交互归 run/trace 侧后续轮)。黑板 context 推导与 dot 静态推断同源。",
  "atoms": [
   {
    "n": 25,
    "cap": "io-instance-preview",
    "module": "实例预览",
-   "func": "设计(D-IO-PREVIEW 2026-07-02):面板主体显示选中节点(无选中=整图 GRAPH.md)io.inputs/io.outputs 两侧的**实例预览**——由真实声明的 JSON Schema 推导出示例 JSON(default/const/examples/enum 优先,否则按类型给零值),只读展示;schema 编辑不在面板做,每侧提供『打开源文件』入口(后续可加 copilot 唤起)。取代旧设计『面板内 io 字段增删/改名/改类型表单』——字段多、嵌套深的 schema 表单会把人搞晕(PM 原话见 02_authoring §3 D-IO-PREVIEW)。",
-   "action": "用户选中任一节点打开 i/o 面板,看到该节点 input/output 的示例 JSON;点编辑按钮跳到源文件(或唤起 copilot)改 schema。",
-   "fe_design": "InputPanel:buildIoDocumentView 经 resolveIoEditTarget 按选中节点解析目标文件(phases/<id>/SKILL.md|LOGIC.md|SUBGRAPH.md,无选中/全局 io 节点=GRAPH.md)→ parseFrontmatter 取 io.inputs/io.outputs → jsonExampleFromSchema 递归推导示例实例 → 只读 <pre> 渲染;每侧带 Edit 按钮 onFileOpen 跳源文件。无 schema 表单、无独立推断展示。",
-   "fe_modules": [],
-   "be_contract": [
+   "func": "设计(r3 保留):面板显示选中节点(无选中=GRAPH.md)io.inputs/io.outputs 的实例预览——按真实 JSON Schema 推导示例 JSON(default/const/examples/enum/类型),清爽只读。schema 编辑走 copilot 或直接开文件(每侧 Edit 按钮跳源文件)。",
+   "action": "选中画布节点 / 打开 i/o 面板。",
+   "fe_design": "buildIoDocumentView → resolveIoEditTarget 取目标文件,parseFrontmatter 取 io 声明,jsonExampleFromSchema 递归推导示例;ExampleField 只读渲染 + Edit 跳文件。无 schema 表单、无假文件投影。",
+   "fe_modules": [
     {
-     "endpoint": "GET /api/skills/{skill_id}",
-     "purpose": "skillDetail.files 提供各节点/根文件内容,面板前端解析 frontmatter io 声明推导预览(无独立 io 端点)。",
-     "mechanism_ref": "mech_io",
-     "iface_ref": null
+     "name": "i/o 面板实例预览与配置入口(InputPanel + io-config)"
     }
    ],
+   "be_contract": [],
    "fe_status": "符合",
-   "be_status": "已实现",
-   "gap_brief": "符合新设计(PR #268 已把面板简化为实例预览 + Edit 跳转;假文件投影/schema 表单均已删)。copilot 唤起入口可在后续迭代补。",
+   "be_status": "n/a",
+   "gap_brief": "符合设计(r3 保留 PR #304 的实例预览)。",
    "impl_ref": "fn-25"
   },
   {
    "n": 26,
    "cap": "test-inputs-manage",
-   "module": "input files",
-   "func": "设计:input files 区管理测试输入——列出 .workspace/test_inputs/ 的真实输入文件,可创建/删除/选中;**选中项 = Predict/Run 的输入 payload**(单选=单次,多选=批量,input F4/F6)。",
-   "action": "用户在 i/o 面板 input files 区新建/删除测试输入,点选一份作为 Predict/Run 输入。",
-   "fe_design": "InputPanel 挂载 TestInputsSection:GET/POST/DELETE /api/skills/{skill_id}/test_inputs 列表/创建/删除;选中项经 onSelectTestInput 上报 Workspace 的 selectedTestInputId,Predict/Run 触发时 resolveRunInput(skillId, selectedTestInputId) 取该文件内容作为 payload(消费链路已 live)。",
-   "fe_modules": [],
+   "module": "测试输入",
+   "func": "设计(r3 修订,PM r2 点3):面板 list 出 .workspace/test_inputs/ 真实输入,可选中(选中=Predict/Run payload,高亮)/删除;创建改为『New file』——建一个空输入文件并在编辑器打开,不再有面板内联 JSON 表单(窄面板写 JSON 反人类)。复杂输入走输入配置弹窗的导入。",
+   "action": "点选测试输入喂 Predict/Run;点 New file 建输入并进编辑器。",
+   "fe_design": "TestInputsSection 挂 InputPanel;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 跳编辑器;选中态经 selectedTestInputId/onSelectTestInput 透传。内联创建表单已删。",
+   "fe_modules": [
+    {
+     "name": "i/o 面板实例预览与配置入口(InputPanel + io-config)"
+    }
+   ],
    "be_contract": [
     {
-     "endpoint": "GET/POST/DELETE /api/skills/{skill_id}/test_inputs",
-     "purpose": "测试输入 CRUD(app/routers/test_inputs.py,存 .workspace/test_inputs/<name>.json;写操作需 X-Studio-Write-Fallback: browser 或走 native-fs)。",
-     "mechanism_ref": null,
-     "iface_ref": null
+     "endpoint": "POST/DELETE /api/skills/{id}/test_inputs",
+     "purpose": "测试输入 CRUD;New file 建空输入",
+     "mechanism_ref": "mech_n2_io",
+     "iface_ref": "iface-test-inputs"
     }
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(2026-07-02 实施):TestInputsSection 已挂进 InputPanel input files 区,selectedTestInputId/onSelectTestInput 接通,选中项即 Predict/Run payload;真机验证见测试页截图。",
+   "gap_brief": "符合设计(r3:内联表单→New file)。",
    "impl_ref": "fn-26"
   },
   {
    "n": 27,
    "cap": "io-panel-perfield",
-   "module": "实例预览",
-   "func": "设计:i/o 面板逐节点生效——选中任一节点,面板显示/管理**该节点自己**的 io(预览、输入文件、artifact、golden),不是只有整图级 io(PM 锁定)。",
-   "action": "用户在画布选中不同节点,i/o 面板内容随之切到该节点。",
-   "fe_design": "resolveIoEditTarget(io-target.ts)按选中节点解析目标文件:phase 节点=phases/<id>/ 下自己的节点文件,无选中/全局 io 节点=GRAPH.md;面板全部区块读写该目标。画布选中经 Workspace→Panels→InputPanel 透传。",
-   "fe_modules": [],
-   "be_contract": [
+   "module": "per-node 目标",
+   "func": "设计(r3 保留):i/o 面板与配置弹窗按选中节点解析该节点自己的 io 目标文件(无选中=GRAPH.md);Input 伪节点/GRAPH.md 归 GRAPH.md io。",
+   "action": "选中不同节点,面板/弹窗目标随之切换。",
+   "fe_design": "resolveIoEditTarget per-node 解析端到端;配置弹窗写回同一目标文件,乐观 hash 锁。",
+   "fe_modules": [
     {
-     "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
-     "purpose": "逐节点 io 声明改动(经文件编辑/导入入口)随文件写回(io 在各 phase frontmatter 与顶层 io)。",
-     "mechanism_ref": "mech_io",
-     "iface_ref": "iface-io-2"
+     "name": "i/o 面板实例预览与配置入口(InputPanel + io-config)"
     }
    ],
+   "be_contract": [],
    "fe_status": "符合",
-   "be_status": "已实现",
-   "gap_brief": "符合设计:per-node 解析(resolveIoEditTarget)端到端打通,实例预览已按选中节点切换。",
+   "be_status": "n/a",
+   "gap_brief": "符合设计。",
    "impl_ref": "fn-27"
   },
   {
-   "n": 28,
-   "cap": "any-io-import-file",
-   "module": "input files",
-   "func": "设计:任一节点的 i/o 面板都能『导入文件为输入字段』——给该节点 io.inputs 写 {source:'file', path},运行期跑到该节点才由引擎把文件内容 lazy 注入黑板(G2:导入文件=导入这个文件的字段进状态机)。",
-   "action": "用户在任一节点的 input files 区导入一个文件为输入字段(填字段名 + 路径)。",
-   "fe_design": "input files 区提供清爽的导入入口(非 schema 表单):填字段名 + 文件路径 → applyImportedFileFieldToGraph(lib/schema-infer.ts 纯函数,upsert io.inputs.properties.<字段> = {type, source:'file', path})→ 写回该节点文件。引擎消费契约已 live:graph_assembler._declared_input_file_specs/_inject_declared_input_files 跑到该节点时读 path 注入字段,成功发 InputFileInjectedEvent。",
+   "n": 32,
+   "cap": "input-config-tree",
+   "module": "输入配置树",
+   "func": "设计(r3 新增,input region F3,PM r3 点2/4):输入配置弹窗 = 字段勾选树。第一行永远是黑板 context(展开为跑到该节点时黑板上的字段,嵌套按层级缩进;勾选=该节点 io.inputs 消费),推导与 dot 静态推断同源。黑板行下面是 Add file 导入的文件,每文件一棵 schema 字段树,勾中字段以 source:'file' 追加为黑板字段。Input 伪节点无黑板只有文件——勾选的文件字段流到第一个 node 成为黑板初始字段(=GRAPH.md io.inputs)。文件行 = 名字 + 灰色路径。",
+   "action": "点面板 Input 区 Configure → 勾选黑板字段 / Add file 导入 → 勾文件字段 → Save。",
+   "fe_design": "InputConfigDialog(shadcn Dialog + Checkbox):blackboardAtNode(复用 staticEdgeInference)出黑板行;Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 scan 出字段候选;applyIoInputChecks 按勾选重建 io.inputs(黑板消费字段 + source:'file' 单文件/批量 dir+pattern),写回目标文件,乐观 hash 锁。",
    "fe_modules": [
     {
-     "name": "io schema 推断"
+     "name": "i/o 面板实例预览与配置入口(InputPanel + io-config)"
     }
    ],
    "be_contract": [
     {
-     "endpoint": "引擎 graph_assembler + io/manager(运行期注入)",
-     "purpose": "识别 io.inputs 字段的 source:'file' 标记,目标节点执行前 lazy 读文件注入黑板(WS-E1-io 已落)。",
-     "mechanism_ref": "mech_io",
-     "iface_ref": null
+     "endpoint": "POST /api/io/scan",
+     "purpose": "扫描文件/文件夹字段(JSON/JSONL/text + 批量折叠 + 编号提取)",
+     "mechanism_ref": "mech_n2_io",
+     "iface_ref": "iface-io-scan"
+    },
+    {
+     "endpoint": "POST /api/skills/{id}/io/import",
+     "purpose": "拷贝外部文件/文件夹进 .workspace/imports 供引擎 source:'file' 解析",
+     "mechanism_ref": "mech_n2_io",
+     "iface_ref": "iface-io-import"
     }
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(2026-07-02 实施):导入入口(字段名+路径→applyImportedFileFieldToGraph)已挂 input files 区,per-node 写回走 onPhaseFileSave 乐观锁;写盘经桌面 Rust sole-writer。",
-   "impl_ref": "fn-28"
+   "gap_brief": "符合设计(r3 实施 + 真机验证:GRAPH.md=Input 伪节点 files-only、segmentation=黑板 chapters 勾选、导入 material-prep 识别字段)。",
+   "impl_ref": "fn-32"
   },
   {
-   "n": 29,
-   "cap": "output-artifact-path",
-   "module": "output artifacts",
-   "func": "设计:output artifacts 区给 io.outputs 某字段配文件路径,跑时落盘成 artifact(G3:只写文件名=默认落 .workspace 的 artifacts;格式只允许 md/json;md 取 validated business_data_md 不回转)。",
-   "action": "用户在 i/o 面板 output artifacts 区给某 output 字段填/清 artifact 路径。",
-   "fe_design": "output 区提供路径设置入口:applyOutputArtifactPathToGraph(lib/schema-infer.ts 纯函数,往 io.outputs.<字段> 写 {target:'artifact', path},空 path 清除)→ 写回节点文件。运行期引擎 io/manager 认 target='artifact' 走 artifact_saver 落 .workspace/runs/<id>/artifacts/<path>。",
+   "n": 33,
+   "cap": "output-artifacts-config",
+   "module": "输出产物清单",
+   "func": "设计(r3 新增,input region F7,PM r3 点5):输出配置弹窗 = artifacts 文件清单。Add artifact 添加要输出的文件,每个文件卡 = stem 名 + single/per-item 紧凑分段钮(per-item 数量由 iterate range 推断)+ 黑板全部字段的勾选列表(每个文件下同一套,只是勾选不同)+ 固定命名预览。落盘固定格式 <stem>_latest_<ts>.json + history/(per-item 编号继承输入批量),engine artifact writer 实现,整体替换旧 per-field target:'artifact'。",
+   "action": "点面板 Output 区 Configure → Add artifact → 命名 stem、选 single/per-item、勾字段 → Save。",
+   "fe_design": "OutputConfigDialog:blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs,带来源)出统一字段全集;每卡勾选 → applyGraphArtifacts 写 GRAPH.md io.artifacts 清单(list of {stem,fields,mode});固定命名预览随 stem/mode 变。",
    "fe_modules": [
     {
-     "name": "io schema 推断"
+     "name": "i/o 面板实例预览与配置入口(InputPanel + io-config)"
     }
    ],
    "be_contract": [
     {
-     "endpoint": "引擎 io/manager(运行期落盘)",
-     "purpose": "运行期认 target='artifact' 走 artifact_saver 落 .workspace/runs/<id>/artifacts/<path>(真实落盘归 N4 运行)。",
-     "mechanism_ref": "mech_io",
-     "iface_ref": null
+     "endpoint": "engine io.artifacts writer",
+     "purpose": "按清单固定格式落盘(latest+history+per-item 编号继承)",
+     "mechanism_ref": "mech_n2_io",
+     "iface_ref": "iface-artifacts"
     }
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(2026-07-02 实施):output artifacts 区逐字段路径行(Apply,空 path 清除)已挂,applyOutputArtifactPathToGraph 写回;运行期落盘契约本就 live。",
-   "impl_ref": "fn-29"
+   "gap_brief": "符合设计(r3 实施 + 真机验证:黑板全字段全集 + 固定命名预览 + single/per-item)。旧 per-field target 已删。",
+   "impl_ref": "fn-33"
   },
   {
    "n": 30,
    "cap": "subgraph-io-no-1to1",
-   "track": "子图",
    "module": "子图 io",
-   "func": "设计:改子图 io 不触发父子 io 严格 1:1 校验(G2:数据流单向不可逆、无回写,父子 io 不绑死;子图 input 和别的节点一样从状态机过滤字段拿)。",
-   "action": "无显式动作(改子图 io 字段时不被 1:1 校验挡)。",
-   "fe_design": "前端本就无该校验。引擎 loader 的 _validate_subgraph_io_contracts 已不再比对 parent_outputs vs child_outputs(旧 [F-v3-subgraph-io-mismatch] outputs 相等 fatal 已删),循环体只做递归子图编译;运行期由 StateMapper 按各自 io 声明切片/合并。子图按 path 解析。",
-   "fe_modules": [
-    {
-     "name": "子图 path 解析"
-    }
-   ],
-   "be_contract": [
-    {
-     "endpoint": "引擎 loader 子图 io 校验(已删)",
-     "purpose": "原 outputs 1:1 fatal 已删除;子图和普通节点一样从黑板按 schema 切片字段。",
-     "mechanism_ref": "mech_io",
-     "iface_ref": "iface-io-3"
-    }
-   ],
+   "func": "设计(保留,G2):子图 io 改动不触发父子 io 严格 1:1 校验;子图 input 和普通节点一样从状态机按 schema 过滤字段。",
+   "action": "改子图 outputs 与父不同,编译不报 1:1 mismatch。",
+   "fe_design": "无前端校验;引擎 loader 已删 1:1 fatal。",
+   "fe_modules": [],
+   "be_contract": [],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(2026-06-20 已核实并回填,引擎 1:1 fatal 已删)。",
+   "gap_brief": "符合设计。",
    "impl_ref": "fn-30"
   },
   {
-   "n": 31,
-   "cap": "golden-entry-output",
-   "module": "golden 入口",
-   "func": "设计:output 区提供 golden 入口——查看/编辑该 agent 节点的期望输出 JSON。**golden JSON 与 #25 的 output 实例预览同构**(都是 io.outputs schema 的数据实例,差别只在生命周期:预览=临时示意,golden=作者认可并持久化到 .workspace/golden 的期望值);预览『存为 golden』即完成创建路 B;golden 归 I/O 不归 Properties(PM 2026-06-04 / 2026-07-02)。",
-   "action": "用户在 i/o 面板 output 区点开 golden:查看/编辑期望输出 JSON,或把当前实例预览存为 golden 模板起点。",
-   "fe_design": "InputPanel output 区挂载 GoldenSection(组件已建):golden 状态/文件入口 + 编辑;schema→实例生成器与 #25 预览共用(同一 jsonExampleFromSchema 可生成空 golden 模板)。",
+   "n": 34,
+   "cap": "golden-out-of-panel",
+   "module": "golden 出面板",
+   "func": "设计(r3,PM r2 点1):面板不再设 golden 区。golden JSON 与 io.outputs 实例预览同构,面板放『Generate template 两连点』无意义;golden 的创建(跑完存实际输出)与 diff 归 run/trace 侧,与 golden-eval 后端逐节点粒度改造同轮(后续轮)。Assets 文件树仍可直接打开 golden 文件。",
+   "action": "(面板无 golden 操作;Assets 树打开 golden 文件)。",
+   "fe_design": "GoldenSection 从 InputPanel 删除;golden 交互归后续轮 run/trace 侧。",
    "fe_modules": [],
-   "be_contract": [
-    {
-     "endpoint": "GET/POST /api/skills/{skill_id}/golden*",
-     "purpose": "golden 读写(app/routers/golden.py)。⚠ 现后端 golden 粒度 = 整次 run final_state 快照;逐节点 golden case(.workspace/golden/<baseline_id>/cases/<case_id>.json)为目标粒度,归后续轮改造。",
-     "mechanism_ref": null,
-     "iface_ref": null
-    }
-   ],
+   "be_contract": [],
    "fe_status": "符合",
-   "be_status": "契约问题",
-   "gap_brief": "前端符合(2026-07-02 实施):GoldenSection 已挂 InputPanel output 区(基线列表 + FILL GOLDEN BY TEMPLATE)。⚠ 后端 golden 仍整次快照粒度,逐节点 case 归后续轮——be_status 保持契约问题。",
-   "impl_ref": "fn-31"
+   "be_status": "n/a",
+   "gap_brief": "符合设计(面板收敛本轮;golden run/trace 交互 + 后端粒度后续轮 #12)。",
+   "impl_ref": "fn-34"
   }
  ]
 }

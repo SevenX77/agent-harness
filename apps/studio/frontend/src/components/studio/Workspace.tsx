@@ -2294,6 +2294,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         activeCandidateId={compareCandidateId}
         onSelectCandidate={handleSelectCandidate}
         onOpenSettings={openSettings}
+        onSelectGraph={handleNodeDeselect}
       />
     </WorkspaceLeftPanelOverlay>
   ) : null

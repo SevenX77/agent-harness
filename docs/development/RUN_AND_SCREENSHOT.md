@@ -1,6 +1,6 @@
 # Run the Studio app + verify the UI
 
-Two parts:
+Four parts:
 
 1. **Startup (any machine)** — get the Tauri desktop app fully running, including
    the Python FastAPI sidecar. This applies to macOS / Windows / Linux desktop /
@@ -8,6 +8,9 @@ Two parts:
 2. **Headless verify (VPS Linux only)** — how to *see* and *drive* the window
    when there is no physical display, using a virtual display + screenshots +
    synthetic mouse clicks.
+3. **Verifying a worktree's changes** — per-task Vite via `scripts/wt-dev.sh`;
+   the root app stays the only full app instance.
+4. **Handbook webpage serving** — single source, single network exit.
 
 ---
 
@@ -79,11 +82,12 @@ unavailable" banner is gone; settings / API-keys pages load real data.
 
 ### 2.1 Virtual display + launch
 
-> **Solo on the box?** the fixed `:99` / default ports below are fine.
-> **Sharing the box with other agents?** STOP — do not use `:99` or the default
-> port; each agent needs its own display / port / cache / worktree. Jump to
-> **§3 Multi-agent isolation** and launch the way it shows, then come back here
-> for screenshot/click.
+> This recipe drives the **ONE full app at the repo root** (`main`'s code). If
+> what you need to verify is a **worktree's** change, this is the wrong tool —
+> use `scripts/wt-dev.sh` + Playwright instead (**§3**). The Xvfb/XTEST path
+> below is only for native-shell behaviors a browser cannot reach. Sharing the
+> box with other agents? The root app is shared — do **not** start a second
+> Xvfb + Tauri stack; coordinate instead (§3).
 
 ```bash
 # start a virtual X display once
@@ -147,109 +151,64 @@ kill "$XVFB_PID"             # only if YOU started that Xvfb
 
 > ⚠️ **`pkill -f 'cargo tauri dev'` / `pkill -f Xvfb` are SAFE ONLY when you are
 > the sole user of the box.** If any other agent shares the repo, those patterns
-> kill *every* agent's app and display at once. When in doubt, kill by pid — see
-> §3.5 (footguns).
+> kill the shared root app and *every* agent's processes at once. When in doubt,
+> kill by pid — see §3.2 (footguns).
 
 ---
 
-## 3. Multi-agent isolation — run YOUR OWN instance, don't collide
+## 3. Verifying a worktree's changes — per-task Vite, never a second app
 
-When **several agents work the repo at once** (each on its own task), every agent
-must launch a **fully independent** app instance. The `:99` display / default
-ports in §2 are a single-tenant convenience; the moment a second agent is active,
-hardcoding them makes two apps fight over the same display, ports, and Vite cache.
-Treat the rules below as mandatory whenever you are not certain you are alone.
+Task isolation is owned by the worktree pipeline (AGENTS.md "Workflow Pipeline"
++ the feature SOP `apps/studio/frontend/CLAUDE.md`), **not** by launching
+another app instance. The repo root runs the ONE full app
+(`scripts/studio-dev.ps1` / `scripts/studio-dev.sh`: Tauri + sidecar :8787 +
+Vite 5173, showing `main`'s code); **never start a second Tauri — or a second
+Xvfb + Tauri stack — from a worktree**.
 
-### 3.1 Run the app from YOUR OWN worktree, never the shared root
+- **Frontend-only change** → run `scripts/wt-dev.sh` inside your worktree. It
+  starts this worktree's own Vite on a free port in 5174-5199 and proxies
+  `/api`/`/ws` to the shared main sidecar. Requests stay same-origin via
+  `VITE_STUDIO_API_BASE_URL=/api`, so no CORS setup
+  (`STUDIO_CORS_EXTRA_ORIGINS`) is needed for any port.
+- **Backend / engine / gateway change** → `scripts/wt-dev.sh --backend`
+  additionally starts a private sidecar from THIS worktree's Python code (free
+  port in 8788-8799, fresh `STUDIO_API_TOKEN` printed for `#tkn=`), so backend
+  changes are verified against your own tree — never against `main`'s sidecar
+  by accident.
+- **Verify at `http://localhost:<vite-port>/#tkn=<token>`** — never on 5173
+  (that is `main`'s code, without your changes).
+- **Headless boxes**: verifying a worktree is browser-level — drive the wt-dev
+  URL with Playwright (locators + screenshots), per
+  `docs/development/FRONTEND_UI_SPEC.md` §2.10. The §2 Xvfb/XTEST recipe is
+  only for the root app's Tauri window (native-shell behaviors such as file
+  dialogs, native menus, and Tauri bridge paths that Playwright cannot reach).
 
-The repo root has `main` checked out; each task runs in its own
-`.worktrees/<type>-<desc>/` (see AGENTS.md "Workflow Pipeline"). **Launch the app
-from inside your worktree**, not the root — otherwise you are verifying the root's
-code, not the change you just made. Pointing the dev command at your worktree's
-`frontend/` is what makes the screenshots actually prove *your* edits.
+### 3.1 Respect other agents' worktrees
 
-### 3.2 Give every shared resource a unique, per-instance value
+Other agents working the same repo show up in `git worktree list`. A worktree
+is **ACTIVE — do not touch** when it has *uncommitted changes + an open PR +
+recently-modified files* (check `git -C <wt> status` and file mtimes). Never
+edit its files, never kill its processes, never `wt-clean` it. Clean up only
+**your own** merged worktrees (`scripts/wt-clean.sh`).
 
-Pick numbers nobody else is using and keep them constant for your whole session:
+### 3.2 Footguns (shared box)
 
-| Resource | Env / flag | Example (mine) | Why unique |
-|---|---|---|---|
-| Vite dev port | `--port <n> --strictPort` | `5199` | `--strictPort` fails loud instead of silently hopping onto another agent's port |
-| Virtual display | `DISPLAY` / `Xvfb :<n>` | `:91` | screenshots/clicks of one app must not land on another's window |
-| Vite cache dir | `VITE_CACHE_DIR` | `/tmp/vite-mine-5199` | sharing root's `.vite` cross-contaminates dep optimization |
-| Backend CORS allow-origin | `STUDIO_CORS_EXTRA_ORIGINS` | `http://127.0.0.1:5199` | backend only allows `5173`/`5174` by default → any other Vite port gets CORS-rejected (`Preflight not successful`) unless you allow it |
-| Sidecar (FastAPI) port | `STUDIO_SIDECAR_PORT` | `8795` | **only if you pin it** — see note below |
-
-> **Sidecar port is the one knob you can usually skip.** Leave `STUDIO_SIDECAR_PORT`
-> **unset** and the Rust process auto-allocates a *free dynamic* port per instance
-> (`allocate_loopback_port()` in `sidecar.rs`) — two agents never collide. Pin it to
-> a unique value **only** when something external needs a fixed port (the
-> browser-tunnel `/api` proxy in `scripts/dev-tunnel.py`); if two agents both pin
-> the *same* value, their sidecars collide — so a pinned value must also be unique.
-
-### 3.3 Share the heavy build artifacts read-only (fast isolated launch)
-
-A fresh worktree's Rust/Python source is identical to root — only `frontend/` and
-docs differ — so you can borrow root's compiled outputs instead of rebuilding the
-world:
-
-- `CARGO_TARGET_DIR=<root>/apps/studio/tauri/target` → near cache-hit; only the
-  final crate recompiles (~30–40s, because `CARGO_MANIFEST_DIR` path changed).
-- Symlink `node_modules` and `apps/studio/tauri/vendor` from root (read-only share)
-  so you skip `npm install` + re-vendoring.
-- But keep `VITE_CACHE_DIR` **unique** (§3.2) — that one must not be shared.
-
-Drive it with a per-instance Tauri config override instead of editing the checked-in
-config:
-
-```bash
-# /tmp/tauri-isolated.conf.json  (your ports baked in)
-{
-  "build": {
-    "devUrl": "http://127.0.0.1:5199",
-    "beforeDevCommand": "node tauri/scripts/sync_resources.js && cd frontend && env VITE_STUDIO_API_BASE_URL=/api STUDIO_SIDECAR_PORT=8795 VITE_CACHE_DIR=/tmp/vite-mine-5199 npm run dev -- --host 127.0.0.1 --port 5199 --strictPort"
-  }
-}
-# launch from YOUR worktree's apps/studio dir:
-cd <worktree>/apps/studio/tauri \
-  && CARGO_TARGET_DIR=<root>/apps/studio/tauri/target \
-     DISPLAY=:91 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 \
-     STUDIO_CORS_EXTRA_ORIGINS=http://127.0.0.1:5199 \
-     cargo tauri dev --config /tmp/tauri-isolated.conf.json >/tmp/tauri-mine.log 2>&1 &
-echo "MY tauri pid = $!"   # record it — the ONLY process you may kill later (§3.5)
-```
-
-`STUDIO_CORS_EXTRA_ORIGINS` goes in the **outer** env (not `beforeDevCommand`): the
-Rust process spawns the sidecar and the sidecar inherits it, so the FastAPI backend
-allows your `:5199` origin. Put it only on the Vite line and the backend still rejects
-your preflight.
-
-### 3.4 Before running OR touching anything: `git worktree list`
-
-Other agents working the **same** repo show up as registered worktrees. An agent's
-worktree is **ACTIVE — do not touch** when it has *uncommitted changes + an open PR
-+ recently-modified files* (check `git -C <wt> status` and file mtimes). Never edit
-its files, never launch on its ports/display, never `wt-clean` it. Clean up only
-**your own** stale worktrees (yours, and the PR already merged).
-
-### 3.5 Footguns
-
-- **`pgrep -f <pattern>` matches your own command line.** A grep for the port/app
-  string counts the very bash you're running, so it lies about "leftover"
-  processes. The real evidence a port is taken/free is
+- **`pkill -f 'cargo tauri dev'` / broad `pkill -f Xvfb` kill the shared root
+  app** (and any other agent's processes). Kill only the PIDs you recorded when
+  you backgrounded something (see §2.4).
+- **`pgrep -f <pattern>` matches your own command line.** A grep for the
+  port/app string counts the very bash you're running, so it lies about
+  "leftover" processes. The real evidence a port is taken/free is
   `ss -ltn | grep -c ':<port>'`, not a process-name grep.
-- **`pkill -f 'cargo tauri dev'` kills EVERY agent's app.** In a shared repo use a
-  pattern unique to your instance (e.g. your log path / config name) or kill by the
-  PID you backgrounded — never the broad `-f 'cargo tauri dev'`.
 - Software-rendering noise (`libEGL warning`, `MESA: dri` lines) under Xvfb is
-  harmless; the `WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` env is
-  what keeps the webview painting.
+  harmless; the `WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` env
+  is what keeps the webview painting.
 
 ## 4. Handbook webpage — single source, single network exit (`main` only)
 
-The N6 frontend handbook (`docs/studio/mvp1/_impl/frontend-handbook/`) is the one
-exception to the per-worktree isolation in §3: the **app** runs per-worktree, but the
-**handbook** is a published doc artifact that must converge to **one** copy. Rule:
+Unlike per-worktree preview (§3), where every task gets its own Vite, the N6
+frontend handbook (`docs/studio/mvp1/_impl/frontend-handbook/`) is a published
+doc artifact that must converge to **one** copy. Rule:
 
 - **Source of truth = `main` repo root.** Edit slices / add screenshots / regenerate
   in a worktree and land via PR like any change — but do **not** keep a second
@@ -269,7 +228,8 @@ exception to the per-worktree isolation in §3: the **app** runs per-worktree, b
   `http.server` reads `index.html` fresh per request, so **refresh = update the repo
   root**: after a handbook PR merges, `git -C "$ROOT" pull` and the live URL shows it.
   Keep exactly one such serve + tunnel; tear down any extra handbook tunnels you
-  started for review (`§3` isolation is for the app, not for spawning more exits).
+  started for review (§3 per-worktree preview is for the app, not a license to
+  spawn more network exits).
 
 > **If the live URL returns `502 Bad gateway`** the tunnel is up but its origin
 > `http.server` died (a bare `nohup python -m http.server` does not survive a crash

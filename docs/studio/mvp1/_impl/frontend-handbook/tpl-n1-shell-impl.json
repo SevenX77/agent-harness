@@ -173,6 +173,16 @@
    "fe_status": "符合",
    "be_status": "n/a",
    "be_dep": "无后端依赖。"
+  },
+  {
+   "n": 32,
+   "cap": "copilot-identity-zhinu",
+   "design_ref": "atom-32",
+   "current": "现状:已实现且符合。header Waypoints + 织女 Zhinü;标题 shrink-0(顺手修掉断连 chip 挤没标题的旧缺陷)。",
+   "gap": "无(等 PM 对名字终审)。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "无后端依赖。"
   }
  ],
  "plan": [
@@ -596,6 +606,25 @@
     {
      "file": "n1-30-typography-after.png",
      "caption": "2026-07-02 真机(R5-D after):.copilot-prose 排版 + 次级信息淡一号 + Bubble 用户气泡"
+    }
+   ]
+  },
+  {
+   "covers": "#32 copilot-identity-zhinu",
+   "atoms": [
+    32
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "纯视觉/文案,按 SOP 不新增单测;既有 1594 例全绿。"
+   ],
+   "layer2": [
+    "真机 Playwright:header 渲染 Waypoints 图标 + 织女 Zhinü;断连 chip 在场时标题完整可见(chip 截断让位)。"
+   ],
+   "screenshots": [
+    {
+     "file": "n1-31-identity-zhinu.png",
+     "caption": "2026-07-02 真机(R5-E):织女 Zhinü + Waypoints 图标;断连 chip 不再挤掉标题"
     }
    ]
   }

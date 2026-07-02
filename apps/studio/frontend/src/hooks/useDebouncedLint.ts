@@ -91,6 +91,40 @@ export interface DebouncedLintTarget {
   workspaceRoot?: string | null
 }
 
+/**
+ * Fire ONE immediate lint of the ON-DISK skill and broadcast on the shared
+ * status/result channels (03_compile A13 / compile-lint F1+F6): a canvas
+ * topology write (connect / disconnect / delete phase → GRAPH.md rewrite) is a
+ * source-truth mutation exactly like editor typing, so it must replace the
+ * three projections with a fresh engine verdict — clearing the stale markers
+ * without re-linting is a defect. No markdown body: the write already settled,
+ * the disk tree IS the new truth. No debounce: there is nothing to coalesce.
+ *
+ * Resolves to the LintResult, or null when the request itself failed (which
+ * broadcasts a null result so no stale errors linger).
+ */
+export async function relintSkillFromDisk(
+  skillId: string,
+  workspaceRoot?: string | null,
+): Promise<LintResult | null> {
+  if (!skillId) {
+    return null
+  }
+  publishLintStatus(skillId, 'checking')
+  try {
+    const response = await api.post<LintResult>(`/skills/${skillId}/lint`, {
+      ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}),
+    })
+    publishLintStatus(skillId, response.data.status === 'passed' ? 'passed' : 'failed')
+    publishLintResult(skillId, response.data)
+    return response.data
+  } catch {
+    publishLintStatus(skillId, 'failed')
+    publishLintResult(skillId, null)
+    return null
+  }
+}
+
 export function useDebouncedLint(skillId: string, markdown: string, target: DebouncedLintTarget = {}) {
   const [status, setStatus] = useState<LintStatus>('idle')
   const [result, setResult] = useState<LintResult | null>(null)

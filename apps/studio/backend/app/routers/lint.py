@@ -1,9 +1,12 @@
 """Lint endpoint.
 
-Realtime lint (compile-lint F1) sends the editor's *unsaved* changed-markdown so
-the engine can check what the user is typing, not just what is on disk. The lint
-kernel stays engine-owned; this router only forwards the body. When no body is
-supplied the endpoint falls back to linting the on-disk skill (backward-compat).
+Realtime lint (compile-lint F1) has two trigger shapes:
+- editor typing sends the *unsaved* changed-markdown body so the engine checks
+  what the user is typing, not just what is on disk;
+- a canvas topology write (03_compile A13) sends NO markdown — the write already
+  settled, so the on-disk tree is the source truth (``workspace_root`` locates
+  workspace-based skills).
+The lint kernel stays engine-owned; this router only routes the request shape.
 """
 
 from __future__ import annotations
@@ -12,8 +15,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 
 from app.models.lint import LintResult
-from app.services.skills import lint_skill as lint_skill_service
-from app.services.skills import lint_skill_changed_markdown
+from app.services.skills import lint_skill_changed_markdown, lint_skill_on_disk
 
 router = APIRouter(prefix="/api/skills/{skill_id}", tags=["lint"])
 
@@ -35,4 +37,4 @@ async def lint_skill(skill_id: str, body: LintRequest | None = None) -> LintResu
             file_path=body.file_path,
             workspace_root=body.workspace_root,
         )
-    return lint_skill_service(skill_id)
+    return lint_skill_on_disk(skill_id, body.workspace_root if body is not None else None)

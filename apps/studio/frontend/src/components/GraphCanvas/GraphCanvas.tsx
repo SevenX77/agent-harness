@@ -758,11 +758,20 @@ export function GraphCanvas({
   // the user sees on drop. A ref (not state) so begin/end never triggers a
   // render on its own; the effect re-runs off the real data changes.
   const pendingGraphEditsRef = useRef(0)
+  // Settle signal for the reconcile effect below: while pending > 0 the effect
+  // skips reconciliation, and because the counter is a ref, dropping back to 0
+  // triggers no render — so any composedLayout change that landed DURING the
+  // edit (e.g. the post-write relint delivering fresh node lint badges before
+  // the write promise resolves) would otherwise never reach the rendered nodes.
+  const [graphEditsSettledTick, setGraphEditsSettledTick] = useState(0)
   const beginGraphEdit = useCallback(() => {
     pendingGraphEditsRef.current += 1
   }, [])
   const endGraphEdit = useCallback(() => {
     pendingGraphEditsRef.current = Math.max(0, pendingGraphEditsRef.current - 1)
+    if (pendingGraphEditsRef.current === 0) {
+      setGraphEditsSettledTick((tick) => tick + 1)
+    }
   }, [])
 
   const [warningQueue, setWarningQueue] = useState<OverwriteConflict[]>([])
@@ -1952,7 +1961,10 @@ export function GraphCanvas({
       })
     }
     fitInitialViewportOnce(hasLayoutNodes)
-  }, [stampSelection, composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
+    // graphEditsSettledTick: re-run once the last in-flight graph edit settles,
+    // reconciling composedLayout changes that arrived while the edit was pending
+    // (see beginGraphEdit/endGraphEdit).
+  }, [stampSelection, composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, graphEditsSettledTick, hasLayoutNodes, setEdges, setNodes])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {

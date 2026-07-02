@@ -87,6 +87,7 @@ const mocks = vi.hoisted(() => ({
   mutateSkillDetail: vi.fn(),
   invoke: vi.fn(),
   lintStatus: 'idle' as 'idle' | 'checking' | 'passed' | 'failed',
+  relintSkillFromDisk: vi.fn(),
   // T-n6hist test#1/#2: the run trace stream + history hooks are driven through
   // mocks so we can flip a run to run_ended and assert the resulting effect wiring.
   runStreamEvents: [] as EventEnvelope[],
@@ -145,6 +146,8 @@ vi.mock('@/hooks/useDebouncedLint', () => ({
   lintStatusEvent: 'studio-lint-status-changed',
   lintResultEvent: 'studio-lint-result-changed',
   readLintStatus: () => mocks.lintStatus,
+  relintSkillFromDisk: (skillId: string, workspaceRoot?: string | null) =>
+    mocks.relintSkillFromDisk(skillId, workspaceRoot),
 }))
 
 vi.mock('@/hooks/useGoldenDiff', () => ({
@@ -535,6 +538,9 @@ describe('Workspace WS-1 local writer contracts', () => {
       content: 'serialized graph\n',
     }))
     expect(mocks.compileSkill).not.toHaveBeenCalled()
+    // 03_compile A13: the settled canvas write triggers an immediate on-disk
+    // RELINT (replacing the projection) — manual Compile stays a user action.
+    expect(mocks.relintSkillFromDisk).toHaveBeenCalledWith('writer-smoke', null)
   })
 
   it('shows compile success with artifact hash and execution fingerprint', async () => {

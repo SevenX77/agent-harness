@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/compile-lint
 doc: mvp1-alignment
-status: FROZEN（lint/compile 触发与 compile-pass stage live；错误仍是底部浮层/toast，drawer 与上下文标记未落 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（lint/compile 触发与 compile-pass stage live；错误仍是底部浮层/toast，drawer 与上下文标记未落 ⚠️。；目标结构已按 R4-R8 retrofit；2026-07-01 PM 增补 F6:触发语义扩画布拓扑改动 + lint 聚合完整性）
 binds_baseline: ./baseline.md
 units: [compile-stage-gate, compile-lint-structured-error]
 aligns_with: 01_workflows/03_compile.md（lint / compile / stage gate）
@@ -19,12 +19,12 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 ## 2. 数据流 / 机制（设计细节）
 ### F1. Realtime Lint
 
-- 机制: editor changes debounce, call lint, then publish status for the center action bar.
+- 机制: editor changes debounce, call lint, then publish status for the center action bar. Trigger semantics = **source truth mutation**: canvas topology writes (connect / disconnect / delete phase → GRAPH.md rewrite) trigger the same relint immediately after the write lands (see F6) — clearing stale projections without re-linting is a defect.
 - 决策: real-time lint should mark context only, not flood the user with global panels while they are mid-edit.
-- 原话/来源: `01_workflows/03_compile.md:13` defines the 800ms lint action; `01_workflows/03_compile.md:28` says real-time lint only marks context.
-- 测试: incomplete edit marks checking/failed without toast or drawer; empty content returns idle.
+- 原话/来源: `01_workflows/03_compile.md:13` defines the 800ms lint action; `01_workflows/03_compile.md:28` says real-time lint only marks context; 03_compile.md A13 + 决策(2026-07-01)define the canvas trigger.
+- 测试: incomplete edit marks checking/failed without toast or drawer; empty content returns idle; canvas edge disconnect lights the island error on the node without opening the editor.
 - Status: live mechanism, presentation target-design.
-- 归属: capability `compile-lint`; region `editor`, `center-action-bar`.
+- 归属: capability `compile-lint`; region `editor`, `canvas`, `center-action-bar`.
 
 ### F2. Manual Compile Drawer
 
@@ -62,8 +62,18 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 - Status: backend live; some location metadata may need engine expansion.
 - 归属: platform `engine`; capability `compile-lint`.
 
+### F6. Lint Completeness (Full Aggregated Diagnostics)
+
+- 机制: one lint/compile pass surfaces the engine's **entire aggregated defect set** for that pass — the engine collects per stage ("同阶段尽量聚合", engine compile-rules §2.1) and exposes the full set on the exception seam (`compile_result.issues`, each issue carrying explicit source_path/line/field_path axes); Studio's lint path expands every issue into `LintResult.errors`, exactly like the manual Compile drawer does. There is no "single-error consumer": realtime lint, drawer, node badges, field tooltips, and editor markers all project the same complete list.
+- 决策: fixing one defect must not "reveal" the next defect of the same stage; independent defects (multiple islands, multiple unknown deps, multiple nodes missing blocks) appear together in one pass.
+- 原话/来源: 2026-07-01 PM:"明明有问题的地方不弹报错……我把一个节点的线断开,没有报错""编译总是只弹个别错误,不完整……将role补上,goal的报错才出现"→ 定为触发语义 + 聚合完整性两条设计(03_compile.md 决策段 2026-07-01)。
+- 测试: a graph with two islands + a node missing `<goal>` lints all three errors in one response; the lint surface and the Compile drawer show the same set.
+- Status: target-design(本轮实现).
+- 归属: platform `engine`(阶段内聚合 + issues 轴); capability `compile-lint`(lint 展开); regions `canvas` `properties` `editor`(投影)。
+
 ## 3. 接口契约
-- Frontend lint sends changed markdown and receives pass/fail/error payload.
+- Frontend lint sends changed markdown and receives pass/fail/error payload; `LintResult.errors` carries the full aggregated defect list of the pass (F6), never just the first error.
+- Canvas topology writes (GRAPH.md rewrite) trigger the same lint call with the serialized content and replace all three projections with the new result (F1/F6).
 - Manual compile calls engine-backed compile and receives structured errors with file, line, field, severity, and message.
 - Center action bar gates Predict on compile-pass and Run on predict-pass.
 - Region links: `center-action-bar`, `canvas`, `properties`, `editor`, `input`.

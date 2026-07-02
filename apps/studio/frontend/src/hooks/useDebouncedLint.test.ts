@@ -113,9 +113,38 @@ vi.mock('../api/client', () => ({
   api: { post: apiHarness.post },
 }))
 
-const { useDebouncedLint, lintStatusStorageKey, lintStatusEvent, lintResultEvent, LINT_DEBOUNCE_MS } = await import(
+const { useDebouncedLint, relintSkillFromDisk, lintStatusStorageKey, lintStatusEvent, lintResultEvent, LINT_DEBOUNCE_MS } = await import(
   './useDebouncedLint'
 )
+
+/** Shared window/sessionStorage/CustomEvent stubs for both lint suites. */
+function installLintDom() {
+  const store = new Map<string, string>()
+  const dispatched: Array<{ type: string; detail: unknown }> = []
+  vi.stubGlobal('window', {
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+    dispatchEvent: (event: { type: string; detail: unknown }) => {
+      dispatched.push(event)
+      return true
+    },
+  })
+  vi.stubGlobal('CustomEvent', class {
+    type: string
+    detail: unknown
+    constructor(type: string, init?: { detail?: unknown }) {
+      this.type = type
+      this.detail = init?.detail
+    }
+  })
+  vi.stubGlobal('sessionStorage', {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+  })
+  Reflect.set(globalThis, '__lintStore', store)
+  Reflect.set(globalThis, '__lintDispatched', dispatched)
+  return { store, dispatched }
+}
 
 function run(skillId: string, markdown: string, target?: DebouncedLintTarget) {
   reactHarness.cursor = 0
@@ -139,30 +168,7 @@ describe('useDebouncedLint real hook path', () => {
     reactHarness.cursor = 0
     reactHarness.cleanup = undefined
     apiHarness.post.mockReset()
-    const store = new Map<string, string>()
-    const dispatched: Array<{ type: string; detail: unknown }> = []
-    vi.stubGlobal('window', {
-      setTimeout: globalThis.setTimeout,
-      clearTimeout: globalThis.clearTimeout,
-      dispatchEvent: (event: { type: string; detail: unknown }) => {
-        dispatched.push(event)
-        return true
-      },
-    })
-    vi.stubGlobal('CustomEvent', class {
-      type: string
-      detail: unknown
-      constructor(type: string, init?: { detail?: unknown }) {
-        this.type = type
-        this.detail = init?.detail
-      }
-    })
-    vi.stubGlobal('sessionStorage', {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => store.set(key, value),
-    })
-    Reflect.set(globalThis, '__lintStore', store)
-    Reflect.set(globalThis, '__lintDispatched', dispatched)
+    installLintDom()
   })
 
   afterEach(() => {
@@ -258,5 +264,65 @@ describe('useDebouncedLint real hook path', () => {
     expect(hookState().message).toBe('network down')
     expect(hookState().result).toBeNull()
     expect(deriveLintDiagnostics(hookState().result as LintResult | null)).toEqual([])
+  })
+})
+
+// ── Canvas source-truth mutation relint (03_compile A13 / compile-lint F1+F6) ──
+// A canvas topology write (connect / disconnect / delete phase) rewrites GRAPH.md
+// without the editor. The write settles to disk BEFORE the relint fires, so
+// relintSkillFromDisk POSTs with NO markdown body (the disk tree is the truth) and
+// broadcasts on the SAME status/result channels, so all three projections replace
+// their stale state instead of merely being cleared.
+
+describe('relintSkillFromDisk', () => {
+  beforeEach(() => {
+    apiHarness.post.mockReset()
+    installLintDom()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('POSTs immediately with no markdown body and broadcasts status + result', async () => {
+    const payload: LintResult = { status: 'failed', errors: [makeError()], phases_summary: null }
+    apiHarness.post.mockResolvedValue({ data: payload })
+
+    const result = await relintSkillFromDisk('skill-1')
+
+    expect(apiHarness.post).toHaveBeenCalledWith('/skills/skill-1/lint', {})
+    expect(result).toEqual(payload)
+    const store = Reflect.get(globalThis, '__lintStore') as Map<string, string>
+    expect(store.get(lintStatusStorageKey('skill-1'))).toBe('failed')
+    const dispatched = Reflect.get(globalThis, '__lintDispatched') as Array<{ type: string; detail: unknown }>
+    const resultEvent = dispatched.find(
+      (event) => event.type === lintResultEvent && (event.detail as { result?: unknown }).result,
+    )
+    expect(resultEvent).toBeDefined()
+    expect((resultEvent!.detail as { skillId: string; result: LintResult }).result.errors).toHaveLength(1)
+  })
+
+  it('forwards workspace_root for workspace-based skills', async () => {
+    const payload: LintResult = { status: 'passed', errors: [], phases_summary: null }
+    apiHarness.post.mockResolvedValue({ data: payload })
+
+    await relintSkillFromDisk('skill-1', 'D:/repo/skills/demo')
+
+    expect(apiHarness.post).toHaveBeenCalledWith('/skills/skill-1/lint', {
+      workspace_root: 'D:/repo/skills/demo',
+    })
+  })
+
+  it('a failed request publishes failed and a null result (no stale projection)', async () => {
+    apiHarness.post.mockRejectedValue(new Error('network down'))
+
+    const result = await relintSkillFromDisk('skill-1')
+
+    expect(result).toBeNull()
+    const store = Reflect.get(globalThis, '__lintStore') as Map<string, string>
+    expect(store.get(lintStatusStorageKey('skill-1'))).toBe('failed')
+    const dispatched = Reflect.get(globalThis, '__lintDispatched') as Array<{ type: string; detail: unknown }>
+    const lastResultEvent = [...dispatched].reverse().find((event) => event.type === lintResultEvent)
+    expect((lastResultEvent!.detail as { result: unknown }).result).toBeNull()
   })
 })

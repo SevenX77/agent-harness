@@ -484,6 +484,18 @@ class RunManager:
             if hasattr(process, "join"):
                 process.join(timeout=2)
         with contextlib.suppress(Exception):
+            # terminate() is SIGTERM — a busy or blocked child can ignore it.
+            # Escalate to kill() (SIGKILL) rather than orphaning the child into
+            # interpreter shutdown (the same exit-139 class).
+            if (
+                hasattr(process, "kill")
+                and hasattr(process, "is_alive")
+                and process.is_alive()
+            ):
+                process.kill()
+                if hasattr(process, "join"):
+                    process.join(timeout=2)
+        with contextlib.suppress(Exception):
             if hasattr(process_queue, "close"):
                 process_queue.close()
         with contextlib.suppress(Exception):

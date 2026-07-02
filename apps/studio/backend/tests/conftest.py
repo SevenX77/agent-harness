@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import contextlib
+import multiprocessing
 import os
 import shutil
 import sys
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -33,6 +35,43 @@ from app.services.terminal_manager import terminal_manager  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 _TEST_TOKEN = "studio-test-token"
+
+# Thread names that must never survive a test's teardown. Precise known-bad
+# classes only, so this gate cannot flake on unrelated background machinery:
+# - "studio-file-watcher": FileWatcherService.stop() must not return while its
+#   daemon thread lives (a survivor keeps running rust/notify code into
+#   interpreter shutdown and SIGSEGVs the Linux CI runners under coverage).
+# - "QueueFeederThread": a multiprocessing.Queue used from the main process was
+#   dropped without close() + join_thread() (the PR #259 leak class).
+_FORBIDDEN_LEAKED_THREAD_NAMES = ("studio-file-watcher", "QueueFeederThread")
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_processes_or_native_threads() -> Iterator[None]:
+    """Regression guard for the intermittent CI exit-139 (SIGSEGV after "N passed").
+
+    Native resources that outlive a test keep running into interpreter/coverage
+    teardown and crash the process on the Linux runners — always AFTER the whole
+    suite passed, so nothing pointed at the leaking test. PR #259 fixed the leaked
+    run/pty processes; run 28559658741 (2026-07-02) crashed again while leaked
+    `studio-file-watcher` threads were still observable after teardowns. Fail the
+    leaking test loudly instead of segfaulting after the summary line.
+    """
+    yield
+    leaked_children = multiprocessing.active_children()
+    assert not leaked_children, (
+        "multiprocessing children survived this test's teardown (join/terminate/kill "
+        f"them before returning): {[(child.pid, child.name) for child in leaked_children]}"
+    )
+    leaked_threads = [
+        thread.name
+        for thread in threading.enumerate()
+        if thread.is_alive() and thread.name.startswith(_FORBIDDEN_LEAKED_THREAD_NAMES)
+    ]
+    assert not leaked_threads, (
+        "known-crash-class threads survived this test's teardown (they SIGSEGV the "
+        f"interpreter during CI coverage shutdown): {leaked_threads}"
+    )
 
 
 @pytest.fixture(autouse=True)

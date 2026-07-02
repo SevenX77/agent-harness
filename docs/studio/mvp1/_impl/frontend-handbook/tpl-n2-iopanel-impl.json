@@ -2,195 +2,236 @@
  "id": "n2_iopanel_impl",
  "title": "i/o 面板 · 实施详情",
  "design_ref": "n2_iopanel_design",
- "intro": "本页是 i/o 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_iopanel_design(原子 #25–#30)。代码按名引用、不写行号。io 契约/artifact/子图引用机制见后端接口契约页 mech_io;后端引后端实施手册 D8(io schema/子图 path)、D2.2(RunArtifactStore artifact 落盘)。重要纠偏:io 投影假文件已清(02_authoring.md atom 决策表 M2+M3 那行标的 InputPanel stale 结论已过时)。",
+ "intro": "本页是 i/o 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_iopanel_design(原子 #25–#31)。2026-07-02 按 D-IO-PREVIEW 新设计重排并同轮实施完成:面板 = 实例预览(#25/#27,PR #268 已落)+ input files 区(TestInputsSection 挂载 #26 + source:file 导入入口 #28)+ output artifacts 路径行(#29)+ GOLDEN 区(GoldenSection 挂载 #31);写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。全部真机验证(截图见测试页);唯一存留 = golden 后端粒度(整次快照→逐节点 case,后续轮,#31 be_dep)。",
  "functions": [
   {
    "n": 25,
-   "cap": "input-field-edit",
+   "cap": "io-instance-preview",
    "design_ref": "n2-atom-25",
-   "current": "现状:已实现且符合。io.inputs 字段增删/改名/改类型直接写真契约 GRAPH.md io.inputs.properties。投影层 IoContractView(panel-files.ts 里只读投影 io 契约的接口)+ inputContractView 注释明确:已删除旧版投影的 input/schema.json、input/sample.json 两个磁盘上不存在的假文件(旧版那两个假文件会让 edit autosave 写进死路径、静默丢数据),改为返回解析后的 io map + 一个种子字符串供 schema-infer 文本框预填,字段编辑直接写 GRAPH.md。注:这与 02_authoring.md atom 决策表 M2+M3 那行标的『InputPanel 投影 io 成假文件 stale』已不符,假文件已清,spec 标注过时。",
-   "gap": "符合设计,无需改。",
+   "current": "现状:已实现且符合新设计。InputPanel(PR #268 简化后):buildIoDocumentView→resolveIoEditTarget 按选中节点取目标文件,parseFrontmatter 取 io 声明,jsonExampleFromSchema 推导示例 JSON 只读渲染;每侧 Edit 按钮 onFileOpen 跳源文件。无 schema 表单、无假文件投影。",
+   "gap": "符合;可选增强 = copilot 唤起入口(与打开文件并列)。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。io.inputs 随 POST /graph/serialize 写回(io 是 GRAPH.md frontmatter 的一部分、无独立 io 端点)。后端实施手册 D8=ok/partial。"
+   "be_dep": "无后端依赖(前端解析 skillDetail.files 推导)。"
   },
   {
    "n": 26,
-   "cap": "input-files-import",
+   "cap": "test-inputs-manage",
    "design_ref": "n2-atom-26",
-   "current": "现状:已实现且符合。SchemaInferPanel(拖 JSON 文本/文件推断 schema 的子面板)→ inferJsonSchemaFromText(从 JSON 文本推断字段 schema 的函数)推断 → applyInputSchemaToGraph(把推断 schema 写进 GRAPH.md io.inputs 的纯函数)写回(R3 input files 导入)。另有 TestInputsSection(测试输入管理)走后端 createTestInput/deleteTestInput,与 io 契约分开、不混。",
+   "current": "现状:已实现且符合。InputPanel input files 区挂载 TestInputsSection(列表/创建/删除/单选喂 Predict/Run/批量勾选),selectedTestInputId/onSelectTestInput 经 Panels 透传接通;后端 CRUD live。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。推断的 io.inputs schema 随 serialize 写回。后端实施手册 D8=ok/partial。"
+   "be_dep": "已就绪(CRUD live;消费链路 live)。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)"
   },
   {
    "n": 27,
    "cap": "io-panel-perfield",
    "design_ref": "n2-atom-27",
-   "current": "现状:已实现且符合。i/o 面板按选中节点解析编辑目标(resolveIoEditTarget,io-target.ts):选中任一 phase 节点即对该节点自己的文件编辑 io.inputs/io.outputs + output-artifact;无选中/全局 io 节点回退整图 GRAPH.md。画布选中经 Panels 透传给 InputPanel,逐节点 i/o 端到端接线(io-target/InputPanel 测试绿)。",
-   "gap": "符合设计,无需改。",
+   "current": "现状:已实现且符合。resolveIoEditTarget(io-target.ts)per-node 解析端到端打通,实例预览随画布选中节点切换;无选中/全局 io 节点回退 GRAPH.md。",
+   "gap": "符合设计,无需改;新挂的三个区(#26/#28/#29/#31)必须同样走 resolveIoEditTarget 的 per-node 目标。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接(后端不需改)。逐节点 io 改动随 GRAPH.md serialize 写回(各 phase frontmatter 的 io + 顶层 io)。"
+   "be_dep": "已就绪(serialize 契约不变)。"
   },
   {
    "n": 28,
    "cap": "any-io-import-file",
    "design_ref": "n2-atom-28",
-   "current": "现状:已实现且符合。新增 applyImportedFileFieldToGraph(schema-infer.ts 里把『从文件导入的字段』写进 GRAPH.md io.inputs.properties.<字段> 的纯函数):它给该字段打上引擎逐节点文件注入认的标记 {source:'file', path:<文件路径>},并 upsert(字段不存在则建、已存在则标记为 file-sourced)、保留 type/其它字段/另一 io 侧/其它 frontmatter/GRAPH.md body。前端入口 FileImportPanel(InputPanel.tsx 里『导入文件作为输入字段』的小节,渲染在 inputs 侧 SchemaInferPanel 之后)挂在 resolveIoEditTarget 解析出的逐节点 relPath+graphMd 上,因此任一节点的 i/o 面板都能导入文件(不止起点 input 节点);填字段名+类型+路径(或拖文件预填路径)→ Import → 经 writeIoFile 写回该节点 io 文件。与 SchemaInferPanel(从粘贴的 JSON 样本推断 schema,#26)区分:导入文件=运行期跑到该节点才把文件内容注入字段,SchemaInferPanel=配置期从样本推断字段表。",
+   "current": "现状:已实现且符合。ImportFileFieldRow(字段名+路径)挂 input files 区,提交经 applyImportedFileFieldToGraph 写 {type, source:'file', path} 到 per-node 目标文件,onPhaseFileSave + sha256(旧内容)乐观锁保存;空字段名/空路径就地报错。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
-   "fe_resync": "2026-06-20:偏差→符合。红先行两层测试:先在 schema-infer.test.ts 加 applyImportedFileFieldToGraph 的断言(导入字段后 io.inputs.properties.<字段> 带 source:'file' + path),确认因函数不存在先 RED(6 例全红、原 23 例仍绿),再实现该纯函数使其转绿(29 例全绿)。标记形状 {source:'file', path} 是对照引擎已上线的两处消费者逐行确认、非臆测:graph_assembler.py 的 _declared_input_file_specs(读 io.inputs.properties 各字段,schema.get('source')!='file' 则跳过,否则取 schema.get('path') 必须非空)+ _inject_declared_input_files(跑到该节点时 read_workspace_text_file 把文件内容注入该字段),以及 io/manager.py(source=='file' 时 input_spec.get('path') 取文件路径)。引擎注入侧本就已上线、本次零改动(未碰 packages/graph-agent),仅前端写回补打标记即闭环。",
-   "be_dep": "引擎注入契约已就绪且本次零改动(graph_assembler 的 _wrap_declared_input_files/_declared_input_file_specs/_inject_declared_input_files、io/manager 的 source=='file' 分支均已实现),非后端阻塞;前端导入写回打 {source:'file',path} 标记后即闭环。"
+   "fe_status_prev": "未实施",
+   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)",
+   "be_dep": "引擎注入契约已就绪、零改动;前端补 UI 入口即闭环。"
   },
   {
    "n": 29,
    "cap": "output-artifact-path",
    "design_ref": "n2-atom-29",
-   "current": "现状:已实现且符合。前端 applyOutputArtifactPathToGraph(往 io.outputs.<字段> 写 {target:'artifact', path} 的纯函数)给字段写 artifact 落盘目标,空 path 清除目标;OutputPathRow 提交。引擎契约已落地:io/manager 认 target in ('artifact','artifact_manager') 走 artifact_saver,解析到 .workspace/runs/<id>/artifacts/<path>。格式只允许 md/json;只写文件名=默认落 .workspace 的 artifacts(G3)。",
+   "current": "现状:已实现且符合。OutputArtifactRow 按 io.outputs 字段逐行渲染(当前 path 预填,Apply 提交,空 path 清除),applyOutputArtifactPathToGraph 写回 per-node 目标文件。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。前端配 artifact 目标(随 serialize)+ 引擎 io/manager 运行期落盘均已实现。后端实施手册 D2.2 RunArtifactStore=ok。"
+   "fe_status_prev": "未实施",
+   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)",
+   "be_dep": "引擎落盘契约已就绪、零改动。"
   },
   {
    "n": 30,
    "cap": "subgraph-io-no-1to1",
    "design_ref": "n2-atom-30",
-   "current": "现状:已实现且符合。引擎已删子图 io.outputs 1:1 FATAL(loader _validate_subgraph_io_contracts 不再比 parent_outputs≠child_outputs 报 [F-v3-subgraph-io-mismatch],commit 98b636c9,符合 skill-syntax §2.4/cutover 第⑦条);子图 io 像普通节点按父声明切片/合并,运行期 StateMapper 限制 outputs 边界(越界报受控 [F-v3-runtime-state-mapping-failed] 非崩溃)。前端本就无该校验,子图 io 编辑不再被编译期 1:1 硬阻塞。",
-   "gap": "符合设计,无需改(后端 1:1 fatal 已删)。",
+   "current": "现状:已实现且符合。引擎已删子图 io.outputs 1:1 FATAL(loader _validate_subgraph_io_contracts 只做递归子图编译);运行期 StateMapper 按各自声明切片/合并;子图按 path 解析。",
+   "gap": "符合设计,无需改。",
    "fe_status": "符合",
-   "be_dep": "已就绪。引擎删除子图 outputs 1:1 fatal 已落地(commit 98b636c9),子图 io 编辑不再被硬阻塞;子图 path 已按绝对 path 解析。"
+   "be_dep": "已就绪(引擎 1:1 fatal 已删)。"
+  },
+  {
+   "n": 31,
+   "cap": "golden-entry-output",
+   "design_ref": "n2-atom-31",
+   "current": "现状:前端已实现。GoldenSection 挂 InputPanel output 区(golden 基线列表 + 无 golden agent 节点的 Generate template 模板填充)。",
+   "gap": "前端符合;后端 golden 粒度(整次快照→逐节点 case)归后续轮,be_dep 如实保留。",
+   "fe_status": "符合",
+   "be_dep": "后端 golden 粒度待改造(整次快照→逐节点 case,后续轮);入口挂载不被阻塞。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)"
   }
  ],
  "plan": [
   {
    "step": 1,
-   "what": "#27 io-panel-perfield:把『input 面板』升级为逐节点的『i/o 面板』——选中任一节点都能编辑其 io.inputs/io.outputs 字段 + 配 artifact;沿用 InputPanel/SchemaInferPanel 组件扩成按选中节点编辑。",
-   "depends_on": "前端依赖:复用现成 io 字段编辑 + serialize 写回。后端不动(serialize 契约不变)。",
-   "why": "纯前端、后端契约不变;把面板从起点 input 扩成逐节点 i/o,是 #28 任一节点导入入口的承载基础,先做。",
+   "what": "#26 test-inputs-manage:InputPanel 挂 TestInputsSection(input files 区),接通 selectedTestInputId/onSelectTestInput,选中项即 Predict/Run payload(消费链路已 live,纯挂载+接线)。",
+   "depends_on": "前端依赖:TestInputsSection 组件 + Panels 已传的 props。后端不动。",
+   "why": "选择链路只断面板一米,挂上即端到端闭环;是本轮价值最大、风险最小的一步,先做。",
    "block": "前端独立"
   },
   {
    "step": 2,
-   "what": "#28 any-io-import-file(前端导入入口):把 SchemaInferPanel 的导入入口挂到每个节点的 i/o 面板,任一节点 i/o 界面都能导入文件→写该节点 io.inputs。",
-   "depends_on": "前端依赖:step 1 的逐节点 i/o 面板;复用 SchemaInferPanel。运行期注入语义等后端(step 3)。",
-   "why": "导入入口随逐节点 i/o 面板(step 1)落地;紧随其后做,先把『任一节点可导入』的前端入口补上。",
+   "what": "#28 + #29:input files 区补『导入文件为输入字段』清爽入口(applyImportedFileFieldToGraph),output artifacts 区补路径设置入口(applyOutputArtifactPathToGraph);均走 resolveIoEditTarget 的 per-node 目标写回。",
+   "depends_on": "前端依赖:lib/schema-infer.ts 纯函数(已在)。引擎注入/落盘契约已 live、零改动。",
+   "why": "PR #268 误伤的两个入口按新设计补回;纯函数与引擎契约都在,只做 UI 层。",
    "block": "前端独立"
   },
   {
    "step": 3,
-   "what": "后端先行:① 删引擎 loader 的子图 io outputs 1:1 FATAL(F-v3-subgraph-io-mismatch 的 parent_outputs ≠ child_outputs),改子图从父状态机按 schema 过滤字段(G2,供 #30);子图 path 解析已收口到读绝对 path(D8.4,旧 target_skill 字面 key 已拒);② 把『任一节点 io 导入字段→运行期跑到该节点才注入』的注入时机契约定下来(引擎 io/manager,供 #28 运行期语义)。",
-   "depends_on": "后端契约(引擎 loader 子图 io 校验、io/manager 注入时机;后端实施手册 D8.4 子图 path 收口=partial)。这是 #30 与 #28 运行期语义的前置。",
-   "why": "后端先于前端铁律:#30 完全是后端待删项、#28 的运行期注入语义取决于后端 io/manager 注入契约;后端没动前端无活/会返工。排在依赖后端的项之前。",
-   "block": "等后端（后端先行）"
+   "what": "#31 golden-entry-output:InputPanel output 区挂 GoldenSection;『预览存为 golden』复用 #25 生成器。",
+   "depends_on": "前端依赖:GoldenSection 组件(已建)。后端 golden 粒度改造(整次快照→逐节点 case)归后续轮,不阻塞入口挂载。",
+   "why": "golden 归 I/O output 区(PM 锁定);入口先挂,数据粒度随后端演进。",
+   "block": "前端独立"
   }
  ],
  "tests": [
   {
-   "covers": "#25 input-field-edit(假文件已清)",
+   "covers": "#25 io-instance-preview",
    "atoms": [
     25
    ],
    "shots": [
-    "改 io.inputs 字段名/类型直接落 GRAPH.md io.inputs.properties,无假文件死路径"
+    "选中节点后 input/output 两侧显示 schema 推导的示例 JSON;点 Edit 跳源文件"
    ],
    "fe_status": "符合",
    "layer1": [
-    "改 io.inputs 字段 → 断言直接写 GRAPH.md io.inputs.properties。",
-    "回归:断言不再投影 input/schema.json、input/sample.json 假文件(IoContractView 只读 + 种子串)。",
-    "断言字段编辑不走死路径、不丢数据。"
+    "喂带 io 声明的节点文件 → 断言 jsonExampleFromSchema 按 default/const/examples/enum/类型推导示例值。",
+    "断言面板无 schema 表单、无假文件投影(InputPanel 既有测试)。"
    ],
    "layer2": [
-    "真跑:改一个 input 字段名,看 GRAPH.md io.inputs 更新、无假文件。"
+    "真跑:选不同节点看预览切换;点 Edit 打开对应源文件。"
+   ],
+   "screenshots": [
+    {
+     "file": "n2-31-iopanel-preview-sections.png",
+     "caption": "选中 segmentation 节点:input/output 实例预览(per-node)+ TEST INPUTS 区 + Import file as input field 区"
+    }
    ]
   },
   {
-   "covers": "#26 input-files-import",
+   "covers": "#26 test-inputs-manage(挂载 + 选中喂 Predict/Run)",
    "atoms": [
     26
    ],
    "shots": [
-    "拖一段 JSON 进来,推断出 io.inputs schema 并写回"
+    "input files 区列出测试输入,点选一份后 Predict/Run 用它作为 payload",
+    "新建/删除测试输入,列表即时刷新"
    ],
    "fe_status": "符合",
    "layer1": [
-    "拖入 JSON 文本 → 断言 inferJsonSchemaFromText 推断字段 + 类型。",
-    "断言 applyInputSchemaToGraph 把 schema 写进 GRAPH.md io.inputs。",
-    "断言 TestInputsSection 与 io 契约分开(走 createTestInput/deleteTestInput)。"
+    "RED:断言 InputPanel 渲染 TestInputsSection 且点选项调用 onSelectTestInput(现状未挂载先红)。",
+    "GREEN:挂载后断言列表/创建/删除走 test_inputs API,选中态高亮并上报 selectedTestInputId。",
+    "断言 Predict/Run 触发时 resolveRunInput 用选中 id 取内容(Workspace 链路既有测试收窄/复用)。"
    ],
    "layer2": [
-    "真跑:拖一个 JSON 文件,看 io.inputs schema 被推断写入。"
+    "真跑:新建一份测试输入,选中,点 Predict/Run,确认 payload 是该文件内容。"
+   ],
+   "screenshots": [
+    {
+     "file": "n2-26-test-input-created-selected.png",
+     "caption": "happy-path 测试输入在列(勾选框+删除钮),整行高亮=已选中为 Predict/Run payload;创建写盘走桌面 Rust sole-writer(headless 经 API 验证),浏览器 faked-desktop 下错误就近显示"
+    }
    ]
   },
   {
-   "covers": "#27 io-panel-perfield(逐节点 i/o)",
-   "atoms": [
-    27
-   ],
-   "shots": [
-    "选中任一节点都能打开 i/o 面板编辑其 io.inputs/outputs + artifact(目标态)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED:当前面板偏向起点 input + output artifact,非逐节点完整 i/o → 断言『任一节点都有 i/o 面板入口』失败。",
-    "GREEN:断言选中任一节点都能编辑其 io.inputs/io.outputs + artifact。",
-    "断言逐节点 io 改动随 serialize 写回对应 phase frontmatter。"
-   ],
-   "layer2": [
-    "真跑:选不同节点,看各自能开 i/o 面板编辑 io。"
-   ]
-  },
-  {
-   "covers": "#28 any-io-import-file(任一节点导入)",
+   "covers": "#28 any-io-import-file(入口补回)",
    "atoms": [
     28
    ],
    "shots": [
-    "在任一节点的 i/o 界面导入文件→该字段写 io.inputs 并带 source:'file'+path,运行期跑到该节点由引擎从文件注入"
+    "在任一节点 input files 区导入文件为字段,该节点 io.inputs.<字段> 落 {source:'file', path}"
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED(已确认先红):applyImportedFileFieldToGraph 未实现时,断言导入字段后 io.inputs.properties.<字段> 带 source:'file' + path 因函数不存在而全部失败(6 例红、原有 23 例绿)。",
-    "GREEN:实现纯函数后,断言导入字段后 io.inputs.properties.<字段>.source=='file'、.path==文件路径、.type 保留;upsert(新建/标记已有);路径 trim;保留另一 io 侧+其它 frontmatter+body;空字段名/空路径各自抛错(空路径因引擎对 source='file' 无 path 会 FATAL,前端先拒)。schema-infer.test.ts 共 29 例全绿。",
-    "标记形状对照引擎消费者确认:graph_assembler _declared_input_file_specs 读 schema.get('source')!='file' 则跳过、否则取非空 schema.get('path');io/manager source=='file' 取 input_spec.get('path')。",
-    "回归:InputPanel 既有测试(data-gap / expected-hash)仍绿,新增 FileImportPanel 不破坏既有 i/o 面板。"
+    "RED:断言 input files 区有导入入口且提交调 applyImportedFileFieldToGraph(现状无入口先红)。",
+    "GREEN:断言导入后写回目标节点文件,io.inputs.properties.<字段> 带 {type, source:'file', path};空字段名/空路径就地报错。",
+    "回归:applyImportedFileFieldToGraph 既有纯函数测试(schema-infer.test.ts)保持绿。"
    ],
    "layer2": [
-    "真跑:在一个非起点(中间)节点的 i/o 面板用 FileImportPanel 导入文件,看该节点 io 文件 io.inputs.<字段> 落 {type, source:'file', path};引擎逐节点注入(_inject_declared_input_files)本就已上线,跑到该节点时按 path 读文件注入该字段。"
+    "真跑:在中间节点导入文件为字段,真跑一次看引擎 lazy 注入(InputFileInjectedEvent)。"
+   ],
+   "screenshots": [
+    {
+     "file": "n2-31-iopanel-preview-sections.png",
+     "caption": "Import file as input field 入口(字段名+路径);写回落盘为桌面路径,纯函数写回有单测"
+    }
    ]
   },
   {
-   "covers": "#29 output-artifact-path(G3)",
+   "covers": "#29 output-artifact-path(入口补回)",
    "atoms": [
     29
    ],
    "shots": [
-    "给一个 output 字段配 xx.json 路径,跑后落 .workspace/artifacts/xx.json"
+    "给 output 字段配 artifact 路径,跑后落 .workspace/runs/<id>/artifacts"
    ],
    "fe_status": "符合",
    "layer1": [
-    "给 output 字段填路径 → 断言 applyOutputArtifactPathToGraph 写 {target:'artifact', path};空 path 清除。",
-    "契约测:引擎 io/manager 认 target='artifact' 走 artifact_saver、解析到 .workspace/runs/<id>/artifacts/<path>。",
-    "断言格式只允许 md/json。"
+    "RED:断言 output artifacts 区有路径设置入口且提交调 applyOutputArtifactPathToGraph(现状无入口先红)。",
+    "GREEN:断言填路径写 {target:'artifact', path}、空 path 清除;写回目标节点文件。"
    ],
    "layer2": [
-    "真跑:给一个 output 配 artifact 路径,跑一次看 .workspace/artifacts 落盘。"
+    "真跑:配一个 artifact 路径,跑一次看落盘。"
+   ],
+   "screenshots": [
+    {
+     "file": "n2-29-output-artifacts-golden.png",
+     "caption": "output artifacts 区:segmentation_result 路径行 + Apply;下方 GOLDEN 区"
+    }
    ]
   },
   {
-   "covers": "#30 subgraph-io-no-1to1(G2 删 1:1)",
+   "covers": "#30 subgraph-io-no-1to1",
    "atoms": [
     30
    ],
    "shots": [
-    "改子图 outputs 与父不同时,不再被 outputs 1:1 FATAL 挡(后端删校验后)"
+    "改子图 outputs 与父不同,编译不报 1:1 mismatch"
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED:当前引擎 loader 取 parent_outputs/child_outputs,不等就报 F-v3-subgraph-io-mismatch → 断言『子图 io 改动不触发 outputs 1:1』失败。",
-    "GREEN(后端删校验后):断言改子图 io.outputs 与父不同不被 1:1 校验挡,子图 input 从状态机按 schema 过滤字段拿。",
-    "回归:子图按绝对 path 解析(旧 target_skill 字面 key 被拒为 deprecated)。"
+    "引擎测试已翻转(outputs 不匹配可编译);前端无该校验、无活。"
    ],
    "layer2": [
-    "真跑(后端删校验后):改一个子图 outputs 与父不同,看编译不报 1:1 mismatch。"
+    "真跑:改一个子图 outputs 与父不同,编译通过。"
+   ]
+  },
+  {
+   "covers": "#31 golden-entry-output(挂载)",
+   "atoms": [
+    31
+   ],
+   "shots": [
+    "output 区点开 golden,查看/编辑期望输出 JSON"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:断言 InputPanel output 区渲染 GoldenSection(现状未挂载先红)。",
+    "GREEN:挂载后断言 golden 入口可点开查看/编辑;GoldenSection/GoldenCaseEditor 既有测试保持绿。"
+   ],
+   "layer2": [
+    "真跑:点开 golden 入口查看/编辑一份 golden JSON。"
+   ],
+   "screenshots": [
+    {
+     "file": "n2-29-output-artifacts-golden.png",
+     "caption": "GOLDEN 区:No golden baselines yet + FILL GOLDEN BY TEMPLATE(agent 节点 Generate template)"
+    }
    ]
   }
  ]

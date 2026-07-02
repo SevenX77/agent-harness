@@ -37,6 +37,19 @@ def filter_runtime_inputs(
     return {key: raw_inputs[key] for key in keys if key in raw_inputs}
 
 
+def _missing_required_inputs(
+    filtered: dict[str, Any],
+    schema: dict[str, Any] | None,
+) -> list[str]:
+    """Declared-required input fields absent from the sliced blackboard."""
+    if not isinstance(schema, dict):
+        return []
+    required = schema.get("required")
+    if not isinstance(required, list):
+        return []
+    return sorted(name for name in required if isinstance(name, str) and name not in filtered)
+
+
 def _project_full_data_to_phase_updates(
     after_data: dict[str, Any],
     before_data: dict[str, Any],
@@ -99,6 +112,18 @@ class StateMapper:
         # schema may be empty/open) and corrupt the child's own accumulation.
         raw_data.pop("phase_outputs", None)
         filtered = filter_runtime_inputs(raw_data, self.input_schema)
+
+        # MVP1 contract (compile-rules §2.3): a declared-required input field
+        # missing from the blackboard is a mapping failure, not a silent drop —
+        # running the phase on partial input would produce an untraceable state.
+        missing = _missing_required_inputs(filtered, self.input_schema)
+        if missing:
+            _phase_mapping_fatal(
+                "phase required input fields missing from blackboard: " + ", ".join(missing),
+                code="[F-v3-runtime-state-mapping-failed]",
+                phase_id=self.phase_id,
+                field_path=missing[0],
+            )
 
         return WorkflowState(
             data=BusinessData.model_validate(filtered),
@@ -360,11 +385,6 @@ def scratch_from_state(state: WorkflowState) -> dict[str, Any]:
     return state["flow"].working_memory or {}
 
 
-def ensure_no_input_write(data: dict[str, Any]) -> None:
-    # StateManager.update_business prevents _ prefixed writes; we can check if they try to write read-only fields
-    pass
-
-
 @dataclass(frozen=True)
 class PhaseWrapper:
     """Common wrapper used by Agent, LOGIC, SUBGRAPH and builtin runtime nodes."""
@@ -449,7 +469,6 @@ __all__ = [
     "PhaseWrapper",
     "ReaderSandboxState",
     "StateMapper",
-    "ensure_no_input_write",
     "filter_runtime_inputs",
     "phase_inputs_from_state",
     "phase_outputs_from_state",

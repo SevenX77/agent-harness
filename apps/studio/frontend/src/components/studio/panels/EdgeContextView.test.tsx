@@ -50,6 +50,37 @@ describe("EdgeContextView", () => {
     expect(html).toContain("No transition recorded for this edge")
   })
 
+  it("renders the static field inference when the edge has not run yet (n5 atom #14)", () => {
+    const html = render({
+      id: "enrich->report",
+      source: "enrich",
+      target: "report",
+      contextJson: {
+        kind: "static_inference",
+        source: "enrich",
+        target: "report",
+        fields: [
+          { name: "summary", type: "string", from: "enrich", via_file: false, consumed_by_target: true },
+          { name: "style_guide", type: "string", from: "references/style.md", via_file: true, consumed_by_target: true },
+          { name: "topic", type: "string", from: "input", via_file: false, consumed_by_target: false },
+        ],
+      },
+    })
+
+    expect(html).toContain("Inferred blackboard fields")
+    expect(html).toContain("summary")
+    expect(html).toContain("style_guide")
+    expect(html).toContain("references/style.md")
+    expect(html).toContain("topic")
+    // Consumed-by-target fields are marked as the dispatch boundary.
+    expect(html).toContain("report input")
+    // No runtime affordances before a run exists.
+    expect(html).not.toContain("Tamper")
+    expect(html).not.toContain("Resume downstream")
+    expect(html).not.toContain("Operations (end → start)")
+    expect(html).not.toContain("No transition recorded for this edge")
+  })
+
   it("offers explicit Tamper editing and downstream resume from a real checkpointed edge context", () => {
     const html = render({
       id: "draft->review",

@@ -231,12 +231,16 @@ def test_build_options_enables_summarized_thinking(tmp_path: Path) -> None:
     assert options.thinking == {"type": "adaptive", "display": "summarized"}
 
 
-def test_build_options_mounts_skill_spec(tmp_path: Path) -> None:
-    # F3: the authoritative graph_skill spec is mounted so the copilot can Read it.
-    # The spec dir exists in this repo, so add_dirs must include it.
+def test_build_options_mounts_reference_doc_dirs(tmp_path: Path) -> None:
+    # F3 渐进暴露: skill-spec + engine 契约 + gateway 概念 + studio 配置地图
+    # 全部挂载,copilot 按需 Read;这些目录同时是读护栏的放行集。
     options = copilot.build_options(None, "claude-key", tmp_path)
 
-    assert any("02-skill-syntax" in entry for entry in options.add_dirs), options.add_dirs
+    entries = [str(entry) for entry in options.add_dirs]
+    assert any("02-skill-syntax" in entry for entry in entries), entries
+    assert any(entry.endswith("01-contract") for entry in entries), entries
+    assert any("graph-agent-gateway" in entry for entry in entries), entries
+    assert any("mounted" in entry for entry in entries), entries
 
 
 def test_build_options_carries_session_system_prompt(tmp_path: Path) -> None:

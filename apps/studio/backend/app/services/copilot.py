@@ -106,6 +106,34 @@ def _skill_spec_dir() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+def _mounted_doc_dirs() -> list[tuple[str, Path]]:
+    """挂载给 copilot 只读查阅的参考目录(渐进暴露:重内容放 Read 后面,system
+    prompt 里只留一行路由)。仓库 docs 缺席时(打包版)对应条目自动省略。
+
+    (领域说明, 目录) 对;目录同时进 add_dirs 与读护栏放行集。"""
+
+    repo_root = Path(__file__).resolve().parents[5]
+    candidates = [
+        (
+            "graph_skill 精确语法 / 字段 / 错误码(权威 skill-spec)",
+            repo_root / "docs/engine/mvp1/01-contract/02-skill-syntax",
+        ),
+        (
+            "engine 契约:物理布局 / 编译规则 / 数据契约 / 失效规则",
+            repo_root / "docs/engine/mvp1/01-contract",
+        ),
+        (
+            "LLM 概念:roles / routes / fallback_chain / 能力与探测",
+            repo_root / "docs/graph-agent-gateway/mvp1",
+        ),
+        (
+            "Studio 配置文件地图(哪个文件是什么、能否手改)",
+            _PROMPTS_DIR / "mounted",
+        ),
+    ]
+    return [(label, path) for label, path in candidates if path.is_dir()]
+
+
 @dataclass(frozen=True)
 class ViewContext:
     view: str
@@ -229,18 +257,21 @@ def _read_target(tool_name: str, tool_input: Mapping[str, Any]) -> str | None:
 
 
 def _read_allowed(raw_path: str, workspace_root: Path) -> bool:
-    """读护栏:workspace 与挂载的 spec 目录内自动放行,其余走审批。"""
+    """读护栏:workspace 与挂载参考目录内自动放行,其余走审批。"""
 
     if _resolve_safe_write_target(raw_path, workspace_root) is not None:
         return True
-    spec_dir = _skill_spec_dir()
-    if spec_dir is None:
+    target = Path(raw_path)
+    if not target.is_absolute():
         return False
-    try:
-        Path(raw_path).resolve(strict=False).relative_to(spec_dir.resolve(strict=False))
-    except (OSError, RuntimeError, ValueError):
-        return False
-    return True
+    resolved = target.resolve(strict=False)
+    for _label, mounted_dir in _mounted_doc_dirs():
+        try:
+            resolved.relative_to(mounted_dir.resolve(strict=False))
+        except (OSError, RuntimeError, ValueError):
+            continue
+        return True
+    return False
 
 
 async def _hold_for_tool_approval(
@@ -527,10 +558,10 @@ def build_options(
     if env_overrides:
         env.update(env_overrides)
 
-    # F3: mount the authoritative graph_skill spec so the copilot can Read it for
-    # exact format/error-code ground-truth (渐进暴露). Skipped if absent.
-    spec_dir = _skill_spec_dir()
-    add_dirs: list[str | Path] = [str(spec_dir)] if spec_dir is not None else []
+    # F3 渐进暴露: mount the reference doc dirs (engine contract / gateway
+    # concepts / studio config map) so the copilot Reads ground truth on demand;
+    # the session system prompt carries only a one-line-per-dir routing table.
+    add_dirs: list[str | Path] = [str(path) for _label, path in _mounted_doc_dirs()]
     permission_mode: Literal["default", "acceptEdits"]
     if can_use_tool is not None:
         # Pre-allowing a tool makes the SDK skip can_use_tool for it, so pre-allow
@@ -670,11 +701,12 @@ def build_session_system_prompt() -> str:
     当轮消息,绝不进会话级 —— 三层分离:恒定规则 / 链路装载 / 运行时上下文。"""
 
     prompt = load_copilot_rules()
-    spec_dir = _skill_spec_dir()
-    if spec_dir is not None:
+    mounted = _mounted_doc_dirs()
+    if mounted:
+        routing = "\n".join(f"- {label} → `{path}`" for label, path in mounted)
         prompt += (
-            f"\n\n## 已挂载 skill-spec(权威格式规范)\n{spec_dir}\n"
-            "需要精确字段 / 语法 / 错误码时用 Read 查阅该目录下的 .md。"
+            "\n\n## 已挂载参考目录(只读,按需用 Read/Glob/Grep 查阅,不整段复述)\n"
+            + routing
         )
     return prompt
 

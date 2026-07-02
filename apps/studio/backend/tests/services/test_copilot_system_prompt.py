@@ -55,7 +55,11 @@ def test_session_system_prompt_has_rules_and_spec_but_never_view_context() -> No
     prompt = copilot.build_session_system_prompt()
 
     assert prompt.startswith(copilot.load_copilot_rules())
-    assert "已挂载 skill-spec" in prompt
+    # 渐进暴露:system prompt 只带挂载目录的一行式路由表,重内容靠 Read。
+    assert "已挂载参考目录" in prompt
+    assert "02-skill-syntax" in prompt
+    assert "graph-agent-gateway" in prompt
+    assert "Studio 配置文件地图" in prompt
     assert "## 当前上下文" not in prompt
     # 规则文档的「上下文契约」章节会提到 <copilot_context> 标签名,所以这里断言的是
     # 渲染出来的具体上下文内容不在场,而不是标签字样。

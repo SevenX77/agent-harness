@@ -116,7 +116,7 @@ async def test_provider_endpoint(
     except httpx.HTTPError as exc:
         return _endpoint_result(endpoint, backend, base_url, "network_error", started, message=str(exc))
 
-    status = _probe_status(response, model_not_found_status="error")
+    status = _probe_status(response, model_not_found_status="error", probed_backend=backend)
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
@@ -127,7 +127,17 @@ async def test_provider_endpoint(
         model_ids=_model_ids(response) if status == "ok" else (),
         model_capabilities=_model_capabilities(response) if status == "ok" else {},
         message=None if status == "ok" else _provider_response_message(response),
-        error_code=None if status == "ok" else _extract_vendor_error_code(response, default=status),
+        error_code=(
+            None
+            if status == "ok"
+            # The classification is authoritative for a protocol mismatch — a
+            # misroute/route-rejection body often carries the FOREIGN upstream's
+            # vendor code, which must not leak past the classification the gate
+            # and UI key off.
+            else "protocol_unsupported"
+            if status == "protocol_unsupported"
+            else _extract_vendor_error_code(response, default=status)
+        ),
     )
 
 
@@ -184,7 +194,7 @@ async def test_provider_route(
     except httpx.HTTPError as exc:
         return _route_result(endpoint, route, backend, base_url, "network_error", started, message=str(exc))
 
-    status = _probe_status(response, model_not_found_status="invalid_model")
+    status = _probe_status(response, model_not_found_status="invalid_model", probed_backend=backend)
     return RouteProbeResult(
         endpoint_id=endpoint.endpoint_id,
         route_id=route.route_id,
@@ -631,12 +641,45 @@ _PROTOCOL_MISMATCH_MARKERS = (
     "use /v1/messages",
     "use /v1/chat/completions",
     "method not allowed",
+    # A host with no handler for the probed protocol's path answers with a
+    # route-level rejection (live 2026-07-02, anthropic.qnaigc.com × google:
+    # GET /v1beta/models -> HTTP 500 "Unsupported fixed route: /v1beta/models").
+    "unsupported fixed route",
+    "unknown route",
+    "route not found",
 )
 
 
 def _has_protocol_mismatch_guidance(response: httpx.Response) -> bool:
     text = response.text.lower()
     return any(marker in text for marker in _PROTOCOL_MISMATCH_MARKERS)
+
+
+# A host with no backend for the probed protocol may silently MISROUTE the
+# request to a different protocol's upstream and surface that upstream's error
+# verbatim (live 2026-07-02, anthropic.qnaigc.com × google: the gemini probe
+# 500s wrapping "OpenAI API error: 401 invalid api key"). A probe for backend X
+# that comes back describing backend Y's API is proof the host does not speak X.
+# Each marker maps to the backends for which it is NATIVE — seeing it on any
+# OTHER backend is a protocol mismatch, not a transient error or a real auth
+# failure on the matching protocol.
+_FOREIGN_API_ERROR_SIGNATURES: dict[str, tuple[ProviderProbeBackend, ...]] = {
+    "openai api error": ("openai", "deepseek", "ark"),
+    "anthropic api error": ("claude",),
+    "gemini api error": ("gemini",),
+    "google api error": ("gemini",),
+}
+
+
+def _has_foreign_protocol_error(
+    response: httpx.Response,
+    probed_backend: ProviderProbeBackend,
+) -> bool:
+    text = response.text.lower()
+    return any(
+        marker in text and probed_backend not in native_backends
+        for marker, native_backends in _FOREIGN_API_ERROR_SIGNATURES.items()
+    )
 
 
 def _is_provider_error_payload(response: httpx.Response) -> bool:
@@ -658,11 +701,17 @@ def _probe_status(
     response: httpx.Response,
     *,
     model_not_found_status: Literal["invalid_model", "error"],
+    probed_backend: ProviderProbeBackend | None = None,
 ) -> ProviderProbeStatus:
     code = response.status_code
     if 200 <= code < 300:
         return "ok"
     if code == 405 or _has_protocol_mismatch_guidance(response):
+        return "protocol_unsupported"
+    if probed_backend is not None and _has_foreign_protocol_error(response, probed_backend):
+        # Misrouted to a different protocol's upstream — the (URL, protocol) cell
+        # cannot speak the probed protocol. This precedes the 401 branch so a
+        # foreign-protocol auth error is not mistaken for THIS key being invalid.
         return "protocol_unsupported"
     if code == 401:
         return "invalid_key"

@@ -24,13 +24,36 @@ _ECHO_TTL_SECONDS = 2.0
 _STOP_JOIN_TIMEOUT_SECONDS = 30.0
 
 
+class _WatchTrigger:
+    """`stop_event` handed to watchfiles' watch(): fires on service stop OR re-watch.
+
+    watch() polls a single `is_set()` object from its native loop (~every 50ms
+    step). Folding both signals into that one object means a blocked watch()
+    always observes the thread's own stop event directly — stopping never
+    depends on stop() still holding the current generation's re-watch reference
+    (losing that reference once stranded a watcher no stop() could ever reach).
+    """
+
+    def __init__(self, stop: threading.Event, rewatch: threading.Event) -> None:
+        self._stop = stop
+        self._rewatch = rewatch
+
+    def is_set(self) -> bool:
+        return self._stop.is_set() or self._rewatch.is_set()
+
+
 class FileWatcherService:
     """Owns the watchfiles thread lifecycle and skill change event conversion."""
 
     def __init__(self, bus: InMemoryEventBus) -> None:
         self._bus = bus
-        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # Stop event of the CURRENT thread. One fresh event per start(), passed
+        # into _run and never cleared: a thread that outlives a timed-out stop()
+        # keeps its own event permanently set, so a later start() cannot revive
+        # it (the old shared-and-cleared event did exactly that, leaving an
+        # unstoppable watcher for the rest of the process).
+        self._thread_stop: threading.Event | None = None
         self._echo: dict[Path, tuple[float, float | None]] = {}
         self._lock = threading.Lock()
         # Opened workspaces to watch on top of the static config roots. Each maps a
@@ -39,30 +62,34 @@ class FileWatcherService:
         # app's built-in skills dirs. Set by `register_workspace` (called when the
         # backend resolves a skill's directory in get_skill_detail).
         self._workspace_roots: dict[Path, str] = {}
-        # The stop_event of the CURRENT watch() generation. Setting it breaks the
+        # Re-watch signal of the CURRENT watch() generation. Setting it breaks the
         # active watch so _run re-reads the (now larger) root set and re-watches.
-        self._watch_stop: threading.Event | None = None
+        self._rewatch: threading.Event | None = None
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         if self._thread is not None:
             return
         self._bus.set_loop(loop)
-        self._stop_event.clear()
-        self._thread = threading.Thread(
+        stop = threading.Event()
+        thread = threading.Thread(
             target=self._run,
+            args=(stop,),
             name="studio-file-watcher",
             daemon=True,
         )
-        self._thread.start()
+        self._thread = thread
+        self._thread_stop = stop
+        thread.start()
 
     def stop(self) -> None:
-        self._stop_event.set()
-        with self._lock:
-            watch_stop = self._watch_stop
-        if watch_stop is not None:
-            # Break the blocking watch() so the thread can observe _stop_event.
-            watch_stop.set()
         thread = self._thread
+        stop = self._thread_stop
+        self._thread = None
+        self._thread_stop = None
+        if stop is not None:
+            # Breaks the blocking watch() too: the thread's _WatchTrigger polls
+            # this event directly.
+            stop.set()
         if thread is not None:
             # Wait until the thread actually exits. A daemon watcher that outlives
             # stop() keeps running rust/notify code into interpreter shutdown, which
@@ -78,14 +105,13 @@ class FileWatcherService:
                     "studio-file-watcher thread still alive after %.0fs stop() wait",
                     _STOP_JOIN_TIMEOUT_SECONDS,
                 )
-        self._thread = None
         with self._lock:
             # The service is a module singleton that outlives each app instance:
             # drop per-app state so stale workspace roots do not accumulate across
             # restarts (or across the test suite, where every generation re-watched
             # long-dead tmp directories).
             self._workspace_roots.clear()
-            self._watch_stop = None
+            self._rewatch = None
 
     def register_workspace(self, root: Path, skill_id: str) -> None:
         """Watch an opened workspace's skill ROOT directory (idempotent).
@@ -106,9 +132,9 @@ class FileWatcherService:
             if self._workspace_roots.get(resolved) == skill_id:
                 return
             self._workspace_roots[resolved] = skill_id
-            watch_stop = self._watch_stop
-        if not static_covered and watch_stop is not None:
-            watch_stop.set()
+            rewatch = self._rewatch
+        if not static_covered and rewatch is not None:
+            rewatch.set()
 
     def _snapshot_roots(self) -> list[Path]:
         """Existing directories to watch: static config roots + opened workspace
@@ -139,11 +165,12 @@ class FileWatcherService:
     def notify_path_changed(self, path: Path) -> None:
         self._handle_path(Change.modified, path)
 
-    def _run(self) -> None:
+    def _run(self, stop: threading.Event) -> None:
         # Re-watch whenever the root set changes (a workspace was opened). Each
-        # generation gets a fresh stop_event; register_workspace()/stop() set it to
-        # break the blocking watch() so we recompute roots and re-watch.
-        while not self._stop_event.is_set():
+        # generation gets a fresh rewatch event; register_workspace() sets it to
+        # break the blocking watch() so we recompute roots and re-watch. stop()
+        # breaks the watch through `stop` itself (see _WatchTrigger).
+        while not stop.is_set():
             for static in _watch_roots():
                 try:
                     static.mkdir(parents=True, exist_ok=True)
@@ -151,25 +178,32 @@ class FileWatcherService:
                     pass
             roots = self._snapshot_roots()
             if not roots:
-                if self._stop_event.wait(1.0):
+                if stop.wait(1.0):
                     break
                 continue
-            watch_stop = threading.Event()
+            rewatch = threading.Event()
             with self._lock:
-                self._watch_stop = watch_stop
-            if self._stop_event.is_set():
+                self._rewatch = rewatch
+            if stop.is_set():
                 break
             try:
                 for changes in watch(
                     *[str(root) for root in roots],
-                    stop_event=watch_stop,
+                    stop_event=_WatchTrigger(stop, rewatch),
                     recursive=True,
                 ):
+                    # Also re-check between (and within) change batches: a batch
+                    # yielded just before stop() must not keep the thread busy
+                    # handling events while stop() waits on the join.
+                    if stop.is_set():
+                        break
                     for change, raw_path in changes:
+                        if stop.is_set():
+                            break
                         self._handle_path(change, Path(raw_path))
             except Exception:
                 logger.exception("skill file watcher crashed")
-                if self._stop_event.wait(1.0):
+                if stop.wait(1.0):
                     break
 
     def _handle_path(self, change: Change, path: Path) -> None:

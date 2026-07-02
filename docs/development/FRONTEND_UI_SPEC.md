@@ -91,6 +91,8 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 数据密集型侧栏（例如模型库、资源列表、引用列表）应避免外层再套装饰性 Card；侧栏本身是布局区域，只有单个 repeated item、弹窗或真正独立的工具面板才使用 Card。
 - `ScrollArea` 不应让 scrollbar 占用内容宽度；需要隐藏 scrollbar 时使用本地 `ScrollArea` wrapper 的 slot selector，且必须验证内容宽度没有被挤压。
 - 本地 `ScrollArea` wrapper 必须在根节点裁剪溢出，并在 viewport 上隐藏浏览器原生 scrollbar；业务面板不要再用裸 `overflow-y-auto` 承担主滚动。
+- 流式追加的消息/日志列表（Copilot 聊天、未来 trace 流）必须使用本地 `components/ui/message-scroller.tsx`（封装 shadcn radix message-scroller primitive）：流式时贴底跟随、用户上滚即释放跟随并浮现回到底部按钮、用户轮次 `scrollAnchor` 锚定；不要为流式列表手写 scrollTop 启发式或再造第二套贴底逻辑。注意 markdown 会把单个 `
+` 折叠成同一段落——验证“长回复溢出滚动”时要用列表/多段内容，不要用单换行文本。
 - 任何固定宽度或最小宽度都必须有响应式约束。窄面板下卡片、ring、badge、按钮和长文本不能横向溢出，也不能被父级裁掉关键反馈。
 
 ### 2.7 卡片、选中态与即时反馈

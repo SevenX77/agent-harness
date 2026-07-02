@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps, ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { CredentialsState, ModelGroup, RoleEntry, RolesData } from '../../api/llm'
-import { DEFAULT_COPILOT_ROLE, RolePicker, copilotRoleOptions } from './role-picker'
+import { RolePicker, copilotRoleOptions, type CopilotRoleOption } from './role-picker'
 
 vi.mock('../ui/button', () => ({
   Button: ({
@@ -98,39 +98,23 @@ const credentials: CredentialsState = {
   ],
 }
 
-const rolesData: RolesData = {
-  models: {},
-  providers: {},
-  roles: {
-    copilot_chat: role('copilot'),
-    copilot_judge: role('copilot'),
-    graph_planner: role('graph_agent'),
-  },
-}
+const modelGroups = [
+  routeGroup('claude-opus-4.8', 'Claude Opus 4.8'),
+  routeGroup('claude-opus-4.7', 'Claude Opus 4.7'),
+]
 
+// F3 sync contract (docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md):
+// composer options == the Settings Copilot display roles that are actually
+// configured (bound model group / non-empty fallback chain).
 describe('copilotRoleOptions', () => {
-  it('keeps only copilot-kind roles and label-cases their names', () => {
-    const options = copilotRoleOptions(rolesData)
-
-    expect(options).toEqual([
-      { role: 'copilot_chat', label: 'Copilot Chat' },
-      { role: 'copilot_judge', label: 'Copilot Judge' },
-    ])
-  })
-
-  it('drops graph_agent roles', () => {
-    const options = copilotRoleOptions(rolesData)
-
-    expect(options.some((option) => option.role === 'graph_planner')).toBe(false)
-  })
-
   it('returns an empty list for null data', () => {
     expect(copilotRoleOptions(null)).toEqual([])
   })
 
-  it('mirrors Copilot settings labels and skips broken legacy copilot roles', () => {
+  it('mirrors Settings: configured roles kept, empty drafts and broken legacy roles excluded', () => {
     const settingsRoles: RolesData = {
-      ...rolesData,
+      models: {},
+      providers: {},
       roles: {
         copilot_claude_opus_4_8: role('copilot', {
           active_model: 'claude-opus-4.8',
@@ -146,28 +130,101 @@ describe('copilotRoleOptions', () => {
           },
           fallback_chain: [{ route_id: 'anthropic-official:claude-opus-4.7', runtime_settings: {} }],
         }),
+        // broken legacy: fallback_chain without any model binding
         copilot_custom_1: role('copilot', {
           fallback_chain: [{ route_id: 'stale-provider:stale-model', runtime_settings: {} }],
         }),
+        // empty draft: shows as a "Drop model" card in Settings, not a usable chat role
         copilot_custom_2: role('copilot'),
         graph_planner: role('graph_agent'),
       },
     }
 
-    expect(copilotRoleOptions(settingsRoles, [
-      routeGroup('claude-opus-4.8', 'Claude Opus 4.8'),
-      routeGroup('claude-opus-4.7', 'Claude Opus 4.7'),
-    ], credentials)).toEqual([
-      { role: 'copilot_claude_opus_4_8', label: 'Claude Opus 4.8' },
-      { role: 'copilot_claude_opus_4_7', label: 'Claude Opus 4.7' },
-      { role: 'copilot_custom_2', label: 'Copilot Custom 2' },
+    const options = copilotRoleOptions(settingsRoles, modelGroups, credentials)
+
+    expect(options.map(({ role: id, label, persisted }) => ({ role: id, label, persisted }))).toEqual([
+      { role: 'copilot_claude_opus_4_8', label: 'Claude Opus 4.8', persisted: true },
+      { role: 'copilot_claude_opus_4_7', label: 'Claude Opus 4.7', persisted: true },
+    ])
+    expect(options[0].fallbackChain).toEqual([
+      { route_id: 'anthropic-official:claude-opus-4.8', runtime_settings: {} },
+    ])
+    expect(options[0].modelGroupId).toBe('claude-opus-4.8')
+  })
+
+  it('excludes copilot roles that have no bound model group', () => {
+    const bare: RolesData = {
+      models: {},
+      providers: {},
+      roles: {
+        copilot_chat: role('copilot'),
+        copilot_judge: role('copilot'),
+      },
+    }
+
+    expect(copilotRoleOptions(bare, modelGroups, credentials)).toEqual([])
+  })
+
+  it('labels a role bound to a non-anthropic-eligible group from the FULL group list (same as Settings)', () => {
+    // Spec 2.5: the Available Models sidebar is NOT pre-filtered by SDK
+    // compatibility, so a copilot role may bind any model group. The composer
+    // label must still come from the group display_name, like Settings cards.
+    const incompatible: ModelGroup = {
+      ...routeGroup('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5'),
+      provider_models: [{
+        ...routeGroup('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5').provider_models[0],
+        call_method_id: 'openai_chat_completions',
+      }],
+    }
+    const settingsRoles: RolesData = {
+      models: {},
+      providers: {},
+      roles: {
+        copilot_custom_2: role('copilot', {
+          active_model: 'claude-sonnet-4-5-20250929',
+          models: {
+            'claude-sonnet-4-5-20250929': { providers: ['anthropic-official:claude-sonnet-4-5-20250929'] },
+          },
+          fallback_chain: [{ route_id: 'anthropic-official:claude-sonnet-4-5-20250929', runtime_settings: {} }],
+        }),
+      },
+    }
+
+    const options = copilotRoleOptions(settingsRoles, [...modelGroups, incompatible], credentials)
+
+    expect(options.map(({ role: id, label }) => ({ role: id, label }))).toEqual([
+      { role: 'copilot_custom_2', label: 'Claude Sonnet 4.5' },
     ])
   })
 
-  it('defaults to copilot_chat', () => {
-    expect(DEFAULT_COPILOT_ROLE).toBe('copilot_chat')
+  it('floats the built-in defaults when no copilot role is persisted (same as Settings)', () => {
+    const noCopilotRoles: RolesData = {
+      models: {},
+      providers: {},
+      roles: { graph_planner: role('graph_agent') },
+    }
+
+    const options = copilotRoleOptions(noCopilotRoles, modelGroups, credentials)
+
+    expect(options.map(({ role: id, label, persisted, modelGroupId }) => ({ role: id, label, persisted, modelGroupId }))).toEqual([
+      { role: 'claude-opus-4.8', label: 'Claude Opus 4.8', persisted: false, modelGroupId: 'claude-opus-4.8' },
+    ])
+    expect(options[0].fallbackChain).toEqual([
+      { route_id: 'anthropic-official:claude-opus-4.8', runtime_settings: {} },
+    ])
   })
 })
+
+function option(id: string, label: string, overrides: Partial<CopilotRoleOption> = {}): CopilotRoleOption {
+  return {
+    role: id,
+    label,
+    fallbackChain: [{ route_id: `anthropic-official:${id}`, runtime_settings: {} }],
+    persisted: true,
+    modelGroupId: id,
+    ...overrides,
+  }
+}
 
 type MenuItemElement = ReactElement<{
   onSelect?: () => void
@@ -175,25 +232,30 @@ type MenuItemElement = ReactElement<{
 }>
 
 describe('RolePicker', () => {
-  it('lists every copilot-kind role option', () => {
+  const options = [
+    option('copilot_claude_opus_4_8', 'Claude Opus 4.8'),
+    option('copilot_claude_opus_4_7', 'Claude Opus 4.7'),
+  ]
+
+  it('lists every configured copilot role option', () => {
     const html = renderToStaticMarkup(
       <RolePicker
-        options={copilotRoleOptions(rolesData)}
-        selectedRole={DEFAULT_COPILOT_ROLE}
+        options={options}
+        selectedRole="copilot_claude_opus_4_8"
         onSelect={() => undefined}
       />,
     )
 
-    expect(html).toContain('Copilot Chat')
-    expect(html).toContain('Copilot Judge')
+    expect(html).toContain('Claude Opus 4.8')
+    expect(html).toContain('Claude Opus 4.7')
     expect(html).toContain('Copilot role')
   })
 
   it('hides the picker when only one copilot role is available', () => {
     const html = renderToStaticMarkup(
       <RolePicker
-        options={[{ role: 'copilot_chat', label: 'Copilot Chat' }]}
-        selectedRole="copilot_chat"
+        options={[option('copilot_claude_opus_4_8', 'Claude Opus 4.8')]}
+        selectedRole="copilot_claude_opus_4_8"
         onSelect={() => undefined}
       />,
     )
@@ -204,18 +266,18 @@ describe('RolePicker', () => {
   it('calls onSelect with the chosen role when a menu item is selected', () => {
     const onSelect = vi.fn()
     const element = RolePicker({
-      options: copilotRoleOptions(rolesData),
-      selectedRole: DEFAULT_COPILOT_ROLE,
+      options,
+      selectedRole: 'copilot_claude_opus_4_8',
       onSelect,
     }) as ReactElement<{ children: ReactNode[] }>
 
     // DropdownMenu > [trigger, content]; content children = [label, ...items]
     const content = element.props.children[1] as ReactElement<{ children: ReactNode[] }>
     const items = content.props.children.flat() as MenuItemElement[]
-    const judgeItem = items.find((item) => item.key === 'copilot_judge')
+    const secondItem = items.find((item) => item.key === 'copilot_claude_opus_4_7')
 
-    judgeItem?.props.onSelect?.()
+    secondItem?.props.onSelect?.()
 
-    expect(onSelect).toHaveBeenCalledWith('copilot_judge')
+    expect(onSelect).toHaveBeenCalledWith('copilot_claude_opus_4_7')
   })
 })

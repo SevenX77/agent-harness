@@ -171,7 +171,13 @@ export function isBrokenLegacyCopilotRole(role: RoleEntry): boolean {
 export function deriveActiveCopilotRoles(
   data: RolesData | null,
   realCopilotRoles: CopilotRolePreview[],
+  allModelGroups: ModelGroup[] = [],
 ): CopilotDisplayRole[] {
+  // Titles come from the FULL group list: a copilot role may bind any model
+  // group (the sidebar is not pre-filtered by SDK compatibility, spec 2.5),
+  // so a non-anthropic-eligible group still labels by its display_name —
+  // exactly what the Settings cards show.
+  const groupTitles = new Map(allModelGroups.map((group) => [group.canonical_id, group.display_name]))
   return data
     ? Object.entries(data.roles)
         .filter(([, role]) => role.role_kind === 'copilot')
@@ -186,7 +192,7 @@ export function deriveActiveCopilotRoles(
 
           return {
             id: name,
-            title: modelGroup?.title ?? copilotRoleTitleFromName(name),
+            title: modelGroup?.title ?? groupTitles.get(activeModelGroupId) ?? copilotRoleTitleFromName(name),
             description: modelGroup?.description ?? 'Coding copilot role.',
             source: modelGroup?.source ?? ('third_party' as const),
             modelGroupId: activeModelGroupId,
@@ -215,8 +221,9 @@ export function deriveFloatedCopilotRoles(
 export function deriveCopilotDisplayRolesFromCandidates(
   data: RolesData | null,
   realCopilotRoles: CopilotRolePreview[],
+  allModelGroups: ModelGroup[] = [],
 ): CopilotDisplayRole[] {
-  const activeRoles = deriveActiveCopilotRoles(data, realCopilotRoles)
+  const activeRoles = deriveActiveCopilotRoles(data, realCopilotRoles, allModelGroups)
   return activeRoles.length > 0 ? activeRoles : deriveFloatedCopilotRoles(realCopilotRoles)
 }
 
@@ -228,6 +235,7 @@ export function deriveCopilotDisplayRoles(
   return deriveCopilotDisplayRolesFromCandidates(
     data,
     deriveCopilotCandidateGroups(modelGroups, credentials),
+    modelGroups,
   )
 }
 
@@ -254,6 +262,52 @@ export function buildCopilotRoleEntry(group: CopilotRolePreview): RoleEntry {
       [group.id]: { providers: allRouteIds },
     },
     fallback_chain: allRouteIds.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
+  }
+}
+
+/**
+ * R-F5: derive a yaml-safe key for a copilot role created from a model group.
+ * The yaml key must match `[a-z][a-z0-9_]*` (no hyphens, no dots, no upper).
+ * `copilot_<slug>` where slug strips any non-[a-zA-Z0-9] run to `_` and lowercases.
+ */
+export function copilotKeyForGroupId(groupId: string): string {
+  return "copilot_" + groupId.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()
+}
+
+export interface CopilotSendRoleResolution {
+  /** Role key to send over the chat websocket (always a persisted yaml key when resolvable). */
+  roleKey: string
+  /** Roles snapshot to persist BEFORE sending, or null when nothing needs materializing. */
+  nextRoles: RolesData | null
+}
+
+/**
+ * F3 (docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md): resolve the role
+ * key for a chat send. A floated built-in option (rendered, not persisted —
+ * atom-56) materializes into `copilot_<slug>` through the same
+ * buildCopilotRoleEntry path Settings uses: first use IS the act-on-it moment.
+ */
+export function resolveCopilotSendRole(
+  data: RolesData,
+  option: { role: string; persisted: boolean; modelGroupId: string },
+  modelGroups: ModelGroup[],
+  credentials: CredentialsState = { providers: [] },
+): CopilotSendRoleResolution {
+  if (option.persisted || data.roles[option.role]) {
+    return { roleKey: option.role, nextRoles: null }
+  }
+  const persistedKey = copilotKeyForGroupId(option.role)
+  if (data.roles[persistedKey]) {
+    return { roleKey: persistedKey, nextRoles: null }
+  }
+  const group = deriveCopilotCandidateGroups(modelGroups, credentials)
+    .find((candidate) => candidate.id === option.modelGroupId)
+  if (!group) {
+    return { roleKey: option.role, nextRoles: null }
+  }
+  return {
+    roleKey: persistedKey,
+    nextRoles: { ...data, roles: { ...data.roles, [persistedKey]: buildCopilotRoleEntry(group) } },
   }
 }
 

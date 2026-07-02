@@ -3,7 +3,9 @@ import {
   applyCopilotModelGroupSelection,
   buildCopilotRoleEntry,
   deriveCopilotCandidateGroups,
+  copilotKeyForGroupId,
   pickDefaultCopilotGroupIds,
+  resolveCopilotSendRole,
 } from "./copilot-role-derivation"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 
@@ -242,5 +244,87 @@ describe("applyCopilotModelGroupSelection — selecting a group keeps the copilo
     expect(role.role_kind).toBe("copilot")
     expect(role.active_model).toBe("claude-opus-4.8")
     expect(role.models["claude-opus-4.8"].providers).toEqual(["anthropic-official:claude-opus-4.8"])
+  })
+})
+
+// F3 (03_regions/copilot mvp1-alignment): sending a chat message with a
+// floated built-in role materializes it through the same path Settings uses.
+describe("resolveCopilotSendRole", () => {
+  const anthropicCredentials: CredentialsState = {
+    providers: [
+      { id: "anthropic-official", name: "Anthropic Official", provider_type: "anthropic_compatible", api_key: "***" },
+    ],
+  }
+  const groups = [group("claude-opus-4.8", "Claude Opus 4.8")]
+
+  function rolesData(roles: RolesData["roles"]): RolesData {
+    return { models: {}, providers: {}, roles }
+  }
+
+  it("passes a persisted role key through untouched", () => {
+    const data = rolesData({
+      copilot_claude_opus_4_8: {
+        role_kind: "copilot",
+        system_prompt_prefix: "",
+        model_fallback_enabled: true,
+        active_model: "claude-opus-4.8",
+        models: { "claude-opus-4.8": { providers: ["anthropic-official:claude-opus-4.8"] } },
+        fallback_chain: [{ route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} }],
+      },
+    })
+
+    expect(resolveCopilotSendRole(
+      data,
+      { role: "copilot_claude_opus_4_8", persisted: true, modelGroupId: "claude-opus-4.8" },
+      groups,
+      anthropicCredentials,
+    )).toEqual({ roleKey: "copilot_claude_opus_4_8", nextRoles: null })
+  })
+
+  it("materializes a floated built-in under copilot_<slug> with the full eligible chain", () => {
+    const data = rolesData({})
+
+    const resolution = resolveCopilotSendRole(
+      data,
+      { role: "claude-opus-4.8", persisted: false, modelGroupId: "claude-opus-4.8" },
+      groups,
+      anthropicCredentials,
+    )
+
+    expect(resolution.roleKey).toBe("copilot_claude_opus_4_8")
+    const entry = resolution.nextRoles?.roles.copilot_claude_opus_4_8
+    expect(entry?.role_kind).toBe("copilot")
+    expect(entry?.active_model).toBe("claude-opus-4.8")
+    expect(entry?.fallback_chain).toEqual([
+      { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+    ])
+  })
+
+  it("reuses an already-persisted copilot_<slug> entry instead of rewriting it", () => {
+    const data = rolesData({
+      copilot_claude_opus_4_8: {
+        role_kind: "copilot",
+        system_prompt_prefix: "",
+        model_fallback_enabled: true,
+        active_model: "claude-opus-4.8",
+        models: { "claude-opus-4.8": { providers: ["anthropic-official:claude-opus-4.8"] } },
+        fallback_chain: [{ route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} }],
+      },
+    })
+
+    expect(resolveCopilotSendRole(
+      data,
+      { role: "claude-opus-4.8", persisted: false, modelGroupId: "claude-opus-4.8" },
+      groups,
+      anthropicCredentials,
+    )).toEqual({ roleKey: "copilot_claude_opus_4_8", nextRoles: null })
+  })
+})
+
+describe("copilotKeyForGroupId", () => {
+  it("derives the yaml-safe copilot_ key", () => {
+    expect(copilotKeyForGroupId("claude-opus-4.8")).toBe("copilot_claude_opus_4_8")
+    expect(copilotKeyForGroupId("DeepSeek V3.2-Pro")).toBe("copilot_deepseek_v3_2_pro")
+    expect(copilotKeyForGroupId("a:b/c.d")).toBe("copilot_a_b_c_d")
   })
 })

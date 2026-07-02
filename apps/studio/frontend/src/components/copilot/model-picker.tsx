@@ -10,8 +10,15 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
 
+/**
+ * F3: the composer's route truth is the selected display role's fallback
+ * chain (same derivation as Settings), so the picker only needs that slice —
+ * not a materialized registry RoleEntry.
+ */
+export type ModelPickerRole = Pick<RoleEntry, 'fallback_chain'>
+
 interface ModelPickerProps {
-  role: RoleEntry | null
+  role: ModelPickerRole | null
   registry: RegistryResponse | null
   selectedRouteId: string
   onSelect: (routeId: string) => void
@@ -27,7 +34,7 @@ export interface RouteOption {
 
 const unavailableReason = 'Route is missing, disabled, or failed in the active registry'
 
-export function getRouteOptions(role: RoleEntry | null, registry: RegistryResponse | null): RouteOption[] {
+export function getRouteOptions(role: ModelPickerRole | null, registry: RegistryResponse | null): RouteOption[] {
   if (!role) {
     return []
   }

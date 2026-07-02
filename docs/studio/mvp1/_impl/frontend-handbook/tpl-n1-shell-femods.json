@@ -15,5 +15,21 @@
     "boundary": "做:壳开合 / 布局 / 强隔离切换 / 面板开合 / 两条退出语义 / 进入挂 Copilot。不做:不管 Copilot 对话本身(归 copilot-assist 的 copilotStore,#22)、不持 skill 数据真相(进工作区后由各面板拉)、不是后端(纯前端壳)。",
     "reuse_note": "N1 自有。本页(Workspace 外壳)登记;#15–#21、#23 都复用同一外壳容器,只登记一次。",
     "design_note": "本壳已符合 D11(强隔离)/ D10(非全屏启动)/ 配合 D8(copilot 退出恢复,会话落盘归 copilotStore);设计页只记稳定设计,现状证据归实施页。边角:WelcomeScreen.tsx no-op 孤儿包装待删。"
+  },
+  {
+    "name": "消息滚动器(MessageScroller)",
+    "kind": "前端 UI 原语(components/ui,横切)",
+    "what": "shadcn radix message-scroller 契约的本地封装:流式聊天列表的贴底跟随 / 上滚释放 / 回到底部按钮 / 用户轮次锚定。",
+    "where": "components/ui/message-scroller.tsx(MessageScrollerProvider / MessageScroller / MessageScrollerViewport / MessageScrollerContent / MessageScrollerItem / MessageScrollerButton)。",
+    "duties": [
+      "autoScroll:流式追加时贴住 live edge;用户上滚离开底部即释放,绝不抢滚。",
+      "MessageScrollerItem scrollAnchor:新用户轮次锚定到视口顶部附近。",
+      "MessageScrollerButton:离底时浮现,点击回到底部并恢复跟随。"
+    ],
+    "api": "MessageScrollerProvider({autoScroll}) > MessageScroller > MessageScrollerViewport > MessageScrollerContent > MessageScrollerItem({messageId,scrollAnchor});MessageScrollerButton。",
+    "reuse_note": "任何流式消息/日志列表(Copilot 面板、未来 trace 流)统一用它,不再各自手写 scroll 逻辑或裸 overflow-y-auto。",
+    "used_by": "CopilotPanel 消息区(atom-24)。",
+    "boundary": "只管滚动行为,不渲染消息内容本身;消息气泡/事件卡仍归业务组件。",
+    "design_note": "对齐 https://ui.shadcn.com/docs/components/radix/message-scroller 的行为契约;设计源 03_regions/copilot F6。"
   }
 ]

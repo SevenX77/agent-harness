@@ -81,13 +81,7 @@ validator: false
 def _write_artifact_logic_skill(root: Path) -> None:
     graph_inputs = _schema_yaml({"body": {"type": "string"}}, required=["body"])
     graph_outputs = _schema_yaml(
-        {
-            "report_md": {
-                "type": "string",
-                "target": "artifact",
-                "path": "report.md",
-            }
-        },
+        {"report_md": {"type": "string"}},
         required=["report_md"],
     )
     phase_inputs = _schema_yaml({"body": {"type": "string"}}, required=["body"])
@@ -102,6 +96,11 @@ io:
     {graph_inputs}
   outputs:
     {graph_outputs}
+  artifacts:
+    - stem: report
+      mode: single
+      format: md
+      fields: [report_md]
 phases:
   - report
 ---
@@ -149,7 +148,7 @@ def test_real_run_imports_workspace_file_into_phase_input(
     assert result.context["report_md"] == "## Runtime IO\n\nImported body."
 
 
-def test_real_run_declared_artifact_target_writes_run_artifact(
+def test_real_run_manifest_artifact_writes_fixed_format_file(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
@@ -166,6 +165,97 @@ def test_real_run_declared_artifact_target_writes_run_artifact(
         body="## Artifact\n\nEngine-owned output.",
     )
 
-    artifact_path = workspace_dir / "runs" / run_id / "artifacts" / "report.md"
     assert result.success is True
-    assert artifact_path.read_text(encoding="utf-8") == "## Artifact\n\nEngine-owned output."
+    artifacts_dir = workspace_dir / "runs" / run_id / "artifacts"
+    latest = sorted(artifacts_dir.glob("report_latest_*.md"))
+    assert len(latest) == 1, list(artifacts_dir.iterdir())
+    assert latest[0].read_text(encoding="utf-8") == "## Artifact\n\nEngine-owned output."
+
+
+def _write_batch_importing_logic_skill(root: Path) -> None:
+    graph_inputs = _schema_yaml({"title": {"type": "string"}}, required=["title"])
+    graph_outputs = _schema_yaml({"count": {"type": "integer"}}, required=["count"])
+    phase_inputs = _schema_yaml(
+        {
+            "title": {"type": "string"},
+            "chapters": {
+                "type": "array",
+                "source": "file",
+                "dir": "imports/abc_segmentation",
+                "pattern": "chapter_{n}_latest_*.json",
+            },
+        },
+        required=["title", "chapters"],
+    )
+    phase_outputs = _schema_yaml({"count": {"type": "integer"}}, required=["count"])
+    _write(
+        root / "GRAPH.md",
+        f"""---
+schema_version: "v0.3.0"
+name: ws-e1-io-e2e-batch-import
+io:
+  inputs:
+    {graph_inputs}
+  outputs:
+    {graph_outputs}
+phases:
+  - report
+---
+<phase depends_on="input" output>report</phase>
+""",
+    )
+    _write(
+        root / "phases" / "report" / "LOGIC.md",
+        f"""---
+io:
+  inputs:
+    {phase_inputs}
+  outputs:
+    {phase_outputs}
+actions: [report]
+validator: false
+---
+<action>report</action>
+""",
+    )
+    _write(
+        root / "phases" / "report" / "actions" / "report.py",
+        dedent(
+            """
+            def report(inputs):
+                chapters = inputs["chapters"]
+                numbers = [c["chapter_number"] for c in chapters]
+                assert numbers == sorted(numbers), numbers
+                return {"count": len(chapters)}
+            """
+        ).lstrip(),
+    )
+
+
+def test_real_run_batch_file_import_aggregates_numbered_json_files(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    """A batch source:'file' declaration (dir + pattern) aggregates the
+    numbered files into a parsed array, ordered by extracted number
+    (design: input region F5 batch numbers kept, PM 2026-07-02)."""
+    skill_root = tmp_path / "skill"
+    workspace_dir = tmp_path / "workspace"
+    batch_dir = workspace_dir / "imports" / "abc_segmentation"
+    for n in (7, 1, 2):
+        _write(
+            batch_dir / f"chapter_{n:03d}_latest_20260414_0649{n:02d}.json",
+            json.dumps({"chapter_number": n, "paragraphs": []}),
+        )
+    _write_batch_importing_logic_skill(skill_root)
+
+    result = run_skill(
+        skill_root,
+        workspace_dir=workspace_dir,
+        thread_id="ws-e1-io-e2e-batch",
+        skill_resolver=mock_skill_resolver,
+        title="Batch",
+    )
+
+    assert result.success is True, getattr(result, "error", None)
+    assert result.context["count"] == 3

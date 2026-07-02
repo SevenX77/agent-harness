@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   ProviderCard,
   ProviderDeleteButton,
+  buildProviderDeleteRequest,
   aggregateThirdPartyModelInfos,
   apiKeyDisplayValue,
   apiKeyInputClassName,
@@ -1762,40 +1763,33 @@ describe("ProviderCard manual model panel", () => {
 })
 
 describe("ProviderCard delete confirmation", () => {
-  it("delete trigger uses a shadcn sonner confirmation toast", () => {
-    const onDelete = vi.fn()
-    const element = ProviderDeleteButton({ draftName: "OpenAI", onDelete })
-    const html = renderToStaticMarkup(<ProviderDeleteButton draftName="OpenAI" onDelete={onDelete} />)
+  // R6-2: the delete button no longer fires a body-level sonner toast (which
+  // closed the Settings modal on click). It signals intent via onRequestDelete;
+  // the parent turns that into an in-tree AlertDialog request.
+  it("delete trigger signals intent via onRequestDelete without deleting", () => {
+    const onRequestDelete = vi.fn()
+    const element = ProviderDeleteButton({ onRequestDelete })
+    const html = renderToStaticMarkup(<ProviderDeleteButton onRequestDelete={onRequestDelete} />)
 
     expect(html).toContain('aria-label="Delete provider"')
     expect(html).toContain('data-delete-toast-trigger="true"')
     element.props.onClick()
 
-    expect(toastMock).toHaveBeenCalledWith(
-      "Delete OpenAI?",
-      expect.objectContaining({
-        description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
-        duration: Infinity,
-        action: expect.objectContaining({ label: "Delete" }),
-        cancel: expect.objectContaining({ label: "Cancel" }),
-        classNames: expect.objectContaining({
-          actionButton: expect.stringContaining("!bg-destructive"),
-        }),
-      }),
-    )
-    expect(onDelete).not.toHaveBeenCalled()
+    expect(onRequestDelete).toHaveBeenCalledTimes(1)
   })
 
-  it("sonner delete action remains wired to provider deletion", () => {
+  it("builds an AlertDialog delete request wired to provider deletion", () => {
     const onDelete = vi.fn()
-    const element = ProviderDeleteButton({ draftName: "OpenAI", onDelete })
-    element.props.onClick()
-    const options = toastMock.mock.calls.at(-1)?.[1] as {
-      action?: { onClick?: () => void }
-    }
 
-    options.action?.onClick?.()
+    const request = buildProviderDeleteRequest("OpenAI", onDelete)
 
+    expect(request).toMatchObject({
+      title: "Delete OpenAI?",
+      description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
+    })
+    expect(onDelete).not.toHaveBeenCalled()
+
+    void request.onConfirm()
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
 

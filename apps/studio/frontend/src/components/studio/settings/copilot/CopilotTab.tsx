@@ -19,7 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
+import { useDeleteConfirm } from "@/components/ui/delete-confirm-dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { SectionTitle } from "../shared"
@@ -187,6 +187,7 @@ export function CopilotTab({
   onNavigateToApiKeys?: () => void
 } = {}) {
   const { t } = useTranslation("settings")
+  const { confirm: confirmDelete, dialog: deleteDialog } = useDeleteConfirm()
 
   const realCopilotRoles = useMemo(() => {
     return deriveCopilotCandidateGroups(modelGroups, credentials)
@@ -536,8 +537,7 @@ export function CopilotTab({
   }
 
   function requestDeleteCopilotRole(role: { id: string; title: string }) {
-    requestDeleteConfirmationToast({
-      id: `delete-copilot-role-${role.id}`,
+    confirmDelete({
       title: `Delete ${role.title}?`,
       description: "Remove this Copilot role permanently.",
       onConfirm: async () => {
@@ -632,6 +632,7 @@ export function CopilotTab({
 
   return (
     <>
+      {deleteDialog}
       <CopilotRolesLayout
         sidebar={(
           <div data-copilot-available-models-sidebar="true" className="min-w-0 lg:h-full">

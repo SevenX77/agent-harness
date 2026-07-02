@@ -34,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
+import { useDeleteConfirm, type DeleteConfirmRequest } from "@/components/ui/delete-confirm-dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { CredentialsState, MaterializationReportEntry, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
@@ -55,16 +55,15 @@ export type RoleCategory = "graph-agent" | "copilot"
 
 const EMPTY_PROVIDER_MODELS_BY_ROUTE_ID: ReadonlyMap<string, ProviderModelOption> = new Map()
 
-export function requestRoleDeleteConfirmation(
+export function buildRoleDeleteRequest(
   roleName: string,
   onDeleteRole: (roleName: string) => void,
-) {
-  requestDeleteConfirmationToast({
-    id: `delete-role-${roleName}`,
+): DeleteConfirmRequest {
+  return {
     title: `Delete ${roleName}?`,
     description: `Remove ${roleName} and its model fallback chain.`,
     onConfirm: () => onDeleteRole(roleName),
-  })
+  }
 }
 
 export const RoleCard = memo(function RoleCard({
@@ -115,6 +114,7 @@ export const RoleCard = memo(function RoleCard({
   const [editOpen, setEditOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  const { confirm: confirmDelete, dialog: deleteDialog } = useDeleteConfirm()
   const actionsOpenTimerRef = useRef<number | null>(null)
   const RoleIcon = category === "copilot" ? Bot : Cog
   const roleFitByRouteId = useMemo<ReadonlyMap<string, MaterializationReportEntry>>(() => (
@@ -196,6 +196,7 @@ export const RoleCard = memo(function RoleCard({
 
   return (
     <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
+      {deleteDialog}
       <Card
         size="sm"
         className="relative rounded-md"
@@ -280,7 +281,7 @@ export const RoleCard = memo(function RoleCard({
                   variant="destructive"
                   onSelect={() => {
                     setActionsOpen(false)
-                    requestRoleDeleteConfirmation(roleName, onDeleteRole)
+                    confirmDelete(buildRoleDeleteRequest(roleName, onDeleteRole))
                   }}
                 >
                   <Trash2 />

@@ -273,6 +273,9 @@ class SkillLoader:
             "io": {
                 "inputs": io_inputs,
                 "outputs": io_outputs,
+                "artifacts": [spec.model_dump() for spec in manifest.io.artifacts]
+                if manifest.io.artifacts
+                else None,
                 "output_schema_keys": sorted(output_schema_keys)
                 if output_schema_keys is not None
                 else None,
@@ -1791,12 +1794,26 @@ def _validate_inline_io_schema(
             continue
         if field_schema.get("source") != "file":
             continue
+        batch_dir = field_schema.get("dir")
+        if isinstance(batch_dir, str) and batch_dir.strip():
+            batch_pattern = field_schema.get("pattern")
+            if not isinstance(batch_pattern, str) or "{n}" not in batch_pattern:
+                _io_fatal(
+                    path,
+                    1,
+                    f"inline {kind} field {field_name!r} declares a batch file dir "
+                    "but its pattern has no {n} number placeholder",
+                    field_path=f"{field_path}.properties.{field_name}.pattern",
+                    code=invalid_code,
+                )
+            continue
         source_path = field_schema.get("path")
         if not isinstance(source_path, str) or not source_path.strip():
             _io_fatal(
                 path,
                 1,
-                f"inline {kind} field {field_name!r} has source: file but no path",
+                f"inline {kind} field {field_name!r} has source: file but no path "
+                "(or dir + pattern for a batch)",
                 field_path=f"{field_path}.properties.{field_name}.path",
                 code=invalid_code,
             )
@@ -2165,6 +2182,16 @@ def _validate_phase_io_schemas(path: Path, mode: str, ast: PhaseAST) -> None:
     io = getattr(ast, "io", None)
     if io is None:
         return
+    if getattr(io, "artifacts", None):
+        raise SkillLoadError(
+            f"{path}: io.artifacts is a graph-boundary declaration and only "
+            "valid on GRAPH.md, not on phase files",
+            payload=make_error_payload(
+                f"[F-v3-{mode}-io-schema-invalid]",
+                "io.artifacts declared on a phase file; move it to GRAPH.md io",
+                source_path=f"{path}:{_frontmatter_key_line(path, 'io')}",
+            ),
+        )
     _validate_inline_io_schema(path, io.inputs, "input", domain=mode)
     _validate_inline_io_schema(path, io.outputs, "output", domain=mode)
 

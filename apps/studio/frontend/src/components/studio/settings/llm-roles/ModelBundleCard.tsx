@@ -34,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
+import { useDeleteConfirm, type DeleteConfirmRequest } from "@/components/ui/delete-confirm-dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { CredentialsState, MaterializationReportEntry, ModelBundleEntry, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
@@ -57,17 +57,16 @@ import { roleTokenLimitSummary } from "./RoleCard"
 import { RoleNameDialog } from "./RoleNameDialog"
 import { RoleSettingsPanel } from "./RoleSettingsDialog"
 
-export function requestModelBundleDeleteConfirmation(
+export function buildModelBundleDeleteRequest(
   bundle: ModelBundleEntry,
   bundleId: string,
   onDeleteBundle: (bundleId: string) => void,
-) {
-  requestDeleteConfirmationToast({
-    id: `delete-model-bundle-${bundleId}`,
+): DeleteConfirmRequest {
+  return {
     title: `Delete ${bundle.display_name || bundleId}?`,
     description: "Remove this model bundle and its route arrangement.",
     onConfirm: () => onDeleteBundle(bundleId),
-  })
+  }
 }
 
 export const ModelBundleCard = memo(function ModelBundleCard({
@@ -104,6 +103,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  const { confirm: confirmDelete, dialog: deleteDialog } = useDeleteConfirm()
   const roleName = bundleRoleName(bundleId)
   const bundleRoleData = useMemo(
     () => rolesDataWithBundleRole(data, bundleId),
@@ -180,6 +180,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
 
   return (
     <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
+      {deleteDialog}
       <Card
         size="sm"
         className="relative rounded-md"
@@ -244,7 +245,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
                   variant="destructive"
                   onSelect={() => {
                     setActionsOpen(false)
-                    requestModelBundleDeleteConfirmation(bundle, bundleId, onDeleteBundle)
+                    confirmDelete(buildModelBundleDeleteRequest(bundle, bundleId, onDeleteBundle))
                   }}
                 >
                   <Trash2 />

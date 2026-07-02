@@ -33,7 +33,7 @@ def test_warehouse_code_health_diagnostics_oracle() -> None:
     build_result = subprocess.run(
         [sys.executable, str(build_tree_script), "--file", str(target_md)],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         cwd=str(repo_root),
     )
     assert build_result.returncode == 0, f"结构树扫描 build_tree.py 执行失败:\n{build_result.stderr}"
@@ -45,7 +45,7 @@ def test_warehouse_code_health_diagnostics_oracle() -> None:
     audit_result = subprocess.run(
         [sys.executable, str(run_static_script), "--file", str(target_md)],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         cwd=str(repo_root),
     )
 

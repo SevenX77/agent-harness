@@ -182,7 +182,7 @@ def test_deterministic_logic_case_exact_match_writes_passed_report(
     assert report["cases"][0]["diff"] == []
     assert report["cases"][0]["stale_fields"] == []
     assert report["cases"][0]["error"] is None
-    assert json.loads((workspace_dir / "golden" / baseline_id / "report.json").read_text()) == report
+    assert json.loads((workspace_dir / "golden" / baseline_id / "report.json").read_text(encoding="utf-8")) == report
 
 
 def test_golden_value_mismatch_returns_failed_case_with_field_diff(

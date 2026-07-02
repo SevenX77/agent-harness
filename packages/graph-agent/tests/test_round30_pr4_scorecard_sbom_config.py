@@ -35,7 +35,7 @@ def _is_executable(path: Path) -> bool:
         result = subprocess.run(
             ["git", "ls-files", "-s", relative],
             cwd=REPO_ROOT,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             capture_output=True,
             check=False,
         )

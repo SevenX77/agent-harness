@@ -13,10 +13,17 @@ runtime failure deep in a single test case.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
 import pytest
+
+# Cross-platform bottom line (docs/development/CROSS_PLATFORM.md): child
+# Python processes spawned by tests must write UTF-8 regardless of the host
+# locale codepage. Does not affect this process (UTF-8 mode is decided at
+# interpreter startup) — call sites still pass encoding="utf-8" explicitly.
+os.environ.setdefault("PYTHONUTF8", "1")
 
 from graph_agent.core.skill_resolver_protocol import SkillResolutionError, validate_skill_id
 

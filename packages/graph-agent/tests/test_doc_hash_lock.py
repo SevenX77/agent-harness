@@ -137,12 +137,12 @@ def test_hash_lock_reports_drift_missing_and_untracked_docs(tmp_path: Path) -> N
 
     tracked = docs_root / "existing-unit" / "baseline.md"
     tracked.parent.mkdir()
-    tracked.write_text("audited baseline\n")
+    tracked.write_text("audited baseline\n", encoding="utf-8")
     expected_tracked_hash = _sha256(tracked)
-    tracked.write_text("silent drift\n")
+    tracked.write_text("silent drift\n", encoding="utf-8")
 
     new_doc = docs_root / "existing-unit" / "extra.md"
-    new_doc.write_text("new audited-style doc\n")
+    new_doc.write_text("new audited-style doc\n", encoding="utf-8")
 
     violations = _collect_hash_lock_violations(
         docs_root=docs_root,
@@ -167,10 +167,10 @@ def test_hash_lock_exemption_allows_only_exact_file_and_hash(tmp_path: Path) -> 
 
     doc_path = docs_root / "unit" / "baseline.md"
     doc_path.parent.mkdir()
-    doc_path.write_text("audited baseline\n")
+    doc_path.write_text("audited baseline\n", encoding="utf-8")
     expected_hash = _sha256(doc_path)
 
-    doc_path.write_text("owner approved drift\n")
+    doc_path.write_text("owner approved drift\n", encoding="utf-8")
     approved_hash = _sha256(doc_path)
 
     assert (
@@ -182,7 +182,7 @@ def test_hash_lock_exemption_allows_only_exact_file_and_hash(tmp_path: Path) -> 
         == []
     )
 
-    doc_path.write_text("second silent drift\n")
+    doc_path.write_text("second silent drift\n", encoding="utf-8")
     violations = _collect_hash_lock_violations(
         docs_root=docs_root,
         expected_hashes={"unit/baseline.md": expected_hash},

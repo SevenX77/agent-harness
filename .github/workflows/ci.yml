@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Cross-platform bottom line (docs/development/CROSS_PLATFORM.md): every
+# Python process in CI runs in UTF-8 mode, matching the policy enforced on
+# Windows/macOS dev machines — no locale-dependent text I/O anywhere.
+env:
+  PYTHONUTF8: "1"
+
 jobs:
   quality-gates:
     runs-on: ubuntu-latest

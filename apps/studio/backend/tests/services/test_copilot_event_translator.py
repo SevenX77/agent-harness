@@ -28,6 +28,7 @@ from claude_agent_sdk import CLIConnectionError
 from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
+    StreamEvent,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -69,10 +70,37 @@ def clean_copilot_state() -> Iterator[None]:
     copilot._view_contexts.clear()
 
 
+def _stream_event(
+    event: dict[str, object], parent_tool_use_id: str | None = None
+) -> StreamEvent:
+    return StreamEvent(
+        uuid="uuid-1",
+        session_id="session-1",
+        event=event,
+        parent_tool_use_id=parent_tool_use_id,
+    )
+
+
+def _text_delta(text: str) -> StreamEvent:
+    return _stream_event(
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}}
+    )
+
+
+def _thinking_delta(thinking: str) -> StreamEvent:
+    return _stream_event(
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": thinking},
+        }
+    )
+
+
 def test_translate_text_event() -> None:
-    events = copilot._translate_sdk_message(
+    # F8 no-stream fallback: without partial deltas the whole block is emitted.
+    events = copilot.SdkMessageTranslator().translate(
         AssistantMessage(content=[TextBlock(text="hello")], model="claude"),
-        {},
     )
 
     assert events == [CopilotEventText(content="hello")]
@@ -80,12 +108,11 @@ def test_translate_text_event() -> None:
 
 def test_translate_thinking_block_event() -> None:
     # F1: extended-thinking must be streamed (collapsible, never dropped).
-    events = copilot._translate_sdk_message(
+    events = copilot.SdkMessageTranslator().translate(
         AssistantMessage(
             content=[ThinkingBlock(thinking="let me reason...", signature="sig")],
             model="claude",
         ),
-        {},
     )
 
     assert events == [CopilotEventThinking(content="let me reason...")]
@@ -95,7 +122,7 @@ def test_translate_thinking_then_text_preserves_order() -> None:
     # Thinking precedes the visible answer in the same assistant turn; both
     # events must be emitted in order so the UI can render the collapsible
     # Thought above the answer text.
-    events = copilot._translate_sdk_message(
+    events = copilot.SdkMessageTranslator().translate(
         AssistantMessage(
             content=[
                 ThinkingBlock(thinking="reasoning", signature="sig"),
@@ -103,7 +130,6 @@ def test_translate_thinking_then_text_preserves_order() -> None:
             ],
             model="claude",
         ),
-        {},
     )
 
     assert events == [
@@ -113,28 +139,29 @@ def test_translate_thinking_then_text_preserves_order() -> None:
 
 
 def test_translate_tool_use_start_event() -> None:
-    tool_names: dict[str, str] = {}
+    translator = copilot.SdkMessageTranslator()
 
-    events = copilot._translate_sdk_message(
+    events = translator.translate(
         AssistantMessage(
             content=[ToolUseBlock(id="tool-1", name="Read", input={"file_path": "SKILL.md"})],
             model="claude",
         ),
-        tool_names,
     )
 
     assert events == [
         CopilotEventToolUseStart(tool_name="Read", tool_input={"file_path": "SKILL.md"})
     ]
-    assert tool_names == {"tool-1": "Read"}
+    assert translator.tool_names == {"tool-1": "Read"}
 
 
 def test_translate_tool_result_event() -> None:
-    events = copilot._translate_sdk_message(
+    translator = copilot.SdkMessageTranslator()
+    translator.tool_names["tool-1"] = "Read"
+
+    events = translator.translate(
         AssistantMessage(
             content=[ToolResultBlock(tool_use_id="tool-1", content="ok")], model="claude"
         ),
-        {"tool-1": "Read"},
     )
 
     assert events == [
@@ -145,9 +172,11 @@ def test_translate_tool_result_event() -> None:
 def test_translate_tool_result_in_user_message() -> None:
     # The real SDK returns tool results in UserMessage, not AssistantMessage —
     # these must still surface (F1 "不省略"), keyed back to the tool name.
-    events = copilot._translate_sdk_message(
+    translator = copilot.SdkMessageTranslator()
+    translator.tool_names["tool-1"] = "Read"
+
+    events = translator.translate(
         UserMessage(content=[ToolResultBlock(tool_use_id="tool-1", content="file contents")]),
-        {"tool-1": "Read"},
     )
 
     assert events == [
@@ -156,23 +185,31 @@ def test_translate_tool_result_in_user_message() -> None:
 
 
 def test_translate_failed_tool_result_in_user_message() -> None:
-    events = copilot._translate_sdk_message(
+    # F8: a failed tool is a RECOVERABLE fact the model often works around —
+    # transcribe it as tool_use_result(success=False), never as CopilotEventError
+    # (reserved for fatal stream-ending errors; the frontend settles the message
+    # state machine on it).
+    translator = copilot.SdkMessageTranslator()
+    translator.tool_names["tool-1"] = "Bash"
+
+    events = translator.translate(
         UserMessage(
             content=[ToolResultBlock(tool_use_id="tool-1", content="denied", is_error=True)]
         ),
-        {"tool-1": "Bash"},
     )
 
-    assert events == [CopilotEventError(message="工具 Bash 失败: denied")]
+    assert events == [
+        CopilotEventToolUseResult(tool_name="Bash", success=False, result_summary="denied")
+    ]
 
 
 def test_translate_user_message_with_plain_text_is_ignored() -> None:
     # A plain user-text message (not a tool result) is not echoed back.
-    assert copilot._translate_sdk_message(UserMessage(content="hello"), {}) == []
+    assert copilot.SdkMessageTranslator().translate(UserMessage(content="hello")) == []
 
 
 def test_translate_result_message_is_done() -> None:
-    events = copilot._translate_sdk_message(
+    events = copilot.SdkMessageTranslator().translate(
         ResultMessage(
             subtype="success",
             duration_ms=1,
@@ -181,24 +218,152 @@ def test_translate_result_message_is_done() -> None:
             num_turns=1,
             session_id="session",
         ),
-        {},
     )
 
     assert events == [CopilotEventDone()]
 
 
-def test_tool_failure_translates_to_error_event() -> None:
-    events = copilot._translate_sdk_message(
+def test_tool_failure_translates_to_failed_tool_result() -> None:
+    translator = copilot.SdkMessageTranslator()
+    translator.tool_names["tool-1"] = "Bash"
+
+    events = translator.translate(
         AssistantMessage(
             content=[
                 ToolResultBlock(tool_use_id="tool-1", content="permission denied", is_error=True)
             ],
             model="claude",
         ),
-        {"tool-1": "Bash"},
     )
 
-    assert events == [CopilotEventError(message="工具 Bash 失败: permission denied")]
+    assert events == [
+        CopilotEventToolUseResult(
+            tool_name="Bash", success=False, result_summary="permission denied"
+        )
+    ]
+
+
+def test_unlisted_tool_use_is_transcribed_faithfully() -> None:
+    # F8: the SDK actually EXECUTES read-only tools outside the pre-allowed list
+    # (Glob/Grep, live evidence 2026-07-02). The translator reports what
+    # happened — policy is enforced at the SDK layer (allowed_tools /
+    # can_use_tool), not by the transcript. The old "V1 不支持工具 X" error was
+    # a lie that also broke the tool-name mapping for the result event AND
+    # split the frontend message (error settles the state machine).
+    translator = copilot.SdkMessageTranslator()
+
+    start_events = translator.translate(
+        AssistantMessage(
+            content=[ToolUseBlock(id="tool-9", name="Glob", input={"pattern": "**/*.md"})],
+            model="claude",
+        ),
+    )
+    result_events = translator.translate(
+        UserMessage(content=[ToolResultBlock(tool_use_id="tool-9", content="a.md")]),
+    )
+
+    assert start_events == [
+        CopilotEventToolUseStart(tool_name="Glob", tool_input={"pattern": "**/*.md"})
+    ]
+    assert result_events == [
+        CopilotEventToolUseResult(tool_name="Glob", success=True, result_summary="a.md")
+    ]
+
+
+def test_stream_text_delta_is_incremental_text() -> None:
+    # F8-1: partial text deltas stream through as incremental text events.
+    translator = copilot.SdkMessageTranslator()
+
+    assert translator.translate(_text_delta("Hel")) == [CopilotEventText(content="Hel")]
+    assert translator.translate(_text_delta("lo")) == [CopilotEventText(content="lo")]
+
+
+def test_stream_thinking_delta_is_incremental_thinking() -> None:
+    # F8-1: reasoning content streams live, not as a whole block at the end.
+    translator = copilot.SdkMessageTranslator()
+
+    assert translator.translate(_thinking_delta("hmm")) == [CopilotEventThinking(content="hmm")]
+
+
+def test_stream_lifecycle_and_non_text_deltas_are_silent() -> None:
+    # F8-1: message lifecycle, signature and tool-input deltas produce no UI events.
+    translator = copilot.SdkMessageTranslator()
+    silent_events = [
+        {"type": "message_start", "message": {}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "signature_delta", "signature": "sig"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '{"file'},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_stop"},
+    ]
+
+    for raw in silent_events:
+        assert translator.translate(_stream_event(raw)) == []
+
+
+def test_stream_subagent_deltas_are_skipped() -> None:
+    # F8-1: deltas belonging to a subagent (parent_tool_use_id) stay out of the
+    # main transcript.
+    translator = copilot.SdkMessageTranslator()
+    event = _stream_event(
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "x"}},
+        parent_tool_use_id="tool-99",
+    )
+
+    assert translator.translate(event) == []
+
+
+def test_complete_message_suppresses_streamed_text_and_thinking() -> None:
+    # F8-2: after partial deltas streamed, the complete AssistantMessage must not
+    # re-emit the same text/thinking — but tool_use blocks still come from it.
+    translator = copilot.SdkMessageTranslator()
+    translator.translate(_thinking_delta("reasoning"))
+    translator.translate(_text_delta("Hel"))
+    translator.translate(_text_delta("lo"))
+
+    events = translator.translate(
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="reasoning", signature="sig"),
+                TextBlock(text="Hello"),
+                ToolUseBlock(id="tool-1", name="Read", input={"file_path": "SKILL.md"}),
+            ],
+            model="claude",
+        ),
+    )
+
+    assert events == [
+        CopilotEventToolUseStart(tool_name="Read", tool_input={"file_path": "SKILL.md"})
+    ]
+
+
+def test_suppression_resets_after_each_complete_message() -> None:
+    # F8-2/F8-3: suppression is per assistant message — a later message that had
+    # no partial deltas (no-stream provider) still emits its whole blocks.
+    translator = copilot.SdkMessageTranslator()
+    translator.translate(_text_delta("first"))
+    translator.translate(AssistantMessage(content=[TextBlock(text="first")], model="claude"))
+
+    events = translator.translate(
+        AssistantMessage(content=[TextBlock(text="second")], model="claude"),
+    )
+
+    assert events == [CopilotEventText(content="second")]
+
+
+def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
+    # F8-1: without include_partial_messages the SDK only yields whole messages.
+    options = copilot.build_options(None, "key", tmp_path)
+
+    assert options.include_partial_messages is True
 
 
 def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:

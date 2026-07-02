@@ -37,6 +37,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
+    StreamEvent,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -62,7 +63,6 @@ from app.models.copilot import (
     CopilotEventThinking,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
-    CopilotToolName,
 )
 
 SessionKey = tuple[str, str, str]
@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
 _ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash"]
-_ALLOWED_TOOL_SET = set(_ALLOWED_TOOLS)
 _FILE_CONTENT_KEYS = {
     "content",
     "file_content",
@@ -217,7 +216,7 @@ def _cleanup_pending_bash_approvals(skill_id: str | None = None) -> int:
 
 async def _drain_sdk_response(
     client: ClaudeSDKClient,
-    tool_names: dict[str, str],
+    translator: SdkMessageTranslator,
     queue: asyncio.Queue[CopilotEvent | object],
 ) -> None:
     """Translate the SDK response stream onto the query queue, then close it.
@@ -229,7 +228,7 @@ async def _drain_sdk_response(
 
     try:
         async for sdk_message in client.receive_response():
-            for event in _translate_sdk_message(sdk_message, tool_names):
+            for event in translator.translate(sdk_message):
                 await queue.put(event)
     finally:
         await queue.put(_STREAM_SENTINEL)
@@ -529,11 +528,17 @@ def build_options(
         allowed_tools=allowed_tools,
         env=env,
         can_use_tool=can_use_tool,
-        # F1: enable extended thinking so the SDK emits ThinkingBlocks. Adaptive
-        # lets the model size its own reasoning per task; display is left at the
-        # default (full) — never "summarized"/"omitted" — so the whole reasoning
-        # trace streams to the UI (collapsible, not summarized away).
-        thinking={"type": "adaptive"},
+        # F1/F8: enable extended thinking so the SDK emits ThinkingBlocks.
+        # Adaptive lets the model size its own reasoning per task. display MUST
+        # be "summarized": the CLI only offers summarized|omitted (there is no
+        # "full"), and leaving it unset strips the content — ThinkingBlocks
+        # arrive with thinking="" and nothing ever reaches the UI (R5 root
+        # cause, probe-verified 2026-07-02). With "summarized" the reasoning
+        # also streams as thinking_delta stream events.
+        thinking={"type": "adaptive", "display": "summarized"},
+        # F8: without this the SDK only yields whole AssistantMessages, so the
+        # panel gets the answer in one burst instead of token-level deltas.
+        include_partial_messages=True,
         add_dirs=add_dirs,
     )
 
@@ -894,7 +899,7 @@ async def stream_query(
             )
             continue
 
-        tool_names: dict[str, str] = {}
+        translator = SdkMessageTranslator()
         try:
             client = await get_or_create_session(
                 skill_id=skill_id,
@@ -925,7 +930,7 @@ async def stream_query(
                     )
                 )
                 consumer = asyncio.create_task(
-                    _drain_sdk_response(client, tool_names, queue)
+                    _drain_sdk_response(client, translator, queue)
                 )
                 yielded_done = False
                 while True:
@@ -1155,79 +1160,116 @@ def _prompt_with_system_context(
     return f"{prompt}\n\n## 用户消息\n{user_message}"
 
 
-def _translate_sdk_message(message: object, tool_names: dict[str, str]) -> list[CopilotEvent]:
-    if isinstance(message, AssistantMessage):
-        return _translate_assistant_message(message, tool_names)
-    if isinstance(message, UserMessage):
-        # The SDK delivers tool RESULTS in UserMessage blocks, not AssistantMessage
-        # — without this they'd be silently dropped (copilot would show "Reading…"
-        # but never the result), violating F1 "不省略".
-        return _translate_user_message(message, tool_names)
-    if isinstance(message, ResultMessage):
-        if message.is_error:
-            details = "; ".join(message.errors or [])
-            suffix = f": {details}" if details else ""
-            return [CopilotEventError(message=f"SDK 返回错误{suffix}")]
-        return [CopilotEventDone()]
-    return []
+class SdkMessageTranslator:
+    """Stateful SDK→CopilotEvent translator for one query stream (F8).
 
+    With ``include_partial_messages`` on, text/thinking arrive twice: first as
+    ``StreamEvent`` token deltas, then again inside the complete
+    ``AssistantMessage``. The translator streams the deltas immediately and
+    remembers it did, so the complete message only contributes what the deltas
+    cannot carry (tool_use blocks — their input exists only whole). A message
+    that produced no deltas (no-stream provider) still emits its whole blocks,
+    so heterogeneous anthropic-compat endpoints never lose content.
+    """
 
-def _translate_user_message(
-    message: UserMessage, tool_names: dict[str, str]
-) -> list[CopilotEvent]:
-    content = message.content
-    if not isinstance(content, list):
+    def __init__(self) -> None:
+        self.tool_names: dict[str, str] = {}
+        self._streamed_text = False
+        self._streamed_thinking = False
+
+    def translate(self, message: object) -> list[CopilotEvent]:
+        if isinstance(message, StreamEvent):
+            return self._translate_stream_event(message)
+        if isinstance(message, AssistantMessage):
+            return self._translate_assistant_message(message)
+        if isinstance(message, UserMessage):
+            # The SDK delivers tool RESULTS in UserMessage blocks, not
+            # AssistantMessage — without this they'd be silently dropped
+            # (copilot would show "Reading…" but never the result),
+            # violating F1 "不省略".
+            return self._translate_user_message(message)
+        if isinstance(message, ResultMessage):
+            if message.is_error:
+                details = "; ".join(message.errors or [])
+                suffix = f": {details}" if details else ""
+                return [CopilotEventError(message=f"SDK 返回错误{suffix}")]
+            return [CopilotEventDone()]
         return []
-    events: list[CopilotEvent] = []
-    for block in content:
-        if isinstance(block, ToolResultBlock):
-            events.extend(_tool_result_events(block, tool_names))
-    return events
 
+    def _translate_stream_event(self, message: StreamEvent) -> list[CopilotEvent]:
+        if message.parent_tool_use_id is not None:
+            # Subagent stream — not part of the main transcript.
+            return []
+        raw = message.event
+        if raw.get("type") != "content_block_delta":
+            return []
+        delta = raw.get("delta")
+        if not isinstance(delta, dict):
+            return []
+        if delta.get("type") == "text_delta":
+            text = delta.get("text")
+            if isinstance(text, str) and text:
+                self._streamed_text = True
+                return [CopilotEventText(content=text)]
+        elif delta.get("type") == "thinking_delta":
+            thinking = delta.get("thinking")
+            if isinstance(thinking, str) and thinking:
+                self._streamed_thinking = True
+                return [CopilotEventThinking(content=thinking)]
+        # signature_delta / input_json_delta carry no UI-visible content.
+        return []
 
-def _tool_result_events(
-    block: ToolResultBlock, tool_names: dict[str, str]
-) -> list[CopilotEvent]:
-    tool_name = tool_names.get(block.tool_use_id, block.tool_use_id)
-    result_summary = _tool_result_summary(block.content)
-    if block.is_error:
-        return [CopilotEventError(message=f"工具 {tool_name} 失败: {result_summary}")]
-    return [
-        CopilotEventToolUseResult(
-            tool_name=tool_name,
-            success=True,
-            result_summary=result_summary,
-        )
-    ]
+    def _translate_user_message(self, message: UserMessage) -> list[CopilotEvent]:
+        content = message.content
+        if not isinstance(content, list):
+            return []
+        events: list[CopilotEvent] = []
+        for block in content:
+            if isinstance(block, ToolResultBlock):
+                events.extend(self._tool_result_events(block))
+        return events
 
-
-def _translate_assistant_message(
-    message: AssistantMessage,
-    tool_names: dict[str, str],
-) -> list[CopilotEvent]:
-    events: list[CopilotEvent] = []
-    for block in message.content:
-        if isinstance(block, ThinkingBlock):
-            # F1: stream the whole reasoning trace; the UI collapses but never
-            # drops it. Skip empty deltas to avoid blank Thought blocks.
-            if block.thinking:
-                events.append(CopilotEventThinking(content=block.thinking))
-        elif isinstance(block, TextBlock):
-            events.append(CopilotEventText(content=block.text))
-        elif isinstance(block, ToolUseBlock):
-            if block.name not in _ALLOWED_TOOL_SET:
-                events.append(CopilotEventError(message=f"V1 不支持工具 {block.name}"))
-                continue
-            tool_names[block.id] = block.name
-            events.append(
-                CopilotEventToolUseStart(
-                    tool_name=cast(CopilotToolName, block.name),
-                    tool_input=block.input,
-                )
+    def _tool_result_events(self, block: ToolResultBlock) -> list[CopilotEvent]:
+        # F8: a failed tool is a recoverable fact (the model usually works
+        # around it) — transcribe it as success=False, never as
+        # CopilotEventError, which is reserved for fatal stream-ending errors
+        # (the frontend settles the message state machine on it).
+        tool_name = self.tool_names.get(block.tool_use_id, block.tool_use_id)
+        return [
+            CopilotEventToolUseResult(
+                tool_name=tool_name,
+                success=not block.is_error,
+                result_summary=_tool_result_summary(block.content),
             )
-        elif isinstance(block, ToolResultBlock):
-            events.extend(_tool_result_events(block, tool_names))
-    return events
+        ]
+
+    def _translate_assistant_message(self, message: AssistantMessage) -> list[CopilotEvent]:
+        streamed_text, self._streamed_text = self._streamed_text, False
+        streamed_thinking, self._streamed_thinking = self._streamed_thinking, False
+        events: list[CopilotEvent] = []
+        for block in message.content:
+            if isinstance(block, ThinkingBlock):
+                # F1: stream the whole reasoning trace; the UI collapses but
+                # never drops it. F8: skip when the deltas already streamed it.
+                if block.thinking and not streamed_thinking:
+                    events.append(CopilotEventThinking(content=block.thinking))
+            elif isinstance(block, TextBlock):
+                if not streamed_text:
+                    events.append(CopilotEventText(content=block.text))
+            elif isinstance(block, ToolUseBlock):
+                # F8: transcribe every tool call by its real name — the SDK
+                # executes read-only tools beyond the pre-allowed list
+                # (Glob/Grep), and policy lives in the SDK options, not here.
+                self.tool_names[block.id] = block.name
+                events.append(
+                    CopilotEventToolUseStart(
+                        tool_name=block.name,
+                        tool_input=block.input,
+                    )
+                )
+            elif isinstance(block, ToolResultBlock):
+                events.extend(self._tool_result_events(block))
+        return events
 
 
 def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
@@ -1502,13 +1544,13 @@ async def run_route_sdk_test(
 async def _drive_sdk_test(
     client: ClaudeSDKClient, route_id: str, token: str
 ) -> RouteSdkTestResult:
-    tool_names: dict[str, str] = {}
+    translator = SdkMessageTranslator()
     answer: list[str] = []
     errors: list[str] = []
     await _ensure_client_connected(client)
     await client.query(_SDK_TEST_PROMPT)
     async for message in client.receive_response():
-        for event in _translate_sdk_message(message, tool_names):
+        for event in translator.translate(message):
             if isinstance(event, CopilotEventError):
                 # Don't short-circuit: a mid-run tool error the model recovers
                 # from shouldn't fail the test — the echoed token is the verdict.

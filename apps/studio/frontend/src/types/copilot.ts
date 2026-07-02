@@ -1,6 +1,5 @@
 import type { JsonObject, JsonValue } from '../api/types'
 
-export type CopilotToolName = 'Read' | 'Write' | 'Edit' | 'Bash'
 export type CopilotEventStatus = 'pending' | 'running' | 'success' | 'error'
 export type CopilotView = 'WelcomeScreen' | 'Edit' | 'Compile' | 'Validate' | 'Predict' | 'Run' | 'Publish'
 
@@ -18,7 +17,9 @@ export interface CopilotTextDeltaEvent extends CopilotEventBase {
 
 export interface CopilotToolUseStartEvent extends CopilotEventBase {
   type: 'tool_use_start'
-  tool_name: CopilotToolName
+  /** Real tool name as the SDK reports it — an open string, not just the
+   * pre-allowed subset (the model runs read-only tools like Glob/Grep too). */
+  tool_name: string
   tool_input: JsonObject
 }
 
@@ -141,7 +142,7 @@ export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {
       status: 'running',
       receivedAt,
       raw,
-      tool_name: record.tool_name as CopilotToolName,
+      tool_name: record.tool_name,
       tool_input: isJsonObject(record.tool_input) ? record.tool_input : {},
     }
   }

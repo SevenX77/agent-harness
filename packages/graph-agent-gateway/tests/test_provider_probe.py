@@ -91,6 +91,101 @@ async def test_gateway_route_test_is_scoped_to_provider_route() -> None:
     ]
 
 
+@pytest.mark.anyio
+async def test_gateway_route_probe_billing_400_is_quota_exceeded_not_invalid_model() -> None:
+    """An exhausted account balance must classify as structural quota_exceeded.
+
+    Anthropic reports "credit balance is too low" as HTTP 400 invalid_request_error,
+    which the plain status-code mapping would misread as a model-level
+    invalid_model. Billing failures hit every model on the endpoint, so they must
+    surface as quota_exceeded (endpoint-structural), not invalid_model.
+    """
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="anthropic-official",
+        protocol="anthropic_compatible",
+        base_url="https://api.anthropic.com",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+    route = ProviderRoute(
+        route_id="anthropic-official:claude-opus-4.8",
+        endpoint_id="anthropic-official",
+        route_slug="claude-opus-4.8",
+        provider_model_id="claude-opus-4.8",
+        canonical_id="claude-opus-4.8",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": (
+                        "Your credit balance is too low to access the Anthropic API. "
+                        "Please go to Plans & Billing to upgrade or purchase credits."
+                    ),
+                },
+            },
+            request=request,
+        )
+
+    result = await test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "quota_exceeded"
+    assert result.message is not None
+    assert "credit balance" in result.message
+
+
+@pytest.mark.anyio
+async def test_gateway_route_probe_capability_400_stays_invalid_model() -> None:
+    """A genuine model-level 400 (bad model id / unsupported param) stays invalid_model."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="anthropic-official",
+        protocol="anthropic_compatible",
+        base_url="https://api.anthropic.com",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+    route = ProviderRoute(
+        route_id="anthropic-official:claude-fable-5",
+        endpoint_id="anthropic-official",
+        route_slug="claude-fable-5",
+        provider_model_id="claude-fable-5",
+        canonical_id="claude-fable-5",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={
+                "type": "error",
+                "error": {
+                    "type": "not_found_error",
+                    "message": "Claude Fable 5 is not available. Please use Opus 4.8.",
+                },
+            },
+            request=request,
+        )
+
+    result = await test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "invalid_model"
+
+
 def test_gateway_official_call_method_timeout_allows_slow_openai_pro_responses() -> None:
     timeout = provider_probe._official_call_method_timeout(
         "openai_responses",

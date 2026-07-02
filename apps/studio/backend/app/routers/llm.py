@@ -796,43 +796,55 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 "unchanged_model_ids": sorted(observed_set & previous_model_ids),
             },
         )
-        if latest_endpoint.provider_kind == "official":
-            # Official endpoints are operator-controlled: a reachable get-models
-            # call is enough to verify (apikeys#24); no per-model probe required.
-            if discovered_model_ids:
-                status = "verified"
+        # Every endpoint kind must prove it can actually GENERATE before reaching
+        # verified (apikeys#24/#25, revised 2026-07-01): get-models only proves
+        # key+URL reachability, and a reachable endpoint can still reject every
+        # generation call (e.g. an exhausted credit balance). The probe leads with
+        # this endpoint's already-verified models so the Test confirms the
+        # *endpoint* in as few attempts as possible; third-party endpoints
+        # additionally auto-detect their transport protocol.
+        verified_model_ids = frozenset(
+            route.provider_model_id
+            for route in latest_credentials.provider_routes.values()
+            if route.endpoint_id == endpoint_id and route.status == "verified"
+        )
+        verification = await _verify_endpoint_by_generation_probe(
+            latest_endpoint,
+            discovered_model_ids,
+            raw_capabilities_by_model,
+            detect_protocol=latest_endpoint.provider_kind != "official",
+        )
+        probe_attempts_log = verification.probe_attempts
+        # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
+        # endpoint's untested physical status, never "failed".
+        if verification.status == "no_model":
+            status = "unverified_manual"
+            # W2-D.4: structured reason so the UI can warn "no model to test,
+            # add a model id and run a single-model test" without parsing text.
+            last_error_code = "no_model_available"
         else:
-            # Third-party endpoints must prove the protocol matches AND that the
-            # endpoint can actually generate before reaching verified (apikeys#25).
-            # The probe leads with this endpoint's already-verified models so the
-            # Test confirms the *endpoint* in as few attempts as possible.
-            verified_model_ids = frozenset(
-                route.provider_model_id
-                for route in latest_credentials.provider_routes.values()
-                if route.endpoint_id == endpoint_id and route.status == "verified"
-            )
-            verification = await _verify_third_party_endpoint_by_probe(
-                latest_endpoint,
-                discovered_model_ids,
-                raw_capabilities_by_model,
-            )
-            probe_attempts_log = verification.probe_attempts
-            # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
-            # endpoint's untested physical status, never "failed".
-            if verification.status == "no_model":
-                status = "unverified_manual"
-                # W2-D.4: structured reason so the UI can warn "no model to test,
-                # add a model id and run a single-model test" without parsing text.
-                last_error_code = "no_model_available"
+            status = verification.status
+        message = verification.message
+        if verification.status == "verified" and verification.verified_model_id is not None:
+            if verification.detected_protocol != latest_endpoint.protocol:
+                endpoint_update["protocol"] = verification.detected_protocol
+                latest_endpoint = latest_endpoint.model_copy(
+                    update={"protocol": verification.detected_protocol}
+                )
+            if latest_endpoint.provider_kind == "official":
+                # Official route truth (status / capabilities / profiles) is owned
+                # by the official per-model profile probes — the endpoint test only
+                # records its generation evidence on the already-listed route.
+                _merge_probe_evidence_into_route(
+                    latest_credentials,
+                    latest_endpoint,
+                    ModelProbeResult(
+                        model_id=verification.verified_model_id,
+                        status="ok",
+                    ),
+                    route_id=route_ids_by_model.get(verification.verified_model_id),
+                )
             else:
-                status = verification.status
-            message = verification.message
-            if verification.status == "verified" and verification.verified_model_id is not None:
-                if verification.detected_protocol != latest_endpoint.protocol:
-                    endpoint_update["protocol"] = verification.detected_protocol
-                    latest_endpoint = latest_endpoint.model_copy(
-                        update={"protocol": verification.detected_protocol}
-                    )
                 latest_credentials, verified_route_ids = _upsert_discovered_routes(
                     latest_credentials,
                     endpoint=latest_endpoint,
@@ -849,31 +861,41 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                     ),
                     route_id=verified_route_ids.get(verification.verified_model_id),
                 )
-            elif (
-                verification.status != "verified"
-                and verified_model_ids
-                and not verification.failure_is_structural
-            ):
-                # An endpoint Test only proves the *endpoint* connects. get-models
-                # just proved the key+URL are live and this endpoint already has a
-                # verified route, so a round where every catalog model probe fails
-                # for model-level reasons (flaky / phantom upstream models the
-                # provider lists but cannot serve) must NOT regress the endpoint to
-                # failed — keep it verified by reusing the previously verified
-                # model. Structural failures (invalid_key / quota) are NOT reused:
-                # those mean the endpoint itself is broken and must fail.
-                retained_model_id = sorted(verified_model_ids)[0]
-                status = "verified"
-                message = (
-                    "Endpoint reachable; reusing previously verified model "
-                    f"{retained_model_id}. No new model verified this run."
+        elif (
+            verification.status != "verified"
+            and verified_model_ids
+            and not verification.failure_is_structural
+        ):
+            # An endpoint Test only proves the *endpoint* connects. get-models
+            # just proved the key+URL are live and this endpoint already has a
+            # verified route, so a round where every catalog model probe fails
+            # for model-level reasons (flaky / phantom upstream models the
+            # provider lists but cannot serve) must NOT regress the endpoint to
+            # failed — keep it verified by reusing the previously verified
+            # model. Structural failures (invalid_key / quota / billing) are NOT
+            # reused: those mean the endpoint itself is broken and must fail.
+            retained_model_id = sorted(verified_model_ids)[0]
+            status = "verified"
+            message = (
+                "Endpoint reachable; reusing previously verified model "
+                f"{retained_model_id}. No new model verified this run."
+            )
+        if verification.status != "verified" and verification.failed_probe is not None:
+            # Persist the REAL failed model's outcome as probe-failed evidence
+            # (R3.1-AC3 / codex-3): upsert its route, then merge the record.
+            # This holds even when the endpoint stays verified via reuse above —
+            # the model genuinely failed, so its route records that diagnostically.
+            failed_result = _model_probe_result_from_route_probe(verification.failed_probe)
+            if latest_endpoint.provider_kind == "official":
+                # The failed model's route already exists from the model-list
+                # upsert above; only the diagnostic evidence is merged onto it.
+                _merge_probe_evidence_into_route(
+                    latest_credentials,
+                    latest_endpoint,
+                    failed_result,
+                    route_id=route_ids_by_model.get(failed_result.model_id),
                 )
-            if verification.status != "verified" and verification.failed_probe is not None:
-                # Persist the REAL failed model's outcome as probe-failed evidence
-                # (R3.1-AC3 / codex-3): upsert its route, then merge the record.
-                # This holds even when the endpoint stays verified via reuse above —
-                # the model genuinely failed, so its route records that diagnostically.
-                failed_result = _model_probe_result_from_route_probe(verification.failed_probe)
+            else:
                 latest_credentials, failed_route_ids = _upsert_third_party_model_probe_routes(
                     latest_credentials,
                     endpoint=latest_endpoint,
@@ -1967,6 +1989,33 @@ def _persist_copilot_sdk_evidence(results: list[copilot.RouteSdkTestResult]) -> 
         logger.info("copilot SDK evidence persisted for %d route(s)", len(results))
 
 
+def _role_test_route_results(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a role/copilot test result into per-route facts for the runtime log."""
+    route_results: list[dict[str, Any]] = []
+    model_groups = result.get("model_groups")
+    if not isinstance(model_groups, list):
+        return route_results
+    for group in model_groups:
+        if not isinstance(group, dict):
+            continue
+        provider_results = group.get("provider_results")
+        if not isinstance(provider_results, list):
+            continue
+        for provider_result in provider_results:
+            if not isinstance(provider_result, dict):
+                continue
+            route_results.append(
+                {
+                    "canonical_id": group.get("canonical_id"),
+                    "route_id": provider_result.get("route_id"),
+                    "provider": provider_result.get("provider_label"),
+                    "status": provider_result.get("status"),
+                    "message": provider_result.get("message"),
+                }
+            )
+    return route_results
+
+
 def _persist_completed_role_test_result(role_name: str, result: dict[str, Any]) -> None:
     """R20: durably persist the LAST completed role/copilot test result per role.
 
@@ -1987,7 +2036,13 @@ def _persist_completed_role_test_result(role_name: str, result: dict[str, Any]) 
             source_id="llm_role_test_results",
             action="role_test_result_saved",
             message="Saved the latest role or copilot test result.",
-            changes={"role_name": role_name, "status": status},
+            # The Runtime log is the diagnostic trail: it must carry the same
+            # per-route facts as the persisted truth file, not just "failed".
+            changes={
+                "role_name": role_name,
+                "status": status,
+                "route_results": _role_test_route_results(result),
+            },
         )
     except Exception as exc:  # noqa: BLE001 — persistence is best-effort, never fail the job
         logger.warning(
@@ -4351,17 +4406,19 @@ _STRUCTURAL_PROBE_STATUSES: frozenset[str] = frozenset(
     {"invalid_key", "quota_exceeded"}
 )
 # How many candidate model ids the batch inference probe will try before giving
-# up on an otherwise-reachable third-party endpoint.
-_THIRD_PARTY_PROBE_MODEL_LIMIT = 6
+# up on an otherwise-reachable endpoint.
+_ENDPOINT_PROBE_MODEL_LIMIT = 6
 
 
 @dataclass(frozen=True)
-class ThirdPartyEndpointVerification:
-    """Outcome of the third-party protocol-detect + batch-inference verification.
+class EndpointGenerationVerification:
+    """Outcome of the endpoint batch-inference verification (both provider kinds).
 
     ``status='verified'`` is set ONLY when a real generation probe (test_provider_route)
-    returned ``ok`` — get-models reachability alone never reaches verified for
-    third-party endpoints (apikeys#25).
+    returned ``ok`` — get-models reachability alone never reaches verified
+    (apikeys#24/#25, revised 2026-07-01): a reachable endpoint can still be unable
+    to generate, e.g. an exhausted credit balance keeps the model list working
+    while every generation call fails.
     """
 
     # "no_model": get-models reached the provider (key+URL connectivity proven)
@@ -4438,11 +4495,11 @@ def _prioritize_notable_probe_models(
     ]
 
 
-def _third_party_probe_model_ids(
+def _endpoint_generation_probe_model_ids(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
 ) -> list[str]:
-    """Pick the model ids to drive the batch inference probe.
+    """Pick the model ids to drive the endpoint batch inference probe.
 
     Discovered ids (from the get-models call) drive the candidate set, falling
     back to the endpoint's own known routes. We do NOT invent candidates from the
@@ -4457,6 +4514,15 @@ def _third_party_probe_model_ids(
     if not candidates:
         # model-list truth = routes (R3.4): fall back to the endpoint's known routes.
         candidates = endpoint_listed_model_ids(credentials, endpoint.endpoint_id)
+    if endpoint.provider_kind == "official":
+        # Official model lists mix in non-language models (image / audio /
+        # embedding); a text-generation probe can only prove anything on a
+        # language model, so restrict the candidates to those.
+        candidates = [
+            model_id
+            for model_id in candidates
+            if _official_catalog_model_type(endpoint, model_id)[0] == "language_reasoning"
+        ]
     # W2-D / R-E1: NO doc-maintained "notable" fallback. If get-models returned no
     # models and the endpoint has no known routes, there is nothing real to probe —
     # return empty so the endpoint Test stays reachable-but-untested (the user adds
@@ -4470,7 +4536,7 @@ def _third_party_probe_model_ids(
         endpoint.endpoint_id,
         prioritized_candidates,
     )
-    return ordered[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
+    return ordered[:_ENDPOINT_PROBE_MODEL_LIMIT]
 
 
 async def _detect_third_party_protocol(
@@ -4557,22 +4623,26 @@ async def _detect_third_party_protocol_for_models(
     return None, last_probe
 
 
-async def _verify_third_party_endpoint_by_probe(
+async def _verify_endpoint_by_generation_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
-) -> ThirdPartyEndpointVerification:
-    """Run protocol auto-detect + batch inference probing for a third-party endpoint.
+    *,
+    detect_protocol: bool,
+) -> EndpointGenerationVerification:
+    """Run batch inference probing to verify an endpoint can actually generate.
 
-    apikeys#24/#25: get-models only proves key+URL reachability for third-party
-    endpoints, so it never promotes to verified. Here we (1) auto-detect the
-    transport protocol by probing a real generation call per candidate protocol,
-    then (2) batch-probe candidate model ids under the detected protocol, stopping
-    on the first ``ok`` and short-circuiting structural errors. The endpoint is
-    promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
+    apikeys#24/#25 (revised 2026-07-01): get-models only proves key+URL
+    reachability — for official AND third-party endpoints alike. A reachable
+    endpoint can still be unable to generate (an exhausted credit balance keeps
+    the model list working while every generation call fails), so the endpoint
+    is promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
+    Third-party endpoints additionally auto-detect the transport protocol
+    (``detect_protocol=True``); official endpoints keep their fixed protocol.
+    The batch stops on the first ``ok`` and short-circuits structural errors.
     """
     probe_attempts: list[dict[str, Any]] = []
-    probe_model_ids = _third_party_probe_model_ids(
+    probe_model_ids = _endpoint_generation_probe_model_ids(
         endpoint,
         discovered_model_ids,
     )
@@ -4580,7 +4650,7 @@ async def _verify_third_party_endpoint_by_probe(
         # W2-D / R-E1: get-models reached the provider (connectivity proven) but no
         # real model is available to verify generation. Reachable-but-untested, NOT
         # failed — the user adds a model id and runs a single-model test.
-        return ThirdPartyEndpointVerification(
+        return EndpointGenerationVerification(
             status="no_model",
             detected_protocol=endpoint.protocol,
             verified_model_id=None,
@@ -4591,46 +4661,49 @@ async def _verify_third_party_endpoint_by_probe(
             probe_attempts=probe_attempts,
         )
 
-    detected_protocol, detection_probe = await _detect_third_party_protocol_for_models(
-        endpoint, probe_model_ids
-    )
-    if detection_probe is not None:
-        # W2-E.1b: record the protocol-detection probe as the first attempt.
-        probe_attempts.append(
-            {
-                "protocol": detected_protocol or endpoint.protocol,
-                "model": detection_probe.model_id,
-                "status": detection_probe.status,
-            }
+    first_probe: RouteProbeResult | None = None
+    detected_protocol = endpoint.protocol
+    if detect_protocol:
+        detected, detection_probe = await _detect_third_party_protocol_for_models(
+            endpoint, probe_model_ids
         )
-    if detected_protocol is None:
-        structural = (
-            detection_probe is not None
-            and detection_probe.status in _STRUCTURAL_PROBE_STATUSES
-        )
-        message = (
-            _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
-            if structural and detection_probe is not None
-            else _protocol_detection_failure_message(probe_model_ids, detection_probe)
-        )
-        return ThirdPartyEndpointVerification(
-            status="failed",
-            detected_protocol=endpoint.protocol,
-            verified_model_id=None,
-            message=message,
-            failure_is_structural=structural,
-            failed_probe=detection_probe,
-            probe_attempts=probe_attempts,
-        )
+        if detection_probe is not None:
+            # W2-E.1b: record the protocol-detection probe as the first attempt.
+            probe_attempts.append(
+                {
+                    "protocol": detected or endpoint.protocol,
+                    "model": detection_probe.model_id,
+                    "status": detection_probe.status,
+                }
+            )
+        if detected is None:
+            structural = (
+                detection_probe is not None
+                and detection_probe.status in _STRUCTURAL_PROBE_STATUSES
+            )
+            message = (
+                _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
+                if structural and detection_probe is not None
+                else _protocol_detection_failure_message(probe_model_ids, detection_probe)
+            )
+            return EndpointGenerationVerification(
+                status="failed",
+                detected_protocol=endpoint.protocol,
+                verified_model_id=None,
+                message=message,
+                failure_is_structural=structural,
+                failed_probe=detection_probe,
+                probe_attempts=probe_attempts,
+            )
+        assert detection_probe is not None  # detected protocol => probe present
+        detected_protocol = detected
+        first_probe = detection_probe
 
-    assert detection_probe is not None  # detected_protocol set => probe present
-    first_probe = detection_probe
-    first_probe_model_id = first_probe.model_id
     detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
 
-    last_failure: RouteProbeResult = first_probe
+    last_failure: RouteProbeResult | None = first_probe
     for model_id in probe_model_ids:
-        if model_id == first_probe_model_id:
+        if first_probe is not None and model_id == first_probe.model_id:
             # This model was already probed (and recorded) during protocol detection.
             probe = first_probe
         else:
@@ -4643,12 +4716,12 @@ async def _verify_third_party_endpoint_by_probe(
             )
         if probe.status == "ok":
             logger.info(
-                "third-party batch probe verified endpoint=%s protocol=%s model=%s",
+                "endpoint batch probe verified endpoint=%s protocol=%s model=%s",
                 endpoint.endpoint_id,
                 detected_protocol,
                 model_id,
             )
-            return ThirdPartyEndpointVerification(
+            return EndpointGenerationVerification(
                 status="verified",
                 detected_protocol=detected_protocol,
                 verified_model_id=model_id,
@@ -4664,13 +4737,14 @@ async def _verify_third_party_endpoint_by_probe(
         last_failure = probe
         if probe.status in _STRUCTURAL_PROBE_STATUSES:
             logger.warning(
-                "third-party batch probe short-circuit endpoint=%s status=%s",
+                "endpoint batch probe short-circuit endpoint=%s status=%s",
                 endpoint.endpoint_id,
                 probe.status,
             )
             break
 
-    return ThirdPartyEndpointVerification(
+    assert last_failure is not None  # probe_model_ids is non-empty => loop probed
+    return EndpointGenerationVerification(
         status="failed",
         detected_protocol=detected_protocol,
         verified_model_id=None,
@@ -4706,7 +4780,7 @@ async def _probe_third_party_models_for_endpoint(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
 ) -> list[ModelProbeResult]:
-    probe_model_ids = _third_party_probe_model_ids(endpoint, discovered_model_ids)
+    probe_model_ids = _endpoint_generation_probe_model_ids(endpoint, discovered_model_ids)
     results: list[ModelProbeResult] = []
     for model_id in probe_model_ids:
         result = _model_probe_result_from_route_probe(

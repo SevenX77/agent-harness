@@ -220,6 +220,28 @@
       "be_status": "已实现",
       "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。language 已是 app_settings 的持久字段、端到端打通:后端 AppSettings 已加显式 language 字段(models/settings.py:31-34,默认 'en',解了 extra='forbid' 的拒收风险);前端 API 类型补 AppLanguage/language(types.ts:96/102);useAppSettings hook 的 setLanguage 走 updateSettings→queueSave→performSave PUT /api/settings 持久化(useAppSettings.ts:167-169),hydrate 时 syncI18nLanguage 按存值初始化 i18n(:89);GeneralTab 下拉 onChange 经 applyLanguageChange 同时切 i18n + 持久化(GeneralTab.tsx:127-148 + language-switch.ts:32-33)。测试绿:前端 12/12、后端 16/16(含 PUT→GET round-trip、缺省回落、拒非法语言)。",
       "impl_ref": true
+    },
+    {
+      "n": 15.2,
+      "cap": "runtime-truth-sources",
+      "track": "共",
+      "module": "运行时诊断",
+      "func": "设计(补写 2026-07-01,设计源 00_settings-ux-spec.md §7.1):展开 Runtime truth source files,每个运行时真相文件一张卡(路径 + Open + 存在性/大小/更新时间),每卡带 Runtime log 折叠列表——审计明细账,展开 Details 看到的事实要与真相 json 文件一致。",
+      "action": "用户展开 General 底部 Runtime truth source files 折叠区,展开某卡的 Runtime log,再展开某条 entry 的 Details。",
+      "fe_design": "GET /api/settings/truth-sources 返回每个真相文件(app_settings / skill_index / llm_credentials / llm_roles / llm_role_test_results / llm_health / llm_canonical_rules / runtime_activity_log …)的路径/元信息 + 按 source_id 过滤的 runtime activity entries。每条 entry = recorded_at / action / message / changes;RuntimeLogItem 通用渲染 changes 全部字段(数组逐行、对象 JSON 行、from→to 对渲染箭头),不设字段白名单。写入侧设计原则:changes 必须承载与真相 json 一致的事实明细——endpoint_test 带 status/message/discovered_model_ids/probe_attempts;role_test_result_saved 带逐路由 route_results(canonical_id/route_id/provider/status/message 失败原文);不许只记 'analyst / failed' 概要。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/settings/truth-sources",
+          "purpose": "返回真相文件卡列表 + 各自按 source_id 过滤的 runtime activity entries(读 logs/studio_runtime_activity.jsonl)。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": null
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。前端 GeneralTab 的 TruthSourceLogs/RuntimeLogItem 已通用渲染 changes 全字段(GeneralTab.tsx);写入侧 2026-07-01 补齐:role_test_result_saved 的 changes 增加 route_results 逐路由明细(_role_test_route_results,routers/llm.py),endpoint_test 原已带 message/discovered_model_ids/probe_attempts。真机验证:analyst 测试后 Runtime log 展开 Details(3) 显示与 llm_role_test_results.json 一致的逐路由状态与失败原文。",
+      "impl_ref": true
     }
   ],
   "fe_defs": [

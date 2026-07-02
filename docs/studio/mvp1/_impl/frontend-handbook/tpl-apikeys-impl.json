@@ -82,11 +82,11 @@
    "n": 24,
    "cap": "official-test-job",
    "design_ref": "atom-24",
-   "current": "现状:已实现且符合。官方 ProviderCard 只有 API Key 行右侧 Test,不再渲染手动 Endpoint test;测试结果除 route/model 列表外也投影到 Available Endpoints。官方 Test 拉 provider model list / route candidates 并写回 credentials;远端 community catalog 的读取是 cache-only,只有 Test 保存 endpoint/route 结果时才把匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs。",
-   "gap": "符合设计,无需改。页面加载或 sync-verified 只更新 disposable verified cache 与顶部 advisory 区,不直接 applied to your keys;按 Test 后,匹配 evidence_refs 已写入 credentials 的 route 才能投影 historical_ready 蓝态。",
+   "current": "现状:已实现且符合(2026-07-01 设计修订后)。官方 ProviderCard 只有 API Key 行右侧 Test,不再渲染手动 Endpoint test;测试结果除 route/model 列表外也投影到 Available Endpoints。官方 Test 拉 provider model list / route candidates 写回 credentials 后,再打一次最小生成探测(_verify_endpoint_by_generation_probe,detect_protocol=False,候选过滤语言模型、按 probe 优先级取首个):生成 ok 才 verified,消息如 'Generation verified via anthropic_compatible. Model: claude-sonnet-5.';结构性失败(invalid_key/欠费类 quota_exceeded)→ endpoint failed 常驻显示 provider 原文;probe_attempts 记入 endpoint_test runtime-activity。远端 community catalog 的读取是 cache-only,只有 Test 保存 endpoint/route 结果时才把匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs。",
+   "gap": "符合设计,无需改。原「get-models 连通即 verified」路径已删(不向后兼容);欠费实证(get-models 200 但所有生成 400)是本次修订动因。页面加载或 sync-verified 只更新 disposable verified cache 与顶部 advisory 区,不直接 applied to your keys;按 Test 后,匹配 evidence_refs 已写入 credentials 的 route 才能投影 historical_ready 蓝态。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。POST /endpoints/{id}/test 是统一入口;官方 Test 写 endpoint/route 结果时会应用 cached community catalog evidence 到 credentials,并保持 sync-verified cache-only。GET /registry 再从 credentials 投影 endpoint/route/ui_state。",
-   "fe_resync": "apikeys 后端+前端齐(2026-06-20)",
+   "be_dep": "已就绪可接。POST /endpoints/{id}/test 是统一入口(官方=get-models+最小生成探测,第三方=协议轮换+批量探测);官方 Test 写 endpoint/route 结果时会应用 cached community catalog evidence 到 credentials,并保持 sync-verified cache-only。GET /registry 再从 credentials 投影 endpoint/route/ui_state。",
+   "fe_resync": "官方生成探测落地(2026-07-01)",
    "be_status": "已实现"
   },
   {
@@ -337,15 +337,23 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "契约测:断言官方卡与第三方卡的 Test 都打 POST /endpoints/{id}/test(第三方不再走『get-models 可达=ok』弱判定)。",
+    "契约测:断言官方卡与第三方卡的 Test 都打 POST /endpoints/{id}/test(官三都不再走『get-models 可达=ok』弱判定)。",
     "mock 后端回 verified → 断言卡升 verified、Routes/Models 回填。",
+    "后端契约测:官方 Test 恰好打一次生成探测且只挑语言模型候选(test_official_endpoint_test_verifies_via_one_generation_probe);欠费类结构失败 → endpoint failed、不复用旧 verified、批量短路(test_official_endpoint_test_billing_failure_fails_endpoint);gateway 把含 credit/billing 标记的 400 归类 quota_exceeded(test_provider_probe.py)。",
     "后端契约测:第三方走 test-jobs 不再被 400(llm.py 门禁已解)。"
    ],
    "layer2": [
     "真跑(用真 key,关键):对一个真第三方 endpoint 点 Test,看状态流转。",
+    "真跑:对 Anthropic Official 点 Test,确认 last_test_message 为 'Generation verified via anthropic_compatible. Model: …'(生成真跑过),endpoint_test runtime-activity 带 probe_attempts。",
     "看第三方卡按钮文案。"
    ],
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
+   "screenshots": [
+    {
+     "file": "n0-apikeys-24-official-generation-verified.png",
+     "caption": "真机(worktree 私有 sidecar,真 Anthropic key):官方卡 Test 后 hover endpoint 标签——Message 显示 'Generation verified via anthropic_compatible. Model: claude-sonnet-5.',官方端点 verified 现在以一次真实生成探测为准,不再 get-models 连通即绿"
+    }
+   ],
+   "fe_resync": "官方生成探测落地、官三判定完全对称(2026-07-01)"
   },
   {
    "covers": "#26 available-endpoints-summary",

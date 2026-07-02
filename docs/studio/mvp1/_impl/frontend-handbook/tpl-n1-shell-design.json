@@ -361,6 +361,21 @@
    "be_status": "n/a",
    "gap_brief": "无。",
    "impl_ref": "fn-30"
+  },
+  {
+   "n": 31,
+   "cap": "copilot-typography-hierarchy",
+   "track": "copilot-assist",
+   "module": "Copilot 面板",
+   "func": "排版与层次统一(F6-8 修订 + F6-10 新增,PM 2026-07-02 R5-D「字体排版布局还是丑,和整个app不在一个世界」「挂载/工具调用结果用淡一号的字」):markdown 排版真相 = .copilot-prose(全语义 token + JetBrains Mono 代码块);两级信息层次(正文全对比 / 次级卡片 muted+hover 恢复);用户气泡改 shadcn Bubble 原语。",
+   "action": "助手回复:标题分级加粗、有序/无序列表带标记、代码块 mono 字体 + muted 底 + 边框、inline code 圆角底、引用左竖线、链接 primary 色;「本轮注入」「Thought」「Exploring/Explored」等次级卡片标签淡一号,hover 恢复;工具失败仍红。用户消息 = muted 圆角气泡(Bubble 原语)。",
+   "fe_design": "根因:旧 `prose prose-sm …` 类全是死类(@tailwindcss/typography 从未安装),markdown 一直是浏览器默认样式。修法 = index.css 自建 `.copilot-prose`(h1-h4/ul/ol/code/pre/blockquote/a/table 全语义 token,不装插件避免其自带灰阶第二世界;index.css 顺带去重 double shadcn/tailwind.css import);次级卡 summary 统一 text-muted-foreground + hover:text-foreground(tool-call-bubble.tsx 同步,失败保持 destructive);新增 ui/bubble.tsx(shadcn Bubble/BubbleContent,cva variant+align)。设计源:mvp1-alignment.md F6-8/F6-10;规则回写 FRONTEND_UI_SPEC(禁 prose 类)。",
+   "fe_modules": [],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "无。",
+   "impl_ref": "fn-31"
   }
  ]
 }

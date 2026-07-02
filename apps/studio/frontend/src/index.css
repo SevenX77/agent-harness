@@ -2,7 +2,6 @@
 /* shadcn tailwind utilities: shimmer, scrollbar-*, scroll-fade-* (used by ui/message-scroller) */
 @import "shadcn/tailwind.css";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/noto-sans-sc";
@@ -801,4 +800,105 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .mask-input::placeholder {
   font-family: var(--font-sans);
   -webkit-text-security: none;
+}
+
+/* ── Copilot markdown typography (R5-D) ─────────────────────────────────────
+   Assistant markdown styling on semantic tokens. The old `prose prose-sm …`
+   classes were DEAD — @tailwindcss/typography was never installed, so copilot
+   answers rendered with raw browser defaults (headings same size as body,
+   naked code blocks, lost list numbering). Scoped here instead of installing
+   the plugin: the plugin ships its own gray palette, which is exactly the
+   "different world" the app must not have. */
+.copilot-prose > * + * {
+  margin-top: 0.4375rem;
+}
+.copilot-prose p {
+  line-height: 1.625;
+}
+.copilot-prose ul {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+}
+.copilot-prose ol {
+  list-style: decimal;
+  padding-inline-start: 1.25rem;
+}
+.copilot-prose li + li {
+  margin-top: 0.1875rem;
+}
+.copilot-prose li > ul,
+.copilot-prose li > ol {
+  margin-top: 0.1875rem;
+}
+.copilot-prose h1,
+.copilot-prose h2,
+.copilot-prose h3,
+.copilot-prose h4 {
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.4;
+}
+.copilot-prose > h1:not(:first-child),
+.copilot-prose > h2:not(:first-child),
+.copilot-prose > h3:not(:first-child),
+.copilot-prose > h4:not(:first-child) {
+  margin-top: 0.875rem;
+}
+.copilot-prose h1 { font-size: 1.0625rem; }
+.copilot-prose h2 { font-size: 1rem; }
+.copilot-prose h3 { font-size: 0.9375rem; }
+.copilot-prose h4 { font-size: 0.875rem; }
+.copilot-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.8125em;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  padding: 0.125rem 0.3125rem;
+}
+.copilot-prose pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.75rem;
+  overflow-x: auto;
+}
+.copilot-prose pre code {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.copilot-prose blockquote {
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 0.75rem;
+  color: var(--muted-foreground);
+}
+.copilot-prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.copilot-prose strong {
+  font-weight: 600;
+}
+.copilot-prose hr {
+  border-color: var(--border);
+  margin-block: 0.75rem;
+}
+.copilot-prose table {
+  font-size: 0.8125rem;
+  border-collapse: collapse;
+}
+.copilot-prose th,
+.copilot-prose td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  text-align: start;
+}
+.copilot-prose th {
+  background: var(--muted);
+  font-weight: 600;
 }

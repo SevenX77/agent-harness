@@ -57,13 +57,20 @@ class InMemoryEventBus:
         await self.publish(self.DEFAULT_TOPIC, event)
 
     def broadcast_from_thread(self, event: dict[str, Any]) -> None:
-        """Publish one default-topic event from a watchdog thread."""
-        if self._loop is None:
+        """Publish one default-topic event from a watchdog thread.
+
+        Fire-and-forget, like publish_from_thread: queue puts cannot meaningfully
+        fail, and blocking on the result stalls the calling thread for the full
+        timeout whenever the loop cannot run callbacks — e.g. while the lifespan
+        shutdown blocks the loop inside file_watcher.stop(), where a pending
+        change batch of N events became an N-second stall that outlived stop()'s
+        join budget and leaked the watcher thread (CI exit-139 class).
+        """
+        loop = self._loop
+        if loop is None or loop.is_closed():
             return
-        if self._loop.is_closed():
-            return
-        future = asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
         try:
-            future.result(timeout=1)
-        except Exception:
+            asyncio.run_coroutine_threadsafe(self.broadcast(event), loop)
+        except RuntimeError:
+            # The loop closed between the check and the call.
             return

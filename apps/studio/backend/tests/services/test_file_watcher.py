@@ -180,6 +180,112 @@ def test_stop_does_not_return_while_watcher_thread_is_alive(
         loop.close()
 
 
+def test_stop_returns_promptly_while_a_change_batch_is_draining(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """stop() must not wait out per-event broadcast timeouts (CI run 28568767879).
+
+    stop() runs synchronously inside the async lifespan shutdown, so the event
+    loop cannot execute the coroutines the watcher thread schedules while it
+    drains its current change batch. A broadcast path that BLOCKS on each
+    event's result therefore stalls its full timeout per pending change — a
+    file-storm batch (e.g. a run + git auto-commit in a watched tmp root) held
+    stop() past its 30s join budget, orphaning the thread. Simulate the
+    can't-run-callbacks loop with a never-started loop and require stop() to
+    return promptly with the thread dead.
+    """
+    static = tmp_path / "static"
+    static.mkdir()
+    ws = tmp_path / "opened-ws"
+    ws.mkdir()
+    monkeypatch.setattr("app.services.file_watcher._watch_roots", lambda: [static])
+
+    # 10 pending changes in one batch: 10s under the old 1s-per-event drain.
+    batch = [(Change.deleted, str(ws / f"file-{i}.md")) for i in range(10)]
+    proceed = threading.Event()
+
+    def fake_watch(*paths: str, stop_event: Any = None, **kwargs: Any) -> Any:
+        proceed.wait(5)
+        yield batch
+        while stop_event is not None and not stop_event.is_set():
+            time.sleep(0.01)
+
+    monkeypatch.setattr("app.services.file_watcher.watch", fake_watch)
+
+    svc = _service()
+    svc.register_workspace(ws, "opened-ws")
+    loop = asyncio.new_event_loop()  # never run: run_coroutine_threadsafe futures never complete
+    try:
+        svc.start(loop)
+        thread = svc._thread
+        assert thread is not None
+        proceed.set()
+        time.sleep(0.2)  # let the thread pick up the batch and start draining
+
+        started = time.monotonic()
+        svc.stop()
+        elapsed = time.monotonic() - started
+
+        assert not thread.is_alive()
+        assert elapsed < 3.0, f"stop() blocked {elapsed:.1f}s draining pending change events"
+    finally:
+        svc.stop()
+        loop.close()
+
+
+def test_thread_surviving_a_timed_out_stop_cannot_be_revived_by_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A watcher thread orphaned by a timed-out stop() must stay condemned.
+
+    In CI run 28568767879 the first timed-out stop() orphaned the thread, and
+    the NEXT app start() cleared the shared stop event — reviving the orphan,
+    whose per-generation watch break event reference was then lost, leaving a
+    thread nothing could ever stop (213 teardown errors, then SIGSEGV at
+    interpreter shutdown). Once stop() has been called, that thread must exit
+    as soon as it becomes responsive again, restarts notwithstanding.
+    """
+    static = tmp_path / "static"
+    static.mkdir()
+    monkeypatch.setattr("app.services.file_watcher._watch_roots", lambda: [static])
+    monkeypatch.setattr("app.services.file_watcher._STOP_JOIN_TIMEOUT_SECONDS", 0.2)
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def fake_watch(*paths: str, stop_event: Any = None, **kwargs: Any) -> Any:
+        entered.set()
+        release.wait(10)  # bounded native window that cannot see stop_event
+        while stop_event is not None and not stop_event.is_set():
+            time.sleep(0.01)
+        return
+        yield  # pragma: no cover - makes this function a generator
+
+    monkeypatch.setattr("app.services.file_watcher.watch", fake_watch)
+
+    svc = _service()
+    loop = asyncio.new_event_loop()
+    try:
+        svc.start(loop)
+        first = svc._thread
+        assert first is not None
+        assert entered.wait(timeout=5)
+        svc.stop()  # times out (0.2s < native window) and orphans the thread
+        assert first.is_alive()
+
+        svc.start(loop)
+        second = svc._thread
+        assert second is not None and second is not first
+
+        release.set()  # native window ends; the orphan can observe events again
+        first.join(3)
+        assert not first.is_alive(), "orphaned watcher thread was revived by restart"
+    finally:
+        release.set()
+        svc.stop()
+        loop.close()
+
+
 def test_is_within(tmp_path: Path) -> None:
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)

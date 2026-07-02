@@ -195,23 +195,35 @@ class SkillLoader:
         manifest = _build_graph_manifest(graph_path, graph_frontmatter)
         body_phase_refs = _extract_body_phase_refs(graph_path, graph_body)
         phase_tokens: dict[str, PhaseTokenInfo] = {ref.name: ref.token for ref in body_phase_refs}
+        # Collect-all: the pre-barrier segments — graph topology, root IO schema,
+        # and per-node parsing — are independent of each other, so their defects
+        # accumulate into one batch instead of the first segment masking the
+        # rest. The batch raises at the barrier below, before the post-loop
+        # validators, which assume a complete, valid node set.
+        batch_errors: list[SkillLoadError] = []
+        graph_diags: list[_Diag] = []
         graph_topology = _validate_graph_topology(
             graph_path,
             manifest.phases,
             body_phase_refs,
             root,
+            graph_diags,
         )
-        io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
-        io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
-        input_schema_keys = _extract_output_schema_keys(io_inputs)
-        output_schema_keys = _extract_output_schema_keys(io_outputs)
-        discovered = _discover_phase_files(root)
+        if graph_diags:
+            batch_errors.append(_diags_error(graph_diags))
+        io_inputs: dict[str, Any] = {}
+        io_outputs: dict[str, Any] = {}
+        try:
+            io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
+            io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
+        except SkillLoadError as exc:
+            batch_errors.append(exc)
+        discovered: list[tuple[str, Path, str]] = []
+        try:
+            discovered = _discover_phase_files(root)
+        except SkillLoadError as exc:
+            batch_errors.append(exc)
         phase_docs: list[PhaseDocument] = []
-        # Collect-all: one broken node must not hide another's defects, so each
-        # node is parsed independently and its errors accumulated. We raise the
-        # batch at this barrier — before the post-loop validators, which assume a
-        # complete, valid node set.
-        node_errors: list[SkillLoadError] = []
         for phase_name, phase_file, mode in discovered:
             try:
                 frontmatter, body, _ = parse_markdown_parts(phase_file)
@@ -221,9 +233,11 @@ class SkillLoader:
                     _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
                 )
             except SkillLoadError as exc:
-                node_errors.append(exc)
-        if node_errors:
-            _raise_collected_node_errors(node_errors)
+                batch_errors.append(exc)
+        if batch_errors:
+            _raise_collected_errors(batch_errors)
+        input_schema_keys = _extract_output_schema_keys(io_inputs)
+        output_schema_keys = _extract_output_schema_keys(io_outputs)
         _validate_agent_resource_paths(root, phase_docs)
         _validate_subgraph_io_contracts(
             root,
@@ -383,10 +397,11 @@ def _io_fatal(
 # Collect-all diagnostics (compile/lint is static analysis, not a run): gather  #
 # every independent defect in one pass instead of aborting at the first         #
 # ``_fatal``. Structural failures that make further parsing impossible still    #
-# abort; only per-node content/whitelist checks accumulate. The full set rides  #
-# on ``exc.compile_result.issues`` (the seam Studio's compile drawer already    #
-# projects); the primary ``payload`` stays the first defect for single-error    #
-# (realtime-lint) consumers.                                                    #
+# abort (missing GRAPH.md, phase-name-set mismatch); the topology stage, root   #
+# IO schema, and per-node content checks all accumulate. The full set rides on  #
+# ``exc.compile_result.issues`` — the ONE seam every Studio consumer (compile   #
+# drawer AND realtime lint) projects; the primary ``payload`` stays the first   #
+# defect only as the exception's identity.                                      #
 # --------------------------------------------------------------------------- #
 
 
@@ -409,10 +424,10 @@ def _make_diag(
 
 
 def _compile_result(diags: list[_Diag]) -> Any:
-    """Build the legacy ``CompileResult`` container Studio's drawer projects.
+    """Build the ``CompileResult`` container every Studio consumer projects.
 
-    ``location`` uses the skill-relative source path (never the absolute path) so
-    Studio's ``file:line`` split is not tripped by a Windows drive-letter colon.
+    ``source_path`` uses the skill-relative posix path (never the absolute
+    path) so consumers are not tripped by a Windows drive-letter colon.
     """
     from graph_agent.core.compiler import CompileIssue, CompileResult
 
@@ -421,16 +436,18 @@ def _compile_result(diags: list[_Diag]) -> Any:
             CompileIssue(
                 rule_id=d.code,
                 severity="FATAL",
-                location=f"{_payload_source_path(d.path)}:{d.line}",
-                message=f"{d.path}:{d.line} {d.message}",
+                source_path=_payload_source_path(d.path),
+                line=d.line,
+                field_path=d.field_path,
+                message=d.message,
             )
             for d in diags
         ]
     )
 
 
-def _raise_diags(diags: list[_Diag]) -> NoReturn:
-    """Raise one error carrying every collected defect; primary = the first."""
+def _diags_error(diags: list[_Diag]) -> SkillLoadError:
+    """Build one error carrying every collected defect; primary = the first."""
     first = diags[0]
     detail = f"{first.path}:{first.line} {first.message}"
     error = SkillLoadError(
@@ -443,7 +460,12 @@ def _raise_diags(diags: list[_Diag]) -> NoReturn:
         ),
     )
     error.compile_result = _compile_result(diags)  # type: ignore[attr-defined]
-    raise error
+    return error
+
+
+def _raise_diags(diags: list[_Diag]) -> NoReturn:
+    """Raise one error carrying every collected defect; primary = the first."""
+    raise _diags_error(diags)
 
 
 def _issues_of(exc: SkillLoadError) -> list[Any]:
@@ -456,23 +478,32 @@ def _issues_of(exc: SkillLoadError) -> list[Any]:
     payload = exc.payload
     code = payload.code if payload is not None else "[F-v3-graph-root-missing]"
     source = payload.source_path if payload is not None else None
+    field_path = payload.field_path if payload is not None else None
     match = re.search(r":(\d+)(?:\s|$)", str(exc))
-    line = match.group(1) if match else "1"
-    location = f"{source}:{line}" if source else str(exc)
-    return [CompileIssue(rule_id=code, severity="FATAL", location=location, message=str(exc))]
+    line = int(match.group(1)) if match else None
+    return [
+        CompileIssue(
+            rule_id=code,
+            severity="FATAL",
+            source_path=source,
+            line=line,
+            field_path=field_path,
+            message=str(exc),
+        )
+    ]
 
 
-def _raise_collected_node_errors(node_errors: list[SkillLoadError]) -> NoReturn:
-    """Re-raise the first node's error verbatim, with every node's defects merged.
+def _raise_collected_errors(errors: list[SkillLoadError]) -> NoReturn:
+    """Re-raise the first error verbatim, with every error's defects merged.
 
-    The first error keeps its identity/payload/attributes (so single-error
-    consumers and existing assertions are untouched); ``compile_result`` is
-    widened to carry the whole batch for the compile drawer.
+    The first error keeps its identity/payload/attributes (so existing
+    assertions on the primary are untouched); ``compile_result`` is widened to
+    carry the whole batch for every diagnostics consumer.
     """
     from graph_agent.core.compiler import CompileResult
 
-    primary = node_errors[0]
-    issues = [issue for exc in node_errors for issue in _issues_of(exc)]
+    primary = errors[0]
+    issues = [issue for exc in errors for issue in _issues_of(exc)]
     primary.compile_result = CompileResult(issues=issues)  # type: ignore[attr-defined]
     raise primary
 
@@ -1384,26 +1415,39 @@ def _validate_graph_topology(
     phases: list[str],
     body_phase_refs: list[BodyPhaseRef],
     skill_root: Path,
+    diags: list[_Diag],
 ) -> dict[str, Any]:
+    """Validate the phase DAG, collecting every independent defect into ``diags``.
+
+    Structural failures that make the topology unreadable (no phases declared,
+    name-set mismatch) still abort; everything below them — islands, unknown
+    deps, cycles, output markers, phase dirs — accumulates so one compile
+    reports the whole stage (compile-rules §2.1 同阶段尽量聚合). When ``diags``
+    is non-empty the returned dict is a placeholder: the caller raises at the
+    collect-all barrier before anything consumes it.
+    """
     _validate_graph_phase_declarations(graph_path, phases, body_phase_refs)
     body_names = [ref.name for ref in body_phase_refs]
     _validate_phase_name_sets(graph_path, phases, body_names, skill_root)
-    adjacency, input_roots, unknown_deps = _collect_graph_dependencies(
+    adjacency, input_roots, flagged = _collect_graph_dependencies(
         graph_path,
         phases,
         body_phase_refs,
+        diags,
     )
 
     # FILE-absolute line for each phase's own <phase> tag, shared by the cycle and
     # island diagnostics so both mark the offending tag (not the frontmatter ---).
     line_by_name = {ref.name: ref.diag_line for ref in body_phase_refs}
-    _validate_acyclic_graph(graph_path, adjacency, line_by_name)
-    if input_roots:
-        _validate_no_islands(graph_path, adjacency, input_roots, line_by_name)
-    _validate_unknown_dependencies(graph_path, unknown_deps)
-    _validate_output_phases(graph_path, body_phase_refs, adjacency)
+    cycle_nodes = _validate_acyclic_graph(graph_path, adjacency, line_by_name, diags)
+    # Phases already diagnosed (no depends_on / unknown dep / cycle member) seed
+    # the reachability walk instead of re-flagging: their unreachability is the
+    # defect already reported, and their downstream is only unreachable as a
+    # cascade of it.
+    _validate_no_islands(graph_path, adjacency, input_roots, line_by_name, diags, flagged | cycle_nodes)
+    _validate_output_phases(graph_path, body_phase_refs, adjacency, diags)
     for phase in phases:
-        _validate_phase_dir(graph_path, phase, skill_root)
+        _validate_phase_dir(graph_path, phase, skill_root, diags)
     return {
         "phases": [
             {
@@ -1413,7 +1457,7 @@ def _validate_graph_topology(
             }
             for ref in body_phase_refs
         ],
-        "order": _topological_order(adjacency, phases),
+        "order": _topological_order(adjacency, phases) if not diags else [],
     }
 
 
@@ -1473,11 +1517,18 @@ def _collect_graph_dependencies(
     graph_path: Path,
     phases: list[str],
     body_phase_refs: list[BodyPhaseRef],
-) -> tuple[dict[str, list[str]], list[str], list[tuple[BodyPhaseRef, str]]]:
+    diags: list[_Diag],
+) -> tuple[dict[str, list[str]], list[str], set[str]]:
+    """Build the adjacency map, collecting per-phase/per-edge defects.
+
+    Returns ``(adjacency, input_roots, flagged)`` where ``flagged`` holds the
+    phases already diagnosed here (bare / unknown dep / self-dep) so the
+    reachability check does not cascade a second diagnostic onto them.
+    """
     phase_set = set(phases)
     adjacency: dict[str, list[str]] = {name: [] for name in phases}
     input_roots: list[str] = []
-    unknown_deps: list[tuple[BodyPhaseRef, str]] = []
+    flagged: set[str] = set()
     for ref in body_phase_refs:
         if not ref.depends_on:
             # `depends_on` is required (skill-spec 00-FORMAT-GROUND-TRUTH: 必填;
@@ -1485,51 +1536,58 @@ def _collect_graph_dependencies(
             # depends_on is a disconnected node — flag it as an island instead of
             # silently treating it as an implicit input root. field_path carries the
             # node locator so Studio's realtime-lint badges the offending node.
-            _graph_fatal(
-                graph_path,
-                ref.diag_line,
-                f"[F-v3-graph-phase-island] phase {ref.name!r} declares no depends_on "
-                '(every phase must connect to "input" or an upstream phase)',
-                field_path=f"{ref.name}.depends_on",
+            diags.append(
+                _make_diag(
+                    graph_path,
+                    ref.diag_line,
+                    f"[F-v3-graph-phase-island] phase {ref.name!r} declares no depends_on "
+                    '(every phase must connect to "input" or an upstream phase)',
+                    field_path=f"{ref.name}.depends_on",
+                )
             )
+            flagged.add(ref.name)
         for dep in ref.depends_on:
             if dep == "input":
                 input_roots.append(ref.name)
                 continue
             if dep not in phase_set:
-                unknown_deps.append((ref, dep))
+                diags.append(
+                    _make_diag(
+                        graph_path,
+                        ref.diag_line,
+                        f"[F-v3-graph-depends-unknown] phase {ref.name!r} "
+                        f"depends_on unknown phase {dep!r}",
+                        field_path=f"{ref.name}.depends_on",
+                    )
+                )
+                flagged.add(ref.name)
                 continue
             if dep == ref.name:
-                _graph_fatal(
-                    graph_path,
-                    ref.diag_line,
-                    f"[F-v3-graph-phase-cycle] phase {ref.name!r} cannot depend on itself",
+                diags.append(
+                    _make_diag(
+                        graph_path,
+                        ref.diag_line,
+                        f"[F-v3-graph-phase-cycle] phase {ref.name!r} cannot depend on itself",
+                        field_path=f"{ref.name}.depends_on",
+                    )
                 )
+                flagged.add(ref.name)
+                continue
             adjacency[dep].append(ref.name)
-    return adjacency, input_roots, unknown_deps
-
-
-def _validate_unknown_dependencies(
-    graph_path: Path,
-    unknown_deps: list[tuple[BodyPhaseRef, str]],
-) -> None:
-    if unknown_deps:
-        ref, dep = unknown_deps[0]
-        _graph_fatal(
-            graph_path,
-            ref.diag_line,
-            f"[F-v3-graph-depends-unknown] phase {ref.name!r} depends_on unknown phase {dep!r}",
-        )
+    return adjacency, input_roots, flagged
 
 
 def _validate_acyclic_graph(
     graph_path: Path,
     adjacency: dict[str, list[str]],
     line_by_name: dict[str, int],
-) -> None:
+    diags: list[_Diag],
+) -> set[str]:
+    """Record every multi-node cycle found; return the phases involved."""
 
     state: dict[str, str] = {}
     stack: list[str] = []
+    cycle_nodes: set[str] = set()
 
     def visit(node: str) -> None:
         state[node] = "gray"
@@ -1538,11 +1596,15 @@ def _validate_acyclic_graph(
             if state.get(nxt) == "gray":
                 start = stack.index(nxt)
                 cycle = stack[start:] + [nxt]
-                _graph_fatal(
-                    graph_path,
-                    line_by_name.get(cycle[0], 1),
-                    "[F-v3-graph-phase-cycle] cycle detected: " + " -> ".join(cycle),
+                cycle_nodes.update(cycle)
+                diags.append(
+                    _make_diag(
+                        graph_path,
+                        line_by_name.get(cycle[0], 1),
+                        "[F-v3-graph-phase-cycle] cycle detected: " + " -> ".join(cycle),
+                    )
                 )
+                continue
             if state.get(nxt) is None:
                 visit(nxt)
         stack.pop()
@@ -1551,6 +1613,7 @@ def _validate_acyclic_graph(
     for node in adjacency:
         if state.get(node) is None:
             visit(node)
+    return cycle_nodes
 
 
 def _validate_no_islands(
@@ -1558,12 +1621,20 @@ def _validate_no_islands(
     adjacency: dict[str, list[str]],
     input_roots: list[str],
     line_by_name: dict[str, int],
+    diags: list[_Diag],
+    suppress: set[str],
 ) -> None:
+    """Flag every phase unreachable from input (minus already-diagnosed ones).
+
+    ``suppress`` phases seed the walk: they already carry their own diagnostic
+    (bare / unknown dep / cycle member), so neither they nor their downstream
+    should drown the report in cascade islands.
+    """
     visited: set[str] = set()
-    stack = list(input_roots)
+    stack = list(input_roots) + sorted(suppress)
     while stack:
         node = stack.pop()
-        if node in visited:
+        if node in visited or node not in adjacency:
             continue
         visited.add(node)
         stack.extend(sorted(set(adjacency[node]) - visited))
@@ -1576,11 +1647,13 @@ def _validate_no_islands(
     # diagnostics), never the body-relative ``token.line_start``.
     for phase_id in adjacency:
         if phase_id not in visited:
-            _graph_fatal(
-                graph_path,
-                line_by_name.get(phase_id, 1),
-                f"[F-v3-graph-phase-island] phase {phase_id!r} is unreachable from input",
-                field_path=f"{phase_id}.depends_on",
+            diags.append(
+                _make_diag(
+                    graph_path,
+                    line_by_name.get(phase_id, 1),
+                    f"[F-v3-graph-phase-island] phase {phase_id!r} is unreachable from input",
+                    field_path=f"{phase_id}.depends_on",
+                )
             )
 
 
@@ -1588,36 +1661,46 @@ def _validate_output_phases(
     graph_path: Path,
     body_phase_refs: list[BodyPhaseRef],
     adjacency: dict[str, list[str]],
+    diags: list[_Diag],
 ) -> None:
     outputs = {ref.name for ref in body_phase_refs if ref.output}
     non_terminal = {phase for phase, downstream in adjacency.items() if downstream}
     invalid = sorted(outputs & non_terminal)
     if invalid:
-        _graph_fatal(
-            graph_path,
-            1,
-            "[F-v3-graph-output-phase-invalid] output phase has downstream edges: "
-            + ", ".join(invalid),
+        diags.append(
+            _make_diag(
+                graph_path,
+                1,
+                "[F-v3-graph-output-phase-invalid] output phase has downstream edges: "
+                + ", ".join(invalid),
+            )
         )
 
 
-def _validate_phase_dir(graph_path: Path, phase: str, skill_root: Path) -> None:
+def _validate_phase_dir(
+    graph_path: Path, phase: str, skill_root: Path, diags: list[_Diag]
+) -> None:
     phases_root = str((skill_root / "phases").resolve())
     candidate_str = os.path.normpath(os.path.join(phases_root, phase))
     if not candidate_str.startswith(phases_root + os.sep):
-        _graph_fatal(
-            graph_path,
-            _frontmatter_key_line(graph_path, "phases"),
-            f"[F-v3-graph-phase-id-invalid] phase {phase!r} escapes the phases directory",
+        diags.append(
+            _make_diag(
+                graph_path,
+                _frontmatter_key_line(graph_path, "phases"),
+                f"[F-v3-graph-phase-id-invalid] phase {phase!r} escapes the phases directory",
+            )
         )
+        return
     candidate = Path(candidate_str)
     if not candidate.is_dir() or not any(
         (candidate / name).is_file() for name in _PHASE_FILE_TO_MODE
     ):
-        _graph_fatal(
-            graph_path,
-            1,
-            f"[F-v3-graph-phase-node-missing] phase {phase!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
+        diags.append(
+            _make_diag(
+                graph_path,
+                1,
+                f"[F-v3-graph-phase-node-missing] phase {phase!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
+            )
         )
 
 

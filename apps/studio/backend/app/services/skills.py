@@ -251,12 +251,34 @@ def lint_skill(skill_id: str) -> LintResult:
     return lint_skill_path(resolve_skill_dir(skill_id))
 
 
+def lint_skill_on_disk(skill_id: str, workspace_root: str | None = None) -> LintResult:
+    """Lint the ON-DISK skill tree (03_compile A13: canvas-write relint).
+
+    A canvas topology write (connect / disconnect / delete phase) settles to
+    disk before the relint fires, so the disk tree IS the source truth — no
+    markdown body round-trip. ``workspace_root`` points at the skill dir for
+    workspace-based skills; without it the skill resolves from the global store.
+    """
+    if workspace_root:
+        root = Path(workspace_root).expanduser().resolve()
+        if root.exists() and root.is_dir():
+            return lint_skill_path(root)
+        logger.info(
+            "lint on-disk skill_id=%s workspace_root=%s missing; falling back to skill store",
+            skill_id,
+            workspace_root,
+        )
+    return lint_skill(skill_id)
+
+
 def lint_skill_path(skill_path: Path) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
     try:
         compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
     except (GraphCompileError, ResourceNotFoundError) as exc:
-        return LintResult(status="failed", errors=[_lint_error_from_exception(exc, skill_path)])
+        # compile-lint F6: lint projects the engine's FULL aggregated defect set
+        # (same seam the manual Compile drawer expands), never just the primary.
+        return LintResult(status="failed", errors=_lint_errors_from_exception(exc, skill_path))
     # Studio-layer config-consistency check layered on a successful compile: the engine
     # treats llm_role as an opaque string (it does not know about gateway roles), so
     # "role not configured" is surfaced here as a NON-FATAL warning on the llm_role field
@@ -1735,6 +1757,46 @@ def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
     }
 
 
+def _lint_errors_from_exception(exc: Exception, skill_dir: Path | None = None) -> list[LintError]:
+    """Expand the engine's aggregated ``compile_result.issues`` into LintErrors.
+
+    Falls back to the single primary exception when no aggregated issues ride
+    on the seam (e.g. ``ResourceNotFoundError``).
+    """
+    compile_result = getattr(exc, "compile_result", None)
+    issues = getattr(compile_result, "issues", None)
+    if isinstance(issues, list) and issues:
+        return [_lint_error_from_issue(issue, skill_dir) for issue in issues]
+    return [_lint_error_from_exception(exc, skill_dir)]
+
+
+def _lint_error_from_issue(issue: object, skill_dir: Path | None) -> LintError:
+    """Map one engine CompileIssue (explicit axes) onto the Studio LintError."""
+    severity = str(getattr(issue, "severity", "FATAL")).lower()
+    message = str(getattr(issue, "message", "Skill compilation failed"))
+    line = getattr(issue, "line", None)
+    field_path = getattr(issue, "field_path", None)
+    source_path = getattr(issue, "source_path", None)
+    if not isinstance(source_path, str) or not source_path:
+        source_path = None
+    else:
+        source_path = source_path.replace("\\", "/")
+    return LintError(
+        file=_lint_file_from_payload(issue, skill_dir),
+        line=line if isinstance(line, int) else None,
+        column=None,
+        error_code=(
+            _normalize_error_code(getattr(issue, "rule_id", None))
+            or _error_code_from_message(message)
+        ),
+        severity="warning" if severity == "warning" else "error",
+        message=message,
+        phase_name=None,
+        field_path=field_path if isinstance(field_path, str) else None,
+        source_path=source_path,
+    )
+
+
 def _lint_error_from_exception(exc: Exception, skill_dir: Path | None = None) -> LintError:
     message = str(exc)
     match = _LOCATION_RE.search(message)
@@ -1861,17 +1923,19 @@ def _compile_errors_from_exception(exc: Exception, skill_dir: Path) -> list[Comp
 
 
 def _compile_error_from_issue(issue: object, skill_dir: Path) -> CompileError:
-    location = getattr(issue, "location", None)
-    line = None
-    file_path = None
-    field = None
-    if isinstance(location, str):
-        file_path, line, field = _parse_compile_location(location, skill_dir)
+    # CompileIssue carries explicit skill-relative source_path/line/field_path
+    # axes; no location-string parsing.
+    source_path = getattr(issue, "source_path", None)
+    file_path = (
+        _relative_compile_path(source_path, skill_dir) if isinstance(source_path, str) else None
+    )
+    line = getattr(issue, "line", None)
+    field = getattr(issue, "field_path", None)
     severity = str(getattr(issue, "severity", "fatal")).lower()
     return CompileError(
         file=file_path,
-        line=line,
-        field=field,
+        line=line if isinstance(line, int) else None,
+        field=field if isinstance(field, str) else None,
         severity="warning" if severity == "warning" else "fatal",
         message=str(getattr(issue, "message", "Skill compilation failed")),
         error_code=_normalize_error_code(getattr(issue, "rule_id", None)),
@@ -1915,25 +1979,6 @@ def _compile_error_code_from_exception(exc: Exception) -> str | None:
         if code:
             return code
     return _normalize_error_code(_error_code_from_message(str(exc)))
-
-
-def _parse_compile_location(
-    location: str,
-    skill_dir: Path,
-) -> tuple[str | None, int | None, str | None]:
-    file_part = location
-    field = None
-    if ":" in location:
-        file_part, rest = location.split(":", 1)
-        line_match = re.match(r"(?P<line>\d+)(?::(?P<field>.*))?", rest)
-        if line_match:
-            return (
-                _relative_compile_path(Path(file_part), skill_dir) or file_part or None,
-                int(line_match.group("line")),
-                line_match.group("field") or None,
-            )
-        field = rest or None
-    return _relative_compile_path(Path(file_part), skill_dir) or file_part or None, None, field
 
 
 def _relative_compile_path(path: str | os.PathLike[str] | None, skill_dir: Path) -> str | None:

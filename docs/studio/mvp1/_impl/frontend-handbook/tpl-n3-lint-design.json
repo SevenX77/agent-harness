@@ -162,6 +162,60 @@
       "be_status": "已实现",
       "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。IDE 式行内标记已落地:lint-monaco-markers.ts:36-54 调 monaco.editor.setModelMarkers(line 53,owner LINT_MARKER_OWNER),由 LazyMonacoPanel.tsx:258(onMount)与 :264-266(lintResult 变化的 effect)触发,驱动源是面板自身的 useDebouncedLint 结果(:250)。marker 计算纯函数化于 field-compile-errors.ts:108-131 lintErrorsToMarkers(映射 line+severity、列感知,DROP 无 line 错误降级到文件级 strip);severity error/warning → Monaco MarkerSeverity(lint-monaco-markers.ts:20-27)。无需改后端。测试 lint-monaco-markers.test.ts:36-72 断言有 line 时 setModelMarkers 被调、无 line 时不调。",
       "impl_ref": "fn-6"
+    },
+    {
+      "n": 7,
+      "cap": "lint-canvas-trigger",
+      "track": "A13",
+      "module": "实时 lint 引擎驱动",
+      "func": "设计:lint 的触发语义是「skill 源真相变更」而不只是「编辑器文本变更」——画布拓扑改动(连线/断线/删节点/建节点/改名/panel 保存 phase 文件)写盘成功后,同样自动触发一次 relint,新结果替换三处就近投影;只清旧标记不重查 = 缺陷(断线后画布反而显得更健康)。",
+      "action": "无显式动作(用户在画布上断线/连线等,写盘 settle 后自动 relint,出错节点立即亮徽章)。",
+      "fe_design": "写盘已 settle → 磁盘树即新真相,无需 body 往返:Workspace 的 refreshLintAfterSourceWrite(清旧投影 + relintSkillFromDisk)挂在所有源写路径(writeGraphEdit 连线/断线/重连、建/删/改名 phase、panel 保存、action/validator 增删)之后;relintSkillFromDisk(useDebouncedLint.ts)发不带 markdown 的 POST /lint(带 workspace_root 定位 workspace 技能),经与编辑器防抖 lint 相同的 lintStatusEvent/lintResultEvent 通道广播,三处投影统一替换。配套修复 GraphCanvas 调和屏障:pendingGraphEdits 归零时 bump graphEditsSettledTick 重跑 reconcile effect,否则编辑期间到达的新徽章数据(relint 常快于写盘 promise settle)永远上不了已挂载的节点。",
+      "fe_modules": [
+        {
+          "name": "实时 lint hook（useDebouncedLint）",
+          "ref": "femod-n3-lint-hook"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "无 markdown body 的请求 = lint 磁盘真相(routers/lint.py → lint_skill_on_disk,workspace_root 定位 workspace 技能目录);有 markdown = 编辑器 changed-markdown 模式,两种触发形状共用一个端点。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-07-02 实现并真机验证)。设计源:01_workflows/03_compile.md A13 + 决策段(2026-07-01)、02_capabilities/compile-lint F1/F6。真机走查(dev-harness + wt-dev --backend 私有 sidecar):断线 → 节点立即亮 [F-v3-graph-phase-island] 徽章;拖线重连 → 徽章消除。测试:useDebouncedLint.test.ts(relintSkillFromDisk 三态)+ Workspace.test.tsx(画布连线写盘后调 relintSkillFromDisk 且仍不自动 compile)+ 后端 test_lint_changed_markdown.py(lint_skill_on_disk 磁盘真相)。",
+      "impl_ref": "fn-7"
+    },
+    {
+      "n": 8,
+      "cap": "lint-completeness",
+      "track": "F6",
+      "module": "实时 lint 引擎驱动",
+      "func": "设计:一次 lint/compile 返回引擎该轮聚合出的全部缺陷(compile-rules「同阶段尽量聚合」),实时 lint 与 Compile drawer 投影同一份完整列表;修掉一个缺陷不应「冒出」同阶段的下一个,多个独立缺陷(多孤岛/多未知依赖/多节点缺块)一次全亮。",
+      "action": "无显式动作(多个缺陷同时存在时,各自的节点/字段/行标记同时出现)。",
+      "fe_design": "引擎侧:拓扑阶段(全部孤岛/未知依赖/自依赖/环/output 标记/phase 目录)+ 根 IO schema + 逐节点内容三段独立收集、屏障统一抛,级联抑制(依赖未知/成环的节点不再重复报「不可达孤岛」);全量缺陷经 exc.compile_result.issues 暴露,每条带显式 source_path/line/field_path 轴(CompileIssue 不再是 location 字符串)。studio 侧:lint 路径展开全部 issues 为 LintError 列表(与手动 Compile drawer 同语义,_lint_errors_from_exception),废除「实时 lint = 单错误消费者」;前端三处投影天然消费完整列表,无需改。",
+      "fe_modules": [
+        {
+          "name": "编译错误按节点分组（compileErrorsByNode）",
+          "ref": "femod-n3-errors-by-node"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "LintResult.errors 携带该轮编译聚合的全部缺陷(engine 同阶段聚合 → compile_result.issues → 全部展开),不再只取首错。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-07-02 实现并真机验证)。设计源:02_capabilities/compile-lint F6(2026-07-01 增补)+ engine compile-rules §2.1「同阶段尽量聚合」。engine:loader.py 拓扑校验批量收集 + _raise_collected_errors 合并拓扑/IO/逐节点三段;CompileIssue 显式四轴(source_path/line/field_path/severity)。studio:services/skills.py lint_skill_path 展开 exc.compile_result.issues。真机:双孤岛断线后两个节点徽章同时亮(截图 n3-lint-07)。测试:engine test_compiler_line_locations.py(双孤岛/双未知依赖/拓扑不遮蔽节点缺陷)+ test_round14(级联抑制)+ 后端 test_lint_surfaces_every_defect_of_one_pass。",
+      "impl_ref": "fn-8"
     }
   ],
   "fe_defs": []

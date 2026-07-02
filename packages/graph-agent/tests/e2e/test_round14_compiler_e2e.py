@@ -276,12 +276,15 @@ def _introduce_cycle(root: Path) -> None:
 
 
 def _introduce_island(root: Path) -> None:
+    # A bare <phase> (no depends_on) is the canonical island; depending on an
+    # unknown phase is attributed to [F-v3-graph-depends-unknown] instead (the
+    # island it causes is a suppressed cascade).
     graph = root / "GRAPH.md"
     _write(
         graph,
         _read(graph).replace(
             '<phase depends_on="segment">score</phase>',
-            '<phase depends_on="nowhere">score</phase>',
+            "<phase>score</phase>",
         ),
     )
 

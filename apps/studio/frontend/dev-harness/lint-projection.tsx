@@ -6,10 +6,19 @@ import { StrictMode, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/index.css'
 import '../src/store/themeStore'
+import { configureApiToken } from '../src/api/client'
+import { bootstrapTunnelToken } from '../src/config/tunnel-token'
 import { Workspace } from '../src/components/studio/Workspace'
 import { Toaster } from '../src/components/ui/sonner'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import { i18nReady } from '../src/i18n'
+
+// Same auth bootstrap as main.tsx (#tkn= hash / sessionStorage), so the harness
+// can also drive a REAL sidecar (wt-dev --backend) instead of page.route mocks.
+const harnessToken = bootstrapTunnelToken()
+if (harnessToken) {
+  configureApiToken(harnessToken)
+}
 
 const INITIAL_SKILL_ID = new URLSearchParams(window.location.search).get('skill') ?? 'lint-projection-smoke'
 

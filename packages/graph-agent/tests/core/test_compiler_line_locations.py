@@ -544,6 +544,126 @@ phases:
         SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     issues = getattr(getattr(excinfo.value, "compile_result", None), "issues", [])
-    located_files = {str(getattr(issue, "location", "")) for issue in issues}
+    located_files = {str(getattr(issue, "source_path", "")) for issue in issues}
     assert any("first" in loc for loc in located_files)
     assert any("second" in loc for loc in located_files)
+
+
+# --------------------------------------------------------------------------- #
+# Stage-level collect-all (compile-rules §2.1 「同阶段尽量聚合」): independent   #
+# defects inside the topology stage (multiple islands / unknown deps), and      #
+# across the independent pre-barrier segments (topology + node contents), must  #
+# surface in ONE compile instead of revealing themselves one fix at a time.     #
+# --------------------------------------------------------------------------- #
+
+
+def _write_three_phase_graph(root: Path, phase_lines: list[str]) -> None:
+    """GRAPH.md with 3 phases a/b/c; frontmatter closes on file line 15, so the
+    body <phase> tags land on file lines 16/17/18."""
+    body = "\n".join(phase_lines)
+    (root / "GRAPH.md").write_text(
+        f"""---
+schema_version: "v0.3.0"
+name: stage-collect-all-test
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties: {{}}
+phases:
+  - a
+  - b
+  - c
+---
+{body}
+""",
+        encoding="utf-8",
+    )
+    for phase in ("a", "b", "c"):
+        (root / "phases" / phase).mkdir(parents=True)
+        (root / "phases" / phase / "SKILL.md").write_text(
+            _AGENT_SKILL_FRONTMATTER + "<role>R</role>\n<goal>G</goal>\n", encoding="utf-8"
+        )
+
+
+def _issues_with_code(exc: SkillLoadError, code: str) -> list[object]:
+    issues = getattr(getattr(exc, "compile_result", None), "issues", None) or []
+    return [issue for issue in issues if str(getattr(issue, "rule_id", "")) == code]
+
+
+def test_two_bare_phases_report_two_islands_together(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
+    # b (line 17) and c (line 18) both declare no depends_on: ONE compile must
+    # flag BOTH islands, not abort at the first bare phase.
+    _write_three_phase_graph(
+        tmp_path,
+        [
+            '<phase depends_on="input" output>a</phase>',
+            "<phase>b</phase>",
+            "<phase>c</phase>",
+        ],
+    )
+
+    with pytest.raises(SkillLoadError) as excinfo:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+
+    islands = _issues_with_code(excinfo.value, "[F-v3-graph-phase-island]")
+    axes = {(getattr(issue, "source_path", None), getattr(issue, "line", None)) for issue in islands}
+    field_paths = {getattr(issue, "field_path", None) for issue in islands}
+    assert len(islands) == 2, f"expected both islands, got: {islands}"
+    assert ("GRAPH.md", 17) in axes
+    assert ("GRAPH.md", 18) in axes
+    assert field_paths == {"b.depends_on", "c.depends_on"}
+
+
+def test_two_unknown_deps_reported_together(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
+    # b -> ghost1 (line 17) and c -> ghost2 (line 18): ONE compile must flag
+    # BOTH unknown dependencies, not just unknown_deps[0].
+    _write_three_phase_graph(
+        tmp_path,
+        [
+            '<phase depends_on="input" output>a</phase>',
+            '<phase depends_on="ghost1">b</phase>',
+            '<phase depends_on="ghost2">c</phase>',
+        ],
+    )
+
+    with pytest.raises(SkillLoadError) as excinfo:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+
+    unknown = _issues_with_code(excinfo.value, "[F-v3-graph-depends-unknown]")
+    messages = " | ".join(str(getattr(issue, "message", "")) for issue in unknown)
+    assert len(unknown) == 2, f"expected both unknown deps, got: {unknown}"
+    assert "ghost1" in messages
+    assert "ghost2" in messages
+
+
+def test_topology_defect_does_not_hide_node_defect(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
+    # A broken edge (island on c) and a node content defect (a missing <goal>)
+    # are independent: ONE compile must surface both, instead of the topology
+    # stage masking every node-level diagnostic.
+    _write_three_phase_graph(
+        tmp_path,
+        [
+            '<phase depends_on="input">a</phase>',
+            '<phase depends_on="a" output>b</phase>',
+            "<phase>c</phase>",
+        ],
+    )
+    (tmp_path / "phases" / "a" / "SKILL.md").write_text(
+        _AGENT_SKILL_FRONTMATTER + "<role>R</role>\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SkillLoadError) as excinfo:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+
+    codes = _all_codes(excinfo.value)
+    assert "[F-v3-graph-phase-island]" in codes
+    assert "[F-v3-agent-goal-missing]" in codes

@@ -14,15 +14,25 @@ from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
 @dataclass
 class CompileIssue:
+    """One compile diagnostic with explicit location axes.
+
+    ``source_path`` is skill-relative (posix separators), ``line`` is the
+    1-based line inside that file, ``field_path`` is the engine's nearest-field
+    locator (e.g. ``"<phase>.depends_on"``) — consumers project these axes
+    directly instead of parsing a location string.
+    """
+
     rule_id: str
     severity: str
-    location: str
+    source_path: str | None
+    line: int | None
+    field_path: str | None
     message: str
 
 
 @dataclass
 class CompileResult:
-    """Legacy diagnostic container retained for import compatibility."""
+    """Aggregated compile diagnostics container (rides on the exception seam)."""
 
     issues: list[CompileIssue] = field(default_factory=list)
 

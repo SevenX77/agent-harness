@@ -12,6 +12,8 @@ interface ToolCallBubbleProps {
 // Bash=Ran), collapsed by default — visual fold only, never omitted.
 const toolVerbs: Record<string, { running: string; done: string }> = {
   Read: { running: 'Exploring', done: 'Explored' },
+  Glob: { running: 'Exploring', done: 'Explored' },
+  Grep: { running: 'Exploring', done: 'Explored' },
   Write: { running: 'Working', done: 'Worked' },
   Edit: { running: 'Working', done: 'Worked' },
   Bash: { running: 'Running', done: 'Ran' },

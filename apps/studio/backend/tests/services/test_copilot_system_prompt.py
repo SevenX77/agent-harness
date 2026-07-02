@@ -31,7 +31,8 @@ def test_rules_document_covers_tools_and_context_contract() -> None:
     # (<copilot_context> 各层语义),让模型不再靠猜。
     rules = copilot.load_copilot_rules()
     assert "工具与边界" in rules
-    assert "Read / Write / Edit / Bash" in rules
+    assert "Read / Glob / Grep" in rules
+    assert "Write / Edit" in rules
     assert "workspace" in rules
     assert "不要原样重发" in rules
     assert "<copilot_context>" in rules

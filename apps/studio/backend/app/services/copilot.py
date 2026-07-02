@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
-_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash"]
+_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"]
 _FILE_CONTENT_KEYS = {
     "content",
     "file_content",

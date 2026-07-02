@@ -154,6 +154,29 @@ def test_translate_tool_use_start_event() -> None:
     assert translator.tool_names == {"tool-1": "Read"}
 
 
+def test_translate_renders_search_tools_instead_of_fake_failures() -> None:
+    """Glob/Grep 由权限层放行并真实执行;翻译器再报「V1 不支持工具」= 执行成功
+    UI 报失败的三处口径不一致(实测过的假失败主因),必须渲染而不是报错。"""
+    tool_names: dict[str, str] = {}
+
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[
+                ToolUseBlock(id="tool-g", name="Glob", input={"pattern": "**/*.md"}),
+                ToolUseBlock(id="tool-r", name="Grep", input={"pattern": "phase"}),
+            ],
+            model="claude",
+        ),
+        tool_names,
+    )
+
+    assert events == [
+        CopilotEventToolUseStart(tool_name="Glob", tool_input={"pattern": "**/*.md"}),
+        CopilotEventToolUseStart(tool_name="Grep", tool_input={"pattern": "phase"}),
+    ]
+    assert tool_names == {"tool-g": "Glob", "tool-r": "Grep"}
+
+
 def test_translate_tool_result_event() -> None:
     translator = copilot.SdkMessageTranslator()
     translator.tool_names["tool-1"] = "Read"

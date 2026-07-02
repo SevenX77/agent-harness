@@ -2,38 +2,12 @@ import { useState } from "react"
 import useSWR from "swr"
 import { ListChecks, Loader2, Plus, Sparkles, Trash2 } from "lucide-react"
 import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
-import type { JsonObject, TestInputMetadata } from "@/api/types"
+import type { TestInputMetadata } from "@/api/types"
 import { useBatchRun } from "@/hooks/useBatchRun"
-import { errorMessage, isJsonObject } from "@/utils/errors"
+import { errorMessage } from "@/utils/errors"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { SectionHeading } from "./_shared/SectionHeading"
 
-type PrepareResult =
-  | { ok: true; name: string; content: JsonObject }
-  | { ok: false; error: string }
-
-/**
- * Pure client-side validation for the create form, mirroring the backend's
- * contract (non-empty name + JSON object content). Kept exported and pure so it
- * is unit-testable without `@testing-library/react`; the interactive flow is
- * covered by the Playwright e2e that drives the live panel.
- */
-export function prepareTestInputCreate(name: string, contentText: string): PrepareResult {
-  const trimmed = name.trim()
-  if (!trimmed) {
-    return { ok: false, error: "Name is required" }
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(contentText)
-  } catch {
-    return { ok: false, error: "Content must be valid JSON" }
-  }
-  if (!isJsonObject(parsed)) {
-    return { ok: false, error: "Content must be a JSON object" }
-  }
-  return { ok: true, name: trimmed, content: parsed }
-}
 
 interface NamingSequenceItem {
   id: string
@@ -96,14 +70,14 @@ export function detectNamingSequence(items: readonly NamingSequenceItem[]): Nami
   return best
 }
 
-const EMPTY_CONTENT = "{\n  \n}"
-
 interface TestInputsSectionProps {
   skillId: string
   workspaceRoot?: string | null
   // F4: which saved input feeds Predict/Run (null = empty payload).
   selectedId?: string | null
   onSelect?: (id: string | null) => void
+  /** Opens the created test-input file in the editor ("New file" flow). */
+  onFileOpen?: (path: string) => void
 }
 
 export function TestInputsSection({
@@ -111,13 +85,12 @@ export function TestInputsSection({
   workspaceRoot = null,
   selectedId = null,
   onSelect,
+  onFileOpen,
 }: TestInputsSectionProps) {
   const { data, mutate } = useSWR<TestInputMetadata[]>(
     `/skills/${skillId}/test_inputs`,
     fetcher,
   )
-  const [name, setName] = useState("")
-  const [content, setContent] = useState(EMPTY_CONTENT)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const items = data ?? []
@@ -138,19 +111,21 @@ export function TestInputsSection({
     void batch.runBatch(group.ids)
   }
 
-  const handleCreate = async () => {
-    const prepared = prepareTestInputCreate(name, content)
-    if (!prepared.ok) {
-      setError(prepared.error)
-      return
-    }
+  // PM 2026-07-02 r2: no inline JSON form in the narrow panel — "New file"
+  // creates an empty input in .workspace/test_inputs and opens it in the
+  // editor; complex inputs come in via the input config dialog import.
+  const handleNewFile = async () => {
     setError(null)
     setBusy(true)
+    const existing = new Set(items.map((item) => item.id))
+    let name = "input-1"
+    for (let i = 1; existing.has(name); i += 1) {
+      name = `input-${i}`
+    }
     try {
-      await createTestInput(skillId, prepared.name, prepared.content, { workspaceRoot })
-      setName("")
-      setContent(EMPTY_CONTENT)
+      await createTestInput(skillId, name, {}, { workspaceRoot })
       await mutate()
+      onFileOpen?.(`.workspace/test_inputs/${name}.json`)
     } catch (err) {
       // Surface the backend's typed reason "就近" (e.g. duplicate name) rather
       // than a generic failure.
@@ -266,36 +241,24 @@ export function TestInputsSection({
         </div>
       ) : null}
 
-      <div className="space-y-2 rounded-md border border-border bg-background p-2">
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Name (e.g. happy-path)"
-          aria-label="New test input name"
-          className="w-full rounded-md border border-border bg-card px-2 py-1 text-xs"
-        />
-        <textarea
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          aria-label="New test input JSON"
-          spellCheck={false}
-          className="h-24 w-full resize-none rounded-md border border-border bg-card px-2 py-1 font-mono text-xs"
-        />
-        {error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-            {error}
-          </div>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => void handleCreate()}
-          disabled={busy}
-          className="flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
-        >
-          <Plus className="size-3.5" />
-          Save test input
-        </button>
-      </div>
+      {error ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          {error}
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => void handleNewFile()}
+        disabled={busy}
+        aria-label="New test input file"
+        className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+      >
+        <Plus className="size-3.5" />
+        New file
+      </button>
+      <p className="text-[11px] text-muted-foreground">
+        Selected input feeds Predict and Run · New file opens in the editor
+      </p>
     </section>
   )
 }

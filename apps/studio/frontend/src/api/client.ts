@@ -847,3 +847,44 @@ export async function writeSkillFile(
   })
   return response.data
 }
+
+// --- IO scan / import (input config tree, input region F5) ---
+
+export interface IoScanField {
+  name: string
+  type: string
+  sample?: unknown
+  items?: IoScanField[]
+}
+
+export interface IoScanEntry {
+  kind: 'file' | 'batch' | 'dir'
+  name: string
+  stem?: string
+  path?: string
+  dir?: string
+  pattern?: string
+  numbers?: number[]
+  count?: number
+  format?: string
+  size?: number
+  fields?: IoScanField[]
+  entries?: IoScanEntry[]
+}
+
+export async function scanIoPath(path: string): Promise<{ entries: IoScanEntry[] }> {
+  const response = await api.post<{ entries: IoScanEntry[] }>(`/io/scan`, { path })
+  return response.data
+}
+
+export async function importIoIntoWorkspace(
+  skillId: string,
+  path: string,
+  name?: string,
+): Promise<{ dir: string; entries: IoScanEntry[] }> {
+  const response = await api.post<{ dir: string; entries: IoScanEntry[] }>(
+    `/skills/${skillId}/io/import`,
+    { path, ...(name ? { name } : {}) },
+  )
+  return response.data
+}

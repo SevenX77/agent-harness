@@ -5,19 +5,11 @@ import type { SkillDetail } from "@/api/types"
 import { InputPanel, __test__ } from "./InputPanel"
 
 const testInputsProps = vi.hoisted((): Array<Record<string, unknown>> => [])
-const goldenProps = vi.hoisted((): Array<Record<string, unknown>> => [])
 
 vi.mock("./TestInputsSection", () => ({
   TestInputsSection: (props: Record<string, unknown>) => {
     testInputsProps.push(props)
     return <div data-mock="test-inputs" />
-  },
-}))
-
-vi.mock("./GoldenSection", () => ({
-  GoldenSection: (props: Record<string, unknown>) => {
-    goldenProps.push(props)
-    return <div data-mock="golden" />
   },
 }))
 
@@ -37,11 +29,28 @@ const graphMd = [
   "    properties:",
   "      topic:",
   "        type: string",
+  "      novel:",
+  "        type: string",
+  "        source: file",
+  "        path: imports/material/novel.md",
+  "      chapters:",
+  "        type: array",
+  "        source: file",
+  "        dir: imports/abc_segmentation",
+  "        pattern: chapter_{n}_latest_*.json",
+  "        numbers: [1, 2, 7]",
   "  outputs:",
   "    type: object",
   "    properties:",
   "      result:",
   "        type: string",
+  "  artifacts:",
+  "    - stem: story_framework",
+  "      mode: single",
+  "      fields: [result]",
+  "    - stem: abc_segmentation",
+  "      mode: per-item",
+  "      fields: [result]",
   "---",
   "<phase depends_on=\"input\">setup</phase>",
 ].join("\n")
@@ -76,19 +85,27 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
     expect(onSelectTestInput).toHaveBeenCalledWith("case-b")
   })
 
-  it("mounts GoldenSection in the output area", () => {
-    goldenProps.length = 0
-    renderToStaticMarkup(<InputPanel skillId="demo" skillDetail={detail()} />)
-    expect(goldenProps).toHaveLength(1)
-    expect(goldenProps[0].skillId).toBe("demo")
+  it("has no golden section and no inline schema/import forms (r3 panel收敛)", () => {
+    const html = renderToStaticMarkup(<InputPanel skillId="demo" skillDetail={detail()} />)
+    expect(html).not.toContain("golden")
+    expect(html).not.toContain("Import file field name")
+    expect(html).not.toContain("Artifact path for")
   })
 
-  it("renders the import-file and output-artifact entries", () => {
+  it("renders Configure entries plus the input-file and artifact list rows", () => {
     const html = renderToStaticMarkup(<InputPanel skillId="demo" skillDetail={detail()} />)
-    expect(html).toContain("Import file field name")
-    expect(html).toContain("Import file path")
-    expect(html).toContain("Import file as input field")
-    expect(html).toContain("Artifact path for result")
+    expect(html).toContain("Configure input")
+    expect(html).toContain("Configure output")
+    // input files list: name + muted path hint (PM r3b)
+    expect(html).toContain("novel")
+    expect(html).toContain("imports/material/novel.md")
+    // batch row with the recorded numbers count
+    expect(html).toContain("imports/abc_segmentation")
+    expect(html).toContain("×3")
+    // artifacts list: stem + mode
+    expect(html).toContain("story_framework")
+    expect(html).toContain("per-item ×3")
+    expect(html).toContain("single")
   })
 
   it("submitIoDocumentEdit saves the mutated document against the previous content hash", async () => {

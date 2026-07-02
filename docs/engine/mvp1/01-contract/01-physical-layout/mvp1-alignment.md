@@ -69,7 +69,21 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 | `result.json` | Engine SDK | SDK 返回的 `RunResult` JSON 形态;`source` 区分 `"run"` / `"predict"`。 |
 | `final_state.json` | Engine SDK | `RunResult.context` 快照;Golden / Compare / 后续流程可以按 run id 复用。 |
 | `metrics.json` | Engine SDK | `RunResult.metrics` 快照。 |
-| `artifacts/` | Engine SDK / tool runtime | phase/tool sidecar;声明 `target: file` 且没有显式 `path` / `output_dir` 时默认写入这里。 |
+| `artifacts/` | Engine SDK / tool runtime | 由 GRAPH.md io 的 `artifacts:` 清单声明驱动(文件×黑板字段勾选,见 skill-syntax);`target: file` 无显式 `path`/`output_dir` 时也默认写入这里。 |
+
+**artifacts 固定命名格式(writer 规范,PM 2026-07-02 r3)** — 自产 artifact 永远这个格式,下游导入扫描零成本识别;导入侧对外来格式保持鲁棒(识别不假定此格式):
+
+```
+artifacts/
+  <stem>_latest_<YYYYMMDD_HHMMSS>.json      # single 模式:当前版本(每次覆盖前先归档)
+  history/<stem>_v<YYYYMMDD_HHMMSS>.json    # 旧版本自动归档
+  <stem>/<item>_<NNN>_latest_<ts>.json      # per-item 模式:iterate 每轮一个,NNN 零填充
+```
+
+- `artifacts:` 清单条目 = `{stem, fields: [黑板字段名…], mode: single|per-item}`;一个文件可装多个字段,一个字段可进多个文件(G3 语义成型态)。
+- per-item 编号**继承输入批量编号**(输入侧导入时提取记录的编号列表),无则用迭代轮次号;数量由 iterate range 推断。
+- 格式只许 `md` / `json`(G3);md 源 = 最终 validated `business_data_md`,不回转。
+- 本清单**整体替换** per-field `target:'artifact'` 声明与 `artifact_manager` legacy 别名——同轮删除,不留兼容(no-backward-compat)。
 
 Predict **不**有专属输出目录。Predict 与真实 Run 都写 `<workspace_dir>/runs/<run_id>/`;调用方读 `result.json` 或 SDK 返回值里的 `RunResult.source` 区分语义:
 

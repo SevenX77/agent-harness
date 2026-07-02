@@ -12,8 +12,6 @@ import pytest
 from graph_agent.callbacks.events import InputFileInjectedEvent
 from graph_agent.core.result import RunResult
 from graph_agent.core.runner import run_skill
-from graph_agent.io.manager import IOManager
-from graph_agent.io.storage import StorageManager
 
 RAW_BUSINESS_MD = "## main\n- answer: raw ok\n\n<!-- preserve-me -->\n\n- note: keep spacing"
 
@@ -297,29 +295,21 @@ def test_file_import_io_errors_are_stable_and_do_not_become_business_input(
 def test_markdown_artifact_uses_validated_business_data_md_instead_of_parsed_json(
     tmp_path: Path,
 ) -> None:
-    workspace_dir = tmp_path / "workspace"
-    storage = StorageManager(workspace_dir, "ws-e1-io", "raw-md-run")
-    io_manager = IOManager(
-        {
-            "outputs": [
-                {
-                    "name": "report",
-                    "target": "artifact",
-                    "path": "report.md",
-                    "content_type": "text/markdown",
-                    "source": "business_data_md",
-                }
-            ]
-        }
-    )
-    inputs = {
-        "current_phase": "main",
+    from graph_agent.io.artifact_manifest import write_manifest_artifacts
+
+    artifacts_dir = tmp_path / "artifacts"
+    blackboard = {
         "report": {"answer": "raw ok", "note": "keep spacing"},
         "business_data_md": RAW_BUSINESS_MD,
     }
+    spec = [
+        {"stem": "report", "mode": "single", "format": "md", "fields": ["business_data_md"]}
+    ]
 
-    saved_paths = io_manager.save_outputs(inputs, storage_manager=storage)
+    written = write_manifest_artifacts(
+        spec, blackboard, artifacts_dir, timestamp="20260702_120000"
+    )
 
-    expected_path = workspace_dir / "runs" / "ws-e1-io" / "raw-md-run" / "phases" / "main" / "report.md"
-    assert saved_paths == [str(expected_path)]
+    expected_path = artifacts_dir / "report_latest_20260702_120000.md"
+    assert written == [expected_path]
     assert expected_path.read_text(encoding="utf-8") == RAW_BUSINESS_MD

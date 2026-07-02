@@ -1,7 +1,7 @@
 ---
 module: 03_regions/input
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 按代码核对:InputPanel 已是 per-node 实例预览(假文件投影已删),Predict/Run 已消费选中测试输入(resolveRunInput),test_inputs CRUD live;缺口=TestInputsSection/GoldenSection 建而未挂、file-import/artifact 设置无面板入口 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07-02 r3 定稿:PM 确认黑板优先配置树模型——面板=预览+Configure+文件 list,输入配置=黑板 context 第一行的字段勾选树+Add file 追加,输出配置=artifacts 文件清单×黑板字段勾选;golden 区从面板移除。样稿经 PM 三轮确认。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [io-panel-artifacts-test-inputs, golden-per-agent-node]
 aligns_with: 01_workflows/02_authoring.md（i/o panel）· 01_workflows/04_run-and-verify.md（predict/run input/golden）
@@ -9,16 +9,16 @@ aligns_with: 01_workflows/02_authoring.md（i/o panel）· 01_workflows/04_run-a
 
 # input — MVP1 Alignment
 
-> **Tier**: region | **Owns**: `io-panel-artifacts-test-inputs`（i/o 面板 owner）+ `golden-per-agent-node` 的 I/O output/golden JSON 入口切面 | **现状**: InputPanel 已是 per-node 实例预览(假文件投影已删,jsonExampleFromSchema + Edit 跳文件);Predict/Run 已消费选中输入(Workspace→resolveRunInput);test_inputs 后端 CRUD live;⚠️ 缺口=TestInputsSection/GoldenSection 建而未挂进面板,file-import/artifact 设置纯函数在 `lib/schema-infer.ts` 但无面板入口。 | **Related**: [baseline](./baseline.md)（双向）· `phase-editing` · `predict` · `run-execution` · `golden-eval` · `assets`
+> **Tier**: region | **Owns**: `io-panel-artifacts-test-inputs`（i/o 面板 owner）| **核心模型(PM 2026-07-02 r3)**: 数据主干是黑板,不是文件——节点输入本来自黑板,import file 只是**追加**字段;输入/输出配置都是「file↔field 映射」的勾选树。 | **Related**: [baseline](./baseline.md)（双向）· `phase-editing` · `predict` · `run-execution` · `golden-eval` · `assets`
 
 ## 1. 定义
-`input` is the current folder name for the MVP1 i/o panel region. It owns node/run input files, schema, validation entry, output artifact paths, golden JSON/settings, and single/batch input selection for Predict/Run.
+`input` is the current folder name for the MVP1 i/o panel region. It owns the per-node i/o preview, the input/output configuration entries (config dialogs), input file imports, output artifact manifests, and single/batch input selection for Predict/Run.
 
 Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-and-verify.md:21`, `01_workflows/04_run-and-verify.md:62`.
 
 ## 2. 数据流 / 机制（设计细节）
-### F1. I/O Panel Identity
 
+### F1. I/O Panel Identity
 - 机制: rename visible panel semantics from Input to i/o and include output-side settings.
 - 决策: input, validate, and batch are configuration; not separate predict products.
 - 原话/来源: `01_workflows/04_run-and-verify.md:30` removes input/validate/batch as standalone predict issues; `01_workflows/04_run-and-verify.md:35` keeps PM wording.
@@ -26,83 +26,105 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - Status: target-design.
 - 归属: region `input`; capabilities `predict`, `phase-editing`.
 
-### F2. Input Files And Schema Instance Preview
-
-- 机制: 面板显示两层真实内容:① **实例预览**——按当前声明的 io schema 推导出"按现在的 schema 大致会得到什么"的示例 JSON(清爽只读,input/output 两侧都给);② **真实测试输入文件**——import/select files,选中项即 Predict/Run payload,照 schema 校验后才可 Predict。**schema 本体不在面板内编辑**:面板只提供两个编辑入口——打开对应源文件(editor)/ 唤起 copilot 改;不再有 schema 表单,也不再有独立的 schema 推断展示。
-- 决策: 面板 = 实例预览 + 数据选择;schema 编辑走 copilot 或直接改文件——在面板里维护 schema 表单太复杂,字段多、嵌套深会把人搞晕(PM 2026-07-02,修订本条旧 "infer or edit schema" 语义);selected input belongs to the node/run configuration(不变)。
-- 原话/来源: PM 2026-07-02(原话见 §4);`01_workflows/04_run-and-verify.md:21` assigns test input selection here; `01_workflows/04_run-and-verify.md:22` keeps validation inside predict.
-- 测试: 实例预览由真实 io 声明推导(非投影假文件、非独立推断产物);面板无 schema 表单,编辑入口跳文件/copilot;file import persists; invalid input blocks predict with field error.
-- Status: target-design(旧 inference demo 与假文件投影一并废弃)。
+### F2. Panel Surface（实例预览 + Configure 入口 + 文件 list）
+- 机制: 面板每侧(input/output)三件东西:① **实例预览**——按当前 io schema 推导的示例 JSON(清爽只读);② **Configure 按钮**——进入该侧配置弹窗(F3/F7);③ **文件 list**——用面板统一的 list 行样式简单列出:input 侧列已导入的输入文件(有才显示),output 侧列已配置的 artifact 文件;文件行 = 文件名 + 灰色路径(一眼认出是文件)。**面板本身不承载配置编辑**,schema 编辑走 Configure 弹窗 / copilot / 直接改文件。
+- 决策: 面板 = 预览 + 入口 + 摘要;配置操作全在弹窗——面板太窄(约 320px),放不下带缩进的字段树(PM 2026-07-02 r2/r3)。**面板不再有 golden 区**:golden 与预览同构,「Generate template 两连点」无意义;golden 交互(存实际输出为 golden、diff)归 run/trace 侧后续轮(PM 2026-07-02 r2 点1)。**不再有内联「创建 test input」表单**(名字+JSON 编辑框):没人会在窄面板里写 JSON;简单输入在 `.workspace` 建文件进编辑器写,复杂输入走导入(PM 2026-07-02 r2 点3)。
+- 原话/来源: PM 2026-07-02(原话见 §4)。
+- 测试: 面板无 schema 表单、无 golden 区、无内联创建表单;实例预览由真实 io 声明推导;Configure 打开对应配置弹窗;文件 list 行显示文件名+路径。
+- Status: target-design。
 - 归属: region `input`; capability `predict`; platform `engine`.
 
-### F3. Output Artifact Settings
-
-- 机制: configure node output files and artifact paths from the i/o panel.
-- 决策: output artifact paths are per-node output settings.
-- 原话/来源: `01_workflows/02_authoring.md:20` assigns artifact setup to i/o; `01_workflows/02_authoring.md:40` records artifact output decision.
-- 测试: setting an output artifact path updates node file; default path lands under workspace artifacts.
-- Status: target-design.
-- 归属: region `input`; capability `phase-editing`; platform `native-fs`.
+### F3. Input Config Tree（黑板优先的输入配置,PM 2026-07-02 r3 核心模型）
+- 机制: 输入配置弹窗 = 一棵字段勾选树:**第一行永远是黑板 context**,展开为「跑到这个节点时黑板上有的字段」(嵌套对象按层级缩进展开;推导与 dot 静态推断共享同一套逻辑,见 trace-observability F4),打勾 = 该节点消费哪些字段(**即它的 io.inputs 声明**);黑板行下面是通过 **Add file** 按钮加进来的文件,每个文件下是它自己的 schema 字段树(后端扫描解析,见 F5),勾中的字段以 `source:'file'` 声明**追加**成黑板字段。文件行 = 文件名 + 灰色路径。
+- **Input 伪节点特例**: 没有黑板(上游无物),配置树里只有文件;在 Input 节点勾选的文件字段,流到第一个 node 时**成为黑板初始字段**(= GRAPH.md `io.inputs`)。一套「文件 + 勾选」= 一份输入方案,存下来命名即 test input——schema 定义与数据来源在同一处闭环。
+- **归属规则**: Input 节点只有输入配置,Output 节点只有输出配置,GRAPH.md 两者都有(两个伪节点即 GRAPH.md io 的投影);普通节点 = 输入配置(黑板+文件)+ 输出预览。
+- 决策: 导入文件不是 node input 的主源,黑板才是;import file 只是在黑板上额外增加字段(PM 2026-07-02 r3 点2)。配置界面的第一性结构是字段勾选树,不是导入向导。
+- 原话/来源: PM 2026-07-02 r3(原话见 §4);样稿经 PM 确认(r3b)。
+- 测试: 黑板行字段与 dot 静态推断同源一致;勾选黑板字段写回节点 io.inputs;勾选文件字段写 `{type, source:'file', path}`;Input 节点树无黑板行;批量文件夹折叠为一行并记录编号列表。
+- Status: target-design。
+- 归属: region `input`; capabilities `phase-editing`, `graph-authoring`; platform `engine`, `native-fs`.
 
 ### F4. Predict/Run Input Selection
-
-- 机制: selected file/config becomes the input payload for Predict and Run.
+- 机制: selected file/config becomes the input payload for Predict and Run;面板 test inputs list 选中项即 payload。
 - 决策: Predict and Run execute according to configuration.
-- 原话/来源: `01_workflows/04_run-and-verify.md:34` and `01_workflows/04_run-and-verify.md:67` record that predict/run run according to config.
+- 原话/来源: `01_workflows/04_run-and-verify.md:34` and `01_workflows/04_run-and-verify.md:67`.
 - 测试: changing selected input changes predict/run payload; missing selection produces scoped panel error.
-- Status: missing.
+- Status: live(2026-07-02 #304 挂通)。
 - 归属: region `input`; capabilities `predict`, `run-execution`.
 
-### F5. Golden Settings And JSON
-
-- 机制: generate/edit per-agent-node golden JSON from output schema;**golden 文件可从 I/O output 区直接点开编辑/查看(随时可编辑),另一入口在 Assets workspace 文件树直接打开该文件**;golden 摘要/diff 入口归 I/O,不在 Properties。**golden JSON 与 F2 的 output 实例预览同构**——都是该节点 `io.outputs` schema 的数据实例,形状无区别,差别只在生命周期(预览=临时示意,golden=作者认可并持久化到 `.workspace/golden` 的期望值);预览"存为 golden"即完成创建路 B,schema→实例生成器与 predict 占位 mock、golden 空模板共用一套(PM 2026-07-02)。
-- 决策: golden settings belong with output because golden is expected output;**golden 主入口 = Assets workspace + I/O output,随时可编辑;golden 不归 Properties**(PM 2026-06-04)。
-- 原话/来源: `01_workflows/04_run-and-verify.md:125` and `01_workflows/04_run-and-verify.md:126` assign golden template/settings to i/o.
-- 测试: create template from schema; fill JSON; node state changes to has-golden.
-- Status: target-design.
-- 归属: region `input`; capability `golden-eval`.
+### F5. File Scan And Recognition（导入扫描,后端纯读）
+- 机制: Add file 选中文件/文件夹后,后端扫描端点解析:`.json` → 顶层字段名+类型+样本值;`.jsonl` → 首行对象字段;`.md`/`.txt` → 整体一个文本候选字段(大文件只记路径+大小,**不内联内容**);子文件夹递归一层。**批量识别**:同 stem 只差编号的文件群(`chapter_001…chapter_060`)折叠成一个批量条目(`chapter_[001–060] ×N`),**编号列表提取并记录**;`latest`/`_v<时间戳>` 识别为版本修饰,自动取 latest、`history/` 忽略。识别用鲁棒的连续数字段正则,**不假定自产固定格式**(外来格式也要能认,PM 2026-07-02 r2 点7「输出固定、输入鲁棒」)。
+- 决策: 扫描放 studio backend(读盘+JSON 解析本来就是后端职责;Rust sole-writer 原则只管写)。
+- 原话/来源: PM 2026-07-02 r2 点4/点7(原话见 §4)。
+- 测试: 真实 material-prep 文件夹(异构 11 文件)与 node1_output(iterate 批量 60 文件)扫描出正确字段树;批量编号列表完整;超大文件不内联。
+- Status: target-design。
+- 归属: region `input`; platform `llm-copilot-http-api`(studio backend HTTP).
 
 ### F6. Batch Input Selection
-
 - 机制: select multiple inputs, start batch, and show progress/per-item failures.
 - 决策: batch is run input configuration.
-- 原话/来源: `01_workflows/04_run-and-verify.md:54` to `01_workflows/04_run-and-verify.md:57` list batch actions.
+- 原话/来源: `01_workflows/04_run-and-verify.md:54` to `:57`.
 - 测试: multiple selected inputs create batch; failed item is visible.
 - Status: backend/orphan frontend.
 - 归属: region `input`; capability `run-execution`.
 
-## 3. 接口契约
-- Inputs: selected node, skill files, node i/o schema, imported input files, golden state.
-- Outputs: file open, schema edit jump(editor/copilot;面板不直接写 schema), selected predict/run input, batch input list, artifact path edits.
-- Capability links: `phase-editing`, `predict`, `run-execution`, `golden-eval`.
-- Platform links: `native-fs`, `engine`.
+### F7. Output Artifacts Config（与输入对称的产物清单,PM 2026-07-02 r3 点5）
+- 机制: 输出配置弹窗 = artifacts 文件清单:**Add artifact** 添加要输出的文件,每个文件卡 = stem 名 + single/per-item 紧凑分段钮 + **黑板全部字段的勾选列表(每个文件下同一套清单,只是勾选不同)** + 固定格式文件名实时预览。per-item 数量从 iterate range 设置推断并显示(`per-item ×N`)。single 与 per-item 的区别只在**取值时机与落盘方式**(per-item 每轮迭代落一个编号文件,single 只落最终值),字段清单同一套。
+- **固定落盘格式(engine artifact writer 规范)**: 单产物 `<stem>_latest_<YYYYMMDD_HHMMSS>.json` + 旧版归档 `history/<stem>_v<ts>.json`;per-item `<stem>/<item>_<NNN>_latest_<ts>.json`(编号零填充,**继承输入批量编号**,无则用轮次号)。自产永远这个格式 → 下游导入扫描一眼认出;输入侧对外来格式保持鲁棒(F5)。
+- **声明形状**: GRAPH.md io 增加 `artifacts:` 清单声明(list of {stem, fields, mode}),**整体替换** per-field `target:'artifact'` 路径(含 `artifact_manager` legacy 别名),同轮删旧不留兼容。
+- 决策: artifacts 是一个 list,用户创建要输出哪些文件、每个文件包含 output 的哪些字段(PM 2026-07-02 r2 点5);固定格式参考既有 pipeline 产物(`<stem>_latest_<ts>` + `history/`,PM 2026-07-02 r2 点7)。
+- 原话/来源: PM 2026-07-02 r2/r3(原话见 §4);样稿经 PM 确认(r3b:两文件下黑板字段清单必须完全一样)。
+- 测试: artifacts 清单写回 GRAPH.md io;engine writer 按固定格式落盘;per-item 编号继承输入批量编号;旧 per-field target 路径已删。
+- Status: target-design。
+- 归属: region `input`; capability `phase-editing`; platform `engine`, `native-fs`.
 
-## 4. 设计决策基础（PM 原话）
-- 面板可见名 = **"I/O"**(文件夹路径 `input` 不变)。
-- golden 主入口 = ① Assets workspace 文件树直接打开文件;② I/O 面板 output 区点开编辑/查看;**随时可编辑**;golden 归 I/O,不归 Properties。
-- **I/O 面板 = 实例预览,schema 编辑走 copilot/文件**(PM 2026-07-02):"原设计在panel里面做这步太复杂了,有太多的字段以及字段嵌套,会把人搞晕的,还不如清爽的让用户看到这里按照现在的schema大致会得到什么,然后用copilot或者自己直接去改文件"。
-- **golden JSON 与推导实例同构**(PM 2026-07-02):"golden输出的json和现在推测的json没有区别"——都是 `io.outputs` schema 的实例,差别只在语义/生命周期。
+### F8. Golden（入口迁出面板）
+- 机制: golden JSON 与 F2 实例预览同构(都是 `io.outputs` schema 的实例,差别只在生命周期);**面板不再设 golden 区**;golden 的创建(跑完存实际输出)与 diff 展示归 run/trace 侧,与 golden-eval 后端逐节点粒度改造同轮设计(后续轮)。
+- 决策: 面板不要 golden,「Generate template」两连点无意义(PM 2026-07-02 r2 点1,修订 2026-06-04「golden 主入口=Assets+I/O output」决策中 I/O 入口部分;Assets 文件树直接打开 golden 文件的入口不变)。
+- 原话/来源: PM 2026-07-02 r2(原话见 §4)。
+- 测试: 面板无 golden 区;Assets 树仍可打开 golden 文件。
+- Status: target-design(面板收敛本轮;run/trace 侧 golden 交互后续轮)。
+- 归属: region `input`(收敛)· capability `golden-eval`(后续轮 owner)。
+
+## 3. 接口契约
+- Inputs: selected node, skill files, node i/o schema, blackboard static inference(与 trace-observability F4 同源), file scan results, iterate range.
+- Outputs: io.inputs/`source:'file'` 声明写回(节点文件/GRAPH.md), `artifacts:` 清单写回(GRAPH.md), selected predict/run input, batch input list, file open。
+- Capability links: `phase-editing`, `graph-authoring`, `predict`, `run-execution`, `golden-eval`.
+- Platform links: `native-fs`(声明写盘), `engine`(artifacts writer / source:file 注入), studio backend(扫描端点)。
+
+## 4. 设计决策基础（PM 原话,2026-07-02）
+- **r2 点1(golden 出面板)**:"不是说了面板不要golden了吗？？你这两个创建模板一定要用户去点两下？有什么意义？？"
+- **r2 点3(test input 心智)**:"没有人会在io面板里面创建一个test inputs，那么小的面板，太反人类了；要么导入一个文件/文件夹，要么在.workspace创建一个文件（在输入不复杂的时候），在编辑器里面编辑"
+- **r2 点4(导入识别)**:"导入文件必须识别出这些文件，并识别出这些文件有哪些字段，哪些内容，并且在这些文件中推断，是否有input需要的字段，是否匹配"(真实样例:`D:\coding\test_data\013_躺赢\01_material-prep\20260416_030517` 异构 artifacts、`…\02_story-deconstruction\node1_output` iterate 批量)
+- **r2 点5(artifacts list)**:"output artifacts应该是一个list，用户创建要输出哪些文件，文件要包含output的哪些字段"
+- **r2 点7(编号与格式)**:"如果输入有批量文件，要把批量的数字提取出来并且记下来，自己输出的artifacts要有一个固定格式……input可能会不是这个格式，要有鲁棒性。但是自己输出的固定格式，再给其他输入就比较好认了。"
+- **r3 点2(黑板主源)**:"导入文件不是node input 数据的主要来源，黑板才是，impot file只是在黑板上额外增加了数据字段"
+- **r3 点3(归属)**:"input node只有输入设置， output node 只有输出设置，graph.md才有输入输出设置"
+- **r3 点4(配置树)**:"输入的配置面板，应该是一个文件树一样的list……第一行永远是黑板context，下面才是import附加的文件和文件带来的字段；input节点没有黑板，只有文件；到了input链接的第一个node，input从文件勾选的字段就成了黑板上的字段"
+- **r3 点5(输出对称)**:"通过add button添加需要输出的artifacts文件，下面列的是黑板上所有的字段，这个文件在其中勾选需要输出的字段"
+- **r3b 修订**:文件名后附路径;输出配置各文件下黑板字段清单完全一样;模式切换用小分段钮,per-item 带 iterate range 推断数量;面板用专用 list 行列输入文件与输出文件。
+- (存续)面板可见名 = **"I/O"**(文件夹路径 `input` 不变);**I/O 面板 = 实例预览,schema 编辑走 copilot/文件**(PM 2026-07-02 r1);**golden JSON 与推导实例同构**(PM 2026-07-02 r1)。
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| INPUT-1 | input 文件 | 单元 `io-panel-artifacts-test-inputs`；**为什么**：input panel 改 i/o panel，每节点 io 设置 + 文件导入注入黑板 |
-| INPUT-2 | Predict/Run 输入 | 单元 `io-panel-artifacts-test-inputs`；**为什么**：predict/run 的输入选择落在 i/o 面板 |
-| INPUT-3 | test_inputs API | 单元 `io-panel-artifacts-test-inputs`；**为什么**：test_inputs CRUD 现 501，要接通批量测试输入 |
+| INPUT-1 | 黑板优先配置树 | 单元 `io-panel-artifacts-test-inputs`；**为什么**：数据主干是黑板,file 只是追加;勾选树 = io 声明的直接投影,一处配置三处受益(io.inputs/source:file/test input) |
+| INPUT-2 | Predict/Run 输入 | 单元 `io-panel-artifacts-test-inputs`；**为什么**：predict/run 的输入选择落在 i/o 面板(live) |
+| INPUT-3 | artifacts 清单替换 per-field target | 单元 `io-panel-artifacts-test-inputs`；**为什么**：文件×字段是多对多,per-field path 表达不了"一个文件装多个字段";固定格式让下游导入零成本识别 |
 
 ## 6. 测试关键点
-1. input 文件: baseline 现状为 TestInputsSection 建而未挂载,面板无输入文件区 ⚠️；目标为 面板列出 `.workspace/test_inputs/` 真实输入并可增删/选中。
-2. Predict/Run 输入: baseline 现状为 Workspace→resolveRunInput 链路已消费 selectedTestInputId,但 InputPanel 忽略该 props、无选择 UI ⚠️；目标为 面板选中项 = Predict/Run payload,端到端可点。
-3. test_inputs API: baseline 现状为 后端 CRUD live(app/routers/test_inputs.py),前端未挂消费 UI ⚠️；目标为 增删测试输入端到端 live,错误就近显示。
+1. 面板收敛: 无 golden 区/内联表单/schema 表单;预览+Configure+文件 list(文件名+灰色路径)。
+2. 输入配置树: 黑板行与 dot 静态推断同源;勾选写回 io.inputs / `source:'file'`;Input 节点无黑板行。
+3. 扫描: 真实 material-prep + node1_output 两个文件夹形状的字段树/批量折叠/编号提取正确;大文件不内联。
+4. artifacts: 清单写回 GRAPH.md;engine writer 固定格式落盘(latest+history+per-item 编号继承);旧 per-field target 路径删净。
+5. Predict/Run 输入: 面板选中项 = payload(live,回归)。
 
 ## 7. 涉及 region / platform
-`phase-editing` · `predict` · `run-execution` · `golden-eval` · `assets`
+`phase-editing` · `graph-authoring` · `predict` · `run-execution` · `golden-eval` · `assets`
 
 ## 8. gaps / 报警
-- 🚨 input 文件区: TestInputsSection 建而未挂载 ⚠️；目标 面板 input files 区列真实输入、可增删/选中。
-- 🚨 Predict/Run 输入选择 UI: 消费链路已 live 但 InputPanel 无选择 UI(忽略 selectedTestInputId props)⚠️；目标 面板选中项 = Predict/Run payload。
-- 🚨 golden 入口: GoldenSection 建而未挂载 ⚠️；目标 output 区可点开查看/编辑 golden。
-- 🚨 file-import / artifact 设置入口: `lib/schema-infer.ts` 纯函数在、面板无入口 ⚠️；目标 input files 区导入文件(source:file)、output 区设 artifact 路径。
+- 🚨 全部 F2/F3/F5/F7/F8 为 2026-07-02 r3 新定稿,实施进行中(worktree feat/io-config-tree);实施完成后按代码真相回填状态。
+- 🚨 golden run/trace 侧交互 + 后端逐节点粒度:后续轮(与 golden-eval 单元一并)。
 
 ## 交叉引用（链接, 不复制）
-[baseline](./baseline.md)（现状,双向）· `phase-editing` · `predict` · `run-execution` · `golden-eval` · `assets`
+[baseline](./baseline.md)（现状,双向）· `phase-editing` · `graph-authoring` · `predict` · `run-execution` · `golden-eval` · `assets`

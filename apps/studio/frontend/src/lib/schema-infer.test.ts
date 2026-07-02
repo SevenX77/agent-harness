@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest"
 import yaml from "js-yaml"
 import {
   addIoField,
-  applyImportedFileFieldToGraph,
   applyInputSchemaToGraph,
-  applyOutputArtifactPathToGraph,
   inferJsonSchemaFromText,
   listIoFields,
   removeIoField,
@@ -64,132 +62,6 @@ describe("applyInputSchemaToGraph (F2 schema writeback)", () => {
     expect(() => applyInputSchemaToGraph("no frontmatter here", { type: "object" })).toThrow(
       /frontmatter/,
     )
-  })
-})
-
-describe("applyOutputArtifactPathToGraph (F3 output artifact path writeback)", () => {
-  it("sets target:artifact + path on the named output field, preserving inputs + body", () => {
-    const next = applyOutputArtifactPathToGraph(GRAPH, "final_result", "result.json")
-
-    // Body (phase DAG) is preserved verbatim.
-    expect(next).toContain('<phase depends_on="input">step1</phase>')
-
-    const fm = next.match(/^---\n([\s\S]*?)\n---/)
-    expect(fm).not.toBeNull()
-    const data = yaml.load(fm![1]) as Record<string, unknown>
-    const io = data.io as Record<string, unknown>
-
-    // The named output field now carries the artifact target + path.
-    const outputs = io.outputs as { properties?: Record<string, { target?: string; path?: string }> }
-    expect(outputs.properties?.final_result.target).toBe("artifact")
-    expect(outputs.properties?.final_result.path).toBe("result.json")
-
-    // io.inputs is untouched.
-    const inputs = io.inputs as { properties?: Record<string, unknown>; required?: string[] }
-    expect(inputs.properties).toHaveProperty("old")
-    expect(inputs.required).toEqual(["old"])
-  })
-
-  it("trims the path before writing it", () => {
-    const next = applyOutputArtifactPathToGraph(GRAPH, "final_result", "  nested/out.json  ")
-    const fm = next.match(/^---\n([\s\S]*?)\n---/)
-    const data = yaml.load(fm![1]) as Record<string, unknown>
-    const io = data.io as Record<string, unknown>
-    const outputs = io.outputs as { properties?: Record<string, { path?: string }> }
-    expect(outputs.properties?.final_result.path).toBe("nested/out.json")
-  })
-
-  it("clears target + path when given an empty/whitespace path", () => {
-    const withPath = applyOutputArtifactPathToGraph(GRAPH, "final_result", "result.json")
-    const cleared = applyOutputArtifactPathToGraph(withPath, "final_result", "   ")
-
-    const fm = cleared.match(/^---\n([\s\S]*?)\n---/)
-    const data = yaml.load(fm![1]) as Record<string, unknown>
-    const io = data.io as Record<string, unknown>
-    const outputs = io.outputs as { properties?: Record<string, Record<string, unknown>> }
-    expect(outputs.properties?.final_result).not.toHaveProperty("target")
-    expect(outputs.properties?.final_result).not.toHaveProperty("path")
-    // The field itself (and its type) survives the clear.
-    expect(outputs.properties?.final_result.type).toBe("string")
-  })
-
-  it("throws a clear error when GRAPH.md has no frontmatter", () => {
-    expect(() => applyOutputArtifactPathToGraph("no frontmatter here", "final_result", "x.json")).toThrow(
-      /frontmatter/,
-    )
-  })
-
-  it("throws a clear error naming the missing output field", () => {
-    expect(() => applyOutputArtifactPathToGraph(GRAPH, "does_not_exist", "x.json")).toThrow(
-      /does_not_exist/,
-    )
-  })
-})
-
-describe("applyImportedFileFieldToGraph (#28 any-io-import-file marker writeback)", () => {
-  // The engine's per-node file injection (graph_assembler _declared_input_file_specs /
-  // _inject_declared_input_files, and io/manager) only fires for an io.inputs field
-  // whose schema carries source:'file' + a non-empty path. So when the user imports a
-  // file on ANY node's i/o panel, the writeback MUST stamp that marker, otherwise the
-  // engine never reads/injects the file at run time (G2: importing a file = importing
-  // its field into the state machine, injected when the run reaches that node).
-  it("stamps source:'file' + path on the imported field in io.inputs, preserving outputs + body", () => {
-    const next = applyImportedFileFieldToGraph(GRAPH, "brief", "string", "inputs/brief.md")
-
-    // Body (phase DAG) is preserved verbatim.
-    expect(next).toContain('<phase depends_on="input">step1</phase>')
-
-    const fm = next.match(/^---\n([\s\S]*?)\n---/)
-    expect(fm).not.toBeNull()
-    const data = yaml.load(fm![1]) as Record<string, unknown>
-    const io = data.io as Record<string, unknown>
-
-    // The imported field is a normal declared input field whose schema carries the
-    // exact marker the engine reads: source:'file' + path.
-    const inputs = io.inputs as { properties?: Record<string, Record<string, unknown>>; required?: string[] }
-    const field = inputs.properties?.brief
-    expect(field?.type).toBe("string")
-    expect(field?.source).toBe("file")
-    expect(field?.path).toBe("inputs/brief.md")
-
-    // Pre-existing input field survives; outputs + other frontmatter untouched.
-    expect(inputs.properties).toHaveProperty("old")
-    const outputs = io.outputs as { required?: string[] }
-    expect(outputs.required).toEqual(["final_result"])
-    expect(data.schema_version).toBe("v0.3.0")
-  })
-
-  it("trims the path before writing it", () => {
-    const next = applyImportedFileFieldToGraph(GRAPH, "brief", "string", "  inputs/brief.md  ")
-    const fm = next.match(/^---\n([\s\S]*?)\n---/)
-    const data = yaml.load(fm![1]) as Record<string, unknown>
-    const io = data.io as Record<string, unknown>
-    const inputs = io.inputs as { properties?: Record<string, { path?: string }> }
-    expect(inputs.properties?.brief.path).toBe("inputs/brief.md")
-  })
-
-  it("marks an existing input field as file-sourced without dropping its siblings", () => {
-    const next = applyImportedFileFieldToGraph(GRAPH, "old", "string", "inputs/old.txt")
-    const fm = next.match(/^---\n([\s\S]*?)\n---/)
-    const data = yaml.load(fm![1]) as Record<string, unknown>
-    const io = data.io as Record<string, unknown>
-    const inputs = io.inputs as { properties?: Record<string, Record<string, unknown>> }
-    expect(inputs.properties?.old.source).toBe("file")
-    expect(inputs.properties?.old.path).toBe("inputs/old.txt")
-  })
-
-  it("throws a clear error when GRAPH.md has no frontmatter", () => {
-    expect(() => applyImportedFileFieldToGraph("no frontmatter here", "brief", "string", "x.md")).toThrow(
-      /frontmatter/,
-    )
-  })
-
-  it("throws when the field name is blank", () => {
-    expect(() => applyImportedFileFieldToGraph(GRAPH, "   ", "string", "x.md")).toThrow(/empty/)
-  })
-
-  it("throws when the path is blank (engine requires source='file' to carry a path)", () => {
-    expect(() => applyImportedFileFieldToGraph(GRAPH, "brief", "string", "   ")).toThrow(/path/)
   })
 })
 

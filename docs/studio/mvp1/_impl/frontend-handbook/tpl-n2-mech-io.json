@@ -1,256 +1,256 @@
 {
-  "id": "mech_io",
-  "title": "io 契约 / artifact 落盘 / 子图引用机制（设计）",
-  "owner_tag": "engine 内核",
-  "overview": {
-    "manages": "节点的 io.inputs/outputs 字段契约怎么以 inline JSON Schema 存在 GRAPH.md 里、output 字段怎么配 artifact 落盘到 .workspace、子图怎么按绝对 path 引用并解析它的真实子拓扑。",
-    "why_single": "io 字段编辑、artifact 落盘、子图 path 解析三件事都不是简单 CRUD：io 是 GRAPH.md frontmatter 的一部分（随 serialize 走，无独立端点）、artifact 落盘的事实源在运行期引擎 io/manager、子图 io 1:1 校验是引擎 loader 的编译期 FATAL——牵涉引擎 io/manager + loader 两个内核点，单列一页讲清。",
-    "design_owner": "graph-agent 引擎（packages/graph-agent）——io schema 校验、artifact 落盘、子图 io 关系、SUBGRAPH path 解析都归引擎内核；前端只编辑 io 字段（写回 GRAPH.md）+ 配 artifact 目标 + 判子图 path 状态。",
-    "code_location": "graph-agent 引擎内核：io/manager.py（运行期 io 落盘/artifact_saver）/ loader.py（子图 io 1:1 校验 F-v3-subgraph-io-mismatch、读 SUBGRAPH path）；① 前端：schema-infer.ts（io 推断/写回/artifact 目标）/ panel-files.ts（inputContractView 只读投影）/ subgraph-path.ts（resolveSubgraphReference）/ subgraph-expansion.ts + SubgraphGroupNode.tsx（子图真子拓扑 inline 展开预览）。",
-    "dataflow": [
-      "io 字段编辑：前端改 io.inputs/outputs → applyInputSchemaToGraph/直写 → 随 GRAPH.md serialize 落盘（无独立 io 端点）",
-      "artifact 配置：applyOutputArtifactPathToGraph 给 io.outputs.<字段> 写 {target:'artifact', path} → serialize 落盘（配置期）",
-      "artifact 落盘（运行期）：引擎 io/manager 认 target='artifact' 走 artifact_saver → 解析到 .workspace/runs/<id>/artifacts/<path>",
-      "子图引用：subgraph phase 的 path（绝对路径）→ resolveSubgraphReference 判 resolved/missing/migration-required → GET child-graph-topology 拉子图真实拓扑预览",
-      "子图 io 校验(编译期):旧 outputs 1:1 fatal(F-v3-subgraph-io-mismatch)已删——loader _validate_subgraph_io_contracts 只做递归子图编译;子图像普通节点由 StateMapper 按各自 io 声明切片/合并(G2 已落);子图按绝对 path 解析"
-    ]
-  },
-  "submodules": [
-    {
-      "name": "io 契约（inline JSON Schema）",
-      "code": "engine: GRAPH.md io schema；前端 schema-infer.ts + panel-files.ts",
-      "owner": "engine 内核 / 前端",
-      "summary": "io.inputs/outputs 是 GRAPH.md frontmatter 里的 inline JSON Schema，前端字段编辑直写真契约，不投影磁盘上不存在的假文件。",
-      "formula": "",
-      "diagram": "",
-      "rules": [
-        "io.inputs/io.outputs 各是一份 properties 字段表（字段名 + 类型）；它是 GRAPH.md frontmatter 的一部分，随 serialize 落盘，无独立 io 端点。",
-        "面板不做 schema 字段表单(D-IO-PREVIEW 2026-07-02):i/o 面板显示按声明 schema 推导的实例预览(jsonExampleFromSchema,只读),schema 本体编辑走 copilot 或直接打开源文件。",
-        "旧版投影的 input/schema.json、input/sample.json 假文件（磁盘上不存在、autosave 写死路径丢数据）已删。",
-        "lib/schema-infer.ts 纯函数保留(inferJsonSchemaFromText / applyInputSchemaToGraph / applyImportedFileFieldToGraph / applyOutputArtifactPathToGraph),供面板 input files / output artifacts 区的导入与路径入口调用(UI 入口按设计页 #26/#28/#29 补回)。"
-      ],
-      "do": [
-        "io 字段直写 GRAPH.md inline schema",
-        "JSON 推断 schema 写回 io.inputs"
-      ],
-      "dont": [
-        "不投影磁盘不存在的假文件",
-        "不在前端持第二份 io 真相"
-      ],
-      "deviation": "面板已是 per-node 实例预览(#25/#27 符合);缺口 = input files 区(测试输入 #26 + source:file 导入 #28)、output artifacts 路径入口(#29)、golden 入口(#31)未挂载——PR #268 简化面板时移除/未接,按 2026-07-02 新设计补回。"
-    },
-    {
-      "name": "artifact 落盘（G3）",
-      "code": "engine: io/manager.py artifact_saver；前端 schema-infer.ts applyOutputArtifactPathToGraph",
-      "owner": "engine 内核",
-      "summary": "io.outputs 某字段配一个文件路径，跑时把它落盘成 artifact 到 .workspace/artifacts；格式只允许 md/json。",
-      "formula": "io.outputs.<字段> 顶层加 {target:'artifact', path}；只写文件名（不写前置路径）= 默认落 .workspace 的 artifacts。",
-      "diagram": "",
-      "rules": [
-        "前端 applyOutputArtifactPathToGraph 给字段写 {target:'artifact', path}，空 path 清除目标（配置期，随 serialize 落盘）。",
-        "运行期引擎 io/manager 认 target in ('artifact','artifact_manager') 走 artifact_saver，解析到 .workspace/runs/<id>/artifacts/<path>。",
-        "格式只允许 md 和 json；md 用最终 validated business_data_md，不回转。",
-        "落盘是并行需求、不影响状态机（黑板照常进状态机）。"
-      ],
-      "do": [
-        "io.outputs 配 artifact 落盘目标（配置期）",
-        "运行期 artifact_saver 落 .workspace/artifacts"
-      ],
-      "dont": [
-        "不在配置期真落盘（真实落盘归 N4 运行）",
-        "不落 md/json 以外格式"
-      ],
-      "deviation": ""
-    },
-    {
-      "name": "子图 path 解析",
-      "code": "engine: loader.py（读 SUBGRAPH path）；前端 subgraph-path.ts + subgraph-expansion.ts + SubgraphGroupNode.tsx",
-      "owner": "engine 内核 / 前端",
-      "summary": "子图按绝对 path 引用、无注册表（D7）；前端判 path 解析状态并拉子图真实拓扑预览。",
-      "formula": "",
-      "diagram": "",
-      "rules": [
-        "SUBGRAPH.md 写 path（子图根目录绝对路径，含 GRAPH.md）；引擎 SkillResolverProtocol.resolve 退化为读 path、无注册表（D7）。",
-        "前端 resolveSubgraphReference 判 resolved（有绝对 path）/ migration-required（仍用旧 target_skill）/ missing（都没有）。",
-        "buildSubgraphExpansion（subgraph-expansion.ts）经 GET child-graph-topology 拉子图真实拓扑，在 SubgraphGroupNode 虚线容器内用主画布同款 dagre TB + React Flow node/edge 渲染真实 phase 真节点真边（绝不编造未声明 phase）。",
-        "copilot 工作目录范围必须把被引用子图 path 纳入（D7，否则读不到/改不到子图）。"
-      ],
-      "do": [
-        "子图按绝对 path 解析（无注册表）",
-        "判 path 状态 + 拉真实子拓扑预览"
-      ],
-      "dont": [
-        "不提供 path 找不到→OS 选文件夹导入工作区入口（F4 未落，偏差，见 #20）",
-        "不编造子图未声明的 phase"
-      ],
-      "deviation": "F4 的『path 找不到→标红→OS 选文件夹导入工作区』导入入口仍缺(R5/D7)。另:Studio 子图拓扑端点现只放行父 skill/workspace/bundled 三类 allowed root(_allowed_child_graph_roots),引擎语法要求的『磁盘任意绝对路径 + copilot cwd 覆盖』需后端把 allowed roots 扩成配置化 cwd 边界。"
-    },
-    {
-      "name": "子图 io 1:1 校验（待删，G2）",
-      "code": "engine: loader.py F-v3-subgraph-io-mismatch",
-      "owner": "engine 内核",
-      "summary": "引擎 loader 仍保留一条父子图 io.outputs 严格比对的 FATAL,G2 要求删掉——数据流单向不可逆、父子 io 不绑死。",
-      "formula": "",
-      "diagram": "",
-      "rules": [
-        "现状 loader 取 parent_outputs/child_outputs,parent_outputs ≠ child_outputs 报 F-v3-subgraph-io-mismatch(只比 outputs 集合是否相等,非 inputs+outputs 全 1:1)。",
-        "子图本身已按绝对 path 解析:SUBGRAPH.md 写 path(内部 Pydantic 字段名 target_skill 但 alias='path',读的是 path key);旧 target_skill 字面 key 已被 loader 拒为 deprecated、引导迁移到绝对 path。",
-        "G2 目标:删这条 outputs 1:1 校验,子图 input 和别的节点一样从父图状态机按 schema 过滤字段拿(导入文件=导入字段进状态机)。"
-      ],
-      "do": [
-        "（现状）编译期父子 outputs 比对 FATAL"
-      ],
-      "dont": [
-        "（目标）不再做父子 io 1:1 严格校验"
-      ],
-      "deviation": "⚠️ 这条 outputs 1:1 校验是 G2 的后端待删项:现状仍 FATAL;前端无此校验(见设计页 #30)。子图 path 已收口到读绝对 path。"
-    }
-  ],
-  "files": [
-    {
-      "name": "io 契约（GRAPH.md io 字段，前端视角）",
-      "what": "节点/整图的 io 契约：io.inputs/io.outputs 各是一份 inline JSON Schema 字段表，存在 GRAPH.md frontmatter 里；output 字段可挂 artifact 落盘目标。前端只编辑字段、不另存文件。",
-      "version": "随 GRAPH.md schema_version = v0.3.0",
-      "structs": [
-        {
-          "name": "io.inputs（输入契约）",
-          "fields": [
-            {
-              "name": "properties",
-              "type": "map<字段名, {type,...}>",
-              "meaning": "输入字段表，inline JSON Schema；前端直写、可由 JSON 推断",
-              "sensitive": false
-            },
-            {
-              "name": "(导入文件)",
-              "type": "字段→状态机",
-              "meaning": "导入一个文件=把它的字段导入状态机（G2，跑到该节点才注入）",
-              "sensitive": false
-            }
-          ]
-        },
-        {
-          "name": "io.outputs（输出契约 + artifact）",
-          "fields": [
-            {
-              "name": "properties",
-              "type": "map<字段名, {type,...}>",
-              "meaning": "输出字段表，inline JSON Schema",
-              "sensitive": false
-            },
-            {
-              "name": "<字段>.target",
-              "type": "enum<artifact|artifact_manager>",
-              "meaning": "配了就跑时落盘成 artifact（G3）",
-              "sensitive": false
-            },
-            {
-              "name": "<字段>.path",
-              "type": "string(md|json)",
-              "meaning": "artifact 文件路径；只写文件名=默认落 .workspace/artifacts",
-              "sensitive": false
-            }
-          ]
-        }
-      ],
-      "owns": "这份数据归引擎——io schema 校验、artifact 落盘语义归 graph-agent 引擎内核；io 是 GRAPH.md 的一部分（详见 mech_graph 的 GRAPH.md 数据文件）。前端只投影/编辑字段。",
-      "crud_pointer": "io 字段无独立端点：读随 GET /skills/{id}（manifest.io）、写随 POST /skills/{id}/graph/serialize（GRAPH.md frontmatter）；artifact 运行期落盘归引擎 io/manager（N4 运行）。下方接口表不重列 serialize。",
-      "storage_note": "io 随 GRAPH.md 落盘（Rust native-fs，见 mech_graph）；artifact 运行期落 .workspace/runs/<id>/artifacts 是引擎 io/manager 实现细节。",
-      "security_fe": "io 契约无机密字段；前端只编辑字段 schema，不持第二份真相。"
-    }
-  ],
-  "interface_groups": [
-    {
-      "key": "crud",
-      "title": "数据读写类（子图拓扑读 / io 随 GRAPH.md 写）",
-      "note": "io 字段读写没有独立端点：读随 skill detail、写随 GRAPH.md serialize（见 mech_graph）。本组只列子图拓扑读这一条独立端点。"
-    },
-    {
-      "key": "action",
-      "title": "编译/运行动作类（子图 io 校验 / artifact 落盘）",
-      "note": "这一类不是填字段存进去：子图 io 1:1 是引擎编译期 FATAL（待删）、artifact 落盘是运行期副作用，都不是 CRUD。"
-    }
-  ],
-  "interfaces": [
-    {
-      "group": "crud",
-      "endpoint": "GET child-graph-topology",
-      "req": "子图绝对 path(来自 SUBGRAPH.md 的 path 字段);后端只接受三类 allowed roots:父 skill 自身目录树 + workspace skills + bundled skills(_allowed_child_graph_roots)",
-      "resp": "ChildGraphTopology{phases:[name...], graph_topology:[{id,mode,path}]};path 非法/不在 allowed roots → 422 SUBGRAPH_PATH_INVALID;path 合法但找不到子图 → 404 SUBGRAPH_PATH_NOT_FOUND",
-      "purpose": "查(子图真实拓扑)——子图 inline 展开预览 / 下钻按 path 拉子图真实 phase 列表,据此在虚线容器内用 React Flow 渲染真实 phase 节点(绝不编造),也校验 path 是否解析得到。注:引擎语法说 path 是磁盘绝对路径、copilot cwd 必须覆盖;但 Studio endpoint 现只放行父 skill/workspace/bundled 三类根——『任意绝对路径』需后端把 allowed roots 扩成配置化 copilot cwd 边界",
-      "provider": "Studio sidecar(skills.py get_subgraph_child_topology → service get_child_graph_topology + _allowed_child_graph_roots);前端 client.ts getChildGraphTopology",
-      "id": "iface-io-1"
-    },
-    {
-      "group": "crud",
-      "endpoint": "io 随 POST /api/skills/{skill_id}/graph/serialize（无独立 io 端点）",
-      "req": "io.inputs/outputs 是 GRAPH.md frontmatter 的一部分，随拓扑 serialize 一起写回（详见 mech_graph iface-2）",
-      "resp": "同 serialize：保留型新 GRAPH.md（io 字段在 frontmatter 里被保留/更新）",
-      "purpose": "写（io 字段）——io 字段增删/改名/改类型、artifact 目标配置都随 GRAPH.md serialize 落盘，没有单独的 io 端点；这里指针指向 mech_graph 的 serialize 接口，避免重列",
-      "provider": "Studio sidecar（同 graph serialize 一条链）",
-      "id": "iface-io-2"
-    },
-    {
-      "group": "action",
-      "endpoint": "引擎 loader 子图 io 1:1 校验（F-v3-subgraph-io-mismatch，⚠️ 待删）",
-      "req": "编译期取 parent_outputs / child_outputs(子图按绝对 path 解析定位)",
-      "resp": "parent_outputs ≠ child_outputs → FATAL F-v3-subgraph-io-mismatch(仅比 outputs 集合是否相等)",
-      "purpose": "(现状)编译期父子 outputs 严格比对;(G2 目标)删此校验,子图 input 从父图状态机按 schema 过滤字段拿——这是后端待删项,不是要前端做的事",
-      "provider": "引擎 loader.py（编译期校验，待按 G2 删除）",
-      "id": "iface-io-3"
-    },
-    {
-      "group": "action",
-      "endpoint": "引擎 io/manager artifact 落盘（运行期，归 N4）",
-      "req": "运行期某节点产出带 {target:'artifact', path} 的 output 字段",
-      "resp": "artifact_saver 落 .workspace/runs/<id>/artifacts/<path>（md/json）",
-      "purpose": "运行期 artifact 落盘——配置期前端只写 target/path，真实落盘是运行期引擎 io/manager 的副作用，归 N4 运行；这里只标契约形状",
-      "provider": "引擎 io/manager.py artifact_saver（运行期）",
-      "id": "iface-io-4"
-    }
-  ],
-  "boundaries": {
-    "do": [
-      "io.inputs/outputs inline JSON Schema 字段编辑（随 GRAPH.md serialize）",
-      "io.outputs 配 artifact 落盘目标（G3，运行期 io/manager 落 .workspace/artifacts）",
-      "子图按绝对 path 解析（D7，无注册表）+ 拉真实子拓扑预览"
-    ],
-    "dont": [
-      "不给 io 字段单独端点（io 是 GRAPH.md frontmatter 的一部分）",
-      "不在配置期真落 artifact（运行期才落，归 N4）",
-      "不做父子 io 1:1 严格绑定（G2：数据流单向、父子 io 不绑死——现状 loader 仍有此校验，是待删项）",
-      "不提供子图 path 找不到的 OS 导入入口尚缺（F4 偏差）"
-    ]
-  },
-  "states_errors": "",
-  "backend_status": [
-    {
-      "item": "io.outputs artifact 落盘（运行产物）",
-      "d12": "D2.2",
-      "status": "ok",
-      "note": "前端配 artifact 目标 + 引擎 io/manager 运行期 artifact_saver 落 .workspace/runs/<id>/artifacts 均已落地（G3）。← 设计页 #29 用。",
-      "ref": "d2"
-    },
-    {
-      "item": "Subgraph 绝对 path 收口",
-      "d12": "D8.4",
-      "status": "partial",
-      "note": "子图按绝对 path 解析已收口(旧 target_skill 字面 key 被拒为 deprecated);剩 path 找不到的 OS 导入入口未落(F4,#20)。",
-      "ref": "d8"
-    },
-    {
-      "item": "子图 io 1:1 校验删除（G2）",
-      "d12": "D8.4",
-      "status": "partial",
-      "note": "缺口:引擎 loader 仍保留 F-v3-subgraph-io-mismatch(仅比父/子 io.outputs 是否相等),G2 要求删此校验改为子图从状态机过滤字段 → #30 依赖后端去删。子图 path 已收口到读绝对 path。",
-      "ref": "d8"
-    },
-    {
-      "item": "io schema 不进 execution_fingerprint 的边界",
-      "d12": "D8.3",
-      "status": "partial",
-      "note": "io schema 变要进 fingerprint、UI metadata 不进；canonicalizer 共用，收口中。← #28 任一节点 io 导入字段的注入时机依赖它。",
-      "ref": "d8"
-    }
+ "id": "mech_io",
+ "title": "io 契约 / artifact 落盘 / 子图引用机制（设计）",
+ "owner_tag": "engine 内核",
+ "overview": {
+  "manages": "节点的 io.inputs/outputs 字段声明用内联 JSON Schema 写进各节点 md;GRAPH.md io.artifacts 清单声明要落盘哪些文件、每文件装黑板哪些字段,由引擎 artifact_manifest writer 按固定格式落 .workspace;source:'file' 字段(单文件 path 或批量 dir+pattern)运行到节点时从 .workspace lazy 注入黑板;子图用 path 引用,子图 io 不做父子 1:1 校验(r3,PM 2026-07-02)。",
+  "why_single": "io 字段编辑经配置弹窗写回各节点 md(乐观 hash 锁);artifacts 清单是 GRAPH.md io 的一部分;artifact 落盘固定格式的真实源在引擎 io/artifact_manifest(<stem>_latest_<ts> + history/ + per-item 编号继承);旧 per-field target:'artifact' 及 io/manager 的 artifact 分支已整体删除(no-backward-compat);导入拷贝 + 字段扫描在 studio backend(/api/io/import、/api/io/scan,纯读/拷贝,不走 Rust sole-writer)。",
+  "design_owner": "graph-agent 引擎（packages/graph-agent）——io schema 校验、artifact 落盘、子图 io 关系、SUBGRAPH path 解析都归引擎内核；前端只编辑 io 字段（写回 GRAPH.md）+ 配 artifact 目标 + 判子图 path 状态。",
+  "code_location": "graph-agent 引擎内核：io/manager.py（运行期 io 落盘/artifact_saver）/ loader.py（子图 io 1:1 校验 F-v3-subgraph-io-mismatch、读 SUBGRAPH path）；① 前端：schema-infer.ts（io 推断/写回/artifact 目标）/ panel-files.ts（inputContractView 只读投影）/ subgraph-path.ts（resolveSubgraphReference）/ subgraph-expansion.ts + SubgraphGroupNode.tsx（子图真子拓扑 inline 展开预览）。",
+  "dataflow": [
+   "io 字段编辑：前端改 io.inputs/outputs → applyInputSchemaToGraph/直写 → 随 GRAPH.md serialize 落盘（无独立 io 端点）",
+   "artifact 配置：applyOutputArtifactPathToGraph 给 io.outputs.<字段> 写 {target:'artifact', path} → serialize 落盘（配置期）",
+   "artifact 落盘（运行期）：引擎 io/manager 认 target='artifact' 走 artifact_saver → 解析到 .workspace/runs/<id>/artifacts/<path>",
+   "子图引用：subgraph phase 的 path（绝对路径）→ resolveSubgraphReference 判 resolved/missing/migration-required → GET child-graph-topology 拉子图真实拓扑预览",
+   "子图 io 校验(编译期):旧 outputs 1:1 fatal(F-v3-subgraph-io-mismatch)已删——loader _validate_subgraph_io_contracts 只做递归子图编译;子图像普通节点由 StateMapper 按各自 io 声明切片/合并(G2 已落);子图按绝对 path 解析"
   ]
+ },
+ "submodules": [
+  {
+   "name": "io 契约（inline JSON Schema）",
+   "code": "engine: GRAPH.md io schema；前端 schema-infer.ts + panel-files.ts",
+   "owner": "engine 内核 / 前端",
+   "summary": "io.inputs/outputs 是 GRAPH.md frontmatter 里的 inline JSON Schema，前端字段编辑直写真契约，不投影磁盘上不存在的假文件。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "io.inputs/io.outputs 各是一份 properties 字段表（字段名 + 类型）；它是 GRAPH.md frontmatter 的一部分，随 serialize 落盘，无独立 io 端点。",
+    "面板不做 schema 字段表单(D-IO-PREVIEW 2026-07-02):i/o 面板显示按声明 schema 推导的实例预览(jsonExampleFromSchema,只读),schema 本体编辑走 copilot 或直接打开源文件。",
+    "旧版投影的 input/schema.json、input/sample.json 假文件（磁盘上不存在、autosave 写死路径丢数据）已删。",
+    "lib/schema-infer.ts 纯函数保留(inferJsonSchemaFromText / applyInputSchemaToGraph / applyImportedFileFieldToGraph / applyOutputArtifactPathToGraph),供面板 input files / output artifacts 区的导入与路径入口调用(UI 入口按设计页 #26/#28/#29 补回)。"
+   ],
+   "do": [
+    "io 字段直写 GRAPH.md inline schema",
+    "JSON 推断 schema 写回 io.inputs"
+   ],
+   "dont": [
+    "不投影磁盘不存在的假文件",
+    "不在前端持第二份 io 真相"
+   ],
+   "deviation": "面板已是 per-node 实例预览(#25/#27 符合);缺口 = input files 区(测试输入 #26 + source:file 导入 #28)、output artifacts 路径入口(#29)、golden 入口(#31)未挂载——PR #268 简化面板时移除/未接,按 2026-07-02 新设计补回。"
+  },
+  {
+   "name": "artifact 落盘（G3）",
+   "code": "engine: io/manager.py artifact_saver；前端 schema-infer.ts applyOutputArtifactPathToGraph",
+   "owner": "engine 内核",
+   "summary": "io.outputs 某字段配一个文件路径，跑时把它落盘成 artifact 到 .workspace/artifacts；格式只允许 md/json。",
+   "formula": "io.outputs.<字段> 顶层加 {target:'artifact', path}；只写文件名（不写前置路径）= 默认落 .workspace 的 artifacts。",
+   "diagram": "",
+   "rules": [
+    "前端 applyOutputArtifactPathToGraph 给字段写 {target:'artifact', path}，空 path 清除目标（配置期，随 serialize 落盘）。",
+    "运行期引擎 io/manager 认 target in ('artifact','artifact_manager') 走 artifact_saver，解析到 .workspace/runs/<id>/artifacts/<path>。",
+    "格式只允许 md 和 json；md 用最终 validated business_data_md，不回转。",
+    "落盘是并行需求、不影响状态机（黑板照常进状态机）。"
+   ],
+   "do": [
+    "io.outputs 配 artifact 落盘目标（配置期）",
+    "运行期 artifact_saver 落 .workspace/artifacts"
+   ],
+   "dont": [
+    "不在配置期真落盘（真实落盘归 N4 运行）",
+    "不落 md/json 以外格式"
+   ],
+   "deviation": ""
+  },
+  {
+   "name": "子图 path 解析",
+   "code": "engine: loader.py（读 SUBGRAPH path）；前端 subgraph-path.ts + subgraph-expansion.ts + SubgraphGroupNode.tsx",
+   "owner": "engine 内核 / 前端",
+   "summary": "子图按绝对 path 引用、无注册表（D7）；前端判 path 解析状态并拉子图真实拓扑预览。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "SUBGRAPH.md 写 path（子图根目录绝对路径，含 GRAPH.md）；引擎 SkillResolverProtocol.resolve 退化为读 path、无注册表（D7）。",
+    "前端 resolveSubgraphReference 判 resolved（有绝对 path）/ migration-required（仍用旧 target_skill）/ missing（都没有）。",
+    "buildSubgraphExpansion（subgraph-expansion.ts）经 GET child-graph-topology 拉子图真实拓扑，在 SubgraphGroupNode 虚线容器内用主画布同款 dagre TB + React Flow node/edge 渲染真实 phase 真节点真边（绝不编造未声明 phase）。",
+    "copilot 工作目录范围必须把被引用子图 path 纳入（D7，否则读不到/改不到子图）。"
+   ],
+   "do": [
+    "子图按绝对 path 解析（无注册表）",
+    "判 path 状态 + 拉真实子拓扑预览"
+   ],
+   "dont": [
+    "不提供 path 找不到→OS 选文件夹导入工作区入口（F4 未落，偏差，见 #20）",
+    "不编造子图未声明的 phase"
+   ],
+   "deviation": "F4 的『path 找不到→标红→OS 选文件夹导入工作区』导入入口仍缺(R5/D7)。另:Studio 子图拓扑端点现只放行父 skill/workspace/bundled 三类 allowed root(_allowed_child_graph_roots),引擎语法要求的『磁盘任意绝对路径 + copilot cwd 覆盖』需后端把 allowed roots 扩成配置化 cwd 边界。"
+  },
+  {
+   "name": "子图 io 1:1 校验（待删，G2）",
+   "code": "engine: loader.py F-v3-subgraph-io-mismatch",
+   "owner": "engine 内核",
+   "summary": "引擎 loader 仍保留一条父子图 io.outputs 严格比对的 FATAL,G2 要求删掉——数据流单向不可逆、父子 io 不绑死。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "现状 loader 取 parent_outputs/child_outputs,parent_outputs ≠ child_outputs 报 F-v3-subgraph-io-mismatch(只比 outputs 集合是否相等,非 inputs+outputs 全 1:1)。",
+    "子图本身已按绝对 path 解析:SUBGRAPH.md 写 path(内部 Pydantic 字段名 target_skill 但 alias='path',读的是 path key);旧 target_skill 字面 key 已被 loader 拒为 deprecated、引导迁移到绝对 path。",
+    "G2 目标:删这条 outputs 1:1 校验,子图 input 和别的节点一样从父图状态机按 schema 过滤字段拿(导入文件=导入字段进状态机)。"
+   ],
+   "do": [
+    "（现状）编译期父子 outputs 比对 FATAL"
+   ],
+   "dont": [
+    "（目标）不再做父子 io 1:1 严格校验"
+   ],
+   "deviation": "⚠️ 这条 outputs 1:1 校验是 G2 的后端待删项:现状仍 FATAL;前端无此校验(见设计页 #30)。子图 path 已收口到读绝对 path。"
+  }
+ ],
+ "files": [
+  {
+   "name": "io 契约（GRAPH.md io 字段，前端视角）",
+   "what": "节点/整图的 io 契约：io.inputs/io.outputs 各是一份 inline JSON Schema 字段表，存在 GRAPH.md frontmatter 里；output 字段可挂 artifact 落盘目标。前端只编辑字段、不另存文件。",
+   "version": "随 GRAPH.md schema_version = v0.3.0",
+   "structs": [
+    {
+     "name": "io.inputs（输入契约）",
+     "fields": [
+      {
+       "name": "properties",
+       "type": "map<字段名, {type,...}>",
+       "meaning": "输入字段表，inline JSON Schema；前端直写、可由 JSON 推断",
+       "sensitive": false
+      },
+      {
+       "name": "(导入文件)",
+       "type": "字段→状态机",
+       "meaning": "导入一个文件=把它的字段导入状态机（G2，跑到该节点才注入）",
+       "sensitive": false
+      }
+     ]
+    },
+    {
+     "name": "io.outputs（输出契约 + artifact）",
+     "fields": [
+      {
+       "name": "properties",
+       "type": "map<字段名, {type,...}>",
+       "meaning": "输出字段表，inline JSON Schema",
+       "sensitive": false
+      },
+      {
+       "name": "<字段>.target",
+       "type": "enum<artifact|artifact_manager>",
+       "meaning": "配了就跑时落盘成 artifact（G3）",
+       "sensitive": false
+      },
+      {
+       "name": "<字段>.path",
+       "type": "string(md|json)",
+       "meaning": "artifact 文件路径；只写文件名=默认落 .workspace/artifacts",
+       "sensitive": false
+      }
+     ]
+    }
+   ],
+   "owns": "这份数据归引擎——io schema 校验、artifact 落盘语义归 graph-agent 引擎内核；io 是 GRAPH.md 的一部分（详见 mech_graph 的 GRAPH.md 数据文件）。前端只投影/编辑字段。",
+   "crud_pointer": "io 字段无独立端点：读随 GET /skills/{id}（manifest.io）、写随 POST /skills/{id}/graph/serialize（GRAPH.md frontmatter）；artifact 运行期落盘归引擎 io/manager（N4 运行）。下方接口表不重列 serialize。",
+   "storage_note": "io 随 GRAPH.md 落盘（Rust native-fs，见 mech_graph）；artifact 运行期落 .workspace/runs/<id>/artifacts 是引擎 io/manager 实现细节。",
+   "security_fe": "io 契约无机密字段；前端只编辑字段 schema，不持第二份真相。"
+  }
+ ],
+ "interface_groups": [
+  {
+   "key": "crud",
+   "title": "数据读写类（子图拓扑读 / io 随 GRAPH.md 写）",
+   "note": "io 字段读写没有独立端点：读随 skill detail、写随 GRAPH.md serialize（见 mech_graph）。本组只列子图拓扑读这一条独立端点。"
+  },
+  {
+   "key": "action",
+   "title": "编译/运行动作类（子图 io 校验 / artifact 落盘）",
+   "note": "这一类不是填字段存进去：子图 io 1:1 是引擎编译期 FATAL（待删）、artifact 落盘是运行期副作用，都不是 CRUD。"
+  }
+ ],
+ "interfaces": [
+  {
+   "group": "crud",
+   "endpoint": "GET child-graph-topology",
+   "req": "子图绝对 path(来自 SUBGRAPH.md 的 path 字段);后端只接受三类 allowed roots:父 skill 自身目录树 + workspace skills + bundled skills(_allowed_child_graph_roots)",
+   "resp": "ChildGraphTopology{phases:[name...], graph_topology:[{id,mode,path}]};path 非法/不在 allowed roots → 422 SUBGRAPH_PATH_INVALID;path 合法但找不到子图 → 404 SUBGRAPH_PATH_NOT_FOUND",
+   "purpose": "查(子图真实拓扑)——子图 inline 展开预览 / 下钻按 path 拉子图真实 phase 列表,据此在虚线容器内用 React Flow 渲染真实 phase 节点(绝不编造),也校验 path 是否解析得到。注:引擎语法说 path 是磁盘绝对路径、copilot cwd 必须覆盖;但 Studio endpoint 现只放行父 skill/workspace/bundled 三类根——『任意绝对路径』需后端把 allowed roots 扩成配置化 copilot cwd 边界",
+   "provider": "Studio sidecar(skills.py get_subgraph_child_topology → service get_child_graph_topology + _allowed_child_graph_roots);前端 client.ts getChildGraphTopology",
+   "id": "iface-io-1"
+  },
+  {
+   "group": "crud",
+   "endpoint": "io 随 POST /api/skills/{skill_id}/graph/serialize（无独立 io 端点）",
+   "req": "io.inputs/outputs 是 GRAPH.md frontmatter 的一部分，随拓扑 serialize 一起写回（详见 mech_graph iface-2）",
+   "resp": "同 serialize：保留型新 GRAPH.md（io 字段在 frontmatter 里被保留/更新）",
+   "purpose": "写（io 字段）——io 字段增删/改名/改类型、artifact 目标配置都随 GRAPH.md serialize 落盘，没有单独的 io 端点；这里指针指向 mech_graph 的 serialize 接口，避免重列",
+   "provider": "Studio sidecar（同 graph serialize 一条链）",
+   "id": "iface-io-2"
+  },
+  {
+   "group": "action",
+   "endpoint": "引擎 loader 子图 io 1:1 校验（F-v3-subgraph-io-mismatch，⚠️ 待删）",
+   "req": "编译期取 parent_outputs / child_outputs(子图按绝对 path 解析定位)",
+   "resp": "parent_outputs ≠ child_outputs → FATAL F-v3-subgraph-io-mismatch(仅比 outputs 集合是否相等)",
+   "purpose": "(现状)编译期父子 outputs 严格比对;(G2 目标)删此校验,子图 input 从父图状态机按 schema 过滤字段拿——这是后端待删项,不是要前端做的事",
+   "provider": "引擎 loader.py（编译期校验，待按 G2 删除）",
+   "id": "iface-io-3"
+  },
+  {
+   "group": "action",
+   "endpoint": "引擎 io/manager artifact 落盘（运行期，归 N4）",
+   "req": "运行期某节点产出带 {target:'artifact', path} 的 output 字段",
+   "resp": "artifact_saver 落 .workspace/runs/<id>/artifacts/<path>（md/json）",
+   "purpose": "运行期 artifact 落盘——配置期前端只写 target/path，真实落盘是运行期引擎 io/manager 的副作用，归 N4 运行；这里只标契约形状",
+   "provider": "引擎 io/manager.py artifact_saver（运行期）",
+   "id": "iface-io-4"
+  }
+ ],
+ "boundaries": {
+  "do": [
+   "io.inputs/outputs inline JSON Schema 字段编辑（随 GRAPH.md serialize）",
+   "io.outputs 配 artifact 落盘目标（G3，运行期 io/manager 落 .workspace/artifacts）",
+   "子图按绝对 path 解析（D7，无注册表）+ 拉真实子拓扑预览"
+  ],
+  "dont": [
+   "不给 io 字段单独端点（io 是 GRAPH.md frontmatter 的一部分）",
+   "不在配置期真落 artifact（运行期才落，归 N4）",
+   "不做父子 io 1:1 严格绑定（G2：数据流单向、父子 io 不绑死——现状 loader 仍有此校验，是待删项）",
+   "不提供子图 path 找不到的 OS 导入入口尚缺（F4 偏差）"
+  ]
+ },
+ "states_errors": "",
+ "backend_status": [
+  {
+   "item": "io.outputs artifact 落盘（运行产物）",
+   "d12": "D2.2",
+   "status": "ok",
+   "note": "前端配 artifact 目标 + 引擎 io/manager 运行期 artifact_saver 落 .workspace/runs/<id>/artifacts 均已落地（G3）。← 设计页 #29 用。",
+   "ref": "d2"
+  },
+  {
+   "item": "Subgraph 绝对 path 收口",
+   "d12": "D8.4",
+   "status": "partial",
+   "note": "子图按绝对 path 解析已收口(旧 target_skill 字面 key 被拒为 deprecated);剩 path 找不到的 OS 导入入口未落(F4,#20)。",
+   "ref": "d8"
+  },
+  {
+   "item": "子图 io 1:1 校验删除（G2）",
+   "d12": "D8.4",
+   "status": "partial",
+   "note": "缺口:引擎 loader 仍保留 F-v3-subgraph-io-mismatch(仅比父/子 io.outputs 是否相等),G2 要求删此校验改为子图从状态机过滤字段 → #30 依赖后端去删。子图 path 已收口到读绝对 path。",
+   "ref": "d8"
+  },
+  {
+   "item": "io schema 不进 execution_fingerprint 的边界",
+   "d12": "D8.3",
+   "status": "partial",
+   "note": "io schema 变要进 fingerprint、UI metadata 不进；canonicalizer 共用，收口中。← #28 任一节点 io 导入字段的注入时机依赖它。",
+   "ref": "d8"
+  }
+ ]
 }

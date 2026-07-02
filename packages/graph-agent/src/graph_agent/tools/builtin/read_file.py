@@ -9,6 +9,7 @@ prompt.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -239,4 +240,65 @@ def _is_allowed_reference(
         return False
 
 
-__all__ = ["RuntimeInputFileError", "make_read_file_tool", "read_workspace_text_file"]
+def list_workspace_batch_files(
+    dir_path: str, pattern: str, workspace_dir: Path
+) -> list[tuple[int, Path]]:
+    """List numbered batch files under a workspace-contained directory.
+
+    ``pattern`` uses ``{n}`` as the number placeholder and ``*`` as a plain
+    wildcard (e.g. ``chapter_{n}_latest_*.json``). Returns ``(number, path)``
+    pairs sorted by the extracted number. Same containment rules as
+    :func:`read_workspace_text_file`: no absolute paths, no workspace escape.
+    """
+    raw_dir = str(dir_path or "").strip().replace("\\", "/")
+    if not raw_dir:
+        raise RuntimeInputFileError("batch file input dir is empty")
+    if Path(raw_dir).is_absolute():
+        raise RuntimeInputFileError(
+            f"batch file input dir {raw_dir!r} escapes workspace_dir: "
+            "absolute paths are not allowed"
+        )
+    if "{n}" not in pattern:
+        raise RuntimeInputFileError(
+            f"batch file input pattern {pattern!r} has no {{n}} number placeholder"
+        )
+
+    workspace_root = Path(workspace_dir).resolve()
+    target_dir = (workspace_root / raw_dir).resolve(strict=False)
+    _ensure_under_workspace(target_dir, workspace_root, raw_dir)
+    if not target_dir.is_dir():
+        raise RuntimeInputFileError(f"batch file input dir {raw_dir!r} is not a directory")
+
+    regex = re.compile(
+        "^"
+        + re.escape(pattern).replace(r"\{n\}", r"(\d+)").replace(r"\*", ".*")
+        + "$"
+    )
+    matches: list[tuple[int, Path]] = []
+    for entry in target_dir.iterdir():
+        if not entry.is_file():
+            continue
+        match = regex.match(entry.name)
+        if match is None:
+            continue
+        matches.append((int(match.group(1)), entry))
+    if not matches:
+        raise RuntimeInputFileError(
+            f"batch file input {raw_dir!r} has no files matching {pattern!r}"
+        )
+    matches.sort(key=lambda item: item[0])
+    return matches
+
+
+def read_batch_file_text(target: Path, workspace_dir: Path) -> str:
+    """Read one batch member (already containment-checked by listing)."""
+    return _read_utf8_text_target(target, str(target))
+
+
+__all__ = [
+    "RuntimeInputFileError",
+    "list_workspace_batch_files",
+    "make_read_file_tool",
+    "read_batch_file_text",
+    "read_workspace_text_file",
+]

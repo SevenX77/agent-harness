@@ -2,100 +2,100 @@
  "id": "n2_iopanel_impl",
  "title": "i/o 面板 · 实施详情",
  "design_ref": "n2_iopanel_design",
- "intro": "本页是 i/o 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_iopanel_design(原子 #25–#31)。2026-07-02 按 D-IO-PREVIEW 新设计重排并同轮实施完成:面板 = 实例预览(#25/#27,PR #268 已落)+ input files 区(TestInputsSection 挂载 #26 + source:file 导入入口 #28)+ output artifacts 路径行(#29)+ GOLDEN 区(GoldenSection 挂载 #31);写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。全部真机验证(截图见测试页);唯一存留 = golden 后端粒度(整次快照→逐节点 case,后续轮,#31 be_dep)。",
+ "intro": "本页是 i/o 面板前端的现状/实施/测试,1:1 对应设计页 n2_iopanel_design(原子 25/26/27/30/32/33/34)。2026-07-02 r3(PM 三轮确认)重构并同轮实施完成:面板 = 实例预览(#25)+ Configure 入口 + 输入文件/artifact 文件 list 行;输入配置弹窗 = 黑板优先字段勾选树 + Add file 导入(#32);输出配置弹窗 = artifacts 清单 × 黑板全字段勾选(#33);New file 取代内联表单(#26);golden 区移出面板(#34)。写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。全部真机验证(截图见测试页)。唯一存留 = golden run/trace 交互 + 后端逐节点粒度(后续轮 #12)。",
  "functions": [
   {
    "n": 25,
    "cap": "io-instance-preview",
    "design_ref": "n2-atom-25",
-   "current": "现状:已实现且符合新设计。InputPanel(PR #268 简化后):buildIoDocumentView→resolveIoEditTarget 按选中节点取目标文件,parseFrontmatter 取 io 声明,jsonExampleFromSchema 推导示例 JSON 只读渲染;每侧 Edit 按钮 onFileOpen 跳源文件。无 schema 表单、无假文件投影。",
-   "gap": "符合;可选增强 = copilot 唤起入口(与打开文件并列)。",
+   "current": "现状:符合。InputPanel buildIoDocumentView→resolveIoEditTarget 取目标文件,jsonExampleFromSchema 递归推导示例 JSON 只读渲染,每侧 Edit 跳源文件。",
+   "gap": "符合;copilot 唤起入口可选增强。",
    "fe_status": "符合",
-   "be_dep": "无后端依赖(前端解析 skillDetail.files 推导)。"
+   "be_dep": "无(前端解析 skillDetail.files)。"
   },
   {
    "n": 26,
    "cap": "test-inputs-manage",
    "design_ref": "n2-atom-26",
-   "current": "现状:已实现且符合。InputPanel input files 区挂载 TestInputsSection(列表/创建/删除/单选喂 Predict/Run/批量勾选),selectedTestInputId/onSelectTestInput 经 Panels 透传接通;后端 CRUD live。",
-   "gap": "符合设计,无需改。",
+   "current": "现状:符合(r3)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 进编辑器。内联 JSON 创建表单已删。",
+   "gap": "符合(内联表单→New file)。",
    "fe_status": "符合",
-   "be_dep": "已就绪(CRUD live;消费链路 live)。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)"
+   "be_dep": "test_inputs CRUD live。",
+   "fe_status_prev": "内联表单",
+   "fe_resync": "2026-07-02 r3:内联表单→New file"
   },
   {
    "n": 27,
    "cap": "io-panel-perfield",
    "design_ref": "n2-atom-27",
-   "current": "现状:已实现且符合。resolveIoEditTarget(io-target.ts)per-node 解析端到端打通,实例预览随画布选中节点切换;无选中/全局 io 节点回退 GRAPH.md。",
-   "gap": "符合设计,无需改;新挂的三个区(#26/#28/#29/#31)必须同样走 resolveIoEditTarget 的 per-node 目标。",
+   "current": "现状:符合。resolveIoEditTarget per-node 解析;配置弹窗写回同一目标文件。",
+   "gap": "符合。",
    "fe_status": "符合",
-   "be_dep": "已就绪(serialize 契约不变)。"
+   "be_dep": "无。"
   },
   {
-   "n": 28,
-   "cap": "any-io-import-file",
-   "design_ref": "n2-atom-28",
-   "current": "现状:已实现且符合。ImportFileFieldRow(字段名+路径)挂 input files 区,提交经 applyImportedFileFieldToGraph 写 {type, source:'file', path} 到 per-node 目标文件,onPhaseFileSave + sha256(旧内容)乐观锁保存;空字段名/空路径就地报错。",
-   "gap": "符合设计,无需改。",
+   "n": 32,
+   "cap": "input-config-tree",
+   "design_ref": "n2-atom-32",
+   "current": "现状:符合(r3 新建)。InputConfigDialog(shadcn Dialog/Checkbox/Input/Button):blackboardAtNode 复用 staticEdgeInference 出黑板行(勾选=io.inputs 消费);Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 candidatesFromScanEntries 出字段候选;applyIoInputChecks 重建 io.inputs(黑板消费 + source:'file' 单文件/批量 dir+pattern)写回,乐观 hash 锁。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。",
+   "gap": "符合设计。",
    "fe_status": "符合",
+   "be_dep": "已就绪:POST /api/io/scan + /io/import(纯读/拷贝,7 后端测试绿)。",
    "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)",
-   "be_dep": "引擎注入契约已就绪、零改动;前端补 UI 入口即闭环。"
+   "fe_resync": "2026-07-02 r3:未实施→符合(实施 + 真机验证)"
   },
   {
-   "n": 29,
-   "cap": "output-artifact-path",
-   "design_ref": "n2-atom-29",
-   "current": "现状:已实现且符合。OutputArtifactRow 按 io.outputs 字段逐行渲染(当前 path 预填,Apply 提交,空 path 清除),applyOutputArtifactPathToGraph 写回 per-node 目标文件。",
-   "gap": "符合设计,无需改。",
+   "n": 33,
+   "cap": "output-artifacts-config",
+   "design_ref": "n2-atom-33",
+   "current": "现状:符合(r3 新建)。OutputConfigDialog:blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,每个 artifact 卡同一套勾选;applyGraphArtifacts 写 GRAPH.md io.artifacts 清单;single/per-item 分段钮 + iterate range 推断 ×N;固定命名预览随 stem/mode 变。",
+   "gap": "符合设计;旧 per-field target 已删。",
    "fe_status": "符合",
+   "be_dep": "已就绪:engine io.artifacts writer(固定格式,1438 engine 测试绿)。",
    "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)",
-   "be_dep": "引擎落盘契约已就绪、零改动。"
+   "fe_resync": "2026-07-02 r3:未实施→符合(实施 + 真机验证)"
   },
   {
    "n": 30,
    "cap": "subgraph-io-no-1to1",
    "design_ref": "n2-atom-30",
-   "current": "现状:已实现且符合。引擎已删子图 io.outputs 1:1 FATAL(loader _validate_subgraph_io_contracts 只做递归子图编译);运行期 StateMapper 按各自声明切片/合并;子图按 path 解析。",
-   "gap": "符合设计,无需改。",
+   "current": "现状:符合。引擎已删子图 io 1:1 fatal。",
+   "gap": "符合。",
    "fe_status": "符合",
-   "be_dep": "已就绪(引擎 1:1 fatal 已删)。"
+   "be_dep": "已就绪。"
   },
   {
-   "n": 31,
-   "cap": "golden-entry-output",
-   "design_ref": "n2-atom-31",
-   "current": "现状:前端已实现。GoldenSection 挂 InputPanel output 区(golden 基线列表 + 无 golden agent 节点的 Generate template 模板填充)。",
-   "gap": "前端符合;后端 golden 粒度(整次快照→逐节点 case)归后续轮,be_dep 如实保留。",
+   "n": 34,
+   "cap": "golden-out-of-panel",
+   "design_ref": "n2-atom-34",
+   "current": "现状:符合(r3)。GoldenSection 从 InputPanel 删除;面板无 golden 区。Assets 树仍可打开 golden 文件。",
+   "gap": "符合;golden run/trace 交互 + 后端粒度归后续轮 #12。",
    "fe_status": "符合",
-   "be_dep": "后端 golden 粒度待改造(整次快照→逐节点 case,后续轮);入口挂载不被阻塞。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-02:未实施→符合(本轮实施 + 真机验证)"
+   "be_dep": "后续轮 #12。",
+   "fe_status_prev": "面板 golden 区",
+   "fe_resync": "2026-07-02 r3:golden 区移出面板"
   }
  ],
  "plan": [
   {
    "step": 1,
-   "what": "#26 test-inputs-manage:InputPanel 挂 TestInputsSection(input files 区),接通 selectedTestInputId/onSelectTestInput,选中项即 Predict/Run payload(消费链路已 live,纯挂载+接线)。",
-   "depends_on": "前端依赖:TestInputsSection 组件 + Panels 已传的 props。后端不动。",
-   "why": "选择链路只断面板一米,挂上即端到端闭环;是本轮价值最大、风险最小的一步,先做。",
-   "block": "前端独立"
+   "what": "#32 输入配置树:InputConfigDialog(黑板优先勾选树 + Add file 导入)+ lib/io-config(blackboardAtNode/applyIoInputChecks)+ 后端 /api/io/scan、/io/import。",
+   "depends_on": "前端 staticEdgeInference(已在)+ 后端扫描/导入端点(本轮建)。",
+   "why": "PM r3 核心:黑板是主源,文件只追加;配置=字段勾选树。",
+   "block": "全栈(前端+backend)"
   },
   {
    "step": 2,
-   "what": "#28 + #29:input files 区补『导入文件为输入字段』清爽入口(applyImportedFileFieldToGraph),output artifacts 区补路径设置入口(applyOutputArtifactPathToGraph);均走 resolveIoEditTarget 的 per-node 目标写回。",
-   "depends_on": "前端依赖:lib/schema-infer.ts 纯函数(已在)。引擎注入/落盘契约已 live、零改动。",
-   "why": "PR #268 误伤的两个入口按新设计补回;纯函数与引擎契约都在,只做 UI 层。",
-   "block": "前端独立"
+   "what": "#33 输出 artifacts:OutputConfigDialog(artifacts 清单 × 黑板全字段勾选)+ applyGraphArtifacts/blackboardAtOutput + engine io.artifacts writer(固定格式)。",
+   "depends_on": "engine ArtifactSpec + write_manifest_artifacts(本轮建,TDD)。",
+   "why": "PM r3 点5:artifacts 是 list;自产固定格式便于下游识别。",
+   "block": "全栈(前端+engine)"
   },
   {
    "step": 3,
-   "what": "#31 golden-entry-output:InputPanel output 区挂 GoldenSection;『预览存为 golden』复用 #25 生成器。",
-   "depends_on": "前端依赖:GoldenSection 组件(已建)。后端 golden 粒度改造(整次快照→逐节点 case)归后续轮,不阻塞入口挂载。",
-   "why": "golden 归 I/O output 区(PM 锁定);入口先挂,数据粒度随后端演进。",
+   "what": "#26/#34 面板收敛:New file 取代内联表单;删 GoldenSection、单行导入、per-field artifact 行;list 行列输入/输出文件。",
+   "depends_on": "前端独立。",
+   "why": "PM r2 点1/3:面板不要 golden、不要窄面板写 JSON。",
    "block": "前端独立"
   }
  ],
@@ -106,92 +106,83 @@
     25
    ],
    "shots": [
-    "选中节点后 input/output 两侧显示 schema 推导的示例 JSON;点 Edit 跳源文件"
+    "选中节点显示 schema 推导示例 JSON;Edit 跳源文件"
    ],
    "fe_status": "符合",
    "layer1": [
-    "喂带 io 声明的节点文件 → 断言 jsonExampleFromSchema 按 default/const/examples/enum/类型推导示例值。",
-    "断言面板无 schema 表单、无假文件投影(InputPanel 既有测试)。"
+    "jsonExampleFromSchema 按 default/const/examples/enum/类型推导(InputPanel.expected-hash.test)。"
    ],
    "layer2": [
-    "真跑:选不同节点看预览切换;点 Edit 打开对应源文件。"
+    "真机:选不同节点看预览切换。"
    ],
    "screenshots": [
     {
-     "file": "n2-31-iopanel-preview-sections.png",
-     "caption": "选中 segmentation 节点:input/output 实例预览(per-node)+ TEST INPUTS 区 + Import file as input field 区"
+     "file": "n2-40-io-panel-r3.png",
+     "caption": "r3 面板:实例预览 + Configure 入口 + TEST INPUTS(happy-path + New file)+ output 预览;无 golden 区、无内联表单"
     }
    ]
   },
   {
-   "covers": "#26 test-inputs-manage(挂载 + 选中喂 Predict/Run)",
+   "covers": "#26 test-inputs-manage(选中喂 Predict/Run + New file)",
    "atoms": [
     26
    ],
    "shots": [
-    "input files 区列出测试输入,点选一份后 Predict/Run 用它作为 payload",
-    "新建/删除测试输入,列表即时刷新"
+    "选中输入=payload 高亮;New file 建输入进编辑器"
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED:断言 InputPanel 渲染 TestInputsSection 且点选项调用 onSelectTestInput(现状未挂载先红)。",
-    "GREEN:挂载后断言列表/创建/删除走 test_inputs API,选中态高亮并上报 selectedTestInputId。",
-    "断言 Predict/Run 触发时 resolveRunInput 用选中 id 取内容(Workspace 链路既有测试收窄/复用)。"
+    "断言选中调 onSelectTestInput、handleNewFile 调 createTestInput 空内容 + onFileOpen(InputPanel.sections.test)。"
    ],
    "layer2": [
-    "真跑:新建一份测试输入,选中,点 Predict/Run,确认 payload 是该文件内容。"
+    "真机:选 happy-path 高亮;New file 建输入。"
+   ]
+  },
+  {
+   "covers": "#32 input-config-tree(黑板优先 + Add file 导入)",
+   "atoms": [
+    32
+   ],
+   "shots": [
+    "黑板 context 第一行勾选;Add file 导入识别字段"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + source:'file' 单/批量);candidatesFromScanEntries 展平扫描结果(io-config.test)。"
+   ],
+   "layer2": [
+    "真机:segmentation 黑板树 chapters 勾选;GRAPH.md=Input 伪节点 files-only『No fields yet』;导入 material-prep 识别 timestamp/run_id/... 字段。"
    ],
    "screenshots": [
     {
-     "file": "n2-26-test-input-created-selected.png",
-     "caption": "happy-path 测试输入在列(勾选框+删除钮),整行高亮=已选中为 Predict/Run payload;创建写盘走桌面 Rust sole-writer(headless 经 API 验证),浏览器 faked-desktop 下错误就近显示"
+     "file": "n2-41-input-config-blackboard.png",
+     "caption": "segmentation 输入配置:Blackboard context 第一行,chapters(array·from input)已勾=消费,project_id 未勾=在黑板但不消费,底部 Add file"
+    },
+    {
+     "file": "n2-43-input-import-recognition.png",
+     "caption": "导入 material-prep 文件夹:新文件组带灰色真实路径,识别出的字段逐个列出并标 source: file(类型识别对)"
     }
    ]
   },
   {
-   "covers": "#28 any-io-import-file(入口补回)",
+   "covers": "#33 output-artifacts-config(清单 × 黑板全字段)",
    "atoms": [
-    28
+    33
    ],
    "shots": [
-    "在任一节点 input files 区导入文件为字段,该节点 io.inputs.<字段> 落 {source:'file', path}"
+    "Add artifact;每卡同一套黑板全字段勾选;固定命名预览"
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED:断言 input files 区有导入入口且提交调 applyImportedFileFieldToGraph(现状无入口先红)。",
-    "GREEN:断言导入后写回目标节点文件,io.inputs.properties.<字段> 带 {type, source:'file', path};空字段名/空路径就地报错。",
-    "回归:applyImportedFileFieldToGraph 既有纯函数测试(schema-infer.test.ts)保持绿。"
+    "blackboardAtOutput 聚合根 io.inputs ∪ 各 phase io.outputs 带来源;applyGraphArtifacts 写 io.artifacts 清单;graphArtifactsOf 读回(io-config.test)。"
    ],
    "layer2": [
-    "真跑:在中间节点导入文件为字段,真跑一次看引擎 lazy 注入(InputFileInjectedEvent)。"
+    "真机:Add artifact 卡显示 chapters/project_id/segmentation_result/.../story_framework 全字段带来源;single/per-item 分段钮;<stem>_latest_<ts>.json · history/ 预览。"
    ],
    "screenshots": [
     {
-     "file": "n2-31-iopanel-preview-sections.png",
-     "caption": "Import file as input field 入口(字段名+路径);写回落盘为桌面路径,纯函数写回有单测"
-    }
-   ]
-  },
-  {
-   "covers": "#29 output-artifact-path(入口补回)",
-   "atoms": [
-    29
-   ],
-   "shots": [
-    "给 output 字段配 artifact 路径,跑后落 .workspace/runs/<id>/artifacts"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED:断言 output artifacts 区有路径设置入口且提交调 applyOutputArtifactPathToGraph(现状无入口先红)。",
-    "GREEN:断言填路径写 {target:'artifact', path}、空 path 清除;写回目标节点文件。"
-   ],
-   "layer2": [
-    "真跑:配一个 artifact 路径,跑一次看落盘。"
-   ],
-   "screenshots": [
-    {
-     "file": "n2-29-output-artifacts-golden.png",
-     "caption": "output artifacts 区:segmentation_result 路径行 + Apply;下方 GOLDEN 区"
+     "file": "n2-42-output-artifacts-config.png",
+     "caption": "输出 artifacts 配置:一个文件卡 + 黑板全字段全集(每字段带类型 + from 来源)+ single/per-item 分段钮 + 固定命名预览"
     }
    ]
   },
@@ -201,37 +192,30 @@
     30
    ],
    "shots": [
-    "改子图 outputs 与父不同,编译不报 1:1 mismatch"
+    "改子图 outputs 与父不同,编译不报 1:1"
    ],
    "fe_status": "符合",
    "layer1": [
-    "引擎测试已翻转(outputs 不匹配可编译);前端无该校验、无活。"
+    "引擎测试已翻转;前端无该校验。"
    ],
    "layer2": [
-    "真跑:改一个子图 outputs 与父不同,编译通过。"
+    "真机:改子图 outputs 编译通过。"
    ]
   },
   {
-   "covers": "#31 golden-entry-output(挂载)",
+   "covers": "#34 golden-out-of-panel",
    "atoms": [
-    31
+    34
    ],
    "shots": [
-    "output 区点开 golden,查看/编辑期望输出 JSON"
+    "面板无 golden 区"
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED:断言 InputPanel output 区渲染 GoldenSection(现状未挂载先红)。",
-    "GREEN:挂载后断言 golden 入口可点开查看/编辑;GoldenSection/GoldenCaseEditor 既有测试保持绿。"
+    "断言 InputPanel 渲染不含 golden(InputPanel.sections.test)。"
    ],
    "layer2": [
-    "真跑:点开 golden 入口查看/编辑一份 golden JSON。"
-   ],
-   "screenshots": [
-    {
-     "file": "n2-29-output-artifacts-golden.png",
-     "caption": "GOLDEN 区:No golden baselines yet + FILL GOLDEN BY TEMPLATE(agent 节点 Generate template)"
-    }
+    "真机:面板无 golden 区(见 n2-40 截图);Assets 树仍可打开 golden 文件。"
    ]
   }
  ]

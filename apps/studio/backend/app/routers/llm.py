@@ -66,7 +66,6 @@ from app.models.llm_config import (
     ProbeCatalogSummary,
     ProviderEndpoint,
     ProviderRoute,
-    ProviderType,
     RegistryResponse,
     RoleEntry,
     RoleModelGroup,
@@ -90,6 +89,7 @@ from app.services.community_catalog_upload import (
 from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.llm_credentials import (
+    EndpointInvariantViolation,
     _route_slug,
     credentials_path,
     delete_endpoint,
@@ -382,6 +382,10 @@ class EndpointTestResponse(BaseModel):
     registry: RegistryResponse
     tested_endpoint_id: str
     discovered_model_count: int
+    # True when the half-life gate skipped the live probe (design §1.2 matrix
+    # revision point 4): the endpoint's protocol_unsupported observation is
+    # still fresh, so no provider call was made and no state changed.
+    skipped: bool = False
 
 
 class EndpointModelTestRequest(BaseModel):
@@ -398,6 +402,7 @@ class EndpointModelTestResult(BaseModel):
         "ok",
         "invalid_model",
         "invalid_key",
+        "protocol_unsupported",
         "rate_limited",
         "quota_exceeded",
         "network_error",
@@ -446,7 +451,10 @@ async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretRespon
 @router.put("/registry/endpoints")
 async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, Any]:
     """Upsert endpoints; absent endpoint IDs are retained."""
-    data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
+    try:
+        data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
+    except EndpointInvariantViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     record_runtime_activity(
         source_id="llm_credentials",
         action="upsert_endpoints",
@@ -693,12 +701,39 @@ async def sync_verified_community_catalog() -> dict[str, Any]:
 
 
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
-async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
+async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestResponse:
     """Verify an endpoint by making the provider's minimal models-list call."""
     credentials = load_credentials()
     endpoint = credentials.provider_endpoints.get(endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
+    if not force:
+        recheck_at = _protocol_unsupported_recheck_at(endpoint)
+        if recheck_at is not None and datetime.now(UTC) < recheck_at:
+            # Half-life gate (design §1.2 matrix revision point 4): the cell was
+            # observed protocol_unsupported recently — an architectural fact that
+            # will not flip day-to-day. Skip the provider call and KEEP the old
+            # observation (refreshing last_test_at here would keep the half-life
+            # from ever expiring). `force=true` re-probes immediately.
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="endpoint_test_skipped",
+                message=(
+                    "Skipped endpoint test: the protocol_unsupported observation "
+                    "is within its re-check window."
+                ),
+                changes={
+                    "endpoint_id": endpoint_id,
+                    "observed_at": endpoint.last_test_at,
+                    "recheck_at": recheck_at.isoformat(),
+                },
+            )
+            return EndpointTestResponse(
+                registry=_registry_response(credentials, _load_roles_or_empty()),
+                tested_endpoint_id=endpoint_id,
+                discovered_model_count=0,
+                skipped=True,
+            )
     starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
     status: Literal["verified", "unverified_manual", "failed", "disabled"] = "failed"
     message = "API key is empty."
@@ -730,8 +765,14 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         # fixed — record it so we can disable (not just "fail") the endpoint below.
         auth_failed = result.status == "invalid_key"
         # W2-B.3: persist the STRUCTURED error code so the frontend reads it directly
-        # instead of parsing the human last_test_message.
-        last_error_code = result.error_code
+        # instead of parsing the human last_test_message. For protocol_unsupported
+        # the classification wins over any vendor error code — the half-life gate
+        # and the UI's unsupported state key off this exact value.
+        last_error_code = (
+            "protocol_unsupported"
+            if result.status == "protocol_unsupported"
+            else result.error_code
+        )
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -812,7 +853,6 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             latest_endpoint,
             discovered_model_ids,
             raw_capabilities_by_model,
-            detect_protocol=latest_endpoint.provider_kind != "official",
         )
         probe_attempts_log = verification.probe_attempts
         # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
@@ -825,12 +865,16 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         else:
             status = verification.status
         message = verification.message
+        if (
+            verification.failed_probe is not None
+            and verification.failed_probe.status == "protocol_unsupported"
+        ):
+            # get-models may pass on a URL that cannot generate via this protocol
+            # (live: qiniu lists models on both hosts regardless of protocol) —
+            # the generation probe is where the mismatch surfaces. Record the
+            # structured classification so the gate / UI see it.
+            last_error_code = "protocol_unsupported"
         if verification.status == "verified" and verification.verified_model_id is not None:
-            if verification.detected_protocol != latest_endpoint.protocol:
-                endpoint_update["protocol"] = verification.detected_protocol
-                latest_endpoint = latest_endpoint.model_copy(
-                    update={"protocol": verification.detected_protocol}
-                )
             if latest_endpoint.provider_kind == "official":
                 # Official route truth (status / capabilities / profiles) is owned
                 # by the official per-model profile probes — the endpoint test only
@@ -936,6 +980,34 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 latest_credentials.provider_routes[route_id] = route.model_copy(
                     update={"status": "disabled"}
                 )
+    if last_error_code == "protocol_unsupported":
+        # Design §1.2 matrix revision point 6: routes only live on cells that
+        # speak their protocol. Clear this cell's routes (phantom model lists on
+        # a dead transport are pure red noise) and strip role references to them.
+        unsupported_route_ids = {
+            route_id
+            for route_id, route in latest_credentials.provider_routes.items()
+            if route.endpoint_id == endpoint_id
+        }
+        if unsupported_route_ids:
+            roles = _load_roles_or_empty()
+            if roles_path().exists():
+                save_roles_file(
+                    roles_path(),
+                    _remove_route_references_from_roles(roles, unsupported_route_ids),
+                    known_route_ids=set(latest_credentials.provider_routes) - unsupported_route_ids,
+                )
+                record_runtime_activity(
+                    source_id="llm_roles",
+                    action="remove_endpoint_route_references",
+                    message="Removed role references to routes on a protocol-unsupported endpoint.",
+                    changes={
+                        "endpoint_id": endpoint_id,
+                        "route_ids": sorted(unsupported_route_ids),
+                    },
+                )
+            for route_id in unsupported_route_ids:
+                del latest_credentials.provider_routes[route_id]
     endpoint_update.update(
         {
             "status": status,
@@ -4387,27 +4459,40 @@ def _successful_generation_probe_capabilities() -> dict[str, Any]:
     }
 
 
-# apikeys#25: candidate transport protocols tried, in order, when auto-detecting
-# a third-party endpoint's protocol. The endpoint's currently-stored protocol is
-# always tried first by _third_party_protocol_candidates; this tuple supplies the
-# fallback rotation. Each protocol maps (via endpoint_probe_backend) to a distinct
-# request shape + auth header, so probing all four covers the auth-header combos.
-_THIRD_PARTY_PROTOCOL_CANDIDATES: tuple[ProviderType, ...] = (
-    "openai_compatible",
-    "anthropic_compatible",
-    "google_genai",
-)
 # apikeys#25: structural probe failures that will reject EVERY model on the
-# endpoint (bad key / billing), so the batch model-probe loop short-circuits
-# instead of burning a probe per model. invalid_model is NOT structural — it is
-# model-specific and means "this protocol reached the provider, that model id is
-# just wrong", so the loop keeps trying other models / counts the protocol as found.
+# endpoint (bad key / billing / URL does not speak this protocol), so the batch
+# model-probe loop short-circuits instead of burning a probe per model.
+# invalid_model is NOT structural — it is model-specific and means "this
+# protocol reached the provider, that model id is just wrong", so the loop
+# keeps trying other models.
 _STRUCTURAL_PROBE_STATUSES: frozenset[str] = frozenset(
-    {"invalid_key", "quota_exceeded"}
+    {"invalid_key", "quota_exceeded", "protocol_unsupported"}
 )
 # How many candidate model ids the batch inference probe will try before giving
 # up on an otherwise-reachable endpoint.
 _ENDPOINT_PROBE_MODEL_LIMIT = 6
+# Design §1.2 (protocol matrix) point 4: protocol_unsupported is an
+# architectural fact about the (base_url, protocol) cell, so its observation
+# has a long half-life — the routine Test skips the cell until it expires;
+# `force=true` re-probes immediately.
+_PROTOCOL_UNSUPPORTED_RECHECK = timedelta(days=30)
+
+
+def _protocol_unsupported_recheck_at(endpoint: ProviderEndpoint) -> datetime | None:
+    """When this cell's protocol_unsupported observation is due for re-probe.
+
+    Returns ``None`` when the endpoint's latest observation is not
+    protocol_unsupported (no gate applies).
+    """
+    if endpoint.last_error_code != "protocol_unsupported" or not endpoint.last_test_at:
+        return None
+    try:
+        observed_at = datetime.fromisoformat(endpoint.last_test_at)
+    except ValueError:
+        return None
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    return observed_at + _PROTOCOL_UNSUPPORTED_RECHECK
 
 
 @dataclass(frozen=True)
@@ -4425,12 +4510,12 @@ class EndpointGenerationVerification:
     # but there is no real model to verify generation — reachable-but-untested,
     # NOT a failure (W2-D / R-E1). The user adds a model id and single-model-tests.
     status: Literal["verified", "failed", "no_model"]
-    detected_protocol: ProviderType
     verified_model_id: str | None
     message: str
     probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # True when the failure is protocol-agnostic (invalid_key / quota_exceeded):
-    # the endpoint itself is broken, so a prior verified route must NOT be reused.
+    # True when the failure is protocol-agnostic within this cell (invalid_key /
+    # quota_exceeded / protocol_unsupported): the endpoint itself cannot generate,
+    # so a prior verified route must NOT be reused.
     failure_is_structural: bool = False
     # The actual failing probe (model_id/status/latency/message) so the Test flow
     # can build a probe-failed evidence record for that real model (R3.1-AC3 /
@@ -4438,17 +4523,8 @@ class EndpointGenerationVerification:
     failed_probe: RouteProbeResult | None = None
     # W2-E.1b diagnostics: every generation probe attempted, as
     # {protocol, model, status} — surfaced in the endpoint_test runtime-activity log
-    # so the user can see which protocol×model combos were tried and how each fared.
+    # so the user can see which model probes were tried and how each fared.
     probe_attempts: list[dict[str, Any]] = field(default_factory=list)
-
-
-def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
-    """Return the protocol rotation with the endpoint's stored protocol first."""
-    ordered: list[ProviderType] = [endpoint.protocol]
-    for candidate in _THIRD_PARTY_PROTOCOL_CANDIDATES:
-        if candidate not in ordered:
-            ordered.append(candidate)
-    return tuple(ordered)
 
 
 def _base_url_hostname(base_url: str) -> str:
@@ -4539,107 +4615,23 @@ def _endpoint_generation_probe_model_ids(
     return ordered[:_ENDPOINT_PROBE_MODEL_LIMIT]
 
 
-async def _detect_third_party_protocol(
-    endpoint: ProviderEndpoint,
-    probe_model_id: str,
-) -> tuple[ProviderType | None, RouteProbeResult | None]:
-    """Auto-detect the working protocol by probing one model per candidate.
-
-    For each candidate protocol we clone the endpoint with that protocol and run
-    a real generation probe for ``probe_model_id``. The FIRST candidate whose
-    probe is not a transport/protocol-level structural mismatch wins: an ``ok``
-    obviously wins, and an ``invalid_model`` also wins because it proves the
-    protocol/auth reached the provider (the model id is just wrong). Returns
-    ``(protocol, probe)`` on success; on failure returns ``(None, probe)`` where
-    ``probe`` is the last (structural or exhausted) result so the caller can tell
-    a broken endpoint (invalid_key / quota) from a merely wrong model id, or
-    ``(None, None)`` when there were no candidates to probe.
-    """
-    last_result: RouteProbeResult | None = None
-    for candidate in _third_party_protocol_candidates(endpoint):
-        candidate_endpoint = endpoint.model_copy(update={"protocol": candidate})
-        logger.info(
-            "third-party protocol auto-detect: trying protocol=%s endpoint=%s",
-            candidate,
-            endpoint.endpoint_id,
-        )
-        result = _model_probe_result_from_route_probe(
-            await _gateway_test_provider_model(candidate_endpoint, probe_model_id)
-        )
-        route_probe = RouteProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            route_id=f"{endpoint.endpoint_id}:{_route_slug(probe_model_id)}",
-            provider_kind=endpoint.provider_kind,
-            backend=_endpoint_probe_backend(candidate_endpoint),
-            base_url=_endpoint_probe_base_url(candidate_endpoint),
-            model_id=probe_model_id,
-            status=result.status,
-            latency_ms=result.latency_ms,
-            message=result.message,
-        )
-        last_result = route_probe
-        if route_probe.status == "ok" or route_probe.status == "invalid_model":
-            logger.info(
-                "third-party protocol detected protocol=%s endpoint=%s probe_status=%s",
-                candidate,
-                endpoint.endpoint_id,
-                route_probe.status,
-            )
-            return candidate, route_probe
-        if route_probe.status in _STRUCTURAL_PROBE_STATUSES:
-            # invalid_key / quota_exceeded are protocol-agnostic — rotating the
-            # protocol cannot fix them, so stop probing further candidates.
-            logger.warning(
-                "third-party protocol auto-detect short-circuit endpoint=%s status=%s",
-                endpoint.endpoint_id,
-                route_probe.status,
-            )
-            return None, route_probe
-    if last_result is not None:
-        logger.warning(
-            "third-party protocol auto-detect exhausted endpoint=%s last_status=%s",
-            endpoint.endpoint_id,
-            last_result.status,
-        )
-    return None, last_result
-
-
-async def _detect_third_party_protocol_for_models(
-    endpoint: ProviderEndpoint,
-    probe_model_ids: Sequence[str],
-) -> tuple[ProviderType | None, RouteProbeResult | None]:
-    """Detect protocol using the same batch model set used for verification."""
-    last_probe: RouteProbeResult | None = None
-    for probe_model_id in probe_model_ids:
-        detected_protocol, detection_probe = await _detect_third_party_protocol(
-            endpoint,
-            probe_model_id,
-        )
-        if detected_protocol is not None:
-            return detected_protocol, detection_probe
-        last_probe = detection_probe
-        if detection_probe is not None and detection_probe.status in _STRUCTURAL_PROBE_STATUSES:
-            return None, detection_probe
-    return None, last_probe
-
-
 async def _verify_endpoint_by_generation_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
-    *,
-    detect_protocol: bool,
 ) -> EndpointGenerationVerification:
     """Run batch inference probing to verify an endpoint can actually generate.
 
-    apikeys#24/#25 (revised 2026-07-01): get-models only proves key+URL
-    reachability — for official AND third-party endpoints alike. A reachable
-    endpoint can still be unable to generate (an exhausted credit balance keeps
-    the model list working while every generation call fails), so the endpoint
-    is promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
-    Third-party endpoints additionally auto-detect the transport protocol
-    (``detect_protocol=True``); official endpoints keep their fixed protocol.
-    The batch stops on the first ``ok`` and short-circuits structural errors.
+    apikeys#24/#25 + design §1.2 protocol matrix (2026-07-02): an endpoint is one
+    immutable (base_url, protocol) cell, so the batch probes with the endpoint's
+    OWN protocol only — no candidate rotation, no clone-with-another-protocol,
+    no protocol rewrite. get-models only proves key+URL reachability, so the
+    endpoint is promoted to ``verified`` ONLY when a real generation probe
+    returns ``ok``. Every attempt lands in ``probe_attempts`` (the old rotation
+    swallowed its intermediate failures, which made protocol flips unexplainable
+    from the runtime log). The batch stops on the first ``ok`` and
+    short-circuits structural errors (invalid_key / quota_exceeded /
+    protocol_unsupported — all of which reject every model on this cell).
     """
     probe_attempts: list[dict[str, Any]] = []
     probe_model_ids = _endpoint_generation_probe_model_ids(
@@ -4652,7 +4644,6 @@ async def _verify_endpoint_by_generation_probe(
         # failed — the user adds a model id and runs a single-model test.
         return EndpointGenerationVerification(
             status="no_model",
-            detected_protocol=endpoint.protocol,
             verified_model_id=None,
             message=(
                 "Endpoint reachable, but it returned no models to verify. "
@@ -4661,71 +4652,26 @@ async def _verify_endpoint_by_generation_probe(
             probe_attempts=probe_attempts,
         )
 
-    first_probe: RouteProbeResult | None = None
-    detected_protocol = endpoint.protocol
-    if detect_protocol:
-        detected, detection_probe = await _detect_third_party_protocol_for_models(
-            endpoint, probe_model_ids
-        )
-        if detection_probe is not None:
-            # W2-E.1b: record the protocol-detection probe as the first attempt.
-            probe_attempts.append(
-                {
-                    "protocol": detected or endpoint.protocol,
-                    "model": detection_probe.model_id,
-                    "status": detection_probe.status,
-                }
-            )
-        if detected is None:
-            structural = (
-                detection_probe is not None
-                and detection_probe.status in _STRUCTURAL_PROBE_STATUSES
-            )
-            message = (
-                _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
-                if structural and detection_probe is not None
-                else _protocol_detection_failure_message(probe_model_ids, detection_probe)
-            )
-            return EndpointGenerationVerification(
-                status="failed",
-                detected_protocol=endpoint.protocol,
-                verified_model_id=None,
-                message=message,
-                failure_is_structural=structural,
-                failed_probe=detection_probe,
-                probe_attempts=probe_attempts,
-            )
-        assert detection_probe is not None  # detected protocol => probe present
-        detected_protocol = detected
-        first_probe = detection_probe
-
-    detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
-
-    last_failure: RouteProbeResult | None = first_probe
+    last_failure: RouteProbeResult | None = None
     for model_id in probe_model_ids:
-        if first_probe is not None and model_id == first_probe.model_id:
-            # This model was already probed (and recorded) during protocol detection.
-            probe = first_probe
-        else:
-            probe = await _gateway_test_provider_route(
-                detected_endpoint,
-                _gateway_probe_route(detected_endpoint, model_id),
-            )
-            probe_attempts.append(
-                {"protocol": detected_protocol, "model": model_id, "status": probe.status}
-            )
+        probe = await _gateway_test_provider_route(
+            endpoint,
+            _gateway_probe_route(endpoint, model_id),
+        )
+        probe_attempts.append(
+            {"protocol": endpoint.protocol, "model": model_id, "status": probe.status}
+        )
         if probe.status == "ok":
             logger.info(
                 "endpoint batch probe verified endpoint=%s protocol=%s model=%s",
                 endpoint.endpoint_id,
-                detected_protocol,
+                endpoint.protocol,
                 model_id,
             )
             return EndpointGenerationVerification(
                 status="verified",
-                detected_protocol=detected_protocol,
                 verified_model_id=model_id,
-                message=f"Generation verified via {detected_protocol}. Model: {model_id}.",
+                message=f"Generation verified via {endpoint.protocol}. Model: {model_id}.",
                 probe_capabilities={
                     model_id: _third_party_probe_capabilities(
                         model_id,
@@ -4746,7 +4692,6 @@ async def _verify_endpoint_by_generation_probe(
     assert last_failure is not None  # probe_model_ids is non-empty => loop probed
     return EndpointGenerationVerification(
         status="failed",
-        detected_protocol=detected_protocol,
         verified_model_id=None,
         message=_model_probe_failure_message(
             _model_probe_result_from_route_probe(last_failure)
@@ -4755,25 +4700,6 @@ async def _verify_endpoint_by_generation_probe(
         failed_probe=last_failure,
         probe_attempts=probe_attempts,
     )
-
-
-def _protocol_detection_failure_message(
-    probe_model_ids: Sequence[str],
-    detection_probe: RouteProbeResult | None,
-) -> str:
-    message = (
-        "Could not auto-detect a working protocol for this endpoint "
-        f"after probing {len(probe_model_ids)} candidate models."
-    )
-    if detection_probe is None:
-        return message
-    detail = (
-        f" Last probe: {detection_probe.backend} / {detection_probe.model_id} "
-        f"returned {detection_probe.status}"
-    )
-    if detection_probe.message:
-        detail += f" ({detection_probe.message})"
-    return f"{message}{detail}"
 
 
 async def _probe_third_party_models_for_endpoint(

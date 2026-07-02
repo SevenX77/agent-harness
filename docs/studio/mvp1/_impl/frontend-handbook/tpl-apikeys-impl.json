@@ -93,18 +93,18 @@
    "n": 25,
    "cap": "tp-getmodels",
    "design_ref": "atom-25",
-   "current": "现状:已实现且符合。第三方 ProviderCard 的 API Key 行右侧按钮文案为 Test,不再出现 Get Models;卡内 Endpoint test 输入单元已移除。点击走 SettingsPage 的 onGetProviderModels/getProviderModels 链路,先持久化每条 Base URL × 三个第三方 protocol endpoint,再逐个 POST /endpoints/{id}/test。后端 endpoint test 与单模型 test 统一为模型 probe:测试过的每个模型都会写 route,ok 写 verified,invalid_model/error 写 failed 并继续尝试其它模型;endpoint 状态由这些模型 probe 结果汇总。返回的 available_models/test_results 投影到 Available Endpoints 与 Available Models。",
-   "gap": "符合设计,无需改。注意:这里不再『猜一个 protocol』;同一 URL 的 OpenAI / Anthropic / Gemini 候选 endpoint 各自测试、各自保留结果,失败候选也显示红态。",
+   "current": "现状:已实现且符合(2026-07-02 矩阵修订后)。点击 Test 走 SettingsPage 的 onGetProviderModels/getProviderModels 链路:先对每个矩阵格子做前置 upsert(existing 格子固定携带持久化 protocol,后端 422 拒绝改协议),再逐格子 POST /endpoints/{id}/test。每个格子只用自身协议跑批量生成探测;protocol_unsupported 观察 → endpoint failed + last_error_code=protocol_unsupported + 该格子 routes 清空;30 天半衰期内日常 Test 跳过该格子(skipped=true + endpoint_test_skipped 日志),UI 显示 muted 'Protocol not supported' 芯片 + Re-probe 按钮(forceTestEndpoint → ?force=true)。前端槽位由持久化 provider_type 决定(providerTypeFromEndpointId slug 反推已删除)。",
+   "gap": "符合设计,无需改。注意:不存在『轮换选出唯一协议』——同一 URL 的三个格子各自测试、各自记录观察;unsupported 格子灰显不红显(无需用户修复),失败候选信息不吞掉。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。POST /endpoints/{id}/test 对第三方 endpoint 按该 endpoint 的 protocol 跑模型 probe,并通过同一条 route 写回逻辑沉淀每个模型的 verified/failed 结果;PUT /registry/endpoints 负责测试前置 upsert。",
-   "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
+   "be_dep": "已就绪可接。POST /endpoints/{id}/test?force= 对格子按自身 protocol 跑批量生成探测并支持半衰期门;PUT /registry/endpoints 承担前置 upsert(protocol 不可变、组合唯一、事实字段保留);gateway provider_probe 提供 protocol_unsupported 分类。",
+   "fe_resync": "协议探测矩阵落地(2026-07-02)"
   },
   {
    "n": 26,
    "cap": "available-endpoints-summary",
    "design_ref": "atom-26",
-      "current": "现状:已实现且符合。ProviderCard 渲染 AvailableEndpointSummary:official 与 third-party 都显示 Available Endpoints;第三方按多 Base URL × openai_compatible / anthropic_compatible / google_genai 三个候选 endpoint 平铺。endpoint 不再用 model chip/Tag 的圆形药丸样式,改为更方的状态块;标签文字缩短为 protocol 短名 + compact host(如 OpenAI / api.qnaigc、Anth / api.qnaigc、Gemini / api.qnaigc),不在块内写 Connected/Failed,只用颜色表达连通性;Radix Tooltip 显示 endpoint id、用户输入 URL、protocol 归一化后的 runtime URL(与输入不同时单独列出)、protocol、status、routes、profiles、verified method ids、request mapper ids、tool protocol、last test/message。每条 Base URL 输入行也聚合它展开出的 endpoint 状态:任一候选可达显示绿勾,候选全失败显示红叉。Ark 这类 official provider 的多调用路径按 call methods / verified profiles 展开,不伪装为多个 endpoint。第三方卡旧的 Endpoint test 输入框和第二个 Test 按钮已删除。",
-      "gap": "符合设计,无需改。多 Base URL / + URL / 多 protocol endpoint 投影已落地并完成 Qiniu 真 key实测;endpoint tooltip 已能区分用户输入 URL 与 protocol canonical runtime URL。",
+   "current": "现状:已实现且符合。ProviderCard 渲染 AvailableEndpointSummary:official 与 third-party 都显示 Available Endpoints;第三方按多 Base URL × openai_compatible / anthropic_compatible / google_genai 三个候选 endpoint 平铺。endpoint 不再用 model chip/Tag 的圆形药丸样式,改为更方的状态块;标签文字缩短为 protocol 短名 + compact host(如 OpenAI / api.qnaigc、Anth / api.qnaigc、Gemini / api.qnaigc),不在块内写 Connected/Failed,只用颜色表达连通性;Radix Tooltip 显示 endpoint id、用户输入 URL、protocol 归一化后的 runtime URL(与输入不同时单独列出)、protocol、status、routes、profiles、verified method ids、request mapper ids、tool protocol、last test/message。每条 Base URL 输入行也聚合它展开出的 endpoint 状态:任一候选可达显示绿勾,候选全失败显示红叉。Ark 这类 official provider 的多调用路径按 call methods / verified profiles 展开,不伪装为多个 endpoint。第三方卡旧的 Endpoint test 输入框和第二个 Test 按钮已删除。",
+   "gap": "符合设计,无需改。多 Base URL / + URL / 多 protocol endpoint 投影已落地并完成 Qiniu 真 key实测;endpoint tooltip 已能区分用户输入 URL 与 protocol canonical runtime URL。",
    "fe_status": "符合",
    "be_dep": "已就绪可接当前单 URL 投影。GET /registry/test_results 提供 endpoint 与 route 状态;多 URL 需要后端/前端保存契约扩展。"
   },
@@ -140,7 +140,7 @@
    "n": 30,
    "cap": "test-status-projection",
    "design_ref": "atom-30",
-      "current": "现状:已接 6 态(本轮后端 Probe Knowledge Catalog 生命周期补齐 + 前端蓝态层级订正后端到端打通)。前端半——ProviderCard(ProviderCard.tsx)已从旧 RouteStatus 枚举迁到后端 6 态。**蓝态层级(2026-06-23 订正,关键)**:蓝(historical_ready『Previously Connected』)落在**路由标签**上——routeTagVariantFromUiState 据 route.ui_state 给标签着色(§143);**provider 标题不挂 6 态徽章**(§140 官方),按下 Test 后官方卡的连通状态显示在『API Key』旁的**绿色 ✓**(可达),不是蓝。第三方卡标题仍挂 Connected/Ready/failed 徽章(§143)。六态色映射复用 LLM Roles 同一套 provider-state-badge.tsx(ready 绿 / historical_ready 蓝 / untested 灰 / failed 红 / cooling_down 灰+倒计时 / off 灰禁用)。Available Models 已区分视角:official 的 Available Routes 仍按 route 展示;third-party/custom 的 Available Models 先按真实 model id 聚合,任一 endpoint route ready/verified 则 model 标签为绿,否则任一 historical_ready/probe-verified 则为蓝;只有 reason_code=invalid_model/model_not_found 等模型级失败才标红;endpoint/protocol/API key/upstream failure 只在 tooltip 中标 Endpoint failed,model 标签保持 untested/neutral。第三方模型 tooltip 展示聚合下的 route status、endpoint id、route id、失败作用域、失败消息和 probe attempts,避免多 endpoint route 把同一个 model 刷成重复标签,也避免把 endpoint failed 误判为 model failed。蓝态证据来源已收紧为:Probe Knowledge Catalog 的 probe-verified 历史必须先通过晋升规则写进 credentials route.metadata.evidence_refs,registry/role materialization 再从 credentials 投影出蓝;catalog-only 孤立证据不出蓝。口径收回真探历史(gap③,观测 provider-list-observed 永不出蓝)。真机验证(真后端 :8795 + .env 真 key 按 Test):OpenAI/Anthropic/Gemini/OpenRouter 真 verified→provider 绿 ✓、路由灰 untested;WaveSpeed 两 base 真 401→红 failed + 真错误码;空卡 placeholder 可读(见 #30 四张真机图)。蓝态(historical_ready)路由标签渲染由单测守(本轮真探路由均 untested/ready,不强造蓝图)。注:旧 import-draft 路径非 MVP1 主线,蓝态靠 credentials evidence_refs 点亮。",
+   "current": "现状:已接 6 态(本轮后端 Probe Knowledge Catalog 生命周期补齐 + 前端蓝态层级订正后端到端打通)。前端半——ProviderCard(ProviderCard.tsx)已从旧 RouteStatus 枚举迁到后端 6 态。**蓝态层级(2026-06-23 订正,关键)**:蓝(historical_ready『Previously Connected』)落在**路由标签**上——routeTagVariantFromUiState 据 route.ui_state 给标签着色(§143);**provider 标题不挂 6 态徽章**(§140 官方),按下 Test 后官方卡的连通状态显示在『API Key』旁的**绿色 ✓**(可达),不是蓝。第三方卡标题仍挂 Connected/Ready/failed 徽章(§143)。六态色映射复用 LLM Roles 同一套 provider-state-badge.tsx(ready 绿 / historical_ready 蓝 / untested 灰 / failed 红 / cooling_down 灰+倒计时 / off 灰禁用)。Available Models 已区分视角:official 的 Available Routes 仍按 route 展示;third-party/custom 的 Available Models 先按真实 model id 聚合,任一 endpoint route ready/verified 则 model 标签为绿,否则任一 historical_ready/probe-verified 则为蓝;只有 reason_code=invalid_model/model_not_found 等模型级失败才标红;endpoint/protocol/API key/upstream failure 只在 tooltip 中标 Endpoint failed,model 标签保持 untested/neutral。第三方模型 tooltip 展示聚合下的 route status、endpoint id、route id、失败作用域、失败消息和 probe attempts,避免多 endpoint route 把同一个 model 刷成重复标签,也避免把 endpoint failed 误判为 model failed。蓝态证据来源已收紧为:Probe Knowledge Catalog 的 probe-verified 历史必须先通过晋升规则写进 credentials route.metadata.evidence_refs,registry/role materialization 再从 credentials 投影出蓝;catalog-only 孤立证据不出蓝。口径收回真探历史(gap③,观测 provider-list-observed 永不出蓝)。真机验证(真后端 :8795 + .env 真 key 按 Test):OpenAI/Anthropic/Gemini/OpenRouter 真 verified→provider 绿 ✓、路由灰 untested;WaveSpeed 两 base 真 401→红 failed + 真错误码;空卡 placeholder 可读(见 #30 四张真机图)。蓝态(historical_ready)路由标签渲染由单测守(本轮真探路由均 untested/ready,不强造蓝图)。注:旧 import-draft 路径非 MVP1 主线,蓝态靠 credentials evidence_refs 点亮。",
    "gap": "符合设计,无需改。蓝态证据链已收口:catalog sync/cache 不直接点亮 UI,Test 才把匹配 evidence_refs 写进 credentials;registry / role materialization 只从 credentials 投影 historical_ready。Import Draft 已退出 MVP1,不再作为蓝态依赖。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /registry 在 endpoint/route 上内嵌 6 态 ui_state;蓝态只由 credentials route.metadata.evidence_refs 投影。sync-verified 只拉远端 verified cache,不写 credentials;endpoint Test 保存结果时应用 cached community evidence。观测(provider-list-observed)不得出蓝、catalog-only evidence 不得出蓝的口径已钉死并加回归测试。",
@@ -333,27 +333,35 @@
    ],
    "shots": [
     "状态 untested→testing→verified(真模型调用真跑、验通才 verified)",
-    "第三方按钮文案为 `Test`(非 Get Models)"
+    "unsupported 格子灰显 'Protocol not supported' + Re-probe 按钮(不再假报 Untested/Invalid API key)"
    ],
    "fe_status": "符合",
    "layer1": [
     "契约测:断言官方卡与第三方卡的 Test 都打 POST /endpoints/{id}/test(官三都不再走『get-models 可达=ok』弱判定)。",
-    "mock 后端回 verified → 断言卡升 verified、Routes/Models 回填。",
-    "后端契约测:官方 Test 恰好打一次生成探测且只挑语言模型候选(test_official_endpoint_test_verifies_via_one_generation_probe);欠费类结构失败 → endpoint failed、不复用旧 verified、批量短路(test_official_endpoint_test_billing_failure_fails_endpoint);gateway 把含 credit/billing 标记的 400 归类 quota_exceeded(test_provider_probe.py)。",
-    "后端契约测:第三方走 test-jobs 不再被 400(llm.py 门禁已解)。"
+    "后端契约测:格子只用自身协议探测且失败不改写 protocol(test_endpoint_test_probes_only_its_own_protocol_and_never_rewrites_it);protocol_unsupported → 清 routes + 剥 role 引用(..._removes_routes_and_role_refs);半衰期门 30 天内跳过、force 绕过、31 天后自动复测(..._is_gated_within_half_life / ..._gate_expires_after_half_life);unsupported 不复用旧 verified(..._does_not_reuse_previously_verified);upsert 改协议 422、新建重复组合 422、存量重复容忍更新(test_upsert_endpoints_*)。",
+    "gateway 契约测:裸 404/405 与 'Use /v1/messages instead' 指引 → protocol_unsupported;provider 错误体包裹的 404 仍 invalid_model(test_provider_probe.py)。",
+    "前端测:protocol_unsupported 直达 endpoint 状态、不再被 model-scope 掩成 untested(llm.test.ts);槽位按持久化协议、不按 id slug(SettingsPage.test.tsx);unsupported 芯片 + Re-probe 按钮渲染(ProviderCard.test.tsx)。"
    ],
    "layer2": [
-    "真跑(用真 key,关键):对一个真第三方 endpoint 点 Test,看状态流转。",
-    "真跑:对 Anthropic Official 点 Test,确认 last_test_message 为 'Generation verified via anthropic_compatible. Model: …'(生成真跑过),endpoint_test runtime-activity 带 probe_attempts。",
-    "看第三方卡按钮文案。"
+    "真跑(真 qiniu key):点 Test 看 2 URL × 3 协议矩阵——4 个 verified 绿格子、google 格子 'Protocol not supported' 灰显、routes 清空。",
+    "真跑:连点两轮 Test,确认 openai 格子协议零翻转、第二轮 unsupported 格子被跳过(runtime log endpoint_test_skipped + recheck 日期)。",
+    "真跑:点 unsupported 格子的 Re-probe 按钮,确认强制复测真打 provider 并刷新观察时间。"
    ],
    "screenshots": [
     {
      "file": "n0-apikeys-24-official-generation-verified.png",
      "caption": "真机(worktree 私有 sidecar,真 Anthropic key):官方卡 Test 后 hover endpoint 标签——Message 显示 'Generation verified via anthropic_compatible. Model: claude-sonnet-5.',官方端点 verified 现在以一次真实生成探测为准,不再 get-models 连通即绿"
+    },
+    {
+     "file": "n0-apikeys-25-protocol-matrix-cells.png",
+     "caption": "真机(worktree 私有 sidecar,真 qiniu key):Test 后 2 URL × 3 协议矩阵——OpenAI/Anth 格子 verified 绿,Gemini 与 anthropic-host 的 OpenAI 格子灰显 'Protocol not supported' 并带 Re-probe 按钮,不再假报 Untested/Invalid API key"
+    },
+    {
+     "file": "n0-apikeys-25-unsupported-reprobe-closeup.png",
+     "caption": "特写:unsupported 格子 muted 样式 + 单格子 Re-probe 按钮(?force=true 绕过 30 天半衰期门)"
     }
    ],
-   "fe_resync": "官方生成探测落地、官三判定完全对称(2026-07-01)"
+   "fe_resync": "协议探测矩阵 + 半衰期门真机验证(2026-07-02)"
   },
   {
    "covers": "#26 available-endpoints-summary",
@@ -361,8 +369,7 @@
     26
    ],
    "shots": [
-    "official 与 third-party provider 卡都显示 Available Endpoints;hover endpoint 标签显示协议/状态/method/profile/tool protocol 详情"
-    ,
+    "official 与 third-party provider 卡都显示 Available Endpoints;hover endpoint 标签显示协议/状态/method/profile/tool protocol 详情",
     "third-party 多 Base URL 行尾分别显示该 URL 的聚合状态:可达 URL 绿勾,失败 URL 红叉"
    ],
    "fe_status": "符合",

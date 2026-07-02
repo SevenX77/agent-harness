@@ -896,6 +896,52 @@ describe('API Keys v4 registry adapter', () => {
     expect(credentials.providers[0].last_error_code).toBe('invalid_model')
   })
 
+  it('surfaces protocol_unsupported as its own endpoint state, never masked as untested', async () => {
+    // Design §1.2 protocol matrix (2026-07-02): "this URL does not speak this
+    // protocol" is a first-class endpoint fact. The old classification funnelled
+    // it into invalid_model, and the model-scope masking then displayed a tested,
+    // structurally dead cell as "Untested" — two lies from one conflation.
+    let currentRegistry = registry()
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'get') return currentRegistry
+      if (config.method === 'put') return currentRegistry
+      if (config.method === 'post' && config.url === '/llm/endpoints/openrouter-custom/test') {
+        currentRegistry = registry({
+          provider_endpoints: {
+            'openrouter-custom': {
+              ...endpoint,
+              status: 'failed',
+              last_test_at: '2026-07-02T09:00:00Z',
+              last_test_message: 'Endpoint model probe failed (protocol_unsupported). Provider returned HTTP 404. not found or method not allowed',
+              last_error_code: 'protocol_unsupported',
+            },
+          },
+          provider_routes: {},
+        })
+        return {
+          registry: currentRegistry,
+          tested_endpoint_id: 'openrouter-custom',
+          discovered_model_count: 0,
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const result = await getProviderModels({
+      id: 'openrouter-custom',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://openrouter.ai/api/v1',
+    })
+
+    expect(result.status).toBe('protocol_unsupported')
+    expect(result.error_code).toBe('protocol_unsupported')
+
+    const credentials = await getCredentials()
+    expect(credentials.providers[0].last_test_status).toBe('protocol_unsupported')
+    expect(credentials.providers[0].last_error_code).toBe('protocol_unsupported')
+  })
+
   it('reports a third-party endpoint as failed when the probe does not reach verified (apikeys#25)', async () => {
     // The old heuristic (status !== 'failed' => ok) is gone; a reachable endpoint
     // whose batch inference probe never succeeds stays out of the connected state.

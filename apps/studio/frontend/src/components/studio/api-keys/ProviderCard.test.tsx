@@ -1798,4 +1798,40 @@ describe("ProviderCard delete confirmation", () => {
 
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
+
+  it("shows a protocol-unsupported cell honestly and offers a force re-probe", () => {
+    // Design §1.2 protocol matrix point 4: within the 30-day half-life the bulk
+    // Test skips the cell, so the card must (a) label the cell "Protocol not
+    // supported" (not "Untested"/"Invalid API key" lies) and (b) offer an
+    // explicit per-cell re-probe that bypasses the gate.
+    const unsupported = makePersisted({
+      id: "qiniu-google",
+      name: "Qiniu",
+      base_url: "https://api.qiniu.example/v1",
+      provider_type: "google_genai",
+      last_test_status: "protocol_unsupported" as TestStatus,
+      last_error_code: "protocol_unsupported",
+      last_test_at: "2026-07-02T09:00:00Z",
+      last_test_message: "Endpoint model probe failed (protocol_unsupported).",
+    })
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({
+          id: "qiniu-google",
+          name: "Qiniu",
+          base_url: "https://api.qiniu.example/v1",
+          provider_type: "google_genai",
+        })}
+        persisted={unsupported}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+        onForceEndpointTest={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain("Protocol not supported")
+    expect(html).toContain("Re-probe protocol")
+  })
 })

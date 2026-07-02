@@ -29,6 +29,7 @@ export function SettingsPageContent({
   onTabChange,
   onProviderFieldChange,
   onGetProviderModels,
+  onForceEndpointTest,
   onDeleteProvider,
   onDeleteProviderEndpoints,
   onBeginAddProvider,
@@ -144,6 +145,7 @@ export function SettingsPageContent({
                     saveStatus={saveStatus}
                     onProviderFieldChange={onProviderFieldChange}
                     onGetProviderModels={onGetProviderModels}
+                    onForceEndpointTest={onForceEndpointTest}
                     onDeleteProvider={onDeleteProvider}
                     onDeleteProviderEndpoints={onDeleteProviderEndpoints}
                     onBeginAddProvider={onBeginAddProvider}

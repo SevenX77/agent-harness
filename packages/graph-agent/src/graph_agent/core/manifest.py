@@ -44,7 +44,7 @@ class ArtifactSpec(BaseModel):
     format: Literal["json", "md"] = "json"
 
     @model_validator(mode="after")
-    def _md_requires_single_field(self) -> "ArtifactSpec":
+    def _md_requires_single_field(self) -> ArtifactSpec:
         if self.format == "md" and len(self.fields) != 1:
             raise ValueError("format 'md' artifacts must declare exactly one field")
         return self

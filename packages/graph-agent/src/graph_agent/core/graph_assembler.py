@@ -79,7 +79,11 @@ from graph_agent.runtime.state_mapper import (
     schema_properties,
 )
 from graph_agent.tools.builtin.read_example import read_declared_example
-from graph_agent.tools.builtin.read_file import RuntimeInputFileError, read_workspace_text_file
+from graph_agent.tools.builtin.read_file import (
+    RuntimeInputFileError,
+    list_workspace_batch_files,
+    read_workspace_text_file,
+)
 from graph_agent.tools.builtin.read_reference import read_declared_reference, read_resource_file
 
 MAX_REACT_TURNS = 8
@@ -108,7 +112,9 @@ class _SubagentRuntime:
 @dataclass(frozen=True)
 class _InputFileSpec:
     field: str
-    path: str
+    path: str | None = None
+    batch_dir: str | None = None
+    batch_pattern: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1232,6 +1238,29 @@ def _declared_input_file_specs(
             continue
         if schema.get("source") != "file":
             continue
+        batch_dir = schema.get("dir")
+        batch_pattern = schema.get("pattern")
+        if isinstance(batch_dir, str) and batch_dir.strip():
+            if not isinstance(batch_pattern, str) or "{n}" not in batch_pattern:
+                detail = (
+                    f"batch file input field {field_name!r} declares dir but its "
+                    "pattern has no {n} number placeholder"
+                )
+                raise GraphAgentFatalError(
+                    detail,
+                    payload=make_error_payload(
+                        "[F-v3-runtime-state-mapping-failed]",
+                        detail,
+                        phase_id=phase_id,
+                        field_path=field_name,
+                    ),
+                )
+            specs.append(
+                _InputFileSpec(
+                    field=field_name, batch_dir=batch_dir, batch_pattern=batch_pattern
+                )
+            )
+            continue
         path = schema.get("path")
         if not isinstance(path, str) or not path.strip():
             detail = f"file input field {field_name!r} has source='file' but no path"
@@ -1258,21 +1287,22 @@ def _inject_declared_input_files(
     workspace_dir = _workspace_dir_from_state(state, phase_id=phase_id)
     next_state = state
     for spec in file_specs:
+        source_ref = spec.path if spec.path else f"{spec.batch_dir}/{spec.batch_pattern}"
         if spec.field.startswith("_"):
             _input_file_fatal(
                 f"file input target field {spec.field!r} is not a business field",
                 phase_id=phase_id,
                 field_path=spec.field,
-                source_path=spec.path,
+                source_path=source_ref,
             )
         try:
-            content = read_workspace_text_file(spec.path, workspace_dir)
+            content = _read_input_file_value(spec, workspace_dir)
         except RuntimeInputFileError as exc:
             _input_file_fatal(
                 str(exc),
                 phase_id=phase_id,
                 field_path=spec.field,
-                source_path=spec.path,
+                source_path=source_ref,
                 cause=exc,
             )
         next_state = StateManager.update_business(next_state, **{spec.field: content})
@@ -1283,11 +1313,38 @@ def _inject_declared_input_files(
                 to_phase=phase_id,
                 changed_keys=[spec.field],
                 blackboard_snapshot=next_state["data"].model_dump(),
-                file_ref=spec.path,
+                file_ref=source_ref,
                 target_field=spec.field,
             ),
         )
     return next_state
+
+
+def _read_input_file_value(spec: _InputFileSpec, workspace_dir: Path) -> Any:
+    """Resolve one file spec: single path -> text; batch dir+pattern -> the
+    numbered members aggregated into a list ordered by extracted number
+    (design: input region F5 — batch numbers kept; .json members parse,
+    other suffixes inject as raw text)."""
+    if spec.batch_dir and spec.batch_pattern:
+        members = list_workspace_batch_files(spec.batch_dir, spec.batch_pattern, workspace_dir)
+        values: list[Any] = []
+        for _, member in members:
+            text = read_workspace_text_file(
+                member.relative_to(Path(workspace_dir).resolve()).as_posix(),
+                workspace_dir,
+            )
+            if member.suffix.lower() == ".json":
+                try:
+                    values.append(json.loads(text))
+                except ValueError as exc:
+                    raise RuntimeInputFileError(
+                        f"batch file input member {member.name!r} is not valid JSON: {exc}"
+                    ) from exc
+            else:
+                values.append(text)
+        return values
+    assert spec.path is not None
+    return read_workspace_text_file(spec.path, workspace_dir)
 
 
 def _workspace_dir_from_state(state: WorkflowState, *, phase_id: str) -> Path:

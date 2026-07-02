@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -194,3 +195,64 @@ def scan_path(request: ScanRequest) -> dict[str, Any]:
     if target.is_file():
         return {"entries": [_file_entry(target)]}
     return {"entries": _scan_dir(target, depth=1)}
+
+
+class ImportRequest(BaseModel):
+    path: str
+    name: str | None = None
+
+
+_IMPORT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+skill_io_router = APIRouter(prefix="/api/skills/{skill_id}/io", tags=["io"])
+
+
+def _rebase_entry_paths(entries: list[dict[str, Any]], workspace_root: Path) -> None:
+    for entry in entries:
+        for key in ("path", "dir"):
+            value = entry.get(key)
+            if isinstance(value, str):
+                entry[key] = Path(value).relative_to(workspace_root).as_posix()
+        nested = entry.get("entries")
+        if isinstance(nested, list):
+            _rebase_entry_paths(nested, workspace_root)
+
+
+@skill_io_router.post("/import")
+def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, Any]:
+    """Copy an external file/folder into ``.workspace/imports/<name>/``.
+
+    Imports are runtime workspace data (same class as runs/ and golden/ that
+    the backend already writes), NOT skill source -- so this write does not go
+    through the Rust native-fs sole-writer. The copy is what makes the
+    engine's workspace-contained ``source:'file'`` declarations resolvable
+    (absolute/external paths are rejected at runtime by design). ``history/``
+    subfolders are version archives and are skipped.
+    """
+    from app.services.skills import resolve_skill_dir
+
+    source = Path(request.path)
+    if not source.exists():
+        raise HTTPException(status_code=404, detail=f"path not found: {request.path}")
+
+    raw_name = request.name or (source.stem if source.is_file() else source.name)
+    if not _IMPORT_NAME_RE.match(raw_name or ""):
+        raise HTTPException(status_code=422, detail=f"unsafe import name: {raw_name!r}")
+
+    workspace_root = (resolve_skill_dir(skill_id) / ".workspace").resolve()
+    target_dir = workspace_root / "imports" / raw_name
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    if source.is_file():
+        target_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target_dir / source.name)
+    else:
+        shutil.copytree(
+            source,
+            target_dir,
+            ignore=shutil.ignore_patterns("history"),
+        )
+
+    entries = _scan_dir(target_dir, depth=1)
+    _rebase_entry_paths(entries, workspace_root)
+    return {"dir": f"imports/{raw_name}", "entries": entries}

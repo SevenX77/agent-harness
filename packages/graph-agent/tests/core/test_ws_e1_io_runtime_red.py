@@ -12,8 +12,6 @@ import pytest
 from graph_agent.callbacks.events import InputFileInjectedEvent
 from graph_agent.core.result import RunResult
 from graph_agent.core.runner import run_skill
-from graph_agent.io.manager import IOManager
-from graph_agent.io.storage import StorageManager
 
 RAW_BUSINESS_MD = "## main\n- answer: raw ok\n\n<!-- preserve-me -->\n\n- note: keep spacing"
 

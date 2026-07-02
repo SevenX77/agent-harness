@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -2292,12 +2292,21 @@ def test_endpoint_test_preserves_route_evidence_and_projects_historical_ready(
             model_capabilities={"gpt-5": {}},
         )
 
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+
     monkeypatch.setattr(
         llm_router,
         "_gateway_test_provider_endpoint",
         fake_gateway_test_provider_endpoint,
         raising=False,
     )
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
     response = client.post("/api/llm/endpoints/openai-official/test")
 
@@ -2308,7 +2317,8 @@ def test_endpoint_test_preserves_route_evidence_and_projects_historical_ready(
     # Evidence survived the re-run Test (SSOT); the probe catalog stays untouched.
     persisted = load_credentials(credentials_path())
     persisted_route = persisted.provider_routes["openai-official:gpt-5"]
-    assert [e.trust_state for e in persisted_route.evidence] == ["probe-verified"]
+    assert "probe-verified" in [e.trust_state for e in persisted_route.evidence]
+    assert all(e.trust_state == "probe-verified" for e in persisted_route.evidence)
 
 def test_third_party_probe_model_ids_fall_back_to_draft_known_models(
     tmp_path: Path,
@@ -2342,7 +2352,7 @@ def test_third_party_probe_model_ids_fall_back_to_draft_known_models(
         credentials_path(),
     )
 
-    assert llm_router._third_party_probe_model_ids(endpoint, ()) == ["draft-known-model"]
+    assert llm_router._endpoint_generation_probe_model_ids(endpoint, ()) == ["draft-known-model"]
 
 
 def test_third_party_probe_model_ids_leads_with_verified_then_unknown_then_failed(
@@ -2409,7 +2419,7 @@ def test_third_party_probe_model_ids_leads_with_verified_then_unknown_then_faile
         credentials_path(),
     )
 
-    model_ids = llm_router._third_party_probe_model_ids(
+    model_ids = llm_router._endpoint_generation_probe_model_ids(
         endpoint,
         ("known-fail", "fresh", "known-ok"),
     )
@@ -2469,7 +2479,7 @@ def test_third_party_probe_model_ids_puts_currently_verified_routes_first(
         credentials_path(),
     )
 
-    model_ids = llm_router._third_party_probe_model_ids(
+    model_ids = llm_router._endpoint_generation_probe_model_ids(
         endpoint,
         ("hist-ok", "green-ok"),
     )
@@ -2833,8 +2843,17 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
         del endpoint, candidate
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+
     monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
     monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
     response = client.post("/api/llm/endpoints/ark-official/test")
 
@@ -2845,11 +2864,14 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
     assert "ark-official:ep-20260316142940-b74bm" in response.json()["registry"]["provider_routes"]
 
 
-def test_endpoint_test_lists_ark_official_catalog_models_without_generation_probe(
+def test_endpoint_test_ark_official_verifies_via_generation_probe_not_profile_probe(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # apikeys#24 (revised 2026-07-01): official endpoints verify via ONE minimal
+    # generation probe; the heavy per-model official call-method probes stay out
+    # of the endpoint-level Test.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -2881,10 +2903,22 @@ def test_endpoint_test_lists_ark_official_catalog_models_without_generation_prob
 
     async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
         del endpoint, model_id, candidate
-        raise AssertionError("Provider-level Test must not generation-probe catalog models.")
+        raise AssertionError("Provider-level Test must not profile-probe catalog models.")
+
+    route_calls: list[ProviderRoute] = []
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        route_calls.append(route)
+        return _route_probe(endpoint, route, status="ok", latency_ms=21)
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
     monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
     response = client.post("/api/llm/endpoints/ark-official/test")
 
@@ -2892,7 +2926,9 @@ def test_endpoint_test_lists_ark_official_catalog_models_without_generation_prob
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["ark-official"]
     assert endpoint["status"] == "verified"
-    assert "doubao-lite-128k-240428" in endpoint["last_test_message"]
+    assert "Generation verified" in endpoint["last_test_message"]
+    # One minimal generation probe verified the endpoint; the batch stops there.
+    assert len(route_calls) == 1
     routes = body["registry"]["provider_routes"]
     assert routes["ark-official:doubao-seed-2-0-pro-260215"]["status"] == "unverified_manual"
     assert routes["ark-official:doubao-seed-2-0-pro-260215"]["verified_profiles"] == []
@@ -3114,11 +3150,15 @@ def test_endpoint_test_logs_probe_attempts(
     )
 
 
-def test_official_endpoint_test_records_model_list_without_generation_probes(
+def test_official_endpoint_test_verifies_via_one_generation_probe(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # apikeys#24 (revised 2026-07-01): a reachable official endpoint can still be
+    # unable to generate (an exhausted credit balance keeps get-models working),
+    # so verified now requires ONE minimal generation probe on a language model —
+    # never the heavy per-model profile probes, and never non-language models.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -3180,9 +3220,21 @@ def test_official_endpoint_test_records_model_list_without_generation_probes(
 
     async def fail_profile_probe(endpoint, model_id: str):
         del endpoint, model_id
-        raise AssertionError("Provider-level Test must not generation-probe every model.")
+        raise AssertionError("Provider-level Test must not profile-probe every model.")
+
+    route_calls: list[ProviderRoute] = []
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        route_calls.append(route)
+        return _route_probe(endpoint, route, status="ok", latency_ms=21)
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
     monkeypatch.setattr(
         llm_router,
         "_probe_official_model_profile_result",
@@ -3195,6 +3247,10 @@ def test_official_endpoint_test_records_model_list_without_generation_probes(
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["openai-official"]
     assert endpoint["status"] == "verified"
+    assert "Generation verified" in endpoint["last_test_message"]
+    # Exactly one generation probe ran, on a language model — gpt-image-1 is not
+    # a text-generation candidate.
+    assert [r.provider_model_id for r in route_calls] == ["gpt-5"]
     routes = body["registry"]["provider_routes"]
     assert list(routes) == [
         "openai-official:gpt-5-old",
@@ -3202,6 +3258,8 @@ def test_official_endpoint_test_records_model_list_without_generation_probes(
         "openai-official:gpt-image-1",
     ]
     route = routes["openai-official:gpt-5"]
+    # Official route status/profiles stay owned by the per-model profile probes;
+    # the endpoint test only records generation evidence on the probed route.
     assert route["status"] == "unverified_manual"
     assert route["verified_profiles"] == []
     assert route["capabilities"]["model_type"]["value"] == "language_reasoning"
@@ -3212,6 +3270,79 @@ def test_official_endpoint_test_records_model_list_without_generation_probes(
     assert image_route["capabilities"]["model_type"]["value"] == "image_generation"
     # model-list dissolves into routes (R3.4): the discovered models ARE the routes
     # asserted above; no provider-list-observed evidence is written.
+
+
+def test_official_endpoint_test_billing_failure_fails_endpoint(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # The user-facing gap this revision closes: an Anthropic account with an
+    # exhausted credit balance still lists models (old design => "verified"),
+    # but every generation call fails. The endpoint Test must surface that as a
+    # structural failure — even when a previously verified route exists.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "anthropic-official": ProviderEndpoint(
+                    endpoint_id="anthropic-official",
+                    display_name="Anthropic Official",
+                    protocol="anthropic_compatible",
+                    base_url="https://api.anthropic.com",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+            provider_routes={
+                "anthropic-official:claude-opus-4.8": ProviderRoute(
+                    route_id="anthropic-official:claude-opus-4.8",
+                    endpoint_id="anthropic-official",
+                    route_slug="claude-opus-4.8",
+                    provider_model_id="claude-opus-4.8",
+                    canonical_id="claude-opus-4.8",
+                    status="verified",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    billing_message = (
+        "Provider returned HTTP 400 (invalid_request_error). Your credit balance is "
+        "too low to access the Anthropic API."
+    )
+    route_calls: list[ProviderRoute] = []
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        return _endpoint_probe_ok(
+            endpoint,
+            latency_ms=42,
+            model_ids=("claude-opus-4.8", "claude-fable-5"),
+        )
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        route_calls.append(route)
+        return _route_probe(endpoint, route, status="quota_exceeded", message=billing_message)
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    response = client.post("/api/llm/endpoints/anthropic-official/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["anthropic-official"]
+    # Structural failure: no reuse of the previously verified route.
+    assert endpoint["status"] == "failed"
+    assert "credit balance" in endpoint["last_test_message"]
+    # quota_exceeded short-circuits the batch after the first probe.
+    assert len(route_calls) == 1
 
 def test_official_profile_probe_skips_reasoning_fallback_methods_after_success(
     monkeypatch,

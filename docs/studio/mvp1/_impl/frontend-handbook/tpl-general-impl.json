@@ -67,6 +67,15 @@
    "fe_status": "符合",
    "be_dep": "契约要改:后端 app_settings 需加 language 字段;现 AppSettings schema extra=forbid 会拒未知字段,必须先在后端显式加 language。GET/PUT /api/settings 链路本身已就绪。",
    "fe_resync": "审计核实已接语言持久化+测试,翻绿(2026-06-20)"
+  },
+  {
+   "n": 15.2,
+   "cap": "runtime-truth-sources",
+   "design_ref": "atom-15.2",
+   "current": "现状:已实现且符合(设计补写 + 写入侧补齐 2026-07-01)。前端 GeneralTab.tsx 的 Runtime truth source files 折叠区渲染 GET /api/settings/truth-sources 的真相文件卡;TruthSourceLogs 每卡折叠显示按 source_id 过滤的 runtime activity entries,RuntimeLogItem 通用渲染每条 entry 的 recorded_at/action/message + Details 折叠(changes 全字段:数组逐行、对象 JSON 行,formatChangeValue)。写入侧:role_test_result_saved 的 changes 现带逐路由 route_results(canonical_id/route_id/provider/status/message,_role_test_route_results,routers/llm.py),与 llm_role_test_results.json 的事实一致;endpoint_test 原已带 status/message/discovered_model_ids/probe_attempts(官方生成探测的 probe_attempts 也进此日志)。",
+   "gap": "符合设计,无需改。历史旧条目(改动前写入)仍只有 role_name/status 概要——按「数据可丢弃」原则不迁移,新条目起即为全量明细。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET /api/settings/truth-sources(routers/settings.py + services/runtime_truth_sources.py)返回卡列表 + entries;写入统一走 record_runtime_activity(services/runtime_activity.py,append-only jsonl,64KB/行上限)。"
   }
  ],
  "plan": [
@@ -229,6 +238,27 @@
    ],
    "fe_status_prev": "偏差",
    "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  },
+  {
+   "covers": "#15.2 runtime-truth-sources(Runtime log 明细一致性)",
+   "atoms": [
+    15.2
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "后端:_persist_completed_role_test_result 落盘后,runtime activity 的 role_test_result_saved entry 的 changes.route_results 与结果的 model_groups 逐路由一致(canonical_id/route_id/provider/status/message,test_llm_role_test_results_api.py::test_persist_completed_role_test_result_logs_per_route_detail)。",
+    "后端:endpoint_test entry 带 message/discovered_model_ids/probe_attempts(test_llm_registry_api.py 既有覆盖)。"
+   ],
+   "layer2": [
+    "跑一次 analyst 角色 Test(含失败路由)。",
+    "General → Runtime truth source files → Role test results 卡展开 Runtime log,展开最新 entry 的 Details,与 llm_role_test_results.json 对照。"
+   ],
+   "screenshots": [
+    {
+     "file": "general-16-runtime-log-route-results.png",
+     "caption": "真机(worktree 私有 sidecar):analyst 测试后 Role test results 卡 Runtime log 最新条目展开 Details(3)——route_results 逐路由显示状态与失败原文(Qiniu fable-5 HTTP 502),与 llm_role_test_results.json 一致;旧条目仍是 Details(2) 概要(不迁移)"
+    }
+   ]
   }
  ]
 }

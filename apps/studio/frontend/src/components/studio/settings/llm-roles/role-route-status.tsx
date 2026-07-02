@@ -266,7 +266,9 @@ function providerUiStateDetail(providerModel?: ProviderModelOption): string | nu
       : "Previously connected from historical probe evidence; test again before treating it as ready."
   }
   if (providerModel.ui_state === "failed") {
-    return detail ? `Failed: ${ensureSentence(detail)}` : "Provider route failed and must be fixed before it can run."
+    // No "Failed:" label here — roleMatchTooltipLine adds the status label
+    // exactly once for blocked routes; labelling twice reads "Failed: Failed:".
+    return detail ? ensureSentence(detail) : "Provider route failed and must be fixed before it can run."
   }
   if (providerModel.ui_state === "off") {
     return detail ? `Off: ${ensureSentence(detail)}` : "This route is disabled."

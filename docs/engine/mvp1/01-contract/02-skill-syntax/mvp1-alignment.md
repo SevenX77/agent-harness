@@ -23,7 +23,7 @@ format_ssot: ../../../skill-spec/00-FORMAT-GROUND-TRUTH.md
 - `GRAPH.md` 的根元数据、根 IO、phase 注册表、body DAG、图级 `iterate`。
 - `LOGIC.md` 的 name、IO、actions、validator、节点级 `iterate`、body `<action>`。
 - `SUBGRAPH.md` 的 name、`path`、IO、validator、节点级 `iterate`。
-- Agent `SKILL.md` 的 name、llm_role、IO、tools、subagents、subgraphs、references、examples、validator、max_iterations、节点级 `iterate`、body role/goal/step/protocol/example。
+- Agent `SKILL.md` 的 name、llm_role、use_graph_llm_role（图默认角色优先级开关，见 skill-spec §5）、IO、tools、subagents、subgraphs、references、examples、validator、max_iterations、节点级 `iterate`、body role/goal/step/protocol/example。
 - `io`、`iterate`、mention/resource 的合法写法。
 - Studio Properties 面板应该从哪些 frontmatter 字段生成表单。
 

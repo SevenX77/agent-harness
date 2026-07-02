@@ -54,7 +54,7 @@
       "module": "三类节点白名单",
       "func": "设计:选中 Agent 节点(SKILL.md),Properties 露 MVP 最小字段子集——llm_role / tools / subagents,不露任何旧 stale 字段。注:这是引擎 agent 语法的最小子集,非全集。",
       "action": "用户选中一个 Agent 节点,面板渲染 agent 分支表单。",
-      "fe_design": "kind=agent 时只渲染 MVP 三字段:llm_role、tools、subagents(SubagentsField 子表单 name/target_skill/description)。绝不渲染 system_prompt/exit_contract/max_retries/python_callable/可编辑 mode(FROZEN 禁字段)。范围说明:引擎 AgentNodeAST(SKILL.md 的 agent 节点 AST)实际还支持 subgraphs[](agent 注册的子图,按 path,§2.4)、references、examples/examples_inline、max_iterations 等;MVP Properties 先收敛到 llm_role/tools/subagents 三个最常用字段,是引擎 agent 语法的『最小子集』、非完整对齐。subgraphs[].path 是引擎 SSOT 明确语法,后续可补编辑形态。subagents 的 target_skill 是 §2.5 合法保留(子代理与子图 path 两回事)。",
+      "fe_design": "kind=agent 时渲染白名单字段:llm_role(+ use_graph_llm_role 优先级开关,见 #22)、tools、subagents(SubagentsField 子表单 name/target_skill/description)。绝不渲染 system_prompt/exit_contract/max_retries/python_callable/可编辑 mode(FROZEN 禁字段)。范围说明:引擎 AgentNodeAST(SKILL.md 的 agent 节点 AST)实际还支持 subgraphs[](agent 注册的子图,按 path,§2.4)、references、examples/examples_inline、max_iterations 等;MVP Properties 先收敛到 llm_role/tools/subagents 三个最常用字段,是引擎 agent 语法的『最小子集』、非完整对齐。subgraphs[].path 是引擎 SSOT 明确语法,后续可补编辑形态。subagents 的 target_skill 是 §2.5 合法保留(子代理与子图 path 两回事)。",
       "fe_modules": [
         {
           "name": "phase 白名单序列化"
@@ -117,7 +117,7 @@
       "module": "保存",
       "func": "设计:在 Properties 改字段后保存,只写该类型白名单字段,name / io / 非本类型字段 / 任意未知键 / body 全部原样保留,不破坏文件。",
       "action": "用户在 Properties 改完字段 → 点保存。",
-      "fe_design": "保存 → applyPhaseFrontmatterForm(把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆出 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回 → 带 expected_hash(对当前文件算 sha256)落盘。空值用 delete 不写 null,避免空字段污染。",
+      "fe_design": "保存 → applyPhaseFrontmatterForm(把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆出 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/use_graph_llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回 → 带 expected_hash(对当前文件算 sha256)落盘。空值用 delete 不写 null,避免空字段污染。",
       "fe_modules": [
         {
           "name": "phase 白名单序列化"
@@ -138,6 +138,19 @@
       "be_status": "已实现",
       "gap_brief": "符合设计(白名单 round-trip 保存:保留 name/io/未知键/body,空值 delete)。",
       "impl_ref": "fn-21"
+    },
+    {
+      "n": 22,
+      "cap": "llm-role-graph-default-switch",
+      "func": "设计:Agent 节点 llm_role 双层来源——节点自选角色 + 整图默认角色(GRAPH.md llm_role,skill-spec §2)。SKILL.md 开关字段 use_graph_llm_role(默认 false)决定优先级:开 = 图默认压过节点自选;关 = 节点自选生效,未选时继承图默认;两级都空回退约定角色 graph_agent(engine manifest.effective_llm_role,skill-spec §5)。覆盖靠开关,绝不改写/清除节点自己的 llm_role(设置本体不销毁)。",
+      "action": "打开『Use graph default』开关 → 保存把 use_graph_llm_role: true 写入 SKILL.md;关掉 → 键删除(默认态)。开关旁小齿轮跳到 graph 属性面板(在那里查看/修改/Test 图默认角色)。",
+      "fe_design": "开关直接绑 useGraphLlmRole 受控表单字段、随保存落盘(无不落盘的幽灵本地态)。开 = Run role 一整行(角色下拉 + Roles 设置齿轮 + Test 烧瓶)整体 disable,节点自选置灰保留、不加『实际生效』标注文案;关 = 整行可用。图默认角色的 Test 放 graph 面板(GraphFrontmatterForm llm_role 行加 RoleTestControl,测试状态与节点行相互独立)。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "engine 已支持 GRAPH.md llm_role(此前 GraphManifest extra=forbid,设图默认即编译炸——已修)+ AgentNodeAST.use_graph_llm_role + effective_llm_role 生效链(test_llm_role_layering.py);前端开关/整行禁用/齿轮跳转/graph 面板 Test 已落地(PropertiesPanel.tsx LlmRoleField / GraphFrontmatterForm)。",
+      "module": "llm_role 分层"
     }
   ]
 }

@@ -3792,9 +3792,10 @@ function ResourceRefField({
   )
 }
 
-function formsEqual(left: PhaseFrontmatterFormData, right: PhaseFrontmatterFormData): boolean {
+export function formsEqual(left: PhaseFrontmatterFormData, right: PhaseFrontmatterFormData): boolean {
   return (
     left.llmRole === right.llmRole
+    && left.useGraphLlmRole === right.useGraphLlmRole
     && left.tools === right.tools
     && left.actions === right.actions
     && left.path === right.path

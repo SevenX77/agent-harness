@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import type { ModelGroup, RolesData } from '@/api/llm'
 import type { SkillDetail } from '@/api/types'
 import type { SkillGraphNodeData } from '@/components/GraphCanvas'
+import { EMPTY_FORM } from './phase-frontmatter'
 import {
   compareModelGroupsForPicker,
+  formsEqual,
   graphAgentRoleNamesForProperties,
   LlmCompareCandidateRow,
   LlmCompareTestResultPanel,
@@ -793,6 +795,15 @@ describe('PropertiesPanel - graph form role test', () => {
     )
     expect(html).toContain('id="graph-llm-role"')
     expect(html).toContain('data-llm-role-test-trigger="true"')
+  })
+})
+
+describe('PropertiesPanel - form dirty check', () => {
+  it('flags the form dirty when only use_graph_llm_role changed', () => {
+    // Regression: caught live — toggling the switch left Save disabled because
+    // formsEqual ignored the new field.
+    expect(formsEqual(EMPTY_FORM, { ...EMPTY_FORM, useGraphLlmRole: true })).toBe(false)
+    expect(formsEqual(EMPTY_FORM, { ...EMPTY_FORM })).toBe(true)
   })
 })
 

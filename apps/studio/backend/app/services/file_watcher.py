@@ -18,6 +18,10 @@ from app.services.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 _ECHO_TTL_SECONDS = 2.0
+# Upper bound for stop() waiting on the watcher thread. The stop events make the
+# thread exit within one 50ms rust-notify step; the only non-responsive sections
+# are bounded native watcher setup/teardown, which this comfortably outlasts.
+_STOP_JOIN_TIMEOUT_SECONDS = 30.0
 
 
 class FileWatcherService:
@@ -60,8 +64,28 @@ class FileWatcherService:
             watch_stop.set()
         thread = self._thread
         if thread is not None:
-            thread.join(timeout=2)
+            # Wait until the thread actually exits. A daemon watcher that outlives
+            # stop() keeps running rust/notify code into interpreter shutdown, which
+            # intermittently SIGSEGVs the Linux CI runners under coverage (exit 139
+            # after "N passed"). A single join(timeout=2) silently gave up whenever
+            # the thread sat in a bounded non-stop-responsive native section, so
+            # poll-join past it instead.
+            deadline = time.monotonic() + _STOP_JOIN_TIMEOUT_SECONDS
+            while thread.is_alive() and time.monotonic() < deadline:
+                thread.join(timeout=0.5)
+            if thread.is_alive():
+                logger.warning(
+                    "studio-file-watcher thread still alive after %.0fs stop() wait",
+                    _STOP_JOIN_TIMEOUT_SECONDS,
+                )
         self._thread = None
+        with self._lock:
+            # The service is a module singleton that outlives each app instance:
+            # drop per-app state so stale workspace roots do not accumulate across
+            # restarts (or across the test suite, where every generation re-watched
+            # long-dead tmp directories).
+            self._workspace_roots.clear()
+            self._watch_stop = None
 
     def register_workspace(self, root: Path, skill_id: str) -> None:
         """Watch an opened workspace's skill ROOT directory (idempotent).

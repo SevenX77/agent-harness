@@ -17,6 +17,7 @@ import inspect
 import json
 import logging
 import secrets
+import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
@@ -72,7 +73,7 @@ logger = logging.getLogger(__name__)
 
 MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
-_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"]
+_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
 _FILE_CONTENT_KEYS = {
     "content",
     "file_content",
@@ -104,6 +105,35 @@ def _skill_spec_dir() -> Path | None:
     Read (F3 渐进暴露). Returns None when absent (e.g. a bundled app without docs)."""
     candidate = Path(__file__).resolve().parents[5] / "docs/engine/mvp1/01-contract/02-skill-syntax"
     return candidate if candidate.is_dir() else None
+
+
+_SKILLS_SRC_DIR = _PROMPTS_DIR / "skills"
+
+
+def copilot_skill_names() -> list[str]:
+    """Names of the copilot scenario skills shipped with the backend
+    (app/prompts/skills/<name>/SKILL.md),按名排序;缺目录时为空。"""
+
+    if not _SKILLS_SRC_DIR.is_dir():
+        return []
+    return sorted(
+        entry.name for entry in _SKILLS_SRC_DIR.iterdir() if (entry / "SKILL.md").is_file()
+    )
+
+
+def _materialize_copilot_skills(workspace_dir: str | Path) -> list[str]:
+    """把随包的场景技能物化进 workspace 的 .claude/skills/,供 CLI 发现。
+
+    每次会话创建都覆盖写(以随包版本为准,幂等);`.claude/` 是 Studio 的运行时
+    供给目录,不属于 D12「skill 源文件唯一写者」管辖的 skills/ 用户源文件。"""
+
+    names = copilot_skill_names()
+    if not names:
+        return []
+    dest_root = Path(workspace_dir) / ".claude" / "skills"
+    for name in names:
+        shutil.copytree(_SKILLS_SRC_DIR / name, dest_root / name, dirs_exist_ok=True)
+    return names
 
 
 def _mounted_doc_dirs() -> list[tuple[str, Path]]:
@@ -563,15 +593,21 @@ def build_options(
     # the session system prompt carries only a one-line-per-dir routing table.
     add_dirs: list[str | Path] = [str(path) for _label, path in _mounted_doc_dirs()]
     permission_mode: Literal["default", "acceptEdits"]
+    skills: list[str]
     if can_use_tool is not None:
         # Pre-allowing a tool makes the SDK skip can_use_tool for it, so pre-allow
         # NOTHING: Read/Glob/Grep 走读护栏(出圈挂审批),Write/Edit 走 workspace
         # 圈定,Bash 走挂起式审批 —— 全部经 can_use_tool。
         allowed_tools = []
         permission_mode = "default"
+        # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
+        # (SDK 会自动配好 Skill 工具,types.py skills 文档)。
+        skills = copilot_skill_names()
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
+        # SDK probe 路要确定性输出,压掉所有技能。
+        skills = []
     return ClaudeAgentOptions(
         cwd=workspace_dir,
         permission_mode=permission_mode,
@@ -585,6 +621,7 @@ def build_options(
         # 宿主机个人配置漂移;MCP 只认显式传入的(当前为空)。
         setting_sources=[],
         strict_mcp_config=True,
+        skills=skills,
         # F1/F8: enable extended thinking so the SDK emits ThinkingBlocks.
         # Adaptive lets the model size its own reasoning per task. display MUST
         # be "summarized": the CLI only offers summarized|omitted (there is no
@@ -1134,6 +1171,7 @@ async def get_or_create_session(
     async with _session_lock:
         session = _sessions.get(session_key)
         if session is None:
+            _materialize_copilot_skills(workspace_dir)
             session = _session_factory(
                 build_options(
                     cast(str | None, base_url),

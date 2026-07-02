@@ -17,6 +17,7 @@ const toolVerbs: Record<string, { running: string; done: string }> = {
   Write: { running: 'Working', done: 'Worked' },
   Edit: { running: 'Working', done: 'Worked' },
   Bash: { running: 'Running', done: 'Ran' },
+  Skill: { running: 'Using skill', done: 'Used skill' },
 }
 
 function toolCallLabel(event: ToolCallEvent, failed: boolean): string {

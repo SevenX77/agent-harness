@@ -206,7 +206,7 @@ def test_build_options_uses_default_endpoint_when_base_url_is_empty(tmp_path: Pa
 
     assert Path(options.cwd) == tmp_path
     assert options.env == {"ANTHROPIC_API_KEY": "claude-key"}
-    assert options.allowed_tools == ["Read", "Glob", "Grep", "Write", "Edit", "Bash"]
+    assert options.allowed_tools == ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
     assert options.permission_mode == "acceptEdits"
 
 
@@ -216,7 +216,7 @@ def test_build_options_sets_provider_base_url(tmp_path: Path) -> None:
     assert Path(options.cwd) == tmp_path
     assert options.env["ANTHROPIC_API_KEY"] == "provider-key"
     assert options.env["ANTHROPIC_BASE_URL"] == "https://provider.example/anthropic"
-    assert options.allowed_tools == ["Read", "Glob", "Grep", "Write", "Edit", "Bash"]
+    assert options.allowed_tools == ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
     assert options.permission_mode == "acceptEdits"
 
 

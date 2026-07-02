@@ -8,7 +8,7 @@ export function StringField({ input, value, error, onChange }: FieldProps) {
         type="text"
         value={typeof value === 'string' ? value : ''}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800"
+        className="w-full rounded-md border border-input bg-input/20 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
         placeholder={typeof input.default === 'string' ? input.default : ''}
       />
     </FieldWrapper>

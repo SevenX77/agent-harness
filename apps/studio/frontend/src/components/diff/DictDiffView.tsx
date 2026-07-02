@@ -31,13 +31,13 @@ export function DictDiffView({
   const keys = Array.from(new Set([...Object.keys(current), ...Object.keys(golden)])).sort()
 
   if (keys.length === 0) {
-    return <div className="text-xs text-slate-500 dark:text-slate-400">Empty object.</div>
+    return <div className="text-xs text-muted-foreground">Empty object.</div>
   }
 
   return (
     <div className="space-y-2">
       {keys.map((key) => (
-        <div key={key} className="rounded-md border border-slate-200 p-2 dark:border-slate-800">
+        <div key={key} className="rounded-md border border-border p-2">
           {renderChild(`${fieldPath}.${key}`, current[key] ?? null, golden[key] ?? null, depth + 1)}
         </div>
       ))}

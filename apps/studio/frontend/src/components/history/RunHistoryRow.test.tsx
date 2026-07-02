@@ -68,7 +68,9 @@ describe("RunHistoryRow", () => {
     expect(html).toContain('data-slot="table-row"')
     expect(html).toContain('data-slot="table-cell"')
     expect(html).toContain('data-slot="badge"')
-    expect(html).toContain('data-slot="button"')
+    // Action buttons are Tooltip triggers (TooltipTrigger asChild overrides the
+    // Button data-slot); the buttons themselves are still the ui/button wrapper.
+    expect(html).toContain('data-slot="tooltip-trigger"')
     expect(html).not.toContain("bg-slate")
     expect(html).not.toContain("text-slate")
     expect(html).not.toContain("bg-sky")

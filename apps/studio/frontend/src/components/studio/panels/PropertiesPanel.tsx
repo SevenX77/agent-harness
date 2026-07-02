@@ -1119,7 +1119,7 @@ function NodeGoldenSection({
 
   if (hasGolden) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+      <div className="flex items-center gap-2 rounded-md border border-success-border/60 bg-success/10 px-3 py-2 text-xs text-success">
         <ShieldCheck className="size-3.5" />
         <span>Golden captured for this node</span>
       </div>
@@ -1568,7 +1568,7 @@ function ActionRow({
       <span className="min-w-0 flex-1 truncate">
         <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
         {name}
-        {orphan ? <span className="ml-1 text-amber-500">unregistered file</span> : null}
+        {orphan ? <span className="ml-1 text-warning">unregistered file</span> : null}
         {missingFile ? <span className="ml-1 text-destructive">missing file</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-1">
@@ -2445,11 +2445,12 @@ function FieldErrorMarker({ errors }: { errors?: LintError[] | null }) {
     return null
   }
   const hasError = errors.some((error) => error.severity === "error")
-  const tone = hasError ? "text-destructive" : "text-amber-500"
+  const tone = hasError ? "text-destructive" : "text-warning"
   const count = errors.length === 1 ? "1 issue" : `${errors.length} issues`
   const messages = errors.map((error) => error.message)
-  // The joined messages live on the trigger's accessible name + native title so the
-  // diagnostic is reachable without opening the styled Tooltip (and survives SSR).
+  // The joined messages live on the trigger's accessible name so the diagnostic
+  // is reachable without opening the styled Tooltip (UI-spec §2.7: no native
+  // title alongside the Radix tooltip).
   const accessibleSummary = `Field has ${count}: ${messages.join("; ")}`
   return (
     <Tooltip>
@@ -2457,7 +2458,6 @@ function FieldErrorMarker({ errors }: { errors?: LintError[] | null }) {
         <span
           role="img"
           aria-label={accessibleSummary}
-          title={accessibleSummary}
           className={`ms-1 inline-flex items-center align-middle ${tone}`}
         >
           <AlertTriangle className="size-3.5" aria-hidden />
@@ -2649,18 +2649,22 @@ function llmRoleComboboxOption(name: string, configured: boolean): SearchableCom
 
 function LlmRoleSettingsButton({ onOpenSettings }: { onOpenSettings?: (tab?: SettingsTab) => void }) {
   return (
-    <Button
-      type="button"
-      size="icon"
-      variant="secondary"
-      className={YAML_ICON_BUTTON_CLASS}
-      title="Open LLM Roles settings"
-      aria-label="Open LLM Roles settings"
-      data-llm-role-settings-trigger="true"
-      onClick={() => onOpenSettings?.("llm_roles")}
-    >
-      <Settings2 className="size-3.5" aria-hidden />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className={YAML_ICON_BUTTON_CLASS}
+          aria-label="Open LLM Roles settings"
+          data-llm-role-settings-trigger="true"
+          onClick={() => onOpenSettings?.("llm_roles")}
+        >
+          <Settings2 className="size-3.5" aria-hidden />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Open LLM Roles settings</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -3270,9 +3274,8 @@ function SearchableOptionCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          aria-label={ariaLabel}
+          aria-label={selected?.detail ? `${ariaLabel}. ${selected.detail}` : ariaLabel}
           disabled={disabled}
-          title={selected?.detail ?? selected?.label}
           {...triggerDataAttributes}
           className={cn("w-full min-w-0 justify-between", triggerClassName)}
         >
@@ -3300,7 +3303,7 @@ function SearchableOptionCombobox({
                     value={option.searchValue ? `${option.value} ${option.searchValue} ${option.section ?? ""}` : `${option.value} ${option.label} ${option.section ?? ""}`}
                     data-checked={option.value === value ? "true" : undefined}
                     data-llm-role-unconfigured={option.unconfigured ? "true" : undefined}
-                    title={option.detail ?? option.label}
+                    aria-label={option.detail ?? option.label}
                     onSelect={() => {
                       onChange(option.value)
                       setOpen(false)
@@ -3716,7 +3719,7 @@ function ResourceRefField({
                 </Button>
               </div>
               {fileMissing ? (
-                <p className="text-xs text-amber-500">File not found in this skill yet.</p>
+                <p className="text-xs text-warning">File not found in this skill yet.</p>
               ) : null}
               <Input
                 aria-label={`${copy.label} ${index + 1} summary`}

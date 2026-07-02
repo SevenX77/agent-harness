@@ -16,7 +16,7 @@ export function EnumField({ input, value, error, onChange }: FieldProps) {
           const selected = options.find((option) => optionKey(option) === event.target.value)
           onChange(selected ?? '')
         }}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800"
+        className="w-full rounded-md border border-input bg-input/20 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
       >
         {options.map((option) => (
           <option key={optionKey(option)} value={optionKey(option)}>

@@ -7,6 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { ExportFormatPicker } from './ExportFormatPicker'
 
 interface ExportButtonProps {
@@ -66,19 +67,24 @@ export function ExportButton({
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size={compact ? 'icon-sm' : 'sm'}
-          disabled={disabled || exporting}
-          onClick={(event) => event.stopPropagation()}
-          title={title}
-        >
-          <Download />
-          {compact ? null : exporting ? 'Exporting...' : label}
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size={compact ? 'icon-sm' : 'sm'}
+              disabled={disabled || exporting}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={title}
+            >
+              <Download />
+              {compact ? null : exporting ? 'Exporting...' : label}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{title}</TooltipContent>
+      </Tooltip>
       {open ? (
         <ExportFormatPicker
           disabled={disabled || exporting}

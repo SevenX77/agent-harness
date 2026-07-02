@@ -26,13 +26,13 @@ export function ListDiffView({
   const count = Math.max(current.length, golden.length)
 
   if (count === 0) {
-    return <div className="text-xs text-slate-500 dark:text-slate-400">Empty list.</div>
+    return <div className="text-xs text-muted-foreground">Empty list.</div>
   }
 
   return (
     <div className="space-y-2">
       {Array.from({ length: count }, (_, index) => (
-        <div key={index} className="rounded-md border border-slate-200 p-2 dark:border-slate-800">
+        <div key={index} className="rounded-md border border-border p-2">
           {renderChild(
             `${fieldPath}[${index}]`,
             current[index] ?? null,

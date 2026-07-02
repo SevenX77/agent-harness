@@ -19,7 +19,7 @@ export function App() {
           onSelectSkill={setCurrentSkillId}
           onCloseSkill={() => setCurrentSkillId(null)}
         />
-        <Toaster position="top-right" />
+        <Toaster position="bottom-right" />
       </RuntimeGate>
     </TooltipProvider>
   )

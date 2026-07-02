@@ -49,11 +49,11 @@ export function InputPlayground({
   }, [isValid, onPayloadChange, payload])
 
   return (
-    <div className="flex max-h-[70vh] w-[34rem] flex-col rounded-md border border-gray-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-slate-800">
+    <div className="flex max-h-[70vh] w-[34rem] flex-col rounded-md border border-border bg-card shadow-xl">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <div>
-          <h4 className="font-bold text-gray-800 dark:text-gray-100">Run Input</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{skillId}</p>
+          <h4 className="font-bold text-foreground">Run Input</h4>
+          <p className="text-xs text-muted-foreground">{skillId}</p>
         </div>
         <div className="flex items-center gap-2">
           <PresetToolbar
@@ -76,7 +76,7 @@ export function InputPlayground({
               setRawJson('{}')
               setRawError(null)
             }}
-            className="flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/40"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Reset
@@ -99,7 +99,7 @@ export function InputPlayground({
           </div>
         ) : (
           <label className="block">
-            <span className="mb-1 block text-sm font-semibold text-gray-800 dark:text-gray-200">Raw JSON</span>
+            <span className="mb-1 block text-sm font-semibold text-foreground">Raw JSON</span>
             <textarea
               value={rawJson}
               onChange={(event) => {
@@ -112,28 +112,28 @@ export function InputPlayground({
                   setRawError('Invalid JSON object.')
                 }
               }}
-              className="h-40 w-full resize-none rounded-md border border-gray-300 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800"
+              className="h-40 w-full resize-none rounded-md border border-input bg-input/20 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
             />
-            {rawError ? <span className="mt-1 block text-xs text-red-600 dark:text-red-400">{rawError}</span> : null}
+            {rawError ? <span className="mt-1 block text-xs text-destructive">{rawError}</span> : null}
           </label>
         )}
 
         <button
           type="button"
           onClick={() => setShowPreview((open) => !open)}
-          className="mt-4 text-xs font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+          className="mt-4 text-xs font-medium text-primary hover:text-primary/80"
         >
           {showPreview ? 'Hide JSON preview' : 'Show JSON preview'}
         </button>
         {showPreview ? (
-          <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">
+          <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-muted/30 p-3 text-xs text-foreground">
             {JSON.stringify(payload ?? {}, null, 2)}
           </pre>
         ) : null}
       </div>
 
-      <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-4 py-3 dark:border-slate-800">
-        <span className={`text-xs font-medium ${isValid ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+      <div className="flex shrink-0 items-center justify-between border-t border-border px-4 py-3">
+        <span className={`text-xs font-medium ${isValid ? 'text-success' : 'text-destructive'}`}>
           {isValid ? 'Inputs valid' : 'Resolve input errors before running'}
         </span>
         <button
@@ -146,7 +146,7 @@ export function InputPlayground({
               onRun(submitted)
             }
           }}
-          className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
+          className="flex items-center gap-2 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Play className="h-4 w-4" />
           {runStatus === 'running' ? 'Running...' : 'Run'}

@@ -54,7 +54,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
         cwd=skill_dir,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     ).stdout.strip()
     assert git_user == "studio-user"
     assert not (workspaces_dir / "default" / "skills" / "p0-skill" / "GRAPH.md").exists()
@@ -95,7 +95,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
         cwd=skill_dir,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     ).stdout
     assert "initial-skill" in git_log
     assert f"auto-run-{run_id}" in git_log
@@ -104,7 +104,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
         cwd=skill_dir,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     ).stdout
     assert ".workspace/runs/latest" not in committed_files
 

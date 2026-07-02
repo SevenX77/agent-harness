@@ -75,7 +75,7 @@ class LocalRuntimeStateStore:
                 lease_file = run_dir / "lease.json"
                 if lease_file.exists():
                     try:
-                        with open(lease_file) as f:
+                        with open(lease_file, encoding="utf-8") as f:
                             current = json.load(f)
                     except (OSError, json.JSONDecodeError) as exc:
                         raise self._lease_fenced_error(
@@ -176,7 +176,7 @@ class LocalRuntimeStateStore:
         if not snapshot_file.exists():
             raise StudioAdapterError("state.not_found", {"detail": "Snapshot not found"})
 
-        with open(snapshot_file) as f:
+        with open(snapshot_file, encoding="utf-8") as f:
             data = json.load(f)
 
         if data.get("run_id") != safe_run_id:
@@ -312,7 +312,7 @@ class LocalRuntimeStateStore:
             )
 
         try:
-            with open(lease_file) as f:
+            with open(lease_file, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
             raise StudioAdapterError(
@@ -370,7 +370,7 @@ class LocalRuntimeStateStore:
         counter_file = run_dir / "fencing_counter.json"
         current_token = 0
         if counter_file.exists():
-            with open(counter_file) as f:
+            with open(counter_file, encoding="utf-8") as f:
                 data = json.load(f)
             current_token = int(data.get("fencing_token", 0))
 
@@ -381,7 +381,7 @@ class LocalRuntimeStateStore:
     def _atomic_write_json(self, target_file: Path, data: dict[str, Any]) -> None:
         temp_file = target_file.with_name(f".{target_file.name}.{uuid.uuid4().hex}.tmp")
         try:
-            with open(temp_file, "w") as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f)
             temp_file.replace(target_file)
         finally:

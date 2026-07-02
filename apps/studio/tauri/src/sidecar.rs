@@ -439,6 +439,10 @@ fn spawn_sidecar_process(
         .env("STUDIO_API_TOKEN", api_token)
         .env("STUDIO_CORS_EXTRA_ORIGINS", sidecar_cors_extra_origins())
         .env("STUDIO_EXIT_ON_ORPHAN", "1")
+        // Cross-platform bottom line (docs/development/CROSS_PLATFORM.md):
+        // the sidecar writes UTF-8 stdout/stderr on every host locale, so the
+        // from_utf8_lossy readers below never mangle non-ASCII log lines.
+        .env("PYTHONUTF8", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

@@ -320,7 +320,7 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
         "openai-direct",
         "anthropic-official",
     }
-    raw = json.loads(credentials_path().read_text())
+    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
 
 
@@ -1854,7 +1854,7 @@ def test_registry_invalidates_legacy_fake_endpoint_test_status(
     monkeypatch,
 ) -> None:
     _seed(tmp_path, monkeypatch)
-    raw = json.loads(credentials_path().read_text())
+    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
     raw["provider_endpoints"]["openai-direct"]["status"] = "verified"
     raw["provider_endpoints"]["openai-direct"]["last_test_message"] = "Credential present."
     credentials_path().write_text(json.dumps(raw), encoding="utf-8")

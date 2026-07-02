@@ -28,14 +28,13 @@ fi
 
 git worktree add -b "$branch" "$dir" origin/main
 
-# Pre-install frontend deps in the background so npm run dev / lint / test are
-# ready by the time they're needed. npm ci only writes into node_modules/ and
-# never touches src, so coding can start immediately. scripts/wt-fe-dev.sh
-# waits for this install (marker: node_modules/.wt-install-done).
-# Skip with WT_SKIP_NPM=1 (e.g. for backend-only tasks).
+# Pre-install deps in the background so dev/lint/test are ready by the time
+# they're needed. Neither install touches src, so coding starts immediately;
+# scripts/wt-dev.sh waits for them (npm marker: node_modules/.wt-install-done,
+# uv: pidfile). Skip with WT_SKIP_NPM=1 / WT_SKIP_UV=1.
+wt_name="$(basename "$dir")"
 fe_dir="$dir/apps/studio/frontend"
 if [ -z "${WT_SKIP_NPM:-}" ] && [ -f "$fe_dir/package.json" ]; then
-  wt_name="$(basename "$dir")"
   npm_log="$repo_root/.worktrees/.$wt_name.npm-ci.log"
   npm_pid="$repo_root/.worktrees/.$wt_name.npm-ci.pid"
   (
@@ -45,9 +44,19 @@ if [ -z "${WT_SKIP_NPM:-}" ] && [ -f "$fe_dir/package.json" ]; then
   )
   echo "• npm ci running in background (log: $npm_log)"
 fi
+if [ -z "${WT_SKIP_UV:-}" ] && [ -f "$dir/uv.lock" ] && command -v uv >/dev/null 2>&1; then
+  uv_log="$repo_root/.worktrees/.$wt_name.uv-sync.log"
+  uv_pid="$repo_root/.worktrees/.$wt_name.uv-sync.pid"
+  (
+    cd "$dir"
+    nohup uv sync --all-packages --all-extras --group dev >"$uv_log" 2>&1 &
+    echo $! >"$uv_pid"
+  )
+  echo "• uv sync running in background (log: $uv_log)"
+fi
 
 echo
 echo "✓ worktree ready: $repo_root/$dir"
 echo "  branch '$branch' cut from origin/main"
 echo "  next: cd \"$repo_root/$dir\"  →  write code  →  scripts/wt-ship.sh"
-echo "  frontend preview: scripts/wt-fe-dev.sh  (own Vite port, shares the main repo's sidecar)"
+echo "  preview: scripts/wt-dev.sh  (own Vite port; add --backend to run this tree's own sidecar)"

@@ -223,6 +223,9 @@ not water a feature down to keep it frontend-only.
   lesson only in chat.
 - First search `apps/studio/frontend/src/components/ui/` for an existing
   shadcn/ui or Radix wrapper. Prefer those components over custom interaction code.
+- The official **shadcn/ui agent skill** is committed at `.claude/skills/shadcn`
+  (installed via `npx skills add shadcn/ui`, pinned in `skills-lock.json`) — use
+  it for component/CLI/theming lookups when doing frontend UI work.
 - If a needed primitive is missing, add the shadcn/ui-style wrapper under
   `src/components/ui/` before using it in business components.
 - Use semantic design tokens and existing component variants. Do not hardcode hex

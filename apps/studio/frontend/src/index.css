@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* shadcn tailwind utilities: shimmer, scrollbar-*, scroll-fade-* (used by ui/message-scroller) */
+@import "shadcn/tailwind.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";

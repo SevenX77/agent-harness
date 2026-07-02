@@ -83,7 +83,8 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
   5. Enter 发送、Shift+Enter 换行;IME 组合输入(`isComposing`)期间 Enter 不发送。
   6. **消息布局(2026-07-02 R3,PM 原话「不需要空一栏给图标,也不需要分 you 和 copilot,左右布局就能分辨」)**:左右气泡布局——用户消息右对齐、`bg-muted` 圆角气泡、纯文本 pre-wrap;助手消息左对齐、无气泡纯排版(markdown);**不渲染 You/Copilot 名字标签、状态文字和头像列**。落地用本地 `components/ui/message.tsx`(shadcn message 原语,align start/end)。
   7. **等待可见(thinking)**:从发送瞬间到首个可见活动之间必须有可见等待指示(shadcn **shimmer** 文字 Thinking…,官方 loading-text 处理)——覆盖两段:①助手消息尚未创建的事件前空窗;②助手消息已建但 `status=running` 且无可见活动(冷启动 spawn 可达 10-30s;context_resolved 回显不算可见活动、不清除它)。F8 真流式落地后,**thinking 增量内容本身就是等待可见性的主体**:首个 thinking token 或正文 token 一到,shimmer 即撤,由实时转录接棒。
-  8. 排版:消息与 composer 正文用 `text-sm leading-relaxed`(此前 text-xs/leading-snug 过挤);消息区视口 `p-4`、消息间距 `gap-3`(R4,PM「左边边距窄」;参照官方 message-scroller 示例 `p-6/gap-4` 按窄面板收敛一档)。
+  8. 排版:消息与 composer 正文用 `text-sm leading-relaxed`(此前 text-xs/leading-snug 过挤);消息区视口 `p-4`、消息间距 `gap-3`(R4,PM「左边边距窄」;参照官方 message-scroller 示例 `p-6/gap-4` 按窄面板收敛一档)。**markdown 排版真相 = `.copilot-prose`(index.css,全语义 token + `--font-mono` 代码块)**——R5-D 根因:旧代码的 `prose prose-sm …` 全是死类(`@tailwindcss/typography` 从未安装),助手 markdown 一直是浏览器默认样式(标题不分级、列表序号丢、代码块裸排),这就是 PM「排版丑、和整个 app 不在一个世界」的结构性原因;修法是自建 token 化样式而**不是**装 typography 插件(插件自带灰阶调色 = 又一个第二世界)。
+  10. **信息层次(R5-D,PM「挂载或者工具调用结果都会用淡一号的字」)**:两级层次——正文与用户消息全对比(text-foreground);**次级信息**(context_resolved 卡 / 工具卡 / Thought / unknown)标签行统一 `text-muted-foreground`,hover 恢复全对比作可点暗示;工具失败保持 destructive 色。用户气泡改用本地 `ui/bubble.tsx`(shadcn Bubble 原语,variant=muted align=end)替代手搓 `div.bg-muted`(shadcn chat.md 契约:message surface 必须是 Bubble)。
   9. 前端引入 `shadcn` tailwind 工具包(`@import "shadcn/tailwind.css"`):激活 shimmer 与 ui/message-scroller 自带的 scrollbar-*/scroll-fade-* 工具类(此前这些类是死类)。
 - 决策: 聊天区的滚动/输入行为向官方 message-scroller 契约看齐,不自造第二套滚动启发式。
 - 原话/来源: PM 2026-07-01(本轮任务原话):「参考这个官方组件 ui,优化现在的 copilot 面板」「下方的输入窗口默认只有一行有点太小了」「我比较喜欢 Claude code 的布局方式,功能在输入框下方」。

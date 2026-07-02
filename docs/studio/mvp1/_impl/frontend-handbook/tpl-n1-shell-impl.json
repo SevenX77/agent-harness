@@ -163,6 +163,16 @@
    "fe_status": "符合",
    "be_status": "n/a",
    "be_dep": "无后端依赖。"
+  },
+  {
+   "n": 31,
+   "cap": "copilot-typography-hierarchy",
+   "design_ref": "atom-31",
+   "current": "现状:已实现且符合。.copilot-prose 落 index.css(语义 token/mono 代码块);panel 两处 markdown + 空态换 copilot-prose;次级卡 summary 淡化(panel 3 处 + tool-call-bubble);ui/bubble.tsx 新增并接管用户气泡。",
+   "gap": "无。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "无后端依赖。"
   }
  ],
  "plan": [
@@ -563,6 +573,29 @@
     {
      "file": "n1-29-role-slot-settled.png",
      "caption": "2026-07-02 真机(R5-C):配置就绪后原地换成 route/role 选择器(BrainCircuit 图标)"
+    }
+   ]
+  },
+  {
+   "covers": "#31 copilot-typography-hierarchy",
+   "atoms": [
+    31
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "纯视觉 pass,按 SOP 不新增单测;既有 1594 例全绿(无 prose 类锁死测试)。"
+   ],
+   "layer2": [
+    "真机 Playwright 同一夹具对话 before/after:before = 标题不分级/列表序号丢/代码块裸排/引用无竖线(prose 死类实锤);after = 全部排版恢复且全语义 token,次级卡片标签整体淡一号。"
+   ],
+   "screenshots": [
+    {
+     "file": "n1-30-typography-before.png",
+     "caption": "2026-07-02 真机(R5-D before):prose 死类下的 markdown 裸奔——标题/列表/代码块全无样式"
+    },
+    {
+     "file": "n1-30-typography-after.png",
+     "caption": "2026-07-02 真机(R5-D after):.copilot-prose 排版 + 次级信息淡一号 + Bubble 用户气泡"
     }
    ]
   }

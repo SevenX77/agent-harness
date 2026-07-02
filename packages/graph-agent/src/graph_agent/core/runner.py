@@ -79,6 +79,7 @@ from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import BusinessData
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
+from graph_agent.io.artifact_manifest import write_manifest_artifacts
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -1760,6 +1761,15 @@ def _finalize_successful_v030_run(
         output_context,
         default_output_dir=trace_output / "artifacts",
     )
+    manifest_artifacts = (
+        compiled_raw.get("io", {}).get("artifacts") if isinstance(compiled_raw, dict) else None
+    )
+    if manifest_artifacts:
+        write_manifest_artifacts(
+            manifest_artifacts,
+            output_context,
+            trace_output / "artifacts",
+        )
     _emit_v030_event(
         event_sink,
         RunEndedEvent(

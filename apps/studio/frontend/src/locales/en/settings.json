@@ -243,6 +243,7 @@
       "availableRoutesLabel": "Available Routes:",
       "availableModelsLabel": "Available Models:",
       "availableEndpointsLabel": "Available Endpoints:",
+      "reprobeProtocol": "Re-probe protocol for {{id}} now",
       "noModelsWarning": "No models returned",
       "unnamedProvider": "Unnamed Provider",
       "officialProvider": "Official Provider",

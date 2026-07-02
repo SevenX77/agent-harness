@@ -43,16 +43,25 @@
 与 official **唯一的区别**：
 1. 用户**必须填入 URL**（base_url）。`protocol`（协议）**以前要用户自己选，现在系统自动测**（自动探测协议）。
    - **探测方式（PM 2026-06-02，#C 答案）**：**把各 protocol 排列组合各测一遍**（用每种协议的连通方式去试），哪个能连通就判定为哪个 protocol —— "排列组合测一遍就知道"，不需要单独的聪明探测逻辑。
+   - **修订记录（PM 2026-07-02，协议探测矩阵）**：#C 的"排列组合各测一遍"落地形态定为**探测矩阵**，并纠正实现 drift（"轮换选出唯一协议并改写 endpoint.protocol"）。原则：**状态不能被设置，只能从观察算出来；观察会老化，但不会被覆盖**。
+     1. **矩阵格子 = (canonical base_url, protocol)，身份不可变**。一张卡的每个 URL × 每个候选协议是一个独立格子（= endpoint 记录）；`protocol` 是身份的一部分，**创建后永不改写**。"检测协议"不再是给某个 endpoint 找协议，而是每个格子**用自己的协议**打推理端点、把结果记在**自己**身上。协议轮换机（在一个 endpoint 的 Test 里换协议试、试通改写 `protocol` 字段）**作废删除** —— 它制造过三重事故（实证 2026-07-02）：qiniu `-openai-` endpoint 被改写成 anthropic 与兄弟 endpoint 完全重复；瞬时失败让 google 的 404 赢下检测；同一 Test 连点两次持久真相不同（前端按 id-slug 回写 protocol 与后端检测打乒乓）。
+     2. **`protocol_unsupported` 一等分类**（gateway 探测分类新增）：路径级 404/405（如 "not found or method not allowed"、"Use /v1/messages instead"，响应体**不含**模型语义错误）= **该 URL 不支持该协议**，与 `invalid_model`（协议通了、模型 id 不对）**必须区分**。旧实现把协议 404 归进 `invalid_model` 是三个假象的共同根因（"Untested"假状态、google 赢检测、6/6 失败仍 verified）。
+     3. **格子永不删除、永不手工 disable，状态 = 最近观察的投影**：`verified`（最近生成 ok）/ `untested`（无观察）/ `unsupported`（最近观察 = protocol_unsupported，展示观察时间 + 下次复查时间）/ 瞬时失败（网络/限流/超时 → 下次 Test 即重试）/ 结构失败（invalid_key / quota → 账号级，与格子生死无关）。
+     4. **失败分类定半衰期**：`protocol_unsupported` 是提供商架构级事实 → 长半衰期（**30 天**内日常 Test 跳过该格子，到期自动补测；用户可对单格子强制 re-probe）；瞬时类不设门。"哪天 qiniu 支持 gemini 了"由半衰期复测或手动 re-probe 重新发现 —— 能力不会永久丢失，只有"多久发现"。
+     5. **protocol 单写真相**：`protocol` 唯一权威 = 后端 credentials 存储的字段。前端**不得**从 endpoint id 的 slug 反推协议，upsert **不得**修改既有 endpoint 的 `protocol`（后端拒绝 422）；(canonical base_url, protocol) 唯一性是存储不变量（历史被改写产生的重复格子视为坏数据清除，数据可丢弃）。
+     6. **routes 只挂在活格子上**：格子被观察为 `protocol_unsupported` 时清除其名下 routes（协议都不通的格子上不存在"模型清单"）；瞬时失败不清。
+     7. **日志完整性**：每个格子测自己 → `probe_attempts` 天然覆盖全部尝试（旧轮换里中间候选的失败探测不落日志、协议翻转无因无果，随轮换机一并消灭）；runtime activity 时间戳统一 **UTC**（与 credentials 对齐）。
+     8. **catalog 只当线索，不当真相**（后续 PR）：探测观察（**含失败**）双向进 Probe Knowledge Catalog（对齐 §1.4 #2.4"失败也是历史"）；catalog 与本地观察冲突（别人通了我这标 unsupported）只**提前本地复测**，永远不直接改本地状态 —— 别人的 key 套餐/区域/网络与我不同，"他通我不通"是常态。
    - **(Claude live 验证 2026-06-02 修正)探测要打「推理端点」，不是 `/models`**：实测 `GET /v1/models` 在 openai 与 anthropic 两种网关上**都返回 200**（各自返回自己 shape 的清单），所以 `/models` **不能**判协议。真正判据 = 推理端点：openai 试 `POST /v1/chat/completions`、anthropic 试 `POST /v1/messages`，看哪个被接受、哪个被拒（如 `anthropic.qnaigc.com` 对 chat/completions 明确回 "Use /v1/messages instead"）。
    - **(Claude live 验证)每协议要带对的 auth header**：anthropic 兼容的第三方网关（qiniu-anthropic / openrouter）用 `x-api-key` 裸探得 401，但它们在 config 里是 verified → app 实际走 `Authorization: Bearer`。探测时 header 带错会把"能用"误判成"不通"。
 2. **endpoint 真连通验证 = 批量模型探测**（不是只点一个模型；PM 2026-06-03 改）：
    - **为什么必须探模型（不能只 get-models）**：`get-models` 只证明 **apikey + URL 可达**，**不证明 protocol↔URL 匹配 / 能真生成**。实证：qiniu 的 openai URL 能 `GET /models`(200) 但 `POST /v1/messages`→404 —— get-models 过了不代表该协议能用。所以第三方必须**用模型打推理端点**才算验通。
    - **为什么批量、不靠单个**：单模型探测**不可靠** —— 实测同一个 `deepseek-r1` 一次 401、再测 200（瞬时抖动）；`minimax/glm` 间歇超时。原来让用户手选一个模型，就是怕系统自动只挑一个、它恰好抖动/超时 → **误判整个 endpoint 不通**。现在改全自动，必须用批量消除这个误判。
    - **机制**：系统**自动分批**探测（每批 ~3 个，优先挑常见可靠模型抬命中率；不一个一个、避免一长串失败浪费时间）；**一批一批打**，直到**某批中任一模型成功 → 判 endpoint 可用（停）**；或**模型探尽全失败 → endpoint 不可用**。
-   - **错误码短路（省去试完所有模型）**：遇**结构性错配**码可直接判"协议/配置错"不必试完 —— openai 打 anthropic URL→`500 "Use /v1/messages instead"`；anthropic 打 openai URL→`404 not found`；未知模型→`400 invalid_request`。**但瞬时类（401 / 429 / timeout）不可短路**（与真失败靠码区分不了、且会抖动）→ 继续下一个/下一批。
+   - **错误码短路（省去试完所有模型）**：遇**结构性错配**码可直接判"协议/配置错"不必试完 —— openai 打 anthropic URL→`500 "Use /v1/messages instead"`；anthropic 打 openai URL→`404 not found`；未知模型→`400 invalid_request`。**但瞬时类（401 / 429 / timeout）不可短路**（与真失败靠码区分不了、且会抖动）→ 继续下一个/下一批。（修订 2026-07-02：本条的"协议错配"签名即 `protocol_unsupported` 分类的判据，见上方矩阵修订第 2 点 —— 命中即判该格子 `unsupported` 并短路整批。）
 3. Probe Knowledge Catalog 行为、标签行为等等**与 official 一致**。
 4. **（PM 2026-06-02/03 拍板：直接设计实现，非可选）一个 provider = 一把 key + 多个 URL**：
-   - **模型（PM 校正）**：**一个 provider = 一把 key**，其下挂**多个 URL**；每个 `(URL × 探通的协议)` = 一个 **endpoint**。一个 URL 同时通两协议（openrouter）→ **两个 endpoint 都建**（确认①）。
+   - **模型（PM 校正）**：**一个 provider = 一把 key**，其下挂**多个 URL**；每个 `(URL × 探通的协议)` = 一个 **endpoint**。一个 URL 同时通两协议（openrouter）→ **两个 endpoint 都建**（确认①）。（修订 2026-07-02：按上方"协议探测矩阵"细化 —— 每个 `(URL × 候选协议)` 格子都是持久记录，探通与否只改**状态投影**，不决定记录存亡；"探通的协议"= 状态为 verified 的格子。）
    - **gateway/registry 无「卡」概念（确认②）**：只存**平铺的标准 endpoints**，**不感知它们来自一张卡还是两张卡**（card 是前端录入便利；多 URL → 标准 endpoint list 的拆分由 ③b 做，见 #3.1）；「同一 provider」靠 endpoint 共享的 `credential_ref` + `rate_limit_bucket` 表达，不是一个 card 实体。
    - **共享（确认③）**：同一把 key 的所有 endpoint 共享 `credential_ref`，且 **一把 key 对应一个 `rate_limit_bucket`**（一处限流、全部冷却）。
    - **展示**：endpoint **平铺，不做协议分组子区**；在 LLM Roles 里同一模型跨 endpoint 合并成 model group，其下 endpoint **平铺展示在 model group 的「endpoints」标签**里。
@@ -62,7 +71,7 @@
    - **各 endpoint 独立**：canonical base_url（按协议归一）、protocol、status、routes、capabilities。
 
 ### 1.3 页面定位（重要边界）
-- API Keys 页面**必须验证 endpoint**（official：get-models + 一次最小生成探测；third-party：协议轮换 + 批量模型探测）。
+- API Keys 页面**必须验证 endpoint**（official：get-models + 一次最小生成探测；third-party：协议矩阵逐格子 get-models + 批量模型探测，半衰期未到的 `unsupported` 格子跳过；修订 2026-07-02，原"协议轮换"作废）。
 - **但它不是"测试模型连通性"的主战场** —— 逐模型"保证能用"的 probe 在 role 页面做。
 - 不过这里**留了入口，可以批量对单个模型做 probe**（escape hatch：需要时在 API key 页也能批量探单模型）。
 
@@ -104,6 +113,11 @@
 
 **6 态色 + 弃用区**：模型卡内每个 provider 行显该 route 的 6 态色（🟢 verified / 🔵 以前联通过 / ⚪ untested / 红 failed / 灰+倒计时 cooling_down / 灰+不可选 off；见 §4.2）。现码 `buildAvailableModelGroups`（`:385`）只留 ready/cooling/untested、**滤掉了 failed**——需改为保留 failed（红、可拖）。
 - **弃用区**（可折叠）：`disabled`（弃用）模型进此区，灰显、hover 显**禁用图标**、**不可拖进 role**；但**可复制模型名 + 可单独 re-probe**；**re-probe 再次连通 → 从弃用区捞回可用模型**（弃用可逆，模型可能又上线）。现码无此区，是新增 UI。
+
+**provider chip 聚合 = 真聚合，不是丢弃（修订 PM 2026-07-02，随 §1.2 协议探测矩阵）**：同一模型在同一 provider 名下有多条 route（多 URL × 多协议 transport）时：
+- **侧栏 chip**：聚合成一个 provider chip 合理，但必须**带成员数量角标**（如 `Qiniu ×4`）+ **tooltip 列出每条 transport**（URL × 协议 × 各自 6 态）。实证反例（2026-07-02）：GLM 5.1 有 4 条 verified Qiniu route，现码 `collapseDuplicateProviderLabels` 只留排序最优 1 条、其余静默丢弃，无数量、无 tooltip —— 用户不知道另外 3 条存在。
+- **拖入 role 面板**：落下时把该 provider 的**全部** transport route 写入 role 配置，并在 provider 链里**展开为 provider 内部的 fallback 子序**（同 provider 的多 transport 可拖动排序、可单删），不是只存被折叠选中的那一条。实证反例（同日）：拖 GLM 5.1 进 role，`llm_roles.yaml` 只落 1 条 route（选哪条用户不可见不可控）。
+- 此设计与「§1.2 确认②endpoint 平铺进 model group 的 endpoints 标签」一致——聚合只发生在**展示**层，配置与执行永远面向 route 全集。
 
 **failed vs cooling_down vs disabled（PM #10「needs_setup 是什么」的最终裁定，定义留底）**：三个「不能直接用」的状态正交，别混。**取消原 `needs_setup` 灰态——它本质是 `failed` 的一个 reason（配置缺口），并入 failed 显红**：
 
@@ -314,13 +328,13 @@ Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/mo
 - **Probe Knowledge Catalog 现状 / legacy 命名**：canonical 入口已收敛到 `graph_agent_gateway.probe_catalog` / `app.services.llm_probe_catalog` / `llm_probe_catalog.json`；底层仍复用 `ProviderImportDraft` / `llm_import_drafts.py` 作为历史存储兼容层。这是历史命名，不是 MVP1 功能名。目标正式 schema 为 `ProbeKnowledgeCatalog`：保留 append-only evidence、remote read-only sync、probe history、candidate/capability fallback；MVP1 分享端点只做 local export，不自动上传；**不保留 Import Draft（待导入草稿 → apply）主线**。
 - **统一 UI state 投影**：§4.2 的标签 = gateway `project_route_state` / Studio adapter 投影，当前已产 6 态：**① 去掉 `needs_setup`（并入 `failed` + reason）② 新增「🔵 蓝=以前联通过」**（#A 已答，见 §4.2）；`catalog_history` 驱动历史蓝态，`draft_history` 仅为旧 metadata fallback。
 - **capability on get-model**：anthropic 在 get-model 时返回 capability —— 对接 gateway `03-credentials-endpoints` / `05-capabilities`；**#B 由 Claude 核实**各 protocol 的 list-models 是否带 capability（见下"Claude 待核实"）。
-- **protocol 自动探测**（第三方）：**#C 已答** —— 各 protocol 排列组合各测一遍、哪个连通判哪个（见 §1.2）。
+- **protocol 自动探测**（第三方）：**#C 已答** —— 各 protocol 排列组合各测一遍、哪个连通判哪个（见 §1.2；修订 2026-07-02：落地形态 = 协议探测矩阵，逐格子观察、不选边不改写，见 §1.2 修订记录）。
 - **model bundle**：对接 `materialize_model_bundle`（把 bundle 物化成兜底链的函数，`services/llm_role_materializer.py:99`）+ `ModelBundle`（数据结构）—— bundle→route list 的解析已有雏形，实现时确认与本规格一致。
 - **测试落点**：§4.3「endpoint 验证 vs model 保证」的分工，需在 gateway `03`(endpoint) / `07`(probe) / `08`(test-SSOT) 模块对齐。
 
 ### 已 PM 拍板（2026-06-02 第二轮）
 - **#A 已答** → §4.2：route 级 6 态体系（🔵 蓝=以前联通过 是独立第 6 态）。gateway `project_provider_model_state` 需从 5 态补到 6 态。
-- **#C 已答** → §1.2：第三方 protocol 自动探测 = 各 protocol 排列组合各测一遍，哪个连通判哪个。
+- **#C 已答** → §1.2：第三方 protocol 自动探测 = 各 protocol 排列组合各测一遍，哪个连通判哪个（2026-07-02 细化为协议探测矩阵，见 §1.2 修订记录）。
 
 ### 新增需求（PM 2026-06-02 第三轮）
 - **#D 多 URL per provider card**（PM 原话："一张 provider card 填两个 URL ,你就当我新加的,如果太难不懂也行"）：第三方 card 填多个 base_url → 各成独立 endpoint（各自探协议 + 验证），模型合并到该 card。
@@ -328,7 +342,7 @@ Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/mo
   - **重叠提示（重要）**：LLM Roles 的"model group 把相同模型跨 endpoint 合并"**本已提供多 URL 兜底** —— 加两张卡（两 endpoint），role 里自动合并成一个带两 provider 的兜底组。故"同模型多 URL 兜底"核心需求现有机制已覆盖；一张卡多 URL 的额外价值 = provider 管理便利（两镜像归一个 provider 名下）。
   - **PM 拍板：不是可选 / 低优先，直接设计实现**。全量设计见 §1.2 item 4；Claude 早前的「可选」建议作废。**3 点已确认**：①一 URL 两协议都建；②平铺建 endpoint、后端无卡概念、roles 里进 model group 的「endpoints」标签（不分组子区）；③一把 key 一个 bucket。
   - **live 验证结果（2026-06-02，用 app 配置 key 真测，key 未外泄）**：
-    - **Qiniu = 两 URL 各一协议（PM #2 确认成立）**：`api.qnaigc.com/v1` 只 openai（`GET /v1/models`→200；`POST /v1/messages`→generic 400）；`anthropic.qnaigc.com` 只 anthropic（`POST /v1/messages`→anthropic-shaped 401；`POST /v1/chat/completions`→500 明确 "Use /v1/messages instead"）。**每个 URL 只能一个协议**。
+    - **Qiniu = 两 URL 各一协议（PM #2 确认成立）**：`api.qnaigc.com/v1` 只 openai（`GET /v1/models`→200；`POST /v1/messages`→generic 400）；`anthropic.qnaigc.com` 只 anthropic（`POST /v1/messages`→anthropic-shaped 401；`POST /v1/chat/completions`→500 明确 "Use /v1/messages instead"）。**每个 URL 只能一个协议**。（观察更新 2026-07-02：`api.qnaigc.com` 现已同时通 anthropic 协议生成——生成探测 verified；且两 host 模型目录不同，`anthropic.qnaigc.com` 多 13 个 free/alpha 模型。**提供商行为会变，正是"观察会老化、按半衰期复测"的实证**，见 §1.2 修订记录。）
     - **OpenRouter = 一 URL 两协议（live 完全成立）**：`openrouter.ai/api` 同时通 `/v1/chat/completions`（Bearer→200）与 `/v1/messages`（**Bearer→200，返回真 anthropic message**；先前 401 是我 `x-api-key` 用错 header）。**走通配置 = `Authorization: Bearer`**（anthropic 兼容第三方通用）。
     - **endpoint 映射规则（确认）**：endpoint 身份 =（canonical base_url, protocol）；一张卡 →（每个 URL × 探通的协议）各成一个 endpoint，命名 `{slug}-{protocol}`（qiniu-openai / qiniu-anthropic / openrouter-openai / openrouter-anthropic）；同卡 endpoint **共享 api_key + rate_limit_bucket**，各自 canonical base_url（按协议）/ routes / capabilities。
     - **现状代码 gap**：`_stable_endpoint_id`（`llm_credentials.py:369`）是 host 白名单硬编码，openrouter 现塌成单 `openrouter-prod` 单协议 → 要改成通用 `(slug, protocol)` 派生 + 迁移现有 id。

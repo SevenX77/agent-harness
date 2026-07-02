@@ -17,6 +17,7 @@ ProviderProbeStatus = Literal[
     "ok",
     "invalid_key",
     "invalid_model",
+    "protocol_unsupported",
     "rate_limited",
     "quota_exceeded",
     "network_error",
@@ -544,6 +545,41 @@ def _is_billing_error(response: httpx.Response) -> bool:
     return any(marker in text for marker in _BILLING_ERROR_MARKERS)
 
 
+# A URL that does not serve the probed protocol at all answers with wrong-path
+# signatures instead of a provider-shaped model error. Two observed families
+# (design §1.2 protocol matrix, live-verified on qiniu): explicit guidance to the
+# correct path ("Use /v1/messages instead", any HTTP status) and bare path-level
+# 404/405 text ("not found or method not allowed"). These are protocol-level
+# facts about the (URL, protocol) combination — classifying them as
+# invalid_model conflates "this URL cannot speak the protocol" with "the model
+# id is wrong" and poisons every consumer downstream.
+_PROTOCOL_MISMATCH_MARKERS = (
+    "use /v1/messages",
+    "use /v1/chat/completions",
+    "method not allowed",
+)
+
+
+def _has_protocol_mismatch_guidance(response: httpx.Response) -> bool:
+    text = response.text.lower()
+    return any(marker in text for marker in _PROTOCOL_MISMATCH_MARKERS)
+
+
+def _is_provider_error_payload(response: httpx.Response) -> bool:
+    """True when the body is the protocol's own structured error schema.
+
+    Every supported protocol (openai / anthropic / google / ark) wraps request
+    errors in a JSON object with an ``error`` member. A 404 carrying that shape
+    proves the protocol handler answered — the failure is about the request
+    (model id), not about the URL not speaking the protocol.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and payload.get("error") is not None
+
+
 def _probe_status(
     response: httpx.Response,
     *,
@@ -552,6 +588,8 @@ def _probe_status(
     code = response.status_code
     if 200 <= code < 300:
         return "ok"
+    if code == 405 or _has_protocol_mismatch_guidance(response):
+        return "protocol_unsupported"
     if code == 401:
         return "invalid_key"
     if code == 429:
@@ -561,6 +599,8 @@ def _probe_status(
     if code in (400, 404):
         if _is_billing_error(response):
             return "quota_exceeded"
+        if code == 404 and not _is_provider_error_payload(response):
+            return "protocol_unsupported"
         return model_not_found_status
     return "error"
 

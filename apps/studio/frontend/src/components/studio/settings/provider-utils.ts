@@ -339,16 +339,11 @@ function providerTypeEndpointSuffix(providerType: ProviderType): string {
 }
 
 function credentialProviderProtocolSlot(provider: CredentialProviderState): ProviderType {
-  return providerTypeFromEndpointId(provider.id) ?? ((provider.provider_type ?? "openai_compatible") as ProviderType)
-}
-
-function providerTypeFromEndpointId(endpointId: string): ProviderType | null {
-  const normalized = endpointId.toLowerCase()
-  if (normalized.includes("-openai-") || normalized.endsWith("-openai")) return "openai_compatible"
-  if (normalized.includes("-anthropic-") || normalized.endsWith("-anthropic")) return "anthropic_compatible"
-  if (normalized.includes("-google-") || normalized.endsWith("-google")) return "google_genai"
-  if (normalized.includes("-ark-") || normalized.endsWith("-ark")) return "ark_runtime"
-  return null
+  // Design §1.2 protocol matrix (2026-07-02): the persisted `provider_type` is
+  // the single protocol truth. Endpoint ids are opaque — the old slug sniffing
+  // ("-openai-" in the id => openai slot) was a second protocol writer that
+  // fought the backend and rendered self-contradictory cards.
+  return (provider.provider_type ?? "openai_compatible") as ProviderType
 }
 
 function providerDraftFromCredential(provider: CredentialProviderState): ProviderDraft {

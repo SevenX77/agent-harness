@@ -186,6 +186,182 @@ async def test_gateway_route_probe_capability_400_stays_invalid_model() -> None:
     assert result.status == "invalid_model"
 
 
+@pytest.mark.anyio
+async def test_gateway_route_probe_path_404_is_protocol_unsupported() -> None:
+    """A path-level 404 (no provider-shaped error payload) means the URL does not
+    speak this protocol at all — it must classify as protocol_unsupported, never
+    as a model-level invalid_model. Live signature (qiniu, 2026-07-02):
+    google_genai probe of api.qnaigc.com/v1 answered a plain-text
+    "not found or method not allowed"."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="qiniu-google",
+        protocol="google_genai",
+        base_url="https://api.qnaigc.com/v1",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+    route = ProviderRoute(
+        route_id="qiniu-google:gemini-2.5-pro",
+        endpoint_id="qiniu-google",
+        route_slug="gemini-2.5-pro",
+        provider_model_id="gemini-2.5-pro",
+        canonical_id="gemini-2.5-pro",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="not found or method not allowed", request=request)
+
+    result = await test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+async def test_gateway_route_probe_model_shaped_404_stays_invalid_model() -> None:
+    """A 404 wrapped in the provider's own error schema proves the protocol
+    reached the provider — the model id is what failed, so invalid_model."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+    route = ProviderRoute(
+        route_id="openai-official:gpt-nonexistent",
+        endpoint_id="openai-official",
+        route_slug="gpt-nonexistent",
+        provider_model_id="gpt-nonexistent",
+        canonical_id="gpt-nonexistent",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={
+                "error": {
+                    "message": "The model `gpt-nonexistent` does not exist or you do not have access to it.",
+                    "type": "invalid_request_error",
+                    "code": "model_not_found",
+                }
+            },
+            request=request,
+        )
+
+    result = await test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "invalid_model"
+
+
+@pytest.mark.anyio
+async def test_gateway_route_probe_wrong_protocol_guidance_is_protocol_unsupported() -> None:
+    """Explicit wrong-endpoint guidance is a protocol mismatch regardless of the
+    HTTP status. Live signature (design §1.2 / live-verified 2026-06-02):
+    POST /v1/chat/completions on anthropic.qnaigc.com answers HTTP 500
+    "Use /v1/messages instead"."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="qiniu-anthropic-host-openai",
+        protocol="openai_compatible",
+        base_url="https://anthropic.qnaigc.com",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+    route = ProviderRoute(
+        route_id="qiniu-anthropic-host-openai:z-ai.glm-5.1",
+        endpoint_id="qiniu-anthropic-host-openai",
+        route_slug="z-ai.glm-5.1",
+        provider_model_id="z-ai/glm-5.1",
+        canonical_id="z-ai.glm-5.1",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={"error": {"message": "Use /v1/messages instead", "type": "invalid_request_error"}},
+            request=request,
+        )
+
+    result = await test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+async def test_gateway_endpoint_test_path_404_is_protocol_unsupported() -> None:
+    """The get-models call hitting a path-level 404 is the same protocol-mismatch
+    fact at the endpoint level — not a generic error."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="qiniu-google",
+        protocol="google_genai",
+        base_url="https://api.qnaigc.com/v1",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="not found or method not allowed", request=request)
+
+    result = await test_provider_endpoint(
+        endpoint,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+    assert result.error_code == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+async def test_gateway_route_probe_405_is_protocol_unsupported() -> None:
+    """405 Method Not Allowed = the path exists but not for this protocol's verb."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="qiniu-google",
+        protocol="google_genai",
+        base_url="https://api.qnaigc.com/v1",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+    route = ProviderRoute(
+        route_id="qiniu-google:gemini-2.5-pro",
+        endpoint_id="qiniu-google",
+        route_slug="gemini-2.5-pro",
+        provider_model_id="gemini-2.5-pro",
+        canonical_id="gemini-2.5-pro",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(405, text="method not allowed", request=request)
+
+    result = await test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
 def test_gateway_official_call_method_timeout_allows_slow_openai_pro_responses() -> None:
     timeout = provider_probe._official_call_method_timeout(
         "openai_responses",

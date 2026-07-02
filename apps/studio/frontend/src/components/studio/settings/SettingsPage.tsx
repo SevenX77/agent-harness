@@ -6,7 +6,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -885,6 +885,29 @@ export function useSettingsPageController(): SettingsPageController {
     ))
   }
 
+  // Design §1.2 protocol matrix point 4: re-probe one (URL, protocol) cell NOW,
+  // bypassing the protocol_unsupported half-life gate — the affordance for
+  // "the provider may have started supporting this protocol today".
+  async function forceReprobeEndpoint(endpointId: string) {
+    pendingRoleProjectionRefreshRef.current = true
+    const toastId = `force-endpoint-test-${endpointId}`
+    toast.loading(`Re-probing protocol for ${endpointId}...`, { id: toastId })
+    try {
+      await forceTestEndpoint(endpointId)
+      const next = await getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      setCredentials(next)
+      setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
+      const reprobed = next.providers.find((provider) => provider.id === endpointId)
+      if (reprobed?.last_error_code === 'protocol_unsupported') {
+        toast.info(`Still unsupported: ${reprobed.last_test_message ?? 'the URL does not speak this protocol.'}`, { id: toastId })
+      } else {
+        toast.success(`Re-probed ${endpointId}: ${reprobed?.last_test_message ?? 'done.'}`, { id: toastId })
+      }
+    } catch (error) {
+      toast.error(composeRequestErrorMessage(error, "Endpoint re-probe failed"), { id: toastId })
+    }
+  }
+
   async function runProviderGetModels(providerId: string) {
     await flushCredentialsSave()
     const draft = providerDraftForAction(draftsRef.current, providerId)
@@ -1104,6 +1127,7 @@ export function useSettingsPageController(): SettingsPageController {
     ensureCredentialsHydrated,
     onProviderFieldChange: updateProviderField,
     onGetProviderModels: (providerId) => void runProviderGetModels(providerId),
+    onForceEndpointTest: (endpointId) => void forceReprobeEndpoint(endpointId),
     onDeleteProvider: deleteProvider,
     onDeleteProviderEndpoints: (endpointIds) => void deleteProviderEndpoints(endpointIds),
     onBeginAddProvider: beginAddProvider,

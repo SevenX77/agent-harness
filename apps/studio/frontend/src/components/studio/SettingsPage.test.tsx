@@ -164,6 +164,7 @@ function baseViewProps(
     onTabChange: vi.fn(),
     onProviderFieldChange: vi.fn(),
     onGetProviderModels: vi.fn(),
+    onForceEndpointTest: vi.fn(),
     onDeleteProvider: vi.fn(),
     onDeleteProviderEndpoints: vi.fn(),
     onBeginAddProvider: vi.fn(),
@@ -528,19 +529,18 @@ describe('Add Provider flow helpers', () => {
     ])
   })
 
-  it('keeps third-party endpoint ids in their intended protocol slots when runtime detection mutates protocol', () => {
+  it('slots third-party endpoints by their persisted protocol, never by id slugs', () => {
+    // Design §1.2 protocol matrix (2026-07-02): the persisted `provider_type` is
+    // the single protocol truth. Endpoint ids are opaque — deriving the slot from
+    // an id slug re-created a second protocol writer that fought the backend
+    // (live incident: a `-openai-` id whose persisted protocol was anthropic
+    // rendered a self-contradictory card and an "untested" ghost slot).
     const [draft] = draftsFromCredentials({
       providers: [
         {
+          // Corrupt legacy cell from the old rotation bug: id slug says openai,
+          // persisted protocol says anthropic. The persisted field must win.
           id: 'anthropic-qnaigc-com-openai-6a75652f0b',
-          name: 'Qiniu',
-          api_key: 'sk-qiniu',
-          base_url: 'https://anthropic.qnaigc.com',
-          provider_type: 'anthropic_compatible',
-          last_test_status: 'ok',
-        },
-        {
-          id: 'anthropic-qnaigc-com-anthropic-38963c9239',
           name: 'Qiniu',
           api_key: 'sk-qiniu',
           base_url: 'https://anthropic.qnaigc.com',
@@ -559,18 +559,23 @@ describe('Add Provider flow helpers', () => {
     })
 
     expect(draft.base_urls?.[0].endpoint_ids).toMatchObject({
-      openai_compatible: 'anthropic-qnaigc-com-openai-6a75652f0b',
-      anthropic_compatible: 'anthropic-qnaigc-com-anthropic-38963c9239',
+      anthropic_compatible: 'anthropic-qnaigc-com-openai-6a75652f0b',
       google_genai: 'anthropic-qnaigc-com-google-ab16819307',
     })
-    expect(providerEndpointDraftsForAction(draft).map((endpointDraft) => ({
-      id: endpointDraft.id,
-      provider_type: endpointDraft.provider_type,
-    }))).toEqual([
-      { id: 'anthropic-qnaigc-com-openai-6a75652f0b', provider_type: 'openai_compatible' },
-      { id: 'anthropic-qnaigc-com-anthropic-38963c9239', provider_type: 'anthropic_compatible' },
-      { id: 'anthropic-qnaigc-com-google-ab16819307', provider_type: 'google_genai' },
-    ])
+    expect(draft.base_urls?.[0].endpoint_ids?.openai_compatible).toBeUndefined()
+
+    const endpointDrafts = providerEndpointDraftsForAction(draft)
+    // Every cell probes its own persisted protocol; the vacant openai slot mints
+    // a fresh creation id instead of hijacking an existing cell.
+    expect(
+      endpointDrafts.map((endpointDraft) => endpointDraft.provider_type).sort(),
+    ).toEqual(['anthropic_compatible', 'google_genai', 'openai_compatible'])
+    expect(
+      endpointDrafts.find((endpointDraft) => endpointDraft.provider_type === 'anthropic_compatible')?.id,
+    ).toBe('anthropic-qnaigc-com-openai-6a75652f0b')
+    expect(
+      endpointDrafts.find((endpointDraft) => endpointDraft.provider_type === 'google_genai')?.id,
+    ).toBe('anthropic-qnaigc-com-google-ab16819307')
   })
 
   it('uses canonical official provider endpoints for hidden Base URL fields and Test actions', () => {

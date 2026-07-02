@@ -2076,14 +2076,17 @@ def test_endpoint_test_third_party_retains_verified_when_reachable_and_previousl
     assert routes["openai-direct:gpt-5"]["status"] == "verified"
 
 
-def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
+def test_endpoint_test_probes_only_its_own_protocol_and_never_rewrites_it(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    # apikeys#25: the third-party Test rotates candidate protocols (cloning the
-    # endpoint per candidate) until a generation probe is accepted, then persists
-    # the detected protocol on the endpoint — the user never hand-picks it.
+    # Protocol matrix (design §1.2 revision 2026-07-02): (base_url, protocol) is
+    # the endpoint's immutable identity. The Test probes THIS combination only —
+    # no candidate rotation, no clone-with-another-protocol, and a failing probe
+    # must never rewrite `protocol`. The old rotation machine turned one transient
+    # failure into a permanent identity flip (live incident: qiniu `-openai-`
+    # endpoint silently became a duplicate anthropic endpoint).
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -2092,7 +2095,8 @@ def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
                 "mystery": ProviderEndpoint(
                     endpoint_id="mystery",
                     display_name="Mystery",
-                    # Stored protocol is wrong; auto-detect must rotate to anthropic.
+                    # This URL only speaks anthropic, but this cell IS the openai
+                    # cell of the matrix — it must report that fact, not mutate.
                     protocol="openai_compatible",
                     base_url="https://anthropic.mystery.example/v1",
                     api_key="secret",
@@ -2112,14 +2116,13 @@ def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
         *,
         runtime_settings: dict[str, object] | None = None,
     ) -> RouteProbeResult:
-        # Protocol rotation clones the endpoint per candidate, so the endpoint's
-        # backend identifies the transport being tried.
-        backend = llm_router._endpoint_probe_backend(endpoint)
-        probed_backends.append(backend)
-        # Only the anthropic (claude) transport is accepted by this endpoint.
-        if backend == "claude":
-            return _route_probe(endpoint, route, status="ok", latency_ms=21)
-        return _route_probe(endpoint, route, status="error", message="protocol mismatch")
+        probed_backends.append(llm_router._endpoint_probe_backend(endpoint))
+        return _route_probe(
+            endpoint,
+            route,
+            status="protocol_unsupported",
+            message="Use /v1/messages instead",
+        )
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
@@ -2129,20 +2132,372 @@ def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
     assert response.status_code == 200
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["mystery"]
-    assert endpoint["status"] == "verified"
-    # Detected protocol persisted (openai was tried first and rejected, claude won).
-    assert endpoint["protocol"] == "anthropic_compatible"
-    assert "openai" in probed_backends and "claude" in probed_backends
+    # Identity untouched; the observation is recorded honestly.
+    assert endpoint["protocol"] == "openai_compatible"
+    assert endpoint["status"] == "failed"
+    assert endpoint["last_error_code"] == "protocol_unsupported"
+    # Only this cell's own transport was probed — exactly once (structural
+    # short-circuit), never a rotated sibling protocol.
+    assert probed_backends == ["openai"]
 
 
-def test_endpoint_test_third_party_invalid_key_short_circuits_protocol_detect(
+def test_endpoint_test_protocol_unsupported_removes_routes_and_role_refs(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    # apikeys#25: a structural error (invalid_key) cannot be fixed by rotating the
-    # protocol, so the auto-detect loop stops after the first candidate instead of
-    # burning a probe per protocol.
+    # Design §1.2 matrix revision point 6: routes only live on cells that speak
+    # their protocol. A protocol_unsupported observation clears the cell's routes
+    # (phantom gemini routes on a dead google cell were pure red noise) and strips
+    # role references to them.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "qiniu-google": ProviderEndpoint(
+                    endpoint_id="qiniu-google",
+                    display_name="Qiniu",
+                    protocol="google_genai",
+                    base_url="https://api.qiniu.example/v1",
+                    api_key="secret",
+                )
+            },
+            provider_routes={
+                "qiniu-google:gemini-2.5-pro": ProviderRoute(
+                    route_id="qiniu-google:gemini-2.5-pro",
+                    endpoint_id="qiniu-google",
+                    route_slug="gemini-2.5-pro",
+                    provider_model_id="gemini-2.5-pro",
+                    canonical_id="gemini-2.5-pro",
+                ),
+            },
+        ),
+        credentials_path(),
+    )
+    save_roles_file(
+        active_roles_path(),
+        RolesData(
+            schema_version=3,
+            roles={
+                "analyst": RoleEntry(
+                    model_groups=[
+                        RoleModelGroup(
+                            canonical_id="gemini-2.5-pro",
+                            display_name="Gemini 2.5 Pro",
+                            provider_models=[
+                                RoleProviderModel(route_id="qiniu-google:gemini-2.5-pro"),
+                            ],
+                        )
+                    ],
+                )
+            },
+        ),
+        known_route_ids={"qiniu-google:gemini-2.5-pro"},
+    )
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        return _endpoint_probe(
+            endpoint,
+            status="protocol_unsupported",
+            message="not found or method not allowed",
+            error_code="protocol_unsupported",
+        )
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+
+    response = client.post("/api/llm/endpoints/qiniu-google/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["qiniu-google"]
+    assert endpoint["status"] == "failed"
+    assert endpoint["last_error_code"] == "protocol_unsupported"
+    # Phantom routes on the dead cell are gone.
+    assert "qiniu-google:gemini-2.5-pro" not in body["registry"]["provider_routes"]
+    # Role references to the removed routes are stripped.
+    roles = load_roles_file(active_roles_path())
+    analyst_groups = roles.roles["analyst"].model_groups or []
+    referenced = [
+        provider_model.route_id
+        for group in analyst_groups
+        for provider_model in group.provider_models
+    ]
+    assert "qiniu-google:gemini-2.5-pro" not in referenced
+
+
+def test_endpoint_test_protocol_unsupported_is_gated_within_half_life(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # Design §1.2 matrix revision point 4: protocol_unsupported is an
+    # architectural fact with a 30-day half-life. Within it, the routine Test
+    # skips the cell (no provider call, observation NOT refreshed); `force=true`
+    # re-probes immediately.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    observed_at = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "qiniu-google": ProviderEndpoint(
+                    endpoint_id="qiniu-google",
+                    display_name="Qiniu",
+                    protocol="google_genai",
+                    base_url="https://api.qiniu.example/v1",
+                    api_key="secret",
+                    status="failed",
+                    last_test_at=observed_at,
+                    last_test_message="Protocol not supported by this URL.",
+                    last_error_code="protocol_unsupported",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    calls = {"n": 0}
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        calls["n"] += 1
+        return _endpoint_probe(
+            endpoint,
+            status="protocol_unsupported",
+            message="not found or method not allowed",
+            error_code="protocol_unsupported",
+        )
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+
+    # The real Test flow upserts the draft BEFORE testing — the upsert must
+    # preserve the protocol_unsupported observation (last_error_code is a fact
+    # field) or the gate never sees it and re-probes every run. The upsert may
+    # re-key the endpoint onto its deterministic (protocol, URL) id; the flow
+    # (like the frontend) then tests by the persisted id from the response.
+    endpoint = load_credentials().provider_endpoints["qiniu-google"]
+    upsert = client.put(
+        "/api/llm/registry/endpoints",
+        json={"provider_endpoints": {"qiniu-google": json.loads(endpoint.model_dump_json())}},
+    )
+    assert upsert.status_code == 200
+    persisted_id, persisted = next(
+        (endpoint_id, entry)
+        for endpoint_id, entry in load_credentials().provider_endpoints.items()
+        if entry.protocol == "google_genai"
+    )
+    assert persisted.last_error_code == "protocol_unsupported"
+
+    gated = client.post(f"/api/llm/endpoints/{persisted_id}/test")
+
+    assert gated.status_code == 200
+    assert calls["n"] == 0  # no provider call within the half-life
+    gated_body = gated.json()
+    assert gated_body["skipped"] is True
+    gated_endpoint = gated_body["registry"]["provider_endpoints"][persisted_id]
+    # The old observation is preserved, not refreshed (refreshing would make the
+    # half-life never expire).
+    assert gated_endpoint["last_test_at"] == observed_at
+
+    forced = client.post(f"/api/llm/endpoints/{persisted_id}/test?force=true")
+
+    assert forced.status_code == 200
+    assert calls["n"] == 1  # force bypasses the gate and re-observes
+    assert forced.json()["skipped"] is False
+
+
+def test_endpoint_test_protocol_unsupported_gate_expires_after_half_life(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # After the 30-day half-life the routine Test re-probes the cell by itself —
+    # a provider that started supporting the protocol is rediscovered without any
+    # manual action ("哪天 qiniu 支持 gemini 了" is a when, not a never).
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "qiniu-google": ProviderEndpoint(
+                    endpoint_id="qiniu-google",
+                    display_name="Qiniu",
+                    protocol="google_genai",
+                    base_url="https://api.qiniu.example/v1",
+                    api_key="secret",
+                    status="failed",
+                    last_test_at=(datetime.now(UTC) - timedelta(days=31)).isoformat(),
+                    last_test_message="Protocol not supported by this URL.",
+                    last_error_code="protocol_unsupported",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    calls = {"n": 0}
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        calls["n"] += 1
+        return _endpoint_probe(
+            endpoint,
+            status="protocol_unsupported",
+            message="not found or method not allowed",
+            error_code="protocol_unsupported",
+        )
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+
+    response = client.post("/api/llm/endpoints/qiniu-google/test")
+
+    assert response.status_code == 200
+    assert calls["n"] == 1
+    assert response.json()["skipped"] is False
+
+
+def test_endpoint_test_protocol_unsupported_does_not_reuse_previously_verified(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # protocol_unsupported is structural: the cell cannot generate at all, so a
+    # previously verified route must NOT keep the endpoint green (unlike flaky
+    # model-level failures, which do reuse).
+    _seed(tmp_path, monkeypatch)  # seeds a verified openai-direct:gpt-5 route
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5",))
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return _route_probe(
+            endpoint,
+            route,
+            status="protocol_unsupported",
+            message="Use /v1/messages instead",
+        )
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    endpoint = response.json()["registry"]["provider_endpoints"]["openai-direct"]
+    assert endpoint["status"] == "failed"
+    assert endpoint["last_error_code"] == "protocol_unsupported"
+
+
+def test_upsert_endpoints_rejects_protocol_change_on_existing_endpoint(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # Design §1.2 matrix revision point 5: protocol is identity — the single
+    # writer is endpoint creation. An upsert that would flip an existing
+    # endpoint's protocol is a client bug (the old ping-pong between frontend
+    # slug-slots and backend detection), rejected with 422.
+    _seed(tmp_path, monkeypatch)
+    current = load_credentials()
+    endpoint = current.provider_endpoints["openai-direct"]
+
+    response = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "openai-direct": {
+                    **json.loads(endpoint.model_dump_json()),
+                    "protocol": "anthropic_compatible",
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "protocol" in response.json()["message"].lower()
+    # Truth unchanged.
+    assert load_credentials().provider_endpoints["openai-direct"].protocol == "openai_compatible"
+
+
+def test_upsert_endpoints_rejects_duplicate_url_protocol_combo(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # (canonical base_url, protocol) uniqueness is a storage invariant — a second
+    # endpoint for the same combination under a new id would recreate the
+    # duplicate-cell corruption the rotation bug used to produce.
+    _seed(tmp_path, monkeypatch)
+    current = load_credentials()
+    endpoint = current.provider_endpoints["openai-direct"]
+
+    response = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "openai-direct-copy": {
+                    **json.loads(endpoint.model_dump_json()),
+                    "endpoint_id": "openai-direct-copy",
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "openai-direct" in response.json()["message"]
+    assert "openai-direct-copy" not in load_credentials().provider_endpoints
+
+
+def test_upsert_endpoints_tolerates_preexisting_duplicate_combo_on_update(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # The uniqueness invariant guards against CREATING new duplicate cells; data
+    # already corrupted by the old rotation bug (two endpoints on one combo) must
+    # still accept updates to either record — otherwise the Test flow 422s on
+    # legitimate cells and the user cannot even re-test their provider.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    duplicate = {
+        "display_name": "Qiniu",
+        "protocol": "anthropic_compatible",
+        "base_url": "https://anthropic.qiniu.example",
+        "api_key": "secret",
+    }
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "qiniu-openai-slug": ProviderEndpoint(endpoint_id="qiniu-openai-slug", **duplicate),
+                "qiniu-anthropic-slug": ProviderEndpoint(endpoint_id="qiniu-anthropic-slug", **duplicate),
+            },
+        ),
+        credentials_path(),
+    )
+    endpoint = load_credentials().provider_endpoints["qiniu-openai-slug"]
+
+    response = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "qiniu-openai-slug": json.loads(endpoint.model_dump_json()),
+            }
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_endpoint_test_third_party_invalid_key_short_circuits_batch_probe(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys#25: a structural error (invalid_key) rejects every model on the
+    # endpoint, so the batch generation probe stops after the first model instead
+    # of burning a probe per candidate.
     _seed(tmp_path, monkeypatch)
     probe_count = {"n": 0}
 
@@ -2702,14 +3057,6 @@ def test_endpoint_test_third_party_probes_discovered_models_after_models_list(
     assert body["discovered_model_count"] == 1
     routes = body["registry"]["provider_routes"]
     assert routes["qiniu:claude-qiniu"]["status"] == "verified"
-
-
-def test_third_party_protocol_auto_detect_excludes_ark_runtime() -> None:
-    assert llm_router._THIRD_PARTY_PROTOCOL_CANDIDATES == (
-        "openai_compatible",
-        "anthropic_compatible",
-        "google_genai",
-    )
 
 
 def test_endpoint_test_uses_endpoint_protocol_and_base_url_for_probe(

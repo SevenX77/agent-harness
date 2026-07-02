@@ -81,6 +81,10 @@ packages/graph-agent-gateway(gateway)时也直接去改。开工前必读 / 必�
   验证新功能的失败测试,再写生产代码。纯视觉/样式调整不新增测试,只锁死视觉细节的旧
   测试同步删除或收窄。
 
+- 报「完成」≠ 收敛:前端任务以 **PM 在主 app 里亲自确认效果**为收敛条件——报 done 时给出
+  「在哪个界面、怎么操作、该看到什么」的确认指引并等 PM 确认,确认前任务不算完;PM 反馈的
+  问题继续在本任务内修。
+
 - 改完必须把 app 真跑起来、亲眼点过受影响界面才报「完成」;typecheck/diff 通过不算
   视觉验证。验证方式:主仓根跑着唯一一套完整 app(studio-dev.ps1: Tauri + sidecar
   :8787 + Vite 5173,展示的是 main 的代码、不含你的改动)。只改了前端 → 在自己
@@ -96,7 +100,9 @@ packages/graph-agent-gateway(gateway)时也直接去改。开工前必读 / 必�
   test / build 四件套;改了 backend/engine/gateway,按 AGENTS.md「CI Gates」跑对应的
   uv run ruff check / uv run mypy(SDK 用 --strict)/ uv run pytest。然后
   scripts/wt-ship.sh ["PR title"] 推分支、开 PR、上 auto-merge;远端 main 仍
-  protected,不要直接 push。合并后 scripts/wt-clean.sh 清理 worktree。
+  protected,不要直接 push。合并后 scripts/wt-clean.sh 清理 worktree、主仓根 git pull;
+  **PR 若改了依赖清单,主仓根必须补装**(package.json 变 → apps/studio/frontend 里
+  npm install;uv.lock 变 → uv sync),否则跑着的主 app 在新依赖上直接红屏,PM 没法确认。
 
 任务:<在这里写你这次要做的功能改动>
 

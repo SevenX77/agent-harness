@@ -30,9 +30,13 @@ def test_copilot_event_subclasses_construct() -> None:
     assert CopilotEventError(message="failed").type == "error"
 
 
-def test_tool_use_start_restricts_tool_name() -> None:
-    with pytest.raises(ValidationError):
-        CopilotEventToolUseStart(tool_name="Delete", tool_input={})
+def test_tool_use_start_accepts_any_tool_name() -> None:
+    # F8: the transcript reports every tool the SDK actually ran — the model
+    # legitimately uses read-only tools (Glob/Grep) beyond the pre-allowed
+    # subset, so tool_name is an open string; policy lives in SDK options.
+    event = CopilotEventToolUseStart(tool_name="Glob", tool_input={"pattern": "*.md"})
+
+    assert event.tool_name == "Glob"
 
 
 @pytest.mark.parametrize(

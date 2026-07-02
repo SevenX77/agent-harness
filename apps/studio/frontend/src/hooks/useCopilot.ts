@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { wsUrl } from '../api/client'
 import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
-import type { CopilotEvent, CopilotMessage } from '../types/copilot'
+import type {
+  CopilotEvent,
+  CopilotMessage,
+  CopilotTextDeltaEvent,
+  CopilotThinkingDeltaEvent,
+} from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
 import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
@@ -79,33 +84,76 @@ function createMessage(role: CopilotMessage['role'], content: string, status: Co
   }
 }
 
+/** Token deltas that stream through the 75ms coalescing queue (F8-5). */
+export type CopilotDeltaEvent = CopilotTextDeltaEvent | CopilotThinkingDeltaEvent
+
 /**
- * Drain queued text deltas into the store, coalescing by message. Shared by the
- * 75ms flush timer and the terminal-event path: draining before applying
- * done/error guarantees the persisted snapshot (R16/D8) includes every trailing
- * text token, not just whatever happened to flush before the turn settled.
+ * F8-4: the assistant message status is a lifecycle (`running → success|error`)
+ * driven ONLY by terminal events. Intermediate events (context_resolved /
+ * tool_* / thinking) must not overwrite it — R5 root cause: context_resolved's
+ * event-level 'success' flipped the message to success and killed the thinking
+ * indicator while the turn was still streaming.
  */
-function flushTextQueue(
-  queue: Array<{ messageId: string; content: string; event: CopilotEvent }>,
+export function assistantMessageAfterEvent(
+  message: CopilotMessage,
+  event: CopilotEvent,
+): CopilotMessage {
+  const status: CopilotMessage['status'] =
+    event.type === 'done' ? 'success' : event.type === 'error' ? 'error' : message.status
+  return { ...message, status, events: [...message.events, event] }
+}
+
+/**
+ * Drain queued token deltas (text AND thinking, F8-5) into the store,
+ * coalescing by message: same-type runs merge into one event, and the first
+ * incoming run also merges into the message's trailing event of the same type,
+ * so a long streamed answer stays a handful of events instead of one per
+ * token. Shared by the 75ms flush timer and the terminal-event path: draining
+ * before applying done/error guarantees the persisted snapshot (R16/D8)
+ * includes every trailing token.
+ */
+export function flushDeltaQueue(
+  queue: Array<{ messageId: string; event: CopilotDeltaEvent }>,
 ): void {
   if (queue.length === 0) {
     return
   }
   const batch = queue.splice(0)
-  const byMessage = new Map<string, { content: string; events: CopilotEvent[] }>()
-  batch.forEach((item) => {
-    const current = byMessage.get(item.messageId) ?? { content: '', events: [] }
-    current.content += item.content
-    current.events.push(item.event)
-    byMessage.set(item.messageId, current)
+  const byMessage = new Map<string, { text: string; events: CopilotDeltaEvent[] }>()
+  batch.forEach(({ messageId, event }) => {
+    const current = byMessage.get(messageId) ?? { text: '', events: [] }
+    const last = current.events[current.events.length - 1]
+    if (last && last.type === event.type) {
+      current.events[current.events.length - 1] = { ...last, content: last.content + event.content }
+    } else {
+      current.events.push(event)
+    }
+    if (event.type === 'text_delta') {
+      current.text += event.content
+    }
+    byMessage.set(messageId, current)
   })
   byMessage.forEach((value, messageId) => {
-    copilotStore.updateMessage(messageId, (message) => ({
-      ...message,
-      content: `${message.content}${value.content}`,
-      status: 'running',
-      events: [...message.events, ...value.events],
-    }))
+    copilotStore.updateMessage(messageId, (message) => {
+      const events = [...message.events]
+      const incoming = [...value.events]
+      const tail = events[events.length - 1]
+      const head = incoming[0]
+      if (
+        tail &&
+        head &&
+        (tail.type === 'text_delta' || tail.type === 'thinking_delta') &&
+        tail.type === head.type
+      ) {
+        events[events.length - 1] = { ...tail, content: tail.content + head.content }
+        incoming.shift()
+      }
+      return {
+        ...message,
+        content: `${message.content}${value.text}`,
+        events: [...events, ...incoming],
+      }
+    })
   })
 }
 
@@ -116,7 +164,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
   const [lastError, setLastError] = useState<string | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const assistantMessageIdRef = useRef<string | null>(null)
-  const textQueueRef = useRef<Array<{ messageId: string, content: string, event: CopilotEvent }>>([])
+  const deltaQueueRef = useRef<Array<{ messageId: string, event: CopilotDeltaEvent }>>([])
 
   const appendAssistantEvent = useCallback((event: CopilotEvent) => {
     let messageId = assistantMessageIdRef.current
@@ -127,20 +175,16 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       copilotStore.appendMessage(message)
     }
 
-    if (event.type === 'text_delta') {
-      textQueueRef.current.push({ messageId, content: event.content, event })
+    if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+      deltaQueueRef.current.push({ messageId, event })
     } else {
       // Terminal events (done/error) trigger an on-disk flush in the store. Drain
-      // any still-queued text deltas first so the persisted transcript carries the
+      // any still-queued deltas first so the persisted transcript carries the
       // complete assistant answer, not a truncated one (R16/D8).
       if (event.type === 'done' || event.type === 'error') {
-        flushTextQueue(textQueueRef.current)
+        flushDeltaQueue(deltaQueueRef.current)
       }
-      copilotStore.updateMessage(messageId, (message) => ({
-        ...message,
-        status: event.status,
-        events: [...message.events, event],
-      }))
+      copilotStore.updateMessage(messageId, (message) => assistantMessageAfterEvent(message, event))
     }
 
     if (event.type === 'done' || event.type === 'error') {
@@ -190,7 +234,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     let reconnectTimer: number | undefined
 
     const flushTimer = window.setInterval(() => {
-      flushTextQueue(textQueueRef.current)
+      flushDeltaQueue(deltaQueueRef.current)
     }, 75)
 
     const connect = () => {
@@ -235,7 +279,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       }
       socketRef.current?.close()
       socketRef.current = null
-      textQueueRef.current = []
+      deltaQueueRef.current = []
     }
   }, [skillId, appendAssistantEvent])
 

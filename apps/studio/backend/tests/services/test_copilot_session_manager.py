@@ -220,12 +220,15 @@ def test_build_options_sets_provider_base_url(tmp_path: Path) -> None:
     assert options.permission_mode == "acceptEdits"
 
 
-def test_build_options_enables_full_thinking(tmp_path: Path) -> None:
-    # F1: thinking must be enabled and shown in full (never summarized/omitted),
-    # otherwise the SDK emits no ThinkingBlock and the streamed Thought is empty.
+def test_build_options_enables_summarized_thinking(tmp_path: Path) -> None:
+    # F1/F8: the CLI only offers summarized|omitted thinking display — there is
+    # no "full", and leaving display unset strips the content (ThinkingBlocks
+    # arrive EMPTY; probe-verified 2026-07-02, the R5 "thinking never shows"
+    # root cause). "summarized" is the maximum exposure and also enables
+    # thinking_delta stream events.
     options = copilot.build_options(None, "claude-key", tmp_path)
 
-    assert options.thinking == {"type": "adaptive"}
+    assert options.thinking == {"type": "adaptive", "display": "summarized"}
 
 
 def test_build_options_mounts_skill_spec(tmp_path: Path) -> None:

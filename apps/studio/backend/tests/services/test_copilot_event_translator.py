@@ -505,7 +505,13 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     client = FakeClient(
         messages=[AssistantMessage(content=[TextBlock(text="hello")], model="claude")]
     )
-    monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
+    captured_options: list[object] = []
+
+    def factory(options: object) -> FakeClient:
+        captured_options.append(options)
+        return client
+
+    monkeypatch.setattr(copilot, "_session_factory", factory)
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
@@ -520,8 +526,10 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     assert events[0].summary.startswith("本轮注入")
     assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
-    assert "聚焦 Studio 上下文" in client.queries[0]
-    assert "user text" in client.queries[0]
+    # 规则文档在会话级 system_prompt,不随每轮 query 重发;无 view context 时
+    # query 就是裸用户消息。
+    assert "聚焦 Studio 上下文" in str(getattr(captured_options[0], "system_prompt", ""))
+    assert client.queries[0] == "user text"
 
 
 async def _collect(stream: AsyncIterator[object]) -> list[object]:

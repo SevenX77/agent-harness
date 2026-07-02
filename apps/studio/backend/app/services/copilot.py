@@ -20,6 +20,7 @@ import secrets
 import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, cast
 from xml.sax.saxutils import escape
@@ -81,35 +82,21 @@ _FILE_CONTENT_KEYS = {
 }
 _FILE_PATH_KEYS = ("absolute_file_path", "file_path", "path")
 
-BASE_SYSTEM_PROMPT_TEMPLATE = """
-你是 Studio Copilot —— 精通 graph_skill 搭建的助手，在 Studio 工作台帮用户设计 / 编辑 / 理解 / 验证 / 运行当前 skill。
+_PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
-## 回复语言（硬规则，优先级最高）
-**语言跟随用户**：永远用用户**最后一条消息**的语言回复。用户写英文 → 整段回复用英文；写中文 → 用中文。
-本提示词和注入上下文是中文，**不代表**回复用中文。例：用户发 "hello" → 用英文回复。代码、标识符、错误码原样保留。
 
-## graph_skill 格式心智模型 (schema v0.3.0)
-一个 skill = 根 `GRAPH.md` + 每个 phase 一个目录 `phases/<name>/`：
-- **GRAPH.md** frontmatter 必含：`schema_version: "v0.3.0"`(精确)、`name`(`^[a-z][a-z0-9_-]*$`)、
-  `phases: [名字列表]`、`io:`(根输入/输出 JSON schema)；可选 `description` / `llm_role`。
-- **GRAPH.md body** 用 `<phase>` XML 画 DAG：入口 `depends_on="input"`，下游引用上游 phase 名
-  (多依赖空格/逗号分隔)，终点加 `output`。三处名字必须一致：
-  frontmatter `phases` = body `<phase>` = `phases/<name>/` 目录。
-- **每个 phase 目录恰好一个模式文件**：`LOGIC.md`(确定性 Python，最常见)= frontmatter `io:` +
-  body `<action>名</action>` → `phases/<name>/actions/<名>.py`
-  (签名 `def 名(inputs): ...`，读上游、返回本 phase 输出，不修改 inputs)。
-  另两种模式是 `SUBGRAPH.md`(子图) / `SKILL.md`(委派子 skill)；
-  agent 等行为、精确语法与错误码以**挂载的 skill-spec 为准**。
+@lru_cache(maxsize=1)
+def load_copilot_rules() -> str:
+    """恒定规则层:app/prompts/copilot-rules.md —— 单一真相文档,SDK 直连路在这里
+    装载;ah 拉起路经其 rules 注入机制装载同一份。规则变更改文档、走 PR,不改代码。"""
+    return (_PROMPTS_DIR / "copilot-rules.md").read_text(encoding="utf-8").strip()
 
-## 生命周期
-Compile(校验 DAG + schema)→ Predict(测试输入空跑)→ Run(真跑)。编译/lint 错误码形如 `[F-v3-...]`。
 
-## 工作方式
-- **先 Read 后改**：动文件前先读完整内容，别凭空猜；改完该编译就编译验证。
-- **主动诊断**：用户问"为啥编译失败"或出现 `[F-v3-...]` → 读相关文件定位根因、给具体修法，不空谈。
-- 权威格式细节已挂载(见下)，用 Read 查阅；业务领域知识靠你自带 + 用户喂的文档，不编造领域事实。
-- 聚焦 Studio 上下文，但允许任何合理通用问题，不拒答。
-""".strip()
+@lru_cache(maxsize=1)
+def copilot_rules_hash() -> str:
+    """规则文档指纹(sha256 前 8 位),回显进 context_resolved 事件,让用户能核对
+    本轮会话吃的是哪一版规则(anti hidden-prompt-magic,与上下文回显同一纪律)。"""
+    return hashlib.sha256(load_copilot_rules().encode("utf-8")).hexdigest()[:8]
 
 
 def _skill_spec_dir() -> Path | None:
@@ -528,6 +515,13 @@ def build_options(
         allowed_tools=allowed_tools,
         env=env,
         can_use_tool=can_use_tool,
+        # 恒定规则层走会话级 system prompt(单一真相 = app/prompts/copilot-rules.md);
+        # 运行时上下文走每轮 turn prompt,见 _prompt_with_turn_context。
+        system_prompt=build_session_system_prompt(),
+        # SDK 隔离模式:不加载开发机 ~/.claude 等文件系统配置,copilot 行为不随
+        # 宿主机个人配置漂移;MCP 只认显式传入的(当前为空)。
+        setting_sources=[],
+        strict_mcp_config=True,
         # F1/F8: enable extended thinking so the SDK emits ThinkingBlocks.
         # Adaptive lets the model size its own reasoning per task. display MUST
         # be "summarized": the CLI only offers summarized|omitted (there is no
@@ -637,24 +631,19 @@ def render_copilot_context_xml(skill_id: str, view: str, context: dict[str, Any]
     return "<copilot_context>\n" + "\n".join(layers) + "\n</copilot_context>"
 
 
-def build_system_prompt(skill_id: str) -> str:
-    """Build the Copilot system prompt: skill-authoring brain + mounted-spec
-    pointer + the latest view context (structured 4-layer XML)."""
+def build_session_system_prompt() -> str:
+    """会话级 system prompt = 规则文档 + 挂载 spec 指针(都是会话内不变的静态层)。
 
-    prompt = BASE_SYSTEM_PROMPT_TEMPLATE
+    运行时 view/judge context 每轮都变,走 ``_prompt_with_turn_context`` 注入到
+    当轮消息,绝不进会话级 —— 三层分离:恒定规则 / 链路装载 / 运行时上下文。"""
+
+    prompt = load_copilot_rules()
     spec_dir = _skill_spec_dir()
     if spec_dir is not None:
         prompt += (
             f"\n\n## 已挂载 skill-spec(权威格式规范)\n{spec_dir}\n"
             "需要精确字段 / 语法 / 错误码时用 Read 查阅该目录下的 .md。"
         )
-
-    view_context = get_view_context(skill_id)
-    if view_context is not None:
-        prompt += "\n\n## 当前上下文\n" + render_copilot_context_xml(
-            skill_id, view_context.view, view_context.context
-        )
-
     return prompt
 
 
@@ -682,7 +671,8 @@ def _context_resolved_event(
         detail_lines.append(render_copilot_judge_context_xml(judge_context))
     if spec_mounted:
         parts.append("skill-spec 已挂载")
-    summary = "本轮注入: " + (" · ".join(parts) if parts else "仅 skill-authoring 基础上下文")
+    parts.append(f"rules@{copilot_rules_hash()}")
+    summary = "本轮注入: " + " · ".join(parts)
     return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
 
 
@@ -923,7 +913,7 @@ async def stream_query(
             consumer: asyncio.Task[None] | None = None
             try:
                 await client.query(
-                    _prompt_with_system_context(
+                    _prompt_with_turn_context(
                         skill_id,
                         user_message,
                         judge_context=judge_context,
@@ -1148,16 +1138,29 @@ async def _ensure_client_connected(client: ClaudeSDKClient) -> None:
     await client.connect()
 
 
-def _prompt_with_system_context(
+def _prompt_with_turn_context(
     skill_id: str,
     user_message: str,
     *,
     judge_context: dict[str, Any] | None = None,
 ) -> str:
-    prompt = build_system_prompt(skill_id)
+    """当轮 prompt = 运行时上下文层 + 用户消息。规则文档在会话级 system_prompt
+    (build_options),不随每轮重发。无任何上下文时就是裸用户消息。"""
+
+    layers: list[str] = []
+    view_context = get_view_context(skill_id)
+    if view_context is not None:
+        layers.append(
+            "## 当前上下文\n"
+            + render_copilot_context_xml(skill_id, view_context.view, view_context.context)
+        )
     if judge_context is not None:
-        prompt += "\n\n## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
-    return f"{prompt}\n\n## 用户消息\n{user_message}"
+        layers.append(
+            "## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
+        )
+    if not layers:
+        return user_message
+    return "\n\n".join(layers) + f"\n\n## 用户消息\n{user_message}"
 
 
 class SdkMessageTranslator:

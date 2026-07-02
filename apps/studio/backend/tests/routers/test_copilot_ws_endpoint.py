@@ -202,7 +202,7 @@ def test_copilot_ws_forwards_structured_judge_context(
 
 
 def test_copilot_prompt_renders_structured_judge_context() -> None:
-    prompt = copilot_service._prompt_with_system_context(
+    prompt = copilot_service._prompt_with_turn_context(
         "text-segmentation",
         "judge it",
         judge_context={

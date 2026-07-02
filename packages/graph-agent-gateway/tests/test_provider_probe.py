@@ -362,6 +362,106 @@ async def test_gateway_route_probe_405_is_protocol_unsupported() -> None:
     assert result.status == "protocol_unsupported"
 
 
+@pytest.mark.anyio
+async def test_gateway_endpoint_test_unsupported_fixed_route_is_protocol_unsupported() -> None:
+    """A host that has no handler for the probed protocol's path answers with a
+    route-level rejection, not a model error. Live signature (2026-07-02,
+    anthropic.qnaigc.com × google): GET /v1beta/models -> HTTP 500
+    {"type":"error","error":{"message":"Unsupported fixed route: /v1beta/models"}}.
+    That is a (URL, protocol) fact, not a transient error."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="qiniu-anthropic-host-google",
+        protocol="google_genai",
+        base_url="https://anthropic.qnaigc.com",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={"type": "error", "error": {"type": "error", "message": "Unsupported fixed route: /v1beta/models"}},
+            request=request,
+        )
+
+    result = await test_provider_endpoint(endpoint, transport=httpx.MockTransport(handler))
+
+    assert result.status == "protocol_unsupported"
+    assert result.error_code == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+async def test_gateway_endpoint_test_misrouted_to_foreign_protocol_is_protocol_unsupported() -> None:
+    """A host with no backend for the probed protocol may silently misroute the
+    request to a DIFFERENT protocol's upstream and surface that upstream's error.
+    Live signature (2026-07-02, anthropic.qnaigc.com × google): the gemini probe
+    500s wrapping "OpenAI API error: 401 invalid api key" — a google endpoint that
+    answers with an OpenAI error proves it does not speak google."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="qiniu-anthropic-host-google",
+        protocol="google_genai",
+        base_url="https://anthropic.qnaigc.com",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={
+                "type": "error",
+                "error": {
+                    "type": "error",
+                    "message": 'OpenAI API error: 401 {"error":{"message":"invalid api key","type":"authentication_error"}}',
+                },
+            },
+            request=request,
+        )
+
+    result = await test_provider_endpoint(endpoint, transport=httpx.MockTransport(handler))
+
+    assert result.status == "protocol_unsupported"
+    assert result.error_code == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+async def test_gateway_openai_probe_own_auth_error_stays_invalid_key() -> None:
+    """A genuine OpenAI endpoint returning its OWN auth error must stay invalid_key —
+    the misroute heuristic only fires when a DIFFERENT protocol's error surfaces, so
+    it must not swallow real auth failures on the matching protocol."""
+    from graph_agent_gateway.registry.provider_probe import test_provider_route
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-real",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+    route = ProviderRoute(
+        route_id="openai-real:gpt-x",
+        endpoint_id="openai-real",
+        route_slug="gpt-x",
+        provider_model_id="gpt-x",
+        canonical_id="gpt-x",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"error": {"message": "OpenAI API error: invalid api key", "type": "authentication_error"}},
+            request=request,
+        )
+
+    result = await test_provider_route(endpoint, route, transport=httpx.MockTransport(handler))
+
+    assert result.status == "invalid_key"
+
+
 def test_gateway_official_call_method_timeout_allows_slow_openai_pro_responses() -> None:
     timeout = provider_probe._official_call_method_timeout(
         "openai_responses",

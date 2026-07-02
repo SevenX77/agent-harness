@@ -38,6 +38,9 @@ def test_rules_document_covers_tools_and_context_contract() -> None:
     assert "<copilot_context>" in rules
     assert "<mentions>" in rules
     assert "只读" in rules
+    assert "mcp__studio__" in rules
+    assert "get_llm_roles" in rules
+    assert "compile_skill" in rules
 
 
 def test_rules_hash_is_stable_short_hex() -> None:

@@ -177,6 +177,26 @@ def test_translate_renders_search_tools_instead_of_fake_failures() -> None:
     assert tool_names == {"tool-g": "Glob", "tool-r": "Grep"}
 
 
+def test_translate_renders_studio_mcp_tools() -> None:
+    tool_names: dict[str, str] = {}
+
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[
+                ToolUseBlock(id="tool-m", name="mcp__studio__compile_skill", input={"skill_id": "s"})
+            ],
+            model="claude",
+        ),
+        tool_names,
+    )
+
+    assert events == [
+        CopilotEventToolUseStart(
+            tool_name="mcp__studio__compile_skill", tool_input={"skill_id": "s"}
+        )
+    ]
+
+
 def test_translate_tool_result_event() -> None:
     translator = copilot.SdkMessageTranslator()
     translator.tool_names["tool-1"] = "Read"

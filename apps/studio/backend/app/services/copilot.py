@@ -38,6 +38,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import (
     AssistantMessage,
+    McpServerConfig,
     ResultMessage,
     StreamEvent,
     TextBlock,
@@ -66,6 +67,7 @@ from app.models.copilot import (
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
+from app.services.copilot_tools import build_copilot_mcp_servers
 
 SessionKey = tuple[str, str, str]
 SessionCacheKey = tuple[str, str, str, str]
@@ -594,20 +596,24 @@ def build_options(
     add_dirs: list[str | Path] = [str(path) for _label, path in _mounted_doc_dirs()]
     permission_mode: Literal["default", "acceptEdits"]
     skills: list[str]
+    mcp_servers: dict[str, McpServerConfig]
     if can_use_tool is not None:
         # Pre-allowing a tool makes the SDK skip can_use_tool for it, so pre-allow
         # NOTHING: Read/Glob/Grep 走读护栏(出圈挂审批),Write/Edit 走 workspace
-        # 圈定,Bash 走挂起式审批 —— 全部经 can_use_tool。
+        # 圈定,Bash 走挂起式审批 —— 全部经 can_use_tool;studio MCP 工具由后端
+        # 实现并校验,回调默认放行(零审批)。
         allowed_tools = []
         permission_mode = "default"
         # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
         # (SDK 会自动配好 Skill 工具,types.py skills 文档)。
         skills = copilot_skill_names()
+        mcp_servers = build_copilot_mcp_servers()
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
-        # SDK probe 路要确定性输出,压掉所有技能。
+        # SDK probe 路要确定性输出,压掉技能与 MCP 工具。
         skills = []
+        mcp_servers = {}
     return ClaudeAgentOptions(
         cwd=workspace_dir,
         permission_mode=permission_mode,
@@ -622,6 +628,7 @@ def build_options(
         setting_sources=[],
         strict_mcp_config=True,
         skills=skills,
+        mcp_servers=mcp_servers,
         # F1/F8: enable extended thinking so the SDK emits ThinkingBlocks.
         # Adaptive lets the model size its own reasoning per task. display MUST
         # be "summarized": the CLI only offers summarized|omitted (there is no

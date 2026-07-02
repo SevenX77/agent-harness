@@ -17,8 +17,8 @@ export interface CopilotTextDeltaEvent extends CopilotEventBase {
 
 export interface CopilotToolUseStartEvent extends CopilotEventBase {
   type: 'tool_use_start'
-  /** Real tool name as the SDK reports it — an open string, not just the
-   * pre-allowed subset (the model runs read-only tools like Glob/Grep too). */
+  /** Real tool name as the SDK reports it — an open string: read-only tools
+   * (Glob/Grep) and studio MCP tools (mcp__studio__<tool>) included. */
   tool_name: string
   tool_input: JsonObject
 }

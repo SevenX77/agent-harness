@@ -20,15 +20,21 @@ const toolVerbs: Record<string, { running: string; done: string }> = {
   Skill: { running: 'Using skill', done: 'Used skill' },
 }
 
+// studio MCP 工具（mcp__studio__<tool>）显示为 studio:<tool>。
+function displayToolName(name: string): string {
+  return name.startsWith('mcp__studio__') ? `studio:${name.slice('mcp__studio__'.length)}` : name
+}
+
 function toolCallLabel(event: ToolCallEvent, failed: boolean): string {
   const verbs = toolVerbs[event.tool_name]
+  const name = displayToolName(event.tool_name)
   if (event.type === 'tool_use_start') {
-    return verbs ? verbs.running : `Running ${event.tool_name}`
+    return verbs ? verbs.running : `Running ${name}`
   }
   if (failed) {
-    return `${event.tool_name} failed`
+    return `${name} failed`
   }
-  return verbs ? verbs.done : `${event.tool_name} completed`
+  return verbs ? verbs.done : `${name} completed`
 }
 
 function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {

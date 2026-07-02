@@ -81,6 +81,8 @@ class CopilotEventToolUseStart(CopilotEventBase):
     """
 
     type: Literal["tool_use_start"] = "tool_use_start"
+    # Open string: the SDK reports real tool names (incl. read-only tools and
+    # studio MCP tools mcp__studio__<tool>); policy lives in SDK options.
     tool_name: str
     tool_input: dict[str, Any]
 

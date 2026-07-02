@@ -17,10 +17,10 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
 | 层 | 机制 | 状态 |
 | --- | --- | --- |
 | 1. git 地基 | `.gitattributes`（`* text=auto eol=lf`，`.ps1/.bat/.cmd` 例外 CRLF，二进制显式标注）+ `.editorconfig`（charset=utf-8）。本地 `core.autocrlf` 是什么都不再影响仓库。 | ✅ 已落地（本文所在 PR） |
-| 2. 代码显式声明 | 所有 `open()` / `Path.read_text()` / `Path.write_text()` / `subprocess(text=True)` 必须显式 `encoding="utf-8"`；读子进程输出加 `errors="replace"`。 | ⏳ PR-B 收口存量 |
-| 3. 运行时兜底 | 所有进程入口设 `PYTHONUTF8=1`（Python UTF-8 模式，3.15 起为官方默认）：根 `conftest.py`、CI env、`studio-dev.ps1` / `wt-*.sh`、Tauri sidecar spawn（`sidecar.rs`）。第 2 层若有遗漏，行为仍统一。 | ⏳ PR-B |
-| 4. 闸门防复发 | ruff 启用 `PLW1514`（unspecified-encoding），未指定编码的文本 I/O 直接 CI 红。 | ⏳ PR-B |
-| 5. CI 真机验证 | `windows-latest` + `macos-latest` 的 cross-platform smoke job（pytest 三包 + 前端 build），**非必需检查**，只做观察信号。 | ⏳ PR-C |
+| 2. 代码显式声明 | 所有 `open()` / `Path.read_text()` / `Path.write_text()` / `subprocess(text=True)` 必须显式 `encoding="utf-8"`；读子进程输出加 `errors="replace"`。 | ✅ #280 |
+| 3. 运行时兜底 | 所有进程入口设 `PYTHONUTF8=1`（Python UTF-8 模式，3.15 起为官方默认）：根 `conftest.py`、CI env、`studio-dev.ps1` / `wt-*.sh`、Tauri sidecar spawn（`sidecar.rs`）。第 2 层若有遗漏，行为仍统一。 | ✅ #280 |
+| 4. 闸门防复发 | ruff 启用 `PLW1514`（unspecified-encoding），未指定编码的文本 I/O 直接 CI 红。 | ✅ #280（`PLW1514` 走 explicit-preview-rules，稳定规则行为不变） |
+| 5. CI 真机验证 | `windows-latest` + `macos-latest` 的 cross-platform smoke job（pytest 三包 + 前端 build），**非必需检查**，只做观察信号。 | ✅ 本 PR |
 
 ## 写代码时的具体规则
 
@@ -70,5 +70,5 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
 | --- | --- | --- | --- |
 | 开发（worktree 工作流） | ✅ Git Bash | ✅ | ✅ |
 | CI 必需检查 | —（ubuntu 上跑） | — | ✅ |
-| CI smoke（非必需） | ⏳ PR-C | ⏳ PR-C | ✅ |
+| CI smoke（非必需） | ✅ | ✅ | ✅ |
 | Studio 启动器 | ✅ `studio-dev.ps1` | ❌ 缺（vendor 目录已预留三平台 runtime，启动链未补齐，单独立项） | ❌ 缺（同左） |

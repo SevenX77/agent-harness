@@ -618,4 +618,81 @@ describe('phase frontmatter helpers', () => {
     expect(off.markdown).not.toContain('validator:')
     expect(off.markdown).toContain('x_internal: keep-me')
   })
+
+  // use_graph_llm_role: the persisted priority switch. ON = the graph-level
+  // default llm_role wins over this node's own value; the node value itself
+  // stays in the file untouched (overwrite by switch, never destroy the setting).
+  it('parses use_graph_llm_role and defaults it to false', () => {
+    const parsedOn = parsePhaseFrontmatter([
+      '---',
+      'llm_role: analyst',
+      'use_graph_llm_role: true',
+      '---',
+      '<role>R</role>',
+    ].join('\n'))
+    expect(parsedOn.ok).toBe(true)
+    if (!parsedOn.ok) return
+    expect(phaseFrontmatterToForm(parsedOn.frontmatter).useGraphLlmRole).toBe(true)
+
+    const parsedOff = parsePhaseFrontmatter([
+      '---',
+      'llm_role: analyst',
+      '---',
+      '<role>R</role>',
+    ].join('\n'))
+    expect(parsedOff.ok).toBe(true)
+    if (!parsedOff.ok) return
+    expect(phaseFrontmatterToForm(parsedOff.frontmatter).useGraphLlmRole).toBe(false)
+  })
+
+  it('serializes the switch without touching the node llm_role value', () => {
+    const source = [
+      '---',
+      'name: review',
+      'llm_role: analyst',
+      '---',
+      '<role>R</role>',
+    ].join('\n')
+
+    const on = applyPhaseFrontmatterForm(source, {
+      ...EMPTY_FORM,
+      llmRole: 'analyst',
+      useGraphLlmRole: true,
+    }, 'agent')
+    expect(on.ok).toBe(true)
+    if (!on.ok) return
+    expect(on.markdown).toContain('use_graph_llm_role: true')
+    // The node's own role selection survives the switch flip.
+    expect(on.markdown).toContain('llm_role: analyst')
+
+    // Switch off = default = key dropped, node role still intact.
+    const off = applyPhaseFrontmatterForm(on.markdown, {
+      ...EMPTY_FORM,
+      llmRole: 'analyst',
+      useGraphLlmRole: false,
+    }, 'agent')
+    expect(off.ok).toBe(true)
+    if (!off.ok) return
+    expect(off.markdown).not.toContain('use_graph_llm_role')
+    expect(off.markdown).toContain('llm_role: analyst')
+  })
+
+  it('never writes the switch for non-agent phases', () => {
+    const source = [
+      '---',
+      'name: strip',
+      'actions:',
+      '  - strip',
+      '---',
+      '<action>strip</action>',
+    ].join('\n')
+    const next = applyPhaseFrontmatterForm(source, {
+      ...EMPTY_FORM,
+      actions: 'strip',
+      useGraphLlmRole: true,
+    }, 'logic')
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).not.toContain('use_graph_llm_role')
+  })
 })

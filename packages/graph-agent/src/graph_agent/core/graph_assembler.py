@@ -59,6 +59,7 @@ from graph_agent.core.manifest import (
     IterateSpec,
     LogicNodeAST,
     SubgraphNodeAST,
+    effective_llm_role,
 )
 from graph_agent.core.skill_resolver_protocol import (
     SkillResolverProtocol,
@@ -1631,9 +1632,10 @@ def _build_skill_node(
     checkpointer: Any = None,
     predict_context: Any = None,
 ) -> Any:
+    phase_llm_role = effective_llm_role(phase_ast, compiled.manifest.llm_role)
     phase_chat_model = _resolve_phase_chat_model(
         phase_id,
-        phase_ast,
+        phase_llm_role,
         chat_model=chat_model,
         model_resolver=model_resolver,
         llm_provider=llm_provider,
@@ -1980,7 +1982,7 @@ def _build_skill_node(
 
 def _resolve_phase_chat_model(
     phase_id: str,
-    phase_ast: AgentNodeAST,
+    llm_role: str,
     *,
     chat_model: Any,
     model_resolver: Any,
@@ -1988,14 +1990,15 @@ def _resolve_phase_chat_model(
     callbacks: tuple[Any, ...],
     predict_context: Any = None,
 ) -> Any:
+    # ``llm_role`` is the phase's EFFECTIVE role, already resolved through the
+    # use_graph_llm_role / graph-default chain (manifest.effective_llm_role).
     predict_strategy = getattr(predict_context, "strategy", None)
     if predict_strategy is not None:
         from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 
-        role_name = phase_ast.llm_role or "graph_agent"
         return PredictGatewayChatModel(
-            role_name,
-            {"role_name": role_name},
+            llm_role,
+            {"role_name": llm_role},
             mock_strategy=predict_strategy,
             callbacks=callbacks,
             phase_name=phase_id,
@@ -2005,7 +2008,7 @@ def _resolve_phase_chat_model(
     if llm_provider is not None:
         return LLMProviderChatModel(
             provider=llm_provider,
-            role=phase_ast.llm_role or "graph_agent",
+            role=llm_role,
             phase_name=phase_id,
             callbacks=callbacks,
         )
@@ -2020,7 +2023,7 @@ def _resolve_phase_chat_model(
     if "predict_context" in sig.parameters:
         kwargs["predict_context"] = predict_context
     return model_resolver.resolve(
-        phase_ast.llm_role or "graph_agent",
+        llm_role,
         **kwargs,
     )
 
@@ -2238,7 +2241,9 @@ def _agent_system_prompt(
         reference_registry_listing=_reference_registry_listing(phase_ast),
         inline_examples=[example.content for example in phase_ast.examples_inline],
         example_registry_listing=_example_registry_listing(phase_ast),
-        role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
+        role_prefix=resolve_role_prefix_from_llm_role(
+            effective_llm_role(phase_ast, compiled.manifest.llm_role)
+        ),
     )
 
 

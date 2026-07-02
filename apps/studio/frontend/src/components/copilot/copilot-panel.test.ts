@@ -2,7 +2,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CopilotMessage } from '../../types/copilot'
-import { buildCopilotJudgeDraft, copilotBackendErrorMessage, CopilotPanel, nextDraftJudgeContext } from './copilot-panel'
+import { buildCopilotJudgeDraft, copilotBackendErrorMessage, CopilotPanel, isComposerSendKey, nextDraftJudgeContext } from './copilot-panel'
 import { BACKEND_UNAVAILABLE_MESSAGE } from '@/utils/errors'
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +22,7 @@ vi.mock('../../api/client', () => ({
 vi.mock('../../api/llm', () => ({
   getRegistry: mocks.getRegistry,
   getRoles: mocks.getRoles,
+  putRoles: vi.fn(),
 }))
 
 vi.mock('../../hooks/useCopilot', () => ({
@@ -45,7 +46,6 @@ vi.mock('./model-picker', () => ({
 }))
 
 vi.mock('./role-picker', () => ({
-  DEFAULT_COPILOT_ROLE: 'copilot_chat',
   RolePicker: () => null,
   copilotRoleOptions: () => [],
 }))
@@ -67,6 +67,24 @@ vi.mock('sonner', () => ({
     info: vi.fn(),
   },
 }))
+
+describe('isComposerSendKey', () => {
+  it('sends on plain Enter only', () => {
+    expect(isComposerSendKey({ key: 'Enter', shiftKey: false, nativeEvent: { isComposing: false } })).toBe(true)
+  })
+
+  it('keeps Shift+Enter as a line break', () => {
+    expect(isComposerSendKey({ key: 'Enter', shiftKey: true, nativeEvent: { isComposing: false } })).toBe(false)
+  })
+
+  it('never sends while an IME composition is active', () => {
+    expect(isComposerSendKey({ key: 'Enter', shiftKey: false, nativeEvent: { isComposing: true } })).toBe(false)
+  })
+
+  it('ignores other keys', () => {
+    expect(isComposerSendKey({ key: 'a', shiftKey: false, nativeEvent: { isComposing: false } })).toBe(false)
+  })
+})
 
 describe('buildCopilotJudgeDraft', () => {
   beforeEach(() => {

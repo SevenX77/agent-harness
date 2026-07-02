@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vitest"
 import {
   CopilotTab,
   copilotBackendReadyCount,
-  copilotKeyForGroupId,
   copilotRoleIdFromModelDropTarget,
   nextCopilotCustomIndex,
   rebuildFallbackChainPreservingRuntime,
 } from "./CopilotTab"
+import { copilotKeyForGroupId } from "./copilot-role-derivation"
 import { agentStatusForRoute } from "./CopilotModelGroupCard"
 import {
   copilotRouteStatusesFromPersistedResult,

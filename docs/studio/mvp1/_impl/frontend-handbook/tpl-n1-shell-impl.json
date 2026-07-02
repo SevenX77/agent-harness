@@ -93,6 +93,26 @@
       "fe_status": "符合",
       "be_status": "n/a",
       "be_dep": "n/a(横幅纯前端;sidecar 配置走 Rust get_sidecar_config 已实现,eager-spawn 归平台)。"
+    },
+    {
+      "n": 24,
+      "cap": "copilot-composer-scroll",
+      "design_ref": "atom-24",
+      "current": "现状:已实现且符合。消息区 = MessageScrollerProvider autoScroll + MessageScroller + Viewport + Content + Item(scrollAnchor=user)+ MessageScrollerButton(components/ui/message-scroller.tsx,包 @shadcn/react 的 message-scroller primitive,shadcn CLI 拉入);composer textarea rows=3 + min-h-[60px] + max-h-[160px] field-sizing-content;isComposerSendKey(copilot-panel.tsx)裁决 Enter 发送/Shift+Enter 换行/isComposing 不发;占位 Paperclip/Plus 按钮已删,操作行=ModelPicker+RolePicker(左)+发送(右)。",
+      "gap": "无。滚动行为由 primitive 提供,真机 Playwright 断言贴底/释放/回底全过。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端;ws 发送契约不动)。"
+    },
+    {
+      "n": 25,
+      "cap": "copilot-role-route-sync",
+      "design_ref": "atom-25",
+      "current": "现状:已实现且符合。role-picker.tsx copilotRoleOptions = deriveCopilotDisplayRoles(rolesData, registry.model_groups) 过滤 fallback_chain 非空,返回 {role,label,fallbackChain,persisted,modelGroupId};deriveActiveCopilotRoles 新增 allModelGroups 参数供全量组标题查找;copilot-panel.tsx selectedOption 即唯一 role/route 真相,ModelPicker 收 Pick<RoleEntry,fallback_chain>;resolveCopilotSendRole(copilot-role-derivation.ts)+copilotKeyForGroupId(从 CopilotTab 移入)物化浮出角色后以持久化 key 发送;copilot_chat 默认常量与 registry.roles 读取已删;roles_changed/registry_changed 刷新链路保留。",
+      "gap": "无。真机验证 composer 菜单与 Settings Copilot 卡逐项一致。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:GET/PUT /api/llm/roles、GET /api/llm/registry、roles_changed/registry_changed 事件均已实现,后端不动。"
     }
   ],
   "plan": [
@@ -316,6 +336,58 @@
         {
           "file": "n1-17-startup-banner.png",
           "caption": "RuntimeShell error 态:应用壳保持可见,底部只显示非阻塞 Backend unavailable + Retry 横幅。"
+        }
+      ]
+    },
+    {
+      "covers": "#24 copilot-composer-scroll",
+      "atoms": [
+        24
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "单测(copilot-panel.test.ts):isComposerSendKey — 裸 Enter 发送、Shift+Enter 换行、isComposing 不发送、其它键忽略;面板 SSR 渲染含 message-scroller 结构。",
+        "滚动行为本身由 @shadcn/react message-scroller primitive 提供(上游已测),本仓不重复单测滚动数学,以真机 layer2 断言为准。"
+      ],
+      "layer2": [
+        "真机 Playwright(Vite 5174 + 主仓 sidecar):发送 80 项 markdown 列表 → 流式期间视口贴底(st+ch==sh);上滚 600px → 新内容不抢滚、回底按钮 data-active=true;点击回底 → 恢复贴底。占位按钮计数=0;textarea 默认高 60px。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-18-copilot-composer.png",
+          "caption": "2026-07-01 真机:三行 composer,操作行在输入框下方(route+role 左 / 发送右),Attach/Add-context 占位按钮已删"
+        },
+        {
+          "file": "n1-20-copilot-stream-bottom.png",
+          "caption": "2026-07-01 真机:流式回复期间消息区贴底跟随(live edge)"
+        },
+        {
+          "file": "n1-21-copilot-scroll-release.png",
+          "caption": "2026-07-01 真机:上滚翻旧消息后跟随释放,右下浮现回到底部按钮"
+        }
+      ]
+    },
+    {
+      "covers": "#25 copilot-role-route-sync",
+      "atoms": [
+        25
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "单测(role-picker.test.tsx):配置完成角色保留 + settings 标签;空草稿/broken legacy 排除;无绑定组的 copilot 角色排除;无持久化角色时浮出内置出现;非 anthropic 候选组按全量组 display_name 标标签。",
+        "单测(copilot-role-derivation.test.ts):resolveCopilotSendRole — 持久化 key 直通、浮出角色物化为 copilot_<slug> 全链 entry、已存在 slug 复用不重写;copilotKeyForGroupId 槽位规则。"
+      ],
+      "layer2": [
+        "真机 Playwright:composer role 菜单 [\"Claude Opus 4.8\",\"Claude Opus 4.7\",\"Claude Sonnet 4.5\"] 与 Settings Copilot 卡标题逐项一致(含非 anthropic 候选组 Sonnet 4.5 的标签);发送走选中 role,回复正常流式返回。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-19-copilot-role-menu.png",
+          "caption": "2026-07-01 真机:composer role 下拉三项"
+        },
+        {
+          "file": "n1-22-copilot-settings-cards.png",
+          "caption": "2026-07-01 真机:Settings Copilot tab 同一时刻的三张角色卡,与 composer 菜单一致"
         }
       ]
     }

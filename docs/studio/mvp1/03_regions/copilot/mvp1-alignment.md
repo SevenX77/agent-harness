@@ -35,13 +35,18 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - Status: live.
 - 归属: region `copilot`; capability `copilot-assist`.
 
-### F3. Model Route Picker
+### F3. Role & Route Picker（composer 与 Settings 同源）
 
-- 机制: chat can choose from the configured copilot role fallback routes.
-- 决策: route config comes from Settings; chat only consumes it.
-- 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot settings; `01_workflows/00_settings-ux-spec.md:395` assigns role mapping.
-- 测试: changing route affects future messages; unavailable config shows scoped error.
-- Status: live.
+- 机制: composer 的 role 下拉与 Settings Copilot tab 的角色卡**同一份派生真相**(`deriveCopilotDisplayRoles`,吃 `GET /api/llm/roles` + registry `model_groups`),route 下拉(model_override)从**选中显示角色的 `fallback_chain`** 派生、可用性用 registry `provider_routes` 投影。**不得**把 `GET /api/llm/registry` 的 roles 物化投影当第二份 role 真相读。
+- 约束(同步契约,2026-07-01 PM 决策"copilot role 和 settings 页 roles 不同步"是缺陷):
+  1. composer 只列**已绑定 model group**(fallback_chain 非空)的 copilot 角色;Settings 里的空草稿卡(未选组的 `copilot_custom_N`)不出现在 composer——它还不是可用角色。
+  2. 无任何持久化 copilot 角色时,Settings 浮出的内置默认(atom-56 语义,rendered-not-persisted)**同样出现在 composer**;首次用它发消息 = "动了" → 前端先按 Settings 同一物化路径(`buildCopilotRoleEntry` + `copilot_<slug>` key,PUT /api/llm/roles)落库,再以持久化 key 发送。
+  3. 默认选中 = 派生列表第一项;**删除前端写死的 `copilot_chat` 默认常量**(旧路径,不向后兼容);后端 ws 契约里 `role` 缺省仍按约定名解析,但面板一律显式传 role。
+  4. `roles_changed` / `registry_changed` 事件驱动刷新,Settings 改完 composer 实时跟上。
+- 决策: route/role config comes from Settings; chat only consumes it — consuming 的派生函数也必须同一份,不许面板自养第二套判定。
+- 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot settings; `01_workflows/00_settings-ux-spec.md:395` assigns role mapping; 浮出/物化语义见 settings copilot 设计 atom-55/56(`docs/studio/mvp1/_impl/frontend-handbook/tpl-copilot-design.json` 派生视图,源头 `00_settings-ux-spec.md` §3.2)。
+- 测试: composer 选项集合 == Settings displayRoles(配置完成子集);空草稿不出现;浮出角色首发消息触发物化并用持久化 key;changing route affects future messages; unavailable config shows scoped error; Settings 增删/换组后 composer 经事件刷新对齐。
+- Status: live(2026-07-01 收敛落地:面板 registry.roles 第二真相 / 浮出角色被滤 / 空草稿可选 / copilot_chat 写死默认均已删,composer 与 Settings 同源)。
 - 归属: region `copilot`; capability `studio-settings`.
 
 ### F4. Tool And Diff Rendering
@@ -62,6 +67,20 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - Status: target-design.
 - 归属: region `copilot`; capability `golden-eval`.
 
+### F6. Message Scrolling & Composer（2026-07-01 新增）
+
+- 机制: 消息区滚动遵循 shadcn radix **message-scroller** 交互契约(`https://ui.shadcn.com/docs/components/radix/message-scroller`):流式回复时贴底自动跟随(live edge);用户上滚离开底部即释放跟随、绝不抢滚;露出「回到底部」按钮;新一轮用户消息锚定在视口顶部附近(turn anchoring);布局变化(markdown 展开/图加载)保持阅读位置。落地为 `src/components/ui/message-scroller.tsx` 的 shadcn 风格封装(缺原语先补 ui/ 再用,FRONTEND_UI_SPEC §2.1),面板消息区不再用裸 `overflow-y-auto` 承担主滚动(§2.6)。
+- Composer:
+  1. 输入框默认可视高度 **≈3 行**(单行太小,PM 2026-07-01),随内容自增到上限(~160px)后内部滚动。
+  2. 操作行固定在**输入框下方**(Claude Code 式布局,PM 2026-07-01 "功能在输入框下方,更加清晰"):左侧 route 选择 + role 选择,右侧发送按钮。
+  3. **不渲染 Attach file / Add context 占位按钮**(本文件 §4 已决:上下文统一走 @mention;图片走拖拽/粘贴)。占位死按钮当场删,不留。
+  4. Enter 发送、Shift+Enter 换行;IME 组合输入(`isComposing`)期间 Enter 不发送。
+- 决策: 聊天区的滚动/输入行为向官方 message-scroller 契约看齐,不自造第二套滚动启发式。
+- 原话/来源: PM 2026-07-01(本轮任务原话):「参考这个官方组件 ui,优化现在的 copilot 面板」「下方的输入窗口默认只有一行有点太小了」「我比较喜欢 Claude code 的布局方式,功能在输入框下方」。
+- 测试: 流式输出时列表贴底;上滚后新增内容不抢滚、出现回底按钮;点击回底恢复跟随;composer 默认高度≈3 行;Enter 发送/Shift+Enter 换行/IME 不误发;占位按钮不存在。
+- Status: live(2026-07-01 落地:ui/message-scroller.tsx 封装 @shadcn/react primitive,composer 三行 + Enter/Shift+Enter/IME 语义,占位按钮已删)。
+- 归属: region `copilot`; capability `copilot-assist`.
+
 ## 3. 接口契约
 - Inputs: current skill id, current view context, copilot role route data, websocket events.
 - Outputs: user message, optional route override, attach/context selection requests.
@@ -81,6 +100,8 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 | COPILOT-1 | session UI | 单元 `copilot-session-persistence`；**为什么**：退出再进对话一模一样，session 渲染基于持久化(D8) |
 | COPILOT-2 | analysis bar | 单元 `copilot-session-persistence`；**为什么**：copilot 分析 bar 是 golden/诊断入口，挂在会话流里 |
 | COPILOT-3 | 下钻 skillId | 单元 `copilot-session-persistence`；**为什么**：下钻子图时 copilot 用 currentSkillId、cwd 含子图 path，不丢上下文 |
+| COPILOT-4 | message-scroller + composer(F6) | PM 2026-07-01；**为什么**：流式聊天贴底/释放/回底与三行 composer 是基础可用性，向 shadcn 官方契约看齐、不自造滚动启发式 |
+| COPILOT-5 | role/route 同源(F3) | PM 2026-07-01「role 不同步」；**为什么**：composer 与 Settings 必须同一份派生真相 + 同一物化路径，否则两处各自为政必然漂移 |
 
 ## 6. 测试关键点
 1. session UI: baseline 现状为 内存态 / skill 切换 reset 风险 ⚠️；目标为 顶部多 session tab 持久化并恢复。

@@ -1,5 +1,5 @@
 import { UserCog } from 'lucide-react'
-import type { CredentialsState, ModelGroup, RolesData } from '../../api/llm'
+import type { CredentialsState, ModelGroup, RoleRouteEntry, RolesData } from '../../api/llm'
 import { deriveCopilotDisplayRoles } from '../studio/settings/copilot/copilot-role-derivation'
 import { Button } from '../ui/button'
 import {
@@ -11,18 +11,25 @@ import {
 } from '../ui/dropdown-menu'
 
 export interface CopilotRoleOption {
+  /** UI role id: persisted yaml key, or the model-group canonical id for a floated built-in. */
   role: string
   label: string
+  /** Fallback chain of the display role — the single route truth for the composer route picker. */
+  fallbackChain: RoleRouteEntry[]
+  /** False for a floated built-in that has not been materialized into the roles yaml yet. */
+  persisted: boolean
+  modelGroupId: string
 }
 
-/** Default copilot role the composer falls back to when nothing is selected. */
-export const DEFAULT_COPILOT_ROLE = 'copilot_chat'
 const emptyCredentials: CredentialsState = { providers: [] }
 
 /**
- * Filter the roles registry down to the active Copilot roles shown in Settings.
- * Labels come from the bound model group when available, so the composer menu
- * stays aligned with the Copilot settings cards.
+ * F3 sync contract (docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md):
+ * the composer role menu is the SAME derivation as the Settings Copilot cards
+ * (deriveCopilotDisplayRoles), narrowed to the roles that are actually usable
+ * for chat — i.e. with a bound model group / non-empty fallback chain. Empty
+ * drafts ("Drop model" cards) are not chat roles; floated built-ins ARE
+ * offered and get materialized on first send (resolveCopilotSendRole).
  */
 export function copilotRoleOptions(
   data: RolesData | null,
@@ -33,8 +40,14 @@ export function copilotRoleOptions(
     return []
   }
   return deriveCopilotDisplayRoles(data, modelGroups, credentials)
-    .filter((role) => Boolean(data.roles[role.id]))
-    .map((role) => ({ role: role.id, label: role.title }))
+    .filter((role) => (role.fallback_chain ?? []).length > 0)
+    .map((role) => ({
+      role: role.id,
+      label: role.title,
+      fallbackChain: role.fallback_chain ?? [],
+      persisted: Boolean(data.roles[role.id]),
+      modelGroupId: role.modelGroupId,
+    }))
 }
 
 interface RolePickerProps {

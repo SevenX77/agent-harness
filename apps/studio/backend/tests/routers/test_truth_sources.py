@@ -1,9 +1,23 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from app.services.llm_paths import credentials_path
 from app.services.runtime_activity import record_runtime_activity
+
+
+def test_runtime_activity_recorded_at_is_utc(client) -> None:
+    # Design §7.1 runtime-truth-sources: the activity log must timestamp in UTC so
+    # entries correlate 1:1 with the credentials / role-test truth files (which
+    # already record UTC). A local-offset stamp made cross-file timelines lie.
+    entry = record_runtime_activity(
+        source_id="llm_credentials",
+        action="endpoint_test",
+        message="utc stamp check",
+    )
+    recorded_at = datetime.fromisoformat(entry["recorded_at"])
+    assert recorded_at.utcoffset() == timedelta(0)
 
 
 def _flatten_sources(payload: dict[str, object]) -> dict[str, dict[str, object]]:

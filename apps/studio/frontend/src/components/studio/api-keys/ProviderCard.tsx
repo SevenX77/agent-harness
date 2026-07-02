@@ -16,6 +16,7 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   TriangleAlert,
   Video,
@@ -436,7 +437,13 @@ type EndpointSummary = {
   toolProtocol: "supported" | "not_listed"
 }
 
-function AvailableEndpointSummary({ endpoints }: { endpoints: EndpointSummary[] }) {
+function AvailableEndpointSummary({
+  endpoints,
+  onForceEndpointTest,
+}: {
+  endpoints: EndpointSummary[]
+  onForceEndpointTest?: (endpointId: string) => void
+}) {
   const { t } = useTranslation("settings")
   if (endpoints.length === 0) return null
   return (
@@ -448,38 +455,56 @@ function AvailableEndpointSummary({ endpoints }: { endpoints: EndpointSummary[] 
             const endpointLabel = `${endpointProtocolShortLabel(endpoint.protocol)} / ${endpointHostLabel(endpoint.baseUrl || endpoint.id)}`
             const ariaLabel = endpointTooltipText(endpoint)
             return (
-              <Tooltip key={endpoint.id}>
-                <TooltipTrigger asChild>
-                  <span
-                    tabIndex={0}
-                    className={cn(
-                      "inline-flex h-6 max-w-full cursor-help items-center gap-1.5 rounded-md border border-l-2 px-2 text-[0.625rem] font-medium leading-none",
-                      "bg-card font-mono shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                      endpointStatusSurfaceClass(endpoint.status),
-                      endpoint.status === "testing" && "api-route-tag-border-flow",
-                    )}
-                    aria-label={ariaLabel}
-                    data-endpoint-status={endpoint.status}
+              <span key={endpoint.id} className="inline-flex max-w-full items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className={cn(
+                        "inline-flex h-6 max-w-full cursor-help items-center gap-1.5 rounded-md border border-l-2 px-2 text-[0.625rem] font-medium leading-none",
+                        "bg-card font-mono shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                        endpointStatusSurfaceClass(endpoint.status),
+                        endpoint.status === "testing" && "api-route-tag-border-flow",
+                      )}
+                      aria-label={ariaLabel}
+                      data-endpoint-status={endpoint.status}
+                    >
+                      {endpoint.status === "testing" ? <Loader2 className="size-2.5 animate-spin" aria-hidden="true" /> : null}
+                      {endpoint.errorCode === "no_model_available" ? (
+                        <TriangleAlert className="size-2.5 shrink-0 text-warning" aria-hidden="true" />
+                      ) : null}
+                      <span className="min-w-0 truncate">{endpointLabel}</span>
+                      {endpoint.methodIds.length > 0 ? (
+                        <span className="shrink-0 font-sans text-muted-foreground">
+                          {endpoint.methodIds.length}m
+                        </span>
+                      ) : null}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    className={diagnosticTooltipContentClassName}
+                    data-allow-native-double-click
                   >
-                    {endpoint.status === "testing" ? <Loader2 className="size-2.5 animate-spin" aria-hidden="true" /> : null}
-                    {endpoint.errorCode === "no_model_available" ? (
-                      <TriangleAlert className="size-2.5 shrink-0 text-warning" aria-hidden="true" />
-                    ) : null}
-                    <span className="min-w-0 truncate">{endpointLabel}</span>
-                    {endpoint.methodIds.length > 0 ? (
-                      <span className="shrink-0 font-sans text-muted-foreground">
-                        {endpoint.methodIds.length}m
-                      </span>
-                    ) : null}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent
-                  className={diagnosticTooltipContentClassName}
-                  data-allow-native-double-click
-                >
-                  <EndpointTooltipContent endpoint={endpoint} />
-                </TooltipContent>
-              </Tooltip>
+                    <EndpointTooltipContent endpoint={endpoint} />
+                  </TooltipContent>
+                </Tooltip>
+                {endpoint.status === "protocol_unsupported" && onForceEndpointTest ? (
+                  // Design §1.2 matrix point 4: the bulk Test skips this cell
+                  // within its half-life; this explicit re-probe bypasses the
+                  // gate for "the provider may support it TODAY" checks.
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 shrink-0 text-muted-foreground"
+                    aria-label={t("apiKeys.card.reprobeProtocol", { id: endpoint.id })}
+                    title={t("apiKeys.card.reprobeProtocol", { id: endpoint.id })}
+                    onClick={() => onForceEndpointTest(endpoint.id)}
+                  >
+                    <RefreshCw className="size-3" aria-hidden="true" />
+                  </Button>
+                ) : null}
+              </span>
             )
           })}
         </TooltipProvider>
@@ -623,6 +648,10 @@ function endpointStatusSurfaceClass(status: TestMessageStatus): string {
   if (status === "ok") return "border-success bg-success/10 text-foreground"
   if (status === "testing") return "border-primary/70 bg-primary/10 text-foreground"
   if (status === "not_configured" || status === "untested") return "border-border/70 bg-muted/10 text-muted-foreground"
+  // protocol_unsupported is a dormant architectural fact about the (URL,
+  // protocol) cell, not something the user must fix (§4.2: red = user action
+  // needed) — muted, not destructive.
+  if (status === "protocol_unsupported") return "border-border/70 bg-muted/20 text-muted-foreground"
   return "border-tag-destructive-border bg-tag-destructive-border/10 text-foreground"
 }
 
@@ -688,6 +717,7 @@ function providerTestResultFailureScope(result: ProviderTestResult | null | unde
     reason === "upstream_error" ||
     reason === "processing_error" ||
     reason === "protocol_mismatch" ||
+    reason === "protocol_unsupported" ||
     reason === "endpoint_test_failed"
   ) {
     return "endpoint"
@@ -1531,6 +1561,7 @@ export function ProviderCard({
   showManualModelPanel = false,
   notableProviderKey,
   onModelsUpdated,
+  onForceEndpointTest,
 }: {
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
@@ -1544,6 +1575,8 @@ export function ProviderCard({
   showManualModelPanel?: boolean
   notableProviderKey?: string
   onModelsUpdated?: (models: ModelInfo[]) => void
+  /** Force re-probe one (URL, protocol) cell, bypassing the half-life gate. */
+  onForceEndpointTest?: (endpointId: string) => void
 }) {
   const { t } = useTranslation("settings")
   const [visible, setVisible] = useState(false)
@@ -2078,7 +2111,9 @@ export function ProviderCard({
             {baseUrlError ? <p id={`base-url-error-${draft.id}`} className="text-xs text-destructive">{baseUrlError}</p> : null}
           </div>
         ) : null}
-        {showAvailableEndpoint ? <AvailableEndpointSummary endpoints={endpointSummaries} /> : null}
+        {showAvailableEndpoint ? (
+          <AvailableEndpointSummary endpoints={endpointSummaries} onForceEndpointTest={onForceEndpointTest} />
+        ) : null}
         {availableModels.length || hasEmptyModelListWarning ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
             {hasAvailableModels ? (

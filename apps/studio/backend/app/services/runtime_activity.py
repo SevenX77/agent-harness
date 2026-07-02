@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -32,8 +32,13 @@ def record_runtime_activity(
     message: str,
     changes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Append one structured activity event and return the event."""
-    now = datetime.now().astimezone()
+    """Append one structured activity event and return the event.
+
+    Timestamps are UTC so log entries correlate 1:1 with the credentials /
+    role-test truth files, which already record UTC (design §7.1
+    runtime-truth-sources).
+    """
+    now = datetime.now(UTC)
     entry: dict[str, Any] = {
         "id": str(uuid4()),
         "recorded_at": now.isoformat(timespec="seconds"),

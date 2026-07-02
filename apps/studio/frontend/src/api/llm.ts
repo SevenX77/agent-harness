@@ -265,6 +265,7 @@ export type TestStatus =
   | 'untested'
   | 'ok'
   | 'invalid_key'
+  | 'protocol_unsupported'
   | 'rate_limited'
   | 'quota_exceeded'
   | 'network_error'
@@ -341,6 +342,7 @@ export type ProviderTestStatus =
   | 'ok'
   | 'error'
   | 'invalid_key'
+  | 'protocol_unsupported'
   | 'rate_limited'
   | 'quota_exceeded'
   | 'network_error'
@@ -1217,6 +1219,19 @@ function endpointTestVerdict(endpoint: ProviderEndpoint, routes: ProviderRoute[]
     }
   }
 
+  if (endpointErrorCode(endpoint) === 'protocol_unsupported') {
+    // Design §1.2 protocol matrix: "this URL does not speak this protocol" is a
+    // first-class endpoint state. It must never fall through to the model-scope
+    // masking below (which used to display a tested, structurally dead cell as
+    // "Untested").
+    return {
+      responseStatus: 'protocol_unsupported',
+      testStatus: 'protocol_unsupported',
+      errorCode: 'protocol_unsupported',
+      hasCompletedTest,
+    }
+  }
+
   if (endpointFailure === 'model') {
     return {
       responseStatus: 'error',
@@ -1367,6 +1382,7 @@ function endpointTestStatus(endpoint: ProviderEndpoint): ProviderTestStatus {
   if (errorCode === 'quota_exceeded' || errorCode === 'insufficient_quota') {
     return 'quota_exceeded'
   }
+  if (errorCode === 'protocol_unsupported') return 'protocol_unsupported'
   if (errorCode === 'timeout') return 'timeout'
   if (errorCode === 'network_error') return 'network_error'
   return 'error'
@@ -1610,6 +1626,9 @@ export async function getProviderModels(
   const existing = endpointForRequest(cachedRegistry, request)
   // Pre-test upsert persists the edited draft (base_url normalized server-side)
   // before the endpoint is exercised — see design atom #25 ("测试前置 upsert 落 endpoint").
+  // Design §1.2 protocol matrix: protocol is identity — for an existing endpoint
+  // the persisted protocol is the single truth (the backend rejects a change
+  // with 422); only endpoint creation supplies a protocol.
   const upsertedRegistry = await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
@@ -1617,7 +1636,7 @@ export async function getProviderModels(
         name: request.name ?? existing?.display_name ?? request.id,
         api_key: request.api_key,
         base_url: request.base_url ?? existing?.base_url ?? '',
-        provider_type: request.provider_type,
+        provider_type: existing?.protocol ?? request.provider_type,
       },
       existing ?? undefined,
     ),
@@ -1670,6 +1689,19 @@ export async function getProviderModels(
   }
 }
 
+/**
+ * Re-probe one (URL, protocol) endpoint cell immediately, bypassing the
+ * protocol_unsupported half-life gate (design §1.2 matrix point 4).
+ */
+export async function forceTestEndpoint(endpointId: string): Promise<CredentialRegistryResponse> {
+  const response = await api.post<EndpointTestResponse>(
+    `/llm/endpoints/${segment(endpointId)}/test`,
+    undefined,
+    { params: { force: true } },
+  )
+  return cacheRegistry(response.data.registry)
+}
+
 export async function testProviderEndpoint(
   request: ProviderTestRequest & { model_id: string },
 ): Promise<ProviderTestResponse> {
@@ -1692,7 +1724,7 @@ export async function testProviderEndpoint(
         name: request.name ?? existing?.display_name ?? request.id,
         api_key: request.api_key,
         base_url: request.base_url ?? existing?.base_url ?? '',
-        provider_type: request.provider_type,
+        provider_type: existing?.protocol ?? request.provider_type,
       },
       existing ?? undefined,
     ),

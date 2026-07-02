@@ -123,9 +123,12 @@ describe("InputPanel example view", () => {
       <InputPanel skillId="demo-skill" skillDetail={skillDetail()} onFileOpen={onFileOpen} />,
     )
 
-    expect(buttonProps).toHaveLength(2)
-    ;(buttonProps[0].onClick as () => void)()
-    ;(buttonProps[1].onClick as () => void)()
+    const editButtons = buttonProps.filter((props) =>
+      String(props["aria-label"] ?? "").startsWith("Edit"),
+    )
+    expect(editButtons).toHaveLength(2)
+    ;(editButtons[0].onClick as () => void)()
+    ;(editButtons[1].onClick as () => void)()
 
     expect(onFileOpen).toHaveBeenCalledTimes(2)
     expect(onFileOpen).toHaveBeenNthCalledWith(1, "GRAPH.md")
@@ -143,8 +146,11 @@ describe("InputPanel example view", () => {
       />,
     )
 
-    expect(buttonProps).toHaveLength(2)
-    ;(buttonProps[0].onClick as () => void)()
+    const editButtons = buttonProps.filter((props) =>
+      String(props["aria-label"] ?? "").startsWith("Edit"),
+    )
+    expect(editButtons).toHaveLength(2)
+    ;(editButtons[0].onClick as () => void)()
 
     expect(onFileOpen).toHaveBeenCalledTimes(1)
     expect(onFileOpen).toHaveBeenCalledWith("phases/analyze/SKILL.md")

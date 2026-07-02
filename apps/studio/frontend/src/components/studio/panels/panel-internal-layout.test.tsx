@@ -6,10 +6,6 @@ import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import { InputPanel } from "./InputPanel"
 import { PropertiesPanel } from "./PropertiesPanel"
 
-vi.mock("./GoldenSection", () => ({
-  GoldenSection: () => null,
-}))
-
 vi.mock("./TestInputsSection", () => ({
   TestInputsSection: () => null,
 }))

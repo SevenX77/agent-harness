@@ -38,7 +38,7 @@ export function DictField({ input, value, error, onChange }: FieldProps) {
             setParseError('Invalid JSON object.')
           }
         }}
-        className="h-32 w-full resize-none rounded-md border border-gray-300 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-800"
+        className="h-32 w-full resize-none rounded-md border border-input bg-input/20 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
       />
     </FieldWrapper>
   )

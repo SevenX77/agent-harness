@@ -35,11 +35,11 @@ describe('TraceEventRow retry badge (D10)', () => {
     expect(html).toContain('schema mismatch')
   })
 
-  it('marks the final attempt badge with the exhausted (red) styling', () => {
+  it('marks the final attempt badge with the exhausted (destructive) styling', () => {
     const html = renderRow(event({ event_type: 'validation_fail', attempt: 3, max_attempts: 3 }))
 
-    expect(html).toContain('Final attempt (3/3)')
-    expect(html).toContain('text-red-700')
+    expect(html).toContain('aria-label="Retry attempt 3/3"')
+    expect(html).toContain('text-destructive')
   })
 
   it('omits the retry badge entirely for events without attempt info', () => {

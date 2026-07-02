@@ -230,8 +230,8 @@ export function PatchProposedBubbleView({
           <Icon className="size-3.5 shrink-0" />
           <span className="truncate">{verb} {event.path}</span>
           <span className="shrink-0 font-normal text-muted-foreground">
-            <span className="text-emerald-600 dark:text-emerald-400">+{stats.added}</span>{' '}
-            <span className="text-red-600 dark:text-red-400">−{stats.removed}</span>
+            <span className="text-success">+{stats.added}</span>{' '}
+            <span className="text-destructive">−{stats.removed}</span>
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -267,7 +267,7 @@ export function PatchProposedBubbleView({
             <span
               className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 ${
                 review === 'accepted'
-                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  ? 'bg-success/15 text-success'
                   : 'bg-muted text-muted-foreground'
               }`}
             >
@@ -292,9 +292,9 @@ export function PatchProposedBubbleView({
             key={index}
             className={
               row.kind === 'add'
-                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                ? 'bg-success/10 text-success'
                 : row.kind === 'del'
-                  ? 'bg-red-500/10 text-red-700 dark:text-red-300'
+                  ? 'bg-destructive/10 text-destructive'
                   : 'text-muted-foreground'
             }
           >

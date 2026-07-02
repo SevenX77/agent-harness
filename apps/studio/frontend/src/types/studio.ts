@@ -1,5 +1,3 @@
-import type { Edge, Node } from 'reactflow'
-import type { StudioNodeData } from '../CustomNodes'
 import type { LintError } from '../api/types'
 
 export type ActiveTab = 'code' | 'trace' | 'diff' | 'history' | 'batch' | 'terminal' | 'settings'
@@ -24,18 +22,4 @@ export interface LintOverride {
   skillId: string
   status: LintStatus
   errors: LintError[]
-}
-
-export interface GraphBuildResult {
-  nodes: Node<StudioNodeData>[]
-  edges: Edge[]
-}
-
-export interface VisualPhase {
-  id: string
-  name: string
-  mode: string
-  role: string | null
-  dependsOn: string[]
-  subgraph: string | null
 }

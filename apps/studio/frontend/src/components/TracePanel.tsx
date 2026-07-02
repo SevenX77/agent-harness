@@ -9,6 +9,7 @@ import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-pro
 import { TraceFilter } from './trace/TraceFilter'
 import { TraceSearchBar } from './trace/TraceSearchBar'
 import { VirtualTraceList } from './trace/VirtualTraceList'
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 // Re-exported so existing importers (`@/components/TracePanel`) keep working;
 // the canonical definition now lives in studio/hitl-prompt to give the
@@ -194,7 +195,7 @@ export function TracePanel({
     return (
       <div role="log" aria-live="polite" aria-label="Event Trace" className="flex h-full min-h-0 flex-col">
         {compareTabStrip}
-        <div className="flex flex-1 items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500">
+        <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
           Waiting for run events
         </div>
       </div>
@@ -208,23 +209,27 @@ export function TracePanel({
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold text-foreground">Event Trace</h3>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-label="Resume run from last checkpoint"
-              title="Continue this run from its last checkpoint"
-              disabled={!canResume || resumeLoading}
-              onClick={onResume}
-              className="flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-            >
-              <Play className="h-3.5 w-3.5" />
-              {resumeLoading ? 'Resuming' : 'Resume'}
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Resume run from last checkpoint"
+                  disabled={!canResume || resumeLoading}
+                  onClick={onResume}
+                  className="flex items-center gap-1 rounded-md border border-success-border px-2 py-1 text-xs font-semibold text-success hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {resumeLoading ? 'Resuming' : 'Resume'}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Continue this run from its last checkpoint</TooltipContent>
+            </Tooltip>
             <button
               type="button"
               aria-label="Compare trace to golden baseline"
               disabled={!canCompare || compareLoading}
               onClick={onCompareToGolden}
-              className="flex items-center gap-1 rounded-md border border-sky-200 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
+              className="flex items-center gap-1 rounded-md border border-primary/40 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <GitCompareArrows className="h-3.5 w-3.5" />
               {compareLoading ? 'Comparing' : 'Compare'}
@@ -234,17 +239,17 @@ export function TracePanel({
               aria-label="Promote run to golden baseline"
               disabled={!canCompare}
               onClick={onPromoteToGolden}
-              className="flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/40"
+              className="flex items-center gap-1 rounded-md border border-warning-border px-2 py-1 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <BadgeCheck className="h-3.5 w-3.5" />
               Golden
             </button>
-            <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <input
                 type="checkbox"
                 checked={linkEnabled}
                 onChange={(event) => onToggleLink?.(event.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+                className="h-3.5 w-3.5 rounded border-border accent-primary"
               />
               Link views
             </label>
@@ -262,33 +267,39 @@ export function TracePanel({
           onClear={filter.clearFilters}
         />
         <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-          <span
-            className="rounded-full border border-border bg-muted/40 px-2 py-0.5"
-            title={
-              linkEnabled && focusPhase
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5">
+                {linkEnabled && focusPhase ? `Focus: ${focusLabel}` : 'Focus: whole run'}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {linkEnabled && focusPhase
                 ? `Focused on node "${focusLabel}" — showing this node's executions`
-                : 'Whole-run trace — focus a node to narrow to its executions'
-            }
-          >
-            {linkEnabled && focusPhase ? `Focus: ${focusLabel}` : 'Focus: whole run'}
-          </span>
+                : 'Whole-run trace — focus a node to narrow to its executions'}
+            </TooltipContent>
+          </Tooltip>
           <span>
             Showing {filter.filteredEvents.length} of {traceEvents.length} events
           </span>
           {canPromoteFocusedNode ? (
-            <button
-              type="button"
-              aria-label={`Promote node "${focusLabel}" to golden`}
-              title="Create a golden baseline for just this focused node from the current run"
-              disabled={nodePromoting}
-              onClick={() => {
-                void handlePromoteFocusedNode()
-              }}
-              className="flex items-center gap-1 rounded-full border border-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/40"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" />
-              {nodePromoting ? 'Promoting node' : 'Promote node to golden'}
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Promote node "${focusLabel}" to golden`}
+                  disabled={nodePromoting}
+                  onClick={() => {
+                    void handlePromoteFocusedNode()
+                  }}
+                  className="flex items-center gap-1 rounded-full border border-warning-border px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  {nodePromoting ? 'Promoting node' : 'Promote node to golden'}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Create a golden baseline for just this focused node from the current run</TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
         {hitlPrompt ? (

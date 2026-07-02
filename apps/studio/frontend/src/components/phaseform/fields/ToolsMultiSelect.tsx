@@ -54,7 +54,7 @@ export function ToolsMultiSelect({ selected, options, onChange }: ToolsMultiSele
               <button
                 type="button"
                 onClick={() => toggle(tool)}
-                title={`Remove ${tool}`}
+                aria-label={`Remove ${tool}`}
                 className="rounded-sm text-muted-foreground hover:text-foreground"
               >
                 <X className="h-3 w-3" />

@@ -5,6 +5,7 @@ import type { SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelBody, PanelFieldRow } from "./_shared/PanelSection"
@@ -158,9 +159,14 @@ function ExampleField({
       <Field>
         <YamlFieldLabel>{title.toLowerCase()}</YamlFieldLabel>
         <div className="flex items-center justify-between gap-2">
-          <FieldDescription className="min-w-0 flex-1 truncate font-mono" title={relPath}>
-            {relPath}
-          </FieldDescription>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <FieldDescription className="min-w-0 flex-1 truncate font-mono">
+                {relPath}
+              </FieldDescription>
+            </TooltipTrigger>
+            <TooltipContent>{relPath}</TooltipContent>
+          </Tooltip>
           <Button
             type="button"
             size="icon"

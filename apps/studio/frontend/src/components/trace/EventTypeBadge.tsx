@@ -4,21 +4,21 @@ interface EventTypeBadgeProps {
 
 function badgeClass(eventType: string): string {
   if (eventType === 'internal_error' || eventType === 'validation_fail') {
-    return 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300'
+    return 'border-destructive-border bg-destructive/10 text-destructive'
   }
   if (eventType === 'llm_call' || eventType === 'prompt_captured') {
-    return 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-300'
+    return 'border-primary/50 bg-primary/10 text-primary'
   }
   if (eventType.includes('tool')) {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+    return 'border-success-border bg-success/10 text-success'
   }
   if (eventType === 'phase_start') {
-    return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+    return 'border-multimodal-border bg-multimodal-border/10 text-foreground'
   }
   if (eventType === 'phase_end' || eventType === 'run_ended') {
-    return 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300'
+    return 'border-success-border bg-success/10 text-success-foreground'
   }
-  return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+  return 'border-border bg-muted/30 text-muted-foreground'
 }
 
 export function EventTypeBadge({ eventType }: EventTypeBadgeProps) {

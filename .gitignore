@@ -38,6 +38,9 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/edge-context.test.ts
 !apps/studio/frontend/src/lib/agent-steps.ts
 !apps/studio/frontend/src/lib/agent-steps.test.ts
+!apps/studio/frontend/src/lib/edge-static-inference.ts
+!apps/studio/frontend/src/lib/edge-static-inference.test.ts
+!apps/studio/frontend/src/lib/io-declarations.ts
 lib64/
 parts/
 sdist/

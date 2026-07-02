@@ -23,6 +23,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - 约束(2026-07-02 R4):**回复语言跟随用户输入语言**——用户写英文回英文、写中文回中文;系统提示词自身语言不决定回复语言(落点:后端 `BASE_SYSTEM_PROMPT_TEMPLATE` 显式语言规则,`test_copilot_system_prompt` 锁存在性)。
 - 约束(2026-07-02 R3):连接状态**不占独立一行**——连接正常(open)时什么都不显示;仅断连/重连时在标题旁显示紧凑提示 chip(含 retry 倒计时)。会话 tab 条 = 单行横向滚动(本地 ScrollArea,绝不出现系统滚动条控件),**每个 tab 带关闭按钮**:关闭 = 删除该会话及其落盘文件(D8 真相在盘上,关掉的对话不得在 hydrate 时复活);关到最后一个时留一个全新空会话;关闭当前活跃 tab 时激活其前一个邻居。
 - 约束(2026-07-02 R5-B,PM「多chat没有出现横向滚动条,鼠标滚轮操作应该横向滚动」):tab 条上**纵向滚轮转横向滚动**——条内容溢出时,滚轮 deltaY 直接驱动 scrollLeft(阻止页面纵滚);触控板原生横向手势(|deltaX|≥|deltaY|)不拦截。溢出可见性:悬停 tab 条时显示**细横向滚动条**(本地 ScrollArea 的 hover 型 ScrollBar,细样式、语义 token),替代 R3 的"完全隐藏"——完全隐藏让 PM 无从判断还有更多 tab。无溢出时滚轮不拦、条不出现。
+- 约束(2026-07-02 R5-E,PM「设计一个copilot的名字和图标,有点寓意的那种」「一般copilot通常是一个人的名字,有没有类似织神之类的美好的神话人物」):**助手身份 = 织女 (Zhinü)**——中国神话里把散落丝线织成云锦天衣的织造女神;这个 copilot 的本职正是把散落的 phase 织成能运行的技能图(DAG),名与职完全同构。面板 header = lucide `Waypoints` 图标(点与线相连 = 织线/DAG 形)+「织女 Zhinü」;备选名 Clotho(希腊命运纺线女神)、嫘祖(缫丝始祖)已议未选。功能域名称(Settings 的 Copilot tab、copilot_* role key、API 路径)**不改**——改的是助手的人格名,不是系统术语。
 - 决策: Copilot is a side assistant, not a blocking modal.
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot configuration and runtime dependency.
 - 测试: closed websocket disables send; reconnect updates status; switching skills resets messages/context.

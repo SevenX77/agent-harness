@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, Bot, CircleAlert, SquareTerminal } from 'lucide-react'
+import { ArrowUp, CircleAlert, SquareTerminal, Waypoints } from 'lucide-react'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
@@ -457,8 +457,15 @@ export function CopilotPanel({
       <header className="studio-canvas-panel-header border-b px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <Bot className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
-            <h2 className="truncate text-sm font-semibold">Copilot</h2>
+            {/* R5-E identity: 织女 (Zhinü) — the weaver goddess who turns loose
+                threads into brocade, as this copilot weaves phases into a DAG.
+                Waypoints = nodes joined by threads. PM can veto with one word. */}
+            <Waypoints className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
+            {/* shrink-0: the short name must never be squeezed out by the
+                reconnect chip (the chip truncates instead). */}
+            <h2 className="shrink-0 text-sm font-semibold">
+              织女 <span className="font-normal text-muted-foreground">Zhinü</span>
+            </h2>
             {copilot.connectionStatus !== 'open' ? (
               <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
                 {copilot.connectionStatus}

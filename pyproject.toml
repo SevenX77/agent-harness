@@ -50,7 +50,13 @@ consider_namespace_packages = true
 [tool.ruff]
 line-length = 120  # 从 100 升, 兼容 Chinese docstring/message 自然长度
 target-version = "py311"
-lint.select = ["E", "F", "B", "I", "UP"]
+# PLW1514: text I/O must pass encoding= explicitly — Windows otherwise decodes
+# with the locale codepage (GBK on zh-CN). See docs/development/CROSS_PLATFORM.md.
+# PLW1514 is still a preview rule; explicit-preview-rules limits preview mode
+# to exactly the codes listed here so stable-rule behavior is unchanged.
+lint.select = ["E", "F", "B", "I", "UP", "PLW1514"]
+lint.preview = true
+lint.explicit-preview-rules = true
 
 # Targeted exemptions for legitimate patterns that the default rule set
 # misclassifies. Both groups are intentional, not technical debt.

@@ -55,7 +55,7 @@ def list_processes() -> list[ProcessInfo]:
             ["powershell", "-NoProfile", "-Command", script],
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         payload = json.loads(result.stdout or "[]")
         if isinstance(payload, dict):
@@ -70,7 +70,7 @@ def list_processes() -> list[ProcessInfo]:
         ["ps", "-eo", "pid=,command="],
         check=True,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     processes: list[ProcessInfo] = []
     for line in result.stdout.splitlines():
@@ -200,7 +200,7 @@ def start_python_sidecar(port: int, tmp_path: Path) -> subprocess.Popen[str]:
         env=sidecar_env(tmp_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
 
 
@@ -285,7 +285,7 @@ def test_tauri_dev_lifecycle_record_or_gui(tmp_path: Path) -> None:
         ["cargo", "tauri", "--version"],
         cwd=TAURI_DIR,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=30,
     )
     record["mode"] = "gui-preflight"

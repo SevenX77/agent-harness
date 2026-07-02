@@ -800,7 +800,7 @@ def test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner(
         else:
             errors.append((owner_id, value, exc_type))
 
-    lease_data = json.loads((tmp_path / "runs" / "run-multiprocess-race" / "lease.json").read_text())
+    lease_data = json.loads((tmp_path / "runs" / "run-multiprocess-race" / "lease.json").read_text(encoding="utf-8"))
     assert acquired == [(lease_data["owner_id"], 1)]
     assert len(errors) == worker_count - 1
     assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
@@ -1236,7 +1236,7 @@ def test_run_artifact_store_rejects_begin_run_metadata_update_after_seal(tmp_pat
         store.begin_run("sealed-run", metadata={"artifact_id": "rewritten.skill"})
 
     assert _error_code(exc_info.value) == "artifact.sealed_write"
-    manifest = json.loads((tmp_path / "runs" / "sealed-run" / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "runs" / "sealed-run" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["metadata"] == {"artifact_id": "demo.skill"}
 
 

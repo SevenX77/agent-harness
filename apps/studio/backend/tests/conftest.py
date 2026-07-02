@@ -10,6 +10,9 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("STUDIO_API_TOKEN", "studio-test-token")
+# Cross-platform bottom line (docs/development/CROSS_PLATFORM.md): child
+# Python processes spawned by tests write UTF-8 regardless of host locale.
+os.environ.setdefault("PYTHONUTF8", "1")
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 STUDIO_BACKEND = REPO_ROOT / "apps" / "studio" / "backend"

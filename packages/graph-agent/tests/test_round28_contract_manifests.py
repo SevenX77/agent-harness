@@ -73,7 +73,7 @@ def _validate_manifest(instance: Any, schema_key: str) -> None:
 def _run_validator(*fixture_paths: Path) -> subprocess.CompletedProcess[str]:
     import sys
     cmd = [sys.executable, str(VALIDATOR_PATH), *map(str, fixture_paths)]
-    return subprocess.run(cmd, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
+    return subprocess.run(cmd, cwd=REPO_ROOT, text=True, encoding="utf-8", errors="replace", capture_output=True, check=False)
 
 
 def _public_api_symbols() -> set[str]:
@@ -205,7 +205,7 @@ def test_task5_targeted_tests_are_collected_from_manifest_nodeids() -> None:
     collect = subprocess.run(
         ["uv", "run", "pytest", "--collect-only", "-q", *nodeids],
         cwd=PACKAGE_ROOT,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=False,
     )
@@ -226,7 +226,7 @@ def test_task7_hash_lock_detects_mutated_schema_fixture() -> None:
     baseline_result = subprocess.run(
         ["uv", "run", "pytest", "tests/test_contract_hash_lock.py", "-q"],
         cwd=PACKAGE_ROOT,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=False,
     )
@@ -244,7 +244,7 @@ def test_task7_hash_lock_detects_mutated_schema_fixture() -> None:
         mutated_result = subprocess.run(
             ["uv", "run", "pytest", "tests/test_contract_hash_lock.py", "-q"],
             cwd=PACKAGE_ROOT,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             capture_output=True,
             check=False,
         )

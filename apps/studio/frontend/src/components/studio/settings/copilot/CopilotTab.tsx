@@ -36,6 +36,7 @@ import {
   deriveCopilotCandidateGroups,
   applyCopilotModelGroupSelection,
   buildCopilotRoleEntry,
+  copilotKeyForGroupId,
   pickDefaultCopilotGroupIds,
   type CopilotRolePreview,
   type CopilotRoutePreview,
@@ -53,15 +54,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { getRoleTestResults } from "@/api/client"
 import type { CredentialsState, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
-
-/**
- * R-F5: derive a yaml-safe key for a copilot role created from a model group.
- * The yaml key must match `[a-z][a-z0-9_]*` (no hyphens, no dots, no upper).
- * `copilot_<slug>` where slug strips any non-[a-zA-Z0-9] run to `_` and lowercases.
- */
-export function copilotKeyForGroupId(groupId: string): string {
-  return "copilot_" + groupId.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()
-}
 
 /**
  * R-F5: resolve the persisted yaml key for a UI role id. Floated built-in

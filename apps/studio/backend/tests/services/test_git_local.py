@@ -268,7 +268,7 @@ def test_commit_empty_snapshot_retries_cas_when_head_advances(
                 cwd=kwargs["cwd"],
                 timeout=kwargs.get("timeout"),
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         return original_run(command, **kwargs)
 
@@ -338,7 +338,7 @@ def test_commit_empty_snapshot_uses_concurrent_existing_marker_after_cas_failure
                 cwd=kwargs["cwd"],
                 timeout=kwargs.get("timeout"),
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             assert result.returncode == 0, result.stderr
             sha_result = original_run(
@@ -346,7 +346,7 @@ def test_commit_empty_snapshot_uses_concurrent_existing_marker_after_cas_failure
                 cwd=kwargs["cwd"],
                 timeout=kwargs.get("timeout"),
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             concurrent_marker["sha"] = sha_result.stdout.strip()
         return original_run(command, **kwargs)

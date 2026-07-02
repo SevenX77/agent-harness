@@ -37,9 +37,15 @@ apps/studio/tauri/
 同时让 Tauri sidecar 拉起动态端口的 FastAPI 后端。
 
 ```bash
-# from repo root
+# from repo root — Windows
 powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1
+
+# from repo root — macOS / Linux
+scripts/studio-dev.sh
 ```
+
+两个脚本是同一层薄壳（设 `PYTHONUTF8` + `STUDIO_SIDECAR_PORT` 后交给跨平台的
+`apps/studio/tauri/scripts/dev_studio.js`）。Linux 桌面依赖见上文系统库清单。
 
 默认配置来自 `apps/studio/tauri/tauri.conf.json`:
 

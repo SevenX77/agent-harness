@@ -26,6 +26,11 @@ from pathlib import Path
 import httpx
 import pytest
 
+# Cross-platform bottom line (docs/development/CROSS_PLATFORM.md): child
+# Python processes spawned by the e2e harness write UTF-8 regardless of
+# host locale.
+os.environ.setdefault("PYTHONUTF8", "1")
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_BACKEND = REPO_ROOT / "apps/studio/backend"
 STUDIO_FRONTEND = REPO_ROOT / "apps/studio/frontend"

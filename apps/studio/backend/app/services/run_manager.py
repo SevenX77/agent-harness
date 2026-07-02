@@ -484,6 +484,18 @@ class RunManager:
             if hasattr(process, "join"):
                 process.join(timeout=2)
         with contextlib.suppress(Exception):
+            # terminate() is SIGTERM — a busy or blocked child can ignore it.
+            # Escalate to kill() (SIGKILL) rather than orphaning the child into
+            # interpreter shutdown (the same exit-139 class).
+            if (
+                hasattr(process, "kill")
+                and hasattr(process, "is_alive")
+                and process.is_alive()
+            ):
+                process.kill()
+                if hasattr(process, "join"):
+                    process.join(timeout=2)
+        with contextlib.suppress(Exception):
             if hasattr(process_queue, "close"):
                 process_queue.close()
         with contextlib.suppress(Exception):
@@ -930,7 +942,7 @@ class RunManager:
                 f"Run not found: {run_id}",
                 {"skill_id": skill_id, "run_id": run_id},
             )
-        return RunMetadata.model_validate_json(metadata_path.read_text())
+        return RunMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
 
     async def _drain_process_queue(self, record: RunRecord) -> None:
         terminal_metadata: RunMetadata | None = None
@@ -1390,7 +1402,7 @@ def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:
 
 
 def _metadata_with_input_summary(metadata_path: Path) -> RunMetadata:
-    metadata = RunMetadata.model_validate_json(metadata_path.read_text())
+    metadata = RunMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
     if metadata.input_summary:
         return metadata
     input_data = _read_run_artifact_json_if_present(metadata_path.parent, "input_data.json") or {}

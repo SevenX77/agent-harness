@@ -1,0 +1,11 @@
+# Cross-platform editor baseline — see docs/development/CROSS_PLATFORM.md.
+# Encoding/EOL only; indentation stays per-language convention.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.{ps1,bat,cmd}]
+end_of_line = crlf

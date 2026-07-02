@@ -757,6 +757,28 @@ def test_runtime_state_store_concurrent_first_acquire_allows_only_one_owner(tmp_
     assert lease_data["fencing_token"] == 1
 
 
+def _reap_processes(processes) -> None:
+    """Ensure no spawn-context child outlives its test (terminate -> kill)."""
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+
+
+def _close_ctx_queue(results_queue) -> None:
+    """Release a spawn-context Queue's feeder thread before the test returns.
+
+    Feeder threads leaked from ctx.Queue()s across the suite crash the
+    interpreter/coverage shutdown (exit 139 AFTER "N passed" on quality-gates,
+    teardown-segfault round 2). close() + join_thread() reaps them.
+    """
+    results_queue.close()
+    results_queue.join_thread()
+
+
 def test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner(
     tmp_path: Path,
 ) -> None:
@@ -772,39 +794,40 @@ def test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner(
         for index in range(worker_count)
     ]
 
-    for process in processes:
-        process.start()
-    for process in processes:
-        # 60s, not 10s: a loaded CI runner spawning 8 fresh interpreters (each
-        # re-imports the whole backend under the "spawn" context) can legitimately
-        # take well over 10s to finish, leaving a still-running worker that trips
-        # `assert alive == []`. The processes complete correctly; only the wait
-        # was too tight.
-        process.join(timeout=60)
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            # 60s, not 10s: a loaded CI runner spawning 8 fresh interpreters (each
+            # re-imports the whole backend under the "spawn" context) can legitimately
+            # take well over 10s to finish, leaving a still-running worker that trips
+            # `assert alive == []`. The processes complete correctly; only the wait
+            # was too tight.
+            process.join(timeout=60)
 
-    alive = [process.pid for process in processes if process.is_alive()]
-    for process in processes:
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=2)
+        alive = [process.pid for process in processes if process.is_alive()]
+        _reap_processes(processes)
 
-    assert alive == []
-    assert [process.exitcode for process in processes] == [0] * worker_count
+        assert alive == []
+        assert [process.exitcode for process in processes] == [0] * worker_count
 
-    acquired: list[tuple[str, int]] = []
-    errors: list[tuple[str, str | None, str]] = []
-    for _ in processes:
-        status, owner_id, value, exc_type = results.get(timeout=1)
-        if status == "ok":
-            acquired.append((owner_id, int(value)))
-        else:
-            errors.append((owner_id, value, exc_type))
+        acquired: list[tuple[str, int]] = []
+        errors: list[tuple[str, str | None, str]] = []
+        for _ in processes:
+            status, owner_id, value, exc_type = results.get(timeout=1)
+            if status == "ok":
+                acquired.append((owner_id, int(value)))
+            else:
+                errors.append((owner_id, value, exc_type))
 
-    lease_data = json.loads((tmp_path / "runs" / "run-multiprocess-race" / "lease.json").read_text())
-    assert acquired == [(lease_data["owner_id"], 1)]
-    assert len(errors) == worker_count - 1
-    assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
-    assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
+        lease_data = json.loads((tmp_path / "runs" / "run-multiprocess-race" / "lease.json").read_text(encoding="utf-8"))
+        assert acquired == [(lease_data["owner_id"], 1)]
+        assert len(errors) == worker_count - 1
+        assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
+        assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
+    finally:
+        _reap_processes(processes)
+        _close_ctx_queue(results)
 
 
 def test_runtime_state_store_multiprocess_expired_takeover_allows_only_one_owner(
@@ -842,39 +865,40 @@ def test_runtime_state_store_multiprocess_expired_takeover_allows_only_one_owner
         for index in range(worker_count)
     ]
 
-    for process in processes:
-        process.start()
-    for process in processes:
-        # 60s, not 10s: a loaded CI runner spawning 8 fresh interpreters (each
-        # re-imports the whole backend under the "spawn" context) can legitimately
-        # take well over 10s to finish, leaving a still-running worker that trips
-        # `assert alive == []`. The processes complete correctly; only the wait
-        # was too tight.
-        process.join(timeout=60)
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            # 60s, not 10s: a loaded CI runner spawning 8 fresh interpreters (each
+            # re-imports the whole backend under the "spawn" context) can legitimately
+            # take well over 10s to finish, leaving a still-running worker that trips
+            # `assert alive == []`. The processes complete correctly; only the wait
+            # was too tight.
+            process.join(timeout=60)
 
-    alive = [process.pid for process in processes if process.is_alive()]
-    for process in processes:
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=2)
+        alive = [process.pid for process in processes if process.is_alive()]
+        _reap_processes(processes)
 
-    assert alive == []
-    assert [process.exitcode for process in processes] == [0] * worker_count
+        assert alive == []
+        assert [process.exitcode for process in processes] == [0] * worker_count
 
-    acquired: list[tuple[str, int]] = []
-    errors: list[tuple[str, str | None, str]] = []
-    for _ in processes:
-        status, owner_id, value, exc_type = results.get(timeout=1)
-        if status == "ok":
-            acquired.append((owner_id, int(value)))
-        else:
-            errors.append((owner_id, value, exc_type))
+        acquired: list[tuple[str, int]] = []
+        errors: list[tuple[str, str | None, str]] = []
+        for _ in processes:
+            status, owner_id, value, exc_type = results.get(timeout=1)
+            if status == "ok":
+                acquired.append((owner_id, int(value)))
+            else:
+                errors.append((owner_id, value, exc_type))
 
-    final_lease = json.loads(lease_path.read_text(encoding="utf-8"))
-    assert acquired == [(final_lease["owner_id"], stale.fencing_token + 1)]
-    assert len(errors) == worker_count - 1
-    assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
-    assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
+        final_lease = json.loads(lease_path.read_text(encoding="utf-8"))
+        assert acquired == [(final_lease["owner_id"], stale.fencing_token + 1)]
+        assert len(errors) == worker_count - 1
+        assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
+        assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
+    finally:
+        _reap_processes(processes)
+        _close_ctx_queue(results)
 
 
 def test_runtime_state_store_acquire_obeys_cross_process_run_file_lock(
@@ -894,22 +918,32 @@ def test_runtime_state_store_acquire_obeys_cross_process_run_file_lock(
         args=(tmp_path, "run-file-lock", "worker-contender", contender_ready, start_acquire, results),
     )
 
-    holder.start()
-    assert ready.get(timeout=30) == "locked"
-    contender.start()
-    assert contender_ready.get(timeout=30) == "ready"
-    start_acquire.set()
+    try:
+        holder.start()
+        assert ready.get(timeout=30) == "locked"
+        contender.start()
+        assert contender_ready.get(timeout=30) == "ready"
+        start_acquire.set()
 
-    with pytest.raises(queue.Empty):
-        results.get(timeout=0.5)
+        with pytest.raises(queue.Empty):
+            results.get(timeout=0.5)
 
-    release.set()
-    holder.join(timeout=30)
-    contender.join(timeout=30)
+        release.set()
+        holder.join(timeout=30)
+        contender.join(timeout=30)
 
-    assert holder.exitcode == 0
-    assert contender.exitcode == 0
-    assert results.get(timeout=10)[0] == "ok"
+        assert holder.exitcode == 0
+        assert contender.exitcode == 0
+        assert results.get(timeout=10)[0] == "ok"
+    finally:
+        # Unblock children before reaping so terminate/kill is the fallback,
+        # not the norm; a join(timeout=30) miss must never leak a child into
+        # the rest of the suite (teardown-segfault round 2).
+        release.set()
+        start_acquire.set()
+        _reap_processes((holder, contender))
+        for ctx_queue in (ready, contender_ready, results):
+            _close_ctx_queue(ctx_queue)
 
 
 def test_runtime_state_store_fencing_token_stays_monotonic_after_release(tmp_path: Path) -> None:
@@ -1236,7 +1270,7 @@ def test_run_artifact_store_rejects_begin_run_metadata_update_after_seal(tmp_pat
         store.begin_run("sealed-run", metadata={"artifact_id": "rewritten.skill"})
 
     assert _error_code(exc_info.value) == "artifact.sealed_write"
-    manifest = json.loads((tmp_path / "runs" / "sealed-run" / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "runs" / "sealed-run" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["metadata"] == {"artifact_id": "demo.skill"}
 
 

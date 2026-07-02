@@ -87,7 +87,7 @@ if [ "$with_backend" = "1" ]; then
   side_log="$repo_root/.worktrees/.$wt_name.sidecar.log"
   (
     cd "$wt_top/apps/studio/backend"
-    STUDIO_API_TOKEN="$token" exec uv run uvicorn app.main:app \
+    STUDIO_API_TOKEN="$token" PYTHONUTF8=1 exec uv run uvicorn app.main:app \
       --host 127.0.0.1 --port "$bport" >"$side_log" 2>&1
   ) &
   side_pid=$!

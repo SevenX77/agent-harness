@@ -107,7 +107,7 @@ class LocalRunArtifactStore:
         if manifest_file.exists():
             manifest["object_refs"] = {ref.path: ref.model_dump(mode="json") for ref in objects}
             self._write_manifest(manifest_file, manifest)
-        with open(sealed_file, "w") as f:
+        with open(sealed_file, "w", encoding="utf-8") as f:
             f.write("sealed")
         return RunArtifactIndex(run_id=run_id, objects=objects, sealed=True)
 
@@ -165,7 +165,7 @@ class LocalRunArtifactStore:
 
     def _read_manifest(self, manifest_file: Path) -> dict[str, Any]:
         try:
-            with open(manifest_file) as f:
+            with open(manifest_file, encoding="utf-8") as f:
                 manifest = json.load(f)
         except json.JSONDecodeError as exc:
             raise StudioAdapterError(
@@ -187,7 +187,7 @@ class LocalRunArtifactStore:
 
     def _write_manifest(self, manifest_file: Path, manifest: dict[str, Any]) -> None:
         temp_manifest = manifest_file.with_suffix(".tmp")
-        with open(temp_manifest, "w") as f:
+        with open(temp_manifest, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
         temp_manifest.replace(manifest_file)
 

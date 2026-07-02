@@ -1,23 +1,32 @@
-import React, { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, Bot, CircleAlert, CircleUserRound, Paperclip, Plus, SquareTerminal } from 'lucide-react'
+import { ArrowUp, Bot, CircleAlert, CircleUserRound, SquareTerminal } from 'lucide-react'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
-import { getRegistry, getRoles, type RegistryResponse, type RoleEntry, type RolesData } from '../../api/llm'
+import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
 import { useCopilot, type CopilotJudgeContext } from '../../hooks/useCopilot'
+import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-derivation'
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
 import { Marker, MarkerContent, MarkerIcon } from '../ui/marker'
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '../ui/message-scroller'
 import { BACKEND_UNAVAILABLE_MESSAGE, errorMessage } from '@/utils/errors'
 import { AnalysisBar } from './analysis-bar'
 import { BashApprovalCard } from './bash-approval-card'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
-import { DEFAULT_COPILOT_ROLE, RolePicker, copilotRoleOptions } from './role-picker'
+import { RolePicker, copilotRoleOptions } from './role-picker'
 import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
 
@@ -139,6 +148,15 @@ interface CopilotPanelProps {
   onFileChanged?: (path: string, action: CopilotFileAction) => void
 }
 
+/** F6: Enter sends, Shift+Enter breaks the line, and an IME composition never sends. */
+export function isComposerSendKey(event: {
+  key: string
+  shiftKey: boolean
+  nativeEvent: { isComposing: boolean }
+}): boolean {
+  return event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing
+}
+
 export function copilotBackendErrorMessage(error: unknown, fallback: string): string {
   return errorMessage(error) === BACKEND_UNAVAILABLE_MESSAGE
     ? 'Copilot backend unavailable'
@@ -194,11 +212,10 @@ export function CopilotPanel({
 }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
-  const [roleData, setRoleData] = useState<RoleEntry | null>(null)
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
   const [selectedRouteId, setSelectedRouteId] = useState('')
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
-  const [selectedRole, setSelectedRole] = useState(DEFAULT_COPILOT_ROLE)
+  const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [openingClaudeCode, setOpeningClaudeCode] = useState(false)
   const { templates, templatesLoading } = useTemplates()
@@ -270,10 +287,7 @@ export function CopilotPanel({
         if (cancelled) {
           return
         }
-        const role = nextRegistry.roles.copilot_chat ?? null
-        setRoleData(role)
         setRegistry(nextRegistry)
-        setSelectedRouteId(role?.fallback_chain?.[0]?.route_id ?? '')
       })
       .catch((error) => {
         toast.error(copilotBackendErrorMessage(error, 'Copilot route config unavailable'))
@@ -291,11 +305,6 @@ export function CopilotPanel({
           return
         }
         setRolesData(nextRoles)
-        const options = copilotRoleOptions(nextRoles)
-        // Keep the default when present; otherwise fall back to the first copilot role.
-        if (!options.some((option) => option.role === DEFAULT_COPILOT_ROLE) && options[0]) {
-          setSelectedRole(options[0].role)
-        }
       })
       .catch((error) => {
         toast.error(copilotBackendErrorMessage(error, 'Copilot roles unavailable'))
@@ -312,16 +321,22 @@ export function CopilotPanel({
     if (roleOptions.some((option) => option.role === selectedRole)) {
       return
     }
-    setSelectedRole(
-      roleOptions.find((option) => option.role === DEFAULT_COPILOT_ROLE)?.role ?? roleOptions[0].role,
-    )
+    setSelectedRole(roleOptions[0].role)
   }, [roleOptions, selectedRole])
 
+  // F3: the selected display role IS the single role/route truth for the
+  // composer — same derivation Settings renders, never registry.roles.
+  const selectedOption = roleOptions.find((option) => option.role === selectedRole) ?? roleOptions[0] ?? null
+  const selectedRoleKey = selectedOption?.role ?? ''
+  const defaultRouteId = selectedOption?.fallbackChain[0]?.route_id ?? ''
+  const pickerRole = useMemo(
+    () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
+    [selectedOption],
+  )
+
   useEffect(() => {
-    const role = registry?.roles[selectedRole] ?? registry?.roles[DEFAULT_COPILOT_ROLE] ?? null
-    setRoleData(role)
-    setSelectedRouteId(role?.fallback_chain?.[0]?.route_id ?? '')
-  }, [registry, selectedRole])
+    setSelectedRouteId(defaultRouteId)
+  }, [selectedRoleKey, defaultRouteId])
 
   function selectRoute(routeId: string) {
     if (routeId === selectedRouteId) {
@@ -340,18 +355,50 @@ export function CopilotPanel({
     }
   }
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  async function sendDraft() {
+    if (!draft.trim() || copilot.connectionStatus !== 'open') {
+      return
+    }
     const activeJudgeContext = nextDraftJudgeContext(draft, draftJudgeContext, { skillId, view, judgeRefs })
+    let roleKey = selectedOption?.role ?? null
+    if (selectedOption && rolesData) {
+      const resolution = resolveCopilotSendRole(rolesData, selectedOption, registry?.model_groups ?? [])
+      roleKey = resolution.roleKey
+      if (resolution.nextRoles) {
+        // First use of a floated built-in materializes it (atom-56 ①) through
+        // the same PUT path Settings uses, then the send carries the yaml key.
+        try {
+          const saved = await putRoles(resolution.nextRoles)
+          setRolesData(saved)
+          setSelectedRole(resolution.roleKey)
+        } catch (error) {
+          toast.error(copilotBackendErrorMessage(error, 'Copilot role could not be saved'))
+          return
+        }
+      }
+    }
     if (copilot.sendMessage(
       draft,
-      selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || null,
-      selectedRole || null,
+      selectedRouteId || defaultRouteId || null,
+      roleKey,
       activeJudgeContext,
     )) {
       setDraft('')
       setDraftJudgeContext(null)
     }
+  }
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void sendDraft()
+  }
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!isComposerSendKey(event)) {
+      return
+    }
+    event.preventDefault()
+    void sendDraft()
   }
 
   return (
@@ -407,16 +454,20 @@ export function CopilotPanel({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+      <MessageScrollerProvider autoScroll>
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport className="p-3">
+            <MessageScrollerContent className="gap-2">
         {copilot.messages.length > 0 ? (
           copilot.messages.map((message) => (
-            <ChatMessageItem
-              key={message.id}
-              message={message}
-              skillId={skillId}
-              workspaceRoot={workspaceRoot}
-              onFileChanged={onFileChanged}
-            />
+            <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={message.role === 'user'}>
+              <ChatMessageItem
+                message={message}
+                skillId={skillId}
+                workspaceRoot={workspaceRoot}
+                onFileChanged={onFileChanged}
+              />
+            </MessageScrollerItem>
           ))
         ) : (
           <div className="studio-canvas-input-surface rounded-md border border-dashed p-3 text-sm text-muted-foreground">
@@ -462,7 +513,11 @@ export function CopilotPanel({
             {copilot.lastError}
           </div>
         ) : null}
-      </div>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton />
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       {skillId && completedRunId && completedRunId !== dismissedRunId ? (
         <div className="px-3 pt-1 shrink-0">
@@ -485,35 +540,22 @@ export function CopilotPanel({
               setDraft(nextDraft)
               setDraftJudgeContext((current) => nextDraftJudgeContext(nextDraft, current, { skillId, view, judgeRefs }))
             }}
-            rows={1}
-            className="min-h-[20px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
+            onKeyDown={handleComposerKeyDown}
+            rows={3}
+            className="min-h-[60px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
             placeholder="Use '@' to mention nodes..."
           />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                aria-label="Attach file"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
-              >
-                <Paperclip className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                aria-label="Add context"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
-              >
-                <Plus className="size-3.5" />
-              </button>
               <ModelPicker
-                role={roleData}
+                role={pickerRole}
                 registry={registry}
-                selectedRouteId={selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || ''}
+                selectedRouteId={selectedRouteId || defaultRouteId}
                 onSelect={selectRoute}
               />
               <RolePicker
                 options={roleOptions}
-                selectedRole={selectedRole}
+                selectedRole={selectedRoleKey}
                 onSelect={setSelectedRole}
               />
             </div>

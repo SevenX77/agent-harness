@@ -13,7 +13,10 @@
       "action": "无显式动作(currentSkillId 变化时自动切换画布面板内容)。",
       "fe_design": "Workspace(工作区根组件)用 currentSkillId(从 navStack 末项经 resolveWorkspaceIdentity 解析出的当前 skill 身份)决定画布面板渲什么:settingsOpen 则渲 Settings;否则 currentSkillId 非空且有打开文件渲 SplitEditor、currentSkillId 为 null 渲 WelcomePage(Home 屏)、其余渲 GraphCanvas(图画布)。设计意图(D11):Home 与工作区不是两套页面,而是同一个壳的两种状态——只有画布面板内容在换,壳框架(Header)始终在;Toolbar 与 Copilot 面板在无 skill 时按状态隐藏(见 #18/#21)。注:WelcomeScreen.tsx 是一个 no-op 孤儿包装(把 onSelectSkill 传成空函数),真实挂载是 Workspace 里直接渲 WelcomePage——孤儿待删。",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -30,7 +33,10 @@
       "action": "无显式动作(skillId 变化时由副作用钩子自动重置工作态)。",
       "fe_design": "Workspace 里一个以 skillId 为依赖的 useEffect(React 副作用钩子):skillId 为 null(回 Home)时 navStack 置空、activePanel 置 null、copilotOpen 置 false;进入 skill 时 navStack 置 [skillId]、activePanel 置 assets、copilotOpen 置 true。另一个以 currentSkillId 为依赖的 effect 清 runId(当前运行)与选中的测试输入。打开文件 / 分屏 / 选中则在 nav 推/退(pushNavSkill / popNavTo)时清。设计意图(D11:IDE/workspace 模型锁定决策——一窗口专注一个 skill):切 skill 等于换一个干净工作台,上一个 skill 的面板/选中/分屏不许残留。",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -47,7 +53,10 @@
       "action": "无显式动作(进入 skill 后即为此布局)。",
       "fe_design": "Workspace 渲染:全宽 Header(顶栏,含 Back-to-Home、Copilot 开关、Settings 入口等)+ 下方 Toolbar(左侧竖排工具条,固定 12 单位宽,始终在)+ 一个水平 ResizablePanelGroup(可缩放面板组)。三栏:左面板(left-panel,仅当 activePanel 非空才挂载,装文件树/属性/IO/时间线/本地历史)、画布(canvas,始终在,装图/编辑器/Home/Settings)、Copilot(copilot,仅当 copilotOpen 才挂载)。设计意图(D11):一个持久的 IDE 壳框架,左 dock 可开合、Copilot 可开合,画布是中心。",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -64,7 +73,10 @@
       "action": "用户点左侧 Toolbar 上的某个面板图标。",
       "fe_design": "Toolbar 渲染五个 PanelKind(面板种类:assets/properties/input/timeline/local-history)按钮,每个 onClick 是 onPanelChange(点的是当前激活面板就传 null、否则传该面板)= toggle。onPanelChange 接 setActivePanel(设置当前左面板的状态);activePanel 既决定左面板渲什么内容,也决定左栏存不存在(为 null 时左栏不挂载、画布变宽)。运行类动作也会程序化把 activePanel 设为 timeline。设计意图(D11):左 dock 是单选 + 可收起,用一个 activePanel 状态统一驱动。",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -81,7 +93,10 @@
       "action": "用户点 Header 左上角的 Layers logo(Back to Home)。",
       "fe_design": "点 Layers logo → onHome → handleHome(回首页的处理函数):先 setSettingsOpen(false) 收起 Settings overlay,再 onCloseSkill() → App 把 currentSkillId 置 null → 触发 #16 的 skillId effect 走 Home 分支(navStack 空、activePanel null、copilotOpen false),左栏与 Copilot 栏卸载、画布渲 WelcomePage。设计意图(D11):Back-to-Home 是退出专注模式的唯一出口,把工作态整组卸载;与 Settings 的 X(只收浮层、不退工作区,见 #20)是两条不同语义,Home 多走一步卸载工作区。",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -98,7 +113,10 @@
       "action": "用户点 Header 或 Toolbar 的 Settings 入口;其中 Toolbar 的 Settings 齿轮是 toggle,打开后再点一次会关闭。",
       "fe_design": "Header 的 Settings 入口 → setSettingsOpen(true) 单向打开;Toolbar 的 Settings 齿轮 → setSettingsOpen(open => !open) 做 toggle。打开时仅在画布面板里把内容换成 SettingsPage(Settings 壳层根组件),左面板(left-panel)与 Copilot 栏(copilot)是同级的兄弟 ResizablePanel、settingsOpen 不动它们,故照常挂载;currentSkillId 不变,工作区不卸载。再次点 Toolbar 齿轮或打开文件都会 setSettingsOpen(false) 收起 Settings,只把画布换回原内容。设计意图(D11/Q3):Settings 是工作区内的一个浮层配置态,不是退出工作区;与 Back-to-Home(#19,卸载工作区)语义相反。(Settings 这层壳本身的设计见 N0 Settings 节点。)",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -115,7 +133,10 @@
       "action": "无显式动作(进入 skill 时 Copilot 面板自动挂载;也可点 Header 的 Sparkles 开关手动开合)。",
       "fe_design": "copilotOpen 状态初始为「有没有 skill」,#16 的 skillId effect 在进入 skill 时置 true、回 Home 置 false;copilotOpen 为真时右侧挂 ResizablePanel 装 CopilotPanel(Copilot 面板组件,props 含 skillId/workspaceRoot/view)。Home(skillId 为 null)时 copilotOpen 为 false,故 Home 无 Copilot 栏。新建空 skill 进入也 copilotOpen=true(effect 的进入分支不看 skill 内容)。Header 的 Sparkles 按钮可手动 toggle copilotOpen。设计意图:Copilot 是工作区专属、随进入即在;Home 是入口屏、无 Copilot。(Copilot 自身的对话/连接归 copilot-assist 能力。)",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -154,7 +175,10 @@
       "action": "无显式动作(应用启动时自动呈现;后端不可用时横幅显示 Retry)。",
       "fe_design": "RuntimeGate(应用根处理 sidecar 配置解析的包装)已退役为非门:RuntimeShell(其内层)永远先渲染壳 children,壳/FS 立即可用;只在底部中央渲一个非阻塞横幅——加载中显「Connecting to backend…」、失败显「Backend unavailable — some features are disabled.」+ Retry,就绪则无横幅。initializeRuntimeConfig(解析 sidecar 地址/令牌的函数,Tauri 下取 Studio Rust 后端 get_sidecar_config)在副作用里跑、失败标 degraded 但不挡渲染。设计意图(D10:后端三分 + 非全屏启动门决策——启动期 sidecar eager-spawn,壳/FS 立即渲染,调 sidecar 处用骨架,不做全屏 splash gate):应用一打开就能用,后端起没起只是局部可观测信号;sidecar 的 eager-spawn 本身归平台(Studio Rust 后端 / 04_platform)。",
       "fe_modules": [
-        { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
+        {
+          "name": "Workspace 外壳容器",
+          "ref": "femod-workspace-shell"
+        }
       ],
       "be_contract": [
         {
@@ -168,6 +192,65 @@
       "be_status": "n/a",
       "gap_brief": "符合设计(RuntimeGate 退役:RuntimeShell 永远先渲壳、仅底部非阻塞横幅显连接状态 + Retry,从不全屏门)。组件名 RuntimeGate 保留属历史命名,功能上已是连接状态横幅、非门——可视为待重命名的小尾巴。",
       "impl_ref": "fn-23"
+    },
+    {
+      "n": 24,
+      "cap": "copilot-composer-scroll",
+      "track": "copilot-assist",
+      "module": "Copilot 面板",
+      "func": "设计(F6,PM 2026-07-01):Copilot 面板消息区滚动遵循 shadcn radix message-scroller 交互契约——流式回复贴底自动跟随、用户上滚即释放跟随并露出「回到底部」按钮、新一轮用户消息锚定视口顶部附近;composer 输入框默认可视高度约 3 行,操作行固定在输入框下方(Claude Code 式布局)。",
+      "action": "用户在 Copilot 面板收发消息:流式输出时不动=贴底跟随;上滚翻旧消息=释放跟随+回底按钮;点回底按钮恢复跟随。输入:Enter 发送、Shift+Enter 换行(IME 组合中 Enter 不发送)。",
+      "fe_design": "消息区用 src/components/ui/message-scroller.tsx 的 shadcn 风格封装(MessageScrollerProvider autoScroll + Viewport + Content + Item(scrollAnchor=用户消息) + 回底 Button),面板不再用裸 overflow-y-auto 承担主滚动(FRONTEND_UI_SPEC §2.6)。composer:textarea 默认 min-height≈3 行、field-sizing-content 自增到 ~160px 后内部滚动;下方操作行左侧 route 下拉(ModelPicker)+ role 下拉(RolePicker)、右侧发送按钮;Attach file / Add context 占位死按钮按设计源 §4 决策删除(上下文统一走 @mention,图片走拖拽/粘贴,后者不在本原子范围)。设计源:docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F6。",
+      "fe_modules": [
+        {
+          "name": "消息滚动器(MessageScroller)",
+          "ref": "femod-message-scroller"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(本轮落地):消息区改用 ui/message-scroller.tsx(@shadcn/react primitive 封装,MessageScrollerProvider autoScroll + Item scrollAnchor=用户消息 + 回底 Button),裸 overflow-y-auto 已删;textarea rows=3 / min-h-[60px];isComposerSendKey 实现 Enter/Shift+Enter/isComposing 语义;Paperclip/Plus 占位按钮已删。真机 Playwright 验证:流式贴底 / 上滚释放 + 回底按钮 / 点击回底恢复全部通过。",
+      "impl_ref": "fn-24"
+    },
+    {
+      "n": 25,
+      "cap": "copilot-role-route-sync",
+      "track": "studio-settings",
+      "module": "Copilot 面板",
+      "func": "设计(F3,PM 2026-07-01「copilot role 和 settings 页 roles 不同步」= 缺陷):composer 的 role 下拉与 Settings Copilot tab 同一份派生真相(deriveCopilotDisplayRoles);route 下拉从选中显示角色的 fallback_chain 派生;浮出内置角色可选、首发消息时按 Settings 同一路径物化落库。",
+      "action": "用户点 composer 的 role 下拉选角色 / route 下拉选兜底 route;Settings 里增删改 copilot 角色后 composer 经事件自动对齐。",
+      "fe_design": "同步契约四条(设计源 F3):① composer 只列已绑定 model group(fallback_chain 非空)的 copilot 角色,空草稿卡(copilot_custom_N 未选组)不出现;② 无持久化 copilot 角色时,浮出内置默认(atom-56 语义)同样出现在 composer,首发消息=「动了」→ 先 buildCopilotRoleEntry + copilot_<slug> key 经 PUT /api/llm/roles 物化,再以持久化 key 发送;③ 默认选中=派生列表第一项,删除写死的 copilot_chat 前端默认常量(不向后兼容);④ roles_changed/registry_changed 事件刷新。route 下拉可用性用 registry provider_routes 投影;不得读 GET /registry 的 roles 物化投影当第二份 role 真相。",
+      "fe_modules": [
+        {
+          "name": "copilot 角色派生",
+          "ref": "femod-copilot-derivation"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/roles",
+          "purpose": "role 真相(含 role_kind='copilot' 角色);composer 与 Settings 同源派生的输入。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        },
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "model_groups(canonical_id/兼容性)+ provider_routes(route 可用性投影);不再读其 roles 物化投影。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        },
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "浮出内置角色首发消息时的物化落库(与 Settings Test 同一物化路径)。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(本轮收敛):copilotRoleOptions 改为 deriveCopilotDisplayRoles 配置完成子集(fallback_chain 非空,空草稿排除、浮出内置保留);标题查找扩到全量 model_groups(非 anthropic 候选组也按 display_name 显示,与 Settings 卡一致);route 下拉吃选中显示角色 fallbackChain + registry provider_routes 投影,registry.roles 第二真相读取已删;resolveCopilotSendRole 在首发消息时物化浮出角色(copilot_<slug> + buildCopilotRoleEntry,PUT /api/llm/roles);DEFAULT_COPILOT_ROLE=copilot_chat 常量已删。真机验证:composer 菜单 = Settings 卡(Claude Opus 4.8 / 4.7 / Sonnet 4.5)完全一致。",
+      "impl_ref": "fn-25"
     }
   ]
 }

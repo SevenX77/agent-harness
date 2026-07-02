@@ -1,13 +1,17 @@
-"""Unit tests for FileWatcherService dynamic-workspace watching.
+"""Unit tests for FileWatcherService dynamic-workspace watching and stop().
 
 Covers the deterministic mapping/root-set logic (which skill a changed path
-belongs to, and which roots get watched). The watchfiles watch loop itself is
-timing/OS dependent and is not exercised here.
+belongs to, and which roots get watched) plus the stop() lifecycle contract.
+The real watchfiles watch loop is timing/OS dependent and is not exercised here.
 """
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from app.services.event_bus import event_bus
@@ -113,6 +117,67 @@ def test_register_workspace_ignores_missing_dir(tmp_path: Path) -> None:
     svc = _service()
     svc.register_workspace(tmp_path / "does-not-exist", "ghost")
     assert svc._workspace_roots == {}
+
+
+def test_stop_clears_registered_workspace_roots(tmp_path: Path) -> None:
+    """stop() must reset the workspace-root registry.
+
+    `file_watcher` is a module singleton that outlives each app instance. Every
+    `get_skill_detail` registers that app's (in tests: that test's tmp) skill root,
+    so without cleanup the root set grows for the rest of the process lifetime and
+    every new watch generation re-scans stale directories.
+    """
+    root = tmp_path / "ws"
+    root.mkdir()
+    svc = _service()
+    svc.register_workspace(root, "ws")
+
+    svc.stop()
+
+    assert svc._workspace_roots == {}
+
+
+def test_stop_does_not_return_while_watcher_thread_is_alive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """stop() must outlast a transiently unresponsive watch backend.
+
+    The rust notify backend has bounded sections (recursive watcher setup/teardown)
+    that cannot observe the stop event. A join that silently gives up after 2s leaks
+    the daemon thread into interpreter/coverage shutdown, where it intermittently
+    SIGSEGVs the Linux CI runners (exit 139 after "N passed"). Simulate a 3s
+    unresponsive window and require stop() to wait it out.
+    """
+    static = tmp_path / "static"
+    static.mkdir()
+    monkeypatch.setattr("app.services.file_watcher._watch_roots", lambda: [static])
+
+    entered = threading.Event()
+
+    def fake_watch(*paths: str, stop_event: Any = None, **kwargs: Any) -> Any:
+        entered.set()
+        time.sleep(3.0)  # bounded native window that cannot see stop_event
+        while stop_event is not None and not stop_event.is_set():
+            time.sleep(0.01)
+        return
+        yield  # pragma: no cover - makes this function a generator
+
+    monkeypatch.setattr("app.services.file_watcher.watch", fake_watch)
+
+    svc = _service()
+    loop = asyncio.new_event_loop()
+    try:
+        svc.start(loop)
+        thread = svc._thread
+        assert thread is not None
+        assert entered.wait(timeout=5)
+
+        svc.stop()
+
+        assert not thread.is_alive()
+    finally:
+        svc.stop()
+        loop.close()
 
 
 def test_is_within(tmp_path: Path) -> None:

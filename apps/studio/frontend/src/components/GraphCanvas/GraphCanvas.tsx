@@ -2502,7 +2502,7 @@ export function GraphCanvas({
         proOptions={{ hideAttribution: true }}
       >
         <SubgraphBridgeInternalsUpdater nodes={nodes} />
-        <Background gap={18} size={1} />
+        <Background gap={18} size={1} color="var(--studio-canvas-dot)" />
         {/* F4: node-anchored HitL input. Reads the live run stream from the
             workspace context (same array the edges already consume) and anchors
             a floating answer box above whichever node paused for human input. */}

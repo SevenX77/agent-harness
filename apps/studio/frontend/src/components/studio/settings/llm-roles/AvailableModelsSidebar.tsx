@@ -341,8 +341,17 @@ const AvailableModelCard = memo(function AvailableModelCard({
         data-selected={selected ? "true" : undefined}
         onPointerDown={(event) => onPointerSelect(model.id, event)}
         onClick={(event) => onClickSelect(model.id, event)}
+        // NOTE: deliberately NO `transform-gpu` here. A persistent
+        // `translateZ(0)` layer on a lazily-mounted card whose content still
+        // settles after first paint (web-font swap, flex/grid reflow) keeps a
+        // STALE rasterized snapshot clipped by this element's own
+        // `overflow-hidden rounded-md` — the first provider pill's top border
+        // rendered sheared on initial load until any repaint (e.g. selecting a
+        // card) forced a re-raster. The `active:scale` press animation still
+        // composites on its own during the transition, so the GPU hint bought
+        // nothing but that first-paint corner-clip. Do not re-add it.
         className={cn(
-          "block w-full max-w-full cursor-grab select-none transform-gpu overflow-hidden rounded-md bg-transparent p-2 text-left transition-[background-color,box-shadow,transform] duration-75 ease-out hover:bg-muted/35 active:scale-[0.99] active:cursor-grabbing active:bg-muted/45 data-[selected=true]:bg-muted/40 data-[selected=true]:ring-2 data-[selected=true]:ring-primary/70 data-[selected=true]:ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
+          "block w-full max-w-full cursor-grab select-none overflow-hidden rounded-md bg-transparent p-2 text-left transition-[background-color,box-shadow,transform] duration-75 ease-out hover:bg-muted/35 active:scale-[0.99] active:cursor-grabbing active:bg-muted/45 data-[selected=true]:bg-muted/40 data-[selected=true]:ring-2 data-[selected=true]:ring-primary/70 data-[selected=true]:ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
         )}
       >
         <div className="grid min-w-0 gap-1">

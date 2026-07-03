@@ -97,7 +97,7 @@ export function CopilotFab({ position, onPositionChange, onOpen }: CopilotFabPro
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--studio-canvas-accent)]',
         )}
       >
-        <MoiraiMark className="size-5 text-[color:var(--studio-canvas-accent)]" title="打开 MoirAI" />
+        <MoiraiMark className="size-5 text-[color:var(--studio-canvas-accent-strong)]" title="打开 MoirAI" />
       </button>
     </div>
   )

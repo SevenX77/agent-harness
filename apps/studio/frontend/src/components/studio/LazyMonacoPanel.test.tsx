@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { writeSkillFile } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { sha256Hex } from "@/lib/hash"
+import type { LintError, LintResult } from "@/api/types"
 import { LazyMonacoPanel, saveMonacoDraft } from "./LazyMonacoPanel"
 
 vi.mock("@/api/client", () => ({
@@ -23,8 +24,26 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), {
     dismiss: vi.fn(),
     error: vi.fn(),
+    success: vi.fn(),
   }),
 }))
+
+const debouncedLintResult = vi.fn<() => LintResult | null>(() => null)
+
+vi.mock("@/hooks/useDebouncedLint", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/useDebouncedLint")>(
+    "@/hooks/useDebouncedLint",
+  )
+  return {
+    ...actual,
+    useDebouncedLint: () => ({
+      status: "idle" as const,
+      result: debouncedLintResult(),
+      message: null,
+      errors: [],
+    }),
+  }
+})
 
 describe("LazyMonacoPanel header controls", () => {
   beforeEach(() => {
@@ -59,6 +78,83 @@ describe("LazyMonacoPanel header controls", () => {
     expect(html).toContain('aria-label="Close editor"')
     expect(html).not.toContain(">x</button>")
     expect(html).not.toContain("inline-flex size-7")
+  })
+})
+
+describe("LazyMonacoPanel lint diagnostics strip", () => {
+  beforeEach(() => {
+    vi.stubGlobal("document", {
+      documentElement: {
+        classList: {
+          contains: () => true,
+        },
+      },
+    })
+    debouncedLintResult.mockReset()
+  })
+
+  function makeError(overrides: Partial<LintError> = {}): LintError {
+    return {
+      file: "GRAPH.md",
+      line: null,
+      column: null,
+      error_code: "F-v3-001",
+      severity: "error",
+      message: "Invalid YAML in frontmatter: found duplicate key \"aa_number\"",
+      phase_name: null,
+      ...overrides,
+    }
+  }
+
+  it("renders the line-less-diagnostic strip above the editor instead of dropping it silently", () => {
+    // LazyMonacoPanel.tsx already documents this contract in a comment next to
+    // applyLintMarkers: "Line-less diagnostics degrade to the strip above,
+    // never guess a line." That strip is `LintDiagnosticsPanel` from
+    // MonacoPanel.tsx, which exists (and is unit-tested in
+    // MonacoPanel.test.tsx) but, before this fix, was never actually mounted
+    // anywhere in the app — a GRAPH.md parse failure with no extractable line
+    // number (e.g. the raw ruamel YAML error) had nowhere to surface at all.
+    debouncedLintResult.mockReturnValue({
+      status: "failed",
+      errors: [makeError()],
+      phases_summary: null,
+    })
+
+    const html = renderToStaticMarkup(
+      <LazyMonacoPanel
+        title="GRAPH.md"
+        skillId="skill-1"
+        filePath="GRAPH.md"
+        value="---\n---\n"
+        onChange={vi.fn()}
+        onSaved={vi.fn()}
+        onInFlightChange={vi.fn()}
+        onConflict={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('aria-label="Lint diagnostics"')
+    expect(html).toContain("Invalid YAML in frontmatter")
+    expect(html).toContain("No line")
+  })
+
+  it("stays collapsed (renders nothing) when lint has not found any diagnostics", () => {
+    debouncedLintResult.mockReturnValue({ status: "passed", errors: [], phases_summary: null })
+
+    const html = renderToStaticMarkup(
+      <LazyMonacoPanel
+        title="GRAPH.md"
+        skillId="skill-1"
+        filePath="GRAPH.md"
+        value="---\n---\n"
+        onChange={vi.fn()}
+        onSaved={vi.fn()}
+        onInFlightChange={vi.fn()}
+        onConflict={vi.fn()}
+      />,
+    )
+
+    expect(html).not.toContain('aria-label="Lint diagnostics"')
   })
 })
 

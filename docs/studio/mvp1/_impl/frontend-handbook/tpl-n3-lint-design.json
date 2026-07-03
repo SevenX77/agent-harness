@@ -143,7 +143,7 @@
       "module": "三处就近投影",
       "func": "设计:在编辑器里,像 IDE 那样把出错的行做行内标记(红色波浪线/行标),悬停看错误原因——和写代码时编辑器报错的体验一致。",
       "action": "无显式动作(编辑出错内容后,编辑器对应行自动出现行内标记;悬停看原因)。",
-      "fe_design": "把有 line 的错误按 line + severity 传进编辑器(Monaco),用 monaco.editor.setModelMarkers 给对应行打 marker(severity 映射成 error/warning 级别),message 作悬停提示;有 column 才精确定列、否则整行标。LintError.line/column 可为 null(后端从异常 message 尽力解析)——无 line 的错误不落行内 marker,降级到文件级 banner / Compile drawer。设计意图:编辑器是改 markdown 的主战场,IDE 式行内标记把(有行号的)错误定位到行,用户改起来最直接。需要编辑器组件新增接收错误的 prop。",
+      "fe_design": "把有 line 的错误按 line + severity 传进编辑器(Monaco),用 monaco.editor.setModelMarkers 给对应行打 marker(severity 映射成 error/warning 级别),message 作悬停提示;有 column 才精确定列、否则整行标;marker scoped 到当前打开的文件(applyLintMarkers(filePath))。LintError.line/column 可为 null(后端从异常 message 尽力解析)——**无 line 的错误不落行内 marker,降级到手动 Compile 抽屉(CompileErrorDrawer),【不】在编辑器里弹 banner**。设计意图:编辑器是改 markdown 的主战场,IDE 式行内标记把(有行号的)错误定位到行,用户改起来最直接;实时 lint『marks context only, not a global panel mid-edit』(F1),所以编辑器里刻意不放大 banner/诊断条(早期迭代放过、已在 PR #234 刻意删除,PR #352 一度接回又撤回并加锁测试)。需要编辑器组件新增接收错误的 prop。",
       "fe_modules": [
         {
           "name": "编译错误就近投影映射（目标）",

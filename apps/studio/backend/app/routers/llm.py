@@ -109,7 +109,11 @@ from app.services.llm_credentials_evidence import (
     route_is_probe_verified,
 )
 from app.services.llm_evidence_ids import new_evidence_id
-from app.services.llm_health_store import RuntimeCircuit, SqliteLlmHealthStore
+from app.services.llm_health_store import (
+    ActiveCircuitsIndex,
+    RuntimeCircuit,
+    SqliteLlmHealthStore,
+)
 from app.services.llm_model_groups import (
     normalize_model_group_key,
     project_model_group_identity,
@@ -2342,8 +2346,13 @@ def _registry_response(
     *,
     setup_required: bool = False,
 ) -> RegistryResponse:
+    # R7-D: snapshot the circuit-breaker health store ONCE for the whole build —
+    # every route's cooldown state is then an O(1) in-memory lookup instead of a
+    # fresh SQLite connection per route (the table itself is almost always empty;
+    # the old code paid a full connect+schema-ensure+query per route regardless).
+    circuits_index = ActiveCircuitsIndex.build(_health_store().get_all_active_circuits())
     credentials = _normalize_credentials_for_registry_response(credentials)
-    credentials = _project_route_ui_states(credentials)
+    credentials = _project_route_ui_states(credentials, circuits_index=circuits_index)
     credentials = _project_endpoint_provider_identities(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
@@ -2380,7 +2389,7 @@ def _registry_response(
             }
             for canonical_id, route_ids in sorted(routes_by_canonical.items())
         ],
-        model_groups=_model_groups_response(credentials),
+        model_groups=_model_groups_response(credentials, circuits_index=circuits_index),
         lint_results=lint_results,
         route_runtime_settings={
             route_id: build_runtime_setting_descriptors(route)
@@ -2424,6 +2433,8 @@ def _probe_catalog_summary() -> ProbeCatalogSummary:
 
 def _project_route_ui_states(
     credentials: LLMCredentialsFile,
+    *,
+    circuits_index: ActiveCircuitsIndex,
 ) -> LLMCredentialsFile:
     """Stamp each route's 6-state ``ui_state`` onto the registry DTO (apikeys#30).
 
@@ -2432,11 +2443,13 @@ def _project_route_ui_states(
     of recomputing it. We reuse the canonical gateway projector via the in-process
     adapter (``project_route_state``) — the identical call ``_provider_model_option``
     makes — and never invent a new state vocabulary here.
+
+    ``circuits_index`` is a snapshot built ONCE per registry request (R7-D) — a
+    route's cooldown state is an O(1) lookup against it, not a fresh query.
     """
     if not credentials.provider_routes:
         return credentials
     adapter = build_gateway_adapter()
-    health_store = _health_store()
     now = datetime.now(UTC)
     projected_routes: dict[str, ProviderRoute] = {}
     changed = False
@@ -2445,11 +2458,10 @@ def _project_route_ui_states(
         if endpoint is None:
             projected_routes[route_id] = route
             continue
-        circuits = health_store.get_active_circuits(
+        circuits = circuits_index.for_route(
             route_id=route.route_id,
             endpoint_id=endpoint.endpoint_id,
             rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
-            now=now,
         )
         projection = adapter.project_route_state(
             {
@@ -2574,7 +2586,11 @@ def _normalize_gemini_catalog_entry_for_registry_response(entry: object) -> obje
     }
 
 
-def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
+def _model_groups_response(
+    credentials: LLMCredentialsFile,
+    *,
+    circuits_index: ActiveCircuitsIndex,
+) -> list[dict[str, Any]]:
     routes_by_identity: dict[str, list[ProviderRoute]] = {}
     for route in credentials.provider_routes.values():
         if not _include_route_in_model_groups(route, credentials):
@@ -2593,6 +2609,7 @@ def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, An
             routes,
             credentials,
             adapter=adapter,
+            circuits_index=circuits_index,
         )
         for routes in routes_by_identity.values()
     ]
@@ -2705,6 +2722,7 @@ def _model_group_response(
     credentials: LLMCredentialsFile,
     *,
     adapter: GatewayAdapter | None = None,
+    circuits_index: ActiveCircuitsIndex,
 ) -> dict[str, Any]:
     provider_models = [
         option
@@ -2714,6 +2732,7 @@ def _model_group_response(
                 route,
                 credentials,
                 adapter=adapter,
+                circuits_index=circuits_index,
             )
         )
         is not None
@@ -2808,17 +2827,17 @@ def _provider_model_option(
     credentials: LLMCredentialsFile,
     *,
     adapter: GatewayAdapter | None = None,
+    circuits_index: ActiveCircuitsIndex,
 ) -> dict[str, Any] | None:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         return None
     if adapter is None:
         adapter = build_gateway_adapter()
-    circuits = _health_store().get_active_circuits(
+    circuits = circuits_index.for_route(
         route_id=route.route_id,
         endpoint_id=endpoint.endpoint_id,
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
-        now=datetime.now(UTC),
     )
     projection = adapter.project_route_state(
         {

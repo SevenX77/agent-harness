@@ -6317,4 +6317,71 @@ def test_ensure_catalog_repository_endpoint_is_retired(client: TestClient, tmp_p
     body = response.json()
     assert body["status"] == "disabled"
     assert body.get("repository_created") is None
+
+
+def test_registry_build_opens_the_health_store_once_regardless_of_route_count(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """R7-D perf fix: building the registry must query the circuit-breaker health
+    store ONCE for the whole request, not once per route/model-option. PM
+    2026-07-03 root cause: a real deployment carried 1208 routes and _health_store()
+    was reconstructed (fresh sqlite3.connect + CREATE TABLE) on every route/model
+    option, ~35s per request against an EMPTY circuits table. Assert the store is
+    constructed at most a small constant number of times, not scaling with routes —
+    a route count of 25 under ONE endpoint is enough to catch an O(routes) regression
+    (any linear coupling would show as 25x here vs. a constant baseline).
+    """
+    from app.services.llm_health_store import SqliteLlmHealthStore
+
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    routes = {
+        f"openai-direct:gpt-5-{i}": ProviderRoute(
+            route_id=f"openai-direct:gpt-5-{i}",
+            endpoint_id="openai-direct",
+            route_slug=f"gpt-5-{i}",
+            provider_model_id=f"gpt-5-{i}",
+            canonical_id=f"gpt-5-{i}",
+            display_name=f"GPT-5 #{i}",
+            status="verified",
+        )
+        for i in range(25)
+    }
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": ProviderEndpoint(
+                    endpoint_id="openai-direct",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+            provider_routes=routes,
+        )
+    )
+
+    construct_calls: list[Path] = []
+    real_init = SqliteLlmHealthStore.__init__
+
+    def counting_init(self: SqliteLlmHealthStore, db_path: Path) -> None:
+        construct_calls.append(db_path)
+        real_init(self, db_path)
+
+    monkeypatch.setattr(SqliteLlmHealthStore, "__init__", counting_init)
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    assert len(response.json()["provider_routes"]) == 25
+    # The exact constant may shift with future refactors, but it must NOT scale
+    # with route count (25 routes) — a regression back to per-route construction
+    # would produce dozens of calls here, not a handful.
+    assert len(construct_calls) <= 3, (
+        f"health store constructed {len(construct_calls)} times for 25 routes — "
+        "must be a small constant, not proportional to route count"
+    )
     assert "ghp-" not in response.text

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, CircleAlert, PanelRightClose, SquareTerminal } from 'lucide-react'
+import { ArrowUp, CircleAlert, PanelRightClose, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -699,18 +699,33 @@ export function CopilotPanel({
           {/* F6: inside the bordered box only the send action lives (stop joins it
               with F7-③ interrupt); every settings control sits BELOW the box. */}
           <div className="flex items-center justify-end">
-            <button
-              type="submit"
-              disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
-              aria-label="Send message"
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-                draft.trim() && copilot.connectionStatus === 'open'
-                  ? 'bg-[color:var(--studio-canvas-accent)] text-primary-foreground hover:bg-primary/80'
-                  : 'bg-secondary text-secondary-foreground'
-              }`}
-            >
-              <ArrowUp className={`size-3.5 ${!draft.trim() ? 'text-muted-foreground' : ''}`} />
-            </button>
+            {copilot.isStreaming ? (
+              /* R7-I: while a turn streams, the send action becomes a stop button
+                 (SDK-native interrupt). The turn's own done event flips it back. */
+              <button
+                type="button"
+                onClick={() => {
+                  void copilot.interrupt()
+                }}
+                aria-label="Stop generating"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
+              >
+                <Square className="size-3 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
+                aria-label="Send message"
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                  draft.trim() && copilot.connectionStatus === 'open'
+                    ? 'bg-[color:var(--studio-canvas-accent)] text-primary-foreground hover:bg-primary/80'
+                    : 'bg-secondary text-secondary-foreground'
+                }`}
+              >
+                <ArrowUp className={`size-3.5 ${!draft.trim() ? 'text-muted-foreground' : ''}`} />
+              </button>
+            )}
           </div>
         </div>
         {/* F7 context actions (attach / @mention) join the left side of this row

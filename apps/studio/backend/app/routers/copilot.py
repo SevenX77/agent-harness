@@ -10,6 +10,7 @@ from app.core.exceptions import raise_not_implemented
 from app.models.copilot import (
     ContextUpdateRequest,
     ContextUpdateResponse,
+    CopilotInterruptResponse,
     CopilotToolApprovalRequest,
     CopilotToolApprovalResponse,
     CopilotWsRequestPayload,
@@ -18,6 +19,7 @@ from app.models.errors import ErrorResponse
 from app.models.golden import CopilotJudgeRequest, CopilotJudgeResponse
 from app.services.copilot import (
     get_view_context,
+    interrupt_active_query,
     reset_session,
     resolve_tool_approval,
     set_view_context,
@@ -100,6 +102,20 @@ async def post_copilot_tool_approval(
         resolved=result.resolved,
         message=result.message,
     )
+
+
+@router.post(
+    "/api/skills/{skill_id}/copilot/interrupt",
+    response_model=CopilotInterruptResponse,
+)
+async def post_copilot_interrupt(skill_id: str) -> CopilotInterruptResponse:
+    """Stop the copilot's active streaming turn (R7-I stop button).
+
+    Calls the SDK-native interrupt on the skill's currently-streaming client.
+    ``interrupted`` is False when there was nothing to stop (idempotent)."""
+
+    interrupted = await interrupt_active_query(skill_id)
+    return CopilotInterruptResponse(interrupted=interrupted)
 
 
 @router.websocket("/api/skills/{skill_id}/copilot/ws")

@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, CircleAlert, SquareTerminal, Waypoints } from 'lucide-react'
+import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
@@ -31,7 +32,7 @@ import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bu
 import { RolePicker, copilotRoleOptions } from './role-picker'
 import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
-import { buildAssistantTranscript } from './transcript'
+import { formatProcessedDuration, partitionAssistantView, type TranscriptSegment } from './transcript'
 
 interface ChatMessageItemProps {
   message: CopilotMessage
@@ -55,7 +56,7 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
       </Message>
     )
   }
-  const segments = buildAssistantTranscript(message)
+  const view = partitionAssistantView(message)
   const streaming = message.status === 'running'
   // F6-7/F8: the wait shimmer covers everything up to the first VISIBLE
   // activity — the first thinking or answer token. context_resolved / tool
@@ -63,97 +64,150 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
   // takes over as the waiting indicator.
   const waiting =
     streaming && !message.content && !message.events.some((event) => event.type === 'thinking_delta')
+  const ctx: ProcessRenderContext = { streaming, skillId, workspaceRoot, onFileChanged }
+  const processNodes = view.process.map((segment) => renderProcessSegment(segment, ctx))
   return (
-    <Message align="start" data-copilot-message-role="assistant">
+    // R7-A: chat content is selectable (PM「聊天内容无法选择」) — opt into the
+    // global text-selection allowlist (FRONTEND_UI_SPEC §2.11).
+    <Message align="start" data-copilot-message-role="assistant" {...allowTextSelectionProps()}>
       <MessageContent>
         {waiting ? <ThinkingRow /> : null}
         <div className="space-y-1.5">
-          {segments.map((segment) => {
-            if (segment.kind === 'text') {
-              return (
-                <div key={segment.id} className="copilot-prose text-sm leading-relaxed text-foreground">
-                  <ReactMarkdown>{segment.content}</ReactMarkdown>
-                </div>
-              )
-            }
-            if (segment.kind === 'thinking') {
-              // F8: reasoning streams live — open while the turn is running so
-              // the trace is visible as it arrives, collapsed once settled.
-              return (
-                <details
-                  key={segment.id}
-                  open={streaming}
-                  className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground"
-                >
-                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Thought</summary>
-                  <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
-                    {segment.content}
-                  </pre>
-                </details>
-              )
-            }
-            const event = segment.event
-            if (event.type === 'tool_use_start') {
-              return <ToolCallBubble key={event.id} event={event} />
-            }
-            if (event.type === 'tool_use_result') {
-              return (
-                <div key={event.id}>
-                  <ToolCallBubble event={event} />
-                  <DiffBubble event={event} />
-                </div>
-              )
-            }
-            if (event.type === 'error') {
-              return (
-                <div key={event.id} className="border-l border-destructive/50 py-1 pl-3 text-xs text-destructive">
-                  <div className="flex items-center gap-2 font-medium">
-                    <CircleAlert className="size-3.5" />
-                    Copilot error
-                  </div>
-                  <p className="mt-1 whitespace-pre-wrap leading-snug">{event.message}</p>
-                </div>
-              )
-            }
-            if (event.type === 'patch_proposed') {
-              return (
-                <PatchProposedBubble
-                  key={event.id}
-                  event={event}
-                  skillId={skillId}
-                  workspaceRoot={workspaceRoot}
-                  onFileChanged={onFileChanged}
-                />
-              )
-            }
-            if (event.type === 'tool_approval_required') {
-              return <ToolApprovalCard key={event.id} event={event} skillId={skillId} />
-            }
-            if (event.type === 'context_resolved') {
-              return (
-                <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">{event.summary}</summary>
-                  <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
-                    {event.detail}
-                  </pre>
-                </details>
-              )
-            }
-            if (event.type === 'unknown') {
-              return (
-                <details key={event.id} className="border-l border-border/70 py-1 pl-3 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Unknown Copilot event</summary>
-                  <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
-                    {JSON.stringify(event.payload, null, 2)}
-                  </pre>
-                </details>
-              )
-            }
-            return null
-          })}
+          {view.process.length > 0 ? (
+            streaming ? (
+              // Live: the process streams inline so the user watches it happen.
+              processNodes
+            ) : (
+              // Settled: the whole process folds into ONE "Processed 44s" row —
+              // PM「最后只保留最终输出,把上面所有过程收束到一个折叠的过程行,加处理时间」.
+              <details className="text-xs text-muted-foreground">
+                <summary className="flex cursor-pointer select-none items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground">
+                  <span className="transition-transform group-open:rotate-90">›</span>
+                  Processed{view.durationMs != null ? ` ${formatProcessedDuration(view.durationMs)}` : ''}
+                </summary>
+                <div className="mt-1 space-y-1.5 pl-2">{processNodes}</div>
+              </details>
+            )
+          ) : null}
+          {view.answer ? (
+            <div className="copilot-prose text-[13px] leading-relaxed text-foreground">
+              <ReactMarkdown>{view.answer.content}</ReactMarkdown>
+            </div>
+          ) : null}
         </div>
       </MessageContent>
     </Message>
+  )
+}
+
+/** Shared context for rendering one process segment (live or inside the fold). */
+interface ProcessRenderContext {
+  streaming: boolean
+  skillId: string | null
+  workspaceRoot?: string | null
+  onFileChanged?: (path: string, action: CopilotFileAction) => void
+}
+
+/**
+ * R7-A: render one PROCESS segment (thinking / tool / context / intermediate
+ * narration). No left rule anywhere (PM「去掉对话小字前面的那根竖线」); tool
+ * spinners stop once the turn settles (see ToolCallBubble `streaming`).
+ */
+function renderProcessSegment(segment: TranscriptSegment, ctx: ProcessRenderContext): ReactNode {
+  if (segment.kind === 'text') {
+    // Intermediate narration before the final answer — dim, one size down.
+    return (
+      <div key={segment.id} className="copilot-prose text-xs leading-relaxed text-muted-foreground">
+        <ReactMarkdown>{segment.content}</ReactMarkdown>
+      </div>
+    )
+  }
+  if (segment.kind === 'thinking') {
+    return <ThinkingBlock key={segment.id} content={segment.content} streaming={ctx.streaming} />
+  }
+  const event = segment.event
+  if (event.type === 'tool_use_start') {
+    return <ToolCallBubble key={event.id} event={event} streaming={ctx.streaming} />
+  }
+  if (event.type === 'tool_use_result') {
+    return (
+      <div key={event.id}>
+        <ToolCallBubble event={event} streaming={ctx.streaming} />
+        <DiffBubble event={event} />
+      </div>
+    )
+  }
+  if (event.type === 'error') {
+    return (
+      <div key={event.id} className="py-0.5 text-xs text-destructive">
+        <div className="flex items-center gap-2 font-medium">
+          <CircleAlert className="size-3.5" />
+          Copilot error
+        </div>
+        <p className="mt-1 whitespace-pre-wrap leading-snug">{event.message}</p>
+      </div>
+    )
+  }
+  if (event.type === 'patch_proposed') {
+    return (
+      <PatchProposedBubble
+        key={event.id}
+        event={event}
+        skillId={ctx.skillId}
+        workspaceRoot={ctx.workspaceRoot}
+        onFileChanged={ctx.onFileChanged}
+      />
+    )
+  }
+  if (event.type === 'tool_approval_required') {
+    return <ToolApprovalCard key={event.id} event={event} skillId={ctx.skillId} />
+  }
+  if (event.type === 'context_resolved') {
+    return (
+      <details key={event.id} className="py-0.5 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">{event.summary}</summary>
+        <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+          {event.detail}
+        </pre>
+      </details>
+    )
+  }
+  if (event.type === 'unknown') {
+    return (
+      <details key={event.id} className="py-0.5 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Unknown Copilot event</summary>
+        <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
+          {JSON.stringify(event.payload, null, 2)}
+        </pre>
+      </details>
+    )
+  }
+  return null
+}
+
+/**
+ * R7-A: reasoning trace. While the turn streams the block stays open and its
+ * scroll box auto-follows the newest reasoning (PM「thinking 的内容也不会自动
+ * 往下滚动」). Once settled it lives inside the folded process row.
+ */
+function ThinkingBlock({ content, streaming }: { content: string; streaming: boolean }) {
+  const preRef = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    if (streaming && preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight
+    }
+  }, [content, streaming])
+  return (
+    <details open={streaming} className="py-0.5 text-xs text-muted-foreground">
+      <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Thought</summary>
+      <pre
+        ref={preRef}
+        {...allowTextSelectionProps()}
+        className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug"
+      >
+        {content}
+      </pre>
+    </details>
   )
 }
 

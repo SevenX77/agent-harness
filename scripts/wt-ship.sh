@@ -35,4 +35,4 @@ gh pr merge "$branch" --auto --squash
 echo
 echo "✓ PR open and auto-merge armed (squash)."
 echo "  It merges into main automatically when CI is green, then the remote branch is deleted."
-echo "  after it merges: scripts/wt-clean.sh   (removes this local worktree)"
+echo "  after it merges: scripts/wt-clean.sh $branch   (removes THIS worktree — your own only)"

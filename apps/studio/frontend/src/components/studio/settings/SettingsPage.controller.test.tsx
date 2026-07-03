@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, getCredentials } from "../../../api/llm"
+import { deleteEndpoint, getCredentials, testEndpoint } from "../../../api/llm"
 import { useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -17,6 +17,8 @@ vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
     success: vi.fn(),
+    loading: vi.fn(),
+    info: vi.fn(),
   },
 }))
 
@@ -69,6 +71,7 @@ vi.mock("../../../api/llm", async (importOriginal) => {
     deleteEndpoint: vi.fn(),
     deleteModelBundle: vi.fn(),
     deleteRole: vi.fn(),
+    testEndpoint: vi.fn(() => Promise.resolve({})),
     getCredentials: vi.fn(() => Promise.resolve({ providers: [] })),
     getModelGroups: vi.fn(() => Promise.resolve([])),
     getProviderModels: vi.fn(),
@@ -189,5 +192,46 @@ describe("useSettingsPageController lifecycle", () => {
     })
 
     expect(deleteEndpoint).toHaveBeenCalledWith("openrouter")
+  })
+
+  it("probes a single endpoint when its tag is activated (item 2)", async () => {
+    // Clicking one endpoint tag re-probes only THAT (URL, protocol) cell via the
+    // single-endpoint test path, not the whole provider.
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      capturedController?.onProbeEndpoint("qiniu-openai")
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(testEndpoint).toHaveBeenCalledWith("qiniu-openai")
+  })
+
+  it("refuses to probe an endpoint when the backend is disconnected (item 2 + readiness gate)", async () => {
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = true
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    act(() => {
+      capturedController?.onProbeEndpoint("qiniu-openai")
+    })
+
+    expect(testEndpoint).not.toHaveBeenCalled()
+    expect(vi.mocked(toast.error)).toHaveBeenCalled()
   })
 })

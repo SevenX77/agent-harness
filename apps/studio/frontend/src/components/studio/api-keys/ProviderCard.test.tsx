@@ -9,11 +9,13 @@ import {
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
+  endpointTagIsTestable,
   endpointTooltipLines,
   representativeProviderUiState,
   routeTooltipLineStatus,
   sortOfficialRouteInfos,
   sortModelInfos,
+  sortThirdPartyModelInfos,
   verifiedSiblingProtocolsOnSameHost,
   type EndpointSummary,
 } from "./ProviderCard"
@@ -1543,6 +1545,38 @@ describe("ProviderCard provider capabilities", () => {
     ])
   })
 
+  it("sorts third-party models green(verified) > blue(historical) > neutral > failed > off to the top (item 4)", () => {
+    // The third-party Available Models list must lift usable models to the top,
+    // mirroring the tag colours: green (ready) first, then blue (historical),
+    // then neutral (untested), with failed/off sinking. Previously the list was
+    // sorted purely alphabetically, burying verified models below dead ones.
+    const sorted = sortThirdPartyModelInfos([
+      { id: "m-off", ui_state: "off" },
+      { id: "m-failed", ui_state: "failed" },
+      { id: "m-untested", ui_state: "untested" },
+      { id: "m-historical", ui_state: "historical_ready" },
+      { id: "m-ready", ui_state: "ready" },
+    ]).map((model) => model.id)
+
+    expect(sorted).toEqual([
+      "m-ready", // green
+      "m-historical", // blue
+      "m-untested", // neutral
+      "m-failed", // red
+      "m-off", // muted / off
+    ])
+  })
+
+  it("breaks third-party sort ties alphabetically within the same status (item 4)", () => {
+    const sorted = sortThirdPartyModelInfos([
+      { id: "zeta", ui_state: "ready" },
+      { id: "alpha", ui_state: "ready" },
+      { id: "mid", ui_state: "ready" },
+    ]).map((model) => model.id)
+
+    expect(sorted).toEqual(["alpha", "mid", "zeta"])
+  })
+
   it("does not render chip area when persisted has no sdks/models", () => {
     const html = renderCardHtml({
       persisted: makePersisted({ available_sdks: [], available_models: [] }),
@@ -1646,6 +1680,36 @@ describe("ProviderCard protocol controls", () => {
     expect(html).not.toContain('data-slot="select-trigger"')
     expect(html).not.toContain(`provider-protocol-${draft.id}`)
     expect(html).not.toContain("Anthropic compatible")
+  })
+})
+
+describe("endpointTagIsTestable — single-endpoint probe affordance (item 2)", () => {
+  // Clicking an endpoint tag re-probes THAT one (URL, protocol) cell. A tag is a
+  // click target only when there is something to probe and no reason it cannot:
+  //   - not_configured → no api key / base url yet, nothing to test
+  //   - testing        → a probe is already in flight
+  //   - protocol_unsupported → a dormant architectural fact (§4.2: gray = not
+  //     user-fixable); its only affordance is the explicit half-life-bypassing
+  //     Re-probe button (§1.2 matrix point 4), not a plain re-test.
+  it("treats configured, idle endpoints (verified / untested / failed) as testable", () => {
+    for (const status of [
+      "ok",
+      "untested",
+      "invalid_key",
+      "rate_limited",
+      "quota_exceeded",
+      "network_error",
+      "timeout",
+      "error",
+    ] as const) {
+      expect(endpointTagIsTestable(status)).toBe(true)
+    }
+  })
+
+  it("does not treat testing / not_configured / protocol_unsupported cells as testable", () => {
+    expect(endpointTagIsTestable("testing")).toBe(false)
+    expect(endpointTagIsTestable("not_configured")).toBe(false)
+    expect(endpointTagIsTestable("protocol_unsupported")).toBe(false)
   })
 })
 

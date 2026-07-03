@@ -245,6 +245,7 @@
       "availableModelsLabel": "可用模型：",
       "availableEndpointsLabel": "可用端点：",
       "reprobeProtocol": "立即复测 {{id}} 的协议",
+      "endpointClickToTest": "点击测试此端点",
       "noModelsWarning": "未返回任何模型",
       "unnamedProvider": "未命名供应商",
       "officialProvider": "官方供应商",

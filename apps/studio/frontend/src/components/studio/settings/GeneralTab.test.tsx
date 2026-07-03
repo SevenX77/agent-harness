@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { GeneralTab, TruthSourcesPanel } from "./GeneralTab"
+import { GeneralTab, TruthSourcesPanel, formatChangeValue } from "./GeneralTab"
 import type { TruthSourceSection } from "@/api/client"
 import type { SettingsPageContentProps } from "./types"
 
@@ -190,5 +190,51 @@ describe("GeneralTab render contract", () => {
     expect(html).toContain("endpoint_test")
     expect(html).toContain('data-state="closed"')
     expect(html).not.toContain("promoted_catalog_records")
+  })
+})
+
+describe("formatChangeValue — runtime-log detail rendering", () => {
+  // PM 2026-07-03 (point 3): endpoint_test entries DO record probe_attempts
+  // (model / protocol / status), but they used to render as a raw
+  // JSON.stringify blob, so the log read as "no detail". Nested objects/arrays
+  // must render as readable key:value lines instead.
+  it("renders an array of probe-attempt objects as readable key:value lines, not a JSON blob", () => {
+    const out = formatChangeValue([
+      { model: "anthropic/claude-haiku-4.5", protocol: "anthropic_compatible", status: "ok" },
+    ])
+    expect(out).not.toContain('{"')
+    expect(out).not.toContain('"model"')
+    expect(out).toContain("model: anthropic/claude-haiku-4.5")
+    expect(out).toContain("protocol: anthropic_compatible")
+    expect(out).toContain("status: ok")
+  })
+
+  it("renders each object in a multi-attempt array on its own line", () => {
+    const out = formatChangeValue([
+      { status: "invalid_model", latency_ms: 527, message: "HTTP 404" },
+      { status: "ok", latency_ms: 210 },
+    ])
+    const lines = out.split("\n")
+    expect(lines.length).toBe(2)
+    expect(lines[0]).toContain("status: invalid_model")
+    expect(lines[0]).toContain("latency_ms: 527")
+    expect(lines[1]).toContain("status: ok")
+  })
+
+  it("still renders a from/to diff object with an arrow", () => {
+    expect(formatChangeValue({ from: "untested", to: "verified" })).toBe("untested -> verified")
+  })
+
+  it("collapses empty arrays and null/undefined to a dash", () => {
+    expect(formatChangeValue([])).toBe("-")
+    expect(formatChangeValue(null)).toBe("-")
+    expect(formatChangeValue(undefined)).toBe("-")
+    expect(formatChangeValue({})).toBe("-")
+  })
+
+  it("passes primitives through as strings", () => {
+    expect(formatChangeValue("verified")).toBe("verified")
+    expect(formatChangeValue(66)).toBe("66")
+    expect(formatChangeValue(true)).toBe("true")
   })
 })

@@ -597,6 +597,13 @@ export function CopilotPanel({
         </div>
       ) : null}
 
+      {/* PM 2026-07-03: the answer must follow to the bottom in real time while it
+          streams. `autoScroll` (defaultScrollPosition="end") sticks the viewport
+          to the bottom as the assistant content grows. We deliberately do NOT mark
+          the user message as a scrollAnchor: an anchor re-pins the viewport to that
+          message (top of the turn), which leaves the streaming answer below the fold
+          and DISABLES the stick-to-bottom follow — the exact "不会实时滚动到最底下"
+          bug. No anchor → pure stick-to-bottom during streaming. */}
       <MessageScrollerProvider autoScroll>
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport className="p-4">
@@ -604,7 +611,7 @@ export function CopilotPanel({
         {copilot.messages.length > 0 ? (
           <>
             {copilot.messages.map((message) => (
-              <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={message.role === 'user'}>
+              <MessageScrollerItem key={message.id} messageId={message.id}>
                 <ChatMessageItem
                   message={message}
                   skillId={skillId}

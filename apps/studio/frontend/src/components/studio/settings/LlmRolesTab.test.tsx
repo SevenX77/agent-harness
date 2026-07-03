@@ -2403,7 +2403,10 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain('data-slot="dialog-content"')
     expect(fieldsHtml).toContain('data-role-settings-fields="true"')
     expect(fieldsHtml).toContain('data-role-settings-toggles="true"')
-    expect(fieldsHtml).toContain("rounded-md border border-border bg-muted/10")
+    // Model Fallback and Thinking each get their own bordered box and fill the
+    // row (2-col grid) the same way the Max output tokens / Temperature row below
+    // does, instead of being nested inside one merged outer box.
+    expect(fieldsHtml).toContain('<div data-role-settings-toggles="true" class="grid gap-3 lg:grid-cols-2">')
     expect(fieldsHtml).toContain('data-role-thinking-setting="true"')
     expect(fieldsHtml).toContain('data-role-output-settings="true"')
     expect(fieldsHtml).toContain('data-role-output-token-input="true"')
@@ -2429,7 +2432,11 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).toContain("Max output tokens")
     expect(fieldsHtml).toContain('value="128,000"')
     expect(fieldsHtml).toContain("Temperature")
-    expect(fieldsHtml).toContain('value="0.7"')
+    // Temperature is a Slider (data-slot="slider"), not a text Input; its current
+    // value is surfaced via the readout span next to it, not a `value=` attribute.
+    expect(fieldsHtml).toContain('data-slot="slider"')
+    expect(fieldsHtml).toContain('data-role-temperature-input="true"')
+    expect(fieldsHtml).toContain(">0.7<")
     expect(fieldsHtml).toContain("Route max output token range: min 4,096 / max 16,384. 1 route cap unavailable.")
   })
 

@@ -9,7 +9,7 @@ import { useStudioEventStream } from "@/hooks/useStudioEventStream"
 import { deleteEndpoint, deleteModelBundle, deleteRole, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
+import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerDraftIdentityKey, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController, SettingsPageProps, SettingsPageViewProps, SettingsTab } from "./types"
 
@@ -123,7 +123,7 @@ function draftEditableSignature(draft: ProviderDraft): string {
   })
 }
 
-function reconcileDraftsWithCredentials(
+export function reconcileDraftsWithCredentials(
   credentials: CredentialsState,
   currentDrafts: ProviderDraft[],
   dirtyProviderIds: Set<string>,
@@ -149,8 +149,17 @@ function reconcileDraftsWithCredentials(
     }
     return currentDraft
   })
+  // A just-saved provider is rebuilt from credentials under a DIFFERENT id than
+  // its locally-minted draft (`custom-<uuid>` → `custom-<uuid>-<protocol>`), so
+  // an id-only "not yet persisted" check keeps the stale local copy alongside
+  // the reconciled one — the duplicate-card bug. Drop any dirty local draft
+  // whose stable provider IDENTITY (name + api_key) is already represented in
+  // the reconciled set; only genuinely-unsaved providers survive.
+  const nextIdentityKeys = new Set(nextDrafts.map(providerDraftIdentityKey))
   const dirtyDraftsNotInCredentials = currentDrafts.filter((draft) => (
-    dirtyProviderIds.has(draft.id) && !nextIds.has(draft.id)
+    dirtyProviderIds.has(draft.id)
+    && !nextIds.has(draft.id)
+    && !nextIdentityKeys.has(providerDraftIdentityKey(draft))
   ))
   return [...reconciled, ...dirtyDraftsNotInCredentials]
 }

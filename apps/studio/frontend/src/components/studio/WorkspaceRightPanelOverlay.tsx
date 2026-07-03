@@ -8,19 +8,18 @@ interface WorkspaceRightPanelOverlayProps {
   children: ReactNode
   width: number
   onResize: (widthPx: number) => void
-  // Drives the open/close animation. The panel grows out of / collapses into
-  // the bottom-right MoirAI FAB (origin-bottom-right). Fade always plays; the
-  // zoom + slide are motion-safe only, so reduced-motion degrades to a fade.
-  state?: "open" | "closed"
 }
 
-export function WorkspaceRightPanelOverlay({ children, width, onResize, state = "open" }: WorkspaceRightPanelOverlayProps) {
+export function WorkspaceRightPanelOverlay({ children, width, onResize }: WorkspaceRightPanelOverlayProps) {
   return (
+    // The open/close animation lives in the FAB↔panel container-transform morph
+    // (copilot-panel-morph.tsx); the panel surface is identical to the morph's
+    // final frame, so mounting here is a seamless hand-off. Only the CONTENTS
+    // fade in ([&>*]) — the surface stays solid so there is no flash.
     <section
       aria-label="Copilot panel"
       data-studio-right-overlay="true"
-      data-state={state}
-      className="studio-right-panel-overlay pointer-events-auto absolute bottom-3 right-3 top-3 z-30 flex min-h-0 origin-top-left overflow-hidden rounded-lg border text-card-foreground duration-200 ease-out data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 motion-safe:data-[state=closed]:zoom-out-95 motion-safe:data-[state=closed]:slide-out-to-top-2 motion-safe:data-[state=closed]:slide-out-to-left-2 motion-safe:data-[state=open]:zoom-in-95 motion-safe:data-[state=open]:slide-in-from-top-2 motion-safe:data-[state=open]:slide-in-from-left-2"
+      className="studio-right-panel-overlay pointer-events-auto absolute bottom-3 right-3 top-3 z-30 flex min-h-0 overflow-hidden rounded-lg border text-card-foreground [&>*]:motion-safe:animate-in [&>*]:motion-safe:fade-in-0 [&>*]:motion-safe:duration-300"
       style={{ width: `${width}px`, maxWidth: "calc(100% - 1.5rem)" }}
     >
       {children}

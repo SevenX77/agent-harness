@@ -62,3 +62,24 @@ export function travelSteps(from: Point, to: Point): Point[] {
 export function isTapGesture(start: Point, end: Point, threshold = 4): boolean {
   return Math.abs(end.x - start.x) <= threshold && Math.abs(end.y - start.y) <= threshold
 }
+
+export interface Rect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/**
+ * The fully-expanded copilot panel rect (docks top-3 / right-3 / bottom-3). The
+ * open animation grows the FAB circle into exactly this box (container transform),
+ * so the circle literally becomes the panel rather than cross-fading.
+ */
+export function panelRect(bounds: Size, panelWidth: number, margin = PANEL_MARGIN): Rect {
+  return {
+    left: bounds.width - panelWidth - margin,
+    top: margin,
+    width: panelWidth,
+    height: Math.max(0, bounds.height - margin * 2),
+  }
+}

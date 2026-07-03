@@ -4,6 +4,7 @@ import {
   buildCopilotRoleEntry,
   deriveCopilotCandidateGroups,
   copilotKeyForGroupId,
+  hostFromBaseUrl,
   pickDefaultCopilotGroupIds,
   resolveCopilotSendRole,
 } from "./copilot-role-derivation"
@@ -326,5 +327,46 @@ describe("copilotKeyForGroupId", () => {
     expect(copilotKeyForGroupId("claude-opus-4.8")).toBe("copilot_claude_opus_4_8")
     expect(copilotKeyForGroupId("DeepSeek V3.2-Pro")).toBe("copilot_deepseek_v3_2_pro")
     expect(copilotKeyForGroupId("a:b/c.d")).toBe("copilot_a_b_c_d")
+  })
+})
+
+describe("copilot route endpoint disambiguation (谁是谁)", () => {
+  it("hostFromBaseUrl extracts the host", () => {
+    expect(hostFromBaseUrl("https://api.qnaigc.com/v1")).toBe("api.qnaigc.com")
+    expect(hostFromBaseUrl("anthropic.qnaigc.com/anthropic")).toBe("anthropic.qnaigc.com")
+    expect(hostFromBaseUrl(null)).toBeNull()
+    expect(hostFromBaseUrl("")).toBeNull()
+  })
+
+  it("distinguishes same-provider routes by host so 14 'Qiniu' rows are no longer identical", () => {
+    // Two Qiniu endpoints, same provider_label but different host/protocol → labels must differ.
+    const modelGroup = {
+      canonical_id: "deepseek.deepseek-v4-pro",
+      display_name: "DeepSeek V4 Pro",
+      provider_models: [
+        route("anthropic-qnaigc-com-anthropic-38963c9239", "deepseek.deepseek-v4-pro", "ready"),
+        route("api-qnaigc-com-anthropic-a3f5205ffe", "deepseek.deepseek-v4-pro", "ready"),
+      ],
+      status_summary: { ready: 2, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 1, thinking: "unknown", tools: "unknown",
+        structured_output: "unknown", max_context_tokens: null, max_output_tokens: null,
+      },
+    } as ModelGroup
+    // both endpoints share provider_label "Qiniu" but different base_url host.
+    modelGroup.provider_models[0].provider_label = "Qiniu"
+    modelGroup.provider_models[1].provider_label = "Qiniu"
+    const credentials: CredentialsState = {
+      providers: [
+        { id: "anthropic-qnaigc-com-anthropic-38963c9239", name: "Qiniu", provider_type: "anthropic_compatible", api_key: "**********", base_url: "https://anthropic.qnaigc.com/anthropic" },
+        { id: "api-qnaigc-com-anthropic-a3f5205ffe", name: "Qiniu", provider_type: "anthropic_compatible", api_key: "**********", base_url: "https://api.qnaigc.com/anthropic" },
+      ],
+    }
+
+    const candidates = deriveCopilotCandidateGroups([modelGroup], credentials)
+    const labels = candidates[0].availableRoutes.map((r) => r.endpointLabel)
+    expect(labels).toEqual(["Qiniu · anthropic.qnaigc.com", "Qiniu · api.qnaigc.com"])
+    // and they carry the host for the tooltip
+    expect(candidates[0].availableRoutes[0].baseUrlHost).toBe("anthropic.qnaigc.com")
   })
 })

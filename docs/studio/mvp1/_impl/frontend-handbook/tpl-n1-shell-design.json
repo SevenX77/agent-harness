@@ -391,6 +391,21 @@
    "be_status": "n/a",
    "gap_brief": "无。PM 对名字有一票否决权,未确认前视为提案落地态。",
    "impl_ref": "fn-32"
+  },
+  {
+   "n": 33,
+   "cap": "copilot-transcript-reading",
+   "track": "copilot-assist",
+   "module": "Copilot 面板",
+   "func": "转录阅读体验(F9,PM 2026-07-02 R7-A):流式能跑但读得差——过程/答案分层,done 后过程收束成一行折叠「Processed Ns ›」只留最终答案;流式黏底自动滚;工具 spinner 只在流式转;thinking 自动滚;去掉二级块左竖线;字体降一档;聊天可选中。",
+   "action": "问一个需思考的问题:流式时过程(Thought/工具/context)实时展开、视口跟着最新内容往下滚;结束后过程收成一行「› Processed 44s」(点开看完整过程),下面只留最终答案;工具完成后 loading 圈不再空转;二级小字前无竖线;可以框选复制聊天文本。",
+   "fe_design": "transcript.ts 新增 partitionAssistantView(过程/答案分离 + 时长)+ formatProcessedDuration;copilot-panel.tsx ChatMessageItemBase 按 streaming 切「实时内联 / done 后折叠 details(summary=Processed Ns)」,renderProcessSegment 统一渲染过程段(全去 border-l),answer text-[13px]、过程 text-xs;ToolCallBubble 收 streaming(spinner 仅流式);新 ThinkingBlock(<pre> 流式顶 scrollTop);消息容器 + thinking pre spread allowTextSelectionProps。滚动用既有 MessageScroller autoScroll。设计源:mvp1-alignment.md F9。",
+   "fe_modules": [],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "折叠行文案 Processed Ns 待 PM 确认中英(默认英文);字体 13px 可再调。",
+   "impl_ref": "fn-33"
   }
  ]
 }

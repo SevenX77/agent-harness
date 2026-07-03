@@ -88,6 +88,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 
 ### 2.6 桌面工具布局与滚动区域
 - Settings 内部的标题、说明和主要内容必须作为一个整体进入对应内容区；不要把 header 和 main 做成割裂的同级结构，导致标题不随内容滚动或视觉归属不清。
+- **不要为一个「只放关闭按钮」的顶栏保留一条独立 chrome band。** Settings modal 的关闭 `X` 直接绝对定位浮在内容容器右上角（`absolute top-2 right-2`，外层容器加 `relative`），让 nav 和内容紧贴 modal 顶部起始，省掉原来那条 `h-11 border-b` 空顶栏（2026-07-02，PM「去掉 setting 页 header、关闭按钮保留在页面上」）。承载它的 `DialogContent` 用 `showCloseButton={false}`，避免和 Radix 自带 `X` 双份。**浮动角标按钮压在有自己右上角控件的内容上时，必须给内容预留一条等宽让位槽**：本例在 nav+内容的 flex 行加 `pr-12`，保证任意窗口宽度下关闭按钮都不会盖住每个 tab `SectionTitle` 右侧的 `SaveStatusBadge`（默认 1400px 窗口两者仅差 8px，缩窄或移动断点必撞——靠让位槽兜住）。
 - 主内容和侧栏内容应明确分工：主区域可以独立滚动，侧栏可以 sticky/fixed 并在自身内部滚动。不要让页面级滚动、主区滚动和侧栏滚动互相抢空间。
 - Settings 中带右侧数据密集侧栏的页面（例如 LLM Roles / Copilot 的 Available Models）必须使用同一个固定高度 split shell：外层内容区在桌面端 `overflow-hidden`，页面宽度放宽到承载主区 + 侧栏，主区和侧栏内部各自滚动；不要再把整页包进普通 `ScrollArea`，否则侧栏滚动会把主内容卷走。
 - 数据密集型侧栏（例如模型库、资源列表、引用列表）应避免外层再套装饰性 Card；侧栏本身是布局区域，只有单个 repeated item、弹窗或真正独立的工具面板才使用 Card。

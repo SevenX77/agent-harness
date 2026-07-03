@@ -164,17 +164,32 @@
   主仓根 `git pull` 让 5173 和对外手册网页刷新到最新;**PR 若改了依赖清单,主仓根还必须补装**
   (`package.json` 变 → `apps/studio/frontend` 里 `npm install`;`uv.lock` 变 → `uv sync`),
   否则跑着的主 app 在新依赖上直接红屏(「三、保留什么」第 4 条)。
+- **合并后把主仓 app 备到「PM 能直接点验」= agent 的活,PM 不做任何机械步骤。** 这套收尾**全部我自己做完**,
+  给 PM 的只有「在哪个界面、怎么点、该看到什么」——**绝不把 `git pull` / 补依赖 / 重建 vendor / 重启 app
+  这类机械步骤列成 1/2/3 清单甩给 PM**(2026-07-02 教训:给 PM 发编号步骤 = 错)。完整收尾:
+  1. 主仓根 `git pull`;
+  2. 依赖清单变了 → `npm install` / `uv sync`(见上);
+  3. **PR 动了 `packages/graph-agent`(engine)/ `packages/graph-agent-gateway`(gateway)源码
+     (哪怕没碰 `pyproject.toml`/`uv.lock`)→ 必须重建 vendor**:桌面 app 的 sidecar 永远从冻结的
+     `apps/studio/tauri/vendor/site-packages` import engine/gateway,不重建就跑旧 SDK(新字段被
+     `extra_forbidden`、新参数 `TypeError`、bug 照旧),配方见 `AGENTS.md`「Workflow Pipeline」第 7 条
+     (先关 app 免得 Windows 锁住 vendor `.pyd`/`.dll`,`build_vendor.py` + `compileall` 预热 `.pyc`);
+  4. 按标准 launcher 重启 app(`scripts/studio-dev.ps1`),加载新的后端 `.py` + 新 vendor。
+  做完这四步再 @ PM 点验。
 
 **Phase 8 · 沉淀(同一次改动里,别只留对话)**
 - 可复用**样式规则** → `FRONTEND_UI_SPEC.md`;**手册方法论/坑** → 方法论文档;**行为类教训** → 记忆。
 - 报 done:自然语言 + 附**亲眼验证的截图/描述**,对齐「设计是什么 / 是否按设计做到 / 做完什么效果」三段;不问「是否继续」。
-- **等 PM 收敛确认 · 报 done 必附「逐项 PM 验证清单」(强制格式)**:报 done 前先把主仓
-  app 保障到能直接看(Phase 7 依赖补装),然后给出一份**逐项验证清单**,让 PM 一条条照着点、
-  不用回翻对话自己拼。硬性格式:**每条已合并的改动占一行**,四列写清——
+- **等 PM 收敛确认 · 报 done 必附「逐项 PM 验证清单」(强制格式)**:报 done 前**我自己**把主仓
+  app 备到能直接点验的状态(Phase 7 完整收尾:pull + 补依赖 + engine/gateway 改动重建 vendor +
+  重启 app)—— **机械准备步骤一律我做,绝不列成清单让 PM 执行**。给 PM 的只有一份**逐项验证清单**,
+  让 PM 一条条照着点、不用回翻对话自己拼。硬性格式:**每条已合并的改动占一行**,四列写清——
   **① 界面路径**(点到哪一屏,如 `Settings → API Keys → Qiniu 卡`)· **② 操作**(点/填/hover
   什么)· **③ 预期**(该看到什么,具体到颜色/文案/数量)· **④ 状态**(`待确认` / `✅ 已确认`)。
   规矩:
   - **一条改动一行,不合并**:一屏能覆盖多条也要逐条列,别糊成一句话。
+  - **只列验证步骤、不列机械步骤**:清单是"给 PM 点验的界面/操作/预期",**不是** pull/装依赖/
+    重建 vendor/重启这类我该做完的机械收尾(那些一律我做,见 Phase 7)。
   - **跨多 PR 的会话要汇总**:清单覆盖**本会话所有**待 PM 确认项 + 已确认的存档一起列(标 ✅),
     PM 才能一眼看全、不漏验。
   - **PM 逐条确认完才算收敛**:**任一条没确认,任务就不算收敛**;PM 指出的问题在本任务内继续

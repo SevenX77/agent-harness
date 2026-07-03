@@ -358,6 +358,23 @@ function providerDraftFromCredential(provider: CredentialProviderState): Provide
   }
 }
 
+/**
+ * Stable provider IDENTITY for a draft, independent of its (unstable) id.
+ *
+ * A freshly-added third-party provider draft carries a locally-minted id
+ * (`custom-<uuid>`), but once saved the backend keys its per-protocol endpoints
+ * by `<id>-<protocol>`, so `draftsFromCredentials` rebuilds the draft under the
+ * primary endpoint's id — a DIFFERENT string. Matching drafts by id alone then
+ * fails to recognise the just-saved provider, so reconcile keeps BOTH copies
+ * (the duplicate-card bug). Identity mirrors `thirdPartyGroupKey` (name +
+ * api_key) for third-party providers and the stable code for official ones, so
+ * the two copies collapse to one.
+ */
+export function providerDraftIdentityKey(draft: ProviderDraft): string {
+  if (inferProviderKind(draft) === "official") return `official ${draft.id}`
+  return `third ${draft.name.trim().toLowerCase()} ${draft.api_key}`
+}
+
 function thirdPartyGroupKey(provider: CredentialProviderState): string {
   return [
     provider.name.trim().toLowerCase(),

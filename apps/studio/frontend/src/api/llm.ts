@@ -1708,14 +1708,19 @@ export async function getProviderModels(
 /**
  * Re-probe one (URL, protocol) endpoint cell immediately, bypassing the
  * protocol_unsupported half-life gate (design §1.2 matrix point 4).
+ *
+ * The POST response already carries the freshly-updated registry, so this
+ * returns it as CredentialsState directly (same shape getCredentials()
+ * returns) — the caller merges it locally, with no separate network round
+ * trip needed to re-fetch + re-decrypt every provider's secret.
  */
-export async function forceTestEndpoint(endpointId: string): Promise<CredentialRegistryResponse> {
+export async function forceTestEndpoint(endpointId: string): Promise<CredentialsState> {
   const response = await api.post<EndpointTestResponse>(
     `/llm/endpoints/${segment(endpointId)}/test`,
     undefined,
     { params: { force: true } },
   )
-  return cacheRegistry(response.data.registry)
+  return registryToCredentials(cacheRegistry(response.data.registry))
 }
 
 export async function testProviderEndpoint(

@@ -156,7 +156,14 @@ function phaseFrontmatter(content: string | undefined): Record<string, unknown> 
   if (!content) return null
   const match = /^---\n([\s\S]*?)\n---/m.exec(content)
   if (!match) return null
-  const parsed = yaml.load(match[1])
+  // Editor content can be mid-edit / malformed (js-yaml's load() throws on e.g. a
+  // duplicate mapping key); degrade to null instead of throwing through canvas render.
+  let parsed: unknown
+  try {
+    parsed = yaml.load(match[1])
+  } catch {
+    return null
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   return parsed as Record<string, unknown>
 }

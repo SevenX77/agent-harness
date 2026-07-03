@@ -23,7 +23,17 @@ export function parseFrontmatter(content: string | undefined): Record<string, un
   if (!match) {
     return {}
   }
-  const parsed = yaml.load(match[1])
+  // The editor reads this live from a possibly-mid-edit file, so malformed YAML
+  // (e.g. a duplicate mapping key — js-yaml's load() rejects it by throwing) is an
+  // expected transient state, not an exception to propagate: degrade to {} so a bad
+  // keystroke never tears down the render tree. The engine lint still surfaces the
+  // real error as an editor marker.
+  let parsed: unknown
+  try {
+    parsed = yaml.load(match[1])
+  } catch {
+    return {}
+  }
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
     ? parsed as Record<string, unknown>
     : {}

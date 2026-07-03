@@ -1808,6 +1808,34 @@ export async function getFixedRoleNames(): Promise<string[]> {
   return response.data.fixed_role_names
 }
 
+export interface FixedRoleRecommendedModel {
+  canonicalId: string
+  displayName: string
+}
+
+export interface FixedRoleStatus {
+  description: string
+  recommendedModels: FixedRoleRecommendedModel[]
+  missingModels: FixedRoleRecommendedModel[]
+}
+
+// 固定角色说明 + 推荐模型 + 当前缺了哪些推荐模型,驱动问号说明和缺模型警告。
+export async function getFixedRoleStatus(roleName: string): Promise<FixedRoleStatus> {
+  type BackendModel = { canonical_id: string; display_name: string }
+  const response = await api.get<{
+    description: string
+    recommended_models: BackendModel[]
+    missing_models: BackendModel[]
+  }>(`/llm/fixed-roles/${roleName}`)
+  const fromBackend = (models: BackendModel[]): FixedRoleRecommendedModel[] =>
+    models.map((model) => ({ canonicalId: model.canonical_id, displayName: model.display_name }))
+  return {
+    description: response.data.description,
+    recommendedModels: fromBackend(response.data.recommended_models),
+    missingModels: fromBackend(response.data.missing_models),
+  }
+}
+
 export async function putRoles(data: RolesData): Promise<RolesData> {
   const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
   return rolesDataFromBackend(response.data, cachedRegistry ?? null)

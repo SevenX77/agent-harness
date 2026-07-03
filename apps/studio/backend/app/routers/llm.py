@@ -1543,6 +1543,37 @@ async def get_fixed_role_names() -> dict[str, list[str]]:
     return {"fixed_role_names": sorted(required_builtin_roles())}
 
 
+@router.get("/fixed-roles/{role_name}")
+async def get_fixed_role_status(role_name: str) -> dict[str, Any]:
+    """固定角色的说明 + 推荐模型 + 当前缺了哪些推荐模型。前端据此渲染问号说明和
+    "缺模型"警告(建议拖哪个模型进来)。"""
+    from app.services.llm_fixed_roles import (
+        is_fixed_role,
+        missing_recommended_models,
+        recommended_model_display_name,
+        recommended_models_for_role,
+        role_description,
+    )
+
+    if not is_fixed_role(role_name):
+        raise HTTPException(status_code=404, detail=f"Not a fixed role: {role_name}")
+    data = _load_roles_or_empty()
+    credentials = load_credentials()
+    role = data.roles.get(role_name)
+    missing = missing_recommended_models(role_name, role, credentials)
+    return {
+        "description": role_description(role_name),
+        "recommended_models": [
+            {"canonical_id": canonical_id, "display_name": recommended_model_display_name(role_name, canonical_id)}
+            for canonical_id in recommended_models_for_role(role_name)
+        ],
+        "missing_models": [
+            {"canonical_id": canonical_id, "display_name": recommended_model_display_name(role_name, canonical_id)}
+            for canonical_id in missing
+        ],
+    }
+
+
 @router.delete("/roles/{role_name}", response_model=RolesData)
 async def delete_llm_role(role_name: str) -> RolesData:
     """Delete one persisted role."""

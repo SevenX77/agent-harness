@@ -13,7 +13,8 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
-import { Bot, ChevronDown, Cog, FlaskConical, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Bot, ChevronDown, CircleAlert, CircleHelp, Cog, FlaskConical, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -34,9 +35,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDeleteConfirm, type DeleteConfirmRequest } from "@/components/ui/delete-confirm-dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import type { CredentialsState, MaterializationReportEntry, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
+import { getFixedRoleStatus, type CredentialsState, type FixedRoleStatus, type MaterializationReportEntry, type ModelGroup, type ProviderModelOption, type RoleTestResponse, type RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
   appendModelGroupToRoleWithResult,
@@ -130,6 +132,26 @@ export const RoleCard = memo(function RoleCard({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+  const [fixedRoleStatus, setFixedRoleStatus] = useState<FixedRoleStatus | null>(null)
+  const modelCodesKey = modelCodes.join("|")
+  useEffect(() => {
+    if (!isFixed) {
+      setFixedRoleStatus(null)
+      return
+    }
+    let alive = true
+    getFixedRoleStatus(roleName)
+      .then((status) => {
+        if (alive) setFixedRoleStatus(status)
+      })
+      .catch(() => {
+        /* 说明/警告拿不到就不显示,不影响角色本身可用 */
+      })
+    return () => {
+      alive = false
+    }
+    // modelCodesKey 变了说明这个角色的模型组变了(加/删模型),缺推荐模型的判断要刷新。
+  }, [isFixed, roleName, modelCodesKey])
 
   const handleRunTestChain = useCallback(() => {
     onRunTestChain(roleName)
@@ -228,6 +250,30 @@ export const RoleCard = memo(function RoleCard({
               className="size-3.5 shrink-0 text-muted-foreground"
             />
             <CardTitle className="min-w-0 break-all">{roleName}</CardTitle>
+            {isFixed && fixedRoleStatus?.description ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      data-role-fixed-info="true"
+                      className="inline-flex shrink-0 text-muted-foreground"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <CircleHelp aria-hidden="true" className="size-3.5" />
+                      <span className="sr-only">What is the {roleName} role for?</span>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-sm whitespace-pre-line break-words">
+                    {[
+                      fixedRoleStatus.description,
+                      fixedRoleStatus.recommendedModels.length
+                        ? `Recommended models: ${fixedRoleStatus.recommendedModels.map((model) => model.displayName).join(", ")}`
+                        : null,
+                    ].filter(Boolean).join("\n")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
             <ChevronDown
               aria-hidden="true"
               className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
@@ -251,51 +297,50 @@ export const RoleCard = memo(function RoleCard({
                 : <FlaskConical data-role-test-icon="true" className="size-3.5" />}
               {testChainRunning ? "Testing" : "Test"}
             </Button>
-            <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  data-role-actions-trigger="true"
-                  aria-label={`More actions for ${roleName}`}
-                  className="shrink-0 text-muted-foreground"
-                  onClick={handleActionsClick}
-                  onDoubleClick={handleActionsDoubleClick}
-                  onPointerDown={handleActionsPointerDown}
-                  onKeyDown={(event) => event.stopPropagation()}
+            {/* 固定角色(引擎 builtin 硬依赖)不可删除、不可改名 —— 这个菜单只有
+                Rename/Delete 两项,全隐藏比留一个空菜单更清楚;后端删除端点亦拒删(409)。 */}
+            {!isFixed && (
+              <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    data-role-actions-trigger="true"
+                    aria-label={`More actions for ${roleName}`}
+                    className="shrink-0 text-muted-foreground"
+                    onClick={handleActionsClick}
+                    onDoubleClick={handleActionsDoubleClick}
+                    onPointerDown={handleActionsPointerDown}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <MoreVertical data-role-icon="true" className="text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-36"
+                  onClick={(event) => event.stopPropagation()}
                 >
-                  <MoreVertical data-role-icon="true" className="text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="w-36"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <DropdownMenuItem data-role-edit-trigger="true" onSelect={() => setEditOpen(true)}>
-                  <Pencil data-role-icon="true" />
-                  Rename
-                </DropdownMenuItem>
-                {/* 固定角色(引擎 builtin 硬依赖)不可删除,隐藏删除入口;后端亦拒删(409)。 */}
-                {!isFixed && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      data-role-delete-trigger="true"
-                      variant="destructive"
-                      onSelect={() => {
-                        setActionsOpen(false)
-                        confirmDelete(buildRoleDeleteRequest(roleName, onDeleteRole))
-                      }}
-                    >
-                      <Trash2 />
-                      Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <DropdownMenuItem data-role-edit-trigger="true" onSelect={() => setEditOpen(true)}>
+                    <Pencil data-role-icon="true" />
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    data-role-delete-trigger="true"
+                    variant="destructive"
+                    onSelect={() => {
+                      setActionsOpen(false)
+                      confirmDelete(buildRoleDeleteRequest(roleName, onDeleteRole))
+                    }}
+                  >
+                    <Trash2 />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </CardAction>
         </CardHeader>
         <CollapsibleContent
@@ -373,17 +418,38 @@ export const RoleCard = memo(function RoleCard({
             </div>
           </SortableContext>
         </DndContext>
-        <Empty
-          aria-label={`Drop model into ${roleName}`}
-          data-model-drop-target="true"
-          onDragOver={handleAvailableModelDragOver}
-          onDrop={handleAvailableModelDrop}
-          className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-border bg-muted/10 p-3 text-muted-foreground transition-colors hover:bg-muted/20"
-        >
-          <EmptyHeader className="max-w-none gap-0">
-            <EmptyTitle className="text-xs font-medium text-muted-foreground">Drop model</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
+        {isFixed && fixedRoleStatus && fixedRoleStatus.missingModels.length > 0 ? (
+          <Empty
+            aria-label={`Drop model into ${roleName}`}
+            data-model-drop-target="true"
+            data-role-missing-recommended-model="true"
+            onDragOver={handleAvailableModelDragOver}
+            onDrop={handleAvailableModelDrop}
+            className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-warning-border bg-warning-background/20 p-3 text-warning-foreground transition-colors hover:bg-warning-background/30"
+          >
+            <EmptyHeader className="max-w-none gap-1.5">
+              <Badge variant="warning" className="gap-1">
+                <CircleAlert className="size-3" />
+                Missing recommended model
+              </Badge>
+              <EmptyTitle className="text-xs font-medium text-warning-foreground">
+                {`Drag in: ${fixedRoleStatus.missingModels.map((model) => model.displayName).join(", ")}`}
+              </EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Empty
+            aria-label={`Drop model into ${roleName}`}
+            data-model-drop-target="true"
+            onDragOver={handleAvailableModelDragOver}
+            onDrop={handleAvailableModelDrop}
+            className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-border bg-muted/10 p-3 text-muted-foreground transition-colors hover:bg-muted/20"
+          >
+            <EmptyHeader className="max-w-none gap-0">
+              <EmptyTitle className="text-xs font-medium text-muted-foreground">Drop model</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        )}
       </CardContent>
       <RoleNameDialog
         title="Rename role"

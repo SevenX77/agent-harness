@@ -15,6 +15,7 @@ import {
   routeTooltipLineStatus,
   sortOfficialRouteInfos,
   sortModelInfos,
+  sortThirdPartyModelInfos,
   verifiedSiblingProtocolsOnSameHost,
   type EndpointSummary,
 } from "./ProviderCard"
@@ -1542,6 +1543,38 @@ describe("ProviderCard provider capabilities", () => {
       "m-image",
       "a-failed",
     ])
+  })
+
+  it("sorts third-party models green(verified) > blue(historical) > neutral > failed > off to the top (item 4)", () => {
+    // The third-party Available Models list must lift usable models to the top,
+    // mirroring the tag colours: green (ready) first, then blue (historical),
+    // then neutral (untested), with failed/off sinking. Previously the list was
+    // sorted purely alphabetically, burying verified models below dead ones.
+    const sorted = sortThirdPartyModelInfos([
+      { id: "m-off", ui_state: "off" },
+      { id: "m-failed", ui_state: "failed" },
+      { id: "m-untested", ui_state: "untested" },
+      { id: "m-historical", ui_state: "historical_ready" },
+      { id: "m-ready", ui_state: "ready" },
+    ]).map((model) => model.id)
+
+    expect(sorted).toEqual([
+      "m-ready", // green
+      "m-historical", // blue
+      "m-untested", // neutral
+      "m-failed", // red
+      "m-off", // muted / off
+    ])
+  })
+
+  it("breaks third-party sort ties alphabetically within the same status (item 4)", () => {
+    const sorted = sortThirdPartyModelInfos([
+      { id: "zeta", ui_state: "ready" },
+      { id: "alpha", ui_state: "ready" },
+      { id: "mid", ui_state: "ready" },
+    ]).map((model) => model.id)
+
+    expect(sorted).toEqual(["alpha", "mid", "zeta"])
   })
 
   it("does not render chip area when persisted has no sdks/models", () => {

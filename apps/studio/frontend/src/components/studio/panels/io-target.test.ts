@@ -1,7 +1,40 @@
 import { describe, expect, it } from "vitest"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/nodes"
-import { resolveIoEditTarget, type SelectedNode } from "./io-target"
+import {
+  ioPanelScope,
+  resolveIoEditTarget,
+  resolveIoNodeRole,
+  type SelectedNode,
+} from "./io-target"
+
+describe("io panel role scoping (F3 归属规则, PM 2026-07-03)", () => {
+  const phase: SelectedNode = { id: "seg", data: { label: "seg" } as SkillGraphNodeData }
+
+  it("resolves role from boundary selection first, then phase, then graph", () => {
+    expect(resolveIoNodeRole(null, "input")).toBe("input-boundary")
+    expect(resolveIoNodeRole(null, "output")).toBe("output-boundary")
+    // a boundary selection wins even if a stale phase lingers
+    expect(resolveIoNodeRole(phase, "output")).toBe("output-boundary")
+    expect(resolveIoNodeRole(phase, null)).toBe("phase")
+    expect(resolveIoNodeRole(null, null)).toBe("graph")
+  })
+
+  it("scopes which sections render per role", () => {
+    expect(ioPanelScope("input-boundary")).toMatchObject({
+      showInput: true, showOutput: false, showTestInputs: true, showArtifacts: false,
+    })
+    expect(ioPanelScope("output-boundary")).toMatchObject({
+      showInput: false, showOutput: true, showTestInputs: false, showArtifacts: true,
+    })
+    expect(ioPanelScope("phase")).toMatchObject({
+      showInput: true, showOutput: true, showTestInputs: false, showArtifacts: false,
+    })
+    expect(ioPanelScope("graph")).toMatchObject({
+      showInput: true, showOutput: true, showTestInputs: true, showArtifacts: true,
+    })
+  })
+})
 
 // Atom #28 (any-io-import-file): the per-node import affordance — drop a file in
 // the i/o panel's "Infer input schema" box and Save — writes the imported

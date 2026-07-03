@@ -393,9 +393,10 @@ describe('GraphCanvas', () => {
     }
   })
 
-  it('opens the I/O panel when a global input or output node is clicked', () => {
+  it('opens the I/O panel and carries the boundary identity when a global input/output node is clicked', () => {
     const onNodeSelect = vi.fn()
     const onNodeDeselect = vi.fn()
+    const onBoundarySelect = vi.fn()
     const onPanelChange = vi.fn()
     const onNodeFileOpen = vi.fn()
     renderToStaticMarkup(
@@ -403,6 +404,7 @@ describe('GraphCanvas', () => {
         skillId="demo-skill"
         onNodeSelect={onNodeSelect}
         onNodeDeselect={onNodeDeselect}
+        onBoundarySelect={onBoundarySelect}
         onNodeFileOpen={onNodeFileOpen}
         onPanelChange={onPanelChange}
       />,
@@ -418,8 +420,12 @@ describe('GraphCanvas', () => {
     expect(onPanelChange).toHaveBeenCalledTimes(2)
     expect(onPanelChange).toHaveBeenNthCalledWith(1, 'input')
     expect(onPanelChange).toHaveBeenNthCalledWith(2, 'input')
+    // The boundary identity now flows through onBoundarySelect (input / output),
+    // not an untyped onNodeDeselect — so the panel can scope to that role.
+    expect(onBoundarySelect).toHaveBeenNthCalledWith(1, 'input')
+    expect(onBoundarySelect).toHaveBeenNthCalledWith(2, 'output')
     expect(onNodeSelect).not.toHaveBeenCalled()
-    expect(onNodeDeselect).toHaveBeenCalledTimes(2)
+    expect(onNodeDeselect).not.toHaveBeenCalled()
     expect(onNodeFileOpen).not.toHaveBeenCalled()
   })
 

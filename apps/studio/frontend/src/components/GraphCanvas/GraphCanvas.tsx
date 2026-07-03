@@ -101,6 +101,13 @@ interface GraphCanvasProps {
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   onNodeDeselect?: () => void
   /**
+   * Selecting a boundary pseudo-node (Input / Output) carries its identity so
+   * the i/o panel can scope to that role (input-boundary / output-boundary),
+   * instead of the old behaviour of deselecting to an untyped graph view where
+   * clicking Input, Output, or blank were indistinguishable (PM 2026-07-03).
+   */
+  onBoundarySelect?: (which: 'input' | 'output') => void
+  /**
    * Reveal something inside a subgraph's inline topology, driven by clicking a
    * file in the Assets trees. `phaseChain` is the root→leaf chain of phase ids;
    * `nonce` makes repeated requests re-fire.
@@ -669,6 +676,7 @@ export function GraphCanvas({
   selectedNodeId,
   onNodeSelect,
   onNodeDeselect,
+  onBoundarySelect,
   revealRequest,
   focusNodeRequest,
   onNodeFileOpen,
@@ -2476,7 +2484,9 @@ export function GraphCanvas({
           const wasSelected = isCanvasNodeSelected(node.id)
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
-            onNodeDeselect?.()
+            // Carry the boundary identity so the i/o panel scopes to input- or
+            // output-only (handleBoundarySelect clears any phase selection).
+            onBoundarySelect?.(node.type === 'globalInput' ? 'input' : 'output')
             onPanelChange?.('input')
             return
           }
@@ -2510,7 +2520,7 @@ export function GraphCanvas({
           cancelPendingNodeClickAction()
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
-            onNodeDeselect?.()
+            onBoundarySelect?.(node.type === 'globalInput' ? 'input' : 'output')
             onPanelChange?.('input')
             return
           }

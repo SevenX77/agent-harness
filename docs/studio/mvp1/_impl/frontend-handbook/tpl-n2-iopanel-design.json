@@ -2,7 +2,7 @@
  "page_id": "n2_iopanel_design",
  "title": "i/o 面板 · 操作设计",
  "region": "authoring:input(→i/o panel)",
- "intro": "本页是 i/o 面板的 MVP1 设计。2026-07-02 r3(PM 三轮确认,input region F2/F3/F5/F7/F8):数据主干是黑板,不是文件——节点输入本来自黑板,import file 只是往黑板上追加字段。面板 = 实例预览(只读)+ Configure 按钮进配置弹窗 + 用面板 list 行列出输入文件/输出 artifact 文件(名字 + 灰色路径)。输入配置弹窗 = 黑板优先的字段勾选树(黑板 context 第一行 = io.inputs 消费,Add file 导入文件/文件夹并追加 source:'file' 字段;Input 伪节点无黑板只有文件)。输出配置弹窗 = artifacts 文件清单(Add artifact,每文件同一套黑板全字段勾选,single/per-item + iterate range 推断数量,固定命名 <stem>_latest_<ts> + history/,engine writer 落盘)。golden 区移出面板(与推导实例同构,两连点无意义;golden 交互归 run/trace 侧后续轮)。黑板 context 推导与 dot 静态推断同源。",
+ "intro": "本页是 i/o 面板的 MVP1 设计。2026-07-02 r3(PM 三轮确认,input region F2/F3/F5/F7/F8):数据主干是黑板,不是文件——节点输入本来自黑板,import file 只是往黑板上追加字段。面板 = 实例预览(只读)+ Configure 按钮进配置弹窗 + 用面板 list 行列出输入文件/输出 artifact 文件(名字 + 灰色路径)。输入配置弹窗 = 黑板优先的字段勾选树(黑板 context 第一行 = io.inputs 消费,Add file 导入文件/文件夹并追加 source:'file' 字段;Input 伪节点无黑板只有文件)。输出配置弹窗 = artifacts 文件清单(Add artifact,每文件同一套黑板全字段勾选,single/per-item + iterate range 推断数量,固定命名 <stem>_latest_<ts> + history/,engine writer 落盘)。golden 区移出面板(与推导实例同构,两连点无意义;golden 交互归 run/trace 侧后续轮)。黑板 context 推导与 dot 静态推断同源。　2026-07-03 r5(PM 真机 4 点反馈,关系模型建对):面板按角色收敛段(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段);io 字段全链路嵌套寻址,配置树可展开、子字段 chapter.aa_number 独立勾选(输出侧 artifacts 只认顶层键,嵌套仅展示);输入配置改内联可折叠(输出 artifacts 保留 scoped modal);New file 改 ghost list 行。详见 MVP1 设计源 03_regions/input/mvp1-alignment.md F2/F3/F7 r5 修订。",
  "atoms": [
   {
    "n": 25,

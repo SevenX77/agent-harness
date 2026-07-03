@@ -47,6 +47,48 @@ def _field_properties(io_block: dict[str, object], direction: str) -> dict[str, 
     return {str(name): schema for name, schema in properties.items()}
 
 
+def _is_object_schema(schema: object) -> bool:
+    """True when a property subschema describes an object (so its own
+    ``properties`` are addressable sub-paths of the value)."""
+    if not isinstance(schema, dict):
+        return False
+    schema_type = schema.get("type")
+    if schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type):
+        return True
+    return isinstance(schema.get("properties"), dict)
+
+
+def _flatten_field_paths(properties: dict[str, object], prefix: str = "") -> dict[str, object]:
+    """Flatten a properties dict into every addressable dotted path.
+
+    Both the parent object path and its descendant leaves are emitted, e.g.
+    ``chapter`` and ``chapter.aa_number`` — so nested object fields are
+    independently addressable in the supply/demand projection (nested-addressing,
+    PM 2026-07-03). Mirrors the engine's recursive required walk.
+    """
+    flat: dict[str, object] = {}
+    for name, schema in properties.items():
+        path = f"{prefix}{name}"
+        flat[path] = schema
+        if _is_object_schema(schema):
+            nested = schema.get("properties") if isinstance(schema, dict) else None
+            if isinstance(nested, dict):
+                flat.update(
+                    _flatten_field_paths(
+                        {str(k): v for k, v in nested.items()},
+                        prefix=f"{path}.",
+                    )
+                )
+    return flat
+
+
+def _ancestor_paths(path: str) -> list[str]:
+    """``a.b.c`` -> ``[a.b.c, a.b, a]`` — the path itself plus every ancestor
+    object it is nested under (nearest last-produced ancestor supplies it)."""
+    parts = path.split(".")
+    return [".".join(parts[: i + 1]) for i in range(len(parts))][::-1]
+
+
 def _phase_io_fields(node: object) -> PhaseIoFields:
     """Project one compiled phase node's input/output field schema."""
     io_block = _io_block(getattr(node, "frontmatter", {}))
@@ -64,7 +106,7 @@ def _graph_input_fields(compiled: CompiledSkill) -> set[str]:
     io_block = raw.get("io")
     if not isinstance(io_block, dict):
         return set()
-    return set(_field_properties(io_block, "inputs"))
+    return set(_flatten_field_paths(_field_properties(io_block, "inputs")))
 
 
 def build_phase_io_index(compiled: CompiledSkill) -> dict[str, PhaseIoFields]:
@@ -94,7 +136,7 @@ def compute_field_supply(
     A field matched by neither is flagged ``supplied=False`` -- a data gap the
     Canvas renders as a missing-input marker on the downstream node.
     """
-    own_inputs = phase_io_index.get(phase_name, {}).get("inputs", {})
+    own_inputs = _flatten_field_paths(phase_io_index.get(phase_name, {}).get("inputs", {}))
     supply: list[FieldSupply] = []
     for field_name in own_inputs:
         producer = _resolve_producer(field_name, depends_on, phase_io_index)
@@ -108,7 +150,7 @@ def compute_field_supply(
                 }
             )
             continue
-        if field_name in graph_input_fields:
+        if any(prefix in graph_input_fields for prefix in _ancestor_paths(field_name)):
             supply.append(
                 {
                     "field": field_name,
@@ -134,10 +176,17 @@ def _resolve_producer(
     depends_on: list[str],
     phase_io_index: dict[str, PhaseIoFields],
 ) -> str | None:
-    """Return the last declared upstream dependency that outputs ``field_name``."""
+    """Return the last declared upstream dependency that outputs ``field_name``.
+
+    A nested demand (``chapter.aa_number``) is supplied by any upstream that
+    produces it OR any ancestor object it is nested under (producing the whole
+    ``chapter`` supplies its sub-fields) — so nested addressing resolves against
+    whole-object producers, not only exactly-declared leaves.
+    """
+    ancestors = _ancestor_paths(field_name)
     producer: str | None = None
     for upstream in depends_on:
-        outputs = phase_io_index.get(upstream, {}).get("outputs", {})
-        if field_name in outputs:
+        outputs = _flatten_field_paths(phase_io_index.get(upstream, {}).get("outputs", {}))
+        if any(prefix in outputs for prefix in ancestors):
             producer = upstream
     return producer

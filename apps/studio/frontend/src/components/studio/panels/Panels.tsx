@@ -13,6 +13,7 @@ import { useWorkspaceContext } from "../WorkspaceContext"
 import { AssetsPanel } from "./AssetsPanel"
 import { HistoryPanel } from "./HistoryPanel"
 import { InputPanel } from "./InputPanel"
+import type { IoBoundarySelection } from "./io-target"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { EdgeContextView } from "./EdgeContextView"
 import { PropertiesPanel } from "./PropertiesPanel"
@@ -28,6 +29,8 @@ interface PanelsProps {
   assetDirectoryTree?: WorkspaceDirectoryTree
   assetSubgraphTree?: SubgraphMembershipTree
   selectedNode: { id: string; data: SkillGraphNodeData } | null
+  /** Which boundary pseudo-node is selected, so the i/o panel scopes by role. */
+  ioBoundary?: IoBoundarySelection
   // F4: i/o-panel test-input selection that feeds Predict/Run.
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
@@ -83,6 +86,7 @@ export function Panels({
   assetDirectoryTree,
   assetSubgraphTree,
   selectedNode,
+  ioBoundary,
   selectedTestInputId,
   onSelectTestInput,
   onPhaseFileSave,
@@ -198,6 +202,7 @@ export function Panels({
         workspaceRoot={workspaceRoot}
         skillDetail={skillDetail}
         selectedNode={selectedNode}
+        ioBoundary={ioBoundary ?? null}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
         onFileOpen={onFileOpen}

@@ -1,7 +1,8 @@
 import { useState, type ComponentProps } from "react"
-import { FileText, Files, Settings2 } from "lucide-react"
+import { ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
 import type { SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -22,8 +23,15 @@ import { errorMessage } from "@/utils/errors"
 import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelBody, PanelFieldRow } from "./_shared/PanelSection"
-import { InputConfigDialog, OutputConfigDialog } from "./IoConfigDialog"
-import { resolveIoEditTarget, type SelectedNode } from "./io-target"
+import { InputConfigInline, OutputConfigDialog } from "./IoConfigDialog"
+import {
+  ioPanelScope,
+  resolveIoEditTarget,
+  resolveIoNodeRole,
+  type IoBoundarySelection,
+  type IoNodeRole,
+  type SelectedNode,
+} from "./io-target"
 import { TestInputsSection } from "./TestInputsSection"
 
 type SaveIoFile = (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
@@ -33,11 +41,13 @@ interface InputPanelProps {
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
   selectedNode?: SelectedNode
+  /** Which boundary pseudo-node is selected, so the panel scopes by role. */
+  ioBoundary?: IoBoundarySelection
   // F4: which saved test input feeds Predict/Run (wired through Workspace).
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
   onFileOpen?: (fileOrPath: FileOpenInput) => void
-  // Writes for the config-dialog declarations (same optimistic-hash contract
+  // Writes for the config declarations (same optimistic-hash contract
   // PropertiesPanel uses).
   onPhaseFileSave?: SaveIoFile
 }
@@ -60,6 +70,20 @@ const YAML_ICON_BUTTON_CLASS =
   "size-7 rounded-md bg-secondary/70 text-muted-foreground hover:bg-secondary hover:text-foreground"
 const EXAMPLE_CODE_CLASS =
   "max-h-72 overflow-auto rounded-md bg-muted/30 px-2 py-2 font-mono text-xs leading-relaxed text-foreground"
+
+/** Panel header title per role — the boundary pseudo-nodes read as Input / Output. */
+function headerTitleFor(role: IoNodeRole, phaseLabel: string): string {
+  switch (role) {
+    case "input-boundary":
+      return "Input"
+    case "output-boundary":
+      return "Output"
+    case "phase":
+      return phaseLabel
+    default:
+      return "I/O"
+  }
+}
 
 function isJsonSerializablePrimitive(value: unknown): value is string | number | boolean | null {
   return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean"
@@ -189,39 +213,23 @@ function YamlFieldLabel({ className, ...props }: ComponentProps<typeof FieldLabe
   )
 }
 
+/** The read-only instance preview for one io side (input / output). */
 function ExampleField({
   title,
   schema,
   relPath,
   onEdit,
-  onConfigure,
 }: {
   title: string
   schema: JsonSchema | null
   relPath: string
   onEdit?: () => void
-  onConfigure?: () => void
 }) {
   const example = schema ? jsonExampleFromSchema(schema) : null
   return (
     <PanelFieldRow>
       <Field>
-        <div className="flex items-center justify-between gap-2">
-          <YamlFieldLabel>{title.toLowerCase()}</YamlFieldLabel>
-          {onConfigure ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="h-6 gap-1 px-2 text-[11px]"
-              onClick={onConfigure}
-              aria-label={`Configure ${title.toLowerCase()}`}
-            >
-              <Settings2 className="size-3" aria-hidden />
-              Configure
-            </Button>
-          ) : null}
-        </div>
+        <YamlFieldLabel>{title.toLowerCase()}</YamlFieldLabel>
         <div className="flex items-center justify-between gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -253,30 +261,6 @@ function ExampleField({
   )
 }
 
-/** Panel list row for a declared input file / batch (name + muted path). */
-function FileListRow({ decl }: { decl: FileFieldDecl }) {
-  const isBatch = Boolean(decl.dir && decl.pattern)
-  const hint = isBatch
-    ? `${decl.dir} · ×${decl.numbers?.length ?? "?"}`
-    : decl.path ?? ""
-  return (
-    <div className="flex items-baseline gap-2 rounded-md border border-border px-2 py-1">
-      {isBatch ? (
-        <Files className="size-3 shrink-0 self-center text-muted-foreground" aria-hidden />
-      ) : (
-        <FileText className="size-3 shrink-0 self-center text-muted-foreground" aria-hidden />
-      )}
-      <span className="shrink-0 font-mono text-xs text-foreground">{decl.field}</span>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{hint}</span>
-        </TooltipTrigger>
-        <TooltipContent>{hint}</TooltipContent>
-      </Tooltip>
-    </div>
-  )
-}
-
 /** Panel list row for a configured output artifact (stem + mode). */
 function ArtifactListRow({ row, perItemCount }: { row: ArtifactRow; perItemCount: number | null }) {
   return (
@@ -299,20 +283,23 @@ export function InputPanel({
   workspaceRoot = null,
   skillDetail,
   selectedNode = null,
+  ioBoundary = null,
   selectedTestInputId = null,
   onSelectTestInput,
   onFileOpen,
   onPhaseFileSave,
 }: InputPanelProps) {
+  const role = resolveIoNodeRole(selectedNode, ioBoundary)
+  const scope = ioPanelScope(role)
   const view = buildIoDocumentView(skillDetail, selectedNode)
   const openSource = () => onFileOpen?.(view.relPath)
   const editSource = onFileOpen ? openSource : undefined
   const [inputConfigOpen, setInputConfigOpen] = useState(false)
   const [outputConfigOpen, setOutputConfigOpen] = useState(false)
 
-  // Reconciled input fields (matched/available/missing). For an interior node
-  // this reconciles io.inputs against the upstream blackboard; for the Input
-  // pseudo-node / GRAPH.md it flags declared graph inputs with no source.
+  // Reconciled input fields (matched/available/missing), nested. For an interior
+  // node this reconciles io.inputs against the upstream blackboard; for the Input
+  // boundary / GRAPH.md it flags declared graph inputs with no source.
   const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "")
   const declaredFiles = fileFieldsOf(view.content)
   const artifacts = graphArtifactsOf(skillDetail)
@@ -337,55 +324,89 @@ export function InputPanel({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <PanelHeader title="Input / Output" />
+      <PanelHeader title={headerTitleFor(role, view.label)} />
       <ScrollArea className="flex-1">
         <PanelBody>
           <FieldSet>
             <FieldGroup>
-              <ExampleField
-                title="Input"
-                schema={view.inputSchema}
-                relPath={view.relPath}
-                onEdit={editSource}
-                onConfigure={() => setInputConfigOpen(true)}
-              />
-              {declaredFiles.length > 0 ? (
+              {scope.showInput ? (
+                <>
+                  <ExampleField title="Input" schema={view.inputSchema} relPath={view.relPath} onEdit={editSource} />
+                  <PanelFieldRow>
+                    <Collapsible open={inputConfigOpen} onOpenChange={setInputConfigOpen}>
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 gap-1 px-2 text-[11px]"
+                          aria-label="Configure input"
+                        >
+                          {inputConfigOpen ? (
+                            <ChevronDown className="size-3" aria-hidden />
+                          ) : (
+                            <ChevronRight className="size-3" aria-hidden />
+                          )}
+                          <Settings2 className="size-3" aria-hidden />
+                          Configure input
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-2">
+                        <InputConfigInline
+                          skillId={skillId}
+                          blackboard={blackboard}
+                          declaredFiles={declaredFiles}
+                          onSave={handleInputConfigSave}
+                          isGraphInput={view.isGraphLevel}
+                        />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </PanelFieldRow>
+                </>
+              ) : null}
+
+              {scope.showTestInputs ? (
                 <PanelFieldRow>
-                  <Field>
-                    <YamlFieldLabel>input files</YamlFieldLabel>
-                    <div className="space-y-1">
-                      {declaredFiles.map((decl) => (
-                        <FileListRow key={decl.field} decl={decl} />
-                      ))}
-                    </div>
-                  </Field>
+                  <TestInputsSection
+                    skillId={skillId}
+                    workspaceRoot={workspaceRoot}
+                    selectedId={selectedTestInputId}
+                    onSelect={onSelectTestInput}
+                    onFileOpen={onFileOpen}
+                  />
                 </PanelFieldRow>
               ) : null}
-              <PanelFieldRow>
-                <TestInputsSection
-                  skillId={skillId}
-                  workspaceRoot={workspaceRoot}
-                  selectedId={selectedTestInputId}
-                  onSelect={onSelectTestInput}
-                  onFileOpen={onFileOpen}
-                />
-              </PanelFieldRow>
-              <ExampleField
-                title="Output"
-                schema={view.outputSchema}
-                relPath={view.relPath}
-                onEdit={editSource}
-                onConfigure={() => setOutputConfigOpen(true)}
-              />
-              {artifacts.length > 0 ? (
+
+              {scope.showOutput ? (
+                <ExampleField title="Output" schema={view.outputSchema} relPath={view.relPath} onEdit={editSource} />
+              ) : null}
+
+              {scope.showArtifacts ? (
                 <PanelFieldRow>
                   <Field>
-                    <YamlFieldLabel>output artifacts</YamlFieldLabel>
-                    <div className="space-y-1">
-                      {artifacts.map((row) => (
-                        <ArtifactListRow key={row.stem} row={row} perItemCount={perItemCount} />
-                      ))}
+                    <div className="flex items-center justify-between gap-2">
+                      <YamlFieldLabel>output artifacts</YamlFieldLabel>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 gap-1 px-2 text-[11px]"
+                        onClick={() => setOutputConfigOpen(true)}
+                        aria-label="Configure output artifacts"
+                      >
+                        <Settings2 className="size-3" aria-hidden />
+                        Configure
+                      </Button>
                     </div>
+                    {artifacts.length > 0 ? (
+                      <div className="space-y-1">
+                        {artifacts.map((row) => (
+                          <ArtifactListRow key={row.stem} row={row} perItemCount={perItemCount} />
+                        ))}
+                      </div>
+                    ) : (
+                      <FieldDescription>No artifacts configured yet.</FieldDescription>
+                    )}
                   </Field>
                 </PanelFieldRow>
               ) : null}
@@ -393,16 +414,6 @@ export function InputPanel({
           </FieldSet>
         </PanelBody>
       </ScrollArea>
-      <InputConfigDialog
-        open={inputConfigOpen}
-        onOpenChange={setInputConfigOpen}
-        skillId={skillId}
-        targetLabel={view.isGraphLevel ? "GRAPH.md io.inputs" : view.label}
-        blackboard={blackboard}
-        declaredFiles={declaredFiles}
-        onSave={handleInputConfigSave}
-        isGraphInput={view.isGraphLevel}
-      />
       <OutputConfigDialog
         open={outputConfigOpen}
         onOpenChange={setOutputConfigOpen}

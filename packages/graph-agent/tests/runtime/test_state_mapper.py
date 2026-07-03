@@ -70,6 +70,97 @@ def test_build_phase_input_passes_when_required_fields_present() -> None:
     assert phase_input["data"].model_dump() == {"topic": "A"}
 
 
+def test_build_phase_input_missing_nested_required_field_raises() -> None:
+    """MVP1 contract (compile-rules §2.3 slice row): ``required`` is enforced at
+    EVERY object nesting level, not only the top. A declared-required sub-field
+    of a present object (``chapter.aa_number``) missing from the blackboard is
+    the same mapping failure as a missing top-level field — dotted field_path so
+    the studio config tree can point at the exact broken sub-field."""
+    mapper = StateMapper(
+        input_schema={
+            "type": "object",
+            "required": ["chapter"],
+            "properties": {
+                "chapter": {
+                    "type": "object",
+                    "required": ["aa_number"],
+                    "properties": {"aa_number": {"type": "integer"}},
+                },
+            },
+        },
+        phase_id="analyze",
+    )
+    state = WorkflowState(
+        data=BusinessData.model_validate({"chapter": {"title": "x"}}),
+        flow=FrameworkState(),
+        messages=[],
+    )
+
+    with pytest.raises(GraphAgentFatalError) as exc_info:
+        mapper.build_phase_input(state)
+
+    assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
+    assert exc_info.value.payload.field_path == "chapter.aa_number"
+    assert "chapter.aa_number" in str(exc_info.value)
+
+
+def test_build_phase_input_passes_when_nested_required_present() -> None:
+    mapper = StateMapper(
+        input_schema={
+            "type": "object",
+            "required": ["chapter"],
+            "properties": {
+                "chapter": {
+                    "type": "object",
+                    "required": ["aa_number"],
+                    "properties": {"aa_number": {"type": "integer"}},
+                },
+            },
+        },
+        phase_id="analyze",
+    )
+    state = WorkflowState(
+        data=BusinessData.model_validate({"chapter": {"aa_number": 3, "title": "x"}}),
+        flow=FrameworkState(),
+        messages=[],
+    )
+
+    phase_input = mapper.build_phase_input(state)
+
+    assert phase_input["data"].model_dump() == {"chapter": {"aa_number": 3, "title": "x"}}
+
+
+def test_build_phase_input_absent_optional_object_skips_nested_required() -> None:
+    """Nested required only bites when the parent object is present (standard
+    JSON-Schema semantics): an ABSENT optional object must not raise on its
+    unmet sub-required — only the missing parent (if the parent itself is
+    required) would."""
+    mapper = StateMapper(
+        input_schema={
+            "type": "object",
+            "required": ["topic"],
+            "properties": {
+                "topic": {"type": "string"},
+                "chapter": {
+                    "type": "object",
+                    "required": ["aa_number"],
+                    "properties": {"aa_number": {"type": "integer"}},
+                },
+            },
+        },
+        phase_id="analyze",
+    )
+    state = WorkflowState(
+        data=BusinessData.model_validate({"topic": "A"}),
+        flow=FrameworkState(),
+        messages=[],
+    )
+
+    phase_input = mapper.build_phase_input(state)
+
+    assert phase_input["data"].model_dump() == {"topic": "A"}
+
+
 def test_ensure_no_input_write_stub_is_deleted() -> None:
     """The no-op ensure_no_input_write stub (documented code debt) must be gone,
     not silently exported as if it protected anything."""

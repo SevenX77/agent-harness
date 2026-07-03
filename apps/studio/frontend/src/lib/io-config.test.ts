@@ -10,10 +10,25 @@ import {
   applyGraphArtifacts,
   applyIoInputChecks,
   blackboardAtNode,
+  blackboardAtOutput,
   graphArtifactsOf,
   reconcileInputFields,
   reconcileOutputFields,
 } from './io-config'
+import { parseFrontmatter } from './io-declarations'
+
+interface FieldSchemaShape {
+  type?: string
+  required?: string[]
+  properties?: Record<string, FieldSchemaShape>
+}
+
+/** Parse a written md string's frontmatter into a typed-enough shape for assertions. */
+function parseFrontmatterYaml(content: string): {
+  io: { inputs: { required?: string[]; properties: Record<string, FieldSchemaShape> } }
+} {
+  return parseFrontmatter(content) as never
+}
 
 const GRAPH_MD = `---
 schema_version: "v0.3.0"
@@ -238,9 +253,9 @@ describe('applyIoInputChecks', () => {
   it('rebuilds io.inputs from checked blackboard fields plus file declarations', () => {
     const next = applyIoInputChecks(REPORT_MD, {
       blackboard: [
-        { name: 'segments', type: 'array', checked: true },
-        { name: 'project_id', type: 'string', checked: true },
-        { name: 'chapters', type: 'array', checked: false },
+        { path: 'segments', type: 'array', checked: true },
+        { path: 'project_id', type: 'string', checked: true },
+        { path: 'chapters', type: 'array', checked: false },
       ],
       files: [
         {
@@ -266,6 +281,101 @@ describe('applyIoInputChecks', () => {
     expect(next).toContain('<action>report</action>')
     const required = next.match(/required:\n(?:\s+- .+\n)+/)?.[0] ?? next
     expect(required).toContain('segments')
+  })
+})
+
+describe('nested addressing (chapter.aa_number, PM 2026-07-03)', () => {
+  // GRAPH.md io.inputs.chapter is an object with a nested aa_number; phase `seg`
+  // consumes chapter.aa_number and produces a nested segmentation_result.
+  const NESTED_GRAPH = `---
+schema_version: "v0.3.0"
+name: nested
+io:
+  inputs:
+    type: object
+    required: [chapter]
+    properties:
+      chapter:
+        type: object
+        properties:
+          aa_number: {type: integer}
+          title: {type: string}
+  outputs:
+    type: object
+    required: [segmentation_result]
+    properties:
+      segmentation_result: {type: object}
+phases: [seg]
+---
+<phase depends_on="input" output>seg</phase>
+`
+  const SEG_MD = `---
+io:
+  inputs:
+    type: object
+    required: [chapter]
+    properties:
+      chapter:
+        type: object
+        required: [aa_number]
+        properties:
+          aa_number: {type: integer}
+  outputs:
+    type: object
+    required: [segmentation_result]
+    properties:
+      segmentation_result:
+        type: object
+        properties:
+          bb_number: {type: integer}
+actions: [seg]
+---
+<action>seg</action>
+`
+  function nestedDetail(): SkillDetail {
+    return {
+      id: 'nested',
+      graph_topology: [{ id: 'seg', depends_on: ['input'] }],
+      files: { 'GRAPH.md': NESTED_GRAPH, 'phases/seg/LOGIC.md': SEG_MD },
+    } as unknown as SkillDetail
+  }
+
+  it('blackboardAtNode expands nested object sub-fields as checkable rows', () => {
+    const rows = blackboardAtNode(nestedDetail(), 'seg')
+    const byPath = new Map(rows.map((r) => [r.path, r]))
+    // parent object + its nested leaves are all addressable rows
+    expect(byPath.get('chapter')).toMatchObject({ depth: 0, hasChildren: true, from: 'input' })
+    // seg declares required chapter.aa_number → that nested path is checked
+    expect(byPath.get('chapter.aa_number')).toMatchObject({ depth: 1, checked: true })
+    // chapter.title is on the blackboard but not consumed → present, unchecked
+    expect(byPath.get('chapter.title')).toMatchObject({ depth: 1, checked: false })
+  })
+
+  it('blackboardAtOutput expands nested output object sub-fields for display', () => {
+    const rows = blackboardAtOutput(nestedDetail())
+    const paths = rows.map((r) => r.path)
+    expect(paths).toContain('segmentation_result')
+    expect(paths).toContain('segmentation_result.bb_number')
+  })
+
+  it('applyIoInputChecks writes a nested io.inputs from a checked sub-path', () => {
+    const next = applyIoInputChecks(SEG_MD, {
+      blackboard: [
+        { path: 'chapter', type: 'object', checked: false },
+        { path: 'chapter.aa_number', type: 'integer', checked: true },
+        { path: 'chapter.title', type: 'string', checked: false },
+      ],
+      files: [],
+    })
+    const fm = parseFrontmatterYaml(next)
+    const chapter = fm.io.inputs.properties.chapter
+    expect(chapter.type).toBe('object')
+    expect(chapter.required).toEqual(['aa_number'])
+    expect(chapter.properties?.aa_number).toMatchObject({ type: 'integer' })
+    // unchecked title must NOT be written back
+    expect(chapter.properties?.title).toBeUndefined()
+    // chapter itself is required at the top level (parent of a required sub-path)
+    expect(fm.io.inputs.required).toContain('chapter')
   })
 })
 

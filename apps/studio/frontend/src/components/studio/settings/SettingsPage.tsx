@@ -6,7 +6,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, testEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerDraftIdentityKey, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -936,38 +936,21 @@ export function useSettingsPageController(): SettingsPageController {
     }
   }
 
-  // Item 2: clicking one endpoint tag re-probes only THAT (URL, protocol) cell
-  // via the single-endpoint test path — not the whole provider. The
-  // protocol_unsupported half-life bypass stays on the dedicated Re-probe button
-  // (forceReprobeEndpoint); a plain tag click uses the standard, non-force test.
-  async function runEndpointTest(endpointId: string) {
-    if (!ensureBackendReachable()) return
-    pendingRoleProjectionRefreshRef.current = true
-    const toastId = `endpoint-test-${endpointId}`
-    toast.loading(`Testing ${endpointId}...`, { id: toastId })
-    try {
-      await testEndpoint(endpointId)
-      const next = await getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
-      setCredentials(next)
-      setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
-      const tested = next.providers.find((provider) => provider.id === endpointId)
-      if (tested?.last_error_code === 'protocol_unsupported') {
-        toast.info(`Still unsupported: ${tested.last_test_message ?? 'the URL does not speak this protocol.'}`, { id: toastId })
-      } else {
-        toast.success(`Tested ${endpointId}: ${tested?.last_test_message ?? 'done.'}`, { id: toastId })
-      }
-    } catch (error) {
-      toast.error(composeRequestErrorMessage(error, "Endpoint test failed"), { id: toastId })
-    }
-  }
-
-  async function runProviderGetModels(providerId: string) {
+  async function runProviderGetModels(providerId: string, options: { onlyEndpointId?: string } = {}) {
     if (!ensureBackendReachable()) return
     await flushCredentialsSave()
     const draft = providerDraftForAction(draftsRef.current, providerId)
     if (!draft) return
     const isOfficial = inferProviderKind(draft) === "official"
-    const endpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
+    const allEndpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
+    // Item 2: clicking one endpoint tag runs THIS SAME card-Test flow, only
+    // scoped to the one clicked (URL, protocol) endpoint — so the get-models
+    // probe and its per-step toast are identical to pressing Test, not a
+    // separate lighter path with its own toast.
+    const endpointDrafts = options.onlyEndpointId
+      ? allEndpointDrafts.filter((endpointDraft) => endpointDraft.id === options.onlyEndpointId)
+      : allEndpointDrafts
+    if (endpointDrafts.length === 0) return
     const baseUrlSteps = isOfficial ? [] : providerBaseUrlStepsForEndpointDrafts(endpointDrafts)
     const baseUrlStepByKey = new Map(baseUrlSteps.map((step, index) => [step.key, { ...step, index }]))
     const totalProgressSteps = endpointDrafts.length + baseUrlSteps.length
@@ -1182,7 +1165,17 @@ export function useSettingsPageController(): SettingsPageController {
     ensureCredentialsHydrated,
     onProviderFieldChange: updateProviderField,
     onGetProviderModels: (providerId) => void runProviderGetModels(providerId),
-    onProbeEndpoint: (endpointId) => void runEndpointTest(endpointId),
+    onProbeEndpoint: (endpointId) => {
+      // Item 2: a single endpoint-tag click runs the SAME card-Test flow scoped
+      // to just this endpoint (same get-models probe + toast). Guard readiness
+      // first so a disconnected backend refuses uniformly (§ backend readiness
+      // gate), then route through the owning provider's get-models.
+      if (!ensureBackendReachable()) return
+      const owner = draftsRef.current.find((candidate) =>
+        providerEndpointDraftsForAction(candidate).some((endpointDraft) => endpointDraft.id === endpointId),
+      )
+      if (owner) void runProviderGetModels(owner.id, { onlyEndpointId: endpointId })
+    },
     onForceEndpointTest: (endpointId) => void forceReprobeEndpoint(endpointId),
     onDeleteProvider: deleteProvider,
     onDeleteProviderEndpoints: (endpointIds) => void deleteProviderEndpoints(endpointIds),

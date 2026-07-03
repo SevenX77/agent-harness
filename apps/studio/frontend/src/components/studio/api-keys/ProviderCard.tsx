@@ -783,11 +783,13 @@ function endpointStatusLabel(status: TestMessageStatus): string {
 function endpointStatusSurfaceClass(status: TestMessageStatus): string {
   if (status === "ok") return "border-success bg-success/10 text-foreground"
   if (status === "testing") return "border-primary/70 bg-primary/10 text-foreground"
-  // untested-but-configured is a live "click to test" target (item 2), so it
-  // reads as neutral/interactive, NOT muted. Design §4.2: untested = gray but
-  // SELECTABLE (no "无法选" qualifier); UI-spec §2.9: "neutral/untested" tag.
-  // Muting it made an actionable cell look as dead as an unusable one.
-  if (status === "untested") return "border-border bg-muted/20 text-foreground"
+  // untested-but-configured is a live "click to test" target (item 2). ONLY the
+  // TEXT is un-muted (readable foreground) so it no longer looks as dead as an
+  // unusable cell; the border + surface keep the SAME quiet muted treatment as
+  // every other neutral cell — we do NOT promote the border to a full-strength
+  // colour (that made the tag shout like a verified/failed one). Design §4.2:
+  // untested = gray but SELECTABLE; UI-spec §2.9: "neutral/untested" tag.
+  if (status === "untested") return "border-border/70 bg-muted/10 text-foreground"
   // not_configured: no api key / base url yet → nothing to test → muted.
   if (status === "not_configured") return "border-border/70 bg-muted/10 text-muted-foreground"
   // protocol_unsupported is a dormant architectural fact about the (URL,

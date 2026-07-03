@@ -20,6 +20,7 @@ export function SettingsPageContent({
   drafts,
   pendingAddProviderId,
   saveStatus,
+  backendReachable,
   rolesData,
   modelGroups,
   rolesSaveStatus,
@@ -153,6 +154,7 @@ export function SettingsPageContent({
                     drafts={drafts}
                     pendingAddProviderId={pendingAddProviderId}
                     saveStatus={saveStatus}
+                    backendReachable={backendReachable}
                     onProviderFieldChange={onProviderFieldChange}
                     onGetProviderModels={onGetProviderModels}
                     onForceEndpointTest={onForceEndpointTest}

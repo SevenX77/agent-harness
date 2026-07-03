@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
-import { act } from "react"
+import { act, useEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { getCredentials } from "../../../api/llm"
+import { deleteEndpoint, getCredentials } from "../../../api/llm"
 import { useSettingsPageController } from "./SettingsPage"
+
+type Controller = ReturnType<typeof useSettingsPageController>
+let capturedController: Controller | null = null
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -53,8 +57,9 @@ vi.mock("@/hooks/useDebouncedRolesSave", () => ({
   }),
 }))
 
+const mockEventStream = vi.hoisted(() => ({ connectionLost: false }))
 vi.mock("@/hooks/useStudioEventStream", () => ({
-  useStudioEventStream: () => ({ connectionLost: false }),
+  useStudioEventStream: () => ({ connectionLost: mockEventStream.connectionLost }),
 }))
 
 vi.mock("../../../api/llm", async (importOriginal) => {
@@ -72,8 +77,13 @@ vi.mock("../../../api/llm", async (importOriginal) => {
   }
 })
 
-function ControllerProbe() {
-  useSettingsPageController()
+function ControllerProbe({ capture }: { capture?: (controller: Controller) => void }) {
+  const controller = useSettingsPageController()
+  // Capture in an effect, not during render — reassigning an outer variable
+  // during render is a lint-flagged side effect (react-hooks/globals).
+  useEffect(() => {
+    capture?.(controller)
+  })
   return null
 }
 
@@ -83,6 +93,8 @@ describe("useSettingsPageController lifecycle", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockEventStream.connectionLost = false
+    capturedController = null
     container = document.createElement("div")
     document.body.appendChild(container)
     root = createRoot(container)
@@ -133,5 +145,49 @@ describe("useSettingsPageController lifecycle", () => {
     })
 
     expect(getCredentials).toHaveBeenCalled()
+  })
+
+  it("refuses a settings mutation when the backend event stream is disconnected", async () => {
+    // A mutating action must not fire into an unreachable backend (the request
+    // gets no response and surfaces a bare "Backend unavailable" toast, and an
+    // optimistic delete removes the card before reverting).
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = true
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    act(() => {
+      capturedController?.onDeleteProvider("openrouter")
+    })
+
+    expect(deleteEndpoint).not.toHaveBeenCalled()
+    expect(vi.mocked(toast.error)).toHaveBeenCalled()
+    expect(capturedController?.backendReachable).toBe(false)
+  })
+
+  it("allows a settings mutation when the backend is reachable", async () => {
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(capturedController?.backendReachable).toBe(true)
+
+    await act(async () => {
+      capturedController?.onDeleteProvider("openrouter")
+      await Promise.resolve()
+    })
+
+    expect(deleteEndpoint).toHaveBeenCalledWith("openrouter")
   })
 })

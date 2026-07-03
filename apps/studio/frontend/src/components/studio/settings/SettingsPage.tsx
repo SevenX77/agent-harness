@@ -660,6 +660,21 @@ export function useSettingsPageController(): SettingsPageController {
     onResync: handleEventResync,
   }, { enabled: apiReady })
 
+  // A mutating settings action (delete / test / add) must never fire into an
+  // unreachable backend: the request gets no response and surfaces a bare
+  // "Backend unavailable" toast, and an optimistic delete removes the card
+  // before silently reverting. Gate every mutation on LIVE reachability —
+  // config resolved (apiReady) AND the event stream connected (!connectionLost).
+  // When not reachable the action is refused with a clear "reconnecting"
+  // message and the UI disables the buttons (see `backendReachable` in the
+  // returned controller).
+  const backendReachable = apiReady && !connectionLost
+  function ensureBackendReachable(): boolean {
+    if (backendReachable) return true
+    toast.error("Backend is reconnecting — please try again in a moment.")
+    return false
+  }
+
   useEffect(() => {
     if (!apiReady) return
     const enabled = appSettings.settings.remote_model_catalog_enabled
@@ -837,6 +852,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   function addProviderWithData(data: AddProviderFormSubmission) {
+    if (!ensureBackendReachable()) return
     const draft = draftFromAddProviderSubmission(data, pendingAddProviderDraft?.id)
     setPendingAddProviderDraft(null)
     dirtyProviderIdsRef.current.add(draft.id)
@@ -856,6 +872,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   function deleteProvider(providerId: string) {
+    if (!ensureBackendReachable()) return
     const draft = providerDraftForAction(draftsRef.current, providerId)
     const endpointIds = draft
       ? providerEndpointDraftsForAction(draft).map((endpointDraft) => endpointDraft.id)
@@ -868,6 +885,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   async function deleteProviderEndpoints(endpointIds: string[]) {
+    if (!ensureBackendReachable()) return
     const uniqueEndpointIds = Array.from(new Set(endpointIds.filter(Boolean)))
     if (uniqueEndpointIds.length === 0) return
     pendingRoleProjectionRefreshRef.current = true
@@ -898,6 +916,7 @@ export function useSettingsPageController(): SettingsPageController {
   // bypassing the protocol_unsupported half-life gate — the affordance for
   // "the provider may have started supporting this protocol today".
   async function forceReprobeEndpoint(endpointId: string) {
+    if (!ensureBackendReachable()) return
     pendingRoleProjectionRefreshRef.current = true
     const toastId = `force-endpoint-test-${endpointId}`
     toast.loading(`Re-probing protocol for ${endpointId}...`, { id: toastId })
@@ -918,6 +937,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   async function runProviderGetModels(providerId: string) {
+    if (!ensureBackendReachable()) return
     await flushCredentialsSave()
     const draft = providerDraftForAction(draftsRef.current, providerId)
     if (!draft) return
@@ -1133,6 +1153,7 @@ export function useSettingsPageController(): SettingsPageController {
       setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
     },
     connectionLost,
+    backendReachable,
     ensureCredentialsHydrated,
     onProviderFieldChange: updateProviderField,
     onGetProviderModels: (providerId) => void runProviderGetModels(providerId),

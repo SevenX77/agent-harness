@@ -6,6 +6,10 @@ type ToolCallEvent = CopilotToolUseStartEvent | CopilotToolUseResultEvent
 
 interface ToolCallBubbleProps {
   event: ToolCallEvent
+  /** R7-A: the spinner only animates while the turn is still streaming — a
+   * settled turn folds the whole process away, so a lingering spinner (the old
+   * bug: 中间过程完成后 loading 圈继续转) must never survive the turn. */
+  streaming?: boolean
 }
 
 // F1: each tool call folds under a semantic verb (read=Explored / write=Worked /
@@ -37,21 +41,21 @@ function toolCallLabel(event: ToolCallEvent, failed: boolean): string {
   return verbs ? verbs.done : `${name} completed`
 }
 
-function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {
+function ToolCallBubbleBase({ event, streaming = false }: ToolCallBubbleProps) {
   const isResult = event.type === 'tool_use_result'
   const failed = isResult && !event.success
   const label = toolCallLabel(event, failed)
+  // A running tool spins only while the turn streams; a start event left behind
+  // by a settled turn shows a neutral check, never a forever-spinner (R7-A).
+  const pending = event.type === 'tool_use_start' && streaming
 
   return (
     <details
       // Failures stay open so the user sees them without a click; everything
       // else folds (click the summary to expand the full input/output).
+      // R7-A: no left rule — PM「去掉对话小字前面的那根竖线」.
       open={failed}
-      className={`border-l py-1 pl-3 text-xs ${
-        failed
-          ? 'border-destructive/50 text-destructive'
-          : 'border-border/70 text-muted-foreground'
-      }`}
+      className={`py-0.5 text-xs ${failed ? 'text-destructive' : 'text-muted-foreground'}`}
     >
       {/* R5-D: tool activity is SECONDARY info — one shade dimmer than the
           answer text (PM: 挂载/工具调用结果都用淡一号的字); hover restores
@@ -61,7 +65,7 @@ function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {
           failed ? 'text-destructive' : 'text-muted-foreground hover:text-foreground'
         }`}
       >
-        {event.type === 'tool_use_start' ? (
+        {pending ? (
           <Loader2 className="size-3.5 animate-spin" />
         ) : failed ? (
           <CircleAlert className="size-3.5" />
@@ -89,5 +93,6 @@ export const ToolCallBubble = React.memo(
   (prev, next) =>
     prev.event.id === next.event.id &&
     prev.event.status === next.event.status &&
-    prev.event.type === next.event.type,
+    prev.event.type === next.event.type &&
+    prev.streaming === next.streaming,
 )

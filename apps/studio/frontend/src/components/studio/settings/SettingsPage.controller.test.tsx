@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, getCredentials, testEndpoint } from "../../../api/llm"
+import { deleteEndpoint, getCredentials, getProviderModels } from "../../../api/llm"
 import { useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -71,7 +71,6 @@ vi.mock("../../../api/llm", async (importOriginal) => {
     deleteEndpoint: vi.fn(),
     deleteModelBundle: vi.fn(),
     deleteRole: vi.fn(),
-    testEndpoint: vi.fn(() => Promise.resolve({})),
     getCredentials: vi.fn(() => Promise.resolve({ providers: [] })),
     getModelGroups: vi.fn(() => Promise.resolve([])),
     getProviderModels: vi.fn(),
@@ -194,9 +193,12 @@ describe("useSettingsPageController lifecycle", () => {
     expect(deleteEndpoint).toHaveBeenCalledWith("openrouter")
   })
 
-  it("probes a single endpoint when its tag is activated (item 2)", async () => {
-    // Clicking one endpoint tag re-probes only THAT (URL, protocol) cell via the
-    // single-endpoint test path, not the whole provider.
+  it("does not fire a get-models probe for an endpoint with no owning provider (item 2 safe no-op)", async () => {
+    // A tag click routes through the owning provider's card-Test flow. An
+    // endpoint with no matching provider draft (nothing to scope to) is a safe
+    // no-op — it must not crash or fire a get-models call. The positive path
+    // (owner found → scoped get-models with the card-Test toast) is verified in
+    // the browser, since it needs rendered provider drafts this mock omits.
     configureApiToken("sidecar-token")
     mockEventStream.connectionLost = false
     await act(async () => {
@@ -213,7 +215,7 @@ describe("useSettingsPageController lifecycle", () => {
       await Promise.resolve()
     })
 
-    expect(testEndpoint).toHaveBeenCalledWith("qiniu-openai")
+    expect(getProviderModels).not.toHaveBeenCalled()
   })
 
   it("refuses to probe an endpoint when the backend is disconnected (item 2 + readiness gate)", async () => {
@@ -231,7 +233,7 @@ describe("useSettingsPageController lifecycle", () => {
       capturedController?.onProbeEndpoint("qiniu-openai")
     })
 
-    expect(testEndpoint).not.toHaveBeenCalled()
+    expect(getProviderModels).not.toHaveBeenCalled()
     expect(vi.mocked(toast.error)).toHaveBeenCalled()
   })
 })

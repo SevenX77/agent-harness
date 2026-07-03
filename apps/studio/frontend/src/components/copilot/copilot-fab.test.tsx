@@ -1,19 +1,17 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { TooltipProvider } from '@/components/ui/tooltip'
 import { CopilotFab } from './copilot-fab'
 
 describe('CopilotFab', () => {
-  it('renders a labelled, solid circular button carrying the MoirAI mark', () => {
+  it('renders a labelled round canvas button carrying the MoirAI mark', () => {
     const html = renderToStaticMarkup(
-      <TooltipProvider>
-        <CopilotFab onClick={vi.fn()} />
-      </TooltipProvider>,
+      <CopilotFab position={null} onPositionChange={vi.fn()} panelWidth={360} onOpen={vi.fn()} />,
     )
-    // A real button with an accessible name — not a bare icon on the canvas.
     expect(html).toContain('aria-label="打开 MoirAI"')
     expect(html).toContain('rounded-full')
-    // The MoirAI constellation mark is inside it.
+    // MoirAI constellation mark, themed on the canvas accent (no hardcoded hex).
     expect(html).toContain('<svg')
+    expect(html).toContain('--studio-canvas-accent')
+    expect(html).not.toMatch(/#[0-9a-fA-F]{3,6}\b/)
   })
 })

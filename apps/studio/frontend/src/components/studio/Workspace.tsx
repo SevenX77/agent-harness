@@ -8,6 +8,7 @@ import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/c
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { CopilotFab } from "@/components/copilot/copilot-fab"
+import type { Point } from "@/components/copilot/copilot-fab-geometry"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
 import { findPromptEvent } from "@/utils/trace"
@@ -300,6 +301,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // feed both the overlay sizes and the canvas safe-area vars, so fit-view tracks.
   const [leftPanelWidth, setLeftPanelWidth] = useState(384)
   const [copilotWidth, setCopilotWidth] = useState(352)
+  // FAB position on the canvas; null = default top-right anchor. Persists across
+  // open/close within the session (survives the panel collapse animation).
+  const [fabPosition, setFabPosition] = useState<Point | null>(null)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const currentWorkspaceSelection = navStack.at(-1) ?? null
   const currentWorkspaceIdentity = useMemo(
@@ -2352,9 +2356,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // Collapsed → a solid MoirAI FAB at the same bottom-right corner; the panel
   // zoom-collapses into it and grows back out of it. Only with a skill loaded.
   const copilotFab = currentSkillId && !copilotOpen ? (
-    <div className="pointer-events-auto absolute bottom-3 right-3 z-30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90 motion-safe:duration-200 motion-safe:ease-out">
-      <CopilotFab onClick={() => setCopilotOpen(true)} />
-    </div>
+    <CopilotFab
+      position={fabPosition}
+      onPositionChange={setFabPosition}
+      panelWidth={copilotWidth}
+      onOpen={() => setCopilotOpen(true)}
+    />
   ) : null
 
   return (

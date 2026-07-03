@@ -178,7 +178,7 @@
    "n": 32,
    "cap": "copilot-identity-moirai",
    "design_ref": "atom-32",
-   "current": "现状:已实现且实机验证。header = MoirAI + Cassiopeia 星座标(moirai-mark.tsx,currentColor);顶栏 Sparkles 开关已删,改画布右下角实心紫 FAB(copilot-fab.tsx);收起走 header PanelRightClose、展开走 FAB;WorkspaceRightPanelOverlay data-state 动画(origin-bottom-right,fade 常驻 / zoom+slide 仅 motion-safe),useAnimatedPresence 200ms 保命到出场尾再卸载。实测:header 显 MoirAI + 标、收起后 FAB 在近黑画布清晰可见、点 FAB 面板复现。",
+   "current": "现状:已实现且实机验证。header = MoirAI + Cassiopeia 星座标(moirai-mark.tsx,currentColor)。顶栏 Sparkles 已删,开关 = 画布圆形 FAB(copilot-fab.tsx):默认右上、画布内可拖(pointer + clampFabPosition + isTapGesture 分拖/点)、36px 无边框、底=--studio-canvas-surface + 标=--studio-canvas-accent(与面板/header 同色);点 FAB 走 WAAPI L 路径(travelSteps 垂直→水平→headerLogoTarget ~440ms)后 onOpen,面板 origin-top-left 从 logo 角展开;收起走 header PanelRightClose。纯几何抽 copilot-fab-geometry.ts(8 单测)。实测(recon-demo/深色):FAB 默认右上(距缘~12px)、36px 无边框、bg/标取到 surface/accent 值、拖到画布中心成功、中途帧见先垂直后水平、tap 后面板打开。",
    "gap": "无。Lachesis/Atropos 两席为设计源保留席、未实现,UI 不显示。",
    "fe_status": "符合",
    "be_status": "n/a",
@@ -630,10 +630,10 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "moirai-mark.test.tsx:无 title 时 aria-hidden、有 title 时 role=img+<title>、currentColor 无硬编码色、五星(5 circle)。copilot-fab.test.tsx:FAB 有可访问名「打开 MoirAI」+ rounded-full + 内含标。动画属纯视觉、按 SOP 不单测;既有 1635 例全绿。"
+    "copilot-fab-geometry.test.ts(8 例,TDD):defaultFabPosition 右上锚点、clampFabPosition 画布内夹取、headerLogoTarget 落在面板左侧近顶、travelSteps L 路径(先垂直后水平)、isTapGesture 拖/点阈值。moirai-mark.test.tsx:aria-hidden/role=img+title、currentColor 无硬编码色、五星。copilot-fab.test.tsx:可访问名「打开 MoirAI」+ rounded-full + accent 标 + 无硬编码色。拖拽/WAAPI 动画属纯视觉、按 SOP 不单测;既有 1652 例全绿。"
    ],
    "layer2": [
-    "真机 Playwright(recon-demo,深色):header 渲染 MoirAI + Cassiopeia 星座标;点 header 收起控件 → 面板卸载、画布右下角实心紫 FAB 浮现且在近黑画布清晰可见;点 FAB → 面板从右下角生长复现。"
+    "真机 Playwright(recon-demo,深色):收起后 FAB 默认在画布右上(距缘~12px)、36px、border 0px、bg 取到 --studio-canvas-surface、标取到 --studio-canvas-accent;拖拽 → FAB 移到画布中心成功;tap → 中途帧见先垂直上再水平飞、随后面板打开(origin-top-left 展开)。"
    ],
    "screenshots": [
     {
@@ -642,11 +642,19 @@
     },
     {
      "file": "n1-35-moirai-fab.png",
-     "caption": "收起态:画布右下角实心紫圆形 FAB + 白标,近黑画布上清晰(修「裸 icon 看不清」)"
+     "caption": "收起态:FAB 默认右上,小尺寸无边框,底=面板 surface + accent 紫标(像 header logo 摘到画布上)"
+    },
+    {
+     "file": "n1-37-fab-drag.png",
+     "caption": "FAB 在画布范围内可自由拖动(此处拖到画布中心)"
+    },
+    {
+     "file": "n1-38-fab-travel.png",
+     "caption": "点 FAB 中途帧:先垂直往上、再水平飞向 panel header logo 位,到位后面板展开"
     },
     {
      "file": "n1-36-moirai-expanded.png",
-     "caption": "点 FAB 从右下角生长展开:MoirAI 面板复现(空态引导 + composer)"
+     "caption": "面板从 header logo 角(origin-top-left)展开:MoirAI 面板复现(空态引导 + composer)"
     }
    ]
   },

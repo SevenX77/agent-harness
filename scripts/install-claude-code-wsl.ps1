@@ -13,6 +13,21 @@
   "Open in Claude Code" button drives (apps/studio/tauri/src/lib.rs) has a
   working `ah` + `claude` waiting for it inside WSL.
 
+  Ownership split (this script is deliberately in two parts):
+
+    PART A — ah runtime prerequisites (WSL2, distro, systemd, mirrored
+      networking, tz/locale/proxy, tmux). These architecturally belong in
+      ah's own installer; we've filed that as a handoff requirement
+      (docs/handoffs/ah-installer-provisioning-and-master-defaults.md, Req 1).
+      Until ah owns them, this script provisions them as a TEMPORARY BRIDGE —
+      when ah's installer provisions its own runtime, delete PART A and let
+      PART B's `ah` install pull it in.
+
+    PART B — Studio's own Claude Code provider layer (install ah, install the
+      claude CLI, subscription auth). This is Studio's permanent
+      responsibility and stays here regardless of ah — the provider CLI and
+      the user's login are explicitly NOT ah's job (handoff Non-Goals).
+
   Idempotent — safe to re-run at any point; each step checks before acting.
 
   Two steps are genuinely gated behind one-time HUMAN action and cannot be
@@ -33,6 +48,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Write-Part($msg) { Write-Host "`n########## $msg ##########" -ForegroundColor Magenta }
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "    OK: $msg" -ForegroundColor Green }
 function Write-Skip($msg) { Write-Host "    already done: $msg" -ForegroundColor DarkGray }
@@ -58,12 +74,17 @@ function Invoke-Wsl {
   return $out
 }
 
-# Non-interactive `bash -lc` doesn't source ~/.bashrc, so claude/ah (both
-# installed under ~/.local/bin / ~/.cargo/bin) aren't on PATH unless every
-# in-distro command prepends it — bake that in here once instead of at each
-# call site (a missing prefix at one call site is exactly what made the
-# claude-CLI presence check misfire on the first real run of this script).
-$PathPrefix = 'export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"; '
+# Two things baked into every in-distro command:
+#  - PATH: non-interactive `bash -lc` doesn't source ~/.bashrc, so claude/ah
+#    (under ~/.local/bin / ~/.cargo/bin) aren't on PATH unless we prepend it
+#    (a missing prefix at one call site is what made the claude-CLI presence
+#    check misfire on the first real run of this script).
+#  - `cd "$HOME"`: run every ah command from a NEUTRAL cwd, never the ambient
+#    Windows dir this script was launched from. ah otherwise surfaces/records
+#    the launch cwd as a project (`ah doctor` -> `permissions:cwd - <repo>`,
+#    and bare ah commands persist per-cwd daemon state) — filed upstream as
+#    handoff Req 3; keeping cwd neutral here avoids binding ah to the repo.
+$PathPrefix = 'export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"; cd "$HOME"; '
 
 function Invoke-InDistro {
   param([string]$Bash, [switch]$AllowFail)
@@ -108,7 +129,14 @@ Write-Host "Studio / Claude Code (via ah) WSL bootstrap" -ForegroundColor White
 Write-Host "distro: $Distro`n"
 
 # ---------------------------------------------------------------------------
-Write-Step "1/9 WSL2 feature"
+# ===========================================================================
+# PART A — ah runtime prerequisites (TEMPORARY BRIDGE; belongs in ah's own
+# installer, see docs/handoffs/ah-installer-provisioning-and-master-defaults.md
+# Req 1). Delete this whole part once ah's installer provisions its own runtime.
+# ===========================================================================
+Write-Part "PART A: ah runtime prerequisites (should move into ah's installer)"
+
+Write-Step "A1 WSL2 feature"
 & wsl.exe --status | Out-Null
 if ($LASTEXITCODE -ne 0) {
   if (-not (Test-Admin)) {
@@ -125,7 +153,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Ok "WSL2 present"
 
 # ---------------------------------------------------------------------------
-Write-Step "2/9 $Distro distro"
+Write-Step "A2 $Distro distro"
 $distros = (& wsl.exe -l -q) -replace "`0", ""
 if ($distros -notcontains $Distro) {
   Write-Host "    installing $Distro (no interactive first-user wizard — we drive it as root)..."
@@ -143,7 +171,7 @@ Write-Ok "$Distro set as default WSL distro"
 Invoke-InDistro "true" | Out-Null
 
 # ---------------------------------------------------------------------------
-Write-Step "3/9 systemd + mirrored networking (may require one wsl --shutdown)"
+Write-Step "A3 systemd + mirrored networking (may require one wsl --shutdown)"
 $needsRestart = $false
 
 $wslConf = Invoke-InDistro "cat /etc/wsl.conf 2>/dev/null || true" -AllowFail
@@ -194,7 +222,7 @@ if ($needsRestart) {
 }
 
 # ---------------------------------------------------------------------------
-Write-Step "4/9 timezone (mirrors Windows -> WSL)"
+Write-Step "A4 timezone (mirrors Windows -> WSL)"
 $winTz = (Get-TimeZone).Id
 $iana = Resolve-Iana $winTz
 if ($null -eq $iana) {
@@ -205,7 +233,7 @@ if ($null -eq $iana) {
 }
 
 # ---------------------------------------------------------------------------
-Write-Step "5/9 locale"
+Write-Step "A5 locale"
 $winLocale = (Get-WinSystemLocale).Name  # e.g. "zh-CN", "en-US"
 $glibcLocale = ($winLocale -replace "-", "_") + ".UTF-8"
 Invoke-InDistro "apt-get update -y -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq locales >/dev/null"
@@ -214,7 +242,7 @@ Invoke-InDistro "update-locale LANG=en_US.UTF-8"
 Write-Ok "generated en_US.UTF-8 + $glibcLocale"
 
 # ---------------------------------------------------------------------------
-Write-Step "6/9 proxy (mirrors your Windows system proxy into WSL, if one is set)"
+Write-Step "A6 proxy (mirrors your Windows system proxy into WSL, if one is set)"
 $proxyKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 $proxySettings = Get-ItemProperty -Path $proxyKey -ErrorAction SilentlyContinue
 $profileScript = "/etc/profile.d/studio-proxy.sh"
@@ -229,20 +257,19 @@ if ($proxySettings -and $proxySettings.ProxyEnable -eq 1 -and $proxySettings.Pro
 }
 
 # ---------------------------------------------------------------------------
-Write-Step "7/9 base packages (tmux, curl, python3)"
+Write-Step "A7 base packages (tmux, curl, python3)"
 Invoke-InDistro "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux ca-certificates curl python3 >/dev/null"
 Write-Ok "tmux + curl + python3 present"
 
-# ---------------------------------------------------------------------------
-Write-Step "8/9 claude CLI + ah"
-$claudeVer = Invoke-InDistro "command -v claude >/dev/null 2>&1 && claude --version || echo MISSING" -AllowFail
-if (($claudeVer -join "") -match "MISSING") {
-  Invoke-InDistro "curl -fsSL https://claude.ai/install.sh | bash"
-  Write-Ok "claude CLI installed"
-} else {
-  Write-Skip "claude CLI present ($claudeVer)"
-}
+# ===========================================================================
+# PART B — Studio's own Claude Code provider layer. Permanent; stays regardless
+# of ah. Installs ah (whose installer would, post handoff Req 1, pull in PART A
+# itself), the claude CLI, and the subscription login. The provider CLI + auth
+# are explicitly NOT ah's job (handoff Non-Goals).
+# ===========================================================================
+Write-Part "PART B: Studio's Claude Code provider layer (ah + claude + auth)"
 
+Write-Step "B1 ah + claude CLI"
 $ahVer = Invoke-InDistro "command -v ah >/dev/null 2>&1 && ah version || echo MISSING" -AllowFail
 if (($ahVer -join "") -match "MISSING") {
   Invoke-InDistro "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/SevenX77/ah/releases/latest/download/ah-installer.sh | sh"
@@ -251,8 +278,16 @@ if (($ahVer -join "") -match "MISSING") {
   Write-Skip "ah present ($ahVer)"
 }
 
+$claudeVer = Invoke-InDistro "command -v claude >/dev/null 2>&1 && claude --version || echo MISSING" -AllowFail
+if (($claudeVer -join "") -match "MISSING") {
+  Invoke-InDistro "curl -fsSL https://claude.ai/install.sh | bash"
+  Write-Ok "claude CLI installed"
+} else {
+  Write-Skip "claude CLI present ($claudeVer)"
+}
+
 # ---------------------------------------------------------------------------
-Write-Step "9/9 auth (subscription login — not an API key)"
+Write-Step "B2 auth (subscription login — not an API key)"
 $hasWslAuth = Invoke-InDistro "test -f ~/.claude/.credentials.json && echo YES || echo NO" -AllowFail
 if (($hasWslAuth -join "") -match "YES") {
   Write-Skip "WSL claude is already authenticated"

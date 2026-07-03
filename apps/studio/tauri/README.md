@@ -182,6 +182,21 @@ OAuth —— 这两步是 OS/安全层面的硬性人工步骤,脚本跑到这�
 然后干净退出(不是报错),按提示做完再重跑同一条命令即可继续。跑完最后会打印
 `ah doctor` 的诊断结果自检。
 
+脚本刻意分成两部分,对应所有权边界:
+
+- **PART A — ah 的运行环境前置**(WSL2 / 发行版 / systemd / 镜像网络 / 时区/语言/代理 /
+  tmux)。这些**架构上应归 ah 自己的安装器**,已作为需求提给 ah 仓库
+  ([`docs/handoffs/ah-installer-provisioning-and-master-defaults.md`](../../../docs/handoffs/ah-installer-provisioning-and-master-defaults.md)
+  Req 1)。在 ah 接管前,本脚本作为**临时桥**代劳;一旦 ah 的安装器自装运行环境,
+  PART A 整段删掉,由 PART B 装 ah 时自动带出。
+- **PART B — Studio 自己的 Claude Code provider 层**(装 ah、装 claude CLI、订阅登录)。
+  这是 Studio 的**长期职责**,与 ah 无关地留在这里 —— provider CLI 和用户登录**明确不归
+  ah 管**(见 handoff Non-Goals)。
+
+同一份 handoff 还提了另外两条给 ah 的需求:修掉 ccbd-rust 时代那条坏掉的内置默认 master
+命令(`claude --dangerously-skip-permissions --continue /remote-control`,新工作区/root/本机
+attach 三处都会崩),以及无显式 `--config` 时不要擅自把当前目录当项目、eager 建全局状态。
+
 ## Phase 边界 (T1 不做)
 
 * **T2 (Python sidecar)**: 用 Tauri 的 sidecar 机制 / `std::process::Command` 拉起

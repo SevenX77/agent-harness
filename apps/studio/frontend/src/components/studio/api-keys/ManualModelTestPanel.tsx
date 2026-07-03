@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import i18n from "@/i18n"
 import { composeRequestErrorMessage } from "@/lib/llm-error-messages"
-import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResponse, type ProviderModelTestResult, type ProviderUiState } from "../../../api/llm"
+import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResult, type ProviderUiState } from "../../../api/llm"
 import { ProviderStateBadge } from "../settings/llm-roles/provider-state-badge"
+import { probeModelsWithConcurrency } from "./model-probe-runner"
 
 interface Props {
   providerKey: string
@@ -17,6 +18,9 @@ interface Props {
   endpointIds?: string[]
   notableProviderKey: string
   onModelsUpdated: (models: ModelInfo[]) => void
+  // P1a: report the model ids currently in flight so the provider card can pulse
+  // exactly those chips (per-model animation driven by the real atomic probe).
+  onTestingModelIdsChange?: (modelIds: string[]) => void
   defaultExpanded?: boolean
 }
 
@@ -102,51 +106,6 @@ export function modelIdPlaceholder(
   return i18n.t("apiKeys.manualTest.placeholderExample", { example: display })
 }
 
-export function mergeModelLists(existing: ModelInfo[], incoming: ModelInfo[]): ModelInfo[] {
-  const byId = new Map(existing.map((model) => [model.id, model]))
-  for (const model of incoming) {
-    if (!byId.has(model.id)) byId.set(model.id, model)
-  }
-  return [...byId.values()]
-}
-
-// W1-B / R-E5: a manual model test fans out across EVERY configured endpoint of the
-// provider (including failed/disabled). Collapse the per-endpoint results to one row per
-// model, preferring a success — a model that works on at least one base_url is usable.
-export function aggregateModelResults(results: ProviderModelTestResult[]): ProviderModelTestResult[] {
-  const byModel = new Map<string, ProviderModelTestResult>()
-  for (const result of results) {
-    const existing = byModel.get(result.model_id)
-    if (!existing || (result.status === "ok" && existing.status !== "ok")) {
-      byModel.set(result.model_id, result)
-    }
-  }
-  return [...byModel.values()]
-}
-
-// Probe the requested models against each endpoint id in turn; one endpoint erroring
-// records a failure for its models but never aborts the rest.
-export async function probeModelsAcrossEndpoints(
-  endpointIds: string[],
-  modelIds: string[],
-  probe: (endpointId: string, modelIds: string[]) => Promise<ProviderModelTestResponse>,
-): Promise<{ results: ProviderModelTestResult[]; models: ModelInfo[] }> {
-  const collected: ProviderModelTestResult[] = []
-  let models: ModelInfo[] = []
-  for (const endpointId of endpointIds) {
-    try {
-      const response = await probe(endpointId, modelIds)
-      collected.push(...response.results)
-      models = mergeModelLists(models, response.available_models)
-    } catch {
-      for (const modelId of modelIds) {
-        collected.push({ model_id: modelId, status: "error", message: null })
-      }
-    }
-  }
-  return { results: aggregateModelResults(collected), models }
-}
-
 export function manualModelCandidateErrorMessage(error: unknown): string {
   return composeRequestErrorMessage(error, i18n.t("apiKeys.manualTest.candidateLoadError"))
 }
@@ -202,7 +161,7 @@ export function ManualModelResultList({ results }: { results: ProviderModelTestR
   )
 }
 
-export function ManualModelTestPanel({ providerKey, endpointIds, notableProviderKey, onModelsUpdated, defaultExpanded = false }: Props) {
+export function ManualModelTestPanel({ providerKey, endpointIds, notableProviderKey, onModelsUpdated, onTestingModelIdsChange, defaultExpanded = false }: Props) {
   const { t } = useTranslation("settings")
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [modelIds, setModelIds] = useState([""])
@@ -249,12 +208,43 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
     setResults([])
     setHasTested(true)
     const toastId = `manual-model-test-${providerKey}`
-    toast.loading(t("apiKeys.manualTest.testingLoading"), { id: toastId })
+    // Track how many (endpoint, model) probes are in flight PER model id — the
+    // same model can be probed on several endpoints at once, so a plain Set
+    // would drop it early. In-flight model ids drive both the live toast
+    // subtitle and the per-model chip animation.
+    const inFlight = new Map<string, number>()
+    const inFlightIds = () => [...inFlight.keys()]
+    const publish = () => onTestingModelIdsChange?.(inFlightIds())
+    // Always pass `description` (never omit it) so a new run REPLACES the
+    // previous run's leftover subtitle instead of showing a stale model id
+    // under the fresh "Testing…" title (PM 2026-07-03 toast-staleness bug).
+    const refreshLoadingToast = () => {
+      const active = inFlightIds()
+      toast.loading(t("apiKeys.manualTest.testingLoading"), {
+        id: toastId,
+        description: (active.length > 0 ? active : trimmedModelIds).join(", "),
+      })
+    }
+    refreshLoadingToast()
     try {
-      const { results, models } = await probeModelsAcrossEndpoints(
+      const { results, models } = await probeModelsWithConcurrency(
         targetEndpointIds,
         trimmedModelIds,
-        (endpointId, modelIds) => testProviderModels({ provider_id: endpointId, model_ids: modelIds }),
+        (endpointId, modelId) => testProviderModels({ provider_id: endpointId, model_ids: [modelId] }),
+        {
+          onStart: (task) => {
+            inFlight.set(task.modelId, (inFlight.get(task.modelId) ?? 0) + 1)
+            publish()
+            refreshLoadingToast()
+          },
+          onSettle: (task) => {
+            const remaining = (inFlight.get(task.modelId) ?? 1) - 1
+            if (remaining <= 0) inFlight.delete(task.modelId)
+            else inFlight.set(task.modelId, remaining)
+            publish()
+            refreshLoadingToast()
+          },
+        },
       )
       setResults(results)
       onModelsUpdated(models)
@@ -266,6 +256,8 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
       setError(message)
       toast.error(message, { id: toastId })
     } finally {
+      inFlight.clear()
+      publish()
       setTesting(false)
     }
   }

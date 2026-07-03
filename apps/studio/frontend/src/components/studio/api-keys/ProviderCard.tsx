@@ -1749,6 +1749,10 @@ export function ProviderCard({
   const [visible, setVisible] = useState(false)
   const [apiKeyEditing, setApiKeyEditing] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
+  // P1a: model ids currently being probed by the manual model-test panel (the
+  // atomic per-model probe reports them live). Drives per-model chip animation —
+  // exactly the model in flight pulses, no card-wide flag guessing.
+  const [manualTestingModelIds, setManualTestingModelIds] = useState<string[]>([])
   const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
   const [baseUrlError, setBaseUrlError] = useState("")
@@ -1774,6 +1778,11 @@ export function ProviderCard({
   // so sibling-endpoint models stay still instead of all flashing at once.
   const isModelUnderEndpointTest = (model: ModelInfo) =>
     routeSummariesForModel(model).some((summary) => isEndpointBeingTested(summary.endpoint_id ?? ""))
+  // A model chip pulses while it is genuinely being probed: either the endpoint
+  // Test is verifying it (isModelUnderEndpointTest) OR the manual model-test
+  // panel has an atomic probe for this exact model id in flight.
+  const isModelBeingProbed = (model: ModelInfo) =>
+    isModelUnderEndpointTest(model) || manualTestingModelIds.includes(model.id)
   // R-G2: auto-expand the full model list when an endpoint test starts, so the user
   // can watch every model being probed instead of only the first few.
   useEffect(() => {
@@ -2050,7 +2059,7 @@ export function ProviderCard({
           // endpoint the model has a route on is being probed. Scoped by
           // isModelUnderEndpointTest so a single endpoint-tag probe only pulses
           // that endpoint's models, not every sibling (point 4, PM 2026-07-03).
-          (status === "testing" || (!isOfficial && !isDisabled && isModelUnderEndpointTest(model))) && "api-route-tag-border-flow",
+          (status === "testing" || (!isOfficial && !isDisabled && isModelBeingProbed(model))) && "api-route-tag-border-flow",
         )}
       >
         <button
@@ -2346,6 +2355,7 @@ export function ProviderCard({
             endpointIds={endpointSummaries.map((endpoint) => endpoint.id)}
             notableProviderKey={notableProviderKey ?? draft.id.split(/[-_]/, 1)[0].toLowerCase()}
             onModelsUpdated={(models) => onModelsUpdated?.(models)}
+            onTestingModelIdsChange={setManualTestingModelIds}
             defaultExpanded={false}
           />
         ) : null}

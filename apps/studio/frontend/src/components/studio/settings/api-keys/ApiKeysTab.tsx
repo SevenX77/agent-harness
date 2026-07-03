@@ -23,6 +23,7 @@ export function ApiKeysTab({
   drafts,
   pendingAddProviderId,
   saveStatus,
+  backendReachable,
   onProviderFieldChange,
   onGetProviderModels,
   onForceEndpointTest,
@@ -40,6 +41,7 @@ export function ApiKeysTab({
   | "drafts"
   | "pendingAddProviderId"
   | "saveStatus"
+  | "backendReachable"
   | "onProviderFieldChange"
   | "onGetProviderModels"
   | "onForceEndpointTest"
@@ -166,7 +168,14 @@ export function ApiKeysTab({
                   </div>
                 ) : null}
                 {pendingAddProviderActive ? null : (
-                  <Button type="button" variant="default" onClick={onBeginAddProvider} className="gap-1">
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={onBeginAddProvider}
+                    className="gap-1"
+                    disabled={backendReachable === false}
+                    title={backendReachable === false ? t("apiKeys.backendReconnecting") : undefined}
+                  >
                     <Plus className="size-3.5" />
                     {t("apiKeys.addProvider")}
                   </Button>

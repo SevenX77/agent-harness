@@ -158,6 +158,7 @@
     "thirdPartyProviders": "Third-party Providers",
     "noThirdPartyProviders": "No third-party providers configured.",
     "addProvider": "Add Provider",
+    "backendReconnecting": "Backend is reconnecting — please try again in a moment.",
     "addProviderDialogTitle": "Add provider",
     "providerName": "Provider name",
     "add": "Add",

@@ -11,6 +11,7 @@ import {
   copyAvailableModelId,
   endpointTagIsTestable,
   endpointTooltipLines,
+  modelRouteIds,
   representativeProviderUiState,
   routeTooltipLineStatus,
   sortOfficialRouteInfos,
@@ -1930,6 +1931,33 @@ describe("endpointTagIsTestable — single-endpoint probe affordance (item 2)", 
   it("only excludes protocol_unsupported (Re-probe only) and the transient testing state", () => {
     expect(endpointTagIsTestable("protocol_unsupported")).toBe(false)
     expect(endpointTagIsTestable("testing")).toBe(false)
+  })
+})
+
+describe("modelRouteIds — route ids a model chip stands for (Remove model)", () => {
+  it("returns the single route id of a one-endpoint model (e.g. a phantom o3-mini)", () => {
+    expect(modelRouteIds({
+      id: "o3-mini",
+      endpoint_id: "llm-wavespeed-ai-v1-openai-x",
+      route_id: "llm-wavespeed-ai-v1-openai-x:o3-mini",
+      status: "failed",
+    })).toEqual(["llm-wavespeed-ai-v1-openai-x:o3-mini"])
+  })
+
+  it("collects every route id of an aggregated model across endpoints, de-duped", () => {
+    const model: ModelInfo = {
+      id: "claude-haiku-4.5",
+      route_id: "ep-anth:claude-haiku-4.5",
+      status: "verified",
+      capabilities: {
+        __aggregate_routes: [
+          { route_id: "ep-anth:claude-haiku-4.5", endpoint_id: "ep-anth", status: "verified" },
+          { route_id: "ep-openai:claude-haiku-4.5", endpoint_id: "ep-openai", status: "verified" },
+          { route_id: "ep-anth:claude-haiku-4.5", endpoint_id: "ep-anth", status: "verified" },
+        ],
+      },
+    }
+    expect(modelRouteIds(model).sort()).toEqual(["ep-anth:claude-haiku-4.5", "ep-openai:claude-haiku-4.5"])
   })
 })
 

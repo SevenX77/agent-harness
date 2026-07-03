@@ -5,8 +5,9 @@ import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
+import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerDraftIdentityKey, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -956,6 +957,36 @@ export function useSettingsPageController(): SettingsPageController {
     }
   }
 
+  // P2: remove a model from a provider by deleting every route it covers (a chip
+  // can span endpoints). The backend refuses (409) when a role still uses the
+  // route, so a referenced model is kept and the user is told why. Merges the
+  // refreshed credentials locally like the other single-route mutations.
+  async function removeModelRoutes(modelId: string, routeIds: string[]) {
+    if (!ensureBackendReachable()) return
+    if (routeIds.length === 0) return
+    pendingRoleProjectionRefreshRef.current = true
+    const toastId = `remove-model-${modelId}`
+    toast.loading(i18n.t("settings:apiKeys.card.removeModelLoading", { modelId }), { id: toastId })
+    try {
+      let next: CredentialsState | null = null
+      for (const routeId of routeIds) {
+        next = await deleteRoute(routeId)
+      }
+      if (next) {
+        const merged = next
+        setCredentials(merged)
+        setDrafts((current) => reconcileDraftsWithCredentials(merged, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
+      }
+      toast.success(i18n.t("settings:apiKeys.card.removeModelSuccess", { modelId }), { id: toastId })
+    } catch (error) {
+      const inUse = (error as { response?: { status?: number } })?.response?.status === 409
+      const fallback = inUse
+        ? i18n.t("settings:apiKeys.card.removeModelInUse", { modelId })
+        : i18n.t("settings:apiKeys.card.removeModelFailed", { modelId })
+      toast.error(composeRequestErrorMessage(error, fallback), { id: toastId })
+    }
+  }
+
   async function runProviderGetModels(providerId: string, options: { onlyEndpointId?: string } = {}) {
     if (!ensureBackendReachable()) return
     await flushCredentialsSave()
@@ -1199,6 +1230,7 @@ export function useSettingsPageController(): SettingsPageController {
     onForceEndpointTest: (endpointId) => void forceReprobeEndpoint(endpointId),
     onDeleteProvider: deleteProvider,
     onDeleteProviderEndpoints: (endpointIds) => void deleteProviderEndpoints(endpointIds),
+    onRemoveModel: (modelId, routeIds) => void removeModelRoutes(modelId, routeIds),
     onBeginAddProvider: beginAddProvider,
     onAddProvider: addProviderWithData,
     onCancelAddProvider: cancelAddProvider,

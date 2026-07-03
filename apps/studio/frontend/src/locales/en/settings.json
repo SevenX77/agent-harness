@@ -251,6 +251,12 @@
       "officialProvider": "Official Provider",
       "thisProvider": "this provider",
       "copyTagAria": "Copy {{target}} {{modelId}}. {{detail}}",
+      "copyModelId": "Copy model id",
+      "removeModel": "Remove model",
+      "removeModelLoading": "Removing {{modelId}}…",
+      "removeModelSuccess": "Removed {{modelId}}.",
+      "removeModelInUse": "Can't remove {{modelId}} — a role still uses it.",
+      "removeModelFailed": "Couldn't remove {{modelId}}.",
       "routeStatus": {
         "verified": "Verified route",
         "failed": "Route test failed",

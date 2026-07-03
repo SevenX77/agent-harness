@@ -168,6 +168,7 @@ function baseViewProps(
     onForceEndpointTest: vi.fn(),
     onDeleteProvider: vi.fn(),
     onDeleteProviderEndpoints: vi.fn(),
+    onRemoveModel: vi.fn(),
     onBeginAddProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onCancelAddProvider: vi.fn(),

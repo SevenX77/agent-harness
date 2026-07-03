@@ -251,6 +251,12 @@
       "officialProvider": "官方供应商",
       "thisProvider": "该供应商",
       "copyTagAria": "复制{{target}} {{modelId}}。{{detail}}",
+      "copyModelId": "复制模型 id",
+      "removeModel": "移除模型",
+      "removeModelLoading": "正在移除 {{modelId}}…",
+      "removeModelSuccess": "已移除 {{modelId}}。",
+      "removeModelInUse": "无法移除 {{modelId}}——仍有角色在用它。",
+      "removeModelFailed": "移除 {{modelId}} 失败。",
       "routeStatus": {
         "verified": "已验证路由",
         "failed": "路由测试失败",

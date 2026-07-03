@@ -80,6 +80,29 @@ export function copilotRouteStatusesFromJob(
   )
 }
 
+// 每条 route 的 SDK 测试真实信息(失败时是具体原因,如 "SDK 返回错误: HTTP 404")—— 供
+// tooltip 展示,让"为什么失败"看得见,而不是只有一盏红灯。
+export function copilotRouteMessagesFromJob(job: RoleTestJobResponse): Record<string, string> {
+  const messages: Record<string, string> = {}
+  for (const provider of job.provider_statuses) {
+    const message = (provider as { message?: string | null }).message
+    if (typeof message === "string" && message.trim()) messages[provider.route_id] = message.trim()
+  }
+  return messages
+}
+
+export function copilotRouteMessagesFromPersistedResult(result: unknown): Record<string, string> {
+  const routes = persistedSdkEvidenceRoutes(result)
+  if (!routes) return {}
+  const messages: Record<string, string> = {}
+  for (const [routeId, routeResult] of Object.entries(routes)) {
+    if (!isRecord(routeResult)) continue
+    const message = routeResult.message
+    if (typeof message === "string" && message.trim()) messages[routeId] = message.trim()
+  }
+  return messages
+}
+
 /**
  * R-F21: surface ``retry_after_seconds`` per route so the FE Test Button can
  * render a countdown and stay disabled while the upstream cooldown is in

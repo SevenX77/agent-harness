@@ -5517,7 +5517,7 @@ def test_role_test_reports_materialized_not_fit_provider_diagnostics(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "thinking": "required",
+                "thinking": True,
             },
             "model_groups": [
                 {
@@ -5529,25 +5529,25 @@ def test_role_test_reports_materialized_not_fit_provider_diagnostics(
         },
     )
     assert put_response.status_code == 200
-    assert put_response.json()["fallback_chain"] == []
-    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == "not_fit"
+    # PR3: thinking is best-effort — an unsupported route still fits (warning),
+    # never blocked / not_fit; the route stays in the chain and gets probed.
+    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == "using"
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "blocked"
-    assert calls == []
+    assert calls == ["gpt-5"]
     provider_result = body["model_groups"][0]["provider_results"][0]
     assert provider_result["route_id"] == "openai-direct:gpt-5"
     assert provider_result["provider_ui_state"] == "ready"
-    assert provider_result["role_fit"] == "not_fit"
-    assert provider_result["admission_decision"] == "block"
-    assert provider_result["status"] == "blocked"
+    assert provider_result["role_fit"] == "using"
+    assert provider_result["admission_decision"] == "admit"
+    assert provider_result["status"] == "ok"
     assert provider_result["warnings"][0]["code"] == "thinking_unsupported"
 
 
-def test_role_test_probes_needs_test_provider_at_click_time(
+def test_role_test_probes_thinking_on_supported_route_with_reasoning_enabled(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5576,7 +5576,12 @@ def test_role_test_probes_needs_test_provider_at_click_time(
                 canonical_id="gpt-5",
                 display_name="GPT-5",
                 status="verified",
-                capabilities={},
+                capabilities={
+                    "thinking_protocol": CapabilityValue(
+                        value=True,
+                        source="probed_verified",
+                    )
+                },
             )
         },
     )
@@ -5604,7 +5609,7 @@ def test_role_test_probes_needs_test_provider_at_click_time(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "thinking": "required",
+                "thinking": True,
             },
             "model_groups": [
                 {
@@ -5616,22 +5621,24 @@ def test_role_test_probes_needs_test_provider_at_click_time(
         },
     )
     assert put_response.status_code == 200
-    assert put_response.json()["fallback_chain"] == []
-    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == "needs_test"
+    assert [entry["route_id"] for entry in put_response.json()["fallback_chain"]] == [
+        "openai-direct:gpt-5"
+    ]
+    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == "using"
 
     response = client.post("/api/llm/roles/analyst/test", json={})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "warning"
+    assert body["status"] == "ok"
     assert calls == ["gpt-5"]
     provider_result = body["model_groups"][0]["provider_results"][0]
     assert provider_result["route_id"] == "openai-direct:gpt-5"
     assert provider_result["provider_ui_state"] == "ready"
-    assert provider_result["role_fit"] == "needs_test"
+    assert provider_result["role_fit"] == "using"
     assert provider_result["admission_decision"] == "admit"
     assert provider_result["status"] == "ok"
-    assert provider_result["warnings"][0]["code"] == "thinking_capability_unknown"
+    assert provider_result["warnings"] == []
     assert provider_result["resolved_settings"]["reasoning"]["enabled"] is True
 
 

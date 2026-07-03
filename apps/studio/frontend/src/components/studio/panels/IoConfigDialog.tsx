@@ -7,11 +7,12 @@ import {
   Files,
   FolderOpen,
   Loader2,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react"
 import { importIoIntoWorkspace, type IoScanEntry } from "@/api/client"
-import { selectImportFile, selectImportFolder } from "@/lib/tauri"
+import { selectImportFolder } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -51,6 +52,8 @@ const INDENT_STEP_REM = 1.1
 
 export interface FileFieldCandidate extends FileFieldDecl {
   checked: boolean
+  /** true = auto-matched a declared io.inputs field on import (PM 2026-07-03). */
+  matched?: boolean
 }
 
 export interface FileGroup {
@@ -59,6 +62,14 @@ export interface FileGroup {
   /** Muted path shown after the label (PM r3b: 一眼认出是文件). */
   pathHint: string
   candidates: FileFieldCandidate[]
+  /** Workspace-relative path of the single imported file (edit-in-editor, P5). */
+  filePath?: string
+}
+
+/** `chapter_{n}.json` / `chapter` stem out of a folded batch entry. */
+function batchStem(entry: IoScanEntry): string {
+  const pattern = entry.pattern ?? entry.stem ?? entry.name
+  return pattern.split(/_?\{n\}/)[0].replace(/\.[^.]+$/, "") || pattern
 }
 
 /** Flatten an import/scan response into checkable per-field candidates. */
@@ -70,8 +81,10 @@ export function candidatesFromScanEntries(entries: IoScanEntry[]): FileFieldCand
       continue
     }
     if (entry.kind === "batch") {
+      // The declared field is the stem (`chapter`), NOT the folder it lives in
+      // — so it can auto-match io.inputs and save as the right field name.
       rows.push({
-        field: (entry.dir ?? entry.name).split("/").pop() ?? entry.name,
+        field: batchStem(entry),
         type: "array",
         dir: entry.dir,
         pattern: entry.pattern,
@@ -92,16 +105,82 @@ export function candidatesFromScanEntries(entries: IoScanEntry[]): FileFieldCand
   return rows
 }
 
-/** Existing `source:'file'` declarations shown as an already-checked group. */
-export function groupFromDeclarations(declarations: FileFieldDecl[]): FileGroup | null {
-  if (declarations.length === 0) {
-    return null
+/**
+ * Normalize a field/stem for tolerant auto-matching: lowercase and drop a
+ * trailing numeric or `{n}` batch segment so `Chapter`, `chapter1`,
+ * `chapter_001` and `chapter_{n}.json` all reduce to `chapter`.
+ */
+export function normalizeFieldName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\.[^.]+$/, "")
+    .replace(/_?\{n\}$/, "")
+    .replace(/[._-]?\d+$/, "")
+}
+
+/**
+ * Auto-match imported candidates against the node/GRAPH.md declared io.inputs
+ * field names (input region F5, PM 2026-07-02 r2「推断…是否匹配」): a candidate
+ * whose normalized name equals a declared input is checked + flagged `matched`
+ * so the author doesn't re-tick every field the import already answers.
+ */
+export function matchCandidatesToInputs(
+  candidates: FileFieldCandidate[],
+  declaredInputNames: readonly string[],
+): FileFieldCandidate[] {
+  const declared = new Set(declaredInputNames.map(normalizeFieldName))
+  return candidates.map((candidate) => {
+    const matched = declared.has(normalizeFieldName(candidate.field))
+    return { ...candidate, matched, checked: matched ? true : candidate.checked }
+  })
+}
+
+/** Group key = the source file (single path, or batch dir+pattern). */
+function fileKeyOf(candidate: FileFieldCandidate): string {
+  if (candidate.path) {
+    return candidate.path
   }
-  return {
-    label: "Declared files",
-    pathHint: "",
-    candidates: declarations.map((decl) => ({ ...decl, checked: true })),
+  if (candidate.dir && candidate.pattern) {
+    return `${candidate.dir}::${candidate.pattern}`
   }
+  return candidate.field
+}
+
+/**
+ * Group candidate fields by their source FILE so each imported/declared file is
+ * one row (name + path + remove + edit-in-editor, P5), with its fields under it
+ * — instead of flattening a whole folder's fields into one anonymous list.
+ */
+export function groupCandidatesByFile(candidates: FileFieldCandidate[]): FileGroup[] {
+  const byFile = new Map<string, FileFieldCandidate[]>()
+  const order: string[] = []
+  for (const candidate of candidates) {
+    const key = fileKeyOf(candidate)
+    if (!byFile.has(key)) {
+      byFile.set(key, [])
+      order.push(key)
+    }
+    byFile.get(key)!.push(candidate)
+  }
+  return order.map((key) => {
+    const members = byFile.get(key)!
+    const first = members[0]
+    const isBatch = Boolean(first.dir && first.pattern)
+    const fileName = first.path ? first.path.split(/[\\/]/).pop() ?? first.path : first.field
+    return {
+      label: isBatch ? `${first.field} ×${first.numbers?.length ?? "?"}` : fileName,
+      pathHint: first.path ?? first.dir ?? "",
+      candidates: members,
+      // Edit-in-editor only makes sense for a single concrete file, not a batch.
+      ...(first.path && !isBatch ? { filePath: first.path } : {}),
+    }
+  })
+}
+
+/** Existing `source:'file'` declarations shown as already-checked per-file groups. */
+export function groupsFromDeclarations(declarations: FileFieldDecl[]): FileGroup[] {
+  return groupCandidatesByFile(declarations.map((decl) => ({ ...decl, checked: true })))
 }
 
 /** `chapter.meta.title` → `[chapter, chapter.meta]` — every ancestor object path. */
@@ -247,23 +326,33 @@ function FieldCheckTree({
   )
 }
 
-/** Import file/folder buttons + the resulting per-file checkable field groups. */
+/**
+ * One "Import…" folder picker + the resulting per-file checkable field groups.
+ * A folder import scans + folds its files (batches, subfolders); each file
+ * becomes one group whose fields auto-match the declared io.inputs (checked +
+ * highlighted). Single import entry only — a folder already imports every file
+ * under it (PM 2026-07-03), so there is no separate file button.
+ */
 function FileImportGroups({
   skillId,
+  declaredInputNames,
   groups,
   setGroups,
   busy,
   setBusy,
   error,
   setError,
+  onFileOpen,
 }: {
   skillId: string
+  declaredInputNames: readonly string[]
   groups: FileGroup[]
   setGroups: (groups: FileGroup[]) => void
   busy: boolean
   setBusy: (busy: boolean) => void
   error: string | null
   setError: (error: string | null) => void
+  onFileOpen?: (path: string) => void
 }) {
   const importPath = async (path: string | null) => {
     if (!path) {
@@ -273,9 +362,10 @@ function FileImportGroups({
     setError(null)
     try {
       const result = await importIoIntoWorkspace(skillId, path)
-      const candidates = candidatesFromScanEntries(result.entries)
-      const label = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path
-      setGroups([...groups, { label, pathHint: path, candidates }])
+      const imported = groupCandidatesByFile(
+        matchCandidatesToInputs(candidatesFromScanEntries(result.entries), declaredInputNames),
+      )
+      setGroups([...groups, ...imported])
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -304,6 +394,16 @@ function FileImportGroups({
             <FileText className="size-3.5 shrink-0 self-center text-muted-foreground" aria-hidden />
             <span className="font-mono text-xs text-foreground">{group.label}</span>
             <span className={PATH_CLASS}>{group.pathHint}</span>
+            {group.filePath && onFileOpen ? (
+              <button
+                type="button"
+                onClick={() => onFileOpen(`.workspace/${group.filePath}`)}
+                aria-label={`Edit file ${group.label}`}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setGroups(groups.filter((_, gi) => gi !== groupIndex))}
@@ -317,7 +417,7 @@ function FileImportGroups({
             {group.candidates.map((candidate, candidateIndex) => (
               <label
                 key={`${candidate.field}-${candidateIndex}`}
-                className={`${ROW_CLASS} cursor-pointer`}
+                className={`${ROW_CLASS} cursor-pointer ${candidate.matched ? "bg-accent" : ""}`}
                 style={indentStyle(1)}
               >
                 <Checkbox
@@ -330,38 +430,25 @@ function FileImportGroups({
                   {candidate.dir
                     ? `batch ×${candidate.numbers?.length ?? "?"} · numbers kept`
                     : `${candidate.type ?? "any"} · source: file`}
+                  {candidate.matched ? " · matched io.inputs" : ""}
                 </span>
               </label>
             ))}
           </div>
         </div>
       ))}
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => void selectImportFile().then(importPath)}
-          disabled={busy}
-          aria-label="Import file"
-          className="h-7 gap-1 text-[11px]"
-        >
-          {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FileText className="size-3.5" aria-hidden />}
-          Import file…
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => void selectImportFolder().then(importPath)}
-          disabled={busy}
-          aria-label="Import folder"
-          className="h-7 gap-1 text-[11px]"
-        >
-          <FolderOpen className="size-3.5" aria-hidden />
-          Import folder…
-        </Button>
-      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        onClick={() => void selectImportFolder().then(importPath)}
+        disabled={busy}
+        aria-label="Import folder"
+        className="h-7 gap-1 text-[11px]"
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FolderOpen className="size-3.5" aria-hidden />}
+        Import…
+      </Button>
       {error ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
           {error}
@@ -380,7 +467,11 @@ export interface InputConfigInlineProps {
   blackboard: ReconciledFieldRow[]
   /** Existing source:'file' declarations of the target document. */
   declaredFiles: FileFieldDecl[]
+  /** Declared io.inputs field names an imported file auto-matches against. */
+  declaredInputNames: readonly string[]
   onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[] }) => Promise<string | null>
+  /** Open an imported file in the editor (P5 edit button). */
+  onFileOpen?: (path: string) => void
   /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
   isGraphInput?: boolean
 }
@@ -394,16 +485,18 @@ export function InputConfigInline({
   skillId,
   blackboard,
   declaredFiles,
+  declaredInputNames,
   onSave,
+  onFileOpen,
   isGraphInput = false,
 }: InputConfigInlineProps) {
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
-  const initialGroup = useMemo(() => groupFromDeclarations(declaredFiles), [declaredFiles])
+  const initialGroups = useMemo(() => groupsFromDeclarations(declaredFiles), [declaredFiles])
   const [groups, setGroups] = useState<FileGroup[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const effectiveGroups = groups ?? (initialGroup ? [initialGroup] : [])
+  const effectiveGroups = groups ?? initialGroups
   const isChecked = (row: ReconciledFieldRow) => blackboardChecks[row.path] ?? row.checked
 
   const handleSave = async () => {
@@ -413,8 +506,10 @@ export function InputConfigInline({
       group.candidates
         .filter((candidate) => candidate.checked)
         .map((candidate) => {
-          const { checked, ...decl } = candidate
+          // `checked`/`matched` are UI-only — persist just the FileFieldDecl.
+          const { checked, matched, ...decl } = candidate
           void checked
+          void matched
           return decl
         }),
     )
@@ -456,12 +551,14 @@ export function InputConfigInline({
       </div>
       <FileImportGroups
         skillId={skillId}
+        declaredInputNames={declaredInputNames}
         groups={effectiveGroups}
         setGroups={setGroups}
         busy={busy}
         setBusy={setBusy}
         error={error}
         setError={setError}
+        onFileOpen={onFileOpen}
       />
       <Button type="button" size="sm" onClick={() => void handleSave()} disabled={busy} className="h-7 text-[11px]">
         Save input config

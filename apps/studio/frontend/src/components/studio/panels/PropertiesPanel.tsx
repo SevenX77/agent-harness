@@ -54,7 +54,8 @@ import { isPathInsideWorkspaceRoot, subgraphPathFieldState, subgraphPathValueFro
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
 import { getChildGraphTopology, getCompareCandidates, getNodeLlmParams, putNodeCompareCandidates, putNodeLlmParams } from "@/api/client"
 import type { CompareCandidate, NodeLlmParams } from "@/api/types"
-import { getModelGroups, getRoles, startCompareCandidateTestJob, type ModelGroup, type RoleEntry, type RolesData, type RoleTestResponse, type RoleTestStatus } from "@/api/llm"
+import { getModelGroups, getRoles, startCompareCandidateTestJob, type ModelGroup, type ProviderModelOption, type RoleEntry, type RolesData, type RoleTestResponse, type RoleTestStatus } from "@/api/llm"
+import { roleTokenLimitSummary } from "@/components/studio/settings/llm-roles/RoleCard"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { cn } from "@/lib/utils"
@@ -2697,7 +2698,7 @@ function LlmRoleField({
         nodeId={nodeId}
         onStartNodeCompare={onStartNodeCompare}
       />
-      <LlmNodeParamsField skillId={skillId} nodeId={nodeId} />
+      <LlmNodeParamsField skillId={skillId} nodeId={nodeId} roleName={value} modelGroups={modelGroups} />
     </Field>
   )
 }
@@ -2752,11 +2753,16 @@ function nodeParamOptionalNumber(value: string): number | null {
 function LlmNodeParamsField({
   skillId = null,
   nodeId = null,
+  roleName = "",
+  modelGroups = [],
 }: {
   skillId?: string | null
   nodeId?: string | null
+  roleName?: string
+  modelGroups?: ModelGroup[]
 }) {
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
+  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false })
 
   useEffect(() => {
     if (!skillId || !nodeId) {
@@ -2795,6 +2801,25 @@ function LlmNodeParamsField({
   const thinkingId = `node-thinking-${nodeId ?? "none"}`
   const maxOutputId = `node-max-output-${nodeId ?? "none"}`
   const temperatureId = `node-temperature-${nodeId ?? "none"}`
+
+  // Infer the concrete output-token cap this node would use: the effective role's
+  // route max (same computation as the Settings role card). Shown as the max
+  // output field's placeholder so an empty (inherit) field still reveals the number.
+  const providerModelsByRouteId = useMemo(() => {
+    const map = new Map<string, ProviderModelOption>()
+    for (const group of modelGroups) {
+      for (const providerModel of group.provider_models) {
+        map.set(providerModel.route_id, providerModel)
+      }
+    }
+    return map
+  }, [modelGroups])
+  const effectiveRole = roleName.trim() || "graph_agent"
+  const roleEntry = rolesData?.roles?.[effectiveRole]
+  const inferredOutputMax = roleEntry
+    ? roleTokenLimitSummary(roleEntry, providerModelsByRouteId).output.max
+    : null
+  const maxOutputPlaceholder = inferredOutputMax != null ? formatThousands(String(inferredOutputMax)) : "Inherit"
 
   return (
     <div className="mt-2 space-y-1.5" data-llm-node-params="true">
@@ -2836,8 +2861,8 @@ function LlmNodeParamsField({
               <YamlNestedFieldLabel htmlFor={maxOutputId}>
                 max output tokens
                 <HelpTooltip label="About max output tokens">
-                  Cap on this node&rsquo;s output tokens. Empty inherits the role default; a value over the
-                  route&rsquo;s max is clamped down to it.
+                  Cap on this node&rsquo;s output tokens. Empty inherits the role default (the placeholder
+                  shows that inferred max); a value over the route&rsquo;s max is clamped down to it.
                 </HelpTooltip>
               </YamlNestedFieldLabel>
               <Input
@@ -2847,7 +2872,7 @@ function LlmNodeParamsField({
                 value={formatThousands(draft.maxOutputTokens)}
                 onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
                 inputMode="numeric"
-                placeholder="Inherit"
+                placeholder={maxOutputPlaceholder}
               />
             </Field>
           </div>

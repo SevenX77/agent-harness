@@ -51,14 +51,15 @@ import { isSafePhaseId } from "@/components/GraphCanvas/canvas-authoring"
 import type { ResumeRunOptions } from "@/api/client"
 import { isPathInsideWorkspaceRoot, subgraphPathFieldState, subgraphPathValueFromSelection } from "@/components/studio/subgraph-path"
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
-import { getChildGraphTopology, getCompareCandidates, putNodeCompareCandidates } from "@/api/client"
-import type { CompareCandidate } from "@/api/types"
+import { getChildGraphTopology, getCompareCandidates, getNodeLlmParams, putNodeCompareCandidates, putNodeLlmParams } from "@/api/client"
+import type { CompareCandidate, NodeLlmParams } from "@/api/types"
 import { getModelGroups, getRoles, startCompareCandidateTestJob, type ModelGroup, type RoleEntry, type RolesData, type RoleTestResponse, type RoleTestStatus } from "@/api/llm"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { cn } from "@/lib/utils"
 import { errorMessage } from "@/utils/errors"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
+import { formatThousands, stripThousands } from "../settings/llm-roles/RoleSettingsDialog"
 import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus } from "../settings/llm-roles/role-route-status"
 import type { SettingsTab } from "../SettingsPage"
 import type { FileOpenInput } from "../file-types"
@@ -2689,6 +2690,7 @@ function LlmRoleField({
           </div>
         </div>
       </div>
+      <LlmNodeParamsField skillId={skillId} nodeId={nodeId} />
       <LlmNodeCompareField
         modelGroups={modelGroups}
         skillId={skillId}
@@ -2697,6 +2699,157 @@ function LlmRoleField({
       />
     </Field>
   )
+}
+
+interface NodeLlmParamsDraft {
+  thinking: boolean | null
+  maxOutputTokens: string
+  temperature: string
+}
+
+const EMPTY_NODE_LLM_PARAMS_DRAFT: NodeLlmParamsDraft = {
+  thinking: null,
+  maxOutputTokens: "",
+  temperature: "",
+}
+
+export function nodeLlmParamsDraftFromApi(params: NodeLlmParams | undefined): NodeLlmParamsDraft {
+  if (!params) return EMPTY_NODE_LLM_PARAMS_DRAFT
+  return {
+    thinking: params.thinking ?? null,
+    maxOutputTokens: params.max_output_tokens != null ? String(params.max_output_tokens) : "",
+    temperature: params.temperature != null ? String(params.temperature) : "",
+  }
+}
+
+export function nodeLlmParamsDraftToApi(draft: NodeLlmParamsDraft): NodeLlmParams {
+  return {
+    thinking: draft.thinking,
+    max_output_tokens: nodeParamOptionalInteger(draft.maxOutputTokens),
+    temperature: nodeParamOptionalNumber(draft.temperature),
+  }
+}
+
+function nodeParamOptionalInteger(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : null
+}
+
+function nodeParamOptionalNumber(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+// PR3: per-node DIRECT overrides of the three simple LLM params. No enable
+// switch — each empty field simply inherits the role default. Loads the node's
+// stored overrides on mount and persists the full triple on every change,
+// mirroring LlmNodeCompareField's load-effect + save-on-change pattern.
+function LlmNodeParamsField({
+  skillId = null,
+  nodeId = null,
+}: {
+  skillId?: string | null
+  nodeId?: string | null
+}) {
+  const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
+
+  useEffect(() => {
+    if (!skillId || !nodeId) {
+      setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
+      return
+    }
+    let cancelled = false
+    void getNodeLlmParams(skillId)
+      .then((map) => {
+        if (cancelled) return
+        setDraft(nodeLlmParamsDraftFromApi(map.nodes[nodeId]))
+      })
+      .catch(() => {
+        if (!cancelled) setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [skillId, nodeId])
+
+  const persist = useCallback(
+    (next: NodeLlmParamsDraft) => {
+      if (!skillId || !nodeId) return
+      void putNodeLlmParams(skillId, nodeId, nodeLlmParamsDraftToApi(next)).catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Could not save model params")
+      })
+    },
+    [skillId, nodeId],
+  )
+
+  const update = (next: NodeLlmParamsDraft) => {
+    setDraft(next)
+    persist(next)
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5" data-llm-node-params="true">
+      <YamlNestedFieldLabel>Model params (override)</YamlNestedFieldLabel>
+      <div className="space-y-2 rounded-md bg-muted/30 px-2 py-2">
+        <Field orientation="horizontal" className="items-center justify-between gap-3">
+          <FieldLabel
+            htmlFor={`node-thinking-${nodeId ?? "none"}`}
+            className="min-w-0 text-xs font-medium"
+            onClick={(event) => event.preventDefault()}
+          >
+            Thinking
+          </FieldLabel>
+          <Switch
+            id={`node-thinking-${nodeId ?? "none"}`}
+            size="sm"
+            data-llm-node-thinking="true"
+            checked={draft.thinking === true}
+            aria-label="Node thinking override"
+            onCheckedChange={(thinking) => update({ ...draft, thinking })}
+          />
+        </Field>
+        <Field className="gap-1">
+          <FieldLabel htmlFor={`node-max-output-${nodeId ?? "none"}`} className="text-xs font-medium">
+            Max output tokens
+          </FieldLabel>
+          <Input
+            id={`node-max-output-${nodeId ?? "none"}`}
+            data-llm-node-max-output="true"
+            aria-label="Node max output tokens override"
+            value={formatThousands(draft.maxOutputTokens)}
+            onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
+            inputMode="numeric"
+            placeholder="Inherit role default"
+          />
+        </Field>
+        <Field className="gap-1">
+          <FieldLabel htmlFor={`node-temperature-${nodeId ?? "none"}`} className="text-xs font-medium">
+            Temperature
+          </FieldLabel>
+          <Input
+            id={`node-temperature-${nodeId ?? "none"}`}
+            data-llm-node-temperature="true"
+            aria-label="Node temperature override"
+            value={draft.temperature}
+            onChange={(event) => update({ ...draft, temperature: sanitizeNodeDecimal(event.target.value) })}
+            inputMode="decimal"
+            placeholder="Inherit role default"
+          />
+        </Field>
+      </div>
+    </div>
+  )
+}
+
+function sanitizeNodeDecimal(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, "")
+  const firstDot = cleaned.indexOf(".")
+  if (firstDot === -1) return cleaned
+  return cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "")
 }
 
 function llmRoleComboboxOption(name: string, configured: boolean): SearchableComboboxOption {

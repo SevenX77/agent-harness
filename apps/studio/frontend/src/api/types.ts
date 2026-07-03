@@ -260,6 +260,22 @@ export interface CompareCandidatesMap {
   nodes: Record<string, CompareCandidate[]>
 }
 
+/**
+ * PR3: per-node direct overrides of the three simple LLM params. Each field is
+ * a direct override — a null/absent field means "inherit the role default".
+ * Persisted per skill+node in the studio backend (not SKILL.md).
+ */
+export interface NodeLlmParams {
+  thinking?: boolean | null
+  max_output_tokens?: number | null
+  temperature?: number | null
+}
+
+/** GET response: node id -> its param overrides (only nodes with overrides). */
+export interface NodeLlmParamsMap {
+  nodes: Record<string, NodeLlmParams>
+}
+
 /** PR2: one candidate's isolated single-node side-run inside a compare group. */
 export interface CompareCandidateRun {
   candidate_id: string

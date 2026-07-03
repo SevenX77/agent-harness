@@ -406,22 +406,14 @@ export interface RoleRouteEntry {
 }
 
 export type RoleProviderPreference = 'manual_order'
-export type RoleThinkingPreference = 'off' | 'preferred' | 'required'
-export type RoleTokenIntentMode = 'default' | 'maximum_available' | 'required_minimum' | 'target'
-export type RoleTokenDowngrade = 'allow' | 'allow_with_warning' | 'block'
 
-export interface RoleTokenIntent {
-  mode: RoleTokenIntentMode
-  value?: number | null
-  downgrade?: RoleTokenDowngrade
-}
-
+// PR3: the LLM role's runtime intent is exactly three simple params. Empty
+// number fields are sent as null (= use the model / route default).
 export interface RoleIntent {
   provider_preference?: RoleProviderPreference
-  thinking?: RoleThinkingPreference
-  target_context_tokens?: RoleTokenIntent | null
-  target_output_tokens?: RoleTokenIntent | null
-  cost_priority?: 'quality' | 'balanced' | 'low_cost' | null
+  thinking?: boolean
+  max_output_tokens?: number | null
+  temperature?: number | null
 }
 
 export interface RoleEntry {

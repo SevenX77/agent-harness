@@ -27,7 +27,7 @@ export function appendModelBundle(data: RolesData, displayName?: string): RolesD
       display_name: requestedName,
       canonical_id: `bundle:${bundleId}`,
       model_fallback_enabled: true,
-      intent: { provider_preference: "manual_order", thinking: "off" },
+      intent: { provider_preference: "manual_order", thinking: false },
       model_groups: [],
       fallback_chain: [],
       lint_requirements: {},
@@ -165,7 +165,7 @@ function roleEntryFromBundle(bundle: ModelBundleEntry, bundleId: string): RoleEn
   return {
     role_kind: "graph_agent",
     model_fallback_enabled: bundle.model_fallback_enabled ?? true,
-    intent: bundle.intent ?? { provider_preference: "manual_order", thinking: "off" },
+    intent: bundle.intent ?? { provider_preference: "manual_order", thinking: false },
     active_model: modelGroups[0]?.canonical_id ?? "",
     models: Object.fromEntries(
       modelGroups.map((group) => [
@@ -194,7 +194,7 @@ function bundleFromRoleEntry(
     model_profile_id: bundle.model_profile_id || bundleId,
     canonical_id: bundle.canonical_id || `bundle:${bundleId}`,
     model_fallback_enabled: role.model_fallback_enabled,
-    intent: role.intent ?? bundle.intent ?? { provider_preference: "manual_order", thinking: "off" },
+    intent: role.intent ?? bundle.intent ?? { provider_preference: "manual_order", thinking: false },
     model_groups: modelGroups,
     lint_requirements: role.lint_requirements ?? bundle.lint_requirements ?? {},
   }

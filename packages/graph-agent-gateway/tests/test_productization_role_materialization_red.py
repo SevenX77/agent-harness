@@ -18,7 +18,7 @@ class NoCircuits:
 
 
 def test_thinking_true_supported_enables_reasoning() -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint
+    from graph_agent_gateway.registry.schema import CapabilityValue
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
 
     route = _route(
@@ -45,7 +45,7 @@ def test_thinking_true_supported_enables_reasoning() -> None:
 
 
 def test_thinking_true_unsupported_warns_but_still_fits() -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint
+    from graph_agent_gateway.registry.schema import CapabilityValue
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
 
     route = _route(
@@ -72,7 +72,7 @@ def test_thinking_true_unsupported_warns_but_still_fits() -> None:
 
 
 def test_thinking_false_does_nothing() -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint
+    from graph_agent_gateway.registry.schema import CapabilityValue
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
 
     route = _route(

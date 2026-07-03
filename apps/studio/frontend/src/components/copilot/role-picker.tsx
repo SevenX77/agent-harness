@@ -1,7 +1,8 @@
-import { BrainCircuit } from 'lucide-react'
+import { BrainCircuit, Loader2 } from 'lucide-react'
 import type { CredentialsState, ModelGroup, RoleRouteEntry, RolesData } from '../../api/llm'
 import { deriveCopilotDisplayRoles } from '../studio/settings/copilot/copilot-role-derivation'
 import { Button } from '../ui/button'
+import { Skeleton } from '../ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import {
   DropdownMenu,
@@ -55,9 +56,49 @@ interface RolePickerProps {
   options: CopilotRoleOption[]
   selectedRole: string
   onSelect: (role: string) => void
+  /** Config still loading — show the fixed default anchor with a spinner instead
+   *  of hiding the whole picker behind a skeleton block (R7-C, PM 2026-07-02). */
+  loading?: boolean
 }
 
-export function RolePicker({ options, selectedRole, onSelect }: RolePickerProps) {
+/** R7-C: the fixed default label shown while roles load (PM: opus4.8). */
+const LOADING_DEFAULT_LABEL = 'Opus 4.8'
+
+export function RolePicker({ options, selectedRole, onSelect, loading = false }: RolePickerProps) {
+  // R7-C (PM 2026-07-02): the picker anchor is ALWAYS present. While config loads
+  // it shows the fixed default (opus4.8) with a spinning icon — the skeleton moves
+  // INTO the dropdown options, not the trigger — so the selector never vanishes or
+  // gets swapped out for a placeholder block.
+  if (loading) {
+    return (
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Loading copilot role"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+              >
+                <Loader2 className="size-3.5 animate-spin" />
+                <span className="min-w-0 truncate">{LOADING_DEFAULT_LABEL}</span>
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Loading copilot roles…</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" side="top" className="w-56">
+          <DropdownMenuLabel>Copilot role</DropdownMenuLabel>
+          <div className="space-y-1.5 px-2 py-1.5" aria-label="Loading copilot roles">
+            <Skeleton className="h-5 w-full rounded-sm" />
+            <Skeleton className="h-5 w-3/4 rounded-sm" />
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
   // R6-1 (PM 2026-07-02, overrides the old F6 "render nothing until there is a
   // role" rule): the model/role anchor is ALWAYS visible. Deleting roles down
   // to a single floated default used to make the whole selector vanish, which

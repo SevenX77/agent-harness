@@ -77,6 +77,11 @@
     --studio-canvas-accent: var(--primary);
     --studio-canvas-accent-muted: var(--primary);
     --studio-canvas-accent-soft: transparent;
+    /* One shade lighter than the accent, for the MoirAI identity mark/wordmark
+     * ONLY (PM「logo 的颜色浅一号」): the dim --primary reads low-contrast on the
+     * near-black canvas / dark card, so tint it ~25% toward white. Theme-agnostic
+     * off the per-theme --primary; do NOT reuse for buttons/rings/edges. */
+    --studio-canvas-accent-strong: color-mix(in oklab, var(--primary) 75%, white);
     --studio-canvas-border: var(--surface-outline);
     --studio-canvas-border-soft: var(--surface-outline);
     --studio-canvas-surface: var(--card);

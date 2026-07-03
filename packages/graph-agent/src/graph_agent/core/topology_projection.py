@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from graph_agent.core.exceptions import GraphAgentError
 from graph_agent.core.loader import _extract_body_phase_refs
-from graph_agent.core.parser import parse_markdown_parts
+from graph_agent.core.parser import parse_markdown_parts, parse_markdown_parts_best_effort
 
 _PHASE_FILE_TO_MODE = {
     "LOGIC.md": "logic",
@@ -41,7 +42,20 @@ def load_graph_topology_projection(skill_dir: Path) -> GraphTopologyProjection:
     if not graph_path.exists():
         return GraphTopologyProjection(phases=[], graph_topology=[])
 
-    frontmatter, body, _line_meta = parse_markdown_parts(graph_path)
+    try:
+        frontmatter, body, _line_meta = parse_markdown_parts(graph_path)
+    except GraphAgentError:
+        # The strict compile-path parser (`parse_markdown_parts`) treats the
+        # whole frontmatter as one atomic YAML document, so a defect
+        # anywhere in it (most often a duplicate key hand-authored under
+        # `io.inputs`/`io.outputs`) blanks out `phases` too, even though
+        # `phases` itself is syntactically fine. This projection's entire
+        # purpose is showing phases/DAG in Studio's repair view WHILE the
+        # skill is broken, so losing recoverable data to a field this
+        # projection never reads defeats it — fall back to a tolerant parse.
+        # If the frontmatter is malformed beyond just a duplicate key, this
+        # re-raises and the caller's own catch-all degrades to ([], []).
+        frontmatter, body, _line_meta = parse_markdown_parts_best_effort(graph_path)
     phases_raw = frontmatter.get("phases", [])
     phases = [str(phase) for phase in phases_raw] if isinstance(phases_raw, list) else []
     refs = _extract_body_phase_refs(graph_path, body)

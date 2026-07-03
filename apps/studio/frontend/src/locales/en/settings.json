@@ -386,7 +386,22 @@
     "title": "LLM Roles",
     "loadingDescription": "Edit model and provider fallback order.",
     "description": "Edit model and provider fallback order. Changes auto-save.",
-    "validationFailed": "Validation failed: {{error}}"
+    "validationFailed": "Validation failed: {{error}}",
+    "fixedRole": {
+      "infoAria": "What is the {{role}} role for?",
+      "recommendedLabel": "Recommended models",
+      "missingWarning": "Missing recommended model",
+      "dragInHint": "Drag in: {{models}}",
+      "fast": {
+        "description": "Fixed role used by the engine's internal sub-tasks (e.g. md-patch, which surgically repairs md2json validation failures). It favors fast responses — best paired with small, fast models."
+      },
+      "copilot_claude_opus_4_8": {
+        "description": "Built-in coding copilot role, kept in sync with the backend fallback chain."
+      },
+      "copilot_deepseek_v4_pro": {
+        "description": "Coding copilot role, kept in sync with the backend fallback chain."
+      }
+    }
   },
   "copilot": {
     "title": "Copilot",

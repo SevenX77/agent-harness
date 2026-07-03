@@ -650,7 +650,7 @@ function timestampValue(value: string): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-function formatChangeValue(value: unknown): string {
+export function formatChangeValue(value: unknown): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return "-"
     return value.map((item) => formatChangeValue(item)).join("\n")
@@ -659,7 +659,15 @@ function formatChangeValue(value: unknown): string {
   if (isRecord(value) && ("from" in value || "to" in value)) {
     return `${formatChangeValue(value.from)} -> ${formatChangeValue(value.to)}`
   }
-  if (typeof value === "object") return JSON.stringify(value)
+  if (isRecord(value)) {
+    // Runtime-log detail like probe_attempts is an array of small objects
+    // (model / protocol / status, or status / latency_ms / message). Render
+    // each as readable "key: value · key: value" instead of a raw JSON blob,
+    // so the expanded log entry actually reads as detail (PM 2026-07-03).
+    const entries = Object.entries(value)
+    if (entries.length === 0) return "-"
+    return entries.map(([key, item]) => `${key}: ${formatChangeValue(item)}`).join(" · ")
+  }
   return String(value)
 }
 

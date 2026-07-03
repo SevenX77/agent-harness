@@ -1,9 +1,30 @@
-import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RoleIntent, RolesData } from "../../../api/llm"
+import type { CredentialsState, FixedRoleRecommendedModel, ModelGroup, ModelInfo, ProviderType, RoleIntent, RolesData } from "../../../api/llm"
 import { endpointIdFromRouteId } from "./route-credentials"
 
 type RoleProviderEntry = RolesData["providers"][string]
 
 export const AVAILABLE_MODEL_DRAG_TYPE = "application/x-studio-available-model"
+
+// Mirror of the backend llm_model_groups.normalize_model_group_key so the
+// fixed-role "missing recommended model" check agrees across FE/BE.
+export function normalizeModelGroupKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+}
+
+// Which recommended models a fixed role is still missing — computed from the
+// role's CURRENT in-memory model groups (identity display names + canonical
+// ids), NOT a backend round-trip, so the warning clears the instant the user
+// drags a matching model in (no stale-disk race). A recommended model counts as
+// present if any present group key matches its canonical id or display name.
+export function missingRecommendedModels(
+  recommended: readonly FixedRoleRecommendedModel[],
+  presentGroupKeys: ReadonlySet<string>,
+): FixedRoleRecommendedModel[] {
+  return recommended.filter((model) => (
+    !presentGroupKeys.has(normalizeModelGroupKey(model.canonicalId))
+    && !presentGroupKeys.has(normalizeModelGroupKey(model.displayName))
+  ))
+}
 
 export function visibleRoleNames(data: RolesData): string[] {
   return Object.keys(data.roles).filter((roleName) => !roleName.startsWith("deerflow_"))
@@ -47,6 +68,22 @@ export function pruneInvalidRoleProviders(
   data: RolesData,
   credentialsByCode?: Record<string, CredentialsState["providers"][number]>,
 ): RolesData {
+  // `data.models` is built from the registry snapshot, which loads slower
+  // than the roles response (and can be transiently invalidated — see
+  // api/llm.ts syncVerifiedCommunityCatalog nulling the registry cache). An
+  // empty model directory while roles already reference models means the
+  // directory just hasn't hydrated yet, not that every referenced provider is
+  // confirmed gone. Treat that as "not yet known" and skip pruning entirely —
+  // otherwise this silently wipes real fallback-chain routes, which the
+  // debounced autosave then persists to disk (roles-registry-hydration-prune
+  // data-loss bug).
+  if (
+    Object.keys(data.models).length === 0
+    && Object.values(data.roles).some((role) => Object.keys(role.models).length > 0)
+  ) {
+    return data
+  }
+
   let changed = false
   const next = cloneRolesData(data)
 

@@ -14,6 +14,9 @@ import pytest
 from app.models.llm_config import LLMCredentialsFile, ProviderRoute
 from app.routers import llm
 from app.services.copilot import RouteSdkTestResult
+from app.services.llm_health_store import ActiveCircuitsIndex
+
+_NO_CIRCUITS = ActiveCircuitsIndex.build([])
 
 
 def _seed_credentials(monkeypatch: pytest.MonkeyPatch, route: ProviderRoute) -> list[LLMCredentialsFile]:
@@ -228,7 +231,7 @@ def test_provider_model_option_emits_call_method_id_from_verified_profile() -> N
         provider_routes={route.route_id: route},
     )
 
-    option = llm._provider_model_option(route, creds)
+    option = llm._provider_model_option(route, creds, circuits_index=_NO_CIRCUITS)
     assert option is not None
     assert option["call_method_id"] == "ark_anthropic_messages"
     # The legacy provider_type heuristic would have excluded this — proving
@@ -262,6 +265,6 @@ def test_provider_model_option_call_method_id_none_for_route_without_verified_pr
         provider_routes={route.route_id: route},
     )
 
-    option = llm._provider_model_option(route, creds)
+    option = llm._provider_model_option(route, creds, circuits_index=_NO_CIRCUITS)
     assert option is not None
     assert option["call_method_id"] is None

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, CircleAlert, PanelRightClose, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, CircleAlert, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -15,7 +15,6 @@ import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
-import { Skeleton } from '../ui/skeleton'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -521,12 +520,31 @@ export function CopilotPanel({
                 copilot weaves a skill's loose phases into one runnable DAG. The
                 mark is the constellation Cassiopeia, which reads at once as an
                 M, a star constellation, and a node-edge graph. Design source:
-                docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md (F1 · R5-E). */}
-            <MoiraiMark className="size-[18px] shrink-0 text-[color:var(--studio-canvas-accent)]" title="MoirAI" />
+                docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md (F1 · R5-E).
+                The mark itself is the collapse control (PM「收的按钮去掉，点 logo
+                收」) — no separate close button in the header. Colour is the one-
+                shade-lighter accent-strong (PM「logo 的颜色浅一号」). */}
+            {onCollapse ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="收起 MoirAI"
+                    onClick={onCollapse}
+                    className="flex shrink-0 items-center justify-center rounded-sm outline-none transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-[color:var(--studio-canvas-accent)]"
+                  >
+                    <MoiraiMark className="size-[18px] text-[color:var(--studio-canvas-accent-strong)]" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">收起</TooltipContent>
+              </Tooltip>
+            ) : (
+              <MoiraiMark className="size-[18px] shrink-0 text-[color:var(--studio-canvas-accent-strong)]" title="MoirAI" />
+            )}
             {/* shrink-0: the short name must never be squeezed out by the
                 reconnect chip (the chip truncates instead). */}
             <h2 className="shrink-0 text-sm font-semibold">
-              Moir<span className="text-[color:var(--studio-canvas-accent)]">AI</span>
+              Moir<span className="text-[color:var(--studio-canvas-accent-strong)]">AI</span>
             </h2>
             {copilot.connectionStatus !== 'open' ? (
               <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
@@ -550,23 +568,6 @@ export function CopilotPanel({
               <SquareTerminal data-icon="inline-start" />
               Open in Claude Code
             </Button>
-            {onCollapse ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label="收起 MoirAI"
-                    onClick={onCollapse}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <PanelRightClose />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">收起</TooltipContent>
-              </Tooltip>
-            ) : null}
           </div>
         </div>
       </header>
@@ -731,25 +732,25 @@ export function CopilotPanel({
         {/* F7 context actions (attach / @mention) join the left side of this row
             once they are functional — no dead placeholders. */}
         <div className="flex items-center justify-end gap-0.5">
-          {registrySettled && rolesSettled ? (
-            <>
-              <ModelPicker
-                role={pickerRole}
-                registry={registry}
-                selectedRouteId={selectedRouteId || defaultRouteId}
-                onSelect={selectRoute}
-              />
-              <RolePicker
-                options={roleOptions}
-                selectedRole={selectedRoleKey}
-                onSelect={setSelectedRole}
-              />
-            </>
-          ) : (
-            // R5-C: role/route slot placeholder while config loads (cold registry
-            // probe can take ~45s) — shadcn Skeleton, sized like the picker chip.
-            <Skeleton aria-label="Loading copilot roles" className="h-7 w-32 rounded-md" />
+          {/* R7-C (PM 2026-07-02): the role anchor is ALWAYS present. While config
+              loads it shows the fixed default (opus4.8) + a spinner (the loading
+              state lives inside RolePicker), not a skeleton block that swaps the
+              whole picker out. The route picker still waits for a settled registry —
+              routes are derived from it, so there is nothing to show until then. */}
+          {registrySettled && rolesSettled && (
+            <ModelPicker
+              role={pickerRole}
+              registry={registry}
+              selectedRouteId={selectedRouteId || defaultRouteId}
+              onSelect={selectRoute}
+            />
           )}
+          <RolePicker
+            options={roleOptions}
+            selectedRole={selectedRoleKey}
+            onSelect={setSelectedRole}
+            loading={!(registrySettled && rolesSettled)}
+          />
         </div>
       </form>
     </aside>

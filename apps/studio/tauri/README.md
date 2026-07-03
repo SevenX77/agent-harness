@@ -160,6 +160,43 @@ Manual desktop smoke:
 4. Close the window and verify `ps -eo pid,command | grep 'uvicorn app.main:app'` (or Task Manager on Windows) shows no sidecar Python process.
 5. Break Python startup intentionally and confirm Splash Error renders recent sidecar stderr instead of a blank screen.
 
+## "Open in Claude Code" (copilot 面板按钮)
+
+按钮 (`open_claude_code` Tauri 命令, `src/lib.rs`) 把当前 skill 工作区交给
+[`ah`](https://github.com/SevenX77/ah)(agent hypervisor)驱动的真实 Claude Code
+跑。Windows 上 `ah` + `claude` 都活在 WSL2 里 —— 点按钮前得先把 WSL2 + Ubuntu +
+tmux + claude CLI + ah + 订阅登录都装好。
+
+`ah` 自己的安装命令(`ah-installer.sh`)**只装 `ah` 这一个二进制**——不装
+WSL2/tmux/claude CLI,也不处理登录(`ah doctor` 只诊断,不安装/不修复;`ah --help`
+的全部子命令里也没有 install/provision 类命令)。这些前置步骤由
+`scripts/install-claude-code-wsl.ps1` 统一打包:
+
+```powershell
+# 从仓库根目录, Windows PowerShell
+powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
+```
+
+幂等,可反复重跑。装 WSL2 需要一次重启、首次登录 claude 需要你在浏览器里过一次
+OAuth —— 这两步是 OS/安全层面的硬性人工步骤,脚本跑到这两处会打印清楚的下一步提示
+然后干净退出(不是报错),按提示做完再重跑同一条命令即可继续。跑完最后会打印
+`ah doctor` 的诊断结果自检。
+
+脚本刻意分成两部分,对应所有权边界:
+
+- **PART A — ah 的运行环境前置**(WSL2 / 发行版 / systemd / 镜像网络 / 时区/语言/代理 /
+  tmux)。这些**架构上应归 ah 自己的安装器**,已作为需求提给 ah 仓库
+  ([`docs/handoffs/ah-installer-provisioning-and-master-defaults.md`](../../../docs/handoffs/ah-installer-provisioning-and-master-defaults.md)
+  Req 1)。在 ah 接管前,本脚本作为**临时桥**代劳;一旦 ah 的安装器自装运行环境,
+  PART A 整段删掉,由 PART B 装 ah 时自动带出。
+- **PART B — Studio 自己的 Claude Code provider 层**(装 ah、装 claude CLI、订阅登录)。
+  这是 Studio 的**长期职责**,与 ah 无关地留在这里 —— provider CLI 和用户登录**明确不归
+  ah 管**(见 handoff Non-Goals)。
+
+同一份 handoff 还提了另外两条给 ah 的需求:修掉 ccbd-rust 时代那条坏掉的内置默认 master
+命令(`claude --dangerously-skip-permissions --continue /remote-control`,新工作区/root/本机
+attach 三处都会崩),以及无显式 `--config` 时不要擅自把当前目录当项目、eager 建全局状态。
+
 ## Phase 边界 (T1 不做)
 
 * **T2 (Python sidecar)**: 用 Tauri 的 sidecar 机制 / `std::process::Command` 拉起

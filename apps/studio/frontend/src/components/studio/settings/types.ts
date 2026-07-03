@@ -20,6 +20,14 @@ export interface ProviderDraft {
   api_key: string
   isTesting: boolean
   testingAction?: "models" | null
+  /**
+   * Item 2 follow-up (PM 2026-07-03): when a single endpoint tag is probed
+   * (onProbeEndpoint → runProviderGetModels with onlyEndpointId), this is that
+   * endpoint's id, so only ITS tag shows the "testing" spinner — not every
+   * sibling endpoint under the same provider. `null`/unset means the whole
+   * card is being tested (full "Test" button), so every endpoint spins.
+   */
+  testingEndpointId?: string | null
 }
 
 export interface ProviderDraftChangeOptions {

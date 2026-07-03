@@ -432,6 +432,10 @@ export function useSettingsPageController(): SettingsPageController {
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [pendingAddProviderDraft, setPendingAddProviderDraft] = useState<ProviderDraft | null>(null)
   const [providerTestingActions, setProviderTestingActions] = useState<Record<string, ProviderDraft["testingAction"]>>({})
+  // Item 2 follow-up: which single endpoint id (if any) is the current
+  // provider-level test scoped to. null/absent = whole-card test (every
+  // endpoint tag spins); a specific id = only that tag spins.
+  const [providerTestingEndpointIds, setProviderTestingEndpointIds] = useState<Record<string, string | null>>({})
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
   const [rolesError, setRolesError] = useState<string | null>(null)
@@ -462,10 +466,10 @@ export function useSettingsPageController(): SettingsPageController {
     return displayDrafts.map((draft) => {
       const testingAction = providerTestingActions[draft.id] ?? null
       return testingAction
-        ? { ...draft, isTesting: true, testingAction }
-        : { ...draft, isTesting: false, testingAction: null }
+        ? { ...draft, isTesting: true, testingAction, testingEndpointId: providerTestingEndpointIds[draft.id] ?? null }
+        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null }
     })
-  }, [drafts, pendingAddProviderDraft, providerTestingActions])
+  }, [drafts, pendingAddProviderDraft, providerTestingActions, providerTestingEndpointIds])
 
   useEffect(() => {
     return () => {
@@ -840,7 +844,11 @@ export function useSettingsPageController(): SettingsPageController {
     }
   }
 
-  function setProviderTesting(providerId: string, testingAction: ProviderDraft["testingAction"]) {
+  function setProviderTesting(
+    providerId: string,
+    testingAction: ProviderDraft["testingAction"],
+    testingEndpointId: string | null = null,
+  ) {
     setProviderTestingActions((current) => {
       if (!testingAction) {
         const next = { ...current }
@@ -848,6 +856,14 @@ export function useSettingsPageController(): SettingsPageController {
         return next
       }
       return { ...current, [providerId]: testingAction }
+    })
+    setProviderTestingEndpointIds((current) => {
+      if (!testingAction || !testingEndpointId) {
+        const next = { ...current }
+        delete next[providerId]
+        return next
+      }
+      return { ...current, [providerId]: testingEndpointId }
     })
   }
 
@@ -921,8 +937,12 @@ export function useSettingsPageController(): SettingsPageController {
     const toastId = `force-endpoint-test-${endpointId}`
     toast.loading(`Re-probing protocol for ${endpointId}...`, { id: toastId })
     try {
-      await forceTestEndpoint(endpointId)
-      const next = await getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      // The response already carries the freshly-updated registry — merge it
+      // locally like runProviderGetModels does, instead of a second network
+      // round trip that re-fetches and re-decrypts every provider's secret
+      // (that redundant getCredentials call was why this hung far longer than
+      // a single endpoint-tag probe).
+      const next = await forceTestEndpoint(endpointId)
       setCredentials(next)
       setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
       const reprobed = next.providers.find((provider) => provider.id === endpointId)
@@ -957,7 +977,7 @@ export function useSettingsPageController(): SettingsPageController {
     const announcedBaseUrlSteps = new Set<string>()
     const reportedBaseUrlSteps = new Set<string>()
 
-    setProviderTesting(providerId, "models")
+    setProviderTesting(providerId, "models", options.onlyEndpointId ?? null)
     const toastId = `get-models-${providerId}`
     toast.loading(
       isOfficial

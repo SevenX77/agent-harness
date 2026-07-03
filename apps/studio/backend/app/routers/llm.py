@@ -109,7 +109,11 @@ from app.services.llm_credentials_evidence import (
     route_is_probe_verified,
 )
 from app.services.llm_evidence_ids import new_evidence_id
-from app.services.llm_health_store import RuntimeCircuit, SqliteLlmHealthStore
+from app.services.llm_health_store import (
+    ActiveCircuitsIndex,
+    RuntimeCircuit,
+    SqliteLlmHealthStore,
+)
 from app.services.llm_model_groups import (
     normalize_model_group_key,
     project_model_group_identity,
@@ -465,6 +469,7 @@ async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, An
             "route_count": len(data.provider_routes),
         },
     )
+    _reconcile_fixed_roles_after_credential_change()
     return serialize_for_response(data)
 
 
@@ -1036,6 +1041,8 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             "probe_attempts": probe_attempts_log,
         },
     )
+    # 新发现的 route 可能正是某个固定角色缺的推荐模型 → 立刻补齐,再回传含新角色的 registry。
+    _reconcile_fixed_roles_after_credential_change()
     return EndpointTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         tested_endpoint_id=endpoint_id,
@@ -1300,6 +1307,8 @@ async def test_endpoint_models(
             },
         )
     await _autoshare_after_probe_best_effort()
+    # 手动探测出的新 route 也可能补齐固定角色缺的推荐模型 → reconcile 后回传含新角色的 registry。
+    _reconcile_fixed_roles_after_credential_change()
     return EndpointModelTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         results=results,
@@ -1537,10 +1546,30 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
 
 @router.get("/fixed-roles")
 async def get_fixed_role_names() -> dict[str, list[str]]:
-    """固定角色名(引擎 builtin 硬依赖、不可删除)。前端据此隐藏删除入口。"""
-    from app.services.llm_fixed_roles import required_builtin_roles
+    """固定角色名(不可删除、不可改名)。前端据此隐藏删除/改名入口。"""
+    from app.services.llm_fixed_roles import fixed_role_names
 
-    return {"fixed_role_names": sorted(required_builtin_roles())}
+    return {"fixed_role_names": sorted(fixed_role_names())}
+
+
+@router.get("/fixed-roles/{role_name}")
+async def get_fixed_role_status(role_name: str) -> dict[str, Any]:
+    """固定角色的推荐模型清单(canonical_id + 展示名)。说明文案归前端 i18n;缺哪个
+    推荐模型由前端拿当前内存里的角色状态实时算(不走后端读盘,避免防抖存盘前的竞态)。"""
+    from app.services.llm_fixed_roles import (
+        is_fixed_role,
+        recommended_model_display_name,
+        recommended_models_for_role,
+    )
+
+    if not is_fixed_role(role_name):
+        raise HTTPException(status_code=404, detail=f"Not a fixed role: {role_name}")
+    return {
+        "recommended_models": [
+            {"canonical_id": canonical_id, "display_name": recommended_model_display_name(role_name, canonical_id)}
+            for canonical_id in recommended_models_for_role(role_name)
+        ],
+    }
 
 
 @router.delete("/roles/{role_name}", response_model=RolesData)
@@ -1552,10 +1581,10 @@ async def delete_llm_role(role_name: str) -> RolesData:
     if role_name not in data.roles:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     if is_fixed_role(role_name):
-        # 引擎 builtin(如 md-patch 的 md2json 修补)硬依赖该角色,删了就跑不起来。
+        # 固定角色(引擎 builtin 硬依赖 / 内置 copilot)删了就跑不起来。
         raise HTTPException(
             status_code=409,
-            detail=f"固定角色不可删除: {role_name}(引擎 builtin skill 硬依赖)",
+            detail=f"固定角色不可删除: {role_name}",
         )
     roles = dict(data.roles)
     del roles[role_name]
@@ -2342,8 +2371,13 @@ def _registry_response(
     *,
     setup_required: bool = False,
 ) -> RegistryResponse:
+    # R7-D: snapshot the circuit-breaker health store ONCE for the whole build —
+    # every route's cooldown state is then an O(1) in-memory lookup instead of a
+    # fresh SQLite connection per route (the table itself is almost always empty;
+    # the old code paid a full connect+schema-ensure+query per route regardless).
+    circuits_index = ActiveCircuitsIndex.build(_health_store().get_all_active_circuits())
     credentials = _normalize_credentials_for_registry_response(credentials)
-    credentials = _project_route_ui_states(credentials)
+    credentials = _project_route_ui_states(credentials, circuits_index=circuits_index)
     credentials = _project_endpoint_provider_identities(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
@@ -2380,7 +2414,7 @@ def _registry_response(
             }
             for canonical_id, route_ids in sorted(routes_by_canonical.items())
         ],
-        model_groups=_model_groups_response(credentials),
+        model_groups=_model_groups_response(credentials, circuits_index=circuits_index),
         lint_results=lint_results,
         route_runtime_settings={
             route_id: build_runtime_setting_descriptors(route)
@@ -2424,6 +2458,8 @@ def _probe_catalog_summary() -> ProbeCatalogSummary:
 
 def _project_route_ui_states(
     credentials: LLMCredentialsFile,
+    *,
+    circuits_index: ActiveCircuitsIndex,
 ) -> LLMCredentialsFile:
     """Stamp each route's 6-state ``ui_state`` onto the registry DTO (apikeys#30).
 
@@ -2432,11 +2468,13 @@ def _project_route_ui_states(
     of recomputing it. We reuse the canonical gateway projector via the in-process
     adapter (``project_route_state``) — the identical call ``_provider_model_option``
     makes — and never invent a new state vocabulary here.
+
+    ``circuits_index`` is a snapshot built ONCE per registry request (R7-D) — a
+    route's cooldown state is an O(1) lookup against it, not a fresh query.
     """
     if not credentials.provider_routes:
         return credentials
     adapter = build_gateway_adapter()
-    health_store = _health_store()
     now = datetime.now(UTC)
     projected_routes: dict[str, ProviderRoute] = {}
     changed = False
@@ -2445,11 +2483,10 @@ def _project_route_ui_states(
         if endpoint is None:
             projected_routes[route_id] = route
             continue
-        circuits = health_store.get_active_circuits(
+        circuits = circuits_index.for_route(
             route_id=route.route_id,
             endpoint_id=endpoint.endpoint_id,
             rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
-            now=now,
         )
         projection = adapter.project_route_state(
             {
@@ -2574,7 +2611,11 @@ def _normalize_gemini_catalog_entry_for_registry_response(entry: object) -> obje
     }
 
 
-def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
+def _model_groups_response(
+    credentials: LLMCredentialsFile,
+    *,
+    circuits_index: ActiveCircuitsIndex,
+) -> list[dict[str, Any]]:
     routes_by_identity: dict[str, list[ProviderRoute]] = {}
     for route in credentials.provider_routes.values():
         if not _include_route_in_model_groups(route, credentials):
@@ -2593,6 +2634,7 @@ def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, An
             routes,
             credentials,
             adapter=adapter,
+            circuits_index=circuits_index,
         )
         for routes in routes_by_identity.values()
     ]
@@ -2705,6 +2747,7 @@ def _model_group_response(
     credentials: LLMCredentialsFile,
     *,
     adapter: GatewayAdapter | None = None,
+    circuits_index: ActiveCircuitsIndex,
 ) -> dict[str, Any]:
     provider_models = [
         option
@@ -2714,6 +2757,7 @@ def _model_group_response(
                 route,
                 credentials,
                 adapter=adapter,
+                circuits_index=circuits_index,
             )
         )
         is not None
@@ -2808,17 +2852,17 @@ def _provider_model_option(
     credentials: LLMCredentialsFile,
     *,
     adapter: GatewayAdapter | None = None,
+    circuits_index: ActiveCircuitsIndex,
 ) -> dict[str, Any] | None:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         return None
     if adapter is None:
         adapter = build_gateway_adapter()
-    circuits = _health_store().get_active_circuits(
+    circuits = circuits_index.for_route(
         route_id=route.route_id,
         endpoint_id=endpoint.endpoint_id,
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
-        now=datetime.now(UTC),
     )
     projection = adapter.project_route_state(
         {
@@ -5504,6 +5548,29 @@ def _save_roles_with_active_routes(data: RolesData) -> RolesData:
     # the on-disk truth fresh on every call, so the just-saved roles are seen
     # immediately (e.g. by the next copilot test-sdk) without a sync hook.
     return reloaded
+
+
+def _reconcile_fixed_roles_after_credential_change() -> list[str]:
+    """凭证变更后自动把固定角色缺的推荐模型组补齐(用户在 API Keys 配好模型 → 固定
+    角色即自动可用,不用手动去角色页拖)。组级粒度,不动用户已删的 endpoint;没改就不写盘。
+    返回被补齐的角色名(便于活动日志)。"""
+    from app.services.llm_fixed_roles import reconcile_fixed_roles
+
+    if not roles_path().exists():
+        return []
+    credentials = load_credentials()
+    roles = _load_roles_or_empty()
+    updated, changed = reconcile_fixed_roles(roles, credentials)
+    if not changed:
+        return []
+    _save_roles_with_active_routes(updated)
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="reconcile_fixed_roles",
+        message="Auto-filled fixed roles with newly available recommended models.",
+        changes={"role_names": sorted(changed)},
+    )
+    return changed
 
 
 def _now_iso() -> str:

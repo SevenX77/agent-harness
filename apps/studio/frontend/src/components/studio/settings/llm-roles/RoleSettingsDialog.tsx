@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import type { RoleIntent, RoleProviderPreference } from "@/api/llm"
 
@@ -84,7 +85,7 @@ export function RoleSettingsFields({
       <FieldGroup className="gap-3">
         <div
           data-role-settings-toggles="true"
-          className="grid gap-3 rounded-md border border-border bg-muted/10 p-3 lg:grid-cols-3"
+          className="grid gap-3 lg:grid-cols-2"
         >
           <Field
             orientation="horizontal"
@@ -160,19 +161,26 @@ export function RoleSettingsFields({
             <FieldLabel htmlFor={`temperature-${roleName}`} className="text-xs font-medium">
               Temperature
             </FieldLabel>
-            <Input
-              id={`temperature-${roleName}`}
-              data-role-temperature-input="true"
-              aria-label={`Temperature for ${roleName}`}
-              value={draft.temperature}
-              onChange={(event) => onDraftChange({
-                ...draft,
-                temperature: sanitizeDecimal(event.target.value),
-              })}
-              inputMode="decimal"
-              placeholder="Blank uses model default"
-            />
-            <FieldDescription>Blank uses the model default (e.g. 0.7).</FieldDescription>
+            <div className="flex h-9 items-center gap-2">
+              <Slider
+                id={`temperature-${roleName}`}
+                data-role-temperature-input="true"
+                aria-label={`Temperature for ${roleName}`}
+                min={0}
+                max={2}
+                step={0.1}
+                value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
+                onValueChange={(vals) => onDraftChange({
+                  ...draft,
+                  temperature: String(vals[0]),
+                })}
+                className="flex-1"
+              />
+              <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                {draft.temperature === "" ? "—" : draft.temperature}
+              </span>
+            </div>
+            <FieldDescription>Drag to set a temperature override; leave untouched to use the model default (e.g. 0.7).</FieldDescription>
           </Field>
         </div>
       </FieldGroup>
@@ -226,15 +234,6 @@ export function formatThousands(value: string): string {
 /** PR3 (exported for tests): drop thousands separators back to a raw digit string. */
 export function stripThousands(value: string): string {
   return value.replace(/[^\d]/g, "")
-}
-
-function sanitizeDecimal(value: string): string {
-  // Keep digits and a single leading decimal point (temperature is a small
-  // positive decimal like 0.7); drop everything else as it is typed.
-  const cleaned = value.replace(/[^\d.]/g, "")
-  const firstDot = cleaned.indexOf(".")
-  if (firstDot === -1) return cleaned
-  return cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "")
 }
 
 function parseOptionalInteger(value: string): number | null {

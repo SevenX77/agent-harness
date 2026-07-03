@@ -1761,6 +1761,19 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
+  // Item 2 follow-up (PM 2026-07-03): a single endpoint-tag click scopes the
+  // probe to draft.testingEndpointId, so only THAT tag should spin — not
+  // every sibling under this provider. null/unset (whole-card "Test" button)
+  // still spins every endpoint, matching the existing full-card behavior.
+  const isEndpointBeingTested = (endpointId: string) =>
+    isGettingModels && (draft.testingEndpointId == null || draft.testingEndpointId === endpointId)
+  // Point 4 (PM 2026-07-03): a third-party model chip pulses only while an
+  // endpoint it actually has a route on is being probed. During a whole-card
+  // Test (testingEndpointId null) that's every model; during a single
+  // endpoint-tag probe it's just the models on that one (URL, protocol) cell,
+  // so sibling-endpoint models stay still instead of all flashing at once.
+  const isModelUnderEndpointTest = (model: ModelInfo) =>
+    routeSummariesForModel(model).some((summary) => isEndpointBeingTested(summary.endpoint_id ?? ""))
   // R-G2: auto-expand the full model list when an endpoint test starts, so the user
   // can watch every model being probed instead of only the first few.
   useEffect(() => {
@@ -1861,7 +1874,7 @@ export function ProviderCard({
       const stateStatus = endpointStateDisplayStatus({
         hasApiKey,
         hasBaseUrl: isOfficial || Boolean(state.row.value.trim()),
-        isTesting: isGettingModels,
+        isTesting: isEndpointBeingTested(state.draft.id),
         result: state.matchedResult,
         models: state.models,
       })
@@ -1890,7 +1903,7 @@ export function ProviderCard({
   const baseUrlReachabilityState = (rowId: string): BaseUrlReachabilityState => {
     const states = endpointStatesByBaseUrlRow.get(rowId) ?? []
     if (states.length === 0) return "unknown"
-    if (isGettingModels && states.some((state) => state.row.value.trim())) return "testing"
+    if (states.some((state) => state.row.value.trim() && isEndpointBeingTested(state.draft.id))) return "testing"
     const reachability = states.map((state): BaseUrlReachabilityState => {
       const result = state.matchedResult
       const status = endpointStateDisplayStatus({
@@ -2033,9 +2046,11 @@ export function ProviderCard({
         className={cn(
           isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",
           // R-G2: a model chip pulses while its own route reports status="testing"
-          // (official, per-route), OR — for third-party providers — while the whole
-          // endpoint test runs, so the user sees every listed model being verified.
-          (status === "testing" || (isGettingModels && !isOfficial && !isDisabled)) && "api-route-tag-border-flow",
+          // (official, per-route), OR — for third-party providers — while an
+          // endpoint the model has a route on is being probed. Scoped by
+          // isModelUnderEndpointTest so a single endpoint-tag probe only pulses
+          // that endpoint's models, not every sibling (point 4, PM 2026-07-03).
+          (status === "testing" || (!isOfficial && !isDisabled && isModelUnderEndpointTest(model))) && "api-route-tag-border-flow",
         )}
       >
         <button

@@ -4,6 +4,10 @@ Parser helpers that matter to callers:
 
 - ``parse_markdown_parts(path)`` — read+decode entry. Returns
   frontmatter, body, and line metadata for V2.1 markdown documents.
+- ``parse_markdown_parts_best_effort(path)`` — tolerant sibling for
+  repair-view consumers (topology_projection) that must survive an
+  unrelated duplicate-key defect elsewhere in the frontmatter; never use
+  it on the compile/lint path, which must stay strict.
 - ``_parse_frontmatter(content)`` / ``_strip_frontmatter(content)`` —
   internal helpers used by ``loader.py`` and ``compiler.py`` to peek
   ``schema_version`` before paying for full Pydantic validation.
@@ -63,12 +67,18 @@ def _make_yaml() -> Any:
     return yaml
 
 
-def _parse_frontmatter(content: str) -> dict[str, Any]:
+def _parse_frontmatter(content: str, path: Path | None = None) -> dict[str, Any]:
     """Extract YAML frontmatter from markdown content.
 
     Returns a ``CommentedMap`` (a dict subclass) so callers downstream
     can read line/column metadata via ``.lc.data[key]`` or via the
     helper :func:`locate_line_for_pydantic_loc`.
+
+    ``path`` is optional (call sites without a concrete file, e.g. the
+    skill analyzer scanning raw text, pass ``None``) and is used only to
+    prefix a raised :class:`SkillLoadError`'s message with ``path:line``
+    when the underlying YAML error carries a location (see
+    :func:`_format_frontmatter_yaml_error`).
     """
     if not content.startswith("---"):
         raise SkillLoadError("No YAML frontmatter found (file must start with ---)")
@@ -91,12 +101,47 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
             yaml = _make_yaml()
             data = yaml.load(io.StringIO(yaml_body))
     except YAMLError as exc:
-        raise SkillLoadError(f"Invalid YAML in frontmatter: {exc}") from exc
+        raise SkillLoadError(_format_frontmatter_yaml_error(exc, path)) from exc
 
     if not isinstance(data, dict):
         raise SkillLoadError("Frontmatter must be a YAML dictionary")
 
     return data
+
+
+def _format_frontmatter_yaml_error(exc: YAMLError, path: Path | None) -> str:
+    """Reformat a raw ruamel/pyyaml ``YAMLError`` into the repo's ``path:line`` convention.
+
+    ``str(exc)`` embeds ruamel's own location dialect (`` in "<file>", line N,
+    column M``), which none of the engine/Studio location regexes understand —
+    they all expect a leading ``<path>:<line>`` (the same convention
+    :func:`_fatal` below produces, and that
+    ``apps/studio/backend/app/services/skills.py:_LOCATION_RE``/
+    ``_location_file_from_error_message`` parse). Reformatting once here, where
+    the raw exception is caught, fixes every downstream consumer instead of
+    teaching each one ruamel's dialect.
+    """
+    line = _yaml_error_line(exc)
+    if path is not None and line is not None:
+        return f"{path}:{line} Invalid YAML in frontmatter: {exc}"
+    return f"Invalid YAML in frontmatter: {exc}"
+
+
+def _yaml_error_line(exc: YAMLError) -> int | None:
+    """Convert a ruamel/pyyaml error mark's 0-indexed line to a 1-indexed file line.
+
+    Prefers ``problem_mark`` (where the parser actually rejected the document,
+    e.g. the *second* occurrence of a duplicate key) over ``context_mark``
+    (where the surrounding construct started). Same offset as
+    :data:`_FRONTMATTER_LINE_OFFSET` / :func:`locate_line_for_pydantic_loc`:
+    the opening ``---`` fence is stripped before parsing, so YAML-stream line 0
+    is markdown file line 2.
+    """
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    line0 = getattr(mark, "line", None) if mark is not None else None
+    if not isinstance(line0, int):
+        return None
+    return line0 + _FRONTMATTER_LINE_OFFSET
 
 
 def _strip_frontmatter(content: str) -> str:
@@ -228,7 +273,7 @@ def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[st
     content = p.read_text(encoding="utf-8")
 
     try:
-        frontmatter = _parse_frontmatter(content)
+        frontmatter = _parse_frontmatter(content, p)
     except SkillLoadError as exc:
         if exc.payload is not None:
             raise
@@ -250,6 +295,64 @@ def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[st
         frontmatter_end_line = content[: match.end()].count("\n") + 1
 
     return frontmatter, body, {"body_start": frontmatter_end_line + 1}
+
+
+def parse_markdown_parts_best_effort(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:
+    """Best-effort sibling of :func:`parse_markdown_parts` for repair-view consumers.
+
+    Compile/lint must stay strict — a duplicate mapping key (e.g. an
+    accidental copy-paste under ``io.inputs.properties``) is a real defect the
+    user needs to see and fix, so :func:`_parse_frontmatter` (the compile
+    path) keeps rejecting it. But a *different* consumer —
+    :func:`graph_agent.core.topology_projection.load_graph_topology_projection`,
+    which exists solely to keep the phases/DAG visible in Studio's repair view
+    while the user fixes a broken skill — has nothing to do with ``io`` at
+    all. Under the strict parser, ruamel treats the whole frontmatter mapping
+    as one atomic document: an unrelated duplicate key anywhere in ``io``
+    blanks out the unrelated, syntactically-fine ``phases`` list too, which
+    defeats the repair view's entire purpose (see
+    ``docs/studio/mvp1/01_workflows/01_init.md`` D2: opening a non-standard
+    skill must not block — "我们有 compile, 有 copilot" — the whole point is
+    that the user can still see and repair it).
+
+    This tolerates duplicate mapping keys (ruamel's ``allow_duplicate_keys``,
+    last value wins) so callers that only need a subset of frontmatter
+    fields can recover them; it still raises on YAML that is not just
+    duplicate-keyed but genuinely malformed, so callers must not treat a
+    successful parse here as validating the document.
+    """
+    p = Path(path)
+    content = p.read_text(encoding="utf-8")
+
+    if not content.startswith("---"):
+        raise SkillLoadError("No YAML frontmatter found (file must start with ---)")
+    match = re.match(r"^---\r?\n(.*?)\r?\n---", content, re.DOTALL)
+    if not match:
+        raise SkillLoadError("Invalid frontmatter format")
+
+    yaml_body = match.group(1)
+    try:
+        if RuamelYAML is None:
+            import yaml as pyyaml
+
+            data = pyyaml.safe_load(io.StringIO(yaml_body))
+        else:
+            yaml = _make_yaml()
+            yaml.allow_duplicate_keys = True
+            data = yaml.load(io.StringIO(yaml_body))
+    except YAMLError as exc:
+        raise SkillLoadError(_format_frontmatter_yaml_error(exc, p)) from exc
+
+    if not isinstance(data, dict):
+        raise SkillLoadError("Frontmatter must be a YAML dictionary")
+
+    body = _strip_frontmatter(content)
+    frontmatter_end_line = 1
+    match = re.match(r"^---\r?\n.*?\r?\n---", content, re.DOTALL)
+    if match:
+        frontmatter_end_line = content[: match.end()].count("\n") + 1
+
+    return data, body, {"body_start": frontmatter_end_line + 1}
 
 
 def extract_raw_blocks(body: str, allowed_tags: list[str]) -> dict[str, str]:

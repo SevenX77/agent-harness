@@ -8,12 +8,12 @@ import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/c
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { CopilotFab } from "@/components/copilot/copilot-fab"
-import type { Point } from "@/components/copilot/copilot-fab-geometry"
+import { CopilotPanelMorph } from "@/components/copilot/copilot-panel-morph"
+import { defaultFabPosition, headerLogoTarget, panelRect, type Point, type Rect } from "@/components/copilot/copilot-fab-geometry"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
 import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
-import { useAnimatedPresence } from "@/hooks/useAnimatedPresence"
 import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
@@ -304,6 +304,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // FAB position on the canvas; null = default top-right anchor. Persists across
   // open/close within the session (survives the panel collapse animation).
   const [fabPosition, setFabPosition] = useState<Point | null>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
+  // Active FAB↔panel container-transform morph, or null. Exactly one of the
+  // FAB / morph / panel renders at a time, gated on this + copilotOpen.
+  const [morph, setMorph] = useState<{ mode: "open" | "close"; fab: Point; logo: Point; panel: Rect } | null>(null)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const currentWorkspaceSelection = navStack.at(-1) ?? null
   const currentWorkspaceIdentity = useMemo(
@@ -2332,15 +2336,30 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // Safe areas = overlay size + its 1.5rem outer margin (0.75rem each side).
   const workspaceOverlayStyle = {
     "--studio-canvas-left-safe-area": activePanel ? `calc(${leftPanelWidth}px + 1.5rem)` : "0px",
-    "--studio-canvas-right-safe-area": copilotOpen ? `calc(${copilotWidth}px + 1.5rem)` : "0px",
+    "--studio-canvas-right-safe-area": copilotOpen || morph?.mode === "open" ? `calc(${copilotWidth}px + 1.5rem)` : "0px",
     "--studio-canvas-editor-safe-area": editorOpen ? "calc(var(--studio-editor-overlay-height) + 1.5rem)" : "0px",
     "--studio-editor-overlay-height": editorHeight != null ? `${editorHeight}px` : "min(52%, 34rem)",
   } as CSSProperties
-  // Keep the panel mounted through its 200ms exit animation (matches the CSS
-  // duration on WorkspaceRightPanelOverlay), then unmount as before.
-  const panelPresence = useAnimatedPresence(copilotOpen, 200)
-  const rightPanelOverlay = panelPresence.mounted ? (
-    <WorkspaceRightPanelOverlay width={copilotWidth} onResize={setCopilotWidth} state={panelPresence.state}>
+  // FAB ↔ panel container-transform: measure the canvas host, then hand the morph
+  // the FAB spot + the header-logo landing + the full panel rect. Exactly one of
+  // { FAB, morph, panel } renders at a time (gated on copilotOpen + morph).
+  const startMorph = (mode: "open" | "close", from: Point | null) => {
+    const host = hostRef.current
+    if (!host) {
+      setCopilotOpen(mode === "open")
+      return
+    }
+    const bounds = { width: host.clientWidth, height: host.clientHeight }
+    setMorph({
+      mode,
+      fab: from ?? defaultFabPosition(bounds),
+      logo: headerLogoTarget(bounds, copilotWidth),
+      panel: panelRect(bounds, copilotWidth),
+    })
+    if (mode === "close") setCopilotOpen(false)
+  }
+  const rightPanelOverlay = copilotOpen && !morph ? (
+    <WorkspaceRightPanelOverlay width={copilotWidth} onResize={setCopilotWidth}>
       <CopilotPanel
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
@@ -2349,18 +2368,24 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         completedRunId={completedRunId}
         onJudgePrepared={setCopilotJudgeResult}
         onFileChanged={handleCopilotFileChanged}
-        onCollapse={() => setCopilotOpen(false)}
+        onCollapse={() => startMorph("close", fabPosition)}
       />
     </WorkspaceRightPanelOverlay>
   ) : null
-  // Collapsed → a solid MoirAI FAB at the same bottom-right corner; the panel
-  // zoom-collapses into it and grows back out of it. Only with a skill loaded.
-  const copilotFab = currentSkillId && !copilotOpen ? (
-    <CopilotFab
-      position={fabPosition}
-      onPositionChange={setFabPosition}
-      panelWidth={copilotWidth}
-      onOpen={() => setCopilotOpen(true)}
+  // Collapsed → the draggable MoirAI FAB (default top-right). Tap → open morph.
+  const copilotFab = currentSkillId && !copilotOpen && !morph ? (
+    <CopilotFab position={fabPosition} onPositionChange={setFabPosition} onOpen={(from) => startMorph("open", from)} />
+  ) : null
+  const copilotMorph = morph ? (
+    <CopilotPanelMorph
+      mode={morph.mode}
+      fab={morph.fab}
+      logo={morph.logo}
+      panel={morph.panel}
+      onFinish={() => {
+        if (morph.mode === "open") setCopilotOpen(true)
+        setMorph(null)
+      }}
     />
   ) : null
 
@@ -2401,6 +2426,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               ) : (
                 <>
                   <div
+                    ref={hostRef}
                     data-studio-canvas-overlay-host="true"
                     className="relative size-full"
                   >
@@ -2449,6 +2475,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     <WorkspaceEditorOverlay onResizeHeight={setEditorHeight} />
                     {rightPanelOverlay}
                     {copilotFab}
+                    {copilotMorph}
                   </div>
                 </>
               )}

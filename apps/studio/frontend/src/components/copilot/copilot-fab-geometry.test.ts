@@ -6,6 +6,7 @@ import {
   FAB_SIZE,
   headerLogoTarget,
   isTapGesture,
+  panelRect,
   travelSteps,
 } from './copilot-fab-geometry'
 
@@ -69,5 +70,19 @@ describe('isTapGesture', () => {
   it('is a drag once it moves past the threshold', () => {
     expect(isTapGesture({ x: 100, y: 100 }, { x: 120, y: 100 })).toBe(false)
     expect(isTapGesture({ x: 100, y: 100 }, { x: 100, y: 130 })).toBe(false)
+  })
+})
+
+describe('panelRect', () => {
+  it('is the panel docked top/right/bottom with the given width', () => {
+    expect(panelRect(bounds, 360)).toEqual({ left: 1000 - 360 - 12, top: 12, width: 360, height: 600 - 24 })
+  })
+
+  it('and headerLogoTarget lands inside that rect (the morph start-of-grow sits on the panel)', () => {
+    const r = panelRect(bounds, 360)
+    const logo = headerLogoTarget(bounds, 360)
+    expect(logo.x).toBeGreaterThanOrEqual(r.left - FAB_SIZE)
+    expect(logo.x).toBeLessThan(r.left + r.width)
+    expect(logo.y).toBeGreaterThanOrEqual(r.top - FAB_SIZE)
   })
 })

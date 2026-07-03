@@ -78,7 +78,12 @@ export function phaseRange(md: string, phaseId: string): PhaseYamlBlock | null {
 }
 
 export function phaseFromYamlBlock(yamlBlock: string): PhaseDef | null {
-  const parsed = yaml.load(`phases:\n${yamlBlock}`) as unknown
+  let parsed: unknown
+  try {
+    parsed = yaml.load(`phases:\n${yamlBlock}`)
+  } catch {
+    return null
+  }
   if (!isJsonObject(parsed) || !Array.isArray(parsed.phases)) {
     return null
   }
@@ -99,7 +104,12 @@ export function phaseToYamlBlock(phase: PhaseDef): string {
 }
 
 export function phaseToolsFromManifest(frontmatter: string): string[] {
-  const parsed = yaml.load(frontmatter) as unknown
+  let parsed: unknown
+  try {
+    parsed = yaml.load(frontmatter)
+  } catch {
+    return []
+  }
   if (!isJsonObject(parsed)) {
     return []
   }
@@ -150,7 +160,12 @@ function findPhaseStartLines(lines: string[]): Array<{ lineIndex: number; phaseI
 }
 
 function scalarString(value: string): string | null {
-  const parsed = yaml.load(value) as JsonValue | undefined
+  let parsed: JsonValue | undefined
+  try {
+    parsed = yaml.load(value) as JsonValue | undefined
+  } catch {
+    return null
+  }
   if (typeof parsed === 'string' || typeof parsed === 'number' || typeof parsed === 'boolean') {
     return String(parsed)
   }

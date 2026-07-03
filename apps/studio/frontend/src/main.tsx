@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './store/themeStore'
 import { App } from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { configureApiToken } from './api/client'
 import { bootstrapTunnelToken } from './config/tunnel-token'
 import { i18nReady } from './i18n'
@@ -16,6 +17,8 @@ await i18nReady
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary label="Studio">
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

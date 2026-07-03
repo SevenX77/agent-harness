@@ -2,7 +2,7 @@
  "id": "n2_iopanel_impl",
  "title": "i/o 面板 · 实施详情",
  "design_ref": "n2_iopanel_design",
- "intro": "本页是 i/o 面板前端的现状/实施/测试,1:1 对应设计页 n2_iopanel_design(原子 25/26/27/30/32/33/34)。2026-07-02 r3(PM 三轮确认)重构并同轮实施完成。**2026-07-03 r5**(PM 真机 4 点反馈,feat/io-node-scoped-config)把「画布节点↔io config」关系模型建对:① 面板**按角色收敛段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段;边界伪节点点击经 onBoundarySelect 承载身份,不再一律 deselect);② io 字段**全链路嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端 fieldPathRows 树遍历,子字段 chapter.aa_number 可独立勾选;输出侧 artifacts 只认顶层键,嵌套仅展示);③ 输入配置**改内联可折叠**(InputConfigInline,替换 InputConfigDialog modal;输出 artifacts 因多卡片保留 scoped modal);④ New file 改 ghost list 行(修订 r4b 的 secondary)。写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。唯一存留 = golden run/trace 交互 + 后端逐节点粒度(后续轮 #12)。",
+ "intro": "本页是 i/o 面板前端的现状/实施/测试,1:1 对应设计页 n2_iopanel_design(原子 25/26/27/30/32/33/34)。2026-07-02 r3(PM 三轮确认)重构并同轮实施完成。**2026-07-03 r5**(PM 真机 4 点反馈,feat/io-node-scoped-config)把「画布节点↔io config」关系模型建对:① 面板**按角色收敛段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段;边界伪节点点击经 onBoundarySelect 承载身份,不再一律 deselect);② io 字段**全链路嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端 fieldPathRows 树遍历,子字段 chapter.aa_number 可独立勾选;输出侧 artifacts 只认顶层键,嵌套仅展示);③ 输入配置**改内联可折叠**(InputConfigInline,替换 InputConfigDialog modal;输出 artifacts 因多卡片保留 scoped modal);④ New file 改 ghost list 行(修订 r4b 的 secondary)。写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。**2026-07-03 r6**(PM 真机第二轮 5 点,feat/io-panel-import-run-edit)收敛面板 run 入口 + 导入体验:① 移除 Test Inputs 区**所有批量 run 入口**(批量勾选/C10 序列建议/Run-N-as-batch/`useBatchRun`,唯一 run=中央动作条);② 导入合并为**单个「Import…」= 文件夹选择器**(删双按钮);③ 导入即**自动匹配**(候选字段名 normalize 后比对声明 io.inputs,命中自动勾选+高亮;批量条目 field 取 stem 修『导入一堆文件无一匹配』根因);④ 导入结果**按文件分组** + 文件行/Test Inputs 行加**编辑按钮**(用编辑器打开)。唯一存留 = golden run/trace 交互 + 后端逐节点粒度(后续轮 #12)。",
  "functions": [
   {
    "n": 25,
@@ -17,12 +17,12 @@
    "n": 26,
    "cap": "test-inputs-manage",
    "design_ref": "n2-atom-26",
-   "current": "现状:符合(r3/r5)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 进编辑器。内联 JSON 创建表单已删。 r4b:list 行无边框 ghost(选中 bg-accent),对齐 FileRow。 r5(PM #4):New file 从 `variant=secondary`(暗色近黑 `--secondary: oklch(0.274…)`)改**透明底 hover 亮的 ghost list 行**(与上方 item 行同款 `text-muted-foreground hover:bg-accent hover:text-foreground`),融进 panel list 样式。",
-   "gap": "符合(内联表单→New file)。",
+   "current": "现状:符合(r3/r5/r6)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 进编辑器。内联 JSON 创建表单已删。 r4b:list 行无边框 ghost(选中 bg-accent),对齐 FileRow。 r5(PM #4):New file 从 `variant=secondary`(暗色近黑 `--secondary: oklch(0.274…)`)改**透明底 hover 亮的 ghost list 行**(与上方 item 行同款 `text-muted-foreground hover:bg-accent hover:text-foreground`),融进 panel list 样式。 r6(PM 点1):**移除批量 run 入口**——删每行批量勾选框 + C10 命名序列建议(Run chapter1–3 as batch)+ 手动 Run-N-as-batch 按钮 + 驱动 hook `useBatchRun`(及其测试),面板不再有任何 run 入口(唯一 run = 中央动作条)。 r6(PM 点5):每行删除(垃圾桶)旁加**编辑按钮**(Pencil),onFileOpen `.workspace/test_inputs/<id>.json` 用编辑器打开。",
+   "gap": "符合(内联表单→New file;批量 run 入口已移除;行内编辑按钮已加)。",
    "fe_status": "符合",
-   "be_dep": "test_inputs CRUD live。",
+   "be_dep": "test_inputs CRUD live;后端 batch-run 端点保留(面板不再调用)。",
    "fe_status_prev": "内联表单",
-   "fe_resync": "2026-07-02 r3:内联表单→New file"
+   "fe_resync": "2026-07-02 r3:内联表单→New file｜2026-07-03 r6:移除批量 run 入口 + 加行内编辑按钮"
   },
   {
    "n": 27,
@@ -39,12 +39,12 @@
    "n": 32,
    "cap": "input-config-tree",
    "design_ref": "n2-atom-32",
-   "current": "现状:符合(r3 新建,r5 改内联+嵌套)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Add file 调 importIoIntoWorkspace + candidatesFromScanEntries,原生 OS 选择器。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。",
-   "gap": "符合设计(r5 内联 + 嵌套)。",
+   "current": "现状:符合(r3 新建,r5 改内联+嵌套)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。 **r6 导入体验(PM 点2/3/4/5)**:导入入口从「Import file…/Import folder…」双按钮合并为**单个「Import…」= 文件夹选择器**(selectImportFolder;文件夹即导入其下全部文件,`selectImportFile` wrapper 已删)。导入即**自动匹配**:candidatesFromScanEntries → matchCandidatesToInputs(把候选字段名 normalizeFieldName 小写+去尾数/`{n}` 后比对 declaredInputFieldNames(view.content)),命中自动勾选 + `bg-accent` 高亮 + 「matched io.inputs」标注;**批量条目 field 取 batchStem(`chapter`)而非父目录名**(旧 bug:取父目录名致导入无一匹配)。导入结果 groupCandidatesByFile **按源文件分组**(每文件一行:名+路径+编辑+删除;字段在下)。单文件组行加**编辑按钮**(Pencil,onFileOpen `.workspace/<candidate.path>`)。",
+   "gap": "符合设计(r5 内联 + 嵌套;r6 单 import + 自动匹配 + 按文件分组 + 编辑按钮)。",
    "fe_status": "符合",
-   "be_dep": "已就绪:POST /api/io/scan + /io/import;engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。",
+   "be_dep": "已就绪:POST /api/io/scan + /io/import(import copy 进 .workspace/imports/<name>/、rebase 相对路径);engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。自动匹配纯前端(比对声明字段名,无需后端)。",
    "fe_status_prev": "r3 modal + 顶层扁平",
-   "fe_resync": "2026-07-03 r5:modal→内联可折叠;顶层扁平→嵌套树可独立勾选"
+   "fe_resync": "2026-07-03 r5:modal→内联可折叠;顶层扁平→嵌套树可独立勾选｜2026-07-03 r6:双 import→单 Import…;导入即自动匹配;按文件分组 + 文件行编辑按钮"
   },
   {
    "n": 33,
@@ -81,7 +81,7 @@
  "plan": [
   {
    "step": 1,
-   "what": "#32 输入配置树:InputConfigDialog(黑板优先勾选树 + Add file 导入)+ lib/io-config(blackboardAtNode/applyIoInputChecks)+ 后端 /api/io/scan、/io/import。",
+   "what": "#32 输入配置树:InputConfigInline(黑板优先勾选树 + 单个 Import… 导入 + 自动匹配 + 按文件分组)+ lib/io-config(blackboardAtNode/applyIoInputChecks/declaredInputFieldNames)+ IoConfigDialog(candidatesFromScanEntries/matchCandidatesToInputs/groupCandidatesByFile)+ 后端 /api/io/scan、/io/import。",
    "depends_on": "前端 staticEdgeInference(已在)+ 后端扫描/导入端点(本轮建)。",
    "why": "PM r3 核心:黑板是主源,文件只追加;配置=字段勾选树。",
    "block": "全栈(前端+backend)"
@@ -186,6 +186,10 @@
     {
      "file": "n2-49-iopanel-r5-graph-inline-config.png",
      "caption": "r5:空白=GRAPH.md 图级——两段都显示;内联 Configure input 展开 Graph inputs,chapter 无 source → missing 置顶;New file 改 ghost list 行(透明底、+ 图标,非黑色实心按钮,#4)。"
+    },
+    {
+     "file": "n2-50-iopanel-r6-import-run-edit.png",
+     "caption": "r6:Test Inputs 区**无批量勾选框/无 Run-as-batch**、每行删除旁带编辑铅笔(点1/5);Graph inputs 内联配置——嵌套树 chapter→aa_number,notes.json 文件组带**编辑铅笔 + 删除**,底部**单个「Import…」**按钮(点2/5)。真机 Chromium 渲染真实组件+CSS。注:自动匹配的勾选+高亮(点3/4)由 18 条单测覆盖(matchCandidatesToInputs/normalizeFieldName/candidatesFromScanEntries batch stem),真机导入依赖原生文件夹选择器(浏览器 harness 触发不了)故此图未含。"
     }
    ]
   },

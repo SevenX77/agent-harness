@@ -69,9 +69,9 @@
    "n": 32,
    "cap": "input-config-tree",
    "module": "输入配置树",
-   "func": "设计(r3 新增,input region F3,PM r3 点2/4):输入配置弹窗 = 字段勾选树。第一行永远是黑板 context(展开为跑到该节点时黑板上的字段,嵌套按层级缩进;勾选=该节点 io.inputs 消费),推导与 dot 静态推断同源。黑板行下面是 Add file 导入的文件,每文件一棵 schema 字段树,勾中字段以 source:'file' 追加为黑板字段。Input 伪节点无黑板只有文件——勾选的文件字段流到第一个 node 成为黑板初始字段(=GRAPH.md io.inputs)。文件行 = 名字 + 灰色路径。 r4 字段对账:黑板行三态——matched(声明+黑板有)整行高亮+左侧主色竖条;available 普通行;missing(io.inputs 声明了但上游没供上)置顶 muted+danger+⚠+『required by io.inputs · not supplied by upstream』不可勾选。把引擎运行期 [F-v3-runtime-state-mapping-failed] 提前到配置期。",
-   "action": "点面板 Input 区 Configure → 勾选黑板字段 / Add file 导入 → 勾文件字段 → Save。",
-   "fe_design": "InputConfigDialog(shadcn Dialog + Checkbox):blackboardAtNode(复用 staticEdgeInference)出黑板行;Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 scan 出字段候选;applyIoInputChecks 按勾选重建 io.inputs(黑板消费字段 + source:'file' 单文件/批量 dir+pattern),写回目标文件,乐观 hash 锁。",
+   "func": "设计(r3 新增,r5 内联+嵌套,r6 导入体验,input region F3/F5):输入配置 = 字段勾选树,第一行永远是黑板 context(展开为跑到该节点时黑板上的字段,嵌套按层级缩进;勾选=该节点 io.inputs 消费),推导与 dot 静态推断同源。黑板行下面是导入的文件,每文件一棵 schema 字段树,勾中字段以 source:'file' 追加为黑板字段。Input 伪节点无黑板只有文件——勾选的文件字段流到第一个 node 成为黑板初始字段(=GRAPH.md io.inputs)。文件行 = 名字 + 灰色路径。 r4 字段对账:黑板行三态——matched(声明+黑板有)整行高亮+左侧主色竖条;available 普通行;missing(io.inputs 声明了但上游没供上)置顶 muted+danger+⚠+『required by io.inputs · not supplied by upstream』不可勾选。把引擎运行期 [F-v3-runtime-state-mapping-failed] 提前到配置期。 r5:配置**内联进面板**(可折叠段,非 modal);object 字段展开子路径、子字段(chapter.aa_number)**可独立勾选**(嵌套寻址三层贯通)。 r6:导入入口 = **单个「Import…」= 文件夹选择器**(文件夹即导入其下全部文件);导入即**自动匹配**(候选字段名 normalize 后比对声明 io.inputs,命中自动勾选+高亮「matched io.inputs」;批量条目 field 取 stem);导入结果**按源文件分组**(每文件一行:名+路径+编辑+删除),单文件行的删除旁有**编辑按钮**用编辑器打开。",
+   "action": "点面板 Input 区 Configure input(内联展开)→ 勾选黑板字段 / 点「Import…」选文件夹导入(自动匹配已勾)→ 需要则手动增减勾选 / 点文件行铅笔编辑 → Save。",
+   "fe_design": "InputConfigInline(内联可折叠段,非 modal;shadcn Collapsible + Checkbox):blackboardAtNode(复用 staticEdgeInference)出黑板行、FieldCheckTree 递归可展开可独立勾选;点「Import…」调 selectImportFolder + importIoIntoWorkspace 拷进 .workspace/imports 并 scan;candidatesFromScanEntries→matchCandidatesToInputs(normalizeFieldName 比对 declaredInputFieldNames,命中自动勾选+bg-accent 高亮)→groupCandidatesByFile 按源文件分组;单文件组行 Pencil 编辑按钮 onFileOpen;applyIoInputChecks 按勾选重建 io.inputs(黑板消费字段的嵌套投影 + source:'file' 单文件/批量 dir+pattern),写回目标文件,乐观 hash 锁。",
    "fe_modules": [
     {
      "name": "i/o 面板实例预览与配置入口(InputPanel + io-config)"

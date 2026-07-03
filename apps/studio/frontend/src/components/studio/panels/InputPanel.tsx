@@ -10,6 +10,7 @@ import { sha256Hex } from "@/lib/hash"
 import {
   applyGraphArtifacts,
   applyIoInputChecks,
+  declaredInputFieldNames,
   fileFieldsOf,
   graphArtifactsOf,
   reconcileInputFields,
@@ -356,7 +357,9 @@ export function InputPanel({
                           skillId={skillId}
                           blackboard={blackboard}
                           declaredFiles={declaredFiles}
+                          declaredInputNames={declaredInputFieldNames(view.content)}
                           onSave={handleInputConfigSave}
+                          onFileOpen={onFileOpen}
                           isGraphInput={view.isGraphLevel}
                         />
                       </CollapsibleContent>

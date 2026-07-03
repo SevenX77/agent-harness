@@ -15,7 +15,6 @@ import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
-import { Skeleton } from '../ui/skeleton'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -733,25 +732,25 @@ export function CopilotPanel({
         {/* F7 context actions (attach / @mention) join the left side of this row
             once they are functional — no dead placeholders. */}
         <div className="flex items-center justify-end gap-0.5">
-          {registrySettled && rolesSettled ? (
-            <>
-              <ModelPicker
-                role={pickerRole}
-                registry={registry}
-                selectedRouteId={selectedRouteId || defaultRouteId}
-                onSelect={selectRoute}
-              />
-              <RolePicker
-                options={roleOptions}
-                selectedRole={selectedRoleKey}
-                onSelect={setSelectedRole}
-              />
-            </>
-          ) : (
-            // R5-C: role/route slot placeholder while config loads (cold registry
-            // probe can take ~45s) — shadcn Skeleton, sized like the picker chip.
-            <Skeleton aria-label="Loading copilot roles" className="h-7 w-32 rounded-md" />
+          {/* R7-C (PM 2026-07-02): the role anchor is ALWAYS present. While config
+              loads it shows the fixed default (opus4.8) + a spinner (the loading
+              state lives inside RolePicker), not a skeleton block that swaps the
+              whole picker out. The route picker still waits for a settled registry —
+              routes are derived from it, so there is nothing to show until then. */}
+          {registrySettled && rolesSettled && (
+            <ModelPicker
+              role={pickerRole}
+              registry={registry}
+              selectedRouteId={selectedRouteId || defaultRouteId}
+              onSelect={selectRoute}
+            />
           )}
+          <RolePicker
+            options={roleOptions}
+            selectedRole={selectedRoleKey}
+            onSelect={setSelectedRole}
+            loading={!(registrySettled && rolesSettled)}
+          />
         </div>
       </form>
     </aside>

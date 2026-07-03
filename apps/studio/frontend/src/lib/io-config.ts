@@ -47,6 +47,135 @@ export function blackboardAtNode(
     }))
 }
 
+/**
+ * r4 field reconciliation (PM 2026-07-02): cross-check a node's declared io
+ * against the fields ACTUALLY available.
+ *  - matched:   declared in md io AND present in the available set
+ *  - available: present but not declared
+ *  - missing:   declared (required) but NOT available — a broken contract the
+ *               engine would fail at runtime ([F-v3-runtime-state-mapping-failed]);
+ *               surfaced at config time, at the TOP, muted + error.
+ */
+export type FieldMatchState = 'matched' | 'available' | 'missing'
+
+export interface ReconciledFieldRow extends BlackboardCheckRow {
+  state: FieldMatchState
+  /** Populated for `missing` rows: why the field is unsatisfied. */
+  reason?: string
+}
+
+function declaredIoProps(
+  frontmatter: Record<string, unknown> | undefined,
+  side: 'inputs' | 'outputs',
+): Record<string, Record<string, unknown>> {
+  const io = schemaObject(frontmatter?.io) ?? {}
+  const props = schemaObject(schemaObject(io[side])?.properties) ?? {}
+  const out: Record<string, Record<string, unknown>> = {}
+  for (const [name, raw] of Object.entries(props)) {
+    const schema = schemaObject(raw)
+    if (schema) {
+      out[name] = schema
+    }
+  }
+  return out
+}
+
+function typeOfSchema(schema: Record<string, unknown>): string | null {
+  return typeof schema.type === 'string' ? schema.type : null
+}
+
+/**
+ * Input reconciliation for a node: blackboard fields tagged matched/available,
+ * plus (at the top) any io.inputs field the upstream blackboard doesn't supply.
+ * `source:'file'` inputs are injected from files, not the blackboard, so they
+ * are never "missing". Empty for nodes with no blackboard (Input pseudo-node).
+ */
+export function reconcileInputFields(
+  skillDetail: SkillDetail | undefined,
+  nodeId: string,
+): ReconciledFieldRow[] {
+  // Input pseudo-node / GRAPH.md (no selected phase): no upstream blackboard.
+  // A declared graph input with no `source:'file'` backing is unsourced — it
+  // can only be filled by the run payload — so flag it missing so the author
+  // sees the unwired entry field (PM 2026-07-02 r4b).
+  if (!nodeId) {
+    const declared = declaredIoProps(rootGraphFrontmatter(skillDetail), 'inputs')
+    return Object.entries(declared)
+      .filter(([, schema]) => schema.source !== 'file')
+      .map(([name, schema]) => ({
+        name,
+        type: typeOfSchema(schema),
+        from: 'io.inputs',
+        checked: false,
+        state: 'missing' as const,
+        reason: 'declared graph input · no source supplied',
+      }))
+  }
+  const blackboard = blackboardAtNode(skillDetail, nodeId)
+  if (blackboard.length === 0) {
+    return []
+  }
+  const bbNames = new Set(blackboard.map((row) => row.name))
+  const declared = declaredIoProps(parseFrontmatter(phaseNodeFileContent(skillDetail, nodeId)), 'inputs')
+
+  const missing: ReconciledFieldRow[] = []
+  for (const [name, schema] of Object.entries(declared)) {
+    if (schema.source === 'file' || bbNames.has(name)) {
+      continue
+    }
+    missing.push({
+      name,
+      type: typeOfSchema(schema),
+      from: 'io.inputs',
+      checked: false,
+      state: 'missing',
+      reason: 'required by io.inputs · not supplied by upstream',
+    })
+  }
+  const rest: ReconciledFieldRow[] = blackboard.map((row) => ({
+    ...row,
+    state: row.checked ? 'matched' : 'available',
+  }))
+  return [...missing, ...rest]
+}
+
+/**
+ * Output reconciliation at the graph boundary: the field universe (root inputs
+ * ∪ every phase's outputs) tagged matched (a declared GRAPH.md io.outputs
+ * member) / available, plus (at the top) any io.outputs field NO phase
+ * produces.
+ */
+export function reconcileOutputFields(
+  skillDetail: SkillDetail | undefined,
+): ReconciledFieldRow[] {
+  const universe = blackboardAtOutput(skillDetail)
+  const universeNames = new Set(universe.map((row) => row.name))
+  const declared = declaredIoProps(rootGraphFrontmatter(skillDetail), 'outputs')
+
+  const missing: ReconciledFieldRow[] = []
+  for (const [name, schema] of Object.entries(declared)) {
+    if (universeNames.has(name)) {
+      continue
+    }
+    missing.push({
+      name,
+      type: typeOfSchema(schema),
+      from: 'io.outputs',
+      checked: false,
+      state: 'missing',
+      reason: 'required by io.outputs · no phase produces it',
+    })
+  }
+  const declaredNames = new Set(Object.keys(declared))
+  const rows: ReconciledFieldRow[] = universe.map((row) => ({
+    ...row,
+    state: declaredNames.has(row.name) ? 'matched' : 'available',
+  }))
+  const matched = rows.filter((row) => row.state === 'matched')
+  const available = rows.filter((row) => row.state === 'available')
+  return [...missing, ...matched, ...available]
+}
+
 export interface FileFieldDecl {
   field: string
   type: string | null

@@ -5,7 +5,9 @@ import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
 import type { TestInputMetadata } from "@/api/types"
 import { useBatchRun } from "@/hooks/useBatchRun"
 import { errorMessage } from "@/utils/errors"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { SectionHeading } from "./_shared/SectionHeading"
 
 
@@ -160,11 +162,12 @@ export function TestInputsSection({
             return (
               <div
                 key={item.id}
-                className={`flex items-center gap-2 rounded-md border px-2 py-1 ${
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-2 py-1 transition-colors",
                   isSelected
-                    ? "border-primary bg-accent"
-                    : "border-border bg-background"
-                }`}
+                    ? "bg-accent font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
               >
                 <input
                   type="checkbox"
@@ -223,15 +226,17 @@ export function TestInputsSection({
 
       {batch.selectedInputIds.length > 0 || batch.batchStatus ? (
         <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void batch.runBatch()}
             disabled={batch.batchRunning || batch.selectedInputIds.length === 0}
-            className="flex items-center gap-1 rounded-md bg-foreground px-2 py-0.5 font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
+            className="h-auto gap-1 px-2 py-0.5"
           >
             {batch.batchRunning ? <Loader2 className="size-3.5 animate-spin" /> : <ListChecks className="size-3.5" />}
             Run {batch.selectedInputIds.length} as batch
-          </button>
+          </Button>
           {batch.batchStatus ? (
             <span className="text-muted-foreground">
               {batch.batchStatus.completed}/{batch.batchStatus.total} · {batch.batchStatus.status}
@@ -246,16 +251,18 @@ export function TestInputsSection({
           {error}
         </div>
       ) : null}
-      <button
+      <Button
         type="button"
+        variant="secondary"
+        size="sm"
         onClick={() => void handleNewFile()}
         disabled={busy}
         aria-label="New test input file"
-        className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+        className="w-fit gap-1"
       >
         <Plus className="size-3.5" />
         New file
-      </button>
+      </Button>
       <p className="text-[11px] text-muted-foreground">
         Selected input feeds Predict and Run · New file opens in the editor
       </p>

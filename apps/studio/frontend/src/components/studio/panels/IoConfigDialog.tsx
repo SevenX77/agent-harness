@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
-import { FileText, Files, Loader2, Plus, Trash2 } from "lucide-react"
+import { AlertTriangle, FileText, Files, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react"
 import { importIoIntoWorkspace, type IoScanEntry } from "@/api/client"
+import { selectImportFile, selectImportFolder } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -14,8 +15,8 @@ import {
 import { Input } from "@/components/ui/input"
 import type {
   ArtifactRow,
-  BlackboardCheckRow,
   FileFieldDecl,
+  ReconciledFieldRow,
 } from "@/lib/io-config"
 import { errorMessage } from "@/utils/errors"
 
@@ -100,23 +101,47 @@ function FieldCheckRow({
   name,
   meta,
   indent = false,
+  highlighted = false,
 }: {
   checked: boolean
   onCheckedChange: (next: boolean) => void
   name: string
   meta: string
   indent?: boolean
+  /** r4: whole-row accent highlight when the field matches the md io declaration. */
+  highlighted?: boolean
 }) {
   return (
-    <label className={`${ROW_CLASS} ${indent ? "pl-7" : ""} cursor-pointer`}>
+    <label
+      className={`${ROW_CLASS} ${indent ? "pl-7" : ""} cursor-pointer border-l-2 ${highlighted ? "border-l-primary bg-accent" : "border-l-transparent"}`}
+    >
       <Checkbox
         checked={checked}
         onCheckedChange={(value) => onCheckedChange(value === true)}
         aria-label={`Toggle field ${name}`}
       />
-      <span className="font-mono text-xs text-foreground">{name}</span>
+      <span className={`font-mono text-xs ${highlighted ? "text-accent-foreground" : "text-foreground"}`}>
+        {name}
+      </span>
       <span className={META_CLASS}>{meta}</span>
     </label>
+  )
+}
+
+/**
+ * r4: a field the md io declares (required) but the actual blackboard/universe
+ * doesn't supply — shown at the TOP, muted + danger, non-checkable, with the
+ * reason. Mirrors the engine's runtime [F-v3-runtime-state-mapping-failed].
+ */
+function MissingFieldRow({ name, reason }: { name: string; reason?: string }) {
+  return (
+    <div className={`${ROW_CLASS} pl-7 bg-destructive/10`}>
+      <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden />
+      <span className="font-mono text-xs text-muted-foreground line-through decoration-destructive/40">
+        {name}
+      </span>
+      <span className="text-[11px] text-destructive">{reason}</span>
+    </div>
   )
 }
 
@@ -126,14 +151,19 @@ export interface InputConfigDialogProps {
   skillId: string
   /** Node label for the title ("Input — event_timeline" / "Input — GRAPH.md io.inputs"). */
   targetLabel: string
-  /** Blackboard context rows; empty for the Input pseudo-node / GRAPH.md. */
-  blackboard: BlackboardCheckRow[]
+  /**
+   * Reconciled blackboard context rows (matched/available/missing); empty for
+   * the Input pseudo-node / GRAPH.md. Missing rows are shown at the top.
+   */
+  blackboard: ReconciledFieldRow[]
   /** Existing source:'file' declarations of the target document. */
   declaredFiles: FileFieldDecl[]
   onSave: (checks: {
     blackboard: Array<{ name: string; type: string | null; checked: boolean }>
     files: FileFieldDecl[]
   }) => Promise<string | null>
+  /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
+  isGraphInput?: boolean
 }
 
 export function InputConfigDialog({
@@ -144,22 +174,20 @@ export function InputConfigDialog({
   blackboard,
   declaredFiles,
   onSave,
+  isGraphInput = false,
 }: InputConfigDialogProps) {
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
   const initialGroup = useMemo(() => groupFromDeclarations(declaredFiles), [declaredFiles])
   const [groups, setGroups] = useState<FileGroup[] | null>(null)
-  const [addPath, setAddPath] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const effectiveGroups = groups ?? (initialGroup ? [initialGroup] : [])
 
-  const isChecked = (row: BlackboardCheckRow) => blackboardChecks[row.name] ?? row.checked
+  const isChecked = (row: ReconciledFieldRow) => blackboardChecks[row.name] ?? row.checked
 
-  const handleAddFile = async () => {
-    const path = addPath.trim()
+  const importPath = async (path: string | null) => {
     if (!path) {
-      setError("Enter a file or folder path to import")
       return
     }
     setBusy(true)
@@ -169,7 +197,6 @@ export function InputConfigDialog({
       const candidates = candidatesFromScanEntries(result.entries)
       const label = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path
       setGroups([...effectiveGroups, { label, pathHint: path, candidates }])
-      setAddPath("")
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -209,11 +236,14 @@ export function InputConfigDialog({
         }),
     )
     const failure = await onSave({
-      blackboard: blackboard.map((row) => ({
-        name: row.name,
-        type: row.type,
-        checked: isChecked(row),
-      })),
+      // Missing rows have no blackboard supply — never persist them as consumed.
+      blackboard: blackboard
+        .filter((row) => row.state !== "missing")
+        .map((row) => ({
+          name: row.name,
+          type: row.type,
+          checked: isChecked(row),
+        })),
       files,
     })
     setBusy(false)
@@ -236,21 +266,32 @@ export function InputConfigDialog({
           {blackboard.length > 0 ? (
             <>
               <div className={GROUP_HEAD_CLASS}>
-                <span className="text-xs font-medium text-foreground">Blackboard context</span>
-                <span className={META_CLASS}>fields on the blackboard when this node runs</span>
+                <span className="text-xs font-medium text-foreground">
+                  {isGraphInput ? "Graph inputs" : "Blackboard context"}
+                </span>
+                <span className={META_CLASS}>
+                  {isGraphInput
+                    ? "declared entry fields — import a file to source them"
+                    : "fields on the blackboard when this node runs"}
+                </span>
               </div>
-              {blackboard.map((row) => (
-                <FieldCheckRow
-                  key={row.name}
-                  checked={isChecked(row)}
-                  onCheckedChange={(next) =>
-                    setBlackboardChecks((prev) => ({ ...prev, [row.name]: next }))
-                  }
-                  name={row.name}
-                  meta={`${row.type ?? "any"} · from ${row.from}`}
-                  indent
-                />
-              ))}
+              {blackboard.map((row) =>
+                row.state === "missing" ? (
+                  <MissingFieldRow key={row.name} name={row.name} reason={row.reason} />
+                ) : (
+                  <FieldCheckRow
+                    key={row.name}
+                    checked={isChecked(row)}
+                    onCheckedChange={(next) =>
+                      setBlackboardChecks((prev) => ({ ...prev, [row.name]: next }))
+                    }
+                    name={row.name}
+                    meta={`${row.type ?? "any"} · from ${row.from}`}
+                    indent
+                    highlighted={row.state === "matched" && isChecked(row)}
+                  />
+                ),
+              )}
             </>
           ) : null}
           {effectiveGroups.map((group, groupIndex) => (
@@ -291,23 +332,29 @@ export function InputConfigDialog({
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          <Input
-            value={addPath}
-            onChange={(event) => setAddPath(event.target.value)}
-            placeholder="File or folder path to import"
-            aria-label="Path to import"
-            className="h-8 flex-1 text-xs"
-          />
           <Button
             type="button"
             size="sm"
             variant="secondary"
-            onClick={() => void handleAddFile()}
+            onClick={() => void selectImportFile().then(importPath)}
             disabled={busy}
-            aria-label="Add file"
+            aria-label="Import file"
+            className="gap-1"
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
-            Add file
+            {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FileText className="size-3.5" aria-hidden />}
+            Import file…
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => void selectImportFolder().then(importPath)}
+            disabled={busy}
+            aria-label="Import folder"
+            className="gap-1"
+          >
+            <FolderOpen className="size-3.5" aria-hidden />
+            Import folder…
           </Button>
         </div>
         {error ? (
@@ -331,8 +378,13 @@ export function InputConfigDialog({
 export interface OutputConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Full blackboard field universe — identical under every artifact card. */
-  universe: BlackboardCheckRow[]
+  /**
+   * Reconciled field universe (matched/available/missing) — identical under
+   * every artifact card. Missing = a required io.outputs field no phase
+   * produces (shown once at the dialog top); matched = a declared io.outputs
+   * member (highlighted in each card).
+   */
+  universe: ReconciledFieldRow[]
   artifacts: ArtifactRow[]
   /** Count shown on the per-item toggle (from the input batch numbers), if known. */
   perItemCount?: number | null
@@ -351,6 +403,8 @@ export function OutputConfigDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const effectiveRows = rows ?? artifacts
+  const missingOutputs = universe.filter((row) => row.state === "missing")
+  const carryableFields = universe.filter((row) => row.state !== "missing")
 
   const updateRow = (index: number, patch: Partial<ArtifactRow>) => {
     setRows(effectiveRows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
@@ -386,6 +440,13 @@ export function OutputConfigDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[55vh] space-y-3 overflow-y-auto">
+          {missingOutputs.length > 0 ? (
+            <div className="overflow-hidden rounded-md border border-destructive/30">
+              {missingOutputs.map((row) => (
+                <MissingFieldRow key={row.name} name={row.name} reason={row.reason} />
+              ))}
+            </div>
+          ) : null}
           {effectiveRows.map((row, index) => (
             <div key={index} className="rounded-md border border-border">
               <div className={GROUP_HEAD_CLASS}>
@@ -430,7 +491,7 @@ export function OutputConfigDialog({
                   <Trash2 className="size-3.5" />
                 </button>
               </div>
-              {universe.map((field) => (
+              {carryableFields.map((field) => (
                 <FieldCheckRow
                   key={field.name}
                   checked={row.fields.includes(field.name)}
@@ -438,6 +499,7 @@ export function OutputConfigDialog({
                   name={field.name}
                   meta={`${field.type ?? "any"} · from ${field.from}`}
                   indent
+                  highlighted={field.state === "matched"}
                 />
               ))}
               <p className="border-t border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">

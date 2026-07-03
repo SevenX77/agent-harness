@@ -160,6 +160,28 @@ Manual desktop smoke:
 4. Close the window and verify `ps -eo pid,command | grep 'uvicorn app.main:app'` (or Task Manager on Windows) shows no sidecar Python process.
 5. Break Python startup intentionally and confirm Splash Error renders recent sidecar stderr instead of a blank screen.
 
+## "Open in Claude Code" (copilot 面板按钮)
+
+按钮 (`open_claude_code` Tauri 命令, `src/lib.rs`) 把当前 skill 工作区交给
+[`ah`](https://github.com/SevenX77/ah)(agent hypervisor)驱动的真实 Claude Code
+跑。Windows 上 `ah` + `claude` 都活在 WSL2 里 —— 点按钮前得先把 WSL2 + Ubuntu +
+tmux + claude CLI + ah + 订阅登录都装好。
+
+`ah` 自己的安装命令(`ah-installer.sh`)**只装 `ah` 这一个二进制**——不装
+WSL2/tmux/claude CLI,也不处理登录(`ah doctor` 只诊断,不安装/不修复;`ah --help`
+的全部子命令里也没有 install/provision 类命令)。这些前置步骤由
+`scripts/install-claude-code-wsl.ps1` 统一打包:
+
+```powershell
+# 从仓库根目录, Windows PowerShell
+powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
+```
+
+幂等,可反复重跑。装 WSL2 需要一次重启、首次登录 claude 需要你在浏览器里过一次
+OAuth —— 这两步是 OS/安全层面的硬性人工步骤,脚本跑到这两处会打印清楚的下一步提示
+然后干净退出(不是报错),按提示做完再重跑同一条命令即可继续。跑完最后会打印
+`ah doctor` 的诊断结果自检。
+
 ## Phase 边界 (T1 不做)
 
 * **T2 (Python sidecar)**: 用 Tauri 的 sidecar 机制 / `std::process::Command` 拉起

@@ -210,6 +210,27 @@ def ensure_workspace_layout() -> None:
     config.default_workspace_skills_dir().mkdir(parents=True, exist_ok=True)
 
 
+def _is_within(path: Path, ancestor: Path) -> bool:
+    """True when ``path`` is ``ancestor`` or nested under it (pure path check)."""
+    return path.resolve().is_relative_to(ancestor.resolve())
+
+
+def _ensure_skill_git_repo(skill_dir: Path) -> None:
+    """Auto-init L1 git the first time a writable user skill is opened.
+
+    skill-repo-git-model: a skill IS a standalone git repo, so opening one that
+    lives outside the read-only bundled ``SKILLS_DIR`` and has no ``.git`` yet
+    turns it into its own repo — Local History then shows THIS skill's history
+    instead of an enclosing repo's. No-op once ``.git`` exists (idempotent), and
+    never writes a repo into bundled sample content under ``SKILLS_DIR``.
+    """
+    if (skill_dir / ".git").exists():
+        return
+    if _is_within(skill_dir, config.SKILLS_DIR):
+        return
+    initialize_skill_repository(skill_dir)
+
+
 async def get_skill_detail(
     user_id: str,
     skill_id: str,
@@ -220,6 +241,10 @@ async def get_skill_detail(
 ) -> SkillDetail:
     """Compile one skill into a Studio SkillDetail response."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    # Opening a skill makes it a standalone git repo: init L1 git here on first
+    # open of a writable user skill so Local History reflects THIS skill's own
+    # history, not an enclosing repo's. Idempotent; skips bundled read-only skills.
+    _ensure_skill_git_repo(skill_dir)
     # Follow whatever the user opens: watch this skill's actual directory (from any
     # path), not just the app's built-in skills dirs, so external file changes push
     # live skill_changed events. Idempotent — a no-op once already watched.

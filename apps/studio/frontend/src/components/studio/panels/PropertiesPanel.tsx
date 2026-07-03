@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import useSWR from "swr"
 import { AxiosError } from "axios"
-import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, RotateCcw, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -2794,7 +2795,6 @@ function LlmNodeParamsField({
   const thinkingId = `node-thinking-${nodeId ?? "none"}`
   const maxOutputId = `node-max-output-${nodeId ?? "none"}`
   const temperatureId = `node-temperature-${nodeId ?? "none"}`
-  const thinkingValue = draft.thinking === null ? "inherit" : draft.thinking ? "on" : "off"
 
   return (
     <div className="mt-2 space-y-1.5" data-llm-node-params="true">
@@ -2807,7 +2807,9 @@ function LlmNodeParamsField({
       </YamlNestedFieldLabel>
       {/* Frame the params in the shared Card box + 2-col grid, matching the iterate
           `accumulate` block. Every unit is min-height so a shorter control (the
-          thinking select) never crowds its neighbour. Reuses @/components/ui, no new style. */}
+          thinking switch) never crowds its neighbour. Per-field widgets: thinking =
+          Switch, temperature = Slider, max output tokens = number Input. Reuses
+          @/components/ui, no new style. */}
       <Card size="sm">
         <CardContent className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
@@ -2815,31 +2817,20 @@ function LlmNodeParamsField({
               <YamlNestedFieldLabel htmlFor={thinkingId}>
                 thinking
                 <HelpTooltip label="About thinking">
-                  <p>Whether this node asks the model to use reasoning/thinking.</p>
-                  <p><span className="font-mono">Inherit</span> &mdash; use the role default.</p>
-                  <p><span className="font-mono">On</span> / <span className="font-mono">Off</span> &mdash; force it for this node.</p>
+                  Whether this node asks the model to use reasoning/thinking. Best-effort: only
+                  applies when the node&rsquo;s model supports it.
                 </HelpTooltip>
               </YamlNestedFieldLabel>
-              <Select
-                value={thinkingValue}
-                onValueChange={(next) =>
-                  update({ ...draft, thinking: next === "inherit" ? null : next === "on" })
-                }
-              >
-                <SelectTrigger
+              <div className="flex h-9 items-center">
+                <Switch
                   id={thinkingId}
+                  size="sm"
                   data-llm-node-thinking="true"
+                  checked={draft.thinking === true}
                   aria-label="Node thinking override"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inherit">Inherit</SelectItem>
-                  <SelectItem value="on">On</SelectItem>
-                  <SelectItem value="off">Off</SelectItem>
-                </SelectContent>
-              </Select>
+                  onCheckedChange={(thinking) => update({ ...draft, thinking })}
+                />
+              </div>
             </Field>
             <Field className="min-h-14 gap-1">
               <YamlNestedFieldLabel htmlFor={maxOutputId}>
@@ -2865,31 +2856,41 @@ function LlmNodeParamsField({
               <YamlNestedFieldLabel htmlFor={temperatureId}>
                 temperature
                 <HelpTooltip label="About temperature">
-                  Sampling temperature for this node. Empty inherits the role default.
+                  Sampling temperature (0&ndash;2) for this node. Drag to override; the reset button
+                  clears it back to the role default.
                 </HelpTooltip>
               </YamlNestedFieldLabel>
-              <Input
-                id={temperatureId}
-                data-llm-node-temperature="true"
-                aria-label="Node temperature override"
-                value={draft.temperature}
-                onChange={(event) => update({ ...draft, temperature: sanitizeNodeDecimal(event.target.value) })}
-                inputMode="decimal"
-                placeholder="Inherit"
-              />
+              <div className="flex h-9 items-center gap-2">
+                <Slider
+                  id={temperatureId}
+                  data-llm-node-temperature="true"
+                  aria-label="Node temperature override"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
+                  onValueChange={(vals) => update({ ...draft, temperature: String(vals[0]) })}
+                  className="flex-1"
+                />
+                <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                  {draft.temperature === "" ? "—" : draft.temperature}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Reset temperature to role default"
+                  className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  disabled={draft.temperature === ""}
+                  onClick={() => update({ ...draft, temperature: "" })}
+                >
+                  <RotateCcw className="size-3.5" aria-hidden />
+                </button>
+              </div>
             </Field>
           </div>
         </CardContent>
       </Card>
     </div>
   )
-}
-
-function sanitizeNodeDecimal(value: string): string {
-  const cleaned = value.replace(/[^\d.]/g, "")
-  const firstDot = cleaned.indexOf(".")
-  if (firstDot === -1) return cleaned
-  return cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "")
 }
 
 function llmRoleComboboxOption(name: string, configured: boolean): SearchableComboboxOption {

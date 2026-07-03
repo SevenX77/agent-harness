@@ -199,3 +199,15 @@ class CopilotToolApprovalResponse(BaseModel):
     approved: bool
     resolved: bool
     message: str | None = None
+
+
+class CopilotInterruptResponse(BaseModel):
+    """Result of a copilot stop-button interrupt (R7-I).
+
+    ``interrupted`` is False when there was no active turn to stop — the click
+    landed after the turn already finished, which is a harmless no-op.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    interrupted: bool

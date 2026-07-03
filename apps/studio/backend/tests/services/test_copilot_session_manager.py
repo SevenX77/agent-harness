@@ -279,3 +279,27 @@ def test_build_options_isolates_filesystem_settings(tmp_path: Path) -> None:
 
     assert options.setting_sources == []
     assert options.strict_mcp_config is True
+
+
+def test_interrupt_active_query_interrupts_the_streaming_client() -> None:
+    # R7-I stop button: interrupting a live turn calls the SDK-native
+    # client.interrupt() on the skill's currently-streaming client.
+    interrupted: list[bool] = []
+
+    class FakeStreamingClient:
+        async def interrupt(self) -> None:
+            interrupted.append(True)
+
+    copilot._active_clients["skill-stop"] = FakeStreamingClient()  # type: ignore[assignment]
+    try:
+        result = asyncio.run(copilot.interrupt_active_query("skill-stop"))
+    finally:
+        copilot._active_clients.pop("skill-stop", None)
+
+    assert result is True
+    assert interrupted == [True]
+
+
+def test_interrupt_active_query_returns_false_when_no_turn_is_active() -> None:
+    # No active stream for the skill → nothing to interrupt (idempotent, no error).
+    assert asyncio.run(copilot.interrupt_active_query("skill-with-no-active-turn")) is False

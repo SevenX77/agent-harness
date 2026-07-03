@@ -1478,6 +1478,17 @@ export async function deleteEndpoint(endpointId: string): Promise<RegistryRespon
   return cacheRegistry(response.data)
 }
 
+/**
+ * Delete one provider route (an endpoint × model cell) — e.g. a stale phantom
+ * model like a doc-guessed `o3-mini` that never really existed. The backend
+ * refuses with a 409 `route_in_use` if a role/profile/bundle still references
+ * it. Returns the refreshed credentials so the caller merges locally.
+ */
+export async function deleteRoute(routeId: string): Promise<CredentialsState> {
+  const response = await api.delete<CredentialRegistryResponse>(`/llm/routes/${segment(routeId)}`)
+  return registryToCredentials(cacheRegistry(response.data))
+}
+
 export async function testEndpoint(endpointId: string): Promise<ProviderEndpoint> {
   const response = await api.post<ProviderEndpoint | EndpointTestResponse>(`/llm/endpoints/${segment(endpointId)}/test`)
   if (isEndpointTestResponse(response.data)) {

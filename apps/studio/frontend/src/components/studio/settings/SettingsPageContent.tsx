@@ -34,6 +34,7 @@ export function SettingsPageContent({
   onForceEndpointTest,
   onDeleteProvider,
   onDeleteProviderEndpoints,
+  onRemoveModel,
   onBeginAddProvider,
   onAddProvider,
   onCancelAddProvider,
@@ -162,6 +163,7 @@ export function SettingsPageContent({
                     onForceEndpointTest={onForceEndpointTest}
                     onDeleteProvider={onDeleteProvider}
                     onDeleteProviderEndpoints={onDeleteProviderEndpoints}
+                    onRemoveModel={onRemoveModel}
                     onBeginAddProvider={onBeginAddProvider}
                     onAddProvider={onAddProvider}
                     onCancelAddProvider={onCancelAddProvider}

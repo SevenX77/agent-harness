@@ -469,6 +469,7 @@ async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, An
             "route_count": len(data.provider_routes),
         },
     )
+    _reconcile_fixed_roles_after_credential_change()
     return serialize_for_response(data)
 
 
@@ -1040,6 +1041,8 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             "probe_attempts": probe_attempts_log,
         },
     )
+    # 新发现的 route 可能正是某个固定角色缺的推荐模型 → 立刻补齐,再回传含新角色的 registry。
+    _reconcile_fixed_roles_after_credential_change()
     return EndpointTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         tested_endpoint_id=endpoint_id,
@@ -1304,6 +1307,8 @@ async def test_endpoint_models(
             },
         )
     await _autoshare_after_probe_best_effort()
+    # 手动探测出的新 route 也可能补齐固定角色缺的推荐模型 → reconcile 后回传含新角色的 registry。
+    _reconcile_fixed_roles_after_credential_change()
     return EndpointModelTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         results=results,
@@ -1541,39 +1546,28 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
 
 @router.get("/fixed-roles")
 async def get_fixed_role_names() -> dict[str, list[str]]:
-    """固定角色名(引擎 builtin 硬依赖、不可删除)。前端据此隐藏删除入口。"""
-    from app.services.llm_fixed_roles import required_builtin_roles
+    """固定角色名(不可删除、不可改名)。前端据此隐藏删除/改名入口。"""
+    from app.services.llm_fixed_roles import fixed_role_names
 
-    return {"fixed_role_names": sorted(required_builtin_roles())}
+    return {"fixed_role_names": sorted(fixed_role_names())}
 
 
 @router.get("/fixed-roles/{role_name}")
 async def get_fixed_role_status(role_name: str) -> dict[str, Any]:
-    """固定角色的说明 + 推荐模型 + 当前缺了哪些推荐模型。前端据此渲染问号说明和
-    "缺模型"警告(建议拖哪个模型进来)。"""
+    """固定角色的推荐模型清单(canonical_id + 展示名)。说明文案归前端 i18n;缺哪个
+    推荐模型由前端拿当前内存里的角色状态实时算(不走后端读盘,避免防抖存盘前的竞态)。"""
     from app.services.llm_fixed_roles import (
         is_fixed_role,
-        missing_recommended_models,
         recommended_model_display_name,
         recommended_models_for_role,
-        role_description,
     )
 
     if not is_fixed_role(role_name):
         raise HTTPException(status_code=404, detail=f"Not a fixed role: {role_name}")
-    data = _load_roles_or_empty()
-    credentials = load_credentials()
-    role = data.roles.get(role_name)
-    missing = missing_recommended_models(role_name, role, credentials)
     return {
-        "description": role_description(role_name),
         "recommended_models": [
             {"canonical_id": canonical_id, "display_name": recommended_model_display_name(role_name, canonical_id)}
             for canonical_id in recommended_models_for_role(role_name)
-        ],
-        "missing_models": [
-            {"canonical_id": canonical_id, "display_name": recommended_model_display_name(role_name, canonical_id)}
-            for canonical_id in missing
         ],
     }
 
@@ -1587,10 +1581,10 @@ async def delete_llm_role(role_name: str) -> RolesData:
     if role_name not in data.roles:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     if is_fixed_role(role_name):
-        # 引擎 builtin(如 md-patch 的 md2json 修补)硬依赖该角色,删了就跑不起来。
+        # 固定角色(引擎 builtin 硬依赖 / 内置 copilot)删了就跑不起来。
         raise HTTPException(
             status_code=409,
-            detail=f"固定角色不可删除: {role_name}(引擎 builtin skill 硬依赖)",
+            detail=f"固定角色不可删除: {role_name}",
         )
     roles = dict(data.roles)
     del roles[role_name]
@@ -5554,6 +5548,29 @@ def _save_roles_with_active_routes(data: RolesData) -> RolesData:
     # the on-disk truth fresh on every call, so the just-saved roles are seen
     # immediately (e.g. by the next copilot test-sdk) without a sync hook.
     return reloaded
+
+
+def _reconcile_fixed_roles_after_credential_change() -> list[str]:
+    """凭证变更后自动把固定角色缺的推荐模型组补齐(用户在 API Keys 配好模型 → 固定
+    角色即自动可用,不用手动去角色页拖)。组级粒度,不动用户已删的 endpoint;没改就不写盘。
+    返回被补齐的角色名(便于活动日志)。"""
+    from app.services.llm_fixed_roles import reconcile_fixed_roles
+
+    if not roles_path().exists():
+        return []
+    credentials = load_credentials()
+    roles = _load_roles_or_empty()
+    updated, changed = reconcile_fixed_roles(roles, credentials)
+    if not changed:
+        return []
+    _save_roles_with_active_routes(updated)
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="reconcile_fixed_roles",
+        message="Auto-filled fixed roles with newly available recommended models.",
+        changes={"role_names": sorted(changed)},
+    )
+    return changed
 
 
 def _now_iso() -> str:

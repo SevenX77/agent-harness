@@ -15,7 +15,7 @@ import { ModelBundleCard } from "./llm-roles/ModelBundleCard"
 import { buildRoleDeleteRequest, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { roleTestStatusesByRole, __resetRoleTestStoreForTests, __setRoleTestStoreForTests } from "./llm-roles/role-test-store"
-import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, attachBundleReferenceToRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
+import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, attachBundleReferenceToRole, missingRecommendedModels, normalizeModelGroupKey, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
@@ -2975,5 +2975,45 @@ describe("#51 bundle drop creates a reference, not a snapshot", () => {
     )
     expect(html).toContain('data-role-linked-bundle="true"')
     expect(html).toContain("Linked to bundle: Premium Stack")
+  })
+})
+
+describe("fixed-role missing-recommended-model computation", () => {
+  it("normalizes canonical ids and display names to the same group key", () => {
+    // Backend normalize_model_group_key parity: dots/spaces/case → single key.
+    expect(normalizeModelGroupKey("claude-haiku-4.5")).toBe("claude-haiku-4-5")
+    expect(normalizeModelGroupKey("Claude Haiku 4.5")).toBe("claude-haiku-4-5")
+    expect(normalizeModelGroupKey("claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5-20251001")
+  })
+
+  it("reports a recommended model missing when no present group matches it", () => {
+    const recommended = [
+      { canonicalId: "claude-haiku-4.5", displayName: "Claude Haiku 4.5" },
+      { canonicalId: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash" },
+    ]
+    // Role only has DeepSeek (present key from its display name).
+    const presentKeys = new Set([normalizeModelGroupKey("DeepSeek V4 Flash")])
+
+    const missing = missingRecommendedModels(recommended, presentKeys)
+
+    expect(missing.map((model) => model.canonicalId)).toEqual(["claude-haiku-4.5"])
+  })
+
+  it("counts a recommended model present when matched by DISPLAY NAME even if the canonical differs (dragged-in route)", () => {
+    // This is the point-6 fix: a Haiku group dragged from Available Models has a
+    // release-stamped canonical (claude-haiku-4-5-20251001) that does NOT match
+    // the recommended canonical, but its identity display name does — so the
+    // warning must clear.
+    const recommended = [{ canonicalId: "claude-haiku-4.5", displayName: "Claude Haiku 4.5" }]
+    const presentKeys = new Set([
+      normalizeModelGroupKey("claude-haiku-4-5-20251001"),
+      normalizeModelGroupKey("Claude Haiku 4.5"),
+    ])
+
+    expect(missingRecommendedModels(recommended, presentKeys)).toEqual([])
+  })
+
+  it("returns nothing when there are no recommended models", () => {
+    expect(missingRecommendedModels([], new Set())).toEqual([])
   })
 })

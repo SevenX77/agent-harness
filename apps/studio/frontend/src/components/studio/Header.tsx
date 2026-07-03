@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, Layers, Loader2, Package, Sparkles } from "lucide-react"
+import { ChevronDown, Layers, Loader2, Package } from "lucide-react"
 import { toast, type ExternalToast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,8 +31,6 @@ interface HeaderProps {
   skillId: string | null
   workspaceRoot?: string | null
   navStack?: string[]
-  copilotOpen: boolean
-  onCopilotToggle: () => void
   onHome: () => void
   onBreadcrumbClick?: (index: number) => void
   // Single-click the current-skill title: clear node selection + show the
@@ -76,8 +74,6 @@ export function Header({
   skillId,
   workspaceRoot = null,
   navStack = skillId ? [skillId] : [],
-  copilotOpen,
-  onCopilotToggle,
   onHome,
   onBreadcrumbClick,
   onTitleSelect,
@@ -290,22 +286,6 @@ export function Header({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onCopilotToggle}
-              aria-label={copilotOpen ? "Hide Copilot" : "Show Copilot"}
-              aria-pressed={copilotOpen}
-            >
-              <Sparkles />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {copilotOpen ? "Hide Copilot" : "Show Copilot"}
-          </TooltipContent>
-        </Tooltip>
       </div>
     </header>
     <Dialog

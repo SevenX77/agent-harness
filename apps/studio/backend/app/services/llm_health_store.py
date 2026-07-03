@@ -67,6 +67,33 @@ class SqliteLlmHealthStore:
                 (scope, scope_id),
             )
 
+    def get_all_active_circuits(self, now: datetime | None = None) -> list[RuntimeCircuit]:
+        """ONE query for every currently-open circuit, across every scope.
+
+        R7-D: building the registry needs to know "which routes/endpoints are
+        cooling down" — but the table itself is tiny (only actively-failing
+        entries live here; on a normal running app it is usually EMPTY). Callers
+        that need this once per request (e.g. a registry build covering hundreds
+        of routes) must call this ONCE and build an ``ActiveCircuitsIndex`` from
+        the result, not call the scoped ``get_active_circuits`` per route — that
+        would be one SQLite round-trip per route for a lookup whose answer is
+        almost always "nothing is open".
+        """
+        current_time = now or datetime.now(UTC)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT scope, scope_id, opened_at, retry_at, ttl_seconds,
+                       reason_code, failure_count, message
+                FROM runtime_circuits
+                """
+            ).fetchall()
+        return [
+            _row_to_circuit(row)
+            for row in rows
+            if _from_iso(row["retry_at"]) > current_time
+        ]
+
     def get_active_circuits(
         self,
         *,
@@ -148,3 +175,42 @@ def _row_to_circuit(row: sqlite3.Row) -> RuntimeCircuit:
         failure_count=row["failure_count"],
         message=row["message"],
     )
+
+
+@dataclass(frozen=True)
+class ActiveCircuitsIndex:
+    """In-memory snapshot of every open circuit, built from ONE query (R7-D).
+
+    Membership per route is then O(1) dict lookups — an endpoint's circuit state
+    is derived once (as part of building this index) regardless of how many
+    routes/models hang off that endpoint, instead of being re-queried per route.
+    """
+
+    by_route: dict[str, list[RuntimeCircuit]]
+    by_endpoint: dict[str, list[RuntimeCircuit]]
+    by_bucket: dict[str, list[RuntimeCircuit]]
+
+    @classmethod
+    def build(cls, circuits: list[RuntimeCircuit]) -> ActiveCircuitsIndex:
+        by_route: dict[str, list[RuntimeCircuit]] = {}
+        by_endpoint: dict[str, list[RuntimeCircuit]] = {}
+        by_bucket: dict[str, list[RuntimeCircuit]] = {}
+        targets: dict[CircuitScope, dict[str, list[RuntimeCircuit]]] = {
+            "route": by_route,
+            "endpoint": by_endpoint,
+            "rate_limit_bucket": by_bucket,
+        }
+        for circuit in circuits:
+            targets[circuit.scope].setdefault(circuit.scope_id, []).append(circuit)
+        return cls(by_route=by_route, by_endpoint=by_endpoint, by_bucket=by_bucket)
+
+    def for_route(
+        self, *, route_id: str, endpoint_id: str, rate_limit_bucket: str
+    ) -> list[RuntimeCircuit]:
+        """Circuits affecting one route, in the same route→endpoint→bucket
+        priority order the old per-route SQL query returned."""
+        return [
+            *self.by_route.get(route_id, []),
+            *self.by_endpoint.get(endpoint_id, []),
+            *self.by_bucket.get(rate_limit_bucket, []),
+        ]

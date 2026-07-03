@@ -30,6 +30,7 @@ export function SettingsPageContent({
   onTabChange,
   onProviderFieldChange,
   onGetProviderModels,
+  onProbeEndpoint,
   onForceEndpointTest,
   onDeleteProvider,
   onDeleteProviderEndpoints,
@@ -157,6 +158,7 @@ export function SettingsPageContent({
                     backendReachable={backendReachable}
                     onProviderFieldChange={onProviderFieldChange}
                     onGetProviderModels={onGetProviderModels}
+                    onProbeEndpoint={onProbeEndpoint}
                     onForceEndpointTest={onForceEndpointTest}
                     onDeleteProvider={onDeleteProvider}
                     onDeleteProviderEndpoints={onDeleteProviderEndpoints}

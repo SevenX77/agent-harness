@@ -1761,6 +1761,12 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
+  // Item 2 follow-up (PM 2026-07-03): a single endpoint-tag click scopes the
+  // probe to draft.testingEndpointId, so only THAT tag should spin — not
+  // every sibling under this provider. null/unset (whole-card "Test" button)
+  // still spins every endpoint, matching the existing full-card behavior.
+  const isEndpointBeingTested = (endpointId: string) =>
+    isGettingModels && (draft.testingEndpointId == null || draft.testingEndpointId === endpointId)
   // R-G2: auto-expand the full model list when an endpoint test starts, so the user
   // can watch every model being probed instead of only the first few.
   useEffect(() => {
@@ -1861,7 +1867,7 @@ export function ProviderCard({
       const stateStatus = endpointStateDisplayStatus({
         hasApiKey,
         hasBaseUrl: isOfficial || Boolean(state.row.value.trim()),
-        isTesting: isGettingModels,
+        isTesting: isEndpointBeingTested(state.draft.id),
         result: state.matchedResult,
         models: state.models,
       })
@@ -1890,7 +1896,7 @@ export function ProviderCard({
   const baseUrlReachabilityState = (rowId: string): BaseUrlReachabilityState => {
     const states = endpointStatesByBaseUrlRow.get(rowId) ?? []
     if (states.length === 0) return "unknown"
-    if (isGettingModels && states.some((state) => state.row.value.trim())) return "testing"
+    if (states.some((state) => state.row.value.trim() && isEndpointBeingTested(state.draft.id))) return "testing"
     const reachability = states.map((state): BaseUrlReachabilityState => {
       const result = state.matchedResult
       const status = endpointStateDisplayStatus({

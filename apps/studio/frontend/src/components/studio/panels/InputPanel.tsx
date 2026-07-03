@@ -9,10 +9,10 @@ import { sha256Hex } from "@/lib/hash"
 import {
   applyGraphArtifacts,
   applyIoInputChecks,
-  blackboardAtNode,
-  blackboardAtOutput,
   fileFieldsOf,
   graphArtifactsOf,
+  reconcileInputFields,
+  reconcileOutputFields,
   type ArtifactRow,
   type FileFieldDecl,
   type IoInputChecks,
@@ -310,9 +310,10 @@ export function InputPanel({
   const [inputConfigOpen, setInputConfigOpen] = useState(false)
   const [outputConfigOpen, setOutputConfigOpen] = useState(false)
 
-  // Blackboard context: empty for GRAPH.md (the Input pseudo-node has no
-  // blackboard — its checked file fields BECOME the graph entry fields).
-  const blackboard = view.isGraphLevel ? [] : blackboardAtNode(skillDetail, selectedNode?.id ?? "")
+  // Reconciled input fields (matched/available/missing). For an interior node
+  // this reconciles io.inputs against the upstream blackboard; for the Input
+  // pseudo-node / GRAPH.md it flags declared graph inputs with no source.
+  const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "")
   const declaredFiles = fileFieldsOf(view.content)
   const artifacts = graphArtifactsOf(skillDetail)
   const graphContent = skillDetail?.files?.["GRAPH.md"] ?? ""
@@ -400,11 +401,12 @@ export function InputPanel({
         blackboard={blackboard}
         declaredFiles={declaredFiles}
         onSave={handleInputConfigSave}
+        isGraphInput={view.isGraphLevel}
       />
       <OutputConfigDialog
         open={outputConfigOpen}
         onOpenChange={setOutputConfigOpen}
-        universe={blackboardAtOutput(skillDetail)}
+        universe={reconcileOutputFields(skillDetail)}
         artifacts={artifacts}
         perItemCount={perItemCount}
         onSave={handleArtifactsSave}

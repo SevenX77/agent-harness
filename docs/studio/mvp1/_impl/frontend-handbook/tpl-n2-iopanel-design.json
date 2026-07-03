@@ -69,7 +69,7 @@
    "n": 32,
    "cap": "input-config-tree",
    "module": "输入配置树",
-   "func": "设计(r3 新增,input region F3,PM r3 点2/4):输入配置弹窗 = 字段勾选树。第一行永远是黑板 context(展开为跑到该节点时黑板上的字段,嵌套按层级缩进;勾选=该节点 io.inputs 消费),推导与 dot 静态推断同源。黑板行下面是 Add file 导入的文件,每文件一棵 schema 字段树,勾中字段以 source:'file' 追加为黑板字段。Input 伪节点无黑板只有文件——勾选的文件字段流到第一个 node 成为黑板初始字段(=GRAPH.md io.inputs)。文件行 = 名字 + 灰色路径。",
+   "func": "设计(r3 新增,input region F3,PM r3 点2/4):输入配置弹窗 = 字段勾选树。第一行永远是黑板 context(展开为跑到该节点时黑板上的字段,嵌套按层级缩进;勾选=该节点 io.inputs 消费),推导与 dot 静态推断同源。黑板行下面是 Add file 导入的文件,每文件一棵 schema 字段树,勾中字段以 source:'file' 追加为黑板字段。Input 伪节点无黑板只有文件——勾选的文件字段流到第一个 node 成为黑板初始字段(=GRAPH.md io.inputs)。文件行 = 名字 + 灰色路径。 r4 字段对账:黑板行三态——matched(声明+黑板有)整行高亮+左侧主色竖条;available 普通行;missing(io.inputs 声明了但上游没供上)置顶 muted+danger+⚠+『required by io.inputs · not supplied by upstream』不可勾选。把引擎运行期 [F-v3-runtime-state-mapping-failed] 提前到配置期。",
    "action": "点面板 Input 区 Configure → 勾选黑板字段 / Add file 导入 → 勾文件字段 → Save。",
    "fe_design": "InputConfigDialog(shadcn Dialog + Checkbox):blackboardAtNode(复用 staticEdgeInference)出黑板行;Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 scan 出字段候选;applyIoInputChecks 按勾选重建 io.inputs(黑板消费字段 + source:'file' 单文件/批量 dir+pattern),写回目标文件,乐观 hash 锁。",
    "fe_modules": [
@@ -93,14 +93,14 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(r3 实施 + 真机验证:GRAPH.md=Input 伪节点 files-only、segmentation=黑板 chapters 勾选、导入 material-prep 识别字段)。",
+   "gap_brief": "符合设计(r3 实施 + 真机验证:GRAPH.md=Input 伪节点 files-only、segmentation=黑板 chapters 勾选、导入 material-prep 识别字段)。 r4 对账三态已实施+真机验证。",
    "impl_ref": "fn-32"
   },
   {
    "n": 33,
    "cap": "output-artifacts-config",
    "module": "输出产物清单",
-   "func": "设计(r3 新增,input region F7,PM r3 点5):输出配置弹窗 = artifacts 文件清单。Add artifact 添加要输出的文件,每个文件卡 = stem 名 + single/per-item 紧凑分段钮(per-item 数量由 iterate range 推断)+ 黑板全部字段的勾选列表(每个文件下同一套,只是勾选不同)+ 固定命名预览。落盘固定格式 <stem>_latest_<ts>.json + history/(per-item 编号继承输入批量),engine artifact writer 实现,整体替换旧 per-field target:'artifact'。",
+   "func": "设计(r3 新增,input region F7,PM r3 点5):输出配置弹窗 = artifacts 文件清单。Add artifact 添加要输出的文件,每个文件卡 = stem 名 + single/per-item 紧凑分段钮(per-item 数量由 iterate range 推断)+ 黑板全部字段的勾选列表(每个文件下同一套,只是勾选不同)+ 固定命名预览。落盘固定格式 <stem>_latest_<ts>.json + history/(per-item 编号继承输入批量),engine artifact writer 实现,整体替换旧 per-field target:'artifact'。 r4 字段对账(与输入同理):matched(GRAPH.md io.outputs 声明的图产出)高亮+竖条;available 普通;missing(io.outputs 声明了但无 phase 产出)dialog 级置顶 muted+danger+⚠+『required by io.outputs · no phase produces it』。",
    "action": "点面板 Output 区 Configure → Add artifact → 命名 stem、选 single/per-item、勾字段 → Save。",
    "fe_design": "OutputConfigDialog:blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs,带来源)出统一字段全集;每卡勾选 → applyGraphArtifacts 写 GRAPH.md io.artifacts 清单(list of {stem,fields,mode});固定命名预览随 stem/mode 变。",
    "fe_modules": [
@@ -118,7 +118,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(r3 实施 + 真机验证:黑板全字段全集 + 固定命名预览 + single/per-item)。旧 per-field target 已删。",
+   "gap_brief": "符合设计(r3 实施 + 真机验证:黑板全字段全集 + 固定命名预览 + single/per-item)。旧 per-field target 已删。 r4 对账三态已实施+真机验证。",
    "impl_ref": "fn-33"
   },
   {

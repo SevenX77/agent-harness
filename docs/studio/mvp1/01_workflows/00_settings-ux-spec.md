@@ -550,8 +550,9 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 7 | 点 X 关闭回工作区画布 | close-settings-overlay | ✅ 无未保存确认,in-flight PUT 仍落地 |
 | 8 | (Settings 打开时)点 Header Home → 连带关 Settings + 退首页 | home-closes-settings | ✅ 与 X 两条语义(Home 还卸载工作区) |
 | 9 | 某 tab 渲染崩溃 → 错误兜底卡 + Retry(不白屏) | settings-error-boundary | ✅ ⚠️ 只包 Roles/Copilot,General/API Keys 没包 |
+| 10 | **后端不可达时禁止写操作(就绪门)** | settings-backend-readiness-gate | ✅(PM 2026-07-03)后端**实时可达** = API 配置就绪(`apiReady`)**且** `/ws/events` 连着(`!connectionLost`)。凡是会写后端的动作(删 provider / 删 URL / Test 取模型 / 单格 Re-probe / 新增 provider)在发请求**前先过这道门**:不可达则**拒绝执行 + 明确提示「后端正在重连,请稍候再试」**(不再让请求打进空气、拿不到响应弹裸 "Backend unavailable",也不再乐观删除后又回滚);同时按钮**禁用**(如 Add Provider `disabled`)。app 外壳仍立即渲染、不整屏隐藏(尊重「壳层立即挂载」),门控只作用在**会写后端的交互**上。 |
 
-> Stage 0 行为 PM 已拍板(批次 settings-shell):窗口小自动收侧栏;再点 toolbar Settings 图标=关 settings;网络拉不到显示「连接不上」警告标志(否则不必让用户感知)。详见 [01_init §4](./01_init.md)(Settings overlay 不卸载工作区的流转)。
+> Stage 0 行为 PM 已拍板(批次 settings-shell):窗口小自动收侧栏;再点 toolbar Settings 图标=关 settings;网络拉不到显示「连接不上」警告标志(否则不必让用户感知);**写操作在后端不可达时禁用 + 提示重连(#10 就绪门,PM 2026-07-03),而不是让动作打进空气再弹裸报错**。详见 [01_init §4](./01_init.md)(Settings overlay 不卸载工作区的流转)。
 
 ### 7.1 Stage 1 — General（身份与产物路径）〔区域 `settings:general`,叙事未覆盖,仅此〕
 

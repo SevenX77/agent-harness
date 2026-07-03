@@ -158,6 +158,7 @@
     "thirdPartyProviders": "第三方服务商",
     "noThirdPartyProviders": "尚未配置第三方服务商。",
     "addProvider": "添加服务商",
+    "backendReconnecting": "后端正在重连，请稍候再试。",
     "addProviderDialogTitle": "添加服务商",
     "providerName": "服务商名称",
     "add": "添加",

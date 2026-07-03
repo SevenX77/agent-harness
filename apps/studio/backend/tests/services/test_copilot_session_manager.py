@@ -220,6 +220,24 @@ def test_build_options_sets_provider_base_url(tmp_path: Path) -> None:
     assert options.permission_mode == "acceptEdits"
 
 
+def test_build_options_sets_model_from_provider_model_id(tmp_path: Path) -> None:
+    # R7-H: the route's provider_model_id must reach the CLI as the native
+    # options.model, so the request carries the right model for EVERY route (not
+    # just the special ark/deepseek env path). Without it the CLI uses its built-in
+    # default (opus) and a non-opus endpoint (deepseek) stalls.
+    options = copilot.build_options(None, "claude-key", tmp_path, model="deepseek-v3-0324")
+
+    assert options.model == "deepseek-v3-0324"
+
+
+def test_build_options_model_defaults_to_none(tmp_path: Path) -> None:
+    # No explicit model → None → CLI default. Production always passes one
+    # (get_or_create_session forwards route.provider_model_id).
+    options = copilot.build_options(None, "claude-key", tmp_path)
+
+    assert options.model is None
+
+
 def test_build_options_enables_summarized_thinking(tmp_path: Path) -> None:
     # F1/F8: the CLI only offers summarized|omitted thinking display — there is
     # no "full", and leaving display unset strips the content (ThinkingBlocks

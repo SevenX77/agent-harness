@@ -178,7 +178,7 @@
    "n": 32,
    "cap": "copilot-identity-moirai",
    "design_ref": "atom-32",
-   "current": "现状:已实现且实机验证。header = MoirAI + Cassiopeia 星座标(moirai-mark.tsx,currentColor)。顶栏 Sparkles 已删,开关 = 画布圆形 FAB(copilot-fab.tsx):默认右上、画布内可拖(pointer + clampFabPosition + isTapGesture 分拖/点)、36px 无边框、底=--studio-canvas-surface + 标=--studio-canvas-accent(与面板/header 同色);点 FAB 走 WAAPI L 路径(travelSteps 垂直→水平→headerLogoTarget ~440ms)后 onOpen,面板 origin-top-left 从 logo 角展开;收起走 header PanelRightClose。纯几何抽 copilot-fab-geometry.ts(8 单测)。实测(recon-demo/深色):FAB 默认右上(距缘~12px)、36px 无边框、bg/标取到 surface/accent 值、拖到画布中心成功、中途帧见先垂直后水平、tap 后面板打开。",
+   "current": "现状:已实现且实机验证。header = MoirAI + Cassiopeia 星座标(moirai-mark.tsx,currentColor)。顶栏 Sparkles 已删,开关 = 画布圆形 FAB(copilot-fab.tsx):默认右上、画布内可拖(pointer + clampFabPosition + isTapGesture 分拖/点)、36px 无边框、底=--studio-canvas-surface + 标=--studio-canvas-accent(与面板/header 同色)。开合 = 容器变形(copilot-panel-morph.tsx):点 FAB → 面板色 surrogate 沿 L 路径(travelSteps 垂直→水平→headerLogoTarget)飞到 logo 位、再 WAAPI 一段把 left/top/width/height/border-radius 撑大到 panelRect(~560ms),即圆连续长成面板;标淡出、面板内容 [&>*] 淡入(surface 不淡);close 反向;Workspace 以 morph state 令 FAB/morph/panel 三态互斥;reduced-motion/无 WAAPI 直接开合。坑(已修):StrictMode 双挂 effect 时 cleanup 的 anim.cancel 触发 oncancel→提前 onFinish 使面板瞬开,改为 cleanup 静默 cancel、仅 onfinish 触发 onFinish。纯几何抽 copilot-fab-geometry.ts(10 单测)。实测(recon-demo/深色,reduced-motion off):采样序列 box 36×36 圆→横移到 logo(x1392→1108)→连续撑大 142×302…→352×832 面板;默认右上、拖到画布中心、close 反向回 FAB 均验。",
    "gap": "无。Lachesis/Atropos 两席为设计源保留席、未实现,UI 不显示。",
    "fe_status": "符合",
    "be_status": "n/a",
@@ -630,10 +630,10 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "copilot-fab-geometry.test.ts(8 例,TDD):defaultFabPosition 右上锚点、clampFabPosition 画布内夹取、headerLogoTarget 落在面板左侧近顶、travelSteps L 路径(先垂直后水平)、isTapGesture 拖/点阈值。moirai-mark.test.tsx:aria-hidden/role=img+title、currentColor 无硬编码色、五星。copilot-fab.test.tsx:可访问名「打开 MoirAI」+ rounded-full + accent 标 + 无硬编码色。拖拽/WAAPI 动画属纯视觉、按 SOP 不单测;既有 1652 例全绿。"
+    "copilot-fab-geometry.test.ts(10 例,TDD):defaultFabPosition 右上锚点、clampFabPosition 画布内夹取、headerLogoTarget 落在面板左侧近顶、travelSteps L 路径(先垂直后水平)、isTapGesture 拖/点阈值、panelRect 展开态面板矩形 + 与 logo 落点关系。moirai-mark.test.tsx:aria-hidden/role=img+title、currentColor 无硬编码色、五星。copilot-fab.test.tsx:可访问名「打开 MoirAI」+ rounded-full + accent 标 + 无硬编码色。拖拽/WAAPI morph 属纯视觉、按 SOP 不单测;既有 1654 例全绿。"
    ],
    "layer2": [
-    "真机 Playwright(recon-demo,深色):收起后 FAB 默认在画布右上(距缘~12px)、36px、border 0px、bg 取到 --studio-canvas-surface、标取到 --studio-canvas-accent;拖拽 → FAB 移到画布中心成功;tap → 中途帧见先垂直上再水平飞、随后面板打开(origin-top-left 展开)。"
+    "真机 Playwright(recon-demo,深色,reducedMotion:'no-preference'):收起后 FAB 默认右上(距缘~12px)、36px、border 0px、bg=--studio-canvas-surface、标=--studio-canvas-accent;拖拽 → FAB 到画布中心;tap → 逐帧采样 box 由 36×36 圆横移到 header logo 位(x1392→1108)再连续撑大 142×302 … 352×832 面板(容器变形:圆长成面板);close 反向面板缩回 FAB。注:headless Chrome 默认 prefers-reduced-motion:reduce 会走直开回退,需 reducedMotion:'no-preference' 才能观察动画。"
    ],
    "screenshots": [
     {
@@ -650,11 +650,15 @@
     },
     {
      "file": "n1-38-fab-travel.png",
-     "caption": "点 FAB 中途帧:先垂直往上、再水平飞向 panel header logo 位,到位后面板展开"
+     "caption": "容器变形·前段:点 FAB 后圆沿 L 路径(先垂直后水平)飞向 panel header logo 位"
+    },
+    {
+     "file": "n1-39-fab-morph.png",
+     "caption": "容器变形·后段:圆到位后连续把自己撑大成整个面板矩形(空 surface,内容随后淡入)——圆长成面板,非淡入淡出"
     },
     {
      "file": "n1-36-moirai-expanded.png",
-     "caption": "面板从 header logo 角(origin-top-left)展开:MoirAI 面板复现(空态引导 + composer)"
+     "caption": "容器变形落定:MoirAI 面板复现(空态引导 + composer)"
     }
    ]
   },

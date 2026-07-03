@@ -5,7 +5,7 @@ import { CopilotFab } from './copilot-fab'
 describe('CopilotFab', () => {
   it('renders a labelled round canvas button carrying the MoirAI mark', () => {
     const html = renderToStaticMarkup(
-      <CopilotFab position={null} onPositionChange={vi.fn()} panelWidth={360} onOpen={vi.fn()} />,
+      <CopilotFab position={null} onPositionChange={vi.fn()} onOpen={vi.fn()} />,
     )
     expect(html).toContain('aria-label="打开 MoirAI"')
     expect(html).toContain('rounded-full')

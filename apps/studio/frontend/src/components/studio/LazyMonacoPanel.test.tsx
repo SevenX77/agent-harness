@@ -24,7 +24,6 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), {
     dismiss: vi.fn(),
     error: vi.fn(),
-    success: vi.fn(),
   }),
 }))
 
@@ -81,7 +80,14 @@ describe("LazyMonacoPanel header controls", () => {
   })
 })
 
-describe("LazyMonacoPanel lint diagnostics strip", () => {
+describe("LazyMonacoPanel realtime-lint surface (no in-editor banner)", () => {
+  // LOCK: the realtime lint surface is inline Monaco markers scoped to the OPEN
+  // file (applyLintMarkers), NOT a large in-editor banner/strip. The banner was
+  // deliberately removed in PR #234 ("real-time lint marks context only, not a
+  // global panel mid-edit", compile-lint F1); the full aggregated list lives in
+  // the manual Compile drawer (CompileErrorDrawer). A later change (PR #352)
+  // reintroduced the banner and was reverted here. This test fails if anyone
+  // mounts a lint banner in the editor panel again.
   beforeEach(() => {
     vi.stubGlobal("document", {
       documentElement: {
@@ -106,17 +112,10 @@ describe("LazyMonacoPanel lint diagnostics strip", () => {
     }
   }
 
-  it("renders the line-less-diagnostic strip above the editor instead of dropping it silently", () => {
-    // LazyMonacoPanel.tsx already documents this contract in a comment next to
-    // applyLintMarkers: "Line-less diagnostics degrade to the strip above,
-    // never guess a line." That strip is `LintDiagnosticsPanel` from
-    // MonacoPanel.tsx, which exists (and is unit-tested in
-    // MonacoPanel.test.tsx) but, before this fix, was never actually mounted
-    // anywhere in the app — a GRAPH.md parse failure with no extractable line
-    // number (e.g. the raw ruamel YAML error) had nowhere to surface at all.
+  it("does NOT render an in-editor lint banner even when lint found errors", () => {
     debouncedLintResult.mockReturnValue({
       status: "failed",
-      errors: [makeError()],
+      errors: [makeError(), makeError({ line: 12, error_code: "F-v3-002", message: "Dangling edge" })],
       phases_summary: null,
     })
 
@@ -133,28 +132,14 @@ describe("LazyMonacoPanel lint diagnostics strip", () => {
       />,
     )
 
-    expect(html).toContain('aria-label="Lint diagnostics"')
-    expect(html).toContain("Invalid YAML in frontmatter")
-    expect(html).toContain("No line")
-  })
-
-  it("stays collapsed (renders nothing) when lint has not found any diagnostics", () => {
-    debouncedLintResult.mockReturnValue({ status: "passed", errors: [], phases_summary: null })
-
-    const html = renderToStaticMarkup(
-      <LazyMonacoPanel
-        title="GRAPH.md"
-        skillId="skill-1"
-        filePath="GRAPH.md"
-        value="---\n---\n"
-        onChange={vi.fn()}
-        onSaved={vi.fn()}
-        onInFlightChange={vi.fn()}
-        onConflict={vi.fn()}
-      />,
-    )
-
+    // No banner container, no banner heading, no diagnostic message baked into
+    // the DOM — the errors surface only as inline Monaco markers (applied via
+    // the editor API on mount, not in server-rendered HTML).
     expect(html).not.toContain('aria-label="Lint diagnostics"')
+    expect(html).not.toContain("Lint found errors")
+    expect(html).not.toContain("Lint found warnings")
+    expect(html).not.toContain("Invalid YAML in frontmatter")
+    expect(html).not.toContain("Dangling edge")
   })
 })
 

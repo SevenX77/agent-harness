@@ -21,6 +21,7 @@ compile = 把磁盘 skill 源码**读进来 → 校验 → 编译成可信 AST**
 - **`module_sandbox`**(`module_sandbox.py`,skill 本地 Python 导入隔离、不污染 `sys.modules`)= loader 加载 skill 代码的机制,在本域。
 - **cache**(源 hash 重编,`compute_cache_key`)、**serializer**(图序列化,供 studio `/graph/serialize`)。
 - **编译期纯函数**:只读源码、不执行 action、不调 Agent;读不到 `.workspace` → golden 失效**不在编译期**(移 eval 期,见 `compile-rules` CR3 / `golden-eval`)。
+- **topology projection(尽力而为投影,repair view 专用)**(`topology_projection.py:load_graph_topology_projection`)是 §2 主编译流水线**之外**的独立辅助机制:Studio 的 repair 态画布(D2,见 `docs/studio/mvp1/01_workflows/01_init.md`:"不卡导入 ... 我们有 compile, 有 copilot")靠它在 skill 编译不过时仍把 `phases`/DAG 画出来,让用户能看着改。**决策(2026-07-03)**:严格编译路径(`parse_markdown_parts`)把整份 frontmatter 当一份原子 YAML 文档——`io.*` 里一个无关的重复 key 会连累语法完全正常的 `phases` 一起读不出来,导致 repair 画布连"看着改"这个前提都没了。修法是新增 `parse_markdown_parts_best_effort`(容忍 `ruamel.yaml` 的 duplicate-key,last-value-wins),**只给 topology projection 这类"repair 视图"消费者用**;编译期主路径继续严格拒绝重复 key(仍是 `[F-v3-*]` 该报的错,不受影响)。若 frontmatter 连 best-effort 都解不出(真正语法损坏,不只是重复 key),原样抛出,由调用方(Studio `_graph_topology_projection_or_empty`)按既有约定降级为 `([], [])` 并记 WARNING。
 
 ## 3. 接口契约
 `compile_skill(root,*,chat_model?,cache,skill_resolver) -> CompiledSkill`(签名归 `03-api-contract`;CompiledSkill/CompileResult 形状归 `data-contracts`);用 `02-resolver` 解析 SUBGRAPH 的 `path`；subagent 的 `target_skill` 属运行期委派机制。

@@ -30,6 +30,7 @@ export function ApiKeysTab({
   onForceEndpointTest,
   onDeleteProvider,
   onDeleteProviderEndpoints,
+  onRemoveModel,
   onBeginAddProvider,
   onAddProvider,
   onCancelAddProvider,
@@ -49,6 +50,7 @@ export function ApiKeysTab({
   | "onForceEndpointTest"
   | "onDeleteProvider"
   | "onDeleteProviderEndpoints"
+  | "onRemoveModel"
   | "onBeginAddProvider"
   | "onAddProvider"
   | "onCancelAddProvider"
@@ -107,6 +109,7 @@ export function ApiKeysTab({
                       onForceEndpointTest={onForceEndpointTest}
                       onDelete={() => onDeleteProvider(draft.id)}
                       onDeleteEndpointIds={onDeleteProviderEndpoints}
+                      onRemoveModel={onRemoveModel}
                       providerKind="official"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
                       notableProviderKey={notableProviderKeyForDraft(draft)}
@@ -159,6 +162,7 @@ export function ApiKeysTab({
                       onForceEndpointTest={onForceEndpointTest}
                       onDelete={() => onDeleteProvider(draft.id)}
                       onDeleteEndpointIds={onDeleteProviderEndpoints}
+                      onRemoveModel={onRemoveModel}
                       providerKind="third-party"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
                       notableProviderKey={notableProviderKeyForDraft(draft)}

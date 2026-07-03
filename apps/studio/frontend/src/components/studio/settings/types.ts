@@ -100,6 +100,8 @@ export interface SettingsPageContentProps {
   onForceEndpointTest: (endpointId: string) => void
   onDeleteProvider: (providerId: string) => void
   onDeleteProviderEndpoints: (endpointIds: string[]) => void
+  /** Remove a model from a provider by deleting all of its route ids (P2). */
+  onRemoveModel: (modelId: string, routeIds: string[]) => void
   onBeginAddProvider: () => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onCancelAddProvider: () => void

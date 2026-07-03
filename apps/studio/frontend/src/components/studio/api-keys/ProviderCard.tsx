@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tag } from "@/components/ui/tag"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1177,6 +1178,20 @@ function routeSummariesForModel(model: ModelInfo): AggregatedRouteSummary[] {
   return summaries.length > 0 ? summaries : [aggregateRouteSummary(model)]
 }
 
+/**
+ * Every route id a model chip stands for — an aggregated chip can cover the same
+ * model across several endpoints, so "Remove model" must delete them all. Used
+ * to purge a stale phantom route (e.g. a doc-guessed `o3-mini`) from a provider.
+ */
+export function modelRouteIds(model: ModelInfo): string[] {
+  const ids = new Set<string>()
+  for (const summary of routeSummariesForModel(model)) {
+    if (summary.route_id) ids.add(summary.route_id)
+  }
+  if (model.route_id) ids.add(model.route_id)
+  return [...ids]
+}
+
 function aggregateRoutesTooltipText(model: ModelInfo): string | null {
   const summaries = aggregateRouteSummaries(model)
   if (summaries.length <= 1) return null
@@ -1726,6 +1741,7 @@ export function ProviderCard({
   onModelsUpdated,
   onProbeEndpoint,
   onForceEndpointTest,
+  onRemoveModel,
 }: {
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
@@ -1743,6 +1759,8 @@ export function ProviderCard({
   onProbeEndpoint?: (endpointId: string) => void
   /** Force re-probe one (URL, protocol) cell, bypassing the half-life gate. */
   onForceEndpointTest?: (endpointId: string) => void
+  /** Remove a model from this provider — deletes all of its route ids (P2). */
+  onRemoveModel?: (modelId: string, routeIds: string[]) => void
 }) {
   const { t } = useTranslation("settings")
   const { confirm: confirmDelete, dialog: deleteDialog } = useDeleteConfirm()
@@ -2091,16 +2109,35 @@ export function ProviderCard({
         </button>
       </Tag>
     )
+    // P2: right-click a model chip to copy its id or remove it (deletes every
+    // route the chip covers) — the affordance for purging a stale phantom model
+    // like a doc-guessed `o3-mini`. Compose Radix menus by nesting asChild
+    // triggers onto the same chip so both context menu and tooltip apply.
+    const removableRouteIds = onRemoveModel ? modelRouteIds(model) : []
     return (
-      <Tooltip key={`${tagKey}:tooltip`}>
-        <TooltipTrigger asChild>{tag}</TooltipTrigger>
-        <TooltipContent
-          className={diagnosticTooltipContentClassName}
-          data-allow-native-double-click
-        >
-          <RouteTooltipContent text={tooltipText} />
-        </TooltipContent>
-      </Tooltip>
+      <ContextMenu key={`${tagKey}:ctx`}>
+        <Tooltip key={`${tagKey}:tooltip`}>
+          <TooltipTrigger asChild>
+            <ContextMenuTrigger asChild>{tag}</ContextMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent
+            className={diagnosticTooltipContentClassName}
+            data-allow-native-double-click
+          >
+            <RouteTooltipContent text={tooltipText} />
+          </TooltipContent>
+        </Tooltip>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={() => void copyAvailableModelId(model.id)}>
+            {t("apiKeys.card.copyModelId")}
+          </ContextMenuItem>
+          {onRemoveModel && removableRouteIds.length > 0 ? (
+            <ContextMenuItem variant="destructive" onSelect={() => onRemoveModel(model.id, removableRouteIds)}>
+              {t("apiKeys.card.removeModel")}
+            </ContextMenuItem>
+          ) : null}
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
 

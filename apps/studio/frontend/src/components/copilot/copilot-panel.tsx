@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, CircleAlert, SquareTerminal, Waypoints } from 'lucide-react'
+import { ArrowUp, CircleAlert, PanelRightClose, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -12,6 +12,7 @@ import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import { openClaudeCode } from '../../lib/tauri'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
 import { Skeleton } from '../ui/skeleton'
@@ -25,6 +26,7 @@ import {
 } from '../ui/message-scroller'
 import { BACKEND_UNAVAILABLE_MESSAGE, errorMessage } from '@/utils/errors'
 import { AnalysisBar } from './analysis-bar'
+import { MoiraiMark } from './moirai-mark'
 import { ToolApprovalCard } from './tool-approval-card'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
@@ -236,6 +238,8 @@ interface CopilotPanelProps {
   onJudgePrepared?: (refs: CopilotJudgeResponse) => void
   // F5/DEF-025: a copilot edit hit disk — reload the editor buffer + recompile.
   onFileChanged?: (path: string, action: CopilotFileAction) => void
+  // R5-E: collapse the panel back to the canvas MoirAI FAB (header control).
+  onCollapse?: () => void
 }
 
 /** F6: Enter sends, Shift+Enter breaks the line, and an IME composition never sends. */
@@ -299,6 +303,7 @@ export function CopilotPanel({
   completedRunId = null,
   onJudgePrepared,
   onFileChanged,
+  onCollapse,
 }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
@@ -511,14 +516,17 @@ export function CopilotPanel({
       <header className="studio-canvas-panel-header border-b px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            {/* R5-E identity: 织女 (Zhinü) — the weaver goddess who turns loose
-                threads into brocade, as this copilot weaves phases into a DAG.
-                Waypoints = nodes joined by threads. PM can veto with one word. */}
-            <Waypoints className="size-4 shrink-0 text-[color:var(--studio-canvas-accent)]" />
+            {/* R5-E identity: MoirAI — named after the Moirai, the three Greek
+                Fates who spin, measure and cut the thread of every life; this
+                copilot weaves a skill's loose phases into one runnable DAG. The
+                mark is the constellation Cassiopeia, which reads at once as an
+                M, a star constellation, and a node-edge graph. Design source:
+                docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md (F1 · R5-E). */}
+            <MoiraiMark className="size-[18px] shrink-0 text-[color:var(--studio-canvas-accent)]" title="MoirAI" />
             {/* shrink-0: the short name must never be squeezed out by the
                 reconnect chip (the chip truncates instead). */}
             <h2 className="shrink-0 text-sm font-semibold">
-              织女 <span className="font-normal text-muted-foreground">Zhinü</span>
+              Moir<span className="text-[color:var(--studio-canvas-accent)]">AI</span>
             </h2>
             {copilot.connectionStatus !== 'open' ? (
               <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
@@ -527,20 +535,39 @@ export function CopilotPanel({
               </span>
             ) : null}
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={openingClaudeCode || !claudeCodeWorkspace}
-            aria-label="Open in Claude Code"
-            onClick={() => {
-              void handleOpenClaudeCode()
-            }}
-            className="studio-canvas-input-surface shrink-0"
-          >
-            <SquareTerminal data-icon="inline-start" />
-            Open in Claude Code
-          </Button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={openingClaudeCode || !claudeCodeWorkspace}
+              aria-label="Open in Claude Code"
+              onClick={() => {
+                void handleOpenClaudeCode()
+              }}
+              className="studio-canvas-input-surface shrink-0"
+            >
+              <SquareTerminal data-icon="inline-start" />
+              Open in Claude Code
+            </Button>
+            {onCollapse ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="收起 MoirAI"
+                    onClick={onCollapse}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <PanelRightClose />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">收起</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
         </div>
       </header>
 

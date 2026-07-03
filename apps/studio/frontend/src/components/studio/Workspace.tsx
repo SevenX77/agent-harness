@@ -7,10 +7,12 @@ import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
+import { CopilotFab } from "@/components/copilot/copilot-fab"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
 import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
+import { useAnimatedPresence } from "@/hooks/useAnimatedPresence"
 import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
@@ -2330,8 +2332,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     "--studio-canvas-editor-safe-area": editorOpen ? "calc(var(--studio-editor-overlay-height) + 1.5rem)" : "0px",
     "--studio-editor-overlay-height": editorHeight != null ? `${editorHeight}px` : "min(52%, 34rem)",
   } as CSSProperties
-  const rightPanelOverlay = copilotOpen ? (
-    <WorkspaceRightPanelOverlay width={copilotWidth} onResize={setCopilotWidth}>
+  // Keep the panel mounted through its 200ms exit animation (matches the CSS
+  // duration on WorkspaceRightPanelOverlay), then unmount as before.
+  const panelPresence = useAnimatedPresence(copilotOpen, 200)
+  const rightPanelOverlay = panelPresence.mounted ? (
+    <WorkspaceRightPanelOverlay width={copilotWidth} onResize={setCopilotWidth} state={panelPresence.state}>
       <CopilotPanel
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
@@ -2340,8 +2345,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         completedRunId={completedRunId}
         onJudgePrepared={setCopilotJudgeResult}
         onFileChanged={handleCopilotFileChanged}
+        onCollapse={() => setCopilotOpen(false)}
       />
     </WorkspaceRightPanelOverlay>
+  ) : null
+  // Collapsed → a solid MoirAI FAB at the same bottom-right corner; the panel
+  // zoom-collapses into it and grows back out of it. Only with a skill loaded.
+  const copilotFab = currentSkillId && !copilotOpen ? (
+    <div className="pointer-events-auto absolute bottom-3 right-3 z-30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90 motion-safe:duration-200 motion-safe:ease-out">
+      <CopilotFab onClick={() => setCopilotOpen(true)} />
+    </div>
   ) : null
 
   return (
@@ -2354,8 +2367,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onBreadcrumbClick={popNavTo}
         onTitleSelect={handleTitleSelect}
         onTitleEdit={handleTitleEdit}
-        copilotOpen={copilotOpen}
-        onCopilotToggle={() => setCopilotOpen((open) => !open)}
         onHome={handleHome}
         onSyncSuccess={() => {
           void mutateSkillDetail()
@@ -2430,6 +2441,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     {leftPanelOverlay}
                     <WorkspaceEditorOverlay onResizeHeight={setEditorHeight} />
                     {rightPanelOverlay}
+                    {copilotFab}
                   </div>
                 </>
               )}

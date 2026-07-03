@@ -142,8 +142,6 @@ describe('Header release status', () => {
         <Header
           skillId="text-segmentation"
           workspaceRoot="/tmp/workspace"
-          copilotOpen={false}
-          onCopilotToggle={vi.fn()}
           onHome={vi.fn()}
         />
       </TooltipProvider>,
@@ -173,8 +171,6 @@ describe('Header release status', () => {
         <Header
           skillId="text-segmentation"
           workspaceRoot="/tmp/workspace"
-          copilotOpen={false}
-          onCopilotToggle={vi.fn()}
           onHome={vi.fn()}
         />
       </TooltipProvider>,
@@ -208,8 +204,6 @@ describe('Header release status', () => {
         <Header
           skillId="draft-skill"
           workspaceRoot="/tmp/workspace"
-          copilotOpen={false}
-          onCopilotToggle={vi.fn()}
           onHome={vi.fn()}
         />
       </TooltipProvider>,
@@ -226,8 +220,6 @@ describe('Header release status', () => {
         <Header
           skillId="text-segmentation"
           workspaceRoot="/tmp/workspace"
-          copilotOpen={false}
-          onCopilotToggle={vi.fn()}
           onHome={vi.fn()}
         />
       </TooltipProvider>,
@@ -248,8 +240,6 @@ describe('Header release status', () => {
         <Header
           skillId="draft-skill"
           workspaceRoot="/tmp/workspace"
-          copilotOpen={false}
-          onCopilotToggle={vi.fn()}
           onHome={vi.fn()}
         />
       </TooltipProvider>,

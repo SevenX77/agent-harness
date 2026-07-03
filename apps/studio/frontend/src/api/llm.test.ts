@@ -1847,7 +1847,7 @@ describe('API Keys v4 registry adapter', () => {
       },
     })
 
-    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['put /llm/roles'])
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['put /llm/roles', 'get /llm/registry'])
     expect(JSON.parse(String(seen[0].data))).toEqual({
       schema_version: 3,
       model_profiles: {},
@@ -1872,6 +1872,91 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
+  it('does not collapse the returned model directory to empty when the registry cache is cold (roles-registry-hydration-prune)', async () => {
+    // putRoles used to build its returned RolesData from `cachedRegistry ?? null`
+    // instead of awaiting a fresh registry — with a cold cache (e.g. right
+    // after syncVerifiedCommunityCatalog nulls it) the echoed-back `models`/
+    // `providers` directories silently came back empty even though the role's
+    // own provider routes were real. LlmRolesTab's pruning then mistook that
+    // emptiness for "confirmed invalid" and wiped the role's real routes on
+    // the very next autosave. putRoles must always resolve a real registry.
+    const registryWithGpt5 = registry({
+      model_groups: [
+        {
+          canonical_id: 'gpt-5',
+          display_name: 'GPT-5',
+          provider_models: [
+            {
+              route_id: route.route_id,
+              endpoint_id: endpoint.endpoint_id,
+              provider_label: 'OpenRouter Custom',
+              provider_kind: 'third_party',
+              provider_model_id: 'openai/gpt-5',
+              ui_state: 'ready',
+              ui_detail: null,
+              retry_at: null,
+              reason_code: null,
+              capability_state: 'known',
+              capabilities: route.capabilities,
+            },
+          ],
+          status_summary: {
+            ready: 1,
+            untested: 0,
+            cooling_down: 0,
+            historical_ready: 0,
+            failed: 0,
+            off: 0,
+          },
+          capability_summary: {
+            capability_known_count: 1,
+            thinking: 'unknown',
+            tools: 'unknown',
+            structured_output: 'unknown',
+            max_context_tokens: null,
+            max_output_tokens: null,
+          },
+        },
+      ],
+    })
+    api.defaults.adapter = adapter((config) => {
+      if (config.url === '/llm/registry') return registryWithGpt5
+      if (config.method === 'put' && config.url === '/llm/roles') {
+        return JSON.parse(String(config.data))
+      }
+      return registryWithGpt5
+    })
+
+    const roles = await putRoles({
+      schema_version: 3,
+      models: {
+        'gpt-5': {
+          name: 'GPT-5',
+          providers: { [route.route_id]: 'openai/gpt-5' },
+        },
+      },
+      providers: {
+        [route.route_id]: { name: 'OpenRouter Custom', type: 'openai_compatible' },
+      },
+      roles: {
+        analyst: {
+          role_kind: 'graph_agent',
+          model_fallback_enabled: false,
+          active_model: 'gpt-5',
+          models: {
+            'gpt-5': { providers: [route.route_id], temperature: 0.2, max_tokens: 8192 },
+          },
+          system_prompt_prefix: '',
+          lint_requirements: {},
+        },
+      },
+    })
+
+    expect(Object.keys(roles.models)).not.toHaveLength(0)
+    expect(Object.keys(roles.providers)).not.toHaveLength(0)
+    expect(roles.roles.analyst.models['gpt-5'].providers).toEqual([route.route_id])
+  })
+
   it('deletes a persisted role through the role delete endpoint', async () => {
     const seen: Array<{ method?: string; url?: string }> = []
     api.defaults.adapter = adapter((config) => {
@@ -1890,7 +1975,10 @@ describe('API Keys v4 registry adapter', () => {
 
     const roles = await deleteRole('analyst')
 
-    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['delete /llm/roles/analyst'])
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'delete /llm/roles/analyst',
+      'get /llm/registry',
+    ])
     expect(roles.roles.analyst).toBeUndefined()
   })
 
@@ -1912,7 +2000,10 @@ describe('API Keys v4 registry adapter', () => {
 
     const roles = await deleteModelBundle('premium_stack')
 
-    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['delete /llm/model-bundles/premium_stack'])
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'delete /llm/model-bundles/premium_stack',
+      'get /llm/registry',
+    ])
     expect(roles.model_bundles?.premium_stack).toBeUndefined()
   })
 

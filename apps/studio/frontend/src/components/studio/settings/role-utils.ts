@@ -47,6 +47,22 @@ export function pruneInvalidRoleProviders(
   data: RolesData,
   credentialsByCode?: Record<string, CredentialsState["providers"][number]>,
 ): RolesData {
+  // `data.models` is built from the registry snapshot, which loads slower
+  // than the roles response (and can be transiently invalidated — see
+  // api/llm.ts syncVerifiedCommunityCatalog nulling the registry cache). An
+  // empty model directory while roles already reference models means the
+  // directory just hasn't hydrated yet, not that every referenced provider is
+  // confirmed gone. Treat that as "not yet known" and skip pruning entirely —
+  // otherwise this silently wipes real fallback-chain routes, which the
+  // debounced autosave then persists to disk (roles-registry-hydration-prune
+  // data-loss bug).
+  if (
+    Object.keys(data.models).length === 0
+    && Object.values(data.roles).some((role) => Object.keys(role.models).length > 0)
+  ) {
+    return data
+  }
+
   let changed = false
   const next = cloneRolesData(data)
 

@@ -2247,6 +2247,47 @@ describe("LlmRolesTab controls", () => {
     expect(validateRolesDraft(repaired)).toBeNull()
   })
 
+  it("does not wipe role providers when the model directory has not hydrated yet (registry still loading)", () => {
+    // The top-level `models`/`providers` directories are built from the slow
+    // registry snapshot; while it's still loading (or was momentarily
+    // invalidated — see api/llm.ts syncVerifiedCommunityCatalog nulling
+    // cachedRegistry), `data.models` can legitimately be `{}` even though a
+    // role's OWN model_groups-derived provider list (route ids) is already
+    // correct. Pruning must never mistake "not yet known" for "confirmed
+    // invalid" — that previously wiped real fallback-chain routes on the next
+    // debounced autosave.
+    const roleName = "fast"
+    const notYetHydrated: RolesData = {
+      ...rolesData,
+      models: {},
+      providers: {},
+      roles: {
+        [roleName]: {
+          model_fallback_enabled: true,
+          active_model: "claude-haiku-4.5",
+          models: {
+            "claude-haiku-4.5": {
+              providers: [
+                "anthropic-official:claude-haiku-4-5-20251001",
+                "wavespeed:anthropic.claude-haiku-4.5",
+              ],
+              temperature: null,
+              max_tokens: null,
+            },
+          },
+        },
+      },
+    }
+
+    const result = pruneInvalidRoleProviders(notYetHydrated, {})
+
+    expect(result).toBe(notYetHydrated)
+    expect(result.roles[roleName].models["claude-haiku-4.5"].providers).toEqual([
+      "anthropic-official:claude-haiku-4-5-20251001",
+      "wavespeed:anthropic.claude-haiku-4.5",
+    ])
+  })
+
   it("uses whole-row drag surfaces without explicit drag or arrow controls", () => {
     const html = renderRolesHtml()
 

@@ -1815,17 +1815,20 @@ export async function getFixedRoleNames(): Promise<string[]> {
 
 export async function putRoles(data: RolesData): Promise<RolesData> {
   const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
-  return rolesDataFromBackend(response.data, cachedRegistry ?? null)
+  const registry = cachedRegistry ?? await getRegistry()
+  return rolesDataFromBackend(response.data, registry)
 }
 
 export async function deleteRole(roleName: string): Promise<RolesData> {
   const response = await api.delete<RolesData>(`/llm/roles/${segment(roleName)}`)
-  return rolesDataFromBackend(response.data, cachedRegistry ?? null)
+  const registry = cachedRegistry ?? await getRegistry()
+  return rolesDataFromBackend(response.data, registry)
 }
 
 export async function deleteModelBundle(bundleId: string): Promise<RolesData> {
   const response = await api.delete<RolesData>(`/llm/model-bundles/${segment(bundleId)}`)
-  return rolesDataFromBackend(response.data, cachedRegistry ?? null)
+  const registry = cachedRegistry ?? await getRegistry()
+  return rolesDataFromBackend(response.data, registry)
 }
 
 export async function testRole(roleName: string): Promise<RoleTestResponse> {

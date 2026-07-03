@@ -198,17 +198,33 @@ fn transient_ah_config_path(workspace_root: &Path) -> PathBuf {
         .join("ah.toml")
 }
 
-fn transient_ah_config_content() -> &'static str {
+/// Prompt the ah-managed Claude master auto-runs on launch, so opening a skill
+/// in Claude Code greets the user with a self-report (who it is / which
+/// workspace + skill / what it can do) instead of an empty prompt. Kept free of
+/// single/double quotes so it embeds cleanly in both the TOML `cmd` string and
+/// the single-quoted shell argument that carries it.
+const CLAUDE_MASTER_REPORT_PROMPT: &str = "用中文简短汇报当前状态(每点一行),然后停下等我:1) 你是谁 2) 当前工作目录 cwd 是什么、根据目录里的文件这是哪个 skill 3) 你能帮我做什么。";
+
+/// The command ah runs as the interactive master.
+///
+/// - `IS_SANDBOX=1` lets `--dangerously-skip-permissions` run even when the WSL
+///   default user is root (claude refuses that flag under root/sudo otherwise);
+///   it is a harmless no-op for a normal uid.
+/// - No `--continue`: a freshly opened workspace has no prior conversation, and
+///   interactive `claude --continue` aborts with "No conversation found to
+///   continue". (No `/remote-control` either — that opens claude's *phone*
+///   remote-control dialog, irrelevant to a local terminal attach.)
+/// - The trailing prompt auto-submits as the first turn → the status report.
+fn claude_master_cmd() -> String {
+    format!("IS_SANDBOX=1 claude --dangerously-skip-permissions '{CLAUDE_MASTER_REPORT_PROMPT}'")
+}
+
+fn transient_ah_config_content() -> String {
     // ah v1 requires at least one agent; Studio only attaches the Claude master pane here.
-    r#"version = "1"
-
-[master]
-enabled = true
-cmd = "claude --dangerously-skip-permissions --continue /remote-control"
-
-[agents.studio]
-provider = "bash"
-"#
+    format!(
+        "version = \"1\"\n\n[master]\nenabled = true\ncmd = \"{cmd}\"\nreadiness_timeout_s = 180\n\n[agents.studio]\nprovider = \"bash\"\n",
+        cmd = claude_master_cmd()
+    )
 }
 
 fn ah_config_for_workspace(workspace_root: &Path) -> Result<PathBuf, String> {
@@ -226,52 +242,121 @@ fn ah_config_for_workspace(workspace_root: &Path) -> Result<PathBuf, String> {
     Ok(config)
 }
 
-fn powershell_single_quote(value: &Path) -> String {
-    format!("'{}'", value.display().to_string().replace('\'', "''"))
+fn powershell_single_quote_str(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn sh_single_quote_str(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn sh_single_quote(value: &Path) -> String {
-    format!("'{}'", value.display().to_string().replace('\'', "'\\''"))
+    sh_single_quote_str(&value.display().to_string())
 }
 
-fn windows_claude_code_launcher_script(workspace_root: &Path, config_path: &Path) -> String {
+/// Translate a Windows path (`C:\Users\x\skill`) into the WSL mount path
+/// (`/mnt/c/Users/x/skill`) that ah + claude see from inside the distro.
+fn windows_path_to_wsl(path: &Path) -> String {
+    let slashed = path.display().to_string().replace('\\', "/");
+    let bytes = slashed.as_bytes();
+    if slashed.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        return format!("/mnt/{}{}", drive, &slashed[2..]);
+    }
+    slashed
+}
+
+/// The bash payload ah + claude run inside WSL. It pre-accepts the per-workspace
+/// onboarding gates (theme picker + folder-trust dialog) so the interactive
+/// master reaches its prompt instead of blocking, then `ah start`s and attaches
+/// the master — all in ONE wsl session so the interactive attach holds the
+/// distro alive and the master persists.
+fn wsl_payload_script(wsl_workspace: &str, wsl_config: &str) -> String {
     format!(
-        r#"$ErrorActionPreference = "Stop"
-Set-Location -LiteralPath {workspace}
-$ah = Get-Command ah -ErrorAction SilentlyContinue
-if (-not $ah) {{
-  Write-Host "ah CLI was not found on PATH."
-  Write-Host "Install ah 1.0.0 from https://github.com/SevenX77/ccbd-rust/releases/tag/v1.0.0, then reopen Studio."
-  Read-Host "Press Enter to close"
-  exit 1
-}}
-Write-Host "Starting Claude Code through ah..."
-& $ah.Source --config {config} start --wait
-if ($LASTEXITCODE -ne 0) {{
-  Read-Host "ah start failed. Press Enter to close"
-  exit $LASTEXITCODE
-}}
-& $ah.Source --config {config} attach master
-if ($LASTEXITCODE -ne 0) {{
-  Read-Host "ah attach failed. Press Enter to close"
-}}
+        r#"#!/usr/bin/env bash
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+WS={workspace}
+CFG={config}
+if ! command -v ah >/dev/null 2>&1; then
+  printf '%s\n' "ah CLI was not found in WSL."
+  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec bash -i
+fi
+if command -v python3 >/dev/null 2>&1; then
+python3 - "$WS" <<'PY'
+import json, os, sys
+p = os.path.expanduser('~/.claude.json')
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {{}}
+d.setdefault('theme', 'dark')
+proj = d.setdefault('projects', {{}})
+e = proj.setdefault(sys.argv[1], {{}})
+e['hasTrustDialogAccepted'] = True
+e.setdefault('hasCompletedProjectOnboarding', True)
+e.setdefault('projectOnboardingSeenCount', 3)
+json.dump(d, open(p, 'w'), indent=2)
+PY
+fi
+cd "$WS" 2>/dev/null || cd "$HOME"
+printf '%s\n' "Starting Claude Code through ah (first launch ~15s cold start)..."
+ah --config "$CFG" start --wait
+printf '%s\n' "Attaching - Claude Code will auto-report its status (detach: Ctrl-b then d)."
+ah --config "$CFG" attach master
+printf '[attach ended; exit=%s]\n' "$?"
+exec bash -i
 "#,
-        workspace = powershell_single_quote(workspace_root),
-        config = powershell_single_quote(config_path),
+        workspace = sh_single_quote_str(wsl_workspace),
+        config = sh_single_quote_str(wsl_config),
     )
 }
 
+/// On Windows, ah + claude live inside WSL2, so the .ps1 just runs the bash
+/// payload through `wsl.exe` in this console window (keeping the attach
+/// interactive).
+fn windows_claude_code_launcher_script(wsl_payload_path: &str) -> String {
+    format!(
+        r#"$ErrorActionPreference = "Stop"
+Write-Host "Opening Claude Code through ah (WSL)..."
+wsl.exe -e bash {payload}
+if ($LASTEXITCODE -ne 0) {{
+  Read-Host "Could not start WSL (exit $LASTEXITCODE). Is WSL2 installed? Press Enter to close"
+}}
+"#,
+        payload = powershell_single_quote_str(wsl_payload_path),
+    )
+}
+
+/// On native Linux ah runs directly. macOS is not yet supported by ah.
 fn unix_claude_code_launcher_script(workspace_root: &Path, config_path: &Path) -> String {
     format!(
         r#"#!/bin/sh
 set -u
-cd {workspace}
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found on PATH."
-  printf '%s\n' "Install ah 1.0.0 from https://github.com/SevenX77/ccbd-rust/releases/tag/v1.0.0, then reopen Studio."
+  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-printf '%s\n' "Starting Claude Code through ah..."
+if command -v python3 >/dev/null 2>&1; then
+python3 - {workspace} <<'PY'
+import json, os, sys
+p = os.path.expanduser('~/.claude.json')
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {{}}
+d.setdefault('theme', 'dark')
+proj = d.setdefault('projects', {{}})
+e = proj.setdefault(sys.argv[1], {{}})
+e['hasTrustDialogAccepted'] = True
+e.setdefault('hasCompletedProjectOnboarding', True)
+e.setdefault('projectOnboardingSeenCount', 3)
+json.dump(d, open(p, 'w'), indent=2)
+PY
+fi
+cd {workspace}
+printf '%s\n' "Starting Claude Code through ah (first launch ~15s cold start)..."
 ah --config {config} start --wait
 status=$?
 if [ "$status" -ne 0 ]; then
@@ -279,11 +364,8 @@ if [ "$status" -ne 0 ]; then
   exec "${{SHELL:-/bin/sh}}"
 fi
 ah --config {config} attach master
-status=$?
-if [ "$status" -ne 0 ]; then
-  printf 'ah attach failed with exit code %s\n' "$status"
-  exec "${{SHELL:-/bin/sh}}"
-fi
+printf '[attach ended]\n'
+exec "${{SHELL:-/bin/sh}}"
 "#,
         workspace = sh_single_quote(workspace_root),
         config = sh_single_quote(config_path),
@@ -315,7 +397,19 @@ fn write_claude_code_launcher_script(
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create launcher script dir: {error}"))?;
     let content = if cfg!(target_os = "windows") {
-        windows_claude_code_launcher_script(workspace_root, config_path)
+        // ah + claude live inside WSL2 on Windows: write the bash payload, then a
+        // .ps1 that runs it through wsl.exe. Both paths are translated to the
+        // /mnt/... form the distro sees.
+        let payload_path = parent.join("open-claude-code.wsl.sh");
+        std::fs::write(
+            &payload_path,
+            wsl_payload_script(
+                &windows_path_to_wsl(workspace_root),
+                &windows_path_to_wsl(config_path),
+            ),
+        )
+        .map_err(|error| format!("failed to write WSL payload: {error}"))?;
+        windows_claude_code_launcher_script(&windows_path_to_wsl(&payload_path))
     } else {
         unix_claude_code_launcher_script(workspace_root, config_path)
     };
@@ -854,9 +948,12 @@ mod tests {
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
-        assert!(config.contains(
-            "cmd = \"claude --dangerously-skip-permissions --continue /remote-control\""
-        ));
+        // IS_SANDBOX (root escape hatch) + skip-permissions + the auto-report
+        // prompt; NOT --continue (aborts on a fresh workspace) or /remote-control.
+        assert!(config.contains("cmd = \"IS_SANDBOX=1 claude --dangerously-skip-permissions '"));
+        assert!(config.contains(CLAUDE_MASTER_REPORT_PROMPT));
+        assert!(!config.contains("--continue"));
+        assert!(!config.contains("/remote-control"));
         assert!(config.contains("[agents.studio]"));
         assert!(config.contains("provider = \"bash\""));
     }
@@ -876,20 +973,39 @@ mod tests {
     }
 
     #[test]
-    fn windows_launcher_runs_ah_start_then_attach_master() {
-        let script = windows_claude_code_launcher_script(
-            Path::new(r"C:\Users\Test User\skill"),
-            Path::new(r"C:\Users\Test User\AppData\Local\Temp\ah.toml"),
+    fn windows_path_to_wsl_maps_drive_to_mnt() {
+        assert_eq!(
+            windows_path_to_wsl(Path::new(r"C:\Users\Test User\skill")),
+            "/mnt/c/Users/Test User/skill"
+        );
+        assert_eq!(windows_path_to_wsl(Path::new(r"D:\a\b")), "/mnt/d/a/b");
+    }
+
+    #[test]
+    fn wsl_payload_starts_ah_then_attaches_master() {
+        let script = wsl_payload_script(
+            "/mnt/c/Users/Test User/skill",
+            "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
         );
 
-        assert!(script.contains("Set-Location -LiteralPath 'C:\\Users\\Test User\\skill'"));
-        assert!(script.contains("Get-Command ah"));
-        assert!(script.contains(
-            "--config 'C:\\Users\\Test User\\AppData\\Local\\Temp\\ah.toml' start --wait"
-        ));
-        assert!(script.contains(
-            "--config 'C:\\Users\\Test User\\AppData\\Local\\Temp\\ah.toml' attach master"
-        ));
+        assert!(script.contains("WS='/mnt/c/Users/Test User/skill'"));
+        assert!(
+            script.contains("CFG='/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml'")
+        );
+        // pre-accepts the per-workspace folder-trust gate so the master doesn't block
+        assert!(script.contains("hasTrustDialogAccepted"));
+        assert!(script.contains("cd \"$WS\""));
+        assert!(script.contains("ah --config \"$CFG\" start --wait"));
+        assert!(script.contains("ah --config \"$CFG\" attach master"));
+    }
+
+    #[test]
+    fn windows_launcher_runs_wsl_bash_payload() {
+        let script =
+            windows_claude_code_launcher_script("/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh");
+
+        assert!(script
+            .contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh'"));
     }
 
     #[test]

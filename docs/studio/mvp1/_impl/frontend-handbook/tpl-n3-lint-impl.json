@@ -66,13 +66,13 @@
    "n": 6,
    "cap": "editor-inline-projection",
    "design_ref": "atom-6",
-   "current": "现状:已实现且符合。LazyMonacoPanel.tsx 接 useDebouncedLint 结果,经 lint-monaco-markers.ts 用 monaco.editor.setModelMarkers(model, LINT_MARKER_OWNER, markers) 给有 line 的错误按 line + severity 打行内 marker、message 作悬停、有 column 才精确列;LintError.line/column 可为 null——无 line 的错误不落行内 marker、降级文件级 banner(MonacoPanel.tsx 的 LintDiagnosticsPanel)。**2026-07-03 修正**:此前本条『顶部 lint banner 逐条列出(PR #180)』的表述不实——`LintDiagnosticsPanel` 组件当时已写好(自身有单测 MonacoPanel.test.tsx)但从未被任何编辑器面板 import/挂载(全仓 grep 确认),`LazyMonacoPanel.tsx` 只接了行内 marker(atom #6 前半句),没有那条『降级文件级 banner』——无 line 的诊断(如 GRAPH.md frontmatter 层原始 YAML 语法异常)此前在编辑器里完全不可见。已在本轮 PR 把 `LintDiagnosticsPanel` 真正接入 `LazyMonacoPanel.tsx`(渲染在编辑器上方,`onJumpToLine` 调 `editor.revealLineInCenter`+`setPosition`,`onCopyErrors` 走 `navigator.clipboard.writeText`),dev-harness + wt-dev --backend 真机验证:strip 随 lintResult 渲染、Copy 按钮产出 `file:line - code - message` 摘要、点击诊断行跳转编辑器无报错。",
-   "gap": "无差距(本轮修复后)。行内 marker + 文件级 banner 两条投影现均已落地。",
+   "current": "现状:已实现且符合。LazyMonacoPanel.tsx 接 useDebouncedLint 结果,经 lint-monaco-markers.ts 用 monaco.editor.setModelMarkers(model, LINT_MARKER_OWNER, markers) 给有 line 的错误按 line + severity 打行内 marker(scoped 到当前打开的文件,`applyLintMarkers(filePath)`)、message 作悬停、有 column 才精确列;LintError.line/column 可为 null——**无 line 的诊断不落行内 marker,也【不】在编辑器里弹 banner,而是归手动 Compile 抽屉(CompileErrorDrawer)**。**编辑器里刻意不放 realtime-lint banner**:这是 compile-lint F1『marks context only, not a global panel mid-edit』+ PR #234 取舍的直接落地——一个列出全部诊断(含属于别的文件的诊断)的大红框正是它禁止的『global panel』。**2026-07-03 反复**:PR #352 曾基于 handoff 误判(把『#234 刻意下线的 banner』当成『死代码,接进去』)把 `LintDiagnosticsPanel` 接回了 `LazyMonacoPanel.tsx`,已由后续 PR 撤回——删掉 `LintDiagnosticsPanel` + 其死代码 wrapper `MonacoPanel`(全仓无人用),并加锁测试 `LazyMonacoPanel.test.tsx`『does NOT render an in-editor lint banner even when lint found errors』防止再犯。",
+   "gap": "无差距。实时面 = 行内 Monaco marker(scoped 到打开文件)+ 节点徽章 + 字段 tooltip;完整聚合列表归 Compile 抽屉;编辑器无 banner,已加锁测试。",
    "fe_status": "符合",
    "be_status": "已实现",
-   "be_dep": "基本就绪。LintError 带 line/column 但可为 null(后端 _lint_error_from_exception 从异常 message 正则尽力解析);2026-07-03 一并修了 line 缺失的一个真实成因——`packages/graph-agent/src/graph_agent/core/parser.py` 的 `_parse_frontmatter` 此前把 ruamel 原始 YAMLError 文本(`in \"<file>\", line N, column M` 格式)原样透传,Studio 的 `_LOCATION_RE`(`path:line` 格式)解不出来;现在 `_parse_frontmatter`/`_format_frontmatter_yaml_error` 在异常源头把它重新格式化成 `path:line` 约定,行号解析成功率提高,`LintDiagnosticsPanel` 兜底的『无 line』场景变少但仍会出现(比如非 mark 定位的异常),banner 仍是必要的最终兜底。",
+   "be_dep": "基本就绪。LintError 带 line/column 但可为 null(后端 _lint_error_from_exception 从异常 message 正则尽力解析);2026-07-03 一并修了 line 缺失的一个真实成因(PR #352,已合并)——`packages/graph-agent/src/graph_agent/core/parser.py` 的 `_parse_frontmatter` 此前把 ruamel 原始 YAMLError 文本(`in \"<file>\", line N, column M` 格式)原样透传,Studio 的 `_LOCATION_RE`(`path:line` 格式)解不出来;现在 `_parse_frontmatter`/`_format_frontmatter_yaml_error` 在异常源头把它重新格式化成 `path:line` 约定,行号解析成功率提高,行内 marker 能覆盖的诊断更多。仍解不出行号的诊断落 Compile 抽屉(无编辑器 banner 兜底,#234 取舍)。",
    "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-03 修正:纠正 2026-06-20 对『顶部 lint banner』状态的误判(组件存在≠已接线),本轮 PR 把 LintDiagnosticsPanel 真正接入 LazyMonacoPanel 并真机验证"
+   "fe_resync": "2026-07-03:先纠正 2026-06-20 对『顶部 lint banner』状态的误判(PR #352 曾接回 banner),随后撤回——实时面锁定为『行内 marker + 无编辑器 banner』,加锁测试防再犯"
   },
   {
    "n": 7,

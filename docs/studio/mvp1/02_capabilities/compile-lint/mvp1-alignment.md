@@ -21,9 +21,10 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 
 - 机制: editor changes debounce, call lint, then publish status for the center action bar. Trigger semantics = **source truth mutation**: canvas topology writes (connect / disconnect / delete phase → GRAPH.md rewrite) trigger the same relint immediately after the write lands (see F6) — clearing stale projections without re-linting is a defect.
 - 决策: real-time lint should mark context only, not flood the user with global panels while they are mid-edit.
-- 原话/来源: `01_workflows/03_compile.md:13` defines the 800ms lint action; `01_workflows/03_compile.md:28` says real-time lint only marks context; 03_compile.md A13 + 决策(2026-07-01)define the canvas trigger.
-- 测试: incomplete edit marks checking/failed without toast or drawer; empty content returns idle; canvas edge disconnect lights the island error on the node without opening the editor.
-- Status: live mechanism, presentation target-design.
+- **实时 lint 的呈现面 = 行内 Monaco marker(红波浪线,scoped 到当前打开的文件,`applyLintMarkers(filePath)`)+ canvas 节点徽章 + Properties 字段 tooltip(F3);编辑器里刻意【不】放大 banner / 诊断条。** 这是 F1"marks context only, not a global panel mid-edit"的直接落地:一个占据编辑器顶部、列出全部诊断(含属于别的文件的诊断)的大红框正是它禁止的"global panel"。完整的聚合诊断列表归**手动 Compile 抽屉**(F2 / `CompileErrorDrawer`),不是实时面。**历史**:早期迭代曾在编辑器里挂过一个 realtime-lint banner,已在 **PR #234**(`fix(studio): restore editing freedom + scope lint markers`,原话:"Removed the large realtime-lint banner; inline Monaco markers are the realtime surface … the full list stays in the Compile drawer")**刻意删除**;PR #352 一度把它接了回来(基于 handoff 误判"死代码,接进去"),已由后续 PR 撤回并加测试锁死(`LazyMonacoPanel.test.tsx`:"does NOT render an in-editor lint banner even when lint found errors")。**没有精确行号的诊断**(引擎归因不到某一行的错误)——行内 marker 需要行号才能画,所以这类诊断只在手动 Compile 抽屉里出现,不再有编辑器 banner 兜底;这是 #234 的取舍("full list stays in the Compile drawer")。
+- 原话/来源: `01_workflows/03_compile.md:13` defines the 800ms lint action; `01_workflows/03_compile.md:28` says real-time lint only marks context; 03_compile.md A13 + 决策(2026-07-01)define the canvas trigger; PR #234 提交说明记录"删除 realtime-lint banner、行内 marker 为实时面、完整列表归 Compile 抽屉"的取舍。
+- 测试: incomplete edit marks checking/failed without toast or drawer; empty content returns idle; canvas edge disconnect lights the island error on the node without opening the editor; **编辑器里出现 lint 错误时【不】渲染 banner(锁:`LazyMonacoPanel.test.tsx`)**。
+- Status: live mechanism, presentation target-design; **实时面 = 行内 marker、无编辑器 banner 已锁定**。
 - 归属: capability `compile-lint`; region `editor`, `canvas`, `center-action-bar`.
 
 ### F2. Manual Compile Drawer

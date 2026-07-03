@@ -8,12 +8,7 @@ import { Button } from '@/components/ui/button'
 import { isTauriRuntime } from '@/config/runtime'
 import { useDebouncedLint } from '@/hooks/useDebouncedLint'
 import { sha256Hex } from '@/lib/hash'
-import {
-  LintDiagnosticsPanel,
-  type EditorOnMount,
-  type MonacoApi,
-  type MonacoEditor as MonacoEditorInstance,
-} from '@/components/MonacoPanel'
+import { type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
 import { applyLintMarkers } from '@/components/studio/lint-monaco-markers'
 import { isReadOnlySkillError } from '@/components/GraphCanvas/drill-edit'
 
@@ -303,25 +298,6 @@ export function LazyMonacoPanel({
     applyLintMarkers(monacoRef.current, editorRef.current?.getModel() ?? null, lintResult, filePath)
   }, [lintResult, filePath])
 
-  const handleJumpToLine = useCallback((line: number | null) => {
-    const editor = editorRef.current
-    if (!editor || line === null) {
-      return
-    }
-    editor.revealLineInCenter(line)
-    editor.setPosition({ lineNumber: line, column: 1 })
-    editor.focus()
-  }, [])
-
-  const handleCopyErrors = useCallback((message: string) => {
-    navigator.clipboard.writeText(message)
-      .then(() => toast.success('Copied lint diagnostics'))
-      .catch((error: unknown) => {
-        console.error('Failed to copy lint diagnostics to clipboard', error)
-        toast.error('Copy failed')
-      })
-  }, [])
-
   return (
     <section className="flex size-full min-h-0 min-w-0 flex-col bg-transparent">
       <div className="studio-canvas-panel-header flex h-10 shrink-0 items-center justify-between border-b px-3">
@@ -354,11 +330,6 @@ export function LazyMonacoPanel({
           ) : null}
         </div>
       </div>
-      <LintDiagnosticsPanel
-        lintResult={lintResult}
-        onJumpToLine={handleJumpToLine}
-        onCopyErrors={handleCopyErrors}
-      />
       <div className="min-h-0 flex-1">
         <Suspense fallback={<MonacoSkeleton />}>
           <MonacoEditor

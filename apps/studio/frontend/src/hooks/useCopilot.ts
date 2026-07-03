@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { wsUrl } from '../api/client'
+import { interruptCopilot, wsUrl } from '../api/client'
 import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
 import type {
@@ -162,6 +162,8 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle')
   const [reconnectInMs, setReconnectInMs] = useState<number | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
+  // R7-I: true while a turn is streaming, so the composer shows a stop button.
+  const [isStreaming, setIsStreaming] = useState(false)
   const socketRef = useRef<WebSocket | null>(null)
   const assistantMessageIdRef = useRef<string | null>(null)
   const deltaQueueRef = useRef<Array<{ messageId: string, event: CopilotDeltaEvent }>>([])
@@ -189,6 +191,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
 
     if (event.type === 'done' || event.type === 'error') {
       assistantMessageIdRef.current = null
+      setIsStreaming(false)
     }
   }, [])
 
@@ -297,8 +300,24 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     assistantMessageIdRef.current = null
     copilotStore.appendMessage(createMessage('user', trimmed, 'success'))
     socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, modelOverride, role, workspaceRoot, judgeContext)))
+    setIsStreaming(true)
     return true
   }, [workspaceRoot])
+
+  // R7-I stop button: interrupt the active turn via the SDK-native backend
+  // endpoint. The interrupted turn ends its stream (a done event), which also
+  // clears isStreaming — so the composer flips back to send on its own.
+  const interrupt = useCallback(async () => {
+    if (!skillId) {
+      return
+    }
+    try {
+      await interruptCopilot(skillId)
+    } catch {
+      // Best-effort stop: if the request fails the turn keeps streaming and the
+      // next terminal event still settles the UI; nothing extra to surface.
+    }
+  }, [skillId])
 
   return {
     messages: snapshot.messages,
@@ -306,6 +325,8 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     reconnectInMs,
     lastError: visibleCopilotSocketError(connectionStatus, lastError),
     sendMessage,
+    isStreaming,
+    interrupt,
     clearMessages: copilotStore.clearMessages,
     persistenceError: snapshot.persistenceError,
     activeSessionId: snapshot.activeSessionId,

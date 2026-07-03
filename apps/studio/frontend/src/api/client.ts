@@ -474,6 +474,19 @@ export async function resolveCopilotToolApproval(
   return response.data
 }
 
+export interface CopilotInterruptResponse {
+  /** False when there was no active turn to stop — an idempotent no-op. */
+  interrupted: boolean
+}
+
+/** R7-I stop button: interrupt the copilot's active streaming turn for a skill. */
+export async function interruptCopilot(skillId: string): Promise<CopilotInterruptResponse> {
+  const response = await api.post<CopilotInterruptResponse>(
+    `/skills/${skillId}/copilot/interrupt`,
+  )
+  return response.data
+}
+
 export interface CopilotJudgeRequest {
   runResultsRef: string
   baselineRef: string

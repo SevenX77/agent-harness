@@ -240,6 +240,10 @@ class ToolApprovalResolution:
 
 _safe_write_sinks: dict[str, _SafeWriteSink] = {}
 _pending_tool_approvals: dict[tuple[str, str], asyncio.Future[bool]] = {}
+# R7-I stop button: the skill's currently-streaming SDK client, set for the
+# duration of one turn so the interrupt endpoint can call client.interrupt()
+# (SDK-native) on it. Cleared when the turn ends (stream_query's finally).
+_active_clients: dict[str, ClaudeSDKClient] = {}
 
 _STREAM_SENTINEL = object()
 
@@ -253,6 +257,22 @@ def _cleanup_pending_tool_approvals(skill_id: str | None = None) -> int:
         if future is not None and not future.done():
             future.set_result(False)
     return len(keys)
+
+
+async def interrupt_active_query(skill_id: str) -> bool:
+    """Interrupt the copilot's active streaming turn for a skill (R7-I stop button).
+
+    Uses the SDK-native ``ClaudeSDKClient.interrupt()`` on the skill's currently
+    streaming client. Returns False when no turn is active — a stop click after the
+    turn already finished is a harmless no-op. The interrupted turn ends its stream,
+    so the panel settles the message like any normal completion.
+    """
+
+    client = _active_clients.get(skill_id)
+    if client is None:
+        return False
+    await client.interrupt()
+    return True
 
 
 async def _drain_sdk_response(
@@ -1027,6 +1047,9 @@ async def stream_query(
             _safe_write_sinks[skill_id] = _SafeWriteSink(
                 queue=queue, workspace_root=resolved_workspace
             )
+            # R7-I: expose this turn's streaming client so the interrupt endpoint
+            # can stop it mid-flight; cleared in the finally when the turn ends.
+            _active_clients[skill_id] = client
             consumer: asyncio.Task[None] | None = None
             try:
                 await client.query(
@@ -1052,6 +1075,7 @@ async def stream_query(
                     yield CopilotEventDone()
             finally:
                 _safe_write_sinks.pop(skill_id, None)
+                _active_clients.pop(skill_id, None)
                 # Pending Bash approvals outlive the response stream so the UI can
                 # resolve the approval card once. They are cleared by the approval
                 # endpoint itself, reset_session, or cleanup_all_sessions.

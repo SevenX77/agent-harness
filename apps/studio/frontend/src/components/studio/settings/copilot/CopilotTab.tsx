@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
+import { CircleAlert, CircleHelp, FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   CatalogAccordion,
   CatalogAccordionContent,
@@ -24,7 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { SectionTitle } from "../shared"
 import { AvailableModelsSidebar } from "../llm-roles/AvailableModelsSidebar"
-import { modelDropFailureMessage } from "../role-utils"
+import { missingRecommendedModels, modelDropFailureMessage, normalizeModelGroupKey } from "../role-utils"
 import {
   AvailableModelDragPreview,
   handleAvailableModelDragOver,
@@ -52,7 +53,8 @@ import {
 } from "./copilot-role-test"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getRoleTestResults } from "@/api/client"
-import type { CredentialsState, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
+import { getFixedRoleNames, getFixedRoleStatus } from "@/api/llm"
+import type { CredentialsState, FixedRoleRecommendedModel, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
 /**
@@ -270,6 +272,34 @@ export function CopilotTab({
     () => (activeRoles.length > 0 ? activeRoles : floatedRoles),
     [activeRoles, floatedRoles],
   )
+
+  // 固定角色(不可删除/不可改名)—— 内置 copilot 角色(opus / deepseek)在其列。前端据此
+  // 隐藏删除入口、渲染问号说明,并在缺推荐模型时给警告。推荐清单是静态的,拉一次即可。
+  const [fixedRoleNames, setFixedRoleNames] = useState<ReadonlySet<string>>(() => new Set())
+  const [fixedRoleRecommended, setFixedRoleRecommended] = useState<Record<string, FixedRoleRecommendedModel[]>>({})
+  useEffect(() => {
+    let alive = true
+    getFixedRoleNames()
+      .then((names) => {
+        if (!alive) return
+        setFixedRoleNames(new Set(names))
+        names.forEach((name) => {
+          getFixedRoleStatus(name)
+            .then((status) => {
+              if (alive) setFixedRoleRecommended((prev) => ({ ...prev, [name]: status.recommendedModels }))
+            })
+            .catch(() => {
+              /* 拿不到推荐清单就不显示提示,不影响角色本身 */
+            })
+        })
+      })
+      .catch(() => {
+        /* 取不到固定角色名就当没有,后端仍会拒删 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
@@ -668,11 +698,29 @@ export function CopilotTab({
                 const modelGroup = role.modelGroupId
                   ? allModelGroupPreviewsById.get(role.modelGroupId)
                   : null
+                const isFixed = fixedRoleNames.has(role.id)
+                const recommendedModels = fixedRoleRecommended[role.id] ?? []
+                const fixedDescription = isFixed
+                  ? t(`llmRoles.fixedRole.${role.id}.description`, { defaultValue: "" })
+                  : ""
+                // 缺哪个推荐模型:拿当前内存里的模型组(canonical + 展示名)实时算,拖进来立刻消警告。
+                const presentGroupKeys = new Set<string>()
+                if (modelGroup) {
+                  presentGroupKeys.add(normalizeModelGroupKey(role.modelGroupId ?? ""))
+                  presentGroupKeys.add(normalizeModelGroupKey(modelGroup.modelLabel ?? ""))
+                }
+                const missingRecommended = isFixed
+                  ? missingRecommendedModels(recommendedModels, presentGroupKeys)
+                  : []
                 if (!modelGroup) {
                   return (
                     <EmptyCopilotRoleCard
                       key={role.id}
                       role={role}
+                      isFixed={isFixed}
+                      fixedDescription={fixedDescription}
+                      recommendedModels={recommendedModels}
+                      missingRecommended={missingRecommended}
                       getActiveAvailableModelDragId={getActiveAvailableModelDragId}
                       onDropModel={(modelGroupId) => dropCopilotModelOnRole(role.id, modelGroupId)}
                       onDeleteRole={() => requestDeleteCopilotRole(role)}
@@ -691,6 +739,9 @@ export function CopilotTab({
                     key={role.id}
                     role={role}
                     modelGroup={modelGroup}
+                    isFixed={isFixed}
+                    fixedDescription={fixedDescription}
+                    recommendedModels={recommendedModels}
                     routeOrder={routeOrder}
                     chainRoutes={chainRoutes}
                     appendableRoutes={appendableRoutes}
@@ -806,9 +857,47 @@ function EmptyCopilotState({
   )
 }
 
+// 固定角色名旁的问号说明:这个角色是干嘛的 + 建议模型(与 LLM Roles 页 RoleCard 一致)。
+function FixedCopilotRoleInfo({
+  roleId,
+  description,
+  recommendedModels,
+}: {
+  roleId: string
+  description: string
+  recommendedModels: FixedRoleRecommendedModel[]
+}) {
+  const { t } = useTranslation("settings")
+  const content = [
+    description,
+    recommendedModels.length
+      ? `${t("llmRoles.fixedRole.recommendedLabel")}: ${recommendedModels.map((model) => model.displayName).join(", ")}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n")
+  if (!content) return null
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span data-role-fixed-info="true" className="inline-flex shrink-0 text-muted-foreground">
+            <CircleHelp aria-hidden="true" className="size-3.5" />
+            <span className="sr-only">{t("llmRoles.fixedRole.infoAria", { role: roleId })}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm whitespace-pre-line break-words">{content}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 function CopilotRoleCard({
   role,
   modelGroup,
+  isFixed,
+  fixedDescription,
+  recommendedModels,
   routeOrder,
   chainRoutes,
   appendableRoutes,
@@ -826,6 +915,9 @@ function CopilotRoleCard({
 }: {
   role: { id: string; title: string; source: "built_in" | "third_party" }
   modelGroup: CopilotRolePreview
+  isFixed: boolean
+  fixedDescription: string
+  recommendedModels: FixedRoleRecommendedModel[]
   routeOrder: string[]
   chainRoutes: CopilotRoutePreview[]
   appendableRoutes: CopilotRoutePreview[]
@@ -895,6 +987,9 @@ function CopilotRoleCard({
         <div className="min-w-0">
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
             {role.title}
+            {isFixed ? (
+              <FixedCopilotRoleInfo roleId={role.id} description={fixedDescription} recommendedModels={recommendedModels} />
+            ) : null}
             <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
           <CardDescription>{t("copilot.roleCard.description")}</CardDescription>
@@ -955,7 +1050,7 @@ function CopilotRoleCard({
                   total: compatibleRoutes.length,
                 })}
           </span>
-          {role.source === "third_party" ? (
+          {role.source === "third_party" && !isFixed ? (
             <Button
               type="button"
               variant="ghost"
@@ -994,15 +1089,24 @@ function CopilotRoleCard({
 
 function EmptyCopilotRoleCard({
   role,
+  isFixed,
+  fixedDescription,
+  recommendedModels,
+  missingRecommended,
   getActiveAvailableModelDragId,
   onDropModel,
   onDeleteRole,
 }: {
   role: { id: string; title: string; source: "built_in" | "third_party" }
+  isFixed: boolean
+  fixedDescription: string
+  recommendedModels: FixedRoleRecommendedModel[]
+  missingRecommended: FixedRoleRecommendedModel[]
   getActiveAvailableModelDragId: () => string | null
   onDropModel: (modelGroupId: string) => void
   onDeleteRole: () => void
 }) {
+  const { t } = useTranslation("settings")
   function handleAvailableModelDrop(event: Parameters<typeof readAvailableModelDropId>[0]) {
     const modelId = readAvailableModelDropId(event, getActiveAvailableModelDragId)
     if (!modelId) {
@@ -1034,10 +1138,13 @@ function EmptyCopilotRoleCard({
         <div className="min-w-0">
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
             {role.title}
+            {isFixed ? (
+              <FixedCopilotRoleInfo roleId={role.id} description={fixedDescription} recommendedModels={recommendedModels} />
+            ) : null}
             <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
         </div>
-        {role.source === "third_party" ? (
+        {role.source === "third_party" && !isFixed ? (
           <CardAction className="row-start-2 justify-self-start sm:row-start-1 sm:justify-self-end">
             <Button
               type="button"
@@ -1054,19 +1161,44 @@ function EmptyCopilotRoleCard({
         ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
-        <Empty
-          aria-label={`Drop model into ${role.title}`}
-          data-model-drop-target="true"
-          data-model-drop-zone="true"
-          data-model-drop-fallback="active-drag-ref"
-          onDragOver={handleAvailableModelDragOver}
-          onDrop={handleAvailableModelDrop}
-          className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-border bg-muted/10 p-3 text-muted-foreground transition-colors hover:bg-muted/20"
-        >
-          <EmptyHeader className="max-w-none gap-0">
-            <EmptyTitle className="text-xs font-medium text-muted-foreground">Drop model</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
+        {isFixed && missingRecommended.length > 0 ? (
+          <Empty
+            aria-label={`Drop model into ${role.title}`}
+            data-model-drop-target="true"
+            data-model-drop-zone="true"
+            data-model-drop-fallback="active-drag-ref"
+            data-copilot-missing-recommended-model="true"
+            onDragOver={handleAvailableModelDragOver}
+            onDrop={handleAvailableModelDrop}
+            className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-warning-border bg-warning-background/20 p-3 text-warning-foreground transition-colors hover:bg-warning-background/30"
+          >
+            <EmptyHeader className="max-w-none gap-1.5">
+              <Badge variant="warning" className="gap-1">
+                <CircleAlert className="size-3" />
+                {t("llmRoles.fixedRole.missingWarning")}
+              </Badge>
+              <EmptyTitle className="text-xs font-medium text-warning-foreground">
+                {t("llmRoles.fixedRole.dragInHint", {
+                  models: missingRecommended.map((model) => model.displayName).join(", "),
+                })}
+              </EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Empty
+            aria-label={`Drop model into ${role.title}`}
+            data-model-drop-target="true"
+            data-model-drop-zone="true"
+            data-model-drop-fallback="active-drag-ref"
+            onDragOver={handleAvailableModelDragOver}
+            onDrop={handleAvailableModelDrop}
+            className="min-h-16 flex-none select-none gap-1 rounded-md border border-dashed border-border bg-muted/10 p-3 text-muted-foreground transition-colors hover:bg-muted/20"
+          >
+            <EmptyHeader className="max-w-none gap-0">
+              <EmptyTitle className="text-xs font-medium text-muted-foreground">Drop model</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        )}
       </CardContent>
     </Card>
   )

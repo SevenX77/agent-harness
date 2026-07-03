@@ -386,7 +386,22 @@
     "title": "LLM 角色",
     "loadingDescription": "编辑模型和服务商 fallback 顺序。",
     "description": "编辑模型和服务商 fallback 顺序。修改会自动保存。",
-    "validationFailed": "验证失败：{{error}}"
+    "validationFailed": "验证失败：{{error}}",
+    "fixedRole": {
+      "infoAria": "{{role}} 角色是干嘛的？",
+      "recommendedLabel": "推荐模型",
+      "missingWarning": "缺少推荐模型",
+      "dragInHint": "拖入：{{models}}",
+      "fast": {
+        "description": "引擎内部子任务固定使用的角色（例如 md-patch 对 md2json 校验失败项做外科式修补），追求快速响应，建议配置小/快模型。"
+      },
+      "copilot_claude_opus_4_8": {
+        "description": "内置编码 copilot 角色，与后端 fallback 链保持同步。"
+      },
+      "copilot_deepseek_v4_pro": {
+        "description": "编码 copilot 角色，与后端 fallback 链保持同步。"
+      }
+    }
   },
   "copilot": {
     "title": "Copilot",

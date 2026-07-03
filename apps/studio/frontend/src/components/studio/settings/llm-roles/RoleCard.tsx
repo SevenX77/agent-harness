@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import {
   closestCenter,
@@ -42,7 +43,9 @@ import { getFixedRoleStatus, type CredentialsState, type FixedRoleStatus, type M
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
   appendModelGroupToRoleWithResult,
+  missingRecommendedModels,
   modelDropFailureMessage,
+  normalizeModelGroupKey,
   renameRole,
   reorderModelInRole,
   toggleModelFallback,
@@ -132,8 +135,9 @@ export const RoleCard = memo(function RoleCard({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+  const { t } = useTranslation("settings")
+  // 固定角色的推荐模型清单是静态的,拉一次即可(缺哪个由下面在内存里实时算)。
   const [fixedRoleStatus, setFixedRoleStatus] = useState<FixedRoleStatus | null>(null)
-  const modelCodesKey = modelCodes.join("|")
   useEffect(() => {
     if (!isFixed) {
       setFixedRoleStatus(null)
@@ -145,13 +149,26 @@ export const RoleCard = memo(function RoleCard({
         if (alive) setFixedRoleStatus(status)
       })
       .catch(() => {
-        /* 说明/警告拿不到就不显示,不影响角色本身可用 */
+        /* 推荐清单拿不到就不显示提示,不影响角色本身可用 */
       })
     return () => {
       alive = false
     }
-    // modelCodesKey 变了说明这个角色的模型组变了(加/删模型),缺推荐模型的判断要刷新。
-  }, [isFixed, roleName, modelCodesKey])
+  }, [isFixed, roleName])
+  // 缺哪个推荐模型:拿当前内存里的模型组(展示名 + canonical)实时比对,拖进来立刻消警告。
+  const missingRecommended = useMemo(() => {
+    if (!isFixed || !fixedRoleStatus) return []
+    const presentKeys = new Set<string>()
+    for (const modelCode of modelCodes) {
+      presentKeys.add(normalizeModelGroupKey(modelCode))
+      const displayName = modelDisplayNamesByCode.get(modelCode) ?? data.models[modelCode]?.name ?? modelCode
+      presentKeys.add(normalizeModelGroupKey(displayName))
+    }
+    return missingRecommendedModels(fixedRoleStatus.recommendedModels, presentKeys)
+  }, [isFixed, fixedRoleStatus, modelCodes, modelDisplayNamesByCode, data.models])
+  const fixedRoleDescription = isFixed
+    ? t(`llmRoles.fixedRole.${roleName}.description`, { defaultValue: "" })
+    : ""
 
   const handleRunTestChain = useCallback(() => {
     onRunTestChain(roleName)
@@ -250,7 +267,7 @@ export const RoleCard = memo(function RoleCard({
               className="size-3.5 shrink-0 text-muted-foreground"
             />
             <CardTitle className="min-w-0 break-all">{roleName}</CardTitle>
-            {isFixed && fixedRoleStatus?.description ? (
+            {isFixed && fixedRoleStatus ? (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -260,14 +277,14 @@ export const RoleCard = memo(function RoleCard({
                       onClick={(event) => event.stopPropagation()}
                     >
                       <CircleHelp aria-hidden="true" className="size-3.5" />
-                      <span className="sr-only">What is the {roleName} role for?</span>
+                      <span className="sr-only">{t("llmRoles.fixedRole.infoAria", { role: roleName })}</span>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-sm whitespace-pre-line break-words">
                     {[
-                      fixedRoleStatus.description,
+                      fixedRoleDescription,
                       fixedRoleStatus.recommendedModels.length
-                        ? `Recommended models: ${fixedRoleStatus.recommendedModels.map((model) => model.displayName).join(", ")}`
+                        ? `${t("llmRoles.fixedRole.recommendedLabel")}: ${fixedRoleStatus.recommendedModels.map((model) => model.displayName).join(", ")}`
                         : null,
                     ].filter(Boolean).join("\n")}
                   </TooltipContent>
@@ -418,7 +435,7 @@ export const RoleCard = memo(function RoleCard({
             </div>
           </SortableContext>
         </DndContext>
-        {isFixed && fixedRoleStatus && fixedRoleStatus.missingModels.length > 0 ? (
+        {isFixed && missingRecommended.length > 0 ? (
           <Empty
             aria-label={`Drop model into ${roleName}`}
             data-model-drop-target="true"
@@ -430,10 +447,12 @@ export const RoleCard = memo(function RoleCard({
             <EmptyHeader className="max-w-none gap-1.5">
               <Badge variant="warning" className="gap-1">
                 <CircleAlert className="size-3" />
-                Missing recommended model
+                {t("llmRoles.fixedRole.missingWarning")}
               </Badge>
               <EmptyTitle className="text-xs font-medium text-warning-foreground">
-                {`Drag in: ${fixedRoleStatus.missingModels.map((model) => model.displayName).join(", ")}`}
+                {t("llmRoles.fixedRole.dragInHint", {
+                  models: missingRecommended.map((model) => model.displayName).join(", "),
+                })}
               </EmptyTitle>
             </EmptyHeader>
           </Empty>

@@ -2690,13 +2690,13 @@ function LlmRoleField({
           </div>
         </div>
       </div>
-      <LlmNodeParamsField skillId={skillId} nodeId={nodeId} />
       <LlmNodeCompareField
         modelGroups={modelGroups}
         skillId={skillId}
         nodeId={nodeId}
         onStartNodeCompare={onStartNodeCompare}
       />
+      <LlmNodeParamsField skillId={skillId} nodeId={nodeId} />
     </Field>
   )
 }
@@ -2791,56 +2791,96 @@ function LlmNodeParamsField({
     persist(next)
   }
 
+  const thinkingId = `node-thinking-${nodeId ?? "none"}`
+  const maxOutputId = `node-max-output-${nodeId ?? "none"}`
+  const temperatureId = `node-temperature-${nodeId ?? "none"}`
+  const thinkingValue = draft.thinking === null ? "inherit" : draft.thinking ? "on" : "off"
+
   return (
     <div className="mt-2 space-y-1.5" data-llm-node-params="true">
-      <YamlNestedFieldLabel>Model params (override)</YamlNestedFieldLabel>
-      <div className="space-y-2 rounded-md bg-muted/30 px-2 py-2">
-        <Field orientation="horizontal" className="items-center justify-between gap-3">
-          <FieldLabel
-            htmlFor={`node-thinking-${nodeId ?? "none"}`}
-            className="min-w-0 text-xs font-medium"
-            onClick={(event) => event.preventDefault()}
-          >
-            Thinking
-          </FieldLabel>
-          <Switch
-            id={`node-thinking-${nodeId ?? "none"}`}
-            size="sm"
-            data-llm-node-thinking="true"
-            checked={draft.thinking === true}
-            aria-label="Node thinking override"
-            onCheckedChange={(thinking) => update({ ...draft, thinking })}
-          />
-        </Field>
-        <Field className="gap-1">
-          <FieldLabel htmlFor={`node-max-output-${nodeId ?? "none"}`} className="text-xs font-medium">
-            Max output tokens
-          </FieldLabel>
-          <Input
-            id={`node-max-output-${nodeId ?? "none"}`}
-            data-llm-node-max-output="true"
-            aria-label="Node max output tokens override"
-            value={formatThousands(draft.maxOutputTokens)}
-            onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
-            inputMode="numeric"
-            placeholder="Inherit role default"
-          />
-        </Field>
-        <Field className="gap-1">
-          <FieldLabel htmlFor={`node-temperature-${nodeId ?? "none"}`} className="text-xs font-medium">
-            Temperature
-          </FieldLabel>
-          <Input
-            id={`node-temperature-${nodeId ?? "none"}`}
-            data-llm-node-temperature="true"
-            aria-label="Node temperature override"
-            value={draft.temperature}
-            onChange={(event) => update({ ...draft, temperature: sanitizeNodeDecimal(event.target.value) })}
-            inputMode="decimal"
-            placeholder="Inherit role default"
-          />
-        </Field>
-      </div>
+      <YamlNestedFieldLabel>
+        Model params
+        <HelpTooltip label="About model params">
+          Per-node overrides of this node&rsquo;s LLM generation params, winning over the role default.
+          Leave a field on <span className="font-mono">Inherit</span> / empty to use the role&rsquo;s value.
+        </HelpTooltip>
+      </YamlNestedFieldLabel>
+      {/* Frame the params in the shared Card box + 2-col grid, matching the iterate
+          `accumulate` block. Every unit is min-height so a shorter control (the
+          thinking select) never crowds its neighbour. Reuses @/components/ui, no new style. */}
+      <Card size="sm">
+        <CardContent className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Field className="min-h-14 gap-1">
+              <YamlNestedFieldLabel htmlFor={thinkingId}>
+                thinking
+                <HelpTooltip label="About thinking">
+                  <p>Whether this node asks the model to use reasoning/thinking.</p>
+                  <p><span className="font-mono">Inherit</span> &mdash; use the role default.</p>
+                  <p><span className="font-mono">On</span> / <span className="font-mono">Off</span> &mdash; force it for this node.</p>
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
+              <Select
+                value={thinkingValue}
+                onValueChange={(next) =>
+                  update({ ...draft, thinking: next === "inherit" ? null : next === "on" })
+                }
+              >
+                <SelectTrigger
+                  id={thinkingId}
+                  data-llm-node-thinking="true"
+                  aria-label="Node thinking override"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inherit">Inherit</SelectItem>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field className="min-h-14 gap-1">
+              <YamlNestedFieldLabel htmlFor={maxOutputId}>
+                max output tokens
+                <HelpTooltip label="About max output tokens">
+                  Cap on this node&rsquo;s output tokens. Empty inherits the role default; a value over the
+                  route&rsquo;s max is clamped down to it.
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
+              <Input
+                id={maxOutputId}
+                data-llm-node-max-output="true"
+                aria-label="Node max output tokens override"
+                value={formatThousands(draft.maxOutputTokens)}
+                onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
+                inputMode="numeric"
+                placeholder="Inherit"
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Field className="min-h-14 gap-1">
+              <YamlNestedFieldLabel htmlFor={temperatureId}>
+                temperature
+                <HelpTooltip label="About temperature">
+                  Sampling temperature for this node. Empty inherits the role default.
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
+              <Input
+                id={temperatureId}
+                data-llm-node-temperature="true"
+                aria-label="Node temperature override"
+                value={draft.temperature}
+                onChange={(event) => update({ ...draft, temperature: sanitizeNodeDecimal(event.target.value) })}
+                inputMode="decimal"
+                placeholder="Inherit"
+              />
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -107,7 +107,7 @@ packages/graph-agent-gateway(gateway)时也直接去改。开工前必读 / 必�
   test / build 四件套;改了 backend/engine/gateway,按 AGENTS.md「CI Gates」跑对应的
   uv run ruff check / uv run mypy(SDK 用 --strict)/ uv run pytest。然后
   scripts/wt-ship.sh ["PR title"] 推分支、开 PR、上 auto-merge;远端 main 仍
-  protected,不要直接 push。合并后 scripts/wt-clean.sh 清理 worktree、主仓根 git pull;
+  protected,不要直接 push。合并后 scripts/wt-clean.sh <本分支> 清理**自己这棵** worktree(只清自己的)、主仓根 git pull;
   **PR 若改了依赖清单,主仓根必须补装**(package.json 变 → apps/studio/frontend 里
   npm install;uv.lock 变 → uv sync),否则跑着的主 app 在新依赖上直接红屏,PM 没法确认。
 

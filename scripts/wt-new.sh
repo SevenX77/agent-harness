@@ -4,8 +4,9 @@
 # Usage:  scripts/wt-new.sh <type>/<short-desc>
 #   e.g.  scripts/wt-new.sh feat/copilot-streaming
 #
-# Always branches from the latest origin/main (never from another task branch),
-# and tidies any already-merged worktrees first so the tree stays clean.
+# Always branches from the latest origin/main (never from another task branch).
+# It does NOT auto-clean other worktrees — clean up your OWN finished worktree
+# explicitly with scripts/wt-clean.sh <your-branch> after its PR merges.
 set -euo pipefail
 
 branch="${1:?usage: scripts/wt-new.sh <type>/<short-desc>  (e.g. feat/copilot-streaming)}"
@@ -15,8 +16,11 @@ branch="${1:?usage: scripts/wt-new.sh <type>/<short-desc>  (e.g. feat/copilot-st
 repo_root="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 cd "$repo_root"
 
-# tidy already-merged worktrees before starting a new one (best-effort)
-[ -x "$repo_root/scripts/wt-clean.sh" ] && "$repo_root/scripts/wt-clean.sh" || true
+# Prune stale worktree admin entries (dirs already removed by hand). This never
+# deletes a live directory and never touches other tasks' worktrees — cleanup is
+# own-scoped now (scripts/wt-clean.sh <your-branch>), so wt-new no longer
+# auto-sweeps merged worktrees.
+git worktree prune
 
 git fetch origin --prune
 

@@ -160,7 +160,7 @@
 - 在 worktree 里完成实现、视觉验证和手册回写后,`scripts/wt-ship.sh ["PR title"]` 推分支、开 PR、
   上 auto-merge;**PR 同时含 前端 src + 切片 JSON + 重生成的 index.html**(若 Phase 2 改了 MVP1
   设计源,也一并带上)。你发出去的 PR 内容就是你验证过的那棵树——不需要再从脏工作区里挑 hunk。
-  远端 `main` 仍 protected,不得直接 push。合并后 `scripts/wt-clean.sh` 清理本地 worktree,
+  远端 `main` 仍 protected,不得直接 push。合并后 `scripts/wt-clean.sh <本分支>` 清理**自己这棵** worktree(只清自己命名的、绝不扫别人的),
   主仓根 `git pull` 让 5173 和对外手册网页刷新到最新;**PR 若改了依赖清单,主仓根还必须补装**
   (`package.json` 变 → `apps/studio/frontend` 里 `npm install`;`uv.lock` 变 → `uv sync`),
   否则跑着的主 app 在新依赖上直接红屏(「三、保留什么」第 4 条)。

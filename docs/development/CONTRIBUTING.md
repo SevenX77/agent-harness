@@ -21,7 +21,7 @@ last_updated: 2026-07-02
 - **分支、PR 与合并** → AGENTS.md「Workflow Pipeline」:一任务一 worktree
   (`scripts/wt-new.sh <type>/<short-desc>` 从 `origin/main` 切),`main` 是
   protected、PR-only;`scripts/wt-ship.sh` 推分支 + 开 PR + auto-merge,合并后
-  `scripts/wt-clean.sh` 清理。Commit message 遵循 Conventional
+  `scripts/wt-clean.sh <本分支>` 清理**自己这棵**(只清自己命名的,不扫别人的)。Commit message 遵循 Conventional
   Commits(`feat(engine): ...`)。
 - **推送前门禁** → AGENTS.md「CI Gates」:ruff / mypy(SDK 用 `--strict`)/
   pytest×3 / 前端 lint+typecheck+test+build / pip-audit,**全部**本地跑绿再推。

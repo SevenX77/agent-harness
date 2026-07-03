@@ -33,8 +33,7 @@ The whole loop is automated; use the helper scripts so every task runs the same
 way and nothing drifts onto stray branches/worktrees.
 
 1. **Start** — `scripts/wt-new.sh <type>/<short-desc>` cuts a fresh worktree +
-   branch from `origin/main` under `.worktrees/<type>-<desc>/` (first tidying any
-   already-merged worktrees). It also kicks off `npm ci` for
+   branch from `origin/main` under `.worktrees/<type>-<desc>/`. It also kicks off `npm ci` for
    `apps/studio/frontend` AND `uv sync` for the Python workspace **in the
    background** (skip: `WT_SKIP_NPM=1` / `WT_SKIP_UV=1`) — neither touches
    src, so start coding immediately; only dev/lint/test need them finished.
@@ -47,9 +46,16 @@ way and nothing drifts onto stray branches/worktrees.
    squash-merges into `main` automatically — no approval, no manual click. To
    review before it lands, skip `wt-ship` (or `gh pr merge --disable-auto`) and
    merge from the PR page yourself.
-5. **Cleanup** — on merge GitHub deletes the remote branch; `scripts/wt-clean.sh`
-   then removes the orphaned local worktree + branch (it also runs at the start
-   of the next `wt-new`).
+5. **Cleanup (only your OWN worktree — never others')** — on merge GitHub deletes
+   the remote branch. Clean up your finished worktree EXPLICITLY:
+   `scripts/wt-clean.sh <your-branch-or-worktree-dir>` removes it (local worktree +
+   branch) once its remote branch is gone, refusing if the tree is dirty. It only
+   ever touches the worktree you NAME — it never sweeps other tasks' trees (the
+   long-standing rule in `docs/development/RUN_AND_SCREENSHOT.md` §3.1). `wt-new`
+   no longer auto-cleans (it only `git worktree prune`s stale admin entries), so
+   starting a task can never delete someone else's worktree. `scripts/wt-clean.sh
+   --all` is an explicit opt-in to sweep EVERY merged worktree, which DOES touch
+   others' — use sparingly.
 6. **Post-merge root refresh (依赖必须跟上)** — after the merge, `git pull` the
    repo root; **if the PR changed dependency manifests, install them in the
    ROOT too**: `package.json`/`package-lock.json` changed → `npm install` in

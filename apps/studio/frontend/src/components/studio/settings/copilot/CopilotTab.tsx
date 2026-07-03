@@ -35,6 +35,7 @@ import {
 import { agentStatusForRoute, CopilotModelGroupCard } from "./CopilotModelGroupCard"
 import {
   deriveCopilotCandidateGroups,
+  hostFromBaseUrl,
   applyCopilotModelGroupSelection,
   buildCopilotRoleEntry,
   copilotKeyForGroupId,
@@ -46,6 +47,8 @@ import {
   copilotRoleTestErrorMessage,
   copilotRouteCooldownsFromJob,
   copilotRouteCooldownsFromPersistedResult,
+  copilotRouteMessagesFromJob,
+  copilotRouteMessagesFromPersistedResult,
   copilotRouteStatusesFromJob,
   copilotRouteStatusesFromPersistedResult,
   runCopilotRoleTestJob,
@@ -116,7 +119,14 @@ export function copilotBackendReadyCount(
   ).length
 }
 
-function copilotRoutePreviewFromProviderModel(pm: ProviderModelOption): CopilotRoutePreview {
+type CopilotEndpointMeta = { base_url?: string; runtime_base_url?: string; provider_type?: string | null }
+
+function copilotRoutePreviewFromProviderModel(
+  pm: ProviderModelOption,
+  endpointById: ReadonlyMap<string, CopilotEndpointMeta>,
+): CopilotRoutePreview {
+  const endpoint = endpointById.get(pm.endpoint_id || "")
+  const host = hostFromBaseUrl(endpoint?.base_url ?? endpoint?.runtime_base_url ?? null)
   return {
     id: pm.route_id,
     route_id: pm.route_id,
@@ -131,14 +141,21 @@ function copilotRoutePreviewFromProviderModel(pm: ProviderModelOption): CopilotR
     modelId: pm.provider_model_id,
     methodId: pm.call_method_id ?? null,
     note: (pm as unknown as Record<string, unknown>).note as string | null || null,
+    // 同 provider 多 endpoint 靠 host 消歧(如"七牛 · api.qnaigc.com"),host 拿不到才退回 provider_label。
+    endpointLabel: host ? `${pm.provider_label} · ${host}` : pm.provider_label,
+    protocol: endpoint?.provider_type ?? null,
+    baseUrlHost: host,
   }
 }
 
 function copilotPreviewFromModelGroup(
   group: ModelGroup,
-  source: "built_in" | "third_party" = "third_party",
+  source: "built_in" | "third_party",
+  endpointById: ReadonlyMap<string, CopilotEndpointMeta>,
 ): CopilotRolePreview {
-  const availableRoutes = (group.provider_models || []).map(copilotRoutePreviewFromProviderModel)
+  const availableRoutes = (group.provider_models || []).map((pm) =>
+    copilotRoutePreviewFromProviderModel(pm, endpointById),
+  )
   return {
     id: group.canonical_id,
     title: group.display_name,
@@ -200,12 +217,18 @@ export function CopilotTab({
     () => new Map(realCopilotRoles.map((candidate) => [candidate.id, candidate])),
     [realCopilotRoles],
   )
+  // 端点 → base_url/协议,给每条 route 的消歧标签("七牛 · <host>")用。
+  const endpointById = useMemo<ReadonlyMap<string, CopilotEndpointMeta>>(
+    () => new Map(credentials.providers.map((provider) => [provider.id, provider])),
+    [credentials.providers],
+  )
   const allModelGroupPreviews = useMemo<CopilotRolePreview[]>(() => (
     modelGroups.map((group) => copilotPreviewFromModelGroup(
       group,
       realCopilotRolesById.get(group.canonical_id)?.source ?? "third_party",
+      endpointById,
     ))
-  ), [modelGroups, realCopilotRolesById])
+  ), [modelGroups, realCopilotRolesById, endpointById])
   const allModelGroupPreviewsById = useMemo(
     () => new Map(allModelGroupPreviews.map((group) => [group.id, group])),
     [allModelGroupPreviews],
@@ -303,6 +326,8 @@ export function CopilotTab({
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
+  // 每条 route 的 SDK 测试真实信息(失败原因),供 tooltip 展示"为什么失败"。
+  const [routeMessages, setRouteMessages] = useState<Record<string, string>>({})
   // R-F21: per-route cooldown countdown (seconds remaining). Populated by the
   // SDK test job poller when a route surfaces `cooling_down`. The Test Button
   // disables while any compatible route has a positive value so users can't
@@ -339,15 +364,20 @@ export function CopilotTab({
         // R-F21: rehydrate any persisted cooldown so the Test Button stays
         // disabled if a 429 was recorded just before the user closed the tab.
         const seededCooldowns: Record<string, number> = {}
+        const seededMessages: Record<string, string> = {}
         for (const entry of Object.values(persisted.results ?? {})) {
           Object.assign(seeded, copilotRouteStatusesFromPersistedResult(entry.result))
           Object.assign(seededCooldowns, copilotRouteCooldownsFromPersistedResult(entry.result))
+          Object.assign(seededMessages, copilotRouteMessagesFromPersistedResult(entry.result))
         }
         if (Object.keys(seeded).length > 0) {
           setRouteStatusOverrides((current) => ({ ...seeded, ...current }))
         }
         if (Object.keys(seededCooldowns).length > 0) {
           setRouteCooldowns((current) => ({ ...seededCooldowns, ...current }))
+        }
+        if (Object.keys(seededMessages).length > 0) {
+          setRouteMessages((current) => ({ ...seededMessages, ...current }))
         }
       })
       .catch(() => {
@@ -627,6 +657,10 @@ export function CopilotTab({
             ...current,
             ...copilotRouteStatusesFromJob(job),
           }))
+          setRouteMessages((current) => ({
+            ...current,
+            ...copilotRouteMessagesFromJob(job),
+          }))
           // R-F21: capture any new cooldown windows the backend reports as a
           // route flips into cooling_down. We additively merge so an existing
           // countdown isn't bumped back up by a stale poll response.
@@ -746,6 +780,7 @@ export function CopilotTab({
                     chainRoutes={chainRoutes}
                     appendableRoutes={appendableRoutes}
                     routeStatusOverrides={routeStatusOverrides}
+                    routeMessages={routeMessages}
                     routeCooldowns={routeCooldowns}
                     isTesting={testingRoleIds.has(role.id)}
                     saveStatus={saveStatus}
@@ -902,6 +937,7 @@ function CopilotRoleCard({
   chainRoutes,
   appendableRoutes,
   routeStatusOverrides,
+  routeMessages,
   routeCooldowns,
   isTesting,
   saveStatus,
@@ -922,6 +958,7 @@ function CopilotRoleCard({
   chainRoutes: CopilotRoutePreview[]
   appendableRoutes: CopilotRoutePreview[]
   routeStatusOverrides: Record<string, CopilotRouteJobStatus>
+  routeMessages: Record<string, string>
   // R-F21: per-route cooldown countdown (seconds). When any compatible route
   // has a positive value the Test Button stays disabled until it elapses.
   routeCooldowns: Record<string, number>
@@ -1072,6 +1109,7 @@ function CopilotRoleCard({
           routes={chainRoutes}
           appendableRoutes={appendableRoutes}
           routeStatusOverrides={routeStatusOverrides}
+          routeMessages={routeMessages}
           onRemoveModelGroup={onRemoveModelGroup}
           onAddRoute={(routeId) => onUpdateRouteOrder([...routeOrder, routeId])}
           onRemoveRoute={(routeId) => onUpdateRouteOrder(routeOrder.filter((candidate) => candidate !== routeId))}

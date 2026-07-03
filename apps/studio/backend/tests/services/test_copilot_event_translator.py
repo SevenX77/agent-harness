@@ -265,6 +265,47 @@ def test_translate_result_message_is_done() -> None:
     assert events == [CopilotEventDone()]
 
 
+def test_error_result_surfaces_real_detail_not_just_generic() -> None:
+    # 真实报错不能被压成一句 "SDK 返回错误" —— 用户要看得出到底为什么失败
+    # (协议不匹配 / 404 / model 不存在 …)。errors 空时退回 result/api_error_status/subtype。
+    events = copilot.SdkMessageTranslator().translate(
+        ResultMessage(
+            subtype="error_during_execution",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=True,
+            num_turns=1,
+            session_id="session",
+            result="404 model not found",
+            api_error_status=404,
+            errors=[],
+        ),
+    )
+
+    assert len(events) == 1
+    message = events[0].message  # type: ignore[union-attr]
+    assert message.startswith("SDK 返回错误")
+    # 关键:实际原因必须出现在消息里,而不是被吞掉。
+    assert "404 model not found" in message
+
+
+def test_error_result_prefers_explicit_errors_list() -> None:
+    events = copilot.SdkMessageTranslator().translate(
+        ResultMessage(
+            subtype="error",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=True,
+            num_turns=1,
+            session_id="session",
+            errors=["upstream refused: anthropic-messages not supported"],
+        ),
+    )
+    assert events[0].message == (  # type: ignore[union-attr]
+        "SDK 返回错误: upstream refused: anthropic-messages not supported"
+    )
+
+
 def test_tool_failure_translates_to_failed_tool_result() -> None:
     translator = copilot.SdkMessageTranslator()
     translator.tool_names["tool-1"] = "Bash"

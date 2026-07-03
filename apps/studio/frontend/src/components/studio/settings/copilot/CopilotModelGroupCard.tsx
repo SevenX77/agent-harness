@@ -50,6 +50,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   routes,
   appendableRoutes,
   routeStatusOverrides,
+  routeMessages = {},
   onAddRoute,
   onRemoveRoute,
   onReorderRoutes,
@@ -60,6 +61,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   routes: CopilotRoutePreview[]
   appendableRoutes: CopilotRoutePreview[]
   routeStatusOverrides: Record<string, CopilotRouteJobStatus>
+  routeMessages?: Record<string, string>
   onAddRoute: (routeId: string) => void
   onRemoveRoute: (routeId: string) => void
   onReorderRoutes: (activeRouteId: string, overRouteId: string) => void
@@ -136,6 +138,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
                   route={route}
                   index={index}
                   status={agentStatusForRoute(route.agentStatus, route.id, routeStatusOverrides)}
+                  message={routeMessages[route.id] ?? null}
                   onRemove={() => onRemoveRoute(route.id)}
                 />
               ))}
@@ -152,11 +155,13 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
   route,
   index,
   status,
+  message,
   onRemove,
 }: {
   route: CopilotRoutePreview
   index: number
   status: CopilotRouteJobStatus
+  message?: string | null
   onRemove: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: route.id })
@@ -186,7 +191,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
         </ItemMedia>
         <ItemContent className="min-w-0 overflow-hidden gap-0.5">
           <ItemTitle className="line-clamp-none block w-full truncate whitespace-nowrap text-xs/relaxed text-muted-foreground">
-            {route.provider}
+            {route.endpointLabel}
           </ItemTitle>
         </ItemContent>
         <ItemActions
@@ -215,7 +220,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
       <Tooltip>
         <TooltipTrigger asChild>{row}</TooltipTrigger>
         <TooltipContent className="max-w-sm whitespace-pre-line break-words">
-          {routeTooltip(route, status)}
+          {routeTooltip(route, status, message)}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -389,11 +394,51 @@ function statusLabel(status: CopilotRouteJobStatus): string {
   return "Failed"
 }
 
-function routeTooltip(route: CopilotRoutePreview, status: CopilotRouteJobStatus): string {
-  return [
+function routeCapabilityList(route: CopilotRoutePreview, key: string): string[] {
+  const capability = (route.capabilities as Record<string, { value?: unknown } | undefined>)[key]
+  const value = capability?.value
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  }
+  return typeof value === "string" && value.trim().length > 0 ? [value.trim()] : []
+}
+
+function routeCapabilityBool(route: CopilotRoutePreview, key: string): boolean {
+  const capability = (route.capabilities as Record<string, { value?: unknown } | undefined>)[key]
+  const value = capability?.value
+  return value === true || value === "true"
+}
+
+function routeTooltip(
+  route: CopilotRoutePreview,
+  status: CopilotRouteJobStatus,
+  message?: string | null,
+): string {
+  // 与 LLM Roles 的 route 状态 tooltip 对齐:端点 + 协议/method + 多模态 + 工具 + 思考,
+  // 再带上本次 SDK 测试的真实结果信息(失败时是具体原因,不再只显示状态)。
+  const methods = routeCapabilityList(route, "verified_methods")
+  const inputModalities = routeCapabilityList(route, "input_modalities")
+  const outputModalities = routeCapabilityList(route, "output_modalities")
+  const acceptsImage = inputModalities.some((modality) => modality.toLowerCase() === "image")
+  const supportsTools = routeCapabilityBool(route, "tools") || routeCapabilityBool(route, "tool_use")
+  const supportsThinking = routeCapabilityBool(route, "thinking")
+  const transport = methods.length > 0 ? methods.join(", ") : route.methodId || "—"
+
+  const lines = [
     route.modelId,
+    route.baseUrlHost
+      ? `Endpoint: ${route.provider} · ${route.baseUrlHost}${route.protocol ? ` (${route.protocol})` : ""}`
+      : `Endpoint: ${route.provider}`,
+    // 同 host 的多个端点靠 endpoint id 彻底区分。
+    route.endpointId ? `ID: ${route.endpointId}` : null,
     `Claude Agent SDK: ${statusLabel(status)}`,
-    `Method: ${route.methodId}`,
+    message ? `↳ ${message}` : null,
+    `Transport: ${transport}`,
+    `Tool use: ${supportsTools ? "yes" : "—"}`,
+    `Multimodal: ${acceptsImage ? "image" : inputModalities.length ? inputModalities.join(", ") : "text only"}`,
+    outputModalities.length ? `Output: ${outputModalities.join(", ")}` : null,
+    supportsThinking ? "Thinking: yes" : null,
     route.note,
-  ].filter(Boolean).join("\n")
+  ]
+  return lines.filter(Boolean).join("\n")
 }

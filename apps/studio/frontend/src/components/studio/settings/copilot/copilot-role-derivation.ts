@@ -31,6 +31,17 @@ export function routeSupportsAnthropicMessages(pm: ProviderModelOption): boolean
   return (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)
 }
 
+// 从 base_url 取 host 做 route 消歧标签(同一 provider 多 endpoint 靠 host 区分)。
+export function hostFromBaseUrl(baseUrl: string | null | undefined): string | null {
+  const value = (baseUrl ?? '').trim()
+  if (!value) return null
+  try {
+    return new URL(value).host || null
+  } catch {
+    return value.replace(/^https?:\/\//i, '').split('/')[0] || null
+  }
+}
+
 export interface CopilotRoutePreview {
   id: string
   route_id: string
@@ -45,6 +56,12 @@ export interface CopilotRoutePreview {
   modelId: string
   methodId?: string | null
   note?: string | null
+  // 消歧标签:同一个 provider(如"七牛")下有多条不同 host/协议的 endpoint,光看
+  // providerLabel 全一样分不清 → 追加 host 区分(如 "七牛 · api.qnaigc.com")。
+  endpointLabel: string
+  // tooltip 用:该 route 端点的协议 + host(从 credentials 查真实 base_url)。
+  protocol: string | null
+  baseUrlHost: string | null
 }
 
 export interface CopilotRolePreview {
@@ -80,28 +97,37 @@ export function deriveCopilotCandidateGroups(
   // by `endpoint.provider_type === 'anthropic_compatible'` — missed ark /
   // deepseek / openrouter routes that expose anthropic-messages under a
   // different provider_type.
-  // `credentials` is no longer required for eligibility (every backend route
-  // already carries the method id), but we keep the parameter for compat.
-  void credentials
+  // credentials 用来把每条 route 的端点真实 base_url / 协议查出来做消歧标签(同 provider
+  // 多 host 时光看 providerLabel 分不清)。
+  const endpointById = new Map(credentials.providers.map((provider) => [provider.id, provider]))
 
   const candidates = (modelGroups || []).map((group) => {
     const availableRoutes: CopilotRoutePreview[] = (group.provider_models || [])
       .filter((pm) => routeSupportsAnthropicMessages(pm))
-      .map((pm) => ({
-        id: pm.route_id,
-        route_id: pm.route_id,
-        endpointId: pm.endpoint_id || '',
-        providerLabel: pm.provider_label,
-        providerKind: pm.provider_kind || 'official',
-        providerModelId: pm.provider_model_id,
-        uiState: pm.ui_state,
-        agentStatus: pm.ui_state,
-        capabilities: pm.capabilities || {},
-        provider: pm.provider_label,
-        modelId: pm.provider_model_id,
-        methodId: pm.call_method_id ?? null,
-        note: (pm as unknown as Record<string, unknown>).note as string | null || null,
-      }))
+      .map((pm) => {
+        const endpointId = pm.endpoint_id || ''
+        const endpoint = endpointById.get(endpointId)
+        const host = hostFromBaseUrl(endpoint?.base_url ?? endpoint?.runtime_base_url ?? null)
+        const protocol = endpoint?.provider_type ?? null
+        return {
+          id: pm.route_id,
+          route_id: pm.route_id,
+          endpointId,
+          providerLabel: pm.provider_label,
+          providerKind: pm.provider_kind || 'official',
+          providerModelId: pm.provider_model_id,
+          uiState: pm.ui_state,
+          agentStatus: pm.ui_state,
+          capabilities: pm.capabilities || {},
+          provider: pm.provider_label,
+          modelId: pm.provider_model_id,
+          methodId: pm.call_method_id ?? null,
+          note: (pm as unknown as Record<string, unknown>).note as string | null || null,
+          endpointLabel: host ? `${pm.provider_label} · ${host}` : pm.provider_label,
+          protocol,
+          baseUrlHost: host,
+        }
+      })
 
     const activeRouteIds = availableRoutes.filter((r) => r.uiState === 'ready').map((r) => r.id)
 

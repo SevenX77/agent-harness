@@ -3,10 +3,41 @@ import {
   copilotRoleTestErrorMessage,
   ERROR_CODE_MAP,
   runCopilotRoleTestJob,
+  copilotRouteMessagesFromJob,
+  copilotRouteMessagesFromPersistedResult,
   copilotRouteStatusesFromJob,
   copilotRouteStatusesFromPersistedResult,
 } from "./copilot-role-test"
 import type { RoleTestJobResponse } from "@/api/llm"
+
+describe("copilot route SDK test messages surface the real failure reason", () => {
+  it("extracts per-route messages from a live job", () => {
+    const job = {
+      provider_statuses: [
+        { route_id: "deepseek-official:deepseek-v4-pro", status: "failed", message: "SDK 返回错误: HTTP 404" },
+        { route_id: "qiniu-anthropic:deepseek.deepseek-v4-pro", status: "ok", message: null },
+      ],
+    } as unknown as RoleTestJobResponse
+
+    expect(copilotRouteMessagesFromJob(job)).toEqual({
+      "deepseek-official:deepseek-v4-pro": "SDK 返回错误: HTTP 404",
+    })
+  })
+
+  it("extracts per-route messages from persisted sdk_evidence", () => {
+    const result = {
+      sdk_evidence: {
+        routes: {
+          "deepseek-official:deepseek-v4-pro": { status: "failed", message: "请求超时, 检查网络 / 代理" },
+          "qiniu-anthropic:deepseek.deepseek-v4-pro": { status: "ok", message: null },
+        },
+      },
+    }
+    expect(copilotRouteMessagesFromPersistedResult(result)).toEqual({
+      "deepseek-official:deepseek-v4-pro": "请求超时, 检查网络 / 代理",
+    })
+  })
+})
 
 describe("copilot role test job helpers", () => {
   it("starts role test jobs and polls until completion with route status progress", async () => {

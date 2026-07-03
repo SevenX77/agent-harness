@@ -1306,6 +1306,26 @@ def _prompt_with_turn_context(
     return "\n\n".join(layers) + f"\n\n## 用户消息\n{user_message}"
 
 
+def _result_error_detail(message: ResultMessage) -> str:
+    """从 SDK ResultMessage 里挤出真实失败原因,让 "SDK 返回错误" 后面带上到底为什么 ——
+    协议不匹配 / 404 / model 不存在等,而不是一句干巴巴的通用错。errors 空时退回
+    result / api_error_status / subtype。"""
+    errors = "; ".join(item for item in (message.errors or []) if item and item.strip())
+    if errors:
+        return errors
+    parts: list[str] = []
+    result = getattr(message, "result", None)
+    if isinstance(result, str) and result.strip():
+        parts.append(result.strip())
+    status = getattr(message, "api_error_status", None)
+    if status:
+        parts.append(f"HTTP {status}")
+    subtype = getattr(message, "subtype", None)
+    if not parts and isinstance(subtype, str) and subtype.strip() and subtype != "error":
+        parts.append(subtype)
+    return " · ".join(parts)
+
+
 class SdkMessageTranslator:
     """Stateful SDK→CopilotEvent translator for one query stream (F8).
 
@@ -1336,8 +1356,8 @@ class SdkMessageTranslator:
             return self._translate_user_message(message)
         if isinstance(message, ResultMessage):
             if message.is_error:
-                details = "; ".join(message.errors or [])
-                suffix = f": {details}" if details else ""
+                detail = _result_error_detail(message)
+                suffix = f": {detail}" if detail else ""
                 return [CopilotEventError(message=f"SDK 返回错误{suffix}")]
             return [CopilotEventDone()]
         return []

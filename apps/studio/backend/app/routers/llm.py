@@ -1535,12 +1535,28 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
+@router.get("/fixed-roles")
+async def get_fixed_role_names() -> dict[str, list[str]]:
+    """固定角色名(引擎 builtin 硬依赖、不可删除)。前端据此隐藏删除入口。"""
+    from app.services.llm_fixed_roles import required_builtin_roles
+
+    return {"fixed_role_names": sorted(required_builtin_roles())}
+
+
 @router.delete("/roles/{role_name}", response_model=RolesData)
 async def delete_llm_role(role_name: str) -> RolesData:
     """Delete one persisted role."""
+    from app.services.llm_fixed_roles import is_fixed_role
+
     data = _load_roles_or_empty()
     if role_name not in data.roles:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
+    if is_fixed_role(role_name):
+        # 引擎 builtin(如 md-patch 的 md2json 修补)硬依赖该角色,删了就跑不起来。
+        raise HTTPException(
+            status_code=409,
+            detail=f"固定角色不可删除: {role_name}(引擎 builtin skill 硬依赖)",
+        )
     roles = dict(data.roles)
     del roles[role_name]
     credentials = load_credentials()

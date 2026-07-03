@@ -1801,6 +1801,13 @@ export async function getRole(roleName: string): Promise<RoleEntry> {
   return response.data
 }
 
+// 固定角色名(引擎 builtin 硬依赖、不可删除,如 md-patch 需要的 `fast`)。
+// 前端据此隐藏这些角色的删除入口;后端删除端点亦拒删(409)。
+export async function getFixedRoleNames(): Promise<string[]> {
+  const response = await api.get<{ fixed_role_names: string[] }>('/llm/fixed-roles')
+  return response.data.fixed_role_names
+}
+
 export async function putRoles(data: RolesData): Promise<RolesData> {
   const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
   return rolesDataFromBackend(response.data, cachedRegistry ?? null)

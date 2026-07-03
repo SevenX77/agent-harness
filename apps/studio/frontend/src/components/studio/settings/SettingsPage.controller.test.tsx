@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, getCredentials, getProviderModels } from "../../../api/llm"
+import { deleteEndpoint, forceTestEndpoint, getCredentials, getProviderModels } from "../../../api/llm"
 import { useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -71,6 +71,7 @@ vi.mock("../../../api/llm", async (importOriginal) => {
     deleteEndpoint: vi.fn(),
     deleteModelBundle: vi.fn(),
     deleteRole: vi.fn(),
+    forceTestEndpoint: vi.fn(),
     getCredentials: vi.fn(() => Promise.resolve({ providers: [] })),
     getModelGroups: vi.fn(() => Promise.resolve([])),
     getProviderModels: vi.fn(),
@@ -235,5 +236,39 @@ describe("useSettingsPageController lifecycle", () => {
 
     expect(getProviderModels).not.toHaveBeenCalled()
     expect(vi.mocked(toast.error)).toHaveBeenCalled()
+  })
+
+  // PM 2026-07-03: the Re-probe icon (protocol_unsupported cells) hung on a
+  // "loading" toast far longer than a single endpoint-tag probe. Root cause:
+  // forceReprobeEndpoint discarded forceTestEndpoint's own response (which
+  // already carries the fresh registry) and instead made a SECOND network
+  // round trip — a full getCredentials({hydrateSecrets}) reload that
+  // re-decrypts every provider's secret. onProbeEndpoint's scoped
+  // runProviderGetModels never does this extra round trip; forceReprobeEndpoint
+  // must not either.
+  it("re-probes a protocol_unsupported endpoint by merging forceTestEndpoint's own response, without a second getCredentials round trip", async () => {
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    vi.mocked(forceTestEndpoint).mockResolvedValue({
+      providers: [{ id: "qiniu-google", name: "Qiniu", api_key: "sk-1", base_url: "https://qiniu.example", provider_type: "google_genai", last_test_status: "ok" }],
+    })
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const getCredentialsCallsBeforeReprobe = vi.mocked(getCredentials).mock.calls.length
+
+    await act(async () => {
+      capturedController?.onForceEndpointTest("qiniu-google")
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(forceTestEndpoint).toHaveBeenCalledWith("qiniu-google")
+    expect(vi.mocked(getCredentials).mock.calls.length).toBe(getCredentialsCallsBeforeReprobe)
   })
 })

@@ -565,6 +565,106 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).not.toContain("Base URL accepted by the model-list endpoint")
   })
 
+  // PM 2026-07-03: clicking ONE endpoint tag (item 2's onProbeEndpoint) only
+  // probes that one (URL, protocol) cell backend-side (verified via runtime
+  // log correlation), but every sibling tag under the same provider spun the
+  // "testing" animation too — because isGettingModels was a provider-wide
+  // flag with no per-endpoint scoping. draft.testingEndpointId narrows it.
+  it("only spins the ONE endpoint tag being probed, not every sibling under the provider", () => {
+    const nextDraft = makeDraft({
+      base_url: "https://openrouter.ai/api",
+      isTesting: true,
+      testingAction: "models",
+      testingEndpointId: "openrouter-openai",
+      base_urls: [
+        {
+          id: "url-openrouter",
+          value: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "openrouter-openai",
+            anthropic_compatible: "openrouter-anthropic",
+            google_genai: "openrouter-google",
+          },
+        },
+      ],
+    })
+
+    const html = renderCardHtml({
+      nextDraft,
+      persistedEndpoints: {
+        "openrouter-openai": makePersisted({
+          id: "openrouter-openai",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          last_test_status: "untested",
+        }),
+        "openrouter-anthropic": makePersisted({
+          id: "openrouter-anthropic",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "anthropic_compatible",
+          last_test_status: "ok",
+          available_models: [{ id: "anthropic-model", status: "verified", ui_state: "ready" }],
+        }),
+        "openrouter-google": makePersisted({
+          id: "openrouter-google",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "google_genai",
+          last_test_status: "error",
+          last_error_code: "protocol_unsupported",
+        }),
+      },
+    })
+
+    expect(html).toContain('data-endpoint-status="testing"')
+    expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(1)
+    expect(html).toContain('data-endpoint-status="ok"')
+    expect(html).toContain('data-endpoint-status="error"')
+  })
+
+  it("spins every endpoint tag when the whole card is tested (no onlyEndpointId scoping)", () => {
+    const nextDraft = makeDraft({
+      base_url: "https://openrouter.ai/api",
+      isTesting: true,
+      testingAction: "models",
+      testingEndpointId: null,
+      base_urls: [
+        {
+          id: "url-openrouter",
+          value: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "openrouter-openai",
+            anthropic_compatible: "openrouter-anthropic",
+          },
+        },
+      ],
+    })
+
+    const html = renderCardHtml({
+      nextDraft,
+      persistedEndpoints: {
+        "openrouter-openai": makePersisted({
+          id: "openrouter-openai",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          last_test_status: "untested",
+        }),
+        "openrouter-anthropic": makePersisted({
+          id: "openrouter-anthropic",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "anthropic_compatible",
+          last_test_status: "untested",
+        }),
+      },
+    })
+
+    // Third-party endpoint drafts always synthesize all 3 protocol candidates
+    // per base-url row (provider-utils.ts providerEndpointDraftsForAction),
+    // regardless of which endpoint_ids were explicitly mapped.
+    expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(3)
+  })
+
   it("shows protocol-normalized runtime URL separately from the input URL", () => {
     const html = renderToStaticMarkup(
       <ProviderCard

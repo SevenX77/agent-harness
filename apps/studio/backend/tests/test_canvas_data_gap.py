@@ -151,6 +151,87 @@ def test_should_resolve_supply_from_phase_graph_input_and_flag_gap() -> None:
     assert by_field["orphan"]["source"] == "none"
 
 
+def test_should_flatten_nested_object_fields_into_dotted_paths() -> None:
+    """Nested addressing (io-node-scoped-config, PM 2026-07-03): an object input
+    field's sub-paths are independently addressable supply entries. A sub-field
+    produced (whole object) upstream resolves via its ancestor; a nested field
+    nobody produces is its own data gap — so the i/o config tree can mark the
+    exact broken sub-field, mirroring the engine's recursive required gate."""
+    index = {
+        "a": {
+            "inputs": {},
+            "outputs": {
+                "chapter": {
+                    "type": "object",
+                    "properties": {
+                        "aa_number": {"type": "integer"},
+                        "title": {"type": "string"},
+                    },
+                },
+            },
+        },
+        "b": {
+            "inputs": {
+                "chapter": {
+                    "type": "object",
+                    "properties": {"aa_number": {"type": "integer"}},
+                },
+                "meta": {
+                    "type": "object",
+                    "properties": {"missing": {"type": "string"}},
+                },
+            },
+            "outputs": {},
+        },
+    }
+
+    supply = compute_field_supply(
+        phase_name="b",
+        depends_on=["a"],
+        phase_io_index=index,
+        graph_input_fields=set(),
+    )
+
+    by_field = {entry["field"]: entry for entry in supply}
+    # the nested sub-path is addressable and resolves to the whole-object producer
+    assert by_field["chapter.aa_number"]["supplied"] is True
+    assert by_field["chapter.aa_number"]["source"] == "phase"
+    assert by_field["chapter.aa_number"]["producer_phase"] == "a"
+    # the parent object path is addressable too, supplied by the same producer
+    assert by_field["chapter"]["producer_phase"] == "a"
+    # a nested field nobody produces is its own gap (parent + leaf both unmet)
+    assert by_field["meta.missing"]["supplied"] is False
+    assert by_field["meta.missing"]["source"] == "none"
+    assert by_field["meta"]["supplied"] is False
+
+
+def test_should_resolve_nested_subpath_from_flattened_graph_input() -> None:
+    """A graph-level object input supplies its declared sub-paths (chapter is a
+    run input → chapter.aa_number is sourced from graph_input, not a gap)."""
+    index = {
+        "b": {
+            "inputs": {
+                "chapter": {
+                    "type": "object",
+                    "properties": {"aa_number": {"type": "integer"}},
+                },
+            },
+            "outputs": {},
+        },
+    }
+
+    supply = compute_field_supply(
+        phase_name="b",
+        depends_on=[],
+        phase_io_index=index,
+        graph_input_fields={"chapter"},
+    )
+
+    by_field = {entry["field"]: entry for entry in supply}
+    assert by_field["chapter.aa_number"]["supplied"] is True
+    assert by_field["chapter.aa_number"]["source"] == "graph_input"
+
+
 def test_graph_topology_rows_carry_io_fields_and_supply(tmp_path: Path) -> None:
     skill_dir = tmp_path / "gap-skill"
     _write_two_phase_skill(skill_dir)

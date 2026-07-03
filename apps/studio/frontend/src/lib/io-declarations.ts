@@ -73,3 +73,60 @@ export function phaseNodeFileContent(skillDetail: SkillDetail | undefined, phase
 export function rootGraphFrontmatter(skillDetail: SkillDetail | undefined): Record<string, unknown> {
   return parseFrontmatter(skillDetail?.files?.['GRAPH.md'])
 }
+
+/**
+ * True when a property subschema describes an object, so its own `properties`
+ * are addressable sub-paths of the value (nested addressing, PM 2026-07-03).
+ * Mirrors the engine `_is_object_schema` and backend `_is_object_schema` so all
+ * three layers agree on what counts as a nestable field.
+ */
+export function isObjectSchema(schema: JsonSchemaObject): boolean {
+  const schemaType = schema.type
+  if (schemaType === 'object' || (Array.isArray(schemaType) && schemaType.includes('object'))) {
+    return true
+  }
+  return schemaObject(schema.properties) != null
+}
+
+export interface FieldPathRow {
+  /** Leaf segment for display, e.g. `aa_number`. */
+  name: string
+  /** Dotted full path identity, e.g. `chapter.aa_number`. */
+  path: string
+  /** Nesting depth (0 = top-level) for tree indentation. */
+  depth: number
+  schema: JsonSchemaObject
+  /** True when this is an object field with at least one nested property. */
+  hasChildren: boolean
+}
+
+/**
+ * Depth-first field descriptors for a `properties` map: every addressable dotted
+ * path (parent object paths AND their descendant leaves), in stable pre-order so
+ * a parent always precedes its children. The single source the i/o config tree,
+ * reconciliation, and the edge-dot inference share, mirroring the backend
+ * `_flatten_field_paths` and the engine's recursive required walk.
+ */
+export function fieldPathRows(
+  properties: Record<string, unknown>,
+  prefix = '',
+  depth = 0,
+): FieldPathRow[] {
+  const rows: FieldPathRow[] = []
+  for (const [name, raw] of Object.entries(properties)) {
+    const schema = schemaObject(raw) ?? {}
+    const path = prefix ? `${prefix}.${name}` : name
+    const nested = isObjectSchema(schema) ? schemaObject(schema.properties) : null
+    const hasChildren = nested != null && Object.keys(nested).length > 0
+    rows.push({ name, path, depth, schema, hasChildren })
+    if (nested) {
+      rows.push(...fieldPathRows(nested, path, depth + 1))
+    }
+  }
+  return rows
+}
+
+/** Every addressable dotted path (parent + descendants) of a `properties` map. */
+export function flattenFieldPaths(properties: Record<string, unknown>): string[] {
+  return fieldPathRows(properties).map((row) => row.path)
+}

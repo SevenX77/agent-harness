@@ -42,6 +42,12 @@ export interface StaticEdgeField {
   from: string
   via_file: boolean
   consumed_by_target: boolean
+  /**
+   * The field's raw JSON subschema, so consumers (i/o config tree) can descend
+   * into nested object `properties` for nested addressing (PM 2026-07-03). The
+   * edge-dot view ignores it; it is purely additive.
+   */
+  schema: FieldSchema
 }
 
 export interface StaticEdgeInference {
@@ -143,6 +149,7 @@ export function staticEdgeInference(
         from: 'input',
         via_file: false,
         consumed_by_target: false,
+        schema: fieldSchema(raw),
       })
     }
   }
@@ -166,6 +173,7 @@ export function staticEdgeInference(
         from: phaseId,
         via_file: false,
         consumed_by_target: false,
+        schema: fieldSchema(raw),
       })
     }
   }
@@ -188,6 +196,7 @@ export function staticEdgeInference(
           from: typeof schema.path === 'string' && schema.path ? schema.path : 'file',
           via_file: true,
           consumed_by_target: false,
+          schema,
         })
       }
     }

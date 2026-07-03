@@ -1,7 +1,7 @@
 ---
 module: 03_regions/input
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 r3 定稿:PM 确认黑板优先配置树模型——面板=预览+Configure+文件 list,输入配置=黑板 context 第一行的字段勾选树+Add file 追加,输出配置=artifacts 文件清单×黑板字段勾选;golden 区从面板移除。样稿经 PM 三轮确认。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07-02 r3 定稿:PM 确认黑板优先配置树模型——面板=预览+Configure+文件 list,输入配置=黑板 context 第一行的字段勾选树+Add file 追加,输出配置=artifacts 文件清单×黑板字段勾选;golden 区从面板移除。样稿经 PM 三轮确认。；目标结构已按 R4-R8 retrofit）｜2026-07-03 r5 修订（PM 真机 4 点反馈,已实施 feat/io-node-scoped-config）:①「节点↔io」关系模型建对——**按角色收敛面板段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段,见 F3 归属规则,原为代码 drift);②**io 字段全链路支持嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端配置树可展开、子字段 `chapter.aa_number` 独立勾选,见 F3);③**输入配置改内联**(可折叠段 + 紧凑树行,替换 F2「配置全在弹窗」;输出 artifacts 编辑因多卡片过宽保留 scoped modal);④**New file 改 ghost list 行**(F2/r4b 的 `variant=secondary` 暗色近黑,改透明底 hover 亮)。
 binds_baseline: ./baseline.md
 units: [io-panel-artifacts-test-inputs, golden-per-agent-node]
 aligns_with: 01_workflows/02_authoring.md（i/o panel）· 01_workflows/04_run-and-verify.md（predict/run input/golden）
@@ -27,8 +27,8 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - 归属: region `input`; capabilities `predict`, `phase-editing`.
 
 ### F2. Panel Surface（实例预览 + Configure 入口 + 文件 list）
-- 机制: 面板每侧(input/output)三件东西:① **实例预览**——按当前 io schema 推导的示例 JSON(清爽只读);② **Configure 按钮**——进入该侧配置弹窗(F3/F7);③ **文件 list**——用面板统一的 list 行样式简单列出:input 侧列已导入的输入文件(有才显示),output 侧列已配置的 artifact 文件;文件行 = 文件名 + 灰色路径(一眼认出是文件)。**面板本身不承载配置编辑**,schema 编辑走 Configure 弹窗 / copilot / 直接改文件。
-- 决策: 面板 = 预览 + 入口 + 摘要;配置操作全在弹窗——面板太窄(约 320px),放不下带缩进的字段树(PM 2026-07-02 r2/r3)。**面板不再有 golden 区**:golden 与预览同构,「Generate template 两连点」无意义;golden 交互(存实际输出为 golden、diff)归 run/trace 侧后续轮(PM 2026-07-02 r2 点1)。**不再有内联「创建 test input」表单**(名字+JSON 编辑框):没人会在窄面板里写 JSON;简单输入在 `.workspace` 建文件进编辑器写,复杂输入走导入(PM 2026-07-02 r2 点3)。
+- 机制: 面板每侧(input/output)按角色渲染:① **实例预览**——按当前 io schema 推导的示例 JSON(清爽只读,嵌套递归展开到叶子);② **配置入口**——input 侧是**内联可折叠段**(点「Configure input」原地展开黑板勾选树,见 F3,不再弹大 modal);output 侧的 artifacts 编辑因是多卡片编辑器、窄面板塞不下,保留一个 scoped「Configure」modal(F7)。**文件 list**并入内联配置树的文件组(已导入文件 + 其字段),不再单列一段。
+- 决策(2026-07-03 r5 修订): **配置默认内联,不再一律走弹窗**——PM 反馈「io config 收进选中节点的属性里,像 Properties 面板」;窄面板(约 320px)的问题用**可折叠段 + 紧凑缩进树行**解决,而非退回 modal。仅 output artifacts 这种多卡片编辑器确实塞不下时保留 scoped modal(PM 允许的兜底)。此条**替换** r2/r3「配置操作全在弹窗、面板不承载配置编辑」的旧决策。**面板不再有 golden 区**(PM 2026-07-02 r2 点1)、**不再有内联「创建 test input」表单**(PM 2026-07-02 r2 点3)不变。
 - 原话/来源: PM 2026-07-02(原话见 §4)。
 - 测试: 面板无 schema 表单、无 golden 区、无内联创建表单;实例预览由真实 io 声明推导;Configure 打开对应配置弹窗;文件 list 行显示文件名+路径。
 - Status: target-design。
@@ -39,7 +39,8 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - **Input 伪节点特例**: 没有黑板(上游无物),配置树里只有文件;在 Input 节点勾选的文件字段,流到第一个 node 时**成为黑板初始字段**(= GRAPH.md `io.inputs`)。一套「文件 + 勾选」= 一份输入方案,存下来命名即 test input——schema 定义与数据来源在同一处闭环。**GRAPH.md io.inputs 已声明、但没有 `source:'file'` 支撑的字段 = 未接来源**,在配置树里以 missing 态置顶报错「declared graph input · no source supplied」——提醒作者这个图入口字段还没接文件/来源(PM 2026-07-02 r4b 点2:"第一个 input 节点要求输出 chapter 字段,但是没有输入,应该触发字段缺失警告")。
 - **归属规则**: Input 节点只有输入配置,Output 节点只有输出配置,GRAPH.md 两者都有(两个伪节点即 GRAPH.md io 的投影);普通节点 = 输入配置(黑板+文件)+ 输出预览。
 - **字段对账三态(PM 2026-07-02 r4)**: 配置树把「节点 md io.inputs 声明」与「实际黑板可用字段」对账,每行标一种状态:**matched**(声明了 + 黑板有 = 被消费)→ 整行 accent 高亮 + 左侧主色竖条;**available**(黑板有但本节点未声明消费)→ 普通行;**missing**(io.inputs 声明了、但上游黑板没供上该字段)→ 置顶,muted + danger 底 + ⚠ 图标 + 原因「required by io.inputs · not supplied by upstream」,不可勾选、不写回。`source:'file'` 字段来自文件注入不是黑板供应,永不算 missing。此对账把引擎运行期 `[F-v3-runtime-state-mapping-failed]`(StateMapper 缺 required 字段)提前到配置期可视化。
-- 决策: 导入文件不是 node input 的主源,黑板才是;import file 只是在黑板上额外增加字段(PM 2026-07-02 r3 点2)。配置界面的第一性结构是字段勾选树,不是导入向导。字段对账让作者一眼看清「声明了但没人给」的断链(PM 2026-07-02 r4)。
+- **嵌套寻址三层贯通(PM 2026-07-03 r5 核心)**: object 字段(如 `chapter`)在配置树里按层级展开,子字段(`chapter.aa_number`)**可独立勾选**;勾选一条子路径 = 在节点 io.inputs 里把 `chapter` 声明成 object 且其 `aa_number` 进 `required`(勾父级=声明整块 object 必需;勾子级=父级自动成为必需 object + 该子字段必需)。这要求**全链路认识嵌套路径,否则前端画的展开树是会撒谎的 UI(勾了没运行语义)**,故本轮三层同时改:① **engine** `StateMapper.build_phase_input` 的 required 门禁改**递归遍历 schema 树**(顶层与嵌套 `required` 同一套,缺失即 `[F-v3-runtime-state-mapping-failed]`,`field_path` 为点路径,与 output 侧 Draft2020 校验器统一;见 `docs/engine/mvp1/01-contract/03-compile-rules/mvp1-alignment.md` slice 行);② **studio backend** `canvas_data_gap.field_supply` 投影**递归展开**嵌套 properties,子路径作独立可寻址条目(带各自 producer/consumer,整块 object 的 producer 供其子路径);③ **前端** io-config / edge-static-inference 从「按顶层 key」改「按树遍历」(`fieldPathRows` 共享层),配置树可展开勾选。**输出侧不对称**:artifacts 由 engine writer 按**顶层 key**落盘(`artifact_manifest.write_manifest_artifacts` 只认顶层),故输出配置树里嵌套子字段**仅展示形状、不独立勾选**——一个 artifact 携带的是整块顶层字段(含其子字段),没有「只装 `segmentation_result.bb_number`」的引擎语义。
+- 决策: 导入文件不是 node input 的主源,黑板才是;import file 只是在黑板上额外增加字段(PM 2026-07-02 r3 点2)。配置界面的第一性结构是字段勾选树,不是导入向导。字段对账让作者一眼看清「声明了但没人给」的断链(PM 2026-07-02 r4)。嵌套子字段的 missing 只显示 subtree 顶层未满足项(不刷屏子孙),对账仍镜像引擎运行期 `[F-v3-runtime-state-mapping-failed]`,现在到嵌套粒度(PM 2026-07-03 r5)。
 - 原话/来源: PM 2026-07-02 r3/r4(原话见 §4);样稿经 PM 确认(r3b + r4)。
 - 测试: 黑板行字段与 dot 静态推断同源一致;勾选黑板字段写回节点 io.inputs;勾选文件字段写 `{type, source:'file', path}`;Input 节点树无黑板行;批量文件夹折叠为一行并记录编号列表;对账三态 matched/available/missing 分类正确(reconcileInputFields),missing 置顶、不写回。
 - Status: target-design。
@@ -108,6 +109,7 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - **r3b 修订**:文件名后附路径;输出配置各文件下黑板字段清单完全一样;模式切换用小分段钮,per-item 带 iterate range 推断数量;面板用专用 list 行列输入文件与输出文件。
 - **r4 字段对账**:"高亮整行，提示与写在md文档中匹配的字段。md文档中没有的字段用muted颜色加在最上方并加上报错标志，表示要求有这个input字段，但实际输入没有。output同理"——matched 行高亮、missing(声明了但实际无供应)置顶 muted + 报错;input=io.inputs vs 黑板,output=io.outputs vs 产出全集。
 - **r4b 收尾**(PM 2026-07-02):① "new file button，统一样式，全局都没有用过黑色按钮；还有这个list的样式，我们panel里面已经有固定的list样式了"——New file/Run-as-batch 改用 shadcn `Button variant=secondary`,test-inputs list 行改用 FileRow 同款无边框 ghost 行(选中 `bg-accent`);② "第一个input节点要求输出chapter字段，但是没有输入，不应该触发字段缺失的警告吗？"——Input 伪节点声明的图入口字段无 `source:'file'` 支撑时报 missing(见 F3);③ "add file设计简直反人类啊，直接用原生file组件选择文件或者文件夹啊，怎么会让用户输入path呢"——改原生 OS 选择器(见 F5)。
+- **r5 真机 4 点反馈(PM 2026-07-03,根因收敛=「画布节点↔io config」关系模型没建对)**:① "在 GRAPH.md input 的 chapter 里临时加了 aa_number(加在 chapter 对象内部),config 弹窗没同步显示" + ② "output 的 segmentation_result 里加了 bb_number,config 也没同步"——根因:预览递归到叶子、config 只枚举顶层键,粒度差;且 io 字段全链路扁平,嵌套子字段没有运行语义 → 三层加嵌套寻址(见 F3 嵌套寻址三层贯通)。③ "定过选 input 节点只显示 input、output 节点只显示 output,现在选中 Input 节点后面板下面还挂着 output 段"——根因:面板无条件全渲染 + 边界伪节点点击一律 deselect(点 Input/Output/空白在状态层是同一件事),没有「边界节点身份」→ 选中态承载 input-boundary/output-boundary/phase/graph 四态 + 按角色收敛段(F3 归属规则本就有,属代码 drift 补齐)。④ "Test inputs 的 New file 按钮还是黑色,list 样式没对齐 panel 已有的 list"——`variant=secondary` 暗色近黑(`--secondary: oklch(0.274…)`),改**透明底 hover 亮的 ghost list 行**(对齐 test-input item 行),修订 r4b「New file 用 secondary」。方向:config 内联进节点属性(像 Properties 面板)、按角色 scoped,窄面板用可折叠段/紧凑树行解决(见 F2 r5 修订)。
 - (存续)面板可见名 = **"I/O"**(文件夹路径 `input` 不变);**I/O 面板 = 实例预览,schema 编辑走 copilot/文件**(PM 2026-07-02 r1);**golden JSON 与推导实例同构**(PM 2026-07-02 r1)。
 
 ## 5. 决策 + 动机

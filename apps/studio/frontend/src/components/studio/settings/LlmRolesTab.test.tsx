@@ -4,6 +4,7 @@ import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { rolesDataToBackend } from "../../../api/llm"
 import { roleChainStatusKey, type RoleChainStatusMap } from "../../../hooks/useRoleTestChainRunner"
 import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, RoleSettingsFields } from "./LlmRolesTab"
+import { formatThousands, stripThousands } from "./llm-roles/RoleSettingsDialog"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
@@ -2309,7 +2310,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("text-red")
   })
 
-  it("renders role-level intent settings as an inline header panel without provider order controls", () => {
+  it("renders the three simple role params as an inline header panel without context/mode controls", () => {
     const dataWithIntent: RolesData = {
       ...rolesData,
       roles: {
@@ -2318,17 +2319,9 @@ describe("LlmRolesTab controls", () => {
           ...rolesData.roles.copilot_chat,
           intent: {
             provider_preference: "manual_order",
-            thinking: "preferred",
-            target_output_tokens: {
-              mode: "target",
-              value: 8192,
-              downgrade: "allow_with_warning",
-            },
-            target_context_tokens: {
-              mode: "required_minimum",
-              value: 64000,
-              downgrade: "allow",
-            },
+            thinking: true,
+            max_output_tokens: 8192,
+            temperature: 0.7,
           },
         },
       },
@@ -2340,11 +2333,9 @@ describe("LlmRolesTab controls", () => {
         modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
-          thinking: "required",
-          contextTokenMode: "required_minimum",
-          contextTokens: "64000",
-          outputTokenMode: "maximum_available",
-          outputTokens: "",
+          thinking: true,
+          maxOutputTokens: "128000",
+          temperature: "0.7",
         }}
         tokenLimitSummary={{
           context: {
@@ -2372,73 +2363,81 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).toContain('data-role-settings-fields="true"')
     expect(fieldsHtml).toContain('data-role-settings-toggles="true"')
     expect(fieldsHtml).toContain("rounded-md border border-border bg-muted/10")
-    expect(fieldsHtml).toContain('data-role-context-settings="true"')
-    expect(fieldsHtml).toContain('data-role-context-token-input-group="true"')
+    expect(fieldsHtml).toContain('data-role-thinking-setting="true"')
     expect(fieldsHtml).toContain('data-role-output-settings="true"')
-    expect(fieldsHtml).toContain('data-role-output-token-input-group="true"')
-    expect(fieldsHtml).toContain("lg:grid-cols-[minmax(12rem,0.8fr)_minmax(18rem,1.2fr)]")
+    expect(fieldsHtml).toContain('data-role-output-token-input="true"')
+    expect(fieldsHtml).toContain('data-role-temperature-settings="true"')
+    expect(fieldsHtml).toContain('data-role-temperature-input="true"')
     expect(fieldsHtml).toContain('data-slot="field-set"')
     expect(fieldsHtml).not.toContain("Provider Order")
     expect(fieldsHtml).not.toContain("Manual order")
     expect(fieldsHtml).toContain("Model Fallback")
     expect(fieldsHtml).toContain("model_fallback_enabled")
     expect(fieldsHtml).toContain("Thinking")
-    expect(fieldsHtml).toContain("Preferred")
-    expect(fieldsHtml).toContain("Required")
+    // Thinking is now a single Switch, not a 3-way radio group.
     expect(fieldsHtml).toContain('data-slot="switch"')
-    expect(fieldsHtml).toContain('data-slot="radio-group"')
-    expect(fieldsHtml).not.toContain("Try the next model group")
-    expect(fieldsHtml).toContain('data-role-context-settings="true"')
-    expect(fieldsHtml).toContain('data-role-output-settings="true"')
-    expect(fieldsHtml).toContain("Context Tokens")
-    expect(fieldsHtml).toContain("Output Tokens")
-    expect(fieldsHtml).toContain("Required Min")
-    expect(fieldsHtml).toContain("Use Max")
-    expect(fieldsHtml).toContain('value="64000"')
-    expect(fieldsHtml).toContain("Context route max token range: min 65,536 / max 200,000. 1 route cap unavailable.")
-    expect(fieldsHtml).toContain("Output route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
-    expect(fieldsHtml).not.toContain("Require routes to prove")
-    expect(fieldsHtml).not.toContain("If Target Exceeds Route Cap")
-    expect(fieldsHtml).not.toContain("Use route max and mark Limited")
-    expect(fieldsHtml).toContain('data-slot="select-trigger"')
-    expect(fieldsHtml).not.toContain("Temperature")
-    expect(fieldsHtml).not.toContain("Max Tokens")
+    expect(fieldsHtml).not.toContain('data-slot="radio-group"')
+    expect(fieldsHtml).not.toContain("Preferred")
+    expect(fieldsHtml).not.toContain('data-slot="select-trigger"')
+    // Context Tokens field is removed entirely.
+    expect(fieldsHtml).not.toContain('data-role-context-settings="true"')
+    expect(fieldsHtml).not.toContain("Context Tokens")
+    expect(fieldsHtml).not.toContain("Required Min")
+    expect(fieldsHtml).not.toContain("Use Max")
+    // Output field is renamed and carries thousands-separated value + Temperature.
+    expect(fieldsHtml).toContain("Max output tokens")
+    expect(fieldsHtml).toContain('value="128,000"')
+    expect(fieldsHtml).toContain("Temperature")
+    expect(fieldsHtml).toContain('value="0.7"')
+    expect(fieldsHtml).toContain("Route max output token range: min 4,096 / max 16,384. 1 route cap unavailable.")
   })
 
-  it("saves Thinking and context/output token modes as role intent", () => {
+  it("maps the draft to the three-param role intent (empty output/temperature -> null)", () => {
     expect(roleIntentFromSettingsDraft({
       providerPreference: "manual_order",
-      thinking: "required",
-      contextTokenMode: "required_minimum",
-      contextTokens: "64000",
-      outputTokenMode: "maximum_available",
-      outputTokens: "",
-    })).toMatchObject({
+      thinking: true,
+      maxOutputTokens: "128000",
+      temperature: "0.7",
+    })).toEqual({
       provider_preference: "manual_order",
-      thinking: "required",
-      target_context_tokens: {
-        mode: "required_minimum",
-        value: 64000,
-        downgrade: "allow",
-      },
-      target_output_tokens: {
-        mode: "maximum_available",
-      },
+      thinking: true,
+      max_output_tokens: 128000,
+      temperature: 0.7,
+    })
+
+    expect(roleIntentFromSettingsDraft({
+      providerPreference: "manual_order",
+      thinking: false,
+      maxOutputTokens: "",
+      temperature: "",
+    })).toEqual({
+      provider_preference: "manual_order",
+      thinking: false,
+      max_output_tokens: null,
+      temperature: null,
     })
   })
 
-  it("does not tell users to run Role Test when route max token caps are unavailable", () => {
+  it("formats and strips thousands separators for the output token input", () => {
+    expect(formatThousands("128000")).toBe("128,000")
+    expect(formatThousands("1")).toBe("1")
+    expect(formatThousands("")).toBe("")
+    // Tolerates separators / stray chars already in the string (live typing).
+    expect(formatThousands("128,00")).toBe("12,800")
+    expect(stripThousands("128,000")).toBe("128000")
+    expect(stripThousands("12ab34")).toBe("1234")
+  })
+
+  it("shows an unavailable-caps hint for the output field when route caps are unknown", () => {
     const fieldsHtml = renderToStaticMarkup(
       <RoleSettingsFields
         roleName="copilot_chat"
         modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
-          thinking: "required",
-          contextTokenMode: "default",
-          contextTokens: "",
-          outputTokenMode: "target",
-          outputTokens: "",
+          thinking: false,
+          maxOutputTokens: "",
+          temperature: "",
         }}
         tokenLimitSummary={{
           context: {
@@ -2459,8 +2458,7 @@ describe("LlmRolesTab controls", () => {
       />,
     )
 
-    expect(fieldsHtml).toContain("Context route max token caps are unavailable.")
-    expect(fieldsHtml).toContain("Output route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Route max output token caps are unavailable.")
     expect(fieldsHtml).not.toContain("Test first")
   })
 })

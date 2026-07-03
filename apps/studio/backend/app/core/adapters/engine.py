@@ -286,6 +286,39 @@ def _private_build_gateway_model_resolver() -> Any:
     return ModelResolver(config_store=config_store, user_id=config.DEFAULT_USER_ID)
 
 
+def _node_param_overrides(phase_name: str | None) -> dict[str, Any]:
+    """Per-node LLM param overrides for ``phase_name`` (PR3), or empty.
+
+    Read from the run-scoped ``STUDIO_NODE_PARAMS_PATH`` file (set by the run
+    worker to the skill's ``.workspace/node_llm_params.json``). A node's override
+    of thinking / max_output_tokens / temperature is passed straight to the
+    gateway resolver, where it wins over the role default. Keeps node overrides a
+    studio-side concern — the engine and the gateway resolver stay skill-agnostic.
+    """
+    if not phase_name:
+        return {}
+    path_str = os.environ.get("STUDIO_NODE_PARAMS_PATH")
+    if not path_str:
+        return {}
+    path = Path(path_str)
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    nodes = loaded.get("nodes") if isinstance(loaded, dict) else None
+    node = nodes.get(phase_name) if isinstance(nodes, dict) else None
+    if not isinstance(node, dict):
+        return {}
+    overrides: dict[str, Any] = {}
+    for key in ("thinking", "max_output_tokens", "temperature"):
+        value = node.get(key)
+        if value is not None:
+            overrides[key] = value
+    return overrides
+
+
 class _GatewayBackedLLMProvider:
     def __init__(self, resolver: Any) -> None:
         self._resolver = resolver
@@ -293,11 +326,16 @@ class _GatewayBackedLLMProvider:
     def invoke(self, request: LLMProviderRequest) -> LLMProviderResponse:
         metadata = dict(request.metadata)
         try:
+            phase_name = metadata.get("phase_name")
+            overrides = _node_param_overrides(phase_name)
             model = self._resolver.resolve(
                 request.role,
                 model_override=metadata.get("model_override"),
                 callbacks=tuple(metadata.get("callbacks") or ()),
-                phase_name=metadata.get("phase_name"),
+                phase_name=phase_name,
+                thinking_enabled=overrides.get("thinking"),
+                max_output_tokens=overrides.get("max_output_tokens"),
+                temperature=overrides.get("temperature"),
             )
             tools = metadata.get("bound_tools") or []
             if tools and hasattr(model, "bind_tools"):

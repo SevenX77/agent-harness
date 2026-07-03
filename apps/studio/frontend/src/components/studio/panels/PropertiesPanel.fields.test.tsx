@@ -14,6 +14,8 @@ import {
   llmCompareModelGroupSearchValue,
   llmRoleSelectOptionState,
   modelGroupRouteOptions,
+  nodeLlmParamsDraftFromApi,
+  nodeLlmParamsDraftToApi,
   PropertiesPanel,
   RoleTestControl,
   roleEndpointRouteOptions,
@@ -819,5 +821,38 @@ describe('PropertiesPanel - compare candidate status light', () => {
       />,
     )
     expect(html).not.toContain('data-llm-compare-status-light')
+  })
+})
+
+describe('PropertiesPanel - node LLM param overrides mapping', () => {
+  it('maps API node params to the draft, treating null/absent as inherit (empty string)', () => {
+    expect(nodeLlmParamsDraftFromApi(undefined)).toEqual({
+      thinking: null,
+      maxOutputTokens: '',
+      temperature: '',
+    })
+    expect(nodeLlmParamsDraftFromApi({ thinking: true, max_output_tokens: 128000, temperature: 0.7 })).toEqual({
+      thinking: true,
+      maxOutputTokens: '128000',
+      temperature: '0.7',
+    })
+    expect(nodeLlmParamsDraftFromApi({ thinking: null, max_output_tokens: null, temperature: null })).toEqual({
+      thinking: null,
+      maxOutputTokens: '',
+      temperature: '',
+    })
+  })
+
+  it('maps the draft back to API params, sending null for empty fields', () => {
+    expect(nodeLlmParamsDraftToApi({ thinking: true, maxOutputTokens: '128000', temperature: '0.7' })).toEqual({
+      thinking: true,
+      max_output_tokens: 128000,
+      temperature: 0.7,
+    })
+    expect(nodeLlmParamsDraftToApi({ thinking: null, maxOutputTokens: '', temperature: '' })).toEqual({
+      thinking: null,
+      max_output_tokens: null,
+      temperature: null,
+    })
   })
 })

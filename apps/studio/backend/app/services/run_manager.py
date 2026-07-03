@@ -119,6 +119,10 @@ def _run_worker_main(
     emit_to_queue = _queue_event_subscriber(process_queue)
     if roles_path_override:
         os.environ["STUDIO_LLM_ROLES_PATH"] = roles_path_override
+    # PR3: point the resolver at this skill's per-node param overrides so agent
+    # nodes with a thinking/max_output_tokens/temperature override run with them.
+    # <skill>/.workspace is run_dir.parent.parent; missing file is fine (no overrides).
+    os.environ["STUDIO_NODE_PARAMS_PATH"] = str(run_dir.parent.parent / "node_llm_params.json")
     try:
         adapter = build_engine_adapter()
         run_payload = {

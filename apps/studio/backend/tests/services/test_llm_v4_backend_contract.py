@@ -637,21 +637,14 @@ def test_roles_v3_authoring_schema_migrates_legacy_provider_preferences_to_manua
                     "model_fallback_enabled": True,
                     "intent": {
                         "provider_preference": "official_first",
-                        "thinking": "preferred",
-                        "target_output_tokens": {
-                            "mode": "target",
-                            "value": 128000,
-                            "downgrade": "allow_with_warning",
-                        },
+                        "thinking": True,
+                        "max_output_tokens": 128000,
+                        "temperature": 0.2,
                     },
                     "model_groups": [
                         {
                             "canonical_id": "claude-sonnet-4-7",
                             "display_name": "Claude Sonnet 4.7",
-                            "intent": {
-                                "thinking": "inherit",
-                                "target_output_tokens": {"mode": "inherit"},
-                            },
                             "provider_models": [
                                 {
                                     "route_id": "anthropic-official:claude-sonnet-4-7",
@@ -678,6 +671,9 @@ def test_roles_v3_authoring_schema_migrates_legacy_provider_preferences_to_manua
     assert data.roles["analyst"].role_kind == "graph_agent"
     assert data.roles["analyst"].model_fallback_enabled is True
     assert data.roles["analyst"].intent.provider_preference == "manual_order"
+    assert data.roles["analyst"].intent.thinking is True
+    assert data.roles["analyst"].intent.max_output_tokens == 128000
+    assert data.roles["analyst"].intent.temperature == 0.2
     assert data.roles["analyst"].model_groups[0].canonical_id == "claude-sonnet-4-7"
     assert data.roles["analyst"].model_groups[0].provider_models[0].route_id == (
         "anthropic-official:claude-sonnet-4-7"
@@ -686,7 +682,8 @@ def test_roles_v3_authoring_schema_migrates_legacy_provider_preferences_to_manua
     assert data.roles["copilot_chat"].intent.provider_preference == "manual_order"
 
 
-def test_role_level_intent_rejects_inherit_token_mode() -> None:
+def test_role_level_intent_rejects_deleted_token_intent_field() -> None:
+    # PR3 deleted the TokenIntent-based fields; extra="forbid" now rejects them.
     with pytest.raises(ValidationError) as exc_info:
         RolesData.model_validate(
             {
@@ -698,7 +695,7 @@ def test_role_level_intent_rejects_inherit_token_mode() -> None:
                         "system_prompt_prefix": "",
                         "model_fallback_enabled": True,
                         "intent": {
-                            "target_output_tokens": {"mode": "inherit"},
+                            "target_output_tokens": {"mode": "target", "value": 1024},
                         },
                         "model_groups": [],
                     }
@@ -712,8 +709,34 @@ def test_role_level_intent_rejects_inherit_token_mode() -> None:
         "analyst",
         "intent",
         "target_output_tokens",
-        "mode",
     ) in error_locations
+
+
+def test_role_level_intent_accepts_three_generation_params() -> None:
+    data = RolesData.model_validate(
+        {
+            "schema_version": 3,
+            "model_bundles": {},
+            "roles": {
+                "analyst": {
+                    "role_kind": "graph_agent",
+                    "system_prompt_prefix": "",
+                    "model_fallback_enabled": True,
+                    "intent": {
+                        "provider_preference": "manual_order",
+                        "thinking": True,
+                        "max_output_tokens": 4096,
+                        "temperature": 0.5,
+                    },
+                    "model_groups": [],
+                }
+            },
+        }
+    )
+    intent = data.roles["analyst"].intent
+    assert intent.thinking is True
+    assert intent.max_output_tokens == 4096
+    assert intent.temperature == 0.5
 
 
 def test_roles_v2_round_trip_and_reference_validation(tmp_path: Path) -> None:

@@ -18,6 +18,8 @@ import type {
   GoldenBaselinePlan,
   GoldenTemplate,
   JsonObject,
+  NodeLlmParams,
+  NodeLlmParamsMap,
   PredictDiagnosticExport,
   PublishResult,
   PublishSkillReq,
@@ -765,6 +767,31 @@ export async function getCompareGroup(
 ): Promise<CompareRunGroupResponse> {
   const response = await api.get<CompareRunGroupResponse>(
     `/skills/${skillId}/runs/compare/${encodeURIComponent(compareGroupId)}`,
+  )
+  return response.data
+}
+
+/**
+ * PR3: read every node's persisted LLM param overrides for a skill.
+ * GET `/skills/{id}/node-llm-params` → NodeLlmParamsMap.
+ */
+export async function getNodeLlmParams(skillId: string): Promise<NodeLlmParamsMap> {
+  const response = await api.get<NodeLlmParamsMap>(`/skills/${skillId}/node-llm-params`)
+  return response.data
+}
+
+/**
+ * PR3: replace one node's LLM param overrides (an all-null body clears the node).
+ * PUT `/skills/{id}/nodes/{node_id}/node-llm-params` → NodeLlmParams.
+ */
+export async function putNodeLlmParams(
+  skillId: string,
+  nodeId: string,
+  params: NodeLlmParams,
+): Promise<NodeLlmParams> {
+  const response = await api.put<NodeLlmParams>(
+    `/skills/${skillId}/nodes/${encodeURIComponent(nodeId)}/node-llm-params`,
+    params,
   )
   return response.data
 }

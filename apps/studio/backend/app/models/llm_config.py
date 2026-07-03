@@ -223,63 +223,24 @@ class LLMCredentialsFile(BaseModel):
         return compute_credential_fingerprint(self.provider_endpoints[endpoint_id])
 
 
-class RoleTokenIntent(BaseModel):
-    """Role-level token intent. Role level cannot inherit from a parent."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Literal["default", "maximum_available", "target"]
-    value: int | None = Field(default=None, ge=1)
-    downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_required_minimum(cls, value: object) -> object:
-        return _migrate_required_minimum_token_intent(value)
-
-
-class TokenIntent(BaseModel):
-    """Nested token intent. Model groups may inherit from the role."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Literal["inherit", "default", "maximum_available", "target"]
-    value: int | None = Field(default=None, ge=1)
-    downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_required_minimum(cls, value: object) -> object:
-        return _migrate_required_minimum_token_intent(value)
-
-
 class RoleIntent(BaseModel):
-    """User intent stored at the Role level."""
+    """User intent stored at the Role level.
+
+    PR3: three role-level generation params only. ``thinking`` is a best-effort
+    switch (enable reasoning when the model supports it, else warn — never a fit
+    downgrade). ``max_output_tokens`` is a plain number clamped into the route's
+    output-token range (or the route max when unset). ``temperature`` is written
+    through to the route runtime settings. The old thinking 3-tier, TokenIntent
+    modes / downgrade, ``target_context_tokens`` and ``cost_priority`` are gone
+    (no backward compat — old paths deleted).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     provider_preference: Literal["manual_order"] = "manual_order"
-    thinking: Literal["off", "preferred", "required"] = "off"
-    target_context_tokens: RoleTokenIntent | None = None
-    target_output_tokens: RoleTokenIntent | None = None
-    cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_provider_preference(cls, value: object) -> object:
-        return _migrate_provider_preference(value)
-
-
-class ModelGroupIntent(BaseModel):
-    """Optional Model Group override intent."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    provider_preference: Literal["manual_order"] | None = None
-    thinking: Literal["inherit", "off", "preferred", "required"] = "inherit"
-    target_context_tokens: TokenIntent | None = None
-    target_output_tokens: TokenIntent | None = None
-    cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+    thinking: bool = False
+    max_output_tokens: int | None = Field(default=None, ge=1)
+    temperature: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="before")
     @classmethod
@@ -288,22 +249,25 @@ class ModelGroupIntent(BaseModel):
 
 
 class RoleProviderModel(BaseModel):
-    """One selected provider model option inside a Model Group."""
+    """One selected provider model option inside a Model Group.
+
+    Model-only: generation params live at the role level (see ``RoleIntent``),
+    so a provider model carries no per-provider intent."""
 
     model_config = ConfigDict(extra="forbid")
 
     route_id: str
-    intent: ModelGroupIntent | None = None
 
 
 class RoleModelGroup(BaseModel):
-    """One user-authored Model Group in a Role."""
+    """One user-authored Model Group in a Role.
+
+    Model-only: no per-group intent — generation params are role-level."""
 
     model_config = ConfigDict(extra="forbid")
 
     canonical_id: str
     display_name: str
-    intent: ModelGroupIntent = Field(default_factory=ModelGroupIntent)
     provider_models: list[RoleProviderModel] = Field(default_factory=list)
 
 
@@ -313,17 +277,6 @@ def _migrate_provider_preference(value: object) -> object:
     if value.get("provider_preference") in {"official_first", "ready_first"}:
         return {**value, "provider_preference": "manual_order"}
     return value
-
-
-def _migrate_required_minimum_token_intent(value: object) -> object:
-    if not isinstance(value, dict):
-        return value
-    if value.get("mode") != "required_minimum":
-        return value
-    migrated = dict(value)
-    migrated["mode"] = "maximum_available"
-    migrated["value"] = None
-    return migrated
 
 
 class RoleEntry(GatewayRoleEntry):

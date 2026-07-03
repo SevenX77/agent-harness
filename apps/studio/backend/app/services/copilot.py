@@ -573,10 +573,15 @@ def build_options(
     api_key: str,
     workspace_dir: str | Path,
     *,
+    model: str | None = None,
     env_overrides: Mapping[str, str] | None = None,
     can_use_tool: Callable[[str, dict[str, Any], ToolPermissionContext], Any] | None = None,
 ) -> ClaudeAgentOptions:
     """Build per-session Claude Agent SDK options without mutating os.environ.
+
+    ``model`` is the selected route's ``provider_model_id`` — it reaches the CLI
+    natively via ``ClaudeAgentOptions.model`` so EVERY route sends the right model
+    (R7-H). None falls back to the CLI default; production always passes one.
 
     With ``can_use_tool`` (the F5 safe-write path) only Read is pre-allowed and
     permission_mode is "default", so the SDK routes Write/Edit/Bash through the
@@ -616,6 +621,10 @@ def build_options(
         mcp_servers = {}
     return ClaudeAgentOptions(
         cwd=workspace_dir,
+        # R7-H: send the route's own model natively. Missing this made generic
+        # (call_method_id=None) routes run on the CLI default (opus), so a non-opus
+        # endpoint like deepseek got a model it doesn't serve and stalled.
+        model=model,
         permission_mode=permission_mode,
         allowed_tools=allowed_tools,
         env=env,
@@ -1184,6 +1193,7 @@ async def get_or_create_session(
                     cast(str | None, base_url),
                     api_key,
                     workspace_dir,
+                    model=model_code,
                     env_overrides=env_overrides,
                     can_use_tool=_make_safe_write_can_use_tool(skill_id),
                 )
@@ -1456,12 +1466,14 @@ def _resolve_route_runtime(
     base_url = route.base_url.strip() or None
     env_overrides: dict[str, str] = {}
     if route.call_method_id == "ark_anthropic_messages":
+        # ark speaks anthropic via a compatibility base_url + a bearer AUTH_TOKEN.
+        # The model itself now rides the native options.model (see build_options),
+        # NOT an ANTHROPIC_MODEL env — so the two special call methods and every
+        # generic route convey the model the same single way.
         base_url = _ark_anthropic_base_url(route.base_url)
         env_overrides["ANTHROPIC_AUTH_TOKEN"] = api_key
-        env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
     elif route.call_method_id == "deepseek_anthropic_messages":
         base_url = _deepseek_anthropic_base_url(route.base_url)
-        env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
     return api_key, base_url, env_overrides
 
 
@@ -1613,7 +1625,13 @@ async def run_route_sdk_test(
     with tempfile.TemporaryDirectory(prefix="copilot-sdk-test-") as workspace:
         token = _sdk_test_token()
         (Path(workspace) / _SDK_TEST_FILE).write_text(token, encoding="utf-8")
-        options = build_options(base_url, api_key, workspace, env_overrides=env_overrides)
+        options = build_options(
+            base_url,
+            api_key,
+            workspace,
+            model=route.provider_model_id,
+            env_overrides=env_overrides,
+        )
         client = _session_factory(options)
         try:
             async with asyncio.timeout(timeout_s):

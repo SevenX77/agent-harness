@@ -128,6 +128,26 @@ def test_passes_when_model_echoes_the_probe_token(monkeypatch: pytest.MonkeyPatc
     assert client.closed is True, "the client must be closed locally (not via global cleanup)"
 
 
+def test_sdk_route_test_passes_provider_model_to_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    # R7-9 (copilot test 卡住): the route test must send the route's OWN model to
+    # the endpoint. build_options previously never set model=, so testing a generic
+    # route (call_method_id=None) sent the CLI default (opus) to e.g. deepseek and
+    # the test hung. Capture the options handed to the SDK and assert the model.
+    captured: dict[str, object] = {}
+
+    def factory(options: object) -> FakeClient:
+        captured["model"] = options.model
+        return FakeClient(messages=_echoed_token_messages())
+
+    monkeypatch.setattr(copilot, "_sdk_test_token", lambda: _TOKEN)
+    monkeypatch.setattr(copilot, "_session_factory", factory)
+
+    result = _run(_route(), _CredProvider())
+
+    assert result.status == "ok"
+    assert captured["model"] == "claude-sonnet"
+
+
 def test_fails_when_token_is_not_echoed(monkeypatch: pytest.MonkeyPatch) -> None:
     # No token in the answer = the model never really read the file = the tool
     # loop wasn't exercised → must FAIL (copilot's whole job is using tools).

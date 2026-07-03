@@ -518,9 +518,53 @@ def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
         "https://ark.cn-beijing.volces.com/api/compatible"
     )
     assert client.options.env["ANTHROPIC_AUTH_TOKEN"] == "ark-secret"
-    assert client.options.env["ANTHROPIC_MODEL"] == "doubao-seed-2-0-pro-260215"
+    # The model reaches the CLI via the native options.model, NOT an ANTHROPIC_MODEL
+    # env hack — so it works for EVERY route, not just the two special ark/deepseek
+    # call methods (deepseek 卡死根因: generic routes never conveyed a model).
+    assert client.options.model == "doubao-seed-2-0-pro-260215"
+    assert "ANTHROPIC_MODEL" not in client.options.env
     assert isinstance(events[0], CopilotEventContextResolved)
     assert events[1:] == [CopilotEventText(content="ark hello"), CopilotEventDone()]
+
+
+def test_stream_query_passes_generic_route_model_to_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A generic anthropic-compatible route (call_method_id=None — e.g. deepseek via
+    # qiniu) MUST convey its provider_model_id to the CLI as options.model. Before
+    # this fix build_options never set model=, and only the ark/deepseek call
+    # methods smuggled it through ANTHROPIC_MODEL env, so a generic route ran on the
+    # CLI default model (opus) — a non-opus endpoint got a model it does not serve
+    # and stalled (R7-H deepseek 卡死 / 完不成任务).
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="ds hello")], model="deepseek")])
+    route = _resolved_route(
+        base_url="https://api.qnaigc.com/v1",
+        route_id="qiniu:deepseek-v3",
+        endpoint_id="qiniu",
+        provider_model_id="deepseek-v3-0324",
+        canonical_id="deepseek-v3",
+        call_method_id=None,
+    )
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override, role="copilot_chat": _runtime(
+            [route], {route.credential_ref: "qiniu-secret"}
+        ),
+    )
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert client.options is not None
+    assert client.options.model == "deepseek-v3-0324"
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventText(content="ds hello"), CopilotEventDone()]
 
 
 def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(

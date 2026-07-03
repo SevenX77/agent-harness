@@ -1684,17 +1684,15 @@ describe("ProviderCard protocol controls", () => {
 })
 
 describe("endpointTagIsTestable — single-endpoint probe affordance (item 2)", () => {
-  // Clicking an endpoint tag re-probes THAT one (URL, protocol) cell. A tag is a
-  // click target only when there is something to probe and no reason it cannot:
-  //   - not_configured → no api key / base url yet, nothing to test
-  //   - testing        → a probe is already in flight
-  //   - protocol_unsupported → a dormant architectural fact (§4.2: gray = not
-  //     user-fixable); its only affordance is the explicit half-life-bypassing
-  //     Re-probe button (§1.2 matrix point 4), not a plain re-test.
-  it("treats configured, idle endpoints (verified / untested / failed) as testable", () => {
+  // PM 2026-07-03: EVERY state is a direct click-to-test target EXCEPT
+  // protocol_unsupported (the "disabled" cell — its only affordance is the
+  // explicit Re-probe button). The only other non-clickable case is `testing`
+  // (a probe is already in flight, so re-clicking mid-run is a no-op).
+  it("treats every state — verified / untested / failed / not-configured — as directly testable", () => {
     for (const status of [
       "ok",
       "untested",
+      "not_configured",
       "invalid_key",
       "rate_limited",
       "quota_exceeded",
@@ -1706,10 +1704,9 @@ describe("endpointTagIsTestable — single-endpoint probe affordance (item 2)", 
     }
   })
 
-  it("does not treat testing / not_configured / protocol_unsupported cells as testable", () => {
-    expect(endpointTagIsTestable("testing")).toBe(false)
-    expect(endpointTagIsTestable("not_configured")).toBe(false)
+  it("only excludes protocol_unsupported (Re-probe only) and the transient testing state", () => {
     expect(endpointTagIsTestable("protocol_unsupported")).toBe(false)
+    expect(endpointTagIsTestable("testing")).toBe(false)
   })
 })
 

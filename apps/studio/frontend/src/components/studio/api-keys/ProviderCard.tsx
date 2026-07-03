@@ -783,13 +783,13 @@ function endpointStatusLabel(status: TestMessageStatus): string {
 function endpointStatusSurfaceClass(status: TestMessageStatus): string {
   if (status === "ok") return "border-success bg-success/10 text-foreground"
   if (status === "testing") return "border-primary/70 bg-primary/10 text-foreground"
-  // untested-but-configured is a live "click to test" target (item 2). ONLY the
-  // TEXT is un-muted (readable foreground) so it no longer looks as dead as an
-  // unusable cell; the border + surface keep the SAME quiet muted treatment as
-  // every other neutral cell — we do NOT promote the border to a full-strength
-  // colour (that made the tag shout like a verified/failed one). Design §4.2:
-  // untested = gray but SELECTABLE; UI-spec §2.9: "neutral/untested" tag.
-  if (status === "untested") return "border-border/70 bg-muted/10 text-foreground"
+  // untested-but-configured is a live "click to test" target (item 2), so it
+  // must read as clearly actionable: a BRIGHT border matching the bright text
+  // (both `foreground`), NOT a muted gray outline (PM 2026-07-03: "边框要和字体
+  // 颜色一样是亮色"). The neutral (non green/blue/red) colour still tells it
+  // apart from tested cells, but the bright outline says "you can click me".
+  // Design §4.2: untested = neutral but SELECTABLE.
+  if (status === "untested") return "border-foreground bg-muted/10 text-foreground"
   // not_configured: no api key / base url yet → nothing to test → muted.
   if (status === "not_configured") return "border-border/70 bg-muted/10 text-muted-foreground"
   // protocol_unsupported is a dormant architectural fact about the (URL,
@@ -802,16 +802,16 @@ function endpointStatusSurfaceClass(status: TestMessageStatus): string {
 /**
  * Whether clicking an endpoint tag re-probes that one (URL, protocol) cell.
  *
- * Item 2: an endpoint tag is a single-endpoint test trigger. Any configured,
- * idle cell (verified / untested / failed) is a live click target — a re-test is
- * always meaningful. It is NOT clickable when there is nothing to probe or a
- * probe cannot run: `not_configured` (no api key / base url yet), `testing` (a
- * probe is already in flight), or `protocol_unsupported` (a dormant
- * architectural fact whose only affordance is the explicit half-life-bypassing
- * Re-probe button, §1.2 matrix point 4).
+ * Item 2 (PM 2026-07-03): EVERY state is a direct click-to-test target EXCEPT
+ * `protocol_unsupported` — that "disabled" cell is a dormant architectural fact
+ * whose only affordance is the explicit half-life-bypassing Re-probe button
+ * (§1.2 matrix point 4). Verified / untested / failed / not-configured all probe
+ * directly on click. The only other exclusion is `testing`: a probe is already
+ * in flight for this cell, so re-clicking it mid-run is a no-op, not a state you
+ * choose to test.
  */
 export function endpointTagIsTestable(status: TestMessageStatus): boolean {
-  return status !== "testing" && status !== "not_configured" && status !== "protocol_unsupported"
+  return status !== "testing" && status !== "protocol_unsupported"
 }
 
 function endpointStateDisplayStatus({

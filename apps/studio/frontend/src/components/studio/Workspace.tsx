@@ -49,6 +49,7 @@ import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
+import type { IoBoundarySelection } from "./panels/io-target"
 import { SettingsPageView, useSettingsPageController, type SettingsTab } from "./SettingsPage"
 import { Toolbar, type PanelKind } from "./Toolbar"
 import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
@@ -339,6 +340,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const settingsController = useSettingsPageController()
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
+  // Which boundary pseudo-node (Input / Output) is selected, so the i/o panel can
+  // scope to that role. Mutually exclusive with a phase selection: selecting a
+  // boundary clears the phase, and vice-versa (PM 2026-07-03).
+  const [ioBoundary, setIoBoundary] = useState<IoBoundarySelection>(null)
   const [childDetailPatch, setChildDetailPatch] = useState<ChildDetailPatch | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<SelectedEdge | null>(null)
   const [inFlight, setInFlight] = useState<Partial<Record<EditorSide, boolean>>>({})
@@ -652,12 +657,23 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setSelectedNodeId(node.id)
     setSelectedNode(node)
     setSelectedEdge(null)
+    setIoBoundary(null)
   }
 
   const handleNodeDeselect = () => {
     setSelectedNodeId(null)
     setSelectedNode(null)
     setSelectedEdge(null)
+    setIoBoundary(null)
+  }
+
+  // Selecting a boundary pseudo-node (Input / Output): drop any phase selection
+  // and record which boundary so the i/o panel scopes to input- or output-only.
+  const handleBoundarySelect = (which: 'input' | 'output') => {
+    setSelectedNodeId(null)
+    setSelectedNode(null)
+    setSelectedEdge(null)
+    setIoBoundary(which)
   }
 
   // Reverse of the node→file reveal: clicking a node-definition file in the
@@ -2295,6 +2311,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         assetDirectoryTree={assetDirectoryTree}
         assetSubgraphTree={assetSubgraphTree}
         selectedNode={selectedNode}
+        ioBoundary={ioBoundary}
         selectedNodeStatus={selectedNodeStatus}
         selectedTestInputId={selectedTestInputId}
         onSelectTestInput={setSelectedTestInputId}
@@ -2441,6 +2458,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       selectedNodeId={selectedNodeId}
                       onNodeSelect={handleNodeSelect}
                       onNodeDeselect={handleNodeDeselect}
+                      onBoundarySelect={handleBoundarySelect}
                       revealRequest={revealRequest}
                       focusNodeRequest={focusNodeRequest}
                       onNodeFileOpen={handleFileOpen}

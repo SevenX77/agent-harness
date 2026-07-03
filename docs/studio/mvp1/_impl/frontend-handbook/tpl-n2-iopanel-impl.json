@@ -2,7 +2,7 @@
  "id": "n2_iopanel_impl",
  "title": "i/o 面板 · 实施详情",
  "design_ref": "n2_iopanel_design",
- "intro": "本页是 i/o 面板前端的现状/实施/测试,1:1 对应设计页 n2_iopanel_design(原子 25/26/27/30/32/33/34)。2026-07-02 r3(PM 三轮确认)重构并同轮实施完成:面板 = 实例预览(#25)+ Configure 入口 + 输入文件/artifact 文件 list 行;输入配置弹窗 = 黑板优先字段勾选树 + Add file 导入(#32);输出配置弹窗 = artifacts 清单 × 黑板全字段勾选(#33);New file 取代内联表单(#26);golden 区移出面板(#34)。写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。全部真机验证(截图见测试页)。唯一存留 = golden run/trace 交互 + 后端逐节点粒度(后续轮 #12)。",
+ "intro": "本页是 i/o 面板前端的现状/实施/测试,1:1 对应设计页 n2_iopanel_design(原子 25/26/27/30/32/33/34)。2026-07-02 r3(PM 三轮确认)重构并同轮实施完成。**2026-07-03 r5**(PM 真机 4 点反馈,feat/io-node-scoped-config)把「画布节点↔io config」关系模型建对:① 面板**按角色收敛段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段;边界伪节点点击经 onBoundarySelect 承载身份,不再一律 deselect);② io 字段**全链路嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端 fieldPathRows 树遍历,子字段 chapter.aa_number 可独立勾选;输出侧 artifacts 只认顶层键,嵌套仅展示);③ 输入配置**改内联可折叠**(InputConfigInline,替换 InputConfigDialog modal;输出 artifacts 因多卡片保留 scoped modal);④ New file 改 ghost list 行(修订 r4b 的 secondary)。写回统一走 onPhaseFileSave + sha256(旧内容)乐观锁。唯一存留 = golden run/trace 交互 + 后端逐节点粒度(后续轮 #12)。",
  "functions": [
   {
    "n": 25,
@@ -17,7 +17,7 @@
    "n": 26,
    "cap": "test-inputs-manage",
    "design_ref": "n2-atom-26",
-   "current": "现状:符合(r3)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 进编辑器。内联 JSON 创建表单已删。 r4b:New file/Run-as-batch 改 shadcn Button(variant=secondary),list 行改无边框 ghost(选中 bg-accent),对齐 FileRow。",
+   "current": "现状:符合(r3/r5)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 进编辑器。内联 JSON 创建表单已删。 r4b:list 行无边框 ghost(选中 bg-accent),对齐 FileRow。 r5(PM #4):New file 从 `variant=secondary`(暗色近黑 `--secondary: oklch(0.274…)`)改**透明底 hover 亮的 ghost list 行**(与上方 item 行同款 `text-muted-foreground hover:bg-accent hover:text-foreground`),融进 panel list 样式。",
    "gap": "符合(内联表单→New file)。",
    "fe_status": "符合",
    "be_dep": "test_inputs CRUD live。",
@@ -28,32 +28,34 @@
    "n": 27,
    "cap": "io-panel-perfield",
    "design_ref": "n2-atom-27",
-   "current": "现状:符合。resolveIoEditTarget per-node 解析;配置弹窗写回同一目标文件。",
-   "gap": "符合。",
+   "current": "现状:符合(r5 补齐角色收敛)。resolveIoEditTarget per-node 解析;配置写回同一目标文件。r5:选中态承载 4 态(resolveIoNodeRole:input-boundary/output-boundary/phase/graph),ioPanelScope 按角色开关段——Input 边界只 input+test inputs、Output 边界只 output+artifacts、phase input(黑板切片)+output 预览、空白=GRAPH.md 两段。GraphCanvas 点边界伪节点经 onBoundarySelect(input/output)传身份(此前一律 onNodeDeselect,点 Input/Output/空白状态层同一件事,面板无条件全渲染=drift,本轮补齐 F3 归属规则)。",
+   "gap": "符合(r5 关系模型建对)。",
    "fe_status": "符合",
-   "be_dep": "无。"
+   "be_dep": "无。",
+   "fe_status_prev": "无角色收敛(全渲染)",
+   "fe_resync": "2026-07-03 r5:边界节点身份 + 按角色收敛段"
   },
   {
    "n": 32,
    "cap": "input-config-tree",
    "design_ref": "n2-atom-32",
-   "current": "现状:符合(r3 新建)。InputConfigDialog(shadcn Dialog/Checkbox/Input/Button):blackboardAtNode 复用 staticEdgeInference 出黑板行(勾选=io.inputs 消费);Add file 调 importIoIntoWorkspace 拷进 .workspace/imports 并 candidatesFromScanEntries 出字段候选;applyIoInputChecks 重建 io.inputs(黑板消费 + source:'file' 单文件/批量 dir+pattern)写回,乐观 hash 锁。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。 r4:reconcileInputFields 三态(matched/available/missing),MissingFieldRow 置顶报错、FieldCheckRow highlighted 竖条+accent。 r4b:Input 伪节点声明的图入口无 source:'file' → missing 置顶;导入改原生 OS 选择器(select_file/select_directory),不再手打 path。",
-   "gap": "符合设计。",
+   "current": "现状:符合(r3 新建,r5 改内联+嵌套)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Add file 调 importIoIntoWorkspace + candidatesFromScanEntries,原生 OS 选择器。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。",
+   "gap": "符合设计(r5 内联 + 嵌套)。",
    "fe_status": "符合",
-   "be_dep": "已就绪:POST /api/io/scan + /io/import(纯读/拷贝,7 后端测试绿)。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-02 r3:未实施→符合(实施 + 真机验证)"
+   "be_dep": "已就绪:POST /api/io/scan + /io/import;engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。",
+   "fe_status_prev": "r3 modal + 顶层扁平",
+   "fe_resync": "2026-07-03 r5:modal→内联可折叠;顶层扁平→嵌套树可独立勾选"
   },
   {
    "n": 33,
    "cap": "output-artifacts-config",
    "design_ref": "n2-atom-33",
-   "current": "现状:符合(r3 新建)。OutputConfigDialog:blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,每个 artifact 卡同一套勾选;applyGraphArtifacts 写 GRAPH.md io.artifacts 清单;single/per-item 分段钮 + iterate range 推断 ×N;固定命名预览随 stem/mode 变。 r4:reconcileOutputFields 三态,missing dialog 级置顶,matched(io.outputs 成员)高亮。",
-   "gap": "符合设计;旧 per-field target 已删。",
+   "current": "现状:符合(r3 新建,r5 嵌套展示)。OutputConfigDialog(仍是 scoped modal——多 artifact 卡片编辑器窄面板塞不下,PM 允许的兜底,只在 Output 边界/GRAPH.md 角色出现):blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,r5 按 fieldPathRows **递归展开**嵌套输出对象(segmentation_result → segmentation_result.bb_number)——但**嵌套子行仅展示形状、不独立勾选**(selectableMaxDepth=0):artifacts 由 engine writer 按顶层键落盘(write_manifest_artifacts 只认 blackboard 顶层),一个 artifact 携带整块顶层字段(含子字段),没有「只装 bb_number」的引擎语义。applyGraphArtifacts 写 GRAPH.md io.artifacts 清单;single/per-item 分段钮;固定命名预览。 r4:reconcileOutputFields 三态,missing dialog 级置顶,matched(io.outputs 成员)高亮。",
+   "gap": "符合设计;旧 per-field target 已删;嵌套输出展示但不 sub-select(引擎顶层落盘约束)。",
    "fe_status": "符合",
-   "be_dep": "已就绪:engine io.artifacts writer(固定格式,1438 engine 测试绿)。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "2026-07-02 r3:未实施→符合(实施 + 真机验证)"
+   "be_dep": "已就绪:engine io.artifacts writer(固定格式,顶层键落盘,engine 测试绿)。",
+   "fe_status_prev": "r3 顶层扁平 universe",
+   "fe_resync": "2026-07-03 r5:输出 universe 递归展示嵌套(子行 display-only)"
   },
   {
    "n": 30,
@@ -140,7 +142,7 @@
    "screenshots": [
     {
      "file": "n2-47-testinputs-list-newfile-style.png",
-     "caption": "r4b:test-inputs list 无边框 ghost 行(input-1);New file 用 secondary Button(对齐 Configure),不再是黑框"
+     "caption": "test-inputs list 无边框 ghost 行(input-1)。注:此图为 r4b 态,New file 当时用 secondary Button;r5(#4)已改 New file 为透明底 ghost list 行(PM 反馈 secondary 暗色近黑)——见 n2-49 的『+ New file』行"
     }
    ]
   },
@@ -176,6 +178,14 @@
     {
      "file": "n2-46-graph-input-missing-native-picker.png",
      "caption": "r4b:GRAPH.md 输入弹窗——chapters/project_id 声明为图入口但无 source → missing 置顶报错;底部 Import file…/Import folder… 原生选择器按钮"
+    },
+    {
+     "file": "n2-48-iopanel-r5-phase-nested-tree.png",
+     "caption": "r5:选中 phase(segment)——内联「Configure input」展开黑板 context 嵌套树:chapter(object·from input)已勾+展开 caret,缩进子字段 aa_number(integer)已勾=声明消费、title 未勾;只 input 段无 test inputs/artifacts(phase 角色收敛)。真机 Chromium 渲染真实组件+CSS。"
+    },
+    {
+     "file": "n2-49-iopanel-r5-graph-inline-config.png",
+     "caption": "r5:空白=GRAPH.md 图级——两段都显示;内联 Configure input 展开 Graph inputs,chapter 无 source → missing 置顶;New file 改 ghost list 行(透明底、+ 图标,非黑色实心按钮,#4)。"
     }
    ]
   },

@@ -2891,10 +2891,11 @@ function LlmNodeParamsField({
                 max={2}
                 step={0.1}
                 value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
-                onValueChange={(vals) => update({ ...draft, temperature: String(vals[0]) })}
+                onValueChange={(vals) => setDraft({ ...draft, temperature: String(vals[0]) })}
+                onValueCommit={(vals) => persist({ ...draft, temperature: String(vals[0]) })}
                 className="flex-1"
               />
-              <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
+              <span className="w-9 shrink-0 text-right text-xs text-foreground">
                 {draft.temperature === "" ? "—" : draft.temperature}
               </span>
             </div>

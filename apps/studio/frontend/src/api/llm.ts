@@ -1806,8 +1806,8 @@ export async function getRole(roleName: string): Promise<RoleEntry> {
   return response.data
 }
 
-// 固定角色名(引擎 builtin 硬依赖、不可删除,如 md-patch 需要的 `fast`)。
-// 前端据此隐藏这些角色的删除入口;后端删除端点亦拒删(409)。
+// 固定角色名(不可删除、不可改名:引擎 builtin 硬依赖如 `fast`,以及内置 copilot 角色)。
+// 前端据此隐藏删除/改名入口;后端删除端点亦拒删(409)。
 export async function getFixedRoleNames(): Promise<string[]> {
   const response = await api.get<{ fixed_role_names: string[] }>('/llm/fixed-roles')
   return response.data.fixed_role_names
@@ -1819,25 +1819,20 @@ export interface FixedRoleRecommendedModel {
 }
 
 export interface FixedRoleStatus {
-  description: string
   recommendedModels: FixedRoleRecommendedModel[]
-  missingModels: FixedRoleRecommendedModel[]
 }
 
-// 固定角色说明 + 推荐模型 + 当前缺了哪些推荐模型,驱动问号说明和缺模型警告。
+// 固定角色的推荐模型清单。说明文案归前端 i18n;缺哪个推荐模型由前端拿当前内存里的角色
+// 状态实时算(见 role-utils.missingRecommendedModelKeys),不走后端读盘,避免防抖存盘前
+// 读到旧数据的竞态(拖了模型警告还不消失的老 bug)。
 export async function getFixedRoleStatus(roleName: string): Promise<FixedRoleStatus> {
   type BackendModel = { canonical_id: string; display_name: string }
-  const response = await api.get<{
-    description: string
-    recommended_models: BackendModel[]
-    missing_models: BackendModel[]
-  }>(`/llm/fixed-roles/${roleName}`)
-  const fromBackend = (models: BackendModel[]): FixedRoleRecommendedModel[] =>
-    models.map((model) => ({ canonicalId: model.canonical_id, displayName: model.display_name }))
+  const response = await api.get<{ recommended_models: BackendModel[] }>(`/llm/fixed-roles/${roleName}`)
   return {
-    description: response.data.description,
-    recommendedModels: fromBackend(response.data.recommended_models),
-    missingModels: fromBackend(response.data.missing_models),
+    recommendedModels: response.data.recommended_models.map((model) => ({
+      canonicalId: model.canonical_id,
+      displayName: model.display_name,
+    })),
   }
 }
 

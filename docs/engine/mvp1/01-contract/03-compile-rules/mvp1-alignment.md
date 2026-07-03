@@ -136,11 +136,11 @@ StateMapper 目标规则:
 | 操作 | 规则 | 失败错误码 |
 |---|---|---|
 | init | 根 inputs 必须满足 `GRAPH.md io.inputs` | `[F-v3-runtime-state-mapping-failed]` |
-| slice | phase `io.inputs.required` 字段必须在当前 state 中存在 | `[F-v3-runtime-state-mapping-failed]` |
+| slice | phase `io.inputs.required` 字段必须在当前 state 中存在（**递归**:每一层 object 的 `required` 都算，嵌套子字段用点路径 `chapter.aa_number`；子字段仅在其父 object 存在时才被检查——标准 JSON-Schema 语义） | `[F-v3-runtime-state-mapping-failed]` |
 | merge | phase output key 必须是 `io.outputs.properties` 子集 | `[F-v3-runtime-state-mapping-failed]` |
 | final | 根 outputs required 字段必须已产生 | `[F-v3-runtime-state-mapping-failed]` |
 
-⚠️ drift 标注:上表是 mvp1 契约/目标。代码现状 `runtime/state_mapper.py:StateMapper.build_phase_input` 只按 `io.inputs.properties` 过滤，不校验 `required` 缺失；该代码债的 baseline 记录与 refactor-target 在 `02-mechanism/04-run-outer/01-graph-exec`。
+✅ 现状（2026-07-03 起）:`runtime/state_mapper.py:StateMapper.build_phase_input` 先按 `io.inputs.properties` 过滤,再走 `_missing_required_inputs`(→ 递归 `_missing_required_paths`)在**每一层 object** 校验 `required` 缺失,缺失即 `[F-v3-runtime-state-mapping-failed]`,`field_path` 为点路径。这与 output 侧 `_validate_phase_updates_against_schema` 的 `Draft202012Validator` 一致——两个映射方向现在都在**所有嵌套层级**执行同一份 required 契约(此前 input 侧只查顶层,studio io 面板 config 树能展开显示的嵌套子字段却在运行期不被 required 拦截,即 drift;本次统一消除)。studio 侧据此把该运行期失败提前到配置期可视化(见 `docs/studio/mvp1/03_regions/input/mvp1-alignment.md` F3 字段对账三态)。
 
 运行时错误归一化:
 

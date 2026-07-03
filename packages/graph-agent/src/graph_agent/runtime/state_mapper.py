@@ -37,17 +37,58 @@ def filter_runtime_inputs(
     return {key: raw_inputs[key] for key in keys if key in raw_inputs}
 
 
+def _is_object_schema(schema: dict[str, Any]) -> bool:
+    """True when a property subschema describes an object (so its own ``required``
+    applies to the value's members)."""
+    schema_type = schema.get("type")
+    if schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type):
+        return True
+    return isinstance(schema.get("properties"), dict)
+
+
 def _missing_required_inputs(
     filtered: dict[str, Any],
     schema: dict[str, Any] | None,
 ) -> list[str]:
-    """Declared-required input fields absent from the sliced blackboard."""
+    """Declared-required input fields — at EVERY object nesting level — absent
+    from the sliced blackboard.
+
+    ``required`` is walked recursively: a present object property whose subschema
+    declares its own ``required`` has those sub-fields checked too, reported as a
+    dotted path (``chapter.aa_number``). A nested required only bites when its
+    parent object is present (standard JSON-Schema semantics) — an absent optional
+    object is not a violation. This makes the input gate enforce the SAME
+    required contract the output side's Draft2020 validator already enforces at
+    every level (compile-rules §2.3 slice row), instead of only the top level.
+    """
+    return _missing_required_paths(filtered, schema, prefix="")
+
+
+def _missing_required_paths(
+    data: Any,
+    schema: dict[str, Any] | None,
+    *,
+    prefix: str,
+) -> list[str]:
     if not isinstance(schema, dict):
         return []
+    data_map: dict[str, Any] = data if isinstance(data, dict) else {}
+    missing: list[str] = []
     required = schema.get("required")
-    if not isinstance(required, list):
-        return []
-    return sorted(name for name in required if isinstance(name, str) and name not in filtered)
+    if isinstance(required, list):
+        for name in required:
+            if isinstance(name, str) and name not in data_map:
+                missing.append(prefix + name)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for name, subschema in properties.items():
+            if not isinstance(name, str) or name not in data_map:
+                continue
+            if isinstance(subschema, dict) and _is_object_schema(subschema):
+                missing.extend(
+                    _missing_required_paths(data_map[name], subschema, prefix=f"{prefix}{name}.")
+                )
+    return sorted(missing)
 
 
 def _project_full_data_to_phase_updates(

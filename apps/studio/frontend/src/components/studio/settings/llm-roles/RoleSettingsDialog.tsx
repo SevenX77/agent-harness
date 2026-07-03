@@ -80,6 +80,14 @@ export function RoleSettingsFields({
   const outputTokenPlaceholder = tokenLimitSummary.output.max
     ? `Blank uses model max (${formatThousands(String(tokenLimitSummary.output.max))})`
     : "Blank uses model max"
+  // Dragging fires onValueChange continuously; committing every tick up through
+  // onDraftChange re-renders the whole roles tree per pixel of drag and feels
+  // laggy. Track the live position locally and only bubble up on release
+  // (onValueCommit), mirroring the node-level temperature slider.
+  const [liveTemperature, setLiveTemperature] = useState(draft.temperature)
+  useEffect(() => {
+    setLiveTemperature(draft.temperature)
+  }, [draft.temperature])
   return (
     <FieldSet data-role-settings-fields="true" className="gap-0">
       <FieldGroup className="gap-3">
@@ -169,15 +177,16 @@ export function RoleSettingsFields({
                 min={0}
                 max={2}
                 step={0.1}
-                value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
-                onValueChange={(vals) => onDraftChange({
+                value={[liveTemperature === "" ? 1 : Number(liveTemperature)]}
+                onValueChange={(vals) => setLiveTemperature(String(vals[0]))}
+                onValueCommit={(vals) => onDraftChange({
                   ...draft,
                   temperature: String(vals[0]),
                 })}
                 className="flex-1"
               />
-              <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                {draft.temperature === "" ? "—" : draft.temperature}
+              <span className="w-9 shrink-0 text-right text-xs text-foreground">
+                {liveTemperature === "" ? "—" : liveTemperature}
               </span>
             </div>
             <FieldDescription>Drag to set a temperature override; leave untouched to use the model default (e.g. 0.7).</FieldDescription>

@@ -15,6 +15,7 @@ import {
   prepareCopilotJudgeContext,
   postPredictRun,
   publishSkill,
+  interruptCopilot,
   resolveCopilotToolApproval,
   resumeRun,
   saveGoldenBaseline,
@@ -538,6 +539,22 @@ describe('api client auth token', () => {
       resolved: true,
       message: null,
     })
+  })
+
+  it('posts a Copilot interrupt to the interrupt endpoint', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.method).toBe('post')
+      expect(config.url).toBe('/skills/text-segmentation/copilot/interrupt')
+      return {
+        data: { interrupted: true },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await expect(interruptCopilot('text-segmentation')).resolves.toEqual({ interrupted: true })
   })
 
   it('prepares Copilot Judge context with explicit golden refs', async () => {

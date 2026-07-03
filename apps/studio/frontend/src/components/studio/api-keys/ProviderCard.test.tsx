@@ -9,6 +9,7 @@ import {
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
+  endpointTagIsTestable,
   endpointTooltipLines,
   representativeProviderUiState,
   routeTooltipLineStatus,
@@ -1646,6 +1647,36 @@ describe("ProviderCard protocol controls", () => {
     expect(html).not.toContain('data-slot="select-trigger"')
     expect(html).not.toContain(`provider-protocol-${draft.id}`)
     expect(html).not.toContain("Anthropic compatible")
+  })
+})
+
+describe("endpointTagIsTestable — single-endpoint probe affordance (item 2)", () => {
+  // Clicking an endpoint tag re-probes THAT one (URL, protocol) cell. A tag is a
+  // click target only when there is something to probe and no reason it cannot:
+  //   - not_configured → no api key / base url yet, nothing to test
+  //   - testing        → a probe is already in flight
+  //   - protocol_unsupported → a dormant architectural fact (§4.2: gray = not
+  //     user-fixable); its only affordance is the explicit half-life-bypassing
+  //     Re-probe button (§1.2 matrix point 4), not a plain re-test.
+  it("treats configured, idle endpoints (verified / untested / failed) as testable", () => {
+    for (const status of [
+      "ok",
+      "untested",
+      "invalid_key",
+      "rate_limited",
+      "quota_exceeded",
+      "network_error",
+      "timeout",
+      "error",
+    ] as const) {
+      expect(endpointTagIsTestable(status)).toBe(true)
+    }
+  })
+
+  it("does not treat testing / not_configured / protocol_unsupported cells as testable", () => {
+    expect(endpointTagIsTestable("testing")).toBe(false)
+    expect(endpointTagIsTestable("not_configured")).toBe(false)
+    expect(endpointTagIsTestable("protocol_unsupported")).toBe(false)
   })
 })
 

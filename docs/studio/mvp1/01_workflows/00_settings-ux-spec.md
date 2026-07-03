@@ -323,6 +323,13 @@ Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/mo
 - **与其他状态轴正交**：`ui_state`（能不能用，6 态）≠ `capability_state`（了解多少能力：unknown/callable_only/partial/known）≠ `role_fit`（适不适合本角色，4 态）≠ `admission`（运行期 3 态）。
 - **实现 gap**：`ProviderUiState` Literal **去掉 `needs_setup`、加 `failed`（带 reason）+ 蓝态**；`_setup_reason` 改产 `failed` + reason（`missing_config` / `endpoint_unreachable` / `model_failed`）而非 `needs_setup`；`project_route_state` 输入为 `catalog_history`（`draft_history` 仅为旧 metadata fallback），读 Probe Knowledge Catalog 中该 route 是否有历史连通证据。
 
+#### endpoint 标签 = 单端点测试入口 + 灰态两义区分（item 1/2，PM 2026-07-02 拍板）
+`Available Endpoints` 里每个 (canonical base_url, protocol) 格子的**视觉 + 交互**跟着它的状态走，而且必须把「未测但可测」与「架构性不可用」这两种灰**一眼分开**（此前实现把二者都置灰，用户无法区分「还没测」和「这把 key / 域名废了」）：
+
+- **untested（未测但已配置）= 中性可交互态，不是 muted 死态。** §4.2 表里 untested 是「灰、可选」（无「无法选」限定）→ 渲染成**可读的中性标签**（`border-border` + `text-foreground`），不是 `text-muted-foreground` 的置灰。它是**点击即测**的活入口：点这个格子 → 只对这一条 endpoint 单独复测（单端点 test，走 `/llm/endpoints/{id}/test`，**不是整卡 Test**）。verified（绿）/ failed（红）同理，都是可点复测的活格子（§2.9：untested 保持 neutral 候选态）。
+- **protocol_unsupported = 架构事实，格子本体不可点（`cursor-not-allowed`）。** 它是「同域名不服务此协议」的死格子（§1.2 矩阵第 9 点：tooltip 指路同域名的活协议），日常不重测（30 天半衰期门）；唯一动手入口是格子尾巴那个**显式 Re-probe 按钮**（force 复测、绕过半衰期门，§1.2 矩阵第 4 点），不是点格子本体。→ 灰 = 非用户可修的架构事实，与 untested 的「还没测」灰在**可点性**上必须分得开。
+- **not_configured（缺 key / base_url）** 仍是 muted 死态（没东西可测）；**testing** 中的格子走边框流动动画、不可点（正在测）。
+
 ### 4.3 测试落点：role card 里的 model 才做真实测试
 - **API key 页**：只验证 **endpoint**（轻量：连通 / get-models / 第三方加一次模型探测）。
 - **role / copilot 页**：对 **role card 里的所有 model 做真实 probe**，**保证能用** —— 这才是"模型能不能用"的主战场。

@@ -445,9 +445,11 @@ export type EndpointSummary = {
 
 function AvailableEndpointSummary({
   endpoints,
+  onProbeEndpoint,
   onForceEndpointTest,
 }: {
   endpoints: EndpointSummary[]
+  onProbeEndpoint?: (endpointId: string) => void
   onForceEndpointTest?: (endpointId: string) => void
 }) {
   const { t } = useTranslation("settings")
@@ -468,20 +470,43 @@ function AvailableEndpointSummary({
                 ? verifiedSiblingProtocolsOnSameHost(endpoint, endpoints)
                 : []
             const ariaLabel = endpointTooltipText(endpoint, siblingProtocols)
+            // Item 2: a configured, idle cell is a click target that re-probes
+            // just this one (URL, protocol) endpoint. protocol_unsupported cells
+            // stay non-clickable here — their affordance is the Re-probe button.
+            const testable = endpointTagIsTestable(endpoint.status) && Boolean(onProbeEndpoint)
+            const probeThisEndpoint = () => onProbeEndpoint?.(endpoint.id)
             return (
               <span key={endpoint.id} className="inline-flex max-w-full items-center gap-0.5">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span
+                      role={testable ? "button" : undefined}
                       tabIndex={0}
+                      onClick={testable ? probeThisEndpoint : undefined}
+                      onKeyDown={
+                        testable
+                          ? (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault()
+                                probeThisEndpoint()
+                              }
+                            }
+                          : undefined
+                      }
                       className={cn(
-                        "inline-flex h-6 max-w-full cursor-help items-center gap-1.5 rounded-md border border-l-2 px-2 text-[0.625rem] font-medium leading-none",
+                        "inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border border-l-2 px-2 text-[0.625rem] font-medium leading-none",
                         "bg-card font-mono shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
                         endpointStatusSurfaceClass(endpoint.status),
                         endpoint.status === "testing" && "api-route-tag-border-flow",
+                        testable
+                          ? "cursor-pointer hover:bg-muted/40"
+                          : endpoint.status === "protocol_unsupported"
+                            ? "cursor-not-allowed"
+                            : "cursor-help",
                       )}
-                      aria-label={ariaLabel}
+                      aria-label={testable ? `${ariaLabel}. ${t("apiKeys.card.endpointClickToTest")}` : ariaLabel}
                       data-endpoint-status={endpoint.status}
+                      data-endpoint-testable={testable ? "true" : "false"}
                     >
                       {endpoint.status === "testing" ? <Loader2 className="size-2.5 animate-spin" aria-hidden="true" /> : null}
                       {endpoint.errorCode === "no_model_available" ? (
@@ -722,12 +747,33 @@ function endpointStatusLabel(status: TestMessageStatus): string {
 function endpointStatusSurfaceClass(status: TestMessageStatus): string {
   if (status === "ok") return "border-success bg-success/10 text-foreground"
   if (status === "testing") return "border-primary/70 bg-primary/10 text-foreground"
-  if (status === "not_configured" || status === "untested") return "border-border/70 bg-muted/10 text-muted-foreground"
+  // untested-but-configured is a live "click to test" target (item 2), so it
+  // reads as neutral/interactive, NOT muted. Design §4.2: untested = gray but
+  // SELECTABLE (no "无法选" qualifier); UI-spec §2.9: "neutral/untested" tag.
+  // Muting it made an actionable cell look as dead as an unusable one.
+  if (status === "untested") return "border-border bg-muted/20 text-foreground"
+  // not_configured: no api key / base url yet → nothing to test → muted.
+  if (status === "not_configured") return "border-border/70 bg-muted/10 text-muted-foreground"
   // protocol_unsupported is a dormant architectural fact about the (URL,
   // protocol) cell, not something the user must fix (§4.2: red = user action
   // needed) — muted, not destructive.
   if (status === "protocol_unsupported") return "border-border/70 bg-muted/20 text-muted-foreground"
   return "border-tag-destructive-border bg-tag-destructive-border/10 text-foreground"
+}
+
+/**
+ * Whether clicking an endpoint tag re-probes that one (URL, protocol) cell.
+ *
+ * Item 2: an endpoint tag is a single-endpoint test trigger. Any configured,
+ * idle cell (verified / untested / failed) is a live click target — a re-test is
+ * always meaningful. It is NOT clickable when there is nothing to probe or a
+ * probe cannot run: `not_configured` (no api key / base url yet), `testing` (a
+ * probe is already in flight), or `protocol_unsupported` (a dormant
+ * architectural fact whose only affordance is the explicit half-life-bypassing
+ * Re-probe button, §1.2 matrix point 4).
+ */
+export function endpointTagIsTestable(status: TestMessageStatus): boolean {
+  return status !== "testing" && status !== "not_configured" && status !== "protocol_unsupported"
 }
 
 function endpointStateDisplayStatus({
@@ -1636,6 +1682,7 @@ export function ProviderCard({
   showManualModelPanel = false,
   notableProviderKey,
   onModelsUpdated,
+  onProbeEndpoint,
   onForceEndpointTest,
 }: {
   draft: ProviderDraft
@@ -1650,6 +1697,8 @@ export function ProviderCard({
   showManualModelPanel?: boolean
   notableProviderKey?: string
   onModelsUpdated?: (models: ModelInfo[]) => void
+  /** Item 2: re-probe a single (URL, protocol) endpoint cell — the endpoint tag click target. */
+  onProbeEndpoint?: (endpointId: string) => void
   /** Force re-probe one (URL, protocol) cell, bypassing the half-life gate. */
   onForceEndpointTest?: (endpointId: string) => void
 }) {
@@ -2184,7 +2233,7 @@ export function ProviderCard({
           </div>
         ) : null}
         {showAvailableEndpoint ? (
-          <AvailableEndpointSummary endpoints={endpointSummaries} onForceEndpointTest={onForceEndpointTest} />
+          <AvailableEndpointSummary endpoints={endpointSummaries} onProbeEndpoint={onProbeEndpoint} onForceEndpointTest={onForceEndpointTest} />
         ) : null}
         {availableModels.length || hasEmptyModelListWarning ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">

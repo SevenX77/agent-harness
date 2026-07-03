@@ -26,6 +26,7 @@ export function ApiKeysTab({
   backendReachable,
   onProviderFieldChange,
   onGetProviderModels,
+  onProbeEndpoint,
   onForceEndpointTest,
   onDeleteProvider,
   onDeleteProviderEndpoints,
@@ -44,6 +45,7 @@ export function ApiKeysTab({
   | "backendReachable"
   | "onProviderFieldChange"
   | "onGetProviderModels"
+  | "onProbeEndpoint"
   | "onForceEndpointTest"
   | "onDeleteProvider"
   | "onDeleteProviderEndpoints"
@@ -101,6 +103,7 @@ export function ApiKeysTab({
                       persisted={persisted}
                       onFieldChange={(patch, options) => onProviderFieldChange(draft.id, { ...draft, ...patch }, options)}
                       onGetModels={() => onGetProviderModels(draft.id)}
+                      onProbeEndpoint={onProbeEndpoint}
                       onForceEndpointTest={onForceEndpointTest}
                       onDelete={() => onDeleteProvider(draft.id)}
                       onDeleteEndpointIds={onDeleteProviderEndpoints}
@@ -152,6 +155,7 @@ export function ApiKeysTab({
                       persistedEndpoints={persistedEndpoints}
                       onFieldChange={(patch, options) => onProviderFieldChange(draft.id, patch, options)}
                       onGetModels={() => onGetProviderModels(draft.id)}
+                      onProbeEndpoint={onProbeEndpoint}
                       onForceEndpointTest={onForceEndpointTest}
                       onDelete={() => onDeleteProvider(draft.id)}
                       onDeleteEndpointIds={onDeleteProviderEndpoints}

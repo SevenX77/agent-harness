@@ -86,6 +86,8 @@ export interface SettingsPageContentProps {
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>, options?: ProviderDraftChangeOptions) => void
   onGetProviderModels: (providerId: string) => void
+  /** Item 2: re-probe a single (URL, protocol) endpoint cell — the endpoint tag click target. */
+  onProbeEndpoint: (endpointId: string) => void
   /** Force re-probe one (URL, protocol) cell, bypassing the half-life gate (design §1.2 matrix point 4). */
   onForceEndpointTest: (endpointId: string) => void
   onDeleteProvider: (providerId: string) => void

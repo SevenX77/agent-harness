@@ -1533,3 +1533,27 @@ def _missing_artifact_payload(artifact_ref_data: dict[str, Any]) -> dict[str, An
             else "Artifact bytes are missing"
         ),
     }
+
+
+_BUILTIN_LLM_ROLE_RE = re.compile(r"^\s*llm_role:\s*([A-Za-z0-9_-]+)\s*$", re.MULTILINE)
+
+
+def required_builtin_roles() -> frozenset[str]:
+    """引擎 builtin skill 硬依赖的 `llm_role` 集合 —— md-patch 声明 `llm_role: fast`
+    (md2json 校验失败项的外科式修补 agent)。Studio 业务层经此 adapter 边界读取这个
+    引擎事实,不直接 import SDK(见 test_productization_import_boundary_red)。返回纯
+    ``frozenset[str]``,不泄露任何 SDK 具体类型。"""
+
+    import graph_agent
+
+    builtin = Path(graph_agent.__file__).resolve().parent / "skills" / "builtin"
+    if not builtin.is_dir():
+        return frozenset()
+    roles: set[str] = set()
+    for skill_md in builtin.rglob("SKILL.md"):
+        try:
+            text = skill_md.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        roles.update(_BUILTIN_LLM_ROLE_RE.findall(text))
+    return frozenset(roles)

@@ -1,5 +1,6 @@
-import { memo } from "react"
+import { memo, useEffect, useState } from "react"
 import { Cog, Plus, type LucideIcon } from "lucide-react"
+import { getFixedRoleNames } from "@/api/llm"
 import { Button } from "@/components/ui/button"
 import {
   CatalogAccordion,
@@ -49,6 +50,21 @@ export const RoleCardList = memo(function RoleCardList({
   onDeleteRole: (roleName: string) => void
 }) {
   const roleNames = visibleRoleNames(data)
+  // 固定角色(引擎 builtin 硬依赖,如 md-patch 的 fast)不可删除 → 隐藏其删除入口。
+  const [fixedRoleNames, setFixedRoleNames] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => {
+    let alive = true
+    getFixedRoleNames()
+      .then((names) => {
+        if (alive) setFixedRoleNames(new Set(names))
+      })
+      .catch(() => {
+        /* 取不到就当没有固定角色(后端仍会拒删,不影响正确性) */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
   const {
     hasMore,
     sentinelRef,
@@ -92,6 +108,7 @@ export const RoleCardList = memo(function RoleCardList({
                     ownedProviderCodesByModel={ownedProviderCodesByModel}
                     providerModelsByRouteId={providerModelsByRouteId}
                     roleName={roleName}
+                    isFixed={fixedRoleNames.has(roleName)}
                     testStatuses={testStatusesByRole[roleName] ?? {}}
                     testChainRunning={Boolean(roleTestRunningByName[roleName])}
                     roleTestResult={roleTestResults[roleName]}

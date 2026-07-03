@@ -82,6 +82,7 @@ export const RoleCard = memo(function RoleCard({
   getAvailableModelGroup,
   onChange,
   onDeleteRole,
+  isFixed,
 }: {
   data: RolesData
   category: RoleCategory
@@ -90,6 +91,7 @@ export const RoleCard = memo(function RoleCard({
   ownedProviderCodesByModel: ReadonlyMap<string, ReadonlySet<string>>
   providerModelsByRouteId?: ReadonlyMap<string, ProviderModelOption>
   roleName: string
+  isFixed?: boolean
   testStatuses?: RoleChainStatusMap
   testChainRunning?: boolean
   roleTestResult?: RoleTestResponse
@@ -275,18 +277,23 @@ export const RoleCard = memo(function RoleCard({
                   <Pencil data-role-icon="true" />
                   Rename
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  data-role-delete-trigger="true"
-                  variant="destructive"
-                  onSelect={() => {
-                    setActionsOpen(false)
-                    confirmDelete(buildRoleDeleteRequest(roleName, onDeleteRole))
-                  }}
-                >
-                  <Trash2 />
-                  Delete
-                </DropdownMenuItem>
+                {/* 固定角色(引擎 builtin 硬依赖)不可删除,隐藏删除入口;后端亦拒删(409)。 */}
+                {!isFixed && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      data-role-delete-trigger="true"
+                      variant="destructive"
+                      onSelect={() => {
+                        setActionsOpen(false)
+                        confirmDelete(buildRoleDeleteRequest(roleName, onDeleteRole))
+                      }}
+                    >
+                      <Trash2 />
+                      Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </CardAction>

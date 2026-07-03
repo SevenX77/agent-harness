@@ -1999,7 +1999,15 @@ export function ProviderCard({
   const availableModelGroups = groupModelInfosByType(visibleModels)
   const modelListClassName = cn(
     isOfficial ? "space-y-2" : "flex gap-1 flex-wrap",
-    !showAllModels && (isOfficial ? "max-h-[7rem] overflow-hidden" : "max-h-[2.75rem] overflow-hidden"),
+    // Truncate the preview by ONE mechanism only: the count-based slice
+    // (availableModelsPreviewLimit) + the "Show more" button. The old
+    // third-party `max-h-[2.75rem]` height clamp fought that count gate — a
+    // provider with ≤12 models but >2 rows (e.g. WaveSpeed, grouped) got its
+    // list clipped by height with no button to expand, because the button
+    // only appears when the COUNT exceeds the limit. Height-clamping only the
+    // official routes (a generous 5 rows) keeps their compact preview without
+    // reintroducing that mismatch on the wrapped third-party chip grid.
+    !showAllModels && isOfficial && "max-h-[7rem] overflow-hidden",
   )
   const renderAvailableModelTag = (model: ModelInfo): ReactElement => {
     const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)

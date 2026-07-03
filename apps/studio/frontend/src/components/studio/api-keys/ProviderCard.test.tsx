@@ -1723,7 +1723,11 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain('data-variant="ghost"')
     expect(html).toContain("text-muted-foreground")
     expect(html).toContain('data-testid="available-models-list"')
-    expect(html).toContain("max-h-[2.75rem]")
+    // The third-party chip grid no longer height-clamps its preview — the
+    // count-based slice + "Show more" button is the single truncation, so a
+    // grouped ≤12-model list (e.g. WaveSpeed) is never clipped without an
+    // expand affordance (PM 2026-07-03).
+    expect(html).not.toContain("max-h-[2.75rem]")
     expect(html).toContain("space-y-2 pb-1")
     const showMoreIndex = html.indexOf("Show 2 more")
     const showMoreStart = html.lastIndexOf("<button", showMoreIndex)

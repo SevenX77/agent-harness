@@ -1544,6 +1544,30 @@ export async function probeRoute(
   return response.data
 }
 
+// #11 slice C: 真塞一张图探这条 route 的模型认不认图。成功后端会把
+// input_modalities/vision 记为 probed_verified 并回填到 route.capabilities。
+export async function probeRouteMultimodal(routeId: string): Promise<ProviderRoute> {
+  const response = await api.post<ProviderRoute>(`/llm/routes/${segment(routeId)}/probe-multimodal`, {})
+  if (cachedRegistry) {
+    cachedRegistry = {
+      ...cachedRegistry,
+      provider_routes: {
+        ...cachedRegistry.provider_routes,
+        [routeId]: response.data,
+      },
+    }
+  }
+  return response.data
+}
+
+// 只有 probed_verified(真探测通过)且 input_modalities 含 image 才算"认图";
+// provider_doc/api_list 只是 catalog 声称,是"可能带多模态"的提示,不是实测判据。
+export function routeAcceptsImageVerified(route: ProviderRoute): boolean {
+  const cap = route.capabilities?.input_modalities
+  if (!cap || cap.source !== 'probed_verified' || !Array.isArray(cap.value)) return false
+  return cap.value.some((modality) => modality === 'image')
+}
+
 export async function getCredentials({
   hydrateSecrets = true,
 }: {

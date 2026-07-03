@@ -9,7 +9,7 @@ import { useStudioEventStream } from "@/hooks/useStudioEventStream"
 import { deleteEndpoint, deleteModelBundle, deleteRole, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
+import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerDraftIdentityKey, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController, SettingsPageProps, SettingsPageViewProps, SettingsTab } from "./types"
 
@@ -123,7 +123,7 @@ function draftEditableSignature(draft: ProviderDraft): string {
   })
 }
 
-function reconcileDraftsWithCredentials(
+export function reconcileDraftsWithCredentials(
   credentials: CredentialsState,
   currentDrafts: ProviderDraft[],
   dirtyProviderIds: Set<string>,
@@ -149,8 +149,17 @@ function reconcileDraftsWithCredentials(
     }
     return currentDraft
   })
+  // A just-saved provider is rebuilt from credentials under a DIFFERENT id than
+  // its locally-minted draft (`custom-<uuid>` → `custom-<uuid>-<protocol>`), so
+  // an id-only "not yet persisted" check keeps the stale local copy alongside
+  // the reconciled one — the duplicate-card bug. Drop any dirty local draft
+  // whose stable provider IDENTITY (name + api_key) is already represented in
+  // the reconciled set; only genuinely-unsaved providers survive.
+  const nextIdentityKeys = new Set(nextDrafts.map(providerDraftIdentityKey))
   const dirtyDraftsNotInCredentials = currentDrafts.filter((draft) => (
-    dirtyProviderIds.has(draft.id) && !nextIds.has(draft.id)
+    dirtyProviderIds.has(draft.id)
+    && !nextIds.has(draft.id)
+    && !nextIdentityKeys.has(providerDraftIdentityKey(draft))
   ))
   return [...reconciled, ...dirtyDraftsNotInCredentials]
 }
@@ -651,6 +660,21 @@ export function useSettingsPageController(): SettingsPageController {
     onResync: handleEventResync,
   }, { enabled: apiReady })
 
+  // A mutating settings action (delete / test / add) must never fire into an
+  // unreachable backend: the request gets no response and surfaces a bare
+  // "Backend unavailable" toast, and an optimistic delete removes the card
+  // before silently reverting. Gate every mutation on LIVE reachability —
+  // config resolved (apiReady) AND the event stream connected (!connectionLost).
+  // When not reachable the action is refused with a clear "reconnecting"
+  // message and the UI disables the buttons (see `backendReachable` in the
+  // returned controller).
+  const backendReachable = apiReady && !connectionLost
+  function ensureBackendReachable(): boolean {
+    if (backendReachable) return true
+    toast.error("Backend is reconnecting — please try again in a moment.")
+    return false
+  }
+
   useEffect(() => {
     if (!apiReady) return
     const enabled = appSettings.settings.remote_model_catalog_enabled
@@ -828,6 +852,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   function addProviderWithData(data: AddProviderFormSubmission) {
+    if (!ensureBackendReachable()) return
     const draft = draftFromAddProviderSubmission(data, pendingAddProviderDraft?.id)
     setPendingAddProviderDraft(null)
     dirtyProviderIdsRef.current.add(draft.id)
@@ -847,6 +872,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   function deleteProvider(providerId: string) {
+    if (!ensureBackendReachable()) return
     const draft = providerDraftForAction(draftsRef.current, providerId)
     const endpointIds = draft
       ? providerEndpointDraftsForAction(draft).map((endpointDraft) => endpointDraft.id)
@@ -859,6 +885,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   async function deleteProviderEndpoints(endpointIds: string[]) {
+    if (!ensureBackendReachable()) return
     const uniqueEndpointIds = Array.from(new Set(endpointIds.filter(Boolean)))
     if (uniqueEndpointIds.length === 0) return
     pendingRoleProjectionRefreshRef.current = true
@@ -889,6 +916,7 @@ export function useSettingsPageController(): SettingsPageController {
   // bypassing the protocol_unsupported half-life gate — the affordance for
   // "the provider may have started supporting this protocol today".
   async function forceReprobeEndpoint(endpointId: string) {
+    if (!ensureBackendReachable()) return
     pendingRoleProjectionRefreshRef.current = true
     const toastId = `force-endpoint-test-${endpointId}`
     toast.loading(`Re-probing protocol for ${endpointId}...`, { id: toastId })
@@ -909,6 +937,7 @@ export function useSettingsPageController(): SettingsPageController {
   }
 
   async function runProviderGetModels(providerId: string) {
+    if (!ensureBackendReachable()) return
     await flushCredentialsSave()
     const draft = providerDraftForAction(draftsRef.current, providerId)
     if (!draft) return
@@ -1124,6 +1153,7 @@ export function useSettingsPageController(): SettingsPageController {
       setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
     },
     connectionLost,
+    backendReachable,
     ensureCredentialsHydrated,
     onProviderFieldChange: updateProviderField,
     onGetProviderModels: (providerId) => void runProviderGetModels(providerId),

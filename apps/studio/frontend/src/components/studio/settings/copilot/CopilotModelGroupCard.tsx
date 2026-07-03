@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react"
+import { memo, useMemo, useState } from "react"
 import {
   closestCenter,
   DndContext,
@@ -15,7 +15,9 @@ import {
   useSortable,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Plus, Trash2 } from "lucide-react"
+import { Image as ImageIcon, Loader2, Plus, Trash2 } from "lucide-react"
+import { toast } from "sonner"
+import { probeRouteMultimodal, routeAcceptsImageVerified } from "@/api/llm"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -192,6 +194,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
           onPointerDown={(event) => event.stopPropagation()}
         >
           <RouteStatusLight status={status} />
+          <MultimodalTestButton route={route} />
           <Button
             type="button"
             variant="ghost"
@@ -218,6 +221,56 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
     </TooltipProvider>
   )
 })
+
+// #11 slice C: per-route 多模态实测。真塞一张图探这条 route 的模型认不认图 —— vision
+// 是每个模型各不相同的能力,所以按 route 各测(不是整个角色一把测)。结果只认
+// probed_verified(catalog 声称只是提示,不算实测通过)。
+function MultimodalTestButton({ route }: { route: CopilotRoutePreview }) {
+  const [testing, setTesting] = useState(false)
+  const [verified, setVerified] = useState<boolean | null>(null)
+
+  async function handleTest() {
+    if (testing) return
+    setTesting(true)
+    try {
+      const updated = await probeRouteMultimodal(route.id)
+      const accepts = routeAcceptsImageVerified(updated)
+      setVerified(accepts)
+      if (accepts) {
+        toast.success(`${route.provider}:认图(已实测,input_modalities 含 image)`)
+      } else {
+        toast.warning(`${route.provider}:不认图(模型拒绝了图像输入)`)
+      }
+    } catch (error) {
+      toast.error(`${route.provider}:${error instanceof Error ? error.message : "多模态测试失败"}`)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      aria-label={`Test multimodal image input for ${route.provider}`}
+      title="测多模态(真塞一张图)"
+      className={cn(
+        "text-muted-foreground hover:text-foreground",
+        verified === true && "text-success hover:text-success",
+        verified === false && "text-destructive hover:text-destructive",
+      )}
+      disabled={testing}
+      onClick={handleTest}
+    >
+      {testing ? (
+        <Loader2 data-role-icon="true" className="size-3 animate-spin" />
+      ) : (
+        <ImageIcon data-role-icon="true" className="size-3" />
+      )}
+    </Button>
+  )
+}
 
 function AddRouteMenu({
   routes,

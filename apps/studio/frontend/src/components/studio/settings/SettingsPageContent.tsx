@@ -20,6 +20,7 @@ export function SettingsPageContent({
   drafts,
   pendingAddProviderId,
   saveStatus,
+  backendReachable,
   rolesData,
   modelGroups,
   rolesSaveStatus,
@@ -46,14 +47,24 @@ export function SettingsPageContent({
   const { t } = useTranslation("settings")
 
   return (
-    <div className="flex size-full flex-col bg-background">
-      <div className="flex h-11 shrink-0 items-center justify-end border-b border-border px-2">
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label={t("shell.close")} className="size-7">
-          <X className="size-4" />
-        </Button>
-      </div>
+    <div className="relative flex size-full flex-col bg-background">
+      {/* No header bar: the close affordance floats in the top-right corner so
+          the settings body starts flush at the top. The content row below
+          reserves a matching right gutter (`pr-12`) so this button never
+          overlaps a tab's top-right control (e.g. the SaveStatusBadge) at any
+          window width — on desktop it insets the content pane, on the stacked
+          mobile layout it insets the nav strip's last tab too. */}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onClose}
+        aria-label={t("shell.close")}
+        className="absolute top-2 right-2 z-30 size-7"
+      >
+        <X className="size-4" />
+      </Button>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col pr-12 md:flex-row">
         <nav className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-border bg-sidebar/40 px-2 py-2 md:w-56 md:flex-col md:border-b-0 md:border-r md:py-4">
           <NavButton active={activeTab === "general"} icon={<Settings />} onClick={() => onTabChange("general")}>
             {t("tabs.general")}
@@ -143,6 +154,7 @@ export function SettingsPageContent({
                     drafts={drafts}
                     pendingAddProviderId={pendingAddProviderId}
                     saveStatus={saveStatus}
+                    backendReachable={backendReachable}
                     onProviderFieldChange={onProviderFieldChange}
                     onGetProviderModels={onGetProviderModels}
                     onForceEndpointTest={onForceEndpointTest}

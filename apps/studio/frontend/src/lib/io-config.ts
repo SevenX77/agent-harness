@@ -139,6 +139,15 @@ function typeOfSchema(schema: Record<string, unknown>): string | null {
 }
 
 /**
+ * The declared io.inputs top-level field names of a node/GRAPH.md document —
+ * the targets an imported file's fields auto-match against (input region F5,
+ * PM 2026-07-02 r2「推断…是否匹配」; the import surfaces the match, PM 2026-07-03).
+ */
+export function declaredInputFieldNames(nodeContent: string | undefined): string[] {
+  return Object.keys(declaredIoProps(parseFrontmatter(nodeContent), 'inputs'))
+}
+
+/**
  * Input reconciliation for a node: blackboard fields tagged matched/available,
  * plus (at the top) any io.inputs field the upstream blackboard doesn't supply.
  * `source:'file'` inputs are injected from files, not the blackboard, so they

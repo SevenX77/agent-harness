@@ -1,7 +1,7 @@
 ---
 module: 03_regions/input
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 r3 定稿:PM 确认黑板优先配置树模型——面板=预览+Configure+文件 list,输入配置=黑板 context 第一行的字段勾选树+Add file 追加,输出配置=artifacts 文件清单×黑板字段勾选;golden 区从面板移除。样稿经 PM 三轮确认。；目标结构已按 R4-R8 retrofit）｜2026-07-03 r5 修订（PM 真机 4 点反馈,已实施 feat/io-node-scoped-config）:①「节点↔io」关系模型建对——**按角色收敛面板段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段,见 F3 归属规则,原为代码 drift);②**io 字段全链路支持嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端配置树可展开、子字段 `chapter.aa_number` 独立勾选,见 F3);③**输入配置改内联**(可折叠段 + 紧凑树行,替换 F2「配置全在弹窗」;输出 artifacts 编辑因多卡片过宽保留 scoped modal);④**New file 改 ghost list 行**(F2/r4b 的 `variant=secondary` 暗色近黑,改透明底 hover 亮)。
+status: FROZEN（2026-07-02 r3 定稿:PM 确认黑板优先配置树模型——面板=预览+Configure+文件 list,输入配置=黑板 context 第一行的字段勾选树+Add file 追加,输出配置=artifacts 文件清单×黑板字段勾选;golden 区从面板移除。样稿经 PM 三轮确认。；目标结构已按 R4-R8 retrofit）｜2026-07-03 r5 修订（PM 真机 4 点反馈,已实施 feat/io-node-scoped-config）:①「节点↔io」关系模型建对——**按角色收敛面板段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段,见 F3 归属规则,原为代码 drift);②**io 字段全链路支持嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端配置树可展开、子字段 `chapter.aa_number` 独立勾选,见 F3);③**输入配置改内联**(可折叠段 + 紧凑树行,替换 F2「配置全在弹窗」;输出 artifacts 编辑因多卡片过宽保留 scoped modal);④**New file 改 ghost list 行**(F2/r4b 的 `variant=secondary` 暗色近黑,改透明底 hover 亮)。｜2026-07-03 r6 修订（PM 真机第二轮 5 点反馈,已实施 feat/io-panel-import-run-edit）:①**移除面板批量 run 入口**(Test Inputs 区删勾选框 + C10 命名序列建议 + Run-N-as-batch + `useBatchRun`;唯一 run = 中央动作条,见 F6);②**导入合并为单个「Import…」=文件夹选择器**(删「Import file…」双按钮,见 F5);③**导入即自动匹配**(候选字段名 normalize 后比对声明 io.inputs,命中自动勾选+高亮;批量条目 field 取 stem `chapter` 而非父目录名——原为字段取名 bug 致"导入一堆文件无一匹配",见 F5);④**导入结果按文件分组 + 文件行/Test Inputs 行加编辑按钮**(垃圾桶旁,用编辑器打开,见 F5)。
 binds_baseline: ./baseline.md
 units: [io-panel-artifacts-test-inputs, golden-per-agent-node]
 aligns_with: 01_workflows/02_authoring.md（i/o panel）· 01_workflows/04_run-and-verify.md（predict/run input/golden）
@@ -54,21 +54,23 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - Status: live(2026-07-02 #304 挂通)。
 - 归属: region `input`; capabilities `predict`, `run-execution`.
 
-### F5. File Scan And Recognition（导入扫描,后端纯读）
-- **导入入口 = 原生 OS 选择器(PM 2026-07-02 r4b 点3)**: 弹窗里是「Import file…」/「Import folder…」两个按钮,点击调 Rust `select_file`/`select_directory` 弹**系统原生文件/文件夹对话框**拿绝对路径——**不让用户手打 path**("直接用原生 file 组件选择文件或者文件夹啊,怎么会让用户输入 path 呢")。选完的绝对路径交给下面的扫描/导入端点。
-- 机制: 选中文件/文件夹后,后端扫描端点解析:`.json` → 顶层字段名+类型+样本值;`.jsonl` → 首行对象字段;`.md`/`.txt` → 整体一个文本候选字段(大文件只记路径+大小,**不内联内容**);子文件夹递归一层。**批量识别**:同 stem 只差编号的文件群(`chapter_001…chapter_060`)折叠成一个批量条目(`chapter_[001–060] ×N`),**编号列表提取并记录**;`latest`/`_v<时间戳>` 识别为版本修饰,自动取 latest、`history/` 忽略。识别用鲁棒的连续数字段正则,**不假定自产固定格式**(外来格式也要能认,PM 2026-07-02 r2 点7「输出固定、输入鲁棒」)。
-- 决策: 扫描放 studio backend(读盘+JSON 解析本来就是后端职责;Rust sole-writer 原则只管写)。
-- 原话/来源: PM 2026-07-02 r2 点4/点7(原话见 §4)。
-- 测试: 真实 material-prep 文件夹(异构 11 文件)与 node1_output(iterate 批量 60 文件)扫描出正确字段树;批量编号列表完整;超大文件不内联。
-- Status: target-design。
-- 归属: region `input`; platform `llm-copilot-http-api`(studio backend HTTP).
+### F5. File Scan And Recognition（导入扫描 + 自动匹配,后端纯读）
+- **导入入口 = 单个「Import…」= 原生文件夹选择器(PM 2026-07-03 r6 点2,修订 r4b 双按钮)**: 配置树里只有**一个**「Import…」按钮,点击调 Rust `select_directory` 弹**系统原生文件夹对话框**拿绝对路径——**不让用户手打 path**。**不再有独立「Import file…」按钮**:一个文件夹就是"把其下全部文件都导入"(PM 原话「导入文件夹不就是把文件夹下的文件都导入吗」),文件夹选择器 + 后端递归扫描/批量折叠已覆盖单文件、多文件、批量三种情形;`select_file` 前端 wrapper 随双按钮一起删。选完的绝对路径交给下面的扫描/导入端点。
+- 机制: 选中文件夹后,后端扫描端点解析:`.json` → 顶层字段名+类型+样本值;`.jsonl` → 首行对象字段;`.md`/`.txt` → 整体一个文本候选字段(大文件只记路径+大小,**不内联内容**);子文件夹递归一层。**批量识别**:同 stem 只差编号的文件群(`chapter_001…chapter_060`)折叠成一个批量条目(`pattern=chapter_{n}.json` + `numbers=[…] ×N`),**编号列表提取并记录**;`latest`/`_v<时间戳>` 识别为版本修饰,自动取 latest、`history/` 忽略。识别用鲁棒的连续数字段正则,**不假定自产固定格式**(外来格式也要能认,PM 2026-07-02 r2 点7「输出固定、输入鲁棒」)。
+- **自动匹配(PM 2026-07-02 r2 点4「推断…是否匹配」的落地,2026-07-03 r6 点3/4)**: 导入扫描出候选字段后,前端把每个候选字段名 **normalize**(小写 + 去尾部数字/`{n}` 批量段:`Chapter`/`chapter1`/`chapter_001`/`chapter_{n}.json` → `chapter`)后,与**本节点/GRAPH.md 声明的 io.inputs 字段名**比对,命中即**自动勾选 + 高亮 + 标注「matched io.inputs」**——作者无需再对着一堆文件逐个手勾。**批量条目的候选 field 取 stem(`chapter`)而非其父文件夹名**——这正是"导入一堆文件却无一匹配"的根因(旧代码用父目录名当 field,永远匹配不上声明字段)。导入结果**按源文件分组**(每个文件一行:文件名 + 灰色路径 + 编辑 + 删除;其字段在下),取代"整文件夹字段拍平成一张匿名清单"。
+- **文件行编辑入口(PM 2026-07-03 r6 点5)**: 每个**单文件**组行的删除(垃圾桶)旁加一个**编辑按钮**,点击用编辑器打开该文件(导入的文件已 copy 进 `.workspace/imports/<name>/`,可直接打开);批量/文件夹组无单一文件、不显示编辑。Test Inputs 行同样在删除旁加编辑按钮(见 predict/test-inputs 心智,F4 相关)。
+- 决策: 扫描放 studio backend(读盘+JSON 解析本来就是后端职责;Rust sole-writer 原则只管写);匹配放前端(纯比对声明字段名,无需落盘)。单入口 + 自动匹配 = 把 r2 点4 的"识别并推断是否匹配"真正做出来。
+- 原话/来源: PM 2026-07-02 r2 点4/点7、2026-07-03 r6 点2/3/4/5(原话见 §4)。
+- 测试: 真实 material-prep 文件夹(异构 11 文件)与 node1_output(iterate 批量 60 文件)扫描出正确字段树;批量编号列表完整;超大文件不内联;`normalizeFieldName`/`matchCandidatesToInputs` 命中声明字段自动勾选、批量 stem 归一;`candidatesFromScanEntries` 批量 field = stem。
+- Status: target-design(单入口 + 自动匹配 + 按文件分组 + 编辑按钮已实施 r6)。
+- 归属: region `input`; platform `llm-copilot-http-api`(studio backend HTTP)、`native-fs`(编辑打开)。
 
-### F6. Batch Input Selection
-- 机制: select multiple inputs, start batch, and show progress/per-item failures.
-- 决策: batch is run input configuration.
-- 原话/来源: `01_workflows/04_run-and-verify.md:54` to `:57`.
-- 测试: multiple selected inputs create batch; failed item is visible.
-- Status: backend/orphan frontend.
+### F6. Batch Input Selection（面板不承载,PM 2026-07-03 r6 点1)
+- 机制: 后端批量 run 能力(`/runs/batch-run` + `/batch/{id}` 轮询 + history 侧 BatchSummary 汇总)保留;**I/O 面板不再有任何 batch/run 入口**——移除 Test Inputs 区的批量勾选框、C10 命名序列建议(`Run chapter1–3 as batch`)、手动「Run N as batch」按钮及其驱动 hook `useBatchRun`。
+- 决策: **面板不承载任何 run 入口,唯一 run 入口 = 中央动作条**(PM 原话「不要再给我加其他 run 的入口了」)。批量作为一种 run 模式可在别处(非面板)按需重新接入;此条**替换**旧的"面板 Test Inputs 内勾选多条 + Run N as batch"设计。
+- 原话/来源: PM 2026-07-03 r6 点1(原话见 §4)。
+- 测试: 面板 Test Inputs 区无批量勾选框、无 Run-as-batch 按钮、无命名序列建议;`useBatchRun` 及其测试已删净。
+- Status: target-design(面板收敛已实施 r6;后端 batch 能力保留)。
 - 归属: region `input`; capability `run-execution`.
 
 ### F7. Output Artifacts Config（与输入对称的产物清单,PM 2026-07-02 r3 点5）
@@ -110,6 +112,7 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - **r4 字段对账**:"高亮整行，提示与写在md文档中匹配的字段。md文档中没有的字段用muted颜色加在最上方并加上报错标志，表示要求有这个input字段，但实际输入没有。output同理"——matched 行高亮、missing(声明了但实际无供应)置顶 muted + 报错;input=io.inputs vs 黑板,output=io.outputs vs 产出全集。
 - **r4b 收尾**(PM 2026-07-02):① "new file button，统一样式，全局都没有用过黑色按钮；还有这个list的样式，我们panel里面已经有固定的list样式了"——New file/Run-as-batch 改用 shadcn `Button variant=secondary`,test-inputs list 行改用 FileRow 同款无边框 ghost 行(选中 `bg-accent`);② "第一个input节点要求输出chapter字段，但是没有输入，不应该触发字段缺失的警告吗？"——Input 伪节点声明的图入口字段无 `source:'file'` 支撑时报 missing(见 F3);③ "add file设计简直反人类啊，直接用原生file组件选择文件或者文件夹啊，怎么会让用户输入path呢"——改原生 OS 选择器(见 F5)。
 - **r5 真机 4 点反馈(PM 2026-07-03,根因收敛=「画布节点↔io config」关系模型没建对)**:① "在 GRAPH.md input 的 chapter 里临时加了 aa_number(加在 chapter 对象内部),config 弹窗没同步显示" + ② "output 的 segmentation_result 里加了 bb_number,config 也没同步"——根因:预览递归到叶子、config 只枚举顶层键,粒度差;且 io 字段全链路扁平,嵌套子字段没有运行语义 → 三层加嵌套寻址(见 F3 嵌套寻址三层贯通)。③ "定过选 input 节点只显示 input、output 节点只显示 output,现在选中 Input 节点后面板下面还挂着 output 段"——根因:面板无条件全渲染 + 边界伪节点点击一律 deselect(点 Input/Output/空白在状态层是同一件事),没有「边界节点身份」→ 选中态承载 input-boundary/output-boundary/phase/graph 四态 + 按角色收敛段(F3 归属规则本就有,属代码 drift 补齐)。④ "Test inputs 的 New file 按钮还是黑色,list 样式没对齐 panel 已有的 list"——`variant=secondary` 暗色近黑(`--secondary: oklch(0.274…)`),改**透明底 hover 亮的 ghost list 行**(对齐 test-input item 行),修订 r4b「New file 用 secondary」。方向:config 内联进节点属性(像 Properties 面板)、按角色 scoped,窄面板用可折叠段/紧凑树行解决(见 F2 r5 修订)。
+- **r6 真机 5 点反馈(PM 2026-07-03,面板 run 入口 + 导入体验收敛)**:① "这是谁让你加的功能？！？不要再给我加其他run的入口了，我都想把这功能删了"——移除 Test Inputs 区**所有批量 run 入口**(勾选框/C10 命名序列建议/Run-N-as-batch),面板不承载任何 run 入口,唯一 run = 中央动作条(见 F6)。② "为什么要两个import？导入文件夹不就是把文件夹下的文件都导入吗？"——导入合并为**单个「Import…」=文件夹选择器**(文件夹即导入其下全部文件,删「Import file…」,见 F5)。③ "导入之后要自动匹配啊" + ④ "你看下我导入了那么多文件都没有匹配上的？"——导入即**自动匹配**:候选字段名 normalize 后比对声明 io.inputs,命中自动勾选+高亮;"一堆文件无一匹配"根因=旧代码批量条目 field 取父目录名、永不等于声明字段,改取 stem(见 F5)。⑤ "文件的垃圾桶旁边再加一个编辑按钮，用编辑器打开，还有下面的testinputs也是一样，要有编辑按钮"——导入结果**按文件分组**,单文件组行 + Test Inputs 行的删除旁各加**编辑按钮**(用编辑器打开;导入文件已 copy 进 `.workspace/imports/`,见 F5)。
 - (存续)面板可见名 = **"I/O"**(文件夹路径 `input` 不变);**I/O 面板 = 实例预览,schema 编辑走 copilot/文件**(PM 2026-07-02 r1);**golden JSON 与推导实例同构**(PM 2026-07-02 r1)。
 
 ## 5. 决策 + 动机

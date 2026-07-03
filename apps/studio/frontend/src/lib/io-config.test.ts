@@ -11,6 +11,7 @@ import {
   applyIoInputChecks,
   blackboardAtNode,
   blackboardAtOutput,
+  declaredInputFieldNames,
   graphArtifactsOf,
   reconcileInputFields,
   reconcileOutputFields,
@@ -410,5 +411,17 @@ describe('graph artifacts manifest', () => {
     ])
     const cleared = applyGraphArtifacts(withArtifacts, [])
     expect(cleared).not.toContain('artifacts:')
+  })
+})
+
+describe('declaredInputFieldNames', () => {
+  it('returns the declared io.inputs top-level field names (auto-match targets)', () => {
+    expect(declaredInputFieldNames(GRAPH_MD)).toEqual(['chapters', 'project_id'])
+    expect(declaredInputFieldNames(FETCH_MD)).toEqual(['chapters'])
+  })
+
+  it('returns [] when the document declares no io.inputs', () => {
+    expect(declaredInputFieldNames(undefined)).toEqual([])
+    expect(declaredInputFieldNames('---\nio:\n  outputs:\n    type: object\n---\n')).toEqual([])
   })
 })

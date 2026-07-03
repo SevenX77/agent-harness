@@ -286,68 +286,37 @@ def _apply_intent(
     group: Any,
     route: Any,
 ) -> str:
-    role_fit = "using"
-    group_intent = _value(group, "intent")
+    """PR3: apply the three role-level generation params. Role-only — group and
+    provider intent are gone. thinking is best-effort (warn, never not_fit),
+    max_output_tokens clamps into the route range (never not_fit), temperature
+    is written through. role_fit stays "using" (cooling_down is stamped by the
+    caller as a warning, not here)."""
+    del group  # role-only: per-group / per-provider intent is removed.
     role_intent = _value(role, "intent")
-    thinking = _value(group_intent, "thinking", "inherit")
-    if thinking == "inherit":
-        thinking = _value(role_intent, "thinking", "off")
-    if thinking == "preferred":
+
+    if _value(role_intent, "thinking", False) is True:
         capability = _route_thinking_capability(route)
-        if capability is None or _capability_value(capability) is not True:
-            warning = {
-                "code": "thinking_not_enabled",
-                "route_id": _value(route, "route_id"),
-                "message": "Thinking was preferred but is not enabled for this provider model.",
-            }
-            entry_report["warnings"].append(warning)
-            role_fit = "downgraded"
+        if capability is not None and _capability_value(capability) is True:
+            _enable_reasoning(entry_report)
         else:
-            _enable_reasoning(entry_report)
-    elif thinking == "required":
-        capability = _route_thinking_capability(route)
-        if capability is None:
-            _enable_reasoning(entry_report)
-            entry_report["warnings"].append(
-                {
-                    "code": "thinking_capability_unknown",
-                    "route_id": _value(route, "route_id"),
-                    "message": "Thinking is required but capability is unknown.",
-                }
-            )
-            return "needs_test"
-        if _capability_value(capability) is not True:
             entry_report["warnings"].append(
                 {
                     "code": "thinking_unsupported",
                     "route_id": _value(route, "route_id"),
-                    "message": "Thinking is required but unsupported.",
+                    "message": (
+                        "Thinking is enabled for this role but not supported by this "
+                        "provider model; the request runs without reasoning."
+                    ),
                 }
             )
-            return "not_fit"
-        _enable_reasoning(entry_report)
 
-    token_intent = None
-    group_token_intent = _value(group_intent, "target_output_tokens")
-    if group_token_intent is not None and _value(group_token_intent, "mode") != "inherit":
-        token_intent = group_token_intent
-    else:
-        token_intent = _value(role_intent, "target_output_tokens")
+    _apply_output_tokens(entry_report, _value(role_intent, "max_output_tokens"), route)
 
-    if token_intent is None:
-        _apply_max_output_tokens(entry_report, route)
-    else:
-        token_fit = _apply_output_token_intent(entry_report, token_intent, route)
-        if token_fit == "not_fit":
-            return "not_fit"
-        if token_fit == "downgraded":
-            role_fit = "downgraded"
-    output_floor_fit = _apply_thinking_output_floor(entry_report, route)
-    if output_floor_fit == "not_fit":
-        return "not_fit"
-    if output_floor_fit == "downgraded":
-        role_fit = "downgraded"
-    return role_fit
+    temperature = _value(role_intent, "temperature")
+    if temperature is not None:
+        entry_report["resolved_settings"]["temperature"] = temperature
+
+    return "using"
 
 
 def _enable_reasoning(entry_report: dict[str, Any]) -> None:
@@ -355,133 +324,46 @@ def _enable_reasoning(entry_report: dict[str, Any]) -> None:
     reasoning["enabled"] = True
 
 
-def _apply_output_token_intent(
+def _apply_output_tokens(
     entry_report: dict[str, Any],
-    token_intent: Any,
+    requested: Any,
     route: Any,
-) -> str:
-    mode = _value(token_intent, "mode")
-    if mode in {"default", "maximum_available"}:
-        _apply_max_output_tokens(entry_report, route)
-        return "using"
-    if mode != "target" or _value(token_intent, "value") is None:
-        return "using"
-    token_value = _value(token_intent, "value")
+) -> None:
+    """None → route max available; a number → clamped into the route [min, max]
+    range. Never not_fit, never downgraded."""
     max_tokens = _max_output_tokens(route)
-    if max_tokens is None or token_value <= max_tokens:
-        entry_report["resolved_settings"]["max_output_tokens"] = token_value
-        return "using"
-    if _value(token_intent, "downgrade") == "block":
-        warning = {
-            "code": "token_cap_blocked",
-            "route_id": _value(route, "route_id"),
-            "message": f"Requested {token_value} output tokens exceeds this route limit of {max_tokens}.",
-        }
-        entry_report["warnings"].append(warning)
-        return "not_fit"
-    entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
-    if _value(token_intent, "downgrade") == "allow_with_warning":
-        warning = {
-            "code": "token_downgraded",
-            "route_id": _value(route, "route_id"),
-            "message": f"Requested {token_value} output tokens, using {max_tokens}.",
-        }
-        entry_report["warnings"].append(warning)
-    return "downgraded"
+    if not isinstance(requested, int):
+        if max_tokens is not None:
+            entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
+        return
 
-
-def _apply_max_output_tokens(entry_report: dict[str, Any], route: Any) -> None:
-    max_tokens = _max_output_tokens(route)
-    if max_tokens is not None:
-        entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
-
-
-def _apply_thinking_output_floor(entry_report: dict[str, Any], route: Any) -> str:
-    reasoning = entry_report["resolved_settings"].get("reasoning")
-    if not isinstance(reasoning, dict) or reasoning.get("enabled") is not True:
-        return "using"
-
-    required_output = _thinking_required_output_tokens(route)
-    if required_output is None:
-        return "using"
-
-    route_max = _max_output_tokens(route)
-    if route_max is not None and required_output > route_max:
-        warning = {
-            "code": "thinking_output_floor_not_fit",
-            "route_id": _value(route, "route_id"),
-            "message": (
-                f"Thinking requires at least {required_output} output tokens, "
-                f"but this route limit is {route_max}."
-            ),
-        }
-        entry_report["warnings"].append(warning)
-        return "not_fit"
-
-    current_output = entry_report["resolved_settings"].get("max_output_tokens")
-    if isinstance(current_output, int | float) and int(current_output) >= required_output:
-        return "using"
-
-    entry_report["resolved_settings"]["max_output_tokens"] = required_output
-    warning = {
-        "code": "thinking_output_floor_applied",
-        "route_id": _value(route, "route_id"),
-        "message": (
-            f"Thinking requires at least {required_output} output tokens; "
-            "Studio raised the runtime max_output_tokens to keep the request valid."
-        ),
-    }
-    entry_report["warnings"].append(warning)
-    return "downgraded"
-
-
-def _thinking_required_output_tokens(route: Any) -> int | None:
-    capabilities = _route_effective_capabilities(route)
-    if _capability_value(capabilities.get("manual_thinking_budget_supported")) is False:
-        return None
-
-    budget = _capability_default_int(capabilities.get("reasoning_budget_tokens"))
-    if budget is None:
-        budget = _capability_int(capabilities.get("default_thinking_budget_tokens"))
-    if budget is None:
-        budget = _capability_min_int(capabilities.get("reasoning_budget_tokens"))
-    if budget is None:
-        budget = _capability_int(capabilities.get("min_thinking_budget_tokens"))
-    if budget is None:
-        return None
-    return budget + 1
+    resolved = requested
+    min_tokens = _min_output_tokens(route)
+    if min_tokens is not None and resolved < min_tokens:
+        resolved = min_tokens
+    if max_tokens is not None and resolved > max_tokens:
+        resolved = max_tokens
+    entry_report["resolved_settings"]["max_output_tokens"] = resolved
 
 
 def _max_output_tokens(route: Any) -> int | None:
+    return _output_token_bound(route, "max")
+
+
+def _min_output_tokens(route: Any) -> int | None:
+    return _output_token_bound(route, "min")
+
+
+def _output_token_bound(route: Any, bound: str) -> int | None:
     capability = (_value(route, "capabilities", {}) or {}).get("max_output_tokens")
     value = _capability_value(capability) if capability is not None else None
     if isinstance(value, int | float):
-        return int(value)
+        # A scalar capability only expresses the maximum; no explicit minimum.
+        return int(value) if bound == "max" else None
     if not isinstance(value, dict):
         return None
-    max_value = value.get("max")
-    return int(max_value) if isinstance(max_value, int | float) else None
-
-
-def _capability_default_int(capability: Any) -> int | None:
-    value = _capability_value(capability)
-    if not isinstance(value, dict):
-        return None
-    default_value = value.get("default")
-    return int(default_value) if isinstance(default_value, int | float) else None
-
-
-def _capability_min_int(capability: Any) -> int | None:
-    value = _capability_value(capability)
-    if not isinstance(value, dict):
-        return None
-    min_value = value.get("min")
-    return int(min_value) if isinstance(min_value, int | float) else None
-
-
-def _capability_int(capability: Any) -> int | None:
-    value = _capability_value(capability)
-    return int(value) if isinstance(value, int | float) else None
+    bound_value = value.get(bound)
+    return int(bound_value) if isinstance(bound_value, int | float) else None
 
 
 def _route_thinking_capability(route: Any) -> Any | None:

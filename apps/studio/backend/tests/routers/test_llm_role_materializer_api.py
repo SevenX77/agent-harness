@@ -243,7 +243,7 @@ def test_put_role_v3_manual_order_preserves_user_provider_order(
     ]
 
 
-def test_put_role_v3_reports_token_downgrade_resolved_settings_and_warning(
+def test_put_role_v3_clamps_output_tokens_above_route_max_without_downgrade(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -281,11 +281,7 @@ def test_put_role_v3_reports_token_downgrade_resolved_settings_and_warning(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "target_output_tokens": {
-                    "mode": "target",
-                    "value": 128000,
-                    "downgrade": "allow_with_warning",
-                },
+                "max_output_tokens": 128000,
             },
             "model_groups": [
                 {
@@ -301,13 +297,14 @@ def test_put_role_v3_reports_token_downgrade_resolved_settings_and_warning(
 
     assert response.status_code == 200
     report = response.json()["materialization_report"]
+    # Clamped to route max, still "using" — never not_fit / downgraded for tokens.
     assert report["entries"][0]["route_id"] == "deepseek-official:deepseek-v4-pro"
     assert report["entries"][0]["resolved_settings"]["max_output_tokens"] == 65536
-    assert report["entries"][0]["role_fit"] == "downgraded"
-    assert report["warnings"][0]["code"] == "token_downgraded"
+    assert report["entries"][0]["role_fit"] == "using"
+    assert report["warnings"] == []
 
 
-def test_put_role_v3_blocks_route_when_output_token_cap_policy_blocks(
+def test_put_role_v3_clamps_output_tokens_below_route_min_without_downgrade(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -324,7 +321,7 @@ def test_put_role_v3_blocks_route_when_output_token_cap_policy_blocks(
                         "max_output_tokens": CapabilityValue(
                             value={
                                 "supported": True,
-                                "min": 1,
+                                "min": 256,
                                 "max": 65536,
                                 "default": 4096,
                             },
@@ -345,11 +342,7 @@ def test_put_role_v3_blocks_route_when_output_token_cap_policy_blocks(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "target_output_tokens": {
-                    "mode": "target",
-                    "value": 128000,
-                    "downgrade": "block",
-                },
+                "max_output_tokens": 8,
             },
             "model_groups": [
                 {
@@ -366,14 +359,50 @@ def test_put_role_v3_blocks_route_when_output_token_cap_policy_blocks(
     assert response.status_code == 200
     body = response.json()
     report = body["materialization_report"]
-    assert report["entries"][0]["route_id"] == "deepseek-official:deepseek-v4-pro"
-    assert report["entries"][0]["resolved_settings"] == {}
-    assert report["entries"][0]["role_fit"] == "not_fit"
-    assert report["warnings"][0]["code"] == "token_cap_blocked"
-    assert body["fallback_chain"] == []
+    assert report["entries"][0]["resolved_settings"]["max_output_tokens"] == 256
+    assert report["entries"][0]["role_fit"] == "using"
+    assert body["fallback_chain"][0]["runtime_settings"]["max_output_tokens"] == 256
 
 
-def test_put_role_v3_uses_each_route_max_for_maximum_available_output_tokens(
+def test_put_role_v3_temperature_written_to_resolved_settings(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    route_id = "ready-provider:gpt-5"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
+        provider_routes={route_id: _provider_route(route_id)},
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "temperature": 0.2,
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [{"route_id": route_id}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fallback_chain"][0]["runtime_settings"]["temperature"] == 0.2
+    assert body["materialization_report"]["entries"][0]["role_fit"] == "using"
+
+
+def test_put_role_v3_uses_each_route_max_when_output_tokens_unset(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -422,7 +451,7 @@ def test_put_role_v3_uses_each_route_max_for_maximum_available_output_tokens(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "target_output_tokens": {"mode": "maximum_available"},
+                "max_output_tokens": None,
             },
             "model_groups": [
                 {
@@ -534,11 +563,13 @@ def test_put_role_v3_keeps_selected_cooling_down_provider_with_warning(
     assert warning["retry_at"] == retry_at.isoformat()
 
 
-def test_put_role_v3_thinking_preferred_unknown_enters_chain_with_warning(
+def test_put_role_v3_thinking_on_unknown_capability_warns_but_still_fits(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # No thinking_protocol capability on the route → unknown. Best-effort: warn,
+    # do not enable reasoning, but keep the route in the chain as "using".
     route_id = "ready-provider:gpt-5"
     credentials = LLMCredentialsFile(
         provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
@@ -554,7 +585,7 @@ def test_put_role_v3_thinking_preferred_unknown_enters_chain_with_warning(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "thinking": "preferred",
+                "thinking": True,
             },
             "model_groups": [
                 {
@@ -570,52 +601,12 @@ def test_put_role_v3_thinking_preferred_unknown_enters_chain_with_warning(
     body = response.json()
     assert [entry["route_id"] for entry in body["fallback_chain"]] == [route_id]
     entry = body["materialization_report"]["entries"][0]
-    assert entry["role_fit"] == "downgraded"
-    assert entry["warnings"][0]["code"] == "thinking_not_enabled"
+    assert entry["role_fit"] == "using"
+    assert entry["warnings"][0]["code"] == "thinking_unsupported"
+    assert body["fallback_chain"][0]["runtime_settings"]["reasoning"]["enabled"] is None
 
 
-def test_put_role_v3_thinking_required_unknown_blocks_with_needs_test(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    route_id = "ready-provider:gpt-5"
-    credentials = LLMCredentialsFile(
-        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
-        provider_routes={route_id: _provider_route(route_id)},
-    )
-    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
-
-    response = client.put(
-        "/api/llm/roles/analyst",
-        json={
-            "role_kind": "graph_agent",
-            "system_prompt_prefix": "",
-            "model_fallback_enabled": True,
-            "intent": {
-                "provider_preference": "manual_order",
-                "thinking": "required",
-            },
-            "model_groups": [
-                {
-                    "canonical_id": "gpt-5",
-                    "display_name": "GPT-5",
-                    "provider_models": [{"route_id": route_id}],
-                }
-            ],
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["fallback_chain"] == []
-    entry = body["materialization_report"]["entries"][0]
-    assert entry["route_id"] == route_id
-    assert entry["role_fit"] == "needs_test"
-    assert entry["warnings"][0]["code"] == "thinking_capability_unknown"
-
-
-def test_put_role_v3_thinking_required_uses_ready_verified_profile(
+def test_put_role_v3_thinking_on_uses_ready_verified_profile(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -658,7 +649,7 @@ def test_put_role_v3_thinking_required_uses_ready_verified_profile(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "thinking": "required",
+                "thinking": True,
             },
             "model_groups": [
                 {
@@ -680,15 +671,29 @@ def test_put_role_v3_thinking_required_uses_ready_verified_profile(
     assert entry["warnings"] == []
 
 
-def test_put_role_v3_returns_fresh_report_without_persisting_report(
+def test_get_role_v3_rematerializes_report_from_current_route_capabilities(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # thinking:true on an unsupported route → warning, no reasoning enabled;
+    # after the route's thinking capability flips to true, GET re-materializes
+    # and now enables reasoning (report is derived, never persisted).
     route_id = "ready-provider:gpt-5"
     credentials = LLMCredentialsFile(
         provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
-        provider_routes={route_id: _provider_route(route_id)},
+        provider_routes={
+            route_id: _provider_route(route_id).model_copy(
+                update={
+                    "capabilities": {
+                        "thinking_protocol": CapabilityValue(
+                            value=False,
+                            source="provider_doc",
+                        )
+                    }
+                }
+            )
+        },
     )
     _seed_materializer_registry(tmp_path, monkeypatch, credentials)
     roles_path = tmp_path / "settings" / "llm" / "llm_roles.yaml"
@@ -701,7 +706,7 @@ def test_put_role_v3_returns_fresh_report_without_persisting_report(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "thinking": "required",
+                "thinking": True,
             },
             "model_groups": [
                 {
@@ -712,54 +717,12 @@ def test_put_role_v3_returns_fresh_report_without_persisting_report(
             ],
         },
     )
-
     assert put_response.status_code == 200
-    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == (
-        "needs_test"
-    )
+    put_entry = put_response.json()["materialization_report"]["entries"][0]
+    assert put_entry["role_fit"] == "using"
+    assert put_entry["warnings"][0]["code"] == "thinking_unsupported"
+    # The derived report is never written to the roles file.
     assert "materialization_report" not in roles_path.read_text(encoding="utf-8")
-
-    get_response = client.get("/api/llm/roles/analyst")
-
-    assert get_response.status_code == 200
-    get_body = get_response.json()
-    assert get_body["materialization_report"]["entries"][0]["role_fit"] == "needs_test"
-    assert get_body["materialization_report"]["entries"][0]["route_id"] == route_id
-
-
-def test_get_role_v3_rematerializes_report_from_current_route_capabilities(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    route_id = "ready-provider:gpt-5"
-    credentials = LLMCredentialsFile(
-        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
-        provider_routes={route_id: _provider_route(route_id)},
-    )
-    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
-
-    put_response = client.put(
-        "/api/llm/roles/analyst",
-        json={
-            "role_kind": "graph_agent",
-            "system_prompt_prefix": "",
-            "model_fallback_enabled": True,
-            "intent": {
-                "provider_preference": "manual_order",
-                "thinking": "required",
-            },
-            "model_groups": [
-                {
-                    "canonical_id": "gpt-5",
-                    "display_name": "GPT-5",
-                    "provider_models": [{"route_id": route_id}],
-                }
-            ],
-        },
-    )
-    assert put_response.status_code == 200
-    assert put_response.json()["fallback_chain"] == []
 
     refreshed_credentials = credentials.model_copy(
         update={
@@ -793,7 +756,7 @@ def test_get_role_v3_rematerializes_report_from_current_route_capabilities(
     assert get_body["materialization_report"]["entries"][0]["warnings"] == []
 
 
-def test_put_role_v3_thinking_required_unsupported_blocks_with_not_fit(
+def test_put_role_v3_thinking_on_unsupported_warns_but_still_fits(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -824,7 +787,7 @@ def test_put_role_v3_thinking_required_unsupported_blocks_with_not_fit(
             "model_fallback_enabled": True,
             "intent": {
                 "provider_preference": "manual_order",
-                "thinking": "required",
+                "thinking": True,
             },
             "model_groups": [
                 {
@@ -838,8 +801,10 @@ def test_put_role_v3_thinking_required_unsupported_blocks_with_not_fit(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["fallback_chain"] == []
+    # Best-effort: unsupported thinking is a warning, route still in the chain.
+    assert [entry["route_id"] for entry in body["fallback_chain"]] == [route_id]
     entry = body["materialization_report"]["entries"][0]
     assert entry["route_id"] == route_id
-    assert entry["role_fit"] == "not_fit"
+    assert entry["role_fit"] == "using"
     assert entry["warnings"][0]["code"] == "thinking_unsupported"
+    assert body["fallback_chain"][0]["runtime_settings"]["reasoning"]["enabled"] is None

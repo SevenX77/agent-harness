@@ -142,15 +142,20 @@
 3. **调兜底序**：model 之间拖序（谁先试，active_model 同步首位）；同一 model group 内 provider 链拖序（只改该模型 provider 顺序）；`Add provider` / 垃圾桶移除单 provider；删整组。
 4. **Model Fallback 开关**：关 → 只用首个 model group（provider 兜底永远在）。
 
-### 2.3 Role Intent（角色意图）
-> 控件应由后端 `build_runtime_setting_descriptors`（把 route capability 投影成前端控件描述符的函数，`registry/capabilities.py:205`）驱动，前端不硬编码各 provider 规则。
-- **Thinking**〔#2〕：off / preferred / required **三档互斥**——**必须用单一三态控件**（segmented / radio / select），**不可用两个开关表达**。现码只有 off/preferred 两态，需换组件 + 补 required 档。
-- **Output token**：target 值 + `Use max` 开关。**downgrade 默认策略不需要 UI**〔#3〕——保持默认（allow），不暴露 block/warn 选择控件。
-- **Route max token 摘要**：投影 route capability，只读。
-- **布局**〔#4〕：现 intent 配置布局偏丑，**只调内部布局、不改逻辑**（轻量 UI 优化）。
-- **Token Intent 完整 schema（回填 B1+，2026-06-03；2026-06-18 PM 修正为 role-only）**：`target_output_tokens` 与 `target_context_tokens` 都是 `TokenIntent{mode, value?, downgrade?}`，`mode` 四档：`default` / `maximum_available`（=`Use max`）/ `target`（配 value）/ **`required_minimum`**（配 value：要求该 route 的**最大可用输出 token ≥ value**；若 route 的输出上限 `< value` → 该 route 对此 role **not_fit、不进 fallback_chain**。语义是"输出下限要求"对比"route 的输出上限"，方向不要写反；`required_minimum` 只约束 output token，不涉 context）。〔实现待补：gateway `_apply_output_token_intent`（把 token 意图落到请求并判 fit 的函数）现仅实现 `maximum_available` / `target`，`required_minimum` 的"低于上限→not_fit"分支尚未落地，按此语义补。〕**intent 只在 role 级设（铁律）**：用户只对 **role** 提能力要求（thinking + token + provider_preference），**不逐 model-group、不逐 provider 配 intent**；加进 role 的 route，**匹配 role 要求就用、不匹配就不用**，逻辑到此为止。〔删原"Model-Group 级 intent 默认继承 role 级、可对该组覆盖"与 `inherit` 档——那是过度设计，与 role-only 原则相悖。〕§2.3 现有"target 值 + Use max 开关"只覆盖 `target`/`maximum_available` → UI 至少还要能表达 `required_minimum`（驱动 Not Fit）和 `default`，并补 `target_context_tokens`（现只有 output token）。
-- **downgrade**：是 `TokenIntent` 上的字段（allow / allow_with_warning / block），**schema 保留、默认 allow、不做 UI**（#3）。
-- **`cost_priority`：mvp1 砍掉（PM 2026-06-03 拍板）** —— 不做 UI，**schema 也不留**；等真有成本优化需求再加。
+### 2.3 Role Intent（角色意图 = 三个生成参数）
+> **改动说明（PM 2026-07-01 拍板简化；PR3 落地，替换旧设计、删旧路径）**：旧 §2.3 把 role intent 做成一套复杂机制——thinking 三档（off/preferred/required）、token 用 `TokenIntent{mode 四档}`（default/maximum_available/target/**required_minimum**，其中 required_minimum 还驱动"route 输出上限不够→not_fit 踢出 fallback"）、外加 `downgrade`（allow/warn/block）与 `target_context_tokens`。**这套整体作废**，理由 = PM 原话："thinking 只需要开关就够了""output token 不需要给选项，填一个数字就行""context token 设置没有意义"。**按"不向后兼容、换掉即删干净"**（AGENTS.md 开发原则 1），PR3 把 thinking→开关、token→纯数字 clamp、删 context token + required_minimum/downgrade 机制、补 temperature。gateway 每条 route 的底层 `RuntimeSettings`（`temperature`/`max_output_tokens`/`reasoning.enabled`）**保留**——它是参数真相载体；动的是 studio `RoleIntent` 语义层 + 物化 + 前端 + 对应测试。
+
+角色 intent 现在就是**三个生成参数**，都在 **role 级**设（铁律：只对 role 提要求，不逐 model-group、不逐 provider）：
+
+- **Thinking（开关）**：单一 `Switch`（on/off），不再是三档。**语义 = best-effort**：开关开且模型支持 reasoning → 用；模型不支持 → 就不用（不报错、不静默降级出错）。落到 gateway `reasoning.enabled`（本来就是 bool）。**Test 时开关开但模型不支持 → 警告，不阻塞**（不像旧 required 档那样把 route 判 not_fit）。旧的 off/preferred/required 三态控件 + required 的 not_fit 逻辑删除。
+- **Max output token（纯数字）**：一个数字输入框，**不给 mode 选项**。机制固定:**不填 = 用模型/route 的最大可用输出 token**；填的数字 **> route 上限 → 取上限**、**< route 下限 → 取下限**（clamp，不再 not_fit、不再 downgrade）。输入与展示**自动加千位符**（PM 撤回了 k 单位，一律全数字）。placeholder 提示按当前配置**推断出的有效最大 token**。落到 gateway `max_output_tokens`。旧 `TokenIntent{mode}` 四档 + `required_minimum→not_fit` + `downgrade` 删除。
+- **Temperature（纯数字，新增）**：role 级新增一个温度数字输入（float）。落到 gateway route `temperature`（route 级本来就有该字段，role 级此前缺，补上）。
+- **Context token：不做**（PM：没有意义）——`target_context_tokens` schema + UI **整块删除**。
+- **Route max token 摘要**：投影 route capability，只读（保留，用来给 output token 输入框算 placeholder 的推断上限）。
+- **`cost_priority`**：早已砍掉（PM 2026-06-03），schema 不留。
+- **provider_preference（manual_order）**：不属于这三个生成参数，是 provider 排序意图，**保留不动**。
+
+**节点级覆盖（PR3 同批做）**：节点 Properties 面板对这三个参数**直接覆盖、无开关字段**（PM 原话："节点覆盖 role 不用做开关，直接覆盖就好"）。节点覆盖**不进 SKILL.md**（llm 参数是 gateway 域配置真相，skill 源只放符号引用）；存 studio 后端**按 skill+phase**（和 compare 候选同族存储）。技术支点：engine 的 `model_resolver.resolve` 本来就带 `phase_name` 入参（`_GatewayBackedLLMProvider.invoke` 已把 phase_name 传进 resolve），studio 侧 resolver 按节点应用覆盖，**PR3 完全不改 engine**。phase 改名时同步迁移该存储 key。
 
 ### 2.4 状态展示与 tooltip（清理）
 - **role-fit 状态灯**：role card 内每 provider 行显 role-fit（Using / Downgraded / Needs Test / Not Fit，role-local 派生，从不改全局 health；来自后端 materialize report）。
@@ -202,7 +207,9 @@
 - **配置缺口红显引导**：缺 key / 无效 key / base_url / protocol / model → `failed`（reason=配置缺口，红）→ 组内**标红 + 「去配置」+ 引导去 API Keys 修**（不隐藏、不默认选）。
 - **role 测试批量**：role Test 探**所有**模型（非停首条成功），失败也回写 Probe Knowledge Catalog，切 tab / 刷新**不丢**。
 - **bundle 引用同步**：改 bundle 内容 → 所有引用该 bundle 的 role materialize 出的 fallback_chain **跟着变**（验引用非快照）。
-- **thinking 三档**：off/preferred/required 用单控件互斥，required 且模型不支持 → role-fit 转 Needs Test / Not Fit，不静默。
+- **thinking 开关（PR3 简化）**：单一 Switch（on/off）；开关开且模型不支持 reasoning → **警告不阻塞**（不再 Needs Test / Not Fit）。旧 off/preferred/required 三档 + required→not_fit 已删。
+- **max output token 纯数字（PR3 简化）**：无 mode 下拉；不填=route 最大、超上限取上限、低下限取下限（clamp），不再 not_fit/downgrade；输入即时千位符。
+- **temperature（PR3 新增）**：role 级数字输入落到 route temperature。context token 已整块删除。
 - **model family 折叠**：折叠态是视图态，刷新后保持（localStorage），不污染后端。
 
 ---
@@ -437,7 +444,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 **四层职责：**
 | 层 | 内容 |
 |---|---|
-| **① 前端 (ts)** | UI + 前端业务逻辑：角色卡 + Available Models 侧栏（model group 卡、**family 可折叠**〔#1〕、**弃用区**可折叠、6 态色含 🔵 蓝、endpoint 平铺在「endpoints」标签）；拖 model group + **默认 provider 选择算法**（Ready+Untested+🔵 优先、排除 failed/off、cooling 有替代不默认选）；provider 链拖序/加删；intent 控件（thinking **三态互斥单控件**〔#2〕、输出 token，downgrade 无 UI〔#3〕，**布局轻优化**〔#4〕，控件由 ③b 描述符驱动）；Test 触发 + role-fit 状态灯 + **单一顶层 tooltip**（fail/downgrade 进 tooltip、**不要 RoleTestResultPanel**、清嵌套 tooltip〔#5〕）；Model Bundle 区（**Add 与 Add Role 同位**〔#6〕、复用 role 编辑/测试/改名删除、**拖进角色=引用**〔#7/#8/#9/#12〕）；family/弃用区折叠（localStorage 视图态）；**只投影、不持第二份**（删 `roleTestStates`） |
+| **① 前端 (ts)** | UI + 前端业务逻辑：角色卡 + Available Models 侧栏（model group 卡、**family 可折叠**〔#1〕、**弃用区**可折叠、6 态色含 🔵 蓝、endpoint 平铺在「endpoints」标签）；拖 model group + **默认 provider 选择算法**（Ready+Untested+🔵 优先、排除 failed/off、cooling 有替代不默认选）；provider 链拖序/加删；intent 控件（PR3 简化：thinking **单 Switch**、max output token **纯数字**、temperature 数字；去 context/mode/downgrade；**布局轻优化**〔#4〕）；节点 Properties 面板同三参数直接覆盖；Test 触发 + role-fit 状态灯 + **单一顶层 tooltip**（fail/downgrade 进 tooltip、**不要 RoleTestResultPanel**、清嵌套 tooltip〔#5〕）；Model Bundle 区（**Add 与 Add Role 同位**〔#6〕、复用 role 编辑/测试/改名删除、**拖进角色=引用**〔#7/#8/#9/#12〕）；family/弃用区折叠（localStorage 视图态）；**只投影、不持第二份**（删 `roleTestStates`） |
 | **③a Studio 适配（应用加工）** | `GET /api/llm/registry`（model_groups DTO + 6 态 `ui_state`）· `GET /api/llm/model-groups` · `GET/PUT/DELETE /api/llm/roles[/{name}]` · `POST /api/llm/roles/{name}/test(-jobs)` · `GET/PUT/DELETE /api/llm/model-bundles[/{id}]`+`/test`。**应用加工**：拖拽编辑角色/绑定的 UI；**default 选择/推荐策略**（产品策略）；6 态颜色转 DTO；materialize 报告 + role 测试结果的渲染；Probe Knowledge Catalog 的远端源配置 / 存储介质 / 上传审批与脱敏。（model_group 分组 / materialize 编排 / 6 态总结 / Probe Knowledge Catalog 的**内核归 ③b**，见右列）|
 | **③b gateway 库（公共能力内核）** | **model group 分组 / identity 识别**；**materialize 编排内核**（按意图过滤路线 + 降级 + 排 fallback 链 + role-fit/downgrade 诊断）；`resolve_routes(role)`→`ResolvedRole`；capability 归一化 + 对比 + `build_runtime_setting_descriptors`（驱动 ① intent 控件）；`lint_role_routes`（只 warn/block 不选型）；route probe；ChatX 调用；熔断 + 错误分类 + **6 态标准总结**（供 ③a 转 DTO）。③b 看到"角色编排结构 + 意图"（通用），看不到"用户怎么拖拽编辑出它" |
 
@@ -453,8 +460,8 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | R7 拖组+默认选 | 拖拽 + 默认算法 | 接收存 model_groups | — |
 | R8–R10 调序/增删/删组 | reorder/增删 | `PUT roles` | — |
 | R11 fallback 开关 | 开关 | 传 fallback 开关给 ③b | **materialize 尊重 fallback 开关** |
-| R12 thinking 三态 | 三态控件←描述符 | 描述符投影 | thinking capability + descriptor |
-| R13 output token | 控件←描述符 | 同上 | max_output capability + descriptor |
+| R12 thinking 开关（PR3 简化） | 单一 Switch（on/off） | role_intent.thinking:bool → route reasoning.enabled | thinking capability（不支持则 Test 警告不阻塞） |
+| R13 max output token（PR3 简化） | 纯数字输入（无 mode）+ temperature 数字 | role_intent.max_output_tokens clamp 到 route min/max；temperature 落 route | max_output capability（算 placeholder 推断上限） |
 | R14 route max 摘要 | 显示 | role_effective_runtime_settings 投影 | `_effective_runtime_settings` |
 | R15 role-fit 灯 | 显示 | 渲染 fit 灯(读 ③b report) | **materialize 算 role_fit + capability + lint** |
 | R16 role Test 批量 | 触发 + 轮询喂灯 | `POST roles/{}/test-jobs` job 包装 + 落存储 | `resolve_routes` + 批量 route probe + **catalog 写语义** |
@@ -611,8 +618,8 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 39 | `Add provider` 补加 / 垃圾桶移除某 provider | role-provider-add/remove | ✅ |
 | 40 | 删整个 model group | role-model-remove | ✅ |
 | 41 | 切 `Model Fallback` 开关(关则只用第一个 model) | role-model-fallback-toggle | ✅ |
-| 42 | 切 `Thinking Preferred`(偏好推理模型) | role-thinking-intent | ✅ ⚠️ 后端还支持 `required` 档,前端只 off/preferred 两态无 UI |
-| 43 | 填 `Output Token Target` / 开 `Use max` | role-output-token-intent | ✅ ⚠️ 前端固定 downgrade=allow,后端 block/warn 策略无 UI |
+| 42 | 开/关 `Thinking` 开关(PR3 简化,不再三档) | role-thinking-intent | thinking:bool;开关开+模型不支持→Test 警告不阻塞 |
+| 43 | 填 `Max output tokens` 纯数字 + `Temperature`(PR3 简化,无 mode/无 context/无 downgrade) | role-output-token-intent | max_output_tokens clamp 到 route min/max;temperature 落 route |
 | 44 | 看 `Route max token` 摘要 | role-output-limit-summary | ✅ |
 | 45 | 悬停状态灯看 role-match(Can Run/Limited/Blocked)+ 诊断 | role-route-status-light | ✅ role_fit 来自后端 materialize report |
 | 46 | 点 `Test` → 后端 job 逐 route 探测兜底链,实时回填灯 + downgrades | role-test | ✅ ⚠️ 结果易失(切 tab 丢);`RoleTestResultPanel` 已写未挂载 |
@@ -664,7 +671,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 测试态 SSOT 落盘/回填、删前端易失层 | ✅ §6.5 检查 2 + §4.1 Probe Knowledge Catalog 写回 |
 | Copilot 整 tab 做到哪档 | ✅ 配置 + 真测试(修假测试)全做,§3.4 |
 | Copilot 分流 bug(#62/63 丢前缀) | ✅ 确认是 bug、接线必修,§7.4 |
-| role intent 前端缺口(#42/43 required/block) | ✅ 补 UI,§2.3 Role Intent |
+| role intent(#42/43) | ✅ **PR3 简化定稿**:thinking 开关 + max output token 纯数字 + temperature;删 required/block/context/mode/downgrade,§2.3 Role Intent |
 | Available Models 静默过滤(#35) | ✅ 显式展示「为何缺失」,§2.1 + §4.2 6 态 |
 | Model Bundle 语义(#50/51 快照/无 Test) | ✅ §2.6 Model Bundle 与 Role 高度统一 |
 | API Keys 现状差(probe/mask/两步/protocol/孤儿/base_url/状态术语) | ✅ §1.2 + §4.2 + §7.2 |

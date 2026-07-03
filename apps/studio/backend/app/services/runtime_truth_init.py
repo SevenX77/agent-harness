@@ -93,16 +93,16 @@ def _ensure_roles_file(created: list[tuple[str, Path]]) -> None:
 
 
 def _ensure_fixed_roles(created: list[tuple[str, Path]]) -> None:
-    """固定角色(引擎 builtin 硬依赖,如 md-patch 的 `fast`)必须始终在场:缺失就补上,
-    不覆盖已存在的。补的是该角色推荐模型的**全部已配置 endpoint**(见
-    `llm_fixed_roles.default_role_entry`),不是空槽 —— 这类角色专供引擎内部子任务用,
-    不该让用户从空白摸索该配什么模型。这样即便迁移/重置清空了角色,固定角色也会在下次
-    启动自动回来 —— 配合删除端点的守卫,构成"固定不可删"。"""
+    """固定角色(引擎 builtin 硬依赖如 `fast`,以及内置 copilot 角色)必须始终在场:缺失
+    就补上,不覆盖已存在的。补的是该角色推荐模型的**全部已配置 endpoint**(见
+    `llm_fixed_roles.default_role_entry`),不是空槽 —— 不该让用户从空白摸索该配什么模型。
+    这样即便迁移/重置清空了角色,固定角色也会在下次启动自动回来 —— 配合删除端点的守卫,
+    构成"固定不可删"。凭证还没配时补出空角色,等 API Keys 配好后由 reconcile 补模型。"""
     from app.services.llm_credentials import load_credentials
-    from app.services.llm_fixed_roles import default_role_entry, required_builtin_roles
+    from app.services.llm_fixed_roles import default_role_entry, fixed_role_names
     from app.services.llm_roles import load_roles_file
 
-    required = required_builtin_roles()
+    required = fixed_role_names()
     if not required:
         return
     path = roles_path()

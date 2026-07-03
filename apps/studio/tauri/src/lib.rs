@@ -266,11 +266,55 @@ fn windows_path_to_wsl(path: &Path) -> String {
     slashed
 }
 
-/// The bash payload ah + claude run inside WSL. It pre-accepts the per-workspace
-/// onboarding gates (theme picker + folder-trust dialog) so the interactive
-/// master reaches its prompt instead of blocking, then `ah start`s and attaches
-/// the master — all in ONE wsl session so the interactive attach holds the
-/// distro alive and the master persists.
+/// Python payload embedded in both launcher scripts that pre-approves the
+/// onboarding gates for the workspace ah is about to open the interactive
+/// master in: theme picker, per-workspace folder-trust, and external-CLAUDE.md
+/// -imports.
+///
+/// The imports approval is gated per the DIRECTORY OF THE IMPORTING CLAUDE.md,
+/// not the workspace cwd — verified empirically: seeding only the workspace's
+/// own `projects` entry still left the "Allow external CLAUDE.md file
+/// imports?" dialog blocking, because this repo's root CLAUDE.md `@`-imports
+/// AGENTS.md (outside a skill subdirectory's cwd) and the approval is recorded
+/// against that CLAUDE.md's own directory. So this walks every ancestor
+/// directory up to the filesystem root and seeds any that has its own
+/// CLAUDE.md, in addition to the workspace itself.
+const CLAUDE_ONBOARDING_PRESEED_PY: &str = r#"import json, os, sys
+p = os.path.expanduser('~/.claude.json')
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+d.setdefault('theme', 'dark')
+proj = d.setdefault('projects', {})
+
+def seed(path):
+    e = proj.setdefault(path, {})
+    e['hasTrustDialogAccepted'] = True
+    e['hasClaudeMdExternalIncludesApproved'] = True
+    e['hasClaudeMdExternalIncludesWarningShown'] = True
+    e.setdefault('hasCompletedProjectOnboarding', True)
+    e.setdefault('projectOnboardingSeenCount', 3)
+
+ws = sys.argv[1]
+seed(ws)
+cur = ws
+while True:
+    parent = os.path.dirname(cur)
+    if parent == cur:
+        break
+    if os.path.isfile(os.path.join(parent, 'CLAUDE.md')):
+        seed(parent)
+    cur = parent
+
+json.dump(d, open(p, 'w'), indent=2)
+"#;
+
+/// The bash payload ah + claude run inside WSL. It pre-accepts the onboarding
+/// gates (see `CLAUDE_ONBOARDING_PRESEED_PY`) so the interactive master reaches
+/// its prompt instead of blocking, then `ah start`s and attaches the master —
+/// all in ONE wsl session so the interactive attach holds the distro alive and
+/// the master persists.
 fn wsl_payload_script(wsl_workspace: &str, wsl_config: &str) -> String {
     format!(
         r#"#!/usr/bin/env bash
@@ -284,19 +328,7 @@ if ! command -v ah >/dev/null 2>&1; then
 fi
 if command -v python3 >/dev/null 2>&1; then
 python3 - "$WS" <<'PY'
-import json, os, sys
-p = os.path.expanduser('~/.claude.json')
-try:
-    d = json.load(open(p))
-except Exception:
-    d = {{}}
-d.setdefault('theme', 'dark')
-proj = d.setdefault('projects', {{}})
-e = proj.setdefault(sys.argv[1], {{}})
-e['hasTrustDialogAccepted'] = True
-e.setdefault('hasCompletedProjectOnboarding', True)
-e.setdefault('projectOnboardingSeenCount', 3)
-json.dump(d, open(p, 'w'), indent=2)
+{preseed}
 PY
 fi
 cd "$WS" 2>/dev/null || cd "$HOME"
@@ -309,6 +341,7 @@ exec bash -i
 "#,
         workspace = sh_single_quote_str(wsl_workspace),
         config = sh_single_quote_str(wsl_config),
+        preseed = CLAUDE_ONBOARDING_PRESEED_PY,
     )
 }
 
@@ -340,19 +373,7 @@ if ! command -v ah >/dev/null 2>&1; then
 fi
 if command -v python3 >/dev/null 2>&1; then
 python3 - {workspace} <<'PY'
-import json, os, sys
-p = os.path.expanduser('~/.claude.json')
-try:
-    d = json.load(open(p))
-except Exception:
-    d = {{}}
-d.setdefault('theme', 'dark')
-proj = d.setdefault('projects', {{}})
-e = proj.setdefault(sys.argv[1], {{}})
-e['hasTrustDialogAccepted'] = True
-e.setdefault('hasCompletedProjectOnboarding', True)
-e.setdefault('projectOnboardingSeenCount', 3)
-json.dump(d, open(p, 'w'), indent=2)
+{preseed}
 PY
 fi
 cd {workspace}
@@ -369,6 +390,7 @@ exec "${{SHELL:-/bin/sh}}"
 "#,
         workspace = sh_single_quote(workspace_root),
         config = sh_single_quote(config_path),
+        preseed = CLAUDE_ONBOARDING_PRESEED_PY,
     )
 }
 
@@ -992,6 +1014,11 @@ mod tests {
         assert!(
             script.contains("CFG='/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml'")
         );
+        // external-imports gate: repos whose root CLAUDE.md `@`-imports a file
+        // outside the skill's cwd (e.g. this repo's AGENTS.md) would otherwise
+        // block the master on an "Allow external CLAUDE.md file imports?" prompt.
+        assert!(script.contains("hasClaudeMdExternalIncludesApproved"));
+        assert!(script.contains("hasClaudeMdExternalIncludesWarningShown"));
         // pre-accepts the per-workspace folder-trust gate so the master doesn't block
         assert!(script.contains("hasTrustDialogAccepted"));
         assert!(script.contains("cd \"$WS\""));

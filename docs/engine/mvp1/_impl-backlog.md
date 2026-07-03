@@ -67,3 +67,9 @@ related: INDEX.md（设计单元台账）· 各模块 mvp1-alignment.md §8（im
 ## 派单序(daemon 恢复后)
 K1→K2(keystone)→ 并行 [Tier 1 挂 create_agent] + [Tier 2 独立轨] → Tier 3 错误 V2(P0-1 起)→ Tier 4 需 studio 协同(S1-S3 现在就可路由)→ Tier 5 收尾。
 > Tier 4 的 S1-S3(3 个 P0)= studio 侧、**现在就能路由**,不必等 daemon。
+
+## 已落地设计决策(非 backlog,存档;`01-compile` 是 audited-ready 锁文档,新决策记在此不进锁文件)
+
+| 日期 | 决策 | 落点 | 动机 |
+|---|---|---|---|
+| 2026-07-03 | **topology projection(尽力而为投影,repair view 专用)是 `01-compile` §2 主编译流水线之外的独立辅助机制**——`topology_projection.py:load_graph_topology_projection` 只服务 Studio 的 repair 态画布(D2,见 `docs/studio/mvp1/01_workflows/01_init.md`:"不卡导入 ... 我们有 compile, 有 copilot"),职责是 skill 编译不过时仍把 `phases`/DAG 画出来、让用户能看着改。此前严格编译路径(`parse_markdown_parts`)把整份 frontmatter 当一份原子 YAML 文档,`io.*` 里一个无关的重复 key 会连累语法完全正常的 `phases` 一起读不出来,repair 画布连"看着改"这个前提都没了。修法:新增 `parse_markdown_parts_best_effort`(容忍 `ruamel.yaml` 的 duplicate-key,last-value-wins),**只给 topology projection 这类"repair 视图"消费者用**;编译期主路径继续严格拒绝重复 key(仍是 `[F-v3-*]` 该报的错,不受影响)。若 frontmatter 连 best-effort 都解不出(真正语法损坏、不只是重复 key),原样抛出,由调用方(Studio `_graph_topology_projection_or_empty`)按既有约定降级为 `([], [])` 并记 WARNING。同一改动把 `_parse_frontmatter` 捕获的原始 ruamel `YAMLError` 消息重新格式化成仓库 `path:line` 约定(此前是 ruamel 自己的 `in "<file>", line N, column M` 格式,Studio 的 `_LOCATION_RE` 解不出来,行号静默丢失)。 | `packages/graph-agent/src/graph_agent/core/parser.py`(`parse_markdown_parts_best_effort`/`_format_frontmatter_yaml_error`)· `topology_projection.py:load_graph_topology_projection` | 复现:`skills/story-deconstruction-v3/subgraph/text-segmentation/GRAPH.md` 手改产生的真实重复 key(`io.inputs.properties` 下)导致 repair 画布只剩 Input/Output 两个桩节点,phases 全丢;PR 修复见 `apps/studio/backend/tests/services/test_skills_broken_graph_parse.py::test_phases_topology_survives_an_unrelated_io_duplicate_key` + `packages/graph-agent/tests/core/test_parse_skill_file.py::test_parse_markdown_parts_duplicate_key_error_carries_path_and_line`。 |

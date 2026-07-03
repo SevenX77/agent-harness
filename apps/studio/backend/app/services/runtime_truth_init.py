@@ -35,6 +35,7 @@ def ensure_runtime_truth_sources() -> list[str]:
     _ensure_json_file("skill_index", config.SKILL_INDEX_PATH, {}, created)
     _ensure_credentials_file(created)
     _ensure_roles_file(created)
+    _ensure_fixed_roles(created)
     _ensure_json_file("llm_role_test_results", role_test_results_path(), {"results": {}}, created)
     # Phase 9: the three legacy catalog files (llm_probe_catalog.json /
     # community_catalog_cache.json / community_upload_queue.json) are retired — startup no
@@ -89,6 +90,34 @@ def _ensure_roles_file(created: list[tuple[str, Path]]) -> None:
         return
     save_roles_file(path, RolesData(), known_route_ids=set(), known_bundle_ids=set())
     created.append(("llm_roles", path))
+
+
+def _ensure_fixed_roles(created: list[tuple[str, Path]]) -> None:
+    """固定角色(引擎 builtin 硬依赖,如 md-patch 的 `fast`)必须始终在场:缺失就补一个
+    空槽(用户在设置页填模型),不覆盖已存在的。这样即便迁移/重置清空了角色,固定角色
+    也会在下次启动自动回来 —— 配合删除端点的守卫,构成"固定不可删"。"""
+    from app.models.llm_config import RoleEntry
+    from app.services.llm_fixed_roles import required_builtin_roles
+    from app.services.llm_roles import load_roles_file
+
+    required = required_builtin_roles()
+    if not required:
+        return
+    path = roles_path()
+    data = load_roles_file(path) if path.exists() else RolesData()
+    missing = [name for name in required if name not in data.roles]
+    if not missing:
+        return
+    roles = dict(data.roles)
+    for name in missing:
+        roles[name] = RoleEntry(role_kind="graph_agent")
+    save_roles_file(
+        path,
+        data.model_copy(update={"roles": roles}),
+        known_route_ids=set(),
+        known_bundle_ids=set(),
+    )
+    created.append(("llm_roles_fixed", path))
 
 
 def _ensure_json_file(

@@ -74,6 +74,14 @@ export interface SettingsPageContentProps {
    * top bar shows a "connection lost" warning to the right of the save badge.
    */
   connectionLost?: boolean
+  /**
+   * Live backend reachability = API config resolved AND the event stream is
+   * connected. Mutating settings actions (delete / test / add) are gated on
+   * this: when false they are refused with a "reconnecting" message and the UI
+   * disables the buttons, so nothing fires into an unreachable backend.
+   * Undefined is treated as reachable (test fixtures / non-gated surfaces).
+   */
+  backendReachable?: boolean
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>, options?: ProviderDraftChangeOptions) => void

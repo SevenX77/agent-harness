@@ -123,6 +123,24 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - Status: 设计定稿(2026-07-02)→ 实施中。
 - 归属: region `copilot`; capability `copilot-assist`(后端 translator 在 studio 后端)。
 
+### F9. 转录阅读体验(2026-07-02 R7-A 新增)
+
+流式已经能跑(F8),但「读」得很差(PM 2026-07-02 R7:「不会自动往下拉显示最新结果」「中间过程完成后不收束、loading 圈继续转」「thinking 不自动滚」「字体再小一号」「最后只保留最终输出,把上面所有过程收束到一个折叠的过程行,加处理时间,类似 processed 44s ›」;另 item7「去掉对话小字前面那根竖线」、item3「聊天内容无法选择」)。约束:
+
+  1. **过程/答案分层(`partitionAssistantView`)**:一个 turn 拆成 **PROCESS**(thinking / 工具卡 / context / 中间叙述)和 **ANSWER**(最后一段文本)。
+     - **流式中**:PROCESS 实时内联展开(看着它发生)+ ANSWER 边流边出。
+     - **结束(done)后**:PROCESS **整体收进一个默认折叠的 `<details>`**,summary = 「`Processed {Ns} ›`」(`formatProcessedDuration`,时长 = done.receivedAt − message.createdAt),下面只留 ANSWER 展开。ANSWER = 最后一段 text run;无最终文本(纯工具 turn)时 answer=null、全部进 PROCESS。
+  2. **自动滚底**:流式时视口黏底,跟随 thinking + 答案增长(MessageScroller `autoScroll`;实测 atBottom 全程保持)。
+  3. **工具卡 spinner 只在流式转**:`ToolCallBubble` 收 `streaming` prop——`tool_use_start` 的 `Loader2 animate-spin` 只在 `streaming` 时转;turn 结束后过程折叠、spinner 随之消失(修 R7「loading 圈继续转」)。
+  4. **thinking 自动滚**:`ThinkingBlock` 的 `<pre>` 在流式时把 scrollTop 顶到 scrollHeight,始终显示最新推理。
+  5. **无竖线**:转录内所有二级信息块(thinking / 工具 / context / error / unknown)一律去掉 `border-l` 左规,改用留白/缩进(PM item7)。
+  6. **字体降一档**:ANSWER `text-[13px]`,PROCESS 二级信息 `text-xs`。
+  7. **可选中**:消息容器 + thinking `<pre>` spread `allowTextSelectionProps()` 进入全局文本选择白名单(FRONTEND_UI_SPEC §2.11,PM item3)。
+- 决策: 「过程」是可展开的审计轨,不是要一直占屏的东西——默认收束成一行 + 处理时间,把注意力还给最终答案;这是 F1「不省略」(过程仍可展开逐步查看)和「可读」的平衡。
+- 测试: 前端单测 `partitionAssistantView`(过程/答案分离、纯工具 turn answer=null、流式中 duration=null)+ `formatProcessedDuration`(秒/分秒);live 验证流式黏底 + done 后折叠成 `Processed Ns ›` + 竖线消除。
+- Status: 设计定稿 + 实施(2026-07-02)。
+- 归属: region `copilot`; capability `copilot-assist`。
+
 ## 3. 接口契约
 - Inputs: current skill id, current view context, copilot role route data, websocket events.
 - Outputs: user message, optional route override, attach/context selection requests.

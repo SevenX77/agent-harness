@@ -6,10 +6,32 @@ import type {
   CopilotTextDeltaEvent,
   CopilotThinkingDeltaEvent,
 } from '../../types/copilot'
-import { buildAssistantTranscript } from './transcript'
+import { buildAssistantTranscript, formatProcessedDuration, partitionAssistantView } from './transcript'
 
-function message(events: CopilotEvent[], content = '', status: CopilotMessage['status'] = 'running'): CopilotMessage {
-  return { id: 'assistant-1', role: 'assistant', content, events, status, createdAt: 1 }
+function message(
+  events: CopilotEvent[],
+  content = '',
+  status: CopilotMessage['status'] = 'running',
+  createdAt = 1,
+): CopilotMessage {
+  return { id: 'assistant-1', role: 'assistant', content, events, status, createdAt }
+}
+
+function doneAt(id: string, receivedAt: number): CopilotEvent {
+  return { id, type: 'done', status: 'success', receivedAt, raw: null }
+}
+
+function toolResult(id: string, success = true): CopilotEvent {
+  return {
+    id,
+    type: 'tool_use_result',
+    status: success ? 'success' : 'error',
+    receivedAt: 1,
+    raw: null,
+    tool_name: 'Read',
+    success,
+    result_summary: 'ok',
+  }
 }
 
 function textDelta(id: string, content: string): CopilotTextDeltaEvent {
@@ -70,5 +92,62 @@ describe('buildAssistantTranscript', () => {
 
   it('returns no segments for an empty in-flight message', () => {
     expect(buildAssistantTranscript(message([]))).toEqual([])
+  })
+})
+
+// R7-A (PM 2026-07-02「最后只保留最终输出，把上面所有过程收束到一个折叠的过程行，
+// 加处理时间 processed 44s」): a settled turn splits into the collapsible PROCESS
+// (thinking / tools / context / intermediate narration) and the final ANSWER
+// (the last text run), plus the turn duration for the "Processed Ns" summary.
+describe('partitionAssistantView', () => {
+  it('splits the final text answer from the preceding process', () => {
+    const view = partitionAssistantView(
+      message(
+        [
+          contextResolved('c1'),
+          thinkingDelta('th1', 'reason'),
+          textDelta('t1', 'Reading the graph'),
+          toolUseStart('tool1'),
+          toolResult('tr1'),
+          textDelta('t2', 'Final answer'),
+          doneAt('d1', 45_000),
+        ],
+        'Reading the graphFinal answer',
+        'success',
+      ),
+    )
+
+    expect(view.process.map((s) => s.kind)).toEqual(['event', 'thinking', 'text', 'event', 'event'])
+    expect(view.answer).toMatchObject({ content: 'Final answer' })
+    expect(view.durationMs).toBe(44_999)
+  })
+
+  it('has a null answer when the turn produced only process (tools, no final text)', () => {
+    const view = partitionAssistantView(
+      message([thinkingDelta('th1', 'hmm'), toolUseStart('tool1'), doneAt('d1', 3_000)], '', 'success'),
+    )
+
+    expect(view.answer).toBeNull()
+    expect(view.process.map((s) => s.kind)).toEqual(['thinking', 'event'])
+    expect(view.durationMs).toBe(2_999)
+  })
+
+  it('reports null duration while the turn is still streaming (no done event)', () => {
+    const view = partitionAssistantView(message([textDelta('t1', 'partial')]))
+
+    expect(view.durationMs).toBeNull()
+    expect(view.answer).toMatchObject({ content: 'partial' })
+  })
+})
+
+describe('formatProcessedDuration', () => {
+  it('formats sub-minute durations as seconds', () => {
+    expect(formatProcessedDuration(44_999)).toBe('45s')
+    expect(formatProcessedDuration(0)).toBe('0s')
+  })
+
+  it('formats minute-plus durations as m/s', () => {
+    expect(formatProcessedDuration(60_000)).toBe('1m')
+    expect(formatProcessedDuration(80_000)).toBe('1m 20s')
   })
 })

@@ -9,6 +9,8 @@ import {
   deleteRole,
   modelGroupsFromRegistry,
   probeRoute,
+  probeRouteMultimodal,
+  routeAcceptsImageVerified,
   putCredentials,
   putRoles,
   resetLlmApiCachesForTests,
@@ -1927,6 +1929,52 @@ describe('API Keys v4 registry adapter', () => {
       'post /llm/routes/openrouter-custom%3Agpt-5/probe?force=true',
     ])
     expect(JSON.parse(String(seen[0].data))).toEqual({ capabilities: [] })
+  })
+
+  it('probes a route for multimodal (image) input via the probe-multimodal endpoint', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      return route
+    })
+
+    await probeRouteMultimodal(route.route_id)
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'post /llm/routes/openrouter-custom%3Agpt-5/probe-multimodal',
+    ])
+  })
+
+  it('routeAcceptsImageVerified is true only for probe-verified image input', () => {
+    const base = { ...route }
+    expect(
+      routeAcceptsImageVerified({
+        ...base,
+        capabilities: {
+          input_modalities: { value: ['text', 'image'], source: 'probed_verified' },
+        },
+      }),
+    ).toBe(true)
+    // catalog 声称(provider_doc)不算实测通过。
+    expect(
+      routeAcceptsImageVerified({
+        ...base,
+        capabilities: {
+          input_modalities: { value: ['text', 'image'], source: 'provider_doc' },
+        },
+      }),
+    ).toBe(false)
+    // 没图 = 不认图。
+    expect(
+      routeAcceptsImageVerified({
+        ...base,
+        capabilities: {
+          input_modalities: { value: ['text'], source: 'probed_verified' },
+        },
+      }),
+    ).toBe(false)
+    // 没探测过 = 不认图。
+    expect(routeAcceptsImageVerified({ ...base, capabilities: {} })).toBe(false)
   })
 
   it('runs a persisted role test and returns provider diagnostics', async () => {

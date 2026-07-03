@@ -46,6 +46,7 @@
    - **修订记录（PM 2026-07-02，协议探测矩阵）**：#C 的"排列组合各测一遍"落地形态定为**探测矩阵**，并纠正实现 drift（"轮换选出唯一协议并改写 endpoint.protocol"）。原则：**状态不能被设置，只能从观察算出来；观察会老化，但不会被覆盖**。
      1. **矩阵格子 = (canonical base_url, protocol)，身份不可变**。一张卡的每个 URL × 每个候选协议是一个独立格子（= endpoint 记录）；`protocol` 是身份的一部分，**创建后永不改写**。"检测协议"不再是给某个 endpoint 找协议，而是每个格子**用自己的协议**打推理端点、把结果记在**自己**身上。协议轮换机（在一个 endpoint 的 Test 里换协议试、试通改写 `protocol` 字段）**作废删除** —— 它制造过三重事故（实证 2026-07-02）：qiniu `-openai-` endpoint 被改写成 anthropic 与兄弟 endpoint 完全重复；瞬时失败让 google 的 404 赢下检测；同一 Test 连点两次持久真相不同（前端按 id-slug 回写 protocol 与后端检测打乒乓）。
      2. **`protocol_unsupported` 一等分类**（gateway 探测分类新增）：路径级 404/405（如 "not found or method not allowed"、"Use /v1/messages instead"，响应体**不含**模型语义错误）= **该 URL 不支持该协议**，与 `invalid_model`（协议通了、模型 id 不对）**必须区分**。旧实现把协议 404 归进 `invalid_model` 是三个假象的共同根因（"Untested"假状态、google 赢检测、6/6 失败仍 verified）。
+        - **补充信号（PM 2026-07-02，误路由与路由拒绝）**：判据不止 404/405。① **路由级拒绝**：`5xx` 明说该协议路径不存在（实证：`anthropic.qnaigc.com × google` 的 `GET /v1beta/models` → HTTP 500 `"Unsupported fixed route: /v1beta/models"`）也是 `protocol_unsupported`（标记扩到 `unsupported fixed route` / `unknown route` / `route not found`）。② **误路由到异协议**：某些网关对不支持的协议**不报错而是静默转发到自己的另一协议上游**，把那个上游的错误原样吐回 —— 探 `google` 却收到 `"OpenAI API error: 401 invalid api key"`（实证：`anthropic.qnaigc.com × gemini` 生成 500 包着七牛内部 OpenAI 上游的 401）。**探 X 协议却收到 Y 协议的 API 错误 = 该 URL 不说 X**，判 `protocol_unsupported`（此判据须早于 401 分支，否则异协议的 401 会被误当成"我这把 key 失效"）。真机验证 2026-07-02：修后该格子稳定判 `protocol_unsupported`、名下 6 条幽灵路由被清空（deepseek-v4-pro 的 qiniu 路由 4→3）。
      3. **格子永不删除、永不手工 disable，状态 = 最近观察的投影**：`verified`（最近生成 ok）/ `untested`（无观察）/ `unsupported`（最近观察 = protocol_unsupported，展示观察时间 + 下次复查时间）/ 瞬时失败（网络/限流/超时 → 下次 Test 即重试）/ 结构失败（invalid_key / quota → 账号级，与格子生死无关）。
      4. **失败分类定半衰期**：`protocol_unsupported` 是提供商架构级事实 → 长半衰期（**30 天**内日常 Test 跳过该格子，到期自动补测；用户可对单格子强制 re-probe）；瞬时类不设门。"哪天 qiniu 支持 gemini 了"由半衰期复测或手动 re-probe 重新发现 —— 能力不会永久丢失，只有"多久发现"。
      5. **protocol 单写真相**：`protocol` 唯一权威 = 后端 credentials 存储的字段。前端**不得**从 endpoint id 的 slug 反推协议，upsert **不得**修改既有 endpoint 的 `protocol`（后端拒绝 422）；(canonical base_url, protocol) 唯一性是存储不变量（历史被改写产生的重复格子视为坏数据清除，数据可丢弃）。
@@ -556,8 +557,9 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 7 | 点 X 关闭回工作区画布 | close-settings-overlay | ✅ 无未保存确认,in-flight PUT 仍落地 |
 | 8 | (Settings 打开时)点 Header Home → 连带关 Settings + 退首页 | home-closes-settings | ✅ 与 X 两条语义(Home 还卸载工作区) |
 | 9 | 某 tab 渲染崩溃 → 错误兜底卡 + Retry(不白屏) | settings-error-boundary | ✅ ⚠️ 只包 Roles/Copilot,General/API Keys 没包 |
+| 10 | **后端不可达时禁止写操作(就绪门)** | settings-backend-readiness-gate | ✅(PM 2026-07-03)后端**实时可达** = API 配置就绪(`apiReady`)**且** `/ws/events` 连着(`!connectionLost`)。凡是会写后端的动作(删 provider / 删 URL / Test 取模型 / 单格 Re-probe / 新增 provider)在发请求**前先过这道门**:不可达则**拒绝执行 + 明确提示「后端正在重连,请稍候再试」**(不再让请求打进空气、拿不到响应弹裸 "Backend unavailable",也不再乐观删除后又回滚);同时按钮**禁用**(如 Add Provider `disabled`)。app 外壳仍立即渲染、不整屏隐藏(尊重「壳层立即挂载」),门控只作用在**会写后端的交互**上。 |
 
-> Stage 0 行为 PM 已拍板(批次 settings-shell):窗口小自动收侧栏;再点 toolbar Settings 图标=关 settings;网络拉不到显示「连接不上」警告标志(否则不必让用户感知)。详见 [01_init §4](./01_init.md)(Settings overlay 不卸载工作区的流转)。
+> Stage 0 行为 PM 已拍板(批次 settings-shell):窗口小自动收侧栏;再点 toolbar Settings 图标=关 settings;网络拉不到显示「连接不上」警告标志(否则不必让用户感知);**写操作在后端不可达时禁用 + 提示重连(#10 就绪门,PM 2026-07-03),而不是让动作打进空气再弹裸报错**。详见 [01_init §4](./01_init.md)(Settings overlay 不卸载工作区的流转)。
 
 ### 7.1 Stage 1 — General（身份与产物路径）〔区域 `settings:general`,叙事未覆盖,仅此〕
 

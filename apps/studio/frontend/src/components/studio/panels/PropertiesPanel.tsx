@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import useSWR from "swr"
 import { AxiosError } from "axios"
-import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, RotateCcw, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, Settings, Settings2, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -2837,24 +2837,25 @@ function LlmNodeParamsField({
           number Input. Reuses @/components/ui, no new style. */}
       <Card size="sm">
         <CardContent className="space-y-3">
-          <Field className="min-h-14 gap-1">
-            <YamlNestedFieldLabel htmlFor={thinkingId}>
+          <Field
+            orientation="horizontal"
+            className="min-h-9 items-center justify-between gap-3"
+          >
+            <YamlNestedFieldLabel htmlFor={thinkingId} className="min-w-0">
               thinking
               <HelpTooltip label="About thinking">
                 Whether this node asks the model to use reasoning/thinking. Best-effort: only
                 applies when the node&rsquo;s model supports it.
               </HelpTooltip>
             </YamlNestedFieldLabel>
-            <div className="flex h-9 items-center">
-              <Switch
-                id={thinkingId}
-                size="sm"
-                data-llm-node-thinking="true"
-                checked={draft.thinking === true}
-                aria-label="Node thinking override"
-                onCheckedChange={(thinking) => update({ ...draft, thinking })}
-              />
-            </div>
+            <Switch
+              id={thinkingId}
+              size="sm"
+              data-llm-node-thinking="true"
+              checked={draft.thinking === true}
+              aria-label="Node thinking override"
+              onCheckedChange={(thinking) => update({ ...draft, thinking })}
+            />
           </Field>
           <Field className="min-h-14 gap-1">
             <YamlNestedFieldLabel htmlFor={maxOutputId}>
@@ -2878,8 +2879,7 @@ function LlmNodeParamsField({
             <YamlNestedFieldLabel htmlFor={temperatureId}>
               temperature
               <HelpTooltip label="About temperature">
-                Sampling temperature (0&ndash;2) for this node. Drag to override; the reset button
-                clears it back to the role default.
+                Sampling temperature (0&ndash;2) for this node. Drag to override the role default.
               </HelpTooltip>
             </YamlNestedFieldLabel>
             <div className="flex h-9 items-center gap-2">
@@ -2897,15 +2897,6 @@ function LlmNodeParamsField({
               <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
                 {draft.temperature === "" ? "—" : draft.temperature}
               </span>
-              <button
-                type="button"
-                aria-label="Reset temperature to role default"
-                className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                disabled={draft.temperature === ""}
-                onClick={() => update({ ...draft, temperature: "" })}
-              >
-                <RotateCcw className="size-3.5" aria-hidden />
-              </button>
             </div>
           </Field>
         </CardContent>

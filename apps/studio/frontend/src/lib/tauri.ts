@@ -151,6 +151,34 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
   }
 }
 
+/** Native OS picker for a single file (io import). Returns the absolute path. */
+export async function selectImportFile(defaultDirectory?: string | null): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    toast.info('Desktop only')
+    return null
+  }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
+    return null
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const selected = await invoke<string | null>('select_file', {
+      defaultPath: defaultDirectory?.trim() || null,
+    })
+    return typeof selected === 'string' ? selected : null
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error)
+    toast.error('Failed to open file picker', { description })
+    return null
+  }
+}
+
+/** Native OS picker for a folder (io import). Returns the absolute path. */
+export async function selectImportFolder(defaultDirectory?: string | null): Promise<string | null> {
+  return selectSkillDirectory(defaultDirectory)
+}
+
 export interface SkillWorkspaceResult {
   root: string
   skillId: string

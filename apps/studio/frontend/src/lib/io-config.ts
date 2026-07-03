@@ -94,6 +94,23 @@ export function reconcileInputFields(
   skillDetail: SkillDetail | undefined,
   nodeId: string,
 ): ReconciledFieldRow[] {
+  // Input pseudo-node / GRAPH.md (no selected phase): no upstream blackboard.
+  // A declared graph input with no `source:'file'` backing is unsourced — it
+  // can only be filled by the run payload — so flag it missing so the author
+  // sees the unwired entry field (PM 2026-07-02 r4b).
+  if (!nodeId) {
+    const declared = declaredIoProps(rootGraphFrontmatter(skillDetail), 'inputs')
+    return Object.entries(declared)
+      .filter(([, schema]) => schema.source !== 'file')
+      .map(([name, schema]) => ({
+        name,
+        type: typeOfSchema(schema),
+        from: 'io.inputs',
+        checked: false,
+        state: 'missing' as const,
+        reason: 'declared graph input · no source supplied',
+      }))
+  }
   const blackboard = blackboardAtNode(skillDetail, nodeId)
   if (blackboard.length === 0) {
     return []

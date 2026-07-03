@@ -150,8 +150,36 @@ actions: [report]
     expect(byName.has('style_guide')).toBe(false)
   })
 
-  it('returns [] for a node with no blackboard (Input pseudo-node / GRAPH.md)', () => {
-    expect(reconcileInputFields(reconDetail(), '')).toEqual([])
+  it('flags graph inputs with no source as missing (Input pseudo-node / GRAPH.md)', () => {
+    // GRAPH.md io.inputs = {chapters, project_id}, neither source:'file' →
+    // both are declared graph inputs with no wired source → missing.
+    const rows = reconcileInputFields(reconDetail(), '')
+    expect(rows.every((r) => r.state === 'missing')).toBe(true)
+    expect(rows.map((r) => r.name).sort()).toEqual(['chapters', 'project_id'])
+    expect(rows[0].reason).toMatch(/graph input/)
+  })
+
+  it('does not flag a graph input already backed by a source:file import', () => {
+    const withFile = `---
+schema_version: "v0.3.0"
+name: demo
+io:
+  inputs:
+    type: object
+    required: [chapters]
+    properties:
+      chapters: {type: array, source: file, dir: imports/ch, pattern: "c_{n}.json"}
+  outputs:
+    type: object
+    required: [x]
+    properties:
+      x: {type: object}
+phases: [fetch]
+---
+<phase depends_on="input" output>fetch</phase>
+`
+    const detail = { id: 'd', graph_topology: [{ id: 'fetch', depends_on: ['input'] }], files: { 'GRAPH.md': withFile } } as unknown as SkillDetail
+    expect(reconcileInputFields(detail, '')).toEqual([])
   })
 })
 

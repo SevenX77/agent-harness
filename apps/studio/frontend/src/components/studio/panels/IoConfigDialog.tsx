@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
-import { AlertTriangle, FileText, Files, Loader2, Plus, Trash2 } from "lucide-react"
+import { AlertTriangle, FileText, Files, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react"
 import { importIoIntoWorkspace, type IoScanEntry } from "@/api/client"
+import { selectImportFile, selectImportFolder } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -161,6 +162,8 @@ export interface InputConfigDialogProps {
     blackboard: Array<{ name: string; type: string | null; checked: boolean }>
     files: FileFieldDecl[]
   }) => Promise<string | null>
+  /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
+  isGraphInput?: boolean
 }
 
 export function InputConfigDialog({
@@ -171,11 +174,11 @@ export function InputConfigDialog({
   blackboard,
   declaredFiles,
   onSave,
+  isGraphInput = false,
 }: InputConfigDialogProps) {
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
   const initialGroup = useMemo(() => groupFromDeclarations(declaredFiles), [declaredFiles])
   const [groups, setGroups] = useState<FileGroup[] | null>(null)
-  const [addPath, setAddPath] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -183,10 +186,8 @@ export function InputConfigDialog({
 
   const isChecked = (row: ReconciledFieldRow) => blackboardChecks[row.name] ?? row.checked
 
-  const handleAddFile = async () => {
-    const path = addPath.trim()
+  const importPath = async (path: string | null) => {
     if (!path) {
-      setError("Enter a file or folder path to import")
       return
     }
     setBusy(true)
@@ -196,7 +197,6 @@ export function InputConfigDialog({
       const candidates = candidatesFromScanEntries(result.entries)
       const label = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path
       setGroups([...effectiveGroups, { label, pathHint: path, candidates }])
-      setAddPath("")
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -266,8 +266,14 @@ export function InputConfigDialog({
           {blackboard.length > 0 ? (
             <>
               <div className={GROUP_HEAD_CLASS}>
-                <span className="text-xs font-medium text-foreground">Blackboard context</span>
-                <span className={META_CLASS}>fields on the blackboard when this node runs</span>
+                <span className="text-xs font-medium text-foreground">
+                  {isGraphInput ? "Graph inputs" : "Blackboard context"}
+                </span>
+                <span className={META_CLASS}>
+                  {isGraphInput
+                    ? "declared entry fields — import a file to source them"
+                    : "fields on the blackboard when this node runs"}
+                </span>
               </div>
               {blackboard.map((row) =>
                 row.state === "missing" ? (
@@ -326,23 +332,29 @@ export function InputConfigDialog({
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          <Input
-            value={addPath}
-            onChange={(event) => setAddPath(event.target.value)}
-            placeholder="File or folder path to import"
-            aria-label="Path to import"
-            className="h-8 flex-1 text-xs"
-          />
           <Button
             type="button"
             size="sm"
             variant="secondary"
-            onClick={() => void handleAddFile()}
+            onClick={() => void selectImportFile().then(importPath)}
             disabled={busy}
-            aria-label="Add file"
+            aria-label="Import file"
+            className="gap-1"
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
-            Add file
+            {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FileText className="size-3.5" aria-hidden />}
+            Import file…
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => void selectImportFolder().then(importPath)}
+            disabled={busy}
+            aria-label="Import folder"
+            className="gap-1"
+          >
+            <FolderOpen className="size-3.5" aria-hidden />
+            Import folder…
           </Button>
         </div>
         {error ? (

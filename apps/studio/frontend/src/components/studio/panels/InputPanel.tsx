@@ -310,10 +310,10 @@ export function InputPanel({
   const [inputConfigOpen, setInputConfigOpen] = useState(false)
   const [outputConfigOpen, setOutputConfigOpen] = useState(false)
 
-  // Blackboard context (reconciled: matched/available/missing): empty for
-  // GRAPH.md (the Input pseudo-node has no blackboard — its checked file
-  // fields BECOME the graph entry fields).
-  const blackboard = view.isGraphLevel ? [] : reconcileInputFields(skillDetail, selectedNode?.id ?? "")
+  // Reconciled input fields (matched/available/missing). For an interior node
+  // this reconciles io.inputs against the upstream blackboard; for the Input
+  // pseudo-node / GRAPH.md it flags declared graph inputs with no source.
+  const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "")
   const declaredFiles = fileFieldsOf(view.content)
   const artifacts = graphArtifactsOf(skillDetail)
   const graphContent = skillDetail?.files?.["GRAPH.md"] ?? ""
@@ -401,6 +401,7 @@ export function InputPanel({
         blackboard={blackboard}
         declaredFiles={declaredFiles}
         onSave={handleInputConfigSave}
+        isGraphInput={view.isGraphLevel}
       />
       <OutputConfigDialog
         open={outputConfigOpen}

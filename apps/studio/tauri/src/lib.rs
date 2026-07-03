@@ -424,6 +424,29 @@ async fn select_directory(
     .map_err(|error| format!("directory picker task failed: {error}"))?
 }
 
+#[tauri::command]
+async fn select_file(
+    app: tauri::AppHandle,
+    default_path: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut dialog = app.dialog().file();
+    if let Some(default_path) = picker_starting_directory(default_path) {
+        dialog = dialog.set_directory(default_path);
+    }
+    let (sender, receiver) = mpsc::channel();
+    dialog.pick_file(move |path| {
+        let _ = sender.send(path.map(|path| path.to_string()));
+    });
+
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver
+            .recv()
+            .map_err(|error| format!("file picker failed: {error}"))
+    })
+    .await
+    .map_err(|error| format!("file picker task failed: {error}"))?
+}
+
 fn picker_starting_directory(default_path: Option<String>) -> Option<PathBuf> {
     let candidate = PathBuf::from(default_path?.trim());
     if candidate.as_os_str().is_empty() {
@@ -604,6 +627,7 @@ pub fn run() {
             confirm_quit_ready,
             restart_sidecar,
             select_directory,
+            select_file,
             reveal_in_file_manager,
             open_path,
             open_claude_code,

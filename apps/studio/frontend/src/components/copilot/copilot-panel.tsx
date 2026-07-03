@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, CircleAlert, PanelRightClose, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, CircleAlert, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -521,12 +521,31 @@ export function CopilotPanel({
                 copilot weaves a skill's loose phases into one runnable DAG. The
                 mark is the constellation Cassiopeia, which reads at once as an
                 M, a star constellation, and a node-edge graph. Design source:
-                docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md (F1 · R5-E). */}
-            <MoiraiMark className="size-[18px] shrink-0 text-[color:var(--studio-canvas-accent)]" title="MoirAI" />
+                docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md (F1 · R5-E).
+                The mark itself is the collapse control (PM「收的按钮去掉，点 logo
+                收」) — no separate close button in the header. Colour is the one-
+                shade-lighter accent-strong (PM「logo 的颜色浅一号」). */}
+            {onCollapse ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="收起 MoirAI"
+                    onClick={onCollapse}
+                    className="flex shrink-0 items-center justify-center rounded-sm outline-none transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-[color:var(--studio-canvas-accent)]"
+                  >
+                    <MoiraiMark className="size-[18px] text-[color:var(--studio-canvas-accent-strong)]" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">收起</TooltipContent>
+              </Tooltip>
+            ) : (
+              <MoiraiMark className="size-[18px] shrink-0 text-[color:var(--studio-canvas-accent-strong)]" title="MoirAI" />
+            )}
             {/* shrink-0: the short name must never be squeezed out by the
                 reconnect chip (the chip truncates instead). */}
             <h2 className="shrink-0 text-sm font-semibold">
-              Moir<span className="text-[color:var(--studio-canvas-accent)]">AI</span>
+              Moir<span className="text-[color:var(--studio-canvas-accent-strong)]">AI</span>
             </h2>
             {copilot.connectionStatus !== 'open' ? (
               <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
@@ -550,23 +569,6 @@ export function CopilotPanel({
               <SquareTerminal data-icon="inline-start" />
               Open in Claude Code
             </Button>
-            {onCollapse ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label="收起 MoirAI"
-                    onClick={onCollapse}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <PanelRightClose />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">收起</TooltipContent>
-              </Tooltip>
-            ) : null}
           </div>
         </div>
       </header>

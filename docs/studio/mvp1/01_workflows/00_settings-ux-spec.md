@@ -333,7 +333,8 @@ Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/mo
 #### endpoint 标签 = 单端点测试入口 + 灰态两义区分（item 1/2，PM 2026-07-02 拍板）
 `Available Endpoints` 里每个 (canonical base_url, protocol) 格子的**视觉 + 交互**跟着它的状态走，而且必须把「未测但可测」与「架构性不可用」这两种灰**一眼分开**（此前实现把二者都置灰，用户无法区分「还没测」和「这把 key / 域名废了」）：
 
-- **untested（未测但已配置）= 中性可交互态，不是 muted 死态。** §4.2 表里 untested 是「灰、可选」（无「无法选」限定）→ **只把文字改成可读前景色**（`text-foreground`）；border/底色仍是和其它中性格子一样的 muted 处理（`border-border/70` + `bg-muted/10`），**不提升边框到实色**（别让它像 verified/failed 一样喧宾夺主）—— 这样就和死格子的 `text-muted-foreground` 置灰分开了。它是**点击即测**的活入口：点这个格子 → 跑**和整卡 Test 同一套** get-models 流程、只 scoped 到这一条 endpoint（复用 `runProviderGetModels({onlyEndpointId})`，**同一套 per-step toast**，不另起简版；**不是整卡全测**）。verified（绿）/ failed（红）同理，都是可点复测的活格子（§2.9：untested 保持 neutral 候选态）。
+- **untested（未测但已配置）= 中性但明确可交互态。** §4.2 表里 untested 是「灰、可选」（无「无法选」限定）→ 用**亮色边框 + 亮色文字**（都是 `border-foreground` + `text-foreground`，中性色但明确是亮的、说明"可点我"；PM 2026-07-03「边框要和字体颜色一样是亮色」），底色 `bg-muted/10`——**不做成 muted 灰边框**（那看着像死格子）。它是**点击即测**的活入口：点它 → 跑**和整卡 Test 同一套** get-models 流程、只 scoped 到这一条 endpoint（复用 `runProviderGetModels({onlyEndpointId})`，**同一套 per-step toast**，不另起简版；**不是整卡全测**）。
+- **可点性:除 `protocol_unsupported` 外全部状态都直接点击即测**（PM 2026-07-03）。verified（绿）/ untested / failed（红）/ not_configured 都可点复测。**唯一不可直接点的是 `protocol_unsupported`**（"disabled"）:格子本体 `cursor-not-allowed`，只能走尾部显式 Re-probe 按钮（force、绕半衰期门）;`testing`（正在测）瞬态也不可点。即 `endpointTagIsTestable` = 除 `testing` / `protocol_unsupported` 外全 true。
 - **protocol_unsupported = 架构事实，格子本体不可点（`cursor-not-allowed`）。** 它是「同域名不服务此协议」的死格子（§1.2 矩阵第 9 点：tooltip 指路同域名的活协议），日常不重测（30 天半衰期门）；唯一动手入口是格子尾巴那个**显式 Re-probe 按钮**（force 复测、绕过半衰期门，§1.2 矩阵第 4 点），不是点格子本体。→ 灰 = 非用户可修的架构事实，与 untested 的「还没测」灰在**可点性**上必须分得开。
 - **not_configured（缺 key / base_url）** 仍是 muted 死态（没东西可测）；**testing** 中的格子走边框流动动画、不可点（正在测）。
 

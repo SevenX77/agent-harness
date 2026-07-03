@@ -196,7 +196,8 @@ Other agents working the same repo show up in `git worktree list`. A worktree
 is **ACTIVE — do not touch** when it has *uncommitted changes + an open PR +
 recently-modified files* (check `git -C <wt> status` and file mtimes). Never
 edit its files, never kill its processes, never `wt-clean` it. Clean up only
-**your own** merged worktrees (`scripts/wt-clean.sh`).
+**your own** merged worktrees, by name — `scripts/wt-clean.sh <your-branch>`
+(cleans only the worktree you name; `--all` is an opt-in global sweep).
 
 ### 3.2 Footguns (shared box)
 

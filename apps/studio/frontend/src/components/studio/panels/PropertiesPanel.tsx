@@ -2830,88 +2830,84 @@ function LlmNodeParamsField({
           Leave a field on <span className="font-mono">Inherit</span> / empty to use the role&rsquo;s value.
         </HelpTooltip>
       </YamlNestedFieldLabel>
-      {/* Frame the params in the shared Card box + 2-col grid, matching the iterate
-          `accumulate` block. Every unit is min-height so a shorter control (the
-          thinking switch) never crowds its neighbour. Per-field widgets: thinking =
-          Switch, temperature = Slider, max output tokens = number Input. Reuses
-          @/components/ui, no new style. */}
+      {/* Frame the params in the shared Card box, one field per row (each field's
+          label sits directly above its own control, so nothing reads as crowded
+          or ambiguous about which label belongs to which control). Per-field
+          widgets: thinking = Switch, temperature = Slider, max output tokens =
+          number Input. Reuses @/components/ui, no new style. */}
       <Card size="sm">
-        <CardContent className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Field className="min-h-14 gap-1">
-              <YamlNestedFieldLabel htmlFor={thinkingId}>
-                thinking
-                <HelpTooltip label="About thinking">
-                  Whether this node asks the model to use reasoning/thinking. Best-effort: only
-                  applies when the node&rsquo;s model supports it.
-                </HelpTooltip>
-              </YamlNestedFieldLabel>
-              <div className="flex h-9 items-center">
-                <Switch
-                  id={thinkingId}
-                  size="sm"
-                  data-llm-node-thinking="true"
-                  checked={draft.thinking === true}
-                  aria-label="Node thinking override"
-                  onCheckedChange={(thinking) => update({ ...draft, thinking })}
-                />
-              </div>
-            </Field>
-            <Field className="min-h-14 gap-1">
-              <YamlNestedFieldLabel htmlFor={maxOutputId}>
-                max output tokens
-                <HelpTooltip label="About max output tokens">
-                  Cap on this node&rsquo;s output tokens. Empty inherits the role default (the placeholder
-                  shows that inferred max); a value over the route&rsquo;s max is clamped down to it.
-                </HelpTooltip>
-              </YamlNestedFieldLabel>
-              <Input
-                id={maxOutputId}
-                data-llm-node-max-output="true"
-                aria-label="Node max output tokens override"
-                value={formatThousands(draft.maxOutputTokens)}
-                onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
-                inputMode="numeric"
-                placeholder={maxOutputPlaceholder}
+        <CardContent className="space-y-3">
+          <Field className="min-h-14 gap-1">
+            <YamlNestedFieldLabel htmlFor={thinkingId}>
+              thinking
+              <HelpTooltip label="About thinking">
+                Whether this node asks the model to use reasoning/thinking. Best-effort: only
+                applies when the node&rsquo;s model supports it.
+              </HelpTooltip>
+            </YamlNestedFieldLabel>
+            <div className="flex h-9 items-center">
+              <Switch
+                id={thinkingId}
+                size="sm"
+                data-llm-node-thinking="true"
+                checked={draft.thinking === true}
+                aria-label="Node thinking override"
+                onCheckedChange={(thinking) => update({ ...draft, thinking })}
               />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Field className="min-h-14 gap-1">
-              <YamlNestedFieldLabel htmlFor={temperatureId}>
-                temperature
-                <HelpTooltip label="About temperature">
-                  Sampling temperature (0&ndash;2) for this node. Drag to override; the reset button
-                  clears it back to the role default.
-                </HelpTooltip>
-              </YamlNestedFieldLabel>
-              <div className="flex h-9 items-center gap-2">
-                <Slider
-                  id={temperatureId}
-                  data-llm-node-temperature="true"
-                  aria-label="Node temperature override"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
-                  onValueChange={(vals) => update({ ...draft, temperature: String(vals[0]) })}
-                  className="flex-1"
-                />
-                <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                  {draft.temperature === "" ? "—" : draft.temperature}
-                </span>
-                <button
-                  type="button"
-                  aria-label="Reset temperature to role default"
-                  className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  disabled={draft.temperature === ""}
-                  onClick={() => update({ ...draft, temperature: "" })}
-                >
-                  <RotateCcw className="size-3.5" aria-hidden />
-                </button>
-              </div>
-            </Field>
-          </div>
+            </div>
+          </Field>
+          <Field className="min-h-14 gap-1">
+            <YamlNestedFieldLabel htmlFor={maxOutputId}>
+              max output tokens
+              <HelpTooltip label="About max output tokens">
+                Cap on this node&rsquo;s output tokens. Empty inherits the role default (the placeholder
+                shows that inferred max); a value over the route&rsquo;s max is clamped down to it.
+              </HelpTooltip>
+            </YamlNestedFieldLabel>
+            <Input
+              id={maxOutputId}
+              data-llm-node-max-output="true"
+              aria-label="Node max output tokens override"
+              value={formatThousands(draft.maxOutputTokens)}
+              onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
+              inputMode="numeric"
+              placeholder={maxOutputPlaceholder}
+            />
+          </Field>
+          <Field className="min-h-14 gap-1">
+            <YamlNestedFieldLabel htmlFor={temperatureId}>
+              temperature
+              <HelpTooltip label="About temperature">
+                Sampling temperature (0&ndash;2) for this node. Drag to override; the reset button
+                clears it back to the role default.
+              </HelpTooltip>
+            </YamlNestedFieldLabel>
+            <div className="flex h-9 items-center gap-2">
+              <Slider
+                id={temperatureId}
+                data-llm-node-temperature="true"
+                aria-label="Node temperature override"
+                min={0}
+                max={2}
+                step={0.1}
+                value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
+                onValueChange={(vals) => update({ ...draft, temperature: String(vals[0]) })}
+                className="flex-1"
+              />
+              <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                {draft.temperature === "" ? "—" : draft.temperature}
+              </span>
+              <button
+                type="button"
+                aria-label="Reset temperature to role default"
+                className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                disabled={draft.temperature === ""}
+                onClick={() => update({ ...draft, temperature: "" })}
+              >
+                <RotateCcw className="size-3.5" aria-hidden />
+              </button>
+            </div>
+          </Field>
         </CardContent>
       </Card>
     </div>

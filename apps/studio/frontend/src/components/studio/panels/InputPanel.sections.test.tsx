@@ -92,20 +92,33 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
     expect(html).not.toContain("Artifact path for")
   })
 
-  it("renders Configure entries plus the input-file and artifact list rows", () => {
+  it("graph overview renders the inline input config entry + artifact list rows", () => {
     const html = renderToStaticMarkup(<InputPanel skillId="demo" skillDetail={detail()} />)
+    // inline Configure entry (Collapsible trigger) replaces the old modal button
     expect(html).toContain("Configure input")
-    expect(html).toContain("Configure output")
-    // input files list: name + muted path hint (PM r3b)
-    expect(html).toContain("novel")
-    expect(html).toContain("imports/material/novel.md")
-    // batch row with the recorded numbers count
-    expect(html).toContain("imports/abc_segmentation")
-    expect(html).toContain("×3")
-    // artifacts list: stem + mode
+    expect(html).toContain("Configure output artifacts")
+    // artifacts list: stem + mode (graph overview shows both sides)
     expect(html).toContain("story_framework")
     expect(html).toContain("per-item ×3")
     expect(html).toContain("single")
+  })
+
+  it("scopes sections by boundary node role (F3 归属规则)", () => {
+    const inputBoundary = renderToStaticMarkup(
+      <InputPanel skillId="demo" skillDetail={detail()} ioBoundary="input" />,
+    )
+    // Input boundary: input config + test inputs, NO output/artifacts section.
+    expect(inputBoundary).toContain("Configure input")
+    expect(inputBoundary).toContain('data-mock="test-inputs"')
+    expect(inputBoundary).not.toContain("output artifacts")
+
+    const outputBoundary = renderToStaticMarkup(
+      <InputPanel skillId="demo" skillDetail={detail()} ioBoundary="output" />,
+    )
+    // Output boundary: output preview + artifacts, NO input config / test inputs.
+    expect(outputBoundary).toContain("output artifacts")
+    expect(outputBoundary).not.toContain("Configure input")
+    expect(outputBoundary).not.toContain('data-mock="test-inputs"')
   })
 
   it("submitIoDocumentEdit saves the mutated document against the previous content hash", async () => {

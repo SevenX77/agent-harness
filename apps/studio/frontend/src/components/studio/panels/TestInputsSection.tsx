@@ -251,18 +251,22 @@ export function TestInputsSection({
           {error}
         </div>
       ) : null}
-      <Button
+      {/* PM 2026-07-03 #4: not a solid (near-black in dark) button — a ghost
+          list row matching the test-input item rows above (transparent, hover
+          lit), so "New file" aligns with the panel's existing list style. */}
+      <button
         type="button"
-        variant="secondary"
-        size="sm"
         onClick={() => void handleNewFile()}
         disabled={busy}
         aria-label="New test input file"
-        className="w-fit gap-1"
+        className={cn(
+          "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors",
+          "text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
+        )}
       >
-        <Plus className="size-3.5" />
+        {busy ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <Plus className="size-3.5 shrink-0" />}
         New file
-      </Button>
+      </button>
       <p className="text-[11px] text-muted-foreground">
         Selected input feeds Predict and Run · New file opens in the editor
       </p>

@@ -1,5 +1,15 @@
-import { useMemo, useState } from "react"
-import { AlertTriangle, FileText, Files, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react"
+import { useMemo, useState, type CSSProperties } from "react"
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Files,
+  FolderOpen,
+  Loader2,
+  Plus,
+  Trash2,
+} from "lucide-react"
 import { importIoIntoWorkspace, type IoScanEntry } from "@/api/client"
 import { selectImportFile, selectImportFolder } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
@@ -16,29 +26,28 @@ import { Input } from "@/components/ui/input"
 import type {
   ArtifactRow,
   FileFieldDecl,
+  IoInputCheckRow,
   ReconciledFieldRow,
 } from "@/lib/io-config"
 import { errorMessage } from "@/utils/errors"
 
 /**
- * Blackboard-first I/O config dialogs (input region F3/F7, PM 2026-07-02 r3).
+ * Blackboard-first I/O config surfaces (input region F3/F7).
  *
- * Input: a checkbox tree — the blackboard context is ALWAYS the first group
- * (checked = the node's io.inputs slice); Add file imports an external
- * file/folder into `.workspace/imports/` and appends its recognized fields
- * (checked = `source:'file'` additions). The Input pseudo-node has no
- * blackboard group — its checked file fields become the graph entry fields.
- *
- * Output: the artifacts manifest — Add artifact adds a file card; every card
- * offers the SAME full blackboard field list (only the checks differ);
- * single/per-item is a compact segmented toggle; the fixed on-disk naming is
- * previewed per card and owned by the engine writer.
+ * Input config is INLINE in the panel (a nested checkbox tree, PM 2026-07-03):
+ * blackboard context first (checked = the node's io.inputs slice, expandable to
+ * nested sub-fields like `chapter.aa_number`), then per-file field groups added
+ * via native Import. Output config is the artifacts manifest (scoped modal — a
+ * multi-card editor too wide for the 320px panel): every card offers the full
+ * blackboard field universe (nested shown for shape; artifacts carry a whole
+ * top-level field, so only top-level fields are checkable).
  */
 
-const ROW_CLASS = "flex items-center gap-2 border-b border-border px-3 py-1.5 last:border-b-0"
-const GROUP_HEAD_CLASS = "flex items-baseline gap-2 border-b border-border bg-muted/40 px-3 py-2"
+const ROW_CLASS = "flex items-center gap-2 px-2 py-1.5"
+const GROUP_HEAD_CLASS = "flex items-baseline gap-2 border-b border-border bg-muted/40 px-2 py-1.5"
 const PATH_CLASS = "min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
 const META_CLASS = "text-[11px] text-muted-foreground"
+const INDENT_STEP_REM = 1.1
 
 export interface FileFieldCandidate extends FileFieldDecl {
   checked: boolean
@@ -95,97 +104,167 @@ export function groupFromDeclarations(declarations: FileFieldDecl[]): FileGroup 
   }
 }
 
-function FieldCheckRow({
-  checked,
-  onCheckedChange,
-  name,
-  meta,
-  indent = false,
-  highlighted = false,
-}: {
-  checked: boolean
-  onCheckedChange: (next: boolean) => void
-  name: string
-  meta: string
-  indent?: boolean
-  /** r4: whole-row accent highlight when the field matches the md io declaration. */
-  highlighted?: boolean
-}) {
-  return (
-    <label
-      className={`${ROW_CLASS} ${indent ? "pl-7" : ""} cursor-pointer border-l-2 ${highlighted ? "border-l-primary bg-accent" : "border-l-transparent"}`}
-    >
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(value) => onCheckedChange(value === true)}
-        aria-label={`Toggle field ${name}`}
-      />
-      <span className={`font-mono text-xs ${highlighted ? "text-accent-foreground" : "text-foreground"}`}>
-        {name}
-      </span>
-      <span className={META_CLASS}>{meta}</span>
-    </label>
-  )
+/** `chapter.meta.title` → `[chapter, chapter.meta]` — every ancestor object path. */
+function ancestorPrefixes(path: string): string[] {
+  const parts = path.split(".")
+  const out: string[] = []
+  for (let i = 1; i < parts.length; i += 1) {
+    out.push(parts.slice(0, i).join("."))
+  }
+  return out
+}
+
+function indentStyle(depth: number): CSSProperties {
+  return { paddingLeft: `${0.5 + depth * INDENT_STEP_REM}rem` }
 }
 
 /**
- * r4: a field the md io declares (required) but the actual blackboard/universe
- * doesn't supply — shown at the TOP, muted + danger, non-checkable, with the
- * reason. Mirrors the engine's runtime [F-v3-runtime-state-mapping-failed].
+ * A field the md io declares (required) but the blackboard/universe doesn't
+ * supply — muted + danger, non-checkable, with the reason. Mirrors the engine's
+ * runtime [F-v3-runtime-state-mapping-failed], now at nested granularity.
  */
-function MissingFieldRow({ name, reason }: { name: string; reason?: string }) {
+function MissingFieldRow({ row }: { row: ReconciledFieldRow }) {
   return (
-    <div className={`${ROW_CLASS} pl-7 bg-destructive/10`}>
+    <div className={`${ROW_CLASS} bg-destructive/10`} style={indentStyle(row.depth)}>
       <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden />
       <span className="font-mono text-xs text-muted-foreground line-through decoration-destructive/40">
-        {name}
+        {row.name}
       </span>
-      <span className="text-[11px] text-destructive">{reason}</span>
+      <span className="text-[11px] text-destructive">{row.reason}</span>
     </div>
   )
 }
 
-export interface InputConfigDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  skillId: string
-  /** Node label for the title ("Input — event_timeline" / "Input — GRAPH.md io.inputs"). */
-  targetLabel: string
-  /**
-   * Reconciled blackboard context rows (matched/available/missing); empty for
-   * the Input pseudo-node / GRAPH.md. Missing rows are shown at the top.
-   */
-  blackboard: ReconciledFieldRow[]
-  /** Existing source:'file' declarations of the target document. */
-  declaredFiles: FileFieldDecl[]
-  onSave: (checks: {
-    blackboard: Array<{ name: string; type: string | null; checked: boolean }>
-    files: FileFieldDecl[]
-  }) => Promise<string | null>
-  /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
-  isGraphInput?: boolean
+/** One expandable/checkable field row (indent by depth, caret when it nests). */
+function FieldCheckRow({
+  row,
+  checked,
+  selectable,
+  onCheckedChange,
+  expanded,
+  onToggleExpand,
+  highlighted,
+}: {
+  row: ReconciledFieldRow
+  checked: boolean
+  /** false = display-only (a nested output sub-field carried by its parent). */
+  selectable: boolean
+  onCheckedChange: (next: boolean) => void
+  expanded: boolean
+  onToggleExpand?: () => void
+  highlighted: boolean
+}) {
+  return (
+    <div
+      className={`${ROW_CLASS} border-l-2 ${highlighted ? "border-l-primary bg-accent" : "border-l-transparent"}`}
+      style={indentStyle(row.depth)}
+    >
+      {row.hasChildren ? (
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${row.path}`}
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+        </button>
+      ) : (
+        <span className="size-3.5 shrink-0" aria-hidden />
+      )}
+      {selectable ? (
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(value) => onCheckedChange(value === true)}
+          aria-label={`Toggle field ${row.path}`}
+        />
+      ) : (
+        <span className="size-3.5 shrink-0" aria-hidden />
+      )}
+      <span
+        className={`font-mono text-xs ${highlighted ? "text-accent-foreground" : "text-foreground"}`}
+      >
+        {row.name}
+      </span>
+      <span className={META_CLASS}>
+        {row.type ?? "any"}
+        {row.from ? ` · from ${row.from}` : ""}
+      </span>
+    </div>
+  )
 }
 
-export function InputConfigDialog({
-  open,
-  onOpenChange,
+/**
+ * Reconciled field rows → an expandable nested tree. Missing rows show first
+ * (always visible); the rest form a collapsible tree (default fully expanded so
+ * nested sub-fields are visible without a click). `selectableMaxDepth` limits
+ * which depths are checkable — the input tree checks any depth (nested
+ * addressing), the output tree only depth 0 (artifacts carry whole fields).
+ */
+function FieldCheckTree({
+  rows,
+  checkOf,
+  onToggleCheck,
+  selectableMaxDepth = Number.POSITIVE_INFINITY,
+}: {
+  rows: ReconciledFieldRow[]
+  checkOf: (row: ReconciledFieldRow) => boolean
+  onToggleCheck: (row: ReconciledFieldRow, next: boolean) => void
+  selectableMaxDepth?: number
+}) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggleExpand = (path: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }
+  const missing = rows.filter((row) => row.state === "missing")
+  const tree = rows.filter((row) => row.state !== "missing")
+  const visible = tree.filter((row) => ancestorPrefixes(row.path).every((ancestor) => !collapsed.has(ancestor)))
+  return (
+    <div className="divide-y divide-border">
+      {missing.map((row) => (
+        <MissingFieldRow key={`missing-${row.path}`} row={row} />
+      ))}
+      {visible.map((row) => (
+        <FieldCheckRow
+          key={row.path}
+          row={row}
+          checked={checkOf(row)}
+          selectable={row.depth <= selectableMaxDepth}
+          onCheckedChange={(next) => onToggleCheck(row, next)}
+          expanded={!collapsed.has(row.path)}
+          onToggleExpand={() => toggleExpand(row.path)}
+          highlighted={row.state === "matched" && checkOf(row)}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** Import file/folder buttons + the resulting per-file checkable field groups. */
+function FileImportGroups({
   skillId,
-  targetLabel,
-  blackboard,
-  declaredFiles,
-  onSave,
-  isGraphInput = false,
-}: InputConfigDialogProps) {
-  const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
-  const initialGroup = useMemo(() => groupFromDeclarations(declaredFiles), [declaredFiles])
-  const [groups, setGroups] = useState<FileGroup[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const effectiveGroups = groups ?? (initialGroup ? [initialGroup] : [])
-
-  const isChecked = (row: ReconciledFieldRow) => blackboardChecks[row.name] ?? row.checked
-
+  groups,
+  setGroups,
+  busy,
+  setBusy,
+  error,
+  setError,
+}: {
+  skillId: string
+  groups: FileGroup[]
+  setGroups: (groups: FileGroup[]) => void
+  busy: boolean
+  setBusy: (busy: boolean) => void
+  error: string | null
+  setError: (error: string | null) => void
+}) {
   const importPath = async (path: string | null) => {
     if (!path) {
       return
@@ -196,17 +275,16 @@ export function InputConfigDialog({
       const result = await importIoIntoWorkspace(skillId, path)
       const candidates = candidatesFromScanEntries(result.entries)
       const label = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path
-      setGroups([...effectiveGroups, { label, pathHint: path, candidates }])
+      setGroups([...groups, { label, pathHint: path, candidates }])
     } catch (err) {
       setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
   }
-
   const toggleCandidate = (groupIndex: number, candidateIndex: number, next: boolean) => {
     setGroups(
-      effectiveGroups.map((group, gi) =>
+      groups.map((group, gi) =>
         gi === groupIndex
           ? {
               ...group,
@@ -218,10 +296,115 @@ export function InputConfigDialog({
       ),
     )
   }
+  return (
+    <>
+      {groups.map((group, groupIndex) => (
+        <div key={`${group.label}-${groupIndex}`} className="rounded-md border border-border">
+          <div className={GROUP_HEAD_CLASS}>
+            <FileText className="size-3.5 shrink-0 self-center text-muted-foreground" aria-hidden />
+            <span className="font-mono text-xs text-foreground">{group.label}</span>
+            <span className={PATH_CLASS}>{group.pathHint}</span>
+            <button
+              type="button"
+              onClick={() => setGroups(groups.filter((_, gi) => gi !== groupIndex))}
+              aria-label={`Remove file group ${group.label}`}
+              className="text-muted-foreground transition-colors hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+          <div className="divide-y divide-border">
+            {group.candidates.map((candidate, candidateIndex) => (
+              <label
+                key={`${candidate.field}-${candidateIndex}`}
+                className={`${ROW_CLASS} cursor-pointer`}
+                style={indentStyle(1)}
+              >
+                <Checkbox
+                  checked={candidate.checked}
+                  onCheckedChange={(value) => toggleCandidate(groupIndex, candidateIndex, value === true)}
+                  aria-label={`Toggle file field ${candidate.field}`}
+                />
+                <span className="font-mono text-xs text-foreground">{candidate.field}</span>
+                <span className={META_CLASS}>
+                  {candidate.dir
+                    ? `batch ×${candidate.numbers?.length ?? "?"} · numbers kept`
+                    : `${candidate.type ?? "any"} · source: file`}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => void selectImportFile().then(importPath)}
+          disabled={busy}
+          aria-label="Import file"
+          className="h-7 gap-1 text-[11px]"
+        >
+          {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FileText className="size-3.5" aria-hidden />}
+          Import file…
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => void selectImportFolder().then(importPath)}
+          disabled={busy}
+          aria-label="Import folder"
+          className="h-7 gap-1 text-[11px]"
+        >
+          <FolderOpen className="size-3.5" aria-hidden />
+          Import folder…
+        </Button>
+      </div>
+      {error ? (
+        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </>
+  )
+}
 
-  const removeGroup = (groupIndex: number) => {
-    setGroups(effectiveGroups.filter((_, gi) => gi !== groupIndex))
-  }
+export interface InputConfigInlineProps {
+  skillId: string
+  /**
+   * Reconciled blackboard context rows (matched/available/missing), nested;
+   * empty for the Input pseudo-node / GRAPH.md except declared graph inputs.
+   */
+  blackboard: ReconciledFieldRow[]
+  /** Existing source:'file' declarations of the target document. */
+  declaredFiles: FileFieldDecl[]
+  onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[] }) => Promise<string | null>
+  /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
+  isGraphInput?: boolean
+}
+
+/**
+ * Inline (in-panel) input config: the nested blackboard checkbox tree + file
+ * import groups + Save. Replaces the old modal so the config lives with the
+ * selected node like the Properties panel (PM 2026-07-03).
+ */
+export function InputConfigInline({
+  skillId,
+  blackboard,
+  declaredFiles,
+  onSave,
+  isGraphInput = false,
+}: InputConfigInlineProps) {
+  const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
+  const initialGroup = useMemo(() => groupFromDeclarations(declaredFiles), [declaredFiles])
+  const [groups, setGroups] = useState<FileGroup[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const effectiveGroups = groups ?? (initialGroup ? [initialGroup] : [])
+  const isChecked = (row: ReconciledFieldRow) => blackboardChecks[row.path] ?? row.checked
 
   const handleSave = async () => {
     setBusy(true)
@@ -239,139 +422,51 @@ export function InputConfigDialog({
       // Missing rows have no blackboard supply — never persist them as consumed.
       blackboard: blackboard
         .filter((row) => row.state !== "missing")
-        .map((row) => ({
-          name: row.name,
-          type: row.type,
-          checked: isChecked(row),
-        })),
+        .map((row) => ({ path: row.path, type: row.type, checked: isChecked(row) })),
       files,
     })
     setBusy(false)
     setError(failure)
-    if (!failure) {
-      onOpenChange(false)
-    }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Input — {targetLabel}</DialogTitle>
-          <DialogDescription>
-            Blackboard fields are the primary input; imported files only add fields.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border">
-          {blackboard.length > 0 ? (
-            <>
-              <div className={GROUP_HEAD_CLASS}>
-                <span className="text-xs font-medium text-foreground">
-                  {isGraphInput ? "Graph inputs" : "Blackboard context"}
-                </span>
-                <span className={META_CLASS}>
-                  {isGraphInput
-                    ? "declared entry fields — import a file to source them"
-                    : "fields on the blackboard when this node runs"}
-                </span>
-              </div>
-              {blackboard.map((row) =>
-                row.state === "missing" ? (
-                  <MissingFieldRow key={row.name} name={row.name} reason={row.reason} />
-                ) : (
-                  <FieldCheckRow
-                    key={row.name}
-                    checked={isChecked(row)}
-                    onCheckedChange={(next) =>
-                      setBlackboardChecks((prev) => ({ ...prev, [row.name]: next }))
-                    }
-                    name={row.name}
-                    meta={`${row.type ?? "any"} · from ${row.from}`}
-                    indent
-                    highlighted={row.state === "matched" && isChecked(row)}
-                  />
-                ),
-              )}
-            </>
-          ) : null}
-          {effectiveGroups.map((group, groupIndex) => (
-            <div key={`${group.label}-${groupIndex}`}>
-              <div className={GROUP_HEAD_CLASS}>
-                <FileText className="size-3.5 shrink-0 self-center text-muted-foreground" aria-hidden />
-                <span className="font-mono text-xs text-foreground">{group.label}</span>
-                <span className={PATH_CLASS}>{group.pathHint}</span>
-                <button
-                  type="button"
-                  onClick={() => removeGroup(groupIndex)}
-                  aria-label={`Remove file group ${group.label}`}
-                  className="text-muted-foreground transition-colors hover:text-destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </div>
-              {group.candidates.map((candidate, candidateIndex) => (
-                <FieldCheckRow
-                  key={`${candidate.field}-${candidateIndex}`}
-                  checked={candidate.checked}
-                  onCheckedChange={(next) => toggleCandidate(groupIndex, candidateIndex, next)}
-                  name={candidate.field}
-                  meta={
-                    candidate.dir
-                      ? `batch ×${candidate.numbers?.length ?? "?"} · numbers kept`
-                      : (candidate.type ?? "any") + " · source: file"
-                  }
-                  indent
-                />
-              ))}
-            </div>
-          ))}
-          {blackboard.length === 0 && effectiveGroups.length === 0 ? (
-            <p className="px-3 py-4 text-xs text-muted-foreground">
-              No fields yet — import a file or folder below.
-            </p>
-          ) : null}
+    <div className="space-y-2">
+      <div className="overflow-hidden rounded-md border border-border">
+        <div className={GROUP_HEAD_CLASS}>
+          <span className="text-xs font-medium text-foreground">
+            {isGraphInput ? "Graph inputs" : "Blackboard context"}
+          </span>
+          <span className={META_CLASS}>
+            {isGraphInput
+              ? "declared entry fields — import a file to source them"
+              : "fields on the blackboard when this node runs"}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => void selectImportFile().then(importPath)}
-            disabled={busy}
-            aria-label="Import file"
-            className="gap-1"
-          >
-            {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FileText className="size-3.5" aria-hidden />}
-            Import file…
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => void selectImportFolder().then(importPath)}
-            disabled={busy}
-            aria-label="Import folder"
-            className="gap-1"
-          >
-            <FolderOpen className="size-3.5" aria-hidden />
-            Import folder…
-          </Button>
-        </div>
-        {error ? (
-          <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-            {error}
+        {blackboard.length > 0 ? (
+          <FieldCheckTree
+            rows={blackboard}
+            checkOf={isChecked}
+            onToggleCheck={(row, next) => setBlackboardChecks((prev) => ({ ...prev, [row.path]: next }))}
+          />
+        ) : (
+          <p className="px-2 py-3 text-xs text-muted-foreground">
+            No blackboard fields — import a file below to add input fields.
           </p>
-        ) : null}
-        <DialogFooter>
-          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" size="sm" onClick={() => void handleSave()} disabled={busy}>
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        )}
+      </div>
+      <FileImportGroups
+        skillId={skillId}
+        groups={effectiveGroups}
+        setGroups={setGroups}
+        busy={busy}
+        setBusy={setBusy}
+        error={error}
+        setError={setError}
+      />
+      <Button type="button" size="sm" onClick={() => void handleSave()} disabled={busy} className="h-7 text-[11px]">
+        Save input config
+      </Button>
+    </div>
   )
 }
 
@@ -379,10 +474,11 @@ export interface OutputConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /**
-   * Reconciled field universe (matched/available/missing) — identical under
-   * every artifact card. Missing = a required io.outputs field no phase
-   * produces (shown once at the dialog top); matched = a declared io.outputs
-   * member (highlighted in each card).
+   * Reconciled field universe (matched/available/missing), nested. Missing = a
+   * required io.outputs field no phase produces (shown once at the top); matched
+   * = a declared io.outputs member (highlighted in each card). Nested sub-fields
+   * are shown for shape but not independently checkable (artifacts carry a whole
+   * top-level field — the engine writer resolves top-level keys only).
    */
   universe: ReconciledFieldRow[]
   artifacts: ArtifactRow[]
@@ -412,9 +508,7 @@ export function OutputConfigDialog({
 
   const toggleField = (index: number, field: string, next: boolean) => {
     const row = effectiveRows[index]
-    const fields = next
-      ? [...row.fields, field]
-      : row.fields.filter((name) => name !== field)
+    const fields = next ? [...row.fields, field] : row.fields.filter((name) => name !== field)
     updateRow(index, { fields })
   }
 
@@ -443,7 +537,7 @@ export function OutputConfigDialog({
           {missingOutputs.length > 0 ? (
             <div className="overflow-hidden rounded-md border border-destructive/30">
               {missingOutputs.map((row) => (
-                <MissingFieldRow key={row.name} name={row.name} reason={row.reason} />
+                <MissingFieldRow key={row.path} row={row} />
               ))}
             </div>
           ) : null}
@@ -491,17 +585,12 @@ export function OutputConfigDialog({
                   <Trash2 className="size-3.5" />
                 </button>
               </div>
-              {carryableFields.map((field) => (
-                <FieldCheckRow
-                  key={field.name}
-                  checked={row.fields.includes(field.name)}
-                  onCheckedChange={(next) => toggleField(index, field.name, next)}
-                  name={field.name}
-                  meta={`${field.type ?? "any"} · from ${field.from}`}
-                  indent
-                  highlighted={field.state === "matched"}
-                />
-              ))}
+              <FieldCheckTree
+                rows={carryableFields}
+                checkOf={(field) => field.depth === 0 && row.fields.includes(field.name)}
+                onToggleCheck={(field, next) => toggleField(index, field.name, next)}
+                selectableMaxDepth={0}
+              />
               <p className="border-t border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
                 {row.mode === "per-item"
                   ? `${row.stem || "<stem>"}/${row.stem || "<stem>"}_001_latest_<ts>.json …`
@@ -513,9 +602,7 @@ export function OutputConfigDialog({
             type="button"
             size="sm"
             variant="secondary"
-            onClick={() =>
-              setRows([...effectiveRows, { stem: "", mode: "single", fields: [] }])
-            }
+            onClick={() => setRows([...effectiveRows, { stem: "", mode: "single", fields: [] }])}
             aria-label="Add artifact"
           >
             <Plus className="size-3.5" aria-hidden />

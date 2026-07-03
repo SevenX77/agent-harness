@@ -97,8 +97,9 @@ describe("InputPanel example view", () => {
     const html = renderToStaticMarkup(<InputPanel skillId="demo-skill" skillDetail={skillDetail()} />)
 
     expect(html).toContain("GRAPH.md")
-    expect(html).toContain("Input")
-    expect(html).toContain("Output")
+    // graph overview shows both io sides (section labels are lowercased)
+    expect(html).toContain(">input<")
+    expect(html).toContain(">output<")
     expect(html).toContain("chapter_content")
     expect(html).toContain("chapter_number")
     expect(html).toContain("segmentation_result")

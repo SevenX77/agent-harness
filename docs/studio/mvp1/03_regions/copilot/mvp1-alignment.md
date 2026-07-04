@@ -11,6 +11,12 @@ aligns_with: 01_workflows/04_run-and-verify.md（analysis bar）· 01_workflows/
 
 > **Tier**: region | **Owns**: `copilot-session-persistence` 的 UI/session 渲染切面；`copilot-sdk-test-parity` 的配置结果消费切面 | **现状**: 面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `copilot-assist` · `studio-settings` · `settings` · `native-fs` · `golden-eval`
 
+> **编排底座方向（PM 2026-07-03）**: copilot 的编排底座走 **ah 为主、SDK 为辅** —— 面板「打开 Claude
+> Code」经 ah 拉起 `MoirAI` master + 三女神,用户在终端直接用,**不做面板流式**。本文档 F1–F9 是 **SDK 面板
+> 流式**这一路(保留为辅 + 质量 A/B 台);ah 编排底座的完整设计与调研见
+> **[ah-orchestration-design.md](./ah-orchestration-design.md)**（含 ah 版本坑、`ah.toml`/`.ah/rules`/
+> `.ah/bundles` 权威配置机制、MoirAI 拓扑、里程碑 1 已验证结果）。二者关系见该文档 §7。
+
 ## 1. 定义
 `copilot` owns the right-side assistant panel UI: message list, tool/diff rendering, route picker, composer, chat connection status, and contextual empty states.
 

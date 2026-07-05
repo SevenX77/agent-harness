@@ -3709,17 +3709,10 @@ async def _probe_role_route(
         )
 
     if selected_profile is not None:
-        if endpoint.api_key is None or not endpoint.api_key.get_secret_value():
-            return ModelProbeResult(
-                model_id=route.provider_model_id,
-                status="invalid_key",
-                message="API key is empty.",
-            )
-        return await _gateway_probe_official_call_method(
-            cast(OfficialCallMethod, selected_profile.method_id),
-            endpoint.api_key.get_secret_value(),
-            _endpoint_probe_base_url(endpoint),
+        return await _probe_official_call_method_generation_atom(
+            endpoint,
             route.provider_model_id,
+            cast(OfficialCallMethod, selected_profile.method_id),
             runtime_settings=_role_test_profile_runtime_settings(
                 selected_profile,
                 resolved_settings,
@@ -3875,20 +3868,43 @@ async def _probe_official_call_method(
     *,
     multimodal: bool = False,
 ) -> ModelProbeResult:
+    return await _probe_official_call_method_generation_atom(
+        endpoint,
+        model_id,
+        candidate.method_id,
+        runtime_settings=candidate.runtime_settings,
+        multimodal=multimodal,
+    )
+
+
+async def _probe_official_call_method_generation_atom(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    method_id: OfficialCallMethod,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+    multimodal: bool = False,
+) -> ModelProbeResult:
+    if _endpoint_probe_is_disabled(endpoint):
+        return _disabled_model_probe_result(model_id)
     if not endpoint.api_key or not endpoint.api_key.get_secret_value():
         return ModelProbeResult(
             model_id=model_id,
             status="invalid_key",
             message="API key is empty.",
         )
-    return await _gateway_probe_official_call_method(
-        candidate.method_id,
-        endpoint.api_key.get_secret_value(),
-        _endpoint_probe_base_url(endpoint),
-        model_id,
-        runtime_settings=candidate.runtime_settings,
-        multimodal=multimodal,
-    )
+    await _publish_llm_probe_active(endpoint.endpoint_id, (model_id,))
+    try:
+        return await _gateway_probe_official_call_method(
+            method_id,
+            endpoint.api_key.get_secret_value(),
+            _endpoint_probe_base_url(endpoint),
+            model_id,
+            runtime_settings=runtime_settings,
+            multimodal=multimodal,
+        )
+    finally:
+        await _publish_llm_probe_active(endpoint.endpoint_id, ())
 
 
 def _official_language_probe_candidates(
@@ -6051,11 +6067,7 @@ async def _probe_official_model_profile_atom(
             model_id=model_id,
             last_probe_message=DISABLED_ENDPOINT_PROBE_MESSAGE,
         )
-    await _publish_llm_probe_active(endpoint.endpoint_id, (model_id,))
-    try:
-        return await _probe_official_model_profile_result(endpoint, model_id)
-    finally:
-        await _publish_llm_probe_active(endpoint.endpoint_id, ())
+    return await _probe_official_model_profile_result(endpoint, model_id)
 
 
 async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:

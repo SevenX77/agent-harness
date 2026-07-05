@@ -7,7 +7,8 @@ updated: 2026-07-05
       已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
       并补齐后续 Studio 功能开发执行规则;2026-07-05 对齐 ah 1.3.0 的 `window_size="follow"`
       与 Wikipedia 渐进式背景披露,并把入口升级为 Claude/Codex 菜单;运行中入口继续提供
-      Attach master pane 与 Close。
+      Attach master pane 与 Close;Attach 会复用已打开的目标终端窗口,没有窗口时才新开。窗口关闭与 app
+      退出必须清掉 Studio-managed ah/tmux。
       本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置/下一阶段方案/
       开发规则),供提交 PR。
 关系: 与本目录 mvp1-alignment.md 的 F1–F9(SDK 面板流式)并列的**另一套编排底座**;
@@ -180,13 +181,18 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 - Studio 显式管理入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 打开菜单;检测到对应 config 的
   `ah --config <cfg> ps` 成功时,同一位置变成运行中菜单,触发按钮显示
   `Close Claude` / `Close Codex` / `Close assistants`,菜单内提供 `Attach Claude` / `Attach Codex`
-  和关闭动作。Attach 只打开一个新终端并执行 `ah --config <cfg> attach master`,不重新 `ah start`,
-  用于用户手动关闭 terminal tab 后重新进入现有 master pane。
+  和关闭动作。Attach 只负责进入既有 master pane,不重新 `ah start`:Windows 下 Studio 为每个
+  workspace+assistant 生成稳定终端标题,如果目标 attach 窗口已经打开,先激活该窗口到最前面;找不到窗口时才
+  新开终端并执行 `ah --config <cfg> attach master`,用于用户手动关闭 terminal tab 后重新进入现有
+  master pane。
 - 点击关闭不直接杀 tmux pane,而是对 Studio 打开的 config 执行 `ah --config <cfg> stop`。ah 1.3.0 的
   `system.shutdown` 与 shutdown cleanup 测试负责清理 master/agent tmux sessions 和进程树。
 - Studio app 退出时也必须清理 Studio 管过的 ah:当前进程内已打开过的 config + `skill-studio-ah`
   临时目录下的 Studio 生成 config 都要 stop。范围只限 Studio-managed / 本次打开过的 config,不调用无 config
-  的全局 `ah stop`,避免误杀用户手工启动的其他 ah 项目。
+  的全局 `ah stop`,避免误杀用户手工启动的其他 ah 项目。**诊断结论(2026-07-05)**:只监听
+  `RunEvent::ExitRequested` 不够,Windows 点窗口 X 可能绕过该分支,导致重新打开 skill 时仍显示
+  `Close assistants`。Tauri 必须同时拦截 `WindowEvent::CloseRequested`,先 `prevent_close()`,执行同一套
+  ah cleanup 后再退出。
 
 ## 5. MoirAI 拓扑设计（目标 + 现状）
 
@@ -519,6 +525,10 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
   persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
+- Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
+  launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;
+- 原生窗口关闭必须与 app quit 一样清理 Studio-managed ah configs,否则 tmux/ahd 会在重启 Studio 后被
+  `code_assistant_status` 重新识别成仍活跃;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
 - `transient_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
   拒绝 `BindReadOnlyPaths` 后导致 `TMUX_COMMAND_FAILED`;

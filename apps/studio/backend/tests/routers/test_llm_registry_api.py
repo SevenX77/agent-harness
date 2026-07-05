@@ -1407,6 +1407,112 @@ def test_registry_model_groups_keep_official_language_probe_candidates_testable(
     assert provider_model["copilot_sdk_compatible"] is True
 
 
+def test_registry_model_groups_keep_third_party_anthropic_method_candidates_testable(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "qiniu-anthropic": ProviderEndpoint(
+                endpoint_id="qiniu-anthropic",
+                display_name="Qiniu",
+                protocol="anthropic_compatible",
+                base_url="https://api.qnaigc.com",
+                api_key="secret",
+                status="verified",
+                provider_kind="third_party",
+            ),
+            "qiniu-openai": ProviderEndpoint(
+                endpoint_id="qiniu-openai",
+                display_name="Qiniu",
+                protocol="openai_compatible",
+                base_url="https://api.qnaigc.com/v1",
+                api_key="secret",
+                status="verified",
+                provider_kind="third_party",
+            ),
+            "openai-compatible": ProviderEndpoint(
+                endpoint_id="openai-compatible",
+                display_name="Plain OpenAI",
+                protocol="openai_compatible",
+                base_url="https://openai-compatible.example/v1",
+                api_key="secret",
+                status="verified",
+                provider_kind="third_party",
+            ),
+        },
+        provider_routes={
+            "qiniu-anthropic:deepseek.deepseek-v4-pro": ProviderRoute(
+                route_id="qiniu-anthropic:deepseek.deepseek-v4-pro",
+                endpoint_id="qiniu-anthropic",
+                route_slug="deepseek.deepseek-v4-pro",
+                provider_model_id="deepseek/deepseek-v4-pro",
+                canonical_id="deepseek.deepseek-v4-pro",
+                display_name="DeepSeek V4 Pro",
+                status="verified",
+                verified_profiles=[],
+                capabilities={},
+            ),
+            "qiniu-openai:deepseek.deepseek-v4-pro": ProviderRoute(
+                route_id="qiniu-openai:deepseek.deepseek-v4-pro",
+                endpoint_id="qiniu-openai",
+                route_slug="deepseek.deepseek-v4-pro",
+                provider_model_id="deepseek/deepseek-v4-pro",
+                canonical_id="deepseek.deepseek-v4-pro",
+                display_name="DeepSeek V4 Pro",
+                status="verified",
+                verified_profiles=[],
+                capabilities={},
+            ),
+            "openai-compatible:deepseek.deepseek-v4-pro": ProviderRoute(
+                route_id="openai-compatible:deepseek.deepseek-v4-pro",
+                endpoint_id="openai-compatible",
+                route_slug="deepseek.deepseek-v4-pro",
+                provider_model_id="deepseek/deepseek-v4-pro",
+                canonical_id="deepseek.deepseek-v4-pro",
+                display_name="DeepSeek V4 Pro",
+                status="verified",
+                verified_profiles=[],
+                capabilities={},
+            ),
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    groups = {group["canonical_id"]: group for group in response.json()["model_groups"]}
+    provider_models = {
+        option["route_id"]: option
+        for option in groups["deepseek.deepseek-v4-pro"]["provider_models"]
+    }
+    assert provider_models["qiniu-anthropic:deepseek.deepseek-v4-pro"][
+        "candidate_call_method_ids"
+    ] == ["anthropic_messages"]
+    assert provider_models["qiniu-anthropic:deepseek.deepseek-v4-pro"][
+        "copilot_sdk_compatible"
+    ] is True
+    assert provider_models["qiniu-openai:deepseek.deepseek-v4-pro"][
+        "candidate_call_method_ids"
+    ] == ["openai_chat_completions", "anthropic_messages"]
+    assert provider_models["qiniu-openai:deepseek.deepseek-v4-pro"][
+        "copilot_sdk_compatible"
+    ] is True
+    assert provider_models["openai-compatible:deepseek.deepseek-v4-pro"][
+        "candidate_call_method_ids"
+    ] == ["openai_chat_completions"]
+    assert provider_models["openai-compatible:deepseek.deepseek-v4-pro"][
+        "copilot_sdk_compatible"
+    ] is False
+
+
 def test_registry_merges_model_groups_by_projected_display_name(
     client: TestClient,
     tmp_path: Path,

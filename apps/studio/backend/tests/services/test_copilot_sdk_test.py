@@ -156,6 +156,29 @@ def test_sdk_route_test_passes_provider_model_to_options(monkeypatch: pytest.Mon
     assert captured["model"] == "claude-sonnet"
 
 
+def test_copilot_sdk_route_without_profile_uses_gateway_endpoint_method_catalog() -> None:
+    route = SimpleNamespace(
+        route_id="qiniu-openai:deepseek.deepseek-v4-pro",
+        endpoint_id="qiniu-openai",
+        provider_model_id="deepseek/deepseek-v4-pro",
+        protocol="openai_compatible",
+        base_url="https://api.qnaigc.com/v1",
+        credential_ref="endpoint:qiniu-openai",
+        call_method_id=None,
+    )
+
+    prepared = copilot.resolved_route_with_copilot_sdk_candidate_method(route)
+    api_key, base_url, env_overrides = copilot._resolve_route_runtime(
+        prepared,
+        _CredProvider(),
+    )
+
+    assert prepared.call_method_id == "anthropic_messages"
+    assert api_key == "key"
+    assert base_url == "https://api.qnaigc.com"
+    assert env_overrides == {}
+
+
 def test_fails_when_token_is_not_echoed(monkeypatch: pytest.MonkeyPatch) -> None:
     # No token in the answer = the model never really read the file = the tool
     # loop wasn't exercised → must FAIL (copilot's whole job is using tools).

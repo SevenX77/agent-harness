@@ -66,6 +66,9 @@ from graph_agent_gateway.registry.call_methods import (
 from graph_agent_gateway.registry.call_methods import (
     call_method_ids_for_client as call_method_ids_for_client,
 )
+from graph_agent_gateway.registry.call_methods import (
+    call_method_ids_for_endpoint as call_method_ids_for_endpoint,
+)
 from graph_agent_gateway.registry.canonical import (
     canonicalize_model as canonicalize_model,
 )

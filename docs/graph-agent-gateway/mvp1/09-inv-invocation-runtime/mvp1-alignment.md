@@ -32,6 +32,8 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 **Call method catalog（运行时真相源，不在 docs 配置）**：`registry/call_methods.json` 是 gateway 包内随代码发布的调用方式目录，字段包括 `method_id`、`provider_backend`、`wire_family`、`official_probe`、`client_compatibility`、`base_url_transform`、`auth_token_env`。它回答两类公共问题：① 这个 method 应走哪个官方 probe backend；② 某类 client（例如 `anthropic_messages_client`）能否直接驱动这个 method。未知 method 返回 `unknown`，不被默认当成 incompatible；明确列为 `incompatible` 的 method 才可被上层直接过滤。
 
+**Endpoint method candidates（pre-profile method truth）**：同一 catalog 还拥有 `endpoint_method_candidates`：`protocol_defaults` 把 endpoint protocol 映射到默认 method，`host_overrides` 记录已实测的多协议 host（例如 qnaigc / wavespeed / openrouter）还能提供 Anthropic Messages method。这个配置只回答“缺少 verified profile 时应先尝试哪些 method”；最终能否给某个消费方使用仍由 `client_compatibility` 判定。Studio Copilot 因此不再在前端或 router 中硬编码 provider 名单，也不会因为第三方 route 暂无 profile 就把已支持 Anthropic Messages 的 endpoint 隐藏。
+
 ## 1.5 格式中立 + 普通 chat 面（gateway 基础调用能力，2026-06-04 PM 确认）
 
 > **§1 的"换成原生 ChatX `.invoke()`"是「ChatX 面」——给 engine 等 LangChain 消费方的路。但 gateway 调用层是格式中立的，不绑死 LangChain。**

@@ -153,6 +153,7 @@ describe('buildCopilotJudgeDraft', () => {
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
+        copilot: mocks.useCopilot(),
         view: 'eval',
         judgeRefs: {
           runResultsRef: 'text-segmentation/runs/run-1/result.json',
@@ -169,6 +170,7 @@ describe('buildCopilotJudgeDraft', () => {
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
+        copilot: mocks.useCopilot(),
       }),
     )
 
@@ -181,6 +183,7 @@ describe('buildCopilotJudgeDraft', () => {
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
+        copilot: mocks.useCopilot(),
         workspaceRoot: '/tmp/text-segmentation',
       }),
     )
@@ -218,7 +221,7 @@ describe('buildCopilotJudgeDraft', () => {
       ],
     }))
     const html = renderToStaticMarkup(
-      React.createElement(CopilotPanel, { skillId: 'text-segmentation' }),
+      React.createElement(CopilotPanel, { skillId: 'text-segmentation', copilot: mocks.useCopilot() }),
     )
     expect(html).toContain('data-copilot-thinking="true"')
   })
@@ -230,7 +233,7 @@ describe('buildCopilotJudgeDraft', () => {
       ],
     }))
     const html = renderToStaticMarkup(
-      React.createElement(CopilotPanel, { skillId: 'text-segmentation' }),
+      React.createElement(CopilotPanel, { skillId: 'text-segmentation', copilot: mocks.useCopilot() }),
     )
     expect(html).toContain('data-copilot-thinking="true"')
   })
@@ -243,7 +246,7 @@ describe('buildCopilotJudgeDraft', () => {
       ],
     }))
     const html = renderToStaticMarkup(
-      React.createElement(CopilotPanel, { skillId: 'text-segmentation' }),
+      React.createElement(CopilotPanel, { skillId: 'text-segmentation', copilot: mocks.useCopilot() }),
     )
     expect(html).not.toContain('data-copilot-thinking="true"')
   })
@@ -265,6 +268,7 @@ describe('buildCopilotJudgeDraft', () => {
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
+        copilot: mocks.useCopilot(),
       }),
     )
 
@@ -293,6 +297,7 @@ describe('buildCopilotJudgeDraft', () => {
     renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'skill-1',
+        copilot: mocks.useCopilot(),
         view: 'eval',
         judgeRefs: {
           runResultsRef: 'skill-1/runs/run-1/result.json',

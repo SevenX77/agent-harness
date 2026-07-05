@@ -64,7 +64,30 @@ const mocks = vi.hoisted(() => ({
       baselineRef: string
     } | null
     onJudgePrepared?: (refs: unknown) => void
+    onCollapse?: () => void
+    copilot?: unknown
   }>,
+  useCopilotCalls: [] as Array<{
+    skillId: string | null
+    workspaceRoot?: string | null
+  }>,
+  copilotController: {
+    messages: [],
+    connectionStatus: 'open',
+    reconnectInMs: null,
+    lastError: null,
+    sendMessage: vi.fn(),
+    isStreaming: false,
+    interrupt: vi.fn(),
+    clearMessages: vi.fn(),
+    persistenceError: null,
+    activeSessionId: null,
+    sessions: [],
+    newSession: vi.fn(),
+    restoreSession: vi.fn(),
+    switchSession: vi.fn(),
+    closeSession: vi.fn(),
+  },
   useSkillsIds: [] as Array<string | null>,
   goldenDiffCalls: [] as Array<{
     skillId: string | null
@@ -142,6 +165,13 @@ vi.mock('@/hooks/useSkills', () => ({
 
 vi.mock('@/hooks/useCopilotContext', () => ({
   useCopilotContext: vi.fn(),
+}))
+
+vi.mock('@/hooks/useCopilot', () => ({
+  useCopilot: (skillId: string | null, workspaceRoot?: string | null) => {
+    mocks.useCopilotCalls.push({ skillId, workspaceRoot })
+    return mocks.copilotController
+  },
 }))
 
 vi.mock('@/hooks/useDebouncedLint', () => ({
@@ -241,6 +271,8 @@ vi.mock('@/components/copilot/copilot-panel', () => ({
       baselineRef: string
     } | null
     onJudgePrepared?: (refs: unknown) => void
+    onCollapse?: () => void
+    copilot?: unknown
   }) => {
     mocks.copilotProps.push(props)
     return <aside data-testid="copilot-panel" />
@@ -402,6 +434,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.conflictDialogProps = null
     mocks.lazyMonacoProps.length = 0
     mocks.copilotProps.length = 0
+    mocks.useCopilotCalls.length = 0
     mocks.useSkillsIds.length = 0
     mocks.goldenDiffCalls.length = 0
     mocks.goldenDiffResult = null
@@ -712,7 +745,49 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(mocks.copilotProps.at(-1)).toMatchObject({
       skillId: 'writer-smoke',
       workspaceRoot: '/abs/path',
+      copilot: mocks.copilotController,
     })
+    expect(mocks.useCopilotCalls.at(-1)).toEqual({
+      skillId: 'writer-smoke',
+      workspaceRoot: '/abs/path',
+    })
+  })
+
+  it('keeps the Copilot controller mounted with the skill even after the panel collapses', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+      expect(mocks.useCopilotCalls.at(-1)).toEqual({
+        skillId: 'writer-smoke',
+        workspaceRoot: null,
+      })
+      const callsBeforeCollapse = mocks.useCopilotCalls.length
+
+      act(() => {
+        mocks.copilotProps.at(-1)?.onCollapse?.()
+      })
+
+      expect(mocks.useCopilotCalls.length).toBeGreaterThan(callsBeforeCollapse)
+      expect(mocks.useCopilotCalls.at(-1)).toEqual({
+        skillId: 'writer-smoke',
+        workspaceRoot: null,
+      })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 
   it('wires golden diff refs into the Copilot Judge eval path', () => {
@@ -1542,6 +1617,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
     mocks.lintStatus = 'passed'
     mocks.useSkillsIds.length = 0
     mocks.copilotProps.length = 0
+    mocks.useCopilotCalls.length = 0
     mocks.goldenDiffCalls.length = 0
     mocks.goldenDiffResult = null
     mocks.goldenDiffCompare.mockReset()

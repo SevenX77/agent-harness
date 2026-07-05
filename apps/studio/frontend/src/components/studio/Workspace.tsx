@@ -12,6 +12,7 @@ import { CopilotPanelMorph } from "@/components/copilot/copilot-panel-morph"
 import { defaultFabPosition, headerLogoTarget, panelRect, type Point, type Rect } from "@/components/copilot/copilot-fab-geometry"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
+import { useCopilot } from "@/hooks/useCopilot"
 import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
@@ -717,6 +718,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       lint_status: currentSkillId ? readLintStatus(currentSkillId) : "idle",
     },
   })
+  const copilot = useCopilot(currentSkillId, currentWorkspaceRoot)
 
   useEffect(() => {
     inFlightRef.current = inFlight
@@ -2446,6 +2448,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       <CopilotPanel
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
+        copilot={copilot}
         view={copilotJudgeRefs ? "eval" : "edit"}
         judgeRefs={copilotJudgeRefs}
         completedRunId={completedRunId}

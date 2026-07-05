@@ -1966,6 +1966,11 @@ async def _update_role_test_job_provider(
 # (full fallback chain, bounded concurrency), and project per-route lights +
 # structured sdk_evidence into the same job contract the LLM-Roles UI consumes.
 _COPILOT_SDK_TEST_CONCURRENCY = 2
+_COPILOT_SDK_SUPPORTED_METHOD_IDS = copilot.COPILOT_SDK_SUPPORTED_METHOD_IDS
+_NO_COPILOT_COMPATIBLE_OFFICIAL_PROFILE_MESSAGE = (
+    "No verified Anthropic Messages profile is available for this official route. "
+    "Run the route profile test in API Keys, then retry Copilot Test."
+)
 
 
 def _human_message_for_error_code(error_code: str | None, role_name: str) -> str:
@@ -2078,7 +2083,19 @@ async def _run_copilot_sdk_test_job(
     async def test_route(route: ResolvedRoute) -> copilot.RouteSdkTestResult:
         async with semaphore:
             await _update_copilot_route(job_id, route, "testing", None)
-            result = await copilot.run_route_sdk_test(route, credential_provider)
+            route_provider = credential_provider
+            try:
+                route, route_provider, prepare_error = await _prepare_copilot_sdk_test_route(
+                    role_name,
+                    route,
+                    credential_provider,
+                )
+            except Exception as exc:  # noqa: BLE001 — surfaced on this route light
+                prepare_error = str(exc)
+            if prepare_error:
+                result = copilot.RouteSdkTestResult(route.route_id, "failed", prepare_error)
+            else:
+                result = await copilot.run_route_sdk_test(route, route_provider)
             # R-F21: surface cooling_down + retry_after_seconds so the FE Test
             # Button can show "Cooling down {n}s" and stay disabled.
             await _update_copilot_route(
@@ -2137,6 +2154,44 @@ async def _update_copilot_route(
         _role_test_jobs[job_id] = current.model_copy(
             update={"provider_statuses": provider_statuses}
         )
+
+
+async def _prepare_copilot_sdk_test_route(
+    role_name: str,
+    route: ResolvedRoute,
+    credential_provider: CredentialProviderProtocol,
+) -> tuple[ResolvedRoute, CredentialProviderProtocol, str | None]:
+    if copilot.resolved_route_has_copilot_sdk_method(route):
+        return route, credential_provider, None
+    endpoint_id = getattr(route, "endpoint_id", None)
+    route_id = getattr(route, "route_id", None)
+    if not isinstance(endpoint_id, str) or not isinstance(route_id, str):
+        return route, credential_provider, None
+    credentials = load_credentials()
+    endpoint = credentials.provider_endpoints.get(endpoint_id)
+    stored_route = credentials.provider_routes.get(route_id)
+    if endpoint is None or stored_route is None or endpoint.provider_kind != "official":
+        return route, credential_provider, None
+
+    updated_route, profile_result = await _ensure_official_role_test_verified_profile(
+        stored_route,
+        endpoint,
+        required_method_ids=_COPILOT_SDK_SUPPORTED_METHOD_IDS,
+    )
+    if profile_result is not None and not profile_result.profiles:
+        return route, credential_provider, _official_role_test_profile_probe_failure_message(profile_result)
+    selected_profile = copilot.select_copilot_sdk_verified_profile(updated_route)
+    if selected_profile is None:
+        return route, credential_provider, _NO_COPILOT_COMPATIBLE_OFFICIAL_PROFILE_MESSAGE
+
+    runtime = build_gateway_route_runtime(role_name, route_override=route_id)
+    if not runtime.routes:
+        return route, credential_provider, "Route could not be resolved after profile probing."
+    return (
+        copilot.resolved_route_with_verified_profile(runtime.routes[0], selected_profile),
+        runtime.credential_provider,
+        None,
+    )
 
 
 def _build_copilot_sdk_result(
@@ -2959,10 +3014,10 @@ def _provider_model_option(
         "capabilities": capabilities,
         # R-F8: CopilotTab filters candidate model groups by call_method_id
         # (anthropic-messages family) instead of the old provider_type
-        # heuristic. The field is None for routes without a verified profile
-        # (i.e. no resolved call method), which is treated as "not copilot-
-        # eligible" by the FE filter.
+        # heuristic. Unverified official routes also expose candidate methods
+        # below so Copilot Test can create the route-level profile evidence.
         "call_method_id": _preferred_route_call_method_id(route),
+        "candidate_call_method_ids": _candidate_route_call_method_ids(route, endpoint),
     }
 
 
@@ -2988,6 +3043,23 @@ def _preferred_route_call_method_id(route: ProviderRoute) -> str | None:
         )
         return None
     return selected.method_id if selected is not None else None
+
+
+def _candidate_route_call_method_ids(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+) -> list[str]:
+    if endpoint.provider_kind != "official":
+        return []
+    return _ordered_unique(
+        [
+            candidate.method_id
+            for candidate in _official_language_probe_candidates(
+                endpoint,
+                route.provider_model_id,
+            )
+        ]
+    )
 
 
 def _health_store() -> SqliteLlmHealthStore:
@@ -3223,8 +3295,13 @@ def _role_test_runtime_settings(
 async def _ensure_official_role_test_verified_profile(
     route: ProviderRoute,
     endpoint: ProviderEndpoint,
+    *,
+    required_method_ids: frozenset[str] | None = None,
 ) -> tuple[ProviderRoute, OfficialModelProfileProbeResult | None]:
-    if endpoint.provider_kind != "official" or _route_has_ready_verified_profile(route):
+    if endpoint.provider_kind != "official" or _route_has_ready_verified_profile(
+        route,
+        required_method_ids=required_method_ids,
+    ):
         return route, None
     if _endpoint_probe_is_disabled(endpoint):
         return (
@@ -3245,6 +3322,18 @@ async def _ensure_official_role_test_verified_profile(
             endpoint,
             profile_result,
         )
+        if not _route_has_ready_verified_profile(
+            updated_route,
+            required_method_ids=required_method_ids,
+        ):
+            return (
+                updated_route,
+                OfficialModelProfileProbeResult(
+                    model_id=route.provider_model_id,
+                    last_probe_message=_NO_COPILOT_COMPATIBLE_OFFICIAL_PROFILE_MESSAGE,
+                    probe_attempts=profile_result.probe_attempts,
+                ),
+            )
         return (
             updated_route,
             profile_result,
@@ -3256,8 +3345,16 @@ async def _ensure_official_role_test_verified_profile(
     )
 
 
-def _route_has_ready_verified_profile(route: ProviderRoute) -> bool:
-    return any(profile.status == "ready" for profile in route.verified_profiles)
+def _route_has_ready_verified_profile(
+    route: ProviderRoute,
+    *,
+    required_method_ids: frozenset[str] | None = None,
+) -> bool:
+    return any(
+        profile.status == "ready"
+        and (required_method_ids is None or profile.method_id in required_method_ids)
+        for profile in route.verified_profiles
+    )
 
 
 def _persist_official_role_test_verified_profile(

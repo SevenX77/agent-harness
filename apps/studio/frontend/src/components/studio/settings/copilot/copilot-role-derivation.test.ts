@@ -17,6 +17,7 @@ function route(
   uiState: ProviderModelOption["ui_state"],
   callMethodId: string | null = "anthropic_messages",
   capabilities: ProviderModelOption["capabilities"] = {},
+  candidateCallMethodIds: string[] = [],
 ): ProviderModelOption {
   return {
     route_id: `${endpointId}:${modelId}`,
@@ -31,6 +32,7 @@ function route(
     capability_state: "known",
     capabilities,
     call_method_id: callMethodId,
+    candidate_call_method_ids: candidateCallMethodIds,
   }
 }
 
@@ -174,6 +176,50 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     ])
     expect(candidates[0].availableRoutes[0].methodId).toBeNull()
     expect(candidates[0].availableRoutes[0].protocol).toBe("anthropic_compatible")
+  })
+
+  it("keeps DeepSeek Official visible when Anthropic SDK support is a candidate beside its default OpenAI method", () => {
+    const deepseekGroup = {
+      canonical_id: "deepseek-v4-pro",
+      display_name: "DeepSeek V4 Pro",
+      provider_models: [
+        route("deepseek-official", "deepseek-v4-pro", "ready", "deepseek_chat_completions", {}, [
+          "deepseek_chat_completions",
+          "deepseek_anthropic_messages",
+        ]),
+      ],
+      status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 0,
+        thinking: "unknown",
+        tools: "unknown",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    } as ModelGroup
+    const credentials: CredentialsState = {
+      providers: [
+        {
+          id: "deepseek-official",
+          name: "DeepSeek Official",
+          provider_type: "openai_compatible",
+          api_key: "x",
+          base_url: "https://api.deepseek.com",
+        },
+      ],
+    }
+
+    const candidates = deriveCopilotCandidateGroups([deepseekGroup], credentials)
+
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].source).toBe("built_in")
+    expect(candidates[0].availableRoutes[0].id).toBe("deepseek-official:deepseek-v4-pro")
+    expect(candidates[0].availableRoutes[0].methodId).toBe("deepseek_chat_completions")
+    expect(candidates[0].availableRoutes[0].candidateMethodIds).toEqual([
+      "deepseek_chat_completions",
+      "deepseek_anthropic_messages",
+    ])
   })
 
   it("filters routes with no verified call method when the endpoint protocol is not Anthropic-compatible", () => {

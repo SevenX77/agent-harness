@@ -10,8 +10,8 @@ import type {
 /**
  * Claude Agent SDK routes must speak the Anthropic Messages wire shape. A
  * verified route-level call method is the strongest evidence. When the method
- * is still unknown, endpoint protocol metadata is the only available truth, so
- * an Anthropic-compatible endpoint stays visible and testable.
+ * is still unknown, official candidate methods can keep a route testable; if
+ * those are absent, endpoint protocol metadata is the remaining truth.
  */
 export const COPILOT_ANTHROPIC_MESSAGES_METHODS = [
   'anthropic_messages',
@@ -48,6 +48,15 @@ function routeMethodId(route: ProviderModelOption | CopilotRoutePreview): string
   return typeof methodId === 'string' ? methodId : null
 }
 
+function routeCandidateMethodIds(route: ProviderModelOption | CopilotRoutePreview): string[] {
+  const raw = 'candidateMethodIds' in route
+    ? route.candidateMethodIds
+    : (route as { candidate_call_method_ids?: unknown }).candidate_call_method_ids
+  return Array.isArray(raw)
+    ? raw.filter((methodId): methodId is string => typeof methodId === 'string' && methodId.length > 0)
+    : []
+}
+
 function routeProtocol(route: ProviderModelOption | CopilotRoutePreview): string | null {
   if ('protocol' in route && typeof route.protocol === 'string') return route.protocol
   return null
@@ -79,11 +88,43 @@ export function routeSupportsAnthropicMessages(
   route: ProviderModelOption | CopilotRoutePreview,
 ): boolean {
   const m = routeMethodId(route)
-  if (m) {
-    return (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)
+  if (m && (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)) {
+    return true
+  }
+  const candidateMethods = routeCandidateMethodIds(route)
+  if (candidateMethods.some((methodId) => (
+    (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(methodId)
+  ))) {
+    return true
+  }
+  if (m || candidateMethods.length > 0) {
+    return false
   }
   const protocol = routeProtocol(route)
   return protocol ? normalizedProtocol(protocol) === 'anthropic_compatible' : false
+}
+
+function routeKnownMethodIds(route: ProviderModelOption | CopilotRoutePreview): string[] {
+  const m = routeMethodId(route)
+  return [
+    ...(m ? [m] : []),
+    ...routeCandidateMethodIds(route),
+  ]
+}
+
+export function routeMethodSetSupportsCopilotSdk(
+  route: ProviderModelOption | CopilotRoutePreview,
+  sdkId: CopilotSdkId = 'claude-agent-sdk',
+): boolean {
+  const requirements = COPILOT_SDK_ROUTE_REQUIREMENTS[sdkId]
+  const methodIds = routeKnownMethodIds(route)
+  if (methodIds.length > 0) {
+    return methodIds.some((methodId) => requirements.supportedMethodIds.includes(methodId))
+  }
+  const protocol = routeProtocol(route)
+  return protocol
+    ? requirements.supportedProtocols.includes(normalizedProtocol(protocol))
+    : false
 }
 
 export function routeSupportsCopilotSdk(
@@ -91,13 +132,7 @@ export function routeSupportsCopilotSdk(
   sdkId: CopilotSdkId = 'claude-agent-sdk',
 ): boolean {
   const requirements = COPILOT_SDK_ROUTE_REQUIREMENTS[sdkId]
-  const methodId = routeMethodId(route)
-  const methodAllowed = methodId ? requirements.supportedMethodIds.includes(methodId) : false
-  const protocol = routeProtocol(route)
-  const protocolAllowed = protocol
-    ? requirements.supportedProtocols.includes(normalizedProtocol(protocol))
-    : false
-  if (methodId ? !methodAllowed : !protocolAllowed) {
+  if (!routeMethodSetSupportsCopilotSdk(route, sdkId)) {
     return false
   }
 
@@ -105,6 +140,7 @@ export function routeSupportsCopilotSdk(
     !capabilityExplicitlyUnsupported(capabilityValue(route, capability))
   ))
 }
+
 
 // 从 base_url 取 host 做 route 消歧标签(同一 provider 多 endpoint 靠 host 区分)。
 export function hostFromBaseUrl(baseUrl: string | null | undefined): string | null {
@@ -130,6 +166,7 @@ export interface CopilotRoutePreview {
   provider: string
   modelId: string
   methodId?: string | null
+  candidateMethodIds: string[]
   note?: string | null
   // 消歧标签:同一个 provider(如"七牛")下有多条不同 host/协议的 endpoint,光看
   // providerLabel 全一样分不清 → 追加 host 区分(如 "七牛 · api.qnaigc.com")。
@@ -191,6 +228,7 @@ export function deriveCopilotCandidateGroups(
           provider: pm.provider_label,
           modelId: pm.provider_model_id,
           methodId: pm.call_method_id ?? null,
+          candidateMethodIds: pm.candidate_call_method_ids ?? [],
           note: (pm as unknown as Record<string, unknown>).note as string | null || null,
           endpointLabel: host ? `${pm.provider_label} · ${host}` : pm.provider_label,
           protocol,

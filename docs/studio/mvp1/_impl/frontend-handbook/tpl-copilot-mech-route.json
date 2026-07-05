@@ -11,8 +11,8 @@
       "前端 copilot tab 把用户配的角色（单 model group + route 兜底序）经 PUT /api/llm/roles 整表保存",
       "运行/测试时 gateway 后端 sidecar 侧 调 build_gateway_route_runtime(role_name) → 委托 gateway 库 的 resolve_routes 物化出有序 ResolvedRoute 兜底链",
       "gateway 后端 sidecar 侧 对链里每条 route 用 _resolve_route_runtime 取出 api_key / base_url / 特殊 env",
-      "真实对话：build_options 把 key/base_url 写进 ClaudeAgentOptions.env（不改全局 os.environ），get_or_create_session 建/复用 ClaudeSDKClient 子进程，connect/query/receive_response 跑一轮，全链失败才报错",
-      "SDK 测试：run_route_sdk_test 对每条 route 起一个临时 ClaudeSDKClient，写一个随机 token 到临时文件、逼模型用工具读回来——token 回显才算 tool loop 真跑通",
+      "真实对话：build_gateway_route_runtime 解析兜底链后,Copilot 层会把每条 route 改选到 Claude Agent SDK 支持的 Anthropic Messages verified profile（例如 DeepSeek Official 的 deepseek_anthropic_messages），再由 build_options 把 key/base_url 写进 ClaudeAgentOptions.env（不改全局 os.environ），get_or_create_session 建/复用 ClaudeSDKClient 子进程，connect/query/receive_response 跑一轮，全链失败才报错",
+      "SDK 测试：若官方 route 尚无 Copilot SDK 支持的 verified invocation profile，先跑 route-level official profile probe atom 写回真实 method/capability evidence；随后 run_route_sdk_test 对每条 route 起一个临时 ClaudeSDKClient，写一个随机 token 到临时文件、逼模型用工具读回来——token 回显才算 tool loop 真跑通",
       "SDK message（AssistantMessage/ResultMessage 的 TextBlock/ToolUseBlock/ToolResultBlock）经 _translate_sdk_message 翻成 websocket event 流给前端"
     ]
   },
@@ -97,7 +97,8 @@
         "_drive_sdk_test（驱动一轮 SDK 对话、按 token 回显判通过的函数，copilot.py）发 _SDK_TEST_PROMPT（要求 Read 该文件并回复内容），遍历 receive_response。",
         "token 出现在模型回复文本里 → status=ok；否则有错误就报最后一条错误、无错误就报英文诊断「The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.」。",
         "中途单个工具错误不短路（模型自己恢复后仍可能回显 token），最终以 token 是否回显为唯一裁决。",
-        "测试经统一的 role test-job 入口触发：前端 startRoleTestJob → POST /api/llm/roles/{name}/test-jobs，后端 _start_role_test_job 见 role.role_kind=='copilot' 即分流到 _start_copilot_sdk_test_job（routers/llm.py），并发跑各 route（_COPILOT_SDK_TEST_CONCURRENCY=2）。"
+        "测试经统一的 role test-job 入口触发：前端 startRoleTestJob → POST /api/llm/roles/{name}/test-jobs，后端 _start_role_test_job 见 role.role_kind=='copilot' 即分流到 _start_copilot_sdk_test_job（routers/llm.py），并发跑各 route（_COPILOT_SDK_TEST_CONCURRENCY=2）。",
+        "官方 route 若当前 resolved call_method_id 不属于 Anthropic Messages family，_prepare_copilot_sdk_test_route 先复用普通 LLM Role Test 的 _ensure_official_role_test_verified_profile，并要求产出 Copilot SDK 支持的 profile：profile probe 成功则把 verified_profiles/evidence 写回 route 并重新 resolve route，再改选到真实 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 路径；profile probe 失败或只产出非 SDK profile 则该 route 直接 failed 并写 probe-failed evidence。"
       ],
       "do": [
         "真 ClaudeSDKClient 子进程 + 真工具调用 + token 回显裁决。",
@@ -194,8 +195,8 @@
       "group": "crud",
       "endpoint": "GET /api/llm/registry",
       "req": "无入参",
-      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + call_method_id + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
-      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动的 route」：已验证 call_method_id 时必须属于 Anthropic Messages family；call_method_id 未验证时回退看 endpoint protocol/provider_type 是否归一为 anthropic_compatible；并且 capabilities.tools / capabilities.tool_use 不得有显式 unsupported/false/no 证据。再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
+      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + call_method_id + candidate_call_method_ids + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
+      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动/可测试的 route」：已验证 call_method_id 时必须属于 Anthropic Messages family；call_method_id 未验证但 candidate_call_method_ids 含 Anthropic Messages family 时保留为可测试候选；两者都未知时回退看 endpoint protocol/provider_type 是否归一为 anthropic_compatible；并且 capabilities.tools / capabilities.tool_use 不得有显式 unsupported/false/no 证据。再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
       "provider": "gateway 后端（routers/llm.py get_llm_registry）",
       "id": "iface-c0"
     },
@@ -222,7 +223,7 @@
       "endpoint": "POST /api/llm/roles/{role_name}/test-jobs（异步 job，前端轮询 GET /api/llm/role-test-jobs/{job_id}）",
       "req": "路径参数 role_name（copilot 角色名）；前端按 500ms 轮询 job 进度",
       "resp": "RoleTestJobResponse：每条 route 的 SDK 测试进度/裁决（queued→testing→ok/failed/blocked）+ 完成后 result（含 sdk_evidence）",
-      "purpose": "copilot 真 SDK 测试——_start_role_test_job 见 role_kind=='copilot' 即分流 _start_copilot_sdk_test_job，对每条 route 跑 run_route_sdk_test（真 ClaudeSDKClient + token 回显验 tool loop），并发 2 条；结果含失败写回 sdk_evidence + 持久化",
+      "purpose": "copilot 真 SDK 测试——_start_role_test_job 见 role_kind=='copilot' 即分流 _start_copilot_sdk_test_job；官方 route 缺 verified profile 时先跑 route-level official profile atom 写回真实 method/evidence，再对每条 route 跑 run_route_sdk_test（真 ClaudeSDKClient + token 回显验 tool loop），并发 2 条；结果含失败写回 sdk_evidence + 持久化",
       "provider": "gateway 后端（routers/llm.py _start_copilot_sdk_test_job → services copilot.run_route_sdk_test）；route 解析委托 gateway 库，SDK 驱动在 gateway 后端 sidecar 侧",
       "id": "iface-c3"
     },
@@ -341,7 +342,7 @@
       "item": "真 SDK 测试（token 回显验 tool loop）",
       "d12": "COPILOT_ASSIST-4",
       "status": "ok",
-      "note": "run_route_sdk_test 已用真 ClaudeSDKClient 子进程 + 临时文件 token 回显验 spawn/env/tool loop，旧的 AsyncAnthropic 裸探针假测试已移除 → spec §3.4 核心 drift（测的 SDK ≠ 跑的 SDK）现码已修。← #58 直接用。",
+      "note": "run_route_sdk_test 已用真 ClaudeSDKClient 子进程 + 临时文件 token 回显验 spawn/env/tool loop；copilot SDK job 对官方未验证或默认非 SDK method 的 route 先复用 official profile atom 并重新 resolve route，真实对话 runtime 也会改选 Copilot SDK 支持的 verified profile，确保 DeepSeek Official 走 deepseek_anthropic_messages 真路径；旧的 AsyncAnthropic 裸探针假测试已移除 → spec §3.4 核心 drift（测的 SDK ≠ 跑的 SDK）现码已修。← #58 直接用。",
       "ref": "d5"
     },
     {

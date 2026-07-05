@@ -12,10 +12,11 @@ import re
 from types import SimpleNamespace
 
 import pytest
-from app.models.llm_config import LLMCredentialsFile, ProviderRoute
+from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.routers import llm
 from app.services.copilot import RouteSdkTestResult
 from app.services.llm_health_store import ActiveCircuitsIndex
+from graph_agent_gateway.registry.schema import VerifiedProfile
 
 _NO_CIRCUITS = ActiveCircuitsIndex.build([])
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")
@@ -222,6 +223,125 @@ def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(
         assert final.result is not None
         assert final.result["status"] == "ok"
         assert final.result["sdk_evidence"]["passed"] == 1
+    finally:
+        llm._role_test_jobs.pop(job_id, None)
+
+
+def test_run_copilot_sdk_test_job_profiles_official_route_for_copilot_method_before_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    route = SimpleNamespace(
+        route_id="deepseek-official:deepseek-v4-pro",
+        endpoint_id="deepseek-official",
+        canonical_id="deepseek-v4-pro",
+        provider_model_id="deepseek-v4-pro",
+        call_method_id="deepseek_chat_completions",
+    )
+    prepared_route = SimpleNamespace(
+        route_id="deepseek-official:deepseek-v4-pro",
+        endpoint_id="deepseek-official",
+        canonical_id="deepseek-v4-pro",
+        provider_model_id="deepseek-v4-pro",
+        call_method_id="deepseek_anthropic_messages",
+    )
+    job_id = "job-copilot-deepseek"
+    llm._role_test_jobs[job_id] = llm.RoleTestJobResponse(
+        job_id=job_id,
+        role_name="copilot_deepseek_v4_pro",
+        status="queued",
+        message="queued",
+        provider_statuses=[llm._copilot_route_progress(route, "queued")],
+    )
+    raw_route = ProviderRoute(
+        route_id="deepseek-official:deepseek-v4-pro",
+        endpoint_id="deepseek-official",
+        route_slug="deepseek-v4-pro",
+        provider_model_id="deepseek-v4-pro",
+        canonical_id="deepseek-v4-pro",
+        status="verified",
+        verified_profiles=[
+            VerifiedProfile(
+                profile_id="text:deepseek_chat_completions",
+                capability="text_chat",
+                method_id="deepseek_chat_completions",
+                request_mapper_id="deepseek_chat_completions_text",
+                status="ready",
+                default=True,
+                fallback_rank=1,
+            )
+        ],
+    )
+    endpoint = ProviderEndpoint(
+        endpoint_id="deepseek-official",
+        display_name="DeepSeek Official",
+        protocol="openai_compatible",
+        base_url="https://api.deepseek.com",
+        api_key="secret",
+        status="verified",
+        provider_kind="official",
+    )
+    credentials = LLMCredentialsFile(
+        provider_endpoints={endpoint.endpoint_id: endpoint},
+        provider_routes={raw_route.route_id: raw_route},
+    )
+    profile_calls: list[tuple[str, str]] = []
+    sdk_calls: list[tuple[str | None, object]] = []
+
+    async def fake_profile_probe(
+        route_arg: ProviderRoute,
+        endpoint_arg: ProviderEndpoint,
+        **kwargs: object,
+    ) -> tuple[ProviderRoute, llm.OfficialModelProfileProbeResult]:
+        assert kwargs["required_method_ids"] == llm._COPILOT_SDK_SUPPORTED_METHOD_IDS
+        profile_calls.append((endpoint_arg.endpoint_id, route_arg.route_id))
+        profile = VerifiedProfile(
+            profile_id="text:deepseek_anthropic_messages",
+            capability="text_chat",
+            method_id="deepseek_anthropic_messages",
+            request_mapper_id="deepseek_anthropic_messages_text",
+            status="ready",
+            default=True,
+            fallback_rank=1,
+        )
+        return (
+            route_arg.model_copy(
+                update={
+                    "status": "verified",
+                    "verified_profiles": [profile],
+                }
+            ),
+            llm.OfficialModelProfileProbeResult(
+                model_id="deepseek-v4-pro",
+                profiles=[profile],
+            ),
+        )
+
+    def fake_runtime(role_name: str, *, route_override: str | None = None, **_kwargs):
+        assert role_name == "copilot_deepseek_v4_pro"
+        assert route_override == "deepseek-official:deepseek-v4-pro"
+        return SimpleNamespace(routes=[prepared_route], credential_provider="fresh-provider")
+
+    async def fake_sdk_test(route_arg: SimpleNamespace, provider: object, *, timeout_s: float = 60.0):
+        del timeout_s
+        sdk_calls.append((getattr(route_arg, "call_method_id", None), provider))
+        return RouteSdkTestResult(route_arg.route_id, "ok", None)
+
+    monkeypatch.setattr(llm, "load_credentials", lambda: credentials)
+    monkeypatch.setattr(llm, "_ensure_official_role_test_verified_profile", fake_profile_probe)
+    monkeypatch.setattr(llm, "build_gateway_route_runtime", fake_runtime)
+    monkeypatch.setattr(llm.copilot, "run_route_sdk_test", fake_sdk_test)
+    monkeypatch.setattr(llm, "_persist_copilot_sdk_evidence", lambda _results: None)
+
+    try:
+        asyncio.run(llm._run_copilot_sdk_test_job(job_id, "copilot_deepseek_v4_pro", [route], object()))
+        assert profile_calls == [
+            ("deepseek-official", "deepseek-official:deepseek-v4-pro")
+        ]
+        assert sdk_calls == [("deepseek_anthropic_messages", "fresh-provider")]
+        final = llm._role_test_jobs[job_id]
+        assert final.status == "completed"
+        assert final.result is not None
+        assert final.result["status"] == "ok"
     finally:
         llm._role_test_jobs.pop(job_id, None)
 

@@ -1646,6 +1646,10 @@ mod tests {
         dir
     }
 
+    fn json_string_content(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     #[cfg(unix)]
     fn symlink_path(target: &Path, link: &Path) {
         std::os::unix::fs::symlink(target, link).expect("symlink");
@@ -2976,7 +2980,7 @@ mod tests {
         // Python `_write_skill_index`: sorted keys, 2-space indent, trailing newline.
         let expected = format!(
             "{{\n  \"alpha\": {{\n    \"absolute_path\": \"{}\",\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
-            outcome.root
+            json_string_content(&outcome.root)
         );
         assert_eq!(
             index_raw, expected,
@@ -3005,7 +3009,7 @@ mod tests {
         let index_raw = std::fs::read_to_string(config.join("skill_index.json")).unwrap();
         let expected = format!(
             "{{\n  \"beta\": {{\n    \"absolute_path\": \"{}\",\n    \"l2_remote_url\": \"\"\n  }},\n  \"zeta\": {{\n    \"absolute_path\": \"/existing/zeta\",\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
-            outcome.root
+            json_string_content(&outcome.root)
         );
         assert_eq!(
             index_raw, expected,
@@ -3088,7 +3092,7 @@ mod tests {
             config.join("app_settings.json"),
             format!(
                 "{{\n  \"default_skills_directory\": \"{}\"\n}}\n",
-                custom.display()
+                json_string_content(&custom.display().to_string())
             ),
         )
         .unwrap();
@@ -3152,7 +3156,7 @@ mod tests {
         // The index entry is written so the detail GET can resolve id→dir.
         let index_raw = std::fs::read_to_string(config.join("skill_index.json")).unwrap();
         assert!(index_raw.contains(&outcome.skill_id));
-        assert!(index_raw.contains(&outcome.root));
+        assert!(index_raw.contains(&json_string_content(&outcome.root)));
         let _ = std::fs::remove_dir_all(&config);
         let _ = std::fs::remove_dir_all(&folder);
     }

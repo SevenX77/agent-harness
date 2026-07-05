@@ -730,6 +730,51 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(routeTagHtml(html, "anthropic/claude-opus-4.7")).not.toContain("api-route-tag-border-flow")
   })
 
+  it("spins a manually probed model chip from the active atom map even when route metadata is missing", () => {
+    const nextDraft = makeDraft({
+      id: "deepseek",
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com",
+      isTesting: false,
+      testingAction: null,
+      testingEndpointId: null,
+      testingModelIdsByEndpoint: { "deepseek-openai": ["deepseek-v4-pro"] },
+      base_urls: [
+        {
+          id: "url-deepseek",
+          value: "https://api.deepseek.com",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "deepseek-openai",
+          },
+        },
+      ],
+    })
+
+    const html = renderCardHtml({
+      nextDraft,
+      persistedEndpoints: {
+        "deepseek-openai": makePersisted({
+          id: "deepseek-openai",
+          name: "DeepSeek",
+          base_url: "https://api.deepseek.com",
+          provider_type: "openai_compatible",
+          last_test_status: "ok",
+          available_models: [
+            {
+              id: "deepseek-v4-pro",
+              status: "verified",
+              ui_state: "ready",
+            },
+          ],
+        }),
+      },
+    })
+
+    expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(1)
+    expect(routeTagHtml(html, "deepseek-v4-pro")).toContain("api-route-tag-border-flow")
+  })
+
   it("shows protocol-normalized runtime URL separately from the input URL", () => {
     const html = renderToStaticMarkup(
       <ProviderCard

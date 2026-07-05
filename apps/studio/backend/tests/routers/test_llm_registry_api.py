@@ -3559,7 +3559,7 @@ def test_endpoint_generation_probe_reports_active_model_atoms(
         base_url="https://api.openai.example/v1",
         api_key="secret",
     )
-    active_events: list[tuple[str, ...]] = []
+    active_events: list[tuple[str, tuple[str, ...]]] = []
 
     async def fake_test_route(
         endpoint: ProviderEndpoint,
@@ -3571,9 +3571,10 @@ def test_endpoint_generation_probe_reports_active_model_atoms(
         status = "ok" if route.provider_model_id == "gpt-5-mini" else "error"
         return _route_probe(endpoint, route, status=status)
 
-    async def on_active_change(active_model_ids: tuple[str, ...]) -> None:
-        active_events.append(active_model_ids)
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
 
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
     result = asyncio.run(
@@ -3581,13 +3582,85 @@ def test_endpoint_generation_probe_reports_active_model_atoms(
             endpoint,
             ("gpt-5", "gpt-5-mini"),
             {},
-            on_active_change=on_active_change,
         )
     )
 
     assert result.status == "verified"
     assert result.verified_model_id == "gpt-5-mini"
-    assert active_events == [("gpt-5",), (), ("gpt-5-mini",), ()]
+    assert active_events == [
+        ("openai-direct", ("gpt-5",)),
+        ("openai-direct", ()),
+        ("openai-direct", ("gpt-5-mini",)),
+        ("openai-direct", ()),
+    ]
+
+
+def test_model_generation_atom_publishes_active_model_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    active_events: list[tuple[str, tuple[str, ...]]] = []
+
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        del runtime_settings
+        return _route_probe(endpoint, route, status="ok")
+
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    result = asyncio.run(llm_router._probe_model_generation_atom(endpoint, "gpt-5"))
+
+    assert result.status == "ok"
+    assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
+
+
+def test_official_profile_atom_publishes_active_model_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        provider_kind="official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    active_events: list[tuple[str, tuple[str, ...]]] = []
+
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
+
+    async def fake_profile_result(
+        endpoint: ProviderEndpoint,
+        model_id: str,
+    ) -> llm_router.OfficialModelProfileProbeResult:
+        return llm_router.OfficialModelProfileProbeResult(model_id=model_id)
+
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
+    monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_result)
+
+    result = asyncio.run(llm_router._probe_official_model_profile_atom(endpoint, "gpt-5"))
+
+    assert result.model_id == "gpt-5"
+    assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
 
 
 def test_endpoint_generation_probe_skips_disabled_endpoint_atom(
@@ -3603,7 +3676,7 @@ def test_endpoint_generation_probe_skips_disabled_endpoint_atom(
         api_key="secret",
         status="disabled",
     )
-    active_events: list[tuple[str, ...]] = []
+    active_events: list[tuple[str, tuple[str, ...]]] = []
 
     async def unexpected_test_route(
         endpoint: ProviderEndpoint,
@@ -3615,9 +3688,10 @@ def test_endpoint_generation_probe_skips_disabled_endpoint_atom(
             f"disabled endpoint atom should not hit provider: {endpoint.endpoint_id}/{route.route_id}"
         )
 
-    async def on_active_change(active_model_ids: tuple[str, ...]) -> None:
-        active_events.append(active_model_ids)
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
 
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_test_route)
 
     result = asyncio.run(
@@ -3625,7 +3699,6 @@ def test_endpoint_generation_probe_skips_disabled_endpoint_atom(
             endpoint,
             ("gpt-5", "gpt-5-mini"),
             {},
-            on_active_change=on_active_change,
         )
     )
 

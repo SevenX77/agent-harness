@@ -878,9 +878,6 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
         # this endpoint's already-verified models so the Test confirms the
         # *endpoint* in as few attempts as possible; third-party matrix cells
         # use their own immutable protocol.
-        async def publish_active_model_ids(active_model_ids: tuple[str, ...]) -> None:
-            await _publish_llm_probe_active(endpoint_id, active_model_ids)
-
         verified_model_ids = frozenset(
             route.provider_model_id
             for route in latest_credentials.provider_routes.values()
@@ -891,7 +888,6 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             discovered_model_ids,
             raw_capabilities_by_model,
             allow_disabled=force,
-            on_active_change=publish_active_model_ids,
         )
         probe_attempts_log = verification.probe_attempts
         # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
@@ -4429,8 +4425,6 @@ def _official_model_type_capability_values(
 async def _probe_official_profile_batch(
     endpoint: ProviderEndpoint,
     model_ids: tuple[str, ...],
-    *,
-    on_active_change: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
 ) -> list[OfficialModelProfileProbeResult]:
     if _endpoint_probe_is_disabled(endpoint):
         return [
@@ -4441,27 +4435,10 @@ async def _probe_official_profile_batch(
             for model_id in model_ids
         ]
     semaphore = asyncio.Semaphore(OFFICIAL_PROVIDER_TEST_CONCURRENCY)
-    active_model_ids: set[str] = set()
-    active_lock = asyncio.Lock()
-
-    async def mark_active(model_id: str, is_active: bool) -> None:
-        if on_active_change is None:
-            return
-        async with active_lock:
-            if is_active:
-                active_model_ids.add(model_id)
-            else:
-                active_model_ids.discard(model_id)
-            active_snapshot = tuple(active_model_ids)
-        await on_active_change(active_snapshot)
 
     async def probe(model_id: str) -> OfficialModelProfileProbeResult:
         async with semaphore:
-            await mark_active(model_id, True)
-            try:
-                return await _probe_official_model_profile_atom(endpoint, model_id)
-            finally:
-                await mark_active(model_id, False)
+            return await _probe_official_model_profile_atom(endpoint, model_id)
 
     return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
 
@@ -4854,7 +4831,6 @@ async def _verify_endpoint_by_generation_probe(
     raw_capabilities_by_model: dict[str, dict[str, Any]],
     *,
     allow_disabled: bool = False,
-    on_active_change: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
 ) -> EndpointGenerationVerification:
     """Run batch inference probing to verify an endpoint can actually generate.
 
@@ -4868,8 +4844,8 @@ async def _verify_endpoint_by_generation_probe(
     from the runtime log). The batch stops on the first ``ok`` and
     short-circuits structural errors (invalid_key / quota_exceeded /
     protocol_unsupported, all of which reject every model on this cell).
-    ``on_active_change`` reports the currently active model atom before and
-    after each generation probe; the UI uses that snapshot for model animation.
+    Each concrete generation attempt goes through ``_probe_model_generation_atom``;
+    that atom owns the live active-model event used by the UI animation.
     """
     probe_attempts: list[dict[str, Any]] = []
     if _endpoint_probe_is_disabled(endpoint, allow_disabled=allow_disabled):
@@ -4899,17 +4875,11 @@ async def _verify_endpoint_by_generation_probe(
 
     last_failure: RouteProbeResult | None = None
     for model_id in probe_model_ids:
-        if on_active_change is not None:
-            await on_active_change((model_id,))
-        try:
-            probe = await _probe_model_generation_atom(
-                endpoint,
-                model_id,
-                allow_disabled=allow_disabled,
-            )
-        finally:
-            if on_active_change is not None:
-                await on_active_change(())
+        probe = await _probe_model_generation_atom(
+            endpoint,
+            model_id,
+            allow_disabled=allow_disabled,
+        )
         probe_attempts.append(
             {"protocol": endpoint.protocol, "model": model_id, "status": probe.status}
         )
@@ -5947,11 +5917,15 @@ async def _probe_route_generation_atom(
 ) -> RouteProbeResult:
     if _endpoint_probe_is_disabled(endpoint, allow_disabled=allow_disabled):
         return _disabled_route_probe_result(endpoint, route)
-    return await _gateway_test_provider_route(
-        endpoint,
-        route,
-        runtime_settings=runtime_settings,
-    )
+    await _publish_llm_probe_active(endpoint.endpoint_id, (route.provider_model_id,))
+    try:
+        return await _gateway_test_provider_route(
+            endpoint,
+            route,
+            runtime_settings=runtime_settings,
+        )
+    finally:
+        await _publish_llm_probe_active(endpoint.endpoint_id, ())
 
 
 async def _probe_model_generation_atom(
@@ -5980,7 +5954,11 @@ async def _probe_official_model_profile_atom(
             model_id=model_id,
             last_probe_message=DISABLED_ENDPOINT_PROBE_MESSAGE,
         )
-    return await _probe_official_model_profile_result(endpoint, model_id)
+    await _publish_llm_probe_active(endpoint.endpoint_id, (model_id,))
+    try:
+        return await _probe_official_model_profile_result(endpoint, model_id)
+    finally:
+        await _publish_llm_probe_active(endpoint.endpoint_id, ())
 
 
 async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:

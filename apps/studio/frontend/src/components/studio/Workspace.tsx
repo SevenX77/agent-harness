@@ -29,7 +29,7 @@ import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspaceFile, writeWorkspaceFile } from "@/lib/tauri"
-import { errorMessage } from "@/utils/errors"
+import { errorDiagnosticDetails, errorMessage } from "@/utils/errors"
 import type { CompileError, PathDiff } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { autoCreatedSubgraphChildDir, defaultSubgraphChildDir, subgraphChildScaffoldFiles } from "@/components/studio/subgraph-scaffold"
@@ -79,13 +79,14 @@ interface WorkspaceProps {
 
 const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
 
-function diagnosticError(message: string): CompileError {
+function diagnosticError(message: string, details: string[] = []): CompileError {
   return {
     file: null,
     line: null,
     field: null,
     severity: "fatal",
     message,
+    ...(details.length > 0 ? { details } : {}),
   }
 }
 
@@ -125,7 +126,7 @@ function requestDiagnosticErrors(error: unknown): CompileError[] {
       return errors
     }
   }
-  return [diagnosticError(errorMessage(error))]
+  return [diagnosticError(errorMessage(error), errorDiagnosticDetails(error))]
 }
 
 function predictStatusFailureErrors(predict: { path_diff: PathDiff | null }): CompileError[] {
@@ -1092,10 +1093,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
     } catch (error: unknown) {
       updateStage(targetSkillId, "compile-fail")
-      const message = error instanceof Error ? error.message : "Compile request failed"
+      const message = errorMessage(error)
       setCompileErrors((current) => ({
         ...current,
-        [targetSkillId]: [{ file: null, line: null, field: null, severity: "fatal", message }],
+        [targetSkillId]: [diagnosticError(message, errorDiagnosticDetails(error))],
       }))
       setCompileDrawerOpen(true)
       toast.error(message)

@@ -59,6 +59,32 @@ describe("buildCompileErrorClipboardText", () => {
     )
   })
 
+  it("includes diagnostic detail lines in the clipboard digest", () => {
+    const text = buildCompileErrorClipboardText([
+      makeError({
+        file: null,
+        line: null,
+        field: null,
+        message: "Backend unavailable",
+        details: [
+          "Request: POST http://127.0.0.1:8787/api/skills/writer-smoke/runs/predict",
+          "Axios code: ERR_NETWORK",
+          "Original error: Network Error",
+        ],
+      }),
+    ], "predict")
+
+    expect(text).toBe(
+      [
+        "1 predict error",
+        "- unknown file - Backend unavailable",
+        "  Request: POST http://127.0.0.1:8787/api/skills/writer-smoke/runs/predict",
+        "  Axios code: ERR_NETWORK",
+        "  Original error: Network Error",
+      ].join("\n"),
+    )
+  })
+
   it("uses the singular form for a single error", () => {
     const text = buildCompileErrorClipboardText([makeError()])
     expect(text.startsWith("1 compile error\n")).toBe(true)
@@ -154,7 +180,19 @@ describe("CompileErrorDrawer rendering", () => {
     act(() => {
       root.render(
         <CompileErrorDrawer
-          errors={[makeError({ file: null, line: null, field: null, message: "Backend unavailable" })]}
+          errors={[
+            makeError({
+              file: null,
+              line: null,
+              field: null,
+              message: "Backend unavailable",
+              details: [
+                "Request: POST http://127.0.0.1:8787/api/skills/writer-smoke/runs/predict",
+                "Axios code: ERR_NETWORK",
+                "Original error: Network Error",
+              ],
+            }),
+          ]}
           open
           onOpenChange={() => {}}
           kind="predict"
@@ -165,6 +203,9 @@ describe("CompileErrorDrawer rendering", () => {
     const text = document.body.textContent ?? ""
     expect(text).toContain("1 predict error")
     expect(text).toContain("Backend unavailable")
+    expect(text).toContain("Request: POST http://127.0.0.1:8787/api/skills/writer-smoke/runs/predict")
+    expect(text).toContain("Axios code: ERR_NETWORK")
+    expect(text).toContain("Original error: Network Error")
     expect(document.body.querySelector('[aria-label="Copy all predict errors"]')).not.toBeNull()
     expect(document.body.querySelector('[data-slot="predict-drawer-content"]')).not.toBeNull()
   })

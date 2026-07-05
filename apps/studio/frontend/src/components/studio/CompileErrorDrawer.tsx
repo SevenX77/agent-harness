@@ -47,7 +47,10 @@ export function buildCompileErrorClipboardText(
 ): string {
   const count = errors.length
   const heading = `${count} ${kind} error${count === 1 ? "" : "s"}`
-  const lines = errors.map((error) => `- ${formatCompileErrorLine(error)}`)
+  const lines = errors.flatMap((error) => [
+    `- ${formatCompileErrorLine(error)}`,
+    ...(error.details ?? []).map((detail) => `  ${detail}`),
+  ])
   return [heading, ...lines].join("\n")
 }
 
@@ -141,6 +144,13 @@ export function CompileErrorDrawer({ errors, open, onOpenChange, kind = "compile
               </span>
               {error.field ? <span> - {error.field}</span> : null}
               <span> - {error.message}</span>
+              {error.details?.length ? (
+                <div className="mt-1 space-y-1 pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                  {error.details.map((detail, detailIndex) => (
+                    <div key={`${detailIndex}-${detail}`}>{detail}</div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

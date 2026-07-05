@@ -152,6 +152,52 @@ def test_probe_multimodal_endpoint_records_image_as_probed_verified(
     assert "image" in verified[0].input_modalities
 
 
+def test_probe_multimodal_endpoint_publishes_active_model_atom(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_route(monkeypatch, tmp_path)
+    chat = llm_router._candidate(
+        method_id="openai_chat_completions",
+        profile_id="chat",
+        capability="language_reasoning",
+        request_mapper_id="m",
+        default_rank=0,
+        fallback_rank=0,
+    )
+    active_events: list[tuple[str, tuple[str, ...]]] = []
+
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
+
+    async def fake_call_method(
+        method_id: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+        multimodal: bool = False,
+    ) -> ModelProbeResult:
+        assert method_id == "openai_chat_completions"
+        assert api_key == "secret"
+        assert base_url == "https://tp.example/v1"
+        assert model_id == "vmodel"
+        assert runtime_settings == {"max_output_tokens": 16}
+        assert multimodal is True
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=12, message=None)
+
+    monkeypatch.setattr(llm_router, "_multimodal_probe_candidate", lambda ep, model: chat)
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
+    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fake_call_method)
+
+    resp = client.post("/api/llm/routes/tp:vmodel/probe-multimodal")
+
+    assert resp.status_code == 200
+    assert active_events == [("tp", ("vmodel",)), ("tp", ())]
+
+
 def test_probe_multimodal_endpoint_records_failure_when_image_rejected(
     client: TestClient,
     tmp_path: Path,

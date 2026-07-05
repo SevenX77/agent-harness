@@ -3707,7 +3707,7 @@ def test_model_generation_atom_publishes_active_model_events(
     assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
 
 
-def test_official_profile_atom_publishes_active_model_events(
+def test_official_call_method_atom_publishes_active_model_events(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3725,18 +3725,144 @@ def test_official_profile_atom_publishes_active_model_events(
     async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
         active_events.append((endpoint_id, active_model_ids))
 
-    async def fake_profile_result(
-        endpoint: ProviderEndpoint,
+    async def fake_call_method(
+        method_id: str,
+        api_key: str,
+        base_url: str,
         model_id: str,
-    ) -> llm_router.OfficialModelProfileProbeResult:
-        return llm_router.OfficialModelProfileProbeResult(model_id=model_id)
+        *,
+        runtime_settings: dict[str, object] | None = None,
+        multimodal: bool = False,
+    ) -> ModelProbeResult:
+        assert method_id == "openai_responses"
+        assert api_key == "secret"
+        assert base_url == "https://api.openai.example/v1"
+        assert runtime_settings == {"temperature": 0.2}
+        assert multimodal is False
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=12)
 
     monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
-    monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_result)
+    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fake_call_method)
 
-    result = asyncio.run(llm_router._probe_official_model_profile_atom(endpoint, "gpt-5"))
+    result = asyncio.run(
+        llm_router._probe_official_call_method_generation_atom(
+            endpoint,
+            "gpt-5",
+            "openai_responses",
+            runtime_settings={"temperature": 0.2},
+        )
+    )
+
+    assert result.status == "ok"
+    assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
+
+
+def test_official_call_method_atom_skips_disabled_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        provider_kind="official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+        status="disabled",
+    )
+    active_events: list[tuple[str, tuple[str, ...]]] = []
+
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
+
+    async def unexpected_call_method(*args: object, **kwargs: object) -> ModelProbeResult:
+        raise AssertionError("disabled official call-method atom should not hit provider")
+
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
+    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", unexpected_call_method)
+
+    result = asyncio.run(
+        llm_router._probe_official_call_method_generation_atom(
+            endpoint,
+            "gpt-5",
+            "openai_responses",
+        )
+    )
 
     assert result.model_id == "gpt-5"
+    assert result.status == "error"
+    assert result.message == llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE
+    assert active_events == []
+
+
+def test_official_role_route_test_uses_call_method_atom_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        provider_kind="official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    route = ProviderRoute(
+        route_id="openai-direct:gpt-5",
+        endpoint_id="openai-direct",
+        route_slug="gpt-5",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+        verified_profiles=[
+            VerifiedProfile(
+                profile_id="text_responses",
+                capability="text_chat",
+                method_id="openai_responses",
+                request_mapper_id="openai_responses_text",
+                status="ready",
+                default=True,
+                fallback_rank=1,
+                runtime_overrides={"temperature": 0.1},
+            )
+        ],
+    )
+    active_events: list[tuple[str, tuple[str, ...]]] = []
+
+    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
+        active_events.append((endpoint_id, active_model_ids))
+
+    async def fake_call_method(
+        method_id: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+        multimodal: bool = False,
+    ) -> ModelProbeResult:
+        assert method_id == "openai_responses"
+        assert api_key == "secret"
+        assert base_url == "https://api.openai.example/v1"
+        assert model_id == "gpt-5"
+        assert runtime_settings == {"temperature": 0.3}
+        assert multimodal is False
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=9)
+
+    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
+    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", fake_call_method)
+
+    result = asyncio.run(
+        llm_router._probe_role_route(
+            route,
+            endpoint,
+            llm_router.RuntimeSettings(),
+            {"temperature": 0.3},
+        )
+    )
+
+    assert result.status == "ok"
     assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
 
 
@@ -6173,8 +6299,11 @@ def test_official_role_test_profile_ensure_writes_evidence_to_route_not_catalog(
         api_key: str,
         base_url: str,
         model_id: str,
+        *,
         runtime_settings: dict[str, object] | None = None,
+        multimodal: bool = False,
     ) -> ModelProbeResult:
+        del multimodal
         return ModelProbeResult(model_id=model_id, status="ok")
 
     monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_probe)
@@ -6273,8 +6402,11 @@ def test_role_test_uses_verified_profile_call_method_for_official_routes(
         api_key: str,
         base_url: str,
         model_id: str,
+        *,
         runtime_settings: dict[str, object] | None = None,
+        multimodal: bool = False,
     ) -> ModelProbeResult:
+        del multimodal
         calls.append(
             {
                 "method_id": method_id,
@@ -6410,8 +6542,11 @@ def test_role_test_probes_missing_official_verified_profile_and_persists_route(
         api_key: str,
         base_url: str,
         model_id: str,
+        *,
         runtime_settings: dict[str, object] | None = None,
+        multimodal: bool = False,
     ) -> ModelProbeResult:
+        del multimodal
         official_calls.append(
             {
                 "method_id": method_id,

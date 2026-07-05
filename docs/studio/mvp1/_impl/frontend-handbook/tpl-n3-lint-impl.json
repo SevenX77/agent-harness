@@ -44,12 +44,12 @@
    "n": 4,
    "cap": "canvas-node-projection",
    "design_ref": "atom-4",
-   "current": "现状:已实现且符合。节点错误投影现由三来源喂入(非只手动 Compile):首屏来自 GET /skills/{id} 的 SkillDetail.lint_result + manifest_errors,编辑后由实时 lint 覆盖,手动 Compile 仍走 drawer。接线:node-compile-errors.ts 的 mergeNodeErrors/activeLintErrors 把首屏 lint_result+manifest_errors 与实时 lint 结果合并按 phase 分组;Workspace.tsx 据 activeLintErrors 算 compileErrorsByNodeId、经 build-nodes.ts 的 buildNodes 注入节点;useDebouncedLint.ts 的 publishLintResult 把实时 lint 结果广播进来覆盖首屏投影。SkillNode.tsx 在该节点有错时渲 AlertTriangle + 该节点逐条 field-line-message 的 tooltip(非只计数)。",
+   "current": "现状:已实现且符合。节点错误投影现由三来源喂入(非只手动 Compile):首屏来自 GET /skills/{id} 的 SkillDetail.lint_result + manifest_errors,编辑后由实时 lint 覆盖,手动 Compile 仍走 drawer。接线:node-compile-errors.ts 的 mergeNodeErrors/activeLintErrors 把首屏 lint_result+manifest_errors 与实时 lint 结果合并按 phase/边界分组;Workspace.tsx 据 activeLintErrors 算 compileErrorsByNodeId、经 build-nodes.ts 的 buildNodes 注入节点;useDebouncedLint.ts 的 publishLintResult 把实时 lint 结果广播进来覆盖首屏投影。Studio preflight(.workspace/import_files 与 golden schema)现在也进入首屏/实时 lint,所以 Input 边界的 test input 缺失会在打开 skill 时直接亮 badge,不再等手动 Compile。SkillNode.tsx 与 GlobalInputOutputNode.tsx 共用 NodeCompileErrorBadge,逐条显示 field-line-message tooltip(非只计数)。",
    "gap": "符合设计,无需改。三来源投影(首屏 lint_result/manifest_errors + 实时 lint 覆盖 + 手动 Compile drawer)与逐条 field-line-message tooltip 均已落地。",
    "fe_status": "符合",
    "be_status": "已实现",
    "be_dep": "已就绪。首屏 SkillDetail.lint_result(get_skill_detail 已 lint)+ manifest_errors + 实时 LintError(file/phase_name 可分组、line/message 填 tooltip)+ CompileError 都够。后端无需改。",
-   "fe_resync": "已落地三来源节点投影(node-compile-errors.ts mergeNodeErrors/activeLintErrors + Workspace.tsx + useDebouncedLint.ts publishLintResult),逐条 field-line-message tooltip 就位;测试 node-compile-errors.test.ts + SkillNode.lint-projection.test.tsx 覆盖;verified by green gates + post-audit(2026-06-20)"
+   "fe_resync": "已落地三来源节点投影(node-compile-errors.ts mergeNodeErrors/activeLintErrors + Workspace.tsx + useDebouncedLint.ts publishLintResult),逐条 field-line-message tooltip 就位。2026-07-05:后端 lint_skill_path 复用 Compile 的 Studio preflight,GET /skills 与 POST /lint 首屏/实时返回 .workspace/import_files/golden 诊断;前端 NodeCompileErrorBadge 统一普通节点与 Input/Output 边界 badge。测试: backend test_api.py + test_lint_changed_markdown.py, frontend SkillNode.compile-errors.test.tsx + GlobalInputOutputNode.test.tsx。"
   },
   {
    "n": 5,

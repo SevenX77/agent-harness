@@ -8,6 +8,7 @@ import { compareReplayArgsForJudgeResult, hasMiniMapToolSpace, Workspace } from 
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import type { EventEnvelope, LintError, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 import { BackendUnavailableError } from '@/utils/errors'
+import { INPUT_ID } from '@/components/nodes'
 
 // React 19's act() warns unless the environment opts in.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -643,6 +644,17 @@ describe('Workspace WS-1 local writer contracts', () => {
 
     expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.review).toHaveLength(1)
     expect(mocks.graphCanvasProps?.sequentialOverwriteErrorsByNodeId).toEqual({})
+  })
+
+  it('projects first-screen Studio preflight lint onto the Input boundary without pressing Compile', () => {
+    renderWorkspace(INPUT_PREFLIGHT_FIXTURE_SKILL_ID)
+
+    expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.[INPUT_ID]).toHaveLength(1)
+    expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.[INPUT_ID]?.[0]).toMatchObject({
+      file: '.workspace/import_files',
+      field: 'chapter',
+      message: expect.stringContaining("test input field 'chapter'"),
+    })
   })
 
   it('renders the left workspace panel as an overlay drawer so the canvas is not resized', () => {
@@ -1814,6 +1826,7 @@ const RECONNECT_FIXTURE_SKILL_ID = 'reconnect-fixture'
 const INPUT_SENTINEL_FIXTURE_SKILL_ID = 'input-sentinel-fixture'
 const STALE_PHASE_DIR_FIXTURE_SKILL_ID = 'stale-phase-dir-fixture'
 const LINT_SEQUENTIAL_OVERWRITE_FIXTURE_SKILL_ID = 'lint-sequential-overwrite-fixture'
+const INPUT_PREFLIGHT_FIXTURE_SKILL_ID = 'input-preflight-fixture'
 const SUBGRAPH_FIXTURE_SKILL_ID = 'subgraph-fixture'
 
 function skillDetail(skillId = 'writer-smoke'): SkillDetail {
@@ -1857,6 +1870,50 @@ function skillDetail(skillId = 'writer-smoke'): SkillDetail {
           message: "Phase 'review' sequentially overwrites field 'events_raw' outputted by upstream phase 'draft'. Declare 'events_raw' in allow_sequential_overwrite in SKILL.md to allow this.",
         }],
         phases_summary: null,
+      },
+    }
+  }
+  if (skillId === INPUT_PREFLIGHT_FIXTURE_SKILL_ID) {
+    return {
+      manifest: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        name: skillId,
+        description: 'Input preflight fixture',
+        io: {
+          inputs: { type: 'object', properties: { chapter: { type: 'string' } } },
+          outputs: { type: 'object', properties: {} },
+        },
+        phases: ['segment'],
+      },
+      graph_topology: [
+        { id: 'segment', src: 'phases/segment/SKILL.md', depends_on: [], mode: 'skill' },
+      ],
+      node_schema_v21: {},
+      io_schema: {
+        inputs: { type: 'object', properties: { chapter: { type: 'string' } } },
+        outputs: { type: 'object', properties: {} },
+      },
+      file_paths: {},
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/segment/SKILL.md': 'segment before\n',
+      },
+      manifest_errors: null,
+      has_golden: false,
+      latest_run_metadata: null,
+      lint_result: {
+        status: 'failed',
+        errors: [{
+          file: '.workspace/import_files',
+          line: null,
+          column: null,
+          phase_name: null,
+          field_path: 'chapter',
+          severity: 'error',
+          error_code: 'STUDIO_TEST_INPUT_MISSING',
+          message: "Graph input schema requires test input field 'chapter'",
+        }],
+        phases_summary: [{ name: 'segment', mode: 'skill', depends_on: [] }],
       },
     }
   }

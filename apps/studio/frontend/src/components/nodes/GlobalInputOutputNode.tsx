@@ -1,7 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { AlertTriangle } from 'lucide-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { formatNodeCompileError } from './SkillNode'
+import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
 import { GLOBAL_INPUT_SOURCE_HANDLE_ID, GLOBAL_OUTPUT_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { GlobalNodeData } from './types'
 
@@ -12,10 +10,6 @@ type GlobalNode = Node<GlobalNodeData>
 export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>) {
   const isInput = data.type === 'global-input'
   const compileErrors = data.compileErrors ?? []
-  const compileErrorCount = compileErrors.length
-  const compileErrorSummary = compileErrorCount > 0
-    ? `${compileErrorCount} compile error${compileErrorCount === 1 ? '' : 's'} on this boundary: ${compileErrors.map(formatNodeCompileError).join('; ')}`
-    : ''
 
   return (
     <div
@@ -47,31 +41,7 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {compileErrorCount > 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  aria-label={compileErrorSummary}
-                  className="inline-flex items-center gap-0.5 rounded-md border border-destructive/40 bg-destructive/10 px-1 font-medium text-destructive"
-                >
-                  <AlertTriangle className="size-3" />
-                  {compileErrorCount}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <div className="mb-1 font-medium">
-                  {compileErrorCount} compile error{compileErrorCount === 1 ? '' : 's'} on this boundary
-                </div>
-                <ul className="space-y-0.5">
-                  {compileErrors.map((error, index) => (
-                    <li key={`${error.field ?? 'boundary'}:${error.line ?? '?'}:${index}`}>
-                      {formatNodeCompileError(error)}
-                    </li>
-                  ))}
-                </ul>
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
+          <NodeCompileErrorBadge errors={compileErrors} scope="boundary" />
           <span className="inline-flex items-center rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
             {isInput ? 'INPUT' : 'OUTPUT'}
           </span>

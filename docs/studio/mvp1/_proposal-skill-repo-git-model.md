@@ -10,7 +10,7 @@ aligns_with:
   - docs/engine/mvp1/02-mechanism/02-resolver/mvp1-alignment.md（RS1/RS2：删 registry、path 直接解析）
   - docs/mvp1-three-module-interface-design-and-changes-2026-06-11/01-design.md（D3：核心 runtime 只吃 ArtifactRef/path）
 binds_code:
-  - apps/studio/backend/app/core/config.py:64（SKILLS_DIR = repo/skills，待删）
+  - apps/studio/backend/app/core/config.py:64（SKILLS_DIR 解析链待删；repo/skills 已移除）
   - apps/studio/backend/app/services/git_local.py（per-skill git，L1，已实现）
   - apps/studio/backend/app/services/git_collab.py（Gitea 协作，L2，已实现）
 ---
@@ -62,7 +62,10 @@ MVP1 目标，当前代码是 drift。本提案只是把它讲成一个连贯的
   它们构成 `indexed → workspace → **bundled SKILLS_DIR**` 的解析链回退。
 
 ### 3.2 bundled skill 赖在主仓子目录、无独立 `.git`（截图现象的根因）
-- `skills/text-segmentation`、`skills/story-deconstruction`、`skills/event-extraction`
+- PR-C 决策（2026-07-05）：主仓不再跟踪 `skills/`。这些示例 skill 的机器本地副本
+  放在仓库外，由用户按需要打开；仓库不记录机器专属落点，也不再把 bundled skill 当
+  运行时输入。
+- PR-C 前，`skills/text-segmentation`、`skills/story-deconstruction`、`skills/event-extraction`
   … 共 16 个技能目录，是**主开发仓 `agent-harness` 的 tracked 内容**（271 个文件），
   **没有各自的 `.git`**。
 - 后果：`HistoryPanel` → `git_local.list_history(skill_dir)` → `git log`（cwd=skill_dir）。
@@ -102,10 +105,10 @@ MVP1 目标，当前代码是 drift。本提案只是把它讲成一个连贯的
    这是**唯一**该保留的全局路径概念，与"技能库"无关。
 4. **历史**：`local-history` 读的就是 skill 自己那个独立仓 → skill 独立化后，截图
    那个"history 是开发仓的"问题自动消失。
-5. **身份**：以 **skill 根 manifest（`GRAPH.md`/`SKILL.md` front-matter）里的一个
-   稳定 id** 为主，git `root-commit` SHA / `origin` URL 为辅校验。**不依赖中心索引**。
-   （git 本身无强身份：只会向上找 `.git`，能当锚的仅 origin URL / root-commit；
-   跨设备唯一性交给 manifest id。）
+5. **身份**：不新增 uuid / manifest id。**路径负责定位**；git `root-commit` SHA /
+   `origin` URL 负责判断"是不是同一个仓"。**不依赖中心索引**。
+   （git 本身只会向上找 `.git`，所以根仓必须先独立；同一性锚点使用 root commit /
+   origin，而不是应用层另造 id。）
 6. **协作**：L2 = Gitea，每个 skill 对应一个 Gitea 仓（`GiteaClient`/
    `GitCollaborateService` 已在）。
 7. **"最近打开列表"**：退化为纯 UI 的**路径 MRU 清单**（localStorage），不是运行时
@@ -119,29 +122,27 @@ MVP1 目标，当前代码是 drift。本提案只是把它讲成一个连贯的
 
 | Step | 动作 | 落点 | 备注 |
 |---|---|---|---|
-| 1 | **skill 独立化**：新建/导入一律走 `initialize_skill_repository`（git init）；bundled 示例技能的处置见 §6-b | `git_local.py`（已实现）+ 新建/导入流程 | 不独立化，L1/L2 全空转 |
+| 1 | **skill 独立化**：新建/导入一律走 `initialize_skill_repository`（git init）；主仓移除 tracked `skills/`，示例 skill 作为仓库外本地目录打开 | `git_local.py`（已实现）+ 新建/导入流程 + repo root | 不独立化，L1/L2 全空转；PR-C 已移除 tracked `skills/` |
 | 2 | **删 SKILLS_DIR 解析链**：删 `config.SKILLS_DIR` + `default_skills_dir`，解析改为"当前 skill 绝对路径"驱动 | `config.py:64`、`skill_resolver.py:36`、`engine.py:182`、`skills.py`(751/850/898/932/987/1017/1056/1456)、`golden_headless.py:606`、`terminal_manager.py:215-228` | 保留 `DEFAULT_SKILLS_ROOT` |
 | 3 | **去 registry 列表**：`list_skill_summaries` 去 registry/public merge，改路径 MRU | `skills.py:183`、`WelcomePage.tsx` | 对齐 `workspace-open-folder-mru` |
 | 4 | **import 去门禁**：不因缺 `GRAPH/SKILL` 阻塞打开，进 repair 态 | `create_new_skill`（`skills.py:512`） | 对齐 D2/D11 |
 | 5 | **history 读独立仓**：确认 `list_history` 作用于独立仓；补测试"skill history 不含主仓提交" | `git_local.list_history`、`HistoryPanel.tsx` | 独立化后自然成立，测试锁死 |
-| 6 | **身份字段**：在 `GRAPH.md`/`SKILL.md` front-matter 定一个稳定 skill id | manifest schema（engine skill-syntax 契约，需 engine owner 确认字段） | 见 §6-a |
+| 6 | **身份收敛**：不引入 uuid / manifest id；定位用路径，同一性用 git root-commit / origin | `git_local.py` / 后续协作 UI | 不触碰 engine skill-syntax schema |
 | 7 | **Gitea 打磨**：token 存储/发放、owner/repo 命名规则、首次 `create_repo` 时机、冲突 UX | `git_collab.py`、Settings、`useSkillSync.ts` | 骨架已在，属接线打磨 |
 
 `file_watcher.py:338` 的 watch roots 与 `terminal_manager` 的访问边界（现用 SKILLS_DIR
 兜底）随 Step 2 一并改为"当前 workspace 路径 + DEFAULT_SKILLS_ROOT"驱动。
 
-## 6. 未决设计问题（需 PM / owner 拍板）
+## 6. PM 已拍板 / owner 待正式化
 
-- **(a) 身份用什么？** 建议 manifest 里一个 uuid（应用层强身份）为主；是否额外用
-  git root-commit / origin 校验？id 字段落 `GRAPH.md` 还是 `SKILL.md`？（后者牵动
-  engine skill-syntax 契约，需 engine owner 确认。）
-- **(b) bundled 示例技能（`skills/` 那 16 个）怎么处置？** 三个方向：
-  ① 移出主仓、每个独立成 git 仓（彻底，但要决定放哪、谁维护）；
-  ② 首次启动时 copy 到用户工作区并 `git init`（保留"开箱示例"，但不再是运行时库）；
-  ③ 直接废弃 bundled 概念，只留空工作区 + 新建。**这与"是否从主仓移除 `skills/`"
-  直接绑定**（前几轮讨论的那步）。
-- **(c) `DEFAULT_SKILLS_ROOT`** 是否保持现名 / 现在的"用户可配"语义不变？
-- **(d) L2 Gitea** 在 MVP1 是必需路径，还是先只保 L1 本地、Gitea 后置？
+- **(a) 身份不用 uuid。** 路径负责打开和定位；git `root-commit` / `origin` 负责判断
+  同一性。不改 `GRAPH.md` / `SKILL.md` schema，不为此引入 manifest id。
+- **(b) bundled 示例技能退出主仓。** tracked `skills/` 从主仓删除；机器本地副本放在
+  仓库外，打开后按 PR-A 的自动 git init 机制变成独立仓。仓库只保留空工作区 + 新建
+  skill 的能力，不再把示例目录当运行时库。
+- **(c) `DEFAULT_SKILLS_ROOT` 保留。** 它只是"新建 skill 的默认落点"，不是技能库 /
+  中心索引。
+- **(d) L2 Gitea 后置。** 先把 L1 本地独立仓跑稳，再继续 Gitea 协作打磨。
 
 ## 7. 正式并入建议（治理路径）
 

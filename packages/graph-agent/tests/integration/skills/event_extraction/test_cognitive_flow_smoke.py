@@ -1,22 +1,28 @@
-"""Smoke tests for the legacy event-extraction root corpus layout."""
+"""Smoke tests for the legacy event-extraction corpus layout."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from graph_agent.core.loader import SkillLoader
+from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
 from ....conftest import MockSkillResolver
-
-REPO_ROOT = Path(__file__).resolve().parents[6]
-SKILL_ROOT = REPO_ROOT / "skills/event-extraction"
+from .._fixture_corpus import write_legacy_v21_corpus
 
 
-def test_event_extraction_compiles_from_legacy_v21_root() -> None:
+def _compile_event_extraction(tmp_path: Path) -> tuple[CompiledSkill, Path]:
+    corpus_root = write_legacy_v21_corpus(tmp_path)
+    skill_root = corpus_root / "skills" / "event-extraction"
     compiled = SkillLoader(validate_context_writes=False).compile_skill(
-        SKILL_ROOT, skill_resolver=MockSkillResolver(REPO_ROOT)
+        skill_root,
+        skill_resolver=MockSkillResolver(corpus_root),
     )
+    return compiled, skill_root
+
+
+def test_event_extraction_compiles_from_legacy_v21_root(tmp_path: Path) -> None:
+    compiled, _skill_root = _compile_event_extraction(tmp_path)
 
     assert list(compiled.manifest.phases) == [
         "setup",
@@ -32,10 +38,8 @@ def test_event_extraction_compiles_from_legacy_v21_root() -> None:
     }
 
 
-def test_event_extraction_setup_action_is_discovered() -> None:
-    compiled = SkillLoader(validate_context_writes=False).compile_skill(
-        SKILL_ROOT, skill_resolver=MockSkillResolver(REPO_ROOT)
-    )
+def test_event_extraction_setup_action_is_discovered(tmp_path: Path) -> None:
+    compiled, skill_root = _compile_event_extraction(tmp_path)
     setup = next(node for node in compiled.nodes if node.phase_name == "setup")
 
     assert isinstance(setup.ast, LogicNodeAST)
@@ -43,14 +47,12 @@ def test_event_extraction_setup_action_is_discovered() -> None:
     assert "format_segments_for_prompt" in compiled.actions.for_phase("setup")
     assert (
         compiled.actions.for_phase("setup")["format_segments_for_prompt"].path
-        == SKILL_ROOT / "phases/setup/actions/format_segments_for_prompt.py"
+        == skill_root / "phases/setup/actions/format_segments_for_prompt.py"
     )
 
 
-def test_event_extraction_final_phase_documents_json_output_contract() -> None:
-    compiled = SkillLoader(validate_context_writes=False).compile_skill(
-        SKILL_ROOT, skill_resolver=MockSkillResolver(REPO_ROOT)
-    )
+def test_event_extraction_final_phase_documents_json_output_contract(tmp_path: Path) -> None:
+    compiled, _skill_root = _compile_event_extraction(tmp_path)
     settings = next(node for node in compiled.nodes if node.phase_name == "settings")
 
     assert isinstance(settings.ast, AgentNodeAST)

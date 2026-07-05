@@ -65,9 +65,18 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 - Status: target-design（PR2 实现）。
 - 归属: region `properties`（候选配置 UI）; capabilities `run-execution`、`trace-observability`（结果 tab 归 `timeline` F6）。
 
+### F6. Agent Node Custom Model Params
+
+- 机制: Agent 节点 Properties 的 `Custom model params` 是独立于 `SKILL.md` 的节点级运行参数开关，数据存于 `.workspace/node_llm_params.json`。`enabled=true` 时该节点的 `thinking` / `max_output_tokens` / `temperature` 作为 node override 参与运行；`enabled=false` 时运行时完全继承当前 llm role，但已有字段值作为未激活草稿保留，重新打开开关应恢复之前的节点设定。只有 `enabled=false` 且所有字段均为空时，后端才把该 node entry 视为可清理的空记录。
+- 决策: 关闭开关不得清空作者刚调好的参数；它只改变“是否把这些值用于运行”。继承态仍必须显示具体数值而不是 `Model default`，并且 fallback 值来自实时 `GET /api/llm/roles` 数据源（Settings 保存或 `roles_changed` 事件重拉后同步刷新），不得在 Properties 打开时复制一份静态 role 参数。
+- 默认: MVP1 llm role setting 应有明确默认值；temperature 缺省显示 role 默认 70%（authored `1.4`），正常情况下不应落到 opaque model default。
+- 测试: 关闭 custom checkbox 后 PUT 保存 `enabled:false` 且保留字段值；UI 显示角色 fallback 具体值；重新打开恢复之前字段值。Settings / LLM Roles 修改 role 参数或收到 `roles_changed` 重拉后，Properties 继承态同步更新同一份 role 数据源。temperature slider 只在 commit/放手/blur/key 结束时触发保存。
+- Status: target-design.
+- 归属: region `properties`; capability `phase-field-whitelist`; backend `node-llm-params`.
+
 ## 3. 接口契约
-- Inputs: selected node/edge, skill detail, diagnostics, **节点级对比候选（后端按 skill+node 存取）**。（golden **不在** Properties，见 F4/§4）
-- Outputs: phase file save, file open requests, panel focus changes, **对比候选持久化写入 + 触发对比运行**。
+- Inputs: selected node/edge, skill detail, diagnostics, **节点级对比候选（后端按 skill+node 存取）**, **实时 LLM Roles 数据源与 node custom model params**。（golden **不在** Properties，见 F4/§4）
+- Outputs: phase file save, file open requests, panel focus changes, **对比候选持久化写入 + 触发对比运行**, **node custom model params 保存**。
 - Capability links: `phase-editing`, `compile-lint`, `trace-observability`, `run-execution`, `golden-eval`（**负向边界**：golden 不在 Properties）。
 
 ## 4. 设计决策基础（PM 原话）
@@ -79,6 +88,7 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 | PROPERTIES-1 | 字段表单 | 单元 `phase-field-whitelist`（落点/消费；owner=phase-editing）；**为什么**：字段权威归 engine skill-syntax，Properties 按节点类型白名单显示 |
 | PROPERTIES-2 | edge trace | 单元 `trace-dot-blackboard`（消费；owner=trace-observability）；**为什么**：选中 edge 的 raw JSON dump 要换成 dot/blackboard 结构化 inspector |
 | PROPERTIES-3 | golden scope | 单元 `golden-per-agent-node`（负向边界）；**为什么**：golden 完全不在 Properties，入口归 I/O、diff 归 editor |
+| PROPERTIES-4 | node custom model params | 单元 `phase-field-whitelist`（消费；owner=properties/backend node params）；**为什么**：节点级 LLM 参数是运行期覆盖层，关闭开关只停用覆盖而不销毁作者草稿 |
 
 ## 6. 测试关键点
 1. 字段表单: baseline 现状为 旧 Mode/Python/SystemPrompt/ExitContract/TargetSkill ⚠️；目标为 字段白名单按 engine MVP1 schema。

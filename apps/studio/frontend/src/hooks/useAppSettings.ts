@@ -108,18 +108,22 @@ export function useAppSettings() {
     setSaveStatus('saving')
     try {
       const saved = withRuntimeDefaults(await updateAppSettings(nextSettings))
-      setSaveStatus('saved')
-      setLastSaveError(null)
+      if (!pendingSettingsRef.current) {
+        setSaveStatus('saved')
+        setLastSaveError(null)
+      }
       if (!pendingSettingsRef.current && appSettingsEqual(latestSettingsRef.current, nextSettings)) {
         latestSettingsRef.current = saved
         setSettings(saved)
       }
       return saved
     } catch (saveError) {
-      setSaveStatus('error')
-      setLastSaveError(saveError)
-      const message = saveError instanceof Error ? saveError.message : 'Save failed'
-      toast.error(`Settings save failed: ${message}`)
+      if (!pendingSettingsRef.current) {
+        setSaveStatus('error')
+        setLastSaveError(saveError)
+        const message = saveError instanceof Error ? saveError.message : 'Save failed'
+        toast.error(`Settings save failed: ${message}`)
+      }
       return null
     } finally {
       inflightRef.current = null
@@ -135,6 +139,11 @@ export function useAppSettings() {
   const queueSave = useCallback((nextSettings: AppSettings) => {
     if (timerRef.current) clearTimeout(timerRef.current)
     setSaveStatus('pending')
+    if (inflightRef.current) {
+      pendingSettingsRef.current = nextSettings
+      timerRef.current = null
+      return
+    }
     timerRef.current = setTimeout(() => {
       timerRef.current = null
       if (inflightRef.current) {

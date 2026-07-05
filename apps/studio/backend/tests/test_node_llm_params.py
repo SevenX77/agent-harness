@@ -51,14 +51,23 @@ def test_enabled_without_field_values_persists_custom_mode(tmp_path: Path) -> No
     assert stored["score"] == NodeLlmParams(enabled=True)
 
 
-def test_disabled_clears_node(tmp_path: Path) -> None:
+def test_disabled_without_field_values_clears_node(tmp_path: Path) -> None:
     write_node_llm_params(tmp_path, "score", NodeLlmParams(enabled=True, thinking=True))
     write_node_llm_params(tmp_path, "other", NodeLlmParams(enabled=True, temperature=0.1))
-    # disabling one node must not touch the other
+    # clearing one node must not touch the other
     write_node_llm_params(tmp_path, "score", NodeLlmParams())
     stored = read_node_llm_params(tmp_path)
     assert "score" not in stored
     assert stored["other"].temperature == 0.1
+
+
+def test_disabled_with_field_values_preserves_node_draft(tmp_path: Path) -> None:
+    params = NodeLlmParams(enabled=False, thinking=True, max_output_tokens=2048, temperature=0.7)
+    write_node_llm_params(tmp_path, "score", params)
+
+    stored = read_node_llm_params(tmp_path)
+
+    assert stored["score"] == params
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +122,33 @@ def test_put_all_null_clears_node_api(
 
     got = client.get("/api/skills/text-segmentation/node-llm-params")
     assert got.json()["nodes"] == {}
+
+
+def test_put_disabled_with_values_preserves_node_params_api(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    put = client.put(
+        "/api/skills/text-segmentation/nodes/setup/node-llm-params",
+        json={"enabled": False, "thinking": True, "max_output_tokens": 4096, "temperature": 0.2},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json() == {
+        "enabled": False,
+        "thinking": True,
+        "max_output_tokens": 4096,
+        "temperature": 0.2,
+    }
+
+    got = client.get("/api/skills/text-segmentation/node-llm-params")
+    assert got.status_code == 200
+    nodes = got.json()["nodes"]
+    assert nodes["setup"] == {
+        "enabled": False,
+        "thinking": True,
+        "max_output_tokens": 4096,
+        "temperature": 0.2,
+    }
 
 
 def test_put_rejects_bad_node_id(

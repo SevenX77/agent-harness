@@ -14,6 +14,7 @@ import { SettingsPageContent } from "./SettingsPageContent"
 import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerDraftIdentityKey, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController, SettingsPageProps, SettingsPageViewProps, SettingsTab } from "./types"
+import { syncLlmRolesCache } from "../llm-roles-cache"
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
@@ -475,6 +476,11 @@ export function useSettingsPageController(): SettingsPageController {
   // lazy load refetches fresh the first time the tab opens.
   const rolesDirtyRef = useRef(false)
   const remoteModelCatalogSyncedRef = useRef(false)
+  const applyRolesDataFromBackend = useCallback((next: RolesData) => {
+    rolesDataRef.current = next
+    setRolesData(next)
+    void syncLlmRolesCache(next)
+  }, [])
   const pendingAddProviderId = pendingAddProviderDraft?.id ?? null
   const visibleDrafts = useMemo(() => {
     const displayDrafts = pendingAddProviderDraft ? [...drafts, pendingAddProviderDraft] : drafts
@@ -526,11 +532,11 @@ export function useSettingsPageController(): SettingsPageController {
       void refreshLoadedLlmRolesProjection({
         rolesLoaded: Boolean(rolesDataRef.current),
         setModelGroups,
-        setRolesData,
+        setRolesData: applyRolesDataFromBackend,
         setRolesError,
       })
     }
-  }, [])
+  }, [applyRolesDataFromBackend])
 
   const { flush: flushCredentialsSave, queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
     onSaved: handleSaved,
@@ -541,12 +547,12 @@ export function useSettingsPageController(): SettingsPageController {
       void refreshLoadedLlmRolesProjection({
         rolesLoaded: Boolean(rolesDataRef.current),
         setModelGroups,
-        setRolesData,
+        setRolesData: applyRolesDataFromBackend,
         setRolesError,
       })
     },
     onSaved: (next) => {
-      setRolesData(next)
+      applyRolesDataFromBackend(next)
       setRolesError(null)
     },
     onError: (error) => {
@@ -634,13 +640,13 @@ export function useSettingsPageController(): SettingsPageController {
     }
     Promise.all([getRoles({ force: true }), getModelGroups({ force: true })])
       .then(([next, nextModelGroups]) => {
-        setRolesData(next)
+        applyRolesDataFromBackend(next)
         setModelGroups(nextModelGroups)
       })
       .catch((error) => {
         console.warn("phase=settings-event-refresh action=roles-refetch-failed error=%o", error)
       })
-  }, [])
+  }, [applyRolesDataFromBackend])
 
   const handleRolesChangedEvent = useCallback(() => {
     if (rolesDataRef.current) {
@@ -775,7 +781,7 @@ export function useSettingsPageController(): SettingsPageController {
     Promise.all([getRoles(), getModelGroups()])
       .then(([next, nextModelGroups]) => {
         if (cancelled) return
-        setRolesData(next)
+        applyRolesDataFromBackend(next)
         setModelGroups(nextModelGroups)
       })
       .catch(() => {
@@ -784,7 +790,7 @@ export function useSettingsPageController(): SettingsPageController {
     return () => {
       cancelled = true
     }
-  }, [apiReady, rolesData])
+  }, [apiReady, applyRolesDataFromBackend, rolesData])
 
   useEffect(() => {
     if (!apiReady) return
@@ -793,10 +799,10 @@ export function useSettingsPageController(): SettingsPageController {
     void refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
       setModelGroups,
-      setRolesData,
+      setRolesData: applyRolesDataFromBackend,
       setRolesError,
     })
-  }, [apiReady, credentials, modelGroups, rolesData])
+  }, [apiReady, applyRolesDataFromBackend, credentials, modelGroups, rolesData])
 
   function scheduleSave() {
     queueSave(() => buildPutPayload(draftsRef.current))
@@ -1160,39 +1166,37 @@ export function useSettingsPageController(): SettingsPageController {
     cancelRolesSave()
     try {
       const next = await deleteRole(roleName)
-      rolesDataRef.current = next
-      setRolesData(next)
+      applyRolesDataFromBackend(next)
       setRolesError(null)
     } catch (error) {
       const message = composeRequestErrorMessage(error, "Delete failed")
       setRolesError(message)
       toast.error(`LLM Role delete failed: ${message}`)
     }
-  }, [cancelRolesSave, flushRolesSave])
+  }, [applyRolesDataFromBackend, cancelRolesSave, flushRolesSave])
 
   const deleteModelBundleById = useCallback(async (bundleId: string) => {
     await flushRolesSave()
     cancelRolesSave()
     try {
       const next = await deleteModelBundle(bundleId)
-      rolesDataRef.current = next
-      setRolesData(next)
+      applyRolesDataFromBackend(next)
       setRolesError(null)
     } catch (error) {
       const message = composeRequestErrorMessage(error, "Delete failed")
       setRolesError(message)
       toast.error(`Model Bundle delete failed: ${message}`)
     }
-  }, [cancelRolesSave, flushRolesSave])
+  }, [applyRolesDataFromBackend, cancelRolesSave, flushRolesSave])
 
   const refreshRolesProjection = useCallback(async () => {
     await refreshLoadedLlmRolesProjection({
       rolesLoaded: Boolean(rolesDataRef.current),
       setModelGroups,
-      setRolesData,
+      setRolesData: applyRolesDataFromBackend,
       setRolesError,
     })
-  }, [])
+  }, [applyRolesDataFromBackend])
 
   return {
     credentials,

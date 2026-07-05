@@ -68,16 +68,20 @@ export function useDebouncedCredentialsSave(
       const payload = getSnapshot()
       try {
         const next = await putFn(payload)
-        setStatus("saved")
-        setLastError(null)
-        onSaved?.(next)
+        if (!pendingSnapshotRef.current) {
+          setStatus("saved")
+          setLastError(null)
+          onSaved?.(next)
+        }
         return next
       } catch (error) {
-        setStatus("error")
-        setLastError(error)
-        const message = error instanceof Error ? error.message : "Save failed"
-        toast.error(`API Keys save failed: ${message}`)
-        onError?.(error)
+        if (!pendingSnapshotRef.current) {
+          setStatus("error")
+          setLastError(error)
+          const message = error instanceof Error ? error.message : "Save failed"
+          toast.error(`API Keys save failed: ${message}`)
+          onError?.(error)
+        }
         return null
       } finally {
         inflightRef.current = null
@@ -97,6 +101,10 @@ export function useDebouncedCredentialsSave(
       if (timerRef.current) clearTimeout(timerRef.current)
       setStatus("pending")
       pendingSnapshotRef.current = getSnapshot
+      if (inflightRef.current) {
+        timerRef.current = null
+        return
+      }
       timerRef.current = setTimeout(() => {
         timerRef.current = null
         const snapshot = pendingSnapshotRef.current

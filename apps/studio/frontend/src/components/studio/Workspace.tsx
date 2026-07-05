@@ -30,7 +30,7 @@ import { isTauriRuntime } from "@/config/runtime"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspaceFile, writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
-import type { CompileError } from "@/api/types"
+import type { CompileError, PathDiff } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { autoCreatedSubgraphChildDir, defaultSubgraphChildDir, subgraphChildScaffoldFiles } from "@/components/studio/subgraph-scaffold"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
@@ -78,6 +78,70 @@ interface WorkspaceProps {
 }
 
 const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
+
+function predictDiagnosticError(message: string): CompileError {
+  return {
+    file: null,
+    line: null,
+    field: null,
+    severity: "fatal",
+    message,
+  }
+}
+
+function normalizeDiagnosticError(value: unknown): CompileError | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null
+  }
+  const candidate = value as Partial<CompileError>
+  if (typeof candidate.message !== "string" || candidate.message.length === 0) {
+    return null
+  }
+  return {
+    file: typeof candidate.file === "string" ? candidate.file : null,
+    line: typeof candidate.line === "number" ? candidate.line : null,
+    field: typeof candidate.field === "string" ? candidate.field : null,
+    severity: candidate.severity === "warning" ? "warning" : "fatal",
+    message: candidate.message,
+    error_code: typeof candidate.error_code === "string" ? candidate.error_code : null,
+  }
+}
+
+function predictRequestErrors(error: unknown): CompileError[] {
+  interface PredictErrorResponse {
+    response?: {
+      data?: {
+        code?: string
+        errors?: unknown[]
+      }
+    }
+  }
+  const responseData = (error as PredictErrorResponse)?.response?.data
+  if (responseData?.code === "compile_failed" && Array.isArray(responseData.errors)) {
+    const errors = responseData.errors
+      .map((item) => normalizeDiagnosticError(item))
+      .filter((item): item is CompileError => item !== null)
+    if (errors.length > 0) {
+      return errors
+    }
+  }
+  return [predictDiagnosticError(errorMessage(error))]
+}
+
+function predictStatusFailureErrors(predict: { path_diff: PathDiff | null }): CompileError[] {
+  const diff = predict.path_diff
+  if (!diff) {
+    return [predictDiagnosticError("Predict finished with failed status, but the backend did not return path-diff details.")]
+  }
+  const details = [
+    diff.missing.length > 0 ? `missing: ${diff.missing.join(", ")}` : null,
+    diff.extra.length > 0 ? `extra: ${diff.extra.join(", ")}` : null,
+    diff.order_mismatch ? "order mismatch" : null,
+    `expected: ${diff.expected_path.join(" -> ") || "(empty)"}`,
+    `actual: ${diff.actual_path.join(" -> ") || "(empty)"}`,
+  ].filter((item): item is string => item !== null)
+  return [predictDiagnosticError(`Predicted execution path did not match (${details.join("; ")}).`)]
+}
 
 function skillDetailWithFile(detail: SkillDetail, path: string, content: string): SkillDetail {
   return {
@@ -370,6 +434,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
   const [compileDrawerOpen, setCompileDrawerOpen] = useState(false)
+  const [predictErrors, setPredictErrors] = useState<CompileError[]>([])
+  const [predictDrawerOpen, setPredictDrawerOpen] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
   // n4-trace#23 (P8 model-compare): the active compare group + its per-candidate
   // runs (from the real compare endpoints) and which candidate tab is selected.
@@ -1001,6 +1067,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const compileSkillById = useCallback(async (targetSkillId: string) => {
     updateStage(targetSkillId, "compiling")
     setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+    setPredictErrors([])
+    setPredictDrawerOpen(false)
     try {
       const result = await compileSkill(targetSkillId)
       if ("code" in result) {
@@ -1954,6 +2022,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     if (!currentSkillId) return
     const targetSkillId = currentSkillId
     updateStage(targetSkillId, "predicting")
+    setPredictErrors([])
+    setPredictDrawerOpen(false)
     try {
       const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
       const predict = await postPredictRun(targetSkillId, inputData)
@@ -1965,13 +2035,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         // predict-fail: clear stale 🟡 logic-OK and show why the prediction failed.
         setRanAgentNodesBySkill((prev) => ({ ...prev, [targetSkillId]: new Set<string>() }))
         updateStage(targetSkillId, "predict-fail")
-        const mismatchedPaths = predict.path_diff
-          ? [...predict.path_diff.missing, ...predict.path_diff.extra]
-          : []
-        const detail = mismatchedPaths.length > 0
-          ? `path diff: ${mismatchedPaths.join(", ")}`
-          : "see predicted execution path"
-        toast.error(`Predict failed: ${detail}`)
+        const errors = predictStatusFailureErrors(predict)
+        setPredictErrors(errors)
+        setPredictDrawerOpen(true)
+        toast.error(`Predict failed: ${errors[0]?.message ?? "see predicted execution path"}`)
         return
       }
       // N4 atom #30: cache the AGENT nodes that ran so the canvas can show 🟡 logic-OK.
@@ -1982,33 +2049,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }))
       clearCopilotJudgeResult()
       updateStage(targetSkillId, "predict-pass")
+      setPredictErrors([])
+      setPredictDrawerOpen(false)
       toast.success("Predict run completed successfully")
     } catch (error: unknown) {
       setRanAgentNodesBySkill((prev) => ({ ...prev, [targetSkillId]: new Set<string>() }))
       updateStage(targetSkillId, "predict-fail")
-      interface PredictErrorResponse {
-        response?: {
-          data?: {
-            code?: string
-            errors?: Array<{
-              file?: string | null
-              line?: number | null
-              field?: string | null
-              message?: string
-            }>
-          }
-        }
-      }
-      const err = error as PredictErrorResponse
-      const responseData = err?.response?.data
-      if (responseData?.code === "compile_failed" && Array.isArray(responseData?.errors)) {
-        const firstError = responseData.errors[0]
-        const detailMsg = firstError?.message || "Unknown compile/predict error"
-        toast.error(`Predict failed: ${detailMsg}`)
-      } else {
-        const fallbackMsg = error instanceof Error ? error.message : "Predict request failed"
-        toast.error(`Predict failed: ${fallbackMsg}`)
-      }
+      const errors = predictRequestErrors(error)
+      setPredictErrors(errors)
+      setPredictDrawerOpen(true)
+      toast.error(`Predict failed: ${errors[0]?.message ?? "Predict request failed"}`)
     }
   }, [clearCopilotJudgeResult, currentSkillId, selectedTestInputId, updateStage])
 
@@ -2503,6 +2553,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     errors={currentCompileErrors}
                     open={compileDrawerOpen && currentCompileErrors.length > 0}
                     onOpenChange={setCompileDrawerOpen}
+                  />
+                  <CompileErrorDrawer
+                    errors={predictErrors}
+                    open={predictDrawerOpen && predictErrors.length > 0}
+                    onOpenChange={setPredictDrawerOpen}
+                    kind="predict"
                   />
                   <CenterActionBar
                     stage={deriveBuildStage(currentSkillId)}

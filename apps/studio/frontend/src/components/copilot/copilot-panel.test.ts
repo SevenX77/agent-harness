@@ -1,4 +1,7 @@
-import React from 'react'
+// @vitest-environment jsdom
+
+import React, { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CopilotMessage } from '../../types/copilot'
@@ -41,6 +44,10 @@ vi.mock('../../api/llm', () => ({
 
 vi.mock('../../hooks/useCopilot', () => ({
   useCopilot: mocks.useCopilot,
+}))
+
+vi.mock('../../hooks/useStudioEventStream', () => ({
+  useStudioEventStream: vi.fn(),
 }))
 
 vi.mock('../../hooks/useTemplates', () => ({
@@ -241,6 +248,50 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantCloseButtonLabel({ claude: true, codex: false })).toBe('Close Claude')
     expect(codeAssistantCloseButtonLabel({ claude: false, codex: true })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: true, codex: true })).toBe('Close assistants')
+  })
+
+  it('polls ah status so a delayed CLI start updates the button', async () => {
+    vi.useFakeTimers()
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    mocks.getCodeAssistantStatus
+      .mockResolvedValueOnce({ claude: false, codex: false })
+      .mockResolvedValueOnce({ claude: false, codex: true })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+      await vi.waitFor(() => {
+        expect(container.textContent).toContain('Open in')
+      })
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000)
+      })
+
+      await vi.waitFor(() => {
+        expect(mocks.getCodeAssistantStatus).toHaveBeenLastCalledWith('/tmp/text-segmentation', { force: true })
+        expect(container.textContent).toContain('Close Codex')
+      })
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+      vi.useRealTimers()
+    }
   })
 
   it('derives attach menu entries from live ahd status', () => {

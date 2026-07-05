@@ -6,7 +6,6 @@ import {
   type RoleTestResponse,
 } from "@/api/llm"
 import i18n from "@/i18n"
-import { localizeCopilotRouteDiagnostic, type CopilotSettingsT } from "./copilot-diagnostics"
 // R-F11: align with the 6-state ProviderUiState (`apps/studio/backend/app/core/
 // adapters/gateway.py` ProviderUiState) plus a transient "testing" projection so
 // the route lights match LlmRolesTab's RoleRouteStatusLight (green/blue/gray/
@@ -81,7 +80,7 @@ export function copilotRouteStatusesFromJob(
   )
 }
 
-// 每条 route 的 SDK 测试真实信息(失败时是具体原因,如 "SDK 返回错误: HTTP 404")—— 供
+// 每条 route 的 SDK 测试真实信息(失败时是具体原因,如 "SDK returned an error: HTTP 404")—— 供
 // tooltip 展示,让"为什么失败"看得见,而不是只有一盏红灯。
 export function copilotRouteMessagesFromJob(job: RoleTestJobResponse): Record<string, string> {
   const messages: Record<string, string> = {}
@@ -258,14 +257,14 @@ export function copilotRoleTestErrorMessage(error: unknown, roleDisplayName: str
   const detail = errorDetail(response?.data)
 
   if (detail) {
-    return `${roleDisplayName} test failed: ${safeDiagnosticDetail(detail)}`
+    return `${roleDisplayName} test failed: ${detail}`
   }
 
   if (response?.status) {
-    return `${roleDisplayName} test failed: ${statusReason(response.status)}${safeDiagnosticDetail(fallbackErrorMessage(error))}`
+    return `${roleDisplayName} test failed: ${statusReason(response.status)}${fallbackErrorMessage(error)}`
   }
 
-  return `${roleDisplayName} test failed: ${safeDiagnosticDetail(fallbackErrorMessage(error))}`
+  return `${roleDisplayName} test failed: ${fallbackErrorMessage(error)}`
 }
 
 function errorResponse(error: unknown): { status?: number; data?: unknown } | null {
@@ -302,14 +301,6 @@ function fallbackErrorMessage(error: unknown): string {
   if (typeof error === "string" && error.length > 0) return error
   return "Check backend logs for more details."
 }
-
-function safeDiagnosticDetail(message: string): string {
-  return localizeCopilotRouteDiagnostic(message, i18n.language || "en", settingsT) ?? message
-}
-
-const settingsT: CopilotSettingsT = (key, options = {}) => (
-  String((i18n.t as unknown as CopilotSettingsT)(key, { ns: "settings", ...options }))
-)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null

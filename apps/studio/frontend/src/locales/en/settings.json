@@ -463,13 +463,7 @@
       "multimodal": "Multimodal: {{value}}",
       "textOnly": "text only",
       "output": "Output: {{output}}",
-      "thinking": "Thinking: yes",
-      "sdkReturnedError": "SDK returned an error: {{detail}}",
-      "timeout": "Request timed out. Check network or proxy settings.",
-      "backendConnectionFailed": "Backend connection failed: {{detail}}",
-      "toolLoopNotVerified": "The model did not read the probe file, so the SDK tool loop was not verified.",
-      "missingApiKey": "This endpoint is missing an API key.",
-      "sdkDiagnosticUnavailable": "SDK diagnostic is available in backend logs."
+      "thinking": "Thinking: yes"
     },
     "multimodal": {
       "acceptsImage": "{{provider}}: image input verified",

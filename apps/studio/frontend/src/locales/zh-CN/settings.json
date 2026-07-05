@@ -463,13 +463,7 @@
       "multimodal": "多模态：{{value}}",
       "textOnly": "仅文本",
       "output": "输出：{{output}}",
-      "thinking": "Thinking：是",
-      "sdkReturnedError": "SDK 返回错误：{{detail}}",
-      "timeout": "请求超时，请检查网络或代理设置。",
-      "backendConnectionFailed": "后端连接失败：{{detail}}",
-      "toolLoopNotVerified": "模型没有读取探测文件，SDK tool loop 未验证。",
-      "missingApiKey": "这个端点缺少 API key。",
-      "sdkDiagnosticUnavailable": "SDK 诊断详情可在后端日志中查看。"
+      "thinking": "Thinking：是"
     },
     "multimodal": {
       "acceptsImage": "{{provider}}：已验证支持图片输入",

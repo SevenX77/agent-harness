@@ -8,15 +8,10 @@ import type {
 } from '@/api/llm'
 
 /**
- * R-F8: an eligible copilot route is one whose backend `call_method_id` is in
- * the Anthropic-messages family — i.e. the route can actually be driven by
- * ClaudeSDKClient. The old heuristic (`endpoint.provider_type ===
- * 'anthropic_compatible'`) missed ark-official + deepseek-official + openrouter
- * routes whose endpoints expose multiple call methods including
- * anthropic-messages but live behind a non-`anthropic_compatible` provider type.
- *
- * The whitelist mirrors the backend method_id set used by the gateway resolver
- * + copilot test orchestrator.
+ * Claude Agent SDK routes must speak the Anthropic Messages wire shape. A
+ * verified route-level call method is the strongest evidence. When the method
+ * is still unknown, endpoint protocol metadata is the only available truth, so
+ * an Anthropic-compatible endpoint stays visible and testable.
  */
 export const COPILOT_ANTHROPIC_MESSAGES_METHODS = [
   'anthropic_messages',
@@ -31,11 +26,13 @@ export const COPILOT_SDK_ROUTE_REQUIREMENTS: Record<
   CopilotSdkId,
   {
     supportedMethodIds: readonly string[]
+    supportedProtocols: readonly string[]
     requiredCapabilities: readonly string[]
   }
 > = {
   'claude-agent-sdk': {
     supportedMethodIds: COPILOT_ANTHROPIC_MESSAGES_METHODS,
+    supportedProtocols: ['anthropic_compatible'],
     // The Claude Agent SDK probe uses a file-read tool loop. A route with a
     // verified negative tool capability cannot run Copilot even if its wire
     // protocol is Anthropic Messages compatible. Unknown stays visible so the
@@ -49,6 +46,15 @@ function routeMethodId(route: ProviderModelOption | CopilotRoutePreview): string
     ? route.methodId
     : (route as { call_method_id?: string | null }).call_method_id
   return typeof methodId === 'string' ? methodId : null
+}
+
+function routeProtocol(route: ProviderModelOption | CopilotRoutePreview): string | null {
+  if ('protocol' in route && typeof route.protocol === 'string') return route.protocol
+  return null
+}
+
+function normalizedProtocol(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 }
 
 function capabilityValue(
@@ -73,8 +79,11 @@ export function routeSupportsAnthropicMessages(
   route: ProviderModelOption | CopilotRoutePreview,
 ): boolean {
   const m = routeMethodId(route)
-  if (typeof m !== 'string') return false
-  return (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)
+  if (m) {
+    return (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)
+  }
+  const protocol = routeProtocol(route)
+  return protocol ? normalizedProtocol(protocol) === 'anthropic_compatible' : false
 }
 
 export function routeSupportsCopilotSdk(
@@ -83,7 +92,12 @@ export function routeSupportsCopilotSdk(
 ): boolean {
   const requirements = COPILOT_SDK_ROUTE_REQUIREMENTS[sdkId]
   const methodId = routeMethodId(route)
-  if (!methodId || !requirements.supportedMethodIds.includes(methodId)) {
+  const methodAllowed = methodId ? requirements.supportedMethodIds.includes(methodId) : false
+  const protocol = routeProtocol(route)
+  const protocolAllowed = protocol
+    ? requirements.supportedProtocols.includes(normalizedProtocol(protocol))
+    : false
+  if (methodId ? !methodAllowed : !protocolAllowed) {
     return false
   }
 
@@ -153,18 +167,12 @@ export function deriveCopilotCandidateGroups(
   modelGroups: ModelGroup[],
   credentials: CredentialsState,
 ): CopilotRolePreview[] {
-  // R-F8: only keep routes whose `call_method_id` is in the anthropic-messages
-  // family (i.e. ClaudeSDKClient can drive them). The old heuristic — filter
-  // by `endpoint.provider_type === 'anthropic_compatible'` — missed ark /
-  // deepseek / openrouter routes that expose anthropic-messages under a
-  // different provider_type.
-  // credentials 用来把每条 route 的端点真实 base_url / 协议查出来做消歧标签(同 provider
-  // 多 host 时光看 providerLabel 分不清)。
+  // credentials 用来把每条 route 的端点真实 base_url / 协议查出来做消歧标签和
+  // method 未验证时的协议兜底(同 provider 多 host 时光看 providerLabel 分不清)。
   const endpointById = new Map(credentials.providers.map((provider) => [provider.id, provider]))
 
   const candidates = (modelGroups || []).map((group) => {
-    const availableRoutes: CopilotRoutePreview[] = (group.provider_models || [])
-      .filter((pm) => routeSupportsCopilotSdk(pm, 'claude-agent-sdk'))
+    const routePreviews: CopilotRoutePreview[] = (group.provider_models || [])
       .map((pm) => {
         const endpointId = pm.endpoint_id || ''
         const endpoint = endpointById.get(endpointId)
@@ -189,6 +197,7 @@ export function deriveCopilotCandidateGroups(
           baseUrlHost: host,
         }
       })
+    const availableRoutes = routePreviews.filter((route) => routeSupportsCopilotSdk(route, 'claude-agent-sdk'))
 
     const activeRouteIds = availableRoutes.filter((r) => r.uiState === 'ready').map((r) => r.id)
 
@@ -335,7 +344,7 @@ export function deriveCopilotDisplayRoles(
  */
 export function buildCopilotRoleEntry(group: CopilotRolePreview): RoleEntry {
   // R-F4 / spec §3.2 #3: include ALL eligible routes (already filtered by
-  // anthropic-messages capability upstream), not just `ui_state === 'ready'`.
+  // Claude Agent SDK capability upstream), not just `ui_state === 'ready'`.
   // Untested/failed routes must still be in the chain so Test can drive them.
   const allRouteIds = group.availableRoutes.map((route) => route.id)
   return {

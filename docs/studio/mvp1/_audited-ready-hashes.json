@@ -9,7 +9,7 @@
   "hashes": {
     "_design-unit-lock-snapshot.json": "353154a5d96c86f0fb3b9d781c4c23a5d837cad7e16ef985c21ccce28fa64315",
     "02_capabilities/compile-lint/baseline.md": "70719f7c4efdfdd5a9c47dad3782d2fc4fa7b07612826e306ea35120e2c430b0",
-    "02_capabilities/compile-lint/mvp1-alignment.md": "d76b0f55d9395b823a782b6d64e0bcb535626bc72d8bdadacf26033f1cb62754",
+    "02_capabilities/compile-lint/mvp1-alignment.md": "7bd147ac56b15a2503aae7ec0f804c6a580e3fa08cf84d1bf5f3e114c50d7428",
     "02_capabilities/conflict-overwrite/baseline.md": "295e7426da8f405dd5203ece8002749700eee5e99c985597ff634ec7992c0acd",
     "02_capabilities/conflict-overwrite/mvp1-alignment.md": "a5893c187d5bbbaa1db6b4cfd70b1fdcee206bb4d3e92e9f432b9fcd090f5827",
     "02_capabilities/copilot-assist/baseline.md": "65206d479caf684a7651a85635b1eaadb2336688ab2ca5b7e16ea0977b84dfb0",
@@ -47,7 +47,7 @@
     "03_regions/editor/baseline.md": "330accfe110ffa37414f6657604b183bac1c53eb3b384591cca4668b5a9ea495",
     "03_regions/editor/mvp1-alignment.md": "9fe6a454d4c9d9e2757bac8b3f6fe0fad1729b0f4c769c1cef4a63bad205df96",
     "03_regions/input/baseline.md": "748eb95638e4c5d448b72a42196b1030dd9e1beb4ed7c1f89f8385d8c7ddcb81",
-    "03_regions/input/mvp1-alignment.md": "05d81e4930632c8b747306907162da69a17b442596493b94334f9c7f1b320202",
+    "03_regions/input/mvp1-alignment.md": "526f5af076a50d997edbd1ea87054ce1ec3ff984d91d72e1be0de48e8add0500",
     "03_regions/local-history/baseline.md": "1e54eefc7dd6649d2d5fc099e93bad9ac51b4acb7b9080da178481a23e21309c",
     "03_regions/local-history/mvp1-alignment.md": "f1ac86375919ffe9269bca3b7e9ba072a83575ae1c62c80eeb050f0409ff2672",
     "03_regions/properties/baseline.md": "1fee4552f1875c1523440096aa2e6c8589f58c872d544a9b6cb1c53b8ba91d48",

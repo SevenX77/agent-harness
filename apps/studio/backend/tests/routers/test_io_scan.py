@@ -159,7 +159,7 @@ SKILL_ID = "text-segmentation"
 IMPORT_URL = f"/api/skills/{SKILL_ID}/io/import"
 
 
-def test_import_copies_folder_into_workspace_imports(
+def test_import_copies_folder_into_workspace_import_files_root(
     client: TestClient, studio_roots: tuple[Path, Path], tmp_path: Path
 ) -> None:
     source = tmp_path / "node1_output" / "abc_segmentation"
@@ -175,14 +175,33 @@ def test_import_copies_folder_into_workspace_imports(
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    assert body["dir"] == "imports/abc_segmentation"
+    assert body["dir"] == "import_files/abc_segmentation"
     skills_dir, _ = studio_roots
-    copied = skills_dir / SKILL_ID / ".workspace" / "imports" / "abc_segmentation"
+    copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / "abc_segmentation"
     assert (copied / "chapter_001_latest_x.json").exists()
     assert not (copied / "history").exists()
     assert body["entries"][0]["kind"] == "batch"
     assert body["entries"][0]["numbers"] == [1, 2]
-    assert body["entries"][0]["dir"] == "imports/abc_segmentation"
+    assert body["entries"][0]["dir"] == "import_files/abc_segmentation"
+
+
+def test_import_copies_node_file_under_node_import_files(
+    client: TestClient, studio_roots: tuple[Path, Path], tmp_path: Path
+) -> None:
+    source = tmp_path / "quality_report.json"
+    source.write_text(json.dumps({"project_id": "013"}), encoding="utf-8")
+
+    resp = client.post(IMPORT_URL, json={"path": str(source), "name": "material", "node_id": "segment"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["dir"] == "import_files/segment/material"
+    skills_dir, _ = studio_roots
+    copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / "segment" / "material"
+    assert (copied / "quality_report.json").exists()
+    entry = body["entries"][0]
+    assert entry["name"] == "quality_report.json"
+    assert entry["path"] == "import_files/segment/material/quality_report.json"
 
 
 def test_import_single_file_lands_under_named_dir(
@@ -195,10 +214,10 @@ def test_import_single_file_lands_under_named_dir(
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    assert body["dir"] == "imports/material"
+    assert body["dir"] == "import_files/material"
     entry = body["entries"][0]
     assert entry["name"] == "quality_report.json"
-    assert entry["path"] == "imports/material/quality_report.json"
+    assert entry["path"] == "import_files/material/quality_report.json"
 
 
 def test_import_missing_source_is_404(client: TestClient, tmp_path: Path) -> None:
@@ -210,4 +229,11 @@ def test_import_unsafe_name_is_422(client: TestClient, tmp_path: Path) -> None:
     src = tmp_path / "x.json"
     src.write_text("{}", encoding="utf-8")
     resp = client.post(IMPORT_URL, json={"path": str(src), "name": "../evil"})
+    assert resp.status_code == 422
+
+
+def test_import_unsafe_node_id_is_422(client: TestClient, tmp_path: Path) -> None:
+    src = tmp_path / "x.json"
+    src.write_text("{}", encoding="utf-8")
+    resp = client.post(IMPORT_URL, json={"path": str(src), "node_id": "../evil"})
     assert resp.status_code == 422

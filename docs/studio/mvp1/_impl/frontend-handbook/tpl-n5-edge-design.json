@@ -2,14 +2,14 @@
  "page_id": "n5_edge_design",
  "title": "边 dot · Context 查看与篡改续跑 · 操作设计",
  "region": "debug:edge",
- "intro": "本页是 dot 面板(边中点圆点)交互面的 MVP1 设计:**dot 双态**(PM 2026-07-02,trace-observability F4)——未跑前显示该边的静态黑板字段推断(#14),跑后展开该边上轮传递的真实黑板(#7),显式进入篡改模式手改 JSON 再点下游续跑(#8/#9,场景 C:下游拿伪造数据跑、上游 checkpoint 不重跑、原 trace 不变)。每张卡只描述操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。注:运行期边黑板数据来自事件流(input_dispatch 等边操作事件的 blackboard_snapshot)派生;静态推断由前端按拓扑 + 各节点 io 声明推导,无后端依赖。",
+ "intro": "本页是 dot 面板(边中点圆点)交互面的 MVP1 设计:**dot 双态**(PM 2026-07-02,trace-observability F4)——未跑前显示该边的静态黑板字段推断(#14),跑后展开该边上轮传递的真实黑板(#7),显式进入篡改模式手改 JSON 再点下游续跑(#8/#9,场景 C:下游拿伪造数据跑、上游 checkpoint 不重跑、原 trace 不变)。2026-07-05 收敛:所有真实 contextEdge 都显示 dot,包括 Input→phase 和 phase→Output;只有 parent↔subgraph group bridge 这类装饰线不显示。每张卡只描述操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。注:运行期边黑板数据来自事件流(input_dispatch 等边操作事件的 blackboard_snapshot)派生;静态推断由前端按拓扑 + 各节点 io 声明推导,无后端依赖。",
  "atoms": [
   {
    "n": 7,
    "cap": "edge-blackboard-readonly-view",
    "track": "C",
    "module": "边黑板查看",
-   "func": "设计(只读底座,spec F6 前半):点边 dot 展开这条边上轮真实传递的黑板快照(只读),看清这条边把哪些业务字段派发给了下游、哪些键这轮变了(changed_keys),作为篡改的前提——先看清真实数据,再决定改什么。",
+   "func": "设计(只读底座,spec F6 前半):点任意真实 contextEdge 的 dot 展开这条边上轮真实传递的黑板快照(只读),包括 Input→phase 和 phase→Output 边界边;看清这条边把哪些业务字段派发给了下游、哪些键这轮变了(changed_keys),作为篡改的前提——先看清真实数据,再决定改什么。",
    "action": "用户点画布上一条边中点的 dot(圆点)。",
    "fe_design": "点边 dot(ContextEdge,带可点 dot 的边组件)→ setSelectedEdge(记下选中边)+ 切到 timeline 面板 → 边 Context 派生(edgeContextFromEvents,edge-context.ts 里在事件流扫该边最后一条匹配 from_phase→to_phase 的 input_dispatch/edge_transition 事件取黑板快照的纯选择器)从同一份运行事件流取该边的 blackboard_snapshot(派发进下游的扁平字典)+ changed_keys(这轮变了的键)+ checkpoint 元数据 → EdgeContextView(边上下文面板组件)以只读键值 + changed_keys 高亮徽章展示。设计意图:数据源是**历史运行事件**(派发已发生、本身不可改),所以默认只读;它是篡改(#8)的真实底座——不先看清真实黑板就改 = 瞎改。无匹配事件则显示空态(非回退 mock 假数据)。",
    "fe_modules": [

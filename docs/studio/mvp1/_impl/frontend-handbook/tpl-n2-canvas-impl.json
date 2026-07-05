@@ -44,7 +44,7 @@
       "n": 5,
       "cap": "io-endpoint-nodes",
       "design_ref": "n2-atom-5",
-      "current": "Current: implemented and aligned. buildNodes renders the graph entry as a global Input node and leaf phases as the Output endpoint. These nodes carry the graph io contract and double-click opens GRAPH.md. GlobalInputOutputNode now renders only the boundary title, INPUT/OUTPUT label, and same-source diagnostic badge; it no longer lists io field names or types inline on the canvas. Field detail belongs in the I/O/Properties panels. Manual Compile .workspace/test_inputs diagnostics are projected by node-compile-errors.ts onto the global Input node, matching the Compile drawer source.",
+      "current": "Current: implemented and aligned. buildNodes renders the graph entry as a global Input node and leaf phases as the Output endpoint. These nodes carry the graph io contract and double-click opens GRAPH.md. GlobalInputOutputNode now renders only the boundary title, INPUT/OUTPUT label, and same-source diagnostic badge; it no longer lists io field names or types inline on the canvas. Field detail belongs in the I/O/Properties panels. Manual Compile .workspace/import_files diagnostics are projected by node-compile-errors.ts onto the global Input node, matching the Compile drawer source.",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。整图 io 随 manifest 返回。D8.1=ok。"
@@ -274,11 +274,11 @@
       "layer1": [
         "Assert dependency-free phases render from the Input sentinel and leaf phases mark Output.",
         "Assert GlobalInputOutputNode does not render schema input/output field names or types even when schema data is present.",
-        "Assert .workspace/test_inputs CompileError groups to INPUT_ID and is injected into the global Input node compileErrors.",
+        "Assert .workspace/import_files CompileError groups to INPUT_ID and is injected into the global Input node compileErrors.",
         "Assert double-clicking the endpoints opens GRAPH.md."
       ],
       "layer2": [
-        "Manual verification on text-segmentation: click Compile and confirm the Input node shows a 2-error boundary badge while the drawer shows the same .workspace/test_inputs errors.",
+        "Manual verification on text-segmentation: click Compile and confirm the Input node shows a 2-error boundary badge while the drawer shows the same .workspace/import_files errors.",
         "Confirm canvas Input/Output nodes show only title plus INPUT/OUTPUT tag, with no chapter/chapters/output field list; double-click still opens GRAPH.md."
       ],
       "screenshots": [
@@ -288,7 +288,7 @@
         },
         {
           "file": "n2-io-endpoint-compact-diagnostics.png",
-          "caption": "After Compile, the two .workspace/test_inputs boundary input errors project to the Input badge; Input/Output nodes stay compact and do not inline field lists."
+          "caption": "After Compile, the two .workspace/import_files boundary input errors project to the Input badge; Input/Output nodes stay compact and do not inline field lists."
         }
       ]
     },

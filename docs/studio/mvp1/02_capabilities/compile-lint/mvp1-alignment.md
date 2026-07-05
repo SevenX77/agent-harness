@@ -58,12 +58,12 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 2026-07-05 correction: compile owns the whole path that can be checked before
 execution, including Studio-owned input/output files. A graph with required
 runtime inputs must not compile into a predictable artifact unless there is at
-least one `.workspace/test_inputs/*.json` file that validates against graph
+least one `.workspace/import_files/*.json` file that validates against graph
 `io.inputs`; every persisted test input file must be valid JSON object data for
 that schema. Persisted golden case `expected_output` files must validate against
 the current agent-node `io.outputs` schema, not only contain top-level required
 keys. These checks live in the Studio shell compile preflight because
-`.workspace/test_inputs` and `.workspace/golden` are Studio workspace files, not
+`.workspace/import_files` and `.workspace/golden` are Studio workspace files, not
 engine SDK source.
 
 - 机制: manual compile runs engine compile first, then Studio preflight validates

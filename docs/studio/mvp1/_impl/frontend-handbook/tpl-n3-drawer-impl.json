@@ -96,7 +96,7 @@
    "layer1": [
     "RED:当前是 CompileErrorPanel 浮层(无复制、自动浮现)→ 断言『点 Compile 弹 drawer』『有复制按钮』失败。",
     "GREEN:点 Compile 有错 → 断言 drawer 打开、列出 compileErrors 的 file:line-field-message。",
-    "Compile boundary projection: .workspace/test_inputs manual Compile errors group under global Input node and feed Input panel diagnostics even when realtime lint is clean.",
+    "Compile boundary projection: .workspace/import_files manual Compile errors group under global Input node and feed Input panel diagnostics even when realtime lint is clean.",
     "Predict/Run no-response 错误 → 断言 drawer 在主错误行下列出 Request、API base URL、Axios code、Original error 等 details。",
     "Predict/Run structured backend ErrorResponse → 断言 drawer 列出 Backend error code、Retry strategy、Backend message、Backend details JSON。",
     "Predict failed diagnostic export → 断言 drawer 列出 engine code/message/phase/field/doc/details，优先于 path_diff。",
@@ -117,7 +117,7 @@
     },
     {
      "file": "n3-compile-input-boundary-diagnostics.png",
-     "caption": "2026-07-05 真机(worktree Vite 5178 + private sidecar 8797): text-segmentation 缺 .workspace/test_inputs/*.json 时点 Compile, drawer 仍列 2 条 test input schema 错误; 关闭 drawer 后同一 CompileError[] 投影到全局 Input 边界节点红色诊断徽章 2, 点击 Input 后左侧 Input panel 的 Input diagnostics 同步显示 chapter / chapters 两条错误。"
+     "caption": "2026-07-05 真机(worktree Vite 5178 + private sidecar 8797): text-segmentation 缺 .workspace/import_files/*.json 根级测试输入时点 Compile, drawer 仍列 2 条 test input schema 错误; 关闭 drawer 后同一 CompileError[] 投影到全局 Input 边界节点红色诊断徽章 2, 点击 Input 后左侧 Input panel 的 Input diagnostics 同步显示 chapter / chapters 两条错误。"
     },
     {
      "file": "n4-predict-engine-diagnostics-drawer.png",

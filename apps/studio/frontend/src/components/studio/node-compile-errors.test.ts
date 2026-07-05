@@ -87,7 +87,7 @@ describe("compileErrorsByNode", () => {
   it("attributes Studio test-input preflight errors to the global Input node", () => {
     const byNode = compileErrorsByNode([
       {
-        file: ".workspace/test_inputs",
+        file: ".workspace/import_files",
         line: null,
         field: "chapter",
         severity: "fatal",
@@ -95,7 +95,7 @@ describe("compileErrorsByNode", () => {
         error_code: "STUDIO_TEST_INPUT_MISSING",
       },
       {
-        file: ".workspace/test_inputs/case-a.json",
+        file: ".workspace/import_files/case-a.json",
         line: null,
         field: "chapters",
         severity: "fatal",

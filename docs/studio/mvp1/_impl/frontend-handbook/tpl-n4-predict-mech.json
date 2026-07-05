@@ -9,7 +9,7 @@
     "dataflow": [
       "前端 handlePredict 取选中测试输入（resolveRunInput：选了 fetch content、没选则报『Select a compile-valid test input before Predict/Run』，不再回退空对象 {}）",
       "postPredictRun POST /api/skills/{id}/runs/predict，body 只带 input_data（不带 mock_llm，把 mock 决策交给后端）",
-      "gateway 后端 sidecar 侧 compile_skill_for_studio 在 predict 前置的手动 Compile 阶段已做 workspace preflight：.workspace/test_inputs/*.json 必须符合 graph io.inputs，golden expected_output 必须符合节点 io.outputs；dispatch_predict_job 运行时再用 EngineAdapter.compile 把 skill 编成 ephemeral artifact（临时编译产物），再 predict_artifact 把 inputs 发给引擎",
+      "gateway 后端 sidecar 侧 compile_skill_for_studio 在 predict 前置的手动 Compile 阶段已做 workspace preflight：.workspace/import_files/*.json 必须符合 graph io.inputs，golden expected_output 必须符合节点 io.outputs；dispatch_predict_job 运行时再用 EngineAdapter.compile 把 skill 编成 ephemeral artifact（临时编译产物），再 predict_artifact 把 inputs 发给引擎",
       "引擎 runner.predict_artifact 装配带 SDKPredictContext 的图：logic 节点真跑确定性代码不烧 token；agent 节点经 resolve_generation 按 has_golden_case 选 golden_case（有 golden）或 heuristic_stub（无 golden，按输出 schema 造占位）",
       "试飞跑完 _persist_predict_result 落盘 result.json；仅当 result.success 为真才 record_predict_pass 把这次 pass 绑编译 content_hash 存 .workspace/last_predict.json",
       "前端 postPredictRun 成功 resolve → updateStage 推档 predict-pass → 动作条点亮 Run（前端门）；Run 真跑时后端再用 last_predict.json 的 content_hash 二次校验（服务端门，见 run 机制）"
@@ -98,9 +98,9 @@
   "backend_status": [
     {
       "item": "Compile preflight 输入/输出文件格式门",
-      "d12": "Studio workspace file contract；engine 不直接拥有 .workspace/test_inputs/.workspace/golden",
+      "d12": "Studio workspace file contract；engine 不直接拥有 .workspace/import_files/.workspace/golden",
       "status": "ok",
-      "note": "compile_skill_for_studio 在 engine compile 后验证 Studio 工作区文件：.workspace/test_inputs/*.json 必须满足 graph io.inputs；有 required input 但没有测试输入会返回 STUDIO_TEST_INPUT_MISSING；输入类型/required 不匹配返回 STUDIO_TEST_INPUT_SCHEMA_INVALID；golden expected_output 用节点 io.outputs 完整 JSON Schema 校验，缺 required 或类型错返回 STUDIO_GOLDEN_SCHEMA_INVALID。Predict/Run 输入解析不再用 {} 兜底。",
+      "note": "compile_skill_for_studio 在 engine compile 后验证 Studio 工作区文件：.workspace/import_files/*.json 必须满足 graph io.inputs；有 required input 但没有测试输入会返回 STUDIO_TEST_INPUT_MISSING；输入类型/required 不匹配返回 STUDIO_TEST_INPUT_SCHEMA_INVALID；golden expected_output 用节点 io.outputs 完整 JSON Schema 校验，缺 required 或类型错返回 STUDIO_GOLDEN_SCHEMA_INVALID。Predict/Run 输入解析不再用 {} 兜底。",
       "ref": "preflight"
     },
     {

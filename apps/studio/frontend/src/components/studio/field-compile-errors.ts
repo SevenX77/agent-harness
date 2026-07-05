@@ -24,7 +24,7 @@ import type { CompileError, LintError } from "@/api/types"
 // emits `phases/<id>/...`, `<id>` = `[A-Za-z0-9_-]+`). Used only as the fallback node
 // scope when an error carries no `phase_name`.
 const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
-const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/test_inputs(?:\/|$)/
+const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/import_files(?:\/|$)/
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "")

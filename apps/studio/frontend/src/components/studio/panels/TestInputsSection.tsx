@@ -34,7 +34,7 @@ export function TestInputsSection({
   const items = data ?? []
 
   // PM 2026-07-02 r2: no inline JSON form in the narrow panel — "New file"
-  // creates an empty input in .workspace/test_inputs and opens it in the
+  // creates an empty input in .workspace/import_files and opens it in the
   // editor; complex inputs come in via the input config dialog import.
   const handleNewFile = async () => {
     setError(null)
@@ -47,7 +47,7 @@ export function TestInputsSection({
     try {
       await createTestInput(skillId, name, {}, { workspaceRoot })
       await mutate()
-      onFileOpen?.(`.workspace/test_inputs/${name}.json`)
+      onFileOpen?.(`.workspace/import_files/${name}.json`)
     } catch (err) {
       // Surface the backend's typed reason "就近" (e.g. duplicate name) rather
       // than a generic failure.
@@ -109,7 +109,7 @@ export function TestInputsSection({
                   <button
                     type="button"
                     // P5: open this test input in the editor (next to delete).
-                    onClick={() => onFileOpen(`.workspace/test_inputs/${item.id}.json`)}
+                    onClick={() => onFileOpen(`.workspace/import_files/${item.id}.json`)}
                     aria-label={`Edit test input ${item.id}`}
                     className="text-muted-foreground transition-colors hover:text-foreground"
                   >

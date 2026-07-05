@@ -33,10 +33,13 @@ def test_create_requires_explicit_browser_fallback_header(
 
     assert response.status_code == 409
     assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
-    assert not (skills_dir / SKILL_ID / ".workspace" / "test_inputs" / "case-a.json").exists()
+    assert not (skills_dir / SKILL_ID / ".workspace" / "import_files" / "case-a.json").exists()
 
 
-def test_create_writes_input_and_returns_metadata(client: TestClient) -> None:
+def test_create_writes_input_and_returns_metadata(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
     response = _create(client, "case-a", {"input_text": "hello"})
 
     assert response.status_code == 200, response.text
@@ -45,6 +48,9 @@ def test_create_writes_input_and_returns_metadata(client: TestClient) -> None:
     assert body["name"] == "case-a"
     assert body["size_bytes"] > 0
     assert "input_text" in body["content_preview"]
+    skills_dir, _workspaces_dir = studio_roots
+    assert (skills_dir / SKILL_ID / ".workspace" / "import_files" / "case-a.json").exists()
+    assert not (skills_dir / SKILL_ID / ".workspace" / "test_inputs" / "case-a.json").exists()
 
 
 def test_created_input_appears_in_list(client: TestClient) -> None:
@@ -121,7 +127,7 @@ def test_delete_requires_explicit_browser_fallback_header(
     studio_roots: tuple[Path, Path],
 ) -> None:
     skills_dir, _workspaces_dir = studio_roots
-    input_path = skills_dir / SKILL_ID / ".workspace" / "test_inputs" / "case-a.json"
+    input_path = skills_dir / SKILL_ID / ".workspace" / "import_files" / "case-a.json"
     input_path.parent.mkdir(parents=True, exist_ok=True)
     input_path.write_text('{"input_text":"keep me"}', encoding="utf-8")
 

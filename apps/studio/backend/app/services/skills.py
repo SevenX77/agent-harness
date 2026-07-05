@@ -630,7 +630,7 @@ def _missing_test_input_errors(raw_inputs: dict[str, Any]) -> list[CompileError]
     fields = [field for field in required if isinstance(field, str)]
     return [
         CompileError(
-            file=".workspace/test_inputs",
+            file=".workspace/import_files",
             field=field,
             severity="fatal",
             message=(
@@ -1162,7 +1162,7 @@ def local_settings_path_for(skill_dir: Path) -> Path:
 
 
 def test_inputs_dir_for_skill(skill_dir: Path) -> Path:
-    return workspace_dir_for(skill_dir) / "test_inputs"
+    return workspace_dir_for(skill_dir) / "import_files"
 
 
 def skill_id_from_changed_path(path: Path) -> str | None:

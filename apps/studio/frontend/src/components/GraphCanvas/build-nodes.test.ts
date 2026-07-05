@@ -133,7 +133,7 @@ describe('buildNodes', () => {
   it('threads compile diagnostics onto the global input boundary node', () => {
     const errors = [
       {
-        file: '.workspace/test_inputs',
+        file: '.workspace/import_files',
         line: null,
         field: 'chapter',
         severity: 'fatal',

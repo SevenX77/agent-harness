@@ -1,7 +1,7 @@
 ---
 module: 01-contract/01-physical-layout
 doc: baseline
-status: audited-ready（现状对齐 WS-E7:skill 树按 loader 校验；run/predict 写 runs/<run_id>；evaluate_golden_baseline 读写 workspace_dir/golden；test_inputs engine SDK 尚未落地）
+status: audited-ready（现状对齐 WS-E7:skill 树按 loader 校验；run/predict 写 runs/<run_id>；evaluate_golden_baseline 读写 workspace_dir/golden；import_files engine SDK CRUD 尚未落地）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.compile_skill · packages/graph-agent/src/graph_agent/core/loader.py:_PHASE_FILE_TO_MODE · packages/graph-agent/src/graph_agent/core/runner.py:run_skill · packages/graph-agent/src/graph_agent/core/runner.py:predict_skill · packages/graph-agent/src/graph_agent/core/runner.py:_validate_workspace_dir · packages/graph-agent/src/graph_agent/core/runner.py:_write_workflow_result_artifacts · packages/graph-agent/src/graph_agent/callbacks/emit.py:_TraceJsonlSink · packages/graph-agent/src/graph_agent/core/result.py:RunResult
 ---
@@ -9,7 +9,7 @@ binds_code: packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.comp
 # 01-physical-layout — Baseline(当下代码实现逻辑)
 
 > **Scope**: 磁盘文件结构的**现状代码**:skill 源码树校验(loader 从根向下)+ Engine SDK 在 `workspace_dir` 下写出的 run-scoped 产物。Studio root 选择、HTTP CRUD、helper/router 不作为本 baseline 代码证据。
-> **现状一句话**:skill 源码树由 loader 校验(`loader.py:SkillLoader.compile_skill` / `_guard_v030_root` / `_PHASE_FILE_TO_MODE`)。workspace 侧,`run_skill` / `predict_skill` / `evaluate_golden_baseline` 都要求 keyword-only `workspace_dir` 并经 `_validate_workspace_dir` 拒绝相对路径;run / predict 产物写入 `<workspace_dir>/runs/<run_id>/`,其中 `trace.jsonl` 由 event sink 创建,`result.json` / `final_state.json` / `metrics.json` 由 `_write_workflow_result_artifacts` 固定写出。WS-E7 后,`evaluate_golden_baseline` 读 `<workspace_dir>/golden/<baseline_id>/{baseline.json,cases/*.json}` 并写 `report.json`;`.workspace/test_inputs/` 的 Engine SDK CRUD 仍未落地。
+> **现状一句话**:skill 源码树由 loader 校验(`loader.py:SkillLoader.compile_skill` / `_guard_v030_root` / `_PHASE_FILE_TO_MODE`)。workspace 侧,`run_skill` / `predict_skill` / `evaluate_golden_baseline` 都要求 keyword-only `workspace_dir` 并经 `_validate_workspace_dir` 拒绝相对路径;run / predict 产物写入 `<workspace_dir>/runs/<run_id>/`,其中 `trace.jsonl` 由 event sink 创建,`result.json` / `final_state.json` / `metrics.json` 由 `_write_workflow_result_artifacts` 固定写出。WS-E7 后,`evaluate_golden_baseline` 读 `<workspace_dir>/golden/<baseline_id>/{baseline.json,cases/*.json}` 并写 `report.json`;`.workspace/import_files/` 的 Engine SDK CRUD 仍未落地。
 
 ## UI/UX
 N/A。
@@ -46,9 +46,9 @@ N/A —— 本模块是 Engine 物理布局契约;Studio 文件树消费不作�
 - `packages/graph-agent/src/graph_agent/core/result.py:RunResult.source` 取值为 `"run"` / `"predict"`;`predict_skill` 构造结果时显式写 `source="predict"`,真实 run 使用默认 `"run"`。
 - `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:PredictResult` 仍是 private predict 内部模型;不是 `.workspace` 物理布局的输出户型。
 
-### 6. golden / test_inputs 现状
+### 6. golden / import_files 现状
 - `evaluate_golden_baseline` 读取 `<workspace_dir>/golden/<baseline_id>/baseline.json` 与 `cases/<case_id>.json`,并写回 `<workspace_dir>/golden/<baseline_id>/report.json`。
-- `.workspace/test_inputs/` 仍是 target physical-layout 户型;Engine SDK CRUD 还未落地。现有 test-inputs CRUD 与 helper 主要在 Studio 后端,不挂为本 baseline 的 engine code evidence。
+- `.workspace/import_files/` 是 target physical-layout 户型;Engine SDK CRUD 还未落地。现有 Test Inputs 与导入文件 CRUD/helper 主要在 Studio 后端,不挂为本 baseline 的 engine code evidence。
 
 ## API
 - skill 物理校验入口:`packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.compile_skill`。
@@ -61,7 +61,7 @@ N/A —— 本模块是 Engine 物理布局契约;Studio 文件树消费不作�
 ## 当前边界(这个模块现在不是什么)
 - 现状**无 subgraph/ 约定目录**——子图物理位置不在 skill 布局里(靠 target_skill + resolver)。
 - Studio 决定 workspace root 放哪;Engine baseline 不挂 Studio helper / router / HTTP CRUD 作为物理布局真相。
-- `.workspace/golden/` 的 Engine eval 读写已由 `evaluate_golden_baseline` 落地;`.workspace/test_inputs/` dataset CRUD 仍未作为 Engine SDK 落地。
+- `.workspace/golden/` 的 Engine eval 读写已由 `evaluate_golden_baseline` 落地;`.workspace/import_files/` dataset CRUD 仍未作为 Engine SDK 落地。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
@@ -73,10 +73,10 @@ N/A —— 本模块是 Engine 物理布局契约;Studio 文件树消费不作�
 | `result/final_state/metrics` | `_write_workflow_result_artifacts` 固定写三份 JSON | 与 alignment §2.2 文件语义一致 |
 | `artifacts/` | path-less `target: file` 默认写 `runs/<run_id>/artifacts/` | 保持为 phase/tool sidecar 目录 |
 | `golden/` | Engine `evaluate_golden_baseline` 读 baseline/cases 并写 report;Studio CRUD 仍是消费者/host 侧 | `<workspace_dir>/golden/<baseline_id>/{baseline.json,report.json,cases/<case_id>.json}` |
-| `test_inputs/` | Engine SDK 未落地;现有 CRUD 主要在 Studio | `<workspace_dir>/test_inputs/{<input_id>.json,index.json}` |
+| `import_files/` | Engine SDK 未落地;现有 CRUD 主要在 Studio | `<workspace_dir>/import_files/{<input_id>.json,<input_import_name>/...,<node_id>/<node_import_name>/...}` |
 | 废除项 | SDK Predict 不写 `.workspace/predict/latest_predict.json`;Studio 侧废除项不挂为 engine 证据 | predict_dir / latest_predict / file_paths.predict_dir 全废 |
 
-> **验"是否按 mvp1 改了"**:① 新建子图默认落 `<skill_root>/subgraph/<name>/`、是完整 graph skill;② 孙图递归在 `<name>/subgraph/<name2>/`;③ 子图位置由物理 path 定;④ `evaluate_golden_baseline` 进入 public API 并校验绝对 `workspace_dir`;⑤ golden Engine eval 读写按 alignment §2.2 户型落地;⑥ Predict 不产生 `.workspace/predict/latest_predict.json`。`test_inputs` CRUD 仍是后续 backlog。
+> **验"是否按 mvp1 改了"**:① 新建子图默认落 `<skill_root>/subgraph/<name>/`、是完整 graph skill;② 孙图递归在 `<name>/subgraph/<name2>/`;③ 子图位置由物理 path 定;④ `evaluate_golden_baseline` 进入 public API 并校验绝对 `workspace_dir`;⑤ golden Engine eval 读写按 alignment §2.2 户型落地;⑥ Predict 不产生 `.workspace/predict/latest_predict.json`。`import_files` Engine CRUD 仍是后续 backlog。
 
 ## 读代码主路径提示
 skill 树: `loader.py:SkillLoader.compile_skill` → `_guard_v030_root` → `_PHASE_FILE_TO_MODE` → resolver(归 `02-resolver`)。

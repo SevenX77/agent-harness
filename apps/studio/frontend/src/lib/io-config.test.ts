@@ -12,6 +12,7 @@ import {
   blackboardAtNode,
   blackboardAtOutput,
   declaredInputFieldNames,
+  fileFieldsInImportScope,
   graphArtifactsOf,
   reconcileInputFields,
   reconcileOutputFields,
@@ -76,7 +77,7 @@ io:
     required: [segments]
     properties:
       segments: {type: array}
-      style_guide: {type: object, source: file, path: imports/ref/style.json}
+      style_guide: {type: object, source: file, path: import_files/report/ref/style.json}
   outputs:
     type: object
     required: [story_framework]
@@ -125,7 +126,7 @@ io:
     properties:
       segments: {type: array}
       glossary: {type: string}
-      style_guide: {type: object, source: file, path: imports/ref/style.json}
+      style_guide: {type: object, source: file, path: import_files/report/ref/style.json}
   outputs:
     type: object
     required: [story_framework]
@@ -184,7 +185,7 @@ io:
     type: object
     required: [chapters]
     properties:
-      chapters: {type: array, source: file, dir: imports/ch, pattern: "c_{n}.json"}
+      chapters: {type: array, source: file, dir: import_files/ch, pattern: "c_{n}.json"}
   outputs:
     type: object
     required: [x]
@@ -262,12 +263,12 @@ describe('applyIoInputChecks', () => {
         {
           field: 'style_guide',
           type: 'object',
-          path: 'imports/ref/style.json',
+          path: 'import_files/report/ref/style.json',
         },
         {
           field: 'chapters_batch',
           type: 'array',
-          dir: 'imports/abc_segmentation',
+          dir: 'import_files/report/abc_segmentation',
           pattern: 'chapter_{n}_latest_*.json',
           numbers: [1, 2, 7],
         },
@@ -277,11 +278,35 @@ describe('applyIoInputChecks', () => {
     expect(next).toContain('project_id')
     expect(next).not.toMatch(/chapters:\s*\{?type: array\}?\s*$/m)
     expect(next).toContain('source: file')
-    expect(next).toContain('dir: imports/abc_segmentation')
+    expect(next).toContain('dir: import_files/report/abc_segmentation')
     expect(next).toContain("pattern: chapter_{n}_latest_*.json")
     expect(next).toContain('<action>report</action>')
     const required = next.match(/required:\n(?:\s+- .+\n)+/)?.[0] ?? next
     expect(required).toContain('segments')
+  })
+})
+
+describe('fileFieldsInImportScope', () => {
+  const nodeIds = new Set(['segment', 'review'])
+  const declarations = [
+    { field: 'root_file', type: 'object', path: 'import_files/material/source.json' },
+    { field: 'root_batch', type: 'array', dir: 'import_files/chapter_batch', pattern: 'chapter_{n}.json' },
+    { field: 'segment_file', type: 'object', path: 'import_files/segment/material/source.json' },
+    { field: 'review_file', type: 'object', path: 'import_files/review/material/source.json' },
+    { field: 'legacy_file', type: 'object', path: 'imports/material/source.json' },
+  ]
+
+  it('keeps only import_files root declarations for graph/input scope', () => {
+    expect(fileFieldsInImportScope(declarations, null, nodeIds).map((decl) => decl.field)).toEqual([
+      'root_file',
+      'root_batch',
+    ])
+  })
+
+  it('keeps only the selected node import_files subfolder for phase scope', () => {
+    expect(fileFieldsInImportScope(declarations, 'segment', nodeIds).map((decl) => decl.field)).toEqual([
+      'segment_file',
+    ])
   })
 })
 

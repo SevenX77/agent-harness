@@ -11,6 +11,7 @@ import {
   fetchGoldenContent,
   getRelease,
   getResumeValidity,
+  importIoIntoWorkspace,
   listReleases,
   prepareCopilotJudgeContext,
   postPredictRun,
@@ -313,6 +314,30 @@ describe('api client auth token', () => {
         message: 'Invalid phase reference',
       }],
     })
+  })
+
+  it('posts node-scoped IO imports with the selected phase id', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.method).toBe('post')
+      expect(config.url).toBe('/skills/skill-a/io/import')
+      expect(JSON.parse(String(config.data))).toEqual({
+        path: '/tmp/material',
+        name: 'material',
+        node_id: 'segment',
+      })
+      return {
+        data: { dir: 'import_files/segment/material', entries: [] },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await expect(importIoIntoWorkspace('skill-a', '/tmp/material', {
+      name: 'material',
+      nodeId: 'segment',
+    })).resolves.toEqual({ dir: 'import_files/segment/material', entries: [] })
   })
 
   it('surfaces backend unavailable for compile network failures', async () => {
@@ -625,7 +650,7 @@ describe('api client auth token', () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(true)
     tauriMocks.readWorkspaceFile.mockRejectedValue(new Error('file not found: case.json'))
     tauriMocks.writeWorkspaceFile.mockResolvedValue({
-      path: '.workspace/test_inputs/case.json',
+      path: '.workspace/import_files/case.json',
       hash: 'native-hash',
     })
     const requests: Array<{ method?: string; url?: string }> = []
@@ -644,7 +669,7 @@ describe('api client auth token', () => {
 
     expect(tauriMocks.writeWorkspaceFile).toHaveBeenCalledWith(
       'skill-a',
-      '.workspace/test_inputs/case.json',
+      '.workspace/import_files/case.json',
       '{\n  "x": 1\n}',
       null,
       { createIfAbsent: true },
@@ -841,7 +866,7 @@ describe('api client auth token', () => {
   it('writes imported local-workspace test inputs to the absolute root with no-clobber', async () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(true)
     tauriMocks.writeWorkspaceFile.mockResolvedValue({
-      path: '.workspace/test_inputs/case.json',
+      path: '.workspace/import_files/case.json',
       hash: 'native-hash',
     })
     const selection = `local-workspace:${encodeURIComponent('skill-a')}:${encodeURIComponent('/Users/sevenx/Projects/imported-skill')}`
@@ -853,7 +878,7 @@ describe('api client auth token', () => {
 
     expect(tauriMocks.writeWorkspaceFile).toHaveBeenCalledWith(
       '/Users/sevenx/Projects/imported-skill',
-      '.workspace/test_inputs/case.json',
+      '.workspace/import_files/case.json',
       '{\n  "x": 1\n}',
       null,
       { createIfAbsent: true },
@@ -863,7 +888,7 @@ describe('api client auth token', () => {
 
   it('rejects duplicate test input names from native no-clobber without pre-reading', async () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(true)
-    tauriMocks.writeWorkspaceFile.mockRejectedValue(new Error('file already exists: .workspace/test_inputs/case.json'))
+    tauriMocks.writeWorkspaceFile.mockRejectedValue(new Error('file already exists: .workspace/import_files/case.json'))
 
     await expect(createTestInput('skill-a', 'case', { x: 1 })).rejects.toThrow(
       'file already exists',
@@ -872,7 +897,7 @@ describe('api client auth token', () => {
     expect(tauriMocks.readWorkspaceFile).not.toHaveBeenCalled()
     expect(tauriMocks.writeWorkspaceFile).toHaveBeenCalledWith(
       'skill-a',
-      '.workspace/test_inputs/case.json',
+      '.workspace/import_files/case.json',
       '{\n  "x": 1\n}',
       null,
       { createIfAbsent: true },
@@ -898,7 +923,7 @@ describe('api client auth token', () => {
 
     expect(tauriMocks.deleteWorkspacePath).toHaveBeenCalledWith(
       'skill-a',
-      '.workspace/test_inputs/case.json',
+      '.workspace/import_files/case.json',
     )
     expect(requests).toEqual([])
   })

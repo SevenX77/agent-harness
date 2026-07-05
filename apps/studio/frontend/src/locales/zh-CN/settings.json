@@ -434,6 +434,51 @@
       "invalidKind": "{{title}} 不是 copilot 角色，无法用 Claude SDK 测试",
       "credentialMissing": "{{title}} 缺少必需的 API key：请到 API Keys 填写后重试"
     },
+    "routeCard": {
+      "addRoute": "添加 route",
+      "removeModelGroup": "移除 {{model}}",
+      "routeOrderAria": "{{model}} copilot route fallback 顺序",
+      "reorderRoute": "调整 {{route}} 顺序",
+      "removeRoute": "移除 {{route}}"
+    },
+    "routeStatus": {
+      "ready": "就绪",
+      "historicalReady": "曾经连通",
+      "testing": "测试中",
+      "untested": "未测试",
+      "coolingDown": "冷却中",
+      "off": "关闭",
+      "failed": "失败"
+    },
+    "routeTooltip": {
+      "endpointWithHost": "端点：{{provider}} · {{host}}{{protocol}}",
+      "endpoint": "端点：{{provider}}",
+      "id": "ID：{{id}}",
+      "sdkStatus": "Claude Agent SDK：{{status}}",
+      "sdkStatusAria": "Claude Agent SDK {{status}}",
+      "detailPrefix": "↳",
+      "transport": "Transport：{{transport}}",
+      "toolUse": "Tool use：{{value}}",
+      "yes": "是",
+      "multimodal": "多模态：{{value}}",
+      "textOnly": "仅文本",
+      "output": "输出：{{output}}",
+      "thinking": "Thinking：是",
+      "sdkReturnedError": "SDK 返回错误：{{detail}}",
+      "timeout": "请求超时，请检查网络或代理设置。",
+      "backendConnectionFailed": "后端连接失败：{{detail}}",
+      "toolLoopNotVerified": "模型没有读取探测文件，SDK tool loop 未验证。",
+      "missingApiKey": "这个端点缺少 API key。",
+      "sdkDiagnosticUnavailable": "SDK 诊断详情可在后端日志中查看。"
+    },
+    "multimodal": {
+      "acceptsImage": "{{provider}}：已验证支持图片输入",
+      "rejectsImage": "{{provider}}：模型拒绝了图片输入",
+      "failed": "{{provider}}：{{error}}",
+      "failedFallback": "多模态测试失败",
+      "aria": "测试 {{provider}} 的多模态图片输入",
+      "title": "测试多模态图片输入"
+    },
     "aria": {
       "testing": "正在测试 {{title}}...",
       "ready": "{{title}} 就绪：{{ready}}/{{total}} 条 route"

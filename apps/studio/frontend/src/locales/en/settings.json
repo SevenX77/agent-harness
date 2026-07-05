@@ -434,6 +434,51 @@
       "invalidKind": "{{title}} is not a copilot role and cannot be tested with the Claude SDK.",
       "credentialMissing": "{{title}} is missing a required API key. Add it in API Keys and try again."
     },
+    "routeCard": {
+      "addRoute": "Add route",
+      "removeModelGroup": "Remove {{model}}",
+      "routeOrderAria": "{{model}} copilot route fallback order",
+      "reorderRoute": "Reorder {{route}}",
+      "removeRoute": "Remove {{route}}"
+    },
+    "routeStatus": {
+      "ready": "Ready",
+      "historicalReady": "Previously Connected",
+      "testing": "Testing",
+      "untested": "Untested",
+      "coolingDown": "Cooling Down",
+      "off": "Off",
+      "failed": "Failed"
+    },
+    "routeTooltip": {
+      "endpointWithHost": "Endpoint: {{provider}} · {{host}}{{protocol}}",
+      "endpoint": "Endpoint: {{provider}}",
+      "id": "ID: {{id}}",
+      "sdkStatus": "Claude Agent SDK: {{status}}",
+      "sdkStatusAria": "Claude Agent SDK {{status}}",
+      "detailPrefix": "↳",
+      "transport": "Transport: {{transport}}",
+      "toolUse": "Tool use: {{value}}",
+      "yes": "yes",
+      "multimodal": "Multimodal: {{value}}",
+      "textOnly": "text only",
+      "output": "Output: {{output}}",
+      "thinking": "Thinking: yes",
+      "sdkReturnedError": "SDK returned an error: {{detail}}",
+      "timeout": "Request timed out. Check network or proxy settings.",
+      "backendConnectionFailed": "Backend connection failed: {{detail}}",
+      "toolLoopNotVerified": "The model did not read the probe file, so the SDK tool loop was not verified.",
+      "missingApiKey": "This endpoint is missing an API key.",
+      "sdkDiagnosticUnavailable": "SDK diagnostic is available in backend logs."
+    },
+    "multimodal": {
+      "acceptsImage": "{{provider}}: image input verified",
+      "rejectsImage": "{{provider}}: model rejected image input",
+      "failed": "{{provider}}: {{error}}",
+      "failedFallback": "Multimodal test failed",
+      "aria": "Test multimodal image input for {{provider}}",
+      "title": "Test multimodal image input"
+    },
     "aria": {
       "testing": "Testing {{title}}...",
       "ready": "{{title}} ready: {{ready}}/{{total}} routes"

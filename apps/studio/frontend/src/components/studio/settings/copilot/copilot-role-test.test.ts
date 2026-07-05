@@ -8,6 +8,7 @@ import {
   copilotRouteStatusesFromJob,
   copilotRouteStatusesFromPersistedResult,
 } from "./copilot-role-test"
+import i18n from "@/i18n"
 import type { RoleTestJobResponse } from "@/api/llm"
 
 describe("copilot route SDK test messages surface the real failure reason", () => {
@@ -154,6 +155,26 @@ describe("copilot role test job helpers", () => {
     }, "DeepSeek V4 Copilot")
 
     expect(message).toBe("DeepSeek V4 Copilot test failed: Role test job crashed")
+  })
+
+  it("does not leak Chinese backend detail while the UI language is English", async () => {
+    const previousLanguage = i18n.language
+    await i18n.changeLanguage("en")
+    try {
+      const message = copilotRoleTestErrorMessage({
+        message: "Request failed with status code 500",
+        response: {
+          status: 500,
+          data: { detail: "SDK 返回错误\n请求超时, 检查网络 / 代理" },
+        },
+      }, "DeepSeek V4 Copilot")
+
+      expect(message).not.toMatch(/[\u3400-\u9fff]/)
+      expect(message).toContain("SDK returned an error")
+      expect(message).toContain("Request timed out")
+    } finally {
+      await i18n.changeLanguage(previousLanguage)
+    }
   })
 })
 

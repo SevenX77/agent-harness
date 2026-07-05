@@ -40,6 +40,7 @@ import {
   buildCopilotRoleEntry,
   copilotKeyForGroupId,
   pickDefaultCopilotGroupIds,
+  routeSupportsCopilotSdk,
   type CopilotRolePreview,
   type CopilotRoutePreview,
 } from "./copilot-role-derivation"
@@ -448,7 +449,12 @@ export function CopilotTab({
     }
 
     onChangeRef.current(
-      applyCopilotModelGroupSelection(nextData, targetRoleId, modelGroup.id, modelGroup.availableRoutes),
+      applyCopilotModelGroupSelection(
+        nextData,
+        targetRoleId,
+        modelGroup.id,
+        compatibleRoutesForRole(modelGroup),
+      ),
     )
     return true
   }, [])
@@ -1248,8 +1254,8 @@ export function copilotRoleIdFromModelDropTarget(target: Element | null): string
   return roleElement?.dataset.roleName ?? null
 }
 
-function compatibleRoutesForRole(role: CopilotRolePreview): CopilotRoutePreview[] {
-  return role.availableRoutes
+export function compatibleRoutesForRole(role: CopilotRolePreview): CopilotRoutePreview[] {
+  return role.availableRoutes.filter((route) => routeSupportsCopilotSdk(route, role.sdkId))
 }
 
 function isCopilotRoute(route: CopilotRoutePreview | undefined): route is CopilotRoutePreview {

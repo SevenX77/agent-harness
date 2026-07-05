@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { Image as ImageIcon, Loader2, Plus, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { probeRouteMultimodal, routeAcceptsImageVerified } from "@/api/llm"
 import { Button } from "@/components/ui/button"
@@ -42,7 +43,17 @@ import { cn } from "@/lib/utils"
 import { ThinkingBadge } from "../llm-roles/RoleBadges"
 import type { CopilotRoutePreview } from "./copilot-role-derivation"
 type CopilotAgentStatus = string
+import {
+  englishContainsCjk,
+  fallbackCopilotT,
+  localizeCopilotRouteDiagnostic,
+  type CopilotSettingsT,
+} from "./copilot-diagnostics"
 import type { CopilotRouteJobStatus } from "./copilot-role-test"
+
+function asCopilotSettingsT(t: unknown): CopilotSettingsT {
+  return t as CopilotSettingsT
+}
 
 export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   modelName,
@@ -67,6 +78,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   onReorderRoutes: (activeRouteId: string, overRouteId: string) => void
   onRemoveModelGroup?: () => void
 }) {
+  const { t } = useTranslation("settings")
   const routeIds = useMemo(() => routes.map((route) => route.id), [routes])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -110,7 +122,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={`Remove ${modelName}`}
+          aria-label={t("copilot.routeCard.removeModelGroup", { model: modelName })}
           data-copilot-model-group-remove="true"
           className="text-muted-foreground hover:text-destructive"
           onClick={onRemoveModelGroup}
@@ -126,7 +138,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
               data-copilot-provider-grid="true"
               className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))] justify-start gap-1.5"
               role="list"
-              aria-label={`${modelName} copilot route fallback order`}
+              aria-label={t("copilot.routeCard.routeOrderAria", { model: modelName })}
               // R-F17: announce route light/order changes politely (e.g. when a
               // probe updates a chip from "untested" → "ready", or the user
               // reorders the fallback chain) without stealing focus.
@@ -164,6 +176,8 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
   message?: string | null
   onRemove: () => void
 }) {
+  const { t, i18n } = useTranslation("settings")
+  const tx = asCopilotSettingsT(t)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: route.id })
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -175,6 +189,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
         variant="muted"
         size="xs"
         data-copilot-provider-card="true"
+        data-copilot-route-id={route.id}
         data-agent-sdk-status={status}
         data-dnd-drag-surface="copilot-provider"
         className={cn(
@@ -184,7 +199,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
         {...attributes}
         {...listeners}
         role="listitem"
-        aria-label={`Reorder ${route.provider}`}
+        aria-label={t("copilot.routeCard.reorderRoute", { route: route.endpointLabel })}
       >
         <ItemMedia className="size-5 rounded-sm bg-background/80 text-[10px] font-mono text-muted-foreground ring-1 ring-foreground/10">
           {index + 1}
@@ -204,7 +219,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={`Remove ${route.provider}`}
+            aria-label={t("copilot.routeCard.removeRoute", { route: route.endpointLabel })}
             className="text-muted-foreground hover:text-foreground"
             onClick={onRemove}
           >
@@ -220,7 +235,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
       <Tooltip>
         <TooltipTrigger asChild>{row}</TooltipTrigger>
         <TooltipContent className="max-w-sm whitespace-pre-line break-words">
-          {routeTooltip(route, status, message)}
+          {routeTooltip(route, status, message, tx, i18n?.language ?? "en")}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -231,6 +246,8 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
 // 是每个模型各不相同的能力,所以按 route 各测(不是整个角色一把测)。结果只认
 // probed_verified(catalog 声称只是提示,不算实测通过)。
 function MultimodalTestButton({ route }: { route: CopilotRoutePreview }) {
+  const { t, i18n } = useTranslation("settings")
+  const tx = asCopilotSettingsT(t)
   const [testing, setTesting] = useState(false)
   const [verified, setVerified] = useState<boolean | null>(null)
 
@@ -242,12 +259,15 @@ function MultimodalTestButton({ route }: { route: CopilotRoutePreview }) {
       const accepts = routeAcceptsImageVerified(updated)
       setVerified(accepts)
       if (accepts) {
-        toast.success(`${route.provider}:认图(已实测,input_modalities 含 image)`)
+        toast.success(t("copilot.multimodal.acceptsImage", { provider: route.provider }))
       } else {
-        toast.warning(`${route.provider}:不认图(模型拒绝了图像输入)`)
+        toast.warning(t("copilot.multimodal.rejectsImage", { provider: route.provider }))
       }
     } catch (error) {
-      toast.error(`${route.provider}:${error instanceof Error ? error.message : "多模态测试失败"}`)
+      const detail = error instanceof Error
+        ? localizeCopilotRouteDiagnostic(error.message, i18n?.language ?? "en", tx)
+        : t("copilot.multimodal.failedFallback")
+      toast.error(t("copilot.multimodal.failed", { provider: route.provider, error: detail }))
     } finally {
       setTesting(false)
     }
@@ -258,8 +278,8 @@ function MultimodalTestButton({ route }: { route: CopilotRoutePreview }) {
       type="button"
       variant="ghost"
       size="icon-xs"
-      aria-label={`Test multimodal image input for ${route.provider}`}
-      title="测多模态(真塞一张图)"
+      aria-label={t("copilot.multimodal.aria", { provider: route.provider })}
+      title={t("copilot.multimodal.title")}
       className={cn(
         "text-muted-foreground hover:text-foreground",
         verified === true && "text-success hover:text-success",
@@ -284,6 +304,7 @@ function AddRouteMenu({
   routes: CopilotRoutePreview[]
   onAddRoute: (routeId: string) => void
 }) {
+  const { t } = useTranslation("settings")
   if (routes.length === 0) return null
 
   return (
@@ -297,13 +318,13 @@ function AddRouteMenu({
           className="h-9 w-full justify-start gap-2 rounded-md px-2.5 text-muted-foreground hover:bg-muted/35 hover:text-foreground"
         >
           <Plus data-role-icon="true" className="size-3 text-muted-foreground" />
-          Add route
+          {t("copilot.routeCard.addRoute")}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         {routes.map((route) => (
           <DropdownMenuItem key={route.id} onSelect={() => onAddRoute(route.id)}>
-            {route.provider}
+            {route.endpointLabel}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -312,10 +333,15 @@ function AddRouteMenu({
 }
 
 function RouteStatusLight({ status }: { status: CopilotRouteJobStatus }) {
+  const { t } = useTranslation("settings")
+  const label = statusLabel(status, asCopilotSettingsT(t))
   return (
     <span
       role="status"
-      aria-label={`Claude Agent SDK ${statusLabel(status)}`}
+      aria-label={t("copilot.routeTooltip.sdkStatusAria", {
+        status: label,
+        defaultValue: `Claude Agent SDK ${label}`,
+      })}
       data-copilot-route-status-light="true"
       className={cn("inline-flex size-1.5 shrink-0 rounded-full ring-1 ring-offset-0", lightClass(status))}
     />
@@ -384,14 +410,24 @@ function lightClass(status: CopilotRouteJobStatus): string {
   return "bg-destructive ring-destructive-border"
 }
 
-function statusLabel(status: CopilotRouteJobStatus): string {
-  if (status === "ready") return "Ready"
-  if (status === "historical_ready") return "Previously Connected"
-  if (status === "testing") return "Testing"
-  if (status === "untested" || status === "not_tested") return "Untested"
-  if (status === "cooling_down") return "Cooling Down"
-  if (status === "off") return "Off"
-  return "Failed"
+function statusLabel(status: CopilotRouteJobStatus, t?: CopilotSettingsT): string {
+  const labelKey =
+    status === "ready" ? "ready"
+    : status === "historical_ready" ? "historicalReady"
+    : status === "testing" ? "testing"
+    : status === "untested" || status === "not_tested" ? "untested"
+    : status === "cooling_down" ? "coolingDown"
+    : status === "off" ? "off"
+    : "failed"
+  const fallback =
+    status === "ready" ? "Ready"
+    : status === "historical_ready" ? "Previously Connected"
+    : status === "testing" ? "Testing"
+    : status === "untested" || status === "not_tested" ? "Untested"
+    : status === "cooling_down" ? "Cooling Down"
+    : status === "off" ? "Off"
+    : "Failed"
+  return t ? t(`copilot.routeStatus.${labelKey}`, { defaultValue: fallback }) : fallback
 }
 
 function routeCapabilityList(route: CopilotRoutePreview, key: string): string[] {
@@ -413,6 +449,8 @@ function routeTooltip(
   route: CopilotRoutePreview,
   status: CopilotRouteJobStatus,
   message?: string | null,
+  t: CopilotSettingsT = fallbackCopilotT,
+  language = "en",
 ): string {
   // 与 LLM Roles 的 route 状态 tooltip 对齐:端点 + 协议/method + 多模态 + 工具 + 思考,
   // 再带上本次 SDK 测试的真实结果信息(失败时是具体原因,不再只显示状态)。
@@ -423,22 +461,36 @@ function routeTooltip(
   const supportsTools = routeCapabilityBool(route, "tools") || routeCapabilityBool(route, "tool_use")
   const supportsThinking = routeCapabilityBool(route, "thinking")
   const transport = methods.length > 0 ? methods.join(", ") : route.methodId || "—"
+  const diagnostic = localizeCopilotRouteDiagnostic(message, language, t)
+  const note = route.note && !englishContainsCjk(route.note, language) ? route.note : null
 
   const lines = [
     route.modelId,
     route.baseUrlHost
-      ? `Endpoint: ${route.provider} · ${route.baseUrlHost}${route.protocol ? ` (${route.protocol})` : ""}`
-      : `Endpoint: ${route.provider}`,
+      ? t("copilot.routeTooltip.endpointWithHost", {
+          provider: route.provider,
+          host: route.baseUrlHost,
+          protocol: route.protocol ? ` (${route.protocol})` : "",
+        })
+      : t("copilot.routeTooltip.endpoint", { provider: route.provider }),
     // 同 host 的多个端点靠 endpoint id 彻底区分。
-    route.endpointId ? `ID: ${route.endpointId}` : null,
-    `Claude Agent SDK: ${statusLabel(status)}`,
-    message ? `↳ ${message}` : null,
-    `Transport: ${transport}`,
-    `Tool use: ${supportsTools ? "yes" : "—"}`,
-    `Multimodal: ${acceptsImage ? "image" : inputModalities.length ? inputModalities.join(", ") : "text only"}`,
-    outputModalities.length ? `Output: ${outputModalities.join(", ")}` : null,
-    supportsThinking ? "Thinking: yes" : null,
-    route.note,
+    route.endpointId ? t("copilot.routeTooltip.id", { id: route.endpointId }) : null,
+    t("copilot.routeTooltip.sdkStatus", { status: statusLabel(status, t) }),
+    diagnostic ? `${t("copilot.routeTooltip.detailPrefix")} ${diagnostic}` : null,
+    t("copilot.routeTooltip.transport", { transport }),
+    t("copilot.routeTooltip.toolUse", {
+      value: supportsTools ? t("copilot.routeTooltip.yes") : "—",
+    }),
+    t("copilot.routeTooltip.multimodal", {
+      value: acceptsImage
+        ? "image"
+        : inputModalities.length
+        ? inputModalities.join(", ")
+        : t("copilot.routeTooltip.textOnly"),
+    }),
+    outputModalities.length ? t("copilot.routeTooltip.output", { output: outputModalities.join(", ") }) : null,
+    supportsThinking ? t("copilot.routeTooltip.thinking") : null,
+    note,
   ]
   return lines.filter(Boolean).join("\n")
 }

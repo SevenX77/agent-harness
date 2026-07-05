@@ -848,9 +848,13 @@ exec bash -i
 fn windows_code_assistant_launcher_script(
     wsl_payload_path: &str,
     assistant: CodeAssistant,
+    window_title: &str,
 ) -> String {
     format!(
         r#"$ErrorActionPreference = "Stop"
+$studioWindowTitle = {window_title}
+$Host.UI.RawUI.WindowTitle = $studioWindowTitle
+[Console]::Title = $studioWindowTitle
 Write-Host "Opening {assistant_name} through ah (WSL)..."
 wsl.exe -e bash {payload}
 if ($LASTEXITCODE -ne 0) {{
@@ -859,6 +863,7 @@ if ($LASTEXITCODE -ne 0) {{
 "#,
         assistant_name = assistant.display_name(),
         payload = powershell_single_quote_str(wsl_payload_path),
+        window_title = powershell_single_quote_str(window_title),
     )
 }
 
@@ -901,9 +906,13 @@ exec bash -i
 fn windows_code_assistant_attach_launcher_script(
     wsl_payload_path: &str,
     assistant: CodeAssistant,
+    window_title: &str,
 ) -> String {
     format!(
         r#"$ErrorActionPreference = "Stop"
+$studioWindowTitle = {window_title}
+$Host.UI.RawUI.WindowTitle = $studioWindowTitle
+[Console]::Title = $studioWindowTitle
 Write-Host "Attaching {assistant_name} through ah (WSL)..."
 wsl.exe -e bash {payload}
 if ($LASTEXITCODE -ne 0) {{
@@ -912,6 +921,7 @@ if ($LASTEXITCODE -ne 0) {{
 "#,
         assistant_name = assistant.display_name(),
         payload = powershell_single_quote_str(wsl_payload_path),
+        window_title = powershell_single_quote_str(window_title),
     )
 }
 
@@ -1024,6 +1034,20 @@ fn attach_launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) 
         .join(format!("{}.{extension}", assistant.attach_launcher_stem()))
 }
 
+fn code_assistant_window_title(workspace_root: &Path, assistant: CodeAssistant) -> String {
+    let workspace_name = workspace_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("workspace");
+    format!(
+        "Studio {} master - {} - {}",
+        assistant.display_name(),
+        workspace_name,
+        workspace_hash(workspace_root)
+    )
+}
+
 fn windows_codex_home_wsl() -> Option<String> {
     let user_profile = std::env::var_os("USERPROFILE")?;
     Some(windows_path_to_wsl(
@@ -1057,7 +1081,12 @@ fn write_code_assistant_launcher_script(
             ),
         )
         .map_err(|error| format!("failed to write WSL payload: {error}"))?;
-        windows_code_assistant_launcher_script(&windows_path_to_wsl(&payload_path), assistant)
+        let window_title = code_assistant_window_title(workspace_root, assistant);
+        windows_code_assistant_launcher_script(
+            &windows_path_to_wsl(&payload_path),
+            assistant,
+            &window_title,
+        )
     } else {
         unix_code_assistant_launcher_script(workspace_root, config_path, assistant)
     };
@@ -1110,9 +1139,11 @@ fn write_code_assistant_attach_launcher_script(
             wsl_attach_payload_script(&windows_path_to_wsl(config_path), assistant),
         )
         .map_err(|error| format!("failed to write WSL attach payload: {error}"))?;
+        let window_title = code_assistant_window_title(workspace_root, assistant);
         windows_code_assistant_attach_launcher_script(
             &windows_path_to_wsl(&payload_path),
             assistant,
+            &window_title,
         )
     } else {
         unix_code_assistant_attach_launcher_script(config_path, assistant)
@@ -1169,14 +1200,17 @@ fn spawn_linux_terminal(script_path: &Path) -> Result<(), String> {
     ))
 }
 
-fn windows_cmd_start_powershell_args(script_path: &Path) -> Vec<std::ffi::OsString> {
+fn windows_cmd_start_powershell_args(
+    script_path: &Path,
+    window_title: &str,
+) -> Vec<std::ffi::OsString> {
     vec![
         std::ffi::OsString::from("/C"),
         std::ffi::OsString::from("start"),
         // cmd.exe's `start` treats the first quoted token as the window title.
-        // Without this empty title, `start Codex powershell.exe ...` launches the
-        // Windows Codex app alias instead of the PowerShell launcher.
-        std::ffi::OsString::from(""),
+        // Keeping it explicit prevents assistant names such as "Codex" from
+        // being interpreted as the command/program.
+        std::ffi::OsString::from(window_title),
         std::ffi::OsString::from("powershell.exe"),
         std::ffi::OsString::from("-NoExit"),
         std::ffi::OsString::from("-ExecutionPolicy"),
@@ -1186,13 +1220,73 @@ fn windows_cmd_start_powershell_args(script_path: &Path) -> Vec<std::ffi::OsStri
     ]
 }
 
+fn windows_focus_existing_terminal_command(window_title: &str) -> String {
+    format!(
+        r#"$ErrorActionPreference = "Stop"
+$needle = {window_title}
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class StudioWindowFocus {{
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}}
+"@
+$target = [IntPtr]::Zero
+$callback = [StudioWindowFocus+EnumWindowsProc]{{
+  param([IntPtr] $hWnd, [IntPtr] $lParam)
+  if (-not [StudioWindowFocus]::IsWindowVisible($hWnd)) {{ return $true }}
+  $title = New-Object System.Text.StringBuilder 512
+  [void][StudioWindowFocus]::GetWindowText($hWnd, $title, $title.Capacity)
+  if ($title.ToString().Contains($needle)) {{
+    $script:target = $hWnd
+    return $false
+  }}
+  return $true
+}}
+[void][StudioWindowFocus]::EnumWindows($callback, [IntPtr]::Zero)
+if ($target -eq [IntPtr]::Zero) {{ exit 1 }}
+[void][StudioWindowFocus]::ShowWindow($target, 9)
+[void][StudioWindowFocus]::SetForegroundWindow($target)
+exit 0
+"#,
+        window_title = powershell_single_quote_str(window_title),
+    )
+}
+
+fn focus_existing_windows_terminal(window_title: &str) -> bool {
+    let command = windows_focus_existing_terminal_command(window_title);
+    Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &command,
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn spawn_terminal_with_launcher(
     script_path: &Path,
     assistant: CodeAssistant,
+    window_title: &str,
+    reuse_existing_window: bool,
 ) -> Result<(), String> {
     if cfg!(target_os = "windows") {
+        if reuse_existing_window && focus_existing_windows_terminal(window_title) {
+            return Ok(());
+        }
         return Command::new("cmd")
-            .args(windows_cmd_start_powershell_args(script_path))
+            .args(windows_cmd_start_powershell_args(script_path, window_title))
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open PowerShell: {error}"));
@@ -1224,7 +1318,8 @@ fn open_code_assistant(
     let workspace_root = existing_directory(&workspace_root)?;
     let config_path = ah_config_for_workspace(&workspace_root, assistant)?;
     let launcher = write_code_assistant_launcher_script(&workspace_root, &config_path, assistant)?;
-    spawn_terminal_with_launcher(&launcher, assistant)?;
+    let window_title = code_assistant_window_title(&workspace_root, assistant);
+    spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?;
     Ok(config_path)
 }
 
@@ -1241,7 +1336,8 @@ fn attach_code_assistant_terminal(
     }
     let launcher =
         write_code_assistant_attach_launcher_script(&workspace_root, &config_path, assistant)?;
-    spawn_terminal_with_launcher(&launcher, assistant)
+    let window_title = code_assistant_window_title(&workspace_root, assistant);
+    spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)
 }
 
 #[tauri::command]
@@ -1615,6 +1711,19 @@ pub fn run() {
 
     let exiting = Arc::new(AtomicBool::new(false));
     app.run(move |app_handle, event| {
+        if let tauri::RunEvent::WindowEvent {
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } = &event
+        {
+            if exiting.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            api.prevent_close();
+            shutdown_application(app_handle.clone(), "window-close");
+            return;
+        }
+
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
             if exiting.swap(true, Ordering::SeqCst) {
                 return;
@@ -1698,6 +1807,41 @@ fn wait_for_quit_flush<R: tauri::Runtime>(app: &tauri::AppHandle<R>, budget: Dur
         budget.as_millis()
     );
     false
+}
+
+fn shutdown_application<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, reason: &'static str) {
+    std::thread::spawn(move || {
+        log::info!("phase=shutdown action=start reason={reason}");
+        // R-F19.2 — give the frontend a budgeted window to flush any
+        // in-flight debounced roles save before we tear down the sidecar. We
+        // emit `before-quit`, then poll a shared `QuitFlushState::ready` flag
+        // set by the `confirm_quit_ready` tauri command (FE calls it after
+        // `flushRolesSave()` resolves). If the flag isn't set within
+        // `QUIT_FLUSH_BUDGET` (e.g. the FE is gone or hung), we proceed anyway
+        // so the user is never trapped — and log a warning so silent loss is
+        // visible per rules/logging.md.
+        wait_for_quit_flush(&app_handle, QUIT_FLUSH_BUDGET);
+        let mut code_assistant_configs = BTreeSet::new();
+        if let Some(state) = app_handle.try_state::<CodeAssistantRuntimeState>() {
+            code_assistant_configs.extend(
+                state
+                    .configs
+                    .lock()
+                    .expect("code assistant state poisoned")
+                    .iter()
+                    .cloned(),
+            );
+        }
+        code_assistant_configs.extend(discover_studio_ah_configs());
+        cleanup_registered_code_assistants(code_assistant_configs);
+        if let Some(state) = app_handle.try_state::<SidecarAppState>() {
+            if let Some(manager) = state.manager.lock().expect("sidecar state poisoned").take() {
+                manager.shutdown_blocking();
+            }
+        }
+        log::info!("phase=shutdown action=exit reason={reason}");
+        app_handle.exit(0);
+    });
 }
 
 #[cfg(test)]
@@ -2153,10 +2297,33 @@ mod tests {
         let script = windows_code_assistant_launcher_script(
             "/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh",
             CodeAssistant::Claude,
+            "Studio Claude Code master - skill - abc123",
         );
 
         assert!(
+            script.contains("$studioWindowTitle = 'Studio Claude Code master - skill - abc123'")
+        );
+        assert!(script.contains("$Host.UI.RawUI.WindowTitle = $studioWindowTitle"));
+        assert!(script.contains("[Console]::Title = $studioWindowTitle"));
+        assert!(
             script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh'")
+        );
+    }
+
+    #[test]
+    fn code_assistant_window_title_is_stable_per_workspace_and_assistant() {
+        let root =
+            Path::new(r"D:\coding\skills\story-deconstruction-v3\subgraph\text-segmentation");
+        let title = code_assistant_window_title(root, CodeAssistant::Codex);
+
+        assert!(title.starts_with("Studio Codex master - text-segmentation - "));
+        assert_eq!(
+            title,
+            code_assistant_window_title(root, CodeAssistant::Codex)
+        );
+        assert_ne!(
+            title,
+            code_assistant_window_title(root, CodeAssistant::Claude)
         );
     }
 
@@ -2178,8 +2345,11 @@ mod tests {
         let script = windows_code_assistant_attach_launcher_script(
             "/mnt/c/tmp/skill-studio-ah/attach-codex-cli.wsl.sh",
             CodeAssistant::Codex,
+            "Studio Codex master - skill - def456",
         );
 
+        assert!(script.contains("$studioWindowTitle = 'Studio Codex master - skill - def456'"));
+        assert!(script.contains("$Host.UI.RawUI.WindowTitle = $studioWindowTitle"));
         assert!(script.contains("Attaching Codex through ah (WSL)"));
         assert!(
             script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/attach-codex-cli.wsl.sh'")
@@ -2187,9 +2357,12 @@ mod tests {
     }
 
     #[test]
-    fn windows_terminal_launcher_uses_empty_start_title() {
+    fn windows_terminal_launcher_uses_stable_start_title() {
         let script_path = Path::new(r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1");
-        let args = windows_cmd_start_powershell_args(script_path);
+        let args = windows_cmd_start_powershell_args(
+            script_path,
+            "Studio Codex master - text-segmentation - abc123",
+        );
         let as_text: Vec<String> = args
             .iter()
             .map(|arg| arg.to_string_lossy().to_string())
@@ -2198,8 +2371,8 @@ mod tests {
         assert_eq!(as_text[0], "/C");
         assert_eq!(as_text[1], "start");
         assert_eq!(
-            as_text[2], "",
-            "cmd start needs an explicit empty title before the program name"
+            as_text[2], "Studio Codex master - text-segmentation - abc123",
+            "cmd start needs an explicit title before the program name"
         );
         assert_eq!(as_text[3], "powershell.exe");
         assert!(as_text.contains(&"-NoExit".to_string()));
@@ -2207,10 +2380,55 @@ mod tests {
             as_text.last().unwrap(),
             r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1"
         );
-        assert!(
-            !as_text[..3].iter().any(|arg| arg == "Codex"),
+        assert_ne!(
+            as_text[3], "Codex",
             "Codex must never be passed as the start command/program"
         );
+    }
+
+    #[test]
+    fn windows_focus_command_targets_existing_studio_terminal_title() {
+        let command = windows_focus_existing_terminal_command(
+            "Studio Codex master - text-segmentation - abc123",
+        );
+
+        assert!(command.contains("$needle = 'Studio Codex master - text-segmentation - abc123'"));
+        assert!(command.contains("EnumWindows"));
+        assert!(command.contains("IsWindowVisible"));
+        assert!(command.contains("GetWindowText"));
+        assert!(command.contains(".Contains($needle)"));
+        assert!(command.contains("ShowWindow($target, 9)"));
+        assert!(command.contains("SetForegroundWindow($target)"));
+        assert!(command.contains("exit 1"));
+    }
+
+    #[test]
+    fn attach_reuses_existing_terminal_but_open_always_runs_launcher() {
+        let source = include_str!("lib.rs");
+
+        assert!(
+            source.contains("spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?"),
+            "initial open must always run the launcher so stale terminal shells cannot block ah start"
+        );
+        assert!(
+            source.contains(
+                "spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)"
+            ),
+            "attach should focus an existing target window before opening a duplicate"
+        );
+    }
+
+    #[test]
+    fn window_close_goes_through_code_assistant_shutdown_cleanup() {
+        let source = include_str!("lib.rs");
+
+        assert!(
+            source.contains("tauri::WindowEvent::CloseRequested"),
+            "clicking the native window close button must not bypass shutdown cleanup"
+        );
+        assert!(source.contains("api.prevent_close();"));
+        assert!(source.contains("shutdown_application(app_handle.clone(), \"window-close\")"));
+        assert!(source.contains("cleanup_registered_code_assistants(code_assistant_configs);"));
     }
 
     #[test]

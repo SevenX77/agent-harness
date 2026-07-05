@@ -205,6 +205,47 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
   }
 }
 
+function deepseekV4ModelGroup(): ModelGroup {
+  return {
+    canonical_id: "deepseek-v4-pro",
+    display_name: "DeepSeek V4 Pro",
+    provider_models: [
+      {
+        route_id: "deepseek-official:deepseek-v4-pro",
+        endpoint_id: "deepseek-official",
+        provider_label: "DeepSeek Official",
+        provider_kind: "official",
+        provider_model_id: "deepseek-v4-pro",
+        ui_state: "ready",
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: "known",
+        capabilities: {},
+        call_method_id: "deepseek_chat_completions",
+        candidate_call_method_ids: ["deepseek_chat_completions", "deepseek_anthropic_messages"],
+        copilot_sdk_compatible: true,
+      },
+    ],
+    status_summary: {
+      ready: 1,
+      untested: 0,
+      cooling_down: 0,
+      historical_ready: 0,
+      failed: 0,
+      off: 0,
+    },
+    capability_summary: {
+      capability_known_count: 1,
+      thinking: "unknown",
+      tools: "unknown",
+      structured_output: "unknown",
+      max_context_tokens: null,
+      max_output_tokens: null,
+    },
+  }
+}
+
 function credentials(): CredentialsState {
   return {
     providers: [
@@ -230,6 +271,12 @@ function credentials(): CredentialsState {
         id: "anthropic-no-tools",
         name: "Anthropic No Tools",
         provider_type: "anthropic_compatible",
+        api_key: "**********",
+      },
+      {
+        id: "deepseek-official",
+        name: "DeepSeek Official",
+        provider_type: "openai_compatible",
         api_key: "**********",
       },
     ],
@@ -341,6 +388,134 @@ describe("CopilotTab route status projection", () => {
     )
 
     expect(html).toContain("1/2 SDK Ready")
+  })
+})
+
+describe("CopilotTab order truth", () => {
+  it("renders persisted built-in cards in the default Claude then DeepSeek order, not yaml insertion order", () => {
+    const data: RolesData = {
+      ...emptyRoles(),
+      roles: {
+        copilot_deepseek_v4_pro: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "deepseek-v4-pro",
+          models: {
+            "deepseek-v4-pro": {
+              providers: ["deepseek-official:deepseek-v4-pro"],
+            },
+          },
+          fallback_chain: [
+            { route_id: "deepseek-official:deepseek-v4-pro", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+        copilot_claude_opus_4_8: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "claude-opus-4.8",
+          models: {
+            "claude-opus-4.8": {
+              providers: ["anthropic-official:claude-opus-4.8"],
+            },
+          },
+          fallback_chain: [
+            { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+      },
+    }
+
+    const html = renderToStaticMarkup(
+      <CopilotTab
+        data={data}
+        credentials={credentials()}
+        modelGroups={[deepseekV4ModelGroup(), mixedSdkCompatibilityModelGroup()]}
+      />,
+    )
+    const roleIds = [...html.matchAll(/data-copilot-role-id="([^"]+)"/g)].map((match) => match[1])
+
+    expect(roleIds.slice(0, 2)).toEqual(["copilot_claude_opus_4_8", "copilot_deepseek_v4_pro"])
+  })
+
+  it("renders configured route chips in fallback_chain order before model-group provider order", () => {
+    const data: RolesData = {
+      ...emptyRoles(),
+      roles: {
+        copilot_opus: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "claude-opus-4.7",
+          models: {
+            "claude-opus-4.7": {
+              providers: [
+                "anthropic-official:claude-opus-4-7",
+                "qiniu-anthropic:claude-opus-4-7",
+              ],
+            },
+          },
+          fallback_chain: [
+            { route_id: "qiniu-anthropic:claude-opus-4-7", runtime_settings: {} },
+            { route_id: "anthropic-official:claude-opus-4-7", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+      },
+    }
+
+    const html = renderToStaticMarkup(
+      <CopilotTab data={data} credentials={credentials()} modelGroups={registryModelGroups()} />,
+    )
+    const routeIds = [...html.matchAll(/data-copilot-route-id="([^"]+)"/g)].map((match) => match[1])
+
+    expect(routeIds.slice(0, 2)).toEqual([
+      "qiniu-anthropic:claude-opus-4-7",
+      "anthropic-official:claude-opus-4-7",
+    ])
+  })
+
+  it("counts SDK Ready against the configured fallback chain, not every appendable model-group route", () => {
+    const data: RolesData = {
+      ...emptyRoles(),
+      roles: {
+        copilot_opus: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "claude-opus-4.7",
+          models: {
+            "claude-opus-4.7": {
+              providers: [
+                "anthropic-official:claude-opus-4-7",
+                "qiniu-anthropic:claude-opus-4-7",
+              ],
+            },
+          },
+          fallback_chain: [
+            { route_id: "qiniu-anthropic:claude-opus-4-7", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+      },
+    }
+
+    const html = renderToStaticMarkup(
+      <CopilotTab data={data} credentials={credentials()} modelGroups={registryModelGroups()} />,
+    )
+
+    expect(html).toContain("0/1 SDK Ready")
   })
 })
 

@@ -57,7 +57,9 @@ from app.core.adapters.gateway import (
     VerifiedProfile,
     apply_call_method_base_url,
     call_method_auth_token_env,
+    call_method_client_compatibility,
     call_method_ids_for_client,
+    call_method_ids_for_endpoint,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.copilot import (
@@ -1496,6 +1498,38 @@ def resolved_route_with_verified_profile(
     return route
 
 
+def _resolved_route_with_call_method(route: ResolvedRoute, method_id: str) -> ResolvedRoute:
+    updates = {"call_method_id": method_id}
+    model_copy = getattr(route, "model_copy", None)
+    if callable(model_copy):
+        return cast(ResolvedRoute, model_copy(update=updates))
+    route.call_method_id = method_id
+    return route
+
+
+def _copilot_sdk_candidate_method_id(route: ResolvedRoute) -> str | None:
+    for method_id in call_method_ids_for_endpoint(
+        getattr(route, "protocol", None),
+        getattr(route, "base_url", None),
+    ):
+        if (
+            method_id in COPILOT_SDK_SUPPORTED_METHOD_IDS
+            and call_method_client_compatibility(method_id, "anthropic_messages_client")
+            == "supported"
+        ):
+            return method_id
+    return None
+
+
+def resolved_route_with_copilot_sdk_candidate_method(route: ResolvedRoute) -> ResolvedRoute:
+    if resolved_route_has_copilot_sdk_method(route):
+        return route
+    method_id = _copilot_sdk_candidate_method_id(route)
+    if method_id is None:
+        return route
+    return _resolved_route_with_call_method(route, method_id)
+
+
 def _prefer_copilot_sdk_profiles(routes: list[ResolvedRoute]) -> list[ResolvedRoute]:
     if all(resolved_route_has_copilot_sdk_method(route) for route in routes):
         return routes
@@ -1516,7 +1550,7 @@ def _prefer_copilot_sdk_profiles(routes: list[ResolvedRoute]) -> list[ResolvedRo
         prepared_routes.append(
             resolved_route_with_verified_profile(route, selected_profile)
             if selected_profile is not None
-            else route
+            else resolved_route_with_copilot_sdk_candidate_method(route)
         )
     return prepared_routes
 

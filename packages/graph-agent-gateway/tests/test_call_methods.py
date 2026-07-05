@@ -2,6 +2,7 @@ from graph_agent_gateway.registry.call_methods import (
     apply_call_method_base_url,
     call_method_client_compatibility,
     call_method_ids_for_client,
+    call_method_ids_for_endpoint,
     official_call_method_ids,
     provider_probe_backend_for_method,
 )
@@ -42,4 +43,34 @@ def test_call_method_catalog_owns_probe_backend_and_base_url_transform() -> None
     assert (
         apply_call_method_base_url("ark_anthropic_messages", "https://ark.cn-beijing.volces.com/api/v3")
         == "https://ark.cn-beijing.volces.com/api/compatible"
+    )
+
+
+def test_endpoint_method_candidates_are_gateway_catalog_truth() -> None:
+    assert call_method_ids_for_endpoint(
+        "anthropic_compatible",
+        "https://api.qnaigc.com",
+    ) == ("anthropic_messages",)
+    assert call_method_ids_for_endpoint(
+        "openai_compatible",
+        "https://api.openai.com",
+    ) == ("openai_chat_completions",)
+    assert call_method_ids_for_endpoint(
+        "openai_compatible",
+        "https://api.qnaigc.com/v1",
+    ) == ("openai_chat_completions", "anthropic_messages")
+    assert call_method_ids_for_endpoint(
+        "openai_compatible",
+        "https://openrouter.ai/api/v1",
+    ) == ("openai_chat_completions", "openrouter_anthropic_messages")
+
+
+def test_anthropic_messages_base_url_transform_uses_anthropic_canonical_shape() -> None:
+    assert (
+        apply_call_method_base_url("anthropic_messages", "https://api.qnaigc.com/v1")
+        == "https://api.qnaigc.com"
+    )
+    assert (
+        apply_call_method_base_url("openrouter_anthropic_messages", "https://openrouter.ai/api/v1")
+        == "https://openrouter.ai/api"
     )

@@ -1,5 +1,30 @@
 {
-  "_comment": "Gateway runtime truth for provider call methods. `wire_family` describes the request/response shape; `client_compatibility.anthropic_messages_client` answers whether a Claude/Anthropic Messages client can invoke the route directly. Unknown methods are not assumed incompatible unless listed here as incompatible.",
+  "_comment": "Gateway runtime truth for provider call methods. `wire_family` describes the request/response shape; `client_compatibility.anthropic_messages_client` answers whether a Claude/Anthropic Messages client can invoke the route directly. Unknown methods are not assumed incompatible unless listed here as incompatible. `endpoint_method_candidates` is the pre-profile method source for endpoint protocol/default host surfaces; callers still filter by the client compatibility they require.",
+  "endpoint_method_candidates": {
+    "protocol_defaults": {
+      "anthropic_compatible": ["anthropic_messages"],
+      "openai_compatible": ["openai_chat_completions"],
+      "google_genai": ["gemini_generate_content"],
+      "ark_runtime": ["ark_chat", "ark_responses"]
+    },
+    "host_overrides": [
+      {
+        "host_suffix": "qnaigc.com",
+        "protocols": ["anthropic_compatible", "openai_compatible", "google_genai"],
+        "method_ids": ["anthropic_messages"]
+      },
+      {
+        "host_suffix": "wavespeed.ai",
+        "protocols": ["anthropic_compatible", "openai_compatible"],
+        "method_ids": ["anthropic_messages"]
+      },
+      {
+        "host_suffix": "openrouter.ai",
+        "protocols": ["anthropic_compatible", "openai_compatible"],
+        "method_ids": ["openrouter_anthropic_messages"]
+      }
+    ]
+  },
   "methods": [
     {
       "method_id": "anthropic_messages",
@@ -7,7 +32,7 @@
       "wire_family": "anthropic_messages",
       "official_probe": true,
       "client_compatibility": {"anthropic_messages_client": "supported"},
-      "base_url_transform": "none",
+      "base_url_transform": "anthropic_compatible",
       "auth_token_env": null
     },
     {
@@ -34,7 +59,7 @@
       "wire_family": "anthropic_messages",
       "official_probe": false,
       "client_compatibility": {"anthropic_messages_client": "supported"},
-      "base_url_transform": "none",
+      "base_url_transform": "anthropic_compatible",
       "auth_token_env": null
     },
     {

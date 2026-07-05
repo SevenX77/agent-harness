@@ -244,6 +244,34 @@ export function isBrokenLegacyCopilotRole(role: RoleEntry): boolean {
   return !hasModelsProjection && !hasModelGroups && hasFallbackChain
 }
 
+export function configuredCopilotRouteIds(role: RoleEntry, activeModelGroupId: string): string[] {
+  const fallbackRouteIds = role.fallback_chain?.map((entry) => entry.route_id).filter(Boolean) ?? []
+  if (fallbackRouteIds.length > 0) return fallbackRouteIds
+  return role.models?.[activeModelGroupId]?.providers ?? []
+}
+
+export function orderCopilotDisplayRoles(
+  roles: CopilotDisplayRole[],
+  realCopilotRoles: CopilotRolePreview[],
+): CopilotDisplayRole[] {
+  const defaultRanks = new Map(
+    pickDefaultCopilotGroupIds(realCopilotRoles).map((id, index) => [id, index]),
+  )
+  return roles
+    .map((role, index) => ({
+      role,
+      index,
+      rank: defaultRanks.get(role.modelGroupId),
+    }))
+    .sort((left, right) => {
+      const leftRank = left.rank ?? Number.MAX_SAFE_INTEGER
+      const rightRank = right.rank ?? Number.MAX_SAFE_INTEGER
+      if (leftRank !== rightRank) return leftRank - rightRank
+      return left.index - right.index
+    })
+    .map(({ role }) => role)
+}
+
 export function deriveActiveCopilotRoles(
   data: RolesData | null,
   realCopilotRoles: CopilotRolePreview[],
@@ -261,10 +289,7 @@ export function deriveActiveCopilotRoles(
         .map(([name, role]) => {
           const activeModelGroupId = Object.keys(role.models ?? {})[0] || role.active_model || name
           const modelGroup = realCopilotRoles.find((candidate) => candidate.id === activeModelGroupId)
-          const fallbackChainRoutes =
-            role.models?.[activeModelGroupId]?.providers ??
-            role.fallback_chain?.map((entry) => entry.route_id) ??
-            []
+          const fallbackChainRoutes = configuredCopilotRouteIds(role, activeModelGroupId)
 
           return {
             id: name,
@@ -300,7 +325,9 @@ export function deriveCopilotDisplayRolesFromCandidates(
   allModelGroups: ModelGroup[] = [],
 ): CopilotDisplayRole[] {
   const activeRoles = deriveActiveCopilotRoles(data, realCopilotRoles, allModelGroups)
-  return activeRoles.length > 0 ? activeRoles : deriveFloatedCopilotRoles(realCopilotRoles)
+  return activeRoles.length > 0
+    ? orderCopilotDisplayRoles(activeRoles, realCopilotRoles)
+    : deriveFloatedCopilotRoles(realCopilotRoles)
 }
 
 export function deriveCopilotDisplayRoles(

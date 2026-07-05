@@ -9,11 +9,11 @@
     "code_location": "route 解析内核（resolve_routes：把 role 的兜底链物化成有序 ResolvedRoute）归 gateway 库，由 Studio 经 GatewayAdapter 薄委托（gateway_resolver.py 的 build_gateway_route_runtime）；provider call method 真相源归 gateway 包内 call_methods.json/call_methods.py（声明 method 的 wire family、client compatibility、官方 probe backend、base_url transform、auth token env）；SDK 调用 / session / 事件翻译 / SDK 测试驱动全在 Studio backend 的 copilot.py。",
     "dataflow": [
       "前端 copilot tab 把用户配的角色（单 model group + route 兜底序）经 PUT /api/llm/roles 整表保存",
-      "GET /api/llm/registry 投影 provider_models[].copilot_sdk_compatible；Studio 后端用 gateway call_methods.json 判断 method 对 anthropic_messages_client 是 supported / incompatible / unknown，前端只消费该布尔字段，不维护 method/protocol 名单",
+      "GET /api/llm/registry 投影 provider_models[].candidate_call_method_ids + copilot_sdk_compatible；Studio 后端用 gateway call_methods.json 的 endpoint_method_candidates（protocol_defaults + host_overrides）补足无 verified profile route 的 method 候选，再按 anthropic_messages_client 的 supported / incompatible / unknown 投影，前端只消费该布尔字段，不维护 method/protocol/provider 名单",
       "运行/测试时 Studio backend 调 build_gateway_route_runtime(role_name) → 委托 gateway 库 的 resolve_routes 物化出有序 ResolvedRoute 兜底链",
       "Studio backend 对链里每条 route 用 _resolve_route_runtime 取出 api_key / base_url / 特殊 env；base_url transform 和 ANTHROPIC_AUTH_TOKEN 等特殊 env 从 gateway call-method catalog 读取",
-      "真实对话：build_gateway_route_runtime 解析兜底链后,Copilot 层会把每条 route 改选到 Claude Agent SDK 支持的 Anthropic Messages verified profile（例如 DeepSeek Official 的 deepseek_anthropic_messages），再由 build_options 把 key/base_url 写进 ClaudeAgentOptions.env（不改全局 os.environ），get_or_create_session 建/复用 ClaudeSDKClient 子进程，connect/query/receive_response 跑一轮，全链失败才报错",
-      "SDK 测试：若官方 route 尚无 Copilot SDK 支持的 verified invocation profile，先跑 route-level official profile probe atom 写回真实 method/capability evidence；随后 run_route_sdk_test 对每条 route 起一个临时 ClaudeSDKClient，写一个随机 token 到临时文件、逼模型用工具读回来——token 回显才算 tool loop 真跑通",
+      "真实对话：build_gateway_route_runtime 解析兜底链后,Copilot 层会优先使用 Claude Agent SDK 支持的 Anthropic Messages verified profile；若 route 暂无 profile，则从 gateway endpoint_method_candidates 选一个已知 supported 的 Anthropic Messages method（例如 Qiniu/WaveSpeed/OpenRouter 的第三方 endpoint）；再由 build_options 把 key/base_url 写进 ClaudeAgentOptions.env（不改全局 os.environ），get_or_create_session 建/复用 ClaudeSDKClient 子进程，connect/query/receive_response 跑一轮，全链失败才报错",
+      "SDK 测试：若 resolved route 尚无 SDK method，先按 endpoint_method_candidates 尝试；若仍没有且是官方 route，再跑 route-level official profile probe atom 写回真实 method/capability evidence；随后 run_route_sdk_test 对每条 route 起一个临时 ClaudeSDKClient，写一个随机 token 到临时文件、逼模型用工具读回来——token 回显才算 tool loop 真跑通",
       "SDK message（AssistantMessage/ResultMessage 的 TextBlock/ToolUseBlock/ToolResultBlock）经 _translate_sdk_message 翻成 websocket event 流给前端"
     ]
   },
@@ -51,7 +51,7 @@
         "关键约束：ClaudeSDKClient.__init__ 不接受 base_url 参数（文件头注释亲述 'accepts base_url=...: False'），只能 per-session env 注入——这正是裸 HTTP 探针测不到的差异。",
         "make_session_key（用 skill、模型、endpoint、api_key 哈希出 SDK session 缓存键的函数，copilot.py）保证换 key 后不复用旧子进程。",
         "get_or_create_session（按缓存键建/复用同一 skill/model/provider/key 组合的 ClaudeSDKClient 的函数，copilot.py）减少重复 spawn。",
-        "_resolve_route_runtime（把一条 ResolvedRoute 转成 api_key/base_url/env_overrides 的函数，copilot.py）从 credential provider 取 secret，并从 gateway call-method catalog 读取 base_url transform 与特殊 env；ark_anthropic_messages 走 /api/compatible 且写 ANTHROPIC_AUTH_TOKEN，deepseek_anthropic_messages 走 /anthropic。"
+        "_resolve_route_runtime（把一条 ResolvedRoute 转成 api_key/base_url/env_overrides 的函数，copilot.py）从 credential provider 取 secret，并从 gateway call-method catalog 读取 base_url transform 与特殊 env；anthropic_messages/openrouter_anthropic_messages 走 Anthropic canonical base_url（去尾 /v1），ark_anthropic_messages 走 /api/compatible 且写 ANTHROPIC_AUTH_TOKEN，deepseek_anthropic_messages 走 /anthropic。"
       ],
       "do": [
         "per-session env 注入（key + base_url + 特殊 env），不污染全局环境。",
@@ -99,7 +99,7 @@
         "token 出现在模型回复文本里 → status=ok；否则有错误就报最后一条错误、无错误就报英文诊断「The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.」。",
         "中途单个工具错误不短路（模型自己恢复后仍可能回显 token），最终以 token 是否回显为唯一裁决。",
         "测试经统一的 role test-job 入口触发：前端 startRoleTestJob → POST /api/llm/roles/{name}/test-jobs，后端 _start_role_test_job 见 role.role_kind=='copilot' 即分流到 _start_copilot_sdk_test_job（routers/llm.py），并发跑各 route（_COPILOT_SDK_TEST_CONCURRENCY=2）。",
-        "官方 route 若当前 resolved call_method_id 不是 gateway catalog 中 anthropic_messages_client=supported 的 method，_prepare_copilot_sdk_test_route 先复用普通 LLM Role Test 的 _ensure_official_role_test_verified_profile，并要求产出支持的 profile；profile probe 成功则写回 verified_profiles/evidence 并重新 resolve route，再改选到真实 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 路径；profile probe 失败或只产出不兼容 method 则该 route failed 并写 probe-failed evidence。"
+        "route 若当前 resolved call_method_id 不是 gateway catalog 中 anthropic_messages_client=supported 的 method，_prepare_copilot_sdk_test_route 先从 endpoint_method_candidates 选 supported method（覆盖第三方 Anthropic-compatible / qnaigc / wavespeed / openrouter 等无 profile route）；若仍无支持 method 且是官方 route，再复用普通 LLM Role Test 的 _ensure_official_role_test_verified_profile，并要求产出支持的 profile；profile probe 成功则写回 verified_profiles/evidence 并重新 resolve route，再改选到真实 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 路径；profile probe 失败或只产出不兼容 method 则该 route failed 并写 probe-failed evidence。"
       ],
       "do": [
         "真 ClaudeSDKClient 子进程 + 真工具调用 + token 回显裁决。",
@@ -343,7 +343,7 @@
       "item": "真 SDK 测试（token 回显验 tool loop）",
       "d12": "COPILOT_ASSIST-4",
       "status": "ok",
-      "note": "run_route_sdk_test 已用真 ClaudeSDKClient 子进程 + 临时文件 token 回显验 spawn/env/tool loop；copilot SDK job 对官方未验证或默认非 SDK method 的 route 先复用 official profile atom 并重新 resolve route，真实对话 runtime 也会改选 Copilot SDK 支持的 verified profile，确保 DeepSeek Official 走 deepseek_anthropic_messages 真路径；旧的 AsyncAnthropic 裸探针假测试已移除 → spec §3.4 核心 drift（测的 SDK ≠ 跑的 SDK）现码已修。← #58 直接用。",
+    "note": "run_route_sdk_test 已用真 ClaudeSDKClient 子进程 + 临时文件 token 回显验 spawn/env/tool loop；copilot SDK job 对无 profile route 先读 gateway endpoint_method_candidates 选 Anthropic Messages supported method（覆盖 Qiniu/WaveSpeed/OpenRouter 等第三方 endpoint），官方未验证或默认非 SDK method 的 route 再复用 official profile atom 并重新 resolve route；真实对话 runtime 同样按 verified profile → endpoint method candidate 的顺序补齐 SDK method，确保 DeepSeek Official 走 deepseek_anthropic_messages、第三方 Anthropic-compatible route 不因缺 profile 被隐藏。旧的 AsyncAnthropic 裸探针假测试已移除 → spec §3.4 核心 drift（测的 SDK ≠ 跑的 SDK）现码已修。← #58 直接用。",
       "ref": "d5"
     },
     {
@@ -361,10 +361,10 @@
       "ref": "d5"
     },
     {
-      "item": "base_url 协议归一化助手归位",
+    "item": "call method catalog + endpoint candidates 归位",
       "d12": "D5.2",
       "status": "ok",
-      "note": "已归位：ark/deepseek Anthropic Messages base_url transform 已从 copilot.py 下沉到 gateway call-method catalog(call_methods.json/call_methods.py),Studio backend 只经 GatewayAdapter 读取 apply_call_method_base_url / call_method_auth_token_env。",
+    "note": "已归位：ark/deepseek/openrouter/anthropic_messages base_url transform 与 auth_token_env 已从 copilot.py 下沉到 gateway call-method catalog(call_methods.json/call_methods.py)；同一 JSON 还声明 endpoint_method_candidates(protocol_defaults + qnaigc/wavespeed/openrouter host_overrides)，Studio backend 只经 GatewayAdapter 读取 call_method_ids_for_endpoint / apply_call_method_base_url / call_method_auth_token_env。",
       "ref": "packages/graph-agent-gateway/src/graph_agent_gateway/registry/call_methods.py"
     },
     {

@@ -29,7 +29,6 @@
     "resources": [
       "vendor/**/*",
       "python_runtime/**/*",
-      "../../../skills/**/*",
       "../../../config/**/*"
     ],
     "icon": [

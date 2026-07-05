@@ -324,88 +324,17 @@ class RoleTestResultsResponse(BaseModel):
     results: dict[str, PersistedRoleTestResult] = Field(default_factory=dict)
 
 
-_CJK_DIAGNOSTIC_RE = re.compile(r"[\u3400-\u9fff]")
-_DISCARDED_COPILOT_DIAGNOSTIC_MESSAGE = (
-    "Previous diagnostic was discarded. Re-run Test for current details."
-)
-
-
-def _public_copilot_diagnostic(message: str | None) -> str | None:
+def _copilot_diagnostic_text(message: str | None) -> str | None:
     if not isinstance(message, str):
         return None
     text = message.strip()
     if not text:
         return None
-    if _CJK_DIAGNOSTIC_RE.search(text):
-        return _DISCARDED_COPILOT_DIAGNOSTIC_MESSAGE
     return text
 
 
-def _sanitize_copilot_sdk_result(result: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(result.get("sdk_evidence"), dict):
-        return result
-
-    sanitized = dict(result)
-    sanitized["message"] = _public_copilot_diagnostic(
-        cast(str | None, sanitized.get("message"))
-    )
-
-    model_groups = sanitized.get("model_groups")
-    if isinstance(model_groups, list):
-        next_groups: list[Any] = []
-        for group in model_groups:
-            if not isinstance(group, dict):
-                next_groups.append(group)
-                continue
-            next_group = dict(group)
-            provider_results = next_group.get("provider_results")
-            if isinstance(provider_results, list):
-                next_provider_results: list[Any] = []
-                for provider_result in provider_results:
-                    if not isinstance(provider_result, dict):
-                        next_provider_results.append(provider_result)
-                        continue
-                    next_provider_result = dict(provider_result)
-                    next_provider_result["message"] = _public_copilot_diagnostic(
-                        cast(str | None, next_provider_result.get("message"))
-                    )
-                    next_provider_results.append(next_provider_result)
-                next_group["provider_results"] = next_provider_results
-            next_groups.append(next_group)
-        sanitized["model_groups"] = next_groups
-
-    sdk_evidence = sanitized.get("sdk_evidence")
-    if isinstance(sdk_evidence, dict):
-        next_evidence = dict(sdk_evidence)
-        routes = next_evidence.get("routes")
-        if isinstance(routes, dict):
-            next_routes: dict[str, Any] = {}
-            for route_id, route_result in routes.items():
-                if not isinstance(route_result, dict):
-                    next_routes[str(route_id)] = route_result
-                    continue
-                next_route_result = dict(route_result)
-                next_route_result["message"] = _public_copilot_diagnostic(
-                    cast(str | None, next_route_result.get("message"))
-                )
-                next_routes[str(route_id)] = next_route_result
-            next_evidence["routes"] = next_routes
-        sanitized["sdk_evidence"] = next_evidence
-
-    return sanitized
-
-
 def _persisted_role_test_result_from_storage(entry: object) -> PersistedRoleTestResult:
-    persisted = PersistedRoleTestResult.model_validate(entry)
-    result = _sanitize_copilot_sdk_result(persisted.result)
-    if result is persisted.result:
-        return persisted
-    return persisted.model_copy(
-        update={
-            "message": _public_copilot_diagnostic(persisted.message),
-            "result": result,
-        }
-    )
+    return PersistedRoleTestResult.model_validate(entry)
 
 
 class CompareCandidateTestRequest(BaseModel):
@@ -2136,7 +2065,7 @@ def _copilot_route_progress(
         canonical_id=route.canonical_id,
         route_id=route.route_id,
         status=status,
-        message=_public_copilot_diagnostic(message),
+        message=_copilot_diagnostic_text(message),
         retry_after_seconds=retry_after_seconds,
     )
 
@@ -2172,7 +2101,7 @@ async def _run_copilot_sdk_test_job(
         await _update_role_test_job(
             job_id,
             status="failed",
-            message=_public_copilot_diagnostic(str(exc)) or "Copilot SDK test failed.",
+            message=_copilot_diagnostic_text(str(exc)) or "Copilot SDK test failed.",
         )
         return
 
@@ -2228,7 +2157,7 @@ def _build_copilot_sdk_result(
     routes_evidence = {
         result.route_id: {
             "status": result.status,
-            "message": _public_copilot_diagnostic(result.message),
+            "message": _copilot_diagnostic_text(result.message),
             "retry_after_seconds": result.retry_after_seconds,
         }
         for result in results
@@ -2259,7 +2188,7 @@ def _copilot_sdk_model_groups(
             {
                 "route_id": route.route_id,
                 "status": result.status if result else "untested",
-                "message": _public_copilot_diagnostic(result.message) if result else None,
+                "message": _copilot_diagnostic_text(result.message) if result else None,
             }
         )
     return [

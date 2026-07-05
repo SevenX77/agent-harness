@@ -328,7 +328,7 @@
     },
     "terminal": "全兜底链 route 都失败时，stream_query yield CopilotEventError（_all_copilot_routes_failed_message，带 failed_route_ids）；SDK 测试 job 全 route failed 仍正常完成、把每条裁决落 sdk_evidence。"
   },
-  "diagnostic_locale_boundary": "Copilot SDK/test-job 的 user-visible 诊断由后端源头保证英文：新写入的 route progress / sdk_evidence message 经过 _public_copilot_diagnostic；旧持久化结果若带 CJK，在 GET /api/llm/roles/test-results 投影时被后端丢弃为英文 fallback（Previous diagnostic was discarded. Re-run Test for current details.）。前端只展示后端返回值，不维护中文转英文垫片。",
+  "diagnostic_locale_boundary": "Copilot SDK/test-job 的 user-visible 诊断由后端源头保证英文：新写入的 route progress / sdk_evidence message 只做空白规范化，不做 CJK 检测、翻译或 fallback 遮罩；GET /api/llm/roles/test-results 对持久化结果原样投影。旧持久化中文诊断必须显式重跑 Test 或直接修正 llm_role_test_results.json，不在读取路径隐式覆盖。前端只展示后端返回值，不维护中文转英文垫片。",
   "backend_status": [
     {
       "item": "route 解析（role → 有序兜底链）",

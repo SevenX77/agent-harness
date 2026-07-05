@@ -203,6 +203,7 @@ export function Panels({
         skillDetail={skillDetail}
         selectedNode={selectedNode}
         ioBoundary={ioBoundary ?? null}
+        lintErrors={lintErrors}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
         onFileOpen={onFileOpen}

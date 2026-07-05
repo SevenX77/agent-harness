@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import { compareReplayArgsForJudgeResult, hasMiniMapToolSpace, Workspace } from './Workspace'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
-import type { EventEnvelope, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
+import type { EventEnvelope, LintError, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 import { BackendUnavailableError } from '@/utils/errors'
 
 // React 19's act() warns unless the environment opts in.
@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
     workspaceRoot?: string | null
     onOpenSettings?: (tab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot') => void
+    lintErrors?: LintError[] | null
   },
   graphCanvasProps: null as null | {
     skillId?: string | null
@@ -322,6 +323,7 @@ vi.mock('./Panels', () => ({
   Panels: (props: {
     onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
     workspaceRoot?: string | null
+    lintErrors?: LintError[] | null
   }) => {
     mocks.panelsProps = props
     return <aside data-testid="panels" />

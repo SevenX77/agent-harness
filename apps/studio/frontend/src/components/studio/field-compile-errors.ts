@@ -24,6 +24,11 @@ import type { CompileError, LintError } from "@/api/types"
 // emits `phases/<id>/...`, `<id>` = `[A-Za-z0-9_-]+`). Used only as the fallback node
 // scope when an error carries no `phase_name`.
 const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
+const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/test_inputs(?:\/|$)/
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "")
+}
 
 function errorPhaseId(error: LintError): string | null {
   if (typeof error.phase_name === "string" && error.phase_name) {
@@ -101,6 +106,35 @@ export function compileErrorsToFieldLintErrors(
   }))
 }
 
+function fieldLintErrorKey(error: LintError): string {
+  return [
+    error.file ?? "",
+    error.line ?? "",
+    error.column ?? "",
+    error.field_path ?? "",
+    error.error_code ?? "",
+    error.severity,
+    error.message,
+  ].join("\u0000")
+}
+
+export function fieldDiagnosticsForPanels(
+  compileErrors: readonly CompileError[] | null | undefined,
+  lintErrors: readonly LintError[] | null | undefined,
+): LintError[] {
+  const merged: LintError[] = []
+  const seen = new Set<string>()
+  for (const error of [...compileErrorsToFieldLintErrors(compileErrors), ...(lintErrors ?? [])]) {
+    const key = fieldLintErrorKey(error)
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    merged.push(error)
+  }
+  return merged
+}
+
 /**
  * Project the whole-skill lint result down to the diagnostics of ONE open file.
  *
@@ -131,6 +165,30 @@ export function lintErrorsForFile(
     const candidate = error.file.replace(/\\/g, "/").replace(/^\/+/, "")
     return candidate === target || candidate.endsWith(`/${target}`)
   })
+}
+
+export type IoBoundary = "input" | "output"
+
+function isInputBoundaryError(error: LintError): boolean {
+  const file = typeof error.file === "string" ? normalizePath(error.file) : ""
+  const field = error.field_path
+  return TEST_INPUT_FILE_RE.test(file)
+    || field === "io.inputs"
+    || (typeof field === "string" && field.startsWith("io.inputs."))
+}
+
+function isOutputBoundaryError(error: LintError): boolean {
+  const field = error.field_path
+  return field === "io.outputs" || (typeof field === "string" && field.startsWith("io.outputs."))
+}
+
+export function lintErrorsForBoundary(
+  errors: readonly LintError[] | null | undefined,
+  boundary: IoBoundary,
+): LintError[] {
+  return (errors ?? []).filter((error) => (
+    boundary === "input" ? isInputBoundaryError(error) : isOutputBoundaryError(error)
+  ))
 }
 
 /** Monaco-shaped marker descriptor (severity kept as a string so this module is monaco-free). */

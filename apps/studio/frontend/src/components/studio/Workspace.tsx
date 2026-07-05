@@ -45,7 +45,7 @@ import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnch
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
 import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
-import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
+import { fieldDiagnosticsForPanels } from "./field-compile-errors"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -2409,18 +2409,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     () => dirtyDownstreamFromValidity(resumeValidity),
     [resumeValidity],
   )
-  // Field-axis source for the Properties panel (N3 atom #5): the realtime lint diagnostics
-  // carry the engine's nearest-field locator (field_path), so they are the field source the
-  // moment a realtime lint has resolved; before that (or when lint is clean) we fall back to
-  // the field-bearing manual-Compile errors mapped onto the same LintError shape. Either way
-  // the panel reads one DTO with a field_path axis — no client-side field re-derivation.
-  // Active lint includes first-screen SkillDetail diagnostics until realtime lint settles.
+  // Field-axis source for the Properties/Input panels (N3 atom #5): manual Compile and
+  // first-screen/realtime lint are both engine-owned diagnostics. Project both onto the
+  // same LintError field_path axis so a clean realtime lint pass cannot erase manual
+  // Compile failures from the side panels while the drawer still shows them.
   const propertiesFieldErrors = useMemo(() => {
-    if (realtimeLint != null || activeLint.length > 0) {
-      return activeLint
-    }
-    return compileErrorsToFieldLintErrors(currentSkillId ? compileErrors[currentSkillId] : [])
-  }, [activeLint, compileErrors, currentSkillId, realtimeLint])
+    return fieldDiagnosticsForPanels(currentSkillId ? compileErrors[currentSkillId] : [], activeLint)
+  }, [activeLint, compileErrors, currentSkillId])
 
   const leftPanelOverlay = activePanel ? (
     <WorkspaceLeftPanelOverlay

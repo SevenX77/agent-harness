@@ -157,7 +157,8 @@
    "fe_status": "符合",
    "layer1": [
     "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + source:'file' 单/批量);candidatesFromScanEntries 展平扫描结果(io-config.test)。",
-    "reconcileInputFields:声明+黑板有=matched、黑板有未声明=available、io.inputs 声明但黑板无=missing(source:'file' 永不 missing);missing 不写回(io-config.test)。"
+    "reconcileInputFields:声明+黑板有=matched、黑板有未声明=available、io.inputs 声明但黑板无=missing(source:'file' 永不 missing);missing 不写回(io-config.test)。",
+    "Input boundary diagnostics: manual Compile errors with file=.workspace/test_inputs remain visible in Input panel diagnostics; panel field source merges manual Compile and lint instead of letting clean realtime lint erase Compile failures."
    ],
    "layer2": [
     "真机:segmentation 黑板树 chapters 勾选;GRAPH.md=Input 伪节点 files-only『No fields yet』;导入 material-prep 识别 timestamp/run_id/... 字段。"
@@ -190,6 +191,10 @@
     {
      "file": "n2-50-iopanel-r6-import-run-edit.png",
      "caption": "r6:Test Inputs 区**无批量勾选框/无 Run-as-batch**、每行删除旁带编辑铅笔(点1/5);Graph inputs 内联配置——嵌套树 chapter→aa_number,notes.json 文件组带**编辑铅笔 + 删除**,底部**单个「Import…」**按钮(点2/5)。真机 Chromium 渲染真实组件+CSS。注:自动匹配的勾选+高亮(点3/4)由 18 条单测覆盖(matchCandidatesToInputs/normalizeFieldName/candidatesFromScanEntries batch stem),真机导入依赖原生文件夹选择器(浏览器 harness 触发不了)故此图未含。"
+    },
+    {
+     "file": "n3-compile-input-boundary-diagnostics.png",
+     "caption": "Input boundary selected after a failing Compile: left Input panel shows Input diagnostics for chapter / chapters while the Input node carries the same red count badge."
     }
    ]
   },

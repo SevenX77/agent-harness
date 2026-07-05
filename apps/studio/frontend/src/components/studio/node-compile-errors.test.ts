@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CompileError, LintError } from "@/api/types"
+import { INPUT_ID } from "@/components/nodes"
 import {
   activeLintErrors,
   compileErrorsByNode,
@@ -81,6 +82,29 @@ describe("compileErrorsByNode", () => {
     ])
     expect(Object.keys(byNode)).toEqual(["review"])
     expect(byNode.review[0].field).toBe("review.io.inputs.properties.summary")
+  })
+
+  it("attributes Studio test-input preflight errors to the global Input node", () => {
+    const byNode = compileErrorsByNode([
+      {
+        file: ".workspace/test_inputs",
+        line: null,
+        field: "chapter",
+        severity: "fatal",
+        message: "Graph input schema requires test input field 'chapter'",
+        error_code: "STUDIO_TEST_INPUT_MISSING",
+      },
+      {
+        file: ".workspace/test_inputs/case-a.json",
+        line: null,
+        field: "chapters",
+        severity: "fatal",
+        message: "'chapters' is a required property",
+        error_code: "STUDIO_TEST_INPUT_SCHEMA_INVALID",
+      },
+    ])
+    expect(Object.keys(byNode)).toEqual([INPUT_ID])
+    expect(byNode[INPUT_ID]).toHaveLength(2)
   })
 
   it("prefers the file phase path over the field prefix when both are present", () => {

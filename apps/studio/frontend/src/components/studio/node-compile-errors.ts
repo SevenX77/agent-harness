@@ -1,7 +1,33 @@
 import type { CompileError, LintError } from "@/api/types"
+import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 
 const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
 const FIELD_NODE_PREFIX_RE = /^([A-Za-z0-9_-]+)\./
+const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/test_inputs(?:\/|$)/
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "")
+}
+
+function boundaryNodeIdFromFile(file: string | null | undefined): string | null {
+  if (typeof file !== "string") {
+    return null
+  }
+  return TEST_INPUT_FILE_RE.test(normalizePath(file)) ? INPUT_ID : null
+}
+
+function boundaryNodeIdFromField(field: string | null | undefined): string | null {
+  if (typeof field !== "string") {
+    return null
+  }
+  if (field === "io.inputs" || field.startsWith("io.inputs.")) {
+    return INPUT_ID
+  }
+  if (field === "io.outputs" || field.startsWith("io.outputs.")) {
+    return OUTPUT_ID
+  }
+  return null
+}
 
 function compileErrorNodeId(error: CompileError | null | undefined): string | null {
   const file = error?.file
@@ -12,6 +38,10 @@ function compileErrorNodeId(error: CompileError | null | undefined): string | nu
     }
   }
   const field = error?.field
+  const boundaryId = boundaryNodeIdFromFile(file) ?? boundaryNodeIdFromField(field)
+  if (boundaryId) {
+    return boundaryId
+  }
   if (typeof field === "string") {
     const fieldMatch = FIELD_NODE_PREFIX_RE.exec(field)
     if (fieldMatch) {
@@ -49,6 +79,10 @@ function lintErrorNodeId(error: LintError | null | undefined): string | null {
     }
   }
   const field = error?.field_path
+  const boundaryId = boundaryNodeIdFromFile(file) ?? boundaryNodeIdFromField(field)
+  if (boundaryId) {
+    return boundaryId
+  }
   if (typeof field === "string") {
     const fieldMatch = FIELD_NODE_PREFIX_RE.exec(field)
     if (fieldMatch) {

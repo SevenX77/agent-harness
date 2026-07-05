@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
-import type { LintError } from "@/api/types"
-import { fieldErrorsByKey, lintErrorsForFile, lintErrorsToMarkers } from "./field-compile-errors"
+import type { CompileError, LintError } from "@/api/types"
+import {
+  fieldDiagnosticsForPanels,
+  fieldErrorsByKey,
+  lintErrorsForBoundary,
+  lintErrorsForFile,
+  lintErrorsToMarkers,
+} from "./field-compile-errors"
 
 function lintErr(overrides: Partial<LintError>): LintError {
   return {
@@ -122,6 +128,92 @@ describe("lintErrorsForFile", () => {
     expect(markers).toHaveLength(1)
     expect(markers[0].startLineNumber).toBe(7)
     expect(markers[0].message).toContain("unreachable from input")
+  })
+})
+
+describe("lintErrorsForBoundary", () => {
+  it("keeps Studio test-input diagnostics on the input boundary", () => {
+    const scoped = lintErrorsForBoundary(
+      [
+        lintErr({
+          file: ".workspace/test_inputs",
+          field_path: "chapter",
+          message: "Graph input schema requires test input field 'chapter'",
+        }),
+        lintErr({
+          file: ".workspace/test_inputs/case-a.json",
+          field_path: "chapters",
+          message: "'chapters' is a required property",
+        }),
+        lintErr({ file: "phases/review/SKILL.md", field_path: "validator", message: "node field" }),
+      ],
+      "input",
+    )
+
+    expect(scoped.map((error) => error.message)).toEqual([
+      "Graph input schema requires test input field 'chapter'",
+      "'chapters' is a required property",
+    ])
+  })
+
+  it("keeps io.inputs field diagnostics on the input boundary", () => {
+    const scoped = lintErrorsForBoundary(
+      [lintErr({ file: "GRAPH.md", field_path: "io.inputs.properties.chapter", message: "bad graph input" })],
+      "input",
+    )
+
+    expect(scoped).toHaveLength(1)
+  })
+})
+
+describe("fieldDiagnosticsForPanels", () => {
+  it("keeps manual Compile diagnostics even after realtime lint has settled clean", () => {
+    const manual: CompileError[] = [
+      {
+        file: ".workspace/test_inputs",
+        line: null,
+        field: "chapter",
+        severity: "fatal",
+        message: "Graph input schema requires test input field 'chapter'",
+        error_code: "STUDIO_TEST_INPUT_MISSING",
+      },
+    ]
+
+    expect(fieldDiagnosticsForPanels(manual, [])).toMatchObject([
+      {
+        file: ".workspace/test_inputs",
+        field_path: "chapter",
+        message: "Graph input schema requires test input field 'chapter'",
+      },
+    ])
+  })
+
+  it("merges manual Compile and lint diagnostics on the same field axis", () => {
+    const manual: CompileError[] = [
+      {
+        file: ".workspace/test_inputs",
+        line: null,
+        field: "chapter",
+        severity: "fatal",
+        message: "missing chapter",
+        error_code: "STUDIO_TEST_INPUT_MISSING",
+      },
+    ]
+    const lint: LintError[] = [
+      lintErr({
+        file: "phases/review/SKILL.md",
+        line: 7,
+        error_code: "F-v3-schema",
+        message: "review field is invalid",
+        phase_name: "review",
+        field_path: "review.io.inputs.properties.chapter",
+      }),
+    ]
+
+    expect(fieldDiagnosticsForPanels(manual, lint).map((error) => error.message)).toEqual([
+      "missing chapter",
+      "review field is invalid",
+    ])
   })
 })
 

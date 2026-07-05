@@ -1785,32 +1785,24 @@ export function ProviderCard({
     ...(draft.testingModelIdsByEndpoint?.[endpointId] ?? []),
     ...(manualTestingModelIdsByEndpoint[endpointId] ?? []),
   ])
+  const activeProbeModelIds = uniqueStrings([
+    ...Object.values(draft.testingModelIdsByEndpoint ?? {}).flat(),
+    ...Object.values(manualTestingModelIdsByEndpoint).flat(),
+  ])
   // Endpoint animation follows the backend active atom event for every probe
   // path. Card-wide Test state and `testingEndpointId` are request context only;
   // manual model probes also publish the same (endpoint, model) atom signal.
   const isEndpointBeingTested = (endpointId: string) =>
     activeProbeModelIdsForEndpoint(endpointId).length > 0
-  // A single endpoint probe may list many models, but only the atomically
-  // probed model route should pulse. The active atom signal comes from either
-  // route status=testing or the backend llm_probe_active event; historical
-  // probe attempts and endpoint membership are not animation sources.
-  const isModelUnderEndpointTest = (model: ModelInfo) => {
-    const summaries = routeSummariesForModel(model)
-    const testingEndpointId = draft.testingEndpointId ?? null
-    return summaries.some((summary) => (
-      (testingEndpointId == null || summary.endpoint_id === testingEndpointId) &&
-      hasActiveAtomicProbeSignal({
-        modelId: model.id,
-        activeModelIds: summary.endpoint_id ? activeProbeModelIdsForEndpoint(summary.endpoint_id) : undefined,
-        status: summary.status,
-      })
-    ))
-  }
-  // A model chip pulses while it is genuinely being probed. isModelUnderEndpointTest
-  // consumes the merged backend + Manual atom map, so no separate card-wide or
-  // model-wide fallback can light up sibling routes.
+  // Model animation follows the same active atom map as endpoint animation. Route
+  // summaries are persisted/display evidence and can be missing endpoint_id on a
+  // manually-added chip; they must not be the source of live animation truth.
   const isModelBeingProbed = (model: ModelInfo) =>
-    isModelUnderEndpointTest(model)
+    hasActiveAtomicProbeSignal({
+      modelId: model.id,
+      activeModelIds: activeProbeModelIds,
+      status: model.status,
+    })
   const hasManualActiveProbe = Object.values(manualTestingModelIdsByEndpoint).some((modelIds) => modelIds.length > 0)
   // R-G2: auto-expand the full model list when an endpoint test starts, so the user
   // can watch every model being probed instead of only the first few.

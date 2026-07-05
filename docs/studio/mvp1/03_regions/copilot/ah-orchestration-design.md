@@ -168,9 +168,10 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
   `$STUDIO_AH_HOST_HOME/.claude.json` 链到 `$HOME/.claude.json`,确保 sandbox HOME 不会重新弹
   folder trust / external includes / theme onboarding。
 - **Codex**:Windows `~/.codex/auth.json` 是登录源头,启动时复制到 WSL `~/.codex/auth.json`,sandbox
-  master cmd 再链到 `$HOME/.codex/auth.json`。项目 trust 不依赖 sandbox 持久 `config.toml`;
-  master 直接带 `-c trust_level="trusted"` 与 `--dangerously-bypass-hook-trust` 启动,和 ah provider
-  拉 worker 时的 trusted 语义一致。
+  master cmd 再链到 `$HOME/.codex/auth.json`。项目 trust 必须写进 Codex 实际读取的 sandbox
+  `$HOME/.codex/config.toml`:master cmd 以当前 `$PWD` 生成 `[projects."<workspace>"] trust_level = "trusted"`,
+  再带 `--dangerously-bypass-hook-trust` 启动。单独传全局 `-c trust_level="trusted"` 不会消掉 Codex
+  的目录 trust prompt。
 
 生命周期规则:
 
@@ -509,7 +510,8 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - launcher 在 `ah start` 前拒绝 `ah < 1.3.0`,避免 `window_size = "follow"` 被旧 ah 忽略;
 - launcher 记录启动 ah 前的宿主 HOME;Claude master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
   `$HOME/.local/bin/claude` symlink;Codex master cmd 补 `$HOME/.local/bin/codex` symlink,并把
-  Windows 源头登录复制到 WSL 后再链接进 ah sandbox 的 `$HOME/.codex/auth.json`;
+  Windows 源头登录复制到 WSL 后再链接进 ah sandbox 的 `$HOME/.codex/auth.json`,同时写入 sandbox
+  `$HOME/.codex/config.toml` 的当前 workspace trust;
 - 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
   persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;

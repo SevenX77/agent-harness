@@ -449,7 +449,7 @@ fn claude_master_cmd() -> String {
 fn codex_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c trust_level=\\\"trusted\\\" {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$HOME/.codex/config.toml\" 2>/dev/null; then {{ if [ -s \"$HOME/.codex/config.toml\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$HOME/.codex/config.toml\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -1686,8 +1686,16 @@ mod tests {
             "Codex master must not stop on the hook trust gate"
         );
         assert!(
-            config.contains("trust_level=\\\\\\\"trusted\\\\\\\""),
-            "Codex master must not stop on the per-project trust gate"
+            config.contains("$HOME/.codex/config.toml"),
+            "Codex master must write the sandbox config file Codex actually reads"
+        );
+        assert!(
+            config.contains("codex_trust_header"),
+            "Codex master must derive a per-project trust table from the workspace path"
+        );
+        assert!(
+            config.contains("trust_level = \\\"trusted\\\""),
+            "Codex master must trust the current sandbox project before launching Codex"
         );
         assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
         assert!(config.contains("[agents.clotho]"));

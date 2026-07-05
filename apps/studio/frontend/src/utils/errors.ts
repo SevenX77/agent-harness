@@ -7,7 +7,114 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+export class BackendUnavailableError extends Error {
+  readonly axiosCode: string | null
+  readonly originalMessage: string
+  readonly requestMethod: string | null
+  readonly requestPath: string | null
+  readonly requestBaseURL: string | null
+  readonly requestURL: string | null
+
+  constructor(error: unknown) {
+    super(BACKEND_UNAVAILABLE_MESSAGE)
+    this.name = 'BackendUnavailableError'
+    Object.setPrototypeOf(this, BackendUnavailableError.prototype)
+
+    if (error instanceof AxiosError) {
+      this.axiosCode = error.code ?? null
+      this.originalMessage = error.message
+      this.requestMethod = normalizeMethod(error.config?.method)
+      this.requestPath = error.config?.url ?? null
+      this.requestBaseURL = error.config?.baseURL ?? null
+      this.requestURL = resolveRequestURL(this.requestBaseURL, this.requestPath)
+      return
+    }
+
+    this.axiosCode = null
+    this.originalMessage = error instanceof Error ? error.message : String(error)
+    this.requestMethod = null
+    this.requestPath = null
+    this.requestBaseURL = null
+    this.requestURL = null
+  }
+}
+
+function normalizeMethod(method: string | undefined): string | null {
+  return method ? method.toUpperCase() : null
+}
+
+function resolveRequestURL(baseURL: string | null, path: string | null): string | null {
+  if (!path) {
+    return baseURL
+  }
+  try {
+    return new URL(path).toString()
+  } catch {
+    // Relative path; combine below.
+  }
+  if (!baseURL) {
+    return path
+  }
+  try {
+    const base = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+    const relativePath = path.startsWith('/') ? path.slice(1) : path
+    return new URL(relativePath, base).toString()
+  } catch {
+    return `${baseURL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
+  }
+}
+
+export function errorDiagnosticDetails(error: unknown): string[] {
+  if (error instanceof BackendUnavailableError) {
+    const details = ['No HTTP response was received from the Studio backend.']
+    const requestURL = error.requestURL ?? error.requestPath
+    if (requestURL) {
+      details.push(`Request: ${error.requestMethod ?? 'UNKNOWN'} ${requestURL}`)
+    }
+    if (error.requestBaseURL) {
+      details.push(`API base URL: ${error.requestBaseURL}`)
+    }
+    const frontendOrigin = currentFrontendOrigin()
+    if (frontendOrigin) {
+      details.push(`Frontend origin: ${frontendOrigin}`)
+    }
+    if (error.axiosCode) {
+      details.push(`Axios code: ${error.axiosCode}`)
+    }
+    details.push(`Original error: ${error.originalMessage}`)
+    details.push('Meaning: the browser/Tauri webview did not receive an HTTP response; this is a sidecar/proxy/port/CORS connectivity failure, not a structured backend diagnostic response.')
+    return details
+  }
+  if (error instanceof AxiosError) {
+    const details = []
+    const method = normalizeMethod(error.config?.method)
+    const requestURL = resolveRequestURL(error.config?.baseURL ?? null, error.config?.url ?? null)
+    if (requestURL) {
+      details.push(`Request: ${method ?? 'UNKNOWN'} ${requestURL}`)
+    }
+    if (error.response) {
+      details.push(`HTTP status: ${error.response.status}`)
+    }
+    if (error.code) {
+      details.push(`Axios code: ${error.code}`)
+    }
+    details.push(`Original error: ${error.message}`)
+    return details
+  }
+  return []
+}
+
+function currentFrontendOrigin(): string | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  return window.location.origin
+}
+
 export function isBackendUnavailableError(error: unknown): boolean {
+  if (error instanceof BackendUnavailableError) {
+    return true
+  }
   if (error instanceof AxiosError) {
     if (error.response) {
       return false

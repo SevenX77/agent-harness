@@ -34,12 +34,12 @@
   {
     "name": "执行诊断抽屉（CompileErrorDrawer kind=compile/predict/run）",
     "kind": "共享 UI 模块（shadcn Sheet 底部抽屉）",
-    "what": "把编译、试飞或真跑启动失败的诊断列表固定展示在屏幕底部，替代只靠短暂 toast 承载细节；标题、复制按钮 aria-label、data-slot 会随 kind 切成 compile、predict 或 run。",
+    "what": "把编译、试飞或真跑启动失败的诊断列表固定展示在屏幕底部，替代只靠短暂 toast 承载细节；标题、复制按钮 aria-label、data-slot 会随 kind 切成 compile、predict 或 run。CompileError.details 用来承载无后端响应时的请求上下文（Request/API base/frontend origin/Axios code/original error），并随错误一起渲染和复制。",
     "where": "CompileErrorDrawer（components/studio/CompileErrorDrawer.tsx）；Predict 接入点在 Workspace.tsx 的 handlePredict catch / status!=='success' 分支；Run 接入点在 handleRun catch 分支。",
     "duties": [
       "展示错误数量、定位信息、severity、message/error_code。",
       "支持 Copy all errors，一次复制完整诊断文本。",
-      "Predict/Run 请求失败时展示 Backend unavailable 等 fatal 合成诊断；Predict 业务失败时展示 path_diff 合成诊断；compile_failed 响应时保留后端 errors。"
+      "Predict/Run 请求失败时展示 Backend unavailable 等 fatal 合成诊断，并保留 no-response 请求上下文；Predict 业务失败时展示 path_diff 合成诊断；compile_failed 响应时保留后端 errors。"
     ],
     "used_by": "Compile：手动 Compile 失败详情；Predict：#4 请求失败/业务失败详情；Run：#6 真跑启动请求失败详情。",
     "boundary": "做：呈现和复制诊断。不做：不解释业务成功条件、不发请求、不修正后端返回形状。",

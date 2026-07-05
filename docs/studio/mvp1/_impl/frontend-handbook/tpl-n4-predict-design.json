@@ -86,7 +86,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（2026-07-04 代码核实）：handlePredict 按业务成功门控——`if (predict.status !== \"success\")` 进 predict-fail（清 🟡、保留 toast 摘要、打开 Predict 诊断抽屉）并 return，只有 status==='success' 才走 updateStage('predict-pass') 点亮 Run。请求异常同样进 predict-fail，并把 Error('Backend unavailable') 或后端 compile_failed errors 规范化成 CompileError[] 交给 CompileErrorDrawer(kind='predict') 展示。原『契约问题：success 不透出』已消解：predict 端点返回真序列化 DTO PredictDiagnosticExport，其 status 是具体字段 Literal['success','failed']，且 status⟺success 等价，所以前端读 predict.status 既正确又拿得到。后端门一致：record_predict_pass 仅 result.success 才记录。测试覆盖：HTTP200 status='failed' 不点亮 Run、status='success' 点亮 Run、Predict 请求失败打开底部详情抽屉。",
+      "gap_brief": "符合设计（2026-07-05 代码核实）：handlePredict 按业务成功门控——`if (predict.status !== \"success\")` 进 predict-fail（清 🟡、保留 toast 摘要、打开 Predict 诊断抽屉）并 return，只有 status==='success' 才走 updateStage('predict-pass') 点亮 Run。请求异常同样进 predict-fail，并把 BackendUnavailableError（含请求方法、完整 URL、API base、frontend origin、Axios code、原始错误消息）或后端 compile_failed errors 规范化成 CompileError[] 交给 CompileErrorDrawer(kind='predict') 展示。原『契约问题：success 不透出』已消解：predict 端点返回真序列化 DTO PredictDiagnosticExport，其 status 是具体字段 Literal['success','failed']，且 status⟺success 等价，所以前端读 predict.status 既正确又拿得到。后端门一致：record_predict_pass 仅 result.success 才记录。测试覆盖：HTTP200 status='failed' 不点亮 Run、status='success' 点亮 Run、Predict 请求失败打开底部详情抽屉。",
       "impl_ref": "fn-4"
     },
     {

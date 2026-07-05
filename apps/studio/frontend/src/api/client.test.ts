@@ -331,6 +331,23 @@ describe('api client auth token', () => {
     await expect(startRun('text-segmentation', { topic: 'mars' })).rejects.toThrow('Backend unavailable')
   })
 
+  it('preserves request diagnostics for backend-unavailable failures', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      throw new AxiosError('connect ECONNREFUSED 127.0.0.1:8787', 'ECONNREFUSED', config)
+    }
+
+    await expect(startRun('text-segmentation', { topic: 'mars' })).rejects.toMatchObject({
+      name: 'BackendUnavailableError',
+      message: 'Backend unavailable',
+      axiosCode: 'ECONNREFUSED',
+      originalMessage: 'connect ECONNREFUSED 127.0.0.1:8787',
+      requestMethod: 'POST',
+      requestPath: '/skills/text-segmentation/runs',
+      requestBaseURL: 'http://localhost:8787/api',
+      requestURL: 'http://localhost:8787/api/skills/text-segmentation/runs',
+    })
+  })
+
   it('test_resume_run_posts_checkpoint_node_target_and_structured_human_response', async () => {
     api.defaults.adapter = async (config): Promise<AxiosResponse> => {
       expect(config.method).toBe('post')

@@ -41,6 +41,7 @@ export interface CompileError {
   severity: 'fatal' | 'warning'
   message: string
   error_code?: string | null
+  details?: string[]
 }
 
 export interface ArtifactRef {

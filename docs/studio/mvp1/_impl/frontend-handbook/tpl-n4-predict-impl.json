@@ -2,7 +2,7 @@
  "id": "n4_predict_impl",
  "title": "Predict 试飞 · 实施详情",
  "design_ref": "n4_predict_design",
- "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）、predict-pass 解锁 Run（#4）、灰禁原因提示（#5）均已接实且符合设计；2026-07-04 追加修正 #4 失败诊断：Predict 失败不再只停留在短暂 toast，而是复用 CompileErrorDrawer 打开底部详情抽屉，展示 Backend unavailable / path_diff / compile_failed errors 等可复制诊断。",
+ "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）、predict-pass 解锁 Run（#4）、灰禁原因提示（#5）均已接实且符合设计；2026-07-04 追加修正 #4 失败诊断：Predict 失败不再只停留在短暂 toast，而是复用 CompileErrorDrawer 打开底部详情抽屉，展示 Backend unavailable / path_diff / compile_failed errors 等可复制诊断；2026-07-05 追加保留 no-response 诊断上下文：Backend unavailable 会展示请求方法、完整 URL、API base、frontend origin、Axios code 与原始错误消息。",
  "functions": [
   {
    "n": 1,
@@ -35,8 +35,8 @@
    "n": 4,
    "cap": "predict-pass-unlock-run",
    "design_ref": "n4-atom-4",
-   "current": "现状：已实现且符合。Workspace.tsx 的 handlePredict 只在 postPredictRun 返回 PredictDiagnosticExport.status==='success' 时 updateStage('predict-pass') 点亮 Run；status!=='success' 时清掉旧的 logic-OK 节点、进 predict-fail、保留 toast 摘要，并把 path_diff 规范化成 CompileError[] 打开 CompileErrorDrawer(kind='predict')。请求失败也进同一条诊断链：compile_failed errors 会原样进入抽屉；网络/sidecar 不可达会被 client.ts 统一折叠成 Error('Backend unavailable')，前端把它作为 fatal predict error 展示在抽屉里。后端 predict pass 仍只在 result.success 为真时记录，前后端门一致。",
-   "gap": "符合设计，无需改。注意：Backend unavailable 这类错误没有后端响应体，当前可展示的详细内容就是 API 层保留下来的错误语义；本页要求它进入持久可复制抽屉，而不是只出现在 toast。",
+   "current": "现状：已实现且符合。Workspace.tsx 的 handlePredict 只在 postPredictRun 返回 PredictDiagnosticExport.status==='success' 时 updateStage('predict-pass') 点亮 Run；status!=='success' 时清掉旧的 logic-OK 节点、进 predict-fail、保留 toast 摘要，并把 path_diff 规范化成 CompileError[] 打开 CompileErrorDrawer(kind='predict')。请求失败也进同一条诊断链：compile_failed errors 会原样进入抽屉；网络/sidecar 不可达会被 client.ts 统一保留为 BackendUnavailableError，Workspace 通过 errorDiagnosticDetails 转成 CompileError.details，抽屉展示请求方法、完整 URL、API base、frontend origin、Axios code 与原始错误消息。后端 predict pass 仍只在 result.success 为真时记录，前后端门一致。",
+   "gap": "符合设计，无需改。注意：Backend unavailable 这类错误没有后端响应体，但必须展示前端仍能掌握的请求上下文（method/url/base/origin/code/original message）；本页要求它进入持久可复制抽屉，而不是只出现在 toast。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。Studio sidecar 返回 PredictDiagnosticExport(status/phases/path_diff)；后端 record_predict_pass/has_passing_predict + 服务端 Run 门已实现且与前端 status 判定一致。",
    "fe_status_prev": "偏差",
@@ -128,17 +128,17 @@
    "layer1": [
     "status==='success' → 断言 updateStage(predict-pass) 点亮 Run，并清空旧 predict 诊断。",
     "status==='failed' 且 path_diff 有缺失/多余/乱序 → 断言进 predict-fail、Run 仍灰、toast 给摘要、CompileErrorDrawer(kind='predict') 打开并展示 expected/actual/missing/extra。",
-    "postPredictRun reject Error('Backend unavailable') → 断言进 predict-fail，底部抽屉标题为 '1 predict error'，详情含 Backend unavailable，且存在 'Copy all predict errors'。",
+    "postPredictRun reject BackendUnavailableError → 断言进 predict-fail，底部抽屉标题为 '1 predict error'，详情含 Backend unavailable、Request、API base URL、Axios code、Original error，且存在 'Copy all predict errors'。",
     "后端契约测：业务失败 predict 不写 last_predict.json；成功才写、content_hash=当前编译 hash。"
    ],
    "layer2": [
     "业务失败 predict（status='failed'）后 Run 仍灰 + 底部 predict 诊断抽屉可见；业务成功（status='success'）后才点亮 Run。",
-    "sidecar/backend 不可达时点 Predict：toast 显示 'Predict failed: Backend unavailable'，同时底部抽屉停留展示同一 fatal 诊断，可复制。",
+    "sidecar/backend 不可达时点 Predict：toast 显示 'Predict failed: Backend unavailable'，同时底部抽屉停留展示同一 fatal 诊断及请求 URL / Axios code / 原始错误消息，可复制。",
     "改图重编后真去 Run，看服务端门是否要求重 Predict。"
    ],
    "shots": [
     "业务失败 predict 后 Run 仍灰 + predict 诊断抽屉展示 path_diff 详情",
-    "Backend unavailable 后 toast 摘要 + predict 诊断抽屉展示可复制 fatal 详情",
+    "Backend unavailable 后 toast 摘要 + predict 诊断抽屉展示可复制 fatal 详情与请求上下文",
     "业务成功后 Run 点亮；改图后需重 Predict"
    ],
    "fe_status_prev": "偏差",

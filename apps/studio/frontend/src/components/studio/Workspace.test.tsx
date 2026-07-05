@@ -3,9 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import { compareReplayArgsForJudgeResult, hasMiniMapToolSpace, Workspace } from './Workspace'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import type { EventEnvelope, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
+import { BackendUnavailableError } from '@/utils/errors'
 
 // React 19's act() warns unless the environment opts in.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -1401,7 +1403,15 @@ describe('Workspace WS-1 local writer contracts', () => {
   })
 
   it('opens the predict error drawer when the predict request fails before diagnostics return', async () => {
-    mocks.postPredictRun.mockRejectedValue(new Error('Backend unavailable'))
+    const config: InternalAxiosRequestConfig = {
+      baseURL: 'http://127.0.0.1:8787/api',
+      url: '/skills/writer-smoke/runs/predict',
+      method: 'post',
+      headers: new AxiosHeaders(),
+    }
+    mocks.postPredictRun.mockRejectedValue(
+      new BackendUnavailableError(new AxiosError('Network Error', 'ERR_NETWORK', config)),
+    )
 
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -1424,6 +1434,9 @@ describe('Workspace WS-1 local writer contracts', () => {
       const text = document.body.textContent ?? ''
       expect(text).toContain('1 predict error')
       expect(text).toContain('Backend unavailable')
+      expect(text).toContain('Request: POST http://127.0.0.1:8787/api/skills/writer-smoke/runs/predict')
+      expect(text).toContain('Axios code: ERR_NETWORK')
+      expect(text).toContain('Original error: Network Error')
       expect(document.body.querySelector('[data-slot="predict-drawer-content"]')).not.toBeNull()
       expect(document.body.querySelector('[aria-label="Copy all predict errors"]')).not.toBeNull()
     } finally {
@@ -1436,7 +1449,15 @@ describe('Workspace WS-1 local writer contracts', () => {
   })
 
   it('opens the run error drawer when starting run fails before diagnostics return', async () => {
-    mocks.startRun.mockRejectedValue(new Error('Backend unavailable'))
+    const config: InternalAxiosRequestConfig = {
+      baseURL: 'http://127.0.0.1:8787/api',
+      url: '/skills/writer-smoke/runs',
+      method: 'post',
+      headers: new AxiosHeaders(),
+    }
+    mocks.startRun.mockRejectedValue(
+      new BackendUnavailableError(new AxiosError('connect ECONNREFUSED 127.0.0.1:8787', 'ECONNREFUSED', config)),
+    )
 
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -1463,6 +1484,9 @@ describe('Workspace WS-1 local writer contracts', () => {
       const text = document.body.textContent ?? ''
       expect(text).toContain('1 run error')
       expect(text).toContain('Backend unavailable')
+      expect(text).toContain('Request: POST http://127.0.0.1:8787/api/skills/writer-smoke/runs')
+      expect(text).toContain('Axios code: ECONNREFUSED')
+      expect(text).toContain('Original error: connect ECONNREFUSED 127.0.0.1:8787')
       expect(document.body.querySelector('[data-slot="run-drawer-content"]')).not.toBeNull()
       expect(document.body.querySelector('[aria-label="Copy all run errors"]')).not.toBeNull()
       expect(toastMocks.error).toHaveBeenCalledWith('Run failed: Backend unavailable')

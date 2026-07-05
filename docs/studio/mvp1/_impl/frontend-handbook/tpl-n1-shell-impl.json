@@ -182,7 +182,7 @@
    "gap": "无。Lachesis/Atropos 两席为设计源保留席、未实现,UI 不显示。Open in 菜单的 Codex 项已接 native launcher;Claude/Codex trust 注入与 ah 生命周期关闭已补齐。",
    "fe_status": "符合",
    "be_status": "已实现",
-   "be_dep": "已就绪:Rust open_claude_code / open_codex_cli / code_assistant_status / close_code_assistant 已注册;Codex launcher 会从 Windows .codex/auth.json 同步到 WSL 并在 ah sandbox 里按 Codex 规则链接 auth/rules/skills,同时以 trust_level=trusted + hook trust bypass 启动;Claude sandbox 链接宿主已预置的 .claude.json;关闭与 app 退出均经 ah --config <cfg> stop。"
+   "be_dep": "已就绪:Rust open_claude_code / open_codex_cli / code_assistant_status / close_code_assistant 已注册;Codex launcher 会从 Windows .codex/auth.json 同步到 WSL 并在 ah sandbox 里按 Codex 规则链接 auth/rules/skills,同时把当前 workspace 写入 sandbox $HOME/.codex/config.toml 的 projects trust 并启用 hook trust bypass;Claude sandbox 链接宿主已预置的 .claude.json;关闭与 app 退出均经 ah --config <cfg> stop。"
   },
   {
    "n": 33,
@@ -633,7 +633,7 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "copilot-fab-geometry.test.ts(10 例,TDD):defaultFabPosition 右上锚点、clampFabPosition 画布内夹取、headerLogoTarget 落在面板左侧近顶、travelSteps L 路径(先垂直后水平)、isTapGesture 拖/点阈值、panelRect 展开态面板矩形 + 与 logo 落点关系。moirai-mark.test.tsx:aria-hidden/role=img+title、currentColor 无硬编码色、五星。copilot-fab.test.tsx:可访问名「打开 MoirAI」+ rounded-full + accent 标 + 无硬编码色。CopilotPanel.test.tsx:断言 Open in 菜单渲 Claude/Codex 两项,分别调用 openClaudeCode/openCodexCli;activeCodeAssistantIds/codeAssistantCloseButtonLabel 断言 ahd 状态会派生 Close Claude / Close Codex / Close assistants。tauri.test.ts:断言 openCodexCli invoke open_codex_cli、code_assistant_status 与 close_code_assistant helper。Rust lib.rs 测试:断言 open_codex_cli / lifecycle command 注册、Codex ah 配置 provider/rules/skills/auth 注入、trust_level=trusted + hook trust bypass、Claude sandbox 链接宿主 .claude.json、WSL payload 从 Windows Codex home 同步 auth、status lookup 不生成临时 workspace。拖拽/WAAPI morph 属纯视觉、按 SOP 不单测。"
+    "copilot-fab-geometry.test.ts(10 例,TDD):defaultFabPosition 右上锚点、clampFabPosition 画布内夹取、headerLogoTarget 落在面板左侧近顶、travelSteps L 路径(先垂直后水平)、isTapGesture 拖/点阈值、panelRect 展开态面板矩形 + 与 logo 落点关系。moirai-mark.test.tsx:aria-hidden/role=img+title、currentColor 无硬编码色、五星。copilot-fab.test.tsx:可访问名「打开 MoirAI」+ rounded-full + accent 标 + 无硬编码色。CopilotPanel.test.tsx:断言 Open in 菜单渲 Claude/Codex 两项,分别调用 openClaudeCode/openCodexCli;activeCodeAssistantIds/codeAssistantCloseButtonLabel 断言 ahd 状态会派生 Close Claude / Close Codex / Close assistants。tauri.test.ts:断言 openCodexCli invoke open_codex_cli、code_assistant_status 与 close_code_assistant helper。Rust lib.rs 测试:断言 open_codex_cli / lifecycle command 注册、Codex ah 配置 provider/rules/skills/auth 注入、sandbox config.toml 项目 trust + hook trust bypass、Claude sandbox 链接宿主 .claude.json、WSL payload 从 Windows Codex home 同步 auth、status lookup 不生成临时 workspace。拖拽/WAAPI morph 属纯视觉、按 SOP 不单测。"
    ],
    "layer2": [
     "真机 Playwright(recon-demo,深色,reducedMotion:'no-preference'):收起后 FAB 默认右上(距缘~12px)、36px、border 0px、bg=--studio-canvas-surface、标=--studio-canvas-accent;拖拽 → FAB 到画布中心;tap → 逐帧采样 box 由 36×36 圆横移到 header logo 位(x1392→1108)再连续撑大 142×302 … 352×832 面板(容器变形:圆长成面板);close 反向面板缩回 FAB。注:headless Chrome 默认 prefers-reduced-motion:reduce 会走直开回退,需 reducedMotion:'no-preference' 才能观察动画。"

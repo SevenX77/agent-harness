@@ -50,7 +50,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
    Claude 订阅登录 → 回来重跑安装脚本,它会把登录凭据复制进 WSL。
    - 用的是你的**订阅登录**,不是 API key。
 
-装完最后看到 `Done. Go back to Studio and click 'Open in Claude Code'.` 就 OK 了。
+装完最后看到 `Done. Go back to Studio and click 'Open in Claude Code'.` 就 OK 了。脚本会检查
+`ah --version`;低于 `1.3.0` 会自动重装最新 `ah` / `ahd` 并停掉旧 daemon,否则
+`window_size = "follow"` 不会生效。
 
 > `ah doctor` 输出里那条红色 `daemon - ahd daemon is not running` 是**正常的**——
 > ahd 是你点按钮那一刻才按需启动的,装机阶段本来就不该起。
@@ -83,6 +85,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 | 按钮点了没反应 / 灰着 | 按钮在没有工作区时会禁用;先确认进了某个 skill 的画布。 |
 | 终端弹出但报 `Could not start WSL` | WSL2 没装好。跑第 1 步的安装脚本。 |
 | 终端里 `ah CLI was not found in WSL` | `ah` 没装。跑安装脚本(会装 `ah`)。 |
+| 终端提示 `Studio requires ah >= 1.3.0` | WSL 里还是旧 ah。跑安装脚本,它会升级 ah/ahd 并停掉旧 daemon。 |
+| 终端顶部出现 systemd 的黄色 `Scope command line contains environment variable` | 正常情况下 launcher 会用 `SYSTEMD_LOG_LEVEL=err` 压掉。若仍出现,说明你开的不是最新 Studio 生成的 launcher,重启 Studio 后再点。 |
+| Claude 顶部出现 `.local/bin/claude missing or broken` | 正常情况下 master 启动前会在沙盒 HOME 内补 `$HOME/.local/bin/claude` 链接。若仍出现,重启 Studio 后再点;若用户自写 `ah.toml`,需要自行在 master cmd 里做同样处理。 |
 | 终端一直停在 `Starting...` 不动超过 ~40s | 大概率网络/代理没通。重跑安装脚本(它会把 Windows 代理同步进 WSL);确认 Windows 上代理是开的。 |
 | 终端提示拒绝覆盖 `.ah/rules/...` 或 `.ah/skills/...` | 该 skill 工作区已有用户手写文件,或 Studio 曾生成的文件被手工改过。Studio 不会静默覆盖;先备份/删除冲突文件,或自己维护 `ah.toml` 接管配置。 |
 | 弹出 “Allow external CLAUDE.md file imports?” 之类的确认框 | 正常情况下已被自动预置跳过(见下)。若仍出现,说明工作区的某个祖先目录有新的 `CLAUDE.md`——点 “Yes” 一次即可,之后不再弹。 |
@@ -116,8 +121,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
    MoirAI / Clotho / Lachesis / Atropos 的规则,四个既有 copilot skill,以及
    `eval-judgement` skill。受管文件带内容 hash;没有 Studio 标记或 hash 对不上的文件
    一律拒绝覆盖。
-3. Studio 写一个临时 `ah.toml`:master 命令仍是
-   `IS_SANDBOX=1 claude --dangerously-skip-permissions '<汇报提示>'`,agents 为
+3. Studio 写一个临时 `ah.toml`:launcher 会记录启动 ah 前的宿主 HOME,master 命令会先设置
+   `SYSTEMD_LOG_LEVEL=err`,在沙盒 HOME 内补 `$HOME/.local/bin/claude -> <真实 claude>` 链接,再以
+   `IS_SANDBOX=1 claude --dangerously-skip-permissions '<汇报提示>'` 进入 Claude Code;agents 为
    Clotho / Lachesis / Atropos(provider 现阶段都用 `claude`),并通过
    `[master].window_size = "follow"` 让 attach 窗口跟随终端尺寸。Studio 默认不写
    `[sandbox].additional_ro_binds`:当前 ah 会把它落成 WSL 不接受的 user scope `BindReadOnlyPaths`,

@@ -305,6 +305,7 @@ export interface CredentialProviderState {
   base_url?: string
   runtime_base_url?: string
   provider_type?: ProviderType | null
+  endpoint_status?: RouteStatus
 
   last_test_status?: TestStatus
   last_test_at?: string
@@ -1088,6 +1089,7 @@ function endpointToCredential(
     base_url: endpointStudioBaseUrl(endpoint),
     runtime_base_url: endpoint.base_url,
     provider_type: providerType,
+    endpoint_status: endpoint.status,
     last_test_status: verdict.testStatus,
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',

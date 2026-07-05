@@ -15,7 +15,7 @@ function route(
   endpointId: string,
   modelId: string,
   uiState: ProviderModelOption["ui_state"],
-  callMethodId: string = "anthropic_messages",
+  callMethodId: string | null = "anthropic_messages",
   capabilities: ProviderModelOption["capabilities"] = {},
 ): ProviderModelOption {
   return {
@@ -30,9 +30,6 @@ function route(
     reason_code: null,
     capability_state: "known",
     capabilities,
-    // R-F8: backend now emits call_method_id on every route; copilot
-    // eligibility is determined by this field belonging to the
-    // anthropic-messages family, not by `provider_type==='anthropic_compatible'`.
     call_method_id: callMethodId,
   }
 }
@@ -117,10 +114,9 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     expect(candidates[0].description).toBe("Claude Opus 4.8")
   })
 
-  it("only lists groups whose routes carry an anthropic-messages call_method_id", () => {
-    // R-F8: eligibility is now driven by the route's call_method_id, not by the
-    // credential provider_type. A route with `openai_chat_completions` is
-    // filtered out even when the credential set is anthropic-compatible.
+  it("filters a route with an explicit non-Anthropic call method", () => {
+    // A verified non-Anthropic method is stronger evidence than endpoint-level
+    // protocol metadata, so this route cannot be driven by Claude Agent SDK.
     const openaiOnlyGroup = {
       canonical_id: "claude-opus-4.8",
       display_name: "Claude Opus 4.8",
@@ -137,6 +133,71 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     } as ModelGroup
     const candidates = deriveCopilotCandidateGroups([openaiOnlyGroup], anthropicCredentials)
     expect(candidates).toEqual([])
+  })
+
+  it("keeps Anthropic-compatible endpoint routes when the call method is not verified yet", () => {
+    const qiniuGroup = {
+      canonical_id: "deepseek-v4-pro",
+      display_name: "DeepSeek V4 Pro",
+      provider_models: [
+        route("qiniu-anthropic", "deepseek-v4-pro", "ready", null, {
+          tools: { value: true, source: "probed_verified" },
+        }),
+      ],
+      status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 1,
+        thinking: "unknown",
+        tools: "supported",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    } as ModelGroup
+    const credentials: CredentialsState = {
+      providers: [
+        {
+          id: "qiniu-anthropic",
+          name: "Qiniu",
+          provider_type: "anthropic_compatible",
+          api_key: "x",
+          base_url: "https://anthropic.qnaigc.com/anthropic",
+        },
+      ],
+    }
+
+    const candidates = deriveCopilotCandidateGroups([qiniuGroup], credentials)
+
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].availableRoutes.map((route) => route.id)).toEqual([
+      "qiniu-anthropic:deepseek-v4-pro",
+    ])
+    expect(candidates[0].availableRoutes[0].methodId).toBeNull()
+    expect(candidates[0].availableRoutes[0].protocol).toBe("anthropic_compatible")
+  })
+
+  it("filters routes with no verified call method when the endpoint protocol is not Anthropic-compatible", () => {
+    const openaiUnknownMethodGroup = {
+      canonical_id: "gpt-5",
+      display_name: "GPT-5",
+      provider_models: [route("openai-official", "gpt-5", "ready", null)],
+      status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 1,
+        thinking: "unknown",
+        tools: "unknown",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    } as ModelGroup
+    const credentials: CredentialsState = {
+      providers: [
+        { id: "openai-official", name: "OpenAI", provider_type: "openai_compatible", api_key: "x" },
+      ],
+    }
+
+    expect(deriveCopilotCandidateGroups([openaiUnknownMethodGroup], credentials)).toEqual([])
   })
 
   it("accepts ark/deepseek/openrouter anthropic-messages variants alongside the official call method", () => {
@@ -168,7 +229,7 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
         route("anthropic-official", "claude-opus-4.8", "ready", "anthropic_messages", {
           tools: { value: true, source: "probed_verified" },
         }),
-        route("no-tools-endpoint", "claude-opus-4.8", "ready", "anthropic_messages", {
+        route("no-tools-endpoint", "claude-opus-4.8", "ready", null, {
           tools: { value: false, source: "probed_verified" },
         }),
       ],

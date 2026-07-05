@@ -8,20 +8,19 @@ import {
   copilotRouteStatusesFromJob,
   copilotRouteStatusesFromPersistedResult,
 } from "./copilot-role-test"
-import i18n from "@/i18n"
 import type { RoleTestJobResponse } from "@/api/llm"
 
 describe("copilot route SDK test messages surface the real failure reason", () => {
   it("extracts per-route messages from a live job", () => {
     const job = {
       provider_statuses: [
-        { route_id: "deepseek-official:deepseek-v4-pro", status: "failed", message: "SDK 返回错误: HTTP 404" },
+        { route_id: "deepseek-official:deepseek-v4-pro", status: "failed", message: "SDK returned an error: HTTP 404" },
         { route_id: "qiniu-anthropic:deepseek.deepseek-v4-pro", status: "ok", message: null },
       ],
     } as unknown as RoleTestJobResponse
 
     expect(copilotRouteMessagesFromJob(job)).toEqual({
-      "deepseek-official:deepseek-v4-pro": "SDK 返回错误: HTTP 404",
+      "deepseek-official:deepseek-v4-pro": "SDK returned an error: HTTP 404",
     })
   })
 
@@ -29,13 +28,13 @@ describe("copilot route SDK test messages surface the real failure reason", () =
     const result = {
       sdk_evidence: {
         routes: {
-          "deepseek-official:deepseek-v4-pro": { status: "failed", message: "请求超时, 检查网络 / 代理" },
+          "deepseek-official:deepseek-v4-pro": { status: "failed", message: "Request timed out. Check network or proxy settings." },
           "qiniu-anthropic:deepseek.deepseek-v4-pro": { status: "ok", message: null },
         },
       },
     }
     expect(copilotRouteMessagesFromPersistedResult(result)).toEqual({
-      "deepseek-official:deepseek-v4-pro": "请求超时, 检查网络 / 代理",
+      "deepseek-official:deepseek-v4-pro": "Request timed out. Check network or proxy settings.",
     })
   })
 })
@@ -157,25 +156,6 @@ describe("copilot role test job helpers", () => {
     expect(message).toBe("DeepSeek V4 Copilot test failed: Role test job crashed")
   })
 
-  it("does not leak Chinese backend detail while the UI language is English", async () => {
-    const previousLanguage = i18n.language
-    await i18n.changeLanguage("en")
-    try {
-      const message = copilotRoleTestErrorMessage({
-        message: "Request failed with status code 500",
-        response: {
-          status: 500,
-          data: { detail: "SDK 返回错误\n请求超时, 检查网络 / 代理" },
-        },
-      }, "DeepSeek V4 Copilot")
-
-      expect(message).not.toMatch(/[\u3400-\u9fff]/)
-      expect(message).toContain("SDK returned an error")
-      expect(message).toContain("Request timed out")
-    } finally {
-      await i18n.changeLanguage(previousLanguage)
-    }
-  })
 })
 
 describe("R20 persisted copilot route status seeding", () => {
@@ -305,7 +285,7 @@ describe("R-F9 copilotRoleTestErrorMessage prefers error_code → human text", (
       job_id: "job-3",
       role_name: "copilot_opus_4_7",
       status: "failed",
-      message: "Claude Opus 4.7 暂无可用模型路由...",
+      message: "Claude Opus 4.7 has no available model route...",
       error_code: "resource.no_available_route",
       error_payload: { role: "copilot_opus_4_7" },
       provider_statuses: [],

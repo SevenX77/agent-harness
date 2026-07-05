@@ -324,6 +324,90 @@ class RoleTestResultsResponse(BaseModel):
     results: dict[str, PersistedRoleTestResult] = Field(default_factory=dict)
 
 
+_CJK_DIAGNOSTIC_RE = re.compile(r"[\u3400-\u9fff]")
+_DISCARDED_COPILOT_DIAGNOSTIC_MESSAGE = (
+    "Previous diagnostic was discarded. Re-run Test for current details."
+)
+
+
+def _public_copilot_diagnostic(message: str | None) -> str | None:
+    if not isinstance(message, str):
+        return None
+    text = message.strip()
+    if not text:
+        return None
+    if _CJK_DIAGNOSTIC_RE.search(text):
+        return _DISCARDED_COPILOT_DIAGNOSTIC_MESSAGE
+    return text
+
+
+def _sanitize_copilot_sdk_result(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result.get("sdk_evidence"), dict):
+        return result
+
+    sanitized = dict(result)
+    sanitized["message"] = _public_copilot_diagnostic(
+        cast(str | None, sanitized.get("message"))
+    )
+
+    model_groups = sanitized.get("model_groups")
+    if isinstance(model_groups, list):
+        next_groups: list[Any] = []
+        for group in model_groups:
+            if not isinstance(group, dict):
+                next_groups.append(group)
+                continue
+            next_group = dict(group)
+            provider_results = next_group.get("provider_results")
+            if isinstance(provider_results, list):
+                next_provider_results: list[Any] = []
+                for provider_result in provider_results:
+                    if not isinstance(provider_result, dict):
+                        next_provider_results.append(provider_result)
+                        continue
+                    next_provider_result = dict(provider_result)
+                    next_provider_result["message"] = _public_copilot_diagnostic(
+                        cast(str | None, next_provider_result.get("message"))
+                    )
+                    next_provider_results.append(next_provider_result)
+                next_group["provider_results"] = next_provider_results
+            next_groups.append(next_group)
+        sanitized["model_groups"] = next_groups
+
+    sdk_evidence = sanitized.get("sdk_evidence")
+    if isinstance(sdk_evidence, dict):
+        next_evidence = dict(sdk_evidence)
+        routes = next_evidence.get("routes")
+        if isinstance(routes, dict):
+            next_routes: dict[str, Any] = {}
+            for route_id, route_result in routes.items():
+                if not isinstance(route_result, dict):
+                    next_routes[str(route_id)] = route_result
+                    continue
+                next_route_result = dict(route_result)
+                next_route_result["message"] = _public_copilot_diagnostic(
+                    cast(str | None, next_route_result.get("message"))
+                )
+                next_routes[str(route_id)] = next_route_result
+            next_evidence["routes"] = next_routes
+        sanitized["sdk_evidence"] = next_evidence
+
+    return sanitized
+
+
+def _persisted_role_test_result_from_storage(entry: object) -> PersistedRoleTestResult:
+    persisted = PersistedRoleTestResult.model_validate(entry)
+    result = _sanitize_copilot_sdk_result(persisted.result)
+    if result is persisted.result:
+        return persisted
+    return persisted.model_copy(
+        update={
+            "message": _public_copilot_diagnostic(persisted.message),
+            "result": result,
+        }
+    )
+
+
 class CompareCandidateTestRequest(BaseModel):
     """Transient node compare-candidate test request."""
 
@@ -1439,7 +1523,7 @@ async def probe_route_multimodal(route_id: str) -> ProviderRoute:
     if candidate is None:
         raise HTTPException(
             status_code=422,
-            detail="该 endpoint / 模型没有可用于多模态探测的调用方式",
+            detail="This endpoint/model has no available call method for multimodal probing.",
         )
     result = await _probe_official_call_method(
         endpoint, route.provider_model_id, candidate, multimodal=True
@@ -1548,7 +1632,7 @@ async def get_role_test_results() -> RoleTestResultsResponse:
     persisted = load_role_test_results()
     return RoleTestResultsResponse(
         results={
-            role_name: PersistedRoleTestResult.model_validate(entry)
+            role_name: _persisted_role_test_result_from_storage(entry)
             for role_name, entry in persisted.items()
         }
     )
@@ -1634,7 +1718,7 @@ async def delete_llm_role(role_name: str) -> RolesData:
         # 固定角色(引擎 builtin 硬依赖 / 内置 copilot)删了就跑不起来。
         raise HTTPException(
             status_code=409,
-            detail=f"固定角色不可删除: {role_name}",
+            detail=f"Fixed roles cannot be deleted: {role_name}",
         )
     roles = dict(data.roles)
     del roles[role_name]
@@ -1960,7 +2044,7 @@ _COPILOT_SDK_TEST_CONCURRENCY = 2
 
 
 def _human_message_for_error_code(error_code: str | None, role_name: str) -> str:
-    """R-F9: map gateway error codes to human-readable Chinese copilot test
+    """R-F9: map gateway error codes to human-readable English copilot test
     toast messages. Raw `ResourceTerminalError: resource.no_available_route`
     leaks an internal exception class name + dict payload to the user; this
     helper returns a sentence the operator can act on.
@@ -1970,16 +2054,19 @@ def _human_message_for_error_code(error_code: str | None, role_name: str) -> str
     error before the BE could attach `error_code`).
     """
     if error_code == "resource.no_available_route":
-        return f"{role_name} 暂无可用模型路由：请先在 API Keys 配置 Anthropic-compatible 凭证并测试通过"
+        return (
+            f"{role_name} has no available model route. Configure and test an "
+            "Anthropic-compatible credential in API Keys first."
+        )
     if error_code == "resource.role_unknown":
-        return f"{role_name} 不存在或已被删除：请刷新页面后重试"
+        return f"{role_name} does not exist or was deleted. Refresh the page and try again."
     if error_code == "resource.role_invalid_kind":
-        return f"{role_name} 不是 copilot 角色，无法用 Claude SDK 测试"
+        return f"{role_name} is not a copilot role, so it cannot be tested with Claude SDK."
     if error_code == "resource.credential_missing":
-        return f"{role_name} 缺少必需的 API key：请到 API Keys 填写后重试"
+        return f"{role_name} is missing a required API key. Fill it in API Keys and retry."
     if error_code:
-        return f"{role_name} 测试失败 ({error_code})"
-    return f"{role_name} 测试失败：无法解析模型路由"
+        return f"{role_name} test failed ({error_code})"
+    return f"{role_name} test failed: could not resolve model routes."
 
 
 async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
@@ -2049,7 +2136,7 @@ def _copilot_route_progress(
         canonical_id=route.canonical_id,
         route_id=route.route_id,
         status=status,
-        message=message,
+        message=_public_copilot_diagnostic(message),
         retry_after_seconds=retry_after_seconds,
     )
 
@@ -2082,7 +2169,11 @@ async def _run_copilot_sdk_test_job(
         results = await asyncio.gather(*(test_route(route) for route in routes))
     except Exception as exc:  # pragma: no cover - defensive job boundary
         logger.exception("Copilot SDK test job failed: %s", job_id)
-        await _update_role_test_job(job_id, status="failed", message=str(exc))
+        await _update_role_test_job(
+            job_id,
+            status="failed",
+            message=_public_copilot_diagnostic(str(exc)) or "Copilot SDK test failed.",
+        )
         return
 
     results_list = list(results)
@@ -2137,7 +2228,7 @@ def _build_copilot_sdk_result(
     routes_evidence = {
         result.route_id: {
             "status": result.status,
-            "message": result.message,
+            "message": _public_copilot_diagnostic(result.message),
             "retry_after_seconds": result.retry_after_seconds,
         }
         for result in results
@@ -2168,7 +2259,7 @@ def _copilot_sdk_model_groups(
             {
                 "route_id": route.route_id,
                 "status": result.status if result else "untested",
-                "message": result.message if result else None,
+                "message": _public_copilot_diagnostic(result.message) if result else None,
             }
         )
     return [

@@ -43,13 +43,38 @@ import { cn } from "@/lib/utils"
 import { ThinkingBadge } from "../llm-roles/RoleBadges"
 import type { CopilotRoutePreview } from "./copilot-role-derivation"
 type CopilotAgentStatus = string
-import {
-  englishContainsCjk,
-  fallbackCopilotT,
-  localizeCopilotRouteDiagnostic,
-  type CopilotSettingsT,
-} from "./copilot-diagnostics"
 import type { CopilotRouteJobStatus } from "./copilot-role-test"
+
+type CopilotSettingsT = (
+  key: string,
+  options?: Record<string, unknown>,
+) => string
+
+function fallbackCopilotT(key: string, options?: Record<string, unknown>): string {
+  const defaults: Record<string, string> = {
+    "copilot.routeStatus.ready": "Ready",
+    "copilot.routeStatus.historicalReady": "Previously Connected",
+    "copilot.routeStatus.testing": "Testing",
+    "copilot.routeStatus.untested": "Untested",
+    "copilot.routeStatus.coolingDown": "Cooling Down",
+    "copilot.routeStatus.off": "Off",
+    "copilot.routeStatus.failed": "Failed",
+    "copilot.routeTooltip.endpointWithHost": "Endpoint: {{provider}} · {{host}}{{protocol}}",
+    "copilot.routeTooltip.endpoint": "Endpoint: {{provider}}",
+    "copilot.routeTooltip.id": "ID: {{id}}",
+    "copilot.routeTooltip.sdkStatus": "Claude Agent SDK: {{status}}",
+    "copilot.routeTooltip.detailPrefix": "↳",
+    "copilot.routeTooltip.transport": "Transport: {{transport}}",
+    "copilot.routeTooltip.toolUse": "Tool use: {{value}}",
+    "copilot.routeTooltip.yes": "yes",
+    "copilot.routeTooltip.multimodal": "Multimodal: {{value}}",
+    "copilot.routeTooltip.textOnly": "text only",
+    "copilot.routeTooltip.output": "Output: {{output}}",
+    "copilot.routeTooltip.thinking": "Thinking: yes",
+  }
+  const template = options?.defaultValue ? String(options.defaultValue) : (defaults[key] ?? key)
+  return template.replace(/\{\{(\w+)}}/g, (_, name: string) => String(options?.[name] ?? ""))
+}
 
 function asCopilotSettingsT(t: unknown): CopilotSettingsT {
   return t as CopilotSettingsT
@@ -176,7 +201,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
   message?: string | null
   onRemove: () => void
 }) {
-  const { t, i18n } = useTranslation("settings")
+  const { t } = useTranslation("settings")
   const tx = asCopilotSettingsT(t)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: route.id })
   const style = {
@@ -235,7 +260,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
       <Tooltip>
         <TooltipTrigger asChild>{row}</TooltipTrigger>
         <TooltipContent className="max-w-sm whitespace-pre-line break-words">
-          {routeTooltip(route, status, message, tx, i18n?.language ?? "en")}
+          {routeTooltip(route, status, message, tx)}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -246,8 +271,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
 // 是每个模型各不相同的能力,所以按 route 各测(不是整个角色一把测)。结果只认
 // probed_verified(catalog 声称只是提示,不算实测通过)。
 function MultimodalTestButton({ route }: { route: CopilotRoutePreview }) {
-  const { t, i18n } = useTranslation("settings")
-  const tx = asCopilotSettingsT(t)
+  const { t } = useTranslation("settings")
   const [testing, setTesting] = useState(false)
   const [verified, setVerified] = useState<boolean | null>(null)
 
@@ -265,7 +289,7 @@ function MultimodalTestButton({ route }: { route: CopilotRoutePreview }) {
       }
     } catch (error) {
       const detail = error instanceof Error
-        ? localizeCopilotRouteDiagnostic(error.message, i18n?.language ?? "en", tx)
+        ? error.message
         : t("copilot.multimodal.failedFallback")
       toast.error(t("copilot.multimodal.failed", { provider: route.provider, error: detail }))
     } finally {
@@ -450,7 +474,6 @@ function routeTooltip(
   status: CopilotRouteJobStatus,
   message?: string | null,
   t: CopilotSettingsT = fallbackCopilotT,
-  language = "en",
 ): string {
   // 与 LLM Roles 的 route 状态 tooltip 对齐:端点 + 协议/method + 多模态 + 工具 + 思考,
   // 再带上本次 SDK 测试的真实结果信息(失败时是具体原因,不再只显示状态)。
@@ -461,8 +484,8 @@ function routeTooltip(
   const supportsTools = routeCapabilityBool(route, "tools") || routeCapabilityBool(route, "tool_use")
   const supportsThinking = routeCapabilityBool(route, "thinking")
   const transport = methods.length > 0 ? methods.join(", ") : route.methodId || "—"
-  const diagnostic = localizeCopilotRouteDiagnostic(message, language, t)
-  const note = route.note && !englishContainsCjk(route.note, language) ? route.note : null
+  const diagnostic = message?.trim() || null
+  const note = route.note?.trim() || null
 
   const lines = [
     route.modelId,

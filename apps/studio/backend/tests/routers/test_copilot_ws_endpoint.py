@@ -844,7 +844,9 @@ def test_stream_query_yields_error_when_no_api_key(
     )
 
     assert isinstance(events[0], CopilotEventContextResolved)
-    assert events[1:] == [CopilotEventError(message="Endpoint test-provider 未配置 API key")]
+    assert events[1:] == [
+        CopilotEventError(message="Endpoint test-provider is missing an API key")
+    ]
 
 
 def test_stream_query_yields_clear_error_for_credential_ref_only_route(
@@ -866,7 +868,7 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
 
     assert isinstance(events[0], CopilotEventContextResolved)
     assert events[1:] == [
-        CopilotEventError(message="Endpoint test-provider 未配置 API key")
+        CopilotEventError(message="Endpoint test-provider is missing an API key")
     ]
 
 
@@ -895,7 +897,7 @@ def test_stream_query_surfaces_resource_terminal_error_as_copilot_error(
 
     assert len(events) == 1
     assert isinstance(events[0], CopilotEventError)
-    assert "无可用 route" in events[0].message
+    assert "has no available route" in events[0].message
 
 
 def test_stream_query_preserves_resource_terminal_error_code_and_payload(

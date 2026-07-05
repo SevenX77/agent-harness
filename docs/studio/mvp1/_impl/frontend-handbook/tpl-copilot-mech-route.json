@@ -95,7 +95,7 @@
         "run_route_sdk_test（对一条 route 跑真 ClaudeSDKClient 工具调用测试的函数，copilot.py）先 _resolve_route_runtime 取 key/base_url/env，缺 key 直接判 failed。",
         "建临时工作目录、写随机 token 到 copilot_probe.txt（_SDK_TEST_FILE），用 build_options 起一个本测试自有生命周期的 ClaudeSDKClient（不碰全局 session 缓存）。",
         "_drive_sdk_test（驱动一轮 SDK 对话、按 token 回显判通过的函数，copilot.py）发 _SDK_TEST_PROMPT（要求 Read 该文件并回复内容），遍历 receive_response。",
-        "token 出现在模型回复文本里 → status=ok；否则有错误就报最后一条错误、无错误就报「token 未回显, tool loop 未验证」。",
+        "token 出现在模型回复文本里 → status=ok；否则有错误就报最后一条错误、无错误就报英文诊断「The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.」。",
         "中途单个工具错误不短路（模型自己恢复后仍可能回显 token），最终以 token 是否回显为唯一裁决。",
         "测试经统一的 role test-job 入口触发：前端 startRoleTestJob → POST /api/llm/roles/{name}/test-jobs，后端 _start_role_test_job 见 role.role_kind=='copilot' 即分流到 _start_copilot_sdk_test_job（routers/llm.py），并发跑各 route（_COPILOT_SDK_TEST_CONCURRENCY=2）。"
       ],
@@ -195,7 +195,7 @@
       "endpoint": "GET /api/llm/registry",
       "req": "无入参",
       "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + call_method_id + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
-      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动的 route」：call_method_id 必须属于 Anthropic Messages family，且 capabilities.tools / capabilities.tool_use 不得有显式 unsupported/false 证据；再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
+      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动的 route」：已验证 call_method_id 时必须属于 Anthropic Messages family；call_method_id 未验证时回退看 endpoint protocol/provider_type 是否归一为 anthropic_compatible；并且 capabilities.tools / capabilities.tool_use 不得有显式 unsupported/false/no 证据。再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
       "provider": "gateway 后端（routers/llm.py get_llm_registry）",
       "id": "iface-c0"
     },
@@ -306,15 +306,15 @@
     "reason_codes": [
       [
         "missing_api_key",
-        "该 route 的 endpoint 未配 api_key → SDK 测试直接判 failed（Endpoint {id} 未配置 API key）"
+        "该 route 的 endpoint 未配 api_key → SDK 测试直接判 failed（Endpoint {id} is missing an API key）"
       ],
       [
         "token_not_echoed",
-        "SDK 起得来但模型没真读文件回显 token → tool loop 未验证、判 failed"
+        "SDK 起得来但模型没真读文件回显 token → tool loop 未验证、判 failed（The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.）"
       ],
       [
         "spawn_or_env_error",
-        "spawn 子进程 / env 注入 / 连接出错 → _error_event_for_exception 映射成明确消息、判 failed"
+        "spawn 子进程 / env 注入 / 连接出错 → _error_event_for_exception 映射成英文明确消息、判 failed"
       ]
     ],
     "probe_errors": {
@@ -328,6 +328,7 @@
     },
     "terminal": "全兜底链 route 都失败时，stream_query yield CopilotEventError（_all_copilot_routes_failed_message，带 failed_route_ids）；SDK 测试 job 全 route failed 仍正常完成、把每条裁决落 sdk_evidence。"
   },
+  "diagnostic_locale_boundary": "Copilot SDK/test-job 的 user-visible 诊断由后端源头保证英文：新写入的 route progress / sdk_evidence message 经过 _public_copilot_diagnostic；旧持久化结果若带 CJK，在 GET /api/llm/roles/test-results 投影时被后端丢弃为英文 fallback（Previous diagnostic was discarded. Re-run Test for current details.）。前端只展示后端返回值，不维护中文转英文垫片。",
   "backend_status": [
     {
       "item": "route 解析（role → 有序兜底链）",

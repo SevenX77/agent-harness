@@ -38,7 +38,7 @@
       "module": "角色卡渲染",
       "func": "设计:把后端真实 model_groups + 凭证投影成 copilot 角色卡,标 Built-in / Third-party,卡内显该角色配的 model group 与 route 兜底链。『Built-in vs Third-party』= 这个 copilot 角色选的是不是系统按 family 阶梯自动浮出的 canonical model-group(§3.2 PM 2026-06-18 澄清),不是一个独立的后端元数据字段。",
       "action": "无显式动作(进 tab 自动按真实数据渲染)。",
-      "fe_design": "进 tab → 从 registry 的 model_groups + credentials 派生候选 copilot 模型组:只保留当前 Copilot SDK 可驱动的 route。Claude Agent SDK 的 route 判据 = call_method_id 属 Anthropic Messages family(anthropic_messages / ark_anthropic_messages / deepseek_anthropic_messages / openrouter_anthropic_messages),且 route 没有显式证据表明 SDK 必需 tool loop 能力不支持(tools/tool_use=false/unsupported/no)。capability unknown 仍保留,让用户能点 Test 收集证据;已验证不支持 SDK 必需能力的 route 不进入角色卡、不进入 Add route 候选、不在拖入模型组时写回 fallback_chain。右侧 Available Models 仍显示完整模型库,不按 Copilot SDK eligibility 预过滤。\n\n与 roles 表里 role_kind='copilot' 的角色对齐渲染成卡:有选中 model group 的渲染成完整角色卡(显过滤后的兜底链 route + SDK 状态灯),没选的渲染成空卡(待选组)。\n\nBuilt-in / Third-party 徽章的判定走『canonical 组归一化』这条已有能力,不需要新后端契约:① copilot 的『内置角色』本质 = 系统自动选了一个 canonical model-group(如 canonical_id 为 claude-opus-4.8 的组),而 canonical_id 由 §2.1『相同模型合并 / singleton 按 canonical_id 键』那套归一化早就算好、registry 的每个 model_group 已带(RoleModelGroup.canonical_id);② 所以『某角色是内置』⟺『它选的组的 canonical_id 正是系统按 family 阶梯(#56)会自动浮出的那批 canonical 组之一』——内置判定与 #56 浮出判定是同一套 canonical-id 真相,不是两份白名单。\n\n落地含义:Built-in 标注 = 复用 #56 的择优函数(pickDefaultCopilotGroupIds)判定『这个角色的组在不在系统会浮出的 canonical 组里』,在 = built_in、否则 third_party(用户自建组)。卡片标题/描述直接取 model_group 的 display_name(已归一化的 canonical 显示名),不靠『display_name 是否含 Claude』套两句模板。",
+      "fe_design": "进 tab → 从 registry 的 model_groups + credentials 派生候选 copilot 模型组:只保留当前 Copilot SDK 可驱动的 route。Claude Agent SDK 的 route 判据 = 已验证 call_method_id 优先:若 call_method_id 已知,必须属于 Anthropic Messages family(anthropic_messages / ark_anthropic_messages / deepseek_anthropic_messages / openrouter_anthropic_messages);若 call_method_id 未知,回退看 endpoint protocol/provider_type 归一化后是否为 anthropic_compatible。显式非 Anthropic method(如 openai_chat_completions)即过滤,不会被 endpoint 名称或 provider label 放行。route 还必须没有显式证据表明 SDK 必需 tool loop 能力不支持(tools/tool_use=false/unsupported/no)。capability unknown 仍保留,让用户能点 Test 收集证据;已验证不支持 SDK 必需能力的 route 不进入角色卡、不进入 Add route 候选、不在拖入模型组时写回 fallback_chain。DeepSeek 官方 Anthropic API 与 Qiniu Anthropic-compatible endpoint 在 method 尚未验证时仍保留可测。右侧 Available Models 仍显示完整模型库,不按 Copilot SDK eligibility 预过滤。\n\n与 roles 表里 role_kind='copilot' 的角色对齐渲染成卡:有选中 model group 的渲染成完整角色卡(显过滤后的兜底链 route + SDK 状态灯),没选的渲染成空卡(待选组)。\n\nBuilt-in / Third-party 徽章的判定走『canonical 组归一化』这条已有能力,不需要新后端契约:① copilot 的『内置角色』本质 = 系统自动选了一个 canonical model-group(如 canonical_id 为 claude-opus-4.8 的组),而 canonical_id 由 §2.1『相同模型合并 / singleton 按 canonical_id 键』那套归一化早就算好、registry 的每个 model_group 已带(RoleModelGroup.canonical_id);② 所以『某角色是内置』⟺『它选的组的 canonical_id 正是系统按 family 阶梯(#56)会自动浮出的那批 canonical 组之一』——内置判定与 #56 浮出判定是同一套 canonical-id 真相,不是两份白名单。\n\n落地含义:Built-in 标注 = 复用 #56 的择优函数(pickDefaultCopilotGroupIds)判定『这个角色的组在不在系统会浮出的 canonical 组里』,在 = built_in、否则 third_party(用户自建组)。卡片标题/描述直接取 model_group 的 display_name(已归一化的 canonical 显示名),不靠『display_name 是否含 Claude』套两句模板。",
       "fe_modules": [
         {
           "name": "copilot 角色派生",
@@ -55,7 +55,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。已接真 registry(deriveCopilotCandidateGroups,无 mock);Built-in 判定已复用 #56 的 pickDefaultCopilotGroupIds,描述/标题直接取 model_group display_name。route eligibility 已收敛为当前 Copilot SDK 判据:call_method_id 必须属于 Anthropic Messages family,且显式不支持 SDK 必需 tools/tool_use 能力的 route 在角色卡/Add route/拖入写回时过滤;右侧 Available Models 仍保留完整模型库。",
+      "gap_brief": "符合设计。已接真 registry(deriveCopilotCandidateGroups,无 mock);Built-in 判定已复用 #56 的 pickDefaultCopilotGroupIds,描述/标题直接取 model_group display_name。route eligibility 已收敛为当前 Copilot SDK 判据:已知 call_method_id 必须属于 Anthropic Messages family;未知 method 时允许 anthropic_compatible endpoint 留在角色卡/Add route/拖入写回中继续测试;显式非 Anthropic method 或显式不支持 SDK 必需 tools/tool_use 能力的 route 过滤;右侧 Available Models 仍保留完整模型库。",
       "impl_ref": "fn-55"
     },
     {
@@ -166,9 +166,9 @@
       "cap": "route-fallback-add-remove",
       "track": "共",
       "module": "route 兜底管理",
-      "func": "设计:往兜底链追加一条当前 Copilot SDK 可驱动的 route / 用垃圾桶删一条;候选 route 用后端 protocol + capability 证据判 eligible(支持 Anthropic Messages,且未显式不支持 SDK 必需 tool loop),不靠名字猜。",
+      "func": "设计:往兜底链追加一条当前 Copilot SDK 可驱动的 route / 用垃圾桶删一条;候选 route 用后端 method/protocol + capability 证据判 eligible(已知 method 支持 Anthropic Messages,未知 method 时 endpoint 为 Anthropic-compatible,且未显式不支持 SDK 必需 tool loop),不靠名字猜。",
       "action": "用户点 `Add route` 选一条可追加 route,或点某 route 的垃圾桶删除。",
-      "fe_design": "Add route → 下拉列出该 model group 里当前 Copilot SDK 可驱动、且还没在链里的 route,选一条追加到兜底序尾 → debounce 保存。垃圾桶 → 从兜底序移除该 route → 保存。候选 route 的『兼容』判据 = route.call_method_id 属 Anthropic Messages family,且 capabilities.tools / capabilities.tool_use 没有显式 false/unsupported/no 证据;unknown 保留供 Test 收敛证据。这个判据同时用于已配置角色卡可见 route、Add route 候选、拖入模型组后写回 fallback_chain/models.providers。右侧 Available Models 不用这个判据预过滤。",
+      "fe_design": "Add route → 下拉列出该 model group 里当前 Copilot SDK 可驱动、且还没在链里的 route,选一条追加到兜底序尾 → debounce 保存。垃圾桶 → 从兜底序移除该 route → 保存。候选 route 的『兼容』判据 = 若 route.call_method_id 已知,必须属 Anthropic Messages family;若 call_method_id 未知,endpoint protocol/provider_type 归一后必须是 anthropic_compatible;且 capabilities.tools / capabilities.tool_use 没有显式 false/unsupported/no 证据。unknown 能力保留供 Test 收敛证据,显式非 Anthropic method 过滤。这个判据同时用于已配置角色卡可见 route、Add route 候选、拖入模型组后写回 fallback_chain/models.providers。右侧 Available Models 不用这个判据预过滤。",
       "fe_modules": [
         {
           "name": "copilot 角色派生",
@@ -191,7 +191,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。增删 route 写兜底链;eligible 判据已用 route.call_method_id + capabilities.tools/tool_use 的真证据过滤(deriveCopilotCandidateGroups + compatibleRoutesForRole),非按名字猜。显式不支持 SDK 必需 capability 的 route 被隐藏,unknown 保留可测;spec §3.2 要取代的 isClaudeAgentSdkCompatibleRoute 名字启发式在现码已不存在。",
+      "gap_brief": "符合设计。增删 route 写兜底链;eligible 判据已用 route.call_method_id / endpoint protocol + capabilities.tools/tool_use 的真证据过滤(deriveCopilotCandidateGroups + compatibleRoutesForRole),非按名字猜。显式不支持 SDK 必需 capability 的 route 被隐藏,unknown capability 保留可测;method 未验证但 endpoint 为 anthropic_compatible 的 route 保留可测;spec §3.2 要取代的 isClaudeAgentSdkCompatibleRoute 名字启发式在现码已不存在。",
       "impl_ref": "fn-60"
     },
     {
@@ -324,7 +324,7 @@
     {
       "id": "femod-copilot-derivation",
       "name": "copilot 角色派生",
-      "explain": "前端共享逻辑：copilot-role-derivation.ts，从后端 model_groups + credentials 派生候选 copilot 模型组的纯函数集；deriveCopilotCandidateGroups（只保留含 anthropic 兼容 endpoint 的组、按 anthropic-messages capability 判 eligible，并标 built_in/third_party）；pickDefaultCopilotGroupIds（按 family 偏好阶梯择优浮出默认 canonical 组：opus4.8→4.7、V4Pro→V3.2Pro，现为孤儿待挂载——它既驱动 #56 浮出，又应作 #55 built_in 判定的唯一真相）；applyCopilotModelGroupSelection（选组时保留 role key、写 active_model/models/fallback_chain，保住 copilot 语义、修掉旧丢前缀 bug）。偏差点（#55）：现状 built_in 判定与描述靠一段独立的硬编码 canonical_id 白名单 + display_name.includes('Claude') 模板，与 pickDefaultCopilotGroupIds 各写各的，应收敛为复用浮出函数判 built_in、描述直接取归一化 display_name（纯前端收敛，不需后端补元数据契约——canonical_id 已在 registry model_group DTO 里）"
+      "explain": "前端共享逻辑：copilot-role-derivation.ts，从后端 model_groups + credentials 派生候选 copilot 模型组的纯函数集；deriveCopilotCandidateGroups（按 Claude Agent SDK eligibility 过滤 route:已知 Anthropic Messages method 直接放行、未知 method 时回退 endpoint anthropic_compatible protocol、显式非 Anthropic method 或 tools/tool_use=false/unsupported/no 则过滤，并标 built_in/third_party）；pickDefaultCopilotGroupIds（按 family 偏好阶梯择优浮出默认 canonical 组：opus4.8→4.7、V4Pro→V3.2Pro，它既驱动 #56 浮出，又作 #55 built_in 判定的唯一真相）；applyCopilotModelGroupSelection（选组时保留 role key、写 active_model/models/fallback_chain，保住 copilot 语义、修掉旧丢前缀 bug）。"
     },
     {
       "id": "femod-copilot-status",

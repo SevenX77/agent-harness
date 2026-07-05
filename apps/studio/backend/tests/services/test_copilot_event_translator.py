@@ -266,7 +266,7 @@ def test_translate_result_message_is_done() -> None:
 
 
 def test_error_result_surfaces_real_detail_not_just_generic() -> None:
-    # 真实报错不能被压成一句 "SDK 返回错误" —— 用户要看得出到底为什么失败
+    # 真实报错不能被压成一句 "SDK returned an error" —— 用户要看得出到底为什么失败
     # (协议不匹配 / 404 / model 不存在 …)。errors 空时退回 result/api_error_status/subtype。
     events = copilot.SdkMessageTranslator().translate(
         ResultMessage(
@@ -284,7 +284,7 @@ def test_error_result_surfaces_real_detail_not_just_generic() -> None:
 
     assert len(events) == 1
     message = events[0].message  # type: ignore[union-attr]
-    assert message.startswith("SDK 返回错误")
+    assert message.startswith("SDK returned an error")
     # 关键:实际原因必须出现在消息里,而不是被吞掉。
     assert "404 model not found" in message
 
@@ -302,7 +302,7 @@ def test_error_result_prefers_explicit_errors_list() -> None:
         ),
     )
     assert events[0].message == (  # type: ignore[union-attr]
-        "SDK 返回错误: upstream refused: anthropic-messages not supported"
+        "SDK returned an error: upstream refused: anthropic-messages not supported"
     )
 
 
@@ -458,7 +458,9 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
     assert isinstance(events[0], CopilotEventContextResolved)  # F4: first event echoes context
-    assert events[1:] == [CopilotEventError(message="Endpoint anthropic-official 未配置 API key")]
+    assert events[1:] == [
+        CopilotEventError(message="Endpoint anthropic-official is missing an API key")
+    ]
 
 
 def test_stream_query_errors_when_model_override_is_unknown(
@@ -473,7 +475,7 @@ def test_stream_query_errors_when_model_override_is_unknown(
         _collect(copilot.stream_query("skill-a", "hi", model_override="BAD_MODEL"))
     )
 
-    assert events == [CopilotEventError(message="未知模型: 'BAD_MODEL'")]
+    assert events == [CopilotEventError(message="Unknown model: 'BAD_MODEL'")]
 
 
 def test_resolve_copilot_runtime_uses_gateway_model_resolver(
@@ -556,7 +558,9 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
     assert isinstance(events[0], CopilotEventContextResolved)
-    assert events[1:] == [CopilotEventError(message="请求超时, 检查网络 / 代理")]
+    assert events[1:] == [
+        CopilotEventError(message="Request timed out. Check network or proxy settings.")
+    ]
 
 
 def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -576,7 +580,10 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert isinstance(events[0], CopilotEventContextResolved)
     assert events[1:] == [
         CopilotEventError(
-            message="后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): connection failed"
+            message=(
+                "Backend connection failed. Check endpoint reachability and proxy settings: "
+                "connection failed"
+            )
         )
     ]
 
@@ -606,7 +613,7 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     )
 
     assert isinstance(events[0], CopilotEventContextResolved)  # F4: context echo first
-    assert events[0].summary.startswith("本轮注入")
+    assert events[0].summary.startswith("Injected this turn")
     assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
     # 规则文档在会话级 system_prompt,不随每轮 query 重发;无 view context 时

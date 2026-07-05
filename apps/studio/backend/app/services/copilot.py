@@ -294,7 +294,7 @@ async def _drain_sdk_response(
     finally:
         await queue.put(_STREAM_SENTINEL)
 
-_SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit 目标必须位于 workspace 内"
+_SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit target must stay inside the workspace"
 _TOOL_APPROVAL_TIMEOUT_S = 120.0
 _READ_FENCED_TOOLS = ("Read", "Glob", "Grep")
 
@@ -340,7 +340,10 @@ async def _hold_for_tool_approval(
 
     if not tool_use_id:
         return PermissionResultDeny(
-            message=f"{tool_name} 请求缺少 tool_use_id,无法进入审批", interrupt=False
+            message=(
+                f"{tool_name} request is missing tool_use_id, so it cannot enter approval."
+            ),
+            interrupt=False,
         )
     future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
     _pending_tool_approvals[(skill_id, tool_use_id)] = future
@@ -357,7 +360,8 @@ async def _hold_for_tool_approval(
     except TimeoutError:
         return PermissionResultDeny(
             message=(
-                f"{tool_name} 在 {int(_TOOL_APPROVAL_TIMEOUT_S)}s 内未获用户批准,视为拒绝"
+                f"{tool_name} was not approved within {int(_TOOL_APPROVAL_TIMEOUT_S)}s "
+                "and was denied."
             ),
             interrupt=False,
         )
@@ -365,7 +369,7 @@ async def _hold_for_tool_approval(
         _pending_tool_approvals.pop((skill_id, tool_use_id), None)
     if approved:
         return PermissionResultAllow()
-    return PermissionResultDeny(message=f"用户拒绝了本次 {tool_name} 调用", interrupt=False)
+    return PermissionResultDeny(message=f"User denied this {tool_name} call.", interrupt=False)
 
 
 def _resolve_safe_write_target(
@@ -512,7 +516,10 @@ def _make_safe_write_can_use_tool(
             command = str(tool_input.get("command", ""))
             if sink is None:
                 return PermissionResultDeny(
-                    message="Bash 需要用户批准,但当前没有活跃的会话流", interrupt=False
+                    message=(
+                        "Bash requires user approval, but there is no active session stream."
+                    ),
+                    interrupt=False,
                 )
             return await _hold_for_tool_approval(
                 skill_id, sink, tool_name="Bash", detail=command, tool_use_id=tool_use_id
@@ -802,14 +809,14 @@ def _context_resolved_event(
             render_copilot_context_xml(skill_id, view_context.view, view_context.context)
         )
     else:
-        detail_lines.append("(无 view 上下文)")
+        detail_lines.append("(no view context)")
     if judge_context is not None:
         parts.append("judge context")
         detail_lines.append(render_copilot_judge_context_xml(judge_context))
     if spec_mounted:
-        parts.append("skill-spec 已挂载")
+        parts.append("skill-spec mounted")
     parts.append(f"rules@{copilot_rules_hash()}")
-    summary = "本轮注入: " + " · ".join(parts)
+    summary = "Injected this turn: " + " · ".join(parts)
     return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
 
 
@@ -960,7 +967,7 @@ async def stream_query(
     try:
         routes, credential_provider = _resolve_copilot_runtime(model_override, role=copilot_role)
     except KeyError as exc:
-        yield CopilotEventError(message=f"未知模型: {exc}")
+        yield CopilotEventError(message=f"Unknown model: {exc}")
         return
     except CopilotRouteResolutionError as exc:
         yield CopilotEventError(
@@ -1013,7 +1020,7 @@ async def stream_query(
             continue
         if not api_key:
             if len(routes) == 1:
-                yield CopilotEventError(message=f"Endpoint {route.endpoint_id} 未配置 API key")
+                yield CopilotEventError(message=f"Endpoint {route.endpoint_id} is missing an API key")
                 return
             failures.append(f"{route.route_id}: missing API key")
             route = _next_copilot_route(
@@ -1358,7 +1365,7 @@ class SdkMessageTranslator:
             if message.is_error:
                 detail = _result_error_detail(message)
                 suffix = f": {detail}" if detail else ""
-                return [CopilotEventError(message=f"SDK 返回错误{suffix}")]
+                return [CopilotEventError(message=f"SDK returned an error{suffix}")]
             return [CopilotEventDone()]
         return []
 
@@ -1470,13 +1477,13 @@ def _resolve_copilot_runtime(
         if not isinstance(error_payload, dict):
             error_payload = {"role": role}
         raise CopilotRouteResolutionError(
-            f"{role} 无可用 route: {exc}",
+            f"{role} has no available route: {exc}",
             error_code=error_code,
             error_payload=error_payload,
         ) from exc
     if not runtime.routes:
         raise CopilotRouteResolutionError(
-            f"{role} role 无可用 route",
+            f"{role} role has no available route",
             error_code=runtime.error_code or "resource.no_available_route",
             error_payload=runtime.error_payload or {"role": role},
         )
@@ -1505,7 +1512,7 @@ def _resolve_route_runtime(
     try:
         secret = credential_provider.get(route.credential_ref)
     except Exception as exc:
-        raise ValueError(f"Endpoint {route.endpoint_id} 未配置 API key") from exc
+        raise ValueError(f"Endpoint {route.endpoint_id} is missing an API key") from exc
     api_key = _secret_value(secret).strip()
     base_url = route.base_url.strip() or None
     env_overrides: dict[str, str] = {}
@@ -1545,12 +1552,15 @@ def _deepseek_anthropic_base_url(base_url: str) -> str:
 
 def _error_event_for_exception(exc: Exception) -> CopilotEventError:
     if isinstance(exc, TimeoutError):
-        return CopilotEventError(message="请求超时, 检查网络 / 代理")
+        return CopilotEventError(message="Request timed out. Check network or proxy settings.")
     if isinstance(exc, (CLIConnectionError, ProcessError, ClaudeSDKError)):
         return CopilotEventError(
-            message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {_safe_copilot_error_message(exc)}"
+            message=(
+                "Backend connection failed. Check endpoint reachability and proxy settings: "
+                f"{_safe_copilot_error_message(exc)}"
+            )
         )
-    return CopilotEventError(message=f"Copilot 请求失败: {_safe_copilot_error_message(exc)}")
+    return CopilotEventError(message=f"Copilot request failed: {_safe_copilot_error_message(exc)}")
 
 
 # COPILOT_ASSIST-4: the copilot test must exercise the SAME path copilot uses at
@@ -1663,7 +1673,7 @@ async def run_route_sdk_test(
         return RouteSdkTestResult(route.route_id, "failed", str(exc))
     if not api_key:
         return RouteSdkTestResult(
-            route.route_id, "failed", f"Endpoint {route.endpoint_id} 未配置 API key"
+            route.route_id, "failed", f"Endpoint {route.endpoint_id} is missing an API key"
         )
 
     with tempfile.TemporaryDirectory(prefix="copilot-sdk-test-") as workspace:
@@ -1737,7 +1747,9 @@ async def _drive_sdk_test(
         logger.warning("phase=sdk_test route=%s errors: %s", route_id, errors[-1])
         return RouteSdkTestResult(route_id, "failed", errors[-1])
     return RouteSdkTestResult(
-        route_id, "failed", "模型未真实读取文件 (token 未回显), tool loop 未验证"
+        route_id,
+        "failed",
+        "The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.",
     )
 
 

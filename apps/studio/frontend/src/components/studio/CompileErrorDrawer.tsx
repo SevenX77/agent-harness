@@ -39,9 +39,14 @@ export function formatCompileErrorLine(error: CompileError): string {
   return parts.join(" - ")
 }
 
-export function buildCompileErrorClipboardText(errors: readonly CompileError[]): string {
+type DiagnosticKind = "compile" | "predict"
+
+export function buildCompileErrorClipboardText(
+  errors: readonly CompileError[],
+  kind: DiagnosticKind = "compile",
+): string {
   const count = errors.length
-  const heading = `${count} compile error${count === 1 ? "" : "s"}`
+  const heading = `${count} ${kind} error${count === 1 ? "" : "s"}`
   const lines = errors.map((error) => `- ${formatCompileErrorLine(error)}`)
   return [heading, ...lines].join("\n")
 }
@@ -50,9 +55,10 @@ type CompileErrorDrawerProps = {
   errors: CompileError[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  kind?: DiagnosticKind
 }
 
-export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorDrawerProps) {
+export function CompileErrorDrawer({ errors, open, onOpenChange, kind = "compile" }: CompileErrorDrawerProps) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -64,18 +70,19 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
   }, [copied])
 
   async function handleCopyAll() {
-    const text = buildCompileErrorClipboardText(errors)
+    const text = buildCompileErrorClipboardText(errors, kind)
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
     } catch (error) {
       // Surface, never swallow: copy is the drawer's headline affordance, so a
       // failure must be observable rather than a silent no-op.
-      console.error("Failed to copy compile errors to clipboard", error)
+      console.error(`Failed to copy ${kind} errors to clipboard`, error)
     }
   }
 
   const errorCount = errors.length
+  const errorLabel = `${kind} error${errorCount === 1 ? "" : "s"}`
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -83,12 +90,12 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
         side="bottom"
         showCloseButton={false}
         aria-describedby={undefined}
-        data-slot="compile-drawer-content"
+        data-slot={`${kind}-drawer-content`}
         className="max-h-[80vh] min-h-[360px] gap-0 border-t-destructive/40 p-0"
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
           <SheetTitle className="text-sm font-medium text-destructive">
-            {errorCount} compile error{errorCount === 1 ? "" : "s"}
+            {errorCount} {errorLabel}
           </SheetTitle>
           <div className="flex items-center gap-1">
             <Button
@@ -96,7 +103,7 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
               variant="outline"
               size="sm"
               onClick={handleCopyAll}
-              aria-label="Copy all compile errors"
+              aria-label={`Copy all ${kind} errors`}
             >
               {copied ? <Check /> : <Copy />}
               {copied ? "Copied" : "Copy all errors"}
@@ -106,7 +113,7 @@ export function CompileErrorDrawer({ errors, open, onOpenChange }: CompileErrorD
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Close compile errors"
+                aria-label={`Close ${kind} errors`}
               >
                 <X />
               </Button>

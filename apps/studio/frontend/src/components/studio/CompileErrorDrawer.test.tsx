@@ -63,6 +63,12 @@ describe("buildCompileErrorClipboardText", () => {
     const text = buildCompileErrorClipboardText([makeError()])
     expect(text.startsWith("1 compile error\n")).toBe(true)
   })
+
+  it("uses the supplied diagnostic label for predict failures", () => {
+    const text = buildCompileErrorClipboardText([makeError()], "predict")
+    expect(text.startsWith("1 predict error\n")).toBe(true)
+    expect(text).toContain("Unknown model alias")
+  })
 })
 
 // The drawer is built on the shared shadcn Sheet, which portals its overlay +
@@ -136,6 +142,25 @@ describe("CompileErrorDrawer rendering", () => {
     expect(overlay?.className).toContain("inset-0")
     const content = document.body.querySelector('[data-slot="compile-drawer-content"]')
     expect(content?.getAttribute("data-side")).toBe("bottom")
+  })
+
+  it("can render the same bottom-sheet treatment for predict errors", () => {
+    act(() => {
+      root.render(
+        <CompileErrorDrawer
+          errors={[makeError({ file: null, line: null, field: null, message: "Backend unavailable" })]}
+          open
+          onOpenChange={() => {}}
+          kind="predict"
+        />,
+      )
+    })
+
+    const text = document.body.textContent ?? ""
+    expect(text).toContain("1 predict error")
+    expect(text).toContain("Backend unavailable")
+    expect(document.body.querySelector('[aria-label="Copy all predict errors"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-slot="predict-drawer-content"]')).not.toBeNull()
   })
 })
 

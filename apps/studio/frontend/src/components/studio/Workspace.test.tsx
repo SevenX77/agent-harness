@@ -1352,6 +1352,88 @@ describe('Workspace WS-1 local writer contracts', () => {
     )
     expect(toastMocks.error).not.toHaveBeenCalled()
   })
+
+  it('opens the predict error drawer with path-diff details when predict returns failed status', async () => {
+    mocks.postPredictRun.mockResolvedValue({
+      is_predict: true,
+      status: 'failed',
+      phases: [],
+      path_diff: {
+        expected_path: ['draft', 'review'],
+        actual_path: ['draft'],
+        missing: ['review'],
+        extra: [],
+        order_mismatch: false,
+      },
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onPredict?.()
+      })
+
+      const text = document.body.textContent ?? ''
+      expect(text).toContain('1 predict error')
+      expect(text).toContain('missing: review')
+      expect(text).toContain('expected: draft -> review')
+      expect(text).toContain('actual: draft')
+      expect(document.body.querySelector('[data-slot="predict-drawer-content"]')).not.toBeNull()
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('opens the predict error drawer when the predict request fails before diagnostics return', async () => {
+    mocks.postPredictRun.mockRejectedValue(new Error('Backend unavailable'))
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onPredict?.()
+      })
+
+      const text = document.body.textContent ?? ''
+      expect(text).toContain('1 predict error')
+      expect(text).toContain('Backend unavailable')
+      expect(document.body.querySelector('[data-slot="predict-drawer-content"]')).not.toBeNull()
+      expect(document.body.querySelector('[aria-label="Copy all predict errors"]')).not.toBeNull()
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      document.body.innerHTML = ''
+    }
+  })
 })
 
 // T-n6hist test#1/#2 (n6-history): the autocommit-feedback toast and the

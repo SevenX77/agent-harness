@@ -13,6 +13,7 @@ import {
   officialProviderDrafts,
   providerDraftForAction,
   providerEndpointDraftsForAction,
+  activeProbeModelIdsForDraft,
   shouldSyncRemoteModelCatalog,
   isStaleRouteReferenceError,
   refreshLoadedLlmRolesProjection,
@@ -600,6 +601,55 @@ describe('Add Provider flow helpers', () => {
     expect(official.provider_type).toBe('anthropic_compatible')
     expect(actionDraft?.base_url).toBe('https://api.anthropic.com')
     expect(actionDraft?.provider_type).toBe('anthropic_compatible')
+  })
+
+  it('expands Ark Official into both Ark runtime and OpenAI-compatible endpoint probes', () => {
+    const ark = officialProviderDrafts([]).find((draft) => draft.id === 'ark-official')
+    expect(ark).toBeTruthy()
+
+    const endpointDrafts = providerEndpointDraftsForAction(ark!)
+
+    expect(endpointDrafts.map((endpointDraft) => ({
+      id: endpointDraft.id,
+      provider_type: endpointDraft.provider_type,
+      base_url: endpointDraft.base_url,
+    }))).toEqual([
+      {
+        id: 'ark-official',
+        provider_type: 'ark_runtime',
+        base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      },
+      {
+        id: 'ark-openai-official',
+        provider_type: 'openai_compatible',
+        base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      },
+    ])
+  })
+
+  it('scopes active atomic probe model ids to the owning provider draft only', () => {
+    const waveSpeed = draftFromAddProviderSubmission({
+      providerCode: 'wavespeed',
+      name: 'WaveSpeed',
+      baseUrl: 'https://llm.wavespeed.ai/v1',
+      apiKey: 'sk-wavespeed',
+      type: 'third-party',
+    }, 'wavespeed')
+    const openRouter = draftFromAddProviderSubmission({
+      providerCode: 'openrouter',
+      name: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api',
+      apiKey: 'sk-openrouter',
+      type: 'third-party',
+    }, 'openrouter')
+    const waveSpeedEndpointIds = providerEndpointDraftsForAction(waveSpeed).map((endpointDraft) => endpointDraft.id)
+    const activeAtoms = {
+      [waveSpeedEndpointIds[0]]: ['anthropic/claude-haiku-4.5'],
+      [waveSpeedEndpointIds[1]]: ['anthropic/claude-haiku-4.5'],
+    }
+
+    expect(activeProbeModelIdsForDraft(waveSpeed, activeAtoms)).toEqual(activeAtoms)
+    expect(activeProbeModelIdsForDraft(openRouter, activeAtoms)).toEqual({})
   })
 
   it('derives notable provider key and manual panel visibility', () => {

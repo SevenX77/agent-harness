@@ -219,19 +219,19 @@
             {
               "name": "nodes",
               "type": "dict<node_id, NodeLlmParams>",
-              "meaning": "只有 enabled=true 的 node entry 会被保留；enabled=false 等价于删除该 node override",
+              "meaning": "node entry 可以保存 enabled=true 的运行覆盖，也可以保存 enabled=false 但带字段值的未激活草稿；只有 enabled=false 且字段全空才清理该 entry",
               "sensitive": false
             },
             {
               "name": "enabled",
               "type": "boolean",
-              "meaning": "显式 opt-in 开关；false=完全继承 role 参数，不传 node override",
+              "meaning": "显式 opt-in 开关；false=运行时完全继承 role 参数，不传 node override，但不销毁已保存的字段草稿",
               "sensitive": false
             },
             {
               "name": "thinking / max_output_tokens / temperature",
               "type": "boolean|null / integer|null / number|null",
-              "meaning": "enabled=true 时逐项覆盖角色默认；null 或缺失表示该字段继承 role。temperature 存 Studio authored 0..2。",
+              "meaning": "enabled=true 时逐项覆盖角色默认；enabled=false 时字段值作为未激活草稿保留，重新打开开关恢复；null 或缺失表示该字段继承 role。temperature 存 Studio authored 0..2。",
               "sensitive": false
             }
           ]
@@ -269,7 +269,7 @@
       "group": "crud",
       "endpoint": "GET /api/skills/{skill_id}/node-llm-params",
       "req": "路径参数 skill_id",
-      "resp": "NodeLlmParamsMap{nodes:{node_id:{enabled,thinking?,max_output_tokens?,temperature?}}}；只返回 enabled=true 的 node override。",
+      "resp": "NodeLlmParamsMap{nodes:{node_id:{enabled,thinking?,max_output_tokens?,temperature?}}}；返回已保存的 node params entry，包括 enabled=false 但带字段值的未激活草稿；enabled=false 且字段全空的 entry 会被清理。",
       "purpose": "读（node model params）——Properties 面板加载当前 skill 的 node scoped model params；默认空 map 表示所有 node 继承 role。",
       "provider": "Studio sidecar（routers/node_llm_params.py → services/node_llm_params.py 读 .workspace/node_llm_params.json）",
       "id": "iface-node-params-read"
@@ -277,7 +277,7 @@
     {
       "group": "crud",
       "endpoint": "PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params",
-      "req": "NodeLlmParams{enabled,thinking?,max_output_tokens?,temperature?};enabled=false 清除该 node entry;enabled=true 保留 entry,空字段逐项继承。",
+      "req": "NodeLlmParams{enabled,thinking?,max_output_tokens?,temperature?};enabled=false 只停用运行覆盖并保留字段草稿，只有字段全空才清除该 node entry;enabled=true 保留 entry,空字段逐项继承。",
       "resp": "NodeLlmParams（写入请求的规范化结果）",
       "purpose": "写（node model params）——Properties 面板的 Custom model params 开关和三个参数控件自动保存；该数据不写 SKILL.md / GRAPH.md / llm_roles.yaml。",
       "provider": "Studio sidecar（routers/node_llm_params.py → services/node_llm_params.py 写 .workspace/node_llm_params.json）",

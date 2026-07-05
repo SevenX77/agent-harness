@@ -71,6 +71,7 @@ import {
   TEMPERATURE_DEBOUNCE_MS,
   TEMPERATURE_SCALE_HELP,
 } from "@/components/studio/llm-temperature"
+import { LLM_ROLES_SWR_KEY, useLlmRolesCacheEventSync } from "../llm-roles-cache"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import { formatThousands, stripThousands } from "../settings/llm-roles/RoleSettingsDialog"
 import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus } from "../settings/llm-roles/role-route-status"
@@ -377,12 +378,13 @@ export function PropertiesPanel({
   onSelectGraph,
   onStartNodeCompare,
 }: PropertiesPanelProps) {
+  useLlmRolesCacheEventSync(Boolean(skillId))
 
   // Configured LLM roles for the llm_role dropdown (GET /llm/roles) via SWR so
   // the list revalidates (focus/reconnect + shared-key mutations) instead of
   // going permanently stale after one on-mount fetch. On failure both stay
   // empty — the field still shows the current stored value, nothing is lost.
-  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
+  const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
   const roleNames = useMemo(
     () => (rolesData ? graphAgentRoleNamesForProperties(rolesData) : []),
     [rolesData],
@@ -2895,16 +2897,8 @@ export function nodeLlmParamsDraftFromApi(params: NodeLlmParams | undefined): No
 }
 
 export function nodeLlmParamsDraftToApi(draft: NodeLlmParamsDraft): NodeLlmParams {
-  if (!draft.enabled) {
-    return {
-      enabled: false,
-      thinking: null,
-      max_output_tokens: null,
-      temperature: null,
-    }
-  }
   return {
-    enabled: true,
+    enabled: draft.enabled,
     thinking: draft.thinking,
     max_output_tokens: nodeParamOptionalInteger(draft.maxOutputTokens),
     temperature: nodeParamOptionalNumber(draft.temperature),
@@ -2942,7 +2936,7 @@ function LlmNodeParamsField({
 }) {
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
   const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
-  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
+  const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
   const latestDraftRef = useRef(draft)
   const pendingTemperatureRef = useRef<string | null>(null)
   const lastSubmittedTemperatureRef = useRef(draft.temperature)
@@ -3120,7 +3114,7 @@ function LlmNodeParamsField({
           aria-label="Use custom model params for this node"
           onCheckedChange={(checked) => {
             const enabled = checked === true
-            update(enabled ? { ...latestDraftRef.current, enabled: true } : EMPTY_NODE_LLM_PARAMS_DRAFT)
+            update({ ...latestDraftRef.current, enabled })
           }}
         />
       </div>

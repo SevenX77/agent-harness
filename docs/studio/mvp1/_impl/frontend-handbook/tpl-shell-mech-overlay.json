@@ -70,23 +70,25 @@
     },
     {
       "name": "即填即存 + 全局保存徽章",
-      "code": "frontend: useDebouncedCredentialsSave / useDebouncedRolesSave + SaveStatusBadge",
+      "code": "frontend: useDebouncedCredentialsSave / useDebouncedRolesSave / useAppSettings + SaveStatusBadge",
       "summary": "改动入队 debounce 自动保存,保存状态(pending/saving/saved/error)渲染成右上角徽章,让用户知道改动有没有落库。",
       "formula": "",
       "diagram": "",
       "rules": [
         "改字段 → 入队 debounce(防抖,改完停顿一下才发请求)保存(凭证走 useDebouncedCredentialsSave、角色走 useDebouncedRolesSave 这两个防抖保存 hook,app 设置走 useAppSettings 这个 app 设置读写 hook 的保存)。",
+        "保存并发统一 latest-wins:防抖期只保留最新 snapshot;已有请求 in-flight 时,新的保存需求立即覆盖 pending payload;旧请求完成时如果已被新 payload supersede,不得把旧响应写成 saved/error、不得弹陈旧 toast、不得用旧服务端快照覆盖本地最新草稿。",
         "保存态枚举:idle(无改动,徽章不显示)/ pending(已入队待发)/ saving(保存中)/ saved(已落库)/ error(失败)。",
         "SaveStatusBadge(保存状态徽章组件)把态渲染成徽章:pending/saving 转圈、saved 打勾、error 三角警告(warning 琥珀色),并带 aria-live(状态变化时读屏软件自动播报的区域)无障碍播报。",
-        "in-flight(在途请求)语义:关 Settings(X/Home)不取消在途 PUT,改动仍落地。"
+        "in-flight(在途请求)语义:关 Settings(X/Home)不取消在途 PUT,改动仍落地;期间继续编辑只保留最新待保存 payload。"
       ],
       "do": [
-        "改动入队 debounce、自动保存。",
+        "改动入队 debounce、自动保存,并在慢保存时按 latest-wins 收敛到最新 payload。",
         "保存态渲染成带图标的徽章。"
       ],
       "dont": [
         "不做手动「保存」按钮(即填即存,无未保存概念)。",
-        "不在关闭时丢在途保存。"
+        "不在关闭时丢在途保存。",
+        "不让旧保存响应覆盖新草稿或弹陈旧错误。"
       ],
       "deviation": "目标要壳层顶栏一个「全局」保存徽章把三套数据保存态汇到一处(原子 #4);现状三套各画各的 SaveStatusBadge、各挂各 tab 标题栏,顶栏无全局保存态。"
     },

@@ -393,7 +393,7 @@
     },
     {
      "endpoint": "Rust open_codex_cli",
-     "purpose": "从 Copilot header 菜单 Codex 项打开当前 workspace 的 ah/Codex master,并按 Codex 规则注入 auth/rules/skills。"
+     "purpose": "从 Copilot header 菜单 Codex 项打开当前 workspace 的 ah/Codex master,并按 Codex 规则注入 auth/rules/skills,同时在 sandbox config.toml 写入当前 workspace trust。"
     },
     {
      "endpoint": "Rust code_assistant_status / close_code_assistant",

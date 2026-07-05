@@ -72,8 +72,9 @@ function setInputValue(input: HTMLInputElement, value: string) {
 async function flushAutosave() {
   await act(async () => {
     vi.advanceTimersByTime(300)
-    await Promise.resolve()
-    await Promise.resolve()
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve()
+    }
   })
 }
 
@@ -242,6 +243,62 @@ describe("PropertiesPanel autosave", () => {
     }))
     expect(onPhaseFileSave.mock.calls[0]?.[0].content).toContain("<role>Reviewer</role>")
     expect(container.innerHTML).not.toContain(">Save<")
+
+    act(() => root.unmount())
+  })
+
+  it("re-applies phase property edits to the current markdown after a hash conflict", async () => {
+    const remoteContent = [
+      "---",
+      "name: review",
+      "description: edited elsewhere",
+      "llm_role: reviewer",
+      "max_iterations: 4",
+      "---",
+      "<role>Remote body</role>",
+    ].join("\n")
+    const onPhaseFileSave = vi.fn<PhaseFileSaveHandler>()
+    onPhaseFileSave
+      .mockRejectedValueOnce({
+        type: "HashConflict",
+        data: {
+          current_hash: "remote-hash",
+          current_content: remoteContent,
+        },
+      })
+      .mockResolvedValueOnce(undefined)
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "max_iterations: 3",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={onPhaseFileSave}
+      />,
+    )
+
+    await settleEffects()
+    setInputValue(container.querySelector("#phase-max-iterations") as HTMLInputElement, "7")
+    await flushAutosave()
+
+    expect(onPhaseFileSave).toHaveBeenCalledTimes(2)
+    expect(onPhaseFileSave.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+      path: "phases/review/SKILL.md",
+      expectedHash: "remote-hash",
+      content: expect.stringContaining("max_iterations: 7"),
+    }))
+    expect(onPhaseFileSave.mock.calls[1]?.[0].content).toContain("description: edited elsewhere")
+    expect(onPhaseFileSave.mock.calls[1]?.[0].content).toContain("<role>Remote body</role>")
+    expect(toastMocks.error).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-save-status="saved"]')).not.toBeNull()
 
     act(() => root.unmount())
   })

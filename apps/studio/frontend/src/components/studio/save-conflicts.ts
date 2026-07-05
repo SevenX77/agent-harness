@@ -7,6 +7,11 @@ export interface SaveRetryPayload {
   expectedHash: string
 }
 
+export interface HashConflictPayload {
+  remoteContent: string
+  remoteHash: string | null
+}
+
 export function overwriteRetryPayload(conflict: SaveConflict): SaveRetryPayload {
   if (!conflict.remoteHash) {
     throw new Error("Cannot retry overwrite without a remote hash")
@@ -19,9 +24,20 @@ export function overwriteRetryPayload(conflict: SaveConflict): SaveRetryPayload 
 }
 
 export function conflictFromSaveError(error: unknown, current: SaveConflict): SaveConflict | null {
-  if (isTauriHashConflictError(error)) {
+  const payload = hashConflictPayloadFromSaveError(error)
+  if (payload) {
     return {
       ...current,
+      remoteContent: payload.remoteContent,
+      remoteHash: payload.remoteHash,
+    }
+  }
+  return null
+}
+
+export function hashConflictPayloadFromSaveError(error: unknown): HashConflictPayload | null {
+  if (isTauriHashConflictError(error)) {
+    return {
       remoteContent: error.data?.current_content ?? "",
       remoteHash: error.data?.current_hash ?? null,
     }
@@ -34,7 +50,6 @@ export function conflictFromSaveError(error: unknown, current: SaveConflict): Sa
     current_markdown_content?: string
   }
   return {
-    ...current,
     remoteContent: data.current_markdown_content ?? "",
     remoteHash: data.current_hash ?? null,
   }

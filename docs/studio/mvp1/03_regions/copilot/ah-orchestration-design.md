@@ -2,17 +2,17 @@
 region: copilot
 kind: target-direction design（ah 编排底座）
 created: 2026-07-03
-updated: 2026-07-04
+updated: 2026-07-05
 状态: 【阶段 1 完成 / 阶段 2 设计确定】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨
       已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
-      并补齐后续 Studio 功能开发执行规则。
+      并补齐后续 Studio 功能开发执行规则;2026-07-05 对齐 ah 1.3.0 的 `window_size="follow"`
+      与 Wikipedia 渐进式背景披露。
       本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置/下一阶段方案/
       开发规则),供提交 PR。
 关系: 与本目录 mvp1-alignment.md 的 F1–F9(SDK 面板流式)并列的**另一套编排底座**;
       PM 拍定 ah 为主、SDK 为辅,故 F8 真流式在 ah 路径下降级(见 §7)。
-一切"设计意图 / 代码事实"均按 CLAUDE.md「论据先行」附出处;ah 相关事实出处 = ah 官方仓库
-`~/coding/ccbd-rust`(git: github.com/SevenX77/ccbd-rust)的 README.md 与 docs/plugin-bundles.md,
-及该仓库源码行号 —— 这些是**权威**,不是派生视图。
+一切"设计意图 / 代码事实"均按 CLAUDE.md「论据先行」附出处;ah 相关事实出处 =
+github.com/SevenX77/ah 的 v1.3.0 tag README、源码与内置 rules —— 这些是**权威**,不是派生视图。
 -->
 
 # copilot — ah 编排底座（MoirAI 三女神）设计与调研
@@ -20,7 +20,8 @@ updated: 2026-07-04
 ## 0. 一句话
 
 Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agent SDK 为辅**：
-面板上「打开 Claude Code」按钮经 ah 拉起一组 agent（`MoirAI` master + 三女神 worker），
+面板上「打开 Claude Code」按钮经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
+`clotho` / `lachesis` / `atropos` 承载三女神），
 用户在终端里直接操作;每个 agent 的**身份 / 知识库 / 工具箱**全部经 `ah.toml` + `.ah/rules/`
 + `.ah/bundles/` 配置注入,不改 ah 本体。
 
@@ -57,30 +58,34 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 
 ## 3. ah 版本要求（踩坑记录,避免重复劳动）
 
-**血泪坑:本机原装 `ah` 是 0.9.0(2026-06-22 的 debug build),它根本没有实现 `bundle` 与
-`.ah/rules/` 注入机制。** 症状:配好 `bundle=[…]` / `.ah/rules/<id>.md`,`ah config validate` 也过
-(serde 默认吞掉未知字段),但 agent 沙盒里的 `.claude/CLAUDE.md` **只有内置 worker 红线 kernel**,
+**当前 Studio 基线:ah ≥ 1.3.0。** 1.2.0 已验证支持 editable rules / skills 注入,但 1.3.0 新增
+`[master].window_size = "follow"`:默认仍是 `fixed`,Studio 若不显式写 `follow`,attach 进去的 MoirAI
+终端窗口不会自动跟随当前终端大小。
+
+历史踩坑:本机原装 `ah` 是 0.9.0(2026-06-22 的 debug build),它根本没有实现 `bundle` 与
+`.ah/rules/` 注入机制。症状:配好 `bundle=[…]` / `.ah/rules/<id>.md`,`ah config validate` 也过
+(serde 默认吞掉未知字段),但 agent 沙盒里的 `.claude/CLAUDE.md` 只有内置协调 kernel,
 自定义人格一个字都没进 —— 女神自我介绍成了「Claude Code / Opus 4.8 / Worker 执行节点」。
 
 - **判据**:`strings ~/.local/bin/ah | grep -i '.ah/bundles'` 在 0.9.0 上**零命中**;daemon 日志无
   bundle/rules 记录;`ah --help` 无 `bundle` 子命令。
-- **根因**:bundle/editable-rules 是较新特性。本机 `~/coding/ccbd-rust` checkout 是 **1.2.0**
-  (`Cargo.toml version = "1.2.0"`),源码里 `src/provider/bundles.rs`、`src/provider/home_layout.rs`
-  的 `composed_rules_for_slot` 都在,已构建产物 `target/release/{ah,ahd}` 也是 1.2.0。
-- **解法**:用 checkout 的 1.2.0 覆盖安装(`ah` + `ahd` **两个都要换**,daemon 才做新版物化):
+- **根因**:bundle/editable-rules 是较新特性。1.2.0 起源码里已有 `src/provider/bundles.rs`、
+  `src/provider/home_layout.rs` 的 `composed_rules_for_slot`,能把项目 `.ah/rules/<slot>.md`
+  物化进 provider home。
+- **解法**:用 1.3.0 release 覆盖安装(`ah` + `ahd` **两个都要换**,daemon 才做新版物化):
   ```bash
   # 先停旧 project: ah --config <ah.toml> kill --session <sess>; ah --config <ah.toml> stop
   cp -a ~/.local/bin/ah  ~/.local/bin/ah.0.9.0.bak    # 备份
   cp -a ~/.local/bin/ahd ~/.local/bin/ahd.0.9.0.bak
-  install -m755 ~/coding/ccbd-rust/target/release/ah  ~/.local/bin/ah
-  install -m755 ~/coding/ccbd-rust/target/release/ahd ~/.local/bin/ahd
+  install -m755 <ah-1.3.0-build>/ah  ~/.local/bin/ah
+  install -m755 <ah-1.3.0-build>/ahd ~/.local/bin/ahd
   ```
-- **结论**:**Studio「打开 Claude Code」依赖的 `ah` 必须 ≥ 支持 bundle/editable-rules 的版本
-  (1.2.0 已验证可用)。** 打包分发 Studio 时要连带升级/内置该版 ah,否则人格注入静默失效。
+- **结论**:**Studio「打开 Claude Code」依赖的 `ah` 必须 ≥ 1.3.0。** 打包分发 Studio 时要连带
+  升级/内置该版 ah,否则要么人格注入静默失效(0.9.0),要么 MoirAI attach 窗口无法保证自动匹配终端大小(未写 1.3.0 follow)。
 
 ## 4. ah 配置机制（权威说明,出处 = ah 仓库 README/docs）
 
-> 出处:`~/coding/ccbd-rust/README.md`(下称 README)与 `docs/plugin-bundles.md`(下称 bundles-doc)。
+> 出处:github.com/SevenX77/ah 的 v1.3.0 tag `README.md`(下称 README)与 `docs/plugin-bundles.md`(下称 bundles-doc)。
 > schema 权威定义在该仓库 `src/cli/config.rs`(README:94)。
 
 ### 4.1 `ah.toml` schema（README:92-159）
@@ -89,7 +94,8 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
   `completion`、`daemon`、`env`(项目环境变量)、`sandbox`。
 - `[agents.<id>]`:`provider`(必填)、`env`、`hooks`、`plugins`、`skills`(引用 `.ah/skills/<name>/`)。
 - `[master]`:`enabled`(默认 true)、`cmd`(默认 `claude`)、`provider`(能解析但 **v1 master 仍强制走
-  Claude 的 sandbox rules 路径**,README:141)、`readiness_timeout_s`(默认 120)、`hooks/plugins/skills`。
+  Claude 的 sandbox rules 路径**,README:141)、`readiness_timeout_s`(默认 120)、`window_size`
+  (1.3.0 新增;`fixed`/`follow`,默认 `fixed`;Studio 必须写 `follow`)、`hooks/plugins/skills`。
 - `[sandbox] additional_ro_binds = ["/opt/tools"]` —— **知识库文档挂载点**:把设计规范/说明文档目录
   只读绑进沙盒,女神就能读到(见 §5 知识库)。
 
@@ -100,9 +106,9 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
   （早先"所有 worker 共用 slot=worker 会撞车"的担心是错的 —— 那是我误读旧源码;README 明确 slot=agent id。)
 - provider → 注入文件:`claude`→`.claude/CLAUDE.md`、`antigravity`→`.gemini/AGENTS.md`、
   `codex`→`.codex/AGENTS.md`(README:173-177)。
-- 固定 kernel **永远前置且删不掉**,内容是「worker 协调红线」:不自派单(不 `ah ask`)、只做当前 prompt
-  圈定的任务、报完等下一次派单、沙盒安全(grep-before-claim / diff 交付 / 零污染)。**这是协调层口吻,
-  不是身份**;人格文本排在 kernel 之后,里程碑 1 实测能主导自我介绍(女神不再自称 worker)。
+- 固定 kernel **永远前置且删不掉**。1.3.0 的 master kernel 仍使用 `master` 作为 cutover/ACK/CLI
+  内部槽位名,worker kernel 仍约束“不自调度、只做当前任务、沙盒安全”。**这些是协调层口吻,不是身份**;
+  Studio 自己写入的 `.ah/rules/*` 不再把 `master`/`worker`/“派单”当角色话术。
 - 内置默认在 ah 仓库 `assets/builtin/defaults/{master,worker}.md`。
 
 ### 4.3 Agent Skills（README:202-228）= 能力/工具箱
@@ -143,12 +149,20 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
   **master** 不接受 `ask`(实测 `ah ask master` → `AGENT_NOT_FOUND`)—— master 是交互 pane,靠
   `ah attach master`(即"打开 Claude Code"按钮走的路),或 `ah master cutover`。里程碑 1 里我用
   `tmux send-keys` 向 master pane 发问 + `capture-pane` 抓回复来验证。
+- 1.3.0 下 attach 命令仍是 `ah attach master`;是否自动匹配当前终端窗口大小由 `ah start` 时的
+  `[master].window_size = "follow"` 决定,不是 attach 命令的新参数。
 - 运行时状态在 SQLite(state 目录按 `ah.toml` 规范路径 hash 命名,如 `~/.local/state/ah/<hash>/`);
   1.2.0 起 daemon 作为 systemd user unit 拉起(`ah-<hash>.service`)。
 
 ## 5. MoirAI 拓扑设计（目标 + 现状）
 
 叙事真相源:`docs/strategy/moirai-copilot-persona-narrative.md`(名字/神话职能/背景故事)。
+常驻 rules 只保留一行身份锚点 + Wikipedia 链接,不再内嵌长背景故事:
+Moirai <https://en.wikipedia.org/wiki/Moirai>,
+Clotho <https://en.wikipedia.org/wiki/Clotho>,
+Lachesis <https://en.wikipedia.org/wiki/Lachesis>,
+Atropos <https://en.wikipedia.org/wiki/Atropos>。
+只有用户询问名字、神话背景或角色来源时,才按链接和锚点展开。
 
 > **关系模型(关键,PM 亲自纠正)**:**Moirai 是三女神的希腊语统称 = 三位一体的结合体,不是第四个上司。**
 > 三位女神是她的三只手(纺/量/剪),彼此是姊妹。所以 master 的人格**不是**"编排者派单给下属",而是"我
@@ -246,10 +260,9 @@ master pane 有 `claude … .local/bin/claude missing or broken · run claude in
 3. **知识库挂载**:把各女神的规范/手册目录经 `[sandbox] additional_ro_binds` 接上(§5)。
 4. **provider 升级**:装了 codex/antigravity 后把 Lachesis→codex、Atropos→antigravity,验证跨 provider
    人格注入(codex→`.codex/AGENTS.md`、antigravity→`.gemini/AGENTS.md`)。
-5. **Studio 自动生成 `ah.toml`**:当前手写;后续由 Studio 按当前 skill 工作区自动生成(PM:「先手写」)。
-   落点:`apps/studio/tauri/src/lib.rs` 的 `ah_config_for_workspace` / `transient_ah_config_content`
-   (现只写 `[agents.studio] provider=bash` 的桩)。
-6. **打包分发带上 ah ≥1.2.0**(§3 结论)。
+5. **provider 可用性自动升级**:当前 Studio 默认全部 fallback claude;后续再按用户是否装 codex/antigravity
+   自动把 Lachesis / Atropos 切到目标 provider。
+6. **打包分发带上 ah ≥1.3.0**(§3 结论)。
 
 ## 9. 阶段 2:接活闭环设计
 
@@ -271,7 +284,7 @@ pane;MoirAI 先自报状态,随后能按 skill 生命周期判断该动哪只手
 3. Lachesis 能拿到 `compile-error-repair`,围绕编译错误码和挂载 spec 做根因修复。
 4. Atropos 拿到新增 `eval-judgement`,能基于 predict/run 产物、trace 与 golden diff 给出达标/不达标的终判,
    并明确把改进方向回流给 Clotho。
-5. master 只在用户看得见的话术里说 MoirAI/Clotho/Lachesis/Atropos,不把 ah 的 master/worker/派单词汇露给用户。
+5. MoirAI 只在用户看得见的话术里说 MoirAI/Clotho/Lachesis/Atropos,不把 ah 的内部槽位/调度词汇露给用户。
 
 ### 9.2 非目标
 
@@ -349,6 +362,7 @@ version = "1"
 enabled = true
 cmd = "IS_SANDBOX=1 claude --dangerously-skip-permissions '<Studio auto-report prompt>'"
 readiness_timeout_s = 180
+window_size = "follow"
 
 [agents.clotho]
 provider = "claude"
@@ -372,14 +386,27 @@ additional_ro_binds = [
 如果工作区向上已经存在用户手写的 `ah.toml`,继续尊重现有 `find_ah_config` 语义:用户配置优先,Studio 不覆盖。此时
 Studio 只做"缺什么提示什么",不擅自把 MoirAI 三女神写进去,因为已有 `ah.toml` 代表用户接管了 ah 项目配置。
 
-### 9.5 rules 从"人格"扩展为"人格 + 操作协议"
+### 9.5 rules 从"长人格"收敛为"身份锚点 + 渐进式背景 + 操作协议"
 
-阶段 1 的 R3 人格文本不改写,避免把已验收口吻打坏。阶段 2 在每份 rules 后面追加一段**不说出口的操作协议**:
+阶段 1 的 R3 长人格文本已经证明口吻可行;阶段 2 正式落地时,为压缩 system prompt,每份 rules 改成三段:
 
-- master/MoirAI:
+1. **身份锚点**:一句话说明角色在 skill 生命周期里的职责。
+2. **背景链接**:直接链接 Wikipedia,只在用户询问名字、神话背景或角色来源时展开。
+3. **内部操作协议**:写清如何做事,但不把内部槽位/调度词汇当成用户可见身份。
+
+每个角色的背景链接:
+
+| 角色 | Wikipedia |
+|---|---|
+| MoirAI / Moirai | <https://en.wikipedia.org/wiki/Moirai> |
+| Clotho | <https://en.wikipedia.org/wiki/Clotho> |
+| Lachesis | <https://en.wikipedia.org/wiki/Lachesis> |
+| Atropos | <https://en.wikipedia.org/wiki/Atropos> |
+
+- MoirAI:
   - 先判断用户请求处在 skill 生命周期哪一段:设计、编译修复、整体 eval、还是需要追问;
   - 需要某只手时,内部用 Bash 跑 `ah ask <agent-id> "<任务包>" --wait`,再把结果整合给用户;
-  - 对用户只说"我让 Clotho 接这段线"这类叙事语言,不要说 worker、派单、job;
+  - 对用户只说"我让 Clotho 接这段线"这类叙事语言,不要说内部槽位、调度、job;
   - 不自己写大量代码;需要落盘变更时,让对应 agent 交付 diff/文件改动摘要。
 - Clotho:
   - 输入必须包含目标、现有文件、边界和未决问题;信息不足先列问题;
@@ -434,7 +461,7 @@ rules 约束:
 | `docs/engine/mvp1/` + `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/` | Clotho | skill / engine 设计边界 |
 | `apps/studio/backend/app/prompts/mounted/` | Clotho/Lachesis/Atropos | Studio copilot 已有挂载说明 |
 | `packages/graph-agent` 的 README 与 compile/golden 相关 docs | Lachesis/Atropos | 编译语义、predict/run/eval 机制 |
-| `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md` | master | MoirAI 编排真相源 |
+| `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md` | MoirAI | 编排真相源 |
 
 Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环境可见的路径。Studio 已有
 `windows_path_to_wsl()` 可复用,新增挂载路径时同样先转换,否则 ah 在 WSL 里看不到 Windows 盘符。
@@ -444,6 +471,10 @@ Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环�
 代码门禁先聚焦 Tauri 单元测试,不需要为了纯配置生成跑完整 Studio:
 
 - `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
+- `transient_ah_config_content` 在 `[master]` 下写入 `window_size = "follow"`,确保 1.3.0 的 tmux
+  master pane 自动跟随 attach 终端大小;
+- 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
+  persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
 - `additional_ro_binds` 在 Windows 下输出 WSL 路径;
@@ -452,7 +483,7 @@ Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环�
 人工验收必须在真实 ah 终端里做,因为阶段 2 的核心是 provider home 物化 + Claude Code 订阅态:
 
 1. 打开一个空白 skill,点「打开 Claude Code」。
-2. MoirAI 自报身份、cwd、能做什么;不得自称 generic copilot/master。
+2. MoirAI 自报身份、cwd、能做什么;不得自称 generic copilot 或把内部槽位名当成身份。
 3. 向 MoirAI 发"帮我把一个 X 流程设计成 skill",它应调用 Clotho 并返回结构化设计。
 4. 制造一个简单编译错误,让 MoirAI 修;它应调用 Lachesis,给出根因和最小修复。
 5. 准备一组 run/predict 产物或缺失产物场景,让 MoirAI 评估;它应调用 Atropos,输出终判与回流建议。
@@ -541,7 +572,7 @@ Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环�
 
 ## 10. 权威引用
 
-- ah 官方仓库:`~/coding/ccbd-rust`(github.com/SevenX77/ccbd-rust)—— `README.md`、
+- ah 官方仓库:github.com/SevenX77/ah v1.3.0 —— `README.md`、
   `docs/plugin-bundles.md`;schema 源 `src/cli/config.rs`;规则组合 `src/provider/home_layout.rs`
   `composed_rules_for_slot`;bundle 解析 `src/provider/bundles.rs`;内置默认 `assets/builtin/defaults/`。
 - MoirAI 叙事:`docs/strategy/moirai-copilot-persona-narrative.md`。
@@ -555,7 +586,8 @@ Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环�
 > 里程碑 1 验证用的工作区 = `/home/sevenx/coding/moirai-ah-test/`(临时,未入库)。以下把该工作区的
 > `ah.toml` 与四份 `.ah/rules/*.md`(R3 最终版)逐字抄录,使本文档自洽可复现:新建目录、按下面落文件、
 > `ah config validate --config ah.toml` → `ah --config ah.toml start --wait` 即可复现四角色身份。
-> 后续正式落地时,这套配置的最终家是 Studio 按 skill 工作区自动生成(§8 待办 5),届时人格文本从此处迁移。
+> 阶段 2 正式落地时,Studio 不再逐字迁移下面的长篇人格文本;生产 rules 采用 §9.5 的短身份锚点 +
+> Wikipedia 渐进式背景 + 操作协议。
 
 ### 11.1 `ah.toml`
 
@@ -570,6 +602,7 @@ version = "1"
 cmd = "claude"
 enabled = true
 readiness_timeout_s = 180
+window_size = "follow"
 
 [agents.clotho]
 provider = "claude"

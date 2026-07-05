@@ -175,7 +175,7 @@ Manual desktop smoke:
 powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 ```
 
-对 `ah` 仓库的相关需求(ah 应自装运行环境、修坏掉的默认 master 命令、别默认绑
+对 `ah` 仓库的相关需求(ah 应自装运行环境、提供 1.3.0 的 master 窗口跟随配置、别默认绑
 cwd)见 [`docs/handoffs/ah-installer-provisioning-and-master-defaults.md`](../../../docs/handoffs/ah-installer-provisioning-and-master-defaults.md)。
 
 ## Phase 边界 (T1 不做)

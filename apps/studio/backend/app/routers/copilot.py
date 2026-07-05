@@ -125,6 +125,7 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
     from app.main import _is_valid_token
 
     if not _is_valid_token(websocket.query_params.get("token")):
+        await websocket.accept()
         await websocket.close(code=4401, reason="Unauthorized")
         return
 

@@ -909,23 +909,30 @@ fn spawn_linux_terminal(script_path: &Path) -> Result<(), String> {
     ))
 }
 
+fn windows_cmd_start_powershell_args(script_path: &Path) -> Vec<std::ffi::OsString> {
+    vec![
+        std::ffi::OsString::from("/C"),
+        std::ffi::OsString::from("start"),
+        // cmd.exe's `start` treats the first quoted token as the window title.
+        // Without this empty title, `start Codex powershell.exe ...` launches the
+        // Windows Codex app alias instead of the PowerShell launcher.
+        std::ffi::OsString::from(""),
+        std::ffi::OsString::from("powershell.exe"),
+        std::ffi::OsString::from("-NoExit"),
+        std::ffi::OsString::from("-ExecutionPolicy"),
+        std::ffi::OsString::from("Bypass"),
+        std::ffi::OsString::from("-File"),
+        script_path.as_os_str().to_os_string(),
+    ]
+}
+
 fn spawn_terminal_with_launcher(
     script_path: &Path,
     assistant: CodeAssistant,
 ) -> Result<(), String> {
     if cfg!(target_os = "windows") {
         return Command::new("cmd")
-            .args([
-                "/C",
-                "start",
-                assistant.display_name(),
-                "powershell.exe",
-                "-NoExit",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(script_path)
+            .args(windows_cmd_start_powershell_args(script_path))
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open PowerShell: {error}"));
@@ -1727,6 +1734,33 @@ mod tests {
 
         assert!(
             script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh'")
+        );
+    }
+
+    #[test]
+    fn windows_terminal_launcher_uses_empty_start_title() {
+        let script_path = Path::new(r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1");
+        let args = windows_cmd_start_powershell_args(script_path);
+        let as_text: Vec<String> = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(as_text[0], "/C");
+        assert_eq!(as_text[1], "start");
+        assert_eq!(
+            as_text[2], "",
+            "cmd start needs an explicit empty title before the program name"
+        );
+        assert_eq!(as_text[3], "powershell.exe");
+        assert!(as_text.contains(&"-NoExit".to_string()));
+        assert_eq!(
+            as_text.last().unwrap(),
+            r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1"
+        );
+        assert!(
+            !as_text[..3].iter().any(|arg| arg == "Codex"),
+            "Codex must never be passed as the start command/program"
         );
     }
 

@@ -11,6 +11,7 @@ import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import {
+  attachCodeAssistant,
   closeCodeAssistant,
   getCodeAssistantStatus,
   openClaudeCode,
@@ -22,6 +23,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
@@ -303,6 +305,14 @@ export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): stri
   return active[0] === 'claude' ? 'Close Claude' : 'Close Codex'
 }
 
+function codeAssistantLabel(assistant: CodeAssistantId): string {
+  return assistant === 'claude' ? 'Claude' : 'Codex'
+}
+
+export function codeAssistantAttachMenuLabels(status: CodeAssistantStatus): string[] {
+  return activeCodeAssistantIds(status).map((assistant) => `Attach ${codeAssistantLabel(assistant)}`)
+}
+
 function judgeContextMatchesScope(context: CopilotJudgeContext, scope?: DraftJudgeContextScope): boolean {
   if (!scope) {
     return true
@@ -356,6 +366,7 @@ export function CopilotPanel({
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [openingCodeAssistant, setOpeningCodeAssistant] = useState<'claude' | 'codex' | null>(null)
+  const [attachingCodeAssistant, setAttachingCodeAssistant] = useState<'claude' | 'codex' | null>(null)
   const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
   const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(inactiveCodeAssistantStatus)
   const { templates, templatesLoading } = useTemplates()
@@ -480,6 +491,7 @@ export function CopilotPanel({
   const defaultRouteId = selectedOption?.fallbackChain[0]?.route_id ?? ''
   const activeCodeAssistants = activeCodeAssistantIds(codeAssistantStatus)
   const codeAssistantCloseLabel = codeAssistantCloseButtonLabel(codeAssistantStatus)
+  const codeAssistantAttachLabels = codeAssistantAttachMenuLabels(codeAssistantStatus)
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -536,6 +548,18 @@ export function CopilotPanel({
       }
     } finally {
       setOpeningCodeAssistant(null)
+    }
+  }
+
+  async function handleAttachCodeAssistant(assistant: CodeAssistantId) {
+    setAttachingCodeAssistant(assistant)
+    try {
+      const attached = await attachCodeAssistant(codeAssistantWorkspace, assistant)
+      if (attached) {
+        await refreshCodeAssistantStatus()
+      }
+    } finally {
+      setAttachingCodeAssistant(null)
     }
   }
 
@@ -643,20 +667,46 @@ export function CopilotPanel({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {codeAssistantCloseLabel ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={closingCodeAssistant || !codeAssistantWorkspace}
-                aria-label={codeAssistantCloseLabel}
-                onClick={() => {
-                  void handleCloseCodeAssistants()
-                }}
-                className="studio-canvas-input-surface shrink-0"
-              >
-                <Square data-icon="inline-start" className="fill-current" />
-                {codeAssistantCloseLabel}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={closingCodeAssistant || attachingCodeAssistant !== null || !codeAssistantWorkspace}
+                    aria-label="Manage code assistant"
+                    className="studio-canvas-input-surface shrink-0"
+                  >
+                    <Square data-icon="inline-start" className="fill-current" />
+                    {codeAssistantCloseLabel}
+                    <ChevronDown className="size-3" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  {activeCodeAssistants.map((assistant, index) => (
+                    <DropdownMenuItem
+                      key={`attach-${assistant}`}
+                      disabled={attachingCodeAssistant !== null || closingCodeAssistant || !codeAssistantWorkspace}
+                      onSelect={() => {
+                        void handleAttachCodeAssistant(assistant)
+                      }}
+                    >
+                      <SquareTerminal data-icon="inline-start" />
+                      {codeAssistantAttachLabels[index] ?? `Attach ${codeAssistantLabel(assistant)}`}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={closingCodeAssistant || !codeAssistantWorkspace}
+                    onSelect={() => {
+                      void handleCloseCodeAssistants()
+                    }}
+                  >
+                    <Square data-icon="inline-start" className="fill-current" />
+                    {codeAssistantCloseLabel}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

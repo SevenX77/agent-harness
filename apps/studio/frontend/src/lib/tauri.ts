@@ -197,6 +197,38 @@ export async function closeCodeAssistant(
   }
 }
 
+export async function attachCodeAssistant(
+  workspaceRoot: string | null | undefined,
+  assistant: 'claude' | 'codex',
+): Promise<boolean> {
+  const targetPath = workspaceRoot?.trim() ?? ''
+  const label = assistant === 'claude' ? 'Claude Code' : 'Codex'
+  if (!targetPath) {
+    toast.error('No workspace path available')
+    return false
+  }
+
+  if (!isTauriRuntime()) {
+    toast.info('Desktop-only feature', { description: targetPath })
+    return false
+  }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
+    return false
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('attach_code_assistant', { workspaceRoot: targetPath, assistant })
+    toast.success(`Attaching ${label}`)
+    return true
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error)
+    toast.error(`Failed to attach ${label}`, { description })
+    return false
+  }
+}
+
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {
   if (!isTauriRuntime()) {
     toast.info('Desktop only')

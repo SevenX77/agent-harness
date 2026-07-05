@@ -6,7 +6,8 @@ updated: 2026-07-05
 状态: 【阶段 1 完成 / 阶段 2 设计确定】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨
       已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
       并补齐后续 Studio 功能开发执行规则;2026-07-05 对齐 ah 1.3.0 的 `window_size="follow"`
-      与 Wikipedia 渐进式背景披露,并把入口升级为 Claude/Codex 菜单。
+      与 Wikipedia 渐进式背景披露,并把入口升级为 Claude/Codex 菜单;运行中入口继续提供
+      Attach master pane 与 Close。
       本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置/下一阶段方案/
       开发规则),供提交 PR。
 关系: 与本目录 mvp1-alignment.md 的 F1–F9(SDK 面板流式)并列的**另一套编排底座**;
@@ -176,8 +177,11 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 生命周期规则:
 
 - `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
-- Studio 显式关闭入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 菜单;检测到对应 config 的
-  `ah --config <cfg> ps` 成功时,同一位置变成 `Close Claude` / `Close Codex` / `Close assistants`。
+- Studio 显式管理入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 打开菜单;检测到对应 config 的
+  `ah --config <cfg> ps` 成功时,同一位置变成运行中菜单,触发按钮显示
+  `Close Claude` / `Close Codex` / `Close assistants`,菜单内提供 `Attach Claude` / `Attach Codex`
+  和关闭动作。Attach 只打开一个新终端并执行 `ah --config <cfg> attach master`,不重新 `ah start`,
+  用于用户手动关闭 terminal tab 后重新进入现有 master pane。
 - 点击关闭不直接杀 tmux pane,而是对 Studio 打开的 config 执行 `ah --config <cfg> stop`。ah 1.3.0 的
   `system.shutdown` 与 shutdown cleanup 测试负责清理 master/agent tmux sessions 和进程树。
 - Studio app 退出时也必须清理 Studio 管过的 ah:当前进程内已打开过的 config + `skill-studio-ah`

@@ -335,7 +335,7 @@ def _locate_skill_path(path: Path) -> tuple[str, str] | None:
 
 def _watch_roots() -> list[Path]:
     from app.services.llm_paths import credentials_path
-    roots = [config.SKILLS_DIR, config.default_workspace_skills_dir(), config.DEFAULT_SKILLS_ROOT]
+    roots = [config.DEFAULT_SKILLS_ROOT]
     try:
         llm_dir = credentials_path().parent
         if llm_dir not in roots:

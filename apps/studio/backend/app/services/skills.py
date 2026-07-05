@@ -206,27 +206,20 @@ def _scaffold_files_for(skill_id: str) -> dict[str, str]:
 
 
 def ensure_workspace_layout() -> None:
-    """Create the writable Studio workspace skeleton."""
-    config.default_workspace_skills_dir().mkdir(parents=True, exist_ok=True)
-
-
-def _is_within(path: Path, ancestor: Path) -> bool:
-    """True when ``path`` is ``ancestor`` or nested under it (pure path check)."""
-    return path.resolve().is_relative_to(ancestor.resolve())
+    """Create the writable Studio app-data skeleton."""
+    config.DEFAULT_SKILLS_ROOT.mkdir(parents=True, exist_ok=True)
+    config.WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _ensure_skill_git_repo(skill_dir: Path) -> None:
-    """Auto-init L1 git the first time a writable user skill is opened.
+    """Auto-init L1 git the first time a skill is opened.
 
-    skill-repo-git-model: a skill IS a standalone git repo, so opening one that
-    lives outside the read-only bundled ``SKILLS_DIR`` and has no ``.git`` yet
+    skill-repo-git-model: a skill IS a standalone git repo. Opening one with no
+    ``.git`` yet
     turns it into its own repo — Local History then shows THIS skill's history
-    instead of an enclosing repo's. No-op once ``.git`` exists (idempotent), and
-    never writes a repo into bundled sample content under ``SKILLS_DIR``.
+    history instead of an enclosing repo's history. No-op once ``.git`` exists.
     """
     if (skill_dir / ".git").exists():
-        return
-    if _is_within(skill_dir, config.SKILLS_DIR):
         return
     initialize_skill_repository(skill_dir)
 
@@ -773,18 +766,6 @@ async def create_new_skill(
         if directory_path
         else await _default_skills_root(metadata) / skill_id
     )
-    public_skill_dir = config.SKILLS_DIR / skill_id
-    workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
-    if await _is_importable_skill_directory(
-        public_skill_dir,
-        storage,
-    ) or await _is_importable_skill_directory(workspace_skill_dir, storage):
-        raise standard_http_exception(
-            "SKILL_ALREADY_EXISTS",
-            f"Skill already exists: {skill_id}",
-            {"skill_id": skill_id},
-        )
-
     if import_existing:
         if not directory_path:
             _raise_invalid_directory_path("", "directory_path is required for import")
@@ -868,12 +849,16 @@ async def fork_skill(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> SkillSummary:
-    """Clone an existing skill into the user's workspace under a new id."""
-    workspace_root = _workspace_skills_dir_for(user_id)
-    target_dir = workspace_root / new_skill_id
+    """Clone an existing skill into the default new-skill root under a new id."""
+    if await metadata.get_skill_index_entry(new_skill_id) is not None:
+        raise standard_http_exception(
+            "SKILL_ALREADY_EXISTS",
+            f"Skill already exists: {new_skill_id}",
+            {"skill_id": new_skill_id},
+        )
+    target_dir = await _default_skills_root(metadata) / new_skill_id
     target_path = target_dir / "GRAPH.md"
-    public_collision = config.SKILLS_DIR / new_skill_id / "GRAPH.md"
-    if await storage.exists(str(target_path)) or await storage.exists(str(public_collision)):
+    if await storage.exists(str(target_path)):
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
             f"Skill already exists: {new_skill_id}",
@@ -908,28 +893,15 @@ async def ensure_workspace_skill_dir_async(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> Path:
-    """Return the writable skill body directory without creating workspace forks."""
+    """Return the indexed writable skill body directory."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
     indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
-        if await storage.exists(str(skill_dir / "GRAPH.md")):
+        if await _workspace_skill_body_exists(skill_dir, storage):
             return skill_dir
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / safe_skill_id
-    if await storage.exists(str(workspace_dir / "GRAPH.md")):
-        return workspace_dir
-
-    public_dir = config.SKILLS_DIR / safe_skill_id
-    if await storage.exists(str(public_dir / "GRAPH.md")):
-        response = error_response(
-            error_code="SKILL_READ_ONLY",
-            http_status=403,
-            message=f"Skill is read-only: {safe_skill_id}",
-            details={"skill_id": safe_skill_id},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
+    del user_id
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
         f"Skill not found: {safe_skill_id}",
@@ -943,7 +915,7 @@ async def resolve_skill_dir_async(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> Path:
-    """Resolve a skill id through the global index, then legacy and builtin paths."""
+    """Resolve a skill id through the opened-skill absolute path index."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
     indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
@@ -951,12 +923,7 @@ async def resolve_skill_dir_async(
         if await storage.exists(str(skill_dir)):
             return skill_dir
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / safe_skill_id
-    if await _workspace_skill_body_exists(workspace_dir, storage):
-        return workspace_dir
-    public_dir = config.SKILLS_DIR / safe_skill_id
-    if await storage.exists(str(public_dir)):
-        return public_dir
+    del user_id
     _raise_skill_not_found(safe_skill_id)
 
 
@@ -997,28 +964,14 @@ async def latest_run_metadata_async(
 
 
 def ensure_workspace_skill_dir(skill_id: str) -> Path:
-    """Return a writable skill dir without creating workspace forks."""
+    """Return the indexed writable skill dir."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
     indexed = _sync_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
-        if (skill_dir / "GRAPH.md").exists():
+        if _workspace_skill_body_exists_sync(skill_dir):
             return skill_dir
 
-    workspace_dir = config.default_workspace_skills_dir() / safe_skill_id
-    if _workspace_skill_body_exists_sync(workspace_dir):
-        return workspace_dir
-
-    public_dir = config.SKILLS_DIR / safe_skill_id
-    if (public_dir / "GRAPH.md").exists():
-        response = error_response(
-            error_code="SKILL_READ_ONLY",
-            http_status=403,
-            message=f"Skill is read-only: {safe_skill_id}",
-            details={"skill_id": safe_skill_id},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
         f"Skill not found: {safe_skill_id}",
@@ -1028,7 +981,7 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
 
 # codeql[py/path-injection] skill_id is converted to safe_skill_id by _validate_skill_id_segment before path joins.
 def resolve_skill_dir(skill_id: str) -> Path:
-    """Resolve a skill id, preferring the global index."""
+    """Resolve a skill id through the opened-skill absolute path index."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
     indexed = _sync_skill_index_entry(safe_skill_id)
     if indexed:
@@ -1036,12 +989,6 @@ def resolve_skill_dir(skill_id: str) -> Path:
         if skill_dir.exists():
             return skill_dir
 
-    workspace_dir = config.default_workspace_skills_dir() / safe_skill_id
-    if _workspace_skill_body_exists_sync(workspace_dir):
-        return workspace_dir
-    public_dir = config.SKILLS_DIR / safe_skill_id
-    if public_dir.exists():
-        return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
         f"Skill not found: {safe_skill_id}",
@@ -1078,7 +1025,7 @@ def test_inputs_dir_for_skill(skill_dir: Path) -> Path:
 def skill_id_from_changed_path(path: Path) -> str | None:
     """Map a changed file path under watched roots back to a skill id."""
     resolved = path.resolve()
-    roots = (config.default_workspace_skills_dir(), config.SKILLS_DIR)
+    roots = (config.DEFAULT_SKILLS_ROOT,)
     for root in roots:
         try:
             relative = resolved.relative_to(root.resolve())
@@ -1477,8 +1424,7 @@ def _allowed_child_graph_roots(parent_skill_dir: Path) -> list[Path]:
     """
     roots = [
         parent_skill_dir,
-        config.default_workspace_skills_dir(),
-        config.SKILLS_DIR,
+        config.DEFAULT_SKILLS_ROOT,
     ]
     resolved: list[Path] = []
     for root in roots:
@@ -2048,19 +1994,6 @@ def _raise_manifest_validation_failed(lint: LintResult) -> None:
         retry_strategy="not_retryable",
     )
     raise_error_response(response)
-
-
-async def _list_skill_ids(root: Path, storage: StorageBackend) -> list[str]:
-    skill_ids: list[str] = []
-    for child_name in await storage.list_dirs(str(root)):
-        if child_name.startswith(".") or child_name == "__pycache__":
-            continue
-        skill_ids.append(child_name)
-    return sorted(skill_ids)
-
-
-def _workspace_skills_dir_for(user_id: str) -> Path:
-    return config.WORKSPACES_DIR / user_id / "skills"
 
 
 def _rewrite_forked_skill_content(content: str, *, old_id: str, new_id: str) -> str:

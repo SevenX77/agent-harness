@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from app.core import config
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.services import skills as skill_service
@@ -21,20 +20,6 @@ def metadata_store(tmp_path: Path) -> LocalJsonMetadataStore:
         global_config_dir=tmp_path / "global-config",
         workspaces_root=tmp_path / "workspaces",
     )
-
-
-@pytest.mark.anyio
-async def test_list_skill_ids_includes_folder_skills_without_graph(tmp_path: Path) -> None:
-    root = tmp_path / "skills"
-    (root / "v1-skill").mkdir(parents=True)
-    (root / "v1-skill" / "SKILL.md").write_text("# V1\n", encoding="utf-8")
-    _write_graph_skill(root / "v21-skill", "v21-skill")
-    (root / ".hidden").mkdir()
-    (root / "__pycache__").mkdir()
-
-    storage = LocalFilesystemBackend(tmp_path)
-
-    assert await skill_service._list_skill_ids(root, storage) == ["v1-skill", "v21-skill"]
 
 
 @pytest.mark.anyio
@@ -271,16 +256,10 @@ def test_create_skill_without_directory_uses_settings_default_folder(
     assert (skill_dir / ".git").is_dir()
 
 
-def test_create_skill_rejects_existing_public_v1_skill_id(
+def test_create_skill_rejects_existing_indexed_skill_id(
     client: TestClient,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    public_skill_dir = tmp_path / "public-skills" / "text-segmentation"
-    public_skill_dir.mkdir(parents=True)
-    (public_skill_dir / "SKILL.md").write_text("# Text segmentation\n", encoding="utf-8")
-    monkeypatch.setattr(config, "SKILLS_DIR", tmp_path / "public-skills")
-
     parent_dir = tmp_path / "external"
     parent_dir.mkdir()
     response = client.post(
@@ -323,14 +302,15 @@ def test_create_skill_with_missing_directory_path_scaffolds(
 async def test_resolve_skill_dir_async_returns_v1_directory_without_graph(
     tmp_path: Path,
     metadata_store: LocalJsonMetadataStore,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     skills_root = tmp_path / "skills"
     skill_dir = skills_root / "story-deconstruction"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# Story Deconstruction\n", encoding="utf-8")
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_root)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    await metadata_store.save_skill_index_entry(
+        "story-deconstruction",
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
 
     resolved = await skill_service.resolve_skill_dir_async(
         "default",
@@ -375,7 +355,6 @@ def test_read_skill_files_returns_real_v1_tree_and_filters_noise(tmp_path: Path)
 async def test_get_skill_detail_returns_broken_detail_with_v1_files(
     tmp_path: Path,
     metadata_store: LocalJsonMetadataStore,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     skills_root = tmp_path / "skills"
     skill_dir = skills_root / "story-deconstruction"
@@ -384,8 +363,10 @@ async def test_get_skill_detail_returns_broken_detail_with_v1_files(
     (skill_dir / "SKILL.md").write_text("# Story Deconstruction\n", encoding="utf-8")
     (skill_dir / "nodes" / "plot.md").write_text("# Plot\n", encoding="utf-8")
     (skill_dir / "script" / "run.py").write_text("print('ok')\n", encoding="utf-8")
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_root)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    await metadata_store.save_skill_index_entry(
+        "story-deconstruction",
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
 
     detail = await skill_service.get_skill_detail(
         "default",
@@ -475,6 +456,5 @@ io:
     return {"prepared": True}
 """,
     }
-
 
 

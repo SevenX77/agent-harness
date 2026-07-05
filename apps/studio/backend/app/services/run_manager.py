@@ -1193,7 +1193,7 @@ def _source_less_run_dir_for(skill_id: str, run_id: str) -> Path:
         )
         raise_error_response(response)
     _validate_run_id_segment(run_id)
-    return config.default_workspace_skills_dir() / skill_id / ".workspace" / "runs" / run_id
+    return config.DEFAULT_SKILLS_ROOT / skill_id / ".workspace" / "runs" / run_id
 
 
 def _write_run_metadata(run_dir: Path, metadata: RunMetadata) -> None:

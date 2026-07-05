@@ -15,9 +15,18 @@ from urllib.request import url2pathname
 
 import pytest
 
+from tests.conftest import register_skill_index_entry
+
 BACKEND_ROOT = next(
     parent for parent in Path(__file__).resolve().parents if (parent / "app").is_dir() and (parent / "tests").is_dir()
 )
+
+
+def _register_demo_skill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, skill_dir: Path) -> None:
+    from app.core import config
+
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", tmp_path / "global-config" / "skill_index.json")
+    register_skill_index_entry("demo.skill", skill_dir)
 
 
 def test_run_manager_routes_source_runs_through_engine_artifact_adapter() -> None:
@@ -2975,6 +2984,7 @@ def test_run_metadata_preserves_artifact_identity_for_source_and_release_runs(
 
     skill_dir = tmp_path / "workspaces" / "default" / "skills" / "demo.skill"
     skill_dir.mkdir(parents=True)
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
     monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", tmp_path / "Skills")
     source_artifact_ref = {
@@ -3036,14 +3046,14 @@ def test_run_metadata_preserves_artifact_identity_for_source_and_release_runs(
         )
     )
 
-    for metadata, expected in (
-        (source_metadata, source_artifact_ref),
-        (release_metadata, release_artifact_ref),
+    for metadata, expected, expected_skill_dir in (
+        (source_metadata, source_artifact_ref, skill_dir),
+        (release_metadata, release_artifact_ref, config.DEFAULT_SKILLS_ROOT / "demo.skill"),
     ):
         assert metadata.artifact_ref == expected
         assert metadata.source_map_ref == expected["source_map_ref"]
         assert metadata.execution_fingerprint == expected["execution_fingerprint"]
-        metadata_path = skill_dir / ".workspace" / "runs" / metadata.run_id / "run_metadata.json"
+        metadata_path = expected_skill_dir / ".workspace" / "runs" / metadata.run_id / "run_metadata.json"
         saved = json.loads(metadata_path.read_text(encoding="utf-8"))
         assert saved["artifact_ref"] == expected
         assert saved["source_map_ref"] == expected["source_map_ref"]
@@ -3064,6 +3074,7 @@ def test_run_detail_reads_final_context_from_sealed_run_artifact_store_not_legac
     run_dir = skill_dir / ".workspace" / "runs" / "run-store-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-store-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3097,6 +3108,7 @@ def test_run_detail_reads_input_data_from_sealed_run_artifact_store_not_legacy_j
     run_dir = skill_dir / ".workspace" / "runs" / "run-store-input-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-store-input-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3129,6 +3141,7 @@ def test_run_detail_reads_trace_and_artifact_list_from_sealed_run_artifact_store
     run_dir = skill_dir / ".workspace" / "runs" / "run-store-trace-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-store-trace-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3182,6 +3195,7 @@ def test_run_detail_does_not_recreate_latest_snapshot_during_read_path(
     latest_dir = skill_dir / ".workspace" / "runs" / "latest"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-read-no-latest", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3212,6 +3226,7 @@ def test_run_detail_validates_artifact_list_object_hashes(
     run_dir = skill_dir / ".workspace" / "runs" / "run-corrupt-listed-artifact"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(
         run_id="run-corrupt-listed-artifact",
@@ -3254,6 +3269,7 @@ def test_run_detail_filters_none_and_non_artifact_object_ref_paths(
     run_dir = skill_dir / ".workspace" / "runs" / "run-null-path-artifact"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(
         run_id="run-null-path-artifact",
@@ -3300,6 +3316,7 @@ def test_run_detail_exposes_trace_artifact_hash_mismatch_without_legacy_trace_fa
     run_dir = skill_dir / ".workspace" / "runs" / "run-corrupt-trace-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-corrupt-trace-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3342,6 +3359,7 @@ def test_run_detail_exposes_artifact_hash_mismatch_without_legacy_json_fallback(
     run_dir = skill_dir / ".workspace" / "runs" / "run-corrupt-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-corrupt-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3375,6 +3393,7 @@ def test_run_detail_exposes_missing_sealed_artifact_without_legacy_json_fallback
     run_dir = skill_dir / ".workspace" / "runs" / "run-missing-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-missing-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3408,6 +3427,7 @@ def test_run_detail_exposes_corrupt_sealed_json_without_legacy_json_fallback(
     run_dir = skill_dir / ".workspace" / "runs" / "run-corrupt-json-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-corrupt-json-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3438,6 +3458,7 @@ def test_run_detail_exposes_corrupt_sealed_unicode_without_legacy_json_fallback(
     run_dir = skill_dir / ".workspace" / "runs" / "run-corrupt-unicode-detail"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-corrupt-unicode-detail", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
@@ -3467,6 +3488,7 @@ def test_list_runs_builds_missing_input_summary_from_sealed_run_artifact_store(
     run_dir = skill_dir / ".workspace" / "runs" / "run-summary-store"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _register_demo_skill(monkeypatch, tmp_path, skill_dir)
     run_dir.mkdir(parents=True)
     metadata = RunMetadata(run_id="run-summary-store", status="success", started_at="2026-06-17T00:00:00Z")
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")

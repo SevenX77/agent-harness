@@ -10,7 +10,7 @@ from app.core.adapters.engine import ResourceNotFoundError, make_error_payload
 
 
 class StudioSkillResolver:
-    """Resolve Studio skill ids through local index, workspace, then bundled skills."""
+    """Resolve Studio skill ids through the opened-skill absolute path index."""
 
     def resolve_skill(self, skill_id: str) -> Path:
         indexed = _skill_index_entry(skill_id)
@@ -28,14 +28,6 @@ class StudioSkillResolver:
                     source_path=indexed_root,
                 ),
             )
-
-        workspace_root = config.default_workspace_skills_dir() / skill_id
-        if _is_skill_root(workspace_root):
-            return workspace_root
-
-        bundled_root = config.SKILLS_DIR / skill_id
-        if _is_skill_root(bundled_root):
-            return bundled_root
 
         message = f"skill {skill_id!r}: skill is not registered in Studio"
         raise ResourceNotFoundError(

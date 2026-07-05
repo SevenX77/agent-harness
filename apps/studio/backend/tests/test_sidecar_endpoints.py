@@ -57,4 +57,5 @@ def test_resource_dir_env_controls_default_paths(monkeypatch: pytest.MonkeyPatch
 
     resource_dir = Path("/tmp/studio-resource").resolve()
     assert config.resource_dir_from_env(os.environ) == resource_dir
-    assert config.default_skills_dir(resource_dir) == resource_dir / "skills"
+    assert not hasattr(config, "default_skills_dir")
+    assert not hasattr(config, "SKILLS_DIR")

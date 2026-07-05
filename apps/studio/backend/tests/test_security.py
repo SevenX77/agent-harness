@@ -87,8 +87,10 @@ def test_terminal_rejects_symlink_escape_from_skills_root(
 
 def test_terminal_uses_only_server_side_whitelisted_command(
     client: TestClient,
+    studio_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    skills_dir, _workspaces_dir = studio_roots
     monkeypatch.setattr("app.services.terminal_manager.PtyProcess", RecordingPtyFactory)
     monkeypatch.setattr(terminal_manager, "command", ["bash", "--noprofile", "--norc"])
 
@@ -99,7 +101,7 @@ def test_terminal_uses_only_server_side_whitelisted_command(
 
     assert response.status_code == 201
     assert RecordingPtyFactory.commands == [["bash", "--noprofile", "--norc"]]
-    assert response.json()["cwd"].endswith("/skills/text-segmentation")
+    assert response.json()["cwd"] == (skills_dir / "text-segmentation").as_posix()
 
 
 def test_terminal_rejects_non_whitelisted_internal_command(

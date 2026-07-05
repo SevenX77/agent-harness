@@ -592,8 +592,6 @@ def _find_file(ref: str) -> Path:
     if ref_path.exists():
         return ref_path
 
-    from app.core import config
-
     candidates: list[Path] = []
     storage_root = _storage_root()
     candidates.append(_safe_join(storage_root, ref_path))
@@ -603,17 +601,13 @@ def _find_file(ref: str) -> Path:
     skill_id = parts[0] if len(parts) >= 3 and parts[0] not in {"runs", "golden"} else None
     if skill_id:
         suffix = Path(*parts[1:])
-        candidates.append(_safe_join(config.SKILLS_DIR / skill_id / ".workspace", suffix))
-        candidates.append(_safe_join(config.SKILLS_DIR / skill_id, suffix))
-        # Workspace skills (the writable ones you actually run/promote) keep their
-        # run/golden artifacts under WORKSPACES_DIR, not SKILLS_DIR. Resolve the
-        # real skill dir so compare finds them there too — otherwise golden
-        # compare fails for every runnable skill.
+        # Resolve the current indexed skill dir so compare finds run/golden
+        # artifacts under that skill's own .workspace directory.
         try:
             from app.services.skills import resolve_skill_dir
 
             resolved_skill_dir: Path | None = resolve_skill_dir(skill_id)
-        except Exception:  # noqa: BLE001 — fall back to the SKILLS_DIR candidates below
+        except Exception:  # noqa: BLE001 - unresolved legacy artifact refs stay unresolved
             resolved_skill_dir = None
         if resolved_skill_dir is not None:
             candidates.append(_safe_join(resolved_skill_dir / ".workspace", suffix))

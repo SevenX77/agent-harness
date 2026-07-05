@@ -21,6 +21,8 @@ from app.services.golden_diff import (
 from app.services.golden_template import generate_golden_template
 from app.services.skills import resolve_skill_dir
 
+from tests.conftest import register_skill_index_entry
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -99,6 +101,7 @@ Produce the segments.
 """,
         encoding="utf-8",
     )
+    register_skill_index_entry(AGENT_SKILL, skill_dir)
     return AGENT_SKILL
 
 

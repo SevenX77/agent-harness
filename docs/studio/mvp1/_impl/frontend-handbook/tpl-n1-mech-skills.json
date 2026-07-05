@@ -3,22 +3,22 @@
   "title": "skill 发现 / 读写契约(gateway 后端 sidecar 侧 skills 路由)",
   "owner_tag": "gateway 后端 sidecar",
   "overview": {
-    "manages": "Home 屏现状对接的 skill 发现 / 建 / 删后端机制:gateway 后端 sidecar 侧(即 apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)的 skills 路由(前缀 /api/skills),提供建/导入(POST)、注册表列举(GET)、注销(DELETE)、单 skill 详情(GET /{id})。",
-    "why_single": "这块机制是一整套「注册表模型」:MetadataStore(后端元数据存储)+ GET /api/skills 聚合 + 自动发现磁盘上未注册的 skill,跨多个端点协同。它与 N1 锁定的 D1/D11(去注册表决策、IDE/workspace 模型)方向冲突,是 Home 重塑的核心债,单列一页讲清「现状契约长啥样、哪几条要退役 / 改、后端实现到哪了」。",
-    "design_owner": "后端为主(gateway 后端 sidecar 侧)。前端只投影它返回的 SkillSummary(skill 摘要 DTO),不自存第二份真相。N1 目标是让 Home 不再依赖这套注册表(改读浏览器 localStorage 的 MRU 最近列表),写盘迁 Studio Rust 后端 native-fs(见机制 B)。",
-    "code_location": "后端:routers/skills.py(skills 路由,APIRouter 前缀 /api/skills)+ services/skills.py(建/导入/列举/注销/详情的服务实现,如 create_new_skill / list_skill_summaries / delete_skill)+ models/skills.py(CreateSkillReq 请求模型、SkillSummary 摘要模型)。前端对接:api/skills 相关调用 + useSkills(走 GET /api/skills 的 hook)。",
+    "manages": "skills 路由从旧的 Home 注册表模型收敛到路径式工作区模型后的后端边界:Home 新建/打开走 Rust native-fs + MRU,后端保留单 skill 详情(GET /{id})、工作区内运行/历史/发布等端点;GET /api/skills 列表聚合已退役。",
+    "why_single": "这块机制曾是一整套「注册表模型」:MetadataStore(后端元数据存储)+ GET /api/skills 聚合 + 自动发现磁盘上未注册的 skill。它与 N1 锁定的 D1/D11(去注册表决策、IDE/workspace 模型)方向冲突;本页记录旧契约如何被拆掉,以及当前只认 skill_index.absolute_path 的路径式边界。",
+    "design_owner": "后端为主(gateway 后端 sidecar 侧)。前端 Home 只维护本地 MRU,不自存第二份运行时真相;进入工作区后,单 skill 详情和相关操作都以 skill_index 中的绝对路径为入口。",
+    "code_location": "后端:routers/skills.py(skills 路由,APIRouter 前缀 /api/skills)+ services/skills.py(新建/导入兼容端点、注销、详情、fork、history 等服务实现)+ models/skills.py(CreateSkillReq、SkillSummary/SkillDetail DTO)。前端:Home 走 Rust native-fs(createSkillWorkspace/openSkillWorkspace)+ MRU;工作区内继续调用 GET /api/skills/{id} 等单 skill 端点。",
     "dataflow": [
-      "打开文件夹 / 新建 → 前端 POST /api/skills(import_existing 选导入或新建)→ 后端 create_new_skill 建目录 / 注册 / 写脚手架 → 返回 SkillSummary",
+      "打开文件夹 / 新建 → 前端调用 Rust native-fs(createSkillWorkspace/openSkillWorkspace)写盘、git init、登记 skill_index.absolute_path → 进入工作区后再 GET /api/skills/{id} 读取详情",
       "(旧现状,已拆)曾经:进 Home → useSkills 调 GET /api/skills → 后端聚合 SKILLS_DIR + workspace + MetadataStore + 自动发现 → SkillSummary[]。现:Home 改读 Rust MRU,GET /api/skills 列表/聚合路由已移除(详见末节 backend_status『GET 去注册表』条)",
-      "Remove → 前端 DELETE /api/skills/{id} → 后端 delete_skill 只注销不删盘",
-      "目标重塑:Home 改读 MRU(本地)→ 不再调 GET /api/skills;打开/新建落盘改走 Studio Rust 后端 native-fs → 不再经 POST /api/skills"
+      "Remove from recent → 前端只删本地 MRU;DELETE /api/skills/{id} 仍是后端注销 skill_index 的兼容端点,但 N1/Home 无调用方",
+      "当前运行时解析:GET /api/skills/{id}、fork、terminal、golden 等后端路径入口只接受 skill_index.absolute_path;DEFAULT_SKILLS_ROOT 仅作为新建默认落点"
     ]
   },
   "submodules": [
     {
-      "name": "注册表模型(现状)",
+      "name": "注册表模型(历史,已退役)",
       "code": "backend: list_skill_summaries + MetadataStore",
-      "summary": "(历史现状:GET 列表路由现已拆,见末节 backend_status『GET』条;此处保留以说明被退役的旧契约长啥样)旧 GET /api/skills 把三个来源聚合成一张列表:公共/内置 skills 目录(SKILLS_DIR)扫描、用户 workspace skills 目录扫描、MetadataStore 持久化摘要,再减去用户显式注销的 id;每条摘要从磁盘算出 phase_count / has_golden / last_run_at,并附 config_mismatch(git 远端 URL 不一致告警)。残留的注册表状态(写 skill_summary.json + 隐藏集 + 建时 list_skills 冲突扫描)仍在,待退役。",
+      "summary": "(历史现状:GET 列表路由现已拆,见末节 backend_status『GET』条;此处保留以说明被退役的旧契约长啥样)旧 GET /api/skills 把三个来源聚合成一张列表:公共/内置 skills 目录(SKILLS_DIR)扫描、用户 workspace skills 目录扫描、MetadataStore 持久化摘要,再减去用户显式注销的 id;每条摘要从磁盘算出 phase_count / has_golden / last_run_at,并附 config_mismatch(git 远端 URL 不一致告警)。PR-B 后 SKILLS_DIR/default workspace 回退也已删除,运行时只认 skill_index.absolute_path。",
       "formula": "",
       "diagram": "",
       "rules": [
@@ -28,7 +28,7 @@
       ],
       "do": ["列举所有已知 skill(含自动发现的未注册项)", "为每条算派生字段供前端展示"],
       "dont": ["不是 N1 目标想要的:它是注册表 + 自动发现,与 D1/D11 去注册表冲突"],
-      "deviation": "✓ 已退役(2026-06-23)。这套旧聚合注册表(GET 列表 + MetadataStore 摘要 + unregistered 隐藏集 + 自动发现)曾与 D1/D11 冲突,现已拆:GET 列表路由早移除,本轮再退掉残留状态机(7 个 MetadataStore 方法删除,建/fork 只写 skill_index)。Home 读 MRU、解析走路径式 skill_index 完成。本节保留以说明被退役的旧契约长啥样。"
+      "deviation": "✓ 已退役(2026-06-23 + PR-B)。这套旧聚合注册表(GET 列表 + MetadataStore 摘要 + unregistered 隐藏集 + 自动发现)曾与 D1/D11 冲突,现已拆:GET 列表路由早移除,残留状态机(7 个 MetadataStore 方法、skill_summary.json、隐藏集)已退掉;PR-B 进一步删除 SKILLS_DIR/default workspace 解析回退。Home 读 MRU、解析走路径式 skill_index 完成。本节保留以说明被退役的旧契约长啥样。"
     },
     {
       "name": "D2 导入放宽(已落)",
@@ -81,8 +81,8 @@
   "interface_groups": [
     {
       "key": "crud",
-      "title": "skill 注册 / 读写接口(注册表模型,N1 目标 retire / 改)",
-      "note": "这一组是 Home 现状对接的 skill CRUD:建/导入(POST)、列举(GET)、注销(DELETE)、详情(GET /{id})。前三条在 N1 目标里要退役 / 改(去注册表 + 写盘迁 Rust + R1 不删);详情(GET /{id})进工作区后仍用,保留。它们仍 live,但本节点标 retire-target,故前端两轴里 be 标「契约问题」(契约要改),不是「未实现」。"
+      "title": "skill 路径式读写接口(历史注册表已退役)",
+      "note": "这一组记录 Home 旧 CRUD 与当前工作区入口的关系:GET /api/skills 列表路由已移除;POST/DELETE 仍是后端兼容端点但 Home 无调用方;GET /api/skills/{id} 进工作区后仍用,并只通过 skill_index.absolute_path 定位。"
     }
   ],
   "interfaces": [
@@ -100,8 +100,8 @@
       "endpoint": "GET /api/skills",
       "req": "无业务入参(鉴权用户 id 来自依赖)",
       "resp": "SkillSummary[](每条带 phase_count / has_golden / last_run_at / config_mismatch 派生字段)",
-      "purpose": "列举所有已知 skill(注册表聚合 + 自动发现磁盘未注册项),Home 现状的 Recent 卡片派生字段来源。N1 目标:Home 改读 MRU,去注册表 / 去自动发现,此端点 N1 退役。",
-      "provider": "gateway 后端 sidecar(list_skills 路由 → list_skill_summaries 服务函数)",
+      "purpose": "历史端点:曾用于列举所有已知 skill(注册表聚合 + 自动发现磁盘未注册项)。现已移除;Home 改读 MRU,运行时不再提供技能库列表。",
+      "provider": "已移除(list_skills 路由 / list_skill_summaries 服务函数均不再作为运行时入口)",
       "id": "iface-list"
     },
     {
@@ -125,9 +125,9 @@
   ],
   "boundaries": {
     "do": [
-      "建/导入 skill(POST)、列举(GET)、注销(DELETE)、单 skill 详情(GET /{id})",
+      "单 skill 详情(GET /{id})和工作区内操作通过 skill_index.absolute_path 定位",
       "导入对缺 manifest 已放宽(D2:repair-state 放行)",
-      "为列表算派生字段(phase_count / has_golden / last_run_at / config_mismatch)供前端展示"
+      "保留 DEFAULT_SKILLS_ROOT 仅作为新建 skill 的默认落点"
     ],
     "dont": [
       "N1 目标不再让 Home 依赖 GET /api/skills 聚合(改 MRU)",
@@ -156,7 +156,7 @@
       "item": "GET /api/skills 去注册表(D1/D11)",
       "d12": "对应 N1 设计锁 D1/D11(去注册表 / IDE 模型)",
       "status": "ok",
-      "note": "已完成(2026-06-23 后端退役旧注册表 + 据代码核对)。前端:Home(WelcomePage.tsx)读本地 MRU(useRecentSkills → Rust recent_workspaces.json),不依赖注册表。后端:GET /api/skills 列表/聚合 HTTP 路由早已拆(skills router 只剩 POST/GET{id}/DELETE{id});本轮进一步退掉残留的旧注册表状态机——MetadataStore 删去 7 个方法(list_skills、get/save/remove_skill_summary、list_unregistered_skill_ids、register/unregister_skill);建/fork 不再写 skill_summary.json(只写 skill_index);建时『目录占用』冲突检查只扫 skill_index;resolve/ensure 只走 skill_index→workspace→public(去掉 unregistered 隐藏集 + summary 兜底)。D1/D11 收敛到路径式 skill_index(Rust native-fs 写的 IDE 模型)完成。",
+      "note": "已完成(2026-06-23 后端退役旧注册表 + PR-B 据代码核对)。前端:Home(WelcomePage.tsx)读本地 MRU(useRecentSkills → Rust recent_workspaces.json),不依赖注册表。后端:GET /api/skills 列表/聚合 HTTP 路由早已拆(skills router 无列表路由);旧 MetadataStore 摘要/隐藏集状态机已删除;建/fork 不再写 skill_summary.json(只写 skill_index);建时『目录占用』冲突检查只扫 skill_index;PR-B 删除 config.SKILLS_DIR/default_skills_dir/default_workspace_skills_dir,StudioSkillResolver/_PrivateStudioSkillResolver/resolve_skill_dir(_async)/ensure_workspace_skill_dir(_async) 只接受 skill_index.absolute_path。file_watcher 静态根仅 DEFAULT_SKILLS_ROOT,外部打开 skill 由 register_workspace 动态 watch;terminal cwd 也走 resolve_skill_dir。D1/D11 收敛到路径式 skill_index(Rust native-fs 写的 IDE 模型)完成。",
       "ref": "d2"
     },
     {

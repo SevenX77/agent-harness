@@ -210,26 +210,11 @@ def _resolve_terminal_cwd(skill_id: str) -> Path:
     if _SKILL_ID_RE.fullmatch(skill_id) is None:
         raise ValueError(f"SKILL_NOT_FOUND: Skill not found: {skill_id}")
 
-    candidates = (
-        config.default_workspace_skills_dir() / skill_id,
-        config.SKILLS_DIR / skill_id,
-    )
-    allowed_roots = (
-        config.default_workspace_skills_dir().resolve(),
-        config.SKILLS_DIR.resolve(),
-    )
+    from app.services.skills import resolve_skill_dir
 
-    for candidate, root in zip(candidates, allowed_roots, strict=True):
-        resolved = candidate.resolve()
-        if not resolved.is_relative_to(root):
-            continue
-        if not resolved.is_relative_to(
-            config.WORKSPACES_DIR.resolve()
-        ) and not resolved.is_relative_to(config.SKILLS_DIR.resolve()):
-            continue
-        if (resolved / "GRAPH.md").is_file():
-            return resolved
-
+    skill_dir = resolve_skill_dir(skill_id).resolve()
+    if (skill_dir / "GRAPH.md").is_file():
+        return skill_dir
     raise ValueError(f"SKILL_NOT_FOUND: Skill not found: {skill_id}")
 
 

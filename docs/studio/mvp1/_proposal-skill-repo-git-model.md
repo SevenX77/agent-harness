@@ -10,7 +10,7 @@ aligns_with:
   - docs/engine/mvp1/02-mechanism/02-resolver/mvp1-alignment.md（RS1/RS2：删 registry、path 直接解析）
   - docs/mvp1-three-module-interface-design-and-changes-2026-06-11/01-design.md（D3：核心 runtime 只吃 ArtifactRef/path）
 binds_code:
-  - apps/studio/backend/app/core/config.py:64（SKILLS_DIR 解析链待删；repo/skills 已移除）
+  - apps/studio/backend/app/core/config.py / paths.py（SKILLS_DIR/default_skills_dir/default_workspace_skills_dir 已删除；仅 DEFAULT_SKILLS_ROOT 保留为新建默认落点）
   - apps/studio/backend/app/services/git_local.py（per-skill git，L1，已实现）
   - apps/studio/backend/app/services/git_collab.py（Gitea 协作，L2，已实现）
 ---
@@ -50,16 +50,18 @@ binds_code:
 **结论：** "去技能库、path 定位、无中心索引"是 engine 与 studio 设计源**双料写定**的
 MVP1 目标，当前代码是 drift。本提案只是把它讲成一个连贯的存储/身份模型 + 落地清单。
 
-## 3. 现状（as-is）与 drift 集群
+## 3. 历史 drift 集群（PR-C + PR-B 后已收敛）
 
-### 3.1 SKILLS_DIR = 运行时"技能库根"（要删的核心）
-- `apps/studio/backend/app/core/config.py:64` `SKILLS_DIR = default_skills_dir(RESOURCE_DIR)`
-  → `paths.py:56` `resource_dir / "skills"`；`RESOURCE_DIR` 缺省 = `REPO_ROOT`
-  （`config.py:12/60`、`paths.py:14`）→ **dev 下 `SKILLS_DIR` = 仓库根 `skills/`**。
-- 被 ~15 处运行时服务当"可枚举/可按 id 索引的技能库"用：`skill_resolver.py:36`、
-  `core/adapters/engine.py:182`、`skills.py`（`751/850/898/932/987/1017/1056/1456`）、
-  `golden_headless.py:606-607`、`file_watcher.py:338`、`terminal_manager.py:215-228`。
-  它们构成 `indexed → workspace → **bundled SKILLS_DIR**` 的解析链回退。
+### 3.1 SKILLS_DIR = 运行时"技能库根"（已删）
+- PR-B 删除了 `config.SKILLS_DIR`、`paths.default_skills_dir(...)`、
+  `config.default_workspace_skills_dir(...)`。运行时不再能通过仓库根 `skills/`
+  或 `workspaces/default/skills` 按 id 回退找 skill。
+- 解析链已改为 path-first：`StudioSkillResolver`、
+  `_PrivateStudioSkillResolver`、`resolve_skill_dir(_async)`、
+  `ensure_workspace_skill_dir(_async)` 只接受 `skill_index` 里的 `absolute_path`。
+- `file_watcher` 的静态 watch root 只保留 `DEFAULT_SKILLS_ROOT`（外部打开的 skill
+  通过 `register_workspace` 动态加入）；`terminal_manager` 也先经
+  `resolve_skill_dir` 落到当前 skill 的绝对路径，再开终端。
 
 ### 3.2 bundled skill 赖在主仓子目录、无独立 `.git`（截图现象的根因）
 - PR-C 决策（2026-07-05）：主仓不再跟踪 `skills/`。这些示例 skill 的机器本地副本
@@ -74,8 +76,9 @@ MVP1 目标，当前代码是 drift。本提案只是把它讲成一个连贯的
   实测：对 `skills/text-segmentation` 跑 `git log` 返回的 sha 与主仓 HEAD 完全一致。
 
 ### 3.3 registry 聚合的列表模型
-- `apps/studio/backend/app/services/skills.py:list_skill_summaries` 合并
+- 历史上的 `apps/studio/backend/app/services/skills.py:list_skill_summaries` 合并
   registry + public paths + workspace paths（`skill-workspace/baseline.md:37` 已标 ⚠️）。
+  这条 GET 列表路由早已移除；PR-B 又删掉残留的 workspace/public 解析回退。
 - import 门禁：`create_new_skill`（`skills.py:512`）要求 `GRAPH.md` + `SKILL.md`
   才接受文件夹（违 D2/D11，见 `skill-workspace` gaps）。
 
@@ -123,15 +126,16 @@ MVP1 目标，当前代码是 drift。本提案只是把它讲成一个连贯的
 | Step | 动作 | 落点 | 备注 |
 |---|---|---|---|
 | 1 | **skill 独立化**：新建/导入一律走 `initialize_skill_repository`（git init）；主仓移除 tracked `skills/`，示例 skill 作为仓库外本地目录打开 | `git_local.py`（已实现）+ 新建/导入流程 + repo root | 不独立化，L1/L2 全空转；PR-C 已移除 tracked `skills/` |
-| 2 | **删 SKILLS_DIR 解析链**：删 `config.SKILLS_DIR` + `default_skills_dir`，解析改为"当前 skill 绝对路径"驱动 | `config.py:64`、`skill_resolver.py:36`、`engine.py:182`、`skills.py`(751/850/898/932/987/1017/1056/1456)、`golden_headless.py:606`、`terminal_manager.py:215-228` | 保留 `DEFAULT_SKILLS_ROOT` |
+| 2 | **删 SKILLS_DIR 解析链**：删 `config.SKILLS_DIR` + `default_skills_dir` + `default_workspace_skills_dir`，解析改为"当前 skill 绝对路径"驱动 | `config.py`、`paths.py`、`skill_resolver.py`、`engine.py`、`skills.py`、`golden_headless.py`、`file_watcher.py`、`terminal_manager.py` | PR-B 已完成；保留 `DEFAULT_SKILLS_ROOT` |
 | 3 | **去 registry 列表**：`list_skill_summaries` 去 registry/public merge，改路径 MRU | `skills.py:183`、`WelcomePage.tsx` | 对齐 `workspace-open-folder-mru` |
 | 4 | **import 去门禁**：不因缺 `GRAPH/SKILL` 阻塞打开，进 repair 态 | `create_new_skill`（`skills.py:512`） | 对齐 D2/D11 |
 | 5 | **history 读独立仓**：确认 `list_history` 作用于独立仓；补测试"skill history 不含主仓提交" | `git_local.list_history`、`HistoryPanel.tsx` | 独立化后自然成立，测试锁死 |
 | 6 | **身份收敛**：不引入 uuid / manifest id；定位用路径，同一性用 git root-commit / origin | `git_local.py` / 后续协作 UI | 不触碰 engine skill-syntax schema |
 | 7 | **Gitea 打磨**：token 存储/发放、owner/repo 命名规则、首次 `create_repo` 时机、冲突 UX | `git_collab.py`、Settings、`useSkillSync.ts` | 骨架已在，属接线打磨 |
 
-`file_watcher.py:338` 的 watch roots 与 `terminal_manager` 的访问边界（现用 SKILLS_DIR
-兜底）随 Step 2 一并改为"当前 workspace 路径 + DEFAULT_SKILLS_ROOT"驱动。
+`file_watcher` 的 watch roots 与 `terminal_manager` 的访问边界已随 Step 2 收敛：
+静态根只保留 `DEFAULT_SKILLS_ROOT`，当前打开的外部 skill 由 workspace 注册路径驱动，
+不再使用 `SKILLS_DIR` 或 workspace 目录兜底。
 
 ## 6. PM 已拍板 / owner 待正式化
 

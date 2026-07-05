@@ -35,6 +35,7 @@ from app.core.adapters.gateway import (
     VerifiedProfile,
     build_runtime_setting_descriptors,
     call_method_client_compatibility,
+    call_method_ids_for_endpoint,
     canonicalize_model,
     lint_role_routes,
     normalize_route_capabilities,
@@ -2164,6 +2165,9 @@ async def _prepare_copilot_sdk_test_route(
 ) -> tuple[ResolvedRoute, CredentialProviderProtocol, str | None]:
     if copilot.resolved_route_has_copilot_sdk_method(route):
         return route, credential_provider, None
+    candidate_route = copilot.resolved_route_with_copilot_sdk_candidate_method(route)
+    if copilot.resolved_route_has_copilot_sdk_method(candidate_route):
+        return candidate_route, credential_provider, None
     endpoint_id = getattr(route, "endpoint_id", None)
     route_id = getattr(route, "route_id", None)
     if not isinstance(endpoint_id, str) or not isinstance(route_id, str):
@@ -3051,17 +3055,18 @@ def _candidate_route_call_method_ids(
     route: ProviderRoute,
     endpoint: ProviderEndpoint,
 ) -> list[str]:
-    if endpoint.provider_kind != "official":
-        return []
-    return _ordered_unique(
-        [
+    candidates: list[str] = []
+    if endpoint.provider_kind == "official":
+        candidates.extend(
             candidate.method_id
             for candidate in _official_language_probe_candidates(
                 endpoint,
                 route.provider_model_id,
             )
-        ]
-    )
+        )
+    if not candidates or endpoint.provider_kind != "official":
+        candidates.extend(call_method_ids_for_endpoint(endpoint.protocol, endpoint.base_url))
+    return _ordered_unique(candidates)
 
 
 def _copilot_sdk_compatible(route: ProviderRoute, endpoint: ProviderEndpoint) -> bool:

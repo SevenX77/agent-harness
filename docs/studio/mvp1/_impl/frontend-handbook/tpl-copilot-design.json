@@ -55,7 +55,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。已接真 registry(deriveCopilotCandidateGroups,无 mock);Built-in 判定已复用 #56 的 pickDefaultCopilotGroupIds,描述/标题直接取 model_group display_name。route eligibility 已收敛为后端投影的 provider_models[].copilot_sdk_compatible,该字段由 gateway call_methods.json 的 client compatibility 计算;前端不再维护 Anthropic Messages method/protocol 名单,显式不支持 SDK 必需 tools/tool_use 能力的 route 过滤,unknown method 保留可测;右侧 Available Models 仍保留完整模型库。",
+      "gap_brief": "符合设计。已接真 registry(deriveCopilotCandidateGroups,无 mock);Built-in 判定已复用 #56 的 pickDefaultCopilotGroupIds,描述/标题直接取 model_group display_name。route eligibility 已收敛为后端投影的 provider_models[].copilot_sdk_compatible,该字段由 gateway call_methods.json 的 endpoint_method_candidates + client compatibility 计算;前端不再维护 Anthropic Messages method/protocol/provider 名单,显式不支持 SDK 必需 tools/tool_use 能力的 route 过滤,unknown method 保留可测;右侧 Available Models 仍保留完整模型库。",
       "impl_ref": "fn-55"
     },
     {
@@ -92,7 +92,7 @@
       "module": "状态投影",
       "func": "设计:角色卡顶部显 N/M SDK Ready 汇总徽章、每条 route 一个 SDK 状态灯,灯来自真 SDK 测试结果,重开/重启后还在。",
       "action": "无显式动作(测试后/加载后自动投影;含挂载时从持久化结果回填)。",
-      "fe_design": "角色卡顶 N/M SDK Ready 徽章(M=兼容 route 数、N=测过且 ready 的)+ 每条 route 一个状态灯(🟢ready/🔵testing/⚪not_tested/🔴unsupported)。灯的权威来自真 SDK 测试:本次测试中走进度 override,本次没测的从挂载时拉的持久化 last 测试结果(读 sdk_evidence.routes 的 per-route 裁决)回填,所以重开 tab/重启后端后状态灯不丢。前端只读投影、不持第二份真相。",
+      "fe_design": "角色卡顶 N/M SDK Ready 徽章(M=当前 fallback_chain 里可见/可测试 route 数、N=其中测过且 ready 的)+ 每条 route 一个状态灯(🟢ready/🔵testing/⚪not_tested/🔴unsupported)。灯的权威来自真 SDK 测试:本次测试中走进度 override,本次没测的从挂载时拉的持久化 last 测试结果(读 sdk_evidence.routes 的 per-route 裁决)回填,所以重开 tab/重启后端后状态灯不丢。前端只读投影、不持第二份真相。",
       "fe_modules": [
         {
           "name": "copilot 状态投影",
@@ -119,7 +119,7 @@
       "module": "SDK 测试",
       "func": "设计:点 Test 对角色每条 route 验 Claude Agent SDK 工具调用能不能真跑通——发真工具调用、验 spawn/env 注入/tool loop,测过 ⟺ 运行能用,不存在假测试。",
       "action": "用户在 copilot 角色卡点 `Test` 按钮。",
-      "fe_design": "点 Test → 起一个后端测试 job、按节奏轮询进度实时刷到每条 route 灯上(testing→ready/unsupported)→ 成功 toast、需关注 toast.warning。后端对每条 route 起一个真 ClaudeSDKClient 子进程:写一个随机 token 到临时文件、逼模型用工具读回来,token 真被回显才算 tool loop 跑通(spawn + env 注入 + 工具循环全验)。若官方 route 尚无 verified invocation profile,SDK Test 先执行同一套 route-level official profile probe atom,把 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 等真实可用 method 写回 route,再重新解析 route 用真实 SDK 路径测试;profile probe 失败则该 route 红灯并写 probe-failed evidence,不拿 endpoint-level 连通性冒充 SDK 成功。这与真实对话走的是同一条 SDK 路径,所以『测的 SDK == 跑的 SDK』。前端只触发 + 展示进度,SDK 驱动策略归后端机制(copilot_mech_route)。",
+      "fe_design": "点 Test → 起一个后端测试 job、按节奏轮询进度实时刷到每条 route 灯上(testing→ready/unsupported)→ 成功 toast、需关注 toast.warning。后端对每条 route 起一个真 ClaudeSDKClient 子进程:写一个随机 token 到临时文件、逼模型用工具读回来,token 真被回显才算 tool loop 跑通(spawn + env 注入 + 工具循环全验)。若 route 尚无 verified invocation profile,SDK Test 先从 gateway endpoint_method_candidates 取可由 Claude SDK 驱动的 Anthropic Messages method；若仍无支持 method 且是官方 route,再执行同一套 route-level official profile probe atom,把 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 等真实可用 method 写回 route,重新解析 route 后用真实 SDK 路径测试;profile probe 失败则该 route 红灯并写 probe-failed evidence,不拿 endpoint-level 连通性冒充 SDK 成功。这与真实对话走的是同一条 SDK 路径,所以『测的 SDK == 跑的 SDK』。前端只触发 + 展示进度,SDK 驱动策略归后端机制(copilot_mech_route)。",
       "fe_modules": [
         {
           "name": "copilot 状态投影",
@@ -136,7 +136,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计——这是 spec §3.4 要修的核心 drift,现码已修:测试走真 ClaudeSDKClient(run_route_sdk_test,token 回显验 tool loop)、官方 route 缺 verified profile 时先做 route-level profile atom 再重解 route 跑 SDK,旧的 AsyncAnthropic 裸探针假测试已移除;前端经统一 role test-job 入口触发(不再需要单独 test-sdk 端点)。",
+      "gap_brief": "符合设计——这是 spec §3.4 要修的核心 drift,现码已修:测试走真 ClaudeSDKClient(run_route_sdk_test,token 回显验 tool loop)、route 缺 verified profile 时先按 gateway endpoint_method_candidates 补 SDK method,官方 route 再按需做 route-level profile atom 后重解 route 跑 SDK,旧的 AsyncAnthropic 裸探针假测试已移除;前端经统一 role test-job 入口触发(不再需要单独 test-sdk 端点)。",
       "impl_ref": "fn-58"
     },
     {
@@ -168,7 +168,7 @@
       "module": "route 兜底管理",
       "func": "设计:往兜底链追加一条当前 Copilot SDK 可驱动/可测试的 route / 用垃圾桶删一条;候选 route 读后端 provider_models[].copilot_sdk_compatible 判 eligible,不在前端按名字、protocol 或 method 表猜。",
       "action": "用户点 `Add route` 选一条可追加 route,或点某 route 的垃圾桶删除。",
-      "fe_design": "Add route → 下拉列出该 model group 里当前 Copilot SDK 可驱动/可测试、且还没在链里的 route,选一条追加到兜底序尾 → debounce 保存。垃圾桶 → 从兜底序移除该 route → 保存。候选 route 的『兼容』判据 = 后端 registry provider_model 的 `copilot_sdk_compatible`。后端根据 gateway call-method catalog 判断 method 是否已知支持/已知不兼容/未知可测,再叠加 tools/tool_use 显式不支持证据;前端只消费这个布尔投影,不读取 protocol 或维护 method allowlist。这个判据同时用于已配置角色卡可见 route、Add route 候选、拖入模型组后写回 fallback_chain/models.providers。右侧 Available Models 不用这个判据预过滤。",
+      "fe_design": "Add route → 下拉列出该 model group 里当前 Copilot SDK 可驱动/可测试、且还没在链里的 route,选一条追加到兜底序尾 → debounce 保存。垃圾桶 → 从兜底序移除该 route → 保存。已配置角色卡的显示顺序以 fallback_chain 为准,model_groups/providers 只提供候选全集,不能覆盖用户兜底序。候选 route 的『兼容』判据 = 后端 registry provider_model 的 `copilot_sdk_compatible`。后端根据 gateway call-method catalog 判断 method 是否已知支持/已知不兼容/未知可测,再叠加 tools/tool_use 显式不支持证据;前端只消费这个布尔投影,不读取 protocol 或维护 method allowlist。这个判据同时用于已配置角色卡可见 route、Add route 候选、拖入模型组后写回 fallback_chain/models.providers。右侧 Available Models 不用这个判据预过滤。",
       "fe_modules": [
         {
           "name": "copilot 角色派生",
@@ -191,7 +191,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。增删 route 写兜底链;eligible 判据已改为读取后端 provider_models[].copilot_sdk_compatible(deriveCopilotCandidateGroups + compatibleRoutesForRole),非按名字猜,也不在前端维护 method/protocol 名单。该字段由 gateway call_methods.json 声明的 anthropic_messages_client 兼容性计算:DeepSeek/Ark/OpenRouter 的 Anthropic Messages 特殊 method 放行,明确 OpenAI/Gemini/普通 chat method 过滤,未知 method 保留可测;spec §3.2 要取代的 isClaudeAgentSdkCompatibleRoute 名字启发式在现码已不存在。",
+      "gap_brief": "符合设计。增删 route 写兜底链;eligible 判据已改为读取后端 provider_models[].copilot_sdk_compatible(deriveCopilotCandidateGroups + compatibleRoutesForRole),非按名字猜,也不在前端维护 method/protocol/provider 名单。该字段由 gateway call_methods.json 的 endpoint_method_candidates + anthropic_messages_client 兼容性计算:DeepSeek/Ark 的 official Anthropic Messages 特殊 method 放行,Qiniu/WaveSpeed/OpenRouter 这类多协议 host 在无 verified profile 时也保留为可测候选,明确 OpenAI/Gemini/普通 chat method 过滤,未知 method 保留可测;spec §3.2 要取代的 isClaudeAgentSdkCompatibleRoute 名字启发式在现码已不存在。",
       "impl_ref": "fn-60"
     },
     {
@@ -324,7 +324,7 @@
     {
       "id": "femod-copilot-derivation",
       "name": "copilot 角色派生",
-      "explain": "前端共享逻辑：copilot-role-derivation.ts，从后端 model_groups + credentials 派生候选 copilot 模型组的纯函数集；deriveCopilotCandidateGroups（按后端 provider_models[].copilot_sdk_compatible 过滤 route,再叠加 tools/tool_use=false/unsupported/no,并标 built_in/third_party；前端不维护 method/protocol 白名单）；pickDefaultCopilotGroupIds（按 family 偏好阶梯择优浮出默认 canonical 组：opus4.8→4.7、V4Pro→V3.2Pro，它既驱动 #56 浮出，又作 #55 built_in 判定的唯一真相）；applyCopilotModelGroupSelection（选组时保留 role key、写 active_model/models/fallback_chain，保住 copilot 语义、修掉旧丢前缀 bug）。"
+      "explain": "前端共享逻辑：copilot-role-derivation.ts，从后端 model_groups + credentials 派生候选 copilot 模型组的纯函数集；deriveCopilotCandidateGroups（按后端 provider_models[].copilot_sdk_compatible 过滤 route,再叠加 tools/tool_use=false/unsupported/no,并标 built_in/third_party；前端不维护 method/protocol/provider 白名单）；pickDefaultCopilotGroupIds/orderCopilotDisplayRoles（按 family 偏好阶梯择优浮出默认 canonical 组：opus4.8→4.7、V4Pro→V3.2Pro，并让已保存内置卡保持 Claude→DeepSeek 顺序）；configuredCopilotRouteIds（已保存角色优先读 fallback_chain,不让 model_groups/providers 覆盖用户兜底序）；applyCopilotModelGroupSelection（选组时保留 role key、写 active_model/models/fallback_chain，保住 copilot 语义、修掉旧丢前缀 bug）。"
     },
     {
       "id": "femod-copilot-status",

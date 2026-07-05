@@ -38,7 +38,9 @@ import {
   hostFromBaseUrl,
   applyCopilotModelGroupSelection,
   buildCopilotRoleEntry,
+  configuredCopilotRouteIds,
   copilotKeyForGroupId,
+  orderCopilotDisplayRoles,
   pickDefaultCopilotGroupIds,
   routeSupportsCopilotSdk,
   type CopilotRolePreview,
@@ -261,8 +263,7 @@ export function CopilotTab({
             const activeModelGroupId = Object.keys(role.models ?? {})[0] || role.active_model || name
 
             const mockData = allModelGroupPreviewsById.get(activeModelGroupId)
-            const fallbackChainRoutes = role.models?.[activeModelGroupId]?.providers ??
-              role.fallback_chain?.map(e => e.route_id) ?? []
+            const fallbackChainRoutes = configuredCopilotRouteIds(role, activeModelGroupId)
 
             return {
               id: name,
@@ -295,8 +296,8 @@ export function CopilotTab({
   }, [realCopilotRoles])
 
   const displayRoles = useMemo(
-    () => (activeRoles.length > 0 ? activeRoles : floatedRoles),
-    [activeRoles, floatedRoles],
+    () => (activeRoles.length > 0 ? orderCopilotDisplayRoles(activeRoles, realCopilotRoles) : floatedRoles),
+    [activeRoles, realCopilotRoles, floatedRoles],
   )
 
   // 固定角色(不可删除/不可改名)—— 内置 copilot 角色(opus / deepseek)在其列。前端据此
@@ -985,14 +986,14 @@ function CopilotRoleCard({
 }) {
   // R-F17: per-card a11y text needs i18n so it tracks the active language.
   const { t } = useTranslation("settings")
-  const compatibleRoutes = compatibleRoutesForRole(modelGroup)
-  const readyCount = copilotBackendReadyCount(compatibleRoutes, routeStatusOverrides)
+  const configuredRoutes = chainRoutes
+  const readyCount = copilotBackendReadyCount(configuredRoutes, routeStatusOverrides)
   // R-F7: disable Test while debounced roles-save is still pending/saving so
   // the gateway resolver sees the snapshot the user just authored.
   const saveInFlight = saveStatus === "pending" || saveStatus === "saving"
-  // R-F21: longest cooldown across compatible routes drives the countdown
+  // R-F21: longest cooldown across configured routes drives the countdown
   // label and the Test Button's disabled state. Falls back to 0 (no cooldown).
-  const maxCooldownSeconds = compatibleRoutes.reduce((max, route) => {
+  const maxCooldownSeconds = configuredRoutes.reduce((max, route) => {
     const seconds = routeCooldowns[route.id]
     return typeof seconds === "number" && seconds > max ? seconds : max
   }, 0)
@@ -1000,7 +1001,7 @@ function CopilotRoleCard({
   // R-F12: per-card warning when there are eligible routes but none ready
   // yet — guide the user to single-test them in API Keys.
   const showUntestedWarning =
-    readyCount === 0 && compatibleRoutes.length > 0
+    readyCount === 0 && configuredRoutes.length > 0
 
   function handleAvailableModelDrop(event: Parameters<typeof readAvailableModelDropId>[0]) {
     const modelId = readAvailableModelDropId(event, getActiveAvailableModelDragId)
@@ -1046,13 +1047,13 @@ function CopilotRoleCard({
               onClick={onNavigateToApiKeys}
               disabled={!onNavigateToApiKeys}
             >
-              {t("copilot.roleCard.untestedWarning", { n: compatibleRoutes.length })}
+              {t("copilot.roleCard.untestedWarning", { n: configuredRoutes.length })}
             </button>
           ) : null}
         </div>
         <CardAction className="row-start-2 flex flex-wrap items-center gap-2 justify-self-start sm:row-start-1 sm:justify-self-end">
-          <Badge variant={readyCount === compatibleRoutes.length ? "success" : "outline"}>
-            {readyCount}/{compatibleRoutes.length} SDK Ready
+          <Badge variant={readyCount === configuredRoutes.length ? "success" : "outline"}>
+            {readyCount}/{configuredRoutes.length} SDK Ready
           </Badge>
           <Button
             type="button"
@@ -1092,7 +1093,7 @@ function CopilotRoleCard({
               : t("copilot.aria.ready", {
                   title: role.title,
                   ready: readyCount,
-                  total: compatibleRoutes.length,
+                  total: configuredRoutes.length,
                 })}
           </span>
           {role.source === "third_party" && !isFixed ? (

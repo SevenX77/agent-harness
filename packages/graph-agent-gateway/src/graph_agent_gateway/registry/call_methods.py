@@ -7,15 +7,26 @@ from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
 from typing import Any, Literal, cast
+from urllib.parse import urlparse
+
+from graph_agent_gateway.registry.base_url import canonicalize_base_url
 
 ProviderProbeBackend = Literal["ark", "claude", "deepseek", "gemini", "openai"]
 ClientCompatibility = Literal["supported", "incompatible", "unknown"]
-BaseUrlTransform = Literal["none", "ark_anthropic_compatible", "deepseek_anthropic"]
+BaseUrlTransform = Literal[
+    "none",
+    "anthropic_compatible",
+    "ark_anthropic_compatible",
+    "deepseek_anthropic",
+]
 
 _BACKENDS: frozenset[str] = frozenset({"ark", "claude", "deepseek", "gemini", "openai"})
 _COMPAT_VALUES: frozenset[str] = frozenset({"supported", "incompatible", "unknown"})
+_PROTOCOL_VALUES: frozenset[str] = frozenset(
+    {"openai_compatible", "anthropic_compatible", "google_genai", "ark_runtime"}
+)
 _BASE_URL_TRANSFORMS: frozenset[str] = frozenset(
-    {"none", "ark_anthropic_compatible", "deepseek_anthropic"}
+    {"none", "anthropic_compatible", "ark_anthropic_compatible", "deepseek_anthropic"}
 )
 
 
@@ -28,6 +39,20 @@ class CallMethodDefinition:
     client_compatibility: dict[str, ClientCompatibility]
     base_url_transform: BaseUrlTransform
     auth_token_env: str | None
+
+
+@dataclass(frozen=True)
+class EndpointCallMethodRule:
+    host_suffix: str
+    protocols: tuple[str, ...]
+    method_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CallMethodCatalog:
+    methods: dict[str, CallMethodDefinition]
+    protocol_defaults: dict[str, tuple[str, ...]]
+    host_overrides: tuple[EndpointCallMethodRule, ...]
 
 
 def call_method_definition(method_id: str) -> CallMethodDefinition | None:
@@ -50,6 +75,27 @@ def call_method_ids_for_client(client_id: str) -> frozenset[str]:
     )
 
 
+def call_method_ids_for_endpoint(protocol: str | None, base_url: str | None) -> tuple[str, ...]:
+    """Return endpoint-level method candidates from gateway catalog truth.
+
+    A route profile is still the strongest method evidence. This function covers
+    the pre-profile gap: endpoint protocol and known multi-protocol hosts tell a
+    consumer which method should be tried before the route has verified profile
+    rows. Callers still decide which client compatibility they require.
+    """
+
+    if not protocol:
+        return ()
+    catalog = _call_method_catalog()
+    candidates: list[str] = list(catalog.protocol_defaults.get(str(protocol), ()))
+    hostname = _url_hostname(base_url or "")
+    if hostname:
+        for rule in catalog.host_overrides:
+            if str(protocol) in rule.protocols and _host_matches(hostname, rule.host_suffix):
+                candidates.extend(rule.method_ids)
+    return _ordered_unique(candidates)
+
+
 def call_method_client_compatibility(method_id: str | None, client_id: str) -> ClientCompatibility:
     if not method_id:
         return "unknown"
@@ -69,6 +115,8 @@ def provider_probe_backend_for_method(method_id: str) -> ProviderProbeBackend:
 def apply_call_method_base_url(method_id: str | None, base_url: str) -> str:
     definition = call_method_definition(method_id or "")
     transform = definition.base_url_transform if definition is not None else "none"
+    if transform == "anthropic_compatible":
+        return canonicalize_base_url(base_url, "anthropic_compatible")
     if transform == "ark_anthropic_compatible":
         return _ark_anthropic_base_url(base_url)
     if transform == "deepseek_anthropic":
@@ -83,6 +131,11 @@ def call_method_auth_token_env(method_id: str | None) -> str | None:
 
 @lru_cache(maxsize=1)
 def _call_method_table() -> dict[str, CallMethodDefinition]:
+    return _call_method_catalog().methods
+
+
+@lru_cache(maxsize=1)
+def _call_method_catalog() -> CallMethodCatalog:
     raw = json.loads(
         resources.files("graph_agent_gateway.registry")
         .joinpath("call_methods.json")
@@ -99,7 +152,12 @@ def _call_method_table() -> dict[str, CallMethodDefinition]:
         if definition.method_id in table:
             raise ValueError(f"Duplicate call method id: {definition.method_id}")
         table[definition.method_id] = definition
-    return table
+    protocol_defaults, host_overrides = _endpoint_method_candidates_from_raw(raw, table)
+    return CallMethodCatalog(
+        methods=table,
+        protocol_defaults=protocol_defaults,
+        host_overrides=host_overrides,
+    )
 
 
 def _definition_from_raw(raw: dict[str, Any]) -> CallMethodDefinition:
@@ -160,6 +218,83 @@ def _base_url_transform(value: str, method_id: str) -> BaseUrlTransform:
     return cast(BaseUrlTransform, value)
 
 
+def _endpoint_method_candidates_from_raw(
+    raw: dict[str, Any],
+    table: dict[str, CallMethodDefinition],
+) -> tuple[dict[str, tuple[str, ...]], tuple[EndpointCallMethodRule, ...]]:
+    candidates_raw = raw.get("endpoint_method_candidates", {})
+    if not isinstance(candidates_raw, dict):
+        raise ValueError("endpoint_method_candidates must be an object")
+    protocol_raw = candidates_raw.get("protocol_defaults", {})
+    if not isinstance(protocol_raw, dict):
+        raise ValueError("endpoint_method_candidates.protocol_defaults must be an object")
+    protocol_defaults: dict[str, tuple[str, ...]] = {}
+    for protocol, methods_raw in protocol_raw.items():
+        if protocol not in _PROTOCOL_VALUES:
+            raise ValueError(f"endpoint method candidates contain unknown protocol {protocol}")
+        protocol_defaults[str(protocol)] = _method_ids(methods_raw, table, f"protocol {protocol}")
+
+    rules_raw = candidates_raw.get("host_overrides", [])
+    if not isinstance(rules_raw, list):
+        raise ValueError("endpoint_method_candidates.host_overrides must be a list")
+    host_overrides = tuple(_endpoint_rule_from_raw(item, table) for item in rules_raw)
+    return protocol_defaults, host_overrides
+
+
+def _endpoint_rule_from_raw(
+    raw: object,
+    table: dict[str, CallMethodDefinition],
+) -> EndpointCallMethodRule:
+    if not isinstance(raw, dict):
+        raise ValueError("endpoint host override must be an object")
+    host_suffix = _required_str(raw, "host_suffix").lower().lstrip(".")
+    protocols_raw = raw.get("protocols")
+    if not isinstance(protocols_raw, list) or not protocols_raw:
+        raise ValueError(f"{host_suffix}: protocols must be a non-empty list")
+    protocols: list[str] = []
+    for protocol in protocols_raw:
+        if not isinstance(protocol, str) or protocol not in _PROTOCOL_VALUES:
+            raise ValueError(f"{host_suffix}: unknown protocol {protocol}")
+        protocols.append(protocol)
+    return EndpointCallMethodRule(
+        host_suffix=host_suffix,
+        protocols=tuple(protocols),
+        method_ids=_method_ids(raw.get("method_ids"), table, f"host {host_suffix}"),
+    )
+
+
+def _method_ids(
+    raw: object,
+    table: dict[str, CallMethodDefinition],
+    owner: str,
+) -> tuple[str, ...]:
+    if not isinstance(raw, list):
+        raise ValueError(f"{owner}: method_ids must be a list")
+    method_ids: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item:
+            raise ValueError(f"{owner}: method id must be a non-empty string")
+        if item not in table:
+            raise ValueError(f"{owner}: unknown method id {item}")
+        method_ids.append(item)
+    return tuple(_ordered_unique(method_ids))
+
+
+def _ordered_unique(values: list[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
+
+
+def _url_hostname(base_url: str) -> str:
+    try:
+        return (urlparse(base_url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _host_matches(hostname: str, suffix: str) -> bool:
+    return hostname == suffix or hostname.endswith(f".{suffix}")
+
+
 def _ark_anthropic_base_url(base_url: str) -> str:
     normalized = base_url.rstrip("/")
     if normalized.endswith("/api/v3"):
@@ -187,6 +322,7 @@ __all__ = [
     "call_method_auth_token_env",
     "call_method_client_compatibility",
     "call_method_definition",
+    "call_method_ids_for_endpoint",
     "call_method_ids_for_client",
     "official_call_method_ids",
     "provider_probe_backend_for_method",

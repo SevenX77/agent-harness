@@ -44,7 +44,7 @@
       "n": 5,
       "cap": "io-endpoint-nodes",
       "design_ref": "n2-atom-5",
-      "current": "现状:已实现且符合。buildNodes 渲染时把整图入口渲成 Input 起点节点(无依赖 phase 的 depends_on 渲染成入口哨兵 input)、叶子 phase 标 Output 终点;它们承载整图 io 契约(manifest.io),可双击开 GRAPH.md。",
+      "current": "Current: implemented and aligned. buildNodes renders the graph entry as a global Input node and leaf phases as the Output endpoint. These nodes carry the graph io contract and double-click opens GRAPH.md. GlobalInputOutputNode now renders only the boundary title, INPUT/OUTPUT label, and same-source diagnostic badge; it no longer lists io field names or types inline on the canvas. Field detail belongs in the I/O/Properties panels. Manual Compile .workspace/test_inputs diagnostics are projected by node-compile-errors.ts onto the global Input node, matching the Compile drawer source.",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。整图 io 随 manifest 返回。D8.1=ok。"
@@ -267,20 +267,28 @@
         5
       ],
       "shots": [
-        "画布有 Input 起点 + Output 终点独立节点,双击开 GRAPH.md"
+        "Canvas has independent Input and Output endpoint nodes; double-click opens GRAPH.md.",
+        "Input/Output nodes do not inline schema field names/types; boundary compile errors render on the Input badge."
       ],
       "fe_status": "符合",
       "layer1": [
-        "断言无依赖 phase 渲染 Input 起点(depends_on 入口哨兵 input)、叶子 phase 标 Output。",
-        "断言双击起点/终点开 GRAPH.md。"
+        "Assert dependency-free phases render from the Input sentinel and leaf phases mark Output.",
+        "Assert GlobalInputOutputNode does not render schema input/output field names or types even when schema data is present.",
+        "Assert .workspace/test_inputs CompileError groups to INPUT_ID and is injected into the global Input node compileErrors.",
+        "Assert double-clicking the endpoints opens GRAPH.md."
       ],
       "layer2": [
-        "看画布起点/终点节点,双击开 GRAPH.md。"
+        "Manual verification on text-segmentation: click Compile and confirm the Input node shows a 2-error boundary badge while the drawer shows the same .workspace/test_inputs errors.",
+        "Confirm canvas Input/Output nodes show only title plus INPUT/OUTPUT tag, with no chapter/chapters/output field list; double-click still opens GRAPH.md."
       ],
       "screenshots": [
         {
           "file": "n2-01-projection.png",
           "caption": "画布带 Input 起点 + Output 终点两个独立端点节点"
+        },
+        {
+          "file": "n2-io-endpoint-compact-diagnostics.png",
+          "caption": "After Compile, the two .workspace/test_inputs boundary input errors project to the Input badge; Input/Output nodes stay compact and do not inline field lists."
         }
       ]
     },

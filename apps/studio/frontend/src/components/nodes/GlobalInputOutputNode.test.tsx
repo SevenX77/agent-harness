@@ -50,7 +50,7 @@ function renderSelectedNode(data: GlobalNodeData): string {
 }
 
 describe('GlobalInputOutputNode', () => {
-  it('renders input fields with type badges', () => {
+  it('renders input boundary without inline schema fields', () => {
     const html = renderNode({
       type: 'global-input',
       schema: {
@@ -61,12 +61,12 @@ describe('GlobalInputOutputNode', () => {
 
     expect(html).toContain('Input')
     expect(html).toContain('INPUT')
-    expect(html).toContain('topic')
-    expect(html).toContain('string')
+    expect(html).not.toContain('topic')
+    expect(html).not.toContain('string')
     expect(html).toContain('cursor-pointer')
   })
 
-  it('renders output fields with type badges', () => {
+  it('renders output boundary without inline schema fields', () => {
     const html = renderNode({
       type: 'global-output',
       schema: {
@@ -77,8 +77,8 @@ describe('GlobalInputOutputNode', () => {
 
     expect(html).toContain('Output')
     expect(html).toContain('OUTPUT')
-    expect(html).toContain('report')
-    expect(html).toContain('object')
+    expect(html).not.toContain('report')
+    expect(html).not.toContain('object')
     expect(html).toContain('cursor-pointer')
   })
 

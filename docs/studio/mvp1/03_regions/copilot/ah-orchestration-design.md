@@ -60,7 +60,8 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 
 **当前 Studio 基线:ah ≥ 1.3.0。** 1.2.0 已验证支持 editable rules / skills 注入,但 1.3.0 新增
 `[master].window_size = "follow"`:默认仍是 `fixed`,Studio 若不显式写 `follow`,attach 进去的 MoirAI
-终端窗口不会自动跟随当前终端大小。
+终端窗口不会自动跟随当前终端大小。Studio launcher 必须在启动前检查 `ah --version`;低于 1.3.0 时
+直接提示升级,不允许继续用旧 ah 静默启动固定分辨率 pane。
 
 历史踩坑:本机原装 `ah` 是 0.9.0(2026-06-22 的 debug build),它根本没有实现 `bundle` 与
 `.ah/rules/` 注入机制。症状:配好 `bundle=[…]` / `.ah/rules/<id>.md`,`ah config validate` 也过
@@ -81,7 +82,8 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
   install -m755 <ah-1.3.0-build>/ahd ~/.local/bin/ahd
   ```
 - **结论**:**Studio「打开 Claude Code」依赖的 `ah` 必须 ≥ 1.3.0。** 打包分发 Studio 时要连带
-  升级/内置该版 ah,否则要么人格注入静默失效(0.9.0),要么 MoirAI attach 窗口无法保证自动匹配终端大小(未写 1.3.0 follow)。
+  升级/内置该版 ah,否则要么人格注入静默失效(0.9.0),要么 MoirAI attach 窗口无法保证自动匹配终端大小。
+  `scripts/install-claude-code-wsl.ps1` 负责把旧 ah 自动升级到该基线,并停掉旧 ahd daemon。
 
 ## 4. ah 配置机制（权威说明,出处 = ah 仓库 README/docs）
 
@@ -232,9 +234,11 @@ Atropos <https://en.wikipedia.org/wiki/Atropos>。
 
 ### 6.3 已知装饰性告警(不阻塞)
 
-master pane 有 `claude … .local/bin/claude missing or broken · run claude install to repair` —— 沙盒里
-`.local/bin/claude` 符号链不存在,但 claude 本体照常应答(实测 Opus 4.8 · Claude Max);后续排查是否影响
-`claude install`-依赖的功能。
+master pane 过去会出现 `claude … .local/bin/claude missing or broken · run claude install to repair`:
+根因是 ah 沙盒 HOME 内没有 `.local/bin/claude` 链接,但 PATH 里的真实 claude 仍能启动。Studio master
+cmd 现在会在进入 Claude Code 前补 `$HOME/.local/bin/claude -> <真实 claude>` symlink,避免这个黄色警告。
+另一个 systemd 黄色提示 `Scope command line contains environment variable` 由 ah 内部 `systemd-run --user --scope`
+打印;Studio launcher/master cmd 通过 `SYSTEMD_LOG_LEVEL=err` 消除这类非失败噪音。
 
 ### 6.4 人格写作方法论(三轮提炼的可复用规则,后续写任何 agent 人格都适用)
 
@@ -366,7 +370,7 @@ version = "1"
 
 [master]
 enabled = true
-cmd = "IS_SANDBOX=1 claude --dangerously-skip-permissions '<Studio auto-report prompt>'"
+cmd = "bash -c '<prepare sandbox claude symlink; export IS_SANDBOX=1; exec claude --dangerously-skip-permissions ...>'"
 readiness_timeout_s = 180
 window_size = "follow"
 
@@ -476,6 +480,10 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
 - `transient_ah_config_content` 在 `[master]` 下写入 `window_size = "follow"`,确保 1.3.0 的 tmux
   master pane 自动跟随 attach 终端大小;
+- launcher 在 `ah start` 前拒绝 `ah < 1.3.0`,避免 `window_size = "follow"` 被旧 ah 忽略;
+- launcher 记录启动 ah 前的宿主 HOME;master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
+  `$HOME/.local/bin/claude` symlink,启动后不再出现
+  systemd scope 环境变量警告或 Claude missing/broken 安装警告;
 - 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
   persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;

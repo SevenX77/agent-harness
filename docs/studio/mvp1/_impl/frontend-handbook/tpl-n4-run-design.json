@@ -10,10 +10,11 @@
       "module": "动作条 · Run 触发（predict-pass 硬门）",
       "func": "设计：predict-pass 后 Run 点亮，用户点 Run 发起一次真跑。predict-pass 是 Run 的唯一前提，且这道门前后端双保险——前端没 predict-pass 连请求都不发，后端再用 content_hash 二次校验，任何 caller（不止 UI）都受约束。",
       "action": "用户点底部动作条最右的 Run 按钮（仅 predict-pass 档高亮可点）。",
-      "fe_design": "点 Run → handleRun（Workspace 发起真跑的回调）第一件事就是 deriveBuildStage 若 ≠ predict-pass 直接 return（前端硬门，连请求都不发）→ 通过则推档 running → resolveRunInput 取输入 → startRun（client.ts 发 POST /runs）→ 成功 setRunId + 切面板到 timeline。后端 start_run 再调 require_passing_predict（用 last_predict.json 的 content_hash 跟新编译 hash 比对），不匹配抛 RUN_REQUIRES_PREDICT(409)。设计意图：predict 是 run 硬前提，前端门挡 UI、后端门挡一切 caller。",
+      "fe_design": "点 Run → handleRun（Workspace 发起真跑的回调）第一件事就是 deriveBuildStage 若 ≠ predict-pass 直接 return（前端硬门，连请求都不发）→ 通过则推档 running → resolveRunInput 取输入 → startRun（client.ts 发 POST /runs）→ 成功 setRunId + 切面板到 timeline；若请求失败（如后端不可达/409/结构化 compile_failed）则回到 predict-pass、toast 只报摘要，同时打开底部诊断抽屉（CompileErrorDrawer kind=run）展示完整可复制错误。后端 start_run 再调 require_passing_predict（用 last_predict.json 的 content_hash 跟新编译 hash 比对），不匹配抛 RUN_REQUIRES_PREDICT(409)。设计意图：predict 是 run 硬前提，前端门挡 UI、后端门挡一切 caller；失败详情不能只靠短暂 toast。",
       "fe_modules": [
         { "name": "构建档位门控（deriveBuildStage + deriveButtons）" },
-        { "name": "测试输入解析（resolveRunInput）" }
+        { "name": "测试输入解析（resolveRunInput）" },
+        { "name": "执行诊断抽屉（CompileErrorDrawer kind=compile/predict/run）" }
       ],
       "be_contract": [
         {
@@ -25,7 +26,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（handleRun 前端守卫 stage!==predict-pass 直接 return；后端 require_passing_predict 服务端门 409 双保险）。spec 标『onRun=桩/零 caller』已过时。",
+      "gap_brief": "符合设计（handleRun 前端守卫 stage!==predict-pass 直接 return；后端 require_passing_predict 服务端门 409 双保险；Run 请求失败打开 kind=run 诊断抽屉，不只 toast）。spec 标『onRun=桩/零 caller』已过时。",
       "impl_ref": "fn-6"
     },
     {

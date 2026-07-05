@@ -20,6 +20,9 @@ from typing import Any, NoReturn
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
 from app.core import config
 from app.core.adapters.engine import (
@@ -492,19 +495,31 @@ async def compile_skill_for_studio(
     except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
 
+    # Studio preflight gates own workspace files that engine compile intentionally does
+    # not know about: test inputs and golden outputs. Anything provably invalid before
+    # running predict/run must fail compile.
+    test_input_errors = _validate_test_inputs_against_graph_input_schema(compiled, skill_dir)
+
     # N4 atom #35: Studio-layer business gate. A persisted golden case whose node's
     # current io.outputs schema now requires fields the golden is missing (output-schema
     # drift) must FAIL compile so the existing N3 compile-gating blocks predict until the
     # golden is reconciled. Binds to the output schema only; the engine compile has no
     # knowledge of Studio golden files, so this gate lives in the shell, after compile.
     golden_errors = _validate_golden_against_output_schema(skill_id, str(skill_dir))
-    if golden_errors:
-        count = len(golden_errors)
-        noun = "field" if count == 1 else "fields"
+    preflight_errors = [*test_input_errors, *golden_errors]
+    if preflight_errors:
+        count = len(preflight_errors)
+        noun = "error" if count == 1 else "errors"
+        if test_input_errors and golden_errors:
+            detail = f"Compile preflight found {count} test input/golden {noun}"
+        elif test_input_errors:
+            detail = f"Test input files do not match the graph input schema ({count} {noun})"
+        else:
+            detail = f"Golden baseline files do not match node output schemas ({count} {noun})"
         raise CompileFailedError(
             CompileFailure(
-                detail=f"Golden baseline is missing {count} required output {noun} after a schema change",
-                errors=golden_errors,
+                detail=detail,
+                errors=preflight_errors,
             )
         )
 
@@ -526,15 +541,116 @@ async def compile_skill_for_studio(
     )
 
 
+def _validate_test_inputs_against_graph_input_schema(
+    compiled: CompiledSkill,
+    skill_dir: Path,
+) -> list[CompileError]:
+    """Compile-time gate for Studio test input JSON files.
+
+    Graph root ``io.inputs`` is the contract for predict/run input files. If required
+    fields exist, at least one test input file must exist; every persisted file must be
+    a JSON object that validates against the schema.
+    """
+    raw_inputs = _compiled_graph_input_schema(compiled)
+    if not raw_inputs:
+        return []
+
+    inputs_dir = test_inputs_dir_for_skill(skill_dir)
+    paths = sorted(inputs_dir.glob("*.json")) if inputs_dir.exists() else []
+    if not paths:
+        return _missing_test_input_errors(raw_inputs)
+
+    try:
+        validator = Draft202012Validator(raw_inputs)
+        validator.check_schema(raw_inputs)
+    except SchemaError as exc:
+        return [
+            CompileError(
+                file="GRAPH.md",
+                field="io.inputs",
+                severity="fatal",
+                message=f"Graph input schema is invalid for test input validation: {exc.message}",
+                error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
+            )
+        ]
+
+    errors: list[CompileError] = []
+    for path in paths:
+        rel_path = _skill_relative_posix(skill_dir, path)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            errors.append(
+                CompileError(
+                    file=rel_path,
+                    severity="fatal",
+                    message=f"Test input file is not valid JSON: {exc}",
+                    error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
+                )
+            )
+            continue
+        if not isinstance(payload, dict):
+            errors.append(
+                CompileError(
+                    file=rel_path,
+                    severity="fatal",
+                    message="Test input file must contain a JSON object.",
+                    error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
+                )
+            )
+            continue
+        for error in sorted(validator.iter_errors(payload), key=_jsonschema_error_sort_key):
+            errors.append(
+                CompileError(
+                    file=rel_path,
+                    field=_jsonschema_error_field(error),
+                    severity="fatal",
+                    message=f"Test input file does not match graph input schema: {error.message}",
+                    error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
+                )
+            )
+    return errors
+
+
+def _compiled_graph_input_schema(compiled: CompiledSkill) -> dict[str, Any]:
+    raw = getattr(compiled, "raw", None)
+    if not isinstance(raw, dict):
+        return {}
+    io_block = raw.get("io")
+    if not isinstance(io_block, dict):
+        return {}
+    inputs = io_block.get("inputs")
+    return dict(inputs) if isinstance(inputs, dict) else {}
+
+
+def _missing_test_input_errors(raw_inputs: dict[str, Any]) -> list[CompileError]:
+    required = raw_inputs.get("required")
+    if not isinstance(required, list):
+        return []
+    fields = [field for field in required if isinstance(field, str)]
+    return [
+        CompileError(
+            file=".workspace/test_inputs",
+            field=field,
+            severity="fatal",
+            message=(
+                f"Graph input schema requires test input field '{field}', "
+                "but no test input JSON files exist. Add a valid test input before predict/run."
+            ),
+            error_code="STUDIO_TEST_INPUT_MISSING",
+        )
+        for field in fields
+    ]
+
+
 def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> list[CompileError]:
-    """N4 #35: compile gate — golden cases missing required output-schema fields are fatal.
+    """N4 #35: compile gate — golden cases must match current output schemas.
 
     For each agent node that has a persisted golden case, resolve the node's CURRENT
-    ``io.outputs`` schema via the allowlisted engine port and compare its ``required``
-    fields against the golden ``expected_output`` keys. A required field absent from the
-    golden = output-schema drift that must block predict. Binds to the output schema only:
-    prompt/agent-internal edits never appear in ``required`` so never trigger this. Returns
-    one fatal ``CompileError`` per missing field (empty list = no drift).
+    ``io.outputs`` schema via the allowlisted engine port and validate the stored
+    ``expected_output``. A stale golden = output-file drift that must block predict.
+    Binds to the output schema only: prompt/agent-internal edits never appear in the
+    schema so never trigger this.
     """
     # Deferred import avoids the golden_diff -> skills import cycle (golden_diff imports
     # resolve_skill_dir/golden_dir_for from this module).
@@ -556,22 +672,40 @@ def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> lis
             )
             continue
         checked += 1
-        missing = _missing_required_golden_fields(output_schema, expected_output)
-        for field in missing:
+        try:
+            validator = Draft202012Validator(output_schema)
+            validator.check_schema(output_schema)
+        except SchemaError as exc:
+            errors.append(
+                CompileError(
+                    field=f"{node_id}.io.outputs",
+                    severity="fatal",
+                    message=(
+                        f"Output schema for agent node '{node_id}' is invalid for golden "
+                        f"validation: {exc.message}"
+                    ),
+                    error_code="STUDIO_GOLDEN_SCHEMA_INVALID",
+                )
+            )
+            continue
+        for error in sorted(validator.iter_errors(expected_output), key=_jsonschema_error_sort_key):
+            field = _jsonschema_error_field(error)
+            golden_field = f"{node_id}.{field}" if field else node_id
             logger.warning(
                 "golden_compile_gate decision=fail skill_id=%s node_id=%s field=%s reason=required_field_missing",
                 skill_id,
                 node_id,
-                field,
+                golden_field,
             )
             errors.append(
                 CompileError(
                     severity="fatal",
-                    field=f"{node_id}.{field}",
+                    field=golden_field,
                     message=(
-                        f"Golden baseline for agent node '{node_id}' is missing required "
-                        f"output field '{field}'. Reconcile the golden before predict."
+                        f"Golden baseline for agent node '{node_id}' does not match "
+                        f"current output schema: {error.message}. Reconcile the golden before predict."
                     ),
+                    error_code="STUDIO_GOLDEN_SCHEMA_INVALID",
                 )
             )
     logger.info(
@@ -583,16 +717,25 @@ def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> lis
     return errors
 
 
-def _missing_required_golden_fields(
-    output_schema: dict[str, Any],
-    expected_output: dict[str, Any],
-) -> list[str]:
-    """Required output-schema fields absent from the golden's top-level keys (ordered)."""
-    required = output_schema.get("required")
-    if not isinstance(required, list):
-        return []
-    present = set(expected_output.keys())
-    return [field for field in required if isinstance(field, str) and field not in present]
+def _jsonschema_error_sort_key(error: JsonSchemaValidationError) -> tuple[str, str]:
+    return (".".join(str(part) for part in error.path), error.message)
+
+
+def _jsonschema_error_field(error: JsonSchemaValidationError) -> str | None:
+    path = ".".join(str(part) for part in error.path)
+    if path:
+        return path
+    schema_path = list(error.schema_path)
+    if "required" in schema_path and error.message.startswith("'"):
+        return error.message.split("'", 2)[1]
+    return None
+
+
+def _skill_relative_posix(skill_dir: Path, path: Path) -> str:
+    try:
+        return path.relative_to(skill_dir).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 async def update_skill_content(

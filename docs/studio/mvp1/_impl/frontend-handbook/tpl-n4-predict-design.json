@@ -24,9 +24,9 @@
       "n": 2,
       "cap": "predict-input-select",
       "module": "试飞数据流",
-      "func": "设计：predict 用哪份输入，由用户在 I/O 面板选一份已导入的测试输入决定（路径式选已有文件直接 predict），不再弹一个独立的输入对话框。没选则用空对象兜底。",
-      "action": "用户在 I/O 面板（左侧 Inputs/Outputs 配置面板）的测试输入列表里选中一份输入，再点 Predict（无选中则按空输入跑）。",
-      "fe_design": "handlePredict 调 resolveRunInput（把 I/O 面板选中的测试输入解析成 predict payload 的函数）：选了输入就 fetch 它的 content 当 input_data，没选回退空对象 {}。这是 spec『predict 触发改成 i/o 面板选已导入文件 → 直接 predict（路径式），废弃 PredictInputDialog（旧的弹窗式输入对话框）』的落地。设计意图：输入是节点/run 的配置项、不是 predict 的独立议题，predict 就按配置跑。",
+      "func": "设计：predict 用哪份输入，由用户在 I/O 面板选一份已导入且通过 Compile preflight 的测试输入决定（路径式选已有文件直接 predict），不再弹一个独立的输入对话框；缺输入文件或输入文件不符合 graph io.inputs 时，Compile 就失败并阻断 Predict。",
+      "action": "用户在 I/O 面板（左侧 Inputs/Outputs 配置面板）的测试输入列表里选中一份输入，再点 Predict。若 graph io.inputs 有 required 字段但没有任何可用测试输入，或测试输入 JSON 不符合 schema，用户应在 Compile drawer 里先看到错误并修正。",
+      "fe_design": "handlePredict 调 resolveRunInput（把 I/O 面板选中的测试输入解析成 predict payload 的函数）：选了输入就 fetch 它的 content 当 input_data；没选不再回退空对象，而是抛出『Select a compile-valid test input before Predict/Run』。Studio backend 的 compile_skill_for_studio 在 engine compile 之后做 workspace preflight：扫描 .workspace/test_inputs/*.json，并用 graph io.inputs JSON Schema 校验；有 required input 但没有测试输入、JSON 解析失败、非对象、类型/required 不匹配都返回 CompileFailure.errors，由 Compile drawer 展示并阻断 Predict。这是 spec『predict 触发改成 i/o 面板选已导入文件 → 直接 predict（路径式），废弃 PredictInputDialog（旧的弹窗式输入对话框）』加上 2026-07-05 设计修正『未运行前可发现的问题属于 compile』的落地。设计意图：输入是整条运行路径的一部分，不允许用 {} 兜底把必炸问题推迟到 Predict。",
       "fe_modules": [
         { "name": "测试输入解析（resolveRunInput）" }
       ],
@@ -40,7 +40,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（resolveRunInput 选中即取 content、无选回退空对象；路径式选文件直接 predict，已无 PredictInputDialog）。",
+      "gap_brief": "符合设计（resolveRunInput 选中即取 content、无选中直接报可解释错误；Studio compile preflight 校验 .workspace/test_inputs/*.json 是否满足 graph io.inputs，路径式选文件直接 predict，已无 PredictInputDialog）。",
       "impl_ref": "fn-2"
     },
     {

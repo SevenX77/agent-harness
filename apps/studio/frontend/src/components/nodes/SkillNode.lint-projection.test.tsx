@@ -7,10 +7,8 @@ import { lintErrorToCompileError } from "@/components/studio/node-compile-errors
 import { SkillNode } from "./SkillNode"
 import type { SkillGraphNode, SkillGraphNodeData } from "./types"
 
-// N3 atom #4 (canvas-node-projection): the node tooltip must surface the SAME field · L<line> —
-// message detail when its errors come from realtime lint (LintError) as when they come from manual
-// Compile (CompileError). lintErrorToCompileError is the adapter the workspace uses to feed lint
-// diagnostics into the node channel; this asserts the rendered badge + count + per-error detail.
+// N3 atom #4 (canvas-node-projection): lint-sourced errors must render with
+// the same node badge and per-error detail as manual Compile errors.
 
 vi.mock("@xyflow/react", () => ({
   Handle: () => <span data-testid="handle" />,
@@ -52,7 +50,7 @@ function renderNode(data: SkillGraphNodeData): string {
 }
 
 describe("SkillNode tooltip fed by lint-sourced errors (atom #4)", () => {
-  it("renders the badge + count + each field · L<line> — message when the node carries lint errors", () => {
+  it("renders the badge + count + each field L<line> - message when the node carries lint errors", () => {
     const html = renderNode(
       baseData({
         compileErrors: [
@@ -62,8 +60,8 @@ describe("SkillNode tooltip fed by lint-sourced errors (atom #4)", () => {
       }),
     )
     expect(html).toContain("2 compile errors on this node")
-    expect(html).toContain("tools · L9 — unknown tool `frobnicate`")
-    expect(html).toContain("validator · L14 — validator must be a boolean")
+    expect(html).toContain("tools L9 - unknown tool `frobnicate`")
+    expect(html).toContain("validator L14 - validator must be a boolean")
   })
 
   it("drops the line segment for a line-less lint error, keeping the field and message", () => {
@@ -73,6 +71,6 @@ describe("SkillNode tooltip fed by lint-sourced errors (atom #4)", () => {
       }),
     )
     expect(html).toContain("1 compile error on this node")
-    expect(html).toContain("path — path must be absolute")
+    expect(html).toContain("path - path must be absolute")
   })
 })

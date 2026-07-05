@@ -67,8 +67,13 @@ def _skill_md(llm_role: str | None) -> str:
 
 def _write_agent_skill(skill_dir: Path, *, llm_role: str | None) -> None:
     (skill_dir / "phases" / "review").mkdir(parents=True)
+    (skill_dir / ".workspace" / "import_files").mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text(_GRAPH, encoding="utf-8")
     (skill_dir / "phases" / "review" / "SKILL.md").write_text(_skill_md(llm_role), encoding="utf-8")
+    (skill_dir / ".workspace" / "import_files" / "case-a.json").write_text(
+        '{"input_text":"hello"}',
+        encoding="utf-8",
+    )
 
 
 def test_unconfigured_llm_role_warns_but_compile_passes(

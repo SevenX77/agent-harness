@@ -665,6 +665,71 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(0)
   })
 
+  it("spins endpoint tags from manual model probe atoms without a card-wide Test action", () => {
+    const nextDraft = makeDraft({
+      id: "openrouter",
+      name: "OpenRouter",
+      base_url: "https://openrouter.ai/api",
+      isTesting: false,
+      testingAction: null,
+      testingEndpointId: null,
+      testingModelIdsByEndpoint: { "openrouter-openai": ["openai/gpt-5.5"] },
+      base_urls: [
+        {
+          id: "url-openrouter",
+          value: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "openrouter-openai",
+            anthropic_compatible: "openrouter-anthropic",
+          },
+        },
+      ],
+    })
+
+    const html = renderCardHtml({
+      nextDraft,
+      persistedEndpoints: {
+        "openrouter-openai": makePersisted({
+          id: "openrouter-openai",
+          name: "OpenRouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          last_test_status: "ok",
+          available_models: [
+            {
+              id: "openai/gpt-5.5",
+              endpoint_id: "openrouter-openai",
+              route_id: "openrouter-openai:openai/gpt-5.5",
+              status: "unverified_manual",
+              ui_state: "untested",
+            },
+          ],
+        }),
+        "openrouter-anthropic": makePersisted({
+          id: "openrouter-anthropic",
+          name: "OpenRouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "anthropic_compatible",
+          last_test_status: "ok",
+          available_models: [
+            {
+              id: "anthropic/claude-opus-4.7",
+              endpoint_id: "openrouter-anthropic",
+              route_id: "openrouter-anthropic:anthropic/claude-opus-4.7",
+              status: "verified",
+              ui_state: "ready",
+            },
+          ],
+        }),
+      },
+    })
+
+    expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(1)
+    expect(routeTagHtml(html, "openai/gpt-5.5")).toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "anthropic/claude-opus-4.7")).not.toContain("api-route-tag-border-flow")
+  })
+
   it("shows protocol-normalized runtime URL separately from the input URL", () => {
     const html = renderToStaticMarkup(
       <ProviderCard

@@ -804,13 +804,10 @@ function endpointStatusSurfaceClass(status: TestMessageStatus): string {
 /**
  * Whether clicking an endpoint tag re-probes that one (URL, protocol) cell.
  *
- * Item 2 (PM 2026-07-03): EVERY state is a direct click-to-test target EXCEPT
- * `protocol_unsupported` — that "disabled" cell is a dormant architectural fact
- * whose only affordance is the explicit half-life-bypassing Re-probe button
- * (§1.2 matrix point 4). Verified / untested / failed / not-configured all probe
- * directly on click. The only other exclusion is `testing`: a probe is already
- * in flight for this cell, so re-clicking it mid-run is a no-op, not a state you
- * choose to test.
+ * Item 2 (PM 2026-07-03): every routine endpoint click probes one cell except
+ * `protocol_unsupported`. That dormant cell is not a routine probe target; it
+ * uses the explicit half-life-bypassing Re-probe button (§1.2 matrix point 4).
+ * `testing` is also excluded because a probe is already in flight.
  */
 export function endpointTagIsTestable(status: TestMessageStatus): boolean {
   return status !== "testing" && status !== "protocol_unsupported"
@@ -1771,7 +1768,7 @@ export function ProviderCard({
   // P1a: model ids currently being probed by the manual model-test panel. The
   // atomic per-model probe reports them live, so animation attaches to the
   // exact model in flight instead of a card-wide flag.
-  const [manualTestingModelIds, setManualTestingModelIds] = useState<string[]>([])
+  const [manualTestingModelIdsByEndpoint, setManualTestingModelIdsByEndpoint] = useState<Record<string, string[]>>({})
   const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
   const [baseUrlError, setBaseUrlError] = useState("")
@@ -1784,11 +1781,15 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
-  // Endpoint animation follows the backend active atom event. `testingEndpointId`
-  // remains request context for logs/toasts, but does not by itself animate a
-  // disabled/skipped endpoint.
+  const activeProbeModelIdsForEndpoint = (endpointId: string): string[] => uniqueStrings([
+    ...(draft.testingModelIdsByEndpoint?.[endpointId] ?? []),
+    ...(manualTestingModelIdsByEndpoint[endpointId] ?? []),
+  ])
+  // Endpoint animation follows the backend active atom event for every probe
+  // path. Card-wide Test state and `testingEndpointId` are request context only;
+  // manual model probes also publish the same (endpoint, model) atom signal.
   const isEndpointBeingTested = (endpointId: string) =>
-    isGettingModels && (draft.testingModelIdsByEndpoint?.[endpointId]?.length ?? 0) > 0
+    activeProbeModelIdsForEndpoint(endpointId).length > 0
   // A single endpoint probe may list many models, but only the atomically
   // probed model route should pulse. The active atom signal comes from either
   // route status=testing or the backend llm_probe_active event; historical
@@ -1800,21 +1801,22 @@ export function ProviderCard({
       (testingEndpointId == null || summary.endpoint_id === testingEndpointId) &&
       hasActiveAtomicProbeSignal({
         modelId: model.id,
-        activeModelIds: summary.endpoint_id ? draft.testingModelIdsByEndpoint?.[summary.endpoint_id] : undefined,
+        activeModelIds: summary.endpoint_id ? activeProbeModelIdsForEndpoint(summary.endpoint_id) : undefined,
         status: summary.status,
       })
     ))
   }
-  // A model chip pulses while it is genuinely being probed: either the endpoint
-  // Test is verifying it (isModelUnderEndpointTest) OR the manual model-test
-  // panel has an atomic probe for this exact model id in flight.
+  // A model chip pulses while it is genuinely being probed. isModelUnderEndpointTest
+  // consumes the merged backend + Manual atom map, so no separate card-wide or
+  // model-wide fallback can light up sibling routes.
   const isModelBeingProbed = (model: ModelInfo) =>
-    isModelUnderEndpointTest(model) || manualTestingModelIds.includes(model.id)
+    isModelUnderEndpointTest(model)
+  const hasManualActiveProbe = Object.values(manualTestingModelIdsByEndpoint).some((modelIds) => modelIds.length > 0)
   // R-G2: auto-expand the full model list when an endpoint test starts, so the user
   // can watch every model being probed instead of only the first few.
   useEffect(() => {
-    if (isGettingModels) setShowAllModels(true)
-  }, [isGettingModels])
+    if (isGettingModels || hasManualActiveProbe) setShowAllModels(true)
+  }, [hasManualActiveProbe, isGettingModels])
   const endpointStates = endpointDrafts.map((endpointDraft) => {
     const row = { id: endpointDraft.id, value: endpointDraft.base_url, provider_type: endpointDraft.provider_type }
     const rowPersisted = persistedEndpoints?.[endpointDraft.id] ?? (endpointDraft.id === draft.id ? persisted : null)
@@ -2406,10 +2408,13 @@ export function ProviderCard({
         {showManualModelPanel ? (
           <ManualModelTestPanel
             providerKey={draft.id}
-            endpointIds={endpointSummaries.map((endpoint) => endpoint.id)}
+            endpointTargets={endpointSummaries.map((endpoint) => ({
+              id: endpoint.id,
+              testable: endpointTagIsTestable(endpoint.status),
+            }))}
             notableProviderKey={notableProviderKey ?? draft.id.split(/[-_]/, 1)[0].toLowerCase()}
             onModelsUpdated={(models) => onModelsUpdated?.(models)}
-            onTestingModelIdsChange={setManualTestingModelIds}
+            onActiveProbeModelIdsByEndpointChange={setManualTestingModelIdsByEndpoint}
             defaultExpanded={false}
           />
         ) : null}

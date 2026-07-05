@@ -11,16 +11,24 @@ import { getNotableModels, testProviderModels, type ModelInfo, type ProviderMode
 import { ProviderStateBadge } from "../settings/llm-roles/provider-state-badge"
 import { probeModelsWithConcurrency } from "./model-probe-runner"
 
+export interface ManualProbeEndpointTarget {
+  id: string
+  testable: boolean
+}
+
+export type ActiveProbeModelIdsByEndpoint = Record<string, string[]>
+
 interface Props {
   providerKey: string
-  // W1-B: every configured endpoint id of this provider, so a manual model test probes
-  // all of them (not just `providerKey`). Falls back to [providerKey] when omitted/empty.
-  endpointIds?: string[]
+  // W1-B: every testable configured endpoint of this provider, so a manual
+  // model test fans out by endpoint. protocol_unsupported/disabled targets are
+  // not routine Manual Test targets; explicit Re-probe owns that path.
+  endpointTargets?: ManualProbeEndpointTarget[]
   notableProviderKey: string
   onModelsUpdated: (models: ModelInfo[]) => void
-  // P1a: report the model ids currently in flight so the provider card can pulse
-  // exactly those chips (per-model animation driven by the real atomic probe).
-  onTestingModelIdsChange?: (modelIds: string[]) => void
+  // P1a: report the exact endpoint/model atoms currently in flight so the
+  // provider card can pulse only those endpoint tags and model chips.
+  onActiveProbeModelIdsByEndpointChange?: (active: ActiveProbeModelIdsByEndpoint) => void
   defaultExpanded?: boolean
 }
 
@@ -138,6 +146,10 @@ export function manualModelToastSummary(results: ProviderModelTestResult[]): {
   }
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
+
 export function ManualModelResultList({ results }: { results: ProviderModelTestResult[] }) {
   const { t } = useTranslation("settings")
   if (results.length === 0) {
@@ -161,7 +173,7 @@ export function ManualModelResultList({ results }: { results: ProviderModelTestR
   )
 }
 
-export function ManualModelTestPanel({ providerKey, endpointIds, notableProviderKey, onModelsUpdated, onTestingModelIdsChange, defaultExpanded = false }: Props) {
+export function ManualModelTestPanel({ providerKey, endpointTargets, notableProviderKey, onModelsUpdated, onActiveProbeModelIdsByEndpointChange, defaultExpanded = false }: Props) {
   const { t } = useTranslation("settings")
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [modelIds, setModelIds] = useState([""])
@@ -175,6 +187,13 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
     () => Array.from(new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))),
     [modelIds],
   )
+  const targetEndpointIds = useMemo(() => {
+    const targets =
+      endpointTargets && endpointTargets.length > 0
+        ? endpointTargets
+        : [{ id: providerKey, testable: true }]
+    return targets.filter((target) => target.testable).map((target) => target.id)
+  }, [endpointTargets, providerKey])
 
   useEffect(() => {
     setExpanded(defaultExpanded)
@@ -201,20 +220,41 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
   }, [notableProviderKey])
 
   async function runModelTests() {
-    if (trimmedModelIds.length === 0) return
-    const targetEndpointIds = endpointIds && endpointIds.length > 0 ? endpointIds : [providerKey]
+    if (trimmedModelIds.length === 0 || targetEndpointIds.length === 0) return
     setTesting(true)
     setError(null)
     setResults([])
     setHasTested(true)
     const toastId = `manual-model-test-${providerKey}`
-    // Track how many (endpoint, model) probes are in flight PER model id — the
-    // same model can be probed on several endpoints at once, so a plain Set
-    // would drop it early. In-flight model ids drive both the live toast
-    // subtitle and the per-model chip animation.
-    const inFlight = new Map<string, number>()
-    const inFlightIds = () => [...inFlight.keys()]
-    const publish = () => onTestingModelIdsChange?.(inFlightIds())
+    // Track how many atomic probes are in flight per endpoint/model. The same
+    // model can be probed on several endpoints at once, so endpoint tags and
+    // model chips must be driven by this endpoint-scoped atom map.
+    const inFlightByEndpoint = new Map<string, Map<string, number>>()
+    const inFlightIds = () => uniqueStrings(
+      [...inFlightByEndpoint.values()].flatMap((endpointModels) => [...endpointModels.keys()]),
+    )
+    const activeByEndpoint = (): ActiveProbeModelIdsByEndpoint => {
+      const active: ActiveProbeModelIdsByEndpoint = {}
+      for (const [endpointId, endpointModels] of inFlightByEndpoint) {
+        const activeModelIds = [...endpointModels.keys()]
+        if (activeModelIds.length > 0) active[endpointId] = activeModelIds
+      }
+      return active
+    }
+    const publish = () => onActiveProbeModelIdsByEndpointChange?.(activeByEndpoint())
+    const startAtom = (endpointId: string, modelId: string) => {
+      const endpointModels = inFlightByEndpoint.get(endpointId) ?? new Map<string, number>()
+      endpointModels.set(modelId, (endpointModels.get(modelId) ?? 0) + 1)
+      inFlightByEndpoint.set(endpointId, endpointModels)
+    }
+    const settleAtom = (endpointId: string, modelId: string) => {
+      const endpointModels = inFlightByEndpoint.get(endpointId)
+      if (!endpointModels) return
+      const remaining = (endpointModels.get(modelId) ?? 1) - 1
+      if (remaining <= 0) endpointModels.delete(modelId)
+      else endpointModels.set(modelId, remaining)
+      if (endpointModels.size === 0) inFlightByEndpoint.delete(endpointId)
+    }
     // Always pass `description` (never omit it) so a new run REPLACES the
     // previous run's leftover subtitle instead of showing a stale model id
     // under the fresh "Testing…" title (PM 2026-07-03 toast-staleness bug).
@@ -233,14 +273,12 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
         (endpointId, modelId) => testProviderModels({ provider_id: endpointId, model_ids: [modelId] }),
         {
           onStart: (task) => {
-            inFlight.set(task.modelId, (inFlight.get(task.modelId) ?? 0) + 1)
+            startAtom(task.endpointId, task.modelId)
             publish()
             refreshLoadingToast()
           },
           onSettle: (task) => {
-            const remaining = (inFlight.get(task.modelId) ?? 1) - 1
-            if (remaining <= 0) inFlight.delete(task.modelId)
-            else inFlight.set(task.modelId, remaining)
+            settleAtom(task.endpointId, task.modelId)
             publish()
             refreshLoadingToast()
           },
@@ -256,7 +294,7 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
       setError(message)
       toast.error(message, { id: toastId })
     } finally {
-      inFlight.clear()
+      inFlightByEndpoint.clear()
       publish()
       setTesting(false)
     }
@@ -335,7 +373,7 @@ export function ManualModelTestPanel({ providerKey, endpointIds, notableProvider
               <Plus className="size-3.5" />
               {t("apiKeys.manualTest.addModel")}
             </Button>
-            <Button type="button" size="sm" onClick={() => void runModelTests()} disabled={testing || trimmedModelIds.length === 0}>
+            <Button type="button" size="sm" onClick={() => void runModelTests()} disabled={testing || trimmedModelIds.length === 0 || targetEndpointIds.length === 0}>
               {testing ? <Loader2 className="size-3.5 animate-spin" /> : null}
               {t("apiKeys.manualTest.testModels")}
             </Button>

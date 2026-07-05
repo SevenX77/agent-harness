@@ -56,6 +56,7 @@ describe("ManualModelTestPanel", () => {
   let root: Root
 
   beforeEach(() => {
+    llmMocks.getNotableModels.mockReset()
     llmMocks.getNotableModels.mockResolvedValue({ notable_models: [] })
     llmMocks.testProviderModels.mockReset()
     toastMock.error.mockReset()
@@ -89,6 +90,35 @@ describe("ManualModelTestPanel", () => {
     expect(html).not.toContain("Hide manual probing")
     expect(html).not.toContain("Add Model")
     expect(html).not.toContain("Test Models")
+  })
+
+  it("does not load notable model candidates until the collapsed panel is opened", async () => {
+    await act(async () => {
+      root.render(
+        <ManualModelTestPanel
+          providerKey="anthropic-official"
+          notableProviderKey="anthropic"
+          onModelsUpdated={vi.fn()}
+        />,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(llmMocks.getNotableModels).not.toHaveBeenCalled()
+
+    const trigger = container.querySelector<HTMLButtonElement>('[data-slot="accordion-trigger"]')
+    expect(trigger).not.toBeNull()
+    await act(async () => {
+      trigger!.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(llmMocks.getNotableModels).toHaveBeenCalledTimes(1)
+    expect(llmMocks.getNotableModels).toHaveBeenCalledWith("anthropic")
   })
 
   it("renders model rows and disabled test button when explicitly expanded", () => {

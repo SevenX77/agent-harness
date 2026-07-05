@@ -346,9 +346,9 @@
    "cap": "notable-models",
    "track": "共",
    "module": "测试与模型探测",
-   "func": "设计:Manual 面板自动拉该 provider 的「值得一试」候选 model id,作为输入框占位建议,降低手填门槛。",
-   "action": "无显式动作(Manual 面板挂载时自动拉取)。",
-   "fe_design": "Manual 面板出现时按 provider 短名自动拉一份「值得一试」的 model id 列表 → 写进输入框占位提示,帮用户少手敲。provider 短名由前端工具从 id/name/url 猜出。数据源是随后端打包的静态推荐文件,不分官/三、纯读不写盘、不走凭证存储。",
+   "func": "设计:Manual 面板在用户展开后拉该 provider 的「值得一试」候选 model id,作为输入框占位建议,降低手填门槛。",
+   "action": "用户展开 Manual model probing 面板;折叠/未使用时不拉取。",
+   "fe_design": "Manual 面板展开时按 provider 短名拉一份「值得一试」的 model id 列表 → 写进输入框占位提示,帮用户少手敲。provider 短名由前端工具从 id/name/url 猜出。前端按 provider_key 缓存与 in-flight 去重,重复开合不反复打后端;数据源是随后端打包的静态推荐文件,不分官/三、纯读不写盘、不走凭证存储。",
    "fe_modules": [
     {
      "name": "provider-utils",

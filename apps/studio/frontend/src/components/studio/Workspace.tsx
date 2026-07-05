@@ -18,6 +18,7 @@ import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
+import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
 import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistory } from "@/hooks/useRunHistory"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
@@ -668,6 +669,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const { data: goldenBaselines, mutate: mutateGoldenBaselines } = useSWR<GoldenBaseline[]>(
     currentSkillId ? `/skills/${currentSkillId}/golden` : null,
     fetcher,
+    STUDIO_TRUTH_SWR_CONFIG,
   )
 
   // N4 atom #30 🟡 logic-OK source: the AGENT nodes that ran in the most-recent predict
@@ -2683,14 +2685,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           </ResizablePanel>
 
         </ResizablePanelGroup>
-        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen} modal={false}>
           <DialogContent
             // grid-rows-[minmax(0,1fr)]: DialogContent is display:grid with a fixed
             // height; without a constrained row the implicit `auto` row grows to the
             // content height and the size-full child (SettingsPage) grows with it, so
             // the inner ScrollArea never gets a bounded height and can't scroll. Pin
             // the single row to the container height so the child is bounded.
-            className="grid-rows-[minmax(0,1fr)] h-[min(92vh,56rem)] w-[min(96vw,88rem)] max-w-none overflow-hidden p-0 sm:max-w-none"
+            className="grid-rows-[minmax(0,1fr)] h-[min(92vh,56rem)] w-[min(96vw,88rem)] max-w-none overflow-hidden p-0 data-closed:hidden sm:max-w-none"
+            aria-describedby={undefined}
+            forceMount
             showCloseButton={false}
           >
             <DialogTitle className="sr-only">Settings</DialogTitle>

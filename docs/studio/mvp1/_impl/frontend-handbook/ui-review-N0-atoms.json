@@ -365,13 +365,13 @@
         },
         {
           "n": 28,
-          "action": "无（Manual 面板挂载时自动拉取）。",
+          "action": "用户展开 Manual model probing 面板；折叠/未使用时不拉取。",
           "cap": "notable-models",
           "module": "测试与模型探测",
           "track": "共",
           "marker": "live",
-          "func": "Manual 面板自动拉该 provider 的 notable-models 候选，作为 model id 输入框的占位建议，降低用户手填门槛。",
-          "fe": "`ManualModelTestPanel.tsx:152-170` `useEffect` 调 `getNotableModels(notableProviderKey)`（`api/llm.ts` 拉 doc 维护候选），写入 `notableModels` 供 `modelIdPlaceholder`（`:59` 生成占位文案）；provider key 由 `notableProviderKeyForDraft`（`provider-utils.ts:106` 从 id/name/url 猜 provider 短名）给出。",
+          "func": "Manual 面板展开后拉该 provider 的 notable-models 候选，作为 model id 输入框的占位建议，降低用户手填门槛。",
+          "fe": "`ManualModelTestPanel.tsx` 在 expanded 后调 `getNotableModels(notableProviderKey)`（`api/llm.ts` 拉 doc 维护候选，并按 provider_key 缓存/in-flight 去重），写入 `notableModels` 供 `modelIdPlaceholder` 生成占位文案；provider key 由 `notableProviderKeyForDraft` 从 id/name/url 猜 provider 短名给出。",
           "be": "`get_provider_notable_models`（routers/llm.py:594 返回 doc 维护的 model id 建议的端点）调 `notable_model_ids(provider_key)`（llm_notable_models 服务，llm.py:101 导入），从随包 note 文件读候选，不分官/三、纯读不写盘。模块归属：端点 = ③a Studio routers/llm.py；数据源是随后端打包的静态 note 文件，非用户凭证/角色，不走 gateway storage seam。",
           "api": "GET /llm/providers/notable-models?provider_key={key} —— 按 provider 短名返回文档维护的「值得一试」model id 列表（输入建议用）；有 note 文件即返。",
           "gap": "符合设计（§7.2 #28 ✅「有 note 文件即返，不分官/三」；属 §1.2/§6.1 ①前端的输入建议辅助）。"

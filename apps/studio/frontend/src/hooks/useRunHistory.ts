@@ -3,6 +3,7 @@ import { useSWRConfig } from 'swr'
 import useSWR from 'swr'
 import { api, fetcher, getLocalHistory, revertSkill } from '../api/client'
 import type { GitHistoryItem, RunDetail, RunListResponse, RunMetadata } from '../api/types'
+import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
 
 export function useRunHistory(skillId: string | null) {
   const {
@@ -10,7 +11,7 @@ export function useRunHistory(skillId: string | null) {
     error,
     isLoading,
     mutate,
-  } = useSWR<RunListResponse>(skillId ? `/skills/${skillId}/runs` : null, fetcher)
+  } = useSWR<RunListResponse>(skillId ? `/skills/${skillId}/runs` : null, fetcher, STUDIO_TRUTH_SWR_CONFIG)
 
   const deleteRun = useCallback(async (runId: string) => {
     if (!skillId) {
@@ -64,7 +65,7 @@ export function useLocalHistory(skillId: string | null) {
       return Promise.resolve([])
     }
     return getLocalHistory(skillId)
-  })
+  }, STUDIO_TRUTH_SWR_CONFIG)
 
   const revert = useCallback(async (sha: string) => {
     if (!skillId) {

@@ -3,6 +3,7 @@ import useSWR from "swr"
 import { Loader2, Pencil, Plus, Trash2 } from "lucide-react"
 import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
 import type { TestInputMetadata } from "@/api/types"
+import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
 import { errorMessage } from "@/utils/errors"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -28,6 +29,7 @@ export function TestInputsSection({
   const { data, mutate } = useSWR<TestInputMetadata[]>(
     `/skills/${skillId}/test_inputs`,
     fetcher,
+    STUDIO_TRUTH_SWR_CONFIG,
   )
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

@@ -197,19 +197,59 @@ export interface TruthSourceContentResponse {
   size_bytes: number
 }
 
+let roleTestResultsCache: RoleTestResultsResponse | null = null
+let roleTestResultsRequest: Promise<RoleTestResultsResponse> | null = null
+let truthSourcesCache: TruthSourcesResponse | null = null
+let truthSourcesRequest: Promise<TruthSourcesResponse> | null = null
+let communityCatalogConfigCache: CommunityCatalogConfig | null = null
+let communityCatalogConfigRequest: Promise<CommunityCatalogConfig> | null = null
+
+export function invalidateRoleTestResultsCache(): void {
+  roleTestResultsCache = null
+  roleTestResultsRequest = null
+}
+
+export function resetClientReadCachesForTests(): void {
+  invalidateRoleTestResultsCache()
+  truthSourcesCache = null
+  truthSourcesRequest = null
+  communityCatalogConfigCache = null
+  communityCatalogConfigRequest = null
+}
+
 /**
  * R20: fetch the persisted last-known role/copilot test results so the settings
  * tabs can re-seed their badges on mount (survives server restart / remount).
  * Kept here, NOT in api/llm.ts, so the KEEP-MAIN roles contract is untouched.
  */
-export async function getRoleTestResults(): Promise<RoleTestResultsResponse> {
-  const response = await api.get<RoleTestResultsResponse>('/llm/roles/test-results')
-  return response.data
+export async function getRoleTestResults(options: { force?: boolean } = {}): Promise<RoleTestResultsResponse> {
+  if (!options.force && roleTestResultsCache) return roleTestResultsCache
+  if (!options.force && roleTestResultsRequest) return roleTestResultsRequest
+  const request = api.get<RoleTestResultsResponse>('/llm/roles/test-results')
+    .then((response) => {
+      roleTestResultsCache = response.data
+      return response.data
+    })
+    .finally(() => {
+      if (roleTestResultsRequest === request) roleTestResultsRequest = null
+    })
+  roleTestResultsRequest = request
+  return request
 }
 
 export async function getTruthSources(): Promise<TruthSourcesResponse> {
-  const response = await api.get<TruthSourcesResponse>('/system/truth-sources')
-  return response.data
+  if (truthSourcesCache) return truthSourcesCache
+  if (truthSourcesRequest) return truthSourcesRequest
+  const request = api.get<TruthSourcesResponse>('/system/truth-sources')
+    .then((response) => {
+      truthSourcesCache = response.data
+      return response.data
+    })
+    .finally(() => {
+      if (truthSourcesRequest === request) truthSourcesRequest = null
+    })
+  truthSourcesRequest = request
+  return request
 }
 
 export async function getTruthSourceContent(sourceId: string): Promise<TruthSourceContentResponse> {
@@ -226,8 +266,18 @@ export interface CommunityCatalogConfig {
 
 /** Read-only, baked-in community catalog config (manifest URL + signing pubkey). */
 export async function getCommunityCatalogConfig(): Promise<CommunityCatalogConfig> {
-  const response = await api.get<CommunityCatalogConfig>('/system/community-catalog-config')
-  return response.data
+  if (communityCatalogConfigCache) return communityCatalogConfigCache
+  if (communityCatalogConfigRequest) return communityCatalogConfigRequest
+  const request = api.get<CommunityCatalogConfig>('/system/community-catalog-config')
+    .then((response) => {
+      communityCatalogConfigCache = response.data
+      return response.data
+    })
+    .finally(() => {
+      if (communityCatalogConfigRequest === request) communityCatalogConfigRequest = null
+    })
+  communityCatalogConfigRequest = request
+  return request
 }
 
 export async function getAppSettings(): Promise<AppSettings> {

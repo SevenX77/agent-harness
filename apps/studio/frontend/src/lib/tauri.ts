@@ -150,20 +150,45 @@ const inactiveCodeAssistantStatus: CodeAssistantStatus = {
   codex: false,
 }
 
+const codeAssistantStatusCache: Partial<Record<string, CodeAssistantStatus>> = {}
+const codeAssistantStatusRequests: Partial<Record<string, Promise<CodeAssistantStatus>>> = {}
+
+export function resetCodeAssistantStatusCacheForTests(): void {
+  for (const key of Object.keys(codeAssistantStatusCache)) delete codeAssistantStatusCache[key]
+  for (const key of Object.keys(codeAssistantStatusRequests)) delete codeAssistantStatusRequests[key]
+}
+
 export async function getCodeAssistantStatus(
   workspaceRoot: string | null | undefined,
+  options: { force?: boolean } = {},
 ): Promise<CodeAssistantStatus> {
   const targetPath = workspaceRoot?.trim() ?? ''
   if (!targetPath || !isTauriRuntime() || !nativeHelpersAreAvailable()) {
     return inactiveCodeAssistantStatus
   }
 
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    return await invoke<CodeAssistantStatus>('code_assistant_status', { workspaceRoot: targetPath })
-  } catch {
-    return inactiveCodeAssistantStatus
+  if (!options.force && codeAssistantStatusCache[targetPath]) {
+    return codeAssistantStatusCache[targetPath]
   }
+  if (!options.force && codeAssistantStatusRequests[targetPath]) {
+    return codeAssistantStatusRequests[targetPath]
+  }
+
+  const request = (async () => {
+    const { invoke } = await import('@tauri-apps/api/core')
+    try {
+      const status = await invoke<CodeAssistantStatus>('code_assistant_status', { workspaceRoot: targetPath })
+      codeAssistantStatusCache[targetPath] = status
+      return status
+    } catch {
+      codeAssistantStatusCache[targetPath] = inactiveCodeAssistantStatus
+      return inactiveCodeAssistantStatus
+    }
+  })().finally(() => {
+    delete codeAssistantStatusRequests[targetPath]
+  })
+  codeAssistantStatusRequests[targetPath] = request
+  return request
 }
 
 export async function closeCodeAssistant(

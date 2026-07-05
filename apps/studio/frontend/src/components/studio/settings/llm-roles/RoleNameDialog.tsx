@@ -67,7 +67,7 @@ export function RoleNameDialog({
       }}
     >
       {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
-      <DialogContent forceMount aria-describedby={undefined} className="sm:max-w-sm">
+      <DialogContent aria-describedby={undefined} className="sm:max-w-sm">
         <form className="grid gap-4" onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>

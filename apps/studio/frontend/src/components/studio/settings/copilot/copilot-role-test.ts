@@ -5,6 +5,7 @@ import {
   type RoleTestProviderProgressStatus,
   type RoleTestResponse,
 } from "@/api/llm"
+import { invalidateRoleTestResultsCache } from "@/api/client"
 import i18n from "@/i18n"
 // R-F11: align with the 6-state ProviderUiState (`apps/studio/backend/app/core/
 // adapters/gateway.py` ProviderUiState) plus a transient "testing" projection so
@@ -53,6 +54,7 @@ export async function runCopilotRoleTestJob(
   }
 
   if (job.status === "failed" || !job.result) {
+    invalidateRoleTestResultsCache()
     // R-F9: keep the BE-rendered message AND the error_code on the thrown
     // error so `copilotRoleTestErrorMessage` can prefer the human message
     // mapped from error_code even when caller catches the Error instance.
@@ -66,6 +68,7 @@ export async function runCopilotRoleTestJob(
     err.job = job
     throw err
   }
+  invalidateRoleTestResultsCache()
   return job.result
 }
 

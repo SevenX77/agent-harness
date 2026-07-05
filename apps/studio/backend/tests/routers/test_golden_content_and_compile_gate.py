@@ -12,6 +12,7 @@ output schema only (prompt/agent-internal edits never appear in ``required``).
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -94,6 +95,12 @@ max_iterations: 5
 """,
         encoding="utf-8",
     )
+
+
+def _write_test_input(skills_dir: Path, content: dict[str, object], *, name: str = "case-a") -> None:
+    path = skills_dir / AGENT_SKILL / ".workspace" / "test_inputs" / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(content), encoding="utf-8")
 
 
 @pytest.fixture
@@ -180,9 +187,12 @@ def test_read_golden_content_is_read_only_no_write_guard(agent_skill: str, clien
 
 def test_compile_passes_when_golden_satisfies_output_schema(
     agent_skill: str,
+    studio_roots: tuple[Path, Path],
     client: TestClient,
 ) -> None:
     """A golden carrying every required output field compiles cleanly."""
+    skills_dir, _workspaces = studio_roots
+    _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     set_manual_golden_for_node(
         agent_skill,
         SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
@@ -194,10 +204,63 @@ def test_compile_passes_when_golden_satisfies_output_schema(
     assert response.json()["status"] == "ok"
 
 
-def test_compile_passes_when_no_golden_exists(agent_skill: str, client: TestClient) -> None:
+def test_compile_passes_when_no_golden_exists(
+    agent_skill: str,
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
     """No golden persisted -> the field-drift gate is a no-op, compile succeeds."""
+    skills_dir, _workspaces = studio_roots
+    _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     response = client.post(f"/api/skills/{agent_skill}/compile")
     assert response.status_code == 200
+
+
+def test_compile_fails_when_required_test_input_is_missing(
+    agent_skill: str,
+    client: TestClient,
+) -> None:
+    """A skill with required runtime inputs must have a compile-valid test input file."""
+    response = client.post(f"/api/skills/{agent_skill}/compile")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "compile_failed"
+    assert "test input" in body["detail"].lower()
+    assert body["errors"] == [
+        {
+            "file": ".workspace/test_inputs",
+            "line": None,
+            "field": "chapter_content",
+            "severity": "fatal",
+            "message": (
+                "Graph input schema requires test input field 'chapter_content', "
+                "but no test input JSON files exist. Add a valid test input before predict/run."
+            ),
+            "error_code": "STUDIO_TEST_INPUT_MISSING",
+        }
+    ]
+
+
+def test_compile_fails_when_test_input_violates_graph_input_schema(
+    agent_skill: str,
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    """Input file format drift is compile-fatal, not a predict-time surprise."""
+    skills_dir, _workspaces = studio_roots
+    _write_test_input(skills_dir, {"chapter_content": 123})
+
+    response = client.post(f"/api/skills/{agent_skill}/compile")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "compile_failed"
+    assert "test input" in body["detail"].lower()
+    assert body["errors"][0]["file"] == ".workspace/test_inputs/case-a.json"
+    assert body["errors"][0]["field"] == "chapter_content"
+    assert body["errors"][0]["error_code"] == "STUDIO_TEST_INPUT_SCHEMA_INVALID"
+    assert "string" in body["errors"][0]["message"]
 
 
 def test_compile_fails_when_golden_missing_newly_required_field(
@@ -212,6 +275,7 @@ def test_compile_fails_when_golden_missing_newly_required_field(
     """
     skills_dir, _workspaces = studio_roots
     _write_agent_skill(skills_dir, required_outputs="[segments, headline]")
+    _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
     # Golden written WITHOUT the (later) required headline field.
     set_manual_golden_for_node(
@@ -224,12 +288,37 @@ def test_compile_fails_when_golden_missing_newly_required_field(
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "compile_failed"
-    assert "missing" in body["detail"].lower()
+    assert "golden" in body["detail"].lower()
     fields = {error["field"] for error in body["errors"]}
     assert "segment.headline" in fields
     assert all(error["severity"] == "fatal" for error in body["errors"])
     # The satisfied field never appears as a gap.
     assert "segment.segments" not in fields
+
+
+def test_compile_fails_when_golden_value_violates_output_schema(
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    """Golden output files are part of the preflight path and must match output schema."""
+    skills_dir, _workspaces = studio_roots
+    _write_agent_skill(skills_dir, required_outputs="[segments]")
+    _write_test_input(skills_dir, {"chapter_content": "chapter one"})
+    register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
+    set_manual_golden_for_node(
+        AGENT_SKILL,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": "not an array"}),
+    )
+
+    response = client.post(f"/api/skills/{AGENT_SKILL}/compile")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "compile_failed"
+    assert "golden" in body["detail"].lower()
+    assert body["errors"][0]["field"] == "segment.segments"
+    assert body["errors"][0]["error_code"] == "STUDIO_GOLDEN_SCHEMA_INVALID"
+    assert "array" in body["errors"][0]["message"]
 
 
 def test_compile_gate_binds_to_output_schema_not_prompt(
@@ -243,6 +332,7 @@ def test_compile_gate_binds_to_output_schema_not_prompt(
     """
     skills_dir, _workspaces = studio_roots
     _write_agent_skill(skills_dir, required_outputs="[segments]")
+    _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
     set_manual_golden_for_node(
         AGENT_SKILL,

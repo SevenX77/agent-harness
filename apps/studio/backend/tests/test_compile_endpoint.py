@@ -7,7 +7,15 @@ from fastapi.testclient import TestClient
 from tests.conftest import copy_skill, register_skill_index_entry
 
 
-def test_compile_success_returns_manifest_summary(client: TestClient) -> None:
+def test_compile_success_returns_manifest_summary(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    input_dir = skills_dir / "text-segmentation" / ".workspace" / "test_inputs"
+    input_dir.mkdir(parents=True)
+    (input_dir / "case-a.json").write_text('{"input_text":"chapter one"}', encoding="utf-8")
+
     response = client.post("/api/skills/text-segmentation/compile")
 
     assert response.status_code == 200

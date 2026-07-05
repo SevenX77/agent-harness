@@ -77,6 +77,10 @@ def test_export_predict_diagnostics_preserves_predict_result_contract() -> None:
             "extra": ["validate"],
             "order_mismatch": False,
         },
+        "error": None,
+        "diagnostics": [],
+        "diagnostics_truncated": False,
+        "diagnostic_counts": {"by_code": {}, "by_level": {}, "total": 0},
     }
 
 

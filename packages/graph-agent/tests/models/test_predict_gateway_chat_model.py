@@ -7,9 +7,11 @@ from types import SimpleNamespace
 from typing import Literal
 
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
+from graph_agent.tools.md_to_json import parse_md
 
 MockedSource = Literal["golden_case", "copilot", "heuristic_stub", "manual"]
 
@@ -252,9 +254,55 @@ def test_bind_tools_preserves_predict_gateway_and_mock_strategy() -> None:
             "name": "finish_task",
             "args": {
                 "reasoning": "Predict mock completed the phase.",
-                "business_data_md": "## item-1\n- text: golden\n",
+                "business_data_md": '## item-1\n```json\n{\n  "text": "golden"\n}\n```\n',
             },
             "id": f"{message.id}_finish_task",
             "type": "tool_call",
         }
     ]
+
+
+def test_bind_tools_business_data_md_preserves_nested_json_payloads() -> None:
+    class ParsedSegment(BaseModel):
+        index: int
+        type: Literal["A", "B", "C"]
+        start_line: int
+        end_line: int
+        description: str
+
+    class SegmentOutput(BaseModel):
+        parsed_segments: list[ParsedSegment]
+        segmentation_result: dict[str, object]
+        segments_summary: str
+
+    payload = {
+        "parsed_segments": [
+            {
+                "description": "opening",
+                "end_line": 2,
+                "index": 1,
+                "start_line": 1,
+                "type": "B",
+            }
+        ],
+        "segmentation_result": {"chapter": 1, "ok": True},
+        "segments_summary": "one segment",
+    }
+    model = _model(MemoryMockStrategy(golden={"draft": payload}))
+    bound = model.bind_tools(
+        [
+            {
+                "name": "finish_task",
+                "description": "finish",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+
+    result = bound._generate([HumanMessage(content="hi")])
+    message = result.generations[0].message
+    business_data_md = message.tool_calls[0]["args"]["business_data_md"]
+    blocks = parse_md(business_data_md, SegmentOutput)
+
+    assert blocks[0].data == payload
+    assert SegmentOutput.model_validate(blocks[0].data).parsed_segments[0].type == "B"

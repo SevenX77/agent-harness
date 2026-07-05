@@ -332,14 +332,8 @@ def _predict_tool_name(tool: Any) -> str | None:
 
 
 def _payload_to_business_data_md(payload: dict[str, Any]) -> str:
-    lines = ["## item-1"]
-    for key, value in payload.items():
-        if isinstance(value, str):
-            rendered = value
-        else:
-            rendered = json.dumps(value, ensure_ascii=False, sort_keys=True)
-        lines.append(f"- {key}: {rendered}")
-    return "\n".join(lines) + "\n"
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    return f"## item-1\n```json\n{rendered}\n```\n"
 
 
 def _safe_identifier(value: str) -> str:

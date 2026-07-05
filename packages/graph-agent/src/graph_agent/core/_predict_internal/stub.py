@@ -51,6 +51,16 @@ def _value_for_schema(
         return _object_value_for_schema(schema, seen={*seen, schema_id}, depth=depth)
 
     if schema_type == "array":
+        items = schema.get("items")
+        if isinstance(items, dict):
+            return [
+                _value_for_schema(
+                    items,
+                    field_name=field_name,
+                    seen={*seen, schema_id},
+                    depth=depth + 1,
+                )
+            ]
         return []
 
     primitive = _primitive_value_for_schema_type(schema_type, field_name=field_name)
@@ -100,11 +110,29 @@ def _primitive_value_for_schema_type(schema_type: str | None, *, field_name: str
     if schema_type == "string":
         return _mock_string(field_name)
     if schema_type == "integer":
+        integer_hint = _integer_value_for_field(field_name)
+        if integer_hint is not _VALUE_NOT_HANDLED:
+            return integer_hint
         return 0
     if schema_type == "number":
         return 0.0
     if schema_type == "boolean":
         return True
+    return _VALUE_NOT_HANDLED
+
+
+def _integer_value_for_field(field_name: str | None) -> object:
+    if not field_name:
+        return _VALUE_NOT_HANDLED
+    normalized = field_name.lower()
+    if normalized == "index" or normalized.endswith("_index"):
+        return 1
+    if normalized == "start_line" or normalized.endswith("_start_line"):
+        return 1
+    if normalized == "end_line" or normalized.endswith("_end_line"):
+        return 999
+    if normalized == "chapter_number" or normalized.endswith("_chapter_number"):
+        return 1
     return _VALUE_NOT_HANDLED
 
 

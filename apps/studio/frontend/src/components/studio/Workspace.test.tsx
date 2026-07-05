@@ -1477,6 +1477,64 @@ describe('Workspace WS-1 local writer contracts', () => {
     }
   })
 
+  it('opens the predict error drawer with engine diagnostics when predict failed without path diff', async () => {
+    mocks.postPredictRun.mockResolvedValue({
+      is_predict: true,
+      status: 'failed',
+      phases: [],
+      path_diff: null,
+      error: {
+        code: '[F-v3-agent-exit-control-failed]',
+        level: 'FATAL',
+        stage: ['运行期'],
+        message: "Phase 'segment' failed: max iterations (2) reached without a valid finish_task marker.",
+        doc_link: 'docs/engine/mvp1/02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md',
+        skill_id: null,
+        phase_id: 'segment',
+        field_path: 'business_data_md',
+        source_path: null,
+        details: {},
+      },
+      diagnostics: [],
+      diagnostics_truncated: false,
+      diagnostic_counts: { total: 1, by_level: { FATAL: 1 }, by_code: { '[F-v3-agent-exit-control-failed]': 1 } },
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onPredict?.()
+      })
+
+      const text = document.body.textContent ?? ''
+      expect(text).toContain('1 predict error')
+      expect(text).toContain('[F-v3-agent-exit-control-failed]')
+      expect(text).toContain("Phase 'segment' failed: max iterations (2) reached without a valid finish_task marker.")
+      expect(text).toContain('phase: segment')
+      expect(text).toContain('field: business_data_md')
+      expect(text).not.toContain('backend did not return path-diff details')
+      expect(document.body.querySelector('[data-slot="predict-drawer-content"]')).not.toBeNull()
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      document.body.innerHTML = ''
+    }
+  })
+
   it('opens the predict error drawer when the predict request fails before diagnostics return', async () => {
     const config: InternalAxiosRequestConfig = {
       baseURL: 'http://127.0.0.1:8787/api',

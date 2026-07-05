@@ -17,6 +17,10 @@ def export_predict_diagnostics(result: RunResult) -> PredictDiagnosticExport:
         status=result.status,
         phases=result.phases or [],
         path_diff=result.path_diff,
+        error=result.error,
+        diagnostics=result.diagnostics,
+        diagnostics_truncated=result.diagnostics_truncated,
+        diagnostic_counts=result.diagnostic_counts,
     )
 
 

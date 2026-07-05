@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { CircleHelp } from "lucide-react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -8,10 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { RoleIntent, RoleProviderPreference } from "@/api/llm"
 import {
   formatTemperaturePercent,
-  TEMPERATURE_DEBOUNCE_MS,
   TEMPERATURE_SCALE_HELP,
 } from "@/components/studio/llm-temperature"
-import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
 
 export interface TokenLimitSummary {
   knownCount: number
@@ -88,27 +86,11 @@ export function RoleSettingsFields({
   const outputTokenPlaceholder = tokenLimitSummary.output.max
     ? `Blank uses model max (${formatThousands(String(tokenLimitSummary.output.max))})`
     : "Blank uses model max"
-  const [liveTemperature, setLiveTemperature] = useState(draft.temperature)
-  const latestDraftRef = useRef(draft)
-  latestDraftRef.current = draft
-  const debouncedTemperatureSubmit = useDebouncedCallback((temperature: string) => {
+  function updateTemperature(temperature: string) {
     onDraftChange({
-      ...latestDraftRef.current,
+      ...draft,
       temperature,
     })
-  }, TEMPERATURE_DEBOUNCE_MS)
-
-  useEffect(() => {
-    setLiveTemperature(draft.temperature)
-    debouncedTemperatureSubmit.cancel()
-  }, [debouncedTemperatureSubmit, draft.temperature])
-
-  function updateTemperature(temperature: string, flush = false) {
-    setLiveTemperature(temperature)
-    debouncedTemperatureSubmit.schedule(temperature)
-    if (flush) {
-      debouncedTemperatureSubmit.flush()
-    }
   }
 
   return (
@@ -201,13 +183,13 @@ export function RoleSettingsFields({
                 min={0}
                 max={2}
                 step={0.1}
-                value={[liveTemperature === "" ? 1 : Number(liveTemperature)]}
+                value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
                 onValueChange={(vals) => updateTemperature(String(vals[0]))}
-                onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
+                onValueCommit={(vals) => updateTemperature(String(vals[0]))}
                 className="flex-1"
               />
               <span className="w-9 shrink-0 text-right text-xs text-foreground">
-                {formatTemperaturePercent(liveTemperature)}
+                {formatTemperaturePercent(draft.temperature)}
               </span>
             </div>
             <FieldDescription>Drag to set a percentage override; blank inherits the route default.</FieldDescription>

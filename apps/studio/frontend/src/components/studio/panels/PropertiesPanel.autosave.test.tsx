@@ -145,7 +145,7 @@ describe("PropertiesPanel autosave", () => {
     apiMocks.getCompareCandidates.mockResolvedValue({ nodes: {} })
     apiMocks.getNodeLlmParams.mockResolvedValue({ nodes: {} })
     apiMocks.putNodeCompareCandidates.mockResolvedValue({ candidates: [] })
-    apiMocks.putNodeLlmParams.mockResolvedValue({ thinking: null, max_output_tokens: null, temperature: null })
+    apiMocks.putNodeLlmParams.mockResolvedValue({ enabled: false, thinking: null, max_output_tokens: null, temperature: null })
     toastMocks.error.mockReset()
     toastMocks.success.mockReset()
   })
@@ -251,6 +251,7 @@ describe("PropertiesPanel autosave", () => {
     apiMocks.getNodeLlmParams.mockResolvedValue({
       nodes: {
         review: {
+          enabled: true,
           thinking: null,
           max_output_tokens: null,
           temperature: 0.7,
@@ -279,6 +280,93 @@ describe("PropertiesPanel autosave", () => {
     expect(container.querySelector("[data-llm-node-temperature]")).not.toBeNull()
     expect(container.innerHTML).toContain(">35%<")
     expect(container.innerHTML).not.toContain(">0.7<")
+
+    act(() => root.unmount())
+  })
+
+  it("autosaves the node custom model params switch", async () => {
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    const toggle = container.querySelector("[data-llm-node-params-enabled]") as HTMLButtonElement
+    expect(toggle).not.toBeNull()
+
+    act(() => {
+      toggle.click()
+    })
+    await flushAutosave()
+
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledWith("demo", "review", {
+      enabled: true,
+      thinking: null,
+      max_output_tokens: null,
+      temperature: null,
+    })
+    expect(container.querySelector('[data-llm-node-params-save-status="saved"]')).not.toBeNull()
+
+    act(() => root.unmount())
+  })
+
+  it("clears local node custom params when the switch is disabled", async () => {
+    apiMocks.getNodeLlmParams.mockResolvedValue({
+      nodes: {
+        review: {
+          enabled: true,
+          thinking: true,
+          max_output_tokens: 2048,
+          temperature: 0.7,
+        },
+      },
+    })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    expect(container.innerHTML).toContain(">35%<")
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("2,048")
+
+    const toggle = container.querySelector("[data-llm-node-params-enabled]") as HTMLButtonElement
+    act(() => {
+      toggle.click()
+    })
+    await flushAutosave()
+
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledWith("demo", "review", {
+      enabled: false,
+      thinking: null,
+      max_output_tokens: null,
+      temperature: null,
+    })
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("")
+    expect(container.innerHTML).not.toContain(">35%<")
 
     act(() => root.unmount())
   })

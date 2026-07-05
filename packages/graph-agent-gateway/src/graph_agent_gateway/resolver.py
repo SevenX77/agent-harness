@@ -144,6 +144,23 @@ class ModelResolver:
             if thinking_enabled is not None
             else _effective_bool(first_route, "reasoning.enabled", False)
         )
+        runtime_setting_sources = {
+            "max_output_tokens": (
+                "call_override"
+                if max_output_tokens is not None
+                else _runtime_setting_source(first_route, "max_output_tokens")
+            ),
+            "temperature": (
+                "call_override"
+                if temperature is not None
+                else _runtime_setting_source(first_route, "temperature")
+            ),
+            "reasoning.enabled": (
+                "call_override"
+                if thinking_enabled is not None
+                else _runtime_setting_source(first_route, "reasoning.enabled")
+            ),
+        }
         if predict_context is not None:
             from graph_agent_gateway.predict_interception import PredictGatewayChatModel
 
@@ -156,6 +173,7 @@ class ModelResolver:
                 callbacks=callbacks,
                 phase_name=phase_name,
                 thinking_enabled=effective_thinking_enabled,
+                runtime_setting_sources=runtime_setting_sources,
                 client_manager=self.client_manager,
                 credential_provider=self.credential_provider,
                 name=first_route.provider_model_id,
@@ -168,6 +186,7 @@ class ModelResolver:
             callbacks=callbacks,
             phase_name=phase_name,
             thinking_enabled=effective_thinking_enabled,
+            runtime_setting_sources=runtime_setting_sources,
             client_manager=self.client_manager,
             credential_provider=self.credential_provider,
             name=first_route.provider_model_id,
@@ -399,6 +418,13 @@ def _effective_int(route: Any, key: str, default: int) -> int:
     setting = route.effective_runtime_settings.get(key)
     value = setting.value if setting is not None else None
     return int(value) if isinstance(value, int | float) and value > 0 else default
+
+
+def _runtime_setting_source(route: Any, key: str) -> str:
+    setting = route.effective_runtime_settings.get(key)
+    if setting is not None and setting.source:
+        return str(setting.source)
+    return "model_default"
 
 
 def _effective_bool(route: Any, key: str, default: bool) -> bool:

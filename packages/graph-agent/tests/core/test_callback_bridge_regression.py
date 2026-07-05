@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.callback_bridge import _extract_text_content, _HarnessCallbackBridge
 
 
@@ -56,6 +58,34 @@ def test_extract_tokens_reads_message_response_metadata_aliases() -> None:
     response = SimpleNamespace(generations=[[SimpleNamespace(message=message)]])
 
     assert _HarnessCallbackBridge._extract_tokens(response) == (13, 2)
+
+
+def test_extract_response_data_preserves_actual_runtime_settings_metadata() -> None:
+    actual_runtime_settings = {
+        "max_output_tokens": {"value": 555, "source": "call_override"},
+        "temperature": {
+            "authored_value": 1.2,
+            "provider_value": 0.6,
+            "source": "call_override",
+            "protocol": "anthropic_compatible",
+        },
+        "reasoning.enabled": {"value": True, "source": "call_override"},
+    }
+    message = AIMessage(
+        content="ok",
+        response_metadata={
+            "actual_runtime_settings": actual_runtime_settings,
+            "usage": {"input_tokens": 13, "output_tokens": 2},
+        },
+    )
+    response = SimpleNamespace(
+        llm_output={"model_name": "claude-sonnet-4-6"},
+        generations=[[SimpleNamespace(message=message)]],
+    )
+
+    data = _HarnessCallbackBridge._extract_response_data(response)
+
+    assert data["response_metadata"]["actual_runtime_settings"] == actual_runtime_settings
 
 
 def test_extract_tokens_returns_zero_tuple_for_unknown_shapes() -> None:

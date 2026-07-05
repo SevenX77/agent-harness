@@ -301,6 +301,8 @@ def _node_param_overrides(phase_name: str | None) -> dict[str, Any]:
     node = nodes.get(phase_name) if isinstance(nodes, dict) else None
     if not isinstance(node, dict):
         return {}
+    if node.get("enabled") is not True:
+        return {}
     overrides: dict[str, Any] = {}
     for key in ("thinking", "max_output_tokens", "temperature"):
         value = node.get(key)

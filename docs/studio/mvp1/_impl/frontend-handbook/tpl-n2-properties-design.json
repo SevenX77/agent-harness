@@ -144,12 +144,23 @@
       "cap": "llm-role-graph-default-switch",
       "func": "设计:Agent 节点 llm_role 双层来源——节点自选角色 + 整图默认角色(GRAPH.md llm_role,skill-spec §2)。SKILL.md 开关字段 use_graph_llm_role(默认 false)决定优先级:开 = 图默认压过节点自选;关 = 节点自选生效,未选时继承图默认;两级都空回退约定角色 graph_agent(engine manifest.effective_llm_role,skill-spec §5)。覆盖靠开关,绝不改写/清除节点自己的 llm_role(设置本体不销毁)。",
       "action": "打开『Use graph default』开关 → 保存把 use_graph_llm_role: true 写入 SKILL.md;关掉 → 键删除(默认态)。开关旁小齿轮跳到 graph 属性面板(在那里查看/修改/Test 图默认角色)。",
-      "fe_design": "开关直接绑 useGraphLlmRole 受控表单字段、随保存落盘(无不落盘的幽灵本地态)。开 = Run role 一整行(角色下拉 + Roles 设置齿轮 + Test 烧瓶)整体 disable,节点自选置灰保留、不加『实际生效』标注文案;关 = 整行可用。图默认角色的 Test 放 graph 面板(GraphFrontmatterForm llm_role 行加 RoleTestControl,测试状态与节点行相互独立)。 Agent ??? Model params ? temperature ????????: shadcn Slider ? 0..2 ????????????? tooltip ??? provider scale, ???? debounce, ??????/route ??",
+      "fe_design": "开关直接绑 useGraphLlmRole 受控表单字段、随保存落盘(无不落盘的幽灵本地态)。开 = Run role 一整行(角色下拉 + Roles 设置齿轮 + Test 烧瓶)整体 disable,节点自选置灰保留、不加『实际生效』标注文案;关 = 整行可用。图默认角色的 Test 放 graph 面板(GraphFrontmatterForm llm_role 行加 RoleTestControl,测试状态与节点行相互独立)。Agent Model params 必须有显式 Custom model params 开关:默认 off=完全继承 role,字段禁用且不写 node override;打开后才通过 node-llm-params API 保存 enabled=true,空字段仍逐项继承。temperature 使用 shadcn Slider + 百分比读数,保存 authored 0..2;保存状态用 SaveStatusBadge,HTTP 保存 debounce。",
       "fe_modules": [],
-      "be_contract": [],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params",
+          "purpose": "保存 Agent 节点的 opt-in model params override:enabled=false 清除/继承 role;enabled=true 时 thinking/max_output_tokens/temperature 可逐项覆盖,空值逐项继承。",
+          "mechanism_ref": "n2_mech_graph"
+        },
+        {
+          "endpoint": "GET /api/skills/{skill_id}/node-llm-params + gateway runtime dispatch",
+          "purpose": "运行前读取 .workspace/node_llm_params.json;engine adapter 只接受 enabled=true 的 node entry 并把字段作为 call override 传给 gateway;trace 记录 actual_runtime_settings。",
+          "mechanism_ref": "n2_mech_graph"
+        }
+      ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "engine 已支持 GRAPH.md llm_role(此前 GraphManifest extra=forbid,设图默认即编译炸——已修)+ AgentNodeAST.use_graph_llm_role + effective_llm_role 生效链(test_llm_role_layering.py);前端开关/整行禁用/齿轮跳转/graph 面板 Test 已落地(PropertiesPanel.tsx LlmRoleField / GraphFrontmatterForm)。 2026-07-05: ??? Model params temperature ?????????????? + tooltip + debounce ???",
+      "gap_brief": "engine 已支持 GRAPH.md llm_role(此前 GraphManifest extra=forbid,设图默认即编译炸——已修)+ AgentNodeAST.use_graph_llm_role + effective_llm_role 生效链(test_llm_role_layering.py);前端开关/整行禁用/齿轮跳转/graph 面板 Test 已落地(PropertiesPanel.tsx LlmRoleField / GraphFrontmatterForm)。2026-07-05:Agent Model params 已补显式 Custom model params 开关、百分比 temperature、debounce 保存与 SaveStatusBadge;默认不再让每个 node 都隐式自定义。",
       "module": "llm_role 分层"
     }
   ]

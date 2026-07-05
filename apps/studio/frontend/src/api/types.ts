@@ -267,6 +267,7 @@ export interface CompareCandidatesMap {
  * Persisted per skill+node in the studio backend (not SKILL.md).
  */
 export interface NodeLlmParams {
+  enabled?: boolean
   thinking?: boolean | null
   max_output_tokens?: number | null
   temperature?: number | null

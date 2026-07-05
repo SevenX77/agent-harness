@@ -8,10 +8,10 @@
    "n": 14,
    "cap": "trace-live-stream",
    "design_ref": "n4-atom-14",
-   "current": "现状：已实现且符合。handleRun 成功 setActivePanel('timeline') 自动开面板；useRunStream(runId) 连 WS、按 seq 去重 + gap 检测 + 100ms flush 进 events[]；TracePanel 经 VirtualTraceList 渲染。",
+   "current": "现状：已实现且符合。handleRun 成功 setActivePanel('timeline') 自动开面板；useRunStream(runId) 连 WS、按 seq 去重 + gap 检测 + 100ms flush 进 events[]；TracePanel 经 VirtualTraceList 渲染。2026-07-05 运行参数可观测性补齐:gateway 在 LLM response_metadata 同时写 effective_runtime_settings(角色/route 解析结果)与 actual_runtime_settings(本次真实传给 provider 的 max_output_tokens、temperature authored/provider value、reasoning.enabled 及 source);Studio engine adapter 合并该 metadata,graph-agent callback_bridge 把它保留在 llm_call.response.response_metadata 中，Full Trace/事件 JSON 可直接看到真实调用值。",
    "gap": "符合设计，无需改。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。WS /ws/runs/{run_id}（D11 ok）live。"
+   "be_dep": "已就绪可接。WS /ws/runs/{run_id}（D11 ok）live；gateway actual_runtime_settings + engine callback_bridge metadata 保留链路已覆盖。"
   },
   {
    "n": 15,
@@ -209,6 +209,8 @@
     "推 seq 1/3（缺 2）→ 断言报 Run stream gap（可观测）。",
     "无事件 → 断言 TracePanel 渲『Waiting for run events』空态。",
     "runId 从 A 切到 B → 断言 events[] 重置、不串 A 的事件。",
+    "gateway test_gateway_response_metadata_reports_actual_call_runtime_settings:断言 response_metadata.actual_runtime_settings 展示 max_output_tokens、temperature authored/provider value、reasoning.enabled 及 source,同时 effective_runtime_settings 保留 role/route 解析值。",
+    "graph-agent test_callback_bridge_regression.py:断言 message.response_metadata.actual_runtime_settings 被 callback_bridge 保留到 llm_call.response.response_metadata。",
     "RED：超大 payload 展开 → 断言『已截断』标注存在（待实现转 GREEN）。"
    ],
    "layer2": [

@@ -219,20 +219,27 @@ const COMPILE_ERROR_REPAIR_SKILL: &str =
 
 const MOIRAI_MASTER_RULES: &str = r#"# 你是 MoirAI（莫伊莱）
 
-你是命运三女神的合一形态：Clotho 纺线，Lachesis 量线，Atropos 剪线。你陪一条 skill 走完它的一生：从散落意图，到 graph 结构，到编译修复，再到 predict/run 后的终判。
+## 身份锚点
+
+- 你是 Moirai 的 Studio 化身：三位命运女神合成的一体，陪一条 skill 从意图、结构、修顺走到终判。
+- 背景参考（Wikipedia）：https://en.wikipedia.org/wiki/Moirai
+- 只在用户询问名字、神话背景或角色来源时，才按上面的链接和这一句锚点展开；日常协作不讲背景故事。
 
 ## 内部操作协议
 
-- 面向用户时只说 MoirAI、Clotho、Lachesis、Atropos；不要把 worker、slot、provider、派单这类脚手架词当成身份解释。
 - 先判断用户请求处在哪一段：需求澄清与设计、编译与修复、整体评估，或需要反问。
-- 需要设计时，把任务交给 Clotho；需要编译/修 bug 时，把任务交给 Lachesis；需要 predict/run、trace 观察和终判时，把任务交给 Atropos。
-- 调用三位女神时使用 ah 的内部协作命令；给用户只汇总结论、取舍、下一步，不转述内部流水账。
+- 需要设计时，用 `ah ask clotho "<任务包>" --wait`；需要编译或修复时，用 `ah ask lachesis "<任务包>" --wait`；需要 predict/run、trace 观察和终判时，用 `ah ask atropos "<任务包>" --wait`。
+- 给用户只汇总结论、取舍、下一步，不转述内部流水账。
 - 不为了让错误消失而补丁式绕过；先定位坏状态为什么可能存在，再决定改哪一层。
 "#;
 
 const CLOTHO_RULES: &str = r#"# 你是 Clotho（克洛托）
 
-你是纺线的手。你的工作是把用户散落的意图整理成可落地的 graph skill 结构：边界、phase、DAG、io schema、确定性逻辑与 agent 判断的分工。
+## 身份锚点
+
+- 你是纺线的手：把散落意图整理成可落地的 graph skill 结构。
+- 背景参考（Wikipedia）：https://en.wikipedia.org/wiki/Clotho
+- 只在用户询问名字、神话背景或角色来源时，才按上面的链接和这一句锚点展开；日常协作不讲背景故事。
 
 ## 内部操作协议
 
@@ -245,7 +252,11 @@ const CLOTHO_RULES: &str = r#"# 你是 Clotho（克洛托）
 
 const LACHESIS_RULES: &str = r#"# 你是 Lachesis（拉刻西斯）
 
-你是量线的手。你的工作是把已经纺出的 skill 量准、修顺：编译、读错误码、定位根因、最小改动修复，并重新验证。
+## 身份锚点
+
+- 你是量线的手：把已经纺出的 skill 量准、修顺，直到契约和实现对齐。
+- 背景参考（Wikipedia）：https://en.wikipedia.org/wiki/Lachesis
+- 只在用户询问名字、神话背景或角色来源时，才按上面的链接和这一句锚点展开；日常协作不讲背景故事。
 
 ## 内部操作协议
 
@@ -258,7 +269,11 @@ const LACHESIS_RULES: &str = r#"# 你是 Lachesis（拉刻西斯）
 
 const ATROPOS_RULES: &str = r#"# 你是 Atropos（阿特罗波斯）
 
-你是剪线的手。你的工作是整体评估：predict/run、观察 trace、对照 golden 或目标标准，给出终判，并把需要返工的方向送回 Clotho 或 Lachesis。
+## 身份锚点
+
+- 你是剪线的手：用 predict/run、trace、golden 或目标标准给整张图下终判。
+- 背景参考（Wikipedia）：https://en.wikipedia.org/wiki/Atropos
+- 只在用户询问名字、神话背景或角色来源时，才按上面的链接和这一句锚点展开；日常协作不讲背景故事。
 
 ## 内部操作协议
 
@@ -510,7 +525,7 @@ fn ah_config_path_literal(path: &Path) -> String {
 
 fn transient_ah_config_content() -> String {
     let mut config = format!(
-        "version = \"1\"\n\n[master]\nenabled = true\ncmd = {cmd}\nreadiness_timeout_s = 180\n\n[agents.clotho]\nprovider = \"claude\"\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = \"claude\"\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = \"claude\"\nskills = [\"eval-judgement\"]\n",
+        "version = \"1\"\n\n[master]\nenabled = true\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = \"claude\"\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = \"claude\"\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = \"claude\"\nskills = [\"eval-judgement\"]\n",
         cmd = toml_string(&claude_master_cmd())
     );
     config.push_str("\n[sandbox]\nadditional_ro_binds = [\n");
@@ -1271,6 +1286,10 @@ mod tests {
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
+        assert!(
+            config.contains("window_size = \"follow\""),
+            "ah 1.3.0 defaults master tmux sizing to fixed; Studio must opt into follow"
+        );
         // IS_SANDBOX (root escape hatch) + skip-permissions + the auto-report
         // prompt; NOT --continue (aborts on a fresh workspace) or /remote-control.
         assert!(config.contains("cmd = \"IS_SANDBOX=1 claude --dangerously-skip-permissions '"));
@@ -1288,6 +1307,47 @@ mod tests {
         assert_eq!(config.matches("provider = \"claude\"").count(), 3);
         assert!(config.contains("[sandbox]"));
         assert!(config.contains("additional_ro_binds = ["));
+    }
+
+    fn assert_progressive_wikipedia_background(rules: &str, wikipedia_url: &str) {
+        assert!(
+            rules.contains(wikipedia_url),
+            "rules should link the role background instead of embedding long mythology"
+        );
+        assert!(
+            rules.contains("只在用户询问"),
+            "background should be disclosed progressively, not always expanded"
+        );
+        assert!(
+            rules.contains("Wikipedia"),
+            "the source link should be named explicitly"
+        );
+        for leaked_term in ["master", "worker", "派单"] {
+            assert!(
+                !rules.contains(leaked_term),
+                "Studio-managed persona rules must not leak ah scaffold term `{leaked_term}`"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_moirai_rules_use_progressive_wikipedia_backgrounds() {
+        assert_progressive_wikipedia_background(
+            MOIRAI_MASTER_RULES,
+            "https://en.wikipedia.org/wiki/Moirai",
+        );
+        assert_progressive_wikipedia_background(
+            CLOTHO_RULES,
+            "https://en.wikipedia.org/wiki/Clotho",
+        );
+        assert_progressive_wikipedia_background(
+            LACHESIS_RULES,
+            "https://en.wikipedia.org/wiki/Lachesis",
+        );
+        assert_progressive_wikipedia_background(
+            ATROPOS_RULES,
+            "https://en.wikipedia.org/wiki/Atropos",
+        );
     }
 
     #[test]

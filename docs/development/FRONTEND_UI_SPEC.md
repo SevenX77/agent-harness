@@ -119,6 +119,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 搜索匹配在数据密集列表中应尽量宽容：支持名称、分组、provider/vendor 等关键字段，并避免 `-`、`.`、空格等符号成为强制精确匹配门槛。
 - API Key 输入框必须始终使用 `type="text"`，避免触发浏览器/扩展密码管理器。已有密钥的 ProviderCard 隐藏且未编辑时必须渲染与真实 key 等长的 mask 字符串，不把真实 key 作为 input 可见 value；输入框获得焦点或用户开始录入时进入编辑态，直接用真实草稿值作为受控 value 并明文显示，保证用户能看清正在输入和修改的内容，失焦后回到等长 mask 字符串；点 Eye 显示后也明文渲染真实 key。新建 provider 的 API Key 输入保持明文录入；空输入不得 mask placeholder。
 - 已有可展示数据时，后台刷新、secret hydration、保存回写和 event-stream resync 都必须原地更新数据，不得把主列表切回 loading skeleton 或让状态区消失后重建。Skeleton 只用于首次没有可展示数据的冷加载。
+- Settings / Copilot / sidebar / templates / roles / registry 等 mutable truth 的前端读取必须遵守 SSOT + event-driven revalidation：所属 app/feature scope 首次需要某个 cache key 时可以 cold load 一次，后续消费者共享缓存和 in-flight 请求；只有成功写回的 canonical server snapshot、后端 commit 后发出的精确 domain event、或用户显式 refresh/probe/test 这三类 truth-changing trigger 可以 invalidate/refetch。组件 mount/unmount、弹窗打开/关闭、tab 切换、window focus、timer polling、WebSocket connect/reconnect、泛泛 resync 都不是数据变更，不得触发后端拉取。需要后台持续状态的长任务必须使用精确 job/probe 状态流或 scoped polling，不能借全局 registry/roles/settings/templates 重拉代替。
 - 列表里的新增流程必须进入列表状态模型：点击 Add 后创建一个未持久化的 pending row，并用该 row 承载内联表单；如果列表原本为空，pending row 必须替代 empty state，而不是让 empty state 和表单同时显示。Cancel 删除 pending row，Submit 再把它替换成真实 draft 并进入保存队列。新增第三方 provider 表单的字段顺序必须和真实第三方卡片一致：Provider name → API Key → Base URL(s)，且 Base URL 必须支持添加多行，提交后落成 `ProviderDraft.base_urls[]`，不能压成单个字符串。
 
 ### 2.9 数据密集列表与 Badge Overflow

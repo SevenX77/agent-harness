@@ -3,6 +3,7 @@ import type { ProviderModelTestResponse } from "../../../api/llm"
 import {
   MODEL_PROBE_CONCURRENCY,
   buildAtomicProbeTasks,
+  hasActiveAtomicProbeSignal,
   probeModelsWithConcurrency,
   runWithConcurrency,
 } from "./model-probe-runner"
@@ -69,6 +70,28 @@ describe("buildAtomicProbeTasks", () => {
       { endpointId: "e2", modelId: "m1" },
       { endpointId: "e2", modelId: "m2" },
     ])
+  })
+})
+
+describe("hasActiveAtomicProbeSignal", () => {
+  it("treats only a live route testing state as an animated model signal", () => {
+    expect(hasActiveAtomicProbeSignal({ status: "testing" })).toBe(true)
+    expect(hasActiveAtomicProbeSignal({
+      modelId: "anthropic/claude-opus-4.8",
+      activeModelIds: ["anthropic/claude-opus-4.8"],
+      status: "verified",
+    })).toBe(true)
+
+    expect(hasActiveAtomicProbeSignal({ status: "unverified_manual" })).toBe(false)
+    expect(hasActiveAtomicProbeSignal({ status: "verified" })).toBe(false)
+    expect(hasActiveAtomicProbeSignal({
+      modelId: "openai/gpt-5.5",
+      activeModelIds: ["anthropic/claude-opus-4.8"],
+      status: "verified",
+    })).toBe(false)
+    expect(hasActiveAtomicProbeSignal({ probeAttemptStatuses: ["ok"] })).toBe(false)
+    expect(hasActiveAtomicProbeSignal({ reasonCode: "ok" })).toBe(false)
+    expect(hasActiveAtomicProbeSignal({ probeAttemptStatuses: [] })).toBe(false)
   })
 })
 

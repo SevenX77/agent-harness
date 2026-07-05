@@ -847,8 +847,11 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
         # key+URL reachability, and a reachable endpoint can still reject every
         # generation call (e.g. an exhausted credit balance). The probe leads with
         # this endpoint's already-verified models so the Test confirms the
-        # *endpoint* in as few attempts as possible; third-party endpoints
-        # additionally auto-detect their transport protocol.
+        # *endpoint* in as few attempts as possible; third-party matrix cells
+        # use their own immutable protocol.
+        async def publish_active_model_ids(active_model_ids: tuple[str, ...]) -> None:
+            await _publish_llm_probe_active(endpoint_id, active_model_ids)
+
         verified_model_ids = frozenset(
             route.provider_model_id
             for route in latest_credentials.provider_routes.values()
@@ -858,6 +861,7 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             latest_endpoint,
             discovered_model_ids,
             raw_capabilities_by_model,
+            on_active_change=publish_active_model_ids,
         )
         probe_attempts_log = verification.probe_attempts
         # "no_model" => reachable-but-untested (W2-D / R-E1): map to the
@@ -4750,19 +4754,23 @@ async def _verify_endpoint_by_generation_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
+    *,
+    on_active_change: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
 ) -> EndpointGenerationVerification:
     """Run batch inference probing to verify an endpoint can actually generate.
 
-    apikeys#24/#25 + design §1.2 protocol matrix (2026-07-02): an endpoint is one
+    apikeys#24/#25 + design protocol matrix (2026-07-02): an endpoint is one
     immutable (base_url, protocol) cell, so the batch probes with the endpoint's
-    OWN protocol only — no candidate rotation, no clone-with-another-protocol,
+    OWN protocol only: no candidate rotation, no clone-with-another-protocol,
     no protocol rewrite. get-models only proves key+URL reachability, so the
     endpoint is promoted to ``verified`` ONLY when a real generation probe
     returns ``ok``. Every attempt lands in ``probe_attempts`` (the old rotation
     swallowed its intermediate failures, which made protocol flips unexplainable
     from the runtime log). The batch stops on the first ``ok`` and
     short-circuits structural errors (invalid_key / quota_exceeded /
-    protocol_unsupported — all of which reject every model on this cell).
+    protocol_unsupported, all of which reject every model on this cell).
+    ``on_active_change`` reports the currently active model atom before and
+    after each generation probe; the UI uses that snapshot for model animation.
     """
     probe_attempts: list[dict[str, Any]] = []
     probe_model_ids = _endpoint_generation_probe_model_ids(
@@ -4772,7 +4780,7 @@ async def _verify_endpoint_by_generation_probe(
     if not probe_model_ids:
         # W2-D / R-E1: get-models reached the provider (connectivity proven) but no
         # real model is available to verify generation. Reachable-but-untested, NOT
-        # failed — the user adds a model id and runs a single-model test.
+        # failed: the user adds a model id and runs a single-model test.
         return EndpointGenerationVerification(
             status="no_model",
             verified_model_id=None,
@@ -4785,10 +4793,16 @@ async def _verify_endpoint_by_generation_probe(
 
     last_failure: RouteProbeResult | None = None
     for model_id in probe_model_ids:
-        probe = await _gateway_test_provider_route(
-            endpoint,
-            _gateway_probe_route(endpoint, model_id),
-        )
+        if on_active_change is not None:
+            await on_active_change((model_id,))
+        try:
+            probe = await _gateway_test_provider_route(
+                endpoint,
+                _gateway_probe_route(endpoint, model_id),
+            )
+        finally:
+            if on_active_change is not None:
+                await on_active_change(())
         probe_attempts.append(
             {"protocol": endpoint.protocol, "model": model_id, "status": probe.status}
         )
@@ -5594,6 +5608,26 @@ async def _publish_roles_changed() -> None:
     except Exception:
         logger.exception(
             "phase=publish_roles_changed action=publish status=failed payload=%s",
+            payload,
+        )
+
+
+async def _publish_llm_probe_active(
+    endpoint_id: str,
+    active_model_ids: tuple[str, ...],
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "llm_probe_active",
+        "timestamp": _now_iso(),
+        "source": "http_api",
+        "endpoint_id": endpoint_id,
+        "active_model_ids": list(active_model_ids),
+    }
+    try:
+        await event_bus.publish(STUDIO_EVENTS_TOPIC, payload)
+    except Exception:
+        logger.exception(
+            "phase=publish_llm_probe_active action=publish status=failed payload=%s",
             payload,
         )
 

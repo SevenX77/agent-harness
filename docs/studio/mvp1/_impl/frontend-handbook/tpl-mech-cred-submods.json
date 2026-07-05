@@ -59,7 +59,8 @@
         "第三方不在多个 protocol 里『猜一个』；同一 URL 的 OpenAI / Anthropic / Gemini 候选 endpoint 各自打自己的推理端点，各自留下结果。",
         "带对应的 auth header：native anthropic 用 x-api-key；anthropic 兼容的第三方用 Authorization: Bearer。",
         "一个 URL 可能同时兼容多个 protocol,所以多个候选 endpoint 可同时是 verified；失败候选也以 failed 留在 registry/前端。",
-        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」；endpoint test 与单 model test 复用这条模型 probe 写回路径。"
+        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」；endpoint test 与单 model test 复用这条模型 probe 写回路径。",
+        "原子 probe 的 UI 进度也以 (endpoint, model) 为身份：endpoint 标签可显示 endpoint 正在测，但 model chip 只有该 route 自身有活动原子信号才显示动画（route status=testing 或后端 llm_probe_active active_model_ids 命中），不能把 endpoint membership 当作 model 正在测。"
       ],
       "do": [
         "协议判定、对应 auth header、route 真探。"

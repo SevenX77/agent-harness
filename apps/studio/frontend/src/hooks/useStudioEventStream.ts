@@ -30,6 +30,8 @@ export interface StudioEventStreamCallbacks {
   onRegistryChanged: () => void
   /** A roles_changed event arrived (external roles file change). */
   onRolesChanged: () => void
+  /** An endpoint generation probe reported its currently active model atoms. */
+  onLlmProbeActive?: (event: { endpointId: string; activeModelIds: string[] }) => void
   /**
    * A (re)connection just opened. Caller should refetch once to fill any gap
    * that may have happened while the socket was down. Fires on the very first
@@ -218,6 +220,16 @@ export function useStudioEventStream(
         } else if (event.type === "roles_changed") {
           console.info("phase=studio-event-stream action=dispatch type=roles_changed")
           callbacksRef.current.onRolesChanged()
+        } else if (event.type === "llm_probe_active") {
+          const payload = event as { endpoint_id?: unknown; active_model_ids?: unknown }
+          const endpointId = typeof payload.endpoint_id === "string" ? payload.endpoint_id : ""
+          const activeModelIds = Array.isArray(payload.active_model_ids)
+            ? payload.active_model_ids.filter((item): item is string => typeof item === "string" && item.length > 0)
+            : []
+          if (endpointId) {
+            console.info("phase=studio-event-stream action=dispatch type=llm_probe_active endpoint_id=%s active=%d", endpointId, activeModelIds.length)
+            callbacksRef.current.onLlmProbeActive?.({ endpointId, activeModelIds })
+          }
         }
       }
 

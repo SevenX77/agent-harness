@@ -34,11 +34,12 @@
   {
     "name": "状态投影",
     "what": "把后端每条 route/endpoint 的测试与状态结果(按参数指纹取缓存)投影成卡上 UI 标签的前端逻辑,目标对齐 LLM Roles 那套完整 6 态色。",
-    "where": "ProviderCard.tsx routeDisplayStatus / :350 routeStatusTagVariant / :360 routeStatusLabel(把 route 状态算成标签变体与文案)、:205 directPersistedTestResult(参数不匹配时回 null 使状态回落)、:787 testStatus(顶层连通态)、:151 TestMessage(连通徽章);目标复用 LLM Roles 已有 6 态组件 provider-state-badge.tsx(ready/historical_ready/untested/cooling_down/failed/off 色映射)。",
+    "where": "ProviderCard.tsx routeDisplayStatus / :350 routeStatusTagVariant / :360 routeStatusLabel(把 route 状态算成标签变体与文案)、:205 directPersistedTestResult(参数不匹配时回 null 使状态回落)、:787 testStatus(顶层连通态)、:151 TestMessage(连通徽章)、isModelUnderEndpointTest(把单 endpoint test 的 model 动画收窄到有活动原子 probe 信号的 route);model-probe-runner.ts hasActiveAtomicProbeSignal(定义 route status=testing 或后端 llm_probe_active active_model_ids 命中才算可动画的原子 probe 信号);目标复用 LLM Roles 已有 6 态组件 provider-state-badge.tsx(ready/historical_ready/untested/cooling_down/failed/off 色映射)。",
     "duties": [
       "按参数指纹取后端缓存的测试结果(经 provider-utils 的 providerCachedTestResult),指纹对不上就视为无结果、状态回落 untested/not_configured。",
       "第三方卡渲染顶层一个连通徽章(TestMessage),官方卡每条 route 渲染一个彩色 Tag,信后端权威态。",
       "把状态映射成标签颜色/文案变体(routeStatusTagVariant/routeStatusLabel),让用户一眼看出 verified/failed/testing 等。",
+      "动画归属也属于状态投影:单 endpoint 格子被测试时,endpoint 标签可显示 testing 动画;model chip 只有该 route 自身有活动原子信号（route status=testing 或后端 llm_probe_active active_model_ids 命中）才挂 border-flow,不能因为属于同一个 endpoint 就全体转。",
       "目标态:迁到后端 6 态 ui_state DTO,补齐蓝态 historical_ready(以前联通过)与 cooling_down(熔断倒计时),并复用 LLM Roles 的 6 态色映射保证三页同色。",
       "结果除 toast 外常驻 inline 写在 key/Base URL 旁(§1.4),只读渲染、不持第二份真相。"
     ],

@@ -433,10 +433,11 @@ export function useSettingsPageController(): SettingsPageController {
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [pendingAddProviderDraft, setPendingAddProviderDraft] = useState<ProviderDraft | null>(null)
   const [providerTestingActions, setProviderTestingActions] = useState<Record<string, ProviderDraft["testingAction"]>>({})
-  // Item 2 follow-up: which single endpoint id (if any) is the current
-  // provider-level test scoped to. null/absent = whole-card test (every
-  // endpoint tag spins); a specific id = only that tag spins.
+  // Item 2 follow-up: which endpoint id is currently being tested. The full
+  // card Test updates this per endpoint as the loop advances, so progress never
+  // falls back to "everything under the provider is spinning".
   const [providerTestingEndpointIds, setProviderTestingEndpointIds] = useState<Record<string, string | null>>({})
+  const [activeProbeModelIdsByEndpoint, setActiveProbeModelIdsByEndpoint] = useState<Record<string, string[]>>({})
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
   const [rolesError, setRolesError] = useState<string | null>(null)
@@ -467,10 +468,16 @@ export function useSettingsPageController(): SettingsPageController {
     return displayDrafts.map((draft) => {
       const testingAction = providerTestingActions[draft.id] ?? null
       return testingAction
-        ? { ...draft, isTesting: true, testingAction, testingEndpointId: providerTestingEndpointIds[draft.id] ?? null }
-        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null }
+        ? {
+          ...draft,
+          isTesting: true,
+          testingAction,
+          testingEndpointId: providerTestingEndpointIds[draft.id] ?? null,
+          testingModelIdsByEndpoint: activeProbeModelIdsByEndpoint,
+        }
+        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null, testingModelIdsByEndpoint: activeProbeModelIdsByEndpoint }
     })
-  }, [drafts, pendingAddProviderDraft, providerTestingActions, providerTestingEndpointIds])
+  }, [activeProbeModelIdsByEndpoint, drafts, pendingAddProviderDraft, providerTestingActions, providerTestingEndpointIds])
 
   useEffect(() => {
     return () => {
@@ -648,11 +655,23 @@ export function useSettingsPageController(): SettingsPageController {
       refetchRolesFromEvent()
       return
     }
-    // Roles tab not opened yet: don't drop the event — mark dirty so the lazy
+    // Roles tab not opened yet: mark dirty so the lazy
     // load refetches fresh when the user first opens Roles/Copilot.
     console.info("phase=settings-event-refresh action=roles-marked-dirty reason=roles-not-loaded")
     rolesDirtyRef.current = true
   }, [refetchRolesFromEvent])
+
+  const handleLlmProbeActiveEvent = useCallback((event: { endpointId: string; activeModelIds: string[] }) => {
+    setActiveProbeModelIdsByEndpoint((current) => {
+      const next = { ...current }
+      if (event.activeModelIds.length > 0) {
+        next[event.endpointId] = event.activeModelIds
+      } else {
+        delete next[event.endpointId]
+      }
+      return next
+    })
+  }, [])
 
   const handleEventResync = useCallback(() => {
     refetchCredentialsFromEvent()
@@ -662,13 +681,14 @@ export function useSettingsPageController(): SettingsPageController {
   const { connectionLost } = useStudioEventStream({
     onRegistryChanged: refetchCredentialsFromEvent,
     onRolesChanged: handleRolesChangedEvent,
+    onLlmProbeActive: handleLlmProbeActiveEvent,
     onResync: handleEventResync,
   }, { enabled: apiReady })
 
   // A mutating settings action (delete / test / add) must never fire into an
   // unreachable backend: the request gets no response and surfaces a bare
   // "Backend unavailable" toast, and an optimistic delete removes the card
-  // before silently reverting. Gate every mutation on LIVE reachability —
+  // before silently reverting. Gate every mutation on LIVE reachability:
   // config resolved (apiReady) AND the event stream connected (!connectionLost).
   // When not reachable the action is refused with a clear "reconnecting"
   // message and the UI disables the buttons (see `backendReachable` in the
@@ -850,6 +870,15 @@ export function useSettingsPageController(): SettingsPageController {
     testingAction: ProviderDraft["testingAction"],
     testingEndpointId: string | null = null,
   ) {
+    if (!testingAction) {
+      const owner = providerDraftForAction(draftsRef.current, providerId)
+      const endpointIds = owner ? providerEndpointDraftsForAction(owner).map((endpointDraft) => endpointDraft.id) : [providerId]
+      setActiveProbeModelIdsByEndpoint((current) => {
+        const next = { ...current }
+        for (const endpointId of endpointIds) delete next[endpointId]
+        return next
+      })
+    }
     setProviderTestingActions((current) => {
       if (!testingAction) {
         const next = { ...current }
@@ -929,8 +958,8 @@ export function useSettingsPageController(): SettingsPageController {
     ))
   }
 
-  // Design §1.2 protocol matrix point 4: re-probe one (URL, protocol) cell NOW,
-  // bypassing the protocol_unsupported half-life gate — the affordance for
+  // Design protocol matrix point 4: re-probe one (URL, protocol) cell NOW,
+  // bypassing the protocol_unsupported half-life gate. This is the affordance for
   // "the provider may have started supporting this protocol today".
   async function forceReprobeEndpoint(endpointId: string) {
     if (!ensureBackendReachable()) return
@@ -995,7 +1024,7 @@ export function useSettingsPageController(): SettingsPageController {
     const isOfficial = inferProviderKind(draft) === "official"
     const allEndpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
     // Item 2: clicking one endpoint tag runs THIS SAME card-Test flow, only
-    // scoped to the one clicked (URL, protocol) endpoint — so the get-models
+    // scoped to the one clicked (URL, protocol) endpoint, so the get-models
     // probe and its per-step toast are identical to pressing Test, not a
     // separate lighter path with its own toast.
     const endpointDrafts = options.onlyEndpointId
@@ -1008,7 +1037,7 @@ export function useSettingsPageController(): SettingsPageController {
     const announcedBaseUrlSteps = new Set<string>()
     const reportedBaseUrlSteps = new Set<string>()
 
-    setProviderTesting(providerId, "models", options.onlyEndpointId ?? null)
+    setProviderTesting(providerId, "models", endpointDrafts[0]?.id ?? options.onlyEndpointId ?? null)
     const toastId = `get-models-${providerId}`
     toast.loading(
       isOfficial
@@ -1028,6 +1057,7 @@ export function useSettingsPageController(): SettingsPageController {
       for (let index = 0; index < endpointDrafts.length; index += 1) {
         const endpointDraft = endpointDrafts[index]
         if (!endpointDraft) continue
+        setProviderTesting(providerId, "models", endpointDraft.id)
         const baseUrlKey = comparableProviderBaseUrl(endpointDraft.base_url)
         const baseUrlStep = baseUrlStepByKey.get(baseUrlKey)
         if (baseUrlStep && !announcedBaseUrlSteps.has(baseUrlKey)) {

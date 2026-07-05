@@ -1,6 +1,6 @@
 import { useState, type ComponentProps } from "react"
-import { ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
-import type { SkillDetail } from "@/api/types"
+import { AlertTriangle, ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
+import type { LintError, SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
@@ -21,6 +21,7 @@ import {
 } from "@/lib/io-config"
 import { ioSchemaOf, parseFrontmatter, schemaObject } from "@/lib/io-declarations"
 import { errorMessage } from "@/utils/errors"
+import { lintErrorsForBoundary } from "../field-compile-errors"
 import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelBody, PanelFieldRow } from "./_shared/PanelSection"
@@ -44,6 +45,7 @@ interface InputPanelProps {
   selectedNode?: SelectedNode
   /** Which boundary pseudo-node is selected, so the panel scopes by role. */
   ioBoundary?: IoBoundarySelection
+  lintErrors?: LintError[] | null
   // F4: which saved test input feeds Predict/Run (wired through Workspace).
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
@@ -279,12 +281,50 @@ function ArtifactListRow({ row, perItemCount }: { row: ArtifactRow; perItemCount
   )
 }
 
+function boundaryDiagnosticLabel(error: LintError): string {
+  const parts = [error.field_path, error.error_code].filter((part): part is string => Boolean(part))
+  return parts.length > 0 ? `${parts.join(" - ")} - ${error.message}` : error.message
+}
+
+function BoundaryDiagnostics({
+  title,
+  errors,
+}: {
+  title: string
+  errors: readonly LintError[]
+}) {
+  if (errors.length === 0) {
+    return null
+  }
+  return (
+    <PanelFieldRow>
+      <Field>
+        <div className="flex items-center gap-1.5 text-destructive">
+          <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+          <YamlFieldLabel className="!text-destructive">{title}</YamlFieldLabel>
+        </div>
+        <div className="space-y-1">
+          {errors.map((error, index) => (
+            <FieldDescription
+              key={`${error.file ?? "boundary"}:${error.field_path ?? "field"}:${index}`}
+              className="rounded-md border border-destructive/35 bg-destructive/10 px-2 py-1 font-mono text-[11px] text-destructive"
+            >
+              {boundaryDiagnosticLabel(error)}
+            </FieldDescription>
+          ))}
+        </div>
+      </Field>
+    </PanelFieldRow>
+  )
+}
+
 export function InputPanel({
   skillId,
   workspaceRoot = null,
   skillDetail,
   selectedNode = null,
   ioBoundary = null,
+  lintErrors = null,
   selectedTestInputId = null,
   onSelectTestInput,
   onFileOpen,
@@ -297,6 +337,11 @@ export function InputPanel({
   const editSource = onFileOpen ? openSource : undefined
   const [inputConfigOpen, setInputConfigOpen] = useState(false)
   const [outputConfigOpen, setOutputConfigOpen] = useState(false)
+  const boundaryDiagnostics = role === "input-boundary"
+    ? lintErrorsForBoundary(lintErrors, "input")
+    : role === "output-boundary"
+      ? lintErrorsForBoundary(lintErrors, "output")
+      : []
 
   // Reconciled input fields (matched/available/missing), nested. For an interior
   // node this reconciles io.inputs against the upstream blackboard; for the Input
@@ -332,6 +377,7 @@ export function InputPanel({
             <FieldGroup>
               {scope.showInput ? (
                 <>
+                  <BoundaryDiagnostics title="Input diagnostics" errors={boundaryDiagnostics} />
                   <ExampleField title="Input" schema={view.inputSchema} relPath={view.relPath} onEdit={editSource} />
                   <PanelFieldRow>
                     <Collapsible open={inputConfigOpen} onOpenChange={setInputConfigOpen}>
@@ -381,7 +427,10 @@ export function InputPanel({
               ) : null}
 
               {scope.showOutput ? (
-                <ExampleField title="Output" schema={view.outputSchema} relPath={view.relPath} onEdit={editSource} />
+                <>
+                  <BoundaryDiagnostics title="Output diagnostics" errors={boundaryDiagnostics} />
+                  <ExampleField title="Output" schema={view.outputSchema} relPath={view.relPath} onEdit={editSource} />
+                </>
               ) : null}
 
               {scope.showArtifacts ? (

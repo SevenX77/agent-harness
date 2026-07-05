@@ -12,7 +12,7 @@
     "used_by": "Predict：#1（compile-pass 点亮 Predict）、#4（predict 成功推档 predict-pass 点亮 Run）、#5（灰禁原因提示）；Run：#6（predict-pass 才点亮 Run + handleRun 守卫）。",
     "boundary": "做：算档位、决定三按钮亮灰。不做：不发 predict/run 请求（那是 handlePredict/handleRun）、不做服务端门校验（content_hash 门在后端 predict_gate）、不持后端真相。",
     "reuse_note": "predict 首登记处；Run #6/#9 复用同一档位机；trace/golden 不直接用。",
-    "design_note": "现状 #5 缺『灰禁原因文字』——deriveButtons 只产 highlight/disabled，无门控可解释提示；目标在 CenterActionBar 据档位补『先通过上一步』旁注。",
+    "design_note": "符合设计：deriveButtons 产出 highlight/disabled，CenterActionBar 再用 shadcn Tooltip 给灰禁 Predict/Run 补『先通过上一步』的可解释提示。",
     "api": "无 —— 纯前端状态机；它驱动的请求（postPredictRun/startRun）由各自 handler 发。"
   },
   {
@@ -30,5 +30,21 @@
     "reuse_note": "predict 首登记处；Run 单次/批量复用。",
     "design_note": "符合 spec『输入是节点/run 配置，不是 predict/run 的独立议题』；路径式选已导入文件直接跑，已无旧 PredictInputDialog 弹窗。",
     "api": "GET 选中测试输入文件 content（经 client.ts），再随 POST /runs/predict 或 POST /runs 发出。"
+  },
+  {
+    "name": "执行诊断抽屉（CompileErrorDrawer kind=compile/predict）",
+    "kind": "共享 UI 模块（shadcn Sheet 底部抽屉）",
+    "what": "把编译或试飞失败的诊断列表固定展示在屏幕底部，替代只靠短暂 toast 承载细节；标题、复制按钮 aria-label、data-slot 会随 kind 切成 compile 或 predict。",
+    "where": "CompileErrorDrawer（components/studio/CompileErrorDrawer.tsx）；Predict 接入点在 Workspace.tsx 的 handlePredict catch / status!=='success' 分支。",
+    "duties": [
+      "展示错误数量、定位信息、severity、message/error_code。",
+      "支持 Copy all errors，一次复制完整诊断文本。",
+      "Predict 请求失败时展示 Backend unavailable 等 fatal 合成诊断；业务失败时展示 path_diff 合成诊断；compile_failed 响应时保留后端 errors。"
+    ],
+    "used_by": "Compile：手动 Compile 失败详情；Predict：#4 请求失败/业务失败详情。",
+    "boundary": "做：呈现和复制诊断。不做：不解释业务成功条件、不发请求、不修正后端返回形状。",
+    "reuse_note": "Predict 复用 Compile 的抽屉视觉与交互，只通过 kind 切文案和测试定位，避免新造一套错误面板。",
+    "design_note": "符合 UI 规范：详情走 Sheet/抽屉，toast 只保留摘要；错误色使用语义 token，不硬编码颜色。",
+    "api": "无直接 API；消费 Workspace 从 postPredictRun 成功/失败分支归一化出的 CompileError[]。"
   }
 ]

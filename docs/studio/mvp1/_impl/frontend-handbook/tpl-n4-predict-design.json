@@ -72,21 +72,21 @@
       "module": "动作条 · Predict 触发与门控",
       "func": "设计：试飞成功后，前端把档位推进到 predict-pass、点亮 Run；同时后端把这次通过的 predict 绑定到当前编译产物的 content_hash 落盘，作为 Run 真跑的服务端前提——改了图 hash 变了，旧的 pass 判失效、必须重 predict。",
       "action": "无显式动作（predict 请求成功 resolve 后自动推档 predict-pass，Run 按钮随之点亮）。",
-      "fe_design": "正确设计：前端只在 predict『业务成功』时才推 predict-pass 解锁 Run——即 postPredictRun 返回体的 RunResult.success===true（path_diff 无缺失/多余/乱序、各 phase 通过），而非仅 HTTP 200。注意取 success 这个布尔字段、不是 status：引擎 RunResult（core/result.py）的 success 是真字段、会被 model_dump 序列化进响应，而 status 是 @property（由 success 派生）、不被 model_dump 序列化、响应里根本没有。判定要和后端一致：后端 record_predict_pass（把通过的 predict 绑编译 content_hash 落 last_predict.json）只在 result.success 为真时记录，供 Run 真跑的服务端门校验。前端 updateStage 推 predict-pass 后 deriveButtons 在该档点亮 Run；业务失败（success===false）则进 predict-fail 并显诊断（读 path_diff/phases）。设计意图：predict 认证的是『当前这张图』，且前端乐观态必须与后端门一致，不能 HTTP 成功就放行。",
+      "fe_design": "正确设计：前端只在 predict『业务成功』时才推 predict-pass 解锁 Run——即 postPredictRun 返回体的 PredictDiagnosticExport.status==='success'（它是 Studio sidecar 序列化出来的真 DTO 字段，和引擎 RunResult.success 等价），而非仅 HTTP 200。判定要和后端一致：后端 record_predict_pass（把通过的 predict 绑编译 content_hash 落 last_predict.json）只在 result.success 为真时记录，供 Run 真跑的服务端门校验。前端 updateStage 推 predict-pass 后 deriveButtons 在该档点亮 Run；业务失败（status!=='success'）或请求失败则进 predict-fail，保留 toast 摘要，并打开和 Compile 一致的底部诊断抽屉（CompileErrorDrawer kind=predict），展示 path_diff / compile_failed errors / Backend unavailable 等详细内容且支持一键复制。设计意图：predict 认证的是『当前这张图』，且前端乐观态必须与后端门一致，不能 HTTP 成功就放行；失败原因必须可追踪，而不是只在短暂 toast 里消失。",
       "fe_modules": [
         { "name": "构建档位门控（deriveBuildStage + deriveButtons）" }
       ],
       "be_contract": [
         {
           "endpoint": "POST /api/skills/{id}/runs/predict",
-          "purpose": "返回 RunResult.model_dump（含 success/phases/path_diff 真字段；status 是 @property、不序列化、响应里没有）；业务成功（success===true）后端才 record_predict_pass 绑 content_hash，作为 Run 服务端门的事实源。前端须读 success 判成功，不能只看 HTTP 200。",
+          "purpose": "返回 PredictDiagnosticExport（含 status/phases/path_diff 真字段）；业务成功（status==='success'，等价于引擎 result.success===true）后端才 record_predict_pass 绑 content_hash，作为 Run 服务端门的事实源。前端须读 status 判成功，不能只看 HTTP 200。",
           "mechanism_ref": "n4_predict_mech",
           "iface_ref": "iface-predict-0"
         }
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：handlePredict（Workspace.tsx:929，Workspace 里发起试飞的回调）现按业务成功门控——`if (predict.status !== \"success\")` 进 predict-fail（清 🟡、弹带 path_diff 的错误 toast）并 return，只有 status==='success' 才走 updateStage('predict-pass') 点亮 Run（Workspace.tsx:949）。原『契约问题：success 不透出』已消解：predict 端点返回真序列化 DTO PredictDiagnosticExport（Studio sidecar 的诊断导出对象，runs.py:63 response_model + diagnostic_export.py:15-20 构建），其 status 是 models/runs.py:67 声明的具体字段 Literal['success','failed']（不是不序列化的 @property），且 status⟺success 等价（core/result.py:73 success 布尔 + :146-148 status @property 由 success 派生），所以前端读 predict.status 既正确又拿得到。后端门一致：predictor.py:145-151 record_predict_pass 仅 result.success 才记录。测试：Workspace.test.tsx:686-707（HTTP200 status='failed' 缺 'review' → predict-fail 无成功 toast）、:709-724（status='success' → predict-pass）。",
+      "gap_brief": "符合设计（2026-07-04 代码核实）：handlePredict 按业务成功门控——`if (predict.status !== \"success\")` 进 predict-fail（清 🟡、保留 toast 摘要、打开 Predict 诊断抽屉）并 return，只有 status==='success' 才走 updateStage('predict-pass') 点亮 Run。请求异常同样进 predict-fail，并把 Error('Backend unavailable') 或后端 compile_failed errors 规范化成 CompileError[] 交给 CompileErrorDrawer(kind='predict') 展示。原『契约问题：success 不透出』已消解：predict 端点返回真序列化 DTO PredictDiagnosticExport，其 status 是具体字段 Literal['success','failed']，且 status⟺success 等价，所以前端读 predict.status 既正确又拿得到。后端门一致：record_predict_pass 仅 result.success 才记录。测试覆盖：HTTP200 status='failed' 不点亮 Run、status='success' 点亮 Run、Predict 请求失败打开底部详情抽屉。",
       "impl_ref": "fn-4"
     },
     {

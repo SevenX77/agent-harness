@@ -2,7 +2,7 @@
  "id": "n4_predict_impl",
  "title": "Predict 试飞 · 实施详情",
  "design_ref": "n4_predict_design",
- "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）已接实且符合设计（spec 把 onPredict 标『桩』已过时）。两处偏差需修前端：#4 predict-pass 解锁 Run——handlePredict 只按 HTTP 成功放行、未读 RunResult.success，会把业务失败的 predict 误放行（真 Run 又被服务端门 409）；#5 门控对用户哑（灰禁按钮无原因文字）。",
+ "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）、predict-pass 解锁 Run（#4）、灰禁原因提示（#5）均已接实且符合设计；2026-07-04 追加修正 #4 失败诊断：Predict 失败不再只停留在短暂 toast，而是复用 CompileErrorDrawer 打开底部详情抽屉，展示 Backend unavailable / path_diff / compile_failed errors 等可复制诊断。",
  "functions": [
   {
    "n": 1,
@@ -35,10 +35,10 @@
    "n": 4,
    "cap": "predict-pass-unlock-run",
    "design_ref": "n4-atom-4",
-   "current": "现状：偏差（前端乐观放行）。Workspace.tsx 的 handlePredict 只 await postPredictRun 的 HTTP 成功就 updateStage('predict-pass') 点亮 Run，未检查返回体 RunResult.success；catch 才进 predict-fail。后端 routers/runs.py 的 predict_run 返回 result.model_dump(mode='json')（HTTP 200）——引擎 RunResult（core/result.py）的 success 是真布尔字段、会序列化进响应；status 是 @property、不被 model_dump 序列化、响应里没有。predictor.py 的 _persist_predict_result 仅当 result.success 才 record_predict_pass。",
-   "gap": "差距：前端把『业务成功』与『HTTP 成功』混了。① client.ts 的 PredictRunResponse 类型当前声明的是可选 `status?`（运行时永远不出现、因为 RunResult.status 不序列化）、且没声明 success——要改成声明 `success?: boolean`（真字段）+ phases/path_diff，别保留没用的 status；② handlePredict 只在 RunResult.success===true 时进 predict-pass，success===false 进 predict-fail 并显诊断（path_diff/phases）。否则 HTTP200-业务失败的 predict 会被前端误放行，真 Run 又被服务端门 409 RUN_REQUIRES_PREDICT。",
+   "current": "现状：已实现且符合。Workspace.tsx 的 handlePredict 只在 postPredictRun 返回 PredictDiagnosticExport.status==='success' 时 updateStage('predict-pass') 点亮 Run；status!=='success' 时清掉旧的 logic-OK 节点、进 predict-fail、保留 toast 摘要，并把 path_diff 规范化成 CompileError[] 打开 CompileErrorDrawer(kind='predict')。请求失败也进同一条诊断链：compile_failed errors 会原样进入抽屉；网络/sidecar 不可达会被 client.ts 统一折叠成 Error('Backend unavailable')，前端把它作为 fatal predict error 展示在抽屉里。后端 predict pass 仍只在 result.success 为真时记录，前后端门一致。",
+   "gap": "符合设计，无需改。注意：Backend unavailable 这类错误没有后端响应体，当前可展示的详细内容就是 API 层保留下来的错误语义；本页要求它进入持久可复制抽屉，而不是只出现在 toast。",
    "fe_status": "符合",
-   "be_dep": "契约问题（DTO 投影）。后端 record_predict_pass/has_passing_predict（predict_gate.py）+ 服务端门已实现；缺口在 Studio sidecar 把 RunResult.success/phases/path_diff 投影给前端类型（PredictRunResponse 现未透出；success 已在 model_dump 响应里、status 是 @property 不序列化）。",
+   "be_dep": "已就绪可接。Studio sidecar 返回 PredictDiagnosticExport(status/phases/path_diff)；后端 record_predict_pass/has_passing_predict + 服务端 Run 门已实现且与前端 status 判定一致。",
    "fe_status_prev": "偏差",
    "fe_resync": "已修复并测试通过(batch1, 2026-06-20)"
   },
@@ -64,9 +64,9 @@
   },
   {
    "step": 2,
-   "what": "#4 predict-pass 按业务成功放行（偏差，需修前端）：① client.ts 的 PredictRunResponse 类型补 success/phases/path_diff（success 是 RunResult 真字段、已在 model_dump 响应里；status 是 @property 不序列化、不读它）；② handlePredict 只在 RunResult.success===true 时 updateStage('predict-pass')，success===false 进 predict-fail 显诊断。否则 HTTP200-业务失败的 predict 被误放行。",
-   "depends_on": "前端依赖 sidecar DTO 投影：PredictRunResponse 透出 success 等字段（缺口在 Studio sidecar 暴露层，引擎 RunResult 已产出 success）。",
-   "why": "前后端 predict 门必须一致：后端只在 result.success 才 record_predict_pass，前端却按 HTTP 成功放行 → 不一致。这是真功能缺陷、不是提示，与 #5 同批修。",
+   "what": "#4 predict-pass 按业务成功放行 + 失败详情抽屉：handlePredict 只在 PredictDiagnosticExport.status==='success' 时 updateStage('predict-pass')；status!=='success' 或请求失败时进入 predict-fail，toast 给摘要，CompileErrorDrawer(kind='predict') 给可复制详情。",
+   "depends_on": "前端依赖 sidecar DTO 投影：PredictDiagnosticExport 透出 status/phases/path_diff；网络不可达无响应体时依赖 client.ts 的 Backend unavailable 错误语义。",
+   "why": "前后端 predict 门必须一致，且失败原因要能停留在屏幕上供排查；toast 只能做摘要，不能承载完整诊断。",
    "block": "前端独立"
   },
   {
@@ -120,26 +120,29 @@
    ]
   },
   {
-   "covers": "#4 predict-pass-unlock-run（偏差 · RED 待转 GREEN）",
+   "covers": "#4 predict-pass-unlock-run + predict failure drawer",
    "atoms": [
     4
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED：mock postPredictRun 返回 HTTP 200 但 RunResult.success===false（path_diff 有缺失）→ 断言『前端不进 predict-pass、Run 仍灰』失败（现状误放行，待实现转 GREEN）。",
-    "实现后：success===true → 断言 updateStage(predict-pass) 点亮 Run；success===false → 断言进 predict-fail 并显诊断、Run 仍灰。",
-    "后端契约测：业务失败 predict 不写 last_predict.json（_persist_predict_result 不调 record_predict_pass）；成功才写、content_hash=当前编译 hash。"
+    "status==='success' → 断言 updateStage(predict-pass) 点亮 Run，并清空旧 predict 诊断。",
+    "status==='failed' 且 path_diff 有缺失/多余/乱序 → 断言进 predict-fail、Run 仍灰、toast 给摘要、CompileErrorDrawer(kind='predict') 打开并展示 expected/actual/missing/extra。",
+    "postPredictRun reject Error('Backend unavailable') → 断言进 predict-fail，底部抽屉标题为 '1 predict error'，详情含 Backend unavailable，且存在 'Copy all predict errors'。",
+    "后端契约测：业务失败 predict 不写 last_predict.json；成功才写、content_hash=当前编译 hash。"
    ],
    "layer2": [
-    "目标落地前对现状真跑取证：造一个 path_diff 不匹配的 predict（HTTP200、success=false），看前端是否误点亮 Run、真去 Run 是否被 409 拦。",
-    "落地后：业务失败 predict（success=false）后 Run 仍灰 + 显诊断；业务成功（success=true）后才点亮。改图重编后真去 Run 看服务端门是否要求重 Predict。"
+    "业务失败 predict（status='failed'）后 Run 仍灰 + 底部 predict 诊断抽屉可见；业务成功（status='success'）后才点亮 Run。",
+    "sidecar/backend 不可达时点 Predict：toast 显示 'Predict failed: Backend unavailable'，同时底部抽屉停留展示同一 fatal 诊断，可复制。",
+    "改图重编后真去 Run，看服务端门是否要求重 Predict。"
    ],
    "shots": [
-    "业务失败 predict（success=false）后 Run 仍灰 + 显诊断",
+    "业务失败 predict 后 Run 仍灰 + predict 诊断抽屉展示 path_diff 详情",
+    "Backend unavailable 后 toast 摘要 + predict 诊断抽屉展示可复制 fatal 详情",
     "业务成功后 Run 点亮；改图后需重 Predict"
    ],
    "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+   "fe_resync": "覆盖的功能点已全部符合(2026-07-04；追加 predict failure drawer 覆盖)"
   },
   {
    "covers": "#5 gating-reason-text（偏差 · RED 待转 GREEN）",

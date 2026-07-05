@@ -205,6 +205,141 @@ fn transient_ah_config_path(workspace_root: &Path) -> PathBuf {
 /// the single-quoted shell argument that carries it.
 const CLAUDE_MASTER_REPORT_PROMPT: &str = "用中文简短汇报当前状态(每点一行),然后停下等我:1) 你是谁 2) 当前工作目录 cwd 是什么、根据目录里的文件这是哪个 skill 3) 你能帮我做什么。";
 
+const STUDIO_AH_MANAGED_MARKER_PREFIX: &str = "<!-- studio-ah-managed hash:";
+const STUDIO_AH_MANAGED_MARKER_SUFFIX: &str = " -->";
+
+const DOMAIN_ANALYSIS_SKILL: &str =
+    include_str!("../../backend/app/prompts/skills/domain-analysis/SKILL.md");
+const GRAPH_DESIGN_SKILL: &str =
+    include_str!("../../backend/app/prompts/skills/graph-design/SKILL.md");
+const AGENT_PROMPT_DESIGN_SKILL: &str =
+    include_str!("../../backend/app/prompts/skills/agent-prompt-design/SKILL.md");
+const COMPILE_ERROR_REPAIR_SKILL: &str =
+    include_str!("../../backend/app/prompts/skills/compile-error-repair/SKILL.md");
+
+const MOIRAI_MASTER_RULES: &str = r#"# 你是 MoirAI（莫伊莱）
+
+你是命运三女神的合一形态：Clotho 纺线，Lachesis 量线，Atropos 剪线。你陪一条 skill 走完它的一生：从散落意图，到 graph 结构，到编译修复，再到 predict/run 后的终判。
+
+## 内部操作协议
+
+- 面向用户时只说 MoirAI、Clotho、Lachesis、Atropos；不要把 worker、slot、provider、派单这类脚手架词当成身份解释。
+- 先判断用户请求处在哪一段：需求澄清与设计、编译与修复、整体评估，或需要反问。
+- 需要设计时，把任务交给 Clotho；需要编译/修 bug 时，把任务交给 Lachesis；需要 predict/run、trace 观察和终判时，把任务交给 Atropos。
+- 调用三位女神时使用 ah 的内部协作命令；给用户只汇总结论、取舍、下一步，不转述内部流水账。
+- 不为了让错误消失而补丁式绕过；先定位坏状态为什么可能存在，再决定改哪一层。
+"#;
+
+const CLOTHO_RULES: &str = r#"# 你是 Clotho（克洛托）
+
+你是纺线的手。你的工作是把用户散落的意图整理成可落地的 graph skill 结构：边界、phase、DAG、io schema、确定性逻辑与 agent 判断的分工。
+
+## 内部操作协议
+
+- 先读全材料，再抽结构；不要凭行业常识脑补事实。
+- 输出先给结构，再给取舍：实体、流程、规则、术语、未决问题，以及这些内容如何映射到 graph。
+- phase 拆分必须能被验证；确定性逻辑优先落 Python/action，只有理解、判断、生成才交给 agent。
+- 设计不能停在口号；要落到 `GRAPH.md`、phase 目录、io schema 和后续可编译路径。
+- 交付给 Lachesis 前，明确哪些地方需要编译验证、哪些假设需要用户确认。
+"#;
+
+const LACHESIS_RULES: &str = r#"# 你是 Lachesis（拉刻西斯）
+
+你是量线的手。你的工作是把已经纺出的 skill 量准、修顺：编译、读错误码、定位根因、最小改动修复，并重新验证。
+
+## 内部操作协议
+
+- 先拿完整编译/lint 错误，不凭半截报错猜。
+- 以挂载的 skill 语法和 compile rules 为准，不靠记忆复述。
+- 读涉事文件全文，再改根因；三处命名、DAG、io schema、phase 模式文件、action 签名和 frontmatter 都要按契约量。
+- 一次只修一类根因；修完说明改了什么、为什么这是根因、下一轮还剩什么。
+- 不做兼容垫片、双格式读取、try/catch 吞坏状态或事后修数据。
+"#;
+
+const ATROPOS_RULES: &str = r#"# 你是 Atropos（阿特罗波斯）
+
+你是剪线的手。你的工作是整体评估：predict/run、观察 trace、对照 golden 或目标标准，给出终判，并把需要返工的方向送回 Clotho 或 Lachesis。
+
+## 内部操作协议
+
+- 先明确验收标准：用户要什么结果、哪些输出字段可比对、哪些失败是阻断。
+- 评估要基于真实运行、trace、输出和错误，而不是主观感觉。
+- 结论分为通过、需要设计返工、需要编译修复、需要用户补材料；不要把不确定包装成通过。
+- 发现结构性问题交回 Clotho；发现契约/编译/实现问题交回 Lachesis。
+- 给 MoirAI 的回报要短：证据、判断、下一步。
+"#;
+
+const EVAL_JUDGEMENT_SKILL: &str = r#"---
+name: eval-judgement
+description: 对 graph_skill 的 predict/run 结果做终判：读取输出、trace、错误与目标标准，给出通过/返工判断和下一步归因。
+---
+
+# Eval Judgement
+
+目标：把一次 skill 运行结果变成可执行的终判，而不是泛泛评价。
+
+## 流程
+
+1. 明确验收标准：用户目标、golden、io schema、关键输出字段和阻断条件。
+2. 读取真实证据：predict/run 输出、trace、错误、日志、生成文件差异。
+3. 分类结论：
+   - `pass`：满足验收标准，无阻断问题。
+   - `design_rework`：phase 拆分、DAG、io 或任务边界错了，交回 Clotho。
+   - `repair_needed`：编译、schema、action、prompt 稳定性或实现契约错了，交回 Lachesis。
+   - `needs_user_input`：缺材料或验收标准不明确。
+4. 输出短结论：证据、判断、归因、下一步。
+
+## 反模式
+
+- 没有运行证据就给通过。
+- 把多个根因混成一段散文。
+- 只说“效果不好”，不指出该回到设计、修复还是补材料。
+"#;
+
+struct StudioAhManagedFile {
+    relative_path: &'static str,
+    body: &'static str,
+}
+
+const STUDIO_AH_MANAGED_FILES: &[StudioAhManagedFile] = &[
+    StudioAhManagedFile {
+        relative_path: ".ah/rules/master.md",
+        body: MOIRAI_MASTER_RULES,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/rules/clotho.md",
+        body: CLOTHO_RULES,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/rules/lachesis.md",
+        body: LACHESIS_RULES,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/rules/atropos.md",
+        body: ATROPOS_RULES,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/skills/domain-analysis/SKILL.md",
+        body: DOMAIN_ANALYSIS_SKILL,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/skills/graph-design/SKILL.md",
+        body: GRAPH_DESIGN_SKILL,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/skills/agent-prompt-design/SKILL.md",
+        body: AGENT_PROMPT_DESIGN_SKILL,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/skills/compile-error-repair/SKILL.md",
+        body: COMPILE_ERROR_REPAIR_SKILL,
+    },
+    StudioAhManagedFile {
+        relative_path: ".ah/skills/eval-judgement/SKILL.md",
+        body: EVAL_JUDGEMENT_SKILL,
+    },
+];
+
 /// The command ah runs as the interactive master.
 ///
 /// - `IS_SANDBOX=1` lets `--dangerously-skip-permissions` run even when the WSL
@@ -219,18 +354,181 @@ fn claude_master_cmd() -> String {
     format!("IS_SANDBOX=1 claude --dangerously-skip-permissions '{CLAUDE_MASTER_REPORT_PROMPT}'")
 }
 
-fn transient_ah_config_content() -> String {
-    // ah v1 requires at least one agent; Studio only attaches the Claude master pane here.
+fn sha256_hex(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn studio_managed_marker(body: &str) -> String {
     format!(
-        "version = \"1\"\n\n[master]\nenabled = true\ncmd = \"{cmd}\"\nreadiness_timeout_s = 180\n\n[agents.studio]\nprovider = \"bash\"\n",
-        cmd = claude_master_cmd()
+        "{STUDIO_AH_MANAGED_MARKER_PREFIX}{}{}",
+        sha256_hex(body),
+        STUDIO_AH_MANAGED_MARKER_SUFFIX
     )
+}
+
+fn frontmatter_insert_offset(body: &str) -> Option<usize> {
+    if !body.starts_with("---\n") && !body.starts_with("---\r\n") {
+        return None;
+    }
+    let mut offset = 0;
+    let mut fence_count = 0;
+    for line in body.split_inclusive('\n') {
+        offset += line.len();
+        if line.trim_end_matches(&['\r', '\n'][..]) == "---" {
+            fence_count += 1;
+            if fence_count == 2 {
+                return Some(offset);
+            }
+        }
+    }
+    None
+}
+
+fn with_studio_managed_marker(body: &str) -> String {
+    let marker = studio_managed_marker(body);
+    if let Some(offset) = frontmatter_insert_offset(body) {
+        let (frontmatter, content) = body.split_at(offset);
+        return format!("{frontmatter}{marker}\n{content}");
+    }
+    format!("{marker}\n{body}")
+}
+
+fn extract_studio_managed_hash(content: &str) -> Option<&str> {
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let hash = trimmed.strip_prefix(STUDIO_AH_MANAGED_MARKER_PREFIX)?;
+        hash.strip_suffix(STUDIO_AH_MANAGED_MARKER_SUFFIX)
+    })
+}
+
+fn strip_studio_managed_marker(content: &str) -> String {
+    content
+        .split_inclusive('\n')
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with(STUDIO_AH_MANAGED_MARKER_PREFIX)
+                || !trimmed.ends_with(STUDIO_AH_MANAGED_MARKER_SUFFIX)
+        })
+        .collect()
+}
+
+fn studio_ah_file_path(workspace_root: &Path, relative_path: &str) -> PathBuf {
+    relative_path
+        .split('/')
+        .fold(workspace_root.to_path_buf(), |path, segment| {
+            path.join(segment)
+        })
+}
+
+fn write_studio_managed_file(path: &Path, body: &str) -> Result<(), String> {
+    if path.exists() {
+        if !path.is_file() {
+            return Err(format!(
+                "refusing to overwrite non-file ah path: {}",
+                path.display()
+            ));
+        }
+        let existing = std::fs::read_to_string(path).map_err(|error| {
+            format!(
+                "failed to read existing ah file {}: {error}",
+                path.display()
+            )
+        })?;
+        let previous_hash = extract_studio_managed_hash(&existing).ok_or_else(|| {
+            format!(
+                "refusing to overwrite unmanaged ah file: {}",
+                path.display()
+            )
+        })?;
+        let existing_body = strip_studio_managed_marker(&existing);
+        let actual_hash = sha256_hex(&existing_body);
+        if previous_hash != actual_hash {
+            return Err(format!(
+                "refusing to overwrite modified Studio-managed ah file: {}",
+                path.display()
+            ));
+        }
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("cannot resolve ah file parent: {}", path.display()))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create ah file dir {}: {error}", parent.display()))?;
+    std::fs::write(path, with_studio_managed_marker(body))
+        .map_err(|error| format!("failed to write ah file {}: {error}", path.display()))
+}
+
+fn prepare_studio_ah_workspace(workspace_root: &Path) -> Result<(), String> {
+    for file in STUDIO_AH_MANAGED_FILES {
+        let path = studio_ah_file_path(workspace_root, file.relative_path);
+        write_studio_managed_file(&path, file.body)?;
+    }
+    Ok(())
+}
+
+fn toml_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn studio_repo_root() -> PathBuf {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .join("..")
+        .join("..")
+        .join("..")
+        .canonicalize()
+        .unwrap_or_else(|_| manifest_dir.join("..").join("..").join(".."))
+}
+
+fn studio_ah_ro_bind_paths() -> Vec<PathBuf> {
+    let root = studio_repo_root();
+    [
+        root.join("docs/engine/mvp1"),
+        root.join("docs/mvp1-three-module-interface-design-and-changes-2026-06-11"),
+        root.join("apps/studio/backend/app/prompts/mounted"),
+        root.join("packages/graph-agent"),
+        root.join("docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md"),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .collect()
+}
+
+fn ah_config_path_literal(path: &Path) -> String {
+    if cfg!(target_os = "windows") {
+        windows_path_to_wsl(path)
+    } else {
+        path.display().to_string()
+    }
+}
+
+fn transient_ah_config_content() -> String {
+    let mut config = format!(
+        "version = \"1\"\n\n[master]\nenabled = true\ncmd = {cmd}\nreadiness_timeout_s = 180\n\n[agents.clotho]\nprovider = \"claude\"\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = \"claude\"\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = \"claude\"\nskills = [\"eval-judgement\"]\n",
+        cmd = toml_string(&claude_master_cmd())
+    );
+    config.push_str("\n[sandbox]\nadditional_ro_binds = [\n");
+    for bind in studio_ah_ro_bind_paths() {
+        let bind = ah_config_path_literal(&bind);
+        config.push_str("  ");
+        config.push_str(&toml_string(&bind));
+        config.push_str(",\n");
+    }
+    config.push_str("]\n");
+    config
 }
 
 fn ah_config_for_workspace(workspace_root: &Path) -> Result<PathBuf, String> {
     if let Some(config) = find_ah_config(workspace_root) {
         return Ok(config);
     }
+    prepare_studio_ah_workspace(workspace_root)?;
     let config = transient_ah_config_path(workspace_root);
     let parent = config
         .parent()
@@ -257,7 +555,10 @@ fn sh_single_quote(value: &Path) -> String {
 /// Translate a Windows path (`C:\Users\x\skill`) into the WSL mount path
 /// (`/mnt/c/Users/x/skill`) that ah + claude see from inside the distro.
 fn windows_path_to_wsl(path: &Path) -> String {
-    let slashed = path.display().to_string().replace('\\', "/");
+    let mut slashed = path.display().to_string().replace('\\', "/");
+    if let Some(stripped) = slashed.strip_prefix("//?/") {
+        slashed = stripped.to_string();
+    }
     let bytes = slashed.as_bytes();
     if slashed.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
         let drive = (bytes[0] as char).to_ascii_lowercase();
@@ -965,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn transient_ah_config_starts_claude_master() {
+    fn transient_ah_config_starts_moirai_team() {
         let config = transient_ah_config_content();
 
         assert!(config.contains("version = \"1\""));
@@ -976,8 +1277,117 @@ mod tests {
         assert!(config.contains(CLAUDE_MASTER_REPORT_PROMPT));
         assert!(!config.contains("--continue"));
         assert!(!config.contains("/remote-control"));
-        assert!(config.contains("[agents.studio]"));
-        assert!(config.contains("provider = \"bash\""));
+        assert!(!config.contains("[agents.studio]"));
+        assert!(config.contains("[agents.clotho]"));
+        assert!(config
+            .contains("skills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]"));
+        assert!(config.contains("[agents.lachesis]"));
+        assert!(config.contains("skills = [\"compile-error-repair\"]"));
+        assert!(config.contains("[agents.atropos]"));
+        assert!(config.contains("skills = [\"eval-judgement\"]"));
+        assert_eq!(config.matches("provider = \"claude\"").count(), 3);
+        assert!(config.contains("[sandbox]"));
+        assert!(config.contains("additional_ro_binds = ["));
+    }
+
+    #[test]
+    fn transient_ah_config_uses_wsl_paths_for_ro_binds_on_windows() {
+        let config = transient_ah_config_content();
+
+        if cfg!(target_os = "windows") {
+            assert!(config.contains("\"/mnt/"));
+            assert!(!config.contains(":\\"));
+        }
+    }
+
+    #[test]
+    fn generated_ah_config_prepares_moirai_workspace_files() {
+        let root = temp_path("moirai-workspace");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let config = ah_config_for_workspace(&root).expect("generated transient ah config");
+
+        assert!(config.is_file());
+        let master_rules = root.join(".ah").join("rules").join("master.md");
+        let clotho_rules = root.join(".ah").join("rules").join("clotho.md");
+        let domain_skill = root
+            .join(".ah")
+            .join("skills")
+            .join("domain-analysis")
+            .join("SKILL.md");
+        let eval_skill = root
+            .join(".ah")
+            .join("skills")
+            .join("eval-judgement")
+            .join("SKILL.md");
+
+        assert!(master_rules.is_file());
+        assert!(clotho_rules.is_file());
+        assert!(domain_skill.is_file());
+        assert!(eval_skill.is_file());
+        let master = std::fs::read_to_string(master_rules).unwrap();
+        assert!(master.contains("studio-ah-managed hash:"));
+        assert!(master.contains("MoirAI"));
+        let domain = std::fs::read_to_string(domain_skill).unwrap();
+        assert!(domain.starts_with("---\n"));
+        assert!(domain.contains("name: domain-analysis"));
+        assert!(domain.contains("studio-ah-managed hash:"));
+        let eval = std::fs::read_to_string(eval_skill).unwrap();
+        assert!(eval.contains("name: eval-judgement"));
+
+        let _ = std::fs::remove_dir_all(&root);
+        if let Some(parent) = config.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
+    }
+
+    #[test]
+    fn existing_ah_config_is_respected_without_generating_studio_files() {
+        let root = temp_path("user-ah-config");
+        let child = root.join("child");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(root.join("ah.toml"), "version = \"1\"\n").unwrap();
+
+        let config = ah_config_for_workspace(&child).expect("existing ah config");
+
+        assert_eq!(config, root.join("ah.toml"));
+        assert!(!root.join(".ah").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn generated_workspace_files_refuse_unmanaged_collisions() {
+        let root = temp_path("moirai-collision");
+        let rules = root.join(".ah").join("rules");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&rules).unwrap();
+        std::fs::write(rules.join("master.md"), "user-owned rules\n").unwrap();
+
+        let error = prepare_studio_ah_workspace(&root).expect_err("collision must fail");
+
+        assert!(error.contains("refusing to overwrite unmanaged ah file"));
+        assert!(error.contains("master.md"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn generated_workspace_files_refuse_modified_managed_files() {
+        let root = temp_path("moirai-modified-managed");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        prepare_studio_ah_workspace(&root).expect("initial managed files");
+        let master_rules = root.join(".ah").join("rules").join("master.md");
+        let mut edited = std::fs::read_to_string(&master_rules).unwrap();
+        edited.push_str("\nuser edit\n");
+        std::fs::write(&master_rules, edited).unwrap();
+
+        let error = prepare_studio_ah_workspace(&root).expect_err("modified managed file fails");
+
+        assert!(error.contains("modified Studio-managed ah file"));
+        assert!(error.contains("master.md"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1001,6 +1411,7 @@ mod tests {
             "/mnt/c/Users/Test User/skill"
         );
         assert_eq!(windows_path_to_wsl(Path::new(r"D:\a\b")), "/mnt/d/a/b");
+        assert_eq!(windows_path_to_wsl(Path::new(r"\\?\D:\a\b")), "/mnt/d/a/b");
     }
 
     #[test]
@@ -1011,9 +1422,7 @@ mod tests {
         );
 
         assert!(script.contains("WS='/mnt/c/Users/Test User/skill'"));
-        assert!(
-            script.contains("CFG='/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml'")
-        );
+        assert!(script.contains("CFG='/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml'"));
         // external-imports gate: repos whose root CLAUDE.md `@`-imports a file
         // outside the skill's cwd (e.g. this repo's AGENTS.md) would otherwise
         // block the master on an "Allow external CLAUDE.md file imports?" prompt.
@@ -1028,11 +1437,13 @@ mod tests {
 
     #[test]
     fn windows_launcher_runs_wsl_bash_payload() {
-        let script =
-            windows_claude_code_launcher_script("/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh");
+        let script = windows_claude_code_launcher_script(
+            "/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh",
+        );
 
-        assert!(script
-            .contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh'"));
+        assert!(
+            script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh'")
+        );
     }
 
     #[test]

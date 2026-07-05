@@ -15,8 +15,8 @@ skill 工作区里准备 MoirAI 三女神编排所需的 `.ah/rules` / `.ah/skil
 点按钮时发生的事:Studio 通过 [`ah`](https://github.com/SevenX77/ah)(agent
 hypervisor)在 **WSL2** 里拉起一个真正的 `claude` 交互会话,跑在你打开的那个
 skill 工作区里。若向上没有用户自己的 `ah.toml`,Studio 会生成 MoirAI 默认编排:
-ah 内部 `[master]` 槽位承载 MoirAI,agents = Clotho / Lachesis / Atropos,并把相关规则、skills、只读
-知识库挂载写好;若已经有用户 `ah.toml`,用户配置优先,Studio 不覆盖。随后 Studio
+ah 内部 `[master]` 槽位承载 MoirAI,agents = Clotho / Lachesis / Atropos,并把相关 rules / skills
+写进当前 skill 工作区;若已经有用户 `ah.toml`,用户配置优先,Studio 不覆盖。随后 Studio
 把一个终端窗口 attach 上去。所以点按钮之前,机器上得先有:
 WSL2 + 一个 Linux 发行版 + systemd + tmux + `claude` CLI + `ah` + 一次订阅登录。
 
@@ -119,8 +119,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 3. Studio 写一个临时 `ah.toml`:master 命令仍是
    `IS_SANDBOX=1 claude --dangerously-skip-permissions '<汇报提示>'`,agents 为
    Clotho / Lachesis / Atropos(provider 现阶段都用 `claude`),并通过
-   `[master].window_size = "follow"` 让 attach 窗口跟随终端尺寸,再通过
-   `[sandbox].additional_ro_binds` 挂载只读设计/实现资料。
+   `[master].window_size = "follow"` 让 attach 窗口跟随终端尺寸。Studio 默认不写
+   `[sandbox].additional_ro_binds`:当前 ah 会把它落成 WSL 不接受的 user scope `BindReadOnlyPaths`,
+   导致 agent pane 启动失败。
 4. 最后写 WSL bash payload → 通过 `wsl.exe -e bash` 在**同一个会话**里
    `ah --config … start --wait` 然后 `exec ah attach master`(attach 顶住发行版,
    master 才不被 WSL 空闲回收)。

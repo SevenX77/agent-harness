@@ -491,52 +491,11 @@ fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn studio_repo_root() -> PathBuf {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .join("..")
-        .join("..")
-        .join("..")
-        .canonicalize()
-        .unwrap_or_else(|_| manifest_dir.join("..").join("..").join(".."))
-}
-
-fn studio_ah_ro_bind_paths() -> Vec<PathBuf> {
-    let root = studio_repo_root();
-    [
-        root.join("docs/engine/mvp1"),
-        root.join("docs/mvp1-three-module-interface-design-and-changes-2026-06-11"),
-        root.join("apps/studio/backend/app/prompts/mounted"),
-        root.join("packages/graph-agent"),
-        root.join("docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md"),
-    ]
-    .into_iter()
-    .filter(|path| path.exists())
-    .collect()
-}
-
-fn ah_config_path_literal(path: &Path) -> String {
-    if cfg!(target_os = "windows") {
-        windows_path_to_wsl(path)
-    } else {
-        path.display().to_string()
-    }
-}
-
 fn transient_ah_config_content() -> String {
-    let mut config = format!(
+    format!(
         "version = \"1\"\n\n[master]\nenabled = true\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = \"claude\"\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = \"claude\"\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = \"claude\"\nskills = [\"eval-judgement\"]\n",
         cmd = toml_string(&claude_master_cmd())
-    );
-    config.push_str("\n[sandbox]\nadditional_ro_binds = [\n");
-    for bind in studio_ah_ro_bind_paths() {
-        let bind = ah_config_path_literal(&bind);
-        config.push_str("  ");
-        config.push_str(&toml_string(&bind));
-        config.push_str(",\n");
-    }
-    config.push_str("]\n");
-    config
+    )
 }
 
 fn ah_config_for_workspace(workspace_root: &Path) -> Result<PathBuf, String> {
@@ -1305,8 +1264,11 @@ mod tests {
         assert!(config.contains("[agents.atropos]"));
         assert!(config.contains("skills = [\"eval-judgement\"]"));
         assert_eq!(config.matches("provider = \"claude\"").count(), 3);
-        assert!(config.contains("[sandbox]"));
-        assert!(config.contains("additional_ro_binds = ["));
+        assert!(!config.contains("[sandbox]"));
+        assert!(
+            !config.contains("additional_ro_binds"),
+            "ah 1.3.0 still maps additional_ro_binds to systemd-run --user --scope BindReadOnlyPaths, which WSL rejects"
+        );
     }
 
     fn assert_progressive_wikipedia_background(rules: &str, wikipedia_url: &str) {
@@ -1351,13 +1313,11 @@ mod tests {
     }
 
     #[test]
-    fn transient_ah_config_uses_wsl_paths_for_ro_binds_on_windows() {
+    fn transient_ah_config_omits_systemd_scope_ro_binds() {
         let config = transient_ah_config_content();
 
-        if cfg!(target_os = "windows") {
-            assert!(config.contains("\"/mnt/"));
-            assert!(!config.contains(":\\"));
-        }
+        assert!(!config.contains("additional_ro_binds"));
+        assert!(!config.contains("BindReadOnlyPaths"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server'
-import { act, createElement, type ReactNode } from 'react'
+import { act, createElement, useEffect, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
@@ -125,6 +125,8 @@ const mocks = vi.hoisted(() => ({
     onClose?: () => void
     controller?: unknown
   },
+  settingsPageMounts: 0,
+  settingsPageUnmounts: 0,
   settingsControllerHookCalls: 0,
   settingsController: { source: 'app-level-settings-controller' } as const,
 }))
@@ -341,6 +343,12 @@ vi.mock('./SettingsPage', () => ({
     onClose?: () => void
     controller?: unknown
   }) => {
+    useEffect(() => {
+      mocks.settingsPageMounts += 1
+      return () => {
+        mocks.settingsPageUnmounts += 1
+      }
+    }, [])
     mocks.settingsPageProps = props
     return <div data-testid="settings" data-initial-tab={props.initialTab} />
   },
@@ -431,6 +439,8 @@ describe('Workspace WS-1 local writer contracts', () => {
     toastMocks.warning.mockReset()
     mocks.panelsProps = null
     mocks.settingsPageProps = null
+    mocks.settingsPageMounts = 0
+    mocks.settingsPageUnmounts = 0
     mocks.settingsControllerHookCalls = 0
     mocks.graphCanvasProps = null
     mocks.centerActionBarProps = null
@@ -1310,10 +1320,9 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace()
 
     expect(mocks.settingsControllerHookCalls).toBeGreaterThan(0)
-    expect(document.body.querySelector('[data-testid="settings"]')).toBeNull()
   })
 
-  it('toggles the settings page off from the same toolbar button that opened it', () => {
+  it('keeps the settings page mounted while the toolbar opens and closes the dialog', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -1330,19 +1339,30 @@ describe('Workspace WS-1 local writer contracts', () => {
 
       const toggle = container.querySelector('[data-testid="settings-toggle"]')
       expect(toggle).not.toBeNull()
-      expect(document.body.querySelector('[data-testid="settings"]')).toBeNull()
+      const mountedSettings = document.body.querySelector('[data-testid="settings"]')
+      expect(mountedSettings).not.toBeNull()
+      expect(mocks.settingsPageMounts).toBe(1)
+      expect(mocks.settingsPageUnmounts).toBe(0)
+      expect(toggle?.getAttribute('aria-pressed')).toBe('false')
+      expect(document.body.style.pointerEvents).not.toBe('none')
 
       act(() => {
         toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
-      expect(document.body.querySelector('[data-testid="settings"]')).not.toBeNull()
+      expect(document.body.querySelector('[data-testid="settings"]')).toBe(mountedSettings)
       expect(mocks.settingsPageProps?.initialTab).toBe('general')
       expect(mocks.settingsPageProps?.controller).toBe(mocks.settingsController)
+      expect(mocks.settingsPageMounts).toBe(1)
+      expect(toggle?.getAttribute('aria-pressed')).toBe('true')
 
       act(() => {
         toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
-      expect(document.body.querySelector('[data-testid="settings"]')).toBeNull()
+      expect(document.body.querySelector('[data-testid="settings"]')).toBe(mountedSettings)
+      expect(mocks.settingsPageMounts).toBe(1)
+      expect(mocks.settingsPageUnmounts).toBe(0)
+      expect(toggle?.getAttribute('aria-pressed')).toBe('false')
+      expect(document.body.style.pointerEvents).not.toBe('none')
     } finally {
       act(() => {
         root.unmount()

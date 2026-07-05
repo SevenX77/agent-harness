@@ -8,7 +8,7 @@
       "n": 1,
       "cap": "open-settings-overlay",
       "design_ref": "atom-1",
-      "current": "现状:已实现且符合。Workspace(工作区根组件)持 settingsOpen 状态(useState),Toolbar(左侧竖排工具条)接收 settingsOpen/onSettingsToggle,onSettingsToggle 用 setSettingsOpen(open => !open) 把 Settings 齿轮做成 toggle;按钮带 aria-pressed=settingsOpen 并在打开态用 secondary 变体显示按下状态。Header(顶栏)的 onOpenSettings 仍是单向 setSettingsOpen(true),供 publish 缺配置等指引打开 Settings。settingsOpen=true 时,Workspace 只在画布区(canvas 这块 ResizablePanel)渲染 SettingsPage(壳层根组件)替换编辑器/图;再次点 Toolbar 齿轮置 false 后画布换回原工作区内容;左侧 Panels(文件树等工具面板)与右侧 Copilot 面板照常挂载——工作区不卸载。SettingsPage 不铺全屏 backdrop、不做 focus-trap,是有意的「非真 modal」。",
+      "current": "现状:已实现且符合。Workspace(工作区根组件)持 settingsOpen 状态(useState),Toolbar(左侧竖排工具条)接收 settingsOpen/onSettingsToggle,onSettingsToggle 用 setSettingsOpen(open => !open) 把 Settings 齿轮做成 toggle;按钮带 aria-pressed=settingsOpen 并在打开态用 secondary 变体显示按下状态。Header(顶栏)的 onOpenSettings 仍是单向 setSettingsOpen(true),供 publish 缺配置等指引打开 Settings。Settings controller(useSettingsPageController)在 Workspace 顶层随 skill workspace 挂载一次;SettingsPageView 放在 DialogContent forceMount 内,关闭时只由 data-closed:hidden 隐藏,不卸载 SettingsPageView / API Keys tab / roles/copilot 状态。再次点 Toolbar 齿轮只切换可见性,不会重建 Settings 树或重新触发已加载数据;左侧 Panels(文件树等工具面板)与右侧 Copilot 面板照常挂载——工作区不卸载。Settings Dialog 以 non-modal 方式 forceMount,关闭态不会遗留 body pointer-events:none;临时的 RoleNameDialog 不 forceMount,只在真正打开时挂载。DialogContent 显式 aria-describedby={undefined},避免 Radix 在结构化多 tab Settings 上误报缺少单一 Description。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_status": "n/a",
@@ -28,7 +28,7 @@
       "n": 3,
       "cap": "settings-tab-switch",
       "design_ref": "atom-3",
-      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 按它渲染对应 tab、导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)。按需加载用多个绑 activeTab 的 useEffect(React 副作用钩子):壳层挂载时先 getCredentials({hydrateSecrets:false}) 拉一次打码摘要快照;切到 api_keys 且未 hydrate 过(credentialsHydratedRef 这个标志为假)才首次 getCredentials() 取明文 hydrate;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉;窗口 focus 和 WebSocket 重连都不触发重拉。",
+      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 同时挂载 General / API Keys / LLM Roles / Copilot 四个 data-settings-tab-panel,只给非激活 panel 加 hidden,导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)切换可见性。按需加载用多个绑 activeTab 的 useEffect(React 副作用钩子):Settings 常驻挂载后先 getCredentials({hydrateSecrets:false}) 拉一次打码摘要快照;切到 api_keys 且未 hydrate 过(credentialsHydratedRef 这个标志为假)才首次 getCredentials() 取明文 hydrate;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉;关闭/重开 Settings、Settings 内切 tab 都不卸载已挂载内容,所以也不重复触发这些初始化。窗口 focus、WebSocket 重连、SWR stale remount/reconnect 都不触发重拉;STUDIO_TRUTH_SWR_CONFIG 关闭 focus/reconnect/stale remount revalidation。truth-sources、community-catalog-config、role-test-results、fixed-roles/fixed-role-status 这类只读启动数据在 client/llm 层做 cache + in-flight 去重,只有明确测试完成/保存/事件后才失效。只有首次无缓存加载、显式用户动作、或唯一真相源广播 registry_changed/roles_changed 才刷新。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -48,7 +48,7 @@
       "n": 5,
       "cap": "ws-registry-refresh",
       "design_ref": "atom-5",
-      "current": "现状:已实现且符合。SettingsPage 通过 useStudioEventStream(带退避重连和可观测日志的事件流 hook)连 wsUrl('/ws/events')(client.ts 里把相对路径拼成完整 WebSocket 地址的函数)。收到 registry_changed 才调用 getCredentials({hydrateSecrets:..., force:true}) 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿。WebSocket open/reconnect 只更新连接健康态和恢复订阅,不调用数据刷新回调。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。窗口 focus 已不再触发 registry 重拉。",
+      "current": "现状:已实现且符合。SettingsPage 通过 useStudioEventStream(带退避重连和可观测日志的事件流 hook)订阅事件;useStudioEventStream 是模块级单例 hub,Settings/Copilot 等多个订阅者共享同一条 wsUrl('/ws/events') WebSocket,不会因组件多处使用而开多条连接或重复分发刷新。收到 registry_changed 才调用 getCredentials({hydrateSecrets:..., force:true}) 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿。WebSocket open/reconnect 只更新连接健康态和恢复订阅,不调用数据刷新回调。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。窗口 focus 已不再触发 registry 重拉。",
       "gap": "✅ 本次已实施并通过两层测试,符合设计。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -58,7 +58,7 @@
       "n": 6,
       "cap": "ws-roles-refresh",
       "design_ref": "atom-6",
-      "current": "现状:已实现且符合。同一条 /ws/events WebSocket 里,收到 roles_changed 后如果 rolesDataRef.current 非空(即角色数据已加载过),就 Promise.all([getRoles({force:true}), getModelGroups({force:true})]) 重拉角色 + 模型组;如果角色数据尚未加载,只把 rolesDirtyRef 标记为 true,下次进入 LLM Roles / Copilot tab 时消费这个 dirty 标志并首次拉取。WebSocket open/reconnect 不触发角色重拉。后端侧 file_watcher 的 _handle_path 比对路径是角色文件就 broadcast roles_changed。",
+      "current": "现状:已实现且符合。同一条共享 /ws/events WebSocket 里,收到 roles_changed 后如果 rolesDataRef.current 非空(即角色数据已加载过),就 Promise.all([getRoles({force:true}), getModelGroups({force:true})]) 重拉角色 + 模型组;如果角色数据尚未加载,只把 rolesDirtyRef 标记为 true,下次进入 LLM Roles / Copilot tab 时消费这个 dirty 标志并首次拉取。WebSocket open/reconnect 不触发角色重拉;多个 useStudioEventStream 订阅者只复用同一个 socket hub。后端侧 file_watcher 的 _handle_path 比对路径是角色文件就 broadcast roles_changed。",
       "gap": "✅ 本次已实施并通过两层测试,符合设计。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -68,7 +68,7 @@
       "n": 7,
       "cap": "close-settings-overlay",
       "design_ref": "atom-7",
-      "current": "现状:已实现且符合。SettingsPageContent 标题栏的 X 按钮 onClick 调 onClose;SettingsPage 收到的 onClose 即 Workspace 传的 () => setSettingsOpen(false),把 settingsOpen 置 false → 画布区从 SettingsPage 换回编辑器/图,左右栏一直没动 → 无缝回工作区。即填即存语义下没有「未保存」确认;关闭不取消在途 PUT(debounce 保存的 in-flight 请求仍落地)。",
+      "current": "现状:已实现且符合。SettingsPageContent 标题栏的 X 按钮 onClick 调 onClose;SettingsPage 收到的 onClose 即 Workspace 传的 () => setSettingsOpen(false),把 settingsOpen 置 false → DialogContent 进入 data-closed:hidden,SettingsPageView 仍保持挂载,左右栏一直没动 → 无缝回工作区且下次打开沿用已加载状态。即填即存语义下没有「未保存」确认;关闭不取消在途 PUT(debounce 保存的 in-flight 请求仍落地)。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_status": "n/a",
@@ -119,7 +119,7 @@
     },
     {
       "step": 4,
-      "what": "#5 ws-registry-refresh + #6 ws-roles-refresh:把 SettingsPage 那条 /ws/events WebSocket 抽成带重连(指数退避:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter 全抖动;永久重试不设放弃上限,连不上就一直按封顶后的间隔重试)+ 可观测日志(连接 INFO / 断开重连 WARNING / 解析失败 ERROR)的逻辑;去掉两处空 catch 静默;连接/重连只恢复订阅、不重拉数据;registry_changed/roles_changed 才强制刷新对应真相;roles_changed 不被「角色未加载过」吞掉(标脏下次进 tab 重拉);配「连接不上」用户警告标志(放壳层顶栏 SettingsPageContent 标题栏、保存徽章 SaveStatusBadge 右侧;触发阈值:连续失败 ≥3 次 或 累计 >10s 仍未连上才显示,避免瞬断闪烁,重连成功立即消失)。",
+      "what": "#5 ws-registry-refresh + #6 ws-roles-refresh:把 SettingsPage 那条 /ws/events WebSocket 抽成模块级共享事件 hub,所有前端订阅者共用一条 WebSocket;hub 带重连(指数退避:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter 全抖动;永久重试不设放弃上限,连不上就一直按封顶后的间隔重试)+ 可观测日志(连接 INFO / 断开重连 WARNING / 解析失败 ERROR)的逻辑;去掉两处空 catch 静默;连接/重连只恢复订阅、不重拉数据;registry_changed/roles_changed 才强制刷新对应真相;roles_changed 不被「角色未加载过」吞掉(标脏下次进 tab 重拉);配「连接不上」用户警告标志(放壳层顶栏 SettingsPageContent 标题栏、保存徽章 SaveStatusBadge 右侧;触发阈值:连续失败 ≥3 次 或 累计 >10s 仍未连上才显示,避免瞬断闪烁,重连成功立即消失)。",
       "depends_on": "前端:重写这条 WebSocket 的连接/重连/事件分发。后端事件源(/ws/events + file_watcher)已就绪、不动。",
       "why": "#5/#6 共用同一条 WebSocket,必须一起改(分开改会互相踩同一段 effect);它修的是韧性(重连)+ 合规(logging 铁律去空 catch),独立于前三步、放最后做收口。",
       "block": "前端独立"
@@ -139,9 +139,10 @@
       "layer1": [
         "渲染 Workspace,模拟点 Toolbar 的 Settings 图标。",
         "断言 settingsOpen 置 true、画布区渲染 SettingsPage、Toolbar Settings 按钮 aria-pressed=true。",
-        "再次点同一个 Toolbar Settings 图标 → 断言 settingsOpen 置 false、SettingsPage 不再渲染、aria-pressed=false。",
+        "断言 SettingsPageContent 同时存在 general/api_keys/llm_roles/copilot 四个 data-settings-tab-panel,非激活 panel hidden。",
+        "再次点同一个 Toolbar Settings 图标 → 断言 settingsOpen 置 false、DialogContent 隐藏但 SettingsPageView 未卸载、aria-pressed=false。",
         "断言左侧 Panels 与右侧 Copilot 面板仍挂载(工作区不卸载)。",
-        "断言无全屏 backdrop / 无 focus-trap(非真 modal)。"
+        "断言无全屏 backdrop / 无 focus-trap(非真 modal),Settings 关闭后 document.body.style.pointerEvents 不会停在 none。"
       ],
       "layer2": [
         "进工作区,点左侧 Toolbar 底部 Settings 齿轮。",
@@ -191,7 +192,8 @@
         "渲染 SettingsPage,mock getCredentials/getRoles/getModelGroups。",
         "断言初始不拉 API Keys 凭证 hydration;切到 api_keys 才首次 getCredentials() 并 hydrate。",
         "断言切到 llm_roles/copilot 才首次拉 roles + model groups。",
-        "断言已加载过的 tab 再切回不重复拉。"
+        "断言已加载过的 tab 再切回不重复拉。",
+        "断言 SWR focus/reconnect/remount 不会重新拉取真相数据;truth-sources、community-catalog-config、role-test-results、fixed-roles/fixed-role-status 并发读取只打一条请求,角色/端点测试完成后才失效 role-test-results cache。"
       ],
       "layer2": [
         "打开 Settings,依次点四个 tab,看内容切换。",
@@ -266,7 +268,7 @@
       "fe_status": "符合",
       "layer1": [
         "渲染 SettingsPage,点标题栏 X → 断言调 onClose、settingsOpen 置 false。",
-        "断言画布从 SettingsPage 换回编辑器/图,左右栏未卸载。",
+        "断言 Settings overlay 隐藏后回到编辑器/图,SettingsPageView 未卸载,左右栏未卸载。",
         "断言无未保存确认弹窗(即填即存);在途 PUT 不被取消。"
       ],
       "layer2": [

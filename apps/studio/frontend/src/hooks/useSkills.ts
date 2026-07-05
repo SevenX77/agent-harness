@@ -1,6 +1,7 @@
 import useSWR from 'swr'
 import { fetcher } from '../api/client'
 import type { SkillDetail } from '../api/types'
+import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
 
 // Only the per-skill DETAIL fetch remains. The old GET /skills LIST was retired:
 // the Home recent list renders from the local native-fs MRU (useRecentSkills),
@@ -13,7 +14,7 @@ export function useSkills(selectedSkillId: string | null) {
     data: skillDetail,
     error: skillDetailError,
     mutate: mutateSkillDetail,
-  } = useSWR<SkillDetail>(selectedSkillId ? `/skills/${selectedSkillId}` : null, fetcher)
+  } = useSWR<SkillDetail>(selectedSkillId ? `/skills/${selectedSkillId}` : null, fetcher, STUDIO_TRUTH_SWR_CONFIG)
 
   return {
     skillDetail,

@@ -23,6 +23,7 @@ import {
   workspacePathExists,
   writePublishPackage,
   writeWorkspaceFile,
+  resetCodeAssistantStatusCacheForTests,
 } from './tauri'
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -75,6 +76,7 @@ async function markRuntimeDegraded() {
 afterEach(async () => {
   vi.unstubAllGlobals()
   await resetRuntimeForTest()
+  resetCodeAssistantStatusCacheForTests()
   vi.clearAllMocks()
 })
 
@@ -235,6 +237,26 @@ describe('desktop shell helpers', () => {
     await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
 
     expect(mockInvoke).toHaveBeenCalledWith('code_assistant_status', {
+      workspaceRoot: '/tmp/workspace',
+    })
+  })
+
+  it('caches code assistant status per workspace until callers force a refresh', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke
+      .mockResolvedValueOnce({ claude: true, codex: false })
+      .mockResolvedValueOnce({ claude: false, codex: true })
+
+    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
+    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
+    await expect(getCodeAssistantStatus('/tmp/workspace', { force: true })).resolves.toEqual({ claude: false, codex: true })
+
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'code_assistant_status', {
+      workspaceRoot: '/tmp/workspace',
+    })
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'code_assistant_status', {
       workspaceRoot: '/tmp/workspace',
     })
   })

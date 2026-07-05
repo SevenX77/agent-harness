@@ -3,6 +3,7 @@ import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'ax
 import { api } from './client'
 import {
   getCredentials,
+  getNotableModels,
   getRegistry,
   getProviderModels,
   getRoles,
@@ -17,6 +18,8 @@ import {
   resetLlmApiCachesForTests,
   getRoleTestJob,
   startRoleTestJob,
+  getFixedRoleNames,
+  getFixedRoleStatus,
   syncVerifiedCommunityCatalog,
   testRole,
   testProviderModels,
@@ -193,6 +196,41 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
+  it('dedupes concurrent secret hydration and reuses hydrated secrets after a forced registry refresh', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      seen.push(`${config.method} ${config.url}`)
+      await Promise.resolve()
+      if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
+        return {
+          data: { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' },
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config,
+        }
+      }
+      return {
+        data: registry(),
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    const [first, second] = await Promise.all([getCredentials(), getCredentials()])
+    await getCredentials({ force: true })
+
+    expect(first.providers[0]?.api_key).toBe('sk-openrouter-real')
+    expect(second.providers[0]?.api_key).toBe('sk-openrouter-real')
+    expect(seen).toEqual([
+      'get /llm/registry',
+      'get /llm/registry/endpoints/openrouter-custom/secret',
+      'get /llm/registry',
+    ])
+  })
+
   it('reuses the registry snapshot for repeated reads until callers force a refresh', async () => {
     const seen: string[] = []
     api.defaults.adapter = adapter((config) => {
@@ -227,6 +265,50 @@ describe('API Keys v4 registry adapter', () => {
     await Promise.all([getRegistry(), getRegistry(), getRegistry()])
 
     expect(seen).toEqual(['get /llm/registry'])
+  })
+
+  it('dedupes fixed role metadata reads', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      seen.push(`${config.method} ${config.url}`)
+      await Promise.resolve()
+      return {
+        data: config.url === '/llm/fixed-roles'
+          ? { fixed_role_names: ['fast'] }
+          : { recommended_models: [{ canonical_id: 'claude-sonnet', display_name: 'Claude Sonnet' }] },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await Promise.all([getFixedRoleNames(), getFixedRoleNames()])
+    await Promise.all([getFixedRoleStatus('fast'), getFixedRoleStatus('fast')])
+    await getFixedRoleNames()
+    await getFixedRoleStatus('fast')
+
+    expect(seen).toEqual([
+      'get /llm/fixed-roles',
+      'get /llm/fixed-roles/fast',
+    ])
+  })
+
+  it('reuses notable model candidates by provider until callers force a refresh', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
+      return { notable_models: ['gpt-5'] }
+    })
+
+    await getNotableModels('openai')
+    await getNotableModels('openai')
+    await getNotableModels('openai', { force: true })
+
+    expect(seen).toEqual([
+      'get /llm/providers/notable-models?provider_key=openai',
+      'get /llm/providers/notable-models?provider_key=openai',
+    ])
   })
 
   it('reuses roles data until callers force a refresh', async () => {

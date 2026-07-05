@@ -29,6 +29,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 const APP_SETTINGS_SAVE_DELAY_MS = 300
 
+let appSettingsCache: AppSettings | null = null
+let appSettingsRequest: Promise<AppSettings> | null = null
+
 function withRuntimeDefaults(settings: AppSettings): AppSettings {
   if (settings.default_skills_directory.trim()) {
     return settings
@@ -47,18 +50,39 @@ export function appSettingsEqual(left: AppSettings, right: AppSettings) {
     && left.remote_model_catalog_enabled === right.remote_model_catalog_enabled
 }
 
-export async function loadAppSettings(): Promise<AppSettings> {
-  try {
-    return withRuntimeDefaults(await getAppSettings())
-  } catch (error) {
-    console.warn('Failed to load settings', error)
-    return withRuntimeDefaults(DEFAULT_APP_SETTINGS)
-  }
+export function resetAppSettingsCacheForTests(): void {
+  appSettingsCache = null
+  appSettingsRequest = null
+}
+
+export async function loadAppSettings(options: { force?: boolean } = {}): Promise<AppSettings> {
+  if (!options.force && appSettingsCache) return appSettingsCache
+  if (!options.force && appSettingsRequest) return appSettingsRequest
+
+  const request = getAppSettings()
+    .then((settings) => {
+      const nextSettings = withRuntimeDefaults(settings)
+      appSettingsCache = nextSettings
+      return nextSettings
+    })
+    .catch((error) => {
+      console.warn('Failed to load settings', error)
+      return withRuntimeDefaults(DEFAULT_APP_SETTINGS)
+    })
+    .finally(() => {
+      if (appSettingsRequest === request) {
+        appSettingsRequest = null
+      }
+    })
+
+  appSettingsRequest = request
+  return request
 }
 
 export async function saveAppSettings(settings: AppSettings): Promise<AppSettings> {
   try {
-    const saved = await updateAppSettings(settings)
+    const saved = withRuntimeDefaults(await updateAppSettings(settings))
+    appSettingsCache = saved
     toast.success('Settings saved')
     return saved
   } catch (error) {
@@ -108,6 +132,7 @@ export function useAppSettings() {
     setSaveStatus('saving')
     try {
       const saved = withRuntimeDefaults(await updateAppSettings(nextSettings))
+      appSettingsCache = saved
       if (!pendingSettingsRef.current) {
         setSaveStatus('saved')
         setLastSaveError(null)

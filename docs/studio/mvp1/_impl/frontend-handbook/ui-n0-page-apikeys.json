@@ -505,9 +505,9 @@
       "track": "共",
       "marker": "live",
       "module": "测试与模型探测",
-      "func": "Manual 面板自动拉该 provider 的「值得一试」候选 model id，作为输入框占位建议，降低手填门槛。",
-      "action": "无（Manual 面板挂载时自动拉取）。",
-      "fe_logic": "Manual 面板出现时自动按 provider 短名拉一份「值得一试」的 model id 列表 → 写进输入框的占位提示，帮用户少手敲。provider 短名由工具函数从 id/name/url 猜出。",
+      "func": "Manual 面板展开后拉该 provider 的「值得一试」候选 model id，作为输入框占位建议，降低手填门槛。",
+      "action": "用户展开 Manual model probing 面板；折叠/未使用时不拉取。",
+      "fe_logic": "Manual 面板展开时按 provider 短名拉一份「值得一试」的 model id 列表 → 写进输入框的占位提示，帮用户少手敲。provider 短名由工具函数从 id/name/url 猜出；前端按 provider_key 做缓存与 in-flight 去重，重复开合不反复打后端。",
       "fe_modules": [
         "provider-utils"
       ],

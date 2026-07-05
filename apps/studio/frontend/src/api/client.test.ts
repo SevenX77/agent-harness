@@ -9,9 +9,13 @@ import {
   createTestInput,
   deleteTestInput,
   fetchGoldenContent,
+  getCommunityCatalogConfig,
   getRelease,
+  getRoleTestResults,
   getResumeValidity,
+  getTruthSources,
   importIoIntoWorkspace,
+  invalidateRoleTestResultsCache,
   listReleases,
   prepareCopilotJudgeContext,
   postPredictRun,
@@ -25,6 +29,7 @@ import {
   startRun,
   writeSkillFile,
   wsUrl,
+  resetClientReadCachesForTests,
 } from './client'
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -64,6 +69,7 @@ describe('api client auth token', () => {
     tauriMocks.readWorkspaceFile.mockReset()
     tauriMocks.writeWorkspaceFile.mockReset()
     tauriMocks.deleteWorkspacePath.mockReset()
+    resetClientReadCachesForTests()
   })
 
   it('test_no_token_no_auth_header', async () => {
@@ -107,6 +113,58 @@ describe('api client auth token', () => {
     configureApiToken('a b')
 
     expect(wsUrl('/ws/events?cursor=1')).toBe('ws://localhost/ws/events?cursor=1&token=a%20b')
+  })
+
+  it('dedupes settings read-only bootstrap endpoints', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      seen.push(`${config.method} ${config.url}`)
+      await Promise.resolve()
+      return {
+        data: config.url === '/system/truth-sources'
+          ? { sections: [] }
+          : { manifest_url: 'https://example.test/manifest.json', signing_pubkey: 'pub' },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await Promise.all([getTruthSources(), getTruthSources()])
+    await Promise.all([getCommunityCatalogConfig(), getCommunityCatalogConfig()])
+    await getTruthSources()
+    await getCommunityCatalogConfig()
+
+    expect(seen).toEqual([
+      'get /system/truth-sources',
+      'get /system/community-catalog-config',
+    ])
+  })
+
+  it('dedupes role test result seed reads and refreshes after explicit invalidation', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      seen.push(`${config.method} ${config.url}`)
+      await Promise.resolve()
+      return {
+        data: { results: {} },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await Promise.all([getRoleTestResults(), getRoleTestResults()])
+    await getRoleTestResults()
+    invalidateRoleTestResultsCache()
+    await getRoleTestResults()
+
+    expect(seen).toEqual([
+      'get /llm/roles/test-results',
+      'get /llm/roles/test-results',
+    ])
   })
 
   it('test_compile_skill_posts_to_compile_endpoint', async () => {

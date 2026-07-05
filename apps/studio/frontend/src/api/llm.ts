@@ -604,7 +604,14 @@ let cachedRegistry: RegistryResponse | null = null
 let registryRequest: Promise<RegistryResponse> | null = null
 let cachedRolesData: RolesData | null = null
 let rolesRequest: Promise<RolesData> | null = null
+const notableModelsCacheByProvider: Partial<Record<string, NotableModelsResponse>> = {}
+const notableModelsRequestByProvider: Partial<Record<string, Promise<NotableModelsResponse>>> = {}
 const knownEndpointSecrets: Record<string, string> = {}
+const endpointSecretRequests: Partial<Record<string, Promise<EndpointSecretResponse>>> = {}
+let fixedRoleNamesCache: string[] | null = null
+let fixedRoleNamesRequest: Promise<string[]> | null = null
+const fixedRoleStatusCache: Partial<Record<string, FixedRoleStatus>> = {}
+const fixedRoleStatusRequests: Partial<Record<string, Promise<FixedRoleStatus>>> = {}
 const testResultCacheByEndpoint: Record<string, ProviderTestResult[]> = {}
 
 export function resetLlmApiCachesForTests(): void {
@@ -612,7 +619,14 @@ export function resetLlmApiCachesForTests(): void {
   registryRequest = null
   cachedRolesData = null
   rolesRequest = null
+  for (const providerKey of Object.keys(notableModelsCacheByProvider)) delete notableModelsCacheByProvider[providerKey]
+  for (const providerKey of Object.keys(notableModelsRequestByProvider)) delete notableModelsRequestByProvider[providerKey]
   for (const endpointId of Object.keys(knownEndpointSecrets)) delete knownEndpointSecrets[endpointId]
+  for (const endpointId of Object.keys(endpointSecretRequests)) delete endpointSecretRequests[endpointId]
+  fixedRoleNamesCache = null
+  fixedRoleNamesRequest = null
+  for (const roleName of Object.keys(fixedRoleStatusCache)) delete fixedRoleStatusCache[roleName]
+  for (const roleName of Object.keys(fixedRoleStatusRequests)) delete fixedRoleStatusRequests[roleName]
   for (const endpointId of Object.keys(testResultCacheByEndpoint)) delete testResultCacheByEndpoint[endpointId]
 }
 
@@ -1147,6 +1161,7 @@ function rememberEndpointSecret(endpointId: string, apiKey: string | null | unde
 
 function forgetEndpointSecret(endpointId: string): void {
   delete knownEndpointSecrets[endpointId]
+  delete endpointSecretRequests[endpointId]
 }
 
 function hydrateRegistryWithKnownSecrets<T extends CredentialRegistryResponse>(registry: T): T {
@@ -1437,6 +1452,8 @@ export async function syncVerifiedCommunityCatalog(): Promise<VerifiedCatalogSyn
   registryRequest = null
   cachedRolesData = null
   rolesRequest = null
+  for (const providerKey of Object.keys(notableModelsCacheByProvider)) delete notableModelsCacheByProvider[providerKey]
+  for (const providerKey of Object.keys(notableModelsRequestByProvider)) delete notableModelsRequestByProvider[providerKey]
   return response.data
 }
 
@@ -1446,9 +1463,20 @@ export async function getModelGroups(options: RegistryReadOptions = {}): Promise
 }
 
 export async function getEndpointSecret(endpointId: string): Promise<EndpointSecretResponse> {
-  const response = await api.get<EndpointSecretResponse>(`/llm/registry/endpoints/${segment(endpointId)}/secret`)
-  rememberEndpointSecret(endpointId, response.data.api_key)
-  return response.data
+  const knownSecret = knownEndpointSecrets[endpointId]
+  if (knownSecret !== undefined) return { endpoint_id: endpointId, api_key: knownSecret }
+  const inFlight = endpointSecretRequests[endpointId]
+  if (inFlight) return inFlight
+  const request = api.get<EndpointSecretResponse>(`/llm/registry/endpoints/${segment(endpointId)}/secret`)
+    .then((response) => {
+      rememberEndpointSecret(endpointId, response.data.api_key)
+      return response.data
+    })
+    .finally(() => {
+      delete endpointSecretRequests[endpointId]
+    })
+  endpointSecretRequests[endpointId] = request
+  return request
 }
 
 async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(registry: T): Promise<T> {
@@ -1456,6 +1484,10 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
     Object.entries(registry.provider_endpoints).map(async ([endpointId, endpoint]) => {
       if (endpoint.api_key !== redactedSecret) {
         return [endpointId, endpoint] as const
+      }
+      const knownSecret = knownEndpointSecrets[endpointId]
+      if (knownSecret !== undefined) {
+        return [endpointId, { ...endpoint, api_key: knownSecret }] as const
       }
       try {
         const secret = await getEndpointSecret(endpointId)
@@ -1796,11 +1828,29 @@ export async function testProviderEndpoint(
   return providerTestResponseFromEndpoint(endpoint, registry)
 }
 
-export async function getNotableModels(providerKey: string): Promise<NotableModelsResponse> {
-  const response = await api.get<NotableModelsResponse>(
-    `/llm/providers/notable-models?provider_key=${encodeURIComponent(providerKey)}`,
+export async function getNotableModels(
+  providerKey: string,
+  options: { force?: boolean } = {},
+): Promise<NotableModelsResponse> {
+  const normalizedProviderKey = providerKey.trim().toLowerCase()
+  if (!options.force && notableModelsCacheByProvider[normalizedProviderKey]) {
+    return notableModelsCacheByProvider[normalizedProviderKey]
+  }
+  if (!options.force && notableModelsRequestByProvider[normalizedProviderKey]) {
+    return notableModelsRequestByProvider[normalizedProviderKey]
+  }
+  const request = api.get<NotableModelsResponse>(
+    `/llm/providers/notable-models?provider_key=${encodeURIComponent(normalizedProviderKey)}`,
   )
-  return response.data
+    .then((response) => {
+      notableModelsCacheByProvider[normalizedProviderKey] = response.data
+      return response.data
+    })
+    .finally(() => {
+      delete notableModelsRequestByProvider[normalizedProviderKey]
+    })
+  notableModelsRequestByProvider[normalizedProviderKey] = request
+  return request
 }
 
 export async function testProviderModels(
@@ -1850,8 +1900,18 @@ export async function getRole(roleName: string): Promise<RoleEntry> {
 // 固定角色名(不可删除、不可改名:引擎 builtin 硬依赖如 `fast`,以及内置 copilot 角色)。
 // 前端据此隐藏删除/改名入口;后端删除端点亦拒删(409)。
 export async function getFixedRoleNames(): Promise<string[]> {
-  const response = await api.get<{ fixed_role_names: string[] }>('/llm/fixed-roles')
-  return response.data.fixed_role_names
+  if (fixedRoleNamesCache) return fixedRoleNamesCache
+  if (fixedRoleNamesRequest) return fixedRoleNamesRequest
+  const request = api.get<{ fixed_role_names: string[] }>('/llm/fixed-roles')
+    .then((response) => {
+      fixedRoleNamesCache = response.data.fixed_role_names
+      return response.data.fixed_role_names
+    })
+    .finally(() => {
+      if (fixedRoleNamesRequest === request) fixedRoleNamesRequest = null
+    })
+  fixedRoleNamesRequest = request
+  return request
 }
 
 export interface FixedRoleRecommendedModel {
@@ -1868,13 +1928,26 @@ export interface FixedRoleStatus {
 // 读到旧数据的竞态(拖了模型警告还不消失的老 bug)。
 export async function getFixedRoleStatus(roleName: string): Promise<FixedRoleStatus> {
   type BackendModel = { canonical_id: string; display_name: string }
-  const response = await api.get<{ recommended_models: BackendModel[] }>(`/llm/fixed-roles/${roleName}`)
-  return {
-    recommendedModels: response.data.recommended_models.map((model) => ({
-      canonicalId: model.canonical_id,
-      displayName: model.display_name,
-    })),
-  }
+  const cached = fixedRoleStatusCache[roleName]
+  if (cached) return cached
+  const inFlight = fixedRoleStatusRequests[roleName]
+  if (inFlight) return inFlight
+  const request = api.get<{ recommended_models: BackendModel[] }>(`/llm/fixed-roles/${roleName}`)
+    .then((response) => {
+      const status = {
+        recommendedModels: response.data.recommended_models.map((model) => ({
+          canonicalId: model.canonical_id,
+          displayName: model.display_name,
+        })),
+      }
+      fixedRoleStatusCache[roleName] = status
+      return status
+    })
+    .finally(() => {
+      delete fixedRoleStatusRequests[roleName]
+    })
+  fixedRoleStatusRequests[roleName] = request
+  return request
 }
 
 export async function putRoles(data: RolesData): Promise<RolesData> {

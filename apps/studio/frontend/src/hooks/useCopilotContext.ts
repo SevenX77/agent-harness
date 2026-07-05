@@ -4,6 +4,7 @@ import type { JsonValue } from '../api/types'
 import type { CopilotView } from '../types/copilot'
 
 const CONTEXT_THRESHOLD_BYTES = 65536
+const lastPostedContextByScope = new Map<string, string>()
 
 interface UseCopilotContextConfig {
   skillId: string | null
@@ -36,6 +37,10 @@ export function compactCopilotContext(context: Record<string, JsonValue>) {
   } satisfies Record<string, JsonValue>
 }
 
+export function resetCopilotContextPostCacheForTests(): void {
+  lastPostedContextByScope.clear()
+}
+
 export function useCopilotContext({
   skillId,
   view,
@@ -49,8 +54,13 @@ export function useCopilotContext({
     if (!skillId) {
       return undefined
     }
+    const scopeKey = `${skillId}\0${view}`
+    if (lastPostedContextByScope.get(scopeKey) === serialized) {
+      return undefined
+    }
 
     const timeout = window.setTimeout(() => {
+      lastPostedContextByScope.set(scopeKey, serialized)
       void api.post(`/skills/${skillId}/copilot/context`, {
         view,
         context: compactContext,

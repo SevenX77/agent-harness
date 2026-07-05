@@ -21,7 +21,7 @@
       ["选中 Subgraph 节点", "填子图 path / validator", "path 输入框 + 校验提示", "占位写 '/absolute/path'，但缺 path 找不到→标红→导入入口（F4 未落）"],
       ["面板底部 DetailRow 区", "只读看 Phase ID / Mode / Depends / Role / Tools / File", "辅助只读信息", "暴露 'Mode' 只读行，与 FROZEN「节点类型=文件名、非 mode 字段」口径矛盾，易误导用户以为 mode 可变"],
       ["frontmatter 解析失败", "看到 error + Open file", "明确报错 + 跳源文件修", "无：失败退路 live"],
-      ["Assets / Skill Files", "浏览当前 skill 文件夹下所有文件", "像传统 IDE Explorer 一样展示完整目录树，含隐藏文件（尤其 .worktree），窄栏仍可读", "无：Tauri 下走 native-fs 递归 workspaceRoot；浏览器态保留 skillDetail.files fallback；左侧栏加最小宽度"],
+      ["Assets / Skill Files", "浏览当前 skill 文件夹下所有文件", "像传统 IDE Explorer 一样展示目录树，含隐藏文件（尤其 .worktree），窄栏仍可读", "无：Tauri 下走 native-fs 先读 workspaceRoot 根目录，子目录展开时懒加载；浏览器态保留 skillDetail.files fallback；左侧栏加最小宽度"],
       ["Assets / Subgraphs", "收起/展开子图库，打开每个子图 path 指向的文件夹", "Subgraphs 可收到面板底部，展开后显示子图完整文件夹（含隐藏文件），而不是只显示连接状态", "无：Subgraphs 现为可折叠 FolderRow，resolved 子图递归读 path 文件夹；missing/migration 可选择文件夹写回 SUBGRAPH.md"]
     ]
   },
@@ -133,7 +133,7 @@
       "status": "ok",
       "problem": "已修：此前 Skill Files 只投影编译产物 files，无法保证看到整个 skill 文件夹和隐藏文件；Subgraphs 只显示是否 linked，不能像 IDE Explorer 一样收起并浏览子图目录。",
       "design": "02_authoring R5 / asset-explorer 口径：工程目录即真相，子图按 path 引用；Assets 面板负责文件浏览与未解析子图导入入口。产品要求：Skill Files 显示完整 skill 文件夹（含隐藏文件，尤其 .worktree）；Subgraphs 可折叠到底部，展开后显示每个子图完整文件夹（含隐藏文件）。",
-      "current": "AssetsPanel.tsx 在 Tauri runtime 下用 listWorkspaceDir 递归 workspaceRoot 构建真实文件树，隐藏文件不被过滤；浏览器态 fallback 到 skillDetail.files。Subgraphs 通过 subgraphMembership 取每个 SUBGRAPH phase 的 path/filePath，resolved path 下同样递归显示完整文件夹；missing/migration 状态可选择文件夹并写回该 phase 的 SUBGRAPH.md。Workspace.tsx 给左右侧栏加 min-w，FileRow/FolderRow 增 truncation/title，窄栏不再把关键内容挤没。",
+      "current": "AssetsPanel.tsx 在 Tauri runtime 下用 listWorkspaceDir 先读取 workspaceRoot 根目录，隐藏文件不被过滤，子目录展开时再懒加载；窗口 focus / visibilitychange 不触发整树刷新；浏览器态 fallback 到 skillDetail.files。Subgraphs 通过 subgraphMembership 取每个 SUBGRAPH phase 的 path/filePath，resolved path 下同样先显示根目录、展开子目录时再读；missing/migration 状态可选择文件夹并写回该 phase 的 SUBGRAPH.md。Workspace.tsx 给左右侧栏加 min-w，FileRow/FolderRow 增 truncation/title，窄栏不再把关键内容挤没。",
       "fix": "本轮已完成，无后续前端动作。",
       "auto": [
         "subgraph-membership.test.ts 覆盖 resolved/missing/migration-required、空白 path trim、filePath 派生。"

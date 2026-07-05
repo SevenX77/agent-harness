@@ -9,7 +9,7 @@
    "n": 16,
    "cap": "secret-hydration",
    "design_ref": "atom-16",
-   "current": "现状:已实现且符合。进 API Keys 页时初始加载走 getCredentials()(llm.ts,默认 hydrateSecrets=true),它先 getRegistry() 拿一份全量打码快照(每个 endpoint 的 api_key='**********'),再调 hydrateEndpointSecrets(llm.ts)逐个 endpoint 把掩码值换回真 key——只对 api_key 仍是掩码值的 endpoint 发 GET /registry/endpoints/{id}/secret(getEndpointSecret,llm.ts),换回的明文写进模块级本地缓存 knownEndpointSecrets(llm.ts,一个 endpointId→真 key 的字典)。下次拉快照时 cacheRegistry→hydrateRegistryWithKnownSecrets(llm.ts)会先用 knownEndpointSecrets 把已知 endpoint 的掩码就地换回,所以已 hydrate 过的 key 不会再打第二次 secret 请求。窗口聚焦不再重拉;registry_changed 事件或用户保存后的强制刷新才会走 getCredentials({force:true}) 更新快照。明文只活在前端本地缓存,从不写回后端。",
+   "current": "现状:已实现且符合。进 API Keys 页时初始加载走 getCredentials()(llm.ts,默认 hydrateSecrets=true),它先 getRegistry() 拿一份全量打码快照(每个 endpoint 的 api_key='**********'),再调 hydrateEndpointSecrets(llm.ts)逐个 endpoint 把掩码值换回真 key——只对 api_key 仍是掩码值的 endpoint 发 GET /registry/endpoints/{id}/secret(getEndpointSecret,llm.ts),换回的明文写进模块级本地缓存 knownEndpointSecrets(llm.ts,一个 endpointId→真 key 的字典)。getEndpointSecret 还按 endpointId 做 in-flight 去重,Settings 常驻初始化与 API Keys hydration 并发命中同一 endpoint 时只打一条 secret 请求。下次拉快照时 cacheRegistry→hydrateRegistryWithKnownSecrets(llm.ts)会先用 knownEndpointSecrets 把已知 endpoint 的掩码就地换回,所以已 hydrate 过的 key 不会再打第二次 secret 请求,即使 registry_changed 或保存后的 force refresh 拿到打码快照也优先复用本地已知真值。窗口聚焦不再重拉;registry_changed 事件或用户保存后的强制刷新才会走 getCredentials({force:true}) 更新快照。明文只活在前端本地缓存,从不写回后端。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /registry/endpoints/{id}/secret(scoped reveal 单 endpoint 明文)+ GET /registry 已实现;后端实施手册 D5.2 CredentialResolver(secret_handle/masked metadata,后端实施手册:455)已收口=ok,secret never leaves Gateway 的边界已立。"
@@ -122,7 +122,7 @@
    "n": 28,
    "cap": "notable-models",
    "design_ref": "atom-28",
-   "current": "现状:已实现且符合。ManualModelTestPanel 挂载时 useEffect(ManualModelTestPanel.tsx)按 notableProviderKey 自动调 getNotableModels(llm.ts)→GET /providers/notable-models?provider_key={key},拿到的 model id 列表写进输入框占位提示 modelIdPlaceholder(ManualModelTestPanel.tsx,挑 notableModels[index] 作 e.g. 例子)。provider 短名由前端 notableProviderKeyForDraft(provider-utils.ts,从 id/name/url 猜)推出。数据源是后端打包的静态推荐文件,纯读不写盘。",
+   "current": "现状:已实现且符合。ManualModelTestPanel(ManualModelTestPanel.tsx)保持折叠时不拉 notable-models;用户展开 Manual model probing 后才按 notableProviderKey 调 getNotableModels(llm.ts)→GET /providers/notable-models?provider_key={key},拿到的 model id 列表写进输入框占位提示 modelIdPlaceholder(ManualModelTestPanel.tsx,挑 notableModels[index] 作 e.g. 例子)。getNotableModels 在 api/llm.ts 按 provider_key 做前端缓存与 in-flight 去重,重复开合或同 provider 多处使用不会反复打后端;force:true 只给显式刷新使用。provider 短名由前端 notableProviderKeyForDraft(provider-utils.ts,从 id/name/url 猜)推出。数据源是后端打包的静态推荐文件,纯读不写盘。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /providers/notable-models?provider_key={key}(文档维护的「值得一试」列表)已实现,不分官/三、不走凭证存储。"
@@ -172,7 +172,7 @@
     "mock GET /registry 回 2 个 endpoint(api_key='**********')、mock GET secret 回真 key。",
     "断言 getCredentials() 后:每个掩码 endpoint 各发一次 secret 请求。",
     "断言卡里 api_key 为真值。",
-    "断言二次拉快照时已知 key 不再发 secret(knownEndpointSecrets 命中)。"
+    "断言并发 hydration 对同一 endpoint 只发一条 secret 请求,二次拉快照/force refresh 时已知 key 不再发 secret(knownEndpointSecrets 命中)。"
    ],
    "layer2": [
     "Real run (2026-07-05, worktree private sidecar + real Ark key): POST /api/llm/endpoints/ark-openai-official/test?force=true returned discovered_model_count=125, endpoint protocol=openai_compatible, status=verified, last_error_code=null, message='Generation verified via openai_compatible. Model: doubao-seed-2-0-pro-260215.'; Settings UI aria for OpenAI / ark.cn-beijing.volces shows Endpoint: ark-openai-official, Status: Connected, Routes: 125.",
@@ -455,7 +455,8 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "Manual 面板挂载 → 断言按 notableProviderKey 调 GET /providers/notable-models。",
+    "Manual 面板保持折叠 → 断言不调 GET /providers/notable-models。",
+    "展开 Manual 面板 → 断言按 notableProviderKey 首次调 GET /providers/notable-models,重复开合同 provider 走前端 cache。",
     "断言拿到的 model id 写进输入框 placeholder。"
    ],
    "layer2": [

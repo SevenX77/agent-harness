@@ -13,7 +13,7 @@ import {
   type RoleTestProviderResult,
   type RoleTestResponse,
 } from "@/api/llm"
-import { getRoleTestResults, type RoleTestResultsResponse } from "@/api/client"
+import { getRoleTestResults, invalidateRoleTestResultsCache, type RoleTestResultsResponse } from "@/api/client"
 
 /**
  * #46/#47 测试态 SSOT (spec §2.4 / 实施页 #46 落地细节):
@@ -235,8 +235,10 @@ export async function runRoleTest(
       throw new Error(job.message ?? "Role test failed")
     }
     await afterRoleTest?.()
+    invalidateRoleTestResultsCache()
     patchRole(roleName, { running: false, result: job.result, error: undefined, activeStatuses: undefined })
   } catch (error) {
+    invalidateRoleTestResultsCache()
     patchRole(roleName, {
       running: false,
       result: store[roleName]?.result,

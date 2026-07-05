@@ -3,7 +3,7 @@ import { toast } from "sonner"
 import { apiClientConfigChangedEvent, authenticatedApiReady } from "@/api/client"
 import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
-import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
+import { shouldApplyExternalRolesRefresh, useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
@@ -541,6 +541,8 @@ export function useSettingsPageController(): SettingsPageController {
       setRolesError(composeRequestErrorMessage(error, "Save failed"))
     },
   })
+  const rolesSaveStatusRef = useRef(rolesSaveStatus)
+  rolesSaveStatusRef.current = rolesSaveStatus
 
   useEffect(() => {
     if (!apiReady) return undefined
@@ -640,6 +642,10 @@ export function useSettingsPageController(): SettingsPageController {
   }, [])
 
   const refetchRolesFromEvent = useCallback(() => {
+    if (!shouldApplyExternalRolesRefresh(rolesSaveStatusRef.current)) {
+      rolesDirtyRef.current = true
+      return
+    }
     Promise.all([getRoles(), getModelGroups()])
       .then(([next, nextModelGroups]) => {
         setRolesData(next)

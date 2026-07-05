@@ -2,6 +2,7 @@
 import { act, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mutate } from "swr"
 import type { RolesData } from "@/api/llm"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
@@ -80,13 +81,56 @@ async function flushAutosave() {
 
 async function settleEffects() {
   await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
+    vi.runOnlyPendingTimers()
+    for (let i = 0; i < 8; i += 1) {
+      await Promise.resolve()
+    }
   })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 function emptyRoles(): RolesData {
   return { schema_version: 3, models: {}, providers: {}, roles: {} }
+}
+
+function rolesWithAnalystFallback(): RolesData {
+  return {
+    schema_version: 3,
+    providers: {},
+    models: {
+      "gpt-5": {
+        providers: ["ready:gpt-5"],
+        temperature: null,
+        max_tokens: null,
+      },
+    },
+    roles: {
+      analyst: {
+        role_kind: "graph",
+        model_fallback_enabled: true,
+        active_model: "gpt-5",
+        models: {
+          "gpt-5": { providers: ["ready:gpt-5"], temperature: null, max_tokens: null },
+        },
+        intent: {
+          provider_preference: "manual_order",
+          thinking: true,
+          max_output_tokens: 1234,
+          temperature: 0.7,
+        },
+        fallback_chain: [],
+      },
+    },
+  } as unknown as RolesData
 }
 
 function graphSkillDetail(graphMarkdown: string): SkillDetail {
@@ -129,8 +173,9 @@ function selectedAgentNode(): { id: string; data: SkillGraphNodeData } {
 }
 
 describe("PropertiesPanel autosave", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers()
+    await mutate("llm/roles", undefined, { revalidate: false })
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -316,7 +361,104 @@ describe("PropertiesPanel autosave", () => {
       max_output_tokens: null,
       temperature: null,
     })
-    expect(container.querySelector('[data-llm-node-params-save-status="saved"]')).not.toBeNull()
+    expect(container.querySelector('[data-llm-node-params-save-status]')).toBeNull()
+    expect(container.querySelector('[data-studio-panel-header="true"] [data-save-status="saved"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-save-status-badge="true"]')).toHaveLength(1)
+
+    act(() => root.unmount())
+  })
+
+  it("keeps the newest node params save queued while an older save is still in flight", async () => {
+    const first = deferred<{ enabled: true; thinking: null; max_output_tokens: null; temperature: null }>()
+    const second = deferred<{ enabled: true; thinking: null; max_output_tokens: number; temperature: null }>()
+    apiMocks.putNodeLlmParams
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    act(() => {
+      ;(container.querySelector("[data-llm-node-params-enabled]") as HTMLButtonElement).click()
+    })
+    await flushAutosave()
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledTimes(1)
+
+    setInputValue(container.querySelector("#node-max-output-review") as HTMLInputElement, "2048")
+    await flushAutosave()
+    expect(container.querySelector('[data-studio-panel-header="true"] [data-save-status="pending"]')).not.toBeNull()
+
+    await act(async () => {
+      first.resolve({ enabled: true, thinking: null, max_output_tokens: null, temperature: null })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[data-studio-panel-header="true"] [data-save-status="saved"]')).toBeNull()
+    expect(apiMocks.putNodeLlmParams.mock.calls[1]?.[2]).toEqual({
+      enabled: true,
+      thinking: null,
+      max_output_tokens: 2048,
+      temperature: null,
+    })
+
+    await act(async () => {
+      second.resolve({ enabled: true, thinking: null, max_output_tokens: 2048, temperature: null })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-studio-panel-header="true"] [data-save-status="saved"]')).not.toBeNull()
+
+    act(() => root.unmount())
+  })
+
+  it("renders custom model params as a title-row checkbox and shows inherited fallback values while disabled", async () => {
+    await mutate("llm/roles", rolesWithAnalystFallback(), { revalidate: false })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+
+    const paramsHeader = container.querySelector('[data-llm-node-params-header="true"]')
+    expect(paramsHeader?.textContent).toContain("Custom model params")
+    const customCheckbox = paramsHeader?.querySelector("[data-llm-node-params-enabled]")
+    expect(customCheckbox).not.toBeNull()
+    expect(container.querySelector('[data-llm-node-params-body="true"] [data-llm-node-params-enabled]')).toBeNull()
+
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("1,234")
+    expect(container.innerHTML).toContain(">35%<")
+    expect(container.querySelector("[data-llm-node-thinking]")?.getAttribute("aria-checked")).toBe("true")
+    expect(container.querySelector("[data-llm-node-thinking]")?.hasAttribute("disabled")).toBe(true)
 
     act(() => root.unmount())
   })

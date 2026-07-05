@@ -10,9 +10,13 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from graph_agent_gateway.registry.call_methods import (
+    ProviderProbeBackend,
+    apply_call_method_base_url,
+    provider_probe_backend_for_method,
+)
 from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderKind, ProviderRoute
 
-ProviderProbeBackend = Literal["ark", "claude", "deepseek", "gemini", "openai"]
 ProviderProbeStatus = Literal[
     "ok",
     "invalid_key",
@@ -24,18 +28,7 @@ ProviderProbeStatus = Literal[
     "timeout",
     "error",
 ]
-OfficialCallMethod = Literal[
-    "anthropic_messages",
-    "ark_anthropic_messages",
-    "ark_chat",
-    "ark_responses",
-    "deepseek_anthropic_messages",
-    "deepseek_chat_completions",
-    "gemini_generate_content",
-    "openai_completions",
-    "openai_chat_completions",
-    "openai_responses",
-]
+OfficialCallMethod = str
 
 
 class EndpointProbeResult(BaseModel):
@@ -503,7 +496,7 @@ async def _request_official_call_method_generation(
         )
     if method_id == "deepseek_anthropic_messages":
         return await client.post(
-            _deepseek_anthropic_messages_url(base_url),
+            _join_base_url_and_endpoint(apply_call_method_base_url(method_id, base_url), "/v1/messages"),
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
             json=_anthropic_messages_payload(
                 model_id, max_tokens, reasoning, content_as_blocks=True, multimodal=multimodal
@@ -511,7 +504,7 @@ async def _request_official_call_method_generation(
         )
     if method_id == "ark_anthropic_messages":
         return await client.post(
-            _ark_anthropic_messages_url(base_url),
+            _join_base_url_and_endpoint(apply_call_method_base_url(method_id, base_url), "/v1/messages"),
             headers={"Authorization": f"Bearer {api_key}", "anthropic-version": "2023-06-01"},
             json=_anthropic_messages_payload(
                 model_id, max_tokens, reasoning, content_as_blocks=True, multimodal=multimodal
@@ -969,34 +962,8 @@ def _ark_thinking_payload(reasoning: Mapping[str, Any]) -> dict[str, object] | N
     return {"type": "enabled" if _runtime_reasoning_enabled(reasoning) else "disabled"}
 
 
-def _deepseek_anthropic_messages_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/v1"):
-        normalized = normalized[:-3]
-    if normalized.endswith("/anthropic"):
-        return f"{normalized}/v1/messages"
-    return f"{normalized}/anthropic/v1/messages"
-
-
-def _ark_anthropic_messages_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/api/v3"):
-        normalized = normalized[: -len("/api/v3")]
-    if normalized.endswith("/api/compatible"):
-        return f"{normalized}/v1/messages"
-    return f"{normalized}/api/compatible/v1/messages"
-
-
 def _official_method_backend(method_id: OfficialCallMethod) -> ProviderProbeBackend:
-    if method_id.startswith("ark_"):
-        return "ark"
-    if method_id.startswith("deepseek_"):
-        return "deepseek"
-    if method_id.startswith("gemini_"):
-        return "gemini"
-    if method_id.startswith("anthropic_"):
-        return "claude"
-    return "openai"
+    return provider_probe_backend_for_method(method_id)
 
 
 def _url_hostname(raw_url: str) -> str:

@@ -1,0 +1,104 @@
+{
+  "_comment": "Gateway runtime truth for provider call methods. `wire_family` describes the request/response shape; `client_compatibility.anthropic_messages_client` answers whether a Claude/Anthropic Messages client can invoke the route directly. Unknown methods are not assumed incompatible unless listed here as incompatible.",
+  "methods": [
+    {
+      "method_id": "anthropic_messages",
+      "provider_backend": "claude",
+      "wire_family": "anthropic_messages",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "supported"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "ark_anthropic_messages",
+      "provider_backend": "ark",
+      "wire_family": "anthropic_messages",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "supported"},
+      "base_url_transform": "ark_anthropic_compatible",
+      "auth_token_env": "ANTHROPIC_AUTH_TOKEN"
+    },
+    {
+      "method_id": "deepseek_anthropic_messages",
+      "provider_backend": "deepseek",
+      "wire_family": "anthropic_messages",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "supported"},
+      "base_url_transform": "deepseek_anthropic",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "openrouter_anthropic_messages",
+      "provider_backend": "claude",
+      "wire_family": "anthropic_messages",
+      "official_probe": false,
+      "client_compatibility": {"anthropic_messages_client": "supported"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "ark_chat",
+      "provider_backend": "ark",
+      "wire_family": "openai_chat_completions",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "ark_responses",
+      "provider_backend": "ark",
+      "wire_family": "openai_responses",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "deepseek_chat_completions",
+      "provider_backend": "deepseek",
+      "wire_family": "openai_chat_completions",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "gemini_generate_content",
+      "provider_backend": "gemini",
+      "wire_family": "gemini_generate_content",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "openai_chat_completions",
+      "provider_backend": "openai",
+      "wire_family": "openai_chat_completions",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "openai_completions",
+      "provider_backend": "openai",
+      "wire_family": "openai_completions",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    },
+    {
+      "method_id": "openai_responses",
+      "provider_backend": "openai",
+      "wire_family": "openai_responses",
+      "official_probe": true,
+      "client_compatibility": {"anthropic_messages_client": "incompatible"},
+      "base_url_transform": "none",
+      "auth_token_env": null
+    }
+  ]
+}

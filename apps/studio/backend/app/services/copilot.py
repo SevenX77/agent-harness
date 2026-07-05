@@ -55,6 +55,9 @@ from app.core.adapters.gateway import (
     ProviderRoute,
     ResolvedRoute,
     VerifiedProfile,
+    apply_call_method_base_url,
+    call_method_auth_token_env,
+    call_method_ids_for_client,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.copilot import (
@@ -89,14 +92,7 @@ _FILE_PATH_KEYS = ("absolute_file_path", "file_path", "path")
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
-COPILOT_SDK_SUPPORTED_METHOD_IDS = frozenset(
-    {
-        "anthropic_messages",
-        "ark_anthropic_messages",
-        "deepseek_anthropic_messages",
-        "openrouter_anthropic_messages",
-    }
-)
+COPILOT_SDK_SUPPORTED_METHOD_IDS = call_method_ids_for_client("anthropic_messages_client")
 
 
 @lru_cache(maxsize=1)
@@ -1586,40 +1582,16 @@ def _resolve_route_runtime(
     except Exception as exc:
         raise ValueError(f"Endpoint {route.endpoint_id} is missing an API key") from exc
     api_key = _secret_value(secret).strip()
-    base_url = route.base_url.strip() or None
+    base_url = apply_call_method_base_url(route.call_method_id, route.base_url).strip() or None
     env_overrides: dict[str, str] = {}
-    if route.call_method_id == "ark_anthropic_messages":
-        # ark speaks anthropic via a compatibility base_url + a bearer AUTH_TOKEN.
-        # The model itself now rides the native options.model (see build_options),
-        # NOT an ANTHROPIC_MODEL env — so the two special call methods and every
-        # generic route convey the model the same single way.
-        base_url = _ark_anthropic_base_url(route.base_url)
-        env_overrides["ANTHROPIC_AUTH_TOKEN"] = api_key
-    elif route.call_method_id == "deepseek_anthropic_messages":
-        base_url = _deepseek_anthropic_base_url(route.base_url)
+    auth_token_env = call_method_auth_token_env(route.call_method_id)
+    if auth_token_env:
+        env_overrides[auth_token_env] = api_key
     return api_key, base_url, env_overrides
 
 
 def _secret_value(secret: SecretStr | str) -> str:
     return secret.get_secret_value() if isinstance(secret, SecretStr) else secret
-
-
-def _ark_anthropic_base_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/api/v3"):
-        normalized = normalized[: -len("/api/v3")]
-    if normalized.endswith("/api/compatible"):
-        return normalized
-    return f"{normalized}/api/compatible"
-
-
-def _deepseek_anthropic_base_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/v1"):
-        normalized = normalized[:-3]
-    if normalized.endswith("/anthropic"):
-        return normalized
-    return f"{normalized}/anthropic"
 
 
 def _error_event_for_exception(exc: Exception) -> CopilotEventError:

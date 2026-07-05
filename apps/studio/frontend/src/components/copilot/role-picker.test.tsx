@@ -73,6 +73,7 @@ function routeGroup(canonicalId: string, displayName: string): ModelGroup {
         capability_state: 'known',
         capabilities: {},
         call_method_id: 'anthropic_messages',
+        copilot_sdk_compatible: true,
       },
     ],
     status_summary: { ready: 1, historical_ready: 0, untested: 0, cooling_down: 0, failed: 0, off: 0 },
@@ -174,6 +175,7 @@ describe('copilotRoleOptions', () => {
       provider_models: [{
         ...routeGroup('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5').provider_models[0],
         call_method_id: 'openai_chat_completions',
+        copilot_sdk_compatible: false,
       }],
     }
     const settingsRoles: RolesData = {

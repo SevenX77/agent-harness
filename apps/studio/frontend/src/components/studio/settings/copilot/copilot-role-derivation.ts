@@ -7,63 +7,21 @@ import type {
   RolesData,
 } from '@/api/llm'
 
-/**
- * Claude Agent SDK routes must speak the Anthropic Messages wire shape. A
- * verified route-level call method is the strongest evidence. When the method
- * is still unknown, official candidate methods can keep a route testable; if
- * those are absent, endpoint protocol metadata is the remaining truth.
- */
-export const COPILOT_ANTHROPIC_MESSAGES_METHODS = [
-  'anthropic_messages',
-  'ark_anthropic_messages',
-  'deepseek_anthropic_messages',
-  'openrouter_anthropic_messages',
-] as const
-
 export type CopilotSdkId = 'claude-agent-sdk'
 
 export const COPILOT_SDK_ROUTE_REQUIREMENTS: Record<
   CopilotSdkId,
   {
-    supportedMethodIds: readonly string[]
-    supportedProtocols: readonly string[]
     requiredCapabilities: readonly string[]
   }
 > = {
   'claude-agent-sdk': {
-    supportedMethodIds: COPILOT_ANTHROPIC_MESSAGES_METHODS,
-    supportedProtocols: ['anthropic_compatible'],
     // The Claude Agent SDK probe uses a file-read tool loop. A route with a
     // verified negative tool capability cannot run Copilot even if its wire
     // protocol is Anthropic Messages compatible. Unknown stays visible so the
     // user can test it and turn the capability into evidence.
     requiredCapabilities: ['tools', 'tool_use'],
   },
-}
-
-function routeMethodId(route: ProviderModelOption | CopilotRoutePreview): string | null {
-  const methodId = 'methodId' in route
-    ? route.methodId
-    : (route as { call_method_id?: string | null }).call_method_id
-  return typeof methodId === 'string' ? methodId : null
-}
-
-function routeCandidateMethodIds(route: ProviderModelOption | CopilotRoutePreview): string[] {
-  const raw = 'candidateMethodIds' in route
-    ? route.candidateMethodIds
-    : (route as { candidate_call_method_ids?: unknown }).candidate_call_method_ids
-  return Array.isArray(raw)
-    ? raw.filter((methodId): methodId is string => typeof methodId === 'string' && methodId.length > 0)
-    : []
-}
-
-function routeProtocol(route: ProviderModelOption | CopilotRoutePreview): string | null {
-  if ('protocol' in route && typeof route.protocol === 'string') return route.protocol
-  return null
-}
-
-function normalizedProtocol(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 }
 
 function capabilityValue(
@@ -84,47 +42,29 @@ function capabilityExplicitlyUnsupported(value: unknown): boolean {
   return normalized === 'false' || normalized === 'unsupported' || normalized === 'no'
 }
 
+function routeBackendCopilotSdkCompatible(
+  route: ProviderModelOption | CopilotRoutePreview,
+): boolean | null {
+  const raw = 'copilotSdkCompatible' in route
+    ? route.copilotSdkCompatible
+    : (route as { copilot_sdk_compatible?: unknown }).copilot_sdk_compatible
+  return typeof raw === 'boolean' ? raw : null
+}
+
 export function routeSupportsAnthropicMessages(
   route: ProviderModelOption | CopilotRoutePreview,
 ): boolean {
-  const m = routeMethodId(route)
-  if (m && (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)) {
-    return true
-  }
-  const candidateMethods = routeCandidateMethodIds(route)
-  if (candidateMethods.some((methodId) => (
-    (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(methodId)
-  ))) {
-    return true
-  }
-  if (m || candidateMethods.length > 0) {
-    return false
-  }
-  const protocol = routeProtocol(route)
-  return protocol ? normalizedProtocol(protocol) === 'anthropic_compatible' : false
+  return routeBackendCopilotSdkCompatible(route) === true
 }
 
-function routeKnownMethodIds(route: ProviderModelOption | CopilotRoutePreview): string[] {
-  const m = routeMethodId(route)
-  return [
-    ...(m ? [m] : []),
-    ...routeCandidateMethodIds(route),
-  ]
-}
-
-export function routeMethodSetSupportsCopilotSdk(
+function routeMethodSetSupportsCopilotSdk(
   route: ProviderModelOption | CopilotRoutePreview,
-  sdkId: CopilotSdkId = 'claude-agent-sdk',
 ): boolean {
-  const requirements = COPILOT_SDK_ROUTE_REQUIREMENTS[sdkId]
-  const methodIds = routeKnownMethodIds(route)
-  if (methodIds.length > 0) {
-    return methodIds.some((methodId) => requirements.supportedMethodIds.includes(methodId))
+  const compatible = routeBackendCopilotSdkCompatible(route)
+  if (compatible !== null) {
+    return compatible
   }
-  const protocol = routeProtocol(route)
-  return protocol
-    ? requirements.supportedProtocols.includes(normalizedProtocol(protocol))
-    : false
+  return false
 }
 
 export function routeSupportsCopilotSdk(
@@ -132,7 +72,7 @@ export function routeSupportsCopilotSdk(
   sdkId: CopilotSdkId = 'claude-agent-sdk',
 ): boolean {
   const requirements = COPILOT_SDK_ROUTE_REQUIREMENTS[sdkId]
-  if (!routeMethodSetSupportsCopilotSdk(route, sdkId)) {
+  if (!routeMethodSetSupportsCopilotSdk(route)) {
     return false
   }
 
@@ -167,6 +107,7 @@ export interface CopilotRoutePreview {
   modelId: string
   methodId?: string | null
   candidateMethodIds: string[]
+  copilotSdkCompatible?: boolean
   note?: string | null
   // 消歧标签:同一个 provider(如"七牛")下有多条不同 host/协议的 endpoint,光看
   // providerLabel 全一样分不清 → 追加 host 区分(如 "七牛 · api.qnaigc.com")。
@@ -229,6 +170,7 @@ export function deriveCopilotCandidateGroups(
           modelId: pm.provider_model_id,
           methodId: pm.call_method_id ?? null,
           candidateMethodIds: pm.candidate_call_method_ids ?? [],
+          copilotSdkCompatible: pm.copilot_sdk_compatible,
           note: (pm as unknown as Record<string, unknown>).note as string | null || null,
           endpointLabel: host ? `${pm.provider_label} · ${host}` : pm.provider_label,
           protocol,

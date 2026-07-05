@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted
 verified_at: 2026-07-05
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_build_chat_result/_dispatch/_invoke_with_token_escalation/_usage_from_ai_message/_build_chat_result_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute ? packages/graph-agent-gateway/src/graph_agent_gateway/temperature.py:provider_temperature_from_authored
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_build_chat_result/_dispatch/_invoke_with_token_escalation/_usage_from_ai_message/_build_chat_result_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/registry/call_methods.py:call_method_definition/call_method_client_compatibility/apply_call_method_base_url/provider_probe_backend_for_method · packages/graph-agent-gateway/src/graph_agent_gateway/registry/call_methods.json · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute · packages/graph-agent-gateway/src/graph_agent_gateway/temperature.py:provider_temperature_from_authored
 units: [chatx-invocation-runtime]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -14,7 +14,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 > **Tier**：③b gateway 公共能力（纯调用运行时；已在 `packages/graph-agent-gateway` 包内，无判据反转）
 > **Owns**：拿一条已解析 `ResolvedRoute` + 原始 `BaseMessage`，用原生 LangChain ChatX 真正调模型，取回 `AIMessage`，再把 route metadata 注入结果并把 usage 喂给观测层；**不做** fallback 遍历 / probe / 熔断。ChatX 主路径的 token escalation helper 位于 `gateway_chat_model.py`,策略归 07 编排层,本篇只记录 invoke bridge 如何被包住。
 > **Status**：设计定稿（2026-06 判据复核，归属表判 09=纯 ③b 不变）；代码 = ChatX invoke bridge 已落地，`RouteChatModelFactory` 负责 route → ChatX 构造，`ordinary_chat.py` 承接 generic ordinary-chat core；thinking blocks / usage metadata / DeepSeek replay 已在主路径覆盖，非标协议完整性仍 deferred。
-> **Related**：[[10-inv-route-chat-model-factory]]（`ResolvedRoute`→原生 ChatX 工厂，本模块的 invoke 用它构造模型）· [[11-inv-provider-profiles]]（provider 差异 init-kwargs 表）· [[07-orch-fallback-circuit-probe]]（fallback/probe/熔断/usage 归属/截断升级编排，与本模块共享 `gateway_chat_model.py`/`client_manager.py` 但各写各的步骤）· [[01-handoff-interface]]（`ResolvedRoute` 契约，调用层唯一输入）· [[04-orch-registry-schema]]（`ResolvedRoute`/`AIMessage` 字段权威源）
+> **Related**：[[10-inv-route-chat-model-factory]]（`ResolvedRoute`→原生 ChatX 工厂，本模块的 invoke 用它构造模型）· [[11-inv-provider-profiles]]（provider 差异 init-kwargs 表）· [[07-orch-fallback-circuit-probe]]（fallback/probe/熔断/usage 归属/截断升级编排，与本模块共享 `gateway_chat_model.py`/`client_manager.py` 但各写各的步骤）· [[01-handoff-interface]]（`ResolvedRoute` 契约，调用层唯一输入）· [[04-orch-registry-schema]]（`ResolvedRoute`/`AIMessage` 字段权威源）· `registry/call_methods.json`（call method 运行时 catalog，定义 method 的 wire family/client compatibility/base_url transform）
 > **决策日志**：client 层 A' 重设计决策（D1 方案 A' / D2 编排-调用分离 / M2 client_manager 5 件事拆解 / M3 `_generate` 逐步归属 / F3 截断升级 / F4 thinking / F5 usage-metadata）——完整逻辑 + PM 原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 09 纯 ③b）
 > **现状**：见同目录 `baseline.md`
 
@@ -30,6 +30,8 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 本模块**纯 ③b 公共**（换任何调模型的 app 都要"拿一条 route 真正调"），已在 gateway 包内，归属表判定不变（`module-disposition-revised.md:52`）。注意边界:本模块**只写运行时 invoke 和结果桥接**;route→ChatX 工厂细节在 [[10-inv-route-chat-model-factory]] 写,provider 差异 init-kwargs 在 [[11-inv-provider-profiles]] 写,fallback/probe/熔断/usage 归属/截断升级在 [[07-orch-fallback-circuit-probe]] 写。
 
+**Call method catalog（运行时真相源，不在 docs 配置）**：`registry/call_methods.json` 是 gateway 包内随代码发布的调用方式目录，字段包括 `method_id`、`provider_backend`、`wire_family`、`official_probe`、`client_compatibility`、`base_url_transform`、`auth_token_env`。它回答两类公共问题：① 这个 method 应走哪个官方 probe backend；② 某类 client（例如 `anthropic_messages_client`）能否直接驱动这个 method。未知 method 返回 `unknown`，不被默认当成 incompatible；明确列为 `incompatible` 的 method 才可被上层直接过滤。
+
 ## 1.5 格式中立 + 普通 chat 面（gateway 基础调用能力，2026-06-04 PM 确认）
 
 > **§1 的"换成原生 ChatX `.invoke()`"是「ChatX 面」——给 engine 等 LangChain 消费方的路。但 gateway 调用层是格式中立的，不绑死 LangChain。**
@@ -41,6 +43,8 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 3. **route handoff**：只给解析好的 route、消费方自调（copilot 走 `claude_agent_sdk`），见 [[01-handoff-interface]]。
 
 **主次关系（重要）**：「普通 chat 内核」是 gateway 的**基础调用能力**——普通 chat 面直接用 `ordinary_chat.dispatch_ordinary_chat`，[[10-inv-route-chat-model-factory]] 的 `GenericRouteChatModel` 也是它的 LangChain 包装；官方 ChatX 则是 LangChain 自己的实现，ChatX 面在有官方时优先用（更可靠），无官方才用 generic 包装内核。
+
+**handoff consumer 的 method 兼容性**：route handoff 不等于 gateway 知道消费方产品语义。gateway 只声明通用 client compatibility，例如 `anthropic_messages_client=supported/incompatible/unknown`；Studio Copilot 这类消费方把它投影成自己的 `copilot_sdk_compatible` UI/API 字段。这样 DeepSeek/Ark 这类“官方主 method 是 OpenAI shape、但另有 Anthropic Messages special method”的 provider 不需要前端硬编码，也不会把没见过的 method 误杀。
 
 > **原话依据**（PM 2026-06-04）："现在市面上没有用 chat 协议的 app 了？全部都用 chatX 了？"——反诘 = 普通 chat 消费方实打实存在（非-LangChain app 一大把），gateway 不能只给 LangChain 面。（"ChatX 不绑死"完整 PM 原话见 §4 D2/D3 + [[10-inv-route-chat-model-factory]] §3.5。）
 
@@ -100,7 +104,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 | **09 → 07（结果桥接输出）** | `ChatResult`（`_build_chat_result` 产出）：`generations[0].message` = augment 后的 `AIMessage`，`response_metadata` 注入 `{route_id, endpoint_id, model=provider_model_id, canonical_id, protocol, finish_reason, usage, effective_runtime_settings}`；`llm_output` 注入 `{token_usage, model_name, route_id, endpoint_id, canonical_id, protocol, effective_runtime_settings}`。当前字段集见 `gateway_chat_model.py:323-356`，MVP1 **保留同一字段集**，只把"重建全新 `AIMessage`"改成"augment ChatX 返回的 `AIMessage`"（避免覆盖 provider 自带 metadata、避免丢 content blocks）。 |
 | **usage 归属（喂观测，非本模块决策）** | 从 `AIMessage.usage_metadata` 取 token → 交 [[07-orch-fallback-circuit-probe]] 的 `LLMClientManager.record_usage`（`client_manager.py:310-323`）按 endpoint 累计。维度对齐见 §8 待办 1。 |
 | **错误 / retry（非本模块决策）** | ChatX 自身瞬时重试（429/5xx/连接，有界）保留在 ChatX 内（F2）；跨 route fallback、异常分类、截断升级重试均在 07 编排层。本模块只保证 ChatX 抛出的异常能被 07 的 `classify_exception` 正确分类（见 §6）。 |
-| **归属 / 稳定性** | `ResolvedRoute`/`AIMessage` 字段权威源 = [[04-orch-registry-schema]]（`registry/schema.py`）/ LangChain；本模块**只消费不定义**，防 drift。`call_method_id`/`request_mapper_id` 归属待定（§8 待办 3）。 |
+| **归属 / 稳定性** | `ResolvedRoute`/`AIMessage` 字段权威源 = [[04-orch-registry-schema]]（`registry/schema.py`）/ LangChain；`call_method_id` 的运行时解释由 `registry/call_methods.json` + `registry/call_methods.py` 负责；`request_mapper_id` 仍是普通 chat/generic path 的请求映射字段。 |
 
 ## 4. 设计决策基础(用户原话)
 
@@ -151,7 +155,7 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 
 2. ✅ 已处理:ChatX `AIMessage.response_metadata` 注入 route metadata 时已避免覆盖 provider 自带 metadata；`_build_chat_result_from_ai_message` 复制 provider metadata 后追加 route metadata,再 `model_copy` augment 原消息,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:360-405`。
 
-3. `call_method_id` / `request_mapper_id` 当前仍是 verified invocation profile 语义遗留字段；MVP1 后续要决定它们由 [[10-inv-route-chat-model-factory]] 的 factory、[[11-inv-provider-profiles]] 的 provider profile，还是只由 ordinary-chat/generic path 消费（与 11 §8 待办 2 同一悬而未决项）。
+3. ✅ 已处理:`call_method_id` 的公共解释入口已收敛到 `registry/call_methods.json` / `registry/call_methods.py`。官方 probe backend、Anthropic Messages client 兼容性、Ark/DeepSeek base_url transform、特殊认证 env 均从同一 catalog 读取；前端和 Studio backend 不再各写 method 名单。`request_mapper_id` 继续作为普通 chat/generic path 的请求映射字段。
 
 4. ✅ **已定（PM 2026-06-04 + 实验）**：WaveSpeed 实测是 **native-compatible**——其 endpoint 同时支持 OpenAI-compatible `/chat/completions` 和 Anthropic Messages，**用官方 ChatX（`ChatOpenAI`/`ChatAnthropic`）就能跑**（实验 6 轮工具循环 PASS，[chatx-provider-patterns.md](../references/chatx-provider-patterns.md)）。真·非标 provider（连官方 ChatX 都没有的）才走 `GenericRouteChatModel` 兜底（见 [[10-inv-route-chat-model-factory]] §3.5）；ordinary-chat 的 WaveSpeed path 已在 `ordinary_chat.py` 内作为 generic/普通 chat 内核分支存在。
 
@@ -186,7 +190,7 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 ## 交叉引用(链接,不复制)
 
 - [[10-inv-route-chat-model-factory]]：`ResolvedRoute`→原生 ChatX 工厂（本模块 invoke 用它构造模型；base_url 双保险 / init-kwargs / thinking 归一化 / stream_usage 在那边写）
-- [[11-inv-provider-profiles]]：provider 差异 init-kwargs 表（`call_method_id`/`request_mapper_id` 归属悬案与本模块 §8 待办 3 共享）
+- [[11-inv-provider-profiles]]：provider 差异 init-kwargs 表（只管 ChatX 构造差异；`call_method_id` 的 method catalog 不并入 ProviderProfile）
 - [[07-orch-fallback-circuit-probe]]：fallback 循环 / probe / 熔断 / mark_down / fallback event / usage 归属 / 截断升级重试（与本模块共享 `gateway_chat_model.py`/`client_manager.py`，各写各的步骤）
 - [[01-handoff-interface]]：`ResolvedRoute` 契约（调用层唯一输入）
 - [[04-orch-registry-schema]]：`ResolvedRoute` 字段权威源（本模块只消费）

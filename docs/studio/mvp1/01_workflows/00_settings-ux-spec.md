@@ -230,7 +230,7 @@
 - **不同点二**：测试**走 copilot 自己的调用**（`claude_agent_sdk` 的 `ClaudeSDKClient`，spawn claude CLI、base_url 经 `ANTHROPIC_BASE_URL` env 注入；`copilot.py:242`）—— 所以 copilot 的"测试"和"真实调用"**本应没区别、不存在假测试**。**但现状有假测试**（见 §3.4）。
 
 ### 3.2 可用模型 + 内置角色动态浮出
-- **eligible 判据 = 后端 capability**（route 的 protocol / call_method 支持 anthropic-messages：anthropic 原生 / deepseek-anthropic / ark-anthropic / openrouter-anthropic），**取代前端 `isClaudeAgentSdkCompatibleRoute`（按名字猜兼容性的函数，`CopilotTab.tsx:228`）名字启发式**。
+- **eligible 判据 = 后端投影的 `copilot_sdk_compatible`**。前端不看 protocol、不维护 method 白名单；Studio 后端从 gateway 的 `call_methods.json` 读取 method 对 `anthropic_messages_client` 的兼容性：已知支持(anthropic / deepseek / ark / openrouter 的 Anthropic Messages method)放行，已知 OpenAI/Gemini/普通 chat method 不兼容则过滤，未知 method 保留可测，再叠加 tool loop capability 的显式不支持证据。它**取代前端 `isClaudeAgentSdkCompatibleRoute` 名字启发式**。
 - **未测试也显示、不预过滤**〔#3〕：PM 原话"你没测试的时候不知道，所以还是会显示在 available models 里面（just keep them in there）"。即 SDK 工具调用能力**未测时未知**，不能据此把 route 滤掉 —— 与 §2「untested/failed 不滤」同一原则；真 SDK 测试（§3.4）才确证。
 - **内置角色 = 动态浮出**〔#2〕：**不写死 2 个**，而是**默认只浮出 Claude 和 DeepSeek 在 available models 里最新最好的模型**，按 family 偏好阶梯择优：
   - Claude：优先 **opus 4.8**，没有则退 **opus 4.7**（再往后退更旧）。
@@ -285,7 +285,7 @@
 
 **E. 假测试现状（要修）**：`test_copilot_role_sdk`（角色 SDK 测试端点，`routers/copilot.py:89`）调 `_probe_copilot_sdk_tool_call`（`routers/llm.py:2150`），后者实际用 `anthropic.AsyncAnthropic` 走 messages API（`:2150-2172`），而真实运行用 `ClaudeSDKClient` + per-session env（`copilot.py:242-252`）。→ **测的 SDK ≠ 跑的 SDK**，测过不证明 spawn/env 注入/tool loop 能跑（§3.4 的核心修正项）。
 
-**F. base_url 助手 = ③b 归一化原语（不属 copilot 领域）**：`_ark_anthropic_base_url`（`copilot.py:476`）和 `_deepseek_anthropic_base_url`（`copilot.py:485`）是两条 protocol 归一化规则（ark 去 `/api/v3` 补 `/api/compatible`；deepseek 去 `/v1` 补 `/anthropic`）。**这两条按判据属 ③b 公共 base_url 归一化（归属 gateway 模块 03 [[03-orch-credentials-endpoints]]），不是 copilot 专属**——MVP1 目标是保存时主归一化，Copilot 拿到的 route 应已 canonical，本地只做 SDK env 映射；这两个助手随归一化下沉 ③b 后，copilot 端不再各写一份。
+**F. call method catalog = ③b 调用方式真相源（不属 copilot 领域）**：`packages/graph-agent-gateway/src/graph_agent_gateway/registry/call_methods.json` 是 provider call method 的运行时配置真相源，声明 method 的 provider backend、wire family、对 `anthropic_messages_client` 的兼容性、base_url transform 和特殊认证 env。`copilot.py` 不再硬编码 `_ark_anthropic_base_url` / `_deepseek_anthropic_base_url`；它只经 GatewayAdapter 调 `apply_call_method_base_url` / `call_method_auth_token_env`，把 gateway catalog 的结果写进 Claude SDK 的 per-session env。
 
 **G. session 持久化边界**：copilot **对话 session 落盘 / 退出恢复**属 copilot 聊天工作台 region（D8），**不在设置页**；见 [`00_settings.md`](./00_settings.md) §5 与 mvp0 `02_features/copilot-chat/`。本页 §3 只配"用哪个模型"。
 
@@ -486,14 +486,14 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 
 ### 6.3 Copilot 页
 > **② 后端 (rust)**：copilot **配置**(本页)= N/A；但 copilot **聊天 session 落盘**(D8)= Rust native-fs（skill 工作台 region，非本页）。
-> **关键边界**：copilot 的 **SDK 调用 / 测试 / session 都属 ③a Studio 领域**（`copilot.py` 用 `ClaudeSDKClient`）；③b gateway 库**只做 route 解析 + capability**，不碰 SDK 调用、不知 copilot 语义。
+> **关键边界**：copilot 的 **SDK 调用 / 测试 / session 都属 ③a Studio 领域**（`copilot.py` 用 `ClaudeSDKClient`）；③b gateway 库**只做 route 解析 + 通用 call method/capability 真相**，不碰 SDK 调用、不知 copilot 语义。gateway 只知道“这个 method 是否能被一个 Anthropic Messages client 驱动”，不知道“Copilot 页面要怎么显示”。
 
 **四层职责：**
 | 层 | 内容 |
 |---|---|
-| **① 前端 (ts)** | copilot 角色卡(**单 model group**)；**可搜索选组器**〔#1〕；Test 触发；route 排序/加删；新建第三方角色(`copilot_` 前缀)；**「Backend Integration」slot 换统一 save-status badge**〔#4〕(四页共用、idle 静默)；**去 mock**；**内置动态浮出**〔#2〕(Claude opus4.8→4.7、DeepSeek V4Pro→V3.2Pro)；**eligible 不预过滤未测 route**〔#3〕；**copilot_ 前缀必修**(选组后保前缀)；UI 尽量复用 role |
-| **③a Studio 适配（应用加工）** | 复用 roles 端点(`role_kind=copilot`，`_is_copilot_role` 认 `copilot_` 前缀) + `POST /api/copilot/roles/{name}/test-sdk` + WS 聊天流。**领域逻辑**：**copilot SDK 调用**(`copilot.py` `ClaudeSDKClient`、base_url→env)；**真 SDK 测试**(修假测试 `AsyncAnthropic`→`ClaudeSDKClient`，`llm.py:2150`)；走**全 fallback 链**(非 `_resolve_copilot_route` 只取首条)；eligible 判据(调 ③b capability)；内置动态浮出策略；session 持久化(D8)+失败显式告警；测试证据回写 Probe Knowledge Catalog |
-| **③b gateway 库（公共能力内核）** | **仅** `resolve_routes("copilot_chat")`→`ResolvedRoute[]`(③a 拿去自己用 SDK 调；**库不调 SDK、不知 copilot 是什么**)；route 是否 **anthropic-messages 兼容**的 capability(供 ③a 判 eligible) |
+| **① 前端 (ts)** | copilot 角色卡(**单 model group**)；**可搜索选组器**〔#1〕；Test 触发；route 排序/加删；新建第三方角色(`copilot_` 前缀)；**「Backend Integration」slot 换统一 save-status badge**〔#4〕(四页共用、idle 静默)；**去 mock**；**内置动态浮出**〔#2〕(Claude opus4.8→4.7、DeepSeek V4Pro→V3.2Pro)；**eligible 不预过滤未测 route**〔#3〕；**只消费 `copilot_sdk_compatible`**，不维护 method/protocol 名单；**copilot_ 前缀必修**(选组后保前缀)；UI 尽量复用 role |
+| **③a Studio 适配（应用加工）** | 复用 roles 端点(`role_kind=copilot`，`_is_copilot_role` 认 `copilot_` 前缀) + `POST /api/copilot/roles/{name}/test-sdk` + WS 聊天流。**领域逻辑**：**copilot SDK 调用**(`copilot.py` `ClaudeSDKClient`、base_url→env)；**真 SDK 测试**(修假测试 `AsyncAnthropic`→`ClaudeSDKClient`)；走**全 fallback 链**；把 ③b call-method compatibility 投影为 `provider_models[].copilot_sdk_compatible`；内置动态浮出策略；session 持久化(D8)+失败显式告警；测试证据回写 Probe Knowledge Catalog |
+| **③b gateway 库（公共能力内核）** | **仅** `resolve_routes("copilot_chat")`→`ResolvedRoute[]`(③a 拿去自己用 SDK 调；**库不调 SDK、不知 copilot 是什么**)；`call_methods.json` 声明 method 的 wire family、client compatibility、official probe backend、base_url transform 和特殊 env |
 
 **逐操作归属（C1–C12，② Rust 全 N/A；session 除外属 chat region）：**
 | # 动作 | ① FE-ts | ③a Studio 适配 | ③b gateway 库 |
@@ -504,7 +504,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | C4 route SDK 状态灯 | 显示 | 来自真 SDK 测试结果(③a 存) | — |
 | C5 Test 真 SDK | 触发 | **`ClaudeSDKClient` 真跑** + 写证据/catalog | **仅** `resolve_routes` 给 route |
 | C6 route 兜底序 | 拖序 | `PUT roles` + 走全链 | `resolve_routes` 返回有序 |
-| C7 Add/删 route(eligible) | 增删 | eligible 判据(调 ③b capability) | anthropic-messages 兼容 capability |
+| C7 Add/删 route(eligible) | 增删 | 读 `copilot_sdk_compatible`，由后端调 ③b call-method catalog 投影 | call method client compatibility |
 | C8 model-group remove | 接 handler | `PUT roles` | — |
 | C9 Add custom 角色 | 弹框(`copilot_custom_N`) | `PUT roles` | — |
 | C10 选 group(可搜索) | 可搜索选组 + **保 copilot_ 前缀** | `PUT roles`(`_is_copilot_role` 认前缀) | — |
@@ -649,12 +649,12 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | # | 动作 | 能力 | 现状 |
 |---|---|---|---|
 | 54 | 进 tab → 标题 + "Backend Integration" 徽章 + 角色卡(无数据先骨架屏) | copilot-tab-shell | ✅ ⚠️ 徽章是写死装饰,不反映真实连接 |
-| 55 | 看 copilot 角色卡(Opus 4.7 / DeepSeek V4,Built-in/Third-party 徽章) | copilot-role-list | ✅ ⚠️ 卡片元数据前端硬编码模板/启发式推导,与后端 role 语义脱节 |
+| 55 | 看 copilot 角色卡(Opus 4.8 / DeepSeek V4 Pro,Built-in/Third-party 徽章) | copilot-role-list | ✅ 已接真 registry；eligible 读后端 `copilot_sdk_compatible`，不再前端猜 method/protocol |
 | 56 | (首次无角色)自动填 3 张种子卡 | role-seed-fallback | 🟡 ⚠️ 前端现造,默认 props 还是 mock |
 | 57 | 看每 route SDK 状态灯(N/M SDK Ready) | route-sdk-status-badge | 🟡 ⚠️ 只按 ui_state==ready 粗映射,非真测过 SDK |
 | 58 | 点 `Test` → 逐 route 验 SDK 工具调用(testing→ready/unsupported) | copilot-role-test | ✅ ⚠️**假测试**:探针走 `AsyncAnthropic`(发 weather 工具调用),真实 copilot 跑 `ClaudeSDKClient` —— 测的 SDK ≠ 跑的 SDK(§3.4 要修) |
 | 59 | 拖动调 route 回退优先级 | route-fallback-reorder | ✅ ⚠️ 运行侧 `_resolve_copilot_route` 只取首条,重排未必生效 |
-| 60 | `Add route` 追加兼容 route / 垃圾桶删 | route-fallback-add/remove | ✅ ⚠️ 可选 route 靠前端启发式过滤 |
+| 60 | `Add route` 追加兼容 route / 垃圾桶删 | route-fallback-add/remove | ✅ 可选 route 读后端 `copilot_sdk_compatible`；未知 method 保留可测，明确不兼容 method 过滤 |
 | 61 | model-group 行的 Remove 按钮 | model-group-remove | 🟡 ⚠️ disabled 写死且无 handler,纯占位 |
 | 62 | 点 `Add model` 新建第三方 copilot 角色草稿卡 | copilot-role-add | ✅ ⚠️ key 命名触发后端分流误判风险(见下 bug) |
 | 63 | 空卡下拉选 Model group → 变可配置角色 | copilot-config-model-group | ✅ ⚠️ 选 group 后 key 变 modelGroupId(无 `copilot_` 前缀) |

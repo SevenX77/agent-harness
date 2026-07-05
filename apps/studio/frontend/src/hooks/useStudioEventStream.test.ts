@@ -317,6 +317,9 @@ describe("useStudioEventStream — R-F13 give-up after 5 consecutive 4401 closes
     act(() => {
       reconnected.acceptOpen()
     })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
 
     // Now three more 4401s — without the counter reset on open this would
     // total 6 and trip the threshold. With the reset, we stay under it.

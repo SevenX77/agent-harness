@@ -37,6 +37,7 @@ let nextSubscriberId = 1
 let hubConnectionLost = false
 let socket: WebSocket | null = null
 let reconnectTimer: number | undefined
+let openResetTimer: number | undefined
 let lostTicker: number | undefined
 let attempt = 0
 let consecutiveAuthFailures = 0
@@ -74,6 +75,10 @@ function resetHubState(): void {
   if (reconnectTimer !== undefined) {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = undefined
+  }
+  if (openResetTimer !== undefined) {
+    window.clearTimeout(openResetTimer)
+    openResetTimer = undefined
   }
   stopLostTicker()
   if (socket) {
@@ -157,6 +162,10 @@ function handleDrop(reason: string, closeCode?: number): void {
     closeCode === undefined ? "n/a" : String(closeCode),
     consecutiveAuthFailures,
   )
+  if (openResetTimer !== undefined) {
+    window.clearTimeout(openResetTimer)
+    openResetTimer = undefined
+  }
   if (socket) {
     socket.onopen = null
     socket.onclose = null
@@ -191,11 +200,16 @@ function connect(): void {
   nextSocket.onopen = () => {
     if (!running) return
     console.info("phase=studio-event-stream action=connect attempt=%d", attempt + 1)
-    attempt = 0
-    consecutiveAuthFailures = 0
     disconnectedSince = null
     stopLostTicker()
     setHubConnectionLost(false)
+
+    openResetTimer = window.setTimeout(() => {
+      if (running && socket === nextSocket) {
+        attempt = 0
+        consecutiveAuthFailures = 0
+      }
+    }, 2000)
   }
 
   nextSocket.onmessage = (message) => {

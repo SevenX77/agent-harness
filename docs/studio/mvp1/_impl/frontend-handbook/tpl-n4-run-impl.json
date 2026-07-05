@@ -8,8 +8,8 @@
    "n": 6,
    "cap": "run-trigger-gated",
    "design_ref": "n4-atom-6",
-   "current": "现状：已实现且符合。Workspace.tsx handleRun 第一件事 deriveBuildStage(currentSkillId) 若 ≠ predict-pass 直接 return（前端硬门）；通过则 updateStage(running) → resolveRunInput → startRun(client.ts) → setRunId + setActivePanel('timeline')。后端 run_manager.start_run 调 require_passing_predict（predict_gate.py）比对 content_hash，不匹配抛 RUN_REQUIRES_PREDICT(409)。",
-   "gap": "符合设计，无需改。spec 标『onRun=桩/零 caller』过时。",
+   "current": "现状：已实现且符合。Workspace.tsx handleRun 第一件事 deriveBuildStage(currentSkillId) 若 ≠ predict-pass 直接 return（前端硬门）；通过则 updateStage(running) → resolveRunInput → startRun(client.ts) → setRunId + setActivePanel('timeline')。失败分支走 requestDiagnosticErrors，把 Backend unavailable / 结构化 compile_failed / 普通异常归一成 CompileError[]，setRunErrors + setRunDrawerOpen 打开 CompileErrorDrawer kind='run'，toast 只保留 `Run failed: ...` 摘要。后端 run_manager.start_run 调 require_passing_predict（predict_gate.py）比对 content_hash，不匹配抛 RUN_REQUIRES_PREDICT(409)。",
+   "gap": "符合设计，无需改。spec 标『onRun=桩/零 caller』过时；旧『Run 请求失败只 toast、没有详情』已闭合。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。POST /runs（routers/runs.py create_run）+ require_passing_predict 服务端门已实现。"
   },
@@ -122,6 +122,7 @@
    "layer1": [
     "mock deriveBuildStage 返回非 predict-pass → 点 Run → 断言 handleRun 直接 return、不调 startRun。",
     "stage=predict-pass → 点 Run → 断言 updateStage(running)、startRun 被调、setRunId、切 timeline。",
+    "stage=predict-pass 且 startRun 抛 Backend unavailable → 断言显示 `1 run error` 抽屉、可见 Backend unavailable、存在 Copy all run errors 按钮，toast 仅作摘要。",
     "后端契约测：无 last_predict 记录 / content_hash 不匹配 → start_run 抛 RUN_REQUIRES_PREDICT(409)。"
    ],
    "layer2": [

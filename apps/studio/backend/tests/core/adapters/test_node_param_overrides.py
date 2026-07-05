@@ -32,8 +32,8 @@ def test_overrides_read_focused_node(tmp_path: Path, monkeypatch: pytest.MonkeyP
     _write_params(
         params,
         {
-            "writer": {"thinking": True, "max_output_tokens": 2048, "temperature": 0.3},
-            "other": {"thinking": False},
+            "writer": {"enabled": True, "thinking": True, "max_output_tokens": 2048, "temperature": 0.3},
+            "other": {"enabled": True, "thinking": False},
         },
     )
     monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
@@ -51,9 +51,16 @@ def test_overrides_read_focused_node(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 def test_null_fields_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     params = tmp_path / "node_llm_params.json"
-    _write_params(params, {"writer": {"thinking": None, "max_output_tokens": 4096, "temperature": None}})
+    _write_params(params, {"writer": {"enabled": True, "thinking": None, "max_output_tokens": 4096, "temperature": None}})
     monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
     assert _node_param_overrides("writer") == {"max_output_tokens": 4096}
+
+
+def test_disabled_node_params_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    params = tmp_path / "node_llm_params.json"
+    _write_params(params, {"writer": {"enabled": False, "thinking": True, "temperature": 0.8}})
+    monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
+    assert _node_param_overrides("writer") == {}
 
 
 def test_missing_file_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,7 +105,7 @@ def test_invoke_passes_node_overrides_to_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     params = tmp_path / "node_llm_params.json"
-    _write_params(params, {"writer": {"thinking": True, "max_output_tokens": 999, "temperature": 0.9}})
+    _write_params(params, {"writer": {"enabled": True, "thinking": True, "max_output_tokens": 999, "temperature": 0.9}})
     monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
 
     resolver = _RecordingResolver()

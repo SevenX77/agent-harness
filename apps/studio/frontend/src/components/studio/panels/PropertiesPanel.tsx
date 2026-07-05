@@ -2858,12 +2858,14 @@ function LlmRoleField({
 }
 
 interface NodeLlmParamsDraft {
+  enabled: boolean
   thinking: boolean | null
   maxOutputTokens: string
   temperature: string
 }
 
 const EMPTY_NODE_LLM_PARAMS_DRAFT: NodeLlmParamsDraft = {
+  enabled: false,
   thinking: null,
   maxOutputTokens: "",
   temperature: "",
@@ -2872,6 +2874,7 @@ const EMPTY_NODE_LLM_PARAMS_DRAFT: NodeLlmParamsDraft = {
 export function nodeLlmParamsDraftFromApi(params: NodeLlmParams | undefined): NodeLlmParamsDraft {
   if (!params) return EMPTY_NODE_LLM_PARAMS_DRAFT
   return {
+    enabled: params.enabled === true,
     thinking: params.thinking ?? null,
     maxOutputTokens: params.max_output_tokens != null ? String(params.max_output_tokens) : "",
     temperature: params.temperature != null ? String(params.temperature) : "",
@@ -2879,7 +2882,16 @@ export function nodeLlmParamsDraftFromApi(params: NodeLlmParams | undefined): No
 }
 
 export function nodeLlmParamsDraftToApi(draft: NodeLlmParamsDraft): NodeLlmParams {
+  if (!draft.enabled) {
+    return {
+      enabled: false,
+      thinking: null,
+      max_output_tokens: null,
+      temperature: null,
+    }
+  }
   return {
+    enabled: true,
     thinking: draft.thinking,
     max_output_tokens: nodeParamOptionalInteger(draft.maxOutputTokens),
     temperature: nodeParamOptionalNumber(draft.temperature),
@@ -2900,10 +2912,8 @@ function nodeParamOptionalNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-// PR3: per-node DIRECT overrides of the three simple LLM params. No enable
-// switch — each empty field simply inherits the role default. Loads the node's
-// stored overrides on mount and persists the full triple on every change,
-// mirroring LlmNodeCompareField's load-effect + save-on-change pattern.
+// Node-level model params are opt-in. When disabled, the node inherits its role;
+// when enabled, blank fields still inherit field-by-field.
 function LlmNodeParamsField({
   skillId = null,
   nodeId = null,
@@ -2916,6 +2926,7 @@ function LlmNodeParamsField({
   modelGroups?: ModelGroup[]
 }) {
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
+  const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
   const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false })
   const latestDraftRef = useRef(draft)
   latestDraftRef.current = draft
@@ -2923,22 +2934,26 @@ function LlmNodeParamsField({
   const persist = useCallback(
     (next: NodeLlmParamsDraft) => {
       if (!skillId || !nodeId) return
-      void putNodeLlmParams(skillId, nodeId, nodeLlmParamsDraftToApi(next)).catch((error) => {
-        toast.error(error instanceof Error ? error.message : "Could not save model params")
-      })
+      setNodeParamsSaveStatus("saving")
+      void putNodeLlmParams(skillId, nodeId, nodeLlmParamsDraftToApi(next))
+        .then(() => {
+          setNodeParamsSaveStatus("saved")
+        })
+        .catch((error) => {
+          setNodeParamsSaveStatus("error")
+          toast.error(error instanceof Error ? error.message : "Could not save model params")
+        })
     },
     [skillId, nodeId],
   )
 
-  const debouncedTemperaturePersist = useDebouncedCallback((temperature: string) => {
-    persist({
-      ...latestDraftRef.current,
-      temperature,
-    })
+  const debouncedPersist = useDebouncedCallback((next: NodeLlmParamsDraft) => {
+    persist(next)
   }, TEMPERATURE_DEBOUNCE_MS)
 
   useEffect(() => {
-    debouncedTemperaturePersist.cancel()
+    debouncedPersist.cancel()
+    setNodeParamsSaveStatus("idle")
     if (!skillId || !nodeId) {
       setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
       return
@@ -2947,7 +2962,8 @@ function LlmNodeParamsField({
     void getNodeLlmParams(skillId)
       .then((map) => {
         if (cancelled) return
-        debouncedTemperaturePersist.cancel()
+        debouncedPersist.cancel()
+        setNodeParamsSaveStatus("idle")
         setDraft(nodeLlmParamsDraftFromApi(map.nodes[nodeId]))
       })
       .catch(() => {
@@ -2955,26 +2971,29 @@ function LlmNodeParamsField({
       })
     return () => {
       cancelled = true
-      debouncedTemperaturePersist.cancel()
+      debouncedPersist.cancel()
     }
-  }, [debouncedTemperaturePersist, skillId, nodeId])
+  }, [debouncedPersist, skillId, nodeId])
 
   const update = (next: NodeLlmParamsDraft) => {
+    latestDraftRef.current = next
     setDraft(next)
-    persist(next)
+    setNodeParamsSaveStatus("pending")
+    debouncedPersist.schedule(next)
   }
 
   const updateTemperature = (temperature: string, flush = false) => {
-    setDraft((current) => ({
-      ...current,
+    const next = {
+      ...latestDraftRef.current,
       temperature,
-    }))
-    debouncedTemperaturePersist.schedule(temperature)
+    }
+    update(next)
     if (flush) {
-      debouncedTemperaturePersist.flush()
+      debouncedPersist.flush()
     }
   }
 
+  const enabledId = `node-params-enabled-${nodeId ?? "none"}`
   const thinkingId = `node-thinking-${nodeId ?? "none"}`
   const maxOutputId = `node-max-output-${nodeId ?? "none"}`
   const temperatureId = `node-temperature-${nodeId ?? "none"}`
@@ -3000,13 +3019,18 @@ function LlmNodeParamsField({
 
   return (
     <div className="mt-2 space-y-1.5" data-llm-node-params="true">
-      <YamlNestedFieldLabel>
-        Model params
-        <HelpTooltip label="About model params">
-          Per-node overrides of this node&rsquo;s LLM generation params, winning over the role default.
-          Leave a field on <span className="font-mono">Inherit</span> / empty to use the role&rsquo;s value.
-        </HelpTooltip>
-      </YamlNestedFieldLabel>
+      <div className="flex items-center justify-between gap-2">
+        <YamlNestedFieldLabel>
+          Model params
+          <HelpTooltip label="About model params">
+            Opt-in per-node overrides of this node&rsquo;s LLM generation params. When off, the node
+            inherits the role defaults; when on, blank fields still inherit field-by-field.
+          </HelpTooltip>
+        </YamlNestedFieldLabel>
+        <span data-llm-node-params-save-status={nodeParamsSaveStatus}>
+          <SaveStatusBadge status={nodeParamsSaveStatus} />
+        </span>
+      </div>
       {/* Frame the params in the shared Card box, one field per row (each field's
           label sits directly above its own control, so nothing reads as crowded
           or ambiguous about which label belongs to which control). Per-field
@@ -3014,6 +3038,24 @@ function LlmNodeParamsField({
           number Input. Reuses @/components/ui, no new style. */}
       <Card size="sm">
         <CardContent className="space-y-3">
+          <Field
+            orientation="horizontal"
+            className="min-h-9 items-center justify-between gap-3"
+          >
+            <YamlNestedFieldLabel htmlFor={enabledId} className="min-w-0">
+              Custom model params
+            </YamlNestedFieldLabel>
+            <Switch
+              id={enabledId}
+              size="sm"
+              data-llm-node-params-enabled="true"
+              checked={draft.enabled}
+              aria-label="Use custom model params for this node"
+              onCheckedChange={(enabled) => {
+                update(enabled ? { ...latestDraftRef.current, enabled: true } : EMPTY_NODE_LLM_PARAMS_DRAFT)
+              }}
+            />
+          </Field>
           <Field
             orientation="horizontal"
             className="min-h-9 items-center justify-between gap-3"
@@ -3030,6 +3072,7 @@ function LlmNodeParamsField({
               size="sm"
               data-llm-node-thinking="true"
               checked={draft.thinking === true}
+              disabled={!draft.enabled}
               aria-label="Node thinking override"
               onCheckedChange={(thinking) => update({ ...draft, thinking })}
             />
@@ -3050,6 +3093,7 @@ function LlmNodeParamsField({
               onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
               inputMode="numeric"
               placeholder={maxOutputPlaceholder}
+              disabled={!draft.enabled}
             />
           </Field>
           <Field className="min-h-14 gap-1">
@@ -3070,6 +3114,7 @@ function LlmNodeParamsField({
                 value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
                 onValueChange={(vals) => updateTemperature(String(vals[0]))}
                 onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
+                disabled={!draft.enabled}
                 className="flex-1"
               />
               <span className="w-9 shrink-0 text-right text-xs text-foreground">

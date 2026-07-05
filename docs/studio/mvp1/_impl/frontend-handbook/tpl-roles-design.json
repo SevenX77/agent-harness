@@ -269,9 +269,9 @@
       "cap": "role-output-token-intent",
       "track": "共",
       "module": "角色意图",
-      "func": "??: Role settings ???????????: thinking ???max output tokens ???temperature ??????temperature ???????? 0..2, UI ??? 0-100%, ????? provider ?????",
+      "func": "设计:Role settings 里的运行参数包含 thinking、max output tokens、temperature。temperature 以 provider-neutral 0..2 为存储值,UI 用 0-100% 读数表达,运行时由 gateway 按 provider 协议映射到真实 provider scale。",
       "action": "用户在角色设置面板选 Output Token 档位,target/required_minimum 档再填值。",
-      "fe_design": "RoleSettingsFields ?? shadcn Slider ?? temperature, ?? label ??? tooltip, ?????????(0=>0%, 0.7=>35%, 2=>100%); onValueChange ???????? debounce ??, onValueCommit flush ??????? roles YAML/API ??? provider-neutral ??? 0..2, ??? null ???? route/default?gateway ? provider ??????????????????",
+      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,0.7=>35%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 必须立即更新父 draft,不能等 debounce 才更新 UI;HTTP 保存由页面级 useDebouncedRolesSave 统一 debounce,onValueCommit 只负责提交当前值。roles YAML/API 保存 provider-neutral 0..2;空值/null 表示继承 route/default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。",
       "fe_modules": [],
       "be_contract": [
         {
@@ -282,14 +282,14 @@
         },
         {
           "endpoint": "PUT /api/llm/roles + gateway runtime dispatch",
-          "purpose": "???? provider-neutral temperature ??? 0..2; gateway ? RouteChatModelFactory/ordinary_chat ????? protocol ??? provider ????(Anthropic 0..1, OpenAI/Gemini/Ark/unknown 0..2), null ??? temperature?",
+          "purpose": "保存 provider-neutral temperature authored 0..2;gateway runtime 在 RouteChatModelFactory/ordinary_chat 按 protocol 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2),null 不传 temperature。GatewayChatModel 在响应 metadata 写 effective_runtime_settings(解析来源)和 actual_runtime_settings(本次实际调用值)。",
           "mechanism_ref": "roles_mech_materialize",
           "iface_ref": "gateway-temperature-scale"
         }
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "?????2026-07-05: temperature ???????? + ?? tooltip + 300ms debounce ??; provider-specific ???? gateway runtime, ???????????",
+      "gap_brief": "符合设计。2026-07-05 已补齐百分比读数、tooltip、UI 立即更新 + HTTP debounce、gateway provider-scale runtime mapping 与 actual_runtime_settings trace。",
       "impl_ref": "fn-43"
     },
     {

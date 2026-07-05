@@ -1,9 +1,9 @@
-"""Per-skill+node persistence for node-level LLM param overrides (PR3).
+"""Per-skill+node persistence for node-level LLM param overrides.
 
 Stored at ``<skill>/.workspace/node_llm_params.json`` as
-``{"nodes": {node_id: {thinking?, max_output_tokens?, temperature?}}}``. Only
-nodes carrying at least one non-null override are kept; writing an all-null (or
-absent) override removes the node's entry. Mirrors ``compare_candidates.py``.
+``{"nodes": {node_id: {enabled, thinking?, max_output_tokens?, temperature?}}}``.
+Only enabled node overrides are kept. When enabled, an individual null/absent
+field inherits the role value. This mirrors the compare-candidates local store.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def node_llm_params_path_for(skill_dir: Path) -> Path:
 
 
 def read_node_llm_params(skill_dir: Path) -> dict[str, NodeLlmParams]:
-    """Read the node -> override map, empty when the file is absent/malformed."""
+    """Read the node -> active override map, empty when the file is absent."""
     path = node_llm_params_path_for(skill_dir)
     if not path.exists():
         return {}
@@ -55,7 +55,7 @@ def write_node_llm_params(
     node_id: str,
     params: NodeLlmParams,
 ) -> NodeLlmParams:
-    """Replace one node's override. An all-null override clears the node entry."""
+    """Replace one node's override. ``enabled=False`` clears the node entry."""
     nodes = read_node_llm_params(skill_dir)
     if params.is_empty():
         nodes.pop(node_id, None)

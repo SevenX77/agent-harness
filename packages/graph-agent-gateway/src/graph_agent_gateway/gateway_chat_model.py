@@ -24,9 +24,12 @@ from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+from graph_agent_gateway.temperature import provider_temperature_from_authored
 from graph_agent_gateway.tracing import emit_llm_fallback_event
 
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
+ActualRuntimeSettings = dict[str, dict[str, object]]
+_MAX_TOKENS_UNSET = object()
 
 
 class GatewayChatModel(BaseChatModel):
@@ -42,6 +45,7 @@ class GatewayChatModel(BaseChatModel):
     event_callbacks: tuple[Any, ...] = Field(default_factory=tuple)
     probe_before_call: bool = True
     thinking_enabled: bool | None = None
+    runtime_setting_sources: dict[str, str] = Field(default_factory=dict)
     bound_tools: tuple[dict[str, object], ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
     tool_kwargs: dict[str, object] = Field(default_factory=dict)
@@ -53,12 +57,13 @@ class GatewayChatModel(BaseChatModel):
         role_name: str,
         resolved_role: ResolvedRole,
         *,
-        max_tokens: int = 4096,
+        max_tokens: int | object = _MAX_TOKENS_UNSET,
         temperature: float | None = None,
         callbacks: Sequence[Any] = (),
         phase_name: str | None = None,
         probe_before_call: bool = True,
         thinking_enabled: bool | None = None,
+        runtime_setting_sources: Mapping[str, str] | None = None,
         bound_tools: Sequence[Mapping[str, object]] = (),
         tool_choice: str | None = None,
         tool_kwargs: Mapping[str, object] | None = None,
@@ -66,15 +71,26 @@ class GatewayChatModel(BaseChatModel):
         credential_provider: Any = None,
         **kwargs: Any,
     ) -> None:
+        sources = dict(runtime_setting_sources or {})
+        resolved_max_tokens = (
+            4096 if max_tokens is _MAX_TOKENS_UNSET else _int_kwarg(max_tokens, 4096)
+        )
+        if max_tokens is not _MAX_TOKENS_UNSET:
+            sources.setdefault("max_output_tokens", "call_override")
+        if temperature is not None:
+            sources.setdefault("temperature", "call_override")
+        if thinking_enabled is not None:
+            sources.setdefault("reasoning.enabled", "call_override")
         super().__init__(  # type: ignore[call-arg]
             role_name=role_name,
             resolved_role=resolved_role,
-            max_tokens=max_tokens,
+            max_tokens=resolved_max_tokens,
             temperature=temperature,
             phase_name=phase_name,
             event_callbacks=tuple(callbacks),
             probe_before_call=probe_before_call,
             thinking_enabled=thinking_enabled,
+            runtime_setting_sources=sources,
             bound_tools=tuple(dict(item) for item in bound_tools),
             tool_choice=tool_choice,
             tool_kwargs=dict(tool_kwargs or {}),
@@ -189,28 +205,58 @@ class GatewayChatModel(BaseChatModel):
             retry_same_used = False
             while True:
                 try:
+                    max_tokens = _runtime_max_tokens(
+                        candidate,
+                        self.max_tokens,
+                        self.runtime_setting_sources,
+                        kwargs.get("max_tokens"),
+                    )
+                    temperature = _runtime_temperature(
+                        candidate,
+                        self.temperature,
+                        self.runtime_setting_sources,
+                        kwargs.get("temperature"),
+                    )
+                    reasoning = _runtime_reasoning(
+                        candidate,
+                        self.thinking_enabled,
+                        self.runtime_setting_sources,
+                        kwargs.get("reasoning"),
+                        has_kwarg="reasoning" in kwargs,
+                    )
+                    actual_runtime_settings = _actual_runtime_settings(
+                        candidate,
+                        max_tokens=max_tokens,
+                        max_tokens_source=_runtime_source(
+                            candidate,
+                            "max_output_tokens",
+                            self.runtime_setting_sources,
+                            has_kwarg=kwargs.get("max_tokens") is not None,
+                        ),
+                        temperature=temperature,
+                        temperature_source=_runtime_source(
+                            candidate,
+                            "temperature",
+                            self.runtime_setting_sources,
+                            has_kwarg=kwargs.get("temperature") is not None,
+                        ),
+                        reasoning=reasoning,
+                        reasoning_source=_runtime_source(
+                            candidate,
+                            "reasoning.enabled",
+                            self.runtime_setting_sources,
+                            has_kwarg="reasoning" in kwargs,
+                        ),
+                    )
                     before_usage = _usage_total_calls(self.client_manager, candidate)
                     response = _dispatch(
                         self.client_manager,
                         candidate,
                         request_messages,
                         credential_provider=self.credential_provider,
-                        max_tokens=_int_kwarg(
-                            kwargs.get("max_tokens"),
-                            _effective_int(candidate, "max_output_tokens", self.max_tokens),
-                        ),
-                        temperature=_optional_float_kwarg(
-                            kwargs.get("temperature"),
-                            self.temperature
-                            if self.temperature is not None
-                            else _effective_optional_float(candidate, "temperature"),
-                        ),
-                        reasoning=_bool_kwarg(
-                            kwargs.get("reasoning"),
-                            self.thinking_enabled
-                            if self.thinking_enabled is not None
-                            else _effective_bool(candidate, "reasoning.enabled", False),
-                        ),
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        reasoning=reasoning,
                         thinking_budget_tokens=_optional_int_kwarg(
                             kwargs.get("thinking_budget_tokens"),
                             _effective_optional_int(candidate, "reasoning.budget_tokens"),
@@ -236,7 +282,7 @@ class GatewayChatModel(BaseChatModel):
                             usage["prompt_tokens"],
                             usage["completion_tokens"],
                         )
-                    return self._build_chat_result(response, candidate)
+                    return self._build_chat_result(response, candidate, actual_runtime_settings)
                 except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
                     classification = classify_exception(exc, route_id=candidate.route_id)
                     failure = _failure_record(candidate, exc, classification.decision)
@@ -297,6 +343,7 @@ class GatewayChatModel(BaseChatModel):
             phase_name=self.phase_name,
             probe_before_call=self.probe_before_call,
             thinking_enabled=self.thinking_enabled,
+            runtime_setting_sources=self.runtime_setting_sources,
             bound_tools=tuple(_normalise_tool(tool) for tool in tools),
             tool_choice=tool_choice,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
@@ -320,9 +367,15 @@ class GatewayChatModel(BaseChatModel):
         self,
         response: Mapping[str, object] | AIMessage,
         candidate: ResolvedRoute,
+        actual_runtime_settings: ActualRuntimeSettings | None = None,
     ) -> ChatResult:
+        actual_runtime_settings = actual_runtime_settings or {}
         if isinstance(response, AIMessage):
-            return self._build_chat_result_from_ai_message(response, candidate)
+            return self._build_chat_result_from_ai_message(
+                response,
+                candidate,
+                actual_runtime_settings,
+            )
 
         usage = _usage_from_response(response)
         finish_reason = _optional_text(response.get("finish_reason"))
@@ -338,6 +391,7 @@ class GatewayChatModel(BaseChatModel):
                 "finish_reason": finish_reason,
                 "usage": usage,
                 "effective_runtime_settings": _runtime_settings_metadata(candidate),
+                "actual_runtime_settings": actual_runtime_settings,
             },
         )
         return ChatResult(
@@ -362,6 +416,7 @@ class GatewayChatModel(BaseChatModel):
                 "canonical_id": candidate.canonical_id,
                 "protocol": candidate.protocol,
                 "effective_runtime_settings": _runtime_settings_metadata(candidate),
+                "actual_runtime_settings": actual_runtime_settings,
             },
         )
 
@@ -369,7 +424,9 @@ class GatewayChatModel(BaseChatModel):
         self,
         response: AIMessage,
         candidate: ResolvedRoute,
+        actual_runtime_settings: ActualRuntimeSettings | None = None,
     ) -> ChatResult:
+        actual_runtime_settings = actual_runtime_settings or {}
         usage = _usage_from_ai_message(response)
         provider_metadata = dict(response.response_metadata or {})
         finish_reason = _optional_text(
@@ -385,6 +442,7 @@ class GatewayChatModel(BaseChatModel):
             "finish_reason": finish_reason,
             "usage": usage,
             "effective_runtime_settings": _runtime_settings_metadata(candidate),
+            "actual_runtime_settings": actual_runtime_settings,
         }
         message = response.model_copy(update={"response_metadata": response_metadata})
         return ChatResult(
@@ -409,6 +467,7 @@ class GatewayChatModel(BaseChatModel):
                 "canonical_id": candidate.canonical_id,
                 "protocol": candidate.protocol,
                 "effective_runtime_settings": _runtime_settings_metadata(candidate),
+                "actual_runtime_settings": actual_runtime_settings,
             },
         )
 
@@ -487,6 +546,96 @@ def _runtime_settings_metadata(candidate: ResolvedRoute) -> dict[str, dict[str, 
         key: setting.model_dump(mode="json")
         for key, setting in candidate.effective_runtime_settings.items()
     }
+
+
+def _actual_runtime_settings(
+    candidate: ResolvedRoute,
+    *,
+    max_tokens: int,
+    max_tokens_source: str,
+    temperature: float | None,
+    temperature_source: str,
+    reasoning: bool,
+    reasoning_source: str,
+) -> ActualRuntimeSettings:
+    return {
+        "max_output_tokens": {
+            "value": max_tokens,
+            "source": max_tokens_source,
+        },
+        "temperature": {
+            "authored_value": temperature,
+            "provider_value": provider_temperature_from_authored(
+                temperature,
+                candidate.protocol,
+            ),
+            "source": temperature_source,
+            "protocol": candidate.protocol,
+        },
+        "reasoning.enabled": {
+            "value": reasoning,
+            "source": reasoning_source,
+        },
+    }
+
+
+def _runtime_source(
+    candidate: ResolvedRoute,
+    key: str,
+    runtime_setting_sources: Mapping[str, str],
+    *,
+    has_kwarg: bool,
+) -> str:
+    if has_kwarg:
+        return "call_override"
+    source = runtime_setting_sources.get(key)
+    if source:
+        return source
+    setting = candidate.effective_runtime_settings.get(key)
+    if setting is not None and setting.source:
+        return str(setting.source)
+    return "model_default"
+
+
+def _runtime_max_tokens(
+    candidate: ResolvedRoute,
+    model_max_tokens: int,
+    runtime_setting_sources: Mapping[str, str],
+    kwarg_value: object,
+) -> int:
+    if kwarg_value is not None:
+        return _int_kwarg(kwarg_value, model_max_tokens)
+    if runtime_setting_sources.get("max_output_tokens") == "call_override":
+        return model_max_tokens
+    return _effective_int(candidate, "max_output_tokens", model_max_tokens)
+
+
+def _runtime_temperature(
+    candidate: ResolvedRoute,
+    model_temperature: float | None,
+    runtime_setting_sources: Mapping[str, str],
+    kwarg_value: object,
+) -> float | None:
+    if kwarg_value is not None:
+        return _optional_float_kwarg(kwarg_value, model_temperature)
+    if runtime_setting_sources.get("temperature") == "call_override":
+        return model_temperature
+    return _effective_optional_float(candidate, "temperature")
+
+
+def _runtime_reasoning(
+    candidate: ResolvedRoute,
+    model_thinking_enabled: bool | None,
+    runtime_setting_sources: Mapping[str, str],
+    kwarg_value: object,
+    *,
+    has_kwarg: bool,
+) -> bool:
+    if has_kwarg:
+        return _bool_kwarg(kwarg_value, False)
+    if runtime_setting_sources.get("reasoning.enabled") == "call_override":
+        return bool(model_thinking_enabled)
+    return _effective_bool(candidate, "reasoning.enabled", False)
 
 
 def _default_client_manager() -> Any:

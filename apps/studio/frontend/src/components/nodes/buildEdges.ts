@@ -15,17 +15,12 @@ export const OUTPUT_ID = '__global_output__'
 
 type TraceEventInput = CallbackEvent | EventEnvelope
 
-export function isBoundaryContextEdge(source: string, target: string): boolean {
-  return source === INPUT_ID || source === OUTPUT_ID || target === INPUT_ID || target === OUTPUT_ID
-}
-
 export function createContextEdge(source: string, target: string, traceEvents: TraceEventInput[] = []): Edge<ContextEdgeData> {
   // hasTraceData reflects whether the run actually dispatched data across this
   // edge — i.e. a matching `input_dispatch` event exists in the stream. Without
   // a run (empty events) every edge is inert, replacing the old `!isGlobal`
   // design-time heuristic.
   const hasTraceData = edgeContextFromEvents(traceEvents, source, target) !== null
-  const isBoundaryEdge = isBoundaryContextEdge(source, target)
   return {
     id: `${source}->${target}`,
     source,
@@ -37,7 +32,7 @@ export function createContextEdge(source: string, target: string, traceEvents: T
       hasTraceData,
       sourcePhaseId: source,
       targetPhaseId: target,
-      showContextControl: !isBoundaryEdge,
+      showContextControl: true,
     },
     style: { strokeWidth: 1.5 },
   }

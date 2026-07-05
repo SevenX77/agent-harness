@@ -67,9 +67,13 @@ supersedes:
         report.json
         cases/
           <case_id>.json
-    test_inputs/
+    import_files/
       <input_id>.json
-      index.json
+      <input_import_name>/
+        ...
+      <node_id>/
+        <node_import_name>/
+          ...
     copilot/
       sessions/
         <skill_id>/
@@ -83,10 +87,10 @@ supersedes:
 
 运行时规则：
 
-- Studio 默认可以把 Engine `workspace_dir` 传为 `<skill_root>/.workspace/`。其他 host 也可以传入别的绝对路径，但内部户型仍是同一套 `runs/`、`golden/`、`test_inputs/`。
+- Studio 默认可以把 Engine `workspace_dir` 传为 `<skill_root>/.workspace/`。其他 host 也可以传入别的绝对路径，但内部户型仍是同一套 `runs/`、`golden/`、`import_files/`。
 - `run_skill` / `predict_skill` 的输出统一进入 `<workspace_dir>/runs/<run_id>/`。
 - `evaluate_golden_baseline` 读写 `<workspace_dir>/golden/<baseline_id>/`。
-- 可复用输入样本放在 `<workspace_dir>/test_inputs/`。
+- 可复用输入样本、Input 导入文件和 Test Inputs 新建文件统一放在 `<workspace_dir>/import_files/` 根目录；节点导入文件放在 `<workspace_dir>/import_files/<node_id>/` 下。
 - Predict 没有专属 `predict/` 或 `latest_predict.json`。
 - golden 是会失效的临时优化产物，不能写进 `phases/<phase_id>/`，也不能作为 skill 源码字段参与 compile。
 

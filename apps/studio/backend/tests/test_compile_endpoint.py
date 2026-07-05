@@ -12,7 +12,7 @@ def test_compile_success_returns_manifest_summary(
     studio_roots: tuple[Path, Path],
 ) -> None:
     skills_dir, _workspaces_dir = studio_roots
-    input_dir = skills_dir / "text-segmentation" / ".workspace" / "test_inputs"
+    input_dir = skills_dir / "text-segmentation" / ".workspace" / "import_files"
     input_dir.mkdir(parents=True)
     (input_dir / "case-a.json").write_text('{"input_text":"chapter one"}', encoding="utf-8")
 

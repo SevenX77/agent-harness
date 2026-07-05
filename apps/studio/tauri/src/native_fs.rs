@@ -279,7 +279,7 @@ pub fn write_workspace_file_impl(
     write_workspace_file_impl_inner(workspace_root, path, content, expected_hash, false)
 }
 
-/// No-clobber counterpart for create-only flows such as `.workspace/test_inputs`.
+/// No-clobber counterpart for create-only flows such as `.workspace/import_files`.
 /// The final publish uses a hard link from a sibling temp file so target
 /// existence is checked atomically by the filesystem instead of via read-then-write.
 pub fn create_workspace_file_if_absent_impl(
@@ -784,7 +784,7 @@ fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
         }
     }
 
-    if parts.len() == 3 && parts[0] == ".workspace" && parts[1] == "test_inputs" {
+    if parts.len() == 3 && parts[0] == ".workspace" && parts[1] == "import_files" {
         let file_name = &parts[2];
         if let Some(stem) = file_name.strip_suffix(".json") {
             if is_safe_test_input_name(stem) {
@@ -864,7 +864,7 @@ fn is_safe_phase_dir_name(name: &str) -> bool {
 }
 
 /// Delete only the native-fs surfaces currently exposed by Studio:
-/// `.workspace/test_inputs/<safe>.json` files and `.workspace/golden/<safe-id>`
+/// `.workspace/import_files/<safe>.json` files and `.workspace/golden/<safe-id>`
 /// baseline directories, plus root `phases/<safe-id>` directories and root
 /// `subgraph/<safe-id>` child-graph directories (the auto-scaffolded subgraph
 /// landing). This avoids exposing a general recursive delete.
@@ -1758,16 +1758,16 @@ mod tests {
     #[test]
     fn create_workspace_file_if_absent_refuses_to_overwrite_existing_file() {
         let root = temp_root("write-create-existing");
-        std::fs::create_dir_all(root.join(".workspace/test_inputs")).unwrap();
+        std::fs::create_dir_all(root.join(".workspace/import_files")).unwrap();
         std::fs::write(
-            root.join(".workspace/test_inputs/case.json"),
+            root.join(".workspace/import_files/case.json"),
             "{\"existing\":true}",
         )
         .unwrap();
 
         let error = create_workspace_file_if_absent_impl(
             root.to_str().unwrap(),
-            ".workspace/test_inputs/case.json",
+            ".workspace/import_files/case.json",
             "{\"incoming\":true}",
         )
         .expect_err("existing file must reject no-clobber create");
@@ -1780,7 +1780,7 @@ mod tests {
             WriteWorkspaceError::HashConflict { .. } => panic!("unexpected hash conflict"),
         }
         assert_eq!(
-            std::fs::read_to_string(root.join(".workspace/test_inputs/case.json")).unwrap(),
+            std::fs::read_to_string(root.join(".workspace/import_files/case.json")).unwrap(),
             "{\"existing\":true}"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -1792,14 +1792,14 @@ mod tests {
 
         let outcome = create_workspace_file_if_absent_impl(
             root.to_str().unwrap(),
-            ".workspace/test_inputs/case.json",
+            ".workspace/import_files/case.json",
             "{\"created\":true}",
         )
         .expect("create missing file");
 
         assert_eq!(outcome.hash, sha256_hex("{\"created\":true}"));
         assert_eq!(
-            std::fs::read_to_string(root.join(".workspace/test_inputs/case.json")).unwrap(),
+            std::fs::read_to_string(root.join(".workspace/import_files/case.json")).unwrap(),
             "{\"created\":true}"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -1969,9 +1969,9 @@ mod tests {
         let root = temp_root("write-final-parent-check");
         let outside = temp_root("write-final-parent-outside");
         std::fs::create_dir_all(root.join(".workspace")).unwrap();
-        symlink_path(&outside, &root.join(".workspace/test_inputs"));
+        symlink_path(&outside, &root.join(".workspace/import_files"));
 
-        let error = ensure_final_parent_inside_workspace(&root, ".workspace/test_inputs/case.json")
+        let error = ensure_final_parent_inside_workspace(&root, ".workspace/import_files/case.json")
             .expect_err("final parent symlink escape rejected");
 
         assert!(
@@ -2244,10 +2244,10 @@ mod tests {
     #[test]
     fn delete_workspace_path_allows_test_input_file_golden_baseline_and_phase_dirs_only() {
         let root = temp_root("delete-allowlist");
-        std::fs::create_dir_all(root.join(".workspace/test_inputs")).unwrap();
+        std::fs::create_dir_all(root.join(".workspace/import_files")).unwrap();
         std::fs::create_dir_all(root.join(".workspace/golden/run-1")).unwrap();
         std::fs::create_dir_all(root.join("phases/review")).unwrap();
-        std::fs::write(root.join(".workspace/test_inputs/case.json"), "{}").unwrap();
+        std::fs::write(root.join(".workspace/import_files/case.json"), "{}").unwrap();
         std::fs::write(root.join(".workspace/golden/run-1/result.json"), "{}").unwrap();
         std::fs::write(
             root.join("phases/review/LOGIC.md"),
@@ -2255,14 +2255,14 @@ mod tests {
         )
         .unwrap();
 
-        delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/test_inputs/case.json")
+            delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/import_files/case.json")
             .expect("delete test input file");
         delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/golden/run-1")
             .expect("delete golden baseline dir");
         delete_workspace_path_impl(root.to_str().unwrap(), "phases/review")
             .expect("delete phase dir");
 
-        assert!(!root.join(".workspace/test_inputs/case.json").exists());
+        assert!(!root.join(".workspace/import_files/case.json").exists());
         assert!(!root.join(".workspace/golden/run-1").exists());
         assert!(!root.join("phases/review").exists());
         let _ = std::fs::remove_dir_all(&root);
@@ -2355,14 +2355,14 @@ mod tests {
     #[test]
     fn delete_workspace_path_refuses_arbitrary_dirs_and_files() {
         let root = temp_root("delete-arbitrary");
-        std::fs::create_dir_all(root.join(".workspace/test_inputs/nested")).unwrap();
+        std::fs::create_dir_all(root.join(".workspace/import_files/nested")).unwrap();
         std::fs::create_dir_all(root.join("phases/draft/nested")).unwrap();
-        std::fs::write(root.join(".workspace/test_inputs/nested/child.json"), "{}").unwrap();
+        std::fs::write(root.join(".workspace/import_files/nested/child.json"), "{}").unwrap();
         std::fs::write(root.join("phases/draft/nested/child.md"), "child").unwrap();
         std::fs::write(root.join("GRAPH.md"), "graph").unwrap();
 
         let dir_error =
-            delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/test_inputs/nested")
+            delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/import_files/nested")
                 .expect_err("arbitrary directory delete rejected");
         let file_error = delete_workspace_path_impl(root.to_str().unwrap(), "GRAPH.md")
             .expect_err("arbitrary file delete rejected");
@@ -2382,7 +2382,7 @@ mod tests {
             nested_phase_error.contains("not allowed"),
             "unexpected nested phase error: {nested_phase_error}"
         );
-        assert!(root.join(".workspace/test_inputs/nested").exists());
+        assert!(root.join(".workspace/import_files/nested").exists());
         assert!(root.join("phases/draft/nested").exists());
         assert!(root.join("GRAPH.md").exists());
         let _ = std::fs::remove_dir_all(&root);

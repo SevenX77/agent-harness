@@ -287,9 +287,9 @@ describe('buildSubgraphExpansion', () => {
 
     expect(internal).toHaveLength(3)
     expect(internal.every((edge) => edge.type === 'contextEdge')).toBe(true)
-    expect(inputEdge?.data?.showContextControl).toBe(false)
+    expect(inputEdge?.data?.showContextControl).toBe(true)
     expect(phaseEdge?.data?.showContextControl).toBe(true)
-    expect(outputEdge?.data?.showContextControl).toBe(false)
+    expect(outputEdge?.data?.showContextControl).toBe(true)
     expect(internal.every((edge) => edge.data?.sourcePhaseId === edge.source)).toBe(true)
     expect(internal.every((edge) => edge.data?.targetPhaseId === edge.target)).toBe(true)
     expect(inputEdge).toBeDefined()

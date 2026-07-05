@@ -3,7 +3,7 @@
 Drives the real lifecycle on the running app:
 - Open the e2e-fast skill, switch to the Input (i/o) panel.
 - In the Test Inputs section, type a name + JSON and Save -> the row appears
-  and a `<name>.json` lands under `.workspace/test_inputs/` on disk.
+  and a `<name>.json` lands under `.workspace/import_files/` on disk.
 - Delete the row -> it disappears and the file is removed.
 
 This is the browser-driven (mouse-sim) verification of the backend CRUD added
@@ -58,7 +58,7 @@ def test_io_panel_create_and_delete_test_input(
         / "skills"
         / "e2e-fast"
         / ".workspace"
-        / "test_inputs"
+        / "import_files"
         / f"{INPUT_NAME}.json"
     )
     assert not input_file.exists(), f"unexpected pre-existing {input_file}"

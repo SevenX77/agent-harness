@@ -2,13 +2,13 @@
  "id": "n5_edge_impl",
  "title": "N5.3 边 dot Context 篡改 · 实施详情",
  "design_ref": "n5_edge_design",
- "intro": "本页是 dot 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_edge_design(原子 #7–#9 + #14)。代码按「文件名 + 函数/对象名」引用。核心结论:运行期只读黑板查看(#7)、篡改编辑(#8,Monaco 已达成 Q3)与篡改续跑链路(#9)已打通;**2026-07-02 新增目标 #14 dot 静态推断**(未跑时按拓扑+io 声明推导该边字段,替代空态)未实施。续跑/事件机制见 mech_n5_resume / mech_n5_events。",
+ "intro": "本页是 dot 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_edge_design(原子 #7–#9 + #14)。代码按「文件名 + 函数/对象名」引用。核心结论:运行期只读黑板查看(#7)、篡改编辑(#8,Monaco 已达成 Q3)与篡改续跑链路(#9)已打通;**2026-07-02 新增目标 #14 dot 静态推断**已实施。2026-07-05 buildEdges/createContextEdge 取消 IO 边界特判,所有真实 contextEdge(含 Input→phase、phase→Output)都显示 dot;子图 parent↔group bridge 仍是装饰线,不显示 dot。续跑/事件机制见 mech_n5_resume / mech_n5_events。",
  "functions": [
   {
    "n": 7,
    "cap": "edge-blackboard-readonly-view",
    "design_ref": "atom-7",
-   "current": "现状:符合。点边 dot(ContextEdge.tsx)→ setSelectedEdge + 切 timeline 面板 → edgeContextFromEvents(lib/edge-context.ts)从同一份事件流扫该边最后一条 input_dispatch/edge_transition 取 blackboard_snapshot/changed_keys/checkpoint 元数据 → EdgeContextView.tsx 以只读键值 + changed_keys 高亮徽章展示(含 transition 头、原始 trace frame);无匹配事件返回 null 显空态(非 mock)。",
+   "current": "现状:符合。点任意真实 contextEdge 的边 dot(ContextEdge.tsx,含 Input→phase 与 phase→Output)→ setSelectedEdge + 切 timeline 面板 → edgeContextFromEvents(lib/edge-context.ts)从同一份事件流扫该边最后一条 input_dispatch/edge_transition 取 blackboard_snapshot/changed_keys/checkpoint 元数据 → EdgeContextView.tsx 以只读键值 + changed_keys 高亮徽章展示(含 transition 头、原始 trace frame);无匹配事件返回 null 显空态(非 mock)。buildEdges/createContextEdge 的 showContextControl 统一为 true;只有 subgraph-expansion 的 parent↔group bridge 显式 false。",
    "gap": "符合设计(只读底座对得上,数据真实非 mock)。",
    "fe_status": "符合",
    "be_status": "已实现",
@@ -66,6 +66,7 @@
    ],
    "shots": [
     "点边 dot 展开该边真实黑板快照(只读)+ changed_keys 高亮",
+    "Input→phase 和 phase→Output 边界边同样显示 dot;parent↔subgraph group bridge 不显示 dot",
     "无匹配事件时不回退 mock(#14 落地后该态显示静态推断)"
    ],
    "fe_status": "符合",
@@ -74,7 +75,8 @@
     "无匹配事件 → 断言返回 null、不回退 mock(该态的展示升级为静态推断,归 #14)。"
    ],
    "layer2": [
-    "真跑:真跑后点一条边 dot,确认展开的是该边上轮真实黑板、变更键高亮,截图。"
+    "真跑:真跑后点一条边 dot,确认展开的是该边上轮真实黑板、变更键高亮,截图。",
+    "真机/组件:确认 Input 后第一条边与 Output 前最后一条边都可点 dot;确认 subgraph parent↔group bridge 仍无 dot。"
    ]
   },
   {

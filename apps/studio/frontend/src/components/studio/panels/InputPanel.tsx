@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react"
+import { useMemo, useState, type ComponentProps } from "react"
 import { AlertTriangle, ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
 import type { LintError, SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import {
   applyGraphArtifacts,
   applyIoInputChecks,
   declaredInputFieldNames,
+  fileFieldsInImportScope,
   fileFieldsOf,
   graphArtifactsOf,
   reconcileInputFields,
@@ -347,7 +348,12 @@ export function InputPanel({
   // node this reconciles io.inputs against the upstream blackboard; for the Input
   // boundary / GRAPH.md it flags declared graph inputs with no source.
   const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "")
-  const declaredFiles = fileFieldsOf(view.content)
+  const importNodeIds = useMemo(
+    () => new Set((skillDetail?.graph_topology ?? []).map((phase) => phase.id)),
+    [skillDetail?.graph_topology],
+  )
+  const importNodeId = view.isGraphLevel ? null : selectedNode?.id ?? null
+  const declaredFiles = fileFieldsInImportScope(fileFieldsOf(view.content), importNodeId, importNodeIds)
   const artifacts = graphArtifactsOf(skillDetail)
   const graphContent = skillDetail?.files?.["GRAPH.md"] ?? ""
   const perItemCount = perItemCountOf(fileFieldsOf(graphContent))
@@ -404,6 +410,7 @@ export function InputPanel({
                           blackboard={blackboard}
                           declaredFiles={declaredFiles}
                           declaredInputNames={declaredInputFieldNames(view.content)}
+                          importNodeId={importNodeId}
                           onSave={handleInputConfigSave}
                           onFileOpen={onFileOpen}
                           isGraphInput={view.isGraphLevel}

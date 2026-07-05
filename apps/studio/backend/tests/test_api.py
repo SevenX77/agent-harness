@@ -761,7 +761,7 @@ def test_batch_run_starts_runs_from_test_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     skills_dir, _workspaces_dir = studio_roots
-    inputs_dir = skills_dir / "text-segmentation" / ".workspace" / "test_inputs"
+    inputs_dir = skills_dir / "text-segmentation" / ".workspace" / "import_files"
     inputs_dir.mkdir(parents=True)
     for index in range(3):
         (inputs_dir / f"case-{index}.json").write_text(

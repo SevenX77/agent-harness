@@ -98,7 +98,7 @@ max_iterations: 5
 
 
 def _write_test_input(skills_dir: Path, content: dict[str, object], *, name: str = "case-a") -> None:
-    path = skills_dir / AGENT_SKILL / ".workspace" / "test_inputs" / f"{name}.json"
+    path = skills_dir / AGENT_SKILL / ".workspace" / "import_files" / f"{name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(content), encoding="utf-8")
 
@@ -229,7 +229,7 @@ def test_compile_fails_when_required_test_input_is_missing(
     assert "test input" in body["detail"].lower()
     assert body["errors"] == [
         {
-            "file": ".workspace/test_inputs",
+            "file": ".workspace/import_files",
             "line": None,
             "field": "chapter_content",
             "severity": "fatal",
@@ -257,7 +257,7 @@ def test_compile_fails_when_test_input_violates_graph_input_schema(
     body = response.json()
     assert body["code"] == "compile_failed"
     assert "test input" in body["detail"].lower()
-    assert body["errors"][0]["file"] == ".workspace/test_inputs/case-a.json"
+    assert body["errors"][0]["file"] == ".workspace/import_files/case-a.json"
     assert body["errors"][0]["field"] == "chapter_content"
     assert body["errors"][0]["error_code"] == "STUDIO_TEST_INPUT_SCHEMA_INVALID"
     assert "string" in body["errors"][0]["message"]

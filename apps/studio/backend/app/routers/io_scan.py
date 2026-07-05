@@ -200,9 +200,11 @@ def scan_path(request: ScanRequest) -> dict[str, Any]:
 class ImportRequest(BaseModel):
     path: str
     name: str | None = None
+    node_id: str | None = None
 
 
 _IMPORT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_NODE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 skill_io_router = APIRouter(prefix="/api/skills/{skill_id}/io", tags=["io"])
 
@@ -220,7 +222,7 @@ def _rebase_entry_paths(entries: list[dict[str, Any]], workspace_root: Path) -> 
 
 @skill_io_router.post("/import")
 def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, Any]:
-    """Copy an external file/folder into ``.workspace/imports/<name>/``.
+    """Copy an external file/folder into ``.workspace/import_files/``.
 
     Imports are runtime workspace data (same class as runs/ and golden/ that
     the backend already writes), NOT skill source -- so this write does not go
@@ -238,9 +240,14 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
     raw_name = request.name or (source.stem if source.is_file() else source.name)
     if not _IMPORT_NAME_RE.match(raw_name or ""):
         raise HTTPException(status_code=422, detail=f"unsafe import name: {raw_name!r}")
+    if request.node_id is not None and not _NODE_ID_RE.match(request.node_id):
+        raise HTTPException(status_code=422, detail=f"unsafe node id: {request.node_id!r}")
 
     workspace_root = (resolve_skill_dir(skill_id) / ".workspace").resolve()
-    target_dir = workspace_root / "imports" / raw_name
+    import_root = workspace_root / "import_files"
+    if request.node_id is not None:
+        import_root = import_root / request.node_id
+    target_dir = import_root / raw_name
     if target_dir.exists():
         shutil.rmtree(target_dir)
     if source.is_file():
@@ -255,4 +262,4 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
 
     entries = _scan_dir(target_dir, depth=1)
     _rebase_entry_paths(entries, workspace_root)
-    return {"dir": f"imports/{raw_name}", "entries": entries}
+    return {"dir": target_dir.relative_to(workspace_root).as_posix(), "entries": entries}

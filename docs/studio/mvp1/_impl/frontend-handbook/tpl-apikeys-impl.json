@@ -9,7 +9,7 @@
    "n": 16,
    "cap": "secret-hydration",
    "design_ref": "atom-16",
-   "current": "现状:已实现且符合。进 API Keys 页时初始加载走 getCredentials()(llm.ts,默认 hydrateSecrets=true),它先 getRegistry() 拿一份全量打码快照(每个 endpoint 的 api_key='**********'),再调 hydrateEndpointSecrets(llm.ts)逐个 endpoint 把掩码值换回真 key——只对 api_key 仍是掩码值的 endpoint 发 GET /registry/endpoints/{id}/secret(getEndpointSecret,llm.ts),换回的明文写进模块级本地缓存 knownEndpointSecrets(llm.ts,一个 endpointId→真 key 的字典)。下次拉快照时 cacheRegistry→hydrateRegistryWithKnownSecrets(llm.ts)会先用 knownEndpointSecrets 把已知 endpoint 的掩码就地换回,所以已 hydrate 过的 key 不会再打第二次 secret 请求。窗口聚焦重拉走 handleFocus(SettingsPage.tsx),只 setCredentials+setDrafts,不额外触发对已知 key 的 secret 请求。明文只活在前端本地缓存,从不写回后端。",
+   "current": "现状:已实现且符合。进 API Keys 页时初始加载走 getCredentials()(llm.ts,默认 hydrateSecrets=true),它先 getRegistry() 拿一份全量打码快照(每个 endpoint 的 api_key='**********'),再调 hydrateEndpointSecrets(llm.ts)逐个 endpoint 把掩码值换回真 key——只对 api_key 仍是掩码值的 endpoint 发 GET /registry/endpoints/{id}/secret(getEndpointSecret,llm.ts),换回的明文写进模块级本地缓存 knownEndpointSecrets(llm.ts,一个 endpointId→真 key 的字典)。下次拉快照时 cacheRegistry→hydrateRegistryWithKnownSecrets(llm.ts)会先用 knownEndpointSecrets 把已知 endpoint 的掩码就地换回,所以已 hydrate 过的 key 不会再打第二次 secret 请求。窗口聚焦不再重拉;registry_changed 事件或用户保存后的强制刷新才会走 getCredentials({force:true}) 更新快照。明文只活在前端本地缓存,从不写回后端。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /registry/endpoints/{id}/secret(scoped reveal 单 endpoint 明文)+ GET /registry 已实现;后端实施手册 D5.2 CredentialResolver(secret_handle/masked metadata,后端实施手册:455)已收口=ok,secret never leaves Gateway 的边界已立。"
@@ -151,7 +151,7 @@
    "n": 31,
    "cap": "registry-restore",
    "design_ref": "atom-31",
-   "current": "现状:已实现且符合。刷新/重进页面的初始加载 useEffect(SettingsPage.tsx)调 getCredentials()(默认 hydrateSecrets=true),getRegistry()→registryToCredentials(llm.ts)把全量 endpoint+route+状态+已发现模型转成 UI 凭证态(endpointToCredential,llm.ts),setCredentials+setDrafts(draftsFromCredentials,provider-utils.ts)恢复每张卡;key 经 #16 的 hydrateEndpointSecrets 换回真值。窗口聚焦 handleFocus(SettingsPage.tsx)、WebSocket registry_changed 事件(SettingsPage.tsx)各再拉一次。前端只投影 registry,不持第二份真相(切 tab/刷新不丢)。",
+   "current": "现状:已实现且符合。刷新/重进页面的初始加载 useEffect(SettingsPage.tsx)调 getCredentials()(默认 hydrateSecrets=true),getRegistry()→registryToCredentials(llm.ts)把全量 endpoint+route+状态+已发现模型转成 UI 凭证态(endpointToCredential,llm.ts),setCredentials+setDrafts(draftsFromCredentials,provider-utils.ts)恢复每张卡;key 经 #16 的 hydrateEndpointSecrets 换回真值。窗口聚焦已不再重拉;WebSocket 连接/重连只恢复订阅,不触发数据刷新。只有 registry_changed 事件或用户写入后的 getCredentials({force:true}) 才会强制绕过缓存重拉。前端只投影 registry,不持第二份真相(切 tab/刷新不丢)。",
    "gap": "符合设计(只投影 registry、不持第二份),无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /registry 返回全量 endpoint/route/role 打码快照(恢复 key 占位/状态/Available Models),key 真值另走 #16 secret 端点。后端实施手册 D5/D6 已收口=ok。"
@@ -558,7 +558,7 @@
    "layer1": [
     "刷新/重进页 → 断言 getCredentials() 把全量 endpoint+route+状态恢复成每张卡。",
     "断言只投影 registry、不持第二份(切 tab/刷新不丢)。",
-    "窗口聚焦 / WebSocket registry_changed 各再拉一次。"
+    "窗口聚焦 / WebSocket 重连不重拉;WebSocket registry_changed 才强制重拉一次。"
    ],
    "layer2": [
     "配好几张卡后刷新页面。",

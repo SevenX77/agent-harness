@@ -3,7 +3,11 @@ import { fetcher } from '../api/client'
 import type { SkillTemplate } from '../api/types'
 
 export function useTemplates() {
-  const { data, error, isLoading, mutate } = useSWR<SkillTemplate[]>('/templates', fetcher)
+  const { data, error, isLoading, mutate } = useSWR<SkillTemplate[]>('/templates', fetcher, {
+    revalidateIfStale: false,
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+  })
 
   return {
     templates: data ?? [],
@@ -12,4 +16,3 @@ export function useTemplates() {
     mutateTemplates: mutate,
   }
 }
-

@@ -401,8 +401,8 @@ export function CopilotPanel({
     setDraftJudgeContext((current) => nextDraftJudgeContext(draft, current, { skillId, view, judgeRefs }))
   }, [draft, skillId, view, judgeRefs])
 
-  const refreshRegistry = useCallback(() => {
-    getRegistry()
+  const refreshRegistry = useCallback((options: { force?: boolean } = {}) => {
+    getRegistry(options)
       .then((nextRegistry) => {
         setRegistry(nextRegistry)
       })
@@ -411,8 +411,8 @@ export function CopilotPanel({
       })
   }, [])
 
-  const refreshRoles = useCallback(() => {
-    getRoles()
+  const refreshRoles = useCallback((options: { force?: boolean } = {}) => {
+    getRoles(options)
       .then((nextRoles) => {
         setRolesData(nextRoles)
       })
@@ -422,12 +422,8 @@ export function CopilotPanel({
   }, [])
 
   useStudioEventStream({
-    onRegistryChanged: refreshRegistry,
-    onRolesChanged: refreshRoles,
-    onResync: () => {
-      refreshRegistry()
-      refreshRoles()
-    },
+    onRegistryChanged: () => refreshRegistry({ force: true }),
+    onRolesChanged: () => refreshRoles({ force: true }),
   })
 
   useEffect(() => {
@@ -519,21 +515,16 @@ export function CopilotPanel({
 
   useEffect(() => {
     let cancelled = false
-    const refresh = async () => {
+    void (async () => {
       const nextStatus = codeAssistantWorkspace
         ? await getCodeAssistantStatus(codeAssistantWorkspace)
         : inactiveCodeAssistantStatus
       if (!cancelled) {
         setCodeAssistantStatus(nextStatus)
       }
-    }
-    void refresh()
-    const interval = window.setInterval(() => {
-      void refresh()
-    }, 3000)
+    })()
     return () => {
       cancelled = true
-      window.clearInterval(interval)
     }
   }, [codeAssistantWorkspace])
 

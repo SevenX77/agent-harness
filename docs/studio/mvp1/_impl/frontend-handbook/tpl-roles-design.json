@@ -271,7 +271,7 @@
       "module": "角色意图",
       "func": "设计:Role settings 里的运行参数包含 thinking、max output tokens、temperature。temperature 默认显示 70%(authored 1.4/2),以 provider-neutral 0..2 为存储值,UI 用 0-100% 读数表达,运行时由 gateway 按 provider 协议映射到真实 provider scale。",
       "action": "用户在角色设置面板切 Thinking、填写 Max output tokens,或拖动 Temperature slider 后松手提交。",
-      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,1.4=>70%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 只更新本地 draft/readout,不得触发 HTTP 保存;onValueCommit 或 pointer/key/blur 等交互结束兜底才把最后一个 preview 提交给页面级 useDebouncedRolesSave,避免点轨道/拖拽后 UI 变了但没落盘。保存处于 pending/saving 时,新的保存需求覆盖旧的排队 payload,旧请求完成后只保存最新快照;roles_changed/focus 等外部刷新不得把旧服务端快照覆盖回本地 draft,必须等本轮保存收敛后再重取。roles YAML/API 保存 provider-neutral 0..2;缺失或 null 的 role temperature 在 Studio role authoring 层归一成默认 70%(authored 1.4),不再表示 model default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。",
+      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,1.4=>70%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 只更新本地 draft/readout,不得触发 HTTP 保存;onValueCommit 或 pointer/key/blur 等交互结束兜底才把最后一个 preview 提交给页面级 useDebouncedRolesSave,避免点轨道/拖拽后 UI 变了但没落盘。保存处于 pending/saving 时,新的保存需求覆盖旧的排队 payload,旧请求完成后只保存最新快照;roles_changed 等后端变更事件不得把旧服务端快照覆盖回本地 draft,必须等本轮保存收敛后再重取。窗口 focus 不是数据变更信号,不触发刷新。roles YAML/API 保存 provider-neutral 0..2;缺失或 null 的 role temperature 在 Studio role authoring 层归一成默认 70%(authored 1.4),不再表示 model default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。",
       "fe_modules": [],
       "be_contract": [
         {
@@ -557,9 +557,9 @@
       "cap": "role-projection-refresh",
       "track": "共",
       "module": "角色与可用模型加载",
-      "func": "设计:(被动)其它窗口改了 roles / 窗口聚焦回来 → 自动重投影刷新角色与可用模型,不丢、不显旧数据。",
-      "action": "无显式动作(其它窗口改 roles / 窗口聚焦 / WebSocket roles_changed 事件自动触发)。",
-      "fe_design": "其它窗口改 roles 或本窗口聚焦回来 / 收到 WebSocket roles_changed 事件 → 重拉 registry 快照 → 重投影角色卡 + 可用模型 + 测试态(测试态从后端持久化种子回填)。前端只投影 registry、不持第二份真相,所以重投影即与后端一致;切 tab / 刷新 / 多窗口改动都收敛到后端 SSOT。",
+      "func": "设计:(被动)其它窗口改了 roles → 后端广播 roles_changed 后自动重投影刷新角色与可用模型,不丢、不显旧数据。",
+      "action": "无显式动作(其它窗口改 roles 后,WebSocket roles_changed 事件自动触发;窗口聚焦不触发刷新)。",
+      "fe_design": "收到 WebSocket roles_changed 事件 → 重拉 roles + model groups 快照 → 重投影角色卡 + 可用模型 + 测试态(测试态从后端持久化种子回填);若角色数据尚未加载,只标 dirty,首次进入 LLM Roles/Copilot 时再拉。前端只投影后端快照、不持第二份真相,所以重投影即与后端一致;切 tab / 刷新 / 多窗口改动都收敛到后端 SSOT。窗口 focus、WebSocket 连接/重连不是数据变更信号,不得自行重拉。",
       "fe_modules": [
         {
           "name": "role 测试态投影",
@@ -568,8 +568,8 @@
       ],
       "be_contract": [
         {
-          "endpoint": "GET /api/llm/registry",
-          "purpose": "重拉全量快照(roles + model_groups + bundle)重投影。",
+          "endpoint": "GET /api/llm/roles + GET /api/llm/registry",
+          "purpose": "重拉 roles 与 registry 投影出的 model groups/bundle 快照后重投影。",
           "mechanism_ref": "roles_mech_materialize",
           "iface_ref": "iface-0"
         }

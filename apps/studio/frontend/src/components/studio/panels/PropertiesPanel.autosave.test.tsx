@@ -34,6 +34,13 @@ const toastMocks = vi.hoisted(() => ({
   warning: vi.fn(),
 }))
 
+const eventStreamMocks = vi.hoisted(() => ({
+  callbacks: null as null | {
+    onRegistryChanged: () => void
+    onRolesChanged: () => void
+  },
+}))
+
 vi.mock("@/api/client", () => ({
   getChildGraphTopology: apiMocks.getChildGraphTopology,
   getCompareCandidates: apiMocks.getCompareCandidates,
@@ -50,6 +57,18 @@ vi.mock("@/api/llm", () => ({
 
 vi.mock("sonner", () => ({
   toast: toastMocks,
+}))
+
+vi.mock("@/hooks/useStudioEventStream", () => ({
+  useStudioEventStream: (
+    callbacks: {
+      onRegistryChanged: () => void
+      onRolesChanged: () => void
+    },
+  ) => {
+    eventStreamMocks.callbacks = callbacks
+    return { connectionLost: false }
+  },
 }))
 
 vi.mock("@/components/ui/slider", () => ({
@@ -135,7 +154,11 @@ function emptyRoles(): RolesData {
   return { schema_version: 3, models: {}, providers: {}, roles: {} }
 }
 
-function rolesWithAnalystFallback(): RolesData {
+function rolesWithAnalystFallback(intent: Partial<{
+  thinking: boolean
+  max_output_tokens: number | null
+  temperature: number | null
+}> = {}): RolesData {
   return {
     schema_version: 3,
     providers: {},
@@ -156,9 +179,9 @@ function rolesWithAnalystFallback(): RolesData {
         },
         intent: {
           provider_preference: "manual_order",
-          thinking: true,
-          max_output_tokens: 1234,
-          temperature: 0.7,
+          thinking: intent.thinking ?? true,
+          max_output_tokens: intent.max_output_tokens ?? 1234,
+          temperature: intent.temperature ?? 0.7,
         },
         fallback_chain: [],
       },
@@ -226,6 +249,7 @@ describe("PropertiesPanel autosave", () => {
     apiMocks.putNodeLlmParams.mockResolvedValue({ enabled: false, thinking: null, max_output_tokens: null, temperature: null })
     toastMocks.error.mockReset()
     toastMocks.success.mockReset()
+    eventStreamMocks.callbacks = null
   })
 
   afterEach(() => {
@@ -640,7 +664,12 @@ describe("PropertiesPanel autosave", () => {
     act(() => root.unmount())
   })
 
-  it("clears local node custom params when the switch is disabled", async () => {
+  it("preserves stored node custom params when the switch is disabled and restores them when re-enabled", async () => {
+    await mutate("llm/roles", rolesWithAnalystFallback({
+      thinking: false,
+      max_output_tokens: 1234,
+      temperature: 1.4,
+    }), { revalidate: false })
     apiMocks.getNodeLlmParams.mockResolvedValue({
       nodes: {
         review: {
@@ -671,6 +700,7 @@ describe("PropertiesPanel autosave", () => {
     await settleEffects()
     expect(container.innerHTML).toContain(">35%<")
     expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("2,048")
+    expect((container.querySelector("[data-llm-node-thinking]") as HTMLButtonElement).getAttribute("aria-checked")).toBe("true")
 
     const toggle = container.querySelector("[data-llm-node-params-enabled]") as HTMLButtonElement
     act(() => {
@@ -680,12 +710,117 @@ describe("PropertiesPanel autosave", () => {
 
     expect(apiMocks.putNodeLlmParams).toHaveBeenCalledWith("demo", "review", {
       enabled: false,
-      thinking: null,
-      max_output_tokens: null,
-      temperature: null,
+      thinking: true,
+      max_output_tokens: 2048,
+      temperature: 0.7,
     })
-    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("")
-    expect(container.innerHTML).not.toContain(">35%<")
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("1,234")
+    expect((container.querySelector("[data-llm-node-thinking]") as HTMLButtonElement).getAttribute("aria-checked")).toBe("false")
+    expect(container.innerHTML).toContain(">70%<")
+
+    act(() => {
+      toggle.click()
+    })
+    await flushAutosave()
+
+    expect(apiMocks.putNodeLlmParams).toHaveBeenLastCalledWith("demo", "review", {
+      enabled: true,
+      thinking: true,
+      max_output_tokens: 2048,
+      temperature: 0.7,
+    })
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("2,048")
+    expect((container.querySelector("[data-llm-node-thinking]") as HTMLButtonElement).getAttribute("aria-checked")).toBe("true")
+    expect(container.innerHTML).toContain(">35%<")
+
+    act(() => root.unmount())
+  })
+
+  it("updates disabled custom model params from the live roles cache source", async () => {
+    await mutate("llm/roles", rolesWithAnalystFallback({
+      max_output_tokens: 1234,
+      temperature: 0.7,
+    }), { revalidate: false })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("1,234")
+    expect(container.innerHTML).toContain(">35%<")
+
+    await act(async () => {
+      await mutate("llm/roles", rolesWithAnalystFallback({
+        max_output_tokens: 3456,
+        temperature: 1.4,
+      }), { revalidate: false })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("3,456")
+    expect(container.innerHTML).toContain(">70%<")
+
+    act(() => root.unmount())
+  })
+
+  it("refreshes disabled custom model params from the roles_changed event source", async () => {
+    await mutate("llm/roles", rolesWithAnalystFallback({
+      max_output_tokens: 1234,
+      temperature: 0.7,
+    }), { revalidate: false })
+    const initialRoles = rolesWithAnalystFallback({
+      max_output_tokens: 1234,
+      temperature: 0.7,
+    })
+    const refreshedRoles = rolesWithAnalystFallback({
+      max_output_tokens: 3456,
+      temperature: 1.4,
+    })
+    llmMocks.getRoles.mockImplementation((options?: { force?: boolean }) => Promise.resolve(options?.force ? refreshedRoles : initialRoles))
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("1,234")
+    expect(container.innerHTML).toContain(">35%<")
+
+    await act(async () => {
+      eventStreamMocks.callbacks?.onRolesChanged()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(llmMocks.getRoles).toHaveBeenCalledWith({ force: true })
+    expect((container.querySelector("#node-max-output-review") as HTMLInputElement).value).toBe("3,456")
+    expect(container.innerHTML).toContain(">70%<")
 
     act(() => root.unmount())
   })

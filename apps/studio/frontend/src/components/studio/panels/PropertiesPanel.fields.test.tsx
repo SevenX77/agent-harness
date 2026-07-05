@@ -855,9 +855,9 @@ describe('PropertiesPanel - node LLM param overrides mapping', () => {
     })
     expect(nodeLlmParamsDraftToApi({ enabled: false, thinking: true, maxOutputTokens: '128000', temperature: '0.7' })).toEqual({
       enabled: false,
-      thinking: null,
-      max_output_tokens: null,
-      temperature: null,
+      thinking: true,
+      max_output_tokens: 128000,
+      temperature: 0.7,
     })
     expect(nodeLlmParamsDraftToApi({ enabled: true, thinking: null, maxOutputTokens: '', temperature: '' })).toEqual({
       enabled: true,

@@ -2,8 +2,10 @@
 
 Stored at ``<skill>/.workspace/node_llm_params.json`` as
 ``{"nodes": {node_id: {enabled, thinking?, max_output_tokens?, temperature?}}}``.
-Only enabled node overrides are kept. When enabled, an individual null/absent
-field inherits the role value. This mirrors the compare-candidates local store.
+Disabled entries with stored field values are kept as an inactive draft so the
+UI can restore them when custom params are re-enabled; a disabled entry with no
+field values clears the node. When enabled, an individual null/absent field
+inherits the role value. This mirrors the compare-candidates local store.
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ def write_node_llm_params(
     node_id: str,
     params: NodeLlmParams,
 ) -> NodeLlmParams:
-    """Replace one node's override. ``enabled=False`` clears the node entry."""
+    """Replace one node's override; empty disabled params clear the node entry."""
     nodes = read_node_llm_params(skill_dir)
     if params.is_empty():
         nodes.pop(node_id, None)

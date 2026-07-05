@@ -51,6 +51,14 @@ vi.mock("@/hooks/useDebouncedCredentialsSave", () => ({
   }),
 }))
 
+const llmRolesCacheMocks = vi.hoisted(() => ({
+  syncLlmRolesCache: vi.fn(),
+}))
+vi.mock("../llm-roles-cache", () => ({
+  LLM_ROLES_SWR_KEY: "llm/roles",
+  syncLlmRolesCache: llmRolesCacheMocks.syncLlmRolesCache,
+}))
+
 const mockRolesSave = vi.hoisted(() => ({ status: "idle" }))
 vi.mock("@/hooks/useDebouncedRolesSave", () => ({
   shouldApplyExternalRolesRefresh: (status: string) => status !== "pending" && status !== "saving",
@@ -108,6 +116,7 @@ describe("useSettingsPageController lifecycle", () => {
     mockRolesSave.status = "idle"
     mockEventStream.callbacks = null
     mockEventStream.connectionLost = false
+    llmRolesCacheMocks.syncLlmRolesCache.mockReset()
     capturedController = null
     container = document.createElement("div")
     document.body.appendChild(container)
@@ -229,6 +238,38 @@ describe("useSettingsPageController lifecycle", () => {
 
     expect(getRoles).toHaveBeenCalledTimes(getRolesCallsAfterInitialLoad + 1)
     expect(getModelGroups).toHaveBeenCalledTimes(getModelGroupsCallsAfterInitialLoad + 1)
+  })
+
+  it("syncs successful roles_changed refreshes into the shared roles cache", async () => {
+    configureApiToken("sidecar-token")
+    const initialRoles = { schema_version: 3, models: {}, providers: {}, roles: { initial: {} } }
+    const refreshedRoles = { schema_version: 3, models: {}, providers: {}, roles: { refreshed: {} } }
+    vi.mocked(getRoles)
+      .mockResolvedValueOnce(initialRoles as never)
+      .mockResolvedValueOnce(refreshedRoles as never)
+    vi.mocked(getModelGroups).mockResolvedValue([])
+
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    llmRolesCacheMocks.syncLlmRolesCache.mockClear()
+    act(() => {
+      mockEventStream.callbacks?.onRolesChanged()
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(capturedController?.rolesData).toEqual(refreshedRoles)
+    expect(llmRolesCacheMocks.syncLlmRolesCache).toHaveBeenCalledWith(refreshedRoles)
   })
 
   it("refuses a settings mutation when the backend event stream is disconnected", async () => {

@@ -53,7 +53,7 @@
    "n": 15,
    "cap": "appsettings-save",
    "design_ref": "atom-15",
-   "current": "现状:已实现且符合。useAppSettings.ts 是 General 即填即存的底座:setUserId/setGiteaHost/setDefaultSkillsDirectory 各自调 updateSettings 合出完整三字段对象 → queueSave 起 300ms debounce(APP_SETTINGS_SAVE_DELAY_MS=300)→ performSave 发 PUT /api/settings(整体三字段,无字段级 PATCH)。并发安全:有 in-flight(inflightRef)时把新值缓冲进 pendingSettingsRef、当前请求 finally 里再发缓冲值。保存态走 SaveStatus(idle/pending/saving/saved/error),GeneralTab.tsx 顶部用 SaveStatusBadge(ui/save-status-badge.tsx)渲染;失败 setSaveStatus('error') + toast 显式告警(useAppSettings.ts),不静默。进 tab/刷新初始 load 走 loadAppSettings→getAppSettings(GET /api/settings),空 default_skills_directory 经 withRuntimeDefaults 在前端先回落 runtime 默认。",
+  "current": "现状:已实现且符合。useAppSettings.ts 是 General 即填即存的底座:setUserId/setGiteaHost/setDefaultSkillsDirectory 各自调 updateSettings 合出完整三字段对象 → queueSave 起 300ms debounce(APP_SETTINGS_SAVE_DELAY_MS=300)→ performSave 发 PUT /api/settings(整体三字段,无字段级 PATCH)。并发安全:有 in-flight(inflightRef)时立即用最新完整 settings 覆盖 pendingSettingsRef,当前请求完成后只发送这份最新 payload;若旧请求完成时已被 pending payload supersede,旧响应不写 saved/error、不弹陈旧 toast、不覆盖本地草稿。保存态走 SaveStatus(idle/pending/saving/saved/error),GeneralTab.tsx 顶部用 SaveStatusBadge(ui/save-status-badge.tsx)渲染;失败 setSaveStatus('error') + toast 显式告警(useAppSettings.ts),不静默。进 tab/刷新初始 load 走 loadAppSettings→getAppSettings(GET /api/settings),空 default_skills_directory 经 withRuntimeDefaults 在前端先回落 runtime 默认。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET/PUT /api/settings(routers/settings.py)整体读写已实现;前端保存徽章用的是共享组件 SaveStatusBadge(ui/save-status-badge.tsx),现状四个 settings tab 的标题栏保存徽章(General / API Keys / LLM Roles / Copilot)已统一复用这一个共享组件——General 侧无近重复 badge。仅 LLM Roles 的「每个角色卡内」另有一个 RoleSaveStatusBadge(RoleBadges.tsx,吃同一 SaveStatus、英文写死、error 用 outline 而非 warning 色)是残留近重复,属 Roles 页范畴、与 General 无关。"
@@ -209,7 +209,7 @@
    "layer1": [
     "连续改三次字段 → 断言只在最后一次后 300ms 发一次 PUT(debounce 合并)。",
     "PUT 整体三字段、无字段级 PATCH。",
-    "并发:in-flight 期间再改 → 断言新值缓冲进 pendingSettings、首个请求回来后再发缓冲值。",
+    "并发:in-flight 期间连续再改 → 断言 pendingSettings 只保留最新 payload、旧请求完成不写 saved/error、不弹陈旧 toast,首个请求回来后只再发最新值。",
     "mock PUT 失败 → 断言 saveStatus='error' + toast.error(失败显式,不静默)。"
    ],
    "layer2": [

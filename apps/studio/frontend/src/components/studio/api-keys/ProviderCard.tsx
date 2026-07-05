@@ -2036,7 +2036,13 @@ export function ProviderCard({
     // (UI-spec §143: historical_ready -> blue "Previously Connected"); fall back
     // to the session RouteStatus only when ui_state is absent.
     const uiState = model.ui_state
-    const tagVariant = uiState ? routeTagVariantFromUiState(uiState) : routeStatusTagVariant(status)
+    const isDisabled = status === "disabled"
+    const isActiveProbe = !isDisabled && isModelBeingProbed(model)
+    const tagVariant = isActiveProbe
+      ? "active"
+      : uiState
+        ? routeTagVariantFromUiState(uiState)
+        : routeStatusTagVariant(status)
     const statusLabel = isOfficial
       ? uiState === "historical_ready" ? t("apiKeys.card.routeStatus.previouslyConnected") : routeStatusLabel(status)
       : thirdPartyModelStatusLabel(model, status)
@@ -2073,7 +2079,6 @@ export function ProviderCard({
       ? t("apiKeys.card.copyTagAria", { target: copyTargetLabel, modelId: model.id, detail: tooltipDetail.replace(/\s+/g, " ") })
       : t("apiKeys.card.copyTagAria", { target: copyTargetLabel, modelId: model.id, detail: statusLabel })
     const tagKey = isOfficial ? `${model.route_id ?? model.id}:${model.status ?? "model"}` : model.id
-    const isDisabled = status === "disabled"
     const aggregateRouteCount = aggregateRouteSummaries(model).length
     const tag = (
       <Tag
@@ -2083,12 +2088,10 @@ export function ProviderCard({
         size="xs"
         className={cn(
           isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",
-          // R-G2: a model chip pulses while its own route reports status="testing"
-          // (official, per-route), OR — for third-party providers — while an
-          // endpoint the model has a route on is being probed. Scoped by
-          // isModelUnderEndpointTest so a single endpoint-tag probe only pulses
-          // that endpoint's models, not every sibling (point 4, PM 2026-07-03).
-          (status === "testing" || (!isOfficial && !isDisabled && isModelBeingProbed(model))) && "api-route-tag-border-flow",
+          // Live animation is owned by the atom signal for both official and
+          // third-party route chips; persisted route evidence only decides idle
+          // color.
+          isActiveProbe && "api-route-tag-border-flow",
         )}
       >
         <button

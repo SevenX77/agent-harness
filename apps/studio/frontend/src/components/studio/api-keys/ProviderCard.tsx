@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils"
 import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, ProviderUiState, RouteStatus } from "../../../api/llm"
 import { inferProviderType, providerCachedTestResult, providerEndpointDraftsForAction, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions } from "../settings/types"
+import { clearActiveProbeEndpoints, hasActiveProbeAtom, hasActiveProbeEndpoint, probeAtomDomKey, updateActiveProbeEndpoint } from "./active-probe-store"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
 import { hasActiveAtomicProbeSignal } from "./model-probe-runner"
@@ -499,6 +500,8 @@ function AvailableEndpointSummary({
         <TooltipProvider>
           {endpoints.map((endpoint) => {
             const endpointLabel = `${endpointProtocolShortLabel(endpoint.protocol)} / ${endpointHostLabel(endpoint.baseUrl || endpoint.id)}`
+            const isActiveEndpoint = hasActiveProbeEndpoint(endpoint.id)
+            const effectiveStatus: TestMessageStatus = isActiveEndpoint ? "testing" : endpoint.status
             // Design §1.2 matrix point 9: an unsupported cell points to the
             // verified sibling protocol on the SAME host, so its muted state
             // reads as "the capability is in the neighbouring route", not
@@ -511,7 +514,7 @@ function AvailableEndpointSummary({
             // Item 2: a configured, idle cell is a click target that re-probes
             // just this one (URL, protocol) endpoint. protocol_unsupported cells
             // stay non-clickable here — their affordance is the Re-probe button.
-            const testable = endpointTagIsTestable(endpoint.status) && Boolean(onProbeEndpoint)
+            const testable = endpointTagIsTestable(effectiveStatus) && Boolean(onProbeEndpoint)
             const probeThisEndpoint = () => onProbeEndpoint?.(endpoint.id)
             return (
               <span key={endpoint.id} className="inline-flex max-w-full items-center gap-0.5">
@@ -534,8 +537,8 @@ function AvailableEndpointSummary({
                       className={cn(
                         "inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border border-l-2 px-2 text-[0.625rem] font-medium leading-none",
                         "bg-card font-mono shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                        endpointStatusSurfaceClass(endpoint.status),
-                        endpoint.status === "testing" && "api-route-tag-border-flow",
+                        endpointStatusSurfaceClass(effectiveStatus),
+                        effectiveStatus === "testing" && "api-route-tag-border-flow",
                         testable
                           ? "cursor-pointer hover:bg-muted/40"
                           : endpoint.status === "protocol_unsupported"
@@ -543,10 +546,16 @@ function AvailableEndpointSummary({
                             : "cursor-help",
                       )}
                       aria-label={testable ? `${ariaLabel}. ${t("apiKeys.card.endpointClickToTest")}` : ariaLabel}
-                      data-endpoint-status={endpoint.status}
+                      data-probe-endpoint-id={endpoint.id}
+                      data-probe-active={effectiveStatus === "testing" ? "true" : undefined}
+                      data-endpoint-status={effectiveStatus}
                       data-endpoint-testable={testable ? "true" : "false"}
                     >
-                      {endpoint.status === "testing" ? <Loader2 className="size-2.5 animate-spin" aria-hidden="true" /> : null}
+                      <Loader2
+                        data-probe-spinner
+                        className={cn("size-2.5 animate-spin", effectiveStatus !== "testing" && "hidden")}
+                        aria-hidden="true"
+                      />
                       {endpoint.errorCode === "no_model_available" ? (
                         <TriangleAlert className="size-2.5 shrink-0 text-warning" aria-hidden="true" />
                       ) : null}
@@ -1190,6 +1199,18 @@ export function modelRouteIds(model: ModelInfo): string[] {
   return [...ids]
 }
 
+function modelProbeEndpointIds(model: ModelInfo, providerEndpointIds: string[]): string[] {
+  const ids = new Set<string>()
+  for (const summary of routeSummariesForModel(model)) {
+    if (summary.endpoint_id) ids.add(summary.endpoint_id)
+  }
+  if (model.endpoint_id) ids.add(model.endpoint_id)
+  if (ids.size === 0) {
+    for (const endpointId of providerEndpointIds) ids.add(endpointId)
+  }
+  return [...ids]
+}
+
 function aggregateRoutesTooltipText(model: ModelInfo): string | null {
   const summaries = aggregateRouteSummaries(model)
   if (summaries.length <= 1) return null
@@ -1765,15 +1786,13 @@ export function ProviderCard({
   const [visible, setVisible] = useState(false)
   const [apiKeyEditing, setApiKeyEditing] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
-  // P1a: model ids currently being probed by the manual model-test panel. The
-  // atomic per-model probe reports them live, so animation attaches to the
-  // exact model in flight instead of a card-wide flag.
-  const [manualTestingModelIdsByEndpoint, setManualTestingModelIdsByEndpoint] = useState<Record<string, string[]>>({})
+  const [hasManualActiveProbe, setHasManualActiveProbe] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
   const [baseUrlError, setBaseUrlError] = useState("")
   const apiKeyInputRef = useRef<HTMLInputElement>(null)
   const baseUrlInputRef = useRef<HTMLInputElement>(null)
+  const manualActiveEndpointIdsRef = useRef<Set<string>>(new Set())
   const isOfficial = providerKind === "official"
   const baseUrlRows = baseUrlRowsForDraft(draft)
   const filledBaseUrlRows = baseUrlRows.filter((row) => row.value.trim().length > 0)
@@ -1781,13 +1800,12 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
+  const providerEndpointIds = endpointDrafts.map((endpointDraft) => endpointDraft.id)
   const activeProbeModelIdsForEndpoint = (endpointId: string): string[] => uniqueStrings([
     ...(draft.testingModelIdsByEndpoint?.[endpointId] ?? []),
-    ...(manualTestingModelIdsByEndpoint[endpointId] ?? []),
   ])
   const activeProbeModelIds = uniqueStrings([
     ...Object.values(draft.testingModelIdsByEndpoint ?? {}).flat(),
-    ...Object.values(manualTestingModelIdsByEndpoint).flat(),
   ])
   // Endpoint animation follows the backend active atom event for every probe
   // path. Card-wide Test state and `testingEndpointId` are request context only;
@@ -1803,7 +1821,22 @@ export function ProviderCard({
       activeModelIds: activeProbeModelIds,
       status: model.status,
     })
-  const hasManualActiveProbe = Object.values(manualTestingModelIdsByEndpoint).some((modelIds) => modelIds.length > 0)
+  const setManualActiveProbeModelIdsByEndpoint = (active: Record<string, string[]>) => {
+    const nextEndpointIds = new Set(Object.keys(active).filter((endpointId) => active[endpointId]?.length > 0))
+    for (const endpointId of manualActiveEndpointIdsRef.current) {
+      if (!nextEndpointIds.has(endpointId)) clearActiveProbeEndpoints([endpointId])
+    }
+    for (const endpointId of nextEndpointIds) {
+      updateActiveProbeEndpoint(endpointId, active[endpointId] ?? [])
+    }
+    manualActiveEndpointIdsRef.current = nextEndpointIds
+    setHasManualActiveProbe(nextEndpointIds.size > 0)
+  }
+  useEffect(() => {
+    return () => {
+      clearActiveProbeEndpoints([...manualActiveEndpointIdsRef.current])
+    }
+  }, [])
   // R-G2: auto-expand the full model list when an endpoint test starts, so the user
   // can watch every model being probed instead of only the first few.
   useEffect(() => {
@@ -2037,7 +2070,9 @@ export function ProviderCard({
     // to the session RouteStatus only when ui_state is absent.
     const uiState = model.ui_state
     const isDisabled = status === "disabled"
-    const isActiveProbe = !isDisabled && isModelBeingProbed(model)
+    const probeEndpointIds = modelProbeEndpointIds(model, providerEndpointIds)
+    const isActiveAtomProbe = probeEndpointIds.some((endpointId) => hasActiveProbeAtom(endpointId, model.id))
+    const isActiveProbe = !isDisabled && (isActiveAtomProbe || isModelBeingProbed(model))
     const tagVariant = isActiveProbe
       ? "active"
       : uiState
@@ -2080,6 +2115,9 @@ export function ProviderCard({
       : t("apiKeys.card.copyTagAria", { target: copyTargetLabel, modelId: model.id, detail: statusLabel })
     const tagKey = isOfficial ? `${model.route_id ?? model.id}:${model.status ?? "model"}` : model.id
     const aggregateRouteCount = aggregateRouteSummaries(model).length
+    const modelProbeKeys = probeEndpointIds
+      .map((endpointId) => probeAtomDomKey(endpointId, model.id))
+      .join(" ")
     const tag = (
       <Tag
         key={tagKey}
@@ -2093,6 +2131,9 @@ export function ProviderCard({
           // color.
           isActiveProbe && "api-route-tag-border-flow",
         )}
+        data-probe-model-id={model.id}
+        data-probe-model-keys={modelProbeKeys || undefined}
+        data-probe-active={isActiveProbe ? "true" : undefined}
       >
         <button
           type="button"
@@ -2409,7 +2450,7 @@ export function ProviderCard({
             }))}
             notableProviderKey={notableProviderKey ?? draft.id.split(/[-_]/, 1)[0].toLowerCase()}
             onModelsUpdated={(models) => onModelsUpdated?.(models)}
-            onActiveProbeModelIdsByEndpointChange={setManualTestingModelIdsByEndpoint}
+            onActiveProbeModelIdsByEndpointChange={setManualActiveProbeModelIdsByEndpoint}
             defaultExpanded={false}
           />
         ) : null}

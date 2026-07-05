@@ -738,7 +738,7 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
       isTesting: false,
       testingAction: null,
       testingEndpointId: null,
-      testingModelIdsByEndpoint: { "deepseek-openai": ["deepseek-v4-pro"] },
+      testingModelIdsByEndpoint: { "deepseek-official": ["deepseek-v4-pro"] },
       base_urls: [
         {
           id: "url-deepseek",
@@ -754,8 +754,8 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     const html = renderCardHtml({
       nextDraft,
       persistedEndpoints: {
-        "deepseek-openai": makePersisted({
-          id: "deepseek-openai",
+        "deepseek-official": makePersisted({
+          id: "deepseek-official",
           name: "DeepSeek",
           base_url: "https://api.deepseek.com",
           provider_type: "openai_compatible",

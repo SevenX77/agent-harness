@@ -627,6 +627,39 @@ describe('Add Provider flow helpers', () => {
     ])
   })
 
+  it('keeps Ark official endpoint ids canonical even when stale endpoint ids exist in local draft state', () => {
+    const ark = {
+      id: 'ark-official',
+      name: 'Ark Official',
+      provider_type: 'ark_runtime' as const,
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      api_key: 'ark-key',
+      isTesting: false,
+      testingAction: null,
+      base_urls: [
+        {
+          id: 'ark-official',
+          value: 'https://ark.cn-beijing.volces.com/api/v3',
+          provider_type: 'ark_runtime' as const,
+          endpoint_ids: {
+            ark_runtime: 'ark-official',
+            openai_compatible: 'ark-official',
+          },
+        },
+      ],
+    }
+
+    const endpointDrafts = providerEndpointDraftsForAction(ark)
+
+    expect(endpointDrafts.map((endpointDraft) => ({
+      id: endpointDraft.id,
+      provider_type: endpointDraft.provider_type,
+    }))).toEqual([
+      { id: 'ark-official', provider_type: 'ark_runtime' },
+      { id: 'ark-openai-official', provider_type: 'openai_compatible' },
+    ])
+  })
+
   it('scopes active atomic probe model ids to the owning provider draft only', () => {
     const waveSpeed = draftFromAddProviderSubmission({
       providerCode: 'wavespeed',

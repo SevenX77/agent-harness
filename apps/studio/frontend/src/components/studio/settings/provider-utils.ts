@@ -211,7 +211,7 @@ export function providerEndpointDraftsForAction(draft: ProviderDraft): ProviderD
   if (officialVendor) {
     return officialEndpointDefinitions(officialVendor).map((endpoint) => ({
       ...draft,
-      id: officialEndpointIdForDraft(draft, endpoint),
+      id: endpoint.id,
       provider_type: endpoint.provider_type,
       base_url: endpoint.baseUrl,
       base_urls: undefined,
@@ -350,23 +350,6 @@ function officialEndpointDefinitions(
   vendor: (typeof officialProviders)[number],
 ): OfficialEndpointDefinition[] {
   return vendor.endpoints
-}
-
-function officialEndpointIdForDraft(
-  draft: ProviderDraft,
-  endpoint: OfficialEndpointDefinition,
-): string {
-  for (const row of draft.base_urls ?? []) {
-    const endpointId = row.endpoint_ids?.[endpoint.provider_type]
-    if (endpointId) return endpointId
-  }
-  if (
-    draft.provider_type === endpoint.provider_type &&
-    normalizeBaseUrlGroupKey(draft.base_url) === normalizeBaseUrlGroupKey(endpoint.baseUrl)
-  ) {
-    return draft.id
-  }
-  return endpoint.id
 }
 
 function officialProviderDisplayName(label: string): string {

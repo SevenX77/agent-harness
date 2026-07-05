@@ -16,6 +16,7 @@ interface WorkspaceEditorOverlayProps {
 export function WorkspaceEditorOverlay({ children, onResizeHeight }: WorkspaceEditorOverlayProps) {
   const {
     activeFileDetails,
+    editorLintResult,
     splitMode,
     openSplitEditor,
     closeFile,
@@ -40,6 +41,7 @@ export function WorkspaceEditorOverlay({ children, onResizeHeight }: WorkspaceEd
         workspaceRoot={file.workspaceRoot}
         filePath={file.path}
         initialHash={file.hash}
+        initialLintResult={editorLintResult}
         saveEnabled={file.saveEnabled ?? true}
         language={file.language}
         value={file.content}

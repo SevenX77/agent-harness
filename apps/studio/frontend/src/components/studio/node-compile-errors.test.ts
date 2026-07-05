@@ -69,6 +69,20 @@ describe("compileErrorsByNode", () => {
     expect(byNode.review[0].field).toBe("review.summary")
   })
 
+  it("attributes engine dataflow compile errors to their node via field_path", () => {
+    const byNode = compileErrorsByNode([
+      {
+        file: null,
+        line: 1,
+        field: "review.io.inputs.properties.summary",
+        severity: "fatal",
+        message: "phase 'review' input 'summary' has no root, upstream, or source:file provider",
+      },
+    ])
+    expect(Object.keys(byNode)).toEqual(["review"])
+    expect(byNode.review[0].field).toBe("review.io.inputs.properties.summary")
+  })
+
   it("prefers the file phase path over the field prefix when both are present", () => {
     const byNode = compileErrorsByNode([
       { file: "phases/expand/SKILL.md", line: 1, field: "review.summary", severity: "fatal", message: "x" },
@@ -121,6 +135,16 @@ describe("lintErrorsByNode", () => {
       lintErr("GRAPH.md", { field_path: "orphan.depends_on", message: "orphan is unreachable from input" }),
     ])
     expect(Object.keys(byNode)).toEqual(["orphan"])
+  })
+
+  it("attributes engine dataflow lint errors to their node via field_path", () => {
+    const byNode = lintErrorsByNode([
+      lintErr("phases/review/SKILL.md", {
+        field_path: "review.io.inputs.properties.summary",
+        message: "phase 'review' input 'summary' has no root, upstream, or source:file provider",
+      }),
+    ])
+    expect(Object.keys(byNode)).toEqual(["review"])
   })
 
   it("still omits a GRAPH.md diagnostic with no node locator (no phase_name, no field_path)", () => {
@@ -177,6 +201,19 @@ describe("activeLintErrors (N3 atom #4 — first-screen vs realtime override)", 
     expect(messages).toContain("manifest error")
   })
 
+  it("dedupes first-screen lint_result and manifest_errors when they carry the same engine diagnostic", () => {
+    const duplicate = lintErr("phases/review/SKILL.md", {
+      field_path: "review.io.inputs.properties.chapter_lines",
+      message: "phase 'review' input 'chapter_lines' has no root, upstream, or source:file provider",
+      error_code: "F-v3-graph-dataflow-source-missing",
+    })
+
+    const errors = activeLintErrors({ firstScreenLint: [duplicate], manifestErrors: [duplicate], realtime: null })
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0].field_path).toBe("review.io.inputs.properties.chapter_lines")
+  })
+
   it("overrides with the realtime LintResult errors once a realtime lint has resolved", () => {
     const errors = activeLintErrors({ firstScreenLint, manifestErrors, realtime })
     expect(errors.map((error) => error.message)).toEqual(["realtime lint"])
@@ -204,6 +241,21 @@ describe("mergeNodeErrors (N3 atom #4 — compile + lint without dropping either
     expect(merged.draft.map((error) => error.message).sort()).toEqual(["boom", "lint"])
     expect(merged.review).toHaveLength(1)
     expect(merged.review[0].message).toBe("lint-review")
+  })
+
+  it("dedupes the same engine diagnostic when manual Compile and active lint report it together", () => {
+    const diagnostic = {
+      file: "phases/review/SKILL.md",
+      line: 2,
+      field: "review.io.inputs.properties.chapter_lines",
+      severity: "fatal",
+      message: "phase 'review' input 'chapter_lines' has no root, upstream, or source:file provider",
+      error_code: "F-v3-graph-dataflow-source-missing",
+    } satisfies CompileError
+
+    const merged = mergeNodeErrors({ review: [diagnostic] }, { review: [diagnostic] })
+
+    expect(merged.review).toHaveLength(1)
   })
 
   it("returns compile-only nodes untouched when there is no lint", () => {

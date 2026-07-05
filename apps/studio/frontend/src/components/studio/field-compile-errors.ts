@@ -37,6 +37,19 @@ function errorPhaseId(error: LintError): string | null {
   return match ? match[1] : null
 }
 
+export function lintErrorsForPhase(
+  errors: readonly LintError[] | null | undefined,
+  phaseId: string,
+): LintError[] {
+  return (errors ?? []).filter((error) => {
+    if (errorPhaseId(error) === phaseId) {
+      return true
+    }
+    const field = error?.field_path
+    return typeof field === "string" && field.startsWith(`${phaseId}.`)
+  })
+}
+
 /**
  * Group the selected node's errors by the engine's `field_path` (nearest field).
  *

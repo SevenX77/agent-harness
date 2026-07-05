@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { EventEnvelope } from '@/api/types'
+import type { EventEnvelope, LintResult } from '@/api/types'
 import type { FileOpenInput, FileMeta } from './file-types'
 
 export type EditorSide = 'left' | 'right'
@@ -54,6 +54,7 @@ export interface WorkspaceContextValue {
   navStack: string[]
   activeFiles: { left?: string, right?: string }
   activeFileDetails: Partial<Record<EditorSide, OpenFile>>
+  editorLintResult?: LintResult | null
   splitMode: boolean
   onFileOpen: (fileOrPath: FileOpenInput, side?: EditorSide) => void
   /** Reverse of node→file reveal: select the canvas node a node-definition file

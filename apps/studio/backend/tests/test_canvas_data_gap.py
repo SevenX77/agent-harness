@@ -27,8 +27,8 @@ def _compile(skill_dir: Path):
 
 
 def _write_two_phase_skill(skill_dir: Path) -> None:
-    """A skill where phase `b` consumes one field from `a` and one graph input,
-    plus one field nobody produces (the data gap)."""
+    """A skill where phase `b` consumes one field from `a`, one graph input,
+    and one file-sourced input that does not need blackboard supply."""
     (skill_dir / "phases" / "a" / "actions").mkdir(parents=True)
     (skill_dir / "phases" / "a" / "actions" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "phases" / "a" / "actions" / "make.py").write_text(
@@ -41,6 +41,8 @@ def _write_two_phase_skill(skill_dir: Path) -> None:
         "def use(inputs):\n    return {'done': True}\n",
         encoding="utf-8",
     )
+    (skill_dir / "assets").mkdir(parents=True)
+    (skill_dir / "assets" / "orphan.txt").write_text("file supplied input\n", encoding="utf-8")
     (skill_dir / "GRAPH.md").write_text(
         """---
 schema_version: "v0.3.0"
@@ -100,6 +102,8 @@ io:
         type: string
       orphan:
         type: string
+        source: file
+        path: assets/orphan.txt
   outputs:
     type: object
     properties:
@@ -149,6 +153,35 @@ def test_should_resolve_supply_from_phase_graph_input_and_flag_gap() -> None:
     assert by_field["seed"]["supplied"] is True
     assert by_field["orphan"]["supplied"] is False
     assert by_field["orphan"]["source"] == "none"
+
+
+def test_should_resolve_source_file_field_without_blackboard_supply() -> None:
+    index = {
+        "b": {
+            "inputs": {
+                "asset_doc": {"type": "string", "source": "file"},
+                "chapter": {
+                    "type": "object",
+                    "source": "file",
+                    "properties": {"title": {"type": "string"}},
+                },
+            },
+            "outputs": {},
+        },
+    }
+
+    supply = compute_field_supply(
+        phase_name="b",
+        depends_on=[],
+        phase_io_index=index,
+        graph_input_fields=set(),
+    )
+
+    by_field = {entry["field"]: entry for entry in supply}
+    assert by_field["asset_doc"]["supplied"] is True
+    assert by_field["asset_doc"]["source"] == "file"
+    assert by_field["chapter.title"]["supplied"] is True
+    assert by_field["chapter.title"]["source"] == "file"
 
 
 def test_should_flatten_nested_object_fields_into_dotted_paths() -> None:
@@ -248,5 +281,6 @@ def test_graph_topology_rows_carry_io_fields_and_supply(tmp_path: Path) -> None:
     assert supply_by_field["alpha"]["producer_phase"] == "a"
     # seed is the graph-level run input
     assert supply_by_field["seed"]["source"] == "graph_input"
-    # orphan has no producer and no graph input -> data gap
-    assert supply_by_field["orphan"]["supplied"] is False
+    # orphan is source:file, so it does not require blackboard supply
+    assert supply_by_field["orphan"]["supplied"] is True
+    assert supply_by_field["orphan"]["source"] == "file"

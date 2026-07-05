@@ -26,6 +26,7 @@ from graph_agent.core.local_workspace_resolver import default_local_resolver_for
 from graph_agent.core.manifest import (
     AgentNodeAST,
     GraphManifest,
+    IterateSpec,
     LogicNodeAST,
     SubgraphNodeAST,
 )
@@ -247,7 +248,14 @@ class SkillLoader:
             _compilation_cache=_compilation_cache,
         )
         _validate_iterate_compile_contracts(phase_docs)
-        _validate_static_dataflow(graph_path, graph_topology, phase_docs, io_inputs, io_outputs)
+        _validate_static_dataflow(
+            graph_path,
+            graph_topology,
+            phase_docs,
+            io_inputs,
+            io_outputs,
+            manifest.iterate,
+        )
         _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs)
 
         actions, tools = _discover_actions_and_tools(root, discovered)
@@ -1872,6 +1880,7 @@ def _validate_static_dataflow(
     phase_docs: list[PhaseDocument],
     root_inputs: dict[str, Any],
     root_outputs: dict[str, Any],
+    graph_iterate: IterateSpec | None = None,
 ) -> None:
     docs_by_phase = {doc.phase_name: doc for doc in phase_docs}
     rows = graph_topology.get("phases")
@@ -1892,7 +1901,8 @@ def _validate_static_dataflow(
     if not order:
         order = [doc.phase_name for doc in phase_docs]
 
-    root_input_keys = _schema_property_keys(root_inputs)
+    dataflow_diags: list[_Diag] = []
+    root_input_keys = set(_schema_property_paths(root_inputs))
     available_after: dict[str, set[str]] = {}
     for phase_name in order:
         doc = docs_by_phase.get(phase_name)
@@ -1904,39 +1914,44 @@ def _validate_static_dataflow(
                 available.update(root_input_keys)
             else:
                 available.update(available_after.get(dep, set()))
+        io_line = _frontmatter_key_line(doc.path, "io")
         input_schema = _phase_input_schema(doc)
-        for required_key in _schema_required_keys(input_schema):
+        for input_key in _schema_property_paths(input_schema):
             if (
-                required_key in available
-                or _schema_field_has_file_source(input_schema, required_key)
-                or _schema_field_has_iterate_source(doc, required_key)
+                _field_is_supplied(input_key, available)
+                or _schema_field_has_file_source(input_schema, input_key)
+                or _schema_field_has_iterate_source(doc, input_key, graph_iterate)
             ):
                 continue
-            _fatal(
-                doc.path,
-                _frontmatter_key_line(doc.path, "io"),
-                "[F-v3-graph-dataflow-source-missing] "
-                f"phase {phase_name!r} required input {required_key!r} has no root, upstream, "
-                "or source:file provider",
-                code="[F-v3-graph-dataflow-source-missing]",
-                field_path=f"{phase_name}.io.inputs.required.{required_key}",
+            dataflow_diags.append(
+                _Diag(
+                    doc.path,
+                    io_line,
+                    "[F-v3-graph-dataflow-source-missing]",
+                    f"phase {phase_name!r} input {input_key!r} has no root, upstream, "
+                    "or source:file provider",
+                    field_path=f"{phase_name}.io.inputs.properties.{input_key}",
+                )
             )
-        available_after[phase_name] = available | _schema_property_keys(_phase_output_schema(doc))
+        available_after[phase_name] = available | set(_schema_property_paths(_phase_output_schema(doc)))
 
     terminal_output_keys: set[str] = set()
     for phase_name in output_phases:
         terminal_output_keys.update(available_after.get(phase_name, set()))
     for required_key in _schema_required_keys(root_outputs):
-        if required_key in terminal_output_keys:
+        if _field_is_supplied(required_key, terminal_output_keys):
             continue
-        _fatal(
-            graph_path,
-            _frontmatter_key_line(graph_path, "io"),
-            "[F-v3-graph-dataflow-source-missing] "
-            f"required root output {required_key!r} is not produced by an output phase",
-            code="[F-v3-graph-dataflow-source-missing]",
-            field_path=f"io.outputs.required.{required_key}",
+        dataflow_diags.append(
+            _Diag(
+                graph_path,
+                _frontmatter_key_line(graph_path, "io"),
+                "[F-v3-graph-dataflow-source-missing]",
+                f"required root output {required_key!r} is not produced by an output phase",
+                field_path=f"io.outputs.required.{required_key}",
+            )
         )
+    if dataflow_diags:
+        _raise_diags(dataflow_diags)
 
 
 def _phase_input_schema(doc: PhaseDocument) -> dict[str, Any]:
@@ -1956,10 +1971,48 @@ def _phase_output_schema(doc: PhaseDocument) -> dict[str, Any]:
 
 
 def _schema_property_keys(schema: dict[str, Any]) -> set[str]:
+    return set(_schema_property_paths(schema))
+
+
+def _schema_property_paths(schema: dict[str, Any]) -> list[str]:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
-        return set()
-    return {key for key in properties if isinstance(key, str)}
+        return []
+    return _flatten_schema_property_paths(properties)
+
+
+def _flatten_schema_property_paths(properties: dict[str, Any], prefix: str = "") -> list[str]:
+    paths: list[str] = []
+    for key, field_schema in properties.items():
+        if not isinstance(key, str):
+            continue
+        path = f"{prefix}{key}"
+        paths.append(path)
+        if _is_object_schema(field_schema):
+            nested = field_schema.get("properties") if isinstance(field_schema, dict) else None
+            if isinstance(nested, dict):
+                paths.extend(_flatten_schema_property_paths(nested, prefix=f"{path}."))
+    return paths
+
+
+def _is_object_schema(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    schema_type = schema.get("type")
+    if schema_type == "object":
+        return True
+    if isinstance(schema_type, list) and "object" in schema_type:
+        return True
+    return isinstance(schema.get("properties"), dict)
+
+
+def _ancestor_paths(field: str) -> list[str]:
+    parts = field.split(".")
+    return [".".join(parts[: i + 1]) for i in range(len(parts))][::-1]
+
+
+def _field_is_supplied(field: str, available: set[str]) -> bool:
+    return any(path in available for path in _ancestor_paths(field))
 
 
 def _schema_required_keys(schema: dict[str, Any]) -> set[str]:
@@ -1970,23 +2023,47 @@ def _schema_required_keys(schema: dict[str, Any]) -> set[str]:
 
 
 def _schema_field_has_file_source(schema: dict[str, Any], field: str) -> bool:
+    return any(_schema_exact_field_has_file_source(schema, path) for path in _ancestor_paths(field))
+
+
+def _schema_exact_field_has_file_source(schema: dict[str, Any], field: str) -> bool:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
         return False
-    field_schema = properties.get(field)
+    field_schema: Any = None
+    current_properties: Any = properties
+    for part in field.split("."):
+        if not isinstance(current_properties, dict):
+            return False
+        field_schema = current_properties.get(part)
+        if not isinstance(field_schema, dict):
+            return False
+        current_properties = field_schema.get("properties")
     return isinstance(field_schema, dict) and field_schema.get("source") == "file"
 
 
-def _schema_field_has_iterate_source(doc: PhaseDocument, field: str) -> bool:
+def _schema_field_has_iterate_source(
+    doc: PhaseDocument,
+    field: str,
+    graph_iterate: IterateSpec | None = None,
+) -> bool:
     batch = getattr(doc.ast, "batch", None)
-    if batch is not None and field == batch.item_var:
+    if batch is not None and _field_matches_injected_var(field, batch.item_var):
         return True
     iterate = getattr(doc.ast, "iterate", None)
+    return _iterate_spec_supplies_field(iterate, field) or _iterate_spec_supplies_field(graph_iterate, field)
+
+
+def _iterate_spec_supplies_field(iterate: IterateSpec | None, field: str) -> bool:
     if iterate is None:
         return False
-    if field == iterate.item_var:
+    if _field_matches_injected_var(field, iterate.item_var):
         return True
-    return iterate.accumulate is not None and field == iterate.accumulate.var
+    return iterate.accumulate is not None and _field_matches_injected_var(field, iterate.accumulate.var)
+
+
+def _field_matches_injected_var(field: str, var_name: str) -> bool:
+    return field == var_name or field.startswith(f"{var_name}.")
 
 
 class _ActionReturnKeyVisitor(ast.NodeVisitor):

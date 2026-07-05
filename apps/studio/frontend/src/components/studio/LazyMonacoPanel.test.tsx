@@ -6,7 +6,7 @@ import { writeSkillFile } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { sha256Hex } from "@/lib/hash"
 import type { LintError, LintResult } from "@/api/types"
-import { LazyMonacoPanel, saveMonacoDraft } from "./LazyMonacoPanel"
+import { LazyMonacoPanel, saveMonacoDraft, selectEditorLintResult } from "./LazyMonacoPanel"
 
 vi.mock("@/api/client", () => ({
   writeSkillFile: vi.fn(),
@@ -140,6 +140,23 @@ describe("LazyMonacoPanel realtime-lint surface (no in-editor banner)", () => {
     expect(html).not.toContain("Lint found warnings")
     expect(html).not.toContain("Invalid YAML in frontmatter")
     expect(html).not.toContain("Dangling edge")
+  })
+
+  it("uses first-screen SkillDetail lint for editor markers until realtime lint resolves", () => {
+    const firstScreen: LintResult = {
+      status: "failed",
+      errors: [makeError({ file: "phases/review/SKILL.md", line: 2, message: "first-screen" })],
+      phases_summary: null,
+    }
+    const realtime: LintResult = {
+      status: "passed",
+      errors: [],
+      phases_summary: null,
+    }
+
+    expect(selectEditorLintResult(null, firstScreen)).toBe(firstScreen)
+    expect(selectEditorLintResult(realtime, firstScreen)).toBe(realtime)
+    expect(selectEditorLintResult(null, null)).toBeNull()
   })
 })
 

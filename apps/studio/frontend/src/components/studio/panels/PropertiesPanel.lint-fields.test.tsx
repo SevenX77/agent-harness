@@ -71,6 +71,29 @@ describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
     expect(html).toContain("validator must be a boolean")
   })
 
+  it("shows selected-node diagnostics whose engine field_path is not a Properties form field", () => {
+    const html = renderPanel({
+      id: "segment",
+      data: baseData({ mode: "agent", filePath: "phases/segment/SKILL.md" }),
+      filePath: "phases/segment/SKILL.md",
+      content: ["---", "name: segment", "---", "steps: []"].join("\n"),
+      lintErrors: [
+        lintErr({
+          file: "phases/segment/SKILL.md",
+          line: 2,
+          error_code: "F-v3-graph-dataflow-source-missing",
+          message: "phase 'segment' input 'chapter_lines' has no root, upstream, or source:file provider",
+          field_path: "segment.io.inputs.properties.chapter_lines",
+        }),
+      ],
+    })
+
+    expect(html).toContain("1 lint issue on this node")
+    expect(html).toContain("segment.io.inputs.properties.chapter_lines")
+    expect(html).toContain("chapter_lines")
+    expect(html).toContain("source:file provider")
+  })
+
   it("does NOT mark fields that have no matching field_path", () => {
     const html = renderPanel({
       id: "segment",

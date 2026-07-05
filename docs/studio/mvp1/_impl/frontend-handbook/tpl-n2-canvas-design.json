@@ -236,21 +236,33 @@
       "n": 10,
       "cap": "data-gap-viz",
       "module": "拓扑与冲突校验",
-      "func": "设计:数据断层可视化(REQ-2)——画布节点只显示『缺字段』的 compile 冲突报错(上一个黑板节点里没有 input 需要的字段),字段选取在 io panel 从黑板字段选、与画布无关;删掉旧的『勾选 UI / 按节点类型相等画红叉』那套。",
-      "action": "用户在 io panel 选输入字段(从黑板/state 字段选,不是从某个上游节点的 io.outputs 选);画布节点在某 input 字段无黑板供给时显示 compile 冲突报错。",
-      "fe_design": "PM 决定 2026-06-20 的目标设计:画布节点的数据断层职责只有一个——把后端 field_supply 里 supplied=false 的输入字段(上一个黑板节点/graph 输入都没供给)投影成节点的 compile 冲突报错,复用画布已有的 node 错误徽标+tooltip(走 compileErrors 通道,与 compile/lint 同一条通道、同一处 merge)。字段选取不在画布上:它在 io panel,输入字段从黑板/state 字段选(io-target/InputPanel 已实现:节点自身 io.inputs 字段 + field_supply 标记供给来源),不是从某个上游节点的 io.outputs 勾选。删掉旧的『勾选 UI / 按节点类型相等画红叉』模型。落地:node-compile-errors.ts 新增纯函数 dataGapErrorsByNode(从 graph_topology[].field_supply 收集 supplied=false 字段→生成 file-less/line-less 的 CompileError,message='Input field X has no upstream supply (missing from blackboard)'),在 Workspace 的 compileErrorsByNodeId 里 mergeNodeErrors 折进节点错误通道,SkillNode 经现有 compileErrors 通道把它当冲突报错渲染。",
+      "func": "设计:数据断层可视化(REQ-2)——缺供给字段是 engine compile/lint 诊断,画布节点只投影同一份 engine 错误;字段供给来源仍在 io panel 通过 field_supply 展示。",
+      "action": "用户在 io panel 选择/查看输入字段供给来源;当某个 io.inputs.properties 字段没有 root input、上游 output、source:file 或 iterate/batch 注入时,engine lint/compile 返回 F-v3-graph-dataflow-source-missing,画布节点/编辑器/Properties/Compile drawer 同步显示。",
+      "fe_design": "2026-07-05 校正:画布节点不再从 graph_topology[].field_supply 合成 file-less CompileError。缺黑板供给属于 engine dataflow 规则:phase io.inputs.properties 声明消费的字段必须由 root input、upstream output、source:file 或 iterate/batch 注入提供;缺失时 engine 返回 F-v3-graph-dataflow-source-missing,field_path=<phase>.io.inputs.properties.<field>。Workspace.compileErrorsByNodeId 只合并 manual compile 与 first-screen/realtime lint 两路 engine DTO;Properties 面板同样读取 active engine lint,先用首屏 SkillDetail lint,实时 lint settle 后替换;field_supply 保留给 io-target/InputPanel 显示 supplied/source/producer_phase,不是节点 compile 错误源。",
       "fe_modules": [],
       "be_contract": [
         {
+          "endpoint": "POST /api/skills/{skill_id}/lint",
+          "purpose": "返回 engine 聚合 dataflow 诊断,每条 LintError 携带 field_path。",
+          "mechanism_ref": "mech_compile",
+          "iface_ref": "iface-lint"
+        },
+        {
+          "endpoint": "POST /api/skills/{skill_id}/compile",
+          "purpose": "返回同一组 engine CompileError;field 对应 engine field_path,Compile drawer 和节点投影使用同一来源。",
+          "mechanism_ref": "mech_compile",
+          "iface_ref": "iface-compile"
+        },
+        {
           "endpoint": "GET /api/skills/{skill_id}",
-          "purpose": "字段级供需要读各 phase 的 io.inputs/outputs schema(随 manifest 返回)算黑板字段勾选关系。",
+          "purpose": "继续返回 graph_topology[].field_supply 供 Input panel 展示字段供给来源,但前端不得据此合成 compile error。",
           "mechanism_ref": "mech_graph",
           "iface_ref": "iface-1"
         }
       ],
       "fe_status": "符合",
       "be_status": "符合",
-      "gap_brief": "PM 决定 2026-06-20: 画布只显缺字段 compile 冲突报错;字段选取在 io panel 从黑板字段选,与画布无关。已落地:后端 compute_field_supply(canvas_data_gap.py)按 phase 算出每个输入字段的供给(supplied=false=断层),随 graph_topology[].field_supply 返回;前端 dataGapErrorsByNode 把 supplied=false 字段投成节点 compile 冲突报错,merge 进画布节点错误通道(compile+lint+data-gap 同显),SkillNode 渲染。字段选取在 io panel 从黑板/state 字段选(io-target/InputPanel),不从上游节点 io.outputs 勾选。旧『勾选 UI / 按类型相等画红叉』模型已删除。不再是 BLOCKER。测试:node-data-gap.test.ts(纯函数 supplied=false→节点错误 / supplied=true→无)+ SkillNode.data-gap.test.tsx(数据断层冲突报错在 tooltip 渲染),先 RED 后 GREEN。",
+      "gap_brief": "2026-07-05 已校正:旧实现 dataGapErrorsByNode/SkillNode.data-gap 把 field_supply 直接投成节点 compile error,导致节点有错但 engine compile 可通过。现已删除前端合成路径;engine 静态 dataflow 对 io.inputs.properties 声明消费字段报 F-v3-graph-dataflow-source-missing,lint/compile/节点/Properties/编辑器/Drawer 共享同一 engine 错误源。",
       "impl_ref": "fn-10"
     },
     {

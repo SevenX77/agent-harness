@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { isTauriRuntime } from '@/config/runtime'
 import { useDebouncedLint } from '@/hooks/useDebouncedLint'
 import { sha256Hex } from '@/lib/hash'
+import type { LintResult } from '@/api/types'
 import { type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
 import { applyLintMarkers } from '@/components/studio/lint-monaco-markers'
 import { isReadOnlySkillError } from '@/components/GraphCanvas/drill-edit'
@@ -37,9 +38,17 @@ interface LazyMonacoPanelProps {
   onConflict: (conflict: SaveConflictPayload) => void
   language?: string
   initialHash?: string | null
+  initialLintResult?: LintResult | null
   saveEnabled?: boolean
   onClose?: () => void
   onSplit?: () => void
+}
+
+export function selectEditorLintResult(
+  realtimeLintResult: LintResult | null,
+  initialLintResult: LintResult | null | undefined,
+): LintResult | null {
+  return realtimeLintResult ?? initialLintResult ?? null
 }
 
 function MonacoSkeleton() {
@@ -126,6 +135,7 @@ export function LazyMonacoPanel({
   onConflict,
   language = 'markdown',
   initialHash = null,
+  initialLintResult = null,
   saveEnabled = true,
   onClose,
   onSplit,
@@ -277,10 +287,11 @@ export function LazyMonacoPanel({
 
   // Realtime lint (workflow 03_compile F1): the live editor draft drives the debounced
   // /lint call; its diagnostics are the single source of truth the panel below projects.
-  const { result: lintResult } = useDebouncedLint(saveEnabled ? skillId : "", draft, {
+  const { result: realtimeLintResult } = useDebouncedLint(saveEnabled ? skillId : "", draft, {
     filePath,
     workspaceRoot,
   })
+  const lintResult = selectEditorLintResult(realtimeLintResult, initialLintResult)
   const editorRef = useRef<MonacoEditorInstance | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
 

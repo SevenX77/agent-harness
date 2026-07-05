@@ -35,6 +35,7 @@ from claude_agent_sdk.types import (
     ToolUseBlock,
     UserMessage,
 )
+from graph_agent_gateway.registry.schema import VerifiedProfile
 from pydantic import SecretStr
 
 
@@ -541,6 +542,83 @@ def test_resolve_copilot_runtime_uses_gateway_model_resolver(
     assert calls == [("copilot_chat", route_id)]
     assert routes[0].route_id == route_id
     assert credential_provider.get("endpoint:anthropic-official").get_secret_value() == "secret"
+
+
+def test_resolve_copilot_runtime_prefers_anthropic_messages_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    route_id = "deepseek-official:deepseek-v4-pro"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "deepseek-official": ProviderEndpoint(
+                endpoint_id="deepseek-official",
+                display_name="DeepSeek Official",
+                protocol="openai_compatible",
+                base_url="https://api.deepseek.com",
+                api_key="secret",
+                provider_kind="official",
+            )
+        },
+        provider_routes={
+            route_id: ProviderRoute(
+                route_id=route_id,
+                endpoint_id="deepseek-official",
+                route_slug="deepseek-v4-pro",
+                provider_model_id="deepseek-v4-pro",
+                canonical_id="deepseek-v4-pro",
+                status="verified",
+                verified_profiles=[
+                    VerifiedProfile(
+                        profile_id="reasoning:deepseek_chat_completions",
+                        capability="reasoning",
+                        method_id="deepseek_chat_completions",
+                        request_mapper_id="deepseek_chat_completions_reasoning_effort",
+                        status="ready",
+                        default=True,
+                        fallback_rank=1,
+                    ),
+                    VerifiedProfile(
+                        profile_id="text:deepseek_anthropic_messages",
+                        capability="text_chat",
+                        method_id="deepseek_anthropic_messages",
+                        request_mapper_id="deepseek_anthropic_messages_text",
+                        status="ready",
+                        default=False,
+                        fallback_rank=2,
+                    ),
+                ],
+            )
+        },
+    )
+    roles = RolesData(
+        roles={
+            "copilot_deepseek_v4_pro": RoleEntry(
+                role_kind="copilot",
+                fallback_chain=[RoleRouteEntry(route_id=route_id)],
+            )
+        }
+    )
+    roles_path = tmp_path / "llm_roles.yaml"
+    roles_path.touch()
+
+    from app.core import config
+    from app.services import gateway_resolver, llm_credentials
+
+    monkeypatch.setattr(gateway_resolver, "load_credentials", lambda: credentials)
+    monkeypatch.setattr(llm_credentials, "load_credentials", lambda: credentials)
+    monkeypatch.setattr(gateway_resolver, "default_roles_path", lambda: roles_path)
+    monkeypatch.setattr(gateway_resolver, "load_roles_file", lambda _path: roles)
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path / "settings")
+
+    routes, _credential_provider = copilot._resolve_copilot_runtime(
+        route_id,
+        role="copilot_deepseek_v4_pro",
+    )
+
+    assert routes[0].route_id == route_id
+    assert routes[0].call_method_id == "deepseek_anthropic_messages"
+    assert routes[0].selected_profile_id == "text:deepseek_anthropic_messages"
 
 
 def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

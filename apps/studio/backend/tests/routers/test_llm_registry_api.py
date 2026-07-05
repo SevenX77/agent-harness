@@ -1329,6 +1329,83 @@ def test_registry_model_groups_include_unverified_language_routes_not_multimodal
     assert provider_model["output_modalities"] == ["text"]
 
 
+def test_registry_model_groups_keep_official_language_probe_candidates_testable(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # Copilot/API Keys atom split: route-level Test creates capability evidence,
+    # so a known official language model must stay visible while that evidence is
+    # still missing. Otherwise DeepSeek Official can never enter the SDK test path.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "deepseek-official": ProviderEndpoint(
+                endpoint_id="deepseek-official",
+                display_name="DeepSeek Official",
+                protocol="openai_compatible",
+                base_url="https://api.deepseek.com",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            ),
+            "openai-official": ProviderEndpoint(
+                endpoint_id="openai-official",
+                display_name="OpenAI Official",
+                protocol="openai_compatible",
+                base_url="https://api.openai.com/v1",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            ),
+        },
+        provider_routes={
+            "deepseek-official:deepseek-v4-pro": ProviderRoute(
+                route_id="deepseek-official:deepseek-v4-pro",
+                endpoint_id="deepseek-official",
+                route_slug="deepseek-v4-pro",
+                provider_model_id="deepseek-v4-pro",
+                canonical_id="deepseek-v4-pro",
+                display_name="DeepSeek V4 Pro",
+                status="unverified_manual",
+                verified_profiles=[],
+                capabilities={},
+            ),
+            "openai-official:gpt-image-1": ProviderRoute(
+                route_id="openai-official:gpt-image-1",
+                endpoint_id="openai-official",
+                route_slug="gpt-image-1",
+                provider_model_id="gpt-image-1",
+                canonical_id="gpt-image-1",
+                display_name="GPT Image 1",
+                status="unverified_manual",
+                verified_profiles=[],
+                capabilities={},
+            ),
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    groups = {group["canonical_id"]: group for group in response.json()["model_groups"]}
+    assert set(groups) == {"deepseek-v4-pro"}
+    provider_model = groups["deepseek-v4-pro"]["provider_models"][0]
+    assert provider_model["route_id"] == "deepseek-official:deepseek-v4-pro"
+    assert provider_model["provider_label"] == "DeepSeek Official"
+    assert provider_model["ui_state"] == "untested"
+    assert provider_model["call_method_id"] is None
+    assert provider_model["candidate_call_method_ids"] == [
+        "deepseek_chat_completions",
+        "deepseek_anthropic_messages",
+    ]
+
+
 def test_registry_merges_model_groups_by_projected_display_name(
     client: TestClient,
     tmp_path: Path,
@@ -4051,6 +4128,23 @@ def test_official_probe_candidates_cover_all_current_official_providers() -> Non
     for endpoint, model_id, expected_methods in cases:
         candidates = llm_router._official_language_probe_candidates(endpoint, model_id)
         assert {candidate.method_id for candidate in candidates} >= expected_methods
+
+    deepseek_anthropic_endpoint = ProviderEndpoint(
+        endpoint_id="deepseek-official",
+        display_name="DeepSeek Official",
+        protocol="anthropic_compatible",
+        base_url="https://api.deepseek.com/anthropic",
+        api_key="secret",
+        provider_kind="official",
+    )
+    candidates = llm_router._official_language_probe_candidates(
+        deepseek_anthropic_endpoint,
+        "deepseek-v4-pro",
+    )
+    assert {candidate.method_id for candidate in candidates} >= {
+        "deepseek_chat_completions",
+        "deepseek_anthropic_messages",
+    }
 
 
 def test_openai_instruct_models_use_legacy_completions_probe() -> None:

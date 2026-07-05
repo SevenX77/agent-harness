@@ -52,7 +52,9 @@ from pydantic import SecretStr
 from app.core.adapters.gateway import (
     CredentialProviderProtocol,
     GatewayAdapter,
+    ProviderRoute,
     ResolvedRoute,
+    VerifiedProfile,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.copilot import (
@@ -86,6 +88,15 @@ _FILE_CONTENT_KEYS = {
 _FILE_PATH_KEYS = ("absolute_file_path", "file_path", "path")
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
+
+COPILOT_SDK_SUPPORTED_METHOD_IDS = frozenset(
+    {
+        "anthropic_messages",
+        "ark_anthropic_messages",
+        "deepseek_anthropic_messages",
+        "openrouter_anthropic_messages",
+    }
+)
 
 
 @lru_cache(maxsize=1)
@@ -1453,6 +1464,67 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+def resolved_route_has_copilot_sdk_method(route: ResolvedRoute) -> bool:
+    return getattr(route, "call_method_id", None) in COPILOT_SDK_SUPPORTED_METHOD_IDS
+
+
+def select_copilot_sdk_verified_profile(route: ProviderRoute) -> VerifiedProfile | None:
+    supported_profiles = [
+        profile
+        for profile in route.verified_profiles
+        if profile.status == "ready" and profile.method_id in COPILOT_SDK_SUPPORTED_METHOD_IDS
+    ]
+    if not supported_profiles:
+        return None
+    return sorted(
+        supported_profiles,
+        key=lambda profile: (not profile.default, profile.fallback_rank, profile.profile_id),
+    )[0]
+
+
+def resolved_route_with_verified_profile(
+    route: ResolvedRoute,
+    profile: VerifiedProfile,
+) -> ResolvedRoute:
+    updates = {
+        "selected_profile_id": profile.profile_id,
+        "selected_profile_capability": profile.capability,
+        "call_method_id": profile.method_id,
+        "request_mapper_id": profile.request_mapper_id,
+    }
+    model_copy = getattr(route, "model_copy", None)
+    if callable(model_copy):
+        return cast(ResolvedRoute, model_copy(update=updates))
+    for key, value in updates.items():
+        setattr(route, key, value)
+    return route
+
+
+def _prefer_copilot_sdk_profiles(routes: list[ResolvedRoute]) -> list[ResolvedRoute]:
+    if all(resolved_route_has_copilot_sdk_method(route) for route in routes):
+        return routes
+
+    from app.services.llm_credentials import load_credentials
+
+    credentials = load_credentials()
+    prepared_routes: list[ResolvedRoute] = []
+    for route in routes:
+        if resolved_route_has_copilot_sdk_method(route):
+            prepared_routes.append(route)
+            continue
+        stored_route = credentials.provider_routes.get(route.route_id)
+        if stored_route is None:
+            prepared_routes.append(route)
+            continue
+        selected_profile = select_copilot_sdk_verified_profile(stored_route)
+        prepared_routes.append(
+            resolved_route_with_verified_profile(route, selected_profile)
+            if selected_profile is not None
+            else route
+        )
+    return prepared_routes
+
+
 def _resolve_copilot_runtime(
     model_override: str | None,
     role: str = "copilot_chat",
@@ -1487,7 +1559,7 @@ def _resolve_copilot_runtime(
             error_code=runtime.error_code or "resource.no_available_route",
             error_payload=runtime.error_payload or {"role": role},
         )
-    return runtime.routes, runtime.credential_provider
+    return _prefer_copilot_sdk_profiles(list(runtime.routes)), runtime.credential_provider
 
 
 def _resolve_copilot_routes(

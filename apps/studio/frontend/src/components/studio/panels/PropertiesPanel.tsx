@@ -65,6 +65,7 @@ import { cn } from "@/lib/utils"
 import { errorMessage } from "@/utils/errors"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
+import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
 import {
   DEFAULT_ROLE_TEMPERATURE,
   formatTemperaturePercent,
@@ -380,16 +381,14 @@ export function PropertiesPanel({
 }: PropertiesPanelProps) {
   useLlmRolesCacheEventSync(Boolean(skillId))
 
-  // Configured LLM roles for the llm_role dropdown (GET /llm/roles) via SWR so
-  // the list revalidates (focus/reconnect + shared-key mutations) instead of
-  // going permanently stale after one on-mount fetch. On failure both stay
-  // empty — the field still shows the current stored value, nothing is lost.
-  const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
+  // Configured LLM roles for the llm_role dropdown. These load once from cache
+  // or backend, then refresh only through explicit settings mutations/events.
+  const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { ...STUDIO_TRUTH_SWR_CONFIG, shouldRetryOnError: false })
   const roleNames = useMemo(
     () => (rolesData ? graphAgentRoleNamesForProperties(rolesData) : []),
     [rolesData],
   )
-  const { data: modelGroupsData } = useSWR("llm/model-groups", getModelGroups, { shouldRetryOnError: false })
+  const { data: modelGroupsData } = useSWR("llm/model-groups", getModelGroups, { ...STUDIO_TRUTH_SWR_CONFIG, shouldRetryOnError: false })
   const modelGroups = useMemo(
     () => (modelGroupsData ? compareModelGroupsForPicker(modelGroupsData) : []),
     [modelGroupsData],
@@ -2936,7 +2935,7 @@ function LlmNodeParamsField({
 }) {
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
   const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
-  const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
+  const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { ...STUDIO_TRUTH_SWR_CONFIG, shouldRetryOnError: false })
   const latestDraftRef = useRef(draft)
   const pendingTemperatureRef = useRef<string | null>(null)
   const lastSubmittedTemperatureRef = useRef(draft.temperature)

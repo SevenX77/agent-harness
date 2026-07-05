@@ -3,7 +3,7 @@ import { act, createElement, useEffect, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSettings } from '../api/types'
-import { appSettingsEqual, DEFAULT_APP_SETTINGS, loadAppSettings, saveAppSettings, useAppSettings } from './useAppSettings'
+import { appSettingsEqual, DEFAULT_APP_SETTINGS, loadAppSettings, resetAppSettingsCacheForTests, saveAppSettings, useAppSettings } from './useAppSettings'
 import { getAppSettings, updateAppSettings } from '../api/client'
 import { toast } from 'sonner'
 
@@ -60,6 +60,7 @@ describe('useAppSettings helpers', () => {
     vi.mocked(updateAppSettings).mockReset()
     vi.mocked(toast.error).mockReset()
     vi.mocked(toast.success).mockReset()
+    resetAppSettingsCacheForTests()
   })
 
   it('loads app settings from the backend', async () => {
@@ -68,6 +69,37 @@ describe('useAppSettings helpers', () => {
     await expect(loadAppSettings()).resolves.toEqual(serverSettings)
 
     expect(getAppSettings).toHaveBeenCalledOnce()
+  })
+
+  it('dedupes concurrent app settings loads', async () => {
+    vi.mocked(getAppSettings).mockResolvedValue(serverSettings)
+
+    await expect(Promise.all([loadAppSettings(), loadAppSettings()])).resolves.toEqual([
+      serverSettings,
+      serverSettings,
+    ])
+
+    expect(getAppSettings).toHaveBeenCalledOnce()
+  })
+
+  it('reuses the cached app settings after a successful load', async () => {
+    vi.mocked(getAppSettings).mockResolvedValue(serverSettings)
+
+    await loadAppSettings()
+    await loadAppSettings()
+
+    expect(getAppSettings).toHaveBeenCalledOnce()
+  })
+
+  it('does not cache the default fallback after a failed load', async () => {
+    vi.mocked(getAppSettings)
+      .mockRejectedValueOnce(new Error('401'))
+      .mockResolvedValueOnce(serverSettings)
+
+    await expect(loadAppSettings()).resolves.toEqual(DEFAULT_APP_SETTINGS)
+    await expect(loadAppSettings()).resolves.toEqual(serverSettings)
+
+    expect(getAppSettings).toHaveBeenCalledTimes(2)
   })
 
   it('saves edited user id and gitea host', async () => {

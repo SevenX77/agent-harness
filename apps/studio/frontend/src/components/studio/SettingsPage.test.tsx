@@ -184,6 +184,13 @@ function baseViewProps(
   }
 }
 
+function tabPanelHtml(html: string, tab: 'general' | 'api_keys' | 'llm_roles' | 'copilot'): string {
+  const start = html.indexOf(`data-settings-tab-panel="${tab}"`)
+  expect(start).toBeGreaterThanOrEqual(0)
+  const next = html.indexOf('data-settings-tab-panel="', start + 1)
+  return next === -1 ? html.slice(start) : html.slice(start, next)
+}
+
 describe('draftsFromCredentials', () => {
   it('produces one draft per provider with the persisted plaintext api_key', () => {
     const drafts = draftsFromCredentials(credentials)
@@ -1057,11 +1064,12 @@ describe('SettingsPageContent (api_keys)', () => {
       />,
     )
 
-    expect(html).toContain('API Keys load failed')
-    expect(html).toContain('Bad Gateway')
-    expect(html).toContain('Stored provider values are not shown')
-    expect(html).not.toContain('Anthropic Official')
-    expect(html).not.toContain('Add Provider')
+    const apiKeysHtml = tabPanelHtml(html, 'api_keys')
+    expect(apiKeysHtml).toContain('API Keys load failed')
+    expect(apiKeysHtml).toContain('Bad Gateway')
+    expect(apiKeysHtml).toContain('Stored provider values are not shown')
+    expect(apiKeysHtml).not.toContain('Anthropic Official')
+    expect(apiKeysHtml).not.toContain('Add Provider')
   })
 
   it('renders official providers and empty third-party state after credentials finish loading', () => {
@@ -1259,7 +1267,7 @@ describe('SettingsPageContent (api_keys)', () => {
   })
 
   it('renders a Delete button/action menu for each user-owned provider', () => {
-    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
+    const html = tabPanelHtml(renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />), 'api_keys')
     const matches = html.match(/aria-label="More actions for [^"]*"/g) ?? []
     expect(matches).toHaveLength(3)
   })

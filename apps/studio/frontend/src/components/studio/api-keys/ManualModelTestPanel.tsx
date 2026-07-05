@@ -178,6 +178,7 @@ export function ManualModelTestPanel({ providerKey, endpointTargets, notableProv
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [modelIds, setModelIds] = useState([""])
   const [notableModels, setNotableModels] = useState<string[]>([])
+  const [notableModelsProviderKey, setNotableModelsProviderKey] = useState<string | null>(null)
   const [results, setResults] = useState<ProviderModelTestResult[]>([])
   const [hasTested, setHasTested] = useState(false)
   const [loadingCandidates, setLoadingCandidates] = useState(false)
@@ -200,11 +201,17 @@ export function ManualModelTestPanel({ providerKey, endpointTargets, notableProv
   }, [defaultExpanded])
 
   useEffect(() => {
+    if (!expanded || notableModelsProviderKey === notableProviderKey) return
     let cancelled = false
     setLoadingCandidates(true)
+    setError(null)
+    setNotableModels([])
     getNotableModels(notableProviderKey)
       .then((response) => {
-        if (!cancelled) setNotableModels(Array.isArray(response.notable_models) ? response.notable_models : [])
+        if (!cancelled) {
+          setNotableModels(Array.isArray(response.notable_models) ? response.notable_models : [])
+          setNotableModelsProviderKey(notableProviderKey)
+        }
       })
       .catch((candidateError: unknown) => {
         if (!cancelled) {
@@ -217,7 +224,7 @@ export function ManualModelTestPanel({ providerKey, endpointTargets, notableProv
     return () => {
       cancelled = true
     }
-  }, [notableProviderKey])
+  }, [expanded, notableModelsProviderKey, notableProviderKey])
 
   async function runModelTests() {
     if (trimmedModelIds.length === 0 || targetEndpointIds.length === 0) return

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
 import { toast } from "sonner"
 import { wsUrl } from "@/api/client"
 import {
@@ -8,26 +8,10 @@ import {
   shouldShowConnectionLost,
 } from "./event-stream-backoff"
 
-/**
- * N0 Settings · Shell (atoms #5 ws-registry-refresh / #6 ws-roles-refresh).
- *
- * Single resilient subscription to the gateway sidecar's `/ws/events` channel.
- * It JSON-parses each message and dispatches by `event.type` to the caller's
- * callbacks (registry_changed → onRegistryChanged, roles_changed →
- * onRolesChanged), reconnects forever with exponential backoff + full jitter,
- * Data refresh is driven by explicit change events, not by socket lifecycle.
- *
- * Resilience replaces the old SettingsPage inline WebSocket which had two empty
- * `catch {}` blocks (logging-rule violation) and no reconnect at all.
- *
- * `connectionLost` is debounced past a flicker threshold: it goes true only
- * after the backoff has consistently failed (≥3 consecutive failures OR >10s
- * with no connection) and returns to false immediately on reconnect.
- */
 export interface StudioEventStreamCallbacks {
-  /** A registry_changed event arrived (external credentials file change). */
+  /** A registry_changed event arrived after credentials truth changed. */
   onRegistryChanged: () => void
-  /** A roles_changed event arrived (external roles file change). */
+  /** A roles_changed event arrived after roles truth changed. */
   onRolesChanged: () => void
   /** An endpoint generation probe reported its currently active model atoms. */
   onLlmProbeActive?: (event: { endpointId: string; activeModelIds: string[] }) => void
@@ -43,20 +27,221 @@ interface StudioEventStreamState {
   connectionLost: boolean
 }
 
-/**
- * Subscribe to `/ws/events`. Pass stable-enough callbacks; the hook reads them
- * via a ref so changing callbacks never tears down the socket. The returned
- * `connectionLost` drives the shell's "connection lost" warning.
- *
- * R-F13 (token refresh on reconnect): the WebSocket URL is built by `wsUrl()`,
- * which reads `currentApiToken` from the api/client module at call time. Because
- * `connect()` re-invokes `wsUrl("/ws/events")` on every reconnect attempt, a token
- * rotated via `configureApiToken()` (e.g. when the sidecar restarts and emits
- * `sidecar-restarted` with a fresh token) is picked up automatically — there is
- * no closure-cached token here. After
- * `WS_AUTH_FAILURE_GIVEUP_THRESHOLD` consecutive 4401 closes the hook stops
- * reconnecting and toasts the user instead of silently spinning forever.
- */
+interface StudioEventSubscriber {
+  callbacksRef: MutableRefObject<StudioEventStreamCallbacks>
+  setConnectionLost: Dispatch<SetStateAction<boolean>>
+}
+
+const subscribers = new Map<number, StudioEventSubscriber>()
+let nextSubscriberId = 1
+let hubConnectionLost = false
+let socket: WebSocket | null = null
+let reconnectTimer: number | undefined
+let lostTicker: number | undefined
+let attempt = 0
+let consecutiveAuthFailures = 0
+let gaveUpOnAuth = false
+let disconnectedSince: number | null = null
+let running = false
+
+function setHubConnectionLost(next: boolean): void {
+  if (hubConnectionLost === next) return
+  hubConnectionLost = next
+  for (const subscriber of subscribers.values()) {
+    subscriber.setConnectionLost((current) => (current === next ? current : next))
+  }
+}
+
+function stopLostTicker(): void {
+  if (lostTicker !== undefined) {
+    window.clearInterval(lostTicker)
+    lostTicker = undefined
+  }
+}
+
+function evaluateConnectionLost(): void {
+  if (!running) return
+  const msWithoutConnection = disconnectedSince === null ? 0 : Date.now() - disconnectedSince
+  setHubConnectionLost(shouldShowConnectionLost(attempt, msWithoutConnection))
+}
+
+function startLostTicker(): void {
+  if (lostTicker !== undefined) return
+  lostTicker = window.setInterval(evaluateConnectionLost, CONNECTION_LOST_TICK_MS)
+}
+
+function resetHubState(): void {
+  if (reconnectTimer !== undefined) {
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
+  stopLostTicker()
+  if (socket) {
+    socket.onopen = null
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    socket.close()
+    socket = null
+  }
+  attempt = 0
+  consecutiveAuthFailures = 0
+  gaveUpOnAuth = false
+  disconnectedSince = null
+  setHubConnectionLost(false)
+}
+
+function dispatchEvent(event: { type?: string } & Record<string, unknown>): void {
+  if (event.type === "registry_changed") {
+    console.info("phase=studio-event-stream action=dispatch type=registry_changed")
+    for (const subscriber of subscribers.values()) {
+      subscriber.callbacksRef.current.onRegistryChanged()
+    }
+    return
+  }
+  if (event.type === "roles_changed") {
+    console.info("phase=studio-event-stream action=dispatch type=roles_changed")
+    for (const subscriber of subscribers.values()) {
+      subscriber.callbacksRef.current.onRolesChanged()
+    }
+    return
+  }
+  if (event.type === "llm_probe_active") {
+    const endpointId = typeof event.endpoint_id === "string" ? event.endpoint_id : ""
+    const activeModelIds = Array.isArray(event.active_model_ids)
+      ? event.active_model_ids.filter((item): item is string => typeof item === "string" && item.length > 0)
+      : []
+    if (!endpointId) return
+    console.info(
+      "phase=studio-event-stream action=dispatch type=llm_probe_active endpoint_id=%s active=%d",
+      endpointId,
+      activeModelIds.length,
+    )
+    for (const subscriber of subscribers.values()) {
+      subscriber.callbacksRef.current.onLlmProbeActive?.({ endpointId, activeModelIds })
+    }
+  }
+}
+
+function giveUpOnAuth(): void {
+  gaveUpOnAuth = true
+  stopLostTicker()
+  setHubConnectionLost(true)
+  console.error(
+    "phase=studio-event-stream action=give-up reason=auth-rejected-threshold consecutive=%d",
+    consecutiveAuthFailures,
+  )
+  toast.error("与 sidecar 连接已断开，请重启 Studio")
+}
+
+function scheduleReconnect(): void {
+  if (!running || gaveUpOnAuth || subscribers.size === 0) return
+  const delay = nextReconnectDelay(attempt)
+  console.warn(
+    "phase=studio-event-stream action=schedule-reconnect attempt=%d delay_ms=%d",
+    attempt + 1,
+    delay,
+  )
+  attempt += 1
+  startLostTicker()
+  evaluateConnectionLost()
+  reconnectTimer = window.setTimeout(connect, delay)
+}
+
+function handleDrop(reason: string, closeCode?: number): void {
+  if (!running) return
+  if (disconnectedSince === null) disconnectedSince = Date.now()
+  console.warn(
+    "phase=studio-event-stream action=disconnect reason=%s close_code=%s consecutive_auth_failures=%d",
+    reason,
+    closeCode === undefined ? "n/a" : String(closeCode),
+    consecutiveAuthFailures,
+  )
+  if (socket) {
+    socket.onopen = null
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    socket = null
+  }
+  if (isWsAuthRejection(closeCode)) {
+    consecutiveAuthFailures += 1
+    if (shouldGiveUpOnAuthFailures(consecutiveAuthFailures)) {
+      giveUpOnAuth()
+      return
+    }
+  }
+  scheduleReconnect()
+}
+
+function connect(): void {
+  reconnectTimer = undefined
+  if (!running || gaveUpOnAuth || subscribers.size === 0 || socket) return
+
+  let nextSocket: WebSocket
+  try {
+    nextSocket = new WebSocket(wsUrl("/ws/events"))
+  } catch (error) {
+    console.error("phase=studio-event-stream action=connect-failed error=%o", error)
+    handleDrop("constructor-threw")
+    return
+  }
+  socket = nextSocket
+
+  nextSocket.onopen = () => {
+    if (!running) return
+    console.info("phase=studio-event-stream action=connect attempt=%d", attempt + 1)
+    attempt = 0
+    consecutiveAuthFailures = 0
+    disconnectedSince = null
+    stopLostTicker()
+    setHubConnectionLost(false)
+  }
+
+  nextSocket.onmessage = (message) => {
+    if (!running) return
+    let event: { type?: string } & Record<string, unknown>
+    try {
+      event = JSON.parse(String(message.data)) as { type?: string } & Record<string, unknown>
+    } catch (error) {
+      console.error(
+        "phase=studio-event-stream action=parse-failed data=%s error=%o",
+        String(message.data).slice(0, 200),
+        error,
+      )
+      return
+    }
+    dispatchEvent(event)
+  }
+
+  nextSocket.onerror = () => {
+    console.warn("phase=studio-event-stream action=socket-error")
+  }
+
+  nextSocket.onclose = (event) => {
+    const closeCode = typeof (event as CloseEvent).code === "number" ? (event as CloseEvent).code : undefined
+    handleDrop("socket-closed", closeCode)
+  }
+}
+
+function subscribe(subscriber: StudioEventSubscriber): () => void {
+  const id = nextSubscriberId
+  nextSubscriberId += 1
+  subscribers.set(id, subscriber)
+  subscriber.setConnectionLost((current) => (current === hubConnectionLost ? current : hubConnectionLost))
+  if (!running) {
+    running = true
+    connect()
+  }
+  return () => {
+    subscribers.delete(id)
+    if (subscribers.size === 0) {
+      running = false
+      resetHubState()
+    }
+  }
+}
+
 export function useStudioEventStream(
   callbacks: StudioEventStreamCallbacks,
   options: StudioEventStreamOptions = {},
@@ -65,196 +250,14 @@ export function useStudioEventStream(
   callbacksRef.current = callbacks
   const enabled = options.enabled ?? true
 
-  const [connectionLost, setConnectionLost] = useState(false)
+  const [connectionLost, setConnectionLost] = useState(hubConnectionLost)
 
   useEffect(() => {
     if (!enabled) {
       setConnectionLost(false)
       return undefined
     }
-    let cancelled = false
-    let socket: WebSocket | null = null
-    let attempt = 0
-    let consecutiveAuthFailures = 0
-    let gaveUpOnAuth = false
-    let reconnectTimer: number | undefined
-    let lostTicker: number | undefined
-    let disconnectedSince: number | null = null
-
-    const evaluateConnectionLost = () => {
-      if (cancelled) return
-      const msWithoutConnection = disconnectedSince === null ? 0 : Date.now() - disconnectedSince
-      const lost = shouldShowConnectionLost(attempt, msWithoutConnection)
-      setConnectionLost((current) => (current === lost ? current : lost))
-    }
-
-    const stopLostTicker = () => {
-      if (lostTicker !== undefined) {
-        window.clearInterval(lostTicker)
-        lostTicker = undefined
-      }
-    }
-
-    const startLostTicker = () => {
-      if (lostTicker !== undefined) return
-      // While disconnected, the time-based threshold must keep advancing even if
-      // no further failure events fire, so re-evaluate on a steady tick.
-      lostTicker = window.setInterval(evaluateConnectionLost, CONNECTION_LOST_TICK_MS)
-    }
-
-    const scheduleReconnect = () => {
-      if (cancelled || gaveUpOnAuth) return
-      const delay = nextReconnectDelay(attempt)
-      console.warn(
-        "phase=studio-event-stream action=schedule-reconnect attempt=%d delay_ms=%d",
-        attempt + 1,
-        delay,
-      )
-      attempt += 1
-      startLostTicker()
-      evaluateConnectionLost()
-      reconnectTimer = window.setTimeout(connect, delay)
-    }
-
-    const giveUpOnAuth = () => {
-      // R-F13: 5 consecutive 4401 closes means the cached token is stale and
-      // silent reconnects will spin forever. Stop the loop and surface the
-      // failure so the user can restart Studio (which re-runs the sidecar
-      // bootstrap and configures a fresh api token via get_sidecar_config IPC).
-      gaveUpOnAuth = true
-      stopLostTicker()
-      // Force the "connection lost" banner true regardless of the time/failure
-      // thresholds — we have explicit evidence the link is unrecoverable.
-      setConnectionLost((current) => (current ? current : true))
-      console.error(
-        "phase=studio-event-stream action=give-up reason=auth-rejected-threshold consecutive=%d",
-        consecutiveAuthFailures,
-      )
-      toast.error("与 sidecar 连接已断开，请重启 Studio")
-    }
-
-    const handleDrop = (reason: string, closeCode?: number) => {
-      if (cancelled) return
-      if (disconnectedSince === null) disconnectedSince = Date.now()
-      console.warn(
-        "phase=studio-event-stream action=disconnect reason=%s close_code=%s consecutive_auth_failures=%d",
-        reason,
-        closeCode === undefined ? "n/a" : String(closeCode),
-        consecutiveAuthFailures,
-      )
-      if (socket) {
-        socket.onopen = null
-        socket.onclose = null
-        socket.onerror = null
-        socket.onmessage = null
-        socket = null
-      }
-      // R-F13: 4401 from the sidecar's /ws/events auth gate is the signal that
-      // the bearer token is stale or wrong. Track it separately from generic
-      // transport drops so a transient 1006/1011 never trips the give-up logic.
-      if (isWsAuthRejection(closeCode)) {
-        consecutiveAuthFailures += 1
-        if (shouldGiveUpOnAuthFailures(consecutiveAuthFailures)) {
-          giveUpOnAuth()
-          return
-        }
-      }
-      scheduleReconnect()
-    }
-
-    const connect = () => {
-      if (cancelled || gaveUpOnAuth) return
-      // R-F13: wsUrl() reads `currentApiToken` from api/client at call time, so
-      // a token rotated between reconnect attempts (e.g. after the sidecar
-      // restarts and emits sidecar-restarted -> configureApiToken(new)) is
-      // picked up here without any extra plumbing. Do NOT capture the URL into
-      // a closure variable outside `connect()` or the freshness guarantee breaks.
-      let nextSocket: WebSocket
-      try {
-        nextSocket = new WebSocket(wsUrl("/ws/events"))
-      } catch (error) {
-        console.error("phase=studio-event-stream action=connect-failed error=%o", error)
-        handleDrop("constructor-threw")
-        return
-      }
-      socket = nextSocket
-
-      nextSocket.onopen = () => {
-        if (cancelled) return
-        console.info("phase=studio-event-stream action=connect attempt=%d", attempt + 1)
-        // Successful (re)connect: reset backoff + connection-lost tracking.
-        // Opening a socket is not evidence that the backend truth changed.
-        // The auth-failure counter resets too — getting an OPEN frame proves
-        // the current token was accepted, so any prior 4401s are stale.
-        attempt = 0
-        consecutiveAuthFailures = 0
-        disconnectedSince = null
-        stopLostTicker()
-        setConnectionLost((current) => (current ? false : current))
-      }
-
-      nextSocket.onmessage = (message) => {
-        if (cancelled) return
-        let event: { type?: string }
-        try {
-          event = JSON.parse(String(message.data)) as { type?: string }
-        } catch (error) {
-          console.error(
-            "phase=studio-event-stream action=parse-failed data=%s error=%o",
-            String(message.data).slice(0, 200),
-            error,
-          )
-          return
-        }
-        if (event.type === "registry_changed") {
-          console.info("phase=studio-event-stream action=dispatch type=registry_changed")
-          callbacksRef.current.onRegistryChanged()
-        } else if (event.type === "roles_changed") {
-          console.info("phase=studio-event-stream action=dispatch type=roles_changed")
-          callbacksRef.current.onRolesChanged()
-        } else if (event.type === "llm_probe_active") {
-          const payload = event as { endpoint_id?: unknown; active_model_ids?: unknown }
-          const endpointId = typeof payload.endpoint_id === "string" ? payload.endpoint_id : ""
-          const activeModelIds = Array.isArray(payload.active_model_ids)
-            ? payload.active_model_ids.filter((item): item is string => typeof item === "string" && item.length > 0)
-            : []
-          if (endpointId) {
-            console.info("phase=studio-event-stream action=dispatch type=llm_probe_active endpoint_id=%s active=%d", endpointId, activeModelIds.length)
-            callbacksRef.current.onLlmProbeActive?.({ endpointId, activeModelIds })
-          }
-        }
-      }
-
-      nextSocket.onerror = () => {
-        // onerror is always followed by onclose; defer the drop handling to
-        // onclose so we schedule exactly one reconnect. Log so the error path
-        // is observable (no silent swallow).
-        console.warn("phase=studio-event-stream action=socket-error")
-      }
-
-      nextSocket.onclose = (event) => {
-        // The browser hands us a CloseEvent with `code` so we can distinguish
-        // a 4401 auth rejection (R-F13) from a normal/abnormal transport close.
-        // `event` may be a plain Event in test environments; coerce defensively.
-        const closeCode = typeof (event as CloseEvent).code === "number" ? (event as CloseEvent).code : undefined
-        handleDrop("socket-closed", closeCode)
-      }
-    }
-
-    connect()
-
-    return () => {
-      cancelled = true
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
-      stopLostTicker()
-      if (socket) {
-        socket.onopen = null
-        socket.onclose = null
-        socket.onerror = null
-        socket.onmessage = null
-        socket.close()
-      }
-    }
+    return subscribe({ callbacksRef, setConnectionLost })
   }, [enabled])
 
   return { connectionLost }

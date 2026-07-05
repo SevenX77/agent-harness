@@ -96,6 +96,21 @@ function mountHook(): void {
   })
 }
 
+function mountTwoHooks(callbacksA = noopCallbacks, callbacksB = noopCallbacks): void {
+  container = document.createElement("div")
+  document.body.appendChild(container)
+  root = createRoot(container)
+
+  function HookHost(): null {
+    useStudioEventStream(callbacksA)
+    useStudioEventStream(callbacksB)
+    return null
+  }
+  act(() => {
+    root.render(createElement(HookHost))
+  })
+}
+
 function unmountHook(): void {
   act(() => {
     root.unmount()
@@ -125,6 +140,29 @@ afterEach(() => {
 })
 
 describe("useStudioEventStream — R-F13 token refresh on reconnect", () => {
+  it("shares one WebSocket connection across multiple subscribers", () => {
+    const first = {
+      onRegistryChanged: vi.fn(),
+      onRolesChanged: vi.fn(),
+    }
+    const second = {
+      onRegistryChanged: vi.fn(),
+      onRolesChanged: vi.fn(),
+    }
+
+    mountTwoHooks(first, second)
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      FakeWebSocket.instances[0].acceptOpen()
+      FakeWebSocket.instances[0].receiveJson({ type: "registry_changed" })
+    })
+
+    expect(first.onRegistryChanged).toHaveBeenCalledTimes(1)
+    expect(second.onRegistryChanged).toHaveBeenCalledTimes(1)
+  })
+
   it("does not dispatch data refresh callbacks on websocket open or reconnect without a change event", () => {
     mountHook()
 

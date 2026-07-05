@@ -510,7 +510,7 @@ export function CopilotPanel({
       setCodeAssistantStatus(inactiveCodeAssistantStatus)
       return
     }
-    setCodeAssistantStatus(await getCodeAssistantStatus(codeAssistantWorkspace))
+    setCodeAssistantStatus(await getCodeAssistantStatus(codeAssistantWorkspace, { force: true }))
   }, [codeAssistantWorkspace])
 
   useEffect(() => {

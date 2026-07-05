@@ -1549,7 +1549,10 @@ def _runtime_state_file_lock_holder(run_dir: Path, ready: Any, release: Any) -> 
     with lock_path.open("a+b") as lock_file:
         _platform_lock_file(lock_file)
         ready.put("locked")
-        release.wait(timeout=5)
+        # Spawn-context suites can spend several seconds importing the backend
+        # before the contender reaches acquire_lease; the holder must not time
+        # out and release the lock before the assertion window starts.
+        release.wait(timeout=60)
         _platform_unlock_file(lock_file)
 
 

@@ -66,6 +66,7 @@ import { errorMessage } from "@/utils/errors"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
 import {
+  DEFAULT_ROLE_TEMPERATURE,
   formatTemperaturePercent,
   TEMPERATURE_DEBOUNCE_MS,
   TEMPERATURE_SCALE_HELP,
@@ -2943,6 +2944,8 @@ function LlmNodeParamsField({
   const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
   const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
   const latestDraftRef = useRef(draft)
+  const pendingTemperatureRef = useRef<string | null>(null)
+  const lastSubmittedTemperatureRef = useRef(draft.temperature)
   const inflightSaveRef = useRef<Promise<void> | null>(null)
   const queuedSaveRef = useRef<NodeLlmParamsDraft | null>(null)
   latestDraftRef.current = draft
@@ -2999,6 +3002,8 @@ function LlmNodeParamsField({
     setNodeParamsSaveStatus("idle")
     if (!skillId || !nodeId) {
       setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
+      pendingTemperatureRef.current = null
+      lastSubmittedTemperatureRef.current = EMPTY_NODE_LLM_PARAMS_DRAFT.temperature
       return
     }
     let cancelled = false
@@ -3007,7 +3012,10 @@ function LlmNodeParamsField({
         if (cancelled) return
         debouncedPersist.cancel()
         setNodeParamsSaveStatus("idle")
-        setDraft(nodeLlmParamsDraftFromApi(map.nodes[nodeId]))
+        const nextDraft = nodeLlmParamsDraftFromApi(map.nodes[nodeId])
+        pendingTemperatureRef.current = null
+        lastSubmittedTemperatureRef.current = nextDraft.temperature
+        setDraft(nextDraft)
       })
       .catch(() => {
         if (!cancelled) setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
@@ -3026,15 +3034,35 @@ function LlmNodeParamsField({
     debouncedPersist.schedule(next)
   }
 
-  const updateTemperature = (temperature: string, flush = false) => {
+  const previewTemperature = (temperature: string) => {
+    const next = {
+      ...latestDraftRef.current,
+      temperature,
+    }
+    pendingTemperatureRef.current = temperature
+    latestDraftRef.current = next
+    setDraft(next)
+  }
+
+  const commitTemperature = (temperature: string) => {
+    pendingTemperatureRef.current = null
+    if (lastSubmittedTemperatureRef.current === temperature) {
+      return
+    }
+    lastSubmittedTemperatureRef.current = temperature
     const next = {
       ...latestDraftRef.current,
       temperature,
     }
     update(next)
-    if (flush) {
-      debouncedPersist.flush()
+    debouncedPersist.flush()
+  }
+
+  const commitPendingTemperature = () => {
+    if (pendingTemperatureRef.current == null) {
+      return
     }
+    commitTemperature(pendingTemperatureRef.current)
   }
 
   const enabledId = `node-params-enabled-${nodeId ?? "none"}`
@@ -3066,15 +3094,13 @@ function LlmNodeParamsField({
     : inferredOutputMax != null
       ? String(inferredOutputMax)
       : ""
-  const fallbackTemperature = roleIntent?.temperature != null ? String(roleIntent.temperature) : ""
+  const fallbackTemperature = String(roleIntent?.temperature ?? DEFAULT_ROLE_TEMPERATURE)
   const maxOutputPlaceholder = inferredOutputMax != null ? formatThousands(String(inferredOutputMax)) : "Inherit"
   const maxOutputValue = draft.enabled ? draft.maxOutputTokens : fallbackMaxOutputTokens
   const temperatureValue = draft.enabled ? draft.temperature : fallbackTemperature
   const temperatureReadout = draft.enabled
     ? formatTemperaturePercent(draft.temperature)
-    : fallbackTemperature
-      ? formatTemperaturePercent(fallbackTemperature)
-      : "Model default"
+    : formatTemperaturePercent(fallbackTemperature)
   const thinkingChecked = draft.enabled ? draft.thinking === true : fallbackThinking
 
   return (
@@ -3162,8 +3188,12 @@ function LlmNodeParamsField({
                 max={2}
                 step={0.1}
                 value={[temperatureValue === "" ? 1 : Number(temperatureValue)]}
-                onValueChange={(vals) => updateTemperature(String(vals[0]))}
-                onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
+                onValueChange={(vals) => previewTemperature(String(vals[0]))}
+                onValueCommit={(vals) => commitTemperature(String(vals[0]))}
+                onPointerUpCapture={commitPendingTemperature}
+                onPointerCancelCapture={commitPendingTemperature}
+                onKeyUpCapture={commitPendingTemperature}
+                onBlurCapture={commitPendingTemperature}
                 disabled={!draft.enabled}
                 className="flex-1"
               />

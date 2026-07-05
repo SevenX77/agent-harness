@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { CircleHelp } from "lucide-react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { RoleIntent, RoleProviderPreference } from "@/api/llm"
 import {
+  DEFAULT_ROLE_TEMPERATURE,
   formatTemperaturePercent,
   TEMPERATURE_SCALE_HELP,
 } from "@/components/studio/llm-temperature"
@@ -56,6 +57,10 @@ export function RoleSettingsPanel({
     onSubmit(roleIntentFromSettingsDraft(nextDraft))
   }
 
+  function previewDraft(nextDraft: RoleSettingsDraft) {
+    setDraft(nextDraft)
+  }
+
   return (
     <RoleSettingsFields
       roleName={roleName}
@@ -64,6 +69,7 @@ export function RoleSettingsPanel({
       tokenLimitSummary={tokenLimitSummary}
       onModelFallbackChange={onModelFallbackChange}
       onDraftChange={updateDraft}
+      onDraftPreview={previewDraft}
     />
   )
 }
@@ -75,6 +81,7 @@ export function RoleSettingsFields({
   tokenLimitSummary,
   onModelFallbackChange,
   onDraftChange,
+  onDraftPreview,
 }: {
   roleName: string
   modelFallbackEnabled: boolean
@@ -82,15 +89,51 @@ export function RoleSettingsFields({
   tokenLimitSummary: RoleTokenLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
   onDraftChange: (draft: RoleSettingsDraft) => void
+  onDraftPreview?: (draft: RoleSettingsDraft) => void
 }) {
   const outputTokenPlaceholder = tokenLimitSummary.output.max
     ? `Blank uses model max (${formatThousands(String(tokenLimitSummary.output.max))})`
     : "Blank uses model max"
-  function updateTemperature(temperature: string) {
+  const pendingTemperatureRef = useRef<string | null>(null)
+  const lastTemperatureRoleRef = useRef(roleName)
+  const lastSubmittedTemperatureRef = useRef(draft.temperature)
+
+  if (lastTemperatureRoleRef.current !== roleName) {
+    lastTemperatureRoleRef.current = roleName
+    pendingTemperatureRef.current = null
+    lastSubmittedTemperatureRef.current = draft.temperature
+  }
+
+  function commitTemperature(temperature: string) {
+    pendingTemperatureRef.current = null
+    if (lastSubmittedTemperatureRef.current === temperature) {
+      return
+    }
+    lastSubmittedTemperatureRef.current = temperature
     onDraftChange({
       ...draft,
       temperature,
     })
+  }
+
+  function commitPendingTemperature() {
+    if (pendingTemperatureRef.current == null) {
+      return
+    }
+    commitTemperature(pendingTemperatureRef.current)
+  }
+
+  function updateTemperature(temperature: string, commit: boolean) {
+    const nextDraft = {
+      ...draft,
+      temperature,
+    }
+    if (commit) {
+      commitTemperature(temperature)
+      return
+    }
+    pendingTemperatureRef.current = temperature
+    ;(onDraftPreview ?? onDraftChange)(nextDraft)
   }
 
   return (
@@ -184,15 +227,19 @@ export function RoleSettingsFields({
                 max={2}
                 step={0.1}
                 value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
-                onValueChange={(vals) => updateTemperature(String(vals[0]))}
-                onValueCommit={(vals) => updateTemperature(String(vals[0]))}
+                onValueChange={(vals) => updateTemperature(String(vals[0]), false)}
+                onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
+                onPointerUpCapture={commitPendingTemperature}
+                onPointerCancelCapture={commitPendingTemperature}
+                onKeyUpCapture={commitPendingTemperature}
+                onBlurCapture={commitPendingTemperature}
                 className="flex-1"
               />
               <span className="w-9 shrink-0 text-right text-xs text-foreground">
                 {formatTemperaturePercent(draft.temperature)}
               </span>
             </div>
-            <FieldDescription>Drag to set a percentage override; blank inherits the route default.</FieldDescription>
+            <FieldDescription>Drag to set the role temperature; 70% is the default.</FieldDescription>
           </Field>
         </div>
       </FieldGroup>
@@ -222,7 +269,7 @@ function draftFromIntent(intent?: RoleIntent): RoleSettingsDraft {
     providerPreference: intent?.provider_preference ?? "manual_order",
     thinking: intent?.thinking ?? false,
     maxOutputTokens: intent?.max_output_tokens != null ? String(intent.max_output_tokens) : "",
-    temperature: intent?.temperature != null ? String(intent.temperature) : "",
+    temperature: intent?.temperature != null ? String(intent.temperature) : String(DEFAULT_ROLE_TEMPERATURE),
   }
 }
 
@@ -244,7 +291,7 @@ export function roleIntentFromSettingsDraft(draft: RoleSettingsDraft): RoleInten
     provider_preference: draft.providerPreference,
     thinking: draft.thinking,
     max_output_tokens: parseOptionalInteger(draft.maxOutputTokens),
-    temperature: parseOptionalNumber(draft.temperature),
+    temperature: parseOptionalNumber(draft.temperature) ?? DEFAULT_ROLE_TEMPERATURE,
   }
 }
 

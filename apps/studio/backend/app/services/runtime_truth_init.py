@@ -9,6 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.core import config
 from app.models.llm_config import LLMCredentialsFile, RolesData
 from app.models.settings import AppSettings
@@ -19,7 +21,7 @@ from app.services.llm_paths import (
     role_test_results_path,
     roles_path,
 )
-from app.services.llm_roles import save_roles_file
+from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.runtime_activity import record_runtime_activity, runtime_activity_log_path
 
 logger = logging.getLogger(__name__)
@@ -86,10 +88,20 @@ def _ensure_credentials_file(created: list[tuple[str, Path]]) -> None:
 
 def _ensure_roles_file(created: list[tuple[str, Path]]) -> None:
     path = roles_path()
-    if path.exists():
+    if not path.exists():
+        save_roles_file(path, RolesData(), known_route_ids=set(), known_bundle_ids=set())
+        created.append(("llm_roles", path))
         return
-    save_roles_file(path, RolesData(), known_route_ids=set(), known_bundle_ids=set())
-    created.append(("llm_roles", path))
+    try:
+        load_roles_file(path)
+    except (ValueError, ValidationError) as exc:
+        logger.warning(
+            "runtime_truth_init action=reset_invalid_truth_source source_id=llm_roles path=%s error=%s",
+            path,
+            exc,
+        )
+        save_roles_file(path, RolesData(), known_route_ids=set(), known_bundle_ids=set())
+        created.append(("llm_roles_reset", path))
 
 
 def _ensure_fixed_roles(created: list[tuple[str, Path]]) -> None:
@@ -100,8 +112,6 @@ def _ensure_fixed_roles(created: list[tuple[str, Path]]) -> None:
     构成"固定不可删"。凭证还没配时补出空角色,等 API Keys 配好后由 reconcile 补模型。"""
     from app.services.llm_credentials import load_credentials
     from app.services.llm_fixed_roles import default_role_entry, fixed_role_names
-    from app.services.llm_roles import load_roles_file
-
     required = fixed_role_names()
     if not required:
         return

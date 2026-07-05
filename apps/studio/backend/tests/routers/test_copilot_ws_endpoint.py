@@ -875,7 +875,9 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
 def test_stream_query_surfaces_resource_terminal_error_as_copilot_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    studio_roots: tuple[Path, Path],
 ) -> None:
+    del studio_roots
     # Regression: the gateway raises ResourceTerminalError (base Exception, NOT a
     # ValueError) when no copilot route resolves. Left uncaught it propagated out
     # of the ws stream loop and the socket died silently (user saw nothing). It

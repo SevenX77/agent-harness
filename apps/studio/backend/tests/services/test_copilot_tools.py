@@ -25,7 +25,10 @@ def test_mcp_server_exposes_tools() -> None:
     assert tool_names == {"get_llm_roles", "compile_skill", "run_role_test"}
 
 
-def test_get_llm_roles_tool_returns_compact_snapshot() -> None:
+def test_get_llm_roles_tool_returns_compact_snapshot(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    del studio_roots
     result = asyncio.run(copilot_tools.get_llm_roles_tool.handler({}))
 
     assert "is_error" not in result

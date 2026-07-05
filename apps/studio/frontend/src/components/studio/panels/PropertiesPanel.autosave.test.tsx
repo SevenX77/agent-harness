@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ReactNode } from "react"
+import { act, type InputHTMLAttributes, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mutate } from "swr"
@@ -52,6 +52,27 @@ vi.mock("sonner", () => ({
   toast: toastMocks,
 }))
 
+vi.mock("@/components/ui/slider", () => ({
+  Slider: ({
+    value,
+    onValueChange,
+    onValueCommit,
+    ...props
+  }: {
+    value: number[]
+    onValueChange?: (value: number[]) => void
+    onValueCommit?: (value: number[]) => void
+  } & InputHTMLAttributes<HTMLInputElement>) => (
+    <input
+      {...props}
+      type="range"
+      value={value[0]}
+      onChange={(event) => onValueChange?.([Number(event.currentTarget.value)])}
+      onBlur={(event) => onValueCommit?.([Number(event.currentTarget.value)])}
+    />
+  ),
+}))
+
 function renderJsx(node: ReactNode): { container: HTMLDivElement; root: Root } {
   const container = document.createElement("div")
   document.body.appendChild(container)
@@ -67,6 +88,18 @@ function setInputValue(input: HTMLInputElement, value: string) {
   act(() => {
     setter?.call(input, value)
     input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+}
+
+function commitInput(input: HTMLInputElement) {
+  act(() => {
+    input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
+  })
+}
+
+function finishPointerInteraction(input: HTMLInputElement) {
+  act(() => {
+    input.dispatchEvent(new Event("pointerup", { bubbles: true }))
   })
 }
 
@@ -329,6 +362,110 @@ describe("PropertiesPanel autosave", () => {
     act(() => root.unmount())
   })
 
+  it("does not save node temperature while dragging and saves only the committed value", async () => {
+    apiMocks.getNodeLlmParams.mockResolvedValue({
+      nodes: {
+        review: {
+          enabled: true,
+          thinking: null,
+          max_output_tokens: null,
+          temperature: 0.7,
+        },
+      },
+    })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    apiMocks.putNodeLlmParams.mockClear()
+
+    const slider = container.querySelector("[data-llm-node-temperature]") as HTMLInputElement
+    setInputValue(slider, "1.4")
+    await flushAutosave()
+
+    expect(container.innerHTML).toContain(">70%<")
+    expect(apiMocks.putNodeLlmParams).not.toHaveBeenCalled()
+
+    commitInput(slider)
+    await flushAutosave()
+
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledTimes(1)
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledWith("demo", "review", {
+      enabled: true,
+      thinking: null,
+      max_output_tokens: null,
+      temperature: 1.4,
+    })
+
+    act(() => root.unmount())
+  })
+
+  it("saves a pending node temperature preview when the pointer interaction ends", async () => {
+    apiMocks.getNodeLlmParams.mockResolvedValue({
+      nodes: {
+        review: {
+          enabled: true,
+          thinking: null,
+          max_output_tokens: null,
+          temperature: 1.4,
+        },
+      },
+    })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+    apiMocks.putNodeLlmParams.mockClear()
+
+    const slider = container.querySelector("[data-llm-node-temperature]") as HTMLInputElement
+    setInputValue(slider, "1.8")
+    await flushAutosave()
+
+    expect(container.innerHTML).toContain(">90%<")
+    expect(apiMocks.putNodeLlmParams).not.toHaveBeenCalled()
+
+    finishPointerInteraction(slider)
+    await flushAutosave()
+
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledTimes(1)
+    expect(apiMocks.putNodeLlmParams).toHaveBeenCalledWith("demo", "review", {
+      enabled: true,
+      thinking: null,
+      max_output_tokens: null,
+      temperature: 1.8,
+    })
+
+    act(() => root.unmount())
+  })
+
   it("autosaves the node custom model params switch", async () => {
     const { container, root } = renderJsx(
       <PropertiesPanel
@@ -459,6 +596,46 @@ describe("PropertiesPanel autosave", () => {
     expect(container.innerHTML).toContain(">35%<")
     expect(container.querySelector("[data-llm-node-thinking]")?.getAttribute("aria-checked")).toBe("true")
     expect(container.querySelector("[data-llm-node-thinking]")?.hasAttribute("disabled")).toBe(true)
+
+    act(() => root.unmount())
+  })
+
+  it("shows the concrete 70% role temperature default while custom model params are disabled", async () => {
+    await mutate("llm/roles", {
+      ...rolesWithAnalystFallback(),
+      roles: {
+        analyst: {
+          ...rolesWithAnalystFallback().roles.analyst,
+          intent: {
+            provider_preference: "manual_order",
+            thinking: false,
+            max_output_tokens: null,
+            temperature: null,
+          },
+        },
+      },
+    }, { revalidate: false })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+
+    expect(container.innerHTML).toContain(">70%<")
+    expect(container.innerHTML).not.toContain("Model default")
 
     act(() => root.unmount())
   })

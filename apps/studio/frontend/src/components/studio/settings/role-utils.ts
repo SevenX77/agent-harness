@@ -1,4 +1,5 @@
 import type { CredentialsState, FixedRoleRecommendedModel, ModelGroup, ModelInfo, ProviderType, RoleIntent, RolesData } from "../../../api/llm"
+import { DEFAULT_ROLE_TEMPERATURE } from "@/components/studio/llm-temperature"
 import { endpointIdFromRouteId } from "./route-credentials"
 
 type RoleProviderEntry = RolesData["providers"][string]
@@ -108,6 +109,11 @@ export function normalizeRolesDraft(data: RolesData): RolesData {
   const next = cloneRolesData(data)
 
   for (const [roleName, role] of Object.entries(next.roles)) {
+    const normalizedIntent = normalizedRoleIntent(role.intent)
+    if (normalizedIntent !== role.intent) {
+      changed = true
+      role.intent = normalizedIntent
+    }
     const modelEntries = Object.entries(role.models).filter(([modelCode]) => Boolean(next.models[modelCode]))
     if (modelEntries.length !== Object.keys(role.models).length) {
       changed = true
@@ -127,6 +133,25 @@ export function normalizeRolesDraft(data: RolesData): RolesData {
   }
 
   return changed ? next : data
+}
+
+function normalizedRoleIntent(intent: RoleIntent | undefined): RoleIntent {
+  const next: RoleIntent = {
+    provider_preference: intent?.provider_preference ?? "manual_order",
+    thinking: intent?.thinking ?? false,
+    max_output_tokens: intent?.max_output_tokens ?? null,
+    temperature: intent?.temperature ?? DEFAULT_ROLE_TEMPERATURE,
+  }
+  if (
+    intent
+    && intent.provider_preference === next.provider_preference
+    && intent.thinking === next.thinking
+    && (intent.max_output_tokens ?? null) === next.max_output_tokens
+    && intent.temperature === next.temperature
+  ) {
+    return intent
+  }
+  return next
 }
 
 export function appendRole(data: RolesData, roleName?: string): RolesData {

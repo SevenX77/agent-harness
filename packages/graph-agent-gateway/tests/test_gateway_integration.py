@@ -205,10 +205,11 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     assert isinstance(model, GatewayChatModel)
     assert model.role_name == "balanced"
     assert model.phase_name == "draft"
-    assert model.temperature == 0.3
+    assert model.temperature is None
     assert model.max_tokens == 1234
     assert model.resolved_role.routes[0].endpoint_id == "openai"
     assert model.resolved_role.routes[0].provider_model_id == "gpt-5"
+    assert model.resolved_role.routes[0].effective_runtime_settings["temperature"].value == 0.3
 
 
 def test_gateway_failure_path_emits_event_and_structured_exception(

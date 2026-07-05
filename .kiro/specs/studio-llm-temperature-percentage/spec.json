@@ -1,24 +1,26 @@
 {
   "feature_name": "studio-llm-temperature-percentage",
   "created_at": "2026-07-04T00:00:00Z",
-  "updated_at": "2026-07-04T00:00:00Z",
+  "updated_at": "2026-07-05T00:00:00Z",
   "language": "zh",
-  "phase": "design_blocked",
+  "phase": "verified_ready_for_pr",
   "approvals": {
     "requirements": {
       "generated": true,
-      "approved": false
+      "approved": true
     },
     "design": {
       "generated": true,
-      "approved": false
+      "approved": true
     },
     "tasks": {
       "generated": true,
-      "approved": false
+      "approved": true
     }
   },
-  "ready_for_implementation": false,
-  "blocked_on": "OPEN DECISION A(线性 remap) vs B(clamp) — 见 design.md §5;方向未定前不进实现。默认推荐 A。",
-  "worktree": "feat/temperature-percentage (cut from origin/main)"
+  "ready_for_implementation": true,
+  "blocked_on": null,
+  "worktree": "feat/temperature-percentage-runtime (cut from origin/main)",
+  "decision": "A(linear remap) selected on 2026-07-05: frontend displays authored 0..2 as 0..100%, gateway maps per provider protocol at invocation time, unset temperature is omitted.",
+  "local_verification": "2026-07-05: all local gates passed; manual UI verified in wt-dev --backend on Vite 5175 with private sidecar 8788."
 }

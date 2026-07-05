@@ -30,7 +30,7 @@ class GenericRouteChatModel(BaseChatModel):
     credential_provider: Any = None
     ordinary_chat_dispatcher: OrdinaryChatDispatcher | None = None
     max_tokens: int = 4096
-    temperature: float = 0.7
+    temperature: float | None = None
     runtime_policy: Any = None
     reasoning: bool = False
     thinking_budget_tokens: int | None = None

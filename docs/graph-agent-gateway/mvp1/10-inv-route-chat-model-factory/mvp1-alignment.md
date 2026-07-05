@@ -2,9 +2,9 @@
 module: 10-inv-route-chat-model-factory
 doc: mvp1-alignment
 status: drafted
-verified_at: 2026-06-02
+verified_at: 2026-07-05
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build/_apply_profiles/_resolve_api_key · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py:ProviderProfile/apply_provider_profile_layers · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build/_apply_profiles/_resolve_api_key · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py:ProviderProfile/apply_provider_profile_layers · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation ? packages/graph-agent-gateway/src/graph_agent_gateway/temperature.py:provider_temperature_from_authored
 units: [route-chat-model-factory]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -190,3 +190,10 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 - [[01-handoff-interface]]：`ResolvedRoute` 契约（工厂唯一输入）
 - [[04-orch-registry-schema]]：`ResolvedRoute` 字段权威源（本工厂只消费）
 - client 层 A' 重设计决策（M6/D1/D2/F1/F4/F5/F6/借鉴 vs 自建）：完整逻辑 + PM 原话留底于本文 §4/§5/§6 / 归属表 `module-disposition-revised.md`（§4 判 10 纯 ③b 新建）
+
+## 2026-07-05 ??: RouteChatModelFactory temperature remap
+
+- `RouteChatModelFactory` ??????? caller override ? route effective runtime settings, ?? provider kwargs ????????????? `route.protocol` ??????
+- Anthropic-compatible ChatX ???? `authored / 2` ?? 0..1 ?; OpenAI-compatible?Gemini?Ark?WaveSpeed ? generic ?????? 0..2 ????? temperature ??? provider kwargs ????
+- `GenericRouteChatModel` ?????????? protocol ???? provider ??, ?? generic ordinary-chat ????????????
+- ????: `test_route_chat_model_factory.py` ?? authored 1.5 ? Anthropic ? 0.75?? OpenAI ?? 1.5, ?? `None` ??? provider kwargs?

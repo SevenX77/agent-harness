@@ -248,6 +248,13 @@ impl CodeAssistant {
         }
     }
 
+    fn attach_launcher_stem(self) -> &'static str {
+        match self {
+            Self::Claude => "attach-claude-code",
+            Self::Codex => "attach-codex-cli",
+        }
+    }
+
     fn master_cmd(self) -> String {
         match self {
             Self::Claude => claude_master_cmd(),
@@ -855,6 +862,59 @@ if ($LASTEXITCODE -ne 0) {{
     )
 }
 
+fn wsl_attach_payload_script(wsl_config: &str, assistant: CodeAssistant) -> String {
+    format!(
+        r#"#!/usr/bin/env bash
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+CFG={config}
+export SYSTEMD_LOG_LEVEL=err
+if ! command -v ah >/dev/null 2>&1; then
+  printf '%s\n' "ah CLI was not found in WSL."
+  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec bash -i
+fi
+ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_major="${{ah_version%%.*}}"
+ah_rest="${{ah_version#*.}}"
+ah_minor="${{ah_rest%%.*}}"
+ah_ok=0
+if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -ge 3 ] 2>/dev/null; then
+  ah_ok=1
+fi
+if [ "$ah_ok" -ne 1 ]; then
+  printf 'ah %s is installed; Studio requires ah >= 1.3.0 for window_size = "follow".\n' "${{ah_version:-unknown}}"
+  printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
+  exec bash -i
+fi
+printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
+ah --config "$CFG" attach master
+printf '[attach ended; exit=%s]\n' "$?"
+exec bash -i
+"#,
+        config = sh_single_quote_str(wsl_config),
+        assistant_name = assistant.display_name(),
+    )
+}
+
+fn windows_code_assistant_attach_launcher_script(
+    wsl_payload_path: &str,
+    assistant: CodeAssistant,
+) -> String {
+    format!(
+        r#"$ErrorActionPreference = "Stop"
+Write-Host "Attaching {assistant_name} through ah (WSL)..."
+wsl.exe -e bash {payload}
+if ($LASTEXITCODE -ne 0) {{
+  Read-Host "Could not start WSL (exit $LASTEXITCODE). Is WSL2 installed? Press Enter to close"
+}}
+"#,
+        assistant_name = assistant.display_name(),
+        payload = powershell_single_quote_str(wsl_payload_path),
+    )
+}
+
 /// On native Linux ah runs directly. macOS is not yet supported by ah.
 fn unix_code_assistant_launcher_script(
     workspace_root: &Path,
@@ -910,6 +970,30 @@ exec "${{SHELL:-/bin/sh}}"
     )
 }
 
+fn unix_code_assistant_attach_launcher_script(
+    config_path: &Path,
+    assistant: CodeAssistant,
+) -> String {
+    format!(
+        r#"#!/bin/sh
+set -u
+export SYSTEMD_LOG_LEVEL=err
+export STUDIO_AH_HOST_HOME="$HOME"
+if ! command -v ah >/dev/null 2>&1; then
+  printf '%s\n' "ah CLI was not found on PATH."
+  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec "${{SHELL:-/bin/sh}}"
+fi
+printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
+ah --config {config} attach master
+printf '[attach ended]\n'
+exec "${{SHELL:-/bin/sh}}"
+"#,
+        config = sh_single_quote(config_path),
+        assistant_name = assistant.display_name(),
+    )
+}
+
 fn launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
     let extension = if cfg!(target_os = "windows") {
         "ps1"
@@ -923,6 +1007,21 @@ fn launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> Path
         .join(workspace_hash(workspace_root))
         .join(assistant.slug())
         .join(format!("{}.{extension}", assistant.launcher_stem()))
+}
+
+fn attach_launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
+    let extension = if cfg!(target_os = "windows") {
+        "ps1"
+    } else if cfg!(target_os = "macos") {
+        "command"
+    } else {
+        "sh"
+    };
+    std::env::temp_dir()
+        .join("skill-studio-ah")
+        .join(workspace_hash(workspace_root))
+        .join(assistant.slug())
+        .join(format!("{}.{extension}", assistant.attach_launcher_stem()))
 }
 
 fn windows_codex_home_wsl() -> Option<String> {
@@ -983,6 +1082,62 @@ fn write_code_assistant_launcher_script(
         std::fs::set_permissions(&script_path, permissions).map_err(|error| {
             format!(
                 "failed to chmod {} launcher: {error}",
+                assistant.display_name()
+            )
+        })?;
+    }
+    Ok(script_path)
+}
+
+fn write_code_assistant_attach_launcher_script(
+    workspace_root: &Path,
+    config_path: &Path,
+    assistant: CodeAssistant,
+) -> Result<PathBuf, String> {
+    let script_path = attach_launcher_script_path(workspace_root, assistant);
+    let parent = script_path.parent().ok_or_else(|| {
+        format!(
+            "cannot resolve attach launcher parent: {}",
+            script_path.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create attach launcher script dir: {error}"))?;
+    let content = if cfg!(target_os = "windows") {
+        let payload_path = parent.join(format!("{}.wsl.sh", assistant.attach_launcher_stem()));
+        std::fs::write(
+            &payload_path,
+            wsl_attach_payload_script(&windows_path_to_wsl(config_path), assistant),
+        )
+        .map_err(|error| format!("failed to write WSL attach payload: {error}"))?;
+        windows_code_assistant_attach_launcher_script(
+            &windows_path_to_wsl(&payload_path),
+            assistant,
+        )
+    } else {
+        unix_code_assistant_attach_launcher_script(config_path, assistant)
+    };
+    std::fs::write(&script_path, content).map_err(|error| {
+        format!(
+            "failed to write {} attach launcher: {error}",
+            assistant.display_name()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&script_path)
+            .map_err(|error| {
+                format!(
+                    "failed to stat {} attach launcher: {error}",
+                    assistant.display_name()
+                )
+            })?
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&script_path, permissions).map_err(|error| {
+            format!(
+                "failed to chmod {} attach launcher: {error}",
                 assistant.display_name()
             )
         })?;
@@ -1073,6 +1228,22 @@ fn open_code_assistant(
     Ok(config_path)
 }
 
+fn attach_code_assistant_terminal(
+    workspace_root: String,
+    assistant: CodeAssistant,
+) -> Result<(), String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    let Some(config_path) = ah_config_for_status(&workspace_root, assistant) else {
+        return Err(format!("{} is not running", assistant.display_name()));
+    };
+    if !ah_config_is_running(&config_path) {
+        return Err(format!("{} is not running", assistant.display_name()));
+    }
+    let launcher =
+        write_code_assistant_attach_launcher_script(&workspace_root, &config_path, assistant)?;
+    spawn_terminal_with_launcher(&launcher, assistant)
+}
+
 #[tauri::command]
 fn open_claude_code(
     workspace_root: String,
@@ -1099,6 +1270,12 @@ fn open_codex_cli(
         .expect("code assistant state poisoned")
         .insert(config);
     Ok(())
+}
+
+#[tauri::command]
+fn attach_code_assistant(workspace_root: String, assistant: String) -> Result<(), String> {
+    let assistant = CodeAssistant::from_slug(assistant.trim())?;
+    attach_code_assistant_terminal(workspace_root, assistant)
 }
 
 #[tauri::command]
@@ -1367,6 +1544,7 @@ pub fn run() {
             open_path,
             open_claude_code,
             open_codex_cli,
+            attach_code_assistant,
             code_assistant_status,
             close_code_assistant,
             native_fs::write_workspace_file,
@@ -1614,6 +1792,10 @@ mod tests {
     #[test]
     fn invoke_handler_registers_code_assistant_lifecycle_commands() {
         let source = include_str!("lib.rs");
+        assert!(
+            source.contains("attach_code_assistant,"),
+            "attach_code_assistant must be registered in the Tauri invoke handler"
+        );
         assert!(
             source.contains("code_assistant_status,"),
             "code_assistant_status must be registered in the Tauri invoke handler"
@@ -1979,6 +2161,32 @@ mod tests {
     }
 
     #[test]
+    fn wsl_attach_payload_only_attaches_master() {
+        let script = wsl_attach_payload_script(
+            "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
+            CodeAssistant::Codex,
+        );
+
+        assert!(script.contains("Attaching Codex master pane"));
+        assert!(script.contains("ah --config \"$CFG\" attach master"));
+        assert!(!script.contains("start --wait"));
+        assert!(!script.contains("Starting Codex through ah"));
+    }
+
+    #[test]
+    fn windows_attach_launcher_runs_wsl_attach_payload() {
+        let script = windows_code_assistant_attach_launcher_script(
+            "/mnt/c/tmp/skill-studio-ah/attach-codex-cli.wsl.sh",
+            CodeAssistant::Codex,
+        );
+
+        assert!(script.contains("Attaching Codex through ah (WSL)"));
+        assert!(
+            script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/attach-codex-cli.wsl.sh'")
+        );
+    }
+
+    #[test]
     fn windows_terminal_launcher_uses_empty_start_title() {
         let script_path = Path::new(r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1");
         let args = windows_cmd_start_powershell_args(script_path);
@@ -2018,6 +2226,19 @@ mod tests {
         assert!(script.contains("command -v ah"));
         assert!(script.contains("ah --config '/tmp/studio ah/ah.toml' start --wait"));
         assert!(script.contains("ah --config '/tmp/studio ah/ah.toml' attach master"));
+    }
+
+    #[test]
+    fn unix_attach_launcher_does_not_start_ah() {
+        let script = unix_code_assistant_attach_launcher_script(
+            Path::new("/tmp/studio ah/ah.toml"),
+            CodeAssistant::Claude,
+        );
+
+        assert!(script.starts_with("#!/bin/sh"));
+        assert!(script.contains("Attaching Claude Code master pane"));
+        assert!(script.contains("ah --config '/tmp/studio ah/ah.toml' attach master"));
+        assert!(!script.contains("start --wait"));
     }
 
     #[test]

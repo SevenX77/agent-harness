@@ -5,6 +5,7 @@ import type { CopilotMessage } from '../../types/copilot'
 import {
   activeCodeAssistantIds,
   buildCopilotJudgeDraft,
+  codeAssistantAttachMenuLabels,
   codeAssistantCloseButtonLabel,
   copilotBackendErrorMessage,
   CopilotPanel,
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   prepareCopilotJudgeContext: vi.fn(),
   openClaudeCode: vi.fn(),
   openCodexCli: vi.fn(),
+  attachCodeAssistant: vi.fn(),
   getCodeAssistantStatus: vi.fn(),
   closeCodeAssistant: vi.fn(),
   buttonProps: [] as Array<Record<string, unknown>>,
@@ -48,6 +50,7 @@ vi.mock('../../hooks/useTemplates', () => ({
 vi.mock('../../lib/tauri', () => ({
   openClaudeCode: mocks.openClaudeCode,
   openCodexCli: mocks.openCodexCli,
+  attachCodeAssistant: mocks.attachCodeAssistant,
   getCodeAssistantStatus: mocks.getCodeAssistantStatus,
   closeCodeAssistant: mocks.closeCodeAssistant,
 }))
@@ -87,6 +90,7 @@ vi.mock('../ui/dropdown-menu', () => ({
     mocks.menuItemProps.push(props)
     return React.createElement('button', props, props.children as React.ReactNode)
   },
+  DropdownMenuSeparator: () => React.createElement('hr'),
 }))
 
 vi.mock('sonner', () => ({
@@ -123,6 +127,8 @@ describe('buildCopilotJudgeDraft', () => {
     mocks.openClaudeCode.mockResolvedValue(true)
     mocks.openCodexCli.mockReset()
     mocks.openCodexCli.mockResolvedValue(true)
+    mocks.attachCodeAssistant.mockReset()
+    mocks.attachCodeAssistant.mockResolvedValue(true)
     mocks.getCodeAssistantStatus.mockReset()
     mocks.getCodeAssistantStatus.mockResolvedValue({ claude: false, codex: false })
     mocks.closeCodeAssistant.mockReset()
@@ -235,6 +241,13 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantCloseButtonLabel({ claude: true, codex: false })).toBe('Close Claude')
     expect(codeAssistantCloseButtonLabel({ claude: false, codex: true })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: true, codex: true })).toBe('Close assistants')
+  })
+
+  it('derives attach menu entries from live ahd status', () => {
+    expect(codeAssistantAttachMenuLabels({ claude: false, codex: false })).toEqual([])
+    expect(codeAssistantAttachMenuLabels({ claude: true, codex: false })).toEqual(['Attach Claude'])
+    expect(codeAssistantAttachMenuLabels({ claude: false, codex: true })).toEqual(['Attach Codex'])
+    expect(codeAssistantAttachMenuLabels({ claude: true, codex: true })).toEqual(['Attach Claude', 'Attach Codex'])
   })
 
   it('shows the thinking indicator while an assistant turn is running with no text yet', () => {

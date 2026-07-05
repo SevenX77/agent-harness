@@ -28,10 +28,10 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 
 ### F2. Properties Field Whitelist
 
-- 机制: render only the fields allowed for agent, logic, or subgraph nodes; save only those fields.
+- 机制: render only the fields allowed for agent, logic, or subgraph nodes; field changes autosave to the owning Markdown file and save only those fields.
 - 决策: Properties must stop being a generic old-frontmatter editor.
 - 原话/来源: `01_workflows/02_authoring.md:28` marks current Properties save live but stale; `01_workflows/02_authoring.md:29` requires the whitelist rebuild.
-- 测试: old fields are absent; required target fields are visible; save round-trips without deleting body content.
+- 测试: old fields are absent; required target fields are visible; editing a field writes the Markdown file without clicking Save; save round-trips without deleting body content.
 - Status: target-design.
 - 归属: region `properties`; platform `engine`; capability `file-editing`.
 
@@ -62,20 +62,20 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 - Status: target-design.
 - 归属: capability `phase-editing`; regions `canvas`, `properties`, `editor`.
 
-### F6. Save Then Compile Feedback
+### F6. Autosave Then Compile Feedback
 
-- 机制: saving a phase file updates editor state, skill detail, and compile/lint context markers.
-- 决策: authoring stays tight: edit field, save, see compile feedback at the place to fix.
+- 机制: autosaving a phase file updates editor state, skill detail, and compile/lint context markers.
+- 决策: authoring stays tight: edit field, autosave, see compile feedback at the place to fix.
 - 原话/来源: `01_workflows/02_authoring.md:31` ties lint/compile and error panel to authoring; `01_workflows/03_compile.md:37` defines context-marker tests.
-- 测试: save updates file hash; compile markers point to changed field/line; conflict recovery works.
-- Status: save live, feedback target-design.
+- 测试: autosave updates file hash; compile markers point to changed field/line; conflict recovery works.
+- Status: autosave live, feedback target-design.
 - 归属: capabilities `phase-editing`, `file-editing`, `compile-lint`.
 
 ## 3. 接口契约
 - Node type is inferred from the phase file kind: agent, logic, or subgraph file.
 - Properties renders a whitelist form per node type; unsupported old fields are not exposed.
 - I/O panel owns node input/output files, output schema, artifacts, and golden-adjacent settings.
-- Saves go through file-editing/native-fs and then compile-lint.
+- Autosaves go through file-editing/native-fs and then compile-lint.
 - Region links: `properties`, `input`, `editor`, `canvas`.
 - Platform links: `native-fs`, `engine`.
 

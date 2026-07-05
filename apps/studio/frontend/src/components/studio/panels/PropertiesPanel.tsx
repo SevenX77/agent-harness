@@ -34,6 +34,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import {
   Select,
   SelectContent,
@@ -60,6 +61,7 @@ import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { cn } from "@/lib/utils"
 import { errorMessage } from "@/utils/errors"
+import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import { formatThousands, stripThousands } from "../settings/llm-roles/RoleSettingsDialog"
 import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus } from "../settings/llm-roles/role-route-status"
@@ -113,6 +115,7 @@ function phaseFrontmatterKind(label: "LOGIC" | "AGENT" | "SUBGRAPH"): PhaseFront
 const YAML_FIELD_LABEL_CLASS = "!text-sm !font-semibold !leading-5 !text-foreground/70"
 const YAML_READONLY_VALUE_CLASS =
   "min-w-0 flex-1 cursor-default select-text truncate border-border/70 bg-secondary/25 font-mono text-xs text-foreground/80 focus-visible:border-input focus-visible:ring-0"
+const PROPERTIES_AUTOSAVE_DELAY_MS = 300
 const YAML_ICON_BUTTON_CLASS = "size-7 rounded-md bg-secondary/70 text-muted-foreground hover:bg-secondary hover:text-foreground"
 
 interface AllowOverwriteCandidate {
@@ -380,30 +383,45 @@ export function PropertiesPanel({
   )
 
   const graphContent = skillDetail?.files?.["GRAPH.md"]
+  const [graphSourceContent, setGraphSourceContent] = useState<string | undefined>(graphContent)
+  useEffect(() => {
+    setGraphSourceContent(graphContent)
+  }, [graphContent])
   const graphFormState = useMemo(() => {
-    if (graphContent === undefined) {
-      return { key: "graph:none", ok: false as const, message: "GRAPH.md is not available in the loaded skill detail." }
+    if (graphSourceContent === undefined) {
+      return { key: `graph:${skillId ?? "unknown"}:none`, ok: false as const, message: "GRAPH.md is not available in the loaded skill detail." }
     }
-    const parsed = parsePhaseFrontmatter(graphContent)
+    const parsed = parsePhaseFrontmatter(graphSourceContent)
     if (!parsed.ok) {
-      return { key: `graph:${graphContent}`, ok: false as const, message: parsed.message }
+      return { key: `graph:${skillId ?? "unknown"}:${graphSourceContent}`, ok: false as const, message: parsed.message }
     }
     return {
-      key: `graph:${graphContent}`,
+      key: `graph:${skillId ?? "unknown"}:${graphSourceContent}`,
       ok: true as const,
       form: graphFrontmatterToForm(parsed.frontmatter),
     }
-  }, [graphContent])
+  }, [graphSourceContent, skillId])
   const [loadedGraphFormKey, setLoadedGraphFormKey] = useState(graphFormState.key)
   const [graphDraft, setGraphDraft] = useState<GraphFrontmatterFormData | null>(() => (
     graphFormState.ok ? graphFormState.form : null
   ))
   const [graphSaving, setGraphSaving] = useState(false)
+  const [graphSavedKey, setGraphSavedKey] = useState<string | null>(null)
+  const [graphSaveFailedKey, setGraphSaveFailedKey] = useState<string | null>(null)
+  const previousGraphFormStateRef = useRef(graphFormState)
 
   useEffect(() => {
+    const previous = previousGraphFormStateRef.current
     setLoadedGraphFormKey(graphFormState.key)
-    setGraphDraft(graphFormState.ok ? graphFormState.form : null)
+    setGraphDraft((current) => {
+      if (!graphFormState.ok) return null
+      if (previous.ok && current && !graphFormsEqual(current, previous.form)) {
+        return current
+      }
+      return graphFormState.form
+    })
     setGraphSaving(false)
+    previousGraphFormStateRef.current = graphFormState
   }, [graphFormState])
 
   const activeGraphDraft = graphFormState.ok
@@ -412,40 +430,66 @@ export function PropertiesPanel({
       : graphFormState.form
     : null
   const graphDirty = Boolean(activeGraphDraft && graphFormState.ok && !graphFormsEqual(activeGraphDraft, graphFormState.form))
-  const graphCanSave = Boolean(onPhaseFileSave && graphContent !== undefined && activeGraphDraft && graphFormState.ok && graphDirty && !graphSaving)
+  const graphAutosaveAvailable = Boolean(onPhaseFileSave && graphSourceContent !== undefined && activeGraphDraft && graphFormState.ok)
+  const graphSaveFailed = graphSaveFailedKey === graphFormState.key
+  const graphAutosaveStatus: SaveStatus = graphSaveFailed
+    ? "error"
+    : graphSaving
+      ? "saving"
+      : graphDirty && graphAutosaveAvailable
+        ? "pending"
+        : graphSavedKey === graphFormState.key
+          ? "saved"
+          : "idle"
 
   const setGraphField = <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => {
+    setGraphSaveFailedKey(null)
     setGraphDraft((current) => current ? { ...current, [field]: value } : current)
   }
 
   const handleGraphReset = () => {
     if (graphFormState.ok) {
+      setGraphSaveFailedKey(null)
       setGraphDraft(graphFormState.form)
     }
   }
 
-  const handleGraphSave = async () => {
-    if (!onPhaseFileSave || graphContent === undefined || !activeGraphDraft) {
+  const handleGraphSave = useCallback(async () => {
+    if (!onPhaseFileSave || graphSourceContent === undefined || !activeGraphDraft) {
       return
     }
-    const next = applyGraphFrontmatterForm(graphContent, activeGraphDraft)
+    const next = applyGraphFrontmatterForm(graphSourceContent, activeGraphDraft)
     if (!next.ok) {
       toast.error(`Frontmatter error: ${next.message}`)
       return
     }
     setGraphSaving(true)
+    setGraphSaveFailedKey(null)
     try {
       await onPhaseFileSave({
         path: "GRAPH.md",
         content: next.markdown,
-        expectedHash: await sha256Hex(graphContent),
+        expectedHash: await sha256Hex(graphSourceContent),
       })
+      setGraphSourceContent(next.markdown)
+      setGraphSavedKey(`graph:${skillId ?? "unknown"}:${next.markdown}`)
     } catch (error) {
+      setGraphSaveFailedKey(graphFormState.key)
       toast.error(error instanceof Error ? error.message : "Could not save graph properties")
     } finally {
       setGraphSaving(false)
     }
-  }
+  }, [activeGraphDraft, graphFormState.key, graphSourceContent, onPhaseFileSave, skillId])
+
+  useEffect(() => {
+    if (!graphDirty || !graphAutosaveAvailable || graphSaving || graphSaveFailed) {
+      return
+    }
+    const timer = setTimeout(() => {
+      void handleGraphSave()
+    }, PROPERTIES_AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [graphAutosaveAvailable, graphDirty, graphSaveFailed, graphSaving, handleGraphSave])
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
   const headerFileLabel = selectedNode ? phaseKindFile(selectedNode.data) : "GRAPH.md"
@@ -454,7 +498,12 @@ export function PropertiesPanel({
   const selectedPhaseId = selectedNode?.data.phaseId ?? selectedNode?.id ?? null
   const filePath = selectedNode?.data.filePath ?? (selectedNode && selectedPhaseId ? `phases/${selectedPhaseId}/${phaseKindFile(selectedNode.data)}` : null)
   const headerFilePath = filePath ?? "GRAPH.md"
-  const fileContent = filePath ? skillDetail?.files?.[filePath] : undefined
+  const loadedFileContent = filePath ? skillDetail?.files?.[filePath] : undefined
+  const [phaseSourceContent, setPhaseSourceContent] = useState<string | undefined>(loadedFileContent)
+  useEffect(() => {
+    setPhaseSourceContent(loadedFileContent)
+  }, [filePath, loadedFileContent])
+  const fileContent = phaseSourceContent
   // Field-level near-projection (atom #5): group THIS node's lint errors by the engine's
   // `field_path` so each frontmatter field can show its own marker; no-field errors are
   // dropped here and stay on the node badge (atom #4).
@@ -464,36 +513,47 @@ export function PropertiesPanel({
   )
   const phaseFormState = useMemo(() => {
     if (!filePath) {
-      return { key: "none", ok: false as const, reason: "missing-node" as const, message: "Select a phase node to edit frontmatter." }
+      return { key: `phase:${skillId ?? "unknown"}:none`, ok: false as const, reason: "missing-node" as const, message: "Select a phase node to edit frontmatter." }
     }
     if (fileContent === undefined) {
-      return { key: filePath, ok: false as const, reason: "missing-file" as const, message: "Phase file is not available in the loaded skill detail." }
+      return { key: `phase:${skillId ?? "unknown"}:${filePath}:missing-file`, ok: false as const, reason: "missing-file" as const, message: "Phase file is not available in the loaded skill detail." }
     }
     const parsed = parsePhaseFrontmatter(fileContent)
     if (!parsed.ok) {
-      return { key: `${filePath}:${fileContent}`, ok: false as const, reason: parsed.reason, message: parsed.message }
+      return { key: `phase:${skillId ?? "unknown"}:${filePath}:${fileContent}`, ok: false as const, reason: parsed.reason, message: parsed.message }
     }
     const form = phaseFrontmatterToForm(parsed.frontmatter)
     return {
-      key: `${filePath}:${fileContent}`,
+      key: `phase:${skillId ?? "unknown"}:${filePath}:${fileContent}`,
       ok: true as const,
       form,
     }
-  }, [fileContent, filePath])
+  }, [fileContent, filePath, skillId])
   const [loadedFormKey, setLoadedFormKey] = useState(phaseFormState.key)
   const [draft, setDraft] = useState<PhaseFrontmatterFormData | null>(() => (
     phaseFormState.ok ? phaseFormState.form : null
   ))
   const [saving, setSaving] = useState(false)
+  const [phaseSavedKey, setPhaseSavedKey] = useState<string | null>(null)
+  const [phaseSaveFailedKey, setPhaseSaveFailedKey] = useState<string | null>(null)
   const [roleTest, setRoleTest] = useState<RoleTestStatusInput>({ running: false })
   // Separate test state for the GRAPH.md default role (graph panel flask).
   const [graphRoleTest, setGraphRoleTest] = useState<RoleTestStatusInput>({ running: false })
+  const previousPhaseFormStateRef = useRef(phaseFormState)
 
   useEffect(() => {
+    const previous = previousPhaseFormStateRef.current
     setLoadedFormKey(phaseFormState.key)
-    setDraft(phaseFormState.ok ? phaseFormState.form : null)
+    setDraft((current) => {
+      if (!phaseFormState.ok) return null
+      if (previous.ok && current && !formsEqual(current, previous.form)) {
+        return current
+      }
+      return phaseFormState.form
+    })
     setSaving(false)
     setRoleTest({ running: false })
+    previousPhaseFormStateRef.current = phaseFormState
   }, [phaseFormState])
 
   const activeDraft = phaseFormState.ok
@@ -509,19 +569,31 @@ export function PropertiesPanel({
     [filePath, selectedNode, selectedPhaseId, skillDetail],
   )
   const dirty = Boolean(activeDraft && phaseFormState.ok && !formsEqual(activeDraft, phaseFormState.form))
-  const canSave = Boolean(onPhaseFileSave && filePath && fileContent !== undefined && activeDraft && phaseFormState.ok && dirty && !saving)
+  const phaseAutosaveAvailable = Boolean(onPhaseFileSave && filePath && fileContent !== undefined && activeDraft && phaseFormState.ok)
+  const phaseSaveFailed = phaseSaveFailedKey === phaseFormState.key
+  const phaseAutosaveStatus: SaveStatus = phaseSaveFailed
+    ? "error"
+    : saving
+      ? "saving"
+      : dirty && phaseAutosaveAvailable
+        ? "pending"
+        : phaseSavedKey === phaseFormState.key
+          ? "saved"
+          : "idle"
 
   const setField = <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => {
+    setPhaseSaveFailedKey(null)
     setDraft((current) => current ? { ...current, [field]: value } : current)
   }
 
   const handleReset = () => {
     if (phaseFormState.ok) {
+      setPhaseSaveFailedKey(null)
       setDraft(phaseFormState.form)
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!onPhaseFileSave || !filePath || fileContent === undefined || !activeDraft) {
       return
     }
@@ -531,18 +603,32 @@ export function PropertiesPanel({
       return
     }
     setSaving(true)
+    setPhaseSaveFailedKey(null)
     try {
       await onPhaseFileSave({
         path: filePath,
         content: next.markdown,
         expectedHash: await sha256Hex(fileContent),
       })
+      setPhaseSourceContent(next.markdown)
+      setPhaseSavedKey(`phase:${skillId ?? "unknown"}:${filePath}:${next.markdown}`)
     } catch (error) {
+      setPhaseSaveFailedKey(phaseFormState.key)
       toast.error(error instanceof Error ? error.message : "Could not save phase properties")
     } finally {
       setSaving(false)
     }
-  }
+  }, [activeDraft, fileContent, filePath, kind, onPhaseFileSave, phaseFormState.key, skillId])
+
+  useEffect(() => {
+    if (!dirty || !phaseAutosaveAvailable || saving || phaseSaveFailed) {
+      return
+    }
+    const timer = setTimeout(() => {
+      void handleSave()
+    }, PROPERTIES_AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [dirty, handleSave, phaseAutosaveAvailable, phaseSaveFailed, saving])
 
   // Reuses the settings role-test job runner (runRoleTestJobToResult) verbatim so
   // the node Properties Test button verifies the same backend job + status the
@@ -647,8 +733,7 @@ export function PropertiesPanel({
               <PhaseFrontmatterForm
                 value={activeDraft}
                 kind={kind}
-                saving={saving}
-                canSave={canSave}
+                saveStatus={phaseAutosaveStatus}
                 canReset={dirty && !saving}
                 roleTest={roleTest}
                 roleNames={roleNames}
@@ -667,9 +752,6 @@ export function PropertiesPanel({
                 onReconnectSubgraphFolder={handleReconnectSubgraphFolder}
                 onFieldChange={setField}
                 onReset={handleReset}
-                onSave={() => {
-                  void handleSave()
-                }}
                 onRoleTest={(roleName) => {
                   void handleRoleTest(roleName)
                 }}
@@ -687,9 +769,6 @@ export function PropertiesPanel({
                       Open file
                     </Button>
                   ) : null}
-                  <Button type="button" size="sm" disabled>
-                    Save
-                  </Button>
                 </PanelActions>
               </div>
             )}
@@ -700,15 +779,11 @@ export function PropertiesPanel({
               <GraphFrontmatterForm
                 value={activeGraphDraft}
                 roleNames={roleNames}
-                saving={graphSaving}
-                canSave={graphCanSave}
+                saveStatus={graphAutosaveStatus}
                 canReset={graphDirty && !graphSaving}
                 roleTest={graphRoleTest}
                 onFieldChange={setGraphField}
                 onReset={handleGraphReset}
-                onSave={() => {
-                  void handleGraphSave()
-                }}
                 onRoleTest={(roleName) => {
                   void handleGraphRoleTest(roleName)
                 }}
@@ -721,9 +796,6 @@ export function PropertiesPanel({
                 <PanelActions>
                   <Button type="button" size="sm" variant="secondary" onClick={() => onFileOpen?.("GRAPH.md")}>
                     Open file
-                  </Button>
-                  <Button type="button" size="sm" disabled>
-                    Save
                   </Button>
                 </PanelActions>
               </div>
@@ -852,25 +924,21 @@ const GRAPH_LLM_ROLE_NONE_SENTINEL = "__none__"
 function GraphFrontmatterForm({
   value,
   roleNames,
-  saving,
-  canSave,
+  saveStatus,
   canReset,
   roleTest,
   onFieldChange,
   onReset,
-  onSave,
   onRoleTest,
   onOpenSettings,
 }: {
   value: GraphFrontmatterFormData
   roleNames: string[]
-  saving: boolean
-  canSave: boolean
+  saveStatus: SaveStatus
   canReset: boolean
   roleTest: RoleTestStatusInput
   onFieldChange: <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => void
   onReset: () => void
-  onSave: () => void
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
 }) {
@@ -892,7 +960,6 @@ function GraphFrontmatterForm({
       className="space-y-2"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave()
       }}
     >
       <FieldSet>
@@ -948,14 +1015,7 @@ function GraphFrontmatterForm({
           </PanelFieldRow>
         </FieldGroup>
       </FieldSet>
-      <PanelActions>
-        <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
-          Reset
-        </Button>
-        <Button type="submit" size="sm" disabled={!canSave}>
-          {saving ? "Saving" : "Save"}
-        </Button>
-      </PanelActions>
+      <PropertiesAutosaveActions saveStatus={saveStatus} canReset={canReset} onReset={onReset} />
     </form>
   )
 }
@@ -966,6 +1026,32 @@ function graphFrontmatterToForm(frontmatter: PhaseFrontmatter): GraphFrontmatter
     description: graphStringValue(frontmatter.description),
     llmRole: graphStringValue(frontmatter.llm_role),
   }
+}
+
+function PropertiesAutosaveActions({
+  saveStatus,
+  canReset,
+  onReset,
+}: {
+  saveStatus: SaveStatus
+  canReset: boolean
+  onReset: () => void
+}) {
+  if (saveStatus === "idle" && !canReset) {
+    return null
+  }
+  return (
+    <PanelActions>
+      <div className="flex items-center justify-end gap-2">
+        <SaveStatusBadge status={saveStatus} />
+        {canReset ? (
+          <Button type="button" size="sm" variant="secondary" onClick={onReset}>
+            Reset
+          </Button>
+        ) : null}
+      </div>
+    </PanelActions>
+  )
 }
 
 function graphFormsEqual(left: GraphFrontmatterFormData, right: GraphFrontmatterFormData): boolean {
@@ -1245,8 +1331,7 @@ function NodeResumeDebugBar({
 function PhaseFrontmatterForm({
   value,
   kind,
-  saving,
-  canSave,
+  saveStatus,
   canReset,
   roleTest,
   roleNames,
@@ -1265,7 +1350,6 @@ function PhaseFrontmatterForm({
   onReconnectSubgraphFolder,
   onFieldChange,
   onReset,
-  onSave,
   onRoleTest,
   onOpenSettings,
   onSelectGraph,
@@ -1273,8 +1357,7 @@ function PhaseFrontmatterForm({
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
-  saving: boolean
-  canSave: boolean
+  saveStatus: SaveStatus
   canReset: boolean
   roleTest: RoleTestStatusInput
   roleNames: string[]
@@ -1293,7 +1376,6 @@ function PhaseFrontmatterForm({
   onReconnectSubgraphFolder: () => void
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
-  onSave: () => void
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
@@ -1304,7 +1386,6 @@ function PhaseFrontmatterForm({
       className="space-y-2"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave()
       }}
     >
       <FieldSet>
@@ -1487,14 +1568,7 @@ function PhaseFrontmatterForm({
           </PanelFieldRow>
         </FieldGroup>
       </FieldSet>
-      <PanelActions>
-        <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
-          Reset
-        </Button>
-        <Button type="submit" size="sm" disabled={!canSave}>
-          {saving ? "Saving" : "Save"}
-        </Button>
-      </PanelActions>
+      <PropertiesAutosaveActions saveStatus={saveStatus} canReset={canReset} onReset={onReset} />
     </form>
   )
 }

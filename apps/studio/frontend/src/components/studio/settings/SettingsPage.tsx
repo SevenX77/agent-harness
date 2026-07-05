@@ -1027,9 +1027,13 @@ export function useSettingsPageController(): SettingsPageController {
     // scoped to the one clicked (URL, protocol) endpoint, so the get-models
     // probe and its per-step toast are identical to pressing Test, not a
     // separate lighter path with its own toast.
-    const endpointDrafts = options.onlyEndpointId
+    const requestedEndpointDrafts = options.onlyEndpointId
       ? allEndpointDrafts.filter((endpointDraft) => endpointDraft.id === options.onlyEndpointId)
       : allEndpointDrafts
+    const persistedByEndpointId = new Map(credentialsRef.current.providers.map((provider) => [provider.id, provider]))
+    const endpointDrafts = requestedEndpointDrafts.filter((endpointDraft) => (
+      routineEndpointTestShouldQueue(endpointDraft, persistedByEndpointId.get(endpointDraft.id))
+    ))
     if (endpointDrafts.length === 0) return
     const baseUrlSteps = isOfficial ? [] : providerBaseUrlStepsForEndpointDrafts(endpointDrafts)
     const baseUrlStepByKey = new Map(baseUrlSteps.map((step, index) => [step.key, { ...step, index }]))
@@ -1309,6 +1313,19 @@ function providerEndpointIdentityMatches(left: ProviderDraft, right: ProviderDra
     (left.provider_type ?? null) === (right.provider_type ?? null) &&
     comparableProviderBaseUrl(left.base_url) === comparableProviderBaseUrl(right.base_url)
   )
+}
+
+function routineEndpointTestShouldQueue(
+  endpointDraft: ProviderDraft,
+  persisted: CredentialsState["providers"][number] | undefined,
+): boolean {
+  if (!persisted) return true
+  if (persisted.endpoint_status === "disabled") return false
+  if (!providerTestParamsMatch(endpointDraft, persisted)) return true
+  const cached = providerCachedTestResult(persisted, endpointDraft)
+  const status = cached?.last_test_status ?? persisted.last_test_status
+  const errorCode = cached?.last_error_code ?? persisted.last_error_code
+  return status !== "protocol_unsupported" && errorCode !== "protocol_unsupported"
 }
 
 type ProviderBaseUrlStep = {

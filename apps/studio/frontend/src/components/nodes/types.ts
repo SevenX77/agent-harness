@@ -92,6 +92,8 @@ export interface GlobalNodeData extends Record<string, unknown> {
   schema: IoDeclaration
   skillId?: string
   workspaceRoot?: string | null
+  /** Compile/lint errors attributed to this global I/O boundary. */
+  compileErrors?: CompileError[]
 }
 
 /**

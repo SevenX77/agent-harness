@@ -130,6 +130,27 @@ describe('buildNodes', () => {
     expect(nodes.map((node) => node.type)).toEqual(['globalInput', 'skill', 'globalOutput'])
   })
 
+  it('threads compile diagnostics onto the global input boundary node', () => {
+    const errors = [
+      {
+        file: '.workspace/test_inputs',
+        line: null,
+        field: 'chapter',
+        severity: 'fatal',
+        message: "Graph input schema requires test input field 'chapter'",
+        error_code: 'STUDIO_TEST_INPUT_MISSING',
+      },
+    ] as const
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['only'],
+      graph_topology: [{ id: 'only', src: 'phases/only/LOGIC.md', depends_on: [], mode: 'logic' }],
+    }), new Set(), () => {}, {}, { [INPUT_ID]: [...errors] })
+
+    const input = nodes.find((node) => node.id === INPUT_ID)
+    expect(input?.type).toBe('globalInput')
+    expect(input?.data.compileErrors).toEqual(errors)
+  })
+
   it('projects explicit graph output markers onto phase node data', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['draft', 'review'],

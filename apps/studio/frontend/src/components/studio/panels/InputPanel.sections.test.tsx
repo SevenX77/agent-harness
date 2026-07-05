@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import type { SkillDetail } from "@/api/types"
+import type { LintError, SkillDetail } from "@/api/types"
 import { InputPanel, __test__ } from "./InputPanel"
 
 const testInputsProps = vi.hoisted((): Array<Record<string, unknown>> => [])
@@ -63,6 +63,21 @@ function detail(): SkillDetail {
   } as unknown as SkillDetail
 }
 
+function lintError(overrides: Partial<LintError>): LintError {
+  return {
+    file: ".workspace/test_inputs",
+    line: null,
+    column: null,
+    error_code: "compile_error",
+    severity: "error",
+    message: "Graph input schema requires test input field 'chapter'",
+    phase_name: null,
+    field_path: "chapter",
+    source_path: null,
+    ...overrides,
+  }
+}
+
 describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
   it("mounts TestInputsSection wired to the selected test input", () => {
     testInputsProps.length = 0
@@ -119,6 +134,29 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
     expect(outputBoundary).toContain("output artifacts")
     expect(outputBoundary).not.toContain("Configure input")
     expect(outputBoundary).not.toContain('data-mock="test-inputs"')
+  })
+
+  it("renders input-boundary compile diagnostics in the panel", () => {
+    const html = renderToStaticMarkup(
+      <InputPanel
+        skillId="demo"
+        skillDetail={detail()}
+        ioBoundary="input"
+        lintErrors={[
+          lintError({ field_path: "chapter" }),
+          lintError({
+            file: "phases/review/SKILL.md",
+            field_path: "validator",
+            message: "node-level diagnostic",
+          }),
+        ]}
+      />,
+    )
+
+    expect(html).toContain("Input diagnostics")
+    expect(html).toContain("chapter")
+    expect(html).toContain("Graph input schema requires test input field")
+    expect(html).not.toContain("node-level diagnostic")
   })
 
   it("submitIoDocumentEdit saves the mutated document against the previous content hash", async () => {

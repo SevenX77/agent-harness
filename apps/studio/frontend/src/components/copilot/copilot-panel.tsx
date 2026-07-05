@@ -286,6 +286,7 @@ const inactiveCodeAssistantStatus: CodeAssistantStatus = {
   claude: false,
   codex: false,
 }
+const CODE_ASSISTANT_STATUS_POLL_MS = 3000
 
 export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
   return [
@@ -515,16 +516,36 @@ export function CopilotPanel({
 
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      const nextStatus = codeAssistantWorkspace
-        ? await getCodeAssistantStatus(codeAssistantWorkspace)
-        : inactiveCodeAssistantStatus
-      if (!cancelled) {
-        setCodeAssistantStatus(nextStatus)
+    let inFlight = false
+    if (!codeAssistantWorkspace) {
+      setCodeAssistantStatus(inactiveCodeAssistantStatus)
+      return () => {
+        cancelled = true
       }
-    })()
+    }
+
+    const poll = async () => {
+      if (inFlight) {
+        return
+      }
+      inFlight = true
+      try {
+        const nextStatus = await getCodeAssistantStatus(codeAssistantWorkspace, { force: true })
+        if (!cancelled) {
+          setCodeAssistantStatus(nextStatus)
+        }
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(() => {
+      void poll()
+    }, CODE_ASSISTANT_STATUS_POLL_MS)
     return () => {
       cancelled = true
+      window.clearInterval(interval)
     }
   }, [codeAssistantWorkspace])
 

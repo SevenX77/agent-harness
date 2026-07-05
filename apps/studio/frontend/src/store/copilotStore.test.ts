@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { copilotStore, loadCopilotSessionsFromDisk } from './copilotStore'
+import {
+  copilotSessionDirectoryPath,
+  copilotSessionRelativeDir,
+  copilotStore,
+  selectedCopilotSessionRelativePath,
+} from './copilotStore'
 import type { CopilotSession } from './copilotStore'
 
-const listWorkspaceDir = vi.fn()
 const readWorkspaceFile = vi.fn()
 const writeWorkspaceFile = vi.fn()
-
 const deleteWorkspacePath = vi.fn()
 
 vi.mock('../lib/tauri', () => ({
@@ -17,25 +20,52 @@ vi.mock('../lib/tauri', () => ({
   ensureWorkspaceSupportDirs: vi.fn().mockResolvedValue(undefined),
   readWorkspaceFile: (workspaceRoot: string, path: string) =>
     readWorkspaceFile(workspaceRoot, path),
-  listWorkspaceDir: (workspaceRoot: string, dir: string) =>
-    listWorkspaceDir(workspaceRoot, dir),
 }))
 
 const WS = '/abs/workspace'
+const WIN_WS = 'C:\\Users\\me\\workspace'
 const SKILL = 'demo-skill'
 const SESSION_DIR = `.workspace/copilot/sessions/${SKILL}`
+const WINDOW_PATH = `${SESSION_DIR}/_window.json`
 
 function diskSession(id: string, text: string): CopilotSession {
   return { id, messages: [{ id: `m-${id}`, role: 'user', content: text } as never] }
 }
 
-function fileEntry(name: string) {
-  return { name, kind: 'file' as const }
+function windowState(openSessionIds: string[], activeSessionId: string | null) {
+  return { openSessionIds, activeSessionId }
+}
+
+function readResult(path: string, value: unknown) {
+  return { path, content: JSON.stringify(value), hash: 'h' }
+}
+
+async function settleWrites() {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+function lastWrittenJson<T>(pathSuffix: string): T | null {
+  const calls = writeWorkspaceFile.mock.calls as Array<[string, string, string]>
+  for (let i = calls.length - 1; i >= 0; i -= 1) {
+    const [, path, content] = calls[i]
+    if (path.endsWith(pathSuffix)) {
+      return JSON.parse(content) as T
+    }
+  }
+  return null
+}
+
+function lastWrittenSession(sessionId: string): CopilotSession | null {
+  return lastWrittenJson<CopilotSession>(`/${sessionId}.json`)
+}
+
+function lastWrittenWindow() {
+  return lastWrittenJson<ReturnType<typeof windowState>>('/_window.json')
 }
 
 beforeEach(() => {
   copilotStore.reset(null)
-  listWorkspaceDir.mockReset()
   readWorkspaceFile.mockReset()
   writeWorkspaceFile.mockReset()
   writeWorkspaceFile.mockResolvedValue({ path: '', content: '', hash: '' })
@@ -43,196 +73,155 @@ beforeEach(() => {
   deleteWorkspacePath.mockResolvedValue(undefined)
 })
 
-describe('loadCopilotSessionsFromDisk', () => {
-  it('reads every .json session and skips non-json + malformed files', async () => {
-    listWorkspaceDir.mockResolvedValue([
-      fileEntry('session-1.json'),
-      fileEntry('README.md'), // skipped: not .json
-      { name: 'sub', kind: 'dir' as const }, // skipped: dir
-      fileEntry('session-2.json'),
-      fileEntry('broken.json'), // skipped: bad JSON
-      fileEntry('not-a-session.json'), // skipped: shape invalid
-    ])
-    readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
-      if (path.endsWith('session-1.json')) {
-        return Promise.resolve({ path, content: JSON.stringify(diskSession('session-1', 'a')), hash: 'h' })
-      }
-      if (path.endsWith('session-2.json')) {
-        return Promise.resolve({ path, content: JSON.stringify(diskSession('session-2', 'b')), hash: 'h' })
-      }
-      if (path.endsWith('broken.json')) {
-        return Promise.resolve({ path, content: '{not json', hash: 'h' })
-      }
-      return Promise.resolve({ path, content: JSON.stringify({ foo: 'bar' }), hash: 'h' })
-    })
-
-    const sessions = await loadCopilotSessionsFromDisk(WS, SKILL)
-
-    expect(sessions.map((s) => s.id)).toEqual(['session-1', 'session-2'])
-    expect(listWorkspaceDir).toHaveBeenCalledWith(WS, SESSION_DIR)
+describe('copilot session storage paths', () => {
+  it('builds the skill-local session directory', () => {
+    expect(copilotSessionRelativeDir(SKILL)).toBe(SESSION_DIR)
+    expect(copilotSessionDirectoryPath(WS, SKILL)).toBe(`${WS}/${SESSION_DIR}`)
+    expect(copilotSessionDirectoryPath(WIN_WS, SKILL)).toBe(
+      `${WIN_WS}\\.workspace\\copilot\\sessions\\${SKILL}`,
+    )
   })
 
-  it('returns empty when the sessions dir is missing (listWorkspaceDir -> [])', async () => {
-    listWorkspaceDir.mockResolvedValue([])
-    expect(await loadCopilotSessionsFromDisk(WS, SKILL)).toEqual([])
-    expect(readWorkspaceFile).not.toHaveBeenCalled()
+  it('accepts only session json files from the current skill directory', () => {
+    expect(
+      selectedCopilotSessionRelativePath(
+        WS,
+        SKILL,
+        `${WS}/${SESSION_DIR}/session-1.json`,
+      ),
+    ).toBe(`${SESSION_DIR}/session-1.json`)
+    expect(
+      selectedCopilotSessionRelativePath(
+        WS,
+        SKILL,
+        `${WS}/.workspace/copilot/sessions/other/session-1.json`,
+      ),
+    ).toBeNull()
+    expect(
+      selectedCopilotSessionRelativePath(
+        WS,
+        SKILL,
+        `${WS}/${SESSION_DIR}/_window.json`,
+      ),
+    ).toBeNull()
   })
 })
 
 describe('copilotStore.hydrate', () => {
-  it('restores disk sessions on cold start (in-memory empty)', async () => {
-    listWorkspaceDir.mockResolvedValue([fileEntry('session-100.json'), fileEntry('session-200.json')])
-    readWorkspaceFile.mockImplementation((_ws: string, path: string) =>
-      Promise.resolve({
-        path,
-        content: JSON.stringify(
-          path.includes('100') ? diskSession('session-100', 'older') : diskSession('session-200', 'newer'),
-        ),
-        hash: 'h',
-      }),
-    )
+  it('restores only the tabs listed in _window.json, preserving window order and active tab', async () => {
+    readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
+      if (path === WINDOW_PATH) {
+        return Promise.resolve(readResult(path, windowState(['session-300', 'session-100'], 'session-100')))
+      }
+      if (path.endsWith('session-300.json')) {
+        return Promise.resolve(readResult(path, diskSession('session-300', 'third')))
+      }
+      if (path.endsWith('session-100.json')) {
+        return Promise.resolve(readResult(path, diskSession('session-100', 'first')))
+      }
+      throw new Error(`unexpected read ${path}`)
+    })
 
     copilotStore.setContext(WS, SKILL)
-    expect(copilotStore.getSnapshot().sessions).toHaveLength(0)
-
     await copilotStore.hydrate(WS, SKILL)
 
     const snap = copilotStore.getSnapshot()
-    expect(snap.sessions.map((s) => s.id)).toEqual(['session-100', 'session-200'])
-    // Active session defaults to the most recent (last) restored session.
-    expect(snap.activeSessionId).toBe('session-200')
+    expect(snap.sessions.map((s) => s.id)).toEqual(['session-300', 'session-100'])
+    expect(snap.activeSessionId).toBe('session-100')
+    expect(readWorkspaceFile).not.toHaveBeenCalledWith(WS, `${SESSION_DIR}/session-200.json`)
   })
 
-  it('merges disk sessions without losing a live in-process session', async () => {
-    // A session was created + chatted in this process; disk also holds an older
-    // session from a previous run. Hydrate must surface BOTH, with the live
-    // session's messages intact (in-memory wins).
-    listWorkspaceDir.mockResolvedValue([fileEntry('session-1.json')])
-    readWorkspaceFile.mockResolvedValue({
-      path: 'session-1.json',
-      content: JSON.stringify(diskSession('session-1', 'older-run')),
-      hash: 'h',
-    })
-
-    copilotStore.setContext(WS, SKILL)
-    const liveId = copilotStore.newSession()
-    await copilotStore.appendMessage({ id: 'live-msg', role: 'user', content: 'live' } as never)
-    const liveMessages = copilotStore.getSnapshot().messages.length
-
-    await copilotStore.hydrate(WS, SKILL)
-
-    const snap = copilotStore.getSnapshot()
-    const live = snap.sessions.find((s) => s.id === liveId)
-    expect(live?.messages.length).toBe(liveMessages)
-    expect(snap.sessions.some((s) => s.id === 'session-1')).toBe(true)
-  })
-
-  it('is idempotent — disk is read at most once per context', async () => {
-    listWorkspaceDir.mockResolvedValue([fileEntry('session-1.json')])
-    readWorkspaceFile.mockResolvedValue({
-      path: 'session-1.json',
-      content: JSON.stringify(diskSession('session-1', 'x')),
-      hash: 'h',
-    })
-
-    copilotStore.setContext(WS, SKILL)
-    await copilotStore.hydrate(WS, SKILL)
-    await copilotStore.hydrate(WS, SKILL)
-
-    expect(listWorkspaceDir).toHaveBeenCalledTimes(1)
-  })
-
-  it('restores the last-viewed tab from _active.json, not the newest session (F2/D8)', async () => {
-    // session-100 (older) was the last-viewed tab; session-200 is just newer.
-    listWorkspaceDir.mockResolvedValue([fileEntry('session-100.json'), fileEntry('session-200.json')])
+  it('does not resurrect every historical transcript when _window.json is missing', async () => {
     readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
-      if (path.endsWith('_active.json')) {
-        return Promise.resolve({ path, content: JSON.stringify({ activeSessionId: 'session-100' }), hash: 'h' })
+      if (path === WINDOW_PATH) {
+        return Promise.reject(new Error('not found'))
       }
-      return Promise.resolve({
-        path,
-        content: JSON.stringify(diskSession(path.includes('100') ? 'session-100' : 'session-200', 'x')),
-        hash: 'h',
-      })
+      throw new Error(`unexpected read ${path}`)
     })
 
     copilotStore.setContext(WS, SKILL)
     await copilotStore.hydrate(WS, SKILL)
 
-    // Active is the persisted last-viewed tab, even though session-200 is newer.
-    expect(copilotStore.getSnapshot().activeSessionId).toBe('session-100')
+    expect(copilotStore.getSnapshot().sessions).toEqual([])
+    expect(readWorkspaceFile).toHaveBeenCalledTimes(1)
+    expect(readWorkspaceFile).toHaveBeenCalledWith(WS, WINDOW_PATH)
   })
 
-  it('ignores the _active.json marker file when loading sessions', async () => {
-    listWorkspaceDir.mockResolvedValue([fileEntry('session-1.json'), fileEntry('_active.json')])
+  it('is idempotent: disk is read at most once per context', async () => {
     readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
-      if (path.endsWith('_active.json')) {
-        return Promise.resolve({ path, content: JSON.stringify({ activeSessionId: 'session-1' }), hash: 'h' })
+      if (path === WINDOW_PATH) {
+        return Promise.resolve(readResult(path, windowState(['session-1'], 'session-1')))
       }
-      return Promise.resolve({ path, content: JSON.stringify(diskSession('session-1', 'x')), hash: 'h' })
+      return Promise.resolve(readResult(path, diskSession('session-1', 'x')))
     })
 
-    const sessions = await loadCopilotSessionsFromDisk(WS, SKILL)
-    // _active.json is a marker, not a session — it must not appear as a session.
-    expect(sessions.map((s) => s.id)).toEqual(['session-1'])
+    copilotStore.setContext(WS, SKILL)
+    await copilotStore.hydrate(WS, SKILL)
+    await copilotStore.hydrate(WS, SKILL)
+
+    expect(readWorkspaceFile).toHaveBeenCalledTimes(2)
   })
 })
 
-/** Find the last persisted JSON for a given session id from the write spy. */
-function lastWrittenSession(sessionId: string): CopilotSession | null {
-  const calls = writeWorkspaceFile.mock.calls as Array<[string, string, string]>
-  for (let i = calls.length - 1; i >= 0; i -= 1) {
-    const [, path, content] = calls[i]
-    if (path.endsWith(`/${sessionId}.json`)) {
-      return JSON.parse(content) as CopilotSession
-    }
-  }
-  return null
-}
-
-describe('copilotStore streamed-turn persistence (R16/D8)', () => {
-  it('persists sessions under the .workspace copilot support tree', async () => {
-    listWorkspaceDir.mockResolvedValue([])
+describe('copilotStore streamed-turn persistence', () => {
+  it('persists new empty sessions and window state under the .workspace copilot support tree', async () => {
     copilotStore.setContext(WS, SKILL)
     const sessionId = copilotStore.newSession()
-
-    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
+    await settleWrites()
 
     expect(writeWorkspaceFile).toHaveBeenCalledWith(
       WS,
       `${SESSION_DIR}/${sessionId}.json`,
       expect.any(String),
     )
-    expect(
-      writeWorkspaceFile.mock.calls.some(([, path]) => String(path).startsWith('.gemini/')),
-    ).toBe(false)
+    expect(lastWrittenSession(sessionId)).toEqual({ id: sessionId, messages: [] })
+    expect(lastWrittenWindow()).toEqual(windowState([sessionId], sessionId))
+  })
+
+  it('updates window state when the active tab changes', async () => {
+    copilotStore.setContext(WS, SKILL)
+    const a = copilotStore.newSession()
+    const b = copilotStore.newSession()
+    await settleWrites()
+    writeWorkspaceFile.mockClear()
+
+    copilotStore.switchSession(a)
+    await settleWrites()
+
+    expect(copilotStore.getSnapshot().activeSessionId).toBe(a)
+    expect(lastWrittenWindow()).toEqual(windowState([a, b], a))
+  })
+
+  it('remembers the active tab when switching away from a skill and back in the same process', () => {
+    copilotStore.setContext(WS, SKILL)
+    const a = copilotStore.newSession()
+    copilotStore.newSession()
+
+    copilotStore.switchSession(a)
+    copilotStore.setContext(WS, 'other-skill')
+    copilotStore.setContext(WS, SKILL)
+
+    expect(copilotStore.getSnapshot().activeSessionId).toBe(a)
   })
 
   it('flushes the full assistant message to disk when the turn completes', async () => {
-    listWorkspaceDir.mockResolvedValue([])
     copilotStore.setContext(WS, SKILL)
     const sessionId = copilotStore.newSession()
 
-    // 1. User turn.
     await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
-    // 2. Assistant shell appended empty + running (mirrors useCopilot's first delta).
     await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never)
 
-    // 3. Streamed text deltas keep status 'running' — these must NOT persist.
     const writesBeforeDone = writeWorkspaceFile.mock.calls.length
     copilotStore.updateMessage('a1', (m) => ({ ...m, content: `${m.content}Hello `, status: 'running' }))
     copilotStore.updateMessage('a1', (m) => ({ ...m, content: `${m.content}world`, status: 'running' }))
     expect(writeWorkspaceFile.mock.calls.length).toBe(writesBeforeDone)
 
-    // 4. Terminal done event settles the message (status -> success) and persists.
     copilotStore.updateMessage('a1', (m) => ({
       ...m,
       status: 'success',
       events: [...m.events, { id: 'e1', type: 'done', status: 'success', receivedAt: 3, raw: {} } as never],
     }))
-    // updateMessage's disk flush is fire-and-forget — let the microtask settle.
-    await Promise.resolve()
-    await Promise.resolve()
+    await settleWrites()
 
     const persisted = lastWrittenSession(sessionId)
     expect(persisted).not.toBeNull()
@@ -241,26 +230,24 @@ describe('copilotStore streamed-turn persistence (R16/D8)', () => {
     expect(assistant?.events.some((e) => (e as { type: string }).type === 'done')).toBe(true)
   })
 
-  it('hydrate round-trips the persisted assistant content on cold start', async () => {
-    // Stream a turn, capture what hit disk, then simulate a fresh process restart.
-    listWorkspaceDir.mockResolvedValue([])
+  it('hydrate round-trips persisted assistant content through _window.json', async () => {
     copilotStore.setContext(WS, SKILL)
     const sessionId = copilotStore.newSession()
     await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'q', events: [], status: 'success', createdAt: 1 } as never)
     await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never)
     copilotStore.updateMessage('a1', (m) => ({ ...m, content: 'streamed answer', status: 'success' }))
-    await Promise.resolve()
-    await Promise.resolve()
+    await settleWrites()
 
     const onDisk = lastWrittenSession(sessionId)
     expect(onDisk?.messages.find((m) => m.id === 'a1')?.content).toBe('streamed answer')
 
-    // Cold restart: wipe in-memory state, then hydrate from the captured disk file.
     copilotStore.reset(null)
-    listWorkspaceDir.mockResolvedValue([fileEntry(`${sessionId}.json`)])
-    readWorkspaceFile.mockImplementation((_ws: string, path: string) =>
-      Promise.resolve({ path, content: JSON.stringify(onDisk), hash: 'h' }),
-    )
+    readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
+      if (path === WINDOW_PATH) {
+        return Promise.resolve(readResult(path, windowState([sessionId], sessionId)))
+      }
+      return Promise.resolve(readResult(path, onDisk))
+    })
 
     copilotStore.setContext(WS, SKILL)
     await copilotStore.hydrate(WS, SKILL)
@@ -273,9 +260,6 @@ describe('copilotStore streamed-turn persistence (R16/D8)', () => {
   })
 })
 
-
-// R3: chat tabs get a close button — closeSession removes the session, deletes
-// its transcript file, and keeps a sane active session.
 describe('closeSession', () => {
   function seedThree(): string[] {
     copilotStore.setContext(WS, SKILL)
@@ -285,40 +269,100 @@ describe('closeSession', () => {
     return [a, b, c]
   }
 
-  it('closing a non-active session keeps the active one and deletes the file', async () => {
-    const [a, , c] = seedThree()
+  it('closing a non-active session keeps the active one and preserves the transcript file', async () => {
+    const [a, b, c] = seedThree()
+    await settleWrites()
+    writeWorkspaceFile.mockClear()
     await copilotStore.closeSession(a)
 
     const snapshot = copilotStore.getSnapshot()
-    expect(snapshot.sessions.map((s) => s.id)).not.toContain(a)
+    expect(snapshot.sessions.map((s) => s.id)).toEqual([b, c])
     expect(snapshot.activeSessionId).toBe(c)
-    expect(deleteWorkspacePath).toHaveBeenCalledWith(WS, `${SESSION_DIR}/${a}.json`)
+    expect(deleteWorkspacePath).not.toHaveBeenCalled()
+    expect(lastWrittenWindow()).toEqual(windowState([b, c], c))
   })
 
   it('closing the active session activates its previous neighbor', async () => {
     const [a, b, c] = seedThree()
+    await settleWrites()
+    writeWorkspaceFile.mockClear()
     await copilotStore.closeSession(c)
 
     const snapshot = copilotStore.getSnapshot()
     expect(snapshot.sessions.map((s) => s.id)).toEqual([a, b])
     expect(snapshot.activeSessionId).toBe(b)
+    expect(lastWrittenWindow()).toEqual(windowState([a, b], b))
   })
 
   it('closing the last remaining session leaves one fresh empty chat', async () => {
     copilotStore.setContext(WS, SKILL)
     const only = copilotStore.newSession()
+    writeWorkspaceFile.mockClear()
+
     await copilotStore.closeSession(only)
+    await settleWrites()
 
     const snapshot = copilotStore.getSnapshot()
     expect(snapshot.sessions).toHaveLength(1)
     expect(snapshot.sessions[0].id).not.toBe(only)
     expect(snapshot.sessions[0].messages).toEqual([])
     expect(snapshot.activeSessionId).toBe(snapshot.sessions[0].id)
+    expect(deleteWorkspacePath).not.toHaveBeenCalled()
+    expect(lastWrittenWindow()).toEqual(windowState([snapshot.sessions[0].id], snapshot.sessions[0].id))
   })
 
   it('ignores unknown session ids', async () => {
     const [a, b, c] = seedThree()
+    await settleWrites()
+    writeWorkspaceFile.mockClear()
     await copilotStore.closeSession('nope')
     expect(copilotStore.getSnapshot().sessions.map((s) => s.id)).toEqual([a, b, c])
+    expect(writeWorkspaceFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('restoreSessionFromFile', () => {
+  it('loads a selected session file from this skill, opens it, and activates it', async () => {
+    copilotStore.setContext(WS, SKILL)
+    const existing = copilotStore.newSession()
+    await settleWrites()
+    writeWorkspaceFile.mockClear()
+    const restored = diskSession('session-restored', 'bring this back')
+    readWorkspaceFile.mockResolvedValue(readResult(`${SESSION_DIR}/session-restored.json`, restored))
+
+    await expect(
+      copilotStore.restoreSessionFromFile(`${WS}/${SESSION_DIR}/session-restored.json`),
+    ).resolves.toBe(true)
+
+    const snapshot = copilotStore.getSnapshot()
+    expect(snapshot.sessions.map((s) => s.id)).toEqual([existing, 'session-restored'])
+    expect(snapshot.activeSessionId).toBe('session-restored')
+    expect(readWorkspaceFile).toHaveBeenCalledWith(WS, `${SESSION_DIR}/session-restored.json`)
+    expect(lastWrittenWindow()).toEqual(windowState([existing, 'session-restored'], 'session-restored'))
+  })
+
+  it('rejects files outside the current skill session directory', async () => {
+    copilotStore.setContext(WS, SKILL)
+
+    await expect(
+      copilotStore.restoreSessionFromFile(`${WS}/.workspace/copilot/sessions/other/session-1.json`),
+    ).resolves.toBe(false)
+
+    expect(readWorkspaceFile).not.toHaveBeenCalled()
+    expect(copilotStore.getSnapshot().persistenceError).toContain('current skill')
+  })
+
+  it('rejects session files whose filename does not match the stored session id', async () => {
+    copilotStore.setContext(WS, SKILL)
+    readWorkspaceFile.mockResolvedValue(
+      readResult(`${SESSION_DIR}/session-1.json`, diskSession('session-2', 'wrong file')),
+    )
+
+    await expect(
+      copilotStore.restoreSessionFromFile(`${WS}/${SESSION_DIR}/session-1.json`),
+    ).resolves.toBe(false)
+
+    expect(copilotStore.getSnapshot().sessions).toEqual([])
+    expect(copilotStore.getSnapshot().persistenceError).toContain('does not match')
   })
 })

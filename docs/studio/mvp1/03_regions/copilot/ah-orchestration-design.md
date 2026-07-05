@@ -3,8 +3,11 @@ region: copilot
 kind: target-direction design（ah 编排底座）
 created: 2026-07-03
 updated: 2026-07-04
-状态: 【阶段 1 完成】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨已端到端验证、PM 验收通过。
-      本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置),供提交 PR。
+状态: 【阶段 1 完成 / 阶段 2 设计确定】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨
+      已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
+      并补齐后续 Studio 功能开发执行规则。
+      本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置/下一阶段方案/
+      开发规则),供提交 PR。
 关系: 与本目录 mvp1-alignment.md 的 F1–F9(SDK 面板流式)并列的**另一套编排底座**;
       PM 拍定 ah 为主、SDK 为辅,故 F8 真流式在 ah 路径下降级(见 §7)。
 一切"设计意图 / 代码事实"均按 CLAUDE.md「论据先行」附出处;ah 相关事实出处 = ah 官方仓库
@@ -248,7 +251,295 @@ master pane 有 `claude … .local/bin/claude missing or broken · run claude in
    (现只写 `[agents.studio] provider=bash` 的桩)。
 6. **打包分发带上 ah ≥1.2.0**(§3 结论)。
 
-## 9. 权威引用
+## 9. 阶段 2:接活闭环设计
+
+> PM 2026-07-04 裁定:方向没问题,go。阶段 2 不再继续打磨"像不像本人",而是让 MoirAI 真正能带着三只手
+> 接一条 skill 的活:Clotho 纺设计,Lachesis 量准并修错,Atropos 跑完下终判,结论回流到下一轮设计。
+
+### 9.1 阶段目标
+
+**从"身份认知"升级到"工作闭环"。** 用户点 Studio 的「打开 Claude Code」后,仍进入 ah 管的终端 master
+pane;MoirAI 先自报状态,随后能按 skill 生命周期判断该动哪只手,并用 ah CLI 调用对应 agent。第一条闭环只要求
+在终端里跑通,不要求面板流式、可视化任务树或 UI 上显示三位女神。
+
+阶段 2 的最小验收:
+
+1. Studio 自动为当前 skill 工作区准备 `.ah/rules/*` 与 `.ah/skills/*`,并生成能拉起
+   `master + clotho + lachesis + atropos` 的 ah 配置。
+2. Clotho 能拿到 `domain-analysis` / `graph-design` / `agent-prompt-design` 三个 skill,完成从需求到
+   `GRAPH.md` + phase 草案的设计。
+3. Lachesis 能拿到 `compile-error-repair`,围绕编译错误码和挂载 spec 做根因修复。
+4. Atropos 拿到新增 `eval-judgement`,能基于 predict/run 产物、trace 与 golden diff 给出达标/不达标的终判,
+   并明确把改进方向回流给 Clotho。
+5. master 只在用户看得见的话术里说 MoirAI/Clotho/Lachesis/Atropos,不把 ah 的 master/worker/派单词汇露给用户。
+
+### 9.2 非目标
+
+- **不做 F8 面板流式**:ah 路径继续直接 attach 到 Claude Code 终端;SDK 面板流式是另一条辅路。
+- **不做新的角色 UI**:界面仍只露 MoirAI 一个入口。Clotho/Lachesis/Atropos 未完整落座前不做 tab、头像、
+  状态卡或可点击 agent 列表。
+- **不做 MCP 独立化**:Studio 现有 copilot MCP 工具仍是进程内 Python,ah 进程不能直接用;阶段 2 先靠 rules+
+  skills+文件系统+现有 CLI/命令行完成闭环。独立 stdio MCP server 留到阶段 3。
+- **不切目标 provider**:阶段 2 仍全部 fallback claude,证明编排与知识注入闭环;Lachesis→codex、
+  Atropos→antigravity 的跨 provider 验证另列阶段。
+
+### 9.3 关键运行时结论:项目根 = skill 工作区
+
+Studio 现有拉起链路有一个容易误判的点:
+
+- `apps/studio/tauri/src/lib.rs` 的 `ah_config_for_workspace` 当前把临时 `ah.toml` 写到系统 temp 下;
+- 但 Windows/Unix launcher 在 `ah --config <path> start --wait` 前都会先 `cd` 到 skill 工作区;
+- ah `start_project` 把当前 `cwd` 记为 session `absolute_path`;
+- daemon 后续给 master/worker 物化 rules、skills、bundle 时用的是 session `absolute_path`,也就是 skill 工作区,
+  不是 temp `ah.toml` 的父目录。
+
+所以阶段 2 的落点应是:
+
+```text
+<skill-workspace>/
+  .ah/
+    rules/
+      master.md
+      clotho.md
+      lachesis.md
+      atropos.md
+    skills/
+      domain-analysis/SKILL.md
+      graph-design/SKILL.md
+      agent-prompt-design/SKILL.md
+      compile-error-repair/SKILL.md
+      eval-judgement/SKILL.md
+```
+
+`ah.toml` 可以继续由 Studio 临时生成;真正被 provider 读取的人格和 skills 必须落在 skill 工作区。这样既不污染
+agent-harness 主仓根,也能让用户把 `.ah/` 作为该 skill 的项目配置提交进自己的 skill 仓库。
+
+**bundle 暂不进入阶段 2。** 原因不是 bundle 不该用,而是 ah CLI 的 `bundle validate/list` 以 config 父目录
+作为 bundle project root;Studio 当前用 temp `ah.toml` 时,CLI 校验会看 temp 目录而不是 skill 工作区。运行时
+daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会制造新的漂移。阶段 3 若要启用 bundle,
+必须先二选一:
+
+1. Studio 把正式 `ah.toml` 写进 skill 工作区,让 config root 和 session root 合一;
+2. 或 ah 增加显式 `--project-root` / config 字段,让 CLI 校验与 daemon 运行使用同一项目根。
+
+### 9.4 Studio 生成策略
+
+生成逻辑放在 `apps/studio/tauri/src/lib.rs`,沿用 `open_claude_code` 的边界,但把现在的
+`transient_ah_config_content()` 拆成"准备工作区 `.ah/`"和"生成 transient config"两步:
+
+1. `prepare_studio_ah_workspace(workspace_root)`:
+   - 创建 `.ah/rules` 与 `.ah/skills`;
+   - 写入四份人格 rules(来自本文 §11 附录的 R3 文本,再追加阶段 2 的内部操作协议);
+   - 从 `apps/studio/backend/app/prompts/skills/*` 同步四个现有 copilot skill;
+   - 新增 `eval-judgement` skill;
+   - 对已存在文件采用**受管头 + 内容 hash**策略:只有文件带 Studio 生成头且 hash 匹配上次生成时才覆盖;用户改过或
+     手写的 `.ah/*` 不静默覆盖,要报清楚冲突路径。
+2. `transient_ah_config_content(workspace_root, platform_paths)`:
+   - 生成 master + 三个 agents;
+   - 引用 `.ah/skills` 中的 skill 名;
+   - 写入 `[sandbox] additional_ro_binds` 的只读知识库挂载路径;
+   - Windows 下所有给 ah/WSL 看的路径必须先转成 `/mnt/<drive>/...`,不能把 `D:\...` 写进 config。
+
+默认配置骨架:
+
+```toml
+version = "1"
+
+[master]
+enabled = true
+cmd = "IS_SANDBOX=1 claude --dangerously-skip-permissions '<Studio auto-report prompt>'"
+readiness_timeout_s = 180
+
+[agents.clotho]
+provider = "claude"
+skills = ["domain-analysis", "graph-design", "agent-prompt-design"]
+
+[agents.lachesis]
+provider = "claude"
+skills = ["compile-error-repair"]
+
+[agents.atropos]
+provider = "claude"
+skills = ["eval-judgement"]
+
+[sandbox]
+additional_ro_binds = [
+  "<engine/studio skill spec docs>",
+  "<studio mounted prompt docs>",
+]
+```
+
+如果工作区向上已经存在用户手写的 `ah.toml`,继续尊重现有 `find_ah_config` 语义:用户配置优先,Studio 不覆盖。此时
+Studio 只做"缺什么提示什么",不擅自把 MoirAI 三女神写进去,因为已有 `ah.toml` 代表用户接管了 ah 项目配置。
+
+### 9.5 rules 从"人格"扩展为"人格 + 操作协议"
+
+阶段 1 的 R3 人格文本不改写,避免把已验收口吻打坏。阶段 2 在每份 rules 后面追加一段**不说出口的操作协议**:
+
+- master/MoirAI:
+  - 先判断用户请求处在 skill 生命周期哪一段:设计、编译修复、整体 eval、还是需要追问;
+  - 需要某只手时,内部用 Bash 跑 `ah ask <agent-id> "<任务包>" --wait`,再把结果整合给用户;
+  - 对用户只说"我让 Clotho 接这段线"这类叙事语言,不要说 worker、派单、job;
+  - 不自己写大量代码;需要落盘变更时,让对应 agent 交付 diff/文件改动摘要。
+- Clotho:
+  - 输入必须包含目标、现有文件、边界和未决问题;信息不足先列问题;
+  - 使用 `domain-analysis` / `graph-design` / `agent-prompt-design`;
+  - 交付 `GRAPH.md`/phase 结构方案、必要时直接落盘,并说明哪些点留给 Lachesis 编译校验。
+- Lachesis:
+  - 先拿全错误码和涉事文件,再查挂载 spec;
+  - 使用 `compile-error-repair`,只修根因;
+  - 交付变更点 + 复验结果;仍失败就带新错误码回到第一步。
+- Atropos:
+  - 先确认是否已有 predict/run 产物、golden、trace;
+  - 使用 `eval-judgement`;
+  - 终判必须有结论、证据、偏差节点、回流给 Clotho 的下一步。
+
+这段协议属于行为约束,不是台词。它可以写 `ah ask`、agent id、命令行,但必须明确"内部使用,不进入用户可见身份叙述"。
+
+### 9.6 `eval-judgement` skill 草案
+
+Atropos 缺的不是人格,而是一套可重复的 eval 判断流程。阶段 2 新增 `.ah/skills/eval-judgement/SKILL.md`:
+
+```markdown
+---
+name: eval-judgement
+description: 对一条 graph skill 的 predict/run 结果做整体终判。用户要求评估是否达标、跑完后需要分析、或需要把失败样本回流到设计时使用。
+---
+
+# 整体 Eval 终判
+
+目标:不是给一个分数,而是判断这条 skill 是否已经能放行;不放行时,指出下一轮设计该改哪里。
+
+## 流程
+1. **收集证据**:确认当前 skill root、最近 predict/run 产物、trace、golden baseline、用户定义的成功标准。
+2. **先看连通性**:predict/run 是否完整跑完;数据是否从 root input 流到 output;失败先定位断在哪个节点。
+3. **再看质量**:对照 golden diff、节点输出、用户成功标准,区分结构性失败、prompt 口径失败、样本不足和配置/模型失败。
+4. **下终判**:固定输出 `结论 / 证据 / 偏差节点 / 根因层 / 回流建议` 五段。
+5. **回流 Clotho**:把需要重纺的内容写成 Clotho 能直接消费的设计任务,不要只说"优化 prompt"。
+
+## 反模式
+- 只报分数,不解释证据。
+- 把单个样例失败直接泛化成整体结论。
+- 没有 golden 时假装做了 golden diff;应明确"缺 golden,本轮只能做结构/trace 评估"。
+- 给 Lachesis 类型的字段级修复建议冒充整体 eval。
+```
+
+### 9.7 知识库挂载
+
+阶段 2 先用全局 `[sandbox] additional_ro_binds` 做只读挂载,不做 per-agent bind。每个 agent 是否读取某份资料由
+rules 约束:
+
+| 资料 | 主要读者 | 用途 |
+|---|---|---|
+| `docs/engine/mvp1/` + `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/` | Clotho | skill / engine 设计边界 |
+| `apps/studio/backend/app/prompts/mounted/` | Clotho/Lachesis/Atropos | Studio copilot 已有挂载说明 |
+| `packages/graph-agent` 的 README 与 compile/golden 相关 docs | Lachesis/Atropos | 编译语义、predict/run/eval 机制 |
+| `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md` | master | MoirAI 编排真相源 |
+
+Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环境可见的路径。Studio 已有
+`windows_path_to_wsl()` 可复用,新增挂载路径时同样先转换,否则 ah 在 WSL 里看不到 Windows 盘符。
+
+### 9.8 验收脚本与人工验收
+
+代码门禁先聚焦 Tauri 单元测试,不需要为了纯配置生成跑完整 Studio:
+
+- `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
+- Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
+- `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
+- `additional_ro_binds` 在 Windows 下输出 WSL 路径;
+- 已存在 `ah.toml` 时不自动生成 MoirAI 配置,继续走用户配置。
+
+人工验收必须在真实 ah 终端里做,因为阶段 2 的核心是 provider home 物化 + Claude Code 订阅态:
+
+1. 打开一个空白 skill,点「打开 Claude Code」。
+2. MoirAI 自报身份、cwd、能做什么;不得自称 generic copilot/master。
+3. 向 MoirAI 发"帮我把一个 X 流程设计成 skill",它应调用 Clotho 并返回结构化设计。
+4. 制造一个简单编译错误,让 MoirAI 修;它应调用 Lachesis,给出根因和最小修复。
+5. 准备一组 run/predict 产物或缺失产物场景,让 MoirAI 评估;它应调用 Atropos,输出终判与回流建议。
+6. 全程 UI 仍只露 MoirAI 入口,无三女神未实现 UI。
+
+### 9.9 阶段 2 开发执行规则
+
+本节约束后续真正落代码的 PR。阶段 2 是 **Studio 功能开发**:以前端入口触发,但功能牵扯到哪层就改哪层。
+`apps/studio/backend` 可改;第一性原理分析确认该改 engine/gateway 时,直接改
+`packages/graph-agent` / `packages/graph-agent-gateway`,并补对应模块测试与严格门禁。不得为了绕开 SDK 改动
+在 Studio 层造次优 workaround。
+
+**必读顺序**:
+
+1. `apps/studio/frontend/CLAUDE.md` —— Studio 功能开发单 agent SOP。它覆盖全局重型多 agent PM 流程;
+   本任务一个 agent 直接写代码,不派 ccb/subagent,不走 12 步 PR 审计,不写 kiro spec,不开 60s loop。
+   主干按其中"五、一个完整 功能任务的端到端 SOP"执行:Phase 0 锁范围 → 1 开 worktree → 2 设计对齐
+   → 3 实施 → 4 亲眼验证 → 5 门禁 → 6 回写手册 → 7 发 PR → 8 报 done 附 PM 验证清单。
+2. `AGENTS.md` 的 Development Principles —— 不向后兼容、第一性原理修复、模块边界决定落点这三条高于速度。
+3. `docs/development/FRONTEND_UI_SPEC.md`(尤其 §2) —— Studio 样式、组件、布局基准的唯一真相。
+4. `docs/studio/mvp1/_impl/frontend-handbook/index.html` —— N6 前端实施说明书,是活的实施追踪器;状态标签手维护,
+   默认可能滞后代码,必须用代码核对。
+5. `docs/studio/mvp1/handbook-methodology/frontend-page-authoring-methodology.md` 与
+   `docs/studio/mvp1/handbook-methodology/handbook-operations-schema-lifecycle.md` —— 手册怎么看、怎么改、何时改、
+   截图怎么截、切片 schema、状态点配色。
+6. MVP1 设计源 —— Studio 看 `docs/studio/mvp1/README.md` + `DESIGN_UNITS_INDEX.md`;engine 看
+   `docs/engine/mvp1/`;gateway 看 `docs/graph-agent-gateway/mvp1/`。设计与代码冲突时设计赢。
+7. `apps/studio/frontend/src/components/ui/` 下现有 shadcn/Radix 封装、相关组件与 design token。优先复用;
+   缺原语先补 shadcn 风格 wrapper,再用到业务组件里;不硬编码颜色。
+
+**开发原则**:
+
+- **不向后兼容**:当前无发布版本、无外部用户。规范/schema/API/文件格式可直接改;所有旧数据可丢弃。禁止迁移垫片、
+  legacy 别名、保留旧字段、双格式读取、版本嗅探。旧数据装不进新形状时,答案是重新生成/删除数据。
+- **第一性原理修复**:挖到坏逻辑真正所在层重新设计。调用方特判、吞异常、事后修数据、复制 workaround 都不合格。
+  先问"这个坏状态为什么可能存在",再问"怎么让报错消失"。
+- **模块边界不是禁区**:该改 engine/gateway 就在 SDK 内改,对齐该模块 MVP1 设计,补测试,过 `mypy --strict`。
+  反向仍禁止:Studio 专属关注点不进 SDK,不绕过 adapter。
+
+**边界纪律**:
+
+- 仅当任务是纯 engine/gateway 内部重构、Rust 层(`apps/studio/tauri`)或顶层架构调整时,才退回全局重型 SOP。
+  正常功能开发(前端 ↔ Studio backend ↔ 必要 SDK 改动)走本轻量流程。
+- 设计先于实施。开工前用手册设计页对齐需求;手册缺失/不全则回 MVP1 设计源补;设计源也没有则先设计并写回设计源。
+  涉及 backend/engine/gateway 接口调整时,同样写回对应模块设计源。
+- 手册随代码同步。收尾按代码真相回写对应切片状态(`fe_status` / `be_status` /
+  `backend_status[].status=ok|partial|bad|review` / `tests` / 截图 / `shot_na`),跑
+  `python3 build_template_slice.py` 重生成 `index.html`,与代码放同一个 PR。导航状态点取页面全部徽章最差值,
+  机制卡也计入,不得留下乐观状态。
+- 一任务一 worktree。用 `scripts/wt-new.sh <type>/<short-desc>` 从 `origin/main` 切专属 worktree;
+  所有改动只在自己的 worktree;不动主仓根、不动其他 agent worktree、不因别处不干净去 reset/checkout/pull。
+  design token、`components/ui/`、手册 `index.html` 等共享文件容易冲突,要动前先对调度。
+- 业务逻辑走 TDD。前端数据流/状态/API、后端、engine/gateway 改动先写失败测试,再写生产代码。纯视觉/样式调整
+  不新增测试;只锁死视觉细节的旧测试要同步删除或收窄。
+
+**验证与交付**:
+
+- 改完必须把 app 真跑起来,亲眼点过受影响界面才可报完成。typecheck/diff 通过不算视觉验证。
+- 主仓根只跑一套完整 app(`studio-dev.ps1`:Tauri + sidecar `:8787` + Vite `5173`,展示 `main`)。
+  只改前端时,在本 worktree 跑 `scripts/wt-dev.sh`,用 5174-5199 的任务专属 Vite 端口并代理到主 sidecar。
+  改 backend/engine/gateway 时,跑 `scripts/wt-dev.sh --backend`,用本 worktree 的私有 sidecar(8788-8799)验证。
+  浏览器打开 `http://localhost:<port>/#tkn=<token>`;不得在 5173 上验证 worktree 改动,不得在 worktree 里另起 Tauri。
+- 推送前本地门禁全绿。前端改动跑 `npm run lint` / `npm run typecheck` / `npm test` / `npm run build`;
+  backend/engine/gateway 按 AGENTS.md CI Gates 跑对应 `ruff` / `mypy` / `pytest`;SDK mypy 用 `--strict`。
+- 发 PR 用 `scripts/wt-ship.sh ["PR title"]`;main 仍 protected,不直接 push。合并后只清自己的 worktree:
+  `scripts/wt-clean.sh <branch-or-worktree-dir>`,主仓根 `git pull`;依赖清单变更后在主仓根补装依赖。若改 engine/gateway
+  源码,关闭运行中的桌面 app 后重建 vendor 并重启 app。
+- 报 done 时给 PM 的不是机械收尾步骤,而是逐项验证清单。固定格式:
+
+```markdown
+| # | 改动(PR) | ① 界面路径 | ② 操作 | ③ 预期 | ④ 状态 |
+```
+
+每条已合并改动一行,写清点到哪一屏、点/填/hover 什么、应看到什么(具体到颜色/文案/数量)、状态为"待确认"或
+"✅ 已确认"。PM 逐条确认完才算收敛;任一条未确认,本任务仍未完成。
+
+### 9.10 阶段 2 后的下一步
+
+阶段 2 通过后,再进入三个方向:
+
+1. **bundle + MCP**:把 Studio copilot MCP 工具拆成独立 stdio MCP server,再用 `.ah/bundles/moirai` 打包
+   skills/hooks/rules/MCP。
+2. **provider 升级**:Lachesis 切 codex,Atropos 切 antigravity,验证 `.codex/AGENTS.md` 与
+   `.gemini/AGENTS.md` 的人格注入和 skill 物化。
+3. **Studio 配置 UI**:只在真实可用后显示更细的 agent 状态;在此之前不做装饰性角色 UI。
+
+## 10. 权威引用
 
 - ah 官方仓库:`~/coding/ccbd-rust`(github.com/SevenX77/ccbd-rust)—— `README.md`、
   `docs/plugin-bundles.md`;schema 源 `src/cli/config.rs`;规则组合 `src/provider/home_layout.rs`
@@ -259,14 +550,14 @@ master pane 有 `claude … .local/bin/claude missing or broken · run claude in
 - Studio 拉起入口:`apps/studio/tauri/src/lib.rs`(`open_claude_code` / `ah_config_for_workspace`)。
 - 并列设计:本目录 `mvp1-alignment.md`(F1–F9,SDK 面板流式)。
 
-## 10. 附录:阶段 1 的完整可跑配置(逐字内嵌)
+## 11. 附录:阶段 1 的完整可跑配置(逐字内嵌)
 
 > 里程碑 1 验证用的工作区 = `/home/sevenx/coding/moirai-ah-test/`(临时,未入库)。以下把该工作区的
 > `ah.toml` 与四份 `.ah/rules/*.md`(R3 最终版)逐字抄录,使本文档自洽可复现:新建目录、按下面落文件、
 > `ah config validate --config ah.toml` → `ah --config ah.toml start --wait` 即可复现四角色身份。
 > 后续正式落地时,这套配置的最终家是 Studio 按 skill 工作区自动生成(§8 待办 5),届时人格文本从此处迁移。
 
-### 10.1 `ah.toml`
+### 11.1 `ah.toml`
 
 ```toml
 # MoirAI 三女神编排拓扑 — 里程碑 1(身份认知)
@@ -290,7 +581,7 @@ provider = "claude"
 provider = "claude"
 ```
 
-### 10.2 `.ah/rules/master.md`（MoirAI）
+### 11.2 `.ah/rules/master.md`（MoirAI）
 
 ```markdown
 # 你是 Moirai（莫伊莱）
@@ -308,7 +599,7 @@ provider = "claude"
 用你最后一句话的语言回你。
 ```
 
-### 10.3 `.ah/rules/clotho.md`（设计）
+### 11.3 `.ah/rules/clotho.md`（设计）
 
 ```markdown
 # 你是 Clotho（克洛托）
@@ -326,7 +617,7 @@ provider = "claude"
 用你最后一句话的语言回你,语气从容,像一个耐得住性子理线的人。
 ```
 
-### 10.4 `.ah/rules/lachesis.md`（编译 + 修 bug）
+### 11.4 `.ah/rules/lachesis.md`（编译 + 修 bug）
 
 ```markdown
 # 你是 Lachesis（拉刻西斯）
@@ -344,7 +635,7 @@ provider = "claude"
 用你最后一句话的语言回你,语气严谨、克制,像一个手不抖的量线人。
 ```
 
-### 10.5 `.ah/rules/atropos.md`（整体评估 / 终判）
+### 11.5 `.ah/rules/atropos.md`（整体评估 / 终判）
 
 ```markdown
 # 你是 Atropos（阿特罗波斯）

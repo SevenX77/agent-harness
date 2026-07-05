@@ -1,9 +1,10 @@
 # “Open in Claude Code” 安装 + 启动指南（Studio 侧）
 
 Studio copilot 面板右上角的 **“Open in Claude Code”** 按钮,会把你当前打开的
-skill 工作区交给真实的 Claude Code 跑一个交互会话。这份文档讲**怎么装、怎么用、
-出问题怎么查**——是 Studio 自己这一套(安装脚本 + 本指南),和 `ah` 自身的职责
-分开(边界见文末「谁负责什么」)。
+skill 工作区交给真实的 Claude Code 跑一个交互会话。默认情况下,Studio 会在这个
+skill 工作区里准备 MoirAI 三女神编排所需的 `.ah/rules` / `.ah/skills`,再交给
+`ah` 启动。这份文档讲**怎么装、怎么用、出问题怎么查**——是 Studio 自己这一套
+(安装脚本 + 本指南),和 `ah` 自身的职责分开(边界见文末「谁负责什么」)。
 
 > 一句话:装一次(脚本 + 两步人工确认)→ 以后点按钮就能用。
 
@@ -13,7 +14,10 @@ skill 工作区交给真实的 Claude Code 跑一个交互会话。这份文档�
 
 点按钮时发生的事:Studio 通过 [`ah`](https://github.com/SevenX77/ah)(agent
 hypervisor)在 **WSL2** 里拉起一个真正的 `claude` 交互会话,跑在你打开的那个
-skill 工作区里,并把一个终端窗口 attach 上去。所以点按钮之前,机器上得先有:
+skill 工作区里。若向上没有用户自己的 `ah.toml`,Studio 会生成 MoirAI 默认编排:
+master = MoirAI,agents = Clotho / Lachesis / Atropos,并把相关规则、skills、只读
+知识库挂载写好;若已经有用户 `ah.toml`,用户配置优先,Studio 不覆盖。随后 Studio
+把一个终端窗口 attach 上去。所以点按钮之前,机器上得先有:
 WSL2 + 一个 Linux 发行版 + systemd + tmux + `claude` CLI + `ah` + 一次订阅登录。
 
 `ah` 自己的安装命令只装 `ah` 一个二进制,**不管** WSL2/tmux/claude/登录这些。
@@ -79,6 +83,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 | 终端弹出但报 `Could not start WSL` | WSL2 没装好。跑第 1 步的安装脚本。 |
 | 终端里 `ah CLI was not found in WSL` | `ah` 没装。跑安装脚本(会装 `ah`)。 |
 | 终端一直停在 `Starting...` 不动超过 ~40s | 大概率网络/代理没通。重跑安装脚本(它会把 Windows 代理同步进 WSL);确认 Windows 上代理是开的。 |
+| 终端提示拒绝覆盖 `.ah/rules/...` 或 `.ah/skills/...` | 该 skill 工作区已有用户手写文件,或 Studio 曾生成的文件被手工改过。Studio 不会静默覆盖;先备份/删除冲突文件,或自己维护 `ah.toml` 接管配置。 |
 | 弹出 “Allow external CLAUDE.md file imports?” 之类的确认框 | 正常情况下已被自动预置跳过(见下)。若仍出现,说明工作区的某个祖先目录有新的 `CLAUDE.md`——点 “Yes” 一次即可,之后不再弹。 |
 
 **为什么通常不弹那些确认框**:launcher 会在拉起 claude 前,往 `~/.claude.json`
@@ -102,10 +107,21 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
   管**。
 
 启动逻辑(点按钮那条链路)在 `apps/studio/tauri/src/lib.rs` 的 `open_claude_code`
-命令里:写一个临时 `ah.toml`(master 命令 = `IS_SANDBOX=1 claude
---dangerously-skip-permissions '<汇报提示>'`)+ 一段 WSL bash payload → 通过
-`wsl.exe -e bash` 在**同一个会话**里 `ah --config … start --wait` 然后
-`exec ah attach master`(attach 顶住发行版,master 才不被 WSL 空闲回收)。
+命令里:
+
+1. `ah_config_for_workspace` 先向上找用户 `ah.toml`;找到就尊重用户配置,不生成 Studio
+   默认文件。
+2. 找不到用户配置时,Studio 在 skill 工作区写入受管 `.ah/rules` 和 `.ah/skills`:
+   MoirAI / Clotho / Lachesis / Atropos 的规则,四个既有 copilot skill,以及
+   `eval-judgement` skill。受管文件带内容 hash;没有 Studio 标记或 hash 对不上的文件
+   一律拒绝覆盖。
+3. Studio 写一个临时 `ah.toml`:master 命令仍是
+   `IS_SANDBOX=1 claude --dangerously-skip-permissions '<汇报提示>'`,agents 为
+   Clotho / Lachesis / Atropos(provider 现阶段都用 `claude`),并通过
+   `[sandbox].additional_ro_binds` 挂载只读设计/实现资料。
+4. 最后写 WSL bash payload → 通过 `wsl.exe -e bash` 在**同一个会话**里
+   `ah --config … start --wait` 然后 `exec ah attach master`(attach 顶住发行版,
+   master 才不被 WSL 空闲回收)。
 
 ---
 
@@ -113,5 +129,6 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 
 - 安装脚本:`scripts/install-claude-code-wsl.ps1`
 - 启动逻辑(Tauri 命令 + WSL payload):`apps/studio/tauri/src/lib.rs`
+- MoirAI / ah 编排设计:`docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md`
 - 给 `ah` 仓库的需求:`docs/handoffs/ah-installer-provisioning-and-master-defaults.md`
 - Tauri 外壳说明里的简版入口:`apps/studio/tauri/README.md` →「Open in Claude Code」

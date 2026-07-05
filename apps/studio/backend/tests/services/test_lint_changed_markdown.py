@@ -21,6 +21,12 @@ def _roots(studio_roots: tuple[Path, Path]) -> tuple[Path, Path]:
     return studio_roots
 
 
+def _write_test_input(skill_dir: Path, payload: str = '{"input_text":"hello"}') -> None:
+    test_inputs_dir = skill_dir / ".workspace" / "import_files"
+    test_inputs_dir.mkdir(parents=True)
+    (test_inputs_dir / "case-a.json").write_text(payload, encoding="utf-8")
+
+
 def _disk_graph_text(skills_dir: Path, skill_id: str) -> str:
     return (skills_dir / skill_id / "GRAPH.md").read_text(encoding="utf-8")
 
@@ -30,6 +36,7 @@ def test_clean_changed_markdown_passes_without_touching_disk(
 ) -> None:
     skills_dir, _workspaces = studio_roots
     skill_id = "text-segmentation"
+    _write_test_input(skills_dir / skill_id)
     original_on_disk = _disk_graph_text(skills_dir, skill_id)
     # A valid edit the user has NOT saved yet: tweak the description only.
     changed = original_on_disk.replace(
@@ -51,6 +58,7 @@ def test_changed_phase_markdown_overlays_that_phase_not_graph_md(
 ) -> None:
     skills_dir, _workspaces = studio_roots
     skill_id = "text-segmentation"
+    _write_test_input(skills_dir / skill_id)
     phase_path = skills_dir / skill_id / "phases" / "setup" / "LOGIC.md"
     original_phase = phase_path.read_text(encoding="utf-8")
     changed_phase = original_phase.replace("<action>prepare</action>", "<action>prepare</action>\n")
@@ -72,6 +80,7 @@ def test_invalid_changed_markdown_fails_while_disk_stays_valid(
 ) -> None:
     skills_dir, _workspaces = studio_roots
     skill_id = "text-segmentation"
+    _write_test_input(skills_dir / skill_id)
     original_on_disk = _disk_graph_text(skills_dir, skill_id)
     # Break the unsaved body: drop the required frontmatter `name` key.
     broken = original_on_disk.replace("name: text-segmentation\n", "")
@@ -90,6 +99,7 @@ def test_changed_markdown_diagnostic_keeps_typed_engine_code(
 ) -> None:
     skills_dir, _workspaces = studio_roots
     skill_id = "text-segmentation"
+    _write_test_input(skills_dir / skill_id)
     original_on_disk = _disk_graph_text(skills_dir, skill_id)
     broken = original_on_disk.replace("name: text-segmentation\n", "")
 
@@ -115,6 +125,7 @@ def test_lint_surfaces_every_defect_of_one_pass(
     """
     skills_dir, _workspaces = studio_roots
     skill_id = "text-segmentation"
+    _write_test_input(skills_dir / skill_id)
     original = _disk_graph_text(skills_dir, skill_id)
     broken = original.replace(
         '<phase depends_on="input" output>setup</phase>',
@@ -149,6 +160,7 @@ def test_lint_on_disk_with_workspace_root_reflects_disk_truth(
     skills_dir, _workspaces = studio_roots
     ws_skill = tmp_path / "ws" / "demo-skill"
     shutil.copytree(skills_dir / "text-segmentation", ws_skill)
+    _write_test_input(ws_skill)
     graph = ws_skill / "GRAPH.md"
     graph.write_text(
         graph.read_text(encoding="utf-8").replace(
@@ -163,8 +175,27 @@ def test_lint_on_disk_with_workspace_root_reflects_disk_truth(
     assert result.status == "failed"
     codes = {error.error_code for error in result.errors}
     assert "F-v3-graph-phase-island" in codes
-    # The global-store skill of the same family is untouched and still passes.
-    assert skill_service.lint_skill_on_disk("text-segmentation").status == "passed"
+    # The global-store skill of the same family is untouched and fails only the
+    # Studio preflight because it has required runtime input but no test input.
+    global_result = skill_service.lint_skill_on_disk("text-segmentation")
+    assert global_result.status == "failed"
+    assert global_result.errors[0].file == ".workspace/import_files"
+    assert global_result.errors[0].field_path == "input_text"
+    assert global_result.errors[0].error_code == "STUDIO_TEST_INPUT_MISSING"
+
+
+def test_lint_on_disk_includes_studio_test_input_preflight(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """The first-screen lint path must match Compile's Studio preflight gate."""
+    result = skill_service.lint_skill_on_disk("text-segmentation")
+
+    assert result.status == "failed"
+    assert result.phases_summary is not None
+    assert result.errors[0].file == ".workspace/import_files"
+    assert result.errors[0].field_path == "input_text"
+    assert result.errors[0].source_path == ".workspace/import_files"
+    assert result.errors[0].error_code == "STUDIO_TEST_INPUT_MISSING"
 
 
 def test_body_lint_diverges_from_stale_disk_state(
@@ -178,6 +209,7 @@ def test_body_lint_diverges_from_stale_disk_state(
     """
     skills_dir, _workspaces = studio_roots
     skill_id = "event-extraction"
+    _write_test_input(skills_dir / skill_id)
     original_on_disk = _disk_graph_text(skills_dir, skill_id)
 
     # Sanity: the disk path lints clean.

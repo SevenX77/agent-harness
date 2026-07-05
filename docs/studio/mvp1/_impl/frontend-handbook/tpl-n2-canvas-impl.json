@@ -44,7 +44,7 @@
       "n": 5,
       "cap": "io-endpoint-nodes",
       "design_ref": "n2-atom-5",
-      "current": "Current: implemented and aligned. buildNodes renders the graph entry as a global Input node and leaf phases as the Output endpoint. These nodes carry the graph io contract and double-click opens GRAPH.md. GlobalInputOutputNode now renders only the boundary title, INPUT/OUTPUT label, and same-source diagnostic badge; it no longer lists io field names or types inline on the canvas. Field detail belongs in the I/O/Properties panels. Manual Compile .workspace/import_files diagnostics are projected by node-compile-errors.ts onto the global Input node, matching the Compile drawer source.",
+      "current": "Current: implemented and aligned. buildNodes renders the graph entry as a global Input node and leaf phases as the Output endpoint. These nodes carry the graph io contract and double-click opens GRAPH.md. GlobalInputOutputNode now renders only the boundary title, INPUT/OUTPUT label, and the shared NodeCompileErrorBadge; it no longer lists io field names or types inline on the canvas. Field detail belongs in the I/O/Properties panels. Manual Compile and Studio preflight .workspace/import_files diagnostics are projected by node-compile-errors.ts onto the global Input node from the same source; test input preflight is returned by first-screen/realtime lint as well as manual Compile.",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。整图 io 随 manifest 返回。D8.1=ok。"

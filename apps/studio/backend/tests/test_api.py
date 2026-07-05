@@ -134,7 +134,23 @@ def test_skill_detail_uses_real_skill_files(
     assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
     assert body["manifest"]["phases"][0] == "setup"
     assert "GRAPH.md" in body["files"]
-    assert body["lint_result"]["status"] == "passed"
+    assert body["lint_result"]["status"] == "failed"
+    assert body["lint_result"]["errors"] == [
+        {
+                "file": ".workspace/import_files",
+            "line": None,
+            "column": None,
+            "error_code": "STUDIO_TEST_INPUT_MISSING",
+            "severity": "error",
+            "message": (
+                "Graph input schema requires test input field 'input_text', "
+                "but no test input JSON files exist. Add a valid test input before predict/run."
+            ),
+            "phase_name": None,
+            "field_path": "input_text",
+                "source_path": ".workspace/import_files",
+        }
+    ]
 
 
 def test_missing_skill_returns_standard_404(client: TestClient) -> None:
@@ -198,6 +214,9 @@ def test_lint_changed_markdown_passes_when_disk_would_fail(
     skills_dir, workspaces_dir = studio_roots
     skill_id = "text-segmentation"
     skill_dir = copy_skill(skills_dir, workspaces_dir, skill_id)
+    test_inputs_dir = skill_dir / ".workspace" / "import_files"
+    test_inputs_dir.mkdir(parents=True)
+    (test_inputs_dir / "case-a.json").write_text('{"input_text":"hello"}', encoding="utf-8")
     good_graph = (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
     # Break the disk copy so a path-based lint would fail.
     (skill_dir / "GRAPH.md").write_text(
@@ -218,11 +237,15 @@ def test_lint_without_body_still_lints_disk_path(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
-    """Backward-compat: no body falls back to linting the on-disk skill."""
+    """No body falls back to linting the full on-disk skill path, including preflight."""
     response = client.post("/api/skills/text-segmentation/lint")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "passed"
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["file"] == ".workspace/import_files"
+    assert body["errors"][0]["field_path"] == "input_text"
+    assert body["errors"][0]["error_code"] == "STUDIO_TEST_INPUT_MISSING"
 
 
 def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(

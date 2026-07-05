@@ -128,6 +128,9 @@ describe('GlobalInputOutputNode', () => {
     })
 
     expect(html).toContain('1 compile error on this boundary')
+    expect(html).toContain('data-node-compile-error-badge="true"')
+    expect(html).toContain('h-5')
+    expect(html).toContain('text-[11px]')
     expect(html).toContain('chapter')
     expect(html).toContain('Graph input schema requires test input field')
   })

@@ -157,7 +157,7 @@ def write_skill_files_atomic(skill_dir: Path, files: dict[str, str]) -> None:
             target = tmp_dir.joinpath(*PurePosixPath(rel_path).parts)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-        lint = lint_skill_path(tmp_dir)
+        lint = lint_skill_path(tmp_dir, include_studio_preflight=False)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
         if skill_dir.exists():
@@ -246,7 +246,7 @@ async def get_skill_detail(
     # live skill_changed events. Idempotent — a no-op once already watched.
     register_workspace(skill_dir, skill_id)
     lint = lint_result or lint_skill_path(skill_dir)
-    if lint.status == "failed":
+    if lint.status == "failed" and lint.phases_summary is None:
         return await _broken_detail_from_files_async(
             user_id,
             skill_id,
@@ -292,7 +292,7 @@ def lint_skill_on_disk(skill_id: str, workspace_root: str | None = None) -> Lint
     return lint_skill(skill_id)
 
 
-def lint_skill_path(skill_path: Path) -> LintResult:
+def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
     try:
         compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
@@ -306,10 +306,38 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     # — compile still passes; the Properties panel / node badge / editor underline light
     # up from this same diagnostic.
     role_warnings = _llm_role_lint_errors(compiled, _configured_role_names())
+    preflight_errors = (
+        _studio_preflight_lint_errors(compiled, skill_path)
+        if include_studio_preflight
+        else []
+    )
     return LintResult(
-        status="passed",
-        errors=role_warnings,
+        status="failed" if any(error.severity == "error" for error in preflight_errors) else "passed",
+        errors=[*role_warnings, *preflight_errors],
         phases_summary=_phase_summary_from_compiled(compiled),
+    )
+
+
+def _studio_preflight_lint_errors(compiled: CompiledSkill, skill_dir: Path) -> list[LintError]:
+    """Mirror Compile's Studio-owned preflight gates into first-screen/realtime lint."""
+    compile_errors = [
+        *_validate_test_inputs_against_graph_input_schema(compiled, skill_dir),
+        *_validate_golden_against_output_schema(skill_dir.name, str(skill_dir)),
+    ]
+    return [_lint_error_from_compile_error(error) for error in compile_errors]
+
+
+def _lint_error_from_compile_error(error: CompileError) -> LintError:
+    return LintError(
+        file=error.file,
+        line=error.line,
+        column=None,
+        error_code=error.error_code or "STUDIO_COMPILE_PREFLIGHT_FAILED",
+        severity="warning" if error.severity == "warning" else "error",
+        message=error.message,
+        phase_name=None,
+        field_path=error.field,
+        source_path=error.file,
     )
 
 
@@ -783,9 +811,10 @@ async def update_skill_files(
     write_skill_files_atomic(skill_dir, files)
     for rel_path in files:
         record_api_write(skill_dir.joinpath(*PurePosixPath(rel_path).parts))
+    structure_lint = lint_skill_path(skill_dir, include_studio_preflight=False)
+    if structure_lint.status == "failed":
+        _raise_manifest_validation_failed(structure_lint)
     lint = lint_skill_path(skill_dir)
-    if lint.status == "failed":
-        _raise_manifest_validation_failed(lint)
     compiled = _load_compiled(skill_dir)
     return await _detail_from_manifest_async(
         user_id,
@@ -1016,7 +1045,7 @@ async def fork_skill(
             str(target_path),
             _rewrite_forked_skill_content(content, old_id=skill_id, new_id=new_skill_id),
         )
-        lint = lint_skill_path(target_dir)
+        lint = lint_skill_path(target_dir, include_studio_preflight=False)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
         summary = await _summary_for_skill_dir_async(user_id, target_dir, storage, metadata)
@@ -1208,7 +1237,7 @@ def _iter_skill_dirs(root: Path) -> Iterable[Path]:
 def _summary_for_skill_dir(skill_dir: Path) -> SkillSummary:
     skill_id = skill_dir.name
     lint = lint_skill_path(skill_dir)
-    if lint.status == "passed":
+    if lint.status == "passed" or lint.phases_summary is not None:
         compiled = _load_compiled(skill_dir)
         name = compiled.manifest.name
         description = str(compiled.manifest.description or "")
@@ -1241,7 +1270,7 @@ async def _summary_for_skill_dir_async(
         name = resolved_skill_id
         description = ""
         phase_count = 0
-    elif (lint := lint_skill_path(skill_dir)).status == "passed":
+    elif (lint := lint_skill_path(skill_dir)).status == "passed" or lint.phases_summary is not None:
         compiled = _load_compiled(skill_dir)
         name = compiled.manifest.name
         description = str(compiled.manifest.description or "")
@@ -1478,7 +1507,7 @@ async def _path_resolved_detail_from_files_async(
     index. Resolving `/skills/{child_id}` would guess a different identity; this
     helper keeps the detail pinned to the already validated child path.
     """
-    if lint_result.status == "failed":
+    if lint_result.status == "failed" and lint_result.phases_summary is None:
         phases, topology = _graph_topology_projection_or_empty(skill_dir)
         return SkillDetail(
             manifest=GraphManifest(

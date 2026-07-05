@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Command,
@@ -75,6 +76,7 @@ import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus
 import type { SettingsTab } from "../SettingsPage"
 import type { FileOpenInput } from "../file-types"
 import { hashConflictPayloadFromSaveError } from "../save-conflicts"
+import { mergeSaveStatuses } from "../settings/save-status-merge"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
 import { roleTestDetailsFromResult, roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
@@ -379,7 +381,7 @@ export function PropertiesPanel({
   // the list revalidates (focus/reconnect + shared-key mutations) instead of
   // going permanently stale after one on-mount fetch. On failure both stay
   // empty — the field still shows the current stored value, nothing is lost.
-  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false })
+  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
   const roleNames = useMemo(
     () => (rolesData ? graphAgentRoleNamesForProperties(rolesData) : []),
     [rolesData],
@@ -613,6 +615,7 @@ export function PropertiesPanel({
         : phaseSavedKey === phaseFormState.key
           ? "saved"
           : "idle"
+  const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
 
   const setField = <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => {
     setPhaseSaveFailedKey(null)
@@ -754,11 +757,19 @@ export function PropertiesPanel({
     setField("path", nextPath)
   }, [activeDraft?.path, effectiveWorkspaceRoot, skillId])
 
+  useEffect(() => {
+    setNodeParamsSaveStatus("idle")
+  }, [selectedNode?.id, skillId])
+
+  const panelSaveStatus = selectedNode
+    ? mergeSaveStatuses([phaseAutosaveStatus, nodeParamsSaveStatus])
+    : graphAutosaveStatus
+
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader
-        title="Properties"
-        extra={<PropertiesHeaderHint />}
+        title={<PropertiesPanelTitle />}
+        extra={<SaveStatusBadge status={panelSaveStatus} />}
         right={<PropertiesFileBadge fileLabel={headerFileLabel} filePath={headerFilePath} onFileOpen={onFileOpen} />}
       />
 
@@ -788,7 +799,6 @@ export function PropertiesPanel({
               <PhaseFrontmatterForm
                 value={activeDraft}
                 kind={kind}
-                saveStatus={phaseAutosaveStatus}
                 canReset={dirty && !saving}
                 roleTest={roleTest}
                 roleNames={roleNames}
@@ -813,6 +823,7 @@ export function PropertiesPanel({
                 onOpenSettings={onOpenSettings}
                 onSelectGraph={onSelectGraph}
                 onStartNodeCompare={onStartNodeCompare}
+                onNodeParamsSaveStatusChange={setNodeParamsSaveStatus}
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -834,7 +845,6 @@ export function PropertiesPanel({
               <GraphFrontmatterForm
                 value={activeGraphDraft}
                 roleNames={roleNames}
-                saveStatus={graphAutosaveStatus}
                 canReset={graphDirty && !graphSaving}
                 roleTest={graphRoleTest}
                 onFieldChange={setGraphField}
@@ -905,7 +915,7 @@ function YamlFieldLabel({ className, ...props }: ComponentProps<typeof FieldLabe
 function YamlNestedFieldLabel({ className, ...props }: ComponentProps<typeof FieldLabel>) {
   return (
     <FieldLabel
-      className={`!text-xs !font-normal !leading-4 !text-foreground/80${className ? ` ${className}` : ""}`}
+      className={`inline-flex items-center gap-1 !text-xs !font-normal !leading-4 !text-foreground/80${className ? ` ${className}` : ""}`}
       {...props}
     />
   )
@@ -955,24 +965,14 @@ function YamlInputField({
   )
 }
 
-function PropertiesHeaderHint() {
+function PropertiesPanelTitle() {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Properties panel source"
-          >
-            <CircleHelp className="size-3.5" aria-hidden />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" align="start" className="max-w-64">
-          This panel edits the front matter YAML fields in the selected Markdown file.
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <span className="inline-flex min-w-0 items-center gap-1">
+      <span className="text-xs font-medium text-foreground">Properties</span>
+      <HelpTooltip label="Properties panel source" side="bottom" align="start">
+        This panel edits the front matter YAML fields in the selected Markdown file.
+      </HelpTooltip>
+    </span>
   )
 }
 
@@ -1004,7 +1004,6 @@ const GRAPH_LLM_ROLE_NONE_SENTINEL = "__none__"
 function GraphFrontmatterForm({
   value,
   roleNames,
-  saveStatus,
   canReset,
   roleTest,
   onFieldChange,
@@ -1014,7 +1013,6 @@ function GraphFrontmatterForm({
 }: {
   value: GraphFrontmatterFormData
   roleNames: string[]
-  saveStatus: SaveStatus
   canReset: boolean
   roleTest: RoleTestStatusInput
   onFieldChange: <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => void
@@ -1095,7 +1093,7 @@ function GraphFrontmatterForm({
           </PanelFieldRow>
         </FieldGroup>
       </FieldSet>
-      <PropertiesAutosaveActions saveStatus={saveStatus} canReset={canReset} onReset={onReset} />
+      <PropertiesAutosaveActions canReset={canReset} onReset={onReset} />
     </form>
   )
 }
@@ -1109,26 +1107,21 @@ function graphFrontmatterToForm(frontmatter: PhaseFrontmatter): GraphFrontmatter
 }
 
 function PropertiesAutosaveActions({
-  saveStatus,
   canReset,
   onReset,
 }: {
-  saveStatus: SaveStatus
   canReset: boolean
   onReset: () => void
 }) {
-  if (saveStatus === "idle" && !canReset) {
+  if (!canReset) {
     return null
   }
   return (
     <PanelActions>
       <div className="flex items-center justify-end gap-2">
-        <SaveStatusBadge status={saveStatus} />
-        {canReset ? (
-          <Button type="button" size="sm" variant="secondary" onClick={onReset}>
-            Reset
-          </Button>
-        ) : null}
+        <Button type="button" size="sm" variant="secondary" onClick={onReset}>
+          Reset
+        </Button>
       </div>
     </PanelActions>
   )
@@ -1411,7 +1404,6 @@ function NodeResumeDebugBar({
 function PhaseFrontmatterForm({
   value,
   kind,
-  saveStatus,
   canReset,
   roleTest,
   roleNames,
@@ -1434,10 +1426,10 @@ function PhaseFrontmatterForm({
   onOpenSettings,
   onSelectGraph,
   onStartNodeCompare,
+  onNodeParamsSaveStatusChange,
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
-  saveStatus: SaveStatus
   canReset: boolean
   roleTest: RoleTestStatusInput
   roleNames: string[]
@@ -1460,6 +1452,7 @@ function PhaseFrontmatterForm({
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
   onStartNodeCompare?: (nodeId: string) => void
+  onNodeParamsSaveStatusChange?: (status: SaveStatus) => void
 }) {
   return (
     <form
@@ -1495,6 +1488,7 @@ function PhaseFrontmatterForm({
                   onOpenSettings={onOpenSettings}
                   onSelectGraph={onSelectGraph}
                   onStartNodeCompare={onStartNodeCompare}
+                  onNodeParamsSaveStatusChange={onNodeParamsSaveStatusChange}
                 />
               </PanelFieldRow>
               <PanelFieldRow>
@@ -1648,7 +1642,7 @@ function PhaseFrontmatterForm({
           </PanelFieldRow>
         </FieldGroup>
       </FieldSet>
-      <PropertiesAutosaveActions saveStatus={saveStatus} canReset={canReset} onReset={onReset} />
+      <PropertiesAutosaveActions canReset={canReset} onReset={onReset} />
     </form>
   )
 }
@@ -2080,20 +2074,30 @@ function transitiveAncestorIds(
   return ancestors
 }
 
-function HelpTooltip({ label, children }: { label: string; children: ReactNode }) {
+function HelpTooltip({
+  label,
+  children,
+  side = "top",
+  align,
+}: {
+  label: string
+  children: ReactNode
+  side?: ComponentProps<typeof TooltipContent>["side"]
+  align?: ComponentProps<typeof TooltipContent>["align"]
+}) {
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+            className="inline-flex size-3.5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={label}
           >
-            <CircleHelp className="size-3.5" aria-hidden />
+            <CircleHelp className="size-3" aria-hidden />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-64">
+        <TooltipContent side={side} align={align} className="max-w-64">
           {/* The base TooltipContent is an inline-flex row; wrap in a single block
               child so prose flows/wraps normally instead of each text run and
               <span> becoming its own flex column. */}
@@ -2741,6 +2745,7 @@ function LlmRoleField({
   onOpenSettings,
   onSelectGraph,
   onStartNodeCompare,
+  onNodeParamsSaveStatusChange,
 }: {
   value: string
   useGraphDefault: boolean
@@ -2756,6 +2761,7 @@ function LlmRoleField({
   onOpenSettings?: (tab?: SettingsTab) => void
   onSelectGraph?: () => void
   onStartNodeCompare?: (nodeId: string) => void
+  onNodeParamsSaveStatusChange?: (status: SaveStatus) => void
 }) {
   const trimmed = value.trim()
   const options = useMemo(
@@ -2852,7 +2858,13 @@ function LlmRoleField({
         nodeId={nodeId}
         onStartNodeCompare={onStartNodeCompare}
       />
-      <LlmNodeParamsField skillId={skillId} nodeId={nodeId} roleName={value} modelGroups={modelGroups} />
+      <LlmNodeParamsField
+        skillId={skillId}
+        nodeId={nodeId}
+        roleName={value}
+        modelGroups={modelGroups}
+        onSaveStatusChange={onNodeParamsSaveStatusChange}
+      />
     </Field>
   )
 }
@@ -2919,30 +2931,61 @@ function LlmNodeParamsField({
   nodeId = null,
   roleName = "",
   modelGroups = [],
+  onSaveStatusChange,
 }: {
   skillId?: string | null
   nodeId?: string | null
   roleName?: string
   modelGroups?: ModelGroup[]
+  onSaveStatusChange?: (status: SaveStatus) => void
 }) {
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
   const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
-  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false })
+  const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false, dedupingInterval: 0 })
   const latestDraftRef = useRef(draft)
+  const inflightSaveRef = useRef<Promise<void> | null>(null)
+  const queuedSaveRef = useRef<NodeLlmParamsDraft | null>(null)
   latestDraftRef.current = draft
+
+  useEffect(() => {
+    onSaveStatusChange?.(nodeParamsSaveStatus)
+  }, [nodeParamsSaveStatus, onSaveStatusChange])
+
+  useEffect(() => () => {
+    onSaveStatusChange?.("idle")
+  }, [onSaveStatusChange])
 
   const persist = useCallback(
     (next: NodeLlmParamsDraft) => {
       if (!skillId || !nodeId) return
-      setNodeParamsSaveStatus("saving")
-      void putNodeLlmParams(skillId, nodeId, nodeLlmParamsDraftToApi(next))
-        .then(() => {
-          setNodeParamsSaveStatus("saved")
-        })
-        .catch((error) => {
-          setNodeParamsSaveStatus("error")
-          toast.error(error instanceof Error ? error.message : "Could not save model params")
-        })
+      const run = async (payload: NodeLlmParamsDraft): Promise<void> => {
+        setNodeParamsSaveStatus("saving")
+        try {
+          await putNodeLlmParams(skillId, nodeId, nodeLlmParamsDraftToApi(payload))
+          if (!queuedSaveRef.current) {
+            setNodeParamsSaveStatus("saved")
+          }
+        } catch (error) {
+          if (!queuedSaveRef.current) {
+            setNodeParamsSaveStatus("error")
+            toast.error(error instanceof Error ? error.message : "Could not save model params")
+          }
+        } finally {
+          inflightSaveRef.current = null
+          const queued = queuedSaveRef.current
+          if (queued) {
+            queuedSaveRef.current = null
+            inflightSaveRef.current = run(queued)
+          }
+        }
+      }
+
+      if (inflightSaveRef.current) {
+        queuedSaveRef.current = next
+        setNodeParamsSaveStatus("pending")
+        return
+      }
+      inflightSaveRef.current = run(next)
     },
     [skillId, nodeId],
   )
@@ -2972,6 +3015,7 @@ function LlmNodeParamsField({
     return () => {
       cancelled = true
       debouncedPersist.cancel()
+      queuedSaveRef.current = null
     }
   }, [debouncedPersist, skillId, nodeId])
 
@@ -3015,47 +3059,53 @@ function LlmNodeParamsField({
   const inferredOutputMax = roleEntry
     ? roleTokenLimitSummary(roleEntry, providerModelsByRouteId).output.max
     : null
+  const roleIntent = roleEntry?.intent
+  const fallbackThinking = roleIntent?.thinking === true
+  const fallbackMaxOutputTokens = roleIntent?.max_output_tokens != null
+    ? String(roleIntent.max_output_tokens)
+    : inferredOutputMax != null
+      ? String(inferredOutputMax)
+      : ""
+  const fallbackTemperature = roleIntent?.temperature != null ? String(roleIntent.temperature) : ""
   const maxOutputPlaceholder = inferredOutputMax != null ? formatThousands(String(inferredOutputMax)) : "Inherit"
+  const maxOutputValue = draft.enabled ? draft.maxOutputTokens : fallbackMaxOutputTokens
+  const temperatureValue = draft.enabled ? draft.temperature : fallbackTemperature
+  const temperatureReadout = draft.enabled
+    ? formatTemperaturePercent(draft.temperature)
+    : fallbackTemperature
+      ? formatTemperaturePercent(fallbackTemperature)
+      : "Model default"
+  const thinkingChecked = draft.enabled ? draft.thinking === true : fallbackThinking
 
   return (
     <div className="mt-2 space-y-1.5" data-llm-node-params="true">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2" data-llm-node-params-header="true">
         <YamlNestedFieldLabel>
-          Model params
+          Custom model params
           <HelpTooltip label="About model params">
             Opt-in per-node overrides of this node&rsquo;s LLM generation params. When off, the node
             inherits the role defaults; when on, blank fields still inherit field-by-field.
           </HelpTooltip>
         </YamlNestedFieldLabel>
-        <span data-llm-node-params-save-status={nodeParamsSaveStatus}>
-          <SaveStatusBadge status={nodeParamsSaveStatus} />
-        </span>
+        <Checkbox
+          id={enabledId}
+          data-llm-node-params-enabled="true"
+          checked={draft.enabled}
+          aria-label="Use custom model params for this node"
+          onCheckedChange={(checked) => {
+            const enabled = checked === true
+            update(enabled ? { ...latestDraftRef.current, enabled: true } : EMPTY_NODE_LLM_PARAMS_DRAFT)
+          }}
+        />
       </div>
       {/* Frame the params in the shared Card box, one field per row (each field's
           label sits directly above its own control, so nothing reads as crowded
           or ambiguous about which label belongs to which control). Per-field
-          widgets: thinking = Switch, temperature = Slider, max output tokens =
-          number Input. Reuses @/components/ui, no new style. */}
-      <Card size="sm">
+          widgets: custom enable = Checkbox, thinking = Switch, temperature =
+          Slider, max output tokens = number Input. Reuses @/components/ui,
+          no new style. */}
+      <Card size="sm" data-llm-node-params-body="true">
         <CardContent className="space-y-3">
-          <Field
-            orientation="horizontal"
-            className="min-h-9 items-center justify-between gap-3"
-          >
-            <YamlNestedFieldLabel htmlFor={enabledId} className="min-w-0">
-              Custom model params
-            </YamlNestedFieldLabel>
-            <Switch
-              id={enabledId}
-              size="sm"
-              data-llm-node-params-enabled="true"
-              checked={draft.enabled}
-              aria-label="Use custom model params for this node"
-              onCheckedChange={(enabled) => {
-                update(enabled ? { ...latestDraftRef.current, enabled: true } : EMPTY_NODE_LLM_PARAMS_DRAFT)
-              }}
-            />
-          </Field>
           <Field
             orientation="horizontal"
             className="min-h-9 items-center justify-between gap-3"
@@ -3071,10 +3121,10 @@ function LlmNodeParamsField({
               id={thinkingId}
               size="sm"
               data-llm-node-thinking="true"
-              checked={draft.thinking === true}
+              checked={thinkingChecked}
               disabled={!draft.enabled}
               aria-label="Node thinking override"
-              onCheckedChange={(thinking) => update({ ...draft, thinking })}
+              onCheckedChange={(thinking) => update({ ...latestDraftRef.current, thinking })}
             />
           </Field>
           <Field className="min-h-14 gap-1">
@@ -3089,8 +3139,8 @@ function LlmNodeParamsField({
               id={maxOutputId}
               data-llm-node-max-output="true"
               aria-label="Node max output tokens override"
-              value={formatThousands(draft.maxOutputTokens)}
-              onChange={(event) => update({ ...draft, maxOutputTokens: stripThousands(event.target.value) })}
+              value={formatThousands(maxOutputValue)}
+              onChange={(event) => update({ ...latestDraftRef.current, maxOutputTokens: stripThousands(event.target.value) })}
               inputMode="numeric"
               placeholder={maxOutputPlaceholder}
               disabled={!draft.enabled}
@@ -3111,14 +3161,14 @@ function LlmNodeParamsField({
                 min={0}
                 max={2}
                 step={0.1}
-                value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
+                value={[temperatureValue === "" ? 1 : Number(temperatureValue)]}
                 onValueChange={(vals) => updateTemperature(String(vals[0]))}
                 onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
                 disabled={!draft.enabled}
                 className="flex-1"
               />
-              <span className="w-9 shrink-0 text-right text-xs text-foreground">
-                {formatTemperaturePercent(draft.temperature)}
+              <span className="min-w-16 shrink-0 text-right text-xs text-foreground">
+                {temperatureReadout}
               </span>
             </div>
           </Field>

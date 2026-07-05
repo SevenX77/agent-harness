@@ -31,6 +31,10 @@ export function rolesSaveErrorDisposition(
   return isRecoverableError?.(error) ? "recoverable" : "fatal"
 }
 
+export function shouldApplyExternalRolesRefresh(status: SaveStatus): boolean {
+  return status !== "pending" && status !== "saving"
+}
+
 /**
  * R-F19.1 — best-effort flush at hook teardown (or before-quit). Called from
  * the hook's useEffect cleanup with the live `pendingSnapshotRef` value; also

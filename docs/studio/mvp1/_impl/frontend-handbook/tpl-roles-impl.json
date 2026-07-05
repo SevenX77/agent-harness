@@ -107,8 +107,8 @@
       "n": 43,
       "cap": "role-output-token-intent",
       "design_ref": "atom-43",
-      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,0.7=>35%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 立即调用 onDraftChange 更新父 draft,不再在子组件里持有滞后的 liveTemperature;HTTP 保存仍由 LlmRolesTab/useDebouncedRolesSave 统一 debounce,因此 saving 返回不会把 slider 拉回旧值。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
-      "gap": "符合设计,无需改。已闭合:百分比读数 + tooltip + provider-neutral 0..2 存储 + gateway provider-scale runtime mapping + saving 时 slider 不回跳。",
+      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,0.7=>35%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 立即调用 onDraftChange 更新父 draft,不再在子组件里持有滞后的 liveTemperature;HTTP 保存仍由 LlmRolesTab/useDebouncedRolesSave 统一 debounce。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed/focus 外部刷新覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
+      "gap": "符合设计,无需改。已闭合:百分比读数 + tooltip + provider-neutral 0..2 存储 + gateway provider-scale runtime mapping + saving/慢保存期间 slider 不回跳。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。PUT /roles 仍保存 role draft;gateway runtime 由 temperature.py / RouteChatModelFactory / ordinary_chat 执行 provider-scale 映射;GatewayChatModel 保留 effective_runtime_settings 并新增 actual_runtime_settings 供 trace 查看真实调用参数。"
     },
@@ -702,6 +702,7 @@
       "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (Vite 5177, private sidecar 8789). No committed screenshot: live verification used local role/settings state; automated coverage is RoleSettingsDialog.behavior.test.tsx, LlmRolesTab.test.tsx, and useDebouncedCallback.test.tsx.",
       "layer1": [
         "RoleSettingsDialog.behavior.test.tsx: moving the temperature Slider calls onDraftChange immediately with the new parent draft value, preventing saving-time jumpback.",
+        "SettingsPage.controller.test.tsx: roles_changed is ignored while roles save status is pending/saving, then allowed again after the save status returns idle.",
         "LlmRolesTab.test.tsx / RoleSettingsFields coverage: temperature renders as a Slider percent readout(0.7=>35%) rather than raw 0.7 and keeps the About temperature scale tooltip trigger.",
         "useDebouncedCallback.test.tsx: schedule waits 300ms, flush runs immediately, cancel/unmount drops stale work."
       ],

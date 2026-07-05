@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from graph_agent import PathDiff, PhaseRecord
 from graph_agent.core.event_contracts import EventEnvelope
+from graph_agent.core.exceptions import ErrorPayload
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -60,6 +61,10 @@ class PredictDiagnosticExport(BaseModel):
     status: Literal["success", "failed"]
     phases: list[PhaseRecord]
     path_diff: PathDiff | None = None
+    error: ErrorPayload | None = None
+    diagnostics: list[ErrorPayload] = Field(default_factory=list)
+    diagnostics_truncated: bool = False
+    diagnostic_counts: dict[str, Any] = Field(default_factory=dict)
 
 
 class BatchRunRequest(BaseModel):

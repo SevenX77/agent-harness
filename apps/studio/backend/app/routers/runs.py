@@ -27,7 +27,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.predictor import predictor_service
+from app.services.predictor import PredictArtifactError, PredictDeadlockError, predictor_service
 from app.services.run_manager import run_manager
 
 router = APIRouter(prefix="/api/skills/{skill_id}/runs", tags=["runs"])
@@ -70,12 +70,17 @@ async def predict_run(skill_id: str, request: PredictRunRequest) -> PredictDiagn
     # N4 atom #30: project the in-process diagnostic export (is_predict / status /
     # phases / path_diff) instead of leaking the raw RunResult. The frontend reads
     # which agent nodes ran from `phases` to drive the golden 🟡 logic-OK middle state.
-    result = predictor_service.dispatch_predict_job(
-        skill_id,
-        request.mock_llm,
-        input_data=request.input_data,
-        current_hashes=request.current_hashes,
-    )
+    try:
+        result = predictor_service.dispatch_predict_job(
+            skill_id,
+            request.mock_llm,
+            input_data=request.input_data,
+            current_hashes=request.current_hashes,
+        )
+    except PredictArtifactError as exc:
+        _raise_predict_artifact_error_response(exc)
+    except PredictDeadlockError as exc:
+        _raise_predict_deadlock_error_response(exc)
     return predictor_service.export_diagnostics(result)
 
 
@@ -119,6 +124,39 @@ _STATE_ERROR_STATUS: dict[str, int] = {
     "state.release_failed": 409,
     "state.not_found": 404,
 }
+
+
+def _raise_predict_artifact_error_response(exc: PredictArtifactError) -> NoReturn:
+    http_status = status.HTTP_503_SERVICE_UNAVAILABLE if exc.retryable else 422
+    raise_error_response(
+        error_response(
+            error_code="PREDICT_FAILED",
+            http_status=http_status,
+            message=str(exc),
+            details={
+                "engine_error_code": exc.error_code,
+                "engine_error_payload": exc.error_payload,
+                "retryable": exc.retryable,
+                "run_id": exc.run_id,
+            },
+            retry_strategy="backoff" if exc.retryable else "not_retryable",
+        )
+    )
+
+
+def _raise_predict_deadlock_error_response(exc: PredictDeadlockError) -> NoReturn:
+    raise_error_response(
+        error_response(
+            error_code="PREDICT_DEADLOCK",
+            http_status=422,
+            message=str(exc),
+            details={
+                "actual_path": exc.actual_path,
+                "phase_name": exc.phase_name,
+            },
+            retry_strategy="not_retryable",
+        )
+    )
 
 
 def _raise_artifact_error_response(exc: StudioAdapterError) -> NoReturn:

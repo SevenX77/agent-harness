@@ -25,13 +25,13 @@ import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { CompareCandidateRun, GoldenBaseline, GraphTopologyItem, LintResult, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
+import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspaceFile, writeWorkspaceFile } from "@/lib/tauri"
 import { errorDiagnosticDetails, errorMessage } from "@/utils/errors"
-import type { CompileError, PathDiff } from "@/api/types"
+import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { autoCreatedSubgraphChildDir, defaultSubgraphChildDir, subgraphChildScaffoldFiles } from "@/components/studio/subgraph-scaffold"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
@@ -106,6 +106,9 @@ function normalizeDiagnosticError(value: unknown): CompileError | null {
     severity: candidate.severity === "warning" ? "warning" : "fatal",
     message: candidate.message,
     error_code: typeof candidate.error_code === "string" ? candidate.error_code : null,
+    details: Array.isArray(candidate.details)
+      ? candidate.details.filter((item): item is string => typeof item === "string")
+      : undefined,
   }
 }
 
@@ -130,7 +133,55 @@ function requestDiagnosticErrors(error: unknown): CompileError[] {
   return [diagnosticError(errorMessage(error), errorDiagnosticDetails(error))]
 }
 
-function predictStatusFailureErrors(predict: { path_diff: PathDiff | null }): CompileError[] {
+function engineDiagnosticDetails(payload: EngineErrorPayload): string[] {
+  const details = [
+    payload.phase_id ? `phase: ${payload.phase_id}` : null,
+    payload.field_path ? `field: ${payload.field_path}` : null,
+    payload.skill_id ? `skill: ${payload.skill_id}` : null,
+    payload.source_path ? `source: ${payload.source_path}` : null,
+    payload.doc_link ? `doc: ${payload.doc_link}` : null,
+    Object.keys(payload.details).length > 0 ? `details:\n${JSON.stringify(payload.details, null, 2)}` : null,
+  ]
+  return details.filter((item): item is string => item !== null)
+}
+
+function engineDiagnosticError(payload: EngineErrorPayload): CompileError {
+  const details = engineDiagnosticDetails(payload)
+  return {
+    file: payload.source_path,
+    line: null,
+    field: payload.field_path,
+    severity: payload.level?.toLowerCase() === "warn" || payload.level?.toLowerCase() === "warning" ? "warning" : "fatal",
+    message: `${payload.code} - ${payload.message}`,
+    error_code: payload.code,
+    ...(details.length > 0 ? { details } : {}),
+  }
+}
+
+function predictEngineDiagnosticErrors(predict: PredictDiagnosticExport): CompileError[] {
+  const diagnostics = [predict.error ?? null, ...(predict.diagnostics ?? [])].filter(
+    (item): item is EngineErrorPayload => item !== null,
+  )
+  const seen = new Set<string>()
+  const errors: CompileError[] = []
+  for (const item of diagnostics) {
+    const key = `${item.code}\0${item.message}\0${item.phase_id ?? ""}\0${item.field_path ?? ""}\0${item.source_path ?? ""}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    errors.push(engineDiagnosticError(item))
+  }
+  if (predict.diagnostics_truncated && errors.length > 0) {
+    const first = errors[0]
+    first.details = [...(first.details ?? []), "diagnostics were truncated by the backend"]
+  }
+  return errors
+}
+
+function predictStatusFailureErrors(predict: PredictDiagnosticExport): CompileError[] {
+  const diagnosticErrors = predictEngineDiagnosticErrors(predict)
+  if (diagnosticErrors.length > 0) {
+    return diagnosticErrors
+  }
   const diff = predict.path_diff
   if (!diff) {
     return [diagnosticError("Predict finished with failed status, but the backend did not return path-diff details.")]

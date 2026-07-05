@@ -112,8 +112,8 @@
     {
       "item": "predict 结果 DTO 投影（success/phases/path_diff 透给前端）",
       "d12": "不在 12D 范围；归 Studio sidecar DTO 投影层",
-      "status": "review",
-      "note": "根因（#4 偏差）：引擎 RunResult（packages/graph-agent core/result.py）的 success/phases/path_diff/error 是真字段、model_dump 会序列化进 predict_run 的 HTTP 响应（status 是 @property、不序列化、响应里没有）；但 client.ts 的 PredictRunResponse 类型未透出 success 等字段，导致 handlePredict 只能按 HTTP 成功放行 predict-pass、与后端『仅 result.success 才记录』的门不一致。修复在 Studio sidecar DTO 投影 + 前端类型透出 success（不是 status），不是引擎缺字段。",
+      "status": "ok",
+      "note": "已符合：Studio sidecar 的 PredictDiagnosticExport 明确投影 status/phases/path_diff/error/diagnostics/diagnostics_truncated/diagnostic_counts；result.error 与 result.diagnostics 不再丢失。PredictArtifactError/PredictDeadlockError 在 /runs/predict 层转为结构化 HTTP 错误，前端 drawer 能展示 engine code/message/phase/field/doc/details。engine 侧已修 enum schema、fenced JSON mock 输出、数组对象 heuristic_stub 与行号字段默认值；text-segmentation 真侧车直连 predict 已验证成功。",
       "ref": "d7"
     }
   ]

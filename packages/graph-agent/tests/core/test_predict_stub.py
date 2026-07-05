@@ -22,7 +22,7 @@ def test_generate_basic_json_schema_field_types() -> None:
         "count": 0,
         "score": 0.0,
         "accepted": True,
-        "items": [],
+        "items": ["<mock_items>"],
         "metadata": {"source": "<mock_source>"},
         "category": "alpha",
     }
@@ -42,8 +42,41 @@ def test_generate_pydantic_style_json_schema() -> None:
 
     assert generate_heuristic_stub(schema) == {
         "text": "<mock_text>",
-        "tags": [],
+        "tags": ["<mock_tags>"],
         "confidence": 0.0,
+    }
+
+
+def test_generate_array_of_objects_uses_one_structure_valid_item() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "parsed_segments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "type": {"type": "string", "enum": ["A", "B", "C"]},
+                        "start_line": {"type": "integer"},
+                        "end_line": {"type": "integer"},
+                        "description": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+    assert generate_heuristic_stub(schema) == {
+        "parsed_segments": [
+            {
+                "description": "<mock_description>",
+                "end_line": 999,
+                "index": 1,
+                "start_line": 1,
+                "type": "A",
+            }
+        ]
     }
 
 

@@ -10,6 +10,7 @@ boundary (no direct SDK import — the import-boundary guard forbids it for serv
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.core.adapters.engine import generate_heuristic_stub
 from app.core.adapters.transport_factory import build_engine_adapter
@@ -41,7 +42,7 @@ def generate_golden_template(skill_id: str, node_id: str) -> GoldenTemplate:
                 retry_strategy="not_retryable",
             )
         )
-    template = generate_heuristic_stub(output_schema)
+    template = _golden_template_from_schema(output_schema)
     logger.info(
         "golden_template action=end skill_id=%s node_id=%s template_keys=%s",
         skill_id,
@@ -54,6 +55,30 @@ def generate_golden_template(skill_id: str, node_id: str) -> GoldenTemplate:
         schema=output_schema,  # alias for output_schema (populate_by_name)
         template=template,
     )
+
+
+def _golden_template_from_schema(output_schema: dict[str, Any]) -> dict[str, Any]:
+    template = generate_heuristic_stub(output_schema)
+    normalized = _empty_array_values_for_schema(template, output_schema)
+    return normalized if isinstance(normalized, dict) else {}
+
+
+def _empty_array_values_for_schema(value: object, schema: object) -> object:
+    if not isinstance(schema, dict):
+        return value
+
+    schema_type = schema.get("type")
+    if schema_type == "array":
+        return []
+
+    properties = schema.get("properties")
+    if isinstance(value, dict) and isinstance(properties, dict):
+        return {
+            key: _empty_array_values_for_schema(child_value, properties.get(key))
+            for key, child_value in value.items()
+        }
+
+    return value
 
 
 __all__ = ["generate_golden_template"]

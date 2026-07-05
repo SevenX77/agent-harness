@@ -358,26 +358,48 @@ def _descriptor_from_json_value(value: Any) -> Any:
         descriptor, _ = _parse_declared_type(value)
         return descriptor
     if isinstance(value, dict):
-        schema_type = value.get("type")
-        if schema_type == "array":
-            items = value.get("items", {})
-            item_descriptor = Any if items == {} else _descriptor_from_json_value(items)
-            return ListType(item_descriptor)
-        if schema_type == "object":
-            if isinstance(value.get("properties"), dict):
-                return _schema_from_mapping(cast(dict[str, Any], value))
-            return dict[str, Any]
-        if isinstance(schema_type, str) and set(value).issubset({"type", "description"}):
-            descriptor, _ = _parse_declared_type(schema_type)
-            return descriptor
-        if isinstance(value.get("properties"), dict):
-            return _schema_from_mapping(cast(dict[str, Any], value))
-        return _schema_from_mapping(cast(dict[str, Any], value))
+        return _descriptor_from_json_mapping(cast(dict[str, Any], value))
     if isinstance(value, list):
-        if len(value) != 1:
-            raise SchemaParseError("List schema shorthand must contain exactly one item type")
-        return ListType(_descriptor_from_json_value(value[0]))
+        return _descriptor_from_json_list(value)
     raise SchemaParseError(f"Unsupported schema value {value!r}")
+
+
+def _descriptor_from_json_mapping(value: dict[str, Any]) -> Any:
+    if "enum" in value:
+        enum_values = value["enum"]
+        if not isinstance(enum_values, list):
+            raise SchemaParseError("JSON Schema 'enum' must be a list")
+        return _literal_from_json_enum(enum_values)
+    schema_type = value.get("type")
+    if schema_type == "array":
+        items = value.get("items", {})
+        item_descriptor = Any if items == {} else _descriptor_from_json_value(items)
+        return ListType(item_descriptor)
+    if schema_type == "object":
+        if isinstance(value.get("properties"), dict):
+            return _schema_from_mapping(value)
+        return dict[str, Any]
+    if isinstance(schema_type, str) and set(value).issubset({"type", "description"}):
+        descriptor, _ = _parse_declared_type(schema_type)
+        return descriptor
+    if isinstance(value.get("properties"), dict):
+        return _schema_from_mapping(value)
+    return _schema_from_mapping(value)
+
+
+def _descriptor_from_json_list(value: list[Any]) -> Any:
+    if len(value) != 1:
+        raise SchemaParseError("List schema shorthand must contain exactly one item type")
+    return ListType(_descriptor_from_json_value(value[0]))
+
+
+def _literal_from_json_enum(values: list[Any]) -> Any:
+    if not values:
+        raise SchemaParseError("JSON Schema 'enum' must contain at least one value")
+    for value in values:
+        if not isinstance(value, str | int | float | bool) and value is not None:
+            raise SchemaParseError("JSON Schema 'enum' only supports scalar values")
+    return cast(Any, Literal).__getitem__(tuple(values))
 
 
 def _normalise_schema_lines(fragment: str) -> list[_SchemaLine]:

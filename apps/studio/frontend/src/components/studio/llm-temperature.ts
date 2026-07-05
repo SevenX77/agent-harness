@@ -1,6 +1,8 @@
 export const AUTHORED_TEMPERATURE_MAX = 2
 export const TEMPERATURE_DEBOUNCE_MS = 300
 export const TEMPERATURE_EMPTY_READOUT = "\u2014"
+export const DEFAULT_TEMPERATURE_PERCENT = 70
+export const DEFAULT_ROLE_TEMPERATURE = AUTHORED_TEMPERATURE_MAX * (DEFAULT_TEMPERATURE_PERCENT / 100)
 
 export const TEMPERATURE_SCALE_HELP =
   "Studio shows temperature as 0-100%. OpenAI-compatible, Gemini, and Ark keep the authored 0-2 scale; Anthropic is remapped to 0-1 at runtime."

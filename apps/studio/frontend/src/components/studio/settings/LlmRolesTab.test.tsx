@@ -2452,7 +2452,7 @@ describe("LlmRolesTab controls", () => {
     expect(formatTemperaturePercent("not-a-number")).toBe("\u2014")
   })
 
-  it("maps the draft to the three-param role intent (empty output/temperature -> null)", () => {
+  it("maps the draft to the three-param role intent (empty output -> null, empty temperature -> 70%)", () => {
     expect(roleIntentFromSettingsDraft({
       providerPreference: "manual_order",
       thinking: true,
@@ -2474,7 +2474,7 @@ describe("LlmRolesTab controls", () => {
       provider_preference: "manual_order",
       thinking: false,
       max_output_tokens: null,
-      temperature: null,
+      temperature: 1.4,
     })
   })
 

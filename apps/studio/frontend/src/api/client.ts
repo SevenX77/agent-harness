@@ -703,9 +703,10 @@ export async function getTestInput(skillId: string, inputId: string): Promise<Te
 
 /**
  * F4: resolve the Predict/Run input payload. With a selected test input, fetch
- * its full content; with none selected, fall back to an empty payload (the
- * prior behaviour). A failed fetch (e.g. the input was deleted) propagates so
- * the caller surfaces a clear error instead of silently running empty.
+ * its full content. Missing selection is a preflight configuration error; do
+ * not silently run `{}` because compile owns the complete input-file path.
+ * A failed fetch (e.g. the input was deleted) propagates so the caller surfaces
+ * a clear error instead of silently running empty.
  */
 export async function resolveRunInput(
   skillId: string,
@@ -713,7 +714,7 @@ export async function resolveRunInput(
   getInput: (skillId: string, inputId: string) => Promise<TestInputDetail> = getTestInput,
 ): Promise<JsonObject> {
   if (!selectedTestInputId) {
-    return {}
+    throw new Error("Select a compile-valid test input before Predict/Run.")
   }
   const detail = await getInput(skillId, selectedTestInputId)
   return detail.content

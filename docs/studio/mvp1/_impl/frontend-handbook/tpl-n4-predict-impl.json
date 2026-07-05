@@ -2,7 +2,7 @@
  "id": "n4_predict_impl",
  "title": "Predict 试飞 · 实施详情",
  "design_ref": "n4_predict_design",
- "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）、predict-pass 解锁 Run（#4）、灰禁原因提示（#5）均已接实且符合设计；2026-07-04 追加修正 #4 失败诊断：Predict 失败不再只停留在短暂 toast，而是复用 CompileErrorDrawer 打开底部详情抽屉，展示 Backend unavailable / path_diff / compile_failed errors 等可复制诊断；2026-07-05 追加保留 no-response 诊断上下文：Backend unavailable 会展示请求方法、完整 URL、API base、frontend origin、Axios code 与原始错误消息。",
+ "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）、predict-pass 解锁 Run（#4）、灰禁原因提示（#5）均已接实且符合设计；2026-07-04 追加修正 #4 失败诊断：Predict 失败不再只停留在短暂 toast，而是复用 CompileErrorDrawer 打开底部详情抽屉，展示 Backend unavailable / path_diff / compile_failed errors 等可复制诊断；2026-07-05 追加保留 no-response 诊断上下文，并按 PM 设计修正把未运行前可发现的输入/输出文件格式问题前移到 Compile preflight：.workspace/test_inputs 校验 graph io.inputs，golden expected_output 校验节点 io.outputs，Predict/Run 不再用 {} 兜底。",
  "functions": [
   {
    "n": 1,
@@ -17,10 +17,10 @@
    "n": 2,
    "cap": "predict-input-select",
    "design_ref": "n4-atom-2",
-   "current": "现状：已实现且符合。handlePredict 调 resolveRunInput(targetSkillId, selectedTestInputId)：选了输入 fetch content、没选回退 {}。已是路径式（i/o 面板选已导入文件直接 predict），无 PredictInputDialog 弹窗。",
+   "current": "现状：已实现且符合。handlePredict 调 resolveRunInput(targetSkillId, selectedTestInputId)：选了输入 fetch content；没选不再回退 {}，而是抛出『Select a compile-valid test input before Predict/Run』并走 Predict/Run 诊断抽屉。Studio backend 的 compile_skill_for_studio 已在 engine compile 后执行 workspace preflight：.workspace/test_inputs/*.json 必须是 JSON object 且符合 GRAPH.md io.inputs；有 required input 但没有测试输入、输入 JSON 类型/required 不匹配都会作为 CompileFailure.errors 返回，Compile drawer 展示并阻断 Predict。已是路径式（i/o 面板选已导入文件直接 predict），无 PredictInputDialog 弹窗。",
    "gap": "符合设计，无需改。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。POST /api/skills/{id}/runs/predict（routers/runs.py predict_run）已实现，接受 input_data。"
+   "be_dep": "已就绪可接。POST /api/skills/{id}/runs/predict（routers/runs.py predict_run）已实现，接受 input_data；Compile preflight 已校验 .workspace/test_inputs/*.json 与 graph io.inputs。"
   },
   {
    "n": 3,
@@ -107,16 +107,26 @@
    "fe_status": "符合",
    "layer1": [
     "选中一份测试输入 → 点 Predict → 断言 resolveRunInput 取该输入 content、postPredictRun body.input_data=该 content 且不含 mock_llm。",
-    "未选输入 → 断言 input_data 回退 {}。",
+    "未选输入 → 断言 resolveRunInput reject『Select a compile-valid test input before Predict/Run』，不再发送 {}。",
+    "后端 compile 契约测：graph io.inputs 有 required 字段但 .workspace/test_inputs 为空 → 422 CompileFailure，错误 file=.workspace/test_inputs、error_code=STUDIO_TEST_INPUT_MISSING。",
+    "后端 compile 契约测：测试输入 JSON 字段类型不符合 graph io.inputs → 422 CompileFailure，错误 file=.workspace/test_inputs/<case>.json、error_code=STUDIO_TEST_INPUT_SCHEMA_INVALID。",
+    "后端 compile 契约测：golden expected_output 不符合节点 io.outputs（缺 required 或类型错）→ 422 CompileFailure，error_code=STUDIO_GOLDEN_SCHEMA_INVALID。",
     "mock 后端契约测：predict response.phases 里 agent 节点 mocked_source ∈ {golden_case, heuristic_stub}（有/无 golden 两例）。"
    ],
    "layer2": [
-    "真跑：选一份输入点 Predict，看 trace 里 logic 节点真跑、agent 节点标 mock 来源（heuristic_stub 或 golden_case）。",
+    "真跑：无测试输入或测试输入缺 chapter 时点 Compile，底部 Compile drawer 直接显示 test input schema 错误，Predict 保持灰禁。",
+    "真跑：选一份 compile-valid 输入点 Predict，看 trace 里 logic 节点真跑、agent 节点标 mock 来源（heuristic_stub 或 golden_case）。",
     "给某 agent 节点建 golden 后再 predict，看该节点 mock 来源切到 golden_case（真跑确认 mock-by-golden）。"
    ],
    "shots": [
     "predict 后 trace 行标 agent 节点 mocked_source",
     "无 golden 时 agent 走 heuristic_stub、有 golden 时走 golden_case"
+   ],
+   "screenshots": [
+    {
+     "file": "n4-predict-compile-preflight-input-gate.png",
+     "caption": "真机(worktree Vite 5177 + 私有 sidecar 8797)：text-segmentation 在没有 .workspace/test_inputs/*.json 时点击 Compile，底部 CompileErrorDrawer 直接显示『2 compile errors』，两条错误分别指出 graph io.inputs required 字段 chapter / chapters 缺少对应测试输入文件；Predict 与 Run 仍灰禁，说明可预知的输入路径错误已在 Compile 阶段阻断。"
+    }
    ]
   },
   {

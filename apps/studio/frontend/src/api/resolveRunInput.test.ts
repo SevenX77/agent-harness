@@ -3,11 +3,12 @@ import { resolveRunInput } from "./client"
 import type { TestInputDetail } from "./types"
 
 describe("resolveRunInput", () => {
-  it("returns an empty payload when no input is selected", async () => {
+  it("rejects when no input is selected", async () => {
     const getInput = vi.fn()
-    const result = await resolveRunInput("skill-1", null, getInput)
 
-    expect(result).toEqual({})
+    await expect(resolveRunInput("skill-1", null, getInput)).rejects.toThrow(
+      "Select a compile-valid test input before Predict/Run.",
+    )
     expect(getInput).not.toHaveBeenCalled()
   })
 

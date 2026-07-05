@@ -47,11 +47,36 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 ### F4. Stage Gate
 
 - 机制: compile-pass unlocks Predict; predict-pass unlocks Run.
-- 决策: run must be blocked until both structure and predict flight have passed.
+- 决策: run must be blocked until both structure/preflight and predict flight have passed.
 - 原话/来源: `01_workflows/03_compile.md:20` defines the gate; `01_workflows/04_run-and-verify.md:10` repeats the spine.
 - 测试: failing compile disables Predict and Run; passing compile enables Predict; failing predict keeps Run disabled.
 - Status: compile gate live; predict-pass missing.
 - 归属: capability `compile-lint`; capabilities `predict`, `run-execution`; region `center-action-bar`.
+
+### F4.1. Pre-run File Gate
+
+2026-07-05 correction: compile owns the whole path that can be checked before
+execution, including Studio-owned input/output files. A graph with required
+runtime inputs must not compile into a predictable artifact unless there is at
+least one `.workspace/test_inputs/*.json` file that validates against graph
+`io.inputs`; every persisted test input file must be valid JSON object data for
+that schema. Persisted golden case `expected_output` files must validate against
+the current agent-node `io.outputs` schema, not only contain top-level required
+keys. These checks live in the Studio shell compile preflight because
+`.workspace/test_inputs` and `.workspace/golden` are Studio workspace files, not
+engine SDK source.
+
+- 机制: manual compile runs engine compile first, then Studio preflight validates
+  test input JSON files against graph `io.inputs` and golden output JSON files
+  against node `io.outputs`; failures return normal `CompileFailure.errors`.
+- 决策: anything knowable before predict/run is a compile error. Predict/Run must
+  never silently substitute `{}` for missing input.
+- 测试: required graph input with no test input fails compile; invalid test input
+  type fails compile; stale golden type/missing field fails compile; all errors
+  surface through the Compile drawer.
+- Status: target-design (implemented 2026-07-05).
+- 归属: Studio backend shell for workspace files; engine remains owner of skill
+  source/schema/dataflow compile errors.
 
 ### F5. Engine Error Contract
 

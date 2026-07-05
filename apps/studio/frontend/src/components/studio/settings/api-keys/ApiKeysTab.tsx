@@ -97,12 +97,22 @@ export function ApiKeysTab({
               </CatalogAccordionTrigger>
               <CatalogAccordionContent className="space-y-3 pb-5">
                 {officialDrafts.map((draft) => {
-                  const persisted = persistedById[draft.id] ?? null
+                  const endpointDrafts = providerEndpointDraftsForAction(draft)
+                  const persistedEndpoints = Object.fromEntries(
+                    endpointDrafts.map((endpointDraft) => [
+                      endpointDraft.id,
+                      persistedById[endpointDraft.id] ?? null,
+                    ]),
+                  )
+                  const persisted = persistedById[draft.id]
+                    ?? endpointDrafts.map((endpointDraft) => persistedById[endpointDraft.id]).find(Boolean)
+                    ?? null
                   return (
                     <ProviderCard
                       key={draft.id}
                       draft={draft}
                       persisted={persisted}
+                      persistedEndpoints={persistedEndpoints}
                       onFieldChange={(patch, options) => onProviderFieldChange(draft.id, { ...draft, ...patch }, options)}
                       onGetModels={() => onGetProviderModels(draft.id)}
                       onProbeEndpoint={onProbeEndpoint}

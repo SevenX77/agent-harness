@@ -1,4 +1,4 @@
-export { SettingsPage, SettingsPageView, SettingsPageContent, CopilotTab, LlmRolesTab, useSettingsPageController } from "./settings"
+export { SettingsPage, SettingsPageView, SettingsPageContent, CopilotTab, LlmRolesTab, activeProbeModelIdsForDraft, useSettingsPageController } from "./settings"
 export { getModelAvailability } from "./settings"
 export type { ModelAvailability, ProviderDraft, SettingsPageContentProps, SettingsPageController, SettingsTab } from "./settings"
 export { isStaleRouteReferenceError, modelGroupsReferenceMissingCredentialProviders, refreshLoadedLlmRolesProjection, shouldSyncRemoteModelCatalog, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./settings"

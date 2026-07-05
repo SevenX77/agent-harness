@@ -27,7 +27,7 @@ class ProviderIdentity(NamedTuple):
     keywords: tuple[str, ...]
     registrable_domains: tuple[str, ...]
     official_hosts: tuple[str, ...]
-    official_endpoint_id: str | None
+    official_endpoint_ids: dict[str, str]
     language_model_prefixes: tuple[str, ...]
     non_language_model_tokens: tuple[str, ...]
 
@@ -48,9 +48,10 @@ def provider_identities() -> tuple[ProviderIdentity, ...]:
             official_hosts=tuple(
                 str(host).lower() for host in entry.get("official_hosts", [])
             ),
-            official_endpoint_id=(
-                str(entry["official_endpoint_id"]) if entry.get("official_endpoint_id") else None
-            ),
+            official_endpoint_ids={
+                str(protocol): str(endpoint_id)
+                for protocol, endpoint_id in entry.get("official_endpoint_ids", {}).items()
+            },
             language_model_prefixes=tuple(
                 str(prefix).lower() for prefix in entry.get("language_model_prefixes", [])
             ),
@@ -84,17 +85,43 @@ def notable_provider_key_for(text_haystack: str, hostname: str) -> str | None:
 
 
 def official_endpoint_id_for_host(hostname: str) -> str | None:
-    """Return the stable official endpoint id for an official-provider host, or ``None``.
+    """Return a host-only official endpoint id when the host maps to exactly one endpoint.
 
-    Matched by the endpoint ``hostname`` falling within a configured ``official_hosts``
-    entry (host == value or host endswith .value). Case-insensitive.
+    Hosts such as ARK/Volces expose multiple protocols. Those must use
+    ``official_endpoint_id_for_host_protocol`` because endpoint identity is the
+    ``(base_url, protocol)`` cell, not the host alone.
     """
     host = hostname.lower()
     for identity in provider_identities():
-        if identity.official_endpoint_id is None:
+        if not identity.official_endpoint_ids:
             continue
         if any(_host_in_domain(host, official) for official in identity.official_hosts):
-            return identity.official_endpoint_id
+            endpoint_ids = tuple(identity.official_endpoint_ids.values())
+            if len(endpoint_ids) == 1:
+                return endpoint_ids[0]
+            return None
+    return None
+
+
+def official_endpoint_id_for_host_protocol(hostname: str, protocol: str) -> str | None:
+    """Return the stable official endpoint id for one host/protocol endpoint cell."""
+    host = hostname.lower()
+    for identity in provider_identities():
+        if not identity.official_endpoint_ids:
+            continue
+        if any(_host_in_domain(host, official) for official in identity.official_hosts):
+            return identity.official_endpoint_ids.get(protocol)
+    return None
+
+
+def official_provider_key_for_host(hostname: str) -> str | None:
+    """Return the provider catalog key for an official-provider host."""
+    host = hostname.lower()
+    for identity in provider_identities():
+        if not identity.official_hosts:
+            continue
+        if any(_host_in_domain(host, official) for official in identity.official_hosts):
+            return identity.key
     return None
 
 

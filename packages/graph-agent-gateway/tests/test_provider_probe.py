@@ -494,6 +494,95 @@ def test_deepseek_anthropic_endpoint_backend_uses_deepseek_provider() -> None:
     assert provider_probe.endpoint_probe_backend(endpoint) == "deepseek"
 
 
+def test_ark_openai_compatible_endpoint_backend_uses_openai_protocol() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-openai-official",
+        protocol="openai_compatible",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+
+    assert provider_probe.endpoint_probe_backend(endpoint) == "openai"
+
+
+@pytest.mark.anyio
+async def test_ark_openai_compatible_endpoint_probe_uses_existing_api_v3_models_path() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-openai-official",
+        protocol="openai_compatible",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, json={"data": [{"id": "doubao-seed-2-0-pro-260215"}]}, request=request)
+
+    result = await provider_probe.test_provider_endpoint(
+        endpoint,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "ok"
+    assert result.model_ids == ("doubao-seed-2-0-pro-260215",)
+    assert requests == ["https://ark.cn-beijing.volces.com/api/v3/models"]
+
+
+@pytest.mark.anyio
+async def test_ark_openai_compatible_route_probe_uses_existing_api_v3_chat_path() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-openai-official",
+        protocol="openai_compatible",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+    route = ProviderRoute(
+        route_id="ark-openai-official:doubao-seed-2-0-pro-260215",
+        endpoint_id="ark-openai-official",
+        route_slug="doubao-seed-2-0-pro-260215",
+        provider_model_id="doubao-seed-2-0-pro-260215",
+        canonical_id="doubao-seed-2-0-pro-260215",
+    )
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, json={"id": "chatcmpl-ok"}, request=request)
+
+    result = await provider_probe.test_provider_route(
+        endpoint,
+        route,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "ok"
+    assert requests == ["https://ark.cn-beijing.volces.com/api/v3/chat/completions"]
+
+
+@pytest.mark.anyio
+async def test_openai_official_call_method_uses_existing_api_v3_chat_path() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, json={"id": "chatcmpl-ok"}, request=request)
+
+    result = await provider_probe.probe_official_call_method(
+        "openai_chat_completions",
+        "secret",
+        "https://ark.cn-beijing.volces.com/api/v3",
+        "doubao-seed-2-0-pro-260215",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "ok"
+    assert requests == ["https://ark.cn-beijing.volces.com/api/v3/chat/completions"]
+
+
 def test_gateway_official_call_method_timeout_allows_slow_openai_pro_responses() -> None:
     timeout = provider_probe._official_call_method_timeout(
         "openai_responses",

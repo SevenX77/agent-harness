@@ -175,6 +175,7 @@
     "断言二次拉快照时已知 key 不再发 secret(knownEndpointSecrets 命中)。"
    ],
    "layer2": [
+    "Real run (2026-07-05, worktree private sidecar + real Ark key): POST /api/llm/endpoints/ark-openai-official/test?force=true returned discovered_model_count=125, endpoint protocol=openai_compatible, status=verified, last_error_code=null, message='Generation verified via openai_compatible. Model: doubao-seed-2-0-pro-260215.'; Settings UI aria for OpenAI / ark.cn-beijing.volces shows Endpoint: ark-openai-official, Status: Connected, Routes: 125.",
     "进 Settings→API Keys,对已存 key 的卡点眼睛。",
     "切到别的 tab 再切回。"
    ]
@@ -346,6 +347,7 @@
     "前端测(2026-07-05):单 endpoint 格子测试和 Manual model probing 原子测试时,ProviderCard 只给有活动原子 probe 信号（route status=testing、后端 llm_probe_active active_model_ids 命中或 Manual 本地 endpoint→model in-flight atom 命中）的 endpoint 标签和 model chip 加 api-route-tag-border-flow;testingAction/testingEndpointId 单独存在时不驱动 endpoint 动画;同 endpoint 仅被 discovered/listed 的模型不转,覆盖 WaveSpeed OpenAI endpoint 不再全体转、Manual 单测模型时 endpoint 不因缺少卡片级 Test 状态而静止;active-probe-store.test.ts 断言 updateActiveProbeEndpoint 只通知命中的 endpoint/model atom,重复 payload 不通知,其他 endpoint/model 不受影响;SettingsPage 不再把 active atom 写入 visibleDrafts。",
     "前端测(2026-07-05):SettingsPage.controller 的 full-card routine Test 队列不调用当前参数仍匹配 protocol_unsupported 的 endpoint,也不调用 endpoint_status=disabled 的 endpoint;只对 OpenAI/Anth 等 eligible endpoint 调 getProviderModels,且不弹 2/3 endpoints 这类 warning。",
     "ProviderCard.test.tsx asserts that a verified official route named by testingModelIdsByEndpoint renders data-variant=\"active\" and api-route-tag-border-flow, while sibling verified routes stay success and idle. SettingsPage.test.tsx asserts Ark Official expands into `ark-official`(ark_runtime) and `ark-openai-official`(openai_compatible), and stale local endpoint_ids cannot make Ark OpenAI-compatible reuse `ark-official`.",
+    "Backend/API tests assert Ark OpenAI-compatible keeps endpoint id `ark-openai-official`, uses wire backend `openai`, uses `/api/v3/models` and `/api/v3/chat/completions` without adding `/v1`, and filters official language candidates by Ark catalog identity rather than OpenAI model names.",
     "tag.test.tsx asserts Tag variant active uses border-transparent and does not include success/destructive border classes, so the animated border replaces the idle border."
    ],
    "layer2": [

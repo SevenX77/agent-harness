@@ -137,10 +137,10 @@ def test_human_message_for_error_code_covers_known_codes() -> None:
     assert "X" in msg_none and "could not resolve" in msg_none
 
 
-def test_get_role_test_results_discards_legacy_cjk_copilot_diagnostics(
+def test_get_role_test_results_returns_persisted_copilot_diagnostics_verbatim(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    legacy_message = "请求超时, 检查网络 / 代理"
+    persisted_message = "SDK returned an error: HTTP 401 unauthorized"
     monkeypatch.setattr(
         llm,
         "load_role_test_results",
@@ -148,7 +148,7 @@ def test_get_role_test_results_discards_legacy_cjk_copilot_diagnostics(
             "copilot_deepseek_v4_pro": {
                 "role_name": "copilot_deepseek_v4_pro",
                 "status": "failed",
-                "message": legacy_message,
+                "message": persisted_message,
                 "updated_at": "2026-07-05T00:00:00+00:00",
                 "result": {
                     "role_name": "copilot_deepseek_v4_pro",
@@ -161,7 +161,7 @@ def test_get_role_test_results_discards_legacy_cjk_copilot_diagnostics(
                                 {
                                     "route_id": "qiniu:deepseek-v4-pro",
                                     "status": "failed",
-                                    "message": legacy_message,
+                                    "message": persisted_message,
                                 }
                             ],
                         }
@@ -173,7 +173,7 @@ def test_get_role_test_results_discards_legacy_cjk_copilot_diagnostics(
                         "routes": {
                             "qiniu:deepseek-v4-pro": {
                                 "status": "failed",
-                                "message": legacy_message,
+                                "message": persisted_message,
                                 "retry_after_seconds": None,
                             }
                         },
@@ -186,11 +186,11 @@ def test_get_role_test_results_discards_legacy_cjk_copilot_diagnostics(
     response = asyncio.run(llm.get_role_test_results())
 
     persisted = response.results["copilot_deepseek_v4_pro"]
-    assert_english_diagnostic(persisted.message)
+    assert persisted.message == persisted_message
     sdk_route = persisted.result["sdk_evidence"]["routes"]["qiniu:deepseek-v4-pro"]
-    assert "Previous diagnostic was discarded" in assert_english_diagnostic(sdk_route["message"])
+    assert sdk_route["message"] == persisted_message
     provider_result = persisted.result["model_groups"][0]["provider_results"][0]
-    assert "Previous diagnostic was discarded" in assert_english_diagnostic(provider_result["message"])
+    assert provider_result["message"] == persisted_message
 
 
 def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(

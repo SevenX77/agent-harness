@@ -1777,7 +1777,7 @@ export function ProviderCard({
   const isOfficial = providerKind === "official"
   const baseUrlRows = baseUrlRowsForDraft(draft)
   const filledBaseUrlRows = baseUrlRows.filter((row) => row.value.trim().length > 0)
-  const endpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
+  const endpointDrafts = providerEndpointDraftsForAction(draft)
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"

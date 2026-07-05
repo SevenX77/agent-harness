@@ -2,13 +2,54 @@ import type { CredentialProviderState, CredentialsState, ProviderTestResult, Pro
 import type { AddProviderFormSubmission } from "../api-keys"
 import type { ProviderDraft } from "./types"
 
+type OfficialEndpointDefinition = {
+  id: string
+  provider_type: ProviderType
+  baseUrl: string
+}
+
+type OfficialProviderDefinition = {
+  code: string
+  label: string
+  baseUrl: string
+  endpoints: OfficialEndpointDefinition[]
+}
+
 const officialProviders = [
-  { code: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com" },
-  { code: "openai", label: "OpenAI", baseUrl: "https://api.openai.com" },
-  { code: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
-  { code: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
-  { code: "ark", label: "Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
-]
+  {
+    code: "anthropic",
+    label: "Anthropic",
+    baseUrl: "https://api.anthropic.com",
+    endpoints: [{ id: "anthropic-official", provider_type: "anthropic_compatible", baseUrl: "https://api.anthropic.com" }],
+  },
+  {
+    code: "openai",
+    label: "OpenAI",
+    baseUrl: "https://api.openai.com",
+    endpoints: [{ id: "openai-official", provider_type: "openai_compatible", baseUrl: "https://api.openai.com" }],
+  },
+  {
+    code: "gemini",
+    label: "Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com",
+    endpoints: [{ id: "gemini-official", provider_type: "google_genai", baseUrl: "https://generativelanguage.googleapis.com" }],
+  },
+  {
+    code: "deepseek",
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    endpoints: [{ id: "deepseek-official", provider_type: "openai_compatible", baseUrl: "https://api.deepseek.com" }],
+  },
+  {
+    code: "ark",
+    label: "Ark",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    endpoints: [
+      { id: "ark-official", provider_type: "ark_runtime", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+      { id: "ark-openai-official", provider_type: "openai_compatible", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+    ],
+  },
+] satisfies OfficialProviderDefinition[]
 const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
 export const thirdPartyProtocolCandidates: ProviderType[] = [
   "openai_compatible",
@@ -141,13 +182,15 @@ export function blankThirdPartyProviderDraft(id: string = `custom-${newProviderI
 
 export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
   return officialProviders.map((vendor) => {
-    const existing = drafts.find((draft) => isOfficialProviderDraft(draft, vendor.code))
-    if (existing) return withOfficialProviderDefaults(existing, vendor)
+    const existing = drafts.filter((draft) => isOfficialProviderDraft(draft, vendor.code))
+    const primaryEndpoint = officialEndpointDefinitions(vendor)[0]
+    const primary = existing.find((draft) => draft.id === primaryEndpoint.id) ?? existing[0]
+    if (primary) return withOfficialProviderDefaults(primary, vendor)
     return {
-      id: `${vendor.code}-official`,
+      id: primaryEndpoint.id,
       name: `${officialProviderDisplayName(vendor.label)} Official`,
-      provider_type: inferProviderType(vendor.code),
-      base_url: vendor.baseUrl,
+      provider_type: primaryEndpoint.provider_type,
+      base_url: primaryEndpoint.baseUrl,
       api_key: "",
       isTesting: false,
       testingAction: null,
@@ -164,15 +207,22 @@ export function providerDraftForAction(drafts: ProviderDraft[], providerId: stri
 }
 
 export function providerEndpointDraftsForAction(draft: ProviderDraft): ProviderDraft[] {
+  const officialVendor = officialProviderForDraft(draft)
+  if (officialVendor) {
+    return officialEndpointDefinitions(officialVendor).map((endpoint) => ({
+      ...draft,
+      id: officialEndpointIdForDraft(draft, endpoint),
+      provider_type: endpoint.provider_type,
+      base_url: endpoint.baseUrl,
+      base_urls: undefined,
+    }))
+  }
   const rows = draft.base_urls?.length
     ? draft.base_urls.filter((row) => row.value.trim().length > 0)
     : [{ id: draft.id, value: draft.base_url, provider_type: draft.provider_type, endpoint_ids: { [draft.provider_type]: draft.id } }]
   const effectiveRows = rows.length > 0 ? rows : [{ id: draft.id, value: draft.base_url }]
   return effectiveRows.flatMap((row) => {
-    const protocols = inferProviderKind(draft) === "official"
-      ? [row.provider_type ?? draft.provider_type]
-      : thirdPartyProtocolCandidates
-    return protocols.map((protocol) => ({
+    return thirdPartyProtocolCandidates.map((protocol) => ({
       ...draft,
       id: endpointIdForBaseUrlProtocol(draft.id, row, protocol),
       provider_type: protocol,
@@ -287,12 +337,36 @@ function withOfficialProviderDefaults(
   draft: ProviderDraft,
   vendor: (typeof officialProviders)[number],
 ): ProviderDraft {
+  const primaryEndpoint = officialEndpointDefinitions(vendor)[0]
   return {
     ...draft,
-    provider_type: inferProviderType(vendor.code),
-    base_url: vendor.baseUrl,
+    provider_type: primaryEndpoint.provider_type,
+    base_url: primaryEndpoint.baseUrl,
     base_urls: undefined,
   }
+}
+
+function officialEndpointDefinitions(
+  vendor: (typeof officialProviders)[number],
+): OfficialEndpointDefinition[] {
+  return vendor.endpoints
+}
+
+function officialEndpointIdForDraft(
+  draft: ProviderDraft,
+  endpoint: OfficialEndpointDefinition,
+): string {
+  for (const row of draft.base_urls ?? []) {
+    const endpointId = row.endpoint_ids?.[endpoint.provider_type]
+    if (endpointId) return endpointId
+  }
+  if (
+    draft.provider_type === endpoint.provider_type &&
+    normalizeBaseUrlGroupKey(draft.base_url) === normalizeBaseUrlGroupKey(endpoint.baseUrl)
+  ) {
+    return draft.id
+  }
+  return endpoint.id
 }
 
 function officialProviderDisplayName(label: string): string {

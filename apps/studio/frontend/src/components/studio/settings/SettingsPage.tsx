@@ -16,6 +16,7 @@ import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController,
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
+const emptyActiveProbeModelIdsByEndpoint: Record<string, string[]> = Object.freeze({})
 
 function useAuthenticatedApiReady(): boolean {
   const [ready, setReady] = useState(() => authenticatedApiReady())
@@ -163,6 +164,23 @@ export function reconcileDraftsWithCredentials(
     && !nextIdentityKeys.has(providerDraftIdentityKey(draft))
   ))
   return [...reconciled, ...dirtyDraftsNotInCredentials]
+}
+
+export function activeProbeModelIdsForDraft(
+  draft: ProviderDraft,
+  activeProbeModelIdsByEndpoint: Record<string, string[]>,
+): Record<string, string[]> {
+  const endpointIds = new Set(providerEndpointDraftsForAction(draft).map((endpointDraft) => endpointDraft.id))
+  const entries = Object.entries(activeProbeModelIdsByEndpoint).filter(([endpointId, modelIds]) => (
+    endpointIds.has(endpointId) && modelIds.length > 0
+  ))
+  if (entries.length === 0) return emptyActiveProbeModelIdsByEndpoint
+  return Object.fromEntries(entries)
+}
+
+function modelIdListsEqual(left: string[] | undefined, right: string[]): boolean {
+  if (!left || left.length !== right.length) return false
+  return left.every((value, index) => value === right[index])
 }
 
 function modelInfoEvidenceRank(model: ModelInfo): number {
@@ -467,15 +485,16 @@ export function useSettingsPageController(): SettingsPageController {
     const displayDrafts = pendingAddProviderDraft ? [...drafts, pendingAddProviderDraft] : drafts
     return displayDrafts.map((draft) => {
       const testingAction = providerTestingActions[draft.id] ?? null
+      const testingModelIdsByEndpoint = activeProbeModelIdsForDraft(draft, activeProbeModelIdsByEndpoint)
       return testingAction
         ? {
           ...draft,
           isTesting: true,
           testingAction,
           testingEndpointId: providerTestingEndpointIds[draft.id] ?? null,
-          testingModelIdsByEndpoint: activeProbeModelIdsByEndpoint,
+          testingModelIdsByEndpoint,
         }
-        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null, testingModelIdsByEndpoint: activeProbeModelIdsByEndpoint }
+        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null, testingModelIdsByEndpoint }
     })
   }, [activeProbeModelIdsByEndpoint, drafts, pendingAddProviderDraft, providerTestingActions, providerTestingEndpointIds])
 
@@ -669,6 +688,12 @@ export function useSettingsPageController(): SettingsPageController {
 
   const handleLlmProbeActiveEvent = useCallback((event: { endpointId: string; activeModelIds: string[] }) => {
     setActiveProbeModelIdsByEndpoint((current) => {
+      if (event.activeModelIds.length > 0 && modelIdListsEqual(current[event.endpointId], event.activeModelIds)) {
+        return current
+      }
+      if (event.activeModelIds.length === 0 && !current[event.endpointId]) {
+        return current
+      }
       const next = { ...current }
       if (event.activeModelIds.length > 0) {
         next[event.endpointId] = event.activeModelIds
@@ -1028,7 +1053,7 @@ export function useSettingsPageController(): SettingsPageController {
     const draft = providerDraftForAction(draftsRef.current, providerId)
     if (!draft) return
     const isOfficial = inferProviderKind(draft) === "official"
-    const allEndpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
+    const allEndpointDrafts = providerEndpointDraftsForAction(draft)
     // Item 2: clicking one endpoint tag runs THIS SAME card-Test flow, only
     // scoped to the one clicked (URL, protocol) endpoint, so the get-models
     // probe and its per-step toast are identical to pressing Test, not a
@@ -1116,7 +1141,7 @@ export function useSettingsPageController(): SettingsPageController {
         toast.info("Test result ignored because provider configuration changed.", { id: toastId })
         return
       }
-      const latestEndpointDrafts = isOfficial ? [latestDraft] : providerEndpointDraftsForAction(latestDraft)
+      const latestEndpointDrafts = providerEndpointDraftsForAction(latestDraft)
       const staleResult = endpointResults.some(({ endpointDraft }) => {
         const latestEndpointDraft = latestEndpointDrafts.find((item) => item.id === endpointDraft.id)
         return !latestEndpointDraft || !providerEndpointIdentityMatches(latestEndpointDraft, endpointDraft)

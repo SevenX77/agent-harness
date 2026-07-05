@@ -157,6 +157,9 @@ from app.services.runtime_activity import record_runtime_activity
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
 
+DISABLED_ENDPOINT_PROBE_MESSAGE = "Endpoint is disabled; skipping live provider probe."
+_ENDPOINT_DISABLED_ERROR_CODE = "endpoint_disabled"
+
 
 async def _autoshare_after_probe_best_effort() -> None:
     """Best-effort community auto-share to the gate after a successful probe.
@@ -838,7 +841,20 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
         endpoint.protocol,
         probe_backend,
     )
-    result = await _gateway_test_provider_endpoint(endpoint)
+    result = await _probe_endpoint_model_list_atom(endpoint, allow_disabled=force)
+    if result.error_code == _ENDPOINT_DISABLED_ERROR_CODE:
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="endpoint_test_skipped",
+            message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+            changes={"endpoint_id": endpoint_id, "reason": _ENDPOINT_DISABLED_ERROR_CODE},
+        )
+        return EndpointTestResponse(
+            registry=_registry_response(credentials, _load_roles_or_empty()),
+            tested_endpoint_id=endpoint_id,
+            discovered_model_count=0,
+            skipped=True,
+        )
     if result.status == "ok":
         status = "unverified_manual"
         model_list_reached = True
@@ -945,6 +961,7 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             latest_endpoint,
             discovered_model_ids,
             raw_capabilities_by_model,
+            allow_disabled=force,
             on_active_change=publish_active_model_ids,
         )
         probe_attempts_log = verification.probe_attempts
@@ -955,6 +972,9 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             # W2-D.4: structured reason so the UI can warn "no model to test,
             # add a model id and run a single-model test" without parsing text.
             last_error_code = "no_model_available"
+        elif verification.status == "skipped_disabled":
+            status = "disabled"
+            last_error_code = latest_endpoint.last_error_code
         else:
             status = verification.status
         message = verification.message
@@ -1158,6 +1178,18 @@ async def test_endpoint_models(
 
     requested_model_ids = _requested_model_ids(request.model_ids)
     results: list[EndpointModelTestResult] = []
+    if _endpoint_probe_is_disabled(endpoint):
+        return EndpointModelTestResponse(
+            registry=_registry_response(credentials, _load_roles_or_empty()),
+            results=[
+                EndpointModelTestResult(
+                    model_id=model_id,
+                    status="error",
+                    message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+                )
+                for model_id in requested_model_ids
+            ],
+        )
     if not endpoint.api_key or not endpoint.api_key.get_secret_value():
         results = [
             EndpointModelTestResult(
@@ -1175,7 +1207,7 @@ async def test_endpoint_models(
     if endpoint.provider_kind == "official":
         official_results: list[OfficialModelProfileProbeResult] = []
         for model_id in requested_model_ids:
-            official_results.append(await _probe_official_model_profile_result(endpoint, model_id))
+            official_results.append(await _probe_official_model_profile_atom(endpoint, model_id))
         successful_model_ids = [result.model_id for result in official_results if result.profiles]
         failed_profile_results = [result for result in official_results if not result.profiles]
         route_ids_by_model: dict[str, str] = {}
@@ -1279,7 +1311,7 @@ async def test_endpoint_models(
     for model_id in requested_model_ids:
         probe_results.append(
             _model_probe_result_from_route_probe(
-                await _gateway_test_provider_model(endpoint, model_id)
+                await _probe_model_generation_atom(endpoint, model_id)
             )
         )
     successful_model_ids = [result.model_id for result in probe_results if result.status == "ok"]
@@ -1473,6 +1505,20 @@ async def probe_route_multimodal(route_id: str) -> ProviderRoute:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {route.endpoint_id}")
+    if _endpoint_probe_is_disabled(endpoint):
+        updated = route.model_copy(
+            update={
+                "status": "disabled",
+                "metadata": {
+                    **route.metadata,
+                    "reason_code": _ENDPOINT_DISABLED_ERROR_CODE,
+                    "last_probe_message": DISABLED_ENDPOINT_PROBE_MESSAGE,
+                },
+            }
+        )
+        credentials.provider_routes[route_id] = updated
+        save_credentials(credentials)
+        return updated
     candidate = _multimodal_probe_candidate(endpoint, route.provider_model_id)
     if candidate is None:
         raise HTTPException(
@@ -3109,8 +3155,22 @@ async def _force_probe_route(
         save_credentials(credentials)
         return updated
     result = _model_probe_result_from_route_probe(
-        await _gateway_test_provider_route(endpoint, route)
+        await _probe_route_generation_atom(endpoint, route)
     )
+    if _model_probe_is_disabled_endpoint_skip(result):
+        updated = route.model_copy(
+            update={
+                "status": "disabled",
+                "metadata": {
+                    **route.metadata,
+                    "reason_code": _ENDPOINT_DISABLED_ERROR_CODE,
+                    "last_probe_message": DISABLED_ENDPOINT_PROBE_MESSAGE,
+                },
+            }
+        )
+        credentials.provider_routes[route.route_id] = updated
+        save_credentials(credentials)
+        return updated
     if result.status == "ok":
         updated = route.model_copy(
             update={
@@ -3241,8 +3301,16 @@ async def _ensure_official_role_test_verified_profile(
 ) -> tuple[ProviderRoute, OfficialModelProfileProbeResult | None]:
     if endpoint.provider_kind != "official" or _route_has_ready_verified_profile(route):
         return route, None
+    if _endpoint_probe_is_disabled(endpoint):
+        return (
+            route,
+            OfficialModelProfileProbeResult(
+                model_id=route.provider_model_id,
+                last_probe_message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+            ),
+        )
 
-    profile_result = await _probe_official_model_profile_result(
+    profile_result = await _probe_official_model_profile_atom(
         endpoint,
         route.provider_model_id,
     )
@@ -3607,6 +3675,8 @@ async def _probe_role_route(
     runtime_settings: RuntimeSettings,
     resolved_settings: dict[str, Any],
 ) -> ModelProbeResult:
+    if _endpoint_probe_is_disabled(endpoint):
+        return _disabled_model_probe_result(route.provider_model_id)
     try:
         selected_profile = select_verified_profile(route, runtime_settings)
     except ProfileSelectionError as exc:
@@ -3642,7 +3712,7 @@ async def _probe_role_route(
         )
 
     return _model_probe_result_from_route_probe(
-        await _gateway_test_provider_route(
+        await _probe_route_generation_atom(
             endpoint,
             route,
             runtime_settings=resolved_settings or None,
@@ -3679,7 +3749,7 @@ async def _probe_official_model_profiles(
     model_id: str,
 ) -> list[VerifiedProfile]:
     """Probe one official-provider model and return verified LLM invocation profiles."""
-    return (await _probe_official_model_profile_result(endpoint, model_id)).profiles
+    return (await _probe_official_model_profile_atom(endpoint, model_id)).profiles
 
 
 async def _probe_official_model_profile_result(
@@ -4433,6 +4503,14 @@ async def _probe_official_profile_batch(
     *,
     on_active_change: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
 ) -> list[OfficialModelProfileProbeResult]:
+    if _endpoint_probe_is_disabled(endpoint):
+        return [
+            OfficialModelProfileProbeResult(
+                model_id=model_id,
+                last_probe_message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+            )
+            for model_id in model_ids
+        ]
     semaphore = asyncio.Semaphore(OFFICIAL_PROVIDER_TEST_CONCURRENCY)
     active_model_ids: set[str] = set()
     active_lock = asyncio.Lock()
@@ -4452,7 +4530,7 @@ async def _probe_official_profile_batch(
         async with semaphore:
             await mark_active(model_id, True)
             try:
-                return await _probe_official_model_profile_result(endpoint, model_id)
+                return await _probe_official_model_profile_atom(endpoint, model_id)
             finally:
                 await mark_active(model_id, False)
 
@@ -4735,7 +4813,7 @@ class EndpointGenerationVerification:
     # "no_model": get-models reached the provider (key+URL connectivity proven)
     # but there is no real model to verify generation — reachable-but-untested,
     # NOT a failure (W2-D / R-E1). The user adds a model id and single-model-tests.
-    status: Literal["verified", "failed", "no_model"]
+    status: Literal["verified", "failed", "no_model", "skipped_disabled"]
     verified_model_id: str | None
     message: str
     probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -4846,6 +4924,7 @@ async def _verify_endpoint_by_generation_probe(
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
     *,
+    allow_disabled: bool = False,
     on_active_change: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
 ) -> EndpointGenerationVerification:
     """Run batch inference probing to verify an endpoint can actually generate.
@@ -4864,6 +4943,13 @@ async def _verify_endpoint_by_generation_probe(
     after each generation probe; the UI uses that snapshot for model animation.
     """
     probe_attempts: list[dict[str, Any]] = []
+    if _endpoint_probe_is_disabled(endpoint, allow_disabled=allow_disabled):
+        return EndpointGenerationVerification(
+            status="skipped_disabled",
+            verified_model_id=None,
+            message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+            probe_attempts=probe_attempts,
+        )
     probe_model_ids = _endpoint_generation_probe_model_ids(
         endpoint,
         discovered_model_ids,
@@ -4887,9 +4973,10 @@ async def _verify_endpoint_by_generation_probe(
         if on_active_change is not None:
             await on_active_change((model_id,))
         try:
-            probe = await _gateway_test_provider_route(
+            probe = await _probe_model_generation_atom(
                 endpoint,
-                _gateway_probe_route(endpoint, model_id),
+                model_id,
+                allow_disabled=allow_disabled,
             )
         finally:
             if on_active_change is not None:
@@ -4946,7 +5033,7 @@ async def _probe_third_party_models_for_endpoint(
     results: list[ModelProbeResult] = []
     for model_id in probe_model_ids:
         result = _model_probe_result_from_route_probe(
-            await _gateway_test_provider_model(endpoint, model_id)
+            await _probe_model_generation_atom(endpoint, model_id)
         )
         results.append(result)
         if result.status in _STRUCTURAL_PROBE_STATUSES:
@@ -4980,7 +5067,7 @@ async def _list_model_capabilities_for_endpoint(
     an empty mapping when the list call is unreachable — callers then fall back to
     the generation-probe default per model.
     """
-    result = await _gateway_test_provider_endpoint(endpoint)
+    result = await _probe_endpoint_model_list_atom(endpoint)
     if result.status != "ok":
         logger.info(
             "list-models capabilities unavailable endpoint=%s status=%s",
@@ -5862,6 +5949,109 @@ def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
 
 def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
     return _gateway_endpoint_probe_base_url(endpoint)
+
+
+def _endpoint_probe_is_disabled(
+    endpoint: ProviderEndpoint,
+    *,
+    allow_disabled: bool = False,
+) -> bool:
+    return endpoint.status == "disabled" and not allow_disabled
+
+
+def _disabled_endpoint_probe_result(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=_endpoint_probe_backend(endpoint),
+        base_url=_endpoint_probe_base_url(endpoint),
+        status="error",
+        message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+        error_code=_ENDPOINT_DISABLED_ERROR_CODE,
+    )
+
+
+def _disabled_route_probe_result(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+) -> RouteProbeResult:
+    return RouteProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        route_id=route.route_id,
+        provider_kind=endpoint.provider_kind,
+        backend=_endpoint_probe_backend(endpoint),
+        base_url=_endpoint_probe_base_url(endpoint),
+        model_id=route.provider_model_id,
+        status="error",
+        message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+    )
+
+
+def _disabled_model_probe_result(model_id: str) -> ModelProbeResult:
+    return ModelProbeResult(
+        model_id=model_id,
+        status="error",
+        message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+    )
+
+
+def _model_probe_is_disabled_endpoint_skip(result: ModelProbeResult) -> bool:
+    return result.status == "error" and result.message == DISABLED_ENDPOINT_PROBE_MESSAGE
+
+
+async def _probe_endpoint_model_list_atom(
+    endpoint: ProviderEndpoint,
+    *,
+    allow_disabled: bool = False,
+) -> EndpointProbeResult:
+    if _endpoint_probe_is_disabled(endpoint, allow_disabled=allow_disabled):
+        return _disabled_endpoint_probe_result(endpoint)
+    return await _gateway_test_provider_endpoint(endpoint)
+
+
+async def _probe_route_generation_atom(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    *,
+    allow_disabled: bool = False,
+    runtime_settings: dict[str, Any] | None = None,
+) -> RouteProbeResult:
+    if _endpoint_probe_is_disabled(endpoint, allow_disabled=allow_disabled):
+        return _disabled_route_probe_result(endpoint, route)
+    return await _gateway_test_provider_route(
+        endpoint,
+        route,
+        runtime_settings=runtime_settings,
+    )
+
+
+async def _probe_model_generation_atom(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    *,
+    allow_disabled: bool = False,
+    runtime_settings: dict[str, Any] | None = None,
+) -> RouteProbeResult:
+    return await _probe_route_generation_atom(
+        endpoint,
+        _gateway_probe_route(endpoint, model_id),
+        allow_disabled=allow_disabled,
+        runtime_settings=runtime_settings,
+    )
+
+
+async def _probe_official_model_profile_atom(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    *,
+    allow_disabled: bool = False,
+) -> OfficialModelProfileProbeResult:
+    if _endpoint_probe_is_disabled(endpoint, allow_disabled=allow_disabled):
+        return OfficialModelProfileProbeResult(
+            model_id=model_id,
+            last_probe_message=DISABLED_ENDPOINT_PROBE_MESSAGE,
+        )
+    return await _probe_official_model_profile_result(endpoint, model_id)
 
 
 async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:

@@ -75,8 +75,8 @@
         "第三方不在多个 protocol 里『猜一个』；同一 URL 的 OpenAI / Anthropic / Gemini 候选 endpoint 各自打自己的推理端点，各自留下结果。",
         "带对应的 auth header：native anthropic 用 x-api-key；anthropic 兼容的第三方用 Authorization: Bearer。",
         "一个 URL 可能同时兼容多个 protocol,所以多个候选 endpoint 可同时是 verified；失败候选也以 failed 留在 registry/前端。",
-        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」；endpoint test 与单 model test 复用这条模型 probe 写回路径。",
-        "原子 probe 的 UI 进度也以 (endpoint, model) 为身份：endpoint 标签可显示 endpoint 正在测，但 model chip 只有该 route 自身有活动原子信号才显示动画（route status=testing 或后端 llm_probe_active active_model_ids 命中），不能把 endpoint membership 当作 model 正在测。"
+        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」；endpoint test、单 model test、role route test、official profile test 复用同一组原子 probe 包装，先判 endpoint.status=disabled 再决定是否真打 provider。",
+        "原子 probe 的 UI 进度也以 (endpoint, model) 为身份：endpoint 标签和 model chip 都只能从该 route 的活动原子信号派生动画（route status=testing 或后端 llm_probe_active active_model_ids 命中），不能把 testingEndpointId 或 endpoint membership 当作正在测。disabled/protocol_unsupported skip 不发 active atom，所以不显示转动动画。"
       ],
       "do": [
         "协议判定、对应 auth header、route 真探。"
@@ -628,6 +628,13 @@
       "d12": "D6.5",
       "status": "ok",
       "note": "已落地(三条子能力全做 + TDD 测试)。gateway 侧通过 Probe Knowledge Catalog 提供 known_verified_capabilities / known_model_ids_for_endpoint / probe_priority(无 IO);backend 侧在 _upsert_discovered_routes 回填 Catalog 已证实能力(子①)、_endpoint_generation_probe_model_ids 用 Catalog 已知模型补清单(子②)并按 probe_priority 跳过已 verified / 把已 failed 排后(子③免盲测)。注:子③有候选就绝不返回空(避免历史全验过的 endpoint 复测误判失败)。测试见 gateway test_probe_catalog.py / legacy test_import_draft_derivation.py + backend test_llm_registry_api.py。",
+      "ref": "d6"
+    },
+    {
+      "item": "原子 probe disabled 门与 active 进度事件",
+      "d12": "D6.1 / D6.5",
+      "status": "ok",
+      "note": "已落地。Studio backend 的 _probe_endpoint_model_list_atom / _probe_model_generation_atom / _probe_route_generation_atom / _probe_official_model_profile_atom 统一判断 endpoint.status=disabled;普通 Test、manual model test、role route test、official profile test 遇 disabled 只返回 skip/error 结果,不打 provider、不发 llm_probe_active。endpoint ?force=true 仅作为显式恢复复测入口。测试见 test_endpoint_test_skips_disabled_endpoint_without_provider_probe、test_endpoint_generation_probe_skips_disabled_endpoint_atom、test_endpoint_scoped_manual_model_test_skips_disabled_endpoint、test_official_manual_model_test_skips_disabled_endpoint、test_route_probe_force_true_skips_disabled_endpoint。",
       "ref": "d6"
     },
     {

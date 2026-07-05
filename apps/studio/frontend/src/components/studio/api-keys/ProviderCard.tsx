@@ -1784,10 +1784,11 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
-  // The controller updates testingEndpointId for the exact endpoint currently
-  // being probed, including full-card Test as it advances through the matrix.
+  // Endpoint animation follows the backend active atom event. `testingEndpointId`
+  // remains request context for logs/toasts, but does not by itself animate a
+  // disabled/skipped endpoint.
   const isEndpointBeingTested = (endpointId: string) =>
-    isGettingModels && draft.testingEndpointId === endpointId
+    isGettingModels && (draft.testingModelIdsByEndpoint?.[endpointId]?.length ?? 0) > 0
   // A single endpoint probe may list many models, but only the atomically
   // probed model route should pulse. The active atom signal comes from either
   // route status=testing or the backend llm_probe_active event; historical

@@ -568,9 +568,8 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
 
   // PM 2026-07-03: clicking ONE endpoint tag (item 2's onProbeEndpoint) only
   // probes that one (URL, protocol) cell backend-side (verified via runtime
-  // log correlation), but every sibling tag under the same provider spun the
-  // "testing" animation too — because isGettingModels was a provider-wide
-  // flag with no per-endpoint scoping. draft.testingEndpointId narrows it.
+  // log correlation), so only the endpoint id carried by draft.testingEndpointId
+  // may receive the endpoint animation.
   it("only spins the ONE endpoint tag being probed, not every sibling under the provider", () => {
     const nextDraft = makeDraft({
       base_url: "https://openrouter.ai/api",
@@ -623,7 +622,7 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).toContain('data-endpoint-status="error"')
   })
 
-  it("spins every endpoint tag when the whole card is tested (no onlyEndpointId scoping)", () => {
+  it("does not spin every endpoint tag without an active endpoint scope", () => {
     const nextDraft = makeDraft({
       base_url: "https://openrouter.ai/api",
       isTesting: true,
@@ -663,7 +662,7 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     // Third-party endpoint drafts always synthesize all 3 protocol candidates
     // per base-url row (provider-utils.ts providerEndpointDraftsForAction),
     // regardless of which endpoint_ids were explicitly mapped.
-    expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(3)
+    expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(0)
   })
 
   it("shows protocol-normalized runtime URL separately from the input URL", () => {
@@ -948,6 +947,8 @@ describe("ProviderCard provider capabilities", () => {
           base_url: "https://api.qnaigc.com/v1",
           isTesting: true,
           testingAction: "models",
+          testingEndpointId: "qiniu",
+          testingModelIdsByEndpoint: { qiniu: ["deepseek-v3"] },
         })}
         persisted={makePersisted({
           id: "qiniu",
@@ -956,6 +957,8 @@ describe("ProviderCard provider capabilities", () => {
           available_models: [
             {
               id: "deepseek-v3",
+              endpoint_id: "qiniu",
+              route_id: "qiniu:deepseek-v3",
               status: "unverified_manual",
               last_probe_message: null,
               capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
@@ -970,17 +973,17 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    // R-G2: while the endpoint test runs, a third-party model chip pulses even though
-    // its own status is still "unverified_manual" — the whole endpoint is being verified.
+    // R-G2: while the endpoint test runs, only the model id reported by the
+    // backend active-atom event pulses, even if its persisted route is not yet
+    // verified.
     const tag = routeTagHtml(html, "deepseek-v3")
     expect(tag).toContain("api-route-tag-border-flow")
   })
 
   // PM 2026-07-03 (follow-up to #347): a single endpoint-tag click scopes the
   // spinner to that ONE endpoint tag, but the model chips below still all
-  // pulsed. A model chip must pulse only when it has a route on the endpoint
-  // actually being probed (draft.testingEndpointId) — models that live only on
-  // a sibling endpoint stay still.
+  // pulsed. A model chip must pulse only when the active atom signal names that
+  // exact model under the probed endpoint; sibling endpoints stay still.
   it("pulses only model chips on the endpoint being single-probed, not siblings", () => {
     const nextDraft = makeDraft({
       id: "wavespeed",
@@ -989,6 +992,7 @@ describe("ProviderCard provider capabilities", () => {
       isTesting: true,
       testingAction: "models",
       testingEndpointId: "wavespeed-openai",
+      testingModelIdsByEndpoint: { "wavespeed-openai": ["anthropic/claude-opus-4.7"] },
       base_urls: [
         {
           id: "url-wavespeed",
@@ -1013,7 +1017,14 @@ describe("ProviderCard provider capabilities", () => {
             base_url: "https://llm.wavespeed.ai/v1",
             provider_type: "openai_compatible",
             available_models: [
-              { id: "model-on-openai", endpoint_id: "wavespeed-openai", route_id: "wavespeed-openai:model-on-openai", status: "unverified_manual", ui_state: "untested" },
+              {
+                id: "model-on-openai",
+                endpoint_id: "wavespeed-openai",
+                route_id: "wavespeed-openai:model-on-openai",
+                status: "testing",
+                ui_state: "cooling_down",
+                capabilities: { probe_attempts: [{ status: "ok", message: "tested" }] },
+              },
             ],
           }),
           "wavespeed-anthropic": makePersisted({
@@ -1038,7 +1049,91 @@ describe("ProviderCard provider capabilities", () => {
     expect(routeTagHtml(html, "model-on-anthropic")).not.toContain("api-route-tag-border-flow")
   })
 
-  it("pulses every model chip when the whole card is tested (no single-endpoint scope)", () => {
+  it("does not pulse every model with historical probe attempts on a single endpoint test", () => {
+    const nextDraft = makeDraft({
+      id: "wavespeed",
+      name: "WaveSpeed",
+      base_url: "https://llm.wavespeed.ai/v1",
+      isTesting: true,
+      testingAction: "models",
+      testingEndpointId: "wavespeed-openai",
+      testingModelIdsByEndpoint: { "wavespeed-openai": ["anthropic/claude-opus-4.7"] },
+      base_urls: [
+        {
+          id: "url-wavespeed",
+          value: "https://llm.wavespeed.ai/v1",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "wavespeed-openai",
+            anthropic_compatible: "wavespeed-anthropic",
+            google_genai: "wavespeed-google",
+          },
+        },
+      ],
+    })
+    const html = renderCardHtml({
+      nextDraft,
+      persisted: null,
+      persistedEndpoints: {
+        "wavespeed-openai": makePersisted({
+          id: "wavespeed-openai",
+          name: "WaveSpeed",
+          base_url: "https://llm.wavespeed.ai/v1",
+          provider_type: "openai_compatible",
+          available_models: [
+            {
+              id: "anthropic/claude-haiku-4.5",
+              endpoint_id: "wavespeed-openai",
+              route_id: "wavespeed-openai:anthropic/claude-haiku-4.5",
+              status: "verified",
+              ui_state: "ready",
+              capabilities: { probe_attempts: [{ status: "ok", message: "tested" }] },
+            },
+            {
+              id: "anthropic/claude-opus-4.7",
+              endpoint_id: "wavespeed-openai",
+              route_id: "wavespeed-openai:anthropic/claude-opus-4.7",
+              status: "verified",
+              ui_state: "ready",
+              capabilities: { probe_attempts: [{ status: "error", message: "tested" }] },
+            },
+            {
+              id: "google/gemini-3.5-flash",
+              endpoint_id: "wavespeed-openai",
+              route_id: "wavespeed-openai:google/gemini-3.5-flash",
+              status: "verified",
+              ui_state: "ready",
+              capabilities: { probe_attempts: [{ status: "ok", message: "tested" }] },
+            },
+            {
+              id: "openai/gpt-5.5",
+              endpoint_id: "wavespeed-openai",
+              route_id: "wavespeed-openai:openai/gpt-5.5",
+              status: "verified",
+              ui_state: "ready",
+              capabilities: { probe_attempts: [{ status: "ok", message: "tested" }] },
+            },
+            {
+              id: "z-ai/glm-5.2",
+              endpoint_id: "wavespeed-openai",
+              route_id: "wavespeed-openai:z-ai/glm-5.2",
+              status: "verified",
+              ui_state: "ready",
+              capabilities: { probe_attempts: [{ status: "ok", message: "tested" }] },
+            },
+          ],
+        }),
+      },
+    })
+
+    expect(routeTagHtml(html, "anthropic/claude-haiku-4.5")).not.toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "anthropic/claude-opus-4.7")).toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "google/gemini-3.5-flash")).not.toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "openai/gpt-5.5")).not.toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "z-ai/glm-5.2")).not.toContain("api-route-tag-border-flow")
+  })
+
+  it("does not pulse every model chip when the whole card has no active model atoms", () => {
     const nextDraft = makeDraft({
       id: "wavespeed",
       name: "WaveSpeed",
@@ -1091,8 +1186,8 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    expect(routeTagHtml(html, "model-on-openai")).toContain("api-route-tag-border-flow")
-    expect(routeTagHtml(html, "model-on-anthropic")).toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "model-on-openai")).not.toContain("api-route-tag-border-flow")
+    expect(routeTagHtml(html, "model-on-anthropic")).not.toContain("api-route-tag-border-flow")
   })
 
   it("renders generated multimodal route candidates with a default border and shadcn-only tooltip", () => {

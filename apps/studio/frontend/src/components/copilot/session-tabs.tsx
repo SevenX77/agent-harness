@@ -1,7 +1,13 @@
 import React, { useEffect, useRef } from 'react'
-import { Plus, X } from 'lucide-react'
+import { FolderOpen, MessageSquarePlus, Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -71,14 +77,15 @@ interface SessionTabsProps {
   activeSessionId: string | null
   onSwitch: (id: string) => void
   onNew: () => void
+  onRestore: () => void
   onClose: (id: string) => void
 }
 
 /**
- * Compact, horizontally-scrollable session tab bar with a trailing "+" to start
- * a new chat (R17). Renders nothing until there is more than one session OR a
- * non-empty conversation — a single empty chat needs no switcher. Reuses the
- * shadcn Button; no bespoke UI.
+ * Compact, horizontally-scrollable session tab bar with a trailing "+" actions
+ * menu for New chat / Restore chat (R17). Renders nothing until there is more
+ * than one session OR a non-empty conversation — a single empty chat needs no
+ * switcher. Reuses shadcn primitives; no bespoke UI.
  */
 export function SessionTabs(props: SessionTabsProps) {
   const stripRef = useRef<HTMLDivElement | null>(null)
@@ -111,6 +118,7 @@ export function SessionTabsView({
   activeSessionId,
   onSwitch,
   onNew,
+  onRestore,
   onClose,
   stripRef,
 }: SessionTabsProps & { stripRef?: React.Ref<HTMLDivElement> }) {
@@ -170,21 +178,29 @@ export function SessionTabsView({
           className="data-horizontal:h-1.5 data-horizontal:border-t-0"
         />
       </ScrollArea>
-      <Tooltip>
-        <TooltipTrigger asChild>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <Button
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-label="New chat"
-            onClick={onNew}
+            aria-label="Chat actions"
             className="shrink-0 text-muted-foreground"
           >
             <Plus />
           </Button>
-        </TooltipTrigger>
-        <TooltipContent>New chat</TooltipContent>
-      </Tooltip>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onSelect={() => onNew()}>
+            <MessageSquarePlus />
+            New chat
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onRestore()}>
+            <FolderOpen />
+            Restore chat
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { toast } from 'sonner'
 import { interruptCopilot, wsUrl } from '../api/client'
 import { nextBackoffMs } from '../lib/websocket'
-import { copilotStore } from '../store/copilotStore'
+import { selectFile } from '../lib/tauri'
+import { copilotSessionDirectoryPath, copilotStore } from '../store/copilotStore'
 import type {
   CopilotEvent,
   CopilotMessage,
@@ -204,9 +206,9 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     if (workspaceRoot) {
       // Multi-session context: load (or create) sessions for this workspace/skill pair.
       copilotStore.setContext(workspaceRoot, skillId)
-      // Cold-start recovery (F2): pull any disk-persisted sessions first, and
-      // only mint a fresh session if none survive on disk — otherwise a restart
-      // would silently discard prior conversations.
+      // Cold-start recovery (F2): restore only the last persisted window state
+      // (`_window.json`). Historical transcript files stay on disk but are not
+      // auto-opened unless the user chooses Restore chat.
       let cancelled = false
       void copilotStore.hydrate(workspaceRoot, skillId).finally(() => {
         if (cancelled) return
@@ -319,6 +321,23 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     }
   }, [skillId])
 
+  const restoreSession = useCallback(async () => {
+    if (!skillId || !workspaceRoot) {
+      toast.error('No skill workspace available')
+      return
+    }
+    const selectedPath = await selectFile(copilotSessionDirectoryPath(workspaceRoot, skillId))
+    if (!selectedPath) {
+      return
+    }
+    const restored = await copilotStore.restoreSessionFromFile(selectedPath)
+    if (!restored) {
+      toast.error('Copilot session could not be restored', {
+        description: copilotStore.getSnapshot().persistenceError ?? undefined,
+      })
+    }
+  }, [skillId, workspaceRoot])
+
   return {
     messages: snapshot.messages,
     connectionStatus,
@@ -332,6 +351,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     activeSessionId: snapshot.activeSessionId,
     sessions: snapshot.sessions,
     newSession: () => copilotStore.newSession(),
+    restoreSession,
     switchSession: (id: string) => copilotStore.switchSession(id),
     closeSession: (id: string) => { void copilotStore.closeSession(id) },
   }

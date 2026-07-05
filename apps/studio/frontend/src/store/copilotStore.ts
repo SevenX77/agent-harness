@@ -1,13 +1,12 @@
 import type { CopilotMessage } from '../types/copilot'
 import {
   writeWorkspaceFile,
-  deleteWorkspacePath,
   ensureWorkspaceSupportDirs,
   readWorkspaceFile,
-  listWorkspaceDir,
 } from '../lib/tauri'
 
 type Listener = () => void
+
 const COPILOT_SESSION_ROOT = '.workspace/copilot/sessions'
 
 export interface CopilotSession {
@@ -15,8 +14,67 @@ export interface CopilotSession {
   messages: CopilotMessage[]
 }
 
-function sessionsDir(skillId: string): string {
+interface CopilotWindowState {
+  openSessionIds: string[]
+  activeSessionId: string | null
+}
+
+export function copilotSessionRelativeDir(skillId: string): string {
   return `${COPILOT_SESSION_ROOT}/${skillId}`
+}
+
+export function copilotSessionDirectoryPath(workspaceRoot: string, skillId: string): string {
+  const trimmedRoot = workspaceRoot.replace(/[\\/]+$/, '')
+  const separator = trimmedRoot.includes('\\') ? '\\' : '/'
+  return `${trimmedRoot}${separator}${copilotSessionRelativeDir(skillId).replace(/\//g, separator)}`
+}
+
+function normalizePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function comparePath(path: string, caseInsensitive: boolean): string {
+  return caseInsensitive ? path.toLowerCase() : path
+}
+
+function workspaceRelativePath(workspaceRoot: string, absolutePath: string): string | null {
+  const root = normalizePath(workspaceRoot)
+  const target = normalizePath(absolutePath)
+  const caseInsensitive = /^[a-zA-Z]:\//.test(root) || root.startsWith('//')
+  const cmpRoot = comparePath(root, caseInsensitive)
+  const cmpTarget = comparePath(target, caseInsensitive)
+  if (!cmpTarget.startsWith(`${cmpRoot}/`)) {
+    return null
+  }
+  return target.slice(root.length + 1)
+}
+
+export function selectedCopilotSessionRelativePath(
+  workspaceRoot: string,
+  skillId: string,
+  absolutePath: string,
+): string | null {
+  const relative = workspaceRelativePath(workspaceRoot, absolutePath)
+  if (!relative) {
+    return null
+  }
+  const dir = copilotSessionRelativeDir(skillId)
+  if (!relative.startsWith(`${dir}/`)) {
+    return null
+  }
+  const fileName = relative.slice(dir.length + 1)
+  if (!fileName.endsWith('.json') || fileName.startsWith('_') || fileName.includes('/')) {
+    return null
+  }
+  return relative
+}
+
+function sessionPath(skillId: string, sessionId: string): string {
+  return `${copilotSessionRelativeDir(skillId)}/${sessionId}.json`
+}
+
+function windowStatePath(skillId: string): string {
+  return `${copilotSessionRelativeDir(skillId)}/_window.json`
 }
 
 function isCopilotSession(value: unknown): value is CopilotSession {
@@ -25,70 +83,134 @@ function isCopilotSession(value: unknown): value is CopilotSession {
   return typeof candidate.id === 'string' && Array.isArray(candidate.messages)
 }
 
-/**
- * Load every persisted session for a workspace/skill from disk via the native
- * read commands. Non-Tauri runtimes return an empty list (listWorkspaceDir is a
- * no-op there), so this is inert in web/test builds. A single corrupt session
- * file is skipped with a warning rather than aborting the whole hydrate —
- * losing one history shouldn't hide the rest.
- */
-async function loadSessionsFromDir(workspaceId: string, dir: string): Promise<CopilotSession[]> {
-  const entries = await listWorkspaceDir(workspaceId, dir)
-  const sessions: CopilotSession[] = []
-  for (const entry of entries) {
-    // `_`-prefixed files are reserved markers (e.g. _active.json), not sessions.
-    if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name.startsWith('_')) {
-      continue
-    }
-    try {
-      const result = await readWorkspaceFile(workspaceId, `${dir}/${entry.name}`)
-      const parsed: unknown = JSON.parse(result.content)
-      if (isCopilotSession(parsed)) {
-        sessions.push(parsed)
-      } else {
-        console.warn(`copilot: skipping malformed session file ${entry.name}`)
-      }
-    } catch (err: unknown) {
-      console.warn(
-        `copilot: skipping unreadable session file ${entry.name}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
+function isCopilotWindowState(value: unknown): value is CopilotWindowState {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as { openSessionIds?: unknown; activeSessionId?: unknown }
+  return (
+    Array.isArray(candidate.openSessionIds) &&
+    candidate.openSessionIds.every((id) => typeof id === 'string') &&
+    (candidate.activeSessionId === null || typeof candidate.activeSessionId === 'string')
+  )
+}
+
+function normalizeWindowState(value: CopilotWindowState): CopilotWindowState {
+  const openSessionIds: string[] = []
+  const seen = new Set<string>()
+  for (const id of value.openSessionIds) {
+    if (id && !seen.has(id)) {
+      seen.add(id)
+      openSessionIds.push(id)
     }
   }
-  return sessions
+  const activeSessionId =
+    value.activeSessionId && seen.has(value.activeSessionId) ? value.activeSessionId : openSessionIds.at(-1) ?? null
+  return { openSessionIds, activeSessionId }
 }
 
-export async function loadCopilotSessionsFromDisk(
-  workspaceId: string,
-  skillId: string,
-): Promise<CopilotSession[]> {
-  return loadSessionsFromDir(workspaceId, sessionsDir(skillId))
-}
-
-function activeMarkerPath(skillId: string): string {
-  return `${sessionsDir(skillId)}/_active.json`
-}
-
-/**
- * Read the last-active session id persisted for a workspace/skill, so cold-start
- * restores the tab the user was actually viewing (F2/D8: "退出恢复 ... 上次活跃
- * tab"), not just the newest-created one. Returns null if no marker / unreadable.
- */
-export async function loadActiveCopilotSessionId(
-  workspaceId: string,
-  skillId: string,
-): Promise<string | null> {
+async function loadWindowState(workspaceId: string, skillId: string): Promise<CopilotWindowState | null> {
   try {
-    const result = await readWorkspaceFile(workspaceId, activeMarkerPath(skillId))
+    const result = await readWorkspaceFile(workspaceId, windowStatePath(skillId))
     const parsed: unknown = JSON.parse(result.content)
-    if (parsed && typeof parsed === 'object' && typeof (parsed as { activeSessionId?: unknown }).activeSessionId === 'string') {
-      return (parsed as { activeSessionId: string }).activeSessionId
+    if (isCopilotWindowState(parsed)) {
+      return normalizeWindowState(parsed)
     }
+    console.warn(`copilot: skipping malformed window state for ${skillId}`)
   } catch {
-    // No marker yet (first run) or unreadable; fall back to newest session.
+    // Missing state is the first-run shape. Historical transcript files are not
+    // window state and must not be auto-opened.
   }
   return null
+}
+
+async function loadSessionById(
+  workspaceId: string,
+  skillId: string,
+  sessionId: string,
+): Promise<CopilotSession | null> {
+  try {
+    const result = await readWorkspaceFile(workspaceId, sessionPath(skillId, sessionId))
+    const parsed: unknown = JSON.parse(result.content)
+    if (isCopilotSession(parsed) && parsed.id === sessionId) {
+      return parsed
+    }
+    console.warn(`copilot: skipping malformed session file ${sessionId}.json`)
+  } catch (err: unknown) {
+    console.warn(
+      `copilot: skipping unreadable session file ${sessionId}.json: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+  }
+  return null
+}
+
+function activeForSessions(sessions: CopilotSession[], requested: string | null): string | null {
+  if (requested && sessions.some((session) => session.id === requested)) {
+    return requested
+  }
+  return sessions.at(-1)?.id ?? null
+}
+
+function windowStateFromSessions(
+  sessions: CopilotSession[],
+  activeSessionId: string | null,
+): CopilotWindowState {
+  const openSessionIds = sessions.map((session) => session.id)
+  return {
+    openSessionIds,
+    activeSessionId: activeForSessions(sessions, activeSessionId),
+  }
+}
+
+async function writeWindowState(
+  workspaceId: string,
+  skillId: string,
+  sessions: CopilotSession[],
+  activeSessionId: string | null,
+): Promise<void> {
+  await ensureWorkspaceSupportDirs(workspaceId)
+  await writeWorkspaceFile(
+    workspaceId,
+    windowStatePath(skillId),
+    JSON.stringify(windowStateFromSessions(sessions, activeSessionId), null, 2),
+  )
+}
+
+function persistWindowState(
+  workspaceId: string,
+  skillId: string,
+  sessions: CopilotSession[],
+  activeSessionId: string | null,
+): void {
+  const sessionsSnapshot = sessions.map((session) => ({ ...session, messages: session.messages }))
+  void writeWindowState(workspaceId, skillId, sessionsSnapshot, activeSessionId).catch((err: unknown) => {
+    state.persistenceError = err instanceof Error ? err.message : String(err)
+    emit()
+  })
+}
+
+async function persistSessionToDisk(
+  workspaceId: string,
+  skillId: string,
+  session: CopilotSession,
+): Promise<void> {
+  try {
+    await ensureWorkspaceSupportDirs(workspaceId)
+    await writeWorkspaceFile(workspaceId, sessionPath(skillId, session.id), JSON.stringify(session, null, 2))
+    state.persistenceError = null
+  } catch (err: unknown) {
+    state.persistenceError = err instanceof Error ? err.message : String(err)
+  }
+  emit()
+}
+
+function selectedSessionId(relativePath: string): string {
+  const fileName = relativePath.slice(relativePath.lastIndexOf('/') + 1)
+  return fileName.slice(0, -'.json'.length)
+}
+
+function contextKey(workspaceId: string, skillId: string): string {
+  return `${workspaceId}::${skillId}`
 }
 
 export interface CopilotState {
@@ -109,11 +231,8 @@ const state: Omit<CopilotState, 'messages'> = {
 }
 
 const sessionsByContext: Record<string, CopilotSession[]> = {}
-
-// Contexts already hydrated from disk this process — so we hit the filesystem
-// at most once per workspace/skill, not on every context switch.
+const activeByContext: Record<string, string | null> = {}
 const hydratedKeys = new Set<string>()
-
 const listeners = new Set<Listener>()
 
 let cachedSnapshot: CopilotState | null = null
@@ -123,47 +242,18 @@ function emit() {
   listeners.forEach((listener) => listener())
 }
 
-/**
- * Persist the active session id (last-viewed tab) so cold start restores it.
- * Fire-and-forget — failure surfaces via persistenceError but never blocks the
- * UI tab switch. Inert in web/test (writeWorkspaceFile throws "Desktop only",
- * caught here). Captures ids at call time so a later context change can't retarget.
- */
-function persistActiveSession(workspaceId: string, skillId: string, activeSessionId: string): void {
-  void writeWorkspaceFile(
-    workspaceId,
-    activeMarkerPath(skillId),
-    JSON.stringify({ activeSessionId }, null, 2),
-  ).catch((err: unknown) => {
-    state.persistenceError = err instanceof Error ? err.message : String(err)
-  })
+function syncCurrentContext() {
+  if (state.workspaceId && state.skillId) {
+    const key = contextKey(state.workspaceId, state.skillId)
+    sessionsByContext[key] = state.sessions
+    activeByContext[key] = state.activeSessionId
+  }
 }
 
-/**
- * Flush a full session (id + messages) to its `<id>.json` file via the native fs
- * wrapper. This is the SINGLE on-disk write path for transcripts — shared by
- * appendMessage (a turn starts) and updateMessage (the streamed assistant text /
- * thinking / tool events land here). R16/D8: streamed assistant content was only
- * ever applied via updateMessage, which previously never persisted, so a restart
- * restored the user question with a BLANK assistant answer. Persisting on every
- * message mutation (incl. the terminal done event) makes hydrate() round-trip the
- * complete transcript. Snapshots the session by value so a later context switch
- * can't retarget the write. Inert in web/test (writeWorkspaceFile rejects there).
- */
-async function persistSessionToDisk(
-  workspaceId: string,
-  skillId: string,
-  session: CopilotSession,
-): Promise<void> {
-  try {
-    await ensureWorkspaceSupportDirs(workspaceId)
-    const relativePath = `${sessionsDir(skillId)}/${session.id}.json`
-    await writeWorkspaceFile(workspaceId, relativePath, JSON.stringify(session, null, 2))
-    state.persistenceError = null
-  } catch (err: unknown) {
-    state.persistenceError = err instanceof Error ? err.message : String(err)
-  }
-  emit()
+function replaceSessions(sessions: CopilotSession[], requestedActiveId: string | null) {
+  state.sessions = sessions
+  state.activeSessionId = activeForSessions(sessions, requestedActiveId)
+  syncCurrentContext()
 }
 
 export const copilotStore = {
@@ -185,99 +275,70 @@ export const copilotStore = {
     state.workspaceId = workspaceId
     state.skillId = skillId
     if (workspaceId && skillId) {
-      const key = `${workspaceId}::${skillId}`
+      const key = contextKey(workspaceId, skillId)
       state.sessions = sessionsByContext[key] || []
+      state.activeSessionId = activeForSessions(state.sessions, activeByContext[key] ?? null)
     } else {
       state.sessions = []
+      state.activeSessionId = null
     }
-    state.activeSessionId = state.sessions.length > 0
-      ? state.sessions[state.sessions.length - 1].id
-      : null
     state.persistenceError = null
     emit()
   },
-  /**
-   * Cold-start recovery (copilot F2): load any sessions persisted to disk for
-   * this workspace/skill and merge them into the in-memory store. In-memory
-   * sessions win on id collision (they carry the live, still-streaming
-   * messages); disk-only sessions are restored so a restart no longer wipes
-   * history. Idempotent per context — disk is read at most once per process.
-   */
   async hydrate(workspaceId: string, skillId: string): Promise<void> {
-    const key = `${workspaceId}::${skillId}`
+    const key = contextKey(workspaceId, skillId)
     if (hydratedKeys.has(key)) return
     hydratedKeys.add(key)
 
-    let diskSessions: CopilotSession[]
-    try {
-      diskSessions = await loadCopilotSessionsFromDisk(workspaceId, skillId)
-    } catch (err: unknown) {
-      // Transient read failure — allow a later retry and surface it.
-      hydratedKeys.delete(key)
-      state.persistenceError = err instanceof Error ? err.message : String(err)
-      emit()
+    const windowState = await loadWindowState(workspaceId, skillId)
+    if (!windowState) {
       return
     }
-    if (diskSessions.length === 0) return
 
-    const memSessions = sessionsByContext[key] ?? []
-    const byId = new Map<string, CopilotSession>()
-    for (const session of diskSessions) byId.set(session.id, session)
-    for (const session of memSessions) byId.set(session.id, session)
-    // Session ids embed Date.now(), so lexical sort ≈ chronological.
-    const merged = [...byId.values()].sort((a, b) =>
-      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
-    )
-    sessionsByContext[key] = merged
-
-    // Restore the LAST-VIEWED tab (F2/D8), not just the newest-created one.
-    const persistedActiveId = await loadActiveCopilotSessionId(workspaceId, skillId)
-
-    // Only touch live state if this is still the active context.
-    if (state.workspaceId === workspaceId && state.skillId === skillId) {
-      state.sessions = merged
-      const activeStillValid =
-        state.activeSessionId !== null &&
-        merged.some((session) => session.id === state.activeSessionId)
-      if (!activeStillValid) {
-        const restoredActive =
-          persistedActiveId && merged.some((session) => session.id === persistedActiveId)
-            ? persistedActiveId
-            : merged[merged.length - 1].id
-        state.activeSessionId = restoredActive
+    const memById = new Map((sessionsByContext[key] ?? []).map((session) => [session.id, session]))
+    const restoredSessions: CopilotSession[] = []
+    for (const sessionId of windowState.openSessionIds) {
+      const inMemory = memById.get(sessionId)
+      if (inMemory) {
+        restoredSessions.push(inMemory)
+        continue
       }
+      const fromDisk = await loadSessionById(workspaceId, skillId, sessionId)
+      if (fromDisk) {
+        restoredSessions.push(fromDisk)
+      }
+    }
+
+    const restoredActiveId = activeForSessions(restoredSessions, windowState.activeSessionId)
+    sessionsByContext[key] = restoredSessions
+    activeByContext[key] = restoredActiveId
+    if (state.workspaceId === workspaceId && state.skillId === skillId) {
+      replaceSessions(restoredSessions, restoredActiveId)
       emit()
     }
   },
   newSession(): string {
     const newId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    const newSession: CopilotSession = {
-      id: newId,
-      messages: [],
-    }
-    state.sessions = [...state.sessions, newSession]
-    state.activeSessionId = newId
+    const newSession: CopilotSession = { id: newId, messages: [] }
+    replaceSessions([...state.sessions, newSession], newId)
     if (state.workspaceId && state.skillId) {
-      const key = `${state.workspaceId}::${state.skillId}`
-      sessionsByContext[key] = state.sessions
-      persistActiveSession(state.workspaceId, state.skillId, newId)
+      void persistSessionToDisk(state.workspaceId, state.skillId, newSession)
+      persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
     }
     emit()
     return newId
   },
   switchSession(id: string) {
+    if (!state.sessions.some((session) => session.id === id)) {
+      return
+    }
     state.activeSessionId = id
+    syncCurrentContext()
     if (state.workspaceId && state.skillId) {
-      persistActiveSession(state.workspaceId, state.skillId, id)
+      persistWindowState(state.workspaceId, state.skillId, state.sessions, id)
     }
     emit()
   },
-  /**
-   * R3: close a chat tab. Removes the session, deletes its transcript file
-   * (D8 truth lives on disk — a closed chat must not resurrect on hydrate),
-   * and keeps a sane active session: previous neighbor when the active one is
-   * closed, or a fresh empty chat when the last one goes.
-   */
   async closeSession(id: string) {
     const index = state.sessions.findIndex((session) => session.id === id)
     if (index < 0) {
@@ -285,33 +346,56 @@ export const copilotStore = {
     }
     const closedActive = state.activeSessionId === id
     const nextSessions = state.sessions.filter((session) => session.id !== id)
-    state.sessions = nextSessions
-    if (closedActive) {
-      state.activeSessionId = nextSessions.length > 0
-        ? nextSessions[Math.min(Math.max(index - 1, 0), nextSessions.length - 1)].id
-        : null
-    }
-    if (state.workspaceId && state.skillId) {
-      const key = `${state.workspaceId}::${state.skillId}`
-      sessionsByContext[key] = nextSessions
-      if (closedActive && state.activeSessionId) {
-        persistActiveSession(state.workspaceId, state.skillId, state.activeSessionId)
-      }
-      try {
-        await deleteWorkspacePath(state.workspaceId, `${sessionsDir(state.skillId)}/${id}.json`)
-        state.persistenceError = null
-      } catch (err: unknown) {
-        // Web mode has no native fs (file never existed) — same swallow-to-state
-        // convention as persistSessionToDisk.
-        state.persistenceError = err instanceof Error ? err.message : String(err)
-      }
-    }
+    const nextActiveId = closedActive
+      ? nextSessions[Math.min(Math.max(index - 1, 0), nextSessions.length - 1)]?.id ?? null
+      : state.activeSessionId
+    replaceSessions(nextSessions, nextActiveId)
+
     if (state.sessions.length === 0) {
       emit()
       this.newSession()
       return
     }
+
+    if (state.workspaceId && state.skillId) {
+      persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
+    }
     emit()
+  },
+  async restoreSessionFromFile(absolutePath: string): Promise<boolean> {
+    if (!state.workspaceId || !state.skillId) {
+      state.persistenceError = 'No current skill is available for Copilot session restore.'
+      emit()
+      return false
+    }
+    const relativePath = selectedCopilotSessionRelativePath(state.workspaceId, state.skillId, absolutePath)
+    if (!relativePath) {
+      state.persistenceError = 'Choose a Copilot session file from the current skill session directory.'
+      emit()
+      return false
+    }
+
+    try {
+      const result = await readWorkspaceFile(state.workspaceId, relativePath)
+      const parsed: unknown = JSON.parse(result.content)
+      if (!isCopilotSession(parsed)) {
+        throw new Error('Selected file is not a Copilot session.')
+      }
+      const expectedId = selectedSessionId(relativePath)
+      if (parsed.id !== expectedId) {
+        throw new Error(`Selected filename does not match stored session id: ${expectedId} != ${parsed.id}`)
+      }
+      const alreadyOpen = state.sessions.some((session) => session.id === parsed.id)
+      replaceSessions(alreadyOpen ? state.sessions : [...state.sessions, parsed], parsed.id)
+      persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
+      state.persistenceError = null
+      emit()
+      return true
+    } catch (err: unknown) {
+      state.persistenceError = err instanceof Error ? err.message : String(err)
+      emit()
+      return false
+    }
   },
   async appendMessage(message: CopilotMessage) {
     state.sessions = state.sessions.map((s) => {
@@ -320,10 +404,7 @@ export const copilotStore = {
       }
       return s
     })
-    if (state.workspaceId && state.skillId) {
-      const key = `${state.workspaceId}::${state.skillId}`
-      sessionsByContext[key] = state.sessions
-    }
+    syncCurrentContext()
     emit()
 
     const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
@@ -331,13 +412,6 @@ export const copilotStore = {
       await persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
     }
   },
-  /**
-   * Apply an updater to one message in the active session. Streamed assistant
-   * deltas (text/thinking/tool) and the terminal done/error events all flow
-   * through here. R16/D8: when a turn completes (status no longer 'running' —
-   * i.e. the done/error event landed), flush the full assembled message to disk
-   * so hydrate() restores a complete transcript instead of a blank answer.
-   */
   updateMessage(messageId: string, updater: (message: CopilotMessage) => CopilotMessage) {
     state.sessions = state.sessions.map((s) => {
       if (s.id === state.activeSessionId) {
@@ -348,17 +422,11 @@ export const copilotStore = {
       }
       return s
     })
-    if (state.workspaceId && state.skillId) {
-      const key = `${state.workspaceId}::${state.skillId}`
-      sessionsByContext[key] = state.sessions
-    }
+    syncCurrentContext()
     emit()
 
     const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
     const updatedMessage = activeSession?.messages.find((m) => m.id === messageId)
-    // Persist once the turn settles (status leaves 'running'); skip mid-stream
-    // deltas to avoid a disk write per token. The empty-shell write from
-    // appendMessage already covers the early in-flight state on disk.
     if (
       state.workspaceId &&
       state.skillId &&
@@ -377,10 +445,7 @@ export const copilotStore = {
       }
       return s
     })
-    if (state.workspaceId && state.skillId) {
-      const key = `${state.workspaceId}::${state.skillId}`
-      sessionsByContext[key] = state.sessions
-    }
+    syncCurrentContext()
     emit()
   },
   reset(skillId: string | null) {
@@ -390,6 +455,9 @@ export const copilotStore = {
     state.persistenceError = null
     for (const key in sessionsByContext) {
       delete sessionsByContext[key]
+    }
+    for (const key in activeByContext) {
+      delete activeByContext[key]
     }
     hydratedKeys.clear()
     emit()

@@ -163,6 +163,29 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
   }
 }
 
+export async function selectFile(defaultDirectory?: string | null): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    toast.info('Desktop only')
+    return null
+  }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
+    return null
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const selected = await invoke<string | null>('select_file', {
+      defaultPath: defaultDirectory?.trim() || null,
+    })
+    return typeof selected === 'string' ? selected : null
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error)
+    toast.error('Failed to open file picker', { description })
+    return null
+  }
+}
+
 /**
  * Native OS picker for the io import. One "Import…" entry = a folder picker: a
  * folder already imports every file under it (PM 2026-07-03), so there is no

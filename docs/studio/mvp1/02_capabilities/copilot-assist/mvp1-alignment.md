@@ -25,12 +25,12 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **测试点**：全部 thinking+tool call 流式、折叠可展开看全部、不丢(回归现码丢 thinking)。
 - **归属**：region [[copilot]]。
 
-### F2 多 session（顶部 tab + new chat）
-- **机制**：copilot 面板顶部一条 tab 栏 = 并列多个 session tab + 一个 `+`(new chat)；切 tab=切 session；一 skill 多条 session 全持久化、退出恢复全部 + 上次活跃 tab。
-- **决策+动机**：一 skill **多条** session(抄 Cursor chat 历史)；session 必持久化(D8 MUST)，落盘归 [[native-fs]](Rust 按 skill 存多 session 文件，跨窗口)；写盘/读回失败→显式告警不静默。
+### F2 多 session（顶部 tab + new chat / restore chat）
+- **机制**：copilot 面板顶部一条 tab 栏 = 并列多个 session tab + 一个 `+` 动作菜单（`New chat` / `Restore chat`）；切 tab=切 session；一 skill 多条 session 文件全持久化为历史库，同时每个 skill 有 `_window.json` 窗口状态文件，记录 `openSessionIds` + `activeSessionId`。打开 skill 时只恢复 `_window.json` 里上次打开的 tab 集合与活跃 tab，不自动打开该 skill 下所有历史 session 文件。
+- **决策+动机**：一 skill **多条** session(抄 Cursor chat 历史)；session 必持久化(D8 MUST)，落盘归 [[native-fs]](Rust 按 skill 存多 session 文件，跨窗口)；关闭 tab 只从窗口状态移除，不删除 transcript 文件；`Restore chat` 通过原生文件选择器默认打开本 skill 的 session 目录并把选中的合法 `<sessionId>.json` 加回窗口。写盘/读回失败→显式告警不静默。
 - **原话**：「要,顶部tab多个session和一个+(new chat),抄cursor」/「后者多条session」/(D8)「copilot对话不能丢, 退出再进去要打开一摸一样的对话, session记录都要在, 和cursor一样, 这点必须要做到」
 - **status**：现纯内存(丢)= target。
-- **测试点**：开 N 条/切 tab/退出恢复全部 session + 活跃 tab(不串/不丢)；写盘失败显式告警。
+- **测试点**：开 N 条/切 tab/关闭部分 tab/退出恢复同一窗口 tab 集合 + 活跃 tab(不串/不丢、不复活未打开历史)；关闭 tab 不删除 transcript；`+ → Restore chat` 默认打开本 skill session 目录并恢复选中文件；写盘失败显式告警。
 - **归属**：region [[copilot]] · platform [[native-fs]]。
 
 ### F3 领域脑子（搭 skill + 业务领域 + 主动诊断）
@@ -105,7 +105,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 ## 6. 测试关键点
 1. ThinkingBlock: baseline 现状为 `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标为 thinking/tool call 全量流式，折叠但不省略。
 2. Copilot Write/Edit 自写例外: baseline 现状为 SDK `acceptEdits` 直写；目标为 允许直写 workspace，同时回显工具事件与 diff/summary，Bash 仍 human-in-the-loop。
-3. session: baseline 现状为 前端 store reset 后内存态丢失 ⚠️；目标为 一 skill 多 session 持久化，退出恢复全部与活跃 tab。
+3. session: baseline 现状为 前端 store reset 后内存态丢失 ⚠️；目标为 一 skill 多 session 历史持久化，并用 `_window.json` 恢复上次打开的 tab 集合与活跃 tab。
 4. SDK 测试: baseline 现状为 Settings probe 走 `AsyncAnthropic` ⚠️；目标为 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 
 ## 7. 涉及 region / platform
@@ -114,7 +114,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 ## 8. gaps / 报警
 - 🚨 ThinkingBlock: `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标 thinking/tool call 全量流式，折叠但不省略。
 - ⚠️ diff 审阅体验: SDK `acceptEdits` 直写为 MVP1 允许；剩余目标是稳定回显工具事件、diff/summary 与 Open Compare，不再把 Write/Edit 直写列为 D12 阻断。
-- 🚨 session: 前端 store reset 后内存态丢失 ⚠️；目标 一 skill 多 session 持久化，退出恢复全部与活跃 tab。
+- 🚨 session: 前端 store reset 后内存态丢失 ⚠️；目标 一 skill 多 session 历史持久化，并用 `_window.json` 恢复上次打开的 tab 集合与活跃 tab。
 - 🚨 SDK 测试: Settings probe 走 `AsyncAnthropic` ⚠️；目标 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 
 > 旧迁移附录暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#02-capabilities-copilot-assist)（迁移期安全网，代码实现验证后删）。

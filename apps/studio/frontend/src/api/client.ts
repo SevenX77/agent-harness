@@ -38,7 +38,7 @@ import type {
 import { isTauriRuntime } from '../config/runtime'
 import { deleteWorkspacePath, writeWorkspaceFile } from '../lib/tauri'
 import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
-import { BACKEND_UNAVAILABLE_MESSAGE, isBackendUnavailableError } from '../utils/errors'
+import { BackendUnavailableError, isBackendUnavailableError } from '../utils/errors'
 
 // API base URL is set explicitly by the dev launcher (vite via .env.local) or by the
 // Tauri runtime gate (configureApiBaseURL after get_sidecar_config IPC resolves).
@@ -126,7 +126,7 @@ api.interceptors.response.use(
   (response) => response,
   (error: unknown) => Promise.reject(
     isBackendUnavailableError(error)
-      ? new Error(BACKEND_UNAVAILABLE_MESSAGE)
+      ? new BackendUnavailableError(error)
       : error,
   ),
 )

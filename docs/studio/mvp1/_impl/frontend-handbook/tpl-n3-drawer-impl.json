@@ -18,7 +18,7 @@
    "n": 8,
    "cap": "compile-drawer",
    "design_ref": "atom-8",
-   "current": "现状:符合。Workspace.tsx 在 compileDrawerOpen && currentCompileErrors.length>0 时渲染 CompileErrorDrawer.tsx(画布作用域底部 drawer):编译失败(422)时 compileSkillById 置 compileDrawerOpen=true 自动弹出,逐条列 file:line - field - message(formatCompileErrorLine),顶部『Copy all errors』把全部错误拼成可读文本写剪贴板。基于 Radix Dialog 但 modal=false + 无 Portal + absolute inset-x-0 bottom-0,只盖画布、不遮挡左右侧栏。",
+   "current": "现状:符合。Workspace.tsx 在 compileDrawerOpen && currentCompileErrors.length>0 时渲染 CompileErrorDrawer.tsx(画布作用域底部 drawer):编译失败(422)时 compileSkillById 置 compileDrawerOpen=true 自动弹出,逐条列 file:line - field - message(formatCompileErrorLine),并支持 CompileError.details 作为逐条缩进诊断行；Predict/Run 的 BackendUnavailableError 会通过 details 展示 Request、API base URL、Frontend origin、Axios code、Original error。顶部『Copy all errors』把全部错误及 details 拼成可读文本写剪贴板。基于 Radix Dialog 但 modal=false + 无 Portal + absolute inset-x-0 bottom-0,只盖画布、不遮挡左右侧栏。",
    "gap": "符合设计(能力模块 COMPILE_LINT-1 已落地),无需改。",
    "fe_status": "符合",
    "be_status": "已实现",
@@ -96,7 +96,8 @@
    "layer1": [
     "RED:当前是 CompileErrorPanel 浮层(无复制、自动浮现)→ 断言『点 Compile 弹 drawer』『有复制按钮』失败。",
     "GREEN:点 Compile 有错 → 断言 drawer 打开、列出 compileErrors 的 file:line-field-message。",
-    "断言复制按钮把全部错误拼文本写入剪贴板(mock clipboard)。",
+    "Predict/Run no-response 错误 → 断言 drawer 在主错误行下列出 Request、API base URL、Axios code、Original error 等 details。",
+    "断言复制按钮把全部错误及 details 拼文本写入剪贴板(mock clipboard)。",
     "断言旧 CompileErrorPanel 不再渲染(组件已删)。"
    ],
    "layer2": [

@@ -8,8 +8,8 @@
    "n": 22,
    "cap": "macro-contract-form",
    "design_ref": "n2-atom-22",
-   "current": "现状:已实现且符合。GRAPH.md 头部经 MacroContractForm(结构化表单组件)编辑:name/schema_version/llm_role/description 受控字段 + phases 可增删列表,按 FROZEN 不提供 type 入口;由画布『Macro contract』按钮在 Sheet 里打开 MacroContractDrawer,头部与 phases 各自保留型写回 GRAPH.md。",
-   "gap": "符合设计,无需改。",
+   "current": "现状:已实现且符合。GRAPH.md 头部经 MacroContractForm(结构化表单组件)编辑:name/schema_version/llm_role/description 受控字段 + phases 可增删列表,按 FROZEN 不提供 type 入口;由画布『Macro contract』按钮在 Sheet 里打开 MacroContractDrawer,头部与 phases 各自保留型写回 GRAPH.md。空白画布 Properties 同时提供轻量 graph 属性表单(name/description/llm_role),字段变更后 300ms debounce 自动写 GRAPH.md,保存状态经 SaveStatusBadge 显示,成功后更新本地 saved markdown baseline,无手动 Save 按钮。",
+   "gap": "符合设计,无需改。2026-07-05:空白画布 Properties 已从手动 Save 改为 GRAPH.md autosave,保留 phases/io/未知键/body。",
    "fe_status": "符合",
    "be_dep": "已就绪可接(后端不需改)。头部改动随 POST /graph/serialize 保留型写回(只换 phases 块、保留其它字节)。后端实施手册 D8.1=ok。"
   },
@@ -49,16 +49,18 @@
    ],
    "shots": [
     "头部表单:name/schema_version/llm_role/description 字段 + phases 可增删列表,无 type 字段",
-    "改 name 保存后 GRAPH.md 头部更新、io/正文保留"
+    "空白画布 Properties 改 name 后自动保存 GRAPH.md,io/phases/正文保留"
    ],
    "fe_status": "符合",
    "layer1": [
     "RED:当前无头部结构化表单(只能裸编辑 GRAPH.md)→ 断言『头部有结构化表单』失败。",
     "GREEN:断言头部表单渲染 name/schema_version/llm_role/description + phases 列表,无 type 入口。",
-    "断言改字段保存走 serialize 保留型写回(io/description/正文保留)。"
+    "断言 Macro contract 改字段保存走 serialize 保留型写回(io/description/正文保留)。",
+    "RED→GREEN:PropertiesPanel.autosave.test.tsx 断言空白画布 Properties 改 #graph-name 后 300ms 内调用 onPhaseFileSave({path:'GRAPH.md'}),写入新 name 且保留 body,不渲染手动 Save 按钮。"
    ],
    "layer2": [
-    "真跑:在头部表单改 name + 增删一个 phase,看 GRAPH.md 头部更新、其它内容不破坏。"
+    "真跑:在头部表单改 name + 增删一个 phase,看 GRAPH.md 头部更新、其它内容不破坏。",
+    "真跑:在空白画布 Properties 改 name/description/llm_role,等待自动保存,diff GRAPH.md 确认只目标 frontmatter 字段变、io/phases/body 不破坏。"
    ]
   },
   {

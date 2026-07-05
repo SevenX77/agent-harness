@@ -230,7 +230,8 @@ describe('PropertiesPanel', () => {
     )
 
     expect(html).toContain('Frontmatter error')
-    expect(html).toContain('disabled=""')
+    expect(html).toContain('Open file')
+    expect(html).not.toContain('>Save<')
   })
 
   it('does not render selected-node subagents as read-only metadata', () => {

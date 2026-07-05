@@ -8,6 +8,7 @@ import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-e
 import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
 import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { clearActiveProbeEndpoints, updateActiveProbeEndpoint } from "../api-keys/active-probe-store"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerDraftIdentityKey, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -176,11 +177,6 @@ export function activeProbeModelIdsForDraft(
   ))
   if (entries.length === 0) return emptyActiveProbeModelIdsByEndpoint
   return Object.fromEntries(entries)
-}
-
-function modelIdListsEqual(left: string[] | undefined, right: string[]): boolean {
-  if (!left || left.length !== right.length) return false
-  return left.every((value, index) => value === right[index])
 }
 
 function modelInfoEvidenceRank(model: ModelInfo): number {
@@ -455,7 +451,6 @@ export function useSettingsPageController(): SettingsPageController {
   // card Test updates this per endpoint as the loop advances, so progress never
   // falls back to "everything under the provider is spinning".
   const [providerTestingEndpointIds, setProviderTestingEndpointIds] = useState<Record<string, string | null>>({})
-  const [activeProbeModelIdsByEndpoint, setActiveProbeModelIdsByEndpoint] = useState<Record<string, string[]>>({})
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
   const [rolesError, setRolesError] = useState<string | null>(null)
@@ -485,18 +480,16 @@ export function useSettingsPageController(): SettingsPageController {
     const displayDrafts = pendingAddProviderDraft ? [...drafts, pendingAddProviderDraft] : drafts
     return displayDrafts.map((draft) => {
       const testingAction = providerTestingActions[draft.id] ?? null
-      const testingModelIdsByEndpoint = activeProbeModelIdsForDraft(draft, activeProbeModelIdsByEndpoint)
       return testingAction
         ? {
           ...draft,
           isTesting: true,
           testingAction,
           testingEndpointId: providerTestingEndpointIds[draft.id] ?? null,
-          testingModelIdsByEndpoint,
         }
-        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null, testingModelIdsByEndpoint }
+        : { ...draft, isTesting: false, testingAction: null, testingEndpointId: null }
     })
-  }, [activeProbeModelIdsByEndpoint, drafts, pendingAddProviderDraft, providerTestingActions, providerTestingEndpointIds])
+  }, [drafts, pendingAddProviderDraft, providerTestingActions, providerTestingEndpointIds])
 
   useEffect(() => {
     return () => {
@@ -687,21 +680,7 @@ export function useSettingsPageController(): SettingsPageController {
   }, [refetchRolesFromEvent])
 
   const handleLlmProbeActiveEvent = useCallback((event: { endpointId: string; activeModelIds: string[] }) => {
-    setActiveProbeModelIdsByEndpoint((current) => {
-      if (event.activeModelIds.length > 0 && modelIdListsEqual(current[event.endpointId], event.activeModelIds)) {
-        return current
-      }
-      if (event.activeModelIds.length === 0 && !current[event.endpointId]) {
-        return current
-      }
-      const next = { ...current }
-      if (event.activeModelIds.length > 0) {
-        next[event.endpointId] = event.activeModelIds
-      } else {
-        delete next[event.endpointId]
-      }
-      return next
-    })
+    updateActiveProbeEndpoint(event.endpointId, event.activeModelIds)
   }, [])
 
   const handleEventResync = useCallback(() => {
@@ -904,11 +883,7 @@ export function useSettingsPageController(): SettingsPageController {
     if (!testingAction) {
       const owner = providerDraftForAction(draftsRef.current, providerId)
       const endpointIds = owner ? providerEndpointDraftsForAction(owner).map((endpointDraft) => endpointDraft.id) : [providerId]
-      setActiveProbeModelIdsByEndpoint((current) => {
-        const next = { ...current }
-        for (const endpointId of endpointIds) delete next[endpointId]
-        return next
-      })
+      clearActiveProbeEndpoints(endpointIds)
     }
     setProviderTestingActions((current) => {
       if (!testingAction) {

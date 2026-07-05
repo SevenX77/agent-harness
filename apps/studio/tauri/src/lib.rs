@@ -366,7 +366,11 @@ const STUDIO_AH_MANAGED_FILES: &[StudioAhManagedFile] = &[
 ///   remote-control dialog, irrelevant to a local terminal attach.)
 /// - The trailing prompt auto-submits as the first turn → the status report.
 fn claude_master_cmd() -> String {
-    format!("IS_SANDBOX=1 claude --dangerously-skip-permissions '{CLAUDE_MASTER_REPORT_PROMPT}'")
+    let prompt = sh_single_quote_str(CLAUDE_MASTER_REPORT_PROMPT);
+    let script = format!(
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
+    );
+    format!("bash -c {}", sh_single_quote_str(&script))
 }
 
 fn sha256_hex(value: &str) -> String {
@@ -596,9 +600,26 @@ fn wsl_payload_script(wsl_workspace: &str, wsl_config: &str) -> String {
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 WS={workspace}
 CFG={config}
+export SYSTEMD_LOG_LEVEL=err
+export STUDIO_AH_HOST_HOME="$HOME"
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found in WSL."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec bash -i
+fi
+ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_major="${{ah_version%%.*}}"
+ah_rest="${{ah_version#*.}}"
+ah_minor="${{ah_rest%%.*}}"
+ah_ok=0
+if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -ge 3 ] 2>/dev/null; then
+  ah_ok=1
+fi
+if [ "$ah_ok" -ne 1 ]; then
+  printf 'ah %s is installed; Studio requires ah >= 1.3.0 for window_size = "follow".\n' "${{ah_version:-unknown}}"
+  printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
 if command -v python3 >/dev/null 2>&1; then
@@ -641,9 +662,26 @@ fn unix_claude_code_launcher_script(workspace_root: &Path, config_path: &Path) -
     format!(
         r#"#!/bin/sh
 set -u
+export SYSTEMD_LOG_LEVEL=err
+export STUDIO_AH_HOST_HOME="$HOME"
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found on PATH."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec "${{SHELL:-/bin/sh}}"
+fi
+ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_major="${{ah_version%%.*}}"
+ah_rest="${{ah_version#*.}}"
+ah_minor="${{ah_rest%%.*}}"
+ah_ok=0
+if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -ge 3 ] 2>/dev/null; then
+  ah_ok=1
+fi
+if [ "$ah_ok" -ne 1 ]; then
+  printf 'ah %s is installed; Studio requires ah >= 1.3.0 for window_size = "follow".\n' "${{ah_version:-unknown}}"
+  printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
 if command -v python3 >/dev/null 2>&1; then
@@ -1251,7 +1289,12 @@ mod tests {
         );
         // IS_SANDBOX (root escape hatch) + skip-permissions + the auto-report
         // prompt; NOT --continue (aborts on a fresh workspace) or /remote-control.
-        assert!(config.contains("cmd = \"IS_SANDBOX=1 claude --dangerously-skip-permissions '"));
+        assert!(config.contains("cmd = \"bash -c "));
+        assert!(config.contains("STUDIO_AH_HOST_HOME"));
+        assert!(config.contains("export IS_SANDBOX=1"));
+        assert!(config.contains("ln -sfn"));
+        assert!(config.contains("$HOME/.local/bin/claude"));
+        assert!(config.contains("--dangerously-skip-permissions"));
         assert!(config.contains(CLAUDE_MASTER_REPORT_PROMPT));
         assert!(!config.contains("--continue"));
         assert!(!config.contains("/remote-control"));
@@ -1318,6 +1361,20 @@ mod tests {
 
         assert!(!config.contains("additional_ro_binds"));
         assert!(!config.contains("BindReadOnlyPaths"));
+    }
+
+    #[test]
+    fn launchers_reject_ah_before_window_size_follow_support() {
+        let windows_payload = wsl_payload_script("/mnt/d/skill", "/mnt/c/tmp/ah.toml");
+        assert!(windows_payload.contains("ah_version="));
+        assert!(windows_payload.contains("requires ah >= 1.3.0"));
+        assert!(windows_payload.contains("window_size = \"follow\""));
+
+        let unix_payload =
+            unix_claude_code_launcher_script(Path::new("/tmp/skill"), Path::new("/tmp/ah.toml"));
+        assert!(unix_payload.contains("ah_version="));
+        assert!(unix_payload.contains("requires ah >= 1.3.0"));
+        assert!(unix_payload.contains("window_size = \"follow\""));
     }
 
     #[test]

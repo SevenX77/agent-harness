@@ -270,10 +270,24 @@ Write-Ok "tmux + curl + python3 present"
 Write-Part "PART B: Studio's Claude Code provider layer (ah + claude + auth)"
 
 Write-Step "B1 ah + claude CLI"
-$ahVer = Invoke-InDistro "command -v ah >/dev/null 2>&1 && ah version || echo MISSING" -AllowFail
-if (($ahVer -join "") -match "MISSING") {
+$minAhVersion = [Version]"1.3.0"
+$ahVer = Invoke-InDistro "command -v ah >/dev/null 2>&1 && ah --version | awk '{print `$2}' || echo MISSING" -AllowFail
+$ahVerText = (($ahVer -join "")).Trim()
+$installAh = $false
+if ($ahVerText -match "MISSING" -or [string]::IsNullOrWhiteSpace($ahVerText)) {
+  $installAh = $true
+} else {
+  try {
+    $installAh = ([Version]$ahVerText) -lt $minAhVersion
+  } catch {
+    $installAh = $true
+  }
+}
+if ($installAh) {
   Invoke-InDistro "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/SevenX77/ah/releases/latest/download/ah-installer.sh | sh"
-  Write-Ok "ah installed"
+  Invoke-InDistro "systemctl --user stop 'ah-*.service' 2>/dev/null || true; pkill -x ahd 2>/dev/null || true; find ~/.local/state/ah -name ahd.sock -type s -delete 2>/dev/null || true" -AllowFail | Out-Null
+  $ahVerAfter = Invoke-InDistro "ah --version | awk '{print `$2}'" -AllowFail
+  Write-Ok "ah installed/updated ($ahVerAfter)"
 } else {
   Write-Skip "ah present ($ahVer)"
 }

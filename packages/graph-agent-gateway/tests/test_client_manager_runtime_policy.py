@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from pydantic import SecretStr
 
 
@@ -358,6 +359,73 @@ def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
     ]
 
 
+def test_openai_runtime_settings_omit_unset_temperature() -> None:
+    from graph_agent_gateway import ordinary_chat
+
+    captured: list[dict[str, object]] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> dict[str, object]:
+            captured.append(dict(kwargs))
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+    class FakeClient:
+        chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    result = ordinary_chat._call_openai_compatible(
+        FakeClient(),  # type: ignore[arg-type]
+        "gpt-5",
+        [{"role": "user", "content": "hello"}],
+        333,
+        None,  # type: ignore[arg-type]
+    )
+
+    assert result["content"] == "ok"
+    assert "temperature" not in captured[0]
+
+
+def test_dispatch_keeps_openai_temperature_on_authored_two_point_scale(monkeypatch) -> None:
+    from graph_agent_gateway import client_manager, ordinary_chat
+    from graph_agent_gateway.registry.schema import RuntimePolicy
+
+    route = _route()
+    captured: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        client_manager.LLMClientManager,
+        "_get_openai_client",
+        classmethod(lambda cls, route, **kwargs: object()),
+    )
+
+    def fake_call_openai_compatible(*args: object, **kwargs: object) -> dict[str, object]:
+        captured.append({"args": args, "kwargs": kwargs})
+        return {
+            "content": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "stop",
+        }
+
+    monkeypatch.setattr(ordinary_chat, "_call_openai_compatible", fake_call_openai_compatible)
+
+    ordinary_chat.dispatch_ordinary_chat(
+        route,
+        [{"role": "user", "content": "hello"}],
+        max_tokens=256,
+        temperature=1.5,
+        runtime_policy=RuntimePolicy(token_escalation_rounds=0),
+    )
+
+    assert captured[0]["args"][4] == pytest.approx(1.5)
+
+
 def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
     from graph_agent_gateway import ordinary_chat
     from graph_agent_gateway.client_manager import LLMClientManager
@@ -418,6 +486,49 @@ def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
             "reasoning": {"effort": "medium"},
         }
     ]
+
+
+def test_dispatch_remaps_anthropic_temperature_to_provider_scale(monkeypatch) -> None:
+    from graph_agent_gateway import client_manager, ordinary_chat
+    from graph_agent_gateway.registry.schema import RuntimePolicy
+
+    route = _route().model_copy(
+        update={
+            "route_id": "anthropic:claude-sonnet-4-6",
+            "endpoint_id": "anthropic",
+            "protocol": "anthropic_compatible",
+            "base_url": "https://api.anthropic.example",
+            "provider_model_id": "claude-sonnet-4-6",
+            "canonical_id": "claude-sonnet-4-6",
+        }
+    )
+    captured: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        client_manager.LLMClientManager,
+        "_get_anthropic_client",
+        classmethod(lambda cls, route, **kwargs: object()),
+    )
+
+    def fake_call_anthropic_compatible(*args: object, **kwargs: object) -> dict[str, object]:
+        captured.append({"args": args, "kwargs": kwargs})
+        return {
+            "content": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "end_turn",
+        }
+
+    monkeypatch.setattr(ordinary_chat, "_call_anthropic_compatible", fake_call_anthropic_compatible)
+
+    ordinary_chat.dispatch_ordinary_chat(
+        route,
+        [{"role": "user", "content": "hello"}],
+        max_tokens=256,
+        temperature=1.5,
+        runtime_policy=RuntimePolicy(token_escalation_rounds=0),
+    )
+
+    assert captured[0]["args"][4] == pytest.approx(0.75)
 
 
 def test_anthropic_runtime_settings_map_to_messages_kwargs(monkeypatch) -> None:

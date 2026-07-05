@@ -62,6 +62,12 @@ import { sha256Hex } from "@/lib/hash"
 import { cn } from "@/lib/utils"
 import { errorMessage } from "@/utils/errors"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
+import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
+import {
+  formatTemperaturePercent,
+  TEMPERATURE_DEBOUNCE_MS,
+  TEMPERATURE_SCALE_HELP,
+} from "@/components/studio/llm-temperature"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import { formatThousands, stripThousands } from "../settings/llm-roles/RoleSettingsDialog"
 import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus } from "../settings/llm-roles/role-route-status"
@@ -2880,25 +2886,8 @@ function LlmNodeParamsField({
 }) {
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
   const { data: rolesData } = useSWR("llm/roles", getRoles, { shouldRetryOnError: false })
-
-  useEffect(() => {
-    if (!skillId || !nodeId) {
-      setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
-      return
-    }
-    let cancelled = false
-    void getNodeLlmParams(skillId)
-      .then((map) => {
-        if (cancelled) return
-        setDraft(nodeLlmParamsDraftFromApi(map.nodes[nodeId]))
-      })
-      .catch(() => {
-        if (!cancelled) setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [skillId, nodeId])
+  const latestDraftRef = useRef(draft)
+  latestDraftRef.current = draft
 
   const persist = useCallback(
     (next: NodeLlmParamsDraft) => {
@@ -2910,9 +2899,49 @@ function LlmNodeParamsField({
     [skillId, nodeId],
   )
 
+  const debouncedTemperaturePersist = useDebouncedCallback((temperature: string) => {
+    persist({
+      ...latestDraftRef.current,
+      temperature,
+    })
+  }, TEMPERATURE_DEBOUNCE_MS)
+
+  useEffect(() => {
+    debouncedTemperaturePersist.cancel()
+    if (!skillId || !nodeId) {
+      setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
+      return
+    }
+    let cancelled = false
+    void getNodeLlmParams(skillId)
+      .then((map) => {
+        if (cancelled) return
+        debouncedTemperaturePersist.cancel()
+        setDraft(nodeLlmParamsDraftFromApi(map.nodes[nodeId]))
+      })
+      .catch(() => {
+        if (!cancelled) setDraft(EMPTY_NODE_LLM_PARAMS_DRAFT)
+      })
+    return () => {
+      cancelled = true
+      debouncedTemperaturePersist.cancel()
+    }
+  }, [debouncedTemperaturePersist, skillId, nodeId])
+
   const update = (next: NodeLlmParamsDraft) => {
     setDraft(next)
     persist(next)
+  }
+
+  const updateTemperature = (temperature: string, flush = false) => {
+    setDraft((current) => ({
+      ...current,
+      temperature,
+    }))
+    debouncedTemperaturePersist.schedule(temperature)
+    if (flush) {
+      debouncedTemperaturePersist.flush()
+    }
   }
 
   const thinkingId = `node-thinking-${nodeId ?? "none"}`
@@ -2996,7 +3025,7 @@ function LlmNodeParamsField({
             <YamlNestedFieldLabel htmlFor={temperatureId}>
               temperature
               <HelpTooltip label="About temperature">
-                Sampling temperature (0&ndash;2) for this node. Drag to override the role default.
+                {TEMPERATURE_SCALE_HELP}
               </HelpTooltip>
             </YamlNestedFieldLabel>
             <div className="flex h-9 items-center gap-2">
@@ -3008,12 +3037,12 @@ function LlmNodeParamsField({
                 max={2}
                 step={0.1}
                 value={[draft.temperature === "" ? 1 : Number(draft.temperature)]}
-                onValueChange={(vals) => setDraft({ ...draft, temperature: String(vals[0]) })}
-                onValueCommit={(vals) => persist({ ...draft, temperature: String(vals[0]) })}
+                onValueChange={(vals) => updateTemperature(String(vals[0]))}
+                onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
                 className="flex-1"
               />
               <span className="w-9 shrink-0 text-right text-xs text-foreground">
-                {draft.temperature === "" ? "—" : draft.temperature}
+                {formatTemperaturePercent(draft.temperature)}
               </span>
             </div>
           </Field>

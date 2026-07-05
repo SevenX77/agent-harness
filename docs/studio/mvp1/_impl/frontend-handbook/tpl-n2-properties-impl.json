@@ -1,245 +1,263 @@
 {
- "id": "n2_properties_impl",
- "title": "Properties 节点属性 · 实施详情",
- "design_ref": "n2_properties_design",
- "intro": "本页是 Properties 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_properties_design(原子 #16–#21)。字段集对齐 engine skill-syntax §2.3/§2.4/§2.5;F1(类型据文件)/F2(白名单)/F4(子图 path 导入)出 phase-editing 能力文档。代码按名引用、不写行号。重要纠偏:白名单主体已重建(02_authoring.md atom 决策表 Properties 保存/白名单那两行标的 stale 结论已过时),唯 mode 派生的 fallback 兜底 + UI『Mode』标签是残留 F1 风险(主路径已文件派生,作者写 mode: 被引擎拒)。",
- "functions": [
-  {
-   "n": 16,
-   "cap": "node-type-derivation",
-   "design_ref": "n2-atom-16",
-   "current": "现状:符合(2026-06-20 闭合 F1 残留歧义)——节点类型派生(buildNodes 里给每个 phase 算 mode 的那一行)已严格走『文件存在性 → topology.mode → logic 默认』链:phaseModeFromFiles(检该 phase 目录下 SUBGRAPH/SKILL/LOGIC.md 哪个在、决定 subgraph/agent/logic 类型的函数)胜过 stale topology.mode;两者都缺时用 phaseKindFromTopologyMode(把 topology.mode 缺位时兜底为 logic 的函数,与 drilled-child 路径同源),绝不回退 manifest 投影的 phase.mode。原 build-nodes.ts 那行的 `?? phase.mode` 残留兜底已删。",
-   "gap": "符合,无需改。2026-06-20:删掉 build-nodes.ts 节点类型派生那行的 `?? phase.mode` 残留 fallback,链改为 phaseModeFromFiles ?? phaseKindFromTopologyMode(topology?.mode)——文件存在性 → topology.mode → logic 默认,manifest 投影的 phase.mode 不再参与类型判定,闭合 F1 歧义。纯前端。",
-   "fe_status": "符合",
-   "fe_resync": "2026-06-20 fe_resync:fe_status 从 偏差 改为 符合。依据:① 删 build-nodes.ts 节点类型派生行的 `?? phase.mode` 残留兜底,类型链现为『文件存在性 ?? phaseKindFromTopologyMode(topology?.mode)』(file → topology.mode → logic 默认,绝不回退 manifest 投影的 phase.mode),闭合 atom#16/F1 歧义;② 先红后绿:build-nodes.test.ts 新增『never falls back to the manifest-projected phase.mode for node kind (F1)』——用 legacy standalone-agent manifest(phasesFromManifest 把单 phase 投成 mode:'llm')+ 无 topology 行 + 无 phase 文件,断言类型为 logic/LOGIC.md;删兜底前该 test 红(收到 'llm',正是残留 fallback 泄漏 manifest 投影),删后绿。build-nodes.test.ts 共 23 tests 全绿,io-target.test.ts 3 tests 全绿,tsc 干净;无既有 test 依赖该 manifest 兜底(删除前其余 22 tests 即全绿)。",
-   "be_dep": "n/a(纯前端派生;引擎 graph_topology 已携带 mode/path/文件信息,前端据文件存在性定类型、topology.mode 仅 fallback)。"
-  },
-  {
-   "n": 17,
-   "cap": "readonly-mode-row",
-   "design_ref": "n2-atom-17",
-   "current": "现状:已实现且符合。Properties 只读区类型行已改为 label『Node type』+ hint『Determined by the phase file (SKILL/LOGIC/SUBGRAPH.md) — not editable』,值取派生标签;不再以可设的『Mode』呈现,符合 FROZEN『类型=文件名、作者不写 mode』。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "n/a(纯前端文案/结构)。"
-  },
-  {
-   "n": 18,
-   "cap": "agent-whitelist",
-   "design_ref": "n2-atom-18",
-   "current": "现状:已实现且符合(MVP 最小子集)。PhaseFrontmatterForm(PropertiesPanel.tsx)kind=agent 时渲染 llm_role(角色下拉 + use_graph_llm_role 开关,见 #22)、tools(Textarea)、subagents(SubagentsField),FROZEN 禁字段全不渲染。引擎 AgentNodeAST(manifest.py)的 agent 全集还含 subgraphs[](AgentRegistryItem,按 path)、references、examples/examples_inline、max_iterations——MVP Properties 先收敛到三字段、是最小子集。",
-   "gap": "符合(MVP 最小子集),不需改。注:不应表述成『完整对齐引擎语法』——引擎 agent 全集更大(subgraphs[]/references/examples/max_iterations)。若产品把 agent subgraphs[].path 纳入 N2 Properties MVP,需补该字段编辑形态;否则保持『最小子集』口径。",
-   "fe_status": "符合",
-   "be_dep": "n/a(纯前端表单;白名单字段对齐引擎 §2.5。保存契约见 #21)。"
-  },
-  {
-   "n": 19,
-   "cap": "logic-whitelist",
-   "design_ref": "n2-atom-19",
-   "current": "现状:已实现且符合(2026-06-20 补齐 io.outputs 提示)。kind=logic 时只渲染:actions(一行一 action、按执行顺序的 Textarea)、validator(Switch 开关,开启后置校验钩子,写回黑板前跑同级 validator.py)。不渲染 llm_role/tools/python_callable。io.outputs 的字段边界(action 回写字段须是 io.outputs.properties 子集)归 i/o 面板,Properties 不重复做;并在 logic 分支 actions/validator 之后多渲一条非阻塞 FieldDescription 提示『Output fields an action writes are bounded by io.outputs — edit those field boundaries in the I/O panel (toolbar tab 3)』,引用工具栏第 3 个 I/O tab,避免用户以为 logic 无 io 约束。",
-   "gap": "符合,无需改。2026-06-20:atom#19 要的『指向 i/o 面板的 io.outputs 边界提示』已落地——PropertiesPanel.tsx logic 分支加一条非阻塞 FieldDescription(additive,不引入可编辑 output 字段),先红后绿(PropertiesPanel.fields.test.tsx 新增 test『logic node surfaces a non-blocking io.outputs hint pointing to the I/O panel』断言含 io.outputs + I/O panel、不含 id=phase-outputs)。",
-   "fe_status": "符合",
-   "be_dep": "n/a(纯前端表单;字段对齐引擎 §2.3)。",
-   "fe_resync": "核验:io.outputs 提示已是 shipped 状态——PropertiesPanel.tsx logic 分支已渲非阻塞 FieldDescription 指向 I/O 面板(toolbar tab 3),PropertiesPanel.fields.test.tsx 断言之;prose 现已如实反映 shipped 状态;verified by green gates + post-audit(2026-06-20)"
-  },
-  {
-   "n": 20,
-   "cap": "subgraph-whitelist",
-   "design_ref": "n2-atom-20",
-   "current": "现状:符合(前端口径)——子图 path 字段、迁移提示、path 解析不到标红(Properties aria-invalid + destructive 文案)、以及『OS 选文件夹导入子图到工作区』入口(Tauri selectSkillDirectory)前端均已接线且测试绿。仅 (c)『copilot 工作目录范围纳入被引用子图 path』仍待后端 cwd 范围契约(D7),属后端阻塞、非前端偏差。",
-   "gap": "前端无活:path 标红(语法缺 + 磁盘 404 两态)、folder-picker 导入、legacy target_skill 迁移提示、白名单 round-trip 保存均已落地。唯一剩项 (c) copilot cwd 纳入子图 path 需后端定 cwd 范围契约(D7),记为延期(后端阻塞)。",
-   "fe_status": "符合",
-   "fe_resync": "2026-06-20 fe_resync:把 fe_status 从 偏差 改为 符合。复核依据——重跑子图白名单 FE 五个测试文件(subgraph-path.test.ts=子图引用三态 resolved/missing/migration-required 纯函数判定、subgraph-field-guard.test.ts、panels/subgraph-membership.test.ts、panels/phase-frontmatter.test.ts=白名单 round-trip 保存、panels/PropertiesPanel.fields.test.tsx=渲染态 aria-invalid 标红 + folder picker 入口 + legacy 迁移提示)共 33 tests 全绿。原『偏差』把后端阻塞(D7 copilot cwd 纳入子图 path)误记为前端偏差;前端口径下 atom#20 已全满足,D7 是唯一后端阻塞剩项、不算 FE deviation。",
-   "be_dep": "唯一剩项等后端。标红(语法缺 + 磁盘 404)+ Tauri folder picker 导入入口 + legacy 迁移提示 + 白名单保存=前端独立且已完成;copilot 工作目录纳入子图 path 的校验需后端把 cwd 范围契约定下来(D7),后端阻塞、记延期。"
-  },
-  {
-   "n": 21,
-   "cap": "whitelist-roundtrip-autosave",
-   "design_ref": "n2-atom-21",
-   "current": "现状:已实现且符合。Properties 选中节点字段变更后不再等手动 Save:PropertiesPanel 用 300ms debounce 自动调用 onPhaseFileSave,保存状态经 SaveStatusBadge 显示 pending/saving/saved/error。保存内容仍走 applyPhaseFrontmatterForm(phase-frontmatter.ts,把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回;空值用 delete 不写 null。保存带 expectedHash=sha256Hex(fileContent),成功后更新本地 saved markdown baseline,证明落盘来自白名单合并而非整文件重写。若 native-fs/file-editing writer 返回 hash conflict,Properties 会把同一份结构化表单改动重新套到冲突响应里的最新 Markdown 上,再用返回的 hash 重试一次,避免旧 baseline 造成误报 Save failed。文档化了 round-trip 契约:name/io/未知键/非本类型字段全不碰。",
-   "gap": "符合设计,无需改。2026-07-05:手动 Save 按钮已删除,字段变更自动写对应 Markdown 文件;保存成功后本地 baseline 前移,切换节点/文件时 saved/error 状态不串台。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。保存走 native-fs write_workspace_file(覆盖写带 expected_hash)。后端实施手册 D12.1=ok、D12.3=ok。"
-  },
-  {
-   "n": 22,
-   "cap": "llm-role-graph-default-switch",
-   "design_ref": "n2-atom-22",
-   "current": "现状:已实现且符合。开关绑 PhaseFrontmatterFormData.useGraphLlmRole(phase-frontmatter.ts 解析/序列化 use_graph_llm_role,开=写 true、关=删键,节点 llm_role 原样保留);开时 Run role 整行 disable(data-llm-role-row-disabled,下拉/齿轮/烧瓶全禁),开关行小齿轮 data-llm-role-graph-trigger 经 onSelectGraph(Workspace handleNodeDeselect)跳 graph 面板;GraphFrontmatterForm llm_role 行新增独立 RoleTestControl(graphRoleTest 状态)。engine 生效链 manifest.effective_llm_role:开→graph→graph_agent,关→node→graph→graph_agent(test_llm_role_layering.py 11 测)。",
-   "gap": "无。此前『Use graph default』是不落盘的本地 useState、只影响 Test 目标,且 GRAPH.md 写 llm_role 会被 engine extra=forbid 编译拒绝——两处已按设计重做。",
-   "fe_status": "符合",
-   "be_dep": "engine 字段 + 生效链已随同一 PR 落地(GraphManifest.llm_role / AgentNodeAST.use_graph_llm_role / effective_llm_role,mypy --strict + 全量 pytest 绿)。"
-  }
- ],
- "plan": [
-  {
-   "step": 1,
-   "what": "#16 node-type-derivation + #17 readonly-mode-row(一起做,都围绕『类型=文件』):把 phaseKindLabel/phaseKindFile(PropertiesPanel.tsx + build-nodes.ts 两份)改以『该 phase 目录下存在哪个节点文件』为唯一真相、mode 仅 fallback;同时删/改述 DetailRow 的『Mode』行为『节点类型(由文件决定,不可编辑)』。",
-   "depends_on": "前端依赖:graph_topology 已携带 path/文件信息,据文件存在性定类型。后端不动。",
-   "why": "纯前端、独立、改动最小,最先做掉;堵 F1 口子(手写 mode 不应改变类型)+ 消除误导用户的 Mode 行。两项同源,一起改更自洽。",
-   "block": "前端独立"
-  },
-  {
-   "step": 2,
-   "what": "#20 subgraph-whitelist(标红 + 导入入口):path 解析不到(resolveSubgraphReference=missing)时在 Properties + Assets 标红;加『OS 选文件夹把子图导入工作区』入口(Tauri 原生 dialog 选文件夹)。",
-   "depends_on": "前端依赖:resolveSubgraphReference 已能判 missing;Tauri dialog 已有。后端:copilot cwd 纳入子图 path 的校验等后端(step 3)。",
-   "why": "标红 + folder picker 导入是纯前端(Tauri dialog),可独立做,补 F4 的导入入口;与 step 1 不冲突可并行。",
-   "block": "前端独立"
-  },
-  {
-   "step": 3,
-   "what": "后端先行 + 收尾:① 后端把 copilot 工作目录范围纳入被引用子图 path 的契约定下来(D7,供 #20 ③);② 前端补 #19 的 io.outputs 边界提示入口(指向 i/o 面板),作收尾。",
-   "depends_on": "后端契约:copilot cwd 范围纳入子图 path(D7);#19 提示纯前端但放收尾。后端实施手册 D8.4 子图 path 收口=partial。",
-   "why": "copilot cwd 纳入子图 path 需后端定范围(后端先于前端);#19 是轻微提示,放最后收口。",
-   "block": "等后端"
-  }
- ],
- "tests": [
-  {
-   "covers": "#16 node-type-derivation(类型据文件,违 F1)",
-   "atoms": [
-    16
-   ],
-   "shots": [
-    "节点类型据文件存在性派生;topology.mode 仅 fallback;manifest 投影的 phase.mode 绝不参与类型判定"
-   ],
-   "fe_status": "符合",
-   "fe_resync": "2026-06-20 fe_resync:test#1 fe_status 从 偏差 改为 符合。先红后绿已落地——build-nodes.test.ts 新增『never falls back to the manifest-projected phase.mode for node kind (F1)』(legacy agent manifest 单 phase 投成 mode:'llm' + 无 topology 行 + 无文件 → 断言类型 logic/LOGIC.md):删 `?? phase.mode` 兜底前红(收到 'llm')、删后绿。配套既有 file-existence 测试(『derives node kind from the phase FILE when topology.mode is absent』『lets the phase FILE override a stale topology.mode』)仍绿。build-nodes.test.ts 23 tests + io-target.test.ts 3 tests 全绿,tsc 干净。",
-   "layer1": [
-    "GREEN(既有):topology.mode 缺位、文件为 SKILL.md → 类型据文件派生为 agent(『derives node kind from the phase FILE when topology.mode is absent』)。",
-    "GREEN(既有):stale topology.mode='logic' 但目录只有 SKILL.md → 文件胜出、类型 agent(『lets the phase FILE override a stale topology.mode』)。",
-    "RED→GREEN(新增):legacy agent manifest 把单 phase 投成 phase.mode='llm' + 无 topology 行 + 无文件 → 断言类型为 logic(topology 默认)、不被 manifest 投影的 phase.mode 推成 agent;删 `?? phase.mode` 兜底前红、删后绿,正是 atom#16 要堵的 F1 歧义。"
-   ],
-   "layer2": [
-    "真跑:看正常 skill 的节点类型据文件正确;构造无文件无 topology 的 legacy agent 场景看类型不被 manifest 投影泄漏。"
-   ]
-  },
-  {
-   "covers": "#17 readonly-mode-row",
-   "atoms": [
-    17
-   ],
-   "shots": [
-    "面板底部只读区不再有『Mode』行,改为『节点类型(由文件决定)』"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED:当前断言 DetailRow 含 label='Mode' 的行 → 应不存在(失败)。",
-    "GREEN:断言无『Mode』只读行,或改述为『节点类型(由文件决定,不可编辑)』。"
-   ],
-   "layer2": [
-    "真跑:选一个节点,看底部只读区无误导的 Mode 行。"
-   ]
-  },
-  {
-   "covers": "#18 agent-whitelist",
-   "atoms": [
-    18
-   ],
-   "shots": [
-    "Agent 节点只显示 llm_role/tools/subagents,无 system_prompt/exit_contract/max_retries"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "渲染 kind=agent 的节点 → 断言只渲染 llm_role/tools/subagents 三字段。",
-    "断言不渲染 system_prompt/exit_contract/max_retries/max_nudges/python_callable/可编辑 mode。",
-    "断言 subagents 子表单有 target_skill(§2.5 合法字段)。"
-   ],
-   "layer2": [
-    "真跑:选一个 Agent 节点,看字段集。"
-   ]
-  },
-  {
-   "covers": "#19 logic-whitelist",
-   "atoms": [
-    19
-   ],
-   "shots": [
-    "Logic 节点只显示 actions/validator;有指向 i/o 面板的 io.outputs 边界提示"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "渲染 kind=logic → 断言只渲染 actions/validator,无 llm_role/tools。",
-    "断言有一个指向 i/o 面板的 io.outputs 边界提示入口。"
-   ],
-   "layer2": [
-    "真跑:选一个 Logic 节点,看字段集 + io 提示。"
-   ],
-   "fe_resync": "核验:test 已如实绿——PropertiesPanel.fields.test.tsx 断言 logic 节点渲非阻塞 io.outputs 提示指向 I/O 面板(含 io.outputs + I/O panel、不含可编辑 phase-outputs);verified by green gates + post-audit(2026-06-20)"
-  },
-  {
-   "covers": "#20 subgraph-whitelist(path 标红 + 导入入口)",
-   "atoms": [
-    20
-   ],
-   "shots": [
-    "填一个不存在的 path:输入框标红 + 出『选文件夹导入子图』入口",
-    "仍用旧 target_skill 的子图:出迁移提示"
-   ],
-   "fe_status": "符合",
-   "fe_resync": "2026-06-20 fe_resync:test#5 fe_status 从 偏差 改为 符合。layer1 三条断言已全部落地且绿(重跑 panels/PropertiesPanel.fields.test.tsx:『missing path → aria-invalid 标红 + Select folder to import subgraph 入口』『可用绝对 path → 不标红、不出导入入口』『legacy target_skill → 迁移提示』;配套纯函数 subgraph-path.test.ts 判 resolved/missing/migration-required 三态),五个子图 FE 测试文件共 33 tests 全绿。原『偏差』是把后端 D7(copilot cwd)误记为前端缺测;前端层测试已名副其实绿。",
-   "layer1": [
-    "渲染 kind=subgraph → 断言只渲染 path/validator。",
-    "RED→GREEN(已绿):missing path 时 path 标红(aria-invalid)+ 出 OS 选文件夹导入入口(resolveSubgraphReference=missing → subgraphPathFieldState 同步标红;磁盘 404 由 getChildGraphTopology 客户端探测)。",
-    "断言 migration-required(旧 target_skill)时出迁移提示(不渲染可编辑 target_skill)。"
-   ],
-   "layer2": [
-    "真跑:填一个不存在 path,看标红 + 点导入入口选文件夹。",
-    "看一个旧 target_skill 子图的迁移提示。"
-   ]
-  },
-  {
-   "covers": "#21 whitelist-roundtrip-autosave",
-   "atoms": [
-    21
-   ],
-   "shots": [
-    "改 Agent 节点 tools 后自动保存:body 与 name/io/未知键全保留、只 tools 变"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "造一个含 name/io/未知键/body 的 phase → 改一个白名单字段 → 300ms debounce 后断言 onPhaseFileSave 收到对应 SKILL.md / LOGIC.md / SUBGRAPH.md 内容,且只该字段变,name/io/未知键/body 全保留。",
-    "断言空值用 delete 不写 null。",
-    "断言保存带 expectedHash=sha256Hex(fileContent)、走 native-fs/file-editing writer;断言 UI 不渲染手动 Save 按钮,保存成功后显示 saved 状态且切换文件不残留。",
-    "模拟 native-fs HashConflict:第一次写用旧 hash 被拒,Properties 必须基于冲突响应的最新 Markdown 重新套用本次字段改动,用 returned hash 重试一次并保留远端新增字段/body,不弹 Save failed。"
-   ],
-   "layer2": [
-    "真跑:改一个节点字段后等待自动保存,diff 文件确认只白名单字段变、body 不破坏。"
-   ]
-  },
-  {
-   "covers": "#22 llm-role-graph-default-switch(开关落盘+整行禁用+graph Test)",
-   "atoms": [
-    22
-   ],
-   "shots": [
-    "开关关(默认):Run role 整行可用、节点角色可选可测",
-    "开关开:use_graph_llm_role: true 落盘、Run role 整行置灰禁用、节点 llm_role 保留",
-    "graph 面板 llm_role 行:独立 Test 烧瓶"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED→GREEN:phase-frontmatter.test.ts 新增 3 测——use_graph_llm_role 解析(缺省 false)、开关序列化不动 llm_role 值(开=写 true/关=删键)、非 agent 节点绝不写该键。",
-    "RED→GREEN:PropertiesPanel.fields.test.tsx 新增 4 测——开(aria-checked=true)时 data-llm-role-row-disabled=true 且节点角色仍可见;关时无禁用标记;开关行渲染 data-llm-role-graph-trigger 齿轮;graph 表单(selectedNode=null)llm_role 行渲染 data-llm-role-test-trigger。",
-    "engine:test_llm_role_layering.py 11 测锁 GraphManifest.llm_role 接受/缺省、AgentNodeAST.use_graph_llm_role 接受/缺省 false、effective_llm_role 五分支、resolver 收到生效角色、未知字段仍拒。"
-   ],
-   "layer2": [
-    "wt-dev 真机:agent 节点开/关开关 → 保存 → SKILL.md diff 出现/删除 use_graph_llm_role,llm_role 行随开关禁用/恢复;点齿轮跳 graph 面板;graph llm_role 选角色后点 Test 烧瓶出状态徽章。"
-   ],
-   "screenshots": [
+  "id": "n2_properties_impl",
+  "title": "Properties 节点属性 · 实施详情",
+  "design_ref": "n2_properties_design",
+  "intro": "本页是 Properties 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_properties_design(原子 #16–#21)。字段集对齐 engine skill-syntax §2.3/§2.4/§2.5;F1(类型据文件)/F2(白名单)/F4(子图 path 导入)出 phase-editing 能力文档。代码按名引用、不写行号。重要纠偏:白名单主体已重建(02_authoring.md atom 决策表 Properties 保存/白名单那两行标的 stale 结论已过时),唯 mode 派生的 fallback 兜底 + UI『Mode』标签是残留 F1 风险(主路径已文件派生,作者写 mode: 被引擎拒)。",
+  "functions": [
     {
-     "file": "n2-16-llmrole-switch-off.png",
-     "caption": "开关关(默认):Run role 行可用,节点自选 analyst 可改可测"
+      "n": 16,
+      "cap": "node-type-derivation",
+      "design_ref": "n2-atom-16",
+      "current": "现状:符合(2026-06-20 闭合 F1 残留歧义)——节点类型派生(buildNodes 里给每个 phase 算 mode 的那一行)已严格走『文件存在性 → topology.mode → logic 默认』链:phaseModeFromFiles(检该 phase 目录下 SUBGRAPH/SKILL/LOGIC.md 哪个在、决定 subgraph/agent/logic 类型的函数)胜过 stale topology.mode;两者都缺时用 phaseKindFromTopologyMode(把 topology.mode 缺位时兜底为 logic 的函数,与 drilled-child 路径同源),绝不回退 manifest 投影的 phase.mode。原 build-nodes.ts 那行的 `?? phase.mode` 残留兜底已删。",
+      "gap": "符合,无需改。2026-06-20:删掉 build-nodes.ts 节点类型派生那行的 `?? phase.mode` 残留 fallback,链改为 phaseModeFromFiles ?? phaseKindFromTopologyMode(topology?.mode)——文件存在性 → topology.mode → logic 默认,manifest 投影的 phase.mode 不再参与类型判定,闭合 F1 歧义。纯前端。",
+      "fe_status": "符合",
+      "fe_resync": "2026-06-20 fe_resync:fe_status 从 偏差 改为 符合。依据:① 删 build-nodes.ts 节点类型派生行的 `?? phase.mode` 残留兜底,类型链现为『文件存在性 ?? phaseKindFromTopologyMode(topology?.mode)』(file → topology.mode → logic 默认,绝不回退 manifest 投影的 phase.mode),闭合 atom#16/F1 歧义;② 先红后绿:build-nodes.test.ts 新增『never falls back to the manifest-projected phase.mode for node kind (F1)』——用 legacy standalone-agent manifest(phasesFromManifest 把单 phase 投成 mode:'llm')+ 无 topology 行 + 无 phase 文件,断言类型为 logic/LOGIC.md;删兜底前该 test 红(收到 'llm',正是残留 fallback 泄漏 manifest 投影),删后绿。build-nodes.test.ts 共 23 tests 全绿,io-target.test.ts 3 tests 全绿,tsc 干净;无既有 test 依赖该 manifest 兜底(删除前其余 22 tests 即全绿)。",
+      "be_dep": "n/a(纯前端派生;引擎 graph_topology 已携带 mode/path/文件信息,前端据文件存在性定类型、topology.mode 仅 fallback)。"
     },
     {
-     "file": "n2-16b-llmrole-switch-on-row-disabled.png",
-     "caption": "开关开:Run role 整行置灰禁用,analyst 保留;保存后 SKILL.md 出现 use_graph_llm_role: true"
+      "n": 17,
+      "cap": "readonly-mode-row",
+      "design_ref": "n2-atom-17",
+      "current": "现状:已实现且符合。Properties 只读区类型行已改为 label『Node type』+ hint『Determined by the phase file (SKILL/LOGIC/SUBGRAPH.md) — not editable』,值取派生标签;不再以可设的『Mode』呈现,符合 FROZEN『类型=文件名、作者不写 mode』。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端文案/结构)。"
     },
     {
-     "file": "n2-17-graph-llmrole-test.png",
-     "caption": "齿轮跳到 graph 面板:图默认 llm_role=loop pm + 独立 Test 烧瓶(测得 Needs Attention 徽章);此状态下 compile 通过(引擎已认 GRAPH.md llm_role)"
+      "n": 18,
+      "cap": "agent-whitelist",
+      "design_ref": "n2-atom-18",
+      "current": "现状:已实现且符合(MVP 最小子集)。PhaseFrontmatterForm(PropertiesPanel.tsx)kind=agent 时渲染 llm_role(角色下拉 + use_graph_llm_role 开关,见 #22)、tools(Textarea)、subagents(SubagentsField),FROZEN 禁字段全不渲染。引擎 AgentNodeAST(manifest.py)的 agent 全集还含 subgraphs[](AgentRegistryItem,按 path)、references、examples/examples_inline、max_iterations——MVP Properties 先收敛到三字段、是最小子集。",
+      "gap": "符合(MVP 最小子集),不需改。注:不应表述成『完整对齐引擎语法』——引擎 agent 全集更大(subgraphs[]/references/examples/max_iterations)。若产品把 agent subgraphs[].path 纳入 N2 Properties MVP,需补该字段编辑形态;否则保持『最小子集』口径。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端表单;白名单字段对齐引擎 §2.5。保存契约见 #21)。"
+    },
+    {
+      "n": 19,
+      "cap": "logic-whitelist",
+      "design_ref": "n2-atom-19",
+      "current": "现状:已实现且符合(2026-06-20 补齐 io.outputs 提示)。kind=logic 时只渲染:actions(一行一 action、按执行顺序的 Textarea)、validator(Switch 开关,开启后置校验钩子,写回黑板前跑同级 validator.py)。不渲染 llm_role/tools/python_callable。io.outputs 的字段边界(action 回写字段须是 io.outputs.properties 子集)归 i/o 面板,Properties 不重复做;并在 logic 分支 actions/validator 之后多渲一条非阻塞 FieldDescription 提示『Output fields an action writes are bounded by io.outputs — edit those field boundaries in the I/O panel (toolbar tab 3)』,引用工具栏第 3 个 I/O tab,避免用户以为 logic 无 io 约束。",
+      "gap": "符合,无需改。2026-06-20:atom#19 要的『指向 i/o 面板的 io.outputs 边界提示』已落地——PropertiesPanel.tsx logic 分支加一条非阻塞 FieldDescription(additive,不引入可编辑 output 字段),先红后绿(PropertiesPanel.fields.test.tsx 新增 test『logic node surfaces a non-blocking io.outputs hint pointing to the I/O panel』断言含 io.outputs + I/O panel、不含 id=phase-outputs)。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端表单;字段对齐引擎 §2.3)。",
+      "fe_resync": "核验:io.outputs 提示已是 shipped 状态——PropertiesPanel.tsx logic 分支已渲非阻塞 FieldDescription 指向 I/O 面板(toolbar tab 3),PropertiesPanel.fields.test.tsx 断言之;prose 现已如实反映 shipped 状态;verified by green gates + post-audit(2026-06-20)"
+    },
+    {
+      "n": 20,
+      "cap": "subgraph-whitelist",
+      "design_ref": "n2-atom-20",
+      "current": "现状:符合(前端口径)——子图 path 字段、迁移提示、path 解析不到标红(Properties aria-invalid + destructive 文案)、以及『OS 选文件夹导入子图到工作区』入口(Tauri selectSkillDirectory)前端均已接线且测试绿。仅 (c)『copilot 工作目录范围纳入被引用子图 path』仍待后端 cwd 范围契约(D7),属后端阻塞、非前端偏差。",
+      "gap": "前端无活:path 标红(语法缺 + 磁盘 404 两态)、folder-picker 导入、legacy target_skill 迁移提示、白名单 round-trip 保存均已落地。唯一剩项 (c) copilot cwd 纳入子图 path 需后端定 cwd 范围契约(D7),记为延期(后端阻塞)。",
+      "fe_status": "符合",
+      "fe_resync": "2026-06-20 fe_resync:把 fe_status 从 偏差 改为 符合。复核依据——重跑子图白名单 FE 五个测试文件(subgraph-path.test.ts=子图引用三态 resolved/missing/migration-required 纯函数判定、subgraph-field-guard.test.ts、panels/subgraph-membership.test.ts、panels/phase-frontmatter.test.ts=白名单 round-trip 保存、panels/PropertiesPanel.fields.test.tsx=渲染态 aria-invalid 标红 + folder picker 入口 + legacy 迁移提示)共 33 tests 全绿。原『偏差』把后端阻塞(D7 copilot cwd 纳入子图 path)误记为前端偏差;前端口径下 atom#20 已全满足,D7 是唯一后端阻塞剩项、不算 FE deviation。",
+      "be_dep": "唯一剩项等后端。标红(语法缺 + 磁盘 404)+ Tauri folder picker 导入入口 + legacy 迁移提示 + 白名单保存=前端独立且已完成;copilot 工作目录纳入子图 path 的校验需后端把 cwd 范围契约定下来(D7),后端阻塞、记延期。"
+    },
+    {
+      "n": 21,
+      "cap": "whitelist-roundtrip-autosave",
+      "design_ref": "n2-atom-21",
+      "current": "现状:已实现且符合。Properties 选中节点字段变更后不再等手动 Save:PropertiesPanel 用 300ms debounce 自动调用 onPhaseFileSave,保存状态经 SaveStatusBadge 显示 pending/saving/saved/error。保存内容仍走 applyPhaseFrontmatterForm(phase-frontmatter.ts,把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回;空值用 delete 不写 null。保存带 expectedHash=sha256Hex(fileContent),成功后更新本地 saved markdown baseline,证明落盘来自白名单合并而非整文件重写。若 native-fs/file-editing writer 返回 hash conflict,Properties 会把同一份结构化表单改动重新套到冲突响应里的最新 Markdown 上,再用返回的 hash 重试一次,避免旧 baseline 造成误报 Save failed。文档化了 round-trip 契约:name/io/未知键/非本类型字段全不碰。",
+      "gap": "符合设计,无需改。2026-07-05:手动 Save 按钮已删除,字段变更自动写对应 Markdown 文件;保存成功后本地 baseline 前移,切换节点/文件时 saved/error 状态不串台。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。保存走 native-fs write_workspace_file(覆盖写带 expected_hash)。后端实施手册 D12.1=ok、D12.3=ok。"
+    },
+    {
+      "n": 22,
+      "cap": "llm-role-graph-default-switch",
+      "design_ref": "n2-atom-22",
+      "current": "现状:已实现且符合。开关绑 PhaseFrontmatterFormData.useGraphLlmRole(phase-frontmatter.ts 解析/序列化 use_graph_llm_role,开=写 true、关=删键,节点 llm_role 原样保留);开时 Run role 整行 disable(data-llm-role-row-disabled,下拉/齿轮/烧瓶全禁),开关行小齿轮 data-llm-role-graph-trigger 经 onSelectGraph(Workspace handleNodeDeselect)跳 graph 面板;GraphFrontmatterForm llm_role 行新增独立 RoleTestControl(graphRoleTest 状态)。engine 生效链 manifest.effective_llm_role:开→graph→graph_agent,关→node→graph→graph_agent(test_llm_role_layering.py 11 测)。 2026-07-05 ????? Model params temperature: LlmNodeParamsField ?????????(0.7=>35%), HelpTooltip ?? Studio 0-100%/??? 0..2/Anthropic runtime remap, onValueChange ????? draft ? debounce putNodeLlmParams, onValueCommit flush ?????",
+      "gap": "无。此前『Use graph default』是不落盘的本地 useState、只影响 Test 目标,且 GRAPH.md 写 llm_role 会被 engine extra=forbid 编译拒绝——两处已按设计重做。 ??????????? debounce ???, ?????????",
+      "fe_status": "符合",
+      "be_dep": "engine 字段 + 生效链已随同一 PR 落地(GraphManifest.llm_role / AgentNodeAST.use_graph_llm_role / effective_llm_role,mypy --strict + 全量 pytest 绿)。 ?????? putNodeLlmParams ?? provider-neutral 0..2 ???; gateway runtime ??? provider-scale ???"
     }
-   ]
-  }
- ]
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#16 node-type-derivation + #17 readonly-mode-row(一起做,都围绕『类型=文件』):把 phaseKindLabel/phaseKindFile(PropertiesPanel.tsx + build-nodes.ts 两份)改以『该 phase 目录下存在哪个节点文件』为唯一真相、mode 仅 fallback;同时删/改述 DetailRow 的『Mode』行为『节点类型(由文件决定,不可编辑)』。",
+      "depends_on": "前端依赖:graph_topology 已携带 path/文件信息,据文件存在性定类型。后端不动。",
+      "why": "纯前端、独立、改动最小,最先做掉;堵 F1 口子(手写 mode 不应改变类型)+ 消除误导用户的 Mode 行。两项同源,一起改更自洽。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#20 subgraph-whitelist(标红 + 导入入口):path 解析不到(resolveSubgraphReference=missing)时在 Properties + Assets 标红;加『OS 选文件夹把子图导入工作区』入口(Tauri 原生 dialog 选文件夹)。",
+      "depends_on": "前端依赖:resolveSubgraphReference 已能判 missing;Tauri dialog 已有。后端:copilot cwd 纳入子图 path 的校验等后端(step 3)。",
+      "why": "标红 + folder picker 导入是纯前端(Tauri dialog),可独立做,补 F4 的导入入口;与 step 1 不冲突可并行。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "后端先行 + 收尾:① 后端把 copilot 工作目录范围纳入被引用子图 path 的契约定下来(D7,供 #20 ③);② 前端补 #19 的 io.outputs 边界提示入口(指向 i/o 面板),作收尾。",
+      "depends_on": "后端契约:copilot cwd 范围纳入子图 path(D7);#19 提示纯前端但放收尾。后端实施手册 D8.4 子图 path 收口=partial。",
+      "why": "copilot cwd 纳入子图 path 需后端定范围(后端先于前端);#19 是轻微提示,放最后收口。",
+      "block": "等后端"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#16 node-type-derivation(类型据文件,违 F1)",
+      "atoms": [
+        16
+      ],
+      "shots": [
+        "节点类型据文件存在性派生;topology.mode 仅 fallback;manifest 投影的 phase.mode 绝不参与类型判定"
+      ],
+      "fe_status": "符合",
+      "fe_resync": "2026-06-20 fe_resync:test#1 fe_status 从 偏差 改为 符合。先红后绿已落地——build-nodes.test.ts 新增『never falls back to the manifest-projected phase.mode for node kind (F1)』(legacy agent manifest 单 phase 投成 mode:'llm' + 无 topology 行 + 无文件 → 断言类型 logic/LOGIC.md):删 `?? phase.mode` 兜底前红(收到 'llm')、删后绿。配套既有 file-existence 测试(『derives node kind from the phase FILE when topology.mode is absent』『lets the phase FILE override a stale topology.mode』)仍绿。build-nodes.test.ts 23 tests + io-target.test.ts 3 tests 全绿,tsc 干净。",
+      "layer1": [
+        "GREEN(既有):topology.mode 缺位、文件为 SKILL.md → 类型据文件派生为 agent(『derives node kind from the phase FILE when topology.mode is absent』)。",
+        "GREEN(既有):stale topology.mode='logic' 但目录只有 SKILL.md → 文件胜出、类型 agent(『lets the phase FILE override a stale topology.mode』)。",
+        "RED→GREEN(新增):legacy agent manifest 把单 phase 投成 phase.mode='llm' + 无 topology 行 + 无文件 → 断言类型为 logic(topology 默认)、不被 manifest 投影的 phase.mode 推成 agent;删 `?? phase.mode` 兜底前红、删后绿,正是 atom#16 要堵的 F1 歧义。"
+      ],
+      "layer2": [
+        "真跑:看正常 skill 的节点类型据文件正确;构造无文件无 topology 的 legacy agent 场景看类型不被 manifest 投影泄漏。"
+      ]
+    },
+    {
+      "covers": "#17 readonly-mode-row",
+      "atoms": [
+        17
+      ],
+      "shots": [
+        "面板底部只读区不再有『Mode』行,改为『节点类型(由文件决定)』"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED:当前断言 DetailRow 含 label='Mode' 的行 → 应不存在(失败)。",
+        "GREEN:断言无『Mode』只读行,或改述为『节点类型(由文件决定,不可编辑)』。"
+      ],
+      "layer2": [
+        "真跑:选一个节点,看底部只读区无误导的 Mode 行。"
+      ]
+    },
+    {
+      "covers": "#18 agent-whitelist",
+      "atoms": [
+        18
+      ],
+      "shots": [
+        "Agent 节点只显示 llm_role/tools/subagents,无 system_prompt/exit_contract/max_retries"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 kind=agent 的节点 → 断言只渲染 llm_role/tools/subagents 三字段。",
+        "断言不渲染 system_prompt/exit_contract/max_retries/max_nudges/python_callable/可编辑 mode。",
+        "断言 subagents 子表单有 target_skill(§2.5 合法字段)。"
+      ],
+      "layer2": [
+        "真跑:选一个 Agent 节点,看字段集。"
+      ]
+    },
+    {
+      "covers": "#19 logic-whitelist",
+      "atoms": [
+        19
+      ],
+      "shots": [
+        "Logic 节点只显示 actions/validator;有指向 i/o 面板的 io.outputs 边界提示"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 kind=logic → 断言只渲染 actions/validator,无 llm_role/tools。",
+        "断言有一个指向 i/o 面板的 io.outputs 边界提示入口。"
+      ],
+      "layer2": [
+        "真跑:选一个 Logic 节点,看字段集 + io 提示。"
+      ],
+      "fe_resync": "核验:test 已如实绿——PropertiesPanel.fields.test.tsx 断言 logic 节点渲非阻塞 io.outputs 提示指向 I/O 面板(含 io.outputs + I/O panel、不含可编辑 phase-outputs);verified by green gates + post-audit(2026-06-20)"
+    },
+    {
+      "covers": "#20 subgraph-whitelist(path 标红 + 导入入口)",
+      "atoms": [
+        20
+      ],
+      "shots": [
+        "填一个不存在的 path:输入框标红 + 出『选文件夹导入子图』入口",
+        "仍用旧 target_skill 的子图:出迁移提示"
+      ],
+      "fe_status": "符合",
+      "fe_resync": "2026-06-20 fe_resync:test#5 fe_status 从 偏差 改为 符合。layer1 三条断言已全部落地且绿(重跑 panels/PropertiesPanel.fields.test.tsx:『missing path → aria-invalid 标红 + Select folder to import subgraph 入口』『可用绝对 path → 不标红、不出导入入口』『legacy target_skill → 迁移提示』;配套纯函数 subgraph-path.test.ts 判 resolved/missing/migration-required 三态),五个子图 FE 测试文件共 33 tests 全绿。原『偏差』是把后端 D7(copilot cwd)误记为前端缺测;前端层测试已名副其实绿。",
+      "layer1": [
+        "渲染 kind=subgraph → 断言只渲染 path/validator。",
+        "RED→GREEN(已绿):missing path 时 path 标红(aria-invalid)+ 出 OS 选文件夹导入入口(resolveSubgraphReference=missing → subgraphPathFieldState 同步标红;磁盘 404 由 getChildGraphTopology 客户端探测)。",
+        "断言 migration-required(旧 target_skill)时出迁移提示(不渲染可编辑 target_skill)。"
+      ],
+      "layer2": [
+        "真跑:填一个不存在 path,看标红 + 点导入入口选文件夹。",
+        "看一个旧 target_skill 子图的迁移提示。"
+      ]
+    },
+    {
+      "covers": "#21 whitelist-roundtrip-autosave",
+      "atoms": [
+        21
+      ],
+      "shots": [
+        "改 Agent 节点 tools 后自动保存:body 与 name/io/未知键全保留、只 tools 变"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "造一个含 name/io/未知键/body 的 phase → 改一个白名单字段 → 300ms debounce 后断言 onPhaseFileSave 收到对应 SKILL.md / LOGIC.md / SUBGRAPH.md 内容,且只该字段变,name/io/未知键/body 全保留。",
+        "断言空值用 delete 不写 null。",
+        "断言保存带 expectedHash=sha256Hex(fileContent)、走 native-fs/file-editing writer;断言 UI 不渲染手动 Save 按钮,保存成功后显示 saved 状态且切换文件不残留。",
+        "模拟 native-fs HashConflict:第一次写用旧 hash 被拒,Properties 必须基于冲突响应的最新 Markdown 重新套用本次字段改动,用 returned hash 重试一次并保留远端新增字段/body,不弹 Save failed。"
+      ],
+      "layer2": [
+        "真跑:改一个节点字段后等待自动保存,diff 文件确认只白名单字段变、body 不破坏。"
+      ]
+    },
+    {
+      "covers": "#22 llm-role-graph-default-switch(开关落盘+整行禁用+graph Test)",
+      "atoms": [
+        22
+      ],
+      "shots": [
+        "开关关(默认):Run role 整行可用、节点角色可选可测",
+        "开关开:use_graph_llm_role: true 落盘、Run role 整行置灰禁用、节点 llm_role 保留",
+        "graph 面板 llm_role 行:独立 Test 烧瓶"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED→GREEN:phase-frontmatter.test.ts 新增 3 测——use_graph_llm_role 解析(缺省 false)、开关序列化不动 llm_role 值(开=写 true/关=删键)、非 agent 节点绝不写该键。",
+        "RED→GREEN:PropertiesPanel.fields.test.tsx 新增 4 测——开(aria-checked=true)时 data-llm-role-row-disabled=true 且节点角色仍可见;关时无禁用标记;开关行渲染 data-llm-role-graph-trigger 齿轮;graph 表单(selectedNode=null)llm_role 行渲染 data-llm-role-test-trigger。",
+        "engine:test_llm_role_layering.py 11 测锁 GraphManifest.llm_role 接受/缺省、AgentNodeAST.use_graph_llm_role 接受/缺省 false、effective_llm_role 五分支、resolver 收到生效角色、未知字段仍拒。"
+      ],
+      "layer2": [
+        "wt-dev 真机:agent 节点开/关开关 → 保存 → SKILL.md diff 出现/删除 use_graph_llm_role,llm_role 行随开关禁用/恢复;点齿轮跳 graph 面板;graph llm_role 选角色后点 Test 烧瓶出状态徽章。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-16-llmrole-switch-off.png",
+          "caption": "开关关(默认):Run role 行可用,节点自选 analyst 可改可测"
+        },
+        {
+          "file": "n2-16b-llmrole-switch-on-row-disabled.png",
+          "caption": "开关开:Run role 整行置灰禁用,analyst 保留;保存后 SKILL.md 出现 use_graph_llm_role: true"
+        },
+        {
+          "file": "n2-17-graph-llmrole-test.png",
+          "caption": "齿轮跳到 graph 面板:图默认 llm_role=loop pm + 独立 Test 烧瓶(测得 Needs Attention 徽章);此状态下 compile 通过(引擎已认 GRAPH.md llm_role)"
+        }
+      ]
+    },
+    {
+      "covers": "#22b node-llm-temperature-percent-slider",
+      "atoms": [
+        22
+      ],
+      "shots": [
+        "Authoring -> event-extraction -> review Agent -> Properties -> Model params: unset temperature reads ?, ? tooltip explains provider remap, keyboard slider changes to 55%."
+      ],
+      "fe_status": "??",
+      "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (Vite 5175, private sidecar 8788) using a temporary browser-only opener that was reverted before commit; node override was cleared via API after verification. Automated coverage is PropertiesPanel.autosave.test.tsx + useDebouncedCallback.test.tsx.",
+      "layer1": [
+        "PropertiesPanel.autosave.test.tsx: mock getNodeLlmParams ?? temperature=0.7, ?? Agent ????? data-llm-node-temperature ??????? >35%<, ??? >0.7<?",
+        "useDebouncedCallback.test.tsx: debounce ??????, commit flush, cancel/unmount ? stale ???"
+      ],
+      "layer2": [
+        "2026-07-05 wt-dev --backend: open event-extraction, select review Agent, Properties -> Model params shows temperature ?; ? tooltip shows provider remap copy; ArrowRight changes readout to 55%; cleanup PUT resets node override to null."
+      ]
+    }
+  ]
 }

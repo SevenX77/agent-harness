@@ -2,9 +2,9 @@
 module: 09-inv-invocation-runtime
 doc: mvp1-alignment
 status: drafted
-verified_at: 2026-06-02
+verified_at: 2026-07-05
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_build_chat_result/_dispatch/_invoke_with_token_escalation/_usage_from_ai_message/_build_chat_result_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_build_chat_result/_dispatch/_invoke_with_token_escalation/_usage_from_ai_message/_build_chat_result_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute ? packages/graph-agent-gateway/src/graph_agent_gateway/temperature.py:provider_temperature_from_authored
 units: [chatx-invocation-runtime]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -191,3 +191,10 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 - [[01-handoff-interface]]：`ResolvedRoute` 契约（调用层唯一输入）
 - [[04-orch-registry-schema]]：`ResolvedRoute` 字段权威源（本模块只消费）
 - client 层 A' 重设计决策（D1/D2/M2/M3/F2-F5）：完整逻辑 + PM 原话留底于本文 §4/§5/§6 / 归属表 `module-disposition-revised.md`（§4 判 09 纯 ③b）
+
+## 2026-07-05 ??: temperature ???? provider scale
+
+- `RuntimeSettings.temperature`?role temperature ? Studio node override temperature ???????? provider-neutral ???, ???? 0..2; `None` ?????/??, gateway ????????????
+- provider ?????????? route ?????????: `provider_temperature_from_authored(authored, protocol)` ? `anthropic_compatible` ?? 0..1, ? OpenAI-compatible / Gemini / Ark / WaveSpeed / generic ?? 0..2?
+- `GatewayChatModel` ? `GenericRouteChatModel` ? temperature ???? `None`; `ModelResolver` ???? 0.7 ????route ? effective runtime settings ??????, ?? caller temperature ??????? override ???
+- ????: `test_client_manager_runtime_policy.py` ?? ordinary-chat Anthropic remap?OpenAI ?? 0..2???????? temperature; `test_gateway_integration.py` ? `test_runtime_hard_cutover.py` ?? resolver ??????? 0.7?

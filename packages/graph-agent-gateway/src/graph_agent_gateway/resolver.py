@@ -139,11 +139,6 @@ class ModelResolver:
             if max_output_tokens is not None
             else _effective_int(first_route, "max_output_tokens", 4096)
         )
-        effective_temperature = (
-            temperature
-            if temperature is not None
-            else _effective_float(first_route, "temperature", 0.7)
-        )
         effective_thinking_enabled = (
             thinking_enabled
             if thinking_enabled is not None
@@ -157,7 +152,7 @@ class ModelResolver:
                 resolved,
                 predict_context=predict_context,
                 max_tokens=effective_max_tokens,
-                temperature=effective_temperature,
+                temperature=temperature,
                 callbacks=callbacks,
                 phase_name=phase_name,
                 thinking_enabled=effective_thinking_enabled,
@@ -169,7 +164,7 @@ class ModelResolver:
             resolved.role_name,
             resolved,
             max_tokens=effective_max_tokens,
-            temperature=effective_temperature,
+            temperature=temperature,
             callbacks=callbacks,
             phase_name=phase_name,
             thinking_enabled=effective_thinking_enabled,
@@ -404,12 +399,6 @@ def _effective_int(route: Any, key: str, default: int) -> int:
     setting = route.effective_runtime_settings.get(key)
     value = setting.value if setting is not None else None
     return int(value) if isinstance(value, int | float) and value > 0 else default
-
-
-def _effective_float(route: Any, key: str, default: float) -> float:
-    setting = route.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return float(value) if isinstance(value, int | float) else default
 
 
 def _effective_bool(route: Any, key: str, default: bool) -> bool:

@@ -107,7 +107,7 @@
       "n": 43,
       "cap": "role-output-token-intent",
       "design_ref": "atom-43",
-      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,1.4=>70%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 只更新本地 draft/readout,不触发 onSubmit/HTTP 保存;onValueCommit 或 pointerup/cancel、keyup、blur 结束兜底才提交当前值给 LlmRolesTab/useDebouncedRolesSave,防止轨道点击只改 UI 不保存。useDebouncedRolesSave 在已有请求 saving 时只保留最新 queued snapshot,旧请求完成后立即保存最新 payload。normalizeRolesDraft + 后端 RoleIntent 默认把缺失/null temperature 归一成 70%(authored 1.4),因此 role settings 几乎不会把 temperature 读成 model default。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed/focus 外部刷新覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
+      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,1.4=>70%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 只更新本地 draft/readout,不触发 onSubmit/HTTP 保存;onValueCommit 或 pointerup/cancel、keyup、blur 结束兜底才提交当前值给 LlmRolesTab/useDebouncedRolesSave,防止轨道点击只改 UI 不保存。useDebouncedRolesSave 在已有请求 saving 时只保留最新 queued snapshot,旧请求完成后立即保存最新 payload。normalizeRolesDraft + 后端 RoleIntent 默认把缺失/null temperature 归一成 70%(authored 1.4),因此 role settings 几乎不会把 temperature 读成 model default。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed 外部变更事件覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回;窗口 focus 不触发 roles 刷新。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
       "gap": "符合设计,无需改。已闭合:百分比读数 + tooltip + provider-neutral 0..2 存储 + role 默认 70% + commit 后保存 + saving 期间 latest-wins 覆盖 + gateway provider-scale runtime mapping。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。PUT /roles 仍保存 role draft;gateway runtime 由 temperature.py / RouteChatModelFactory / ordinary_chat 执行 provider-scale 映射;GatewayChatModel 保留 effective_runtime_settings 并新增 actual_runtime_settings 供 trace 查看真实调用参数。"
@@ -201,10 +201,10 @@
       "n": 53,
       "cap": "role-projection-refresh",
       "design_ref": "atom-53",
-      "current": "现状:已实现且符合。其它窗口改 roles / 窗口聚焦 / WebSocket roles_changed → 重拉 registry → 重投影角色卡 + 可用模型 + 测试态(挂载 useEffect 从 getRoleTestResults 持久化种子回填)。前端只投影 registry、不持第二份,重投影即与后端一致。",
+      "current": "现状:已实现且符合。其它窗口改 roles 后由后端广播 WebSocket roles_changed,前端才 getRoles({force:true}) + getModelGroups({force:true}) 重拉角色与可用模型并重投影角色卡 + 测试态(挂载 useEffect 从 getRoleTestResults 持久化种子回填);若角色数据尚未加载则只标 dirty,首次进入 LLM Roles/Copilot 再拉。窗口聚焦、WebSocket 连接/重连不触发重拉。前端只投影后端快照、不持第二份,重投影即与后端一致。",
       "gap": "符合设计(被动重投影、只读),无需改。注:测试 live 态的「不丢」目前靠持久化种子兜底,#46 删易失层后会更彻底地纯后端投影。",
       "fe_status": "符合",
-      "be_dep": "已就绪可接。GET /registry 重拉快照;WS roles_changed 事件已有。"
+      "be_dep": "已就绪可接。GET /roles 与 GET /registry 重拉快照;WS roles_changed 事件已有。"
     }
   ],
   "plan": [
@@ -679,15 +679,16 @@
         53
       ],
       "shots": [
-        "其它窗口改 roles / 聚焦回来 → 角色 + 可用模型自动重投影"
+        "其它窗口改 roles 后收到 roles_changed → 角色 + 可用模型自动重投影"
       ],
       "fe_status": "符合",
       "layer1": [
-        "触发 WS roles_changed / 窗口聚焦 → 断言重拉 registry、重投影角色 + 可用模型 + 测试态(持久化种子回填)。",
+        "触发 WS roles_changed → 断言重拉 roles + model groups、重投影角色 + 可用模型 + 测试态(持久化种子回填)。",
+        "窗口聚焦 / WebSocket 重连但无 roles_changed → 断言不重拉 roles/model groups。",
         "断言只投影 registry、不持第二份(切 tab/刷新不丢角色)。"
       ],
       "layer2": [
-        "开两个窗口,一个改角色,看另一个聚焦回来是否刷新。"
+        "开两个窗口,一个改角色,看另一个窗口收到 roles_changed 后是否刷新。"
       ]
     },
     {

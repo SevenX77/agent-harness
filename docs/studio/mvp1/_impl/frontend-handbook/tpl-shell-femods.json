@@ -7,7 +7,7 @@
       "持 settingsOpen(Settings 开没开)开关:Toolbar(左侧竖排工具条)的 onSettingsOpen 与 Header(顶栏)的 onOpenSettings 都置 true,X(onClose)/ Home(handleHome)置 false。",
       "只在画布面板(canvas,工作区中央那块可缩放面板)渲染 SettingsPage 替换编辑器/图,左侧 Panels(文件树等工具面板)与右侧 Copilot 面板全程挂载——工作区不卸载。",
       "非真 modal:不铺全屏 backdrop(遮罩层)、不做 focus-trap(把键盘焦点锁在弹窗内的机制)。",
-      "tab 切换 + 按 tab 懒加载:切到 api_keys 才首拉凭证并 hydrate(把掩码 key 换回明文)、切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
+      "tab 切换 + 按需加载:壳层首次从无到有拉摘要快照;切到 api_keys 才首拉凭证并 hydrate(把掩码 key 换回明文)、切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
       "两条关闭语义:X 只收起 overlay(工作区还在);Home 先收起再调 onCloseSkill(卸载当前工作区退回首页的回调)卸载工作区退首页。"
     ],
     "used_by": "#1(open-settings-overlay)、#2(settings-skeleton,骨架挂在容器里)、#3(settings-tab-switch)、#7(close-settings-overlay)、#8(home-closes-settings)。",
@@ -31,16 +31,16 @@
   {
     "name": "Settings WebSocket 刷新",
     "what": "Settings 壳层那条连 /ws/events 的 WebSocket(长连事件通道):收到 gateway 后端 sidecar 文件监听器广播的 registry_changed(凭证文件变了)/ roles_changed(角色文件变了)后,重拉对应数据刷新界面,实现外部文件变更自动跟上单一真相。",
-    "where": "SettingsPage.tsx 里挂载时开 WebSocket 的那个 useEffect(React 副作用钩子);连接地址由 wsUrl('/ws/events')(client.ts 里把相对路径拼成完整 WebSocket 地址的函数)给出;socket.onmessage(收到一条事件的回调)分发 registry_changed → getCredentials(拉凭证快照的 API 函数)重拉、roles_changed → getRoles + getModelGroups(分别拉角色、拉模型组的 API 函数)重拉。",
+    "where": "useStudioEventStream.ts(带退避重连和可观测日志的事件流 hook)负责连接 /ws/events;SettingsPage.tsx 把 registry_changed → getCredentials({force:true})(拉凭证快照的 API 函数)重拉、roles_changed → getRoles({force:true}) + getModelGroups({force:true})(分别拉角色、拉模型组的 API 函数)重拉或标 dirty。",
     "duties": [
       "挂载时开一条 WebSocket 连 /ws/events,组件卸载时 close 关闭。",
-      "收 registry_changed → 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿;收 roles_changed → 重拉角色 + 模型组。",
+      "收 registry_changed → 强制重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿;收 roles_changed → 若角色已加载则强制重拉角色 + 模型组,否则标 dirty 供首次打开时消费。",
       "用 cancelled(组件已卸载标志)防卸载后还 setState(更新已销毁组件的状态会报警告)。",
-      "(目标)断开/出错后按指数退避(每次重连间隔翻倍)重连,重连成功后重拉一次补漏。",
-      "(目标)连接 / 断开 / 重连 / 解析失败都记可观测日志(去掉现状那两处空 catch 静默),拉不到时给用户「连接不上」警告标志。"
+      "断开/出错后按指数退避(每次重连间隔翻倍)重连;重连成功只恢复订阅,不重拉数据。",
+      "连接 / 断开 / 重连 / 解析失败都记可观测日志,拉不到时给用户「连接不上」警告标志。"
     ],
     "used_by": "#5(ws-registry-refresh)、#6(ws-roles-refresh)。",
-    "boundary": "做:订阅事件流、按事件类型重拉对应数据、(目标)重连+可观测。不做:不在事件里取数据体(只收『变了』信号、自己重拉)、不持第二份真相、不广播(广播归 gateway 后端 sidecar 的 file_watcher 文件监听器)。",
+    "boundary": "做:订阅事件流、按事件类型重拉对应数据、重连+可观测。不做:不在事件里取数据体(只收『变了』信号、自己重拉)、不因连接/重连/focus 自行重拉、不持第二份真相、不广播(广播归 gateway 后端 sidecar 的 file_watcher 文件监听器)。",
     "api": "WS /ws/events(订阅 registry_changed / roles_changed 事件);重拉走 GET /api/llm/registry(拉凭证/路由打码快照)与 getRoles / getModelGroups。"
   },
   {

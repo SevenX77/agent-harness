@@ -15,8 +15,7 @@ import {
  * It JSON-parses each message and dispatches by `event.type` to the caller's
  * callbacks (registry_changed → onRegistryChanged, roles_changed →
  * onRolesChanged), reconnects forever with exponential backoff + full jitter,
- * and on every successful (re)connect calls `onResync` so the caller refetches
- * once to fill any gap missed while disconnected.
+ * Data refresh is driven by explicit change events, not by socket lifecycle.
  *
  * Resilience replaces the old SettingsPage inline WebSocket which had two empty
  * `catch {}` blocks (logging-rule violation) and no reconnect at all.
@@ -32,12 +31,6 @@ export interface StudioEventStreamCallbacks {
   onRolesChanged: () => void
   /** An endpoint generation probe reported its currently active model atoms. */
   onLlmProbeActive?: (event: { endpointId: string; activeModelIds: string[] }) => void
-  /**
-   * A (re)connection just opened. Caller should refetch once to fill any gap
-   * that may have happened while the socket was down. Fires on the very first
-   * connect too (harmless: it just re-confirms the current data).
-   */
-  onResync: () => void
 }
 
 const CONNECTION_LOST_TICK_MS = 1_000
@@ -189,8 +182,8 @@ export function useStudioEventStream(
       nextSocket.onopen = () => {
         if (cancelled) return
         console.info("phase=studio-event-stream action=connect attempt=%d", attempt + 1)
-        // Successful (re)connect: reset backoff + connection-lost tracking and
-        // refetch once to fill any gap missed while the socket was down.
+        // Successful (re)connect: reset backoff + connection-lost tracking.
+        // Opening a socket is not evidence that the backend truth changed.
         // The auth-failure counter resets too — getting an OPEN frame proves
         // the current token was accepted, so any prior 4401s are stale.
         attempt = 0
@@ -198,7 +191,6 @@ export function useStudioEventStream(
         disconnectedSince = null
         stopLostTicker()
         setConnectionLost((current) => (current ? false : current))
-        callbacksRef.current.onResync()
       }
 
       nextSocket.onmessage = (message) => {

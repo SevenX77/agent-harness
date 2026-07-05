@@ -76,7 +76,6 @@ class FakeWebSocket {
 const noopCallbacks = {
   onRegistryChanged: vi.fn(),
   onRolesChanged: vi.fn(),
-  onResync: vi.fn(),
 }
 
 let container: HTMLDivElement
@@ -113,7 +112,6 @@ beforeEach(() => {
   toastMock.info.mockClear()
   noopCallbacks.onRegistryChanged.mockClear()
   noopCallbacks.onRolesChanged.mockClear()
-  noopCallbacks.onResync.mockClear()
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
   configureApiBaseURL("http://localhost:8787/api")
   configureApiToken("token-initial")
@@ -127,6 +125,31 @@ afterEach(() => {
 })
 
 describe("useStudioEventStream — R-F13 token refresh on reconnect", () => {
+  it("does not dispatch data refresh callbacks on websocket open or reconnect without a change event", () => {
+    mountHook()
+
+    act(() => {
+      FakeWebSocket.instances[0].acceptOpen()
+    })
+
+    expect(noopCallbacks.onRegistryChanged).not.toHaveBeenCalled()
+    expect(noopCallbacks.onRolesChanged).not.toHaveBeenCalled()
+
+    act(() => {
+      FakeWebSocket.instances[0].dropWith(1006)
+    })
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+    const reconnected = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+    act(() => {
+      reconnected.acceptOpen()
+    })
+
+    expect(noopCallbacks.onRegistryChanged).not.toHaveBeenCalled()
+    expect(noopCallbacks.onRolesChanged).not.toHaveBeenCalled()
+  })
+
   it("rebuilds the WebSocket URL with the latest token on every reconnect", () => {
     mountHook()
 

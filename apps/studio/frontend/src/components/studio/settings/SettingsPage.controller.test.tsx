@@ -138,6 +138,33 @@ describe("useSettingsPageController lifecycle", () => {
     expect(vi.mocked(getCredentials).mock.calls[0]?.[0]).toBeUndefined()
   })
 
+  it("does not refetch credentials or roles when the window receives focus", async () => {
+    await act(async () => {
+      root.render(<ControllerProbe />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    vi.mocked(getCredentials).mockClear()
+    vi.mocked(getRoles).mockClear()
+    vi.mocked(getModelGroups).mockClear()
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getCredentials).not.toHaveBeenCalled()
+    expect(getRoles).not.toHaveBeenCalled()
+    expect(getModelGroups).not.toHaveBeenCalled()
+  })
+
   it("waits for the Tauri API token before app-level hydration", async () => {
     ;(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {}
     configureApiToken(null)

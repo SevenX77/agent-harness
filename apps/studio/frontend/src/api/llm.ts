@@ -601,11 +601,17 @@ export interface RolesData {
 
 const redactedSecret = '**********'
 let cachedRegistry: RegistryResponse | null = null
+let registryRequest: Promise<RegistryResponse> | null = null
+let cachedRolesData: RolesData | null = null
+let rolesRequest: Promise<RolesData> | null = null
 const knownEndpointSecrets: Record<string, string> = {}
 const testResultCacheByEndpoint: Record<string, ProviderTestResult[]> = {}
 
 export function resetLlmApiCachesForTests(): void {
   cachedRegistry = null
+  registryRequest = null
+  cachedRolesData = null
+  rolesRequest = null
   for (const endpointId of Object.keys(knownEndpointSecrets)) delete knownEndpointSecrets[endpointId]
   for (const endpointId of Object.keys(testResultCacheByEndpoint)) delete testResultCacheByEndpoint[endpointId]
 }
@@ -1162,6 +1168,7 @@ function hydrateRegistryWithKnownSecrets<T extends CredentialRegistryResponse>(r
 
 function cacheRegistry(registry: CredentialRegistryResponse): RegistryResponse {
   const hydrated = hydrateRegistryWithKnownSecrets(registry)
+  cachedRolesData = null
   cachedRegistry = {
     ...(cachedRegistry ?? {
       model_profiles: {},
@@ -1403,9 +1410,19 @@ export function apiKeysCredentialsFromRegistry(registry: CredentialRegistryRespo
   return registryToCredentials(registry)
 }
 
-export async function getRegistry(): Promise<RegistryResponse> {
-  const response = await api.get<RegistryResponse>('/llm/registry')
-  return cacheRegistry(response.data)
+interface RegistryReadOptions {
+  force?: boolean
+}
+
+export async function getRegistry(options: RegistryReadOptions = {}): Promise<RegistryResponse> {
+  if (!options.force && cachedRegistry) return cachedRegistry
+  if (registryRequest) return registryRequest
+  registryRequest = api.get<RegistryResponse>('/llm/registry')
+    .then((response) => cacheRegistry(response.data))
+    .finally(() => {
+      registryRequest = null
+    })
+  return registryRequest
 }
 
 /**
@@ -1417,11 +1434,14 @@ export async function getRegistry(): Promise<RegistryResponse> {
 export async function syncVerifiedCommunityCatalog(): Promise<VerifiedCatalogSyncResponse> {
   const response = await api.post<VerifiedCatalogSyncResponse>('/llm/catalog/sync-verified')
   cachedRegistry = null
+  registryRequest = null
+  cachedRolesData = null
+  rolesRequest = null
   return response.data
 }
 
-export async function getModelGroups(): Promise<ModelGroup[]> {
-  const registry = cachedRegistry ?? await getRegistry()
+export async function getModelGroups(options: RegistryReadOptions = {}): Promise<ModelGroup[]> {
+  const registry = await getRegistry(options)
   return modelGroupsFromRegistry(registry)
 }
 
@@ -1573,10 +1593,12 @@ export function routeAcceptsImageVerified(route: ProviderRoute): boolean {
 
 export async function getCredentials({
   hydrateSecrets = true,
+  force = false,
 }: {
   hydrateSecrets?: boolean
+  force?: boolean
 } = {}): Promise<CredentialsState> {
-  const registry = hydrateSecrets ? await hydrateEndpointSecrets(await getRegistry()) : await getRegistry()
+  const registry = hydrateSecrets ? await hydrateEndpointSecrets(await getRegistry({ force })) : await getRegistry({ force })
   return registryToCredentials(registry)
 }
 
@@ -1601,7 +1623,7 @@ export async function putCredentials(
   if (Object.keys(providerEndpoints).length > 0) {
     await putRegistryEndpoints(providerEndpoints)
   }
-  const registry = await getRegistry()
+  const registry = await getRegistry({ force: true })
   return registryToCredentials(registry)
 }
 
@@ -1806,10 +1828,18 @@ export function providerModelsFromRegistry(
   return routesForEndpoint(registry, endpointId).map(modelInfoFromRoute)
 }
 
-export async function getRoles(): Promise<RolesData> {
-  const response = await api.get<RolesData>('/llm/roles')
-  const registry = cachedRegistry ?? await getRegistry()
-  return rolesDataFromBackend(response.data, registry)
+export async function getRoles(options: RegistryReadOptions = {}): Promise<RolesData> {
+  if (!options.force && cachedRolesData) return cachedRolesData
+  if (rolesRequest) return rolesRequest
+  rolesRequest = (async () => {
+    const response = await api.get<RolesData>('/llm/roles')
+    const registry = await getRegistry(options)
+    cachedRolesData = rolesDataFromBackend(response.data, registry)
+    return cachedRolesData
+  })().finally(() => {
+    rolesRequest = null
+  })
+  return rolesRequest
 }
 
 export async function getRole(roleName: string): Promise<RoleEntry> {
@@ -1850,19 +1880,22 @@ export async function getFixedRoleStatus(roleName: string): Promise<FixedRoleSta
 export async function putRoles(data: RolesData): Promise<RolesData> {
   const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
   const registry = cachedRegistry ?? await getRegistry()
-  return rolesDataFromBackend(response.data, registry)
+  cachedRolesData = rolesDataFromBackend(response.data, registry)
+  return cachedRolesData
 }
 
 export async function deleteRole(roleName: string): Promise<RolesData> {
   const response = await api.delete<RolesData>(`/llm/roles/${segment(roleName)}`)
   const registry = cachedRegistry ?? await getRegistry()
-  return rolesDataFromBackend(response.data, registry)
+  cachedRolesData = rolesDataFromBackend(response.data, registry)
+  return cachedRolesData
 }
 
 export async function deleteModelBundle(bundleId: string): Promise<RolesData> {
   const response = await api.delete<RolesData>(`/llm/model-bundles/${segment(bundleId)}`)
   const registry = cachedRegistry ?? await getRegistry()
-  return rolesDataFromBackend(response.data, registry)
+  cachedRolesData = rolesDataFromBackend(response.data, registry)
+  return cachedRolesData
 }
 
 export async function testRole(roleName: string): Promise<RoleTestResponse> {

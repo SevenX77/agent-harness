@@ -28,7 +28,7 @@
       "n": 3,
       "cap": "settings-tab-switch",
       "design_ref": "atom-3",
-      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 按它渲染对应 tab、导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)。懒加载用多个绑 activeTab 的 useEffect(React 副作用钩子):切到 api_keys 且未 hydrate 过(credentialsHydratedRef 这个标志为假)才首次 getCredentials() 取明文 hydrate;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉。注:凭证的打码快照在壳层挂载时由一个无条件 useEffect getCredentials({hydrateSecrets:false}) 先拉一次(供各 tab 共用),按 tab 懒加载的是 API Keys 的明文 hydrate 与 Roles 的角色/模型组。",
+      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 按它渲染对应 tab、导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)。按需加载用多个绑 activeTab 的 useEffect(React 副作用钩子):壳层挂载时先 getCredentials({hydrateSecrets:false}) 拉一次打码摘要快照;切到 api_keys 且未 hydrate 过(credentialsHydratedRef 这个标志为假)才首次 getCredentials() 取明文 hydrate;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉;窗口 focus 和 WebSocket 重连都不触发重拉。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -48,17 +48,17 @@
       "n": 5,
       "cap": "ws-registry-refresh",
       "design_ref": "atom-5",
-      "current": "现状:刷新可用,但韧性偏差。SettingsPage 挂载时一个 useEffect(React 副作用钩子)开 WebSocket 连 wsUrl('/ws/events')(client.ts 里把相对路径拼成完整 WebSocket 地址的函数)。socket.onmessage(收到一条事件的回调)里 JSON.parse 事件、判 event.type==='registry_changed' 就 getCredentials({hydrateSecrets:...}) 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。偏差点:onmessage 内层有 try{...}catch{ // ignore }、外层建连也 try{...}catch{ // ignore }——两处空 catch 静默吞异常(违 logging 铁律);effect 清理只 socket.close(),断开后没有任何重连逻辑。",
+      "current": "现状:已实现且符合。SettingsPage 通过 useStudioEventStream(带退避重连和可观测日志的事件流 hook)连 wsUrl('/ws/events')(client.ts 里把相对路径拼成完整 WebSocket 地址的函数)。收到 registry_changed 才调用 getCredentials({hydrateSecrets:..., force:true}) 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿。WebSocket open/reconnect 只更新连接健康态和恢复订阅,不调用数据刷新回调。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。窗口 focus 已不再触发 registry 重拉。",
       "gap": "✅ 本次已实施并通过两层测试,符合设计。",
       "fe_status": "符合",
       "be_status": "已实现",
-      "be_dep": "已就绪可接(后端不需改)。/ws/events 通道(websockets.studio_events)+ file_watcher 广播 registry_changed 已实现;重拉走 GET /api/llm/registry(已实现)。前端缺的是重连 + 可观测,与后端无关。"
+      "be_dep": "已就绪可接(后端不需改)。/ws/events 通道(websockets.studio_events)+ file_watcher 广播 registry_changed 已实现;重拉走 GET /api/llm/registry(已实现)。前端侧重连、可观测日志、连接/重连不重拉也已在 useStudioEventStream 收口。"
     },
     {
       "n": 6,
       "cap": "ws-roles-refresh",
       "design_ref": "atom-6",
-      "current": "现状:刷新可用但会吞事件,且与 #5 同源的韧性偏差。同一条 /ws/events WebSocket 里,event.type==='roles_changed' 且 rolesDataRef.current 非空(即角色数据已加载过)才 Promise.all([getRoles, getModelGroups]) 重拉角色 + 模型组。后端侧 file_watcher 的 _handle_path 比对路径是角色文件就 broadcast roles_changed。偏差点:① 只有 rolesDataRef 非空才响应——没开过 LLM Roles / Copilot tab 的话角色数据未加载,roles_changed 被直接吞掉(下次进 tab 拉的是当时的新值,但事件本身没留痕);② 与 #5 共用同一段空 catch 静默 + 无重连。",
+      "current": "现状:已实现且符合。同一条 /ws/events WebSocket 里,收到 roles_changed 后如果 rolesDataRef.current 非空(即角色数据已加载过),就 Promise.all([getRoles({force:true}), getModelGroups({force:true})]) 重拉角色 + 模型组;如果角色数据尚未加载,只把 rolesDirtyRef 标记为 true,下次进入 LLM Roles / Copilot tab 时消费这个 dirty 标志并首次拉取。WebSocket open/reconnect 不触发角色重拉。后端侧 file_watcher 的 _handle_path 比对路径是角色文件就 broadcast roles_changed。",
       "gap": "✅ 本次已实施并通过两层测试,符合设计。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -119,7 +119,7 @@
     },
     {
       "step": 4,
-      "what": "#5 ws-registry-refresh + #6 ws-roles-refresh:把 SettingsPage 那条 /ws/events WebSocket 抽成带重连(指数退避:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter 全抖动;永久重试不设放弃上限,连不上就一直按封顶后的间隔重试;重连成功重拉一次补漏)+ 可观测日志(连接 INFO / 断开重连 WARNING / 解析失败 ERROR)的逻辑;去掉两处空 catch 静默;roles_changed 不被「角色未加载过」吞掉(标脏下次进 tab 重拉);配「连接不上」用户警告标志(放壳层顶栏 SettingsPageContent 标题栏、保存徽章 SaveStatusBadge 右侧;触发阈值:连续失败 ≥3 次 或 累计 >10s 仍未连上才显示,避免瞬断闪烁,重连成功立即消失)。",
+      "what": "#5 ws-registry-refresh + #6 ws-roles-refresh:把 SettingsPage 那条 /ws/events WebSocket 抽成带重连(指数退避:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter 全抖动;永久重试不设放弃上限,连不上就一直按封顶后的间隔重试)+ 可观测日志(连接 INFO / 断开重连 WARNING / 解析失败 ERROR)的逻辑;去掉两处空 catch 静默;连接/重连只恢复订阅、不重拉数据;registry_changed/roles_changed 才强制刷新对应真相;roles_changed 不被「角色未加载过」吞掉(标脏下次进 tab 重拉);配「连接不上」用户警告标志(放壳层顶栏 SettingsPageContent 标题栏、保存徽章 SaveStatusBadge 右侧;触发阈值:连续失败 ≥3 次 或 累计 >10s 仍未连上才显示,避免瞬断闪烁,重连成功立即消失)。",
       "depends_on": "前端:重写这条 WebSocket 的连接/重连/事件分发。后端事件源(/ws/events + file_watcher)已就绪、不动。",
       "why": "#5/#6 共用同一条 WebSocket,必须一起改(分开改会互相踩同一段 effect);它修的是韧性(重连)+ 合规(logging 铁律去空 catch),独立于前三步、放最后做收口。",
       "block": "前端独立"
@@ -233,19 +233,20 @@
       ],
       "shots": [
         "外部改凭证文件后界面自动刷新(无需手动)",
-        "WebSocket 断开后自动重连、重连成功后重拉一次",
+        "WebSocket 断开后自动重连、重连成功只恢复订阅不重拉",
         "连接不上时显示「连接不上」警告标志"
       ],
       "fe_status": "符合",
       "layer1": [
-        "mock WebSocket,推 {type:'registry_changed'} → 断言触发 getCredentials 重拉 + 重建草稿。",
-        "推 {type:'roles_changed'} → 断言触发 getRoles+getModelGroups 重拉(且不因角色未加载被吞)。",
-        "RED:当前 onmessage/建连为空 catch 静默、断开无重连 → 断言『断开后重连』『解析失败有日志』失败。",
+        "mock WebSocket,推 {type:'registry_changed'} → 断言触发 getCredentials({force:true}) 重拉 + 重建草稿。",
+        "推 {type:'roles_changed'} → 断言触发 getRoles({force:true})+getModelGroups({force:true}) 重拉(且不因角色未加载被吞)。",
+        "打开 / 重连 WebSocket 但不推变更事件 → 断言不触发 getCredentials/getRoles/getModelGroups。",
+        "RED(回归防线):旧实现 onmessage/建连为空 catch 静默、断开无重连 → 断言『断开后重连』『解析失败有日志』失败。",
         "GREEN:模拟 socket 断开 → 断言按退避重连;模拟解析异常 → 断言记 ERROR 日志(非空 catch)。"
       ],
       "layer2": [
         "真跑(关键):开两个窗口/进程,在外部真改凭证文件,看 Settings 界面是否自动刷新。",
-        "真跑:手动断开后端再恢复,看 WebSocket 是否自动重连并补刷新、断开期间是否显示「连接不上」警告。"
+        "真跑:手动断开后端再恢复,看 WebSocket 是否自动重连、是否不因重连本身重拉数据、断开期间是否显示「连接不上」警告。"
       ],
       "screenshots": [
         {

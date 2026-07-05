@@ -6,6 +6,13 @@ import {
   templatableAgentNodeIds,
 } from "./node-golden"
 
+const EMPTY_PREDICT_DIAGNOSTICS = {
+  error: null,
+  diagnostics: [],
+  diagnostics_truncated: false,
+  diagnostic_counts: {},
+}
+
 function goldenCase(nodeId: string): GoldenBaselineCase {
   return {
     case_id: `${nodeId}-case`,
@@ -70,6 +77,7 @@ describe("ranAgentNodesFromPredict (agent-only filter from phases presence)", ()
       is_predict: true,
       status: "success",
       path_diff: null,
+      ...EMPTY_PREDICT_DIAGNOSTICS,
       phases: [
         { phase_name: "setup", type: "logic", inputs: {}, outputs: {}, mocked_source: null },
         { phase_name: "draft", type: "llm", inputs: {}, outputs: {}, mocked_source: "heuristic_stub" },
@@ -83,7 +91,13 @@ describe("ranAgentNodesFromPredict (agent-only filter from phases presence)", ()
   it("returns an empty set for null / phases-less payloads", () => {
     expect(ranAgentNodesFromPredict(null)).toEqual(new Set())
     expect(
-      ranAgentNodesFromPredict({ is_predict: true, status: "success", path_diff: null, phases: [] }),
+      ranAgentNodesFromPredict({
+        is_predict: true,
+        status: "success",
+        path_diff: null,
+        phases: [],
+        ...EMPTY_PREDICT_DIAGNOSTICS,
+      }),
     ).toEqual(new Set())
   })
 })

@@ -98,10 +98,31 @@ export function errorDiagnosticDetails(error: unknown): string[] {
     if (error.code) {
       details.push(`Axios code: ${error.code}`)
     }
+    const payload = error.response?.data as Partial<ErrorResponse> | undefined
+    if (typeof payload?.error_code === 'string') {
+      details.push(`Backend error code: ${payload.error_code}`)
+    }
+    if (typeof payload?.retry_strategy === 'string') {
+      details.push(`Retry strategy: ${payload.retry_strategy}`)
+    }
+    if (typeof payload?.message === 'string' && payload.message !== error.message) {
+      details.push(`Backend message: ${payload.message}`)
+    }
+    if (isRecord(payload?.details)) {
+      details.push(`Backend details:\n${formatDiagnosticJson(payload.details)}`)
+    }
     details.push(`Original error: ${error.message}`)
     return details
   }
   return []
+}
+
+function formatDiagnosticJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 function currentFrontendOrigin(): string | null {

@@ -26,21 +26,21 @@
    "n": 3,
    "cap": "predict-logic-vs-agent-mock",
    "design_ref": "n4-atom-3",
-   "current": "现状：已实现且符合（后端 live）。前端 postPredictRun 请求只带 input_data、不带 mock_llm。后端引擎装配带 SDKPredictContext 的图：logic 节点真跑；agent 节点 runner.resolve_generation 按 has_golden_case → golden_case（有 golden）/ heuristic_stub（无 golden）。已对引擎核实（packages/graph-agent core/runner.py resolve_generation）。",
+   "current": "现状：已实现且符合（后端 live）。前端 postPredictRun 请求只带 input_data、不带 mock_llm。后端引擎装配带 SDKPredictContext 的图：logic 节点真跑；agent 节点 runner.resolve_generation 按 has_golden_case → golden_case（有 golden）/ heuristic_stub（无 golden）。本轮修正 engine Predict 链路：JSON Schema enum 先映射为 Literal，不再被误判成 list shorthand；agent mock 输出改为 fenced JSON，避免数组/对象被 markdown 解析打散；heuristic_stub 对数组对象生成 1 个结构化样例，并给 start_line/end_line/index/chapter_number 这类字段填可通过验证的值。已用 text-segmentation 真侧车 predict 验证 setup/segment/review 成功。",
    "gap": "符合设计，无需改。前端职责仅『不带 mock_llm、把决策交后端』，已做到。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。引擎 predict_artifact + resolve_generation（mock-by-golden）live。"
+   "be_dep": "已就绪可接。引擎 predict_artifact + resolve_generation（mock-by-golden / heuristic_stub）live；SchemaEngine enum、PredictGateway fenced JSON、heuristic_stub 结构化样例已补测试覆盖。"
   },
   {
    "n": 4,
    "cap": "predict-pass-unlock-run",
    "design_ref": "n4-atom-4",
-   "current": "现状：已实现且符合。Workspace.tsx 的 handlePredict 只在 postPredictRun 返回 PredictDiagnosticExport.status==='success' 时 updateStage('predict-pass') 点亮 Run；status!=='success' 时清掉旧的 logic-OK 节点、进 predict-fail、保留 toast 摘要，并把 path_diff 规范化成 CompileError[] 打开 CompileErrorDrawer(kind='predict')。请求失败也进同一条诊断链：compile_failed errors 会原样进入抽屉；网络/sidecar 不可达会被 client.ts 统一保留为 BackendUnavailableError，Workspace 通过 errorDiagnosticDetails 转成 CompileError.details，抽屉展示请求方法、完整 URL、API base、frontend origin、Axios code 与原始错误消息。后端 predict pass 仍只在 result.success 为真时记录，前后端门一致。",
-   "gap": "符合设计，无需改。注意：Backend unavailable 这类错误没有后端响应体，但必须展示前端仍能掌握的请求上下文（method/url/base/origin/code/original message）；本页要求它进入持久可复制抽屉，而不是只出现在 toast。",
+   "current": "现状：已实现且符合。Workspace.tsx 的 handlePredict 只在 postPredictRun 返回 PredictDiagnosticExport.status==='success' 时 updateStage('predict-pass') 点亮 Run；status!=='success' 时清掉旧的 logic-OK 节点、进 predict-fail、保留 toast 摘要，并优先把 PredictDiagnosticExport.error/diagnostics 规范化成 CompileErrorDrawer(kind='predict')，没有 engine diagnostics 时才回退 path_diff。请求失败也进同一条诊断链：compile_failed errors 会原样进入抽屉；HTTP structured ErrorResponse 会列 Backend error code / Retry strategy / Backend message / Backend details；no-response BackendUnavailableError 会展示 Request、API base URL、Frontend origin、Axios code 与原始错误。后端 predict pass 仍只在 result.success 为真时记录，前后端门一致。",
+   "gap": "符合设计，无需改。注意：真正没有 HTTP 响应时只能展示前端掌握的连接上下文；有后端/engine 结构化错误时必须展示 engine code、message、phase、field、doc/source/details，而不是吞成 Backend unavailable。",
    "fe_status": "符合",
-   "be_dep": "已就绪可接。Studio sidecar 返回 PredictDiagnosticExport(status/phases/path_diff)；后端 record_predict_pass/has_passing_predict + 服务端 Run 门已实现且与前端 status 判定一致。",
+   "be_dep": "已就绪可接。Studio sidecar 返回 PredictDiagnosticExport(status/phases/path_diff/error/diagnostics/diagnostics_truncated/diagnostic_counts)；PredictArtifactError/PredictDeadlockError 会投影成结构化 HTTP 错误；后端 record_predict_pass/has_passing_predict + 服务端 Run 门已实现且与前端 status 判定一致。",
    "fe_status_prev": "偏差",
-   "fe_resync": "已修复并测试通过(batch1, 2026-06-20)"
+   "fe_resync": "覆盖的功能点已全部符合(2026-07-05；追加 engine diagnostics drawer + sidecar 真链路验证)"
   },
   {
    "n": 5,
@@ -127,22 +127,32 @@
    "fe_status": "符合",
    "layer1": [
     "status==='success' → 断言 updateStage(predict-pass) 点亮 Run，并清空旧 predict 诊断。",
-    "status==='failed' 且 path_diff 有缺失/多余/乱序 → 断言进 predict-fail、Run 仍灰、toast 给摘要、CompileErrorDrawer(kind='predict') 打开并展示 expected/actual/missing/extra。",
-    "postPredictRun reject BackendUnavailableError → 断言进 predict-fail，底部抽屉标题为 '1 predict error'，详情含 Backend unavailable、Request、API base URL、Axios code、Original error，且存在 'Copy all predict errors'。",
+    "status==='failed' 且 response.error/diagnostics 存在 engine payload → 断言进 predict-fail、Run 仍灰、toast 给摘要、CompileErrorDrawer(kind='predict') 打开并展示 code/message/phase/field/doc/details。",
+    "status==='failed' 且只有 path_diff → 断言进 predict-fail、Run 仍灰、toast 给摘要、drawer 展示 expected/actual/missing/extra。",
+    "postPredictRun reject structured ErrorResponse → 断言 drawer 展示 Backend error code / Retry strategy / Backend message / Backend details。",
+    "postPredictRun reject BackendUnavailableError(no response) → 断言 drawer 详情含 Backend unavailable、Request、API base URL、Axios code、Original error。",
     "后端契约测：业务失败 predict 不写 last_predict.json；成功才写、content_hash=当前编译 hash。"
    ],
    "layer2": [
-    "业务失败 predict（status='failed'）后 Run 仍灰 + 底部 predict 诊断抽屉可见；业务成功（status='success'）后才点亮 Run。",
+    "真侧车(8792)+worktree Vite(5175)：无测试输入点 Predict，底部 predict 诊断抽屉展示 [F-v3-runtime-phase-failed]、缺失 blackboard 字段 chapter 与 doc 引用，Run 仍灰。",
+    "真侧车直连 POST /api/skills/text-segmentation/runs/predict，传合法 chapter/chapters，返回 status=success、phases=setup/segment/review、error=null、diagnostics=[]。",
     "sidecar/backend 不可达时点 Predict：toast 显示 'Predict failed: Backend unavailable'，同时底部抽屉停留展示同一 fatal 诊断及请求 URL / Axios code / 原始错误消息，可复制。",
     "改图重编后真去 Run，看服务端门是否要求重 Predict。"
    ],
    "shots": [
-    "业务失败 predict 后 Run 仍灰 + predict 诊断抽屉展示 path_diff 详情",
+    "engine 业务失败 predict 后 Run 仍灰 + predict 诊断抽屉展示 code/message/doc/details",
+    "业务失败 predict 后 path_diff 回退详情仍可见",
     "Backend unavailable 后 toast 摘要 + predict 诊断抽屉展示可复制 fatal 详情与请求上下文",
     "业务成功后 Run 点亮；改图后需重 Predict"
    ],
    "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-07-04；追加 predict failure drawer 覆盖)"
+   "fe_resync": "覆盖的功能点已全部符合(2026-07-04；追加 predict failure drawer 覆盖)",
+   "screenshots": [
+    {
+     "file": "n4-predict-engine-diagnostics-drawer.png",
+     "caption": "真机(worktree Vite 5175 + 私有 sidecar 8792)：text-segmentation 编译后在未选择测试输入时点 Predict，底部 CompileErrorDrawer(kind='predict') 自动展开，标题为『1 predict error』，主行展示 [F-v3-runtime-phase-failed]，详情展示缺失 blackboard 字段 chapter 与 engine doc 引用；Run 仍灰，说明失败没有被误放行为 predict-pass。"
+    }
+   ]
   },
   {
    "covers": "#5 gating-reason-text（偏差 · RED 待转 GREEN）",

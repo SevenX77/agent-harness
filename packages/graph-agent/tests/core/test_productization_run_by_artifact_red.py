@@ -226,6 +226,98 @@ Call @tool:finish_task with the answer.
     )
 
 
+def _write_complex_agent_skill(root: Path) -> None:
+    _write_text(
+        root / "GRAPH.md",
+        """---
+schema_version: "v0.3.0"
+name: artifact-runtime-predict-complex-agent
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      parsed_segments:
+        type: array
+        items:
+          type: object
+          required: [index, type, start_line, end_line, description]
+          properties:
+            index:
+              type: integer
+            type:
+              type: string
+              enum: [A, B, C]
+            start_line:
+              type: integer
+            end_line:
+              type: integer
+            description:
+              type: string
+      segmentation_result:
+        type: object
+      segments_summary:
+        type: string
+phases:
+  - segment
+---
+<phase depends_on="input" output>segment</phase>
+""",
+    )
+    _write_text(
+        root / "phases" / "segment" / "SKILL.md",
+        """---
+llm_role: analyst
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    required: [parsed_segments, segmentation_result, segments_summary]
+    properties:
+      parsed_segments:
+        type: array
+        items:
+          type: object
+          required: [index, type, start_line, end_line, description]
+          properties:
+            index:
+              type: integer
+            type:
+              type: string
+              enum: [A, B, C]
+            start_line:
+              type: integer
+            end_line:
+              type: integer
+            description:
+              type: string
+      segmentation_result:
+        type: object
+      segments_summary:
+        type: string
+tools:
+  - finish_task
+max_iterations: 2
+---
+<role>
+You segment text.
+</role>
+
+<goal>
+Call @tool:finish_task with parsed_segments, segmentation_result, and segments_summary.
+</goal>
+""",
+    )
+
+
 class FailIfInvokedProvider:
     def __init__(self) -> None:
         self.calls = 0
@@ -475,6 +567,53 @@ def test_predict_artifact_agent_phase_never_invokes_live_llm_provider(
     assert result["source"] == "predict"
     assert result["success"] is True
     assert result["context"]["answer"] == "mocked-agent-answer"
+
+
+def test_predict_artifact_agent_phase_accepts_complex_mock_payload(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    runner = importlib.import_module("graph_agent.core.runner")
+    skill_root = tmp_path / "artifact-runtime-predict-complex-agent"
+    _write_complex_agent_skill(skill_root)
+    manifest = compile_artifact(source_root=skill_root, skill_resolver=mock_skill_resolver)
+    workspace_dir = tmp_path / "workspace"
+    mock_payload = {
+        "parsed_segments": [
+            {
+                "description": "opening",
+                "end_line": 2,
+                "index": 1,
+                "start_line": 1,
+                "type": "B",
+            }
+        ],
+        "segmentation_result": {"chapter": 1, "ok": True},
+        "segments_summary": "one segment",
+    }
+
+    request = PredictArtifactRequest(
+        artifact_ref=manifest.artifact_ref,
+        inputs={"topic": "complex"},
+        execution_context={
+            "artifact_root": str(skill_root),
+            "workspace_dir": str(workspace_dir),
+            "thread_id": "artifact-agent-predict-complex",
+            "mock_llm": {"segment": mock_payload},
+        },
+        idempotency_key="idem-agent-predict-complex",
+    )
+
+    session = runner.predict_artifact(request, skill_resolver=mock_skill_resolver)
+
+    assert isinstance(session, RunSession)
+    result_path = workspace_dir / "runs" / session.run_id / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["source"] == "predict"
+    assert result["success"] is True
+    assert result["context"]["parsed_segments"] == mock_payload["parsed_segments"]
+    assert result["context"]["segmentation_result"] == mock_payload["segmentation_result"]
+    assert result["context"]["segments_summary"] == "one segment"
 
 
 def test_predict_graph_resolves_engine_predict_model_before_live_provider(

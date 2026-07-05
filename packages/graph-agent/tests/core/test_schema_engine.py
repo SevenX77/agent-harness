@@ -369,6 +369,19 @@ class TestEdgeCaseInputsT8:
 
         assert {n for n, _ in schema.fields} == {"tags"}
 
+    def test_json_object_schema_string_enum_maps_to_literal(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md(
+            '{"properties": {"kind": {"type": "string", "enum": ["A", "B", "C"]}}, '
+            '"required": ["kind"]}'
+        )
+        model = engine.get_pydantic_model(schema)
+
+        assert model.model_validate({"kind": "A"}).model_dump() == {"kind": "A"}
+        with pytest.raises(ValueError, match="Input should be 'A', 'B' or 'C'"):
+            model.model_validate({"kind": "D"})
+
     def test_json_invalid_raises_schema_parse_error(self) -> None:
         engine = SchemaEngine()
 

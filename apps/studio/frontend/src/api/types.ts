@@ -374,11 +374,28 @@ export interface PhaseRecord {
   mocked_source: MockedSource | null
 }
 
+export interface EngineErrorPayload {
+  code: string
+  level: string | null
+  stage: string[] | null
+  message: string
+  doc_link: string | null
+  skill_id: string | null
+  phase_id: string | null
+  field_path: string | null
+  source_path: string | null
+  details: JsonObject
+}
+
 export interface PredictDiagnosticExport {
   is_predict: boolean
   status: 'success' | 'failed'
   phases: PhaseRecord[]
   path_diff: PathDiff | null
+  error: EngineErrorPayload | null
+  diagnostics: EngineErrorPayload[]
+  diagnostics_truncated: boolean
+  diagnostic_counts: JsonObject
 }
 
 /**

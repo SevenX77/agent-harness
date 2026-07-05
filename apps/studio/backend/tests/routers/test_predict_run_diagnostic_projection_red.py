@@ -12,8 +12,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from app.core.adapters.engine import PathDiff, PhaseRecord, RunResult
+from app.core.adapters.engine import PathDiff, PhaseRecord, RunResult, make_error_payload
 from app.services import predictor as predictor_module
+from app.services.predictor import PredictArtifactError
 from fastapi.testclient import TestClient
 
 
@@ -71,8 +72,17 @@ def test_predict_endpoint_returns_diagnostic_export_phases(
 
     assert response.status_code == 200
     body: dict[str, Any] = response.json()
-    # PredictDiagnosticExport contract — exactly these keys (extra='forbid').
-    assert set(body.keys()) == {"is_predict", "status", "phases", "path_diff"}
+    # PredictDiagnosticExport contract: the frontend gets path and engine diagnostics.
+    assert set(body.keys()) == {
+        "diagnostic_counts",
+        "diagnostics",
+        "diagnostics_truncated",
+        "error",
+        "is_predict",
+        "path_diff",
+        "phases",
+        "status",
+    }
     assert body["is_predict"] is True
     assert body["status"] == "success"
     phase_names = [phase["phase_name"] for phase in body["phases"]]
@@ -98,3 +108,85 @@ def test_predict_endpoint_does_not_leak_runresult_only_fields(
     body = response.json()
     for run_only_field in ("run_id", "success", "metrics", "context", "skill_id"):
         assert run_only_field not in body
+
+
+def test_predict_endpoint_returns_engine_diagnostics_for_failed_status(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine_error = make_error_payload(
+        "[F-v3-agent-exit-control-failed]",
+        "Phase 'segment' failed: max iterations (2) reached without a valid finish_task marker.",
+        phase_id="segment",
+        field_path="business_data_md",
+    )
+    monkeypatch.setattr(
+        predictor_module.predictor_service,
+        "dispatch_predict_job",
+        lambda *args, **kwargs: RunResult(
+            success=False,
+            run_id="predict-diagnostics",
+            skill_id="text-segmentation",
+            context={},
+            source="predict",
+            phases=[],
+            path_diff=None,
+            error=engine_error,
+        ),
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs/predict",
+        json={"input_data": {"input_text": "hi"}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["error"]["code"] == "[F-v3-agent-exit-control-failed]"
+    assert body["error"]["phase_id"] == "segment"
+    assert body["error"]["field_path"] == "business_data_md"
+    assert body["diagnostics"] == [body["error"]]
+    assert body["diagnostic_counts"]["total"] == 1
+
+
+def test_predict_endpoint_projects_engine_artifact_errors(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Engine predict failures must reach the frontend as structured diagnostics."""
+
+    def raise_engine_error(*_args: Any, **_kwargs: Any) -> RunResult:
+        raise PredictArtifactError(
+            "engine.schema_invalid",
+            {"message": "List schema shorthand must contain exactly one item type"},
+            run_id="predict-error-1",
+            retryable=False,
+        )
+
+    monkeypatch.setattr(
+        predictor_module.predictor_service,
+        "dispatch_predict_job",
+        raise_engine_error,
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs/predict",
+        json={"input_data": {"input_text": "hi"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error_code": "PREDICT_FAILED",
+        "http_status": 422,
+        "message": "List schema shorthand must contain exactly one item type",
+        "details": {
+            "engine_error_code": "engine.schema_invalid",
+            "engine_error_payload": {
+                "message": "List schema shorthand must contain exactly one item type"
+            },
+            "retryable": False,
+            "run_id": "predict-error-1",
+        },
+        "retry_strategy": "not_retryable",
+    }

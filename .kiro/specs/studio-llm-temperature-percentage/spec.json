@@ -1,0 +1,24 @@
+{
+  "feature_name": "studio-llm-temperature-percentage",
+  "created_at": "2026-07-04T00:00:00Z",
+  "updated_at": "2026-07-04T00:00:00Z",
+  "language": "zh",
+  "phase": "design_blocked",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": false
+    },
+    "design": {
+      "generated": true,
+      "approved": false
+    },
+    "tasks": {
+      "generated": true,
+      "approved": false
+    }
+  },
+  "ready_for_implementation": false,
+  "blocked_on": "OPEN DECISION A(线性 remap) vs B(clamp) — 见 design.md §5;方向未定前不进实现。默认推荐 A。",
+  "worktree": "feat/temperature-percentage (cut from origin/main)"
+}

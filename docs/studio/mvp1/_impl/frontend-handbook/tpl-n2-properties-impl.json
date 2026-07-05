@@ -65,10 +65,10 @@
       "n": 22,
       "cap": "llm-role-graph-default-switch",
       "design_ref": "n2-atom-22",
-      "current": "现状:已实现且符合。开关绑 PhaseFrontmatterFormData.useGraphLlmRole(phase-frontmatter.ts 解析/序列化 use_graph_llm_role,开=写 true、关=删键,节点 llm_role 原样保留);开时 Run role 整行 disable(data-llm-role-row-disabled,下拉/齿轮/烧瓶全禁),开关行小齿轮 data-llm-role-graph-trigger 经 onSelectGraph(Workspace handleNodeDeselect)跳 graph 面板;GraphFrontmatterForm llm_role 行新增独立 RoleTestControl(graphRoleTest 状态)。engine 生效链 manifest.effective_llm_role:开→graph→graph_agent,关→node→graph→graph_agent(test_llm_role_layering.py 11 测)。 2026-07-05 ????? Model params temperature: LlmNodeParamsField ?????????(0.7=>35%), HelpTooltip ?? Studio 0-100%/??? 0..2/Anthropic runtime remap, onValueChange ????? draft ? debounce putNodeLlmParams, onValueCommit flush ?????",
-      "gap": "无。此前『Use graph default』是不落盘的本地 useState、只影响 Test 目标,且 GRAPH.md 写 llm_role 会被 engine extra=forbid 编译拒绝——两处已按设计重做。 ??????????? debounce ???, ?????????",
+      "current": "现状:已实现且符合。开关绑 PhaseFrontmatterFormData.useGraphLlmRole(phase-frontmatter.ts 解析/序列化 use_graph_llm_role,开=写 true、关=删键,节点 llm_role 原样保留);开时 Run role 整行 disable(data-llm-role-row-disabled,下拉/齿轮/烧瓶全禁),开关行小齿轮 data-llm-role-graph-trigger 经 onSelectGraph(Workspace handleNodeDeselect)跳 graph 面板;GraphFrontmatterForm llm_role 行新增独立 RoleTestControl(graphRoleTest 状态)。engine 生效链 manifest.effective_llm_role:开→graph→graph_agent,关→node→graph→graph_agent(test_llm_role_layering.py 11 测)。2026-07-05 补齐 Agent Model params: LlmNodeParamsField(PropertiesPanel.tsx)新增 Custom model params Switch,默认 off=完全继承 role;打开后写 PUT /node-llm-params 的 enabled=true,每个空字段仍逐项继承。temperature 用 shadcn Slider + 百分比读数(0.7=>35%);node 参数保存用 300ms debounce + SaveStatusBadge;存储在 skill 的 .workspace/node_llm_params.json,不是 SKILL.md 或 llm_roles.yaml。runtime 只读取 enabled=true 的 node entry,把 thinking/max_output_tokens/temperature 作为 call override 传给 gateway。",
+      "gap": "无。此前『Use graph default』是不落盘的本地 useState、只影响 Test 目标,且 GRAPH.md 写 llm_role 会被 engine extra=forbid 编译拒绝——两处已按设计重做。node model params 也已闭合:默认继承 role,显式开关后才保存/生效,保存有可见状态且不会把所有 node 默认变成自定义。",
       "fe_status": "符合",
-      "be_dep": "engine 字段 + 生效链已随同一 PR 落地(GraphManifest.llm_role / AgentNodeAST.use_graph_llm_role / effective_llm_role,mypy --strict + 全量 pytest 绿)。 ?????? putNodeLlmParams ?? provider-neutral 0..2 ???; gateway runtime ??? provider-scale ???"
+      "be_dep": "engine 字段 + 生效链已随同一 PR 落地(GraphManifest.llm_role / AgentNodeAST.use_graph_llm_role / effective_llm_role,mypy --strict + 全量 pytest 绿)。node 参数通过 Studio backend node_llm_params.py 持久化到 .workspace/node_llm_params.json;engine adapter 的 _node_param_overrides 只接受 enabled=true;gateway runtime 通过 runtime_setting_sources 区分 role default 与 call/node override,trace metadata 的 actual_runtime_settings 展示真实调用值。"
     }
   ],
   "plan": [
@@ -247,16 +247,18 @@
         22
       ],
       "shots": [
-        "Authoring -> event-extraction -> review Agent -> Properties -> Model params: unset temperature reads ?, ? tooltip explains provider remap, keyboard slider changes to 55%."
+        "Authoring -> event-extraction -> review Agent -> Properties -> Model params: Custom model params off by default, fields disabled and inherited; turning it on autosaves enabled=true, temperature reads as a percent and SaveStatusBadge reaches Saved."
       ],
-      "fe_status": "??",
-      "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (Vite 5175, private sidecar 8788) using a temporary browser-only opener that was reverted before commit; node override was cleared via API after verification. Automated coverage is PropertiesPanel.autosave.test.tsx + useDebouncedCallback.test.tsx.",
+      "fe_status": "符合",
+      "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (Vite 5177, private sidecar 8789) using disposable .workspace node override state; node override was cleared via API after verification. Automated coverage is PropertiesPanel.autosave.test.tsx, PropertiesPanel.fields.test.tsx, backend node_llm_params tests, and gateway actual_runtime_settings tests.",
       "layer1": [
-        "PropertiesPanel.autosave.test.tsx: mock getNodeLlmParams ?? temperature=0.7, ?? Agent ????? data-llm-node-temperature ??????? >35%<, ??? >0.7<?",
-        "useDebouncedCallback.test.tsx: debounce ??????, commit flush, cancel/unmount ? stale ???"
+        "PropertiesPanel.fields.test.tsx: nodeLlmParamsDraftFromApi/ToApi maps enabled=false to null fields and enabled=true to field-by-field overrides.",
+        "PropertiesPanel.autosave.test.tsx: toggling Custom model params calls putNodeLlmParams with enabled=true and null inherited fields, then shows data-llm-node-params-save-status='saved'.",
+        "PropertiesPanel.autosave.test.tsx: mocked temperature=0.7 renders the Slider percent readout as 35%, not raw 0.7.",
+        "backend test_node_llm_params.py + test_node_param_overrides.py: enabled=false clears/ignores a node entry; enabled=true persists even when all fields inherit; runtime adapter passes only enabled node fields to resolver."
       ],
       "layer2": [
-        "2026-07-05 wt-dev --backend: open event-extraction, select review Agent, Properties -> Model params shows temperature ?; ? tooltip shows provider remap copy; ArrowRight changes readout to 55%; cleanup PUT resets node override to null."
+        "2026-07-05 wt-dev --backend: open event-extraction, select review Agent, Properties -> Model params shows inherited/off state; turn on Custom model params, save reaches Saved, adjust temperature and confirm percent readout plus persisted .workspace override; turn off resets the node override."
       ]
     }
   ]

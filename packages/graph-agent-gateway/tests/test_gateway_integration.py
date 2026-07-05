@@ -512,6 +512,67 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
     ]
 
 
+def test_gateway_response_metadata_reports_actual_call_runtime_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.registry.schema import (
+        ResolvedRole,
+        ResolvedRoute,
+        RuntimePolicy,
+    )
+    from langchain_core.messages import HumanMessage
+
+    factory = FakeRouteChatModelFactory()
+    _install_route_factory(monkeypatch, factory)
+    route = ResolvedRoute(
+        role_name="graph_agent",
+        route_id="anthropic:claude",
+        endpoint_id="anthropic",
+        protocol="anthropic_compatible",
+        base_url="https://api.anthropic.example",
+        credential_ref="endpoint:anthropic",
+        credential_fingerprint="fp",
+        provider_model_id="claude-sonnet-4-6",
+        canonical_id="claude-sonnet-4.6",
+        effective_runtime_settings={
+            "max_output_tokens": {"value": 333, "source": "route_setting"},
+            "temperature": {"value": 0.4, "source": "route_setting"},
+            "reasoning.enabled": {"value": False, "source": "route_setting"},
+        },
+    )
+    model = GatewayChatModel(
+        role_name="graph_agent",
+        resolved_role=ResolvedRole(
+            role_name="graph_agent",
+            runtime_policy=RuntimePolicy(),
+            routes=[route],
+        ),
+        client_manager=RecordingSuccessClientManager(),
+        max_tokens=555,
+        temperature=1.2,
+        thinking_enabled=True,
+    )
+
+    result = model.invoke([HumanMessage(content="hello")])
+
+    assert result.response_metadata["effective_runtime_settings"]["temperature"] == {
+        "value": 0.4,
+        "source": "route_setting",
+        "message": None,
+    }
+    assert result.response_metadata["actual_runtime_settings"] == {
+        "max_output_tokens": {"value": 555, "source": "call_override"},
+        "temperature": {
+            "authored_value": 1.2,
+            "provider_value": 0.6,
+            "source": "call_override",
+            "protocol": "anthropic_compatible",
+        },
+        "reasoning.enabled": {"value": True, "source": "call_override"},
+    }
+
+
 def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
     from graph_agent_gateway.registry.schema import (
         ProviderEndpoint,

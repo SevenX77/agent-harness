@@ -29,7 +29,7 @@ def test_read_missing_returns_empty(tmp_path: Path) -> None:
 
 
 def test_write_then_read_round_trips(tmp_path: Path) -> None:
-    params = NodeLlmParams(thinking=True, max_output_tokens=2048, temperature=0.3)
+    params = NodeLlmParams(enabled=True, thinking=True, max_output_tokens=2048, temperature=0.3)
     write_node_llm_params(tmp_path, "score", params)
     stored = read_node_llm_params(tmp_path)
     assert list(stored.keys()) == ["score"]
@@ -37,17 +37,24 @@ def test_write_then_read_round_trips(tmp_path: Path) -> None:
 
 
 def test_partial_override_persists_only_set_fields(tmp_path: Path) -> None:
-    write_node_llm_params(tmp_path, "score", NodeLlmParams(temperature=0.7))
+    write_node_llm_params(tmp_path, "score", NodeLlmParams(enabled=True, temperature=0.7))
     stored = read_node_llm_params(tmp_path)
+    assert stored["score"].enabled is True
     assert stored["score"].temperature == 0.7
     assert stored["score"].thinking is None
     assert stored["score"].max_output_tokens is None
 
 
-def test_write_all_null_clears_node(tmp_path: Path) -> None:
-    write_node_llm_params(tmp_path, "score", NodeLlmParams(thinking=True))
-    write_node_llm_params(tmp_path, "other", NodeLlmParams(temperature=0.1))
-    # clearing one node (all-null override) must not touch the other
+def test_enabled_without_field_values_persists_custom_mode(tmp_path: Path) -> None:
+    write_node_llm_params(tmp_path, "score", NodeLlmParams(enabled=True))
+    stored = read_node_llm_params(tmp_path)
+    assert stored["score"] == NodeLlmParams(enabled=True)
+
+
+def test_disabled_clears_node(tmp_path: Path) -> None:
+    write_node_llm_params(tmp_path, "score", NodeLlmParams(enabled=True, thinking=True))
+    write_node_llm_params(tmp_path, "other", NodeLlmParams(enabled=True, temperature=0.1))
+    # disabling one node must not touch the other
     write_node_llm_params(tmp_path, "score", NodeLlmParams())
     stored = read_node_llm_params(tmp_path)
     assert "score" not in stored
@@ -65,9 +72,10 @@ def test_put_and_get_node_params_api(
 ) -> None:
     put = client.put(
         "/api/skills/text-segmentation/nodes/setup/node-llm-params",
-        json={"thinking": True, "max_output_tokens": 4096, "temperature": 0.2},
+        json={"enabled": True, "thinking": True, "max_output_tokens": 4096, "temperature": 0.2},
     )
     assert put.status_code == 200, put.text
+    assert put.json()["enabled"] is True
     assert put.json()["thinking"] is True
     assert put.json()["max_output_tokens"] == 4096
     assert put.json()["temperature"] == 0.2
@@ -89,7 +97,7 @@ def test_put_all_null_clears_node_api(
 ) -> None:
     client.put(
         "/api/skills/text-segmentation/nodes/setup/node-llm-params",
-        json={"thinking": True},
+        json={"enabled": True, "thinking": True},
     )
     cleared = client.put(
         "/api/skills/text-segmentation/nodes/setup/node-llm-params",
@@ -97,6 +105,7 @@ def test_put_all_null_clears_node_api(
     )
     assert cleared.status_code == 200
     assert cleared.json() == {
+        "enabled": False,
         "thinking": None,
         "max_output_tokens": None,
         "temperature": None,
@@ -123,7 +132,7 @@ def test_put_rejects_extra_field(
 ) -> None:
     resp = client.put(
         "/api/skills/text-segmentation/nodes/setup/node-llm-params",
-        json={"thinking": True, "cost_priority": "low_cost"},
+        json={"enabled": True, "thinking": True, "cost_priority": "low_cost"},
     )
     assert resp.status_code == 422
 

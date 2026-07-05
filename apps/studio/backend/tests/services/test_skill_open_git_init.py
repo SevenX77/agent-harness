@@ -1,11 +1,10 @@
-"""PR-A: opening a writable user skill makes it a standalone git repo.
+"""Opening a skill makes it a standalone git repo.
 
 Design: skill-repo-git-model (`docs/studio/mvp1/_proposal-skill-repo-git-model.md`).
-Opening a skill (`get_skill_detail`, the GET /skills/{id} entry) auto-inits L1 git
-when the resolved folder is a writable user skill with no `.git` yet, so Local
-History reflects THAT skill's own history instead of bubbling up to an enclosing
-repo. Read-only bundled skills (under SKILLS_DIR) are never touched, and a skill
-that already has `.git` is left untouched (idempotent).
+Opening a skill (`get_skill_detail`, the GET /skills/{id} entry) auto-inits L1
+git when the resolved folder has no `.git` yet, so Local History reflects THAT
+skill's own history instead of bubbling up to an enclosing repo. A skill that
+already has `.git` is left untouched (idempotent).
 """
 
 from __future__ import annotations
@@ -34,12 +33,12 @@ def metadata_store(tmp_path: Path) -> LocalJsonMetadataStore:
 
 
 def _isolate_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point config at tmp roots; return the (empty) bundled SKILLS_DIR."""
-    skills_root = tmp_path / "skills"
+    """Point config at tmp roots; return the default new-skill root."""
+    skills_root = tmp_path / "default-skills"
     skills_root.mkdir(exist_ok=True)
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_root)
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
     monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "global-config" / "app_settings.json")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_root)
     return skills_root
 
 
@@ -58,8 +57,7 @@ async def test_opening_user_skill_without_git_auto_inits_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_roots(tmp_path, monkeypatch)
-    # A user skill OUTSIDE the bundled SKILLS_DIR (as a coding/skill/ folder would be),
-    # registered by absolute path in the index, with NO .git yet.
+    # A skill registered by absolute path in the index, with NO .git yet.
     skill_dir = tmp_path / "coding" / "skill" / "seg"
     _write_graph_skill(skill_dir, "seg")
     await _register_user_skill(metadata_store, "seg", skill_dir)
@@ -75,22 +73,22 @@ async def test_opening_user_skill_without_git_auto_inits_repo(
 
 
 @pytest.mark.anyio
-async def test_opening_bundled_skill_does_not_init_git(
+async def test_opening_default_root_skill_without_git_auto_inits_repo(
     tmp_path: Path,
     metadata_store: LocalJsonMetadataStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     skills_root = _isolate_roots(tmp_path, monkeypatch)
-    # Read-only bundled sample content lives UNDER SKILLS_DIR — never write a .git
-    # into the app tree.
     skill_dir = skills_root / "text-segmentation"
     _write_graph_skill(skill_dir, "text-segmentation")
+    await _register_user_skill(metadata_store, "text-segmentation", skill_dir)
 
     await skill_service.get_skill_detail(
         "default", "text-segmentation", LocalFilesystemBackend(tmp_path), metadata_store
     )
 
-    assert not (skill_dir / ".git").exists()
+    assert (skill_dir / ".git").is_dir()
+    assert GitLocalService().log(skill_dir), "expected the initial-skill commit"
 
 
 @pytest.mark.anyio

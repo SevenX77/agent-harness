@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
-from app.core import config
 from app.services.diagnostic_export import (
     assert_trace_can_be_promoted_to_golden,
     export_predict_diagnostics,
 )
 from app.services.golden_diff import set_golden_baseline_for_run
+from app.services.skills import resolve_skill_dir
 from fastapi import HTTPException
 from graph_agent import PathDiff, PhaseRecord, RunResult
 
@@ -106,7 +106,7 @@ def test_set_golden_baseline_rejects_predict_final_state(
     studio_roots: tuple[Path, Path],
 ) -> None:
     _skills_dir, _workspaces_dir = studio_roots
-    run_dir = config.SKILLS_DIR / "text-segmentation" / ".workspace" / "runs" / "predict-run"
+    run_dir = resolve_skill_dir("text-segmentation") / ".workspace" / "runs" / "predict-run"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(
         json.dumps({"metadata": {"is_predict": True}, "phases": []}),

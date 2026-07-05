@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import register_skill_index_entry
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -80,6 +82,7 @@ max_iterations: 5
 """,
         encoding="utf-8",
     )
+    register_skill_index_entry(AGENT_SKILL, skill_dir)
     return AGENT_SKILL
 
 

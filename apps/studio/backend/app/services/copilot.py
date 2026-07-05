@@ -862,7 +862,7 @@ def _resolve_copilot_workspace_dir(
             )
         return requested_workspace
 
-    skills_root = config.default_workspace_skills_dir()
+    skills_root = config.DEFAULT_SKILLS_ROOT
     skill_dir = skills_root / skill_id
     if skill_dir.is_dir():
         return skill_dir

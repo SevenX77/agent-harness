@@ -940,10 +940,10 @@ def test_resolve_copilot_workspace_dir_uses_skill_dir_not_process_cwd(
     # the SDK initialize load the repo's MCP/settings and hang).
     from app.core import config
 
-    skills_root = tmp_path / "workspaces" / "default" / "skills"
+    skills_root = tmp_path / "default-skills"
     skill_dir = skills_root / "demo"
     skill_dir.mkdir(parents=True)
-    monkeypatch.setattr(config, "default_workspace_skills_dir", lambda: skills_root)
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_root)
 
     assert copilot_service._resolve_copilot_workspace_dir("demo") == skill_dir
 
@@ -1065,7 +1065,7 @@ def test_resolve_copilot_workspace_dir_falls_back_to_skills_root(
     from app.core import config
 
     skills_root = tmp_path / "skills"
-    monkeypatch.setattr(config, "default_workspace_skills_dir", lambda: skills_root)
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_root)
 
     resolved = copilot_service._resolve_copilot_workspace_dir("missing-skill")
 

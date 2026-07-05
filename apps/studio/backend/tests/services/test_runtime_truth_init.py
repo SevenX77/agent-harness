@@ -22,6 +22,7 @@ def test_ensure_runtime_truth_sources_creates_safe_empty_stores(
     caplog: Any,
 ) -> None:
     del studio_roots
+    config.SKILL_INDEX_PATH.unlink(missing_ok=True)
     caplog.set_level(logging.INFO, logger="app.services.runtime_truth_init")
 
     created = ensure_runtime_truth_sources()

@@ -19,6 +19,8 @@ from app.models.golden import SetManualGoldenReq
 from app.services.golden_diff import set_manual_golden_for_node
 from fastapi.testclient import TestClient
 
+from tests.conftest import register_skill_index_entry
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -98,6 +100,7 @@ max_iterations: 5
 def agent_skill(studio_roots: tuple[Path, Path]) -> str:
     skills_dir, _workspaces = studio_roots
     _write_agent_skill(skills_dir, required_outputs="[segments]")
+    register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
     return AGENT_SKILL
 
 
@@ -209,6 +212,7 @@ def test_compile_fails_when_golden_missing_newly_required_field(
     """
     skills_dir, _workspaces = studio_roots
     _write_agent_skill(skills_dir, required_outputs="[segments, headline]")
+    register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
     # Golden written WITHOUT the (later) required headline field.
     set_manual_golden_for_node(
         AGENT_SKILL,
@@ -239,6 +243,7 @@ def test_compile_gate_binds_to_output_schema_not_prompt(
     """
     skills_dir, _workspaces = studio_roots
     _write_agent_skill(skills_dir, required_outputs="[segments]")
+    register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
     set_manual_golden_for_node(
         AGENT_SKILL,
         SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),

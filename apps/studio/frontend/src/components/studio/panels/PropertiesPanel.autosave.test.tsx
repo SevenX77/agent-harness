@@ -247,6 +247,42 @@ describe("PropertiesPanel autosave", () => {
     act(() => root.unmount())
   })
 
+  it("shows node temperature overrides as percentages", async () => {
+    apiMocks.getNodeLlmParams.mockResolvedValue({
+      nodes: {
+        review: {
+          thinking: null,
+          max_output_tokens: null,
+          temperature: 0.7,
+        },
+      },
+    })
+
+    const { container, root } = renderJsx(
+      <PropertiesPanel
+        skillId="demo"
+        workspaceRoot="/skills/demo"
+        skillDetail={phaseSkillDetail([
+          "---",
+          "name: review",
+          "llm_role: analyst",
+          "---",
+          "<role>Reviewer</role>",
+        ].join("\n"))}
+        selectedNode={selectedAgentNode()}
+        onPhaseFileSave={vi.fn()}
+      />,
+    )
+
+    await settleEffects()
+
+    expect(container.querySelector("[data-llm-node-temperature]")).not.toBeNull()
+    expect(container.innerHTML).toContain(">35%<")
+    expect(container.innerHTML).not.toContain(">0.7<")
+
+    act(() => root.unmount())
+  })
+
   it("re-applies phase property edits to the current markdown after a hash conflict", async () => {
     const remoteContent = [
       "---",

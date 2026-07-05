@@ -251,7 +251,8 @@ def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
 
     assert isinstance(model, GatewayChatModel)
     assert model.max_tokens == 2048
-    assert model.temperature == 0.25
+    assert model.temperature is None
+    assert model.resolved_role.routes[0].effective_runtime_settings["temperature"].value == 0.25
     assert model.thinking_enabled is False
     assert model.resolved_role.system_prompt_prefix == "Always be exact."
     assert [route.route_id for route in model.resolved_role.routes] == [

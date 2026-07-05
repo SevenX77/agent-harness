@@ -37,7 +37,7 @@ class GatewayChatModel(BaseChatModel):
     role_name: str
     resolved_role: ResolvedRole
     max_tokens: int = 4096
-    temperature: float = 0.7
+    temperature: float | None = None
     phase_name: str | None = None
     event_callbacks: tuple[Any, ...] = Field(default_factory=tuple)
     probe_before_call: bool = True
@@ -54,7 +54,7 @@ class GatewayChatModel(BaseChatModel):
         resolved_role: ResolvedRole,
         *,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         callbacks: Sequence[Any] = (),
         phase_name: str | None = None,
         probe_before_call: bool = True,
@@ -199,9 +199,11 @@ class GatewayChatModel(BaseChatModel):
                             kwargs.get("max_tokens"),
                             _effective_int(candidate, "max_output_tokens", self.max_tokens),
                         ),
-                        temperature=_float_kwarg(
+                        temperature=_optional_float_kwarg(
                             kwargs.get("temperature"),
-                            _effective_float(candidate, "temperature", self.temperature),
+                            self.temperature
+                            if self.temperature is not None
+                            else _effective_optional_float(candidate, "temperature"),
                         ),
                         reasoning=_bool_kwarg(
                             kwargs.get("reasoning"),
@@ -704,12 +706,6 @@ def _effective_int(candidate: ResolvedRoute, key: str, default: int) -> int:
     return int(value) if isinstance(value, int | float) and value > 0 else default
 
 
-def _effective_float(candidate: ResolvedRoute, key: str, default: float) -> float:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return float(value) if isinstance(value, int | float) else default
-
-
 def _effective_optional_int(candidate: ResolvedRoute, key: str) -> int | None:
     setting = candidate.effective_runtime_settings.get(key)
     value = setting.value if setting is not None else None
@@ -759,7 +755,7 @@ def _effective_structured_output(candidate: ResolvedRoute) -> dict[str, object] 
     return result
 
 
-def _float_kwarg(value: object, default: float) -> float:
+def _optional_float_kwarg(value: object, default: float | None) -> float | None:
     if isinstance(value, bool):
         return default
     try:

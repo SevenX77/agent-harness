@@ -1,694 +1,712 @@
 {
- "id": "roles_impl",
- "title": "LLM Roles · 实施详情",
- "design_ref": "roles_design",
- "intro": "本页是 LLM Roles 前端的现状/差距/实施计划/测试,1:1 对应设计页 roles_design(原子 #32–#53)。设计已说清「应该怎样」,这里写「现在怎样、差多少、按什么顺序补、怎么测」。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定);前端 Roles 系列文件 base 在 apps/studio/frontend/src/components/studio/settings/llm-roles/(角色/侧栏/束组件)与 .../settings/(LlmRolesTab、role-utils、model-bundle-utils),API 在 apps/studio/frontend/src/api/(llm.ts、client.ts);后端 base 在 apps/studio/backend/app/(routers/llm.py、services/llm_role_materializer.py),物化内核在 packages/graph-agent-gateway。底层依赖的角色物化机制见 roles_mech_materialize,后端契约就绪情况:materialize/role-fit(D6.2/6.3)=ok、6 态投影(D6.1)=ok、role 测试 job+持久化=ok、draft probe 真 worker=partial、bundle 引用同步=partial。",
- "functions": [
-  {
-   "n": 32,
-   "cap": "role-list-load",
-   "design_ref": "atom-32",
-   "current": "现状:已实现且符合。进 tab 拉 registry 后,LlmRolesTab(LlmRolesTab.tsx)用 pruneInvalidRoleProviders(role-utils.ts)归一化角色数据 → RoleCardList(RoleCardList.tsx)只渲染 Graph Agent Roles 分区;role_kind === \"copilot\" 的角色被过滤到独立 Copilot tab,不再出现 Copilot Roles / Add Copilot Role 模块;没有 role_kind 的历史角色按 graph-agent 兼容显示,避免仅凭名称误删旧图角色 → 右侧 AvailableModelsSidebar(AvailableModelsSidebar.tsx)渲染可拖的 model group 卡。角色与侧栏都是 registry 的纯投影。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。GET /registry 返回 roles(已 materialize)+ model_groups DTO;后端 materialize(D6.2)+ 6 态(D6.1)收口=ok。"
-  },
-  {
-   "n": 33,
-   "cap": "role-create",
-   "design_ref": "atom-33",
-   "current": "现状:已实现且符合。Add Graph Agent Role 触发命名弹框(RoleNameDialog.tsx),提交后在 roles 里新建一个空角色(无 model group 合法),入队 debounce 保存(useDebouncedRolesSave.ts → putRoles)。命名弹框校验空名/重名。",
-   "gap": "符合设计(允许建无模型空壳),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 整表 upsert(新建随 debounce 落库),保存后 _materialize_roles_for_response(routers/llm.py)重 materialize。"
-  },
-  {
-   "n": 34,
-   "cap": "available-models-search",
-   "design_ref": "atom-34",
-   "current": "现状:已实现且符合。侧栏搜索框 onChange 改 query,filterAvailableModelGroups(AvailableModelsSidebar.tsx)按多词匹配过滤:匹配模型显示名/canonical id/各 provider 标签/provider model id,含紧凑匹配(compactSearchText 去分隔符)与多 token 全含(searchTokens)。过滤纯前端,清空按钮复位 query。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "n/a(纯前端搜索,无后端契约)。"
-  },
-  {
-   "n": 35,
-   "cap": "available-model-provider-states",
-   "design_ref": "atom-35",
-   "current": "现状:已实现且符合主体。侧栏模型卡每个 provider 行用 providerStateTagVariant(AvailableModelsSidebar.tsx)按 6 态 ui_state 上色:ready→success、historical_ready→probe-verified(蓝)、untested→default、failed→destructive(红)、cooling_down→warning、off→muted。failed 不被过滤——provider 行照常渲染、标红、仍可拖(buildAvailableModelGroups 不滤 failed)。状态权威来自后端 model_groups DTO 内嵌的 ui_state,前端只读。",
-   "gap": "差距(增量,非阻塞):① failed 行(reason=missing_config 配置缺口)尚无「去配置」点击引导跳 API Keys 页(spec §2.1 要求红显 + 引导);② off/disabled 的「弃用区」(可折叠、灰显、不可拖、可复制名 + 可 re-probe 捞回)尚未单独成区。两项是新增 UI,不改 6 态着色主体。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。GET /registry 的 model_groups DTO 已内嵌 6 态 ui_state + reason_code(D6.1 收口=ok),前端直接着色;「去配置」跳转纯前端路由,弃用区纯前端折叠态。"
-  },
-  {
-   "n": 36,
-   "cap": "role-model-map-drag",
-   "design_ref": "atom-36",
-   "current": "现状:已实现且符合。从侧栏拖模型进角色卡 → RoleCard(RoleCard.tsx)的 handleAvailableModelDrop 取 model group → appendModelGroupToRoleWithResult(role-utils.ts)按 defaultProviderModelsForGroup(role-utils.ts)选可用 provider(按 providerStateRank 状态序 + providerKindRank official 优先排)→ 写成角色里一个结构化 model group、active_model 同步首位(syncActiveModelToFirst)→ 入队保存。重复拖入已在该角色的组不建副本(providers Set 合并)。",
-   "gap": "差距(小):defaultProviderModelsForGroup 的 providerStateRank 只显式区分 ready/untested/cooling_down,蓝态 historical_ready 落进默认桶(>2);设计要蓝态也算默认可用候选,可在 providerStateRank 补蓝态权重。拖入主流程符合。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 整表 upsert,后端 materialize 物化结构化 group 成 fallback_chain。"
-  },
-  {
-   "n": 37,
-   "cap": "role-model-reorder",
-   "design_ref": "atom-37",
-   "current": "现状:已实现且符合。角色卡内 DndContext 拖动 model 卡 → reorderModelInRole(role-utils.ts)改 model 兜底序 → active_model 同步首位 → 入队保存。模型序就是 materialize 遍历的模型层顺序。",
-   "gap": "符合设计(active_model 同步首位),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 持久化顺序,materialize 按序排链。"
-  },
-  {
-   "n": 38,
-   "cap": "role-provider-reorder",
-   "design_ref": "atom-38",
-   "current": "现状:已实现且符合。ProviderChain(ProviderChain.tsx)的 DndContext 拖动 provider 标签 → reorderProviderInRole(role-utils.ts)只改该模型组内 provider 序(组间不影响)→ 入队保存。provider 链用网格 + rectSortingStrategy,每行带序号 + RoleRouteStatusLight。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 持久化组内 provider 序。"
-  },
-  {
-   "n": 39,
-   "cap": "role-provider-add-remove",
-   "design_ref": "atom-39",
-   "current": "现状:已实现且符合。ProviderChain 的 AddProviderMenu(ProviderChain.tsx)下拉列出该模型未加的可补 provider → appendProviderToModel(role-utils.ts)补进组(去重);每行垃圾桶 → removeProviderFromRole(role-utils.ts)移除单 provider。Add 候选来自该模型 owned 但未入选的 provider。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 持久化增删。"
-  },
-  {
-   "n": 40,
-   "cap": "role-model-remove",
-   "design_ref": "atom-40",
-   "current": "现状:已实现且符合。在角色卡内移除整个 model group(经 ModelItem,ModelItem.tsx 的删组操作)→ 从角色删该模型连同所有 provider route → active_model 重算 → 入队保存。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 持久化删组。"
-  },
-  {
-   "n": 41,
-   "cap": "role-model-fallback-toggle",
-   "design_ref": "atom-41",
-   "current": "现状:已实现且符合。RoleSettingsPanel(RoleSettingsDialog.tsx)里的 Model Fallback Switch → toggleModelFallback(role-utils.ts)写 model_fallback_enabled → 入队保存。后端 materialize_role(gateway role_materialization.py)读 model_fallback_enabled,关则 groups[:1](只取首组,provider 兜底永远在)。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。materialize 尊重 fallback 开关(D6.2 收口=ok)。"
-  },
-  {
-   "n": 42,
-   "cap": "role-thinking-intent",
-   "design_ref": "atom-42",
-   "current": "现状:已实现且符合(已超出 spec §7.3 旧快照)。RoleSettingsFields(RoleSettingsDialog.tsx)的 Thinking 用 RadioGroup 三档互斥单选(off / preferred / required,RoleThinkingPreference),写进 intent.thinking。后端 _apply_intent(gateway role_materialization.py)已支持三档 role_fit:preferred 不支持→downgraded、required 能力未知→needs_test、required 不支持→not_fit。spec §7.3 #42 标的「前端只 off/preferred 无 required UI」是更早快照,现码已补齐 required 档与三态单控件。",
-   "gap": "符合设计,无需改(required 档 + 三态互斥单选已落地)。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。_apply_intent 三档 role_fit + thinking capability descriptor(D6.2/6.3 收口=ok)。"
-  },
-  {
-   "n": 43,
-   "cap": "role-output-token-intent",
-   "design_ref": "atom-43",
-   "current": "现状:已实现且符合(已超出 spec §7.3 旧快照)。TokenIntentField(RoleSettingsDialog.tsx)用「档位 Select + 值输入」:档位 default / maximum_available(Use Max)/ target / required_minimum(TOKEN_MODE_OPTIONS),target 与 required_minimum 才启用值输入(tokenModeAcceptsValue);写进 intent.target_output_tokens(roleIntentFromSettingsDraft → tokenIntentFromDraft,downgrade 默认 allow)。且补了 target_context_tokens 同一套档位控件。downgrade 无 UI、cost_priority 未做。spec §7.3 #43 标的「前端固定 downgrade=allow、block/warn 无 UI」正是设计要的(downgrade 不暴露),现码符合;required_minimum 档已能驱动 Not Fit。",
-   "gap": "前端符合设计(档位选择器 + context/output 双 token + downgrade 不暴露 + cost_priority 不留,均符合)。后端清理偏差(schema 比 2026-06-18「intent 只在 role 级」的决定落后一版):apps/studio/backend/app/models/llm_config.py(角色配置数据模型)仍带着四个该删的构造——(1) token 意图的 inherit 档(intent 只在 role 级,没有组/provider 级继承就不需要 inherit);(2) ModelGroupIntent(组级意图,已定意图不下沉到 model-group);(3) 每-provider 的 RoleProviderModel.intent(provider 级意图,同理删);(4) cost_priority(mvp1 已砍、schema 不留)。前端已按 role-only 实现(不发这四个构造),后端 schema 待清理对齐。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。_apply_output_token_intent 据 mode/value/downgrade 算 role_fit(required_minimum 达不到→not_fit;D6.2 收口=ok)。"
-  },
-  {
-   "n": 44,
-   "cap": "role-output-limit-summary",
-   "design_ref": "atom-44",
-   "current": "现状:已实现且符合。roleTokenLimitSummary(RoleCard.tsx)从 providerModelsByRouteId(route→ProviderModelOption)取各 route 的 max_input/max_output_tokens 聚合成 min/max + 已知/未知计数 → TokenIntentField 的 FieldDescription(RoleSettingsDialog.tsx,tokenLimitSummaryText)只读渲染 context + output 双摘要。纯前端投影 route capability。",
-   "gap": "符合设计(双摘要、只读),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。route capability 来自 GET /registry 的 model_groups DTO(投影,不发额外请求)。"
-  },
-  {
-   "n": 45,
-   "cap": "role-route-status-light",
-   "design_ref": "atom-45",
-   "current": "现状:已实现且符合。ProviderTag(ProviderChain.tsx)用 deriveRoleRouteStatus(role-route-status.tsx)把后端 materialization_report 的 role_fit(roleFitByRouteId,来自 role.materialization_report.entries)+ 该 route 的 6 态 ui_state + 实时测试态合成 runnable/limited/blocked/testing → RoleRouteStatusLight(role-route-status.tsx)渲染灯 → 单一顶层 Tooltip 包整行显 roleProviderRouteTooltip(模型名 + role-match 诊断 + 能力/token 上限)。role_fit 权威来自后端 report,前端只渲染。无独立 RoleTestResultPanel、无嵌套 tooltip(已是单顶层)。2026-07-01 补齐失败诊断:route 级 failed 的 ui_detail 由 adapter(_map_gateway_projection + _route_failed_probe_reason,adapters/gateway.py)从 route 最新 probe-failed evidence 的 reason 投影,tooltip 显示 provider 原文;providerUiStateDetail(role-route-status.tsx)不再自带 'Failed:' 前缀(标签由 roleMatchTooltipLine 加一次)。",
-   "gap": "符合设计(route 级失败诊断已从 evidence 投影,真机验证 fable-5 tooltip 显示 HTTP 404 原文),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。角色已 materialize,materialization_report.entries 内嵌 role_fit + warnings(D6.2/6.3 收口=ok);route 级失败 detail 由 credentials route.evidence 投影(probe-failed reason → ui_detail)。"
-  },
-  {
-   "n": 46,
-   "cap": "role-test",
-   "design_ref": "atom-46",
-   "current": "现状:已实现且符合(2026-06-23 据代码核实,旧『偏差—live 态仍存前端易失 useState』文案已过时并订正)。起测链路:点 Test → handleRunTestChain(LlmRolesTab.tsx)→ startRoleTestJob(llm.ts → POST /roles/{name}/test-jobs)起异步 job;按 500ms 调 getRoleTestJob(GET /role-test-jobs/{job_id})轮询,把 job.provider_statuses 实时刷到状态灯;完成再用 result 刷各行测试态。后端语义:对角色全部 route 批量真 probe(不停首条成功),失败回写 draft + 持久化。挂载回填:getRoleTestResults(GET /roles/test-results)种子回填 badge(切 tab/重开显历史)。未保存先拒测。关键订正:live 测试态已移出组件易失 useState、改存模块级 useRoleTestStore(components/studio/settings/llm-roles/role-test-store.ts)——切 tab 组件卸载不再丢 live 进度;SSOT 仍是后端 job 字典 + 持久化 /roles/test-results。旧 current 说的组件 useState roleTestStates 现已不存在(grep 0 命中)。",
-   "gap": "✅ 本次已实施并通过两层测试,符合设计。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接(后端不需改)。POST /roles/{name}/test-jobs(批量探测)+ GET /role-test-jobs/{job_id}(轮询)+ GET /roles/test-results(持久化种子)+ draft 回写均已实现,后端是 SSOT。前端改法不依赖后端再动。"
-  },
-  {
-   "n": 47,
-   "cap": "role-test-error-banner",
-   "design_ref": "atom-47",
-   "current": "现状:已实现且符合。handleRunTestChain(LlmRolesTab.tsx)在有未保存校验错误时不发测试、写一条 error 到 roleTestStates,RoleCard(RoleCard.tsx)的 data-role-test-error 红条常驻显「Role Test failed: …」;job 失败也写 error 显红条。失败保留上次 result(current[roleName]?.result)。显式告警不静默。",
-   "gap": "✅ 本次已实施并通过两层测试,符合设计。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。job 失败回 status=failed + message。"
-  },
-  {
-   "n": 48,
-   "cap": "role-rename-delete",
-   "design_ref": "atom-48",
-   "current": "现状:已实现且符合。RoleCard(RoleCard.tsx)的 ⋮ 菜单:Rename → RoleNameDialog 改名 → renameRole(role-utils.ts)随整表 upsert;Delete → requestRoleDeleteConfirmation(RoleCard.tsx)弹二次确认 → onDeleteRole → removeRole(role-utils.ts)从 roles 移除 → 入队保存(整表 upsert 缺席即删)。",
-   "gap": "符合设计(改名弹框 + 删除二次确认),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。DELETE /roles/{name}(删角色)与 PUT /roles(改名整表 upsert)均已实现。"
-  },
-  {
-   "n": 49,
-   "cap": "model-bundle-create",
-   "design_ref": "atom-49",
-   "current": "现状:已实现且符合。AdvancedModelBundlesSection(AdvancedModelBundlesSection.tsx)的 Add Model Bundle 按钮位于 Model Bundles 列表/空态之后的模块底部左侧,与 Graph Agent Roles 的 Add Role 入口节奏统一;点击后走 RoleNameDialog 命名 → 新建空 bundle(canonical_id='bundle:{id}')→ 入队保存。已配的束经 modelBundleGroupsFromData(AdvancedModelBundlesSection.tsx)在 AvailableModelsSidebar 的 pinnedModelGroups 顶部槽渲染(置于 model-group 列表之上)。",
-   "gap": "符合设计(Add Model Bundle 在 Model Bundles 内容/空态下方左侧、空束、Pinned 顶部槽),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 整表 upsert(model_bundles 同文件),materialize_model_bundle(gateway)物化束 route 链。"
-  },
-  {
-   "n": 50,
-   "cap": "model-bundle-edit",
-   "design_ref": "atom-50",
-   "current": "现状:偏差——编辑复用角色卡已符合,但束卡无状态灯、无 Test。编辑复用:ModelBundleCard(ModelBundleCard.tsx)用 rolesDataWithBundleRole(model-bundle-utils.ts)把束当成一个虚拟角色,复用 ModelItem + RoleSettingsPanel 做模型调序 / provider 链拖序 / 增删 / 意图编辑。拖入约束:拖模型进束走 appendModelGroupToBundle(model-bundle-utils.ts),拖束进束报错(不可嵌套)。偏差点:ModelBundleCard 给 ModelItem 传 testStatuses={}(空,已核 :289),且束卡 header 无 Test 按钮——束的 role-route 状态灯全空、未挂束测试(spec §2.6 要求束测试/状态与 role 统一)。",
-   "gap": "差距:① 把 role 的 RoleRouteStatusLight + 测试态投影复用到束卡(给 ModelItem 喂束测试的 testStatuses,不再传空);② 束卡 header 加 Test 按钮,复用 role 测试路径(POST /model-bundles/{id}/test 或临时角色解析)。前端复用 role 已有组件,后端束测试编排已可复用 role 测试。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。束测试复用 role 测试编排(resolve 临时 + 批量 probe);PUT /roles 整表 upsert 已实现。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 51,
-   "cap": "bundle-as-role-source",
-   "design_ref": "atom-51",
-   "current": "现状:前端已符合(引用语义,非快照;2026-06-23 据代码核实,旧『偏差—快照复制』文案已过时并订正)。拖束入角色走 attachBundleReferenceToRole(role-utils.ts:434-446):只设 role.bundle_id=该束引用、不再把 route 快照拍进角色;LlmRolesTab.tsx:323 命中 bundle 拖入分支调它后即 return,先于普通 model group 的快照路径,故束与普通组已分流。注:『按引用物化展开 / 改束→引用它的角色链跟着变 / 删束级联 / role 在引用上局部 delta 覆盖』属后端物化编排增量(见 be_dep + 下方 gap),不在前端这一轴。",
-   "gap": "差距:改为引用语义——① 前端拖束入角色时存 bundle 引用(bundle_id)而非 route 快照;② 后端 materialize 时按引用拉取当前束内容展开成 fallback_chain(改束 → 引用它的角色物化链跟着变);③ 删束级联;④ role 可在引用上局部覆盖。这是 spec §2.6 #8/#12「拖进角色=引用、改束同步」,覆盖早期快照方案。\n\n引用数据模型(可落地,不靠猜):\n- role 怎么存引用:角色的 model_groups[] 里这一项不再是「展开后的 RoleModelGroup(canonical_id='bundle:{id}' + 一串 provider_models 快照 route_id)」,而是一个引用项,核心字段 = bundle_id(指向 model_bundles[bundle_id])。schema 不变名/可加判别:用现有 canonical_id 仍写 'bundle:{id}' 作判别(materialize 见 'bundle:' 前缀即知是引用项),bundle_id 从前缀解析或单独存——具体存「单独 bundle_id 字段」还是「沿用 canonical_id 前缀解析」是实现细节,自己定;关键是不再拍 provider_models 快照进去。\n- materialize 何时展开:物化(materialize_role,每次 GET /registry / PUT /roles 触发的重 materialize)遍历到引用项时,按 bundle_id 去当前 model_bundles 查出束的当前 provider_models,就地展开成这串 route 追加进遍历序(位置 = 该引用项在 model_groups 里的位置)。即「展开发生在每次物化」,不是「拖入时一次性展开」——这正是 live 同步的来源:束内容是物化时现查的。\n- 改/删如何传播:改束 = 改 model_bundles[bundle_id] 内容 → 不动任何引用它的 role 的存储 → 下次这些 role 物化时现查到新内容 → fallback_chain 自动变(零额外传播代码)。删束 = 从 model_bundles 移除 bundle_id → 引用它的 role 物化时按 bundle_id 查不到 → 该引用项展开成空(级联消失,不入链),少这串 route 可能转 not-fit;前端投影时同样发现引用悬空 → 提示/移除该项(前端处理细节自定)。\n\n局部覆盖存储语义已定(PM 2026-06-18,方案①引用+delta):role 存 bundle_id 引用 + 一份「该 role 的覆盖 delta」——role 对引用束的调序/删/加 route/配 provider 都记成 delta、不固化快照;物化时先按引用拉束的当前内容、再叠加该 role 的 delta。冲突铁律——束是源头:束删某条 route 就从该 role 链移除(哪怕 role 覆盖过它),role 的 delta 只对仍存在于束里的 route 生效,束里已不存在的 route 上的 delta 自动失效丢弃。不需要方案②那种「一改即脱离引用、固化成快照」的第二套机制。落地顺序:「纯引用 + 改束/删束传播」先落,「role 在引用上局部覆盖」按方案① delta 叠加补上。",
-   "fe_status": "符合",
-   "be_dep": "契约要改。materialize 需支持「角色引用 bundle_id → 物化时按引用展开 + 删束查不到则展开为空」;现状物化吃的是已拍平的 model_groups。属 D6.2 物化编排的增量,需后端补引用展开路径。局部覆盖存储语义已定(PM 2026-06-18 方案①:引用+delta),后端 schema 在 role 的引用项上存一份覆盖 delta,物化时按引用拉束当前内容后叠加 delta;束删某条 route 则该 route 从 role 链移除、其上 delta 失效(束是源头),不做「改即固化快照」。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 52,
-   "cap": "model-bundle-rename-delete",
-   "design_ref": "atom-52",
-   "current": "现状:已实现且符合。ModelBundleCard(ModelBundleCard.tsx)的 ⋮ 菜单:Edit → RoleNameDialog(fieldLabel='Bundle name')改名 → renameModelBundle(model-bundle-utils.ts)随整表 upsert;Delete → requestModelBundleDeleteConfirmation(ModelBundleCard.tsx)弹二次确认 → onDeleteBundle → removeModelBundle(model-bundle-utils.ts)从 model_bundles 移除 → 入队保存。改名删除 UI 与 role 统一。",
-   "gap": "符合设计(束改名弹框 + 删除二次确认,与 role 统一),无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。PUT /roles 整表 upsert(model_bundles 同文件)。"
-  },
-  {
-   "n": 53,
-   "cap": "role-projection-refresh",
-   "design_ref": "atom-53",
-   "current": "现状:已实现且符合。其它窗口改 roles / 窗口聚焦 / WebSocket roles_changed → 重拉 registry → 重投影角色卡 + 可用模型 + 测试态(挂载 useEffect 从 getRoleTestResults 持久化种子回填)。前端只投影 registry、不持第二份,重投影即与后端一致。",
-   "gap": "符合设计(被动重投影、只读),无需改。注:测试 live 态的「不丢」目前靠持久化种子兜底,#46 删易失层后会更彻底地纯后端投影。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。GET /registry 重拉快照;WS roles_changed 事件已有。"
-  }
- ],
- "plan": [
-  {
-   "step": 1,
-   "what": "#35 增量 UI:① failed 行(reason=missing_config)加「去配置」点击引导跳 API Keys 页(AvailableModelsSidebar.tsx 的 provider 行,按 reason_code=missing_config 显引导 + 路由跳转);② off/disabled 加可折叠「弃用区」(灰显、不可拖、可复制名 + 可 re-probe 捞回)。复用现有 6 态着色,不改主体。",
-   "depends_on": "无(纯前端 UI;6 态 ui_state + reason_code 后端已内嵌 registry)。",
-   "why": "纯前端、零后端依赖,补齐 spec §2.1「配置缺口红显引导 + 弃用区」两块增量 UI;现 6 态色已对,只差引导与弃用区收纳。",
-   "block": "前端独立"
-  },
-  {
-   "step": 2,
-   "what": "#46/#47 测试 SSOT 落差收尾(头号工程):删 LlmRolesTab.tsx 的易失 roleTestStates,改为完全从后端 job 投影 live 态(切 tab/刷新都从 GET /roles/test-results + 活跃 job 轮询重投影,不在前端另存真值);错误条也从后端错误投影。清理孤儿 RoleTestResultPanel(RoleTestResultPanel.tsx,spec §2.4「不要」)。",
-   "depends_on": "前端依赖:后端 SSOT(test-jobs + role-test-jobs 轮询 + /roles/test-results 持久化 + draft 回写)已全就绪,前端只需删易失层改投影。后端不动。",
-   "why": "对应 §6.5 检查 2(前端只投影、不持第二份)从 ✗ 转 ✓,是 settings 接线主工程;后端 SSOT 已备好,纯前端改造不被阻塞,优先做。",
-   "block": "前端独立"
-  },
-  {
-   "step": 3,
-   "what": "#36 默认选择补蓝态:在 defaultProviderModelsForGroup(role-utils.ts)的 providerStateRank 给 historical_ready(🔵 蓝)补默认可用候选权重(与 ready/untested 同属可默认入选),对齐 spec §2.2「默认选 Ready+Untested+🔵」。",
-   "depends_on": "无(纯前端排序权重)。",
-   "why": "小改动、纯前端、独立;补齐默认 provider 选择对蓝态的显式优先,拖入主流程已对,只差蓝态权重。",
-   "block": "前端独立"
-  },
-  {
-   "step": 4,
-   "what": "#50 束测试/状态与 role 统一:① 给 ModelBundleCard(ModelBundleCard.tsx)的 ModelItem 喂束测试的 testStatuses(不再传空),复用 RoleRouteStatusLight;② 束卡 header 加 Test 按钮,复用 role 测试路径(runPersistedRoleTestJob/束测试端点)。",
-   "depends_on": "前端依赖:复用 #2 收尾后的纯后端测试投影 + role 已有状态灯组件。后端束测试编排已可复用 role 测试。",
-   "why": "排在 #2 之后:束测试要复用「已删易失层」的纯后端测试投影,先把 role 测试态投影收口干净,束复用才不继承旧易失层。",
-   "block": "等后端（编排复用，后端已可接）"
-  },
-  {
-   "step": 5,
-   "what": "#51 bundle 拖进角色=引用(覆盖快照):① 前端拖束入角色时存 bundle 引用(bundle_id)而非 route 快照(改 LlmRolesTab.tsx pointerUp 对 bundle group 的处理 + role-utils 存引用);② 后端 materialize 按引用拉当前束内容展开 fallback_chain;③ 删束级联(物化按 bundle_id 查不到则该引用项展开为空)。改束 → 引用它的角色物化链同步变。④ role 在引用上局部覆盖 = 按已定方案①(引用+delta)实现:覆盖记成该 role 的 delta、物化时按引用拉束当前内容后叠加 delta,束删某条 route 则该 route 从 role 链移除、其上 delta 失效(束是源头),先落 ①②③ 再补 ④。",
-   "depends_on": "后端契约要改:materialize 需支持「角色引用 bundle_id → 物化时按引用展开 + 查不到展开为空 + 叠加该 role 的覆盖 delta」(D6.2 物化编排增量)。前端存引用依赖后端定下引用 schema。④局部覆盖存储语义已定(PM 2026-06-18 方案①引用+delta),后端 schema 据此在引用项上存一份 delta。",
-   "why": "后端先于前端铁律:引用语义要后端先定下「角色怎么存 bundle 引用、materialize 怎么按引用展开/查不到怎么办、怎么叠加 delta」,前端再改拖入存引用,否则返工。排在所有前端独立项之后。①②③ 先落,④ 按方案① delta 叠加补上。",
-   "block": "等后端（后端先行）"
-  }
- ],
- "tests": [
-  {
-   "covers": "#32 role-list-load",
-   "atoms": [
-    32
-   ],
-   "shots": [
-    "进 tab 显已有 graph-agent 角色卡 + 右侧可用模型侧栏;Copilot Roles 分区不出现"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock GET /registry 回含 graph-agent + role_kind=copilot 混合角色。",
-    "断言只渲染 Graph Agent Roles 分区和 graph-agent 角色卡;Copilot Roles / Add Copilot Role 计数为 0。",
-    "断言引用已删 endpoint 的 route 被 pruneInvalidRoleProviders 剔掉。"
-   ],
-   "layer2": [
-    "进 Settings→LLM Roles 看角色卡 + 侧栏。"
-   ],
-   "screenshots": [
+  "id": "roles_impl",
+  "title": "LLM Roles · 实施详情",
+  "design_ref": "roles_design",
+  "intro": "本页是 LLM Roles 前端的现状/差距/实施计划/测试,1:1 对应设计页 roles_design(原子 #32–#53)。设计已说清「应该怎样」,这里写「现在怎样、差多少、按什么顺序补、怎么测」。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定);前端 Roles 系列文件 base 在 apps/studio/frontend/src/components/studio/settings/llm-roles/(角色/侧栏/束组件)与 .../settings/(LlmRolesTab、role-utils、model-bundle-utils),API 在 apps/studio/frontend/src/api/(llm.ts、client.ts);后端 base 在 apps/studio/backend/app/(routers/llm.py、services/llm_role_materializer.py),物化内核在 packages/graph-agent-gateway。底层依赖的角色物化机制见 roles_mech_materialize,后端契约就绪情况:materialize/role-fit(D6.2/6.3)=ok、6 态投影(D6.1)=ok、role 测试 job+持久化=ok、draft probe 真 worker=partial、bundle 引用同步=partial。",
+  "functions": [
     {
-     "file": "n0-roles-no-copilot-section.png",
-     "caption": "2026-06-24 Playwright 视觉验证:LLM Roles 只显示 Graph Agent Roles 分区;role_kind=copilot 的 copilot_chat 未在此页重复出现,侧边栏 Copilot tab 仍保留。"
-    }
-   ]
-  },
-  {
-   "covers": "#33 role-create",
-   "atoms": [
-    33
-   ],
-   "shots": [
-    "点 Add Graph Agent Role,命名提交后出现空角色卡",
-    "空名提交时弹框内 required 红字报错"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "点 Add Graph Agent Role → 断言出现命名弹框。",
-    "提交名字 → 断言 roles 新增一个无 model group 的空角色 + 入队保存。",
-    "空名提交 → 断言被拦(required)。"
-   ],
-   "layer2": [
-    "点 Add Graph Agent Role,命名建空角色。",
-    "另起:空名提交看报错。"
-   ]
-  },
-  {
-   "covers": "#34 available-models-search",
-   "atoms": [
-    34
-   ],
-   "shots": [
-    "搜 provider/model 关键词,侧栏实时过滤 + 计数更新"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "侧栏喂多模型 → 输入关键词 → 断言按模型名/canonical id/provider 标签/provider model id 多词匹配过滤。",
-    "断言紧凑匹配(忽略分隔符)与多 token 全含生效。",
-    "清空按钮 → 断言复位。"
-   ],
-   "layer2": [
-    "侧栏搜一个 provider 名看过滤。"
-   ]
-  },
-  {
-   "covers": "#35 available-model-provider-states(6 态 + 不滤 failed)",
-   "atoms": [
-    35
-   ],
-   "shots": [
-    "模型卡各 provider 行显 6 态色",
-    "failed 行标红仍列出仍可拖",
-    "配置缺口行有「去配置」引导(目标)",
-    "弃用区折叠(目标)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "喂含各 ui_state 的 model_groups DTO → 断言各 provider 行渲染对应 6 态色(ready/historical_ready/untested/failed/cooling_down/off)。",
-    "断言 failed 行不被过滤(仍渲染、标红、可拖)。",
-    "RED(增量):断言 reason=missing_config 行有「去配置」引导链接 → 现无 → 待补。",
-    "RED(增量):断言 off/disabled 行进可折叠弃用区、不可拖 → 现无 → 待补。"
-   ],
-   "layer2": [
-    "造各态数据看 6 态色。",
-    "看 failed 行能否拖。",
-    "看配置缺口行有无引导、弃用区有无。"
-   ]
-  },
-  {
-   "covers": "#36 role-model-map-drag",
-   "atoms": [
-    36
-   ],
-   "shots": [
-    "拖模型进角色自动挂组 + 默认选可用 provider 在前",
-    "重复拖同一模型不建副本"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "拖一个 model group 进角色 → 断言挂成结构化 model group、默认选 ready+untested(official 优先)、active_model 同步首位。",
-    "重复拖已在该角色的组 → 断言不建副本(provider 合并去重)。",
-    "RED(小):断言 historical_ready 蓝态也被默认选入 → 现落默认桶 → 待补权重。"
-   ],
-   "layer2": [
-    "从侧栏拖一个模型进角色看默认选。",
-    "再拖同一个看是否去重。"
-   ]
-  },
-  {
-   "covers": "#37 role-model-reorder",
-   "atoms": [
-    37
-   ],
-   "shots": [
-    "拖 model 调序,active_model 跟到第一个"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "拖动 model 卡调序 → 断言模型兜底序变 + active_model 同步首位。"
-   ],
-   "layer2": [
-    "角色里拖两个 model 换序看 active 跟首位。"
-   ]
-  },
-  {
-   "covers": "#38 role-provider-reorder",
-   "atoms": [
-    38
-   ],
-   "shots": [
-    "拖 provider 标签调该模型组内 provider 序(组间不影响)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "拖 provider 标签 → 断言只改该模型组内 provider 序,别的模型组不变。"
-   ],
-   "layer2": [
-    "某模型组内拖两个 provider 换序。"
-   ]
-  },
-  {
-   "covers": "#39 role-provider-add-remove",
-   "atoms": [
-    39
-   ],
-   "shots": [
-    "Add provider 补一个 / 垃圾桶删一个"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "点 Add provider → 断言下拉列出该模型未加的可补 provider、选后补进组(去重)。",
-    "点垃圾桶 → 断言移除该 provider、不影响别的模型组。"
-   ],
-   "layer2": [
-    "某模型 Add 一个 provider、再删一个。"
-   ]
-  },
-  {
-   "covers": "#40 role-model-remove",
-   "atoms": [
-    40
-   ],
-   "shots": [
-    "删整个 model group,该模型连 provider 一起消失"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "移除整组 → 断言该模型连所有 provider route 从角色删除 + active_model 重算。"
-   ],
-   "layer2": [
-    "删一个 model group 看整组消失。"
-   ]
-  },
-  {
-   "covers": "#41 role-model-fallback-toggle",
-   "atoms": [
-    41
-   ],
-   "shots": [
-    "关 Model Fallback → 物化只用第一个 model group"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "切 Model Fallback 开关 → 断言写 model_fallback_enabled。",
-    "后端契约测:关闭时 materialize 只取 groups[:1](provider 兜底仍在)。"
-   ],
-   "layer2": [
-    "关 Model Fallback,看是否只用首个 model。"
-   ]
-  },
-  {
-   "covers": "#42 role-thinking-intent(三档互斥)",
-   "atoms": [
-    42
-   ],
-   "shots": [
-    "Thinking 是 off/preferred/required 单一三态控件(非两开关)",
-    "required 且模型不支持 → role-fit 转 Not Fit/Needs Test"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "断言 Thinking 是单一三态 RadioGroup(off/preferred/required),非两个开关。",
-    "选 required → 断言写 intent.thinking='required'。",
-    "后端契约测:required 不支持→role_fit not_fit、能力未知→needs_test、preferred 不支持→downgraded。"
-   ],
-   "layer2": [
-    "切 Thinking 三档看互斥。",
-    "对一个不支持 thinking 的模型设 required 看灯转 Blocked/Limited。"
-   ]
-  },
-  {
-   "covers": "#43 role-output-token-intent(档位选择器)",
-   "atoms": [
-    43
-   ],
-   "shots": [
-    "Output/Context Token 是档位下拉(Default/Use Max/Target/Required Min)+ 值输入",
-    "required_minimum 达不到 → role-fit Not Fit"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "断言档位下拉有 default/maximum_available/target/required_minimum 四档,target 与 required_minimum 才启用值输入。",
-    "选 required_minimum 填值 → 断言写 intent.target_output_tokens{mode,value,downgrade:allow}。",
-    "断言 downgrade 无 UI(固定 allow)、cost_priority 无控件。",
-    "后端契约测:required_minimum 达不到 route 上限→role_fit not_fit;target 超限按 downgrade 策略。"
-   ],
-   "layer2": [
-    "切 Output Token 档位看值输入启停。",
-    "设 required_minimum 大于 route 上限看灯转 Blocked。"
-   ]
-  },
-  {
-   "covers": "#44 role-output-limit-summary",
-   "atoms": [
-    44
-   ],
-   "shots": [
-    "设置面板显 Context/Output route max token 范围摘要(只读)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "喂带 max_input/max_output_tokens 的 route → 断言聚合 min/max + 已知/未知计数。",
-    "断言 context + output 双摘要文案正确(只读)。"
-   ],
-   "layer2": [
-    "看角色设置面板的 token 摘要。"
-   ]
-  },
-  {
-   "covers": "#45 role-route-status-light(灯 + 单顶层 tooltip)",
-   "atoms": [
-    45
-   ],
-   "shots": [
-    "provider 行显 Can Run/Limited/Blocked/Testing 灯",
-    "悬停显单一顶层诊断 tooltip(无嵌套、无独立 panel)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "喂 materialization_report(role_fit using/downgraded/needs_test/not_fit)+ 各 ui_state → 断言 deriveRoleRouteStatus 合成对应灯(runnable/limited/blocked/testing)。",
-    "断言悬停只有一个顶层 tooltip(无嵌套)、无 RoleTestResultPanel 面板。",
-    "断言 tooltip 含模型名 + role-match 诊断 + 能力/token 上限。",
-    "喂 failed providerModel(ui_detail=evidence reason)→ 断言 tooltip 显 'Failed: <原文>' 且不出现 'Failed: Failed:' 双前缀(state-badges.test.tsx);后端侧 adapter 测试断言 route 级 failed 的 ui_detail 取最新 probe-failed evidence reason(test_productization_route_state_delegation.py)。"
-   ],
-   "layer2": [
-    "悬停一个 downgraded route 的灯看 tooltip。",
-    "悬停一条 failed route(fable-5 × Anthropic Official)确认 tooltip 显示 provider 404 原文而非兜底文案。",
-    "确认没有独立测试结果面板。"
-   ],
-   "screenshots": [
-    {
-     "file": "roles-card.png",
-     "caption": "角色卡(Premium):model + provider 行状态灯(绿=可用)+ 单顶层 tooltip;右侧可用模型侧栏 6 态色"
+      "n": 32,
+      "cap": "role-list-load",
+      "design_ref": "atom-32",
+      "current": "现状:已实现且符合。进 tab 拉 registry 后,LlmRolesTab(LlmRolesTab.tsx)用 pruneInvalidRoleProviders(role-utils.ts)归一化角色数据 → RoleCardList(RoleCardList.tsx)只渲染 Graph Agent Roles 分区;role_kind === \"copilot\" 的角色被过滤到独立 Copilot tab,不再出现 Copilot Roles / Add Copilot Role 模块;没有 role_kind 的历史角色按 graph-agent 兼容显示,避免仅凭名称误删旧图角色 → 右侧 AvailableModelsSidebar(AvailableModelsSidebar.tsx)渲染可拖的 model group 卡。角色与侧栏都是 registry 的纯投影。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。GET /registry 返回 roles(已 materialize)+ model_groups DTO;后端 materialize(D6.2)+ 6 态(D6.1)收口=ok。"
     },
     {
-     "file": "n0-roles-45-failed-route-evidence-tooltip.png",
-     "caption": "真机(worktree 私有 sidecar):analyst 卡 Claude Fable 5 × Anthropic Official 失败路由 hover——tooltip 红字显示 route evidence 的完整 404 原因(Claude Fable 5 is not available. Please use Opus 4.8),单个 Failed: 前缀,不再是笼统兜底文案"
-    }
-   ]
-  },
-  {
-   "covers": "#46 role-test(批量 + SSOT 不丢)",
-   "atoms": [
-    46
-   ],
-   "shots": [
-    "点 Test 状态灯 untested→testing→ready/限/失败(批量真探所有模型)",
-    "切 tab 再回测试态仍在(后端 SSOT)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "点 Test → 断言起 POST /roles/{name}/test-jobs、按 500ms 轮询 GET /role-test-jobs/{job_id}、provider_statuses 实时刷灯。",
-    "mock job 完成 → 断言用 result 刷各行测试态 + role_fit。",
-    "断言批量探所有模型(非停首条成功)。",
-    "RED:切 tab(组件卸载)再挂载 → 断言 live 态从后端 job/持久化重投影、不丢 → 现 roleTestStates 易失会丢 live 进度 → 待删易失层转 GREEN。",
-    "断言挂载 seedRoleTestStatesFromPersisted 从 GET /roles/test-results 回填历史 badge。"
-   ],
-   "layer2": [
-    "真跑(用真 key,关键):对一个真角色点 Test,看状态灯流转 + 失败回写 draft。",
-    "测试中切 tab 再回,看进度/结果是否保住。"
-   ]
-  },
-  {
-   "covers": "#47 role-test-error-banner",
-   "atoms": [
-    47
-   ],
-   "shots": [
-    "未保存先拒测显红条「先保存再测」",
-    "job 失败显红条带原因,保留上次结果"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "有未保存校验错误时点 Test → 断言不发测试、显红错误条。",
-    "job 失败 → 断言显红条 + 保留 last-known result。"
-   ],
-   "layer2": [
-    "未保存状态点 Test 看红条。"
-   ]
-  },
-  {
-   "covers": "#48 role-rename-delete",
-   "atoms": [
-    48
-   ],
-   "shots": [
-    "⋮→Rename 改名",
-    "⋮→Delete 二次确认后角色消失"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "⋮→Rename → 断言弹命名弹框、改名随整表 upsert。",
-    "⋮→Delete → 断言先二次确认 toast、确认后 removeRole + 保存。"
-   ],
-   "layer2": [
-    "改一个角色名。",
-    "删一个角色过二次确认。"
-   ]
-  },
-  {
-   "covers": "#49 model-bundle-create",
-   "atoms": [
-    49
-   ],
-   "shots": [
-    "Add Model Bundle 位于 Model Bundles 空态下方左侧,与 Add Role 模块底部入口统一;命名后出现空束",
-    "已配束在侧栏顶部 Pinned 槽"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "点 Add Model Bundle → 断言命名弹框、新建空 bundle(canonical_id='bundle:{id}')。",
-    "断言已配束经 modelBundleGroupsFromData 在侧栏 pinnedModelGroups 顶部渲染。"
-   ],
-   "layer2": [
-    "点 Add Model Bundle 建一个空束看位置 + Pinned 槽。"
-   ],
-   "screenshots": [
-    {
-     "file": "n0-roles-49-model-bundle-add-bottom.png",
-     "caption": "LLM Roles 空状态: Add Model Bundle 位于 Model Bundles 空态下方左侧,与上方 Add Role 入口统一。"
+      "n": 33,
+      "cap": "role-create",
+      "design_ref": "atom-33",
+      "current": "现状:已实现且符合。Add Graph Agent Role 触发命名弹框(RoleNameDialog.tsx),提交后在 roles 里新建一个空角色(无 model group 合法),入队 debounce 保存(useDebouncedRolesSave.ts → putRoles)。命名弹框校验空名/重名。",
+      "gap": "符合设计(允许建无模型空壳),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 整表 upsert(新建随 debounce 落库),保存后 _materialize_roles_for_response(routers/llm.py)重 materialize。"
     },
     {
-     "file": "n0-roles-card-inset-bundle-bottom.png",
-     "caption": "2026-06-24 真机验证:Role card 位于 CatalogAccordionContent 内侧 8px,左右边框/圆角不再被 overflow-hidden 裁切;Add Model Bundle 继续位于 Model Bundles 空态下方左侧。"
+      "n": 34,
+      "cap": "available-models-search",
+      "design_ref": "atom-34",
+      "current": "现状:已实现且符合。侧栏搜索框 onChange 改 query,filterAvailableModelGroups(AvailableModelsSidebar.tsx)按多词匹配过滤:匹配模型显示名/canonical id/各 provider 标签/provider model id,含紧凑匹配(compactSearchText 去分隔符)与多 token 全含(searchTokens)。过滤纯前端,清空按钮复位 query。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端搜索,无后端契约)。"
+    },
+    {
+      "n": 35,
+      "cap": "available-model-provider-states",
+      "design_ref": "atom-35",
+      "current": "现状:已实现且符合主体。侧栏模型卡每个 provider 行用 providerStateTagVariant(AvailableModelsSidebar.tsx)按 6 态 ui_state 上色:ready→success、historical_ready→probe-verified(蓝)、untested→default、failed→destructive(红)、cooling_down→warning、off→muted。failed 不被过滤——provider 行照常渲染、标红、仍可拖(buildAvailableModelGroups 不滤 failed)。状态权威来自后端 model_groups DTO 内嵌的 ui_state,前端只读。",
+      "gap": "差距(增量,非阻塞):① failed 行(reason=missing_config 配置缺口)尚无「去配置」点击引导跳 API Keys 页(spec §2.1 要求红显 + 引导);② off/disabled 的「弃用区」(可折叠、灰显、不可拖、可复制名 + 可 re-probe 捞回)尚未单独成区。两项是新增 UI,不改 6 态着色主体。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。GET /registry 的 model_groups DTO 已内嵌 6 态 ui_state + reason_code(D6.1 收口=ok),前端直接着色;「去配置」跳转纯前端路由,弃用区纯前端折叠态。"
+    },
+    {
+      "n": 36,
+      "cap": "role-model-map-drag",
+      "design_ref": "atom-36",
+      "current": "现状:已实现且符合。从侧栏拖模型进角色卡 → RoleCard(RoleCard.tsx)的 handleAvailableModelDrop 取 model group → appendModelGroupToRoleWithResult(role-utils.ts)按 defaultProviderModelsForGroup(role-utils.ts)选可用 provider(按 providerStateRank 状态序 + providerKindRank official 优先排)→ 写成角色里一个结构化 model group、active_model 同步首位(syncActiveModelToFirst)→ 入队保存。重复拖入已在该角色的组不建副本(providers Set 合并)。",
+      "gap": "差距(小):defaultProviderModelsForGroup 的 providerStateRank 只显式区分 ready/untested/cooling_down,蓝态 historical_ready 落进默认桶(>2);设计要蓝态也算默认可用候选,可在 providerStateRank 补蓝态权重。拖入主流程符合。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 整表 upsert,后端 materialize 物化结构化 group 成 fallback_chain。"
+    },
+    {
+      "n": 37,
+      "cap": "role-model-reorder",
+      "design_ref": "atom-37",
+      "current": "现状:已实现且符合。角色卡内 DndContext 拖动 model 卡 → reorderModelInRole(role-utils.ts)改 model 兜底序 → active_model 同步首位 → 入队保存。模型序就是 materialize 遍历的模型层顺序。",
+      "gap": "符合设计(active_model 同步首位),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 持久化顺序,materialize 按序排链。"
+    },
+    {
+      "n": 38,
+      "cap": "role-provider-reorder",
+      "design_ref": "atom-38",
+      "current": "现状:已实现且符合。ProviderChain(ProviderChain.tsx)的 DndContext 拖动 provider 标签 → reorderProviderInRole(role-utils.ts)只改该模型组内 provider 序(组间不影响)→ 入队保存。provider 链用网格 + rectSortingStrategy,每行带序号 + RoleRouteStatusLight。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 持久化组内 provider 序。"
+    },
+    {
+      "n": 39,
+      "cap": "role-provider-add-remove",
+      "design_ref": "atom-39",
+      "current": "现状:已实现且符合。ProviderChain 的 AddProviderMenu(ProviderChain.tsx)下拉列出该模型未加的可补 provider → appendProviderToModel(role-utils.ts)补进组(去重);每行垃圾桶 → removeProviderFromRole(role-utils.ts)移除单 provider。Add 候选来自该模型 owned 但未入选的 provider。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 持久化增删。"
+    },
+    {
+      "n": 40,
+      "cap": "role-model-remove",
+      "design_ref": "atom-40",
+      "current": "现状:已实现且符合。在角色卡内移除整个 model group(经 ModelItem,ModelItem.tsx 的删组操作)→ 从角色删该模型连同所有 provider route → active_model 重算 → 入队保存。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 持久化删组。"
+    },
+    {
+      "n": 41,
+      "cap": "role-model-fallback-toggle",
+      "design_ref": "atom-41",
+      "current": "现状:已实现且符合。RoleSettingsPanel(RoleSettingsDialog.tsx)里的 Model Fallback Switch → toggleModelFallback(role-utils.ts)写 model_fallback_enabled → 入队保存。后端 materialize_role(gateway role_materialization.py)读 model_fallback_enabled,关则 groups[:1](只取首组,provider 兜底永远在)。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。materialize 尊重 fallback 开关(D6.2 收口=ok)。"
+    },
+    {
+      "n": 42,
+      "cap": "role-thinking-intent",
+      "design_ref": "atom-42",
+      "current": "现状:已实现且符合(已超出 spec §7.3 旧快照)。RoleSettingsFields(RoleSettingsDialog.tsx)的 Thinking 用 RadioGroup 三档互斥单选(off / preferred / required,RoleThinkingPreference),写进 intent.thinking。后端 _apply_intent(gateway role_materialization.py)已支持三档 role_fit:preferred 不支持→downgraded、required 能力未知→needs_test、required 不支持→not_fit。spec §7.3 #42 标的「前端只 off/preferred 无 required UI」是更早快照,现码已补齐 required 档与三态单控件。",
+      "gap": "符合设计,无需改(required 档 + 三态互斥单选已落地)。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。_apply_intent 三档 role_fit + thinking capability descriptor(D6.2/6.3 收口=ok)。"
+    },
+    {
+      "n": 43,
+      "cap": "role-output-token-intent",
+      "design_ref": "atom-43",
+      "current": "??: ???RoleSettingsFields(RoleSettingsDialog.tsx) ??? thinking?max output tokens?temperature ????????; temperature ?? shadcn Slider, ???? 0-100% ???, label ???? tooltip????????????, ??? useDebouncedCallback 300ms debounce, release/onValueCommit flush ???; ????? provider-neutral 0..2 ???, ????? null?gateway ???????: Anthropic 1.5 -> 0.75, OpenAI/Gemini/Ark/unknown 1.5 -> 1.5; ?????? temperature, ???? 0.7?",
+      "gap": "?????2026-07-05: ?????????? tooltip????? debounce?gateway provider-scale runtime mapping ?????",
+      "fe_status": "??",
+      "be_dep": "???????????: PUT /roles ??????; packages/graph-agent-gateway ?? temperature.py, RouteChatModelFactory ? ordinary_chat ??????; GatewayChatModel/GenericRouteChatModel ??? 0.7 ????? unset temperature?"
+    },
+    {
+      "n": 44,
+      "cap": "role-output-limit-summary",
+      "design_ref": "atom-44",
+      "current": "现状:已实现且符合。roleTokenLimitSummary(RoleCard.tsx)从 providerModelsByRouteId(route→ProviderModelOption)取各 route 的 max_input/max_output_tokens 聚合成 min/max + 已知/未知计数 → TokenIntentField 的 FieldDescription(RoleSettingsDialog.tsx,tokenLimitSummaryText)只读渲染 context + output 双摘要。纯前端投影 route capability。",
+      "gap": "符合设计(双摘要、只读),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。route capability 来自 GET /registry 的 model_groups DTO(投影,不发额外请求)。"
+    },
+    {
+      "n": 45,
+      "cap": "role-route-status-light",
+      "design_ref": "atom-45",
+      "current": "现状:已实现且符合。ProviderTag(ProviderChain.tsx)用 deriveRoleRouteStatus(role-route-status.tsx)把后端 materialization_report 的 role_fit(roleFitByRouteId,来自 role.materialization_report.entries)+ 该 route 的 6 态 ui_state + 实时测试态合成 runnable/limited/blocked/testing → RoleRouteStatusLight(role-route-status.tsx)渲染灯 → 单一顶层 Tooltip 包整行显 roleProviderRouteTooltip(模型名 + role-match 诊断 + 能力/token 上限)。role_fit 权威来自后端 report,前端只渲染。无独立 RoleTestResultPanel、无嵌套 tooltip(已是单顶层)。2026-07-01 补齐失败诊断:route 级 failed 的 ui_detail 由 adapter(_map_gateway_projection + _route_failed_probe_reason,adapters/gateway.py)从 route 最新 probe-failed evidence 的 reason 投影,tooltip 显示 provider 原文;providerUiStateDetail(role-route-status.tsx)不再自带 'Failed:' 前缀(标签由 roleMatchTooltipLine 加一次)。",
+      "gap": "符合设计(route 级失败诊断已从 evidence 投影,真机验证 fable-5 tooltip 显示 HTTP 404 原文),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。角色已 materialize,materialization_report.entries 内嵌 role_fit + warnings(D6.2/6.3 收口=ok);route 级失败 detail 由 credentials route.evidence 投影(probe-failed reason → ui_detail)。"
+    },
+    {
+      "n": 46,
+      "cap": "role-test",
+      "design_ref": "atom-46",
+      "current": "现状:已实现且符合(2026-06-23 据代码核实,旧『偏差—live 态仍存前端易失 useState』文案已过时并订正)。起测链路:点 Test → handleRunTestChain(LlmRolesTab.tsx)→ startRoleTestJob(llm.ts → POST /roles/{name}/test-jobs)起异步 job;按 500ms 调 getRoleTestJob(GET /role-test-jobs/{job_id})轮询,把 job.provider_statuses 实时刷到状态灯;完成再用 result 刷各行测试态。后端语义:对角色全部 route 批量真 probe(不停首条成功),失败回写 draft + 持久化。挂载回填:getRoleTestResults(GET /roles/test-results)种子回填 badge(切 tab/重开显历史)。未保存先拒测。关键订正:live 测试态已移出组件易失 useState、改存模块级 useRoleTestStore(components/studio/settings/llm-roles/role-test-store.ts)——切 tab 组件卸载不再丢 live 进度;SSOT 仍是后端 job 字典 + 持久化 /roles/test-results。旧 current 说的组件 useState roleTestStates 现已不存在(grep 0 命中)。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接(后端不需改)。POST /roles/{name}/test-jobs(批量探测)+ GET /role-test-jobs/{job_id}(轮询)+ GET /roles/test-results(持久化种子)+ draft 回写均已实现,后端是 SSOT。前端改法不依赖后端再动。"
+    },
+    {
+      "n": 47,
+      "cap": "role-test-error-banner",
+      "design_ref": "atom-47",
+      "current": "现状:已实现且符合。handleRunTestChain(LlmRolesTab.tsx)在有未保存校验错误时不发测试、写一条 error 到 roleTestStates,RoleCard(RoleCard.tsx)的 data-role-test-error 红条常驻显「Role Test failed: …」;job 失败也写 error 显红条。失败保留上次 result(current[roleName]?.result)。显式告警不静默。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。job 失败回 status=failed + message。"
+    },
+    {
+      "n": 48,
+      "cap": "role-rename-delete",
+      "design_ref": "atom-48",
+      "current": "现状:已实现且符合。RoleCard(RoleCard.tsx)的 ⋮ 菜单:Rename → RoleNameDialog 改名 → renameRole(role-utils.ts)随整表 upsert;Delete → requestRoleDeleteConfirmation(RoleCard.tsx)弹二次确认 → onDeleteRole → removeRole(role-utils.ts)从 roles 移除 → 入队保存(整表 upsert 缺席即删)。",
+      "gap": "符合设计(改名弹框 + 删除二次确认),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。DELETE /roles/{name}(删角色)与 PUT /roles(改名整表 upsert)均已实现。"
+    },
+    {
+      "n": 49,
+      "cap": "model-bundle-create",
+      "design_ref": "atom-49",
+      "current": "现状:已实现且符合。AdvancedModelBundlesSection(AdvancedModelBundlesSection.tsx)的 Add Model Bundle 按钮位于 Model Bundles 列表/空态之后的模块底部左侧,与 Graph Agent Roles 的 Add Role 入口节奏统一;点击后走 RoleNameDialog 命名 → 新建空 bundle(canonical_id='bundle:{id}')→ 入队保存。已配的束经 modelBundleGroupsFromData(AdvancedModelBundlesSection.tsx)在 AvailableModelsSidebar 的 pinnedModelGroups 顶部槽渲染(置于 model-group 列表之上)。",
+      "gap": "符合设计(Add Model Bundle 在 Model Bundles 内容/空态下方左侧、空束、Pinned 顶部槽),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 整表 upsert(model_bundles 同文件),materialize_model_bundle(gateway)物化束 route 链。"
+    },
+    {
+      "n": 50,
+      "cap": "model-bundle-edit",
+      "design_ref": "atom-50",
+      "current": "现状:偏差——编辑复用角色卡已符合,但束卡无状态灯、无 Test。编辑复用:ModelBundleCard(ModelBundleCard.tsx)用 rolesDataWithBundleRole(model-bundle-utils.ts)把束当成一个虚拟角色,复用 ModelItem + RoleSettingsPanel 做模型调序 / provider 链拖序 / 增删 / 意图编辑。拖入约束:拖模型进束走 appendModelGroupToBundle(model-bundle-utils.ts),拖束进束报错(不可嵌套)。偏差点:ModelBundleCard 给 ModelItem 传 testStatuses={}(空,已核 :289),且束卡 header 无 Test 按钮——束的 role-route 状态灯全空、未挂束测试(spec §2.6 要求束测试/状态与 role 统一)。",
+      "gap": "差距:① 把 role 的 RoleRouteStatusLight + 测试态投影复用到束卡(给 ModelItem 喂束测试的 testStatuses,不再传空);② 束卡 header 加 Test 按钮,复用 role 测试路径(POST /model-bundles/{id}/test 或临时角色解析)。前端复用 role 已有组件,后端束测试编排已可复用 role 测试。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。束测试复用 role 测试编排(resolve 临时 + 批量 probe);PUT /roles 整表 upsert 已实现。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 51,
+      "cap": "bundle-as-role-source",
+      "design_ref": "atom-51",
+      "current": "现状:前端已符合(引用语义,非快照;2026-06-23 据代码核实,旧『偏差—快照复制』文案已过时并订正)。拖束入角色走 attachBundleReferenceToRole(role-utils.ts:434-446):只设 role.bundle_id=该束引用、不再把 route 快照拍进角色;LlmRolesTab.tsx:323 命中 bundle 拖入分支调它后即 return,先于普通 model group 的快照路径,故束与普通组已分流。注:『按引用物化展开 / 改束→引用它的角色链跟着变 / 删束级联 / role 在引用上局部 delta 覆盖』属后端物化编排增量(见 be_dep + 下方 gap),不在前端这一轴。",
+      "gap": "差距:改为引用语义——① 前端拖束入角色时存 bundle 引用(bundle_id)而非 route 快照;② 后端 materialize 时按引用拉取当前束内容展开成 fallback_chain(改束 → 引用它的角色物化链跟着变);③ 删束级联;④ role 可在引用上局部覆盖。这是 spec §2.6 #8/#12「拖进角色=引用、改束同步」,覆盖早期快照方案。\n\n引用数据模型(可落地,不靠猜):\n- role 怎么存引用:角色的 model_groups[] 里这一项不再是「展开后的 RoleModelGroup(canonical_id='bundle:{id}' + 一串 provider_models 快照 route_id)」,而是一个引用项,核心字段 = bundle_id(指向 model_bundles[bundle_id])。schema 不变名/可加判别:用现有 canonical_id 仍写 'bundle:{id}' 作判别(materialize 见 'bundle:' 前缀即知是引用项),bundle_id 从前缀解析或单独存——具体存「单独 bundle_id 字段」还是「沿用 canonical_id 前缀解析」是实现细节,自己定;关键是不再拍 provider_models 快照进去。\n- materialize 何时展开:物化(materialize_role,每次 GET /registry / PUT /roles 触发的重 materialize)遍历到引用项时,按 bundle_id 去当前 model_bundles 查出束的当前 provider_models,就地展开成这串 route 追加进遍历序(位置 = 该引用项在 model_groups 里的位置)。即「展开发生在每次物化」,不是「拖入时一次性展开」——这正是 live 同步的来源:束内容是物化时现查的。\n- 改/删如何传播:改束 = 改 model_bundles[bundle_id] 内容 → 不动任何引用它的 role 的存储 → 下次这些 role 物化时现查到新内容 → fallback_chain 自动变(零额外传播代码)。删束 = 从 model_bundles 移除 bundle_id → 引用它的 role 物化时按 bundle_id 查不到 → 该引用项展开成空(级联消失,不入链),少这串 route 可能转 not-fit;前端投影时同样发现引用悬空 → 提示/移除该项(前端处理细节自定)。\n\n局部覆盖存储语义已定(PM 2026-06-18,方案①引用+delta):role 存 bundle_id 引用 + 一份「该 role 的覆盖 delta」——role 对引用束的调序/删/加 route/配 provider 都记成 delta、不固化快照;物化时先按引用拉束的当前内容、再叠加该 role 的 delta。冲突铁律——束是源头:束删某条 route 就从该 role 链移除(哪怕 role 覆盖过它),role 的 delta 只对仍存在于束里的 route 生效,束里已不存在的 route 上的 delta 自动失效丢弃。不需要方案②那种「一改即脱离引用、固化成快照」的第二套机制。落地顺序:「纯引用 + 改束/删束传播」先落,「role 在引用上局部覆盖」按方案① delta 叠加补上。",
+      "fe_status": "符合",
+      "be_dep": "契约要改。materialize 需支持「角色引用 bundle_id → 物化时按引用展开 + 删束查不到则展开为空」;现状物化吃的是已拍平的 model_groups。属 D6.2 物化编排的增量,需后端补引用展开路径。局部覆盖存储语义已定(PM 2026-06-18 方案①:引用+delta),后端 schema 在 role 的引用项上存一份覆盖 delta,物化时按引用拉束当前内容后叠加 delta;束删某条 route 则该 route 从 role 链移除、其上 delta 失效(束是源头),不做「改即固化快照」。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 52,
+      "cap": "model-bundle-rename-delete",
+      "design_ref": "atom-52",
+      "current": "现状:已实现且符合。ModelBundleCard(ModelBundleCard.tsx)的 ⋮ 菜单:Edit → RoleNameDialog(fieldLabel='Bundle name')改名 → renameModelBundle(model-bundle-utils.ts)随整表 upsert;Delete → requestModelBundleDeleteConfirmation(ModelBundleCard.tsx)弹二次确认 → onDeleteBundle → removeModelBundle(model-bundle-utils.ts)从 model_bundles 移除 → 入队保存。改名删除 UI 与 role 统一。",
+      "gap": "符合设计(束改名弹框 + 删除二次确认,与 role 统一),无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。PUT /roles 整表 upsert(model_bundles 同文件)。"
+    },
+    {
+      "n": 53,
+      "cap": "role-projection-refresh",
+      "design_ref": "atom-53",
+      "current": "现状:已实现且符合。其它窗口改 roles / 窗口聚焦 / WebSocket roles_changed → 重拉 registry → 重投影角色卡 + 可用模型 + 测试态(挂载 useEffect 从 getRoleTestResults 持久化种子回填)。前端只投影 registry、不持第二份,重投影即与后端一致。",
+      "gap": "符合设计(被动重投影、只读),无需改。注:测试 live 态的「不丢」目前靠持久化种子兜底,#46 删易失层后会更彻底地纯后端投影。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。GET /registry 重拉快照;WS roles_changed 事件已有。"
     }
-   ]
-  },
-  {
-   "covers": "#50 model-bundle-edit(束状态灯 + Test)",
-   "atoms": [
-    50
-   ],
-   "shots": [
-    "束卡复用角色编辑器调序/增删/意图",
-    "束卡显 role-route 状态灯 + 有 Test 按钮(目标)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "拖模型进束 → 断言 appendModelGroupToBundle 挂组;拖束进束 → 断言报错(不可嵌套)。",
-    "断言束卡复用 ModelItem + RoleSettingsPanel(调序/增删/意图)。",
-    "RED:断言束卡 provider 行显 role-route 状态灯 → 现 testStatuses={} 全空 → 待喂束测试转 GREEN。",
-    "RED:断言束卡 header 有 Test 按钮 → 现无 → 待加复用 role 测试。"
-   ],
-   "layer2": [
-    "束卡里调序/加模型。",
-    "看束卡有无状态灯 + Test 按钮。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#51 bundle-as-role-source(引用非快照)",
-   "atoms": [
-    51
-   ],
-   "shots": [
-    "把束拖进角色作一组兜底",
-    "改束内容 → 引用它的角色物化链跟着变(目标)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "拖束进角色 → 断言角色挂这个束作一组。",
-    "RED:改束内容后 → 断言引用它的角色 materialize 出的 fallback_chain 跟着变 → 现快照复制不变 → 待改引用语义转 GREEN。",
-    "后端契约测:materialize 按 bundle 引用展开当前束内容(非读拍平快照)。"
-   ],
-   "layer2": [
-    "建束 → 拖进角色 → 改束加一个模型 → 看角色是否同步(现不同步,目标同步)。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#52 model-bundle-rename-delete",
-   "atoms": [
-    52
-   ],
-   "shots": [
-    "束 ⋮→Edit 改名",
-    "束 ⋮→Delete 二次确认后消失"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "束 ⋮→Edit → 断言命名弹框(Bundle name)、改名随整表 upsert。",
-    "束 ⋮→Delete → 断言二次确认、确认后 removeModelBundle + 保存。"
-   ],
-   "layer2": [
-    "改一个束名。",
-    "删一个束过二次确认。"
-   ]
-  },
-  {
-   "covers": "#53 role-projection-refresh",
-   "atoms": [
-    53
-   ],
-   "shots": [
-    "其它窗口改 roles / 聚焦回来 → 角色 + 可用模型自动重投影"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "触发 WS roles_changed / 窗口聚焦 → 断言重拉 registry、重投影角色 + 可用模型 + 测试态(持久化种子回填)。",
-    "断言只投影 registry、不持第二份(切 tab/刷新不丢角色)。"
-   ],
-   "layer2": [
-    "开两个窗口,一个改角色,看另一个聚焦回来是否刷新。"
-   ]
-  }
- ]
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#35 增量 UI:① failed 行(reason=missing_config)加「去配置」点击引导跳 API Keys 页(AvailableModelsSidebar.tsx 的 provider 行,按 reason_code=missing_config 显引导 + 路由跳转);② off/disabled 加可折叠「弃用区」(灰显、不可拖、可复制名 + 可 re-probe 捞回)。复用现有 6 态着色,不改主体。",
+      "depends_on": "无(纯前端 UI;6 态 ui_state + reason_code 后端已内嵌 registry)。",
+      "why": "纯前端、零后端依赖,补齐 spec §2.1「配置缺口红显引导 + 弃用区」两块增量 UI;现 6 态色已对,只差引导与弃用区收纳。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#46/#47 测试 SSOT 落差收尾(头号工程):删 LlmRolesTab.tsx 的易失 roleTestStates,改为完全从后端 job 投影 live 态(切 tab/刷新都从 GET /roles/test-results + 活跃 job 轮询重投影,不在前端另存真值);错误条也从后端错误投影。清理孤儿 RoleTestResultPanel(RoleTestResultPanel.tsx,spec §2.4「不要」)。",
+      "depends_on": "前端依赖:后端 SSOT(test-jobs + role-test-jobs 轮询 + /roles/test-results 持久化 + draft 回写)已全就绪,前端只需删易失层改投影。后端不动。",
+      "why": "对应 §6.5 检查 2(前端只投影、不持第二份)从 ✗ 转 ✓,是 settings 接线主工程;后端 SSOT 已备好,纯前端改造不被阻塞,优先做。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "#36 默认选择补蓝态:在 defaultProviderModelsForGroup(role-utils.ts)的 providerStateRank 给 historical_ready(🔵 蓝)补默认可用候选权重(与 ready/untested 同属可默认入选),对齐 spec §2.2「默认选 Ready+Untested+🔵」。",
+      "depends_on": "无(纯前端排序权重)。",
+      "why": "小改动、纯前端、独立;补齐默认 provider 选择对蓝态的显式优先,拖入主流程已对,只差蓝态权重。",
+      "block": "前端独立"
+    },
+    {
+      "step": 4,
+      "what": "#50 束测试/状态与 role 统一:① 给 ModelBundleCard(ModelBundleCard.tsx)的 ModelItem 喂束测试的 testStatuses(不再传空),复用 RoleRouteStatusLight;② 束卡 header 加 Test 按钮,复用 role 测试路径(runPersistedRoleTestJob/束测试端点)。",
+      "depends_on": "前端依赖:复用 #2 收尾后的纯后端测试投影 + role 已有状态灯组件。后端束测试编排已可复用 role 测试。",
+      "why": "排在 #2 之后:束测试要复用「已删易失层」的纯后端测试投影,先把 role 测试态投影收口干净,束复用才不继承旧易失层。",
+      "block": "等后端（编排复用，后端已可接）"
+    },
+    {
+      "step": 5,
+      "what": "#51 bundle 拖进角色=引用(覆盖快照):① 前端拖束入角色时存 bundle 引用(bundle_id)而非 route 快照(改 LlmRolesTab.tsx pointerUp 对 bundle group 的处理 + role-utils 存引用);② 后端 materialize 按引用拉当前束内容展开 fallback_chain;③ 删束级联(物化按 bundle_id 查不到则该引用项展开为空)。改束 → 引用它的角色物化链同步变。④ role 在引用上局部覆盖 = 按已定方案①(引用+delta)实现:覆盖记成该 role 的 delta、物化时按引用拉束当前内容后叠加 delta,束删某条 route 则该 route 从 role 链移除、其上 delta 失效(束是源头),先落 ①②③ 再补 ④。",
+      "depends_on": "后端契约要改:materialize 需支持「角色引用 bundle_id → 物化时按引用展开 + 查不到展开为空 + 叠加该 role 的覆盖 delta」(D6.2 物化编排增量)。前端存引用依赖后端定下引用 schema。④局部覆盖存储语义已定(PM 2026-06-18 方案①引用+delta),后端 schema 据此在引用项上存一份 delta。",
+      "why": "后端先于前端铁律:引用语义要后端先定下「角色怎么存 bundle 引用、materialize 怎么按引用展开/查不到怎么办、怎么叠加 delta」,前端再改拖入存引用,否则返工。排在所有前端独立项之后。①②③ 先落,④ 按方案① delta 叠加补上。",
+      "block": "等后端（后端先行）"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#32 role-list-load",
+      "atoms": [
+        32
+      ],
+      "shots": [
+        "进 tab 显已有 graph-agent 角色卡 + 右侧可用模型侧栏;Copilot Roles 分区不出现"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock GET /registry 回含 graph-agent + role_kind=copilot 混合角色。",
+        "断言只渲染 Graph Agent Roles 分区和 graph-agent 角色卡;Copilot Roles / Add Copilot Role 计数为 0。",
+        "断言引用已删 endpoint 的 route 被 pruneInvalidRoleProviders 剔掉。"
+      ],
+      "layer2": [
+        "进 Settings→LLM Roles 看角色卡 + 侧栏。"
+      ],
+      "screenshots": [
+        {
+          "file": "n0-roles-no-copilot-section.png",
+          "caption": "2026-06-24 Playwright 视觉验证:LLM Roles 只显示 Graph Agent Roles 分区;role_kind=copilot 的 copilot_chat 未在此页重复出现,侧边栏 Copilot tab 仍保留。"
+        }
+      ]
+    },
+    {
+      "covers": "#33 role-create",
+      "atoms": [
+        33
+      ],
+      "shots": [
+        "点 Add Graph Agent Role,命名提交后出现空角色卡",
+        "空名提交时弹框内 required 红字报错"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "点 Add Graph Agent Role → 断言出现命名弹框。",
+        "提交名字 → 断言 roles 新增一个无 model group 的空角色 + 入队保存。",
+        "空名提交 → 断言被拦(required)。"
+      ],
+      "layer2": [
+        "点 Add Graph Agent Role,命名建空角色。",
+        "另起:空名提交看报错。"
+      ]
+    },
+    {
+      "covers": "#34 available-models-search",
+      "atoms": [
+        34
+      ],
+      "shots": [
+        "搜 provider/model 关键词,侧栏实时过滤 + 计数更新"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "侧栏喂多模型 → 输入关键词 → 断言按模型名/canonical id/provider 标签/provider model id 多词匹配过滤。",
+        "断言紧凑匹配(忽略分隔符)与多 token 全含生效。",
+        "清空按钮 → 断言复位。"
+      ],
+      "layer2": [
+        "侧栏搜一个 provider 名看过滤。"
+      ]
+    },
+    {
+      "covers": "#35 available-model-provider-states(6 态 + 不滤 failed)",
+      "atoms": [
+        35
+      ],
+      "shots": [
+        "模型卡各 provider 行显 6 态色",
+        "failed 行标红仍列出仍可拖",
+        "配置缺口行有「去配置」引导(目标)",
+        "弃用区折叠(目标)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "喂含各 ui_state 的 model_groups DTO → 断言各 provider 行渲染对应 6 态色(ready/historical_ready/untested/failed/cooling_down/off)。",
+        "断言 failed 行不被过滤(仍渲染、标红、可拖)。",
+        "RED(增量):断言 reason=missing_config 行有「去配置」引导链接 → 现无 → 待补。",
+        "RED(增量):断言 off/disabled 行进可折叠弃用区、不可拖 → 现无 → 待补。"
+      ],
+      "layer2": [
+        "造各态数据看 6 态色。",
+        "看 failed 行能否拖。",
+        "看配置缺口行有无引导、弃用区有无。"
+      ]
+    },
+    {
+      "covers": "#36 role-model-map-drag",
+      "atoms": [
+        36
+      ],
+      "shots": [
+        "拖模型进角色自动挂组 + 默认选可用 provider 在前",
+        "重复拖同一模型不建副本"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "拖一个 model group 进角色 → 断言挂成结构化 model group、默认选 ready+untested(official 优先)、active_model 同步首位。",
+        "重复拖已在该角色的组 → 断言不建副本(provider 合并去重)。",
+        "RED(小):断言 historical_ready 蓝态也被默认选入 → 现落默认桶 → 待补权重。"
+      ],
+      "layer2": [
+        "从侧栏拖一个模型进角色看默认选。",
+        "再拖同一个看是否去重。"
+      ]
+    },
+    {
+      "covers": "#37 role-model-reorder",
+      "atoms": [
+        37
+      ],
+      "shots": [
+        "拖 model 调序,active_model 跟到第一个"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "拖动 model 卡调序 → 断言模型兜底序变 + active_model 同步首位。"
+      ],
+      "layer2": [
+        "角色里拖两个 model 换序看 active 跟首位。"
+      ]
+    },
+    {
+      "covers": "#38 role-provider-reorder",
+      "atoms": [
+        38
+      ],
+      "shots": [
+        "拖 provider 标签调该模型组内 provider 序(组间不影响)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "拖 provider 标签 → 断言只改该模型组内 provider 序,别的模型组不变。"
+      ],
+      "layer2": [
+        "某模型组内拖两个 provider 换序。"
+      ]
+    },
+    {
+      "covers": "#39 role-provider-add-remove",
+      "atoms": [
+        39
+      ],
+      "shots": [
+        "Add provider 补一个 / 垃圾桶删一个"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "点 Add provider → 断言下拉列出该模型未加的可补 provider、选后补进组(去重)。",
+        "点垃圾桶 → 断言移除该 provider、不影响别的模型组。"
+      ],
+      "layer2": [
+        "某模型 Add 一个 provider、再删一个。"
+      ]
+    },
+    {
+      "covers": "#40 role-model-remove",
+      "atoms": [
+        40
+      ],
+      "shots": [
+        "删整个 model group,该模型连 provider 一起消失"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "移除整组 → 断言该模型连所有 provider route 从角色删除 + active_model 重算。"
+      ],
+      "layer2": [
+        "删一个 model group 看整组消失。"
+      ]
+    },
+    {
+      "covers": "#41 role-model-fallback-toggle",
+      "atoms": [
+        41
+      ],
+      "shots": [
+        "关 Model Fallback → 物化只用第一个 model group"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "切 Model Fallback 开关 → 断言写 model_fallback_enabled。",
+        "后端契约测:关闭时 materialize 只取 groups[:1](provider 兜底仍在)。"
+      ],
+      "layer2": [
+        "关 Model Fallback,看是否只用首个 model。"
+      ]
+    },
+    {
+      "covers": "#42 role-thinking-intent(三档互斥)",
+      "atoms": [
+        42
+      ],
+      "shots": [
+        "Thinking 是 off/preferred/required 单一三态控件(非两开关)",
+        "required 且模型不支持 → role-fit 转 Not Fit/Needs Test"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "断言 Thinking 是单一三态 RadioGroup(off/preferred/required),非两个开关。",
+        "选 required → 断言写 intent.thinking='required'。",
+        "后端契约测:required 不支持→role_fit not_fit、能力未知→needs_test、preferred 不支持→downgraded。"
+      ],
+      "layer2": [
+        "切 Thinking 三档看互斥。",
+        "对一个不支持 thinking 的模型设 required 看灯转 Blocked/Limited。"
+      ]
+    },
+    {
+      "covers": "#43 role-output-token-intent(档位选择器)",
+      "atoms": [
+        43
+      ],
+      "shots": [
+        "Output/Context Token 是档位下拉(Default/Use Max/Target/Required Min)+ 值输入",
+        "required_minimum 达不到 → role-fit Not Fit"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "断言档位下拉有 default/maximum_available/target/required_minimum 四档,target 与 required_minimum 才启用值输入。",
+        "选 required_minimum 填值 → 断言写 intent.target_output_tokens{mode,value,downgrade:allow}。",
+        "断言 downgrade 无 UI(固定 allow)、cost_priority 无控件。",
+        "后端契约测:required_minimum 达不到 route 上限→role_fit not_fit;target 超限按 downgrade 策略。"
+      ],
+      "layer2": [
+        "切 Output Token 档位看值输入启停。",
+        "设 required_minimum 大于 route 上限看灯转 Blocked。"
+      ]
+    },
+    {
+      "covers": "#44 role-output-limit-summary",
+      "atoms": [
+        44
+      ],
+      "shots": [
+        "设置面板显 Context/Output route max token 范围摘要(只读)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "喂带 max_input/max_output_tokens 的 route → 断言聚合 min/max + 已知/未知计数。",
+        "断言 context + output 双摘要文案正确(只读)。"
+      ],
+      "layer2": [
+        "看角色设置面板的 token 摘要。"
+      ]
+    },
+    {
+      "covers": "#45 role-route-status-light(灯 + 单顶层 tooltip)",
+      "atoms": [
+        45
+      ],
+      "shots": [
+        "provider 行显 Can Run/Limited/Blocked/Testing 灯",
+        "悬停显单一顶层诊断 tooltip(无嵌套、无独立 panel)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "喂 materialization_report(role_fit using/downgraded/needs_test/not_fit)+ 各 ui_state → 断言 deriveRoleRouteStatus 合成对应灯(runnable/limited/blocked/testing)。",
+        "断言悬停只有一个顶层 tooltip(无嵌套)、无 RoleTestResultPanel 面板。",
+        "断言 tooltip 含模型名 + role-match 诊断 + 能力/token 上限。",
+        "喂 failed providerModel(ui_detail=evidence reason)→ 断言 tooltip 显 'Failed: <原文>' 且不出现 'Failed: Failed:' 双前缀(state-badges.test.tsx);后端侧 adapter 测试断言 route 级 failed 的 ui_detail 取最新 probe-failed evidence reason(test_productization_route_state_delegation.py)。"
+      ],
+      "layer2": [
+        "悬停一个 downgraded route 的灯看 tooltip。",
+        "悬停一条 failed route(fable-5 × Anthropic Official)确认 tooltip 显示 provider 404 原文而非兜底文案。",
+        "确认没有独立测试结果面板。"
+      ],
+      "screenshots": [
+        {
+          "file": "roles-card.png",
+          "caption": "角色卡(Premium):model + provider 行状态灯(绿=可用)+ 单顶层 tooltip;右侧可用模型侧栏 6 态色"
+        },
+        {
+          "file": "n0-roles-45-failed-route-evidence-tooltip.png",
+          "caption": "真机(worktree 私有 sidecar):analyst 卡 Claude Fable 5 × Anthropic Official 失败路由 hover——tooltip 红字显示 route evidence 的完整 404 原因(Claude Fable 5 is not available. Please use Opus 4.8),单个 Failed: 前缀,不再是笼统兜底文案"
+        }
+      ]
+    },
+    {
+      "covers": "#46 role-test(批量 + SSOT 不丢)",
+      "atoms": [
+        46
+      ],
+      "shots": [
+        "点 Test 状态灯 untested→testing→ready/限/失败(批量真探所有模型)",
+        "切 tab 再回测试态仍在(后端 SSOT)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "点 Test → 断言起 POST /roles/{name}/test-jobs、按 500ms 轮询 GET /role-test-jobs/{job_id}、provider_statuses 实时刷灯。",
+        "mock job 完成 → 断言用 result 刷各行测试态 + role_fit。",
+        "断言批量探所有模型(非停首条成功)。",
+        "RED:切 tab(组件卸载)再挂载 → 断言 live 态从后端 job/持久化重投影、不丢 → 现 roleTestStates 易失会丢 live 进度 → 待删易失层转 GREEN。",
+        "断言挂载 seedRoleTestStatesFromPersisted 从 GET /roles/test-results 回填历史 badge。"
+      ],
+      "layer2": [
+        "真跑(用真 key,关键):对一个真角色点 Test,看状态灯流转 + 失败回写 draft。",
+        "测试中切 tab 再回,看进度/结果是否保住。"
+      ]
+    },
+    {
+      "covers": "#47 role-test-error-banner",
+      "atoms": [
+        47
+      ],
+      "shots": [
+        "未保存先拒测显红条「先保存再测」",
+        "job 失败显红条带原因,保留上次结果"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "有未保存校验错误时点 Test → 断言不发测试、显红错误条。",
+        "job 失败 → 断言显红条 + 保留 last-known result。"
+      ],
+      "layer2": [
+        "未保存状态点 Test 看红条。"
+      ]
+    },
+    {
+      "covers": "#48 role-rename-delete",
+      "atoms": [
+        48
+      ],
+      "shots": [
+        "⋮→Rename 改名",
+        "⋮→Delete 二次确认后角色消失"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "⋮→Rename → 断言弹命名弹框、改名随整表 upsert。",
+        "⋮→Delete → 断言先二次确认 toast、确认后 removeRole + 保存。"
+      ],
+      "layer2": [
+        "改一个角色名。",
+        "删一个角色过二次确认。"
+      ]
+    },
+    {
+      "covers": "#49 model-bundle-create",
+      "atoms": [
+        49
+      ],
+      "shots": [
+        "Add Model Bundle 位于 Model Bundles 空态下方左侧,与 Add Role 模块底部入口统一;命名后出现空束",
+        "已配束在侧栏顶部 Pinned 槽"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "点 Add Model Bundle → 断言命名弹框、新建空 bundle(canonical_id='bundle:{id}')。",
+        "断言已配束经 modelBundleGroupsFromData 在侧栏 pinnedModelGroups 顶部渲染。"
+      ],
+      "layer2": [
+        "点 Add Model Bundle 建一个空束看位置 + Pinned 槽。"
+      ],
+      "screenshots": [
+        {
+          "file": "n0-roles-49-model-bundle-add-bottom.png",
+          "caption": "LLM Roles 空状态: Add Model Bundle 位于 Model Bundles 空态下方左侧,与上方 Add Role 入口统一。"
+        },
+        {
+          "file": "n0-roles-card-inset-bundle-bottom.png",
+          "caption": "2026-06-24 真机验证:Role card 位于 CatalogAccordionContent 内侧 8px,左右边框/圆角不再被 overflow-hidden 裁切;Add Model Bundle 继续位于 Model Bundles 空态下方左侧。"
+        }
+      ]
+    },
+    {
+      "covers": "#50 model-bundle-edit(束状态灯 + Test)",
+      "atoms": [
+        50
+      ],
+      "shots": [
+        "束卡复用角色编辑器调序/增删/意图",
+        "束卡显 role-route 状态灯 + 有 Test 按钮(目标)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "拖模型进束 → 断言 appendModelGroupToBundle 挂组;拖束进束 → 断言报错(不可嵌套)。",
+        "断言束卡复用 ModelItem + RoleSettingsPanel(调序/增删/意图)。",
+        "RED:断言束卡 provider 行显 role-route 状态灯 → 现 testStatuses={} 全空 → 待喂束测试转 GREEN。",
+        "RED:断言束卡 header 有 Test 按钮 → 现无 → 待加复用 role 测试。"
+      ],
+      "layer2": [
+        "束卡里调序/加模型。",
+        "看束卡有无状态灯 + Test 按钮。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+    },
+    {
+      "covers": "#51 bundle-as-role-source(引用非快照)",
+      "atoms": [
+        51
+      ],
+      "shots": [
+        "把束拖进角色作一组兜底",
+        "改束内容 → 引用它的角色物化链跟着变(目标)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "拖束进角色 → 断言角色挂这个束作一组。",
+        "RED:改束内容后 → 断言引用它的角色 materialize 出的 fallback_chain 跟着变 → 现快照复制不变 → 待改引用语义转 GREEN。",
+        "后端契约测:materialize 按 bundle 引用展开当前束内容(非读拍平快照)。"
+      ],
+      "layer2": [
+        "建束 → 拖进角色 → 改束加一个模型 → 看角色是否同步(现不同步,目标同步)。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+    },
+    {
+      "covers": "#52 model-bundle-rename-delete",
+      "atoms": [
+        52
+      ],
+      "shots": [
+        "束 ⋮→Edit 改名",
+        "束 ⋮→Delete 二次确认后消失"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "束 ⋮→Edit → 断言命名弹框(Bundle name)、改名随整表 upsert。",
+        "束 ⋮→Delete → 断言二次确认、确认后 removeModelBundle + 保存。"
+      ],
+      "layer2": [
+        "改一个束名。",
+        "删一个束过二次确认。"
+      ]
+    },
+    {
+      "covers": "#53 role-projection-refresh",
+      "atoms": [
+        53
+      ],
+      "shots": [
+        "其它窗口改 roles / 聚焦回来 → 角色 + 可用模型自动重投影"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "触发 WS roles_changed / 窗口聚焦 → 断言重拉 registry、重投影角色 + 可用模型 + 测试态(持久化种子回填)。",
+        "断言只投影 registry、不持第二份(切 tab/刷新不丢角色)。"
+      ],
+      "layer2": [
+        "开两个窗口,一个改角色,看另一个聚焦回来是否刷新。"
+      ]
+    },
+    {
+      "covers": "#43b role-temperature-percent-slider",
+      "atoms": [
+        43
+      ],
+      "shots": [
+        "Settings -> LLM Roles -> fast expanded: Temperature reads 40%, ? tooltip explains 0-100/provider remap, keyboard slider changes to 55% and restores to 40%."
+      ],
+      "fe_status": "??",
+      "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (Vite 5175, private sidecar 8788). No committed screenshot: live verification used local role/settings state; automated coverage is LlmRolesTab.test.tsx + useDebouncedCallback.test.tsx.",
+      "layer1": [
+        "LlmRolesTab.test.tsx: RoleSettingsFields ?????? temperature ? Slider??? 35%????? >0.7<??? About temperature scale tooltip trigger?",
+        "useDebouncedCallback.test.tsx: schedule ???? 300ms ???????; flush ????; cancel/unmount ??? stale work?"
+      ],
+      "layer2": [
+        "2026-07-05 wt-dev --backend: Settings -> LLM Roles -> expand fast -> Temperature shows 40%, ? tooltip shows provider remap copy, ArrowRight changes readout to 55%, ArrowLeft restores 40%."
+      ]
+    }
+  ]
 }

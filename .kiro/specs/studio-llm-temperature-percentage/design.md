@@ -1,9 +1,14 @@
 # Design Document — Studio LLM 温度百分比化 + 跨 provider 兼容
 
-> **STATUS: DESIGN BLOCKED — 需要一个产品方向决策(见 §5)。**
-> 调研已把温度全链坐实(§1~§4)。剩一个真·取舍:「百分比 → 真实温度」用
-> **(A) 线性 remap** 还是 **(B) clamp**。二者行为可见地不同、且决定 gateway 改动的
-> 侵入面。**默认推荐 A**;方向定死前不进实现(tasks.md 相应 BLOCKED)。
+> **STATUS: IMPLEMENTATION IN PROGRESS ? 2026-07-05 ?? A(linear remap)?**
+> PM ?? "go/??" ?????? A: ?????? 0..2 ??? 0..100%, gateway ????? route ?????? provider protocol ??????, ????????? temperature?
+
+## 0. 2026-07-05 ????
+
+- ?? A(linear remap), ??? Anthropic-only clamp?
+- Studio UI ????????: slider ??/???? provider-neutral ??? 0..2?
+- gateway ??????? `provider_temperature_from_authored`: Anthropic-compatible 0..2 -> 0..1; OpenAI-compatible / Gemini / Ark / WaveSpeed / generic ?? 0..2?
+- ?? ordinary-chat ???????? 0.7; `None` ?????, provider ????????
 
 ## 1. 现状证据 —— 温度是"裸值原样透传",且有两条运行时路径
 
@@ -88,7 +93,7 @@ registry 里**没有**存过任何 per-model / per-protocol 温度上限
   (node `persist` / role `onSubmit`),`setDraft` 本地 state 保持即时;卸载/外部
   reset 时取消在途 debounce(Requirement 4.3)。两处滑条统一接。
 
-## 5. ★ OPEN DECISION:(A)线性 remap vs (B)clamp
+## 5. Decision: A linear remap
 
 两种都能让"一个值对两家都合法",但产品语义与侵入面不同。**需要请求方拍板。**
 
@@ -143,3 +148,9 @@ registry 里**没有**存过任何 per-model / per-protocol 温度上限
    `_predict_internal` 的 mock/predict 字段,不发真 provider,本特性不改 engine。
    实现时加一条断言/核查确保没有 engine 侧绕过两条网关路径直接发温度的通道。
 4. **前端 debounce hook 复用**:先查 `src/hooks/` 是否已有 debounce 封装,避免重复造。
+
+## 8. 2026-07-05 ????
+
+- Frontend: `apps/studio/frontend/src/components/studio/llm-temperature.ts` ??????????????? debounce ??; Role settings ? node Model params ?? slider ??????
+- Gateway: `packages/graph-agent-gateway/src/graph_agent_gateway/temperature.py` ??? provider ??????????; factory ? ordinary-chat ???????? provider ??????
+- Tests: gateway factory / ordinary-chat / resolver ????? provider ????????; frontend tests ???????? debounce hook?

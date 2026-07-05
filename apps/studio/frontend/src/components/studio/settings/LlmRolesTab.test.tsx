@@ -17,6 +17,7 @@ import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-role
 import { roleTestStatusesByRole, __resetRoleTestStoreForTests, __setRoleTestStoreForTests } from "./llm-roles/role-test-store"
 import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, attachBundleReferenceToRole, missingRecommendedModels, normalizeModelGroupKey, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
+import { formatTemperaturePercent } from "../llm-temperature"
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
   dismiss: vi.fn(),
@@ -2432,12 +2433,23 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).toContain("Max output tokens")
     expect(fieldsHtml).toContain('value="128,000"')
     expect(fieldsHtml).toContain("Temperature")
-    // Temperature is a Slider (data-slot="slider"), not a text Input; its current
-    // value is surfaced via the readout span next to it, not a `value=` attribute.
+    // Temperature is a Slider (data-slot="slider"), not a text Input; its authored
+    // 0..2 value is surfaced as a 0..100% readout next to it, not a raw `value=`.
     expect(fieldsHtml).toContain('data-slot="slider"')
     expect(fieldsHtml).toContain('data-role-temperature-input="true"')
-    expect(fieldsHtml).toContain(">0.7<")
+    expect(fieldsHtml).toContain('aria-label="About temperature scale"')
+    expect(fieldsHtml).toContain(">35%<")
+    expect(fieldsHtml).not.toContain(">0.7<")
     expect(fieldsHtml).toContain("Route max output token range: min 4,096 / max 16,384. 1 route cap unavailable.")
+  })
+
+  it("formats authored temperature values as percentages for display only", () => {
+    expect(formatTemperaturePercent("")).toBe("\u2014")
+    expect(formatTemperaturePercent("0")).toBe("0%")
+    expect(formatTemperaturePercent("0.7")).toBe("35%")
+    expect(formatTemperaturePercent("1.5")).toBe("75%")
+    expect(formatTemperaturePercent("2")).toBe("100%")
+    expect(formatTemperaturePercent("not-a-number")).toBe("\u2014")
   })
 
   it("maps the draft to the three-param role intent (empty output/temperature -> null)", () => {

@@ -16,6 +16,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
 from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
+from graph_agent_gateway.temperature import provider_temperature_from_authored
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def dispatch_ordinary_chat(
     messages: list[MessageDict],
     *,
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     runtime_policy: RuntimePolicy,
     reasoning: bool = False,
     thinking_budget_tokens: int | None = None,
@@ -55,13 +56,17 @@ def dispatch_ordinary_chat(
     credential_provider: CredentialProviderProtocol | None = None,
 ) -> CallResult:
     """Dispatch one generic ordinary-chat route outside LLMClientManager."""
+    provider_temperature = provider_temperature_from_authored(
+        temperature,
+        str(route.protocol),
+    )
 
     def invoke(token_budget: int) -> CallResult:
         return _dispatch_provider_call(
             route,
             messages,
             token_budget,
-            temperature,
+            provider_temperature,
             runtime_policy=runtime_policy,
             reasoning=reasoning,
             thinking_budget_tokens=thinking_budget_tokens,
@@ -90,7 +95,7 @@ def _dispatch_provider_call(
     route: ResolvedRoute,
     messages: list[MessageDict],
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     runtime_policy: RuntimePolicy,
     reasoning: bool = False,
@@ -221,7 +226,7 @@ def _call_openai_compatible(
     model: str,
     messages: list[MessageDict],
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     tools: list[ToolSchema] | None = None,
     tool_choice: str | None = None,
@@ -237,8 +242,9 @@ def _call_openai_compatible(
         "model": model,
         "messages": cast(Iterable[ChatCompletionMessageParam], messages),
         "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if top_p is not None:
         kwargs["top_p"] = top_p
     if stop_sequences:
@@ -286,7 +292,7 @@ def _call_openai_responses(
     model: str,
     messages: list[MessageDict],
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     top_p: float | None = None,
     reasoning_effort: str | None = None,
@@ -296,8 +302,9 @@ def _call_openai_responses(
         "model": model,
         "input": messages,
         "max_output_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if top_p is not None:
         kwargs["top_p"] = top_p
     if reasoning_effort:
@@ -328,7 +335,7 @@ def _call_google_genai(
     model: str,
     messages: list[MessageDict],
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     top_p: float | None = None,
     stop_sequences: list[str] | None = None,
@@ -340,10 +347,9 @@ def _call_google_genai(
 ) -> CallResult:
     """Call a google-genai generate_content endpoint."""
     system_instruction, contents = _google_contents(messages)
-    config: dict[str, object] = {
-        "max_output_tokens": max_tokens,
-        "temperature": temperature,
-    }
+    config: dict[str, object] = {"max_output_tokens": max_tokens}
+    if temperature is not None:
+        config["temperature"] = temperature
     if system_instruction:
         config["system_instruction"] = system_instruction
     if top_p is not None:
@@ -391,7 +397,7 @@ def _call_ark_runtime(
     model: str,
     messages: list[MessageDict],
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     top_p: float | None = None,
     stop_sequences: list[str] | None = None,
@@ -405,8 +411,9 @@ def _call_ark_runtime(
         "model": model,
         "messages": cast(Iterable[ChatCompletionMessageParam], messages),
         "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if top_p is not None:
         kwargs["top_p"] = top_p
     if stop_sequences:
@@ -449,7 +456,7 @@ def _call_anthropic_compatible(
     model: str,
     messages: list[MessageDict],
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     reasoning: bool = False,
     thinking_budget_tokens: int | None = None,
@@ -489,7 +496,8 @@ def _call_anthropic_compatible(
             request_mapper_id,
         )
     else:
-        kwargs["temperature"] = temperature
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         response = _anthropic_messages_create(client, kwargs)
 
     usage_obj = _field(response, "usage")
@@ -560,7 +568,7 @@ def _call_wavespeed_any_llm(
     messages: list[MessageDict],
     model: str,
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     *,
     reasoning: bool,
     credential_provider: CredentialProviderProtocol | None = None,
@@ -588,10 +596,11 @@ def _call_wavespeed_any_llm(
         "model": model,
         "enable_sync_mode": True,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "reasoning": reasoning,
         "priority": "latency",
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     if system_prompt:
         payload["system_prompt"] = system_prompt
     if tools:

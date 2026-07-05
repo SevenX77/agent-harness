@@ -28,10 +28,18 @@ def _route(
     provider_model_id: str = "openai/gpt-5",
     canonical_id: str = "gpt-5",
     timeout_seconds: int = 17,
-    temperature: float = 0.2,
+    temperature: float | None = 0.2,
     max_tokens: int = 333,
 ):
     from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting, ResolvedRoute
+    effective_runtime_settings = {
+        "max_output_tokens": EffectiveRuntimeSetting(value=max_tokens, source="route_setting"),
+    }
+    if temperature is not None:
+        effective_runtime_settings["temperature"] = EffectiveRuntimeSetting(
+            value=temperature,
+            source="route_setting",
+        )
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -45,10 +53,7 @@ def _route(
         trust_env=False,
         provider_model_id=provider_model_id,
         canonical_id=canonical_id,
-        effective_runtime_settings={
-            "temperature": EffectiveRuntimeSetting(value=temperature, source="route_setting"),
-            "max_output_tokens": EffectiveRuntimeSetting(value=max_tokens, source="route_setting"),
-        },
+        effective_runtime_settings=effective_runtime_settings,
     )
 
 
@@ -219,6 +224,56 @@ def test_factory_builds_anthropic_chat_model_with_canonical_root_base_url() -> N
     assert chat_model.anthropic_api_key.get_secret_value() == "wavespeed-secret"
     assert chat_model.default_request_timeout == 17.0
     assert chat_model.max_tokens == 333
+
+
+def test_factory_remaps_anthropic_temperature_from_authored_two_point_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import graph_agent_gateway.route_chat_model_factory as factory_module
+
+    class FakeChatAnthropic:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(factory_module, "ChatAnthropic", FakeChatAnthropic)
+
+    chat_model = _factory().build(
+        _route(
+            endpoint_id="wavespeed",
+            route_slug="claude-sonnet-4-6",
+            protocol="anthropic_compatible",
+            base_url="https://llm.wavespeed.ai/v1",
+            provider_model_id="claude-sonnet-4-6",
+            canonical_id="claude-sonnet-4-6",
+            temperature=1.5,
+        )
+    )
+
+    assert isinstance(chat_model, FakeChatAnthropic)
+    assert chat_model.kwargs["temperature"] == pytest.approx(0.75)
+
+
+def test_factory_keeps_openai_temperature_on_authored_two_point_scale() -> None:
+    chat_model = _factory().build(_route(temperature=1.5))
+
+    assert chat_model.temperature == pytest.approx(1.5)
+
+
+def test_factory_omits_unset_temperature_from_provider_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import graph_agent_gateway.route_chat_model_factory as factory_module
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(factory_module, "ChatOpenAI", FakeChatOpenAI)
+
+    chat_model = _factory().build(_route(temperature=None))
+
+    assert isinstance(chat_model, FakeChatOpenAI)
+    assert "temperature" not in chat_model.kwargs
 
 
 def test_factory_maps_ark_runtime_to_chat_openai_api_v3() -> None:

@@ -1,9 +1,17 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { CircleHelp } from "lucide-react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { RoleIntent, RoleProviderPreference } from "@/api/llm"
+import {
+  formatTemperaturePercent,
+  TEMPERATURE_DEBOUNCE_MS,
+  TEMPERATURE_SCALE_HELP,
+} from "@/components/studio/llm-temperature"
+import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
 
 export interface TokenLimitSummary {
   knownCount: number
@@ -80,14 +88,29 @@ export function RoleSettingsFields({
   const outputTokenPlaceholder = tokenLimitSummary.output.max
     ? `Blank uses model max (${formatThousands(String(tokenLimitSummary.output.max))})`
     : "Blank uses model max"
-  // Dragging fires onValueChange continuously; committing every tick up through
-  // onDraftChange re-renders the whole roles tree per pixel of drag and feels
-  // laggy. Track the live position locally and only bubble up on release
-  // (onValueCommit), mirroring the node-level temperature slider.
   const [liveTemperature, setLiveTemperature] = useState(draft.temperature)
+  const latestDraftRef = useRef(draft)
+  latestDraftRef.current = draft
+  const debouncedTemperatureSubmit = useDebouncedCallback((temperature: string) => {
+    onDraftChange({
+      ...latestDraftRef.current,
+      temperature,
+    })
+  }, TEMPERATURE_DEBOUNCE_MS)
+
   useEffect(() => {
     setLiveTemperature(draft.temperature)
-  }, [draft.temperature])
+    debouncedTemperatureSubmit.cancel()
+  }, [debouncedTemperatureSubmit, draft.temperature])
+
+  function updateTemperature(temperature: string, flush = false) {
+    setLiveTemperature(temperature)
+    debouncedTemperatureSubmit.schedule(temperature)
+    if (flush) {
+      debouncedTemperatureSubmit.flush()
+    }
+  }
+
   return (
     <FieldSet data-role-settings-fields="true" className="gap-0">
       <FieldGroup className="gap-3">
@@ -166,8 +189,9 @@ export function RoleSettingsFields({
             data-role-temperature-settings="true"
             className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3"
           >
-            <FieldLabel htmlFor={`temperature-${roleName}`} className="text-xs font-medium">
-              Temperature
+            <FieldLabel htmlFor={`temperature-${roleName}`} className="inline-flex items-center gap-1 text-xs font-medium">
+              <span>Temperature</span>
+              <TemperatureHelp />
             </FieldLabel>
             <div className="flex h-9 items-center gap-2">
               <Slider
@@ -178,22 +202,36 @@ export function RoleSettingsFields({
                 max={2}
                 step={0.1}
                 value={[liveTemperature === "" ? 1 : Number(liveTemperature)]}
-                onValueChange={(vals) => setLiveTemperature(String(vals[0]))}
-                onValueCommit={(vals) => onDraftChange({
-                  ...draft,
-                  temperature: String(vals[0]),
-                })}
+                onValueChange={(vals) => updateTemperature(String(vals[0]))}
+                onValueCommit={(vals) => updateTemperature(String(vals[0]), true)}
                 className="flex-1"
               />
               <span className="w-9 shrink-0 text-right text-xs text-foreground">
-                {liveTemperature === "" ? "—" : liveTemperature}
+                {formatTemperaturePercent(liveTemperature)}
               </span>
             </div>
-            <FieldDescription>Drag to set a temperature override; leave untouched to use the model default (e.g. 0.7).</FieldDescription>
+            <FieldDescription>Drag to set a percentage override; blank inherits the route default.</FieldDescription>
           </Field>
         </div>
       </FieldGroup>
     </FieldSet>
+  )
+}
+
+function TemperatureHelp() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="About temperature scale"
+          className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-hidden"
+        >
+          <CircleHelp className="size-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{TEMPERATURE_SCALE_HELP}</TooltipContent>
+    </Tooltip>
   )
 }
 

@@ -21,6 +21,7 @@ from graph_agent_gateway.provider_profiles import (
 )
 from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.temperature import provider_temperature_from_authored
 
 
 class RouteChatModelFactory:
@@ -39,6 +40,10 @@ class RouteChatModelFactory:
         base_url = canonicalize_base_url(route.base_url, protocol)
         api_key = _resolve_api_key(route, self.credential_provider)
         common = _runtime_kwargs(route, caller_kwargs)
+        common["temperature"] = provider_temperature_from_authored(
+            common.get("temperature"),
+            protocol,
+        )
 
         if protocol in {"openai_compatible", "ark_runtime"}:
             kwargs = {

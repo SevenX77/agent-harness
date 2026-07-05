@@ -39,7 +39,7 @@ export function formatCompileErrorLine(error: CompileError): string {
   return parts.join(" - ")
 }
 
-type DiagnosticKind = "compile" | "predict"
+type DiagnosticKind = "compile" | "predict" | "run"
 
 export function buildCompileErrorClipboardText(
   errors: readonly CompileError[],

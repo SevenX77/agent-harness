@@ -1434,6 +1434,46 @@ describe('Workspace WS-1 local writer contracts', () => {
       document.body.innerHTML = ''
     }
   })
+
+  it('opens the run error drawer when starting run fails before diagnostics return', async () => {
+    mocks.startRun.mockRejectedValue(new Error('Backend unavailable'))
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onPredict?.()
+      })
+      await act(async () => {
+        await mocks.centerActionBarProps?.onRun?.()
+      })
+
+      expect(mocks.startRun).toHaveBeenCalledWith('writer-smoke', { topic: 'mars' })
+      const text = document.body.textContent ?? ''
+      expect(text).toContain('1 run error')
+      expect(text).toContain('Backend unavailable')
+      expect(document.body.querySelector('[data-slot="run-drawer-content"]')).not.toBeNull()
+      expect(document.body.querySelector('[aria-label="Copy all run errors"]')).not.toBeNull()
+      expect(toastMocks.error).toHaveBeenCalledWith('Run failed: Backend unavailable')
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      document.body.innerHTML = ''
+    }
+  })
 })
 
 // T-n6hist test#1/#2 (n6-history): the autocommit-feedback toast and the

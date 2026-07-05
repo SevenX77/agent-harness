@@ -680,6 +680,13 @@ def test_roles_v3_authoring_schema_migrates_legacy_provider_preferences_to_manua
     )
     assert data.roles["copilot_chat"].role_kind == "copilot"
     assert data.roles["copilot_chat"].intent.provider_preference == "manual_order"
+    assert data.roles["copilot_chat"].intent.temperature == 1.4
+
+
+def test_role_intent_defaults_temperature_to_seventy_percent() -> None:
+    role = RoleEntry()
+
+    assert role.intent.temperature == 1.4
 
 
 def test_role_level_intent_rejects_deleted_token_intent_field() -> None:

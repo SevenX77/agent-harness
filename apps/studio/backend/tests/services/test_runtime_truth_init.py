@@ -61,3 +61,37 @@ def test_ensure_runtime_truth_sources_is_idempotent(
     ensure_runtime_truth_sources()
 
     assert ensure_runtime_truth_sources() == []
+
+
+def test_ensure_runtime_truth_sources_resets_invalid_roles_file(
+    studio_roots: tuple[object, object],
+) -> None:
+    del studio_roots
+    path = roles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """
+schema_version: 3
+roles:
+  analyst:
+    role_kind: graph_agent
+    intent:
+      provider_preference: manual_order
+      thinking: false
+      max_output_tokens:
+      temperature:
+    model_groups: []
+    fallback_chain: []
+model_profiles: {}
+model_bundles: {}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    created = ensure_runtime_truth_sources()
+
+    assert "llm_roles_reset" in created
+    data = load_roles_file(path)
+    assert data.roles
+    assert all(role.intent.temperature == 1.4 for role in data.roles.values())
+    assert "temperature:" in path.read_text(encoding="utf-8")

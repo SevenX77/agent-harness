@@ -47,6 +47,7 @@ from graph_agent_gateway.registry.storage import compute_credential_fingerprint
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
+DEFAULT_ROLE_TEMPERATURE = 1.4
 
 TestStatus = Annotated[
     Literal[
@@ -229,10 +230,11 @@ class RoleIntent(BaseModel):
     PR3: three role-level generation params only. ``thinking`` is a best-effort
     switch (enable reasoning when the model supports it, else warn — never a fit
     downgrade). ``max_output_tokens`` is a plain number clamped into the route's
-    output-token range (or the route max when unset). ``temperature`` is written
-    through to the route runtime settings. The old thinking 3-tier, TokenIntent
-    modes / downgrade, ``target_context_tokens`` and ``cost_priority`` are gone
-    (no backward compat — old paths deleted).
+    output-token range (or the route max when unset). ``temperature`` defaults
+    to 70% on Studio's authored 0..2 slider and is written through to the route
+    runtime settings. The old thinking 3-tier, TokenIntent modes / downgrade,
+    ``target_context_tokens`` and ``cost_priority`` are gone (no backward compat
+    — old paths deleted).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -240,7 +242,7 @@ class RoleIntent(BaseModel):
     provider_preference: Literal["manual_order"] = "manual_order"
     thinking: bool = False
     max_output_tokens: int | None = Field(default=None, ge=1)
-    temperature: float | None = Field(default=None, ge=0)
+    temperature: float = Field(default=DEFAULT_ROLE_TEMPERATURE, ge=0)
 
     @model_validator(mode="before")
     @classmethod

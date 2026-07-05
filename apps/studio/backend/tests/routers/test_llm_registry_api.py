@@ -6171,7 +6171,7 @@ def test_role_test_probes_thinking_on_supported_route_with_reasoning_enabled(
         *,
         runtime_settings: dict[str, object] | None = None,
     ) -> RouteProbeResult:
-        assert runtime_settings == {"reasoning": {"enabled": True}}
+        assert runtime_settings == {"reasoning": {"enabled": True}, "temperature": 1.4}
         calls.append(route.provider_model_id)
         return _route_probe(endpoint, route, status="ok")
 

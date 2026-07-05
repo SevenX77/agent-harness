@@ -405,8 +405,9 @@ export interface RoleRouteEntry {
 
 export type RoleProviderPreference = 'manual_order'
 
-// PR3: the LLM role's runtime intent is exactly three simple params. Empty
-// number fields are sent as null (= use the model / route default).
+// PR3: the LLM role's runtime intent is exactly three simple params. Max output
+// may be null (= route max); temperature is normalized to a concrete role
+// default (70% on Studio's authored 0..2 slider) before save.
 export interface RoleIntent {
   provider_preference?: RoleProviderPreference
   thinking?: boolean

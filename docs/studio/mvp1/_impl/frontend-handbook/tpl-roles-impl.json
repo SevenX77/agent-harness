@@ -107,8 +107,8 @@
       "n": 43,
       "cap": "role-output-token-intent",
       "design_ref": "atom-43",
-      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,0.7=>35%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 立即调用 onDraftChange 更新父 draft,不再在子组件里持有滞后的 liveTemperature;HTTP 保存仍由 LlmRolesTab/useDebouncedRolesSave 统一 debounce。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed/focus 外部刷新覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
-      "gap": "符合设计,无需改。已闭合:百分比读数 + tooltip + provider-neutral 0..2 存储 + gateway provider-scale runtime mapping + saving/慢保存期间 slider 不回跳。",
+      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,1.4=>70%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 只更新本地 draft/readout,不触发 onSubmit/HTTP 保存;onValueCommit 或 pointerup/cancel、keyup、blur 结束兜底才提交当前值给 LlmRolesTab/useDebouncedRolesSave,防止轨道点击只改 UI 不保存。useDebouncedRolesSave 在已有请求 saving 时只保留最新 queued snapshot,旧请求完成后立即保存最新 payload。normalizeRolesDraft + 后端 RoleIntent 默认把缺失/null temperature 归一成 70%(authored 1.4),因此 role settings 几乎不会把 temperature 读成 model default。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed/focus 外部刷新覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
+      "gap": "符合设计,无需改。已闭合:百分比读数 + tooltip + provider-neutral 0..2 存储 + role 默认 70% + commit 后保存 + saving 期间 latest-wins 覆盖 + gateway provider-scale runtime mapping。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。PUT /roles 仍保存 role draft;gateway runtime 由 temperature.py / RouteChatModelFactory / ordinary_chat 执行 provider-scale 映射;GatewayChatModel 保留 effective_runtime_settings 并新增 actual_runtime_settings 供 trace 查看真实调用参数。"
     },
@@ -699,11 +699,12 @@
         "Settings -> LLM Roles -> fast expanded: Temperature reads 40%, ? tooltip explains 0-100/provider remap, keyboard slider changes to 55% and restores to 40%."
       ],
       "fe_status": "符合",
-      "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (Vite 5177, private sidecar 8789). No committed screenshot: live verification used local role/settings state; automated coverage is RoleSettingsDialog.behavior.test.tsx, LlmRolesTab.test.tsx, and useDebouncedCallback.test.tsx.",
+      "shot_na": "Manual verified on 2026-07-05 in wt-dev --backend (worktree Vite 5187, private sidecar 8789). No committed screenshot: live verification used local role/settings state; automated coverage is RoleSettingsDialog.behavior.test.tsx, LlmRolesTab.test.tsx, and useDebouncedRolesSave.test.ts.",
       "layer1": [
-        "RoleSettingsDialog.behavior.test.tsx: moving the temperature Slider calls onDraftChange immediately with the new parent draft value, preventing saving-time jumpback.",
+        "RoleSettingsDialog.behavior.test.tsx: moving the temperature Slider previews 70% locally without calling onSubmit; pointerup/blur/commit then submits exactly one role intent with temperature=1.4, including the Radix-missed-commit fallback path.",
+        "useDebouncedRolesSave.test.ts: while an older PUT is still in flight, multiple queued role snapshots collapse to the newest payload before the next PUT.",
         "SettingsPage.controller.test.tsx: roles_changed is ignored while roles save status is pending/saving, then allowed again after the save status returns idle.",
-        "LlmRolesTab.test.tsx / RoleSettingsFields coverage: temperature renders as a Slider percent readout(0.7=>35%) rather than raw 0.7 and keeps the About temperature scale tooltip trigger.",
+        "LlmRolesTab.test.tsx / RoleSettingsFields coverage: temperature renders as a Slider percent readout(1.4=>70%) rather than raw 1.4 and keeps the About temperature scale tooltip trigger; an empty temperature draft serializes to the 70% default.",
         "useDebouncedCallback.test.tsx: schedule waits 300ms, flush runs immediately, cancel/unmount drops stale work."
       ],
       "layer2": [

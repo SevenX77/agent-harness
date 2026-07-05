@@ -149,7 +149,7 @@
 
 - **Thinking（开关）**：单一 `Switch`（on/off），不再是三档。**语义 = best-effort**：开关开且模型支持 reasoning → 用；模型不支持 → 就不用（不报错、不静默降级出错）。落到 gateway `reasoning.enabled`（本来就是 bool）。**Test 时开关开但模型不支持 → 警告，不阻塞**（不像旧 required 档那样把 route 判 not_fit）。旧的 off/preferred/required 三态控件 + required 的 not_fit 逻辑删除。
 - **Max output token（纯数字）**：一个数字输入框，**不给 mode 选项**。机制固定:**不填 = 用模型/route 的最大可用输出 token**；填的数字 **> route 上限 → 取上限**、**< route 下限 → 取下限**（clamp，不再 not_fit、不再 downgrade）。输入与展示**自动加千位符**（PM 撤回了 k 单位，一律全数字）。placeholder 提示按当前配置**推断出的有效最大 token**。落到 gateway `max_output_tokens`。旧 `TokenIntent{mode}` 四档 + `required_minimum→not_fit` + `downgrade` 删除。
-- **Temperature（纯数字，新增）**：role 级新增一个温度数字输入（float）。落到 gateway route `temperature`（route 级本来就有该字段，role 级此前缺，补上）。
+- **Temperature（Slider，默认 70%）**：role 级温度使用 0-100% Slider；存储仍是 provider-neutral authored 0..2 数值，因此默认 70% 对应 `temperature=1.4`。拖动时只更新本地读数，松手/键盘结束/focus 离开等交互结束点才触发保存；若底层 Slider 只发 preview 没发 commit，结束事件也必须提交最后一个 preview，不能出现 UI 变了但没落盘。保存中如果又产生新需求，只保留最新 payload，旧保存完成后立即用最新值覆盖。落到 gateway route `temperature`（route 级本来就有该字段，role 级此前缺，补上）。role intent 不再把空 temperature 当作 model default；缺失或 null 必须在 Studio role authoring 层归一成默认 70%。
 - **Context token：不做**（PM：没有意义）——`target_context_tokens` schema + UI **整块删除**。
 - **Route max token 摘要**：投影 route capability，只读（保留，用来给 output token 输入框算 placeholder 的推断上限）。
 - **`cost_priority`**：早已砍掉（PM 2026-06-03），schema 不留。

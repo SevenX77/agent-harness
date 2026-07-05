@@ -1,10 +1,65 @@
-import { describe, expect, it, vi } from "vitest"
+// @vitest-environment jsdom
+import { act, createElement, useEffect, type ReactNode } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { RolesData } from "@/api/llm"
 import {
   flushPendingRolesSaveOnUnmount,
   rolesSaveErrorDisposition,
   shouldApplyExternalRolesRefresh,
+  useDebouncedRolesSave,
 } from "./useDebouncedRolesSave"
+
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+  },
+}))
+
+function renderJsx(node: ReactNode): { container: HTMLDivElement; root: Root } {
+  const container = document.createElement("div")
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  act(() => {
+    root.render(node)
+  })
+  return { container, root }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function sampleRoles(label: string): RolesData {
+  return {
+    schema_version: 3,
+    models: {},
+    providers: {},
+    roles: {
+      [label]: {
+        title: label,
+        role_kind: "copilot",
+        active_model: "",
+        models: {},
+        fallback_chain: [],
+      },
+    },
+  } as unknown as RolesData
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  document.body.innerHTML = ""
+  vi.clearAllMocks()
+})
 
 describe("rolesSaveErrorDisposition", () => {
   it("recovers a non-buffered stale role save error", () => {
@@ -22,6 +77,58 @@ describe("rolesSaveErrorDisposition", () => {
 
   it("reports non-recoverable errors when no newer snapshot is queued", () => {
     expect(rolesSaveErrorDisposition(new Error("server down"), false, () => false)).toBe("fatal")
+  })
+})
+
+describe("useDebouncedRolesSave", () => {
+  it("keeps only the newest queued roles snapshot while an older save is in flight", async () => {
+    vi.useFakeTimers()
+    const first = deferred<RolesData>()
+    const second = deferred<RolesData>()
+    const putFn = vi.fn<(data: RolesData) => Promise<RolesData>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+    let hook: ReturnType<typeof useDebouncedRolesSave> | null = null
+
+    function Harness() {
+      const result = useDebouncedRolesSave({ delayMs: 20, putFn })
+      useEffect(() => {
+        hook = result
+      })
+      return null
+    }
+
+    const { root } = renderJsx(createElement(Harness))
+
+    act(() => {
+      hook?.queue(() => sampleRoles("first"))
+      vi.advanceTimersByTime(20)
+    })
+    expect(putFn).toHaveBeenCalledTimes(1)
+    expect(Object.keys(putFn.mock.calls[0]?.[0].roles ?? {})).toEqual(["first"])
+
+    act(() => {
+      hook?.queue(() => sampleRoles("stale-second"))
+      hook?.queue(() => sampleRoles("latest-second"))
+    })
+    expect(putFn).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      first.resolve(sampleRoles("first"))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(putFn).toHaveBeenCalledTimes(2)
+    expect(Object.keys(putFn.mock.calls[1]?.[0].roles ?? {})).toEqual(["latest-second"])
+
+    await act(async () => {
+      second.resolve(sampleRoles("latest-second"))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    act(() => root.unmount())
   })
 })
 

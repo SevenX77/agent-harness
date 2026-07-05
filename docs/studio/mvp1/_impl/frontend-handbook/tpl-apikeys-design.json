@@ -11,7 +11,7 @@
    "module": "凭证录入与管理",
    "func": "设计:让用户进 API Keys 页时就能看到/编辑自己之前存过的真实 key,而不是一排掩码占位符。",
    "action": "用户切到 API Keys tab(首次进入自动触发,无需点按钮)。",
-   "fe_design": "进 tab 先拉一份 registry 快照(里面 key 全是 '**********' 掩码,后端默认不外泄明文)→ 前端发现哪些 endpoint 的 key 是掩码值,就对这些 endpoint 各发一次「取明文」请求把真 key 换回来 → 写进前端本地缓存,用户即可查看/修改。这是纯展示层的回填(hydration):明文只在本地 settings UI 内换回,前端不把它当第二份真相、不写回后端。窗口聚焦重新拉取时只取掩码快照、不重复换明文。",
+   "fe_design": "进 tab 先拉一份 registry 快照(里面 key 全是 '**********' 掩码,后端默认不外泄明文)→ 前端发现哪些 endpoint 的 key 是掩码值,就对这些 endpoint 各发一次「取明文」请求把真 key 换回来 → 写进前端本地缓存,用户即可查看/修改。这是纯展示层的回填(hydration):明文只在本地 settings UI 内换回,前端不把它当第二份真相、不写回后端。窗口聚焦不是数据变更信号,不得触发重新拉取;后续只有 registry_changed 这类后端真相变更事件或用户写入后的强制刷新才重拉。",
    "fe_modules": [
     {
      "name": "凭证 hydration",
@@ -442,8 +442,8 @@
    "track": "共",
    "module": "凭证录入与管理",
    "func": "设计:刷新/重开页面后从后端 registry 恢复每个 provider 的 key、状态、Available Models,不丢已配凭证与探测结果。",
-   "action": "无显式动作(刷新或重进页面自动恢复;其它窗口改动聚焦回来也重拉)。",
-   "fe_design": "刷新或重进页面 → 拉一份全量 registry 快照(含 endpoint+route+状态+已发现模型)→ 转成 UI 凭证态恢复每张卡 → key 再经 #16 的 hydration 换回真值。初始与窗口聚焦时各拉一次。前端只投影 registry、不持第二份真相(切 tab/刷新状态不丢)。",
+   "action": "无显式动作(刷新或重进页面自动恢复;其它窗口改动由后端 registry_changed 事件触发重拉)。",
+   "fe_design": "刷新或重进页面 → 首次从无到有拉一份全量 registry 快照(含 endpoint+route+状态+已发现模型)→ 转成 UI 凭证态恢复每张卡 → key 再经 #16 的 hydration 换回真值。窗口聚焦、WebSocket 重连、tab 切换都不是数据变更信号,不得自行重拉;后续只有 registry_changed 这类后端真相变更事件或用户写入后的强制刷新才重拉。前端只投影 registry、不持第二份真相(切 tab/刷新状态不丢)。",
    "fe_modules": [
     {
      "name": "凭证 hydration",

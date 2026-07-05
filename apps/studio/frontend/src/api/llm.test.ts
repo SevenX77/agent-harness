@@ -3,6 +3,7 @@ import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'ax
 import { api } from './client'
 import {
   getCredentials,
+  getRegistry,
   getProviderModels,
   getRoles,
   deleteModelBundle,
@@ -190,6 +191,64 @@ describe('API Keys v4 registry adapter', () => {
       last_test_status: 'ok',
       available_sdks: ['openai_compatible'],
     })
+  })
+
+  it('reuses the registry snapshot for repeated reads until callers force a refresh', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
+      return registry()
+    })
+
+    await getRegistry()
+    await getRegistry()
+    await getRegistry({ force: true })
+
+    expect(seen).toEqual([
+      'get /llm/registry',
+      'get /llm/registry',
+    ])
+  })
+
+  it('dedupes concurrent registry reads into one backend request', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      seen.push(`${config.method} ${config.url}`)
+      await Promise.resolve()
+      return {
+        data: registry(),
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await Promise.all([getRegistry(), getRegistry(), getRegistry()])
+
+    expect(seen).toEqual(['get /llm/registry'])
+  })
+
+  it('reuses roles data until callers force a refresh', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
+      if (config.url === '/llm/roles') {
+        return { schema_version: 3, model_profiles: {}, model_bundles: {}, roles: {} }
+      }
+      return registry()
+    })
+
+    await getRoles()
+    await getRoles()
+    await getRoles({ force: true })
+
+    expect(seen).toEqual([
+      'get /llm/roles',
+      'get /llm/registry',
+      'get /llm/roles',
+      'get /llm/registry',
+    ])
   })
 
   it('syncs the verified community catalog through the verified read-path endpoint', async () => {

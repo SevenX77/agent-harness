@@ -556,31 +556,6 @@ export function useSettingsPageController(): SettingsPageController {
   const rolesSaveStatusRef = useRef(rolesSaveStatus)
   rolesSaveStatusRef.current = rolesSaveStatus
 
-  useEffect(() => {
-    if (!apiReady) return undefined
-    const handleFocus = () => {
-      getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
-        .then((next) => {
-          setCredentials(next)
-          setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
-        })
-        .catch(() => {})
-
-      if (rolesDataRef.current) {
-        Promise.all([getRoles(), getModelGroups()])
-          .then(([next, nextModelGroups]) => {
-            setRolesData(next)
-            setModelGroups(nextModelGroups)
-          })
-          .catch(() => {})
-      }
-    }
-    window.addEventListener("focus", handleFocus)
-    return () => {
-      window.removeEventListener("focus", handleFocus)
-    }
-  }, [apiReady])
-
   // R-F19.2 — when the Tauri shell intercepts `WindowEvent::CloseRequested`
   // (Cmd+Q / window close / Quit menu) it emits `before-quit` and blocks the
   // shutdown for `QUIT_FLUSH_BUDGET` (1500ms) waiting for the FE to ack via
@@ -638,12 +613,11 @@ export function useSettingsPageController(): SettingsPageController {
   }, [flushRolesSave])
 
   // #5/#6 WebSocket auto-refresh, extracted into useStudioEventStream (resilient
-  // reconnect + observable logging). registry_changed re-pulls credentials;
-  // roles_changed re-pulls roles+model-groups when loaded, else marks them dirty
-  // so the next Roles/Copilot tab open refetches (the event is no longer
-  // silently dropped). onResync runs on every (re)connect to backfill any gap.
+  // reconnect + observable logging). Only explicit backend change events refresh
+  // config truth: registry_changed re-pulls credentials; roles_changed re-pulls
+  // roles+model-groups when loaded, else marks them dirty.
   const refetchCredentialsFromEvent = useCallback(() => {
-    getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+    getCredentials({ hydrateSecrets: credentialsHydratedRef.current, force: true })
       .then((next) => {
         setCredentials(next)
         setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
@@ -658,7 +632,7 @@ export function useSettingsPageController(): SettingsPageController {
       rolesDirtyRef.current = true
       return
     }
-    Promise.all([getRoles(), getModelGroups()])
+    Promise.all([getRoles({ force: true }), getModelGroups({ force: true })])
       .then(([next, nextModelGroups]) => {
         setRolesData(next)
         setModelGroups(nextModelGroups)
@@ -683,16 +657,10 @@ export function useSettingsPageController(): SettingsPageController {
     updateActiveProbeEndpoint(event.endpointId, event.activeModelIds)
   }, [])
 
-  const handleEventResync = useCallback(() => {
-    refetchCredentialsFromEvent()
-    if (rolesDataRef.current) refetchRolesFromEvent()
-  }, [refetchCredentialsFromEvent, refetchRolesFromEvent])
-
   const { connectionLost } = useStudioEventStream({
     onRegistryChanged: refetchCredentialsFromEvent,
     onRolesChanged: handleRolesChangedEvent,
     onLlmProbeActive: handleLlmProbeActiveEvent,
-    onResync: handleEventResync,
   }, { enabled: apiReady })
 
   // A mutating settings action (delete / test / add) must never fire into an

@@ -180,29 +180,19 @@ test.describe("Settings shell — WebSocket auto-refresh (#5 registry / #6 roles
     await expect.poll(() => state.rolesGets).toBeGreaterThan(before)
   })
 
-  test("#6 roles_changed while Roles is unopened is marked dirty (not dropped, not eagerly fetched) and consumed on tab open", async ({ page }) => {
-    const infoLogs: string[] = []
-    page.on("console", (msg) => {
-      if (msg.type() === "info" || msg.type() === "log") infoLogs.push(msg.text())
-    })
+  test("#6 roles_changed refreshes app-level roles after the startup load", async ({ page }) => {
     await installMockWebSocket(page)
     const state = await mockShellBackend(page)
-    await openSettings(page) // stays on General → roles never loaded
+    await openSettings(page)
 
     await page.evaluate(() => {
       ;(window as unknown as { __wsControl?: { pushLast: (e: unknown) => void } }).__wsControl?.pushLast({ type: "roles_changed" })
     })
 
-    // Not loaded yet → no eager roles GET, but the event is recorded (dirty), not dropped.
-    await expect.poll(() => infoLogs.some((line) => line.includes("roles-marked-dirty"))).toBe(true)
-    expect(state.rolesGets).toBe(0)
-
-    // Opening the Roles tab consumes the dirty flag and refetches fresh.
-    await page.getByRole("button", { name: "LLM Roles" }).click()
-    await expect.poll(() => state.rolesGets).toBeGreaterThanOrEqual(1)
+    await expect.poll(() => state.rolesGets).toBeGreaterThanOrEqual(2)
   })
 
-  test("#5/#6 a reconnect re-syncs (refetches) to backfill any gap missed while disconnected", async ({ page }) => {
+  test("#5/#6 reconnect restores the subscription without refetching unchanged data", async ({ page }) => {
     await installMockWebSocket(page)
     const state = await mockShellBackend(page)
     await openSettings(page)
@@ -210,10 +200,16 @@ test.describe("Settings shell — WebSocket auto-refresh (#5 registry / #6 roles
     await expect.poll(() => state.registryGets).toBeGreaterThanOrEqual(1)
     const before = state.registryGets
 
-    // Drop the live socket while reconnects still succeed → the hook reconnects
-    // and onResync refetches credentials to fill any gap.
+    // Drop the live socket while reconnects still succeed. Reconnect itself is
+    // not evidence that config truth changed, so it must not refetch registry.
     await page.evaluate(() => {
       ;(window as unknown as { __wsControl?: { dropLast: () => void } }).__wsControl?.dropLast()
+    })
+    await page.waitForTimeout(1_500)
+    expect(state.registryGets).toBe(before)
+
+    await page.evaluate(() => {
+      ;(window as unknown as { __wsControl?: { pushLast: (e: unknown) => void } }).__wsControl?.pushLast({ type: "registry_changed" })
     })
     await expect.poll(() => state.registryGets, { timeout: 10_000 }).toBeGreaterThan(before)
   })

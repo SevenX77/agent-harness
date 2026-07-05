@@ -9,7 +9,7 @@
     "dataflow": [
       "用户点 Toolbar Settings 图标 → Workspace 把 settingsOpen 置 true",
       "Workspace 在画布面板渲染 SettingsPage(左文件树 / 右 Copilot 仍挂载)",
-      "SettingsPage 按 activeTab 懒加载该 tab 数据(切到 API Keys 才拉凭证、切到 Roles/Copilot 才拉角色)",
+      "SettingsPage 首次挂载加载壳层所需摘要数据;切到 API Keys 才拉明文 hydration,切到 Roles/Copilot 才拉角色/模型组,已加载不重复拉",
       "用户改字段 → 入队 debounce 保存 → 保存态(pending→saving→saved/error)汇给 SaveStatusBadge",
       "外部进程改凭证/角色文件 → sidecar 文件监听器广播 registry_changed / roles_changed → 前端 WebSocket 收到 → 重拉对应数据刷新",
       "某 tab 渲染抛错 → SettingsErrorBoundary 捕获 → 渲染兜底卡 + Retry",
@@ -27,7 +27,7 @@
         "Workspace 持 settingsOpen 状态;Toolbar 的 onSettingsOpen 与 Header 的 onOpenSettings 都把它置 true。",
         "settingsOpen=true 时只在画布面板(canvas)渲染 SettingsPage,替换编辑器/图;左侧 Panels(文件树等)与右侧 Copilot 面板照常挂载——工作区不卸载。",
         "非真 modal:不铺全屏 backdrop、不做 focus-trap,让用户配置时仍能看/操作工作区。",
-        "SettingsPageContent 按 activeTab 渲染对应 tab;tab 数据懒加载——切到 api_keys 才首拉凭证、切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
+        "SettingsPageContent 按 activeTab 渲染对应 tab;tab 数据按需加载——壳层首次从无到有拉摘要快照,切到 api_keys 才首拉明文 hydration,切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
         "X(onClose)把 settingsOpen 置 false 收起、工作区状态不丢;Home(handleHome)先收起 Settings 再 onCloseSkill 卸载工作区退首页——两条语义。"
       ],
       "do": [
@@ -50,11 +50,11 @@
       "diagram": "",
       "rules": [
         "前端:SettingsPage 挂载时开一条 WebSocket 连 /ws/events;onmessage(收到一条事件的回调)解析事件 type。",
-        "收到 registry_changed → getCredentials(拉凭证快照的 API 函数)重拉凭证 + 重建草稿;收到 roles_changed 且角色已加载过 → 重拉角色 + 模型组。",
+        "收到 registry_changed → getCredentials(拉凭证快照的 API 函数,force=true)重拉凭证 + 重建草稿;收到 roles_changed → 若角色已加载则 getRoles/getModelGroups(force=true)重拉角色 + 模型组,若尚未加载则只标记 dirty 供首次打开时消费。",
         "后端:gateway 后端 sidecar 的 file_watcher(文件监听器)在 _handle_path(每个文件落盘时被调的回调)里比对落盘路径是不是凭证文件 / 角色文件,命中就 broadcast_from_thread(从工作线程把事件广播到事件总线)广播 registry_changed / roles_changed。",
         "后端:/ws/events(studio_events 路由处理函数)校验 token(连接鉴权令牌)后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题),把事件逐条 send_json(以 JSON 发回一条消息)推给前端。",
         "前端用 cancelled(组件已卸载标志)防组件卸载后还 setState(更新已销毁组件状态会报警告);socket 在 effect(副作用钩子)清理时 close 关闭。",
-        "断开/出错 → 按指数退避自动重连:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter(全抖动,在退避区间内随机化,避免多端同时重连打爆后端);永久重试,不设放弃上限,连不上就一直按封顶后的间隔重试;重连成功后立即重拉一次补齐断线期间漏掉的变更。",
+        "断开/出错 → 按指数退避自动重连:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter(全抖动,在退避区间内随机化,避免多端同时重连打爆后端);永久重试,不设放弃上限,连不上就一直按封顶后的间隔重试。连接成功只说明订阅恢复,不是数据变更证据,不得因此重拉 registry/roles。",
         "「连接不上」警告标志:放在 Settings 壳层顶栏(overlay title bar)、保存徽章(SaveStatusBadge)右侧。触发阈值不是一断开就弹(避免瞬断闪烁)——仅当重连退避连续失败达到阈值(连续失败 ≥3 次 或 累计 >10s 仍未连上)才显示「连接不上」;一旦重连成功立即消失。"
       ],
       "do": [
@@ -63,10 +63,10 @@
         "后端 /ws/events 鉴权 + 订阅 + 推送。"
       ],
       "dont": [
-        "前端不持第二份真相(只重拉 registry/roles 投影,不本地拼)。",
+        "前端不持第二份真相(只在初始从无到有加载、后端变更事件或用户写入后强制重拉 registry/roles 投影,不本地拼)。",
         "后端不在事件里塞数据体(只广播「变了」的信号,前端自己重拉)。"
       ],
-      "deviation": "⚠️ 前端 WebSocket 的 onmessage 解析、外层连接建立都是空 catch 静默(违 logging 铁律:降级必须可观测),且断开后无重连——断线后自动刷新永久失效。roles_changed 还被「角色未加载过(rolesDataRef 为空)」直接吞掉,没开过 Roles tab 的外部改动收不到。这些是现状偏差,目标要补重连 + 可观测日志 + 不吞事件。"
+      "deviation": "已对齐原则:WebSocket 断开后会重连并记录可观测日志;连接/重连本身不触发数据重拉。roles_changed 在角色未加载时只标 dirty,首次打开 Roles/Copilot 再消费;registry_changed/roles_changed 才是允许强制重拉的真相变更信号。"
     },
     {
       "name": "即填即存 + 全局保存徽章",
@@ -150,7 +150,7 @@
     ]
   },
   "states_errors": {
-    "intro": "壳层对外的状态主要有两组:一组是保存徽章的保存态(idle/pending/saving/saved/error),另一组是 WebSocket 连接的健康态(连接/断开/重连)。前者已实现,后者是现状缺口(无重连、无可观测)。",
+    "intro": "壳层对外的状态主要有两组:一组是保存徽章的保存态(idle/pending/saving/saved/error),另一组是 WebSocket 连接的健康态(连接/断开/重连)。两组都已实现;WebSocket 健康态只表达连接状态,不作为数据变更信号。",
     "states": [
       {
         "code": "idle",
@@ -211,16 +211,16 @@
     },
     "reason_codes": [],
     "ws_health": {
-      "intro": "WebSocket 连接健康态是壳层 NFR 的一部分,但现状缺失。目标态与现状缺口:",
+      "intro": "WebSocket 连接健康态是壳层 NFR 的一部分。当前目标态与实现状态:",
       "target": [
-        "连接断开 → 应自动重连(指数退避:初始延迟 1s,倍率 ×2,封顶 30s,加 full jitter 全抖动避免重连风暴;永久重试,不设放弃上限,连不上就一直按封顶后的间隔重试)并在重连成功后重拉一次,补齐断线期间漏掉的变更",
+        "连接断开 → 应自动重连(指数退避:初始延迟 1s,倍率 ×2,封顶 30s,加 full jitter 全抖动避免重连风暴;永久重试,不设放弃上限,连不上就一直按封顶后的间隔重试);重连成功只恢复订阅,不重拉数据",
         "连接 / 断开 / 重连 / 收到事件 / 解析失败 → 都应有可观测日志(INFO 连接、WARNING 断开重连、ERROR 解析失败)",
         "拉不到 / 连不上 → 给用户一个「连接不上」的警告标志(PM 拍板:否则不必让用户感知)。放置:Settings 壳层顶栏(overlay title bar)、保存徽章(SaveStatusBadge)右侧。触发阈值:不是一断开就弹(避免瞬断闪烁)——仅当重连退避连续失败达到阈值(连续失败 ≥3 次 或 累计 >10s 仍未连上)才显示「连接不上」标志;一旦重连成功立即消失。"
       ],
       "current_gap": [
-        "断开后无重连——断线即永久失去自动刷新",
-        "onmessage 解析与连接建立全空 catch 静默——违 logging 铁律,运维看不到任何异常",
-        "无「连接不上」用户可见警告标志"
+        "已实现断线重连和可观测日志",
+        "已去掉连接/重连即重拉;只有 registry_changed / roles_changed 触发重拉",
+        "连接不上警告由连续失败阈值驱动,重连成功立即清除"
       ]
     }
   },
@@ -236,7 +236,7 @@
       "item": "文件监听器广播 registry_changed / roles_changed",
       "d12": "—",
       "status": "ok",
-      "note": "sidecar 的 services/file_watcher(文件监听器)已能在凭证文件(llm_credentials.json)/ 角色文件落盘时 broadcast_from_thread(从工作线程把事件广播到事件总线)广播对应事件,事件源后端已实现。前端侧的重连 / 可观测 / 不吞事件是前端缺口,与后端无关。",
+      "note": "sidecar 的 services/file_watcher(文件监听器)已能在凭证文件(llm_credentials.json)/ 角色文件落盘时 broadcast_from_thread(从工作线程把事件广播到事件总线)广播对应事件,事件源后端已实现。前端侧重连 / 可观测 / 不吞事件也已实现,且连接/重连本身不触发数据重拉。",
       "ref": "shell"
     },
     {

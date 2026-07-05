@@ -55,9 +55,16 @@ def test_upsert_endpoints_persists_protocol_canonical_base_urls(tmp_path: Path) 
     )
     assert saved[wavespeed_persisted_id]["base_url"] == "https://llm.wavespeed.ai"
 
-    # DeepSeek and Ark hosts are recognized as official providers, so the
-    # incoming endpoint_id is rewritten to the curated `*-official` id.
-    assert saved["deepseek-official"]["base_url"] == "https://api.deepseek.com/anthropic"
+    # DeepSeek's official matrix currently declares only its OpenAI-compatible
+    # cell. A DeepSeek Anthropic-compatible authoring row still gets the
+    # protocol-specific canonical base URL, but not a host-only official id.
+    deepseek_persisted_id = stable_endpoint_id(
+        protocol="anthropic_compatible", base_url="https://api.deepseek.com/anthropic"
+    )
+    assert saved[deepseek_persisted_id]["base_url"] == "https://api.deepseek.com/anthropic"
+
+    # Ark runtime is declared as an official protocol cell, so the incoming
+    # endpoint_id is rewritten to the curated `ark-official` id.
     assert saved["ark-official"]["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
 
     # Generic openai-compatible endpoints also flow through stable_endpoint_id.
@@ -65,6 +72,38 @@ def test_upsert_endpoints_persists_protocol_canonical_base_urls(tmp_path: Path) 
         protocol="openai_compatible", base_url="https://api.openai.example/v1"
     )
     assert saved[openai_persisted_id]["base_url"] == "https://api.openai.example/v1"
+
+
+def test_upsert_endpoints_keeps_ark_openai_compatible_endpoint_separate(tmp_path: Path) -> None:
+    from app.services.llm_credentials import upsert_endpoints
+
+    path = tmp_path / "llm_credentials.json"
+
+    upsert_endpoints(
+        {
+            "ark-runtime": {
+                "endpoint_id": "ark-runtime",
+                "display_name": "Ark Runtime",
+                "protocol": "ark_runtime",
+                "base_url": "https://ark.cn-beijing.volces.com/",
+                "api_key": "secret",
+            },
+            "ark-openai-official": {
+                "endpoint_id": "ark-openai-official",
+                "display_name": "Ark Official",
+                "protocol": "openai_compatible",
+                "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                "api_key": "secret",
+            },
+        },
+        path=path,
+    )
+
+    saved = json.loads(path.read_text(encoding="utf-8"))["provider_endpoints"]
+
+    assert saved["ark-official"]["protocol"] == "ark_runtime"
+    assert saved["ark-openai-official"]["protocol"] == "openai_compatible"
+    assert saved["ark-openai-official"]["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
 
 
 def test_upserted_canonical_base_url_is_what_resolver_reads(tmp_path: Path) -> None:

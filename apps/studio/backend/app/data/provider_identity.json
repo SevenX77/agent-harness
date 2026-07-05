@@ -1,5 +1,5 @@
 {
-  "_comment": "Data-driven provider identity (W3-A / T2). Replaces hardcoded provider matches across the studio backend so a new provider is a config edit, not code. 'key' indexes docs/development/llm_provider_notes/<key>.md. THIRD-PARTY endpoints match by a keyword in their id/display-name (lowercased) OR their host's registrable domain -> 'key' (notable-model lookup). OFFICIAL endpoints match by 'official_hosts' -> 'official_endpoint_id' (stable-id auto-detection). Host matching everywhere is: host == value OR host endswith .value. 'display_alias' is the human provider name.",
+  "_comment": "Data-driven provider identity (W3-A / T2). Replaces hardcoded provider matches across the studio backend so a new provider is a config edit, not code. 'key' indexes docs/development/llm_provider_notes/<key>.md. THIRD-PARTY endpoints match by a keyword in their id/display-name (lowercased) OR their host's registrable domain -> 'key' (notable-model lookup). OFFICIAL endpoints match by 'official_hosts' + protocol -> 'official_endpoint_ids' (stable-id auto-detection). Host matching everywhere is: host == value OR host endswith .value. 'display_alias' is the human provider name.",
   "providers": [
     {
       "key": "qiniu",
@@ -23,31 +23,42 @@
       "key": "openai",
       "display_alias": "OpenAI",
       "official_hosts": ["api.openai.com"],
-      "official_endpoint_id": "openai-official"
+      "official_endpoint_ids": {
+        "openai_compatible": "openai-official"
+      }
     },
     {
       "key": "anthropic",
       "display_alias": "Anthropic",
       "official_hosts": ["api.anthropic.com"],
-      "official_endpoint_id": "anthropic-official"
+      "official_endpoint_ids": {
+        "anthropic_compatible": "anthropic-official"
+      }
     },
     {
       "key": "deepseek",
       "display_alias": "DeepSeek",
       "official_hosts": ["api.deepseek.com"],
-      "official_endpoint_id": "deepseek-official"
+      "official_endpoint_ids": {
+        "openai_compatible": "deepseek-official"
+      }
     },
     {
       "key": "gemini",
       "display_alias": "Gemini",
       "official_hosts": ["generativelanguage.googleapis.com"],
-      "official_endpoint_id": "gemini-official"
+      "official_endpoint_ids": {
+        "google_genai": "gemini-official"
+      }
     },
     {
       "key": "ark",
       "display_alias": "ARK",
       "official_hosts": ["volces.com"],
-      "official_endpoint_id": "ark-official",
+      "official_endpoint_ids": {
+        "ark_runtime": "ark-official",
+        "openai_compatible": "ark-openai-official"
+      },
       "language_model_prefixes": ["doubao-", "deepseek-", "glm-", "kimi-", "mistral-", "qwen", "seed-", "ep-"],
       "non_language_model_tokens": ["seedream", "seedance", "wan", "embedding", "translate", "translation", "tts", "audio", "video", "3d"]
     }

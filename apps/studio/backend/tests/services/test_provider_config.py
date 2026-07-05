@@ -6,6 +6,8 @@ from app.services.provider_config import (
     language_model_classification,
     notable_provider_key_for,
     official_endpoint_id_for_host,
+    official_endpoint_id_for_host_protocol,
+    official_provider_key_for_host,
     provider_identities,
     static_probe_candidate_specs,
 )
@@ -45,9 +47,28 @@ def test_official_host_maps_to_stable_endpoint_id() -> None:
     assert official_endpoint_id_for_host("api.deepseek.com") == "deepseek-official"
     assert official_endpoint_id_for_host("generativelanguage.googleapis.com") == "gemini-official"
     # ARK matches by registrable domain — any *.volces.com host, or the bare domain.
-    assert official_endpoint_id_for_host("ark.cn-beijing.volces.com") == "ark-official"
-    assert official_endpoint_id_for_host("volces.com") == "ark-official"
+    assert official_endpoint_id_for_host("ark.cn-beijing.volces.com") is None
+    assert official_endpoint_id_for_host("volces.com") is None
     assert official_endpoint_id_for_host("API.OPENAI.COM") == "openai-official"
+
+
+def test_official_host_protocol_maps_to_stable_endpoint_id() -> None:
+    assert (
+        official_endpoint_id_for_host_protocol("ark.cn-beijing.volces.com", "ark_runtime")
+        == "ark-official"
+    )
+    assert (
+        official_endpoint_id_for_host_protocol("ark.cn-beijing.volces.com", "openai_compatible")
+        == "ark-openai-official"
+    )
+    assert official_endpoint_id_for_host_protocol("api.openai.com", "openai_compatible") == "openai-official"
+    assert official_endpoint_id_for_host_protocol("api.openai.com", "anthropic_compatible") is None
+
+
+def test_official_host_maps_to_provider_catalog_key() -> None:
+    assert official_provider_key_for_host("ark.cn-beijing.volces.com") == "ark"
+    assert official_provider_key_for_host("api.openai.com") == "openai"
+    assert official_provider_key_for_host("api.qnaigc.com") is None
 
 
 def test_non_official_host_returns_none() -> None:

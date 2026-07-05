@@ -151,6 +151,7 @@ from app.services.official_capability_sources import (
 from app.services.provider_config import (
     language_model_classification,
     notable_provider_key_for,
+    official_provider_key_for_host,
     static_probe_candidate_specs,
 )
 from app.services.provider_probe_rules import dynamic_probe_candidate_specs
@@ -3990,18 +3991,18 @@ def _is_gemini_interactions_only_model(model: str) -> bool:
 
 def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: str) -> bool:
     model = model_id.lower()
-    backend = _endpoint_probe_backend(endpoint)
-    if backend == "claude":
+    catalog_provider_key = _endpoint_catalog_provider_key(endpoint)
+    if catalog_provider_key == "anthropic":
         return model.startswith("claude-")
-    if backend == "gemini":
+    if catalog_provider_key == "gemini":
         if _is_gemini_interactions_only_model(model):
             return False
         if _is_gemini_known_non_language_model(model):
             return False
         return True
-    if backend == "deepseek":
+    if catalog_provider_key == "deepseek":
         return model.startswith("deepseek-")
-    if backend == "ark":
+    if catalog_provider_key == "ark":
         # W3-A / T2: ARK's language-model prefixes + non-language tokens are data-driven
         # (app/data/provider_identity.json -> ark). A model is a language model when it
         # has no non-language token and starts with a configured prefix.
@@ -4052,12 +4053,12 @@ def _official_catalog_capabilities(
     )
     normalized = _plain_normalized_capabilities(endpoint, model_id, raw_capabilities)
     input_source_urls = official_doc_source_urls(
-        _endpoint_probe_backend(endpoint),
+        _endpoint_capability_source_key(endpoint),
         model_type=model_type,
         modalities=input_modalities,
     )
     output_source_urls = official_doc_source_urls(
-        _endpoint_probe_backend(endpoint),
+        _endpoint_capability_source_key(endpoint),
         model_type=model_type,
         modalities=output_modalities,
     )
@@ -4147,7 +4148,7 @@ def _plain_normalized_capabilities(
         source="api_list",
     )
     plain: dict[str, object] = {}
-    source_urls = official_api_list_source_urls(_endpoint_probe_backend(endpoint))
+    source_urls = official_api_list_source_urls(_endpoint_capability_source_key(endpoint))
     for key, capability in normalized.items():
         if key in {
             "max_input_tokens",
@@ -4174,7 +4175,7 @@ def _official_normalized_route_capabilities(
         raw_capabilities=raw_capabilities or {},
         source="api_list",
     )
-    source_urls = list(official_api_list_source_urls(_endpoint_probe_backend(endpoint)))
+    source_urls = list(official_api_list_source_urls(_endpoint_capability_source_key(endpoint)))
     for key in ("input_modalities", "output_modalities", "max_input_tokens", "max_output_tokens"):
         capability = capabilities.get(key)
         if capability is None:
@@ -4196,7 +4197,7 @@ def _provider_doc_limit_capabilities(
 ) -> dict[str, object]:
     capabilities: dict[str, object] = {}
     for key, rule in provider_doc_limit_rules(
-        _endpoint_probe_backend(endpoint),
+        _endpoint_capability_source_key(endpoint),
         model_id,
     ).items():
         capabilities[key] = rule.value
@@ -4211,7 +4212,7 @@ def _provider_doc_limit_capability_values(
 ) -> dict[str, CapabilityValue]:
     capabilities: dict[str, CapabilityValue] = {}
     for key, rule in provider_doc_limit_rules(
-        _endpoint_probe_backend(endpoint),
+        _endpoint_capability_source_key(endpoint),
         model_id,
     ).items():
         capabilities[key] = _capability_value_from_rule(rule)
@@ -4318,7 +4319,8 @@ def _ordered_unique(values: list[str]) -> list[str]:
 
 def _official_catalog_model_type(endpoint: ProviderEndpoint, model_id: str) -> tuple[str, str]:
     model = model_id.lower()
-    if _endpoint_probe_backend(endpoint) == "gemini" and _is_gemini_interactions_only_model(model):
+    catalog_provider_key = _endpoint_catalog_provider_key(endpoint)
+    if catalog_provider_key == "gemini" and _is_gemini_interactions_only_model(model):
         return "interactions_agent", "Interactions API agent"
     if _is_official_language_model_candidate(endpoint, model_id):
         return "language_reasoning", "Language/reasoning model"
@@ -4332,7 +4334,7 @@ def _official_catalog_model_type(endpoint: ProviderEndpoint, model_id: str) -> t
             "imagen",
             "nano-banana",
         )
-    ) or (_endpoint_probe_backend(endpoint) == "gemini" and "image" in model):
+    ) or (catalog_provider_key == "gemini" and "image" in model):
         return "image_generation", "Image generation model"
     if any(token in model for token in ("seedance", "sora", "veo", "video", "wan")):
         return "video_generation", "Video generation model"
@@ -4365,14 +4367,14 @@ def _official_catalog_modalities(
     model_id: str,
     model_type: str,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    backend = _endpoint_probe_backend(endpoint)
+    catalog_provider_key = _endpoint_catalog_provider_key(endpoint)
     model = model_id.lower()
     if model_type == "language_reasoning":
-        if backend == "claude":
+        if catalog_provider_key == "anthropic":
             return ("text", "image", "pdf"), ("text",)
-        if backend == "gemini" and not model.startswith("gemma-"):
+        if catalog_provider_key == "gemini" and not model.startswith("gemma-"):
             return ("text", "image", "audio", "video"), ("text",)
-        if backend == "openai":
+        if catalog_provider_key == "openai":
             if model.startswith(("gpt-4", "gpt-5", "o1", "o3", "o4")):
                 return ("text", "image", "file"), ("text",)
             return ("text",), ("text",)
@@ -4395,7 +4397,7 @@ def _official_catalog_modalities(
             return ("text",), ("audio",)
         return ("text", "audio"), ("text", "audio")
     if model_type == "embedding":
-        if backend == "gemini" and "embedding-2" in model:
+        if catalog_provider_key == "gemini" and "embedding-2" in model:
             return ("text", "image", "audio", "video"), ("embedding",)
         return ("text",), ("embedding",)
     if model_type == "moderation":
@@ -4511,7 +4513,7 @@ def _official_model_type_capability_values(
         model_id,
         model_type,
     )
-    backend = _endpoint_probe_backend(endpoint)
+    backend = _endpoint_capability_source_key(endpoint)
     input_source_urls = official_doc_source_urls(
         backend,
         model_type=model_type,
@@ -4901,7 +4903,28 @@ def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
     matched = notable_provider_key_for(text_haystack, hostname)
     if matched is not None:
         return matched
+    official = official_provider_key_for_host(hostname)
+    if official is not None:
+        return official
     return _endpoint_probe_backend(endpoint)
+
+
+def _endpoint_catalog_provider_key(endpoint: ProviderEndpoint) -> str:
+    return _endpoint_notable_provider_key(endpoint)
+
+
+def _endpoint_capability_source_key(endpoint: ProviderEndpoint) -> str:
+    """Return the provider key used by official capability source tables.
+
+    Catalog identity and capability-source identity are adjacent but not the same
+    vocabulary: Anthropic models are cataloged under the provider key
+    ``anthropic``, while the existing official capability source table is keyed
+    by the model family ``claude``.
+    """
+    catalog_provider_key = _endpoint_catalog_provider_key(endpoint)
+    if catalog_provider_key == "anthropic":
+        return "claude"
+    return catalog_provider_key
 
 
 def _prioritize_notable_probe_models(

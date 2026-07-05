@@ -85,4 +85,42 @@ describe("buildPutPayload", () => {
       },
     ])
   })
+
+  it("uses canonical official endpoint identities even when a draft carries stale endpoint_ids", () => {
+    const result = buildPutPayload([
+      {
+        id: "ark-official",
+        name: "Ark Official",
+        api_key: "volc-key",
+        base_url: "https://ark.cn-beijing.volces.com/api/v3",
+        provider_type: "ark_runtime",
+        base_urls: [{
+          id: "ark-official",
+          value: "https://ark.cn-beijing.volces.com/api/v3",
+          provider_type: "ark_runtime",
+          endpoint_ids: {
+            ark_runtime: "ark-official",
+            openai_compatible: "ark-official",
+          },
+        }],
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        id: "ark-official",
+        name: "Ark Official",
+        api_key: "volc-key",
+        base_url: "https://ark.cn-beijing.volces.com/api/v3",
+        provider_type: "ark_runtime",
+      },
+      {
+        id: "ark-openai-official",
+        name: "Ark Official",
+        api_key: "volc-key",
+        base_url: "https://ark.cn-beijing.volces.com/api/v3",
+        provider_type: "openai_compatible",
+      },
+    ])
+  })
 })

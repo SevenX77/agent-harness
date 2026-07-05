@@ -5,7 +5,8 @@ import {
   type CredentialsState,
   type ProviderCredentialUpdate,
 } from "@/api/llm"
-import { endpointIdForBaseUrlProtocol, thirdPartyProtocolCandidates } from "@/components/studio/settings/provider-utils"
+import { endpointIdForBaseUrlProtocol, inferProviderKind, providerEndpointDraftsForAction, thirdPartyProtocolCandidates } from "@/components/studio/settings/provider-utils"
+import type { ProviderDraft } from "@/components/studio/settings/types"
 
 /** Status of the most recent (or in-flight) auto-save call. */
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error"
@@ -172,6 +173,16 @@ export function buildPutPayload(
   }>,
 ): ProviderCredentialUpdate[] {
   return providers.flatMap((provider) => {
+    const draft = credentialUpdateDraft(provider)
+    if (inferProviderKind(draft) === "official") {
+      return providerEndpointDraftsForAction(draft).map((endpointDraft) => ({
+        id: endpointDraft.id,
+        name: endpointDraft.name,
+        api_key: endpointDraft.api_key,
+        base_url: endpointDraft.base_url.trim(),
+        provider_type: endpointDraft.provider_type,
+      }))
+    }
     const baseUrlRows = provider.base_urls?.length
       ? provider.base_urls
       : [{ id: provider.id, value: provider.base_url ?? "" }]
@@ -194,4 +205,36 @@ export function buildPutPayload(
       provider_type: row.provider_type ?? provider.provider_type ?? null,
     }))
   })
+}
+
+function credentialUpdateDraft(
+  provider: Readonly<{
+    id: string
+    name: string
+    api_key?: string
+    base_url?: string
+    base_urls?: ReadonlyArray<{
+      id: string
+      value: string
+      provider_type?: ProviderCredentialUpdate["provider_type"]
+      endpoint_ids?: Partial<Record<NonNullable<ProviderCredentialUpdate["provider_type"]>, string>>
+    }>
+    provider_type?: ProviderCredentialUpdate["provider_type"]
+  }>,
+): ProviderDraft {
+  return {
+    id: provider.id,
+    name: provider.name,
+    api_key: provider.api_key ?? "",
+    base_url: provider.base_url ?? "",
+    provider_type: provider.provider_type ?? "openai_compatible",
+    base_urls: provider.base_urls?.map((row) => ({
+      id: row.id,
+      value: row.value,
+      provider_type: row.provider_type ?? undefined,
+      endpoint_ids: row.endpoint_ids ? { ...row.endpoint_ids } : undefined,
+    })),
+    isTesting: false,
+    testingAction: null,
+  }
 }

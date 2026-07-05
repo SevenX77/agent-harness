@@ -608,7 +608,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 30 | 状态投影:tp 顶层徽章(参数指纹) / official 每 route 彩色 Tag(后端权威) | 共 | test-status-projection | ✅ → 目标 6 态(§4.2) |
 | 31 | 刷新后从 registry 恢复 key/状态/Available Models | 共 | registry-restore | ✅ |
 
-> **官/三 目标区别(去掉 drift 后)**：official 不是用户选的,后端按 `endpoint_id` 白名单(anthropic/openai/gemini/deepseek/ark-official)钉死 `provider_kind`,前端镜像成固定 5 厂商 + canonical base_url/protocol 默认且隐藏;third-party 用户自填 name/url/protocol/key。**测试路径同一套**(统一 endpoint test + 批量探测)。多 URL/协议探测/命名见 §1.2。
+> **官/三 目标区别(去掉 drift 后)**：official 不是用户选的,后端按 `endpoint_id` 白名单(anthropic/openai/gemini/deepseek/ark-official/ark-openai-official)钉死 `provider_kind`,前端镜像成固定 5 厂商 + canonical base_url/protocol 默认且隐藏;Ark official 同一 host 有两颗协议身份：`ark-official`=`ark_runtime`, `ark-openai-official`=`openai_compatible`,不能只按 host 合并。third-party 用户自填 name/url/protocol/key。**测试路径同一套**(统一 endpoint test + 批量探测)。多 URL/协议探测/命名见 §1.2。
 > **🔌 孤儿/🛠 backend-only**：`OfficialVendorSelect`、`AddProviderForm` createBlank/derive、`ProviderDeleteButton`(定义未渲染)、`probeRoute`→`POST /routes/{id}/probe`(此 tab 未接线)。处置(接线 vs 清死代码)逐组判定。
 
 ### 7.3 Stage 3 — LLM Roles（角色 → 模型兜底链）〔区域 `settings:llm-roles`〕

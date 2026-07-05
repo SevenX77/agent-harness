@@ -18,6 +18,7 @@ function route(
   callMethodId: string | null = "anthropic_messages",
   capabilities: ProviderModelOption["capabilities"] = {},
   candidateCallMethodIds: string[] = [],
+  copilotSdkCompatible: boolean = callMethodId !== null,
 ): ProviderModelOption {
   return {
     route_id: `${endpointId}:${modelId}`,
@@ -33,6 +34,7 @@ function route(
     capabilities,
     call_method_id: callMethodId,
     candidate_call_method_ids: candidateCallMethodIds,
+    copilot_sdk_compatible: copilotSdkCompatible,
   }
 }
 
@@ -122,7 +124,7 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     const openaiOnlyGroup = {
       canonical_id: "claude-opus-4.8",
       display_name: "Claude Opus 4.8",
-      provider_models: [route("anthropic-official", "claude-opus-4.8", "ready", "openai_chat_completions")],
+      provider_models: [route("anthropic-official", "claude-opus-4.8", "ready", "openai_chat_completions", {}, [], false)],
       status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {
         capability_known_count: 1,
@@ -137,14 +139,14 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     expect(candidates).toEqual([])
   })
 
-  it("keeps Anthropic-compatible endpoint routes when the call method is not verified yet", () => {
+  it("keeps routes only when the backend marks the method set Copilot SDK testable", () => {
     const qiniuGroup = {
       canonical_id: "deepseek-v4-pro",
       display_name: "DeepSeek V4 Pro",
       provider_models: [
         route("qiniu-anthropic", "deepseek-v4-pro", "ready", null, {
           tools: { value: true, source: "probed_verified" },
-        }),
+        }, [], true),
       ],
       status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {
@@ -186,7 +188,7 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
         route("deepseek-official", "deepseek-v4-pro", "ready", "deepseek_chat_completions", {}, [
           "deepseek_chat_completions",
           "deepseek_anthropic_messages",
-        ]),
+        ], true),
       ],
       status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {
@@ -277,7 +279,7 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
         }),
         route("no-tools-endpoint", "claude-opus-4.8", "ready", null, {
           tools: { value: false, source: "probed_verified" },
-        }),
+        }, [], true),
       ],
       status_summary: { ready: 2, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {

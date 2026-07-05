@@ -54,6 +54,18 @@ from graph_agent_gateway.probe_catalog import (
 from graph_agent_gateway.registry.base_url import (
     canonicalize_base_url as canonicalize_base_url,
 )
+from graph_agent_gateway.registry.call_methods import (
+    apply_call_method_base_url as apply_call_method_base_url,
+)
+from graph_agent_gateway.registry.call_methods import (
+    call_method_auth_token_env as call_method_auth_token_env,
+)
+from graph_agent_gateway.registry.call_methods import (
+    call_method_client_compatibility as call_method_client_compatibility,
+)
+from graph_agent_gateway.registry.call_methods import (
+    call_method_ids_for_client as call_method_ids_for_client,
+)
 from graph_agent_gateway.registry.canonical import (
     canonicalize_model as canonicalize_model,
 )

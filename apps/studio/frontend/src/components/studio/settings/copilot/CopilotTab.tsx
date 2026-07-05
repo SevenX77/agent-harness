@@ -142,6 +142,7 @@ function copilotRoutePreviewFromProviderModel(
     modelId: pm.provider_model_id,
     methodId: pm.call_method_id ?? null,
     candidateMethodIds: pm.candidate_call_method_ids ?? [],
+    copilotSdkCompatible: pm.copilot_sdk_compatible,
     note: (pm as unknown as Record<string, unknown>).note as string | null || null,
     // 同 provider 多 endpoint 靠 host 消歧(如"七牛 · api.qnaigc.com"),host 拿不到才退回 provider_label。
     endpointLabel: host ? `${pm.provider_label} · ${host}` : pm.provider_label,

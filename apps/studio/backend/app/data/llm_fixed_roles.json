@@ -1,0 +1,24 @@
+{
+  "_comment": "Studio runtime truth for fixed LLM roles. Engine-required builtin names still come from the engine adapter; this file owns Studio product defaults and recommended model groups.",
+  "roles": {
+    "fast": {
+      "role_kind": "graph_agent",
+      "recommended_models": [
+        {"canonical_id": "claude-haiku-4.5", "display_name": "Claude Haiku 4.5"},
+        {"canonical_id": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash"}
+      ]
+    },
+    "copilot_claude_opus_4_8": {
+      "role_kind": "copilot",
+      "recommended_models": [
+        {"canonical_id": "claude-opus-4.8", "display_name": "Claude Opus 4.8"}
+      ]
+    },
+    "copilot_deepseek_v4_pro": {
+      "role_kind": "copilot",
+      "recommended_models": [
+        {"canonical_id": "deepseek-v4-pro", "display_name": "DeepSeek V4 Pro"}
+      ]
+    }
+  }
+}

@@ -111,15 +111,11 @@ export interface ProviderModelOption {
   reason_code?: string | null
   capability_state: CapabilityState
   capabilities: Record<string, CapabilityValue>
-  /**
-   * R-F8: the route's gateway call method id (e.g. `anthropic_messages`,
-   * `ark_anthropic_messages`). Used by CopilotTab to keep ONLY routes that
-   * the Claude Agent SDK / Anthropic Messages caller can actually drive.
-   * Optional value means the route has not produced a verified invocation
-   * profile yet; candidate_call_method_ids below can still keep it testable.
-   */
+  /** R-F8: backend-projected gateway call method evidence for diagnostics. */
   call_method_id?: string | null
   candidate_call_method_ids?: string[]
+  /** Studio backend decision derived from the gateway call-method catalog. */
+  copilot_sdk_compatible?: boolean
 }
 
 export interface ModelGroupStatusSummary {

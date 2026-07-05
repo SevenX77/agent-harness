@@ -6,11 +6,12 @@
     "unified_model": "两条地基约束先讲清，下面所有机制都建在它们上（§3.1 / §2.6 PM 2026-06-18 统一模型）：① 统一模型——model-group、model-bundle、graph role、copilot role 本质都是『一串 routes 的数组』，最终都被 materializer 展开铺平成一条 fallback_chain；copilot 角色不是特殊物种，就是 role_kind='copilot' 的一条 role，它的兜底链跟 graph role 同一套解析/物化机制（resolve_routes），区别只在『谁拥有这串数组』。② copilot 单 model-group 约束——copilot 角色只能配一个 model group（不像 graph role 可多组 / 可拖 bundle），所以它的 routes 数组永远来自单一 canonical 组内的若干 provider route，『换组』= 退选当前组再选另一组（见设计页 #61），不存在多组并存。这两条决定了：copilot 的『内置角色』= 自动选了一个 canonical model-group（如 canonical_id=claude-opus-4.8 的组），复用 §2.1 已有的 canonical_id 归一化，不需要新的后端 role 元数据契约。",
     "why_single": "它横跨 3 个真实部件（前端 copilot tab 录入/触发 / gateway 后端 sidecar 侧的 copilot.py SDK 驱动 / gateway 库的 route 解析内核），牵涉一个关键反直觉点——copilot 的真实对话不走普通 LLM 的 HTTP 调用、而是 spawn 一个 claude CLI 子进程（base_url 只能经 ANTHROPIC_BASE_URL 环境变量 per-session 注入、构造器不收 base_url）。所以「测得准 ⟺ 跑得通」这件事，必须测试也走同一个 ClaudeSDKClient 子进程路径，不能用裸 HTTP 探针冒充——这条契约一两句说不清，故单列一页。",
     "design_owner": "gateway 后端 sidecar 侧（apps/studio/backend 的 copilot.py，即 gateway 后端的 sidecar 侧）。copilot 的 SDK 调用 / session 缓存 / 事件翻译 / SDK 测试都属 Studio 应用领域——gateway 库（packages/graph-agent-gateway）按 MVP1 第四轮判据「不感知 copilot」，只负责把一个叫 copilot_chat 的 role 解析成有序 route 列表（route 级公共能力），谁拿去怎么用与库无关。",
-    "code_location": "route 解析内核（resolve_routes：把 role 的兜底链物化成有序 ResolvedRoute）归 gateway 库，由 Studio 经 GatewayAdapter 薄委托（gateway_resolver.py 的 build_gateway_route_runtime）；SDK 调用 / session / 事件翻译 / SDK 测试驱动全在 gateway 后端 sidecar 侧 的 copilot.py。base_url 按协议归一化的两条助手（_ark_anthropic_base_url / _deepseek_anthropic_base_url）按判据属 gateway 库 公共归一化原语、现仍残留 gateway 后端 sidecar 侧 待下沉。",
+    "code_location": "route 解析内核（resolve_routes：把 role 的兜底链物化成有序 ResolvedRoute）归 gateway 库，由 Studio 经 GatewayAdapter 薄委托（gateway_resolver.py 的 build_gateway_route_runtime）；provider call method 真相源归 gateway 包内 call_methods.json/call_methods.py（声明 method 的 wire family、client compatibility、官方 probe backend、base_url transform、auth token env）；SDK 调用 / session / 事件翻译 / SDK 测试驱动全在 Studio backend 的 copilot.py。",
     "dataflow": [
       "前端 copilot tab 把用户配的角色（单 model group + route 兜底序）经 PUT /api/llm/roles 整表保存",
-      "运行/测试时 gateway 后端 sidecar 侧 调 build_gateway_route_runtime(role_name) → 委托 gateway 库 的 resolve_routes 物化出有序 ResolvedRoute 兜底链",
-      "gateway 后端 sidecar 侧 对链里每条 route 用 _resolve_route_runtime 取出 api_key / base_url / 特殊 env",
+      "GET /api/llm/registry 投影 provider_models[].copilot_sdk_compatible；Studio 后端用 gateway call_methods.json 判断 method 对 anthropic_messages_client 是 supported / incompatible / unknown，前端只消费该布尔字段，不维护 method/protocol 名单",
+      "运行/测试时 Studio backend 调 build_gateway_route_runtime(role_name) → 委托 gateway 库 的 resolve_routes 物化出有序 ResolvedRoute 兜底链",
+      "Studio backend 对链里每条 route 用 _resolve_route_runtime 取出 api_key / base_url / 特殊 env；base_url transform 和 ANTHROPIC_AUTH_TOKEN 等特殊 env 从 gateway call-method catalog 读取",
       "真实对话：build_gateway_route_runtime 解析兜底链后,Copilot 层会把每条 route 改选到 Claude Agent SDK 支持的 Anthropic Messages verified profile（例如 DeepSeek Official 的 deepseek_anthropic_messages），再由 build_options 把 key/base_url 写进 ClaudeAgentOptions.env（不改全局 os.environ），get_or_create_session 建/复用 ClaudeSDKClient 子进程，connect/query/receive_response 跑一轮，全链失败才报错",
       "SDK 测试：若官方 route 尚无 Copilot SDK 支持的 verified invocation profile，先跑 route-level official profile probe atom 写回真实 method/capability evidence；随后 run_route_sdk_test 对每条 route 起一个临时 ClaudeSDKClient，写一个随机 token 到临时文件、逼模型用工具读回来——token 回显才算 tool loop 真跑通",
       "SDK message（AssistantMessage/ResultMessage 的 TextBlock/ToolUseBlock/ToolResultBlock）经 _translate_sdk_message 翻成 websocket event 流给前端"
@@ -34,8 +35,8 @@
         "无 route 的终态错误码产出。"
       ],
       "dont": [
-        "不调 SDK、不 spawn 子进程、不知 copilot 语义（那是 gateway 后端 sidecar 侧）。",
-        "不决定哪些 route 对 copilot 合格（eligible 判据是 gateway 后端 sidecar 侧 读 capability 算）。"
+        "不调 SDK、不 spawn 子进程、不知 copilot 语义（那是 Studio backend）。",
+        "不决定“copilot 角色怎么显示/怎么推荐”；gateway 只声明通用 client compatibility，例如 anthropic_messages_client 是否能驱动该 method。"
       ],
       "deviation": ""
     },
@@ -50,7 +51,7 @@
         "关键约束：ClaudeSDKClient.__init__ 不接受 base_url 参数（文件头注释亲述 'accepts base_url=...: False'），只能 per-session env 注入——这正是裸 HTTP 探针测不到的差异。",
         "make_session_key（用 skill、模型、endpoint、api_key 哈希出 SDK session 缓存键的函数，copilot.py）保证换 key 后不复用旧子进程。",
         "get_or_create_session（按缓存键建/复用同一 skill/model/provider/key 组合的 ClaudeSDKClient 的函数，copilot.py）减少重复 spawn。",
-        "_resolve_route_runtime（把一条 ResolvedRoute 转成 api_key/base_url/env_overrides 的函数，copilot.py）从 credential provider 取 secret + 算特殊 env。"
+        "_resolve_route_runtime（把一条 ResolvedRoute 转成 api_key/base_url/env_overrides 的函数，copilot.py）从 credential provider 取 secret，并从 gateway call-method catalog 读取 base_url transform 与特殊 env；ark_anthropic_messages 走 /api/compatible 且写 ANTHROPIC_AUTH_TOKEN，deepseek_anthropic_messages 走 /anthropic。"
       ],
       "do": [
         "per-session env 注入（key + base_url + 特殊 env），不污染全局环境。",
@@ -60,7 +61,7 @@
         "不决定 route 顺序（解析归 gateway 库）、不算 6 态。",
         "不持久化对话 session 落盘（那是 D8 copilot 聊天工作台 region，不在设置页）。"
       ],
-      "deviation": "⚠️ base_url 按协议归一化的两条助手 _ark_anthropic_base_url（ark 去 /api/v3 补 /api/compatible）/ _deepseek_anthropic_base_url（deepseek 去 /v1 补 /anthropic，copilot.py）按第四轮判据属 gateway 库 公共 base_url 归一化原语（归 gateway 凭证/端点模块）、不该是 copilot 专属；MVP1 目标是保存时主归一化、copilot 拿到的 route 已 canonical，本地只做 env 映射——这两个助手随归一化下沉 gateway 库 后 copilot 端不再各写一份。"
+      "deviation": ""
     },
     {
       "name": "一次消息主循环 + 全链兜底",
@@ -98,7 +99,7 @@
         "token 出现在模型回复文本里 → status=ok；否则有错误就报最后一条错误、无错误就报英文诊断「The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.」。",
         "中途单个工具错误不短路（模型自己恢复后仍可能回显 token），最终以 token 是否回显为唯一裁决。",
         "测试经统一的 role test-job 入口触发：前端 startRoleTestJob → POST /api/llm/roles/{name}/test-jobs，后端 _start_role_test_job 见 role.role_kind=='copilot' 即分流到 _start_copilot_sdk_test_job（routers/llm.py），并发跑各 route（_COPILOT_SDK_TEST_CONCURRENCY=2）。",
-        "官方 route 若当前 resolved call_method_id 不属于 Anthropic Messages family，_prepare_copilot_sdk_test_route 先复用普通 LLM Role Test 的 _ensure_official_role_test_verified_profile，并要求产出 Copilot SDK 支持的 profile：profile probe 成功则把 verified_profiles/evidence 写回 route 并重新 resolve route，再改选到真实 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 路径；profile probe 失败或只产出非 SDK profile 则该 route 直接 failed 并写 probe-failed evidence。"
+        "官方 route 若当前 resolved call_method_id 不是 gateway catalog 中 anthropic_messages_client=supported 的 method，_prepare_copilot_sdk_test_route 先复用普通 LLM Role Test 的 _ensure_official_role_test_verified_profile，并要求产出支持的 profile；profile probe 成功则写回 verified_profiles/evidence 并重新 resolve route，再改选到真实 deepseek_anthropic_messages / ark_anthropic_messages / anthropic_messages 路径；profile probe 失败或只产出不兼容 method 则该 route failed 并写 probe-failed evidence。"
       ],
       "do": [
         "真 ClaudeSDKClient 子进程 + 真工具调用 + token 回显裁决。",
@@ -195,8 +196,8 @@
       "group": "crud",
       "endpoint": "GET /api/llm/registry",
       "req": "无入参",
-      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + call_method_id + candidate_call_method_ids + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
-      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动/可测试的 route」：已验证 call_method_id 时必须属于 Anthropic Messages family；call_method_id 未验证但 candidate_call_method_ids 含 Anthropic Messages family 时保留为可测试候选；两者都未知时回退看 endpoint protocol/provider_type 是否归一为 anthropic_compatible；并且 capabilities.tools / capabilities.tool_use 不得有显式 unsupported/false/no 证据。再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
+      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + call_method_id + candidate_call_method_ids + copilot_sdk_compatible + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
+      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动/可测试的 route」：route 兼容性只读 provider_models[].copilot_sdk_compatible；该字段由 Studio 后端根据 gateway call-method catalog 的 anthropic_messages_client 兼容性计算，明确不兼容 method 过滤，未知 method 保留可测，并叠加 capabilities.tools / capabilities.tool_use 显式 unsupported/false/no 证据。再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
       "provider": "gateway 后端（routers/llm.py get_llm_registry）",
       "id": "iface-c0"
     },
@@ -362,9 +363,9 @@
     {
       "item": "base_url 协议归一化助手归位",
       "d12": "D5.2",
-      "status": "partial",
-      "note": "缺口：_ark/_deepseek_anthropic_base_url 两条归一化助手按判据属 gateway 库 公共原语、现仍残留 gateway 后端 sidecar 侧 copilot.py，待随保存时主归一化下沉后 copilot 端不再各写一份（不影响功能，是归属/重复问题）。",
-      "ref": "d5"
+      "status": "ok",
+      "note": "已归位：ark/deepseek Anthropic Messages base_url transform 已从 copilot.py 下沉到 gateway call-method catalog(call_methods.json/call_methods.py),Studio backend 只经 GatewayAdapter 读取 apply_call_method_base_url / call_method_auth_token_env。",
+      "ref": "packages/graph-agent-gateway/src/graph_agent_gateway/registry/call_methods.py"
     },
     {
       "item": "dispatch_copilot 一次性入口（⚠️ 规范入口设计待定）",

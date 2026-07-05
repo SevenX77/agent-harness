@@ -1404,6 +1404,7 @@ def test_registry_model_groups_keep_official_language_probe_candidates_testable(
         "deepseek_chat_completions",
         "deepseek_anthropic_messages",
     ]
+    assert provider_model["copilot_sdk_compatible"] is True
 
 
 def test_registry_merges_model_groups_by_projected_display_name(

@@ -34,6 +34,7 @@ from app.core.adapters.gateway import (
     RuntimeSettings,
     VerifiedProfile,
     build_runtime_setting_descriptors,
+    call_method_client_compatibility,
     canonicalize_model,
     lint_role_routes,
     normalize_route_capabilities,
@@ -3018,6 +3019,7 @@ def _provider_model_option(
         # below so Copilot Test can create the route-level profile evidence.
         "call_method_id": _preferred_route_call_method_id(route),
         "candidate_call_method_ids": _candidate_route_call_method_ids(route, endpoint),
+        "copilot_sdk_compatible": _copilot_sdk_compatible(route, endpoint),
     }
 
 
@@ -3060,6 +3062,28 @@ def _candidate_route_call_method_ids(
             )
         ]
     )
+
+
+def _copilot_sdk_compatible(route: ProviderRoute, endpoint: ProviderEndpoint) -> bool:
+    method_ids = _ordered_unique(
+        [
+            method_id
+            for method_id in (
+                _preferred_route_call_method_id(route),
+                *_candidate_route_call_method_ids(route, endpoint),
+            )
+            if method_id
+        ]
+    )
+    if not method_ids:
+        return False
+    compatibilities = [
+        call_method_client_compatibility(method_id, "anthropic_messages_client")
+        for method_id in method_ids
+    ]
+    if "supported" in compatibilities:
+        return True
+    return not all(value == "incompatible" for value in compatibilities)
 
 
 def _health_store() -> SqliteLlmHealthStore:
@@ -3712,7 +3736,7 @@ async def _probe_role_route(
         return await _probe_official_call_method_generation_atom(
             endpoint,
             route.provider_model_id,
-            cast(OfficialCallMethod, selected_profile.method_id),
+            selected_profile.method_id,
             runtime_settings=_role_test_profile_runtime_settings(
                 selected_profile,
                 resolved_settings,

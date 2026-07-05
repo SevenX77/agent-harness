@@ -51,6 +51,7 @@ function registryModelGroups(): ModelGroup[] {
           capability_state: "known",
           capabilities: {},
           call_method_id: "anthropic_messages",
+          copilot_sdk_compatible: true,
         },
         {
           route_id: "qiniu-anthropic:claude-opus-4-7",
@@ -65,6 +66,7 @@ function registryModelGroups(): ModelGroup[] {
           capability_state: "known",
           capabilities: {},
           call_method_id: "anthropic_messages",
+          copilot_sdk_compatible: true,
         },
       ],
       status_summary: {
@@ -105,6 +107,7 @@ function openAiModelGroup(): ModelGroup {
         capability_state: "known",
         capabilities: {},
         call_method_id: "openai_responses",
+        copilot_sdk_compatible: false,
       },
     ],
     status_summary: {
@@ -146,6 +149,7 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
           tools: { value: true, source: "probed_verified" },
         },
         call_method_id: "anthropic_messages",
+        copilot_sdk_compatible: true,
       },
       {
         route_id: "openai-compat:claude-opus-4.8",
@@ -162,6 +166,7 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
           tools: { value: true, source: "probed_verified" },
         },
         call_method_id: "openai_chat_completions",
+        copilot_sdk_compatible: false,
       },
       {
         route_id: "anthropic-no-tools:claude-opus-4.8",
@@ -178,6 +183,7 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
           tools: { value: false, source: "probed_verified" },
         },
         call_method_id: "anthropic_messages",
+        copilot_sdk_compatible: true,
       },
     ],
     status_summary: {
@@ -414,6 +420,7 @@ function opusGroup(canonicalId: string, displayName: string): ModelGroup {
         capability_state: "known",
         capabilities: {},
         call_method_id: "anthropic_messages",
+        copilot_sdk_compatible: true,
       },
     ],
     status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
@@ -1106,6 +1113,7 @@ describe("R-F11 6-state copilot route lights", () => {
           capability_state: "known",
           capabilities: {},
           call_method_id: "anthropic_messages",
+          copilot_sdk_compatible: true,
         })),
         status_summary: {
           ready: 1,

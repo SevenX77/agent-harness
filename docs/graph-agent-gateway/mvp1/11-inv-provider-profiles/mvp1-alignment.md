@@ -14,7 +14,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 > **Tier**：③b gateway 公共能力（MVP1 新增设计单元/调用层 provider 差异表；WS-1 后源码已存在，ordinary provider/thinking 分支已迁到 `ordinary_chat.py`，后续只按需收束进 ProviderProfile 或 payload patch）
 > **Owns**：`ProviderProfile` = route 派生 key → ChatX init-kwargs（+ 可选 `pre_init` / 动态 `init_kwargs_factory`）的声明式表；gateway 工厂按 `protocol:{route.protocol}` → `endpoint:{route.endpoint_id}` → `endpoint:{route.endpoint_id}:model:{route.provider_model_id}` 叠加。把 headers / Responses API / 温度默认 / stream_usage / thinking 开关等**构造期差异**收束到 init-kwargs 层。仅当请求 payload 必须改才子类覆盖单方法（deerflow 范式），**绝不重写整套消息转换**。**只描述怎么构造 ChatX，不做运行时动态选型**。
 > **Status**：设计定稿（2026-06 判据复核，归属表判 11=纯 ③b 不变）；代码 = `ProviderProfile` 注册表、route key 派生、factory overlay、最小 `stream_usage` defaults 与 DeepSeek payload patch 已落地；其它 provider thinking 完整归一化仍 deferred。
-> **Related**：[[10-inv-route-chat-model-factory]]（本表被工厂第 6 步调用，合成 ChatX init-kwargs）· [[05-orch-capabilities-and-models]]（capability/lint/`select_verified_profile` 留编排前置校验，与本表划清层级）· [[09-inv-invocation-runtime]]（invoke 运行时；`call_method_id`/`request_mapper_id` 归属悬案共享）· [[04-orch-registry-schema]]（`VerifiedProfile` 字段权威源，**不**与 `ProviderProfile` 合并）
+> **Related**：[[10-inv-route-chat-model-factory]]（本表被工厂第 6 步调用，合成 ChatX init-kwargs）· [[05-orch-capabilities-and-models]]（capability/lint/`select_verified_profile` 留编排前置校验，与本表划清层级）· [[09-inv-invocation-runtime]]（invoke 运行时；`call_method_id` 已归 gateway call-method catalog,不并入本 ProviderProfile）· [[04-orch-registry-schema]]（`VerifiedProfile` 字段权威源，**不**与 `ProviderProfile` 合并）
 > **决策日志**：client 层 A' 重设计决策（F6 provider 差异 → init-kwargs profile / M6 `RouteChatModelFactory` / D1 方案 A' / 借鉴 vs 自建）——完整逻辑 + PM 拍板原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 11 纯 ③b）
 > **现状**：见同目录 `baseline.md`（WS-1 后 `ProviderProfile` 调用层模块已存在；它与 `registry/profile_selector.py` 的 verified profile 选择器是不同层级）
 
@@ -114,7 +114,7 @@ MVP1 目标：`ProviderProfile` 模式（用 provider 或 route 派生 key 映�
 1. 已处理:`ProviderProfile` gateway key 规则已定为 `protocol:{route.protocol}` → `endpoint:{route.endpoint_id}` → `endpoint:{route.endpoint_id}:model:{route.provider_model_id}`；deepagents 的 `provider:model` 字符串只作为参考模式，不作为 gateway 工厂输入。
 2. 待办:把 thinking 规则从 `ordinary_chat.py` provider 分支提炼成 profile/init kwargs 前，需要保留 lint 里的预算校验和 Anthropic manual/adaptive 约束(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:242-332`)。
 3. 已处理:`PatchedChatDeepSeek` 已在 gateway factory 落地为单方法 `_get_request_payload` 覆盖；本地 replay helper 按原始 `AIMessage` 顺序把 `additional_kwargs["reasoning_content"]` 写回 payload，不搬 deerflow 文件。
-4. 待办(跨模块协调,命名易混):`call_method_id` / `request_mapper_id` 在 MVP1 后是否继续存在、由谁消费,需要和 `ProviderProfile` 的 init kwargs 表分清层级;现状它们由 selected verified profile 写入 route(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:94-103`)。与 [[10-inv-route-chat-model-factory]] §8 待办 4、[[09-inv-invocation-runtime]] §8 待办 3 为同一悬案。
+4. 已处理(跨模块协调,命名易混):`call_method_id` 继续作为 verified invocation profile 写入 route,但运行时解释入口已归 [[09-inv-invocation-runtime]] 的 `registry/call_methods.json` / `registry/call_methods.py`；它不并入 `ProviderProfile` 的 init kwargs 表。`request_mapper_id` 继续服务普通 chat/generic path 的请求映射。
 5. 疑点:现有 `_profile_supports_reasoning`(靠字符串包含 thinking/reasoning 判断 profile 是否支持 reasoning 的 helper)是否足够稳定应在 [[05-orch-capabilities-and-models]] 继续跟踪;本模块只记录它不是 ChatX provider profile(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:55-66`)。
 
 ## 已实现 / 与 baseline 差异
@@ -145,7 +145,7 @@ MVP1 目标：`ProviderProfile` 模式（用 provider 或 route 派生 key 映�
 
 ## 交叉引用(链接,不复制)
 
-- [[10-inv-route-chat-model-factory]]：`RouteChatModelFactory` 工厂（第 6 步调本表合 init-kwargs；`call_method_id`/`request_mapper_id` 归属悬案共享）
+- [[10-inv-route-chat-model-factory]]：`RouteChatModelFactory` 工厂（第 6 步调本表合 init-kwargs；`call_method_id` 已归 09 的 call-method catalog,不并入本表）
 - [[05-orch-capabilities-and-models]]：capability / lint / `select_verified_profile`（留编排前置校验，与本表划清层级，不混不动态选型）
 - [[09-inv-invocation-runtime]]：invoke 运行时（profile 构造的 ChatX 在那边被 `.invoke()`）
 - [[04-orch-registry-schema]]：`VerifiedProfile` 字段权威源（**不**与 `ProviderProfile` 合并）

@@ -21,6 +21,7 @@ def _websocket_token_is_valid(websocket: WebSocket) -> bool:
 
 
 async def _close_unauthorized(websocket: WebSocket) -> None:
+    await websocket.accept()
     await websocket.close(code=4401, reason="Unauthorized")
 
 

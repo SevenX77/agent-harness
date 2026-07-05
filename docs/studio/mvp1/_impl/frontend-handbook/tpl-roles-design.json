@@ -271,7 +271,7 @@
       "module": "角色意图",
       "func": "设计:Role settings 里的运行参数包含 thinking、max output tokens、temperature。temperature 以 provider-neutral 0..2 为存储值,UI 用 0-100% 读数表达,运行时由 gateway 按 provider 协议映射到真实 provider scale。",
       "action": "用户在角色设置面板选 Output Token 档位,target/required_minimum 档再填值。",
-      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,0.7=>35%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 必须立即更新父 draft,不能等 debounce 才更新 UI;HTTP 保存由页面级 useDebouncedRolesSave 统一 debounce,onValueCommit 只负责提交当前值。roles YAML/API 保存 provider-neutral 0..2;空值/null 表示继承 route/default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。",
+      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,0.7=>35%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 必须立即更新父 draft,不能等 debounce 才更新 UI;HTTP 保存由页面级 useDebouncedRolesSave 统一 debounce,onValueCommit 只负责提交当前值。保存处于 pending/saving 时,roles_changed/focus 等外部刷新不得把旧服务端快照覆盖回本地 draft,必须等本轮保存收敛后再重取。roles YAML/API 保存 provider-neutral 0..2;空值/null 表示继承 route/default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。",
       "fe_modules": [],
       "be_contract": [
         {

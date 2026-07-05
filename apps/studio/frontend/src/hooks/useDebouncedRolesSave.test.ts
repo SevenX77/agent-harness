@@ -3,6 +3,7 @@ import type { RolesData } from "@/api/llm"
 import {
   flushPendingRolesSaveOnUnmount,
   rolesSaveErrorDisposition,
+  shouldApplyExternalRolesRefresh,
 } from "./useDebouncedRolesSave"
 
 describe("rolesSaveErrorDisposition", () => {
@@ -21,6 +22,16 @@ describe("rolesSaveErrorDisposition", () => {
 
   it("reports non-recoverable errors when no newer snapshot is queued", () => {
     expect(rolesSaveErrorDisposition(new Error("server down"), false, () => false)).toBe("fatal")
+  })
+})
+
+describe("shouldApplyExternalRolesRefresh", () => {
+  it("blocks external role refetches while a local roles save is buffered or in flight", () => {
+    expect(shouldApplyExternalRolesRefresh("idle")).toBe(true)
+    expect(shouldApplyExternalRolesRefresh("saved")).toBe(true)
+    expect(shouldApplyExternalRolesRefresh("error")).toBe(true)
+    expect(shouldApplyExternalRolesRefresh("pending")).toBe(false)
+    expect(shouldApplyExternalRolesRefresh("saving")).toBe(false)
   })
 })
 

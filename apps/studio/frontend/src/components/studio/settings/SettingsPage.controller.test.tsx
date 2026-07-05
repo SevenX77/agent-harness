@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, forceTestEndpoint, getCredentials, getProviderModels } from "../../../api/llm"
+import { deleteEndpoint, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles } from "../../../api/llm"
 import { useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -51,18 +51,26 @@ vi.mock("@/hooks/useDebouncedCredentialsSave", () => ({
   }),
 }))
 
+const mockRolesSave = vi.hoisted(() => ({ status: "idle" }))
 vi.mock("@/hooks/useDebouncedRolesSave", () => ({
+  shouldApplyExternalRolesRefresh: (status: string) => status !== "pending" && status !== "saving",
   useDebouncedRolesSave: () => ({
     cancel: vi.fn(),
     flush: vi.fn(),
     queue: vi.fn(),
-    status: "idle",
+    status: mockRolesSave.status,
   }),
 }))
 
-const mockEventStream = vi.hoisted(() => ({ connectionLost: false }))
+const mockEventStream = vi.hoisted(() => ({
+  callbacks: null as null | import("@/hooks/useStudioEventStream").StudioEventStreamCallbacks,
+  connectionLost: false,
+}))
 vi.mock("@/hooks/useStudioEventStream", () => ({
-  useStudioEventStream: () => ({ connectionLost: mockEventStream.connectionLost }),
+  useStudioEventStream: (callbacks: import("@/hooks/useStudioEventStream").StudioEventStreamCallbacks) => {
+    mockEventStream.callbacks = callbacks
+    return { connectionLost: mockEventStream.connectionLost }
+  },
 }))
 
 vi.mock("../../../api/llm", async (importOriginal) => {
@@ -97,6 +105,8 @@ describe("useSettingsPageController lifecycle", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRolesSave.status = "idle"
+    mockEventStream.callbacks = null
     mockEventStream.connectionLost = false
     capturedController = null
     container = document.createElement("div")
@@ -149,6 +159,49 @@ describe("useSettingsPageController lifecycle", () => {
     })
 
     expect(getCredentials).toHaveBeenCalled()
+  })
+
+  it("does not apply roles_changed refresh while a roles save is still pending or saving", async () => {
+    configureApiToken("sidecar-token")
+    mockRolesSave.status = "saving"
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(capturedController?.rolesData).not.toBeNull()
+    const getRolesCallsAfterInitialLoad = vi.mocked(getRoles).mock.calls.length
+    const getModelGroupsCallsAfterInitialLoad = vi.mocked(getModelGroups).mock.calls.length
+
+    act(() => {
+      mockEventStream.callbacks?.onRolesChanged()
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getRoles).toHaveBeenCalledTimes(getRolesCallsAfterInitialLoad)
+    expect(getModelGroups).toHaveBeenCalledTimes(getModelGroupsCallsAfterInitialLoad)
+
+    mockRolesSave.status = "idle"
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    act(() => {
+      mockEventStream.callbacks?.onRolesChanged()
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getRoles).toHaveBeenCalledTimes(getRolesCallsAfterInitialLoad + 1)
+    expect(getModelGroups).toHaveBeenCalledTimes(getModelGroupsCallsAfterInitialLoad + 1)
   })
 
   it("refuses a settings mutation when the backend event stream is disconnected", async () => {

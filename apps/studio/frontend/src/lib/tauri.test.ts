@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { initializeRuntimeConfig } from '../config/runtime'
 import * as tauriModule from './tauri'
 import {
+  attachCodeAssistant,
   checkpointWorkspaceFile,
   clearWorkspaceCheckpoint,
   closeCodeAssistant,
@@ -257,6 +258,19 @@ describe('desktop shell helpers', () => {
     expect(mockInvoke).toHaveBeenCalledWith('close_code_assistant', {
       workspaceRoot: '/tmp/workspace',
       assistant: 'codex',
+    })
+  })
+
+  it('attaches the selected code assistant master pane through ah', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue(undefined)
+
+    await expect(attachCodeAssistant('/tmp/workspace', 'claude')).resolves.toBe(true)
+
+    expect(mockInvoke).toHaveBeenCalledWith('attach_code_assistant', {
+      workspaceRoot: '/tmp/workspace',
+      assistant: 'claude',
     })
   })
 })

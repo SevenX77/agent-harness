@@ -696,7 +696,7 @@ describe('GraphCanvas', () => {
     expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: OUTPUT_ID })
   })
 
-  it('creates graph input and output optimistic edges without a transient context dot', () => {
+  it('creates graph input and output optimistic edges with the same context dot as phase edges', () => {
     renderToStaticMarkup(
       <GraphCanvas
         skillId="demo-skill"
@@ -716,12 +716,12 @@ describe('GraphCanvas', () => {
     expect(vi.mocked(addEdge).mock.calls[0]?.[0]).toMatchObject({
       source: INPUT_ID,
       target: 'draft',
-      data: expect.objectContaining({ showContextControl: false }),
+      data: expect.objectContaining({ showContextControl: true }),
     })
     expect(vi.mocked(addEdge).mock.calls[1]?.[0]).toMatchObject({
       source: 'draft',
       target: OUTPUT_ID,
-      data: expect.objectContaining({ showContextControl: false }),
+      data: expect.objectContaining({ showContextControl: true }),
     })
   })
 
@@ -977,7 +977,7 @@ describe('GraphCanvas', () => {
     )
   })
 
-  it('reconnects optimistic graph output edges without inheriting the old context dot', async () => {
+  it('reconnects optimistic graph output edges with the unified context dot', async () => {
     const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
     const oldEdge = {
       id: 'draft->review',
@@ -1017,7 +1017,7 @@ describe('GraphCanvas', () => {
         id: `draft->${OUTPUT_ID}`,
         source: 'draft',
         target: OUTPUT_ID,
-        data: expect.objectContaining({ showContextControl: false }),
+        data: expect.objectContaining({ showContextControl: true }),
       }),
     ])
   })
@@ -1033,7 +1033,7 @@ describe('GraphCanvas', () => {
         hasTraceData: false,
         sourcePhaseId: 'draft',
         targetPhaseId: OUTPUT_ID,
-        showContextControl: false,
+        showContextControl: true,
       },
     } as Edge
     setEdgesMock.mockImplementationOnce((updater: Edge[] | ((current: Edge[]) => Edge[])) => (

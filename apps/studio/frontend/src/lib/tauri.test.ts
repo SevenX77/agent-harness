@@ -299,21 +299,21 @@ describe('writeWorkspaceFile', () => {
   it('passes createIfAbsent only when the caller requests no-clobber writes', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
-    mockInvoke.mockResolvedValue({ path: '.workspace/test_inputs/case.json', hash: 'native-hash' })
+    mockInvoke.mockResolvedValue({ path: '.workspace/import_files/case.json', hash: 'native-hash' })
 
     await expect(
       writeWorkspaceFile(
         '/tmp/workspace',
-        '.workspace/test_inputs/case.json',
+        '.workspace/import_files/case.json',
         '{\n  "x": 1\n}',
         null,
         { createIfAbsent: true },
       ),
-    ).resolves.toEqual({ path: '.workspace/test_inputs/case.json', hash: 'native-hash' })
+    ).resolves.toEqual({ path: '.workspace/import_files/case.json', hash: 'native-hash' })
 
     expect(mockInvoke).toHaveBeenCalledWith('write_workspace_file', {
       workspaceRoot: '/tmp/workspace',
-      relativePath: '.workspace/test_inputs/case.json',
+      relativePath: '.workspace/import_files/case.json',
       content: '{\n  "x": 1\n}',
       expectedHash: null,
       createIfAbsent: true,
@@ -400,12 +400,12 @@ describe('deleteWorkspacePath', () => {
     mockInvoke.mockResolvedValue(undefined)
 
     await expect(
-      deleteWorkspacePath('/tmp/workspace', '.workspace/test_inputs/case.json'),
+      deleteWorkspacePath('/tmp/workspace', '.workspace/import_files/case.json'),
     ).resolves.toBeUndefined()
 
     expect(mockInvoke).toHaveBeenCalledWith('delete_workspace_path', {
       workspaceRoot: '/tmp/workspace',
-      path: '.workspace/test_inputs/case.json',
+      path: '.workspace/import_files/case.json',
     })
   })
 
@@ -415,12 +415,12 @@ describe('deleteWorkspacePath', () => {
     mockInvoke.mockResolvedValue(undefined)
 
     await expect(
-      deleteWorkspacePath('/tmp/workspace', '.workspace/test_inputs/case.json'),
+      deleteWorkspacePath('/tmp/workspace', '.workspace/import_files/case.json'),
     ).resolves.toBeUndefined()
 
     expect(mockInvoke).toHaveBeenCalledWith('delete_workspace_path', {
       workspaceRoot: '/tmp/workspace',
-      path: '.workspace/test_inputs/case.json',
+      path: '.workspace/import_files/case.json',
     })
   })
 })

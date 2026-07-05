@@ -657,7 +657,7 @@ function validateTestInputName(raw: string): string {
 }
 
 function testInputPath(name: string): string {
-  return `.workspace/test_inputs/${name}.json`
+  return `.workspace/import_files/${name}.json`
 }
 
 function resolveTestInputWorkspaceRoot(skillId: string, workspaceRoot?: string | null): string {
@@ -945,11 +945,15 @@ export async function scanIoPath(path: string): Promise<{ entries: IoScanEntry[]
 export async function importIoIntoWorkspace(
   skillId: string,
   path: string,
-  name?: string,
+  options: { name?: string; nodeId?: string | null } = {},
 ): Promise<{ dir: string; entries: IoScanEntry[] }> {
   const response = await api.post<{ dir: string; entries: IoScanEntry[] }>(
     `/skills/${skillId}/io/import`,
-    { path, ...(name ? { name } : {}) },
+    {
+      path,
+      ...(options.name ? { name: options.name } : {}),
+      ...(options.nodeId ? { node_id: options.nodeId } : {}),
+    },
   )
   return response.data
 }

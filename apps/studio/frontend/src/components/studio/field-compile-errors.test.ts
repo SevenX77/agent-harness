@@ -136,12 +136,12 @@ describe("lintErrorsForBoundary", () => {
     const scoped = lintErrorsForBoundary(
       [
         lintErr({
-          file: ".workspace/test_inputs",
+          file: ".workspace/import_files",
           field_path: "chapter",
           message: "Graph input schema requires test input field 'chapter'",
         }),
         lintErr({
-          file: ".workspace/test_inputs/case-a.json",
+          file: ".workspace/import_files/case-a.json",
           field_path: "chapters",
           message: "'chapters' is a required property",
         }),
@@ -170,7 +170,7 @@ describe("fieldDiagnosticsForPanels", () => {
   it("keeps manual Compile diagnostics even after realtime lint has settled clean", () => {
     const manual: CompileError[] = [
       {
-        file: ".workspace/test_inputs",
+        file: ".workspace/import_files",
         line: null,
         field: "chapter",
         severity: "fatal",
@@ -181,7 +181,7 @@ describe("fieldDiagnosticsForPanels", () => {
 
     expect(fieldDiagnosticsForPanels(manual, [])).toMatchObject([
       {
-        file: ".workspace/test_inputs",
+        file: ".workspace/import_files",
         field_path: "chapter",
         message: "Graph input schema requires test input field 'chapter'",
       },
@@ -191,7 +191,7 @@ describe("fieldDiagnosticsForPanels", () => {
   it("merges manual Compile and lint diagnostics on the same field axis", () => {
     const manual: CompileError[] = [
       {
-        file: ".workspace/test_inputs",
+        file: ".workspace/import_files",
         line: null,
         field: "chapter",
         severity: "fatal",

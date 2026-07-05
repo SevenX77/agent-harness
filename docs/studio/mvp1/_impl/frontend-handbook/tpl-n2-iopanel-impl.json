@@ -17,10 +17,10 @@
    "n": 26,
    "cap": "test-inputs-manage",
    "design_ref": "n2-atom-26",
-   "current": "现状:符合(r3/r5/r6)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容 → onFileOpen 进编辑器。内联 JSON 创建表单已删。 r4b:list 行无边框 ghost(选中 bg-accent),对齐 FileRow。 r5(PM #4):New file 从 `variant=secondary`(暗色近黑 `--secondary: oklch(0.274…)`)改**透明底 hover 亮的 ghost list 行**(与上方 item 行同款 `text-muted-foreground hover:bg-accent hover:text-foreground`),融进 panel list 样式。 r6(PM 点1):**移除批量 run 入口**——删每行批量勾选框 + C10 命名序列建议(Run chapter1–3 as batch)+ 手动 Run-N-as-batch 按钮 + 驱动 hook `useBatchRun`(及其测试),面板不再有任何 run 入口(唯一 run = 中央动作条)。 r6(PM 点5):每行删除(垃圾桶)旁加**编辑按钮**(Pencil),onFileOpen `.workspace/test_inputs/<id>.json` 用编辑器打开。",
+   "current": "现状:符合(r3/r5/r6;2026-07-05 import_files 收敛)。TestInputsSection 列表/选中(=Predict/Run payload,高亮)/删除;handleNewFile 自动命名 input-N → createTestInput 空内容写到 `.workspace/import_files/<id>.json` → onFileOpen 进编辑器。内联 JSON 创建表单已删。 r4b:list 行无边框 ghost(选中 bg-accent),对齐 FileRow。 r5(PM #4):New file 从 `variant=secondary`(暗色近黑 `--secondary: oklch(0.274…)`)改**透明底 hover 亮的 ghost list 行**(与上方 item 行同款 `text-muted-foreground hover:bg-accent hover:text-foreground`),融进 panel list 样式。 r6(PM 点1):**移除批量 run 入口**——删每行批量勾选框 + C10 命名序列建议(Run chapter1–3 as batch)+ 手动 Run-N-as-batch 按钮 + 驱动 hook `useBatchRun`(及其测试),面板不再有任何 run 入口(唯一 run = 中央动作条)。 r6(PM 点5):每行删除(垃圾桶)旁加**编辑按钮**(Pencil),onFileOpen `.workspace/import_files/<id>.json` 用编辑器打开。",
    "gap": "符合(内联表单→New file;批量 run 入口已移除;行内编辑按钮已加)。",
    "fe_status": "符合",
-   "be_dep": "test_inputs CRUD live;后端 batch-run 端点保留(面板不再调用)。",
+   "be_dep": "test_inputs CRUD live,但物理存储统一为 `.workspace/import_files/` 根级;后端 batch-run 端点保留(面板不再调用)。",
    "fe_status_prev": "内联表单",
    "fe_resync": "2026-07-02 r3:内联表单→New file｜2026-07-03 r6:移除批量 run 入口 + 加行内编辑按钮"
   },
@@ -39,10 +39,10 @@
    "n": 32,
    "cap": "input-config-tree",
    "design_ref": "n2-atom-32",
-   "current": "现状:符合(r3 新建,r5 改内联+嵌套)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。 **r6 导入体验(PM 点2/3/4/5)**:导入入口从「Import file…/Import folder…」双按钮合并为**单个「Import…」= 文件夹选择器**(selectImportFolder;文件夹即导入其下全部文件,`selectImportFile` wrapper 已删)。导入即**自动匹配**:candidatesFromScanEntries → matchCandidatesToInputs(把候选字段名 normalizeFieldName 小写+去尾数/`{n}` 后比对 declaredInputFieldNames(view.content)),命中自动勾选 + `bg-accent` 高亮 + 「matched io.inputs」标注;**批量条目 field 取 batchStem(`chapter`)而非父目录名**(旧 bug:取父目录名致导入无一匹配)。导入结果 groupCandidatesByFile **按源文件分组**(每文件一行:名+路径+编辑+删除;字段在下)。单文件组行加**编辑按钮**(Pencil,onFileOpen `.workspace/<candidate.path>`)。",
+   "current": "现状:符合(r3 新建,r5 改内联+嵌套;2026-07-05 import_files 收敛)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。 **r6 导入体验(PM 点2/3/4/5)**:导入入口从「Import file…/Import folder…」双按钮合并为**单个「Import…」= 文件夹选择器**(selectImportFolder;文件夹即导入其下全部文件,`selectImportFile` wrapper 已删)。导入即**自动匹配**:candidatesFromScanEntries → matchCandidatesToInputs(把候选字段名 normalizeFieldName 小写+去尾数/`{n}` 后比对 declaredInputFieldNames(view.content)),命中自动勾选 + `bg-accent` 高亮 + 「matched io.inputs」标注;**批量条目 field 取 batchStem(`chapter`)而非父目录名**(旧 bug:取父目录名致导入无一匹配)。导入结果 groupCandidatesByFile **按源文件分组**(每文件一行:名+路径+编辑+删除;字段在下)。单文件组行加**编辑按钮**(Pencil,onFileOpen `.workspace/<candidate.path>`)。导入落盘统一为 `.workspace/import_files/`:Input/GRAPH 与 Test Inputs 在根级,phase 导入在 `import_files/<node_id>/`;InputPanel 经 fileFieldsInImportScope 只把当前 scope 的 `source:'file'` 声明送进文件组,legacy 导入声明、旧测试输入目录和其他节点目录不显示。",
    "gap": "符合设计(r5 内联 + 嵌套;r6 单 import + 自动匹配 + 按文件分组 + 编辑按钮)。",
    "fe_status": "符合",
-   "be_dep": "已就绪:POST /api/io/scan + /io/import(import copy 进 .workspace/imports/<name>/、rebase 相对路径);engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。自动匹配纯前端(比对声明字段名,无需后端)。",
+   "be_dep": "已就绪:POST /api/io/scan + /io/import(import copy 进 .workspace/import_files[/<node_id>]/<name>/、rebase 相对路径);engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。自动匹配纯前端(比对声明字段名,无需后端)。",
    "fe_status_prev": "r3 modal + 顶层扁平",
    "fe_resync": "2026-07-03 r5:modal→内联可折叠;顶层扁平→嵌套树可独立勾选｜2026-07-03 r6:双 import→单 Import…;导入即自动匹配;按文件分组 + 文件行编辑按钮"
   },
@@ -158,7 +158,8 @@
    "layer1": [
     "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + source:'file' 单/批量);candidatesFromScanEntries 展平扫描结果(io-config.test)。",
     "reconcileInputFields:声明+黑板有=matched、黑板有未声明=available、io.inputs 声明但黑板无=missing(source:'file' 永不 missing);missing 不写回(io-config.test)。",
-    "Input boundary diagnostics: manual Compile errors with file=.workspace/test_inputs remain visible in Input panel diagnostics; panel field source merges manual Compile and lint instead of letting clean realtime lint erase Compile failures."
+    "Input boundary diagnostics: manual Compile errors with file=.workspace/import_files remain visible in Input panel diagnostics; panel field source merges manual Compile and lint instead of letting clean realtime lint erase Compile failures.",
+    "Import files scope: Input/Test Inputs write and display only `.workspace/import_files/*`; phase imports write and display only `.workspace/import_files/<node_id>/*`; legacy import declarations are ignored by the IO panel."
    ],
    "layer2": [
     "真机:segmentation 黑板树 chapters 勾选;GRAPH.md=Input 伪节点 files-only『No fields yet』;导入 material-prep 识别 timestamp/run_id/... 字段。"

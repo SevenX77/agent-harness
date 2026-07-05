@@ -1,7 +1,7 @@
 """Test input CRUD endpoints (INPUT-3: io-panel-artifacts-test-inputs).
 
 Stores each named test input as one JSON file under the skill's
-`.workspace/test_inputs/`. The list endpoint projects file metadata; create
+`.workspace/import_files/`. The list endpoint projects file metadata; create
 writes a new file; delete removes one. The content is the JSON payload the i/o
 panel feeds to Predict/Run.
 """

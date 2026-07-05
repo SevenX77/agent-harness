@@ -31,7 +31,7 @@ def test_workspace_run_artifacts_do_not_require_native_fs_source_writer() -> Non
 
 def test_studio_owned_workspace_data_requires_native_fs_source_writer() -> None:
     studio_workspace_paths = (
-        ".workspace/test_inputs/case.json",
+        ".workspace/import_files/case.json",
         ".workspace/golden/run-1/baseline.json",
         ".workspace/golden/run-1/report.json",
         ".workspace/golden/run-1/cases/setup.json",

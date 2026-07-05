@@ -485,6 +485,43 @@ export function fileFieldsOf(nodeContent: string | undefined): FileFieldDecl[] {
   return rows
 }
 
+function importDeclWorkspacePath(decl: FileFieldDecl): string | null {
+  const raw = decl.path ?? decl.dir
+  if (!raw) {
+    return null
+  }
+  const normalized = raw.replace(/\\/g, '/').replace(/^\.workspace\//, '').replace(/^\/+/, '')
+  return normalized || null
+}
+
+/**
+ * Keep only file-backed declarations owned by the currently open import scope.
+ *
+ * Input/Test Inputs use `.workspace/import_files/` directly. Phase nodes use
+ * `.workspace/import_files/<node_id>/`. The graph topology's node id set is
+ * needed to disambiguate a root import folder from a node-owned subfolder.
+ */
+export function fileFieldsInImportScope(
+  declarations: FileFieldDecl[],
+  nodeId: string | null,
+  nodeIds: ReadonlySet<string> = new Set(),
+): FileFieldDecl[] {
+  return declarations.filter((decl) => {
+    const path = importDeclWorkspacePath(decl)
+    if (!path) {
+      return false
+    }
+    const parts = path.split('/').filter(Boolean)
+    if (parts[0] !== 'import_files') {
+      return false
+    }
+    if (nodeId) {
+      return parts[1] === nodeId && parts.length >= 3
+    }
+    return parts.length >= 2 && !nodeIds.has(parts[1])
+  })
+}
+
 /**
  * Field universe at the Output pseudo-node: root io.inputs plus every phase's
  * declared outputs (topology order, later phases overwrite same names) — the

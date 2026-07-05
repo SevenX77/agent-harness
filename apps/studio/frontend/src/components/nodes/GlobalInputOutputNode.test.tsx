@@ -117,7 +117,7 @@ describe('GlobalInputOutputNode', () => {
       },
       compileErrors: [
         {
-          file: '.workspace/test_inputs',
+          file: '.workspace/import_files',
           line: null,
           field: 'chapter',
           severity: 'fatal',

@@ -15,7 +15,7 @@ class WorkspaceWriteClassification:
 
 _RUNTIME_ARTIFACT_PREFIX = (".workspace", "runs")
 _STUDIO_WORKSPACE_DATA_PREFIXES = (
-    (".workspace", "test_inputs"),
+    (".workspace", "import_files"),
     (".workspace", "golden"),
 )
 _SOURCE_ROOT_FILES = {"GRAPH.md", "SKILL.md"}

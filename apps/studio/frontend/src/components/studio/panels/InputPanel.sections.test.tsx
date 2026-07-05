@@ -32,11 +32,11 @@ const graphMd = [
   "      novel:",
   "        type: string",
   "        source: file",
-  "        path: imports/material/novel.md",
+  "        path: import_files/material/novel.md",
   "      chapters:",
   "        type: array",
   "        source: file",
-  "        dir: imports/abc_segmentation",
+  "        dir: import_files/abc_segmentation",
   "        pattern: chapter_{n}_latest_*.json",
   "        numbers: [1, 2, 7]",
   "  outputs:",
@@ -65,7 +65,7 @@ function detail(): SkillDetail {
 
 function lintError(overrides: Partial<LintError>): LintError {
   return {
-    file: ".workspace/test_inputs",
+    file: ".workspace/import_files",
     line: null,
     column: null,
     error_code: "compile_error",

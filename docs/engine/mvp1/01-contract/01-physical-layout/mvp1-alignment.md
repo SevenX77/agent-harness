@@ -49,9 +49,11 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
       report.json                       # evaluate_golden_baseline 评估报告
       cases/
         <case_id>.json                  # 单个 golden case
-  test_inputs/
-    <input_id>.json                     # 单个可复用输入样本
-    index.json                          # 可选索引 / metadata cache
+  import_files/
+    <input_id>.json                     # Input/Test Inputs 根级输入样本
+    <input_import_name>/...             # Input 导入文件/文件夹
+    <node_id>/
+      <node_import_name>/...            # 节点导入文件/文件夹
 ```
 
 #### 2.2.1 入口契约(`workspace_dir`)
@@ -103,20 +105,21 @@ RunResult.source = "predict"
 
 golden 的失效语义归 `05-invalidation`,评估 / diff 机制归 `05-run-inner/06-golden-eval`;本域只规定它在磁盘上落在 `.workspace/golden/`。
 
-#### 2.2.4 `test_inputs/`
-`test_inputs/` 是可复用输入数据集根目录,供 run / predict / golden eval 复用输入样本。
+#### 2.2.4 `import_files/`
+`import_files/` 是输入侧文件事实根目录,供 run / predict / golden eval 复用输入样本,也承载 Input 与节点配置导入的 `source:'file'` 文件。
 
 | 路径 | 内容 / 语义 |
 |---|---|
-| `test_inputs/<input_id>.json` | 单个可复用输入样本。 |
-| `test_inputs/index.json` | 可选 metadata cache;可记录 label、更新时间、绑定 baseline / case 等索引信息。 |
+| `import_files/<input_id>.json` | Input/Test Inputs 根级输入样本。 |
+| `import_files/<input_import_name>/...` | Input 边界导入的外部文件/文件夹。 |
+| `import_files/<node_id>/<node_import_name>/...` | 节点导入的外部文件/文件夹;`node_id` 必须是当前 graph phase id。 |
 
-Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路径写成另一份 Engine physical-layout SSOT。
+Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路径写成另一份 Engine physical-layout SSOT;所有这类文件读取都必须从 `import_files/` 对应 scope 解析。
 
 #### 2.2.5 不变式 + 废除项
 - Engine 只认传入的 `workspace_dir: Path`;Studio 是 root 的提供者,不是 Engine 户型的一部分。
 - Run 与 Predict 的结果和日志统一进入 `<workspace_dir>/runs/<run_id>/`。
-- Golden 数据集统一进入 `<workspace_dir>/golden/`;Test Inputs 统一进入 `<workspace_dir>/test_inputs/`。
+- Golden 数据集统一进入 `<workspace_dir>/golden/`;Test Inputs、Input 导入和节点导入统一进入 `<workspace_dir>/import_files/`。
 - `run_id` 是 run-scoped artifacts 的唯一索引;Predict 没有 `latest` 文件。
 - 旧 Predict 专用目录废除:`predict_dir`、`.workspace/predict/latest_predict.json`、API response 中的 `file_paths.predict_dir`、旧 `.gitignore` 对 `.workspace/predict/` 的放行项都不再是 Engine 契约。
 
@@ -150,7 +153,7 @@ engine 全权定义两棵树;`.workspace` 户型被 studio/host 消费(`03-api-c
 
 ## 8. gaps / 待设计 + 报警
 1. WS-E7 后,`evaluate_golden_baseline` 已作为 Engine public API 落地,并按 §2.2 读写 `workspace_dir/golden/<baseline_id>`。`.workspace` 是 Studio/host 可选择的 workspace root 名称,Engine 只认入参 `workspace_dir`。
-2. `test_inputs/` 的 Engine SDK CRUD 仍主要由 Studio 编排,后续若进入 Engine 必须继续按 §2.2 户型补齐。
+2. `import_files/` 的 Engine SDK CRUD 仍主要由 Studio 编排,后续若进入 Engine 必须继续按 §2.2 户型补齐,并保留根级 / 节点级 scope 语义。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §2 · `skill-syntax`(子图 path 语法)· `02-mechanism/02-resolver`(子图 path 解析)· `compile-rules` · `05-run-inner/06-golden-eval`

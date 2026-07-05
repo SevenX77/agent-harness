@@ -3,7 +3,7 @@ import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 
 const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
 const FIELD_NODE_PREFIX_RE = /^([A-Za-z0-9_-]+)\./
-const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/test_inputs(?:\/|$)/
+const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/import_files(?:\/|$)/
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "")

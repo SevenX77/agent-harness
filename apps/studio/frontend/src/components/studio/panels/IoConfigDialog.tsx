@@ -335,6 +335,7 @@ function FieldCheckTree({
  */
 function FileImportGroups({
   skillId,
+  importNodeId,
   declaredInputNames,
   groups,
   setGroups,
@@ -345,6 +346,7 @@ function FileImportGroups({
   onFileOpen,
 }: {
   skillId: string
+  importNodeId?: string | null
   declaredInputNames: readonly string[]
   groups: FileGroup[]
   setGroups: (groups: FileGroup[]) => void
@@ -361,7 +363,7 @@ function FileImportGroups({
     setBusy(true)
     setError(null)
     try {
-      const result = await importIoIntoWorkspace(skillId, path)
+      const result = await importIoIntoWorkspace(skillId, path, { nodeId: importNodeId ?? null })
       const imported = groupCandidatesByFile(
         matchCandidatesToInputs(candidatesFromScanEntries(result.entries), declaredInputNames),
       )
@@ -467,6 +469,8 @@ export interface InputConfigInlineProps {
   blackboard: ReconciledFieldRow[]
   /** Existing source:'file' declarations of the target document. */
   declaredFiles: FileFieldDecl[]
+  /** Null = Input/Test Inputs root import scope; phase id = node-scoped imports. */
+  importNodeId?: string | null
   /** Declared io.inputs field names an imported file auto-matches against. */
   declaredInputNames: readonly string[]
   onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[] }) => Promise<string | null>
@@ -485,6 +489,7 @@ export function InputConfigInline({
   skillId,
   blackboard,
   declaredFiles,
+  importNodeId = null,
   declaredInputNames,
   onSave,
   onFileOpen,
@@ -551,6 +556,7 @@ export function InputConfigInline({
       </div>
       <FileImportGroups
         skillId={skillId}
+        importNodeId={importNodeId}
         declaredInputNames={declaredInputNames}
         groups={effectiveGroups}
         setGroups={setGroups}

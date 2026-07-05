@@ -56,7 +56,7 @@
    "n": 21,
    "cap": "whitelist-roundtrip-autosave",
    "design_ref": "n2-atom-21",
-   "current": "现状:已实现且符合。Properties 选中节点字段变更后不再等手动 Save:PropertiesPanel 用 300ms debounce 自动调用 onPhaseFileSave,保存状态经 SaveStatusBadge 显示 pending/saving/saved/error。保存内容仍走 applyPhaseFrontmatterForm(phase-frontmatter.ts,把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回;空值用 delete 不写 null。保存带 expectedHash=sha256Hex(fileContent),成功后更新本地 saved markdown baseline,证明落盘来自白名单合并而非整文件重写。文档化了 round-trip 契约:name/io/未知键/非本类型字段全不碰。",
+   "current": "现状:已实现且符合。Properties 选中节点字段变更后不再等手动 Save:PropertiesPanel 用 300ms debounce 自动调用 onPhaseFileSave,保存状态经 SaveStatusBadge 显示 pending/saving/saved/error。保存内容仍走 applyPhaseFrontmatterForm(phase-frontmatter.ts,把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回;空值用 delete 不写 null。保存带 expectedHash=sha256Hex(fileContent),成功后更新本地 saved markdown baseline,证明落盘来自白名单合并而非整文件重写。若 native-fs/file-editing writer 返回 hash conflict,Properties 会把同一份结构化表单改动重新套到冲突响应里的最新 Markdown 上,再用返回的 hash 重试一次,避免旧 baseline 造成误报 Save failed。文档化了 round-trip 契约:name/io/未知键/非本类型字段全不碰。",
    "gap": "符合设计,无需改。2026-07-05:手动 Save 按钮已删除,字段变更自动写对应 Markdown 文件;保存成功后本地 baseline 前移,切换节点/文件时 saved/error 状态不串台。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。保存走 native-fs write_workspace_file(覆盖写带 expected_hash)。后端实施手册 D12.1=ok、D12.3=ok。"
@@ -200,7 +200,8 @@
    "layer1": [
     "造一个含 name/io/未知键/body 的 phase → 改一个白名单字段 → 300ms debounce 后断言 onPhaseFileSave 收到对应 SKILL.md / LOGIC.md / SUBGRAPH.md 内容,且只该字段变,name/io/未知键/body 全保留。",
     "断言空值用 delete 不写 null。",
-    "断言保存带 expectedHash=sha256Hex(fileContent)、走 native-fs/file-editing writer;断言 UI 不渲染手动 Save 按钮,保存成功后显示 saved 状态且切换文件不残留。"
+    "断言保存带 expectedHash=sha256Hex(fileContent)、走 native-fs/file-editing writer;断言 UI 不渲染手动 Save 按钮,保存成功后显示 saved 状态且切换文件不残留。",
+    "模拟 native-fs HashConflict:第一次写用旧 hash 被拒,Properties 必须基于冲突响应的最新 Markdown 重新套用本次字段改动,用 returned hash 重试一次并保留远端新增字段/body,不弹 Save failed。"
    ],
    "layer2": [
     "真跑:改一个节点字段后等待自动保存,diff 文件确认只白名单字段变、body 不破坏。"

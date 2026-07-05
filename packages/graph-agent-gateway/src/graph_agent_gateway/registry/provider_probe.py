@@ -266,7 +266,7 @@ def endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
 
     base_host = _url_hostname(endpoint.base_url)
     endpoint_id = endpoint.endpoint_id.lower()
-    if endpoint.protocol == "ark_runtime" or _host_matches(base_host, "volces.com") or "ark" in endpoint_id:
+    if endpoint.protocol == "ark_runtime":
         return "ark"
     if "deepseek" in base_host:
         return "deepseek"
@@ -298,7 +298,13 @@ async def _request_models(
             },
         )
     if backend in ("ark", "openai", "deepseek"):
-        endpoint_path = "/api/v3/models" if backend == "ark" else "/v1/models"
+        endpoint_path = (
+            "/api/v3/models"
+            if backend == "ark"
+            else _openai_compatible_endpoint_path(base_url, "/models")
+            if backend == "openai"
+            else "/v1/models"
+        )
         return await client.get(
             _join_base_url_and_endpoint(base_url, endpoint_path),
             headers={"Authorization": f"Bearer {api_key}"},
@@ -372,7 +378,14 @@ async def _request_model_generation(
     if effort:
         payload["reasoning_effort"] = effort
     return await client.post(
-        _join_base_url_and_endpoint(base_url, "/v1/chat/completions"),
+        _join_base_url_and_endpoint(
+            base_url,
+            (
+                _openai_compatible_endpoint_path(base_url, "/chat/completions")
+                if backend == "openai"
+                else "/v1/chat/completions"
+            ),
+        ),
         headers={"Authorization": f"Bearer {api_key}"},
         json=payload,
     )
@@ -448,7 +461,10 @@ async def _request_official_call_method_generation(
         if effort or _runtime_reasoning_enabled(reasoning):
             payload["reasoning"] = {"effort": effort or "low"}
         return await client.post(
-            _join_base_url_and_endpoint(base_url, "/v1/responses"),
+            _join_base_url_and_endpoint(
+                base_url,
+                _openai_compatible_endpoint_path(base_url, "/responses"),
+            ),
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
         )
@@ -461,13 +477,19 @@ async def _request_official_call_method_generation(
         if effort or _runtime_reasoning_enabled(reasoning):
             payload["reasoning_effort"] = effort or "low"
         return await client.post(
-            _join_base_url_and_endpoint(base_url, "/v1/chat/completions"),
+            _join_base_url_and_endpoint(
+                base_url,
+                _openai_compatible_endpoint_path(base_url, "/chat/completions"),
+            ),
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
         )
     if method_id == "openai_completions":
         return await client.post(
-            _join_base_url_and_endpoint(base_url, "/v1/completions"),
+            _join_base_url_and_endpoint(
+                base_url,
+                _openai_compatible_endpoint_path(base_url, "/completions"),
+            ),
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": model_id,
@@ -546,7 +568,10 @@ async def _request_official_call_method_generation(
     if effort or _runtime_reasoning_enabled(reasoning):
         payload["reasoning_effort"] = effort or "low"
     return await client.post(
-        _join_base_url_and_endpoint(base_url, "/v1/chat/completions"),
+        _join_base_url_and_endpoint(
+            base_url,
+            _openai_compatible_endpoint_path(base_url, "/chat/completions"),
+        ),
         headers={"Authorization": f"Bearer {api_key}"},
         json=payload,
     )
@@ -827,6 +852,14 @@ def _join_base_url_and_endpoint(base_url: str, endpoint_path: str) -> str:
     parts = urlsplit(normalized_base)
     path = f"{parts.path.rstrip('/')}{endpoint_without_version}"
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _openai_compatible_endpoint_path(base_url: str, suffix: str) -> str:
+    normalized_suffix = suffix if suffix.startswith("/") else f"/{suffix}"
+    base_path = urlsplit(base_url.rstrip("/")).path.rstrip("/")
+    if any(base_path.endswith(version_root) for version_root in ("/v1", "/api/v3")):
+        return normalized_suffix
+    return f"/v1{normalized_suffix}"
 
 
 def _endpoint_secret(endpoint: ProviderEndpoint, api_key: str | None) -> str:

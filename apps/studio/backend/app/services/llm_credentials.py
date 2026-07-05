@@ -28,7 +28,7 @@ from app.core.adapters.gateway import (
 )
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
-from app.services.provider_config import official_endpoint_id_for_host
+from app.services.provider_config import official_endpoint_id_for_host_protocol
 
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK
@@ -40,6 +40,7 @@ _SUPPORTED_CREDENTIALS_SCHEMA_VERSIONS = (4, 5)
 _LEGACY_CREDENTIALS_FIELDS = ("providers", "provider_credentials")
 CURATED_PROVIDER_KIND_BY_ENDPOINT_ID = {
     "anthropic-official": "official",
+    "ark-openai-official": "official",
     "ark-official": "official",
     "openai-official": "official",
     "deepseek-official": "official",
@@ -326,7 +327,7 @@ def _persisted_endpoint_id(
     endpoint: ProviderEndpoint,
     canonical_base_url: str,
 ) -> str:
-    official_endpoint_id = _official_endpoint_id_for_base_url(canonical_base_url)
+    official_endpoint_id = _official_endpoint_id_for_base_url(canonical_base_url, endpoint.protocol)
     if official_endpoint_id is not None:
         return official_endpoint_id
     if endpoint_id in CURATED_PROVIDER_KIND_BY_ENDPOINT_ID:
@@ -334,10 +335,10 @@ def _persisted_endpoint_id(
     return url_stable_endpoint_id(protocol=endpoint.protocol, base_url=canonical_base_url)
 
 
-def _official_endpoint_id_for_base_url(base_url: str) -> str | None:
+def _official_endpoint_id_for_base_url(base_url: str, protocol: str) -> str | None:
     # W3-A / T2: official host -> stable endpoint id is data-driven now
     # (app/data/provider_identity.json) — a new official provider is a config edit.
-    return official_endpoint_id_for_host(_url_hostname(base_url))
+    return official_endpoint_id_for_host_protocol(_url_hostname(base_url), protocol)
 
 
 def _normalize_loaded_credentials(data: LLMCredentialsFile) -> LLMCredentialsFile:
@@ -496,7 +497,7 @@ def _stable_endpoint_id(provider: dict[str, Any]) -> str:
     if protocol not in {"anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"}:
         return raw
     canonical_base_url = canonicalize_base_url(base_url, protocol)
-    official_endpoint_id = _official_endpoint_id_for_base_url(canonical_base_url)
+    official_endpoint_id = _official_endpoint_id_for_base_url(canonical_base_url, protocol)
     if official_endpoint_id is not None:
         return official_endpoint_id
     if raw in CURATED_PROVIDER_KIND_BY_ENDPOINT_ID:

@@ -11,7 +11,7 @@
         "所有写都是原子写——先写临时文件、fsync、再 os.replace 整体替换，杜绝半截文件。",
         "落地后强制 0600 文件权限、0700 目录权限，靠权限保护明文 key（文件本身不加密）。",
         "保留语义：upsert_endpoints 对没传 api_key 的 endpoint 保留旧 key（_preserved_secret），不会把已存的 key 抹掉。",
-        "official 端点（anthropic / openai / gemini / deepseek / ark-official 白名单）强制钉死 provider_kind=official。",
+        "official 端点（anthropic / openai / gemini / deepseek / ark-official / ark-openai-official 白名单）强制钉死 provider_kind=official；官方 host identity 必须带 protocol 维度，Ark 的 ark_runtime 与 OpenAI-compatible 不能按 host 合并。",
         "同一把 key 挂的多个 endpoint 共享 credential_ref 和 rate_limit_bucket（限流配额按 key 算）。",
         "删 endpoint 时级联删它名下的 route，不留孤儿路由。"
       ],
@@ -36,7 +36,7 @@
         "拆分：每个 URL 先展开为多个 protocol 候选 endpoint；测试后各 endpoint 独立保留自己的 verified/failed 结果，不把一个 URL 收敛成唯一协议。",
         "base_url 按 protocol 归一化（canonicalize_base_url），存进去的就是 canonical 形态，不留原始杂字符串。",
         "id 生成走两步：canonical_endpoint_id_base 出 {slug}-{protocol} 基名，再 _next_endpoint_id 在撞号时补 -2 / -3。",
-        "protocol 后缀固定映射：openai_compatible→openai、anthropic_compatible→anthropic、google_genai→google、ark_runtime→ark；第三方新增/测试候选不包含 ark_runtime，Ark 只属于官方 Ark endpoint。",
+        "protocol 后缀固定映射：openai_compatible→openai、anthropic_compatible→anthropic、google_genai→google、ark_runtime→ark；第三方新增/测试候选不包含 ark_runtime，Ark runtime 只属于官方 Ark endpoint；Ark OpenAI-compatible 是独立官方 endpoint `ark-openai-official`，wire backend 走 OpenAI-compatible，model catalog/provider identity 仍按 Ark 过滤。",
         "去重保序：reserved_endpoint_ids 已占用的 id 不复用，保证 id 稳定可回填。"
       ],
       "do": [

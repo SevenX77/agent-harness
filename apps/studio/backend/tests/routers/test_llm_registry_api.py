@@ -3395,6 +3395,64 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
     assert "ark-official:ep-20260316142940-b74bm" in response.json()["registry"]["provider_routes"]
 
 
+def test_endpoint_test_uses_openai_backend_for_ark_openai_official(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "ark-official": ProviderEndpoint(
+                    endpoint_id="ark-official",
+                    display_name="Ark Official",
+                    protocol="ark_runtime",
+                    base_url="https://ark.cn-beijing.volces.com/api/v3",
+                    api_key="secret",
+                ),
+                "ark-openai-official": ProviderEndpoint(
+                    endpoint_id="ark-openai-official",
+                    display_name="Ark Official",
+                    protocol="openai_compatible",
+                    base_url="https://ark.cn-beijing.volces.com/api/v3",
+                    api_key="secret",
+                ),
+            },
+        ),
+        credentials_path(),
+    )
+    endpoint_calls: list[ProviderEndpoint] = []
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        endpoint_calls.append(endpoint)
+        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("doubao-seed-2-0-pro-260215",))
+
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint, candidate
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return _route_probe(endpoint, route, status="ok", latency_ms=21)
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    response = client.post("/api/llm/endpoints/ark-openai-official/test")
+
+    assert response.status_code == 200
+    assert [llm_router._endpoint_probe_backend(e) for e in endpoint_calls] == ["openai"]
+    assert [e.endpoint_id for e in endpoint_calls] == ["ark-openai-official"]
+    assert "ark-openai-official:doubao-seed-2-0-pro-260215" in response.json()["registry"]["provider_routes"]
+
+
 def test_endpoint_test_ark_official_verifies_via_generation_probe_not_profile_probe(
     client: TestClient,
     tmp_path: Path,
@@ -4445,6 +4503,28 @@ def test_ark_language_candidate_filter_includes_text_catalog_families() -> None:
             candidate.method_id
             for candidate in llm_router._official_language_probe_candidates(endpoint, model_id)
         } == {"ark_chat", "ark_responses", "ark_anthropic_messages"}
+
+
+def test_ark_openai_official_uses_ark_catalog_filter_with_openai_wire_methods() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-openai-official",
+        display_name="Ark Official",
+        protocol="openai_compatible",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    assert llm_router._is_official_language_model_candidate(endpoint, "doubao-seed-2-0-pro-260215") is True
+    candidates = llm_router._official_language_probe_candidates(
+        endpoint,
+        "doubao-seed-2-0-pro-260215",
+    )
+
+    assert {candidate.method_id for candidate in candidates} == {
+        "openai_responses",
+        "openai_chat_completions",
+    }
 
 
 def test_official_catalog_candidate_methods_cover_capability_library_models() -> None:

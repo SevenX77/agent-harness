@@ -70,7 +70,7 @@ def _client(
 
 def _assert_ws_rejected(client: TestClient, path: str) -> None:
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(path):
-            pass
+        with client.websocket_connect(path) as websocket:
+            websocket.receive_text()
 
     assert exc_info.value.code == 4401

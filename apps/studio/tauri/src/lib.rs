@@ -3,10 +3,10 @@ mod sidecar;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, Mutex,
@@ -24,6 +24,8 @@ use tauri_plugin_dialog::DialogExt;
 /// making the user wait noticeably if the FE is gone.
 const QUIT_FLUSH_BUDGET: Duration = Duration::from_millis(1500);
 const QUIT_FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const AH_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const AH_SHUTDOWN_POLL_ATTEMPTS: usize = 12;
 
 struct SidecarAppState {
     manager: Mutex<Option<sidecar::SidecarManager>>,
@@ -223,6 +225,8 @@ enum CodeAssistant {
 }
 
 impl CodeAssistant {
+    const ALL: [Self; 2] = [Self::Claude, Self::Codex];
+
     fn slug(self) -> &'static str {
         match self {
             Self::Claude => "claude",
@@ -268,6 +272,140 @@ impl CodeAssistant {
             "codex" => Ok(Self::Codex),
             _ => Err(format!("unknown code assistant: {value}")),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AhLifecycleSnapshot {
+    ahd_has_inventory: bool,
+    master_tmux_alive: bool,
+    worker_tmux_alive: bool,
+}
+
+impl AhLifecycleSnapshot {
+    fn new(ahd_has_inventory: bool, master_tmux_alive: bool, worker_tmux_alive: bool) -> Self {
+        Self {
+            ahd_has_inventory,
+            master_tmux_alive,
+            worker_tmux_alive,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CodeAssistantLifecycleAction {
+    StartFresh,
+    AttachExisting,
+    CleanupStale,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CodeAssistantOpenDecision {
+    StartFresh,
+    AttachRequested,
+    RejectOtherActive,
+    CleanupStale,
+}
+
+#[derive(Clone, Debug)]
+struct AhRuntimeProbe {
+    snapshot: AhLifecycleSnapshot,
+    tmux_socket_label: Option<String>,
+    tmux_sessions: Vec<String>,
+    session_ids: Vec<String>,
+}
+
+impl AhRuntimeProbe {
+    fn empty() -> Self {
+        Self {
+            snapshot: AhLifecycleSnapshot::new(false, false, false),
+            tmux_socket_label: None,
+            tmux_sessions: Vec::new(),
+            session_ids: Vec::new(),
+        }
+    }
+}
+
+fn code_assistant_lifecycle_is_active(snapshot: AhLifecycleSnapshot) -> bool {
+    snapshot.ahd_has_inventory && snapshot.master_tmux_alive
+}
+
+fn reconcile_code_assistant_lifecycle(
+    snapshot: AhLifecycleSnapshot,
+) -> CodeAssistantLifecycleAction {
+    if code_assistant_lifecycle_is_active(snapshot) {
+        CodeAssistantLifecycleAction::AttachExisting
+    } else if snapshot.ahd_has_inventory || snapshot.master_tmux_alive || snapshot.worker_tmux_alive
+    {
+        CodeAssistantLifecycleAction::CleanupStale
+    } else {
+        CodeAssistantLifecycleAction::StartFresh
+    }
+}
+
+fn code_assistant_shutdown_is_complete(snapshot: AhLifecycleSnapshot) -> bool {
+    !snapshot.ahd_has_inventory && !snapshot.master_tmux_alive && !snapshot.worker_tmux_alive
+}
+
+fn decide_code_assistant_open(
+    requested: Option<AhLifecycleSnapshot>,
+    others: &[AhLifecycleSnapshot],
+) -> CodeAssistantOpenDecision {
+    let requested_action = requested
+        .map(reconcile_code_assistant_lifecycle)
+        .unwrap_or(CodeAssistantLifecycleAction::StartFresh);
+    let other_actions = others
+        .iter()
+        .copied()
+        .map(reconcile_code_assistant_lifecycle)
+        .collect::<Vec<_>>();
+    let has_stale = requested_action == CodeAssistantLifecycleAction::CleanupStale
+        || other_actions
+            .iter()
+            .any(|action| *action == CodeAssistantLifecycleAction::CleanupStale);
+    let other_active_count = other_actions
+        .iter()
+        .filter(|action| **action == CodeAssistantLifecycleAction::AttachExisting)
+        .count();
+
+    if has_stale
+        || (requested_action == CodeAssistantLifecycleAction::AttachExisting
+            && other_active_count > 0)
+    {
+        CodeAssistantOpenDecision::CleanupStale
+    } else if requested_action == CodeAssistantLifecycleAction::AttachExisting {
+        CodeAssistantOpenDecision::AttachRequested
+    } else if other_active_count > 0 {
+        CodeAssistantOpenDecision::RejectOtherActive
+    } else {
+        CodeAssistantOpenDecision::StartFresh
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CommandResult {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl CommandResult {
+    fn from_output(output: Output) -> Self {
+        Self {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        }
+    }
+
+    fn combined_output(&self) -> String {
+        if self.stderr.is_empty() {
+            return self.stdout.clone();
+        }
+        if self.stdout.is_empty() {
+            return self.stderr.clone();
+        }
+        format!("{}\n{}", self.stdout, self.stderr)
     }
 }
 
@@ -618,38 +756,289 @@ fn ah_config_for_status(workspace_root: &Path, assistant: CodeAssistant) -> Opti
     })
 }
 
-fn command_status_success(mut command: Command) -> Result<bool, String> {
+fn command_result(mut command: Command, label: &str) -> Result<CommandResult, String> {
     command
         .output()
-        .map(|output| output.status.success())
-        .map_err(|error| format!("failed to run ah command: {error}"))
+        .map(CommandResult::from_output)
+        .map_err(|error| format!("failed to run {label}: {error}"))
 }
 
-fn run_ah_config_command(config_path: &Path, ah_args: &[&str]) -> Result<bool, String> {
+fn run_ah_config_command_output(
+    config_path: &Path,
+    ah_args: &[&str],
+) -> Result<CommandResult, String> {
     if cfg!(target_os = "windows") {
         let mut command = Command::new("wsl.exe");
-        let args = ah_args.join(" ");
+        let args = ah_args
+            .iter()
+            .map(|arg| sh_single_quote_str(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
         let script = format!(
             "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; ah --config {} {}",
             sh_single_quote_str(&windows_path_to_wsl(config_path)),
             args
         );
         command.args(["-e", "bash", "-lc", &script]);
-        return command_status_success(command);
+        return command_result(command, "ah");
     }
 
     let mut command = Command::new("ah");
     command.env("SYSTEMD_LOG_LEVEL", "err");
     command.arg("--config").arg(config_path).args(ah_args);
-    command_status_success(command)
+    command_result(command, "ah")
 }
 
-fn ah_config_is_running(config_path: &Path) -> bool {
-    run_ah_config_command(config_path, &["ps"]).unwrap_or(false)
+fn run_ah_config_command(config_path: &Path, ah_args: &[&str]) -> Result<bool, String> {
+    run_ah_config_command_output(config_path, ah_args).map(|result| result.success)
 }
 
 fn stop_ah_config(config_path: &Path) -> Result<bool, String> {
     run_ah_config_command(config_path, &["stop"])
+}
+
+fn tmux_socket_label_is_safe(label: &str) -> bool {
+    !label.is_empty()
+        && label
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+}
+
+fn run_tmux_socket_command(
+    socket_label: &str,
+    tmux_args: &[&str],
+) -> Result<CommandResult, String> {
+    if !tmux_socket_label_is_safe(socket_label) {
+        return Err(format!("unsafe tmux socket label: {socket_label}"));
+    }
+
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("wsl.exe");
+        let args = tmux_args
+            .iter()
+            .map(|arg| sh_single_quote_str(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let script = format!(
+            "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; tmux -L {} {}",
+            sh_single_quote_str(socket_label),
+            args
+        );
+        command.args(["-e", "bash", "-lc", &script]);
+        return command_result(command, "tmux");
+    }
+
+    let mut command = Command::new("tmux");
+    command.env("SYSTEMD_LOG_LEVEL", "err");
+    command.arg("-L").arg(socket_label).args(tmux_args);
+    command_result(command, "tmux")
+}
+
+fn extract_tmux_socket_label(text: &str) -> Option<String> {
+    for suffix in text.split("tmux -L ").skip(1) {
+        let Some(raw_label) = suffix.split_whitespace().next() else {
+            continue;
+        };
+        let label = raw_label.trim_matches(|ch| ch == '\'' || ch == '"' || ch == '`');
+        if tmux_socket_label_is_safe(label) {
+            return Some(label.to_string());
+        }
+    }
+    None
+}
+
+fn extract_ah_session_ids(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|token| {
+            token.trim_matches(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+        })
+        .filter(|token| token.starts_with("sess_"))
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn tmux_session_is_master(session: &str) -> bool {
+    session.starts_with("master_")
+}
+
+fn tmux_session_is_worker(session: &str) -> bool {
+    session.starts_with("agent_") || session.starts_with("worker_")
+}
+
+fn tmux_session_is_ah_managed(session: &str) -> bool {
+    tmux_session_is_master(session) || tmux_session_is_worker(session)
+}
+
+fn list_tmux_sessions(socket_label: &str) -> Vec<String> {
+    let Ok(result) =
+        run_tmux_socket_command(socket_label, &["list-sessions", "-F", "#{session_name}"])
+    else {
+        return Vec::new();
+    };
+    if !result.success {
+        return Vec::new();
+    }
+    result
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn kill_tmux_session(socket_label: &str, session_name: &str) -> Result<bool, String> {
+    run_tmux_socket_command(socket_label, &["kill-session", "-t", session_name])
+        .map(|result| result.success)
+}
+
+fn inspect_ah_runtime(config_path: &Path, tmux_socket_hint: Option<&str>) -> AhRuntimeProbe {
+    let Ok(ps_result) = run_ah_config_command_output(config_path, &["ps"]) else {
+        return AhRuntimeProbe::empty();
+    };
+    let ps_output = ps_result.combined_output();
+    let tmux_socket_label = extract_tmux_socket_label(&ps_output).or_else(|| {
+        tmux_socket_hint
+            .filter(|label| tmux_socket_label_is_safe(label))
+            .map(str::to_string)
+    });
+    let tmux_sessions = tmux_socket_label
+        .as_deref()
+        .map(list_tmux_sessions)
+        .unwrap_or_default();
+    let snapshot = AhLifecycleSnapshot::new(
+        ps_result.success,
+        tmux_sessions
+            .iter()
+            .any(|session| tmux_session_is_master(session)),
+        tmux_sessions
+            .iter()
+            .any(|session| tmux_session_is_worker(session)),
+    );
+    AhRuntimeProbe {
+        snapshot,
+        tmux_socket_label,
+        tmux_sessions,
+        session_ids: extract_ah_session_ids(&ps_output),
+    }
+}
+
+fn force_cleanup_ah_runtime(config_path: &Path, probe: &AhRuntimeProbe) {
+    for session_id in &probe.session_ids {
+        match run_ah_config_command(config_path, &["kill", "--session", session_id, "--force"]) {
+            Ok(true) => log::info!(
+                "phase=code-assistant-cleanup action=ah-kill-session-ok config={} session_id={session_id}",
+                config_path.display()
+            ),
+            Ok(false) => log::info!(
+                "phase=code-assistant-cleanup action=ah-kill-session-skip config={} session_id={session_id}",
+                config_path.display()
+            ),
+            Err(error) => log::warn!(
+                "phase=code-assistant-cleanup action=ah-kill-session-failed config={} session_id={session_id} error={error}",
+                config_path.display()
+            ),
+        }
+    }
+
+    if let Some(socket_label) = probe.tmux_socket_label.as_deref() {
+        for session in probe
+            .tmux_sessions
+            .iter()
+            .filter(|session| tmux_session_is_ah_managed(session))
+        {
+            match kill_tmux_session(socket_label, session) {
+                Ok(true) => log::info!(
+                    "phase=code-assistant-cleanup action=tmux-kill-session-ok socket={socket_label} session={session}"
+                ),
+                Ok(false) => log::info!(
+                    "phase=code-assistant-cleanup action=tmux-kill-session-skip socket={socket_label} session={session}"
+                ),
+                Err(error) => log::warn!(
+                    "phase=code-assistant-cleanup action=tmux-kill-session-failed socket={socket_label} session={session} error={error}"
+                ),
+            }
+        }
+    }
+}
+
+fn wait_for_code_assistant_shutdown(
+    config_path: &Path,
+    tmux_socket_hint: Option<&str>,
+) -> AhRuntimeProbe {
+    let mut last_probe = inspect_ah_runtime(config_path, tmux_socket_hint);
+    if code_assistant_shutdown_is_complete(last_probe.snapshot) {
+        return last_probe;
+    }
+
+    for _ in 0..AH_SHUTDOWN_POLL_ATTEMPTS {
+        std::thread::sleep(AH_SHUTDOWN_POLL_INTERVAL);
+        let hint = last_probe.tmux_socket_label.as_deref().or(tmux_socket_hint);
+        last_probe = inspect_ah_runtime(config_path, hint);
+        if code_assistant_shutdown_is_complete(last_probe.snapshot) {
+            break;
+        }
+    }
+    last_probe
+}
+
+fn cleanup_code_assistant_config(config_path: &Path) -> Result<bool, String> {
+    let before = inspect_ah_runtime(config_path, None);
+    if code_assistant_shutdown_is_complete(before.snapshot) {
+        return Ok(false);
+    }
+
+    let stop_succeeded = stop_ah_config(config_path)?;
+    let after_stop =
+        wait_for_code_assistant_shutdown(config_path, before.tmux_socket_label.as_deref());
+    if code_assistant_shutdown_is_complete(after_stop.snapshot) {
+        return Ok(stop_succeeded || before.snapshot != after_stop.snapshot);
+    }
+
+    force_cleanup_ah_runtime(config_path, &after_stop);
+    let fallback_hint = after_stop
+        .tmux_socket_label
+        .as_deref()
+        .or(before.tmux_socket_label.as_deref());
+    let after_force = wait_for_code_assistant_shutdown(config_path, fallback_hint);
+    if code_assistant_shutdown_is_complete(after_force.snapshot) {
+        return Ok(true);
+    }
+
+    Err(format!(
+        "failed to close ah completely: ahd={}, master_tmux={}, worker_tmux={}",
+        after_force.snapshot.ahd_has_inventory,
+        after_force.snapshot.master_tmux_alive,
+        after_force.snapshot.worker_tmux_alive
+    ))
+}
+
+fn workspace_code_assistant_configs(workspace_root: &Path) -> BTreeSet<PathBuf> {
+    CodeAssistant::ALL
+        .iter()
+        .filter_map(|assistant| ah_config_for_status(workspace_root, *assistant))
+        .collect()
+}
+
+struct CodeAssistantCleanupResult {
+    configs: BTreeSet<PathBuf>,
+    closed_any: bool,
+}
+
+fn cleanup_workspace_code_assistants(
+    workspace_root: &Path,
+) -> Result<CodeAssistantCleanupResult, String> {
+    let configs = workspace_code_assistant_configs(workspace_root);
+    let mut closed_any = false;
+    for config in &configs {
+        closed_any |= cleanup_code_assistant_config(config)?;
+    }
+    Ok(CodeAssistantCleanupResult {
+        configs,
+        closed_any,
+    })
 }
 
 fn discover_studio_ah_configs() -> Vec<PathBuf> {
@@ -674,17 +1063,17 @@ fn discover_studio_ah_configs() -> Vec<PathBuf> {
 
 fn cleanup_registered_code_assistants(configs: BTreeSet<PathBuf>) {
     for config in configs {
-        match stop_ah_config(&config) {
+        match cleanup_code_assistant_config(&config) {
             Ok(true) => log::info!(
-                "phase=code-assistant-cleanup action=ah-stop-ok config={}",
+                "phase=code-assistant-cleanup action=close-ok config={}",
                 config.display()
             ),
             Ok(false) => log::info!(
-                "phase=code-assistant-cleanup action=ah-stop-skip config={} reason=not_running",
+                "phase=code-assistant-cleanup action=close-skip config={} reason=not_running",
                 config.display()
             ),
             Err(error) => log::warn!(
-                "phase=code-assistant-cleanup action=ah-stop-failed config={} error={error}",
+                "phase=code-assistant-cleanup action=close-failed config={} error={error}",
                 config.display()
             ),
         }
@@ -1311,16 +1700,93 @@ fn spawn_terminal_with_launcher(
     ))
 }
 
+enum CodeAssistantOpenAction {
+    StartFresh,
+    AttachExisting(PathBuf),
+}
+
+fn prepare_code_assistant_open(
+    workspace_root: &Path,
+    requested: CodeAssistant,
+) -> Result<CodeAssistantOpenAction, String> {
+    let requested_runtime = ah_config_for_status(workspace_root, requested).map(|config| {
+        let probe = inspect_ah_runtime(&config, None);
+        (config, probe.snapshot)
+    });
+    let requested_config = requested_runtime
+        .as_ref()
+        .map(|(config, _)| config.to_path_buf());
+    let other_runtimes = CodeAssistant::ALL
+        .iter()
+        .copied()
+        .filter(|assistant| assistant.slug() != requested.slug())
+        .filter_map(|assistant| {
+            ah_config_for_status(workspace_root, assistant).map(|config| {
+                let probe = inspect_ah_runtime(&config, None);
+                (assistant, config, probe.snapshot)
+            })
+        })
+        .filter(|(_, config, _)| requested_config.as_ref() != Some(config))
+        .collect::<Vec<_>>();
+    let other_snapshots = other_runtimes
+        .iter()
+        .map(|(_, _, snapshot)| *snapshot)
+        .collect::<Vec<_>>();
+
+    match decide_code_assistant_open(
+        requested_runtime.as_ref().map(|(_, snapshot)| *snapshot),
+        &other_snapshots,
+    ) {
+        CodeAssistantOpenDecision::AttachRequested => {
+            let (config, _) = requested_runtime.expect("requested runtime must exist");
+            Ok(CodeAssistantOpenAction::AttachExisting(config))
+        }
+        CodeAssistantOpenDecision::RejectOtherActive => {
+            let assistant = other_runtimes
+                .iter()
+                .find_map(|(assistant, _, snapshot)| {
+                    code_assistant_lifecycle_is_active(*snapshot).then_some(*assistant)
+                })
+                .expect("active other assistant must exist");
+            Err(format!(
+                "{} is already running; close it before opening {}.",
+                assistant.display_name(),
+                requested.display_name()
+            ))
+        }
+        CodeAssistantOpenDecision::CleanupStale => {
+            cleanup_workspace_code_assistants(workspace_root)?;
+            Ok(CodeAssistantOpenAction::StartFresh)
+        }
+        CodeAssistantOpenDecision::StartFresh => Ok(CodeAssistantOpenAction::StartFresh),
+    }
+}
+
 fn open_code_assistant(
     workspace_root: String,
     assistant: CodeAssistant,
 ) -> Result<PathBuf, String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let config_path = ah_config_for_workspace(&workspace_root, assistant)?;
-    let launcher = write_code_assistant_launcher_script(&workspace_root, &config_path, assistant)?;
-    let window_title = code_assistant_window_title(&workspace_root, assistant);
-    spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?;
-    Ok(config_path)
+    match prepare_code_assistant_open(&workspace_root, assistant)? {
+        CodeAssistantOpenAction::AttachExisting(config_path) => {
+            let launcher = write_code_assistant_attach_launcher_script(
+                &workspace_root,
+                &config_path,
+                assistant,
+            )?;
+            let window_title = code_assistant_window_title(&workspace_root, assistant);
+            spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)?;
+            Ok(config_path)
+        }
+        CodeAssistantOpenAction::StartFresh => {
+            let config_path = ah_config_for_workspace(&workspace_root, assistant)?;
+            let launcher =
+                write_code_assistant_launcher_script(&workspace_root, &config_path, assistant)?;
+            let window_title = code_assistant_window_title(&workspace_root, assistant);
+            spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?;
+            Ok(config_path)
+        }
+    }
 }
 
 fn attach_code_assistant_terminal(
@@ -1331,8 +1797,19 @@ fn attach_code_assistant_terminal(
     let Some(config_path) = ah_config_for_status(&workspace_root, assistant) else {
         return Err(format!("{} is not running", assistant.display_name()));
     };
-    if !ah_config_is_running(&config_path) {
-        return Err(format!("{} is not running", assistant.display_name()));
+    let probe = inspect_ah_runtime(&config_path, None);
+    match reconcile_code_assistant_lifecycle(probe.snapshot) {
+        CodeAssistantLifecycleAction::AttachExisting => {}
+        CodeAssistantLifecycleAction::CleanupStale => {
+            cleanup_workspace_code_assistants(&workspace_root)?;
+            return Err(format!(
+                "{} was stale and has been closed; reopen it from Open in.",
+                assistant.display_name()
+            ));
+        }
+        CodeAssistantLifecycleAction::StartFresh => {
+            return Err(format!("{} is not running", assistant.display_name()));
+        }
     }
     let launcher =
         write_code_assistant_attach_launcher_script(&workspace_root, &config_path, assistant)?;
@@ -1377,15 +1854,46 @@ fn attach_code_assistant(workspace_root: String, assistant: String) -> Result<()
 #[tauri::command]
 fn code_assistant_status(workspace_root: String) -> Result<CodeAssistantStatus, String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let active = |assistant| {
-        ah_config_for_status(&workspace_root, assistant)
-            .as_deref()
-            .map(ah_config_is_running)
+    let config_for_assistant = |assistant| ah_config_for_status(&workspace_root, assistant);
+    let mut probes = BTreeMap::new();
+    for assistant in CodeAssistant::ALL {
+        if let Some(config_path) = config_for_assistant(assistant) {
+            probes
+                .entry(config_path.clone())
+                .or_insert_with(|| inspect_ah_runtime(&config_path, None));
+        }
+    }
+
+    let has_stale = probes.values().any(|probe| {
+        reconcile_code_assistant_lifecycle(probe.snapshot)
+            == CodeAssistantLifecycleAction::CleanupStale
+    });
+    let active_config_count = probes
+        .values()
+        .filter(|probe| code_assistant_lifecycle_is_active(probe.snapshot))
+        .count();
+    if has_stale || active_config_count > 1 {
+        cleanup_workspace_code_assistants(&workspace_root)?;
+        return Ok(CodeAssistantStatus {
+            claude: false,
+            codex: false,
+        });
+    }
+
+    let active = |assistant| -> bool {
+        config_for_assistant(assistant)
+            .and_then(|config_path| probes.get(&config_path))
+            .map(|probe| code_assistant_lifecycle_is_active(probe.snapshot))
             .unwrap_or(false)
     };
+    let claude = active(CodeAssistant::Claude);
     Ok(CodeAssistantStatus {
-        claude: active(CodeAssistant::Claude),
-        codex: active(CodeAssistant::Codex),
+        claude,
+        codex: if claude {
+            false
+        } else {
+            active(CodeAssistant::Codex)
+        },
     })
 }
 
@@ -1397,16 +1905,16 @@ fn close_code_assistant(
 ) -> Result<bool, String> {
     let workspace_root = existing_directory(&workspace_root)?;
     let assistant = CodeAssistant::from_slug(assistant.trim())?;
-    let Some(config) = ah_config_for_status(&workspace_root, assistant) else {
+    if ah_config_for_status(&workspace_root, assistant).is_none() {
         return Ok(false);
-    };
-    let stopped = stop_ah_config(&config)?;
+    }
+    let cleanup = cleanup_workspace_code_assistants(&workspace_root)?;
     state
         .configs
         .lock()
         .expect("code assistant state poisoned")
-        .remove(&config);
-    Ok(stopped)
+        .retain(|registered_config| !cleanup.configs.contains(registered_config));
+    Ok(cleanup.closed_any)
 }
 
 #[tauri::command]
@@ -2190,6 +2698,106 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(transient_dir.parent().unwrap());
+    }
+
+    #[test]
+    fn code_assistant_status_requires_ahd_and_master_tmux() {
+        assert!(code_assistant_lifecycle_is_active(
+            AhLifecycleSnapshot::new(true, true, true)
+        ));
+        assert!(!code_assistant_lifecycle_is_active(
+            AhLifecycleSnapshot::new(true, false, true)
+        ));
+        assert!(!code_assistant_lifecycle_is_active(
+            AhLifecycleSnapshot::new(false, true, true)
+        ));
+        assert!(code_assistant_lifecycle_is_active(
+            AhLifecycleSnapshot::new(true, true, false)
+        ));
+    }
+
+    #[test]
+    fn stale_ahd_without_master_requires_cleanup_before_reopen() {
+        assert_eq!(
+            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(true, false, true)),
+            CodeAssistantLifecycleAction::CleanupStale
+        );
+        assert_eq!(
+            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(false, true, false)),
+            CodeAssistantLifecycleAction::CleanupStale
+        );
+        assert_eq!(
+            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(true, true, true)),
+            CodeAssistantLifecycleAction::AttachExisting
+        );
+        assert_eq!(
+            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(false, false, false)),
+            CodeAssistantLifecycleAction::StartFresh
+        );
+    }
+
+    #[test]
+    fn open_decision_enforces_single_ahd_per_workspace() {
+        let active = AhLifecycleSnapshot::new(true, true, true);
+        let stopped = AhLifecycleSnapshot::new(false, false, false);
+        let stale = AhLifecycleSnapshot::new(true, false, false);
+
+        assert_eq!(
+            decide_code_assistant_open(Some(active), &[stopped]),
+            CodeAssistantOpenDecision::AttachRequested
+        );
+        assert_eq!(
+            decide_code_assistant_open(Some(stopped), &[active]),
+            CodeAssistantOpenDecision::RejectOtherActive
+        );
+        assert_eq!(
+            decide_code_assistant_open(Some(active), &[active]),
+            CodeAssistantOpenDecision::CleanupStale
+        );
+        assert_eq!(
+            decide_code_assistant_open(Some(stale), &[stopped]),
+            CodeAssistantOpenDecision::CleanupStale
+        );
+        assert_eq!(
+            decide_code_assistant_open(None, &[stopped]),
+            CodeAssistantOpenDecision::StartFresh
+        );
+    }
+
+    #[test]
+    fn close_cleanup_requires_master_and_worker_tmux_to_be_gone() {
+        assert!(code_assistant_shutdown_is_complete(
+            AhLifecycleSnapshot::new(false, false, false)
+        ));
+        assert!(!code_assistant_shutdown_is_complete(
+            AhLifecycleSnapshot::new(false, true, false)
+        ));
+        assert!(!code_assistant_shutdown_is_complete(
+            AhLifecycleSnapshot::new(false, false, true)
+        ));
+        assert!(!code_assistant_shutdown_is_complete(
+            AhLifecycleSnapshot::new(true, false, false)
+        ));
+    }
+
+    #[test]
+    fn ah_ps_probe_extracts_tmux_socket_label_and_session_ids() {
+        let output = r#"
+Sessions
+sess_alpha  running
+sess_beta,  done
+
+💡 To inspect live tmux sessions: tmux -L ahd-57379dc91a921eed ls
+"#;
+
+        assert_eq!(
+            extract_tmux_socket_label(output).as_deref(),
+            Some("ahd-57379dc91a921eed")
+        );
+        assert_eq!(
+            extract_ah_session_ids(output),
+            vec!["sess_alpha".to_string(), "sess_beta".to_string()]
+        );
     }
 
     #[test]

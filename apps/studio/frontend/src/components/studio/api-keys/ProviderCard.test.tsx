@@ -566,16 +566,16 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).not.toContain("Base URL accepted by the model-list endpoint")
   })
 
-  // PM 2026-07-03: clicking ONE endpoint tag (item 2's onProbeEndpoint) only
-  // probes that one (URL, protocol) cell backend-side (verified via runtime
-  // log correlation), so only the endpoint id carried by draft.testingEndpointId
-  // may receive the endpoint animation.
-  it("only spins the ONE endpoint tag being probed, not every sibling under the provider", () => {
+  // PM 2026-07-03 + atom follow-up: clicking ONE endpoint tag probes one
+  // (URL, protocol) cell, and the endpoint animation is driven by the backend
+  // active atom event for that endpoint, not by a card-wide testing flag.
+  it("only spins the ONE endpoint tag with an active atom, not every sibling under the provider", () => {
     const nextDraft = makeDraft({
       base_url: "https://openrouter.ai/api",
       isTesting: true,
       testingAction: "models",
       testingEndpointId: "openrouter-openai",
+      testingModelIdsByEndpoint: { "openrouter-openai": ["openai-model"] },
       base_urls: [
         {
           id: "url-openrouter",
@@ -622,12 +622,12 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).toContain('data-endpoint-status="error"')
   })
 
-  it("does not spin every endpoint tag without an active endpoint scope", () => {
+  it("does not spin endpoint tags from testingEndpointId alone without an active atom", () => {
     const nextDraft = makeDraft({
       base_url: "https://openrouter.ai/api",
       isTesting: true,
       testingAction: "models",
-      testingEndpointId: null,
+      testingEndpointId: "openrouter-openai",
       base_urls: [
         {
           id: "url-openrouter",
@@ -659,9 +659,9 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
       },
     })
 
-    // Third-party endpoint drafts always synthesize all 3 protocol candidates
-    // per base-url row (provider-utils.ts providerEndpointDraftsForAction),
-    // regardless of which endpoint_ids were explicitly mapped.
+    // The backend did not publish llm_probe_active for this endpoint, so no
+    // endpoint tag should animate even though the controller still knows which
+    // endpoint request is in flight.
     expect((html.match(/data-endpoint-status="testing"/g) ?? []).length).toBe(0)
   })
 

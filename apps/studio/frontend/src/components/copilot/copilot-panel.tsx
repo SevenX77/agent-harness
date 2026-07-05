@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, CircleAlert, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ChevronDown, CircleAlert, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -10,8 +10,14 @@ import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
-import { openClaudeCode } from '../../lib/tauri'
+import { openClaudeCode, openCodexCli } from '../../lib/tauri'
 import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
@@ -316,7 +322,7 @@ export function CopilotPanel({
   const [rolesSettled, setRolesSettled] = useState(false)
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
-  const [openingClaudeCode, setOpeningClaudeCode] = useState(false)
+  const [openingCodeAssistant, setOpeningCodeAssistant] = useState<'claude' | 'codex' | null>(null)
   const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId, workspaceRoot)
   const inEvalView = view === 'eval'
@@ -324,7 +330,7 @@ export function CopilotPanel({
     () => copilotRoleOptions(rolesData, registry?.model_groups ?? []),
     [rolesData, registry],
   )
-  const claudeCodeWorkspace = workspaceRoot?.trim() || null
+  const codeAssistantWorkspace = workspaceRoot?.trim() || null
 
   async function askCopilotJudge() {
     if (!skillId || !judgeRefs) {
@@ -455,12 +461,16 @@ export function CopilotPanel({
     toast.info('Route switched. Future messages will use it.')
   }
 
-  async function handleOpenClaudeCode() {
-    setOpeningClaudeCode(true)
+  async function handleOpenCodeAssistant(assistant: 'claude' | 'codex') {
+    setOpeningCodeAssistant(assistant)
     try {
-      await openClaudeCode(claudeCodeWorkspace)
+      if (assistant === 'claude') {
+        await openClaudeCode(codeAssistantWorkspace)
+      } else {
+        await openCodexCli(codeAssistantWorkspace)
+      }
     } finally {
-      setOpeningClaudeCode(false)
+      setOpeningCodeAssistant(null)
     }
   }
 
@@ -554,20 +564,40 @@ export function CopilotPanel({
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={openingClaudeCode || !claudeCodeWorkspace}
-              aria-label="Open in Claude Code"
-              onClick={() => {
-                void handleOpenClaudeCode()
-              }}
-              className="studio-canvas-input-surface shrink-0"
-            >
-              <SquareTerminal data-icon="inline-start" />
-              Open in Claude Code
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                  aria-label="Open code assistant"
+                  className="studio-canvas-input-surface shrink-0"
+                >
+                  <SquareTerminal data-icon="inline-start" />
+                  Open in
+                  <ChevronDown className="size-3" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem
+                  disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                  onSelect={() => {
+                    void handleOpenCodeAssistant('claude')
+                  }}
+                >
+                  Claude
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                  onSelect={() => {
+                    void handleOpenCodeAssistant('codex')
+                  }}
+                >
+                  Codex
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>

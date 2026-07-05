@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-  One-shot(ish) bootstrap for Studio's "Open in Claude Code" button: WSL2 +
-  Ubuntu + systemd + tmux + claude CLI + ah, with Windows' proxy/timezone/
-  locale mirrored in, so the interactive `claude` master ah spawns can reach
-  the network and doesn't sit behind a locale/tz mismatch.
+  One-shot(ish) bootstrap for Studio's code assistant menu: WSL2 + Ubuntu +
+  systemd + tmux + claude CLI + Codex CLI + ah, with Windows'
+  proxy/timezone/locale mirrored in, so the interactive master ah spawns can
+  reach the network and don't sit behind a locale/tz mismatch.
 
 .DESCRIPTION
   ah's own installer only installs the `ah`/`ahd` binaries themselves — it
-  does not provision WSL2, tmux, the claude CLI, or auth (verified via
+  does not provision WSL2, tmux, provider CLIs, or auth (verified via
   `ah doctor`, which only diagnoses; there is no `ah install`/`--fix`). This
   script covers everything ah's installer does NOT, so the launcher Studio's
-  "Open in Claude Code" button drives (apps/studio/tauri/src/lib.rs) has a
-  working `ah` + `claude` waiting for it inside WSL.
+  assistant menu drives (apps/studio/tauri/src/lib.rs) has a working `ah` plus
+  provider CLIs waiting for it inside WSL.
 
   Ownership split (this script is deliberately in two parts):
 
@@ -23,18 +23,18 @@
       when ah's installer provisions its own runtime, delete PART A and let
       PART B's `ah` install pull it in.
 
-    PART B — Studio's own Claude Code provider layer (install ah, install the
-      claude CLI, subscription auth). This is Studio's permanent
-      responsibility and stays here regardless of ah — the provider CLI and
-      the user's login are explicitly NOT ah's job (handoff Non-Goals).
+    PART B — Studio's own provider layer (install ah, install the claude and
+      Codex CLIs, subscription auth). This is Studio's permanent responsibility
+      and stays here regardless of ah — the provider CLI and the user's login
+      are explicitly NOT ah's job (handoff Non-Goals).
 
   Idempotent — safe to re-run at any point; each step checks before acting.
 
   Two steps are genuinely gated behind one-time HUMAN action and cannot be
   scripted around (OS security boundaries, not a shortcut we skipped):
     1. Installing the WSL2 feature requires a reboot before WSL is usable.
-    2. The first-ever claude login is an interactive OAuth flow (opens your
-       browser) — there is no non-interactive way to mint that session.
+    2. The first-ever claude/Codex login is an interactive OAuth flow (opens
+       your browser) — there is no non-interactive way to mint that session.
   When the script hits either gate, it prints exactly what to do and exits
   cleanly (not an error) — re-run the same command afterward to continue.
 
@@ -125,7 +125,7 @@ function Resolve-Iana([string]$WindowsTzId) {
   return $null
 }
 
-Write-Host "Studio / Claude Code (via ah) WSL bootstrap" -ForegroundColor White
+Write-Host "Studio / Claude + Codex (via ah) WSL bootstrap" -ForegroundColor White
 Write-Host "distro: $Distro`n"
 
 # ---------------------------------------------------------------------------
@@ -262,14 +262,14 @@ Invoke-InDistro "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux ca-c
 Write-Ok "tmux + curl + python3 present"
 
 # ===========================================================================
-# PART B — Studio's own Claude Code provider layer. Permanent; stays regardless
-# of ah. Installs ah (whose installer would, post handoff Req 1, pull in PART A
-# itself), the claude CLI, and the subscription login. The provider CLI + auth
-# are explicitly NOT ah's job (handoff Non-Goals).
+# PART B — Studio's own provider layer. Permanent; stays regardless of ah.
+# Installs ah (whose installer would, post handoff Req 1, pull in PART A
+# itself), the provider CLIs, and subscription logins. Provider CLI + auth are
+# explicitly NOT ah's job (handoff Non-Goals).
 # ===========================================================================
-Write-Part "PART B: Studio's Claude Code provider layer (ah + claude + auth)"
+Write-Part "PART B: Studio's provider layer (ah + claude + Codex + auth)"
 
-Write-Step "B1 ah + claude CLI"
+Write-Step "B1 ah + provider CLIs"
 $minAhVersion = [Version]"1.3.0"
 $ahVer = Invoke-InDistro "command -v ah >/dev/null 2>&1 && ah --version | awk '{print `$2}' || echo MISSING" -AllowFail
 $ahVerText = (($ahVer -join "")).Trim()
@@ -300,6 +300,34 @@ if (($claudeVer -join "") -match "MISSING") {
   Write-Skip "claude CLI present ($claudeVer)"
 }
 
+$codexWinBin = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin\codex.exe"
+if (-not (Test-Path $codexWinBin)) {
+  Write-Host "    installing the Codex CLI on Windows (auth source of truth)..."
+  $previousCodexNonInteractive = $env:CODEX_NON_INTERACTIVE
+  $env:CODEX_NON_INTERACTIVE = "1"
+  try {
+    Invoke-RestMethod -Uri "https://chatgpt.com/codex/install.ps1" | Invoke-Expression
+  } finally {
+    if ($null -eq $previousCodexNonInteractive) {
+      Remove-Item Env:\CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue
+    } else {
+      $env:CODEX_NON_INTERACTIVE = $previousCodexNonInteractive
+    }
+  }
+  Write-Ok "Windows Codex CLI installed"
+} else {
+  $codexWinVer = & $codexWinBin --version
+  Write-Skip "Windows Codex CLI present ($codexWinVer)"
+}
+
+$codexWslVer = Invoke-InDistro "command -v codex >/dev/null 2>&1 && codex --version || echo MISSING" -AllowFail
+if (($codexWslVer -join "") -match "MISSING") {
+  Invoke-InDistro "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+  Write-Ok "WSL Codex CLI installed"
+} else {
+  Write-Skip "WSL Codex CLI present ($codexWslVer)"
+}
+
 # ---------------------------------------------------------------------------
 Write-Step "B2 auth (subscription login — not an API key)"
 $hasWslAuth = Invoke-InDistro "test -f ~/.claude/.credentials.json && echo YES || echo NO" -AllowFail
@@ -325,11 +353,27 @@ if (($hasWslAuth -join "") -match "YES") {
   }
 }
 
+$winCodexAuthPath = Join-Path $env:USERPROFILE ".codex\auth.json"
+if (Test-Path $winCodexAuthPath) {
+  $wslCodexAuthPath = "/mnt/" + $env:USERPROFILE.Substring(0,1).ToLower() + ($env:USERPROFILE.Substring(2) -replace "\\", "/") + "/.codex/auth.json"
+  Invoke-InDistro "mkdir -p ~/.codex && cp '$wslCodexAuthPath' ~/.codex/auth.json && chmod 600 ~/.codex/auth.json"
+  Write-Ok "copied your Windows Codex login into WSL"
+} else {
+  Write-Warn2 "one-time manual step needed — Codex auth must be created on Windows first:"
+  Write-Host "      1. Open a NEW PowerShell and run:" -ForegroundColor Yellow
+  Write-Host "         & '$codexWinBin' login --device-auth" -ForegroundColor Yellow
+  Write-Host "      2. Complete the browser login." -ForegroundColor Yellow
+  Write-Host "      3. Re-run this exact script — it will copy the login into WSL." -ForegroundColor Yellow
+  exit 0
+}
+
 # ---------------------------------------------------------------------------
 Write-Step "verify"
 $doctor = Invoke-InDistro "ah doctor" -AllowFail
 Write-Host ($doctor -join "`n")
 Write-Host "    (a red 'daemon - ahd daemon is not running' line above is expected here --" -ForegroundColor DarkGray
-Write-Host "     ahd starts on demand the first time you click 'Open in Claude Code'.)" -ForegroundColor DarkGray
+Write-Host "     ahd starts on demand the first time you use the assistant menu.)" -ForegroundColor DarkGray
+$codexStatus = Invoke-InDistro "codex login status" -AllowFail
+Write-Host "Codex: $($codexStatus -join ' ')" -ForegroundColor DarkGray
 
-Write-Host "`nDone. Go back to Studio and click 'Open in Claude Code'." -ForegroundColor Green
+Write-Host "`nDone. Go back to Studio and use the Claude/Codex assistant menu." -ForegroundColor Green

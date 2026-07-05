@@ -159,6 +159,30 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 - 运行时状态在 SQLite(state 目录按 `ah.toml` 规范路径 hash 命名,如 `~/.local/state/ah/<hash>/`);
   1.2.0 起 daemon 作为 systemd user unit 拉起(`ah-<hash>.service`)。
 
+### 4.6 trust / auth / 进程生命周期
+
+Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打开 master pane 都卡在 trust/onboarding:
+
+- **Claude**:WSL 宿主启动 payload 先用 `CLAUDE_ONBOARDING_PRESEED_PY` 写 `~/.claude.json`,把当前 skill
+  工作区与含 `CLAUDE.md` 的祖先目录标成 trusted/onboarded。ah sandbox 的 master cmd 再把
+  `$STUDIO_AH_HOST_HOME/.claude.json` 链到 `$HOME/.claude.json`,确保 sandbox HOME 不会重新弹
+  folder trust / external includes / theme onboarding。
+- **Codex**:Windows `~/.codex/auth.json` 是登录源头,启动时复制到 WSL `~/.codex/auth.json`,sandbox
+  master cmd 再链到 `$HOME/.codex/auth.json`。项目 trust 不依赖 sandbox 持久 `config.toml`;
+  master 直接带 `-c trust_level="trusted"` 与 `--dangerously-bypass-hook-trust` 启动,和 ah provider
+  拉 worker 时的 trusted 语义一致。
+
+生命周期规则:
+
+- `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
+- Studio 显式关闭入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 菜单;检测到对应 config 的
+  `ah --config <cfg> ps` 成功时,同一位置变成 `Close Claude` / `Close Codex` / `Close assistants`。
+- 点击关闭不直接杀 tmux pane,而是对 Studio 打开的 config 执行 `ah --config <cfg> stop`。ah 1.3.0 的
+  `system.shutdown` 与 shutdown cleanup 测试负责清理 master/agent tmux sessions 和进程树。
+- Studio app 退出时也必须清理 Studio 管过的 ah:当前进程内已打开过的 config + `skill-studio-ah`
+  临时目录下的 Studio 生成 config 都要 stop。范围只限 Studio-managed / 本次打开过的 config,不调用无 config
+  的全局 `ah stop`,避免误杀用户手工启动的其他 ah 项目。
+
 ## 5. MoirAI 拓扑设计（目标 + 现状）
 
 叙事真相源:`docs/strategy/moirai-copilot-persona-narrative.md`(名字/神话职能/背景故事)。

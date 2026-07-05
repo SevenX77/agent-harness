@@ -2,7 +2,15 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CopilotMessage } from '../../types/copilot'
-import { buildCopilotJudgeDraft, copilotBackendErrorMessage, CopilotPanel, isComposerSendKey, nextDraftJudgeContext } from './copilot-panel'
+import {
+  activeCodeAssistantIds,
+  buildCopilotJudgeDraft,
+  codeAssistantCloseButtonLabel,
+  copilotBackendErrorMessage,
+  CopilotPanel,
+  isComposerSendKey,
+  nextDraftJudgeContext,
+} from './copilot-panel'
 import { BACKEND_UNAVAILABLE_MESSAGE } from '@/utils/errors'
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   prepareCopilotJudgeContext: vi.fn(),
   openClaudeCode: vi.fn(),
   openCodexCli: vi.fn(),
+  getCodeAssistantStatus: vi.fn(),
+  closeCodeAssistant: vi.fn(),
   buttonProps: [] as Array<Record<string, unknown>>,
   menuItemProps: [] as Array<Record<string, unknown>>,
 }))
@@ -38,6 +48,8 @@ vi.mock('../../hooks/useTemplates', () => ({
 vi.mock('../../lib/tauri', () => ({
   openClaudeCode: mocks.openClaudeCode,
   openCodexCli: mocks.openCodexCli,
+  getCodeAssistantStatus: mocks.getCodeAssistantStatus,
+  closeCodeAssistant: mocks.closeCodeAssistant,
 }))
 
 vi.mock('./analysis-bar', () => ({
@@ -111,6 +123,10 @@ describe('buildCopilotJudgeDraft', () => {
     mocks.openClaudeCode.mockResolvedValue(true)
     mocks.openCodexCli.mockReset()
     mocks.openCodexCli.mockResolvedValue(true)
+    mocks.getCodeAssistantStatus.mockReset()
+    mocks.getCodeAssistantStatus.mockResolvedValue({ claude: false, codex: false })
+    mocks.closeCodeAssistant.mockReset()
+    mocks.closeCodeAssistant.mockResolvedValue(true)
     mocks.buttonProps.length = 0
     mocks.menuItemProps.length = 0
     mocks.useTemplates.mockReturnValue({ templates: [], templatesLoading: false })
@@ -211,6 +227,14 @@ describe('buildCopilotJudgeDraft', () => {
     await vi.waitFor(() => {
       expect(mocks.openCodexCli).toHaveBeenCalledWith('/tmp/text-segmentation')
     })
+  })
+
+  it('derives the close button state from live ahd status', () => {
+    expect(activeCodeAssistantIds({ claude: false, codex: false })).toEqual([])
+    expect(codeAssistantCloseButtonLabel({ claude: false, codex: false })).toBeNull()
+    expect(codeAssistantCloseButtonLabel({ claude: true, codex: false })).toBe('Close Claude')
+    expect(codeAssistantCloseButtonLabel({ claude: false, codex: true })).toBe('Close Codex')
+    expect(codeAssistantCloseButtonLabel({ claude: true, codex: true })).toBe('Close assistants')
   })
 
   it('shows the thinking indicator while an assistant turn is running with no text yet', () => {

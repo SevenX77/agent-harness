@@ -16,6 +16,7 @@ const tagVariants = cva(
         destructive: "border-tag-destructive-border bg-tag-destructive-border/10 text-foreground",
         "probe-verified": "border-multimodal-border bg-multimodal-border/10 text-foreground",
         muted: "border-border/70 bg-muted/10 text-muted-foreground",
+        active: "border-transparent bg-muted/20 text-foreground",
       },
       size: {
         default: "h-7 px-3 text-sm",

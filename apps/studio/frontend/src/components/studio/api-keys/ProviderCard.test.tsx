@@ -1048,6 +1048,53 @@ describe("ProviderCard provider capabilities", () => {
     expect(idleTag).not.toContain("api-route-tag-border-flow")
   })
 
+  it("animates official route chips from the active atom map even when persisted status is verified", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({
+          id: "anthropic-official",
+          name: "Anthropic Official",
+          isTesting: true,
+          testingAction: "models",
+          testingModelIdsByEndpoint: {
+            "anthropic-official": ["claude-sonnet-4-5-20250929"],
+          },
+        })}
+        persisted={makePersisted({
+          id: "anthropic-official",
+          name: "Anthropic Official",
+          available_models: [
+            {
+              id: "claude-haiku-4-5-20251001",
+              status: "verified",
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+            {
+              id: "claude-sonnet-4-5-20250929",
+              status: "verified",
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const activeTag = routeTagHtml(html, "claude-sonnet-4-5-20250929")
+    expect(activeTag).toContain('data-route-status="verified"')
+    expect(activeTag).toContain('data-variant="active"')
+    expect(activeTag).toContain("api-route-tag-border-flow")
+    expect(activeTag).not.toContain('data-variant="success"')
+
+    const idleTag = routeTagHtml(html, "claude-haiku-4-5-20251001")
+    expect(idleTag).toContain('data-variant="success"')
+    expect(idleTag).not.toContain("api-route-tag-border-flow")
+  })
+
   it("animates third-party model chips while the endpoint test runs (R-G2)", () => {
     const html = renderToStaticMarkup(
       <ProviderCard

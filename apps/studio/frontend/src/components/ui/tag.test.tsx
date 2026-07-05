@@ -36,6 +36,7 @@ describe("tagVariants", () => {
     const warningClasses = tagVariants({ variant: "warning" }).split(/\s+/)
     const destructiveClasses = tagVariants({ variant: "destructive" }).split(/\s+/)
     const probeVerifiedClasses = tagVariants({ variant: "probe-verified" }).split(/\s+/)
+    const activeClasses = tagVariants({ variant: "active" }).split(/\s+/)
 
     expect(infoClasses).toEqual(expect.arrayContaining(["border-primary/70", "bg-primary/10"]))
     expect(successClasses).toEqual(expect.arrayContaining(["border-success", "bg-success/10"]))
@@ -52,5 +53,11 @@ describe("tagVariants", () => {
     expect(probeVerifiedClasses).toContain("text-foreground")
     expect(probeVerifiedClasses).not.toContain("bg-success/10")
     expect(probeVerifiedClasses).not.toContain("border-warning")
+
+    expect(activeClasses).toContain("border-transparent")
+    expect(activeClasses).toContain("bg-muted/20")
+    expect(activeClasses).toContain("text-foreground")
+    expect(activeClasses).not.toContain("border-success")
+    expect(activeClasses).not.toContain("border-tag-destructive-border")
   })
 })

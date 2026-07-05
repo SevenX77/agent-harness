@@ -10,7 +10,13 @@ import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
-import { openClaudeCode, openCodexCli } from '../../lib/tauri'
+import {
+  closeCodeAssistant,
+  getCodeAssistantStatus,
+  openClaudeCode,
+  openCodexCli,
+  type CodeAssistantStatus,
+} from '../../lib/tauri'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -272,6 +278,31 @@ interface DraftJudgeContextScope {
   } | null
 }
 
+type CodeAssistantId = 'claude' | 'codex'
+
+const inactiveCodeAssistantStatus: CodeAssistantStatus = {
+  claude: false,
+  codex: false,
+}
+
+export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
+  return [
+    ...(status.claude ? (['claude'] as const) : []),
+    ...(status.codex ? (['codex'] as const) : []),
+  ]
+}
+
+export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): string | null {
+  const active = activeCodeAssistantIds(status)
+  if (active.length === 0) {
+    return null
+  }
+  if (active.length > 1) {
+    return 'Close assistants'
+  }
+  return active[0] === 'claude' ? 'Close Claude' : 'Close Codex'
+}
+
 function judgeContextMatchesScope(context: CopilotJudgeContext, scope?: DraftJudgeContextScope): boolean {
   if (!scope) {
     return true
@@ -325,6 +356,8 @@ export function CopilotPanel({
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [openingCodeAssistant, setOpeningCodeAssistant] = useState<'claude' | 'codex' | null>(null)
+  const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
+  const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(inactiveCodeAssistantStatus)
   const { templates, templatesLoading } = useTemplates()
   const inEvalView = view === 'eval'
   const roleOptions = useMemo(
@@ -445,6 +478,8 @@ export function CopilotPanel({
   const selectedOption = roleOptions.find((option) => option.role === selectedRole) ?? roleOptions[0] ?? null
   const selectedRoleKey = selectedOption?.role ?? ''
   const defaultRouteId = selectedOption?.fallbackChain[0]?.route_id ?? ''
+  const activeCodeAssistants = activeCodeAssistantIds(codeAssistantStatus)
+  const codeAssistantCloseLabel = codeAssistantCloseButtonLabel(codeAssistantStatus)
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -462,16 +497,58 @@ export function CopilotPanel({
     toast.info('Route switched. Future messages will use it.')
   }
 
-  async function handleOpenCodeAssistant(assistant: 'claude' | 'codex') {
+  const refreshCodeAssistantStatus = useCallback(async () => {
+    if (!codeAssistantWorkspace) {
+      setCodeAssistantStatus(inactiveCodeAssistantStatus)
+      return
+    }
+    setCodeAssistantStatus(await getCodeAssistantStatus(codeAssistantWorkspace))
+  }, [codeAssistantWorkspace])
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      const nextStatus = codeAssistantWorkspace
+        ? await getCodeAssistantStatus(codeAssistantWorkspace)
+        : inactiveCodeAssistantStatus
+      if (!cancelled) {
+        setCodeAssistantStatus(nextStatus)
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => {
+      void refresh()
+    }, 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [codeAssistantWorkspace])
+
+  async function handleOpenCodeAssistant(assistant: CodeAssistantId) {
     setOpeningCodeAssistant(assistant)
     try {
-      if (assistant === 'claude') {
-        await openClaudeCode(codeAssistantWorkspace)
-      } else {
-        await openCodexCli(codeAssistantWorkspace)
+      const opened = assistant === 'claude'
+        ? await openClaudeCode(codeAssistantWorkspace)
+        : await openCodexCli(codeAssistantWorkspace)
+      if (opened) {
+        await refreshCodeAssistantStatus()
       }
     } finally {
       setOpeningCodeAssistant(null)
+    }
+  }
+
+  async function handleCloseCodeAssistants() {
+    if (activeCodeAssistants.length === 0) {
+      return
+    }
+    setClosingCodeAssistant(true)
+    try {
+      await Promise.all(activeCodeAssistants.map((assistant) => closeCodeAssistant(codeAssistantWorkspace, assistant)))
+      await refreshCodeAssistantStatus()
+    } finally {
+      setClosingCodeAssistant(false)
     }
   }
 
@@ -565,40 +642,57 @@ export function CopilotPanel({
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
-                  aria-label="Open code assistant"
-                  className="studio-canvas-input-surface shrink-0"
-                >
-                  <SquareTerminal data-icon="inline-start" />
-                  Open in
-                  <ChevronDown className="size-3" aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-36">
-                <DropdownMenuItem
-                  disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
-                  onSelect={() => {
-                    void handleOpenCodeAssistant('claude')
-                  }}
-                >
-                  Claude
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
-                  onSelect={() => {
-                    void handleOpenCodeAssistant('codex')
-                  }}
-                >
-                  Codex
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {codeAssistantCloseLabel ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={closingCodeAssistant || !codeAssistantWorkspace}
+                aria-label={codeAssistantCloseLabel}
+                onClick={() => {
+                  void handleCloseCodeAssistants()
+                }}
+                className="studio-canvas-input-surface shrink-0"
+              >
+                <Square data-icon="inline-start" className="fill-current" />
+                {codeAssistantCloseLabel}
+              </Button>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                    aria-label="Open code assistant"
+                    className="studio-canvas-input-surface shrink-0"
+                  >
+                    <SquareTerminal data-icon="inline-start" />
+                    Open in
+                    <ChevronDown className="size-3" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                    onSelect={() => {
+                      void handleOpenCodeAssistant('claude')
+                    }}
+                  >
+                    Claude
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                    onSelect={() => {
+                      void handleOpenCodeAssistant('codex')
+                    }}
+                  >
+                    Codex
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </header>

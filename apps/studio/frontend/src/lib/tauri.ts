@@ -140,6 +140,63 @@ export async function openCodexCli(workspaceRoot: string | null | undefined): Pr
   return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex')
 }
 
+export interface CodeAssistantStatus {
+  claude: boolean
+  codex: boolean
+}
+
+const inactiveCodeAssistantStatus: CodeAssistantStatus = {
+  claude: false,
+  codex: false,
+}
+
+export async function getCodeAssistantStatus(
+  workspaceRoot: string | null | undefined,
+): Promise<CodeAssistantStatus> {
+  const targetPath = workspaceRoot?.trim() ?? ''
+  if (!targetPath || !isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    return inactiveCodeAssistantStatus
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return await invoke<CodeAssistantStatus>('code_assistant_status', { workspaceRoot: targetPath })
+  } catch {
+    return inactiveCodeAssistantStatus
+  }
+}
+
+export async function closeCodeAssistant(
+  workspaceRoot: string | null | undefined,
+  assistant: 'claude' | 'codex',
+): Promise<boolean> {
+  const targetPath = workspaceRoot?.trim() ?? ''
+  if (!targetPath) {
+    toast.error('No workspace path available')
+    return false
+  }
+
+  if (!isTauriRuntime()) {
+    toast.info('Desktop-only feature', { description: targetPath })
+    return false
+  }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
+    return false
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const stopped = await invoke<boolean>('close_code_assistant', { workspaceRoot: targetPath, assistant })
+    toast.success(stopped ? `Closed ${assistant === 'claude' ? 'Claude Code' : 'Codex'}` : 'Code assistant is not running')
+    return stopped
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error)
+    toast.error(`Failed to close ${assistant === 'claude' ? 'Claude Code' : 'Codex'}`, { description })
+    return false
+  }
+}
+
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {
   if (!isTauriRuntime()) {
     toast.info('Desktop only')

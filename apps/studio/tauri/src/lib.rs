@@ -1,7 +1,9 @@
 mod native_fs;
 mod sidecar;
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -33,6 +35,17 @@ struct SidecarAppState {
 /// can proceed without dropping a pending in-memory edit.
 struct QuitFlushState {
     ready: AtomicBool,
+}
+
+struct CodeAssistantRuntimeState {
+    configs: Mutex<BTreeSet<PathBuf>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeAssistantStatus {
+    claude: bool,
+    codex: bool,
 }
 
 #[tauri::command]
@@ -199,6 +212,10 @@ fn transient_ah_config_path(workspace_root: &Path, assistant: CodeAssistant) -> 
         .join("ah.toml")
 }
 
+fn studio_ah_temp_root() -> PathBuf {
+    std::env::temp_dir().join("skill-studio-ah")
+}
+
 #[derive(Clone, Copy)]
 enum CodeAssistant {
     Claude,
@@ -235,6 +252,14 @@ impl CodeAssistant {
         match self {
             Self::Claude => claude_master_cmd(),
             Self::Codex => codex_master_cmd(),
+        }
+    }
+
+    fn from_slug(value: &str) -> Result<Self, String> {
+        match value {
+            "claude" => Ok(Self::Claude),
+            "codex" => Ok(Self::Codex),
+            _ => Err(format!("unknown code assistant: {value}")),
         }
     }
 }
@@ -409,7 +434,7 @@ const STUDIO_AH_MANAGED_FILES: &[StudioAhManagedFile] = &[
 fn claude_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -424,7 +449,7 @@ fn claude_master_cmd() -> String {
 fn codex_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c trust_level=\\\"trusted\\\" {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -577,6 +602,86 @@ fn ah_config_for_workspace(
     std::fs::write(&config, transient_ah_config_content(assistant))
         .map_err(|error| format!("failed to write transient ah config: {error}"))?;
     Ok(config)
+}
+
+fn ah_config_for_status(workspace_root: &Path, assistant: CodeAssistant) -> Option<PathBuf> {
+    find_ah_config(workspace_root).or_else(|| {
+        let transient = transient_ah_config_path(workspace_root, assistant);
+        transient.is_file().then_some(transient)
+    })
+}
+
+fn command_status_success(mut command: Command) -> Result<bool, String> {
+    command
+        .output()
+        .map(|output| output.status.success())
+        .map_err(|error| format!("failed to run ah command: {error}"))
+}
+
+fn run_ah_config_command(config_path: &Path, ah_args: &[&str]) -> Result<bool, String> {
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("wsl.exe");
+        let args = ah_args.join(" ");
+        let script = format!(
+            "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; ah --config {} {}",
+            sh_single_quote_str(&windows_path_to_wsl(config_path)),
+            args
+        );
+        command.args(["-e", "bash", "-lc", &script]);
+        return command_status_success(command);
+    }
+
+    let mut command = Command::new("ah");
+    command.env("SYSTEMD_LOG_LEVEL", "err");
+    command.arg("--config").arg(config_path).args(ah_args);
+    command_status_success(command)
+}
+
+fn ah_config_is_running(config_path: &Path) -> bool {
+    run_ah_config_command(config_path, &["ps"]).unwrap_or(false)
+}
+
+fn stop_ah_config(config_path: &Path) -> Result<bool, String> {
+    run_ah_config_command(config_path, &["stop"])
+}
+
+fn discover_studio_ah_configs() -> Vec<PathBuf> {
+    fn visit(dir: &Path, configs: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, configs);
+            } else if path.file_name().and_then(|name| name.to_str()) == Some("ah.toml") {
+                configs.push(path);
+            }
+        }
+    }
+
+    let mut configs = Vec::new();
+    visit(&studio_ah_temp_root(), &mut configs);
+    configs
+}
+
+fn cleanup_registered_code_assistants(configs: BTreeSet<PathBuf>) {
+    for config in configs {
+        match stop_ah_config(&config) {
+            Ok(true) => log::info!(
+                "phase=code-assistant-cleanup action=ah-stop-ok config={}",
+                config.display()
+            ),
+            Ok(false) => log::info!(
+                "phase=code-assistant-cleanup action=ah-stop-skip config={} reason=not_running",
+                config.display()
+            ),
+            Err(error) => log::warn!(
+                "phase=code-assistant-cleanup action=ah-stop-failed config={} error={error}",
+                config.display()
+            ),
+        }
+    }
 }
 
 fn powershell_single_quote_str(value: &str) -> String {
@@ -957,21 +1062,78 @@ fn spawn_terminal_with_launcher(
     ))
 }
 
-fn open_code_assistant(workspace_root: String, assistant: CodeAssistant) -> Result<(), String> {
+fn open_code_assistant(
+    workspace_root: String,
+    assistant: CodeAssistant,
+) -> Result<PathBuf, String> {
     let workspace_root = existing_directory(&workspace_root)?;
     let config_path = ah_config_for_workspace(&workspace_root, assistant)?;
     let launcher = write_code_assistant_launcher_script(&workspace_root, &config_path, assistant)?;
-    spawn_terminal_with_launcher(&launcher, assistant)
+    spawn_terminal_with_launcher(&launcher, assistant)?;
+    Ok(config_path)
 }
 
 #[tauri::command]
-fn open_claude_code(workspace_root: String) -> Result<(), String> {
-    open_code_assistant(workspace_root, CodeAssistant::Claude)
+fn open_claude_code(
+    workspace_root: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+) -> Result<(), String> {
+    let config = open_code_assistant(workspace_root, CodeAssistant::Claude)?;
+    state
+        .configs
+        .lock()
+        .expect("code assistant state poisoned")
+        .insert(config);
+    Ok(())
 }
 
 #[tauri::command]
-fn open_codex_cli(workspace_root: String) -> Result<(), String> {
-    open_code_assistant(workspace_root, CodeAssistant::Codex)
+fn open_codex_cli(
+    workspace_root: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+) -> Result<(), String> {
+    let config = open_code_assistant(workspace_root, CodeAssistant::Codex)?;
+    state
+        .configs
+        .lock()
+        .expect("code assistant state poisoned")
+        .insert(config);
+    Ok(())
+}
+
+#[tauri::command]
+fn code_assistant_status(workspace_root: String) -> Result<CodeAssistantStatus, String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    let active = |assistant| {
+        ah_config_for_status(&workspace_root, assistant)
+            .as_deref()
+            .map(ah_config_is_running)
+            .unwrap_or(false)
+    };
+    Ok(CodeAssistantStatus {
+        claude: active(CodeAssistant::Claude),
+        codex: active(CodeAssistant::Codex),
+    })
+}
+
+#[tauri::command]
+fn close_code_assistant(
+    workspace_root: String,
+    assistant: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+) -> Result<bool, String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    let assistant = CodeAssistant::from_slug(assistant.trim())?;
+    let Some(config) = ah_config_for_status(&workspace_root, assistant) else {
+        return Ok(false);
+    };
+    let stopped = stop_ah_config(&config)?;
+    state
+        .configs
+        .lock()
+        .expect("code assistant state poisoned")
+        .remove(&config);
+    Ok(stopped)
 }
 
 #[tauri::command]
@@ -1205,6 +1367,8 @@ pub fn run() {
             open_path,
             open_claude_code,
             open_codex_cli,
+            code_assistant_status,
+            close_code_assistant,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
             native_fs::read_workspace_file,
@@ -1236,6 +1400,9 @@ pub fn run() {
             // leaks readiness into a fresh session.
             app.manage(QuitFlushState {
                 ready: AtomicBool::new(false),
+            });
+            app.manage(CodeAssistantRuntimeState {
+                configs: Mutex::new(BTreeSet::new()),
             });
             if std::env::var("STUDIO_TAURI_DISABLE_SIDECAR").as_deref() != Ok("1") {
                 let resolved_resource_root = app
@@ -1287,6 +1454,19 @@ pub fn run() {
                 // is never trapped — and log a warning so silent loss is
                 // visible per rules/logging.md.
                 wait_for_quit_flush(&app_handle, QUIT_FLUSH_BUDGET);
+                let mut code_assistant_configs = BTreeSet::new();
+                if let Some(state) = app_handle.try_state::<CodeAssistantRuntimeState>() {
+                    code_assistant_configs.extend(
+                        state
+                            .configs
+                            .lock()
+                            .expect("code assistant state poisoned")
+                            .iter()
+                            .cloned(),
+                    );
+                }
+                code_assistant_configs.extend(discover_studio_ah_configs());
+                cleanup_registered_code_assistants(code_assistant_configs);
                 if let Some(state) = app_handle.try_state::<SidecarAppState>() {
                     if let Some(manager) =
                         state.manager.lock().expect("sidecar state poisoned").take()
@@ -1432,6 +1612,19 @@ mod tests {
     }
 
     #[test]
+    fn invoke_handler_registers_code_assistant_lifecycle_commands() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("code_assistant_status,"),
+            "code_assistant_status must be registered in the Tauri invoke handler"
+        );
+        assert!(
+            source.contains("close_code_assistant,"),
+            "close_code_assistant must be registered in the Tauri invoke handler"
+        );
+    }
+
+    #[test]
     fn transient_ah_config_starts_moirai_team() {
         let config = transient_ah_config_content(CodeAssistant::Claude);
 
@@ -1448,6 +1641,11 @@ mod tests {
         assert!(config.contains("export IS_SANDBOX=1"));
         assert!(config.contains("ln -sfn"));
         assert!(config.contains("$HOME/.local/bin/claude"));
+        assert!(
+            config.contains("$STUDIO_AH_HOST_HOME/.claude.json"),
+            "Claude sandbox must reuse the host preseeded trust/onboarding file"
+        );
+        assert!(config.contains("$HOME/.claude.json"));
         assert!(config.contains("--dangerously-skip-permissions"));
         assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
         assert!(!config.contains("--continue"));
@@ -1483,6 +1681,14 @@ mod tests {
         assert!(config.contains("$HOME/.agents/skills"));
         assert!(config.contains("rm -rf \\\"$HOME/.agents/skills\\\""));
         assert!(config.contains("--dangerously-bypass-approvals-and-sandbox"));
+        assert!(
+            config.contains("--dangerously-bypass-hook-trust"),
+            "Codex master must not stop on the hook trust gate"
+        );
+        assert!(
+            config.contains("trust_level=\\\\\\\"trusted\\\\\\\""),
+            "Codex master must not stop on the per-project trust gate"
+        );
         assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
         assert!(config.contains("[agents.clotho]"));
         assert!(config
@@ -1623,6 +1829,33 @@ mod tests {
         assert_eq!(config, root.join("ah.toml"));
         assert!(!root.join(".ah").exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn status_config_lookup_does_not_generate_transient_workspace_files() {
+        let root = temp_path("status-ah-config");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let transient = transient_ah_config_path(&root, CodeAssistant::Codex);
+        let transient_dir = transient.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&transient_dir);
+
+        assert!(ah_config_for_status(&root, CodeAssistant::Codex).is_none());
+        assert!(!root.join(".ah").exists());
+
+        std::fs::create_dir_all(&transient_dir).unwrap();
+        std::fs::write(
+            &transient,
+            transient_ah_config_content(CodeAssistant::Codex),
+        )
+        .unwrap();
+
+        assert_eq!(
+            ah_config_for_status(&root, CodeAssistant::Codex).as_deref(),
+            Some(transient.as_path())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(transient_dir.parent().unwrap());
     }
 
     #[test]

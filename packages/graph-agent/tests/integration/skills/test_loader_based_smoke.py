@@ -1,4 +1,4 @@
-"""Loader-based smoke tests for the live V2.1 skills."""
+"""Loader-based smoke tests for legacy V2.1 corpus-shaped fixtures."""
 
 from __future__ import annotations
 
@@ -10,14 +10,18 @@ from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
 from ...conftest import MockSkillResolver
-
-REPO_ROOT = Path(__file__).resolve().parents[5]
+from ._fixture_corpus import write_legacy_v21_corpus
 
 
 @pytest.fixture(scope="module")
-def compiled_skills() -> dict[str, CompiledSkill]:
-    resolver = MockSkillResolver(REPO_ROOT)
-    skills = {}
+def legacy_corpus_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return write_legacy_v21_corpus(tmp_path_factory.mktemp("legacy-v21-corpus"))
+
+
+@pytest.fixture(scope="module")
+def compiled_skills(legacy_corpus_root: Path) -> dict[str, CompiledSkill]:
+    resolver = MockSkillResolver(legacy_corpus_root)
+    skills: dict[str, CompiledSkill] = {}
     for skill_id in (
         "event-extraction",
         "batch-analysis",
@@ -25,22 +29,14 @@ def compiled_skills() -> dict[str, CompiledSkill]:
         "global-synthesis",
         "story-deconstruction",
     ):
-        try:
-            skills[skill_id] = SkillLoader(validate_context_writes=False).compile_skill(
-                REPO_ROOT / "skills" / skill_id,
-                skill_resolver=resolver
-            )
-        except Exception as exc:
-            class FailedMockCompiledSkill:
-                def __init__(self, error):
-                    self._error = error
-                def __getattr__(self, name):
-                    raise self._error
-            skills[skill_id] = FailedMockCompiledSkill(exc)
+        skills[skill_id] = SkillLoader(validate_context_writes=False).compile_skill(
+            legacy_corpus_root / "skills" / skill_id,
+            skill_resolver=resolver,
+        )
     return skills
 
 
-def test_all_live_skills_compile_from_v21_roots(
+def test_all_legacy_fixture_skills_compile_from_v21_roots(
     compiled_skills: dict[str, CompiledSkill],
 ) -> None:
     assert set(compiled_skills) == {
@@ -139,6 +135,7 @@ def test_live_skill_topology_matches_graph_md(
     ],
 )
 def test_logic_actions_are_discovered_from_v21_phase_dirs(
+    legacy_corpus_root: Path,
     compiled_skills: dict[str, CompiledSkill],
     skill_id: str,
     phase_id: str,
@@ -152,7 +149,7 @@ def test_logic_actions_are_discovered_from_v21_phase_dirs(
     assert node.ast.actions == [action_name]
     assert action_name in compiled.actions.for_phase(phase_id)
     assert compiled.actions.for_phase(phase_id)[action_name].path == (
-        REPO_ROOT / "skills" / skill_id / relative_path
+        legacy_corpus_root / "skills" / skill_id / relative_path
     )
 
 

@@ -3,6 +3,7 @@ import { AxiosError } from "axios"
 import type { AxiosResponse, InternalAxiosRequestConfig } from "axios"
 import {
   conflictFromSaveError,
+  hashConflictPayloadFromSaveError,
   isSameSaveConflict,
   overwriteRetryPayload,
 } from "./save-conflicts"
@@ -66,8 +67,22 @@ describe("conflictFromSaveError", () => {
     })
   })
 
+  it("extracts a reusable conflict payload without a workspace conflict shell", () => {
+    expect(hashConflictPayloadFromSaveError({
+      type: "HashConflict",
+      data: {
+        current_hash: "remote-hash",
+        current_content: "remote body\n",
+      },
+    })).toEqual({
+      remoteHash: "remote-hash",
+      remoteContent: "remote body\n",
+    })
+  })
+
   it("ignores non-conflict save errors", () => {
     expect(conflictFromSaveError(new Error("network down"), buildConflict())).toBeNull()
+    expect(hashConflictPayloadFromSaveError(new Error("network down"))).toBeNull()
   })
 })
 

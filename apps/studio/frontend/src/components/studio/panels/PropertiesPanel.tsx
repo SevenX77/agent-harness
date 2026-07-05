@@ -67,6 +67,7 @@ import { formatThousands, stripThousands } from "../settings/llm-roles/RoleSetti
 import { RoleRouteStatusLight, roleRouteStatusSurfaceClass, type RoleRouteStatus } from "../settings/llm-roles/role-route-status"
 import type { SettingsTab } from "../SettingsPage"
 import type { FileOpenInput } from "../file-types"
+import { hashConflictPayloadFromSaveError } from "../save-conflicts"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
 import { roleTestDetailsFromResult, roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
@@ -474,8 +475,29 @@ export function PropertiesPanel({
       setGraphSourceContent(next.markdown)
       setGraphSavedKey(`graph:${skillId ?? "unknown"}:${next.markdown}`)
     } catch (error) {
+      let errorToReport: unknown = error
+      const conflict = hashConflictPayloadFromSaveError(error)
+      if (conflict?.remoteHash) {
+        const retry = applyGraphFrontmatterForm(conflict.remoteContent, activeGraphDraft)
+        if (retry.ok) {
+          try {
+            await onPhaseFileSave({
+              path: "GRAPH.md",
+              content: retry.markdown,
+              expectedHash: conflict.remoteHash,
+            })
+            setGraphSourceContent(retry.markdown)
+            setGraphSavedKey(`graph:${skillId ?? "unknown"}:${retry.markdown}`)
+            return
+          } catch (retryError) {
+            errorToReport = retryError
+          }
+        } else {
+          errorToReport = new Error(`Frontmatter error: ${retry.message}`)
+        }
+      }
       setGraphSaveFailedKey(graphFormState.key)
-      toast.error(error instanceof Error ? error.message : "Could not save graph properties")
+      toast.error(errorToReport instanceof Error ? errorToReport.message : "Could not save graph properties")
     } finally {
       setGraphSaving(false)
     }
@@ -613,8 +635,29 @@ export function PropertiesPanel({
       setPhaseSourceContent(next.markdown)
       setPhaseSavedKey(`phase:${skillId ?? "unknown"}:${filePath}:${next.markdown}`)
     } catch (error) {
+      let errorToReport: unknown = error
+      const conflict = hashConflictPayloadFromSaveError(error)
+      if (conflict?.remoteHash) {
+        const retry = applyPhaseFrontmatterForm(conflict.remoteContent, activeDraft, kind)
+        if (retry.ok) {
+          try {
+            await onPhaseFileSave({
+              path: filePath,
+              content: retry.markdown,
+              expectedHash: conflict.remoteHash,
+            })
+            setPhaseSourceContent(retry.markdown)
+            setPhaseSavedKey(`phase:${skillId ?? "unknown"}:${filePath}:${retry.markdown}`)
+            return
+          } catch (retryError) {
+            errorToReport = retryError
+          }
+        } else {
+          errorToReport = new Error(`Frontmatter error: ${retry.message}`)
+        }
+      }
       setPhaseSaveFailedKey(phaseFormState.key)
-      toast.error(error instanceof Error ? error.message : "Could not save phase properties")
+      toast.error(errorToReport instanceof Error ? errorToReport.message : "Could not save phase properties")
     } finally {
       setSaving(false)
     }

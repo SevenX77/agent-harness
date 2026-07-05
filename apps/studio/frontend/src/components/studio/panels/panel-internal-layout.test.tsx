@@ -75,7 +75,8 @@ describe("studio panel internal layout", () => {
     expect(html).toContain('data-studio-panel-body="true"')
     expect(html).not.toContain('data-studio-panel-section="true"')
     expect(html).toContain('data-studio-panel-field-row="true"')
-    expect(html).toContain('data-studio-panel-actions="true"')
+    expect(html).not.toContain('data-studio-panel-actions="true"')
+    expect(html).not.toContain(">Save<")
     expect(html).not.toContain("PropertyCard")
   })
 

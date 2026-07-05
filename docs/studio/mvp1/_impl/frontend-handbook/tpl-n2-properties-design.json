@@ -2,7 +2,7 @@
   "page_id": "n2_properties_design",
   "title": "Properties 节点属性 · 操作设计",
   "region": "authoring:properties",
-  "intro": "本页是右侧 Properties 面板(选中画布节点后编辑该节点 frontmatter 属性的面板)各操作的 MVP1 设计。核心规则:节点类型由文件名(SKILL/LOGIC/SUBGRAPH.md)决定、不是可变 mode 字段;每类节点只露自己的白名单字段(对齐 engine skill-syntax §2.3 Logic / §2.4 Subgraph / §2.5 Agent);保存只写白名单、保留 name/io/未知键/body。io.inputs/outputs 归 i/o 面板、正文 XML 步骤归画布内联,都不在 Properties。字段集对齐与 round-trip 现状/差距见实施页。",
+  "intro": "本页是右侧 Properties 面板(选中画布节点后编辑该节点 frontmatter 属性的面板)各操作的 MVP1 设计。核心规则:节点类型由文件名(SKILL/LOGIC/SUBGRAPH.md)决定、不是可变 mode 字段;每类节点只露自己的白名单字段(对齐 engine skill-syntax §2.3 Logic / §2.4 Subgraph / §2.5 Agent);字段变更实时写回对应 Markdown 文件,保存只写白名单、保留 name/io/未知键/body,不依赖手动 Save 按钮。io.inputs/outputs 归 i/o 面板、正文 XML 步骤归画布内联,都不在 Properties。字段集对齐与 round-trip 现状/差距见实施页。",
   "atoms": [
     {
       "n": 16,
@@ -113,11 +113,11 @@
     },
     {
       "n": 21,
-      "cap": "whitelist-roundtrip-save",
+      "cap": "whitelist-roundtrip-autosave",
       "module": "保存",
-      "func": "设计:在 Properties 改字段后保存,只写该类型白名单字段,name / io / 非本类型字段 / 任意未知键 / body 全部原样保留,不破坏文件。",
-      "action": "用户在 Properties 改完字段 → 点保存。",
-      "fe_design": "保存 → applyPhaseFrontmatterForm(把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆出 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/use_graph_llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回 → 带 expected_hash(对当前文件算 sha256)落盘。空值用 delete 不写 null,避免空字段污染。",
+      "func": "设计:在 Properties 改字段后自动保存,只写该类型白名单字段,name / io / 非本类型字段 / 任意未知键 / body 全部原样保留,不破坏文件。",
+      "action": "用户在 Properties 修改字段 → 字段变更 debounce 后自动写回对应 SKILL.md / LOGIC.md / SUBGRAPH.md,无需点击 Save。",
+      "fe_design": "字段变更 → Properties 表单进入 pending/saving 状态并 debounce autosave → applyPhaseFrontmatterForm(把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆出 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/use_graph_llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回 → 带 expected_hash(对当前文件算 sha256)走 file-editing/native-fs 写盘 → 成功后更新本地 saved markdown baseline,SaveStatusBadge 显示 saved。空值用 delete 不写 null,避免空字段污染。手动 Save 按钮不出现;Reset 只在本地 dirty 且尚未保存时提供撤回。",
       "fe_modules": [
         {
           "name": "phase 白名单序列化"
@@ -136,7 +136,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计(白名单 round-trip 保存:保留 name/io/未知键/body,空值 delete)。",
+      "gap_brief": "符合设计(白名单 round-trip 自动保存:字段变更 debounce 写对应 Markdown 文件,保留 name/io/未知键/body,空值 delete,无手动 Save 按钮)。",
       "impl_ref": "fn-21"
     },
     {

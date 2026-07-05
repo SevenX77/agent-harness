@@ -9,8 +9,8 @@
       "cap": "macro-contract-form",
       "module": "宏观契约",
       "func": "设计:头部宏观契约(name / schema_version / llm_role / description / phases,无 type 字段)用结构化表单编辑,而不是只能裸改 GRAPH.md 文本(M1)。",
-      "action": "用户编辑整图头部:改 name / schema_version / llm_role / description,或增删 phases。",
-      "fe_design": "目标设计:给 GRAPH.md 头部一个结构化表单——name / schema_version / llm_role / description 各一个受控字段、phases 一个可增删列表,改完按 FROZEN 头部 schema 校验后 serialize 写回。FROZEN:头部无 type 字段(旧 doc 的 type=simple/graph 已废,节点类型=文件名)。现状没有头部结构化表单,只能双击进 GRAPH.md 裸文本编辑(见 #23)。",
+      "action": "用户编辑整图头部:在空白画布 Properties 改 name / llm_role / description 并自动保存,或在 Macro contract 抽屉改 name / schema_version / llm_role / description / phases。",
+      "fe_design": "目标设计:给 GRAPH.md 头部一个结构化表单——name / schema_version / llm_role / description 各一个受控字段、phases 一个可增删列表,改完按 FROZEN 头部 schema 校验后 serialize 写回。空白画布选中 Properties 时提供轻量 graph 属性表单,只露 name / description / llm_role 三个 graph frontmatter 字段;字段变更 debounce 后直接写 GRAPH.md,保留 phases/io/未知键/body,不出现手动 Save 按钮。FROZEN:头部无 type 字段(旧 doc 的 type=simple/graph 已废,节点类型=文件名)。",
       "fe_modules": [
         {"name": "graph round-trip 客户端"}
       ],
@@ -19,7 +19,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。GRAPH.md 头部结构化表单已完整落地:MacroContractForm 组件(macroform/MacroContractForm.tsx:33-149,渲染 name/schema_version/llm_role/description 四个受控 scalar 字段 + phases 增删 Badge 列表,无 type/mode 入口,FROZEN 合规);graph-header.ts(:80-93 graphHeaderToForm 解析 GRAPH.md frontmatter 进表单,:105-129 applyGraphHeaderForm 写回四字段同时保留 phases/io/body、绝不产出 type);MacroContractDrawer.tsx(:59-100 接两条保存路径——scalar 走 writeFile+graphHash、phases 走 serializeSkillGraph)。从画布可达:GraphCanvas.tsx:867-878 'Macro contract' 按钮开 Sheet 挂载 Drawer。后端 serialize 契约 live(POST /{skill_id}/graph/serialize,skills.py:443)。测试断言四字段 + phases 列表、无 type/mode、round-trip 保留 io/phases/body。",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。GRAPH.md 头部结构化表单已完整落地:MacroContractForm 组件渲染 name/schema_version/llm_role/description 四个受控 scalar 字段 + phases 增删 Badge 列表,无 type/mode 入口,FROZEN 合规;graph-header.ts 的 graphHeaderToForm 解析 GRAPH.md frontmatter 进表单,applyGraphHeaderForm 写回四字段同时保留 phases/io/body、绝不产出 type;MacroContractDrawer 接两条保存路径——scalar 走 writeFile+graphHash、phases 走 serializeSkillGraph。2026-07-05:空白画布 Properties 的 graph 属性表单已改为自动保存 GRAPH.md:name/description/llm_role 字段变更 debounce 写文件,保留 phases/io/未知键/body,无手动 Save 按钮。后端 serialize 契约 live(POST /{skill_id}/graph/serialize)。测试断言四字段 + phases 列表、无 type/mode、round-trip 保留 io/phases/body;Properties autosave 测试断言 GRAPH.md 改名自动写回且 body 保留。",
       "impl_ref": "fn-22"
     },
     {

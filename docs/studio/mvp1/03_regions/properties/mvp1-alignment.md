@@ -19,10 +19,10 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 ## 2. 数据流 / 机制（设计细节）
 ### F1. Node Field Whitelist Form
 
-- 机制: render editable fields per agent/logic/subgraph node type and save to the phase file。**Properties 只管节点的 frontmatter 属性(白名单字段);节点正文结构(XML / L3 步骤)不在 Properties,在画布上以内联子节点呈现与编辑(见 `canvas` / `phase-editing` F5)**。
+- 机制: render editable fields per agent/logic/subgraph node type and persist field changes directly to the owning Markdown file (`SKILL.md` / `LOGIC.md` / `SUBGRAPH.md`) through file-editing/native-fs autosave; the form does not depend on a manual `Save` button. **Properties 只管节点的 frontmatter 属性(白名单字段);节点正文结构(XML / L3 步骤)不在 Properties,在画布上以内联子节点呈现与编辑(见 `canvas` / `phase-editing` F5)**。
 - 决策: rebuild away from stale generic mode/frontmatter fields;**职责切分锁定:Properties=frontmatter 属性,canvas=正文 XML 结构**(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:28` marks current save stale; `01_workflows/02_authoring.md:29` requires the whitelist rebuild.
-- 测试: selected agent/logic/subgraph each show only allowed fields; save preserves non-edited body blocks.
+- 测试: selected agent/logic/subgraph each show only allowed fields; editing a field debounces into a Markdown write without clicking Save; save preserves non-edited body blocks.
 - Status: target-design.
 - 归属: region `properties`; capability `phase-editing`.
 

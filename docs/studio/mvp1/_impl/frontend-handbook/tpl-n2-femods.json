@@ -51,7 +51,7 @@
       "白名单写回：frontmatterFromForm 以原 frontmatter 浅拷贝为起点，agent → 只 set llm_role/tools/subagents、logic → actions/validator、subgraph → path/validator，从不触碰别的键。",
       "round-trip 保真：applyPhaseFrontmatterForm 保证 name / io / 非本类型字段 / 任意未知键 / body 全部原样保留；空值用 delete 而非写 null。"
     ],
-    "used_by": "#18（agent-whitelist）、#19（logic-whitelist）、#20（subgraph-whitelist）、#21（whitelist-roundtrip-save）。",
+    "used_by": "#18（agent-whitelist）、#19（logic-whitelist）、#20（subgraph-whitelist）、#21（whitelist-roundtrip-autosave）。",
     "boundary": "做：frontmatter 解析 + 三类白名单写回 + round-trip 保真。不做：不编辑 io.inputs/outputs（归 i/o 面板）、不编辑正文 XML 步骤（归画布内联）、不决定节点类型（类型由文件决定）。",
     "api": "无 —— 纯前端解析/序列化；落盘由 Properties 保存经 graph round-trip 客户端走 native-fs。"
   },

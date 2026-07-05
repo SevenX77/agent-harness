@@ -78,11 +78,11 @@
    "n": 22,
    "cap": "copilot-exit-restore",
    "design_ref": "atom-22",
-   "current": "现状:桌面态已实现且符合(D8),纠正旧审计稿/spec 滞后标注。copilotStore(Copilot 会话内存 store)的 persistSessionToDisk(写盘唯一函数)经 writeWorkspaceFile(Rust native-fs 封装)落 .workspace/copilot/sessions/<skillId>/<会话id>.json,由 appendMessage 与 updateMessage(status 离开 running/pending 即结算时)触发;persistActiveSession 写 _active.json 记上次活跃 tab。再进/冷启动 hydrate 从盘读回按 id 合并(内存优先)、并按 _active.json 恢复上次活跃 tab;useCopilot 的 context effect 在 skillId 为 null(回 Home)时早返回、不清 store(reset 仅 web/无 workspace 身份的兜底分支调)。故对话跨退出/再进/冷启动恢复一致。Web/非桌面态 writeWorkspaceFile 抛 Desktop only(被吞进 persistenceError)、读/列返回空 → 内存优先、刷新即丢。",
-   "gap": "符合设计(桌面态)。以真代码为准:旧审计稿 surfaces_table「纯内存全丢=缺口」已过时,01_init.md 仍标 target-design 属 spec 滞后于代码。Web 态内存优先=MVP1 桌面优先设计边界(可接受),无需改。",
+   "current": "现状:桌面态已实现且符合(D8)。copilotStore(Copilot 会话内存 store)把 transcript 与窗口状态拆成两层:session 文件经 persistSessionToDisk/writeWorkspaceFile 落 .workspace/copilot/sessions/<skillId>/<会话id>.json,由 newSession(空会话也立即写盘)、appendMessage 与 updateMessage(status 离开 running/pending 即结算时)触发;_window.json 记录 openSessionIds + activeSessionId,由 new/switch/close/restore 持续更新。再进/冷启动 hydrate 只按 _window.json 读取对应 session 文件,恢复上次打开的 tab 集合与活跃 tab,不会扫描目录恢复全部历史;关闭 tab 只更新窗口状态、不删除 transcript;Restore chat 经 selectFile 默认打开当前 skill session 目录,选中合法 <sessionId>.json 后 restoreSessionFromFile 加回窗口。useCopilot 的 context effect 在 skillId 为 null(回 Home)时早返回、不清 store(reset 仅 web/无 workspace 身份的兜底分支调)。Web/非桌面态 writeWorkspaceFile 抛 Desktop only(被吞进 persistenceError)、读返回空 → 内存优先、刷新即丢。",
+   "gap": "符合设计(桌面态)。以真代码为准:旧审计稿 surfaces_table「纯内存全丢=缺口」已过时,旧 _active.json / 目录全量恢复语义已删除。Web 态内存优先=MVP1 桌面优先设计边界(可接受),无需改。",
    "fe_status": "符合",
    "be_status": "已实现",
-   "be_dep": "已就绪:Studio Rust 后端 write_workspace_file/read_workspace_file/list_workspace_dir/ensure_workspace_support_dirs 已实现(D8 落点)。"
+   "be_dep": "已就绪:Studio Rust 后端 write_workspace_file/read_workspace_file/ensure_workspace_support_dirs/select_file 已实现(D8 落点)。"
   },
   {
    "n": 23,
@@ -128,11 +128,11 @@
    "n": 27,
    "cap": "copilot-panel-visual-r3",
    "design_ref": "atom-27",
-   "current": "现状:已实现且符合。header 状态行删除、断连 chip 内联标题旁(copilot-panel.tsx);SessionTabs 用 ScrollArea 单行横滚 + 每 tab 关闭按钮(session-tabs.tsx),copilotStore.closeSession 删内存会话 + deleteWorkspacePath 删盘上 json、活跃邻居切换、最后一个补新空会话;消息用 ui/message.tsx 左右布局(用户右气泡/助手左排版,无标签无头像列);ThinkingRow 双覆盖(事件前空窗 + running 无正文,首事件 context_resolved 不清除);排版 text-sm leading-relaxed。 R4:ThinkingRow 改 shimmer 文字;视口 p-4/消息 gap-3/composer px-4;index.css 引入 shadcn/tailwind.css(shimmer+scrollbar 工具类激活);后端 BASE_SYSTEM_PROMPT_TEMPLATE 加语言跟随规则。",
+   "current": "现状:已实现且符合。header 状态行删除、断连 chip 内联标题旁(copilot-panel.tsx);SessionTabs 用 ScrollArea 单行横滚 + 每 tab 关闭按钮 + 右侧 + 动作菜单(New chat / Restore chat)(session-tabs.tsx),copilotStore.closeSession 从 _window.json 移除 tab 但保留 transcript、活跃邻居切换、最后一个补新空会话;restoreSessionFromFile 校验并恢复当前 skill session 文件;消息用 ui/message.tsx 左右布局(用户右气泡/助手左排版,无标签无头像列);ThinkingRow 双覆盖(事件前空窗 + running 无正文,首事件 context_resolved 不清除);排版 text-sm leading-relaxed。 R4:ThinkingRow 改 shimmer 文字;视口 p-4/消息 gap-3/composer px-4;index.css 引入 shadcn/tailwind.css(shimmer+scrollbar 工具类激活);后端 BASE_SYSTEM_PROMPT_TEMPLATE 加语言跟随规则。",
    "gap": "无。",
    "fe_status": "符合",
    "be_status": "已实现",
-   "be_dep": "已就绪:语言规则落在 studio 后端系统提示词(test_copilot_system_prompt 新断言);Rust delete_workspace_path 已有。"
+   "be_dep": "已就绪:语言规则落在 studio 后端系统提示词(test_copilot_system_prompt 新断言);Rust select_file 已有。"
   },
   {
    "n": 28,
@@ -376,19 +376,22 @@
     22
    ],
    "shots": [
-    "与 copilot 对话后回 Home 再进同一 skill → 对话与上次活跃 tab 一模一样恢复"
+    "与 copilot 对话后回 Home 再进同一 skill → 打开的 tab 集合与上次活跃 tab 一模一样恢复"
    ],
    "fe_status": "符合",
    "layer1": [
-    "mock native-fs 读写,与 copilot 对话(含 AI 回答)→ 断言 persistSessionToDisk 把会话写到 .workspace/copilot/sessions/<skillId>/<id>.json、_active.json 记活跃 tab。",
+    "mock native-fs 读写,与 copilot 对话(含 AI 回答)→ 断言 persistSessionToDisk 把会话写到 .workspace/copilot/sessions/<skillId>/<id>.json、_window.json 记 openSessionIds + activeSessionId。",
     "回 Home(skillId=null)→ 断言 useCopilot effect 早返回、copilotStore 未 reset。",
-    "再进同一 skill → 断言 hydrate 读回会话(含 AI 回答)并恢复上次活跃 tab。",
+    "再进同一 skill → 断言 hydrate 只按 _window.json 读回已打开会话(含 AI 回答)并恢复上次活跃 tab,不会目录全量复活历史。",
+    "关闭 tab → 断言 transcript 文件不删除,_window.json 移除该 id;Restore chat → 断言选择当前 skill session 文件后加回窗口并激活。",
     "断言 web/非桌面态 writeWorkspaceFile 抛 Desktop only 被吞进 persistenceError、不崩。"
    ],
    "layer2": [
-    "真跑(关键,桌面):进 skill → 与 copilot 对几句(等 AI 回答完)→ 回 Home → 再进同一 skill → 应看到原对话(含 AI 回答)与上次活跃 tab,不应是空白会话。",
-    "真跑:对话后冷启动应用 → 再进同一 skill → 对话仍恢复(冷启动 hydrate 读盘)。"
+    "真跑(关键,桌面):进 skill → 打开多条 chat,关闭其中一条 → 回 Home → 再进同一 skill → 应只看到上次窗口仍打开的 tab 与活跃 tab,关闭的历史不自动复活。",
+    "真跑:点 + → Restore chat → 原生文件选择器默认打开 .workspace/copilot/sessions/<skillId> → 选择未打开的 <sessionId>.json → tab 加回并激活。",
+    "真跑:对话后冷启动应用 → 再进同一 skill → _window.json 中的窗口状态仍恢复。"
    ],
+   "shot_na": "原生 OS 文件选择器由系统窗口绘制,Playwright/网页截图截不到;替代验证: tauri.test.ts 断言 select_file defaultPath, copilotStore.test.ts 断言 restoreSessionFromFile 只恢复当前 skill session 文件。",
    "screenshots": [
     {
      "file": "n1-07-copilot-collapsed.png",
@@ -499,12 +502,12 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "closeSession 单测(copilotStore.test.ts):非活跃关闭保活跃+删文件;关活跃激活前邻居;关最后一个留全新空会话;未知 id 不动。",
-    "面板单测:running 无正文渲染 thinking;transcript 以用户消息结尾渲染 thinking;有正文即撤;消息行 data-slot=message + align;tab 渲染 Close 按钮。",
+    "closeSession / restoreSessionFromFile 单测(copilotStore.test.ts):非活跃关闭保活跃+不删文件+更新 _window.json;关活跃激活前邻居;关最后一个留全新空会话;未知 id 不动;Restore chat 只接受当前 skill session 目录内且文件名=session id 的 json。",
+    "面板单测:running 无正文渲染 thinking;transcript 以用户消息结尾渲染 thinking;有正文即撤;消息行 data-slot=message + align;tab 渲染 Close 按钮;+ 菜单渲染 New chat / Restore chat。",
     "后端单测(test_copilot_system_prompt):系统提示词含「语言跟随用户」规则。"
    ],
    "layer2": [
-    "真机 Playwright:header 无 open 行;发送后 +0ms 起 Thinking 可见至首正文;用户气泡贴右;无 You/Copilot 标签;新建 tab 出关闭按钮、单行不出竖向滚动、点关闭即移除。",
+    "真机 Playwright:header 无 open 行;发送后 +0ms 起 Thinking 可见至首正文;用户气泡贴右;无 You/Copilot 标签;新建 tab 出关闭按钮、单行不出竖向滚动、点关闭即从窗口移除;点 + 显示 New chat / Restore chat 菜单。",
     "真机(R4,私有 sidecar):hello 得到全英文回复(cjk=0);shimmer 动画 tw-shimmer 生效;视口 padding 16px。"
    ],
    "screenshots": [
@@ -561,7 +564,7 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "session-tabs 单测(14 例):consumeHorizontalWheel 纵滚转横滚且消费/无溢出不动/横向手势放行;既有 label/close/switch/new 测试随 View 拆分继续绿。"
+    "session-tabs 单测(15 例):consumeHorizontalWheel 纵滚转横滚且消费/无溢出不动/横向手势放行;既有 label/close/switch 测试随 View 拆分继续绿;新增 + 菜单 New chat / Restore chat 触发测试。"
    ],
    "layer2": [
     "真机 Playwright(worktree Vite,store 造 8 tab 溢出 630>306):WheelEvent deltaY=120 → scrollLeft 0→120 且事件被消费(页面不纵滚);deltaY=-50 → 120→70;deltaX 主导的手势不拦截;悬停出 6px 横向滚动条(data-state=visible)。"

@@ -15,6 +15,7 @@ import {
   restoreWorkspaceFile,
   revealInFileManager,
   seedWorkspaceCheckpoint,
+  selectFile,
   selectSkillDirectory,
   workspacePathExists,
   writePublishPackage,
@@ -119,6 +120,45 @@ describe('selectSkillDirectory', () => {
 
     expect(mockInvoke).toHaveBeenCalledWith('select_directory', { defaultPath: null })
     expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('selectFile', () => {
+  it('opens the native file picker in Tauri with the default folder', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue('/tmp/workspace/.workspace/copilot/sessions/demo/session-1.json')
+
+    await expect(selectFile('/tmp/workspace/.workspace/copilot/sessions/demo')).resolves.toBe(
+      '/tmp/workspace/.workspace/copilot/sessions/demo/session-1.json',
+    )
+
+    expect(mockInvoke).toHaveBeenCalledWith('select_file', {
+      defaultPath: '/tmp/workspace/.workspace/copilot/sessions/demo',
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('returns null outside desktop runtime', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    await resetRuntimeForTest()
+
+    await expect(selectFile('/tmp/default')).resolves.toBeNull()
+
+    expect(mockInvoke).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('Desktop only')
+  })
+
+  it('shows the picker failure reason', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockRejectedValue(new Error('dialog permission denied'))
+
+    await expect(selectFile('/tmp/default')).resolves.toBeNull()
+
+    expect(toast.error).toHaveBeenCalledWith('Failed to open file picker', {
+      description: 'dialog permission denied',
+    })
   })
 })
 

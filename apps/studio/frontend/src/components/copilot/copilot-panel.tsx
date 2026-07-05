@@ -607,6 +607,7 @@ export function CopilotPanel({
         activeSessionId={copilot.activeSessionId}
         onSwitch={copilot.switchSession}
         onNew={copilot.newSession}
+        onRestore={copilot.restoreSession}
         onClose={copilot.closeSession}
       />
 

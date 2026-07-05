@@ -68,7 +68,7 @@ describe('sessionTabs', () => {
 })
 
 describe('SessionTabs', () => {
-  it('renders a tab per session plus a New chat control', () => {
+  it('renders a tab per session plus a chat actions control', () => {
     const html = renderToStaticMarkup(
       <SessionTabs
         sessions={[
@@ -78,13 +78,14 @@ describe('SessionTabs', () => {
         activeSessionId="s1"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onRestore={() => undefined}
         onClose={() => undefined}
       />,
     )
 
     expect(html).toContain('first question')
     expect(html).toContain('second question')
-    expect(html).toContain('aria-label="New chat"')
+    expect(html).toContain('aria-label="Chat actions"')
   })
 
   it('renders nothing for a single empty session (no switcher needed)', () => {
@@ -94,6 +95,7 @@ describe('SessionTabs', () => {
         activeSessionId="s1"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onRestore={() => undefined}
         onClose={() => undefined}
       />,
     )
@@ -108,12 +110,13 @@ describe('SessionTabs', () => {
         activeSessionId="s1"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onRestore={() => undefined}
         onClose={() => undefined}
       />,
     )
 
     expect(html).toContain('only chat')
-    expect(html).toContain('aria-label="New chat"')
+    expect(html).toContain('aria-label="Chat actions"')
   })
 
   // Buttons are wrapped in Tooltip/TooltipTrigger now, so interaction tests walk
@@ -132,6 +135,14 @@ describe('SessionTabs', () => {
     return out
   }
 
+  function textContent(node: unknown): string {
+    if (typeof node === 'string' || typeof node === 'number') return String(node)
+    if (Array.isArray(node)) return node.map(textContent).join('')
+    if (!node || typeof node !== 'object') return ''
+    const el = node as AnyElement
+    return textContent(el.props?.children)
+  }
+
   it('calls onSwitch with the chosen session id', () => {
     const onSwitch = vi.fn()
     const element = SessionTabsView({
@@ -139,6 +150,7 @@ describe('SessionTabs', () => {
       activeSessionId: 's1',
       onSwitch,
       onNew: () => undefined,
+      onRestore: () => undefined,
       onClose: () => undefined,
     })
 
@@ -150,20 +162,42 @@ describe('SessionTabs', () => {
     expect(onSwitch).toHaveBeenCalledWith('s2')
   })
 
-  it('calls onNew when the New chat control is activated', () => {
+  it('calls onNew when the New chat menu item is activated', () => {
     const onNew = vi.fn()
     const element = SessionTabsView({
       sessions: [session('s1', [{ role: 'user', content: 'a' }]), session('s2', [{ role: 'user', content: 'b' }])],
       activeSessionId: 's1',
       onSwitch: () => undefined,
       onNew,
+      onRestore: () => undefined,
       onClose: () => undefined,
     })
 
-    const newButton = collectElements(element).find((el) => el.props?.['aria-label'] === 'New chat')
-    ;(newButton?.props?.onClick as () => void)?.()
+    const newItem = collectElements(element).find(
+      (el) => typeof el.props?.onSelect === 'function' && textContent(el).includes('New chat'),
+    )
+    ;(newItem?.props?.onSelect as () => void)?.()
 
     expect(onNew).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onRestore when the Restore chat menu item is activated', () => {
+    const onRestore = vi.fn()
+    const element = SessionTabsView({
+      sessions: [session('s1', [{ role: 'user', content: 'a' }]), session('s2', [{ role: 'user', content: 'b' }])],
+      activeSessionId: 's1',
+      onSwitch: () => undefined,
+      onNew: () => undefined,
+      onRestore,
+      onClose: () => undefined,
+    })
+
+    const restoreItem = collectElements(element).find(
+      (el) => typeof el.props?.onSelect === 'function' && textContent(el).includes('Restore chat'),
+    )
+    ;(restoreItem?.props?.onSelect as () => void)?.()
+
+    expect(onRestore).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -206,6 +240,7 @@ describe('SessionTabs close button', () => {
         activeSessionId="a"
         onSwitch={() => undefined}
         onNew={() => undefined}
+        onRestore={() => undefined}
         onClose={() => undefined}
       />,
     )

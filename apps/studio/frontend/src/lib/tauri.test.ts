@@ -6,8 +6,10 @@ import * as tauriModule from './tauri'
 import {
   checkpointWorkspaceFile,
   clearWorkspaceCheckpoint,
+  closeCodeAssistant,
   createSkillWorkspace,
   deleteWorkspacePath,
+  getCodeAssistantStatus,
   openClaudeCode,
   openCodexCli,
   openSkillWorkspace,
@@ -221,6 +223,40 @@ describe('desktop shell helpers', () => {
     expect(mockInvoke).not.toHaveBeenCalled()
     expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
       description: '/tmp/workspace',
+    })
+  })
+
+  it('reads code assistant ahd status through the native shell', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue({ claude: true, codex: false })
+
+    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
+
+    expect(mockInvoke).toHaveBeenCalledWith('code_assistant_status', {
+      workspaceRoot: '/tmp/workspace',
+    })
+  })
+
+  it('treats code assistants as inactive outside desktop runtime', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    await resetRuntimeForTest()
+
+    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: false, codex: false })
+
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it('closes the selected code assistant through ah', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue(true)
+
+    await expect(closeCodeAssistant('/tmp/workspace', 'codex')).resolves.toBe(true)
+
+    expect(mockInvoke).toHaveBeenCalledWith('close_code_assistant', {
+      workspaceRoot: '/tmp/workspace',
+      assistant: 'codex',
     })
   })
 })

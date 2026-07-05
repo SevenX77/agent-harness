@@ -147,6 +147,22 @@ describe('copilotStore.hydrate', () => {
     expect(readWorkspaceFile).toHaveBeenCalledWith(WS, WINDOW_PATH)
   })
 
+  it('keeps an explicit empty window state empty instead of auto-opening a session', async () => {
+    readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
+      if (path === WINDOW_PATH) {
+        return Promise.resolve(readResult(path, windowState([], null)))
+      }
+      throw new Error(`unexpected read ${path}`)
+    })
+
+    copilotStore.setContext(WS, SKILL)
+    await copilotStore.hydrate(WS, SKILL)
+
+    expect(copilotStore.getSnapshot().sessions).toEqual([])
+    expect(copilotStore.getSnapshot().activeSessionId).toBeNull()
+    expect(writeWorkspaceFile).not.toHaveBeenCalled()
+  })
+
   it('is idempotent: disk is read at most once per context', async () => {
     readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
       if (path === WINDOW_PATH) {
@@ -164,6 +180,18 @@ describe('copilotStore.hydrate', () => {
 })
 
 describe('copilotStore streamed-turn persistence', () => {
+  it('materializes an empty window only when the first message is appended', async () => {
+    copilotStore.setContext(WS, SKILL)
+
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
+
+    const snapshot = copilotStore.getSnapshot()
+    expect(snapshot.sessions).toHaveLength(1)
+    expect(snapshot.activeSessionId).toBe(snapshot.sessions[0].id)
+    expect(lastWrittenSession(snapshot.sessions[0].id)).toEqual(snapshot.sessions[0])
+    expect(lastWrittenWindow()).toEqual(windowState([snapshot.sessions[0].id], snapshot.sessions[0].id))
+  })
+
   it('persists new empty sessions and window state under the .workspace copilot support tree', async () => {
     copilotStore.setContext(WS, SKILL)
     const sessionId = copilotStore.newSession()
@@ -294,21 +322,21 @@ describe('closeSession', () => {
     expect(lastWrittenWindow()).toEqual(windowState([a, b], b))
   })
 
-  it('closing the last remaining session leaves one fresh empty chat', async () => {
+  it('closing the last remaining session leaves an empty window state without creating a fresh file', async () => {
     copilotStore.setContext(WS, SKILL)
     const only = copilotStore.newSession()
+    await settleWrites()
     writeWorkspaceFile.mockClear()
 
     await copilotStore.closeSession(only)
     await settleWrites()
 
     const snapshot = copilotStore.getSnapshot()
-    expect(snapshot.sessions).toHaveLength(1)
-    expect(snapshot.sessions[0].id).not.toBe(only)
-    expect(snapshot.sessions[0].messages).toEqual([])
-    expect(snapshot.activeSessionId).toBe(snapshot.sessions[0].id)
+    expect(snapshot.sessions).toEqual([])
+    expect(snapshot.activeSessionId).toBeNull()
     expect(deleteWorkspacePath).not.toHaveBeenCalled()
-    expect(lastWrittenWindow()).toEqual(windowState([snapshot.sessions[0].id], snapshot.sessions[0].id))
+    expect(lastWrittenSession(only)).toBeNull()
+    expect(lastWrittenWindow()).toEqual(windowState([], null))
   })
 
   it('ignores unknown session ids', async () => {

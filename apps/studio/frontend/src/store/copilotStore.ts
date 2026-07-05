@@ -151,6 +151,13 @@ function activeForSessions(sessions: CopilotSession[], requested: string | null)
   return sessions.at(-1)?.id ?? null
 }
 
+function createEmptySession(): CopilotSession {
+  return {
+    id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    messages: [],
+  }
+}
+
 function windowStateFromSessions(
   sessions: CopilotSession[],
   activeSessionId: string | null,
@@ -318,15 +325,14 @@ export const copilotStore = {
     }
   },
   newSession(): string {
-    const newId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    const newSession: CopilotSession = { id: newId, messages: [] }
-    replaceSessions([...state.sessions, newSession], newId)
+    const newSession = createEmptySession()
+    replaceSessions([...state.sessions, newSession], newSession.id)
     if (state.workspaceId && state.skillId) {
       void persistSessionToDisk(state.workspaceId, state.skillId, newSession)
       persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
     }
     emit()
-    return newId
+    return newSession.id
   },
   switchSession(id: string) {
     if (!state.sessions.some((session) => session.id === id)) {
@@ -350,12 +356,6 @@ export const copilotStore = {
       ? nextSessions[Math.min(Math.max(index - 1, 0), nextSessions.length - 1)]?.id ?? null
       : state.activeSessionId
     replaceSessions(nextSessions, nextActiveId)
-
-    if (state.sessions.length === 0) {
-      emit()
-      this.newSession()
-      return
-    }
 
     if (state.workspaceId && state.skillId) {
       persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
@@ -398,6 +398,16 @@ export const copilotStore = {
     }
   },
   async appendMessage(message: CopilotMessage) {
+    const hasActiveSession = Boolean(
+      state.activeSessionId && state.sessions.some((session) => session.id === state.activeSessionId),
+    )
+    if (!hasActiveSession) {
+      const materialized = createEmptySession()
+      replaceSessions([...state.sessions, materialized], materialized.id)
+      if (state.workspaceId && state.skillId) {
+        persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
+      }
+    }
     state.sessions = state.sessions.map((s) => {
       if (s.id === state.activeSessionId) {
         return { ...s, messages: [...s.messages, message] }

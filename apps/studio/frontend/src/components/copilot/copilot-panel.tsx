@@ -5,7 +5,7 @@ import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
-import { useCopilot, type CopilotJudgeContext } from '../../hooks/useCopilot'
+import type { CopilotController, CopilotJudgeContext } from '../../hooks/useCopilot'
 import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-derivation'
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
@@ -233,6 +233,7 @@ function ThinkingRow() {
 interface CopilotPanelProps {
   skillId: string | null
   workspaceRoot?: string | null
+  copilot: CopilotController
   view?: 'edit' | 'eval'
   judgeRefs?: {
     runResultsRef: string
@@ -303,6 +304,7 @@ export function nextDraftJudgeContext(
 export function CopilotPanel({
   skillId,
   workspaceRoot,
+  copilot,
   view = 'edit',
   judgeRefs = null,
   completedRunId = null,
@@ -324,7 +326,6 @@ export function CopilotPanel({
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [openingCodeAssistant, setOpeningCodeAssistant] = useState<'claude' | 'codex' | null>(null)
   const { templates, templatesLoading } = useTemplates()
-  const copilot = useCopilot(skillId, workspaceRoot)
   const inEvalView = view === 'eval'
   const roleOptions = useMemo(
     () => copilotRoleOptions(rolesData, registry?.model_groups ?? []),

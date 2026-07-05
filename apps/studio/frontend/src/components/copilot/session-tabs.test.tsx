@@ -88,7 +88,7 @@ describe('SessionTabs', () => {
     expect(html).toContain('aria-label="Chat actions"')
   })
 
-  it('renders nothing for a single empty session (no switcher needed)', () => {
+  it('renders a single empty session because the actions menu must always be reachable', () => {
     const html = renderToStaticMarkup(
       <SessionTabs
         sessions={[session('s1', [])]}
@@ -100,7 +100,26 @@ describe('SessionTabs', () => {
       />,
     )
 
-    expect(html).toBe('')
+    expect(html).toContain('Chat 1')
+    expect(html).toContain('aria-label="Chat actions"')
+    expect(html).toContain('aria-label="Close Chat 1"')
+  })
+
+  it('renders a temporary draft tab and actions menu when no persisted session is open', () => {
+    const html = renderToStaticMarkup(
+      <SessionTabs
+        sessions={[]}
+        activeSessionId={null}
+        onSwitch={() => undefined}
+        onNew={() => undefined}
+        onRestore={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('Chat 1')
+    expect(html).toContain('aria-label="Chat actions"')
+    expect(html).not.toContain('aria-label="Close Chat 1"')
   })
 
   it('still renders for a single non-empty session so a new chat can be started', () => {

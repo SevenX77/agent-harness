@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/copilot-assist
 doc: mvp1-alignment
-status: FROZEN（SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session/window persistence live，ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [copilot-sdk-test-parity, copilot-session-persistence]
 aligns_with: 01_workflows/00_settings-ux-spec.md（Copilot SDK test）· 01_workflows/04_run-and-verify.md（analysis bar）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/00_settings-ux-spec.md（Copilot SDK test）· 01_work
 
 # copilot-assist — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `copilot-sdk-test-parity`（真实 SDK smoke 路径）+ `copilot-session-persistence`（多 session / 消息渲染） | **现状**: SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`
+> **Tier**: capability | **Owns**: `copilot-sdk-test-parity`（真实 SDK smoke 路径）+ `copilot-session-persistence`（多 session / 消息渲染） | **现状**: SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session/window persistence live，ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`
 
 ## 1. 定义
 copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个**懂搭 skill + 懂业务领域**的对话助手，能精确取上下文（@mention）、允许 SDK 在 workspace 内自行读写文件并配套审阅回显、对话式建技能、承载 judge/打磨、跑完主动提分析。
@@ -26,11 +26,11 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **归属**：region [[copilot]]。
 
 ### F2 多 session（顶部 tab + new chat / restore chat）
-- **机制**：copilot 面板顶部一条 tab 栏 = 并列多个 session tab + 一个 `+` 动作菜单（`New chat` / `Restore chat`）；切 tab=切 session；一 skill 多条 session 文件全持久化为历史库，同时每个 skill 有 `_window.json` 窗口状态文件，记录 `openSessionIds` + `activeSessionId`。打开 skill 时只恢复 `_window.json` 里上次打开的 tab 集合与活跃 tab，不自动打开该 skill 下所有历史 session 文件。
-- **决策+动机**：一 skill **多条** session(抄 Cursor chat 历史)；session 必持久化(D8 MUST)，落盘归 [[native-fs]](Rust 按 skill 存多 session 文件，跨窗口)；关闭 tab 只从窗口状态移除，不删除 transcript 文件；`Restore chat` 通过原生文件选择器默认打开本 skill 的 session 目录并把选中的合法 `<sessionId>.json` 加回窗口。写盘/读回失败→显式告警不静默。
+- **机制**：copilot 面板顶部一条 tab 栏 = 并列多个 session tab + 一个 `+` 动作菜单（`New chat` / `Restore chat`）；切 tab=切 session；一 skill 多条 session 文件全持久化为历史库，同时每个 skill 有 `_window.json` 窗口状态文件，记录 `openSessionIds` + `activeSessionId`。打开 skill 时只恢复 `_window.json` 里上次打开的 tab 集合与活跃 tab，不自动打开该 skill 下所有历史 session 文件。`openSessionIds=[]` 是合法窗口状态：面板显示一个不落盘的临时草稿 tab，用户首条发送才物化为真实 session 文件并写回 `_window.json`。
+- **决策+动机**：一 skill **多条** session(抄 Cursor chat 历史)；session 必持久化(D8 MUST)，落盘归 [[native-fs]](Rust 按 skill 存多 session 文件，跨窗口)；关闭 tab 只从窗口状态移除，不删除 transcript 文件；关闭最后一个 tab 只把 `_window.json` 写成空窗口状态，不创建新的空 transcript 文件；`New chat` 是显式用户动作，可立即创建空 session；`Restore chat` 通过原生文件选择器默认打开本 skill 的 session 目录并把选中的合法 `<sessionId>.json` 加回窗口。写盘/读回失败→显式告警不静默。
 - **原话**：「要,顶部tab多个session和一个+(new chat),抄cursor」/「后者多条session」/(D8)「copilot对话不能丢, 退出再进去要打开一摸一样的对话, session记录都要在, 和cursor一样, 这点必须要做到」
-- **status**：现纯内存(丢)= target。
-- **测试点**：开 N 条/切 tab/关闭部分 tab/退出恢复同一窗口 tab 集合 + 活跃 tab(不串/不丢、不复活未打开历史)；关闭 tab 不删除 transcript；`+ → Restore chat` 默认打开本 skill session 目录并恢复选中文件；写盘失败显式告警。
+- **status**：live。
+- **测试点**：开 N 条/切 tab/关闭部分 tab/退出恢复同一窗口 tab 集合 + 活跃 tab(不串/不丢、不复活未打开历史)；关闭 tab 不删除 transcript；关闭最后一个 tab 写空窗口状态且不创建新 transcript；空窗口 panel 仍显示临时草稿 tab 与 `+` 菜单；首条消息物化真实 session；`+ → Restore chat` 默认打开本 skill session 目录并恢复选中文件；写盘失败显式告警。
 - **归属**：region [[copilot]] · platform [[native-fs]]。
 
 ### F3 领域脑子（搭 skill + 业务领域 + 主动诊断）
@@ -74,9 +74,9 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **归属**：copilot-assist 拥有分析弹窗 UI；数据流 [[golden-eval]]/[[publish]]。**回写** g-e + workflow [[04_run-and-verify]]。
 
 ### F8 生命周期（出现 / Home 卸载 / 下钻无缝）
-- **机制 + 决策**：出现时机=随 skill(新建空 skill 即有；welcome 屏无 copilot，Q4)；Back-to-Home 卸载→对话靠 F2 session 恢复，打开 Settings 不卸载(Q3)；下钻子图**无缝**(不切工程，copilot cwd 已含子图 path，随时切回无需缓存，T6)。
+- **机制 + 决策**：出现时机=随 skill(新建空 skill 即有；welcome 屏无 copilot，Q4)；Copilot 的会话加载、窗口状态恢复、WebSocket 生命周期绑定「打开/关闭 skill」，不绑定右侧 panel 展开/收起；panel 展开/收起只影响 UI 呈现。Back-to-Home 卸载→对话靠 F2 session 恢复，打开 Settings 不卸载(Q3)；下钻子图**无缝**(不切工程，copilot cwd 已含子图 path，随时切回无需缓存，T6)。
 - **原话**：(Q4)copilot 随 skill、welcome 无；(Q3)Settings 不卸载；(T6)「子图下钻... assets、copilot 都不用动... copilot无缝衔接, 随时切回父图不用缓存」
-- **status**：出现/卸载 live；下钻无缝 = target。
+- **status**：出现/卸载 live；会话加载/WS 生命周期随 skill live；下钻无缝 = target。
 - **测试点**：welcome 无 copilot / 新建空 skill 即有；Home 卸载靠 session 恢复；下钻不切工程、copilot 接得上子图。
 - **归属**：region [[copilot]] + [[shell-layout]]。
 
@@ -105,7 +105,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 ## 6. 测试关键点
 1. ThinkingBlock: baseline 现状为 `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标为 thinking/tool call 全量流式，折叠但不省略。
 2. Copilot Write/Edit 自写例外: baseline 现状为 SDK `acceptEdits` 直写；目标为 允许直写 workspace，同时回显工具事件与 diff/summary，Bash 仍 human-in-the-loop。
-3. session: baseline 现状为 前端 store reset 后内存态丢失 ⚠️；目标为 一 skill 多 session 历史持久化，并用 `_window.json` 恢复上次打开的 tab 集合与活跃 tab。
+3. session: 现状为 一 skill 多 session 历史持久化，并用 `_window.json` 恢复上次打开的 tab 集合与活跃 tab；空窗口状态合法,首条消息才把临时草稿物化为真实 session。
 4. SDK 测试: baseline 现状为 Settings probe 走 `AsyncAnthropic` ⚠️；目标为 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 
 ## 7. 涉及 region / platform
@@ -114,7 +114,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 ## 8. gaps / 报警
 - 🚨 ThinkingBlock: `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标 thinking/tool call 全量流式，折叠但不省略。
 - ⚠️ diff 审阅体验: SDK `acceptEdits` 直写为 MVP1 允许；剩余目标是稳定回显工具事件、diff/summary 与 Open Compare，不再把 Write/Edit 直写列为 D12 阻断。
-- 🚨 session: 前端 store reset 后内存态丢失 ⚠️；目标 一 skill 多 session 历史持久化，并用 `_window.json` 恢复上次打开的 tab 集合与活跃 tab。
+- ✅ session: 一 skill 多 session 历史持久化 + `_window.json` 窗口恢复已 live；空窗口状态合法,临时草稿首发才落盘。
 - 🚨 SDK 测试: Settings probe 走 `AsyncAnthropic` ⚠️；目标 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 
 > 旧迁移附录暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#02-capabilities-copilot-assist)（迁移期安全网，代码实现验证后删）。

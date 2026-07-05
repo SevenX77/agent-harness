@@ -191,19 +191,60 @@ fn workspace_hash(workspace_root: &Path) -> String {
         .collect()
 }
 
-fn transient_ah_config_path(workspace_root: &Path) -> PathBuf {
+fn transient_ah_config_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
     std::env::temp_dir()
         .join("skill-studio-ah")
         .join(workspace_hash(workspace_root))
+        .join(assistant.slug())
         .join("ah.toml")
 }
 
-/// Prompt the ah-managed Claude master auto-runs on launch, so opening a skill
-/// in Claude Code greets the user with a self-report (who it is / which
+#[derive(Clone, Copy)]
+enum CodeAssistant {
+    Claude,
+    Codex,
+}
+
+impl CodeAssistant {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+
+    fn provider(self) -> &'static str {
+        self.slug()
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+        }
+    }
+
+    fn launcher_stem(self) -> &'static str {
+        match self {
+            Self::Claude => "open-claude-code",
+            Self::Codex => "open-codex-cli",
+        }
+    }
+
+    fn master_cmd(self) -> String {
+        match self {
+            Self::Claude => claude_master_cmd(),
+            Self::Codex => codex_master_cmd(),
+        }
+    }
+}
+
+/// Prompt the ah-managed interactive master auto-runs on launch, so opening a
+/// skill in Claude/Codex greets the user with a self-report (who it is / which
 /// workspace + skill / what it can do) instead of an empty prompt. Kept free of
 /// single/double quotes so it embeds cleanly in both the TOML `cmd` string and
 /// the single-quoted shell argument that carries it.
-const CLAUDE_MASTER_REPORT_PROMPT: &str = "用中文简短汇报当前状态(每点一行),然后停下等我:1) 你是谁 2) 当前工作目录 cwd 是什么、根据目录里的文件这是哪个 skill 3) 你能帮我做什么。";
+const MOIRAI_MASTER_REPORT_PROMPT: &str = "用中文简短汇报当前状态(每点一行),然后停下等我:1) 你是谁 2) 当前工作目录 cwd 是什么、根据目录里的文件这是哪个 skill 3) 你能帮我做什么。";
 
 const STUDIO_AH_MANAGED_MARKER_PREFIX: &str = "<!-- studio-ah-managed hash:";
 const STUDIO_AH_MANAGED_MARKER_SUFFIX: &str = " -->";
@@ -366,9 +407,24 @@ const STUDIO_AH_MANAGED_FILES: &[StudioAhManagedFile] = &[
 ///   remote-control dialog, irrelevant to a local terminal attach.)
 /// - The trailing prompt auto-submits as the first turn → the status report.
 fn claude_master_cmd() -> String {
-    let prompt = sh_single_quote_str(CLAUDE_MASTER_REPORT_PROMPT);
+    let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
         "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
+    );
+    format!("bash -c {}", sh_single_quote_str(&script))
+}
+
+/// The Codex master uses Codex-native locations inside ah's sandbox:
+///
+/// - `$HOME/.codex/auth.json` for ChatGPT auth, linked from the WSL host copy
+///   that Studio refreshes from Windows before `ah start`.
+/// - `$HOME/.codex/AGENTS.md` for the MoirAI master instructions.
+/// - `$HOME/.agents/skills` for Studio-managed skills, matching Codex's
+///   documented local skill discovery path.
+fn codex_master_cmd() -> String {
+    let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
+    let script = format!(
+        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -495,25 +551,30 @@ fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn transient_ah_config_content() -> String {
+fn transient_ah_config_content(assistant: CodeAssistant) -> String {
+    let provider = assistant.provider();
     format!(
-        "version = \"1\"\n\n[master]\nenabled = true\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = \"claude\"\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = \"claude\"\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = \"claude\"\nskills = [\"eval-judgement\"]\n",
-        cmd = toml_string(&claude_master_cmd())
+        "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = {provider_toml}\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = [\"eval-judgement\"]\n",
+        provider_toml = toml_string(provider),
+        cmd = toml_string(&assistant.master_cmd())
     )
 }
 
-fn ah_config_for_workspace(workspace_root: &Path) -> Result<PathBuf, String> {
+fn ah_config_for_workspace(
+    workspace_root: &Path,
+    assistant: CodeAssistant,
+) -> Result<PathBuf, String> {
     if let Some(config) = find_ah_config(workspace_root) {
         return Ok(config);
     }
     prepare_studio_ah_workspace(workspace_root)?;
-    let config = transient_ah_config_path(workspace_root);
+    let config = transient_ah_config_path(workspace_root, assistant);
     let parent = config
         .parent()
         .ok_or_else(|| format!("cannot resolve ah config parent: {}", config.display()))?;
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create transient ah config dir: {error}"))?;
-    std::fs::write(&config, transient_ah_config_content())
+    std::fs::write(&config, transient_ah_config_content(assistant))
         .map_err(|error| format!("failed to write transient ah config: {error}"))?;
     Ok(config)
 }
@@ -594,7 +655,32 @@ json.dump(d, open(p, 'w'), indent=2)
 /// its prompt instead of blocking, then `ah start`s and attaches the master —
 /// all in ONE wsl session so the interactive attach holds the distro alive and
 /// the master persists.
-fn wsl_payload_script(wsl_workspace: &str, wsl_config: &str) -> String {
+fn wsl_payload_script(
+    wsl_workspace: &str,
+    wsl_config: &str,
+    assistant: CodeAssistant,
+    windows_codex_home: Option<&str>,
+) -> String {
+    let codex_auth_sync = if matches!(assistant, CodeAssistant::Codex) {
+        let windows_home = windows_codex_home
+            .map(sh_single_quote_str)
+            .unwrap_or_else(|| "''".to_string());
+        format!(
+            r#"WIN_CODEX_HOME={windows_home}
+if [ -z "$WIN_CODEX_HOME" ] || [ ! -f "$WIN_CODEX_HOME/auth.json" ]; then
+  printf '%s\n' "Windows Codex auth was not found."
+  printf '%s\n' "Run Codex login on Windows first, then reopen Studio's Codex menu item."
+  exec bash -i
+fi
+mkdir -p "$HOME/.codex"
+cp "$WIN_CODEX_HOME/auth.json" "$HOME/.codex/auth.json"
+chmod 600 "$HOME/.codex/auth.json"
+"#,
+            windows_home = windows_home
+        )
+    } else {
+        String::new()
+    };
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -602,6 +688,7 @@ WS={workspace}
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
 export STUDIO_AH_HOST_HOME="$HOME"
+{codex_auth_sync}
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found in WSL."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
@@ -628,15 +715,17 @@ python3 - "$WS" <<'PY'
 PY
 fi
 cd "$WS" 2>/dev/null || cd "$HOME"
-printf '%s\n' "Starting Claude Code through ah (first launch ~15s cold start)..."
+printf '%s\n' "Starting {assistant_name} through ah (first launch ~15s cold start)..."
 ah --config "$CFG" start --wait
-printf '%s\n' "Attaching - Claude Code will auto-report its status (detach: Ctrl-b then d)."
+printf '%s\n' "Attaching - {assistant_name} will auto-report its status (detach: Ctrl-b then d)."
 ah --config "$CFG" attach master
 printf '[attach ended; exit=%s]\n' "$?"
 exec bash -i
 "#,
         workspace = sh_single_quote_str(wsl_workspace),
         config = sh_single_quote_str(wsl_config),
+        assistant_name = assistant.display_name(),
+        codex_auth_sync = codex_auth_sync,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
     )
 }
@@ -644,21 +733,29 @@ exec bash -i
 /// On Windows, ah + claude live inside WSL2, so the .ps1 just runs the bash
 /// payload through `wsl.exe` in this console window (keeping the attach
 /// interactive).
-fn windows_claude_code_launcher_script(wsl_payload_path: &str) -> String {
+fn windows_code_assistant_launcher_script(
+    wsl_payload_path: &str,
+    assistant: CodeAssistant,
+) -> String {
     format!(
         r#"$ErrorActionPreference = "Stop"
-Write-Host "Opening Claude Code through ah (WSL)..."
+Write-Host "Opening {assistant_name} through ah (WSL)..."
 wsl.exe -e bash {payload}
 if ($LASTEXITCODE -ne 0) {{
   Read-Host "Could not start WSL (exit $LASTEXITCODE). Is WSL2 installed? Press Enter to close"
 }}
 "#,
+        assistant_name = assistant.display_name(),
         payload = powershell_single_quote_str(wsl_payload_path),
     )
 }
 
 /// On native Linux ah runs directly. macOS is not yet supported by ah.
-fn unix_claude_code_launcher_script(workspace_root: &Path, config_path: &Path) -> String {
+fn unix_code_assistant_launcher_script(
+    workspace_root: &Path,
+    config_path: &Path,
+    assistant: CodeAssistant,
+) -> String {
     format!(
         r#"#!/bin/sh
 set -u
@@ -690,7 +787,7 @@ python3 - {workspace} <<'PY'
 PY
 fi
 cd {workspace}
-printf '%s\n' "Starting Claude Code through ah (first launch ~15s cold start)..."
+printf '%s\n' "Starting {assistant_name} through ah (first launch ~15s cold start)..."
 ah --config {config} start --wait
 status=$?
 if [ "$status" -ne 0 ]; then
@@ -703,11 +800,12 @@ exec "${{SHELL:-/bin/sh}}"
 "#,
         workspace = sh_single_quote(workspace_root),
         config = sh_single_quote(config_path),
+        assistant_name = assistant.display_name(),
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
     )
 }
 
-fn launcher_script_path(workspace_root: &Path) -> PathBuf {
+fn launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
     let extension = if cfg!(target_os = "windows") {
         "ps1"
     } else if cfg!(target_os = "macos") {
@@ -718,14 +816,23 @@ fn launcher_script_path(workspace_root: &Path) -> PathBuf {
     std::env::temp_dir()
         .join("skill-studio-ah")
         .join(workspace_hash(workspace_root))
-        .join(format!("open-claude-code.{extension}"))
+        .join(assistant.slug())
+        .join(format!("{}.{extension}", assistant.launcher_stem()))
 }
 
-fn write_claude_code_launcher_script(
+fn windows_codex_home_wsl() -> Option<String> {
+    let user_profile = std::env::var_os("USERPROFILE")?;
+    Some(windows_path_to_wsl(
+        &PathBuf::from(user_profile).join(".codex"),
+    ))
+}
+
+fn write_code_assistant_launcher_script(
     workspace_root: &Path,
     config_path: &Path,
+    assistant: CodeAssistant,
 ) -> Result<PathBuf, String> {
-    let script_path = launcher_script_path(workspace_root);
+    let script_path = launcher_script_path(workspace_root, assistant);
     let parent = script_path
         .parent()
         .ok_or_else(|| format!("cannot resolve launcher parent: {}", script_path.display()))?;
@@ -735,30 +842,45 @@ fn write_claude_code_launcher_script(
         // ah + claude live inside WSL2 on Windows: write the bash payload, then a
         // .ps1 that runs it through wsl.exe. Both paths are translated to the
         // /mnt/... form the distro sees.
-        let payload_path = parent.join("open-claude-code.wsl.sh");
+        let payload_path = parent.join(format!("{}.wsl.sh", assistant.launcher_stem()));
         std::fs::write(
             &payload_path,
             wsl_payload_script(
                 &windows_path_to_wsl(workspace_root),
                 &windows_path_to_wsl(config_path),
+                assistant,
+                windows_codex_home_wsl().as_deref(),
             ),
         )
         .map_err(|error| format!("failed to write WSL payload: {error}"))?;
-        windows_claude_code_launcher_script(&windows_path_to_wsl(&payload_path))
+        windows_code_assistant_launcher_script(&windows_path_to_wsl(&payload_path), assistant)
     } else {
-        unix_claude_code_launcher_script(workspace_root, config_path)
+        unix_code_assistant_launcher_script(workspace_root, config_path, assistant)
     };
-    std::fs::write(&script_path, content)
-        .map_err(|error| format!("failed to write Claude Code launcher: {error}"))?;
+    std::fs::write(&script_path, content).map_err(|error| {
+        format!(
+            "failed to write {} launcher: {error}",
+            assistant.display_name()
+        )
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut permissions = std::fs::metadata(&script_path)
-            .map_err(|error| format!("failed to stat Claude Code launcher: {error}"))?
+            .map_err(|error| {
+                format!(
+                    "failed to stat {} launcher: {error}",
+                    assistant.display_name()
+                )
+            })?
             .permissions();
         permissions.set_mode(0o700);
-        std::fs::set_permissions(&script_path, permissions)
-            .map_err(|error| format!("failed to chmod Claude Code launcher: {error}"))?;
+        std::fs::set_permissions(&script_path, permissions).map_err(|error| {
+            format!(
+                "failed to chmod {} launcher: {error}",
+                assistant.display_name()
+            )
+        })?;
     }
     Ok(script_path)
 }
@@ -787,13 +909,16 @@ fn spawn_linux_terminal(script_path: &Path) -> Result<(), String> {
     ))
 }
 
-fn spawn_terminal_with_launcher(script_path: &Path) -> Result<(), String> {
+fn spawn_terminal_with_launcher(
+    script_path: &Path,
+    assistant: CodeAssistant,
+) -> Result<(), String> {
     if cfg!(target_os = "windows") {
         return Command::new("cmd")
             .args([
                 "/C",
                 "start",
-                "Claude Code",
+                assistant.display_name(),
                 "powershell.exe",
                 "-NoExit",
                 "-ExecutionPolicy",
@@ -819,15 +944,27 @@ fn spawn_terminal_with_launcher(script_path: &Path) -> Result<(), String> {
         return spawn_linux_terminal(script_path);
     }
 
-    Err("opening Claude Code is not supported on this platform".to_string())
+    Err(format!(
+        "opening {} is not supported on this platform",
+        assistant.display_name()
+    ))
+}
+
+fn open_code_assistant(workspace_root: String, assistant: CodeAssistant) -> Result<(), String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    let config_path = ah_config_for_workspace(&workspace_root, assistant)?;
+    let launcher = write_code_assistant_launcher_script(&workspace_root, &config_path, assistant)?;
+    spawn_terminal_with_launcher(&launcher, assistant)
 }
 
 #[tauri::command]
 fn open_claude_code(workspace_root: String) -> Result<(), String> {
-    let workspace_root = existing_directory(&workspace_root)?;
-    let config_path = ah_config_for_workspace(&workspace_root)?;
-    let launcher = write_claude_code_launcher_script(&workspace_root, &config_path)?;
-    spawn_terminal_with_launcher(&launcher)
+    open_code_assistant(workspace_root, CodeAssistant::Claude)
+}
+
+#[tauri::command]
+fn open_codex_cli(workspace_root: String) -> Result<(), String> {
+    open_code_assistant(workspace_root, CodeAssistant::Codex)
 }
 
 #[tauri::command]
@@ -1060,6 +1197,7 @@ pub fn run() {
             reveal_in_file_manager,
             open_path,
             open_claude_code,
+            open_codex_cli,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
             native_fs::read_workspace_file,
@@ -1278,8 +1416,17 @@ mod tests {
     }
 
     #[test]
+    fn invoke_handler_registers_open_codex_cli_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("open_codex_cli,"),
+            "open_codex_cli must be registered in the Tauri invoke handler"
+        );
+    }
+
+    #[test]
     fn transient_ah_config_starts_moirai_team() {
-        let config = transient_ah_config_content();
+        let config = transient_ah_config_content(CodeAssistant::Claude);
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
@@ -1295,7 +1442,7 @@ mod tests {
         assert!(config.contains("ln -sfn"));
         assert!(config.contains("$HOME/.local/bin/claude"));
         assert!(config.contains("--dangerously-skip-permissions"));
-        assert!(config.contains(CLAUDE_MASTER_REPORT_PROMPT));
+        assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
         assert!(!config.contains("--continue"));
         assert!(!config.contains("/remote-control"));
         assert!(!config.contains("[agents.studio]"));
@@ -1306,12 +1453,39 @@ mod tests {
         assert!(config.contains("skills = [\"compile-error-repair\"]"));
         assert!(config.contains("[agents.atropos]"));
         assert!(config.contains("skills = [\"eval-judgement\"]"));
-        assert_eq!(config.matches("provider = \"claude\"").count(), 3);
+        assert_eq!(config.matches("provider = \"claude\"").count(), 4);
         assert!(!config.contains("[sandbox]"));
         assert!(
             !config.contains("additional_ro_binds"),
             "ah 1.3.0 still maps additional_ro_binds to systemd-run --user --scope BindReadOnlyPaths, which WSL rejects"
         );
+    }
+
+    #[test]
+    fn transient_ah_config_starts_codex_moirai_team() {
+        let config = transient_ah_config_content(CodeAssistant::Codex);
+
+        assert!(config.contains("version = \"1\""));
+        assert!(config.contains("[master]"));
+        assert!(config.contains("window_size = \"follow\""));
+        assert!(config.contains("cmd = \"bash -c "));
+        assert!(config.contains("STUDIO_AH_HOST_HOME"));
+        assert!(config.contains("$HOME/.local/bin/codex"));
+        assert!(config.contains("$HOME/.codex/auth.json"));
+        assert!(config.contains("$HOME/.codex/AGENTS.md"));
+        assert!(config.contains("$HOME/.agents/skills"));
+        assert!(config.contains("rm -rf \\\"$HOME/.agents/skills\\\""));
+        assert!(config.contains("--dangerously-bypass-approvals-and-sandbox"));
+        assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
+        assert!(config.contains("[agents.clotho]"));
+        assert!(config
+            .contains("skills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]"));
+        assert!(config.contains("[agents.lachesis]"));
+        assert!(config.contains("skills = [\"compile-error-repair\"]"));
+        assert!(config.contains("[agents.atropos]"));
+        assert!(config.contains("skills = [\"eval-judgement\"]"));
+        assert_eq!(config.matches("provider = \"codex\"").count(), 4);
+        assert!(!config.contains("--dangerously-skip-permissions"));
     }
 
     fn assert_progressive_wikipedia_background(rules: &str, wikipedia_url: &str) {
@@ -1357,7 +1531,7 @@ mod tests {
 
     #[test]
     fn transient_ah_config_omits_systemd_scope_ro_binds() {
-        let config = transient_ah_config_content();
+        let config = transient_ah_config_content(CodeAssistant::Claude);
 
         assert!(!config.contains("additional_ro_binds"));
         assert!(!config.contains("BindReadOnlyPaths"));
@@ -1365,13 +1539,21 @@ mod tests {
 
     #[test]
     fn launchers_reject_ah_before_window_size_follow_support() {
-        let windows_payload = wsl_payload_script("/mnt/d/skill", "/mnt/c/tmp/ah.toml");
+        let windows_payload = wsl_payload_script(
+            "/mnt/d/skill",
+            "/mnt/c/tmp/ah.toml",
+            CodeAssistant::Claude,
+            None,
+        );
         assert!(windows_payload.contains("ah_version="));
         assert!(windows_payload.contains("requires ah >= 1.3.0"));
         assert!(windows_payload.contains("window_size = \"follow\""));
 
-        let unix_payload =
-            unix_claude_code_launcher_script(Path::new("/tmp/skill"), Path::new("/tmp/ah.toml"));
+        let unix_payload = unix_code_assistant_launcher_script(
+            Path::new("/tmp/skill"),
+            Path::new("/tmp/ah.toml"),
+            CodeAssistant::Claude,
+        );
         assert!(unix_payload.contains("ah_version="));
         assert!(unix_payload.contains("requires ah >= 1.3.0"));
         assert!(unix_payload.contains("window_size = \"follow\""));
@@ -1383,7 +1565,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
-        let config = ah_config_for_workspace(&root).expect("generated transient ah config");
+        let config = ah_config_for_workspace(&root, CodeAssistant::Claude)
+            .expect("generated transient ah config");
 
         assert!(config.is_file());
         let master_rules = root.join(".ah").join("rules").join("master.md");
@@ -1427,7 +1610,8 @@ mod tests {
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(root.join("ah.toml"), "version = \"1\"\n").unwrap();
 
-        let config = ah_config_for_workspace(&child).expect("existing ah config");
+        let config =
+            ah_config_for_workspace(&child, CodeAssistant::Claude).expect("existing ah config");
 
         assert_eq!(config, root.join("ah.toml"));
         assert!(!root.join(".ah").exists());
@@ -1473,7 +1657,11 @@ mod tests {
         let child = root.join("child").join("nested");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&child).unwrap();
-        std::fs::write(root.join("ah.toml"), transient_ah_config_content()).unwrap();
+        std::fs::write(
+            root.join("ah.toml"),
+            transient_ah_config_content(CodeAssistant::Claude),
+        )
+        .unwrap();
 
         let found = find_ah_config(&child).expect("ah config found");
 
@@ -1496,6 +1684,8 @@ mod tests {
         let script = wsl_payload_script(
             "/mnt/c/Users/Test User/skill",
             "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
+            CodeAssistant::Claude,
+            None,
         );
 
         assert!(script.contains("WS='/mnt/c/Users/Test User/skill'"));
@@ -1513,9 +1703,26 @@ mod tests {
     }
 
     #[test]
+    fn wsl_payload_syncs_codex_auth_from_windows_home() {
+        let script = wsl_payload_script(
+            "/mnt/c/Users/Test User/skill",
+            "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
+            CodeAssistant::Codex,
+            Some("/mnt/c/Users/Test User/.codex"),
+        );
+
+        assert!(script.contains("WIN_CODEX_HOME='/mnt/c/Users/Test User/.codex'"));
+        assert!(script.contains("cp \"$WIN_CODEX_HOME/auth.json\" \"$HOME/.codex/auth.json\""));
+        assert!(script.contains("chmod 600 \"$HOME/.codex/auth.json\""));
+        assert!(script.contains("Run Codex login on Windows first"));
+        assert!(script.contains("Starting Codex through ah"));
+    }
+
+    #[test]
     fn windows_launcher_runs_wsl_bash_payload() {
-        let script = windows_claude_code_launcher_script(
+        let script = windows_code_assistant_launcher_script(
             "/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh",
+            CodeAssistant::Claude,
         );
 
         assert!(
@@ -1525,9 +1732,10 @@ mod tests {
 
     #[test]
     fn unix_launcher_runs_ah_start_then_attach_master() {
-        let script = unix_claude_code_launcher_script(
+        let script = unix_code_assistant_launcher_script(
             Path::new("/tmp/skill root"),
             Path::new("/tmp/studio ah/ah.toml"),
+            CodeAssistant::Claude,
         );
 
         assert!(script.starts_with("#!/bin/sh"));

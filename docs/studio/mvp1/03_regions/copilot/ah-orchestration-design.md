@@ -6,7 +6,7 @@ updated: 2026-07-05
 状态: 【阶段 1 完成 / 阶段 2 设计确定】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨
       已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
       并补齐后续 Studio 功能开发执行规则;2026-07-05 对齐 ah 1.3.0 的 `window_size="follow"`
-      与 Wikipedia 渐进式背景披露。
+      与 Wikipedia 渐进式背景披露,并把入口升级为 Claude/Codex 菜单。
       本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置/下一阶段方案/
       开发规则),供提交 PR。
 关系: 与本目录 mvp1-alignment.md 的 F1–F9(SDK 面板流式)并列的**另一套编排底座**;
@@ -20,7 +20,7 @@ github.com/SevenX77/ah 的 v1.3.0 tag README、源码与内置 rules —— 这�
 ## 0. 一句话
 
 Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agent SDK 为辅**：
-面板上「打开 Claude Code」按钮经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
+面板上「Open in」菜单可选 Claude 或 Codex,经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
 `clotho` / `lachesis` / `atropos` 承载三女神），
 用户在终端里直接操作;每个 agent 的**身份 / 知识库 / 工具箱**全部经 `ah.toml` + `.ah/rules/`
 + `.ah/bundles/` 配置注入,不改 ah 本体。
@@ -95,8 +95,8 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 - 顶层:`version`(必须 `"1"`)、`agents`(必填,≥1 个 `[agents.<id>]`)、`master`(可选)、
   `completion`、`daemon`、`env`(项目环境变量)、`sandbox`。
 - `[agents.<id>]`:`provider`(必填)、`env`、`hooks`、`plugins`、`skills`(引用 `.ah/skills/<name>/`)。
-- `[master]`:`enabled`(默认 true)、`cmd`(默认 `claude`)、`provider`(能解析但 **v1 master 仍强制走
-  Claude 的 sandbox rules 路径**,README:141)、`readiness_timeout_s`(默认 120)、`window_size`
+- `[master]`:`enabled`(默认 true)、`cmd`(默认 `claude`)、`provider`(Studio 按菜单写 `claude` 或
+  `codex`;master 仍用 Studio 自定义 `cmd` 进入对应 CLI)、`readiness_timeout_s`(默认 120)、`window_size`
   (1.3.0 新增;`fixed`/`follow`,默认 `fixed`;Studio 必须写 `follow`)、`hooks/plugins/skills`。
 - `[sandbox] additional_ro_binds = ["/opt/tools"]` —— ah schema 支持的只读文档挂载点,但 **Studio 当前默认不生成**。
   2026-07-05 实测 ah 1.3.0 仍会把它翻译成
@@ -267,10 +267,11 @@ cmd 现在会在进入 Claude Code 前补 `$HOME/.local/bin/claude -> <真实 cl
    (predict/run + trace 观察 + golden diff + 优化方向)。
 3. **知识库挂载恢复**:等 ah 不再把 ro bind 落到 WSL 不支持的 user scope `BindReadOnlyPaths` 后,
    再恢复真正只读挂载;在此之前不写 `[sandbox] additional_ro_binds`。
-4. **provider 升级**:装了 codex/antigravity 后把 Lachesis→codex、Atropos→antigravity,验证跨 provider
-   人格注入(codex→`.codex/AGENTS.md`、antigravity→`.gemini/AGENTS.md`)。
-5. **provider 可用性自动升级**:当前 Studio 默认全部 fallback claude;后续再按用户是否装 codex/antigravity
-   自动把 Lachesis / Atropos 切到目标 provider。
+4. **Codex provider 已作为显式入口**:Studio 菜单选择 Codex 时 master 与三女神 agents 均写
+   `provider = "codex"`;Codex master 的 auth/rules/skills 分别按 Codex 规则进入
+   `.codex/auth.json`、`.codex/AGENTS.md`、`.agents/skills`。Windows 登录态是源头,WSL/ah sandbox
+   只拿复制/链接后的副本。
+5. **antigravity provider 后续再接**:等本机安装与 provider home 规则确认后,再加第三个菜单项或自动升级。
 6. **打包分发带上 ah ≥1.3.0**(§3 结论)。
 
 ## 9. 阶段 2:接活闭环设计
@@ -478,12 +479,13 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 代码门禁先聚焦 Tauri 单元测试,不需要为了纯配置生成跑完整 Studio:
 
 - `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
-- `transient_ah_config_content` 在 `[master]` 下写入 `window_size = "follow"`,确保 1.3.0 的 tmux
+- `transient_ah_config_content` 按菜单生成 `provider = "claude"` 或 `provider = "codex"`,并在 `[master]`
+  下写入 `window_size = "follow"`,确保 1.3.0 的 tmux
   master pane 自动跟随 attach 终端大小;
 - launcher 在 `ah start` 前拒绝 `ah < 1.3.0`,避免 `window_size = "follow"` 被旧 ah 忽略;
-- launcher 记录启动 ah 前的宿主 HOME;master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
-  `$HOME/.local/bin/claude` symlink,启动后不再出现
-  systemd scope 环境变量警告或 Claude missing/broken 安装警告;
+- launcher 记录启动 ah 前的宿主 HOME;Claude master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
+  `$HOME/.local/bin/claude` symlink;Codex master cmd 补 `$HOME/.local/bin/codex` symlink,并把
+  Windows 源头登录复制到 WSL 后再链接进 ah sandbox 的 `$HOME/.codex/auth.json`;
 - 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
   persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
@@ -494,7 +496,7 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 
 人工验收必须在真实 ah 终端里做,因为阶段 2 的核心是 provider home 物化 + Claude Code 订阅态:
 
-1. 打开一个空白 skill,点「打开 Claude Code」。
+1. 打开一个空白 skill,点「Open in」菜单里的 Claude 与 Codex 两项。
 2. MoirAI 自报身份、cwd、能做什么;不得自称 generic copilot 或把内部槽位名当成身份。
 3. 向 MoirAI 发"帮我把一个 X 流程设计成 skill",它应调用 Clotho 并返回结构化设计。
 4. 制造一个简单编译错误,让 MoirAI 修;它应调用 Lachesis,给出根因和最小修复。

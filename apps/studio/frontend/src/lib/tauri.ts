@@ -100,7 +100,11 @@ export async function openLocalPath(path: string): Promise<boolean> {
   return false
 }
 
-export async function openClaudeCode(workspaceRoot: string | null | undefined): Promise<boolean> {
+async function openCodeAssistant(
+  workspaceRoot: string | null | undefined,
+  command: 'open_claude_code' | 'open_codex_cli',
+  label: 'Claude Code' | 'Codex',
+): Promise<boolean> {
   const targetPath = workspaceRoot?.trim() ?? ''
   if (!targetPath) {
     toast.error('No workspace path available')
@@ -118,14 +122,22 @@ export async function openClaudeCode(workspaceRoot: string | null | undefined): 
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('open_claude_code', { workspaceRoot: targetPath })
-    toast.success('Opening Claude Code')
+    await invoke(command, { workspaceRoot: targetPath })
+    toast.success(`Opening ${label}`)
     return true
   } catch (error) {
     const description = error instanceof Error ? error.message : String(error)
-    toast.error('Failed to open Claude Code', { description })
+    toast.error(`Failed to open ${label}`, { description })
     return false
   }
+}
+
+export async function openClaudeCode(workspaceRoot: string | null | undefined): Promise<boolean> {
+  return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code')
+}
+
+export async function openCodexCli(workspaceRoot: string | null | undefined): Promise<boolean> {
+  return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex')
 }
 
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {

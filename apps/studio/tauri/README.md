@@ -160,12 +160,13 @@ Manual desktop smoke:
 4. Close the window and verify `ps -eo pid,command | grep 'uvicorn app.main:app'` (or Task Manager on Windows) shows no sidecar Python process.
 5. Break Python startup intentionally and confirm Splash Error renders recent sidecar stderr instead of a blank screen.
 
-## "Open in Claude Code" (copilot 面板按钮)
+## "Open in" Claude/Codex (copilot 面板菜单)
 
-按钮 (`open_claude_code` Tauri 命令, `src/lib.rs`) 把当前 skill 工作区交给
-[`ah`](https://github.com/SevenX77/ah)(agent hypervisor)驱动的真实 Claude Code
-跑;Windows 上 `ah` + `claude` 活在 WSL2 里。**装 + 用的完整指南**(含一次性安装、
-点按钮的使用流程、排错、所有权边界)见:
+菜单 (`open_claude_code` / `open_codex_cli` Tauri 命令, `src/lib.rs`) 把当前 skill
+工作区交给 [`ah`](https://github.com/SevenX77/ah)(agent hypervisor)驱动的真实
+Claude Code 或 Codex 跑;Windows 上 `ah` + provider CLI 活在 WSL2 里,但 Codex 登录源
+是 Windows `%USERPROFILE%\.codex\auth.json`。**装 + 用的完整指南**(含一次性安装、
+点菜单的使用流程、排错、所有权边界)见:
 
 - **[`docs/development/open-in-claude-code-setup.md`](../../../docs/development/open-in-claude-code-setup.md)**
 

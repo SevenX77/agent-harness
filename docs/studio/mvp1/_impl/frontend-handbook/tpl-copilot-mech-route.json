@@ -194,8 +194,8 @@
       "group": "crud",
       "endpoint": "GET /api/llm/registry",
       "req": "无入参",
-      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
-      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups 从 model_groups + credentials 派生出「anthropic 兼容的候选 copilot 模型组」，并投影现有 copilot 角色卡；前端只投影、不持第二份真相",
+      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + call_method_id + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
+      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups / compatibleRoutesForRole 从 model_groups + credentials 派生出「当前 Copilot SDK 可驱动的 route」：call_method_id 必须属于 Anthropic Messages family，且 capabilities.tools / capabilities.tool_use 不得有显式 unsupported/false 证据；再投影现有 copilot 角色卡。前端只投影、不持第二份真相；右侧 Available Models 仍显示完整 model_groups，不按 Copilot SDK eligibility 预过滤",
       "provider": "gateway 后端（routers/llm.py get_llm_registry）",
       "id": "iface-c0"
     },

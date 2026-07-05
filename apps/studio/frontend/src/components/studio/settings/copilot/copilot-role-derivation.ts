@@ -25,10 +25,71 @@ export const COPILOT_ANTHROPIC_MESSAGES_METHODS = [
   'openrouter_anthropic_messages',
 ] as const
 
-export function routeSupportsAnthropicMessages(pm: ProviderModelOption): boolean {
-  const m = (pm as { call_method_id?: string | null }).call_method_id
+export type CopilotSdkId = 'claude-agent-sdk'
+
+export const COPILOT_SDK_ROUTE_REQUIREMENTS: Record<
+  CopilotSdkId,
+  {
+    supportedMethodIds: readonly string[]
+    requiredCapabilities: readonly string[]
+  }
+> = {
+  'claude-agent-sdk': {
+    supportedMethodIds: COPILOT_ANTHROPIC_MESSAGES_METHODS,
+    // The Claude Agent SDK probe uses a file-read tool loop. A route with a
+    // verified negative tool capability cannot run Copilot even if its wire
+    // protocol is Anthropic Messages compatible. Unknown stays visible so the
+    // user can test it and turn the capability into evidence.
+    requiredCapabilities: ['tools', 'tool_use'],
+  },
+}
+
+function routeMethodId(route: ProviderModelOption | CopilotRoutePreview): string | null {
+  const methodId = 'methodId' in route
+    ? route.methodId
+    : (route as { call_method_id?: string | null }).call_method_id
+  return typeof methodId === 'string' ? methodId : null
+}
+
+function capabilityValue(
+  route: Pick<ProviderModelOption | CopilotRoutePreview, 'capabilities'>,
+  key: string,
+): unknown {
+  const raw = (route.capabilities as Record<string, unknown> | undefined)?.[key]
+  if (raw && typeof raw === 'object' && 'value' in raw) {
+    return (raw as { value?: unknown }).value
+  }
+  return raw
+}
+
+function capabilityExplicitlyUnsupported(value: unknown): boolean {
+  if (value === false) return true
+  if (typeof value !== 'string') return false
+  const normalized = value.trim().toLowerCase()
+  return normalized === 'false' || normalized === 'unsupported' || normalized === 'no'
+}
+
+export function routeSupportsAnthropicMessages(
+  route: ProviderModelOption | CopilotRoutePreview,
+): boolean {
+  const m = routeMethodId(route)
   if (typeof m !== 'string') return false
   return (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)
+}
+
+export function routeSupportsCopilotSdk(
+  route: ProviderModelOption | CopilotRoutePreview,
+  sdkId: CopilotSdkId = 'claude-agent-sdk',
+): boolean {
+  const requirements = COPILOT_SDK_ROUTE_REQUIREMENTS[sdkId]
+  const methodId = routeMethodId(route)
+  if (!methodId || !requirements.supportedMethodIds.includes(methodId)) {
+    return false
+  }
+
+  return requirements.requiredCapabilities.every((capability) => (
+    !capabilityExplicitlyUnsupported(capabilityValue(route, capability))
+  ))
 }
 
 // 从 base_url 取 host 做 route 消歧标签(同一 provider 多 endpoint 靠 host 区分)。
@@ -103,7 +164,7 @@ export function deriveCopilotCandidateGroups(
 
   const candidates = (modelGroups || []).map((group) => {
     const availableRoutes: CopilotRoutePreview[] = (group.provider_models || [])
-      .filter((pm) => routeSupportsAnthropicMessages(pm))
+      .filter((pm) => routeSupportsCopilotSdk(pm, 'claude-agent-sdk'))
       .map((pm) => {
         const endpointId = pm.endpoint_id || ''
         const endpoint = endpointById.get(endpointId)

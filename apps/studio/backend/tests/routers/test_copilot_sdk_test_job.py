@@ -8,6 +8,7 @@ test_copilot_sdk_test.py and the real spawn by a creds-gated live test.
 from __future__ import annotations
 
 import asyncio
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,13 @@ from app.services.copilot import RouteSdkTestResult
 from app.services.llm_health_store import ActiveCircuitsIndex
 
 _NO_CIRCUITS = ActiveCircuitsIndex.build([])
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+
+
+def assert_english_diagnostic(message: str | None) -> str:
+    assert message, "expected a user-visible diagnostic"
+    assert not _CJK_RE.search(message), message
+    return message
 
 
 def _seed_credentials(monkeypatch: pytest.MonkeyPatch, route: ProviderRoute) -> list[LLMCredentialsFile]:
@@ -95,34 +103,94 @@ def test_start_copilot_sdk_test_job_preserves_gateway_terminal_error(
     assert job.status == "failed"
     assert job.error_code == "resource.no_available_route"
     assert job.error_payload == {"role": "copilot_chat", "route_ids": []}
-    # R-F9: the user-visible message is the human Chinese rendering, not
+    # R-F9: the user-visible message is the human English rendering, not
     # the raw `ResourceTerminalError: ...` repr.
-    assert "ResourceTerminalError" not in (job.message or "")
-    assert "暂无可用模型路由" in (job.message or "")
-    assert "copilot_chat" in (job.message or "")
+    message = assert_english_diagnostic(job.message)
+    assert "ResourceTerminalError" not in message
+    assert "has no available model route" in message
+    assert "copilot_chat" in message
 
 
 def test_human_message_for_error_code_covers_known_codes() -> None:
     """R-F9 acceptance #1 — every error_code surfaced by the gateway path has a
-    human Chinese rendering keyed off the same table the frontend mirrors."""
-    assert "暂无可用模型路由" in llm._human_message_for_error_code(
-        "resource.no_available_route", "X"
-    )
-    assert "不存在或已被删除" in llm._human_message_for_error_code(
-        "resource.role_unknown", "X"
-    )
-    assert "不是 copilot 角色" in llm._human_message_for_error_code(
-        "resource.role_invalid_kind", "X"
-    )
-    assert "缺少必需的 API key" in llm._human_message_for_error_code(
-        "resource.credential_missing", "X"
-    )
+    human English rendering keyed off the same table the frontend mirrors."""
+    messages = [
+        llm._human_message_for_error_code("resource.no_available_route", "X"),
+        llm._human_message_for_error_code("resource.role_unknown", "X"),
+        llm._human_message_for_error_code("resource.role_invalid_kind", "X"),
+        llm._human_message_for_error_code("resource.credential_missing", "X"),
+        llm._human_message_for_error_code("some.new.code", "X"),
+        llm._human_message_for_error_code(None, "X"),
+    ]
+    for message in messages:
+        assert_english_diagnostic(message)
+
+    assert "has no available model route" in messages[0]
+    assert "does not exist or was deleted" in messages[1]
+    assert "is not a copilot role" in messages[2]
+    assert "is missing a required API key" in messages[3]
     # Unknown code → still human, never leaks "ResourceTerminalError" or repr.
-    msg_unknown = llm._human_message_for_error_code("some.new.code", "X")
-    assert "测试失败" in msg_unknown and "some.new.code" in msg_unknown
+    msg_unknown = messages[4]
+    assert "test failed" in msg_unknown and "some.new.code" in msg_unknown
     # None code → fallback to generic message, role still mentioned.
-    msg_none = llm._human_message_for_error_code(None, "X")
-    assert "X" in msg_none and "无法解析" in msg_none
+    msg_none = messages[5]
+    assert "X" in msg_none and "could not resolve" in msg_none
+
+
+def test_get_role_test_results_discards_legacy_cjk_copilot_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_message = "请求超时, 检查网络 / 代理"
+    monkeypatch.setattr(
+        llm,
+        "load_role_test_results",
+        lambda: {
+            "copilot_deepseek_v4_pro": {
+                "role_name": "copilot_deepseek_v4_pro",
+                "status": "failed",
+                "message": legacy_message,
+                "updated_at": "2026-07-05T00:00:00+00:00",
+                "result": {
+                    "role_name": "copilot_deepseek_v4_pro",
+                    "status": "failed",
+                    "warnings": [],
+                    "model_groups": [
+                        {
+                            "canonical_id": "deepseek-v4-pro",
+                            "provider_results": [
+                                {
+                                    "route_id": "qiniu:deepseek-v4-pro",
+                                    "status": "failed",
+                                    "message": legacy_message,
+                                }
+                            ],
+                        }
+                    ],
+                    "sdk_evidence": {
+                        "tested": True,
+                        "passed": 0,
+                        "total": 1,
+                        "routes": {
+                            "qiniu:deepseek-v4-pro": {
+                                "status": "failed",
+                                "message": legacy_message,
+                                "retry_after_seconds": None,
+                            }
+                        },
+                    },
+                },
+            }
+        },
+    )
+
+    response = asyncio.run(llm.get_role_test_results())
+
+    persisted = response.results["copilot_deepseek_v4_pro"]
+    assert_english_diagnostic(persisted.message)
+    sdk_route = persisted.result["sdk_evidence"]["routes"]["qiniu:deepseek-v4-pro"]
+    assert "Previous diagnostic was discarded" in assert_english_diagnostic(sdk_route["message"])
+    provider_result = persisted.result["model_groups"][0]["provider_results"][0]
+    assert "Previous diagnostic was discarded" in assert_english_diagnostic(provider_result["message"])
 
 
 def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(

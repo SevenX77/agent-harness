@@ -282,7 +282,7 @@ def test_rejected_bash_returns_deny(tmp_path: Path) -> None:
             approve=False,
         )
         assert isinstance(result, PermissionResultDeny)
-        assert "拒绝" in result.message
+        assert "denied" in result.message
         assert resolution.resolved is True
 
     asyncio.run(scenario())
@@ -304,7 +304,7 @@ def test_bash_approval_times_out_to_deny(
     )
 
     assert isinstance(result, PermissionResultDeny)
-    assert "未获用户批准" in result.message
+    assert "not approved" in result.message
     assert isinstance(_drain(queue)[0], CopilotEventToolApprovalRequired)
     # 超时后审批号已清理,再批复报 not found。
     late = copilot.resolve_tool_approval("skill-timeout", "tu-timeout", approve=True)

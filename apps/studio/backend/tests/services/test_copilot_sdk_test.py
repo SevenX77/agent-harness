@@ -14,6 +14,7 @@ The real spawn/env contract is only discharged by a creds-gated live test
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
@@ -90,6 +91,13 @@ def _result_message() -> ResultMessage:
 
 
 _TOKEN = "tok123deadbeef"
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+
+
+def assert_english_diagnostic(message: str | None) -> str:
+    assert message, "expected a user-visible diagnostic"
+    assert not _CJK_RE.search(message), message
+    return message
 
 
 def _echoed_token_messages() -> list[object]:
@@ -160,7 +168,8 @@ def test_fails_when_token_is_not_echoed(monkeypatch: pytest.MonkeyPatch) -> None
     result = _run(_route(), _CredProvider())
 
     assert result.status == "failed"
-    assert "token" in (result.message or "") or "读取" in (result.message or ""), result.message
+    message = assert_english_diagnostic(result.message)
+    assert "token" in message or "tool loop" in message, message
 
 
 def test_fails_on_sdk_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,7 +179,7 @@ def test_fails_on_sdk_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _run(_route(), _CredProvider())
 
     assert result.status == "failed"
-    assert "后端连接失败" in (result.message or ""), result.message
+    assert "Backend connection failed" in assert_english_diagnostic(result.message)
 
 
 def test_fails_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +189,7 @@ def test_fails_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _run(_route(), _CredProvider())
 
     assert result.status == "failed"
-    assert "请求超时" in (result.message or ""), result.message
+    assert "Request timed out" in assert_english_diagnostic(result.message)
 
 
 def test_rate_limit_error_surfaces_as_cooling_down(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,5 +266,6 @@ def test_fails_without_spawning_when_api_key_missing(monkeypatch: pytest.MonkeyP
     result = _run(_route(), _CredProvider(secret=None))
 
     assert result.status == "failed"
-    assert "API key" in (result.message or ""), result.message
+    message = assert_english_diagnostic(result.message)
+    assert "API key" in message, message
     assert spawned["called"] is False, "must not spawn a CLI when credentials are missing"

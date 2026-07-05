@@ -16,12 +16,12 @@ describe('normalizeCopilotEvent', () => {
 
   it('maps a context_resolved payload (F4 context echo) with summary + detail', () => {
     const event = normalizeCopilotEvent(
-      { type: 'context_resolved', summary: '本轮注入: view=Edit', detail: '{...}' },
+      { type: 'context_resolved', summary: 'Injected this turn: view=Edit', detail: '{...}' },
       'evt-ctx',
     )
 
     expect(event.type).toBe('context_resolved')
-    expect(event).toMatchObject({ status: 'success', summary: '本轮注入: view=Edit', detail: '{...}' })
+    expect(event).toMatchObject({ status: 'success', summary: 'Injected this turn: view=Edit', detail: '{...}' })
   })
 
   it('falls back to unknown for context_resolved missing detail', () => {

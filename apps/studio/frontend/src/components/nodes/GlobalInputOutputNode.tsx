@@ -1,7 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { AlertTriangle } from 'lucide-react'
-import type { IoInput, IoOutput } from '../../api/types'
-import { Badge } from '../ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { formatNodeCompileError } from './SkillNode'
 import { GLOBAL_INPUT_SOURCE_HANDLE_ID, GLOBAL_OUTPUT_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
@@ -10,15 +8,9 @@ import type { GlobalNodeData } from './types'
 export type { GlobalNodeData } from './types'
 
 type GlobalNode = Node<GlobalNodeData>
-type SchemaField = Pick<IoInput | IoOutput, 'name' | 'type'>
-
-function fieldsFor(data: GlobalNodeData): SchemaField[] {
-  return data.type === 'global-input' ? data.schema.inputs : data.schema.outputs
-}
 
 export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>) {
   const isInput = data.type === 'global-input'
-  const fields = fieldsFor(data)
   const compileErrors = data.compileErrors ?? []
   const compileErrorCount = compileErrors.length
   const compileErrorSummary = compileErrorCount > 0
@@ -53,18 +45,6 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
           <div className="truncate text-sm font-semibold text-foreground">
             {isInput ? 'Input' : 'Output'}
           </div>
-          {fields.length > 0 ? (
-            <div className="mt-2 grid gap-1.5">
-              {fields.map((field) => (
-                <div key={field.name} className="flex min-w-0 items-center justify-between gap-3 text-xs">
-                  <span className="truncate font-mono text-foreground">{field.name}</span>
-                  <Badge variant="secondary" className="shrink-0 font-mono">
-                    {field.type ?? 'unknown'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {compileErrorCount > 0 ? (

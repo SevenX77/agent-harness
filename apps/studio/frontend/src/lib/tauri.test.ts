@@ -9,6 +9,7 @@ import {
   createSkillWorkspace,
   deleteWorkspacePath,
   openClaudeCode,
+  openCodexCli,
   openSkillWorkspace,
   readWorkspaceFile,
   restoreWorkspaceFile,
@@ -152,6 +153,30 @@ describe('desktop shell helpers', () => {
     await resetRuntimeForTest()
 
     await expect(openClaudeCode('/tmp/workspace')).resolves.toBe(false)
+
+    expect(mockInvoke).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
+      description: '/tmp/workspace',
+    })
+  })
+
+  it('opens Codex CLI through the native ah launcher', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue(undefined)
+
+    await expect(openCodexCli('/tmp/workspace')).resolves.toBe(true)
+
+    expect(mockInvoke).toHaveBeenCalledWith('open_codex_cli', {
+      workspaceRoot: '/tmp/workspace',
+    })
+  })
+
+  it('does not invoke the Codex launcher outside desktop runtime', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    await resetRuntimeForTest()
+
+    await expect(openCodexCli('/tmp/workspace')).resolves.toBe(false)
 
     expect(mockInvoke).not.toHaveBeenCalled()
     expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {

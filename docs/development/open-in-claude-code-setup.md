@@ -1,7 +1,7 @@
-# “Open in Claude Code” 安装 + 启动指南（Studio 侧）
+# “Open in Claude / Codex” 安装 + 启动指南（Studio 侧）
 
-Studio copilot 面板右上角的 **“Open in Claude Code”** 按钮,会把你当前打开的
-skill 工作区交给真实的 Claude Code 跑一个交互会话。默认情况下,Studio 会在这个
+Studio copilot 面板右上角的 **“Open in”** 菜单,会把你当前打开的
+skill 工作区交给真实的 Claude Code 或 Codex 跑一个交互会话。默认情况下,Studio 会在这个
 skill 工作区里准备 MoirAI 三女神编排所需的 `.ah/rules` / `.ah/skills`,再交给
 `ah` 启动。这份文档讲**怎么装、怎么用、出问题怎么查**——是 Studio 自己这一套
 (安装脚本 + 本指南),和 `ah` 自身的职责分开(边界见文末「谁负责什么」)。
@@ -12,15 +12,15 @@ skill 工作区里准备 MoirAI 三女神编排所需的 `.ah/rules` / `.ah/skil
 
 ## 0. 它是什么 / 为什么要装这些
 
-点按钮时发生的事:Studio 通过 [`ah`](https://github.com/SevenX77/ah)(agent
-hypervisor)在 **WSL2** 里拉起一个真正的 `claude` 交互会话,跑在你打开的那个
+点菜单时发生的事:Studio 通过 [`ah`](https://github.com/SevenX77/ah)(agent
+hypervisor)在 **WSL2** 里拉起一个真正的 `claude` 或 `codex` 交互会话,跑在你打开的那个
 skill 工作区里。若向上没有用户自己的 `ah.toml`,Studio 会生成 MoirAI 默认编排:
 ah 内部 `[master]` 槽位承载 MoirAI,agents = Clotho / Lachesis / Atropos,并把相关 rules / skills
 写进当前 skill 工作区;若已经有用户 `ah.toml`,用户配置优先,Studio 不覆盖。随后 Studio
 把一个终端窗口 attach 上去。所以点按钮之前,机器上得先有:
-WSL2 + 一个 Linux 发行版 + systemd + tmux + `claude` CLI + `ah` + 一次订阅登录。
+WSL2 + 一个 Linux 发行版 + systemd + tmux + `claude` CLI + Codex CLI + `ah` + 一次订阅登录。
 
-`ah` 自己的安装命令只装 `ah` 一个二进制,**不管** WSL2/tmux/claude/登录这些。
+`ah` 自己的安装命令只装 `ah` 一个二进制,**不管** WSL2/tmux/provider CLI/登录这些。
 所以这些由 Studio 的安装脚本 `scripts/install-claude-code-wsl.ps1` 统一打包。
 
 ---
@@ -34,7 +34,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 ```
 
 脚本**幂等**(随便重跑,已经装好的会跳过),会依次装 WSL2 → 发行版 → systemd +
-镜像网络 → 时区/语言/代理(从 Windows 同步)→ tmux → `ah` → `claude` → 处理登录,
+镜像网络 → 时区/语言/代理(从 Windows 同步)→ tmux → `ah` → `claude` / Codex → 处理登录,
 最后打印 `ah doctor` 自检。
 
 ### 只有两处必须你亲自动手(操作系统安全层面绕不过)
@@ -45,12 +45,15 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 1. **装 WSL2 要重启一次电脑。** 首次装 WSL2 功能后 Windows 需要重启;脚本会提示
    你重启,重启后再跑一遍命令。
    - 如果提示需要管理员权限:用「以管理员身份运行」的 PowerShell 再跑一次。
-2. **首次登录 Claude 要你在浏览器里过一次 OAuth。** 脚本会在 Windows 上装一份
+2. **首次登录 Claude / Codex 要你在浏览器里过一次 OAuth。** 脚本会在 Windows 上装一份
    `claude` CLI(如果还没有),然后让你:开一个新终端跑 `claude` → 浏览器里用你的
    Claude 订阅登录 → 回来重跑安装脚本,它会把登录凭据复制进 WSL。
+   Codex 也一样:脚本会先在 Windows 用户目录安装 standalone Codex CLI,需要时提示你在
+   Windows PowerShell 里跑 `codex login --device-auth`,然后把
+   `%USERPROFILE%\.codex\auth.json` 复制到 WSL 的 `~/.codex/auth.json`。
    - 用的是你的**订阅登录**,不是 API key。
 
-装完最后看到 `Done. Go back to Studio and click 'Open in Claude Code'.` 就 OK 了。脚本会检查
+装完最后看到 `Done. Go back to Studio and use the Claude/Codex assistant menu.` 就 OK 了。脚本会检查
 `ah --version`;低于 `1.3.0` 会自动重装最新 `ah` / `ahd` 并停掉旧 daemon,否则
 `window_size = "follow"` 不会生效。
 
@@ -59,20 +62,20 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 
 ---
 
-## 2. 日常使用:点按钮
+## 2. 日常使用:点菜单
 
 1. Studio 里打开任意一个 skill(进画布)。
-2. 右侧 MoirAI(copilot)面板右上角,点 **“Open in Claude Code”**(终端图标)。
-3. 弹出一个终端窗口,先打印 `Starting Claude Code through ah ...`。
-4. 约 **15–20 秒**(首次冷启动)后自动 attach,你会看到 Claude Code 交互界面
-   (Opus 4.8、当前工作目录路径)。该 tmux 窗口按 ah 1.3.0 的 `window_size = "follow"`
+2. 右侧 MoirAI(copilot)面板右上角,点 **“Open in”**(终端图标),再选 **Claude** 或 **Codex**。
+3. 弹出一个终端窗口,先打印 `Starting Claude Code through ah ...` 或 `Starting Codex through ah ...`。
+4. 约 **15–20 秒**(首次冷启动)后自动 attach,你会看到对应 CLI 交互界面
+   和当前工作目录路径。该 tmux 窗口按 ah 1.3.0 的 `window_size = "follow"`
    跟随当前终端尺寸。
-5. **不用你打字**,Claude 会自己蹦出一段中文状态汇报(我是谁 / 当前是哪个 skill /
-   能帮你做什么),然后停下等你。之后就是一个正常的 Claude Code 会话,直接对话即可。
+5. **不用你打字**,master 会自己蹦出一段中文状态汇报(我是谁 / 当前是哪个 skill /
+   能帮你做什么),然后停下等你。之后就是一个正常的 Claude Code 或 Codex 会话,直接对话即可。
 
 关于这个窗口:
-- 底部那条绿色状态栏是 **tmux**——它让 claude 进程独立于窗口存活。关掉窗口,
-  claude 不会立刻死;再点一次按钮能重新 attach 回同一个会话。
+- 底部那条绿色状态栏是 **tmux**——它让 master 进程独立于窗口存活。关掉窗口,
+  master 不会立刻死;再点一次同一菜单项能重新 attach 回同一个会话。
 - 想临时脱离(不关会话):`Ctrl-b` 然后按 `d`。
 - 窗口中间大片留白是 Claude Code TUI 自身的渲染方式(输入框钉在底部),不是 bug。
 
@@ -85,6 +88,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 | 按钮点了没反应 / 灰着 | 按钮在没有工作区时会禁用;先确认进了某个 skill 的画布。 |
 | 终端弹出但报 `Could not start WSL` | WSL2 没装好。跑第 1 步的安装脚本。 |
 | 终端里 `ah CLI was not found in WSL` | `ah` 没装。跑安装脚本(会装 `ah`)。 |
+| 选 Codex 后提示 `Windows Codex auth was not found` | 先在 Windows PowerShell 里跑 `codex login --device-auth`,再重跑安装脚本或重新点 Codex。 |
 | 终端提示 `Studio requires ah >= 1.3.0` | WSL 里还是旧 ah。跑安装脚本,它会升级 ah/ahd 并停掉旧 daemon。 |
 | 终端顶部出现 systemd 的黄色 `Scope command line contains environment variable` | 正常情况下 launcher 会用 `SYSTEMD_LOG_LEVEL=err` 压掉。若仍出现,说明你开的不是最新 Studio 生成的 launcher,重启 Studio 后再点。 |
 | Claude 顶部出现 `.local/bin/claude missing or broken` | 正常情况下 master 启动前会在沙盒 HOME 内补 `$HOME/.local/bin/claude` 链接。若仍出现,重启 Studio 后再点;若用户自写 `ah.toml`,需要自行在 master cmd 里做同样处理。 |
@@ -108,12 +112,13 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
   `ah` 仓库(见 [`docs/handoffs/ah-installer-provisioning-and-master-defaults.md`](../handoffs/ah-installer-provisioning-and-master-defaults.md)
   Req 1)。在 `ah` 接管前,脚本作为**临时桥**代劳;一旦 `ah` 自装运行环境,PART A
   整段删掉。
-- **PART B — Studio 自己的 Claude Code provider 层**(装 `ah`、装 `claude` CLI、
+- **PART B — Studio 自己的 provider 层**(装 `ah`、装 `claude` / Codex CLI、
   订阅登录)。这是 Studio 的**长期职责** —— provider CLI 和用户登录**明确不归 `ah`
-  管**。
+  管**。Codex 的登录源在 Windows `%USERPROFILE%\.codex\auth.json`;WSL 和 ah sandbox
+  只拿复制/链接后的 auth 副本。
 
-启动逻辑(点按钮那条链路)在 `apps/studio/tauri/src/lib.rs` 的 `open_claude_code`
-命令里:
+启动逻辑(点菜单那条链路)在 `apps/studio/tauri/src/lib.rs` 的 `open_claude_code` /
+`open_codex_cli` 命令里:
 
 1. `ah_config_for_workspace` 先向上找用户 `ah.toml`;找到就尊重用户配置,不生成 Studio
    默认文件。
@@ -121,10 +126,13 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
    MoirAI / Clotho / Lachesis / Atropos 的规则,四个既有 copilot skill,以及
    `eval-judgement` skill。受管文件带内容 hash;没有 Studio 标记或 hash 对不上的文件
    一律拒绝覆盖。
-3. Studio 写一个临时 `ah.toml`:launcher 会记录启动 ah 前的宿主 HOME,master 命令会先设置
-   `SYSTEMD_LOG_LEVEL=err`,在沙盒 HOME 内补 `$HOME/.local/bin/claude -> <真实 claude>` 链接,再以
-   `IS_SANDBOX=1 claude --dangerously-skip-permissions '<汇报提示>'` 进入 Claude Code;agents 为
-   Clotho / Lachesis / Atropos(provider 现阶段都用 `claude`),并通过
+3. Studio 写一个临时 `ah.toml`:launcher 会记录启动 ah 前的宿主 HOME。Claude master
+   会在沙盒 HOME 内补 `$HOME/.local/bin/claude -> <真实 claude>` 链接,再以
+   `IS_SANDBOX=1 claude --dangerously-skip-permissions '<汇报提示>'` 进入 Claude Code。
+   Codex master 会在沙盒 HOME 内按 Codex 规则注入 `$HOME/.codex/auth.json`、
+   `$HOME/.codex/AGENTS.md` 和 `$HOME/.agents/skills`,再以
+   `codex --dangerously-bypass-approvals-and-sandbox '<汇报提示>'` 进入 Codex。agents 为
+   Clotho / Lachesis / Atropos(provider 跟随菜单选择为 `claude` 或 `codex`),并通过
    `[master].window_size = "follow"` 让 attach 窗口跟随终端尺寸。Studio 默认不写
    `[sandbox].additional_ro_binds`:当前 ah 会把它落成 WSL 不接受的 user scope `BindReadOnlyPaths`,
    导致 agent pane 启动失败。
@@ -140,4 +148,4 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 - 启动逻辑(Tauri 命令 + WSL payload):`apps/studio/tauri/src/lib.rs`
 - MoirAI / ah 编排设计:`docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md`
 - 给 `ah` 仓库的需求:`docs/handoffs/ah-installer-provisioning-and-master-defaults.md`
-- Tauri 外壳说明里的简版入口:`apps/studio/tauri/README.md` →「Open in Claude Code」
+- Tauri 外壳说明里的简版入口:`apps/studio/tauri/README.md` →「Open in Claude/Codex」

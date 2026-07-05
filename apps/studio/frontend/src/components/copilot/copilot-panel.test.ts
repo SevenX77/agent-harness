@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
   getRoles: vi.fn(),
   prepareCopilotJudgeContext: vi.fn(),
   openClaudeCode: vi.fn(),
+  openCodexCli: vi.fn(),
   buttonProps: [] as Array<Record<string, unknown>>,
+  menuItemProps: [] as Array<Record<string, unknown>>,
 }))
 
 vi.mock('../../api/client', () => ({
@@ -35,6 +37,7 @@ vi.mock('../../hooks/useTemplates', () => ({
 
 vi.mock('../../lib/tauri', () => ({
   openClaudeCode: mocks.openClaudeCode,
+  openCodexCli: mocks.openCodexCli,
 }))
 
 vi.mock('./analysis-bar', () => ({
@@ -57,6 +60,19 @@ vi.mock('./session-tabs', () => ({
 vi.mock('../ui/button', () => ({
   Button: (props: Record<string, unknown>) => {
     mocks.buttonProps.push(props)
+    return React.createElement('button', props, props.children as React.ReactNode)
+  },
+}))
+
+vi.mock('../ui/dropdown-menu', () => ({
+  DropdownMenu: (props: Record<string, unknown>) =>
+    React.createElement('div', { 'data-slot': 'dropdown-menu' }, props.children as React.ReactNode),
+  DropdownMenuTrigger: (props: Record<string, unknown>) =>
+    React.createElement(React.Fragment, null, props.children as React.ReactNode),
+  DropdownMenuContent: (props: Record<string, unknown>) =>
+    React.createElement('div', { 'data-slot': 'dropdown-menu-content' }, props.children as React.ReactNode),
+  DropdownMenuItem: (props: Record<string, unknown>) => {
+    mocks.menuItemProps.push(props)
     return React.createElement('button', props, props.children as React.ReactNode)
   },
 }))
@@ -93,7 +109,10 @@ describe('buildCopilotJudgeDraft', () => {
     mocks.prepareCopilotJudgeContext.mockReset()
     mocks.openClaudeCode.mockReset()
     mocks.openClaudeCode.mockResolvedValue(true)
+    mocks.openCodexCli.mockReset()
+    mocks.openCodexCli.mockResolvedValue(true)
     mocks.buttonProps.length = 0
+    mocks.menuItemProps.length = 0
     mocks.useTemplates.mockReturnValue({ templates: [], templatesLoading: false })
     mocks.useCopilot.mockReturnValue(copilotState())
   })
@@ -158,21 +177,36 @@ describe('buildCopilotJudgeDraft', () => {
     expect(html).toContain('studio-copilot-input')
   })
 
-  it('opens the current workspace in Claude Code through ah', async () => {
-    renderToStaticMarkup(
+  it('opens the current workspace through the Claude/Codex assistant menu', async () => {
+    const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
         workspaceRoot: '/tmp/text-segmentation',
       }),
     )
 
-    const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open in Claude Code')
+    const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open code assistant')
     expect(openButton).toBeTruthy()
+    expect(html).toContain('Claude')
+    expect(html).toContain('Codex')
 
-    ;(openButton?.onClick as (() => void) | undefined)?.()
+    const menuText = (props: Record<string, unknown>) =>
+      renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
+    const claudeItem = mocks.menuItemProps.find((props) => menuText(props).includes('Claude'))
+    const codexItem = mocks.menuItemProps.find((props) => menuText(props).includes('Codex'))
+    expect(claudeItem).toBeTruthy()
+    expect(codexItem).toBeTruthy()
+
+    ;(claudeItem?.onSelect as (() => void) | undefined)?.()
 
     await vi.waitFor(() => {
       expect(mocks.openClaudeCode).toHaveBeenCalledWith('/tmp/text-segmentation')
+    })
+
+    ;(codexItem?.onSelect as (() => void) | undefined)?.()
+
+    await vi.waitFor(() => {
+      expect(mocks.openCodexCli).toHaveBeenCalledWith('/tmp/text-segmentation')
     })
   })
 

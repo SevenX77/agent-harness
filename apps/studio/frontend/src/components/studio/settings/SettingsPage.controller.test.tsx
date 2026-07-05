@@ -19,6 +19,7 @@ vi.mock("sonner", () => ({
     success: vi.fn(),
     loading: vi.fn(),
     info: vi.fn(),
+    warning: vi.fn(),
   },
 }))
 
@@ -270,5 +271,136 @@ describe("useSettingsPageController lifecycle", () => {
 
     expect(forceTestEndpoint).toHaveBeenCalledWith("qiniu-google")
     expect(vi.mocked(getCredentials).mock.calls.length).toBe(getCredentialsCallsBeforeReprobe)
+  })
+
+  it("omits protocol_unsupported endpoints from the full-card routine Test queue", async () => {
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    vi.mocked(getCredentials).mockResolvedValue({
+      providers: [
+        {
+          id: "openrouter-openai",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          last_test_status: "ok",
+        },
+        {
+          id: "openrouter-anthropic",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "anthropic_compatible",
+          last_test_status: "ok",
+        },
+        {
+          id: "openrouter-google",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "google_genai",
+          last_test_status: "protocol_unsupported",
+          last_error_code: "protocol_unsupported",
+          last_test_message: "Protocol not supported.",
+        },
+      ],
+    })
+    vi.mocked(getProviderModels).mockResolvedValue({
+      status: "ok",
+      latency_ms: null,
+      model_seen: "~anthropic/claude-sonnet-latest",
+      message: "Generation verified.",
+      available_models: [{ id: "~anthropic/claude-sonnet-latest" }],
+      available_sdks: ["openai_compatible"],
+    })
+
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      capturedController?.onGetProviderModels("openrouter-openai")
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+
+    expect(getProviderModels).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(getProviderModels).mock.calls.map(([request]) => request.id)).toEqual([
+      "openrouter-openai",
+      "openrouter-anthropic",
+    ])
+    expect(vi.mocked(toast.warning)).not.toHaveBeenCalledWith(
+      expect.stringContaining("2/3 endpoints"),
+      expect.anything(),
+    )
+  })
+
+  it("omits explicitly disabled endpoints from the full-card routine Test queue", async () => {
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    vi.mocked(getCredentials).mockResolvedValue({
+      providers: [
+        {
+          id: "openrouter-openai",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "openai_compatible",
+          endpoint_status: "verified",
+          last_test_status: "ok",
+        },
+        {
+          id: "openrouter-anthropic",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "anthropic_compatible",
+          endpoint_status: "verified",
+          last_test_status: "ok",
+        },
+        {
+          id: "openrouter-google",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          base_url: "https://openrouter.ai/api",
+          provider_type: "google_genai",
+          endpoint_status: "disabled",
+          last_test_status: "untested",
+        },
+      ],
+    })
+    vi.mocked(getProviderModels).mockResolvedValue({
+      status: "ok",
+      latency_ms: null,
+      model_seen: "~anthropic/claude-sonnet-latest",
+      message: "Generation verified.",
+      available_models: [{ id: "~anthropic/claude-sonnet-latest" }],
+      available_sdks: ["openai_compatible"],
+    })
+
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      capturedController?.onGetProviderModels("openrouter-openai")
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+
+    expect(getProviderModels).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(getProviderModels).mock.calls.map(([request]) => request.id)).toEqual([
+      "openrouter-openai",
+      "openrouter-anthropic",
+    ])
   })
 })

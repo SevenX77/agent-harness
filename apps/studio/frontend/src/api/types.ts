@@ -666,13 +666,13 @@ export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | Gr
  * resolving where that field is supplied from. Produced by the backend
  * `compute_field_supply` (services/canvas_data_gap.py) and attached to each
  * `graph_topology` row as `field_supply`. `supplied=false` (`source='none'`) is a
- * data gap the i/o panel renders as a missing-input marker; a supplied field
- * names its `producer_phase` (when `source='phase'`) so the user sees who feeds it.
+ * data gap the i/o panel renders as a missing-input marker; supplied fields name
+ * their source (`phase`, `graph_input`, or `file`) and producer phase when applicable.
  */
 export interface FieldSupplyEntry {
   field: string
   supplied: boolean
-  source: 'phase' | 'graph_input' | 'none'
+  source: 'phase' | 'graph_input' | 'file' | 'none'
   producer_phase: string | null
 }
 

@@ -184,6 +184,53 @@ def test_phase_required_input_without_source_is_compile_fatal(
     _assert_code(exc_info, "[F-v3-graph-dataflow-source-missing]")
 
 
+def test_phase_declared_input_without_source_is_compile_fatal(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
+    _graph(tmp_path, input_field="topic", output_field="answer")
+    _write(
+        tmp_path / "phases" / "main" / "SKILL.md",
+        """---
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      chapter_lines:
+        type: array
+        items:
+          type: string
+      chapter_number:
+        type: integer
+    required: [topic]
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+    required: [answer]
+---
+<role>
+Assistant.
+</role>
+<goal>
+Produce the declared output.
+</goal>
+""",
+    )
+
+    with pytest.raises(SkillLoadError) as exc_info:
+        _compile(tmp_path, mock_skill_resolver)
+
+    _assert_code(exc_info, "[F-v3-graph-dataflow-source-missing]")
+    issues = exc_info.value.compile_result.issues  # type: ignore[attr-defined]
+    assert [issue.field_path for issue in issues] == [
+        "main.io.inputs.properties.chapter_lines",
+        "main.io.inputs.properties.chapter_number",
+    ]
+
+
 def test_required_root_output_must_be_available_at_output_phase(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:

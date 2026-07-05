@@ -136,9 +136,20 @@ def compute_field_supply(
     A field matched by neither is flagged ``supplied=False`` -- a data gap the
     Canvas renders as a missing-input marker on the downstream node.
     """
-    own_inputs = _flatten_field_paths(phase_io_index.get(phase_name, {}).get("inputs", {}))
+    own_input_schemas = phase_io_index.get(phase_name, {}).get("inputs", {})
+    own_inputs = _flatten_field_paths(own_input_schemas)
     supply: list[FieldSupply] = []
     for field_name in own_inputs:
+        if _field_has_file_source(own_input_schemas, field_name):
+            supply.append(
+                {
+                    "field": field_name,
+                    "supplied": True,
+                    "source": "file",
+                    "producer_phase": None,
+                }
+            )
+            continue
         producer = _resolve_producer(field_name, depends_on, phase_io_index)
         if producer is not None:
             supply.append(
@@ -169,6 +180,23 @@ def compute_field_supply(
             }
         )
     return supply
+
+
+def _field_has_file_source(properties: dict[str, object], field_name: str) -> bool:
+    return any(_exact_field_has_file_source(properties, path) for path in _ancestor_paths(field_name))
+
+
+def _exact_field_has_file_source(properties: dict[str, object], field_name: str) -> bool:
+    current: object = properties
+    field_schema: object = None
+    for part in field_name.split("."):
+        if not isinstance(current, dict):
+            return False
+        field_schema = current.get(part)
+        if not isinstance(field_schema, dict):
+            return False
+        current = field_schema.get("properties")
+    return isinstance(field_schema, dict) and field_schema.get("source") == "file"
 
 
 def _resolve_producer(

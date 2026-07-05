@@ -55,6 +55,15 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 
 ### F5. Engine Error Contract
 
+2026-07-05 correction: blackboard data-gap diagnostics are engine compile/lint
+diagnostics, not a Studio-only canvas projection. A phase input declared in
+`io.inputs.properties` must be supplied by graph root input, upstream output,
+`source:file`, or iterate/batch injection; otherwise engine emits
+`[F-v3-graph-dataflow-source-missing]` with `field_path =
+<phase>.io.inputs.properties.<field>`. Studio may still expose
+`graph_topology[].field_supply` for Input-panel supply visualization, but must
+not synthesize node compile errors from it.
+
 - 机制: engine returns structured compile errors; Studio should not invent separate validation rules when engine can own them.
 - 决策: compile check content and error codes stay engine-owned.
 - 原话/来源: `01_workflows/03_compile.md:22` lists engine checks; `01_workflows/03_compile.md:30` says do not create Studio-only compile codes.

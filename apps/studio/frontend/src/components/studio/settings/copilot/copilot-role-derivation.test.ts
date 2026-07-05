@@ -6,11 +6,18 @@ import {
   copilotKeyForGroupId,
   hostFromBaseUrl,
   pickDefaultCopilotGroupIds,
+  routeSupportsCopilotSdk,
   resolveCopilotSendRole,
 } from "./copilot-role-derivation"
-import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
+import type { CredentialsState, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 
-function route(endpointId: string, modelId: string, uiState: string, callMethodId: string = "anthropic_messages") {
+function route(
+  endpointId: string,
+  modelId: string,
+  uiState: ProviderModelOption["ui_state"],
+  callMethodId: string = "anthropic_messages",
+  capabilities: ProviderModelOption["capabilities"] = {},
+): ProviderModelOption {
   return {
     route_id: `${endpointId}:${modelId}`,
     endpoint_id: endpointId,
@@ -22,7 +29,7 @@ function route(endpointId: string, modelId: string, uiState: string, callMethodI
     retry_at: null,
     reason_code: null,
     capability_state: "known",
-    capabilities: {},
+    capabilities,
     // R-F8: backend now emits call_method_id on every route; copilot
     // eligibility is determined by this field belonging to the
     // anthropic-messages family, not by `provider_type==='anthropic_compatible'`.
@@ -30,7 +37,11 @@ function route(endpointId: string, modelId: string, uiState: string, callMethodI
   }
 }
 
-function group(canonicalId: string, displayName: string, uiState = "ready"): ModelGroup {
+function group(
+  canonicalId: string,
+  displayName: string,
+  uiState: ProviderModelOption["ui_state"] = "ready",
+): ModelGroup {
   return {
     canonical_id: canonicalId,
     display_name: displayName,
@@ -147,6 +158,49 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     const candidates = deriveCopilotCandidateGroups([arkGroup], anthropicCredentials)
     expect(candidates).toHaveLength(1)
     expect(candidates[0].availableRoutes).toHaveLength(1)
+  })
+
+  it("filters routes whose explicit capability evidence says the SDK-required tool loop is unsupported", () => {
+    const mixedGroup = {
+      canonical_id: "claude-opus-4.8",
+      display_name: "Claude Opus 4.8",
+      provider_models: [
+        route("anthropic-official", "claude-opus-4.8", "ready", "anthropic_messages", {
+          tools: { value: true, source: "probed_verified" },
+        }),
+        route("no-tools-endpoint", "claude-opus-4.8", "ready", "anthropic_messages", {
+          tools: { value: false, source: "probed_verified" },
+        }),
+      ],
+      status_summary: { ready: 2, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 2,
+        thinking: "unknown",
+        tools: "mixed",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    } as ModelGroup
+    const twoKeyCredentials: CredentialsState = {
+      providers: [
+        { id: "anthropic-official", name: "Anthropic Official", provider_type: "anthropic_compatible", api_key: "x" },
+        { id: "no-tools-endpoint", name: "No Tools", provider_type: "anthropic_compatible", api_key: "x" },
+      ],
+    }
+
+    const candidates = deriveCopilotCandidateGroups([mixedGroup], twoKeyCredentials)
+
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].availableRoutes.map((r) => r.id)).toEqual([
+      "anthropic-official:claude-opus-4.8",
+    ])
+  })
+
+  it("keeps unknown tool capability routes visible so the SDK test can collect evidence", () => {
+    const untested = route("anthropic-official", "claude-opus-4.8", "untested", "anthropic_messages", {})
+
+    expect(routeSupportsCopilotSdk(untested)).toBe(true)
   })
 })
 

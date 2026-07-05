@@ -17,7 +17,7 @@
       "n": 55,
       "cap": "copilot-role-list",
       "design_ref": "atom-55",
-      "current": "现状:已接真数据,Built-in 判定用了一套与浮出阶梯重复的脆逻辑(偏差)。realCopilotRoles 由 deriveCopilotCandidateGroups(copilot-role-derivation.ts)从真实 modelGroups + credentials 派生:按 provider_type=='anthropic_compatible' 滤出 anthropic 兼容 endpoint、再滤掉无可用 route 的组。activeRoles(CopilotTab.tsx)把 data.roles 里 role_kind=='copilot' 的角色对齐渲染:有 model group 的走 CopilotRoleCard、没选的走 EmptyCopilotRoleCard;Built-in/Third-party 徽章按 source 标。偏差点:deriveCopilotCandidateGroups 里 isBuiltIn 是一段独立硬编码的 canonical_id 白名单(group.canonical_id === 'claude-opus-4.7' || '...-4.8' || 'deepseek-v4-pro' || '...-v3.2-pro'),description 是 group.display_name.includes('Claude') ? 'Anthropic Claude reasoning agent' : 'DeepSeek agent role' 的两句模板——这段白名单与 pickDefaultCopilotGroupIds 的浮出阶梯用的是同一批 canonical_id,却各写各的,容易漂(改了浮出忘了改白名单)。",
+      "current": "现状:已实现且符合。realCopilotRoles 由 deriveCopilotCandidateGroups(copilot-role-derivation.ts)从真实 modelGroups + credentials 派生:routeSupportsCopilotSdk 先按当前 sdkId='claude-agent-sdk' 过滤 call_method_id(Anthropic Messages family),再排除 capabilities.tools / capabilities.tool_use 显式 false/unsupported/no 的 route;capability unknown 保留以便 Test 收集证据。activeRoles(CopilotTab.tsx)把 data.roles 里 role_kind=='copilot' 的角色对齐渲染:有 model group 的走 CopilotRoleCard、没选的走 EmptyCopilotRoleCard;configured card 的 visibleRoutes 也走 compatibleRoutesForRole,所以旧 fallback_chain 里残留的不兼容 route 不会在页面显示。Built-in/Third-party 判定已复用 #56 的 pickDefaultCopilotGroupIds,description/title 直接取 model_group.display_name,不再有 includes('Claude') 模板或第二份白名单。右侧 AvailableModelsSidebar 仍吃完整 modelGroups,不按 Copilot SDK eligibility 预过滤。",
       "gap": "✅ 本次已实施并通过两层测试,符合设计。",
       "fe_status": "符合",
       "be_dep": "无后端依赖(后端不需改)。canonical_id 已在 GET /registry 的 model_group DTO(RoleModelGroup.canonical_id)里返回,Built-in 判定与描述都是纯前端用已有字段算——spec §3.2 已澄清这不是『缺后端 DTO 元数据契约』,无需后端先行。"
@@ -63,8 +63,8 @@
       "n": 60,
       "cap": "route-fallback-add-remove",
       "design_ref": "atom-60",
-      "current": "现状:已实现且符合。Add route 走 CopilotModelGroupCard 的 AddRouteMenu → onAddRoute → updateRouteOrder 追加;垃圾桶 onRemoveRoute → 从兜底序移除;两者都写 fallback_chain → 保存。可追加候选 = appendableRoutes(CopilotTab.tsx,visibleRoutes 里还没在链里的);visibleRoutes 来自 compatibleRoutesForRole → modelGroup.availableRoutes,而 availableRoutes 在 deriveCopilotCandidateGroups 里已按 provider_type=='anthropic_compatible' 的真 capability 过滤,不靠名字猜。",
-      "gap": "符合设计,无需改。spec §3.2 要取代的前端名字启发式 isClaudeAgentSdkCompatibleRoute 在现码已不存在(grep 无),eligible 改用真 capability(anthropic 兼容协议)。",
+      "current": "现状:已实现且符合。Add route 走 CopilotModelGroupCard 的 AddRouteMenu → onAddRoute → updateRouteOrder 追加;垃圾桶 onRemoveRoute → 从兜底序移除;两者都写 fallback_chain → 保存。可追加候选 = appendableRoutes(CopilotTab.tsx,visibleRoutes 里还没在链里的);visibleRoutes 来自 compatibleRoutesForRole → routeSupportsCopilotSdk,同一判据也用于 configured role card 的 chainRoutes 和拖入模型组后的 applyCopilotModelGroupSelection 写回。routeSupportsCopilotSdk 以 sdkId 查 COPILOT_SDK_ROUTE_REQUIREMENTS:Claude Agent SDK 支持 call_method_id ∈ anthropic_messages / ark_anthropic_messages / deepseek_anthropic_messages / openrouter_anthropic_messages,并排除已验证不支持 tools/tool_use 的 route;unknown 能力保留供 Test。",
+      "gap": "符合设计,无需改。spec §3.2 要取代的前端名字启发式 isClaudeAgentSdkCompatibleRoute 在现码已不存在(grep 无),eligible 改用真 protocol/capability 证据(call_method_id + tools/tool_use)。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。PUT /llm/roles(保存增删)+ GET /registry(提供 provider_type/capability)均已实现。后端 D5 收口=ok。"
     },
@@ -286,17 +286,28 @@
       ],
       "shots": [
         "Add route 只列兼容且未在链里的 route",
-        "垃圾桶删一条 route"
+        "垃圾桶删一条 route",
+        "已配置角色卡过滤不支持当前 SDK protocol / 必需 capability 的 route"
       ],
       "fe_status": "符合",
       "layer1": [
-        "断言 appendableRoutes = visibleRoutes 里不在 routeOrder 的;visibleRoutes 来自按 anthropic_compatible 过滤的 availableRoutes。",
+        "断言 appendableRoutes = visibleRoutes 里不在 routeOrder 的;visibleRoutes 来自 routeSupportsCopilotSdk(call_method_id + tools/tool_use evidence)。",
         "Add route → 断言追加到兜底序尾;垃圾桶 → 断言从序移除。",
+        "回归:configured role 的旧 fallback_chain 若含 openai_chat_completions 或 tools=false route,页面不渲染 data-copilot-route-id,ready badge 只按兼容 route 计数。",
+        "回归:拖入非 Claude/OpenAI model group 后右侧模型库仍显示完整模型组,但 Copilot 角色卡不渲染不兼容 route。",
+        "回归:英文 locale 的 copilot 文案无 CJK;后端中文 SDK 诊断经 localizeCopilotRouteDiagnostic 在英文 UI 转成英文。",
         "回归:无 isClaudeAgentSdkCompatibleRoute 名字启发式(grep 空)。"
       ],
       "layer2": [
         "点 Add route 看候选只含兼容 route。",
-        "删一条 route 看链更新。"
+        "删一条 route 看链更新。",
+        "Settings→Copilot:Claude Opus 4.8 卡仅显示 Anthropic route;DeepSeek V4 Pro 因当前 route 不满足 Claude Agent SDK 判据显示 0/0 SDK Ready 且无 route chip;右侧 Available Models 仍显示完整模型库;Language=English 时页面正文/route tooltip 无中文。"
+      ],
+      "screenshots": [
+        {
+          "file": "screenshots/copilot-route-sdk-filter.png",
+          "caption": "2026-07-05 真机验证:Copilot 角色卡按 Claude Agent SDK protocol/capability 过滤 route;DeepSeek V4 Pro 的不兼容 route 不显示,右侧 Available Models 保持全量,英文 tooltip 无中文诊断泄漏。"
+        }
       ]
     },
     {

@@ -126,6 +126,79 @@ function openAiModelGroup(): ModelGroup {
   }
 }
 
+function mixedSdkCompatibilityModelGroup(): ModelGroup {
+  return {
+    canonical_id: "claude-opus-4.8",
+    display_name: "Claude Opus 4.8",
+    provider_models: [
+      {
+        route_id: "anthropic-official:claude-opus-4.8",
+        endpoint_id: "anthropic-official",
+        provider_label: "Anthropic Official",
+        provider_kind: "official",
+        provider_model_id: "claude-opus-4.8",
+        ui_state: "ready",
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: "known",
+        capabilities: {
+          tools: { value: true, source: "probed_verified" },
+        },
+        call_method_id: "anthropic_messages",
+      },
+      {
+        route_id: "openai-compat:claude-opus-4.8",
+        endpoint_id: "openai-compat",
+        provider_label: "OpenAI Compat",
+        provider_kind: "third_party",
+        provider_model_id: "claude-opus-4.8",
+        ui_state: "ready",
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: "known",
+        capabilities: {
+          tools: { value: true, source: "probed_verified" },
+        },
+        call_method_id: "openai_chat_completions",
+      },
+      {
+        route_id: "anthropic-no-tools:claude-opus-4.8",
+        endpoint_id: "anthropic-no-tools",
+        provider_label: "Anthropic No Tools",
+        provider_kind: "third_party",
+        provider_model_id: "claude-opus-4.8",
+        ui_state: "ready",
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: "known",
+        capabilities: {
+          tools: { value: false, source: "probed_verified" },
+        },
+        call_method_id: "anthropic_messages",
+      },
+    ],
+    status_summary: {
+      ready: 3,
+      untested: 0,
+      cooling_down: 0,
+      historical_ready: 0,
+      failed: 0,
+      off: 0,
+    },
+    capability_summary: {
+      capability_known_count: 3,
+      thinking: "unknown",
+      tools: "mixed",
+      structured_output: "unknown",
+      max_context_tokens: null,
+      max_output_tokens: null,
+    },
+  }
+}
+
 function credentials(): CredentialsState {
   return {
     providers: [
@@ -138,6 +211,18 @@ function credentials(): CredentialsState {
       {
         id: "qiniu-anthropic",
         name: "Qiniu Anthropic",
+        provider_type: "anthropic_compatible",
+        api_key: "**********",
+      },
+      {
+        id: "openai-compat",
+        name: "OpenAI Compat",
+        provider_type: "openai_compatible",
+        api_key: "**********",
+      },
+      {
+        id: "anthropic-no-tools",
+        name: "Anthropic No Tools",
         provider_type: "anthropic_compatible",
         api_key: "**********",
       },
@@ -171,6 +256,41 @@ function roles(): RolesData {
         fallback_chain: [
           { route_id: "anthropic-official:claude-opus-4-7", runtime_settings: {} },
           { route_id: "qiniu-anthropic:claude-opus-4-7", runtime_settings: {} },
+        ],
+        lint_requirements: {},
+      },
+    },
+  }
+}
+
+function rolesWithMixedSdkCompatibilityRoutes(): RolesData {
+  return {
+    schema_version: 3,
+    models: {},
+    providers: {},
+    model_profiles: {},
+    model_bundles: {},
+    roles: {
+      copilot_opus: {
+        role_kind: "copilot",
+        system_prompt_prefix: "",
+        model_fallback_enabled: true,
+        intent: { provider_preference: "manual_order" },
+        model_groups: [],
+        active_model: "claude-opus-4.8",
+        models: {
+          "claude-opus-4.8": {
+            providers: [
+              "anthropic-official:claude-opus-4.8",
+              "openai-compat:claude-opus-4.8",
+              "anthropic-no-tools:claude-opus-4.8",
+            ],
+          },
+        },
+        fallback_chain: [
+          { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+          { route_id: "openai-compat:claude-opus-4.8", runtime_settings: {} },
+          { route_id: "anthropic-no-tools:claude-opus-4.8", runtime_settings: {} },
         ],
         lint_requirements: {},
       },
@@ -461,6 +581,32 @@ describe("CopilotTab available model drag-in", () => {
     expect(html).toContain('data-available-model-pointer-drag-source="true"')
   })
 
+  it("filters configured role routes by the active Copilot SDK protocol and required capabilities", () => {
+    const html = renderToStaticMarkup(
+      <CopilotTab
+        data={rolesWithMixedSdkCompatibilityRoutes()}
+        credentials={credentials()}
+        modelGroups={[mixedSdkCompatibilityModelGroup()]}
+      />,
+    )
+
+    expect(html).toContain('data-copilot-route-id="anthropic-official:claude-opus-4.8"')
+    expect(html).not.toContain('data-copilot-route-id="openai-compat:claude-opus-4.8"')
+    expect(html).not.toContain('data-copilot-route-id="anthropic-no-tools:claude-opus-4.8"')
+    expect(html).toContain("1/1 SDK Ready")
+  })
+
+  it("keeps the Available Models sidebar unfiltered even when a model has no Copilot SDK route", () => {
+    const html = renderToStaticMarkup(
+      <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={[openAiModelGroup()]} />,
+    )
+
+    expect(html).toContain('data-copilot-available-models-sidebar="true"')
+    expect(html).toContain("GPT 4.1")
+    expect(html).toContain("OpenAI Official")
+    expect(html).not.toContain('data-copilot-route-id="openai-official:gpt-4.1"')
+  })
+
   it("makes both empty and configured Copilot role cards available-model drop zones", () => {
     const emptyHtml = renderToStaticMarkup(
       <CopilotTab data={rolesWithDraft()} credentials={credentials()} modelGroups={registryModelGroups()} />,
@@ -505,7 +651,7 @@ describe("CopilotTab available model drag-in", () => {
     expect(html).toContain('data-copilot-role-card="true"')
     expect(html).not.toContain('data-copilot-empty-role-card="true"')
     expect(html).toContain("GPT 4.1")
-    expect(html).toContain("OpenAI Official")
+    expect(html).not.toContain('data-copilot-route-id="openai-official:gpt-4.1"')
   })
 })
 
@@ -783,6 +929,23 @@ describe("copilot empty-state + untested-warning text routed through i18n", () =
     expect(zh.copilot.addModelTooltip).toContain("模型组")
     expect(zh.copilot.roleCard.untestedWarning).toContain("{{n}}")
     expect(zh.copilot.roleCard.untestedWarning).toContain("未测试")
+  })
+})
+
+describe("Copilot English locale", () => {
+  function collectStrings(value: unknown): string[] {
+    if (typeof value === "string") return [value]
+    if (Array.isArray(value)) return value.flatMap(collectStrings)
+    if (value && typeof value === "object") {
+      return Object.values(value).flatMap(collectStrings)
+    }
+    return []
+  }
+
+  it("does not contain Chinese UI copy in the English bundle", async () => {
+    const en = (await import("@/locales/en/settings.json")).default
+
+    expect(collectStrings(en.copilot).join("\n")).not.toMatch(/[\u3400-\u9fff]/)
   })
 })
 

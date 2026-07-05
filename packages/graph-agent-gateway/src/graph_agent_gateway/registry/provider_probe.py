@@ -275,11 +275,13 @@ def endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
     endpoint_id = endpoint.endpoint_id.lower()
     if endpoint.protocol == "ark_runtime" or _host_matches(base_host, "volces.com") or "ark" in endpoint_id:
         return "ark"
+    if "deepseek" in base_host:
+        return "deepseek"
     if endpoint.protocol == "anthropic_compatible":
         return "claude"
     if endpoint.protocol == "google_genai":
         return "gemini"
-    if "deepseek" in base_host or "deepseek" in endpoint_id:
+    if "deepseek" in endpoint_id:
         return "deepseek"
     return "openai"
 
@@ -971,6 +973,8 @@ def _deepseek_anthropic_messages_url(base_url: str) -> str:
     normalized = base_url.rstrip("/")
     if normalized.endswith("/v1"):
         normalized = normalized[:-3]
+    if normalized.endswith("/anthropic"):
+        return f"{normalized}/v1/messages"
     return f"{normalized}/anthropic/v1/messages"
 
 

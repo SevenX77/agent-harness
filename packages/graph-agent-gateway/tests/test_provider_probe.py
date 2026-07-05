@@ -462,6 +462,38 @@ async def test_gateway_openai_probe_own_auth_error_stays_invalid_key() -> None:
     assert result.status == "invalid_key"
 
 
+@pytest.mark.anyio
+async def test_deepseek_anthropic_probe_keeps_canonical_anthropic_base_path() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, json={"id": "ok"}, request=request)
+
+    result = await provider_probe.probe_official_call_method(
+        "deepseek_anthropic_messages",
+        "secret",
+        "https://api.deepseek.com/anthropic",
+        "deepseek-v4-pro",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "ok"
+    assert requests == ["https://api.deepseek.com/anthropic/v1/messages"]
+
+
+def test_deepseek_anthropic_endpoint_backend_uses_deepseek_provider() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="deepseek-official",
+        protocol="anthropic_compatible",
+        base_url="https://api.deepseek.com/anthropic",
+        api_key=SecretStr("secret"),
+        provider_kind="official",
+    )
+
+    assert provider_probe.endpoint_probe_backend(endpoint) == "deepseek"
+
+
 def test_gateway_official_call_method_timeout_allows_slow_openai_pro_responses() -> None:
     timeout = provider_probe._official_call_method_timeout(
         "openai_responses",

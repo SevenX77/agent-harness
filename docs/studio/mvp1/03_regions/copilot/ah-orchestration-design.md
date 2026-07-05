@@ -96,8 +96,11 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 - `[master]`:`enabled`(默认 true)、`cmd`(默认 `claude`)、`provider`(能解析但 **v1 master 仍强制走
   Claude 的 sandbox rules 路径**,README:141)、`readiness_timeout_s`(默认 120)、`window_size`
   (1.3.0 新增;`fixed`/`follow`,默认 `fixed`;Studio 必须写 `follow`)、`hooks/plugins/skills`。
-- `[sandbox] additional_ro_binds = ["/opt/tools"]` —— **知识库文档挂载点**:把设计规范/说明文档目录
-  只读绑进沙盒,女神就能读到(见 §5 知识库)。
+- `[sandbox] additional_ro_binds = ["/opt/tools"]` —— ah schema 支持的只读文档挂载点,但 **Studio 当前默认不生成**。
+  2026-07-05 实测 ah 1.3.0 仍会把它翻译成
+  `systemd-run --user --scope --property=BindReadOnlyPaths=...`;WSL systemd 255 对 user scope 返回
+  `Unknown assignment: BindReadOnlyPaths=...`,会直接导致 `TMUX_COMMAND_FAILED` 并回滚整个 session。
+  在 ah 修正 scope/service 落点或能力探测前,知识通过 `.ah/skills` / rules 中的明确路径提示进入,不走该字段。
 
 ### 4.2 可编辑 Agent 规则 = 人格注入点（README:161-200,**里程碑 1 用的就是这条**）
 
@@ -178,8 +181,9 @@ Atropos <https://en.wikipedia.org/wiki/Atropos>。
 
 - **provider 分工 vs fallback**:里程碑 1 全部用 claude(fallback),证明拓扑与人格注入通;后续按用户是否装
   codex/antigravity 升级到目标 provider(改 `[agents.X].provider` 即可,人格文件不用动)。
-- **知识库**:经 `[sandbox] additional_ro_binds` 把设计/说明文档只读挂进沙盒(Clotho 挂 engine skill 标准
-  + 领域方法论;Lachesis 挂编译错误码手册;Atropos 挂 golden/eval 规范)—— 待接。
+- **知识库**:阶段 2 不再默认经 `[sandbox] additional_ro_binds` 挂载设计/说明文档。该字段在当前 ah 1.3.0 +
+  WSL systemd user scope 下会让 agent spawn 失败;先通过 `.ah/skills` / rules 中的明确资料路径提示接入。
+  等 ah 把只读 bind 改到可用的 transient service 或加入能力探测后,再恢复真正的只读挂载。
 - **工具箱**:skills 经 §4.3、MCP 经 §4.4;当前仅人格(身份)就位。
 - **UI 纪律(不可违反)**:今天只有 **Clotho 真正"入座"**;Studio UI 只显示 **MoirAI** 一个入口,
   **未实现的女神不得出现在 UI**(与叙事文档一致)。
@@ -257,7 +261,8 @@ master pane 有 `claude … .local/bin/claude missing or broken · run claude in
    才能经 bundle `[[mcp.servers]]` 给 ah agent 用(§4.4)。
 2. **Atropos eval skill**:三女神里只有 Atropos 没有对应 skill;需按"科学 eval 机制"补一个
    (predict/run + trace 观察 + golden diff + 优化方向)。
-3. **知识库挂载**:把各女神的规范/手册目录经 `[sandbox] additional_ro_binds` 接上(§5)。
+3. **知识库挂载恢复**:等 ah 不再把 ro bind 落到 WSL 不支持的 user scope `BindReadOnlyPaths` 后,
+   再恢复真正只读挂载;在此之前不写 `[sandbox] additional_ro_binds`。
 4. **provider 升级**:装了 codex/antigravity 后把 Lachesis→codex、Atropos→antigravity,验证跨 provider
    人格注入(codex→`.codex/AGENTS.md`、antigravity→`.gemini/AGENTS.md`)。
 5. **provider 可用性自动升级**:当前 Studio 默认全部 fallback claude;后续再按用户是否装 codex/antigravity
@@ -350,8 +355,9 @@ daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会�
 2. `transient_ah_config_content(workspace_root, platform_paths)`:
    - 生成 master + 三个 agents;
    - 引用 `.ah/skills` 中的 skill 名;
-   - 写入 `[sandbox] additional_ro_binds` 的只读知识库挂载路径;
-   - Windows 下所有给 ah/WSL 看的路径必须先转成 `/mnt/<drive>/...`,不能把 `D:\...` 写进 config。
+   - 不写 `[sandbox] additional_ro_binds`;当前 ah 会把该字段落成 WSL 不接受的 user scope
+     `BindReadOnlyPaths`,导致 `ah start` 在 spawn agent 时失败;
+   - Windows 下所有给 ah/WSL 看的路径若未来进入 config,必须先转成 `/mnt/<drive>/...`,不能把 `D:\...` 写进 config。
 
 默认配置骨架:
 
@@ -376,11 +382,6 @@ skills = ["compile-error-repair"]
 provider = "claude"
 skills = ["eval-judgement"]
 
-[sandbox]
-additional_ro_binds = [
-  "<engine/studio skill spec docs>",
-  "<studio mounted prompt docs>",
-]
 ```
 
 如果工作区向上已经存在用户手写的 `ah.toml`,继续尊重现有 `find_ah_config` 语义:用户配置优先,Studio 不覆盖。此时
@@ -451,10 +452,12 @@ description: 对一条 graph skill 的 predict/run 结果做整体终判。用�
 - 给 Lachesis 类型的字段级修复建议冒充整体 eval。
 ```
 
-### 9.7 知识库挂载
+### 9.7 知识库路径提示
 
-阶段 2 先用全局 `[sandbox] additional_ro_binds` 做只读挂载,不做 per-agent bind。每个 agent 是否读取某份资料由
-rules 约束:
+阶段 2 **不使用**全局 `[sandbox] additional_ro_binds`:ah 1.3.0 会把它翻译成
+`systemd-run --user --scope --property=BindReadOnlyPaths=...`,当前 WSL systemd user scope 会拒绝该属性,
+导致 agent pane 秒退。先通过 rules / skills 明确告诉各角色哪些资料可读;这些路径本来就在同一台机器上,
+Claude Code 以 `--dangerously-skip-permissions` 运行时可直接读取。每个 agent 是否读取某份资料由 rules 约束:
 
 | 资料 | 主要读者 | 用途 |
 |---|---|---|
@@ -463,8 +466,8 @@ rules 约束:
 | `packages/graph-agent` 的 README 与 compile/golden 相关 docs | Lachesis/Atropos | 编译语义、predict/run/eval 机制 |
 | `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md` | MoirAI | 编排真相源 |
 
-Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环境可见的路径。Studio 已有
-`windows_path_to_wsl()` 可复用,新增挂载路径时同样先转换,否则 ah 在 WSL 里看不到 Windows 盘符。
+Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 ah 实际运行环境可见的路径。Studio 已有
+`windows_path_to_wsl()` 可复用,新增路径时同样先转换,否则 ah 在 WSL 里看不到 Windows 盘符。
 
 ### 9.8 验收脚本与人工验收
 
@@ -477,7 +480,8 @@ Windows/WSL 规则:写进 `ah.toml` 的 bind 路径必须是 ah 实际运行环�
   persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
-- `additional_ro_binds` 在 Windows 下输出 WSL 路径;
+- `transient_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
+  拒绝 `BindReadOnlyPaths` 后导致 `TMUX_COMMAND_FAILED`;
 - 已存在 `ah.toml` 时不自动生成 MoirAI 配置,继续走用户配置。
 
 人工验收必须在真实 ah 终端里做,因为阶段 2 的核心是 provider home 物化 + Claude Code 订阅态:

@@ -3497,6 +3497,49 @@ def test_endpoint_test_logs_probe_attempts(
     )
 
 
+def test_endpoint_generation_probe_reports_active_model_atoms(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    active_events: list[tuple[str, ...]] = []
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        del runtime_settings
+        status = "ok" if route.provider_model_id == "gpt-5-mini" else "error"
+        return _route_probe(endpoint, route, status=status)
+
+    async def on_active_change(active_model_ids: tuple[str, ...]) -> None:
+        active_events.append(active_model_ids)
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    result = asyncio.run(
+        llm_router._verify_endpoint_by_generation_probe(
+            endpoint,
+            ("gpt-5", "gpt-5-mini"),
+            {},
+            on_active_change=on_active_change,
+        )
+    )
+
+    assert result.status == "verified"
+    assert result.verified_model_id == "gpt-5-mini"
+    assert active_events == [("gpt-5",), (), ("gpt-5-mini",), ()]
+
+
 def test_official_endpoint_test_verifies_via_one_generation_probe(
     client: TestClient,
     tmp_path: Path,

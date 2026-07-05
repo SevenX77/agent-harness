@@ -11,7 +11,7 @@ export function mergeModelLists(existing: ModelInfo[], incoming: ModelInfo[]): M
 
 // W1-B / R-E5: a manual model test fans out across EVERY configured endpoint of
 // the provider (including failed/disabled). Collapse the per-endpoint results to
-// one row per model, preferring a success — a model that works on at least one
+// one row per model, preferring a success because a model that works on at least one
 // base_url is usable.
 export function aggregateModelResults(results: ProviderModelTestResult[]): ProviderModelTestResult[] {
   const byModel = new Map<string, ProviderModelTestResult>()
@@ -26,14 +26,31 @@ export function aggregateModelResults(results: ProviderModelTestResult[]): Provi
 
 /**
  * The single atomic unit of an LLM test: prove ONE model on ONE (URL, protocol)
- * endpoint. Everything — the endpoint "Test", the ↻ re-probe, and manual model
- * probing — is built out of this one probe so a single code path owns "who is
- * being tested right now" (which in turn drives per-model animation + toast),
- * instead of every caller deriving it from card-wide flags.
+ * endpoint. Endpoint Test, Re-probe, and manual model probing are built out of
+ * this one probe so a single code path owns "who is being tested right now"
+ * (which in turn drives per-model animation + toast), instead of every caller
+ * deriving it from card-wide flags.
  */
 export interface AtomicProbeTask {
   endpointId: string
   modelId: string
+}
+
+export interface AtomicProbeSignal {
+  modelId?: string | null
+  activeModelIds?: readonly string[] | null
+  status?: string | null
+  // Persisted evidence fields stay here so tests can assert they are not live
+  // animation sources.
+  reasonCode?: string | null
+  probeAttemptStatuses?: readonly string[] | null
+}
+
+export function hasActiveAtomicProbeSignal(signal: AtomicProbeSignal): boolean {
+  return signal.status === "testing" || (
+    typeof signal.modelId === "string" &&
+    (signal.activeModelIds?.includes(signal.modelId) ?? false)
+  )
 }
 
 /** PM 2026-07-03: probe at most this many (endpoint, model) cells at once. */

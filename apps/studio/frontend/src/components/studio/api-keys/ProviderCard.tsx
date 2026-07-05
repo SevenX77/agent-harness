@@ -47,6 +47,7 @@ import { inferProviderType, providerCachedTestResult, providerEndpointDraftsForA
 import type { ProviderDraft, ProviderDraftChangeOptions } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
+import { hasActiveAtomicProbeSignal } from "./model-probe-runner"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
 type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
@@ -1767,9 +1768,9 @@ export function ProviderCard({
   const [visible, setVisible] = useState(false)
   const [apiKeyEditing, setApiKeyEditing] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
-  // P1a: model ids currently being probed by the manual model-test panel (the
-  // atomic per-model probe reports them live). Drives per-model chip animation —
-  // exactly the model in flight pulses, no card-wide flag guessing.
+  // P1a: model ids currently being probed by the manual model-test panel. The
+  // atomic per-model probe reports them live, so animation attaches to the
+  // exact model in flight instead of a card-wide flag.
   const [manualTestingModelIds, setManualTestingModelIds] = useState<string[]>([])
   const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
@@ -1783,19 +1784,26 @@ export function ProviderCard({
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || filledBaseUrlRows.length > 0)
   const isGettingModels = draft.testingAction === "models"
-  // Item 2 follow-up (PM 2026-07-03): a single endpoint-tag click scopes the
-  // probe to draft.testingEndpointId, so only THAT tag should spin — not
-  // every sibling under this provider. null/unset (whole-card "Test" button)
-  // still spins every endpoint, matching the existing full-card behavior.
+  // The controller updates testingEndpointId for the exact endpoint currently
+  // being probed, including full-card Test as it advances through the matrix.
   const isEndpointBeingTested = (endpointId: string) =>
-    isGettingModels && (draft.testingEndpointId == null || draft.testingEndpointId === endpointId)
-  // Point 4 (PM 2026-07-03): a third-party model chip pulses only while an
-  // endpoint it actually has a route on is being probed. During a whole-card
-  // Test (testingEndpointId null) that's every model; during a single
-  // endpoint-tag probe it's just the models on that one (URL, protocol) cell,
-  // so sibling-endpoint models stay still instead of all flashing at once.
-  const isModelUnderEndpointTest = (model: ModelInfo) =>
-    routeSummariesForModel(model).some((summary) => isEndpointBeingTested(summary.endpoint_id ?? ""))
+    isGettingModels && draft.testingEndpointId === endpointId
+  // A single endpoint probe may list many models, but only the atomically
+  // probed model route should pulse. The active atom signal comes from either
+  // route status=testing or the backend llm_probe_active event; historical
+  // probe attempts and endpoint membership are not animation sources.
+  const isModelUnderEndpointTest = (model: ModelInfo) => {
+    const summaries = routeSummariesForModel(model)
+    const testingEndpointId = draft.testingEndpointId ?? null
+    return summaries.some((summary) => (
+      (testingEndpointId == null || summary.endpoint_id === testingEndpointId) &&
+      hasActiveAtomicProbeSignal({
+        modelId: model.id,
+        activeModelIds: summary.endpoint_id ? draft.testingModelIdsByEndpoint?.[summary.endpoint_id] : undefined,
+        status: summary.status,
+      })
+    ))
+  }
   // A model chip pulses while it is genuinely being probed: either the endpoint
   // Test is verifying it (isModelUnderEndpointTest) OR the manual model-test
   // panel has an atomic probe for this exact model id in flight.

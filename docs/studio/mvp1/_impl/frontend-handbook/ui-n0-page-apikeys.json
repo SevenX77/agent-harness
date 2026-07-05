@@ -75,7 +75,7 @@
       "term": "批量模型探测（batch model probe）",
       "category": "后端能力",
       "owner": "③b gateway（设计；现码在 ③a 待下沉）",
-      "explain": "判第三方 endpoint 真能不能用的目标方式：不只点一个模型试，而是自动分批（每批约 3 个、优先挑常见可靠模型）去真打推理端点。一批一批打，某批里任一模型成功就判 endpoint 可用并停下；全部探尽都失败才判不可用。这么做是因为单模型探测不可靠——同一模型可能这次 401、下次 200（瞬时抖动）。遇到结构性错配错误码（如「请改用 /v1/messages」）可短路判错，但瞬时类错误（401/429/超时）不许短路。这套「批量探测策略（短路·汇总）」按设计是 ③b 公共能力内核；③a 只做 job/进度/HTTP 包装。",
+      "explain": "判第三方 endpoint 真能不能用的目标方式：不只点一个模型试，而是自动分批（每批约 3 个、优先挑常见可靠模型）去真打推理端点。一批一批打，某批里任一模型成功就判 endpoint 可用并停下；全部探尽都失败才判不可用。这么做是因为单模型探测不可靠——同一模型可能这次 401、下次 200（瞬时抖动）。遇到结构性错配错误码（如「请改用 /v1/messages」）可短路判错，但瞬时类错误（401/429/超时）不许短路。UI 进度也按这套原子理解:正在测哪个 endpoint 就只让那个 endpoint 标签转；model chip 只有该 (endpoint, model) route 有活动原子信号（route status=testing 或后端 llm_probe_active active_model_ids 命中）才转,不能因为被同一个 endpoint 列出来就全体转。这套「批量探测策略（短路·汇总）」按设计是 ③b 公共能力内核；③a 只做 job/进度/HTTP 包装。",
       "detail": [
         [
           "定义层",
@@ -425,7 +425,7 @@
       "module": "测试与模型探测",
       "func": "第三方卡点 Test：用当前 API Key + Base URL 做一次统一连接/模型发现测试，回填 Available Endpoints 与 Available Models。",
       "action": "在第三方卡点 `Test` 按钮。",
-      "fe_logic": "第三方卡只有一个 `Test` 按钮 → 点击前校验 API Key 和 Base URL → 走当前 endpoint 连通 / 模型发现路径 → 结果按参数指纹缓存并投影到卡内状态、`Available Endpoints` 与 `Available Models`；不再同时显示 `Get Models` 与第二个 `Endpoint test`。",
+      "fe_logic": "第三方卡只有一个 `Test` 按钮 → 点击前校验 API Key 和 Base URL → 走当前 endpoint 连通 / 模型发现路径 → 结果按参数指纹缓存并投影到卡内状态、`Available Endpoints` 与 `Available Models`；不再同时显示 `Get Models` 与第二个 `Endpoint test`。单 endpoint 格子测试时,endpoint 标签按 testingEndpointId 显示动画;Available Models 的动画按 model-probe-runner.ts 的原子 probe 信号（route status=testing 或后端 llm_probe_active active_model_ids 命中）附加到对应 model route,不再按 endpoint membership 全体附加。",
       "fe_modules": [
         "test-status-projection"
       ],
@@ -444,7 +444,7 @@
           "connected": "已接通"
         }
       ],
-      "gap": "前端已对齐：第三方卡已清掉 Get Models/Endpoint test 双测试 UI，只保留一个 Test。后端语义仍待统一成不分官/三的 endpoint 测试 + batch/profile probe。"
+      "gap": "前端已对齐：第三方卡已清掉 Get Models/Endpoint test 双测试 UI，只保留一个 Test；2026-07-05 已补齐单 endpoint test 的 model 动画归属,WaveSpeed/OpenAI 这类同 endpoint 列出多个 discovered models 时不会全体转；后端 endpoint generation probe 会通过 llm_probe_active 发布当前活动 model atom。后端语义仍待统一成不分官/三的 endpoint 测试 + batch/profile probe。"
     },
     {
       "n": 26,
@@ -560,7 +560,7 @@
       "module": "状态投影",
       "func": "把后端（③a Studio）测试结果投影成状态标签：第三方卡顶层一个连通徽章（按参数指纹取缓存结果）、官方每条 route 一个彩色 Tag（信后端（③a Studio）权威状态）。",
       "action": "无（测试/加载后自动投影；含改 key 失效回退见 #21）。",
-      "fe_logic": "[[test-status-projection]]（状态投影）把后端（③a Studio）endpoint/route 状态转成 UI 标签：provider 卡内的 Available Endpoints 展示 endpoint 级状态；Available Routes/Models 展示 route/model 级状态；参数变化后按指纹让旧结果失效。",
+      "fe_logic": "[[test-status-projection]]（状态投影）把后端（③a Studio）endpoint/route 状态转成 UI 标签：provider 卡内的 Available Endpoints 展示 endpoint 级状态；Available Routes/Models 展示 route/model 级状态；参数变化后按指纹让旧结果失效。动画也走状态投影:单 endpoint test 下 model chip 只认该 route 自身的原子 probe 信号（route status=testing 或后端 llm_probe_active active_model_ids 命中）,不把同 endpoint discovered/listed 模型误判成正在测试。",
       "fe_modules": [
         "test-status-projection",
         "provider-utils"
@@ -574,7 +574,7 @@
           "connected": "已接通"
         }
       ],
-      "gap": "仍需继续统一到底层 [[six-state]]：当前前端已把 endpoint 详情集中到 Available Endpoints，但后端 route/status 枚举和历史态投影仍需收敛到 6 态标准。"
+      "gap": "仍需继续统一到底层 [[six-state]]：当前前端已把 endpoint 详情集中到 Available Endpoints，且 2026-07-05 已把 model 动画从 endpoint membership 改成活动原子 probe 信号驱动；后端 route/status 枚举和历史态投影仍需收敛到 6 态标准。"
     },
     {
       "n": 31,

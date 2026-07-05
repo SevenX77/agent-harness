@@ -64,6 +64,10 @@ class FakeWebSocket {
     this.onclose?.({ code, reason, wasClean: false })
   }
 
+  receiveJson(payload: unknown): void {
+    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(payload) }))
+  }
+
   close(): void {
     this.readyState = FakeWebSocket.CLOSED
   }
@@ -149,6 +153,37 @@ describe("useStudioEventStream — R-F13 token refresh on reconnect", () => {
     const latest = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
     expect(latest.url).toContain("token=token-rotated")
     expect(latest.url).not.toContain("token=token-initial")
+  })
+})
+
+describe("useStudioEventStream — LLM probe progress", () => {
+  it("dispatches active model atoms from llm_probe_active events", () => {
+    const onLlmProbeActive = vi.fn()
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    function HookHost(): null {
+      useStudioEventStream({ ...noopCallbacks, onLlmProbeActive })
+      return null
+    }
+
+    act(() => {
+      root.render(createElement(HookHost))
+    })
+    act(() => {
+      FakeWebSocket.instances[0].acceptOpen()
+      FakeWebSocket.instances[0].receiveJson({
+        type: "llm_probe_active",
+        endpoint_id: "wavespeed-openai",
+        active_model_ids: ["anthropic/claude-opus-4.8", 123, ""],
+      })
+    })
+
+    expect(onLlmProbeActive).toHaveBeenCalledWith({
+      endpointId: "wavespeed-openai",
+      activeModelIds: ["anthropic/claude-opus-4.8"],
+    })
   })
 })
 

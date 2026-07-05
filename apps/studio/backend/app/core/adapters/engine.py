@@ -151,12 +151,10 @@ def _sha256_hex_from_content_hash(content_hash: str) -> str | None:
 
 
 class _PrivateStudioSkillResolver:
-    """Resolve Studio skill ids through local index, workspace, then bundled skills."""
+    """Resolve Studio skill ids through the opened-skill absolute path index."""
 
     def resolve_skill(self, skill_id: str) -> Path:
         from graph_agent import ResourceNotFoundError
-
-        from app.core import config
 
         safe_skill_id = _safe_studio_segment(skill_id, "skill_id")
         indexed = self._skill_index_entry(safe_skill_id)
@@ -174,14 +172,6 @@ class _PrivateStudioSkillResolver:
                     source_path=indexed_root,
                 ),
             )
-
-        workspace_root = _safe_child_path(config.default_workspace_skills_dir(), safe_skill_id)
-        if self._is_skill_root(workspace_root):
-            return workspace_root
-
-        bundled_root = _safe_child_path(config.SKILLS_DIR, safe_skill_id)
-        if self._is_skill_root(bundled_root):
-            return bundled_root
 
         message = f"skill {safe_skill_id!r}: skill is not registered in Studio"
         raise ResourceNotFoundError(

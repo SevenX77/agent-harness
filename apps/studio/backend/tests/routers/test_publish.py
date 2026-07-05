@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
+from app.core import config
 from app.core.adapters.http_transport import StudioAdapterError
 from app.core.adapters.product_store_local import LocalProductArtifactStore
 from app.core.backends import get_registry_client
@@ -1045,6 +1046,9 @@ def test_publish_skill_retry_rejects_source_missing_release_without_current_user
 
     first = client.post("/api/skills/text-segmentation/publish", json={})
     _rmtree_with_retry(studio_roots[0] / "text-segmentation")
+    index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
+    index.pop("text-segmentation", None)
+    config.SKILL_INDEX_PATH.write_text(json.dumps(index), encoding="utf-8")
     retry = client.post("/api/skills/text-segmentation/publish", json={})
 
     assert first.status_code == 200

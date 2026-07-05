@@ -108,6 +108,17 @@ validator: false
     )
 
 
+async def _register_skill(
+    metadata_store: LocalJsonMetadataStore,
+    skill_id: str,
+    skill_dir: Path,
+) -> None:
+    await metadata_store.save_skill_index_entry(
+        skill_id,
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
+
+
 def test_subgraph_phase_topology_surfaces_absolute_path(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -176,15 +187,14 @@ async def test_resolve_child_graph_topology_returns_child_phases(
 ) -> None:
     from app.core import config
 
-    skills_dir = tmp_path / "skills"
-    workspaces_dir = tmp_path / "workspaces"
+    skills_dir = tmp_path / "default-skills"
     skills_dir.mkdir()
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", workspaces_dir)
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_dir)
 
     parent_dir = skills_dir / "parent"
     parent_dir.mkdir()
     (parent_dir / "GRAPH.md").write_text("placeholder\n", encoding="utf-8")
+    await _register_skill(metadata_store, "parent", parent_dir)
 
     child_dir = skills_dir / "child"
     child_dir.mkdir()
@@ -216,15 +226,14 @@ async def test_resolve_child_graph_topology_includes_path_resolved_detail(
 ) -> None:
     from app.core import config
 
-    skills_dir = tmp_path / "skills"
-    workspaces_dir = tmp_path / "workspaces"
+    skills_dir = tmp_path / "default-skills"
     skills_dir.mkdir()
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", workspaces_dir)
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_dir)
 
     parent_dir = skills_dir / "parent"
     parent_dir.mkdir()
     (parent_dir / "GRAPH.md").write_text("placeholder\n", encoding="utf-8")
+    await _register_skill(metadata_store, "parent", parent_dir)
 
     child_dir = skills_dir / "child"
     child_dir.mkdir()
@@ -262,13 +271,13 @@ async def test_resolve_child_graph_topology_rejects_relative_path(
     from app.core import config
     from fastapi import HTTPException
 
-    skills_dir = tmp_path / "skills"
+    skills_dir = tmp_path / "default-skills"
     skills_dir.mkdir()
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_dir)
     parent_dir = skills_dir / "parent"
     parent_dir.mkdir()
     (parent_dir / "GRAPH.md").write_text("placeholder\n", encoding="utf-8")
+    await _register_skill(metadata_store, "parent", parent_dir)
 
     storage = LocalFilesystemBackend(tmp_path)
     with pytest.raises(HTTPException) as exc_info:
@@ -292,13 +301,13 @@ async def test_resolve_child_graph_topology_rejects_path_outside_boundary(
     from app.core import config
     from fastapi import HTTPException
 
-    skills_dir = tmp_path / "skills"
+    skills_dir = tmp_path / "default-skills"
     skills_dir.mkdir()
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_dir)
     parent_dir = skills_dir / "parent"
     parent_dir.mkdir()
     (parent_dir / "GRAPH.md").write_text("placeholder\n", encoding="utf-8")
+    await _register_skill(metadata_store, "parent", parent_dir)
 
     outside_dir = tmp_path / "outside" / "child"
     outside_dir.mkdir(parents=True)
@@ -326,13 +335,13 @@ async def test_resolve_child_graph_topology_missing_graph_md(
     from app.core import config
     from fastapi import HTTPException
 
-    skills_dir = tmp_path / "skills"
+    skills_dir = tmp_path / "default-skills"
     skills_dir.mkdir()
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_dir)
     parent_dir = skills_dir / "parent"
     parent_dir.mkdir()
     (parent_dir / "GRAPH.md").write_text("placeholder\n", encoding="utf-8")
+    await _register_skill(metadata_store, "parent", parent_dir)
 
     empty_child = skills_dir / "empty-child"
     empty_child.mkdir()

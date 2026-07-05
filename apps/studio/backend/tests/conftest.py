@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import multiprocessing
 import os
 import shutil
@@ -111,21 +112,28 @@ def _community_catalog_neutralized_in_tests(
 
 @pytest.fixture
 def studio_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
-    skills_dir = tmp_path / "skills"
     workspaces_dir = tmp_path / "workspaces"
     global_config_dir = tmp_path / "global-config"
     default_skills_root = global_config_dir / "Skills"
-    skills_dir.mkdir()
-    _write_graph_skill(skills_dir / "text-segmentation", "text-segmentation", "Text segments")
-    _write_graph_skill(skills_dir / "event-extraction", "event-extraction", "Events")
-    _write_graph_skill(skills_dir / "batch-analysis", "batch-analysis", "Batch")
-    _write_graph_skill(skills_dir / "global-synthesis", "global-synthesis", "Global")
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
+    skills_dir = default_skills_root
+    skills_dir.mkdir(parents=True)
+    skill_index: dict[str, dict[str, str]] = {}
+    for skill_id, description in (
+        ("text-segmentation", "Text segments"),
+        ("event-extraction", "Events"),
+        ("batch-analysis", "Batch"),
+        ("global-synthesis", "Global"),
+    ):
+        skill_dir = skills_dir / skill_id
+        _write_graph_skill(skill_dir, skill_id, description)
+        skill_index[skill_id] = {"absolute_path": str(skill_dir), "l2_remote_url": ""}
     monkeypatch.setattr(config, "WORKSPACES_DIR", workspaces_dir)
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", global_config_dir)
     monkeypatch.setattr(config, "SKILL_INDEX_PATH", global_config_dir / "skill_index.json")
     monkeypatch.setattr(config, "APP_SETTINGS_PATH", global_config_dir / "app_settings.json")
     monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", default_skills_root)
+    config.SKILL_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    config.SKILL_INDEX_PATH.write_text(json.dumps(skill_index), encoding="utf-8")
     clear_backend_caches()
     return skills_dir, workspaces_dir
 
@@ -224,4 +232,13 @@ def copy_skill(src_root: Path, dst_root: Path, skill_id: str) -> Path:
     target = dst_root / "default" / "skills" / skill_id
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_root / skill_id, target)
+    register_skill_index_entry(skill_id, target)
     return target
+
+
+def register_skill_index_entry(skill_id: str, skill_dir: Path) -> None:
+    index_path = config.SKILL_INDEX_PATH
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    raw = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {}
+    raw[skill_id] = {"absolute_path": str(skill_dir), "l2_remote_url": ""}
+    index_path.write_text(json.dumps(raw), encoding="utf-8")

@@ -12,7 +12,7 @@ def test_resource_dir_prefers_studio_resource_dir_env() -> None:
     )
 
     assert resource_dir == Path("/tmp/studio-resources").resolve()
-    assert paths.default_skills_dir(resource_dir) == Path("/tmp/studio-resources/skills").resolve()
+    assert not hasattr(paths, "default_skills_dir")
     assert paths.default_config_dir(resource_dir) == Path("/tmp/studio-resources/config").resolve()
     assert (
         paths.default_workspaces_dir(resource_dir)

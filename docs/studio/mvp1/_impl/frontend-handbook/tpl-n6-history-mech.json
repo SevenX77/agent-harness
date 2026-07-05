@@ -8,7 +8,7 @@
     "code_location": "后端:`git_local`(GitLocalService,本地 git 命令封装)的 `auto_commit_run`(成功 run 后自动提交)/`commit_empty_snapshot`(发布时打 release 空提交)/`revert_to`(git reset --hard 回滚);run 编排里 `run_manager._auto_commit_successful_run`(run 成功后调 auto_commit_run 并回填 git_status);路由 `skills.get_skill_history`(合并历史)/`skills.revert_skill`(回滚端点)/`skills._record_release_history_snapshot`(发布快照)。前端:`useLocalHistory`(历史 hook)+ `HistoryPanel`(面板)。",
     "dataflow": [
       "用户跑一次 run 成功 → run 编排 `_auto_commit_successful_run` 调 `auto_commit_run`(git add + commit --allow-empty,提交信息 `auto-run-{run_id}`)",
-      "提交结果回填成本次 run 元数据上的 `git_status`(committed / locked / failed)",
+      "提交结果回填成本次 run 元数据上的 `git_status`(committed / locked / failed / no_git)",
       "前端收到 `run_ended`(只标志结束、不带 metadata)→ 再拉 `GET /skills/{id}/runs/{run_id}` 读 `RunDetail.metadata.git_status` → 投影存档反馈(原子 #1)+ revalidate `/skills/{id}/history`(原子 #2)",
       "面板拉 `GET /skills/{id}/history` → 后端把 git 历史 ∪ product store releases 合并成 GitHistoryItem 列表(按 kind 标 auto_run/manual/release)",
       "用户点某快照 Revert → `POST /skills/{id}/revert {sha}` → 后端 `revert_to`(git reset --hard {sha})→ 回恢复后的 skill detail",
@@ -24,20 +24,20 @@
       "diagram": "",
       "rules": [
         "`auto_commit_run`(成功 run 后自动提交)对 skill 目录跑 git add + commit --allow-empty,提交信息固定为 `auto-run-{run_id}`;skill 目录无 `.git` 时返回 None(不存档,不报错)。",
-        "`_auto_commit_successful_run`(run 编排里的调用方)把提交结果落成 run 元数据上的 `git_status`:成功=committed、遇 git 锁=locked、命令失败=failed,locked/failed 会写 WARNING 日志(可观测降级)。",
+        "`_auto_commit_successful_run`(run 编排里的调用方)把提交结果落成 run 元数据上的 `git_status`:成功=committed、无仓=no_git、遇 git 锁=locked、命令失败=failed,locked/failed 会写 WARNING 日志(可观测降级)。",
         "这是 run 成功的**服务端副作用**:没有独立的前端『存档』端点;前端经 **run 详情读模型**(`GET /skills/{id}/runs/{run_id}` 的 `RunDetail.metadata.git_status`,见下方接口表 `iface-run-detail`)读 `git_status`——运行流 `run_ended` 只标志结束、**不带 metadata**。",
-        "⚠️ **后端边界(MAJOR)**:`auto_commit_run` 在 skill 目录无 `.git` 时返回 None,而 `_auto_commit_successful_run` **不区分 None**,只要不抛异常就把 git_status 置 committed。即 `committed` **不绝对等于**真有一次可回滚的 git 提交(无仓时也会标 committed)。前端据此投影『可回滚』需谨慎;建议后端把无仓情形扩成 `skipped`/`no_repo`,在此之前前端文案不无条件承诺『可回滚快照已存在』。"
+        "PR-A/PR-B 后,普通打开的用户 skill 会自动 `git init`,且历史/运行路径只落到当前 skill 的绝对路径;若仍遇到无 `.git` 的异常目录,后端显式回填 no_git,前端不得把它当作可回滚快照。"
       ],
       "do": [
         "run 成功后自动本地 git 提交(allow-empty)。",
-        "把提交结果回填成 run 元数据 git_status(committed/locked/failed)。",
+        "把提交结果回填成 run 元数据 git_status(committed/no_git/locked/failed)。",
         "git 锁 / 命令失败时写 WARNING、不阻塞 run。"
       ],
       "dont": [
         "不暴露独立的『存档』前端端点(autocommit 是 run 的副作用)。",
-        "无 `.git` 时不存档也不报错(但当前仍标 committed,见上 ⚠️)。"
+        "无 `.git` 时不存档也不报错,并回填 no_git。"
       ],
-      "deviation": "后端已实现且回填 git_status;前端缺口在不消费 git_status、run 完成不给存档反馈(原子 #1 偏差)。另有后端 MAJOR:无 `.git` 时 git_status 仍标 committed(应区分 skipped/no_repo)——属后端 code drift,前端投影需带保留口径。"
+      "deviation": "后端已实现且回填 git_status(committed/no_git/locked/failed);PR-A 自动 git init + PR-B path-first 后,普通 skill history/autocommit 不再冒泡到主仓。前端缺口在不消费 git_status、run 完成不给存档反馈(原子 #1 偏差)。"
     },
     {
       "name": "release 快照标记",
@@ -131,7 +131,7 @@
       "group": "crud",
       "endpoint": "GET /api/skills/{skill_id}/runs/{run_id}",
       "req": "path 参数 skill_id + run_id;无 body",
-      "resp": "RunDetail(`apps/studio/backend/app/models/runs.py`),含 `metadata`(RunMetadata),其 `git_status`∈committed/locked/failed/null 即 #1 要读的存档状态",
+      "resp": "RunDetail(`apps/studio/backend/app/models/runs.py`),含 `metadata`(RunMetadata),其 `git_status`∈committed/no_git/locked/failed/null 即 #1 要读的存档状态",
       "purpose": "#1 的读模型:`run_ended` 只标志结束、不带 metadata,前端须再拉本 run 详情才能读 `git_status` 投影存档反馈;前端可用既有 run-history hook 的 `fetchRunDetail`",
       "provider": "gateway 后端 sidecar(`runs.get_run` → `RunDetail.metadata.git_status`)",
       "id": "iface-run-detail"
@@ -168,7 +168,7 @@
       "item": "成功 run autocommit + git_status 回填",
       "d12": "D12「写盘/ git 走 native-fs」",
       "status": "ok",
-      "note": "`auto_commit_run` + `_auto_commit_successful_run` 已实现:run 成功自动本地提交并回填 git_status(committed/locked/failed)。现由 Python `git_local` 以 git CLI 子进程完成;D12 目标态是写盘/git 迁到 Studio Rust native-fs(属后端占坑,不阻塞前端消费 git_status)。",
+      "note": "`auto_commit_run` + `_auto_commit_successful_run` 已实现:run 成功自动本地提交并回填 git_status(committed/no_git/locked/failed)。PR-A 保证打开的用户 skill 无 .git 时自动 init;PR-B 删除 SKILLS_DIR/default workspace 回退后,autocommit/history 只作用于当前 skill 的绝对路径。现由 Python `git_local` 以 git CLI 子进程完成;D12 目标态是写盘/git 迁到 Studio Rust native-fs(属后端占坑,不阻塞前端消费 git_status)。",
       "ref": "d12"
     },
     {

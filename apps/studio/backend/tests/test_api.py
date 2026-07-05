@@ -34,7 +34,7 @@ FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
 def _open_skills_into_index(workspaces_dir: Path, dirs_by_id: dict[str, Path]) -> None:
     """Record folders in the native-fs skill index so Home (IDE model) lists them.
 
-    Home stopped auto-scanning the bundled SKILLS_DIR registry (01_init.md D11);
+    Home does not auto-scan a bundled skills registry (01_init.md D11);
     a folder surfaces only after it is opened/imported, which the native-fs layer
     records as a skill-index entry. Tests simulate that open by writing the entry.
     """
@@ -449,7 +449,7 @@ def test_fork_skill_copies_directory_and_rewrites_identity(
     assert body["id"] == "text-segmentation-copy"
     assert body["name"] == "text-segmentation-copy"
 
-    target_dir = workspaces_dir / "default" / "skills" / "text-segmentation-copy"
+    target_dir = skills_dir / "text-segmentation-copy"
     assert (target_dir / "GRAPH.md").exists()
     assert (target_dir / "phases" / "setup" / "actions" / "prepare.py").exists()
     assert (target_dir / "golden" / "baseline.json").exists()
@@ -1482,7 +1482,7 @@ def _write_final_state(
     payload: dict[str, Any],
 ) -> Path:
     del workspaces_dir
-    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
+    run_dir = resolve_skill_dir(skill_id) / ".workspace" / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps(payload), encoding="utf-8")
     return run_dir
@@ -1495,7 +1495,7 @@ def _write_result_state(
     payload: dict[str, Any],
 ) -> Path:
     del workspaces_dir
-    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
+    run_dir = resolve_skill_dir(skill_id) / ".workspace" / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
     return run_dir

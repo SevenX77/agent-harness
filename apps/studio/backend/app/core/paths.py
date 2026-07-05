@@ -52,10 +52,6 @@ def default_skills_root(settings_dir: Path) -> Path:
     return settings_dir / "Skills"
 
 
-def default_skills_dir(resource_dir: Path) -> Path:
-    return resource_dir / "skills"
-
-
 def default_config_dir(resource_dir: Path) -> Path:
     return resource_dir / "config"
 

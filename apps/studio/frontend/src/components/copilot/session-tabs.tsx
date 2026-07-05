@@ -18,6 +18,7 @@ export interface SessionTab {
   id: string
   label: string
   isActive: boolean
+  isTemporary?: boolean
 }
 
 /**
@@ -83,9 +84,8 @@ interface SessionTabsProps {
 
 /**
  * Compact, horizontally-scrollable session tab bar with a trailing "+" actions
- * menu for New chat / Restore chat (R17). Renders nothing until there is more
- * than one session OR a non-empty conversation — a single empty chat needs no
- * switcher. Reuses shadcn primitives; no bespoke UI.
+ * menu for New chat / Restore chat (R17). Empty windows keep a non-persisted
+ * draft tab so the restore action is always reachable.
  */
 export function SessionTabs(props: SessionTabsProps) {
   const stripRef = useRef<HTMLDivElement | null>(null)
@@ -122,11 +122,10 @@ export function SessionTabsView({
   onClose,
   stripRef,
 }: SessionTabsProps & { stripRef?: React.Ref<HTMLDivElement> }) {
-  const tabs = sessionTabs(sessions, activeSessionId)
-  const hasContent = sessions.some((session) => session.messages.length > 0)
-  if (tabs.length <= 1 && !hasContent) {
-    return null
-  }
+  const persistedTabs = sessionTabs(sessions, activeSessionId)
+  const tabs: SessionTab[] = persistedTabs.length > 0
+    ? persistedTabs
+    : [{ id: '__temporary-copilot-draft__', label: 'Chat 1', isActive: true, isTemporary: true }]
 
   return (
     <div className="flex items-center gap-1 border-b border-sidebar-border px-2 py-1.5">
@@ -153,24 +152,31 @@ export function SessionTabsView({
                   size="sm"
                   variant="ghost"
                   aria-current={tab.isActive ? 'true' : undefined}
-                  onClick={() => onSwitch(tab.id)}
-                  className={cn('max-w-[10rem] rounded-e-none pe-1', tab.isActive ? '' : 'text-muted-foreground')}
+                  aria-disabled={tab.isTemporary ? 'true' : undefined}
+                  onClick={tab.isTemporary ? undefined : () => onSwitch(tab.id)}
+                  className={cn(
+                    'max-w-[10rem]',
+                    tab.isTemporary ? 'rounded-md pe-3' : 'rounded-e-none pe-1',
+                    tab.isActive ? '' : 'text-muted-foreground',
+                  )}
                 >
                   <span className="truncate">{tab.label}</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{tab.label}</TooltipContent>
             </Tooltip>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={`Close ${tab.label}`}
-              onClick={() => onClose(tab.id)}
-              className="size-6 rounded-s-none text-muted-foreground opacity-60 hover:text-foreground group-hover/tab:opacity-100"
-            >
-              <X className="size-3" />
-            </Button>
+            {tab.isTemporary ? null : (
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Close ${tab.label}`}
+                onClick={() => onClose(tab.id)}
+                className="size-6 rounded-s-none text-muted-foreground opacity-60 hover:text-foreground group-hover/tab:opacity-100"
+              >
+                <X className="size-3" />
+              </Button>
+            )}
           </span>
         ))}
         <ScrollBar

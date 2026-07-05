@@ -201,10 +201,12 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
 
   useEffect(() => {
     if (!skillId) {
+      copilotStore.reset(null)
       return
     }
     if (workspaceRoot) {
-      // Multi-session context: load (or create) sessions for this workspace/skill pair.
+      // Multi-session context: load the persisted window for this workspace/skill
+      // pair. Empty state is valid; the draft materializes only on first send.
       copilotStore.setContext(workspaceRoot, skillId)
       // Cold-start recovery (F2): restore only the last persisted window state
       // (`_window.json`). Historical transcript files stay on disk but are not
@@ -212,18 +214,15 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       let cancelled = false
       void copilotStore.hydrate(workspaceRoot, skillId).finally(() => {
         if (cancelled) return
-        if (copilotStore.getSnapshot().sessions.length === 0) {
-          copilotStore.newSession()
-        }
       })
       return () => {
         cancelled = true
       }
     }
-    // Fallback (web / no workspace identity): main's single-session reset on skill change.
+    // Fallback (web / no workspace identity): keep the chat empty until the
+    // first outgoing/incoming message materializes an in-memory session.
     if (snapshot.skillId !== skillId) {
       copilotStore.reset(skillId)
-      copilotStore.newSession()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skillId, workspaceRoot])
@@ -356,3 +355,5 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     closeSession: (id: string) => { void copilotStore.closeSession(id) },
   }
 }
+
+export type CopilotController = ReturnType<typeof useCopilot>

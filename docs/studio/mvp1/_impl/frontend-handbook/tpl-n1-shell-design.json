@@ -51,7 +51,7 @@
    "module": "壳布局",
    "func": "设计:进入 skill 后的壳布局 = 顶部 Header 横条 + 左侧 12px 宽 Toolbar 竖条 + 三栏 ResizablePanelGroup(可缩放面板组:左面板 / 画布 / Copilot)。",
    "action": "无显式动作(进入 skill 后即为此布局)。",
-   "fe_design": "Workspace 渲染:全宽 Header(顶栏,含 Back-to-Home、Copilot 开关、Settings 入口等)+ 下方 Toolbar(左侧竖排工具条,固定 12 单位宽,始终在)+ 一个水平 ResizablePanelGroup(可缩放面板组)。三栏:左面板(left-panel,仅当 activePanel 非空才挂载,装文件树/属性/IO/时间线/本地历史)、画布(canvas,始终在,装图/编辑器/Home/Settings)、Copilot(copilot,仅当 copilotOpen 才挂载)。设计意图(D11):一个持久的 IDE 壳框架,左 dock 可开合、Copilot 可开合,画布是中心。",
+   "fe_design": "Workspace 渲染:全宽 Header(顶栏,含 Back-to-Home、Copilot 开关、Settings 入口等)+ 下方 Toolbar(左侧竖排工具条,固定 12 单位宽,始终在)+ 一个水平 ResizablePanelGroup(可缩放面板组)。三栏:左面板(left-panel,仅当 activePanel 非空才挂载,装文件树/属性/IO/时间线/本地历史)、画布(canvas,始终在,装图/编辑器/Home/Settings)、Copilot UI panel(仅当 copilotOpen 才渲染右侧面板)。Copilot 的 controller/useCopilot 随 currentSkillId 在 Workspace 级挂载,因此会话加载/WS 生命周期绑定打开/关闭 skill,不绑定面板展开/收起。设计意图(D11):一个持久的 IDE 壳框架,左 dock 可开合、Copilot 可开合,画布是中心。",
    "fe_modules": [
     {
      "name": "Workspace 外壳容器",
@@ -151,7 +151,7 @@
    "module": "Copilot 与启动",
    "func": "设计(D8 MUST):退出再进同一个 skill,Copilot 窗口要和上次离开时一样恢复——打开的会话 tab 集合、上次活跃 tab、历史消息(含 AI 回答)都回来;未打开的历史会话不自动复活;其余工作态(面板/分屏)可丢。",
    "action": "无显式动作(回 Home 再进同一 skill,或冷启动后进同一 skill,对话自动按窗口状态恢复);需要找回未打开历史时用 tab 条右侧 + 菜单的 Restore chat。",
-   "fe_design": "桌面态按 D8(copilot 退出恢复决策:退出再进恢复对话一模一样)实现为两层真相:① session transcript 历史库:copilotStore 的 persistSessionToDisk 经 writeWorkspaceFile(Rust native-fs 封装)把会话落到 .workspace/copilot/sessions/<skillId>/<会话id>.json,由 newSession(空会话也立即写盘)、appendMessage 与 updateMessage(流式结算)触发;② 窗口状态:同目录 _window.json 记录 openSessionIds + activeSessionId,由 new/switch/close/restore 持续更新。再进 / 冷启动时 hydrate 只按 _window.json 读取对应 session 文件并恢复打开的 tab 集合与活跃 tab,不会扫描目录恢复全部历史。关闭 tab 只从窗口状态移除,不删除 transcript;Restore chat 通过原生文件选择器默认打开本 skill session 目录,选中合法 <sessionId>.json 后加回窗口。设计意图(D8):Copilot 对话是用户资产,历史记录不能因关闭 tab 被删;窗口恢复必须等于上次打开状态。Web/非桌面态没有 native-fs,会话退化为内存、刷新即丢——这是 MVP1 桌面优先的设计边界(可接受)。",
+   "fe_design": "桌面态按 D8(copilot 退出恢复决策:退出再进恢复对话一模一样)实现为两层真相:① session transcript 历史库:copilotStore 的 persistSessionToDisk 经 writeWorkspaceFile(Rust native-fs 封装)把会话落到 .workspace/copilot/sessions/<skillId>/<会话id>.json,由显式 New chat、首条消息物化临时草稿、appendMessage 与 updateMessage(流式结算)触发;② 窗口状态:同目录 _window.json 记录 openSessionIds + activeSessionId,由 new/switch/close/restore 持续更新。再进 / 冷启动时 hydrate 只按 _window.json 读取对应 session 文件并恢复打开的 tab 集合与活跃 tab,不会扫描目录恢复全部历史。`openSessionIds=[]` 是合法窗口状态:面板显示不落盘的临时草稿 tab,用户首条消息才创建真实 session 文件并写回窗口状态。关闭 tab 只从窗口状态移除,不删除 transcript;关闭最后一个 tab 写空窗口状态、不补新空文件;Restore chat 通过原生文件选择器默认打开本 skill session 目录,选中合法 <sessionId>.json 后加回窗口。设计意图(D8):Copilot 对话是用户资产,历史记录不能因关闭 tab 被删;窗口恢复必须等于上次打开状态。Web/非桌面态没有 native-fs,会话退化为内存、刷新即丢——这是 MVP1 桌面优先的设计边界(可接受)。",
    "fe_modules": [],
    "be_contract": [
     {
@@ -163,7 +163,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(桌面态:copilotStore 经 Rust native-fs 把会话落 .workspace/copilot/sessions/<skillId>/<id>.json,并用 _window.json 恢复上次打开的 tab 集合+活跃 tab;关闭 tab 不删 transcript,Restore chat 手动加回历史;回 Home 不清 store)。此结论以真代码为准,纠正旧审计稿「纯内存全丢」与 spec 滞后的「未实现」标注。Web 态内存优先、刷新即丢=桌面优先设计边界(可接受)。",
+   "gap_brief": "符合设计(桌面态:copilotStore 经 Rust native-fs 把会话落 .workspace/copilot/sessions/<skillId>/<id>.json,并用 _window.json 恢复上次打开的 tab 集合+活跃 tab;关闭 tab 不删 transcript,关最后一个写空窗口状态且不补新空文件,Restore chat 手动加回历史;回 Home 卸载 skill 后下次按窗口状态恢复)。此结论以真代码为准,纠正旧审计稿「纯内存全丢」与 spec 滞后的「未实现」标注。Web 态内存优先、刷新即丢=桌面优先设计边界(可接受)。",
    "impl_ref": "fn-22"
   },
   {
@@ -285,9 +285,9 @@
    "cap": "copilot-panel-visual-r3",
    "track": "copilot-assist",
    "module": "Copilot 面板",
-   "func": "设计(R3,PM 2026-07-02 视觉反馈;2026-07-05 session 窗口状态修订):① 连接状态不占独立一行(open 时不显示,断连才在标题旁显示紧凑 chip);② 会话 tab 条单行横向滚动(ScrollArea 隐藏原生滚动条)+ 每个 tab 关闭按钮(关闭仅从 _window.json 窗口状态移除、不删 transcript,关最后一个留全新空会话,关活跃 tab 激活前邻居)+ 右侧 + 动作菜单(New chat / Restore chat);③ 消息左右气泡布局(用户右对齐 bg-muted 气泡,助手左对齐纯排版,无 You/Copilot 标签/状态字/头像列);④ 发送到首个正文 token 之间必须有 Thinking 指示(事件前空窗 + running 无正文两段都盖);⑤ 排版 text-sm leading-relaxed。 R4 追加:thinking 用 shadcn shimmer 文字;视口 p-4/gap-3 放宽边距;引入 shadcn tailwind 工具包激活 shimmer/scrollbar/scroll-fade;后端系统提示词加「语言跟随用户」规则(hello 不再回中文)。",
+   "func": "设计(R3,PM 2026-07-02 视觉反馈;2026-07-05 session 窗口状态修订):① 连接状态不占独立一行(open 时不显示,断连才在标题旁显示紧凑 chip);② 会话 tab 条始终显示、单行横向滚动(ScrollArea 隐藏原生滚动条)+ 真实 tab 关闭按钮(关闭仅从 _window.json 窗口状态移除、不删 transcript,关最后一个写空窗口状态且不补新文件,空窗口显示不落盘临时草稿,首条消息才物化,关活跃 tab 激活前邻居)+ 右侧 + 动作菜单(New chat / Restore chat);③ 消息左右气泡布局(用户右对齐 bg-muted 气泡,助手左对齐纯排版,无 You/Copilot 标签/状态字/头像列);④ 发送到首个正文 token 之间必须有 Thinking 指示(事件前空窗 + running 无正文两段都盖);⑤ 排版 text-sm leading-relaxed。 R4 追加:thinking 用 shadcn shimmer 文字;视口 p-4/gap-3 放宽边距;引入 shadcn tailwind 工具包激活 shimmer/scrollbar/scroll-fade;后端系统提示词加「语言跟随用户」规则(hello 不再回中文)。",
    "action": "用户在面板收发消息/切换与关闭 chat tab;点右侧 + 打开动作菜单并选择 New chat 或 Restore chat;断连时看到标题旁提示。",
-   "fe_design": "设计源 03_regions/copilot F1(状态 chip + tab 条)与 F6-⑥⑦⑧(气泡/thinking/排版)。落地组件:components/ui/message.tsx(shadcn message 原语,align start/end)、ui/spinner、ui/scroll-area、ui/dropdown-menu;store 的 closeSession 只更新 _window.json,restoreSessionFromFile 校验所选文件属于当前 skill session 目录且文件名与 session id 匹配;useCopilot 调 selectFile 默认打开 .workspace/copilot/sessions/<skillId>。",
+   "fe_design": "设计源 03_regions/copilot F1(状态 chip + tab 条)与 F6-⑥⑦⑧(气泡/thinking/排版)。落地组件:components/ui/message.tsx(shadcn message 原语,align start/end)、ui/spinner、ui/scroll-area、ui/dropdown-menu;store 的 closeSession 只更新 _window.json,restoreSessionFromFile 校验所选文件属于当前 skill session 目录且文件名与 session id 匹配;SessionTabs 在 sessions=[] 时渲染临时 Chat 1 草稿并保留 + 菜单;useCopilot 调 selectFile 默认打开 .workspace/copilot/sessions/<skillId>,并由 Workspace 级挂载保证 panel 收起不卸载会话/WS。",
    "fe_modules": [
     {
      "name": "消息滚动器(MessageScroller)",
@@ -304,7 +304,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计(本轮落地)。真机验证:header 无 open 行;用户气泡贴右(gapRight 12px vs gapLeft 173px);无 You/Copilot 标签;tab 条单行(sh==ch==24)带关闭按钮、关闭即移出当前窗口;右侧 + 是 New chat / Restore chat 动作菜单;Thinking 从发送 +0ms 可见到首正文 token(暖会话 ~440ms,冷启动覆盖 spawn 全程)。 R4:shimmer thinking、p-4/gap-3、语言规则(test_copilot_system_prompt 锁)已落地。",
+   "gap_brief": "符合设计。真机验证:header 无 open 行;用户气泡贴右(gapRight 12px vs gapLeft 173px);无 You/Copilot 标签;tab 条单行(sh==ch==24)带关闭按钮、关闭即移出当前窗口;空窗口仍显示临时 Chat 1 与右侧 + 菜单;右侧 + 是 New chat / Restore chat 动作菜单;Thinking 从发送 +0ms 可见到首正文 token(暖会话 ~440ms,冷启动覆盖 spawn 全程)。 R4:shimmer thinking、p-4/gap-3、语言规则(test_copilot_system_prompt 锁)已落地。",
    "impl_ref": "fn-27"
   },
   {

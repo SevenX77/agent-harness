@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Command,
   CommandEmpty,
@@ -47,7 +48,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
-import { fieldErrorsByKey } from "@/components/studio/field-compile-errors"
+import { fieldErrorsByKey, lintErrorsForPhase } from "@/components/studio/field-compile-errors"
 import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/components/GraphCanvas"
 import { isSafePhaseId } from "@/components/GraphCanvas/canvas-authoring"
 import type { ResumeRunOptions } from "@/api/client"
@@ -539,6 +540,10 @@ export function PropertiesPanel({
     () => (selectedNode ? fieldErrorsByKey(lintErrors, selectedNode.id) : {}),
     [lintErrors, selectedNode],
   )
+  const nodeLintErrors = useMemo(
+    () => (selectedNode ? lintErrorsForPhase(lintErrors, selectedNode.id) : []),
+    [lintErrors, selectedNode],
+  )
   const phaseFormState = useMemo(() => {
     if (!filePath) {
       return { key: `phase:${skillId ?? "unknown"}:none`, ok: false as const, reason: "missing-node" as const, message: "Select a phase node to edit frontmatter." }
@@ -778,6 +783,7 @@ export function PropertiesPanel({
                 onPromoteNode={onPromoteNode}
               />
             ) : null}
+            <NodeLintSummary errors={nodeLintErrors} />
             {phaseFormState.ok && activeDraft ? (
               <PhaseFrontmatterForm
                 value={activeDraft}
@@ -853,6 +859,31 @@ export function PropertiesPanel({
         )}
       </ScrollArea>
     </div>
+  )
+}
+
+function NodeLintSummary({ errors }: { errors: readonly LintError[] }) {
+  if (errors.length === 0) {
+    return null
+  }
+  const hasError = errors.some((error) => error.severity !== "warning")
+  const title = `${errors.length} lint issue${errors.length === 1 ? "" : "s"} on this node`
+  return (
+    <Alert variant={hasError ? "destructive" : "default"}>
+      <AlertTriangle className="size-3.5" aria-hidden />
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>
+        <ul className="space-y-1">
+          {errors.map((error, index) => (
+            <li key={`${error.file ?? "skill"}:${error.line ?? "noline"}:${error.field_path ?? "fieldless"}:${index}`}>
+              <span className="font-medium">{error.field_path ?? error.file ?? "skill"}</span>
+              {error.line ? <span> · L{error.line}</span> : null}
+              <span> - {error.message}</span>
+            </li>
+          ))}
+        </ul>
+      </AlertDescription>
+    </Alert>
   )
 }
 

@@ -89,11 +89,11 @@
       "n": 10,
       "cap": "data-gap-viz",
       "design_ref": "n2-atom-10",
-      "current": "现状:符合——画布节点已显示 REQ-2 数据断层为 compile 冲突报错。node-compile-errors.ts 的 dataGapErrorsByNode 从 graph_topology[].field_supply 收集 supplied=false 输入字段,生成 file-less CompileError;Workspace 的 compileErrorsByNodeId 用 mergeNodeErrors 把它和 compile/lint 折进同一条节点错误通道,SkillNode 经现有 compileErrors 徽标+tooltip 渲染。字段选取在 io panel 从黑板/state 字段选(io-target/InputPanel),不从上游节点 io.outputs 勾选。",
-      "gap": "无。PM 决定 2026-06-20 把交互模型 pin 为『画布只显缺字段 compile 冲突报错;字段选取在 io panel 从黑板字段选,与画布无关』,旧『按类型相等画红叉 / 勾选 UI』模型已删除,已按此落地。",
+      "current": "现状:符合(2026-07-05 校正)。画布节点错误通道只合并 manual compile 与 first-screen/realtime lint 两路 engine DTO;缺供给字段由 engine dataflow compile/lint 返回 F-v3-graph-dataflow-source-missing,field_path=<phase>.io.inputs.properties.<field>,再由 node-compile-errors.ts 按 field_path 节点前缀投影到 SkillNode。Properties 面板也读同一 active engine lint,对不对应表单字段的 dataflow 诊断显示节点级摘要;编辑器用首屏 lint 到 realtime lint 的同一投影画 Monaco marker。graph_topology[].field_supply 仍随 SkillDetail 返回,仅供 io-target/InputPanel 显示 supplied/source/producer_phase,不再合成 CompileError。",
+      "gap": "无。旧 dataGapErrorsByNode 前端合成路径已删除,避免节点提示、Properties、编辑器、Compile drawer 与 compile 按钮走不同真相源。",
       "fe_status": "符合",
-      "be_dep": "后端已就位(不再 BLOCKER):compute_field_supply(canvas_data_gap.py)随 graph_topology[].field_supply 暴露每个输入字段的供给结构,supplied=false=断层。前端纯读该投影,无第二真相源。",
-      "fe_resync": "2026-06-20 fe_resync: PM pin 设计后落地——dataGapErrorsByNode(node-compile-errors.ts)把 field_supply 的 supplied=false 字段投成节点 compile 冲突报错,Workspace.compileErrorsByNodeId mergeNodeErrors 折入画布节点错误通道,SkillNode 渲染。测试 node-data-gap.test.ts + SkillNode.data-gap.test.tsx 先 RED 后 GREEN(focused 套件全绿)。io panel 字段选取已确认从黑板/state 字段(field_supply)而非上游节点 io.outputs,符合 PM。"
+      "be_dep": "已就绪并接通。engine compile/lint 现在检查 phase io.inputs.properties 声明消费字段的 root/upstream/source:file/iterate-batch 来源;backend 透传 compile_result.issues 到 LintError.field_path 和 CompileError.field。compute_field_supply 保留为面板供给可视化,不是错误真相源。",
+      "fe_resync": "2026-07-05 resync:删除 node-compile-errors.ts 的 dataGapErrorsByNode 与 SkillNode.data-gap/node-data-gap 旧测试;Workspace.compileErrorsByNodeId 不再 merge field_supply。新增 engine strict compile gate 与 backend compile endpoint 测试,前端 node-compile-errors.test.ts 改为断言 engine dataflow field_path 可定位节点并去重 compile/lint 重复诊断;LazyMonacoPanel.test.tsx 锁首屏 lint marker;PropertiesPanel.lint-fields.test.tsx 锁节点级 dataflow 摘要。"
     },
     {
       "n": 11,
@@ -367,27 +367,37 @@
       ]
     },
     {
-      "covers": "#10 data-gap-viz(PM 2026-06-20:画布缺字段 compile 冲突报错)",
+      "covers": "#10 data-gap-viz(engine dataflow single source)",
       "atoms": [
         10
       ],
       "shots": [
-        "上游黑板缺供给的输入字段在画布节点显示为 compile 冲突报错(field·message),tooltip 可见"
+        "缺供给输入字段由 engine compile/lint 返回后,画布节点显示同一条 compile 错误"
       ],
       "fe_status": "符合",
       "layer1": [
-        "RED(已确认):dataGapErrorsByNode 未实现时 node-data-gap.test.ts + SkillNode.data-gap.test.tsx 全 FAIL(TypeError: dataGapErrorsByNode is not a function)。",
-        "GREEN:node-data-gap.test.ts 断言 supplied=false→节点错误(含字段名+upstream 文案)、supplied=true→无错误、多字段聚合、file/line 为 null;SkillNode.data-gap.test.tsx 断言数据断层冲突报错在节点 tooltip 渲染、全供给时无报错。",
-        "回归:node-compile-errors.test.ts + build-nodes.test.ts + SkillNode.compile-errors.test.tsx + io-target.field-supply.test.ts + InputPanel.data-gap.test.tsx 全绿。"
+        "RED(已确认):phase 声明 chapter_lines/chapter_number 但 root/upstream/source:file/iterate 都不供给时,旧 engine compile 通过。",
+        "GREEN:graph-agent strict compile gate 返回两条 F-v3-graph-dataflow-source-missing,field_path 指向 <phase>.io.inputs.properties.<field>。",
+        "回归:backend compile endpoint 返回 422 两条 CompileError.field;frontend node-compile-errors.test.ts 断言 compile/lint field_path 都能定位节点;InputPanel field_supply 测试保留。"
       ],
       "layer2": [
-        "两层渲染验证:dataGapErrorsByNode 纯函数→Workspace mergeNodeErrors→build-nodes 透传 compileErrors→SkillNode 经 renderToStaticMarkup 渲染冲突报错,端到端在测试里走通(无 @testing-library,纯函数 + SSR)。"
+        "两层投影验证:engine compile_result.issues -> backend LintError.field_path / CompileError.field -> Workspace 只合并 compile+lint 两路 engine DTO -> SkillNode 节点 badge/tooltip。"
       ],
       "screenshots": [
         {
           "file": "n2-10-data-gap.png",
-          "caption": "上游黑板缺供给的输入字段，节点上投影为 compile 冲突报错"
+          "caption": "缺供给输入字段在节点上显示为 engine compile/lint 投影的 compile 错误"
         }
+      ],
+      "what": "engine dataflow 对声明但无来源的 io.inputs.properties 字段返回聚合错误;backend compile endpoint 透传 field_path;frontend 节点投影只消费 engine compile/lint DTO,field_supply 仅保留给 InputPanel。",
+      "steps": [
+        "RED: phase 声明 chapter_lines/chapter_number 但 root/upstream/source:file/iterate 都不供给时,旧 engine compile 通过。",
+        "GREEN: engine 返回两条 F-v3-graph-dataflow-source-missing;backend /compile 返回 422 两条 CompileError.field;frontend 按 field_path 将 lint/compile 错误投到节点。"
+      ],
+      "expected": [
+        "Compile 按钮失败且 drawer 列出同一组错误。",
+        "节点 badge、Properties 字段错误、编辑器 marker 来自同一 engine 错误列表。",
+        "field_supply 不再单独制造节点 compile error。"
       ]
     },
     {

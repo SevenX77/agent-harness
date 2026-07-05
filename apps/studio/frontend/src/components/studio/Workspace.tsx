@@ -43,7 +43,7 @@ import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
-import { activeLintErrors, compileErrorsByNode, dataGapErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
+import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
 import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
 import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
@@ -1934,6 +1934,26 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return () => socket.close()
   }, [activeFileDetails, currentSkillId, mutateSkillDetail])
 
+
+  const activeLint = useMemo(
+    () => activeLintErrors({
+      firstScreenLint: skillDetail?.lint_result?.errors,
+      manifestErrors: skillDetail?.manifest_errors,
+      realtime: realtimeLint?.errors,
+    }),
+    [skillDetail?.lint_result, skillDetail?.manifest_errors, realtimeLint],
+  )
+
+  const editorLintResult = useMemo<LintResult | null>(() => {
+    if (!currentSkillId) return null
+    if (realtimeLint != null) return realtimeLint
+    return {
+      status: activeLint.length > 0 ? "failed" : "passed",
+      errors: activeLint,
+      phases_summary: skillDetail?.lint_result?.phases_summary ?? null,
+    }
+  }, [activeLint, currentSkillId, realtimeLint, skillDetail?.lint_result?.phases_summary])
+
   const contextValue = useMemo<WorkspaceContextValue>(() => ({
     currentSkillId,
     navStack: displayNavStack,
@@ -1942,6 +1962,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       right: activeFileDetails.right?.path,
     },
     activeFileDetails,
+    editorLintResult,
     splitMode,
     onFileOpen: handleFileOpen,
     onRevealNodeForFile: handleRevealNodeForFile,
@@ -1964,6 +1985,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     activeFileDetails,
     closeFile,
     currentSkillId,
+    editorLintResult,
     handleFileOpen,
     handleRevealNodeForFile,
     handleRevealSubgraphChildNode,
@@ -2303,24 +2325,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [onCloseSkill])
 
   const currentCompileErrors = currentSkillId ? compileErrors[currentSkillId] ?? [] : []
-  // N3 atom #4: the active lint diagnostics for the canvas/properties projection — the
-  // first-screen SkillDetail sources (lint_result + manifest_errors) seed the initial badges,
-  // and the realtime LintResult (lifted from the editor) overlays them once it resolves.
-  const activeLint = useMemo(
-    () => activeLintErrors({
-      firstScreenLint: skillDetail?.lint_result?.errors,
-      manifestErrors: skillDetail?.manifest_errors,
-      realtime: realtimeLint?.errors,
-    }),
-    [skillDetail?.lint_result, skillDetail?.manifest_errors, realtimeLint],
-  )
   // N3 atom #4: feed the canvas node channel from BOTH manual Compile AND lint — the lint
   // diagnostics are adapted onto the CompileError shape the node tooltip renders, grouped by
   // node, and merged with the compile errors (neither dropped). Previously fed by Compile only.
-  // n2-canvas#10 (data-gap-viz, PM 2026-06-20): also fold in the data-gap channel — each phase
-  // input field the backend flagged `supplied=false` (graph_topology[].field_supply) becomes a
-  // node conflict error, so a missing-blackboard-supply gap shows on the canvas node exactly like
-  // a compile conflict (no checkbox UI, no red-X — selection stays in the i/o panel).
   const compileErrorsByNodeId = useMemo(() => {
     const compileByNode = compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : [])
     const lintByNode = lintErrorsByNode(activeLint)
@@ -2328,10 +2335,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     for (const [nodeId, errors] of Object.entries(lintByNode)) {
       lintAsCompileByNode[nodeId] = errors.map(lintErrorToCompileError)
     }
-    const compileWithLint = mergeNodeErrors(compileByNode, lintAsCompileByNode)
-    const dataGapByNode = dataGapErrorsByNode(skillDetail?.graph_topology)
-    return mergeNodeErrors(compileWithLint, dataGapByNode)
-  }, [activeLint, compileErrors, currentSkillId, skillDetail?.graph_topology])
+    return mergeNodeErrors(compileByNode, lintAsCompileByNode)
+  }, [activeLint, compileErrors, currentSkillId])
   const manualCompileErrorsByNodeId = useMemo(
     () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
     [compileErrors, currentSkillId],
@@ -2358,12 +2363,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // moment a realtime lint has resolved; before that (or when lint is clean) we fall back to
   // the field-bearing manual-Compile errors mapped onto the same LintError shape. Either way
   // the panel reads one DTO with a field_path axis — no client-side field re-derivation.
+  // Active lint includes first-screen SkillDetail diagnostics until realtime lint settles.
   const propertiesFieldErrors = useMemo(() => {
-    if (realtimeLint != null) {
-      return realtimeLint.errors
+    if (realtimeLint != null || activeLint.length > 0) {
+      return activeLint
     }
     return compileErrorsToFieldLintErrors(currentSkillId ? compileErrors[currentSkillId] : [])
-  }, [compileErrors, currentSkillId, realtimeLint])
+  }, [activeLint, compileErrors, currentSkillId, realtimeLint])
 
   const leftPanelOverlay = activePanel ? (
     <WorkspaceLeftPanelOverlay

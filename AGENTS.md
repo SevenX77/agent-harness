@@ -172,6 +172,19 @@ one-page orientation, not the full design.
 - **Single source of truth (底座一)**: config truth (credentials / roles /
   settings) lives in exactly ONE place; never side-cache changing config truth.
   Writes flow frontend → FastAPI → gateway truth.
+- **Server-authoritative state + event-driven revalidation (SSOT 读取原则)**:
+  frontend/backend-local caches are read-through replicas of the owning truth,
+  not secondary truth stores. A cache key may cold-load once when the owning
+  feature/app scope first needs it, and all consumers must share that in-flight
+  request/result. After that, revalidation is allowed only from a closed set of
+  truth-changing triggers: a successful write returning the canonical server
+  snapshot, a backend post-commit domain event for the exact dataset, or an
+  explicit user command whose purpose is to refresh/probe/test that dataset.
+  Component mount/unmount, Settings dialog open/close, tab switch, window focus,
+  timer polling, WebSocket connect/reconnect, and generic "resync" are NOT data
+  changes and must not refetch mutable truth. If an event cannot identify the
+  changed dataset precisely, fix the event contract instead of broad-refreshing
+  registry/roles/settings/templates.
 - **Boundaries, not locks**: engine and gateway are stable foundations with
   strict gates (`mypy --strict` + full module test suites), NOT no-go zones.
   Routine studio plumbing flows through the adapters (`app/core/adapters/`);

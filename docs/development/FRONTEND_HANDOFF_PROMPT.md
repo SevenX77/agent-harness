@@ -52,6 +52,16 @@ packages/graph-agent-gateway(gateway)时也直接去改。开工前必读 / 必�
   MVP1 设计 + 补该模块测试 + 过 mypy --strict 门禁),不许在 studio 层绕着写次优
   方案——为绕开 SDK 改动而造的 workaround 本身就是缺陷。反向仍禁止:studio 专属
   关注点不进 SDK,不绕过 adapter。
+- Server-authoritative state + event-driven revalidation: mutable truth 只由
+  后端/gateway/storage 的唯一 owner 决定;前端缓存只是 read-through 副本。某个
+  cache key 可以在所属 app/feature scope 首次需要时 cold load 一次,并且所有消费者
+  必须共享同一个 in-flight/result。之后只有三类 truth-changing trigger 能重拉:写操作
+  成功并返回 canonical server snapshot、后端在 commit 后发出精确指向该 dataset 的
+  domain event、用户显式点击 refresh/probe/test 这类本意就是更新该 dataset 的命令。
+  组件 mount/unmount、Settings 打开/关闭、tab switch、window focus、timer polling、
+  WebSocket connect/reconnect、泛泛的 resync 都不是数据更新,不得触发 settings/
+  registry/roles/templates 等 mutable truth 重拉。事件无法精确说明变更对象时,修 event
+  contract,不要 broad refresh。
 
 边界与纪律(不可省):
 - 仅当任务是纯 engine/gateway 内部重构、Rust 层(apps/studio/tauri)或顶层架构调整

@@ -24,6 +24,7 @@
 | [`studio-llm-endpoint-connectivity-and-status-projection/`](./studio-llm-endpoint-connectivity-and-status-projection/) | Draft (requirements+research+已确认 design) | endpoint 测试=只测连通性 · **状态投影归一**(单一持久化 ui_state,删前端文本匹配) · 没模型不猜 notable(untested+⚠,不判 failed) · invalid_key⇒disabled · 探测全链路日志 · 手动探测扇出全 endpoint(含 failed) · ark 多协议 · provider id tooltip+索引澄清。上游 `studio-llm-credentials-catalog-ssot` | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
 | [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | Studio v3 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/system-level/workspace-file-system/baseline.md`](../../docs/studio/system-level/workspace-file-system/baseline.md) |
 | [`studio-feature-skill-lifecycle/`](./studio-feature-skill-lifecycle/) | Draft (Review-ready) | 测试输入管理(原生选路径→Python 读入)+ 批量运行(序列自动批量)。已收敛去过度设计:S1 哈希冲突移出(DEF-011)、文件转换工具移交引擎(DEF-012)。建议改名 `test-inputs-batch` | [`docs/studio/02_features/skill-lifecycle/baseline.md`](../../docs/studio/02_features/skill-lifecycle/baseline.md) |
+| [`studio-open-in-binary-provenance/`](./studio-open-in-binary-provenance/) | Draft (research+design 完成) | **Open in Codex/Claude 二进制来源守卫**:Windows Codex 的 WSL 集成劫持 `~/.local/bin/codex` 指向 `/mnt/*` PE → interop 当 Windows 进程执行 → ah 环境变量级沙盒被整体穿透(2026-07-06 实证)。修复:master cmd 拒 `/mnt/*` + codex standalone 稳定路径优先 + 安装脚本自愈 + 设计矩阵补「二进制必须本 OS 原生」铁律 | [`docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md`](../../docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md) |
 
 
 

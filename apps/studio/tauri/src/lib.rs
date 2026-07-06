@@ -1299,72 +1299,90 @@ fn start_code_assistant_status_stream(
     app: tauri::AppHandle,
     config_path: PathBuf,
 ) -> Result<CodeAssistantStatusStream, String> {
-    let mut child = spawn_ah_events_command(&config_path)?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "ah events did not expose stdout".to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
-    let child_slot = Arc::new(Mutex::new(Some(child)));
+    let child_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let thread_stop = Arc::clone(&stop);
     let thread_child = Arc::clone(&child_slot);
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
+        // The events child can die for reasons that are not stop requests —
+        // WSL still booting when the app comes up, `wsl --shutdown`, crashes.
+        // A one-shot child would leave the status frozen on its last
+        // snapshot, so supervise it: respawn with a short backoff until this
+        // stream is explicitly stopped. The respawned `ah events` immediately
+        // emits a fresh snapshot (local inactive when the daemon is absent),
+        // which corrects any staleness accumulated during the gap.
+        let backoff = |stop_flag: &AtomicBool| {
+            for _ in 0..30 {
+                if stop_flag.load(Ordering::SeqCst) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            false
+        };
+        while !thread_stop.load(Ordering::SeqCst) {
+            let mut child = match spawn_ah_events_command(&config_path) {
+                Ok(child) => child,
+                Err(error) => {
+                    log::warn!(
+                        "phase=code-assistant-status action=events-spawn-failed config={} error={error}",
+                        config_path.display()
+                    );
+                    if backoff(&thread_stop) {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let Some(stdout) = child.stdout.take() else {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::warn!("phase=code-assistant-status action=events-no-stdout");
+                if backoff(&thread_stop) {
+                    break;
+                }
+                continue;
+            };
+            *thread_child
+                .lock()
+                .expect("code assistant events child poisoned") = Some(child);
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if thread_stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                match line {
+                    Ok(line) => {
+                        if let Some(snapshot) = lifecycle_snapshot_from_ah_event(&line) {
+                            handle_code_assistant_status_snapshot(&app, &config_path, snapshot);
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "phase=code-assistant-status action=events-read-failed error={error}"
+                        );
+                        break;
+                    }
+                }
+            }
+            if let Some(mut child) = thread_child
+                .lock()
+                .expect("code assistant events child poisoned")
+                .take()
+            {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
             if thread_stop.load(Ordering::SeqCst) {
                 break;
             }
-            match line {
-                Ok(line) => {
-                    if let Some(snapshot) = lifecycle_snapshot_from_ah_event(&line) {
-                        handle_code_assistant_status_snapshot(&app, &config_path, snapshot);
-                    }
-                }
-                Err(error) => {
-                    log::warn!(
-                        "phase=code-assistant-status action=events-read-failed error={error}"
-                    );
-                    break;
-                }
-            }
-        }
-        if let Some(mut child) = thread_child
-            .lock()
-            .expect("code assistant events child poisoned")
-            .take()
-        {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        if !thread_stop.load(Ordering::SeqCst) {
-            if let Some(state) = app.try_state::<CodeAssistantRuntimeState>() {
-                let workspace_root = {
-                    let specs = state
-                        .status_specs
-                        .lock()
-                        .expect("code assistant status specs poisoned");
-                    specs
-                        .get(&config_path)
-                        .map(|spec| spec.workspace_root.clone())
-                };
-                state
-                    .status_streams
-                    .lock()
-                    .expect("code assistant status streams poisoned")
-                    .remove(&config_path);
-                state
-                    .status_snapshots
-                    .lock()
-                    .expect("code assistant status snapshots poisoned")
-                    .remove(&config_path);
-                if let Some(workspace_root) = workspace_root {
-                    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
-                }
-            }
             log::warn!(
-                "phase=code-assistant-status action=events-exited config={}",
+                "phase=code-assistant-status action=events-exited-respawning config={}",
                 config_path.display()
             );
+            if backoff(&thread_stop) {
+                break;
+            }
         }
     });
     Ok(CodeAssistantStatusStream {

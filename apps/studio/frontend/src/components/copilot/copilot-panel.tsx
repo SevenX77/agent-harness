@@ -13,9 +13,10 @@ import type { CopilotMessage } from '../../types/copilot'
 import {
   attachCodeAssistant,
   closeCodeAssistant,
-  getCodeAssistantStatus,
+  ensureCodeAssistantStatusEvents,
   openClaudeCode,
   openCodexCli,
+  subscribeCodeAssistantStatus,
   type CodeAssistantStatus,
 } from '../../lib/tauri'
 import { Button } from '../ui/button'
@@ -286,7 +287,6 @@ const inactiveCodeAssistantStatus: CodeAssistantStatus = {
   claude: false,
   codex: false,
 }
-const CODE_ASSISTANT_STATUS_POLL_MS = 3000
 
 export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
   return [
@@ -512,12 +512,11 @@ export function CopilotPanel({
       setCodeAssistantStatus(inactiveCodeAssistantStatus)
       return
     }
-    setCodeAssistantStatus(await getCodeAssistantStatus(codeAssistantWorkspace, { force: true }))
+    await ensureCodeAssistantStatusEvents(codeAssistantWorkspace)
   }, [codeAssistantWorkspace])
 
   useEffect(() => {
     let cancelled = false
-    let inFlight = false
     if (!codeAssistantWorkspace) {
       setCodeAssistantStatus(inactiveCodeAssistantStatus)
       return () => {
@@ -525,28 +524,28 @@ export function CopilotPanel({
       }
     }
 
-    const poll = async () => {
-      if (inFlight) {
-        return
+    let unsubscribe: (() => void) | null = null
+    setCodeAssistantStatus(inactiveCodeAssistantStatus)
+    void subscribeCodeAssistantStatus(codeAssistantWorkspace, (nextStatus) => {
+      if (!cancelled) {
+        setCodeAssistantStatus(nextStatus)
       }
-      inFlight = true
-      try {
-        const nextStatus = await getCodeAssistantStatus(codeAssistantWorkspace, { force: true })
-        if (!cancelled) {
-          setCodeAssistantStatus(nextStatus)
+    })
+      .then((dispose) => {
+        if (cancelled) {
+          dispose()
+          return
         }
-      } finally {
-        inFlight = false
-      }
-    }
-
-    void poll()
-    const interval = window.setInterval(() => {
-      void poll()
-    }, CODE_ASSISTANT_STATUS_POLL_MS)
+        unsubscribe = dispose
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCodeAssistantStatus(inactiveCodeAssistantStatus)
+        }
+      })
     return () => {
       cancelled = true
-      window.clearInterval(interval)
+      unsubscribe?.()
     }
   }, [codeAssistantWorkspace])
 

@@ -145,50 +145,71 @@ export interface CodeAssistantStatus {
   codex: boolean
 }
 
+interface CodeAssistantStatusEventPayload {
+  workspaceRoot: string
+  status: CodeAssistantStatus
+}
+
 const inactiveCodeAssistantStatus: CodeAssistantStatus = {
   claude: false,
   codex: false,
 }
 
-const codeAssistantStatusCache: Partial<Record<string, CodeAssistantStatus>> = {}
-const codeAssistantStatusRequests: Partial<Record<string, Promise<CodeAssistantStatus>>> = {}
+const CODE_ASSISTANT_STATUS_EVENT = 'code-assistant-status-changed'
 
-export function resetCodeAssistantStatusCacheForTests(): void {
-  for (const key of Object.keys(codeAssistantStatusCache)) delete codeAssistantStatusCache[key]
-  for (const key of Object.keys(codeAssistantStatusRequests)) delete codeAssistantStatusRequests[key]
+function normalizePathForCompare(path: string): string {
+  return path.replaceAll('\\', '/')
 }
 
-export async function getCodeAssistantStatus(
+export async function ensureCodeAssistantStatusEvents(
   workspaceRoot: string | null | undefined,
-  options: { force?: boolean } = {},
-): Promise<CodeAssistantStatus> {
+): Promise<void> {
   const targetPath = workspaceRoot?.trim() ?? ''
   if (!targetPath || !isTauriRuntime() || !nativeHelpersAreAvailable()) {
-    return inactiveCodeAssistantStatus
+    return
   }
 
-  if (!options.force && codeAssistantStatusCache[targetPath]) {
-    return codeAssistantStatusCache[targetPath]
-  }
-  if (!options.force && codeAssistantStatusRequests[targetPath]) {
-    return codeAssistantStatusRequests[targetPath]
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('watch_code_assistant_status', { workspaceRoot: targetPath })
+}
+
+export async function subscribeCodeAssistantStatus(
+  workspaceRoot: string | null | undefined,
+  onStatus: (status: CodeAssistantStatus) => void,
+): Promise<() => void> {
+  const targetPath = workspaceRoot?.trim() ?? ''
+  if (!targetPath || !isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    onStatus(inactiveCodeAssistantStatus)
+    return () => {}
   }
 
-  const request = (async () => {
-    const { invoke } = await import('@tauri-apps/api/core')
-    try {
-      const status = await invoke<CodeAssistantStatus>('code_assistant_status', { workspaceRoot: targetPath })
-      codeAssistantStatusCache[targetPath] = status
-      return status
-    } catch {
-      codeAssistantStatusCache[targetPath] = inactiveCodeAssistantStatus
-      return inactiveCodeAssistantStatus
+  const [{ invoke }, { listen }] = await Promise.all([
+    import('@tauri-apps/api/core'),
+    import('@tauri-apps/api/event'),
+  ])
+  const targetForCompare = normalizePathForCompare(targetPath)
+  const unlisten = await listen<CodeAssistantStatusEventPayload>(CODE_ASSISTANT_STATUS_EVENT, (event) => {
+    const payload = event.payload
+    if (!payload) {
+      return
     }
-  })().finally(() => {
-    delete codeAssistantStatusRequests[targetPath]
+    if (normalizePathForCompare(payload.workspaceRoot) === targetForCompare) {
+      onStatus(payload.status)
+    }
   })
-  codeAssistantStatusRequests[targetPath] = request
-  return request
+
+  try {
+    await invoke('watch_code_assistant_status', { workspaceRoot: targetPath })
+  } catch {
+    unlisten()
+    onStatus(inactiveCodeAssistantStatus)
+    return () => {}
+  }
+
+  return () => {
+    unlisten()
+    void invoke('unwatch_code_assistant_status', { workspaceRoot: targetPath }).catch(() => {})
+  }
 }
 
 export async function closeCodeAssistant(

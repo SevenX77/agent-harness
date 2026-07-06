@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => ({
   openClaudeCode: vi.fn(),
   openCodexCli: vi.fn(),
   attachCodeAssistant: vi.fn(),
-  getCodeAssistantStatus: vi.fn(),
+  ensureCodeAssistantStatusEvents: vi.fn(),
+  subscribeCodeAssistantStatus: vi.fn(),
   closeCodeAssistant: vi.fn(),
   buttonProps: [] as Array<Record<string, unknown>>,
   menuItemProps: [] as Array<Record<string, unknown>>,
@@ -58,7 +59,8 @@ vi.mock('../../lib/tauri', () => ({
   openClaudeCode: mocks.openClaudeCode,
   openCodexCli: mocks.openCodexCli,
   attachCodeAssistant: mocks.attachCodeAssistant,
-  getCodeAssistantStatus: mocks.getCodeAssistantStatus,
+  ensureCodeAssistantStatusEvents: mocks.ensureCodeAssistantStatusEvents,
+  subscribeCodeAssistantStatus: mocks.subscribeCodeAssistantStatus,
   closeCodeAssistant: mocks.closeCodeAssistant,
 }))
 
@@ -136,8 +138,10 @@ describe('buildCopilotJudgeDraft', () => {
     mocks.openCodexCli.mockResolvedValue(true)
     mocks.attachCodeAssistant.mockReset()
     mocks.attachCodeAssistant.mockResolvedValue(true)
-    mocks.getCodeAssistantStatus.mockReset()
-    mocks.getCodeAssistantStatus.mockResolvedValue({ claude: false, codex: false })
+    mocks.ensureCodeAssistantStatusEvents.mockReset()
+    mocks.ensureCodeAssistantStatusEvents.mockResolvedValue(undefined)
+    mocks.subscribeCodeAssistantStatus.mockReset()
+    mocks.subscribeCodeAssistantStatus.mockResolvedValue(vi.fn())
     mocks.closeCodeAssistant.mockReset()
     mocks.closeCodeAssistant.mockResolvedValue(true)
     mocks.buttonProps.length = 0
@@ -272,14 +276,18 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantCloseButtonLabel({ claude: true, codex: true })).toBe('Close assistants')
   })
 
-  it('polls ah status so a delayed CLI start updates the button', async () => {
-    vi.useFakeTimers()
+  it('subscribes to ah runtime events so a delayed CLI start updates the button without polling', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval')
     const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
       .IS_REACT_ACT_ENVIRONMENT
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-    mocks.getCodeAssistantStatus
-      .mockResolvedValueOnce({ claude: false, codex: false })
-      .mockResolvedValueOnce({ claude: false, codex: true })
+    let emitStatus: ((status: { claude: boolean; codex: boolean }) => void) | null = null
+    const unsubscribe = vi.fn()
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      onStatus({ claude: false, codex: false })
+      return unsubscribe
+    })
     const container = document.createElement('div')
     document.body.appendChild(container)
     let root: Root | null = createRoot(container)
@@ -297,11 +305,12 @@ describe('buildCopilotJudgeDraft', () => {
       })
 
       await act(async () => {
-        vi.advanceTimersByTime(3000)
+        emitStatus?.({ claude: false, codex: true })
       })
 
       await vi.waitFor(() => {
-        expect(mocks.getCodeAssistantStatus).toHaveBeenLastCalledWith('/tmp/text-segmentation', { force: true })
+        expect(mocks.subscribeCodeAssistantStatus).toHaveBeenCalledWith('/tmp/text-segmentation', expect.any(Function))
+        expect(setIntervalSpy).not.toHaveBeenCalled()
         expect(container.textContent).toContain('Close Codex')
       })
     } finally {
@@ -312,7 +321,7 @@ describe('buildCopilotJudgeDraft', () => {
       document.body.removeChild(container)
       ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
         previousReactActEnvironment
-      vi.useRealTimers()
+      setIntervalSpy.mockRestore()
     }
   })
 

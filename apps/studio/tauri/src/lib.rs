@@ -1,12 +1,13 @@
 mod native_fs;
 mod sidecar;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, Mutex,
@@ -41,14 +42,37 @@ struct QuitFlushState {
 
 struct CodeAssistantRuntimeState {
     configs: Mutex<BTreeSet<PathBuf>>,
+    status_streams: Mutex<BTreeMap<PathBuf, CodeAssistantStatusStream>>,
+    status_specs: Mutex<BTreeMap<PathBuf, CodeAssistantStatusSpec>>,
+    status_snapshots: Mutex<BTreeMap<PathBuf, AhLifecycleSnapshot>>,
 }
 
-#[derive(Serialize)]
+struct CodeAssistantStatusStream {
+    stop: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<Child>>>,
+}
+
+#[derive(Clone)]
+struct CodeAssistantStatusSpec {
+    workspace_root: PathBuf,
+    assistant: CodeAssistant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodeAssistantStatus {
     claude: bool,
     codex: bool,
 }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodeAssistantStatusEvent {
+    workspace_root: String,
+    status: CodeAssistantStatus,
+}
+
+const CODE_ASSISTANT_STATUS_EVENT: &str = "code-assistant-status-changed";
 
 #[tauri::command]
 fn get_sidecar_config(
@@ -345,6 +369,22 @@ fn reconcile_code_assistant_lifecycle(
 
 fn code_assistant_shutdown_is_complete(snapshot: AhLifecycleSnapshot) -> bool {
     !snapshot.ahd_has_inventory && !snapshot.master_tmux_alive && !snapshot.worker_tmux_alive
+}
+
+#[derive(Deserialize)]
+struct AhRuntimeEventLine {
+    ahd_has_inventory: bool,
+    master_tmux_alive: bool,
+    worker_tmux_alive: bool,
+}
+
+fn lifecycle_snapshot_from_ah_event(line: &str) -> Option<AhLifecycleSnapshot> {
+    let event: AhRuntimeEventLine = serde_json::from_str(line).ok()?;
+    Some(AhLifecycleSnapshot::new(
+        event.ahd_has_inventory,
+        event.master_tmux_alive,
+        event.worker_tmux_alive,
+    ))
 }
 
 fn decide_code_assistant_open(
@@ -793,6 +833,30 @@ fn run_ah_config_command(config_path: &Path, ah_args: &[&str]) -> Result<bool, S
     run_ah_config_command_output(config_path, ah_args).map(|result| result.success)
 }
 
+fn spawn_ah_events_command(config_path: &Path) -> Result<Child, String> {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut command = Command::new("wsl.exe");
+        let script = format!(
+            "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; ah --config {} events --format json",
+            sh_single_quote_str(&windows_path_to_wsl(config_path))
+        );
+        command.args(["-e", "bash", "-lc", &script]);
+        command
+    } else {
+        let mut command = Command::new("ah");
+        command.env("SYSTEMD_LOG_LEVEL", "err");
+        command
+            .arg("--config")
+            .arg(config_path)
+            .args(["events", "--format", "json"]);
+        command
+    };
+    command.stdout(Stdio::piped()).stderr(Stdio::null());
+    command
+        .spawn()
+        .map_err(|error| format!("failed to run ah events: {error}"))
+}
+
 fn stop_ah_config(config_path: &Path) -> Result<bool, String> {
     run_ah_config_command(config_path, &["stop"])
 }
@@ -1047,6 +1111,386 @@ fn cleanup_workspace_code_assistants(
     })
 }
 
+fn code_assistant_status_specs_for_workspace(
+    workspace_root: &Path,
+) -> BTreeMap<PathBuf, CodeAssistantStatusSpec> {
+    let mut specs = BTreeMap::new();
+    for assistant in CodeAssistant::ALL {
+        if let Some(config_path) = ah_config_for_status(workspace_root, assistant) {
+            specs.entry(config_path).or_insert(CodeAssistantStatusSpec {
+                workspace_root: workspace_root.to_path_buf(),
+                assistant,
+            });
+        }
+    }
+    specs
+}
+
+fn status_specs_for_workspace(
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+) -> BTreeMap<PathBuf, CodeAssistantStatusSpec> {
+    state
+        .status_specs
+        .lock()
+        .expect("code assistant status specs poisoned")
+        .iter()
+        .filter(|(_, spec)| spec.workspace_root == workspace_root)
+        .map(|(config, spec)| (config.clone(), spec.clone()))
+        .collect()
+}
+
+fn snapshots_for_configs(
+    state: &CodeAssistantRuntimeState,
+    specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
+) -> BTreeMap<PathBuf, AhLifecycleSnapshot> {
+    let snapshots = state
+        .status_snapshots
+        .lock()
+        .expect("code assistant status snapshots poisoned");
+    specs
+        .keys()
+        .filter_map(|config| {
+            snapshots
+                .get(config)
+                .map(|snapshot| (config.clone(), *snapshot))
+        })
+        .collect()
+}
+
+fn code_assistant_status_from_snapshots(
+    specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
+    snapshots: &BTreeMap<PathBuf, AhLifecycleSnapshot>,
+) -> CodeAssistantStatus {
+    let mut status = CodeAssistantStatus {
+        claude: false,
+        codex: false,
+    };
+    for (config, spec) in specs {
+        let active = snapshots
+            .get(config)
+            .copied()
+            .map(code_assistant_lifecycle_is_active)
+            .unwrap_or(false);
+        if !active {
+            continue;
+        }
+        match spec.assistant {
+            CodeAssistant::Claude => status.claude = true,
+            CodeAssistant::Codex => status.codex = true,
+        }
+    }
+    if status.claude {
+        status.codex = false;
+    }
+    status
+}
+
+fn workspace_status_requires_cleanup(
+    specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
+    snapshots: &BTreeMap<PathBuf, AhLifecycleSnapshot>,
+) -> bool {
+    let has_stale = snapshots.values().any(|snapshot| {
+        reconcile_code_assistant_lifecycle(*snapshot) == CodeAssistantLifecycleAction::CleanupStale
+    });
+    let active_count = specs
+        .keys()
+        .filter(|config| {
+            snapshots
+                .get(*config)
+                .copied()
+                .map(code_assistant_lifecycle_is_active)
+                .unwrap_or(false)
+        })
+        .count();
+    has_stale || active_count > 1
+}
+
+fn emit_code_assistant_status_for_workspace(
+    app: &tauri::AppHandle,
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+) {
+    let specs = status_specs_for_workspace(state, workspace_root);
+    let snapshots = snapshots_for_configs(state, &specs);
+    let status = code_assistant_status_from_snapshots(&specs, &snapshots);
+    if let Err(error) = app.emit(
+        CODE_ASSISTANT_STATUS_EVENT,
+        CodeAssistantStatusEvent {
+            workspace_root: workspace_root.display().to_string(),
+            status,
+        },
+    ) {
+        log::warn!("phase=code-assistant-status action=emit-failed error={error}");
+    }
+}
+
+fn clear_status_snapshots_for_workspace(state: &CodeAssistantRuntimeState, workspace_root: &Path) {
+    let configs = status_specs_for_workspace(state, workspace_root)
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    state
+        .status_snapshots
+        .lock()
+        .expect("code assistant status snapshots poisoned")
+        .retain(|config, _| !configs.contains(config));
+}
+
+fn handle_code_assistant_status_snapshot(
+    app: &tauri::AppHandle,
+    config_path: &Path,
+    snapshot: AhLifecycleSnapshot,
+) {
+    let Some(state) = app.try_state::<CodeAssistantRuntimeState>() else {
+        return;
+    };
+    let workspace_root = {
+        let specs = state
+            .status_specs
+            .lock()
+            .expect("code assistant status specs poisoned");
+        specs
+            .get(config_path)
+            .map(|spec| spec.workspace_root.clone())
+    };
+    let Some(workspace_root) = workspace_root else {
+        return;
+    };
+
+    state
+        .status_snapshots
+        .lock()
+        .expect("code assistant status snapshots poisoned")
+        .insert(config_path.to_path_buf(), snapshot);
+
+    let specs = status_specs_for_workspace(&state, &workspace_root);
+    let snapshots = snapshots_for_configs(&state, &specs);
+    if workspace_status_requires_cleanup(&specs, &snapshots) {
+        match cleanup_workspace_code_assistants(&workspace_root) {
+            Ok(cleanup) => {
+                state
+                    .configs
+                    .lock()
+                    .expect("code assistant state poisoned")
+                    .retain(|registered_config| !cleanup.configs.contains(registered_config));
+                clear_status_snapshots_for_workspace(&state, &workspace_root);
+            }
+            Err(error) => {
+                log::warn!(
+                    "phase=code-assistant-status action=cleanup-failed workspace={} error={error}",
+                    workspace_root.display()
+                );
+            }
+        }
+    }
+
+    emit_code_assistant_status_for_workspace(app, &state, &workspace_root);
+}
+
+fn stop_code_assistant_status_stream(stream: CodeAssistantStatusStream) {
+    stream.stop.store(true, Ordering::SeqCst);
+    if let Some(mut child) = stream
+        .child
+        .lock()
+        .expect("code assistant events child poisoned")
+        .take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+fn start_code_assistant_status_stream(
+    app: tauri::AppHandle,
+    config_path: PathBuf,
+) -> Result<CodeAssistantStatusStream, String> {
+    let mut child = spawn_ah_events_command(&config_path)?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "ah events did not expose stdout".to_string())?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let child_slot = Arc::new(Mutex::new(Some(child)));
+    let thread_stop = Arc::clone(&stop);
+    let thread_child = Arc::clone(&child_slot);
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if thread_stop.load(Ordering::SeqCst) {
+                break;
+            }
+            match line {
+                Ok(line) => {
+                    if let Some(snapshot) = lifecycle_snapshot_from_ah_event(&line) {
+                        handle_code_assistant_status_snapshot(&app, &config_path, snapshot);
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        "phase=code-assistant-status action=events-read-failed error={error}"
+                    );
+                    break;
+                }
+            }
+        }
+        if let Some(mut child) = thread_child
+            .lock()
+            .expect("code assistant events child poisoned")
+            .take()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if !thread_stop.load(Ordering::SeqCst) {
+            if let Some(state) = app.try_state::<CodeAssistantRuntimeState>() {
+                let workspace_root = {
+                    let specs = state
+                        .status_specs
+                        .lock()
+                        .expect("code assistant status specs poisoned");
+                    specs
+                        .get(&config_path)
+                        .map(|spec| spec.workspace_root.clone())
+                };
+                state
+                    .status_streams
+                    .lock()
+                    .expect("code assistant status streams poisoned")
+                    .remove(&config_path);
+                state
+                    .status_snapshots
+                    .lock()
+                    .expect("code assistant status snapshots poisoned")
+                    .remove(&config_path);
+                if let Some(workspace_root) = workspace_root {
+                    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
+                }
+            }
+            log::warn!(
+                "phase=code-assistant-status action=events-exited config={}",
+                config_path.display()
+            );
+        }
+    });
+    Ok(CodeAssistantStatusStream {
+        stop,
+        child: child_slot,
+    })
+}
+
+fn ensure_code_assistant_status_streams_for_workspace(
+    app: &tauri::AppHandle,
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+) -> Result<(), String> {
+    let next_specs = code_assistant_status_specs_for_workspace(workspace_root);
+    let next_configs = next_specs.keys().cloned().collect::<BTreeSet<_>>();
+    let stale_streams = {
+        let specs = status_specs_for_workspace(state, workspace_root);
+        specs
+            .keys()
+            .filter(|config| !next_configs.contains(*config))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for config in stale_streams {
+        if let Some(stream) = state
+            .status_streams
+            .lock()
+            .expect("code assistant status streams poisoned")
+            .remove(&config)
+        {
+            stop_code_assistant_status_stream(stream);
+        }
+        state
+            .status_specs
+            .lock()
+            .expect("code assistant status specs poisoned")
+            .remove(&config);
+        state
+            .status_snapshots
+            .lock()
+            .expect("code assistant status snapshots poisoned")
+            .remove(&config);
+    }
+
+    {
+        let mut specs = state
+            .status_specs
+            .lock()
+            .expect("code assistant status specs poisoned");
+        for (config, spec) in next_specs {
+            specs.insert(config, spec);
+        }
+    }
+
+    for config in next_configs {
+        let should_start = {
+            let streams = state
+                .status_streams
+                .lock()
+                .expect("code assistant status streams poisoned");
+            !streams.contains_key(&config)
+        };
+        if should_start {
+            let stream = start_code_assistant_status_stream(app.clone(), config.clone())?;
+            let mut streams = state
+                .status_streams
+                .lock()
+                .expect("code assistant status streams poisoned");
+            if streams.contains_key(&config) {
+                stop_code_assistant_status_stream(stream);
+            } else {
+                streams.insert(config, stream);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unwatch_code_assistant_status_streams_for_workspace(
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+) {
+    let configs = status_specs_for_workspace(state, workspace_root)
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    for config in configs {
+        if let Some(stream) = state
+            .status_streams
+            .lock()
+            .expect("code assistant status streams poisoned")
+            .remove(&config)
+        {
+            stop_code_assistant_status_stream(stream);
+        }
+        state
+            .status_specs
+            .lock()
+            .expect("code assistant status specs poisoned")
+            .remove(&config);
+        state
+            .status_snapshots
+            .lock()
+            .expect("code assistant status snapshots poisoned")
+            .remove(&config);
+    }
+}
+
+fn stop_all_code_assistant_status_streams(state: &CodeAssistantRuntimeState) {
+    let streams = std::mem::take(
+        &mut *state
+            .status_streams
+            .lock()
+            .expect("code assistant status streams poisoned"),
+    );
+    for (_, stream) in streams {
+        stop_code_assistant_status_stream(stream);
+    }
+}
+
 fn discover_studio_ah_configs() -> Vec<PathBuf> {
     fn visit(dir: &Path, configs: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -1205,14 +1649,18 @@ ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
+ah_patch="${{ah_rest#*.}}"
+[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
 if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -ge 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.0 for window_size = "follow".\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
@@ -1277,14 +1725,18 @@ ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
+ah_patch="${{ah_rest#*.}}"
+[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
 if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -ge 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.0 for window_size = "follow".\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
@@ -1340,14 +1792,18 @@ ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
+ah_patch="${{ah_rest#*.}}"
+[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
 if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -ge 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.0 for window_size = "follow".\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
@@ -1387,6 +1843,25 @@ export STUDIO_AH_HOST_HOME="$HOME"
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found on PATH."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec "${{SHELL:-/bin/sh}}"
+fi
+ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_major="${{ah_version%%.*}}"
+ah_rest="${{ah_version#*.}}"
+ah_minor="${{ah_rest%%.*}}"
+ah_patch="${{ah_rest#*.}}"
+[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
+ah_ok=0
+if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+  ah_ok=1
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
+  ah_ok=1
+fi
+if [ "$ah_ok" -ne 1 ]; then
+  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
+  printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
 printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
@@ -1768,27 +2243,23 @@ fn prepare_code_assistant_open(
     }
 }
 
-fn open_code_assistant(
-    workspace_root: String,
-    assistant: CodeAssistant,
-) -> Result<PathBuf, String> {
-    let workspace_root = existing_directory(&workspace_root)?;
-    match prepare_code_assistant_open(&workspace_root, assistant)? {
+fn open_code_assistant(workspace_root: &Path, assistant: CodeAssistant) -> Result<PathBuf, String> {
+    match prepare_code_assistant_open(workspace_root, assistant)? {
         CodeAssistantOpenAction::AttachExisting(config_path) => {
             let launcher = write_code_assistant_attach_launcher_script(
-                &workspace_root,
+                workspace_root,
                 &config_path,
                 assistant,
             )?;
-            let window_title = code_assistant_window_title(&workspace_root, assistant);
+            let window_title = code_assistant_window_title(workspace_root, assistant);
             spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)?;
             Ok(config_path)
         }
         CodeAssistantOpenAction::StartFresh => {
-            let config_path = ah_config_for_workspace(&workspace_root, assistant)?;
+            let config_path = ah_config_for_workspace(workspace_root, assistant)?;
             let launcher =
-                write_code_assistant_launcher_script(&workspace_root, &config_path, assistant)?;
-            let window_title = code_assistant_window_title(&workspace_root, assistant);
+                write_code_assistant_launcher_script(workspace_root, &config_path, assistant)?;
+            let window_title = code_assistant_window_title(workspace_root, assistant);
             spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?;
             Ok(config_path)
         }
@@ -1825,29 +2296,37 @@ fn attach_code_assistant_terminal(
 
 #[tauri::command]
 fn open_claude_code(
+    app: tauri::AppHandle,
     workspace_root: String,
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
-    let config = open_code_assistant(workspace_root, CodeAssistant::Claude)?;
+    let workspace_root = existing_directory(&workspace_root)?;
+    let config = open_code_assistant(&workspace_root, CodeAssistant::Claude)?;
     state
         .configs
         .lock()
         .expect("code assistant state poisoned")
         .insert(config);
+    ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
+    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(())
 }
 
 #[tauri::command]
 fn open_codex_cli(
+    app: tauri::AppHandle,
     workspace_root: String,
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
-    let config = open_code_assistant(workspace_root, CodeAssistant::Codex)?;
+    let workspace_root = existing_directory(&workspace_root)?;
+    let config = open_code_assistant(&workspace_root, CodeAssistant::Codex)?;
     state
         .configs
         .lock()
         .expect("code assistant state poisoned")
         .insert(config);
+    ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
+    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(())
 }
 
@@ -1858,53 +2337,33 @@ fn attach_code_assistant(workspace_root: String, assistant: String) -> Result<()
 }
 
 #[tauri::command]
-fn code_assistant_status(workspace_root: String) -> Result<CodeAssistantStatus, String> {
+fn watch_code_assistant_status(
+    app: tauri::AppHandle,
+    workspace_root: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+) -> Result<(), String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let config_for_assistant = |assistant| ah_config_for_status(&workspace_root, assistant);
-    let mut probes = BTreeMap::new();
-    for assistant in CodeAssistant::ALL {
-        if let Some(config_path) = config_for_assistant(assistant) {
-            probes
-                .entry(config_path.clone())
-                .or_insert_with(|| inspect_ah_runtime(&config_path, None));
-        }
-    }
+    ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
+    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
+    Ok(())
+}
 
-    let has_stale = probes.values().any(|probe| {
-        reconcile_code_assistant_lifecycle(probe.snapshot)
-            == CodeAssistantLifecycleAction::CleanupStale
-    });
-    let active_config_count = probes
-        .values()
-        .filter(|probe| code_assistant_lifecycle_is_active(probe.snapshot))
-        .count();
-    if has_stale || active_config_count > 1 {
-        cleanup_workspace_code_assistants(&workspace_root)?;
-        return Ok(CodeAssistantStatus {
-            claude: false,
-            codex: false,
-        });
+#[tauri::command]
+fn unwatch_code_assistant_status(
+    workspace_root: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+) -> Result<(), String> {
+    let workspace_root = PathBuf::from(workspace_root.trim());
+    if workspace_root.as_os_str().is_empty() {
+        return Ok(());
     }
-
-    let active = |assistant| -> bool {
-        config_for_assistant(assistant)
-            .and_then(|config_path| probes.get(&config_path))
-            .map(|probe| code_assistant_lifecycle_is_active(probe.snapshot))
-            .unwrap_or(false)
-    };
-    let claude = active(CodeAssistant::Claude);
-    Ok(CodeAssistantStatus {
-        claude,
-        codex: if claude {
-            false
-        } else {
-            active(CodeAssistant::Codex)
-        },
-    })
+    unwatch_code_assistant_status_streams_for_workspace(&state, &workspace_root);
+    Ok(())
 }
 
 #[tauri::command]
 fn close_code_assistant(
+    app: tauri::AppHandle,
     workspace_root: String,
     assistant: String,
     state: tauri::State<'_, CodeAssistantRuntimeState>,
@@ -1912,6 +2371,8 @@ fn close_code_assistant(
     let workspace_root = existing_directory(&workspace_root)?;
     let assistant = CodeAssistant::from_slug(assistant.trim())?;
     if ah_config_for_status(&workspace_root, assistant).is_none() {
+        clear_status_snapshots_for_workspace(&state, &workspace_root);
+        emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
         return Ok(false);
     }
     let cleanup = cleanup_workspace_code_assistants(&workspace_root)?;
@@ -1920,6 +2381,8 @@ fn close_code_assistant(
         .lock()
         .expect("code assistant state poisoned")
         .retain(|registered_config| !cleanup.configs.contains(registered_config));
+    clear_status_snapshots_for_workspace(&state, &workspace_root);
+    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(cleanup.closed_any)
 }
 
@@ -2155,7 +2618,8 @@ pub fn run() {
             open_claude_code,
             open_codex_cli,
             attach_code_assistant,
-            code_assistant_status,
+            watch_code_assistant_status,
+            unwatch_code_assistant_status,
             close_code_assistant,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
@@ -2191,6 +2655,9 @@ pub fn run() {
             });
             app.manage(CodeAssistantRuntimeState {
                 configs: Mutex::new(BTreeSet::new()),
+                status_streams: Mutex::new(BTreeMap::new()),
+                status_specs: Mutex::new(BTreeMap::new()),
+                status_snapshots: Mutex::new(BTreeMap::new()),
             });
             if std::env::var("STUDIO_TAURI_DISABLE_SIDECAR").as_deref() != Ok("1") {
                 let resolved_resource_root = app
@@ -2265,6 +2732,7 @@ pub fn run() {
                             .iter()
                             .cloned(),
                     );
+                    stop_all_code_assistant_status_streams(&state);
                 }
                 code_assistant_configs.extend(discover_studio_ah_configs());
                 cleanup_registered_code_assistants(code_assistant_configs);
@@ -2345,6 +2813,7 @@ fn shutdown_application<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, reas
                     .iter()
                     .cloned(),
             );
+            stop_all_code_assistant_status_streams(&state);
         }
         code_assistant_configs.extend(discover_studio_ah_configs());
         cleanup_registered_code_assistants(code_assistant_configs);
@@ -2455,8 +2924,12 @@ mod tests {
             "attach_code_assistant must be registered in the Tauri invoke handler"
         );
         assert!(
-            source.contains("code_assistant_status,"),
-            "code_assistant_status must be registered in the Tauri invoke handler"
+            source.contains("watch_code_assistant_status,"),
+            "watch_code_assistant_status must be registered in the Tauri invoke handler"
+        );
+        assert!(
+            source.contains("unwatch_code_assistant_status,"),
+            "unwatch_code_assistant_status must be registered in the Tauri invoke handler"
         );
         assert!(
             source.contains("close_code_assistant,"),
@@ -2599,7 +3072,7 @@ mod tests {
     }
 
     #[test]
-    fn launchers_reject_ah_before_window_size_follow_support() {
+    fn launchers_reject_ah_before_runtime_events_support() {
         let windows_payload = wsl_payload_script(
             "/mnt/d/skill",
             "/mnt/c/tmp/ah.toml",
@@ -2607,8 +3080,7 @@ mod tests {
             None,
         );
         assert!(windows_payload.contains("ah_version="));
-        assert!(windows_payload.contains("requires ah >= 1.3.0"));
-        assert!(windows_payload.contains("window_size = \"follow\""));
+        assert!(windows_payload.contains("requires ah >= 1.3.1"));
 
         let unix_payload = unix_code_assistant_launcher_script(
             Path::new("/tmp/skill"),
@@ -2616,8 +3088,7 @@ mod tests {
             CodeAssistant::Claude,
         );
         assert!(unix_payload.contains("ah_version="));
-        assert!(unix_payload.contains("requires ah >= 1.3.0"));
-        assert!(unix_payload.contains("window_size = \"follow\""));
+        assert!(unix_payload.contains("requires ah >= 1.3.1"));
     }
 
     #[test]
@@ -2784,6 +3255,64 @@ mod tests {
         assert!(!code_assistant_shutdown_is_complete(
             AhLifecycleSnapshot::new(true, false, false)
         ));
+    }
+
+    #[test]
+    fn ah_events_snapshot_maps_open_state_from_inventory_and_master_not_worker() {
+        let line = r#"{"schema_version":1,"event":"snapshot","reason":"tmux_changed","runtime_state":"degraded","ahd_has_inventory":true,"master_tmux_alive":true,"worker_tmux_alive":false}"#;
+        let snapshot = lifecycle_snapshot_from_ah_event(line).expect("snapshot parses");
+
+        assert_eq!(snapshot, AhLifecycleSnapshot::new(true, true, false));
+        assert!(code_assistant_lifecycle_is_active(snapshot));
+    }
+
+    #[test]
+    fn ah_events_status_aggregation_cleans_stale_or_multiple_active_configs() {
+        let workspace = PathBuf::from("/tmp/studio-skill");
+        let claude_config = workspace.join(".claude-ah.toml");
+        let codex_config = workspace.join(".codex-ah.toml");
+        let specs = BTreeMap::from([
+            (
+                claude_config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: workspace.clone(),
+                    assistant: CodeAssistant::Claude,
+                },
+            ),
+            (
+                codex_config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: workspace,
+                    assistant: CodeAssistant::Codex,
+                },
+            ),
+        ]);
+
+        let snapshots = BTreeMap::from([(
+            claude_config.clone(),
+            AhLifecycleSnapshot::new(true, true, false),
+        )]);
+        assert_eq!(
+            code_assistant_status_from_snapshots(&specs, &snapshots),
+            CodeAssistantStatus {
+                claude: true,
+                codex: false,
+            }
+        );
+        assert!(!workspace_status_requires_cleanup(&specs, &snapshots));
+
+        let multiple_active = BTreeMap::from([
+            (claude_config, AhLifecycleSnapshot::new(true, true, true)),
+            (
+                codex_config.clone(),
+                AhLifecycleSnapshot::new(true, true, true),
+            ),
+        ]);
+        assert!(workspace_status_requires_cleanup(&specs, &multiple_active));
+
+        let stale_codex =
+            BTreeMap::from([(codex_config, AhLifecycleSnapshot::new(true, false, true))]);
+        assert!(workspace_status_requires_cleanup(&specs, &stale_codex));
     }
 
     #[test]

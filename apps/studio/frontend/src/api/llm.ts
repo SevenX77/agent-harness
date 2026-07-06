@@ -1537,7 +1537,7 @@ export async function deleteEndpoint(endpointId: string): Promise<RegistryRespon
  * it. Returns the refreshed credentials so the caller merges locally.
  */
 export async function deleteRoute(routeId: string): Promise<CredentialsState> {
-  const response = await api.delete<CredentialRegistryResponse>(`/llm/routes/${segment(routeId)}`)
+  const response = await api.delete<RegistryResponse>(`/llm/routes/${segment(routeId)}`)
   return registryToCredentials(cacheRegistry(response.data))
 }
 
@@ -1580,39 +1580,28 @@ function isEndpointModelTestResponse(value: unknown): value is EndpointModelTest
   )
 }
 
+function routeFromRegistryResponse(registry: RegistryResponse, routeId: string): ProviderRoute {
+  const cached = cacheRegistry(registry)
+  const route = cached.provider_routes[routeId]
+  if (!route) throw new Error(`Registry response omitted route: ${routeId}`)
+  return route
+}
+
 export async function probeRoute(
   routeId: string,
   request: { capabilities: string[]; force?: boolean },
 ): Promise<ProviderRoute> {
   const { force, ...body } = request
   const forceQuery = force ? '?force=true' : ''
-  const response = await api.post<ProviderRoute>(`/llm/routes/${segment(routeId)}/probe${forceQuery}`, body)
-  if (cachedRegistry) {
-    cachedRegistry = {
-      ...cachedRegistry,
-      provider_routes: {
-        ...cachedRegistry.provider_routes,
-        [routeId]: response.data,
-      },
-    }
-  }
-  return response.data
+  const response = await api.post<RegistryResponse>(`/llm/routes/${segment(routeId)}/probe${forceQuery}`, body)
+  return routeFromRegistryResponse(response.data, routeId)
 }
 
 // #11 slice C: 真塞一张图探这条 route 的模型认不认图。成功后端会把
 // input_modalities/vision 记为 probed_verified 并回填到 route.capabilities。
 export async function probeRouteMultimodal(routeId: string): Promise<ProviderRoute> {
-  const response = await api.post<ProviderRoute>(`/llm/routes/${segment(routeId)}/probe-multimodal`, {})
-  if (cachedRegistry) {
-    cachedRegistry = {
-      ...cachedRegistry,
-      provider_routes: {
-        ...cachedRegistry.provider_routes,
-        [routeId]: response.data,
-      },
-    }
-  }
-  return response.data
+  const response = await api.post<RegistryResponse>(`/llm/routes/${segment(routeId)}/probe-multimodal`, {})
+  return routeFromRegistryResponse(response.data, routeId)
 }
 
 // 只有 probed_verified(真探测通过)且 input_modalities 含 image 才算"认图";

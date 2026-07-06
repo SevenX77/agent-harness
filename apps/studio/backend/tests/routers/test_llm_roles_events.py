@@ -19,6 +19,7 @@ import pytest
 from app.core import config
 from app.models.llm_config import (
     LLMCredentialsFile,
+    ModelProfile,
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
@@ -181,6 +182,44 @@ def test_delete_llm_role_publishes_and_drops_from_next_build(
 
     resolver = build_gateway_model_resolver(roles_path)
     assert "copilot_custom_test" not in resolver.registry_snapshot.roles
+
+
+def test_apply_model_profile_publishes_roles_changed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles_path, route_id = _seed(tmp_path, monkeypatch)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            model_profiles={
+                "haiku": ModelProfile(
+                    model_profile_id="haiku",
+                    canonical_id="claude-3-5-haiku",
+                    display_name="Claude 3.5 Haiku",
+                    fallback_chain=[RoleRouteEntry(route_id=route_id)],
+                )
+            },
+            roles={"copilot_custom_test": RoleEntry()},
+        ),
+        known_route_ids={route_id},
+    )
+
+    async def _apply() -> dict[str, object]:
+        with _DirectSubscriber() as sub:
+            await llm_router.apply_model_profile(
+                "copilot_custom_test",
+                llm_router.RoleApplyProfileRequest(model_profile_id="haiku"),
+            )
+            return await sub.receive()
+
+    event = asyncio.run(_apply())
+    assert event["type"] == "roles_changed"
+    assert event["source"] == "http_api"
+
+    resolver = build_gateway_model_resolver(roles_path)
+    role = resolver.registry_snapshot.roles["copilot_custom_test"]
+    assert [entry.route_id for entry in role.fallback_chain] == [route_id]
 
 
 def test_publish_failure_does_not_break_save(

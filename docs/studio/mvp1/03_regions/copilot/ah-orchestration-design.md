@@ -180,8 +180,7 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 
 - `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
 - Studio 显式管理入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 打开菜单。活跃判定必须是
-  **双探测**:① `ah --config <cfg> ps` 能读到 ahd inventory;② 从 `ah ps` 输出里的 `tmux -L <socket>`
-  继续 `tmux -L <socket> list-sessions`,确认存在 `master_*` session。只有 ahd inventory、只有 master
+  **事件源双事实**:Studio 订阅 `ah events --format json` 的 runtime snapshot,活跃判定只认 `ahd_has_inventory=true` 与 `master_tmux_alive=true` 同时成立。只有 ahd inventory、只有 master
   tmux、或残留 worker/agent tmux 都是 stale 状态;Studio 必须先按 workspace 清理所有 Studio-managed ah
   config,再允许重新打开。
 - workspace 内只允许一个 Studio-managed ahd。Open 同一个 assistant 且双探测活跃时只 attach 到既有
@@ -315,7 +314,7 @@ cmd 现在会在进入 Claude Code 前补 `$HOME/.local/bin/claude -> <真实 cl
    `.codex/auth.json`、`.codex/AGENTS.md`、`.agents/skills`。Windows 登录态是源头,WSL/ah sandbox
    只拿复制/链接后的副本。
 5. **antigravity provider 后续再接**:等本机安装与 provider home 规则确认后,再加第三个菜单项或自动升级。
-6. **打包分发带上 ah ≥1.3.0**(§3 结论)。
+6. **打包分发带上 ah ≥1.3.1**(§3 结论)。
 
 ## 9. 阶段 2:接活闭环设计
 
@@ -535,8 +534,7 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
 - Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
   launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;
-- `code_assistant_status` 的活跃判定必须同时要求 `ah --config <cfg> ps` 成功与 `tmux -L <socket>`
-  下存在 `master_*` session;只有 ahd、只有 master tmux、残留 worker tmux 均判 stale;
+- `watch_code_assistant_status` 不轮询 `ah ps`,而是订阅 `ah events --format json`;活跃判定必须同时要求事件快照里 `ahd_has_inventory=true` 与 `master_tmux_alive=true`;只有 ahd、只有 master tmux、残留 worker tmux 均判 stale;
 - Open 决策必须保证 workspace 内单例 ahd:同 assistant 活跃时 attach,另一个 assistant 活跃时拒绝,
   双 active 或 ahd/master 脱钩时先清理所有 Studio-managed ah configs 再重新打开;
 - `ah ps` 输出解析必须提取 `tmux -L <socket>` 与 `sess_*` session id,供后续 tmux double-check 与
@@ -544,7 +542,7 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - Close / Window close / app quit 的 cleanup 必须在 `ah stop` 后确认 ahd inventory、`master_*`、
   `agent_*`/`worker_*` tmux sessions 全灭;未全灭时走强制 kill,仍残留则返回/记录错误;
 - 原生窗口关闭必须与 app quit 一样清理 Studio-managed ah configs,否则 tmux/ahd 会在重启 Studio 后被
-  `code_assistant_status` 重新识别成仍活跃;
+  `watch_code_assistant_status` 再收到事件时重新投影成 inactive;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
 - `transient_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
   拒绝 `BindReadOnlyPaths` 后导致 `TMUX_COMMAND_FAILED`;

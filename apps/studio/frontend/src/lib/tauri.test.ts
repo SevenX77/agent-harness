@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { initializeRuntimeConfig } from '../config/runtime'
 import * as tauriModule from './tauri'
@@ -10,7 +11,7 @@ import {
   closeCodeAssistant,
   createSkillWorkspace,
   deleteWorkspacePath,
-  getCodeAssistantStatus,
+  ensureCodeAssistantStatusEvents,
   openClaudeCode,
   openCodexCli,
   openSkillWorkspace,
@@ -23,11 +24,15 @@ import {
   workspacePathExists,
   writePublishPackage,
   writeWorkspaceFile,
-  resetCodeAssistantStatusCacheForTests,
+  subscribeCodeAssistantStatus,
 } from './tauri'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(),
 }))
 
 vi.mock('sonner', () => ({
@@ -39,6 +44,10 @@ vi.mock('sonner', () => ({
 }))
 
 const mockInvoke = vi.mocked(invoke)
+const mockListen = vi.mocked(listen)
+type CodeAssistantStatusTestEvent = {
+  payload: { workspaceRoot: string; status: { claude: boolean; codex: boolean } }
+}
 
 async function resetRuntimeForTest() {
   await initializeRuntimeConfig({
@@ -76,7 +85,6 @@ async function markRuntimeDegraded() {
 afterEach(async () => {
   vi.unstubAllGlobals()
   await resetRuntimeForTest()
-  resetCodeAssistantStatusCacheForTests()
   vi.clearAllMocks()
 })
 
@@ -229,34 +237,44 @@ describe('desktop shell helpers', () => {
     })
   })
 
-  it('reads code assistant ahd status through the native shell', async () => {
+  it('starts the code assistant status event source through the native shell', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
-    mockInvoke.mockResolvedValue({ claude: true, codex: false })
+    mockInvoke.mockResolvedValue(undefined)
 
-    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
+    await expect(ensureCodeAssistantStatusEvents('/tmp/workspace')).resolves.toBeUndefined()
 
-    expect(mockInvoke).toHaveBeenCalledWith('code_assistant_status', {
+    expect(mockInvoke).toHaveBeenCalledWith('watch_code_assistant_status', {
       workspaceRoot: '/tmp/workspace',
     })
   })
 
-  it('caches code assistant status per workspace until callers force a refresh', async () => {
+  it('subscribes to code assistant status events and unwatches on dispose', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
-    mockInvoke
-      .mockResolvedValueOnce({ claude: true, codex: false })
-      .mockResolvedValueOnce({ claude: false, codex: true })
+    mockInvoke.mockResolvedValue(undefined)
+    const unlisten = vi.fn()
+    const listeners: Array<(event: CodeAssistantStatusTestEvent) => void> = []
+    mockListen.mockImplementation(async (_event, handler) => {
+      listeners.push(handler as (event: CodeAssistantStatusTestEvent) => void)
+      return unlisten
+    })
+    const onStatus = vi.fn()
 
-    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
-    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: true, codex: false })
-    await expect(getCodeAssistantStatus('/tmp/workspace', { force: true })).resolves.toEqual({ claude: false, codex: true })
+    const dispose = await subscribeCodeAssistantStatus('/tmp/workspace', onStatus)
+    expect(listeners).toHaveLength(1)
+    listeners[0]({ payload: { workspaceRoot: '/tmp/other', status: { claude: false, codex: true } } })
+    listeners[0]({ payload: { workspaceRoot: '/tmp/workspace', status: { claude: true, codex: false } } })
+    dispose()
 
-    expect(mockInvoke).toHaveBeenCalledTimes(2)
-    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'code_assistant_status', {
+    expect(mockListen).toHaveBeenCalledWith('code-assistant-status-changed', expect.any(Function))
+    expect(mockInvoke).toHaveBeenCalledWith('watch_code_assistant_status', {
       workspaceRoot: '/tmp/workspace',
     })
-    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'code_assistant_status', {
+    expect(onStatus).toHaveBeenCalledTimes(1)
+    expect(onStatus).toHaveBeenCalledWith({ claude: true, codex: false })
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    expect(mockInvoke).toHaveBeenCalledWith('unwatch_code_assistant_status', {
       workspaceRoot: '/tmp/workspace',
     })
   })
@@ -264,9 +282,14 @@ describe('desktop shell helpers', () => {
   it('treats code assistants as inactive outside desktop runtime', async () => {
     vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
     await resetRuntimeForTest()
+    const onStatus = vi.fn()
 
-    await expect(getCodeAssistantStatus('/tmp/workspace')).resolves.toEqual({ claude: false, codex: false })
+    await expect(subscribeCodeAssistantStatus('/tmp/workspace', onStatus)).resolves.toEqual(
+      expect.any(Function),
+    )
 
+    expect(onStatus).toHaveBeenCalledWith({ claude: false, codex: false })
+    expect(mockListen).not.toHaveBeenCalled()
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 

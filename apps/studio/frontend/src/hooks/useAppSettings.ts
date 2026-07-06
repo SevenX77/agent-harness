@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import i18n from '../i18n'
-import { getAppSettings, updateAppSettings } from '../api/client'
+import { apiClientConfigChangedEvent, authenticatedApiReady, getAppSettings, updateAppSettings } from '../api/client'
 import type { AppLanguage, AppSettings } from '../api/types'
 import type { SaveStatus } from './useDebouncedCredentialsSave'
 import { runtimeDefaultSkillsDirectory } from '../utils/skill-paths'
@@ -31,6 +31,22 @@ const APP_SETTINGS_SAVE_DELAY_MS = 300
 
 let appSettingsCache: AppSettings | null = null
 let appSettingsRequest: Promise<AppSettings> | null = null
+
+function useAuthenticatedSettingsApiReady(): boolean {
+  const [ready, setReady] = useState(() => authenticatedApiReady())
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handleConfigChange = () => setReady(authenticatedApiReady())
+    window.addEventListener(apiClientConfigChangedEvent, handleConfigChange)
+    handleConfigChange()
+    return () => {
+      window.removeEventListener(apiClientConfigChangedEvent, handleConfigChange)
+    }
+  }, [])
+
+  return ready
+}
 
 function withRuntimeDefaults(settings: AppSettings): AppSettings {
   if (settings.default_skills_directory.trim()) {
@@ -92,6 +108,7 @@ export async function saveAppSettings(settings: AppSettings): Promise<AppSetting
 }
 
 export function useAppSettings() {
+  const apiReady = useAuthenticatedSettingsApiReady()
   const [settings, setSettings] = useState<AppSettings>(withRuntimeDefaults(DEFAULT_APP_SETTINGS))
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
@@ -104,6 +121,10 @@ export function useAppSettings() {
   const performSaveRef = useRef<(nextSettings: AppSettings) => Promise<AppSettings | null>>(async () => null)
 
   useEffect(() => {
+    if (!apiReady) {
+      setIsLoading(true)
+      return undefined
+    }
     let cancelled = false
     setIsLoading(true)
     loadAppSettings()
@@ -126,7 +147,7 @@ export function useAppSettings() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [apiReady])
 
   const performSave = useCallback(async (nextSettings: AppSettings): Promise<AppSettings | null> => {
     setSaveStatus('saving')

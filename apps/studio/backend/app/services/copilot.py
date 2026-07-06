@@ -80,17 +80,7 @@ SessionKey = tuple[str, str, str]
 SessionCacheKey = tuple[str, str, str, str]
 logger = logging.getLogger(__name__)
 
-MAX_REFERENCE_BYTES = 5 * 1024
-_BODY_REFERENCE_CHARS = 300
 _ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
-_FILE_CONTENT_KEYS = {
-    "content",
-    "file_content",
-    "markdown",
-    "skill_md_text",
-    "phase_config_yaml",
-}
-_FILE_PATH_KEYS = ("absolute_file_path", "file_path", "path")
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
@@ -175,18 +165,9 @@ def _mounted_doc_dirs() -> list[tuple[str, Path]]:
     return [(label, path) for label, path in candidates if path.is_dir()]
 
 
-@dataclass(frozen=True)
-class ViewContext:
-    view: str
-    context: dict[str, Any]
-    timestamp_ms: int
-
-
 _sessions: dict[SessionCacheKey, ClaudeSDKClient] = {}
 _session_lock = asyncio.Lock()
 _session_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient
-_view_contexts: dict[str, ViewContext] = {}
-_view_context_lock = asyncio.Lock()
 # Session keys only index the in-process ``_sessions`` cache, so the salt just
 # needs to stay stable for the process lifetime; a fresh random salt per start
 # keeps the derived api_key hash unpredictable (S2053).
@@ -666,7 +647,7 @@ def build_options(
         env=env,
         can_use_tool=can_use_tool,
         # 恒定规则层走会话级 system prompt(单一真相 = app/prompts/copilot-rules.md);
-        # 运行时上下文走每轮 turn prompt,见 _prompt_with_turn_context。
+        # 当前请求显式携带的上下文走每轮 turn prompt,见 _prompt_with_turn_context。
         system_prompt=build_session_system_prompt(),
         # SDK 隔离模式:不加载开发机 ~/.claude 等文件系统配置,copilot 行为不随
         # 宿主机个人配置漂移;MCP 只认显式传入的(当前为空)。
@@ -689,54 +670,6 @@ def build_options(
     )
 
 
-async def set_view_context(
-    skill_id: str,
-    view: str,
-    context: dict[str, Any],
-    timestamp_ms: int,
-) -> bool:
-    """Cache the newest known Studio view context for a skill."""
-
-    async with _view_context_lock:
-        cached = _view_contexts.get(skill_id)
-        if cached is not None and timestamp_ms <= cached.timestamp_ms:
-            return False
-        _view_contexts[skill_id] = ViewContext(
-            view=view,
-            context=dict(context),
-            timestamp_ms=timestamp_ms,
-        )
-        return True
-
-
-def get_view_context(skill_id: str) -> ViewContext | None:
-    """Return the latest cached view context for a skill."""
-
-    return _view_contexts.get(skill_id)
-
-
-def truncate_for_reference(content: str, file_path: str | None) -> str:
-    """Trim large file references while preserving YAML frontmatter when possible."""
-
-    if len(content.encode("utf-8")) <= MAX_REFERENCE_BYTES:
-        return content
-
-    marker = _truncation_marker(file_path)
-    marker_bytes = len(marker.encode("utf-8"))
-    budget = max(MAX_REFERENCE_BYTES - marker_bytes, 0)
-    frontmatter = _extract_yaml_frontmatter(content)
-
-    if frontmatter is None:
-        return content[:_BODY_REFERENCE_CHARS] + marker
-
-    frontmatter_bytes = len(frontmatter.encode("utf-8"))
-    if frontmatter_bytes > budget:
-        return _trim_utf8_bytes(frontmatter, budget) + marker
-
-    body = content[len(frontmatter) :]
-    return frontmatter + body[:_BODY_REFERENCE_CHARS] + marker
-
-
 def _xml_leaf(tag: str, value: object) -> str:
     """One XML leaf, value JSON-encoded then XML-escaped (safe for dict/scalar)."""
 
@@ -744,50 +677,11 @@ def _xml_leaf(tag: str, value: object) -> str:
     return f"  <{tag}>{escape(payload)}</{tag}>"
 
 
-def render_copilot_context_xml(skill_id: str, view: str, context: dict[str, Any]) -> str:
-    """F4 4-layer resolver: render injected context as structured XML (not a flat
-    JSON dump) so the model can attend to each layer separately.
-
-    Layers: (1) skill basics, (2) current selection (node/edge), (3) lint/compile
-    status, (4) explicit @mention content; any remaining keys go under <implicit>.
-    Per-value truncation reuses ``_context_for_prompt`` so the >150K reference cap
-    still applies. Empty layers are omitted.
-    """
-
-    capped = _context_for_prompt(context)
-    layers: list[str] = [_xml_leaf("skill", {"id": skill_id, "view": view})]
-
-    selection: list[str] = []
-    node = capped.get("selected_node")
-    if isinstance(node, dict):
-        selection.append("    " + _xml_leaf("node", node).strip())
-    edge = capped.get("selected_edge")
-    if isinstance(edge, dict):
-        selection.append("    " + _xml_leaf("edge", edge).strip())
-    if selection:
-        layers.append("  <selection>\n" + "\n".join(selection) + "\n  </selection>")
-
-    lint = capped.get("lint_status")
-    if lint is not None and lint != "idle":
-        layers.append(_xml_leaf("lint_status", lint))
-
-    mentions = capped.get("mentions")
-    if mentions:
-        layers.append(_xml_leaf("mentions", mentions))
-
-    handled = {"selected_node", "selected_node_id", "selected_edge", "lint_status", "mentions"}
-    implicit = {key: value for key, value in capped.items() if key not in handled and value is not None}
-    if implicit:
-        layers.append(_xml_leaf("implicit", implicit))
-
-    return "<copilot_context>\n" + "\n".join(layers) + "\n</copilot_context>"
-
-
 def build_session_system_prompt() -> str:
     """会话级 system prompt = 规则文档 + 挂载 spec 指针(都是会话内不变的静态层)。
 
-    运行时 view/judge context 每轮都变,走 ``_prompt_with_turn_context`` 注入到
-    当轮消息,绝不进会话级 —— 三层分离:恒定规则 / 链路装载 / 运行时上下文。"""
+    只有当前请求显式携带的上下文会走 ``_prompt_with_turn_context`` 注入到
+    当轮消息,绝不进会话级 —— 三层分离:恒定规则 / 链路装载 / 请求上下文。"""
 
     prompt = load_copilot_rules()
     mounted = _mounted_doc_dirs()
@@ -805,20 +699,11 @@ def _context_resolved_event(
     *,
     judge_context: dict[str, Any] | None = None,
 ) -> CopilotEventContextResolved:
-    """F4: build the first-event echo of what context is injected this turn."""
+    """Build the first-event echo of explicit request context injected this turn."""
+    del skill_id
     spec_mounted = _skill_spec_dir() is not None
-    view_context = get_view_context(skill_id)
     parts: list[str] = []
     detail_lines: list[str] = []
-    if view_context is not None:
-        parts.append(f"view={view_context.view}")
-        # Echo the exact structured XML that gets injected, so the user can verify
-        # what the model actually receives (anti hidden-prompt-magic, F4).
-        detail_lines.append(
-            render_copilot_context_xml(skill_id, view_context.view, view_context.context)
-        )
-    else:
-        detail_lines.append("(no view context)")
     if judge_context is not None:
         parts.append("judge context")
         detail_lines.append(render_copilot_judge_context_xml(judge_context))
@@ -826,7 +711,8 @@ def _context_resolved_event(
         parts.append("skill-spec mounted")
     parts.append(f"rules@{copilot_rules_hash()}")
     summary = "Injected this turn: " + " · ".join(parts)
-    return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
+    detail = "\n".join(detail_lines) if detail_lines else "(no request context)"
+    return CopilotEventContextResolved(summary=summary, detail=detail)
 
 
 def render_copilot_judge_context_xml(judge_context: dict[str, Any]) -> str:
@@ -1303,16 +1189,10 @@ def _prompt_with_turn_context(
     *,
     judge_context: dict[str, Any] | None = None,
 ) -> str:
-    """当轮 prompt = 运行时上下文层 + 用户消息。规则文档在会话级 system_prompt
-    (build_options),不随每轮重发。无任何上下文时就是裸用户消息。"""
+    """Current turn prompt = explicit request context + user message."""
 
     layers: list[str] = []
-    view_context = get_view_context(skill_id)
-    if view_context is not None:
-        layers.append(
-            "## 当前上下文\n"
-            + render_copilot_context_xml(skill_id, view_context.view, view_context.context)
-        )
+    del skill_id
     if judge_context is not None:
         layers.append(
             "## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
@@ -1829,54 +1709,3 @@ async def _drive_sdk_test(
         "failed",
         "The model did not read the probe file (the token was not echoed), so the SDK tool loop was not verified.",
     )
-
-
-def _context_for_prompt(context: dict[str, Any]) -> dict[str, Any]:
-    file_path = _file_path_from_context(context)
-    return {key: _context_value_for_prompt(key, value, file_path) for key, value in context.items()}
-
-
-def _context_value_for_prompt(key: str, value: Any, file_path: str | None) -> Any:
-    if isinstance(value, str) and _is_file_content_key(key):
-        return truncate_for_reference(value, file_path)
-    return value
-
-
-def _is_file_content_key(key: str) -> bool:
-    return (
-        key in _FILE_CONTENT_KEYS
-        or key.endswith("_text")
-        or key.endswith("_yaml")
-        or key.endswith("_md")
-        or key.endswith("_markdown")
-    )
-
-
-def _file_path_from_context(context: dict[str, Any]) -> str | None:
-    for key in _FILE_PATH_KEYS:
-        value = context.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
-def _truncation_marker(file_path: str | None) -> str:
-    path = file_path or "<unknown>"
-    return f"[Content truncated due to length. Use 'Read' tool to inspect the full file: {path}]"
-
-
-def _extract_yaml_frontmatter(content: str) -> str | None:
-    lines = content.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
-        return None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            return "".join(lines[: index + 1])
-    return None
-
-
-def _trim_utf8_bytes(content: str, max_bytes: int) -> str:
-    if max_bytes <= 0:
-        return ""
-    encoded = content.encode("utf-8")
-    return encoded[:max_bytes].decode("utf-8", errors="ignore")

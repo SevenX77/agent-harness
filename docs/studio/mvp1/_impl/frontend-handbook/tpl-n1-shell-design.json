@@ -257,14 +257,14 @@
    "cap": "copilot-composer-context-controls",
    "track": "copilot-assist",
    "module": "Copilot 面板",
-   "func": "设计(F7,PM 2026-07-02,target-design):composer 三个待落地控制,各自独立 PR 全栈落地——① @mention 弹出器(@ 触发节点选择 popover,选中插入 token + mentions 进 context POST;后端 mentions XML 层已就绪);② 附件按钮(外部文件/图片:文件选择+拖拽+粘贴 → ws payload 内容块 → 后端转 claude_agent_sdk ImageContent;§4 旧「砍掉 Attach file」已被 PM 反转);③ 停止按钮(流式中发送变停止,ws interrupt 控制消息 → ClaudeSDKClient.interrupt())。可用才渲染,不留死占位。",
+   "func": "设计(F7,PM 2026-07-02,target-design + 2026-07-06 更正):composer 三个待落地控制,各自独立 PR 全栈落地——① @mention 弹出器(@ 触发节点选择 popover,选中插入 token + mentions 随 Copilot WS message payload 显式发送;不得恢复 view-context POST 或选中态自动同步);② 附件按钮(外部文件/图片:文件选择+拖拽+粘贴 → ws payload 内容块 → 后端转 claude_agent_sdk ImageContent;§4 旧「砍掉 Attach file」已被 PM 反转);③ 停止按钮(流式中发送变停止,ws interrupt 控制消息 → ClaudeSDKClient.interrupt())。可用才渲染,不留死占位。",
    "action": "@ 键入弹节点选择;点附件按钮选外部文件(或拖拽/粘贴);流式期间点停止中断回复。",
    "fe_design": "设计源 docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md F7(三条机制与链路、格式约束、降级提示)。落地顺序按后端工作量升序:mention(后端已就绪)→ interrupt(ws 控制消息)→ attach(内容块通路)。",
    "fe_modules": [],
    "be_contract": [
     {
-     "endpoint": "POST /api/skills/{skill_id}/copilot/context",
-     "purpose": "@mention:mentions 随 view-context 注入(后端 mentions 层已实现)。",
+     "endpoint": "WS /api/skills/{skill_id}/copilot/ws",
+     "purpose": "@mention:mentions 随当前 Copilot message payload 显式提交。",
      "mechanism_ref": "copilot_mech_route",
      "iface_ref": "iface-c0"
     },

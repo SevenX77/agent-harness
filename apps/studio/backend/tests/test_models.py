@@ -16,8 +16,6 @@ def test_model_exports_cover_phase0_contracts() -> None:
         "BatchRunResponse",
         "BatchRunStatus",
         "CompareResult",
-        "ContextUpdateRequest",
-        "ContextUpdateResponse",
         "CreateSkillReq",
         "ErrorResponse",
         "GoldenBaseline",

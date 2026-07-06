@@ -14,7 +14,6 @@ import { copilotFileActionEffects, type CopilotFileAction } from "@/components/c
 import { PromptInspector } from "@/components/PromptInspector"
 import { useCopilot } from "@/hooks/useCopilot"
 import { findPromptEvent } from "@/utils/trace"
-import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
@@ -748,29 +747,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [goldenDiff, mutateGoldenBaselines],
   )
 
-  useCopilotContext({
-    skillId: currentSkillId,
-    view: "Edit",
-    context: {
-      selected_node_id: selectedNodeId,
-      selected_node: selectedNode
-        ? {
-            id: selectedNode.id,
-            label: selectedNode.data.label,
-            status: selectedNode.data.status,
-            summary: typeof selectedNode.data.summary === "string" ? selectedNode.data.summary : null,
-          }
-        : null,
-      selected_edge: selectedEdge
-        ? {
-            source: selectedEdge.source,
-            target: selectedEdge.target,
-            context_json: selectedEdge.contextJson as unknown as { [key: string]: string | number | boolean | null },
-          }
-        : null,
-      lint_status: currentSkillId ? readLintStatus(currentSkillId) : "idle",
-    },
-  })
   const copilot = useCopilot(currentSkillId, currentWorkspaceRoot)
 
   useEffect(() => {

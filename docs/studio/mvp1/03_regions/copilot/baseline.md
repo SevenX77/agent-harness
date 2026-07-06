@@ -3,13 +3,13 @@ module: 03_regions/copilot
 doc: baseline
 status: FROZEN（现状对齐 pinned 代码 0d9fbaf；面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
-binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace · apps/studio/frontend/src/components/copilot/copilot-panel.tsx:CopilotPanel · apps/studio/frontend/src/hooks/useCopilot.ts:useCopilot · apps/studio/frontend/src/hooks/useCopilotContext.ts:useCopilotContext · apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubble · apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubble
+binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace · apps/studio/frontend/src/components/copilot/copilot-panel.tsx:CopilotPanel · apps/studio/frontend/src/hooks/useCopilot.ts:useCopilot · apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubble · apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubble
 units: [copilot-session-persistence, copilot-sdk-test-parity]
 ---
 
 # copilot — Baseline（当下代码实现逻辑）
 
-> **Scope**: 右侧 Copilot region：chat panel、connection state、view context sync、model route picker、tool/diff rendering 与 analysis bar UI。
+> **Scope**: 右侧 Copilot region：chat panel、connection state、explicit composer context、model route picker、tool/diff rendering 与 analysis bar UI。
 > **现状一句话**: 面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。
 
 ## UI/UX
@@ -21,7 +21,7 @@ units: [copilot-session-persistence, copilot-sdk-test-parity]
 | Registry role | Panel loads registry and picks `copilot_chat` fallback route. | `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:inEvalView（L83）`, `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:role（L90）` |
 | Send | Submit sends draft through `useCopilot` with selected route id. | `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:submit（L111）` |
 | Websocket | `useCopilot` opens `/copilot/ws`, reconnects, queues text deltas, and appends events. | `apps/studio/frontend/src/hooks/useCopilot.ts:connect（L96）`, `apps/studio/frontend/src/hooks/useCopilot.ts:delay（L123）` |
-| View context | `useCopilotContext` debounces current view context to `/copilot/context`. | `apps/studio/frontend/src/hooks/useCopilotContext.ts:useCopilotContext（L39）`, `apps/studio/frontend/src/hooks/useCopilotContext.ts:timeout（L53）` |
+| View context | No implicit view context sync. Selection stays local unless a future composer `@` mention explicitly sends it with the chat message. | `apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace`, `docs/development/STUDIO_REQUEST_AUDIT.md` |
 | Tool/diff bubbles | Tool calls and diff summaries render inside messages. | `apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubbleBase（L18）`, `apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubbleBase（L19）` |
 
 ## 前端逻辑
@@ -33,7 +33,7 @@ units: [copilot-session-persistence, copilot-sdk-test-parity]
 | Registry role | Panel loads registry and picks `copilot_chat` fallback route. | `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:inEvalView（L83）`, `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:role（L90）` |
 | Send | Submit sends draft through `useCopilot` with selected route id. | `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:submit（L111）` |
 | Websocket | `useCopilot` opens `/copilot/ws`, reconnects, queues text deltas, and appends events. | `apps/studio/frontend/src/hooks/useCopilot.ts:connect（L96）`, `apps/studio/frontend/src/hooks/useCopilot.ts:delay（L123）` |
-| View context | `useCopilotContext` debounces current view context to `/copilot/context`. | `apps/studio/frontend/src/hooks/useCopilotContext.ts:useCopilotContext（L39）`, `apps/studio/frontend/src/hooks/useCopilotContext.ts:timeout（L53）` |
+| View context | No implicit view context sync. Selection stays local unless a future composer `@` mention explicitly sends it with the chat message. | `apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace`, `docs/development/STUDIO_REQUEST_AUDIT.md` |
 | Tool/diff bubbles | Tool calls and diff summaries render inside messages. | `apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubbleBase（L18）`, `apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubbleBase（L19）` |
 
 ## 后端功能
@@ -52,7 +52,7 @@ N/A。
 > **验"是否按目标改了"**：1. session UI；2. analysis bar；3. 下钻 skillId。
 
 ## 读代码主路径提示
-`apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace` → `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:CopilotPanel` → `apps/studio/frontend/src/hooks/useCopilot.ts:useCopilot` → `apps/studio/frontend/src/hooks/useCopilotContext.ts:useCopilotContext` → `apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubble` → `apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubble`。
+`apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace` → `apps/studio/frontend/src/components/copilot/copilot-panel.tsx:CopilotPanel` → `apps/studio/frontend/src/hooks/useCopilot.ts:useCopilot` → `apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubble` → `apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubble`。
 
 > 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#03-regions-copilot)（迁移期安全网，代码实现验证后删）。
 

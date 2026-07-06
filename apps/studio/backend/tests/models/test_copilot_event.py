@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 from app.models.copilot import (
-    ContextUpdateRequest,
     CopilotEvent,
     CopilotEventDone,
     CopilotEventError,
@@ -10,7 +9,7 @@ from app.models.copilot import (
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 
 def test_copilot_event_subclasses_construct() -> None:
@@ -63,25 +62,3 @@ def test_copilot_event_union_round_trips(event: CopilotEvent) -> None:
     validated = adapter.validate_python(event.model_dump())
 
     assert validated == event
-
-
-def test_context_update_request_accepts_timestamp() -> None:
-    request = ContextUpdateRequest(
-        view="Edit",
-        context={"skill_md_text": "---\nname: demo\n---"},
-        timestamp=1_765_000_000_000,
-    )
-
-    assert request.timestamp == 1_765_000_000_000
-
-
-def test_context_update_request_forbids_extra_fields() -> None:
-    with pytest.raises(ValidationError):
-        ContextUpdateRequest.model_validate(
-            {
-                "view": "Edit",
-                "context": {},
-                "timestamp": 1,
-                "extra": "nope",
-            }
-        )

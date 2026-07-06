@@ -8,8 +8,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.core.exceptions import raise_not_implemented
 from app.models.copilot import (
-    ContextUpdateRequest,
-    ContextUpdateResponse,
     CopilotInterruptResponse,
     CopilotToolApprovalRequest,
     CopilotToolApprovalResponse,
@@ -18,11 +16,9 @@ from app.models.copilot import (
 from app.models.errors import ErrorResponse
 from app.models.golden import CopilotJudgeRequest, CopilotJudgeResponse
 from app.services.copilot import (
-    get_view_context,
     interrupt_active_query,
     reset_session,
     resolve_tool_approval,
-    set_view_context,
     stream_query,
 )
 from app.services.copilot_judge_adapter import CopilotJudgeAdapter, raise_missing_judge_ref
@@ -144,34 +140,3 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
                 await websocket.send_json(event.model_dump(exclude_none=True))
     except WebSocketDisconnect:
         await reset_session(skill_id=skill_id, model_code=None)
-
-
-@router.post(
-    "/api/skills/{skill_id}/copilot/context",
-    response_model=ContextUpdateResponse,
-)
-async def post_copilot_context(
-    skill_id: str,
-    request: ContextUpdateRequest,
-) -> ContextUpdateResponse:
-    """Update the cached Studio view context without starting an LLM query."""
-
-    accepted = await set_view_context(
-        skill_id=skill_id,
-        view=request.view,
-        context=request.context,
-        timestamp_ms=request.timestamp,
-    )
-    if accepted:
-        return ContextUpdateResponse(
-            accepted=True,
-            summary=f"{request.view} at {request.timestamp}",
-        )
-
-    cached = get_view_context(skill_id)
-    summary = f"{cached.view} at {cached.timestamp_ms}" if cached is not None else None
-    return ContextUpdateResponse(
-        accepted=False,
-        reason="out_of_order",
-        summary=summary,
-    )

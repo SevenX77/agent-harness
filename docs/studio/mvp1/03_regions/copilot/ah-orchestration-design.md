@@ -185,11 +185,15 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
   config,再允许重新打开。
 - workspace 内只允许一个 Studio-managed ahd。Open 同一个 assistant 且双探测活跃时只 attach 到既有
   master,不再 `ah start`;Open 另一个 assistant 且已有 ahd 活跃时直接拒绝,要求先关闭现有 assistant。
+  Open 命令返回的 config path 同时是该 workspace 本轮状态身份的真相源:当 skill 自带 `ah.toml` 时,
+  Claude/Codex 会共享同一个 config path,不得再用文件扫描顺序把已打开的 Codex 误归类成 Claude。
   UI 同一位置变成运行中菜单,触发按钮显示 `Close Claude` / `Close Codex` / `Close assistants`,菜单内提供
   `Attach Claude` / `Attach Codex` 和关闭动作。Attach 只负责进入既有 master pane,不重新 `ah start`:
   Windows 下 Studio 为每个 workspace+assistant 生成稳定终端标题,如果目标 attach 窗口已经打开,先激活该
   窗口到最前面;找不到窗口时才新开终端并执行 `ah --config <cfg> attach master`,用于用户手动关闭 terminal
   tab 后重新进入现有 master pane。
+  Open 首次启动的 launcher 必须检查 `ah start --wait` 退出码;启动失败时停在终端错误提示,不得继续
+  `attach master`,否则用户看到的是旧 master/空终端,状态事件也不会反映真实启动失败。
 - 点击关闭不直接杀 tmux pane,而是走统一 cleanup:先对 Studio 打开的 config 执行 `ah --config <cfg> stop`,
   轮询双探测直到 ahd inventory、`master_*`、`agent_*`/`worker_*` 全部消失;若 `ah stop` 后仍残留,再按
   `ah kill --session <sess> --force` 与 `tmux -L <socket> kill-session -t <session>` 兜底。关闭按钮、
@@ -537,6 +541,8 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - `watch_code_assistant_status` 不轮询 `ah ps`,而是订阅 `ah events --format json`;活跃判定必须同时要求事件快照里 `ahd_has_inventory=true` 与 `master_tmux_alive=true`;只有 ahd、只有 master tmux、残留 worker tmux 均判 stale;
 - Open 决策必须保证 workspace 内单例 ahd:同 assistant 活跃时 attach,另一个 assistant 活跃时拒绝,
   双 active 或 ahd/master 脱钩时先清理所有 Studio-managed ah configs 再重新打开;
+- Open 命令返回的 config path 必须注册为本轮 workspace 状态身份源,优先于扫描发现的 config 身份;
+  Windows 首次启动 payload 必须在 `ah start --wait` 非 0 时中止,不能继续 attach;
 - `ah ps` 输出解析必须提取 `tmux -L <socket>` 与 `sess_*` session id,供后续 tmux double-check 与
   `ah kill --session` 兜底使用;
 - Close / Window close / app quit 的 cleanup 必须在 `ah stop` 后确认 ahd inventory、`master_*`、

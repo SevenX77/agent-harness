@@ -242,7 +242,7 @@ fn studio_ah_temp_root() -> PathBuf {
     std::env::temp_dir().join("skill-studio-ah")
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CodeAssistant {
     Claude,
     Codex,
@@ -1140,6 +1140,31 @@ fn status_specs_for_workspace(
         .collect()
 }
 
+fn next_status_specs_for_workspace(
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+) -> BTreeMap<PathBuf, CodeAssistantStatusSpec> {
+    let mut specs = code_assistant_status_specs_for_workspace(workspace_root);
+    let registered_configs = state
+        .configs
+        .lock()
+        .expect("code assistant state poisoned")
+        .clone();
+    let registered_specs = state
+        .status_specs
+        .lock()
+        .expect("code assistant status specs poisoned")
+        .clone();
+
+    for (config, spec) in registered_specs {
+        if spec.workspace_root == workspace_root && registered_configs.contains(&config) {
+            specs.insert(config, spec);
+        }
+    }
+
+    specs
+}
+
 fn snapshots_for_configs(
     state: &CodeAssistantRuntimeState,
     specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
@@ -1384,7 +1409,7 @@ fn ensure_code_assistant_status_streams_for_workspace(
     state: &CodeAssistantRuntimeState,
     workspace_root: &Path,
 ) -> Result<(), String> {
-    let next_specs = code_assistant_status_specs_for_workspace(workspace_root);
+    let next_specs = next_status_specs_for_workspace(state, workspace_root);
     let next_configs = next_specs.keys().cloned().collect::<BTreeSet<_>>();
     let stale_streams = {
         let specs = status_specs_for_workspace(state, workspace_root);
@@ -1447,6 +1472,25 @@ fn ensure_code_assistant_status_streams_for_workspace(
         }
     }
     Ok(())
+}
+
+fn register_opened_code_assistant_status_spec(
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+    assistant: CodeAssistant,
+    config_path: &Path,
+) {
+    state
+        .status_specs
+        .lock()
+        .expect("code assistant status specs poisoned")
+        .insert(
+            config_path.to_path_buf(),
+            CodeAssistantStatusSpec {
+                workspace_root: workspace_root.to_path_buf(),
+                assistant,
+            },
+        );
 }
 
 fn unwatch_code_assistant_status_streams_for_workspace(
@@ -1672,6 +1716,11 @@ fi
 cd "$WS" 2>/dev/null || cd "$HOME"
 printf '%s\n' "Starting {assistant_name} through ah (first launch ~15s cold start)..."
 ah --config "$CFG" start --wait
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf 'ah start failed with exit code %s\n' "$status"
+  exec bash -i
+fi
 printf '%s\n' "Attaching - {assistant_name} will auto-report its status (detach: Ctrl-b then d)."
 ah --config "$CFG" attach master
 printf '[attach ended; exit=%s]\n' "$?"
@@ -2306,7 +2355,13 @@ fn open_claude_code(
         .configs
         .lock()
         .expect("code assistant state poisoned")
-        .insert(config);
+        .insert(config.clone());
+    register_opened_code_assistant_status_spec(
+        &state,
+        &workspace_root,
+        CodeAssistant::Claude,
+        &config,
+    );
     ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
     emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(())
@@ -2324,7 +2379,13 @@ fn open_codex_cli(
         .configs
         .lock()
         .expect("code assistant state poisoned")
-        .insert(config);
+        .insert(config.clone());
+    register_opened_code_assistant_status_spec(
+        &state,
+        &workspace_root,
+        CodeAssistant::Codex,
+        &config,
+    );
     ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
     emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(())
@@ -3316,6 +3377,32 @@ mod tests {
     }
 
     #[test]
+    fn opened_config_status_spec_is_authoritative_for_requested_assistant() {
+        let workspace = PathBuf::from("/tmp/studio-skill");
+        let config = workspace.join("ah.toml");
+        let state = CodeAssistantRuntimeState {
+            configs: Mutex::new(BTreeSet::from([config.clone()])),
+            status_streams: Mutex::new(BTreeMap::new()),
+            status_specs: Mutex::new(BTreeMap::from([(
+                config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: workspace.clone(),
+                    assistant: CodeAssistant::Codex,
+                },
+            )])),
+            status_snapshots: Mutex::new(BTreeMap::new()),
+        };
+
+        let specs = next_status_specs_for_workspace(&state, &workspace);
+
+        assert_eq!(
+            specs.get(&config).map(|spec| spec.assistant),
+            Some(CodeAssistant::Codex),
+            "the config returned by open_codex_cli is the status identity source; discovery must not relabel it as Claude"
+        );
+    }
+
+    #[test]
     fn ah_ps_probe_extracts_tmux_socket_label_and_session_ids() {
         let output = r#"
 Sessions
@@ -3434,6 +3521,8 @@ sessions
         assert!(script.contains("hasTrustDialogAccepted"));
         assert!(script.contains("cd \"$WS\""));
         assert!(script.contains("ah --config \"$CFG\" start --wait"));
+        assert!(script.contains("status=$?"));
+        assert!(script.contains("ah start failed with exit code %s"));
         assert!(script.contains("ah --config \"$CFG\" attach master"));
     }
 

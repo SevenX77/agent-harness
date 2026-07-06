@@ -185,6 +185,22 @@ one-page orientation, not the full design.
   changes and must not refetch mutable truth. If an event cannot identify the
   changed dataset precisely, fix the event contract instead of broad-refreshing
   registry/roles/settings/templates.
+- **Compile/lint 单出口 + 全量聚合 + 同一份诊断 (diagnostics SSOT)**: there is
+  exactly ONE compile/lint exit — engine
+  `graph_agent.core.compiler.compile_skill(...)`. First-screen lint, realtime
+  lint, and manual Compile all reach that same exit through the Studio backend,
+  which layers only Studio-owned preflight checks the engine cannot know about
+  (`.workspace/runtime_config.json` / `import_files` / `golden`). One pass
+  returns the engine's FULL aggregated defect set — never just the first error;
+  fixing one defect must not "reveal" the next one of the same stage. Every
+  frontend surface (canvas node badges, Properties/input field tooltips, Monaco
+  editor markers, Compile drawer) projects the SAME complete diagnostics list —
+  no surface runs its own validation, synthesizes its own errors, or consumes a
+  truncated subset. Studio must not invent Studio-only compile rules/codes for
+  anything the engine can own. Authoritative design:
+  `docs/studio/mvp1/02_capabilities/compile-lint/mvp1-alignment.md` (esp. the
+  2026-07-05 data-chain clarification + F6) and
+  `docs/studio/mvp1/01_workflows/03_compile.md`.
 - **Boundaries, not locks**: engine and gateway are stable foundations with
   strict gates (`mypy --strict` + full module test suites), NOT no-go zones.
   Routine studio plumbing flows through the adapters (`app/core/adapters/`);

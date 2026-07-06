@@ -36,8 +36,9 @@ const subscribers = new Map<number, StudioEventSubscriber>()
 let nextSubscriberId = 1
 let hubConnectionLost = false
 let socket: WebSocket | null = null
-let reconnectTimer: number | undefined
-let lostTicker: number | undefined
+let reconnectTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+let openResetTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+let lostTicker: ReturnType<typeof globalThis.setInterval> | undefined
 let attempt = 0
 let consecutiveAuthFailures = 0
 let gaveUpOnAuth = false
@@ -54,7 +55,7 @@ function setHubConnectionLost(next: boolean): void {
 
 function stopLostTicker(): void {
   if (lostTicker !== undefined) {
-    window.clearInterval(lostTicker)
+    globalThis.clearInterval(lostTicker)
     lostTicker = undefined
   }
 }
@@ -67,13 +68,17 @@ function evaluateConnectionLost(): void {
 
 function startLostTicker(): void {
   if (lostTicker !== undefined) return
-  lostTicker = window.setInterval(evaluateConnectionLost, CONNECTION_LOST_TICK_MS)
+  lostTicker = globalThis.setInterval(evaluateConnectionLost, CONNECTION_LOST_TICK_MS)
 }
 
 function resetHubState(): void {
   if (reconnectTimer !== undefined) {
-    window.clearTimeout(reconnectTimer)
+    globalThis.clearTimeout(reconnectTimer)
     reconnectTimer = undefined
+  }
+  if (openResetTimer !== undefined) {
+    globalThis.clearTimeout(openResetTimer)
+    openResetTimer = undefined
   }
   stopLostTicker()
   if (socket) {
@@ -145,7 +150,7 @@ function scheduleReconnect(): void {
   attempt += 1
   startLostTicker()
   evaluateConnectionLost()
-  reconnectTimer = window.setTimeout(connect, delay)
+  reconnectTimer = globalThis.setTimeout(connect, delay)
 }
 
 function handleDrop(reason: string, closeCode?: number): void {
@@ -157,6 +162,10 @@ function handleDrop(reason: string, closeCode?: number): void {
     closeCode === undefined ? "n/a" : String(closeCode),
     consecutiveAuthFailures,
   )
+  if (openResetTimer !== undefined) {
+    globalThis.clearTimeout(openResetTimer)
+    openResetTimer = undefined
+  }
   if (socket) {
     socket.onopen = null
     socket.onclose = null
@@ -191,11 +200,17 @@ function connect(): void {
   nextSocket.onopen = () => {
     if (!running) return
     console.info("phase=studio-event-stream action=connect attempt=%d", attempt + 1)
-    attempt = 0
-    consecutiveAuthFailures = 0
     disconnectedSince = null
     stopLostTicker()
     setHubConnectionLost(false)
+
+    openResetTimer = globalThis.setTimeout(() => {
+      openResetTimer = undefined
+      if (running && socket === nextSocket) {
+        attempt = 0
+        consecutiveAuthFailures = 0
+      }
+    }, 2000)
   }
 
   nextSocket.onmessage = (message) => {

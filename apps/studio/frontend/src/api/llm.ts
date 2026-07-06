@@ -1890,11 +1890,6 @@ export async function getRoles(options: RegistryReadOptions = {}): Promise<Roles
   return rolesRequest
 }
 
-export async function getRole(roleName: string): Promise<RoleEntry> {
-  const response = await api.get<RoleEntry>(`/llm/roles/${roleName}`)
-  return response.data
-}
-
 // 固定角色名(不可删除、不可改名:引擎 builtin 硬依赖如 `fast`,以及内置 copilot 角色)。
 // 前端据此隐藏删除/改名入口;后端删除端点亦拒删(409)。
 export async function getFixedRoleNames(): Promise<string[]> {

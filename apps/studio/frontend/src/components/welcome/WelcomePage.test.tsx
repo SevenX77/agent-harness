@@ -62,6 +62,10 @@ vi.mock('../../api/client', () => ({
     delete: vi.fn(),
     post: vi.fn(),
   },
+  apiClientConfigChangedEvent: 'studio-api-client-config-changed',
+  authenticatedApiReady: vi.fn(() => true),
+  getAppSettings: vi.fn(),
+  updateAppSettings: vi.fn(),
 }))
 
 vi.mock('sonner', () => ({

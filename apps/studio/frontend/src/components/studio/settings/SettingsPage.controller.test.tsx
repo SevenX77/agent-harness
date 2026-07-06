@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
 import { deleteEndpoint, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles } from "../../../api/llm"
-import { useSettingsPageController } from "./SettingsPage"
+import { SettingsPageView, useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
 let capturedController: Controller | null = null
@@ -81,6 +81,22 @@ vi.mock("@/hooks/useStudioEventStream", () => ({
   },
 }))
 
+vi.mock("./SettingsPageContent", () => ({
+  SettingsPageContent: ({
+    activeTab,
+    onTabChange,
+  }: {
+    activeTab: string
+    onTabChange: (tab: "general" | "api_keys" | "llm_roles" | "copilot") => void
+  }) => (
+    <div data-testid="settings-content" data-active-tab={activeTab}>
+      <button data-testid="settings-tab-general" onClick={() => onTabChange("general")} />
+      <button data-testid="settings-tab-api-keys" onClick={() => onTabChange("api_keys")} />
+      <button data-testid="settings-tab-llm-roles" onClick={() => onTabChange("llm_roles")} />
+    </div>
+  ),
+}))
+
 vi.mock("../../../api/llm", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../api/llm")>()
   return {
@@ -105,6 +121,28 @@ function ControllerProbe({ capture }: { capture?: (controller: Controller) => vo
     capture?.(controller)
   })
   return null
+}
+
+function SettingsViewProbe({
+  capture,
+  initialTab,
+}: {
+  capture?: (controller: Controller) => void
+  initialTab?: "general" | "api_keys" | "llm_roles" | "copilot"
+}) {
+  const controller = useSettingsPageController()
+  useEffect(() => {
+    capture?.(controller)
+  })
+  return <SettingsPageView controller={controller} initialTab={initialTab} onClose={() => undefined} />
+}
+
+async function flushControllerEffects(): Promise<void> {
+  await act(async () => {
+    for (let index = 0; index < 6; index += 1) {
+      await Promise.resolve()
+    }
+  })
 }
 
 describe("useSettingsPageController lifecycle", () => {
@@ -168,6 +206,64 @@ describe("useSettingsPageController lifecycle", () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+
+    expect(getCredentials).not.toHaveBeenCalled()
+    expect(getRoles).not.toHaveBeenCalled()
+    expect(getModelGroups).not.toHaveBeenCalled()
+  })
+
+  it("keeps Settings open, close, and tab switches backend-silent after app-level hydration", async () => {
+    await act(async () => {
+      root.render(
+        <SettingsViewProbe
+          initialTab="general"
+          capture={(controller) => { capturedController = controller }}
+        />,
+      )
+    })
+    await flushControllerEffects()
+
+    expect(getCredentials).toHaveBeenCalled()
+    expect(getRoles).toHaveBeenCalled()
+    expect(getModelGroups).toHaveBeenCalled()
+
+    vi.mocked(getCredentials).mockClear()
+    vi.mocked(getRoles).mockClear()
+    vi.mocked(getModelGroups).mockClear()
+
+    await act(async () => {
+      root.render(
+        <SettingsViewProbe
+          initialTab="api_keys"
+          capture={(controller) => { capturedController = controller }}
+        />,
+      )
+    })
+    await flushControllerEffects()
+
+    expect(capturedController?.credentialsLoading).toBe(false)
+    expect(getCredentials).not.toHaveBeenCalled()
+    expect(getRoles).not.toHaveBeenCalled()
+    expect(getModelGroups).not.toHaveBeenCalled()
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>("[data-testid='settings-tab-llm-roles']")?.click()
+    })
+    await flushControllerEffects()
+
+    expect(getCredentials).not.toHaveBeenCalled()
+    expect(getRoles).not.toHaveBeenCalled()
+    expect(getModelGroups).not.toHaveBeenCalled()
+
+    await act(async () => {
+      root.render(
+        <SettingsViewProbe
+          initialTab="general"
+          capture={(controller) => { capturedController = controller }}
+        />,
+      )
+    })
+    await flushControllerEffects()
 
     expect(getCredentials).not.toHaveBeenCalled()
     expect(getRoles).not.toHaveBeenCalled()

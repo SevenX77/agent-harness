@@ -299,11 +299,14 @@ not water a feature down to keep it frontend-only.
   there is a specific product reason not to.
 - In status updates for UI work, name the design-system component being used when
   one applies.
-- Before finishing frontend changes, run the app and personally inspect the
-  changed screen in a browser or Tauri shell. Click through every touched
-  interactive workflow, including the main success path and obvious cancel/error
-  states when feasible, and report that manual verification; tests and builds
-  alone are not enough.
+- Before reporting done, boot the app from your own worktree
+  (`scripts/wt-dev.sh`, `--backend` when backend/engine/gateway changed) and
+  smoke-check that the touched screens open without errors, capturing the
+  handbook screenshots along the way. Detailed per-item click-through
+  verification belongs to the PM (decision 2026-07-06, replacing the old
+  agent self-inspection rule): deliver a per-item verification checklist and a
+  ready-to-click app instead of self-testing every flow. Tests and builds
+  alone still do not count as the smoke check.
 - **Parallel tasks: one worktree per task, preview via `scripts/wt-dev.sh`.**
   The repo root runs the ONE full app (`studio-dev.ps1`: Tauri + sidecar
   :8787 + Vite 5173, showing `main`'s code). Each worktree starts its own

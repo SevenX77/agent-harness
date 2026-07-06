@@ -16,16 +16,22 @@ aligns_with: 01_workflows/03_compile.md（lint / compile / stage gate）
 
 Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.md:10`, `01_workflows/03_compile.md:26`.
 
-2026-07-05 data-chain clarification: Studio does not have separate lint and
-compile rule engines. The one engine-owned compile exit is
+2026-07-06 data-chain clarification: Studio has one compile/lint result
+pipeline, not two competing exits. Its engine-owned structural compile stage is
 `graph_agent.core.compiler.compile_skill(...)`, implemented by
-`SkillLoader.compile_skill(...)`. Studio's backend shell calls that same exit
-from first-screen lint, realtime lint, and manual Compile, then layers only
-Studio-owned preflight checks that the engine SDK cannot know about
-(`.workspace/runtime_config.json`, `.workspace/import_files/`, `.workspace/golden`).
-The frontend then projects the resulting diagnostics to node badges, field
-tooltips, editor markers, and the drawer. Any error that can be proven before
-predict/run belongs on this compile/lint path, not on predict/run startup.
+`SkillLoader.compile_skill(...)`. The Studio backend calls that same engine
+stage from first-screen lint, realtime lint, and manual Compile, and combines
+the engine diagnostics with Studio-owned preflight diagnostics for workspace
+truth the engine SDK cannot own (`.workspace/runtime_config.json`,
+`.workspace/import_files/`, `.workspace/golden`). Those Studio checks are part
+of the same `/lint` or `/compile` response, not a separate user-visible compile
+exit. If engine compile stops early but `GRAPH.md` frontmatter is still
+parseable, Studio must still run any independent runtime-input preflight that
+can be proven from `io.inputs` and runtime_config, so one bad field does not
+mask another. The frontend then projects the resulting combined diagnostics to
+node badges, field tooltips, editor markers, and the drawer. Any error that can
+be proven before predict/run belongs on this compile/lint path, not on
+predict/run startup.
 
 ## 2. 数据流 / 机制（设计细节）
 ### F1. Realtime Lint
@@ -77,9 +83,14 @@ checks live in the Studio shell compile preflight because `.workspace/import_fil
 `.workspace/runtime_config.json`, and `.workspace/golden` are Studio workspace
 files, not engine SDK source.
 
-- 机制: manual compile refreshes runtime_config first, runs engine compile with
-  runtime input fields, then Studio preflight validates golden output JSON files
-  against node `io.outputs`; failures return normal `CompileFailure.errors`.
+- 机制: manual compile refreshes runtime_config first, runs the engine structural
+  compile stage with runtime input fields, and returns one combined
+  `CompileFailure.errors` list containing engine diagnostics plus any
+  independent Studio workspace preflight diagnostics. If engine compile succeeds,
+  Studio preflight also validates golden output JSON files against node
+  `io.outputs`; if engine compile fails before a compiled node set exists,
+  Studio still runs the runtime-input checks that only require parseable
+  `GRAPH.md` `io.inputs`.
 - 决策: anything knowable before predict/run is a compile error. Predict/Run must
   never silently substitute `{}` for missing input.
 - 测试: required graph input with no runtime_config root import backing fails
@@ -110,7 +121,7 @@ not synthesize node compile errors from it.
 
 ### F6. Lint Completeness (Full Aggregated Diagnostics)
 
-- 机制: one lint/compile pass surfaces the engine's **entire aggregated defect set** for that pass — the engine collects per stage ("同阶段尽量聚合", engine compile-rules §2.1) and exposes the full set on the exception seam (`compile_result.issues`, each issue carrying explicit source_path/line/field_path axes); Studio's lint path expands every issue into `LintResult.errors`, exactly like the manual Compile drawer does. There is no "single-error consumer": realtime lint, drawer, node badges, field tooltips, and editor markers all project the same complete list.
+- 机制: one lint/compile pass surfaces the engine's **entire aggregated defect set** for that pass — the engine collects per stage ("同阶段尽量聚合", engine compile-rules §2.1) and exposes the full set on the exception seam (`compile_result.issues`, each issue carrying explicit source_path/line/field_path axes); Studio's lint path expands every issue into `LintResult.errors`, exactly like the manual Compile drawer does. Studio then merges its own independent workspace preflight errors into the same result, including runtime-input errors that can be determined even when engine compile already produced structural errors. There is no "single-error consumer": realtime lint, drawer, node badges, field tooltips, and editor markers all project the same complete list.
 - 决策: fixing one defect must not "reveal" the next defect of the same stage; independent defects (multiple islands, multiple unknown deps, multiple nodes missing blocks) appear together in one pass.
 - 原话/来源: 2026-07-01 PM:"明明有问题的地方不弹报错……我把一个节点的线断开,没有报错""编译总是只弹个别错误,不完整……将role补上,goal的报错才出现"→ 定为触发语义 + 聚合完整性两条设计(03_compile.md 决策段 2026-07-01)。
 - 测试: a graph with two islands + a node missing `<goal>` lints all three errors in one response; the lint surface and the Compile drawer show the same set.
@@ -119,13 +130,13 @@ not synthesize node compile errors from it.
 
 ## 3. 接口契约
 - Unified backend path: `GET /api/skills/{id}` -> `get_skill_detail` ->
-  `lint_skill_path` -> engine `compile_skill(...)` -> Studio preflight ->
+  `lint_skill_path` -> engine `compile_skill(...)` + Studio diagnostic merge ->
   `SkillDetail.lint_result`; `POST /api/skills/{id}/lint` -> `lint_skill` ->
   changed-markdown sandbox or on-disk skill -> `lint_skill_path` -> the same
-  engine `compile_skill(...)` -> the same Studio preflight -> `LintResult`;
+  engine `compile_skill(...)` + Studio diagnostic merge -> `LintResult`;
   `POST /api/skills/{id}/compile` -> `compile_skill_for_studio` ->
   `refresh_runtime_config` -> the same engine `compile_skill(...,
-  runtime_input_fields=...)` -> the same Studio preflight -> frozen artifact or
+  runtime_input_fields=...)` + Studio diagnostic merge -> frozen artifact or
   `CompileFailure.errors`.
 - Frontend lint sends changed markdown and receives pass/fail/error payload; `LintResult.errors` carries the full aggregated defect list of the pass (F6), never just the first error.
 - Canvas topology writes (GRAPH.md rewrite) trigger the same lint call with the serialized content and replace all three projections with the new result (F1/F6).

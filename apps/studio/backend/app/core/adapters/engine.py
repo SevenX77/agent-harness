@@ -75,6 +75,7 @@ from graph_agent.core.manifest import (
 from graph_agent.core.manifest import (
     effective_llm_role as effective_llm_role,
 )
+from graph_agent.core.parser import parse_markdown_parts as parse_markdown_parts
 from graph_agent.core.result import (
     PathDiff as PathDiff,
 )

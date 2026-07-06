@@ -9,6 +9,7 @@ lint's).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,40 @@ def _write_test_input(skill_dir: Path, payload: str = '{"input_text":"hello"}') 
 
 def _disk_graph_text(skills_dir: Path, skill_id: str) -> str:
     return (skills_dir / skill_id / "GRAPH.md").read_text(encoding="utf-8")
+
+
+def _write_source_file_graph_with_one_runtime_binding(skill_dir: Path) -> None:
+    (skill_dir / "GRAPH.md").write_text(
+        """---
+schema_version: "v0.3.0"
+name: text-segmentation
+description: Lint should aggregate independent input diagnostics
+io:
+  inputs:
+    type: object
+    required: [chapter, chapters]
+    properties:
+      chapter:
+        type: object
+      chapters:
+        type: array
+        source: file
+        path: imports/chapters/chapters.json
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+phases:
+  - setup
+---
+<phase depends_on="input" output>setup</phase>
+""",
+        encoding="utf-8",
+    )
+    import_file = skill_dir / ".workspace" / "import_files" / "chapters.json"
+    import_file.parent.mkdir(parents=True, exist_ok=True)
+    import_file.write_text(json.dumps({"chapters": []}), encoding="utf-8")
 
 
 def test_clean_changed_markdown_passes_without_touching_disk(
@@ -196,6 +231,24 @@ def test_lint_on_disk_includes_studio_runtime_input_preflight(
     assert result.errors[0].field_path == "input_text"
     assert result.errors[0].source_path == ".workspace/runtime_config.json"
     assert result.errors[0].error_code == "STUDIO_RUNTIME_INPUT_MISSING"
+
+
+def test_lint_aggregates_engine_io_error_with_missing_runtime_input(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """First-screen lint must surface all independent compile-time input defects."""
+    skills_dir, _workspaces = studio_roots
+    _write_source_file_graph_with_one_runtime_binding(skills_dir / "text-segmentation")
+
+    result = skill_service.lint_skill_on_disk("text-segmentation")
+
+    assert result.status == "failed"
+    by_code_and_field = {
+        (error.error_code, error.field_path)
+        for error in result.errors
+    }
+    assert ("F-v3-graph-io-schema-invalid", "io.inputs.properties.chapters.source") in by_code_and_field
+    assert ("STUDIO_RUNTIME_INPUT_MISSING", "chapter") in by_code_and_field
 
 
 def test_body_lint_diverges_from_stale_disk_state(

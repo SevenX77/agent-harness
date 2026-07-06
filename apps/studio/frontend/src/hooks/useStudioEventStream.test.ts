@@ -275,6 +275,27 @@ describe("useStudioEventStream — R-F13 give-up after 5 consecutive 4401 closes
     expect(toastMock.error).toHaveBeenCalledWith("与 sidecar 连接已断开，请重启 Studio")
   })
 
+  it("still gives up when each rejected auth socket opens briefly before the 4401 close", () => {
+    mountHook()
+
+    // The backend accepts the WebSocket before closing with 4401 so browsers can
+    // observe the real close code. That brief open must not reset auth failures.
+    for (let i = 0; i < WS_AUTH_FAILURE_GIVEUP_THRESHOLD; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current.acceptOpen()
+        current.dropWith(WS_AUTH_REJECTED_CLOSE_CODE, "Unauthorized")
+      })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+    }
+
+    expect(FakeWebSocket.instances.length).toBe(WS_AUTH_FAILURE_GIVEUP_THRESHOLD)
+    expect(toastMock.error).toHaveBeenCalledTimes(1)
+    expect(toastMock.error).toHaveBeenCalledWith("与 sidecar 连接已断开，请重启 Studio")
+  })
+
   it("does NOT count non-4401 transport drops toward the give-up threshold", () => {
     mountHook()
 
@@ -318,7 +339,7 @@ describe("useStudioEventStream — R-F13 give-up after 5 consecutive 4401 closes
       reconnected.acceptOpen()
     })
     act(() => {
-      vi.advanceTimersByTime(2000)
+      vi.advanceTimersByTime(2_000)
     })
 
     // Now three more 4401s — without the counter reset on open this would

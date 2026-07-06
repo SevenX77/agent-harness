@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles } from "../../../api/llm"
+import { deleteEndpoint, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog } from "../../../api/llm"
 import { SettingsPageView, useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -23,6 +23,10 @@ vi.mock("sonner", () => ({
   },
 }))
 
+const mockAppSettings = vi.hoisted(() => ({
+  remoteModelCatalogEnabled: false,
+}))
+
 vi.mock("@/hooks/useAppSettings", () => ({
   useAppSettings: () => ({
     settings: {
@@ -30,7 +34,7 @@ vi.mock("@/hooks/useAppSettings", () => ({
       gitea_host: "",
       default_skills_directory: "",
       language: "en",
-      remote_model_catalog_enabled: false,
+      remote_model_catalog_enabled: mockAppSettings.remoteModelCatalogEnabled,
     },
     isLoading: false,
     saveStatus: "idle",
@@ -151,6 +155,7 @@ describe("useSettingsPageController lifecycle", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAppSettings.remoteModelCatalogEnabled = false
     mockRolesSave.status = "idle"
     mockEventStream.callbacks = null
     mockEventStream.connectionLost = false
@@ -291,6 +296,18 @@ describe("useSettingsPageController lifecycle", () => {
     })
 
     expect(getCredentials).toHaveBeenCalled()
+  })
+
+  it("does not sync the remote community catalog just because settings mounted", async () => {
+    mockAppSettings.remoteModelCatalogEnabled = true
+
+    await act(async () => {
+      root.render(<ControllerProbe />)
+    })
+    await flushControllerEffects()
+
+    expect(getCredentials).toHaveBeenCalled()
+    expect(syncVerifiedCommunityCatalog).not.toHaveBeenCalled()
   })
 
   it("does not apply roles_changed refresh while a roles save is still pending or saving", async () => {

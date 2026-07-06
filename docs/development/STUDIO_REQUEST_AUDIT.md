@@ -76,7 +76,7 @@ Use per-request tests when a request has unique semantics:
 | LLM fixed role metadata | `GET /api/llm/fixed-roles`, `GET /api/llm/fixed-roles/{role_name}` | First visible LLM Roles/Copilot consumer | OK: fixed-role names and recommended-model metadata are immutable backend projections; frontend lazy tab mounting prevents hidden Settings pages from reading them, and the API client dedupes/caches repeated consumers. | `test_llm_fixed_roles.py`, `llm.test.ts`, `SettingsPageContent.lazy-tabs.test.tsx` |
 | Manual model suggestions | `GET /api/llm/providers/notable-models` | Explicitly opening the API Keys manual model probing accordion | OK: notable models are suggestion-only placeholder metadata, not runtime truth; the collapsed panel is silent, and candidates are cached per provider until explicit force refresh. | `test_llm_registry_api.py`, `ManualModelTestPanel.test.tsx`, `llm.test.ts` |
 | LLM role test jobs | `POST /api/llm/roles/{role_name}/test-jobs`, `POST /api/llm/model-bundles/{bundle_id}/test-jobs`, `POST /api/llm/model-groups/test-jobs`, `GET /api/llm/role-test-jobs/{job_id}` | Explicit Test button / compare-candidate test action, then scoped job polling | OK: test jobs are explicit commands; polling is confined to the returned job id and never refreshes broad registry/roles/settings truth as a progress substitute. | `test_llm_registry_api.py`, `role-test-store.test.ts`, `copilot-role-test.test.ts`, `PropertiesPanel.network-side-effect.test.tsx`, `llm.test.ts` |
-| LLM registry | `GET /api/llm/registry` | Settings/API Keys/roles consumers and domain events | Partial: client reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Remaining audit: all registry write paths must keep returning/projecting exact canonical snapshots. | `llm.test.ts`, `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
+| LLM registry | `GET /api/llm/registry`, `PUT /api/llm/registry/endpoints`, `DELETE /api/llm/registry/endpoints/{endpoint_id}` | Settings/API Keys/roles consumers, endpoint save/delete commands, and domain events | Partial: client reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Endpoint save/delete now return and project the exact canonical registry snapshot without a follow-up broad GET. Remaining audit: route-level registry mutations still need route-specific review. | `llm.test.ts`, `test_llm_registry_api.py`, `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
 | LLM roles | `GET/PUT /api/llm/roles` | Settings/Copilot role consumers and role writes/events | Partial: roles reads are cached/deduped; Settings open/close, tab switch, focus, WebSocket connect/reconnect, and hidden API Keys tab mounts are guarded as non-triggers. Remaining audit: role write/test/job paths need route-by-route review. | `SettingsPage.controller.test.tsx`, `SettingsPageContent.lazy-tabs.test.tsx`, `useStudioEventStream.test.ts` |
 | Templates | `GET /api/templates` | Create-skill Copilot empty-state template UI | OK: templates are disabled while the template UI is hidden and cold-load only when the create-skill template UI becomes visible. | `useTemplates.test.tsx`, `copilot-panel.test.ts` |
 | Run history | `GET /api/skills/{skill_id}/runs` | Timeline panel cold load / explicit refresh / run mutation projection | Partial: all SWR reads must use the Studio truth policy, and phase-node clicks can no longer reopen Timeline implicitly. Run/delete projection semantics still need route-specific audit. | `studio-swr-policy.usage.test.ts`, `GraphCanvas.test.tsx` |
@@ -314,7 +314,7 @@ Guard:
 ```studio-request-audit-verdicts
 BACKEND DELETE /api/llm/model-bundles/{bundle_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND DELETE /api/llm/model-profiles/{model_profile_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND DELETE /api/llm/registry/endpoints/{endpoint_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit endpoint delete command; backend returns the joined canonical RegistryResponse after cascading route references.
 BACKEND DELETE /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND DELETE /api/llm/routes/{route_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND DELETE /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -327,8 +327,8 @@ BACKEND GET /api/llm/fixed-roles | ok | specific | Immutable fixed-role metadata
 BACKEND GET /api/llm/fixed-roles/{role_name} | ok | specific | Immutable fixed-role recommendation projection; route has response/404 tests and emits no revalidation event.
 BACKEND GET /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/llm/providers/notable-models | ok | specific | Suggestion-only provider note projection for manual model probing; route has response tests and is not runtime truth.
-BACKEND GET /api/llm/registry | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/registry | ok | specific | Canonical joined registry projection; route tests cover redaction, role/model-group joins, setup_required, and registry projection fields.
+BACKEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | specific | Explicit local secret reveal for API Keys hydration; frontend dedupes and reuses known secrets after exact registry writes.
 BACKEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped in-memory role-test job status read; backend tests cover start/read/progress and it emits no broad truth refresh.
 BACKEND GET /api/llm/roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/llm/roles/test-results | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -415,7 +415,7 @@ BACKEND POST /gateway/resolve_credential | internal | none | Backend-owned infra
 BACKEND POST /gateway/resolve_routes | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND POST /shutdown | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND PUT /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND PUT /api/llm/registry/endpoints | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/registry/endpoints | ok | specific | Explicit endpoint save command; backend returns the joined canonical RegistryResponse so callers do not perform write-after-read refresh.
 BACKEND PUT /api/llm/roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/llm/routes/{route_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -429,7 +429,7 @@ BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect
 BACKEND WS /ws/runs/{run_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
 BACKEND WS /ws/terminal/{term_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit provider delete command; client projects the returned canonical registry snapshot without a follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/roles/{role_name} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND DELETE /api/llm/routes/{route_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND DELETE /api/skills/{skill_id}/runs/{run_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
@@ -437,7 +437,7 @@ FRONTEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | review | specifi
 FRONTEND GET /api/llm/fixed-roles | ok | shared | First visible LLM Roles/Copilot consumer reads immutable metadata once; lazy Settings tabs and client cache/dedupe block hidden-page and repeated fetches.
 FRONTEND GET /api/llm/fixed-roles/{role_name} | ok | shared | First visible role card reads immutable per-role recommendations once; client cache/dedupe shares repeated consumers.
 FRONTEND GET /api/llm/providers/notable-models | ok | shared | Manual model candidates load only when the probing accordion is explicitly opened; collapsed API Keys is network-silent and client cache is provider-scoped.
-FRONTEND GET /api/llm/registry | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; write projection audit remains.
+FRONTEND GET /api/llm/registry | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; endpoint save/delete now project returned canonical snapshots, while route-level mutations still need review.
 FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | shared | API Keys credential cold-load secret hydration; client dedupes concurrent endpoint secret reads and reuses known secrets after forced registry refresh.
 FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling starts only after an explicit Test command returns a job id; pollers do not refresh registry/roles/settings truth.
 FRONTEND GET /api/llm/roles | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; write projection audit remains.
@@ -496,7 +496,7 @@ FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | review | sp
 FRONTEND POST /api/skills/{skill_id}/sync | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/test_inputs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/validate_input | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND PUT /api/llm/registry/endpoints | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/llm/registry/endpoints | ok | specific | Explicit API Keys save/upsert command; client uses the returned canonical registry snapshot and no longer follows with a broad /llm/registry GET.
 FRONTEND PUT /api/llm/roles | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND PUT /api/settings | ok | specific | Settings autosave only follows explicit field edits; debounce/in-flight semantics keep the latest payload and suppress stale response projection.
 FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Output artifact config save is an explicit command and projects the returned runtime_config snapshot.

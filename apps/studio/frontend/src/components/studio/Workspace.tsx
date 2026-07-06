@@ -909,16 +909,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     })
   }, [])
 
-  // Remember the last panel the user had open so re-opening a selected node
-  // restores THAT panel instead of always snapping to Properties.
-  const lastPanelKindRef = useRef<PanelKind>("properties")
-  useEffect(() => {
-    if (activePanel) lastPanelKindRef.current = activePanel
-  }, [activePanel])
-  const openSelectedNodePanel = useCallback(() => {
-    setActivePanel(lastPanelKindRef.current)
-  }, [])
-
   // Close every open file editor (both split sides) — used when clicking empty
   // canvas clears the workspace.
   const closeAllEditors = useCallback(() => {
@@ -2562,7 +2552,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       focusNodeRequest={focusNodeRequest}
                       onNodeFileOpen={handleFileOpen}
                       onPanelChange={setActivePanel}
-                      onOpenSelectedNodePanel={openSelectedNodePanel}
                       onCloseEditors={closeAllEditors}
                       onCreatePhase={handleCreatePhase}
                       onDeletePhase={handleDeletePhase}

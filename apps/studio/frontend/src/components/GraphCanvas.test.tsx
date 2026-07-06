@@ -429,7 +429,7 @@ describe('GraphCanvas', () => {
     expect(onNodeFileOpen).not.toHaveBeenCalled()
   })
 
-  it('opens the recorded panel when an already-selected skill node is clicked again', () => {
+  it('keeps repeated skill-node clicks selection-only and never opens a side panel', () => {
     vi.useFakeTimers()
     try {
       const onNodeSelect = vi.fn()
@@ -457,30 +457,28 @@ describe('GraphCanvas', () => {
       props?.onNodeClick?.({}, selected)
 
       expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
-      // The panel open is deferred (so a double-click can pre-empt it).
       expect(onPanelChange).not.toHaveBeenCalled()
 
       vi.advanceTimersByTime(220)
 
-      // With no onOpenSelectedNodePanel host hook, the second click falls back to
-      // the Properties panel — never the file editor.
-      expect(onPanelChange).toHaveBeenCalledWith('properties')
+      // Node clicks are UI selection only. Opening Properties/I/O/Timeline must
+      // go through the toolbar or an already-mounted panel, otherwise selection
+      // can become an implicit backend read trigger.
+      expect(onPanelChange).not.toHaveBeenCalled()
       expect(onNodeFileOpen).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('opens the recorded panel via the host hook on the second click of a selected node', () => {
+  it('does not call a host panel opener on the second click of a selected node', () => {
     vi.useFakeTimers()
     try {
-      const onOpenSelectedNodePanel = vi.fn()
       const onPanelChange = vi.fn()
       renderToStaticMarkup(
         <GraphCanvas
           skillId="demo-skill"
           selectedNodeId="setup"
-          onOpenSelectedNodePanel={onOpenSelectedNodePanel}
           onPanelChange={onPanelChange}
         />,
       )
@@ -491,9 +489,7 @@ describe('GraphCanvas', () => {
       props?.onNodeClick?.({}, phaseNode('setup'))
       vi.advanceTimersByTime(220)
 
-      // The host decides which panel to restore; the canvas does not force one.
-      expect(onOpenSelectedNodePanel).toHaveBeenCalledTimes(1)
-      expect(onPanelChange).not.toHaveBeenCalledWith('properties')
+      expect(onPanelChange).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

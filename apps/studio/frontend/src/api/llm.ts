@@ -1640,8 +1640,9 @@ export async function putCredentials(
   const existingEndpoints = cachedRegistry?.provider_endpoints ?? {}
   const updateIds = new Set(updates.map((update) => update.id))
   const removedEndpointIds = Object.keys(existingEndpoints).filter((endpointId) => !updateIds.has(endpointId))
+  let latestRegistry: RegistryResponse | null = null
   for (const endpointId of removedEndpointIds) {
-    await deleteEndpoint(endpointId)
+    latestRegistry = await deleteEndpoint(endpointId)
   }
   const providerEndpoints = Object.fromEntries(
     updates.map((update) => [
@@ -1653,10 +1654,9 @@ export async function putCredentials(
     ]),
   )
   if (Object.keys(providerEndpoints).length > 0) {
-    await putRegistryEndpoints(providerEndpoints)
+    latestRegistry = await putRegistryEndpoints(providerEndpoints)
   }
-  const registry = await getRegistry({ force: true })
-  return registryToCredentials(registry)
+  return registryToCredentials(latestRegistry ?? cachedRegistry ?? await getRegistry({ force: true }))
 }
 
 export async function testProvider(

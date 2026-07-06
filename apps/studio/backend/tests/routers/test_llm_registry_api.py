@@ -320,6 +320,10 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
         "openai-direct",
         "anthropic-official",
     }
+    assert put_response.json()["model_groups"][0]["canonical_id"] == "gpt-5"
+    assert put_response.json()["canonical_groups"][0]["canonical_id"] == "gpt-5"
+    assert "graph_agent" in put_response.json()["roles"]
+    assert put_response.json()["setup_required"] is False
     raw = json.loads(credentials_path().read_text(encoding="utf-8"))
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
 
@@ -5245,6 +5249,9 @@ def test_route_delete_conflicts_but_endpoint_delete_cascades_references(
     assert endpoint_response.status_code == 200
     assert endpoint_response.json()["provider_endpoints"] == {}
     assert endpoint_response.json()["provider_routes"] == {}
+    assert endpoint_response.json()["model_groups"] == []
+    assert endpoint_response.json()["canonical_groups"] == []
+    assert "graph_agent" in endpoint_response.json()["roles"]
     saved_roles = load_roles_file(roles_path)
     assert saved_roles.roles["graph_agent"].fallback_chain == []
     assert saved_roles.model_profiles["GPT5"].fallback_chain == []

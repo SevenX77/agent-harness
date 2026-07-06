@@ -209,7 +209,7 @@ def test_publish_failure_does_not_break_save(
     with caplog.at_level("ERROR"):
         result = asyncio.run(llm_router.put_llm_roles(request))
 
-    assert "copilot_custom_test" in result.roles
+    assert "copilot_custom_test" in result.roles_data.roles
     # The saved roles are still visible to a fresh resolver build despite the
     # event-bus failure.
     resolver = build_gateway_model_resolver(roles_path)

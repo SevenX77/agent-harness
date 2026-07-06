@@ -108,6 +108,21 @@ function registry(overrides: Partial<RegistryResponse> = {}): RegistryResponse {
   }
 }
 
+function rolesProjection(
+  rolesData: {
+    schema_version: 3
+    model_profiles: Record<string, unknown>
+    model_bundles: Record<string, unknown>
+    roles: Record<string, unknown>
+  },
+  registryOverrides: Partial<RegistryResponse> = {},
+) {
+  return {
+    roles_data: rolesData,
+    registry: registry(registryOverrides),
+  }
+}
+
 describe('API Keys v4 registry adapter', () => {
   afterEach(() => {
     api.defaults.adapter = undefined
@@ -317,7 +332,7 @@ describe('API Keys v4 registry adapter', () => {
     api.defaults.adapter = adapter((config) => {
       seen.push(`${config.method} ${config.url}`)
       if (config.url === '/llm/roles') {
-        return { schema_version: 3, model_profiles: {}, model_bundles: {}, roles: {} }
+        return rolesProjection({ schema_version: 3, model_profiles: {}, model_bundles: {}, roles: {} })
       }
       return registry()
     })
@@ -328,9 +343,7 @@ describe('API Keys v4 registry adapter', () => {
 
     expect(seen).toEqual([
       'get /llm/roles',
-      'get /llm/registry',
       'get /llm/roles',
-      'get /llm/registry',
     ])
   })
 
@@ -1783,28 +1796,69 @@ describe('API Keys v4 registry adapter', () => {
         })
       }
       if (config.url === '/llm/roles') {
-        return {
-          schema_version: 3,
-          model_profiles: {},
-          model_bundles: {},
-          roles: {
-            analyst: {
-              role_kind: 'graph_agent',
-              system_prompt_prefix: '',
-              model_fallback_enabled: true,
-              intent: { provider_preference: 'manual_order' },
-              model_groups: [
-                {
-                  canonical_id: 'gpt-5',
-                  display_name: 'GPT-5',
-                  provider_models: [{ route_id: route.route_id }],
-                },
-              ],
-              fallback_chain: [],
-              lint_requirements: {},
+        return rolesProjection(
+          {
+            schema_version: 3,
+            model_profiles: {},
+            model_bundles: {},
+            roles: {
+              analyst: {
+                role_kind: 'graph_agent',
+                system_prompt_prefix: '',
+                model_fallback_enabled: true,
+                intent: { provider_preference: 'manual_order' },
+                model_groups: [
+                  {
+                    canonical_id: 'gpt-5',
+                    display_name: 'GPT-5',
+                    provider_models: [{ route_id: route.route_id }],
+                  },
+                ],
+                fallback_chain: [],
+                lint_requirements: {},
+              },
             },
           },
-        }
+          {
+            model_groups: [
+              {
+                canonical_id: 'gpt-5',
+                display_name: 'GPT-5',
+                provider_models: [
+                  {
+                    route_id: route.route_id,
+                    endpoint_id: endpoint.endpoint_id,
+                    provider_label: 'OpenRouter Custom',
+                    provider_kind: 'third_party',
+                    provider_model_id: 'openai/gpt-5',
+                    ui_state: 'ready',
+                    ui_detail: null,
+                    retry_at: null,
+                    reason_code: null,
+                    capability_state: 'known',
+                    capabilities: route.capabilities,
+                  },
+                ],
+                status_summary: {
+                  ready: 1,
+                  untested: 0,
+                  cooling_down: 0,
+                  historical_ready: 0,
+                  failed: 0,
+                  off: 0,
+                },
+                capability_summary: {
+                  capability_known_count: 1,
+                  thinking: 'supported',
+                  tools: 'unknown',
+                  structured_output: 'unknown',
+                  max_context_tokens: null,
+                  max_output_tokens: null,
+                },
+              },
+            ],
+          },
+        )
       }
       return registry({
         model_groups: [
@@ -1873,35 +1927,76 @@ describe('API Keys v4 registry adapter', () => {
   it('keeps persisted model bundle groups addressable when roles reference them', async () => {
     api.defaults.adapter = adapter((config) => {
       if (config.url === '/llm/roles') {
-        return {
-          schema_version: 3,
-          model_profiles: {},
-          model_bundles: {
-            premium_stack: {
-              model_profile_id: 'premium_stack',
-              display_name: 'Premium Stack',
-              canonical_id: 'bundle:premium_stack',
-              fallback_chain: [{ route_id: route.route_id }],
+        return rolesProjection(
+          {
+            schema_version: 3,
+            model_profiles: {},
+            model_bundles: {
+              premium_stack: {
+                model_profile_id: 'premium_stack',
+                display_name: 'Premium Stack',
+                canonical_id: 'bundle:premium_stack',
+                fallback_chain: [{ route_id: route.route_id }],
+              },
+            },
+            roles: {
+              analyst: {
+                role_kind: 'graph_agent',
+                system_prompt_prefix: '',
+                model_fallback_enabled: true,
+                intent: { provider_preference: 'manual_order' },
+                model_groups: [
+                  {
+                    canonical_id: 'bundle:premium_stack',
+                    display_name: 'Premium Stack',
+                    provider_models: [{ route_id: route.route_id }],
+                  },
+                ],
+                fallback_chain: [{ route_id: route.route_id }],
+                lint_requirements: {},
+              },
             },
           },
-          roles: {
-            analyst: {
-              role_kind: 'graph_agent',
-              system_prompt_prefix: '',
-              model_fallback_enabled: true,
-              intent: { provider_preference: 'manual_order' },
-              model_groups: [
-                {
-                  canonical_id: 'bundle:premium_stack',
-                  display_name: 'Premium Stack',
-                  provider_models: [{ route_id: route.route_id }],
+          {
+            model_groups: [
+              {
+                canonical_id: 'gpt-5',
+                display_name: 'GPT-5',
+                provider_models: [
+                  {
+                    route_id: route.route_id,
+                    endpoint_id: endpoint.endpoint_id,
+                    provider_label: 'OpenRouter Custom',
+                    provider_kind: 'third_party',
+                    provider_model_id: 'openai/gpt-5',
+                    ui_state: 'ready',
+                    ui_detail: null,
+                    retry_at: null,
+                    reason_code: null,
+                    capability_state: 'known',
+                    capabilities: route.capabilities,
+                  },
+                ],
+                status_summary: {
+                  ready: 1,
+                  untested: 0,
+                  cooling_down: 0,
+                  historical_ready: 0,
+                  failed: 0,
+                  off: 0,
                 },
-              ],
-              fallback_chain: [{ route_id: route.route_id }],
-              lint_requirements: {},
-            },
+                capability_summary: {
+                  capability_known_count: 1,
+                  thinking: 'unknown',
+                  tools: 'unknown',
+                  structured_output: 'unknown',
+                  max_context_tokens: null,
+                  max_output_tokens: null,
+                },
+              },
+            ],
           },
-        }
+        )
       }
       return registry({
         model_groups: [
@@ -1959,9 +2054,8 @@ describe('API Keys v4 registry adapter', () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
-      if (config.url === '/llm/registry') return registry()
       if (config.method === 'put' && config.url === '/llm/roles') {
-        return JSON.parse(String(config.data))
+        return rolesProjection(JSON.parse(String(config.data)))
       }
       return registry()
     })
@@ -1991,7 +2085,7 @@ describe('API Keys v4 registry adapter', () => {
       },
     })
 
-    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['put /llm/roles', 'get /llm/registry'])
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['put /llm/roles'])
     expect(JSON.parse(String(seen[0].data))).toEqual({
       schema_version: 3,
       model_profiles: {},
@@ -2064,9 +2158,11 @@ describe('API Keys v4 registry adapter', () => {
       ],
     })
     api.defaults.adapter = adapter((config) => {
-      if (config.url === '/llm/registry') return registryWithGpt5
       if (config.method === 'put' && config.url === '/llm/roles') {
-        return JSON.parse(String(config.data))
+        return {
+          roles_data: JSON.parse(String(config.data)),
+          registry: registryWithGpt5,
+        }
       }
       return registryWithGpt5
     })
@@ -2105,24 +2201,15 @@ describe('API Keys v4 registry adapter', () => {
     const seen: Array<{ method?: string; url?: string }> = []
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url })
-      if (config.url === '/llm/registry') return registry()
       if (config.method === 'delete' && config.url === '/llm/roles/analyst') {
-        return {
-          schema_version: 3,
-          model_profiles: {},
-          model_bundles: {},
-          roles: {},
-        }
+        return rolesProjection({ schema_version: 3, model_profiles: {}, model_bundles: {}, roles: {} })
       }
       return registry()
     })
 
     const roles = await deleteRole('analyst')
 
-    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
-      'delete /llm/roles/analyst',
-      'get /llm/registry',
-    ])
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['delete /llm/roles/analyst'])
     expect(roles.roles.analyst).toBeUndefined()
   })
 
@@ -2130,24 +2217,15 @@ describe('API Keys v4 registry adapter', () => {
     const seen: Array<{ method?: string; url?: string }> = []
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url })
-      if (config.url === '/llm/registry') return registry()
       if (config.method === 'delete' && config.url === '/llm/model-bundles/premium_stack') {
-        return {
-          schema_version: 3,
-          model_profiles: {},
-          model_bundles: {},
-          roles: {},
-        }
+        return rolesProjection({ schema_version: 3, model_profiles: {}, model_bundles: {}, roles: {} })
       }
       return registry()
     })
 
     const roles = await deleteModelBundle('premium_stack')
 
-    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
-      'delete /llm/model-bundles/premium_stack',
-      'get /llm/registry',
-    ])
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['delete /llm/model-bundles/premium_stack'])
     expect(roles.model_bundles?.premium_stack).toBeUndefined()
   })
 

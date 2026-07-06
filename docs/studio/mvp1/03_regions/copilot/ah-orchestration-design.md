@@ -183,6 +183,14 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
   **事件源双事实**:Studio 订阅 `ah events --format json` 的 runtime snapshot,活跃判定只认 `ahd_has_inventory=true` 与 `master_tmux_alive=true` 同时成立。只有 ahd inventory、只有 master
   tmux、或残留 worker/agent tmux 都是 stale 状态;Studio 必须先按 workspace 清理所有 Studio-managed ah
   config,再允许重新打开。
+  **诊断结论(2026-07-06)——事件快照只投影状态,绝不触发清理**:`ah start` 冷启动窗口(session 已
+  ACTIVE、master tmux 还要 ~15s 才活)在快照布尔上与 stale 完全同形(`ahd_has_inventory=true,
+  master_tmux_alive=false`),ah 的 `runtime_state` 也只有 Active/Degraded/Inactive、没有 Starting 相位。
+  若在事件流处理里做"stale 即自动 cleanup",Studio 会 `ah stop` 掉自己正在启动的 runtime,终端里阻塞在
+  `spawn_master_pane` RPC 上的 `ah start` 被断连,报 `invalid JSON response from daemon: EOF`(exit 3)。
+  因此 stale 判定 + 清理**只允许发生在用户动作时机**:Open 前的 prepare 决策、Attach 的 CleanupStale
+  分支、Close、app quit;事件快照 handler 只更新状态缓存并 emit 给前端。ah 侧补 `Starting` 相位后,
+  Open/Attach 的判定可再升级为"master 曾 alive 后消失才算 stale"(见 ccbd-rust 跟进项)。
 - workspace 内只允许一个 Studio-managed ahd。Open 同一个 assistant 且双探测活跃时只 attach 到既有
   master,不再 `ah start`;Open 另一个 assistant 且已有 ahd 活跃时直接拒绝,要求先关闭现有 assistant。
   Open 命令返回的 config path 同时是该 workspace 本轮状态身份的真相源:当 skill 自带 `ah.toml` 时,
@@ -406,6 +414,12 @@ daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会�
 2. `transient_ah_config_content(workspace_root, platform_paths)`:
    - 生成 master + 三个 agents;
    - 引用 `.ah/skills` 中的 skill 名;
+   - **必须输出顶层 `[env]` 表并含 `IS_SANDBOX = "1"`**(2026-07-06):worker agent 由 ah 以裸
+     `<provider> --dangerously-skip-permissions` 在 WSL root 下拉起,claude CLI 无 `IS_SANDBOX=1`
+     时直接拒跑退出("cannot be used with root/sudo privileges"),三个 worker 出生即死、被 REAP 后
+     `ah start --wait` 报 `AGENT_NOT_FOUND`。`[env]` 经 `ah start` 的 merged_env →
+     `agent.spawn extra_env_vars` 注入 worker;master 的逃生口仍是 cmd 字符串里的
+     `export IS_SANDBOX=1`,两者缺一不可;
    - 不写 `[sandbox] additional_ro_binds`;当前 ah 会把该字段落成 WSL 不接受的 user scope
      `BindReadOnlyPaths`,导致 `ah start` 在 spawn agent 时失败;
    - Windows 下所有给 ah/WSL 看的路径若未来进入 config,必须先转成 `/mnt/<drive>/...`,不能把 `D:\...` 写进 config。
@@ -414,6 +428,9 @@ daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会�
 
 ```toml
 version = "1"
+
+[env]
+IS_SANDBOX = "1"
 
 [master]
 enabled = true
@@ -539,6 +556,9 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
   launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;
 - `watch_code_assistant_status` 不轮询 `ah ps`,而是订阅 `ah events --format json`;活跃判定必须同时要求事件快照里 `ahd_has_inventory=true` 与 `master_tmux_alive=true`;只有 ahd、只有 master tmux、残留 worker tmux 均判 stale;
+- 事件快照 handler **只更新状态缓存 + emit,前向不接任何 cleanup**;冷启动窗口与 stale 在快照布尔上
+  同形,事件驱动的自动清理会杀掉正在启动的 runtime(2026-07-06 事故,详见 §4 生命周期规则的诊断结论);
+  stale 清理只在 Open 前 prepare 决策、Attach CleanupStale、Close、app quit 这四个用户动作时机执行;
 - Open 决策必须保证 workspace 内单例 ahd:同 assistant 活跃时 attach,另一个 assistant 活跃时拒绝,
   双 active 或 ahd/master 脱钩时先清理所有 Studio-managed ah configs 再重新打开;
 - Open 命令返回的 config path 必须注册为本轮 workspace 状态身份源,优先于扫描发现的 config 身份;

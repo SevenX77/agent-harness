@@ -126,10 +126,6 @@ interface GraphCanvasProps {
   focusNodeRequest?: { nodeId: string; nonce: number } | null
   onNodeFileOpen?: (file: FileOpenInput) => void
   onPanelChange?: (panel: PanelKind | null) => void
-  // Clicking an already-selected node opens the LAST panel the user had open
-  // (recorded by the host), not a hard-coded Properties panel. Falls back to
-  // 'properties' when the host does not provide it.
-  onOpenSelectedNodePanel?: () => void
   // Clicking empty canvas closes any open side panel AND the file editor(s).
   onCloseEditors?: () => void
   onCreatePhase?: (kind: NewPhaseKind, phaseId?: string, target?: ChildSaveTarget) => Promise<void> | void
@@ -681,7 +677,6 @@ export function GraphCanvas({
   focusNodeRequest,
   onNodeFileOpen,
   onPanelChange,
-  onOpenSelectedNodePanel,
   onCloseEditors,
   onCreatePhase,
   onDeletePhase,
@@ -810,20 +805,6 @@ export function GraphCanvas({
   // created node may not exist in the graph yet when we capture its placement, so
   // we hold the position here until the rebuild surfaces it, then apply + clear.
   const pendingCreatePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
-  // Deferred single-click action (open the recorded panel on the SECOND click of
-  // an already-selected node). Held in a timeout so a double-click can cancel it
-  // and open the editor instead of flashing a panel open.
-  const pendingNodeClickActionRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const cancelPendingNodeClickAction = useCallback(() => {
-    if (pendingNodeClickActionRef.current) {
-      clearTimeout(pendingNodeClickActionRef.current)
-      pendingNodeClickActionRef.current = null
-    }
-  }, [])
-
-  useEffect(() => cancelPendingNodeClickAction, [cancelPendingNodeClickAction])
-
   const applySelectionOverride = useCallback((nodeId: string | null) => {
     const next = { active: true, nodeId }
     selectionOverrideRef.current = next
@@ -849,11 +830,6 @@ export function GraphCanvas({
     const override = selectionOverrideRef.current
     return override.active ? override.nodeId : selectedNodeId
   }, [selectedNodeId])
-
-  const isCanvasNodeSelected = useCallback((nodeId: string) => (
-    currentActiveSelectedNodeId() === nodeId
-    || nodesRef.current.some((node) => node.id === nodeId && node.selected)
-  ), [currentActiveSelectedNodeId])
 
   const updateViewportReady = useCallback((ready: boolean) => {
     viewportReadyRef.current = ready
@@ -2374,7 +2350,6 @@ export function GraphCanvas({
   }, [beginGraphEdit, blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, endGraphEdit, expandedChildSaveTarget, onDisconnectConnection, restoreReconnectingEdge, setEdges, setNodes])
 
   const handlePaneClick = useCallback(() => {
-    cancelPendingNodeClickAction()
     syncCanvasSelection(null)
     onNodeDeselect?.()
     setEdgeMenuConnection(null)
@@ -2383,7 +2358,7 @@ export function GraphCanvas({
     // the file editor(s). It no longer opens the graph.md panel.
     onPanelChange?.(null)
     onCloseEditors?.()
-  }, [cancelPendingNodeClickAction, onCloseEditors, onNodeDeselect, onPanelChange, syncCanvasSelection])
+  }, [onCloseEditors, onNodeDeselect, onPanelChange, syncCanvasSelection])
 
   return (
     <ContextMenu>
@@ -2480,8 +2455,6 @@ export function GraphCanvas({
         }}
         onNodeClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          cancelPendingNodeClickAction()
-          const wasSelected = isCanvasNodeSelected(node.id)
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
             // Carry the boundary identity so the i/o panel scopes to input- or
@@ -2492,19 +2465,6 @@ export function GraphCanvas({
           }
           if (node.type === 'skill') {
             onNodeSelect?.({ id: skillNodePhaseId(node), data: node.data })
-            // First click selects/highlights only. The SECOND click on an
-            // already-selected node opens the last-recorded panel (deferred so a
-            // double-click opens the editor instead of flashing the panel open).
-            if (wasSelected) {
-              pendingNodeClickActionRef.current = setTimeout(() => {
-                pendingNodeClickActionRef.current = null
-                if (onOpenSelectedNodePanel) {
-                  onOpenSelectedNodePanel()
-                } else {
-                  onPanelChange?.('properties')
-                }
-              }, 220)
-            }
           }
         }}
         onNodeDragStart={(_, node) => {
@@ -2517,7 +2477,6 @@ export function GraphCanvas({
         selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          cancelPendingNodeClickAction()
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
             onBoundarySelect?.(node.type === 'globalInput' ? 'input' : 'output')

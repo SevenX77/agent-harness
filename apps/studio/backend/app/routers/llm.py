@@ -98,7 +98,6 @@ from app.services.llm_credentials import (
     delete_route,
     load_credentials,
     save_credentials,
-    serialize_for_response,
     upsert_endpoints,
     upsert_routes,
 )
@@ -1373,12 +1372,12 @@ async def test_endpoint_models(
     )
 
 
-@router.post("/routes/{route_id}/probe")
+@router.post("/routes/{route_id}/probe", response_model=RegistryResponse)
 async def probe_route(
     route_id: str,
     request: RouteProbeRequest,
     force: bool = False,
-) -> ProviderRoute:
+) -> RegistryResponse:
     """Probe one route and update normalized capability metadata."""
     credentials = load_credentials()
     route = credentials.provider_routes.get(route_id)
@@ -1388,7 +1387,8 @@ async def probe_route(
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {route.endpoint_id}")
     if force:
-        return await _force_probe_route(credentials, route, endpoint)
+        await _force_probe_route(credentials, route, endpoint)
+        return await _write_registry_response(load_credentials())
     capabilities = dict(route.capabilities)
     for capability in request.capabilities:
         key = _capability_key(capability)
@@ -1409,7 +1409,7 @@ async def probe_route(
     updated = route.model_copy(update={"status": "verified", "capabilities": capabilities})
     credentials.provider_routes[route_id] = updated
     save_credentials(credentials)
-    return updated
+    return await _write_registry_response(credentials)
 
 
 def _multimodal_probe_candidate(
@@ -1428,8 +1428,8 @@ def _multimodal_probe_candidate(
     return min(candidates, key=lambda candidate: (candidate.default_rank, candidate.profile_id))
 
 
-@router.post("/routes/{route_id}/probe-multimodal", response_model=ProviderRoute)
-async def probe_route_multimodal(route_id: str) -> ProviderRoute:
+@router.post("/routes/{route_id}/probe-multimodal", response_model=RegistryResponse)
+async def probe_route_multimodal(route_id: str) -> RegistryResponse:
     """真塞一张测试图探测该 route 的模型是否**接受**图像输入(#11)。
 
     provider 接受(2xx)= 该模型 input_modalities 含 image → 把 input_modalities/
@@ -1456,7 +1456,7 @@ async def probe_route_multimodal(route_id: str) -> ProviderRoute:
         )
         credentials.provider_routes[route_id] = updated
         save_credentials(credentials)
-        return updated
+        return await _write_registry_response(credentials)
     candidate = _multimodal_probe_candidate(endpoint, route.provider_model_id)
     if candidate is None:
         raise HTTPException(
@@ -1470,11 +1470,11 @@ async def probe_route_multimodal(route_id: str) -> ProviderRoute:
         credentials, endpoint, result, route_id=route_id, multimodal=True
     )
     save_credentials(credentials)
-    return credentials.provider_routes[route_id]
+    return await _write_registry_response(credentials)
 
 
-@router.put("/routes/{route_id}", response_model=ProviderRoute)
-async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> ProviderRoute:
+@router.put("/routes/{route_id}", response_model=RegistryResponse)
+async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> RegistryResponse:
     """Replace editable route metadata without changing identity."""
     credentials = load_credentials()
     route = credentials.provider_routes.get(route_id)
@@ -1496,11 +1496,11 @@ async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> Pro
         message="Updated editable route metadata.",
         changes={"route_id": route_id, "status": request.status},
     )
-    return updated
+    return await _write_registry_response(load_credentials())
 
 
-@router.delete("/routes/{route_id}")
-async def delete_registry_route(route_id: str) -> dict[str, Any]:
+@router.delete("/routes/{route_id}", response_model=RegistryResponse)
+async def delete_registry_route(route_id: str) -> RegistryResponse:
     """Delete a route unless roles/profiles still reference it."""
     roles = _load_roles_or_empty()
     refs = _route_references(route_id, roles)
@@ -1520,7 +1520,7 @@ async def delete_registry_route(route_id: str) -> dict[str, Any]:
             "remaining_route_count": len(data.provider_routes),
         },
     )
-    return serialize_for_response(data)
+    return await _write_registry_response(data)
 
 
 @router.get("/roles", response_model=RolesData)

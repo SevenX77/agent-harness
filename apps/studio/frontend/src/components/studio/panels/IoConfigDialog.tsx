@@ -24,6 +24,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import type { LintError } from "@/api/types"
 import type {
   ArtifactRow,
   FileFieldDecl,
@@ -31,6 +33,7 @@ import type {
   ReconciledFieldRow,
 } from "@/lib/io-config"
 import { errorMessage } from "@/utils/errors"
+import { formatDiagnosticCode } from "../field-compile-errors"
 
 /**
  * Blackboard-first I/O config surfaces (input region F3/F7).
@@ -204,18 +207,55 @@ function indentStyle(depth: number): CSSProperties {
   return { paddingLeft: `${0.5 + depth * INDENT_STEP_REM}rem` }
 }
 
+function diagnosticMessage(error: LintError): string {
+  const code = formatDiagnosticCode(error.error_code)
+  return code ? `${code} ${error.message}` : error.message
+}
+
+function FieldDiagnosticMarker({ errors }: { errors?: readonly LintError[] | null }) {
+  if (!errors || errors.length === 0) {
+    return null
+  }
+  const hasError = errors.some((error) => error.severity === "error")
+  const tone = hasError ? "text-destructive" : "text-warning"
+  const messages = errors.map(diagnosticMessage)
+  const count = errors.length === 1 ? "1 issue" : `${errors.length} issues`
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          role="img"
+          aria-label={`Field has ${count}: ${messages.join("; ")}`}
+          data-io-field-diagnostic="true"
+          className={`inline-flex shrink-0 items-center ${tone}`}
+        >
+          <AlertTriangle className="size-3.5" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        <ul className="space-y-0.5">
+          {messages.map((message, index) => (
+            <li key={`${errors[index]?.error_code ?? "err"}-${index}`}>{message}</li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 /**
  * A field the md io declares (required) but the blackboard/universe doesn't
  * supply — muted + danger, non-checkable, with the reason. Mirrors the engine's
  * runtime [F-v3-runtime-state-mapping-failed], now at nested granularity.
  */
-function MissingFieldRow({ row }: { row: ReconciledFieldRow }) {
+function MissingFieldRow({ row, errors }: { row: ReconciledFieldRow; errors?: readonly LintError[] }) {
   return (
     <div className={`${ROW_CLASS} bg-destructive/10`} style={indentStyle(row.depth)}>
       <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden />
       <span className="font-mono text-xs text-muted-foreground line-through decoration-destructive/40">
         {row.name}
       </span>
+      <FieldDiagnosticMarker errors={errors} />
       <span className="text-[11px] text-destructive">{row.reason}</span>
     </div>
   )
@@ -230,6 +270,7 @@ function FieldCheckRow({
   expanded,
   onToggleExpand,
   highlighted,
+  errors,
 }: {
   row: ReconciledFieldRow
   checked: boolean
@@ -239,6 +280,7 @@ function FieldCheckRow({
   expanded: boolean
   onToggleExpand?: () => void
   highlighted: boolean
+  errors?: readonly LintError[]
 }) {
   return (
     <div
@@ -271,6 +313,7 @@ function FieldCheckRow({
       >
         {row.name}
       </span>
+      <FieldDiagnosticMarker errors={errors} />
       <span className={META_CLASS}>
         {row.type ?? "any"}
         {row.from ? ` · from ${row.from}` : ""}
@@ -291,11 +334,13 @@ function FieldCheckTree({
   checkOf,
   onToggleCheck,
   selectableMaxDepth = Number.POSITIVE_INFINITY,
+  diagnosticsByField = {},
 }: {
   rows: ReconciledFieldRow[]
   checkOf: (row: ReconciledFieldRow) => boolean
   onToggleCheck: (row: ReconciledFieldRow, next: boolean) => void
   selectableMaxDepth?: number
+  diagnosticsByField?: Record<string, LintError[]>
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleExpand = (path: string) => {
@@ -315,7 +360,7 @@ function FieldCheckTree({
   return (
     <div className="divide-y divide-border">
       {missing.map((row) => (
-        <MissingFieldRow key={`missing-${row.path}`} row={row} />
+        <MissingFieldRow key={`missing-${row.path}`} row={row} errors={diagnosticsByField[row.path] ?? diagnosticsByField[row.name]} />
       ))}
       {visible.map((row) => (
         <FieldCheckRow
@@ -327,6 +372,7 @@ function FieldCheckTree({
           expanded={!collapsed.has(row.path)}
           onToggleExpand={() => toggleExpand(row.path)}
           highlighted={row.state === "matched" && checkOf(row)}
+          errors={diagnosticsByField[row.path] ?? diagnosticsByField[row.name]}
         />
       ))}
     </div>
@@ -351,6 +397,7 @@ function FileImportGroups({
   error,
   setError,
   onFileOpen,
+  diagnosticsByField = {},
 }: {
   skillId: string
   importNodeId?: string | null
@@ -362,6 +409,7 @@ function FileImportGroups({
   error: string | null
   setError: (error: string | null) => void
   onFileOpen?: (path: string) => void
+  diagnosticsByField?: Record<string, LintError[]>
 }) {
   const importPath = async (path: string | null) => {
     if (!path) {
@@ -435,6 +483,7 @@ function FileImportGroups({
                   aria-label={`Toggle file field ${candidate.field}`}
                 />
                 <span className="font-mono text-xs text-foreground">{candidate.field}</span>
+                <FieldDiagnosticMarker errors={diagnosticsByField[candidate.field]} />
                 <span className={META_CLASS}>
                   {candidate.dir
                     ? `batch ×${candidate.numbers?.length ?? "?"} · numbers kept`
@@ -485,6 +534,7 @@ export interface InputConfigInlineProps {
   onFileOpen?: (path: string) => void
   /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
   isGraphInput?: boolean
+  diagnosticsByField?: Record<string, LintError[]>
 }
 
 /**
@@ -501,6 +551,7 @@ export function InputConfigInline({
   onSave,
   onFileOpen,
   isGraphInput = false,
+  diagnosticsByField = {},
 }: InputConfigInlineProps) {
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
   const initialGroups = useMemo(
@@ -562,6 +613,7 @@ export function InputConfigInline({
             rows={blackboard}
             checkOf={isChecked}
             onToggleCheck={(row, next) => setBlackboardChecks((prev) => ({ ...prev, [row.path]: next }))}
+            diagnosticsByField={diagnosticsByField}
           />
         ) : (
           <p className="px-2 py-3 text-xs text-muted-foreground">
@@ -580,6 +632,7 @@ export function InputConfigInline({
         error={error}
         setError={setError}
         onFileOpen={onFileOpen}
+        diagnosticsByField={diagnosticsByField}
       />
       <Button type="button" size="sm" onClick={() => void handleSave()} disabled={busy} className="h-7 text-[11px]">
         Save input config

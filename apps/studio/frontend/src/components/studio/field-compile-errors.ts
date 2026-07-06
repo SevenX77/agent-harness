@@ -191,6 +191,50 @@ export function lintErrorsForBoundary(
   ))
 }
 
+export function formatDiagnosticCode(code: string | null | undefined): string | null {
+  const trimmed = code?.trim()
+  if (!trimmed) {
+    return null
+  }
+  return trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed : `[${trimmed}]`
+}
+
+function boundaryFieldKey(error: LintError, boundary: IoBoundary): string | null {
+  const field = error.field_path?.trim()
+  if (!field) {
+    return null
+  }
+  const prefix = boundary === "input" ? "io.inputs.properties." : "io.outputs.properties."
+  if (field.startsWith(prefix)) {
+    const key = field.slice(prefix.length).split(".")[0]?.trim()
+    return key || null
+  }
+  if (field === "io.inputs" || field === "io.outputs") {
+    return null
+  }
+  if (field.startsWith("io.inputs.") || field.startsWith("io.outputs.")) {
+    return null
+  }
+  const key = field.split(".")[0]?.trim()
+  return key || null
+}
+
+export function boundaryFieldErrorsByKey(
+  errors: readonly LintError[] | null | undefined,
+  boundary: IoBoundary,
+): Record<string, LintError[]> {
+  const byField: Record<string, LintError[]> = {}
+  for (const error of lintErrorsForBoundary(errors, boundary)) {
+    const field = boundaryFieldKey(error, boundary)
+    if (!field) {
+      continue
+    }
+    const bucket = byField[field] ?? (byField[field] = [])
+    bucket.push(error)
+  }
+  return byField
+}
+
 /** Monaco-shaped marker descriptor (severity kept as a string so this module is monaco-free). */
 export interface LintMarkerDescriptor {
   startLineNumber: number

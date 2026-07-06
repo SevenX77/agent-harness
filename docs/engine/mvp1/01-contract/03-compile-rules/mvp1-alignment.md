@@ -16,6 +16,18 @@ compile-rules = skill **要满足什么才合法可编译**,以及 Loader **怎�
 
 本文件现在是 compile-rules 的 mvp1 SSOT，不再链接 mvp0 spec 当权威。97 个现有码以 `packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY` 为代码 baseline；本文件保留迁移源里的「具体原因 / 修复建议」，避免旧文删除后丢失解释语义。
 
+Implementation binding: the public compile entry is
+`packages/graph-agent/src/graph_agent/core/compiler.py:compile_skill`; it is a
+facade that normalizes caching/resolver/runtime input fields and delegates to
+`packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.compile_skill`.
+`loader.py` is an orchestration pipeline, not a "one function per rule" file:
+helpers implement parser, topology, IO/dataflow, resolver/subgraph, mention, and
+purity stages, and each stage may emit one or many registered `[F-v3-*]`
+diagnostics. The rule contract is this document plus
+`error_registry.py:ERROR_REGISTRY`; every new or changed compile rule must update
+the registry, preserve the documented code semantics, and add tests that bind
+rule input -> code -> source_path/line/field_path/severity.
+
 ## 2. 三段生命周期契约
 
 ### 2.1 编译期校验流(Compile-time Workflow)

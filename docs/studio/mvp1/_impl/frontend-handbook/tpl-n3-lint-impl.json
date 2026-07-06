@@ -55,12 +55,12 @@
    "n": 5,
    "cap": "properties-projection",
    "design_ref": "atom-5",
-   "current": "现状:已实现且符合。PropertiesPanel.tsx 收 fieldErrors 入参,按 fieldErrorsByKey(field-compile-errors.ts)把错误按 field 分组,在 llm_role / tools / actions / validator 等字段旁渲 FieldErrorMarker(标记 + tooltip 显 message);Workspace.tsx 用 propertiesFieldErrors(实时 lint 在时取 realtimeLint.errors、否则取手动 Compile 映射)经 lintErrors 喂入;无 field 的错误降级到节点级(#4)。2026-06-23 真机实测:field_path=tools 驱动 Properties 的 Tools 字段 ⚠ 标记(PR #180)。",
-   "gap": "无差距。字段级就近投影(FieldErrorMarker)+ 实时 lint field_path 定位 + 无 field 降级节点级均已落地。原受 drift 限制「Studio LintError 未采纳 field_path」已闭合(见 be_dep)。",
+   "current": "现状:已实现且符合。PropertiesPanel.tsx 收 fieldErrors 入参,按 fieldErrorsByKey(field-compile-errors.ts)把错误按 field 分组,在 llm_role / tools / actions / validator 等字段旁渲 FieldErrorMarker(标记 + tooltip 显 message);InputPanel.tsx 对 Input 边界使用 boundaryFieldErrorsByKey,把 io.inputs.properties.<field>.* / runtime_config 字段诊断投到 Configure input 具体字段行旁的 FieldDiagnosticMarker,只有 io.inputs 这类边界级错误留在 Input diagnostics 顶部块;Workspace.tsx 用 propertiesFieldErrors(实时 lint 在时取 realtimeLint.errors、否则取手动 Compile 映射)经 lintErrors 喂入;无 field 的错误降级到节点级(#4)。2026-06-23 真机实测:field_path=tools 驱动 Properties 的 Tools 字段 ⚠ 标记(PR #180)。",
+   "gap": "无差距。字段级就近投影(FieldErrorMarker / FieldDiagnosticMarker)+ 实时 lint field_path 定位 + 无 field 降级节点级/边界级均已落地。原受 drift 限制「Studio LintError 未采纳 field_path」已闭合(见 be_dep)。",
    "fe_status": "符合",
    "be_status": "已实现",
    "be_dep": "已就绪(2026-06-23 核验代码,原 drift 已闭合)。后端 LintError(models/errors.py:33-34)与前端 LintError(api/types.ts:27-28)均已带 field_path / source_path,engine 定位轴已被 Studio 采纳。实时 lint 的字段级投影已真跑:field_path=tools 驱动 Properties 的 Tools 字段标记(真机实测见实测页 #5);无 field 的错误(如 model)降级到节点小标志。原『Studio LintError 未采纳 field_path、字段投影只能先消费 CompileError』drift 已修复。",
-   "fe_resync": "batch6b:#4 修复 / #5 核实已满足(2026-06-20)"
+   "fe_resync": "batch6b:#4 修复 / #5 核实已满足(2026-06-20)。2026-07-05:补齐 Input 边界字段级投影,InputPanel.sections.test.tsx 断言具体 input 字段旁出现 data-io-field-diagnostic 且顶部 Input diagnostics 不再吞字段级错误;field-compile-errors.test.ts 覆盖 boundaryFieldErrorsByKey。"
   },
   {
    "n": 6,
@@ -207,6 +207,7 @@
    "layer1": [
     "RED:当前 PropertiesPanel 不接 compileErrors → 断言『字段旁有错误标记』失败(零投影)。",
     "GREEN:给 PropertiesPanel 传含 field 的 CompileError → 断言对应字段旁渲染错误标记 + tooltip(message)。",
+    "GREEN:给 InputPanel 传 io.inputs.properties.<field> 或 runtime_config field_path → 断言 Configure input 对应字段旁渲染 data-io-field-diagnostic,且不出现在顶部 Input diagnostics;给 io.inputs 边界级 field_path → 断言仍留顶部 fallback strip。",
     "断言无 field 的错误不误标到任意字段(退节点级)。"
    ],
    "layer2": [

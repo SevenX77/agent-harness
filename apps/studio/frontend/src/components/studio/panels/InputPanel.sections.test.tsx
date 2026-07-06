@@ -161,14 +161,17 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
     expect(outputBoundary).not.toContain('data-mock="test-inputs"')
   })
 
-  it("renders input-boundary compile diagnostics in the panel", () => {
+  it("renders input-boundary diagnostics next to the matching field", () => {
     const html = renderToStaticMarkup(
       <InputPanel
         skillId="demo"
         skillDetail={detail()}
         ioBoundary="input"
         lintErrors={[
-          lintError({ field_path: "chapter" }),
+          lintError({
+            field_path: "chapters",
+            message: "Graph input schema requires runtime input field 'chapters'",
+          }),
           lintError({
             file: "phases/review/SKILL.md",
             field_path: "validator",
@@ -178,10 +181,26 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
       />,
     )
 
-    expect(html).toContain("Input diagnostics")
-    expect(html).toContain("chapter")
+    expect(html).not.toContain("Input diagnostics")
+    expect(html).toContain('data-io-field-diagnostic="true"')
+    expect(html).toContain("chapters")
+    expect(html).toContain("[compile_error]")
     expect(html).toContain("Graph input schema requires runtime input field")
     expect(html).not.toContain("node-level diagnostic")
+  })
+
+  it("keeps boundary-level diagnostics in the fallback strip when no concrete field exists", () => {
+    const html = renderToStaticMarkup(
+      <InputPanel
+        skillId="demo"
+        skillDetail={detail()}
+        ioBoundary="input"
+        lintErrors={[lintError({ field_path: "io.inputs", message: "whole input block is invalid" })]}
+      />,
+    )
+
+    expect(html).toContain("Input diagnostics")
+    expect(html).toContain("io.inputs - [compile_error] - whole input block is invalid")
   })
 
   it("submitIoDocumentEdit saves the mutated document against the previous content hash", async () => {

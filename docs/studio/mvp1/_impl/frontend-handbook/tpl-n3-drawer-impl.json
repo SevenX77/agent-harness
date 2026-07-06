@@ -18,7 +18,7 @@
    "n": 8,
    "cap": "compile-drawer",
    "design_ref": "atom-8",
-   "current": "现状:符合。Workspace.tsx 在 compileDrawerOpen && currentCompileErrors.length>0 时渲染 CompileErrorDrawer.tsx(画布作用域底部 drawer):编译失败(422)时 compileSkillById 置 compileDrawerOpen=true 自动弹出,逐条列 file:line - field - message(formatCompileErrorLine),并支持 CompileError.details 作为逐条缩进诊断行；Predict/Run 的 BackendUnavailableError 会通过 details 展示 Request、API base URL、Frontend origin、Axios code、Original error；structured backend ErrorResponse 会展示 Backend error code、Retry strategy、Backend message、Backend details；PredictDiagnosticExport.error/diagnostics 会展示 engine code/message/phase/field/doc/source/details。顶部『Copy all errors』把全部错误及 details 拼成可读文本写剪贴板。基于 Radix Dialog 但 modal=false + 无 Portal + absolute inset-x-0 bottom-0,只盖画布、不遮挡左右侧栏。",
+   "current": "现状:符合。Workspace.tsx 在 compileDrawerOpen && currentCompileErrors.length>0 时渲染 CompileErrorDrawer.tsx(画布作用域底部 drawer):编译失败(422)时 compileSkillById 置 compileDrawerOpen=true 自动弹出,逐条列 file:line - field - [error_code] - message(formatCompileErrorLine,error_code 存在时统一加 []),并支持 CompileError.details 作为逐条缩进诊断行；Predict/Run 的 BackendUnavailableError 会通过 details 展示 Request、API base URL、Frontend origin、Axios code、Original error；structured backend ErrorResponse 会展示 Backend error code、Retry strategy、Backend message、Backend details；PredictDiagnosticExport.error/diagnostics 会展示 engine code/message/phase/field/doc/source/details。顶部『Copy all errors』把全部错误及 details 拼成可读文本写剪贴板。基于 Radix Dialog 但 modal=false + 无 Portal + absolute inset-x-0 bottom-0,只盖画布、不遮挡左右侧栏。",
    "gap": "符合设计(能力模块 COMPILE_LINT-1 已落地),无需改。",
    "fe_status": "符合",
    "be_status": "已实现",
@@ -88,14 +88,14 @@
     9
    ],
    "shots": [
-    "点 Compile 且有错 → 弹出 drawer 列全部 file:line-field-message",
+    "点 Compile 且有错 → 弹出 drawer 列全部 file:line-field-[error_code]-message",
     "drawer 顶部复制按钮,复制内容含全部错误",
     "drawer 不遮挡左侧栏;旧底部浮层 CompileErrorPanel 已不存在"
    ],
    "fe_status": "符合",
    "layer1": [
     "RED:当前是 CompileErrorPanel 浮层(无复制、自动浮现)→ 断言『点 Compile 弹 drawer』『有复制按钮』失败。",
-    "GREEN:点 Compile 有错 → 断言 drawer 打开、列出 compileErrors 的 file:line-field-message。",
+    "GREEN:点 Compile 有错 → 断言 drawer 打开、列出 compileErrors 的 file:line-field-[error_code]-message;formatCompileErrorLine 对 error_code 断言 [code] 格式。",
     "Compile boundary projection: .workspace/import_files manual Compile errors group under global Input node and feed Input panel diagnostics even when realtime lint is clean.",
     "Predict/Run no-response 错误 → 断言 drawer 在主错误行下列出 Request、API base URL、Axios code、Original error 等 details。",
     "Predict/Run structured backend ErrorResponse → 断言 drawer 列出 Backend error code、Retry strategy、Backend message、Backend details JSON。",
@@ -113,7 +113,7 @@
    "screenshots": [
     {
      "file": "n3-drawer-01-fail-drawer.png",
-     "caption": "真机:点 Compile 且编译失败 → 底部 CompileErrorDrawer 自动弹出,标题『3 compile errors』,顶部『Copy all errors』复制按钮(把全部错误拼成可读文本写剪贴板),逐条列 file:line - field - message。drawer 只盖画布、不遮挡左侧 Assets 文件树与右侧 Copilot 栏(Radix Dialog modal=false + 无 Portal + absolute inset-x-0 bottom-0);旧底部浮层 CompileErrorPanel 已删除(全仓 0 引用)。"
+     "caption": "真机:点 Compile 且编译失败 → 底部 CompileErrorDrawer 自动弹出,标题『3 compile errors』,顶部『Copy all errors』复制按钮(把全部错误拼成可读文本写剪贴板),逐条列 file:line - field - [error_code] - message。drawer 只盖画布、不遮挡左侧 Assets 文件树与右侧 Copilot 栏(Radix Dialog modal=false + 无 Portal + absolute inset-x-0 bottom-0);旧底部浮层 CompileErrorPanel 已删除(全仓 0 引用)。"
     },
     {
      "file": "n3-compile-input-boundary-diagnostics.png",

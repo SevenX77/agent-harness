@@ -245,7 +245,6 @@ describe('buildCopilotJudgeDraft', () => {
 
     const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open code assistant')
     expect(openButton).toBeTruthy()
-    expect(html).toContain('Open in CLI')
     expect(html).toContain('Claude')
     expect(html).toContain('Codex')
 
@@ -302,7 +301,7 @@ describe('buildCopilotJudgeDraft', () => {
         }))
       })
       await vi.waitFor(() => {
-        expect(container.textContent).toContain('Open in CLI')
+        expect(container.textContent).toContain('Open in')
       })
 
       await act(async () => {

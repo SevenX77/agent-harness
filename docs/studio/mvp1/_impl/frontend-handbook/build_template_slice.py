@@ -1484,7 +1484,7 @@ window.addEventListener('load', ()=>{
         '</div>'
         "<script>" + js + "</script></body></html>"
     )
-    OUT.write_text(out, encoding="utf-8")
+    OUT.write_text(out, encoding="utf-8", newline="\n")
     print("OK ->", OUT)
     print("pages:", [p[0] for p in pages])
 

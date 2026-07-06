@@ -458,6 +458,16 @@ async def get_llm_registry() -> RegistryResponse:
     )
 
 
+async def _write_registry_response(credentials: LLMCredentialsFile) -> RegistryResponse:
+    """Return the canonical registry projection after a registry write."""
+    return await asyncio.to_thread(
+        _registry_response,
+        credentials,
+        _load_roles_or_empty(),
+        setup_required=False,
+    )
+
+
 @router.get("/registry/endpoints/{endpoint_id}/secret", response_model=EndpointSecretResponse)
 async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretResponse:
     """Return one endpoint secret for the local settings UI."""
@@ -471,8 +481,8 @@ async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretRespon
     )
 
 
-@router.put("/registry/endpoints")
-async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, Any]:
+@router.put("/registry/endpoints", response_model=RegistryResponse)
+async def put_registry_endpoints(request: EndpointUpsertRequest) -> RegistryResponse:
     """Upsert endpoints; absent endpoint IDs are retained."""
     try:
         data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
@@ -489,11 +499,11 @@ async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, An
         },
     )
     _reconcile_fixed_roles_after_credential_change()
-    return serialize_for_response(data)
+    return await _write_registry_response(data)
 
 
-@router.delete("/registry/endpoints/{endpoint_id}")
-async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
+@router.delete("/registry/endpoints/{endpoint_id}", response_model=RegistryResponse)
+async def delete_registry_endpoint(endpoint_id: str) -> RegistryResponse:
     """Delete an endpoint and cascade its owned provider route references."""
     credentials = load_credentials()
     roles = _load_roles_or_empty()
@@ -523,7 +533,7 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
             "remaining_route_count": len(data.provider_routes),
         },
     )
-    return serialize_for_response(data)
+    return await _write_registry_response(data)
 
 
 @router.post("/catalog/sync")

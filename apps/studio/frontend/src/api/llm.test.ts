@@ -512,7 +512,6 @@ describe('API Keys v4 registry adapter', () => {
       'get /llm/registry',
       'get /llm/registry/endpoints/openrouter-custom/secret',
       'put /llm/registry/endpoints',
-      'get /llm/registry',
     ])
     expect(JSON.parse(String(seen[2].data))).toEqual({
       provider_endpoints: {
@@ -570,8 +569,10 @@ describe('API Keys v4 registry adapter', () => {
   })
 
   it('keeps the full registry projection after saving endpoint credentials', async () => {
+    const seen: string[] = []
     let currentRegistry = registry({ probe_catalog: probeCatalog })
     api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
       if (config.method === 'get') return currentRegistry
       currentRegistry = registry({
         provider_endpoints: {
@@ -582,12 +583,7 @@ describe('API Keys v4 registry adapter', () => {
         },
         probe_catalog: probeCatalog,
       })
-      return {
-        schema_version: 4,
-        provider_endpoints: currentRegistry.provider_endpoints,
-        provider_routes: currentRegistry.provider_routes,
-        runtime_policy: currentRegistry.runtime_policy,
-      }
+      return currentRegistry
     })
 
     await getCredentials({ hydrateSecrets: false })
@@ -601,6 +597,10 @@ describe('API Keys v4 registry adapter', () => {
       },
     ])
 
+    expect(seen).toEqual([
+      'get /llm/registry',
+      'put /llm/registry/endpoints',
+    ])
     expect(saved.probe_catalog).toEqual(probeCatalog)
     expect(saved.providers[0].name).toBe('OpenRouter Renamed')
   })
@@ -1416,8 +1416,11 @@ describe('API Keys v4 registry adapter', () => {
       },
     ])
 
-    const editedPayload = JSON.parse(String(seen[2].data)).provider_endpoints['openrouter-custom']
-    const restoredPayload = JSON.parse(String(seen[4].data)).provider_endpoints['openrouter-custom']
+    const savePayloads = seen
+      .filter((item) => item.method === 'put' && item.url === '/llm/registry/endpoints')
+      .map((item) => JSON.parse(String(item.data)).provider_endpoints['openrouter-custom'])
+    const editedPayload = savePayloads[1]
+    const restoredPayload = savePayloads[2]
     expect(editedPayload.api_key).toBe('sk-liv')
     expect(restoredPayload.api_key).toBe('sk-live')
     for (const payload of [editedPayload, restoredPayload]) {
@@ -1546,7 +1549,6 @@ describe('API Keys v4 registry adapter', () => {
       'get /llm/registry',
       'get /llm/registry/endpoints/openrouter-custom/secret',
       'delete /llm/registry/endpoints/openrouter-custom',
-      'get /llm/registry',
     ])
     expect(saved.providers).toEqual([])
   })

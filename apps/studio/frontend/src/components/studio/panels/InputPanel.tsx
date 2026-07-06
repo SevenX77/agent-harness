@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react"
+import { useEffect, useState, type ComponentProps } from "react"
 import { AlertTriangle, ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
 import type { LintError, RuntimeConfig, SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
 } from "@/lib/io-config"
 import { ioSchemaOf, parseFrontmatter, schemaObject } from "@/lib/io-declarations"
 import { errorMessage } from "@/utils/errors"
-import { lintErrorsForBoundary } from "../field-compile-errors"
+import { boundaryFieldErrorsByKey, formatDiagnosticCode, lintErrorsForBoundary } from "../field-compile-errors"
 import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelBody, PanelFieldRow } from "./_shared/PanelSection"
@@ -283,7 +283,8 @@ function ArtifactListRow({ row, perItemCount }: { row: ArtifactRow; perItemCount
 }
 
 function boundaryDiagnosticLabel(error: LintError): string {
-  const parts = [error.field_path, error.error_code].filter((part): part is string => Boolean(part))
+  const code = formatDiagnosticCode(error.error_code)
+  const parts = [error.field_path, code].filter((part): part is string => Boolean(part))
   return parts.length > 0 ? `${parts.join(" - ")} - ${error.message}` : error.message
 }
 
@@ -338,13 +339,26 @@ export function InputPanel({
   const view = buildIoDocumentView(skillDetail, selectedNode)
   const openSource = () => onFileOpen?.(view.relPath)
   const editSource = onFileOpen ? openSource : undefined
-  const [inputConfigOpen, setInputConfigOpen] = useState(false)
-  const [outputConfigOpen, setOutputConfigOpen] = useState(false)
   const boundaryDiagnostics = role === "input-boundary"
     ? lintErrorsForBoundary(lintErrors, "input")
     : role === "output-boundary"
       ? lintErrorsForBoundary(lintErrors, "output")
       : []
+  const boundaryDiagnosticsByField = role === "input-boundary"
+    ? boundaryFieldErrorsByKey(lintErrors, "input")
+    : {}
+  const fieldDiagnosticSet = new Set(Object.values(boundaryDiagnosticsByField).flat())
+  const boundaryFallbackDiagnostics = role === "input-boundary"
+    ? boundaryDiagnostics.filter((error) => !fieldDiagnosticSet.has(error))
+    : boundaryDiagnostics
+  const [inputConfigOpen, setInputConfigOpen] = useState(() => role === "input-boundary" && boundaryDiagnostics.length > 0)
+  const [outputConfigOpen, setOutputConfigOpen] = useState(false)
+
+  useEffect(() => {
+    if (role === "input-boundary" && boundaryDiagnostics.length > 0) {
+      setInputConfigOpen(true)
+    }
+  }, [role, boundaryDiagnostics.length])
 
   const importNodeId = view.isGraphLevel ? null : selectedNode?.id ?? null
   const declaredFiles = runtimeFileFieldsInImportScope(runtimeConfig, importNodeId)
@@ -374,7 +388,7 @@ export function InputPanel({
             <FieldGroup>
               {scope.showInput ? (
                 <>
-                  <BoundaryDiagnostics title="Input diagnostics" errors={boundaryDiagnostics} />
+                  <BoundaryDiagnostics title="Input diagnostics" errors={boundaryFallbackDiagnostics} />
                   <ExampleField title="Input" schema={view.inputSchema} relPath={view.relPath} onEdit={editSource} />
                   <PanelFieldRow>
                     <Collapsible open={inputConfigOpen} onOpenChange={setInputConfigOpen}>
@@ -405,6 +419,7 @@ export function InputPanel({
                           onSave={handleInputConfigSave}
                           onFileOpen={onFileOpen}
                           isGraphInput={view.isGraphLevel}
+                          diagnosticsByField={boundaryDiagnosticsByField}
                         />
                       </CollapsibleContent>
                     </Collapsible>
@@ -426,7 +441,7 @@ export function InputPanel({
 
               {scope.showOutput ? (
                 <>
-                  <BoundaryDiagnostics title="Output diagnostics" errors={boundaryDiagnostics} />
+                  <BoundaryDiagnostics title="Output diagnostics" errors={boundaryFallbackDiagnostics} />
                   <ExampleField title="Output" schema={view.outputSchema} relPath={view.relPath} onEdit={editSource} />
                 </>
               ) : null}

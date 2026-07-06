@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { CompileError, LintError } from "@/api/types"
 import {
+  boundaryFieldErrorsByKey,
   fieldDiagnosticsForPanels,
   fieldErrorsByKey,
+  formatDiagnosticCode,
   lintErrorsForBoundary,
   lintErrorsForFile,
   lintErrorsToMarkers,
@@ -163,6 +165,60 @@ describe("lintErrorsForBoundary", () => {
     )
 
     expect(scoped).toHaveLength(1)
+  })
+})
+
+describe("boundaryFieldErrorsByKey", () => {
+  it("projects io.inputs.properties diagnostics onto the concrete input field", () => {
+    const byField = boundaryFieldErrorsByKey(
+      [
+        lintErr({
+          file: "GRAPH.md",
+          field_path: "io.inputs.properties.chapters.source",
+          error_code: "F-v3-graph-io-schema-invalid",
+          message: "chapters uses source:file",
+        }),
+      ],
+      "input",
+    )
+
+    expect(Object.keys(byField)).toEqual(["chapters"])
+    expect(byField.chapters?.[0].message).toBe("chapters uses source:file")
+  })
+
+  it("projects runtime_config diagnostics onto the runtime input field", () => {
+    const byField = boundaryFieldErrorsByKey(
+      [
+        lintErr({
+          file: ".workspace/runtime_config.json",
+          field_path: "chapter",
+          error_code: "STUDIO_RUNTIME_INPUT_MISSING",
+          message: "missing chapter",
+        }),
+      ],
+      "input",
+    )
+
+    expect(Object.keys(byField)).toEqual(["chapter"])
+  })
+
+  it("leaves boundary-level diagnostics without a field out of the field map", () => {
+    const byField = boundaryFieldErrorsByKey(
+      [lintErr({ file: "GRAPH.md", field_path: "io.inputs", message: "whole input block is invalid" })],
+      "input",
+    )
+
+    expect(byField).toEqual({})
+  })
+})
+
+describe("formatDiagnosticCode", () => {
+  it("wraps unbracketed diagnostic codes", () => {
+    expect(formatDiagnosticCode("F-v3-graph-io-schema-invalid")).toBe("[F-v3-graph-io-schema-invalid]")
+  })
+
+  it("keeps already bracketed diagnostic codes unchanged", () => {
+    expect(formatDiagnosticCode("[F-v3-graph-io-schema-invalid]")).toBe("[F-v3-graph-io-schema-invalid]")
   })
 })
 

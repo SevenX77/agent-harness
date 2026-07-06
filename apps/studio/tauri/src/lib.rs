@@ -1645,6 +1645,56 @@ chmod 600 "$HOME/.codex/auth.json"
     } else {
         String::new()
     };
+    // Claude auth bridge: never copy refresh-token-bearing .credentials.json
+    // between Windows and WSL — OAuth token rotation makes the two copies
+    // invalidate each other (both ended up gutted on 2026-07-06). The
+    // supported hand-off is a long-lived `claude setup-token` credential in
+    // CLAUDE_CODE_OAUTH_TOKEN: the .ps1 launcher forwards it via WSLENV and
+    // ah >= 1.3.2 passes it through the daemon env to master + workers. A
+    // WSL-local `claude /login` (own refresh chain) also satisfies the gate.
+    let claude_auth_bridge = if matches!(assistant, CodeAssistant::Claude) {
+        r#"CLAUDE_CRED="$HOME/.claude/.credentials.json"
+claude_auth_ok=0
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  claude_auth_ok=1
+elif [ -f "$CLAUDE_CRED" ] && command -v python3 >/dev/null 2>&1; then
+  if python3 - "$CLAUDE_CRED" <<'CREDPY'
+import json
+import sys
+try:
+    oauth = json.load(open(sys.argv[1])).get("claudeAiOauth") or {}
+except Exception:
+    sys.exit(1)
+sys.exit(0 if (oauth.get("accessToken") or oauth.get("refreshToken")) else 1)
+CREDPY
+  then
+    claude_auth_ok=1
+  fi
+fi
+if [ "$claude_auth_ok" -ne 1 ]; then
+  printf '%s\n' "No usable Claude login for the WSL master/workers."
+  printf '%s\n' "On Windows: run 'claude setup-token', approve in the browser, then persist it:"
+  printf '%s\n' "  setx CLAUDE_CODE_OAUTH_TOKEN <token>"
+  printf '%s\n' "Reopen Studio afterwards - the launcher forwards the token into WSL."
+  printf '%s\n' "(Alternative: run 'claude /login' inside WSL for a WSL-local login.)"
+  exec bash -i
+fi
+"#
+        .to_string()
+    } else {
+        String::new()
+    };
+    let claude_pre_start = if matches!(assistant, CodeAssistant::Claude) {
+        r#"if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  # The daemon unit captures its env at bootstrap; stop a leftover empty
+  # daemon so `ah start` re-bootstraps it with the token in its environment.
+  ah --config "$CFG" stop >/dev/null 2>&1 || true
+fi
+"#
+        .to_string()
+    } else {
+        String::new()
+    };
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -1652,7 +1702,7 @@ WS={workspace}
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
 export STUDIO_AH_HOST_HOME="$HOME"
-{codex_auth_sync}
+{codex_auth_sync}{claude_auth_bridge}
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found in WSL."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
@@ -1669,11 +1719,11 @@ if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
 elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 2 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.2 for runtime inventory + auth passthrough.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
@@ -1683,7 +1733,7 @@ python3 - "$WS" <<'PY'
 PY
 fi
 cd "$WS" 2>/dev/null || cd "$HOME"
-printf '%s\n' "Starting {assistant_name} through ah (first launch ~15s cold start)..."
+{claude_pre_start}printf '%s\n' "Starting {assistant_name} through ah (first launch ~15s cold start)..."
 ah --config "$CFG" start --wait
 status=$?
 if [ "$status" -ne 0 ]; then
@@ -1699,6 +1749,8 @@ exec bash -i
         config = sh_single_quote_str(wsl_config),
         assistant_name = assistant.display_name(),
         codex_auth_sync = codex_auth_sync,
+        claude_auth_bridge = claude_auth_bridge,
+        claude_pre_start = claude_pre_start,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
     )
 }
@@ -1711,12 +1763,27 @@ fn windows_code_assistant_launcher_script(
     assistant: CodeAssistant,
     window_title: &str,
 ) -> String {
+    // Forward the user's long-lived `claude setup-token` credential into the
+    // WSL payload via WSLENV; the payload gates on it and ah >= 1.3.2 passes
+    // it through the daemon env to master + workers.
+    let claude_token_forward = if matches!(assistant, CodeAssistant::Claude) {
+        r#"$claudeOauthToken = [Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN', 'User')
+if (-not $claudeOauthToken) { $claudeOauthToken = $env:CLAUDE_CODE_OAUTH_TOKEN }
+if ($claudeOauthToken) {
+  $env:CLAUDE_CODE_OAUTH_TOKEN = $claudeOauthToken
+  $env:WSLENV = if ($env:WSLENV) { $env:WSLENV + ':CLAUDE_CODE_OAUTH_TOKEN/u' } else { 'CLAUDE_CODE_OAUTH_TOKEN/u' }
+}
+"#
+        .to_string()
+    } else {
+        String::new()
+    };
     format!(
         r#"$ErrorActionPreference = "Stop"
 $studioWindowTitle = {window_title}
 $Host.UI.RawUI.WindowTitle = $studioWindowTitle
 [Console]::Title = $studioWindowTitle
-Write-Host "Opening {assistant_name} through ah (WSL)..."
+{claude_token_forward}Write-Host "Opening {assistant_name} through ah (WSL)..."
 wsl.exe -e bash {payload}
 if ($LASTEXITCODE -ne 0) {{
   Read-Host "Could not start WSL (exit $LASTEXITCODE). Is WSL2 installed? Press Enter to close"
@@ -1725,6 +1792,7 @@ if ($LASTEXITCODE -ne 0) {{
         assistant_name = assistant.display_name(),
         payload = powershell_single_quote_str(wsl_payload_path),
         window_title = powershell_single_quote_str(window_title),
+        claude_token_forward = claude_token_forward,
     )
 }
 
@@ -1750,11 +1818,11 @@ if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
 elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 2 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.2 for runtime inventory + auth passthrough.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
@@ -1817,11 +1885,11 @@ if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
 elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 2 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.2 for runtime inventory + auth passthrough.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
@@ -1874,11 +1942,11 @@ if [ "$ah_major" -gt 1 ] 2>/dev/null; then
   ah_ok=1
 elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 1 ] 2>/dev/null; then
+elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 2 ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.1 for runtime events.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= 1.3.2 for runtime inventory + auth passthrough.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
@@ -3109,7 +3177,7 @@ mod tests {
     }
 
     #[test]
-    fn launchers_reject_ah_before_runtime_events_support() {
+    fn launchers_reject_ah_before_runtime_inventory_support() {
         let windows_payload = wsl_payload_script(
             "/mnt/d/skill",
             "/mnt/c/tmp/ah.toml",
@@ -3117,7 +3185,7 @@ mod tests {
             None,
         );
         assert!(windows_payload.contains("ah_version="));
-        assert!(windows_payload.contains("requires ah >= 1.3.1"));
+        assert!(windows_payload.contains("requires ah >= 1.3.2"));
 
         let unix_payload = unix_code_assistant_launcher_script(
             Path::new("/tmp/skill"),
@@ -3125,7 +3193,48 @@ mod tests {
             CodeAssistant::Claude,
         );
         assert!(unix_payload.contains("ah_version="));
-        assert!(unix_payload.contains("requires ah >= 1.3.1"));
+        assert!(unix_payload.contains("requires ah >= 1.3.2"));
+    }
+
+    #[test]
+    fn claude_wsl_payload_gates_on_reusable_auth() {
+        // Copying refresh-token-bearing .credentials.json between Windows and
+        // WSL self-destructs on OAuth token rotation (both copies got gutted
+        // on 2026-07-06), so the bridge is CLAUDE_CODE_OAUTH_TOKEN from
+        // `claude setup-token`, forwarded by the .ps1 launcher via WSLENV and
+        // handed to master/workers through ah's env passthrough (>= 1.3.2).
+        let payload = wsl_payload_script(
+            "/mnt/d/skill",
+            "/mnt/c/tmp/ah.toml",
+            CodeAssistant::Claude,
+            None,
+        );
+        assert!(payload.contains("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(payload.contains("claude setup-token"));
+        assert!(payload.contains(".claude/.credentials.json"));
+
+        // Codex has its own auth sync (Windows auth.json copy); the claude
+        // bridge must not leak into its payload.
+        let codex_payload = wsl_payload_script(
+            "/mnt/d/skill",
+            "/mnt/c/tmp/ah.toml",
+            CodeAssistant::Codex,
+            Some("/mnt/c/Users/u/.codex"),
+        );
+        assert!(!codex_payload.contains("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(codex_payload.contains("auth.json"));
+    }
+
+    #[test]
+    fn windows_launcher_forwards_claude_oauth_token_via_wslenv() {
+        let claude_ps1 =
+            windows_code_assistant_launcher_script("/mnt/c/x.sh", CodeAssistant::Claude, "title");
+        assert!(claude_ps1.contains("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(claude_ps1.contains("WSLENV"));
+
+        let codex_ps1 =
+            windows_code_assistant_launcher_script("/mnt/c/x.sh", CodeAssistant::Codex, "title");
+        assert!(!codex_ps1.contains("CLAUDE_CODE_OAUTH_TOKEN"));
     }
 
     #[test]

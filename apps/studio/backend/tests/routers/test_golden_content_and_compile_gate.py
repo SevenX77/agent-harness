@@ -103,6 +103,40 @@ def _write_test_input(skills_dir: Path, content: dict[str, object], *, name: str
     path.write_text(json.dumps(content), encoding="utf-8")
 
 
+def _write_graph_with_source_file_and_missing_runtime_input(skill_dir: Path) -> None:
+    (skill_dir / "GRAPH.md").write_text(
+        """---
+schema_version: "v0.3.0"
+name: text-segmentation
+description: Compile should aggregate independent input diagnostics
+io:
+  inputs:
+    type: object
+    required: [chapter, chapters]
+    properties:
+      chapter:
+        type: object
+      chapters:
+        type: array
+        source: file
+        path: imports/chapters/chapters.json
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+phases:
+  - setup
+---
+<phase depends_on="input" output>setup</phase>
+""",
+        encoding="utf-8",
+    )
+    import_file = skill_dir / ".workspace" / "import_files" / "chapters.json"
+    import_file.parent.mkdir(parents=True, exist_ok=True)
+    import_file.write_text(json.dumps({"chapters": []}), encoding="utf-8")
+
+
 @pytest.fixture
 def agent_skill(studio_roots: tuple[Path, Path]) -> str:
     skills_dir, _workspaces = studio_roots
@@ -262,6 +296,27 @@ def test_compile_fails_when_runtime_input_violates_graph_input_schema(
     assert body["errors"][0]["field"] == "chapter_content"
     assert body["errors"][0]["error_code"] == "STUDIO_RUNTIME_INPUT_SCHEMA_INVALID"
     assert "string" in body["errors"][0]["message"]
+
+
+def test_compile_aggregates_engine_io_error_with_missing_runtime_input(
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    """Engine structural failures must not hide independent Studio runtime preflight errors."""
+    skills_dir, _workspaces = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    _write_graph_with_source_file_and_missing_runtime_input(skill_dir)
+
+    response = client.post("/api/skills/text-segmentation/compile")
+
+    assert response.status_code == 422
+    body = response.json()
+    by_code_and_field = {
+        (error["error_code"], error["field"])
+        for error in body["errors"]
+    }
+    assert ("F-v3-graph-io-schema-invalid", "io.inputs.properties.chapters.source") in by_code_and_field
+    assert ("STUDIO_RUNTIME_INPUT_MISSING", "chapter") in by_code_and_field
 
 
 def test_compile_fails_when_golden_missing_newly_required_field(

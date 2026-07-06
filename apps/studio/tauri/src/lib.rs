@@ -763,8 +763,13 @@ fn toml_string(value: &str) -> String {
 
 fn transient_ah_config_content(assistant: CodeAssistant) -> String {
     let provider = assistant.provider();
+    // [env] flows to worker agents via `ah start` → agent.spawn extra_env_vars.
+    // Workers run as bare `<provider> --dangerously-skip-permissions` under the
+    // WSL root user; without IS_SANDBOX=1 the claude CLI refuses to start and
+    // the moirai workers die on spawn (the master gets the same escape via
+    // `export IS_SANDBOX=1` inside its cmd string).
     format!(
-        "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = {provider_toml}\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = [\"eval-judgement\"]\n",
+        "version = \"1\"\n\n[env]\nIS_SANDBOX = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = {provider_toml}\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = [\"eval-judgement\"]\n",
         provider_toml = toml_string(provider),
         cmd = toml_string(&assistant.master_cmd())
     )
@@ -1211,26 +1216,6 @@ fn code_assistant_status_from_snapshots(
     status
 }
 
-fn workspace_status_requires_cleanup(
-    specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
-    snapshots: &BTreeMap<PathBuf, AhLifecycleSnapshot>,
-) -> bool {
-    let has_stale = snapshots.values().any(|snapshot| {
-        reconcile_code_assistant_lifecycle(*snapshot) == CodeAssistantLifecycleAction::CleanupStale
-    });
-    let active_count = specs
-        .keys()
-        .filter(|config| {
-            snapshots
-                .get(*config)
-                .copied()
-                .map(code_assistant_lifecycle_is_active)
-                .unwrap_or(false)
-        })
-        .count();
-    has_stale || active_count > 1
-}
-
 fn emit_code_assistant_status_for_workspace(
     app: &tauri::AppHandle,
     state: &CodeAssistantRuntimeState,
@@ -1289,27 +1274,11 @@ fn handle_code_assistant_status_snapshot(
         .expect("code assistant status snapshots poisoned")
         .insert(config_path.to_path_buf(), snapshot);
 
-    let specs = status_specs_for_workspace(&state, &workspace_root);
-    let snapshots = snapshots_for_configs(&state, &specs);
-    if workspace_status_requires_cleanup(&specs, &snapshots) {
-        match cleanup_workspace_code_assistants(&workspace_root) {
-            Ok(cleanup) => {
-                state
-                    .configs
-                    .lock()
-                    .expect("code assistant state poisoned")
-                    .retain(|registered_config| !cleanup.configs.contains(registered_config));
-                clear_status_snapshots_for_workspace(&state, &workspace_root);
-            }
-            Err(error) => {
-                log::warn!(
-                    "phase=code-assistant-status action=cleanup-failed workspace={} error={error}",
-                    workspace_root.display()
-                );
-            }
-        }
-    }
-
+    // Snapshots only drive the status display. A cold-starting runtime
+    // (inventory ACTIVE, master tmux not up for ~15s) is indistinguishable
+    // from a stale leftover here, so auto-cleanup on event snapshots would
+    // kill the runtime `ah start` is still bringing up. Cleanup happens on
+    // user actions only (open/attach/close/quit).
     emit_code_assistant_status_for_workspace(app, &state, &workspace_root);
 }
 
@@ -3033,6 +3002,11 @@ mod tests {
         assert!(config.contains("[agents.atropos]"));
         assert!(config.contains("skills = [\"eval-judgement\"]"));
         assert_eq!(config.matches("provider = \"claude\"").count(), 4);
+        // Worker agents spawn as bare `<provider> --dangerously-skip-permissions`
+        // under the WSL root user; they need IS_SANDBOX=1 injected through the
+        // config [env] table (master gets it via `export IS_SANDBOX=1` in cmd).
+        assert!(config.contains("[env]"));
+        assert!(config.contains("IS_SANDBOX = \"1\""));
         assert!(!config.contains("[sandbox]"));
         assert!(
             !config.contains("additional_ro_binds"),
@@ -3080,6 +3054,8 @@ mod tests {
         assert!(config.contains("[agents.atropos]"));
         assert!(config.contains("skills = [\"eval-judgement\"]"));
         assert_eq!(config.matches("provider = \"codex\"").count(), 4);
+        assert!(config.contains("[env]"));
+        assert!(config.contains("IS_SANDBOX = \"1\""));
         assert!(!config.contains("--dangerously-skip-permissions"));
     }
 
@@ -3328,7 +3304,12 @@ mod tests {
     }
 
     #[test]
-    fn ah_events_status_aggregation_cleans_stale_or_multiple_active_configs() {
+    fn ah_events_status_aggregation_is_display_only() {
+        // Startup-window snapshots (inventory ACTIVE while the master tmux pane
+        // is still cold-starting) are indistinguishable from stale leftovers, so
+        // event snapshots must ONLY drive the status display — never cleanup.
+        // Cleanup stays on user actions: prepare_code_assistant_open,
+        // attach (CleanupStale), Close, and app quit.
         let workspace = PathBuf::from("/tmp/studio-skill");
         let claude_config = workspace.join(".claude-ah.toml");
         let codex_config = workspace.join(".codex-ah.toml");
@@ -3360,20 +3341,17 @@ mod tests {
                 codex: false,
             }
         );
-        assert!(!workspace_status_requires_cleanup(&specs, &snapshots));
 
-        let multiple_active = BTreeMap::from([
-            (claude_config, AhLifecycleSnapshot::new(true, true, true)),
-            (
-                codex_config.clone(),
-                AhLifecycleSnapshot::new(true, true, true),
-            ),
-        ]);
-        assert!(workspace_status_requires_cleanup(&specs, &multiple_active));
-
-        let stale_codex =
-            BTreeMap::from([(codex_config, AhLifecycleSnapshot::new(true, false, true))]);
-        assert!(workspace_status_requires_cleanup(&specs, &stale_codex));
+        // The startup window reads as "not active yet", nothing more.
+        let starting =
+            BTreeMap::from([(claude_config, AhLifecycleSnapshot::new(true, false, false))]);
+        assert_eq!(
+            code_assistant_status_from_snapshots(&specs, &starting),
+            CodeAssistantStatus {
+                claude: false,
+                codex: false,
+            }
+        );
     }
 
     #[test]

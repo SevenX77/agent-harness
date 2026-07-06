@@ -1,8 +1,7 @@
-import { useEffect, useState, type ComponentProps } from "react"
-import { AlertTriangle, ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
+import { useState, type ComponentProps } from "react"
+import { AlertTriangle, FileText, Files, Settings2 } from "lucide-react"
 import type { LintError, RuntimeConfig, SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -14,6 +13,7 @@ import {
   reconcileOutputFields,
   runtimeArtifactsOf,
   runtimeFileFieldsInImportScope,
+  runtimeInputConflictsInImportScope,
   type ArtifactRow,
   type FileFieldDecl,
   type IoInputChecks,
@@ -50,6 +50,7 @@ interface InputPanelProps {
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
   onRuntimeArtifactsSave?: (artifacts: ArtifactRow[]) => Promise<string | null>
+  onRuntimeConfigRefresh?: () => Promise<unknown> | unknown
   onFileOpen?: (fileOrPath: FileOpenInput) => void
   // Writes for the config declarations (same optimistic-hash contract
   // PropertiesPanel uses).
@@ -331,6 +332,7 @@ export function InputPanel({
   selectedTestInputId = null,
   onSelectTestInput,
   onRuntimeArtifactsSave,
+  onRuntimeConfigRefresh,
   onFileOpen,
   onPhaseFileSave,
 }: InputPanelProps) {
@@ -351,17 +353,11 @@ export function InputPanel({
   const boundaryFallbackDiagnostics = role === "input-boundary"
     ? boundaryDiagnostics.filter((error) => !fieldDiagnosticSet.has(error))
     : boundaryDiagnostics
-  const [inputConfigOpen, setInputConfigOpen] = useState(() => role === "input-boundary" && boundaryDiagnostics.length > 0)
   const [outputConfigOpen, setOutputConfigOpen] = useState(false)
-
-  useEffect(() => {
-    if (role === "input-boundary" && boundaryDiagnostics.length > 0) {
-      setInputConfigOpen(true)
-    }
-  }, [role, boundaryDiagnostics.length])
 
   const importNodeId = view.isGraphLevel ? null : selectedNode?.id ?? null
   const declaredFiles = runtimeFileFieldsInImportScope(runtimeConfig, importNodeId)
+  const inputConflicts = runtimeInputConflictsInImportScope(runtimeConfig, importNodeId)
   // Reconciled input fields (matched/available/missing), nested. For an interior
   // node this reconciles io.inputs against upstream blackboard + runtime files.
   const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "", declaredFiles)
@@ -391,38 +387,25 @@ export function InputPanel({
                   <BoundaryDiagnostics title="Input diagnostics" errors={boundaryFallbackDiagnostics} />
                   <ExampleField title="Input" schema={view.inputSchema} relPath={view.relPath} onEdit={editSource} />
                   <PanelFieldRow>
-                    <Collapsible open={inputConfigOpen} onOpenChange={setInputConfigOpen}>
-                      <CollapsibleTrigger asChild>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          className="h-7 gap-1 px-2 text-[11px]"
-                          aria-label="Configure input"
-                        >
-                          {inputConfigOpen ? (
-                            <ChevronDown className="size-3" aria-hidden />
-                          ) : (
-                            <ChevronRight className="size-3" aria-hidden />
-                          )}
-                          <Settings2 className="size-3" aria-hidden />
-                          Configure input
-                        </Button>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2">
-                        <InputConfigInline
-                          skillId={skillId}
-                          blackboard={blackboard}
-                          declaredFiles={declaredFiles}
-                          declaredInputNames={declaredInputFieldNames(view.content)}
-                          importNodeId={importNodeId}
-                          onSave={handleInputConfigSave}
-                          onFileOpen={onFileOpen}
-                          isGraphInput={view.isGraphLevel}
-                          diagnosticsByField={boundaryDiagnosticsByField}
-                        />
-                      </CollapsibleContent>
-                    </Collapsible>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <YamlFieldLabel>Input configuration</YamlFieldLabel>
+                      </div>
+                      <InputConfigInline
+                        skillId={skillId}
+                        workspaceRoot={workspaceRoot}
+                        blackboard={blackboard}
+                        declaredFiles={declaredFiles}
+                        declaredInputNames={declaredInputFieldNames(view.content)}
+                        importNodeId={importNodeId}
+                        conflicts={inputConflicts}
+                        onSave={handleInputConfigSave}
+                        onRuntimeConfigRefresh={onRuntimeConfigRefresh}
+                        onFileOpen={onFileOpen}
+                        isGraphInput={view.isGraphLevel}
+                        diagnosticsByField={boundaryDiagnosticsByField}
+                      />
+                    </div>
                   </PanelFieldRow>
                 </>
               ) : null}

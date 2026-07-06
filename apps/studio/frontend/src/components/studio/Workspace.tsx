@@ -860,7 +860,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         : rawPath
     const fileSkillId = requestedSkillId
     const fileWorkspaceRoot = isStringPath ? currentWorkspaceRoot : fileOrPath.workspaceRoot ?? currentWorkspaceRoot
-    let content = isStringPath ? currentFiles[path] ?? "" : fileOrPath.content
+    const hasCurrentFile = Object.prototype.hasOwnProperty.call(currentFiles, path)
+    let content = isStringPath ? (hasCurrentFile ? currentFiles[path] : undefined) : fileOrPath.content
     let hash = isStringPath ? null : fileOrPath.hash ?? null
     if (content === undefined) {
       if (isTauriRuntime()) {
@@ -868,7 +869,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         content = nativeFile.content
         hash = nativeFile.hash
       } else {
-        content = currentFiles[path] ?? ""
+        content = hasCurrentFile ? currentFiles[path] : ""
       }
     }
     const language = isStringPath ? languageForPath(path) : fileOrPath.language ?? languageForPath(path)
@@ -2430,6 +2431,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         selectedTestInputId={selectedTestInputId}
         onSelectTestInput={setSelectedTestInputId}
         onRuntimeArtifactsSave={handleRuntimeArtifactsSave}
+        onRuntimeConfigRefresh={mutateRuntimeConfig}
         onPhaseFileSave={handlePhaseFileSave}
         onPhaseRename={handleRenamePhase}
         onActionCreate={handleActionCreate}

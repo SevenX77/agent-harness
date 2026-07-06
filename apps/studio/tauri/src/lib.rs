@@ -201,20 +201,13 @@ fn existing_directory(path: &str) -> Result<PathBuf, String> {
 }
 
 fn find_ah_config(start_dir: &Path) -> Option<PathBuf> {
-    let mut current = if start_dir.is_file() {
-        start_dir.parent()?.to_path_buf()
+    let current = if start_dir.is_file() {
+        start_dir.parent()?
     } else {
-        start_dir.to_path_buf()
+        start_dir
     };
-    loop {
-        let candidate = current.join("ah.toml");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
+    let candidate = current.join("ah.toml");
+    candidate.is_file().then_some(candidate)
 }
 
 fn workspace_hash(workspace_root: &Path) -> String {
@@ -230,12 +223,8 @@ fn workspace_hash(workspace_root: &Path) -> String {
         .collect()
 }
 
-fn transient_ah_config_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
-    std::env::temp_dir()
-        .join("skill-studio-ah")
-        .join(workspace_hash(workspace_root))
-        .join(assistant.slug())
-        .join("ah.toml")
+fn studio_ah_config_path(workspace_root: &Path) -> PathBuf {
+    workspace_root.join("ah.toml")
 }
 
 fn studio_ah_temp_root() -> PathBuf {
@@ -458,6 +447,8 @@ const MOIRAI_MASTER_REPORT_PROMPT: &str = "用中文简短汇报当前状态(每
 
 const STUDIO_AH_MANAGED_MARKER_PREFIX: &str = "<!-- studio-ah-managed hash:";
 const STUDIO_AH_MANAGED_MARKER_SUFFIX: &str = " -->";
+const STUDIO_AH_CONFIG_MARKER_PREFIX: &str = "# studio-ah-managed hash:";
+const STUDIO_AH_CONFIG_MARKER_SUFFIX: &str = "";
 
 const DOMAIN_ANALYSIS_SKILL: &str =
     include_str!("../../backend/app/prompts/skills/domain-analysis/SKILL.md");
@@ -619,7 +610,7 @@ const STUDIO_AH_MANAGED_FILES: &[StudioAhManagedFile] = &[
 fn claude_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -n \"$claude_real\" ] && [ ! -x \"$claude_real\" ]; then claude_real=\"\"; fi; if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -634,7 +625,7 @@ fn claude_master_cmd() -> String {
 fn codex_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$HOME/.codex/config.toml\" 2>/dev/null; then {{ if [ -s \"$HOME/.codex/config.toml\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$HOME/.codex/config.toml\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=$(command -v codex || true); if [ -n \"$codex_real\" ] && [ ! -x \"$codex_real\" ]; then codex_real=\"\"; fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$HOME/.codex/config.toml\" 2>/dev/null; then {{ if [ -s \"$HOME/.codex/config.toml\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$HOME/.codex/config.toml\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -703,6 +694,32 @@ fn strip_studio_managed_marker(content: &str) -> String {
         .collect()
 }
 
+fn studio_managed_toml_marker(body: &str) -> String {
+    format!(
+        "{STUDIO_AH_CONFIG_MARKER_PREFIX}{}{STUDIO_AH_CONFIG_MARKER_SUFFIX}",
+        sha256_hex(body)
+    )
+}
+
+fn with_studio_managed_toml_marker(body: &str) -> String {
+    format!("{}\n{body}", studio_managed_toml_marker(body))
+}
+
+fn extract_studio_managed_toml_hash(content: &str) -> Option<&str> {
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let hash = trimmed.strip_prefix(STUDIO_AH_CONFIG_MARKER_PREFIX)?;
+        hash.strip_suffix(STUDIO_AH_CONFIG_MARKER_SUFFIX)
+    })
+}
+
+fn strip_studio_managed_toml_marker(content: &str) -> String {
+    content
+        .split_inclusive('\n')
+        .filter(|line| !line.trim().starts_with(STUDIO_AH_CONFIG_MARKER_PREFIX))
+        .collect()
+}
+
 fn studio_ah_file_path(workspace_root: &Path, relative_path: &str) -> PathBuf {
     relative_path
         .split('/')
@@ -749,6 +766,48 @@ fn write_studio_managed_file(path: &Path, body: &str) -> Result<(), String> {
         .map_err(|error| format!("failed to write ah file {}: {error}", path.display()))
 }
 
+fn write_studio_managed_toml_file(path: &Path, body: &str) -> Result<(), String> {
+    if path.exists() {
+        if !path.is_file() {
+            return Err(format!(
+                "refusing to overwrite non-file ah config: {}",
+                path.display()
+            ));
+        }
+        let existing = std::fs::read_to_string(path).map_err(|error| {
+            format!(
+                "failed to read existing ah config {}: {error}",
+                path.display()
+            )
+        })?;
+        let previous_hash = extract_studio_managed_toml_hash(&existing).ok_or_else(|| {
+            format!(
+                "refusing to overwrite unmanaged ah config: {}",
+                path.display()
+            )
+        })?;
+        let existing_body = strip_studio_managed_toml_marker(&existing);
+        let actual_hash = sha256_hex(&existing_body);
+        if previous_hash != actual_hash {
+            return Err(format!(
+                "refusing to overwrite modified Studio-managed ah config: {}",
+                path.display()
+            ));
+        }
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("cannot resolve ah config parent: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "failed to create ah config dir {}: {error}",
+            parent.display()
+        )
+    })?;
+    std::fs::write(path, with_studio_managed_toml_marker(body))
+        .map_err(|error| format!("failed to write ah config {}: {error}", path.display()))
+}
+
 fn prepare_studio_ah_workspace(workspace_root: &Path) -> Result<(), String> {
     for file in STUDIO_AH_MANAGED_FILES {
         let path = studio_ah_file_path(workspace_root, file.relative_path);
@@ -761,7 +820,35 @@ fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn transient_ah_config_content(assistant: CodeAssistant) -> String {
+fn master_provider_from_ah_config(config_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let mut in_master = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_master = trimmed == "[master]";
+            continue;
+        }
+        if !in_master {
+            continue;
+        }
+        let Some(value) = trimmed.strip_prefix("provider") else {
+            continue;
+        };
+        let value = value.trim_start();
+        let value = value.strip_prefix('=')?.trim();
+        let value = value.strip_prefix('"')?;
+        let value = value.strip_suffix('"')?;
+        return Some(value.to_string());
+    }
+    None
+}
+
+fn ah_config_matches_assistant(config_path: &Path, assistant: CodeAssistant) -> bool {
+    master_provider_from_ah_config(config_path).as_deref() == Some(assistant.provider())
+}
+
+fn studio_ah_config_content(assistant: CodeAssistant) -> String {
     let provider = assistant.provider();
     format!(
         "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\n\n[agents.clotho]\nprovider = {provider_toml}\nskills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = [\"compile-error-repair\"]\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = [\"eval-judgement\"]\n",
@@ -774,26 +861,22 @@ fn ah_config_for_workspace(
     workspace_root: &Path,
     assistant: CodeAssistant,
 ) -> Result<PathBuf, String> {
-    if let Some(config) = find_ah_config(workspace_root) {
-        return Ok(config);
+    let config = studio_ah_config_path(workspace_root);
+    if config.is_file() {
+        let existing = std::fs::read_to_string(&config)
+            .map_err(|error| format!("failed to read ah config {}: {error}", config.display()))?;
+        if extract_studio_managed_toml_hash(&existing).is_none() {
+            return Ok(config);
+        }
     }
     prepare_studio_ah_workspace(workspace_root)?;
-    let config = transient_ah_config_path(workspace_root, assistant);
-    let parent = config
-        .parent()
-        .ok_or_else(|| format!("cannot resolve ah config parent: {}", config.display()))?;
-    std::fs::create_dir_all(parent)
-        .map_err(|error| format!("failed to create transient ah config dir: {error}"))?;
-    std::fs::write(&config, transient_ah_config_content(assistant))
-        .map_err(|error| format!("failed to write transient ah config: {error}"))?;
+    write_studio_managed_toml_file(&config, &studio_ah_config_content(assistant))?;
     Ok(config)
 }
 
 fn ah_config_for_status(workspace_root: &Path, assistant: CodeAssistant) -> Option<PathBuf> {
-    find_ah_config(workspace_root).or_else(|| {
-        let transient = transient_ah_config_path(workspace_root, assistant);
-        transient.is_file().then_some(transient)
-    })
+    let config = find_ah_config(workspace_root)?;
+    ah_config_matches_assistant(&config, assistant).then_some(config)
 }
 
 fn command_result(mut command: Command, label: &str) -> Result<CommandResult, String> {
@@ -1670,6 +1753,27 @@ fi
 mkdir -p "$HOME/.codex"
 cp "$WIN_CODEX_HOME/auth.json" "$HOME/.codex/auth.json"
 chmod 600 "$HOME/.codex/auth.json"
+WIN_USER_HOME="${{WIN_CODEX_HOME%/.codex}}"
+codex_real=""
+codex_path_candidate="$(command -v codex || true)"
+if [ -n "$codex_path_candidate" ] && [ -x "$codex_path_candidate" ]; then
+  codex_real="$codex_path_candidate"
+fi
+if [ -z "$codex_real" ] && [ -n "$WIN_USER_HOME" ]; then
+  for codex_candidate in "$WIN_USER_HOME"/AppData/Local/OpenAI/Codex/bin/*/codex.exe; do
+    if [ -x "$codex_candidate" ]; then
+      codex_real="$codex_candidate"
+      break
+    fi
+  done
+fi
+if [ -z "$codex_real" ]; then
+  printf '%s\n' "Codex executable was not found in WSL."
+  printf '%s\n' "Run Codex login on Windows first, then reopen Studio's Codex menu item."
+  exec bash -i
+fi
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$codex_real" "$HOME/.local/bin/codex"
 "#,
             windows_home = windows_home
         )
@@ -2329,7 +2433,7 @@ fn attach_code_assistant_terminal(
         CodeAssistantLifecycleAction::CleanupStale => {
             cleanup_workspace_code_assistants(&workspace_root)?;
             return Err(format!(
-                "{} was stale and has been closed; reopen it from Open in.",
+                "{} was stale and has been closed; reopen it from Open in CLI.",
                 assistant.display_name()
             ));
         }
@@ -2999,8 +3103,8 @@ mod tests {
     }
 
     #[test]
-    fn transient_ah_config_starts_moirai_team() {
-        let config = transient_ah_config_content(CodeAssistant::Claude);
+    fn studio_ah_config_starts_moirai_team() {
+        let config = studio_ah_config_content(CodeAssistant::Claude);
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
@@ -3041,14 +3145,15 @@ mod tests {
     }
 
     #[test]
-    fn transient_ah_config_starts_codex_moirai_team() {
-        let config = transient_ah_config_content(CodeAssistant::Codex);
+    fn studio_ah_config_starts_codex_moirai_team() {
+        let config = studio_ah_config_content(CodeAssistant::Codex);
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
         assert!(config.contains("window_size = \"follow\""));
         assert!(config.contains("cmd = \"bash -c "));
         assert!(config.contains("STUDIO_AH_HOST_HOME"));
+        assert!(config.contains("[ ! -x \\\"$codex_real\\\" ]"));
         assert!(config.contains("$HOME/.local/bin/codex"));
         assert!(config.contains("$HOME/.codex/auth.json"));
         assert!(config.contains("$HOME/.codex/AGENTS.md"));
@@ -3125,8 +3230,8 @@ mod tests {
     }
 
     #[test]
-    fn transient_ah_config_omits_systemd_scope_ro_binds() {
-        let config = transient_ah_config_content(CodeAssistant::Claude);
+    fn studio_ah_config_omits_systemd_scope_ro_binds() {
+        let config = studio_ah_config_content(CodeAssistant::Claude);
 
         assert!(!config.contains("additional_ro_binds"));
         assert!(!config.contains("BindReadOnlyPaths"));
@@ -3159,8 +3264,9 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         let config = ah_config_for_workspace(&root, CodeAssistant::Claude)
-            .expect("generated transient ah config");
+            .expect("generated workspace ah config");
 
+        assert_eq!(config, root.join("ah.toml"));
         assert!(config.is_file());
         let master_rules = root.join(".ah").join("rules").join("master.md");
         let clotho_rules = root.join(".ah").join("rules").join("clotho.md");
@@ -3188,23 +3294,25 @@ mod tests {
         assert!(domain.contains("studio-ah-managed hash:"));
         let eval = std::fs::read_to_string(eval_skill).unwrap();
         assert!(eval.contains("name: eval-judgement"));
+        let config_content = std::fs::read_to_string(config).unwrap();
+        assert!(config_content.contains("# studio-ah-managed hash:"));
+        assert_eq!(
+            master_provider_from_ah_config(&root.join("ah.toml")).as_deref(),
+            Some("claude")
+        );
 
         let _ = std::fs::remove_dir_all(&root);
-        if let Some(parent) = config.parent() {
-            let _ = std::fs::remove_dir_all(parent);
-        }
     }
 
     #[test]
     fn existing_ah_config_is_respected_without_generating_studio_files() {
         let root = temp_path("user-ah-config");
-        let child = root.join("child");
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("ah.toml"), "version = \"1\"\n").unwrap();
 
         let config =
-            ah_config_for_workspace(&child, CodeAssistant::Claude).expect("existing ah config");
+            ah_config_for_workspace(&root, CodeAssistant::Claude).expect("existing ah config");
 
         assert_eq!(config, root.join("ah.toml"));
         assert!(!root.join(".ah").exists());
@@ -3212,30 +3320,54 @@ mod tests {
     }
 
     #[test]
-    fn status_config_lookup_does_not_generate_transient_workspace_files() {
+    fn managed_workspace_ah_config_rewrites_for_requested_assistant() {
+        let root = temp_path("managed-ah-config-rewrite");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let claude_config =
+            ah_config_for_workspace(&root, CodeAssistant::Claude).expect("claude config");
+        assert_eq!(claude_config, root.join("ah.toml"));
+        assert_eq!(
+            master_provider_from_ah_config(&claude_config).as_deref(),
+            Some("claude")
+        );
+
+        let codex_config =
+            ah_config_for_workspace(&root, CodeAssistant::Codex).expect("codex config");
+        assert_eq!(codex_config, root.join("ah.toml"));
+        assert_eq!(
+            master_provider_from_ah_config(&codex_config).as_deref(),
+            Some("codex")
+        );
+        assert_eq!(
+            ah_config_for_status(&root, CodeAssistant::Codex).as_deref(),
+            Some(codex_config.as_path())
+        );
+        assert!(ah_config_for_status(&root, CodeAssistant::Claude).is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn status_config_lookup_does_not_generate_workspace_files() {
         let root = temp_path("status-ah-config");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let transient = transient_ah_config_path(&root, CodeAssistant::Codex);
-        let transient_dir = transient.parent().unwrap().to_path_buf();
-        let _ = std::fs::remove_dir_all(&transient_dir);
+        let config = root.join("ah.toml");
 
         assert!(ah_config_for_status(&root, CodeAssistant::Codex).is_none());
         assert!(!root.join(".ah").exists());
 
-        std::fs::create_dir_all(&transient_dir).unwrap();
-        std::fs::write(
-            &transient,
-            transient_ah_config_content(CodeAssistant::Codex),
-        )
-        .unwrap();
+        write_studio_managed_toml_file(&config, &studio_ah_config_content(CodeAssistant::Codex))
+            .unwrap();
 
         assert_eq!(
             ah_config_for_status(&root, CodeAssistant::Codex).as_deref(),
-            Some(transient.as_path())
+            Some(config.as_path())
         );
+        assert!(ah_config_for_status(&root, CodeAssistant::Claude).is_none());
         let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_dir_all(transient_dir.parent().unwrap());
     }
 
     #[test]
@@ -3474,20 +3606,20 @@ sessions
     }
 
     #[test]
-    fn find_ah_config_walks_up_from_workspace() {
+    fn find_ah_config_does_not_walk_above_workspace() {
         let root = temp_path("ah-config-root");
         let child = root.join("child").join("nested");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(
             root.join("ah.toml"),
-            transient_ah_config_content(CodeAssistant::Claude),
+            studio_ah_config_content(CodeAssistant::Claude),
         )
         .unwrap();
 
-        let found = find_ah_config(&child).expect("ah config found");
+        let found = find_ah_config(&child);
 
-        assert_eq!(found, root.join("ah.toml"));
+        assert_eq!(found, None);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3538,6 +3670,11 @@ sessions
         assert!(script.contains("WIN_CODEX_HOME='/mnt/c/Users/Test User/.codex'"));
         assert!(script.contains("cp \"$WIN_CODEX_HOME/auth.json\" \"$HOME/.codex/auth.json\""));
         assert!(script.contains("chmod 600 \"$HOME/.codex/auth.json\""));
+        assert!(script.contains("WIN_USER_HOME=\"${WIN_CODEX_HOME%/.codex}\""));
+        assert!(script.contains("command -v codex || true"));
+        assert!(script.contains("[ -x \"$codex_path_candidate\" ]"));
+        assert!(script.contains("AppData/Local/OpenAI/Codex/bin/*/codex.exe"));
+        assert!(script.contains("ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\""));
         assert!(script.contains("Run Codex login on Windows first"));
         assert!(script.contains("Starting Codex through ah"));
     }

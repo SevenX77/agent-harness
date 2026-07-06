@@ -1,7 +1,6 @@
-import type { JsonObject, JsonValue } from '../api/types'
+import type { JsonObject } from '../api/types'
 
 export type CopilotEventStatus = 'pending' | 'running' | 'success' | 'error'
-export type CopilotView = 'WelcomeScreen' | 'Edit' | 'Compile' | 'Validate' | 'Predict' | 'Run' | 'Publish'
 
 export interface CopilotEventBase {
   id: string
@@ -101,12 +100,6 @@ export interface CopilotMessage {
   events: CopilotEvent[]
   status: CopilotEventStatus
   createdAt: number
-}
-
-export interface CopilotContextPayload {
-  view: CopilotView
-  context: Record<string, JsonValue>
-  timestamp: number
 }
 
 export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {

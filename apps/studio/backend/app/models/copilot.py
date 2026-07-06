@@ -6,16 +6,6 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CopilotView: TypeAlias = Literal[
-    "WelcomeScreen",
-    "Edit",
-    "Compile",
-    "Validate",
-    "Predict",
-    "Run",
-    "Publish",
-]
-
 
 class CopilotWsRequestPayload(BaseModel):
     """Incoming Copilot WebSocket request payload."""
@@ -154,26 +144,6 @@ CopilotEvent: TypeAlias = Annotated[
     | CopilotEventError,
     Field(discriminator="type"),
 ]
-
-
-class ContextUpdateRequest(BaseModel):
-    """Update the cached Studio view context for Copilot."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    view: CopilotView
-    context: dict[str, Any]
-    timestamp: int
-
-
-class ContextUpdateResponse(BaseModel):
-    """Response for a Studio view context update."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    accepted: bool
-    reason: Literal["out_of_order"] | None = None
-    summary: str | None = None
 
 
 class CopilotToolApprovalRequest(BaseModel):

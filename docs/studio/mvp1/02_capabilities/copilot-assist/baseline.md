@@ -21,7 +21,7 @@ units: [copilot-sdk-test-parity, copilot-session-persistence]
 | 面板主入口 | `copilot-panel.tsx:74-230` | header / 连接态 / 消息列表 / 空态(按 view) / 输入框 / 模型选择器 / 发送 |
 | 消息渲染 | `copilot-panel.tsx:17-37` | 用户/assistant 区分；`ToolCallBubble`；Edit/Write/Read/Bash 结果→diff/summary bubble |
 | 会话逻辑 | `useCopilot.ts:25-157` | skillId 变即 reset；WS connect/重连；textQueue 75ms flush；发送只构造 `{user_message, model_override?}` |
-| 上下文同步 | `useCopilotContext.ts:6-62` | debounce POST `view/context/timestamp`；>2048 压缩；**view 快照通道、非 mention** |
+| 上下文同步 | 已删除 `useCopilotContext` 与 `/copilot/context` | 不再后台同步 view/selection/lint；未来 @mention 必须随 Copilot WS 消息 payload 显式发送 |
 | 事件类型 | `types/copilot.ts:14-109` | `text_delta`/`tool_use_start`/`tool_use_result`/`error`/`done`/`unknown` |
 
 ## 后端功能

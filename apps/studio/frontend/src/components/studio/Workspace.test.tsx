@@ -167,10 +167,6 @@ vi.mock('@/hooks/useSkills', () => ({
   },
 }))
 
-vi.mock('@/hooks/useCopilotContext', () => ({
-  useCopilotContext: vi.fn(),
-}))
-
 vi.mock('@/hooks/useCopilot', () => ({
   useCopilot: (skillId: string | null, workspaceRoot?: string | null) => {
     mocks.useCopilotCalls.push({ skillId, workspaceRoot })

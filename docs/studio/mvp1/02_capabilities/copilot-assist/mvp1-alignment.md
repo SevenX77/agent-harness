@@ -41,13 +41,13 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **测试点**：问"为啥编译失败"→读 skill-spec 给 ground-truth；帮写领域 prompt→读 skill 文件不空谈；违 FROZEN→compile 报 `F-v3`→主动给修法。
 - **归属**：platform engine(skill-spec 知识源)；触发粒度待细化(见 gaps)。
 
-### F4 @mention + 隐式上下文 + 上下文回显
-- **机制**：① 显式 @ → 输入框弹 MentionMenu(files/phases/dots/errors/trace，键盘导航，模糊过滤 <50ms)；② 自动 mention(点画布节点→@phase / 点 dot→@黑板 / 点文件→@file)；③ 隐式上下文(view/选中/活跃文件/dirty buffer)随消息发；④ 后端 4 层 resolver(skill 基本/选中节点/@内容/lint错误)→XML 喂 prompt；⑤ 发送后**第一条**回显本轮注入清单。
+### F4 @mention + 显式请求上下文 + 上下文回显
+- **机制**：① 显式 @ → 输入框弹 MentionMenu(files/phases/dots/errors/trace，键盘导航，模糊过滤 <50ms)；② 只有用户在 composer 中选择/保留的 @mention 随本次 Copilot 消息发送；③ 禁止点画布节点/dot/文件后自动把对象送给 Copilot，禁止隐式 view/选中/dirty buffer 后台同步；④ 后端 resolver 只处理当前 WS 消息 payload 中的显式 mentions/attachments/judge context；⑤ 发送后**第一条**回显本轮实际注入清单。
 - **决策+动机**：**composer = 输入框内联彩色 pill**(需 tiptap 类富文本，react-mentions overlay 渲染不了真 DOM pill)；**dot=黑板**(对齐 trace 走查，取代旧 @edge_context 边语义)；**上下文回显插在 agent 开跑前、第一条**(可折叠、点开看实际内容/文档，反 hidden prompt magic，与 F1"不省略"一套)。
 - **原话**：「输入框内联彩色 pill」/「能否插入在 agent 开始任务的前面... user输入完按发送后, 第一条弹出的就是这个信息, 可折叠, 可查看具体内容或文档」
 - **status**：现纯空壳(占位符 + disabled "Add context")= target。
-- **测试点**：输入 `@plan`→菜单过滤高亮、选中成内联 pill 可删；点节点/dot/文件自动 @；dirty 文件 @ 拿草稿；发送后第一条=注入清单点开看内容；大工程菜单 <50ms / 超 150K 截断告警。
-- **归属**：region [[copilot]](菜单/pill/回显)；自动触发跨 [[canvas]]/[[editor]]/[[timeline]]。
+- **测试点**：输入 `@plan`→菜单过滤高亮、选中成内联 pill 可删；点击画布节点/dot/文件本身不触发后端 Copilot 请求；发送消息时 payload 只包含 composer 内显式 mentions；发送后第一条=注入清单点开看内容；大工程菜单 <50ms / 超 150K 截断告警。
+- **归属**：region [[copilot]](菜单/pill/回显)；可提名对象来自 [[canvas]]/[[editor]]/[[timeline]]，但提名只由 composer 内显式选择触发。
 
 ### F5 Copilot 自写 + diff 气泡 + Bash 审批
 - **机制**：MVP1 明确允许 Copilot SDK `Read/Write/Edit` 在当前 workspace/cwd/add_dirs 范围内自行读写文件；Studio 不要求把 Write/Edit 拦成 Rust 写入或 `patch_proposed` 才算合规。工具事件仍要回显，能拿到前后内容时展示 diff 气泡 / Open Compare；写后 compile/predict/run 使用磁盘上的最新结果。Bash 命令仍逐条审批卡(human-in-the-loop)，因为 Bash 可执行任意 shell 与重定向写入。
@@ -83,7 +83,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 ---
 
 ## 3. 接口契约
-- **copilot WS（① 前端 → ③a studio backend）**：`WS /api/skills/{skill_id}/copilot/ws`（现 `routers/copilot.py:34`）。请求(MVP1 扩展)`{user_message, model_override?, mentions[], implicit_context, attachments[]（图片 base64,新）, request_id}`；响应事件 union `text_delta | thinking_delta(新) | tool_use_start | tool_use_result | patch_applied(新) | context_resolved(新) | tool_approval_request(新) | error | done`。字段 SSOT = `apps/studio/backend/app/models/copilot.py`(实现时扩展)。错误→`error` 事件不甩 raw traceback。
+- **copilot WS（① 前端 → ③a studio backend）**：`WS /api/skills/{skill_id}/copilot/ws`（现 `routers/copilot.py:34`）。请求(MVP1 扩展)`{user_message, model_override?, mentions[], attachments[]（图片 base64,新）, request_id}`；响应事件 union `text_delta | thinking_delta(新) | tool_use_start | tool_use_result | patch_applied(新) | context_resolved(新) | tool_approval_request(新) | error | done`。字段 SSOT = `apps/studio/backend/app/models/copilot.py`(实现时扩展)。错误→`error` 事件不甩 raw traceback。
 - **调用 SDK（③a → claude_agent_sdk）**：copilot 自身 = `ClaudeSDKClient`；block 类型 SSOT = `claude_agent_sdk/types.py`(Text/Thinking/ToolUse/ToolResult/ServerTool)；MVP1 允许 SDK `Read/Write/Edit` 自行读写 workspace；`can_use_tool`/PreToolUse 主要用于 Bash 审批与必要的 workspace 边界控制。
 - **Copilot Write/Edit 例外（D12 carve-out）**：Copilot SDK 工具 runner 的 Write/Edit 不走 [[native-fs]] 也不算 D12 违规；Studio 负责事件回显、diff/summary、必要时刷新编辑器视图。D12 仍适用于 Studio 自有写入链路（editor save、graph serialize、test_inputs/golden/runs/artifacts、publish package 等）。
 - **跨能力边界(数据流归别处)**：judge/打磨→[[golden-eval]]；commit-msg→[[publish]]；模型选择→[[studio-settings]]；role→route→[[gateway]] `resolve_routes("copilot_chat")`。

@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from app.models.audit import AuditResult
 from app.models.compare import CompareResult
-from app.models.copilot import (
-    ContextUpdateRequest,
-    ContextUpdateResponse,
-)
 from app.models.errors import ErrorResponse, LintError
 from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.golden import GoldenBaseline, SetGoldenReq
@@ -46,8 +42,6 @@ __all__ = [
     "BatchRunResponse",
     "BatchRunStatus",
     "CompareResult",
-    "ContextUpdateRequest",
-    "ContextUpdateResponse",
     "CreateSkillReq",
     "ErrorResponse",
     "GoldenBaseline",

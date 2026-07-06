@@ -755,7 +755,7 @@ pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<Read
 }
 
 enum AllowedDeleteTarget {
-    TestInputJson,
+    ImportPath,
     GoldenBaselineDir,
     PhaseDir,
     // Root `subgraph/<child_skill_name>` directory — the standard nested child-graph
@@ -784,13 +784,8 @@ fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
         }
     }
 
-    if parts.len() == 3 && parts[0] == ".workspace" && parts[1] == "import_files" {
-        let file_name = &parts[2];
-        if let Some(stem) = file_name.strip_suffix(".json") {
-            if is_safe_test_input_name(stem) {
-                return Ok(AllowedDeleteTarget::TestInputJson);
-            }
-        }
+    if parts.len() >= 3 && parts[0] == ".workspace" && parts[1] == "import_files" {
+        return Ok(AllowedDeleteTarget::ImportPath);
     }
 
     if parts.len() == 3
@@ -810,21 +805,6 @@ fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
     }
 
     Err(format!("delete path not allowed: {trimmed}"))
-}
-
-fn is_safe_test_input_name(name: &str) -> bool {
-    if name.is_empty() || name.len() > 100 {
-        return false;
-    }
-    let mut chars = name.chars();
-    let first = match chars.next() {
-        Some(value) => value,
-        None => return false,
-    };
-    if !first.is_ascii_alphanumeric() {
-        return false;
-    }
-    chars.all(|value| value.is_ascii_alphanumeric() || value == '.' || value == '_' || value == '-')
 }
 
 fn is_safe_golden_baseline_id(id: &str) -> bool {
@@ -882,11 +862,16 @@ pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<()
     })?;
     let file_type = metadata.file_type();
     match allowed {
-        AllowedDeleteTarget::TestInputJson => {
-            if !file_type.is_file() {
-                return Err(format!("delete path must be a file: {path}"));
+        AllowedDeleteTarget::ImportPath => {
+            if file_type.is_dir() {
+                std::fs::remove_dir_all(&target)
+                    .map_err(|error| format!("cannot remove dir: {error}"))
+            } else if file_type.is_file() {
+                std::fs::remove_file(&target)
+                    .map_err(|error| format!("cannot remove file: {error}"))
+            } else {
+                Err(format!("delete path must be a file or directory: {path}"))
             }
-            std::fs::remove_file(&target).map_err(|error| format!("cannot remove file: {error}"))
         }
         AllowedDeleteTarget::GoldenBaselineDir
         | AllowedDeleteTarget::PhaseDir
@@ -1566,8 +1551,14 @@ pub fn create_skill_workspace_impl(
         std::fs::write(&target, content)
             .map_err(|error| format!("cannot write scaffold file {rel_path}: {error}"))?;
     }
-    std::fs::create_dir_all(skill_dir.join(".workspace"))
-        .map_err(|error| format!("cannot create .workspace dir: {error}"))?;
+    std::fs::create_dir_all(
+        skill_dir
+            .join(".workspace")
+            .join("import_files")
+            .join(".phase")
+            .join("init"),
+    )
+    .map_err(|error| format!("cannot create runtime import layout: {error}"))?;
 
     initialize_skill_repository(&skill_dir, config_dir)?;
 
@@ -1971,8 +1962,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".workspace")).unwrap();
         symlink_path(&outside, &root.join(".workspace/import_files"));
 
-        let error = ensure_final_parent_inside_workspace(&root, ".workspace/import_files/case.json")
-            .expect_err("final parent symlink escape rejected");
+        let error =
+            ensure_final_parent_inside_workspace(&root, ".workspace/import_files/case.json")
+                .expect_err("final parent symlink escape rejected");
 
         assert!(
             error.contains("escapes workspace"),
@@ -2255,7 +2247,7 @@ mod tests {
         )
         .unwrap();
 
-            delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/import_files/case.json")
+        delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/import_files/case.json")
             .expect("delete test input file");
         delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/golden/run-1")
             .expect("delete golden baseline dir");
@@ -2353,7 +2345,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_workspace_path_refuses_arbitrary_dirs_and_files() {
+    fn delete_workspace_path_allows_nested_import_dirs_but_refuses_source_paths() {
         let root = temp_root("delete-arbitrary");
         std::fs::create_dir_all(root.join(".workspace/import_files/nested")).unwrap();
         std::fs::create_dir_all(root.join("phases/draft/nested")).unwrap();
@@ -2361,19 +2353,14 @@ mod tests {
         std::fs::write(root.join("phases/draft/nested/child.md"), "child").unwrap();
         std::fs::write(root.join("GRAPH.md"), "graph").unwrap();
 
-        let dir_error =
-            delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/import_files/nested")
-                .expect_err("arbitrary directory delete rejected");
+        delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/import_files/nested")
+            .expect("nested import directory delete allowed");
         let file_error = delete_workspace_path_impl(root.to_str().unwrap(), "GRAPH.md")
             .expect_err("arbitrary file delete rejected");
         let nested_phase_error =
             delete_workspace_path_impl(root.to_str().unwrap(), "phases/draft/nested")
                 .expect_err("nested phase directory delete rejected");
 
-        assert!(
-            dir_error.contains("not allowed"),
-            "unexpected dir error: {dir_error}"
-        );
         assert!(
             file_error.contains("not allowed"),
             "unexpected file error: {file_error}"
@@ -2382,7 +2369,7 @@ mod tests {
             nested_phase_error.contains("not allowed"),
             "unexpected nested phase error: {nested_phase_error}"
         );
-        assert!(root.join(".workspace/import_files/nested").exists());
+        assert!(!root.join(".workspace/import_files/nested").exists());
         assert!(root.join("phases/draft/nested").exists());
         assert!(root.join("GRAPH.md").exists());
         let _ = std::fs::remove_dir_all(&root);
@@ -2943,8 +2930,9 @@ mod tests {
             "no logic-phase actions dir"
         );
 
-        // .workspace dir and .gitignore.
+        // .workspace runtime import layout and .gitignore.
         assert!(root.join(".workspace").is_dir());
+        assert!(root.join(".workspace/import_files/.phase/init").is_dir());
         assert_eq!(
             std::fs::read_to_string(root.join(".gitignore")).unwrap(),
             "/.workspace/*\n!/.workspace/golden/\n/.workspace/local_settings.json\n"

@@ -321,13 +321,12 @@ export async function selectFile(defaultDirectory?: string | null): Promise<stri
   }
 }
 
-/**
- * Native OS picker for the io import. One "Import…" entry = a folder picker: a
- * folder already imports every file under it (PM 2026-07-03), so there is no
- * separate single-file picker.
- */
 export async function selectImportFolder(defaultDirectory?: string | null): Promise<string | null> {
   return selectSkillDirectory(defaultDirectory)
+}
+
+export async function selectImportFile(defaultDirectory?: string | null): Promise<string | null> {
+  return selectFile(defaultDirectory)
 }
 
 export interface SkillWorkspaceResult {

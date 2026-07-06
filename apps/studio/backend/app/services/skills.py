@@ -612,12 +612,25 @@ def _validate_runtime_inputs_against_graph_input_schema(
     root_bindings = inputs.get("root") if isinstance(inputs, dict) else None
     if not isinstance(root_bindings, dict):
         root_bindings = {}
+    raw_conflicts = inputs.get("conflicts") if isinstance(inputs, dict) else None
+    root_conflicts = raw_conflicts.get("root") if isinstance(raw_conflicts, dict) else None
+    if not isinstance(root_conflicts, list):
+        root_conflicts = []
+    conflicts_by_field = {
+        conflict.get("field"): conflict
+        for conflict in root_conflicts
+        if isinstance(conflict, dict) and isinstance(conflict.get("field"), str)
+    }
 
     errors: list[CompileError] = []
     required = raw_inputs.get("required")
     if isinstance(required, list):
         for field in required:
-            if isinstance(field, str) and field not in root_bindings:
+            if not isinstance(field, str):
+                continue
+            if field in conflicts_by_field:
+                errors.append(_conflict_runtime_input_error(field, conflicts_by_field[field]))
+            elif field not in root_bindings:
                 errors.append(_missing_runtime_input_error(field))
 
     for field, binding in root_bindings.items():
@@ -667,6 +680,22 @@ def _missing_runtime_input_error(field: str) -> CompileError:
             ".workspace/import_files before predict/run."
         ),
         error_code="STUDIO_RUNTIME_INPUT_MISSING",
+    )
+
+
+def _conflict_runtime_input_error(field: str, conflict: dict[str, Any]) -> CompileError:
+    candidates = conflict.get("candidates")
+    count = len(candidates) if isinstance(candidates, list) else 0
+    return CompileError(
+        file=".workspace/runtime_config.json",
+        field=field,
+        severity="fatal",
+        message=(
+            f"Graph input schema field '{field}' has multiple runtime import candidates"
+            f" ({count}). Keep only one matching field under .workspace/import_files "
+            "or rename the extra candidates."
+        ),
+        error_code="STUDIO_RUNTIME_INPUT_CONFLICT",
     )
 
 

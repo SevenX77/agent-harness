@@ -25,6 +25,7 @@ supersedes:
 - `.workspace/runtime_config.json` is the single runtime configuration layer for a Studio skill. It contains import-file bindings, runtime output artifact specs, node custom model params, compare LLM candidates, and other runtime-only configuration. It must not contain `golden` or `ui`.
 - Studio refreshes `.workspace/runtime_config.json` from `.workspace/import_files/` before lint/compile/run/predict and whenever the import file tree or import file contents change. Compile/lint read this file so missing or invalid runtime inputs are blocked before execution.
 - Runtime file imports live only under `.workspace/import_files/`: Input/Test Inputs files at the root, phase-node files under `.workspace/import_files/.phase/<phase_id>/`. The `.phase/` sentinel keeps node ids from colliding with user-created root folders.
+- `.workspace/import_files/.phase/` is an exact mirror of the current `GRAPH.md` phase registry. Skill initialization and graph topology changes create missing phase dirs and delete stale phase dirs. `history/` and `.history/` under import files are archive folders and are never runtime inputs.
 - At run/predict, `runtime_config.inputs.root` is materialized into the initial GRAPH input blackboard, and `runtime_config.inputs.phases.<phase_id>` is injected immediately before that phase executes. Imported file paths never appear in `GRAPH.md` or phase Markdown.
 - A run or predict writes an immutable snapshot at `.workspace/runs/<run_id>/runtime_config.snapshot.json`; replay/debug reads the snapshot, not a moving live config.
 
@@ -82,6 +83,7 @@ supersedes:
       <input_id>.json
       <input_import_name>/
         ...
+      # history/ and .history/ folders are ignored archives.
       .phase/
         <phase_id>/
           <node_import_name>/
@@ -103,7 +105,7 @@ supersedes:
 - `run_skill` / `predict_skill` 的输出统一进入 `<workspace_dir>/runs/<run_id>/`。
 - `run_skill` / `predict_skill` 必须在 `<workspace_dir>/runs/<run_id>/runtime_config.snapshot.json` 保存当次运行配置快照。
 - `evaluate_golden_baseline` 读写 `<workspace_dir>/golden/<baseline_id>/`。
-- 可复用输入样本、Input 导入文件和 Test Inputs 新建文件统一放在 `<workspace_dir>/import_files/` 根目录；节点导入文件放在 `<workspace_dir>/import_files/.phase/<phase_id>/` 下。
+- 可复用输入样本、Input 导入文件和 Test Inputs 新建文件统一放在 `<workspace_dir>/import_files/` 根目录；节点导入文件放在 `<workspace_dir>/import_files/.phase/<phase_id>/` 下。`<workspace_dir>/import_files/.phase/` 必须与当前 graph phase 注册表强同步；新增 phase 创建空目录，删除/重命名 phase 清理旧目录。`history/` 与 `.history/` 永不参与 runtime import 扫描。
 - Predict 没有专属 `predict/` 或 `latest_predict.json`。
 - golden 是会失效的临时优化产物，不能写进 `phases/<phase_id>/`，也不能作为 skill 源码字段参与 compile。
 

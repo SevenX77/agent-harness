@@ -36,6 +36,7 @@ interface PanelsProps {
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
   onRuntimeArtifactsSave?: (artifacts: RuntimeArtifactRow[]) => Promise<string | null>
+  onRuntimeConfigRefresh?: () => Promise<unknown> | unknown
   onPhaseFileSave?: (
     payload: { path: string; content: string; expectedHash: string },
     target?: ChildSaveTarget,
@@ -93,6 +94,7 @@ export function Panels({
   selectedTestInputId,
   onSelectTestInput,
   onRuntimeArtifactsSave,
+  onRuntimeConfigRefresh,
   onPhaseFileSave,
   onPhaseRename,
   onActionCreate,
@@ -212,6 +214,7 @@ export function Panels({
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
         onRuntimeArtifactsSave={onRuntimeArtifactsSave}
+        onRuntimeConfigRefresh={onRuntimeConfigRefresh}
         onFileOpen={onFileOpen}
         onPhaseFileSave={onPhaseFileSave}
       />

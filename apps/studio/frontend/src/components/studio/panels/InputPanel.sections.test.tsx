@@ -130,12 +130,13 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
     expect(html).not.toContain("Artifact path for")
   })
 
-  it("graph overview renders the inline input config entry + artifact list rows", () => {
+  it("graph overview renders the always-expanded input config + artifact list rows", () => {
     const html = renderToStaticMarkup(
       <InputPanel skillId="demo" skillDetail={detail()} runtimeConfig={runtimeConfig()} />,
     )
-    // inline Configure entry (Collapsible trigger) replaces the old modal button
-    expect(html).toContain("Configure input")
+    expect(html).toContain("Input configuration")
+    expect(html).not.toContain("Configure input")
+    expect(html).not.toContain("Save input config")
     expect(html).toContain("Configure output artifacts")
     // artifacts list: stem + mode (graph overview shows both sides)
     expect(html).toContain("story_framework")
@@ -148,7 +149,8 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
       <InputPanel skillId="demo" skillDetail={detail()} runtimeConfig={runtimeConfig()} ioBoundary="input" />,
     )
     // Input boundary: input config + test inputs, NO output/artifacts section.
-    expect(inputBoundary).toContain("Configure input")
+    expect(inputBoundary).toContain("Input configuration")
+    expect(inputBoundary).not.toContain("Configure input")
     expect(inputBoundary).toContain('data-mock="test-inputs"')
     expect(inputBoundary).not.toContain("output artifacts")
 

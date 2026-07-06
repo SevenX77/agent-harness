@@ -44,6 +44,20 @@ def test_scan_json_file_yields_top_level_fields(client: TestClient, tmp_path: Pa
     assert fields["validation"]["type"] == "object"
 
 
+def test_scan_json_file_accepts_utf8_bom(client: TestClient, tmp_path: Path) -> None:
+    target = tmp_path / "windows_export.json"
+    target.write_text(
+        json.dumps({"chapters": [{"title": "A"}], "topic": "manual verify"}),
+        encoding="utf-8-sig",
+    )
+
+    payload = _scan(client, target)
+
+    fields = {f["name"]: f for f in _entry(payload, "windows_export.json")["fields"]}
+    assert fields["chapters"]["type"] == "array"
+    assert fields["topic"]["type"] == "string"
+
+
 def test_scan_folder_lists_files_and_text_candidates(
     client: TestClient, tmp_path: Path
 ) -> None:
@@ -149,6 +163,25 @@ def test_scan_takes_latest_version_and_ignores_history(
     assert entry["stem"] == "global"
 
 
+def test_scan_ignores_dot_history(
+    client: TestClient, tmp_path: Path
+) -> None:
+    folder = tmp_path / "story_framework"
+    folder.mkdir()
+    (folder / "global_latest_20260414_124706.json").write_text(
+        json.dumps({"scenes": []}), encoding="utf-8"
+    )
+    dot_history = folder / ".history"
+    dot_history.mkdir()
+    (dot_history / "global_v20260414_065740.json").write_text("{}", encoding="utf-8")
+
+    payload = _scan(client, folder)
+
+    names = [e["name"] for e in payload["entries"]]
+    assert ".history" not in names
+    assert [e["name"] for e in payload["entries"]] == ["global_latest_20260414_124706.json"]
+
+
 def test_scan_recurses_one_level_into_subfolders(
     client: TestClient, tmp_path: Path
 ) -> None:
@@ -202,6 +235,8 @@ def test_import_copies_folder_into_workspace_import_files_root(
         )
     (source / "history").mkdir()
     (source / "history" / "chapter_001_v0.json").write_text("{}", encoding="utf-8")
+    (source / ".history").mkdir()
+    (source / ".history" / "chapter_002_v0.json").write_text("{}", encoding="utf-8")
 
     resp = client.post(IMPORT_URL, json={"path": str(source)})
     assert resp.status_code == 200, resp.text
@@ -212,6 +247,7 @@ def test_import_copies_folder_into_workspace_import_files_root(
     copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / "abc_segmentation"
     assert (copied / "chapter_001_latest_x.json").exists()
     assert not (copied / "history").exists()
+    assert not (copied / ".history").exists()
     assert body["entries"][0]["kind"] == "batch"
     assert body["entries"][0]["numbers"] == [1, 2]
     assert body["entries"][0]["dir"] == "import_files/abc_segmentation"
@@ -223,25 +259,25 @@ def test_import_copies_node_file_under_node_import_files(
     source = tmp_path / "quality_report.json"
     source.write_text(json.dumps({"project_id": "013"}), encoding="utf-8")
 
-    resp = client.post(IMPORT_URL, json={"path": str(source), "name": "material", "node_id": "segment"})
+    resp = client.post(IMPORT_URL, json={"path": str(source), "name": "material", "node_id": "setup"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    assert body["dir"] == "import_files/.phase/segment/material"
+    assert body["dir"] == "import_files/.phase/setup/material"
     skills_dir, _ = studio_roots
-    copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / ".phase" / "segment" / "material"
+    copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / ".phase" / "setup" / "material"
     assert (copied / "quality_report.json").exists()
     entry = body["entries"][0]
     assert entry["name"] == "quality_report.json"
-    assert entry["path"] == "import_files/.phase/segment/material/quality_report.json"
+    assert entry["path"] == "import_files/.phase/setup/material/quality_report.json"
     runtime_config = json.loads(
         (skills_dir / SKILL_ID / ".workspace" / "runtime_config.json").read_text(encoding="utf-8")
     )
     assert "golden" not in runtime_config
     assert "ui" not in runtime_config
-    assert runtime_config["inputs"]["phases"]["segment"]["project_id"]["json_path"] == ["project_id"]
-    assert runtime_config["inputs"]["phases"]["segment"]["project_id"]["path"] == (
-        "import_files/.phase/segment/material/quality_report.json"
+    assert runtime_config["inputs"]["phases"]["setup"]["project_id"]["json_path"] == ["project_id"]
+    assert runtime_config["inputs"]["phases"]["setup"]["project_id"]["path"] == (
+        "import_files/.phase/setup/material/quality_report.json"
     )
 
 
@@ -269,7 +305,7 @@ def test_runtime_config_get_refreshes_import_manifest(
     root_dir = skill_dir / ".workspace" / "import_files"
     root_dir.mkdir(parents=True)
     (root_dir / "brief.md").write_text("hello", encoding="utf-8")
-    phase_dir = skill_dir / ".workspace" / "import_files" / ".phase" / "segment"
+    phase_dir = skill_dir / ".workspace" / "import_files" / ".phase" / "setup"
     phase_dir.mkdir(parents=True)
     (phase_dir / "chapters.json").write_text(json.dumps([{"chapter_number": 1}]), encoding="utf-8")
 
@@ -282,10 +318,83 @@ def test_runtime_config_get_refreshes_import_manifest(
     assert body["inputs"]["root"]["brief"]["path"] == "import_files/brief.md"
     assert body["inputs"]["root"]["brief"]["value_type"] == "string"
     assert body["inputs"]["root"]["brief"]["content_type"] == "text/markdown"
-    assert body["inputs"]["manifest"]["phases"]["segment"][0]["name"] == "chapters.json"
-    assert body["inputs"]["phases"]["segment"]["chapters"]["path"] == (
-        "import_files/.phase/segment/chapters.json"
+    assert body["inputs"]["manifest"]["phases"]["setup"][0]["name"] == "chapters.json"
+    assert body["inputs"]["phases"]["setup"]["chapters"]["path"] == (
+        "import_files/.phase/setup/chapters.json"
     )
+
+
+def test_import_rejects_unknown_node_id(
+    client: TestClient, tmp_path: Path
+) -> None:
+    source = tmp_path / "quality_report.json"
+    source.write_text(json.dumps({"project_id": "013"}), encoding="utf-8")
+
+    resp = client.post(IMPORT_URL, json={"path": str(source), "name": "material", "node_id": "segment"})
+
+    assert resp.status_code == 422
+    assert "unknown node id" in resp.text
+
+
+def test_runtime_config_get_syncs_phase_import_dirs_to_graph(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    skills_dir, _ = studio_roots
+    skill_dir = skills_dir / SKILL_ID
+    phase_root = skill_dir / ".workspace" / "import_files" / ".phase"
+    (phase_root / "obsolete").mkdir(parents=True)
+    (phase_root / "obsolete" / "stale.json").write_text("{}", encoding="utf-8")
+
+    resp = client.get(f"/api/skills/{SKILL_ID}/runtime-config")
+    assert resp.status_code == 200, resp.text
+
+    assert (phase_root / "setup").is_dir()
+    assert not (phase_root / "obsolete").exists()
+
+
+def test_runtime_config_ignores_dot_history_and_reports_duplicate_conflicts(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    skills_dir, _ = studio_roots
+    skill_dir = skills_dir / SKILL_ID
+    root_dir = skill_dir / ".workspace" / "import_files"
+    root_dir.mkdir(parents=True)
+    (root_dir / "a.json").write_text(json.dumps({"input_text": "first"}), encoding="utf-8")
+    (root_dir / "b.json").write_text(json.dumps({"input_text": "second"}), encoding="utf-8")
+    dot_history = root_dir / ".history"
+    dot_history.mkdir()
+    (dot_history / "archived.json").write_text(json.dumps({"input_text": "old"}), encoding="utf-8")
+
+    resp = client.get(f"/api/skills/{SKILL_ID}/runtime-config")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert [entry["name"] for entry in body["inputs"]["manifest"]["root"]] == ["a.json", "b.json"]
+    assert "input_text" not in body["inputs"]["root"]
+    conflicts = body["inputs"]["conflicts"]["root"]
+    assert conflicts == [
+        {
+            "field": "input_text",
+            "normalized_field": "input_text",
+            "scope": "root",
+            "candidates": [
+                {
+                    "path": "import_files/a.json",
+                    "type": "string",
+                    "value_type": "json",
+                    "content_type": "application/json",
+                    "json_path": ["input_text"],
+                },
+                {
+                    "path": "import_files/b.json",
+                    "type": "string",
+                    "value_type": "json",
+                    "content_type": "application/json",
+                    "json_path": ["input_text"],
+                },
+            ],
+        }
+    ]
 
 
 def test_runtime_config_artifacts_put_updates_unified_runtime_config(

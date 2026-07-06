@@ -479,6 +479,17 @@ export function runtimeFileFieldsInImportScope(
   return runtimeFileFieldsFromEntries(nodeId ? manifest.phases[nodeId] ?? [] : manifest.root ?? [])
 }
 
+export function runtimeInputConflictsInImportScope(
+  runtimeConfig: RuntimeConfig | null | undefined,
+  nodeId: string | null,
+) {
+  const conflicts = runtimeConfig?.inputs?.conflicts
+  if (!conflicts) {
+    return []
+  }
+  return nodeId ? conflicts.phases?.[nodeId] ?? [] : conflicts.root ?? []
+}
+
 /**
  * Field universe at the Output pseudo-node: root io.inputs plus every phase's
  * declared outputs (topology order, later phases overwrite same names) — the

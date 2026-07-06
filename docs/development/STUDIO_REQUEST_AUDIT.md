@@ -223,7 +223,6 @@ FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret
 FRONTEND GET /api/llm/role-test-jobs/{job_id}
 FRONTEND GET /api/llm/roles
 FRONTEND GET /api/llm/roles/test-results
-FRONTEND GET /api/llm/roles/{role_name}
 FRONTEND GET /api/settings
 FRONTEND GET /api/skills/{skill_id}
 FRONTEND GET /api/skills/{skill_id}/compare-candidates
@@ -331,8 +330,8 @@ BACKEND GET /api/llm/registry | ok | specific | Canonical joined registry projec
 BACKEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | specific | Explicit local secret reveal for API Keys hydration; frontend dedupes and reuses known secrets after exact registry writes.
 BACKEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped in-memory role-test job status read; backend tests cover start/read/progress and it emits no broad truth refresh.
 BACKEND GET /api/llm/roles | ok | specific | Aggregate roles cold-load projection; backend returns roles_data plus the joined registry snapshot from the same roles/credentials state.
-BACKEND GET /api/llm/roles/test-results | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/roles/test-results | ok | specific | Persisted last-known role-test result projection; backend read is scoped, emits no revalidation event, and tests cover empty/result re-projection.
+BACKEND GET /api/llm/roles/{role_name} | ok | specific | Scoped backend role read; frontend no longer exposes a caller, and backend tests cover materialized single-role response behavior.
 BACKEND GET /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -369,8 +368,8 @@ BACKEND POST /api/llm/endpoints/{endpoint_id}/models/test | ok | specific | Expl
 BACKEND POST /api/llm/endpoints/{endpoint_id}/test | ok | specific | Explicit endpoint Test command; backend returns EndpointTestResponse with canonical registry projection and scoped endpoint metadata.
 BACKEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | ok | specific | Explicit bundle Test command; returns a scoped job id and does not mutate broad registry/roles truth.
 BACKEND POST /api/llm/model-groups/test-jobs | ok | specific | Explicit compare-candidate Test command; returns a scoped transient job id and does not persist role truth.
-BACKEND POST /api/llm/roles/{role_name}/apply-profile | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/roles/{role_name}/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/roles/{role_name}/apply-profile | ok | specific | Explicit profile-apply command; backend writes roles truth, emits roles_changed, and tests cover conflict/runtime-setting projection.
+BACKEND POST /api/llm/roles/{role_name}/test | ok | specific | Explicit role test command; backend probes only the persisted role targets and returns scoped diagnostics without refreshing broad roles/registry truth.
 BACKEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role Test command; returns a scoped job id and progress is read only through /role-test-jobs/{job_id}.
 BACKEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
 BACKEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
@@ -417,7 +416,7 @@ BACKEND POST /shutdown | internal | none | Backend-owned infrastructure endpoint
 BACKEND PUT /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/llm/registry/endpoints | ok | specific | Explicit endpoint save command; backend returns the joined canonical RegistryResponse so callers do not perform write-after-read refresh.
 BACKEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; backend emits roles_changed and returns a roles_data + registry projection snapshot instead of requiring write-after-read refresh.
-BACKEND PUT /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/roles/{role_name} | ok | specific | Explicit scoped role replace used by backend/materializer tests; backend writes roles truth, emits roles_changed, and returns the materialized role.
 BACKEND PUT /api/llm/routes/{route_id} | ok | specific | Explicit route metadata update command; backend returns the joined canonical RegistryResponse.
 BACKEND PUT /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -442,7 +441,6 @@ FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | shared | AP
 FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling starts only after an explicit Test command returns a job id; pollers do not refresh registry/roles/settings truth.
 FRONTEND GET /api/llm/roles | ok | shared | Cached read path is guarded against mount, focus, and reconnect refetch; roles response carries registry projection data, so cold loads do not perform a second broad registry read.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
-FRONTEND GET /api/llm/roles/{role_name} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
 FRONTEND GET /api/skills/{skill_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
@@ -471,7 +469,7 @@ FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test | ok | specific | Exp
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/test | ok | specific | Explicit endpoint Test/re-probe command; client projects returned registry and controller tests guard against a second getCredentials round trip.
 FRONTEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | ok | specific | Explicit bundle Test button command; lifecycle tests cover start/poll/settle through the scoped job mirror.
 FRONTEND POST /api/llm/model-groups/test-jobs | ok | specific | Explicit compare-candidate Test command from Properties; node selection tests cover that selection itself does not start test jobs, and returned jobs are polled by id.
-FRONTEND POST /api/llm/roles/{role_name}/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/roles/{role_name}/test | ok | specific | Explicit legacy role Test command; client sends only the command and consumes scoped diagnostics with no follow-up registry/roles read.
 FRONTEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role/Copilot Test button command; tests cover validation gating, start/poll/settle, and no job start when validation fails.
 FRONTEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; client projects returned registry and returns the updated route to the caller.
 FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; client projects returned registry and returns the updated route to the caller.

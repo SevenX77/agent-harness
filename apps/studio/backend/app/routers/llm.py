@@ -2510,7 +2510,15 @@ async def apply_model_profile(
     )
     roles = dict(data.roles)
     roles[role_name] = updated
-    return _save_roles_with_active_routes(data.model_copy(update={"roles": roles})).roles[role_name]
+    saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
+    await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="apply_model_profile",
+        message="Applied one LLM model profile to a role.",
+        changes={"role_name": role_name, "model_profile_id": request.model_profile_id},
+    )
+    return saved.roles[role_name]
 
 
 def _project_endpoint_provider_identities(

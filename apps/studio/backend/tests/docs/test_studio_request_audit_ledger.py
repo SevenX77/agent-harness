@@ -16,7 +16,9 @@ API_CALL_RE = re.compile(
 )
 WS_URL_RE = re.compile(r"\bwsUrl\(\s*([`'\"])(.*?)\1", re.DOTALL)
 LEDGER_RE = re.compile(r"```studio-request-audit-ledger\n(?P<body>.*?)\n```", re.DOTALL)
+VERDICTS_RE = re.compile(r"```studio-request-audit-verdicts\n(?P<body>.*?)\n```", re.DOTALL)
 TEMPLATE_EXPR_RE = re.compile(r"\$\{([^}]+)\}")
+VERDICT_STATUSES = {"ok", "partial", "bad", "internal", "review"}
 
 
 def _join_paths(prefix: str, path: str) -> str:
@@ -143,13 +145,62 @@ def _ledger_keys() -> set[str]:
     }
 
 
+def _verdict_keys() -> set[str]:
+    text = AUDIT_DOC.read_text(encoding="utf-8")
+    match = VERDICTS_RE.search(text)
+    assert match is not None, "STUDIO_REQUEST_AUDIT.md must contain a studio-request-audit-verdicts code fence."
+
+    verdicts: set[str] = set()
+    invalid: list[str] = []
+    for line_number, raw_line in enumerate(match.group("body").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) != 4:
+            invalid.append(f"line {line_number}: expected 4 pipe-delimited fields")
+            continue
+        key, status, guard, rationale = parts
+        if status not in VERDICT_STATUSES:
+            invalid.append(f"line {line_number}: invalid status {status!r}")
+        if guard not in {"shared", "specific", "none"}:
+            invalid.append(f"line {line_number}: invalid guard {guard!r}")
+        if not rationale:
+            invalid.append(f"line {line_number}: rationale is required")
+        verdicts.add(key)
+    assert not invalid, "Invalid studio-request-audit-verdicts rows:\n" + "\n".join(invalid)
+    return verdicts
+
+
 def test_studio_request_audit_ledger_covers_current_backend_and_frontend_requests() -> None:
     inventory = _backend_route_keys() | _frontend_route_keys()
     ledger = _ledger_keys()
 
     missing = sorted(inventory - ledger)
+    stale = sorted(ledger - inventory)
     assert not missing, (
         "Every Studio backend route and frontend request must be listed in "
         "docs/development/STUDIO_REQUEST_AUDIT.md's studio-request-audit-ledger block. Missing:\n"
         + "\n".join(missing)
+    )
+    assert not stale, (
+        "docs/development/STUDIO_REQUEST_AUDIT.md's studio-request-audit-ledger block must not "
+        "keep stale request keys. Stale:\n" + "\n".join(stale)
+    )
+
+
+def test_studio_request_audit_verdicts_cover_current_backend_and_frontend_requests() -> None:
+    inventory = _backend_route_keys() | _frontend_route_keys()
+    verdicts = _verdict_keys()
+
+    missing = sorted(inventory - verdicts)
+    stale = sorted(verdicts - inventory)
+    assert not missing, (
+        "Every Studio backend route and frontend request must have a request-policy verdict in "
+        "docs/development/STUDIO_REQUEST_AUDIT.md's studio-request-audit-verdicts block. Missing:\n"
+        + "\n".join(missing)
+    )
+    assert not stale, (
+        "docs/development/STUDIO_REQUEST_AUDIT.md's studio-request-audit-verdicts block must not "
+        "keep stale request keys. Stale:\n" + "\n".join(stale)
     )

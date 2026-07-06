@@ -731,7 +731,7 @@ export function CopilotPanel({
                     className="studio-canvas-input-surface shrink-0"
                   >
                     <SquareTerminal data-icon="inline-start" />
-                    Open in
+                    Open in CLI
                     <ChevronDown className="size-3" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>

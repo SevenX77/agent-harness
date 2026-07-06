@@ -15,8 +15,8 @@ vi.mock("../api/client", () => ({
   fetcher: mocks.fetcher,
 }))
 
-function HookHost(): null {
-  useTemplates()
+function HookHost({ enabled = true }: { enabled?: boolean }): null {
+  useTemplates({ enabled })
   return null
 }
 
@@ -73,5 +73,87 @@ describe("useTemplates", () => {
     })
 
     expect(mocks.fetcher).not.toHaveBeenCalled()
+  })
+
+  it("does not load templates while the template UI is not active", async () => {
+    await act(async () => {
+      root.render(
+        createElement(
+          SWRConfig,
+          {
+            value: {
+              provider: () => new Map(),
+              dedupingInterval: 0,
+              focusThrottleInterval: 0,
+            },
+          },
+          createElement(HookHost, { enabled: false }),
+        ),
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.fetcher).not.toHaveBeenCalled()
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+      window.dispatchEvent(new Event("online"))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.fetcher).not.toHaveBeenCalled()
+  })
+
+  it("loads templates once when the template UI becomes active", async () => {
+    await act(async () => {
+      root.render(
+        createElement(
+          SWRConfig,
+          {
+            value: {
+              provider: () => new Map(),
+              dedupingInterval: 0,
+              focusThrottleInterval: 0,
+            },
+          },
+          createElement(HookHost, { enabled: false }),
+        ),
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.fetcher).not.toHaveBeenCalled()
+
+    await act(async () => {
+      root.render(
+        createElement(
+          SWRConfig,
+          {
+            value: {
+              provider: () => new Map(),
+              dedupingInterval: 0,
+              focusThrottleInterval: 0,
+            },
+          },
+          createElement(HookHost, { enabled: true }),
+        ),
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.fetcher).toHaveBeenCalledTimes(1)
+    expect(mocks.fetcher).toHaveBeenCalledWith("/templates")
   })
 })

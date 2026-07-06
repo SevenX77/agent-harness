@@ -370,7 +370,8 @@ export function CopilotPanel({
   const [attachingCodeAssistant, setAttachingCodeAssistant] = useState<'claude' | 'codex' | null>(null)
   const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
   const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(inactiveCodeAssistantStatus)
-  const { templates, templatesLoading } = useTemplates()
+  const shouldLoadTemplates = !skillId && copilot.messages.length === 0
+  const { templates, templatesLoading } = useTemplates({ enabled: shouldLoadTemplates })
   const inEvalView = view === 'eval'
   const roleOptions = useMemo(
     () => copilotRoleOptions(rolesData, registry?.model_groups ?? []),

@@ -208,6 +208,28 @@ describe('buildCopilotJudgeDraft', () => {
     expect(html).toContain('studio-copilot-input')
   })
 
+  it('does not load templates when the current skill chat does not show template UI', () => {
+    renderToStaticMarkup(
+      React.createElement(CopilotPanel, {
+        skillId: 'text-segmentation',
+        copilot: mocks.useCopilot(),
+      }),
+    )
+
+    expect(mocks.useTemplates).toHaveBeenCalledWith({ enabled: false })
+  })
+
+  it('loads templates only for the create-skill empty state where templates are visible', () => {
+    renderToStaticMarkup(
+      React.createElement(CopilotPanel, {
+        skillId: null,
+        copilot: mocks.useCopilot(),
+      }),
+    )
+
+    expect(mocks.useTemplates).toHaveBeenCalledWith({ enabled: true })
+  })
+
   it('opens the current workspace through the Claude/Codex assistant menu', async () => {
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {

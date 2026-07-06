@@ -213,6 +213,34 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
   `Close assistants`。Tauri 必须同时拦截 `WindowEvent::CloseRequested`,先 `prevent_close()`,执行同一套
   ah cleanup 后再退出。
 
+## 4.5 凭证与登录态搬运矩阵(2026-07-06 定稿)
+
+原则:**一处登录、launcher 搬运;按 OS × assistant 显式列举,分清「分系统的」与「共用的」**。
+
+- **铁律:绝不复制含 refresh token 的凭据文件到第二个长期存活的环境。** OAuth refresh token 是
+  轮转式的(用一次作废换新):两个环境持有同一条链,谁先刷新谁存活,另一侧刷新必失败并把凭据文件
+  清成空壳。2026-07-06 实证:装机脚本曾把 Windows `~/.claude/.credentials.json` 复制进 WSL,当天
+  两侧同分钟被各自的失败刷新清空、双双登出。`scripts/install-claude-code-wsl.ps1` 的一次性复制
+  (L333-340)据此**废止为引导残留**,不再是设计的一部分。
+- **claude(Windows host → WSL)**:搬运物 = `claude setup-token` 签发的一年期推理 token
+  (官方跨环境机制,不参与轮转)。链路:用户一次性 `claude setup-token` + `setx
+  CLAUDE_CODE_OAUTH_TOKEN <token>` → Open 的 `.ps1` launcher 读用户级 env、经 `WSLENV` 送进
+  payload → payload 预检(无 token 且 WSL 本地 `.credentials.json` 无可用 token 时,停在指引、
+  不拉起注定 Not-logged-in 的 master)→ `ah start`(ah ≥ 1.3.2 将该变量列入 daemon env
+  passthrough)→ daemon unit env → master(tmux 子进程)与 worker(systemd-run scope 子进程)
+  全部继承;token 不落 ah.toml、不进 sqlite、不进 spawn-cmd 日志。替代路径:在 WSL 里
+  `claude /login`(独立 refresh 链,与 Windows 互不干扰),预检同样放行。
+- **codex(Windows host → WSL)**:搬运物 = Windows `~/.codex/auth.json`,payload 每次启动复制
+  (现状保留);workspace trust 由 master cmd 写 sandbox `config.toml`。已知风险注记:auth.json
+  若含轮转式 refresh token,与 claude 同类的互踩隐患存在,尚未爆雷、持续观察;爆雷时按 claude
+  的 token-env 模式重构。
+- **macOS / Linux(native,无 WSL)**:无搬运层 —— Studio 与 ah 同宿主,master/worker 直接用
+  宿主登录态;唯一 launcher 差异是脚本形态(`.sh`),凭证矩阵不适用。
+- **分层归属**:Windows-only = `.ps1` 生成、`WSLENV` 转发、`windows_path_to_wsl` 路径翻译、
+  codex auth.json 复制源;跨 OS 共用 = ah.toml 模板(含 `[env]`)、auth 预检语义、版本门禁、
+  preseed;ah 侧(与 OS 无关)= env passthrough 白名单、sandbox home 物化。新增 assistant 时
+  必须同时补齐本矩阵的对应行,不许只做 claude。
+
 ## 5. MoirAI 拓扑设计（目标 + 现状）
 
 叙事真相源:`docs/strategy/moirai-copilot-persona-narrative.md`(名字/神话职能/背景故事)。

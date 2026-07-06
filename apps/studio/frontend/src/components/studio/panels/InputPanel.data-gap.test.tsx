@@ -85,7 +85,7 @@ describe("InputPanel simplified schema view", () => {
 
     expect(html).toContain("phases/enrich/LOGIC.md")
     expect(html).toContain("orphan")
-    expect(html).not.toContain("topic")
+    expect(html).toContain("topic")
     expect(html).not.toContain("result")
     expect(html).not.toContain("Data gap: input field")
   })

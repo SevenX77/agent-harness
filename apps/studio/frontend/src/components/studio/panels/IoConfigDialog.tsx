@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react"
+import { useMemo, useRef, useState, type CSSProperties } from "react"
 import {
   AlertTriangle,
   ChevronDown,
@@ -12,9 +12,15 @@ import {
   Trash2,
 } from "lucide-react"
 import { importIoIntoWorkspace, type IoScanEntry } from "@/api/client"
-import { selectImportFolder } from "@/lib/tauri"
+import { deleteWorkspacePath, openLocalPath, selectImportFile, selectImportFolder } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -25,7 +31,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { LintError } from "@/api/types"
+import { Badge } from "@/components/ui/badge"
+import type { LintError, RuntimeInputConflict } from "@/api/types"
 import type {
   ArtifactRow,
   FileFieldDecl,
@@ -187,10 +194,29 @@ export function groupsFromDeclarations(
   declaredInputNames: readonly string[] = [],
 ): FileGroup[] {
   const declared = new Set(declaredInputNames.map(normalizeFieldName))
+  const schemaOrder = new Map(declaredInputNames.map((name, index) => [normalizeFieldName(name), index]))
   return groupCandidatesByFile(declarations.map((decl) => ({
     ...decl,
     checked: declared.has(normalizeFieldName(decl.field)),
-  })))
+  }))).sort((left, right) => {
+    const leftIndex = firstSchemaIndex(left, schemaOrder)
+    const rightIndex = firstSchemaIndex(right, schemaOrder)
+    if (leftIndex !== rightIndex) {
+      return leftIndex - rightIndex
+    }
+    return left.pathHint.localeCompare(right.pathHint)
+  })
+}
+
+function firstSchemaIndex(group: FileGroup, schemaOrder: Map<string, number>): number {
+  let best = Number.POSITIVE_INFINITY
+  for (const candidate of group.candidates) {
+    const index = schemaOrder.get(normalizeFieldName(candidate.field))
+    if (index !== undefined && index < best) {
+      best = index
+    }
+  }
+  return best
 }
 
 /** `chapter.meta.title` → `[chapter, chapter.meta]` — every ancestor object path. */
@@ -388,26 +414,30 @@ function FieldCheckTree({
  */
 function FileImportGroups({
   skillId,
+  workspaceRoot,
   importNodeId,
   declaredInputNames,
   groups,
-  setGroups,
   busy,
   setBusy,
   error,
   setError,
+  onGroupsChange,
+  onRuntimeConfigRefresh,
   onFileOpen,
   diagnosticsByField = {},
 }: {
   skillId: string
+  workspaceRoot?: string | null
   importNodeId?: string | null
   declaredInputNames: readonly string[]
   groups: FileGroup[]
-  setGroups: (groups: FileGroup[]) => void
   busy: boolean
   setBusy: (busy: boolean) => void
   error: string | null
   setError: (error: string | null) => void
+  onGroupsChange: (groups: FileGroup[]) => void
+  onRuntimeConfigRefresh?: () => Promise<unknown> | unknown
   onFileOpen?: (path: string) => void
   diagnosticsByField?: Record<string, LintError[]>
 }) {
@@ -422,7 +452,8 @@ function FileImportGroups({
       const imported = groupCandidatesByFile(
         matchCandidatesToInputs(candidatesFromScanEntries(result.entries), declaredInputNames),
       )
-      setGroups([...groups, ...imported])
+      await onRuntimeConfigRefresh?.()
+      onGroupsChange([...groups, ...imported])
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -430,7 +461,7 @@ function FileImportGroups({
     }
   }
   const toggleCandidate = (groupIndex: number, candidateIndex: number, next: boolean) => {
-    setGroups(
+    onGroupsChange(
       groups.map((group, gi) =>
         gi === groupIndex
           ? {
@@ -443,6 +474,32 @@ function FileImportGroups({
       ),
     )
   }
+  const folderPathFor = (group: FileGroup): string | null => {
+    const rel = group.filePath ?? group.pathHint
+    if (!rel || !workspaceRoot) {
+      return null
+    }
+    const workspaceRel = rel.split("/").slice(0, -1).join("/")
+    const folderRel = group.filePath ? workspaceRel : rel
+    return `${workspaceRoot.replace(/[\\/]+$/, "")}/.workspace/${folderRel}`.replaceAll("\\", "/")
+  }
+  const deleteGroup = async (group: FileGroup, groupIndex: number) => {
+    const rel = group.filePath ?? group.pathHint
+    if (!rel) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteWorkspacePath(workspaceRoot ?? skillId, `.workspace/${rel}`)
+      await onRuntimeConfigRefresh?.()
+      onGroupsChange(groups.filter((_, gi) => gi !== groupIndex))
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <>
       {groups.map((group, groupIndex) => (
@@ -450,7 +507,14 @@ function FileImportGroups({
           <div className={GROUP_HEAD_CLASS}>
             <FileText className="size-3.5 shrink-0 self-center text-muted-foreground" aria-hidden />
             <span className="font-mono text-xs text-foreground">{group.label}</span>
-            <span className={PATH_CLASS}>{group.pathHint}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={PATH_CLASS}>{group.pathHint}</span>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="start">
+                <span className="font-mono text-xs">{group.pathHint}</span>
+              </TooltipContent>
+            </Tooltip>
             {group.filePath && onFileOpen ? (
               <button
                 type="button"
@@ -461,9 +525,24 @@ function FileImportGroups({
                 <Pencil className="size-3.5" />
               </button>
             ) : null}
+            {folderPathFor(group) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const folder = folderPathFor(group)
+                  if (folder) {
+                    void openLocalPath(folder)
+                  }
+                }}
+                aria-label={`Open folder ${group.label}`}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <FolderOpen className="size-3.5" />
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => setGroups(groups.filter((_, gi) => gi !== groupIndex))}
+              onClick={() => void deleteGroup(group, groupIndex)}
               aria-label={`Remove file group ${group.label}`}
               className="text-muted-foreground transition-colors hover:text-destructive"
             >
@@ -495,18 +574,29 @@ function FileImportGroups({
           </div>
         </div>
       ))}
-      <Button
-        type="button"
-        size="sm"
-        variant="secondary"
-        onClick={() => void selectImportFolder().then(importPath)}
-        disabled={busy}
-        aria-label="Import folder"
-        className="h-7 gap-1 text-[11px]"
-      >
-        {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FolderOpen className="size-3.5" aria-hidden />}
-        Import…
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            aria-label="Import file or folder"
+            className="h-7 gap-1 text-[11px]"
+          >
+            {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FolderOpen className="size-3.5" aria-hidden />}
+            Import…
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem onSelect={() => { void selectImportFile().then(importPath) }}>
+            Import file
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => { void selectImportFolder().then(importPath) }}>
+            Import folder
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {error ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
           {error}
@@ -530,6 +620,9 @@ export interface InputConfigInlineProps {
   /** Declared io.inputs field names an imported file auto-matches against. */
   declaredInputNames: readonly string[]
   onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[]; fileFieldNames?: string[] }) => Promise<string | null>
+  onRuntimeConfigRefresh?: () => Promise<unknown> | unknown
+  workspaceRoot?: string | null
+  conflicts?: RuntimeInputConflict[]
   /** Open an imported file in the editor (P5 edit button). */
   onFileOpen?: (path: string) => void
   /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
@@ -539,7 +632,7 @@ export interface InputConfigInlineProps {
 
 /**
  * Inline (in-panel) input config: the nested blackboard checkbox tree + file
- * import groups + Save. Replaces the old modal so the config lives with the
+ * import groups. Replaces the old modal so the config lives with the
  * selected node like the Properties panel (PM 2026-07-03).
  */
 export function InputConfigInline({
@@ -549,11 +642,15 @@ export function InputConfigInline({
   importNodeId = null,
   declaredInputNames,
   onSave,
+  onRuntimeConfigRefresh,
+  workspaceRoot,
+  conflicts = [],
   onFileOpen,
   isGraphInput = false,
   diagnosticsByField = {},
 }: InputConfigInlineProps) {
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
+  const saveSeq = useRef(0)
   const initialGroups = useMemo(
     () => groupsFromDeclarations(declaredFiles, declaredInputNames),
     [declaredFiles, declaredInputNames],
@@ -561,14 +658,17 @@ export function InputConfigInline({
   const [groups, setGroups] = useState<FileGroup[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const effectiveGroups = groups ?? initialGroups
   const isChecked = (row: ReconciledFieldRow) => blackboardChecks[row.path] ?? row.checked
 
-  const handleSave = async () => {
-    setBusy(true)
+  const persist = async (nextGroups: FileGroup[], nextBlackboardChecks = blackboardChecks) => {
+    const seq = saveSeq.current + 1
+    saveSeq.current = seq
+    setSaving(true)
     setError(null)
-    const files = effectiveGroups.flatMap((group) =>
+    const files = nextGroups.flatMap((group) =>
       group.candidates
         .filter((candidate) => candidate.checked)
         .map((candidate) => {
@@ -581,22 +681,40 @@ export function InputConfigInline({
     )
     const fileFieldNames = Array.from(new Set([
       ...declaredFiles.map((decl) => decl.field),
-      ...effectiveGroups.flatMap((group) => group.candidates.map((candidate) => candidate.field)),
+      ...nextGroups.flatMap((group) => group.candidates.map((candidate) => candidate.field)),
     ]))
     const failure = await onSave({
       // Missing rows have no blackboard supply — never persist them as consumed.
       blackboard: blackboard
         .filter((row) => row.state !== "missing")
-        .map((row) => ({ path: row.path, type: row.type, checked: isChecked(row) })),
+        .map((row) => ({ path: row.path, type: row.type, checked: nextBlackboardChecks[row.path] ?? row.checked })),
       files,
       fileFieldNames,
     })
-    setBusy(false)
-    setError(failure)
+    if (seq === saveSeq.current) {
+      setSaving(false)
+      setError(failure)
+    }
+  }
+  const updateGroups = (nextGroups: FileGroup[]) => {
+    setGroups(nextGroups)
+    void persist(nextGroups)
   }
 
   return (
     <div className="space-y-2">
+      <div className="flex justify-end">
+        {saving ? <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">saving</Badge> : null}
+      </div>
+      {conflicts.length > 0 ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          {conflicts.map((conflict) => (
+            <div key={conflict.field}>
+              {conflict.field}: multiple runtime file candidates. Lint/compile will fail until only one remains.
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="overflow-hidden rounded-md border border-border">
         <div className={GROUP_HEAD_CLASS}>
           <span className="text-xs font-medium text-foreground">
@@ -612,7 +730,11 @@ export function InputConfigInline({
           <FieldCheckTree
             rows={blackboard}
             checkOf={isChecked}
-            onToggleCheck={(row, next) => setBlackboardChecks((prev) => ({ ...prev, [row.path]: next }))}
+            onToggleCheck={(row, next) => {
+              const nextChecks = { ...blackboardChecks, [row.path]: next }
+              setBlackboardChecks(nextChecks)
+              void persist(effectiveGroups, nextChecks)
+            }}
             diagnosticsByField={diagnosticsByField}
           />
         ) : (
@@ -623,20 +745,19 @@ export function InputConfigInline({
       </div>
       <FileImportGroups
         skillId={skillId}
+        workspaceRoot={workspaceRoot}
         importNodeId={importNodeId}
         declaredInputNames={declaredInputNames}
         groups={effectiveGroups}
-        setGroups={setGroups}
+        onGroupsChange={updateGroups}
         busy={busy}
         setBusy={setBusy}
         error={error}
         setError={setError}
+        onRuntimeConfigRefresh={onRuntimeConfigRefresh}
         onFileOpen={onFileOpen}
         diagnosticsByField={diagnosticsByField}
       />
-      <Button type="button" size="sm" onClick={() => void handleSave()} disabled={busy} className="h-7 text-[11px]">
-        Save input config
-      </Button>
     </div>
   )
 }

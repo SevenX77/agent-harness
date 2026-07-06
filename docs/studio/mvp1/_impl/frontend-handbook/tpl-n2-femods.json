@@ -71,17 +71,18 @@
   },
   {
     "name": "io schema 推断",
-    "what": "i/o 面板的一组纯函数：从导入扫描结果/runtime_config 推导可勾选文件字段、把勾选结果写回 io.inputs JSON Schema、读取 runtime_config artifacts，全在内存算；runtime_config 保存走后端端点。",
-    "where": "io-config.ts：blackboardAtNode/reconcileInputFields/applyIoInputChecks（黑板+runtime_config 文件字段对账并重建 io.inputs schema）、runtimeArtifactsOf/runtimeFileFieldsInImportScope（只读 runtime_config 投影）；只读投影 io 契约的 InputPanel/IoConfigDialog 已不再投影磁盘上不存在的假文件。",
+    "what": "i/o 面板的一组纯函数：从导入扫描结果/runtime_config 推导可勾选文件字段、把勾选结果写回 io.inputs JSON Schema、读取 runtime_config artifacts/conflicts，全在内存算；runtime_config 保存走后端端点，checkbox 修改走 md 文件真实源实时保存。",
+    "where": "io-config.ts：blackboardAtNode/reconcileInputFields/applyIoInputChecks（黑板+runtime_config 文件字段对账并重建 io.inputs schema）、runtimeArtifactsOf/runtimeFileFieldsInImportScope/runtimeInputConflictsInImportScope（只读 runtime_config 投影）；只读投影 io 契约的 InputPanel/IoConfigDialog 已不再投影磁盘上不存在的假文件。",
     "duties": [
       "reconcileInputFields：把 io.inputs 声明、黑板可用字段、runtime_config root import backing 对账成 matched/available/missing。",
       "applyIoInputChecks：把勾选结果直接写进目标 Markdown 的 io.inputs.properties；文件字段只写普通 schema，不写 path/source/dir/pattern。",
       "runtimeArtifactsOf：从 runtime_config.artifacts 读 output artifact 清单；保存由 InputPanel 调 runtime_config API。",
-      "runtimeFileFieldsInImportScope：只读当前 Input/phase scope 的 import manifest，不再投影磁盘上不存在的 input/schema.json、input/sample.json 假文件。"
+      "runtimeFileFieldsInImportScope：只读当前 Input/phase scope 的 import manifest，不再投影磁盘上不存在的 input/schema.json、input/sample.json 假文件。",
+      "runtimeInputConflictsInImportScope：只读当前 scope 的 runtime_config conflicts；冲突显示在 UI，但 checkbox 不禁用，lint/compile 负责报错。"
     ],
     "used_by": "#25（input-field-edit）、#26（input-files-import）、#29（output-artifact-config）。",
     "boundary": "做：io schema 对账 / 写回 Markdown schema / runtime_config 投影，纯内存。不做：不真把 artifact 写盘（运行期由引擎 artifact_manifest 落 .workspace/runs/<id>/artifacts，归 N4 运行）。",
-    "api": "runtime_config 保存走 Studio backend；Markdown schema 写回仍经 graph/file save 客户端落盘。"
+    "api": "runtime_config 保存走 Studio backend；Markdown schema 写回仍经 graph/file save 客户端实时落盘；import 文件删除走 native-fs deleteWorkspacePath。"
   },
   {
     "name": "子图 inline 预览",

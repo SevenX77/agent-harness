@@ -108,6 +108,13 @@ export interface RuntimeInputBinding {
   sha256?: string
 }
 
+export interface RuntimeInputConflict {
+  field: string
+  normalized_field?: string
+  scope?: string
+  candidates: Array<Record<string, unknown>>
+}
+
 export interface RuntimeArtifactRow {
   stem: string
   mode: 'single' | 'per-item'
@@ -125,6 +132,10 @@ export interface RuntimeConfig {
     }
     root: Record<string, RuntimeInputBinding>
     phases: Record<string, Record<string, RuntimeInputBinding>>
+    conflicts?: {
+      root?: RuntimeInputConflict[]
+      phases?: Record<string, RuntimeInputConflict[]>
+    }
   }
   llm?: Record<string, unknown>
   artifacts: RuntimeArtifactRow[]

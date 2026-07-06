@@ -5,7 +5,7 @@ Read-only: parses JSON/JSONL top-level fields, treats md/txt as one text
 candidate field (never inlining content), folds numbered batch file groups
 (``chapter_001…chapter_060``) into one entry with the extracted number list,
 recognizes ``latest``/``_v<ts>`` version modifiers (keep latest, skip
-``history/``), and recurses one level into subfolders. Recognition is
+``history/``/``.history/``), and recurses one level into subfolders. Recognition is
 regex-robust — it must NOT assume the engine's own fixed artifact format.
 """
 
@@ -30,6 +30,7 @@ _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 _DOC_SUFFIXES = {".pdf", ".doc", ".docx"}
 _SAMPLE_MAX_CHARS = 200
+_ARCHIVE_DIR_NAMES = {"history", ".history"}
 _VERSION_RE = re.compile(r"_(?:latest(?:_\d{8}_\d{6})?|v\d{8}_\d{6})", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"_(\d{1,6})(?=_|$)")
 
@@ -87,7 +88,7 @@ def _batch_key(stem: str) -> tuple[str, int] | None:
 
 def _scan_json_file(path: Path) -> list[dict[str, Any]]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     if isinstance(data, list):
@@ -105,7 +106,7 @@ def _scan_json_file(path: Path) -> list[dict[str, Any]]:
 
 def _scan_jsonl_file(path: Path) -> list[dict[str, Any]]:
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
             if not line.strip():
                 continue
             inner = _fields_of_mapping(json.loads(line))
@@ -117,7 +118,7 @@ def _scan_jsonl_file(path: Path) -> list[dict[str, Any]]:
 
 def _scan_tabular_file(path: Path, *, delimiter: str) -> list[dict[str, Any]]:
     try:
-        with path.open(encoding="utf-8", newline="") as fh:
+        with path.open(encoding="utf-8-sig", newline="") as fh:
             reader = csv.reader(fh, delimiter=delimiter)
             header = next(reader, [])
     except (OSError, UnicodeDecodeError, csv.Error):
@@ -245,7 +246,7 @@ def _scan_dir(path: Path, *, depth: int) -> list[dict[str, Any]]:
     subdirs: list[Path] = []
     for child in sorted(path.iterdir()):
         if child.is_dir():
-            if child.name.lower() == "history":
+            if child.name.lower() in _ARCHIVE_DIR_NAMES:
                 continue
             subdirs.append(child)
         elif child.is_file():
@@ -306,10 +307,10 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
     the backend already writes), NOT skill source -- so this write does not go
     through the Rust native-fs sole-writer. Phase-owned imports are isolated
     under ``import_files/.phase/<node_id>/`` so user-created root folders never
-    collide with node ids. ``history/`` subfolders are version archives and are
-    skipped.
+    collide with node ids. ``history/`` and ``.history/`` subfolders are version
+    archives and are skipped.
     """
-    from app.services.runtime_config import refresh_runtime_config
+    from app.services.runtime_config import ensure_import_layout, refresh_runtime_config
     from app.services.skills import resolve_skill_dir
 
     source = Path(request.path)
@@ -322,7 +323,12 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
     if request.node_id is not None and not _NODE_ID_RE.match(request.node_id):
         raise HTTPException(status_code=422, detail=f"unsafe node id: {request.node_id!r}")
 
-    workspace_root = (resolve_skill_dir(skill_id) / ".workspace").resolve()
+    skill_dir = resolve_skill_dir(skill_id)
+    valid_phase_ids = set(ensure_import_layout(skill_dir))
+    if request.node_id is not None and request.node_id not in valid_phase_ids:
+        raise HTTPException(status_code=422, detail=f"unknown node id: {request.node_id!r}")
+
+    workspace_root = (skill_dir / ".workspace").resolve()
     import_root = workspace_root / "import_files"
     if request.node_id is not None:
         import_root = import_root / ".phase" / request.node_id
@@ -336,10 +342,10 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
         shutil.copytree(
             source,
             target_dir,
-            ignore=shutil.ignore_patterns("history"),
+            ignore=shutil.ignore_patterns("history", ".history"),
         )
 
     entries = _scan_dir(target_dir, depth=1)
     _rebase_entry_paths(entries, workspace_root)
-    refresh_runtime_config(workspace_root.parent)
+    refresh_runtime_config(skill_dir)
     return {"dir": target_dir.relative_to(workspace_root).as_posix(), "entries": entries}

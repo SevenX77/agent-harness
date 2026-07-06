@@ -41,7 +41,7 @@
 
 ## 三、这套流程保留什么(不可省)
 
-1. **改完亲眼看再报 done;报 done ≠ 收敛,PM 在 app 里确认完才算收敛** —— 前端改动**必须**我自己把 app 跑起来,在浏览器或 Tauri 壳里点过受影响的界面(主成功路径 + 明显的取消/错误态),**看到效果**才向你说「完成」。agent reply / filesystem diff / typecheck 通过 **都不等于**视觉验证。且我的自验只是**前置条件**:前端任务的**收敛条件是 PM 亲自在主 app 里确认过效果**(PM 决策 2026-07-02)——报 done 时必须附一份**逐项 PM 验证清单**(每条改动一行:界面路径 / 操作 / 预期 / 状态;强制格式与规矩见 Phase 8),并把主仓 app 保障到能直接看的状态(见第 4 条),然后等 PM 逐条确认;**任一条没确认就不算收敛**,PM 指出的问题继续在本任务内修。
+1. **验证环境我备好,逐项点验归 PM;报 done ≠ 收敛,PM 确认完才算收敛**(PM 决策 2026-07-06:为提速,取代旧的「agent 亲眼逐项点验」)—— 报 done 前我要做到:在自己 worktree 起 `scripts/wt-dev.sh` 环境,确认 app 能起、受影响界面能打开不报错(smoke,不逐项点验),顺手截手册要用的真机图(见 Phase 4);合并后按 Phase 7 收尾把主仓 app 备到 PM 能直接看的状态。前端任务的**收敛条件是 PM 亲自在主 app 里逐条确认过效果**(PM 决策 2026-07-02)——报 done 时必须附一份**逐项 PM 验证清单**(每条改动一行:界面路径 / 操作 / 预期 / 状态;强制格式与规矩见 Phase 8),然后等 PM 逐条确认;**任一条没确认就不算收敛**,PM 指出的问题继续在本任务内修。agent reply / filesystem diff / typecheck 通过**不等于** smoke 验证,smoke 也**不等于**收敛。
 2. **推送前 CI Gates 本地全绿** —— 改了前端,在 `apps/studio/frontend` 下必须跑通:
    ```bash
    npm run lint
@@ -63,7 +63,7 @@
      **本 worktree 的 Python 代码**起一个私有 sidecar(8788-8799 挑空闲端口,自动生成
      `STUDIO_API_TOKEN` 并打印),Vite 代理指向它——后端改动也在自己这棵树上验证,
      绝不拿 `main` 的后端"验证"自己的后端改动。
-   浏览器开 `http://localhost:<port>/#tkn=<token>` 亲眼验证**自己这棵树**。
+   浏览器开 `http://localhost:<port>/#tkn=<token>` 验证**自己这棵树**。
    不要在 worktree 里再起第二套 Tauri,也不要动主仓根工作区或其他 agent 的
    worktree。发 PR 用 `scripts/wt-ship.sh`;`main` 仍是 protected,不要直接 push。
 4. **合并后主仓依赖跟上,把 app 保障到 PM 能直接看** —— PR 合并后主仓根 `git pull`;
@@ -131,8 +131,8 @@
   直接清理或收窄。照 Phase 2 定稿的设计页做,不偏靶。
 - 时刻对照「二、开发原则」:改坏逻辑所在的那一层,不打补丁;换掉的旧规范/旧数据路径当场删干净。
 
-**Phase 4 · 亲眼验证(顺手产出手册要用的真机图)**
-- 跑 app 亲眼点过受影响界面(主成功路径 + 取消/错误态);agent reply / diff / typecheck 通过都**不等于**视觉验证。
+**Phase 4 · 验证环境 & 手册截图(逐项点验归 PM)**
+- 起本树环境做 **smoke 确认**:app 能起、受影响界面能打开、不红屏不报错即可;**逐项功能点验由 PM 在收敛阶段做**(PM 决策 2026-07-06,取代旧的 agent 亲眼逐项点验)。agent reply / diff / typecheck 通过**不等于** smoke 确认。
 - **验证用自己 worktree 的 Vite(`scripts/wt-dev.sh`)**:主仓根跑着**唯一一套**完整 app
   (`scripts/studio-dev.ps1` 启动的 Tauri + sidecar :8787 + Vite 5173)。只改了前端 →
   `scripts/wt-dev.sh`(Vite 代理到主仓共享 sidecar);改了 backend/engine/gateway →
@@ -179,7 +179,7 @@
 
 **Phase 8 · 沉淀(同一次改动里,别只留对话)**
 - 可复用**样式规则** → `FRONTEND_UI_SPEC.md`;**手册方法论/坑** → 方法论文档;**行为类教训** → 记忆。
-- 报 done:自然语言 + 附**亲眼验证的截图/描述**,对齐「设计是什么 / 是否按设计做到 / 做完什么效果」三段;不问「是否继续」。
+- 报 done:自然语言 + 附**截图/描述**(smoke 确认 + 手册真机图),对齐「设计是什么 / 是否按设计做到 / 做完什么效果」三段;不问「是否继续」。
 - **等 PM 收敛确认 · 报 done 必附「逐项 PM 验证清单」(强制格式)**:报 done 前**我自己**把主仓
   app 备到能直接点验的状态(Phase 7 完整收尾:pull + 补依赖 + engine/gateway 改动重建 vendor +
   重启 app)—— **机械准备步骤一律我做,绝不列成清单让 PM 执行**。给 PM 的只有一份**逐项验证清单**,

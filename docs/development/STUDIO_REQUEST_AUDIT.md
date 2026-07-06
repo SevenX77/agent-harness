@@ -73,6 +73,9 @@ Use per-request tests when a request has unique semantics:
 | Settings tab mounting | hidden tab reads such as `GET /api/llm/roles/test-results` | Settings rendered every tab while only one was visible | Fixed. Tabs are lazy-mounted on first visit and kept mounted afterward; opening API Keys no longer mounts LLM Roles/Copilot seed effects. | `SettingsPageContent.shell.test.tsx`, `SettingsPageContent.lazy-tabs.test.tsx` |
 | Remote community catalog sync | `POST /api/llm/catalog/sync-verified` | Settings controller automatically synced after app settings loaded when the flag was enabled | Removed. Remote catalog sync is not a lifecycle side effect; any future sync must be an explicit user command or precise backend event path. | `SettingsPage.controller.test.tsx` |
 | API key endpoint secrets | `GET /api/llm/registry/endpoints/{endpoint_id}/secret` | API Keys app-level credential cold load / forced registry refresh after exact registry event | OK: secret hydration dedupes concurrent requests, reuses known secrets after forced registry refresh, and Settings open/close/tab switches do not rehydrate. | `llm.test.ts`, `SettingsPage.controller.test.tsx` |
+| LLM fixed role metadata | `GET /api/llm/fixed-roles`, `GET /api/llm/fixed-roles/{role_name}` | First visible LLM Roles/Copilot consumer | OK: fixed-role names and recommended-model metadata are immutable backend projections; frontend lazy tab mounting prevents hidden Settings pages from reading them, and the API client dedupes/caches repeated consumers. | `test_llm_fixed_roles.py`, `llm.test.ts`, `SettingsPageContent.lazy-tabs.test.tsx` |
+| Manual model suggestions | `GET /api/llm/providers/notable-models` | Explicitly opening the API Keys manual model probing accordion | OK: notable models are suggestion-only placeholder metadata, not runtime truth; the collapsed panel is silent, and candidates are cached per provider until explicit force refresh. | `test_llm_registry_api.py`, `ManualModelTestPanel.test.tsx`, `llm.test.ts` |
+| LLM role test jobs | `POST /api/llm/roles/{role_name}/test-jobs`, `POST /api/llm/model-bundles/{bundle_id}/test-jobs`, `POST /api/llm/model-groups/test-jobs`, `GET /api/llm/role-test-jobs/{job_id}` | Explicit Test button / compare-candidate test action, then scoped job polling | OK: test jobs are explicit commands; polling is confined to the returned job id and never refreshes broad registry/roles/settings truth as a progress substitute. | `test_llm_registry_api.py`, `role-test-store.test.ts`, `copilot-role-test.test.ts`, `PropertiesPanel.network-side-effect.test.tsx`, `llm.test.ts` |
 | LLM registry | `GET /api/llm/registry` | Settings/API Keys/roles consumers and domain events | Partial: client reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Remaining audit: all registry write paths must keep returning/projecting exact canonical snapshots. | `llm.test.ts`, `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
 | LLM roles | `GET/PUT /api/llm/roles` | Settings/Copilot role consumers and role writes/events | Partial: roles reads are cached/deduped; Settings open/close, tab switch, focus, WebSocket connect/reconnect, and hidden API Keys tab mounts are guarded as non-triggers. Remaining audit: role write/test/job paths need route-by-route review. | `SettingsPage.controller.test.tsx`, `SettingsPageContent.lazy-tabs.test.tsx`, `useStudioEventStream.test.ts` |
 | Templates | `GET /api/templates` | Create-skill Copilot empty-state template UI | OK: templates are disabled while the template UI is hidden and cold-load only when the create-skill template UI becomes visible. | `useTemplates.test.tsx`, `copilot-panel.test.ts` |
@@ -320,13 +323,13 @@ BACKEND DELETE /api/skills/{skill_id}/runs/{run_id} | review | specific | Backen
 BACKEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/_debug/value-error | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND GET /api/batch/{batch_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/llm/fixed-roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/llm/fixed-roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/fixed-roles | ok | specific | Immutable fixed-role metadata projection; route has response tests and emits no revalidation event.
+BACKEND GET /api/llm/fixed-roles/{role_name} | ok | specific | Immutable fixed-role recommendation projection; route has response/404 tests and emits no revalidation event.
 BACKEND GET /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/llm/providers/notable-models | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/providers/notable-models | ok | specific | Suggestion-only provider note projection for manual model probing; route has response tests and is not runtime truth.
 BACKEND GET /api/llm/registry | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/llm/role-test-jobs/{job_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped in-memory role-test job status read; backend tests cover start/read/progress and it emits no broad truth refresh.
 BACKEND GET /api/llm/roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/llm/roles/test-results | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -364,11 +367,11 @@ BACKEND POST /api/llm/catalog/sync | review | specific | Backend route is invent
 BACKEND POST /api/llm/catalog/sync-verified | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/llm/endpoints/{endpoint_id}/models/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/llm/endpoints/{endpoint_id}/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/model-groups/test-jobs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | ok | specific | Explicit bundle Test command; returns a scoped job id and does not mutate broad registry/roles truth.
+BACKEND POST /api/llm/model-groups/test-jobs | ok | specific | Explicit compare-candidate Test command; returns a scoped transient job id and does not persist role truth.
 BACKEND POST /api/llm/roles/{role_name}/apply-profile | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/llm/roles/{role_name}/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/roles/{role_name}/test-jobs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role Test command; returns a scoped job id and progress is read only through /role-test-jobs/{job_id}.
 BACKEND POST /api/llm/routes/{route_id}/probe | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/llm/routes/{route_id}/probe-multimodal | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/skills | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -431,12 +434,12 @@ FRONTEND DELETE /api/llm/roles/{role_name} | review | specific | Mutation or exp
 FRONTEND DELETE /api/llm/routes/{route_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND DELETE /api/skills/{skill_id}/runs/{run_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND GET /api/llm/fixed-roles | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/llm/fixed-roles/{role_name} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/llm/providers/notable-models | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/fixed-roles | ok | shared | First visible LLM Roles/Copilot consumer reads immutable metadata once; lazy Settings tabs and client cache/dedupe block hidden-page and repeated fetches.
+FRONTEND GET /api/llm/fixed-roles/{role_name} | ok | shared | First visible role card reads immutable per-role recommendations once; client cache/dedupe shares repeated consumers.
+FRONTEND GET /api/llm/providers/notable-models | ok | shared | Manual model candidates load only when the probing accordion is explicitly opened; collapsed API Keys is network-silent and client cache is provider-scoped.
 FRONTEND GET /api/llm/registry | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; write projection audit remains.
 FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | shared | API Keys credential cold-load secret hydration; client dedupes concurrent endpoint secret reads and reuses known secrets after forced registry refresh.
-FRONTEND GET /api/llm/role-test-jobs/{job_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling starts only after an explicit Test command returns a job id; pollers do not refresh registry/roles/settings truth.
 FRONTEND GET /api/llm/roles | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; write projection audit remains.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
 FRONTEND GET /api/llm/roles/{role_name} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
@@ -466,10 +469,10 @@ FRONTEND POST /api/io/scan | review | specific | Mutation or explicit command ne
 FRONTEND POST /api/llm/catalog/sync-verified | ok | specific | No lifecycle trigger remains in Settings; future use must be an explicit command or precise backend event path.
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/llm/model-groups/test-jobs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | ok | specific | Explicit bundle Test button command; lifecycle tests cover start/poll/settle through the scoped job mirror.
+FRONTEND POST /api/llm/model-groups/test-jobs | ok | specific | Explicit compare-candidate Test command from Properties; node selection tests cover that selection itself does not start test jobs, and returned jobs are polled by id.
 FRONTEND POST /api/llm/roles/{role_name}/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/llm/roles/{role_name}/test-jobs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role/Copilot Test button command; tests cover validation gating, start/poll/settle, and no job start when validation fails.
 FRONTEND POST /api/llm/routes/{route_id}/probe | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/compile | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.

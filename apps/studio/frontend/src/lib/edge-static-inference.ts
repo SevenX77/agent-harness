@@ -1,4 +1,4 @@
-import type { SkillDetail } from '@/api/types'
+import type { RuntimeConfig, RuntimeImportEntry, RuntimeImportField, SkillDetail } from '@/api/types'
 import {
   ioPropertiesOf,
   parseFrontmatter,
@@ -19,7 +19,7 @@ import {
  *   fields at edge(source -> target) =
  *       root io.inputs
  *     ∪ io.outputs of every ancestor phase of `target`
- *     ∪ the target's declared `source:'file'` inputs (lazily injected right
+ *     ∪ the target's runtime_config file inputs (lazily injected right
  *       before the target runs — exactly at this dot)
  *
  * A field name produced by multiple ancestors resolves to the NEAREST
@@ -76,6 +76,53 @@ function fieldType(schema: FieldSchema): string | null {
   return typeof schema.type === 'string' ? schema.type : null
 }
 
+function runtimeBatchFieldName(entry: RuntimeImportEntry): string {
+  const raw = entry.pattern ?? entry.stem ?? entry.name
+  const withoutExt = raw.replace(/\.[^.]+$/, '')
+  return withoutExt.split(/_?\{n\}/)[0].replace(/[._-]+$/, '') || withoutExt
+}
+
+function runtimeFieldSchema(field: RuntimeImportField): FieldSchema {
+  return typeof field.type === 'string' ? { type: field.type } : {}
+}
+
+function runtimeImportFields(entries: RuntimeImportEntry[]): StaticEdgeField[] {
+  const rows: StaticEdgeField[] = []
+  for (const entry of entries) {
+    if (entry.kind === 'dir') {
+      rows.push(...runtimeImportFields(entry.entries ?? []))
+      continue
+    }
+    if (entry.kind === 'batch') {
+      const name = runtimeBatchFieldName(entry)
+      rows.push({
+        name,
+        type: 'array',
+        from: typeof entry.dir === 'string' ? entry.dir : 'runtime_config',
+        via_file: true,
+        consumed_by_target: false,
+        schema: { type: 'array' },
+      })
+      continue
+    }
+    for (const field of entry.fields ?? []) {
+      if (typeof field.name !== 'string' || !field.name) {
+        continue
+      }
+      const schema = runtimeFieldSchema(field)
+      rows.push({
+        name: field.name,
+        type: fieldType(schema),
+        from: typeof entry.path === 'string' ? entry.path : 'runtime_config',
+        via_file: true,
+        consumed_by_target: false,
+        schema,
+      })
+    }
+  }
+  return rows
+}
+
 interface PhaseDeclarations {
   inputs: Record<string, unknown>
   outputs: Record<string, unknown>
@@ -93,6 +140,7 @@ export function staticEdgeInference(
   skillDetail: SkillDetail | undefined,
   source: string,
   target: string,
+  runtimeConfig?: RuntimeConfig | null,
 ): StaticEdgeInference | null {
   const topology = (skillDetail?.graph_topology ?? []) as unknown as TopologyPhase[]
   if (topology.length === 0) {
@@ -184,21 +232,12 @@ export function staticEdgeInference(
     ? ioPropertiesOf(rootFrontmatter, 'outputs')
     : declarationsOf(target).inputs
 
-  // The target's declared file imports inject at exactly this dot (lazy,
-  // right before the target runs). Not applicable to the terminal edge.
+  // Runtime-config file imports inject at exactly this dot (lazy, right before
+  // the target runs). Not applicable to the terminal edge.
   if (!isTerminalEdge) {
-    for (const [name, raw] of Object.entries(consumerInputs)) {
-      const schema = fieldSchema(raw)
-      if (schema.source === 'file') {
-        fields.set(name, {
-          name,
-          type: fieldType(schema),
-          from: typeof schema.path === 'string' && schema.path ? schema.path : 'file',
-          via_file: true,
-          consumed_by_target: false,
-          schema,
-        })
-      }
+    const phaseRuntimeEntries = runtimeConfig?.inputs?.manifest?.phases?.[target] ?? []
+    for (const field of runtimeImportFields(phaseRuntimeEntries)) {
+      fields.set(field.name, field)
     }
   }
 

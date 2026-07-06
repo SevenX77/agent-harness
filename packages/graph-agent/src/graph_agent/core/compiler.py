@@ -55,6 +55,7 @@ def compile_skill(
     chat_model: Any = None,
     cache: bool = True,
     skill_resolver: SkillResolverProtocol | None = None,
+    runtime_input_fields: dict[str, set[str]] | None = None,
 ) -> CompiledSkill:
     """Compile a V2.1 skill root into a CompiledSkill.
 
@@ -65,13 +66,19 @@ def compile_skill(
     del chat_model
     skill_root = Path(root)
     resolver = skill_resolver or default_local_resolver_for_skill(skill_root)
+    if runtime_input_fields is not None:
+        cache = False
     if cache:
         key = compute_cache_key(skill_root)
         cached = load_from_cache(key, skill_root)
         if cached is not None:
             return cached
 
-    compiled = SkillLoader().compile_skill(skill_root, skill_resolver=resolver)
+    compiled = SkillLoader().compile_skill(
+        skill_root,
+        skill_resolver=resolver,
+        runtime_input_fields=runtime_input_fields,
+    )
     if cache:
         save_to_cache(compute_cache_key(skill_root), compiled)
     return compiled

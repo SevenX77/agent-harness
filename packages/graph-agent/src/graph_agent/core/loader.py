@@ -156,6 +156,7 @@ class SkillLoader:
         skill_root: str | Path,
         *,
         skill_resolver: SkillResolverProtocol | None = None,
+        runtime_input_fields: dict[str, set[str]] | None = None,
         _loading_stack: tuple[str, ...] = (),
         _compilation_cache: dict[str, CompiledSkill] | None = None,
     ) -> CompiledSkill:
@@ -255,6 +256,7 @@ class SkillLoader:
             io_inputs,
             io_outputs,
             manifest.iterate,
+            runtime_input_fields=runtime_input_fields,
         )
         _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs)
 
@@ -281,9 +283,6 @@ class SkillLoader:
             "io": {
                 "inputs": io_inputs,
                 "outputs": io_outputs,
-                "artifacts": [spec.model_dump() for spec in manifest.io.artifacts]
-                if manifest.io.artifacts
-                else None,
                 "output_schema_keys": sorted(output_schema_keys)
                 if output_schema_keys is not None
                 else None,
@@ -1800,29 +1799,13 @@ def _validate_inline_io_schema(
     for field_name, field_schema in properties.items():
         if not isinstance(field_name, str) or not isinstance(field_schema, dict):
             continue
-        if field_schema.get("source") != "file":
-            continue
-        batch_dir = field_schema.get("dir")
-        if isinstance(batch_dir, str) and batch_dir.strip():
-            batch_pattern = field_schema.get("pattern")
-            if not isinstance(batch_pattern, str) or "{n}" not in batch_pattern:
-                _io_fatal(
-                    path,
-                    1,
-                    f"inline {kind} field {field_name!r} declares a batch file dir "
-                    "but its pattern has no {n} number placeholder",
-                    field_path=f"{field_path}.properties.{field_name}.pattern",
-                    code=invalid_code,
-                )
-            continue
-        source_path = field_schema.get("path")
-        if not isinstance(source_path, str) or not source_path.strip():
+        if field_schema.get("source") == "file":
             _io_fatal(
                 path,
                 1,
-                f"inline {kind} field {field_name!r} has source: file but no path "
-                "(or dir + pattern for a batch)",
-                field_path=f"{field_path}.properties.{field_name}.path",
+                f"inline {kind} field {field_name!r} uses source:file; file imports "
+                "must be declared in .workspace/runtime_config.json",
+                field_path=f"{field_path}.properties.{field_name}.source",
                 code=invalid_code,
             )
     return schema
@@ -1881,6 +1864,8 @@ def _validate_static_dataflow(
     root_inputs: dict[str, Any],
     root_outputs: dict[str, Any],
     graph_iterate: IterateSpec | None = None,
+    *,
+    runtime_input_fields: dict[str, set[str]] | None = None,
 ) -> None:
     docs_by_phase = {doc.phase_name: doc for doc in phase_docs}
     rows = graph_topology.get("phases")
@@ -1919,7 +1904,7 @@ def _validate_static_dataflow(
         for input_key in _schema_property_paths(input_schema):
             if (
                 _field_is_supplied(input_key, available)
-                or _schema_field_has_file_source(input_schema, input_key)
+                or _runtime_input_field_is_supplied(runtime_input_fields, phase_name, input_key)
                 or _schema_field_has_iterate_source(doc, input_key, graph_iterate)
             ):
                 continue
@@ -1929,7 +1914,7 @@ def _validate_static_dataflow(
                     io_line,
                     "[F-v3-graph-dataflow-source-missing]",
                     f"phase {phase_name!r} input {input_key!r} has no root, upstream, "
-                    "or source:file provider",
+                    "runtime input, or iterator provider",
                     field_path=f"{phase_name}.io.inputs.properties.{input_key}",
                 )
             )
@@ -2015,31 +2000,24 @@ def _field_is_supplied(field: str, available: set[str]) -> bool:
     return any(path in available for path in _ancestor_paths(field))
 
 
+def _runtime_input_field_is_supplied(
+    runtime_input_fields: dict[str, set[str]] | None,
+    phase_name: str,
+    field: str,
+) -> bool:
+    if not runtime_input_fields:
+        return False
+    phase_fields = runtime_input_fields.get(phase_name)
+    if not phase_fields:
+        return False
+    return _field_is_supplied(field, phase_fields)
+
+
 def _schema_required_keys(schema: dict[str, Any]) -> set[str]:
     required = schema.get("required", [])
     if not isinstance(required, list):
         return set()
     return {key for key in required if isinstance(key, str)}
-
-
-def _schema_field_has_file_source(schema: dict[str, Any], field: str) -> bool:
-    return any(_schema_exact_field_has_file_source(schema, path) for path in _ancestor_paths(field))
-
-
-def _schema_exact_field_has_file_source(schema: dict[str, Any], field: str) -> bool:
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        return False
-    field_schema: Any = None
-    current_properties: Any = properties
-    for part in field.split("."):
-        if not isinstance(current_properties, dict):
-            return False
-        field_schema = current_properties.get(part)
-        if not isinstance(field_schema, dict):
-            return False
-        current_properties = field_schema.get("properties")
-    return isinstance(field_schema, dict) and field_schema.get("source") == "file"
 
 
 def _schema_field_has_iterate_source(
@@ -2259,16 +2237,6 @@ def _validate_phase_io_schemas(path: Path, mode: str, ast: PhaseAST) -> None:
     io = getattr(ast, "io", None)
     if io is None:
         return
-    if getattr(io, "artifacts", None):
-        raise SkillLoadError(
-            f"{path}: io.artifacts is a graph-boundary declaration and only "
-            "valid on GRAPH.md, not on phase files",
-            payload=make_error_payload(
-                f"[F-v3-{mode}-io-schema-invalid]",
-                "io.artifacts declared on a phase file; move it to GRAPH.md io",
-                source_path=f"{path}:{_frontmatter_key_line(path, 'io')}",
-            ),
-        )
     _validate_inline_io_schema(path, io.inputs, "input", domain=mode)
     _validate_inline_io_schema(path, io.outputs, "output", domain=mode)
 

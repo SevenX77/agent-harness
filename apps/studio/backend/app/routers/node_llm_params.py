@@ -2,7 +2,7 @@
 
 Overrides are the three role-level generation params (thinking /
 max_output_tokens / temperature) applied per node, stored per skill+node under
-``.workspace/node_llm_params.json``. The run-time resolver seam that applies
+``.workspace/runtime_config.json``. The run-time resolver seam that applies
 them lives with the run endpoints (wired by the orchestrator).
 """
 

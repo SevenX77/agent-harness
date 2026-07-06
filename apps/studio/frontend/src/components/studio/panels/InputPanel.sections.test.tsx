@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import type { LintError, SkillDetail } from "@/api/types"
+import type { LintError, RuntimeConfig, SkillDetail } from "@/api/types"
 import { InputPanel, __test__ } from "./InputPanel"
 
 const testInputsProps = vi.hoisted((): Array<Record<string, unknown>> => [])
@@ -31,26 +31,13 @@ const graphMd = [
   "        type: string",
   "      novel:",
   "        type: string",
-  "        source: file",
-  "        path: import_files/material/novel.md",
   "      chapters:",
   "        type: array",
-  "        source: file",
-  "        dir: import_files/abc_segmentation",
-  "        pattern: chapter_{n}_latest_*.json",
-  "        numbers: [1, 2, 7]",
   "  outputs:",
   "    type: object",
   "    properties:",
   "      result:",
   "        type: string",
-  "  artifacts:",
-  "    - stem: story_framework",
-  "      mode: single",
-  "      fields: [result]",
-  "    - stem: abc_segmentation",
-  "      mode: per-item",
-  "      fields: [result]",
   "---",
   "<phase depends_on=\"input\">setup</phase>",
 ].join("\n")
@@ -63,14 +50,48 @@ function detail(): SkillDetail {
   } as unknown as SkillDetail
 }
 
+function runtimeConfig(): RuntimeConfig {
+  return {
+    schema_version: "studio.runtime_config.v1",
+    inputs: {
+      import_root: "import_files",
+      manifest: {
+        root: [
+          {
+            kind: "file",
+            name: "novel.md",
+            path: "import_files/material/novel.md",
+            fields: [{ name: "novel", type: "string" }],
+          },
+          {
+            kind: "batch",
+            name: "chapter_{n}_latest_*.json",
+            stem: "chapter",
+            dir: "import_files/abc_segmentation",
+            pattern: "chapter_{n}_latest_*.json",
+            numbers: [1, 2, 7],
+          },
+        ],
+        phases: {},
+      },
+      root: {},
+      phases: {},
+    },
+    artifacts: [
+      { stem: "story_framework", mode: "single", fields: ["result"] },
+      { stem: "abc_segmentation", mode: "per-item", fields: ["result"] },
+    ],
+  }
+}
+
 function lintError(overrides: Partial<LintError>): LintError {
   return {
-    file: ".workspace/import_files",
+    file: ".workspace/runtime_config.json",
     line: null,
     column: null,
     error_code: "compile_error",
     severity: "error",
-    message: "Graph input schema requires test input field 'chapter'",
+    message: "Graph input schema requires runtime input field 'chapter'",
     phase_name: null,
     field_path: "chapter",
     source_path: null,
@@ -101,14 +122,18 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
   })
 
   it("has no golden section and no inline schema/import forms (r3 panel收敛)", () => {
-    const html = renderToStaticMarkup(<InputPanel skillId="demo" skillDetail={detail()} />)
+    const html = renderToStaticMarkup(
+      <InputPanel skillId="demo" skillDetail={detail()} runtimeConfig={runtimeConfig()} />,
+    )
     expect(html).not.toContain("golden")
     expect(html).not.toContain("Import file field name")
     expect(html).not.toContain("Artifact path for")
   })
 
   it("graph overview renders the inline input config entry + artifact list rows", () => {
-    const html = renderToStaticMarkup(<InputPanel skillId="demo" skillDetail={detail()} />)
+    const html = renderToStaticMarkup(
+      <InputPanel skillId="demo" skillDetail={detail()} runtimeConfig={runtimeConfig()} />,
+    )
     // inline Configure entry (Collapsible trigger) replaces the old modal button
     expect(html).toContain("Configure input")
     expect(html).toContain("Configure output artifacts")
@@ -120,7 +145,7 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
 
   it("scopes sections by boundary node role (F3 归属规则)", () => {
     const inputBoundary = renderToStaticMarkup(
-      <InputPanel skillId="demo" skillDetail={detail()} ioBoundary="input" />,
+      <InputPanel skillId="demo" skillDetail={detail()} runtimeConfig={runtimeConfig()} ioBoundary="input" />,
     )
     // Input boundary: input config + test inputs, NO output/artifacts section.
     expect(inputBoundary).toContain("Configure input")
@@ -128,7 +153,7 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
     expect(inputBoundary).not.toContain("output artifacts")
 
     const outputBoundary = renderToStaticMarkup(
-      <InputPanel skillId="demo" skillDetail={detail()} ioBoundary="output" />,
+      <InputPanel skillId="demo" skillDetail={detail()} runtimeConfig={runtimeConfig()} ioBoundary="output" />,
     )
     // Output boundary: output preview + artifacts, NO input config / test inputs.
     expect(outputBoundary).toContain("output artifacts")
@@ -155,7 +180,7 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
 
     expect(html).toContain("Input diagnostics")
     expect(html).toContain("chapter")
-    expect(html).toContain("Graph input schema requires test input field")
+    expect(html).toContain("Graph input schema requires runtime input field")
     expect(html).not.toContain("node-level diagnostic")
   })
 

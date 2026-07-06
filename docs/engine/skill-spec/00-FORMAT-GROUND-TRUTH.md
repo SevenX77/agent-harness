@@ -1,7 +1,7 @@
 ---
 status: FROZEN
 ssot: graph_skill_format_templates
-updated: 2026-06-30
+updated: 2026-07-05
 
 supersedes:
   - docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md inline templates
@@ -12,12 +12,21 @@ supersedes:
 
 - `phase_config` is not a legal field or compatibility layer. Agent phase settings are declared directly in `phases/<id>/SKILL.md` frontmatter.
 - Every `io.inputs` and `io.outputs` block is a Draft 2020-12 JSON Schema object: top-level `type: object`, `properties` is required, and every `required` entry must exist in `properties`.
-- Compile validates static dataflow before run: every required phase input must come from root input, an upstream phase output, an explicit `source: file`, or an iterator-injected field; every required root output must be available at an output-marked terminal phase.
+- Compile validates static dataflow before run: every required phase input must come from root input, an upstream phase output, a runtime-config import binding, or an iterator-injected field; every required root output must be available at an output-marked terminal phase.
 - LOGIC actions must be declared as `def <action_name>(inputs) -> dict`; `inputs` is read-only, and actions produce values only by returning keys declared in the phase `io.outputs.properties`.
 - Declared Agent tools must resolve during compile, except for framework-provided tools and generated subagent/critic tools.
 - Declared `references[].path` and `examples[].path` are compile-time source resources: paths must be portable POSIX-style relative paths using only `A-Z a-z 0-9 . _ - /`, must not escape the skill root, and must point to readable files. Runtime reader fallback is only for reader processing failures after the source path has passed compile.
 - `llm_role` reachability is host/gateway truth. Pure source compile accepts the string shape; Studio strict compile/run preflight may inject a role resolver and fail early when the configured role is unavailable.
 - Agent phase 生效角色判定链（engine `manifest.effective_llm_role`）：`use_graph_llm_role: true` → 图默认 `llm_role` → 兜底；`false`（默认）→ 节点 `llm_role` → 图默认 `llm_role` → 兜底。兜底 = 约定角色名 `graph_agent`（去 host 的角色注册表按此名解析）。
+
+## 2026-07-05 Runtime Config Addendum
+
+- `GRAPH.md` and phase Markdown files declare only skill source: topology, frontmatter, and JSON Schema for blackboard fields. They must not store imported file paths, import directories, artifact file routing, LLM compare candidates, or node custom model params.
+- `.workspace/runtime_config.json` is the single runtime configuration layer for a Studio skill. It contains import-file bindings, runtime output artifact specs, node custom model params, compare LLM candidates, and other runtime-only configuration. It must not contain `golden` or `ui`.
+- Studio refreshes `.workspace/runtime_config.json` from `.workspace/import_files/` before lint/compile/run/predict and whenever the import file tree or import file contents change. Compile/lint read this file so missing or invalid runtime inputs are blocked before execution.
+- Runtime file imports live only under `.workspace/import_files/`: Input/Test Inputs files at the root, phase-node files under `.workspace/import_files/.phase/<phase_id>/`. The `.phase/` sentinel keeps node ids from colliding with user-created root folders.
+- At run/predict, `runtime_config.inputs.root` is materialized into the initial GRAPH input blackboard, and `runtime_config.inputs.phases.<phase_id>` is injected immediately before that phase executes. Imported file paths never appear in `GRAPH.md` or phase Markdown.
+- A run or predict writes an immutable snapshot at `.workspace/runs/<run_id>/runtime_config.snapshot.json`; replay/debug reads the snapshot, not a moving live config.
 
 # graph_skill 文件格式模板唯一真相源
 
@@ -36,7 +45,7 @@ supersedes:
 
 标准目录是一棵树。它同时展示作者编辑的 skill 源码，以及 Studio 默认同址放置的 `.workspace/` 运行时目录。
 
-`.workspace/` 是约定目录名，使用小写。它属于标准物理目录，但不是 skill 源码，不进入 git，compile 不读取它；run、predict、golden eval 等运行期产物才写入这里。
+`.workspace/` 是约定目录名，使用小写。它属于标准物理目录，但不是 skill 源码，不进入 git。compile/lint 只允许读取其中的 `runtime_config.json` 作为运行配置层；run、predict、golden eval 等运行期产物才写入这里。
 
 ```text
 <skill_root>/
@@ -54,8 +63,10 @@ supersedes:
   references/
   examples/
   .workspace/
+    runtime_config.json
     runs/
       <run_id>/
+        runtime_config.snapshot.json
         trace.jsonl
         result.json
         final_state.json
@@ -71,9 +82,10 @@ supersedes:
       <input_id>.json
       <input_import_name>/
         ...
-      <node_id>/
-        <node_import_name>/
-          ...
+      .phase/
+        <phase_id>/
+          <node_import_name>/
+            ...
     copilot/
       sessions/
         <skill_id>/
@@ -87,10 +99,11 @@ supersedes:
 
 运行时规则：
 
-- Studio 默认可以把 Engine `workspace_dir` 传为 `<skill_root>/.workspace/`。其他 host 也可以传入别的绝对路径，但内部户型仍是同一套 `runs/`、`golden/`、`import_files/`。
+- Studio 默认可以把 Engine `workspace_dir` 传为 `<skill_root>/.workspace/`。其他 host 也可以传入别的绝对路径，但内部户型仍是同一套 `runtime_config.json`、`runs/`、`golden/`、`import_files/`。
 - `run_skill` / `predict_skill` 的输出统一进入 `<workspace_dir>/runs/<run_id>/`。
+- `run_skill` / `predict_skill` 必须在 `<workspace_dir>/runs/<run_id>/runtime_config.snapshot.json` 保存当次运行配置快照。
 - `evaluate_golden_baseline` 读写 `<workspace_dir>/golden/<baseline_id>/`。
-- 可复用输入样本、Input 导入文件和 Test Inputs 新建文件统一放在 `<workspace_dir>/import_files/` 根目录；节点导入文件放在 `<workspace_dir>/import_files/<node_id>/` 下。
+- 可复用输入样本、Input 导入文件和 Test Inputs 新建文件统一放在 `<workspace_dir>/import_files/` 根目录；节点导入文件放在 `<workspace_dir>/import_files/.phase/<phase_id>/` 下。
 - Predict 没有专属 `predict/` 或 `latest_predict.json`。
 - golden 是会失效的临时优化产物，不能写进 `phases/<phase_id>/`，也不能作为 skill 源码字段参与 compile。
 

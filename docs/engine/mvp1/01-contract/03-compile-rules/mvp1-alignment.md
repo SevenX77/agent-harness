@@ -62,7 +62,7 @@ sequenceDiagram
 | 解析 phase 节点 | node md | Logic/Subgraph/Agent AST | 文件名类型推导、字段表、body XML、节点 IO schema | domain-specific F-v3 |
 | 递归解析子 skill | SUBGRAPH / subagent target | child skill root / child AST | resolver 注入、skill id、路径、递归链路 | `[F-v3-compile-recursion-cycle]`, `[F-v3-compile-depth-exceeded]`, `[F-v3-resolver-*]`, `[F-v3-skill-*]` |
 | DAG 校验 | frontmatter phases + body depends_on | topological order | 依赖存在、无环、无孤岛 | `[F-v3-graph-phase-cycle]`, `[F-v3-graph-phase-island]` |
-| IO 数据流校验 | root IO + phase IO | dataflow map | phase `io.inputs.properties` 声明消费的每个字段都必须有 root input / upstream output / `source:file` / iterate-batch 注入来源；输出字段合法、串联覆盖需授权 | `[F-v3-graph-dataflow-source-missing]`, `[F-v3-sequential-overwrite-unauthorized]` |
+| IO 数据流校验 | root IO + phase IO + runtime_config input fields | dataflow map | phase `io.inputs.properties` 声明消费的每个字段都必须有 root input / upstream output / runtime_config import binding / iterate-batch 注入来源；输出字段合法、串联覆盖需授权 | `[F-v3-graph-dataflow-source-missing]`, `[F-v3-sequential-overwrite-unauthorized]` |
 | Mention 校验 | Agent AST | mention refs | 静态可达、类型/语法合法 | `[F-v3-mention-*]` |
 | Purity 校验 | action/tool Python 文件 | purity report | action 必须纯；mvp1 目标硬禁 `run_skill`/文件系统/`sys.path`/import 越界 | `[F-v3-logic-action-purity-violation]` |
 | 错误聚合 | all checks | error report | 同阶段尽量聚合，payload 至少含 code/level/stage/message/doc_link | 各 domain code |

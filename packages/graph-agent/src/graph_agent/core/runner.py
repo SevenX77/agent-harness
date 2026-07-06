@@ -69,7 +69,7 @@ from graph_agent.core.exceptions import (
     SkillLoadError,
     make_error_payload,
 )
-from graph_agent.core.graph_assembler import assemble_graph
+from graph_agent.core.graph_assembler import assemble_graph, read_runtime_input_binding_value
 from graph_agent.core.llm_provider import LLMProvider, LLMProviderError
 from graph_agent.core.local_workspace_resolver import (
     LocalWorkspaceResolver,
@@ -88,6 +88,58 @@ _NO_MOCK_LLM = object()
 _RUNTIME_PHASE_FAILED_CODE = "[F-v3-runtime-phase-failed]"
 _SKILL_ENTRYPOINT_FILENAME = "SKILL.md"
 _HITL_TOOL_NAMES = {"ask_clarification", "request_human_input"}
+
+
+def _runtime_input_fields_from_config(
+    runtime_config: dict[str, Any] | None,
+) -> dict[str, set[str]] | None:
+    if not isinstance(runtime_config, dict):
+        return None
+    inputs = runtime_config.get("inputs")
+    if not isinstance(inputs, dict):
+        return None
+    phases = inputs.get("phases")
+    if not isinstance(phases, dict):
+        return None
+    result: dict[str, set[str]] = {}
+    for phase_id, bindings in phases.items():
+        if not isinstance(phase_id, str) or not isinstance(bindings, dict):
+            continue
+        fields = {
+            field for field, value in bindings.items() if isinstance(field, str) and isinstance(value, dict)
+        }
+        if fields:
+            result[phase_id] = fields
+    return result or None
+
+
+def _runtime_artifacts_from_config(runtime_config: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(runtime_config, dict):
+        return []
+    raw = runtime_config.get("artifacts")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _runtime_root_inputs_from_config(
+    runtime_config: dict[str, Any] | None,
+    workspace_dir: Path,
+) -> dict[str, Any]:
+    if not isinstance(runtime_config, dict):
+        return {}
+    inputs = runtime_config.get("inputs")
+    if not isinstance(inputs, dict):
+        return {}
+    root = inputs.get("root")
+    if not isinstance(root, dict):
+        return {}
+    materialized: dict[str, Any] = {}
+    for field_name, binding in root.items():
+        if not isinstance(field_name, str) or not isinstance(binding, dict):
+            continue
+        materialized[field_name] = read_runtime_input_binding_value(field_name, binding, workspace_dir)
+    return materialized
 
 
 @dataclass(frozen=True)
@@ -224,6 +276,7 @@ def predict_skill(  # noqa: C901
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     copilot_predict: Callable[..., Any] | None = None,
+    runtime_config: dict[str, Any] | None = None,
     **inputs: Any,
 ) -> RunResult:
     """Run skill compilation and execution in Predict mode with caching and mock generation."""
@@ -251,8 +304,15 @@ def predict_skill(  # noqa: C901
 
     mock_llm = inputs.pop("mock_llm", None)
     current_hashes = inputs.pop("current_hashes", None) or {}
+    root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_root)
+    if root_runtime_inputs:
+        inputs = {**inputs, **root_runtime_inputs}
 
-    compiled = compile_skill(skill_path_obj, skill_resolver=resolver)
+    compiled = compile_skill(
+        skill_path_obj,
+        skill_resolver=resolver,
+        runtime_input_fields=_runtime_input_fields_from_config(runtime_config),
+    )
 
 
     # 1. Strategy setup
@@ -295,6 +355,7 @@ def predict_skill(  # noqa: C901
         callbacks=cast(Any, event_sink),
         skill_resolver=resolver,
         predict_context=predict_context,
+        runtime_config=runtime_config,
     )
     graph = assembled.graph
 
@@ -402,6 +463,7 @@ def run_skill(
     skill_resolver: SkillResolverProtocol | None = None,
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
+    runtime_config: dict[str, Any] | None = None,
     **inputs: Any,
 ) -> RunResult:
     """Execute a SKILL.md and return a typed workflow result."""
@@ -431,6 +493,7 @@ def run_skill(
             skill_resolver=resolver,
             model_resolver=model_resolver,
             llm_provider=llm_provider,
+            runtime_config=runtime_config,
             **inputs,
         )
     except GraphAgentError as exc:
@@ -490,6 +553,7 @@ def resume_skill(
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> RunResult:
     """Resume a previously interrupted skill run from a checkpoint."""
     workspace_root = _validate_workspace_dir(workspace_dir)
@@ -526,7 +590,11 @@ def resume_skill(
     active_checkpointer = checkpointer if checkpointer is not None else _resolve_resume_checkpointer()
 
     try:
-        compiled = compile_skill(skill_path, skill_resolver=resolver)
+        compiled = compile_skill(
+            skill_path,
+            skill_resolver=resolver,
+            runtime_input_fields=_runtime_input_fields_from_config(runtime_config),
+        )
         invoke_config = _resolve_resume_config(
             active_checkpointer,
             compiled=compiled,
@@ -559,6 +627,7 @@ def resume_skill(
             callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
+            runtime_config=runtime_config,
         )
         graph = assembled.graph
         _validate_resume_node_ids(compiled, from_phase, resume_from_node_id, resume_to_node_id)
@@ -631,6 +700,7 @@ def resume_skill(
         run_id=run_id,
         trace_output=trace_output,
         wall_time=wall_time,
+        runtime_config=runtime_config,
     )
 
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
@@ -686,6 +756,7 @@ def _run_skill_dict(
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
+    runtime_config: dict[str, Any] | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -727,6 +798,7 @@ def _run_skill_dict(
             skill_resolver=resolver,
             model_resolver=model_resolver,
             llm_provider=llm_provider,
+            runtime_config=runtime_config,
             **inputs,
         )
 
@@ -860,6 +932,9 @@ def _run_compiled_artifact_graph(
         )
 
     event_subscriber = request.execution_context.get("event_subscriber")
+    runtime_config = request.execution_context.get("runtime_config")
+    if not isinstance(runtime_config, dict):
+        runtime_config = None
     checkpointer_spec = request.execution_context.get("checkpointer_spec")
     if checkpointer_spec is None:
         checkpointer_spec = request.execution_context.get("checkpointer")
@@ -874,6 +949,7 @@ def _run_compiled_artifact_graph(
         llm_provider=llm_provider,
         model_resolver=model_resolver,
         checkpointer_spec=checkpointer_spec or "auto",
+        runtime_config=runtime_config,
         **request.inputs,
     )
     wall_time = float(raw.get("wall_time_sec", 0.0))
@@ -917,6 +993,9 @@ def _run_compiled_artifact_predict_graph(
             retryable=False,
         )
 
+    runtime_config = request.execution_context.get("runtime_config")
+    if not isinstance(runtime_config, dict):
+        runtime_config = None
     return predict_skill(
         artifact_root,
         workspace_dir=workspace_dir,
@@ -927,6 +1006,7 @@ def _run_compiled_artifact_predict_graph(
         model_resolver=model_resolver,
         mock_llm=request.execution_context.get("mock_llm"),
         current_hashes=request.execution_context.get("current_hashes") or {},
+        runtime_config=runtime_config,
         **request.inputs,
     )
 
@@ -1748,6 +1828,7 @@ def _finalize_successful_v030_run(
     run_id: str,
     trace_output: Path,
     wall_time: float,
+    runtime_config: dict[str, Any] | None,
 ) -> dict[str, Any]:
     final_context = result["data"].model_dump()
     output_context = _context_with_framework_output_sources(final_context, result)
@@ -1761,9 +1842,7 @@ def _finalize_successful_v030_run(
         output_context,
         default_output_dir=trace_output / "artifacts",
     )
-    manifest_artifacts = (
-        compiled_raw.get("io", {}).get("artifacts") if isinstance(compiled_raw, dict) else None
-    )
+    manifest_artifacts = _runtime_artifacts_from_config(runtime_config)
     if manifest_artifacts:
         write_manifest_artifacts(
             manifest_artifacts,
@@ -1959,6 +2038,7 @@ def _run_v030_skill_dict(
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     checkpointer_spec: Any = "auto",
+    runtime_config: dict[str, Any] | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
@@ -1972,6 +2052,9 @@ def _run_v030_skill_dict(
     t0 = time.time()
     run_id = thread_id or str(uuid.uuid4())
     trace_output = workspace_dir / "runs" / run_id
+    root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_dir)
+    if root_runtime_inputs:
+        inputs = {**inputs, **root_runtime_inputs}
     event_sink = _prepare_v030_event_sink(
         trace_output=trace_output,
         event_subscriber=event_subscriber,
@@ -1993,7 +2076,11 @@ def _run_v030_skill_dict(
     active_checkpointer = resolve_checkpointer(checkpointer_spec)
 
     try:
-        compiled = compile_skill(skill_root, skill_resolver=resolver)
+        compiled = compile_skill(
+            skill_root,
+            skill_resolver=resolver,
+            runtime_input_fields=_runtime_input_fields_from_config(runtime_config),
+        )
         assembled = assemble_graph(
             compiled,
             chat_model=chat_model,
@@ -2002,6 +2089,7 @@ def _run_v030_skill_dict(
             callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
+            runtime_config=runtime_config,
         )
         graph = assembled.graph
 
@@ -2065,6 +2153,7 @@ def _run_v030_skill_dict(
         run_id=run_id,
         trace_output=trace_output,
         wall_time=wall_time,
+        runtime_config=runtime_config,
     )
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
     return {

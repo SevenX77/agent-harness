@@ -156,11 +156,18 @@ def compile_artifact(
     store: Literal["ephemeral", "product"] = "ephemeral",
     version: str | None = None,
     artifact_output_root: str | Path | None = None,
+    runtime_input_fields: dict[str, set[str]] | None = None,
+    runtime_config_fingerprint: str | None = None,
 ) -> CompiledArtifactManifest:
     source_path = Path(source_root)
 
     # 1. Invoke Engine compiler to validate the skill
-    compile_skill(source_path, cache=False, skill_resolver=skill_resolver)
+    compile_skill(
+        source_path,
+        cache=False,
+        skill_resolver=skill_resolver,
+        runtime_input_fields=runtime_input_fields,
+    )
 
     # 2. Find all files, sort by POSIX relative path lexicographically, excluding metadata/cache files
     relative_paths: list[str] = []
@@ -211,6 +218,11 @@ def compile_artifact(
 
         fingerprint_hasher.update(len(content).to_bytes(8, "big"))
         fingerprint_hasher.update(content)
+    if runtime_config_fingerprint:
+        runtime_bytes = runtime_config_fingerprint.encode("utf-8")
+        fingerprint_hasher.update(b"runtime_config")
+        fingerprint_hasher.update(len(runtime_bytes).to_bytes(8, "big"))
+        fingerprint_hasher.update(runtime_bytes)
     execution_fingerprint = f"sha256:{fingerprint_hasher.hexdigest()}"
 
     objects_root = Path(artifact_output_root) if artifact_output_root is not None else _default_artifact_output_root()

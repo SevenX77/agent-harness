@@ -39,10 +39,10 @@
    "n": 32,
    "cap": "input-config-tree",
    "design_ref": "n2-atom-32",
-   "current": "现状:符合(r3 新建,r5 改内联+嵌套;2026-07-05 import_files 收敛)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。 **r6 导入体验(PM 点2/3/4/5)**:导入入口从「Import file…/Import folder…」双按钮合并为**单个「Import…」= 文件夹选择器**(selectImportFolder;文件夹即导入其下全部文件,`selectImportFile` wrapper 已删)。导入即**自动匹配**:candidatesFromScanEntries → matchCandidatesToInputs(把候选字段名 normalizeFieldName 小写+去尾数/`{n}` 后比对 declaredInputFieldNames(view.content)),命中自动勾选 + `bg-accent` 高亮 + 「matched io.inputs」标注;**批量条目 field 取 batchStem(`chapter`)而非父目录名**(旧 bug:取父目录名致导入无一匹配)。导入结果 groupCandidatesByFile **按源文件分组**(每文件一行:名+路径+编辑+删除;字段在下)。单文件组行加**编辑按钮**(Pencil,onFileOpen `.workspace/<candidate.path>`)。导入落盘统一为 `.workspace/import_files/`:Input/GRAPH 与 Test Inputs 在根级,phase 导入在 `import_files/<node_id>/`;InputPanel 经 fileFieldsInImportScope 只把当前 scope 的 `source:'file'` 声明送进文件组,legacy 导入声明、旧测试输入目录和其他节点目录不显示。",
+   "current": "现状:符合(r3 新建,r5 改内联+嵌套;2026-07-05 runtime_config/import_files 收敛)。**r5 起是 InputConfigInline(内联可折叠段,非 modal)**:面板「Configure input」CollapsibleTrigger 原地展开黑板勾选树 + 文件组 + Save;blackboardAtNode/reconcileInputFields 复用 staticEdgeInference 出黑板行,**按 fieldPathRows 递归树遍历**——object 字段展开子路径,子字段(chapter.aa_number)独立勾选(FieldCheckTree 带展开/折叠 caret + depth 缩进);勾选=io.inputs 声明该路径,applyIoInputChecks 的 nestedPropertiesFromPaths 把勾中路径投影成嵌套 io.inputs(顶层与嵌套 required 各层生成),乐观 hash 锁写回。Input 伪节点(GRAPH.md)blackboard=[] 只显文件组。三态(matched/available/missing)到嵌套粒度,missing 只显 subtree 顶层未满足项;runtime_config 文件注入字段不算 upstream missing。对账镜像 engine 运行期 `[F-v3-runtime-state-mapping-failed]`,本轮 engine 递归 required 让嵌套 missing 真被拦(此前只顶层)。 **r6 导入体验(PM 点2/3/4/5)**:导入入口从「Import file…/Import folder…」双按钮合并为**单个「Import…」= 文件夹选择器**(selectImportFolder;文件夹即导入其下全部文件,`selectImportFile` wrapper 已删)。导入即**自动匹配**:candidatesFromScanEntries → matchCandidatesToInputs(把候选字段名 normalizeFieldName 小写+去尾数/`{n}` 后比对 declaredInputFieldNames(view.content)),命中自动勾选 + `bg-accent` 高亮 + 「matched io.inputs」标注;**批量条目 field 取 batchStem(`chapter`)而非父目录名**(旧 bug:取父目录名致导入无一匹配)。导入结果 groupCandidatesByFile **按源文件分组**(每文件一行:名+路径+编辑+删除;字段在下)。单文件组行加**编辑按钮**(Pencil,onFileOpen `.workspace/<candidate.path>`)。导入落盘统一为 `.workspace/import_files/`:Input/GRAPH 与 Test Inputs 在根级,phase 导入在 `import_files/.phase/<node_id>/`;InputPanel 经 runtimeFileFieldsInImportScope 只把当前 scope 的 runtime_config manifest 送进文件组,legacy 导入声明、旧测试输入目录和其他节点目录不显示。import_files 文件树刷新和文件内容更新都会刷新 runtime_config 并重算字段。",
    "gap": "符合设计(r5 内联 + 嵌套;r6 单 import + 自动匹配 + 按文件分组 + 编辑按钮)。",
    "fe_status": "符合",
-   "be_dep": "已就绪:POST /api/io/scan + /io/import(import copy 进 .workspace/import_files[/<node_id>]/<name>/、rebase 相对路径);engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。自动匹配纯前端(比对声明字段名,无需后端)。",
+   "be_dep": "已就绪:POST /api/io/scan + /io/import(import copy 进 .workspace/import_files/ 或 .workspace/import_files/.phase/<node_id>/<name>/、rebase 相对路径并刷新 runtime_config);engine 递归 required(state_mapper) + backend field_supply 递归(canvas_data_gap),全测试绿。自动匹配纯前端(比对声明字段名,无需后端)。",
    "fe_status_prev": "r3 modal + 顶层扁平",
    "fe_resync": "2026-07-03 r5:modal→内联可折叠;顶层扁平→嵌套树可独立勾选｜2026-07-03 r6:双 import→单 Import…;导入即自动匹配;按文件分组 + 文件行编辑按钮"
   },
@@ -50,10 +50,10 @@
    "n": 33,
    "cap": "output-artifacts-config",
    "design_ref": "n2-atom-33",
-   "current": "现状:符合(r3 新建,r5 嵌套展示)。OutputConfigDialog(仍是 scoped modal——多 artifact 卡片编辑器窄面板塞不下,PM 允许的兜底,只在 Output 边界/GRAPH.md 角色出现):blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,r5 按 fieldPathRows **递归展开**嵌套输出对象(segmentation_result → segmentation_result.bb_number)——但**嵌套子行仅展示形状、不独立勾选**(selectableMaxDepth=0):artifacts 由 engine writer 按顶层键落盘(write_manifest_artifacts 只认 blackboard 顶层),一个 artifact 携带整块顶层字段(含子字段),没有「只装 bb_number」的引擎语义。applyGraphArtifacts 写 GRAPH.md io.artifacts 清单;single/per-item 分段钮;固定命名预览。 r4:reconcileOutputFields 三态,missing dialog 级置顶,matched(io.outputs 成员)高亮。",
+   "current": "现状:符合(r3 新建,r5 嵌套展示;2026-07-05 runtime_config 收敛)。OutputConfigDialog(仍是 scoped modal——多 artifact 卡片编辑器窄面板塞不下,PM 允许的兜底,只在 Output 边界/GRAPH.md 角色出现):blackboardAtOutput(根 io.inputs ∪ 各 phase io.outputs 带来源)出统一字段全集,r5 按 fieldPathRows **递归展开**嵌套输出对象(segmentation_result → segmentation_result.bb_number)——但**嵌套子行仅展示形状、不独立勾选**(selectableMaxDepth=0):artifacts 由 engine writer 按顶层键落盘(write_manifest_artifacts 只认 blackboard 顶层),一个 artifact 携带整块顶层字段(含子字段),没有「只装 bb_number」的引擎语义。OutputConfigDialog 保存 runtime_config.artifacts,不写 GRAPH.md io;single/per-item 分段钮;固定命名预览。 r4:reconcileOutputFields 三态,missing dialog 级置顶,matched(io.outputs 成员)高亮。",
    "gap": "符合设计;旧 per-field target 已删;嵌套输出展示但不 sub-select(引擎顶层落盘约束)。",
    "fe_status": "符合",
-   "be_dep": "已就绪:engine io.artifacts writer(固定格式,顶层键落盘,engine 测试绿)。",
+   "be_dep": "已就绪:runtime_config artifacts + engine artifact writer(固定格式,顶层键落盘,engine 测试绿)。",
    "fe_status_prev": "r3 顶层扁平 universe",
    "fe_resync": "2026-07-03 r5:输出 universe 递归展示嵌套(子行 display-only)"
   },
@@ -88,7 +88,7 @@
   },
   {
    "step": 2,
-   "what": "#33 输出 artifacts:OutputConfigDialog(artifacts 清单 × 黑板全字段勾选)+ applyGraphArtifacts/blackboardAtOutput + engine io.artifacts writer(固定格式)。",
+   "what": "#33 输出 artifacts:OutputConfigDialog(artifacts 清单 × 黑板全字段勾选)+ runtime_config.artifacts/blackboardAtOutput + engine artifact writer(固定格式)。",
    "depends_on": "engine ArtifactSpec + write_manifest_artifacts(本轮建,TDD)。",
    "why": "PM r3 点5:artifacts 是 list;自产固定格式便于下游识别。",
    "block": "全栈(前端+engine)"
@@ -156,10 +156,10 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + source:'file' 单/批量);candidatesFromScanEntries 展平扫描结果(io-config.test)。",
-    "reconcileInputFields:声明+黑板有=matched、黑板有未声明=available、io.inputs 声明但黑板无=missing(source:'file' 永不 missing);missing 不写回(io-config.test)。",
+    "blackboardAtNode 出黑板行(勾选=io.inputs 消费);applyIoInputChecks 重建 io.inputs(黑板 + runtime_config 文件字段普通 schema);candidatesFromScanEntries 展平扫描结果(io-config.test)。",
+    "reconcileInputFields:声明+黑板有=matched、黑板有未声明=available、io.inputs 声明但黑板无=missing(runtime_config root import backing 可满足 Input 伪节点入口字段);missing 不写回(io-config.test)。",
     "Input boundary diagnostics: manual Compile errors with file=.workspace/import_files remain visible in Input panel diagnostics; panel field source merges manual Compile and lint instead of letting clean realtime lint erase Compile failures.",
-    "Import files scope: Input/Test Inputs write and display only `.workspace/import_files/*`; phase imports write and display only `.workspace/import_files/<node_id>/*`; legacy import declarations are ignored by the IO panel."
+    "Import files scope: Input/Test Inputs write and display only `.workspace/import_files/*`; phase imports write and display only `.workspace/import_files/.phase/<node_id>/*`; legacy import declarations are ignored by the IO panel."
    ],
    "layer2": [
     "真机:segmentation 黑板树 chapters 勾选;GRAPH.md=Input 伪节点 files-only『No fields yet』;导入 material-prep 识别 timestamp/run_id/... 字段。"
@@ -171,7 +171,7 @@
     },
     {
      "file": "n2-43-input-import-recognition.png",
-     "caption": "导入 material-prep 文件夹:新文件组带灰色真实路径,识别出的字段逐个列出并标 source: file(类型识别对)"
+     "caption": "导入 material-prep 文件夹:新文件组带灰色真实路径,识别出的字段逐个列出并来自 runtime_config manifest(类型识别对)"
     },
     {
      "file": "n2-44-input-reconcile-missing-matched.png",
@@ -209,7 +209,7 @@
    ],
    "fe_status": "符合",
    "layer1": [
-    "blackboardAtOutput 聚合根 io.inputs ∪ 各 phase io.outputs 带来源;applyGraphArtifacts 写 io.artifacts 清单;graphArtifactsOf 读回(io-config.test)。",
+    "blackboardAtOutput 聚合根 io.inputs ∪ 各 phase io.outputs 带来源;runtimeArtifactsOf 读 runtime_config,保存写 runtime_config.artifacts(io-config.test)。",
     "reconcileOutputFields:io.outputs 成员=matched、universe 其余=available、io.outputs 声明但 universe 无=missing(io-config.test)。"
    ],
    "layer2": [

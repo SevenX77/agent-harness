@@ -16,7 +16,7 @@
 | 动作 | 最终决策 / status | 能力·区域 | 依据(file:line)+ FROZEN |
 |---|---|---|---|
 | M1 头部 `name/schema_version/llm_role/description/phases`(**无 type**) | **target-design**:需结构化表单,现无 panel 只能裸编辑 GRAPH.md(旧 doc 写 type=stale) | graph-authoring · canvas | `GraphCanvas.tsx:397-405,423-429`;FROZEN `02-graph-md-spec.md:12-20` |
-| M2+M3 io schema 展示与编辑入口 | **target-design(D-IO-PREVIEW + D-IO-CONFIG-TREE,PM 2026-07-02)**:i/o 面板 = 实例预览(只读)+ **Configure 按钮进配置弹窗** + 文件 list 摘要;配置 = 黑板优先字段勾选树(黑板 context 第一行 = io.inputs 消费,Add file 追加 `source:'file'`;Input 节点无黑板只有文件);**面板内不做 schema 表单/推断展示**。双击 IO 开 GRAPH.md=live 保留 | file-editing · input | `GraphCanvas.tsx:423-429`/`InputPanel.tsx`;FROZEN `02-graph:60,86-87`;原话见 §3 D-IO-CONFIG-TREE + `03_regions/input` §4 |
+| M2+M3 io schema 展示与编辑入口 | **target-design(D-IO-PREVIEW + D-IO-CONFIG-TREE,PM 2026-07-02)**:i/o 面板 = 实例预览(只读)+ **Configure 按钮进配置弹窗** + 文件 list 摘要;配置 = 黑板优先字段勾选树(黑板 context 第一行 = io.inputs 消费,Add file 由 runtime_config 注入文件字段;Input 节点无黑板只有文件);**面板内不做 schema 表单/推断展示**。双击 IO 开 GRAPH.md=live 保留 | file-editing · input | `GraphCanvas.tsx:423-429`/`InputPanel.tsx`;FROZEN `02-graph:60,86-87`;原话见 §3 D-IO-CONFIG-TREE + `03_regions/input` §4 |
 | i/o panel 改名 + artifacts 清单 | **target-design(r3)**:input→i/o panel;artifacts = **文件清单**(Add artifact,每文件勾选黑板字段,single/per-item,固定命名 `<stem>_latest_<ts>` + `history/`),配置归 Output 节点/GRAPH.md(Input 节点只输入、Output 节点只输出、GRAPH.md 两者都有);普通节点 = 输入配置 + 输出预览 | phase-editing · input(→i/o panel) | **FROZEN/G3**(io.outputs 顶层文件路径+schema、一 schema 多文件、只许 md/json——r3 清单即其成型态);md 源=最终 validated `business_data_md`(不回转);细化落 `03_regions/input` F7 |
 | M4 起点 Input / 终点 Output = 画布独立节点 | **live**(已渲染、可双击开 GRAPH.md) | graph-authoring · canvas | `build-nodes.ts:203-217`;FROZEN `02-graph:44` |
 | REQ-1 纵向 TB 布局 | **target-design**:现 LR 挤瘪面板,目标 TB | graph-authoring · canvas | `lib/layout.ts:31`(rankdir LR)/`SkillNode.tsx:82,132` |
@@ -51,7 +51,7 @@
 
 ## 5. 测试关键点
 - 新建 phase 脚手架产出**合 FROZEN**(logic/agent,无 mode/system_prompt/exit_contract/python_callable),可直接编译。
-- i/o 面板 = 预览 + Configure + 文件 list(无 schema 表单/golden 区/内联创建表单);配置树黑板行与 dot 静态推断同源;勾选写回 io.inputs / `source:'file'`(D-IO-CONFIG-TREE)。
+- i/o 面板 = 预览 + Configure + 文件 list(无 schema 表单/golden 区/内联创建表单);配置树黑板行与 dot 静态推断同源;勾选写回 io.inputs JSON Schema,文件路径绑定留在 runtime_config(D-IO-CONFIG-TREE)。
 - 子图 io 改动**不**触发严格 1:1 校验(G2);子图按 path 解析、path 找不到→标红+导入入口。
 - artifacts:清单声明(文件×黑板字段勾选)→ engine writer 固定格式落 `.workspace`(`<stem>_latest_<ts>` + `history/`,per-item 编号继承输入批量);md 取 `business_data_md` 不回转;旧 per-field target 路径删净。
 - 所有写(serialize_graph/mutate_phase_body/新建 phase/Properties 保存)走 **Rust** 文件命令(非 Python)。

@@ -1,6 +1,6 @@
 """Fixed-format artifact manifest writer (MVP1 r3 design).
 
-GRAPH.md ``io.artifacts`` declares which files to persist and which
+The host runtime_config ``artifacts`` manifest declares which files to persist and which
 blackboard fields each file carries. This module owns the fixed on-disk
 naming so downstream imports can recognize engine-produced artifacts at a
 glance (design: engine mvp1 physical-layout §2.2.2, skill-syntax §3.4.1):

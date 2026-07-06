@@ -45,7 +45,7 @@ callback 派发失败只记录 warning,不破坏工具执行。该实现只记�
 
 ### 4. 边操作事件现状(节点间 dot 操作,源 11-io)
 "节点间操作"(上节点 end→下节点 start 之间)已有 typed event schema:`ArtifactSavedEvent`(io.outputs artifact 落盘)、`CompactionEvent`(截断/摘要)、`BlackboardReduceEvent`、`InputDispatchEvent`、`InputFileInjectedEvent`。
-- `InputFileInjectedEvent` 已在声明式 `source: file` 输入成功注入普通 blackboard 后发出;事件包含 `from_phase`、`to_phase`、`changed_keys`、`blackboard_snapshot`、`file_ref`、`target_field`。该发射点位于 graph-exec/io 接线,不是 Studio DTO。
+- `InputFileInjectedEvent` 已在 runtime_config import binding 输入成功注入普通 blackboard 后发出;事件包含 `from_phase`、`to_phase`、`changed_keys`、`blackboard_snapshot`、`file_ref`、`target_field`。该发射点位于 graph-exec/io 接线,不是 Studio DTO。
 - `InputDispatchEvent` runtime emit 已接入 `graph_assembler.py:_wrap_phase_runtime_node` 返回的节点入口拦截器:phase 执行前按 `io.inputs.properties` 从 business blackboard 计算 `dispatched_keys`/`changed_keys`,携带 dispatch 时的 `blackboard_snapshot`,经通用 callbacks/event sink 发出并写入 `trace.jsonl`。非 iterate 执行 `branch_index=None`;phase/graph iterate 执行期间由 runtime contextvar 写入稳定的 1-based `branch_index`。
 - `BlackboardReduceEvent` runtime emit 已接入声明式 loop accumulate:每次 `_merge_accumulator` 后、`StateManager.update_business(... accumulate.var=acc)` 写回后发出,携带声明的 `accumulate.merge`、`changed_keys=[accumulate.var]` 与操作后的 blackboard snapshot。engine 不计算 authoritative before/after diff;OB5 仍由 consumer 用 snapshot 近似。
 

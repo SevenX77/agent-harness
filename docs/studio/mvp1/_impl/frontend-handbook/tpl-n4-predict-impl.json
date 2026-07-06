@@ -17,7 +17,7 @@
    "n": 2,
    "cap": "predict-input-select",
    "design_ref": "n4-atom-2",
-   "current": "现状：已实现且符合。handlePredict 调 resolveRunInput(targetSkillId, selectedTestInputId)：选了输入 fetch content；没选不再回退 {}，而是抛出『Select a compile-valid test input before Predict/Run』并走 Predict/Run 诊断抽屉。Studio backend 的 compile_skill_for_studio 已在 engine compile 后执行 workspace preflight：.workspace/import_files/*.json 必须是 JSON object 且符合 GRAPH.md io.inputs；有 required input 但没有测试输入、输入 JSON 类型/required 不匹配都会作为 CompileFailure.errors 返回，Compile drawer 展示并阻断 Predict。已是路径式（i/o 面板选已导入文件直接 predict），无 PredictInputDialog 弹窗。",
+   "current": "现状：已实现且符合。handlePredict 调 resolveRunInput(targetSkillId, selectedTestInputId)：选了输入 fetch content；没选不再回退 {}，而是抛出『Select a compile-valid test input before Predict/Run』并走 Predict/Run 诊断抽屉。Studio backend 的 compile_skill_for_studio 已在 engine compile 前刷新 .workspace/runtime_config.json 并把 import binding 传入 compile：required input 没有 runtime_config backing、输入类型/required 不匹配都会作为 CompileFailure.errors 返回，Compile drawer 展示并阻断 Predict。Predict/Run 会在 .workspace/runs/<run_id>/runtime_config.snapshot.json 保存当次配置快照。已是路径式（i/o 面板选已导入文件直接 predict），无 PredictInputDialog 弹窗。",
    "gap": "符合设计，无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。POST /api/skills/{id}/runs/predict（routers/runs.py predict_run）已实现，接受 input_data；Compile preflight 已校验 .workspace/import_files/*.json 与 graph io.inputs。"
@@ -108,8 +108,8 @@
    "layer1": [
     "选中一份测试输入 → 点 Predict → 断言 resolveRunInput 取该输入 content、postPredictRun body.input_data=该 content 且不含 mock_llm。",
     "未选输入 → 断言 resolveRunInput reject『Select a compile-valid test input before Predict/Run』，不再发送 {}。",
-    "后端 compile 契约测：graph io.inputs 有 required 字段但 .workspace/import_files 为空 → 422 CompileFailure，错误 file=.workspace/import_files、error_code=STUDIO_TEST_INPUT_MISSING。",
-    "后端 compile 契约测：测试输入 JSON 字段类型不符合 graph io.inputs → 422 CompileFailure，错误 file=.workspace/import_files/<case>.json、error_code=STUDIO_TEST_INPUT_SCHEMA_INVALID。",
+    "后端 compile 契约测：graph io.inputs 有 required 字段但 runtime_config root bindings 为空 → 422 CompileFailure，错误 file=.workspace/runtime_config.json、error_code=STUDIO_RUNTIME_INPUT_MISSING。",
+    "后端 compile 契约测：runtime_config root binding 字段类型不符合 graph io.inputs → 422 CompileFailure，错误 file=.workspace/runtime_config.json、error_code=STUDIO_RUNTIME_INPUT_SCHEMA_INVALID。",
     "后端 compile 契约测：golden expected_output 不符合节点 io.outputs（缺 required 或类型错）→ 422 CompileFailure，error_code=STUDIO_GOLDEN_SCHEMA_INVALID。",
     "mock 后端契约测：predict response.phases 里 agent 节点 mocked_source ∈ {golden_case, heuristic_stub}（有/无 golden 两例）。"
    ],

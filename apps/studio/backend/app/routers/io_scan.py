@@ -11,7 +11,9 @@ regex-robust — it must NOT assume the engine's own fixed artifact format.
 
 from __future__ import annotations
 
+import csv
 import json
+import mimetypes
 import re
 import shutil
 from pathlib import Path
@@ -23,6 +25,10 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/api/io", tags=["io"])
 
 _TEXT_SUFFIXES = {".md", ".txt"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg"}
+_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
+_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+_DOC_SUFFIXES = {".pdf", ".doc", ".docx"}
 _SAMPLE_MAX_CHARS = 200
 _VERSION_RE = re.compile(r"_(?:latest(?:_\d{8}_\d{6})?|v\d{8}_\d{6})", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"_(\d{1,6})(?=_|$)")
@@ -99,11 +105,53 @@ def _scan_json_file(path: Path) -> list[dict[str, Any]]:
 
 def _scan_jsonl_file(path: Path) -> list[dict[str, Any]]:
     try:
-        with path.open(encoding="utf-8") as fh:
-            first = fh.readline()
-        return _fields_of_mapping(json.loads(first))
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            inner = _fields_of_mapping(json.loads(line))
+            return [{"name": _strip_version(path.stem), "type": "array", "sample": None, "items": inner}]
     except (OSError, ValueError):
         return []
+    return []
+
+
+def _scan_tabular_file(path: Path, *, delimiter: str) -> list[dict[str, Any]]:
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            reader = csv.reader(fh, delimiter=delimiter)
+            header = next(reader, [])
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return []
+    return [
+        {
+            "name": _strip_version(path.stem),
+            "type": "array",
+            "sample": None,
+            "items": [{"name": str(column), "type": "string", "sample": None} for column in header if str(column)],
+        }
+    ]
+
+
+def _content_type_for(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".md":
+        return "text/markdown"
+    if suffix == ".txt":
+        return "text/plain"
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
+
+
+def _binary_field(path: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": _strip_version(path.stem),
+            "type": "object",
+            "sample": None,
+            "value_type": "file_ref",
+            "content_type": _content_type_for(path),
+        }
+    ]
 
 
 def _file_entry(path: Path) -> dict[str, Any]:
@@ -111,19 +159,31 @@ def _file_entry(path: Path) -> dict[str, Any]:
     size = path.stat().st_size
     if suffix == ".json":
         fmt, fields = "json", _scan_json_file(path)
-    elif suffix == ".jsonl":
+    elif suffix in {".jsonl", ".ndjson"}:
         fmt, fields = "jsonl", _scan_jsonl_file(path)
+    elif suffix in {".csv", ".tsv"}:
+        fmt = suffix.removeprefix(".")
+        fields = _scan_tabular_file(path, delimiter="\t" if suffix == ".tsv" else ",")
     elif suffix in _TEXT_SUFFIXES or suffix == "":
         fmt = "text"
         fields = [{"name": _strip_version(path.stem), "type": "string", "sample": None}]
+    elif suffix in _DOC_SUFFIXES:
+        fmt, fields = "document", _binary_field(path)
+    elif suffix in _IMAGE_SUFFIXES:
+        fmt, fields = "image", _binary_field(path)
+    elif suffix in _AUDIO_SUFFIXES:
+        fmt, fields = "audio", _binary_field(path)
+    elif suffix in _VIDEO_SUFFIXES:
+        fmt, fields = "video", _binary_field(path)
     else:
-        fmt, fields = "binary", []
+        fmt, fields = "binary", _binary_field(path)
     return {
         "kind": "file",
         "name": path.name,
         "stem": _strip_version(path.stem),
         "path": str(path),
         "format": fmt,
+        "content_type": _content_type_for(path),
         "size": size,
         "fields": fields,
     }
@@ -147,19 +207,37 @@ def _fold_batches(files: list[Path]) -> list[dict[str, Any]]:
         members.sort(key=lambda item: item[0])
         numbers = [n for n, _ in members]
         first = members[0][1]
+        first_entry = _file_entry(first)
+        field_name = _batch_field_name(pattern)
         entries.append(
             {
                 "kind": "batch",
                 "name": pattern,
+                "stem": field_name,
                 "dir": str(first.parent),
                 "pattern": pattern,
                 "numbers": numbers,
                 "count": len(members),
-                "fields": _file_entry(first)["fields"],
+                "format": first_entry["format"],
+                "content_type": first_entry.get("content_type"),
+                "fields": [
+                    {
+                        "name": field_name,
+                        "type": "array",
+                        "sample": None,
+                        "items": first_entry["fields"],
+                    }
+                ],
             }
         )
     entries.extend(_file_entry(f) for f in sorted(singles))
     return entries
+
+
+def _batch_field_name(pattern: str) -> str:
+    stem = Path(pattern).stem
+    prefix = stem.split("{n}", 1)[0]
+    return prefix.rstrip("._-") or stem
 
 
 def _scan_dir(path: Path, *, depth: int) -> list[dict[str, Any]]:
@@ -226,11 +304,12 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
 
     Imports are runtime workspace data (same class as runs/ and golden/ that
     the backend already writes), NOT skill source -- so this write does not go
-    through the Rust native-fs sole-writer. The copy is what makes the
-    engine's workspace-contained ``source:'file'`` declarations resolvable
-    (absolute/external paths are rejected at runtime by design). ``history/``
-    subfolders are version archives and are skipped.
+    through the Rust native-fs sole-writer. Phase-owned imports are isolated
+    under ``import_files/.phase/<node_id>/`` so user-created root folders never
+    collide with node ids. ``history/`` subfolders are version archives and are
+    skipped.
     """
+    from app.services.runtime_config import refresh_runtime_config
     from app.services.skills import resolve_skill_dir
 
     source = Path(request.path)
@@ -246,7 +325,7 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
     workspace_root = (resolve_skill_dir(skill_id) / ".workspace").resolve()
     import_root = workspace_root / "import_files"
     if request.node_id is not None:
-        import_root = import_root / request.node_id
+        import_root = import_root / ".phase" / request.node_id
     target_dir = import_root / raw_name
     if target_dir.exists():
         shutil.rmtree(target_dir)
@@ -262,4 +341,5 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
 
     entries = _scan_dir(target_dir, depth=1)
     _rebase_entry_paths(entries, workspace_root)
+    refresh_runtime_config(workspace_root.parent)
     return {"dir": target_dir.relative_to(workspace_root).as_posix(), "entries": entries}

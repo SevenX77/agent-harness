@@ -40,7 +40,7 @@
    "n": 14,
    "cap": "edge-dot-static-inference",
    "design_ref": "atom-14",
-   "current": "现状:已实现且符合。staticEdgeInference 纯函数(根 io.inputs ∪ 祖先 io.outputs(最近祖先覆盖)∪ target source:'file' 注入;终端边→root io.outputs 为消费者;字段真相读 files frontmatter、拓扑用 graph_topology.depends_on)+ EdgeContextView StaticInferenceBody(隐藏 Tamper/Resume/Operations)+ GraphCanvas 无事件回退 + tooltip 语义;6 例纯函数测试 + 1 例视图测试。",
+   "current": "现状:已实现且符合。staticEdgeInference 纯函数(根 io.inputs ∪ 祖先 io.outputs(最近祖先覆盖)∪ target runtime_config import binding 注入;终端边→root io.outputs 为消费者;字段真相读 files frontmatter + runtime_config,拓扑用 graph_topology.depends_on)+ EdgeContextView StaticInferenceBody(隐藏 Tamper/Resume/Operations)+ GraphCanvas 无事件回退 + tooltip 语义;6 例纯函数测试 + 1 例视图测试。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_status": "n/a",
@@ -52,7 +52,7 @@
  "plan": [
   {
    "step": 1,
-   "what": "#14 edge-dot-static-inference:新增静态黑板推断纯选择器(TDD:拓扑+io 声明→逐边字段集,含 source:'file' 注入与顺序覆盖语义)→ EdgeContextView 双态(无运行事件=静态推断视图,有=真实快照)→ ContextEdge tooltip 语义更新。",
+   "what": "#14 edge-dot-static-inference:新增静态黑板推断纯选择器(TDD:拓扑+io 声明+runtime_config→逐边字段集,含 import binding 注入与顺序覆盖语义)→ EdgeContextView 双态(无运行事件=静态推断视图,有=真实快照)→ ContextEdge tooltip 语义更新。",
    "depends_on": "前端独立(推导数据全在 skillDetail;无后端依赖)。",
    "why": "2026-07-02 PM 新增目标:dot 在没跑之前也要像 node 的 io 一样给出 schema 推断;#7-#9 运行期链路已符合,本节点当前唯一实质工程就是这条。",
    "block": "前端独立"
@@ -130,7 +130,7 @@
    "fe_status": "符合",
    "layer1": [
     "RED:断言静态推断选择器存在且对样例拓扑推导正确(现状函数不存在先红)。",
-    "GREEN:断言逐边字段集 = 根 io.inputs ∪ 祖先 io.outputs ∪ source:'file' 注入;同名顺序覆盖取最近祖先;下游 io.inputs 切片字段被标出;并联分支各自独立。",
+    "GREEN:断言逐边字段集 = 根 io.inputs ∪ 祖先 io.outputs ∪ runtime_config import binding 注入;同名顺序覆盖取最近祖先;下游 io.inputs 切片字段被标出;并联分支各自独立。",
     "断言 EdgeContextView 无运行事件时渲染静态推断视图(非空态),有事件时保持真实视图;ContextEdge hasTraceData=false 态 tooltip 为字段推断语义。"
    ],
    "layer2": [

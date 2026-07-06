@@ -72,6 +72,66 @@ export interface CompileFailure {
 
 export type CompileResult = CompileSuccess | CompileFailure
 
+export interface RuntimeImportField {
+  name: string
+  type?: string | null
+  value_type?: string | null
+  json_path?: string[] | null
+  items?: RuntimeImportField[] | null
+  content_type?: string | null
+}
+
+export interface RuntimeImportEntry {
+  kind?: 'file' | 'dir' | 'batch' | string
+  name: string
+  stem?: string | null
+  path?: string | null
+  dir?: string | null
+  pattern?: string | null
+  numbers?: number[] | null
+  count?: number | null
+  format?: string | null
+  content_type?: string | null
+  fields?: RuntimeImportField[] | null
+  entries?: RuntimeImportEntry[] | null
+}
+
+export interface RuntimeInputBinding {
+  path?: string
+  dir?: string
+  pattern?: string
+  numbers?: number[]
+  value_type?: string
+  content_type?: string
+  type?: string
+  json_path?: string[]
+  sha256?: string
+}
+
+export interface RuntimeArtifactRow {
+  stem: string
+  mode: 'single' | 'per-item'
+  format?: 'json' | 'md'
+  fields: string[]
+}
+
+export interface RuntimeConfig {
+  schema_version: string
+  inputs: {
+    import_root: string
+    manifest: {
+      root: RuntimeImportEntry[]
+      phases: Record<string, RuntimeImportEntry[]>
+    }
+    root: Record<string, RuntimeInputBinding>
+    phases: Record<string, Record<string, RuntimeInputBinding>>
+  }
+  llm?: Record<string, unknown>
+  artifacts: RuntimeArtifactRow[]
+  updated_at?: string
+  fingerprint?: string
+}
+
 export interface SkillSummary {
   id: string
   name: string

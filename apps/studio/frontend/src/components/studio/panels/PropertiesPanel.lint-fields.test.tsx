@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from "react-dom/server"
+﻿import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import type { LintError, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
@@ -7,7 +7,7 @@ import { PropertiesPanel } from "./PropertiesPanel"
 
 // Field-level lint near-projection (authoring N3 atom #5): the Properties panel marks the
 // offending frontmatter field by the engine's `field_path`. No-field errors degrade to the
-// node badge (not asserted here — they simply do not render a field marker).
+// node badge (not asserted here 鈥?they simply do not render a field marker).
 
 function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
   return {
@@ -57,7 +57,7 @@ function renderPanel(args: {
 
 const LOGIC_CONTENT = ["---", "name: segment", "validator: true", "---", "body"].join("\n")
 
-describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
+describe("PropertiesPanel 鈥?field-level lint projection (atom #5)", () => {
   it("marks the field named by the engine field_path", () => {
     const html = renderPanel({
       id: "segment",
@@ -82,7 +82,7 @@ describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
           file: "phases/segment/SKILL.md",
           line: 2,
           error_code: "F-v3-graph-dataflow-source-missing",
-          message: "phase 'segment' input 'chapter_lines' has no root, upstream, or source:file provider",
+          message: "phase 'segment' input 'chapter_lines' has no root, upstream, or runtime input provider",
           field_path: "segment.io.inputs.properties.chapter_lines",
         }),
       ],
@@ -91,7 +91,7 @@ describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
     expect(html).toContain("1 lint issue on this node")
     expect(html).toContain("segment.io.inputs.properties.chapter_lines")
     expect(html).toContain("chapter_lines")
-    expect(html).toContain("source:file provider")
+    expect(html).toContain("runtime input provider")
   })
 
   it("does NOT mark fields that have no matching field_path", () => {
@@ -100,14 +100,14 @@ describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
       data: baseData({ filePath: "phases/segment/LOGIC.md" }),
       filePath: "phases/segment/LOGIC.md",
       content: LOGIC_CONTENT,
-      // GRAPH-level error: no field_path → degrades to node badge, no field marker.
+      // GRAPH-level error: no field_path 鈫?degrades to node badge, no field marker.
       lintErrors: [lintErr({ field_path: null, file: "GRAPH.md", phase_name: null, message: "graph broken" })],
     })
     expect(html).not.toContain("Field has")
     expect(html).not.toContain("graph broken")
   })
 
-  it("scopes markers to the selected node — other phases' field errors are ignored", () => {
+  it("scopes markers to the selected node 鈥?other phases' field errors are ignored", () => {
     const html = renderPanel({
       id: "segment",
       data: baseData({ filePath: "phases/segment/LOGIC.md" }),

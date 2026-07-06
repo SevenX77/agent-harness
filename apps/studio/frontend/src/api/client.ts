@@ -27,6 +27,8 @@ import type {
   RunDetail,
   RunMetadata,
   ResumeValidityResponse,
+  RuntimeArtifactRow,
+  RuntimeConfig,
   SerializeGraphRes,
   SkillDetail,
   SyncSkillReq,
@@ -1024,6 +1026,8 @@ export async function writeSkillFile(
 export interface IoScanField {
   name: string
   type: string
+  value_type?: string
+  content_type?: string
   sample?: unknown
   items?: IoScanField[]
 }
@@ -1038,6 +1042,7 @@ export interface IoScanEntry {
   numbers?: number[]
   count?: number
   format?: string
+  content_type?: string
   size?: number
   fields?: IoScanField[]
   entries?: IoScanEntry[]
@@ -1061,5 +1066,18 @@ export async function importIoIntoWorkspace(
       ...(options.nodeId ? { node_id: options.nodeId } : {}),
     },
   )
+  return response.data
+}
+
+export async function getRuntimeConfig(skillId: string): Promise<RuntimeConfig> {
+  const response = await api.get<RuntimeConfig>(`/skills/${skillId}/runtime-config`)
+  return response.data
+}
+
+export async function putRuntimeArtifacts(
+  skillId: string,
+  artifacts: RuntimeArtifactRow[],
+): Promise<RuntimeConfig> {
+  const response = await api.put<RuntimeConfig>(`/skills/${skillId}/runtime-config/artifacts`, { artifacts })
   return response.data
 }

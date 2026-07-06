@@ -448,7 +448,7 @@ describe('api client auth token', () => {
         node_id: 'segment',
       })
       return {
-        data: { dir: 'import_files/segment/material', entries: [] },
+        data: { dir: 'import_files/.phase/segment/material', entries: [] },
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -459,7 +459,7 @@ describe('api client auth token', () => {
     await expect(importIoIntoWorkspace('skill-a', '/tmp/material', {
       name: 'material',
       nodeId: 'segment',
-    })).resolves.toEqual({ dir: 'import_files/segment/material', entries: [] })
+    })).resolves.toEqual({ dir: 'import_files/.phase/segment/material', entries: [] })
   })
 
   it('surfaces backend unavailable for compile network failures', async () => {

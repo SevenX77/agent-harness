@@ -36,8 +36,10 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 
 ```
 <workspace_dir>/                        # Studio 决定在哪;Engine 只在里面盖固定户型
+  runtime_config.json                   # runtime-only config: imports/artifacts/node params/compare candidates
   runs/
     <run_id>/                           # run_skill / predict_skill 的统一 run-scoped 输出地
+      runtime_config.snapshot.json      # 本次 run/predict 的 runtime_config 不可变快照
       trace.jsonl                       # typed CallbackEvent JSONL;一行一个事件
       result.json                       # serialized RunResult
       final_state.json                  # RunResult.context 快照
@@ -52,8 +54,9 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
   import_files/
     <input_id>.json                     # Input/Test Inputs 根级输入样本
     <input_import_name>/...             # Input 导入文件/文件夹
-    <node_id>/
-      <node_import_name>/...            # 节点导入文件/文件夹
+    .phase/
+      <node_id>/
+        <node_import_name>/...          # 节点导入文件/文件夹
 ```
 
 #### 2.2.1 入口契约(`workspace_dir`)
@@ -71,7 +74,7 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 | `result.json` | Engine SDK | SDK 返回的 `RunResult` JSON 形态;`source` 区分 `"run"` / `"predict"`。 |
 | `final_state.json` | Engine SDK | `RunResult.context` 快照;Golden / Compare / 后续流程可以按 run id 复用。 |
 | `metrics.json` | Engine SDK | `RunResult.metrics` 快照。 |
-| `artifacts/` | Engine SDK / tool runtime | 由 GRAPH.md io 的 `artifacts:` 清单声明驱动(文件×黑板字段勾选,见 skill-syntax);`target: file` 无显式 `path`/`output_dir` 时也默认写入这里。 |
+| `artifacts/` | Engine SDK / tool runtime | 由 runtime_config 的 `artifacts` 清单声明驱动(文件×黑板字段勾选,见 skill-spec);`target: file` 无显式 `path`/`output_dir` 时也默认写入这里。 |
 
 **artifacts 固定命名格式(writer 规范,PM 2026-07-02 r3)** — 自产 artifact 永远这个格式,下游导入扫描零成本识别;导入侧对外来格式保持鲁棒(识别不假定此格式):
 
@@ -82,10 +85,10 @@ artifacts/
   <stem>/<item>_<NNN>_latest_<ts>.json      # per-item 模式:iterate 每轮一个,NNN 零填充
 ```
 
-- `artifacts:` 清单条目 = `{stem, fields: [黑板字段名…], mode: single|per-item}`;一个文件可装多个字段,一个字段可进多个文件(G3 语义成型态)。
+- `runtime_config.artifacts` 清单条目 = `{stem, fields: [黑板字段名…], mode: single|per-item}`;一个文件可装多个字段,一个字段可进多个文件(G3 语义成型态)。
 - per-item 编号**继承输入批量编号**(输入侧导入时提取记录的编号列表),无则用迭代轮次号;数量由 iterate range 推断。
 - 格式只许 `md` / `json`(G3);md 源 = 最终 validated `business_data_md`,不回转。
-- 本清单**整体替换** per-field `target:'artifact'` 声明与 `artifact_manager` legacy 别名——同轮删除,不留兼容(no-backward-compat)。
+- 本清单**整体替换**旧 per-field artifact path 声明与 legacy 别名——同轮删除,不留兼容(no-backward-compat)。
 
 Predict **不**有专属输出目录。Predict 与真实 Run 都写 `<workspace_dir>/runs/<run_id>/`;调用方读 `result.json` 或 SDK 返回值里的 `RunResult.source` 区分语义:
 
@@ -106,20 +109,20 @@ RunResult.source = "predict"
 golden 的失效语义归 `05-invalidation`,评估 / diff 机制归 `05-run-inner/06-golden-eval`;本域只规定它在磁盘上落在 `.workspace/golden/`。
 
 #### 2.2.4 `import_files/`
-`import_files/` 是输入侧文件事实根目录,供 run / predict / golden eval 复用输入样本,也承载 Input 与节点配置导入的 `source:'file'` 文件。
+`import_files/` 是输入侧文件事实根目录,供 run / predict / golden eval 复用输入样本,也承载 Input 与节点配置导入的外部文件。字段绑定由 `.workspace/runtime_config.json` 记录,不写进 GRAPH.md/节点 md。
 
 | 路径 | 内容 / 语义 |
 |---|---|
 | `import_files/<input_id>.json` | Input/Test Inputs 根级输入样本。 |
 | `import_files/<input_import_name>/...` | Input 边界导入的外部文件/文件夹。 |
-| `import_files/<node_id>/<node_import_name>/...` | 节点导入的外部文件/文件夹;`node_id` 必须是当前 graph phase id。 |
+| `import_files/.phase/<node_id>/<node_import_name>/...` | 节点导入的外部文件/文件夹;`node_id` 必须是当前 graph phase id。`.phase/` 用来隔离用户根级文件夹与节点 id。 |
 
-Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路径写成另一份 Engine physical-layout SSOT;所有这类文件读取都必须从 `import_files/` 对应 scope 解析。
+Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路径写成另一份 Engine physical-layout SSOT;所有这类文件读取都必须从 `import_files/` 对应 scope 解析,并刷新 runtime_config。
 
 #### 2.2.5 不变式 + 废除项
 - Engine 只认传入的 `workspace_dir: Path`;Studio 是 root 的提供者,不是 Engine 户型的一部分。
 - Run 与 Predict 的结果和日志统一进入 `<workspace_dir>/runs/<run_id>/`。
-- Golden 数据集统一进入 `<workspace_dir>/golden/`;Test Inputs、Input 导入和节点导入统一进入 `<workspace_dir>/import_files/`。
+- Golden 数据集统一进入 `<workspace_dir>/golden/`;Test Inputs、Input 导入和节点导入统一进入 `<workspace_dir>/import_files/`;runtime_config 统一进入 `<workspace_dir>/runtime_config.json`。
 - `run_id` 是 run-scoped artifacts 的唯一索引;Predict 没有 `latest` 文件。
 - 旧 Predict 专用目录废除:`predict_dir`、`.workspace/predict/latest_predict.json`、API response 中的 `file_paths.predict_dir`、旧 `.gitignore` 对 `.workspace/predict/` 的放行项都不再是 Engine 契约。
 

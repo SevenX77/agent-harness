@@ -176,15 +176,15 @@ def test_lint_on_disk_with_workspace_root_reflects_disk_truth(
     codes = {error.error_code for error in result.errors}
     assert "F-v3-graph-phase-island" in codes
     # The global-store skill of the same family is untouched and fails only the
-    # Studio preflight because it has required runtime input but no test input.
+    # Studio preflight because it has required runtime input but no runtime_config root binding.
     global_result = skill_service.lint_skill_on_disk("text-segmentation")
     assert global_result.status == "failed"
-    assert global_result.errors[0].file == ".workspace/import_files"
+    assert global_result.errors[0].file == ".workspace/runtime_config.json"
     assert global_result.errors[0].field_path == "input_text"
-    assert global_result.errors[0].error_code == "STUDIO_TEST_INPUT_MISSING"
+    assert global_result.errors[0].error_code == "STUDIO_RUNTIME_INPUT_MISSING"
 
 
-def test_lint_on_disk_includes_studio_test_input_preflight(
+def test_lint_on_disk_includes_studio_runtime_input_preflight(
     studio_roots: tuple[Path, Path],
 ) -> None:
     """The first-screen lint path must match Compile's Studio preflight gate."""
@@ -192,10 +192,10 @@ def test_lint_on_disk_includes_studio_test_input_preflight(
 
     assert result.status == "failed"
     assert result.phases_summary is not None
-    assert result.errors[0].file == ".workspace/import_files"
+    assert result.errors[0].file == ".workspace/runtime_config.json"
     assert result.errors[0].field_path == "input_text"
-    assert result.errors[0].source_path == ".workspace/import_files"
-    assert result.errors[0].error_code == "STUDIO_TEST_INPUT_MISSING"
+    assert result.errors[0].source_path == ".workspace/runtime_config.json"
+    assert result.errors[0].error_code == "STUDIO_RUNTIME_INPUT_MISSING"
 
 
 def test_body_lint_diverges_from_stale_disk_state(

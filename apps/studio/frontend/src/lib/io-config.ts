@@ -1,6 +1,12 @@
 import yaml from 'js-yaml'
 
-import type { SkillDetail } from '@/api/types'
+import type {
+  RuntimeArtifactRow,
+  RuntimeConfig,
+  RuntimeImportEntry,
+  RuntimeImportField,
+  SkillDetail,
+} from '@/api/types'
 
 import { staticEdgeInference } from './edge-static-inference'
 import {
@@ -20,8 +26,8 @@ import {
  * The blackboard is the primary data source for a node's inputs; imported
  * files only ADD fields on top. Accordingly the input config is a checkbox
  * tree — blackboard context first (checked = the node's io.inputs slice),
- * then per-file field trees (checked = `source:'file'` additions). The
- * output config is the symmetric artifacts manifest on GRAPH.md io
+ * then per-file field trees (checked = runtime_config-backed additions). The
+ * output config is the symmetric artifacts manifest in runtime_config
  * (files × blackboard-field checks; fixed on-disk format is engine-owned).
  *
  * Blackboard derivation is shared with the edge-dot static inference
@@ -150,15 +156,17 @@ export function declaredInputFieldNames(nodeContent: string | undefined): string
 /**
  * Input reconciliation for a node: blackboard fields tagged matched/available,
  * plus (at the top) any io.inputs field the upstream blackboard doesn't supply.
- * `source:'file'` inputs are injected from files, not the blackboard, so they
+ * runtime_config inputs are injected from files, not the blackboard, so they
  * are never "missing". Empty for nodes with no blackboard (Input pseudo-node).
  */
 export function reconcileInputFields(
   skillDetail: SkillDetail | undefined,
   nodeId: string,
+  runtimeFiles: FileFieldDecl[] = [],
 ): ReconciledFieldRow[] {
+  const runtimeSuppliedTopNames = new Set(runtimeFiles.map((decl) => decl.field))
   // Input pseudo-node / GRAPH.md (no selected phase): no upstream blackboard.
-  // A declared graph input with no `source:'file'` backing is unsourced — it
+  // A declared graph input with no runtime_config backing is unsourced — it
   // can only be filled by the run payload — so flag it missing so the author
   // sees the unwired entry field (PM 2026-07-02 r4b). Nested addressing: the
   // topmost unsourced object path stands for its whole subtree.
@@ -166,8 +174,8 @@ export function reconcileInputFields(
     const declared = declaredIoProps(rootGraphFrontmatter(skillDetail), 'inputs')
     return missingDeclaredRows(
       declared,
-      () => false,
-      'declared graph input · no source supplied',
+      (path) => runtimeSuppliedTopNames.has(path.split('.')[0]),
+      'declared graph input · no runtime input supplied',
     )
   }
   const blackboard = blackboardAtNode(skillDetail, nodeId)
@@ -179,7 +187,7 @@ export function reconcileInputFields(
 
   const missing = missingDeclaredRows(
     declared,
-    (path) => suppliedPaths.has(path),
+    (path) => suppliedPaths.has(path) || runtimeSuppliedTopNames.has(path.split('.')[0]),
     'required by io.inputs · not supplied by upstream',
   )
   const rest: ReconciledFieldRow[] = blackboard.map((row) => ({
@@ -191,7 +199,7 @@ export function reconcileInputFields(
 
 /**
  * Declared io.inputs paths (nested) not satisfied by `isSupplied`, as `missing`
- * rows — skipping `source:'file'` top-level fields (file-injected, never a
+ * rows — skipping runtime_config-backed top-level fields (file-injected, never a
  * blackboard gap) and any path whose ancestor is already missing (the topmost
  * unmet object stands for its subtree, so the tree isn't spammed with children).
  */
@@ -203,8 +211,7 @@ function missingDeclaredRows(
   const missing: ReconciledFieldRow[] = []
   const missingPaths = new Set<string>()
   for (const row of fieldPathRows(declared)) {
-    const topSchema = schemaObject(declared[row.path.split('.')[0]]) ?? {}
-    if (topSchema.source === 'file' || isSupplied(row.path)) {
+    if (isSupplied(row.path)) {
       continue
     }
     if (ancestorPrefixes(row.path).some((ancestor) => missingPaths.has(ancestor))) {
@@ -312,6 +319,7 @@ export interface IoInputCheckRow {
 export interface IoInputChecks {
   blackboard: IoInputCheckRow[]
   files: FileFieldDecl[]
+  fileFieldNames?: string[]
 }
 
 interface NestedBuild {
@@ -358,7 +366,7 @@ function nestedPropertiesFromPaths(rows: Array<{ path: string; type: string | nu
 /**
  * Rebuild a node file's `io.inputs` from the dialog state: checked blackboard
  * paths become the consumed (nested) slice; file declarations append their
- * `source:'file'` fields (single path or batch dir+pattern). Non-file top-level
+ * runtime file fields. Non-file top-level
  * properties NOT touched by the blackboard checks (e.g. runtime payload fields
  * on GRAPH.md) are preserved untouched.
  */
@@ -370,10 +378,11 @@ export function applyIoInputChecks(content: string, checks: IoInputChecks): stri
 
     // Top-level fields owned by the blackboard tree — preserve everything else.
     const blackboardTopNames = new Set(checks.blackboard.map((row) => row.path.split('.')[0]))
+    const fileTopNames = new Set(checks.fileFieldNames ?? checks.files.map((file) => file.field))
     const properties: Record<string, unknown> = {}
     for (const [name, schema] of Object.entries(previousProperties)) {
       const declared = schemaObject(schema) ?? {}
-      if (declared.source === 'file' || blackboardTopNames.has(name)) {
+      if (declared.source === 'file' || blackboardTopNames.has(name) || fileTopNames.has(name)) {
         continue
       }
       properties[name] = schema
@@ -387,20 +396,7 @@ export function applyIoInputChecks(content: string, checks: IoInputChecks): stri
     }
 
     for (const file of checks.files) {
-      const entry: Record<string, unknown> = {
-        ...(file.type ? { type: file.type } : {}),
-        source: 'file',
-      }
-      if (file.dir && file.pattern) {
-        entry.dir = file.dir
-        entry.pattern = file.pattern
-        if (file.numbers && file.numbers.length > 0) {
-          entry.numbers = file.numbers
-        }
-      } else if (file.path) {
-        entry.path = file.path
-      }
-      properties[file.field] = entry
+      properties[file.field] = file.type ? { type: file.type } : {}
     }
 
     io.inputs = {
@@ -411,115 +407,76 @@ export function applyIoInputChecks(content: string, checks: IoInputChecks): stri
   })
 }
 
-export interface ArtifactRow {
-  stem: string
-  mode: 'single' | 'per-item'
-  format?: 'json' | 'md'
-  fields: string[]
-}
+export type ArtifactRow = RuntimeArtifactRow
 
-/** Write the artifacts manifest onto GRAPH.md io (empty list removes it). */
-export function applyGraphArtifacts(graphMd: string, artifacts: ArtifactRow[]): string {
-  return mutateFrontmatter(graphMd, (data) => {
-    const io = ioOf(data)
-    if (artifacts.length === 0) {
-      delete io.artifacts
-      return
-    }
-    io.artifacts = artifacts.map((row) => ({
-      stem: row.stem,
-      mode: row.mode,
-      ...(row.format && row.format !== 'json' ? { format: row.format } : {}),
-      fields: row.fields,
-    }))
-  })
-}
-
-/** Read the declared artifacts manifest from GRAPH.md frontmatter. */
-export function graphArtifactsOf(skillDetail: SkillDetail | undefined): ArtifactRow[] {
-  const frontmatter = rootGraphFrontmatter(skillDetail)
-  const io = schemaObject(frontmatter?.io) ?? {}
-  const raw = io.artifacts
+export function runtimeArtifactsOf(runtimeConfig: RuntimeConfig | null | undefined): ArtifactRow[] {
+  const raw = runtimeConfig?.artifacts
   if (!Array.isArray(raw)) {
     return []
   }
-  const rows: ArtifactRow[] = []
-  for (const item of raw) {
-    const entry = schemaObject(item)
-    if (!entry || typeof entry.stem !== 'string' || !Array.isArray(entry.fields)) {
-      continue
-    }
-    rows.push({
-      stem: entry.stem,
-      mode: entry.mode === 'per-item' ? 'per-item' : 'single',
-      format: entry.format === 'md' ? 'md' : 'json',
-      fields: entry.fields.filter((f): f is string => typeof f === 'string'),
-    })
-  }
-  return rows
+  return raw
+    .filter((row) => typeof row.stem === 'string' && Array.isArray(row.fields))
+    .map((row) => ({
+      stem: row.stem,
+      mode: row.mode === 'per-item' ? 'per-item' : 'single',
+      format: row.format === 'md' ? 'md' : 'json',
+      fields: row.fields.filter((field): field is string => typeof field === 'string'),
+    }))
 }
 
-/** File-sourced input declarations of a node (or GRAPH.md via nodeContent). */
-export function fileFieldsOf(nodeContent: string | undefined): FileFieldDecl[] {
-  const frontmatter = parseFrontmatter(nodeContent)
-  const io = schemaObject(frontmatter?.io) ?? {}
-  const inputs = schemaObject(io.inputs) ?? {}
-  const properties = schemaObject(inputs.properties) ?? {}
-  const rows: FileFieldDecl[] = []
-  for (const [name, raw] of Object.entries(properties)) {
-    const schema = schemaObject(raw)
-    if (!schema || schema.source !== 'file') {
-      continue
-    }
-    rows.push({
-      field: name,
-      type: typeof schema.type === 'string' ? schema.type : null,
-      ...(typeof schema.path === 'string' ? { path: schema.path } : {}),
-      ...(typeof schema.dir === 'string' ? { dir: schema.dir } : {}),
-      ...(typeof schema.pattern === 'string' ? { pattern: schema.pattern } : {}),
-      ...(Array.isArray(schema.numbers)
-        ? { numbers: schema.numbers.filter((n): n is number => typeof n === 'number') }
-        : {}),
-    })
-  }
-  return rows
+function runtimeBatchFieldName(entry: RuntimeImportEntry): string {
+  const raw = entry.pattern ?? entry.stem ?? entry.name
+  const withoutExt = raw.replace(/\.[^.]+$/, '')
+  return withoutExt.split(/_?\{n\}/)[0].replace(/[._-]+$/, '') || withoutExt
 }
 
-function importDeclWorkspacePath(decl: FileFieldDecl): string | null {
-  const raw = decl.path ?? decl.dir
-  if (!raw) {
+function fieldDeclFromRuntimeFile(entry: RuntimeImportEntry, field: RuntimeImportField): FileFieldDecl | null {
+  if (typeof field.name !== 'string' || !field.name) {
     return null
   }
-  const normalized = raw.replace(/\\/g, '/').replace(/^\.workspace\//, '').replace(/^\/+/, '')
-  return normalized || null
+  return {
+    field: field.name,
+    type: typeof field.type === 'string' ? field.type : null,
+    ...(typeof entry.path === 'string' ? { path: entry.path } : {}),
+  }
 }
 
-/**
- * Keep only file-backed declarations owned by the currently open import scope.
- *
- * Input/Test Inputs use `.workspace/import_files/` directly. Phase nodes use
- * `.workspace/import_files/<node_id>/`. The graph topology's node id set is
- * needed to disambiguate a root import folder from a node-owned subfolder.
- */
-export function fileFieldsInImportScope(
-  declarations: FileFieldDecl[],
+function runtimeFileFieldsFromEntries(entries: RuntimeImportEntry[]): FileFieldDecl[] {
+  const rows: FileFieldDecl[] = []
+  for (const entry of entries) {
+    if (entry.kind === 'dir') {
+      rows.push(...runtimeFileFieldsFromEntries(entry.entries ?? []))
+      continue
+    }
+    if (entry.kind === 'batch') {
+      rows.push({
+        field: runtimeBatchFieldName(entry),
+        type: 'array',
+        ...(typeof entry.dir === 'string' ? { dir: entry.dir } : {}),
+        ...(typeof entry.pattern === 'string' ? { pattern: entry.pattern } : {}),
+        ...(Array.isArray(entry.numbers) ? { numbers: entry.numbers.filter((n): n is number => typeof n === 'number') } : {}),
+      })
+      continue
+    }
+    for (const field of entry.fields ?? []) {
+      const decl = fieldDeclFromRuntimeFile(entry, field)
+      if (decl) {
+        rows.push(decl)
+      }
+    }
+  }
+  return rows
+}
+
+export function runtimeFileFieldsInImportScope(
+  runtimeConfig: RuntimeConfig | null | undefined,
   nodeId: string | null,
-  nodeIds: ReadonlySet<string> = new Set(),
 ): FileFieldDecl[] {
-  return declarations.filter((decl) => {
-    const path = importDeclWorkspacePath(decl)
-    if (!path) {
-      return false
-    }
-    const parts = path.split('/').filter(Boolean)
-    if (parts[0] !== 'import_files') {
-      return false
-    }
-    if (nodeId) {
-      return parts[1] === nodeId && parts.length >= 3
-    }
-    return parts.length >= 2 && !nodeIds.has(parts[1])
-  })
+  const manifest = runtimeConfig?.inputs?.manifest
+  if (!manifest) {
+    return []
+  }
+  return runtimeFileFieldsFromEntries(nodeId ? manifest.phases[nodeId] ?? [] : manifest.root ?? [])
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { ResumeRunOptions } from "@/api/client"
-import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
+import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TraceDocumentPanel } from "@/components/MonacoPanel"
@@ -26,6 +26,7 @@ interface PanelsProps {
   skillId: string | null
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
+  runtimeConfig?: RuntimeConfig | null
   assetDirectoryTree?: WorkspaceDirectoryTree
   assetSubgraphTree?: SubgraphMembershipTree
   selectedNode: { id: string; data: SkillGraphNodeData } | null
@@ -34,6 +35,7 @@ interface PanelsProps {
   // F4: i/o-panel test-input selection that feeds Predict/Run.
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
+  onRuntimeArtifactsSave?: (artifacts: RuntimeArtifactRow[]) => Promise<string | null>
   onPhaseFileSave?: (
     payload: { path: string; content: string; expectedHash: string },
     target?: ChildSaveTarget,
@@ -83,12 +85,14 @@ export function Panels({
   skillId,
   workspaceRoot = null,
   skillDetail,
+  runtimeConfig = null,
   assetDirectoryTree,
   assetSubgraphTree,
   selectedNode,
   ioBoundary,
   selectedTestInputId,
   onSelectTestInput,
+  onRuntimeArtifactsSave,
   onPhaseFileSave,
   onPhaseRename,
   onActionCreate,
@@ -201,11 +205,13 @@ export function Panels({
         skillId={skillId}
         workspaceRoot={workspaceRoot}
         skillDetail={skillDetail}
+        runtimeConfig={runtimeConfig}
         selectedNode={selectedNode}
         ioBoundary={ioBoundary ?? null}
         lintErrors={lintErrors}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
+        onRuntimeArtifactsSave={onRuntimeArtifactsSave}
         onFileOpen={onFileOpen}
         onPhaseFileSave={onPhaseFileSave}
       />

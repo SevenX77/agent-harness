@@ -127,6 +127,7 @@ def compute_field_supply(
     depends_on: list[str],
     phase_io_index: dict[str, PhaseIoFields],
     graph_input_fields: set[str],
+    runtime_input_fields: dict[str, set[str]] | None = None,
 ) -> list[FieldSupply]:
     """For each input field of ``phase_name``, resolve where it is supplied from.
 
@@ -138,14 +139,15 @@ def compute_field_supply(
     """
     own_input_schemas = phase_io_index.get(phase_name, {}).get("inputs", {})
     own_inputs = _flatten_field_paths(own_input_schemas)
+    runtime_fields = runtime_input_fields.get(phase_name, set()) if runtime_input_fields else set()
     supply: list[FieldSupply] = []
     for field_name in own_inputs:
-        if _field_has_file_source(own_input_schemas, field_name):
+        if any(prefix in runtime_fields for prefix in _ancestor_paths(field_name)):
             supply.append(
                 {
                     "field": field_name,
                     "supplied": True,
-                    "source": "file",
+                    "source": "runtime_input",
                     "producer_phase": None,
                 }
             )
@@ -180,23 +182,6 @@ def compute_field_supply(
             }
         )
     return supply
-
-
-def _field_has_file_source(properties: dict[str, object], field_name: str) -> bool:
-    return any(_exact_field_has_file_source(properties, path) for path in _ancestor_paths(field_name))
-
-
-def _exact_field_has_file_source(properties: dict[str, object], field_name: str) -> bool:
-    current: object = properties
-    field_schema: object = None
-    for part in field_name.split("."):
-        if not isinstance(current, dict):
-            return False
-        field_schema = current.get(part)
-        if not isinstance(field_schema, dict):
-            return False
-        current = field_schema.get("properties")
-    return isinstance(field_schema, dict) and field_schema.get("source") == "file"
 
 
 def _resolve_producer(

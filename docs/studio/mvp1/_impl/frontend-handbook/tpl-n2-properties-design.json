@@ -154,7 +154,7 @@
         },
         {
           "endpoint": "GET /api/skills/{skill_id}/node-llm-params + gateway runtime dispatch",
-          "purpose": "运行前读取 .workspace/node_llm_params.json;engine adapter 只接受 enabled=true 的 node entry 并把字段作为 call override 传给 gateway;trace 记录 actual_runtime_settings。",
+          "purpose": "运行前读取 .workspace/runtime_config.json;engine adapter 只接受 enabled=true 的 node entry 并把字段作为 call override 传给 gateway;trace 记录 actual_runtime_settings。",
           "mechanism_ref": "n2_mech_graph"
         }
       ],

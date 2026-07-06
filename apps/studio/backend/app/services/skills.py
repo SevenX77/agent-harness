@@ -65,6 +65,7 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.file_watcher import record_api_write, register_workspace
 from app.services.git_local import initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
+from app.services.runtime_config import refresh_runtime_config, runtime_input_fields_for_engine
 from app.services.skill_resolver import build_studio_skill_resolver
 
 logger = logging.getLogger(__name__)
@@ -294,8 +295,13 @@ def lint_skill_on_disk(skill_id: str, workspace_root: str | None = None) -> Lint
 
 def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
+    runtime_config = refresh_runtime_config(skill_path)
     try:
-        compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
+        compiled = compile_skill(
+            skill_path,
+            skill_resolver=build_studio_skill_resolver(),
+            runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
+        )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         # compile-lint F6: lint projects the engine's FULL aggregated defect set
         # (same seam the manual Compile drawer expands), never just the primary.
@@ -307,7 +313,7 @@ def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) 
     # up from this same diagnostic.
     role_warnings = _llm_role_lint_errors(compiled, _configured_role_names())
     preflight_errors = (
-        _studio_preflight_lint_errors(compiled, skill_path)
+        _studio_preflight_lint_errors(compiled, skill_path, runtime_config)
         if include_studio_preflight
         else []
     )
@@ -318,10 +324,14 @@ def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) 
     )
 
 
-def _studio_preflight_lint_errors(compiled: CompiledSkill, skill_dir: Path) -> list[LintError]:
+def _studio_preflight_lint_errors(
+    compiled: CompiledSkill,
+    skill_dir: Path,
+    runtime_config: dict[str, Any],
+) -> list[LintError]:
     """Mirror Compile's Studio-owned preflight gates into first-screen/realtime lint."""
     compile_errors = [
-        *_validate_test_inputs_against_graph_input_schema(compiled, skill_dir),
+        *_validate_runtime_inputs_against_graph_input_schema(compiled, runtime_config),
         *_validate_golden_against_output_schema(skill_dir.name, str(skill_dir)),
     ]
     return [_lint_error_from_compile_error(error) for error in compile_errors]
@@ -514,19 +524,21 @@ async def compile_skill_for_studio(
 ) -> CompileSuccess:
     """Compile a resolved skill and return the Studio compile contract."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    runtime_config = refresh_runtime_config(skill_dir)
     try:
         compiled = compile_skill(
             skill_dir,
             cache=False,
             skill_resolver=build_studio_skill_resolver(),
+            runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
 
     # Studio preflight gates own workspace files that engine compile intentionally does
-    # not know about: test inputs and golden outputs. Anything provably invalid before
-    # running predict/run must fail compile.
-    test_input_errors = _validate_test_inputs_against_graph_input_schema(compiled, skill_dir)
+    # not know about: runtime root inputs and golden outputs. Anything provably
+    # invalid before running predict/run must fail compile.
+    runtime_input_errors = _validate_runtime_inputs_against_graph_input_schema(compiled, runtime_config)
 
     # N4 atom #35: Studio-layer business gate. A persisted golden case whose node's
     # current io.outputs schema now requires fields the golden is missing (output-schema
@@ -534,14 +546,14 @@ async def compile_skill_for_studio(
     # golden is reconciled. Binds to the output schema only; the engine compile has no
     # knowledge of Studio golden files, so this gate lives in the shell, after compile.
     golden_errors = _validate_golden_against_output_schema(skill_id, str(skill_dir))
-    preflight_errors = [*test_input_errors, *golden_errors]
+    preflight_errors = [*runtime_input_errors, *golden_errors]
     if preflight_errors:
         count = len(preflight_errors)
         noun = "error" if count == 1 else "errors"
-        if test_input_errors and golden_errors:
-            detail = f"Compile preflight found {count} test input/golden {noun}"
-        elif test_input_errors:
-            detail = f"Test input files do not match the graph input schema ({count} {noun})"
+        if runtime_input_errors and golden_errors:
+            detail = f"Compile preflight found {count} runtime input/golden {noun}"
+        elif runtime_input_errors:
+            detail = f"Runtime input bindings do not match the graph input schema ({count} {noun})"
         else:
             detail = f"Golden baseline files do not match node output schemas ({count} {noun})"
         raise CompileFailedError(
@@ -556,6 +568,7 @@ async def compile_skill_for_studio(
             "skill_dir": str(skill_dir),
             "skill_id": skill_id,
             "artifact_scope": "ephemeral",
+            "runtime_config": runtime_config,
         }
     )
     return CompileSuccess(
@@ -569,24 +582,14 @@ async def compile_skill_for_studio(
     )
 
 
-def _validate_test_inputs_against_graph_input_schema(
+def _validate_runtime_inputs_against_graph_input_schema(
     compiled: CompiledSkill,
-    skill_dir: Path,
+    runtime_config: dict[str, Any],
 ) -> list[CompileError]:
-    """Compile-time gate for Studio test input JSON files.
-
-    Graph root ``io.inputs`` is the contract for predict/run input files. If required
-    fields exist, at least one test input file must exist; every persisted file must be
-    a JSON object that validates against the schema.
-    """
+    """Compile-time gate for Studio runtime root input bindings."""
     raw_inputs = _compiled_graph_input_schema(compiled)
     if not raw_inputs:
         return []
-
-    inputs_dir = test_inputs_dir_for_skill(skill_dir)
-    paths = sorted(inputs_dir.glob("*.json")) if inputs_dir.exists() else []
-    if not paths:
-        return _missing_test_input_errors(raw_inputs)
 
     try:
         validator = Draft202012Validator(raw_inputs)
@@ -597,44 +600,46 @@ def _validate_test_inputs_against_graph_input_schema(
                 file="GRAPH.md",
                 field="io.inputs",
                 severity="fatal",
-                message=f"Graph input schema is invalid for test input validation: {exc.message}",
-                error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
+                message=f"Graph input schema is invalid for runtime input validation: {exc.message}",
+                error_code="STUDIO_RUNTIME_INPUT_SCHEMA_INVALID",
             )
         ]
 
+    properties = raw_inputs.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    inputs = runtime_config.get("inputs")
+    root_bindings = inputs.get("root") if isinstance(inputs, dict) else None
+    if not isinstance(root_bindings, dict):
+        root_bindings = {}
+
     errors: list[CompileError] = []
-    for path in paths:
-        rel_path = _skill_relative_posix(skill_dir, path)
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            errors.append(
-                CompileError(
-                    file=rel_path,
-                    severity="fatal",
-                    message=f"Test input file is not valid JSON: {exc}",
-                    error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
-                )
-            )
+    required = raw_inputs.get("required")
+    if isinstance(required, list):
+        for field in required:
+            if isinstance(field, str) and field not in root_bindings:
+                errors.append(_missing_runtime_input_error(field))
+
+    for field, binding in root_bindings.items():
+        if not isinstance(field, str) or not isinstance(binding, dict):
             continue
-        if not isinstance(payload, dict):
-            errors.append(
-                CompileError(
-                    file=rel_path,
-                    severity="fatal",
-                    message="Test input file must contain a JSON object.",
-                    error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
-                )
-            )
+        schema = properties.get(field)
+        if not isinstance(schema, dict):
             continue
-        for error in sorted(validator.iter_errors(payload), key=_jsonschema_error_sort_key):
+        actual_type = binding.get("type")
+        if not isinstance(actual_type, str):
+            continue
+        if not _runtime_input_type_matches(schema.get("type"), actual_type):
             errors.append(
                 CompileError(
-                    file=rel_path,
-                    field=_jsonschema_error_field(error),
+                    file=".workspace/runtime_config.json",
+                    field=field,
                     severity="fatal",
-                    message=f"Test input file does not match graph input schema: {error.message}",
-                    error_code="STUDIO_TEST_INPUT_SCHEMA_INVALID",
+                    message=(
+                        f"Runtime input field '{field}' has type '{actual_type}', "
+                        f"but graph input schema expects {_format_expected_json_type(schema.get('type'))}."
+                    ),
+                    error_code="STUDIO_RUNTIME_INPUT_SCHEMA_INVALID",
                 )
             )
     return errors
@@ -651,24 +656,36 @@ def _compiled_graph_input_schema(compiled: CompiledSkill) -> dict[str, Any]:
     return dict(inputs) if isinstance(inputs, dict) else {}
 
 
-def _missing_test_input_errors(raw_inputs: dict[str, Any]) -> list[CompileError]:
-    required = raw_inputs.get("required")
-    if not isinstance(required, list):
-        return []
-    fields = [field for field in required if isinstance(field, str)]
-    return [
-        CompileError(
-            file=".workspace/import_files",
-            field=field,
-            severity="fatal",
-            message=(
-                f"Graph input schema requires test input field '{field}', "
-                "but no test input JSON files exist. Add a valid test input before predict/run."
-            ),
-            error_code="STUDIO_TEST_INPUT_MISSING",
-        )
-        for field in fields
-    ]
+def _missing_runtime_input_error(field: str) -> CompileError:
+    return CompileError(
+        file=".workspace/runtime_config.json",
+        field=field,
+        severity="fatal",
+        message=(
+            f"Graph input schema requires runtime input field '{field}', "
+            "but runtime_config has no root import binding. Add a matching file under "
+            ".workspace/import_files before predict/run."
+        ),
+        error_code="STUDIO_RUNTIME_INPUT_MISSING",
+    )
+
+
+def _runtime_input_type_matches(expected: object, actual: str) -> bool:
+    if expected is None:
+        return True
+    if isinstance(expected, str):
+        return actual == expected or (expected == "number" and actual == "integer")
+    if isinstance(expected, list):
+        return any(_runtime_input_type_matches(item, actual) for item in expected)
+    return True
+
+
+def _format_expected_json_type(expected: object) -> str:
+    if isinstance(expected, str):
+        return expected
+    if isinstance(expected, list):
+        return " or ".join(str(item) for item in expected)
+    return "an unconstrained type"
 
 
 def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> list[CompileError]:
@@ -1669,10 +1686,12 @@ def _graph_content_hash(content: str) -> str:
 
 
 def _load_compiled(skill_path: Path) -> CompiledSkill:
+    runtime_config = refresh_runtime_config(skill_path)
     try:
         return SkillLoader().compile_skill(
             skill_path,
             skill_resolver=build_studio_skill_resolver(),
+            runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
         )
     except Exception as exc:
         response = error_response(
@@ -1784,6 +1803,7 @@ def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, 
     # for the Canvas data-gap view (read-only projection over compiled.nodes).
     phase_io_index = build_phase_io_index(compiled)
     graph_input_fields = _graph_input_field_names(compiled)
+    runtime_input_fields = runtime_input_fields_for_engine(refresh_runtime_config(skill_dir))
     topology = compiled.raw.get("graph_topology", {})
     rows = topology.get("phases", []) if isinstance(topology, dict) else []
     if isinstance(rows, list):
@@ -1795,6 +1815,7 @@ def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, 
                 skill_dir,
                 phase_io_index=phase_io_index,
                 graph_input_fields=graph_input_fields,
+                runtime_input_fields=runtime_input_fields,
                 output=row.get("output") is True,
             )
             for row in rows
@@ -1810,6 +1831,7 @@ def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, 
             skill_dir,
             phase_io_index=phase_io_index,
             graph_input_fields=graph_input_fields,
+            runtime_input_fields=runtime_input_fields,
         )
         for phase_name in compiled.manifest.phases
     ]
@@ -1830,6 +1852,7 @@ def _topology_row(
     *,
     phase_io_index: dict[str, dict[str, dict[str, object]]] | None = None,
     graph_input_fields: set[str] | None = None,
+    runtime_input_fields: dict[str, set[str]] | None = None,
     output: bool = False,
 ) -> dict[str, object]:
     """Build one topology row.
@@ -1857,6 +1880,7 @@ def _topology_row(
             depends_on=depends_on,
             phase_io_index=phase_io_index,
             graph_input_fields=graph_input_fields or set(),
+            runtime_input_fields=runtime_input_fields,
         )
     return row
 

@@ -216,33 +216,34 @@ def test_compile_passes_when_no_golden_exists(
     assert response.status_code == 200
 
 
-def test_compile_fails_when_required_test_input_is_missing(
+def test_compile_fails_when_required_runtime_input_is_missing(
     agent_skill: str,
     client: TestClient,
 ) -> None:
-    """A skill with required runtime inputs must have a compile-valid test input file."""
+    """A skill with required runtime inputs must have a runtime_config root binding."""
     response = client.post(f"/api/skills/{agent_skill}/compile")
 
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "compile_failed"
-    assert "test input" in body["detail"].lower()
+    assert "runtime input" in body["detail"].lower()
     assert body["errors"] == [
         {
-            "file": ".workspace/import_files",
+            "file": ".workspace/runtime_config.json",
             "line": None,
             "field": "chapter_content",
             "severity": "fatal",
             "message": (
-                "Graph input schema requires test input field 'chapter_content', "
-                "but no test input JSON files exist. Add a valid test input before predict/run."
+                "Graph input schema requires runtime input field 'chapter_content', "
+                "but runtime_config has no root import binding. Add a matching file under "
+                ".workspace/import_files before predict/run."
             ),
-            "error_code": "STUDIO_TEST_INPUT_MISSING",
+            "error_code": "STUDIO_RUNTIME_INPUT_MISSING",
         }
     ]
 
 
-def test_compile_fails_when_test_input_violates_graph_input_schema(
+def test_compile_fails_when_runtime_input_violates_graph_input_schema(
     agent_skill: str,
     studio_roots: tuple[Path, Path],
     client: TestClient,
@@ -256,10 +257,10 @@ def test_compile_fails_when_test_input_violates_graph_input_schema(
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "compile_failed"
-    assert "test input" in body["detail"].lower()
-    assert body["errors"][0]["file"] == ".workspace/import_files/case-a.json"
+    assert "runtime input" in body["detail"].lower()
+    assert body["errors"][0]["file"] == ".workspace/runtime_config.json"
     assert body["errors"][0]["field"] == "chapter_content"
-    assert body["errors"][0]["error_code"] == "STUDIO_TEST_INPUT_SCHEMA_INVALID"
+    assert body["errors"][0]["error_code"] == "STUDIO_RUNTIME_INPUT_SCHEMA_INVALID"
     assert "string" in body["errors"][0]["message"]
 
 

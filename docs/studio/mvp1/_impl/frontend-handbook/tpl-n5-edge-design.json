@@ -82,7 +82,7 @@
    "n": 14,
    "cap": "edge-dot-static-inference",
    "module": "dot 静态推断",
-   "func": "设计(PM 2026-07-02,trace-observability F4 / canvas F5):**没跑之前**,dot 也要像 node 的 io 一样给出黑板 schema 推断——『graph 跑到这个 dot 时黑板上应该有哪些字段』。推导与编译期数据流校验同源:该边可用字段 = 根 io.inputs ∪ 下游节点全部上游祖先 phase 的 io.outputs ∪ 已声明的 source:'file' 注入字段;同名顺序覆盖取最近祖先;并标出下游节点将按其 io.inputs 切走哪些字段。逐边不同,随拓扑/io 声明编辑即时更新。",
+   "func": "设计(PM 2026-07-02,trace-observability F4 / canvas F5):**没跑之前**,dot 也要像 node 的 io 一样给出黑板 schema 推断——『graph 跑到这个 dot 时黑板上应该有哪些字段』。推导与编译期数据流校验同源:该边可用字段 = 根 io.inputs ∪ 下游节点全部上游祖先 phase 的 io.outputs ∪ runtime_config 中该 phase 的 import binding 注入字段 ∪ iterate/batch 注入字段;同名顺序覆盖取最近祖先;并标出下游节点将按其 io.inputs 切走哪些字段。逐边不同,随拓扑/io 声明/runtime_config 编辑即时更新。",
    "action": "用户在未跑(或未选中某次 run)时点一条边的 dot,看到该边的静态字段推断;选中某次 run 后同一面板切为真实快照(#7)。",
    "fe_design": "新增静态推断纯选择器(按 skillDetail 拓扑 + 各节点 io 声明推导每条边的字段集,前端推导、无后端依赖——engine graph-exec E4 已把 canvas 黑板可视化划给前端)→ EdgeContextView 无匹配运行事件时渲染静态推断视图(字段名 + 类型 + 来源节点 + 下游将切走标记)替代空态;有运行事件时保持 #7 真实视图。ContextEdge 的 hasTraceData=false 态 tooltip 同步改为『查看该边字段推断』语义。",
    "fe_modules": [

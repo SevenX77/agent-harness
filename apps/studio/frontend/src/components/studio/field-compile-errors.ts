@@ -24,7 +24,7 @@ import type { CompileError, LintError } from "@/api/types"
 // emits `phases/<id>/...`, `<id>` = `[A-Za-z0-9_-]+`). Used only as the fallback node
 // scope when an error carries no `phase_name`.
 const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
-const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/import_files(?:\/|$)/
+const RUNTIME_INPUT_FILE_RE = /(?:^|\/)\.workspace\/(?:import_files(?:\/|$)|runtime_config\.json$)/
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "")
@@ -172,7 +172,7 @@ export type IoBoundary = "input" | "output"
 function isInputBoundaryError(error: LintError): boolean {
   const file = typeof error.file === "string" ? normalizePath(error.file) : ""
   const field = error.field_path
-  return TEST_INPUT_FILE_RE.test(file)
+  return RUNTIME_INPUT_FILE_RE.test(file)
     || field === "io.inputs"
     || (typeof field === "string" && field.startsWith("io.inputs."))
 }

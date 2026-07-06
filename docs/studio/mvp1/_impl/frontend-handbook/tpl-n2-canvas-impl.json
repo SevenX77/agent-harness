@@ -92,7 +92,7 @@
       "current": "现状:符合(2026-07-05 校正)。画布节点错误通道只合并 manual compile 与 first-screen/realtime lint 两路 engine DTO;缺供给字段由 engine dataflow compile/lint 返回 F-v3-graph-dataflow-source-missing,field_path=<phase>.io.inputs.properties.<field>,再由 node-compile-errors.ts 按 field_path 节点前缀投影到 SkillNode。Properties 面板也读同一 active engine lint,对不对应表单字段的 dataflow 诊断显示节点级摘要;编辑器用首屏 lint 到 realtime lint 的同一投影画 Monaco marker。graph_topology[].field_supply 仍随 SkillDetail 返回,仅供 io-target/InputPanel 显示 supplied/source/producer_phase,不再合成 CompileError。",
       "gap": "无。旧 dataGapErrorsByNode 前端合成路径已删除,避免节点提示、Properties、编辑器、Compile drawer 与 compile 按钮走不同真相源。",
       "fe_status": "符合",
-      "be_dep": "已就绪并接通。engine compile/lint 现在检查 phase io.inputs.properties 声明消费字段的 root/upstream/source:file/iterate-batch 来源;backend 透传 compile_result.issues 到 LintError.field_path 和 CompileError.field。compute_field_supply 保留为面板供给可视化,不是错误真相源。",
+      "be_dep": "已就绪并接通。engine compile/lint 现在检查 phase io.inputs.properties 声明消费字段的 root/upstream/runtime_config import binding/iterate-batch 来源;backend 透传 compile_result.issues 到 LintError.field_path 和 CompileError.field。compute_field_supply 保留为面板供给可视化,不是错误真相源。",
       "fe_resync": "2026-07-05 resync:删除 node-compile-errors.ts 的 dataGapErrorsByNode 与 SkillNode.data-gap/node-data-gap 旧测试;Workspace.compileErrorsByNodeId 不再 merge field_supply。新增 engine strict compile gate 与 backend compile endpoint 测试,前端 node-compile-errors.test.ts 改为断言 engine dataflow field_path 可定位节点并去重 compile/lint 重复诊断;LazyMonacoPanel.test.tsx 锁首屏 lint marker;PropertiesPanel.lint-fields.test.tsx 锁节点级 dataflow 摘要。"
     },
     {
@@ -384,7 +384,7 @@
       ],
       "fe_status": "符合",
       "layer1": [
-        "RED(已确认):phase 声明 chapter_lines/chapter_number 但 root/upstream/source:file/iterate 都不供给时,旧 engine compile 通过。",
+        "RED(已确认):phase 声明 chapter_lines/chapter_number 但 root/upstream/runtime_config import binding/iterate 都不供给时,旧 engine compile 通过。",
         "GREEN:graph-agent strict compile gate 返回两条 F-v3-graph-dataflow-source-missing,field_path 指向 <phase>.io.inputs.properties.<field>。",
         "回归:backend compile endpoint 返回 422 两条 CompileError.field;frontend node-compile-errors.test.ts 断言 compile/lint field_path 都能定位节点;InputPanel field_supply 测试保留。"
       ],
@@ -399,7 +399,7 @@
       ],
       "what": "engine dataflow 对声明但无来源的 io.inputs.properties 字段返回聚合错误;backend compile endpoint 透传 field_path;frontend 节点投影只消费 engine compile/lint DTO,field_supply 仅保留给 InputPanel。",
       "steps": [
-        "RED: phase 声明 chapter_lines/chapter_number 但 root/upstream/source:file/iterate 都不供给时,旧 engine compile 通过。",
+        "RED: phase 声明 chapter_lines/chapter_number 但 root/upstream/runtime_config import binding/iterate 都不供给时,旧 engine compile 通过。",
         "GREEN: engine 返回两条 F-v3-graph-dataflow-source-missing;backend /compile 返回 422 两条 CompileError.field;frontend 按 field_path 将 lint/compile 错误投到节点。"
       ],
       "expected": [

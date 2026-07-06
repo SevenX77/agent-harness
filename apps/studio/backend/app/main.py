@@ -32,6 +32,7 @@ from app.routers import (
     loopback,
     node_llm_params,
     runs,
+    runtime_config,
     settings,
     skills,
     system,
@@ -150,6 +151,7 @@ def create_app() -> FastAPI:
     studio_app.include_router(compare.router)
     studio_app.include_router(compare_candidates.router)
     studio_app.include_router(node_llm_params.router)
+    studio_app.include_router(runtime_config.router)
     studio_app.include_router(copilot.router)
     studio_app.include_router(llm.router)
     studio_app.include_router(loopback.router)

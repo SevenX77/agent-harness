@@ -657,9 +657,9 @@ describe('Workspace WS-1 local writer contracts', () => {
 
     expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.[INPUT_ID]).toHaveLength(1)
     expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.[INPUT_ID]?.[0]).toMatchObject({
-      file: '.workspace/import_files',
+      file: '.workspace/runtime_config.json',
       field: 'chapter',
-      message: expect.stringContaining("test input field 'chapter'"),
+      message: expect.stringContaining("runtime input field 'chapter'"),
     })
   })
 
@@ -1920,14 +1920,14 @@ function skillDetail(skillId = 'writer-smoke'): SkillDetail {
       lint_result: {
         status: 'failed',
         errors: [{
-          file: '.workspace/import_files',
+          file: '.workspace/runtime_config.json',
           line: null,
           column: null,
           phase_name: null,
           field_path: 'chapter',
           severity: 'error',
-          error_code: 'STUDIO_TEST_INPUT_MISSING',
-          message: "Graph input schema requires test input field 'chapter'",
+          error_code: 'STUDIO_RUNTIME_INPUT_MISSING',
+          message: "Graph input schema requires runtime input field 'chapter'",
         }],
         phases_summary: [{ name: 'segment', mode: 'skill', depends_on: [] }],
       },

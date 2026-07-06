@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { SkillDetail } from '@/api/types'
+import type { RuntimeConfig, SkillDetail } from '@/api/types'
 import { staticEdgeInference } from './edge-static-inference'
 
 // Topology: input -> fetch -> enrich -> report, with `draft` produced by both
 // fetch and enrich (sequential overwrite: nearest ancestor wins), and report
-// declaring a `source:'file'` input plus consuming `summary`. Field truth is
+// consuming `summary` plus a runtime_config file input. Field truth is
 // declared in the FILES' frontmatter (the authoritative source); graph_topology
 // carries only ids + depends_on — its io_fields projection is deliberately
 // absent here because it degrades to empty on compile errors.
@@ -63,7 +63,7 @@ const reportMd = [
   '    type: object',
   '    properties:',
   '      summary: {type: string}',
-  '      style_guide: {type: string, source: file, path: references/style.md}',
+  '      style_guide: {type: string}',
   '  outputs:',
   '    type: object',
   '    properties:',
@@ -92,6 +92,31 @@ function fieldMap(result: NonNullable<ReturnType<typeof staticEdgeInference>>) {
   return new Map(result.fields.map((field) => [field.name, field]))
 }
 
+function runtimeConfig(): RuntimeConfig {
+  return {
+    schema_version: 'studio.runtime_config.v1',
+    inputs: {
+      import_root: 'import_files',
+      manifest: {
+        root: [],
+        phases: {
+          report: [
+            {
+              kind: 'file',
+              name: 'style.md',
+              path: 'import_files/.phase/report/references/style.md',
+              fields: [{ name: 'style_guide', type: 'string' }],
+            },
+          ],
+        },
+      },
+      root: {},
+      phases: {},
+    },
+    artifacts: [],
+  }
+}
+
 describe('staticEdgeInference', () => {
   it('returns root inputs only for the entry edge', () => {
     const result = staticEdgeInference(detail(), '__global_input__', 'fetch')
@@ -115,12 +140,12 @@ describe('staticEdgeInference', () => {
     expect(fields.get('draft')).toMatchObject({ from: 'enrich' })
   })
 
-  it('includes the target\'s declared source:file injections as via_file fields', () => {
-    const result = staticEdgeInference(detail(), 'enrich', 'report')
+  it('includes the target runtime_config imports as via_file fields', () => {
+    const result = staticEdgeInference(detail(), 'enrich', 'report', runtimeConfig())
     const fields = fieldMap(result!)
     expect(fields.get('style_guide')).toMatchObject({
       via_file: true,
-      from: 'references/style.md',
+      from: 'import_files/.phase/report/references/style.md',
       consumed_by_target: true,
     })
   })

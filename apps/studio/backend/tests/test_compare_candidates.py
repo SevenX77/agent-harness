@@ -1,13 +1,14 @@
 """PR2 node-level Compare LLMs — candidate persistence (per skill + node).
 
 Candidates are model-only (model group + endpoint route). They live in the
-skill's ``.workspace/compare_candidates.json`` keyed by node id — NOT in
+skill's ``.workspace/runtime_config.json`` keyed by node id — NOT in
 SKILL.md (compare is a run-time experiment config, not skill source). These
 tests pin the store round-trip and the GET/PUT API before the run wiring.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -79,8 +80,12 @@ def test_put_and_get_candidates_api(
     assert nodes["setup"][0]["model_group_id"] == "deepseek-v4"
     assert nodes["setup"][1]["route"] == "anthropic-official"
 
-    # persisted on disk under the skill workspace
-    disk = read_compare_candidates(resolve_skill_dir("text-segmentation"))
+    # persisted in runtime_config under the skill workspace
+    skill_dir = resolve_skill_dir("text-segmentation")
+    assert not (skill_dir / ".workspace" / "compare_candidates.json").exists()
+    runtime_config = json.loads((skill_dir / ".workspace" / "runtime_config.json").read_text(encoding="utf-8"))
+    assert runtime_config["llm"]["compare_candidates"]["nodes"]["setup"][0]["candidate_id"] == "fast"
+    disk = read_compare_candidates(skill_dir)
     assert [c.candidate_id for c in disk["setup"]] == ["fast", "slow"]
 
 

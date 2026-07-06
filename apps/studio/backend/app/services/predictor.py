@@ -12,6 +12,7 @@ from app.core.adapters.engine import (
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
+from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class PredictorService:
     ) -> RunResult:
         """Resolve strategy, run graph_agent in Predict mode, and assemble result."""
         skill_dir = ensure_workspace_skill_dir(skill_id)
+        runtime_config = refresh_runtime_config(skill_dir)
 
         adapter = build_engine_adapter()
 
@@ -74,6 +76,7 @@ class PredictorService:
                 "skill_dir": str(skill_dir),
                 "skill_id": skill_id,
                 "artifact_scope": "ephemeral",
+                "runtime_config": runtime_config,
             }
         )
 
@@ -88,6 +91,7 @@ class PredictorService:
                     "current_hashes": current_hashes,
                     "inputs": input_data or {},
                     "workspace_dir": str(workspace_dir_for(skill_dir)),
+                    "execution_context": {"runtime_config": runtime_config},
                 }
             )
         except StudioAdapterError as exc:
@@ -112,6 +116,7 @@ class PredictorService:
             result,
             content_hash=art_ref["content_hash"],
             artifact_ref=art_ref,
+            runtime_config=runtime_config,
         )
         return cast(RunResult, result)
 
@@ -127,6 +132,7 @@ class PredictorService:
         *,
         content_hash: str,
         artifact_ref: dict[str, Any],
+        runtime_config: dict[str, Any],
     ) -> None:
         workspace_dir = workspace_dir_for(skill_dir)
         from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
@@ -138,6 +144,7 @@ class PredictorService:
 
         run_dir = workspace_dir / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
+        write_runtime_snapshot(run_dir, runtime_config)
         (run_dir / "result.json").write_text(
             result.model_dump_json(),
             encoding="utf-8",

@@ -2,13 +2,14 @@
 
 Overrides are the three role-level generation params (thinking /
 max_output_tokens / temperature). They live in the skill's
-``.workspace/node_llm_params.json`` keyed by node id — NOT in SKILL.md (llm
+``.workspace/runtime_config.json`` keyed by node id — NOT in SKILL.md (llm
 params are gateway-domain config truth, not skill source). These tests pin the
 store round-trip and the GET/PUT API before the run-time resolver wiring.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from app.models.node_llm_params import NodeLlmParams
@@ -96,7 +97,11 @@ def test_put_and_get_node_params_api(
     assert nodes["setup"]["max_output_tokens"] == 4096
 
     # persisted on disk under the skill workspace
-    disk = read_node_llm_params(resolve_skill_dir("text-segmentation"))
+    skill_dir = resolve_skill_dir("text-segmentation")
+    assert not (skill_dir / ".workspace" / "node_llm_params.json").exists()
+    runtime_config = json.loads((skill_dir / ".workspace" / "runtime_config.json").read_text(encoding="utf-8"))
+    assert runtime_config["llm"]["node_params"]["nodes"]["setup"]["temperature"] == 0.2
+    disk = read_node_llm_params(skill_dir)
     assert disk["setup"].temperature == 0.2
 
 

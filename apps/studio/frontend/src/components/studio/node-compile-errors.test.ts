@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+﻿import { describe, expect, it } from "vitest"
 import type { CompileError, LintError } from "@/api/types"
 import { INPUT_ID } from "@/components/nodes"
 import {
@@ -44,7 +44,7 @@ describe("compileErrorsByNode", () => {
     expect(byNode.expand).toHaveLength(1)
   })
 
-  it("omits graph-level errors (GRAPH.md / null file) — not attributable to a node", () => {
+  it("omits graph-level errors (GRAPH.md / null file) 鈥?not attributable to a node", () => {
     const byNode = compileErrorsByNode([err("GRAPH.md"), err(null), err("phases/p/LOGIC.md")])
     expect(Object.keys(byNode)).toEqual(["p"])
   })
@@ -77,30 +77,30 @@ describe("compileErrorsByNode", () => {
         line: 1,
         field: "review.io.inputs.properties.summary",
         severity: "fatal",
-        message: "phase 'review' input 'summary' has no root, upstream, or source:file provider",
+        message: "phase 'review' input 'summary' has no root, upstream, or runtime input provider",
       },
     ])
     expect(Object.keys(byNode)).toEqual(["review"])
     expect(byNode.review[0].field).toBe("review.io.inputs.properties.summary")
   })
 
-  it("attributes Studio test-input preflight errors to the global Input node", () => {
+  it("attributes Studio runtime-input preflight errors to the global Input node", () => {
     const byNode = compileErrorsByNode([
       {
-        file: ".workspace/import_files",
+        file: ".workspace/runtime_config.json",
         line: null,
         field: "chapter",
         severity: "fatal",
-        message: "Graph input schema requires test input field 'chapter'",
-        error_code: "STUDIO_TEST_INPUT_MISSING",
+        message: "Graph input schema requires runtime input field 'chapter'",
+        error_code: "STUDIO_RUNTIME_INPUT_MISSING",
       },
       {
-        file: ".workspace/import_files/case-a.json",
+        file: ".workspace/runtime_config.json",
         line: null,
         field: "chapters",
         severity: "fatal",
-        message: "'chapters' is a required property",
-        error_code: "STUDIO_TEST_INPUT_SCHEMA_INVALID",
+        message: "Runtime input field 'chapters' has type 'string'",
+        error_code: "STUDIO_RUNTIME_INPUT_SCHEMA_INVALID",
       },
     ])
     expect(Object.keys(byNode)).toEqual([INPUT_ID])
@@ -115,7 +115,7 @@ describe("compileErrorsByNode", () => {
   })
 
   it("omits a file-less error whose field carries no node-id prefix", () => {
-    // A bare field with no "<node>." prefix isn't node-attributable — stays in the drawer only.
+    // A bare field with no "<node>." prefix isn't node-attributable 鈥?stays in the drawer only.
     expect(compileErrorsByNode([goldenFieldErr("summary")])).toEqual({})
   })
 })
@@ -165,7 +165,7 @@ describe("lintErrorsByNode", () => {
     const byNode = lintErrorsByNode([
       lintErr("phases/review/SKILL.md", {
         field_path: "review.io.inputs.properties.summary",
-        message: "phase 'review' input 'summary' has no root, upstream, or source:file provider",
+        message: "phase 'review' input 'summary' has no root, upstream, or runtime input provider",
       }),
     ])
     expect(Object.keys(byNode)).toEqual(["review"])
@@ -182,7 +182,7 @@ describe("lintErrorsByNode", () => {
   })
 })
 
-describe("lintErrorToCompileError (N3 atom #4 — feed lint into the node tooltip)", () => {
+describe("lintErrorToCompileError (N3 atom #4 鈥?feed lint into the node tooltip)", () => {
   it("renames the engine field_path locator onto the CompileError field axis", () => {
     const compile = lintErrorToCompileError(
       lintErr("phases/segment/SKILL.md", {
@@ -213,7 +213,7 @@ describe("lintErrorToCompileError (N3 atom #4 — feed lint into the node toolti
   })
 })
 
-describe("activeLintErrors (N3 atom #4 — first-screen vs realtime override)", () => {
+describe("activeLintErrors (N3 atom #4 鈥?first-screen vs realtime override)", () => {
   const firstScreenLint = [lintErr("phases/draft/SKILL.md", { message: "first-screen lint" })]
   const manifestErrors = [lintErr("GRAPH.md", { message: "manifest error" })]
   const realtime = [lintErr("phases/draft/SKILL.md", { message: "realtime lint" })]
@@ -228,7 +228,7 @@ describe("activeLintErrors (N3 atom #4 — first-screen vs realtime override)", 
   it("dedupes first-screen lint_result and manifest_errors when they carry the same engine diagnostic", () => {
     const duplicate = lintErr("phases/review/SKILL.md", {
       field_path: "review.io.inputs.properties.chapter_lines",
-      message: "phase 'review' input 'chapter_lines' has no root, upstream, or source:file provider",
+      message: "phase 'review' input 'chapter_lines' has no root, upstream, or runtime input provider",
       error_code: "F-v3-graph-dataflow-source-missing",
     })
 
@@ -253,7 +253,7 @@ describe("activeLintErrors (N3 atom #4 — first-screen vs realtime override)", 
   })
 })
 
-describe("mergeNodeErrors (N3 atom #4 — compile + lint without dropping either)", () => {
+describe("mergeNodeErrors (N3 atom #4 鈥?compile + lint without dropping either)", () => {
   it("concatenates compile and lint errors per node, keeping both channels", () => {
     const compileByNode = { draft: [err("phases/draft/SKILL.md")] }
     const lintByNode = {
@@ -273,7 +273,7 @@ describe("mergeNodeErrors (N3 atom #4 — compile + lint without dropping either
       line: 2,
       field: "review.io.inputs.properties.chapter_lines",
       severity: "fatal",
-      message: "phase 'review' input 'chapter_lines' has no root, upstream, or source:file provider",
+      message: "phase 'review' input 'chapter_lines' has no root, upstream, or runtime input provider",
       error_code: "F-v3-graph-dataflow-source-missing",
     } satisfies CompileError
 

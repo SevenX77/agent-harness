@@ -53,6 +53,7 @@ def _fake_side_worker(
     process_queue: queue.Queue[dict[str, Any]],
     art_ref: dict[str, Any],
     roles_path_override: str | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> None:
     """Records what the side-run worker was handed (input slice + roles + artifact)."""
     del skill_id
@@ -64,6 +65,7 @@ def _fake_side_worker(
             {
                 "inputs": inputs,
                 "roles_path_override": roles_path_override,
+                "runtime_config": runtime_config,
                 "artifact_id": art_ref.get("artifact_id"),
             }
         ),

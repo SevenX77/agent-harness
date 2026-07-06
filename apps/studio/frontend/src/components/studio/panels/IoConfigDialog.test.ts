@@ -15,7 +15,7 @@ describe("candidatesFromScanEntries", () => {
       {
         kind: "batch",
         name: "chapter_{n}.json",
-        dir: "import_files/segment/x/node1_output",
+        dir: "import_files/.phase/segment/x/node1_output",
         pattern: "chapter_{n}.json",
         numbers: [1, 2, 3],
       },
@@ -32,7 +32,7 @@ describe("candidatesFromScanEntries", () => {
       {
         kind: "file",
         name: "a.json",
-        path: "import_files/segment/x/a.json",
+        path: "import_files/.phase/segment/x/a.json",
         fields: [
           { name: "chapter", type: "object" },
           { name: "notes", type: "string" },

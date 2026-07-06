@@ -168,6 +168,19 @@ def test_input_file_injected_event_emits_before_dispatch_for_runtime_file_input(
         thread_id="ws-e4-runtime-file-input",
         event_subscriber=events.append,
         skill_resolver=mock_skill_resolver,
+        runtime_config={
+            "inputs": {
+                "phases": {
+                    "reader": {
+                        "body": {
+                            "path": "inputs/body.md",
+                            "type": "string",
+                            "value_type": "string",
+                        }
+                    }
+                }
+            }
+        },
         title="Runtime IO",
     )
 

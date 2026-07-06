@@ -253,11 +253,15 @@ def test_release_run_starts_from_committed_product_artifact_without_recompiling_
         inputs: dict[str, Any],
         process_queue: Any,
         art_ref: dict[str, Any] | None = None,
+        roles_path_override: str | None = None,
+        runtime_config: dict[str, Any] | None = None,
     ) -> None:
         captured["skill_id"] = skill_id
         captured["run_dir_raw"] = run_dir_raw
         captured["inputs"] = inputs
         captured["art_ref"] = art_ref
+        captured["roles_path_override"] = roles_path_override
+        captured["runtime_config"] = runtime_config
         process_queue.put({"type": "status", "status": "success", "metrics": {}})
 
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
@@ -277,6 +281,8 @@ def test_release_run_starts_from_committed_product_artifact_without_recompiling_
     assert captured["skill_id"] == "text-segmentation"
     assert captured["inputs"] == {"input_text": "from release"}
     assert captured["art_ref"] == expected_artifact_ref
+    assert captured["roles_path_override"] is None
+    assert captured["runtime_config"] is None
 
 
 def test_release_run_missing_product_blob_returns_typed_artifact_not_found_without_source_fallback(

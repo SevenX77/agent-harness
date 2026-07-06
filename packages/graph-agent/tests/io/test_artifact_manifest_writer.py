@@ -1,7 +1,7 @@
 """Artifact manifest writer — fixed-format persistence (MVP1 r3, PM 2026-07-02).
 
 Design: engine mvp1 physical-layout §2.2.2 + skill-syntax §3.4.1.
-GRAPH.md io.artifacts declares a list of {stem, fields, mode}; the writer
+runtime_config artifacts declares a list of {stem, fields, mode}; the writer
 persists blackboard fields into fixed-format files:
 
 - single:   ``<stem>_latest_<YYYYMMDD_HHMMSS>.json`` (+ old versions archived

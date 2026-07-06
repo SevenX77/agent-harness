@@ -67,6 +67,7 @@ Use per-request tests when a request has unique semantics:
 | Canvas node selection | left-panel reads such as `GET /api/skills/{skill_id}/node-llm-params`, `GET /api/skills/{skill_id}/runs`, `GET /api/skills/{skill_id}/test_inputs` | Repeated click on an already-selected phase node previously reopened the recorded side panel | Removed. Phase-node clicks are selection only; opening Properties/I/O/Timeline must be a toolbar action or an already-mounted panel projection. | `GraphCanvas.test.tsx` |
 | Properties node config | `GET /api/skills/{skill_id}/node-llm-params` | Properties panel cold load | OK if shared per skill and silent on node selection after load. | `GraphCanvas.test.tsx`, `PropertiesPanel.network-side-effect.test.tsx`, client cache tests |
 | Properties compare candidates | `GET /api/skills/{skill_id}/compare-candidates` | Properties panel cold load | OK if shared per skill and silent on node selection after load. | `GraphCanvas.test.tsx`, `PropertiesPanel.network-side-effect.test.tsx`, client cache tests |
+| Runtime config | `GET /api/skills/{skill_id}/runtime-config`; `PUT /api/skills/{skill_id}/runtime-config/artifacts` | Workspace cold load/import-file events; explicit output artifact save | OK: runtime config is server-owned truth derived from `.workspace/import_files/` plus explicit runtime settings; frontend revalidates only after import file changes or artifact save. | Backend runtime-config/router tests, `Workspace.test.tsx`, `io-config.test.ts` |
 | Settings app settings | `GET/PUT /api/settings` | App settings initialization / user save | OK: the hook waits for authenticated API readiness before the first read, shares the cold-load request, and saves only after explicit settings edits. | `useAppSettings.test.ts` |
 | Settings truth sources | `GET /api/system/truth-sources`, `GET /api/system/community-catalog-config`, `GET /api/system/truth-sources/{source_id}/content` | General settings cold load / explicit source open preview fallback | OK: General cold-loads metadata once and the API client dedupes/cache-shares it; source content is only loaded after the user explicitly opens a source and native open falls back to preview. | `GeneralTab.lifecycle.test.tsx`, `client.test.ts` |
 | Settings tab mounting | hidden tab reads such as `GET /api/llm/roles/test-results` | Settings rendered every tab while only one was visible | Fixed. Tabs are lazy-mounted on first visit and kept mounted afterward; opening API Keys no longer mounts LLM Roles/Copilot seed effects. | `SettingsPageContent.shell.test.tsx`, `SettingsPageContent.lazy-tabs.test.tsx` |
@@ -119,6 +120,7 @@ BACKEND GET /api/skills/{skill_id}/history
 BACKEND GET /api/skills/{skill_id}/node-llm-params
 BACKEND GET /api/skills/{skill_id}/releases
 BACKEND GET /api/skills/{skill_id}/releases/{release_version}
+BACKEND GET /api/skills/{skill_id}/runtime-config
 BACKEND GET /api/skills/{skill_id}/runs
 BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id}
 BACKEND GET /api/skills/{skill_id}/runs/{run_id}
@@ -196,6 +198,7 @@ BACKEND PUT /api/llm/roles/{role_name}
 BACKEND PUT /api/llm/routes/{route_id}
 BACKEND PUT /api/settings
 BACKEND PUT /api/skills/{skill_id}
+BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
 BACKEND WS /api/skills/{skill_id}/copilot/ws
@@ -227,6 +230,7 @@ FRONTEND GET /api/skills/{skill_id}/history
 FRONTEND GET /api/skills/{skill_id}/node-llm-params
 FRONTEND GET /api/skills/{skill_id}/releases
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version}
+FRONTEND GET /api/skills/{skill_id}/runtime-config
 FRONTEND GET /api/skills/{skill_id}/runs
 FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id}
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}
@@ -274,6 +278,7 @@ FRONTEND PUT /api/llm/roles
 FRONTEND PUT /api/settings
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
+FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts
 FRONTEND WS /api/skills/{skill_id}/copilot/ws
 FRONTEND WS /ws/events
 FRONTEND WS /ws/runs/{run_id}
@@ -334,6 +339,7 @@ BACKEND GET /api/skills/{skill_id}/history | review | specific | Backend route i
 BACKEND GET /api/skills/{skill_id}/node-llm-params | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/releases | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/releases/{release_version} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is server-owned truth; reads are cold load or precise import-file/runtime-config revalidation.
 BACKEND GET /api/skills/{skill_id}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/runs/{run_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -411,6 +417,7 @@ BACKEND PUT /api/llm/roles/{role_name} | review | specific | Backend route is in
 BACKEND PUT /api/llm/routes/{route_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Runtime artifact writes are explicit output-config saves and return the canonical runtime_config snapshot.
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
@@ -442,6 +449,7 @@ FRONTEND GET /api/skills/{skill_id}/history | review | shared | Read request nee
 FRONTEND GET /api/skills/{skill_id}/node-llm-params | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/releases | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is shared per-skill truth, revalidated only after import-file events, runtime_config file events, or artifact save.
 FRONTEND GET /api/skills/{skill_id}/runs | partial | shared | Run-history list is a SWR cold-load key with Studio truth policy; phase-node clicks no longer reopen Timeline implicitly. Exact refresh sources after run/delete still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
@@ -487,6 +495,7 @@ FRONTEND POST /api/skills/{skill_id}/validate_input | review | specific | Mutati
 FRONTEND PUT /api/llm/registry/endpoints | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND PUT /api/llm/roles | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND PUT /api/settings | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Output artifact config save is an explicit command and projects the returned runtime_config snapshot.
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.

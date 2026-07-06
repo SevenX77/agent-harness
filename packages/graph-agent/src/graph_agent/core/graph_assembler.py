@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import copy
+import csv
 import importlib.util
 import json
 import logging
@@ -112,6 +113,9 @@ class _SubagentRuntime:
 @dataclass(frozen=True)
 class _InputFileSpec:
     field: str
+    value_type: str = "string"
+    content_type: str | None = None
+    json_path: tuple[str, ...] = ()
     path: str | None = None
     batch_dir: str | None = None
     batch_pattern: str | None = None
@@ -167,6 +171,7 @@ def assemble_graph(
     llm_provider: LLMProvider | None = None,
     checkpointer: Any = None,
     predict_context: Any = None,
+    runtime_config: dict[str, Any] | None = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> CompiledStateGraph:
@@ -202,6 +207,7 @@ def assemble_graph(
                 _loading_stack,
                 _compilation_cache,
                 predict_context=predict_context,
+                runtime_config=runtime_config,
             ),
         )
         phase_ids.append(phase_id)
@@ -252,6 +258,7 @@ def _build_phase_node(
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
     predict_context: Any = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
@@ -262,6 +269,7 @@ def _build_phase_node(
             node_kind="logic",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            runtime_config=runtime_config,
         )
     if isinstance(ast, SubgraphNodeAST):
         return _wrap_phase_runtime_node(
@@ -284,6 +292,7 @@ def _build_phase_node(
             node_kind="subgraph",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            runtime_config=runtime_config,
         )
     if isinstance(ast, AgentNodeAST):
         return _wrap_phase_runtime_node(
@@ -308,6 +317,7 @@ def _build_phase_node(
             node_kind="agent",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            runtime_config=runtime_config,
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
@@ -1053,6 +1063,7 @@ def _wrap_phase_runtime_node(
     node_kind: str,
     source_path: Path,
     callbacks: Any | None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> Any:
     io = getattr(phase_ast, "io", None)
     input_schema = getattr(io, "inputs", None) if io is not None else None
@@ -1100,9 +1111,9 @@ def _wrap_phase_runtime_node(
 
     wrapped = _wrap_declared_input_files(
         phase_id,
-        input_schema,
         _dispatch_and_run,
         callbacks=callbacks,
+        runtime_config=runtime_config,
     )
     iterate = getattr(phase_ast, "iterate", None)
     if iterate is not None:
@@ -1197,12 +1208,12 @@ def _phase_validator_fatal(
 
 def _wrap_declared_input_files(
     phase_id: str,
-    input_schema: dict[str, Any] | None,
     node: Any,
     *,
     callbacks: Any | None,
+    runtime_config: dict[str, Any] | None,
 ) -> Any:
-    file_specs = _declared_input_file_specs(input_schema, phase_id=phase_id)
+    file_specs = _runtime_input_file_specs(runtime_config, phase_id=phase_id)
     if not file_specs:
         return node
 
@@ -1222,48 +1233,56 @@ def _wrap_declared_input_files(
     return _node_with_input_files
 
 
-def _declared_input_file_specs(
-    input_schema: dict[str, Any] | None,
+def _runtime_input_file_specs(
+    runtime_config: dict[str, Any] | None,
     *,
     phase_id: str,
 ) -> list[_InputFileSpec]:
-    if not isinstance(input_schema, dict):
+    if not isinstance(runtime_config, dict):
         return []
-    properties = input_schema.get("properties")
-    if not isinstance(properties, dict):
+    inputs = runtime_config.get("inputs")
+    if not isinstance(inputs, dict):
+        return []
+    phases = inputs.get("phases")
+    if not isinstance(phases, dict):
+        return []
+    phase_bindings = phases.get(phase_id)
+    if not isinstance(phase_bindings, dict):
         return []
     specs: list[_InputFileSpec] = []
-    for field_name, schema in properties.items():
-        if not isinstance(field_name, str) or not isinstance(schema, dict):
+    for field_name, binding in phase_bindings.items():
+        if not isinstance(field_name, str) or not isinstance(binding, dict):
             continue
-        if schema.get("source") != "file":
-            continue
-        batch_dir = schema.get("dir")
-        batch_pattern = schema.get("pattern")
-        if isinstance(batch_dir, str) and batch_dir.strip():
-            if not isinstance(batch_pattern, str) or "{n}" not in batch_pattern:
-                detail = (
-                    f"batch file input field {field_name!r} declares dir but its "
-                    "pattern has no {n} number placeholder"
-                )
-                raise GraphAgentFatalError(
-                    detail,
-                    payload=make_error_payload(
-                        "[F-v3-runtime-state-mapping-failed]",
-                        detail,
-                        phase_id=phase_id,
-                        field_path=field_name,
-                    ),
-                )
-            specs.append(
-                _InputFileSpec(
-                    field=field_name, batch_dir=batch_dir, batch_pattern=batch_pattern
-                )
+        specs.append(_runtime_input_spec_from_binding(field_name, binding, phase_id=phase_id))
+    return specs
+
+
+def _runtime_input_spec_from_binding(
+    field_name: str,
+    binding: dict[str, Any],
+    *,
+    phase_id: str | None,
+) -> _InputFileSpec:
+    value_type = binding.get("value_type")
+    if not isinstance(value_type, str) or not value_type:
+        value_type = "string"
+    content_type = binding.get("content_type")
+    if not isinstance(content_type, str):
+        content_type = None
+    raw_json_path = binding.get("json_path")
+    json_path = (
+        tuple(part for part in raw_json_path if isinstance(part, str))
+        if isinstance(raw_json_path, list)
+        else ()
+    )
+    batch_dir = binding.get("dir")
+    batch_pattern = binding.get("pattern")
+    if isinstance(batch_dir, str) and batch_dir.strip():
+        if not isinstance(batch_pattern, str) or "{n}" not in batch_pattern:
+            detail = (
+                f"runtime input field {field_name!r} declares dir but its "
+                "pattern has no {n} number placeholder"
             )
-            continue
-        path = schema.get("path")
-        if not isinstance(path, str) or not path.strip():
-            detail = f"file input field {field_name!r} has source='file' but no path"
             raise GraphAgentFatalError(
                 detail,
                 payload=make_error_payload(
@@ -1273,8 +1292,43 @@ def _declared_input_file_specs(
                     field_path=field_name,
                 ),
             )
-        specs.append(_InputFileSpec(field=field_name, path=path))
-    return specs
+        return _InputFileSpec(
+            field=field_name,
+            value_type=value_type,
+            content_type=content_type,
+            json_path=json_path,
+            batch_dir=batch_dir,
+            batch_pattern=batch_pattern,
+        )
+    path = binding.get("path")
+    if not isinstance(path, str) or not path.strip():
+        detail = f"runtime input field {field_name!r} has no path"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload(
+                "[F-v3-runtime-state-mapping-failed]",
+                detail,
+                phase_id=phase_id,
+                field_path=field_name,
+            ),
+        )
+    return _InputFileSpec(
+        field=field_name,
+        value_type=value_type,
+        content_type=content_type,
+        json_path=json_path,
+        path=path,
+    )
+
+
+def read_runtime_input_binding_value(
+    field_name: str,
+    binding: dict[str, Any],
+    workspace_dir: Path,
+) -> Any:
+    """Materialize one runtime_config input binding from workspace_dir."""
+    spec = _runtime_input_spec_from_binding(field_name, binding, phase_id=None)
+    return _read_input_file_value(spec, workspace_dir)
 
 
 def _inject_declared_input_files(
@@ -1329,22 +1383,63 @@ def _read_input_file_value(spec: _InputFileSpec, workspace_dir: Path) -> Any:
         members = list_workspace_batch_files(spec.batch_dir, spec.batch_pattern, workspace_dir)
         values: list[Any] = []
         for _, member in members:
-            text = read_workspace_text_file(
-                member.relative_to(Path(workspace_dir).resolve()).as_posix(),
-                workspace_dir,
-            )
-            if member.suffix.lower() == ".json":
-                try:
-                    values.append(json.loads(text))
-                except ValueError as exc:
-                    raise RuntimeInputFileError(
-                        f"batch file input member {member.name!r} is not valid JSON: {exc}"
-                    ) from exc
-            else:
-                values.append(text)
+            member_ref = member.relative_to(Path(workspace_dir).resolve()).as_posix()
+            values.append(_read_single_runtime_input_value(spec, member_ref, workspace_dir))
         return values
     assert spec.path is not None
-    return read_workspace_text_file(spec.path, workspace_dir)
+    return _read_single_runtime_input_value(spec, spec.path, workspace_dir)
+
+
+def _read_single_runtime_input_value(
+    spec: _InputFileSpec,
+    path: str,
+    workspace_dir: Path,
+) -> Any:
+    if spec.value_type == "file_ref":
+        workspace_root = Path(workspace_dir).resolve()
+        candidate = (workspace_root / path).resolve(strict=False)
+        try:
+            candidate.relative_to(workspace_root)
+        except ValueError as exc:
+            raise RuntimeInputFileError(f"file input path {path!r} escapes workspace_dir") from exc
+        if not candidate.is_file():
+            raise RuntimeInputFileError(f"file input {path!r} not found")
+        stat = candidate.stat()
+        return {
+            "path": path,
+            "content_type": spec.content_type or "application/octet-stream",
+            "size": stat.st_size,
+        }
+
+    text = read_workspace_text_file(path, workspace_dir).lstrip("\ufeff")
+    if spec.value_type == "json":
+        try:
+            value = json.loads(text)
+        except ValueError as exc:
+            raise RuntimeInputFileError(f"file input {path!r} is not valid JSON: {exc}") from exc
+        for key in spec.json_path:
+            if not isinstance(value, dict) or key not in value:
+                raise RuntimeInputFileError(f"file input {path!r} is missing JSON field {key!r}")
+            value = value[key]
+        return value
+    if spec.value_type in {"jsonl", "ndjson"}:
+        rows: list[Any] = []
+        try:
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                rows.append(json.loads(line))
+        except ValueError as exc:
+            raise RuntimeInputFileError(f"file input {path!r} is not valid JSONL: {exc}") from exc
+        return rows
+    if spec.value_type in {"csv", "tsv"}:
+        delimiter = "\t" if spec.value_type == "tsv" else ","
+        try:
+            reader = csv.DictReader(text.splitlines(), delimiter=delimiter)
+            return [dict(row) for row in reader]
+        except csv.Error as exc:
+            raise RuntimeInputFileError(f"file input {path!r} is not valid {spec.value_type.upper()}: {exc}") from exc
+    return text
 
 
 def _workspace_dir_from_state(state: WorkflowState, *, phase_id: str) -> Path:

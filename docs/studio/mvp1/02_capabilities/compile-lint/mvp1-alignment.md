@@ -56,24 +56,25 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 ### F4.1. Pre-run File Gate
 
 2026-07-05 correction: compile owns the whole path that can be checked before
-execution, including Studio-owned input/output files. A graph with required
-runtime inputs must not compile into a predictable artifact unless there is at
-least one `.workspace/import_files/*.json` file that validates against graph
-`io.inputs`; every persisted test input file must be valid JSON object data for
-that schema. Persisted golden case `expected_output` files must validate against
-the current agent-node `io.outputs` schema, not only contain top-level required
-keys. These checks live in the Studio shell compile preflight because
-`.workspace/import_files` and `.workspace/golden` are Studio workspace files, not
-engine SDK source.
+execution, including Studio-owned runtime configuration. Studio refreshes
+`.workspace/runtime_config.json` from `.workspace/import_files/` before
+lint/compile; graph root inputs and phase inputs are considered supplied only
+when the Markdown `io.inputs` schema and the runtime_config import binding agree.
+Golden remains outside runtime_config; persisted golden case `expected_output`
+files still validate against the current agent-node `io.outputs` schema. These
+checks live in the Studio shell compile preflight because `.workspace/import_files`,
+`.workspace/runtime_config.json`, and `.workspace/golden` are Studio workspace
+files, not engine SDK source.
 
-- 机制: manual compile runs engine compile first, then Studio preflight validates
-  test input JSON files against graph `io.inputs` and golden output JSON files
+- 机制: manual compile refreshes runtime_config first, runs engine compile with
+  runtime input fields, then Studio preflight validates golden output JSON files
   against node `io.outputs`; failures return normal `CompileFailure.errors`.
 - 决策: anything knowable before predict/run is a compile error. Predict/Run must
   never silently substitute `{}` for missing input.
-- 测试: required graph input with no test input fails compile; invalid test input
-  type fails compile; stale golden type/missing field fails compile; all errors
-  surface through the Compile drawer.
+- 测试: required graph input with no runtime_config root import backing fails
+  compile; phase file input with no runtime_config phase binding fails compile;
+  stale golden type/missing field fails compile; all errors surface through the
+  Compile drawer.
 - Status: target-design (implemented 2026-07-05).
 - 归属: Studio backend shell for workspace files; engine remains owner of skill
   source/schema/dataflow compile errors.
@@ -83,7 +84,7 @@ engine SDK source.
 2026-07-05 correction: blackboard data-gap diagnostics are engine compile/lint
 diagnostics, not a Studio-only canvas projection. A phase input declared in
 `io.inputs.properties` must be supplied by graph root input, upstream output,
-`source:file`, or iterate/batch injection; otherwise engine emits
+runtime_config import binding, or iterate/batch injection; otherwise engine emits
 `[F-v3-graph-dataflow-source-missing]` with `field_path =
 <phase>.io.inputs.properties.<field>`. Studio may still expose
 `graph_topology[].field_supply` for Input-panel supply visualization, but must

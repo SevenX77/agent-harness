@@ -209,8 +209,8 @@
       "security_fe": "GRAPH.md / phase 文件无机密字段（凭证在 N0 的 llm_credentials.json，不在搭图文件里）；前端写盘带 expected_hash 防覆盖。"
     },
     {
-      "name": ".workspace/node_llm_params.json（Studio 本地 node model params）",
-      "what": "每个 skill 的每个 Agent node 可选的 model params override，本地存放在 skill 根下 .workspace/node_llm_params.json。它不是 SKILL.md、不是 GRAPH.md、也不是全局 llm_roles.yaml；llm_roles.yaml 继续只保存角色/route 配置真相。",
+      "name": ".workspace/runtime_config.json（Studio 运行配置）",
+      "what": "每个 skill 的 import bindings、runtime artifacts、Agent node model params override、Compare LLM candidates 等运行期配置统一存放在 skill 根下 .workspace/runtime_config.json。它不是 SKILL.md、不是 GRAPH.md、也不是全局 llm_roles.yaml；llm_roles.yaml 继续只保存角色/route 配置真相。golden 与 ui 不进入 runtime_config。",
       "version": "无迁移版本；pre-release 数据可丢弃/重生成。",
       "structs": [
         {
@@ -237,8 +237,8 @@
           ]
         }
       ],
-      "owns": "Studio backend owns this local workspace state and exposes it through node-llm-params API; gateway owns role config truth, engine only receives already-resolved call overrides through adapter.",
-      "crud_pointer": "读写走 GET /api/skills/{skill_id}/node-llm-params 与 PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params；运行时 run_manager 设置 STUDIO_NODE_PARAMS_PATH，engine adapter 的 _node_param_overrides 读取 enabled=true 的 entry。",
+      "owns": "Studio backend owns this local workspace state and exposes node-llm-params / compare-candidates / runtime-config API views over the same file; gateway owns role config truth, engine only receives already-resolved call overrides through adapter.",
+      "crud_pointer": "读写走 GET /api/skills/{skill_id}/node-llm-params 与 PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params；运行时 run_manager 设置 STUDIO_RUNTIME_CONFIG_PATH，engine adapter 的 _node_param_overrides 读取 runtime_config 中 enabled=true 的 node entry。",
       "storage_note": ".workspace/* 是本地 workspace 状态；如果未来产品要求 node params 随 skill 发布，应另定非 .workspace 的 skill source 文件，而不是塞进 llm_roles.yaml。",
       "security_fe": "无机密字段；它只包含 node scoped model generation params。"
     }
@@ -271,7 +271,7 @@
       "req": "路径参数 skill_id",
       "resp": "NodeLlmParamsMap{nodes:{node_id:{enabled,thinking?,max_output_tokens?,temperature?}}}；返回已保存的 node params entry，包括 enabled=false 但带字段值的未激活草稿；enabled=false 且字段全空的 entry 会被清理。",
       "purpose": "读（node model params）——Properties 面板加载当前 skill 的 node scoped model params；默认空 map 表示所有 node 继承 role。",
-      "provider": "Studio sidecar（routers/node_llm_params.py → services/node_llm_params.py 读 .workspace/node_llm_params.json）",
+      "provider": "Studio sidecar（routers/node_llm_params.py → services/runtime_config.py 读 .workspace/runtime_config.json）",
       "id": "iface-node-params-read"
     },
     {
@@ -280,7 +280,7 @@
       "req": "NodeLlmParams{enabled,thinking?,max_output_tokens?,temperature?};enabled=false 只停用运行覆盖并保留字段草稿，只有字段全空才清除该 node entry;enabled=true 保留 entry,空字段逐项继承。",
       "resp": "NodeLlmParams（写入请求的规范化结果）",
       "purpose": "写（node model params）——Properties 面板的 Custom model params 开关和三个参数控件自动保存；该数据不写 SKILL.md / GRAPH.md / llm_roles.yaml。",
-      "provider": "Studio sidecar（routers/node_llm_params.py → services/node_llm_params.py 写 .workspace/node_llm_params.json）",
+      "provider": "Studio sidecar（routers/node_llm_params.py → services/runtime_config.py 写 .workspace/runtime_config.json）",
       "id": "iface-node-params-write"
     },
     {

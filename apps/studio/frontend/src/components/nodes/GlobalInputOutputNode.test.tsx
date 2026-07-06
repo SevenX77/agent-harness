@@ -117,12 +117,12 @@ describe('GlobalInputOutputNode', () => {
       },
       compileErrors: [
         {
-          file: '.workspace/import_files',
+          file: '.workspace/runtime_config.json',
           line: null,
           field: 'chapter',
           severity: 'fatal',
-          message: "Graph input schema requires test input field 'chapter'",
-          error_code: 'STUDIO_TEST_INPUT_MISSING',
+          message: "Graph input schema requires runtime input field 'chapter'",
+          error_code: 'STUDIO_RUNTIME_INPUT_MISSING',
         },
       ],
     })
@@ -132,6 +132,6 @@ describe('GlobalInputOutputNode', () => {
     expect(html).toContain('h-5')
     expect(html).toContain('text-[11px]')
     expect(html).toContain('chapter')
-    expect(html).toContain('Graph input schema requires test input field')
+    expect(html).toContain('Graph input schema requires runtime input field')
   })
 })

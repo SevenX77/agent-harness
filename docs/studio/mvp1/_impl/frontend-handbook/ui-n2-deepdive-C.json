@@ -40,12 +40,12 @@
     ]
   },
   "io_panel": {
-    "summary": "io 面板已不再投影假文件(stale 已清):旧版把 input/schema.json + input/sample.json 两个磁盘上不存在的假文件投进编辑器、edit autosave 到死路径=静默丢数据,现已删除,panel-files.ts 注释明确说明并改为直接读 GRAPH.md frontmatter 的 io.inputs/io.outputs。input 侧:导入靠 SchemaInferPanel 拖 JSON 推断 schema 存进 GRAPH.md io.inputs(F2),加上字段级增删改名/改类型直接写 io.inputs.properties。output artifact 落盘(G3):OutputPathRow 给每个 output 字段设 path,applyOutputArtifactPathToGraph 往 io.outputs.<field> 写 {target:'artifact', path},空 path 清除;引擎侧 io/manager 认 target='artifact' 并解析到 .workspace/runs/<id>/artifacts/<path>,G3 后端契约已落地。G2(子图 io 1:1 校验删了没):前端无该校验;引擎 loader 仍保留 [F-v3-subgraph-io-mismatch] 校验,但只比 outputs(parent_outputs != child_outputs)不是 inputs+outputs 全 1:1,所以是'已弱化为仅 outputs',没有彻底删除。",
+    "summary": "io 面板已不再投影假文件(stale 已清):旧版把 input/schema.json + input/sample.json 两个磁盘上不存在的假文件投进编辑器、edit autosave 到死路径=静默丢数据,现已删除,panel-files.ts 注释明确说明并改为直接读 GRAPH.md/节点 md frontmatter 的 io.inputs/io.outputs。2026-07-05 runtime_config 收敛后,input 侧导入文件的路径/目录/pattern 统一放在 .workspace/runtime_config.json,Markdown io.inputs 只保存普通 JSON Schema 字段;output artifact 清单也写 runtime_config.artifacts,不写 GRAPH.md io。G2(子图 io 1:1 校验删了没):前端无该校验;引擎 loader 仍保留 [F-v3-subgraph-io-mismatch] 校验,但只比 outputs(parent_outputs != child_outputs)不是 inputs+outputs 全 1:1,所以是'已弱化为仅 outputs',没有彻底删除。",
     "evidence": [
       ["投影假文件已删:IoContractView 注释——曾投 input/schema.json + input/sample.json 两个假文件,edit autosave 到死路径=静默丢数据,现已移除,改为返回解析后的 io map + 一个 seed 字符串", "apps/studio/frontend/src/components/studio/panels/panel-files.ts:70-85"],
       ["input 字段级编辑直接写真契约 GRAPH.md io.inputs.properties(rename/setType/remove/add),无假文件死路径", "apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:342-358, 542-579"],
       ["input schema 推断(F2):拖 JSON → inferJsonSchemaFromText → applyInputSchemaToGraph 写 GRAPH.md io.inputs,提示 'Saved to GRAPH.md io.inputs.'", "apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:87-107, 164-167"],
-      ["output artifact 落盘(G3):applyOutputArtifactPathToGraph 往 io.outputs.<field> 写 target='artifact'+path(空清除),OutputPathRow 提交", "apps/studio/frontend/src/lib/schema-infer.ts:80-111; apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:222-290"],
+      ["output artifact 落盘(G3):OutputConfigDialog 保存 runtime_config.artifacts,engine artifact_manifest writer 运行期落 .workspace/runs/<id>/artifacts", "apps/studio/frontend/src/lib/io-config.ts; apps/studio/frontend/src/components/studio/panels/InputPanel.tsx"],
       ["G3 引擎契约已落地:io/manager 认 target in ('artifact','artifact_manager') 并走 artifact_saver 解析名/路径", "packages/graph-agent/src/graph_agent/io/manager.py:159-163, 237"],
       ["G2 子图 io 校验未删,仅弱化为比 outputs:loader 取 parent_outputs/child_outputs,若 parent_outputs != child_outputs 报 [F-v3-subgraph-io-mismatch] FATAL(注意它读 target_skill 而非新 path:)", "packages/graph-agent/src/graph_agent/core/loader.py:549-558"]
     ]

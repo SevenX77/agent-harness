@@ -442,6 +442,13 @@ class EndpointModelTestResponse(BaseModel):
     results: list[EndpointModelTestResult]
 
 
+class RolesProjectionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    roles_data: RolesData
+    registry: RegistryResponse
+
+
 @router.get("/registry", response_model=RegistryResponse)
 async def get_llm_registry() -> RegistryResponse:
     """Return the joined redacted endpoint/route/role registry."""
@@ -465,6 +472,24 @@ async def _write_registry_response(credentials: LLMCredentialsFile) -> RegistryR
         _load_roles_or_empty(),
         setup_required=False,
     )
+
+
+async def _roles_projection_response(
+    roles: RolesData,
+    credentials: LLMCredentialsFile | None = None,
+    *,
+    setup_required: bool = False,
+) -> RolesProjectionResponse:
+    """Return roles plus the registry projection built from the same snapshot."""
+    active_credentials = credentials or load_credentials()
+    roles_data = _materialize_roles_for_response(roles, active_credentials)
+    registry = await asyncio.to_thread(
+        _registry_response,
+        active_credentials,
+        roles_data,
+        setup_required=setup_required,
+    )
+    return RolesProjectionResponse(roles_data=roles_data, registry=registry)
 
 
 @router.get("/registry/endpoints/{endpoint_id}/secret", response_model=EndpointSecretResponse)
@@ -1523,14 +1548,17 @@ async def delete_registry_route(route_id: str) -> RegistryResponse:
     return await _write_registry_response(data)
 
 
-@router.get("/roles", response_model=RolesData)
-async def get_llm_roles() -> RolesData:
+@router.get("/roles", response_model=RolesProjectionResponse)
+async def get_llm_roles() -> RolesProjectionResponse:
     """Return all route-backed roles."""
-    return _materialize_roles_for_response(_load_roles_or_empty())
+    return await _roles_projection_response(
+        _load_roles_or_empty(),
+        setup_required=not credentials_path().exists(),
+    )
 
 
-@router.put("/roles", response_model=RolesData)
-async def put_llm_roles(request: RolesData) -> RolesData:
+@router.put("/roles", response_model=RolesProjectionResponse)
+async def put_llm_roles(request: RolesData) -> RolesProjectionResponse:
     """Upsert submitted roles; absent roles are retained."""
     current = _load_roles_or_empty()
     merged = current.model_copy(
@@ -1554,7 +1582,7 @@ async def put_llm_roles(request: RolesData) -> RolesData:
             "model_bundle_count": len(saved.model_bundles),
         },
     )
-    return _materialize_roles_for_response(saved, credentials)
+    return await _roles_projection_response(saved, credentials)
 
 
 @router.get("/roles/test-results", response_model=RoleTestResultsResponse)
@@ -1644,8 +1672,8 @@ async def get_fixed_role_status(role_name: str) -> dict[str, Any]:
     }
 
 
-@router.delete("/roles/{role_name}", response_model=RolesData)
-async def delete_llm_role(role_name: str) -> RolesData:
+@router.delete("/roles/{role_name}", response_model=RolesProjectionResponse)
+async def delete_llm_role(role_name: str) -> RolesProjectionResponse:
     """Delete one persisted role."""
     from app.services.llm_fixed_roles import is_fixed_role
 
@@ -1669,7 +1697,7 @@ async def delete_llm_role(role_name: str) -> RolesData:
         message="Deleted one LLM role.",
         changes={"role_name": role_name, "remaining_role_count": len(saved.roles)},
     )
-    return _materialize_roles_for_response(saved, credentials)
+    return await _roles_projection_response(saved, credentials)
 
 
 @router.post("/roles/{role_name}/test")
@@ -2364,8 +2392,8 @@ async def put_model_profiles(profiles: dict[str, ModelProfile]) -> dict[str, Mod
     return _save_roles_with_active_routes(data).model_profiles
 
 
-@router.delete("/model-bundles/{bundle_id}", response_model=RolesData)
-async def delete_model_bundle(bundle_id: str) -> RolesData:
+@router.delete("/model-bundles/{bundle_id}", response_model=RolesProjectionResponse)
+async def delete_model_bundle(bundle_id: str) -> RolesProjectionResponse:
     """Delete one persisted model bundle and cascade off referencing roles.
 
     #51/#52 delete cascade: the bundle is the source of truth. When it is removed,
@@ -2392,7 +2420,14 @@ async def delete_model_bundle(bundle_id: str) -> RolesData:
     saved = _save_roles_with_active_routes(
         data.model_copy(update={"model_bundles": bundles, "roles": roles})
     )
-    return _materialize_roles_for_response(saved, credentials)
+    await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="delete_model_bundle",
+        message="Deleted one LLM model bundle.",
+        changes={"bundle_id": bundle_id, "remaining_model_bundle_count": len(saved.model_bundles)},
+    )
+    return await _roles_projection_response(saved, credentials)
 
 
 @router.delete("/model-profiles/{model_profile_id}")

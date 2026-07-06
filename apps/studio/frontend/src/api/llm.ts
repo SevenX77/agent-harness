@@ -549,6 +549,11 @@ interface BackendRolesData {
   roles: Record<string, BackendRoleEntry>
 }
 
+interface RolesProjectionResponse {
+  roles_data: RolesData
+  registry: RegistryResponse
+}
+
 interface BackendRoleEntry {
   role_kind: RoleKind
   system_prompt_prefix: string
@@ -1196,6 +1201,12 @@ function cacheRegistry(registry: CredentialRegistryResponse): RegistryResponse {
     ...hydrated,
   } as RegistryResponse
   return cachedRegistry
+}
+
+function cacheRolesProjection(snapshot: RolesProjectionResponse): RolesData {
+  const registry = cacheRegistry(snapshot.registry)
+  cachedRolesData = rolesDataFromBackend(snapshot.roles_data, registry)
+  return cachedRolesData
 }
 
 type EndpointFailureScope = 'endpoint' | 'model' | 'unknown'
@@ -1871,10 +1882,8 @@ export async function getRoles(options: RegistryReadOptions = {}): Promise<Roles
   if (!options.force && cachedRolesData) return cachedRolesData
   if (rolesRequest) return rolesRequest
   rolesRequest = (async () => {
-    const response = await api.get<RolesData>('/llm/roles')
-    const registry = await getRegistry(options)
-    cachedRolesData = rolesDataFromBackend(response.data, registry)
-    return cachedRolesData
+    const response = await api.get<RolesProjectionResponse>('/llm/roles')
+    return cacheRolesProjection(response.data)
   })().finally(() => {
     rolesRequest = null
   })
@@ -1940,24 +1949,18 @@ export async function getFixedRoleStatus(roleName: string): Promise<FixedRoleSta
 }
 
 export async function putRoles(data: RolesData): Promise<RolesData> {
-  const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
-  const registry = cachedRegistry ?? await getRegistry()
-  cachedRolesData = rolesDataFromBackend(response.data, registry)
-  return cachedRolesData
+  const response = await api.put<RolesProjectionResponse>('/llm/roles', rolesDataToBackend(data))
+  return cacheRolesProjection(response.data)
 }
 
 export async function deleteRole(roleName: string): Promise<RolesData> {
-  const response = await api.delete<RolesData>(`/llm/roles/${segment(roleName)}`)
-  const registry = cachedRegistry ?? await getRegistry()
-  cachedRolesData = rolesDataFromBackend(response.data, registry)
-  return cachedRolesData
+  const response = await api.delete<RolesProjectionResponse>(`/llm/roles/${segment(roleName)}`)
+  return cacheRolesProjection(response.data)
 }
 
 export async function deleteModelBundle(bundleId: string): Promise<RolesData> {
-  const response = await api.delete<RolesData>(`/llm/model-bundles/${segment(bundleId)}`)
-  const registry = cachedRegistry ?? await getRegistry()
-  cachedRolesData = rolesDataFromBackend(response.data, registry)
-  return cachedRolesData
+  const response = await api.delete<RolesProjectionResponse>(`/llm/model-bundles/${segment(bundleId)}`)
+  return cacheRolesProjection(response.data)
 }
 
 export async function testRole(roleName: string): Promise<RoleTestResponse> {

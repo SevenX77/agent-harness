@@ -165,6 +165,13 @@ def _registry_response_route(body, route_id: str = "openai-direct:gpt-5"):
     return body["provider_routes"][route_id]
 
 
+def _roles_projection_roles_data(body):
+    assert "roles_data" in body
+    assert "registry" in body
+    assert "model_groups" in body["registry"]
+    return body["roles_data"]
+
+
 def test_role_effective_runtime_settings_uses_gateway_model_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -223,6 +230,23 @@ def test_role_effective_runtime_settings_uses_gateway_model_resolver(
 
     assert calls == ["graph_agent"]
     assert route_id in result["graph_agent"]
+
+
+def test_get_roles_returns_roles_and_registry_projection(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    response = client.get("/api/llm/roles")
+
+    assert response.status_code == 200
+    body = response.json()
+    roles_data = _roles_projection_roles_data(body)
+    assert "graph_agent" in roles_data["roles"]
+    assert body["registry"]["roles"]["graph_agent"]["fallback_chain"][0]["route_id"] == "openai-direct:gpt-5"
+    assert _registry_response_route(body["registry"])["status"] == "verified"
 
 
 def test_role_effective_runtime_settings_projects_no_available_route(
@@ -6080,7 +6104,10 @@ def test_put_roles_preserves_advanced_model_bundles(
     )
 
     assert response.status_code == 200
-    assert response.json()["model_bundles"]["premium_stack"]["display_name"] == "Premium Stack"
+    body = response.json()
+    roles_data = _roles_projection_roles_data(body)
+    assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
+    assert roles_data["model_bundles"]["premium_stack"]["display_name"] == "Premium Stack"
     assert "premium_stack" in load_roles_file(active_roles_path()).model_bundles
 
 
@@ -6118,7 +6145,10 @@ def test_put_roles_materializes_model_bundle_groups_to_flat_route_chain(
     )
 
     assert response.status_code == 200
-    bundle = response.json()["model_bundles"]["premium_stack"]
+    body = response.json()
+    roles_data = _roles_projection_roles_data(body)
+    assert body["registry"]["model_groups"][0]["canonical_id"] == "gpt-5"
+    bundle = roles_data["model_bundles"]["premium_stack"]
     assert [entry["route_id"] for entry in bundle["fallback_chain"]] == ["openai-direct:gpt-5"]
     saved = load_roles_file(active_roles_path()).model_bundles["premium_stack"]
     assert [entry.route_id for entry in saved.fallback_chain] == ["openai-direct:gpt-5"]
@@ -6151,7 +6181,10 @@ def test_delete_model_bundle_removes_persisted_bundle(
     response = client.delete("/api/llm/model-bundles/premium_stack")
 
     assert response.status_code == 200
-    assert "premium_stack" not in response.json()["model_bundles"]
+    body = response.json()
+    roles_data = _roles_projection_roles_data(body)
+    assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
+    assert "premium_stack" not in roles_data["model_bundles"]
     assert "premium_stack" not in load_roles_file(active_roles_path()).model_bundles
 
 

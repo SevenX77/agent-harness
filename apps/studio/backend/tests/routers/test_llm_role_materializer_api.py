@@ -511,11 +511,13 @@ def test_delete_role_v3_removes_persisted_role_instead_of_put_merge_retaining_it
     delete_response = client.delete("/api/llm/roles/analyst")
 
     assert delete_response.status_code == 200
-    assert "analyst" not in delete_response.json()["roles"]
-    assert "planner" in delete_response.json()["roles"]
+    delete_roles = delete_response.json()["roles_data"]["roles"]
+    assert "analyst" not in delete_roles
+    assert "planner" in delete_roles
     get_response = client.get("/api/llm/roles")
-    assert "analyst" not in get_response.json()["roles"]
-    assert "planner" in get_response.json()["roles"]
+    get_roles = get_response.json()["roles_data"]["roles"]
+    assert "analyst" not in get_roles
+    assert "planner" in get_roles
 
 
 def test_put_role_v3_keeps_selected_cooling_down_provider_with_warning(

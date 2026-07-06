@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/sheet"
 import { allowTextSelectionProps } from "@/hooks/useNativeDoubleClickGuard"
 import type { CompileError } from "@/api/types"
+import { formatDiagnosticCode } from "./field-compile-errors"
 
 /**
  * Compile-error drawer (N3 · COMPILE_LINT-1).
@@ -34,6 +35,10 @@ export function formatCompileErrorLine(error: CompileError): string {
   const parts = [location]
   if (error.field) {
     parts.push(error.field)
+  }
+  const code = formatDiagnosticCode(error.error_code)
+  if (code) {
+    parts.push(code)
   }
   parts.push(error.message)
   return parts.join(" - ")
@@ -133,26 +138,30 @@ export function CompileErrorDrawer({ errors, open, onOpenChange, kind = "compile
           {...allowTextSelectionProps()}
           className="min-h-0 flex-1 space-y-2 overflow-auto px-4 py-3 select-text"
         >
-          {errors.map((error, index) => (
-            <div
-              key={`${error.file ?? "compile"}-${error.line ?? "x"}-${index}`}
-              className="text-xs text-muted-foreground"
-            >
-              <span className="font-medium text-foreground">
-                {error.file ?? "unknown file"}
-                {error.line ? `:${error.line}` : ""}
-              </span>
-              {error.field ? <span> - {error.field}</span> : null}
-              <span> - {error.message}</span>
-              {error.details?.length ? (
-                <div className="mt-1 space-y-1 pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                  {error.details.map((detail, detailIndex) => (
-                    <div key={`${detailIndex}-${detail}`}>{detail}</div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ))}
+          {errors.map((error, index) => {
+            const code = formatDiagnosticCode(error.error_code)
+            return (
+              <div
+                key={`${error.file ?? "compile"}-${error.line ?? "x"}-${index}`}
+                className="text-xs text-muted-foreground"
+              >
+                <span className="font-medium text-foreground">
+                  {error.file ?? "unknown file"}
+                  {error.line ? `:${error.line}` : ""}
+                </span>
+                {error.field ? <span> - {error.field}</span> : null}
+                {code ? <span> - {code}</span> : null}
+                <span> - {error.message}</span>
+                {error.details?.length ? (
+                  <div className="mt-1 space-y-1 pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    {error.details.map((detail, detailIndex) => (
+                      <div key={`${detailIndex}-${detail}`}>{detail}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       </SheetContent>
     </Sheet>

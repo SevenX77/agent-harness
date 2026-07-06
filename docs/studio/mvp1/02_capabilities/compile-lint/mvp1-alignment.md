@@ -16,6 +16,17 @@ aligns_with: 01_workflows/03_compile.md（lint / compile / stage gate）
 
 Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.md:10`, `01_workflows/03_compile.md:26`.
 
+2026-07-05 data-chain clarification: Studio does not have separate lint and
+compile rule engines. The one engine-owned compile exit is
+`graph_agent.core.compiler.compile_skill(...)`, implemented by
+`SkillLoader.compile_skill(...)`. Studio's backend shell calls that same exit
+from first-screen lint, realtime lint, and manual Compile, then layers only
+Studio-owned preflight checks that the engine SDK cannot know about
+(`.workspace/runtime_config.json`, `.workspace/import_files/`, `.workspace/golden`).
+The frontend then projects the resulting diagnostics to node badges, field
+tooltips, editor markers, and the drawer. Any error that can be proven before
+predict/run belongs on this compile/lint path, not on predict/run startup.
+
 ## 2. 数据流 / 机制（设计细节）
 ### F1. Realtime Lint
 
@@ -107,6 +118,15 @@ not synthesize node compile errors from it.
 - 归属: platform `engine`(阶段内聚合 + issues 轴); capability `compile-lint`(lint 展开); regions `canvas` `properties` `editor`(投影)。
 
 ## 3. 接口契约
+- Unified backend path: `GET /api/skills/{id}` -> `get_skill_detail` ->
+  `lint_skill_path` -> engine `compile_skill(...)` -> Studio preflight ->
+  `SkillDetail.lint_result`; `POST /api/skills/{id}/lint` -> `lint_skill` ->
+  changed-markdown sandbox or on-disk skill -> `lint_skill_path` -> the same
+  engine `compile_skill(...)` -> the same Studio preflight -> `LintResult`;
+  `POST /api/skills/{id}/compile` -> `compile_skill_for_studio` ->
+  `refresh_runtime_config` -> the same engine `compile_skill(...,
+  runtime_input_fields=...)` -> the same Studio preflight -> frozen artifact or
+  `CompileFailure.errors`.
 - Frontend lint sends changed markdown and receives pass/fail/error payload; `LintResult.errors` carries the full aggregated defect list of the pass (F6), never just the first error.
 - Canvas topology writes (GRAPH.md rewrite) trigger the same lint call with the serialized content and replace all three projections with the new result (F1/F6).
 - Manual compile calls engine-backed compile and receives structured errors with file, line, field, severity, and message.

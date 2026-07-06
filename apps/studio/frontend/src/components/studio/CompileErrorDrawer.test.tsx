@@ -33,6 +33,12 @@ describe("formatCompileErrorLine", () => {
     )
   })
 
+  it("wraps diagnostic codes in brackets when present", () => {
+    expect(formatCompileErrorLine(makeError({ error_code: "F-v3-graph-io-schema-invalid" }))).toBe(
+      "phases/draft/SKILL.md:12 - model - [F-v3-graph-io-schema-invalid] - Unknown model alias",
+    )
+  })
+
   it("omits the field segment when there is no field", () => {
     expect(formatCompileErrorLine(makeError({ field: null }))).toBe(
       "phases/draft/SKILL.md:12 - Unknown model alias",

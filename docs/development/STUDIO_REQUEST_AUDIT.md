@@ -42,6 +42,8 @@ Use a shared test when it protects an architectural boundary:
 
 - Static guard tests for deleted/forbidden request channels, such as the removed
   Copilot auto-context endpoint.
+- Static guard tests for shared request-policy helpers, such as requiring every
+  production `useSWR(...)` truth read to opt into `STUDIO_TRUTH_SWR_CONFIG`.
 - Network-silent interaction tests for UI-only actions after cold data is loaded,
   such as node selection, panel open/close, tab switch, and dialog reopen.
 - API client cache tests for shared in-flight/cold-load semantics and precise
@@ -62,12 +64,15 @@ Use per-request tests when a request has unique semantics:
 | Area | Request/route | Current trigger | Verdict | Guard |
 | --- | --- | --- | --- | --- |
 | Copilot canvas context | `POST /api/skills/{skill_id}/copilot/context` | Canvas selection/render sent selected node/edge/lint state | Removed. UI selection is not truth mutation and must not be sent implicitly. | `CopilotContext.network-side-effect.test.ts`, `test_copilot_context_endpoint_removed.py` |
-| Properties node config | `GET /api/skills/{skill_id}/node-llm-params` | Properties panel cold load | OK if shared per skill and silent on node selection after load. | `PropertiesPanel.network-side-effect.test.tsx`, client cache tests |
-| Properties compare candidates | `GET /api/skills/{skill_id}/compare-candidates` | Properties panel cold load | OK if shared per skill and silent on node selection after load. | `PropertiesPanel.network-side-effect.test.tsx`, client cache tests |
+| Canvas node selection | left-panel reads such as `GET /api/skills/{skill_id}/node-llm-params`, `GET /api/skills/{skill_id}/runs`, `GET /api/skills/{skill_id}/test_inputs` | Repeated click on an already-selected phase node previously reopened the recorded side panel | Removed. Phase-node clicks are selection only; opening Properties/I/O/Timeline must be a toolbar action or an already-mounted panel projection. | `GraphCanvas.test.tsx` |
+| Properties node config | `GET /api/skills/{skill_id}/node-llm-params` | Properties panel cold load | OK if shared per skill and silent on node selection after load. | `GraphCanvas.test.tsx`, `PropertiesPanel.network-side-effect.test.tsx`, client cache tests |
+| Properties compare candidates | `GET /api/skills/{skill_id}/compare-candidates` | Properties panel cold load | OK if shared per skill and silent on node selection after load. | `GraphCanvas.test.tsx`, `PropertiesPanel.network-side-effect.test.tsx`, client cache tests |
 | Settings app settings | `GET/PUT /api/settings` | App settings initialization / user save | OK: the hook waits for authenticated API readiness before the first read, shares the cold-load request, and saves only after explicit settings edits. | `useAppSettings.test.ts` |
 | LLM registry | `GET /api/llm/registry` | Settings/API Keys/roles consumers and domain events | Partial: client reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Remaining audit: all registry write paths must keep returning/projecting exact canonical snapshots. | `llm.test.ts`, `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
 | LLM roles | `GET/PUT /api/llm/roles` | Settings/Copilot role consumers and role writes/events | Partial: roles reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Remaining audit: role write/test/job paths need route-by-route review. | `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
 | Templates | `GET /api/templates` | Create-skill Copilot empty-state template UI | OK: templates are disabled while the template UI is hidden and cold-load only when the create-skill template UI becomes visible. | `useTemplates.test.tsx`, `copilot-panel.test.ts` |
+| Run history | `GET /api/skills/{skill_id}/runs` | Timeline panel cold load / explicit refresh / run mutation projection | Partial: all SWR reads must use the Studio truth policy, and phase-node clicks can no longer reopen Timeline implicitly. Run/delete projection semantics still need route-specific audit. | `studio-swr-policy.usage.test.ts`, `GraphCanvas.test.tsx` |
+| Test inputs | `GET /api/skills/{skill_id}/test_inputs` | I/O panel cold load / create-delete projection | Partial: all SWR reads must use the Studio truth policy, and phase-node clicks can no longer reopen I/O implicitly. Create/delete projection semantics still need route-specific audit. | `studio-swr-policy.usage.test.ts`, `GraphCanvas.test.tsx` |
 | Studio event stream | `WS /ws/events` | App-level domain event stream | OK for the generic-resync risk: connect/reconnect do not dispatch data refresh callbacks; only precise backend events invoke the exact handlers. | `useStudioEventStream.test.ts` |
 | Copilot chat | `WS /api/skills/{skill_id}/copilot/ws` | User sends a Copilot message | OK as explicit user action; future `@` mentions must travel with the message payload, not background UI state. | Required when `@` mention payload is implemented |
 
@@ -434,12 +439,12 @@ FRONTEND GET /api/skills/{skill_id}/history | review | shared | Read request nee
 FRONTEND GET /api/skills/{skill_id}/node-llm-params | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/releases | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/runs | review | shared | Run-history list is a SWR cold-load key; exact refresh sources after run/delete still need route-specific audit.
+FRONTEND GET /api/skills/{skill_id}/runs | partial | shared | Run-history list is a SWR cold-load key with Studio truth policy; phase-node clicks no longer reopen Timeline implicitly. Exact refresh sources after run/delete still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/subgraph | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/test_inputs | review | shared | Test input list is a SWR cold-load key; create/delete revalidation semantics still need route-specific audit.
+FRONTEND GET /api/skills/{skill_id}/test_inputs | partial | shared | Test input list is a SWR cold-load key with Studio truth policy; phase-node clicks no longer reopen I/O implicitly. Create/delete revalidation semantics still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/system/community-catalog-config | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/system/truth-sources | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.

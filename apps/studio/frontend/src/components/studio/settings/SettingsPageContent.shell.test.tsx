@@ -82,10 +82,11 @@ describe("Settings shell per-tab skeleton gate", () => {
     expect(html).not.toContain('data-roles-tab-skeleton="true"')
   })
 
-  it("keeps the roles skeleton hidden on General", () => {
+  it("does not mount role-backed tabs before they are visited", () => {
     const html = render({ activeTab: "general", rolesData: null })
-    expect(html).toMatch(/data-settings-tab-panel="llm_roles"[^>]*hidden[\s\S]*data-roles-tab-skeleton="true"/)
-    expect(html).toMatch(/data-settings-tab-panel="copilot"[^>]*hidden[\s\S]*data-roles-tab-skeleton="true"/)
+    expect(html).not.toContain('data-settings-tab-panel="llm_roles"')
+    expect(html).not.toContain('data-settings-tab-panel="copilot"')
+    expect(html).not.toContain('data-roles-tab-skeleton="true"')
   })
 
   it("shows the General-tab skeleton while appSettings are loading", () => {
@@ -113,16 +114,13 @@ describe("Settings shell per-tab skeleton gate", () => {
     expect(html).toContain('data-copilot-settings-page="true"')
   })
 
-  it("keeps every tab panel mounted and hides inactive panels", () => {
+  it("mounts only the active tab panel on first render", () => {
     const html = render({ activeTab: "general", rolesData: emptyRolesData })
     expect(html).toContain('data-settings-tab-panel="general"')
-    expect(html).toContain('data-settings-tab-panel="api_keys"')
-    expect(html).toContain('data-settings-tab-panel="llm_roles"')
-    expect(html).toContain('data-settings-tab-panel="copilot"')
+    expect(html).not.toContain('data-settings-tab-panel="api_keys"')
+    expect(html).not.toContain('data-settings-tab-panel="llm_roles"')
+    expect(html).not.toContain('data-settings-tab-panel="copilot"')
     expect(html).toMatch(/data-settings-tab-panel="general"(?![^>]*hidden)/)
-    expect(html).toMatch(/data-settings-tab-panel="api_keys"[^>]*hidden/)
-    expect(html).toMatch(/data-settings-tab-panel="llm_roles"[^>]*hidden/)
-    expect(html).toMatch(/data-settings-tab-panel="copilot"[^>]*hidden/)
   })
 })
 

@@ -1,7 +1,7 @@
 export { SettingsPage, SettingsPageView, SettingsPageContent, CopilotTab, LlmRolesTab, activeProbeModelIdsForDraft, useSettingsPageController } from "./settings"
 export { getModelAvailability } from "./settings"
 export type { ModelAvailability, ProviderDraft, SettingsPageContentProps, SettingsPageController, SettingsTab } from "./settings"
-export { isStaleRouteReferenceError, modelGroupsReferenceMissingCredentialProviders, refreshLoadedLlmRolesProjection, shouldSyncRemoteModelCatalog, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./settings"
+export { isStaleRouteReferenceError, modelGroupsReferenceMissingCredentialProviders, refreshLoadedLlmRolesProjection, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./settings"
 export { officialProviderTestSummary } from "./settings"
 export { draftsFromCredentials, draftFromAddProviderSubmission, endpointIdForBaseUrlProtocol, inferProviderKind, inferProviderType, notableProviderKeyForDraft, officialProviderDrafts, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch, shouldShowManualModelPanel, thirdPartyProtocolCandidates, thirdPartyProviderDrafts } from "./settings"
 export { appendModelToRole, moveModelInRole, moveProviderInRole, removeModelFromRole, removeProviderFromRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, updateActiveModel, updateRoleIntent, updateRoleModelSettings, validateRoleDraft, visibleRoleNames } from "./settings"

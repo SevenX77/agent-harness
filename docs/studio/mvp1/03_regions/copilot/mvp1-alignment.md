@@ -31,12 +31,12 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - Status: live.
 - 归属: region `copilot`; capability `copilot-assist`.
 
-### F2. View Context Sync
+### F2. No Implicit View Context Sync
 
-- 机制: selected node/edge/lint/view state posts to copilot context endpoint with compaction.
-- 决策: chat should understand current screen without pasting huge payloads.
+- 机制: selected node/edge/lint/view state must not post to a Copilot context endpoint. Context is explicit: user text, composer @mentions, attachments, or judge payload on the current message.
+- 决策: UI selection is not truth mutation and must not create backend writes or prompt context. The original intent is typing `@` in the Copilot input to choose what to send.
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:462` lists cross-cutting settings/copilot dependencies.
-- 测试: selecting node updates context; large context is summarized with fingerprint.
+- 测试: selecting node/edge and opening/closing panels does not call a Copilot context backend; future @mention tests assert only composer-selected mentions are sent with the message payload.
 - Status: live.
 - 归属: region `copilot`; capability `copilot-assist`.
 
@@ -98,12 +98,12 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 ### F7. Composer 上下文与控制(2026-07-02 新增,target-design)
 
 - 机制: composer 的三个待落地控制,各自独立成 PR、全栈落地(不做前端假按钮):
-  1. **@mention 弹出器**:textarea 中键入 `@` 在光标处弹节点选择 popover(数据源=当前 skill 图节点),选中插入 `@<node_id>` token 并把该节点加入 mentions;发送前 mentions 随 view-context POST `/skills/{id}/copilot/context` 注入——**后端 mentions 层已就绪**(`app/services/copilot.py` context 压缩已渲染 `mentions` XML 层),缺的只是前端选择器与采集链路。
+  1. **@mention 弹出器**:textarea 中键入 `@` 在光标处弹节点选择 popover(数据源=当前 skill 图节点),选中插入 `@<node_id>` token 并把该节点加入 mentions;发送消息时 mentions 随 Copilot WS payload 显式提交。不得恢复 view-context POST 或选中态自动同步。
   2. **附件(外部文件/图片)**:PM 2026-07-02 决策反转本文件 §4 旧条目「砍掉 Attach file」——**附件按钮要保留且做真**:「添加附件还是要的啊,添加外部的文件、图片等,和 @mention 是两码事」。@mention=图内节点上下文,附件=外部文件输入,二者并存。入口三个:附件按钮(系统文件选择)+ 拖拽 + 粘贴;格式与大小约束沿用 §4(Claude 原生组:PNG/JPEG/GIF/WebP ≤~5MB / PDF / 文本类);链路 = 前端把附件(base64+media_type)放进 ws send payload → studio 后端转 `claude_agent_sdk` 内容块(ImageContent 等)→ 非 vision 模型给「不支持图片」降级提示。后端目前无此通路(copilot.py 无 ImageContent),需后端新增。
   3. **停止按钮**:流式期间发送按钮变停止;ws 增加控制消息(如 `{"type":"interrupt"}`)→ 后端对当前 `ClaudeSDKClient` 调 `interrupt()`。后端 ws 循环目前无 interrupt 通道,需后端新增。
 - 决策: 三个控制都是「可用才渲染」;各自单独 PR 排队(mention → interrupt → attach,按后端工作量升序),不把 composer 布局修正(F6)拖在一起。
-- 原话/来源: PM 2026-07-02 本轮反馈原话(见上);mentions 后端座:`apps/studio/backend/app/services/copilot.py` context 压缩 `mentions` 层。
-- 测试: @ 键入弹出/选中插入 token/context POST 含 mentions;附件选择/拖拽/粘贴后 chips 呈现、payload 带内容块、非 vision 降级提示;流式中点停止 → 流即断、消息态落 stopped。
+- 原话/来源: PM 2026-07-02 本轮反馈原话(见上) + 2026-07-06 更正:Copilot 输入框输入 `@` 才弹出可 @ 对象,选中的画布对象不得自动给 Copilot。
+- 测试: @ 键入弹出/选中插入 token/WS payload 含 mentions;点击画布节点本身不触发 Copilot 后端请求;附件选择/拖拽/粘贴后 chips 呈现、payload 带内容块、非 vision 降级提示;流式中点停止 → 流即断、消息态落 stopped。
 - Status: target-design(2026-07-02,分 PR 落地)。
 - 归属: region `copilot`; capability `copilot-assist`(附件链路含 studio 后端)。
 

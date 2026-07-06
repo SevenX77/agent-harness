@@ -65,10 +65,8 @@ class FakeClient:
 @pytest.fixture(autouse=True)
 def clean_copilot_state() -> Iterator[None]:
     asyncio.run(copilot.cleanup_all_sessions())
-    copilot._view_contexts.clear()
     yield
     asyncio.run(copilot.cleanup_all_sessions())
-    copilot._view_contexts.clear()
 
 
 def _stream_event(

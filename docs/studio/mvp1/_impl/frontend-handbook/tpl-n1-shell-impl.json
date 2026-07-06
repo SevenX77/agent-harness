@@ -118,8 +118,8 @@
    "n": 26,
    "cap": "copilot-composer-context-controls",
    "design_ref": "atom-26",
-   "current": "现状:三个控制均未实施——@ 键入无弹出(placeholder 文案先行);无附件入口;流式期间无停止。后端:mentions XML 层已实现(app/services/copilot.py),ws 无 interrupt 通道,无 ImageContent 内容块通路。",
-   "gap": "按 F7 分三个 PR:① @mention 弹出器+mentions 采集(纯前端+既有 context 端点);② ws interrupt + 停止按钮(前后端);③ 附件选择/拖拽/粘贴+内容块通路(前后端,量最大)。",
+   "current": "现状:三个控制均未实施——@ 键入无弹出(placeholder 文案先行);无附件入口;流式期间无停止。后端:无 mentions payload resolver,ws 无 interrupt 通道,无 ImageContent 内容块通路;旧 view-context POST 已删除。",
+   "gap": "按 F7 分三个 PR:① @mention 弹出器+mentions 采集(前端+WS payload+后端显式 resolver);② ws interrupt + 停止按钮(前后端);③ 附件选择/拖拽/粘贴+内容块通路(前后端,量最大)。",
    "fe_status": "未实施",
    "be_status": "未实现",
    "be_dep": "mentions 注入已就绪;interrupt 与附件内容块待后端新增(ws 契约扩展)。"
@@ -486,7 +486,7 @@
    ],
    "fe_status": "未实施",
    "layer1": [
-    "(target)@ 弹出/选中插 token/context POST 带 mentions;附件 chips/payload 内容块/非 vision 降级;停止断流。"
+    "(target)@ 弹出/选中插 token/WS payload 带 mentions;附件 chips/payload 内容块/非 vision 降级;停止断流。"
    ],
    "layer2": [
     "(target)真机:@ 选节点后提问引用该节点;附件发图收到理解回复;长回复中点停止立即停。"

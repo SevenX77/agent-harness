@@ -1,17 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Iterator
-
-import pytest
 from app.services import copilot
-
-
-@pytest.fixture(autouse=True)
-def clear_view_contexts() -> Iterator[None]:
-    copilot._view_contexts.clear()
-    yield
-    copilot._view_contexts.clear()
 
 
 def test_rules_document_is_skill_authoring_brain() -> None:
@@ -27,16 +16,14 @@ def test_rules_document_is_skill_authoring_brain() -> None:
 
 
 def test_rules_document_covers_tools_and_context_contract() -> None:
-    # 新增章节:工具边界(四工具白名单/workspace 圈定/Bash 审批语义)与上下文契约
-    # (<copilot_context> 各层语义),让模型不再靠猜。
     rules = copilot.load_copilot_rules()
     assert "工具与边界" in rules
     assert "Read / Glob / Grep" in rules
     assert "Write / Edit" in rules
     assert "workspace" in rules
     assert "不要原样重发" in rules
-    assert "<copilot_context>" in rules
-    assert "<mentions>" in rules
+    assert "不会把当前 UI selection" in rules
+    assert "@" in rules
     assert "只读" in rules
     assert "mcp__studio__" in rules
     assert "get_llm_roles" in rules
@@ -50,11 +37,7 @@ def test_rules_hash_is_stable_short_hex() -> None:
     assert digest == copilot.copilot_rules_hash()
 
 
-def test_session_system_prompt_has_rules_and_spec_but_never_view_context() -> None:
-    # 会话级 system prompt = 规则 + 挂载 spec 指针;运行时 view context 绝不进来
-    # (它每轮都变,属于 turn prompt)。
-    asyncio.run(copilot.set_view_context("skill-a", "Edit", {"dirty": True}, 100))
-
+def test_session_system_prompt_has_rules_and_spec_but_no_request_context() -> None:
     prompt = copilot.build_session_system_prompt()
 
     assert prompt.startswith(copilot.load_copilot_rules())
@@ -64,46 +47,28 @@ def test_session_system_prompt_has_rules_and_spec_but_never_view_context() -> No
     assert "graph-agent-gateway" in prompt
     assert "Studio 配置文件地图" in prompt
     assert "## 当前上下文" not in prompt
-    # 规则文档的「上下文契约」章节会提到 <copilot_context> 标签名,所以这里断言的是
-    # 渲染出来的具体上下文内容不在场,而不是标签字样。
-    assert '<skill>{"id": "skill-a"' not in prompt
+    assert "## Copilot Judge Context" not in prompt
 
 
-def test_turn_prompt_injects_small_view_context() -> None:
-    asyncio.run(
-        copilot.set_view_context("skill-a", "Edit", {"skill_md_text": "hello", "dirty": True}, 100)
+def test_turn_prompt_injects_only_explicit_judge_context() -> None:
+    prompt = copilot._prompt_with_turn_context(
+        "skill-a",
+        "why?",
+        judge_context={
+            "compare_result_ref": "skills/s/golden/g1/compare/r1/compare_result.json",
+            "judge_context_ref": "skills/s/runs/r1/copilot_judge/g1/judge_context.json",
+            "baseline_ref": "skills/s/golden/g1/baseline.json",
+            "diff_summary": {"total_score": 88},
+        },
     )
 
-    prompt = copilot._prompt_with_turn_context("skill-a", "why?")
-
-    # F4: context renders as structured XML before the user message; the rules
-    # document itself must NOT be re-sent per turn.
-    assert "## 当前上下文" in prompt
-    assert '<skill>{"id": "skill-a", "view": "Edit"}</skill>' in prompt
-    assert '"skill_md_text": "hello"' in prompt
-    assert '"dirty": true' in prompt
+    assert "## 当前上下文" not in prompt
+    assert "## Copilot Judge Context" in prompt
+    assert "<judge_context>" in prompt
+    assert "compare_result_ref" in prompt
+    assert "total_score" in prompt
     assert prompt.rstrip().endswith("## 用户消息\nwhy?")
     assert "graph_skill 格式心智模型" not in prompt
-
-
-def test_turn_prompt_truncates_large_file_context() -> None:
-    asyncio.run(
-        copilot.set_view_context(
-            "skill-a",
-            "Edit",
-            {"file_path": "/tmp/SKILL.md", "skill_md_text": "x" * 6144, "dirty": False},
-            100,
-        )
-    )
-
-    prompt = copilot._prompt_with_turn_context("skill-a", "check")
-
-    assert "<copilot_context>" in prompt
-    assert "x" * 300 in prompt
-    assert "x" * 301 not in prompt
-    assert "[Content truncated due to length. Use 'Read' tool" in prompt
-    assert "/tmp/SKILL.md" in prompt
-    assert '"dirty": false' in prompt
 
 
 def test_turn_prompt_without_context_is_plain_user_message() -> None:
@@ -113,3 +78,4 @@ def test_turn_prompt_without_context_is_plain_user_message() -> None:
 def test_context_resolved_event_echoes_rules_hash() -> None:
     event = copilot._context_resolved_event("skill-a")
     assert f"rules@{copilot.copilot_rules_hash()}" in event.summary
+    assert event.detail == "(no request context)"

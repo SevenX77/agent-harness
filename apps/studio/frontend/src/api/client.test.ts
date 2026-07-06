@@ -9,7 +9,9 @@ import {
   createTestInput,
   deleteTestInput,
   fetchGoldenContent,
+  getCompareCandidates,
   getCommunityCatalogConfig,
+  getNodeLlmParams,
   getRelease,
   getRoleTestResults,
   getResumeValidity,
@@ -19,6 +21,8 @@ import {
   listReleases,
   prepareCopilotJudgeContext,
   postPredictRun,
+  putNodeCompareCandidates,
+  putNodeLlmParams,
   publishSkill,
   interruptCopilot,
   resolveCopilotToolApproval,
@@ -164,6 +168,66 @@ describe('api client auth token', () => {
     expect(seen).toEqual([
       'get /llm/roles/test-results',
       'get /llm/roles/test-results',
+    ])
+  })
+
+  it('dedupes skill-scoped node config reads and updates caches from node writes', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      seen.push(`${config.method} ${config.url}`)
+      await Promise.resolve()
+      const dataByRoute: Record<string, unknown> = {
+        'get /skills/demo/compare-candidates': {
+          nodes: {
+            review: [{ candidate_id: 'fast', model_group_id: 'gpt-5', route: 'auto' }],
+          },
+        },
+        'get /skills/demo/node-llm-params': {
+          nodes: {
+            review: { enabled: true, thinking: true, max_output_tokens: 2048, temperature: 0.7 },
+          },
+        },
+        'put /skills/demo/nodes/review/compare-candidates': {
+          candidates: [{ candidate_id: 'slow', model_group_id: 'gpt-5', route: 'qiniu:gpt-5' }],
+        },
+        'put /skills/demo/nodes/review/node-llm-params': {
+          enabled: true,
+          thinking: false,
+          max_output_tokens: 4096,
+          temperature: 0.2,
+        },
+      }
+      return {
+        data: dataByRoute[`${config.method} ${config.url}`] ?? {},
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await Promise.all([getCompareCandidates('demo'), getCompareCandidates('demo')])
+    await Promise.all([getNodeLlmParams('demo'), getNodeLlmParams('demo')])
+    await getCompareCandidates('demo')
+    await getNodeLlmParams('demo')
+
+    const savedCandidates = await putNodeCompareCandidates('demo', 'review', [
+      { candidate_id: 'slow', model_group_id: 'gpt-5', route: 'qiniu:gpt-5' },
+    ])
+    const savedParams = await putNodeLlmParams('demo', 'review', {
+      enabled: true,
+      thinking: false,
+      max_output_tokens: 4096,
+      temperature: 0.2,
+    })
+
+    expect((await getCompareCandidates('demo')).nodes.review).toEqual(savedCandidates.candidates)
+    expect((await getNodeLlmParams('demo')).nodes.review).toEqual(savedParams)
+    expect(seen).toEqual([
+      'get /skills/demo/compare-candidates',
+      'get /skills/demo/node-llm-params',
+      'put /skills/demo/nodes/review/compare-candidates',
+      'put /skills/demo/nodes/review/node-llm-params',
     ])
   })
 

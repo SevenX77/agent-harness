@@ -47,9 +47,9 @@ def test_compile_failure_returns_structured_errors(
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "compile_failed"
-    assert body["detail"].startswith("Skill compilation failed with 1 error")
+    assert body["detail"].startswith("Skill compilation failed with 2 errors")
     assert body["errors"]
-    error = body["errors"][0]
+    error = next(error for error in body["errors"] if "mode" in error["message"])
     assert set(error) == {"file", "line", "field", "severity", "message", "error_code"}
     assert error["file"] in {"phases/setup/LOGIC.md", None}
     assert error["line"] is None or isinstance(error["line"], int)
@@ -57,6 +57,9 @@ def test_compile_failure_returns_structured_errors(
     assert error["severity"] == "fatal"
     assert error["error_code"] is None or isinstance(error["error_code"], str)
     assert "mode" in error["message"]
+    assert ("STUDIO_RUNTIME_INPUT_MISSING", "input_text") in {
+        (error["error_code"], error["field"]) for error in body["errors"]
+    }
 
 
 def test_compile_unresolved_subgraph_returns_structured_compile_error(
@@ -87,11 +90,13 @@ io:
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "compile_failed"
-    assert body["detail"] == "Skill compilation failed with 1 error"
-    assert len(body["errors"]) == 1
-    error = body["errors"][0]
+    assert body["detail"] == "Skill compilation failed with 2 errors"
+    error = next(error for error in body["errors"] if "missing.child" in error["message"])
     assert error["severity"] == "fatal"
     assert "missing.child" in error["message"]
+    assert ("STUDIO_RUNTIME_INPUT_MISSING", "input_text") in {
+        (error["error_code"], error["field"]) for error in body["errors"]
+    }
 
 
 def test_compile_declared_unsupplied_inputs_return_engine_dataflow_errors(
@@ -163,12 +168,13 @@ Produce the answer.
     assert response.status_code == 422
     body = response.json()
     assert body["code"] == "compile_failed"
-    assert body["detail"] == "Skill compilation failed with 2 errors"
-    assert [error["field"] for error in body["errors"]] == [
-        "review.io.inputs.properties.chapter_lines",
-        "review.io.inputs.properties.chapter_number",
-    ]
-    assert {error["error_code"] for error in body["errors"]} == {"F-v3-graph-dataflow-source-missing"}
+    assert body["detail"] == "Skill compilation failed with 3 errors"
+    by_code_and_field = {(error["error_code"], error["field"]) for error in body["errors"]}
+    assert by_code_and_field == {
+        ("F-v3-graph-dataflow-source-missing", "review.io.inputs.properties.chapter_lines"),
+        ("F-v3-graph-dataflow-source-missing", "review.io.inputs.properties.chapter_number"),
+        ("STUDIO_RUNTIME_INPUT_MISSING", "topic"),
+    }
 
 
 def test_compile_missing_skill_returns_404(client: TestClient) -> None:

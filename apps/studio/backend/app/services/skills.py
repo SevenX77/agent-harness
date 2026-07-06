@@ -41,6 +41,7 @@ from app.core.adapters.engine import (
     compile_skill,
     load_child_graph_topology_projection,
     load_graph_topology_projection,
+    parse_markdown_parts,
     read_subgraph_path,
 )
 from app.core.adapters.transport_factory import build_engine_adapter
@@ -305,7 +306,16 @@ def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) 
     except (GraphCompileError, ResourceNotFoundError) as exc:
         # compile-lint F6: lint projects the engine's FULL aggregated defect set
         # (same seam the manual Compile drawer expands), never just the primary.
-        return LintResult(status="failed", errors=_lint_errors_from_exception(exc, skill_path))
+        errors = _lint_errors_from_exception(exc, skill_path)
+        if include_studio_preflight:
+            errors.extend(
+                _lint_error_from_compile_error(error)
+                for error in _runtime_input_preflight_errors_from_graph_frontmatter(
+                    skill_path,
+                    runtime_config,
+                )
+            )
+        return LintResult(status="failed", errors=errors)
     # Studio-layer config-consistency check layered on a successful compile: the engine
     # treats llm_role as an opaque string (it does not know about gateway roles), so
     # "role not configured" is surfaced here as a NON-FATAL warning on the llm_role field
@@ -533,7 +543,20 @@ async def compile_skill_for_studio(
             runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
-        raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
+        failure = _compile_failure_from_exception(exc, skill_dir)
+        preflight_errors = _runtime_input_preflight_errors_from_graph_frontmatter(
+            skill_dir,
+            runtime_config,
+        )
+        if preflight_errors:
+            errors = [*failure.errors, *preflight_errors]
+            count = len(errors)
+            noun = "error" if count == 1 else "errors"
+            failure = CompileFailure(
+                detail=f"Skill compilation failed with {count} {noun}",
+                errors=errors,
+            )
+        raise CompileFailedError(failure) from exc
 
     # Studio preflight gates own workspace files that engine compile intentionally does
     # not know about: runtime root inputs and golden outputs. Anything provably
@@ -588,6 +611,27 @@ def _validate_runtime_inputs_against_graph_input_schema(
 ) -> list[CompileError]:
     """Compile-time gate for Studio runtime root input bindings."""
     raw_inputs = _compiled_graph_input_schema(compiled)
+    return _validate_runtime_inputs_against_raw_input_schema(raw_inputs, runtime_config)
+
+
+def _runtime_input_preflight_errors_from_graph_frontmatter(
+    skill_dir: Path,
+    runtime_config: dict[str, Any],
+) -> list[CompileError]:
+    """Run Studio-owned runtime input checks even when engine compile stops early.
+
+    Engine structure diagnostics and Studio runtime binding diagnostics are
+    independent when GRAPH.md frontmatter is still parseable. Returning both in
+    one compile/lint result keeps one broken field from masking another.
+    """
+    raw_inputs = _graph_input_schema_from_frontmatter(skill_dir)
+    return _validate_runtime_inputs_against_raw_input_schema(raw_inputs, runtime_config)
+
+
+def _validate_runtime_inputs_against_raw_input_schema(
+    raw_inputs: dict[str, Any],
+    runtime_config: dict[str, Any],
+) -> list[CompileError]:
     if not raw_inputs:
         return []
 
@@ -656,6 +700,18 @@ def _validate_runtime_inputs_against_graph_input_schema(
                 )
             )
     return errors
+
+
+def _graph_input_schema_from_frontmatter(skill_dir: Path) -> dict[str, Any]:
+    try:
+        frontmatter, _body, _line_meta = parse_markdown_parts(skill_dir / "GRAPH.md")
+    except Exception:  # noqa: BLE001 - engine parse diagnostics already own this failure.
+        return {}
+    io_block = frontmatter.get("io")
+    if not isinstance(io_block, dict):
+        return {}
+    inputs = io_block.get("inputs")
+    return dict(inputs) if isinstance(inputs, dict) else {}
 
 
 def _compiled_graph_input_schema(compiled: CompiledSkill) -> dict[str, Any]:

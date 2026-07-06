@@ -23,7 +23,7 @@ github.com/SevenX77/ah 的 v1.3.0 tag README、源码与内置 rules —— 这�
 ## 0. 一句话
 
 Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agent SDK 为辅**：
-面板上「Open in CLI」菜单可选 Claude 或 Codex,经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
+面板上「Open in」菜单可选 Claude 或 Codex,经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
 `clotho` / `lachesis` / `atropos` 承载三女神），
 用户在终端里直接操作;每个 agent 的**身份 / 知识库 / 工具箱**全部经 `ah.toml` + `.ah/rules/`
 + `.ah/bundles/` 配置注入,不改 ah 本体。
@@ -179,7 +179,7 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 生命周期规则:
 
 - `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
-- Studio 显式管理入口是 `Open in CLI` 菜单:没有活跃 ahd 时显示 Claude/Codex 打开菜单。活跃判定必须是
+- Studio 显式管理入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 打开菜单。活跃判定必须是
   **事件源双事实**:Studio 订阅 `ah events --format json` 的 runtime snapshot,活跃判定只认 `ahd_has_inventory=true` 与 `master_tmux_alive=true` 同时成立。只有 ahd inventory、只有 master
   tmux、或残留 worker/agent tmux 都是 stale 状态;Studio 必须先按 workspace 清理所有 Studio-managed ah
   config,再允许重新打开。
@@ -187,10 +187,6 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
   master,不再 `ah start`;Open 另一个 assistant 且已有 ahd 活跃时直接拒绝,要求先关闭现有 assistant。
   Open 命令返回的 config path 同时是该 workspace 本轮状态身份的真相源:当 skill 自带 `ah.toml` 时,
   Claude/Codex 会共享同一个 config path,不得再用文件扫描顺序把已打开的 Codex 误归类成 Claude。
-  Studio-managed config 必须落在 skill workspace 根目录的 `ah.toml`:ah v1.3.1 的 events snapshot 以 config
-  父目录作为 runtime workspace,临时目录 config 会让 `ah start` 的真实 session 在 skill workspace、但 `ah events`
-  读到 temp workspace,按钮因此保持 `Open in CLI`。状态身份从根 `ah.toml` 的 `[master].provider` 派生,不从
-  路径顺序或旧返回值猜测。
   UI 同一位置变成运行中菜单,触发按钮显示 `Close Claude` / `Close Codex` / `Close assistants`,菜单内提供
   `Attach Claude` / `Attach Codex` 和关闭动作。Attach 只负责进入既有 master pane,不重新 `ah start`:
   Windows 下 Studio 为每个 workspace+assistant 生成稳定终端标题,如果目标 attach 窗口已经打开,先激活该
@@ -358,22 +354,18 @@ pane;MoirAI 先自报状态,随后能按 skill 生命周期判断该动哪只手
 
 ### 9.3 关键运行时结论:项目根 = skill 工作区
 
-Studio 拉起链路有一个容易误判的点:
+Studio 现有拉起链路有一个容易误判的点:
 
-- 旧实现把 Studio 生成的 `ah.toml` 写到系统 temp 下;
+- `apps/studio/tauri/src/lib.rs` 的 `ah_config_for_workspace` 当前把临时 `ah.toml` 写到系统 temp 下;
 - 但 Windows/Unix launcher 在 `ah --config <path> start --wait` 前都会先 `cd` 到 skill 工作区;
 - ah `start_project` 把当前 `cwd` 记为 session `absolute_path`;
 - daemon 后续给 master/worker 物化 rules、skills、bundle 时用的是 session `absolute_path`,也就是 skill 工作区,
-  不是 temp `ah.toml` 的父目录;
-- ah v1.3.1 的 `ah events --format json` runtime snapshot 以 config 父目录作为 `workspace_path`;
-- 所以 temp config 会形成两个工作区:session 在真实 skill workspace,events 却读 temp workspace。结果是 CLI 已经开着,
-  但 Studio 订阅到的 `ahd_has_inventory/master_tmux_alive` 仍属于 temp workspace,按钮不会切成 Close。
+  不是 temp `ah.toml` 的父目录。
 
 所以阶段 2 的落点应是:
 
 ```text
 <skill-workspace>/
-  ah.toml
   .ah/
     rules/
       master.md
@@ -388,18 +380,21 @@ Studio 拉起链路有一个容易误判的点:
       eval-judgement/SKILL.md
 ```
 
-`ah.toml` 不再临时生成。Studio-managed `ah.toml` 写进 skill workspace 根目录,带受管 hash 头;已存在且
-不带受管头的用户 `ah.toml` 视为用户接管配置,Studio 不覆盖。这样 config root、session root、events
-workspace 三者合一,provider 读取的人格和 skills 也都来自同一个 skill workspace。
+`ah.toml` 可以继续由 Studio 临时生成;真正被 provider 读取的人格和 skills 必须落在 skill 工作区。这样既不污染
+agent-harness 主仓根,也能让用户把 `.ah/` 作为该 skill 的项目配置提交进自己的 skill 仓库。
 
-**bundle 暂不进入阶段 2。** 原因不是 bundle 不该用,而是阶段 2 只先落 rules/skills/CLI 闭环。现在
-`ah.toml` 已位于 skill workspace 根目录,后续启用 bundle 时,ah CLI 校验、daemon 运行与 events 状态都应继续
-使用同一项目根,不得重新引入 temp config。
+**bundle 暂不进入阶段 2。** 原因不是 bundle 不该用,而是 ah CLI 的 `bundle validate/list` 以 config 父目录
+作为 bundle project root;Studio 当前用 temp `ah.toml` 时,CLI 校验会看 temp 目录而不是 skill 工作区。运行时
+daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会制造新的漂移。阶段 3 若要启用 bundle,
+必须先二选一:
+
+1. Studio 把正式 `ah.toml` 写进 skill 工作区,让 config root 和 session root 合一;
+2. 或 ah 增加显式 `--project-root` / config 字段,让 CLI 校验与 daemon 运行使用同一项目根。
 
 ### 9.4 Studio 生成策略
 
-生成逻辑放在 `apps/studio/tauri/src/lib.rs`,沿用 `open_claude_code` 的边界,分成"准备工作区 `.ah/`"和
-"生成 workspace 根 `ah.toml`"两步:
+生成逻辑放在 `apps/studio/tauri/src/lib.rs`,沿用 `open_claude_code` 的边界,但把现在的
+`transient_ah_config_content()` 拆成"准备工作区 `.ah/`"和"生成 transient config"两步:
 
 1. `prepare_studio_ah_workspace(workspace_root)`:
    - 创建 `.ah/rules` 与 `.ah/skills`;
@@ -408,12 +403,11 @@ workspace 三者合一,provider 读取的人格和 skills 也都来自同一个 
    - 新增 `eval-judgement` skill;
    - 对已存在文件采用**受管头 + 内容 hash**策略:只有文件带 Studio 生成头且 hash 匹配上次生成时才覆盖;用户改过或
      手写的 `.ah/*` 不静默覆盖,要报清楚冲突路径。
-2. `studio_ah_config_content(workspace_root, platform_paths)`:
+2. `transient_ah_config_content(workspace_root, platform_paths)`:
    - 生成 master + 三个 agents;
    - 引用 `.ah/skills` 中的 skill 名;
    - 不写 `[sandbox] additional_ro_binds`;当前 ah 会把该字段落成 WSL 不接受的 user scope
      `BindReadOnlyPaths`,导致 `ah start` 在 spawn agent 时失败;
-   - Codex/Claude 等 assistant 身份写入 `[master].provider`,状态订阅只用该字段判定根 `ah.toml` 属于哪个 assistant;
    - Windows 下所有给 ah/WSL 看的路径若未来进入 config,必须先转成 `/mnt/<drive>/...`,不能把 `D:\...` 写进 config。
 
 默认配置骨架:
@@ -441,10 +435,8 @@ skills = ["eval-judgement"]
 
 ```
 
-如果工作区根目录已经存在用户手写的 `ah.toml`,用户配置优先,Studio 不覆盖。Studio 不再向上扫描祖先目录,
-因为 ah v1.3.1 events 把 config 父目录作为 runtime workspace;祖先 config 会把子 skill 的状态投影到错误
-workspace。此时 Studio 只做"缺什么提示什么",不擅自把 MoirAI 三女神写进去,因为已有 `ah.toml` 代表用户接管了
-ah 项目配置。
+如果工作区向上已经存在用户手写的 `ah.toml`,继续尊重现有 `find_ah_config` 语义:用户配置优先,Studio 不覆盖。此时
+Studio 只做"缺什么提示什么",不擅自把 MoirAI 三女神写进去,因为已有 `ah.toml` 代表用户接管了 ah 项目配置。
 
 ### 9.5 rules 从"长人格"收敛为"身份锚点 + 渐进式背景 + 操作协议"
 
@@ -532,8 +524,8 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 
 代码门禁先聚焦 Tauri 单元测试,不需要为了纯配置生成跑完整 Studio:
 
-- `studio_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
-- `studio_ah_config_content` 按菜单生成 `provider = "claude"` 或 `provider = "codex"`,并在 `[master]`
+- `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
+- `transient_ah_config_content` 按菜单生成 `provider = "claude"` 或 `provider = "codex"`,并在 `[master]`
   下写入 `window_size = "follow"`,确保 1.3.0 的 tmux
   master pane 自动跟随 attach 终端大小;
 - launcher 在 `ah start` 前拒绝 `ah < 1.3.0`,避免 `window_size = "follow"` 被旧 ah 忽略;
@@ -547,8 +539,6 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
   launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;
 - `watch_code_assistant_status` 不轮询 `ah ps`,而是订阅 `ah events --format json`;活跃判定必须同时要求事件快照里 `ahd_has_inventory=true` 与 `master_tmux_alive=true`;只有 ahd、只有 master tmux、残留 worker tmux 均判 stale;
-- Studio-managed config 必须写在 workspace 根 `ah.toml`,不得写入 temp;`find_ah_config` 不向上扫描祖先目录,
-  `ah_config_for_status` 只接受 `[master].provider` 匹配当前 assistant 的根配置;
 - Open 决策必须保证 workspace 内单例 ahd:同 assistant 活跃时 attach,另一个 assistant 活跃时拒绝,
   双 active 或 ahd/master 脱钩时先清理所有 Studio-managed ah configs 再重新打开;
 - Open 命令返回的 config path 必须注册为本轮 workspace 状态身份源,优先于扫描发现的 config 身份;
@@ -560,13 +550,13 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - 原生窗口关闭必须与 app quit 一样清理 Studio-managed ah configs,否则 tmux/ahd 会在重启 Studio 后被
   `watch_code_assistant_status` 再收到事件时重新投影成 inactive;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
-- `studio_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
+- `transient_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
   拒绝 `BindReadOnlyPaths` 后导致 `TMUX_COMMAND_FAILED`;
 - 已存在 `ah.toml` 时不自动生成 MoirAI 配置,继续走用户配置。
 
 人工验收必须在真实 ah 终端里做,因为阶段 2 的核心是 provider home 物化 + Claude Code 订阅态:
 
-1. 打开一个空白 skill,点「Open in CLI」菜单里的 Claude 与 Codex 两项。
+1. 打开一个空白 skill,点「Open in」菜单里的 Claude 与 Codex 两项。
 2. MoirAI 自报身份、cwd、能做什么;不得自称 generic copilot 或把内部槽位名当成身份。
 3. 向 MoirAI 发"帮我把一个 X 流程设计成 skill",它应调用 Clotho 并返回结构化设计。
 4. 制造一个简单编译错误,让 MoirAI 修;它应调用 Lachesis,给出根因和最小修复。

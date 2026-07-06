@@ -203,6 +203,10 @@ let truthSourcesCache: TruthSourcesResponse | null = null
 let truthSourcesRequest: Promise<TruthSourcesResponse> | null = null
 let communityCatalogConfigCache: CommunityCatalogConfig | null = null
 let communityCatalogConfigRequest: Promise<CommunityCatalogConfig> | null = null
+const compareCandidatesCache = new Map<string, CompareCandidatesMap>()
+const compareCandidatesRequests = new Map<string, Promise<CompareCandidatesMap>>()
+const nodeLlmParamsCache = new Map<string, NodeLlmParamsMap>()
+const nodeLlmParamsRequests = new Map<string, Promise<NodeLlmParamsMap>>()
 
 export function invalidateRoleTestResultsCache(): void {
   roleTestResultsCache = null
@@ -215,6 +219,10 @@ export function resetClientReadCachesForTests(): void {
   truthSourcesRequest = null
   communityCatalogConfigCache = null
   communityCatalogConfigRequest = null
+  compareCandidatesCache.clear()
+  compareCandidatesRequests.clear()
+  nodeLlmParamsCache.clear()
+  nodeLlmParamsRequests.clear()
 }
 
 /**
@@ -782,8 +790,22 @@ export async function getRunDetail(skillId: string, runId: string): Promise<RunD
  * a skill. GET `/skills/{id}/compare-candidates` → CompareCandidatesMap.
  */
 export async function getCompareCandidates(skillId: string): Promise<CompareCandidatesMap> {
-  const response = await api.get<CompareCandidatesMap>(`/skills/${skillId}/compare-candidates`)
-  return response.data
+  const cached = compareCandidatesCache.get(skillId)
+  if (cached) return cached
+  const inflight = compareCandidatesRequests.get(skillId)
+  if (inflight) return inflight
+  const request = api.get<CompareCandidatesMap>(`/skills/${skillId}/compare-candidates`)
+    .then((response) => {
+      compareCandidatesCache.set(skillId, response.data)
+      return response.data
+    })
+    .finally(() => {
+      if (compareCandidatesRequests.get(skillId) === request) {
+        compareCandidatesRequests.delete(skillId)
+      }
+    })
+  compareCandidatesRequests.set(skillId, request)
+  return request
 }
 
 /**
@@ -799,6 +821,16 @@ export async function putNodeCompareCandidates(
     `/skills/${skillId}/nodes/${encodeURIComponent(nodeId)}/compare-candidates`,
     { candidates },
   )
+  const current = compareCandidatesCache.get(skillId)
+  if (current) {
+    compareCandidatesCache.set(skillId, {
+      nodes: {
+        ...current.nodes,
+        [nodeId]: response.data.candidates,
+      },
+    })
+  }
+  compareCandidatesRequests.delete(skillId)
   return response.data
 }
 
@@ -840,8 +872,22 @@ export async function getCompareGroup(
  * GET `/skills/{id}/node-llm-params` → NodeLlmParamsMap.
  */
 export async function getNodeLlmParams(skillId: string): Promise<NodeLlmParamsMap> {
-  const response = await api.get<NodeLlmParamsMap>(`/skills/${skillId}/node-llm-params`)
-  return response.data
+  const cached = nodeLlmParamsCache.get(skillId)
+  if (cached) return cached
+  const inflight = nodeLlmParamsRequests.get(skillId)
+  if (inflight) return inflight
+  const request = api.get<NodeLlmParamsMap>(`/skills/${skillId}/node-llm-params`)
+    .then((response) => {
+      nodeLlmParamsCache.set(skillId, response.data)
+      return response.data
+    })
+    .finally(() => {
+      if (nodeLlmParamsRequests.get(skillId) === request) {
+        nodeLlmParamsRequests.delete(skillId)
+      }
+    })
+  nodeLlmParamsRequests.set(skillId, request)
+  return request
 }
 
 /**
@@ -857,6 +903,16 @@ export async function putNodeLlmParams(
     `/skills/${skillId}/nodes/${encodeURIComponent(nodeId)}/node-llm-params`,
     params,
   )
+  const current = nodeLlmParamsCache.get(skillId)
+  if (current) {
+    nodeLlmParamsCache.set(skillId, {
+      nodes: {
+        ...current.nodes,
+        [nodeId]: response.data,
+      },
+    })
+  }
+  nodeLlmParamsRequests.delete(skillId)
   return response.data
 }
 

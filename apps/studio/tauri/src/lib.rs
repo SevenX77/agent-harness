@@ -859,6 +859,10 @@ fn extract_ah_session_ids(text: &str) -> Vec<String> {
         .collect()
 }
 
+fn ah_ps_output_has_inventory(text: &str) -> bool {
+    !extract_ah_session_ids(text).is_empty()
+}
+
 fn tmux_session_is_master(session: &str) -> bool {
     session.starts_with("master_")
 }
@@ -908,8 +912,10 @@ fn inspect_ah_runtime(config_path: &Path, tmux_socket_hint: Option<&str>) -> AhR
         .as_deref()
         .map(list_tmux_sessions)
         .unwrap_or_default();
+    let has_inventory = ps_result.success && ah_ps_output_has_inventory(&ps_output);
+    let session_ids = extract_ah_session_ids(&ps_output);
     let snapshot = AhLifecycleSnapshot::new(
-        ps_result.success,
+        has_inventory,
         tmux_sessions
             .iter()
             .any(|session| tmux_session_is_master(session)),
@@ -921,7 +927,7 @@ fn inspect_ah_runtime(config_path: &Path, tmux_socket_hint: Option<&str>) -> AhR
         snapshot,
         tmux_socket_label,
         tmux_sessions,
-        session_ids: extract_ah_session_ids(&ps_output),
+        session_ids,
     }
 }
 
@@ -2798,6 +2804,24 @@ sess_beta,  done
             extract_ah_session_ids(output),
             vec!["sess_alpha".to_string(), "sess_beta".to_string()]
         );
+    }
+
+    #[test]
+    fn ah_ps_probe_requires_session_inventory_not_just_success() {
+        let empty_output = "";
+        let active_output = r#"
+sessions
++-------------------------------------------+-------------------+
+| session_id                                | project_id        |
++-------------------------------------------+-------------------+
+| sess_77674378-4680-45fc-9d3c-dc83af81cb23 | text-segmentation |
++-------------------------------------------+-------------------+
+
+💡 To inspect live tmux sessions: tmux -L ahd-0b624d24e71a6307 ls
+"#;
+
+        assert!(!ah_ps_output_has_inventory(empty_output));
+        assert!(ah_ps_output_has_inventory(active_output));
     }
 
     #[test]

@@ -67,7 +67,7 @@ Use per-request tests when a request has unique semantics:
 | Settings app settings | `GET/PUT /api/settings` | App settings initialization / user save | OK: the hook waits for authenticated API readiness before the first read, shares the cold-load request, and saves only after explicit settings edits. | `useAppSettings.test.ts` |
 | LLM registry | `GET /api/llm/registry` | Settings/API Keys/roles consumers and domain events | Partial: client reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Remaining audit: all registry write paths must keep returning/projecting exact canonical snapshots. | `llm.test.ts`, `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
 | LLM roles | `GET/PUT /api/llm/roles` | Settings/Copilot role consumers and role writes/events | Partial: roles reads are cached/deduped; Settings open/close, tab switch, focus, and WebSocket connect/reconnect are guarded as non-triggers. Remaining audit: role write/test/job paths need route-by-route review. | `SettingsPage.controller.test.tsx`, `useStudioEventStream.test.ts` |
-| Templates | `GET /api/templates` | Template UI | Pending audit: should load only when template UI is opened or a template is used. | Required if it is mounted globally |
+| Templates | `GET /api/templates` | Create-skill Copilot empty-state template UI | OK: templates are disabled while the template UI is hidden and cold-load only when the create-skill template UI becomes visible. | `useTemplates.test.tsx`, `copilot-panel.test.ts` |
 | Studio event stream | `WS /ws/events` | App-level domain event stream | OK for the generic-resync risk: connect/reconnect do not dispatch data refresh callbacks; only precise backend events invoke the exact handlers. | `useStudioEventStream.test.ts` |
 | Copilot chat | `WS /api/skills/{skill_id}/copilot/ws` | User sends a Copilot message | OK as explicit user action; future `@` mentions must travel with the message payload, not background UI state. | Required when `@` mention payload is implemented |
 
@@ -219,14 +219,17 @@ FRONTEND GET /api/skills/{skill_id}/history
 FRONTEND GET /api/skills/{skill_id}/node-llm-params
 FRONTEND GET /api/skills/{skill_id}/releases
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version}
+FRONTEND GET /api/skills/{skill_id}/runs
 FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id}
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare
 FRONTEND GET /api/skills/{skill_id}/subgraph
+FRONTEND GET /api/skills/{skill_id}/test_inputs
 FRONTEND GET /api/skills/{skill_id}/test_inputs/{input_id}
 FRONTEND GET /api/system/community-catalog-config
 FRONTEND GET /api/system/truth-sources
 FRONTEND GET /api/system/truth-sources/{source_id}/content
+FRONTEND GET /api/templates
 FRONTEND POST /api/io/scan
 FRONTEND POST /api/llm/catalog/sync-verified
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test
@@ -431,14 +434,17 @@ FRONTEND GET /api/skills/{skill_id}/history | review | shared | Read request nee
 FRONTEND GET /api/skills/{skill_id}/node-llm-params | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/releases | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/runs | review | shared | Run-history list is a SWR cold-load key; exact refresh sources after run/delete still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/subgraph | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/test_inputs | review | shared | Test input list is a SWR cold-load key; create/delete revalidation semantics still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/system/community-catalog-config | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/system/truth-sources | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/system/truth-sources/{source_id}/content | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/templates | ok | shared | Disabled until the create-skill template UI is visible; no Copilot skill chat mount fetch.
 FRONTEND POST /api/io/scan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/llm/catalog/sync-verified | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.

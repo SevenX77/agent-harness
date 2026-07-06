@@ -3,8 +3,16 @@ import { fetcher } from '../api/client'
 import type { SkillTemplate } from '../api/types'
 import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
 
-export function useTemplates() {
-  const { data, error, isLoading, mutate } = useSWR<SkillTemplate[]>('/templates', fetcher, STUDIO_TRUTH_SWR_CONFIG)
+interface UseTemplatesOptions {
+  enabled?: boolean
+}
+
+export function useTemplates({ enabled = true }: UseTemplatesOptions = {}) {
+  const { data, error, isLoading, mutate } = useSWR<SkillTemplate[]>(
+    enabled ? '/templates' : null,
+    fetcher,
+    STUDIO_TRUTH_SWR_CONFIG,
+  )
 
   return {
     templates: data ?? [],

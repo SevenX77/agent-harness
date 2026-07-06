@@ -15,6 +15,14 @@ API_CALL_RE = re.compile(
     re.DOTALL,
 )
 WS_URL_RE = re.compile(r"\bwsUrl\(\s*([`'\"])(.*?)\1", re.DOTALL)
+SWR_DIRECT_KEY_RE = re.compile(
+    r"\buseSWR(?:<[^>]+>)?\(\s*([`'\"])(.*?)\1\s*,\s*fetcher\b",
+    re.DOTALL,
+)
+SWR_TERNARY_KEY_RE = re.compile(
+    r"\buseSWR(?:<[^>]+>)?\(\s*[^,]*?\?\s*([`'\"])(.*?)\1\s*:\s*null\s*,\s*fetcher\b",
+    re.DOTALL,
+)
 LEDGER_RE = re.compile(r"```studio-request-audit-ledger\n(?P<body>.*?)\n```", re.DOTALL)
 VERDICTS_RE = re.compile(r"```studio-request-audit-verdicts\n(?P<body>.*?)\n```", re.DOTALL)
 TEMPLATE_EXPR_RE = re.compile(r"\$\{([^}]+)\}")
@@ -129,6 +137,9 @@ def _frontend_route_keys() -> set[str]:
         text = path.read_text(encoding="utf-8")
         for match in API_CALL_RE.finditer(text):
             keys.add(f"FRONTEND {match.group(1).upper()} {_normalize_frontend_path(match.group(3))}")
+        for pattern in (SWR_DIRECT_KEY_RE, SWR_TERNARY_KEY_RE):
+            for match in pattern.finditer(text):
+                keys.add(f"FRONTEND GET {_normalize_frontend_path(match.group(2))}")
         for match in WS_URL_RE.finditer(text):
             keys.add(f"FRONTEND WS {_normalize_frontend_path(match.group(2))}")
     return keys

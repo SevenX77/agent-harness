@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Bot, KeyRound, Plug, Settings, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
@@ -10,7 +11,7 @@ import { LlmRolesTab } from "./LlmRolesTab"
 import { RolesTabSkeleton } from "./RolesTabSkeleton"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
 import { NavButton } from "./shared"
-import type { SettingsPageContentProps } from "./types"
+import type { SettingsPageContentProps, SettingsTab } from "./types"
 
 export function SettingsPageContent({
   activeTab,
@@ -47,6 +48,16 @@ export function SettingsPageContent({
   onNavigateToApiKeys,
 }: SettingsPageContentProps) {
   const { t } = useTranslation("settings")
+  const [mountedTabs, setMountedTabs] = useState<Set<SettingsTab>>(() => new Set([activeTab]))
+
+  useEffect(() => {
+    setMountedTabs((current) => {
+      if (current.has(activeTab)) return current
+      return new Set([...current, activeTab])
+    })
+  }, [activeTab])
+
+  const isMounted = (tab: SettingsTab): boolean => mountedTabs.has(tab)
 
   return (
     <div className="relative flex size-full flex-col bg-background">
@@ -82,112 +93,120 @@ export function SettingsPageContent({
           </NavButton>
         </nav>
 
-        <ScrollArea
-          className="flex-1"
-          data-settings-tab-panel="general"
-          hidden={activeTab !== "general"}
-        >
-          <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
-            <SettingsErrorBoundary label="General">
-              {appSettings.isLoading ? (
-                <GeneralTabSkeleton />
-              ) : (
-                <GeneralTab appSettings={appSettings} />
-              )}
-            </SettingsErrorBoundary>
-          </div>
-        </ScrollArea>
+        {isMounted("general") ? (
+          <ScrollArea
+            className="flex-1"
+            data-settings-tab-panel="general"
+            hidden={activeTab !== "general"}
+          >
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
+              <SettingsErrorBoundary label="General">
+                {appSettings.isLoading ? (
+                  <GeneralTabSkeleton />
+                ) : (
+                  <GeneralTab appSettings={appSettings} />
+                )}
+              </SettingsErrorBoundary>
+            </div>
+          </ScrollArea>
+        ) : null}
 
-        <ScrollArea
-          className="flex-1"
-          data-settings-tab-panel="api_keys"
-          hidden={activeTab !== "api_keys"}
-        >
-          <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
-            <SettingsErrorBoundary label="API Keys">
-              <ApiKeysTab
-                credentials={credentials}
-                credentialsLoading={credentialsLoading}
-                credentialsError={credentialsError}
-                drafts={drafts}
-                pendingAddProviderId={pendingAddProviderId}
-                saveStatus={saveStatus}
-                backendReachable={backendReachable}
-                onProviderFieldChange={onProviderFieldChange}
-                onGetProviderModels={onGetProviderModels}
-                onProbeEndpoint={onProbeEndpoint}
-                onForceEndpointTest={onForceEndpointTest}
-                onDeleteProvider={onDeleteProvider}
-                onDeleteProviderEndpoints={onDeleteProviderEndpoints}
-                onRemoveModel={onRemoveModel}
-                onBeginAddProvider={onBeginAddProvider}
-                onAddProvider={onAddProvider}
-                onCancelAddProvider={onCancelAddProvider}
-                onProviderModelsUpdated={onProviderModelsUpdated}
-              />
-            </SettingsErrorBoundary>
-          </div>
-        </ScrollArea>
-
-        <div
-          className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden"
-          data-settings-tab-panel="llm_roles"
-          hidden={activeTab !== "llm_roles"}
-        >
-          <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
-            <SettingsErrorBoundary label="LLM Roles">
-              {rolesData === null && !rolesError ? (
-                <RolesTabSkeleton />
-              ) : (
-                <LlmRolesTab
-                  data={rolesData}
+        {isMounted("api_keys") ? (
+          <ScrollArea
+            className="flex-1"
+            data-settings-tab-panel="api_keys"
+            hidden={activeTab !== "api_keys"}
+          >
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
+              <SettingsErrorBoundary label="API Keys">
+                <ApiKeysTab
                   credentials={credentials}
-                  modelGroups={modelGroups}
-                  saveStatus={rolesSaveStatus}
-                  error={rolesError}
-                  onChange={onRolesDataChange}
-                  onDeleteRole={onDeleteRole}
-                  onDeleteModelBundle={onDeleteModelBundle}
-                  onBeforeRoleTest={onBeforeRoleTest}
-                  onAfterRoleTest={onAfterRoleTest}
-                  onNavigateToApiKeys={onNavigateToApiKeys}
+                  credentialsLoading={credentialsLoading}
+                  credentialsError={credentialsError}
+                  drafts={drafts}
+                  pendingAddProviderId={pendingAddProviderId}
+                  saveStatus={saveStatus}
+                  backendReachable={backendReachable}
+                  onProviderFieldChange={onProviderFieldChange}
+                  onGetProviderModels={onGetProviderModels}
+                  onProbeEndpoint={onProbeEndpoint}
+                  onForceEndpointTest={onForceEndpointTest}
+                  onDeleteProvider={onDeleteProvider}
+                  onDeleteProviderEndpoints={onDeleteProviderEndpoints}
+                  onRemoveModel={onRemoveModel}
+                  onBeginAddProvider={onBeginAddProvider}
+                  onAddProvider={onAddProvider}
+                  onCancelAddProvider={onCancelAddProvider}
+                  onProviderModelsUpdated={onProviderModelsUpdated}
                 />
-              )}
-            </SettingsErrorBoundary>
-          </div>
-        </div>
+              </SettingsErrorBoundary>
+            </div>
+          </ScrollArea>
+        ) : null}
 
-        <div
-          className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden"
-          data-settings-tab-panel="copilot"
-          hidden={activeTab !== "copilot"}
-        >
-          <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
-            <SettingsErrorBoundary label="Copilot">
-              {rolesData === null && !rolesError ? (
-                <RolesTabSkeleton />
-              ) : (
-                <CopilotTab
-                  data={rolesData}
-                  credentials={credentials}
-                  modelGroups={modelGroups}
-                  onChange={onRolesDataChange}
-                  saveStatus={rolesSaveStatus}
-                  error={rolesError}
-                  // R-F3: route delete through the real DELETE endpoint (LlmRolesTab
-                  // already uses it). Without this, the FE-only delete + PUT would
-                  // be merged additively by the backend and never drop the yaml key.
-                  onDeleteRole={onDeleteRole}
-                  // R-F7: flush any debounced roles save before the SDK Test so the
-                  // gateway snapshot is up to date and Test doesn't race the writer.
-                  onBeforeRoleTest={onBeforeRoleTest}
-                  // R-F12: empty-state + per-card warnings link to the API Keys tab.
-                  onNavigateToApiKeys={onNavigateToApiKeys}
-                />
-              )}
-            </SettingsErrorBoundary>
+        {isMounted("llm_roles") ? (
+          <div
+            className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden"
+            data-settings-tab-panel="llm_roles"
+            hidden={activeTab !== "llm_roles"}
+          >
+            <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
+              <SettingsErrorBoundary label="LLM Roles">
+                {rolesData === null && !rolesError ? (
+                  <RolesTabSkeleton />
+                ) : (
+                  <LlmRolesTab
+                    data={rolesData}
+                    credentials={credentials}
+                    modelGroups={modelGroups}
+                    saveStatus={rolesSaveStatus}
+                    error={rolesError}
+                    onChange={onRolesDataChange}
+                    onDeleteRole={onDeleteRole}
+                    onDeleteModelBundle={onDeleteModelBundle}
+                    onBeforeRoleTest={onBeforeRoleTest}
+                    onAfterRoleTest={onAfterRoleTest}
+                    onNavigateToApiKeys={onNavigateToApiKeys}
+                  />
+                )}
+              </SettingsErrorBoundary>
+            </div>
           </div>
-        </div>
+        ) : null}
+
+        {isMounted("copilot") ? (
+          <div
+            className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden"
+            data-settings-tab-panel="copilot"
+            hidden={activeTab !== "copilot"}
+          >
+            <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
+              <SettingsErrorBoundary label="Copilot">
+                {rolesData === null && !rolesError ? (
+                  <RolesTabSkeleton />
+                ) : (
+                  <CopilotTab
+                    data={rolesData}
+                    credentials={credentials}
+                    modelGroups={modelGroups}
+                    onChange={onRolesDataChange}
+                    saveStatus={rolesSaveStatus}
+                    error={rolesError}
+                    // R-F3: route delete through the real DELETE endpoint (LlmRolesTab
+                    // already uses it). Without this, the FE-only delete + PUT would
+                    // be merged additively by the backend and never drop the yaml key.
+                    onDeleteRole={onDeleteRole}
+                    // R-F7: flush any debounced roles save before the SDK Test so the
+                    // gateway snapshot is up to date and Test doesn't race the writer.
+                    onBeforeRoleTest={onBeforeRoleTest}
+                    // R-F12: empty-state + per-card warnings link to the API Keys tab.
+                    onNavigateToApiKeys={onNavigateToApiKeys}
+                  />
+                )}
+              </SettingsErrorBoundary>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

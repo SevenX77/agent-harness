@@ -14,7 +14,6 @@ import {
   providerDraftForAction,
   providerEndpointDraftsForAction,
   activeProbeModelIdsForDraft,
-  shouldSyncRemoteModelCatalog,
   isStaleRouteReferenceError,
   refreshLoadedLlmRolesProjection,
   providerTestParamsFingerprint,
@@ -210,31 +209,6 @@ describe('draftsFromCredentials', () => {
       providers: [{ id: 'TEST', name: 'Test', api_key: '' }],
     })
     expect(drafts[0].provider_type).toBe('openai_compatible')
-  })
-})
-
-describe('remote model catalog auto-sync policy', () => {
-  it('runs only after settings load, when enabled, and before the current on-cycle has synced', () => {
-    expect(shouldSyncRemoteModelCatalog({
-      settingsLoading: true,
-      enabled: true,
-      alreadySynced: false,
-    })).toBe(false)
-    expect(shouldSyncRemoteModelCatalog({
-      settingsLoading: false,
-      enabled: false,
-      alreadySynced: false,
-    })).toBe(false)
-    expect(shouldSyncRemoteModelCatalog({
-      settingsLoading: false,
-      enabled: true,
-      alreadySynced: true,
-    })).toBe(false)
-    expect(shouldSyncRemoteModelCatalog({
-      settingsLoading: false,
-      enabled: true,
-      alreadySynced: false,
-    })).toBe(true)
   })
 })
 

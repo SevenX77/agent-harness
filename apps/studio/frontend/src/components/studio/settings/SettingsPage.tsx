@@ -7,7 +7,7 @@ import { shouldApplyExternalRolesRefresh, useDebouncedRolesSave } from "@/hooks/
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import { clearActiveProbeEndpoints, updateActiveProbeEndpoint } from "../api-keys/active-probe-store"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
@@ -76,18 +76,6 @@ export function modelGroupsReferenceMissingCredentialProviders(
     const endpointId = providerModel.endpoint_id ?? providerModel.route_id.split(":")[0]
     return Boolean(endpointId && !providerIds.has(endpointId))
   }))
-}
-
-export function shouldSyncRemoteModelCatalog({
-  settingsLoading,
-  enabled,
-  alreadySynced,
-}: {
-  settingsLoading: boolean
-  enabled: boolean
-  alreadySynced: boolean
-}): boolean {
-  return !settingsLoading && enabled && !alreadySynced
 }
 
 function errorText(error: unknown): string {
@@ -475,7 +463,6 @@ export function useSettingsPageController(): SettingsPageController {
   // opened (rolesData still null). Instead of dropping it, set this flag so the
   // lazy load refetches fresh the first time the tab opens.
   const rolesDirtyRef = useRef(false)
-  const remoteModelCatalogSyncedRef = useRef(false)
   const applyRolesDataFromBackend = useCallback((next: RolesData) => {
     rolesDataRef.current = next
     setRolesData(next)
@@ -683,35 +670,6 @@ export function useSettingsPageController(): SettingsPageController {
     toast.error("Backend is reconnecting — please try again in a moment.")
     return false
   }
-
-  useEffect(() => {
-    if (!apiReady) return
-    const enabled = appSettings.settings.remote_model_catalog_enabled
-    if (!enabled) {
-      remoteModelCatalogSyncedRef.current = false
-      return
-    }
-    if (!shouldSyncRemoteModelCatalog({
-      settingsLoading: appSettings.isLoading,
-      enabled,
-      alreadySynced: remoteModelCatalogSyncedRef.current,
-    })) {
-      return
-    }
-    remoteModelCatalogSyncedRef.current = true
-    syncVerifiedCommunityCatalog()
-      .then(() => {
-        refetchCredentialsFromEvent()
-      })
-      .catch((error) => {
-        console.warn("phase=settings-catalog action=verified-community-catalog-sync-failed error=%o", error)
-      })
-  }, [
-    apiReady,
-    appSettings.isLoading,
-    appSettings.settings.remote_model_catalog_enabled,
-    refetchCredentialsFromEvent,
-  ])
 
   useEffect(() => {
     if (!apiReady) return

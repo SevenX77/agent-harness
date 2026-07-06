@@ -112,10 +112,11 @@ def test_delete_bundle_cascades_reference_off_role(
     from app.routers.llm import _load_roles_or_empty, delete_model_bundle
 
     result = asyncio.run(delete_model_bundle("primary"))
+    roles_data = result.roles_data
 
-    assert "primary" not in result.model_bundles
+    assert "primary" not in roles_data.model_bundles
     # The referencing role's bundle_id is dropped (no dangling reference left).
-    role = result.roles["graph_agent"]
+    role = roles_data.roles["graph_agent"]
     assert role.bundle_id is None
     assert role.fallback_chain == []
     # And it is durably persisted: a reload shows no dangling reference.

@@ -818,7 +818,6 @@ def _filter_gateway_roles(roles: dict[str, Any]) -> dict[str, Any]:
     }
 
     bundle_keys = {
-        "model_profile_id",
         "bundle_id",
         "fallback_chain",
         "lint_requirements",
@@ -862,7 +861,15 @@ def _filter_gateway_roles(roles: dict[str, Any]) -> dict[str, Any]:
         filtered_bundles = {}
         for b_id, b in roles["model_bundles"].items():
             if isinstance(b, dict):
-                filtered_bundles[b_id] = {k: v for k, v in b.items() if k in bundle_keys}
+                filtered_bundle = {k: v for k, v in b.items() if k in bundle_keys}
+                filtered_bundle["bundle_id"] = (
+                    filtered_bundle.get("bundle_id")
+                    or b.get("model_profile_id")
+                    or b_id
+                )
+                filtered_bundle["fallback_chain"] = b.get("fallback_chain") or []
+                filtered_bundle["lint_requirements"] = b.get("lint_requirements") or {}
+                filtered_bundles[b_id] = filtered_bundle
         filtered["model_bundles"] = filtered_bundles
 
     return filtered

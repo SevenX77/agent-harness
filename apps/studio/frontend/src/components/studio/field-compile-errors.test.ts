@@ -132,18 +132,18 @@ describe("lintErrorsForFile", () => {
 })
 
 describe("lintErrorsForBoundary", () => {
-  it("keeps Studio test-input diagnostics on the input boundary", () => {
+  it("keeps Studio runtime-input diagnostics on the input boundary", () => {
     const scoped = lintErrorsForBoundary(
       [
         lintErr({
-          file: ".workspace/import_files",
+          file: ".workspace/runtime_config.json",
           field_path: "chapter",
-          message: "Graph input schema requires test input field 'chapter'",
+          message: "Graph input schema requires runtime input field 'chapter'",
         }),
         lintErr({
-          file: ".workspace/import_files/case-a.json",
+          file: ".workspace/runtime_config.json",
           field_path: "chapters",
-          message: "'chapters' is a required property",
+          message: "Runtime input field 'chapters' has type 'string'",
         }),
         lintErr({ file: "phases/review/SKILL.md", field_path: "validator", message: "node field" }),
       ],
@@ -151,8 +151,8 @@ describe("lintErrorsForBoundary", () => {
     )
 
     expect(scoped.map((error) => error.message)).toEqual([
-      "Graph input schema requires test input field 'chapter'",
-      "'chapters' is a required property",
+      "Graph input schema requires runtime input field 'chapter'",
+      "Runtime input field 'chapters' has type 'string'",
     ])
   })
 
@@ -170,20 +170,20 @@ describe("fieldDiagnosticsForPanels", () => {
   it("keeps manual Compile diagnostics even after realtime lint has settled clean", () => {
     const manual: CompileError[] = [
       {
-        file: ".workspace/import_files",
+        file: ".workspace/runtime_config.json",
         line: null,
         field: "chapter",
         severity: "fatal",
-        message: "Graph input schema requires test input field 'chapter'",
-        error_code: "STUDIO_TEST_INPUT_MISSING",
+        message: "Graph input schema requires runtime input field 'chapter'",
+        error_code: "STUDIO_RUNTIME_INPUT_MISSING",
       },
     ]
 
     expect(fieldDiagnosticsForPanels(manual, [])).toMatchObject([
       {
-        file: ".workspace/import_files",
+        file: ".workspace/runtime_config.json",
         field_path: "chapter",
-        message: "Graph input schema requires test input field 'chapter'",
+        message: "Graph input schema requires runtime input field 'chapter'",
       },
     ])
   })
@@ -191,12 +191,12 @@ describe("fieldDiagnosticsForPanels", () => {
   it("merges manual Compile and lint diagnostics on the same field axis", () => {
     const manual: CompileError[] = [
       {
-        file: ".workspace/import_files",
+        file: ".workspace/runtime_config.json",
         line: null,
         field: "chapter",
         severity: "fatal",
         message: "missing chapter",
-        error_code: "STUDIO_TEST_INPUT_MISSING",
+        error_code: "STUDIO_RUNTIME_INPUT_MISSING",
       },
     ]
     const lint: LintError[] = [

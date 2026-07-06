@@ -1,6 +1,6 @@
-import { useMemo, useState, type ComponentProps } from "react"
+import { useState, type ComponentProps } from "react"
 import { AlertTriangle, ChevronDown, ChevronRight, FileText, Files, Settings2 } from "lucide-react"
-import type { LintError, SkillDetail } from "@/api/types"
+import type { LintError, RuntimeConfig, SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
@@ -8,14 +8,12 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { sha256Hex } from "@/lib/hash"
 import {
-  applyGraphArtifacts,
   applyIoInputChecks,
   declaredInputFieldNames,
-  fileFieldsInImportScope,
-  fileFieldsOf,
-  graphArtifactsOf,
   reconcileInputFields,
   reconcileOutputFields,
+  runtimeArtifactsOf,
+  runtimeFileFieldsInImportScope,
   type ArtifactRow,
   type FileFieldDecl,
   type IoInputChecks,
@@ -43,6 +41,7 @@ interface InputPanelProps {
   skillId: string
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
+  runtimeConfig?: RuntimeConfig | null
   selectedNode?: SelectedNode
   /** Which boundary pseudo-node is selected, so the panel scopes by role. */
   ioBoundary?: IoBoundarySelection
@@ -50,6 +49,7 @@ interface InputPanelProps {
   // F4: which saved test input feeds Predict/Run (wired through Workspace).
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
+  onRuntimeArtifactsSave?: (artifacts: ArtifactRow[]) => Promise<string | null>
   onFileOpen?: (fileOrPath: FileOpenInput) => void
   // Writes for the config declarations (same optimistic-hash contract
   // PropertiesPanel uses).
@@ -323,11 +323,13 @@ export function InputPanel({
   skillId,
   workspaceRoot = null,
   skillDetail,
+  runtimeConfig = null,
   selectedNode = null,
   ioBoundary = null,
   lintErrors = null,
   selectedTestInputId = null,
   onSelectTestInput,
+  onRuntimeArtifactsSave,
   onFileOpen,
   onPhaseFileSave,
 }: InputPanelProps) {
@@ -344,19 +346,13 @@ export function InputPanel({
       ? lintErrorsForBoundary(lintErrors, "output")
       : []
 
-  // Reconciled input fields (matched/available/missing), nested. For an interior
-  // node this reconciles io.inputs against the upstream blackboard; for the Input
-  // boundary / GRAPH.md it flags declared graph inputs with no source.
-  const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "")
-  const importNodeIds = useMemo(
-    () => new Set((skillDetail?.graph_topology ?? []).map((phase) => phase.id)),
-    [skillDetail?.graph_topology],
-  )
   const importNodeId = view.isGraphLevel ? null : selectedNode?.id ?? null
-  const declaredFiles = fileFieldsInImportScope(fileFieldsOf(view.content), importNodeId, importNodeIds)
-  const artifacts = graphArtifactsOf(skillDetail)
-  const graphContent = skillDetail?.files?.["GRAPH.md"] ?? ""
-  const perItemCount = perItemCountOf(fileFieldsOf(graphContent))
+  const declaredFiles = runtimeFileFieldsInImportScope(runtimeConfig, importNodeId)
+  // Reconciled input fields (matched/available/missing), nested. For an interior
+  // node this reconciles io.inputs against upstream blackboard + runtime files.
+  const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "", declaredFiles)
+  const artifacts = runtimeArtifactsOf(runtimeConfig)
+  const perItemCount = perItemCountOf(runtimeFileFieldsInImportScope(runtimeConfig, null))
 
   const handleInputConfigSave = (checks: IoInputChecks) =>
     submitIoDocumentEdit({
@@ -367,12 +363,7 @@ export function InputPanel({
     })
 
   const handleArtifactsSave = (rows: ArtifactRow[]) =>
-    submitIoDocumentEdit({
-      relPath: "GRAPH.md",
-      content: graphContent,
-      mutate: (content) => applyGraphArtifacts(content, rows),
-      save: onPhaseFileSave,
-    })
+    onRuntimeArtifactsSave?.(rows) ?? Promise.resolve("Saving runtime artifacts is unavailable in this context")
 
   return (
     <div className="flex h-full flex-col bg-background">

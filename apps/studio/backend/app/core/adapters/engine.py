@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -150,6 +151,40 @@ def _sha256_hex_from_content_hash(content_hash: str) -> str | None:
     return sha256_val if _SHA256_HEX_RE.fullmatch(sha256_val) else None
 
 
+def _runtime_input_fields_for_engine(
+    runtime_config: dict[str, Any] | None,
+) -> dict[str, set[str]] | None:
+    if not isinstance(runtime_config, dict):
+        return None
+    inputs = runtime_config.get("inputs")
+    phases = inputs.get("phases") if isinstance(inputs, dict) else None
+    if not isinstance(phases, dict):
+        return None
+    result: dict[str, set[str]] = {}
+    for phase_id, bindings in phases.items():
+        if not isinstance(phase_id, str) or not isinstance(bindings, dict):
+            continue
+        fields = {
+            field for field, binding in bindings.items() if isinstance(field, str) and isinstance(binding, dict)
+        }
+        if fields:
+            result[phase_id] = fields
+    return result or None
+
+
+def _runtime_config_fingerprint(runtime_config: dict[str, Any] | None) -> str | None:
+    if not isinstance(runtime_config, dict):
+        return None
+    existing = runtime_config.get("fingerprint")
+    if isinstance(existing, str) and existing:
+        return existing
+    stable = {
+        key: value for key, value in runtime_config.items() if key not in {"updated_at", "fingerprint", "golden", "ui"}
+    }
+    raw = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(raw).hexdigest()}"
+
+
 class _PrivateStudioSkillResolver:
     """Resolve Studio skill ids through the opened-skill absolute path index."""
 
@@ -279,15 +314,15 @@ def _private_build_gateway_model_resolver() -> Any:
 def _node_param_overrides(phase_name: str | None) -> dict[str, Any]:
     """Per-node LLM param overrides for ``phase_name`` (PR3), or empty.
 
-    Read from the run-scoped ``STUDIO_NODE_PARAMS_PATH`` file (set by the run
-    worker to the skill's ``.workspace/node_llm_params.json``). A node's override
+    Read from the run-scoped ``STUDIO_RUNTIME_CONFIG_PATH`` file (set by the run
+    worker to the skill's ``.workspace/runtime_config.json``). A node's override
     of thinking / max_output_tokens / temperature is passed straight to the
     gateway resolver, where it wins over the role default. Keeps node overrides a
     studio-side concern — the engine and the gateway resolver stay skill-agnostic.
     """
     if not phase_name:
         return {}
-    path_str = os.environ.get("STUDIO_NODE_PARAMS_PATH")
+    path_str = os.environ.get("STUDIO_RUNTIME_CONFIG_PATH")
     if not path_str:
         return {}
     path = Path(path_str)
@@ -297,7 +332,9 @@ def _node_param_overrides(phase_name: str | None) -> dict[str, Any]:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    nodes = loaded.get("nodes") if isinstance(loaded, dict) else None
+    llm = loaded.get("llm") if isinstance(loaded, dict) else None
+    node_params = llm.get("node_params") if isinstance(llm, dict) else None
+    nodes = node_params.get("nodes") if isinstance(node_params, dict) else None
     node = nodes.get(phase_name) if isinstance(nodes, dict) else None
     if not isinstance(node, dict):
         return {}
@@ -760,6 +797,9 @@ class EngineAdapter:
         skill_dir = payload["skill_dir"]
         skill_id = payload["skill_id"]
         store_type = payload.get("artifact_scope", "ephemeral")
+        runtime_config = payload.get("runtime_config")
+        if not isinstance(runtime_config, dict):
+            runtime_config = None
         storage_root = _studio_storage_root()
 
         resolver = self._build_studio_skill_resolver()
@@ -778,6 +818,8 @@ class EngineAdapter:
                 store="product" if store_type == "product" else "ephemeral",
                 version=payload.get("version") if isinstance(payload.get("version"), str) else None,
                 artifact_output_root=storage_root / "engine_artifacts",
+                runtime_input_fields=_runtime_input_fields_for_engine(runtime_config),
+                runtime_config_fingerprint=_runtime_config_fingerprint(runtime_config),
             )
         except Exception as exc:
             raise StudioAdapterError("engine.compile_failed", {"detail": str(exc)}) from exc

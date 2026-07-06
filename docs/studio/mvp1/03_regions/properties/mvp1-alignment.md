@@ -57,7 +57,7 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 
 - 机制: 节点 Properties 面板保留 `Compare LLMs` 区块，作者在此为**该节点**登记若干**对比候选**；每个候选 = 一个 model group + 一条 endpoint route（"auto" 或具体 route）。**候选只选模型，不做 role / bundle**（有意简化：对比 = 同节点同输入、只换底层模型）。
 - 决策（PM 2026-07-02）:
-  - **候选持久化在 Studio 后端**，按 `skill + node` 归属，**不写进 SKILL.md**（对比是运行期实验配置，不是 skill 源文件的一部分）；节点改名 → 后端存储 key 同步迁移。
+  - **候选持久化在 `.workspace/runtime_config.json`**，按 `skill + node` 归属，**不写进 SKILL.md**（对比是运行期实验配置，不是 skill 源文件的一部分）；节点改名 → runtime_config key 同步迁移。
   - **运行机制 = 旁路单节点多跑**（详见 `01_workflows/00_settings-ux-spec.md §2.8` + `timeline` F6）：主图用基准模型照常跑一次；Studio 抓对比节点在主 run 的 `InputDispatchEvent` 输入切片，对每个候选把**该单个 phase** 物化成 `depends_on=input` 的单节点临时 skill 变体 + 候选临时 roles，走现成 `run_artifact` 各跑一遍。独立单节点 run ⇒ **不改 engine 执行、永不写主黑板、per-candidate artifacts 各自分目录**。
   - **旧整图按角色扇出链删除**：`CompareRunDialog` + `POST /runs/compare` role fan-out + `run_compare.py` 整图 roles 物化同批清掉。
 - 原话/来源: PM 2026-07-01「跑对比是在整图真的 run 的时候跑的……直接在这个节点加一个平行的 node，同样的输入和其他配置，除了 llm 不同」+ 2026-07-02 实证"引擎跑不了并联"后 PM 批准的旁路单节点等价方案。
@@ -67,7 +67,7 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 
 ### F6. Agent Node Custom Model Params
 
-- 机制: Agent 节点 Properties 的 `Custom model params` 是独立于 `SKILL.md` 的节点级运行参数开关，数据存于 `.workspace/node_llm_params.json`。`enabled=true` 时该节点的 `thinking` / `max_output_tokens` / `temperature` 作为 node override 参与运行；`enabled=false` 时运行时完全继承当前 llm role，但已有字段值作为未激活草稿保留，重新打开开关应恢复之前的节点设定。只有 `enabled=false` 且所有字段均为空时，后端才把该 node entry 视为可清理的空记录。
+- 机制: Agent 节点 Properties 的 `Custom model params` 是独立于 `SKILL.md` 的节点级运行参数开关，数据存于 `.workspace/runtime_config.json` 的 llm/node params 区。`enabled=true` 时该节点的 `thinking` / `max_output_tokens` / `temperature` 作为 node override 参与运行；`enabled=false` 时运行时完全继承当前 llm role，但已有字段值作为未激活草稿保留，重新打开开关应恢复之前的节点设定。只有 `enabled=false` 且所有字段均为空时，后端才把该 node entry 视为可清理的空记录。
 - 决策: 关闭开关不得清空作者刚调好的参数；它只改变“是否把这些值用于运行”。继承态仍必须显示具体数值而不是 `Model default`，并且 fallback 值来自实时 `GET /api/llm/roles` 数据源（Settings 保存或 `roles_changed` 事件重拉后同步刷新），不得在 Properties 打开时复制一份静态 role 参数。
 - 默认: MVP1 llm role setting 应有明确默认值；temperature 缺省显示 role 默认 70%（authored `1.4`），正常情况下不应落到 opaque model default。
 - 测试: 关闭 custom checkbox 后 PUT 保存 `enabled:false` 且保留字段值；UI 显示角色 fallback 具体值；重新打开恢复之前字段值。Settings / LLM Roles 修改 role 参数或收到 `roles_changed` 重拉后，Properties 继承态同步更新同一份 role 数据源。temperature slider 只在 commit/放手/blur/key 结束时触发保存。
@@ -75,8 +75,8 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 - 归属: region `properties`; capability `phase-field-whitelist`; backend `node-llm-params`.
 
 ## 3. 接口契约
-- Inputs: selected node/edge, skill detail, diagnostics, **节点级对比候选（后端按 skill+node 存取）**, **实时 LLM Roles 数据源与 node custom model params**。（golden **不在** Properties，见 F4/§4）
-- Outputs: phase file save, file open requests, panel focus changes, **对比候选持久化写入 + 触发对比运行**, **node custom model params 保存**。
+- Inputs: selected node/edge, skill detail, diagnostics, **节点级对比候选（runtime_config 按 skill+node 存取）**, **实时 LLM Roles 数据源与 node custom model params**。（golden **不在** Properties，见 F4/§4）
+- Outputs: phase file save, file open requests, panel focus changes, **对比候选写入 runtime_config + 触发对比运行**, **node custom model params 保存到 runtime_config**。
 - Capability links: `phase-editing`, `compile-lint`, `trace-observability`, `run-execution`, `golden-eval`（**负向边界**：golden 不在 Properties）。
 
 ## 4. 设计决策基础（PM 原话）

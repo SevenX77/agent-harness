@@ -178,9 +178,16 @@ export function groupCandidatesByFile(candidates: FileFieldCandidate[]): FileGro
   })
 }
 
-/** Existing `source:'file'` declarations shown as already-checked per-file groups. */
-export function groupsFromDeclarations(declarations: FileFieldDecl[]): FileGroup[] {
-  return groupCandidatesByFile(declarations.map((decl) => ({ ...decl, checked: true })))
+/** Runtime_config import declarations shown as already-checked per-file groups. */
+export function groupsFromDeclarations(
+  declarations: FileFieldDecl[],
+  declaredInputNames: readonly string[] = [],
+): FileGroup[] {
+  const declared = new Set(declaredInputNames.map(normalizeFieldName))
+  return groupCandidatesByFile(declarations.map((decl) => ({
+    ...decl,
+    checked: declared.has(normalizeFieldName(decl.field)),
+  })))
 }
 
 /** `chapter.meta.title` → `[chapter, chapter.meta]` — every ancestor object path. */
@@ -431,7 +438,7 @@ function FileImportGroups({
                 <span className={META_CLASS}>
                   {candidate.dir
                     ? `batch ×${candidate.numbers?.length ?? "?"} · numbers kept`
-                    : `${candidate.type ?? "any"} · source: file`}
+                    : `${candidate.type ?? "any"} · runtime file`}
                   {candidate.matched ? " · matched io.inputs" : ""}
                 </span>
               </label>
@@ -467,13 +474,13 @@ export interface InputConfigInlineProps {
    * empty for the Input pseudo-node / GRAPH.md except declared graph inputs.
    */
   blackboard: ReconciledFieldRow[]
-  /** Existing source:'file' declarations of the target document. */
+  /** Runtime_config import declarations of the target scope. */
   declaredFiles: FileFieldDecl[]
   /** Null = Input/Test Inputs root import scope; phase id = node-scoped imports. */
   importNodeId?: string | null
   /** Declared io.inputs field names an imported file auto-matches against. */
   declaredInputNames: readonly string[]
-  onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[] }) => Promise<string | null>
+  onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[]; fileFieldNames?: string[] }) => Promise<string | null>
   /** Open an imported file in the editor (P5 edit button). */
   onFileOpen?: (path: string) => void
   /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
@@ -496,7 +503,10 @@ export function InputConfigInline({
   isGraphInput = false,
 }: InputConfigInlineProps) {
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
-  const initialGroups = useMemo(() => groupsFromDeclarations(declaredFiles), [declaredFiles])
+  const initialGroups = useMemo(
+    () => groupsFromDeclarations(declaredFiles, declaredInputNames),
+    [declaredFiles, declaredInputNames],
+  )
   const [groups, setGroups] = useState<FileGroup[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -518,12 +528,17 @@ export function InputConfigInline({
           return decl
         }),
     )
+    const fileFieldNames = Array.from(new Set([
+      ...declaredFiles.map((decl) => decl.field),
+      ...effectiveGroups.flatMap((group) => group.candidates.map((candidate) => candidate.field)),
+    ]))
     const failure = await onSave({
       // Missing rows have no blackboard supply — never persist them as consumed.
       blackboard: blackboard
         .filter((row) => row.state !== "missing")
         .map((row) => ({ path: row.path, type: row.type, checked: isChecked(row) })),
       files,
+      fileFieldNames,
     })
     setBusy(false)
     setError(failure)
@@ -631,7 +646,7 @@ export function OutputConfigDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Output artifacts — GRAPH.md io</DialogTitle>
+          <DialogTitle>Output artifacts — runtime_config</DialogTitle>
           <DialogDescription>
             Each file carries the blackboard fields you check; on-disk naming is fixed.
           </DialogDescription>

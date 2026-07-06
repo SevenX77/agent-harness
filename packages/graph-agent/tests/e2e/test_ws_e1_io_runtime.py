@@ -22,17 +22,13 @@ def _schema_yaml(properties: dict[str, Any], *, required: list[str] | None = Non
     return json.dumps(schema, ensure_ascii=False, indent=4).replace("\n", "\n    ")
 
 
-def _write_importing_logic_skill(root: Path, *, input_file: str) -> None:
+def _write_importing_logic_skill(root: Path) -> None:
     graph_inputs = _schema_yaml({"title": {"type": "string"}}, required=["title"])
     graph_outputs = _schema_yaml({"report_md": {"type": "string"}}, required=["report_md"])
     phase_inputs = _schema_yaml(
         {
             "title": {"type": "string"},
-            "body": {
-                "type": "string",
-                "source": "file",
-                "path": input_file,
-            },
+            "body": {"type": "string"},
         },
         required=["title", "body"],
     )
@@ -96,11 +92,6 @@ io:
     {graph_inputs}
   outputs:
     {graph_outputs}
-  artifacts:
-    - stem: report
-      mode: single
-      format: md
-      fields: [report_md]
 phases:
   - report
 ---
@@ -133,14 +124,26 @@ def test_real_run_imports_workspace_file_into_phase_input(
 ) -> None:
     skill_root = tmp_path / "skill"
     workspace_dir = tmp_path / "workspace"
-    _write(workspace_dir / "inputs" / "body.md", "Imported body.")
-    _write_importing_logic_skill(skill_root, input_file="inputs/body.md")
+    _write(workspace_dir / "import_files" / ".phase" / "report" / "body.md", "Imported body.")
+    _write_importing_logic_skill(skill_root)
 
     result = run_skill(
         skill_root,
         workspace_dir=workspace_dir,
         thread_id="ws-e1-io-e2e-import",
         skill_resolver=mock_skill_resolver,
+        runtime_config={
+            "inputs": {
+                "phases": {
+                    "report": {
+                        "body": {
+                            "path": "import_files/.phase/report/body.md",
+                            "value_type": "string",
+                        }
+                    }
+                }
+            }
+        },
         title="Runtime IO",
     )
 
@@ -162,6 +165,11 @@ def test_real_run_manifest_artifact_writes_fixed_format_file(
         workspace_dir=workspace_dir,
         thread_id=run_id,
         skill_resolver=mock_skill_resolver,
+        runtime_config={
+            "artifacts": [
+                {"stem": "report", "mode": "single", "format": "md", "fields": ["report_md"]}
+            ]
+        },
         body="## Artifact\n\nEngine-owned output.",
     )
 
@@ -172,18 +180,45 @@ def test_real_run_manifest_artifact_writes_fixed_format_file(
     assert latest[0].read_text(encoding="utf-8") == "## Artifact\n\nEngine-owned output."
 
 
+def test_real_run_imports_root_workspace_file_into_graph_input(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    skill_root = tmp_path / "skill"
+    workspace_dir = tmp_path / "workspace"
+    body_path = workspace_dir / "import_files" / "body.md"
+    body_path.parent.mkdir(parents=True, exist_ok=True)
+    body_path.write_bytes(b"\xef\xbb\xbfRoot imported input.")
+    _write_artifact_logic_skill(skill_root)
+
+    result = run_skill(
+        skill_root,
+        workspace_dir=workspace_dir,
+        thread_id="ws-e1-io-e2e-root-import",
+        skill_resolver=mock_skill_resolver,
+        runtime_config={
+            "inputs": {
+                "root": {
+                    "body": {
+                        "path": "import_files/body.md",
+                        "value_type": "string",
+                    }
+                }
+            }
+        },
+    )
+
+    assert result.success is True
+    assert result.context["report_md"] == "Root imported input."
+
+
 def _write_batch_importing_logic_skill(root: Path) -> None:
     graph_inputs = _schema_yaml({"title": {"type": "string"}}, required=["title"])
     graph_outputs = _schema_yaml({"count": {"type": "integer"}}, required=["count"])
     phase_inputs = _schema_yaml(
         {
             "title": {"type": "string"},
-            "chapters": {
-                "type": "array",
-                "source": "file",
-                "dir": "imports/abc_segmentation",
-                "pattern": "chapter_{n}_latest_*.json",
-            },
+            "chapters": {"type": "array"},
         },
         required=["title", "chapters"],
     )
@@ -236,12 +271,12 @@ def test_real_run_batch_file_import_aggregates_numbered_json_files(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """A batch source:'file' declaration (dir + pattern) aggregates the
+    """A batch runtime_config declaration (dir + pattern) aggregates the
     numbered files into a parsed array, ordered by extracted number
     (design: input region F5 batch numbers kept, PM 2026-07-02)."""
     skill_root = tmp_path / "skill"
     workspace_dir = tmp_path / "workspace"
-    batch_dir = workspace_dir / "imports" / "abc_segmentation"
+    batch_dir = workspace_dir / "import_files" / ".phase" / "report" / "abc_segmentation"
     for n in (7, 1, 2):
         _write(
             batch_dir / f"chapter_{n:03d}_latest_20260414_0649{n:02d}.json",
@@ -254,6 +289,19 @@ def test_real_run_batch_file_import_aggregates_numbered_json_files(
         workspace_dir=workspace_dir,
         thread_id="ws-e1-io-e2e-batch",
         skill_resolver=mock_skill_resolver,
+        runtime_config={
+            "inputs": {
+                "phases": {
+                    "report": {
+                        "chapters": {
+                            "dir": "import_files/.phase/report/abc_segmentation",
+                            "pattern": "chapter_{n}_latest_*.json",
+                            "value_type": "json",
+                        }
+                    }
+                }
+            }
+        },
         title="Batch",
     )
 

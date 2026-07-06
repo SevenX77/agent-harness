@@ -24,8 +24,8 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
@@ -467,6 +467,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const inFlightRef = useRef<Partial<Record<EditorSide, boolean>>>({})
   const [conflict, setConflict] = useState<SaveConflict | null>(null)
   const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(currentSkillId)
+  const { data: runtimeConfig, mutate: mutateRuntimeConfig } = useSWR<RuntimeConfig>(
+    currentSkillId ? `/skills/${currentSkillId}/runtime-config` : null,
+    fetcher,
+    STUDIO_TRUTH_SWR_CONFIG,
+  )
   const assetDirectoryTree = useWorkspaceDirectoryTree({
     workspaceRoot: currentWorkspaceRoot ?? currentSkillId,
     skillId: currentSkillId,
@@ -521,6 +526,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setCompareRuns([])
     setCompareCandidateId(null)
   }, [currentSkillId])
+
+  const handleRuntimeArtifactsSave = useCallback(async (artifacts: RuntimeArtifactRow[]): Promise<string | null> => {
+    if (!currentSkillId) {
+      return "No active workspace"
+    }
+    try {
+      const updated = await putRuntimeArtifacts(currentSkillId, artifacts)
+      await mutateRuntimeConfig(updated, { revalidate: false })
+      return null
+    } catch (error) {
+      return errorMessage(error)
+    }
+  }, [currentSkillId, mutateRuntimeConfig])
 
   // N3 #12: subscribe to realtime-lint status changes (published by useDebouncedLint as
   // the `lintStatusEvent` window event). A matching skillId bumps lintTick so the
@@ -1901,6 +1919,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       try {
         const event = JSON.parse(String(message.data)) as { type?: string, skill_id?: string, path?: string }
         if (event.type !== "skill_changed" || event.skill_id !== currentSkillId || !event.path) return
+        const normalizedChangedPath = event.path.replace(/\\/g, "/")
+        if (
+          normalizedChangedPath.startsWith(".workspace/import_files/")
+          || normalizedChangedPath === ".workspace/runtime_config.json"
+        ) {
+          void mutateRuntimeConfig()
+        }
         // Keep the file tree live like a native explorer's watcher: refresh every
         // already-loaded ancestor folder of the changed path so external edits AND
         // Studio's own native-fs create/delete/rename show up without a manual
@@ -1951,7 +1976,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
     }
     return () => socket.close()
-  }, [activeFileDetails, currentSkillId, mutateSkillDetail])
+  }, [activeFileDetails, currentSkillId, mutateRuntimeConfig, mutateSkillDetail])
 
 
   const activeLint = useMemo(
@@ -2396,6 +2421,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
         skillDetail={skillDetail}
+        runtimeConfig={runtimeConfig ?? null}
         assetDirectoryTree={assetDirectoryTree}
         assetSubgraphTree={assetSubgraphTree}
         selectedNode={selectedNode}
@@ -2403,6 +2429,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         selectedNodeStatus={selectedNodeStatus}
         selectedTestInputId={selectedTestInputId}
         onSelectTestInput={setSelectedTestInputId}
+        onRuntimeArtifactsSave={handleRuntimeArtifactsSave}
         onPhaseFileSave={handlePhaseFileSave}
         onPhaseRename={handleRenamePhase}
         onActionCreate={handleActionCreate}
@@ -2541,6 +2568,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       skillId={currentSkillId}
                       workspaceRoot={currentWorkspaceRoot}
                       skillDetail={skillDetail}
+                      runtimeConfig={runtimeConfig ?? null}
                       childDetailPatch={childDetailPatch}
                       isLoading={isLoading}
                       error={skillDetailError}

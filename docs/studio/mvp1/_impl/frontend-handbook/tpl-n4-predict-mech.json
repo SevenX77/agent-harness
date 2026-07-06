@@ -100,7 +100,7 @@
       "item": "Compile preflight 输入/输出文件格式门",
       "d12": "Studio workspace file contract；engine 不直接拥有 .workspace/import_files/.workspace/golden",
       "status": "ok",
-      "note": "compile_skill_for_studio 在 engine compile 后验证 Studio 工作区文件：.workspace/import_files/*.json 必须满足 graph io.inputs；有 required input 但没有测试输入会返回 STUDIO_TEST_INPUT_MISSING；输入类型/required 不匹配返回 STUDIO_TEST_INPUT_SCHEMA_INVALID；golden expected_output 用节点 io.outputs 完整 JSON Schema 校验，缺 required 或类型错返回 STUDIO_GOLDEN_SCHEMA_INVALID。Predict/Run 输入解析不再用 {} 兜底。",
+      "note": "compile_skill_for_studio 在 engine compile 前刷新 .workspace/runtime_config.json,并在 engine compile 后验证 Studio 工作区运行配置：runtime_config root bindings 必须满足 graph io.inputs；有 required input 但无 root binding 返回 STUDIO_RUNTIME_INPUT_MISSING；输入类型不匹配返回 STUDIO_RUNTIME_INPUT_SCHEMA_INVALID；golden expected_output 用节点 io.outputs 完整 JSON Schema 校验，缺 required 或类型错返回 STUDIO_GOLDEN_SCHEMA_INVALID。Predict/Run 输入解析不再用 {} 兜底。",
       "ref": "preflight"
     },
     {

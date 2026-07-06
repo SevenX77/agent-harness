@@ -29,27 +29,6 @@ class ContextBridge(BaseModel):
     outputs: dict[str, str] = Field(default_factory=dict)
 
 
-class ArtifactSpec(BaseModel):
-    """One declared artifact file: which blackboard fields it carries.
-
-    Fixed on-disk naming is owned by ``graph_agent.io.artifact_manifest``.
-    Only valid on GRAPH.md io (graph boundary), not on phase files.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    stem: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]*$")
-    fields: list[str] = Field(min_length=1)
-    mode: Literal["single", "per-item"] = "single"
-    format: Literal["json", "md"] = "json"
-
-    @model_validator(mode="after")
-    def _md_requires_single_field(self) -> ArtifactSpec:
-        if self.format == "md" and len(self.fields) != 1:
-            raise ValueError("format 'md' artifacts must declare exactly one field")
-        return self
-
-
 class PhaseIOSchema(BaseModel):
     """Inline JSON Schema contract for a graph or phase boundary."""
 
@@ -57,7 +36,6 @@ class PhaseIOSchema(BaseModel):
 
     inputs: dict[str, Any] = Field(..., min_length=1)
     outputs: dict[str, Any] = Field(..., min_length=1)
-    artifacts: list[ArtifactSpec] | None = None
 
 
 class AgentRegistryItem(BaseModel):

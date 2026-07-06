@@ -73,7 +73,38 @@ def test_scan_folder_lists_files_and_text_candidates(
 
     log = _entry(payload, "log.jsonl")
     assert log["format"] == "jsonl"
-    assert {f["name"] for f in log["fields"]} == {"event", "ts"}
+    assert log["fields"][0]["name"] == "log"
+    assert log["fields"][0]["type"] == "array"
+    assert {f["name"] for f in log["fields"][0]["items"]} == {"event", "ts"}
+
+
+def test_scan_structured_tables_and_file_refs(client: TestClient, tmp_path: Path) -> None:
+    folder = tmp_path / "mixed"
+    folder.mkdir()
+    (folder / "people.csv").write_text("name,age\nAda,37\n", encoding="utf-8")
+    (folder / "codes.tsv").write_text("code\tlabel\nA1\tAlpha\n", encoding="utf-8")
+    (folder / "notes.md").write_text("# Notes\n", encoding="utf-8")
+    (folder / "brief.pdf").write_bytes(b"%PDF-1.4\n")
+
+    payload = _scan(client, folder)
+
+    people = _entry(payload, "people.csv")
+    assert people["format"] == "csv"
+    assert people["fields"][0]["type"] == "array"
+    assert [field["name"] for field in people["fields"][0]["items"]] == ["name", "age"]
+
+    codes = _entry(payload, "codes.tsv")
+    assert codes["format"] == "tsv"
+    assert [field["name"] for field in codes["fields"][0]["items"]] == ["code", "label"]
+
+    notes = _entry(payload, "notes.md")
+    assert notes["format"] == "text"
+    assert notes["content_type"] == "text/markdown"
+
+    brief = _entry(payload, "brief.pdf")
+    assert brief["format"] == "document"
+    assert brief["content_type"] == "application/pdf"
+    assert brief["fields"][0]["value_type"] == "file_ref"
 
 
 def test_scan_folds_numbered_batch_and_keeps_numbers(
@@ -93,8 +124,9 @@ def test_scan_folds_numbered_batch_and_keeps_numbers(
     assert batch["kind"] == "batch"
     assert batch["numbers"] == [1, 2, 7]
     assert batch["count"] == 3
-    field_names = {f["name"] for f in batch["fields"]}
-    assert field_names == {"chapter_number", "paragraphs"}
+    assert batch["fields"][0]["name"] == "chapter"
+    assert batch["fields"][0]["type"] == "array"
+    assert {f["name"] for f in batch["fields"][0]["items"]} == {"chapter_number", "paragraphs"}
 
 
 def test_scan_takes_latest_version_and_ignores_history(
@@ -195,13 +227,22 @@ def test_import_copies_node_file_under_node_import_files(
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    assert body["dir"] == "import_files/segment/material"
+    assert body["dir"] == "import_files/.phase/segment/material"
     skills_dir, _ = studio_roots
-    copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / "segment" / "material"
+    copied = skills_dir / SKILL_ID / ".workspace" / "import_files" / ".phase" / "segment" / "material"
     assert (copied / "quality_report.json").exists()
     entry = body["entries"][0]
     assert entry["name"] == "quality_report.json"
-    assert entry["path"] == "import_files/segment/material/quality_report.json"
+    assert entry["path"] == "import_files/.phase/segment/material/quality_report.json"
+    runtime_config = json.loads(
+        (skills_dir / SKILL_ID / ".workspace" / "runtime_config.json").read_text(encoding="utf-8")
+    )
+    assert "golden" not in runtime_config
+    assert "ui" not in runtime_config
+    assert runtime_config["inputs"]["phases"]["segment"]["project_id"]["json_path"] == ["project_id"]
+    assert runtime_config["inputs"]["phases"]["segment"]["project_id"]["path"] == (
+        "import_files/.phase/segment/material/quality_report.json"
+    )
 
 
 def test_import_single_file_lands_under_named_dir(
@@ -218,6 +259,57 @@ def test_import_single_file_lands_under_named_dir(
     entry = body["entries"][0]
     assert entry["name"] == "quality_report.json"
     assert entry["path"] == "import_files/material/quality_report.json"
+
+
+def test_runtime_config_get_refreshes_import_manifest(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    skills_dir, _ = studio_roots
+    skill_dir = skills_dir / SKILL_ID
+    root_dir = skill_dir / ".workspace" / "import_files"
+    root_dir.mkdir(parents=True)
+    (root_dir / "brief.md").write_text("hello", encoding="utf-8")
+    phase_dir = skill_dir / ".workspace" / "import_files" / ".phase" / "segment"
+    phase_dir.mkdir(parents=True)
+    (phase_dir / "chapters.json").write_text(json.dumps([{"chapter_number": 1}]), encoding="utf-8")
+
+    resp = client.get(f"/api/skills/{SKILL_ID}/runtime-config")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["inputs"]["manifest"]["root"][0]["name"] == "brief.md"
+    assert body["inputs"]["manifest"]["root"][0]["content_type"] == "text/markdown"
+    assert body["inputs"]["root"]["brief"]["path"] == "import_files/brief.md"
+    assert body["inputs"]["root"]["brief"]["value_type"] == "string"
+    assert body["inputs"]["root"]["brief"]["content_type"] == "text/markdown"
+    assert body["inputs"]["manifest"]["phases"]["segment"][0]["name"] == "chapters.json"
+    assert body["inputs"]["phases"]["segment"]["chapters"]["path"] == (
+        "import_files/.phase/segment/chapters.json"
+    )
+
+
+def test_runtime_config_artifacts_put_updates_unified_runtime_config(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    resp = client.put(
+        f"/api/skills/{SKILL_ID}/runtime-config/artifacts",
+        json={
+            "artifacts": [
+                {"stem": "report", "mode": "single", "format": "md", "fields": ["report_md"]}
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["artifacts"] == [
+        {"stem": "report", "mode": "single", "format": "md", "fields": ["report_md"]}
+    ]
+    assert "golden" not in body
+    assert "ui" not in body
+    skills_dir, _ = studio_roots
+    disk = json.loads((skills_dir / SKILL_ID / ".workspace" / "runtime_config.json").read_text(encoding="utf-8"))
+    assert disk["artifacts"][0]["stem"] == "report"
 
 
 def test_import_missing_source_is_404(client: TestClient, tmp_path: Path) -> None:

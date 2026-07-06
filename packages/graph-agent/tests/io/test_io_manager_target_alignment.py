@@ -1,6 +1,6 @@
 """IOManager target contract (MVP1 r3): ``file`` is the only per-field target.
 
-Artifact persistence moved wholly to the GRAPH.md ``io.artifacts`` manifest
+Artifact persistence moved wholly to the host runtime_config ``artifacts`` manifest
 (``graph_agent.io.artifact_manifest``); the former per-field
 ``target: 'artifact'`` and its ``artifact_manager`` legacy alias were deleted
 in the same change (no-backward-compat).
@@ -34,7 +34,7 @@ class TestIOManagerTargetContract:
     ) -> None:
         io_mgr = IOManager({"outputs": [{"name": "story_framework", "target": target}]})
 
-        with pytest.raises(ValueError, match="io.artifacts manifest"):
+        with pytest.raises(ValueError, match="runtime_config artifacts manifest"):
             io_mgr.save_outputs({"story_framework": {}}, output_dir=tmp_path)
 
     def test_missing_required_runtime_input_raises(self) -> None:

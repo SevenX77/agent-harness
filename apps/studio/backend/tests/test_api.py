@@ -137,18 +137,19 @@ def test_skill_detail_uses_real_skill_files(
     assert body["lint_result"]["status"] == "failed"
     assert body["lint_result"]["errors"] == [
         {
-                "file": ".workspace/import_files",
+                "file": ".workspace/runtime_config.json",
             "line": None,
             "column": None,
-            "error_code": "STUDIO_TEST_INPUT_MISSING",
+            "error_code": "STUDIO_RUNTIME_INPUT_MISSING",
             "severity": "error",
             "message": (
-                "Graph input schema requires test input field 'input_text', "
-                "but no test input JSON files exist. Add a valid test input before predict/run."
+                "Graph input schema requires runtime input field 'input_text', "
+                "but runtime_config has no root import binding. Add a matching file under "
+                ".workspace/import_files before predict/run."
             ),
             "phase_name": None,
             "field_path": "input_text",
-                "source_path": ".workspace/import_files",
+                "source_path": ".workspace/runtime_config.json",
         }
     ]
 
@@ -233,6 +234,25 @@ def test_lint_changed_markdown_passes_when_disk_would_fail(
     assert response.json()["status"] == "passed"
 
 
+def test_lint_accepts_runtime_config_root_text_input(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    skill_id = "text-segmentation"
+    skill_dir = copy_skill(skills_dir, workspaces_dir, skill_id)
+    inputs_dir = skill_dir / ".workspace" / "import_files"
+    inputs_dir.mkdir(parents=True)
+    (inputs_dir / "input_text.txt").write_text("hello", encoding="utf-8")
+
+    response = client.post(f"/api/skills/{skill_id}/lint")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "passed"
+    runtime_config = json.loads((skill_dir / ".workspace" / "runtime_config.json").read_text(encoding="utf-8"))
+    assert runtime_config["inputs"]["root"]["input_text"]["value_type"] == "string"
+
+
 def test_lint_without_body_still_lints_disk_path(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -243,9 +263,9 @@ def test_lint_without_body_still_lints_disk_path(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "failed"
-    assert body["errors"][0]["file"] == ".workspace/import_files"
+    assert body["errors"][0]["file"] == ".workspace/runtime_config.json"
     assert body["errors"][0]["field_path"] == "input_text"
-    assert body["errors"][0]["error_code"] == "STUDIO_TEST_INPUT_MISSING"
+    assert body["errors"][0]["error_code"] == "STUDIO_RUNTIME_INPUT_MISSING"
 
 
 def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(
@@ -1367,8 +1387,10 @@ def fake_run_worker(
     inputs: dict[str, Any],
     process_queue: queue.Queue[dict[str, Any]],
     art_ref: dict[str, Any],
+    roles_path_override: str | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> None:
-    del art_ref, inputs
+    del art_ref, inputs, roles_path_override, runtime_config
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(exist_ok=True)
@@ -1403,8 +1425,10 @@ def fake_failed_run_worker(
     inputs: dict[str, Any],
     process_queue: queue.Queue[dict[str, Any]],
     art_ref: dict[str, Any],
+    roles_path_override: str | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> None:
-    del skill_id, art_ref, inputs
+    del skill_id, art_ref, inputs, roles_path_override, runtime_config
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps({}), encoding="utf-8")

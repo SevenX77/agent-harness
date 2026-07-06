@@ -77,26 +77,23 @@ Phase 类型由物理文件名决定：
 
 每个节点自己的 `io.inputs` 声明从黑板读取哪些字段，`io.outputs` 声明允许写回哪些字段。父图和子图 IO 不需要字段全集一一相等。
 
-节点 `io.inputs` 的字段可带 `source: 'file'` + `path`：该字段不来自黑板，而是运行到本节点时从文件惰性注入、**追加**为黑板字段（黑板是主源，文件只是追加——PM 2026-07-02 r3）。
+节点 `io.inputs` 只声明消费哪些黑板字段,不存文件路径。导入文件路径、目录、批量 pattern 和解析出的字段绑定都在 `.workspace/runtime_config.json`；compile/lint/run/predict 读取 runtime_config 后把这些字段视为运行前/运行时注入的黑板来源（黑板是主源，文件只是运行配置注入——PM 2026-07-02 r3 + 2026-07-05 runtime_config 收敛）。
 
-### 3.4.1 artifacts 清单（GRAPH.md io 落盘声明）
+### 3.4.1 artifacts 清单（runtime_config 落盘声明）
 
-GRAPH.md 的 `io` 下可声明 `artifacts:` 清单——要落盘哪些文件、每个文件装黑板的哪些字段：
+GRAPH.md 的 `io` 只声明输入/输出 schema。要落盘哪些 artifact 文件、每个文件装黑板的哪些字段,写入 `.workspace/runtime_config.json` 的 `artifacts` 清单：
 
 ```yaml
-io:
-  inputs: {…}
-  outputs: {…}
-  artifacts:
-    - stem: story_framework
-      mode: single            # single | per-item
-      fields: [story_framework, unified_event_stream]
-    - stem: abc_segmentation
-      mode: per-item          # iterate 每轮一个编号文件
-      fields: [segmentation_result]
+artifacts:
+  - stem: story_framework
+    mode: single            # single | per-item
+    fields: [story_framework, unified_event_stream]
+  - stem: abc_segmentation
+    mode: per-item          # iterate 每轮一个编号文件
+    fields: [segmentation_result]
 ```
 
-一个文件可装多个字段、一个字段可进多个文件（G3「一 schema 多文件 / 多 schema 多文件」的成型态）。落盘命名固定格式（`<stem>_latest_<ts>` + `history/` + per-item 编号继承输入批量），见 physical-layout §2.2.2。**per-field `target:'artifact'` 与 `artifact_manager` 别名不是规范字段**——由本清单整体替换，不留兼容。
+一个文件可装多个字段、一个字段可进多个文件（G3「一 schema 多文件 / 多 schema 多文件」的成型态）。落盘命名固定格式（`<stem>_latest_<ts>` + `history/` + per-item 编号继承输入批量），见 physical-layout §2.2.2。旧 per-field artifact path 与 legacy 别名不是规范字段,不留兼容。
 
 ### 3.5 Iterate 只认 iterate
 

@@ -59,7 +59,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 
 ### F5. Edge Dot Hit Target(双态)
 
-- 机制: the line/dot between nodes is clickable;**双态**:未跑前打开该边的**静态黑板字段推断**(根 `io.inputs` ∪ 上游祖先 `io.outputs` ∪ `source: file` 注入,前端按拓扑 + io 声明推导,逐边不同、随编辑即时更新);跑后(选中某次 run)打开真实 blackboard transition data(边事件快照 + 操作记录)。完整语义与数据契约归 `trace-observability` F4,canvas 只渲染。
+- 机制: the line/dot between nodes is clickable;**双态**:未跑前打开该边的**静态黑板字段推断**(根 `io.inputs` ∪ 上游祖先 `io.outputs` ∪ runtime_config import binding 注入 ∪ iterate/batch 注入,前端按拓扑 + io 声明 + runtime_config 推导,逐边不同、随编辑即时更新);跑后(选中某次 run)打开真实 blackboard transition data(边事件快照 + 操作记录)。完整语义与数据契约归 `trace-observability` F4,canvas 只渲染。
 - 决策: dot represents operations between upstream end and downstream start;**未跑前也要像 node 的 io 一样给出 schema 推断**(PM 2026-07-02)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:76` defines dot; `01_workflows/04_run-and-verify.md:109` preserves the PM quote;静态推断原话留底于 `trace-observability` F4(PM 2026-07-02)。
 - 测试: 未跑时 dot opens per-edge static field inference(随 io 声明/拓扑变化更新);跑后 dot opens real transition context; parallel branch dot shows shared filtered blackboard.

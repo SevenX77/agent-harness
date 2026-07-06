@@ -318,7 +318,7 @@ export function EdgeContextView({
 /**
  * n5 atom #14 static-inference body: which fields SHOULD be on the blackboard
  * when the run reaches this dot, derived purely from declarations (root
- * io.inputs ∪ ancestor io.outputs ∪ the target's source:'file' injections).
+ * io.inputs + ancestor io.outputs + the target's runtime_config file injections).
  */
 function StaticInferenceBody({ fields, target }: { fields: StaticEdgeField[]; target: string }) {
   return (

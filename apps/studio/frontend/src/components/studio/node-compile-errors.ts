@@ -3,7 +3,7 @@ import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 
 const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
 const FIELD_NODE_PREFIX_RE = /^([A-Za-z0-9_-]+)\./
-const TEST_INPUT_FILE_RE = /(?:^|\/)\.workspace\/import_files(?:\/|$)/
+const RUNTIME_INPUT_FILE_RE = /(?:^|\/)\.workspace\/(?:import_files(?:\/|$)|runtime_config\.json$)/
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "")
@@ -13,7 +13,7 @@ function boundaryNodeIdFromFile(file: string | null | undefined): string | null 
   if (typeof file !== "string") {
     return null
   }
-  return TEST_INPUT_FILE_RE.test(normalizePath(file)) ? INPUT_ID : null
+  return RUNTIME_INPUT_FILE_RE.test(normalizePath(file)) ? INPUT_ID : null
 }
 
 function boundaryNodeIdFromField(field: string | null | undefined): string | null {

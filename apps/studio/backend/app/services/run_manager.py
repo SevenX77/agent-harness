@@ -55,6 +55,7 @@ from app.models.runs import (
 )
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
+from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
@@ -104,6 +105,7 @@ def _run_worker_main(
     process_queue: Any,
     art_ref: dict[str, Any],
     roles_path_override: str | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> None:
     """Subprocess entrypoint that executes EngineAdapter.run_artifact.
 
@@ -119,10 +121,7 @@ def _run_worker_main(
     emit_to_queue = _queue_event_subscriber(process_queue)
     if roles_path_override:
         os.environ["STUDIO_LLM_ROLES_PATH"] = roles_path_override
-    # PR3: point the resolver at this skill's per-node param overrides so agent
-    # nodes with a thinking/max_output_tokens/temperature override run with them.
-    # <skill>/.workspace is run_dir.parent.parent; missing file is fine (no overrides).
-    os.environ["STUDIO_NODE_PARAMS_PATH"] = str(run_dir.parent.parent / "node_llm_params.json")
+    os.environ["STUDIO_RUNTIME_CONFIG_PATH"] = str(run_dir / "runtime_config.snapshot.json")
     try:
         adapter = build_engine_adapter()
         run_payload = {
@@ -135,6 +134,8 @@ def _run_worker_main(
             "idempotency_key": run_dir.name,
             "inputs": inputs,
         }
+        if runtime_config is not None:
+            run_payload["execution_context"] = {"runtime_config": runtime_config}
         if adapter.transport == "in_process":
             run_payload["event_subscriber"] = emit_to_queue
         result = adapter.run_artifact(run_payload)
@@ -522,6 +523,7 @@ class RunManager:
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
         skill_dir = resolve_skill_dir(skill_id)
+        runtime_config = refresh_runtime_config(skill_dir)
 
         adapter = build_engine_adapter()
         art_ref = adapter.compile(
@@ -529,6 +531,7 @@ class RunManager:
                 "skill_dir": str(skill_dir),
                 "skill_id": skill_id,
                 "artifact_scope": "ephemeral",
+                "runtime_config": runtime_config,
             }
         )
 
@@ -544,6 +547,7 @@ class RunManager:
         run_dir = run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
+        write_runtime_snapshot(run_dir, runtime_config)
         _write_json(run_dir / "input_data.json", inputs)
         _persist_run_input_artifact(run_dir, inputs, artifact_ref=art_ref)
         metadata = RunMetadata(
@@ -559,7 +563,7 @@ class RunManager:
         process_queue = self.queue_factory()
         process = self.process_factory(
             target=self.worker,
-            args=(skill_id, str(run_dir), inputs, process_queue, art_ref),
+            args=(skill_id, str(run_dir), inputs, process_queue, art_ref, None, runtime_config),
         )
         try:
             process.start()
@@ -611,6 +615,7 @@ class RunManager:
         )
 
         skill_dir = resolve_skill_dir(skill_id)
+        runtime_config = refresh_runtime_config(skill_dir)
         candidates = read_compare_candidates(skill_dir).get(node_id, [])
         if not candidates:
             response = error_response(
@@ -662,6 +667,7 @@ class RunManager:
                 candidate_id=candidate.candidate_id,
                 candidate_label=candidate.model_group_id,
                 roles_path_override=str(roles_file),
+                runtime_config=runtime_config,
             )
             spawned.append(
                 CompareCandidateRun(
@@ -688,12 +694,15 @@ class RunManager:
         candidate_id: str,
         candidate_label: str,
         roles_path_override: str,
+        runtime_config: dict[str, Any] | None,
     ) -> RunMetadata:
         """Spawn one isolated single-node candidate side-run tagged with its group."""
         run_id = _new_run_id()
         run_dir = run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
+        if runtime_config is not None:
+            write_runtime_snapshot(run_dir, runtime_config)
         _write_json(run_dir / "input_data.json", inputs)
         _persist_run_input_artifact(run_dir, inputs, artifact_ref=art_ref)
         metadata = RunMetadata(
@@ -713,7 +722,7 @@ class RunManager:
         process_queue = self.queue_factory()
         process = self.process_factory(
             target=self.worker,
-            args=(skill_id, str(run_dir), inputs, process_queue, art_ref, roles_path_override),
+            args=(skill_id, str(run_dir), inputs, process_queue, art_ref, roles_path_override, runtime_config),
         )
         try:
             process.start()
@@ -772,10 +781,15 @@ class RunManager:
         artifact_ref: dict[str, Any],
     ) -> RunMetadata:
         inputs = _runtime_inputs_from_request(request)
+        runtime_config: dict[str, Any] | None = None
+        with contextlib.suppress(Exception):
+            runtime_config = refresh_runtime_config(resolve_skill_dir(skill_id))
         run_id = _new_run_id()
         run_dir = _source_less_run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
+        if runtime_config is not None:
+            write_runtime_snapshot(run_dir, runtime_config)
         _write_json(run_dir / "input_data.json", inputs)
         _persist_run_input_artifact(run_dir, inputs, artifact_ref=artifact_ref)
         metadata = RunMetadata(
@@ -791,7 +805,7 @@ class RunManager:
         process_queue = self.queue_factory()
         process = self.process_factory(
             target=self.worker,
-            args=(skill_id, str(run_dir), inputs, process_queue, artifact_ref),
+            args=(skill_id, str(run_dir), inputs, process_queue, artifact_ref, None, runtime_config),
         )
         try:
             process.start()

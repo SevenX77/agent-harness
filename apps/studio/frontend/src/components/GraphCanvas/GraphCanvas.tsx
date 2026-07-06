@@ -19,7 +19,7 @@ import { Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
-import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, SkillDetail } from '@/api/types'
+import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, RuntimeConfig, SkillDetail } from '@/api/types'
 import { getChildGraphTopology, getSkillDetail, type ResumeRunOptions } from '@/api/client'
 import { isTauriRuntime } from '@/config/runtime'
 import { resolveWorkspaceIdentity, topLevelSkillIdFromWorkspaceRoot } from '@/components/studio/workspace-identity'
@@ -94,6 +94,7 @@ interface GraphCanvasProps {
   // editable workspace) or READ-ONLY (a bundled/public skill); see isDrilledChildEditable.
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
+  runtimeConfig?: RuntimeConfig | null
   childDetailPatch?: ChildDetailPatch | null
   isLoading?: boolean
   error?: unknown
@@ -666,6 +667,7 @@ export function GraphCanvas({
   skillId,
   workspaceRoot,
   skillDetail,
+  runtimeConfig = null,
   childDetailPatch = null,
   isLoading = false,
   error,
@@ -714,6 +716,10 @@ export function GraphCanvas({
   useEffect(() => {
     skillDetailRef.current = skillDetail
   }, [skillDetail])
+  const runtimeConfigRef = useRef(runtimeConfig)
+  useEffect(() => {
+    runtimeConfigRef.current = runtimeConfig
+  }, [runtimeConfig])
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   // N2 atom #13 (subgraph-inline-preview): resolved child topology per expanded
   // subgraph node, keyed by the parent node id. Drives the canvas-level inline
@@ -1424,7 +1430,7 @@ export function GraphCanvas({
     // exists fall back to the static declared-fields inference (n5 atom #14).
     const resolvedContextJson = contextJson === undefined
       ? edgeContextFromEvents(currentWorkspace.traceEvents ?? [], source, target)
-        ?? staticEdgeInference(skillDetailRef.current, source, target)
+        ?? staticEdgeInference(skillDetailRef.current, source, target, runtimeConfigRef.current)
         ?? undefined
       : contextJson as EdgeContextJson
     currentWorkspace.setSelectedEdge({

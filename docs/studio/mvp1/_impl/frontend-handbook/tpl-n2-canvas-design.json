@@ -237,8 +237,8 @@
       "cap": "data-gap-viz",
       "module": "拓扑与冲突校验",
       "func": "设计:数据断层可视化(REQ-2)——缺供给字段是 engine compile/lint 诊断,画布节点只投影同一份 engine 错误;字段供给来源仍在 io panel 通过 field_supply 展示。",
-      "action": "用户在 io panel 选择/查看输入字段供给来源;当某个 io.inputs.properties 字段没有 root input、上游 output、source:file 或 iterate/batch 注入时,engine lint/compile 返回 F-v3-graph-dataflow-source-missing,画布节点/编辑器/Properties/Compile drawer 同步显示。",
-      "fe_design": "2026-07-05 校正:画布节点不再从 graph_topology[].field_supply 合成 file-less CompileError。缺黑板供给属于 engine dataflow 规则:phase io.inputs.properties 声明消费的字段必须由 root input、upstream output、source:file 或 iterate/batch 注入提供;缺失时 engine 返回 F-v3-graph-dataflow-source-missing,field_path=<phase>.io.inputs.properties.<field>。Workspace.compileErrorsByNodeId 只合并 manual compile 与 first-screen/realtime lint 两路 engine DTO;Properties 面板同样读取 active engine lint,先用首屏 SkillDetail lint,实时 lint settle 后替换;field_supply 保留给 io-target/InputPanel 显示 supplied/source/producer_phase,不是节点 compile 错误源。",
+      "action": "用户在 io panel 选择/查看输入字段供给来源;当某个 io.inputs.properties 字段没有 root input、上游 output、runtime_config import binding 或 iterate/batch 注入时,engine lint/compile 返回 F-v3-graph-dataflow-source-missing,画布节点/编辑器/Properties/Compile drawer 同步显示。",
+      "fe_design": "2026-07-05 校正:画布节点不再从 graph_topology[].field_supply 合成 file-less CompileError。缺黑板供给属于 engine dataflow 规则:phase io.inputs.properties 声明消费的字段必须由 root input、upstream output、runtime_config import binding 或 iterate/batch 注入提供;缺失时 engine 返回 F-v3-graph-dataflow-source-missing,field_path=<phase>.io.inputs.properties.<field>。Workspace.compileErrorsByNodeId 只合并 manual compile 与 first-screen/realtime lint 两路 engine DTO;Properties 面板同样读取 active engine lint,先用首屏 SkillDetail lint,实时 lint settle 后替换;field_supply 保留给 io-target/InputPanel 显示 supplied/source/producer_phase,不是节点 compile 错误源。",
       "fe_modules": [],
       "be_contract": [
         {

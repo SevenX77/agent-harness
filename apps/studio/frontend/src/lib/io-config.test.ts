@@ -4,18 +4,17 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { SkillDetail } from '@/api/types'
+import type { RuntimeConfig, SkillDetail } from '@/api/types'
 
 import {
-  applyGraphArtifacts,
   applyIoInputChecks,
   blackboardAtNode,
   blackboardAtOutput,
   declaredInputFieldNames,
-  fileFieldsInImportScope,
-  graphArtifactsOf,
   reconcileInputFields,
   reconcileOutputFields,
+  runtimeArtifactsOf,
+  runtimeFileFieldsInImportScope,
 } from './io-config'
 import { parseFrontmatter } from './io-declarations'
 
@@ -77,7 +76,7 @@ io:
     required: [segments]
     properties:
       segments: {type: array}
-      style_guide: {type: object, source: file, path: import_files/report/ref/style.json}
+      style_guide: {type: object}
   outputs:
     type: object
     required: [story_framework]
@@ -117,7 +116,7 @@ describe('blackboardAtNode', () => {
 
 describe('reconcileInputFields (r4: matched / available / missing)', () => {
   // report declares io.inputs {segments (on blackboard), glossary (required,
-  // no producer → missing), style_guide (source:file → not a blackboard gap)}.
+  // no producer -> missing), style_guide (runtime_config -> not a blackboard gap)}.
   const RECON_REPORT = `---
 io:
   inputs:
@@ -126,7 +125,7 @@ io:
     properties:
       segments: {type: array}
       glossary: {type: string}
-      style_guide: {type: object, source: file, path: import_files/report/ref/style.json}
+      style_guide: {type: object}
   outputs:
     type: object
     required: [story_framework]
@@ -152,7 +151,9 @@ actions: [report]
   }
 
   it('flags a declared-required input with no upstream producer as missing, at the top', () => {
-    const rows = reconcileInputFields(reconDetail(), 'report')
+    const rows = reconcileInputFields(reconDetail(), 'report', [
+      { field: 'style_guide', type: 'object', path: 'import_files/.phase/report/ref/style.json' },
+    ])
 
     // missing rows come first
     expect(rows[0]).toMatchObject({ name: 'glossary', state: 'missing' })
@@ -163,12 +164,12 @@ actions: [report]
     expect(byName.get('segments')).toMatchObject({ state: 'matched', checked: true })
     // available upstream but not consumed
     expect(byName.get('chapters')).toMatchObject({ state: 'available', checked: false })
-    // source:'file' declarations are NOT blackboard gaps → never "missing"
+    // runtime_config-backed declarations are NOT blackboard gaps → never "missing"
     expect(byName.has('style_guide')).toBe(false)
   })
 
   it('flags graph inputs with no source as missing (Input pseudo-node / GRAPH.md)', () => {
-    // GRAPH.md io.inputs = {chapters, project_id}, neither source:'file' →
+    // GRAPH.md io.inputs = {chapters, project_id}, neither has runtime_config backing ->
     // both are declared graph inputs with no wired source → missing.
     const rows = reconcileInputFields(reconDetail(), '')
     expect(rows.every((r) => r.state === 'missing')).toBe(true)
@@ -176,7 +177,7 @@ actions: [report]
     expect(rows[0].reason).toMatch(/graph input/)
   })
 
-  it('does not flag a graph input already backed by a source:file import', () => {
+  it('does not flag a graph input already backed by a runtime_config import', () => {
     const withFile = `---
 schema_version: "v0.3.0"
 name: demo
@@ -185,7 +186,7 @@ io:
     type: object
     required: [chapters]
     properties:
-      chapters: {type: array, source: file, dir: import_files/ch, pattern: "c_{n}.json"}
+      chapters: {type: array}
   outputs:
     type: object
     required: [x]
@@ -196,7 +197,9 @@ phases: [fetch]
 <phase depends_on="input" output>fetch</phase>
 `
     const detail = { id: 'd', graph_topology: [{ id: 'fetch', depends_on: ['input'] }], files: { 'GRAPH.md': withFile } } as unknown as SkillDetail
-    expect(reconcileInputFields(detail, '')).toEqual([])
+    expect(reconcileInputFields(detail, '', [
+      { field: 'chapters', type: 'array', dir: 'import_files/ch', pattern: 'c_{n}.json' },
+    ])).toEqual([])
   })
 })
 
@@ -277,34 +280,71 @@ describe('applyIoInputChecks', () => {
 
     expect(next).toContain('project_id')
     expect(next).not.toMatch(/chapters:\s*\{?type: array\}?\s*$/m)
-    expect(next).toContain('source: file')
-    expect(next).toContain('dir: import_files/report/abc_segmentation')
-    expect(next).toContain("pattern: chapter_{n}_latest_*.json")
+    expect(next).not.toContain('source: file')
+    expect(next).not.toContain('dir: import_files/report/abc_segmentation')
+    expect(next).not.toContain("pattern: chapter_{n}_latest_*.json")
+    expect(next).toContain('style_guide')
+    expect(next).toContain('chapters_batch')
     expect(next).toContain('<action>report</action>')
     const required = next.match(/required:\n(?:\s+- .+\n)+/)?.[0] ?? next
     expect(required).toContain('segments')
   })
 })
 
-describe('fileFieldsInImportScope', () => {
-  const nodeIds = new Set(['segment', 'review'])
-  const declarations = [
-    { field: 'root_file', type: 'object', path: 'import_files/material/source.json' },
-    { field: 'root_batch', type: 'array', dir: 'import_files/chapter_batch', pattern: 'chapter_{n}.json' },
-    { field: 'segment_file', type: 'object', path: 'import_files/segment/material/source.json' },
-    { field: 'review_file', type: 'object', path: 'import_files/review/material/source.json' },
-    { field: 'legacy_file', type: 'object', path: 'imports/material/source.json' },
-  ]
+describe('runtimeFileFieldsInImportScope', () => {
+  const runtimeConfig = {
+    schema_version: 'studio.runtime_config.v1',
+    inputs: {
+      import_root: 'import_files',
+      manifest: {
+        root: [
+          {
+            kind: 'dir',
+            name: 'material',
+            entries: [
+              {
+                kind: 'file',
+                name: 'source.json',
+                path: 'import_files/material/source.json',
+                fields: [{ name: 'root_file', type: 'object' }],
+              },
+            ],
+          },
+          {
+            kind: 'batch',
+            name: 'chapter_{n}.json',
+            stem: 'chapter',
+            dir: 'import_files/chapter_batch',
+            pattern: 'chapter_{n}.json',
+            numbers: [1, 2],
+          },
+        ],
+        phases: {
+          segment: [
+            {
+              kind: 'file',
+              name: 'source.json',
+              path: 'import_files/.phase/segment/material/source.json',
+              fields: [{ name: 'segment_file', type: 'object' }],
+            },
+          ],
+        },
+      },
+      root: {},
+      phases: {},
+    },
+    artifacts: [],
+  } satisfies RuntimeConfig
 
-  it('keeps only import_files root declarations for graph/input scope', () => {
-    expect(fileFieldsInImportScope(declarations, null, nodeIds).map((decl) => decl.field)).toEqual([
+  it('reads root import_files declarations for graph/input scope', () => {
+    expect(runtimeFileFieldsInImportScope(runtimeConfig, null).map((decl) => decl.field)).toEqual([
       'root_file',
-      'root_batch',
+      'chapter',
     ])
   })
 
-  it('keeps only the selected node import_files subfolder for phase scope', () => {
-    expect(fileFieldsInImportScope(declarations, 'segment', nodeIds).map((decl) => decl.field)).toEqual([
+  it('reads only the selected .phase node scope for phase imports', () => {
+    expect(runtimeFileFieldsInImportScope(runtimeConfig, 'segment').map((decl) => decl.field)).toEqual([
       'segment_file',
     ])
   })
@@ -405,37 +445,23 @@ actions: [seg]
   })
 })
 
-describe('graph artifacts manifest', () => {
-  it('writes io.artifacts onto GRAPH.md and reads it back', () => {
-    const next = applyGraphArtifacts(GRAPH_MD, [
-      { stem: 'story_framework', mode: 'single', fields: ['story_framework'] },
-      {
-        stem: 'abc_segmentation',
-        mode: 'per-item',
-        fields: ['segments'],
+describe('runtime artifacts manifest', () => {
+  it('reads artifact rows from runtime_config', () => {
+    const rows = runtimeArtifactsOf({
+      schema_version: 'studio.runtime_config.v1',
+      inputs: {
+        import_root: 'import_files',
+        manifest: { root: [], phases: {} },
+        root: {},
+        phases: {},
       },
-    ])
-
-    expect(next).toContain('artifacts:')
-    expect(next).toContain('stem: story_framework')
-    expect(next).toContain('mode: per-item')
-    expect(next).toContain('<phase depends_on="input">fetch</phase>')
-
-    const detailWithArtifacts = {
-      ...detail(),
-      files: { 'GRAPH.md': next },
-    } as unknown as SkillDetail
-    const rows = graphArtifactsOf(detailWithArtifacts)
+      artifacts: [
+        { stem: 'story_framework', mode: 'single', fields: ['story_framework'] },
+        { stem: 'abc_segmentation', mode: 'per-item', fields: ['segments'] },
+      ],
+    })
     expect(rows).toHaveLength(2)
     expect(rows[1]).toMatchObject({ stem: 'abc_segmentation', mode: 'per-item' })
-  })
-
-  it('removes the artifacts key when the list is empty', () => {
-    const withArtifacts = applyGraphArtifacts(GRAPH_MD, [
-      { stem: 'x', mode: 'single', fields: ['story_framework'] },
-    ])
-    const cleared = applyGraphArtifacts(withArtifacts, [])
-    expect(cleared).not.toContain('artifacts:')
   })
 })
 

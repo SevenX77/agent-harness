@@ -9,7 +9,7 @@ Supported input sources:
 
 Supported output targets:
 - ``file`` — written to a specified path. (Artifact persistence is declared
-  via the GRAPH.md ``io.artifacts`` manifest — see
+  by the host runtime_config ``artifacts`` manifest — see
   ``graph_agent.io.artifact_manifest`` — not per-field targets.)
 """
 
@@ -158,7 +158,7 @@ class IOManager:
                 raise ValueError(
                     f"Unknown output target '{target}' for output '{name}'. "
                     f"Supported: file. Artifact persistence is declared via the "
-                    f"GRAPH.md io.artifacts manifest, not per-field targets."
+                    f"runtime_config artifacts manifest, not per-field targets."
                 )
 
         return saved_paths

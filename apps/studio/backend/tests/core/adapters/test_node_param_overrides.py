@@ -1,6 +1,6 @@
 """PR3: per-node LLM param overrides reach the gateway resolver.
 
-The run worker sets STUDIO_NODE_PARAMS_PATH to the skill's node_llm_params.json;
+The run worker sets STUDIO_RUNTIME_CONFIG_PATH to the run's runtime_config snapshot;
 _GatewayBackedLLMProvider.invoke reads the focused node's override and passes
 thinking / max_output_tokens / temperature to resolver.resolve() (where a
 present override wins over the role default). Node overrides stay a studio-side
@@ -19,16 +19,16 @@ from graph_agent.core.llm_provider import LLMProviderRequest
 
 
 def _write_params(path: Path, nodes: dict[str, dict[str, Any]]) -> None:
-    path.write_text(json.dumps({"nodes": nodes}), encoding="utf-8")
+    path.write_text(json.dumps({"llm": {"node_params": {"nodes": nodes}}}), encoding="utf-8")
 
 
 def test_overrides_absent_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("STUDIO_NODE_PARAMS_PATH", raising=False)
+    monkeypatch.delenv("STUDIO_RUNTIME_CONFIG_PATH", raising=False)
     assert _node_param_overrides("phase") == {}
 
 
 def test_overrides_read_focused_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    params = tmp_path / "node_llm_params.json"
+    params = tmp_path / "runtime_config.json"
     _write_params(
         params,
         {
@@ -36,7 +36,7 @@ def test_overrides_read_focused_node(tmp_path: Path, monkeypatch: pytest.MonkeyP
             "other": {"enabled": True, "thinking": False},
         },
     )
-    monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
+    monkeypatch.setenv("STUDIO_RUNTIME_CONFIG_PATH", str(params))
     assert _node_param_overrides("writer") == {
         "thinking": True,
         "max_output_tokens": 2048,
@@ -50,21 +50,21 @@ def test_overrides_read_focused_node(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_null_fields_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    params = tmp_path / "node_llm_params.json"
+    params = tmp_path / "runtime_config.json"
     _write_params(params, {"writer": {"enabled": True, "thinking": None, "max_output_tokens": 4096, "temperature": None}})
-    monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
+    monkeypatch.setenv("STUDIO_RUNTIME_CONFIG_PATH", str(params))
     assert _node_param_overrides("writer") == {"max_output_tokens": 4096}
 
 
 def test_disabled_node_params_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    params = tmp_path / "node_llm_params.json"
+    params = tmp_path / "runtime_config.json"
     _write_params(params, {"writer": {"enabled": False, "thinking": True, "temperature": 0.8}})
-    monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
+    monkeypatch.setenv("STUDIO_RUNTIME_CONFIG_PATH", str(params))
     assert _node_param_overrides("writer") == {}
 
 
 def test_missing_file_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(tmp_path / "absent.json"))
+    monkeypatch.setenv("STUDIO_RUNTIME_CONFIG_PATH", str(tmp_path / "absent.json"))
     assert _node_param_overrides("writer") == {}
 
 
@@ -104,9 +104,9 @@ class _RecordingResolver:
 def test_invoke_passes_node_overrides_to_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    params = tmp_path / "node_llm_params.json"
+    params = tmp_path / "runtime_config.json"
     _write_params(params, {"writer": {"enabled": True, "thinking": True, "max_output_tokens": 999, "temperature": 0.9}})
-    monkeypatch.setenv("STUDIO_NODE_PARAMS_PATH", str(params))
+    monkeypatch.setenv("STUDIO_RUNTIME_CONFIG_PATH", str(params))
 
     resolver = _RecordingResolver()
     provider = _GatewayBackedLLMProvider(resolver)
@@ -123,7 +123,7 @@ def test_invoke_passes_node_overrides_to_resolve(
 def test_invoke_without_override_passes_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("STUDIO_NODE_PARAMS_PATH", raising=False)
+    monkeypatch.delenv("STUDIO_RUNTIME_CONFIG_PATH", raising=False)
     resolver = _RecordingResolver()
     provider = _GatewayBackedLLMProvider(resolver)
     provider.invoke(

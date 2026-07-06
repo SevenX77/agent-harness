@@ -192,11 +192,7 @@ def write_file_input_skill(root: Path) -> None:
         "reader",
         inputs={
             "title": {"type": "string"},
-            "body": {
-                "type": "string",
-                "source": "file",
-                "path": "inputs/body.md",
-            },
+            "body": {"type": "string"},
         },
         outputs={"answer": {"type": "string"}},
         required=["title", "body"],

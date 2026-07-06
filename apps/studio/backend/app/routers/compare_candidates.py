@@ -1,7 +1,7 @@
 """Node-level Compare LLMs candidate persistence endpoints (PR2).
 
 Candidates are model-only (model group + endpoint route) and are stored per
-skill+node under ``.workspace/compare_candidates.json``. Distinct from
+skill+node under ``.workspace/runtime_config.json``. Distinct from
 ``routers/compare.py`` (golden diff). The run-time side-run wiring that consumes
 these candidates lives with the run endpoints.
 """

@@ -47,7 +47,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ### F4. Edge Dot Blackboard Transition(双态:静态推断 + 运行期真实)
 
 - 机制: dot 有两态,同一个 dot 面板承载:
-  - **未跑前(静态推断)**:像节点 io 一样给出该边的黑板字段推断——"graph 跑到这个 dot 时,黑板上应该有哪些字段"。推导规则与编译期数据流校验同源:该边可用字段 = 根 `io.inputs` ∪ 下游节点全部上游祖先 phase 的 `io.outputs` ∪ 已声明的 `source: file` 注入字段;同名顺序覆盖(`allow_sequential_overwrite`)取最近祖先;并标出下游节点将按其 `io.inputs` 切走哪些字段。逐边不同,随拓扑/io 声明编辑即时更新;由前端按拓扑 + 节点 io 声明推导(engine `graph-exec` E4 已把 canvas 黑板可视化划给前端,呼应本 workflow REQ-2 黑板可视化连线)。
+  - **未跑前(静态推断)**:像节点 io 一样给出该边的黑板字段推断——"graph 跑到这个 dot 时,黑板上应该有哪些字段"。推导规则与编译期数据流校验同源:该边可用字段 = 根 `io.inputs` ∪ 下游节点全部上游祖先 phase 的 `io.outputs` ∪ runtime_config 中该 phase 的 import binding 注入字段 ∪ iterate/batch 注入字段;同名顺序覆盖(`allow_sequential_overwrite`)取最近祖先;并标出下游节点将按其 `io.inputs` 切走哪些字段。逐边不同,随拓扑/io 声明/runtime_config 编辑即时更新;由前端按拓扑 + 节点 io 声明 + runtime_config 推导(engine `graph-exec` E4 已把 canvas 黑板可视化划给前端,呼应本 workflow REQ-2 黑板可视化连线)。
   - **跑后(选中某次 run)**:clicking the dot shows real blackboard state and all operations between upstream end and downstream start——数据源 = engine 边操作事件族(`InputDispatchEvent`/`BlackboardReduceEvent`/`InputFileInjectedEvent`/`ArtifactSavedEvent`/`CompactionEvent`)的 `blackboard_snapshot` + `changed_keys` + `branch_index`,按 `from_phase`/`to_phase` 聚合(engine `02-observability` OB4/OB5)。
 - 决策: dot is the between-node state-machine transition point;**默认显示静态推断,选中某次 run 切换为该 run 的真实快照/操作记录**(PM 2026-07-02 扩充)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:76` defines dot semantics; `01_workflows/04_run-and-verify.md:109` keeps the PM wording;PM 2026-07-02:"我说的不是跑过一次后拿到trace,我说的是在没跑之前,也要像node的io一样,给出一个schema推断,这个dot在这里应该会有哪些字段。当然你说的这些(运行期快照/操作记录)都要加上"。

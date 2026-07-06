@@ -7,9 +7,18 @@ import { appSettingsEqual, DEFAULT_APP_SETTINGS, loadAppSettings, resetAppSettin
 import { getAppSettings, updateAppSettings } from '../api/client'
 import { toast } from 'sonner'
 
-vi.mock('../api/client', () => ({
+const apiClientMocks = vi.hoisted(() => ({
+  apiReady: true,
+  configChangedEvent: 'studio-api-client-config-changed',
   getAppSettings: vi.fn(),
   updateAppSettings: vi.fn(),
+}))
+
+vi.mock('../api/client', () => ({
+  apiClientConfigChangedEvent: apiClientMocks.configChangedEvent,
+  authenticatedApiReady: () => apiClientMocks.apiReady,
+  getAppSettings: apiClientMocks.getAppSettings,
+  updateAppSettings: apiClientMocks.updateAppSettings,
 }))
 
 vi.mock('sonner', () => ({
@@ -56,6 +65,7 @@ afterEach(() => {
 
 describe('useAppSettings helpers', () => {
   beforeEach(() => {
+    apiClientMocks.apiReady = true
     vi.mocked(getAppSettings).mockReset()
     vi.mocked(updateAppSettings).mockReset()
     vi.mocked(toast.error).mockReset()
@@ -170,6 +180,53 @@ describe('useAppSettings language field', () => {
   })
 })
 
+describe('useAppSettings API readiness', () => {
+  beforeEach(() => {
+    apiClientMocks.apiReady = true
+    vi.mocked(getAppSettings).mockReset()
+    vi.mocked(updateAppSettings).mockReset()
+    resetAppSettingsCacheForTests()
+  })
+
+  it('waits for authenticated API readiness before loading settings', async () => {
+    apiClientMocks.apiReady = false
+    vi.mocked(getAppSettings).mockResolvedValue(serverSettings)
+    const captured = { current: null as ReturnType<typeof useAppSettings> | null }
+
+    function Harness() {
+      const result = useAppSettings()
+      useEffect(() => {
+        captured.current = result
+      })
+      return null
+    }
+
+    const { root } = renderJsx(createElement(Harness))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).not.toHaveBeenCalled()
+    expect(captured.current?.isLoading).toBe(true)
+
+    apiClientMocks.apiReady = true
+    act(() => {
+      window.dispatchEvent(new Event(apiClientMocks.configChangedEvent))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).toHaveBeenCalledOnce()
+    expect(captured.current?.settings).toEqual(serverSettings)
+
+    act(() => root.unmount())
+  })
+})
+
 describe('useAppSettings remote model catalog flag', () => {
   it('defaults automatic remote model catalog reads to enabled', () => {
     expect(DEFAULT_APP_SETTINGS.remote_model_catalog_enabled).toBe(true)
@@ -192,6 +249,7 @@ describe('useAppSettings remote model catalog flag', () => {
 
 describe('useAppSettings autosave queue', () => {
   beforeEach(() => {
+    apiClientMocks.apiReady = true
     vi.mocked(getAppSettings).mockReset()
     vi.mocked(updateAppSettings).mockReset()
     vi.mocked(toast.error).mockReset()

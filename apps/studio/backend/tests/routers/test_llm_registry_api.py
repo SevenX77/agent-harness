@@ -159,6 +159,12 @@ def _seed(
     return active_credentials_path, roles_path
 
 
+def _registry_response_route(body, route_id: str = "openai-direct:gpt-5"):
+    assert "model_groups" in body
+    assert "canonical_groups" in body
+    return body["provider_routes"][route_id]
+
+
 def test_role_effective_runtime_settings_uses_gateway_model_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -5257,6 +5263,24 @@ def test_route_delete_conflicts_but_endpoint_delete_cascades_references(
     assert saved_roles.model_profiles["GPT5"].fallback_chain == []
 
 
+def test_route_delete_returns_canonical_registry_response_when_unreferenced(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _active_credentials_path, roles_path = _seed(tmp_path, monkeypatch)
+    save_roles_file(roles_path, RolesData(), known_route_ids={"openai-direct:gpt-5"})
+
+    response = client.delete("/api/llm/routes/openai-direct:gpt-5")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_routes"] == {}
+    assert body["model_groups"] == []
+    assert body["canonical_groups"] == []
+    assert body["setup_required"] is False
+
+
 def test_route_delete_conflicts_with_role_model_group_references(
     client: TestClient,
     tmp_path: Path,
@@ -5439,7 +5463,8 @@ def test_route_metadata_probe_and_profile_apply_conflict(
         json={"capabilities": ["tool_calling"]},
     )
     assert probe_response.status_code == 200
-    assert probe_response.json()["capabilities"]["tool_protocol"]["source"] == "probed_verified"
+    probed_route = _registry_response_route(probe_response.json())
+    assert probed_route["capabilities"]["tool_protocol"]["source"] == "probed_verified"
 
     update_response = client.put(
         "/api/llm/routes/openai-direct:gpt-5",
@@ -5452,8 +5477,9 @@ def test_route_metadata_probe_and_profile_apply_conflict(
         },
     )
     assert update_response.status_code == 200
-    assert update_response.json()["route_id"] == "openai-direct:gpt-5"
-    assert update_response.json()["display_name"] == "GPT-5 Updated"
+    updated_route = _registry_response_route(update_response.json())
+    assert updated_route["route_id"] == "openai-direct:gpt-5"
+    assert updated_route["display_name"] == "GPT-5 Updated"
 
     client.put(
         "/api/llm/roles/graph_agent",
@@ -5494,7 +5520,7 @@ def test_route_probe_accepts_runtime_setting_capability_metadata(
     )
 
     assert response.status_code == 200
-    capabilities = response.json()["capabilities"]
+    capabilities = _registry_response_route(response.json())["capabilities"]
     assert capabilities["temperature"]["source"] == "probed_verified"
     assert capabilities["temperature"]["value"] == {
         "supported": True,
@@ -5548,7 +5574,7 @@ def test_route_probe_force_true_calls_real_provider_probe(
             "model_id": "gpt-5",
         }
     ]
-    assert response.json()["status"] == "verified"
+    assert _registry_response_route(response.json())["status"] == "verified"
 
 
 def test_route_probe_force_true_skips_disabled_endpoint(
@@ -5581,10 +5607,10 @@ def test_route_probe_force_true_skips_disabled_endpoint(
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "disabled"
-    assert body["metadata"]["reason_code"] == "endpoint_disabled"
-    assert body["metadata"]["last_probe_message"] == llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE
+    route = _registry_response_route(response.json())
+    assert route["status"] == "disabled"
+    assert route["metadata"]["reason_code"] == "endpoint_disabled"
+    assert route["metadata"]["last_probe_message"] == llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE
 
 
 def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
@@ -5623,7 +5649,7 @@ def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
 
     assert response.status_code == 200
     assert gateway_calls == [("openai-direct", "openai-direct:gpt-5")]
-    assert response.json()["status"] == "verified"
+    assert _registry_response_route(response.json())["status"] == "verified"
 
 
 def test_route_probe_force_true_success_closes_active_route_circuit(
@@ -5648,7 +5674,7 @@ def test_route_probe_force_true_success_closes_active_route_circuit(
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
     assert response.status_code == 200
-    assert response.json()["status"] == "verified"
+    assert _registry_response_route(response.json())["status"] == "verified"
 
     from app.services.llm_health_store import SqliteLlmHealthStore
 
@@ -5709,8 +5735,7 @@ def test_route_probe_force_true_transient_failure_refreshes_route_circuit(
     assert active[0].reason_code == "timeout"
     assert active[0].message == "forced probe timed out"
 
-    registry = client.get("/api/llm/registry").json()
-    provider_model = registry["model_groups"][0]["provider_models"][0]
+    provider_model = response.json()["model_groups"][0]["provider_models"][0]
     assert provider_model["ui_state"] == "cooling_down"
     assert provider_model["retry_at"] == active[0].retry_at.isoformat()
 
@@ -5740,10 +5765,9 @@ def test_route_probe_force_true_hard_failure_projects_needs_setup(
     response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
 
     assert response.status_code == 200
-    assert response.json()["status"] == "failed"
+    assert _registry_response_route(response.json())["status"] == "failed"
 
-    registry = client.get("/api/llm/registry").json()
-    provider_model = registry["model_groups"][0]["provider_models"][0]
+    provider_model = response.json()["model_groups"][0]["provider_models"][0]
     assert provider_model["route_id"] == "openai-direct:gpt-5"
     assert provider_model["ui_state"] == "failed"
     assert provider_model["reason_code"] == "invalid_model"

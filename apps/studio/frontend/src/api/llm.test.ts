@@ -9,6 +9,7 @@ import {
   getRoles,
   deleteModelBundle,
   deleteRole,
+  deleteRoute,
   modelGroupsFromRegistry,
   probeRoute,
   probeRouteMultimodal,
@@ -2152,31 +2153,96 @@ describe('API Keys v4 registry adapter', () => {
 
   it('can force a route probe for Cooling Down Test Now', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    const probedRoute = { ...route, status: 'verified' as const }
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
-      return route
+      return registry({
+        provider_routes: { [route.route_id]: probedRoute },
+        model_groups: [
+          {
+            canonical_id: 'gpt-5',
+            display_name: 'GPT-5',
+            provider_models: [
+              {
+                route_id: route.route_id,
+                endpoint_id: endpoint.endpoint_id,
+                provider_label: 'OpenRouter Custom',
+                provider_kind: 'third_party',
+                provider_model_id: 'openai/gpt-5',
+                ui_state: 'ready',
+                ui_detail: null,
+                retry_at: null,
+                reason_code: null,
+                capability_state: 'known',
+                capabilities: route.capabilities,
+              },
+            ],
+            status_summary: {
+              ready: 1,
+              untested: 0,
+              cooling_down: 0,
+              historical_ready: 0,
+              failed: 0,
+              off: 0,
+            },
+            capability_summary: {
+              capability_known_count: 1,
+              thinking: 'unknown',
+              tools: 'unknown',
+              structured_output: 'unknown',
+              max_context_tokens: null,
+              max_output_tokens: null,
+            },
+          },
+        ],
+      })
     })
 
-    await probeRoute(route.route_id, { capabilities: [], force: true })
+    const updated = await probeRoute(route.route_id, { capabilities: [], force: true })
+    const cached = await getRegistry()
 
     expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
       'post /llm/routes/openrouter-custom%3Agpt-5/probe?force=true',
     ])
     expect(JSON.parse(String(seen[0].data))).toEqual({ capabilities: [] })
+    expect(updated).toEqual(probedRoute)
+    expect(cached.model_groups[0].status_summary.ready).toBe(1)
   })
 
   it('probes a route for multimodal (image) input via the probe-multimodal endpoint', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    const probedRoute = {
+      ...route,
+      capabilities: {
+        input_modalities: { value: ['text', 'image'], source: 'probed_verified' as const },
+      },
+    }
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
-      return route
+      return registry({ provider_routes: { [route.route_id]: probedRoute } })
     })
 
-    await probeRouteMultimodal(route.route_id)
+    const updated = await probeRouteMultimodal(route.route_id)
 
     expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
       'post /llm/routes/openrouter-custom%3Agpt-5/probe-multimodal',
     ])
+    expect(updated.capabilities.input_modalities?.source).toBe('probed_verified')
+  })
+
+  it('deletes a route by projecting the returned registry without a follow-up registry GET', async () => {
+    const seen: Array<{ method?: string; url?: string }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url })
+      return registry({ provider_routes: {}, model_groups: [] })
+    })
+
+    const credentials = await deleteRoute(route.route_id)
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'delete /llm/routes/openrouter-custom%3Agpt-5',
+    ])
+    expect(credentials.providers[0].available_models).toEqual([])
   })
 
   it('routeAcceptsImageVerified is true only for probe-verified image input', () => {

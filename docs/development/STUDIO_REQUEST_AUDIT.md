@@ -268,6 +268,218 @@ FRONTEND WS /ws/events
 FRONTEND WS /ws/runs/{run_id}
 ```
 
+## Machine-Readable Verdict Ledger
+
+The fenced block below is the per-request policy audit ledger. Format:
+
+`request key | status | guard | rationale`
+
+Statuses:
+
+- `ok`: audited and currently aligned with the request policy.
+- `partial`: known safe boundary exists, but some route-specific projection,
+  lifecycle, or write semantics still need audit.
+- `bad`: known violation that must be redesigned.
+- `internal`: backend-owned infrastructure route that is not a UI revalidation
+  trigger.
+- `review`: inventoried but not yet fully audited.
+
+Guard:
+
+- `shared`: covered by a shared architectural guard test, or should be.
+- `specific`: needs a route/component-specific behavior test before being marked
+  `ok`.
+- `none`: no UI-side request trigger guard applies.
+
+```studio-request-audit-verdicts
+BACKEND DELETE /api/llm/model-bundles/{bundle_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/llm/model-profiles/{model_profile_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/llm/registry/endpoints/{endpoint_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/llm/routes/{route_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/skills/{skill_id}/golden/{golden_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/skills/{skill_id}/runs/{run_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/_debug/value-error | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND GET /api/batch/{batch_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/fixed-roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/fixed-roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/providers/notable-models | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/registry | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/role-test-jobs/{job_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/roles/test-results | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/golden | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/golden/template | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/golden/{golden_id}/content | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/history | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/node-llm-params | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/releases | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/releases/{release_version} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id}/audit | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id}/compare | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id}/diff | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/subgraph | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/test_inputs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/system/community-catalog-config | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/system/truth-sources | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/system/truth-sources/{source_id}/content | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/templates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /health | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /api/copilot/roles/{role_name}/test-sdk | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/io/scan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/catalog/contribute | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/catalog/repository/ensure | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/catalog/share | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/catalog/sync | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/catalog/sync-verified | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/endpoints/{endpoint_id}/models/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/endpoints/{endpoint_id}/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/model-groups/test-jobs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/roles/{role_name}/apply-profile | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/roles/{role_name}/test | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/roles/{role_name}/test-jobs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/routes/{route_id}/probe | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/llm/routes/{route_id}/probe-multimodal | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/compile | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/copilot/dispatch | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/copilot/interrupt | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/copilot/judge | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/copilot/tool-approval | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/files/{file_path:path} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/fork | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/golden | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/golden/manual/plan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/golden/plan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/graph/serialize | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/io/import | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/lint | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/publish | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/releases/{release_version}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/revert | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs/batch-run | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs/predict | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/sync | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/terminal | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/test_inputs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/validate_input | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /engine/compile | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /engine/predict_artifact | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /engine/resume | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /engine/resume_validity | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /engine/run_artifact | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /gateway/decide_fallback | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /gateway/materialize_model_bundle | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /gateway/materialize_role | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /gateway/project_route_state | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /gateway/resolve_credential | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /gateway/resolve_routes | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND POST /shutdown | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND PUT /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/registry/endpoints | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/roles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/roles/{role_name} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/routes/{route_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
+BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect must not refresh broad truth.
+BACKEND WS /ws/runs/{run_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
+BACKEND WS /ws/terminal/{term_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
+FRONTEND DELETE /api/llm/model-bundles/{bundle_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND DELETE /api/llm/roles/{role_name} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND DELETE /api/llm/routes/{route_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND DELETE /api/skills/{skill_id}/runs/{run_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND GET /api/llm/fixed-roles | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/fixed-roles/{role_name} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/providers/notable-models | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/registry | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; write projection audit remains.
+FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/role-test-jobs/{job_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/roles | partial | shared | Cached read path is guarded against mount, focus, and reconnect refetch; write projection audit remains.
+FRONTEND GET /api/llm/roles/test-results | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/llm/roles/{role_name} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
+FRONTEND GET /api/skills/{skill_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
+FRONTEND GET /api/skills/{skill_id}/golden | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/golden/template | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/golden/{golden_id}/content | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/history | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/node-llm-params | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
+FRONTEND GET /api/skills/{skill_id}/releases | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/subgraph | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/system/community-catalog-config | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/system/truth-sources | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/system/truth-sources/{source_id}/content | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND POST /api/io/scan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/catalog/sync-verified | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/endpoints/{endpoint_id}/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/model-groups/test-jobs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/roles/{role_name}/test | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/roles/{role_name}/test-jobs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/routes/{route_id}/probe | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/compile | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/copilot/interrupt | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/copilot/judge | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/files/{file_path:path} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/golden | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/golden/manual/plan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/golden/plan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/graph/serialize | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/io/import | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/lint | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/publish | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/revert | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs/predict | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/sync | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/test_inputs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/validate_input | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/llm/registry/endpoints | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/llm/roles | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/settings | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
+FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys.
+FRONTEND WS /ws/runs/{run_id} | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
+```
+
 ## Audit Procedure
 
 1. Inventory requests with:

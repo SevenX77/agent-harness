@@ -2385,11 +2385,20 @@ async def get_model_profiles() -> dict[str, ModelProfile]:
     return _load_roles_or_empty().model_profiles
 
 
-@router.put("/model-profiles")
-async def put_model_profiles(profiles: dict[str, ModelProfile]) -> dict[str, ModelProfile]:
+@router.put("/model-profiles", response_model=RolesProjectionResponse)
+async def put_model_profiles(profiles: dict[str, ModelProfile]) -> RolesProjectionResponse:
     """Replace model profile set."""
     data = _load_roles_or_empty().model_copy(update={"model_profiles": profiles})
-    return _save_roles_with_active_routes(data).model_profiles
+    credentials = load_credentials()
+    saved = _save_roles_with_active_routes(data)
+    await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="replace_model_profiles",
+        message="Replaced LLM model profiles.",
+        changes={"model_profile_count": len(saved.model_profiles)},
+    )
+    return await _roles_projection_response(saved, credentials)
 
 
 @router.delete("/model-bundles/{bundle_id}", response_model=RolesProjectionResponse)
@@ -2430,14 +2439,15 @@ async def delete_model_bundle(bundle_id: str) -> RolesProjectionResponse:
     return await _roles_projection_response(saved, credentials)
 
 
-@router.delete("/model-profiles/{model_profile_id}")
-async def delete_model_profile(model_profile_id: str) -> RolesData:
+@router.delete("/model-profiles/{model_profile_id}", response_model=RolesProjectionResponse)
+async def delete_model_profile(model_profile_id: str) -> RolesProjectionResponse:
     """Delete profile and mark roles that still show its source snapshot."""
     data = _load_roles_or_empty()
     profiles = dict(data.model_profiles)
     removed = profiles.pop(model_profile_id, None)
     if removed is None:
         raise HTTPException(status_code=404, detail=f"Unknown model profile: {model_profile_id}")
+    credentials = load_credentials()
     roles = {}
     for role_name, role in data.roles.items():
         if role.source_profile_id == model_profile_id:
@@ -2453,7 +2463,18 @@ async def delete_model_profile(model_profile_id: str) -> RolesData:
             roles[role_name] = role.model_copy(update={"source_profile_id": None, "source_profile_snapshot": snapshot})
         else:
             roles[role_name] = role
-    return _save_roles_with_active_routes(data.model_copy(update={"model_profiles": profiles, "roles": roles}))
+    saved = _save_roles_with_active_routes(data.model_copy(update={"model_profiles": profiles, "roles": roles}))
+    await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="delete_model_profile",
+        message="Deleted one LLM model profile.",
+        changes={
+            "model_profile_id": model_profile_id,
+            "remaining_model_profile_count": len(saved.model_profiles),
+        },
+    )
+    return await _roles_projection_response(saved, credentials)
 
 
 @router.post("/roles/{role_name}/apply-profile", response_model=RoleEntry)

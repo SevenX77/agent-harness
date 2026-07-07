@@ -317,12 +317,12 @@ BACKEND DELETE /api/llm/model-profiles/{model_profile_id} | ok | specific | Expl
 BACKEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit endpoint delete command; backend returns the joined canonical RegistryResponse after cascading route references.
 BACKEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete command; backend rejects fixed roles, emits roles_changed, and returns a roles_data + registry projection snapshot.
 BACKEND DELETE /api/llm/routes/{route_id} | ok | specific | Explicit route delete command; backend rejects referenced routes and otherwise returns the joined canonical RegistryResponse.
-BACKEND DELETE /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND DELETE /api/skills/{skill_id}/golden/{golden_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND DELETE /api/skills/{skill_id}/runs/{run_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/skills/{skill_id} | ok | specific | Explicit skill delete command; service tests cover index removal/path safety and it is not a lifecycle refresh path.
+BACKEND DELETE /api/skills/{skill_id}/golden/{golden_id} | ok | specific | Explicit golden baseline delete command; guarded by browser-fallback/native-writer boundary tests and returns no broad truth refresh.
+BACKEND DELETE /api/skills/{skill_id}/runs/{run_id} | ok | specific | Explicit Timeline delete command; route deletes one run id and the frontend projects that deletion without refetching run history.
+BACKEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | ok | specific | Explicit Test Inputs delete command; route removes one input id and frontend projection clears only the affected cached list/selection.
 BACKEND GET /api/_debug/value-error | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
-BACKEND GET /api/batch/{batch_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/batch/{batch_id} | ok | specific | Scoped batch-run status read keyed by batch_id; allowed as job status polling and never refreshes broad skill/settings truth.
 BACKEND GET /api/llm/fixed-roles | ok | specific | Immutable fixed-role metadata projection; route has response tests and emits no revalidation event.
 BACKEND GET /api/llm/fixed-roles/{role_name} | ok | specific | Immutable fixed-role recommendation projection; route has response/404 tests and emits no revalidation event.
 BACKEND GET /api/llm/model-profiles | ok | specific | Scoped model-profile projection read; backend test covers direct projection and it emits no broad revalidation event.
@@ -334,37 +334,37 @@ BACKEND GET /api/llm/roles | ok | specific | Aggregate roles cold-load projectio
 BACKEND GET /api/llm/roles/test-results | ok | specific | Persisted last-known role-test result projection; backend read is scoped, emits no revalidation event, and tests cover empty/result re-projection.
 BACKEND GET /api/llm/roles/{role_name} | ok | specific | Scoped backend role read; frontend no longer exposes a caller, and backend tests cover materialized single-role response behavior.
 BACKEND GET /api/settings | ok | specific | Scoped app-settings read; backend tests cover effective defaults and persisted snapshot roundtrip, and the route emits no revalidation event.
-BACKEND GET /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id} | ok | shared | Canonical SkillDetail projection for one skill; consumers cold-load by skill id or revalidate from precise skill/file events.
 BACKEND GET /api/skills/{skill_id}/compare-candidates | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
-BACKEND GET /api/skills/{skill_id}/golden | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/golden/template | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/golden/{golden_id}/content | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/history | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/golden | ok | shared | Per-skill golden metadata projection; used for cold-load node badges and explicit golden flows, not focus/reconnect refresh.
+BACKEND GET /api/skills/{skill_id}/golden/template | ok | specific | Explicit manual-golden template read for one node; no content is hydrated unless the user starts that create flow.
+BACKEND GET /api/skills/{skill_id}/golden/{golden_id}/content | ok | specific | Explicit read of one golden content ref; list responses do not hydrate content implicitly.
+BACKEND GET /api/skills/{skill_id}/history | ok | shared | Local history list read scoped to a skill; frontend owns it in the History UI and uses precise run-ended/revert revalidation.
 BACKEND GET /api/skills/{skill_id}/node-llm-params | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
-BACKEND GET /api/skills/{skill_id}/releases | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/releases/{release_version} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/releases | ok | specific | Release-management read scoped to one skill; no production UI lifecycle subscriber polls this route.
+BACKEND GET /api/skills/{skill_id}/releases/{release_version} | ok | specific | Explicit release manifest read scoped by release_version; not a broad refresh trigger.
 BACKEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is server-owned truth; reads are cold load or precise import-file/runtime-config revalidation.
-BACKEND GET /api/skills/{skill_id}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/runs/{run_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/runs/{run_id}/audit | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/runs/{run_id}/compare | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/runs/{run_id}/diff | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/subgraph | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/test_inputs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/system/community-catalog-config | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/system/truth-sources | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/system/truth-sources/{source_id}/content | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/runs | ok | shared | Run-history list read scoped to one skill; writes return/project RunMetadata and do not require write-after-read list refresh.
+BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | ok | specific | Scoped compare-group read after an explicit compare run; polling/refresh stays keyed to compare_group_id.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run detail read for trace/run-ended flows; it never refreshes the run list or skill detail.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id}/audit | ok | specific | Explicit audit detail read for one run id; route is observational and emits no domain refresh.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit Golden Compare read for one run/baseline pair; response is scoped compare data only.
+BACKEND GET /api/skills/{skill_id}/runs/{run_id}/diff | ok | specific | Explicit diff read alias for one run/baseline pair; response is scoped compare data only.
+BACKEND GET /api/skills/{skill_id}/subgraph | ok | specific | Explicit child-subgraph topology resolution by path; normal node selection does not invoke this route.
+BACKEND GET /api/skills/{skill_id}/test_inputs | ok | shared | Test input metadata list for the I/O panel; frontend uses Studio truth policy and projects create/delete changes.
+BACKEND GET /api/skills/{skill_id}/test_inputs/{input_id} | ok | specific | Explicit Predict/Run preflight reads one selected test input content; selection alone does not hydrate content.
+BACKEND GET /api/system/community-catalog-config | ok | shared | Settings General metadata read; client cache dedupes and it emits no revalidation event.
+BACKEND GET /api/system/truth-sources | ok | shared | Settings General truth-source metadata read; client cache dedupes and it emits no revalidation event.
+BACKEND GET /api/system/truth-sources/{source_id}/content | ok | specific | Explicit source preview fallback read keyed by source_id; source list loading does not hydrate content.
 BACKEND GET /api/templates | ok | specific | Static built-in template projection; backend test covers canonical template ids and verifies the read emits no revalidation event.
 BACKEND GET /health | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
-BACKEND POST /api/copilot/roles/{role_name}/test-sdk | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/io/scan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/catalog/contribute | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/catalog/repository/ensure | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/catalog/share | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/catalog/sync | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/llm/catalog/sync-verified | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/copilot/roles/{role_name}/test-sdk | ok | specific | Explicit Copilot role SDK test command; returns scoped diagnostics/job state and does not mutate broad registry truth.
+BACKEND POST /api/io/scan | ok | specific | Explicit I/O import scan for a chosen file/folder; scanning is not tied to panel mount or selection.
+BACKEND POST /api/llm/catalog/contribute | ok | specific | Explicit community-catalog contribution command; repository/catalog side effects are command-scoped and do not refresh runtime roles/settings.
+BACKEND POST /api/llm/catalog/repository/ensure | ok | specific | Explicit catalog repository setup command; result is catalog-scoped setup metadata.
+BACKEND POST /api/llm/catalog/share | ok | specific | Explicit share command for selected local catalog content; no lifecycle caller remains.
+BACKEND POST /api/llm/catalog/sync | ok | specific | Explicit remote catalog sync command; current Settings lifecycle auto-sync path is removed.
+BACKEND POST /api/llm/catalog/sync-verified | ok | specific | Explicit verified-catalog sync command; controller tests guard that Settings load does not call it automatically.
 BACKEND POST /api/llm/endpoints/{endpoint_id}/models/test | ok | specific | Explicit manual model probe command; backend returns EndpointModelTestResponse with canonical registry projection and scoped results.
 BACKEND POST /api/llm/endpoints/{endpoint_id}/test | ok | specific | Explicit endpoint Test command; backend returns EndpointTestResponse with canonical registry projection and scoped endpoint metadata.
 BACKEND POST /api/llm/model-bundles/{bundle_id}/test-jobs | ok | specific | Explicit bundle Test command; returns a scoped job id and does not mutate broad registry/roles truth.
@@ -374,34 +374,34 @@ BACKEND POST /api/llm/roles/{role_name}/test | ok | specific | Explicit role tes
 BACKEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role Test command; returns a scoped job id and progress is read only through /role-test-jobs/{job_id}.
 BACKEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
 BACKEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
-BACKEND POST /api/skills | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills | ok | specific | Explicit create/import skill command; returns one SkillSummary and does not act as a background refresh.
 BACKEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; success returns CompileSuccess with canonical SkillDetail detail built from the same compile/lint result, and failure returns structured CompileFailure.errors.
-BACKEND POST /api/skills/{skill_id}/copilot/dispatch | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/copilot/interrupt | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/copilot/judge | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/copilot/tool-approval | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/files/{file_path:path} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/fork | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/golden | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/golden/manual/plan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/golden/plan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/graph/serialize | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/io/import | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/lint | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/publish | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/releases/{release_version}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/revert | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs/batch-run | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs/predict | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/sync | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/terminal | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/test_inputs | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/validate_input | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/copilot/dispatch | ok | specific | Unimplemented dispatch scaffold returns 501 and does not store view context or trigger revalidation.
+BACKEND POST /api/skills/{skill_id}/copilot/interrupt | ok | specific | Explicit stop command for one skill's active Copilot stream; idempotent when no stream is active.
+BACKEND POST /api/skills/{skill_id}/copilot/judge | ok | specific | Explicit judge-context preparation for one compare result; returns refs only and does not start a background sync.
+BACKEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Explicit approval resolution for one held Copilot tool_use_id; no broad truth cache is invalidated.
+BACKEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser fallback for explicit file save with expected-hash semantics; Tauri native-fs remains the normal sole writer.
+BACKEND POST /api/skills/{skill_id}/fork | ok | specific | Explicit fork command; returns the new SkillSummary and does not re-read all skills as a side effect.
+BACKEND POST /api/skills/{skill_id}/golden | ok | specific | Browser fallback for explicit Promote to Golden; native-fs plan path is preferred in desktop and tests guard fallback header use.
+BACKEND POST /api/skills/{skill_id}/golden/manual/plan | ok | specific | Explicit manual-golden save planner; backend returns a file plan and writes nothing itself.
+BACKEND POST /api/skills/{skill_id}/golden/plan | ok | specific | Explicit promote-to-golden planner for native-fs; backend returns planned files plus baseline projection.
+BACKEND POST /api/skills/{skill_id}/graph/serialize | ok | specific | Explicit canvas topology save; response is canonical hash/update metadata for the edited GRAPH.md.
+BACKEND POST /api/skills/{skill_id}/io/import | ok | specific | Explicit import command for selected I/O material; not run from panel visibility or focus.
+BACKEND POST /api/skills/{skill_id}/lint | ok | specific | Explicit/debounced diagnostics SSOT endpoint; caller chooses disk or changed-markdown body and receives the full lint result.
+BACKEND POST /api/skills/{skill_id}/publish | ok | specific | Explicit publish command; productization tests cover package payload/native-writer boundary and remote-sync skip states.
+BACKEND POST /api/skills/{skill_id}/releases/{release_version}/runs | ok | specific | Explicit run-from-release command; returns RunMetadata for the launched release run.
+BACKEND POST /api/skills/{skill_id}/revert | ok | specific | Explicit Local History revert command; returns canonical SkillDetail and frontend projects it without a broad follow-up read.
+BACKEND POST /api/skills/{skill_id}/runs | ok | specific | Explicit Run command; returns RunMetadata and does not require a run-list refetch.
+BACKEND POST /api/skills/{skill_id}/runs/batch-run | ok | specific | Explicit batch run over selected test inputs; subsequent status reads are scoped to batch_id.
+BACKEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict command; returns diagnostic export used for local projection, not broad refresh.
+BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | ok | specific | Explicit node-compare command keyed by base_run_id; returns compare group metadata.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit compare command alias for one run id; response is scoped compare result.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume | ok | specific | Explicit resume command; returns RunMetadata for the resumed run and emits scoped run stream events.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | ok | specific | Scoped resume-validity/dirty-downstream probe for one run and resume target; not a broad truth refresh.
+BACKEND POST /api/skills/{skill_id}/sync | ok | specific | Explicit collaboration sync command; no background sync runs on focus/reconnect.
+BACKEND POST /api/skills/{skill_id}/terminal | ok | specific | Explicit terminal session creation; returns one ws_url and subsequent traffic is isolated to that terminal id.
+BACKEND POST /api/skills/{skill_id}/test_inputs | ok | specific | Browser fallback for explicit Test Input create; desktop path writes through native-fs and frontend projects returned metadata.
+BACKEND POST /api/skills/{skill_id}/validate_input | ok | specific | Explicit validation command for a submitted payload; returns scoped validation diagnostics.
 BACKEND POST /engine/compile | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND POST /engine/predict_artifact | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND POST /engine/resume | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
@@ -420,14 +420,14 @@ BACKEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; back
 BACKEND PUT /api/llm/roles/{role_name} | ok | specific | Explicit scoped role replace used by backend/materializer tests; backend writes roles truth, emits roles_changed, and returns the materialized role.
 BACKEND PUT /api/llm/routes/{route_id} | ok | specific | Explicit route metadata update command; backend returns the joined canonical RegistryResponse.
 BACKEND PUT /api/settings | ok | specific | Explicit app-settings save command; unchanged snapshots are side-effect-free, changed snapshots return the canonical AppSettings response and publish a precise settings_changed event.
-BACKEND PUT /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/skills/{skill_id} | ok | specific | Explicit skill metadata update; returns canonical SkillDetail for the edited skill.
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Runtime artifact writes are explicit output-config saves and return the canonical runtime_config snapshot.
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | specific | Explicit Properties compare-candidates save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=compare_candidates, node_id).
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=node_llm_params, node_id).
-BACKEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
+BACKEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; future @mentions must travel in this message payload, not via background context POST.
 BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect must not refresh broad truth.
-BACKEND WS /ws/runs/{run_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
-BACKEND WS /ws/terminal/{term_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
+BACKEND WS /ws/runs/{run_id} | ok | specific | Scoped run event stream keyed by run_id; it observes one execution and does not refresh registry/settings truth.
+BACKEND WS /ws/terminal/{term_id} | ok | specific | Scoped terminal stream keyed by term_id; lifecycle is tied to an explicit terminal session.
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id} | ok | specific | Explicit model-bundle delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit provider delete command; client projects the returned canonical registry snapshot without a follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.

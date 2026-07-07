@@ -131,6 +131,12 @@ const mocks = vi.hoisted(() => ({
   settingsPageUnmounts: 0,
   settingsControllerHookCalls: 0,
   settingsController: { source: 'app-level-settings-controller' } as const,
+  studioEventStreamSubscribers: [] as Array<{
+    current: {
+      onSkillChanged?: (event: { skillId: string; path: string }) => void
+      onRuntimeConfigChanged?: (event: { skillId: string; dataset: string; nodeId?: string }) => void
+    }
+  }>,
 }))
 
 const toastMocks = vi.hoisted(() => ({
@@ -176,6 +182,31 @@ vi.mock('@/hooks/useCopilot', () => ({
     return mocks.copilotController
   },
 }))
+
+vi.mock('@/hooks/useStudioEventStream', async () => {
+  const React = await import('react')
+  return {
+    useStudioEventStream: (
+      callbacks: {
+        onSkillChanged?: (event: { skillId: string; path: string }) => void
+        onRuntimeConfigChanged?: (event: { skillId: string; dataset: string; nodeId?: string }) => void
+      },
+      options: { enabled?: boolean } = {},
+    ) => {
+      const callbacksRef = React.useRef(callbacks)
+      callbacksRef.current = callbacks
+      const enabled = options.enabled ?? true
+      React.useEffect(() => {
+        if (!enabled) return undefined
+        mocks.studioEventStreamSubscribers.push(callbacksRef)
+        return () => {
+          mocks.studioEventStreamSubscribers = mocks.studioEventStreamSubscribers.filter((item) => item !== callbacksRef)
+        }
+      }, [callbacksRef, enabled])
+      return { connectionLost: false }
+    },
+  }
+})
 
 vi.mock('@/hooks/useDebouncedLint', () => ({
   lintStatusEvent: 'studio-lint-status-changed',
@@ -427,6 +458,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       },
     )
     mocks.webSockets = []
+    mocks.studioEventStreamSubscribers = []
     mocks.runStreamEvents = []
     mocks.getRunDetail.mockReset()
     mocks.projectRunHistory.mockReset()
@@ -969,6 +1001,49 @@ describe('Workspace WS-1 local writer contracts', () => {
     }))
   })
 
+  it('uses the shared studio event stream instead of opening a workspace-local events socket', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      expect(mocks.studioEventStreamSubscribers).toHaveLength(1)
+      expect(mocks.webSockets).toHaveLength(0)
+
+      act(() => {
+        mocks.graphCanvasProps?.onNodeFileOpen?.('GRAPH.md')
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      act(() => {
+        mocks.lazyMonacoProps.at(-1)?.onChange('local dirty graph\n')
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(mocks.studioEventStreamSubscribers).toHaveLength(1)
+      expect(mocks.webSockets).toHaveLength(0)
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
   it('keeps a dirty open editor buffer when a same-file skill_changed event arrives', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -1011,12 +1086,9 @@ describe('Workspace WS-1 local writer contracts', () => {
       })
 
       await act(async () => {
-        mocks.webSockets.at(-1)?.onmessage?.({
-          data: JSON.stringify({
-            type: 'skill_changed',
-            skill_id: 'writer-smoke',
-            path: 'GRAPH.md',
-          }),
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'GRAPH.md',
         })
         await Promise.resolve()
         await Promise.resolve()
@@ -1057,13 +1129,10 @@ describe('Workspace WS-1 local writer contracts', () => {
       mocks.getSkillDetail.mockClear()
 
       await act(async () => {
-        mocks.webSockets.at(-1)?.onmessage?.({
-          data: JSON.stringify({
-            type: 'runtime_config_changed',
-            skill_id: 'writer-smoke',
-            dataset: 'node_llm_params',
-            node_id: 'setup',
-          }),
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onRuntimeConfigChanged?.({
+          skillId: 'writer-smoke',
+          dataset: 'node_llm_params',
+          nodeId: 'setup',
         })
         await Promise.resolve()
         await Promise.resolve()

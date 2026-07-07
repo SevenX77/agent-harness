@@ -15,6 +15,10 @@ export interface StudioEventStreamCallbacks {
   onRolesChanged: () => void
   /** An endpoint generation probe reported its currently active model atoms. */
   onLlmProbeActive?: (event: { endpointId: string; activeModelIds: string[] }) => void
+  /** A skill file changed after the backend/native watcher observed a real file mutation. */
+  onSkillChanged?: (event: { skillId: string; path: string }) => void
+  /** A runtime-config dataset changed after the backend/native watcher observed a real mutation. */
+  onRuntimeConfigChanged?: (event: { skillId: string; dataset: string; nodeId?: string }) => void
 }
 
 const CONNECTION_LOST_TICK_MS = 1_000
@@ -108,6 +112,35 @@ function dispatchEvent(event: { type?: string } & Record<string, unknown>): void
     console.info("phase=studio-event-stream action=dispatch type=roles_changed")
     for (const subscriber of subscribers.values()) {
       subscriber.callbacksRef.current.onRolesChanged()
+    }
+    return
+  }
+  if (event.type === "skill_changed") {
+    const skillId = typeof event.skill_id === "string" ? event.skill_id : ""
+    const path = typeof event.path === "string" ? event.path : ""
+    if (!skillId || !path) return
+    console.info(
+      "phase=studio-event-stream action=dispatch type=skill_changed skill_id=%s path=%s",
+      skillId,
+      path,
+    )
+    for (const subscriber of subscribers.values()) {
+      subscriber.callbacksRef.current.onSkillChanged?.({ skillId, path })
+    }
+    return
+  }
+  if (event.type === "runtime_config_changed") {
+    const skillId = typeof event.skill_id === "string" ? event.skill_id : ""
+    const dataset = typeof event.dataset === "string" ? event.dataset : ""
+    const nodeId = typeof event.node_id === "string" ? event.node_id : undefined
+    if (!skillId || !dataset) return
+    console.info(
+      "phase=studio-event-stream action=dispatch type=runtime_config_changed skill_id=%s dataset=%s",
+      skillId,
+      dataset,
+    )
+    for (const subscriber of subscribers.values()) {
+      subscriber.callbacksRef.current.onRuntimeConfigChanged?.({ skillId, dataset, nodeId })
     }
     return
   }

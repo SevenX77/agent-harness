@@ -357,3 +357,45 @@ describe("useStudioEventStream — R-F13 give-up after 5 consecutive 4401 closes
     expect(toastMock.error).not.toHaveBeenCalled()
   })
 })
+
+describe("useStudioEventStream - workspace domain events", () => {
+  it("dispatches skill and runtime-config events through the shared socket", () => {
+    const onSkillChanged = vi.fn()
+    const onRuntimeConfigChanged = vi.fn()
+    const callbacks = {
+      ...noopCallbacks,
+      onSkillChanged,
+      onRuntimeConfigChanged,
+    }
+
+    mountTwoHooks(callbacks, noopCallbacks)
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      FakeWebSocket.instances[0].acceptOpen()
+      FakeWebSocket.instances[0].receiveJson({
+        type: "skill_changed",
+        skill_id: "writer-smoke",
+        path: "GRAPH.md",
+      })
+      FakeWebSocket.instances[0].receiveJson({
+        type: "runtime_config_changed",
+        skill_id: "writer-smoke",
+        dataset: "node_llm_params",
+        node_id: "setup",
+      })
+    })
+
+    expect(onSkillChanged).toHaveBeenCalledWith({
+      skillId: "writer-smoke",
+      path: "GRAPH.md",
+    })
+    expect(onRuntimeConfigChanged).toHaveBeenCalledWith({
+      skillId: "writer-smoke",
+      dataset: "node_llm_params",
+      nodeId: "setup",
+    })
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+})

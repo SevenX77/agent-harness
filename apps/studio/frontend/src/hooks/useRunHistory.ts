@@ -74,7 +74,7 @@ export function useLocalHistory(skillId: string | null) {
     const detail = await revertSkill(skillId, sha)
     await Promise.all([
       mutate(undefined, { revalidate: true }),
-      mutateGlobal(`/skills/${skillId}`, detail, { revalidate: true }),
+      mutateGlobal(`/skills/${skillId}`, detail, { revalidate: false }),
     ])
     return detail
   }, [mutate, mutateGlobal, skillId])

@@ -355,7 +355,7 @@ BACKEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | specific | 
 BACKEND GET /api/system/community-catalog-config | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/system/truth-sources | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/system/truth-sources/{source_id}/content | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/templates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/templates | ok | specific | Static built-in template projection; backend test covers canonical template ids and verifies the read emits no revalidation event.
 BACKEND GET /health | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND POST /api/copilot/roles/{role_name}/test-sdk | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/io/scan | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.

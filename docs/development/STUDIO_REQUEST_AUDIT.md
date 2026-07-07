@@ -443,7 +443,7 @@ FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling s
 FRONTEND GET /api/llm/roles | ok | shared | Cached read path is guarded against mount, focus, and reconnect refetch; roles response carries registry projection data, so cold loads do not perform a second broad registry read.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
-FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert and manual Compile project returned SkillDetail snapshots without follow-up GET. File-event detail reads now flow only from precise skill_changed events on the shared event hub. Source-write refresh paths still need route-specific audit.
+FRONTEND GET /api/skills/{skill_id} | ok | shared | Shared per-skill SkillDetail cold load uses Studio truth SWR policy; manual Compile, Local History revert, and source-write/file events project canonical snapshots or revalidate only the exact skill key.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/golden | ok | shared | Workspace cold-loads per-skill golden metadata once for canvas node badges through Studio truth SWR policy; per-node promote projects the returned baseline into the loaded list without broad refresh.
 FRONTEND GET /api/skills/{skill_id}/golden/template | ok | specific | Explicit manual-golden create action for one agent node; not triggered by panel open, node selection, focus, timer, or reconnect.
@@ -501,9 +501,9 @@ FRONTEND PUT /api/settings | ok | specific | Settings autosave only follows expl
 FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Output artifact config save is an explicit command and projects the returned runtime_config snapshot.
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | specific | Explicit Properties compare-candidates autosave for one node; client updates the skill-scoped cache entry and clears in-flight stale reads.
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params autosave for one node; debounced saves project the returned node config without broad refetch.
-FRONTEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
+FRONTEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; it opens for the active skill conversation and future @mentions must travel in the message payload, with no background context POST.
 FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys. Consumers must share the singleton hub; Workspace file/runtime watchers are covered and must not create a workspace-local events socket.
-FRONTEND WS /ws/runs/{run_id} | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
+FRONTEND WS /ws/runs/{run_id} | ok | specific | Scoped run event stream keyed by run_id; it observes a single execution and does not refresh registry/settings/skill-list truth.
 ```
 
 ## Audit Procedure

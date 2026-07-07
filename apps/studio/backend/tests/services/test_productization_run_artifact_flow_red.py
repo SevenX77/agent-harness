@@ -22,6 +22,30 @@ BACKEND_ROOT = next(
 )
 
 
+def _minimal_skill_detail() -> dict[str, Any]:
+    return {
+        "manifest": {
+            "schema_version": "v0.3.0",
+            "name": "demo",
+            "description": "",
+            "io": {
+                "inputs": {"type": "object", "properties": {}},
+                "outputs": {"type": "object", "properties": {}},
+            },
+            "phases": ["draft"],
+        },
+        "graph_topology": [],
+        "node_schema_v21": {},
+        "io_schema": {},
+        "file_paths": {},
+        "files": {},
+        "has_golden": False,
+        "latest_run_metadata": None,
+        "lint_result": {"status": "passed", "errors": [], "phases_summary": []},
+        "manifest_errors": [],
+    }
+
+
 def _register_demo_skill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, skill_dir: Path) -> None:
     from app.core import config
 
@@ -100,10 +124,12 @@ def test_compile_success_schema_exposes_artifact_identity_and_execution_fingerpr
         },
         source_map_ref="file:///tmp/source_map.json",
         execution_fingerprint=f"sha256:{'2' * 64}",
+        detail=_minimal_skill_detail(),
     )
 
     assert response.artifact_ref["source_map_ref"] == "file:///tmp/source_map.json"
     assert response.execution_fingerprint == f"sha256:{'2' * 64}"
+    assert response.detail.lint_result is not None
 
 
 def test_compile_skill_for_studio_returns_artifact_identity_from_engine_adapter(
@@ -140,12 +166,18 @@ def test_compile_skill_for_studio_returns_artifact_identity_from_engine_adapter(
                 "version": None,
             }
 
+    async def fake_detail(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        return _minimal_skill_detail()
+
     monkeypatch.setattr(skills_module, "resolve_skill_dir_async", fake_resolve_skill_dir_async)
+    monkeypatch.setattr(skills_module, "_detail_from_manifest_async", fake_detail)
     monkeypatch.setattr(
         skills_module,
         "compile_skill",
         lambda *_args, **_kwargs: SimpleNamespace(
             manifest=SimpleNamespace(phases=["draft"], name="demo"),
+            nodes=[],
+            raw={},
         ),
     )
     monkeypatch.setattr(skills_module, "build_engine_adapter", lambda: FakeAdapter(), raising=False)

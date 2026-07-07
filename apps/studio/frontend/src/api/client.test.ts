@@ -232,6 +232,22 @@ describe('api client auth token', () => {
   })
 
   it('test_compile_skill_posts_to_compile_endpoint', async () => {
+    const detail = {
+      manifest: { name: 'text-segmentation' },
+      graph_topology: [],
+      node_schema_v21: {},
+      io_schema: {},
+      file_paths: {},
+      files: {},
+      has_golden: false,
+      latest_run_metadata: null,
+      lint_result: {
+        status: 'passed',
+        errors: [],
+        phases_summary: [{ name: 'setup', tier: 'logic', has_validator: false }],
+      },
+      manifest_errors: [],
+    }
     api.defaults.adapter = async (config): Promise<AxiosResponse> => {
       expect(config.method).toBe('post')
       expect(config.url).toBe('/skills/text-segmentation/compile')
@@ -251,6 +267,7 @@ describe('api client auth token', () => {
           },
           source_map_ref: 'file:///tmp/source_map.json',
           execution_fingerprint: `sha256:${'2'.repeat(64)}`,
+          detail,
         },
         status: 200,
         statusText: 'OK',
@@ -274,6 +291,7 @@ describe('api client auth token', () => {
       },
       source_map_ref: 'file:///tmp/source_map.json',
       execution_fingerprint: `sha256:${'2'.repeat(64)}`,
+      detail,
     })
   })
 

@@ -125,6 +125,7 @@ class CompileSuccess(BaseModel):
     artifact_ref: dict[str, Any]
     source_map_ref: str
     execution_fingerprint: str
+    detail: SkillDetail
 
 
 class CompileFailure(BaseModel):

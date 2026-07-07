@@ -28,6 +28,11 @@ def test_compile_success_returns_manifest_summary(
     assert body["artifact_ref"]["content_hash"].startswith("sha256:")
     assert body["artifact_ref"]["source_map_ref"] == body["source_map_ref"]
     assert body["artifact_ref"]["execution_fingerprint"] == body["execution_fingerprint"]
+    assert body["detail"]["manifest"]["name"] == "text-segmentation"
+    assert body["detail"]["lint_result"]["status"] == "passed"
+    assert body["detail"]["lint_result"]["phases_summary"] == [
+        {"name": "setup", "tier": "logic", "has_validator": False}
+    ]
 
 
 def test_compile_failure_returns_structured_errors(

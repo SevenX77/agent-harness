@@ -33,6 +33,12 @@ node badges, field tooltips, editor markers, and the drawer. Any error that can
 be proven before predict/run belongs on this compile/lint path, not on
 predict/run startup.
 
+2026-07-07 request-policy clarification: successful manual Compile returns
+`CompileSuccess.detail`, a canonical `SkillDetail` projection built from the
+same compiled artifact and lint/preflight result. The frontend projects that
+detail into the shared skill-detail cache with `revalidate: false`; it must not
+follow a successful Compile with a broad `GET /api/skills/{id}`.
+
 ## 2. 数据流 / 机制（设计细节）
 ### F1. Realtime Lint
 

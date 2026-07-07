@@ -503,6 +503,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       },
       source_map_ref: 'file:///tmp/source_map.json',
       execution_fingerprint: `sha256:${'2'.repeat(64)}`,
+      detail: skillDetail('writer-smoke'),
     })
     mocks.getCompareGroup.mockReset()
     mocks.getCompareGroup.mockResolvedValue({ compare_group_id: 'group-1', runs: [] })
@@ -630,6 +631,42 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(toastMocks.success).toHaveBeenCalledWith(expect.stringContaining('writer-smoke'))
     expect(toastMocks.success).toHaveBeenCalledWith(expect.stringContaining('sha256:11111111'))
     expect(toastMocks.success).toHaveBeenCalledWith(expect.stringContaining('fp sha256:22222222'))
+  })
+
+  it('projects compile success detail without broad skill-detail refetch', async () => {
+    const compiledDetail = {
+      ...skillDetail('writer-smoke'),
+      lint_result: {
+        status: 'passed' as const,
+        errors: [],
+        phases_summary: [{ name: 'setup', tier: 'logic', has_validator: false }],
+      },
+    }
+    mocks.compileSkill.mockResolvedValueOnce({
+      skill_id: 'writer-smoke',
+      status: 'ok',
+      phase_count: 2,
+      manifest_name: 'writer-smoke',
+      artifact_ref: {
+        artifact_id: 'writer-smoke',
+        content_hash: `sha256:${'1'.repeat(64)}`,
+        store: 'ephemeral',
+        version: null,
+        manifest_ref: 'file:///tmp/manifest.json',
+        source_map_ref: 'file:///tmp/source_map.json',
+      },
+      source_map_ref: 'file:///tmp/source_map.json',
+      execution_fingerprint: `sha256:${'2'.repeat(64)}`,
+      detail: compiledDetail,
+    })
+
+    renderWorkspace()
+
+    await mocks.centerActionBarProps?.onCompile?.()
+
+    expect(mocks.mutateSkillDetail.mock.calls).toEqual([
+      [compiledDetail, { revalidate: false }],
+    ])
   })
 
   it('predict button resolves selected input and calls the predict API without source paths', async () => {

@@ -103,6 +103,7 @@ const mocks = vi.hoisted(() => ({
   goldenDiffCompare: vi.fn(),
   compileSkill: vi.fn(),
   getSkillDetail: vi.fn(),
+  fetcher: vi.fn(async () => []),
   getCompareGroup: vi.fn(),
   getResumeValidity: vi.fn(),
   postPredictRun: vi.fn(),
@@ -143,7 +144,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@/api/client', () => ({
   compileSkill: mocks.compileSkill,
-  fetcher: vi.fn(async () => []),
+  fetcher: mocks.fetcher,
   getCompareGroup: mocks.getCompareGroup,
   getResumeValidity: mocks.getResumeValidity,
   getSkillDetail: mocks.getSkillDetail,
@@ -453,6 +454,8 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.writeSkillFile.mockResolvedValue({ path: 'GRAPH.md', hash: 'python-hash' })
     mocks.getSkillDetail.mockReset()
     mocks.getSkillDetail.mockImplementation(async (id: string) => skillDetail(id))
+    mocks.fetcher.mockReset()
+    mocks.fetcher.mockResolvedValue([])
     mocks.compileSkill.mockReset()
     mocks.compileSkill.mockResolvedValue({
       status: 'ok',
@@ -1027,6 +1030,49 @@ describe('Workspace WS-1 local writer contracts', () => {
         localContent: 'local dirty graph\n',
         remoteContent: 'remote graph\n',
       })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('handles runtime_config_changed as a scoped runtime-config revalidation', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          <Workspace
+            skillId="writer-smoke"
+            onSelectSkill={vi.fn()}
+            onCloseSkill={vi.fn()}
+          />,
+        )
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      mocks.fetcher.mockClear()
+      mocks.getSkillDetail.mockClear()
+
+      await act(async () => {
+        mocks.webSockets.at(-1)?.onmessage?.({
+          data: JSON.stringify({
+            type: 'runtime_config_changed',
+            skill_id: 'writer-smoke',
+            dataset: 'node_llm_params',
+            node_id: 'setup',
+          }),
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.fetcher).toHaveBeenCalledWith('/skills/writer-smoke/runtime-config')
+      expect(mocks.getSkillDetail).not.toHaveBeenCalled()
     } finally {
       act(() => {
         root.unmount()

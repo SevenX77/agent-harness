@@ -9,10 +9,14 @@ store round-trip and the GET/PUT API before the run-time resolver wiring.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
+import pytest
 from app.models.node_llm_params import NodeLlmParams
+from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.node_llm_params import (
     read_node_llm_params,
     write_node_llm_params,
@@ -23,6 +27,25 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 # Unit: store round-trip
 # ---------------------------------------------------------------------------
+
+
+class _DirectSubscriber:
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    def __enter__(self) -> _DirectSubscriber:
+        event_bus._subscribers.setdefault(STUDIO_EVENTS_TOPIC, set()).add(self.queue)
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        subscribers = event_bus._subscribers.get(STUDIO_EVENTS_TOPIC)
+        if subscribers is not None:
+            subscribers.discard(self.queue)
+            if not subscribers:
+                event_bus._subscribers.pop(STUDIO_EVENTS_TOPIC, None)
+
+    async def receive(self) -> dict[str, Any]:
+        return await asyncio.wait_for(self.queue.get(), timeout=1.0)
 
 
 def test_read_missing_returns_empty(tmp_path: Path) -> None:
@@ -71,6 +94,26 @@ def test_disabled_with_field_values_preserves_node_draft(tmp_path: Path) -> None
     assert stored["score"] == params
 
 
+def test_write_same_node_params_is_side_effect_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    params = NodeLlmParams(enabled=True, thinking=True, max_output_tokens=2048, temperature=0.3)
+    write_node_llm_params(tmp_path, "score", params)
+
+    def fail_update(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        raise AssertionError("unchanged node llm params must not rewrite runtime_config")
+
+    monkeypatch.setattr(
+        "app.services.node_llm_params.update_node_llm_params_payload",
+        fail_update,
+    )
+
+    result = write_node_llm_params(tmp_path, "score", params)
+    assert result.value == params
+    assert result.changed is False
+
+
 # ---------------------------------------------------------------------------
 # API: GET map + PUT one node
 # ---------------------------------------------------------------------------
@@ -103,6 +146,37 @@ def test_put_and_get_node_params_api(
     assert runtime_config["llm"]["node_params"]["nodes"]["setup"]["temperature"] == 0.2
     disk = read_node_llm_params(skill_dir)
     assert disk["setup"].temperature == 0.2
+
+
+def test_put_node_params_publishes_precise_event_only_when_changed(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    del studio_roots
+    payload = {"enabled": True, "thinking": True, "max_output_tokens": 4096, "temperature": 0.2}
+
+    with _DirectSubscriber() as sub:
+        put = client.put(
+            "/api/skills/text-segmentation/nodes/setup/node-llm-params",
+            json=payload,
+        )
+        event = asyncio.run(sub.receive())
+
+    assert put.status_code == 200
+    assert event["type"] == "runtime_config_changed"
+    assert event["source"] == "http_api"
+    assert event["skill_id"] == "text-segmentation"
+    assert event["dataset"] == "node_llm_params"
+    assert event["node_id"] == "setup"
+
+    with _DirectSubscriber() as sub:
+        repeat = client.put(
+            "/api/skills/text-segmentation/nodes/setup/node-llm-params",
+            json=payload,
+        )
+        assert sub.queue.empty()
+
+    assert repeat.status_code == 200
 
 
 def test_put_all_null_clears_node_api(

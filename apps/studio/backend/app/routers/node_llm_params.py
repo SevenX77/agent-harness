@@ -19,6 +19,7 @@ from app.services.node_llm_params import (
     read_node_llm_params,
     write_node_llm_params,
 )
+from app.services.runtime_config_events import publish_runtime_config_changed
 from app.services.skills import resolve_skill_dir
 
 # Prevent pytest from collecting this router module as tests.
@@ -63,4 +64,11 @@ async def put_node_llm_params(
 ) -> NodeLlmParams:
     skill_dir = resolve_skill_dir(skill_id)
     _validate_node_id(node_id)
-    return write_node_llm_params(skill_dir, node_id, request)
+    result = write_node_llm_params(skill_dir, node_id, request)
+    if result.changed:
+        await publish_runtime_config_changed(
+            skill_id=skill_id,
+            dataset="node_llm_params",
+            node_id=node_id,
+        )
+    return result.value

@@ -859,7 +859,15 @@ export interface EventEnvelope {
   error_payload?: TransportErrorPayload | null
 }
 
-export interface StudioGlobalEvent {
-  type: 'skill_changed'
-  skill_id: string
-}
+export type StudioGlobalEvent =
+  | {
+      type: 'skill_changed'
+      skill_id: string
+      path?: string
+    }
+  | {
+      type: 'runtime_config_changed'
+      skill_id: string
+      dataset: string
+      node_id?: string
+    }

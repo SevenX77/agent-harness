@@ -1918,7 +1918,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const socket = new WebSocket(wsUrl("/ws/events"))
     socket.onmessage = (message) => {
       try {
-        const event = JSON.parse(String(message.data)) as { type?: string, skill_id?: string, path?: string }
+        const event = JSON.parse(String(message.data)) as {
+          type?: string
+          skill_id?: string
+          path?: string
+          dataset?: string
+        }
+        if (event.type === "runtime_config_changed") {
+          if (event.skill_id === currentSkillId && event.dataset) {
+            void mutateRuntimeConfig()
+          }
+          return
+        }
         if (event.type !== "skill_changed" || event.skill_id !== currentSkillId || !event.path) return
         const normalizedChangedPath = event.path.replace(/\\/g, "/")
         if (

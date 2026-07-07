@@ -82,7 +82,7 @@ Use per-request tests when a request has unique semantics:
 | Run history | `GET /api/skills/{skill_id}/runs` | Timeline panel cold load / explicit refresh / run mutation projection | OK: Timeline owns the list subscription, Workspace projects start/resume metadata without subscribing or cold-loading the list, and delete/start/resume update the shared snapshot without write-after-read refresh. | `studio-swr-policy.usage.test.ts`, `GraphCanvas.test.tsx`, `useRunHistory.revalidation.test.tsx`, `Workspace.test.tsx` |
 | Local History | `GET /api/skills/{skill_id}/history` | History panel cold load / explicit refresh / run-ended exact revalidation / revert exact revalidation | OK: History UI owns the list subscription; Workspace holds only a revalidator for the run-ended event and does not cold-load `/history` when a skill opens. | `useRunHistory.revalidation.test.tsx`, `Workspace.test.tsx` |
 | Test inputs | `GET /api/skills/{skill_id}/test_inputs` | I/O panel cold load / create-delete projection | OK: all SWR reads use the Studio truth policy, phase-node clicks no longer reopen I/O implicitly, and create/delete project local list snapshots without write-after-read refresh. | `studio-swr-policy.usage.test.ts`, `GraphCanvas.test.tsx`, `TestInputsSection.revalidation.test.tsx` |
-| Studio event stream | `WS /ws/events` | App-level domain event stream | OK for the generic-resync risk: connect/reconnect do not dispatch data refresh callbacks; only precise backend events invoke the exact handlers. | `useStudioEventStream.test.ts` |
+| Studio event stream | `WS /ws/events` | App-level domain event stream | OK for the generic-resync risk: connect/reconnect do not dispatch data refresh callbacks; only precise backend events invoke the exact handlers. Settings, Copilot, LLM role cache, and Workspace file/runtime watchers share the same hub; Workspace must not open a second `/ws/events` socket or reconnect it on editor state changes. | `useStudioEventStream.test.ts`, `Workspace.test.tsx` |
 | Copilot chat | `WS /api/skills/{skill_id}/copilot/ws` | User sends a Copilot message | OK as explicit user action; future `@` mentions must travel with the message payload, not background UI state. | Required when `@` mention payload is implemented |
 
 ## Machine-Readable Inventory Ledger
@@ -443,7 +443,7 @@ FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling s
 FRONTEND GET /api/llm/roles | ok | shared | Cached read path is guarded against mount, focus, and reconnect refetch; roles response carries registry projection data, so cold loads do not perform a second broad registry read.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
-FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert projects the returned SkillDetail without a follow-up GET. Source-write, compile, and file-event refresh paths still need route-specific audit.
+FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert projects the returned SkillDetail without a follow-up GET. File-event detail reads now flow only from precise skill_changed events on the shared event hub. Source-write and compile refresh paths still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/golden | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/golden/template | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
@@ -502,7 +502,7 @@ FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | O
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
-FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys.
+FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys. Consumers must share the singleton hub; Workspace file/runtime watchers are covered and must not create a workspace-local events socket.
 FRONTEND WS /ws/runs/{run_id} | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
 ```
 

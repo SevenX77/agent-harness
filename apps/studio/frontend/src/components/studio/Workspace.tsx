@@ -20,11 +20,12 @@ import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
 import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistoryRevalidator, useRunHistoryProjection } from "@/hooks/useRunHistory"
 import { useSkills } from "@/hooks/useSkills"
+import { useStudioEventStream } from "@/hooks/useStudioEventStream"
 import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
@@ -1914,82 +1915,79 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setSelectedNodeId(null)
   }, [])
 
-  useEffect(() => {
-    if (!currentSkillId) return
-    const socket = new WebSocket(wsUrl("/ws/events"))
-    socket.onmessage = (message) => {
-      try {
-        const event = JSON.parse(String(message.data)) as {
-          type?: string
-          skill_id?: string
-          path?: string
-          dataset?: string
-        }
-        if (event.type === "runtime_config_changed") {
-          if (event.skill_id === currentSkillId && event.dataset) {
-            void mutateRuntimeConfig()
-          }
-          return
-        }
-        if (event.type !== "skill_changed" || event.skill_id !== currentSkillId || !event.path) return
-        const normalizedChangedPath = event.path.replace(/\\/g, "/")
-        if (
-          normalizedChangedPath.startsWith(".workspace/import_files/")
-          || normalizedChangedPath === ".workspace/runtime_config.json"
-        ) {
-          void mutateRuntimeConfig()
-        }
-        // Keep the file tree live like a native explorer's watcher: refresh every
-        // already-loaded ancestor folder of the changed path so external edits AND
-        // Studio's own native-fs create/delete/rename show up without a manual
-        // re-expand — reloading ancestors (not just the file's folder) also surfaces
-        // a brand-new nested folder. Unexpanded folders stay lazy (native behaviour).
-        const changedParts = event.path.split("/").filter(Boolean)
-        const tree = assetDirectoryTreeRef.current
-        for (let depth = 0; depth < changedParts.length; depth += 1) {
-          const dir = changedParts.slice(0, depth).join("/")
-          if (tree.getDirectory(dir).status !== "idle") {
-            tree.reloadDirectory(dir)
-          }
-        }
-        const entries = (["left", "right"] as const).filter((side) => activeFileDetails[side]?.path === event.path)
-        for (const side of entries) {
-          const file = activeFileDetails[side]
-          if (!file) continue
-          void getSkillDetail(currentSkillId).then(async (detail) => {
-            const remoteContent = detail.files?.[event.path ?? ""]
-            if (remoteContent === undefined) return
-            const remoteHash = await sha256Hex(remoteContent)
-            if (file.dirty || inFlightRef.current[side]) {
-              setConflict({
-                skillId: currentSkillId,
-                path: event.path ?? file.path,
-                side,
-                localContent: file.content,
-                remoteContent,
-                remoteHash,
-              })
-            } else {
-              setActiveFileDetails((current) => ({
-                ...current,
-                [side]: {
-                  ...file,
-                  content: remoteContent,
-                  hash: remoteHash,
-                  savedContent: remoteContent,
-                  dirty: false,
-                },
-              }))
-              void mutateSkillDetail(detail, { revalidate: false })
-            }
-          })
-        }
-      } catch {
-        toast.error("Could not process file change event")
-      }
+  const ignoreStudioEvent = useCallback(() => {}, [])
+
+  const handleRuntimeConfigChangedEvent = useCallback((event: { skillId: string; dataset: string }) => {
+    if (event.skillId === currentSkillId && event.dataset) {
+      void mutateRuntimeConfig()
     }
-    return () => socket.close()
+  }, [currentSkillId, mutateRuntimeConfig])
+
+  const handleSkillChangedEvent = useCallback((event: { skillId: string; path: string }) => {
+    try {
+      if (event.skillId !== currentSkillId || !event.path) return
+      const normalizedChangedPath = event.path.replace(/\\/g, "/")
+      if (
+        normalizedChangedPath.startsWith(".workspace/import_files/")
+        || normalizedChangedPath === ".workspace/runtime_config.json"
+      ) {
+        void mutateRuntimeConfig()
+      }
+      // Keep the file tree live like a native explorer's watcher: refresh every
+      // already-loaded ancestor folder of the changed path so external edits AND
+      // Studio's own native-fs create/delete/rename show up without a manual
+      // re-expand. Reloading ancestors also surfaces a brand-new nested folder.
+      const changedParts = normalizedChangedPath.split("/").filter(Boolean)
+      const tree = assetDirectoryTreeRef.current
+      for (let depth = 0; depth < changedParts.length; depth += 1) {
+        const dir = changedParts.slice(0, depth).join("/")
+        if (tree.getDirectory(dir).status !== "idle") {
+          tree.reloadDirectory(dir)
+        }
+      }
+      const entries = (["left", "right"] as const).filter((side) => activeFileDetails[side]?.path === event.path)
+      for (const side of entries) {
+        const file = activeFileDetails[side]
+        if (!file) continue
+        void getSkillDetail(currentSkillId).then(async (detail) => {
+          const remoteContent = detail.files?.[event.path]
+          if (remoteContent === undefined) return
+          const remoteHash = await sha256Hex(remoteContent)
+          if (file.dirty || inFlightRef.current[side]) {
+            setConflict({
+              skillId: currentSkillId,
+              path: event.path,
+              side,
+              localContent: file.content,
+              remoteContent,
+              remoteHash,
+            })
+          } else {
+            setActiveFileDetails((current) => ({
+              ...current,
+              [side]: {
+                ...file,
+                content: remoteContent,
+                hash: remoteHash,
+                savedContent: remoteContent,
+                dirty: false,
+              },
+            }))
+            void mutateSkillDetail(detail, { revalidate: false })
+          }
+        })
+      }
+    } catch {
+      toast.error("Could not process file change event")
+    }
   }, [activeFileDetails, currentSkillId, mutateRuntimeConfig, mutateSkillDetail])
+
+  useStudioEventStream({
+    onRegistryChanged: ignoreStudioEvent,
+    onRolesChanged: ignoreStudioEvent,
+    onRuntimeConfigChanged: handleRuntimeConfigChangedEvent,
+    onSkillChanged: handleSkillChangedEvent,
+  }, { enabled: Boolean(currentSkillId) })
 
 
   const activeLint = useMemo(

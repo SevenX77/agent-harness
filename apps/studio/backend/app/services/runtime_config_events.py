@@ -30,6 +30,5 @@ async def publish_runtime_config_changed(
         await event_bus.publish(STUDIO_EVENTS_TOPIC, payload)
     except Exception:
         logger.exception(
-            "phase=publish_runtime_config_changed action=publish status=failed payload=%s",
-            payload,
+            "phase=publish_runtime_config_changed action=publish status=failed event_type=runtime_config_changed",
         )

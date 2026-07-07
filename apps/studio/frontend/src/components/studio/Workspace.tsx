@@ -1131,7 +1131,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         toast.success(
           `Compiled ${result.manifest_name} (${shortHash(result.artifact_ref.content_hash)}, fp ${shortHash(result.execution_fingerprint)})`,
         )
-        void mutateSkillDetail()
+        void mutateSkillDetail(result.detail, { revalidate: false })
       }
     } catch (error: unknown) {
       updateStage(targetSkillId, "compile-fail")

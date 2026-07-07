@@ -62,6 +62,7 @@ export interface CompileSuccess {
   artifact_ref: ArtifactRef
   source_map_ref: string
   execution_fingerprint: string
+  detail: SkillDetail
 }
 
 export interface CompileFailure {

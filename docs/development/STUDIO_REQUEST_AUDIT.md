@@ -375,7 +375,7 @@ BACKEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit rol
 BACKEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
 BACKEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
 BACKEND POST /api/skills | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND POST /api/skills/{skill_id}/compile | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; success returns CompileSuccess with canonical SkillDetail detail built from the same compile/lint result, and failure returns structured CompileFailure.errors.
 BACKEND POST /api/skills/{skill_id}/copilot/dispatch | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/skills/{skill_id}/copilot/interrupt | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND POST /api/skills/{skill_id}/copilot/judge | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -443,7 +443,7 @@ FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling s
 FRONTEND GET /api/llm/roles | ok | shared | Cached read path is guarded against mount, focus, and reconnect refetch; roles response carries registry projection data, so cold loads do not perform a second broad registry read.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
-FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert projects the returned SkillDetail without a follow-up GET. File-event detail reads now flow only from precise skill_changed events on the shared event hub. Source-write and compile refresh paths still need route-specific audit.
+FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert and manual Compile project returned SkillDetail snapshots without follow-up GET. File-event detail reads now flow only from precise skill_changed events on the shared event hub. Source-write refresh paths still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/golden | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/golden/template | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
@@ -474,7 +474,7 @@ FRONTEND POST /api/llm/roles/{role_name}/test | ok | specific | Explicit legacy 
 FRONTEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role/Copilot Test button command; tests cover validation gating, start/poll/settle, and no job start when validation fails.
 FRONTEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; client projects returned registry and returns the updated route to the caller.
 FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; client projects returned registry and returns the updated route to the caller.
-FRONTEND POST /api/skills/{skill_id}/compile | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; client projects CompileSuccess.detail into the shared skill-detail cache with revalidate:false and performs no broad /skills/{skill_id} follow-up read.
 FRONTEND POST /api/skills/{skill_id}/copilot/interrupt | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/copilot/judge | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.

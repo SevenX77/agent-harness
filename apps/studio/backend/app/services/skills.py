@@ -594,6 +594,20 @@ async def compile_skill_for_studio(
             "runtime_config": runtime_config,
         }
     )
+    lint_result = LintResult(
+        status="passed",
+        errors=_llm_role_lint_errors(compiled, _configured_role_names()),
+        phases_summary=_phase_summary_from_compiled(compiled),
+    )
+    detail = await _detail_from_manifest_async(
+        user_id,
+        skill_id,
+        skill_dir,
+        compiled,
+        lint_result,
+        storage,
+        metadata,
+    )
     return CompileSuccess(
         skill_id=skill_id,
         status="ok",
@@ -602,6 +616,7 @@ async def compile_skill_for_studio(
         artifact_ref=artifact_ref,
         source_map_ref=artifact_ref["source_map_ref"],
         execution_fingerprint=artifact_ref["execution_fingerprint"],
+        detail=detail,
     )
 
 

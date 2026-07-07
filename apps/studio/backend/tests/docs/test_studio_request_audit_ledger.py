@@ -27,6 +27,7 @@ LEDGER_RE = re.compile(r"```studio-request-audit-ledger\n(?P<body>.*?)\n```", re
 VERDICTS_RE = re.compile(r"```studio-request-audit-verdicts\n(?P<body>.*?)\n```", re.DOTALL)
 TEMPLATE_EXPR_RE = re.compile(r"\$\{([^}]+)\}")
 VERDICT_STATUSES = {"ok", "partial", "bad", "internal", "review"}
+VerdictRow = tuple[str, str, str, str]
 
 
 def _join_paths(prefix: str, path: str) -> str:
@@ -156,12 +157,12 @@ def _ledger_keys() -> set[str]:
     }
 
 
-def _verdict_keys() -> set[str]:
+def _verdict_rows() -> list[VerdictRow]:
     text = AUDIT_DOC.read_text(encoding="utf-8")
     match = VERDICTS_RE.search(text)
     assert match is not None, "STUDIO_REQUEST_AUDIT.md must contain a studio-request-audit-verdicts code fence."
 
-    verdicts: set[str] = set()
+    verdicts: list[VerdictRow] = []
     invalid: list[str] = []
     for line_number, raw_line in enumerate(match.group("body").splitlines(), start=1):
         line = raw_line.strip()
@@ -178,9 +179,13 @@ def _verdict_keys() -> set[str]:
             invalid.append(f"line {line_number}: invalid guard {guard!r}")
         if not rationale:
             invalid.append(f"line {line_number}: rationale is required")
-        verdicts.add(key)
+        verdicts.append((key, status, guard, rationale))
     assert not invalid, "Invalid studio-request-audit-verdicts rows:\n" + "\n".join(invalid)
     return verdicts
+
+
+def _verdict_keys() -> set[str]:
+    return {key for key, _status, _guard, _rationale in _verdict_rows()}
 
 
 def test_studio_request_audit_ledger_covers_current_backend_and_frontend_requests() -> None:
@@ -214,4 +219,18 @@ def test_studio_request_audit_verdicts_cover_current_backend_and_frontend_reques
     assert not stale, (
         "docs/development/STUDIO_REQUEST_AUDIT.md's studio-request-audit-verdicts block must not "
         "keep stale request keys. Stale:\n" + "\n".join(stale)
+    )
+
+
+def test_frontend_request_policy_verdicts_are_resolved() -> None:
+    unresolved = [
+        f"{key} | {status} | {rationale}"
+        for key, status, _guard, rationale in _verdict_rows()
+        if key.startswith("FRONTEND ") and status == "review"
+    ]
+
+    assert not unresolved, (
+        "Frontend requests are user-visible performance surfaces and must not remain "
+        "at the placeholder 'review' verdict. Classify each as ok/partial/bad/internal "
+        "with its trigger and guard-test rationale:\n" + "\n".join(unresolved)
     )

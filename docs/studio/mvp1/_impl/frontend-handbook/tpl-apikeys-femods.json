@@ -1,17 +1,18 @@
 [
   {
-    "name": "凭证 hydration",
-    "what": "进 API Keys tab 时,把后端回的「打码 key 快照」逐个 endpoint 换回真值的纯展示层回填逻辑——明文只在前端本地换回、绝不写回后端。",
-    "where": "llm.ts hydrateEndpointSecrets(逐 endpoint 把掩码 key 换回真值的主函数);配套 llm.ts getEndpointSecret(对单 endpoint 发 GET /registry/endpoints/{id}/secret 取明文)、llm.ts knownEndpointSecrets(endpointId→真 key 的模块级本地缓存)、llm.ts hydrateRegistryWithKnownSecrets(下次拉快照时用本地缓存就地换回,避免重复请求)、入口在 llm.ts getCredentials(默认 hydrateSecrets=true)。",
+    "name": "凭证 scoped reveal",
+    "what": "用户显式点 Eye / Copy 时,若当前卡只有后端回的「打码 key 快照」占位,才把当前 provider 对应的单个 endpoint 明文取回的展示层逻辑——明文只在前端本地暂存、绝不写回后端。",
+    "where": "ProviderCard.tsx resolveApiKeyForSensitiveAction(显式敏感动作前解析真实 key);SettingsPage.tsx revealProviderSecret(按 provider 找 endpoint 并投影单条 secret);llm.ts getEndpointSecret(对单 endpoint 发 GET /registry/endpoints/{id}/secret 取明文)、llm.ts knownEndpointSecrets(endpointId→真 key 的模块级本地缓存)、llm.ts hydrateRegistryWithKnownSecrets(下次拉快照时用本地缓存就地换回已显式 reveal 的 key,避免重复请求)。llm.ts getCredentials 默认 hydrateSecrets=false;hydrateEndpointSecrets 只保留给明确传 hydrateSecrets:true 的低层能力/测试,不是 Settings 生命周期入口。",
     "duties": [
-      "拿到一份全量 registry 快照后,挑出 api_key 仍是掩码值('**********')的 endpoint,只对这些发『取明文』请求(已是真值的跳过)。",
-      "把换回的明文写进模块级本地缓存 knownEndpointSecrets,供本次会话后续就地复用。",
-      "下次再拉快照时先用本地缓存就地换回已知 key,确保同一 key 不会发第二次 secret 请求。",
-      "保证明文只活在前端本地缓存里:从不写回后端;窗口聚焦不触发重拉,只有 registry_changed 事件或用户写入后的强制刷新才取新快照。",
-      "对取明文失败的单个 endpoint 静默保留掩码(不整体失败),让其余 endpoint 正常 hydrate。"
+      "Settings/registry 生命周期只拿全量 redacted registry 快照,不得据此逐 endpoint 批量取明文。",
+      "只有 Eye / Copy 这类用户显式敏感动作命中 redacted 占位时,才对当前 provider 的一个 endpoint 发『取明文』请求(已是真值的跳过)。",
+      "把换回的明文写进当前 credentials/drafts 投影与模块级本地缓存 knownEndpointSecrets,供本次会话后续就地复用。",
+      "下次再拉快照时先用本地缓存就地换回已显式 reveal 的 key,确保同一 key 不会发第二次 secret 请求。",
+      "保证明文只活在前端内存里:从不写回后端;窗口聚焦、Settings 开关、tab 切换、WebSocket 连接/重连都不触发 secret 请求。",
+      "对取明文失败的单个 endpoint 返回 null 并保留掩码,只阻止本次显示/复制,不整体失败。"
     ],
-    "used_by": "#16(secret-hydration,进 tab 首次回填真 key)、#31(registry-restore,刷新/重进页恢复每张卡后再经它换回真值)。",
-    "boundary": "做:把掩码 key 换成真值供 UI 查看/修改,纯读取式回填。不做:不把明文写回后端、不持第二份真相、不参与 key 的保存/校验/测试,也不决定 key 是否有效。"
+    "used_by": "#16(secret-reveal,显式 Eye/Copy scoped reveal)、#22(secret-mask-toggle,点眼睛时按需 reveal)、#23(secret-copy,复制前按需 reveal)、#31(registry-restore,刷新/重进页只恢复 redacted 快照,已显式 reveal 过的 key 可由本地缓存就地换回)。",
+    "boundary": "做:在显式敏感动作中把单条掩码 key 换成真值供 UI 查看/复制,纯读取式回填。不做:不在打开/切 tab/聚焦/重连时取明文,不把明文写回后端、不持第二份真相、不参与 key 的保存/校验/测试,也不决定 key 是否有效。"
   },
   {
     "name": "provider-utils",

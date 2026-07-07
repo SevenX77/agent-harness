@@ -30,6 +30,7 @@ export function SettingsPageContent({
   onClose,
   onTabChange,
   onProviderFieldChange,
+  onRevealProviderSecret,
   onGetProviderModels,
   onProbeEndpoint,
   onForceEndpointTest,
@@ -128,6 +129,7 @@ export function SettingsPageContent({
                   saveStatus={saveStatus}
                   backendReachable={backendReachable}
                   onProviderFieldChange={onProviderFieldChange}
+                  onRevealProviderSecret={onRevealProviderSecret}
                   onGetProviderModels={onGetProviderModels}
                   onProbeEndpoint={onProbeEndpoint}
                   onForceEndpointTest={onForceEndpointTest}

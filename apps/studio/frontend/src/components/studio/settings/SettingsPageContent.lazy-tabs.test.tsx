@@ -69,6 +69,7 @@ function baseProps(overrides: Partial<SettingsPageContentProps> = {}): SettingsP
     onBeginAddProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onCancelAddProvider: vi.fn(),
+    onRevealProviderSecret: vi.fn().mockResolvedValue(null),
     onProviderModelsUpdated: vi.fn(),
     onRolesDataChange: vi.fn(),
     onDeleteRole: vi.fn(),

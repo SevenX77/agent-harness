@@ -6,15 +6,15 @@
  "atoms": [
   {
    "n": 16,
-   "cap": "secret-hydration",
+   "cap": "secret-reveal",
    "track": "共",
    "module": "凭证录入与管理",
-   "func": "设计:让用户进 API Keys 页时就能看到/编辑自己之前存过的真实 key,而不是一排掩码占位符。",
-   "action": "用户切到 API Keys tab(首次进入自动触发,无需点按钮)。",
-   "fe_design": "进 tab 先拉一份 registry 快照(里面 key 全是 '**********' 掩码,后端默认不外泄明文)→ 前端发现哪些 endpoint 的 key 是掩码值,就对这些 endpoint 各发一次「取明文」请求把真 key 换回来 → 写进前端本地缓存,用户即可查看/修改。这是纯展示层的回填(hydration):明文只在本地 settings UI 内换回,前端不把它当第二份真相、不写回后端。窗口聚焦不是数据变更信号,不得触发重新拉取;后续只有 registry_changed 这类后端真相变更事件或用户写入后的强制刷新才重拉。",
+   "func": "设计:API Keys 生命周期只恢复打码快照;用户显式点 Eye 或 Copy 时,才取回当前 provider 的单条真实 key。",
+   "action": "用户点 API Key 输入框旁的 Eye / Copy 图标;打开 Settings、切到 API Keys tab、窗口聚焦、WebSocket 连接/重连都不能自动取明文。",
+   "fe_design": "Settings 壳层首次需要凭证时只拉一份 registry 打码快照(里面 key 全是 '**********' 掩码,后端默认不外泄明文),前端据此恢复卡片/状态/Available Models。只有用户对某一张卡点 Eye 或 Copy,且当前草稿值仍是掩码占位时,前端才按该 provider 的 endpoint_id 发一条「取明文」请求,把返回的真实 key 投影到当前内存态并完成显示/复制。这是显式敏感动作的 scoped reveal:明文只在本地 settings UI 内暂存,前端不把它当第二份真相、不写回后端。窗口聚焦、tab 切换、Settings 开关、WebSocket 连接/重连不是数据变更信号,不得触发重新拉取;后续只有 registry_changed 这类后端真相变更事件或用户写入后的强制刷新才重拉打码快照。",
    "fe_modules": [
     {
-     "name": "凭证 hydration",
+     "name": "凭证 scoped reveal",
      "ref": "femod-hydration"
     }
    ],
@@ -27,7 +27,7 @@
     },
     {
      "endpoint": "GET /api/llm/registry",
-     "purpose": "先拿全量打码快照,前端据此判断哪些 endpoint 需要换明文。",
+     "purpose": "拿全量打码快照供前端投影卡片/状态;不得据此批量取明文。",
      "mechanism_ref": "mech_cred",
      "iface_ref": "iface-0"
     }
@@ -184,17 +184,24 @@
    "module": "凭证录入与管理",
    "func": "设计:用眼睛图标在明文与掩码间切换 API Key 显示,方便核对又默认不外泄。",
    "action": "用户点 API Key 输入框旁的 Eye / EyeOff 图标。",
-   "fe_design": "点眼睛图标 → 翻转可见态 → 输入框始终是 type=text,掩码态用 CSS 把字符遮成圆点(不切浏览器原生 password 输入框)。这样既能切换显隐,又不触发浏览器密码管理器、不与「抑制密码管理器」属性冲突。配合复制按钮(#23)使用。",
+   "fe_design": "点眼睛图标 → 若当前值仍是 redacted 占位,先走 #16 scoped reveal 取当前 provider 的单条真实 key;拿到后翻转可见态。输入框始终是 type=text,掩码态用 CSS 把字符遮成圆点(不切浏览器原生 password 输入框)。这样既能切换显隐,又不触发浏览器密码管理器、不与「抑制密码管理器」属性冲突。配合复制按钮(#23)使用。",
    "fe_modules": [
     {
      "name": "provider-utils",
      "ref": "femod-provider-utils"
     }
    ],
-   "be_contract": [],
+   "be_contract": [
+    {
+     "endpoint": "GET /api/llm/registry/endpoints/{endpoint_id}/secret",
+     "purpose": "仅当用户点 Eye 且当前值仍是 redacted 占位时,取当前 provider 的单条明文 key;已在内存中有真实 key 时不请求。",
+     "mechanism_ref": "mech_cred",
+     "iface_ref": "iface-1"
+    }
+   ],
    "fe_status": "符合",
-   "be_status": "n/a",
-   "gap_brief": "符合设计。2026-06-24:代码已落地并回填。输入框永远 type=text——apiKeyInputType()(ProviderCard.tsx)恒返回字面 'text'(再无 'password')。已有 key 的 ProviderCard 隐藏态由 apiKeyDisplayValue 渲染与真实 key 等长的 mask value,并设 readOnly;点 Eye 显示后才渲染真实 key。AddProviderForm 等正在录入的新 key 仍可复用 apiKeyInputClassName 的 CSS mask,空值不 mask placeholder。无原生 type=password 残留,不触发浏览器密码管理器。",
+   "be_status": "已实现",
+   "gap_brief": "符合设计。2026-06-24:代码已落地并回填。输入框永远 type=text——apiKeyInputType()(ProviderCard.tsx)恒返回字面 'text'(再无 'password')。已有 key 的 ProviderCard 隐藏态由 apiKeyDisplayValue 渲染与真实 key 等长的 mask value,并设 readOnly;点 Eye 显示后才渲染真实 key。2026-07-06:若生命周期只拿到 redacted 占位,点 Eye 先 scoped reveal 单条 secret,不在打开 API Keys 时批量 hydrate。AddProviderForm 等正在录入的新 key 仍可复用 apiKeyInputClassName 的 CSS mask,空值不 mask placeholder。无原生 type=password 残留,不触发浏览器密码管理器。",
    "impl_ref": "fn-22"
   },
   {
@@ -204,17 +211,24 @@
    "module": "凭证录入与管理",
    "func": "设计:一键把 API Key 复制到剪贴板,省去手动选中长串密钥。",
    "action": "用户点 API Key 旁的 Copy 图标。",
-   "fe_design": "点 Copy 图标 → 调浏览器剪贴板写入 key → 成功/失败各弹一条提示;key 为空时按钮禁用。纯前端剪贴板操作,无网络、无后端。",
+   "fe_design": "点 Copy 图标 → 若当前值仍是 redacted 占位,先走 #16 scoped reveal 取当前 provider 的单条真实 key;拿到后调浏览器剪贴板写入 key → 成功/失败各弹一条提示;key 为空时按钮禁用。已有真实 key 在内存中时复制仍是纯前端剪贴板操作。",
    "fe_modules": [
     {
      "name": "provider-utils",
      "ref": "femod-provider-utils"
     }
    ],
-   "be_contract": [],
+   "be_contract": [
+    {
+     "endpoint": "GET /api/llm/registry/endpoints/{endpoint_id}/secret",
+     "purpose": "仅当用户点 Copy 且当前值仍是 redacted 占位时,取当前 provider 的单条明文 key;已在内存中有真实 key 时不请求。",
+     "mechanism_ref": "mech_cred",
+     "iface_ref": "iface-1"
+    }
+   ],
    "fe_status": "符合",
-   "be_status": "n/a",
-   "gap_brief": "符合设计。",
+   "be_status": "已实现",
+   "gap_brief": "符合设计。Copy 是显式敏感动作;它可以 scoped reveal 单条 secret,但打开/切 tab/聚焦/重连不得触发。",
    "impl_ref": "fn-23"
   },
   {
@@ -446,7 +460,7 @@
    "fe_design": "刷新或重进页面 → 首次从无到有拉一份全量 registry 快照(含 endpoint+route+状态+已发现模型)→ 转成 UI 凭证态恢复每张卡 → key 再经 #16 的 hydration 换回真值。窗口聚焦、WebSocket 重连、tab 切换都不是数据变更信号,不得自行重拉;后续只有 registry_changed 这类后端真相变更事件或用户写入后的强制刷新才重拉。前端只投影 registry、不持第二份真相(切 tab/刷新状态不丢)。",
    "fe_modules": [
     {
-     "name": "凭证 hydration",
+     "name": "凭证 scoped reveal",
      "ref": "femod-hydration"
     },
     {
@@ -457,7 +471,7 @@
    "be_contract": [
     {
      "endpoint": "GET /api/llm/registry",
-     "purpose": "返回全量 endpoint/route/role 打码快照(恢复 key 占位/状态/Available Models),key 真值另走 #16 secret 端点。",
+     "purpose": "返回全量 endpoint/route/role 打码快照(恢复 key 占位/状态/Available Models),key 真值只在 #16 显式 reveal 时走 secret 端点。",
      "mechanism_ref": "mech_cred",
      "iface_ref": "iface-0"
     }
@@ -471,8 +485,8 @@
  "fe_defs": [
   {
    "id": "femod-hydration",
-   "name": "凭证 hydration",
-   "explain": "前端共享逻辑：hydrateEndpointSecrets,逐 endpoint 把掩码 key 换回真值的前端逻辑；secret-hydration"
+   "name": "凭证 scoped reveal",
+   "explain": "前端共享逻辑：显式敏感动作的 scoped reveal。ProviderCard 点 Eye/Copy 时,若当前值仍是 redacted 占位,经 SettingsPage.onRevealProviderSecret 调 getEndpointSecret 取单条 endpoint 明文;生命周期加载只投影打码 registry,不得批量 hydrate。"
   },
   {
    "id": "femod-provider-utils",

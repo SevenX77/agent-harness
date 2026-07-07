@@ -28,7 +28,7 @@
       "n": 3,
       "cap": "settings-tab-switch",
       "design_ref": "atom-3",
-      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 同时挂载 General / API Keys / LLM Roles / Copilot 四个 data-settings-tab-panel,只给非激活 panel 加 hidden,导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)切换可见性。按需加载用多个绑 activeTab 的 useEffect(React 副作用钩子):Settings 常驻挂载后先 getCredentials({hydrateSecrets:false}) 拉一次打码摘要快照;切到 api_keys 且未 hydrate 过(credentialsHydratedRef 这个标志为假)才首次 getCredentials() 取明文 hydrate;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉;关闭/重开 Settings、Settings 内切 tab 都不卸载已挂载内容,所以也不重复触发这些初始化。窗口 focus、WebSocket 重连、SWR stale remount/reconnect 都不触发重拉;STUDIO_TRUTH_SWR_CONFIG 关闭 focus/reconnect/stale remount revalidation。truth-sources、community-catalog-config、role-test-results、fixed-roles/fixed-role-status 这类只读启动数据在 client/llm 层做 cache + in-flight 去重,只有明确测试完成/保存/事件后才失效。只有首次无缓存加载、显式用户动作、或唯一真相源广播 registry_changed/roles_changed 才刷新。",
+      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 同时挂载 General / API Keys / LLM Roles / Copilot 四个 data-settings-tab-panel,只给非激活 panel 加 hidden,导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)切换可见性。按需加载用多个绑 activeTab 的 useEffect(React 副作用钩子):Settings 常驻挂载后先 getCredentials({hydrateSecrets:false}) 拉一次打码摘要快照;切到 api_keys 只渲染这份 redacted registry,不会自动取明文;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉;关闭/重开 Settings、Settings 内切 tab 都不卸载已挂载内容,所以也不重复触发这些初始化。API key 明文只在 Eye/Copy 这类显式敏感动作下 scoped reveal 单条 endpoint。窗口 focus、WebSocket 重连、SWR stale remount/reconnect 都不触发重拉;STUDIO_TRUTH_SWR_CONFIG 关闭 focus/reconnect/stale remount revalidation。truth-sources、community-catalog-config、role-test-results、fixed-roles/fixed-role-status 这类只读启动数据在 client/llm 层做 cache + in-flight 去重,只有明确测试完成/保存/事件后才失效。只有首次无缓存加载、显式用户动作、或唯一真相源广播 registry_changed/roles_changed 才刷新。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -48,7 +48,7 @@
       "n": 5,
       "cap": "ws-registry-refresh",
       "design_ref": "atom-5",
-      "current": "现状:已实现且符合。SettingsPage 通过 useStudioEventStream(带退避重连和可观测日志的事件流 hook)订阅事件;useStudioEventStream 是模块级单例 hub,Settings/Copilot 等多个订阅者共享同一条 wsUrl('/ws/events') WebSocket,不会因组件多处使用而开多条连接或重复分发刷新。收到 registry_changed 才调用 getCredentials({hydrateSecrets:..., force:true}) 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿。WebSocket open/reconnect 只更新连接健康态和恢复订阅,不调用数据刷新回调。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。窗口 focus 已不再触发 registry 重拉。",
+      "current": "现状:已实现且符合。SettingsPage 通过 useStudioEventStream(带退避重连和可观测日志的事件流 hook)订阅事件;useStudioEventStream 是模块级单例 hub,Settings/Copilot 等多个订阅者共享同一条 wsUrl('/ws/events') WebSocket,不会因组件多处使用而开多条连接或重复分发刷新。收到 registry_changed 才调用 getCredentials({hydrateSecrets:false, force:true}) 重拉 redacted 凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿;registry_changed 不会批量 hydrate secrets。WebSocket open/reconnect 只更新连接健康态和恢复订阅,不调用数据刷新回调。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。窗口 focus 已不再触发 registry 重拉。",
       "gap": "✅ 本次已实施并通过两层测试,符合设计。",
       "fe_status": "符合",
       "be_status": "已实现",
@@ -190,14 +190,14 @@
       "fe_status": "符合",
       "layer1": [
         "渲染 SettingsPage,mock getCredentials/getRoles/getModelGroups。",
-        "断言初始不拉 API Keys 凭证 hydration;切到 api_keys 才首次 getCredentials() 并 hydrate。",
+        "断言初始只拉 redacted registry,不拉 API Keys secret;切到 api_keys 也不触发 secret 请求。",
         "断言切到 llm_roles/copilot 才首次拉 roles + model groups。",
         "断言已加载过的 tab 再切回不重复拉。",
         "断言 SWR focus/reconnect/remount 不会重新拉取真相数据;truth-sources、community-catalog-config、role-test-results、fixed-roles/fixed-role-status 并发读取只打一条请求,角色/端点测试完成后才失效 role-test-results cache。"
       ],
       "layer2": [
         "打开 Settings,依次点四个 tab,看内容切换。",
-        "用网络面板确认切到 API Keys 才出现 registry/secret 请求。"
+        "用网络面板确认打开 Settings/API Keys 只有 registry 摘要请求,没有 secret 请求;点 Eye/Copy 才出现一条 scoped secret 请求。"
       ]
     },
     {

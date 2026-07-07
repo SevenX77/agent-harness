@@ -445,26 +445,26 @@ FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-t
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
 FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert and manual Compile project returned SkillDetail snapshots without follow-up GET. File-event detail reads now flow only from precise skill_changed events on the shared event hub. Source-write refresh paths still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
-FRONTEND GET /api/skills/{skill_id}/golden | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/golden/template | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/golden/{golden_id}/content | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/golden | ok | shared | Workspace cold-loads per-skill golden metadata once for canvas node badges through Studio truth SWR policy; per-node promote projects the returned baseline into the loaded list without broad refresh.
+FRONTEND GET /api/skills/{skill_id}/golden/template | ok | specific | Explicit manual-golden create action for one agent node; not triggered by panel open, node selection, focus, timer, or reconnect.
+FRONTEND GET /api/skills/{skill_id}/golden/{golden_id}/content | ok | specific | Explicit open/edit of one golden baseline content ref; list metadata does not hydrate content implicitly.
 FRONTEND GET /api/skills/{skill_id}/history | ok | shared | Local History list is owned by the History UI cold-load key; Workspace uses a revalidator-only hook for run-ended refreshes, so skill open does not subscribe to or cold-load the list.
 FRONTEND GET /api/skills/{skill_id}/node-llm-params | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
-FRONTEND GET /api/skills/{skill_id}/releases | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/releases | ok | specific | API client helper is only used by explicit release-management reads/tests; the main workspace/header does not poll releases during normal authoring.
+FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | ok | specific | API client helper reads one release manifest by explicit release-version request; no lifecycle subscriber exists in the production UI.
 FRONTEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is shared per-skill truth, revalidated only after import-file events, runtime_config file events, or artifact save.
 FRONTEND GET /api/skills/{skill_id}/runs | ok | shared | Run-history list is a Timeline-owned SWR cold-load key with Studio truth policy; Workspace uses a projection-only hook so skill open/start/resume do not subscribe to or cold-load the list, and writes project returned metadata without a follow-up GET.
-FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
-FRONTEND GET /api/skills/{skill_id}/subgraph | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | ok | specific | Scoped compare-group read starts only after an explicit node compare run returns a group id; refresh is confined to that compare_group_id.
+FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run detail read is driven by an explicit trace/run-ended target run id and does not refresh run lists or skill truth.
+FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit Golden Compare/Judge action reads the selected run's compare payload; replay stays scoped to the chosen run id and baseline.
+FRONTEND GET /api/skills/{skill_id}/subgraph | ok | specific | Explicit subgraph expand/drill action resolves one child graph topology by path; ordinary node selection and panel open do not resolve subgraphs.
 FRONTEND GET /api/skills/{skill_id}/test_inputs | ok | shared | Test input list is a SWR cold-load key with Studio truth policy; phase-node clicks no longer reopen I/O implicitly, and create/delete project list changes without write-after-read refresh.
-FRONTEND GET /api/skills/{skill_id}/test_inputs/{input_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id}/test_inputs/{input_id} | ok | specific | Explicit Predict/Run preflight resolves the selected test input content; missing selection fails locally and no input content is hydrated by selection alone.
 FRONTEND GET /api/system/community-catalog-config | ok | shared | Settings General cold-loads once; client cache dedupes concurrent/repeated consumers.
 FRONTEND GET /api/system/truth-sources | ok | shared | Settings General cold-loads once; client cache dedupes concurrent/repeated consumers.
 FRONTEND GET /api/system/truth-sources/{source_id}/content | ok | shared | Explicit source-open preview fallback only; no mount, tab switch, focus, or selection trigger.
 FRONTEND GET /api/templates | ok | shared | Disabled until the create-skill template UI is visible; no Copilot skill chat mount fetch.
-FRONTEND POST /api/io/scan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/io/scan | ok | specific | Explicit I/O import dialog action scans a chosen file/folder and returns scoped field candidates; no panel mount or node selection scans disk.
 FRONTEND POST /api/llm/catalog/sync-verified | ok | specific | No lifecycle trigger remains in Settings; future use must be an explicit command or precise backend event path.
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test | ok | specific | Explicit manual model probe command; client projects returned registry/results and does not perform a follow-up registry GET.
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/test | ok | specific | Explicit endpoint Test/re-probe command; client projects returned registry and controller tests guard against a second getCredentials round trip.
@@ -475,32 +475,32 @@ FRONTEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit ro
 FRONTEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; client projects returned registry and returns the updated route to the caller.
 FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; client projects returned registry and returns the updated route to the caller.
 FRONTEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; client projects CompileSuccess.detail into the shared skill-detail cache with revalidate:false and performs no broad /skills/{skill_id} follow-up read.
-FRONTEND POST /api/skills/{skill_id}/copilot/interrupt | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/copilot/judge | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/files/{file_path:path} | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/golden | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/golden/manual/plan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/golden/plan | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/graph/serialize | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/io/import | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/lint | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/publish | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/copilot/interrupt | ok | specific | Explicit Copilot Stop button command; it interrupts only the active skill stream and never revalidates registry/roles/settings/skill truth.
+FRONTEND POST /api/skills/{skill_id}/copilot/judge | ok | specific | Explicit Copilot Judge preparation from a compare result; it returns scoped refs for the next Copilot message and is not a background context sync.
+FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Explicit approve/reject action for one held Copilot tool call; result is scoped to that tool_use_id.
+FRONTEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser-only explicit file-save fallback; Tauri uses native-fs as sole writer, and editor/panel saves are user edits with expected-hash conflict handling.
+FRONTEND POST /api/skills/{skill_id}/golden | ok | specific | Browser-only explicit Promote to Golden fallback; Tauri uses the plan endpoint plus native-fs writes, and callers project the returned baseline.
+FRONTEND POST /api/skills/{skill_id}/golden/manual/plan | ok | specific | Explicit manual-golden save asks backend for a write plan, then persists through native-fs; it is not a lifecycle refresh.
+FRONTEND POST /api/skills/{skill_id}/golden/plan | ok | specific | Explicit promote-to-golden in Tauri asks for a write plan and projects the returned baseline after native-fs writes.
+FRONTEND POST /api/skills/{skill_id}/graph/serialize | ok | specific | Explicit canvas topology mutation persists GRAPH.md with expected_hash and returns the canonical hash/update metadata; selection alone never serializes.
+FRONTEND POST /api/skills/{skill_id}/io/import | ok | specific | Explicit I/O import command writes the chosen import mapping/runtime files; create/delete projections or precise runtime events handle follow-up state.
+FRONTEND POST /api/skills/{skill_id}/lint | ok | specific | Explicit/debounced lint after user source edits or settled file writes; it is the diagnostics SSOT path and not a focus, reconnect, or selection refresh.
+FRONTEND POST /api/skills/{skill_id}/publish | ok | specific | Explicit Header Publish command; success/failure is local command state and does not poll release or registry truth.
 FRONTEND POST /api/skills/{skill_id}/revert | ok | specific | Explicit Local History revert command; client projects the returned SkillDetail into the skill-detail cache without a follow-up /skills/{skill_id} GET and revalidates only the history list.
 FRONTEND POST /api/skills/{skill_id}/runs | ok | specific | Explicit Run command; backend returns RunMetadata and Workspace projects it into the shared run-history cache without subscribing to or refetching the list.
-FRONTEND POST /api/skills/{skill_id}/runs/predict | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict button command; input content is resolved from the selected test input and the returned diagnostic export is projected locally.
+FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | ok | specific | Explicit node Compare LLMs command from Properties; node selection itself is covered as network-silent and never starts compare jobs.
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume | ok | specific | Explicit resume commands return RunMetadata and Workspace projects the resumed run into the shared run-history cache without a follow-up /runs GET.
-FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/sync | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | ok | specific | Scoped dirty-downstream probe runs for a failed run after skill content changes or resume UI needs validity; it is not triggered by selecting arbitrary nodes.
+FRONTEND POST /api/skills/{skill_id}/sync | ok | specific | Explicit collaboration Sync command from the publish/collaboration UI; no background sync runs on skill open, focus, or reconnect.
 FRONTEND POST /api/skills/{skill_id}/test_inputs | ok | specific | Explicit Test Inputs create command; client inserts the returned TestInputMetadata into the local list snapshot without a follow-up /test_inputs GET.
-FRONTEND POST /api/skills/{skill_id}/validate_input | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/validate_input | ok | specific | Explicit playground/input validation command; it validates a submitted payload and does not revalidate broad skill or runtime truth.
 FRONTEND PUT /api/llm/registry/endpoints | ok | specific | Explicit API Keys save/upsert command; client uses the returned canonical registry snapshot and no longer follows with a broad /llm/registry GET.
 FRONTEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
 FRONTEND PUT /api/settings | ok | specific | Settings autosave only follows explicit field edits; debounce/in-flight semantics keep the latest payload and suppress stale response projection.
 FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Output artifact config save is an explicit command and projects the returned runtime_config snapshot.
-FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | specific | Explicit Properties compare-candidates autosave for one node; client updates the skill-scoped cache entry and clears in-flight stale reads.
+FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params autosave for one node; debounced saves project the returned node config without broad refetch.
 FRONTEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.
 FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys. Consumers must share the singleton hub; Workspace file/runtime watchers are covered and must not create a workspace-local events socket.
 FRONTEND WS /ws/runs/{run_id} | partial | specific | Scoped user or run stream; needs route-specific lifecycle guard.

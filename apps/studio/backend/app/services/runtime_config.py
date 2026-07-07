@@ -71,6 +71,7 @@ def write_runtime_config(skill_dir: Path, config: dict[str, Any]) -> dict[str, A
     from app.services.file_watcher import record_api_write
 
     record_api_write(path, match_current_mtime=False)
+    # codeql[py/path-injection] skill_dir is the resolved opened skill root; runtime_config.json is a fixed child path.
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

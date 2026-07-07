@@ -18,7 +18,7 @@ import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk }
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistoryProjection } from "@/hooks/useRunHistory"
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistoryRevalidator, useRunHistoryProjection } from "@/hooks/useRunHistory"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
@@ -590,9 +590,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // History SWR cache when this run reaches run_ended so the snapshot appears
   // without the user clicking Refresh. We only project the single backend truth —
   // refresh asks SWR to re-fetch the same `/skills/{id}/history` key the panel
-  // consumes; we never build a snapshot locally.
-  const localHistory = useLocalHistory(currentSkillId)
-  const refreshLocalHistory = localHistory.refresh
+  // consumes; Workspace only holds a revalidator and does not subscribe to the
+  // Local History list, so opening a skill does not cold-load `/history`.
+  const { refresh: refreshLocalHistory } = useLocalHistoryRevalidator(currentSkillId)
   const { projectRun } = useRunHistoryProjection(currentSkillId)
   // Track which (skill, run) pair has already triggered a refresh so the effect
   // fires once on the not-ended → ended edge, not on every subsequent re-render

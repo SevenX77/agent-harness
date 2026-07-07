@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends
 
@@ -11,6 +13,7 @@ from app.core.backends import get_metadata
 from app.core.exceptions import error_response, raise_error_response
 from app.core.ports.metadata import MetadataStore
 from app.models.settings import AppSettings
+from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.runtime_activity import record_runtime_activity
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,9 @@ async def put_settings(
     """Persist global Studio app settings."""
     settings = _with_effective_defaults(settings)
     previous = _with_effective_defaults(await metadata.read_app_settings())
+    changes = _settings_changes(previous, settings)
+    if not changes:
+        return previous
     try:
         await metadata.write_app_settings(settings)
     except Exception as exc:
@@ -53,7 +59,7 @@ async def put_settings(
             retry_strategy="idempotent",
         )
         raise_error_response(response)
-    changes = _settings_changes(previous, settings)
+    await _publish_settings_changed(changes)
     record_runtime_activity(
         source_id="app_settings",
         action="update_app_settings",
@@ -71,3 +77,21 @@ def _settings_changes(previous: AppSettings, current: AppSettings) -> dict[str, 
         for key, value in current_data.items()
         if previous_data.get(key) != value
     }
+
+
+async def _publish_settings_changed(changes: dict[str, dict[str, object]]) -> None:
+    payload: dict[str, Any] = {
+        "type": "settings_changed",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "http_api",
+        "source_id": "app_settings",
+        "changed_fields": sorted(changes),
+        "changes": changes,
+    }
+    try:
+        await event_bus.publish(STUDIO_EVENTS_TOPIC, payload)
+    except Exception:
+        logger.exception(
+            "phase=publish_settings_changed action=publish status=failed payload=%s",
+            payload,
+        )

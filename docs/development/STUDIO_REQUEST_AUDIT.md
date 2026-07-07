@@ -332,7 +332,7 @@ BACKEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped in-memory 
 BACKEND GET /api/llm/roles | ok | specific | Aggregate roles cold-load projection; backend returns roles_data plus the joined registry snapshot from the same roles/credentials state.
 BACKEND GET /api/llm/roles/test-results | ok | specific | Persisted last-known role-test result projection; backend read is scoped, emits no revalidation event, and tests cover empty/result re-projection.
 BACKEND GET /api/llm/roles/{role_name} | ok | specific | Scoped backend role read; frontend no longer exposes a caller, and backend tests cover materialized single-role response behavior.
-BACKEND GET /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/settings | ok | specific | Scoped app-settings read; backend tests cover effective defaults and persisted snapshot roundtrip, and the route emits no revalidation event.
 BACKEND GET /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/golden | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
@@ -418,7 +418,7 @@ BACKEND PUT /api/llm/registry/endpoints | ok | specific | Explicit endpoint save
 BACKEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; backend emits roles_changed and returns a roles_data + registry projection snapshot instead of requiring write-after-read refresh.
 BACKEND PUT /api/llm/roles/{role_name} | ok | specific | Explicit scoped role replace used by backend/materializer tests; backend writes roles truth, emits roles_changed, and returns the materialized role.
 BACKEND PUT /api/llm/routes/{route_id} | ok | specific | Explicit route metadata update command; backend returns the joined canonical RegistryResponse.
-BACKEND PUT /api/settings | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/settings | ok | specific | Explicit app-settings save command; unchanged snapshots are side-effect-free, changed snapshots return the canonical AppSettings response and publish a precise settings_changed event.
 BACKEND PUT /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Runtime artifact writes are explicit output-config saves and return the canonical runtime_config snapshot.
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.

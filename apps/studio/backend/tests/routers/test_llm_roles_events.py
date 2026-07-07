@@ -222,6 +222,96 @@ def test_apply_model_profile_publishes_roles_changed(
     assert [entry.route_id for entry in role.fallback_chain] == [route_id]
 
 
+def test_get_model_profiles_returns_scoped_profile_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles_path, route_id = _seed(tmp_path, monkeypatch)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            model_profiles={
+                "haiku": ModelProfile(
+                    model_profile_id="haiku",
+                    canonical_id="claude-3-5-haiku",
+                    display_name="Claude 3.5 Haiku",
+                    fallback_chain=[RoleRouteEntry(route_id=route_id)],
+                )
+            },
+            roles={"copilot_custom_test": RoleEntry()},
+        ),
+        known_route_ids={route_id},
+    )
+
+    result = asyncio.run(llm_router.get_model_profiles())
+
+    assert list(result) == ["haiku"]
+    assert result["haiku"].display_name == "Claude 3.5 Haiku"
+
+
+def test_put_model_profiles_publishes_and_returns_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _roles_path, route_id = _seed(tmp_path, monkeypatch)
+    request = {
+        "haiku": ModelProfile(
+            model_profile_id="haiku",
+            canonical_id="claude-3-5-haiku",
+            display_name="Claude 3.5 Haiku",
+            fallback_chain=[RoleRouteEntry(route_id=route_id)],
+        )
+    }
+
+    async def _put() -> tuple[llm_router.RolesProjectionResponse, dict[str, object]]:
+        with _DirectSubscriber() as sub:
+            result = await llm_router.put_model_profiles(request)
+            return result, await sub.receive()
+
+    result, event = asyncio.run(_put())
+    assert event["type"] == "roles_changed"
+    assert event["source"] == "http_api"
+    assert result.roles_data.model_profiles["haiku"].display_name == "Claude 3.5 Haiku"
+    assert result.registry.model_profiles["haiku"].display_name == "Claude 3.5 Haiku"
+
+
+def test_delete_model_profile_publishes_and_returns_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles_path, route_id = _seed(tmp_path, monkeypatch)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            model_profiles={
+                "haiku": ModelProfile(
+                    model_profile_id="haiku",
+                    canonical_id="claude-3-5-haiku",
+                    display_name="Claude 3.5 Haiku",
+                    fallback_chain=[RoleRouteEntry(route_id=route_id)],
+                )
+            },
+            roles={"copilot_custom_test": RoleEntry(source_profile_id="haiku")},
+        ),
+        known_route_ids={route_id},
+    )
+
+    async def _delete() -> tuple[llm_router.RolesProjectionResponse, dict[str, object]]:
+        with _DirectSubscriber() as sub:
+            result = await llm_router.delete_model_profile("haiku")
+            return result, await sub.receive()
+
+    result, event = asyncio.run(_delete())
+    assert event["type"] == "roles_changed"
+    assert event["source"] == "http_api"
+    assert "haiku" not in result.roles_data.model_profiles
+    assert "haiku" not in result.registry.model_profiles
+    role = result.roles_data.roles["copilot_custom_test"]
+    assert role.source_profile_id is None
+    assert role.source_profile_snapshot is not None
+    assert role.source_profile_snapshot["deleted_marker"] is True
+
+
 def test_publish_failure_does_not_break_save(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

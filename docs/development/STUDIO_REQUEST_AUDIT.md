@@ -312,7 +312,7 @@ Guard:
 
 ```studio-request-audit-verdicts
 BACKEND DELETE /api/llm/model-bundles/{bundle_id} | ok | specific | Explicit model-bundle delete command; backend emits roles_changed and returns a roles_data + registry projection snapshot built from the saved roles truth.
-BACKEND DELETE /api/llm/model-profiles/{model_profile_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND DELETE /api/llm/model-profiles/{model_profile_id} | ok | specific | Explicit model-profile delete command; backend emits roles_changed, cascades role source snapshots, and returns a roles_data + registry projection snapshot.
 BACKEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit endpoint delete command; backend returns the joined canonical RegistryResponse after cascading route references.
 BACKEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete command; backend rejects fixed roles, emits roles_changed, and returns a roles_data + registry projection snapshot.
 BACKEND DELETE /api/llm/routes/{route_id} | ok | specific | Explicit route delete command; backend rejects referenced routes and otherwise returns the joined canonical RegistryResponse.
@@ -324,7 +324,7 @@ BACKEND GET /api/_debug/value-error | internal | none | Backend-owned infrastruc
 BACKEND GET /api/batch/{batch_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/llm/fixed-roles | ok | specific | Immutable fixed-role metadata projection; route has response tests and emits no revalidation event.
 BACKEND GET /api/llm/fixed-roles/{role_name} | ok | specific | Immutable fixed-role recommendation projection; route has response/404 tests and emits no revalidation event.
-BACKEND GET /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/llm/model-profiles | ok | specific | Scoped model-profile projection read; backend test covers direct projection and it emits no broad revalidation event.
 BACKEND GET /api/llm/providers/notable-models | ok | specific | Suggestion-only provider note projection for manual model probing; route has response tests and is not runtime truth.
 BACKEND GET /api/llm/registry | ok | specific | Canonical joined registry projection; route tests cover redaction, role/model-group joins, setup_required, and registry projection fields.
 BACKEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | specific | Explicit local secret reveal for API Keys hydration; frontend dedupes and reuses known secrets after exact registry writes.
@@ -413,7 +413,7 @@ BACKEND POST /gateway/project_route_state | internal | none | Backend-owned infr
 BACKEND POST /gateway/resolve_credential | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND POST /gateway/resolve_routes | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
 BACKEND POST /shutdown | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
-BACKEND PUT /api/llm/model-profiles | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/llm/model-profiles | ok | specific | Explicit model-profile replace command; backend emits roles_changed and returns a roles_data + registry projection snapshot instead of requiring write-after-read refresh.
 BACKEND PUT /api/llm/registry/endpoints | ok | specific | Explicit endpoint save command; backend returns the joined canonical RegistryResponse so callers do not perform write-after-read refresh.
 BACKEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; backend emits roles_changed and returns a roles_data + registry projection snapshot instead of requiring write-after-read refresh.
 BACKEND PUT /api/llm/roles/{role_name} | ok | specific | Explicit scoped role replace used by backend/materializer tests; backend writes roles truth, emits roles_changed, and returns the materialized role.

@@ -228,12 +228,11 @@ vi.mock('@/hooks/useRunHistory', async (importActual) => {
     useRunHistoryProjection: () => ({
       projectRun: mocks.projectRunHistory,
     }),
-    useLocalHistory: () => ({
-      history: [],
-      isLoading: false,
-      error: null,
+    useLocalHistory: () => {
+      throw new Error('Workspace must not subscribe to the local-history list')
+    },
+    useLocalHistoryRevalidator: () => ({
       refresh: mocks.refreshLocalHistory,
-      revert: vi.fn(),
     }),
   }
 })

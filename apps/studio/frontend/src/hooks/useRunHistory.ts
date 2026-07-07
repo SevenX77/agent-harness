@@ -6,6 +6,7 @@ import type { GitHistoryItem, RunListResponse, RunMetadata } from '../api/types'
 import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
 
 const runHistoryKey = (skillId: string) => `/skills/${skillId}/runs`
+const localHistoryKey = (skillId: string) => `/skills/${skillId}/history`
 
 function projectDeletedRun(current: RunListResponse | undefined, runId: string): RunListResponse | undefined {
   if (!current) {
@@ -111,6 +112,18 @@ export function useLocalHistory(skillId: string | null) {
     refresh: mutate,
     revert,
   }
+}
+
+export function useLocalHistoryRevalidator(skillId: string | null) {
+  const { mutate } = useSWRConfig()
+  const refresh = useCallback(async () => {
+    if (!skillId) {
+      return
+    }
+    await mutate<GitHistoryItem[]>(localHistoryKey(skillId))
+  }, [mutate, skillId])
+
+  return { refresh }
 }
 
 export function runTokenTotal(run: RunMetadata): number | null {

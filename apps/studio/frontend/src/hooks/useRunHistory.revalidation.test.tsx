@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, createElement, useEffect } from "react"
+import type { ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import useSWR, { SWRConfig } from "swr"
 import type { Cache } from "swr"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { RunListResponse, RunMetadata, SkillDetail } from "../api/types"
+import type { GitHistoryItem, RunListResponse, RunMetadata, SkillDetail } from "../api/types"
 import { STUDIO_TRUTH_SWR_CONFIG } from "./studio-swr-policy"
-import { useLocalHistory, useRunHistory, useRunHistoryProjection } from "./useRunHistory"
+import { useLocalHistory, useLocalHistoryRevalidator, useRunHistory, useRunHistoryProjection } from "./useRunHistory"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -28,6 +29,7 @@ vi.mock("../api/client", () => ({
 }))
 
 type LocalHistoryHook = ReturnType<typeof useLocalHistory>
+type LocalHistoryRevalidatorHook = ReturnType<typeof useLocalHistoryRevalidator>
 type RunHistoryHook = ReturnType<typeof useRunHistory>
 type RunHistoryProjectionHook = ReturnType<typeof useRunHistoryProjection>
 
@@ -72,6 +74,16 @@ function runList(runs: RunMetadata[]): RunListResponse {
   }
 }
 
+function historyItem(sha: string): GitHistoryItem {
+  return {
+    sha,
+    message: `Auto run ${sha}`,
+    author: "Studio",
+    timestamp: "2026-07-07T00:00:00Z",
+    kind: "auto_run",
+  }
+}
+
 function SkillDetailSubscriber({ skillId }: { skillId: string }) {
   useSWR(`/skills/${skillId}`, mocks.fetcher, STUDIO_TRUTH_SWR_CONFIG)
   return null
@@ -85,6 +97,20 @@ function LocalHistoryHost({
   onHook: (hook: LocalHistoryHook) => void
 }) {
   const hook = useLocalHistory(skillId)
+  useEffect(() => {
+    onHook(hook)
+  }, [hook, onHook])
+  return null
+}
+
+function LocalHistoryRevalidatorHost({
+  skillId,
+  onHook,
+}: {
+  skillId: string
+  onHook: (hook: LocalHistoryRevalidatorHook) => void
+}) {
+  const hook = useLocalHistoryRevalidator(skillId)
   useEffect(() => {
     onHook(hook)
   }, [hook, onHook])
@@ -188,6 +214,107 @@ describe("useLocalHistory skill detail revalidation policy", () => {
 
     expect(mocks.revertSkill).toHaveBeenCalledWith("demo", "abc123")
     expect(mocks.fetcher).not.toHaveBeenCalled()
+  })
+})
+
+describe("useLocalHistory revalidator policy", () => {
+  let container: HTMLDivElement
+  let root: Root
+  let cache: Cache
+  let localHistory: LocalHistoryHook | null
+  let revalidator: LocalHistoryRevalidatorHook | null
+
+  beforeEach(() => {
+    cache = new Map()
+    localHistory = null
+    revalidator = null
+    mocks.getLocalHistory.mockReset()
+    mocks.getLocalHistory.mockResolvedValue([historyItem("sha-1")])
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  function swr(children: ReactNode) {
+    return createElement(
+      SWRConfig,
+      {
+        value: {
+          provider: () => cache,
+          dedupingInterval: 0,
+          focusThrottleInterval: 0,
+          ...STUDIO_TRUTH_SWR_CONFIG,
+        },
+      },
+      children,
+    )
+  }
+
+  it("does not cold-load local history when only a revalidator is mounted", async () => {
+    await act(async () => {
+      root.render(swr(
+        createElement(LocalHistoryRevalidatorHost, {
+          skillId: "demo",
+          onHook: (hook) => {
+            revalidator = hook
+          },
+        }),
+      ))
+      await settle()
+    })
+
+    expect(mocks.getLocalHistory).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await revalidator?.refresh()
+      await settle()
+    })
+
+    expect(mocks.getLocalHistory).not.toHaveBeenCalled()
+  })
+
+  it("revalidates the mounted local history list without a Workspace subscription", async () => {
+    await act(async () => {
+      root.render(swr(
+        createElement(
+          "div",
+          null,
+          createElement(LocalHistoryRevalidatorHost, {
+            skillId: "demo",
+            onHook: (hook) => {
+              revalidator = hook
+            },
+          }),
+          createElement(LocalHistoryHost, {
+            skillId: "demo",
+            onHook: (hook) => {
+              localHistory = hook
+            },
+          }),
+        ),
+      ))
+      await settle()
+    })
+
+    expect(mocks.getLocalHistory).toHaveBeenCalledTimes(1)
+    expect(localHistory?.history.map((item) => item.sha)).toEqual(["sha-1"])
+    mocks.getLocalHistory.mockClear()
+    mocks.getLocalHistory.mockResolvedValue([historyItem("sha-2")])
+
+    await act(async () => {
+      await revalidator?.refresh()
+      await settle()
+    })
+
+    expect(mocks.getLocalHistory).toHaveBeenCalledTimes(1)
+    expect(localHistory?.history.map((item) => item.sha)).toEqual(["sha-2"])
   })
 })
 

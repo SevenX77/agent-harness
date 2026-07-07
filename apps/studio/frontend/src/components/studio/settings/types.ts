@@ -39,12 +39,10 @@ export interface SettingsPageProps {
   initialTab?: SettingsTab
 }
 
-export interface SettingsPageController extends Omit<
+export type SettingsPageController = Omit<
   SettingsPageContentProps,
   "activeTab" | "onClose" | "onTabChange" | "onNavigateToApiKeys"
-> {
-  ensureCredentialsHydrated: () => void
-}
+>
 
 export interface SettingsPageViewProps extends SettingsPageProps {
   controller: SettingsPageController
@@ -93,6 +91,7 @@ export interface SettingsPageContentProps {
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>, options?: ProviderDraftChangeOptions) => void
+  onRevealProviderSecret: (providerId: string) => Promise<string | null>
   onGetProviderModels: (providerId: string) => void
   /** Item 2: re-probe a single (URL, protocol) endpoint cell — the endpoint tag click target. */
   onProbeEndpoint: (endpointId: string) => void

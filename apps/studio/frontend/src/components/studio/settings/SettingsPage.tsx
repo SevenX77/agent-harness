@@ -7,7 +7,7 @@ import { shouldApplyExternalRolesRefresh, useDebouncedRolesSave } from "@/hooks/
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRoles, isRedactedEndpointSecret, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import { clearActiveProbeEndpoints, updateActiveProbeEndpoint } from "../api-keys/active-probe-store"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
@@ -456,7 +456,6 @@ export function useSettingsPageController(): SettingsPageController {
   const dirtyProviderIdsRef = useRef<Set<string>>(new Set())
   const deletedProviderIdsRef = useRef<Set<string>>(new Set())
   const controllerMountedRef = useRef(true)
-  const credentialsHydratedRef = useRef(false)
   const credentialsHydratingRef = useRef(false)
   const pendingRoleProjectionRefreshRef = useRef(false)
   // #6: a roles_changed event arrived while the Roles/Copilot tab had never been
@@ -610,7 +609,7 @@ export function useSettingsPageController(): SettingsPageController {
   // config truth: registry_changed re-pulls credentials; roles_changed re-pulls
   // roles+model-groups when loaded, else marks them dirty.
   const refetchCredentialsFromEvent = useCallback(() => {
-    getCredentials({ hydrateSecrets: credentialsHydratedRef.current, force: true })
+    getCredentials({ hydrateSecrets: false, force: true })
       .then((next) => {
         setCredentials(next)
         setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
@@ -675,10 +674,9 @@ export function useSettingsPageController(): SettingsPageController {
     if (!apiReady) return
     let cancelled = false
     credentialsHydratingRef.current = true
-    getCredentials()
+    getCredentials({ hydrateSecrets: false })
       .then((next) => {
         if (cancelled) return
-        credentialsHydratedRef.current = true
         invalidatedTestOutcomeIdsRef.current.clear()
         setCredentialsError(null)
         setCredentials(next)
@@ -700,31 +698,39 @@ export function useSettingsPageController(): SettingsPageController {
     }
   }, [apiReady])
 
-  const ensureCredentialsHydrated = useCallback(() => {
-    if (!apiReady) return
-    if (credentialsHydratedRef.current || credentialsHydratingRef.current) return
-    credentialsHydratingRef.current = true
-    getCredentials()
-      .then((next) => {
-        if (!controllerMountedRef.current) return
-        credentialsHydratedRef.current = true
-        invalidatedTestOutcomeIdsRef.current.clear()
-        setCredentialsError(null)
-        setCredentials(next)
-        setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
-        setCredentialsLoading(false)
-      })
-      .catch((error) => {
-        if (!controllerMountedRef.current) return
-        const message = error instanceof Error ? error.message : "Load failed"
-        setCredentialsError(message)
-        toast.error(`API Keys load failed: ${message}`)
-        setCredentialsLoading(false)
-      })
-      .finally(() => {
-        credentialsHydratingRef.current = false
-      })
-  }, [apiReady])
+  async function revealProviderSecret(providerId: string): Promise<string | null> {
+    if (!ensureBackendReachable()) return null
+    const draft = draftsRef.current.find((item) => item.id === providerId)
+    const endpointIds = draft
+      ? providerEndpointDraftsForAction(draft).map((endpointDraft) => endpointDraft.id)
+      : [providerId]
+    const currentSecret = draft?.api_key
+      ?? credentialsRef.current.providers.find((provider) => provider.id === providerId)?.api_key
+      ?? ""
+    if (currentSecret && !isRedactedEndpointSecret(currentSecret)) return currentSecret
+    const endpointId = endpointIds.find((candidate) => {
+      const endpoint = credentialsRef.current.providers.find((provider) => provider.id === candidate)
+      return !endpoint || isRedactedEndpointSecret(endpoint.api_key)
+    }) ?? endpointIds[0] ?? providerId
+    try {
+      const secret = await getEndpointSecret(endpointId)
+      setCredentials((current) => ({
+        ...current,
+        providers: current.providers.map((provider) => (
+          provider.id === providerId || endpointIds.includes(provider.id)
+            ? { ...provider, api_key: secret.api_key }
+            : provider
+        )),
+      }))
+      setDrafts((current) => current.map((item) => (
+        item.id === providerId ? { ...item, api_key: secret.api_key } : item
+      )))
+      return secret.api_key
+    } catch (error) {
+      toast.error(composeRequestErrorMessage(error, "API key reveal failed"))
+      return null
+    }
+  }
 
   useEffect(() => {
     if (!apiReady) return
@@ -877,7 +883,7 @@ export function useSettingsPageController(): SettingsPageController {
       for (const endpointId of uniqueEndpointIds) {
         await deleteEndpoint(endpointId)
       }
-      const next = await getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      const next = await getCredentials({ hydrateSecrets: false })
       setCredentials(next)
       setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
     } catch (error) {
@@ -1183,7 +1189,7 @@ export function useSettingsPageController(): SettingsPageController {
     },
     connectionLost,
     backendReachable,
-    ensureCredentialsHydrated,
+    onRevealProviderSecret: revealProviderSecret,
     onProviderFieldChange: updateProviderField,
     onGetProviderModels: (providerId) => void runProviderGetModels(providerId),
     onProbeEndpoint: (endpointId) => {
@@ -1215,17 +1221,10 @@ export function useSettingsPageController(): SettingsPageController {
 
 export function SettingsPageView({ onClose, initialTab = "general", controller }: SettingsPageViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
-  const { ensureCredentialsHydrated } = controller
 
   useEffect(() => {
     setActiveTab(initialTab)
   }, [initialTab])
-
-  useEffect(() => {
-    if (activeTab === "api_keys") {
-      ensureCredentialsHydrated()
-    }
-  }, [activeTab, ensureCredentialsHydrated])
 
   return (
     <SettingsPageContent

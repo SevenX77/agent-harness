@@ -51,7 +51,7 @@
       "module": "壳层容器",
       "func": "设计:在四个 tab(General / API Keys / LLM Roles / Copilot)之间切换,且切到哪个才懒加载哪个的数据,不一进 Settings 就把四套数据全拉一遍。",
       "action": "用户点 Settings 左侧导航栏里的某个 tab(General / API Keys / LLM Roles / Copilot)。",
-      "fe_design": "点导航栏某 tab → 更新 activeTab(当前激活 tab 的状态)→ SettingsPageContent(壳层内容区,按 activeTab 渲染对应 tab)切到该 tab。数据懒加载用绑 activeTab 的 useEffect(React 副作用钩子)实现:切到 api_keys 才首次 hydrate(把掩码 key 换回真值的明文回填)、切到 llm_roles/copilot 才首次拉 roles(角色)+ model groups(模型组)。已加载过的 tab 不重复拉。注:凭证的「打码快照」在壳层挂载时即拉一次(供各 tab 共用),真正按 tab 懒加载的是 API Keys 的明文 hydration 与 Roles 的角色/模型组。设计意图:成本最高的数据按需加载,降低首屏开销(尤其 API Keys 的明文 hydration、Roles 的大列表)。",
+      "fe_design": "点导航栏某 tab → 更新 activeTab(当前激活 tab 的状态)→ SettingsPageContent(壳层内容区,按 activeTab 渲染对应 tab)切到该 tab。数据懒加载用绑 activeTab 的 useEffect(React 副作用钩子)实现:Settings 壳层首次需要凭证时只拉一次 redacted registry 打码摘要(供 API Keys/roles 投影共用),切到 api_keys 只渲染这份已加载快照、不自动取明文;切到 llm_roles/copilot 且 roles/model groups 未加载时才首次拉 roles(角色)+ model groups(模型组)。已加载过的 tab 不重复拉。API key 明文只允许在用户点 Eye/Copy 这类显式敏感动作时 scoped reveal 单条 endpoint。设计意图:生命周期加载只做必要摘要,降低首屏与 tab 切换开销,避免 API Keys 明文批量 hydration。",
       "fe_modules": [
         {
           "name": "Settings overlay 容器",
@@ -61,7 +61,7 @@
       "be_contract": [
         {
           "endpoint": "GET /api/llm/registry",
-          "purpose": "切到 API Keys tab 时首次拉凭证/路由快照(懒加载),供该 tab 渲染。",
+          "purpose": "Settings 壳层首次需要凭证时拉 redacted 凭证/路由快照,供 API Keys tab 渲染;切到 API Keys 不自动取 secret。",
           "mechanism_ref": "mech_cred",
           "iface_ref": "iface-0"
         }

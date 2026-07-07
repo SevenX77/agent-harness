@@ -177,7 +177,7 @@ describe('API Keys v4 registry adapter', () => {
       })
     })
 
-    const credentials = await getCredentials()
+    const credentials = await getCredentials({ hydrateSecrets: true })
 
     expect(seen).toEqual([
       'get /llm/registry',
@@ -235,8 +235,11 @@ describe('API Keys v4 registry adapter', () => {
       }
     }
 
-    const [first, second] = await Promise.all([getCredentials(), getCredentials()])
-    await getCredentials({ force: true })
+    const [first, second] = await Promise.all([
+      getCredentials({ hydrateSecrets: true }),
+      getCredentials({ hydrateSecrets: true }),
+    ])
+    await getCredentials({ hydrateSecrets: true, force: true })
 
     expect(first.providers[0]?.api_key).toBe('sk-openrouter-real')
     expect(second.providers[0]?.api_key).toBe('sk-openrouter-real')
@@ -403,7 +406,7 @@ describe('API Keys v4 registry adapter', () => {
       },
     }))
 
-    const credentials = await getCredentials({ hydrateSecrets: false })
+    const credentials = await getCredentials()
 
     expect(credentials.probe_catalog).toEqual({
       local_evidence_records_count: 3,
@@ -524,17 +527,15 @@ describe('API Keys v4 registry adapter', () => {
 
     expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
       'get /llm/registry',
-      'get /llm/registry/endpoints/openrouter-custom/secret',
       'put /llm/registry/endpoints',
     ])
-    expect(JSON.parse(String(seen[2].data))).toEqual({
+    expect(JSON.parse(String(seen[1].data))).toEqual({
       provider_endpoints: {
         'openrouter-custom': {
           endpoint_id: endpoint.endpoint_id,
           display_name: 'OpenRouter Renamed',
           protocol: endpoint.protocol,
           base_url: endpoint.base_url,
-          api_key: 'sk-openrouter-real',
           timeout_seconds: endpoint.timeout_seconds,
           trust_env: endpoint.trust_env,
           proxy_env: endpoint.proxy_env,
@@ -579,7 +580,7 @@ describe('API Keys v4 registry adapter', () => {
       },
     ])
 
-    expect(JSON.parse(String(seen[2].data)).provider_endpoints['openrouter-custom'].api_key).toBe('')
+    expect(JSON.parse(String(seen[1].data)).provider_endpoints['openrouter-custom'].api_key).toBe('')
   })
 
   it('keeps the full registry projection after saving endpoint credentials', async () => {
@@ -1561,7 +1562,6 @@ describe('API Keys v4 registry adapter', () => {
 
     expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
       'get /llm/registry',
-      'get /llm/registry/endpoints/openrouter-custom/secret',
       'delete /llm/registry/endpoints/openrouter-custom',
     ])
     expect(saved.providers).toEqual([])

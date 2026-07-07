@@ -372,7 +372,7 @@
       "endpoint": "GET /api/llm/registry/endpoints/{endpoint_id}/secret",
       "req": "路径参数 endpoint_id",
       "resp": "EndpointSecretResponse{endpoint_id, api_key=单条明文}；endpoint 不存在 → 404",
-      "purpose": "查（取单条明文）——scoped reveal，前端进 API Keys tab 后逐个 endpoint 把占位 ********** 换回真 key 显示/编辑，只取需要的那一条，不在 registry 里一次性吐全部明文",
+      "purpose": "查（取单条明文）——scoped reveal，仅在用户显式点 Eye / Copy 等敏感动作且当前值仍是 redacted 占位时，取当前 provider 对应 endpoint 的单条真 key 显示/复制；打开 Settings、切到 API Keys tab、聚焦、重连、registry_changed 摘要刷新都不得逐个 endpoint 换明文，不在 registry 里一次性吐全部明文",
       "provider": "gateway 后端（llm.py get_registry_endpoint_secret）",
       "id": "iface-1"
     },

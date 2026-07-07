@@ -604,7 +604,7 @@ export interface RolesData {
   [key: string]: unknown
 }
 
-const redactedSecret = '**********'
+export const REDACTED_ENDPOINT_SECRET = '**********'
 let cachedRegistry: RegistryResponse | null = null
 let registryRequest: Promise<RegistryResponse> | null = null
 let cachedRolesData: RolesData | null = null
@@ -618,6 +618,10 @@ let fixedRoleNamesRequest: Promise<string[]> | null = null
 const fixedRoleStatusCache: Partial<Record<string, FixedRoleStatus>> = {}
 const fixedRoleStatusRequests: Partial<Record<string, Promise<FixedRoleStatus>>> = {}
 const testResultCacheByEndpoint: Record<string, ProviderTestResult[]> = {}
+
+export function isRedactedEndpointSecret(value: string | null | undefined): boolean {
+  return value === REDACTED_ENDPOINT_SECRET
+}
 
 export function resetLlmApiCachesForTests(): void {
   cachedRegistry = null
@@ -1138,8 +1142,8 @@ function endpointFromCredentialUpdate(
 ): ProviderEndpointWrite {
   const nextProtocol = update.provider_type ?? existing?.protocol ?? 'openai_compatible'
   const nextBaseUrl = update.base_url ?? existing?.base_url ?? ''
-  const nextSecret = update.api_key === redactedSecret
-    ? existing?.api_key === redactedSecret ? undefined : existing?.api_key
+  const nextSecret = update.api_key === REDACTED_ENDPOINT_SECRET
+    ? existing?.api_key === REDACTED_ENDPOINT_SECRET ? undefined : existing?.api_key
     : update.api_key ?? existing?.api_key ?? null
   return {
     endpoint_id: update.id,
@@ -1160,7 +1164,7 @@ function endpointFromCredentialUpdate(
 
 function rememberEndpointSecret(endpointId: string, apiKey: string | null | undefined): void {
   if (apiKey == null) return
-  if (apiKey === redactedSecret) return
+  if (apiKey === REDACTED_ENDPOINT_SECRET) return
   knownEndpointSecrets[endpointId] = apiKey
 }
 
@@ -1173,7 +1177,7 @@ function hydrateRegistryWithKnownSecrets<T extends CredentialRegistryResponse>(r
   const providerEndpoints = Object.fromEntries(
     Object.entries(registry.provider_endpoints).map(([endpointId, endpoint]) => {
       const knownSecret = knownEndpointSecrets[endpointId]
-      if (endpoint.api_key === redactedSecret && knownSecret !== undefined) {
+      if (endpoint.api_key === REDACTED_ENDPOINT_SECRET && knownSecret !== undefined) {
         return [endpointId, { ...endpoint, api_key: knownSecret }]
       }
       rememberEndpointSecret(endpointId, endpoint.api_key)
@@ -1493,7 +1497,7 @@ export async function getEndpointSecret(endpointId: string): Promise<EndpointSec
 async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(registry: T): Promise<T> {
   const entries = await Promise.all(
     Object.entries(registry.provider_endpoints).map(async ([endpointId, endpoint]) => {
-      if (endpoint.api_key !== redactedSecret) {
+      if (endpoint.api_key !== REDACTED_ENDPOINT_SECRET) {
         return [endpointId, endpoint] as const
       }
       const knownSecret = knownEndpointSecrets[endpointId]
@@ -1624,7 +1628,7 @@ export function routeAcceptsImageVerified(route: ProviderRoute): boolean {
 }
 
 export async function getCredentials({
-  hydrateSecrets = true,
+  hydrateSecrets = false,
   force = false,
 }: {
   hydrateSecrets?: boolean

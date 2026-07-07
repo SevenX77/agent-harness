@@ -42,7 +42,7 @@ import {
 import i18n from "@/i18n"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, ProviderUiState, RouteStatus } from "../../../api/llm"
+import { isRedactedEndpointSecret, type CredentialsState, type ModelInfo, type ModelProbeStatus, type ProviderTestResult, type ProviderType, type ProviderUiState, type RouteStatus } from "../../../api/llm"
 import { inferProviderType, providerCachedTestResult, providerEndpointDraftsForAction, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions } from "../settings/types"
 import { clearActiveProbeEndpoints, hasActiveProbeAtom, hasActiveProbeEndpoint, probeAtomDomKey, updateActiveProbeEndpoint } from "./active-probe-store"
@@ -342,7 +342,17 @@ export function buildProviderDeleteRequest(
   }
 }
 
-function FieldCopyButton({ value, label, className }: { value: string; label: string; className?: string }) {
+function FieldCopyButton({
+  value,
+  label,
+  className,
+  resolveValue,
+}: {
+  value: string
+  label: string
+  className?: string
+  resolveValue?: () => Promise<string | null>
+}) {
   const { t } = useTranslation("settings")
   return (
     <Button
@@ -350,7 +360,12 @@ function FieldCopyButton({ value, label, className }: { value: string; label: st
       size="icon"
       variant="ghost"
       className={cn("text-muted-foreground/70 transition-none hover:text-muted-foreground", className)}
-      onClick={() => void copyCredentialValue(value, label)}
+      onClick={() => {
+        void (async () => {
+          const resolved = resolveValue ? await resolveValue() : value
+          if (resolved) await copyCredentialValue(resolved, label)
+        })()
+      }}
       disabled={!value}
       aria-label={t("apiKeys.card.copyLabelButton", { label })}
     >
@@ -1751,6 +1766,7 @@ export function ProviderCard({
   persisted,
   persistedEndpoints,
   onFieldChange,
+  onRevealApiKey,
   onGetModels,
   onDelete,
   onDeleteEndpointIds,
@@ -1766,6 +1782,7 @@ export function ProviderCard({
   persisted: CredentialsState["providers"][number] | null
   persistedEndpoints?: Record<string, CredentialsState["providers"][number] | null | undefined>
   onFieldChange: (patch: Partial<ProviderDraft>, options?: ProviderDraftChangeOptions) => void
+  onRevealApiKey?: () => Promise<string | null>
   onGetModels: () => void
   onEndpointTest?: (modelId: string) => void
   onDelete: () => void
@@ -1831,6 +1848,12 @@ export function ProviderCard({
     }
     manualActiveEndpointIdsRef.current = nextEndpointIds
     setHasManualActiveProbe(nextEndpointIds.size > 0)
+  }
+
+  async function resolveApiKeyForSensitiveAction(): Promise<string | null> {
+    if (!draft.api_key) return null
+    if (!isRedactedEndpointSecret(draft.api_key)) return draft.api_key
+    return await onRevealApiKey?.() ?? null
   }
   useEffect(() => {
     return () => {
@@ -2296,13 +2319,25 @@ export function ProviderCard({
                   className="size-7 text-muted-foreground/70 transition-none hover:text-muted-foreground [&_svg]:size-3.5"
                   onClick={() => {
                     setApiKeyEditing(false)
-                    setVisible((value) => !value)
+                    if (visible) {
+                      setVisible(false)
+                      return
+                    }
+                    void (async () => {
+                      const resolved = await resolveApiKeyForSensitiveAction()
+                      if (resolved) setVisible(true)
+                    })()
                   }}
                   aria-label={visible ? t("apiKeys.card.hideApiKeyButton") : t("apiKeys.card.showApiKeyButton")}
                 >
                   {visible ? <EyeOff /> : <Eye />}
                 </Button>
-                <FieldCopyButton value={draft.api_key} label={t("apiKeys.card.apiKeyShort")} className="size-7 [&_svg]:size-3.5" />
+                <FieldCopyButton
+                  value={draft.api_key}
+                  label={t("apiKeys.card.apiKeyShort")}
+                  className="size-7 [&_svg]:size-3.5"
+                  resolveValue={resolveApiKeyForSensitiveAction}
+                />
               </div>
             </div>
             <div className={fieldActionClassName}>

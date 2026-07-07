@@ -25,6 +25,7 @@ export function ApiKeysTab({
   saveStatus,
   backendReachable,
   onProviderFieldChange,
+  onRevealProviderSecret,
   onGetProviderModels,
   onProbeEndpoint,
   onForceEndpointTest,
@@ -45,6 +46,7 @@ export function ApiKeysTab({
   | "saveStatus"
   | "backendReachable"
   | "onProviderFieldChange"
+  | "onRevealProviderSecret"
   | "onGetProviderModels"
   | "onProbeEndpoint"
   | "onForceEndpointTest"
@@ -114,6 +116,7 @@ export function ApiKeysTab({
                       persisted={persisted}
                       persistedEndpoints={persistedEndpoints}
                       onFieldChange={(patch, options) => onProviderFieldChange(draft.id, { ...draft, ...patch }, options)}
+                      onRevealApiKey={() => onRevealProviderSecret(draft.id)}
                       onGetModels={() => onGetProviderModels(draft.id)}
                       onProbeEndpoint={onProbeEndpoint}
                       onForceEndpointTest={onForceEndpointTest}
@@ -167,6 +170,7 @@ export function ApiKeysTab({
                       persisted={persisted}
                       persistedEndpoints={persistedEndpoints}
                       onFieldChange={(patch, options) => onProviderFieldChange(draft.id, patch, options)}
+                      onRevealApiKey={() => onRevealProviderSecret(draft.id)}
                       onGetModels={() => onGetProviderModels(draft.id)}
                       onProbeEndpoint={onProbeEndpoint}
                       onForceEndpointTest={onForceEndpointTest}

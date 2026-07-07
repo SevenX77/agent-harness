@@ -2,8 +2,34 @@ import { useCallback } from 'react'
 import { useSWRConfig } from 'swr'
 import useSWR from 'swr'
 import { api, fetcher, getLocalHistory, revertSkill } from '../api/client'
-import type { GitHistoryItem, RunDetail, RunListResponse, RunMetadata } from '../api/types'
+import type { GitHistoryItem, RunListResponse, RunMetadata } from '../api/types'
 import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
+
+const runHistoryKey = (skillId: string) => `/skills/${skillId}/runs`
+
+function projectDeletedRun(current: RunListResponse | undefined, runId: string): RunListResponse | undefined {
+  if (!current) {
+    return current
+  }
+  const runs = current.runs.filter((run) => run.run_id !== runId)
+  const removed = current.runs.length - runs.length
+  if (removed === 0) {
+    return current
+  }
+  return {
+    total: Math.max(0, current.total - removed),
+    runs,
+  }
+}
+
+function projectRunMetadata(current: RunListResponse | undefined, run: RunMetadata): RunListResponse {
+  const previousRuns = current?.runs ?? []
+  const existed = previousRuns.some((item) => item.run_id === run.run_id)
+  return {
+    total: current ? current.total + (existed ? 0 : 1) : 1,
+    runs: [run, ...previousRuns.filter((item) => item.run_id !== run.run_id)],
+  }
+}
 
 export function useRunHistory(skillId: string | null) {
   const {
@@ -18,28 +44,12 @@ export function useRunHistory(skillId: string | null) {
       return
     }
     await api.delete(`/skills/${skillId}/runs/${runId}`)
-    await mutate((current) => current
-      ? {
-        total: Math.max(0, current.total - 1),
-        runs: current.runs.filter((run) => run.run_id !== runId),
-      }
-      : current, { revalidate: true })
+    await mutate((current) => projectDeletedRun(current, runId), { revalidate: false })
   }, [mutate, skillId])
 
   const startOptimisticRun = useCallback(async (run: RunMetadata) => {
-    await mutate((current) => ({
-      total: current ? current.total + 1 : 1,
-      runs: [run, ...(current?.runs ?? []).filter((item) => item.run_id !== run.run_id)],
-    }), { revalidate: true })
+    await mutate((current) => projectRunMetadata(current, run), { revalidate: false })
   }, [mutate])
-
-  const fetchRunDetail = useCallback(async (runId: string): Promise<RunDetail | null> => {
-    if (!skillId) {
-      return null
-    }
-    const response = await api.get<RunDetail>(`/skills/${skillId}/runs/${runId}`)
-    return response.data
-  }, [skillId])
 
   return {
     runs: data?.runs ?? [],
@@ -49,8 +59,23 @@ export function useRunHistory(skillId: string | null) {
     refresh: mutate,
     startOptimisticRun,
     deleteRun,
-    fetchRunDetail,
   }
+}
+
+export function useRunHistoryProjection(skillId: string | null) {
+  const { mutate } = useSWRConfig()
+  const projectRun = useCallback(async (run: RunMetadata) => {
+    if (!skillId) {
+      return
+    }
+    await mutate<RunListResponse>(
+      runHistoryKey(skillId),
+      (current) => projectRunMetadata(current, run),
+      { revalidate: false },
+    )
+  }, [mutate, skillId])
+
+  return { projectRun }
 }
 
 export function useLocalHistory(skillId: string | null) {

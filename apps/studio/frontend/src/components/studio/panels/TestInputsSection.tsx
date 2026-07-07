@@ -47,8 +47,11 @@ export function TestInputsSection({
       name = `input-${i}`
     }
     try {
-      await createTestInput(skillId, name, {}, { workspaceRoot })
-      await mutate()
+      const created = await createTestInput(skillId, name, {}, { workspaceRoot })
+      await mutate((current) => orderTestInputs([
+        ...(current ?? []).filter((item) => item.id !== created.id),
+        created,
+      ]), { revalidate: false })
       onFileOpen?.(`.workspace/import_files/${name}.json`)
     } catch (err) {
       // Surface the backend's typed reason "就近" (e.g. duplicate name) rather
@@ -66,7 +69,7 @@ export function TestInputsSection({
       if (selectedId === id) {
         onSelect?.(null)
       }
-      await mutate()
+      await mutate((current) => current?.filter((item) => item.id !== id) ?? current, { revalidate: false })
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -158,4 +161,8 @@ export function TestInputsSection({
       </p>
     </section>
   )
+}
+
+function orderTestInputs(items: TestInputMetadata[]): TestInputMetadata[] {
+  return [...items].sort((left, right) => left.id.localeCompare(right.id))
 }

@@ -442,7 +442,7 @@ FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling s
 FRONTEND GET /api/llm/roles | ok | shared | Cached read path is guarded against mount, focus, and reconnect refetch; roles response carries registry projection data, so cold loads do not perform a second broad registry read.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
-FRONTEND GET /api/skills/{skill_id} | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
+FRONTEND GET /api/skills/{skill_id} | partial | shared | Shared per-skill cold load uses Studio truth SWR policy; Local History revert projects the returned SkillDetail without a follow-up GET. Source-write, compile, and file-event refresh paths still need route-specific audit.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/golden | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
 FRONTEND GET /api/skills/{skill_id}/golden/template | review | shared | Read request needs trigger audit; allowed only as cold load, explicit refresh, or precise event revalidation.
@@ -485,7 +485,7 @@ FRONTEND POST /api/skills/{skill_id}/graph/serialize | review | specific | Mutat
 FRONTEND POST /api/skills/{skill_id}/io/import | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/lint | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/publish | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
-FRONTEND POST /api/skills/{skill_id}/revert | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
+FRONTEND POST /api/skills/{skill_id}/revert | ok | specific | Explicit Local History revert command; client projects the returned SkillDetail into the skill-detail cache without a follow-up /skills/{skill_id} GET and revalidates only the history list.
 FRONTEND POST /api/skills/{skill_id}/runs | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/runs/predict | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.
 FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | review | specific | Mutation or explicit command needs route-specific trigger and canonical snapshot audit.

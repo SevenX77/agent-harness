@@ -226,12 +226,12 @@ def test_frontend_request_policy_verdicts_are_resolved() -> None:
     unresolved = [
         f"{key} | {status} | {rationale}"
         for key, status, _guard, rationale in _verdict_rows()
-        if key.startswith("FRONTEND ") and status == "review"
+        if key.startswith("FRONTEND ") and status in {"review", "partial"}
     ]
 
     assert not unresolved, (
         "Frontend requests are user-visible performance surfaces and must not remain "
-        "at the placeholder 'review' verdict. Classify each as ok/partial/bad/internal "
+        "at an unresolved 'review' or 'partial' verdict. Classify each as ok/bad/internal "
         "with its trigger and guard-test rationale:\n" + "\n".join(unresolved)
     )
 
@@ -240,11 +240,11 @@ def test_backend_request_policy_verdicts_are_resolved() -> None:
     unresolved = [
         f"{key} | {status} | {rationale}"
         for key, status, _guard, rationale in _verdict_rows()
-        if key.startswith("BACKEND ") and status == "review"
+        if key.startswith("BACKEND ") and status in {"review", "partial"}
     ]
 
     assert not unresolved, (
         "Backend routes define the server-owned request surface and must not remain "
-        "at the placeholder 'review' verdict. Classify each as ok/partial/bad/internal "
+        "at an unresolved 'review' or 'partial' verdict. Classify each as ok/bad/internal "
         "with its trigger, canonical response, and event rationale:\n" + "\n".join(unresolved)
     )

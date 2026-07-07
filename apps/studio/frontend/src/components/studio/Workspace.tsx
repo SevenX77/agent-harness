@@ -18,13 +18,13 @@ import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk }
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistory } from "@/hooks/useRunHistory"
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistoryProjection } from "@/hooks/useRunHistory"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
@@ -593,7 +593,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // consumes; we never build a snapshot locally.
   const localHistory = useLocalHistory(currentSkillId)
   const refreshLocalHistory = localHistory.refresh
-  const { fetchRunDetail } = useRunHistory(currentSkillId)
+  const { projectRun } = useRunHistoryProjection(currentSkillId)
   // Track which (skill, run) pair has already triggered a refresh so the effect
   // fires once on the not-ended → ended edge, not on every subsequent re-render
   // while the terminated run keeps replaying its log. nextLocalHistoryRefreshKey
@@ -628,14 +628,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       completedRunId,
       lastRefreshedKey: archiveFeedbackRunRef.current,
     })
-    if (!feedbackKey || !completedRunId) {
+    if (!feedbackKey || !completedRunId || !currentSkillId) {
       return
     }
+    const targetSkillId = currentSkillId
     archiveFeedbackRunRef.current = feedbackKey
     let cancelled = false
     const announceArchiveOutcome = async () => {
       try {
-        const detail = await fetchRunDetail(completedRunId)
+        const detail = await getRunDetail(targetSkillId, completedRunId)
         if (cancelled || !detail) {
           return
         }
@@ -658,7 +659,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return () => {
       cancelled = true
     }
-  }, [completedRunId, currentSkillId, fetchRunDetail])
+  }, [completedRunId, currentSkillId])
 
   const statusByNodeId = useMemo(
     () => deriveNodeStatuses(runStream.events, runId),
@@ -2165,6 +2166,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
       const result = await startRun(targetSkillId, inputData)
       clearCopilotJudgeResult()
+      await projectRun(result)
       setRunId(result.run_id)
       setRunErrors([])
       setRunDrawerOpen(false)
@@ -2178,7 +2180,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setRunDrawerOpen(true)
       toast.error(`Run failed: ${errors[0]?.message ?? "Run request failed"}`)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId])
+  }, [clearCopilotJudgeResult, currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId, projectRun])
 
   // Switch the visible candidate: re-point the trace stream at that candidate's
   // spawned run (the per-candidate run id from the real compare group).
@@ -2312,6 +2314,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setActivePanel("timeline")
       // Re-subscribe the trace stream to the resumed run (new id, or re-attach).
       clearCopilotJudgeResult()
+      await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
       toast.success("Run resumed from checkpoint")
@@ -2322,7 +2325,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
 
   const handleSubmitHitlResponse = useCallback(async (request: TraceHitlResumeRequest) => {
     if (!currentSkillId || !runId) return
@@ -2331,6 +2334,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const result = await resumeRun(currentSkillId, runId, hitlResumeOptionsFromRequest(request))
       setActivePanel("timeline")
       clearCopilotJudgeResult()
+      await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
       toast.success("Run resumed with human input")
@@ -2339,7 +2343,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
 
   const handleResumeEdgeDownstream = useCallback(async (options: ResumeRunOptions) => {
     if (!currentSkillId || !runId) return
@@ -2348,6 +2352,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const result = await resumeRun(currentSkillId, runId, options)
       setActivePanel("timeline")
       clearCopilotJudgeResult()
+      await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
       toast.success("Run resumed from tampered edge context")
@@ -2356,7 +2361,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
 
   const handleResumeNode = useCallback(async (options: ResumeRunOptions) => {
     if (!currentSkillId || !runId) return
@@ -2365,6 +2370,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const result = await resumeRun(currentSkillId, runId, options)
       setActivePanel("timeline")
       clearCopilotJudgeResult()
+      await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
       toast.success("Run resumed from selected node")
@@ -2373,7 +2379,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
 
   const handleHome = useCallback(() => {
     setSettingsOpen(false)

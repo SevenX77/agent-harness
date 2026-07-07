@@ -105,6 +105,7 @@ const mocks = vi.hoisted(() => ({
   getSkillDetail: vi.fn(),
   fetcher: vi.fn(async () => []),
   getCompareGroup: vi.fn(),
+  getRunDetail: vi.fn(),
   getResumeValidity: vi.fn(),
   postPredictRun: vi.fn(),
   resolveRunInput: vi.fn(),
@@ -119,7 +120,7 @@ const mocks = vi.hoisted(() => ({
   // T-n6hist test#1/#2: the run trace stream + history hooks are driven through
   // mocks so we can flip a run to run_ended and assert the resulting effect wiring.
   runStreamEvents: [] as EventEnvelope[],
-  fetchRunDetail: vi.fn(),
+  projectRunHistory: vi.fn(),
   refreshLocalHistory: vi.fn(),
   settingsPageProps: null as null | {
     initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
@@ -146,6 +147,7 @@ vi.mock('@/api/client', () => ({
   compileSkill: mocks.compileSkill,
   fetcher: mocks.fetcher,
   getCompareGroup: mocks.getCompareGroup,
+  getRunDetail: mocks.getRunDetail,
   getResumeValidity: mocks.getResumeValidity,
   getSkillDetail: mocks.getSkillDetail,
   postPredictRun: mocks.postPredictRun,
@@ -220,15 +222,11 @@ vi.mock('@/hooks/useRunHistory', async (importActual) => {
   const actual = await importActual<typeof import('@/hooks/useRunHistory')>()
   return {
     ...actual,
-    useRunHistory: () => ({
-      runs: [],
-      total: 0,
-      error: null,
-      isLoading: false,
-      refresh: vi.fn(),
-      startOptimisticRun: vi.fn(),
-      deleteRun: vi.fn(),
-      fetchRunDetail: mocks.fetchRunDetail,
+    useRunHistory: () => {
+      throw new Error('Workspace must not subscribe to the run-history list')
+    },
+    useRunHistoryProjection: () => ({
+      projectRun: mocks.projectRunHistory,
     }),
     useLocalHistory: () => ({
       history: [],
@@ -431,7 +429,9 @@ describe('Workspace WS-1 local writer contracts', () => {
     )
     mocks.webSockets = []
     mocks.runStreamEvents = []
-    mocks.fetchRunDetail.mockReset()
+    mocks.getRunDetail.mockReset()
+    mocks.projectRunHistory.mockReset()
+    mocks.projectRunHistory.mockResolvedValue(undefined)
     mocks.refreshLocalHistory.mockReset()
     toastMocks.warning.mockReset()
     mocks.panelsProps = null
@@ -1712,7 +1712,7 @@ describe('Workspace WS-1 local writer contracts', () => {
 // T-n6hist test#1/#2 (n6-history): the autocommit-feedback toast and the
 // Local-History auto-refresh both live in run_ended useEffects, which SSR never
 // runs. These drive a real client render (createRoot + act so effects fire),
-// flip the run to run_ended, and assert the wiring end-to-end: fetchRunDetail →
+// flip the run to run_ended, and assert the wiring end-to-end: getRunDetail →
 // archiveFeedbackForGitStatus → toast (test#1), and refreshLocalHistory exactly
 // once on the not-ended → ended edge (test#2).
 describe('Workspace run_ended history wiring (integration)', () => {
@@ -1729,7 +1729,9 @@ describe('Workspace run_ended history wiring (integration)', () => {
       },
     )
     mocks.runStreamEvents = []
-    mocks.fetchRunDetail.mockReset()
+    mocks.getRunDetail.mockReset()
+    mocks.projectRunHistory.mockReset()
+    mocks.projectRunHistory.mockResolvedValue(undefined)
     mocks.refreshLocalHistory.mockReset()
     mocks.resolveRunInput.mockReset()
     mocks.resolveRunInput.mockResolvedValue({ topic: 'mars' })
@@ -1788,7 +1790,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
   // the history effects fire under a real client render.
   async function startRunToCompletion(gitStatus: RunDetail['metadata']['git_status']) {
     mocks.runStreamEvents = [runEndedEvent('run-1')]
-    mocks.fetchRunDetail.mockResolvedValue(runDetailWithGitStatus('run-1', gitStatus))
+    mocks.getRunDetail.mockResolvedValue(runDetailWithGitStatus('run-1', gitStatus))
     renderWithEffects()
     await act(async () => {
       await mocks.centerActionBarProps?.onPredict?.()
@@ -1796,7 +1798,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
     await act(async () => {
       await mocks.centerActionBarProps?.onRun?.()
     })
-    // Let the run_ended effects (fetchRunDetail microtask chain) settle.
+    // Let the run_ended effects (getRunDetail microtask chain) settle.
     await act(async () => {
       await Promise.resolve()
       await Promise.resolve()
@@ -1806,7 +1808,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
   it('re-fetches the run detail and surfaces a successful, revertable archive toast when committed', async () => {
     await startRunToCompletion('committed')
 
-    expect(mocks.fetchRunDetail).toHaveBeenCalledWith('run-1')
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('writer-smoke', 'run-1')
     expect(toastMocks.success).toHaveBeenCalledWith(expect.stringMatching(/Local History/i))
     expect(toastMocks.warning).not.toHaveBeenCalled()
   })
@@ -1814,7 +1816,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
   it('does not promise a revertable snapshot when the skill has no git repo (no_git)', async () => {
     await startRunToCompletion('no_git')
 
-    expect(mocks.fetchRunDetail).toHaveBeenCalledWith('run-1')
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('writer-smoke', 'run-1')
     const noGitToast = toastMocks.success.mock.calls
       .map((call) => String(call[0]))
       .find((message) => /no git repo/i.test(message))
@@ -1825,7 +1827,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
   it('warns (never claims success) when the git index was locked', async () => {
     await startRunToCompletion('locked')
 
-    expect(mocks.fetchRunDetail).toHaveBeenCalledWith('run-1')
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('writer-smoke', 'run-1')
     expect(toastMocks.warning).toHaveBeenCalledWith(expect.stringMatching(/not archived/i))
   })
 
@@ -1833,6 +1835,15 @@ describe('Workspace run_ended history wiring (integration)', () => {
     await startRunToCompletion('committed')
 
     expect(mocks.refreshLocalHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('projects the started run metadata into run history without subscribing to the list', async () => {
+    await startRunToCompletion('committed')
+
+    expect(mocks.projectRunHistory).toHaveBeenCalledWith(expect.objectContaining({
+      run_id: 'run-1',
+      status: 'running',
+    }))
   })
 })
 

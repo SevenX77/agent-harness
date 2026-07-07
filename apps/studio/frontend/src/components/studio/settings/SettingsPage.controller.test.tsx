@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, forceTestEndpoint, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog } from "../../../api/llm"
+import { deleteEndpoint, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog } from "../../../api/llm"
 import { SettingsPageView, useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -110,6 +110,7 @@ vi.mock("../../../api/llm", async (importOriginal) => {
     deleteRole: vi.fn(),
     forceTestEndpoint: vi.fn(),
     getCredentials: vi.fn(() => Promise.resolve({ providers: [] })),
+    getEndpointSecret: vi.fn(),
     getModelGroups: vi.fn(() => Promise.resolve([])),
     getProviderModels: vi.fn(),
     getRoles: vi.fn(() => Promise.resolve({ models: {}, providers: {}, roles: {} })),
@@ -177,7 +178,7 @@ describe("useSettingsPageController lifecycle", () => {
     container?.remove()
   })
 
-  it("hydrates API key credentials as part of the app-level controller mount", async () => {
+  it("loads credential summaries on app-level controller mount without hydrating API key secrets", async () => {
     await act(async () => {
       root.render(<ControllerProbe />)
     })
@@ -187,7 +188,8 @@ describe("useSettingsPageController lifecycle", () => {
     })
 
     expect(getCredentials).toHaveBeenCalled()
-    expect(vi.mocked(getCredentials).mock.calls[0]?.[0]).toBeUndefined()
+    expect(vi.mocked(getCredentials).mock.calls[0]?.[0]).toEqual({ hydrateSecrets: false })
+    expect(getEndpointSecret).not.toHaveBeenCalled()
   })
 
   it("does not refetch credentials or roles when the window receives focus", async () => {
@@ -217,7 +219,7 @@ describe("useSettingsPageController lifecycle", () => {
     expect(getModelGroups).not.toHaveBeenCalled()
   })
 
-  it("keeps Settings open, close, and tab switches backend-silent after app-level hydration", async () => {
+  it("keeps Settings open, close, and tab switches backend-silent after app-level summary load", async () => {
     await act(async () => {
       root.render(
         <SettingsViewProbe
@@ -235,6 +237,7 @@ describe("useSettingsPageController lifecycle", () => {
     vi.mocked(getCredentials).mockClear()
     vi.mocked(getRoles).mockClear()
     vi.mocked(getModelGroups).mockClear()
+    vi.mocked(getEndpointSecret).mockClear()
 
     await act(async () => {
       root.render(
@@ -250,6 +253,7 @@ describe("useSettingsPageController lifecycle", () => {
     expect(getCredentials).not.toHaveBeenCalled()
     expect(getRoles).not.toHaveBeenCalled()
     expect(getModelGroups).not.toHaveBeenCalled()
+    expect(getEndpointSecret).not.toHaveBeenCalled()
 
     act(() => {
       container.querySelector<HTMLButtonElement>("[data-testid='settings-tab-llm-roles']")?.click()
@@ -259,6 +263,7 @@ describe("useSettingsPageController lifecycle", () => {
     expect(getCredentials).not.toHaveBeenCalled()
     expect(getRoles).not.toHaveBeenCalled()
     expect(getModelGroups).not.toHaveBeenCalled()
+    expect(getEndpointSecret).not.toHaveBeenCalled()
 
     await act(async () => {
       root.render(
@@ -273,6 +278,42 @@ describe("useSettingsPageController lifecycle", () => {
     expect(getCredentials).not.toHaveBeenCalled()
     expect(getRoles).not.toHaveBeenCalled()
     expect(getModelGroups).not.toHaveBeenCalled()
+    expect(getEndpointSecret).not.toHaveBeenCalled()
+  })
+
+  it("loads one provider secret only for an explicit API key reveal command", async () => {
+    configureApiToken("sidecar-token")
+    vi.mocked(getCredentials).mockResolvedValueOnce({
+      providers: [{
+        id: "openrouter-openai",
+        name: "OpenRouter",
+        api_key: "**********",
+        base_url: "https://openrouter.ai/api/v1",
+        provider_type: "openai_compatible",
+      }],
+    })
+    vi.mocked(getEndpointSecret).mockResolvedValueOnce({
+      endpoint_id: "openrouter-openai",
+      api_key: "sk-openrouter",
+    })
+
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await flushControllerEffects()
+
+    expect(getEndpointSecret).not.toHaveBeenCalled()
+
+    let revealed: string | null | undefined
+    await act(async () => {
+      revealed = await capturedController?.onRevealProviderSecret("openrouter-openai")
+      await Promise.resolve()
+    })
+
+    expect(getEndpointSecret).toHaveBeenCalledTimes(1)
+    expect(getEndpointSecret).toHaveBeenCalledWith("openrouter-openai")
+    expect(revealed).toBe("sk-openrouter")
+    expect(capturedController?.drafts.find((item) => item.id === "openrouter-openai")?.api_key).toBe("sk-openrouter")
   })
 
   it("waits for the Tauri API token before app-level hydration", async () => {

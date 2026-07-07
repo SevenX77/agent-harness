@@ -440,7 +440,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | A7 capability 回填 | 显示能力 | 投影 | **list-models 富字段归一化** + 缺则 probe |
 | A8 Probe Knowledge Catalog 赋能/写回 | 蓝标签渲染 | 调 ③b 读写 + 远端源 + 上传审批/脱敏 | **catalog 读写语义 + probe 结果合并 + provider 分区 + probe priority** |
 | A9 6 态标签 | 渲染色 | 6 态结果转 DTO | **6 态标准总结（含读 catalog 出蓝）+ RouteStatus + 熔断** |
-| A10 secret reveal | 进 tab 逐个换真值 | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
+| A10 secret reveal | Eye/Copy 等显式用户动作才换单条真值；进 tab 只投影 redacted registry | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
 | A11 删 endpoint | 二次确认 | `PUT endpoints`（整表 upsert） | — |
 | A12 save-status badge | 统一 badge ← saveStatus | save 端点返回状态 | — |
 
@@ -591,13 +591,13 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 
 | # | 动作 | 轨 | 能力 | 现状 |
 |---|---|---|---|---|
-| 16 | 进 tab → 加载凭证 + 逐个 GET secret 把 `'**********'` 换回真值 | 共 | secret-hydration | ✅ |
+| 16 | 进 tab → 只加载 redacted registry 凭证；Eye/Copy 显式动作才 scoped GET 单条 secret | 共 | secret-reveal | ✅ |
 | 17 | 渲染拆 official 区(固定 5 厂商预渲染)+ third-party 区(用户自增) | 共 | provider-partition | ✅ |
 | 18 | official 只填 Key;Base URL/Protocol canonical 默认+隐藏,不可增删改名 | 官 | official-key-only | ✅ |
 | 19 | `+ Add Provider` → 弹框填名 → 建 `custom-{uuid}` 草稿 | 三 | tp-add-provider | ✅ ⚠️ 现两步,目标 inline 一次填全(§1.2) |
 | 20 | 填 name / base_url / protocol / api_key | 三 | tp-credential-edit | ✅ |
 | 21 | 改 API Key(两类共用;改后旧测试失效→badge 回 untested) | 共 | credential-key-edit | ✅ |
-| 22 | Eye/EyeOff 切明文/掩码 | 共 | secret-mask-toggle | ✅ ⚠️ 切 native `password` type,违契约(目标:永 text + CSS mask) |
+| 22 | Eye/EyeOff 切明文/掩码（redacted 时先 scoped reveal 单条 secret） | 共 | secret-mask-toggle | ✅ |
 | 23 | Copy 复制 key 到剪贴板 | 共 | secret-copy | ✅ |
 | 24 | `Test` → 异步批量 job(750ms 轮询)拉全厂商模型目录,endpoint 提 verified | 官 | official-test-job | ✅ ⚠️**DRIFT**:后端硬门禁 `provider_kind!='official'` 拒;目标=统一 `POST /endpoints/{id}/test`+批量探测(§1.2) |
 | 25 | `Get Models` → 同步单次 models-list 发现;路由停 unverified_manual | 三 | tp-getmodels | ✅ ⚠️ DRIFT(同上) |

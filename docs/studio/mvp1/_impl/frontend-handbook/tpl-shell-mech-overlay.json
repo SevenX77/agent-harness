@@ -9,7 +9,7 @@
     "dataflow": [
       "用户点 Toolbar Settings 图标 → Workspace 把 settingsOpen 置 true",
       "Workspace 在画布面板渲染 SettingsPage(左文件树 / 右 Copilot 仍挂载)",
-      "SettingsPage 首次挂载加载壳层所需摘要数据;切到 API Keys 才拉明文 hydration,切到 Roles/Copilot 才拉角色/模型组,已加载不重复拉",
+      "SettingsPage 首次挂载加载壳层所需 redacted 摘要数据;切到 API Keys 只渲染已加载的打码 registry,点 Eye/Copy 才 scoped reveal 单条 secret;切到 Roles/Copilot 才拉角色/模型组,已加载不重复拉",
       "用户改字段 → 入队 debounce 保存 → 保存态(pending→saving→saved/error)汇给 SaveStatusBadge",
       "外部进程改凭证/角色文件 → sidecar 文件监听器广播 registry_changed / roles_changed → 前端 WebSocket 收到 → 重拉对应数据刷新",
       "某 tab 渲染抛错 → SettingsErrorBoundary 捕获 → 渲染兜底卡 + Retry",
@@ -27,7 +27,7 @@
         "Workspace 持 settingsOpen 状态;Toolbar 的 onSettingsOpen 与 Header 的 onOpenSettings 都把它置 true。",
         "settingsOpen=true 时只在画布面板(canvas)渲染 SettingsPage,替换编辑器/图;左侧 Panels(文件树等)与右侧 Copilot 面板照常挂载——工作区不卸载。",
         "非真 modal:不铺全屏 backdrop、不做 focus-trap,让用户配置时仍能看/操作工作区。",
-        "SettingsPageContent 按 activeTab 渲染对应 tab;tab 数据按需加载——壳层首次从无到有拉摘要快照,切到 api_keys 才首拉明文 hydration,切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
+        "SettingsPageContent 按 activeTab 渲染对应 tab;tab 数据按需加载——壳层首次从无到有只拉 redacted 摘要快照,切到 api_keys 只渲染已加载快照且不取 secret,点 Eye/Copy 才 scoped reveal 单条 secret;切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
         "X(onClose)把 settingsOpen 置 false 收起、工作区状态不丢;Home(handleHome)先收起 Settings 再 onCloseSkill 卸载工作区退首页——两条语义。"
       ],
       "do": [
@@ -50,7 +50,7 @@
       "diagram": "",
       "rules": [
         "前端:SettingsPage 挂载时开一条 WebSocket 连 /ws/events;onmessage(收到一条事件的回调)解析事件 type。",
-        "收到 registry_changed → getCredentials(拉凭证快照的 API 函数,force=true)重拉凭证 + 重建草稿;收到 roles_changed → 若角色已加载则 getRoles/getModelGroups(force=true)重拉角色 + 模型组,若尚未加载则只标记 dirty 供首次打开时消费。",
+        "收到 registry_changed → getCredentials(拉 redacted 凭证快照的 API 函数,hydrateSecrets=false,force=true)重拉凭证 + 重建草稿,不批量取 secret;收到 roles_changed → 若角色已加载则 getRoles/getModelGroups(force=true)重拉角色 + 模型组,若尚未加载则只标记 dirty 供首次打开时消费。",
         "后端:gateway 后端 sidecar 的 file_watcher(文件监听器)在 _handle_path(每个文件落盘时被调的回调)里比对落盘路径是不是凭证文件 / 角色文件,命中就 broadcast_from_thread(从工作线程把事件广播到事件总线)广播 registry_changed / roles_changed。",
         "后端:/ws/events(studio_events 路由处理函数)校验 token(连接鉴权令牌)后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题),把事件逐条 send_json(以 JSON 发回一条消息)推给前端。",
         "前端用 cancelled(组件已卸载标志)防组件卸载后还 setState(更新已销毁组件状态会报警告);socket 在 effect(副作用钩子)清理时 close 关闭。",

@@ -334,12 +334,12 @@ BACKEND GET /api/llm/roles/test-results | ok | specific | Persisted last-known r
 BACKEND GET /api/llm/roles/{role_name} | ok | specific | Scoped backend role read; frontend no longer exposes a caller, and backend tests cover materialized single-role response behavior.
 BACKEND GET /api/settings | ok | specific | Scoped app-settings read; backend tests cover effective defaults and persisted snapshot roundtrip, and the route emits no revalidation event.
 BACKEND GET /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/compare-candidates | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
 BACKEND GET /api/skills/{skill_id}/golden | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/golden/template | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/golden/{golden_id}/content | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/history | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND GET /api/skills/{skill_id}/node-llm-params | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND GET /api/skills/{skill_id}/node-llm-params | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
 BACKEND GET /api/skills/{skill_id}/releases | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/releases/{release_version} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is server-owned truth; reads are cold load or precise import-file/runtime-config revalidation.
@@ -421,8 +421,8 @@ BACKEND PUT /api/llm/routes/{route_id} | ok | specific | Explicit route metadata
 BACKEND PUT /api/settings | ok | specific | Explicit app-settings save command; unchanged snapshots are side-effect-free, changed snapshots return the canonical AppSettings response and publish a precise settings_changed event.
 BACKEND PUT /api/skills/{skill_id} | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Runtime artifact writes are explicit output-config saves and return the canonical runtime_config snapshot.
-BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
-BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | review | specific | Backend route is inventoried; trigger, canonical response, and event emission audit still pending.
+BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | specific | Explicit Properties compare-candidates save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=compare_candidates, node_id).
+BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=node_llm_params, node_id).
 BACKEND WS /api/skills/{skill_id}/copilot/ws | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.
 BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect must not refresh broad truth.
 BACKEND WS /ws/runs/{run_id} | partial | specific | Scoped stream route; frontend trigger and lifecycle guards must stay route-specific.

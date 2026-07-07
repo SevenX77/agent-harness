@@ -119,6 +119,31 @@ def test_register_workspace_ignores_missing_dir(tmp_path: Path) -> None:
     assert svc._workspace_roots == {}
 
 
+def test_api_write_echo_defaults_to_current_mtime(tmp_path: Path) -> None:
+    changed = tmp_path / "skill" / ".workspace" / "runtime_config.json"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("before", encoding="utf-8")
+
+    svc = _service()
+    svc.record_api_write(changed)
+
+    assert svc._is_echo(changed.resolve()) is True
+    assert svc._is_echo(changed.resolve()) is False
+
+
+def test_api_write_intent_can_suppress_next_mtime_change(tmp_path: Path) -> None:
+    changed = tmp_path / "skill" / ".workspace" / "runtime_config.json"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("before", encoding="utf-8")
+
+    svc = _service()
+    svc.record_api_write(changed, match_current_mtime=False)
+    changed.write_text("after", encoding="utf-8")
+
+    assert svc._is_echo(changed.resolve()) is True
+    assert svc._is_echo(changed.resolve()) is False
+
+
 def test_stop_clears_registered_workspace_roots(tmp_path: Path) -> None:
     """stop() must reset the workspace-root registry.
 

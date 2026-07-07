@@ -19,6 +19,7 @@ from app.services.compare_candidates import (
     read_compare_candidates,
     write_node_compare_candidates,
 )
+from app.services.runtime_config_events import publish_runtime_config_changed
 from app.services.skills import resolve_skill_dir
 
 # Prevent pytest from collecting this router module as tests.
@@ -63,5 +64,11 @@ async def put_node_compare_candidates(
 ) -> NodeCompareCandidates:
     skill_dir = resolve_skill_dir(skill_id)
     _validate_node_id(node_id)
-    stored = write_node_compare_candidates(skill_dir, node_id, request.candidates)
-    return NodeCompareCandidates(candidates=stored)
+    result = write_node_compare_candidates(skill_dir, node_id, request.candidates)
+    if result.changed:
+        await publish_runtime_config_changed(
+            skill_id=skill_id,
+            dataset="compare_candidates",
+            node_id=node_id,
+        )
+    return NodeCompareCandidates(candidates=result.value)

@@ -67,10 +67,15 @@ def write_runtime_config(skill_dir: Path, config: dict[str, Any]) -> dict[str, A
     workspace = workspace_dir_for_runtime(skill_dir)
     workspace.mkdir(parents=True, exist_ok=True)
     payload = _with_fingerprint(config)
-    runtime_config_path_for(skill_dir).write_text(
+    path = runtime_config_path_for(skill_dir)
+    from app.services.file_watcher import record_api_write
+
+    record_api_write(path, match_current_mtime=False)
+    path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    record_api_write(path)
     return payload
 
 

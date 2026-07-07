@@ -157,10 +157,11 @@ class FileWatcherService:
             roots.append(resolved)
         return roots
 
-    def record_api_write(self, path: Path) -> None:
+    def record_api_write(self, path: Path, *, match_current_mtime: bool = True) -> None:
         resolved = path.resolve()
+        saved_mtime = _safe_mtime(resolved) if match_current_mtime else None
         with self._lock:
-            self._echo[resolved] = (time.monotonic(), _safe_mtime(resolved))
+            self._echo[resolved] = (time.monotonic(), saved_mtime)
 
     def notify_path_changed(self, path: Path) -> None:
         self._handle_path(Change.modified, path)
@@ -295,8 +296,8 @@ class FileWatcherService:
         return None
 
 
-def record_api_write(path: Path) -> None:
-    file_watcher.record_api_write(path)
+def record_api_write(path: Path, *, match_current_mtime: bool = True) -> None:
+    file_watcher.record_api_write(path, match_current_mtime=match_current_mtime)
 
 
 def register_workspace(root: Path, skill_id: str) -> None:

@@ -150,6 +150,43 @@ defect even when all tests pass.
   studio-specific concerns INTO the SDKs, or bypassing the adapters out of
   convenience.
 
+## Coding Standards(编程规范)
+
+适用于全部三个模块的代码级规范,与上面的 Development Principles 同级生效;
+review 时按此清单挑刺,违反即返工,不看"测试是否通过"。
+
+- **低耦合、高内聚。** 一个模块/类/函数只围绕一个明确职责组织(高内聚);
+  单元之间只通过窄而显式的接口交互,不依赖对方的内部实现细节(低耦合)。
+  跨模块协作只走公开边界(engine/gateway 的 SDK 公共 API、studio 的
+  `app/core/adapters/`),禁止伸手进别的单元的私有结构取数据或改状态。
+  判断标准:改动 A 的内部实现,B 不需要跟着改,才算解耦干净。
+- **单一职责(SRP)。** 一个单元只应有一个"被改动的理由"。函数只做一件事;
+  出现 `load_and_validate_and_save` 式的"和"式命名,先拆分再实现。
+  一个 PR 也遵守同样纪律:一个任务一个 PR,不夹带无关重构。
+- **显式优于隐式。** 依赖通过参数/构造器显式注入(gateway 的 storage
+  provider 注入就是范式),不用全局单例、不靠 import 副作用;魔法值提成
+  命名常量;行为不建立在"碰巧的默认值"上。
+- **Fail fast,在边界校验。** 非法输入在系统边界(HTTP 层、loader、adapter
+  入口)立刻拒绝并给出完整诊断;边界之内的代码得以假设数据已合法,不再
+  层层重复防御。禁止用 try/except 把坏状态吞进深处(呼应 first-principles
+  fixes:问"这个状态为什么能存在",而不是"怎么让报错消失")。
+- **让非法状态不可表示。** 优先用类型系统/schema(Pydantic model、TS
+  联合类型与判别式)把约束编码进数据结构本身,而不是靠散落的运行时 if
+  校验加注释约定。能在编译期/校验期挡住的错误,不留给运行期。
+- **DRY,但三次成律。** 同一业务规则/常量/schema 只允许一个权威定义
+  (呼应"底座一"/SSOT);但不为消灭两处相似代码就提前抽象——错误的
+  抽象比重复更贵,相似逻辑第三次出现、且确认是同一业务含义时再抽公共层。
+- **KISS / YAGNI。** 只为当下已确认的需求写代码;不写"将来可能用到"的
+  参数、hook、扩展点、配置项(呼应 no-backward-compat:将来需求来了,
+  直接改设计,不需要今天预留)。实现方案二选一时,选更简单直白的那个。
+- **组合优于继承。** 扩展行为用组合、依赖注入、策略对象,不搭深继承树;
+  继承只用于真正的 is-a 且基类稳定的场合。
+- **副作用隔离。** 纯计算(编译、校验、转换)与 IO/状态变更(文件、网络、
+  全局状态)分层放置:纯函数部分天然可单测,IO 部分保持薄且集中。
+- **命名即文档,注释只写 why。** 名字完整说清"是什么/干什么",不用缩写
+  黑话;注释只记录代码本身表达不了的约束、取舍与原因(why),不复述
+  代码在做什么(what),更不写"改动说明"式注释。
+
 ## Three-Module Architecture (division of labor)
 
 Two pure-SDK libraries + a desktop shell. Respect the boundaries; the

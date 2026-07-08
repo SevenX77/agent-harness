@@ -234,7 +234,7 @@ describe('buildCopilotJudgeDraft', () => {
     expect(mocks.useTemplates).toHaveBeenCalledWith({ enabled: true })
   })
 
-  it('opens the current workspace through the Claude/Codex assistant menu', async () => {
+  it('opens the current workspace through the Claude code/Codex CLI menu', async () => {
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
@@ -245,12 +245,13 @@ describe('buildCopilotJudgeDraft', () => {
 
     const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open code assistant')
     expect(openButton).toBeTruthy()
-    expect(html).toContain('Claude')
+    expect(html).toContain('Open in CLI')
+    expect(html).toContain('Claude code')
     expect(html).toContain('Codex')
 
     const menuText = (props: Record<string, unknown>) =>
       renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
-    const claudeItem = mocks.menuItemProps.find((props) => menuText(props).includes('Claude'))
+    const claudeItem = mocks.menuItemProps.find((props) => menuText(props).includes('Claude code'))
     const codexItem = mocks.menuItemProps.find((props) => menuText(props).includes('Codex'))
     expect(claudeItem).toBeTruthy()
     expect(codexItem).toBeTruthy()
@@ -271,7 +272,7 @@ describe('buildCopilotJudgeDraft', () => {
   it('derives the close button state from live ahd status', () => {
     expect(activeCodeAssistantIds({ claude: false, codex: false })).toEqual([])
     expect(codeAssistantCloseButtonLabel({ claude: false, codex: false })).toBeNull()
-    expect(codeAssistantCloseButtonLabel({ claude: true, codex: false })).toBe('Close Claude')
+    expect(codeAssistantCloseButtonLabel({ claude: true, codex: false })).toBe('Close Claude code')
     expect(codeAssistantCloseButtonLabel({ claude: false, codex: true })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: true, codex: true })).toBe('Close assistants')
   })
@@ -301,7 +302,7 @@ describe('buildCopilotJudgeDraft', () => {
         }))
       })
       await vi.waitFor(() => {
-        expect(container.textContent).toContain('Open in')
+        expect(container.textContent).toContain('Open in CLI')
       })
 
       await act(async () => {
@@ -311,7 +312,7 @@ describe('buildCopilotJudgeDraft', () => {
       await vi.waitFor(() => {
         expect(mocks.subscribeCodeAssistantStatus).toHaveBeenCalledWith('/tmp/text-segmentation', expect.any(Function))
         expect(setIntervalSpy).not.toHaveBeenCalled()
-        expect(container.textContent).toContain('Close Codex')
+        expect(container.textContent).toContain('CLI running')
       })
     } finally {
       act(() => {
@@ -327,9 +328,9 @@ describe('buildCopilotJudgeDraft', () => {
 
   it('derives attach menu entries from live ahd status', () => {
     expect(codeAssistantAttachMenuLabels({ claude: false, codex: false })).toEqual([])
-    expect(codeAssistantAttachMenuLabels({ claude: true, codex: false })).toEqual(['Attach Claude'])
+    expect(codeAssistantAttachMenuLabels({ claude: true, codex: false })).toEqual(['Attach Claude code'])
     expect(codeAssistantAttachMenuLabels({ claude: false, codex: true })).toEqual(['Attach Codex'])
-    expect(codeAssistantAttachMenuLabels({ claude: true, codex: true })).toEqual(['Attach Claude', 'Attach Codex'])
+    expect(codeAssistantAttachMenuLabels({ claude: true, codex: true })).toEqual(['Attach Claude code', 'Attach Codex'])
   })
 
   it('shows the thinking indicator while an assistant turn is running with no text yet', () => {

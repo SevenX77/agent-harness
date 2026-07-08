@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, ChevronDown, CircleAlert, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ChevronDown, CircleAlert, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -303,11 +303,11 @@ export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): stri
   if (active.length > 1) {
     return 'Close assistants'
   }
-  return active[0] === 'claude' ? 'Close Claude' : 'Close Codex'
+  return active[0] === 'claude' ? 'Close Claude code' : 'Close Codex'
 }
 
 function codeAssistantLabel(assistant: CodeAssistantId): string {
-  return assistant === 'claude' ? 'Claude' : 'Codex'
+  return assistant === 'claude' ? 'Claude code' : 'Codex'
 }
 
 export function codeAssistantAttachMenuLabels(status: CodeAssistantStatus): string[] {
@@ -689,8 +689,8 @@ export function CopilotPanel({
                     aria-label="Manage code assistant"
                     className="studio-canvas-input-surface shrink-0"
                   >
-                    <Square data-icon="inline-start" className="fill-current" />
-                    {codeAssistantCloseLabel}
+                    <MonitorCheck data-icon="inline-start" />
+                    CLI running
                     <ChevronDown className="size-3" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -731,7 +731,7 @@ export function CopilotPanel({
                     className="studio-canvas-input-surface shrink-0"
                   >
                     <SquareTerminal data-icon="inline-start" />
-                    Open in
+                    Open in CLI
                     <ChevronDown className="size-3" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -742,7 +742,7 @@ export function CopilotPanel({
                       void handleOpenCodeAssistant('claude')
                     }}
                   >
-                    Claude
+                    Claude code
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}

@@ -1,7 +1,7 @@
 # Design: Open in Codex/Claude — 二进制来源守卫(binary provenance guard)
 
 > 前置:research.md(同目录)。事故根因与穿透机理已实证坐实,本文只定修复设计。
-> 状态:Draft(research+design 完成,待实施)。实施不在本 spec 内启动。
+> 状态:Implemented(2026-07-07)。agent-harness 侧 D1-D3 已落地;D4 是 ah/ccbd-rust 纵深防线,不在本次范围。
 
 ## §1 铁律(设计矩阵增补,最高层结论)
 

@@ -91,6 +91,57 @@ function Invoke-InDistro {
   return Invoke-Wsl -WslArgs @("-d", $Distro, "-u", "root", "-e", "bash", "-lc", ($PathPrefix + $Bash)) -AllowFail:$AllowFail
 }
 
+function Test-ProviderCliInteropHijack {
+  param([string]$Command)
+  $bash = @'
+cmd_path="$(command -v __COMMAND__ 2>/dev/null || true)"
+entry="$HOME/.local/bin/__COMMAND__"
+for candidate in "$cmd_path" "$entry"; do
+  [ -n "$candidate" ] || continue
+  [ -e "$candidate" ] || [ -L "$candidate" ] || continue
+  target="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+  case "$target" in
+    /mnt/*)
+      printf 'HIJACKED %s -> %s\n' "$candidate" "$target"
+      exit 0
+      ;;
+  esac
+done
+printf 'OK\n'
+'@.Replace("__COMMAND__", $Command)
+  return Invoke-InDistro $bash -AllowFail
+}
+
+function Test-ClaudeReusableAuth {
+  $bash = @'
+cred="$HOME/.claude/.credentials.json"
+if [ -f "$cred" ] && command -v python3 >/dev/null 2>&1; then
+  python3 - "$cred" <<'PY'
+import json
+import sys
+
+try:
+    oauth = json.load(open(sys.argv[1], encoding="utf-8")).get("claudeAiOauth") or {}
+except Exception:
+    sys.exit(1)
+
+sys.exit(0 if (oauth.get("accessToken") or oauth.get("refreshToken")) else 1)
+PY
+  if [ "$?" -eq 0 ]; then
+    printf 'PRESENT\n'
+    exit 0
+  fi
+fi
+printf 'MISSING\n'
+'@
+  return Invoke-InDistro $bash -AllowFail
+}
+
+function ConvertTo-BashSingleQuoted {
+  param([string]$Value)
+  return "'" + ($Value -replace "'", "'`"`"'") + "'"
+}
+
 # --- Windows Timezone -> IANA lookup (subset covering the zones users are
 # actually likely to be in; unmapped falls back to Etc/UTC with a warning
 # rather than guessing). Source: CLDR windowsZones.xml, common entries only.
@@ -270,7 +321,7 @@ Write-Ok "tmux + curl + python3 present"
 Write-Part "PART B: Studio's provider layer (ah + claude + Codex + auth)"
 
 Write-Step "B1 ah + provider CLIs"
-$minAhVersion = [Version]"1.3.0"
+$minAhVersion = [Version]"1.3.4"
 $ahVer = Invoke-InDistro "command -v ah >/dev/null 2>&1 && ah --version | awk '{print `$2}' || echo MISSING" -AllowFail
 $ahVerText = (($ahVer -join "")).Trim()
 $installAh = $false
@@ -292,11 +343,16 @@ if ($installAh) {
   Write-Skip "ah present ($ahVer)"
 }
 
-$claudeVer = Invoke-InDistro "command -v claude >/dev/null 2>&1 && claude --version || echo MISSING" -AllowFail
-if (($claudeVer -join "") -match "MISSING") {
+$claudePresent = Invoke-InDistro "command -v claude >/dev/null 2>&1 && echo PRESENT || echo MISSING" -AllowFail
+$claudeHijack = Test-ProviderCliInteropHijack "claude"
+if (($claudePresent -join "") -match "MISSING") {
   Invoke-InDistro "curl -fsSL https://claude.ai/install.sh | bash"
   Write-Ok "claude CLI installed"
+} elseif (($claudeHijack -join "`n") -match "HIJACKED") {
+  Invoke-InDistro "curl -fsSL https://claude.ai/install.sh | bash"
+  Write-Ok "repaired hijacked claude entry ($($claudeHijack -join ' '))"
 } else {
+  $claudeVer = Invoke-InDistro "claude --version" -AllowFail
   Write-Skip "claude CLI present ($claudeVer)"
 }
 
@@ -320,39 +376,48 @@ if (-not (Test-Path $codexWinBin)) {
   Write-Skip "Windows Codex CLI present ($codexWinVer)"
 }
 
-$codexWslVer = Invoke-InDistro "command -v codex >/dev/null 2>&1 && codex --version || echo MISSING" -AllowFail
-if (($codexWslVer -join "") -match "MISSING") {
+$codexWslPresent = Invoke-InDistro "command -v codex >/dev/null 2>&1 && echo PRESENT || echo MISSING" -AllowFail
+$codexWslHijack = Test-ProviderCliInteropHijack "codex"
+if (($codexWslPresent -join "") -match "MISSING") {
   Invoke-InDistro "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
   Write-Ok "WSL Codex CLI installed"
+} elseif (($codexWslHijack -join "`n") -match "HIJACKED") {
+  Invoke-InDistro "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+  Write-Ok "repaired hijacked codex entry ($($codexWslHijack -join ' '))"
 } else {
+  $codexWslVer = Invoke-InDistro "codex --version" -AllowFail
   Write-Skip "WSL Codex CLI present ($codexWslVer)"
 }
 
 # ---------------------------------------------------------------------------
 Write-Step "B2 auth (subscription login — not an API key)"
-$hasWslAuth = Invoke-InDistro "test -f ~/.claude/.credentials.json && echo YES || echo NO" -AllowFail
-if (($hasWslAuth -join "") -match "YES") {
-  Write-Skip "WSL claude is already authenticated"
+$winClaudeCredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json"
+$claudeCredUsable = $false
+if (Test-Path $winClaudeCredPath) {
+  try {
+    $oauth = (Get-Content -Path $winClaudeCredPath -Raw | ConvertFrom-Json).claudeAiOauth
+    $claudeCredUsable = [bool]($oauth.accessToken -or $oauth.refreshToken)
+  } catch {
+    $claudeCredUsable = $false
+  }
+}
+if (-not $claudeCredUsable) {
+  Write-Warn2 "Claude auth is not ready: sign in to Claude Code on Windows, then re-run this script."
+  Write-Host "      Studio uses Windows Claude's normal login file as the single auth source." -ForegroundColor Yellow
+  Write-Host "      It does not require a WSL Claude login and does not copy .credentials.json." -ForegroundColor Yellow
+  exit 0
 } else {
-  $winCredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json"
-  if (Test-Path $winCredPath) {
-    $wslCredPath = "/mnt/" + $env:USERPROFILE.Substring(0,1).ToLower() + ($env:USERPROFILE.Substring(2) -replace "\\", "/") + "/.claude/.credentials.json"
-    Invoke-InDistro "mkdir -p ~/.claude && cp '$wslCredPath' ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json"
-    Write-Ok "copied your Windows claude login into WSL"
+  $wslClaudeCredPath = "/mnt/" + $env:USERPROFILE.Substring(0,1).ToLower() + ($env:USERPROFILE.Substring(2) -replace "\\", "/") + "/.claude/.credentials.json"
+  $quotedClaudeCredPath = ConvertTo-BashSingleQuoted $wslClaudeCredPath
+  Invoke-InDistro "mkdir -p ~/.claude && ln -sfn $quotedClaudeCredPath ~/.claude/.credentials.json"
+  $claudeAuth = Test-ClaudeReusableAuth
+  if (($claudeAuth -join "") -match "PRESENT") {
+    Write-Ok "linked Windows Claude login into WSL"
   } else {
-    $winClaudeExe = Join-Path $env:USERPROFILE ".local\bin\claude.exe"
-    if (-not (Test-Path $winClaudeExe)) {
-      Write-Host "    installing the claude CLI on Windows so you can log in natively..."
-      Invoke-RestMethod -Uri "https://claude.ai/install.ps1" | Invoke-Expression
-    }
-    Write-Warn2 "one-time manual step needed — this is your real login, it can't be scripted:"
-    Write-Host "      1. Open a NEW terminal and run: claude" -ForegroundColor Yellow
-    Write-Host "      2. Complete the login in your browser (uses your Claude subscription)." -ForegroundColor Yellow
-    Write-Host "      3. Re-run this exact script — it will copy the login into WSL." -ForegroundColor Yellow
+    Write-Warn2 "Windows Claude credentials were linked, but WSL could not read a usable Claude login."
     exit 0
   }
 }
-
 $winCodexAuthPath = Join-Path $env:USERPROFILE ".codex\auth.json"
 if (Test-Path $winCodexAuthPath) {
   $wslCodexAuthPath = "/mnt/" + $env:USERPROFILE.Substring(0,1).ToLower() + ($env:USERPROFILE.Substring(2) -replace "\\", "/") + "/.codex/auth.json"

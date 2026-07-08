@@ -2,11 +2,11 @@
 region: copilot
 kind: target-direction design（ah 编排底座）
 created: 2026-07-03
-updated: 2026-07-05
+updated: 2026-07-07
 状态: 【阶段 1 完成 / 阶段 2 设计确定】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨
       已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
       并补齐后续 Studio 功能开发执行规则;2026-07-05 对齐 ah 1.3.0 的 `window_size="follow"`
-      与 Wikipedia 渐进式背景披露,并把入口升级为 Claude/Codex 菜单;运行中入口继续提供
+      与 Wikipedia 渐进式背景披露,并把入口升级为 Open in CLI 菜单;运行中入口继续提供
       Attach master pane 与 Close;Attach 会复用已打开的目标终端窗口,没有窗口时才新开。2026-07-05
       生命周期兜底升级:状态必须同时看 ahd inventory 与 master tmux,ahd-only/master-only 属 stale;
       workspace 内只允许一个 Studio-managed ahd,关闭按钮与 app 退出共用同一套 ah/tmux cleanup。
@@ -23,7 +23,7 @@ github.com/SevenX77/ah 的 v1.3.0 tag README、源码与内置 rules —— 这�
 ## 0. 一句话
 
 Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agent SDK 为辅**：
-面板上「Open in」菜单可选 Claude 或 Codex,经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
+面板上「Open in CLI」菜单可选 Claude code 或 Codex,经 ah 拉起一组 agent（内部 `[master]` 槽位承载 MoirAI,
 `clotho` / `lachesis` / `atropos` 承载三女神），
 用户在终端里直接操作;每个 agent 的**身份 / 知识库 / 工具箱**全部经 `ah.toml` + `.ah/rules/`
 + `.ah/bundles/` 配置注入,不改 ah 本体。
@@ -61,10 +61,11 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 
 ## 3. ah 版本要求（踩坑记录,避免重复劳动）
 
-**当前 Studio 基线:ah ≥ 1.3.0。** 1.2.0 已验证支持 editable rules / skills 注入,但 1.3.0 新增
+**当前 Studio 基线:ah ≥ 1.3.4。** 1.2.0 已验证支持 editable rules / skills 注入,但 1.3.0 新增
 `[master].window_size = "follow"`:默认仍是 `fixed`,Studio 若不显式写 `follow`,attach 进去的 MoirAI
-终端窗口不会自动跟随当前终端大小。Studio launcher 必须在启动前检查 `ah --version`;低于 1.3.0 时
-直接提示升级,不允许继续用旧 ah 静默启动固定分辨率 pane。
+终端窗口不会自动跟随当前终端大小。1.3.2 提供 daemon env passthrough;1.3.4 新增
+冷启动 `starting` 相位与 provider 层 worker `IS_SANDBOX=1` 注入,替代 Studio 临时 `[env]` 注入。
+Studio launcher 必须在启动前检查 `ah --version`;低于 1.3.4 时直接提示升级,不允许继续用旧 ah 静默启动。
 
 历史踩坑:本机原装 `ah` 是 0.9.0(2026-06-22 的 debug build),它根本没有实现 `bundle` 与
 `.ah/rules/` 注入机制。症状:配好 `bundle=[…]` / `.ah/rules/<id>.md`,`ah config validate` 也过
@@ -84,8 +85,9 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
   install -m755 <ah-1.3.0-build>/ah  ~/.local/bin/ah
   install -m755 <ah-1.3.0-build>/ahd ~/.local/bin/ahd
   ```
-- **结论**:**Studio「打开 Claude Code」依赖的 `ah` 必须 ≥ 1.3.0。** 打包分发 Studio 时要连带
-  升级/内置该版 ah,否则要么人格注入静默失效(0.9.0),要么 MoirAI attach 窗口无法保证自动匹配终端大小。
+- **结论**:**Studio「打开 Claude Code / Codex」依赖的 `ah` 必须 ≥ 1.3.4。** 打包分发 Studio 时要连带
+  升级/内置当前基线 ah,否则要么人格注入静默失效(0.9.0),要么 MoirAI attach 窗口无法保证自动匹配终端大小,
+  要么缺失 1.3.4 的 starting/worker sandbox 行为。
   `scripts/install-claude-code-wsl.ps1` 负责把旧 ah 自动升级到该基线,并停掉旧 ahd daemon。
 
 ## 4. ah 配置机制（权威说明,出处 = ah 仓库 README/docs）
@@ -179,7 +181,7 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 生命周期规则:
 
 - `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
-- Studio 显式管理入口是原 `Open in` 位置:没有活跃 ahd 时显示 Claude/Codex 打开菜单。活跃判定必须是
+- Studio 显式管理入口是 `Open in CLI` 位置:没有活跃 ahd 时显示 Claude code/Codex 打开菜单。活跃判定必须是
   **事件源双事实**:Studio 订阅 `ah events --format json` 的 runtime snapshot,活跃判定只认 `ahd_has_inventory=true` 与 `master_tmux_alive=true` 同时成立。只有 ahd inventory、只有 master
   tmux、或残留 worker/agent tmux 都是 stale 状态;Studio 必须先按 workspace 清理所有 Studio-managed ah
   config,再允许重新打开。
@@ -195,8 +197,8 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
   master,不再 `ah start`;Open 另一个 assistant 且已有 ahd 活跃时直接拒绝,要求先关闭现有 assistant。
   Open 命令返回的 config path 同时是该 workspace 本轮状态身份的真相源:当 skill 自带 `ah.toml` 时,
   Claude/Codex 会共享同一个 config path,不得再用文件扫描顺序把已打开的 Codex 误归类成 Claude。
-  UI 同一位置变成运行中菜单,触发按钮显示 `Close Claude` / `Close Codex` / `Close assistants`,菜单内提供
-  `Attach Claude` / `Attach Codex` 和关闭动作。Attach 只负责进入既有 master pane,不重新 `ah start`:
+  UI 同一位置变成运行中菜单,触发按钮显示 `CLI running`,菜单内提供
+  `Attach Claude code` / `Attach Codex` 和关闭动作。Attach 只负责进入既有 master pane,不重新 `ah start`:
   Windows 下 Studio 为每个 workspace+assistant 生成稳定终端标题,如果目标 attach 窗口已经打开,先激活该
   窗口到最前面;找不到窗口时才新开终端并执行 `ah --config <cfg> attach master`,用于用户手动关闭 terminal
   tab 后重新进入现有 master pane。
@@ -217,27 +219,40 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 
 原则:**一处登录、launcher 搬运;按 OS × assistant 显式列举,分清「分系统的」与「共用的」**。
 
+- **铁律:master/worker 可执行文件必须是执行侧 OS 的原生二进制。** ah 的沙盒是环境变量级协作式隔离,
+  成立前提是子进程与 daemon 同 OS;跨 binfmt interop 边界执行(WSL 内 exec `/mnt/*` 下的 PE)=沙盒契约作废,
+  且失效是静默的(事故背景见 `.kiro/specs/studio-open-in-binary-provenance/research.md`)。因此对解析出的
+  二进制必须做来源校验,命中跨界二进制时 **fail loud**:拒绝启动、打印修复指引、绝不静默降级。凭证搬运矩阵管
+  "登录态数据从哪来",本铁律管"二进制从哪来"——两个正交维度,新增 assistant 两个都必须回答。
+- **二进制来源矩阵**:
+
+  | assistant | 可信来源 | 不可信入口 / 说明 |
+  |---|---|---|
+  | claude | WSL 原生 install.sh 产物,通常位于 `~/.local/share/claude/versions/*`,由 `~/.local/bin/claude` 指向 | Windows+WSL 下 `~/.local/bin/claude` 仍需 `readlink -f` 校验,目标落到 `/mnt/*` 必须拒绝 |
+  | codex | WSL 原生 install.sh standalone 产物:`~/.codex/packages/standalone/current/bin/codex` | `~/.local/bin/codex` 会被 Windows Codex WSL 集成改写,不可作信任锚;仅作 fallback 且必须过 `/mnt/*` 守卫 |
+
 - **铁律:绝不复制含 refresh token 的凭据文件到第二个长期存活的环境。** OAuth refresh token 是
   轮转式的(用一次作废换新):两个环境持有同一条链,谁先刷新谁存活,另一侧刷新必失败并把凭据文件
   清成空壳。2026-07-06 实证:装机脚本曾把 Windows `~/.claude/.credentials.json` 复制进 WSL,当天
   两侧同分钟被各自的失败刷新清空、双双登出。`scripts/install-claude-code-wsl.ps1` 的一次性复制
   (L333-340)据此**废止为引导残留**,不再是设计的一部分。
-- **claude(Windows host → WSL)**:搬运物 = `claude setup-token` 签发的一年期推理 token
-  (官方跨环境机制,不参与轮转)。链路:用户一次性 `claude setup-token` + `setx
-  CLAUDE_CODE_OAUTH_TOKEN <token>` → Open 的 `.ps1` launcher 读用户级 env、经 `WSLENV` 送进
-  payload → payload 预检(无 token 且 WSL 本地 `.credentials.json` 无可用 token 时,停在指引、
-  不拉起注定 Not-logged-in 的 master)→ `ah start`(ah ≥ 1.3.2 将该变量列入 daemon env
-  passthrough)→ daemon unit env → master(tmux 子进程)与 worker(systemd-run scope 子进程)
-  全部继承;token 不落 ah.toml、不进 sqlite、不进 spawn-cmd 日志。替代路径:在 WSL 里
-  `claude /login`(独立 refresh 链,与 Windows 互不干扰),预检同样放行。
+- **claude(Windows host → WSL)**:搬运物 = Windows
+  `%USERPROFILE%\.claude\.credentials.json` 这一份文件本身,但**只做 symlink,不复制**。用户只需在
+  Windows Claude Code 正常登录;Open 的 WSL payload 把 WSL root 的
+  `~/.claude/.credentials.json` 链到 `/mnt/<drive>/Users/<user>/.claude/.credentials.json`,
+  预检该文件里有可用 `accessToken` 或 `refreshToken`,否则停在“先登录 Windows Claude Code”的指引;
+  Claude master/worker 进入 ah sandbox 后,再把 sandbox HOME 下的
+  `$HOME/.claude/.credentials.json` 链到 `$STUDIO_AH_HOST_HOME/.claude/.credentials.json`。这样
+  Windows/WSL/sandbox 看到的是同一份凭据文件,不会生成第二份 OAuth 文件;用户不需要 WSL
+  `claude /login`,也不需要 `claude setup-token` / `CLAUDE_CODE_OAUTH_TOKEN`。
 - **codex(Windows host → WSL)**:搬运物 = Windows `~/.codex/auth.json`,payload 每次启动复制
   (现状保留);workspace trust 由 master cmd 写 sandbox `config.toml`。已知风险注记:auth.json
   若含轮转式 refresh token,与 claude 同类的互踩隐患存在,尚未爆雷、持续观察;爆雷时按 claude
-  的 token-env 模式重构。
+  的 symlink 单一真相源模式重构。
 - **macOS / Linux(native,无 WSL)**:无搬运层 —— Studio 与 ah 同宿主,master/worker 直接用
   宿主登录态;唯一 launcher 差异是脚本形态(`.sh`),凭证矩阵不适用。
-- **分层归属**:Windows-only = `.ps1` 生成、`WSLENV` 转发、`windows_path_to_wsl` 路径翻译、
-  codex auth.json 复制源;跨 OS 共用 = ah.toml 模板(含 `[env]`)、auth 预检语义、版本门禁、
+- **分层归属**:Windows-only = `.ps1` 生成、`windows_path_to_wsl` 路径翻译、
+  codex auth.json 复制源;跨 OS 共用 = ah.toml 模板、auth 预检语义、版本门禁、二进制来源守卫、
   preseed;ah 侧(与 OS 无关)= env passthrough 白名单、sandbox home 物化。新增 assistant 时
   必须同时补齐本矩阵的对应行,不许只做 claude。
 
@@ -354,7 +369,7 @@ cmd 现在会在进入 Claude Code 前补 `$HOME/.local/bin/claude -> <真实 cl
    `.codex/auth.json`、`.codex/AGENTS.md`、`.agents/skills`。Windows 登录态是源头,WSL/ah sandbox
    只拿复制/链接后的副本。
 5. **antigravity provider 后续再接**:等本机安装与 provider home 规则确认后,再加第三个菜单项或自动升级。
-6. **打包分发带上 ah ≥1.3.1**(§3 结论)。
+6. **打包分发带上 ah ≥1.3.4**(§3 结论)。
 
 ## 9. 阶段 2:接活闭环设计
 
@@ -376,7 +391,8 @@ pane;MoirAI 先自报状态,随后能按 skill 生命周期判断该动哪只手
 3. Lachesis 能拿到 `compile-error-repair`,围绕编译错误码和挂载 spec 做根因修复。
 4. Atropos 拿到新增 `eval-judgement`,能基于 predict/run 产物、trace 与 golden diff 给出达标/不达标的终判,
    并明确把改进方向回流给 Clotho。
-5. MoirAI 只在用户看得见的话术里说 MoirAI/Clotho/Lachesis/Atropos,不把 ah 的内部槽位/调度词汇露给用户。
+5. MoirAI 的开场自报由 `moirai-intro` skill 承载,启动 prompt 只做短触发,不把预期答案硬塞进第一条用户消息。
+6. MoirAI 只在用户看得见的话术里说 MoirAI/Clotho/Lachesis/Atropos,不把 ah 的内部槽位/调度词汇露给用户。
 
 ### 9.2 非目标
 
@@ -413,6 +429,7 @@ Studio 现有拉起链路有一个容易误判的点:
       graph-design/SKILL.md
       agent-prompt-design/SKILL.md
       compile-error-repair/SKILL.md
+      moirai-intro/SKILL.md
       eval-judgement/SKILL.md
 ```
 
@@ -436,18 +453,15 @@ daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会�
    - 创建 `.ah/rules` 与 `.ah/skills`;
    - 写入四份人格 rules(来自本文 §11 附录的 R3 文本,再追加阶段 2 的内部操作协议);
    - 从 `apps/studio/backend/app/prompts/skills/*` 同步四个现有 copilot skill;
-   - 新增 `eval-judgement` skill;
+   - 新增 `moirai-intro` 与 `eval-judgement` skills;
    - 对已存在文件采用**受管头 + 内容 hash**策略:只有文件带 Studio 生成头且 hash 匹配上次生成时才覆盖;用户改过或
      手写的 `.ah/*` 不静默覆盖,要报清楚冲突路径。
 2. `transient_ah_config_content(workspace_root, platform_paths)`:
    - 生成 master + 三个 agents;
-   - 引用 `.ah/skills` 中的 skill 名;
-   - **必须输出顶层 `[env]` 表并含 `IS_SANDBOX = "1"`**(2026-07-06):worker agent 由 ah 以裸
-     `<provider> --dangerously-skip-permissions` 在 WSL root 下拉起,claude CLI 无 `IS_SANDBOX=1`
-     时直接拒跑退出("cannot be used with root/sudo privileges"),三个 worker 出生即死、被 REAP 后
-     `ah start --wait` 报 `AGENT_NOT_FOUND`。`[env]` 经 `ah start` 的 merged_env →
-     `agent.spawn extra_env_vars` 注入 worker;master 的逃生口仍是 cmd 字符串里的
-     `export IS_SANDBOX=1`,两者缺一不可;
+   - 引用 `.ah/skills` 中的 skill 名,其中 `[master].skills = ["moirai-intro"]`;
+   - 不输出临时顶层 `[env] IS_SANDBOX = "1"`。2026-07-06 的 Studio 注入只是 ah 1.3.4 前的过渡方案;
+     1.3.4 已在 provider 层原生给 worker 注入 sandbox env。master 的 Claude root 逃生口仍保留在
+     cmd 字符串里的 `export IS_SANDBOX=1`;
    - 不写 `[sandbox] additional_ro_binds`;当前 ah 会把该字段落成 WSL 不接受的 user scope
      `BindReadOnlyPaths`,导致 `ah start` 在 spawn agent 时失败;
    - Windows 下所有给 ah/WSL 看的路径若未来进入 config,必须先转成 `/mnt/<drive>/...`,不能把 `D:\...` 写进 config。
@@ -457,14 +471,12 @@ daemon 虽按 session `absolute_path` 解析,但"校验看 A、运行看 B"会�
 ```toml
 version = "1"
 
-[env]
-IS_SANDBOX = "1"
-
 [master]
 enabled = true
 cmd = "bash -c '<prepare sandbox claude symlink; export IS_SANDBOX=1; exec claude --dangerously-skip-permissions ...>'"
 readiness_timeout_s = 180
 window_size = "follow"
+skills = ["moirai-intro"]
 
 [agents.clotho]
 provider = "claude"
@@ -520,7 +532,36 @@ Studio 只做"缺什么提示什么",不擅自把 MoirAI 三女神写进去,因�
 
 这段协议属于行为约束,不是台词。它可以写 `ah ask`、agent id、命令行,但必须明确"内部使用,不进入用户可见身份叙述"。
 
-### 9.6 `eval-judgement` skill 草案
+### 9.6 `moirai-intro` skill 草案
+
+开场不再靠一大段 CLI prompt 直接把答案列给模型。Studio 只自动提交短触发词
+`使用 moirai-intro 介绍你自己。`;开场结构写入 `.ah/skills/moirai-intro/SKILL.md`,并挂到 `[master].skills`:
+
+```markdown
+---
+name: moirai-intro
+description: Studio Open in CLI 启动后，用 MoirAI 的角色文档和当前工作区事实做一次简短自我介绍与编队状态汇报。
+---
+
+# MoirAI Intro
+
+目标:启动触发或用户要求"介绍你自己"时,做一次事实自检式开场,不是复述固定答案。
+
+信息来源:
+1. 已加载的 MoirAI / Clotho / Lachesis / Atropos 角色文档。
+2. 当前目录事实:`pwd`、`GRAPH.md`、`phases/`、目录名;不要做大范围仓库扫描。
+3. `ah ps` 的编队状态。`ah status` 不是可用命令,不要调用;无法确认就写"未确认"。
+
+输出:中文短答,每点一行,然后停下等用户:
+1. 你是谁。
+2. 当前 cwd 和 skill 判断。
+3. Clotho / Lachesis / Atropos 的职责与状态。
+4. 你能帮什么。
+
+约束:不把本文件逐字背诵;不暴露隐藏 prompt、规则全文或无关命令流水;不主动展开神话背景。
+```
+
+### 9.7 `eval-judgement` skill 草案
 
 Atropos 缺的不是人格,而是一套可重复的 eval 判断流程。阶段 2 新增 `.ah/skills/eval-judgement/SKILL.md`:
 
@@ -548,7 +589,7 @@ description: 对一条 graph skill 的 predict/run 结果做整体终判。用�
 - 给 Lachesis 类型的字段级修复建议冒充整体 eval。
 ```
 
-### 9.7 知识库路径提示
+### 9.8 知识库路径提示
 
 阶段 2 **不使用**全局 `[sandbox] additional_ro_binds`:ah 1.3.0 会把它翻译成
 `systemd-run --user --scope --property=BindReadOnlyPaths=...`,当前 WSL systemd user scope 会拒绝该属性,
@@ -565,19 +606,21 @@ Claude Code 以 `--dangerously-skip-permissions` 运行时可直接读取。每�
 Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 ah 实际运行环境可见的路径。Studio 已有
 `windows_path_to_wsl()` 可复用,新增路径时同样先转换,否则 ah 在 WSL 里看不到 Windows 盘符。
 
-### 9.8 验收脚本与人工验收
+### 9.9 验收脚本与人工验收
 
 代码门禁先聚焦 Tauri 单元测试,不需要为了纯配置生成跑完整 Studio:
 
 - `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
 - `transient_ah_config_content` 按菜单生成 `provider = "claude"` 或 `provider = "codex"`,并在 `[master]`
-  下写入 `window_size = "follow"`,确保 1.3.0 的 tmux
-  master pane 自动跟随 attach 终端大小;
-- launcher 在 `ah start` 前拒绝 `ah < 1.3.0`,避免 `window_size = "follow"` 被旧 ah 忽略;
+  下写入 `window_size = "follow"` 与 `skills = ["moirai-intro"]`,确保 tmux master pane 自动跟随 attach
+  终端大小,且开场自报由 skill 而不是硬编码 prompt 承载;
+- launcher 在 `ah start` 前拒绝 `ah < 1.3.4`,避免缺失 starting 相位或 worker sandbox env;
 - launcher 记录启动 ah 前的宿主 HOME;Claude master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
   `$HOME/.local/bin/claude` symlink;Codex master cmd 补 `$HOME/.local/bin/codex` symlink,并把
   Windows 源头登录复制到 WSL 后再链接进 ah sandbox 的 `$HOME/.codex/auth.json`,同时写入 sandbox
   `$HOME/.codex/config.toml` 的当前 workspace trust;
+- Claude/Codex master cmd 在最终 `exec` 前对 `readlink -f` 结果做 `/mnt/*` 守卫;Codex 解析顺序优先
+  使用 `$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex`,再 fallback 到 PATH / `~/.local/bin`;
 - 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
   persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
@@ -598,20 +641,21 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - 原生窗口关闭必须与 app quit 一样清理 Studio-managed ah configs,否则 tmux/ahd 会在重启 Studio 后被
   `watch_code_assistant_status` 再收到事件时重新投影成 inactive;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
+- `.ah/skills/moirai-intro/SKILL.md` 明确使用 `ah ps` 确认三位子 agent 状态,并声明 `ah status` 不是可用命令;
 - `transient_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
   拒绝 `BindReadOnlyPaths` 后导致 `TMUX_COMMAND_FAILED`;
 - 已存在 `ah.toml` 时不自动生成 MoirAI 配置,继续走用户配置。
 
 人工验收必须在真实 ah 终端里做,因为阶段 2 的核心是 provider home 物化 + Claude Code 订阅态:
 
-1. 打开一个空白 skill,点「Open in」菜单里的 Claude 与 Codex 两项。
-2. MoirAI 自报身份、cwd、能做什么;不得自称 generic copilot 或把内部槽位名当成身份。
+1. 打开一个空白 skill,点「Open in CLI」菜单里的 Claude code 与 Codex 两项。
+2. MoirAI 自报身份、cwd、三位子 agent 职责/状态、能做什么;不得自称 generic copilot 或把内部槽位名当成身份。
 3. 向 MoirAI 发"帮我把一个 X 流程设计成 skill",它应调用 Clotho 并返回结构化设计。
 4. 制造一个简单编译错误,让 MoirAI 修;它应调用 Lachesis,给出根因和最小修复。
 5. 准备一组 run/predict 产物或缺失产物场景,让 MoirAI 评估;它应调用 Atropos,输出终判与回流建议。
 6. 全程 UI 仍只露 MoirAI 入口,无三女神未实现 UI。
 
-### 9.9 阶段 2 开发执行规则
+### 9.10 阶段 2 开发执行规则
 
 本节约束后续真正落代码的 PR。阶段 2 是 **Studio 功能开发**:以前端入口触发,但功能牵扯到哪层就改哪层。
 `apps/studio/backend` 可改;第一性原理分析确认该改 engine/gateway 时,直接改
@@ -682,7 +726,7 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 每条已合并改动一行,写清点到哪一屏、点/填/hover 什么、应看到什么(具体到颜色/文案/数量)、状态为"待确认"或
 "✅ 已确认"。PM 逐条确认完才算收敛;任一条未确认,本任务仍未完成。
 
-### 9.10 阶段 2 后的下一步
+### 9.11 阶段 2 后的下一步
 
 阶段 2 通过后,再进入三个方向:
 

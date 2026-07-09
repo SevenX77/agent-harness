@@ -16,6 +16,8 @@ enabled = true
 # 完成信号:provider Stop hook 直推 ahd,是「内部后台任务型假完成」的编排器侧根治
 [completion]
 hook_push_enabled = true
+hook_push_events = ["stop"]
+hook_push_providers = ["claude", "codex", "antigravity"]
 
 # 实现者:antigravity 主力编程(已知行为护栏,必读 .ah/rules/a1.md)
 [agents.a1]
@@ -33,3 +35,36 @@ provider = "claude"
 # 角色同 a1 但护栏按 codex 特性裁剪;缺规则文件时 ah 回退内置 worker 默认规则)
 # [agents.a2]
 # provider = "codex"
+
+# ── CLI 层配置(模型 / effort / statusline / autoCompact)──────────────────────
+# 源自 pack v0.4.0 实战拍板值。ah 把 [master.settings] / [agents.<id>.settings]
+# 深合并进该角色沙箱的 .claude/settings.json(嵌套表=嵌套对象;同名键覆盖)。
+# 硬限制(ah v1.4.0):仅 provider = "claude" 的角色支持——给 antigravity(a1/a3)
+# 写 settings 会在配置加载时直接报错,它们的模型/effort 配在宿主全局
+# ~/.gemini/antigravity-cli/settings.json 的 model 名里内嵌(本机实测值
+# "Gemini 3.5 Flash (High)"——检查 effort 就看这个字段),随沙箱物化继承。
+# 模型分档(pack 实战拍板):审计门用旗舰+最高持久化档(effortLevel 上限 xhigh,
+# max 仅 session);master 用中档+medium(编排是短视野决策,质量门在审计与
+# operator 物理验证,master 又是最烧 token 的常驻角色);实施走便宜模型——
+# 这就是"便宜模型编排勾旗舰水准"的分档表达。
+# 生效时机=沙箱物化(spawn)时;在跑的 agent 需 kill+up / 重启栈才带新配置。
+
+[master.settings]
+model = "claude-sonnet-5"
+effortLevel = "medium"
+autoCompactEnabled = true
+
+# statusline 按 operator 监控需求配:角色(pane 对号)· 模型+effort(验证配置真生效)
+# · context 占用%(compaction 临近=master 会吞消息的高危窗口,capture-pane 一眼可读)。
+[master.settings.statusLine]
+type = "command"
+command = "jq -r '\"master · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+
+[agents.a4.settings]
+model = "claude-opus-4-8"
+effortLevel = "xhigh"
+autoCompactEnabled = true
+
+[agents.a4.settings.statusLine]
+type = "command"
+command = "jq -r '\"a4-audit · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"

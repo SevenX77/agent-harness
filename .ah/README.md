@@ -1,9 +1,9 @@
 # .ah/ · ah 编程 SOP(agent-harness 实例)
 
 用 [ah](https://github.com/SevenX77/ah)(≥ 1.4.0)在本仓编排 agent 团队做工程的配置实例,源自
-[ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) v0.1.0 `examples/dev-programming/`
-(commit bb41fcf)。协作方法论(三层拓扑 / SOP 闭环 / 设计管线 / 代理实践 / 纪律清单)读 pack 的
-`GUIDE.md` / `ROLES.md`——那是人读层;本目录只放注入 agent 的实例层。
+[ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) v0.4.0 `examples/dev-programming/`。
+协作方法论(三层拓扑 / SOP 闭环 / 设计管线 / 代理实践 / 纪律清单)读 pack 的 `GUIDE.md` / `ROLES.md`,
+**operator(用户代理)角色规范读 pack `OPERATOR.md`**——那是人读层;本目录只放注入 agent 的实例层。
 
 ## 内容
 
@@ -18,9 +18,20 @@
    `examples/scenarios/dev-programming/ah.toml`、保真测试 `tests/dev_scenario_template.rs`
    (直接断言 `config["master"]["cmd"]`)、模板 README 原文 "The master provider is determined
    by `[master] cmd` in `ah.toml`, not by the master slot file"。
-2. `[completion] hook_push_enabled = true`:provider Stop hook 直推 ahd,是 pack GUIDE §11
+2. `[completion]` hook_push 三行:provider Stop hook 直推 ahd,是 pack GUIDE §11
    「内部后台任务型假完成」的编排器侧根治(ah 官方模板同样开启)。
 3. 规则文件与 VERIFY.md 已按本仓适配(worktree/PR 纪律、CI Gates、已知坑)。
+
+## CLI 层配置(模型 / effort / statusline)
+
+`ah.toml` 末尾是 pack v0.4.0 实战拍板的 CLI 层配置:`[master.settings]` / `[agents.a4.settings]`
+深合并进该角色沙箱的 `.claude/settings.json`。**仅 claude provider 支持**(ah v1.4.0);
+antigravity(a1/a3)的模型/effort 配在宿主全局 `~/.gemini/antigravity-cli/settings.json` 的
+model 名里内嵌(本机实测 "Gemini 3.5 Flash (High)"),随沙箱物化继承。分档:**a4 审计 =
+Opus 4.8 + xhigh**(质量门不偷懒;effortLevel 持久化上限就是 xhigh)、**master = Sonnet 5 +
+medium**(编排是短视野决策,质量门在审计与 operator 物理验证)、实施走便宜模型。statusline
+按 operator 监控需求配(角色 · 模型+effort · context%),**依赖 WSL 侧装 `jq`**(本机已装)。
+生效时机:沙箱**物化(spawn)时**——改了 ah.toml,在跑的 agent 要 kill+up / 重启栈才带新配置。
 
 ## 怎么跑(标准形态)
 
@@ -67,6 +78,28 @@ env 路线已废弃)。清单随实测滚动回写(`[x]` = 已在本机验证过
       需要自己的 `uv sync` / `npm ci`(Python 可用 `UV_PROJECT_ENVIRONMENT` 把 venv 指到
       树外,避免与 Windows venv 打架)。
 - [ ] `/mnt/d` 跨界 IO 慢是已知代价;确认过慢再评估 WSL 原生 clone 形态。
+
+### WSL 侧运行地基(2026-07-09 已搭好并 standby 实证)
+
+真任务的标准形态 = **在 WSL 原生 clone `~/agent-harness` 里跑 ah 编队**(不在 /mnt/d:
+GUIDE 明令 WSL 项目放原生盘,避跨界 IO)。已就位(实测 `wt-new → ruff → ah config validate`
+首环全通):uv/node(v22 原生 Linux,非 /mnt/c 的 Windows node)/gh/jq 装齐;WSL git push
+认证 = Windows 的 `ghp_` classic PAT(**不轮转,复制安全**)配进 gh + git helper。
+真任务时:`cd ~/agent-harness && git pull && scripts/wt-new.sh <type>/<desc>` → 拉栈 →
+在树里跑 CI Gates(uv run …)。**operator 与编队共用这份 WSL 仓,Windows 侧的
+D:\coding\agent-harness 只做 operator 亲手活(spec 编辑、pack 同步),两份仓经 main 汇合。**
+
+### 拉栈前一行漂移自检(时区/语言与 Windows 对齐)
+
+`/etc/localtime` 是手工 symlink,Windows 改时区不会自动跟。拉栈前跑一行确认没漂:
+
+```bash
+# Windows 时区 vs WSL,应一致(本机=Pacific/America_Los_Angeles);locale 应是 UTF-8
+tzutil /g   # (Windows 侧) ↔  readlink -f /etc/localtime | sed 's|.*/zoneinfo/||'  (WSL 侧)
+```
+
+漂了则 `ln -sf /usr/share/zoneinfo/<Area/City> /etc/localtime`(编码策略见
+`docs/development/CROSS_PLATFORM.md`:一律 UTF-8,勿 GBK)。
 
 ### 本机拉栈的四条实测配方(2026-07-09,不照做必踩)
 

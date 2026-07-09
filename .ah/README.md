@@ -40,9 +40,19 @@ ah attach master                         # 进 master 对话;Ctrl-b d 离开不�
 
 ah 只跑 Linux/WSL2。本机 WSL = Ubuntu-24.04(root 用户;claude 与 ah 已装,claude 凭据走
 `CLAUDE_CODE_OAUTH_TOKEN` env 通道——**不要**跨 Windows/WSL 拷 `.credentials.json`,
-refresh token 轮转会互踩)。以下路径**尚未在本机实测**,首跑逐条落地并回写本节:
+refresh token 轮转会互踩)。清单随实测滚动回写(`[x]` = 已在本机验证过):
 
-- [ ] `wsl -e ah version` 确认 ≥ 1.4.0,旧了重跑官方 installer。
+- [x] ah ≥ 1.4.0:2026-07-09 已升(installer → `/root/.cargo/bin`);`/usr/bin/{ah,ahd}`
+      的旧 1.3.0-rc.1 已改为指向 cargo 版的 symlink,消除双位置版本 skew。
+- [x] antigravity:**CLI 真名是 `agy`**(ah 对该 provider spawn 的命令就是
+      `agy --dangerously-skip-permissions`,别按 antigravity 找二进制),WSL 已装
+      (`/root/.local/bin/agy`,`/usr/local/bin/agy` 加了 symlink 兜 PATH)。鉴权已通:
+      **Windows 侧 agy 把 token 存在凭据管理器(`gemini:antigravity`),文件系统里没有
+      可 symlink 的文件**——用 CredRead 读出 blob(UTF-8 JSON,键 `token`/`auth_method`)
+      写成 WSL `~/.gemini/antigravity-cli/antigravity-oauth-token`(chmod 600)即可;
+      `agy models` 与 `agy -p` 实测通(Google refresh token 不轮转,双端共用可行,
+      不同于 claude)。`.gemini/GEMINI.md` 风险实际很低:它未跟踪,worktree 天然不带它,
+      而 ah 会话只允许在 worktree 里跑。
 - [ ] ah 用的 worktree 从 **WSL 侧**跑 `scripts/wt-new.sh` 创建(Windows 侧建的 worktree,
       gitdir 指针是 Windows 绝对路径,WSL git 读不了)。
 - [ ] 仓根/worktree 的 `.venv`、`node_modules` 是 Windows 原生产物,WSL 不可复用:WSL 侧
@@ -50,8 +60,6 @@ refresh token 轮转会互踩)。以下路径**尚未在本机实测**,首跑逐
       树外,避免与 Windows venv 打架)。
 - [ ] root 用户要 bypass 权限的 master 用 `IS_SANDBOX=1 claude --dangerously-skip-permissions`
       (`ah.toml` 里有现成注释行;worker 侧 ah ≥ 1.3.4 已自动注入 `IS_SANDBOX`)。
-- [ ] antigravity CLI 在 WSL 的安装/登录;并处置本地未跟踪的 `.gemini/GEMINI.md`——它写着
-      「未经用户确认禁止写代码」,若 antigravity 读项目级 GEMINI 规则,会掐死 a1/a3 的自主实施。
 - [ ] `/mnt/d` 跨界 IO 慢是已知代价;确认过慢再评估 WSL 原生 clone 形态。
 
 首跑踩坑回写进本 README 与 `.ah/VERIFY.md` §2——档案错了改档案,一处生效。

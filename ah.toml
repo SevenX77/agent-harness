@@ -1,0 +1,35 @@
+# ah 编程 SOP · agent-harness 实例
+# 源自 SevenX77/ah-scenario-pack dev-programming 场景(当前实战拓扑):
+#   antigravity 主力实施/设计 + claude 协调/审计。
+# 启动方式与本机(Windows/WSL)注意事项:.ah/README.md;验证命令档案:.ah/VERIFY.md。
+version = "1"
+
+# 主控/协调者:强语义 + 长上下文;场景规则 .ah/rules/master.md
+# 注意:master 由本表决定(ah >= 1.4.0 官方模板形式),不要写成 [agents.master]
+# ——那会额外孵化一个名叫 "master" 的普通 worker,真 master 反而落在默认配置上。
+[master]
+cmd = "claude"
+enabled = true
+# WSL 以 root 运行且需要 bypass 权限时改用(claude 对 root 强制要求 IS_SANDBOX=1):
+# cmd = "IS_SANDBOX=1 claude --dangerously-skip-permissions"
+
+# 完成信号:provider Stop hook 直推 ahd,是「内部后台任务型假完成」的编排器侧根治
+[completion]
+hook_push_enabled = true
+
+# 实现者:antigravity 主力编程(已知行为护栏,必读 .ah/rules/a1.md)
+[agents.a1]
+provider = "antigravity"
+
+# 设计者:发散/第一性;必须与 master 异族,同族发散=回音壁(.ah/rules/a3.md)
+[agents.a3]
+provider = "antigravity"
+
+# 审计者:唯一质量门,逐任务必审(.ah/rules/a4.md)
+[agents.a4]
+provider = "claude"
+
+# 可选:第二实施通道(codex 配额恢复后启用;启用时补 .ah/rules/a2.md,
+# 角色同 a1 但护栏按 codex 特性裁剪;缺规则文件时 ah 回退内置 worker 默认规则)
+# [agents.a2]
+# provider = "codex"

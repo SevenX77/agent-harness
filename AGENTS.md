@@ -286,6 +286,12 @@ one-page orientation, not the full design.
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).
+- **ah 编程 SOP(多 agent 编排开发本仓)**: 仓根 `ah.toml` + `.ah/`(角色规则 +
+  `VERIFY.md` 验证档案 + 启动指南)是
+  [ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) dev-programming
+  场景在本仓的实例。用 [ah](https://github.com/SevenX77/ah) 拉起 master+workers
+  协作开发时以 `.ah/` 为准;方法论(拓扑/SOP 闭环/设计管线/纪律清单)读 pack 的
+  `GUIDE.md`/`ROLES.md`。入口:`.ah/README.md`。
 - **Feature handoff prompt (template, single source)**:
   `docs/development/FRONTEND_HANDOFF_PROMPT.md` — the canonical copy-paste brief
   for handing a Studio feature task (frontend-driven, full-stack) to an agent

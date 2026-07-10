@@ -58,7 +58,7 @@ revision_trace: REVISION-TRACE.md
   - 将 `ah events --format json` 的每一行都按完整 snapshot 解析，设为 open/attach/close 决策的主输入。
   - `status --json` 仅在尚无 events 订阅结果时作为 bootstrap 输入；两者都存在时按 `sequence` 仲裁，旧序号不得覆盖新序号已应用的状态。
   - daemon-absent 场景：`status --json` 非结构化失败时，等待/触发 events 订阅拿到结构化 `daemon_absent` 快照再决策，不直接把 CLI stderr 当作错误态展示。
-  - 保持现有 `code-assistant-status-changed` 前端事件边界的语义定位（但 payload 形状按任务 9 重做）。
+  - 保持现有 `code-assistant-status-changed` 前端事件边界的语义定位（但 payload 形状按任务 8 重做）。
   - 明确处理 ahd alive 但 `active=false`，UI 应显示 Open。
   - 对 unsupported schema、invalid JSON、stream drop、身份校验失败输出诊断而不是本地猜测。
   - _Requirements: 2.1, 2.2, 2.3, 2.6, 3.1, 3.2, 3.3, 5.1, 5.11_

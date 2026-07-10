@@ -1,7 +1,7 @@
 # .ah/ · ah 编程 SOP(agent-harness 实例)
 
 用 [ah](https://github.com/SevenX77/ah)(≥ 1.4.0)在本仓编排 agent 团队做工程的配置实例,源自
-[ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) v0.4.0 `examples/dev-programming/`。
+[ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) v0.5.0 `examples/dev-programming/`(v0.5.0 执笔权铁律:gate 文档——design/spec/tasks/TDD 框线——一律严谨 agent 执笔,发散型只有辩论席位)。
 协作方法论(三层拓扑 / SOP 闭环 / 设计管线 / 代理实践 / 纪律清单)读 pack 的 `GUIDE.md` / `ROLES.md`,
 **operator(用户代理)角色规范读 pack `OPERATOR.md`**——那是人读层;本目录只放注入 agent 的实例层。
 
@@ -54,7 +54,10 @@ symlink 单一真相源**:Windows `%USERPROFILE%\.claude\.credentials.json` 是�
 `~/.claude/.credentials.json` 与 ah 沙箱 HOME 全部 symlink 指向它——所有环境同一份文件,
 永不产生第二份 OAuth 链,WSL 里跑 claude 是安全的(设计:`ah-orchestration-design.md` §4.5;
 实现:PR #476。**绝不复制**该文件——复制出第二份才会轮转互踩;旧的 CLAUDE_CODE_OAUTH_TOKEN
-env 路线已废弃)。清单随实测滚动回写(`[x]` = 已在本机验证过):
+env 路线已废弃)。**已知脆弱点(2026-07-10 实证)**:claude 刷新失败进入登出态时,会把
+`{expiresAt:0}` stub 以普通文件原子写回,把写回路径上的 symlink 盖掉(链上逐级、包括
+`~/.claude/` 的);见到某 HOME 下它变回普通文件,先查 Windows 真相源是否过期,重登后
+从链头到链尾重建 symlink。清单随实测滚动回写(`[x]` = 已在本机验证过):
 
 - [x] ah ≥ 1.4.0:2026-07-09 已升(installer → `/root/.cargo/bin`);`/usr/bin/{ah,ahd}`
       的旧 1.3.0-rc.1 已改为指向 cargo 版的 symlink,消除双位置版本 skew。
@@ -116,9 +119,13 @@ tzutil /g   # (Windows 侧) ↔  readlink -f /etc/localtime | sed 's|.*/zoneinfo
 2. **驱动栈期间必须保持一个长活 WSL 会话**(如后台 `wsl -e bash -c "sleep infinity"`):
    没有任何交互会话时 WSL 空闲关机(vmIdleTimeout),整栈(ahd+tmux+agents)全带走,
    事后盘面只剩 CRASHED 尸体和 ACTIVE 幽灵会话。
-3. **state dir 有解析不一致陷阱**(ah 1.4.0):`start/ask/ps` 落 `default`,而
-   `events/status` 解析到别处报 `ahd_alive:false` 假死——驱动脚本统一
-   `AH_STATE_DIR=$HOME/.local/state/ah/default` 兜平。
+3. **state dir 有解析不一致陷阱**(1.4.0 发现;2026-07-10 于 1.5.0 复验仍在且换边:
+   同一含 ah.toml 的 cwd 下无 --config 时,`status`/`ps` 落 `default`、`events` 走
+   project discovery;已提上游 [ah#15](https://github.com/SevenX77/ah/issues/15))——
+   驱动栈的每条 ah 命令统一显式 `AH_STATE_DIR`。钉到该 worktree 的规范项目目录
+   (`timeout 3 ah events --format json | head -1` 输出里的 `state_dir`,形如
+   `$HOME/.local/state/ah/<hash>`)优于钉 `default`:任务间隔离,且与 ah 自身
+   project discovery 对齐(2026-07-10 真栈实测配方)。
 4. **`ah stop` 不清持久 unit**:`~/.config/systemd/user/ah-*.service` 留存且 enabled,
    WSL 重启即复活旧 daemon。停栈后手动 `systemctl --user disable --now` + 删 unit 文件
    (上游修复前的操作项)。已知上游问题另见:kill→up 重生偶发单 agent CRASHED;

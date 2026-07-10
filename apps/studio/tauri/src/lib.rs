@@ -3292,6 +3292,117 @@ mod tests {
         assert!(unix_payload.contains("requires ah >= 1.3.4"));
     }
 
+    // ── studio-ah-state-contract-v1 task 2 (version gate) RED tests ──────────
+    //
+    // Authored by g1 (泳道1 gatekeeper) test-first: g1-m1 turns these GREEN by
+    // adding ONLY the production code named below and must NOT edit this test.
+    // Contract seam g1-m1 must implement for `test_version_gate_rejects_below_1_4_0`:
+    //
+    //   /// The single-source ah version gate. Trims a bare `ah version` string and
+    //   /// compares it to the one 1.4.0 floor constant. `Ok(())` = supported;
+    //   /// `Err(diagnostic)` = blocked (too old OR unparseable), actionable text.
+    //   /// start/attach/status/cleanup AND the events subscription all call THIS.
+    //   fn ah_version_gate(version_output: &str) -> Result<(), String>
+    //
+    // See .kiro/specs/studio-ah-state-contract-v1/tasks.md task 2 (lines 48-55).
+
+    /// Req 1.1/1.6/5.4: the ah runtime floor is 1.4.0. A `< 1.4.0` runtime is
+    /// blocked at the single-source gate; because start/attach/status/cleanup AND
+    /// the `ah events --format json` subscription all consult that one gate before
+    /// acting, a blocked runtime yields no events subscription.
+    ///
+    /// RED when written: `ah_version_gate` does not exist yet — the only version
+    /// check today lives inside the launcher shell templates — so this fails to
+    /// COMPILE until g1-m1 adds the Rust gate. Anchored to the task-1 boundary
+    /// version fixtures (contract inputs), not to internal state: reverting
+    /// g1-m1's comparison logic (e.g. off-by-one at the floor) turns it red again.
+    ///
+    /// The "no events subscription is spawned" half is the direct consequence of
+    /// this gate returning `Err`: `start_code_assistant_status_stream`
+    /// (lib.rs:1335) must call `ah_version_gate` before entering its respawn loop.
+    /// That wiring is a Req-1.6/5.4 acceptance rollback check (revert the events-
+    /// path gate call → an unsupported ah spawns `ah events` again) — a pure unit
+    /// test can't observe subprocess non-spawn without a live WSL/ah + Tauri
+    /// AppHandle, so the gate's `Err` verdict is the load-bearing unit assertion.
+    #[test]
+    fn test_version_gate_rejects_below_1_4_0() {
+        use ah_contract_fixtures::{
+            AH_VERSION_MIN_SUPPORTED, AH_VERSION_SUPPORTED, AH_VERSION_UNSUPPORTED,
+        };
+
+        // Below the 1.4.0 floor → blocked with an actionable diagnostic. The
+        // "1.3.4\n" fixture keeps its trailing newline so the gate's trim is
+        // exercised (Req 1.1/1.6, fail-fast diagnostic Req 1.2/1.7).
+        let rejected = ah_version_gate(AH_VERSION_UNSUPPORTED);
+        assert!(
+            rejected.is_err(),
+            "ah 1.3.4 is below the 1.4.0 floor and must be blocked (Req 1.1/5.4)"
+        );
+        assert!(
+            !rejected.unwrap_err().is_empty(),
+            "a blocked version must return an actionable diagnostic, not fail silently (Req 1.2/1.7)"
+        );
+
+        // The floor itself and newer pass — proves the gate is a real comparison,
+        // not a constant-reject that would 'block' events for every version.
+        assert!(
+            ah_version_gate(AH_VERSION_MIN_SUPPORTED).is_ok(),
+            "exactly 1.4.0 is the supported floor and must pass (Req 1.1)"
+        );
+        assert!(
+            ah_version_gate(AH_VERSION_SUPPORTED).is_ok(),
+            "1.5.0 is above the floor and must pass"
+        );
+    }
+
+    /// Req 1.8: the version probe is ONE bare `ah version` command whose output is
+    /// trimmed — no `ah --version | awk '{print $2}'` second-token parse path
+    /// anywhere. Each generated launcher/attach script is the real artifact the
+    /// subprocess runs, so it is the contract boundary this asserts against.
+    ///
+    /// RED when written: all four templates currently emit
+    /// `ah --version 2>/dev/null | awk '{print $2}'` (lib.rs:1760/1842/1909/1966),
+    /// so the bare-form and no-`--version`/no-`print $2` assertions fail today and
+    /// go green only once g1-m1 rewrites the templates. Reverting that template
+    /// change re-reds it (the string is regenerated from the production template).
+    #[test]
+    fn test_version_parse_uses_bare_ah_version() {
+        let scripts = [
+            wsl_payload_script(
+                "/mnt/d/skill",
+                "/mnt/c/tmp/ah.toml",
+                CodeAssistant::Claude,
+                None,
+                Some("/mnt/c/Users/u/.claude"),
+            ),
+            wsl_attach_payload_script("/mnt/c/tmp/ah.toml", CodeAssistant::Claude),
+            unix_code_assistant_launcher_script(
+                Path::new("/tmp/skill"),
+                Path::new("/tmp/ah.toml"),
+                CodeAssistant::Claude,
+            ),
+            unix_code_assistant_attach_launcher_script(
+                Path::new("/tmp/ah.toml"),
+                CodeAssistant::Claude,
+            ),
+        ];
+
+        for script in &scripts {
+            assert!(
+                script.contains("ah version"),
+                "version probe must be the bare `ah version` command (Req 1.8):\n{script}"
+            );
+            assert!(
+                !script.contains("ah --version"),
+                "the `ah --version` form must be gone — Req 1.8 probes bare `ah version`:\n{script}"
+            );
+            assert!(
+                !script.contains("print $2"),
+                "the awk second-token parse (`print $2`) must be gone (Req 1.8):\n{script}"
+            );
+        }
+    }
+
     #[test]
     fn claude_wsl_payload_links_windows_credentials() {
         // The Windows .credentials.json is the single auth file; WSL root links

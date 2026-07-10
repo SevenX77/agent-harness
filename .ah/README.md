@@ -7,9 +7,11 @@
 
 ## 内容
 
-- `ah.toml`(仓根)——拓扑(双泳道):master=claude(零裁决中继)+ 泳道1(g1=claude 闸门 +
+- `ah.toml`(仓根)——拓扑(双泳道):**治理链 = 用户 → operator(代理 CEO,监督管理 PM)→
+  master(项目经理,全体 agents 由其管辖调配)→ 各 agent**。master=claude + 泳道1(g1=claude 闸门 +
   g1-m1=antigravity 实施)+ 泳道2(g2/g2-m1 对称)+ o1=antigravity 设计辩论席。
-  泳道内事务由本泳道闸门终裁(实施者阻塞落盘 `.lane-question`,收件人=其闸门),不过 master;
+  泳道内技术事务由本泳道闸门终裁——这是 master 的**裁决下放**,不是脱离管辖(实施者阻塞落盘
+  `.lane-question`,收件人=其闸门),派单调配权始终在 master;
   闸门执笔 RED 验收测试,实施者纯变绿、不得改测试文件;实施位首选 codex,配额恢复后替换 g*-m1 provider;
   d1=claude 设计执笔席(design 稿 + spec/tasks 转写,master 不兼笔)。
 - `.ah/rules/<id>.md`——各 slot 场景规则(ah 注入时自动前置协调内核,勿复述内核)

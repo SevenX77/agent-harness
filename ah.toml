@@ -1,11 +1,12 @@
 # ah 编程 SOP · agent-harness 实例(双泳道拓扑)
 # 源自 SevenX77/ah-scenario-pack v0.5.1 dual-lane 模板:
-#   master(零裁决中继)+ 泳道1(g1 闸门 + g1-m1 实施)+ 泳道2(g2 + g2-m1,对称并发)
+#   master(项目经理/小组长,全体 agents 由其管辖调配)+ 泳道1(g1 闸门 + g1-m1 实施)+ 泳道2(g2 + g2-m1,对称并发)
 #   + o1 设计辩论席 + d1 设计执笔席。泳道内事务由该泳道闸门终裁,不过 master。
 # 启动方式与本机(Windows/WSL)注意事项:.ah/README.md;验证命令档案:.ah/VERIFY.md。
 version = "1"
 
-# 主控/纯中继:跨泳道排期、模块分派、闸门间冲突上升;不裁决泳道内事务。
+# 项目经理(PM/小组长):全体 agents 在其管辖之下、由其派单调配;泳道内技术裁决
+# 下放给各泳道闸门(管理带宽安排,管辖权仍在 master)。其上是 operator(用户代理 CEO)。
 # 注意:master 由本表决定(ah 官方模板形式),不要写成 [agents.master]——那会
 # 额外孵化一个名叫 "master" 的普通 worker,真 master 反而落在默认配置上
 # (pack v0.2.0 教训;v0.5.1 dual-lane 模板此处复发了该 drift,已报上游)。

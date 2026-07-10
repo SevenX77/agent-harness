@@ -1,0 +1,17 @@
+{
+  "spec": "studio-ah-state-contract-v1",
+  "status": "Draft",
+  "language": "zh",
+  "title": "Studio ah v1.4.0+ State Contract Integration",
+  "last_updated": "2026-07-10",
+  "linked_code_paths": [
+    "apps/studio/tauri/src/lib.rs",
+    "apps/studio/frontend/src/components/copilot/copilot-panel.tsx",
+    "apps/studio/frontend/src/lib/tauri.ts"
+  ],
+  "external_references": [
+    "https://github.com/SevenX77/ah/releases/tag/v1.4.0",
+    "https://raw.githubusercontent.com/SevenX77/ah/v1.4.0/CHANGELOG.md",
+    "https://raw.githubusercontent.com/SevenX77/ah/v1.4.0/README.md"
+  ]
+}

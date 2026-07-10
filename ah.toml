@@ -1,12 +1,14 @@
-# ah 编程 SOP · agent-harness 实例
-# 源自 SevenX77/ah-scenario-pack dev-programming 场景(当前实战拓扑):
-#   antigravity 主力实施/设计 + claude 协调/审计。
+# ah 编程 SOP · agent-harness 实例(双泳道拓扑)
+# 源自 SevenX77/ah-scenario-pack v0.5.1 dual-lane 模板:
+#   master(零裁决中继)+ 泳道1(g1 闸门 + g1-m1 实施)+ 泳道2(g2 + g2-m1,对称并发)
+#   + o1 设计辩论席。泳道内事务由该泳道闸门终裁,不过 master。
 # 启动方式与本机(Windows/WSL)注意事项:.ah/README.md;验证命令档案:.ah/VERIFY.md。
 version = "1"
 
-# 主控/协调者:强语义 + 长上下文;场景规则 .ah/rules/master.md
-# 注意:master 由本表决定(ah >= 1.4.0 官方模板形式),不要写成 [agents.master]
-# ——那会额外孵化一个名叫 "master" 的普通 worker,真 master 反而落在默认配置上。
+# 主控/纯中继:跨泳道排期、模块分派、闸门间冲突上升;不裁决泳道内事务。
+# 注意:master 由本表决定(ah 官方模板形式),不要写成 [agents.master]——那会
+# 额外孵化一个名叫 "master" 的普通 worker,真 master 反而落在默认配置上
+# (pack v0.2.0 教训;v0.5.1 dual-lane 模板此处复发了该 drift,已报上游)。
 [master]
 cmd = "claude"
 enabled = true
@@ -19,34 +21,41 @@ hook_push_enabled = true
 hook_push_events = ["stop"]
 hook_push_providers = ["claude", "codex", "antigravity"]
 
-# 实现者:antigravity 主力编程(已知行为护栏,必读 .ah/rules/a1.md)
-[agents.a1]
-provider = "antigravity"
-
-# 设计者:发散/第一性;必须与 master 异族,同族发散=回音壁(.ah/rules/a3.md)
-[agents.a3]
-provider = "antigravity"
-
-# 审计者:唯一质量门,逐任务必审(.ah/rules/a4.md)
-[agents.a4]
+# 泳道1 闸门(gatekeeper):RED 验收测试执笔 + 逐任务审计 + e2e;g1-m1 的终裁上级
+[agents.g1]
 provider = "claude"
 
-# 可选:第二实施通道(codex 配额恢复后启用;启用时补 .ah/rules/a2.md,
-# 角色同 a1 但护栏按 codex 特性裁剪;缺规则文件时 ah 回退内置 worker 默认规则)
-# [agents.a2]
-# provider = "codex"
+# 泳道1 实施(code monkey):对着 g1 的 RED 测试纯实施变绿;只向 g1 汇报。
+# 实施位首选 codex(机械精确);本机 codex 配额恢复前用 antigravity——
+# g1-m1.md 的「发散型附加护栏」一节在 provider 是发散型期间必须保留。
+[agents.g1-m1]
+provider = "antigravity"
+
+# 泳道2(与泳道1 完全对称,纯为并发;单泳道够用时可整段注释掉连同其 rules)
+[agents.g2]
+provider = "claude"
+
+[agents.g2-m1]
+provider = "antigravity"
+
+# 设计辩论席(oracle):第一性质疑/替代方案/推翻问法 + spec 忠实度对抗审;
+# markdown-only;必须与 master 异族(同族发散=回音壁)。
+# 执笔权注意:o1 出的是辩论意见书;design/spec/tasks/TDD 框线的笔在严谨 agent
+# (v0.5.0 执笔权铁律,用户拍板;v0.5.1 模板 o1.md 的「设计主笔」措辞与此矛盾,本实例不采纳)。
+[agents.o1]
+provider = "antigravity"
 
 # ── CLI 层配置(模型 / effort / statusline / autoCompact)──────────────────────
-# 源自 pack v0.4.0 实战拍板值。ah 把 [master.settings] / [agents.<id>.settings]
-# 深合并进该角色沙箱的 .claude/settings.json(嵌套表=嵌套对象;同名键覆盖)。
-# 硬限制(ah v1.4.0):仅 provider = "claude" 的角色支持——给 antigravity(a1/a3)
-# 写 settings 会在配置加载时直接报错,它们的模型/effort 配在宿主全局
+# 源自 pack v0.4.0 实战拍板值,移植到双泳道:质量门顶配,编排位经济档。
+# ah 把 [master.settings] / [agents.<id>.settings] 深合并进该角色沙箱的
+# .claude/settings.json(嵌套表=嵌套对象;同名键覆盖)。
+# 硬限制:仅 provider = "claude" 的角色支持——给 antigravity(g*-m1/o1)写 settings
+# 会在配置加载时直接报错,它们的模型/effort 配在宿主全局
 # ~/.gemini/antigravity-cli/settings.json 的 model 名里内嵌(本机实测值
 # "Gemini 3.5 Flash (High)"——检查 effort 就看这个字段),随沙箱物化继承。
-# 模型分档(pack 实战拍板):审计门用旗舰+最高持久化档(effortLevel 上限 xhigh,
-# max 仅 session);master 用中档+medium(编排是短视野决策,质量门在审计与
-# operator 物理验证,master 又是最烧 token 的常驻角色);实施走便宜模型——
-# 这就是"便宜模型编排勾旗舰水准"的分档表达。
+# 分档:闸门(g1/g2)= 旗舰 + 最高持久化档(effortLevel 上限 xhigh,max 仅 session)
+# ——闸门是唯一质量门,不偷懒;master = 中档 + medium(零裁决中继是短视野决策,
+# 又是最烧 token 的常驻角色);实施走便宜模型。
 # 生效时机=沙箱物化(spawn)时;在跑的 agent 需 kill+up / 重启栈才带新配置。
 
 [master.settings]
@@ -55,16 +64,25 @@ effortLevel = "medium"
 autoCompactEnabled = true
 
 # statusline 按 operator 监控需求配:角色(pane 对号)· 模型+effort(验证配置真生效)
-# · context 占用%(compaction 临近=master 会吞消息的高危窗口,capture-pane 一眼可读)。
+# · context 占用%(compaction 临近=会吞消息的高危窗口,capture-pane 一眼可读)。
 [master.settings.statusLine]
 type = "command"
 command = "jq -r '\"master · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
 
-[agents.a4.settings]
+[agents.g1.settings]
 model = "claude-opus-4-8"
 effortLevel = "xhigh"
 autoCompactEnabled = true
 
-[agents.a4.settings.statusLine]
+[agents.g1.settings.statusLine]
 type = "command"
-command = "jq -r '\"a4-audit · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+command = "jq -r '\"g1-gate · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+
+[agents.g2.settings]
+model = "claude-opus-4-8"
+effortLevel = "xhigh"
+autoCompactEnabled = true
+
+[agents.g2.settings.statusLine]
+type = "command"
+command = "jq -r '\"g2-gate · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"

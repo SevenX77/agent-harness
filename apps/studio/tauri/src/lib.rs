@@ -1,6 +1,12 @@
 mod native_fs;
 mod sidecar;
 
+// ah v1.4.0+ state-contract test fixtures (studio-ah-state-contract-v1, task 1).
+// Test-only: the frozen ah CLI snapshot/version/identity samples that the RED tests
+// in tasks 2–9 consume. Builds no production types (the typed parser is task 3).
+#[cfg(test)]
+mod ah_contract_fixtures;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};

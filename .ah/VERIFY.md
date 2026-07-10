@@ -45,6 +45,47 @@ uv run --with pip-audit pip-audit                # 必须 0 CVE
 - **桌面 app vendor 快照**:engine/gateway 源码改动对桌面 app 不即时生效(sidecar 永远 import `apps/studio/tauri/vendor/site-packages` 冻结快照)。开发期验证用 wt-dev 私有 sidecar;合并后要真机验证必须重跑 `build_vendor.py` + 预热 pyc + 重启 app(AGENTS.md 工作流第 7 条)。
 - **本机(Windows devbox)**:仓根 `.venv`/`node_modules` 是 Windows 原生产物,WSL 侧的 ah workers 不可复用,需自建环境——见 `.ah/README.md`「首跑清单」(该路径尚未实测)。
 
+### Rust / Tauri crate(`apps/studio/tauri`)的构建门(2026-07-10 排查落档)
+
+改动 `apps/studio/tauri/src/*.rs`(Rust 原生 fs 层 / ah 集成)时按此节验证,别再现场重排查。
+
+- **rustup 空列表陷阱(已修)**:sandbox 里 `cargo`/`rustc` 本体存在,但 `rustup
+  toolchain list` 曾报 `no installed toolchains`。根因是 **sandbox 把 HOME 重定向**,
+  导致 rustup 找不到宿主机上已装的工具链(工具链实际在 `/root/.rustup` +
+  `/root/.cargo`,并非真的没装)。
+- **修复配方(operator 已在 ah.toml 运行时注入区落地)**:给需要跑 cargo 的 agent
+  角色(g1 gatekeeper、g1-m1 实施者)注入两个 env:
+  `RUSTUP_HOME=/root/.rustup` 与 `CARGO_HOME=/root/.cargo`。注入后
+  `rustup toolchain list` 能看到 `stable-x86_64-unknown-linux-gnu (active, default)`,
+  `cargo`/`rustc` 可用(2026-07-10 实测 cargo 1.96.1;裸 crate `cargo check` 绿,
+  证明工具链本身健康,唯一卡点是下条的系统库)。
+- **tauri crate 还依赖系统库(operator 机器地基,agent 不自己装)**:
+  `cargo check --lib` 目前在依赖 crate `libdbus-sys` 的 build.rs 上 panic 退出
+  (exit 101),实测报错:
+
+  ```
+  pkg-config exited with status code 1
+  Package dbus-1 was not found in the pkg-config search path.
+  The system library `dbus-1` required by crate `libdbus-sys` was not found.
+  thread 'main' panicked at .../libdbus-sys-0.2.7/build.rs:25:9: explicit panic
+  ```
+
+  `dbus-1` 只是构建顺序上第一个失败的;整条 GTK/webkit 栈都缺:2026-07-10
+  `pkg-config --exists` 实测 `dbus-1 / gtk+-3.0 / glib-2.0 / gdk-3.0 / gio-2.0 /
+  webkit2gtk-4.1 / javascriptcoregtk-4.1 / libsoup-3.0 / cairo / pango / atk /
+  gdk-pixbuf-2.0` 全部 MISS(`pkg-config` 本体在 `/usr/bin/pkg-config`,存在)。
+  这些系统库由 **operator 在宿主机地基上安装**,不归 agent(`apt install` 是机器
+  地基权限)。装完前 `cargo check`/`test` 卡在 build 阶段、连 Rust 源都编不到,是
+  **预期未解锁态**,不是环境配错;解锁以 operator 通知为准。下次直接对照上面报错
+  定位:若仍卡 `dbus-1` 说明还没装完,若报错换成 `gtk+-3.0`/`webkit2gtk-4.1` 说明
+  在往后推进。
+- **CI 无 cargo/rust 门(重要)**:`.github/workflows/ci.yml` 的 5 个必过 check
+  (`quality-gates` / `graph-agent-tests`×3 / `frontend-gates`)**不含任何
+  cargo/rust 门禁**——这个 crate 不进 CI。因此**泳道1 gatekeeper 本地的
+  `cargo test`(在 `apps/studio/tauri`)是该 crate 唯一的机器验证门**,不能因为
+  "CI 不测"就降低本地验收标准(RED→GREEN 证据、回滚自检、全套 cargo test 整套跑,
+  都按对后端一样的从严标准执行)。
+
 ## 3. 任务完成后的验收矩阵(按改动类型查表)
 
 | 改动类型 | 验收方式 | 工具 | 人参与? |

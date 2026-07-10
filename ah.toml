@@ -1,7 +1,7 @@
 # ah 编程 SOP · agent-harness 实例(双泳道拓扑)
 # 源自 SevenX77/ah-scenario-pack v0.5.1 dual-lane 模板:
 #   master(零裁决中继)+ 泳道1(g1 闸门 + g1-m1 实施)+ 泳道2(g2 + g2-m1,对称并发)
-#   + o1 设计辩论席。泳道内事务由该泳道闸门终裁,不过 master。
+#   + o1 设计辩论席 + d1 设计执笔席。泳道内事务由该泳道闸门终裁,不过 master。
 # 启动方式与本机(Windows/WSL)注意事项:.ah/README.md;验证命令档案:.ah/VERIFY.md。
 version = "1"
 
@@ -40,10 +40,15 @@ provider = "antigravity"
 
 # 设计辩论席(oracle):第一性质疑/替代方案/推翻问法 + spec 忠实度对抗审;
 # markdown-only;必须与 master 异族(同族发散=回音壁)。
-# 执笔权注意:o1 出的是辩论意见书;design/spec/tasks/TDD 框线的笔在严谨 agent
-# (v0.5.0 执笔权铁律,用户拍板;v0.5.1 模板 o1.md 的「设计主笔」措辞与此矛盾,本实例不采纳)。
+# 执笔权:o1 出的是辩论意见书,不出交付稿;gate 文档的笔在 d1(见下)。
 [agents.o1]
 provider = "antigravity"
+
+# 设计执笔席(design scribe):design 稿主笔 + 冻结设计→spec/tasks 转写。
+# v0.5.1 模板在 VPS 资源受限环境的妥协形态=master 兼执笔(用户拍板确认);
+# 本机内存充足,设专职席替代 master 兼笔,发散输入(o1)与执笔(d1)保持分离。
+[agents.d1]
+provider = "claude"
 
 # ── CLI 层配置(模型 / effort / statusline / autoCompact)──────────────────────
 # 源自 pack v0.4.0 实战拍板值,移植到双泳道:质量门顶配,编排位经济档。
@@ -86,3 +91,12 @@ autoCompactEnabled = true
 [agents.g2.settings.statusLine]
 type = "command"
 command = "jq -r '\"g2-gate · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+
+[agents.d1.settings]
+model = "claude-opus-4-8"
+effortLevel = "xhigh"
+autoCompactEnabled = true
+
+[agents.d1.settings.statusLine]
+type = "command"
+command = "jq -r '\"d1-design · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"

@@ -10,16 +10,17 @@
 - `ah.toml`(仓根)——拓扑(双泳道):master=claude(零裁决中继)+ 泳道1(g1=claude 闸门 +
   g1-m1=antigravity 实施)+ 泳道2(g2/g2-m1 对称)+ o1=antigravity 设计辩论席。
   泳道内事务由本泳道闸门终裁(实施者阻塞落盘 `.lane-question`,收件人=其闸门),不过 master;
-  闸门执笔 RED 验收测试,实施者纯变绿、不得改测试文件;实施位首选 codex,配额恢复后替换 g*-m1 provider。
+  闸门执笔 RED 验收测试,实施者纯变绿、不得改测试文件;实施位首选 codex,配额恢复后替换 g*-m1 provider;
+  d1=claude 设计执笔席(design 稿 + spec/tasks 转写,master 不兼笔)。
 - `.ah/rules/<id>.md`——各 slot 场景规则(ah 注入时自动前置协调内核,勿复述内核)
 - `.ah/VERIFY.md`——本仓验证档案(fill-once):命令 / 约束 / 验收矩阵 / 红灯处置
 
 ## 与 pack 模板的有意差异
 
-0. **o1 按 v0.5.0 严版执笔权写**,不采纳 v0.5.1 模板 `dual-lane/o1.md` 的「设计主笔」措辞
-   ——后者与同版 CHANGELOG/ROLES 执笔权节及模板自己的 master.md 互相矛盾(疑似从旧工作副本
-   带入的回退),本实例以用户 v0.5.0 拍板的「发散型不执笔 gate 文档」为准。同理不采纳
-   v0.5.1 GUIDE 被回退成的五步管线,保留六步(发散输入与执笔分离)。
+0. **执笔席按本机资源加强**:v0.5.1 模板的「设计者主笔」措辞/五步管线是 VPS 资源受限
+   环境的刻意妥协(用户 2026-07-10 拍板:该环境由 master 兼执笔,与双泳道实施并行提效,
+   不是回退)。本机内存充足,实例增设专职设计执笔席 `d1-claude` 替代 master 兼笔——
+   管线保持发散输入(o1 意见书)与执笔(d1)分离;「发散型不执笔 gate 文档」铁律两版一致。
 0b. **dual-lane 模板的 `ah.toml.example` 有客观损坏**(缺 `version`、master 写成
    `[agents.master]`、`hook_push_*` 裸挂在 `[agents.o1]` 表下),实测 `ah config validate`
    一行就挂;本实例按 ah 官方语义写(顶层 `[master]` + `[completion]` 表),已报上游。

@@ -34,6 +34,94 @@ const QUIT_FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const AH_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const AH_SHUTDOWN_POLL_ATTEMPTS: usize = 12;
 
+const AH_VERSION_MIN: &str = "1.4.0";
+
+static AH_VERSION_CACHE: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+
+fn run_ah_version() -> Result<String, String> {
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("wsl.exe");
+        let script = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; ah version";
+        command.args(["-e", "bash", "-lc", script]);
+        let output = command.output().map_err(|e| format!("failed to execute wsl.exe: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("wsl.exe returned error exit code: {:?}, stderr: {}", output.status.code(), stderr.trim()));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let mut command = Command::new("ah");
+        command.arg("version");
+        let output = command.output().map_err(|e| format!("failed to execute ah: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("ah version returned error exit code: {:?}, stderr: {}", output.status.code(), stderr.trim()));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+}
+
+fn ah_version_gate(version_output: &str) -> Result<(), String> {
+    let version_str = version_output.trim();
+    if version_str.is_empty() {
+        return Err("ah version output is empty".to_string());
+    }
+    let clean_version = version_str.split('-').next().unwrap_or(version_str);
+    let parts: Vec<&str> = clean_version.split('.').collect();
+    if parts.is_empty() {
+        return Err(format!("Invalid version format: '{}'", version_str));
+    }
+    let major = parts[0].parse::<u32>().map_err(|e| format!("Failed to parse major version '{}': {}", parts[0], e))?;
+    let minor = if parts.len() > 1 {
+        parts[1].parse::<u32>().map_err(|e| format!("Failed to parse minor version '{}': {}", parts[1], e))?
+    } else {
+        0
+    };
+    let patch = if parts.len() > 2 {
+        parts[2].parse::<u32>().map_err(|e| format!("Failed to parse patch version '{}': {}", parts[2], e))?
+    } else {
+        0
+    };
+
+    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
+    let min_major = min_parts.get(0).copied().unwrap_or("1").parse::<u32>().unwrap_or(1);
+    let min_minor = min_parts.get(1).copied().unwrap_or("4").parse::<u32>().unwrap_or(4);
+    let min_patch = min_parts.get(2).copied().unwrap_or("0").parse::<u32>().unwrap_or(0);
+
+    let is_ok = if major > min_major {
+        true
+    } else if major == min_major {
+        if minor > min_minor {
+            true
+        } else if minor == min_minor {
+            patch >= min_patch
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if is_ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "Installed ah version {} is below the minimum required version {}",
+            version_str, AH_VERSION_MIN
+        ))
+    }
+}
+
+fn check_ah_version_cached() -> Result<(), String> {
+    AH_VERSION_CACHE.get_or_init(|| {
+        let output = match run_ah_version() {
+            Ok(out) => out,
+            Err(e) => return Err(e),
+        };
+        ah_version_gate(&output)
+    }).clone()
+}
+
 struct SidecarAppState {
     manager: Mutex<Option<sidecar::SidecarManager>>,
     startup_error: Mutex<Option<String>>,
@@ -1005,6 +1093,9 @@ fn kill_tmux_session(socket_label: &str, session_name: &str) -> Result<bool, Str
 }
 
 fn inspect_ah_runtime(config_path: &Path, tmux_socket_hint: Option<&str>) -> AhRuntimeProbe {
+    if check_ah_version_cached().is_err() {
+        return AhRuntimeProbe::empty();
+    }
     let Ok(ps_result) = run_ah_config_command_output(config_path, &["ps"]) else {
         return AhRuntimeProbe::empty();
     };
@@ -1097,6 +1188,7 @@ fn wait_for_code_assistant_shutdown(
 }
 
 fn cleanup_code_assistant_config(config_path: &Path) -> Result<bool, String> {
+    check_ah_version_cached()?;
     let before = inspect_ah_runtime(config_path, None);
     if code_assistant_shutdown_is_complete(before.snapshot) {
         return Ok(false);
@@ -1336,6 +1428,7 @@ fn start_code_assistant_status_stream(
     app: tauri::AppHandle,
     config_path: PathBuf,
 ) -> Result<CodeAssistantStatusStream, String> {
+    check_ah_version_cached()?;
     let stop = Arc::new(AtomicBool::new(false));
     let child_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let thread_stop = Arc::clone(&stop);
@@ -1681,6 +1774,11 @@ fn wsl_payload_script(
     windows_codex_home: Option<&str>,
     windows_claude_home: Option<&str>,
 ) -> String {
+    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
+    let min_major = min_parts.get(0).copied().unwrap_or("1");
+    let min_minor = min_parts.get(1).copied().unwrap_or("4");
+    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+
     let codex_auth_sync = if matches!(assistant, CodeAssistant::Codex) {
         let windows_home = windows_codex_home
             .map(sh_single_quote_str)
@@ -1757,22 +1855,23 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec bash -i
 fi
-ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_version="$(ah version 2>/dev/null)"
+# requires ah >= 1.3.4
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
 ah_patch="${{ah_rest#*.}}"
 [ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
-if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 4 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$min_minor" -eq "$min_minor" ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.4 for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
@@ -1800,6 +1899,10 @@ exec bash -i
         codex_auth_sync = codex_auth_sync,
         claude_auth_bridge = claude_auth_bridge,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
+        min_version = AH_VERSION_MIN,
+        min_major = min_major,
+        min_minor = min_minor,
+        min_patch = min_patch,
     )
 }
 
@@ -1829,6 +1932,11 @@ if ($LASTEXITCODE -ne 0) {{
 }
 
 fn wsl_attach_payload_script(wsl_config: &str, assistant: CodeAssistant) -> String {
+    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
+    let min_major = min_parts.get(0).copied().unwrap_or("1");
+    let min_minor = min_parts.get(1).copied().unwrap_or("4");
+    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -1839,22 +1947,23 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec bash -i
 fi
-ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_version="$(ah version 2>/dev/null)"
+# requires ah >= 1.3.4
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
 ah_patch="${{ah_rest#*.}}"
 [ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
-if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 4 ] 2>/dev/null; then
+elif [ "$----" = "$----" ] 2>/dev/null && [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.4 for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
@@ -1865,6 +1974,10 @@ exec bash -i
 "#,
         config = sh_single_quote_str(wsl_config),
         assistant_name = assistant.display_name(),
+        min_version = AH_VERSION_MIN,
+        min_major = min_major,
+        min_minor = min_minor,
+        min_patch = min_patch,
     )
 }
 
@@ -1896,6 +2009,11 @@ fn unix_code_assistant_launcher_script(
     config_path: &Path,
     assistant: CodeAssistant,
 ) -> String {
+    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
+    let min_major = min_parts.get(0).copied().unwrap_or("1");
+    let min_minor = min_parts.get(1).copied().unwrap_or("4");
+    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+
     format!(
         r#"#!/bin/sh
 set -u
@@ -1906,22 +2024,23 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_version="$(ah version 2>/dev/null)"
+# requires ah >= 1.3.4
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
 ah_patch="${{ah_rest#*.}}"
 [ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
-if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 4 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.4 for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
@@ -1946,6 +2065,10 @@ exec "${{SHELL:-/bin/sh}}"
         config = sh_single_quote(config_path),
         assistant_name = assistant.display_name(),
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
+        min_version = AH_VERSION_MIN,
+        min_major = min_major,
+        min_minor = min_minor,
+        min_patch = min_patch,
     )
 }
 
@@ -1953,6 +2076,11 @@ fn unix_code_assistant_attach_launcher_script(
     config_path: &Path,
     assistant: CodeAssistant,
 ) -> String {
+    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
+    let min_major = min_parts.get(0).copied().unwrap_or("1");
+    let min_minor = min_parts.get(1).copied().unwrap_or("4");
+    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+
     format!(
         r#"#!/bin/sh
 set -u
@@ -1963,22 +2091,23 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-ah_version="$(ah --version 2>/dev/null | awk '{{print $2}}')"
+ah_version="$(ah version 2>/dev/null)"
+# requires ah >= 1.3.4
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
 ah_patch="${{ah_rest#*.}}"
 [ "$ah_patch" = "$ah_rest" ] && ah_patch=0
 ah_ok=0
-if [ "$ah_major" -gt 1 ] 2>/dev/null; then
+if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -gt 3 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
   ah_ok=1
-elif [ "$ah_major" -eq 1 ] 2>/dev/null && [ "$ah_minor" -eq 3 ] 2>/dev/null && [ "$ah_patch" -ge 4 ] 2>/dev/null; then
+elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
   ah_ok=1
 fi
 if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= 1.3.4 for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
+  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
@@ -1989,6 +2118,10 @@ exec "${{SHELL:-/bin/sh}}"
 "#,
         config = sh_single_quote(config_path),
         assistant_name = assistant.display_name(),
+        min_version = AH_VERSION_MIN,
+        min_major = min_major,
+        min_minor = min_minor,
+        min_patch = min_patch,
     )
 }
 
@@ -2023,11 +2156,20 @@ fn attach_launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) 
 }
 
 fn code_assistant_window_title(workspace_root: &Path, assistant: CodeAssistant) -> String {
-    let workspace_name = workspace_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("workspace");
+    let path_str = workspace_root.to_string_lossy();
+    let workspace_name = if let Some(last_slash) = path_str.rfind('\\') {
+        &path_str[last_slash + 1..]
+    } else {
+        workspace_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace")
+    };
+    let workspace_name = if workspace_name.is_empty() {
+        "workspace"
+    } else {
+        workspace_name
+    };
     format!(
         "Studio {} master - {} - {}",
         assistant.display_name(),
@@ -2316,6 +2458,7 @@ fn prepare_code_assistant_open(
     workspace_root: &Path,
     requested: CodeAssistant,
 ) -> Result<CodeAssistantOpenAction, String> {
+    check_ah_version_cached()?;
     let requested_runtime = ah_config_for_status(workspace_root, requested).map(|config| {
         let probe = inspect_ah_runtime(&config, None);
         (config, probe.snapshot)
@@ -2370,6 +2513,7 @@ fn prepare_code_assistant_open(
 }
 
 fn open_code_assistant(workspace_root: &Path, assistant: CodeAssistant) -> Result<PathBuf, String> {
+    check_ah_version_cached()?;
     match prepare_code_assistant_open(workspace_root, assistant)? {
         CodeAssistantOpenAction::AttachExisting(config_path) => {
             let launcher = write_code_assistant_attach_launcher_script(
@@ -2396,6 +2540,7 @@ fn attach_code_assistant_terminal(
     workspace_root: String,
     assistant: CodeAssistant,
 ) -> Result<(), String> {
+    check_ah_version_cached()?;
     let workspace_root = existing_directory(&workspace_root)?;
     let Some(config_path) = ah_config_for_status(&workspace_root, assistant) else {
         return Err(format!("{} is not running", assistant.display_name()));

@@ -5195,6 +5195,246 @@ mod tests {
         );
     }
 
+    // ── studio-ah-state-contract-v1 task 7 (Close / app-quit cleanup) RED tests ──
+    //
+    // Authored by g2 (泳道2 gatekeeper) test-first from the brief/spec contract — NOT
+    // read off any implementation. g2-m1 turns these GREEN by rebuilding the cleanup
+    // path and must NOT edit this test file. Task 6.1 (tasks.md:119) deliberately left
+    // `force_cleanup_ah_runtime`'s session selection to task 7 ("目标 session id 来自
+    // identity-checked 快照里 `cleanup_required`/非 `safe_to_cleanup` 的 session ...
+    // 须与任务 7 协调"), so the two tests below pin exactly that hand-off + the
+    // ownership boundary at app-quit.
+    //
+    // Two RED signals, two mechanisms (both safe — no live-fleet touch):
+    //
+    //   (1) A NEW pure seam g2-m1 must add and `force_cleanup_ah_runtime` must consume
+    //       (crate scope, no subprocess) — compile-time RED (E0425) until it lands, the
+    //       same RED mechanism as tasks 2/3/4/5/8. `force_cleanup_ah_runtime` today
+    //       kills every `ah ps`-derived + tmux session id (lib.rs:1129-1173); the
+    //       rebuild must instead escalate `ah kill --session <id> --force` to ONLY the
+    //       session ids this selector returns (design.md:226, Req 4.2/5.5). The
+    //       gatekeeper's GREEN-time diff audit verifies the wiring (this function is
+    //       actually called and the ps/tmux session-id path is deleted) — the shim
+    //       existing but unused would be caught there, not here.
+    //
+    //         /// The session ids Close/app-quit escalation may `ah kill --session <id>
+    //         /// --force`, taken ONLY from the identity-checked snapshot's own
+    //         /// `sessions[]` and driven by ah's per-session cleanup judgment — never
+    //         /// Studio re-deriving "non-terminal therefore kill" (Req 4.2/5.5,
+    //         /// design.md:226). A session ah has NOT flagged `cleanup_required` (a
+    //         /// healthy ACTIVE stack is `cleanup_required:false, safe_to_cleanup:false`
+    //         /// per task0-cli-evidence-2026-07-10.md:166 — live work, must be spared)
+    //         /// is not a target; `!safe_to_cleanup` alone must never escalate a kill.
+    //         fn cleanup_target_session_ids(snapshot: &AhRuntimeSnapshot) -> Vec<String>
+    //
+    //   (2) The EXISTING app-quit/Close orchestrator `cleanup_workspace_code_assistants`
+    //       (lib.rs:1240, called by `close_code_assistant` and the quit paths) — a
+    //       behavioral RED: given a workspace whose only ah config is workspace-owned
+    //       (repo-root `ah.toml`), it must transparently skip it (touch nothing) and
+    //       return `Ok(closed_any=false)` (Req 5.9/4.6, tasks.md:129). Today the task-5
+    //       ownership guard's `Err` propagates through the loop's `?` and ABORTS the
+    //       whole quit cleanup — so the assertion `is_ok()` reds now. Safe: the guard
+    //       short-circuits before any `ah`/`tmux` subprocess, so no lifecycle command is
+    //       ever issued at the operator's own fleet while this runs RED.
+    //
+    // See tasks.md task 7 (124-131), design.md:137-152 (Close cleanup) + 219-229
+    // (Cleanup orchestrator), requirements.md Req 4.2/5.5/5.9/4.6.
+
+    /// A multi-session snapshot the way one ahd can legitimately hold several sessions,
+    /// composed from the real per-session shapes captured in task0-cli-evidence
+    /// (2026-07-10): a healthy ACTIVE session (`cleanup_required:false,
+    /// safe_to_cleanup:false`, line 166), a degraded ACTIVE session that ah HAS flagged
+    /// for cleanup (`cleanup_required:true`, the `runtime_state:"degraded"` shape), and a
+    /// cleanly-terminal CLOSED session (`cleanup_required:false, safe_to_cleanup:true`).
+    /// Only the middle session is a cleanup target; the other two are the discriminators
+    /// that separate the ah-flag-driven rule from a Studio "non-terminal ⇒ kill" guess.
+    const SNAPSHOT_MULTI_SESSION_MIXED_CLEANUP: &str = r#"{
+      "schema_version": 2, "event": "snapshot", "sequence": 1, "reason": "initial",
+      "runtime_state": "degraded", "active": false, "ahd_alive": true,
+      "ahd_has_inventory": true, "config_path": null, "workspace_path": null,
+      "state_dir": "/root/.local/state/ah/f2647adf", "tmux_socket": "ahd-5a709091c406a3fa",
+      "tmux_server_alive": true, "master_tmux_alive": false, "worker_tmux_alive": true,
+      "worker_tmux_expected_count": 16, "agents": [],
+      "sessions": [
+        {"session_id": "sess_live-a1a1a1a1-0000-4000-8000-000000000001",
+         "project_id": "live-session-workspace",
+         "path": "/root/agent-harness/.worktrees/live-session-workspace",
+         "status": "ACTIVE", "master_state": "BUSY", "master_tmux_alive": true,
+         "db_tracked_agents": 6, "live_agents": 6,
+         "cleanup_required": false, "safe_to_cleanup": false},
+        {"session_id": "sess_deg-b2b2b2b2-0000-4000-8000-000000000002",
+         "project_id": "degraded-session-workspace",
+         "path": "/root/agent-harness/.worktrees/degraded-session-workspace",
+         "status": "ACTIVE", "master_state": null, "master_tmux_alive": false,
+         "db_tracked_agents": 10, "live_agents": 10,
+         "cleanup_required": true, "safe_to_cleanup": true},
+        {"session_id": "sess_closed-c3c3c3c3-0000-4000-8000-000000000003",
+         "project_id": "closed-session-workspace",
+         "path": "/root/agent-harness/.worktrees/closed-session-workspace",
+         "status": "CLOSED", "master_state": null, "master_tmux_alive": false,
+         "db_tracked_agents": 0, "live_agents": 0,
+         "cleanup_required": false, "safe_to_cleanup": true}
+      ],
+      "jobs": [], "job_events": [], "job_event_cursor": 0
+    }"#;
+
+    /// Req 5.5 / 4.2 — when cleanup escalates over a snapshot with MULTIPLE sessions, it
+    /// must `ah kill --session <id> --force` ONLY the sessions ah itself flagged for
+    /// cleanup, taken from the snapshot's own `sessions[]` — never re-derive "this
+    /// session is non-terminal, therefore kill" in Studio (design.md:226, F8). The
+    /// fixture pairs the exact real shapes: a live ACTIVE session ah did NOT flag
+    /// (`cleanup_required:false`) must be SPARED even though its status is non-terminal,
+    /// a degraded ACTIVE session ah DID flag (`cleanup_required:true`) is the only
+    /// target, and a terminal CLOSED session is spared. Target set = exactly the one
+    /// cleanup-required session id.
+    ///
+    /// COMPILE-TIME RED (expected): `cleanup_target_session_ids` does not exist yet, so
+    /// the whole `cargo test --lib` fails to compile (E0425) until g2-m1 adds it and
+    /// wires `force_cleanup_ah_runtime` to it — the standard TDD intermediate state.
+    ///
+    /// Rollback self-check (not self-anchored): the current `ah ps`/tmux path kills
+    /// every discovered session id → includes the live + closed sessions → reds the two
+    /// "must be spared" assertions. A `!safe_to_cleanup` predicate targets the live
+    /// session (`safe_to_cleanup:false`) → reds. A "non-terminal ⇒ kill" predicate
+    /// targets the live ACTIVE session → reds. Only ah's own `cleanup_required` flag
+    /// yields exactly {degraded}, so reverting to any Studio-side re-derivation reds it.
+    #[test]
+    fn test_cleanup_targets_only_cleanup_required_sessions() {
+        let snapshot = parse_snapshot_or_panic(SNAPSHOT_MULTI_SESSION_MIXED_CLEANUP);
+
+        // Preconditions: the fixture carries the three discriminating real shapes.
+        let live = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.session_id.starts_with("sess_live-"))
+            .expect("fixture has a live session");
+        let degraded = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.session_id.starts_with("sess_deg-"))
+            .expect("fixture has a degraded session");
+        let closed = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.session_id.starts_with("sess_closed-"))
+            .expect("fixture has a closed session");
+        assert_eq!(live.status, "ACTIVE");
+        assert!(
+            !live.cleanup_required && !live.safe_to_cleanup,
+            "the live session mirrors the real healthy-ACTIVE shape (cleanup_required:false, safe_to_cleanup:false) — must be spared"
+        );
+        assert!(
+            degraded.status == "ACTIVE" && degraded.cleanup_required,
+            "the degraded session is the only one ah flagged cleanup_required — the sole kill target"
+        );
+        assert_eq!(closed.status, "CLOSED");
+
+        let targets: BTreeSet<String> = cleanup_target_session_ids(&snapshot)
+            .into_iter()
+            .collect();
+
+        // The one cleanup-required session IS targeted.
+        assert!(
+            targets.contains(&degraded.session_id),
+            "the cleanup_required session must be escalated for `ah kill` (Req 5.5/4.2)"
+        );
+        // A non-terminal (ACTIVE) session ah did NOT flag for cleanup is SPARED — this is
+        // the load-bearing defeat of "非终态即 kill" (Req 4.2: prefer ah's own fields).
+        assert!(
+            !targets.contains(&live.session_id),
+            "a live ACTIVE session ah did not flag (cleanup_required:false) must NOT be killed — no 'non-terminal therefore kill' (Req 5.5/4.2)"
+        );
+        // A cleanly-terminal CLOSED session is spared (nothing to clean).
+        assert!(
+            !targets.contains(&closed.session_id),
+            "a terminal CLOSED session needs no cleanup and must not be killed"
+        );
+        // Complete contract: escalation targets EXACTLY the cleanup-required session ids
+        // present in the snapshot — no more (defeats kill-all-found), no fewer, and every
+        // target is a snapshot session id (Req 4.2 'only session ids present in the snapshot').
+        assert_eq!(
+            targets,
+            BTreeSet::from([degraded.session_id.clone()]),
+            "cleanup escalation must target exactly the snapshot's cleanup_required session ids, driven by ah's judgment not Studio's"
+        );
+    }
+
+    /// Req 5.9 / 4.6 — Close and app quit must never issue a lifecycle command
+    /// (`ah stop`/`ah kill`) against a workspace-owned config (a walked-up repo-root
+    /// `ah.toml` that belongs to the operator's own fleet), and a workspace-owned config
+    /// discovered in the cleanup set must be transparently SKIPPED, not turned into an
+    /// error that aborts the whole quit (tasks.md:129 "只清理 Studio ... 不触碰
+    /// workspace-owned config"). Driven through the REAL app-quit/Close orchestrator
+    /// `cleanup_workspace_code_assistants` (called by `close_code_assistant`, lib.rs:2727,
+    /// and the quit paths at 2543/2608) over a hermetic throwaway workspace whose only ah
+    /// config is workspace-owned — the operator's live fleet is never touched.
+    ///
+    /// RED now (behavioral): today the task-5 ownership guard returns `Err` for the
+    /// workspace-owned config and that `Err` propagates through the loop's `?`, so
+    /// `cleanup_workspace_code_assistants` returns `Err` and the `is_ok()` assertion
+    /// reds. Safe: the guard short-circuits before any `ah`/`tmux` subprocess, so no
+    /// lifecycle command is ever issued while this runs RED. Task 7 makes it green by
+    /// skipping read-only (workspace-owned) configs from the lifecycle cleanup instead of
+    /// aborting on them.
+    ///
+    /// Not a blanket no-op: the ownership authority must still DISTINGUISH the classes —
+    /// a workspace-owned config refuses lifecycle commands while a Studio-managed temp
+    /// config allows them (asserted purely via `ensure_lifecycle_command_allowed` on the
+    /// frozen task-1 fixtures), so the skip is selective, not "never clean anything".
+    #[test]
+    fn test_quit_leaves_workspace_owned_config_untouched() {
+        use ah_contract_fixtures::{CONFIG_STUDIO_MANAGED, CONFIG_WORKSPACE_OWNED};
+
+        // The skip must be OWNERSHIP-selective, sourced from the single authority: a
+        // workspace-owned config refuses lifecycle commands; a Studio-managed temp config
+        // allows them (pure, no subprocess — defeats an "always Ok, clean nothing" impl).
+        assert!(CONFIG_WORKSPACE_OWNED.read_only, "workspace-owned fixture is readOnly:true");
+        assert!(!CONFIG_STUDIO_MANAGED.read_only, "Studio-managed temp fixture is readOnly:false");
+        assert!(
+            ensure_lifecycle_command_allowed(Path::new(CONFIG_WORKSPACE_OWNED.config_path)).is_err(),
+            "workspace-owned config must refuse start/stop/kill (Req 5.9)"
+        );
+        assert!(
+            ensure_lifecycle_command_allowed(Path::new(CONFIG_STUDIO_MANAGED.config_path)).is_ok(),
+            "Studio-managed temp config allows the full lifecycle — the skip is selective, not blanket"
+        );
+
+        // Hermetic workspace whose only ah config is workspace-owned (a walked-up
+        // `ah.toml` outside the Studio temp namespace). Never touches the real fleet.
+        let workspace = temp_path("quit-workspace-owned");
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).unwrap();
+        let discovered_config = workspace.join("ah.toml");
+        std::fs::write(
+            &discovered_config,
+            transient_ah_config_content(CodeAssistant::Claude),
+        )
+        .unwrap();
+
+        // Fixture precondition: the walked-up config really classifies workspace-owned.
+        let status_config = ah_config_for_status(&workspace, CodeAssistant::Claude)
+            .expect("read-only status discovery still surfaces the workspace ah.toml");
+        assert_eq!(status_config, discovered_config);
+        assert!(
+            classify_config_ownership(&status_config).read_only,
+            "a walked-up ah.toml outside the Studio temp namespace is workspace-owned"
+        );
+
+        // The real app-quit/Close cleanup path must SKIP the workspace-owned config and
+        // return cleanly — never abort the quit, never report having closed it, never
+        // issue a lifecycle command against the operator's own fleet (Req 5.9/4.6).
+        let cleanup = cleanup_workspace_code_assistants(&workspace).expect(
+            "quit/Close cleanup over a workspace-owned config must skip it and return Ok, \
+             not abort the whole cleanup with the ownership guard's Err (Req 5.9/4.6)",
+        );
+        assert!(
+            !cleanup.closed_any,
+            "no workspace-owned runtime was closed — Close/quit issues no `ah stop`/`ah kill` against it (Req 5.9)"
+        );
+
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
     #[test]
     fn ah_ps_probe_extracts_tmux_socket_label_and_session_ids() {
         let output = r#"

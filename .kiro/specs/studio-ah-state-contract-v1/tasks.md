@@ -121,7 +121,10 @@ revision_trace: REVISION-TRACE.md
   - 排期：须先于任务 7（Close/quit 依赖同一决策面，不能继续叠在 `ah ps` 路径上）、任务 9（前端按钮投影依赖任务 6 真实闭环）之前完成。
   - _Requirements: 2.1, 2.2, 2.3, 2.6, 2.7, 3.1-3.8, 4.1-4.6, 5.1, 5.2, 5.10, 5.11, 5.13_
 
-- [ ] 7. 重做 Close 和 app quit cleanup
+- [x] 7. 重做 Close 和 app quit cleanup
+  - **完成于 5cb62744**，RED=b44fa176，跨泳道审计 ACCEPT=`task7-cross-lane-review-2026-07-11.md`（b5c1d288）。
+    附条件：`cleanup_target_session_ids` 只按 `cleanup_required` 判定（比 design.md:226 字面 OR 读法更 fail-closed，
+    已用回滚自检坐实字面读法会误杀活栈），design.md:226 措辞收紧留给任务10 设计回写。
   - **先写红测试**：`test_cleanup_targets_only_cleanup_required_sessions`（多 session 快照 → 只对 `cleanup_required`/非 `safe_to_cleanup` 的 session id 发 `ah kill`，Req 5.5）；`test_quit_leaves_workspace_owned_config_untouched`（本仓根 `ah.toml` fixture → Close/quit 不发任何生命周期命令，Req 5.9）。
   - Close 先确认目标 config 是 Studio-managed（绝不对 workspace-owned config 发生命周期命令），再调用 `ah stop`。
   - stop 后重新读取当前快照（events-primary，status fallback）。

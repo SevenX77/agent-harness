@@ -24,7 +24,7 @@ The compilation and diagnostic pipeline serves as the primary gateway for valida
 *   **DAG Topology**: Detects circular dependencies (`[F-v3-graph-phase-cycle]`), unreachable phases (`[F-v3-graph-phase-island]`), and phase name mismatches.
 *   **Phase/Directory Mappings**: Validates "three-name consistency": the frontmatter phase key, the body `<phase>` tag, and the corresponding subdirectory under `phases/` must match exactly.
 *   **Input/Output Schemas**: Validates draft2020-12 JSON schemas and checks that downstream inputs match upstream outputs.
-*   **Action Signatures & Purity**: Verifies that Python actions under `actions/` exist and match signatures (`def <name>(inputs): ...`), rejecting unsafe imports or dynamic scripting.
+*   **Action Signatures & Purity**: Verifies that Python actions under `actions/` exist and match signatures (`def <name>(inputs) -> dict`), rejecting unsafe imports or dynamic scripting.
 *   **Mentions Reachability**: Assures that mentions like `@tool:`, `@subagent:`, `@subgraph:`, `@reference:`, `@example:`, and `@protocol:` point to valid resources.
 
 ### What Compilation Cannot Check:
@@ -33,7 +33,7 @@ The compilation and diagnostic pipeline serves as the primary gateway for valida
 *   **Runtime Execution Failures**: Semantic Python logic exceptions or non-structural execution-stage errors.
 
 ## 3. Error Codes & Diagnostics
-Defects are reported using structured `[F-v3-*]` error codes (e.g., `[F-v3-graph-phase-cycle]`, `[F-v3-io-schema-mismatch]`). Each code maps to a precise remediation step registered within the engine's error catalog.
+Defects are reported using structured `[F-v3-*]` error codes (e.g., `[F-v3-graph-phase-cycle]`, `[F-v3-graph-dataflow-source-missing]`). Each code maps to a precise remediation step registered within the engine's error catalog.
 
 ## 4. Engineering & Repair Disciplines
 *   **Compile-Pass Gate**: A compile-pass is a hard prerequisite for running prediction or execution (`[[KB-13-studio-gates-tools]]`).

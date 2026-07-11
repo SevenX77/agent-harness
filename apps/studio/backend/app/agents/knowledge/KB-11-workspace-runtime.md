@@ -6,7 +6,7 @@ related:
   - KB-13-studio-gates-tools
 ---
 
-> Distilled from: engine skill-spec runtime appendix & `docs/studio/mvp1/02_capabilities/skill-workspace.md`
+> Distilled from: engine skill-spec runtime appendix & `docs/studio/mvp1/02_capabilities/skill-workspace/mvp1-alignment.md`
 
 # KB-11: Workspace & Runtime Specifications
 
@@ -33,5 +33,5 @@ The `.workspace/` directory contains all transient configurations, execution out
 ## 3. Subgraph Workspace Membership
 *   **Inline Subgraph Resolution**: Subgraph references within a skill resolve via absolute file system paths.
 *   **Membership Inclusion Rule**:
-    *   If a subgraph's absolute path lies **inside** the parent skill's directory tree (e.g., `<skill-root>/subgraphs/sub-a/`), it is automatically considered a member of the workspace.
+    *   If a subgraph's absolute path lies **inside** the parent skill's directory tree (e.g., `<skill-root>/subgraph/sub-a/`), it is automatically considered a member of the workspace.
     *   If the subgraph path is located **outside** the parent skill's directory tree, the path must be registered in the workspace configurations so the compiler and copilot can resolve it.

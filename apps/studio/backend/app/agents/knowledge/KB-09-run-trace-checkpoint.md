@@ -6,7 +6,7 @@ related:
   - KB-11-workspace-runtime
 ---
 
-> Distilled from: `docs/studio/mvp1/02_capabilities/trace-observability.md` & `01_workflows/04_run-and-verify.md` & `05_debugging.md`
+> Distilled from: `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md` & `01_workflows/04_run-and-verify.md` & `05_debugging.md`
 
 # KB-09: Run, Trace, & Checkpoint
 
@@ -14,7 +14,7 @@ This document details the telemetry, state persistence, and debugging overrides 
 
 ## 1. Trace Telemetry (`trace.jsonl`)
 *   **Execution Logs**: Every execution run writes detailed telemetry to a `trace.jsonl` file inside `.workspace/runs/<run_id>/`.
-*   **Event Types**: The engine emits up to 33 distinct event types. When debugging, analyze the following key events:
+*   **Event Types**: The engine emits dozens of distinct structured event types. When debugging, analyze the following key events:
     *   `phase_start` / `phase_end`: Logs exact input/output payloads and metrics (time, token usage) for a phase.
     *   `tool_call` / `tool_response`: Logs arguments and outputs for tool interactions within agent nodes.
     *   `error`: Captures stack traces, schema violations, and API failures.

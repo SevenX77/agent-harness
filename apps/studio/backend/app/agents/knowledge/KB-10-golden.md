@@ -5,7 +5,7 @@ related:
   - KB-09-run-trace-checkpoint
 ---
 
-> Distilled from: `docs/studio/mvp1/02_capabilities/golden-eval.md` & `01_workflows/06_eval.md`
+> Distilled from: `docs/studio/mvp1/02_capabilities/golden-eval/mvp1-alignment.md` & `01_workflows/06_eval.md`
 
 # KB-10: Golden Baselines & Evaluation
 

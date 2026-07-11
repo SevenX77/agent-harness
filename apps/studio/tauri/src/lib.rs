@@ -3753,6 +3753,341 @@ mod tests {
         );
     }
 
+    // ── studio-ah-state-contract-v1 tasks 3 (remaining) + 4 RED tests ────────────
+    //
+    // Authored by g1 (泳道1 gatekeeper) test-first. tasks 3 and 4 are a single batch
+    // (tasks.md:57/66 「须与任务 X 同批落地」): task 3's typed parser + snapshot-driven
+    // decision plane are useless without task 4's events-primary + sequence arbitration,
+    // and shipping task 3 alone would leave `status` as a mid-state decision surface —
+    // forbidden by the spec. So both are RED here in one PR; g1-m1 turns them GREEN by
+    // adding ONLY the production seams named below and must NOT edit this test file.
+    //
+    // Contract seams g1-m1 must implement (crate scope; derive PartialEq+Eq+Debug on the
+    // enum, Debug is not required on the structs). Field model = design.md:237-273
+    // (corrected against real 1.4.0/1.5.0 CLI output per F8), fields listed in
+    // tasks.md:60. RED mechanism = the same compile-time E0425/E0412 as task 2's
+    // `ah_version_gate` and task 3's `verify_snapshot_identity`: none of these symbols
+    // exist yet, so the whole lib-test target fails to COMPILE until g1-m1 adds them.
+    //
+    //   /// The four-value runtime phase (design.md Data Models). A typed enum, never a
+    //   /// stringly value nor a Studio-invented reduction back to a bool (Req 3.8).
+    //   enum AhRuntimeState { Active, Inactive, Starting, Degraded }
+    //
+    //   /// One session inside a parsed snapshot. Identity + cleanup-eligibility fields
+    //   /// are consumed directly, never re-derived (Req 2.6/2.7/4.2). `live_agents` is
+    //   /// the real field name — NOT `active_agents` (design F8).
+    //   struct AhSessionSnapshot {
+    //       session_id: String, project_id: String, path: String, status: String,
+    //       live_agents: u64, db_tracked_agents: u64,
+    //       cleanup_required: bool, safe_to_cleanup: bool,
+    //   }
+    //
+    //   /// A parsed, schema-validated ah v1.4.0+ runtime snapshot (one `status --json`
+    //   /// stdout, or one `events --format json` JSONL line). `config_path` is ADVISORY
+    //   /// ONLY (Req 2.7). Top-level tmux-health (`master_tmux_alive`/`worker_tmux_alive`)
+    //   /// and `config_path` MUST be serde-optional/defaulted so the reduced
+    //   /// SEQUENCE_*/daemon_absent frames (which omit them) still parse; the full
+    //   /// SNAPSHOT_* fixtures carry them. Per tasks.md:60 the parser must also cover
+    //   /// `ahd_alive`/`sequence`/`reason`/`config_path`/`sessions[].session_id/path/
+    //   /// project_id` (g1-m1 may add `state_dir`/`agents`/`workspace_path` too).
+    //   struct AhRuntimeSnapshot {
+    //       schema_version: u64, runtime_state: AhRuntimeState,
+    //       active: bool, ahd_alive: bool, sequence: u64,
+    //       reason: Option<String>, config_path: Option<String>,
+    //       master_tmux_alive: bool, worker_tmux_alive: bool,
+    //       sessions: Vec<AhSessionSnapshot>,
+    //   }
+    //
+    //   /// Parse + schema-validate. `Ok` only when `schema_version == 2`; `Err(diag)` on
+    //   /// an unknown schema (must NOT default-pass to a healthy read) or invalid JSON
+    //   /// (Req 2.4/2.5).
+    //   fn parse_ah_runtime_snapshot(snapshot_json: &str) -> Result<AhRuntimeSnapshot, String>
+    //
+    //   /// Reduce an (identity-checked) typed snapshot to the normal-path lifecycle
+    //   /// action, sourcing active / terminal-session state from the snapshot's OWN
+    //   /// fields — never from `ah ps` text (`ah_ps_output_has_inventory` /
+    //   /// `extract_ah_session_ids`) or tmux probing (task 3: remove ps/tmux from the
+    //   /// decision plane). active → AttachExisting; inactive/all-terminal → StartFresh.
+    //   /// (starting/degraded phase handling is task 6, out of scope here.)
+    //   fn reconcile_snapshot_lifecycle(snapshot: &AhRuntimeSnapshot) -> CodeAssistantLifecycleAction
+    //
+    //   /// Stream-scoped applied-`sequence` cache (Req 2.1/5.13). `accept` returns true
+    //   /// if the snapshot was applied, false if dropped as stale. Within one unchanged
+    //   /// stream an older-or-equal `sequence` is dropped; but a `reason:"initial"`
+    //   /// baseline, a freshly (re)established subscription, or a changed
+    //   /// `sessions[].session_id` UNCONDITIONALLY resets the cache and applies.
+    //   struct SequenceArbiter { /* private */ }
+    //   impl SequenceArbiter { fn new() -> Self; fn accept(&mut self, snapshot: &AhRuntimeSnapshot) -> bool }
+    //
+    //   /// Arbitrate the bootstrap read: `status --json` result (Ok=stdout JSON,
+    //   /// Err=stderr from a non-zero exit) vs an available `events` snapshot line. When
+    //   /// an events snapshot is present it WINS — a `status --json` stderr failure must
+    //   /// never be surfaced as the authoritative error while a structured events
+    //   /// snapshot is available (Req 2.3/5.11).
+    //   fn resolve_bootstrap_snapshot(
+    //       status_json_result: Result<&str, &str>,
+    //       events_snapshot_json: Option<&str>,
+    //   ) -> Result<AhRuntimeSnapshot, String>
+    //
+    // See tasks.md tasks 3 (lines 57-64) + 4 (lines 66-75), design.md:195-330,
+    // requirements.md Req 2.1/2.7/3.5/3.8/5.11/5.13. Every fixture consumed
+    // (`ah_contract_fixtures::*`) is a frozen task-1 contract input — real CLI output
+    // shapes, not internal state. These tests are NOT self-anchored: reverting g1-m1's
+    // parser/decision/arbiter logic reds them again (per-test rollback notes below).
+
+    /// Parse a frozen fixture snapshot under the typed parser, panicking with a clear
+    /// message if it fails — every fixture fed here is documented well-formed
+    /// schema_version:2, so a parse failure means the parser seam regressed, not bad data.
+    fn parse_snapshot_or_panic(json: &str) -> AhRuntimeSnapshot {
+        parse_ah_runtime_snapshot(json)
+            .expect("frozen schema_version:2 fixture must parse under the typed parser")
+    }
+
+    /// Task 3 (tasks.md:57-62) — the typed parser projects `active`, `runtime_state`
+    /// (as a typed phase), the session list, and master/worker health straight out of
+    /// the structured snapshot, and REJECTS an unsupported schema instead of
+    /// default-passing. Anchored to the frozen full-schema fixtures; a parser that
+    /// dropped the phase enum, mislabelled `live_agents`, or silently accepted schema 999
+    /// reds this.
+    #[test]
+    fn test_typed_snapshot_parser_projects_phase_sessions_and_health() {
+        use ah_contract_fixtures::{
+            SNAPSHOT_ACTIVE, SNAPSHOT_DEGRADED, SNAPSHOT_STARTING, SNAPSHOT_TERMINAL_CLOSED,
+            SNAPSHOT_UNSUPPORTED_SCHEMA,
+        };
+
+        // active — runtime_state=Active, active=true, ahd alive, one live-fleet session,
+        // master + worker tmux healthy (health sourced from the snapshot, not a tmux probe).
+        let active = parse_snapshot_or_panic(SNAPSHOT_ACTIVE);
+        assert_eq!(active.runtime_state, AhRuntimeState::Active);
+        assert!(active.active);
+        assert!(active.ahd_alive);
+        assert!(
+            active.master_tmux_alive,
+            "master health must come from the snapshot's own field, not list_tmux_sessions"
+        );
+        assert!(
+            active.worker_tmux_alive,
+            "worker health must come from the snapshot's own field, not list_tmux_sessions"
+        );
+        assert_eq!(active.sessions.len(), 1);
+        let s = &active.sessions[0];
+        assert_eq!(s.session_id, "sess_6ddea78e-0ea9-4f00-9b9a-15226e3cce28");
+        assert_eq!(s.project_id, "feat-studio-ah-state-contract-impl");
+        assert_eq!(s.status, "ACTIVE");
+
+        // starting — hands-off phase: active=false, and the session is not cleanup-eligible
+        // (nothing to clean, must be left alone — Req 3.6, verified downstream by task 6).
+        let starting = parse_snapshot_or_panic(SNAPSHOT_STARTING);
+        assert_eq!(starting.runtime_state, AhRuntimeState::Starting);
+        assert!(!starting.active);
+        assert!(!starting.sessions[0].cleanup_required);
+        assert!(!starting.sessions[0].safe_to_cleanup);
+
+        // degraded — master tmux dead in the snapshot, one ACTIVE session with
+        // live_agents=10 and cleanup_required=true (the cleanup-then-open shape, Req 3.7).
+        let degraded = parse_snapshot_or_panic(SNAPSHOT_DEGRADED);
+        assert_eq!(degraded.runtime_state, AhRuntimeState::Degraded);
+        assert!(!degraded.active);
+        assert!(
+            !degraded.master_tmux_alive,
+            "degraded's dead master tmux must be read from the snapshot, not re-probed"
+        );
+        let ds = &degraded.sessions[0];
+        assert_eq!(ds.status, "ACTIVE");
+        assert_eq!(
+            ds.live_agents, 10,
+            "the real v2 field is live_agents (=10), NOT active_agents (design F8)"
+        );
+        assert!(ds.cleanup_required);
+
+        // terminal CLOSED — ahd alive, active=false, session terminal ⇒ open-able (Req 3.2).
+        let closed = parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED);
+        assert_eq!(closed.runtime_state, AhRuntimeState::Inactive);
+        assert!(!closed.active);
+        assert!(closed.ahd_alive);
+        assert_eq!(closed.sessions[0].status, "CLOSED");
+
+        // unsupported schema — MUST be an Err with a diagnostic, never a silent healthy
+        // read that falls back to local probing (Req 2.5). This is the load-bearing
+        // fail-closed assertion of the parser.
+        let unsupported = parse_ah_runtime_snapshot(SNAPSHOT_UNSUPPORTED_SCHEMA);
+        assert!(
+            unsupported.is_err(),
+            "schema_version:999 must be rejected, not silently accepted as active (Req 2.5)"
+        );
+        assert!(
+            !unsupported.unwrap_err().is_empty(),
+            "an unsupported-schema rejection must carry an actionable diagnostic"
+        );
+    }
+
+    /// Task 3 (tasks.md:63) — the normal decision plane consumes a TYPED snapshot, not
+    /// `ah ps` text. `reconcile_snapshot_lifecycle` takes `&AhRuntimeSnapshot`, so it
+    /// structurally cannot reach `ah_ps_output_has_inventory` / `extract_ah_session_ids`
+    /// or tmux probing; the two differing outcomes prove it is a real projection of the
+    /// snapshot's `active`/session-terminal state, not a constant. (The full removal of
+    /// the ps/tmux path from `inspect_ah_runtime` is the gatekeeper's diff-audit item;
+    /// this test pins the new snapshot-driven seam.)
+    #[test]
+    fn test_decision_plane_consumes_typed_snapshot_not_ps_text() {
+        use ah_contract_fixtures::{SNAPSHOT_ACTIVE, SNAPSHOT_TERMINAL_CLOSED};
+
+        let active = parse_snapshot_or_panic(SNAPSHOT_ACTIVE);
+        assert_eq!(
+            reconcile_snapshot_lifecycle(&active),
+            CodeAssistantLifecycleAction::AttachExisting,
+            "an active snapshot attaches — decided from runtime_state/active, not ps inventory"
+        );
+
+        let closed = parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED);
+        assert_eq!(
+            reconcile_snapshot_lifecycle(&closed),
+            CodeAssistantLifecycleAction::StartFresh,
+            "an inactive/all-terminal snapshot starts fresh — decided from the session's own \
+             terminal status, not from re-derived `ah ps` inventory"
+        );
+
+        // Control: the two outcomes differ, so this is a genuine projection of snapshot
+        // state and not a constant that would 'pass' for any input.
+        assert_ne!(
+            reconcile_snapshot_lifecycle(&active),
+            reconcile_snapshot_lifecycle(&closed)
+        );
+    }
+
+    /// Task 4 (tasks.md:67, Req 2.1/5.13) — a `reason:"initial"`/`sequence:1` frame that
+    /// arrives AFTER the stream advanced past 1 triggers an UNCONDITIONAL reset and is
+    /// applied, in both the same-session and changed-session cases. A naive global-max
+    /// guard (1 ≤ 3 ⇒ drop) would pin the UI on the stale state forever; asserting the
+    /// reset frame applies reds that naive implementation. Its control is
+    /// `test_sequence_guard_within_stream` (a genuinely-older frame is still dropped).
+    #[test]
+    fn test_sequence_reset_on_reason_initial() {
+        use ah_contract_fixtures::{
+            SEQUENCE_RESET_FRAME_NEW_SESSION, SEQUENCE_RESET_FRAME_SAME_SESSION,
+            SEQUENCE_STREAM_FRAMES,
+        };
+
+        // ── Branch 1: same-session reason:"initial" reset ──
+        // Advance one stream 1→2→3; each strictly-newer in-stream frame applies.
+        let mut arb = SequenceArbiter::new();
+        for (i, &frame) in SEQUENCE_STREAM_FRAMES.iter().enumerate() {
+            assert!(
+                arb.accept(&parse_snapshot_or_panic(frame)),
+                "in-stream frame #{} (sequence {}) is strictly newer and must apply",
+                i + 1,
+                i + 1
+            );
+        }
+        // Fresh baseline: sequence:1 / reason:"initial", SAME session_id, but a genuinely
+        // newer state (the stack has CLOSED). Must reset-and-apply, not be dropped.
+        let reset_same = parse_snapshot_or_panic(SEQUENCE_RESET_FRAME_SAME_SESSION);
+        assert_eq!(
+            reset_same.runtime_state,
+            AhRuntimeState::Inactive,
+            "fixture precondition: the same-session reset frame carries the newer CLOSED state"
+        );
+        assert!(
+            arb.accept(&reset_same),
+            "reason:\"initial\"/sequence:1 after the stream advanced past 1 must reset-and-apply, \
+             NOT be dropped by the older-or-equal guard (Req 2.1/5.13)"
+        );
+
+        // ── Branch 2: changed sessions[].session_id reset ──
+        // NOTE (fixture gap, flagged not self-fixed): SEQUENCE_RESET_FRAME_NEW_SESSION
+        // carries a changed session_id AND reason:"initial"/sequence:1 together, so this
+        // branch exercises the changed-session-id reset trigger but does not ISOLATE it
+        // from the reason:"initial" trigger — both fire. A fixture with a changed
+        // session_id under a NON-initial reason would isolate it; none exists, and adding
+        // one is task-1 scope (raised to master via .lane-question, not self-added here).
+        let mut arb2 = SequenceArbiter::new();
+        for &frame in SEQUENCE_STREAM_FRAMES {
+            assert!(arb2.accept(&parse_snapshot_or_panic(frame)));
+        }
+        let reset_new = parse_snapshot_or_panic(SEQUENCE_RESET_FRAME_NEW_SESSION);
+        assert!(
+            arb2.accept(&reset_new),
+            "a sequence:1 frame carrying a changed sessions[].session_id is an independent \
+             unconditional-reset trigger and must apply (Req 2.1/5.13)"
+        );
+    }
+
+    /// Task 4 (tasks.md:67, Req 5.13 second half) — WITHIN one unchanged stream, a
+    /// genuinely-older `sequence` is still dropped. This is the control that keeps
+    /// `test_sequence_reset_on_reason_initial` honest: the reset there is lifted ONLY by
+    /// a reset trigger, not by weakening the monotonic guard into accept-everything.
+    #[test]
+    fn test_sequence_guard_within_stream() {
+        use ah_contract_fixtures::SEQUENCE_STREAM_FRAMES;
+
+        // Advance the stream 1→2→3.
+        let mut arb = SequenceArbiter::new();
+        for &frame in SEQUENCE_STREAM_FRAMES {
+            assert!(arb.accept(&parse_snapshot_or_panic(frame)));
+        }
+
+        // Replay frame #2 (sequence:2, reason:"tmux_changed" — NOT a reset, SAME session):
+        // a genuinely-older in-stream frame. Applied cache is at 3 with no reset trigger,
+        // so the monotonic guard MUST drop it.
+        let stale = parse_snapshot_or_panic(SEQUENCE_STREAM_FRAMES[1]);
+        assert_eq!(stale.sequence, 2);
+        assert_ne!(
+            stale.reason.as_deref(),
+            Some("initial"),
+            "fixture precondition: the stale replay frame is not an initial reset"
+        );
+        assert!(
+            !arb.accept(&stale),
+            "an older sequence within the same unchanged stream must be dropped, not applied \
+             (Req 5.13); only a reset trigger (initial / new subscription / changed session) \
+             lifts the monotonic guard"
+        );
+    }
+
+    /// Task 4 (tasks.md:67, Req 5.11) — when `ah status --json` fails with a non-zero exit
+    /// and unstructured stderr while an `events` subscription yields a structured
+    /// `daemon_absent` snapshot, the decision follows the events snapshot, NOT the status
+    /// stderr text. The primary case reds a "status-stderr-as-authoritative-error"
+    /// implementation (it would return Err ⇒ the `.expect` fails); the control case reds a
+    /// "hardcoded daemon_absent constant" implementation (it would ignore the real events
+    /// content ⇒ ahd_alive:true assertion fails).
+    #[test]
+    fn test_daemon_absent_prefers_events_over_status_stderr() {
+        use ah_contract_fixtures::{SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_INACTIVE};
+
+        // Real daemon-absent shape (task0 §2b): `ah status --json` exits non-zero with a
+        // human-readable stderr and NO JSON; `ah events --format json` yields the
+        // structured daemon_absent snapshot. Studio must decide off the events snapshot.
+        let status_failure: Result<&str, &str> =
+            Err("error: ahd is not running for this config (no daemon)\n");
+
+        let resolved = resolve_bootstrap_snapshot(status_failure, Some(SNAPSHOT_DAEMON_ABSENT));
+        let snap = resolved.expect(
+            "an available structured daemon_absent events snapshot must win over the status \
+             stderr — the stderr must NOT be surfaced as the authoritative error (Req 5.11)",
+        );
+        assert!(!snap.ahd_alive, "daemon_absent: ahd is not alive");
+        assert!(
+            !snap.active,
+            "daemon_absent resolves to inactive-startable, never an error state (Req 2.3)"
+        );
+        assert_eq!(snap.runtime_state, AhRuntimeState::Inactive);
+        assert!(snap.sessions.is_empty());
+
+        // Control: the resolver forwards the ACTUAL events snapshot content, not a
+        // hardcoded daemon_absent. Pair the same status failure with an ahd-alive/inactive
+        // events snapshot; the resolved state must reflect ahd_alive:true.
+        let status_failure_2: Result<&str, &str> = Err("error: ahd is not running\n");
+        let resolved_alive = resolve_bootstrap_snapshot(status_failure_2, Some(SNAPSHOT_INACTIVE))
+            .expect("an available events snapshot must resolve, not error on the status stderr");
+        assert!(
+            resolved_alive.ahd_alive,
+            "the resolver must return the events snapshot's real content (ahd_alive:true here), \
+             proving it is not a constant daemon_absent"
+        );
+    }
+
     #[test]
     fn claude_wsl_payload_links_windows_credentials() {
         // The Windows .credentials.json is the single auth file; WSL root links

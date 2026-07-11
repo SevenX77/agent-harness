@@ -3110,29 +3110,48 @@ fn shutdown_application<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, reas
     });
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, Debug, Clone)]
-struct IdentitySession {
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum AhRuntimeState {
+    Active,
+    Inactive,
+    Starting,
+    Degraded,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+struct AhSessionSnapshot {
     session_id: String,
     project_id: String,
     path: String,
+    status: String,
+    live_agents: u64,
+    db_tracked_agents: u64,
+    cleanup_required: bool,
+    safe_to_cleanup: bool,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-struct IdentitySnapshot {
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+struct AhRuntimeSnapshot {
     schema_version: u64,
-    state_dir: String,
+    runtime_state: AhRuntimeState,
+    active: bool,
+    ahd_alive: bool,
+    sequence: u64,
+    reason: Option<String>,
+    config_path: Option<String>,
     #[serde(default)]
-    sessions: Vec<IdentitySession>,
+    master_tmux_alive: bool,
+    #[serde(default)]
+    worker_tmux_alive: bool,
+    #[serde(default)]
+    sessions: Vec<AhSessionSnapshot>,
+    #[serde(default)]
+    state_dir: String,
 }
 
-fn verify_snapshot_identity(
-    snapshot_json: &str,
-    requested_config_path: &Path,
-    requested_workspace_dir: &Path,
-) -> Result<(), String> {
-    let _ = requested_config_path;
-    let snapshot: IdentitySnapshot = serde_json::from_str(snapshot_json)
+fn parse_ah_runtime_snapshot(snapshot_json: &str) -> Result<AhRuntimeSnapshot, String> {
+    let snapshot: AhRuntimeSnapshot = serde_json::from_str(snapshot_json)
         .map_err(|e| format!("Invalid JSON in snapshot: {e}"))?;
 
     if snapshot.schema_version != 2 {
@@ -3141,6 +3160,87 @@ fn verify_snapshot_identity(
             snapshot.schema_version
         ));
     }
+
+    Ok(snapshot)
+}
+
+fn reconcile_snapshot_lifecycle(snapshot: &AhRuntimeSnapshot) -> CodeAssistantLifecycleAction {
+    if snapshot.active {
+        CodeAssistantLifecycleAction::AttachExisting
+    } else {
+        CodeAssistantLifecycleAction::StartFresh
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SequenceArbiter {
+    last_sequence: Option<u64>,
+    last_session_id: Option<String>,
+}
+
+impl SequenceArbiter {
+    fn new() -> Self {
+        Self {
+            last_sequence: None,
+            last_session_id: None,
+        }
+    }
+
+    fn accept(&mut self, snapshot: &AhRuntimeSnapshot) -> bool {
+        let current_session_id = snapshot.sessions.first().map(|s| s.session_id.clone());
+        let is_reset = if self.last_sequence.is_none() {
+            true
+        } else if snapshot.reason.as_deref() == Some("initial") {
+            true
+        } else if current_session_id != self.last_session_id {
+            true
+        } else {
+            false
+        };
+
+        if is_reset {
+            self.last_sequence = Some(snapshot.sequence);
+            self.last_session_id = current_session_id;
+            true
+        } else {
+            if let Some(last_seq) = self.last_sequence {
+                if snapshot.sequence > last_seq {
+                    self.last_sequence = Some(snapshot.sequence);
+                    self.last_session_id = current_session_id;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                self.last_sequence = Some(snapshot.sequence);
+                self.last_session_id = current_session_id;
+                true
+            }
+        }
+    }
+}
+
+fn resolve_bootstrap_snapshot(
+    status_json_result: Result<&str, &str>,
+    events_snapshot_json: Option<&str>,
+) -> Result<AhRuntimeSnapshot, String> {
+    if let Some(events_json) = events_snapshot_json {
+        parse_ah_runtime_snapshot(events_json)
+    } else {
+        match status_json_result {
+            Ok(status_json) => parse_ah_runtime_snapshot(status_json),
+            Err(stderr) => Err(stderr.to_string()),
+        }
+    }
+}
+
+fn verify_snapshot_identity(
+    snapshot_json: &str,
+    requested_config_path: &Path,
+    requested_workspace_dir: &Path,
+) -> Result<(), String> {
+    let _ = requested_config_path;
+    let snapshot = parse_ah_runtime_snapshot(snapshot_json)?;
 
     let requested_wsl = windows_path_to_wsl(requested_workspace_dir);
     let requested_wsl_path = Path::new(&requested_wsl);

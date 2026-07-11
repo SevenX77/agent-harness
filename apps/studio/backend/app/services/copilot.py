@@ -16,6 +16,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import secrets
 import shutil
 import tempfile
@@ -38,6 +39,12 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import (
     AssistantMessage,
+    HookCallback,
+    HookContext,
+    HookEvent,
+    HookInput,
+    HookJSONOutput,
+    HookMatcher,
     McpServerConfig,
     ResultMessage,
     StreamEvent,
@@ -246,35 +253,97 @@ async def _drain_sdk_response(
         await queue.put(_STREAM_SENTINEL)
 
 _SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit target must stay inside the workspace"
-_TOOL_APPROVAL_TIMEOUT_S = 120.0
-_READ_FENCED_TOOLS = ("Read", "Glob", "Grep")
+# 审批可等待时限(R8.4):默认 30 分钟,可经环境变量调;超时 = 停任务保会话,
+# 不再是静默拒绝后继续跑(deny-and-continue 会让 agent 拿超时当"用户拒绝"续推)。
+_TOOL_APPROVAL_TIMEOUT_S = float(os.environ.get("STUDIO_TOOL_APPROVAL_TIMEOUT_S", "1800"))
+_WRITE_CLASS_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+_WRITE_BOUNDARY_MATCHER = "|".join(_WRITE_CLASS_TOOLS)
 
 
-def _read_target(tool_name: str, tool_input: Mapping[str, Any]) -> str | None:
-    """The path a read-class tool is aimed at (None = tool defaults to cwd)."""
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
 
-    raw = tool_input.get("file_path") if tool_name == "Read" else tool_input.get("path")
-    if raw is None or not str(raw).strip():
-        return None
-    return str(raw)
 
+def _write_boundary_violation(raw_path: str, workspace_root: Path) -> str | None:
+    """硬边界规则(R8.2):写目标必须落在 workspace ∪ skills root,且显式排除
+    llm/ 配置真相目录与 app_settings.json(排除项优先于白名单——即使白名单
+    未来扩到 settings 目录,配置真相仍不可写)。返回违规原因,None = 合规。"""
 
-def _read_allowed(raw_path: str, workspace_root: Path) -> bool:
-    """读护栏:workspace 与挂载参考目录内自动放行,其余走审批。"""
+    from app.core import config
+    from app.core.paths import app_settings_path, default_skills_root
 
-    if _resolve_safe_write_target(raw_path, workspace_root) is not None:
-        return True
     target = Path(raw_path)
     if not target.is_absolute():
-        return False
+        target = workspace_root / target
     resolved = target.resolve(strict=False)
-    for _label, mounted_dir in _mounted_doc_dirs():
-        try:
-            resolved.relative_to(mounted_dir.resolve(strict=False))
-        except (OSError, RuntimeError, ValueError):
-            continue
-        return True
-    return False
+    settings_dir = Path(config.APP_SETTINGS_DIR).resolve(strict=False)
+    if resolved == app_settings_path(settings_dir).resolve(strict=False) or _is_under(
+        resolved, (settings_dir / "llm").resolve(strict=False)
+    ):
+        return (
+            f"{raw_path} is LLM/app configuration truth; the copilot never writes it"
+            " directly (use the config tools or the Settings UI)."
+        )
+    allowed_roots = (
+        workspace_root.resolve(strict=False),
+        default_skills_root(settings_dir).resolve(strict=False),
+    )
+    if any(_is_under(resolved, root) for root in allowed_roots):
+        return None
+    return f"{raw_path} is outside the write whitelist (workspace ∪ skills root)."
+
+
+def _make_write_boundary_hook(skill_id: str) -> HookCallback:
+    """硬边界层 = PreToolUse hook(R8.2):每次工具调用必然触发,不受
+    allowed_tools / acceptEdits 绕过(SDK 契约:can_use_tool 仅在权限规则判
+    "ask" 时触发)。这消除了「Write 必须恒处 ask 态」的隐含不变量——即使
+    Write 被误放进 allowed_tools,越界写仍被这里 deny。"""
+
+    async def write_boundary_hook(
+        raw_input: HookInput, tool_use_id: str | None, context: HookContext
+    ) -> HookJSONOutput:
+        del tool_use_id, context
+        input_data = cast("dict[str, Any]", raw_input)
+
+        def deny(reason: str) -> HookJSONOutput:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+
+        tool_name = str(input_data.get("tool_name", ""))
+        if tool_name not in _WRITE_CLASS_TOOLS:
+            return {}
+        tool_input = input_data.get("tool_input") or {}
+        raw_path = (
+            tool_input.get("file_path")
+            or tool_input.get("path")
+            or tool_input.get("notebook_path")
+        )
+        sink = _safe_write_sinks.get(skill_id)
+        if sink is None:
+            return deny("no active session stream, write boundary cannot be resolved")
+        if raw_path is None or not str(raw_path).strip():
+            return deny(f"{tool_name} call carries no target path")
+        violation = _write_boundary_violation(str(raw_path), sink.workspace_root)
+        if violation is not None:
+            logger.info(
+                "phase=copilot_guardrail action=write_boundary_deny tool=%s path=%s",
+                tool_name,
+                raw_path,
+            )
+            return deny(violation)
+        # 合规写不给 allow——留给正常权限流(ask → can_use_tool → patch 卡)。
+        return {}
+
+    return write_boundary_hook
 
 
 async def _hold_for_tool_approval(
@@ -309,13 +378,16 @@ async def _hold_for_tool_approval(
     try:
         approved = await asyncio.wait_for(future, _TOOL_APPROVAL_TIMEOUT_S)
     except TimeoutError:
-        return PermissionResultDeny(
-            message=(
-                f"{tool_name} was not approved within {int(_TOOL_APPROVAL_TIMEOUT_S)}s "
-                "and was denied."
-            ),
-            interrupt=False,
+        # R8.4/8.5: 超时 = 停任务(interrupt)但保会话——用户回来直接续对话;
+        # 不折算成"用户拒绝"让 agent 带着错误信号继续跑。
+        message = (
+            f"{tool_name} approval timed out after {int(_TOOL_APPROVAL_TIMEOUT_S)}s"
+            " — task stopped, session preserved; send a new message to continue."
         )
+        await sink.queue.put(
+            CopilotEventError(message=message, error_code="tool_approval_timeout")
+        )
+        return PermissionResultDeny(message=message, interrupt=True)
     finally:
         _pending_tool_approvals.pop((skill_id, tool_use_id), None)
     if approved:
@@ -454,15 +526,6 @@ def _make_safe_write_can_use_tool(
                     )
                     await sink.queue.put(event)
             return PermissionResultAllow()
-        if tool_name in _READ_FENCED_TOOLS:
-            if sink is None:
-                return PermissionResultAllow()
-            target = _read_target(tool_name, tool_input)
-            if target is None or _read_allowed(target, sink.workspace_root):
-                return PermissionResultAllow()
-            return await _hold_for_tool_approval(
-                skill_id, sink, tool_name=tool_name, detail=target, tool_use_id=tool_use_id
-            )
         if tool_name == "Bash":
             command = str(tool_input.get("command", ""))
             if sink is None:
@@ -554,6 +617,7 @@ def build_options(
     model: str | None = None,
     env_overrides: Mapping[str, str] | None = None,
     can_use_tool: Callable[[str, dict[str, Any], ToolPermissionContext], Any] | None = None,
+    write_boundary_hook: HookCallback | None = None,
 ) -> ClaudeAgentOptions:
     """Build per-session Claude Agent SDK options without mutating os.environ.
 
@@ -579,6 +643,7 @@ def build_options(
     skills: list[str]
     mcp_servers: dict[str, McpServerConfig]
     agents: dict[str, AgentDefinition] | None
+    hooks: dict[HookEvent, list[HookMatcher]] | None = None
     if can_use_tool is not None:
         # 读类三件 + 零审批 MCP 声明式直放(R8.1;这些不再进 can_use_tool);
         # Write/Edit/Bash 留在 "ask" 路径:白名单圈定 + 审批 UX 照旧。硬边界
@@ -590,6 +655,13 @@ def build_options(
         skills = agent_assets.skill_names()
         mcp_servers = build_copilot_mcp_servers()
         agents = _goddess_agent_definitions()
+        if write_boundary_hook is not None:
+            # 硬边界层(R8.2):写类工具每次调用先过 PreToolUse hook。
+            hooks = {
+                "PreToolUse": [
+                    HookMatcher(matcher=_WRITE_BOUNDARY_MATCHER, hooks=[write_boundary_hook])
+                ]
+            }
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
@@ -608,6 +680,7 @@ def build_options(
         env=env,
         can_use_tool=can_use_tool,
         agents=agents,
+        hooks=hooks,
         # 会话基座 = 完整 claude_code preset,MoirAI 资产以 append 叠加(R6.1;
         # 纯字符串会整体替换基座,是已定谳的缺陷用法);当前请求显式携带的上下文
         # 走每轮 turn prompt,见 _prompt_with_turn_context。
@@ -1131,6 +1204,7 @@ async def get_or_create_session(
                     model=model_code,
                     env_overrides=env_overrides,
                     can_use_tool=_make_safe_write_can_use_tool(skill_id),
+                    write_boundary_hook=_make_write_boundary_hook(skill_id),
                 )
             )
             _sessions[session_key] = session

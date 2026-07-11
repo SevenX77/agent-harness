@@ -306,7 +306,9 @@ def test_bash_approval_times_out_to_deny(
     )
 
     assert isinstance(result, PermissionResultDeny)
-    assert "not approved" in result.message
+    # R8.4: 超时 = 停任务(interrupt)保会话,不是静默拒绝续跑。
+    assert result.interrupt is True
+    assert "timed out" in result.message
     assert isinstance(_drain(queue)[0], CopilotEventToolApprovalRequired)
     # 超时后审批号已清理,再批复报 not found。
     late = copilot.resolve_tool_approval("skill-timeout", "tu-timeout", approve=True)
@@ -393,57 +395,6 @@ def test_read_of_mounted_knowledge_dir_is_allowed(tmp_path: Path) -> None:
     assert _drain(queue) == []
 
 
-def test_read_outside_workspace_is_held_then_follows_verdict(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    outside = tmp_path / "secret.md"
-    outside.write_text("secret", encoding="utf-8")
-    queue = _register_sink("skill-read-out", workspace)
-
-    async def scenario() -> None:
-        result, event, _resolution = await _held_call(
-            "skill-read-out",
-            queue,
-            "Read",
-            {"file_path": str(outside)},
-            "tu-read-out",
-            approve=True,
-        )
-        assert isinstance(result, PermissionResultAllow)
-        assert event.tool_name == "Read"
-        assert event.detail == str(outside)
-
-        denied, _event2, _res2 = await _held_call(
-            "skill-read-out",
-            queue,
-            "Read",
-            {"file_path": str(outside)},
-            "tu-read-out-2",
-            approve=False,
-        )
-        assert isinstance(denied, PermissionResultDeny)
-
-    asyncio.run(scenario())
-
-
-def test_glob_outside_workspace_is_held(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    queue = _register_sink("skill-glob-out", workspace)
-
-    async def scenario() -> None:
-        result, event, _resolution = await _held_call(
-            "skill-glob-out",
-            queue,
-            "Glob",
-            {"pattern": "**/*.py", "path": str(tmp_path)},
-            "tu-glob-out",
-            approve=False,
-        )
-        assert isinstance(result, PermissionResultDeny)
-        assert event.tool_name == "Glob"
-
-    asyncio.run(scenario())
 
 
 def test_glob_without_path_defaults_to_cwd_and_is_allowed(tmp_path: Path) -> None:

@@ -138,7 +138,7 @@ struct CodeAssistantRuntimeState {
     configs: Mutex<BTreeSet<PathBuf>>,
     status_streams: Mutex<BTreeMap<PathBuf, CodeAssistantStatusStream>>,
     status_specs: Mutex<BTreeMap<PathBuf, CodeAssistantStatusSpec>>,
-    status_snapshots: Mutex<BTreeMap<PathBuf, AhLifecycleSnapshot>>,
+    status_snapshots: Mutex<BTreeMap<PathBuf, AhRuntimeSnapshot>>,
 }
 
 struct CodeAssistantStatusStream {
@@ -473,6 +473,10 @@ enum CodeAssistantOpenDecision {
     AttachRequested,
     RejectOtherActive,
     CleanupStale,
+    // Startup is in progress: Open takes NO lifecycle action (not a duplicate start, not
+    // cleanup, not attach, not a reject) and waits for startup to finish (Req 3.6). Mirrors
+    // `CodeAssistantLifecycleAction::HandsOff` for the Open decision plane.
+    HandsOff,
 }
 
 #[derive(Clone, Debug)]
@@ -494,76 +498,8 @@ impl AhRuntimeProbe {
     }
 }
 
-fn code_assistant_lifecycle_is_active(snapshot: AhLifecycleSnapshot) -> bool {
-    snapshot.ahd_has_inventory && snapshot.master_tmux_alive
-}
-
-fn reconcile_code_assistant_lifecycle(
-    snapshot: AhLifecycleSnapshot,
-) -> CodeAssistantLifecycleAction {
-    if code_assistant_lifecycle_is_active(snapshot) {
-        CodeAssistantLifecycleAction::AttachExisting
-    } else if snapshot.ahd_has_inventory || snapshot.master_tmux_alive || snapshot.worker_tmux_alive
-    {
-        CodeAssistantLifecycleAction::CleanupStale
-    } else {
-        CodeAssistantLifecycleAction::StartFresh
-    }
-}
-
 fn code_assistant_shutdown_is_complete(snapshot: AhLifecycleSnapshot) -> bool {
     !snapshot.ahd_has_inventory && !snapshot.master_tmux_alive && !snapshot.worker_tmux_alive
-}
-
-#[derive(Deserialize)]
-struct AhRuntimeEventLine {
-    ahd_has_inventory: bool,
-    master_tmux_alive: bool,
-    worker_tmux_alive: bool,
-}
-
-fn lifecycle_snapshot_from_ah_event(line: &str) -> Option<AhLifecycleSnapshot> {
-    let event: AhRuntimeEventLine = serde_json::from_str(line).ok()?;
-    Some(AhLifecycleSnapshot::new(
-        event.ahd_has_inventory,
-        event.master_tmux_alive,
-        event.worker_tmux_alive,
-    ))
-}
-
-fn decide_code_assistant_open(
-    requested: Option<AhLifecycleSnapshot>,
-    others: &[AhLifecycleSnapshot],
-) -> CodeAssistantOpenDecision {
-    let requested_action = requested
-        .map(reconcile_code_assistant_lifecycle)
-        .unwrap_or(CodeAssistantLifecycleAction::StartFresh);
-    let other_actions = others
-        .iter()
-        .copied()
-        .map(reconcile_code_assistant_lifecycle)
-        .collect::<Vec<_>>();
-    let has_stale = requested_action == CodeAssistantLifecycleAction::CleanupStale
-        || other_actions
-            .iter()
-            .any(|action| *action == CodeAssistantLifecycleAction::CleanupStale);
-    let other_active_count = other_actions
-        .iter()
-        .filter(|action| **action == CodeAssistantLifecycleAction::AttachExisting)
-        .count();
-
-    if has_stale
-        || (requested_action == CodeAssistantLifecycleAction::AttachExisting
-            && other_active_count > 0)
-    {
-        CodeAssistantOpenDecision::CleanupStale
-    } else if requested_action == CodeAssistantLifecycleAction::AttachExisting {
-        CodeAssistantOpenDecision::AttachRequested
-    } else if other_active_count > 0 {
-        CodeAssistantOpenDecision::RejectOtherActive
-    } else {
-        CodeAssistantOpenDecision::StartFresh
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -1372,7 +1308,7 @@ fn next_status_specs_for_workspace(
 fn snapshots_for_configs(
     state: &CodeAssistantRuntimeState,
     specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
-) -> BTreeMap<PathBuf, AhLifecycleSnapshot> {
+) -> BTreeMap<PathBuf, AhRuntimeSnapshot> {
     let snapshots = state
         .status_snapshots
         .lock()
@@ -1382,14 +1318,14 @@ fn snapshots_for_configs(
         .filter_map(|config| {
             snapshots
                 .get(config)
-                .map(|snapshot| (config.clone(), *snapshot))
+                .map(|snapshot| (config.clone(), snapshot.clone()))
         })
         .collect()
 }
 
 fn code_assistant_status_from_snapshots(
     specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
-    snapshots: &BTreeMap<PathBuf, AhLifecycleSnapshot>,
+    snapshots: &BTreeMap<PathBuf, AhRuntimeSnapshot>,
 ) -> CodeAssistantStatus {
     let mut claude_state = AssistantState {
         status: AssistantStatus::Inactive,
@@ -1403,16 +1339,14 @@ fn code_assistant_status_from_snapshots(
     };
 
     for (config, spec) in specs {
-        let active = snapshots
+        // Project the typed `runtime_state` PHASE straight onto the UI status (SSOT, design
+        // .md:132-133): inactive/starting/active/degraded now each render distinctly instead of
+        // collapsing every non-active phase to "inactive". A config with no cached events frame
+        // yet reads as inactive.
+        let status_val = snapshots
             .get(config)
-            .copied()
-            .map(code_assistant_lifecycle_is_active)
-            .unwrap_or(false);
-        let status_val = if active {
-            AssistantStatus::Active
-        } else {
-            AssistantStatus::Inactive
-        };
+            .map(|snapshot| assistant_status_for_runtime_state(snapshot.runtime_state))
+            .unwrap_or(AssistantStatus::Inactive);
         let read_only = classify_config_ownership(config).read_only;
         let state = AssistantState {
             status: status_val,
@@ -1465,7 +1399,7 @@ fn clear_status_snapshots_for_workspace(state: &CodeAssistantRuntimeState, works
 fn handle_code_assistant_status_snapshot(
     app: &tauri::AppHandle,
     config_path: &Path,
-    snapshot: AhLifecycleSnapshot,
+    snapshot: AhRuntimeSnapshot,
 ) {
     let Some(state) = app.try_state::<CodeAssistantRuntimeState>() else {
         return;
@@ -1569,7 +1503,11 @@ fn start_code_assistant_status_stream(
                 }
                 match line {
                     Ok(line) => {
-                        if let Some(snapshot) = lifecycle_snapshot_from_ah_event(&line) {
+                        // events-primary: each `ah events --format json` snapshot line is the
+                        // typed v2 `AhRuntimeSnapshot` (design.md:325). Non-snapshot event lines
+                        // (or any that fail schema validation) are skipped, never collapsed to a
+                        // boolean plane.
+                        if let Ok(snapshot) = parse_ah_runtime_snapshot(&line) {
                             handle_code_assistant_status_snapshot(&app, &config_path, snapshot);
                         }
                     }
@@ -2541,13 +2479,24 @@ enum CodeAssistantOpenAction {
 }
 
 fn prepare_code_assistant_open(
+    state: &CodeAssistantRuntimeState,
     workspace_root: &Path,
     requested: CodeAssistant,
 ) -> Result<CodeAssistantOpenAction, String> {
     check_ah_version_cached()?;
-    let requested_runtime = ah_config_for_status(workspace_root, requested).map(|config| {
-        let probe = inspect_ah_runtime(&config, None);
-        (config, probe.snapshot)
+
+    let cached_snapshot = |config: &Path| -> Option<AhRuntimeSnapshot> {
+        state
+            .status_snapshots
+            .lock()
+            .expect("code assistant status snapshots poisoned")
+            .get(config)
+            .cloned()
+    };
+
+    let requested_runtime = ah_config_for_status(workspace_root, requested).and_then(|config| {
+        resolve_open_snapshot(cached_snapshot(&config).as_ref(), &config, workspace_root)
+            .map(|snapshot| (config, snapshot))
     });
     let requested_config = requested_runtime
         .as_ref()
@@ -2557,20 +2506,20 @@ fn prepare_code_assistant_open(
         .copied()
         .filter(|assistant| assistant.slug() != requested.slug())
         .filter_map(|assistant| {
-            ah_config_for_status(workspace_root, assistant).map(|config| {
-                let probe = inspect_ah_runtime(&config, None);
-                (assistant, config, probe.snapshot)
+            ah_config_for_status(workspace_root, assistant).and_then(|config| {
+                resolve_open_snapshot(cached_snapshot(&config).as_ref(), &config, workspace_root)
+                    .map(|snapshot| (assistant, config, snapshot))
             })
         })
         .filter(|(_, config, _)| requested_config.as_ref() != Some(config))
         .collect::<Vec<_>>();
     let other_snapshots = other_runtimes
         .iter()
-        .map(|(_, _, snapshot)| *snapshot)
+        .map(|(_, _, snapshot)| snapshot.clone())
         .collect::<Vec<_>>();
 
-    match decide_code_assistant_open(
-        requested_runtime.as_ref().map(|(_, snapshot)| *snapshot),
+    match decide_code_assistant_open_v2(
+        requested_runtime.as_ref().map(|(_, snapshot)| snapshot),
         &other_snapshots,
     ) {
         CodeAssistantOpenDecision::AttachRequested => {
@@ -2581,7 +2530,7 @@ fn prepare_code_assistant_open(
             let assistant = other_runtimes
                 .iter()
                 .find_map(|(assistant, _, snapshot)| {
-                    code_assistant_lifecycle_is_active(*snapshot).then_some(*assistant)
+                    (snapshot.runtime_state == AhRuntimeState::Active).then_some(*assistant)
                 })
                 .expect("active other assistant must exist");
             Err(format!(
@@ -2595,12 +2544,21 @@ fn prepare_code_assistant_open(
             Ok(CodeAssistantOpenAction::StartFresh)
         }
         CodeAssistantOpenDecision::StartFresh => Ok(CodeAssistantOpenAction::StartFresh),
+        // Startup in progress: take no lifecycle action, mirror attach's hands-off wait (Req 3.6).
+        CodeAssistantOpenDecision::HandsOff => Err(format!(
+            "{} is still starting; wait for startup to finish before opening it again.",
+            requested.display_name()
+        )),
     }
 }
 
-fn open_code_assistant(workspace_root: &Path, assistant: CodeAssistant) -> Result<PathBuf, String> {
+fn open_code_assistant(
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+    assistant: CodeAssistant,
+) -> Result<PathBuf, String> {
     check_ah_version_cached()?;
-    match prepare_code_assistant_open(workspace_root, assistant)? {
+    match prepare_code_assistant_open(state, workspace_root, assistant)? {
         CodeAssistantOpenAction::AttachExisting(config_path) => {
             let launcher = write_code_assistant_attach_launcher_script(
                 workspace_root,
@@ -2624,6 +2582,7 @@ fn open_code_assistant(workspace_root: &Path, assistant: CodeAssistant) -> Resul
 }
 
 fn attach_code_assistant_terminal(
+    state: &CodeAssistantRuntimeState,
     workspace_root: String,
     assistant: CodeAssistant,
 ) -> Result<(), String> {
@@ -2632,8 +2591,18 @@ fn attach_code_assistant_terminal(
     let Some(config_path) = ah_config_for_status(&workspace_root, assistant) else {
         return Err(format!("{} is not running", assistant.display_name()));
     };
-    let probe = inspect_ah_runtime(&config_path, None);
-    match reconcile_code_assistant_lifecycle(probe.snapshot) {
+    let cached = state
+        .status_snapshots
+        .lock()
+        .expect("code assistant status snapshots poisoned")
+        .get(&config_path)
+        .cloned();
+    let snapshot = resolve_open_snapshot(cached.as_ref(), &config_path, &workspace_root);
+    let action = snapshot
+        .as_ref()
+        .map(reconcile_snapshot_lifecycle)
+        .unwrap_or(CodeAssistantLifecycleAction::StartFresh);
+    match action {
         CodeAssistantLifecycleAction::AttachExisting => {}
         CodeAssistantLifecycleAction::CleanupStale => {
             cleanup_workspace_code_assistants(&workspace_root)?;
@@ -2665,7 +2634,7 @@ fn open_claude_code(
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let config = open_code_assistant(&workspace_root, CodeAssistant::Claude)?;
+    let config = open_code_assistant(&state, &workspace_root, CodeAssistant::Claude)?;
     state
         .configs
         .lock()
@@ -2689,7 +2658,7 @@ fn open_codex_cli(
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let config = open_code_assistant(&workspace_root, CodeAssistant::Codex)?;
+    let config = open_code_assistant(&state, &workspace_root, CodeAssistant::Codex)?;
     state
         .configs
         .lock()
@@ -2707,9 +2676,13 @@ fn open_codex_cli(
 }
 
 #[tauri::command]
-fn attach_code_assistant(workspace_root: String, assistant: String) -> Result<(), String> {
+fn attach_code_assistant(
+    workspace_root: String,
+    assistant: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+) -> Result<(), String> {
     let assistant = CodeAssistant::from_slug(assistant.trim())?;
-    attach_code_assistant_terminal(workspace_root, assistant)
+    attach_code_assistant_terminal(&state, workspace_root, assistant)
 }
 
 #[tauri::command]
@@ -3278,6 +3251,60 @@ fn reconcile_snapshot_lifecycle(snapshot: &AhRuntimeSnapshot) -> CodeAssistantLi
     }
 }
 
+/// The Open decision the live `prepare_code_assistant_open` entry consumes, driven by the typed
+/// `runtime_state` phase from the events-primary/status-fallback plane — never `ah ps` text or
+/// tmux probing (design.md:27/178/325). Replaces the deleted boolean `decide_code_assistant_open`
+/// (task6.1-seam-decision-2026-07-10.md, master 裁决 2).
+///
+/// The requested runtime's phase decides the base action via `reconcile_snapshot_lifecycle`
+/// (Active→attach, Inactive→start fresh, Degraded→cleanup-then-start, Starting→hands-off). The
+/// single-ahd-per-workspace arbitration over `others` is copied verbatim from the old function,
+/// with the "is the other active" judgment swapped from the boolean plane to `runtime_state ==
+/// Active` (equivalently: `others` that reconcile to `AttachExisting`).
+///
+/// A `Starting` requested runtime is hands-off regardless of `others`: it is the requested
+/// runtime's own phase that governs, so Open leaves the in-progress startup alone rather than
+/// acting on a cross-assistant condition. (This resolves the `Starting`+other-active combination
+/// the decision doc §四 left to this lane — hands-off wins.)
+fn decide_code_assistant_open_v2(
+    requested: Option<&AhRuntimeSnapshot>,
+    others: &[AhRuntimeSnapshot],
+) -> CodeAssistantOpenDecision {
+    let requested_action = requested
+        .map(reconcile_snapshot_lifecycle)
+        .unwrap_or(CodeAssistantLifecycleAction::StartFresh);
+
+    if requested_action == CodeAssistantLifecycleAction::HandsOff {
+        return CodeAssistantOpenDecision::HandsOff;
+    }
+
+    let other_actions = others
+        .iter()
+        .map(reconcile_snapshot_lifecycle)
+        .collect::<Vec<_>>();
+    let has_stale = requested_action == CodeAssistantLifecycleAction::CleanupStale
+        || other_actions
+            .iter()
+            .any(|action| *action == CodeAssistantLifecycleAction::CleanupStale);
+    let other_active_count = other_actions
+        .iter()
+        .filter(|action| **action == CodeAssistantLifecycleAction::AttachExisting)
+        .count();
+
+    if has_stale
+        || (requested_action == CodeAssistantLifecycleAction::AttachExisting
+            && other_active_count > 0)
+    {
+        CodeAssistantOpenDecision::CleanupStale
+    } else if requested_action == CodeAssistantLifecycleAction::AttachExisting {
+        CodeAssistantOpenDecision::AttachRequested
+    } else if other_active_count > 0 {
+        CodeAssistantOpenDecision::RejectOtherActive
+    } else {
+        CodeAssistantOpenDecision::StartFresh
+    }
+}
+
 /// SSOT projection of ah's `runtime_state` phase onto the per-assistant `AssistantStatus`
 /// the frontend renders (tasks.md:90, design.md:132-133, Req 5.6/6.1). This is the single
 /// mapping every UI surface projects; `Error` is produced upstream on parse/identity
@@ -3408,6 +3435,33 @@ fn verify_snapshot_identity(
     }
 
     Ok(())
+}
+
+/// The events-primary/status-fallback typed snapshot an Open/Attach decision reads
+/// (design.md:92-158, 裁决 1.4). A cached frame from this config's supervised `ah events`
+/// stream wins (events-primary; the per-config stream already scopes it to this ahd). With no
+/// frame yet it bootstraps from `ah status --json` and verifies the snapshot really describes
+/// THIS workspace before any lifecycle decision consumes it. `None` means "no runtime info"
+/// (ahd absent and uncached) — the caller treats that as start-fresh. It never parses `ah ps`
+/// text or probes tmux (design.md:27/178/325).
+fn resolve_open_snapshot(
+    cached: Option<&AhRuntimeSnapshot>,
+    config_path: &Path,
+    workspace_dir: &Path,
+) -> Option<AhRuntimeSnapshot> {
+    if let Some(snapshot) = cached {
+        return Some(snapshot.clone());
+    }
+
+    let status = run_ah_config_command_output(config_path, &["status", "--json"]).ok()?;
+    let status_result: Result<&str, &str> = if status.success {
+        Ok(status.stdout.as_str())
+    } else {
+        Err(status.stderr.as_str())
+    };
+    let snapshot = resolve_bootstrap_snapshot(status_result, None).ok()?;
+    verify_snapshot_identity(status.stdout.as_str(), config_path, workspace_dir).ok()?;
+    Some(snapshot)
 }
 
 #[cfg(test)]
@@ -4713,70 +4767,6 @@ mod tests {
     }
 
     #[test]
-    fn code_assistant_status_requires_ahd_and_master_tmux() {
-        assert!(code_assistant_lifecycle_is_active(
-            AhLifecycleSnapshot::new(true, true, true)
-        ));
-        assert!(!code_assistant_lifecycle_is_active(
-            AhLifecycleSnapshot::new(true, false, true)
-        ));
-        assert!(!code_assistant_lifecycle_is_active(
-            AhLifecycleSnapshot::new(false, true, true)
-        ));
-        assert!(code_assistant_lifecycle_is_active(
-            AhLifecycleSnapshot::new(true, true, false)
-        ));
-    }
-
-    #[test]
-    fn stale_ahd_without_master_requires_cleanup_before_reopen() {
-        assert_eq!(
-            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(true, false, true)),
-            CodeAssistantLifecycleAction::CleanupStale
-        );
-        assert_eq!(
-            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(false, true, false)),
-            CodeAssistantLifecycleAction::CleanupStale
-        );
-        assert_eq!(
-            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(true, true, true)),
-            CodeAssistantLifecycleAction::AttachExisting
-        );
-        assert_eq!(
-            reconcile_code_assistant_lifecycle(AhLifecycleSnapshot::new(false, false, false)),
-            CodeAssistantLifecycleAction::StartFresh
-        );
-    }
-
-    #[test]
-    fn open_decision_enforces_single_ahd_per_workspace() {
-        let active = AhLifecycleSnapshot::new(true, true, true);
-        let stopped = AhLifecycleSnapshot::new(false, false, false);
-        let stale = AhLifecycleSnapshot::new(true, false, false);
-
-        assert_eq!(
-            decide_code_assistant_open(Some(active), &[stopped]),
-            CodeAssistantOpenDecision::AttachRequested
-        );
-        assert_eq!(
-            decide_code_assistant_open(Some(stopped), &[active]),
-            CodeAssistantOpenDecision::RejectOtherActive
-        );
-        assert_eq!(
-            decide_code_assistant_open(Some(active), &[active]),
-            CodeAssistantOpenDecision::CleanupStale
-        );
-        assert_eq!(
-            decide_code_assistant_open(Some(stale), &[stopped]),
-            CodeAssistantOpenDecision::CleanupStale
-        );
-        assert_eq!(
-            decide_code_assistant_open(None, &[stopped]),
-            CodeAssistantOpenDecision::StartFresh
-        );
-    }
-
-    #[test]
     fn close_cleanup_requires_master_and_worker_tmux_to_be_gone() {
         assert!(code_assistant_shutdown_is_complete(
             AhLifecycleSnapshot::new(false, false, false)
@@ -4793,21 +4783,14 @@ mod tests {
     }
 
     #[test]
-    fn ah_events_snapshot_maps_open_state_from_inventory_and_master_not_worker() {
-        let line = r#"{"schema_version":1,"event":"snapshot","reason":"tmux_changed","runtime_state":"degraded","ahd_has_inventory":true,"master_tmux_alive":true,"worker_tmux_alive":false}"#;
-        let snapshot = lifecycle_snapshot_from_ah_event(line).expect("snapshot parses");
-
-        assert_eq!(snapshot, AhLifecycleSnapshot::new(true, true, false));
-        assert!(code_assistant_lifecycle_is_active(snapshot));
-    }
-
-    #[test]
     fn ah_events_status_aggregation_is_display_only() {
         // Startup-window snapshots (inventory ACTIVE while the master tmux pane
         // is still cold-starting) are indistinguishable from stale leftovers, so
         // event snapshots must ONLY drive the status display — never cleanup.
         // Cleanup stays on user actions: prepare_code_assistant_open,
         // attach (CleanupStale), Close, and app quit.
+        use ah_contract_fixtures::{SNAPSHOT_ACTIVE, SNAPSHOT_STARTING};
+
         let workspace = PathBuf::from("/tmp/studio-skill");
         let claude_config = workspace.join(".claude-ah.toml");
         let codex_config = workspace.join(".codex-ah.toml");
@@ -4828,26 +4811,25 @@ mod tests {
             ),
         ]);
 
-        let snapshots = BTreeMap::from([(
-            claude_config.clone(),
-            AhLifecycleSnapshot::new(true, true, false),
-        )]);
-        // Migrated from the old `{claude,codex}` bool literal to the task-8 per-assistant
-        // payload (design.md:290-297): the SAME display-only semantic, now asserted on the
-        // serialized wire shape. claude active; codex (no snapshot) inactive.
+        // task 6.1 cutover: the status cache is now the typed `AhRuntimeSnapshot` plane, so this
+        // feeds frozen typed fixtures (was the old boolean `AhLifecycleSnapshot::new(...)`); the
+        // display-only contract is unchanged. claude active; codex (no snapshot) inactive.
+        let snapshots =
+            BTreeMap::from([(claude_config.clone(), parse_snapshot_or_panic(SNAPSHOT_ACTIVE))]);
         let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &snapshots))
             .expect("payload must serialize to the frontend wire shape");
         assert_eq!(v["claude"]["status"], "active");
         assert_eq!(v["codex"]["status"], "inactive");
 
-        // The startup window (ahd inventory present, master tmux not yet alive) reads as
-        // "not active yet", nothing more — both assistants inactive.
+        // The startup window (session STARTING, master tmux not yet alive) now projects as the
+        // distinct `starting` phase — the typed plane no longer collapses it to `inactive`. It is
+        // still display-only: reaching this phase never triggers cleanup.
         let starting =
-            BTreeMap::from([(claude_config, AhLifecycleSnapshot::new(true, false, false))]);
+            BTreeMap::from([(claude_config, parse_snapshot_or_panic(SNAPSHOT_STARTING))]);
         let v_starting =
             serde_json::to_value(code_assistant_status_from_snapshots(&specs, &starting))
                 .expect("payload must serialize to the frontend wire shape");
-        assert_eq!(v_starting["claude"]["status"], "inactive");
+        assert_eq!(v_starting["claude"]["status"], "starting");
         assert_eq!(v_starting["codex"]["status"], "inactive");
     }
 
@@ -4928,6 +4910,8 @@ mod tests {
     /// codex not → codex must be `"inactive"`).
     #[test]
     fn test_payload_reports_claude_codex_independently() {
+        use ah_contract_fixtures::SNAPSHOT_ACTIVE;
+
         let workspace = PathBuf::from("/tmp/studio-skill");
         let claude_config = workspace.join(".claude-ah.toml");
         let codex_config = workspace.join(".codex-ah.toml");
@@ -4948,11 +4932,12 @@ mod tests {
             ),
         ]);
 
-        // Both stacks active simultaneously (Req 5.12 "both active" pairing — modelled via
-        // the is-active decision shape: ahd inventory present + master tmux alive).
+        // Both stacks active simultaneously (Req 5.12 "both active" pairing — the typed
+        // `runtime_state: active` snapshot, task 6.1 having retyped the cache from the old
+        // boolean plane; the serialized-payload assertions are unchanged).
         let both_active = BTreeMap::from([
-            (claude_config.clone(), AhLifecycleSnapshot::new(true, true, false)),
-            (codex_config.clone(), AhLifecycleSnapshot::new(true, true, false)),
+            (claude_config.clone(), parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
+            (codex_config.clone(), parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
         ]);
         let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &both_active))
             .expect("payload must serialize to the frontend wire shape");
@@ -4966,7 +4951,7 @@ mod tests {
         // report codex inactive (defeats a constant-`active` impl that would fake the pair above,
         // and proves both keys are always present).
         let claude_only =
-            BTreeMap::from([(claude_config, AhLifecycleSnapshot::new(true, true, false))]);
+            BTreeMap::from([(claude_config, parse_snapshot_or_panic(SNAPSHOT_ACTIVE))]);
         let v2 = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &claude_only))
             .expect("payload must serialize to the frontend wire shape");
         assert_eq!(v2["claude"]["status"], "active");
@@ -4984,7 +4969,7 @@ mod tests {
     /// fixtures are opposite classes so no constant satisfies both.
     #[test]
     fn test_payload_carries_readonly_flag() {
-        use ah_contract_fixtures::{CONFIG_STUDIO_MANAGED, CONFIG_WORKSPACE_OWNED};
+        use ah_contract_fixtures::{CONFIG_STUDIO_MANAGED, CONFIG_WORKSPACE_OWNED, SNAPSHOT_ACTIVE};
 
         // Frozen fixture facts: one workspace-owned config (readOnly:true) + one Studio-managed
         // temp config (readOnly:false).
@@ -5035,8 +5020,8 @@ mod tests {
             ),
         ]);
         let snapshots = BTreeMap::from([
-            (claude_config, AhLifecycleSnapshot::new(true, true, false)),
-            (codex_config, AhLifecycleSnapshot::new(true, true, false)),
+            (claude_config, parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
+            (codex_config, parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
         ]);
 
         let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &snapshots))

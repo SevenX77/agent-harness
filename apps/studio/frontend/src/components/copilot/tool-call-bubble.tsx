@@ -1,6 +1,7 @@
 import React from 'react'
 import { CheckCircle2, CircleAlert, Loader2, TerminalSquare, Wrench } from 'lucide-react'
 import type { CopilotToolUseResultEvent, CopilotToolUseStartEvent } from '../../types/copilot'
+import { parseRoleChangeSummary, RoleChangeCard } from './role-change-card'
 
 type ToolCallEvent = CopilotToolUseStartEvent | CopilotToolUseResultEvent
 
@@ -48,13 +49,17 @@ function ToolCallBubbleBase({ event, streaming = false }: ToolCallBubbleProps) {
   // A running tool spins only while the turn streams; a start event left behind
   // by a settled turn shows a neutral check, never a forever-spinner (R7-A).
   const pending = event.type === 'tool_use_start' && streaming
+  // R10.2: a copilot-driven role config change must be VISIBLE (not folded) and
+  // carry a one-click undo — render the change card instead of the raw summary.
+  const roleChange =
+    isResult && event.success ? parseRoleChangeSummary(event.tool_name, event.result_summary) : null
 
   return (
     <details
       // Failures stay open so the user sees them without a click; everything
       // else folds (click the summary to expand the full input/output).
       // R7-A: no left rule — PM「去掉对话小字前面的那根竖线」.
-      open={failed}
+      open={failed || roleChange != null}
       className={`py-0.5 text-xs ${failed ? 'text-destructive' : 'text-muted-foreground'}`}
     >
       {/* R5-D: tool activity is SECONDARY info — one shade dimmer than the
@@ -79,6 +84,8 @@ function ToolCallBubbleBase({ event, streaming = false }: ToolCallBubbleProps) {
         <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
           {JSON.stringify(event.tool_input, null, 2)}
         </pre>
+      ) : roleChange != null ? (
+        <RoleChangeCard change={roleChange} />
       ) : event.result_summary ? (
         <p className="mt-1.5 whitespace-pre-wrap leading-snug">
           {event.result_summary.split('\n').slice(0, 4).join('\n')}

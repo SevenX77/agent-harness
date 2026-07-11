@@ -1,0 +1,6 @@
+{
+  "moirai":   ["moirai-intro"],
+  "clotho":   ["domain-analysis", "graph-design", "agent-prompt-design"],
+  "lachesis": ["compile-error-repair", "graph-design"],
+  "atropos":  ["eval-judgement", "agent-prompt-design"]
+}

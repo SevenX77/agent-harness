@@ -25,6 +25,7 @@ import {
   writePublishPackage,
   writeWorkspaceFile,
   subscribeCodeAssistantStatus,
+  type CodeAssistantStatus,
 } from './tauri'
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -46,7 +47,7 @@ vi.mock('sonner', () => ({
 const mockInvoke = vi.mocked(invoke)
 const mockListen = vi.mocked(listen)
 type CodeAssistantStatusTestEvent = {
-  payload: { workspaceRoot: string; status: { claude: boolean; codex: boolean } }
+  payload: { workspaceRoot: string; status: CodeAssistantStatus }
 }
 
 async function resetRuntimeForTest() {
@@ -263,8 +264,24 @@ describe('desktop shell helpers', () => {
 
     const dispose = await subscribeCodeAssistantStatus('/tmp/workspace', onStatus)
     expect(listeners).toHaveLength(1)
-    listeners[0]({ payload: { workspaceRoot: '/tmp/other', status: { claude: false, codex: true } } })
-    listeners[0]({ payload: { workspaceRoot: '/tmp/workspace', status: { claude: true, codex: false } } })
+    listeners[0]({
+      payload: {
+        workspaceRoot: '/tmp/other',
+        status: {
+          claude: { status: 'inactive', readOnly: false },
+          codex: { status: 'active', readOnly: false },
+        },
+      },
+    })
+    listeners[0]({
+      payload: {
+        workspaceRoot: '/tmp/workspace',
+        status: {
+          claude: { status: 'active', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        },
+      },
+    })
     dispose()
 
     expect(mockListen).toHaveBeenCalledWith('code-assistant-status-changed', expect.any(Function))
@@ -272,7 +289,10 @@ describe('desktop shell helpers', () => {
       workspaceRoot: '/tmp/workspace',
     })
     expect(onStatus).toHaveBeenCalledTimes(1)
-    expect(onStatus).toHaveBeenCalledWith({ claude: true, codex: false })
+    expect(onStatus).toHaveBeenCalledWith({
+      claude: { status: 'active', readOnly: false },
+      codex: { status: 'inactive', readOnly: false },
+    })
     expect(unlisten).toHaveBeenCalledTimes(1)
     expect(mockInvoke).toHaveBeenCalledWith('unwatch_code_assistant_status', {
       workspaceRoot: '/tmp/workspace',
@@ -288,7 +308,10 @@ describe('desktop shell helpers', () => {
       expect.any(Function),
     )
 
-    expect(onStatus).toHaveBeenCalledWith({ claude: false, codex: false })
+    expect(onStatus).toHaveBeenCalledWith({
+      claude: { status: 'inactive', readOnly: false },
+      codex: { status: 'inactive', readOnly: false },
+    })
     expect(mockListen).not.toHaveBeenCalled()
     expect(mockInvoke).not.toHaveBeenCalled()
   })

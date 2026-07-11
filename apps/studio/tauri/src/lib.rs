@@ -4429,6 +4429,146 @@ mod tests {
         );
     }
 
+    /// Task 6.1 (task6.1-seam-decision-2026-07-10.md, master 裁决 2) — the Open decision the
+    /// LIVE `prepare_code_assistant_open` entry consumes must be driven by the typed
+    /// `AhRuntimeSnapshot` phase, not the old boolean `ah ps`/tmux plane. `decide_code_assistant_open_v2`
+    /// takes `Option<&AhRuntimeSnapshot>` (requested) + `&[AhRuntimeSnapshot]` (others) and returns the
+    /// existing `CodeAssistantOpenDecision` enum, so its return value IS the contract boundary
+    /// `prepare_code_assistant_open`'s `match` branches on (attach / start / cleanup / hands-off).
+    ///
+    /// COMPILE-TIME RED (expected, master 裁决 4): `decide_code_assistant_open_v2` and the new
+    /// `CodeAssistantOpenDecision::HandsOff` variant do not exist yet, so the whole `cargo test --lib`
+    /// fails to COMPILE until g2 implements them — the standard TDD intermediate state, not a defect.
+    ///
+    /// This test pins the single-runtime (no others) phase→decision map. The starting branch mirrors
+    /// `test_starting_is_hands_off`'s style: a starting REQUESTED runtime must resolve to a distinct
+    /// no-action outcome (`HandsOff`), never a duplicate start / cleanup / attach / reject. The `assert_ne!`
+    /// controls prove the four phases yield genuinely different decisions (real projection, not a constant).
+    #[test]
+    fn test_open_decision_v2_maps_requested_phase() {
+        use ah_contract_fixtures::{
+            SNAPSHOT_ACTIVE, SNAPSHOT_DEGRADED, SNAPSHOT_INACTIVE, SNAPSHOT_STARTING,
+        };
+
+        let active = parse_snapshot_or_panic(SNAPSHOT_ACTIVE);
+        let inactive = parse_snapshot_or_panic(SNAPSHOT_INACTIVE);
+        let degraded = parse_snapshot_or_panic(SNAPSHOT_DEGRADED);
+        let starting = parse_snapshot_or_panic(SNAPSHOT_STARTING);
+
+        // Fixture preconditions: each frozen snapshot really carries the phase under test.
+        assert_eq!(active.runtime_state, AhRuntimeState::Active);
+        assert_eq!(inactive.runtime_state, AhRuntimeState::Inactive);
+        assert_eq!(degraded.runtime_state, AhRuntimeState::Degraded);
+        assert_eq!(starting.runtime_state, AhRuntimeState::Starting);
+
+        // Active → attach the existing runtime.
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&active), &[]),
+            CodeAssistantOpenDecision::AttachRequested,
+            "active requested runtime attaches — decided from runtime_state, not `ah ps` inventory"
+        );
+        // Inactive (all sessions terminal) → start fresh.
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&inactive), &[]),
+            CodeAssistantOpenDecision::StartFresh,
+            "inactive requested runtime starts fresh — sessions are terminal (Req 3.5)"
+        );
+        // Degraded (cleanup_required) → cleanup-then-start; Open stays usable (Req 3.7/5.7).
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&degraded), &[]),
+            CodeAssistantOpenDecision::CleanupStale,
+            "degraded requested runtime cleans up then starts — Open must stay usable, not three-buttons-dark (Req 3.7/5.7)"
+        );
+
+        // Starting → hands-off: startup is in progress, so Open takes NO lifecycle action —
+        // not a duplicate start, not cleanup, not attach, not a reject (Req 3.6). A starting
+        // phase must map to a distinct no-action outcome, i.e. none of the four acting decisions.
+        let starting_decision = decide_code_assistant_open_v2(Some(&starting), &[]);
+        assert_eq!(
+            starting_decision,
+            CodeAssistantOpenDecision::HandsOff,
+            "starting requested runtime is hands-off — Open takes no action while startup is in progress (Req 3.6)"
+        );
+        assert_ne!(
+            starting_decision,
+            CodeAssistantOpenDecision::StartFresh,
+            "starting must NOT start a duplicate runtime (Req 3.6: 'shall not start a duplicate')"
+        );
+        assert_ne!(
+            starting_decision,
+            CodeAssistantOpenDecision::CleanupStale,
+            "starting must NOT run cleanup — startup is in progress and must be left alone (Req 3.6)"
+        );
+        assert_ne!(
+            starting_decision,
+            CodeAssistantOpenDecision::AttachRequested,
+            "starting takes no action, so Open must not attach a not-yet-ready runtime (Req 3.6)"
+        );
+        assert_ne!(
+            starting_decision,
+            CodeAssistantOpenDecision::RejectOtherActive,
+            "starting is about the requested runtime's own phase, not a cross-assistant rejection (Req 3.6)"
+        );
+
+        // Control: the four phases yield four genuinely different decisions — this is a real
+        // projection of the snapshot phase, not a constant that would 'pass' for any input.
+        assert_ne!(
+            decide_code_assistant_open_v2(Some(&active), &[]),
+            decide_code_assistant_open_v2(Some(&inactive), &[])
+        );
+        assert_ne!(
+            decide_code_assistant_open_v2(Some(&inactive), &[]),
+            decide_code_assistant_open_v2(Some(&degraded), &[])
+        );
+        assert_ne!(
+            decide_code_assistant_open_v2(Some(&degraded), &[]),
+            starting_decision
+        );
+    }
+
+    /// Task 6.1 (master 裁决 2, cross-assistant arbitration) — the new decision function copies
+    /// `decide_code_assistant_open`'s single-ahd-per-workspace arbitration over `others`, swapping the
+    /// "is the other active" judgment from the boolean plane to the typed snapshot's `runtime_state`.
+    /// Anchored to the same behaviors the old `open_decision_enforces_single_ahd_per_workspace` pins,
+    /// so the cutover preserves the guardrail rather than silently dropping it.
+    ///
+    /// COMPILE-TIME RED (expected): references the not-yet-built `decide_code_assistant_open_v2`.
+    ///
+    /// Scope (test-author honesty, per decision doc §四): master fixed the inactive+other-active and
+    /// active+other-active cases; the `Starting` requested + other-active combination is left to g2
+    /// (hands-off vs. copied reject has genuine tension master did not settle) and is intentionally
+    /// NOT asserted here.
+    #[test]
+    fn test_open_decision_v2_arbitrates_other_active_runtime() {
+        use ah_contract_fixtures::{SNAPSHOT_ACTIVE, SNAPSHOT_ACTIVE_CODEX, SNAPSHOT_INACTIVE};
+
+        let requested_active = parse_snapshot_or_panic(SNAPSHOT_ACTIVE);
+        let requested_inactive = parse_snapshot_or_panic(SNAPSHOT_INACTIVE);
+        // A DIFFERENT assistant's runtime that is active (distinct workspace/session_id).
+        let other_active = [parse_snapshot_or_panic(SNAPSHOT_ACTIVE_CODEX)];
+        assert_eq!(other_active[0].runtime_state, AhRuntimeState::Active);
+
+        // Inactive requested but another assistant is already active → reject: one ahd per workspace.
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&requested_inactive), &other_active),
+            CodeAssistantOpenDecision::RejectOtherActive,
+            "another active assistant blocks starting a second one (single-ahd guard, copied from decide_code_assistant_open)"
+        );
+        // Both requested and another are active → cleanup the duplicate stack (matches old
+        // decide_code_assistant_open(Some(active), &[active]) == CleanupStale).
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&requested_active), &other_active),
+            CodeAssistantOpenDecision::CleanupStale,
+            "two active runtimes for one workspace resolve to CleanupStale, same as the old boolean-plane arbitration"
+        );
+        // No requested runtime and nothing else active → start fresh (unwrap default preserved).
+        assert_eq!(
+            decide_code_assistant_open_v2(None, &[]),
+            CodeAssistantOpenDecision::StartFresh,
+            "no requested snapshot and no active others starts fresh (unwrap_or(StartFresh) preserved)"
+        );
+    }
+
     #[test]
     fn claude_wsl_payload_links_windows_credentials() {
         // The Windows .credentials.json is the single auth file; WSL root links

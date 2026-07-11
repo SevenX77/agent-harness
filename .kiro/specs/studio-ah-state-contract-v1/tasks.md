@@ -54,7 +54,7 @@ revision_trace: REVISION-TRACE.md
   - 保持已有安装/provisioning 入口，不让旧版本继续进入生命周期命令。
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 5.4_
 
-- [ ] 3. 用结构化 snapshot 替换一次性状态检测，并加身份校验（须与任务 4 同批落地）
+- [x] 3. 用结构化 snapshot 替换一次性状态检测，并加身份校验（须与任务 4 同批落地）
   - **先写红测试**：`test_identity_rejects_config_path_match_state_dir_mismatch`（NF1 回显 fixture → 断言丢弃 + 诊断，Req 5.10a）；`test_identity_canonicalizes_windows_wsl_path`（`C:\...` vs `/mnt/c/...` 同 canonical → 断言接受，raw string 比对会红，Req 5.10b）。
   - 将 one-shot bootstrap 读切到 `ah --config <path> status --json`，但不把它的非结构化失败当作权威"无 runtime"信号（见任务 4 的 events-primary 仲裁）。二者高度耦合，必须同一 PR 落地，避免出现 task 3 单独存在时 status 仍被当主决策面的中间态。
   - 引入 typed parser，显式校验 `schema_version`，字段按 design.md 修订后的模型（`ahdAlive`、`sequence`、`reason`、可空 `configPath`、`liveAgents`/`dbTrackedAgents`、`safeToCleanup`/`cleanupRequired`、`sessions[].sessionId`/`path`/`projectId`）。
@@ -63,7 +63,7 @@ revision_trace: REVISION-TRACE.md
   - 移除 normal decision path 对 `ah ps` 文本解析和 tmux 探测的依赖。
   - _Requirements: 2.1, 2.4→2.5(schema), 2.6, 2.7, 3.5, 3.8, 4.8, 5.2, 5.10_
 
-- [ ] 4. 升级 live status subscription 为主决策面 + sequence 仲裁（须与任务 3 同批落地）
+- [x] 4. 升级 live status subscription 为主决策面 + sequence 仲裁（须与任务 3 同批落地）
   - **先写红测试**：`test_sequence_reset_on_reason_initial`（流内升到 >1 后来一帧 `reason:"initial"`/`sequence:1` → 断言无条件重置并应用，而非按旧序号丢弃；含 `session_id` 变化分支，Req 5.13）；`test_sequence_guard_within_stream`（同流内真正的旧序号仍被丢弃）；`test_daemon_absent_prefers_events_over_status_stderr`（Req 5.11）。
   - 将 `ah events --format json` 的每一行都按完整 snapshot 解析，设为 open/attach/close 决策的主输入。
   - `sequence` 仲裁限定在**单订阅流 / 同 `session_id` 生命周期内**：识别到新（重）建订阅、`reason:"initial"` 帧、或 `session_id` 变化时，**无条件重置** applied-sequence 缓存再应用，不得用旧序号挡新帧；重置后同流内旧序号才不覆盖新序号已应用的状态（Req 2.1 / 坑洞 3.2）。

@@ -185,11 +185,7 @@ export async function subscribeCodeAssistantStatus(
 ): Promise<() => void> {
   const targetPath = workspaceRoot?.trim() ?? ''
   if (!targetPath || !isTauriRuntime() || !nativeHelpersAreAvailable()) {
-    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
-      onStatus({ claude: false, codex: false } as any)
-    } else {
-      onStatus(inactiveCodeAssistantStatus)
-    }
+    onStatus(inactiveCodeAssistantStatus)
     return () => {}
   }
 

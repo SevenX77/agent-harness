@@ -357,22 +357,27 @@ cmd 现在会在进入 Claude Code 前补 `$HOME/.local/bin/claude -> <真实 cl
 4. **对齐叙事真相源,别自造关系**:名字/神话职能/角色关系一律以 `moirai-copilot-persona-narrative.md`
    为准(R1 的"编排者 master / 隶属麾下"就是脱离叙事源的自造 drift)。
 
-## 7. 与 SDK 路径 / F8 真流式的关系
+## 7. 与 SDK 路径 / F8 真流式的关系(2026-07-11 升级:MoirAI 面板化身落地)
 
 - ah 定为主底座后,**F8(token-level streaming)在 ah 路径下不投入**(PM:「不想浪费时间在流式输出上」)——
   ah 走 tmux 终端,用户直接看 Claude Code TUI 自己的流式,不需要 Studio 面板再翻译一遍。
-- SDK 路径(F1–F9)保留为"辅"与质量 A/B 对照台(同一份配置在 Claude Code 与 ah 下回答质量是否有差距,
-  PM 尚未测,留作后续实测)。
-- 两条路共用同一份 copilot 角色/知识/技能语义(`copilot.py:93-94`)。
+- **SDK 路径已升级为 MoirAI 的面板化身**(studio-moirai-agent-system spec 实施):
+  会话基座 = 完整 `claude_code` preset + MoirAI 资产 append(`copilot.py` `_session_system_prompt`),
+  三女神注册为 SDK 原生 `AgentDefinition` subagents(经 Agent 工具随叫随到,skills 由
+  agent-skill-map 派生,lachesis 携带 compile→predict 诊断工具)。不再是"辅/对照台"定位。
+- **两条路共用同一棵资产树** `apps/studio/backend/app/agents/`(roles / operating-manual /
+  contexts / knowledge / skills / agent-skill-map.json):SDK 路由 `app/services/agent_assets.py`
+  内存拼装,ah 路由 tauri `prepare_studio_ah_workspace()` 运行时物化(R1.4 拼装契约)。
 
 ## 8. 待办 / 缺口
 
 1. **MCP 独立化**:Studio 现有 3 个进程内 Python copilot MCP 工具 → 做成独立 stdio MCP server,
    才能经 bundle `[[mcp.servers]]` 给 ah agent 用(§4.4)。
-2. **Atropos eval skill**:三女神里只有 Atropos 没有对应 skill;需按"科学 eval 机制"补一个
-   (predict/run + trace 观察 + golden diff + 优化方向)。
-3. **知识库挂载恢复**:等 ah 不再把 ro bind 落到 WSL 不支持的 user scope `BindReadOnlyPaths` 后,
-   再恢复真正只读挂载;在此之前不写 `[sandbox] additional_ro_binds`。
+2. **Atropos eval skill —— 已完成(2026-07-11)**:`eval-judgement` 已进统一技能池
+   `app/agents/skills/`,经 agent-skill-map 同时供 SDK subagent 与 ah worker 使用。
+3. **知识库挂载 —— 已被随包知识库取代(2026-07-11,见 §9.8)**:契约事实全部提炼进
+   `app/agents/knowledge/`(KB-00 hub + 13 篇),ah 路直接物化进 `.ah/knowledge/`,
+   不再依赖 ro bind / 开发仓 docs;`[sandbox] additional_ro_binds` 保持不用。
 4. **Codex provider 已作为显式入口**:Studio 菜单选择 Codex 时 master 与三女神 agents 均写
    `provider = "codex"`;Codex master 的 auth/rules/skills 分别按 Codex 规则进入
    `.codex/auth.json`、`.codex/AGENTS.md`、`.agents/skills`。Windows 登录态是源头,WSL/ah sandbox
@@ -598,22 +603,20 @@ description: 对一条 graph skill 的 predict/run 结果做整体终判。用�
 - 给 Lachesis 类型的字段级修复建议冒充整体 eval。
 ```
 
-### 9.8 知识库路径提示
+### 9.8 知识库:随包分发,物化进工作区(2026-07-11 替换旧"资料表"方案)
 
-阶段 2 **不使用**全局 `[sandbox] additional_ro_binds`:ah 1.3.0 会把它翻译成
-`systemd-run --user --scope --property=BindReadOnlyPaths=...`,当前 WSL systemd user scope 会拒绝该属性,
-导致 agent pane 秒退。先通过 rules / skills 明确告诉各角色哪些资料可读;这些路径本来就在同一台机器上,
-Claude Code 以 `--dangerously-skip-permissions` 运行时可直接读取。每个 agent 是否读取某份资料由 rules 约束:
+旧方案(挂载开发仓 docs 目录给各角色读)已废弃:打包版没有开发仓 docs,那些挂载会静默消失,
+是假依赖;`[sandbox] additional_ro_binds` 也因 WSL user scope 拒绝 `BindReadOnlyPaths` 不可用。
 
-| 资料 | 主要读者 | 用途 |
-|---|---|---|
-| `docs/engine/mvp1/` + `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/` | Clotho | skill / engine 设计边界 |
-| `apps/studio/backend/app/prompts/mounted/` | Clotho/Lachesis/Atropos | Studio copilot 已有挂载说明 |
-| `packages/graph-agent` 的 README 与 compile/golden 相关 docs | Lachesis/Atropos | 编译语义、predict/run/eval 机制 |
-| `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md` | MoirAI | 编排真相源 |
+现方案(studio-moirai-agent-system spec):契约事实从设计源提炼为**随包知识库**
+`apps/studio/backend/app/agents/knowledge/`(KB-00 场景路由 hub + KB-01..13 主题文档,
+frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled from` 提炼来源)。
 
-Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 ah 实际运行环境可见的路径。Studio 已有
-`windows_path_to_wsl()` 可复用,新增路径时同样先转换,否则 ah 在 WSL 里看不到 Windows 盘符。
+- **SDK 面板路**:`knowledge/` 是唯一挂载目录(`copilot.py` `_mounted_doc_dirs()`),
+  KB-00 路由入口随操作手册进会话 append。
+- **ah CLI 路**:StartFresh 时物化进 `.ah/knowledge/`(受管头,拒覆盖语义与 rules/skills 一致),
+  `contexts/cli.md` 向各角色声明该位置;链接按 stem 文件名在目录内解析,无需任何挂载/绑定。
+- 知识库内容与设计源冲突时,以设计源为准并回修知识库(R4.3,由复核任务把关)。
 
 ### 9.9 验收脚本与人工验收
 
@@ -621,8 +624,9 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 
 - `transient_ah_config_content` 生成 master + clotho/lachesis/atropos,且三者 skills 映射正确;
 - `transient_ah_config_content` 按菜单生成 `provider = "claude"` 或 `provider = "codex"`,并在 `[master]`
-  下写入 `window_size = "follow"` 与 `skills = ["moirai-intro"]`,确保 tmux master pane 自动跟随 attach
-  终端大小,且开场自报由 skill 而不是硬编码 prompt 承载;
+  下写入 `window_size = "follow"`;master 与三女神的 `skills` 一律由 `agent-skill-map.json`
+  运行时派生(与 SDK 路 AgentDefinition.skills 同源,R5.5/R7.3),开场自报仍由 `moirai-intro`
+  skill 而不是硬编码 prompt 承载;
 - launcher 在 `ah start` 前拒绝 `ah < 1.3.4`,避免缺失 starting 相位或 worker sandbox env;
 - launcher 记录启动 ah 前的宿主 HOME;Claude master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
   `$HOME/.local/bin/claude` symlink;Codex master cmd 补 `$HOME/.local/bin/codex` symlink,并把
@@ -630,8 +634,9 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
   `$HOME/.codex/config.toml` 的当前 workspace trust;
 - Claude/Codex master cmd 在最终 `exec` 前对 `readlink -f` 结果做 `/mnt/*` 守卫;Codex 解析顺序优先
   使用 `$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex`,再 fallback 到 PATH / `~/.local/bin`;
-- 四份 `.ah/rules/*` 使用 Wikipedia 链接 + "只在用户询问背景时展开"的渐进式披露,不在 Studio 自己的
-  persona rules 里泄露 `master` / `worker` / "派单" 作为身份词;
+- 四份 `.ah/rules/*` 由运行时拼装(role + operating-manual + contexts/cli,R1.4 落盘标记),
+  人格按 §6.4 方法论英文重打磨,脚手架词(ah/copilot/master/worker)只出现在元指令注释、
+  不进台词(回归测试锁定);
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
 - Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
   launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;

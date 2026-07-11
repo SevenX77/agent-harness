@@ -87,9 +87,11 @@ def test_build_options_safe_write_routes_everything_through_callback() -> None:
         return PermissionResultAllow()
 
     opts = copilot.build_options("https://x", "key", "/ws", can_use_tool=cb)
-    # NOTHING pre-allowed: Read/Glob/Grep 读护栏、Write/Edit 圈定、Bash 审批
-    # 全部要经过 can_use_tool(预放行的工具会跳过回调)。
-    assert opts.allowed_tools == []
+    # R8.1: 读类三件 + 零审批 MCP 声明式直放(不再进回调);Write/Edit/Bash
+    # 不在 allowlist,仍走 "ask" 路径经 can_use_tool 进审批 UX。
+    assert "Read" in opts.allowed_tools
+    for gated in ("Write", "Edit", "Bash"):
+        assert gated not in opts.allowed_tools
     assert opts.permission_mode == "default"
     assert opts.can_use_tool is cb
 
@@ -304,7 +306,9 @@ def test_bash_approval_times_out_to_deny(
     )
 
     assert isinstance(result, PermissionResultDeny)
-    assert "not approved" in result.message
+    # R8.4: 超时 = 停任务(interrupt)保会话,不是静默拒绝续跑。
+    assert result.interrupt is True
+    assert "timed out" in result.message
     assert isinstance(_drain(queue)[0], CopilotEventToolApprovalRequired)
     # 超时后审批号已清理,再批复报 not found。
     late = copilot.resolve_tool_approval("skill-timeout", "tu-timeout", approve=True)
@@ -373,17 +377,17 @@ def test_read_inside_workspace_is_allowed_without_events(tmp_path: Path) -> None
     assert _drain(queue) == []
 
 
-def test_read_of_mounted_spec_dir_is_allowed(tmp_path: Path) -> None:
-    spec_dir = copilot._skill_spec_dir()
-    assert spec_dir is not None, "repo spec dir expected in this checkout"
-    queue = _register_sink("skill-spec-read", tmp_path)
-    cb = copilot._make_safe_write_can_use_tool("skill-spec-read")
+def test_read_of_mounted_knowledge_dir_is_allowed(tmp_path: Path) -> None:
+    from app.services import agent_assets
+
+    queue = _register_sink("skill-kb-read", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("skill-kb-read")
 
     result = asyncio.run(
         cb(
             "Read",
-            {"file_path": str(spec_dir / "mvp1-alignment.md")},
-            ToolPermissionContext(tool_use_id="tu-spec"),
+            {"file_path": str(agent_assets.knowledge_dir() / "KB-00-hub.md")},
+            ToolPermissionContext(tool_use_id="tu-kb"),
         )
     )
 
@@ -391,57 +395,6 @@ def test_read_of_mounted_spec_dir_is_allowed(tmp_path: Path) -> None:
     assert _drain(queue) == []
 
 
-def test_read_outside_workspace_is_held_then_follows_verdict(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    outside = tmp_path / "secret.md"
-    outside.write_text("secret", encoding="utf-8")
-    queue = _register_sink("skill-read-out", workspace)
-
-    async def scenario() -> None:
-        result, event, _resolution = await _held_call(
-            "skill-read-out",
-            queue,
-            "Read",
-            {"file_path": str(outside)},
-            "tu-read-out",
-            approve=True,
-        )
-        assert isinstance(result, PermissionResultAllow)
-        assert event.tool_name == "Read"
-        assert event.detail == str(outside)
-
-        denied, _event2, _res2 = await _held_call(
-            "skill-read-out",
-            queue,
-            "Read",
-            {"file_path": str(outside)},
-            "tu-read-out-2",
-            approve=False,
-        )
-        assert isinstance(denied, PermissionResultDeny)
-
-    asyncio.run(scenario())
-
-
-def test_glob_outside_workspace_is_held(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    queue = _register_sink("skill-glob-out", workspace)
-
-    async def scenario() -> None:
-        result, event, _resolution = await _held_call(
-            "skill-glob-out",
-            queue,
-            "Glob",
-            {"pattern": "**/*.py", "path": str(tmp_path)},
-            "tu-glob-out",
-            approve=False,
-        )
-        assert isinstance(result, PermissionResultDeny)
-        assert event.tool_name == "Glob"
-
-    asyncio.run(scenario())
 
 
 def test_glob_without_path_defaults_to_cwd_and_is_allowed(tmp_path: Path) -> None:

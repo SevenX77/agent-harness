@@ -3548,6 +3548,130 @@ mod tests {
         }
     }
 
+    // ── studio-ah-state-contract-v1 task 3 (snapshot identity check) RED tests ──
+    //
+    // Authored by g1 (泳道1 gatekeeper) test-first: g1-m1 turns these GREEN by
+    // adding ONLY the production code named below and must NOT edit this test.
+    // Contract seam g1-m1 must implement for both identity tests:
+    //
+    //   /// Validate that a received ah snapshot belongs to the config Studio
+    //   /// actually requested (Req 2.7/4.8). AUTHORITATIVE identity is the
+    //   /// snapshot's `state_dir` + session identity
+    //   /// (`sessions[].session_id`/`path`/`project_id`); `config_path` is
+    //   /// ADVISORY ONLY — it is `null` on a config-less daemon and echoed
+    //   /// straight back to the requested path (NF1), so a `config_path` match
+    //   /// carries zero discriminating power and must NOT decide identity.
+    //   /// Studio independently derives the expected identity from
+    //   /// `requested_workspace_dir` (basename ⇒ the platform-neutral
+    //   /// `project_id` anchor; the dir itself ⇒ the expected worktree path).
+    //   /// ALL path comparison (`state_dir`, `sessions[].path`) is canonicalized
+    //   /// across the Windows↔WSL boundary via `windows_path_to_wsl`, never raw
+    //   /// string equality. `Ok(())` = identity matches ⇒ snapshot may be
+    //   /// trusted; `Err(diagnostic)` = mismatch ⇒ snapshot MUST be discarded
+    //   /// with an actionable diagnostic (used for no UI or cleanup decision).
+    //   fn verify_snapshot_identity(
+    //       snapshot_json: &str,
+    //       requested_config_path: &Path,
+    //       requested_workspace_dir: &Path,
+    //   ) -> Result<(), String>
+    //
+    // See .kiro/specs/studio-ah-state-contract-v1/tasks.md task 3 (lines 57-64)
+    // and requirements.md Req 2.7 / 4.8 / 5.10. The two task-1 identity fixtures
+    // (ah_contract_fixtures::IDENTITY_*) are the frozen contract inputs — real ah
+    // CLI output shapes (NF1 was CAPTURED verbatim in task 0), not internal state.
+    //
+    // RED when written: `verify_snapshot_identity` does not exist yet, so the test
+    // crate fails to COMPILE until g1-m1 adds the Rust seam (same RED mechanism as
+    // task 2's `ah_version_gate`). The two tests are each other's controls — an
+    // "always Err" impl reds `test_identity_canonicalizes_windows_wsl_path`, an
+    // "always Ok" or `config_path`-only impl reds
+    // `test_identity_rejects_config_path_match_state_dir_mismatch` — so no trivial
+    // constant implementation can turn the pair GREEN.
+
+    /// Req 5.10(a) / 2.7 / 4.8 — the NF1 echo-through failure form. The fixture's
+    /// snapshot echoes the REQUESTED `config_path` (`/tmp/ah-fixture-nf1/ah.toml`)
+    /// straight back, yet its authoritative `state_dir`/session identity belongs to
+    /// a DIFFERENT live daemon (project `feat-studio-ah-state-contract-impl`). A
+    /// `config_path`-only check would wrongly ACCEPT this; the identity check must
+    /// DISCARD it with a diagnostic because the authoritative identity does not
+    /// match the requested `ah-fixture-nf1` config.
+    ///
+    /// Anchored to the CAPTURED task-0 contract input (`IDENTITY_NF1_ECHO_MISMATCH`,
+    /// `Provenance::Captured`), not to internal state. Rollback self-check: if
+    /// g1-m1's comparison regresses to trusting `config_path` (or accepts
+    /// unconditionally), the echoed match is accepted and this test reds again.
+    #[test]
+    fn test_identity_rejects_config_path_match_state_dir_mismatch() {
+        use ah_contract_fixtures::IDENTITY_NF1_ECHO_MISMATCH;
+        let f = &IDENTITY_NF1_ECHO_MISMATCH;
+
+        // Precondition the fixture guarantees (documents WHY a config_path check is
+        // the trap): the snapshot's config_path DOES match the requested path.
+        assert!(
+            f.snapshot_json.contains(f.requested_config_path),
+            "fixture precondition: the NF1 snapshot must echo the requested config_path \
+             so this test proves a config_path match is not trusted"
+        );
+
+        let verdict = verify_snapshot_identity(
+            f.snapshot_json,
+            Path::new(f.requested_config_path),
+            Path::new(f.requested_workspace_dir),
+        );
+
+        assert!(
+            verdict.is_err(),
+            "NF1 echo: config_path matches but state_dir/session identity is another \
+             live daemon — the snapshot MUST be discarded, not accepted (Req 2.7/5.10a)"
+        );
+        assert!(
+            !verdict.unwrap_err().is_empty(),
+            "a discarded snapshot must carry an actionable diagnostic, not fail silently (Req 4.8)"
+        );
+    }
+
+    /// Req 5.10(b) / 2.7 — cross-platform canonical acceptance. A Windows host
+    /// requests `C:\Users\dev\myproj` while the WSL-side ah reports the same target
+    /// as `/mnt/c/Users/dev/myproj`. Raw string comparison of those two paths FAILS;
+    /// the identity check must ACCEPT after canonicalizing across the Windows↔WSL
+    /// boundary (and via the platform-neutral `project_id` basename `myproj`).
+    ///
+    /// Anchored to the `IDENTITY_WINDOWS_WSL_CANONICAL_MATCH` fixture. The assert
+    /// below re-proves that raw equality would reject this pair, so an accept can
+    /// only come from real canonicalization/project_id matching, never from a raw
+    /// string compare. Rollback self-check: revert canonicalization to raw string
+    /// path equality (with no project_id anchor) and this accept turns to reject → red.
+    #[test]
+    fn test_identity_canonicalizes_windows_wsl_path() {
+        use ah_contract_fixtures::IDENTITY_WINDOWS_WSL_CANONICAL_MATCH;
+        let f = &IDENTITY_WINDOWS_WSL_CANONICAL_MATCH;
+
+        // Precondition: raw string comparison of the requested Windows workspace dir
+        // against the WSL snapshot path does NOT match — so acceptance is only
+        // possible through cross-platform canonicalization, not raw equality.
+        assert!(
+            f.snapshot_json.contains("/mnt/c/Users/dev/myproj"),
+            "fixture precondition: snapshot carries the /mnt/c WSL form of the request"
+        );
+        assert_ne!(
+            f.requested_workspace_dir, "/mnt/c/Users/dev/myproj",
+            "fixture precondition: the C:\\ request differs from the /mnt/c snapshot as raw strings"
+        );
+
+        let verdict = verify_snapshot_identity(
+            f.snapshot_json,
+            Path::new(f.requested_config_path),
+            Path::new(f.requested_workspace_dir),
+        );
+
+        assert!(
+            verdict.is_ok(),
+            "C:\\ request vs /mnt/c WSL snapshot for the same canonical target must be \
+             accepted after Windows↔WSL canonicalization — raw string compare is forbidden \
+             (Req 2.7/5.10b); got diagnostic: {verdict:?}"
+        );
+    }
+
     #[test]
     fn claude_wsl_payload_links_windows_credentials() {
         // The Windows .credentials.json is the single auth file; WSL root links

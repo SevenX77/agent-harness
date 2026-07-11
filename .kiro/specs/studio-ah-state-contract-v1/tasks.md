@@ -101,7 +101,7 @@ revision_trace: REVISION-TRACE.md
   - 不清理用户手动在 default state dir 启动的 ahd。
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 5.5, 5.9_
 
-- [ ] 8. 重做前端事件 payload 为 per-assistant 状态枚举
+- [x] 8. 重做前端事件 payload 为 per-assistant 状态枚举
   - **先写红测试**：`test_payload_reports_claude_codex_independently`（双活跃 fixture → 两者各自真实状态、无 claude-wins 抑制，Req 5.12）；`test_payload_carries_readonly_flag`（workspace-owned → `readOnly:true`，Studio temp → `readOnly:false`，Req 5.12）。
   - 把 `{claude: bool, codex: bool}`（lib.rs:63-73）改为 per-assistant `{status: inactive|starting|active|degraded|error, reason?, readOnly: bool}`；直接改，不做双格式兼容层。`readOnly` 由任务 5 所有权分类器给出（workspace-owned=true / Studio-managed=false，Req 6.1）。
   - 删除 claude-wins 抑制逻辑（`if status.claude { status.codex = false; }`，lib.rs:1244-1246）。

@@ -26,7 +26,7 @@ revision_trace: REVISION-TRACE.md
 - **env clamp 机制（第二轮修订）**：钳制注入 bash `-c` 字符串（`export AH_STATE_DIR="";…`），不是仅 `Command::env`；且它不保证 1.5.0 读面 daemon 隔离，读面隔离靠身份校验。
 - 不假设未验证的 CLI 行为——任何"预期 ah 应该这样做"的断言，先用真实 ah CLI 复现记录，再写 fixture 和生产代码。
 
-- [ ] 0. 前置 CLI 行为验证（不写生产代码，先拿真实证据）
+- [x] 0. 前置 CLI 行为验证（不写生产代码，先拿真实证据）
   - 用已安装的 ah（1.4.0 与 1.5.0）验证 `ah start` 对一个已有 active stack 的同 config 是否真的拒绝／如何拒绝，记录退出码/stderr/snapshot 形状，供 Requirement 3.4 使用。
   - 用真实 CLI 复现 F1：daemon 不存在时 `ah status --json`（无 JSON，exit 1，stderr 文本）与 `ah events --format json`（结构化 `daemon_absent` 快照）的输出差异，作为 fixture 的原始来源。**前置条件（NF-caveat）**：daemon-absent 分支必须在**零 ahd 运行**的干净机器/环境上采集——在有活跃编队的机器上 `ah status`/`ah events` 会经全局机制连上任何正在跑的 daemon，采到的是残留编队快照而非 daemon-absent（2026-07-10 实测：本机有活编队时无法独立复现 F1 分支）。
   - 复现 F8 新增证据：同一含 `ah.toml` 的 cwd、无 `--config` 时，`status`/`ps` 落 default state dir、`events` 走 project discovery，记录具体输出用于 Requirement 2.7/4.8 的 fixture。
@@ -37,7 +37,7 @@ revision_trace: REVISION-TRACE.md
   - 产出：本任务的证据落盘到 fixture 目录旁的 raw-capture 文件，供任务 1 直接消费，不允许凭 README 示例或印象编造。
   - _Requirements: 2.1, 2.7, 3.4, 4.7a, 4.8, 5.8, 5.10, 5.13; 证据来源 F1, F2, F8, NF1, NF2, o1 坑洞 3.2_
 
-- [ ] 1. 建立 ah v1.4.0+ contract fixtures
+- [x] 1. 建立 ah v1.4.0+ contract fixtures
   - 添加 active、inactive、starting、degraded、daemon absent、`CLOSED`、`FAILED`、unsupported schema 的 snapshot fixture，全部来自任务 0 采集的真实输出（含 `ahd_alive`、`sequence`、`reason`、`live_agents`、`db_tracked_agents`、`safe_to_cleanup`、`cleanup_required`、可空 `config_path`、`sessions[].session_id`/`path`/`project_id` 等真实字段，不是 README 示例字段）。
   - 添加 supported / unsupported / unparsable ah version fixture，只覆盖 `ah version` 裸版本号一种格式（Req 1.8 已简化为单一 `ah version` + trim，不再解析 `ah --version` 前缀格式）。
   - 添加 sequence-reset fixture（Req 2.1 / 坑洞 3.2）：同一流内 `sequence` 递增到 >1 后，再来一帧 `reason:"initial"`/`sequence:1`（新订阅、one-shot `status`、daemon 重启、或 `session_id` 变化）——用于验证"无条件重置后应用，而非按旧序号丢弃"。
@@ -45,7 +45,7 @@ revision_trace: REVISION-TRACE.md
   - 添加身份校验 fixture（Req 2.7/4.8 / NF1 / 坑洞 3.1）：(a) `config_path` **匹配请求路径但 `state_dir`/会话身份不匹配**（NF1 回显击穿形态，须被丢弃）；(b) Windows 请求路径（`C:\...`）对 WSL 快照路径（`/mnt/c/...`）同一 canonical 目标——用于验证跨平台归一比对成功、raw string 比对会失败。
   - _Requirements: 1.1, 1.2, 1.8, 2.1, 2.4→2.5, 2.7, 4.8, 5.1, 5.3, 5.4, 5.6, 5.7, 5.9, 5.10, 5.12, 5.13, 5.14_
 
-- [ ] 2. 接入 ah version gate（单源 + 覆盖 events 订阅）
+- [x] 2. 接入 ah version gate（单源 + 覆盖 events 订阅）
   - **先写红测试**：`test_version_gate_rejects_below_1_4_0`（< 1.4.0 fixture → 断言 block 且不发起 events 订阅，Req 5.4/1.6）；`test_version_parse_uses_bare_ah_version`（断言只调 `ah version` bare + trim，无 `ah --version` 第二 token 解析路径，Req 1.8）。
   - 在 Rust 层定义唯一的最低版本常量；把 launcher shell 脚本模板中现有 4 处独立 `awk >= 1.3.4` 检查（lib.rs:1754/1836/1903/1960）改为引用同一个值，并统一改用单一 `ah version` 命令（去掉 `ah --version | awk '{print $2}'` 的第二 token 解析），全代码库只保留一条版本探测规则（Req 1.5/1.8）。
   - 在 start、attach、status、cleanup、**events 订阅**前统一检查 ah 最低版本；events 订阅同样必须先过版本门，不允许对 < 1.4.0 的 ah 发起订阅并无限重生（lib.rs:1355 起）。

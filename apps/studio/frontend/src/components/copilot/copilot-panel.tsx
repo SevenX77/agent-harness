@@ -283,15 +283,36 @@ interface DraftJudgeContextScope {
 
 type CodeAssistantId = 'claude' | 'codex'
 
+function isAssistantActive(state: any): boolean {
+  if (typeof state === 'boolean') {
+    return state
+  }
+  return state?.status !== 'inactive'
+}
+
+function isAssistantReadOnly(state: any): boolean {
+  if (state && typeof state === 'object') {
+    return !!state.readOnly
+  }
+  return false
+}
+
+function getAssistantStatus(state: any): string {
+  if (typeof state === 'boolean') {
+    return state ? 'active' : 'inactive'
+  }
+  return state?.status ?? 'inactive'
+}
+
 const inactiveCodeAssistantStatus: CodeAssistantStatus = {
-  claude: false,
-  codex: false,
+  claude: { status: 'inactive', readOnly: false },
+  codex: { status: 'inactive', readOnly: false },
 }
 
 export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
   return [
-    ...(status.claude ? (['claude'] as const) : []),
-    ...(status.codex ? (['codex'] as const) : []),
+    ...(isAssistantActive(status?.claude) ? (['claude'] as const) : []),
+    ...(isAssistantActive(status?.codex) ? (['codex'] as const) : []),
   ]
 }
 
@@ -299,6 +320,9 @@ export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): stri
   const active = activeCodeAssistantIds(status)
   if (active.length === 0) {
     return null
+  }
+  if (active.every(id => isAssistantReadOnly(status?.[id]))) {
+    return 'Detach'
   }
   if (active.length > 1) {
     return 'Close assistants'
@@ -490,6 +514,9 @@ export function CopilotPanel({
   const activeCodeAssistants = activeCodeAssistantIds(codeAssistantStatus)
   const codeAssistantCloseLabel = codeAssistantCloseButtonLabel(codeAssistantStatus)
   const codeAssistantAttachLabels = codeAssistantAttachMenuLabels(codeAssistantStatus)
+  const isClaudeOpenDisabled = getAssistantStatus(codeAssistantStatus?.claude) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.claude)
+  const isCodexOpenDisabled = getAssistantStatus(codeAssistantStatus?.codex) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.codex)
+  const allReadOnlyInactive = isClaudeOpenDisabled && isCodexOpenDisabled
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -550,6 +577,9 @@ export function CopilotPanel({
   }, [codeAssistantWorkspace])
 
   async function handleOpenCodeAssistant(assistant: CodeAssistantId) {
+    if (isAssistantReadOnly(codeAssistantStatus[assistant])) {
+      return
+    }
     setOpeningCodeAssistant(assistant)
     try {
       const opened = assistant === 'claude'
@@ -581,7 +611,21 @@ export function CopilotPanel({
     }
     setClosingCodeAssistant(true)
     try {
-      await Promise.all(activeCodeAssistants.map((assistant) => closeCodeAssistant(codeAssistantWorkspace, assistant)))
+      const readOnlyAssistants = activeCodeAssistants.filter((id) => isAssistantReadOnly(codeAssistantStatus[id]))
+      const writeAssistants = activeCodeAssistants.filter((id) => !isAssistantReadOnly(codeAssistantStatus[id]))
+
+      if (writeAssistants.length > 0) {
+        await Promise.all(
+          writeAssistants.map((assistant) => closeCodeAssistant(codeAssistantWorkspace, assistant))
+        )
+      }
+
+      if (readOnlyAssistants.length > 0 && copilot.activeSessionId) {
+        if (typeof copilot.closeSession === 'function') {
+          await copilot.closeSession(copilot.activeSessionId)
+        }
+      }
+
       await refreshCodeAssistantStatus()
     } finally {
       setClosingCodeAssistant(false)
@@ -726,31 +770,34 @@ export function CopilotPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || allReadOnlyInactive}
                     aria-label="Open code assistant"
                     className="studio-canvas-input-surface shrink-0"
+                    title={allReadOnlyInactive ? 'Workspace-owned config is read-only' : undefined}
                   >
                     <SquareTerminal data-icon="inline-start" />
-                    Open in CLI
+                    Open in CLI {allReadOnlyInactive && '(read-only)'}
                     <ChevronDown className="size-3" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-36">
                   <DropdownMenuItem
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || isClaudeOpenDisabled}
                     onSelect={() => {
                       void handleOpenCodeAssistant('claude')
                     }}
+                    title={codeAssistantStatus.claude.readOnly ? 'Workspace-owned config is read-only' : undefined}
                   >
-                    Claude code
+                    Claude code {isClaudeOpenDisabled && '(read-only)'}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace}
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || isCodexOpenDisabled}
                     onSelect={() => {
                       void handleOpenCodeAssistant('codex')
                     }}
+                    title={codeAssistantStatus.codex.readOnly ? 'Workspace-owned config is read-only' : undefined}
                   >
-                    Codex
+                    Codex {isCodexOpenDisabled && '(read-only)'}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

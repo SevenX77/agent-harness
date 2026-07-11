@@ -153,10 +153,29 @@ struct CodeAssistantStatusSpec {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum AssistantStatus {
+    Inactive,
+    Starting,
+    Active,
+    Degraded,
+    Error,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssistantState {
+    status: AssistantStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    read_only: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodeAssistantStatus {
-    claude: bool,
-    codex: bool,
+    claude: AssistantState,
+    codex: AssistantState,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -334,6 +353,16 @@ fn transient_ah_config_path(workspace_root: &Path, assistant: CodeAssistant) -> 
 
 fn studio_ah_temp_root() -> PathBuf {
     std::env::temp_dir().join("skill-studio-ah")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConfigOwnership {
+    read_only: bool,
+}
+
+fn classify_config_ownership(config_path: &Path) -> ConfigOwnership {
+    let read_only = !config_path.starts_with(studio_ah_temp_root());
+    ConfigOwnership { read_only }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1321,28 +1350,44 @@ fn code_assistant_status_from_snapshots(
     specs: &BTreeMap<PathBuf, CodeAssistantStatusSpec>,
     snapshots: &BTreeMap<PathBuf, AhLifecycleSnapshot>,
 ) -> CodeAssistantStatus {
-    let mut status = CodeAssistantStatus {
-        claude: false,
-        codex: false,
+    let mut claude_state = AssistantState {
+        status: AssistantStatus::Inactive,
+        reason: None,
+        read_only: false,
     };
+    let mut codex_state = AssistantState {
+        status: AssistantStatus::Inactive,
+        reason: None,
+        read_only: false,
+    };
+
     for (config, spec) in specs {
         let active = snapshots
             .get(config)
             .copied()
             .map(code_assistant_lifecycle_is_active)
             .unwrap_or(false);
-        if !active {
-            continue;
-        }
+        let status_val = if active {
+            AssistantStatus::Active
+        } else {
+            AssistantStatus::Inactive
+        };
+        let read_only = classify_config_ownership(config).read_only;
+        let state = AssistantState {
+            status: status_val,
+            reason: None,
+            read_only,
+        };
         match spec.assistant {
-            CodeAssistant::Claude => status.claude = true,
-            CodeAssistant::Codex => status.codex = true,
+            CodeAssistant::Claude => claude_state = state,
+            CodeAssistant::Codex => codex_state = state,
         }
     }
-    if status.claude {
-        status.codex = false;
+
+    CodeAssistantStatus {
+        claude: claude_state,
+        codex: codex_state,
     }
-    status
 }
 
 fn emit_code_assistant_status_for_workspace(

@@ -74,7 +74,7 @@ revision_trace: REVISION-TRACE.md
   - 对 unsupported schema、invalid JSON、stream drop、身份校验失败输出诊断而不是本地猜测。
   - _Requirements: 2.1, 2.2, 2.3, 2.6, 3.1, 3.2, 3.3, 5.1, 5.11, 5.13_
 
-- [ ] 5. 加入 config 所有权分类与环境变量钳制（护栏先行：须在任务 6 发出 `ah start` 之前落地）
+- [x] 5. 加入 config 所有权分类与环境变量钳制（护栏先行：须在任务 6 发出 `ah start` 之前落地）
   - **先写红测试**：`test_lifecycle_only_on_studio_managed_config`（workspace-owned config 只收 read-only 命令、绝不收 start/stop/kill，Req 5.9）；`test_env_clamp_in_bash_string`（断言构造出的 bash `-c` 字符串含 `export AH_STATE_DIR=""; ...` 前缀，而非仅 `Command::env`，Req 4.7）。
   - 实现所有权分类器：`find_ah_config` 向上发现的 config 默认判定为 workspace-owned（只读：`status`/`events`/观察性 attach），只有 Studio 自己注册的 temp config 才是 Studio-managed（可执行 start/stop/kill）。
   - `ah_config_for_status`（lib.rs:828-833）的"优先取发现的 config"逻辑改为先过所有权分类器，再决定可执行哪些命令。

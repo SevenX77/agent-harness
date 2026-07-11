@@ -140,6 +140,10 @@ tzutil /g   # (Windows 侧) ↔  readlink -f /etc/localtime | sed 's|.*/zoneinfo
    (`timeout 3 ah events --format json | head -1` 输出里的 `state_dir`,形如
    `$HOME/.local/state/ah/<hash>`)优于钉 `default`:任务间隔离,且与 ah 自身
    project discovery 对齐(2026-07-10 真栈实测配方)。
+   **例外——`ps` 恰好相反(2026-07-11 实测,1.5.0)**:`AH_STATE_DIR=<hash目录> ah ps`
+   返回**空表**(活栈 7 pane、agent BUSY 时也如此);`ps` 必须在 worktree cwd **裸跑**
+   (不带该 env)才出全表。即:`events` 等要钉 env,`ps`/`status` 要裸跑 + cwd 定位,
+   监控脚本按子命令分姿势(数据点已补进 ah#15)。
 4. **`ah stop` 不清持久 unit**:`~/.config/systemd/user/ah-*.service` 留存且 enabled,
    WSL 重启即复活旧 daemon。停栈后手动 `systemctl --user disable --now` + 删 unit 文件
    (上游修复前的操作项)。已知上游问题另见:kill→up 重生偶发单 agent CRASHED;

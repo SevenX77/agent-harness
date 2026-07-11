@@ -3512,7 +3512,8 @@ mod tests {
         assert!(MOIRAI_INTRO_SKILL.contains("name: moirai-intro"));
         assert!(MOIRAI_INTRO_SKILL.contains("ah ps"));
         assert!(MOIRAI_INTRO_SKILL.contains("ah status"));
-        assert!(MOIRAI_INTRO_SKILL.contains("不是可用命令"));
+        assert!(MOIRAI_INTRO_SKILL.contains("ah status --json"));
+        assert!(!MOIRAI_INTRO_SKILL.contains("不是可用命令"));
     }
 
     #[test]

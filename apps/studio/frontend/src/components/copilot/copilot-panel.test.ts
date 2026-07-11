@@ -333,6 +333,137 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantAttachMenuLabels({ claude: true, codex: true })).toEqual(['Attach Claude code', 'Attach Codex'])
   })
 
+  // ── studio-ah-state-contract-v1 task 9 (read-only Detach control semantics) RED tests ──
+  //
+  // Authored by g2 (泳道2 gatekeeper) test-first: g2-m1 turns these GREEN by wiring the
+  // read-only control semantics of Req 6.4 / 5.14 and must NOT edit these tests. They ride
+  // the reshaped per-assistant payload of task 8 (design.md:290-297):
+  //   { claude: { status, reason?, readOnly }, codex: { status, reason?, readOnly } }
+  // delivered here through the subscribeCodeAssistantStatus mock exactly as the live event
+  // does. These assert the CONTRACT BOUNDARY the frontend controls: rendered controls the
+  // user sees (Detach label / disabled Open + guidance) AND the lifecycle-command surface
+  // (`closeCodeAssistant` invokes ah stop/ah kill; `openClaudeCode`/`openCodexCli` invoke
+  // ah start). "no lifecycle command" is proven by those mocks never being called — not by
+  // an internal flag. See tasks.md task 9 (111-118), design.md:296-301/310, Req 6.4/5.14.
+
+  it('test_readonly_active_close_is_detach', async () => {
+    // Req 6.4 / 5.14: a workspace-owned (readOnly) assistant that is active presents its Close
+    // control as Detach — local tab close only, emitting NO ah stop / ah kill. RED today: the
+    // panel has no Detach path — it labels the control "Close …" and Close calls
+    // closeCodeAssistant (the ah stop/kill boundary).
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    const unsubscribe = vi.fn()
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return unsubscribe
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+
+      // A read-only assistant (workspace-owned config) that is ACTIVE.
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'active', readOnly: true },
+          codex: { status: 'inactive', readOnly: true },
+        })
+      })
+
+      // The active control resolves to Detach (not Close) for a read-only assistant.
+      await vi.waitFor(() => {
+        expect(container.textContent).toContain('Detach')
+      })
+
+      // Selecting Detach closes the local tab only — it must NOT emit ah stop / ah kill.
+      const menuText = (props: Record<string, unknown>) =>
+        renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
+      const detachItem = mocks.menuItemProps.find((props) => menuText(props).includes('Detach'))
+      expect(detachItem).toBeTruthy()
+      await act(async () => {
+        ;(detachItem?.onSelect as (() => void) | undefined)?.()
+      })
+      expect(mocks.closeCodeAssistant).not.toHaveBeenCalled()
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('test_readonly_inactive_open_disabled', async () => {
+    // Req 6.4 / 5.14: a workspace-owned (readOnly) assistant that is inactive renders its Open
+    // control disabled with guidance text, and issues NO lifecycle command (openClaudeCode /
+    // openCodexCli both drive ah start). RED today: with both assistants inactive the panel
+    // renders an ENABLED "Open in CLI" with clickable Claude/Codex items and no read-only
+    // guidance. Guidance must live in the accessible DOM (button title / menu text), not a
+    // portal-only tooltip, so it is observable here.
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    const unsubscribe = vi.fn()
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return unsubscribe
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+
+      // Both assistants read-only AND inactive (workspace-owned config, nothing running).
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'inactive', readOnly: true },
+          codex: { status: 'inactive', readOnly: true },
+        })
+      })
+
+      // The Open control is disabled, so no rejected lifecycle command can be triggered.
+      await vi.waitFor(() => {
+        const openButton = container.querySelector('button[aria-label="Open code assistant"]')
+        expect(openButton).toBeTruthy()
+        expect((openButton as HTMLButtonElement).disabled).toBe(true)
+      })
+      // …and it explains why (read-only workspace-owned config guidance, Req 6.4).
+      expect(/read.?only/i.test(container.innerHTML)).toBe(true)
+      expect(mocks.openClaudeCode).not.toHaveBeenCalled()
+      expect(mocks.openCodexCli).not.toHaveBeenCalled()
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
   it('shows the thinking indicator while an assistant turn is running with no text yet', () => {
     mocks.useCopilot.mockReturnValue(copilotState({
       messages: [

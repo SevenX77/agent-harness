@@ -4497,6 +4497,180 @@ mod tests {
         );
     }
 
+    // ── studio-ah-state-contract-v1 task 8 (per-assistant status payload) RED tests ──
+    //
+    // Authored by g2 (泳道2 gatekeeper) test-first: g2-m1 turns these GREEN by adding
+    // ONLY the production code named below and must NOT edit this test file.
+    //
+    // Task 8 reshapes the `code-assistant-status-changed` payload from the two-boolean
+    // `{claude:bool,codex:bool}` (lib.rs:157-160) into the per-assistant shape of
+    // design.md:290-297 / Req 6.1-6.2, and DELETES the claude-wins suppression
+    // (lib.rs:1342-1344). Contract seams g2-m1 must implement (crate scope; the payload
+    // MUST stay `Serialize` — it crosses to the frontend via `app.emit`):
+    //
+    //   /// The five-value per-assistant runtime status (design.md:293). MUST serialize to
+    //   /// the lowercase wire tokens the frontend union consumes
+    //   /// (`'inactive'|'starting'|'active'|'degraded'|'error'`) — `#[serde(rename_all="lowercase")]`,
+    //   /// never the PascalCase variant name. (This projection from AhLifecycleSnapshot only
+    //   /// emits active/inactive today; the richer phases arrive when task 6/9 feed the typed
+    //   /// snapshot in — the enum still declares all five.)
+    //   enum AssistantStatus { Inactive, Starting, Active, Degraded, Error }
+    //
+    //   /// One assistant's slot in the reshaped payload (design.md:295-297). Serializes
+    //   /// camelCase → `{ status, reason?, readOnly }`; `reason` is `skip_serializing_if` None.
+    //   struct AssistantState { status: AssistantStatus, reason: Option<String>, read_only: bool }
+    //
+    //   /// The reshaped payload: replaces `{claude:bool,codex:bool}` OUTRIGHT (no dual format),
+    //   /// one AssistantState per assistant — both keys always present.
+    //   struct CodeAssistantStatus { claude: AssistantState, codex: AssistantState }
+    //
+    //   /// Ownership classification for a config path — task 5's seam, referenced here so the
+    //   /// payload's readOnly is SOURCED from the single ownership authority, never a
+    //   /// Studio-local guess. read_only==true ⇔ workspace-owned (find_ah_config walk-up);
+    //   /// false ⇔ Studio-managed temp config. Declared+implemented by task 5, so these tests
+    //   /// are compile-time RED (E0425 `classify_config_ownership` / E0433 `ConfigOwnership`)
+    //   /// until task 5 lands it — the same RED mechanism as task 2/3/4.
+    //   fn classify_config_ownership(config_path: &Path) -> ConfigOwnership
+    //   struct ConfigOwnership { read_only: bool, /* … */ }
+    //
+    // `code_assistant_status_from_snapshots(specs, snapshots)` keeps its inputs but returns the
+    // reshaped payload: per (config, spec) it maps the snapshot to AssistantState.status and
+    // carries read_only = classify_config_ownership(config).read_only. Assertions are on the
+    // SERIALIZED wire payload (what the frontend actually receives), not internal fields, so a
+    // rename of the Rust types cannot dodge the contract. See tasks.md task 8 (104-109),
+    // design.md:290-301, requirements.md Req 5.12 / 6.1 / 6.2.
+
+    /// Req 6.2 / 5.12: each of Claude and Codex reports its own real state — including both
+    /// active at once — with the claude-wins suppression (lib.rs:1342-1344) gone. Anchored to
+    /// the serialized `code-assistant-status-changed` payload (the frontend contract boundary).
+    /// Rollback self-check: restore `if claude { codex = inactive }` and the dual-active
+    /// assertion reds; a constant `"active"` impl reds on the control case (claude active,
+    /// codex not → codex must be `"inactive"`).
+    #[test]
+    fn test_payload_reports_claude_codex_independently() {
+        let workspace = PathBuf::from("/tmp/studio-skill");
+        let claude_config = workspace.join(".claude-ah.toml");
+        let codex_config = workspace.join(".codex-ah.toml");
+        let specs = BTreeMap::from([
+            (
+                claude_config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: workspace.clone(),
+                    assistant: CodeAssistant::Claude,
+                },
+            ),
+            (
+                codex_config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: workspace.clone(),
+                    assistant: CodeAssistant::Codex,
+                },
+            ),
+        ]);
+
+        // Both stacks active simultaneously (Req 5.12 "both active" pairing — modelled via
+        // the is-active decision shape: ahd inventory present + master tmux alive).
+        let both_active = BTreeMap::from([
+            (claude_config.clone(), AhLifecycleSnapshot::new(true, true, false)),
+            (codex_config.clone(), AhLifecycleSnapshot::new(true, true, false)),
+        ]);
+        let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &both_active))
+            .expect("payload must serialize to the frontend wire shape");
+        assert_eq!(v["claude"]["status"], "active", "claude active reports active");
+        assert_eq!(
+            v["codex"]["status"], "active",
+            "codex active reports its OWN active state — no claude-wins suppression (Req 6.2)"
+        );
+
+        // Control: claude active, codex has no active stack → per-assistant derivation must
+        // report codex inactive (defeats a constant-`active` impl that would fake the pair above,
+        // and proves both keys are always present).
+        let claude_only =
+            BTreeMap::from([(claude_config, AhLifecycleSnapshot::new(true, true, false))]);
+        let v2 = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &claude_only))
+            .expect("payload must serialize to the frontend wire shape");
+        assert_eq!(v2["claude"]["status"], "active");
+        assert_eq!(
+            v2["codex"]["status"], "inactive",
+            "codex with no active stack is inactive — proves the state is derived per assistant"
+        );
+    }
+
+    /// Req 6.1 / 5.12: the payload carries a per-assistant `readOnly` ownership flag — true for
+    /// a workspace-owned config, false for a Studio-managed temp config — sourced from the
+    /// single ownership authority (task 5's `classify_config_ownership`). Anchored to the frozen
+    /// task-1 ownership fixtures + the serialized wire payload. Rollback self-check: hardcode
+    /// `readOnly:false` (or drop the field) and the workspace-owned assertion reds; the two
+    /// fixtures are opposite classes so no constant satisfies both.
+    #[test]
+    fn test_payload_carries_readonly_flag() {
+        use ah_contract_fixtures::{CONFIG_STUDIO_MANAGED, CONFIG_WORKSPACE_OWNED};
+
+        // Frozen fixture facts: one workspace-owned config (readOnly:true) + one Studio-managed
+        // temp config (readOnly:false).
+        assert!(CONFIG_WORKSPACE_OWNED.read_only, "workspace-owned fixture is readOnly:true");
+        assert!(!CONFIG_STUDIO_MANAGED.read_only, "Studio-managed temp fixture is readOnly:false");
+
+        // readOnly must be SOURCED from the ownership authority, not a Studio-local guess.
+        // Referencing classify_config_ownership here is the compile-time RED seam (task 5) and
+        // proves the payload agrees with the real classifier for each config.
+        assert_eq!(
+            classify_config_ownership(Path::new(CONFIG_WORKSPACE_OWNED.config_path)).read_only,
+            CONFIG_WORKSPACE_OWNED.read_only,
+            "classifier must agree with the frozen workspace-owned class"
+        );
+        assert_eq!(
+            classify_config_ownership(Path::new(CONFIG_STUDIO_MANAGED.config_path)).read_only,
+            CONFIG_STUDIO_MANAGED.read_only,
+            "classifier must agree with the frozen Studio-managed class"
+        );
+
+        // Claude on the workspace-owned config, Codex on the Studio-managed config; both active
+        // (readOnly is orthogonal to running state — a workspace-owned stack can be attached
+        // for observation).
+        let claude_config = PathBuf::from(CONFIG_WORKSPACE_OWNED.config_path);
+        let codex_config = PathBuf::from(CONFIG_STUDIO_MANAGED.config_path);
+        let claude_workspace = claude_config
+            .parent()
+            .expect("config path has a parent dir")
+            .to_path_buf();
+        let codex_workspace = codex_config
+            .parent()
+            .expect("config path has a parent dir")
+            .to_path_buf();
+        let specs = BTreeMap::from([
+            (
+                claude_config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: claude_workspace,
+                    assistant: CodeAssistant::Claude,
+                },
+            ),
+            (
+                codex_config.clone(),
+                CodeAssistantStatusSpec {
+                    workspace_root: codex_workspace,
+                    assistant: CodeAssistant::Codex,
+                },
+            ),
+        ]);
+        let snapshots = BTreeMap::from([
+            (claude_config, AhLifecycleSnapshot::new(true, true, false)),
+            (codex_config, AhLifecycleSnapshot::new(true, true, false)),
+        ]);
+
+        let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &snapshots))
+            .expect("payload must serialize to the frontend wire shape");
+        assert_eq!(
+            v["claude"]["readOnly"], true,
+            "workspace-owned config → readOnly:true so the UI can render Detach / disabled-Open (Req 6.1)"
+        );
+        assert_eq!(
+            v["codex"]["readOnly"], false,
+            "Studio-managed temp config → readOnly:false so the normal lifecycle controls show (Req 6.1)"
+        );
+    }
+
     #[test]
     fn ah_ps_probe_extracts_tmux_socket_label_and_session_ids() {
         let output = r#"

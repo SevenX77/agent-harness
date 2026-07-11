@@ -140,9 +140,15 @@ export async function openCodexCli(workspaceRoot: string | null | undefined): Pr
   return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex')
 }
 
+export interface AssistantState {
+  status: 'inactive' | 'starting' | 'active' | 'degraded' | 'error'
+  reason?: string
+  readOnly: boolean
+}
+
 export interface CodeAssistantStatus {
-  claude: boolean
-  codex: boolean
+  claude: AssistantState
+  codex: AssistantState
 }
 
 interface CodeAssistantStatusEventPayload {
@@ -151,8 +157,8 @@ interface CodeAssistantStatusEventPayload {
 }
 
 const inactiveCodeAssistantStatus: CodeAssistantStatus = {
-  claude: false,
-  codex: false,
+  claude: { status: 'inactive', readOnly: false },
+  codex: { status: 'inactive', readOnly: false },
 }
 
 const CODE_ASSISTANT_STATUS_EVENT = 'code-assistant-status-changed'

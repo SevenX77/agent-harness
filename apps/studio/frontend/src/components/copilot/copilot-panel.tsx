@@ -17,6 +17,7 @@ import {
   openClaudeCode,
   openCodexCli,
   subscribeCodeAssistantStatus,
+  type AssistantState,
   type CodeAssistantStatus,
 } from '../../lib/tauri'
 import { Button } from '../ui/button'
@@ -283,25 +284,50 @@ interface DraftJudgeContextScope {
 
 type CodeAssistantId = 'claude' | 'codex'
 
-function isAssistantActive(state: any): boolean {
-  if (typeof state === 'boolean') {
-    return state
-  }
-  return state?.status !== 'inactive'
-}
+// Live status is the AssistantState object; the boolean shape is the legacy
+// per-assistant flag still emitted through the ahd-events path (and its regression
+// test), so every projector defensively accepts both.
+type AssistantStateInput = AssistantState | boolean | null | undefined
 
-function isAssistantReadOnly(state: any): boolean {
-  if (state && typeof state === 'object') {
-    return !!state.readOnly
-  }
-  return false
-}
-
-function getAssistantStatus(state: any): string {
+function getAssistantStatus(state: AssistantStateInput): string {
   if (typeof state === 'boolean') {
     return state ? 'active' : 'inactive'
   }
   return state?.status ?? 'inactive'
+}
+
+// The 5-state code-assistant contract (tauri.ts AssistantState:
+// inactive | starting | active | degraded | error) decides which header control the
+// panel projects — not a bare inactive-vs-not binary. Only a genuinely running
+// assistant exposes the Attach/Close management control; 'error' keeps its
+// pre-existing running-control mapping (unchanged, out of task-9 scope), while
+// 'starting' (mid-transition, hands-off) and 'degraded' (recoverable → Open) are not
+// attachable and route to the Open control instead.
+function isAssistantActive(state: AssistantStateInput): boolean {
+  switch (getAssistantStatus(state)) {
+    case 'active':
+    case 'error':
+      return true
+    case 'inactive':
+    case 'starting':
+    case 'degraded':
+      return false
+    default:
+      return false
+  }
+}
+
+// starting = the CLI is spawned but not yet ready: hands-off until it settles, so the
+// panel offers no clickable lifecycle action while it is in flight.
+function isAssistantStarting(state: AssistantStateInput): boolean {
+  return getAssistantStatus(state) === 'starting'
+}
+
+function isAssistantReadOnly(state: AssistantStateInput): boolean {
+  if (state && typeof state === 'object') {
+    return !!state.readOnly
+  }
+  return false
 }
 
 const inactiveCodeAssistantStatus: CodeAssistantStatus = {
@@ -517,6 +543,10 @@ export function CopilotPanel({
   const isClaudeOpenDisabled = getAssistantStatus(codeAssistantStatus?.claude) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.claude)
   const isCodexOpenDisabled = getAssistantStatus(codeAssistantStatus?.codex) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.codex)
   const allReadOnlyInactive = isClaudeOpenDisabled && isCodexOpenDisabled
+  // While either CLI is mid-start the Open control is hands-off: a disabled trigger
+  // makes its lifecycle items unreachable until the state settles.
+  const isAnyCodeAssistantStarting =
+    isAssistantStarting(codeAssistantStatus?.claude) || isAssistantStarting(codeAssistantStatus?.codex)
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -770,7 +800,7 @@ export function CopilotPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || allReadOnlyInactive}
+                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || allReadOnlyInactive || isAnyCodeAssistantStarting}
                     aria-label="Open code assistant"
                     className="studio-canvas-input-surface shrink-0"
                     title={allReadOnlyInactive ? 'Workspace-owned config is read-only' : undefined}

@@ -149,4 +149,28 @@ tzutil /g   # (Windows 侧) ↔  readlink -f /etc/localtime | sed 's|.*/zoneinfo
    (上游修复前的操作项)。已知上游问题另见:kill→up 重生偶发单 agent CRASHED;
    `~/.cache/ah/sandboxes/` 尸体累积无 GC。
 
+### 栈重建/复活的三条追加配方(2026-07-11 凭据事故复盘实测)
+
+5. **`ah start` 必须在 login shell 里跑**(`wsl -- bash -lc '... ah start --wait'`):
+   daemon unit 的 Environment 是从 start 时的客户端环境烤进去的,再传给全部 spawn scope。
+   非 login shell(`bash -c`/裸脚本)的 PATH 没有 `/root/.local/bin` → master 落地
+   `sh: claude: not found`(exit 127)秒死 → daemon 的 master-death cleanup 把刚 spawn
+   的全部 worker 连坐杀光,客户端只看到一个 `AGENT_NOT_FOUND`,极难反查(实测 4 连败)。
+   `ah` 自己不受影响纯属侥幸(`/usr/bin/ah` 有 symlink),别被"ah 能跑"骗过。
+6. **master 的 root cmd 变体必须用 `env` 承载**:写
+   `cmd = "env IS_SANDBOX=1 claude --dangerously-skip-permissions"`,不要裸
+   `IS_SANDBOX=1 claude ...`——spawn 走 systemd-run 直连路径时 `VAR=1` 前缀
+   **不展开**(systemd 明确警告"not expanded by default"),claude 拿不到
+   IS_SANDBOX 就触发 root 检查 `--dangerously-skip-permissions cannot be used with
+   root`(exit 1)秒死,一样级联全灭。`env` 形式在 sh 与 systemd-run 两条路径下都成立。
+7. **每次 start 前先验运行时注入还在**:worktree ah.toml 的未提交注入(master cmd 变体 +
+   worker 代理 env)会被"延迟蒸发"(本仓实测一天两例,pack CHANGELOG 已记 git-clean 事故;
+   本次为第二次复现,蒸发路径待抓)。拉栈前一行自检:
+   `grep -c HTTP_PROXY ah.toml`(应=worker 数)+ `grep -n '^cmd' ah.toml`(应含 env 变体),
+   少了就重跑注入脚本再 start。凭据事故后复活栈的完整顺序:用户 /login →
+   验 token(`expiresAt` 未过期)→ 验注入 → login shell 里 stop/清 tmux/清本栈 state →
+   `ah start --wait` → 验到 pane(登录态+statusline)→ 注入带进度的重启简报。
+   注意:**长跑中的 claude 席位不会重读凭据文件**,登出态卡在进程内,凭据复活后必须
+   重生席位(kill+up 或整栈重建;`ah up` realign 非原子,ah#16,整栈重建更稳)。
+
 首跑踩坑回写进本 README 与 `.ah/VERIFY.md` §2——档案错了改档案,一处生效。

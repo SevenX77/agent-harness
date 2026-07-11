@@ -692,9 +692,9 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     assert events[0].summary.startswith("Injected this turn")
     assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
-    # 规则文档在会话级 system_prompt,不随每轮 query 重发;无 view context 时
-    # query 就是裸用户消息。
-    assert "聚焦 Studio 上下文" in str(getattr(captured_options[0], "system_prompt", ""))
+    # MoirAI 资产在会话级 system_prompt(preset+append),不随每轮 query 重发;
+    # 无 view context 时 query 就是裸用户消息。
+    assert "assembled-by=studio" in str(getattr(captured_options[0], "system_prompt", ""))
     assert client.queries[0] == "user text"
 
 

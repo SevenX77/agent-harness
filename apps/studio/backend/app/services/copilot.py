@@ -21,12 +21,12 @@ import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, cast
 from xml.sax.saxutils import escape
 
 from claude_agent_sdk import (
+    AgentDefinition,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ClaudeSDKError,
@@ -41,6 +41,7 @@ from claude_agent_sdk.types import (
     McpServerConfig,
     ResultMessage,
     StreamEvent,
+    SystemPromptPreset,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -74,6 +75,7 @@ from app.models.copilot import (
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
+from app.services import agent_assets
 from app.services.copilot_tools import build_copilot_mcp_servers
 
 SessionKey = tuple[str, str, str]
@@ -82,87 +84,46 @@ logger = logging.getLogger(__name__)
 
 _ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
 
-_PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
-
 COPILOT_SDK_SUPPORTED_METHOD_IDS = call_method_ids_for_client("anthropic_messages_client")
 
-
-@lru_cache(maxsize=1)
-def load_copilot_rules() -> str:
-    """恒定规则层:app/prompts/copilot-rules.md —— 单一真相文档,SDK 直连路在这里
-    装载;ah 拉起路经其 rules 注入机制装载同一份。规则变更改文档、走 PR,不改代码。"""
-    return (_PROMPTS_DIR / "copilot-rules.md").read_text(encoding="utf-8").strip()
-
-
-@lru_cache(maxsize=1)
-def copilot_rules_hash() -> str:
-    """规则文档指纹(sha256 前 8 位),回显进 context_resolved 事件,让用户能核对
-    本轮会话吃的是哪一版规则(anti hidden-prompt-magic,与上下文回显同一纪律)。"""
-    return hashlib.sha256(load_copilot_rules().encode("utf-8")).hexdigest()[:8]
-
-
-def _skill_spec_dir() -> Path | None:
-    """The authoritative graph_skill syntax spec dir, mounted for the copilot to
-    Read (F3 渐进暴露). Returns None when absent (e.g. a bundled app without docs)."""
-    candidate = Path(__file__).resolve().parents[5] / "docs/engine/mvp1/01-contract/02-skill-syntax"
-    return candidate if candidate.is_dir() else None
-
-
-_SKILLS_SRC_DIR = _PROMPTS_DIR / "skills"
-
-
-def copilot_skill_names() -> list[str]:
-    """Names of the copilot scenario skills shipped with the backend
-    (app/prompts/skills/<name>/SKILL.md),按名排序;缺目录时为空。"""
-
-    if not _SKILLS_SRC_DIR.is_dir():
-        return []
-    return sorted(
-        entry.name for entry in _SKILLS_SRC_DIR.iterdir() if (entry / "SKILL.md").is_file()
-    )
+# 读类三件 + 零审批 MCP 工具声明式直放(R8.1/R9.1/R10.2):由后端实现并自校验
+# 参数的工具天然安全;Write/Edit/Bash 不在此列,走 "ask" 路径进审批 UX。
+_DECLARATIVE_ALLOWED_TOOLS = [
+    "Read",
+    "Glob",
+    "Grep",
+    "mcp__studio__get_llm_roles",
+    "mcp__studio__compile_skill",
+    "mcp__studio__run_role_test",
+    "mcp__studio__predict_skill",
+    "mcp__studio__create_llm_role",
+    "mcp__studio__update_llm_role",
+]
 
 
 def _materialize_copilot_skills(workspace_dir: str | Path) -> list[str]:
-    """把随包的场景技能物化进 workspace 的 .claude/skills/,供 CLI 发现。
+    """把随包的场景技能(app/agents/skills)物化进 workspace 的 .claude/skills/,
+    供 CLI 发现。
 
     每次会话创建都覆盖写(以随包版本为准,幂等);`.claude/` 是 Studio 的运行时
     供给目录,不属于 D12「skill 源文件唯一写者」管辖的 skills/ 用户源文件。"""
 
-    names = copilot_skill_names()
+    names = agent_assets.skill_names()
     if not names:
         return []
+    src_root = agent_assets.agents_dir() / "skills"
     dest_root = Path(workspace_dir) / ".claude" / "skills"
     for name in names:
-        shutil.copytree(_SKILLS_SRC_DIR / name, dest_root / name, dirs_exist_ok=True)
+        shutil.copytree(src_root / name, dest_root / name, dirs_exist_ok=True)
     return names
 
 
 def _mounted_doc_dirs() -> list[tuple[str, Path]]:
-    """挂载给 copilot 只读查阅的参考目录(渐进暴露:重内容放 Read 后面,system
-    prompt 里只留一行路由)。仓库 docs 缺席时(打包版)对应条目自动省略。
+    """挂载给 copilot 只读查阅的目录 —— 收敛为随包知识库一条(R4.4/4.5):
+    契约事实全部在 knowledge/(KB-00 为路由入口),不再挂开发仓 docs
+    (打包版没有它们,挂了也是静默消失的假依赖)。"""
 
-    (领域说明, 目录) 对;目录同时进 add_dirs 与读护栏放行集。"""
-
-    repo_root = Path(__file__).resolve().parents[5]
-    candidates = [
-        (
-            "graph_skill 精确语法 / 字段 / 错误码(权威 skill-spec)",
-            repo_root / "docs/engine/mvp1/01-contract/02-skill-syntax",
-        ),
-        (
-            "engine 契约:物理布局 / 编译规则 / 数据契约 / 失效规则",
-            repo_root / "docs/engine/mvp1/01-contract",
-        ),
-        (
-            "LLM 概念:roles / routes / fallback_chain / 能力与探测",
-            repo_root / "docs/graph-agent-gateway/mvp1",
-        ),
-        (
-            "Studio 配置文件地图(哪个文件是什么、能否手改)",
-            _PROMPTS_DIR / "mounted",
-        ),
-    ]
-    return [(label, path) for label, path in candidates if path.is_dir()]
+    return [("graph_skill knowledge base (start at KB-00)", agent_assets.knowledge_dir())]
 
 
 _sessions: dict[SessionCacheKey, ClaudeSDKClient] = {}
@@ -612,30 +573,30 @@ def build_options(
     if env_overrides:
         env.update(env_overrides)
 
-    # F3 渐进暴露: mount the reference doc dirs (engine contract / gateway
-    # concepts / studio config map) so the copilot Reads ground truth on demand;
-    # the session system prompt carries only a one-line-per-dir routing table.
+    # 挂载收敛(R4.4/4.5):只剩随包知识库一条,KB-00 路由入口随手册进 append。
     add_dirs: list[str | Path] = [str(path) for _label, path in _mounted_doc_dirs()]
     permission_mode: Literal["default", "acceptEdits"]
     skills: list[str]
     mcp_servers: dict[str, McpServerConfig]
+    agents: dict[str, AgentDefinition] | None
     if can_use_tool is not None:
-        # Pre-allowing a tool makes the SDK skip can_use_tool for it, so pre-allow
-        # NOTHING: Read/Glob/Grep 走读护栏(出圈挂审批),Write/Edit 走 workspace
-        # 圈定,Bash 走挂起式审批 —— 全部经 can_use_tool;studio MCP 工具由后端
-        # 实现并校验,回调默认放行(零审批)。
-        allowed_tools = []
+        # 读类三件 + 零审批 MCP 声明式直放(R8.1;这些不再进 can_use_tool);
+        # Write/Edit/Bash 留在 "ask" 路径:白名单圈定 + 审批 UX 照旧。硬边界
+        # 由 PreToolUse hook 承担(每次调用必触发,不受 allowed_tools 绕过)。
+        allowed_tools = _DECLARATIVE_ALLOWED_TOOLS.copy()
         permission_mode = "default"
         # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
         # (SDK 会自动配好 Skill 工具,types.py skills 文档)。
-        skills = copilot_skill_names()
+        skills = agent_assets.skill_names()
         mcp_servers = build_copilot_mcp_servers()
+        agents = _goddess_agent_definitions()
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
-        # SDK probe 路要确定性输出,压掉技能与 MCP 工具。
+        # SDK probe 路要确定性输出,压掉技能 / MCP / subagents(R6.6 裸配置)。
         skills = []
         mcp_servers = {}
+        agents = None
     return ClaudeAgentOptions(
         cwd=workspace_dir,
         # R7-H: send the route's own model natively. Missing this made generic
@@ -646,9 +607,11 @@ def build_options(
         allowed_tools=allowed_tools,
         env=env,
         can_use_tool=can_use_tool,
-        # 恒定规则层走会话级 system prompt(单一真相 = app/prompts/copilot-rules.md);
-        # 当前请求显式携带的上下文走每轮 turn prompt,见 _prompt_with_turn_context。
-        system_prompt=build_session_system_prompt(),
+        agents=agents,
+        # 会话基座 = 完整 claude_code preset,MoirAI 资产以 append 叠加(R6.1;
+        # 纯字符串会整体替换基座,是已定谳的缺陷用法);当前请求显式携带的上下文
+        # 走每轮 turn prompt,见 _prompt_with_turn_context。
+        system_prompt=_session_system_prompt(),
         # SDK 隔离模式:不加载开发机 ~/.claude 等文件系统配置,copilot 行为不随
         # 宿主机个人配置漂移;MCP 只认显式传入的(当前为空)。
         setting_sources=[],
@@ -677,21 +640,70 @@ def _xml_leaf(tag: str, value: object) -> str:
     return f"  <{tag}>{escape(payload)}</{tag}>"
 
 
-def build_session_system_prompt() -> str:
-    """会话级 system prompt = 规则文档 + 挂载 spec 指针(都是会话内不变的静态层)。
+def _session_system_prompt() -> SystemPromptPreset:
+    """会话级 system prompt = 完整 claude_code preset + MoirAI 资产 append
+    (moirai 角色 + 操作手册 + panel 表面薄层;KB-00 路由入口在手册里,R3.8)。
 
     只有当前请求显式携带的上下文会走 ``_prompt_with_turn_context`` 注入到
-    当轮消息,绝不进会话级 —— 三层分离:恒定规则 / 链路装载 / 请求上下文。"""
+    当轮消息,绝不进会话级 —— 三层分离:基座+资产 / 链路装载 / 请求上下文。"""
 
-    prompt = load_copilot_rules()
-    mounted = _mounted_doc_dirs()
-    if mounted:
-        routing = "\n".join(f"- {label} → `{path}`" for label, path in mounted)
-        prompt += (
-            "\n\n## 已挂载参考目录(只读,按需用 Read/Glob/Grep 查阅,不整段复述)\n"
-            + routing
+    return {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": agent_assets.assemble_inline(
+            ["roles/moirai.md", "operating-manual.md", "contexts/panel.md"]
+        ),
+    }
+
+
+# 三女神 AgentDefinition 的职责一句话(description 供 MoirAI 判定派遣契合度;
+# 台词层人格在 roles/*.md,这里只是调度语义)。
+_GODDESS_DESCRIPTIONS = {
+    "clotho": (
+        "Designs what the skill should be: overall capability, domain analysis,"
+        " node orchestration, and agent prompt design."
+    ),
+    "lachesis": (
+        "Makes the skill real and runnable: engineering conventions, engine"
+        " contracts, compile-clean guarantees, and the compile→predict"
+        " diagnostic chain."
+    ),
+    "atropos": (
+        "Judges finished work on real run evidence: final verdicts and"
+        " feedback that flows back into the next iteration."
+    ),
+}
+
+_GODDESS_TOOLS: dict[str, list[str]] = {
+    "clotho": ["Read", "Glob", "Grep"],
+    "lachesis": [
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__studio__compile_skill",
+        "mcp__studio__predict_skill",
+    ],
+    "atropos": ["Read", "Glob", "Grep"],
+}
+
+
+def _goddess_agent_definitions() -> dict[str, AgentDefinition]:
+    """三女神 = SDK 原生 subagents(R6.2/6.3)。prompt 运行于薄 harness 基座
+    (spike 定谳,research §T6),因此带上自足的操作手册;model 不设,继承
+    会话路由;skills 与 ah 路同源派生自 agent-skill-map.json(R5.5)。"""
+
+    skill_map = agent_assets.load_skill_map()
+    return {
+        name: AgentDefinition(
+            description=_GODDESS_DESCRIPTIONS[name],
+            prompt=agent_assets.assemble_inline(
+                [f"roles/{name}.md", "operating-manual.md"]
+            ),
+            tools=_GODDESS_TOOLS[name],
+            skills=skill_map[name],
         )
-    return prompt
+        for name in ("clotho", "lachesis", "atropos")
+    }
 
 
 def _context_resolved_event(
@@ -701,15 +713,12 @@ def _context_resolved_event(
 ) -> CopilotEventContextResolved:
     """Build the first-event echo of explicit request context injected this turn."""
     del skill_id
-    spec_mounted = _skill_spec_dir() is not None
     parts: list[str] = []
     detail_lines: list[str] = []
     if judge_context is not None:
         parts.append("judge context")
         detail_lines.append(render_copilot_judge_context_xml(judge_context))
-    if spec_mounted:
-        parts.append("skill-spec mounted")
-    parts.append(f"rules@{copilot_rules_hash()}")
+    parts.append(f"assets@{agent_assets.assets_fingerprint()}")
     summary = "Injected this turn: " + " · ".join(parts)
     detail = "\n".join(detail_lines) if detail_lines else "(no request context)"
     return CopilotEventContextResolved(summary=summary, detail=detail)

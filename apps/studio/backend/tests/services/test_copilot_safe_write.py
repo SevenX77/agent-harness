@@ -87,9 +87,11 @@ def test_build_options_safe_write_routes_everything_through_callback() -> None:
         return PermissionResultAllow()
 
     opts = copilot.build_options("https://x", "key", "/ws", can_use_tool=cb)
-    # NOTHING pre-allowed: Read/Glob/Grep 读护栏、Write/Edit 圈定、Bash 审批
-    # 全部要经过 can_use_tool(预放行的工具会跳过回调)。
-    assert opts.allowed_tools == []
+    # R8.1: 读类三件 + 零审批 MCP 声明式直放(不再进回调);Write/Edit/Bash
+    # 不在 allowlist,仍走 "ask" 路径经 can_use_tool 进审批 UX。
+    assert "Read" in opts.allowed_tools
+    for gated in ("Write", "Edit", "Bash"):
+        assert gated not in opts.allowed_tools
     assert opts.permission_mode == "default"
     assert opts.can_use_tool is cb
 
@@ -373,17 +375,17 @@ def test_read_inside_workspace_is_allowed_without_events(tmp_path: Path) -> None
     assert _drain(queue) == []
 
 
-def test_read_of_mounted_spec_dir_is_allowed(tmp_path: Path) -> None:
-    spec_dir = copilot._skill_spec_dir()
-    assert spec_dir is not None, "repo spec dir expected in this checkout"
-    queue = _register_sink("skill-spec-read", tmp_path)
-    cb = copilot._make_safe_write_can_use_tool("skill-spec-read")
+def test_read_of_mounted_knowledge_dir_is_allowed(tmp_path: Path) -> None:
+    from app.services import agent_assets
+
+    queue = _register_sink("skill-kb-read", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("skill-kb-read")
 
     result = asyncio.run(
         cb(
             "Read",
-            {"file_path": str(spec_dir / "mvp1-alignment.md")},
-            ToolPermissionContext(tool_use_id="tu-spec"),
+            {"file_path": str(agent_assets.knowledge_dir() / "KB-00-hub.md")},
+            ToolPermissionContext(tool_use_id="tu-kb"),
         )
     )
 

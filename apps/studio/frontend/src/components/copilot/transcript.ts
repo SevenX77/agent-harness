@@ -42,36 +42,30 @@ export function buildAssistantTranscript(message: CopilotMessage): TranscriptSeg
 }
 
 /**
- * R7-A: a turn's renderable split into the collapsible PROCESS (thinking, tool
- * calls, context, any intermediate narration) and the final ANSWER (the last
- * text run). The panel shows the process live while streaming, then folds it
- * into one "Processed {duration}" line once settled, keeping only the answer
- * expanded — PM 2026-07-02「最后只保留最终输出，上面所有过程收束到一个折叠的过程行」.
+ * R7-A: a turn's renderable metadata for UI rendering.
+ * Instead of physically slicing segments and losing events, we retain the full
+ * chronological array of segments and calculate the topology (lastTextIndex)
+ * to let the rendering layer decide between live streaming (flat chronological)
+ * and settled (collapsed process + final answer) presentation.
  */
 export interface AssistantView {
-  process: TranscriptSegment[]
-  answer: { id: string; content: string } | null
+  segments: TranscriptSegment[]
+  lastTextIndex: number
   durationMs: number | null
 }
 
-export function partitionAssistantView(message: CopilotMessage): AssistantView {
+export function buildAssistantView(message: CopilotMessage): AssistantView {
   const segments = buildAssistantTranscript(message)
-  let answerIndex = -1
+  let lastTextIndex = -1
   for (let i = segments.length - 1; i >= 0; i -= 1) {
     if (segments[i].kind === 'text') {
-      answerIndex = i
+      lastTextIndex = i
       break
     }
   }
-  const answerSegment = answerIndex >= 0 ? segments[answerIndex] : null
-  const answer =
-    answerSegment && answerSegment.kind === 'text'
-      ? { id: answerSegment.id, content: answerSegment.content }
-      : null
-  const process = answerIndex >= 0 ? segments.slice(0, answerIndex) : segments
   const done = message.events.find((event) => event.type === 'done')
   const durationMs = done ? Math.max(0, done.receivedAt - message.createdAt) : null
-  return { process, answer, durationMs }
+  return { segments, lastTextIndex, durationMs }
 }
 
 /** Compact "Processed 45s" / "1m 20s" duration label for the folded process row. */

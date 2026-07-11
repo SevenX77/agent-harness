@@ -163,7 +163,14 @@ revision_trace: REVISION-TRACE.md
   - 更新 `apps/studio/tauri/src/lib.rs:550` 的 moirai-intro skill 文本中同一句"ah status 不是可用命令"的表述；本 spec 与 moirai spec 都要改这一行，本 spec 先行落地，moirai spec 后续 rebase。
   - _Requirements: 对应 design.md Overview 与本文件任务 5/8 的行为变更_
 
-- [ ] 11. 跑 focused verification
+- [x] 11. 跑 focused verification
+  - **完成于 a41c7851**（g1-claude 执笔）：Rust `cargo test --lib` 166 passed/1 既有 root 沙箱环境红
+    （`native_fs.rs` 未被本 spec 触碰，已用 `git diff origin/main...HEAD` 证伪为既有红，非本次引入）；
+    前端 lint/typecheck/test(1851 tests)/build 全绿，copilot 面板投影定向复跑 56 tests 全绿；
+    `.ah/VERIFY.md` §1 收口全量清单（ruff/mypy×3/pytest×3/pip-audit）全绿、0 CVE。
+    手工 smoke 因本沙箱无图形显示服务（`DISPLAY` 空、无 Xvfb）未能真机跑，改产出
+    `task11-manual-smoke-checklist.md` 供 operator/PM 真机逐项点验。master 已物理核实
+    commit 只含两份报告文件、native_fs.rs 未被本分支触碰的证伪依据成立。
   - 运行 Tauri/Rust ah adapter 相关测试。
   - 如果触及 frontend projection，运行 Copilot panel 相关前端测试。
   - 使用安装后的 ah v1.4.0+ 手工 smoke：Open、Attach、master `/exit` 后回到 Open、`starting` 期间 hands-off、`degraded` 期间 Open 可用、Close、app quit cleanup、workspace-owned config（如本仓根 `ah.toml`）在 Close/quit 时保持不受影响、只读 assistant 的 Close 为 Detach（仅断开观察、编队仍活）。

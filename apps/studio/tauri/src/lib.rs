@@ -31,8 +31,6 @@ use tauri_plugin_dialog::DialogExt;
 /// making the user wait noticeably if the FE is gone.
 const QUIT_FLUSH_BUDGET: Duration = Duration::from_millis(1500);
 const QUIT_FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(25);
-const AH_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(150);
-const AH_SHUTDOWN_POLL_ATTEMPTS: usize = 12;
 
 const AH_VERSION_MIN: &str = "1.4.0";
 
@@ -479,25 +477,6 @@ enum CodeAssistantOpenDecision {
     HandsOff,
 }
 
-#[derive(Clone, Debug)]
-struct AhRuntimeProbe {
-    snapshot: AhLifecycleSnapshot,
-    tmux_socket_label: Option<String>,
-    tmux_sessions: Vec<String>,
-    session_ids: Vec<String>,
-}
-
-impl AhRuntimeProbe {
-    fn empty() -> Self {
-        Self {
-            snapshot: AhLifecycleSnapshot::new(false, false, false),
-            tmux_socket_label: None,
-            tmux_sessions: Vec::new(),
-            session_ids: Vec::new(),
-        }
-    }
-}
-
 fn code_assistant_shutdown_is_complete(snapshot: AhLifecycleSnapshot) -> bool {
     !snapshot.ahd_has_inventory && !snapshot.master_tmux_alive && !snapshot.worker_tmux_alive
 }
@@ -516,16 +495,6 @@ impl CommandResult {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         }
-    }
-
-    fn combined_output(&self) -> String {
-        if self.stderr.is_empty() {
-            return self.stdout.clone();
-        }
-        if self.stdout.is_empty() {
-            return self.stderr.clone();
-        }
-        format!("{}\n{}", self.stdout, self.stderr)
     }
 }
 
@@ -996,36 +965,6 @@ fn tmux_socket_label_is_safe(label: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
 }
 
-fn run_tmux_socket_command(
-    socket_label: &str,
-    tmux_args: &[&str],
-) -> Result<CommandResult, String> {
-    if !tmux_socket_label_is_safe(socket_label) {
-        return Err(format!("unsafe tmux socket label: {socket_label}"));
-    }
-
-    if cfg!(target_os = "windows") {
-        let mut command = Command::new("wsl.exe");
-        let args = tmux_args
-            .iter()
-            .map(|arg| sh_single_quote_str(arg))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let script = format!(
-            "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; tmux -L {} {}",
-            sh_single_quote_str(socket_label),
-            args
-        );
-        command.args(["-e", "bash", "-lc", &script]);
-        return command_result(command, "tmux");
-    }
-
-    let mut command = Command::new("tmux");
-    command.env("SYSTEMD_LOG_LEVEL", "err");
-    command.arg("-L").arg(socket_label).args(tmux_args);
-    command_result(command, "tmux")
-}
-
 fn extract_tmux_socket_label(text: &str) -> Option<String> {
     for suffix in text.split("tmux -L ").skip(1) {
         let Some(raw_label) = suffix.split_whitespace().next() else {
@@ -1055,91 +994,24 @@ fn ah_ps_output_has_inventory(text: &str) -> bool {
     !extract_ah_session_ids(text).is_empty()
 }
 
-fn tmux_session_is_master(session: &str) -> bool {
-    session.starts_with("master_")
-}
-
-fn tmux_session_is_worker(session: &str) -> bool {
-    session.starts_with("agent_") || session.starts_with("worker_")
-}
-
-fn tmux_session_is_ah_managed(session: &str) -> bool {
-    tmux_session_is_master(session) || tmux_session_is_worker(session)
-}
-
-fn list_tmux_sessions(socket_label: &str) -> Vec<String> {
-    let Ok(result) =
-        run_tmux_socket_command(socket_label, &["list-sessions", "-F", "#{session_name}"])
-    else {
-        return Vec::new();
-    };
-    if !result.success {
-        return Vec::new();
-    }
-    result
-        .stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-fn kill_tmux_session(socket_label: &str, session_name: &str) -> Result<bool, String> {
-    run_tmux_socket_command(socket_label, &["kill-session", "-t", session_name])
-        .map(|result| result.success)
-}
-
-fn inspect_ah_runtime(config_path: &Path, tmux_socket_hint: Option<&str>) -> AhRuntimeProbe {
-    if check_ah_version_cached().is_err() {
-        return AhRuntimeProbe::empty();
-    }
-    let Ok(ps_result) = run_ah_config_command_output(config_path, &["ps"]) else {
-        return AhRuntimeProbe::empty();
-    };
-    let ps_output = ps_result.combined_output();
-    let tmux_socket_label = extract_tmux_socket_label(&ps_output).or_else(|| {
-        tmux_socket_hint
-            .filter(|label| tmux_socket_label_is_safe(label))
-            .map(str::to_string)
-    });
-    let tmux_sessions = tmux_socket_label
-        .as_deref()
-        .map(list_tmux_sessions)
-        .unwrap_or_default();
-    let has_inventory = ps_result.success && ah_ps_output_has_inventory(&ps_output);
-    let session_ids = extract_ah_session_ids(&ps_output);
-    let snapshot = AhLifecycleSnapshot::new(
-        has_inventory,
-        tmux_sessions
-            .iter()
-            .any(|session| tmux_session_is_master(session)),
-        tmux_sessions
-            .iter()
-            .any(|session| tmux_session_is_worker(session)),
-    );
-    AhRuntimeProbe {
-        snapshot,
-        tmux_socket_label,
-        tmux_sessions,
-        session_ids,
-    }
-}
-
-fn force_cleanup_ah_runtime(config_path: &Path, probe: &AhRuntimeProbe) {
-    if let Err(error) = ensure_lifecycle_command_allowed(config_path) {
-        log::warn!(
-            "phase=code-assistant-cleanup action=force-cleanup-refused config={} error={error}",
-            config_path.display()
-        );
-        return;
-    }
-    for session_id in &probe.session_ids {
-        match run_ah_config_command(config_path, &["kill", "--session", session_id, "--force"]) {
-            Ok(true) => log::info!(
-                "phase=code-assistant-cleanup action=ah-kill-session-ok config={} session_id={session_id}",
-                config_path.display()
-            ),
+/// Escalate `ah kill --session <id> --force` to exactly the sessions ah itself
+/// flagged for cleanup in the identity-checked snapshot (`cleanup_target_session_ids`)
+/// — never a Studio "non-terminal ⇒ kill" re-derivation, and never a direct tmux
+/// kill (design.md:226-227, Req 4.2/5.5). The caller has already gated
+/// `config_path` to a Studio-managed config (ownership skip + lifecycle guard),
+/// so no further ownership check runs here. Returns whether any kill reported
+/// success, so the close can report whether it actually tore something down.
+fn force_cleanup_ah_sessions(config_path: &Path, snapshot: &AhRuntimeSnapshot) -> bool {
+    let mut killed_any = false;
+    for session_id in cleanup_target_session_ids(snapshot) {
+        match run_ah_config_command(config_path, &["kill", "--session", &session_id, "--force"]) {
+            Ok(true) => {
+                killed_any = true;
+                log::info!(
+                    "phase=code-assistant-cleanup action=ah-kill-session-ok config={} session_id={session_id}",
+                    config_path.display()
+                );
+            }
             Ok(false) => log::info!(
                 "phase=code-assistant-cleanup action=ah-kill-session-skip config={} session_id={session_id}",
                 config_path.display()
@@ -1150,79 +1022,44 @@ fn force_cleanup_ah_runtime(config_path: &Path, probe: &AhRuntimeProbe) {
             ),
         }
     }
-
-    if let Some(socket_label) = probe.tmux_socket_label.as_deref() {
-        for session in probe
-            .tmux_sessions
-            .iter()
-            .filter(|session| tmux_session_is_ah_managed(session))
-        {
-            match kill_tmux_session(socket_label, session) {
-                Ok(true) => log::info!(
-                    "phase=code-assistant-cleanup action=tmux-kill-session-ok socket={socket_label} session={session}"
-                ),
-                Ok(false) => log::info!(
-                    "phase=code-assistant-cleanup action=tmux-kill-session-skip socket={socket_label} session={session}"
-                ),
-                Err(error) => log::warn!(
-                    "phase=code-assistant-cleanup action=tmux-kill-session-failed socket={socket_label} session={session} error={error}"
-                ),
-            }
-        }
-    }
+    killed_any
 }
 
-fn wait_for_code_assistant_shutdown(
+/// Close a single ah config, crossing NO ownership boundary (design.md 215-228).
+///
+/// A workspace-owned config (a walked-up repo-root `ah.toml` outside the Studio
+/// temp namespace) belongs to the operator's own fleet: skip it transparently —
+/// issue no lifecycle command, and never abort the sweep over the remaining
+/// Studio-managed configs (Req 5.9/4.6). The skip is ownership-selective, sourced
+/// from the single ownership authority, not a blanket no-op.
+///
+/// For a Studio-managed config the normal close is `ah stop`; then the current
+/// snapshot is re-read through the typed events-primary/status-fallback plane
+/// (identity-checked when the workspace is known), and `ah kill --session <id>
+/// --force` is escalated ONLY to the sessions ah itself flagged `cleanup_required`
+/// — never Studio re-deriving "non-terminal therefore kill", never a direct tmux
+/// kill (design.md:225-227).
+fn cleanup_code_assistant_config(
     config_path: &Path,
-    tmux_socket_hint: Option<&str>,
-) -> AhRuntimeProbe {
-    let mut last_probe = inspect_ah_runtime(config_path, tmux_socket_hint);
-    if code_assistant_shutdown_is_complete(last_probe.snapshot) {
-        return last_probe;
-    }
-
-    for _ in 0..AH_SHUTDOWN_POLL_ATTEMPTS {
-        std::thread::sleep(AH_SHUTDOWN_POLL_INTERVAL);
-        let hint = last_probe.tmux_socket_label.as_deref().or(tmux_socket_hint);
-        last_probe = inspect_ah_runtime(config_path, hint);
-        if code_assistant_shutdown_is_complete(last_probe.snapshot) {
-            break;
-        }
-    }
-    last_probe
-}
-
-fn cleanup_code_assistant_config(config_path: &Path) -> Result<bool, String> {
-    ensure_lifecycle_command_allowed(config_path)?;
-    check_ah_version_cached()?;
-    let before = inspect_ah_runtime(config_path, None);
-    if code_assistant_shutdown_is_complete(before.snapshot) {
+    workspace_dir: Option<&Path>,
+) -> Result<bool, String> {
+    if classify_config_ownership(config_path).read_only {
         return Ok(false);
     }
+    // Fail-closed boundary: the ownership skip above already excludes
+    // workspace-owned configs, so this always passes here; it keeps
+    // `ensure_lifecycle_command_allowed` the single authority guarding every path
+    // that can emit a lifecycle command.
+    ensure_lifecycle_command_allowed(config_path)?;
+    check_ah_version_cached()?;
 
-    let stop_succeeded = stop_ah_config(config_path)?;
-    let after_stop =
-        wait_for_code_assistant_shutdown(config_path, before.tmux_socket_label.as_deref());
-    if code_assistant_shutdown_is_complete(after_stop.snapshot) {
-        return Ok(stop_succeeded || before.snapshot != after_stop.snapshot);
-    }
+    let stopped = stop_ah_config(config_path)?;
 
-    force_cleanup_ah_runtime(config_path, &after_stop);
-    let fallback_hint = after_stop
-        .tmux_socket_label
-        .as_deref()
-        .or(before.tmux_socket_label.as_deref());
-    let after_force = wait_for_code_assistant_shutdown(config_path, fallback_hint);
-    if code_assistant_shutdown_is_complete(after_force.snapshot) {
-        return Ok(true);
-    }
+    let killed_any = resolve_cleanup_snapshot(config_path, workspace_dir)
+        .map(|snapshot| force_cleanup_ah_sessions(config_path, &snapshot))
+        .unwrap_or(false);
 
-    Err(format!(
-        "failed to close ah completely: ahd={}, master_tmux={}, worker_tmux={}",
-        after_force.snapshot.ahd_has_inventory,
-        after_force.snapshot.master_tmux_alive,
-        after_force.snapshot.worker_tmux_alive
-    ))
+    Ok(stopped || killed_any)
 }
 
 fn workspace_code_assistant_configs(workspace_root: &Path) -> BTreeSet<PathBuf> {
@@ -1243,7 +1080,7 @@ fn cleanup_workspace_code_assistants(
     let configs = workspace_code_assistant_configs(workspace_root);
     let mut closed_any = false;
     for config in &configs {
-        closed_any |= cleanup_code_assistant_config(config)?;
+        closed_any |= cleanup_code_assistant_config(config, Some(workspace_root))?;
     }
     Ok(CodeAssistantCleanupResult {
         configs,
@@ -1698,7 +1535,11 @@ fn discover_studio_ah_configs() -> Vec<PathBuf> {
 
 fn cleanup_registered_code_assistants(configs: BTreeSet<PathBuf>) {
     for config in configs {
-        match cleanup_code_assistant_config(&config) {
+        // App-quit sweep: only Studio-managed configs reach here (registered
+        // state + Studio temp namespace discovery), and there is no workspace to
+        // disambiguate, so the snapshot is read config-scoped (Some/None handled
+        // in `resolve_cleanup_snapshot`).
+        match cleanup_code_assistant_config(&config, None) {
             Ok(true) => log::info!(
                 "phase=code-assistant-cleanup action=close-ok config={}",
                 config.display()
@@ -3462,6 +3303,52 @@ fn resolve_open_snapshot(
     let snapshot = resolve_bootstrap_snapshot(status_result, None).ok()?;
     verify_snapshot_identity(status.stdout.as_str(), config_path, workspace_dir).ok()?;
     Some(snapshot)
+}
+
+/// The session ids Close/app-quit cleanup may escalate with `ah kill --session
+/// <id> --force`, taken ONLY from the identity-checked snapshot's own `sessions[]`
+/// and driven by ah's own per-session judgment — never Studio re-deriving
+/// "non-terminal therefore kill" (Req 4.2/5.5, design.md:226).
+///
+/// A healthy ACTIVE session ah has NOT flagged (`cleanup_required:false`, carrying
+/// `safe_to_cleanup:false` because it holds live work) must be spared; a terminal
+/// CLOSED session needs no cleanup. `safe_to_cleanup` is ah's safety gate against
+/// killing live work, NOT a kill trigger, so `!safe_to_cleanup` alone must never
+/// escalate a kill — only ah's own `cleanup_required` flag selects a target. The
+/// `BTreeSet` dedupes and orders the ids for a deterministic escalation set.
+fn cleanup_target_session_ids(snapshot: &AhRuntimeSnapshot) -> BTreeSet<String> {
+    snapshot
+        .sessions
+        .iter()
+        .filter(|session| session.cleanup_required)
+        .map(|session| session.session_id.clone())
+        .collect()
+}
+
+/// The post-stop snapshot cleanup reads to decide `ah kill` targets (design.md:225
+/// "Re-read the current snapshot ... after stop"), always through the typed
+/// events-primary/status-fallback plane — never `ah ps` text or tmux probing
+/// (design.md:178).
+///
+/// When the caller knows the workspace (Close, and the Open/Attach cleanup-stale
+/// branches) it goes through `resolve_open_snapshot`, which bootstraps a fresh
+/// `status --json` read and verifies the snapshot's own identity really matches
+/// the requested workspace before any kill consumes it. The app-quit sweep has
+/// only the config path (no workspace to disambiguate); `ah --config <path> status
+/// --json` is already scoped to exactly that ahd, so it reads config-scoped
+/// without the workspace identity gate.
+fn resolve_cleanup_snapshot(
+    config_path: &Path,
+    workspace_dir: Option<&Path>,
+) -> Option<AhRuntimeSnapshot> {
+    if let Some(workspace_dir) = workspace_dir {
+        return resolve_open_snapshot(None, config_path, workspace_dir);
+    }
+    let status = run_ah_config_command_output(config_path, &["status", "--json"]).ok()?;
+    if !status.success {
+        return None;
+    }
+    parse_ah_runtime_snapshot(&status.stdout).ok()
 }
 
 #[cfg(test)]

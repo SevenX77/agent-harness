@@ -152,7 +152,11 @@ revision_trace: REVISION-TRACE.md
   - 覆盖只读（workspace-owned）assistant：active 时 Close→Detach（仅断开本地观察，不发 stop），inactive 时 Open 置灰带引导文案（Req 6.4）。
   - _Requirements: 3.1, 3.2, 3.3, 3.6, 3.7, 5.1, 5.4, 5.6, 5.7, 5.14_
 
-- [ ] 10. 设计文档回写（F7，须与实现同 PR）
+- [x] 10. 设计文档回写（F7，须与实现同 PR）
+  - **完成于 26308bd3**（d1-claude 执笔，纯文档回写 4 处 + design.md:226 收紧）+ **47e6f95b/938fb5e7**
+    （第 4 条验收点收尾：lib.rs moirai-intro skill 文案订正，RED=g1-claude，GREEN=g1-m1）。
+    跨泳道审计：docs 部分 ACCEPT=`task10-cross-lane-review-2026-07-11.md`（4948037f，g2-claude 审）；
+    lib.rs 部分 ACCEPT=`task10-lib-rs-cross-lane-review-2026-07-11.md`（fdf358ab，g2-claude 审）。
   - 更新 `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md:185-193`：加入 `starting`/`degraded` 相位语义（此前该段写"runtime_state 只有 Active/Degraded/Inactive、没有 Starting"，已被 ah 1.3.4 证伪）。
   - 更新同文件 629-644：把"`ah ps` 输出解析必须提取 tmux session id 供 double-check/兜底"这类内容，从"必须遵守的规则"改写为与本 spec 一致的 events-primary + ownership guard 表述；不再要求解析 `ah ps` 作为决策依据。
   - 更新同文件 553 与 644："`ah status` 不是可用命令"——1.4.0 起为假，需订正为 `status --json` 作为 bootstrap/fallback 读的正确用法（含 F1 的 daemon-absent 注意事项）。

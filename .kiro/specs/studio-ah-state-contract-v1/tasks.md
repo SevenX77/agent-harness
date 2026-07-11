@@ -140,7 +140,10 @@ revision_trace: REVISION-TRACE.md
   - 更新 `copilot-panel.tsx` 的投影逻辑以消费新 payload，验证既有的双活跃分支（copilot-panel.tsx:303-306）能正确显示 claude/codex 各自真实状态。
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 5.12_
 
-- [ ] 9. 验证前端按钮投影（含 starting/degraded + 只读 Detach）
+- [x] 9. 验证前端按钮投影（含 starting/degraded + 只读 Detach）
+  - **完成于 2a14016b**，RED=7ab55ec6，跨泳道审计 ACCEPT=`task9-cross-lane-review-2026-07-11.md`（1f6bf220）。
+    只读 Detach/置灰在更早的 task8 批次（68ee4cee）已落地，本任务补齐了 starting/degraded 分支
+    （此前 `isAssistantActive` 只做 inactive-vs-非inactive 二分，塌成 active）。
   - **先写红测试**：`test_readonly_active_close_is_detach`（`readOnly:true`+active fixture → Close 呈现为 Detach、只关本地 tab、不发 `ah stop`/`ah kill`，Req 5.14）；`test_readonly_inactive_open_disabled`（`readOnly:true`+inactive → Open 置灰带引导文案、不发任何生命周期命令，Req 5.14）。
   - 用 fixture 验证 Open/Attach/Close/Starting/Degraded/Error 状态只由 identity-checked normalized snapshot 决定。
   - 覆盖 ahd alive、`active=false`、terminal sessions 时按钮恢复 Open。

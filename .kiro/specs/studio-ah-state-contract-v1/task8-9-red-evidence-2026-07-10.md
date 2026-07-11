@@ -168,6 +168,69 @@ task8 是**破坏性 payload 重塑**,会连带失效两处既有旧形状测试
 
 以上是发现即报,不阻塞本批红测试交付。
 
+**master 裁定(2026-07-10)**:既有测试迁移由 g2-claude(执笔/gatekeeper)做,不下放 g2-m1
+(铁律「实施者不得增删改测试文件」无"机械迁移"例外)。迁移已在紧跟 871c3546 的追加 commit 落地,
+见下 §D。第 3 项 `tauri.ts` 接口本体仍留给 g2-m1(生产代码,不算改测试)。
+
+---
+
+## D. 既有测试迁移到新 payload 形状(master 裁定后追加,同批)
+
+把 task8 破坏性重塑会连带失效的既有旧形状测试,迁到新 per-assistant 形状,**语义断言不变**,
+只改被断言的数据形状。**不动** `tauri.ts:143-146` 接口本体(生产代码,g2-m1 在 task8 改)。
+
+### 迁移清单
+
+1. Rust `ah_events_status_aggregation_is_display_only`(`apps/studio/tauri/src/lib.rs`):
+   旧 `assert_eq!(..., CodeAssistantStatus { claude: true, codex: false })` →
+   序列化 wire 断言 `v["claude"]["status"]=="active"` / `v["codex"]["status"]=="inactive"`;
+   启动窗一段同理断言两者 `"inactive"`。"事件聚合仅供显示、启动窗读作未活跃"语义原样保留。
+2. 前端 `copilot-panel.test.ts`「derives the close button state...」与「derives attach menu
+   entries...」:旧布尔字面量 `{claude:true,codex:false}` →
+   `{claude:{status:'active',readOnly:false},codex:{status:'inactive',readOnly:false}}`
+   (readOnly:false=Studio-managed,故 active 控件仍是 'Close …',与只读 Detach 场景解耦)。
+   Close-label / attach-label 期望值原样不变。
+
+### 红仍在,且红因是"新生产缝还不存在"(非旧字面量残留、非意外变绿)
+
+- **Rust(提交态,编译期红)**:`cargo test --lib --no-run` 仍只报
+  `error[E0425]: cannot find function classify_config_ownership`(2 处)——迁移后的
+  `ah_events_...` 已能编译(不再有旧 `{claude,codex}` 字面量类型错误),整个 target 之所以仍
+  编译不过,是因为 task8/5 新生产缝 `classify_config_ownership` 还不存在。
+- **Rust(临时桩实证,确认不会意外变绿)**:临时给 mod tests 塞一个
+  `classify_config_ownership` 桩让 target 能编译后真跑三条(桩用完即撤,提交态无桩):
+
+  ```
+  test tests::test_payload_reports_claude_codex_independently ... FAILED
+    left: Null   right: "active"     (旧扁平 bool payload 无嵌套 .status)
+  test tests::test_payload_carries_readonly_flag ... FAILED
+    left: false  right: true         (桩分类器 false，与冻结 workspace-owned=true 不符)
+  test tests::ah_events_status_aggregation_is_display_only ... FAILED
+    left: Null   right: "active"     (同上，迁移后仍红,未意外变绿)
+  test result: FAILED. 0 passed; 3 failed; 160 filtered out
+  ```
+
+  证明迁移后的 `ah_events_...` 对**旧未重塑生产代码**仍是真红(序列化后拿不到嵌套
+  `.status`),红因确是"新 payload 形状还没实现",不是断言被削弱成恒真。
+
+- **前端(运行期红 + 类型红)**:`npx vitest run …copilot-panel.test.ts` →
+  **4 failed | 18 passed**(2 条迁移 + 2 条 task9 新测,均红;其余 18 条既有绿):
+
+  ```
+  × derives the close button state from live ahd status
+      AssertionError: expected [ 'claude', 'codex' ] to deeply equal []
+  × derives attach menu entries from live ahd status
+  × test_readonly_active_close_is_detach
+  × test_readonly_inactive_open_disabled
+  ```
+
+  迁移后 `activeCodeAssistantIds({claude:inactive,codex:inactive})` 在**旧 helper**下把两个
+  per-assistant 对象当 truthy → 返回 `['claude','codex']`(期望 `[]`)→ 真红,未意外变绿。
+  `npm run typecheck` 现为红(退出码 2),报 `TS2322: Type '{ status; readOnly }' is not
+  assignable to type 'boolean'`——即新形状字面量还不匹配旧 `CodeAssistantStatus` 接口,红因同为
+  "新生产缝(重塑后的 `tauri.ts` 接口 + helper)还不存在"。g2-m1 在 task8 把接口与 helper 重塑后,
+  运行期与类型双绿。
+
 ---
 
 ## 验证命令汇总(可复跑)

@@ -270,11 +270,17 @@ describe('buildCopilotJudgeDraft', () => {
   })
 
   it('derives the close button state from live ahd status', () => {
-    expect(activeCodeAssistantIds({ claude: false, codex: false })).toEqual([])
-    expect(codeAssistantCloseButtonLabel({ claude: false, codex: false })).toBeNull()
-    expect(codeAssistantCloseButtonLabel({ claude: true, codex: false })).toBe('Close Claude code')
-    expect(codeAssistantCloseButtonLabel({ claude: false, codex: true })).toBe('Close Codex')
-    expect(codeAssistantCloseButtonLabel({ claude: true, codex: true })).toBe('Close assistants')
+    // Migrated from the old `{claude,codex}` bool shape to the task-8 per-assistant payload
+    // (design.md:290-297); the normal (non-read-only) close-label semantic is unchanged.
+    // readOnly:false = Studio-managed, so an active assistant's control stays 'Close …' —
+    // the read-only Detach case is covered by test_readonly_active_close_is_detach.
+    const active = { status: 'active', readOnly: false } as const
+    const inactive = { status: 'inactive', readOnly: false } as const
+    expect(activeCodeAssistantIds({ claude: inactive, codex: inactive })).toEqual([])
+    expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: inactive })).toBeNull()
+    expect(codeAssistantCloseButtonLabel({ claude: active, codex: inactive })).toBe('Close Claude code')
+    expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: active })).toBe('Close Codex')
+    expect(codeAssistantCloseButtonLabel({ claude: active, codex: active })).toBe('Close assistants')
   })
 
   it('subscribes to ah runtime events so a delayed CLI start updates the button without polling', async () => {
@@ -327,10 +333,13 @@ describe('buildCopilotJudgeDraft', () => {
   })
 
   it('derives attach menu entries from live ahd status', () => {
-    expect(codeAssistantAttachMenuLabels({ claude: false, codex: false })).toEqual([])
-    expect(codeAssistantAttachMenuLabels({ claude: true, codex: false })).toEqual(['Attach Claude code'])
-    expect(codeAssistantAttachMenuLabels({ claude: false, codex: true })).toEqual(['Attach Codex'])
-    expect(codeAssistantAttachMenuLabels({ claude: true, codex: true })).toEqual(['Attach Claude code', 'Attach Codex'])
+    // Migrated to the task-8 per-assistant payload shape; attach-label semantic unchanged.
+    const active = { status: 'active', readOnly: false } as const
+    const inactive = { status: 'inactive', readOnly: false } as const
+    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: inactive })).toEqual([])
+    expect(codeAssistantAttachMenuLabels({ claude: active, codex: inactive })).toEqual(['Attach Claude code'])
+    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: active })).toEqual(['Attach Codex'])
+    expect(codeAssistantAttachMenuLabels({ claude: active, codex: active })).toEqual(['Attach Claude code', 'Attach Codex'])
   })
 
   // ── studio-ah-state-contract-v1 task 9 (read-only Detach control semantics) RED tests ──

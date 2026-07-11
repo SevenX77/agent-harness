@@ -4451,24 +4451,23 @@ mod tests {
             claude_config.clone(),
             AhLifecycleSnapshot::new(true, true, false),
         )]);
-        assert_eq!(
-            code_assistant_status_from_snapshots(&specs, &snapshots),
-            CodeAssistantStatus {
-                claude: true,
-                codex: false,
-            }
-        );
+        // Migrated from the old `{claude,codex}` bool literal to the task-8 per-assistant
+        // payload (design.md:290-297): the SAME display-only semantic, now asserted on the
+        // serialized wire shape. claude active; codex (no snapshot) inactive.
+        let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &snapshots))
+            .expect("payload must serialize to the frontend wire shape");
+        assert_eq!(v["claude"]["status"], "active");
+        assert_eq!(v["codex"]["status"], "inactive");
 
-        // The startup window reads as "not active yet", nothing more.
+        // The startup window (ahd inventory present, master tmux not yet alive) reads as
+        // "not active yet", nothing more — both assistants inactive.
         let starting =
             BTreeMap::from([(claude_config, AhLifecycleSnapshot::new(true, false, false))]);
-        assert_eq!(
-            code_assistant_status_from_snapshots(&specs, &starting),
-            CodeAssistantStatus {
-                claude: false,
-                codex: false,
-            }
-        );
+        let v_starting =
+            serde_json::to_value(code_assistant_status_from_snapshots(&specs, &starting))
+                .expect("payload must serialize to the frontend wire shape");
+        assert_eq!(v_starting["claude"]["status"], "inactive");
+        assert_eq!(v_starting["codex"]["status"], "inactive");
     }
 
     #[test]

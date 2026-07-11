@@ -473,6 +473,136 @@ describe('buildCopilotJudgeDraft', () => {
     }
   })
 
+  // ── studio-ah-state-contract-v1 task 9 (starting/degraded button projection) RED tests ──
+  //
+  // Authored by g1 (泳道1 gatekeeper) test-first: g1-m1 turns these GREEN and must NOT edit
+  // them. Today `isAssistantActive` (copilot-panel.tsx:286-291) collapses the 5-state contract
+  // (tauri.ts:143-147) into a bare inactive-vs-not binary, so 'starting' and 'degraded' both
+  // fall through the "active" branch and render the Attach/Close ("CLI running") control. These
+  // pin the CONTRACT BOUNDARY the frontend controls — the rendered control the user actually
+  // sees (trigger disabled state / presence) and whether an Attach/Close action is a clickable
+  // (enabled) button — not any internal flag. They ride the task-8 per-assistant payload
+  // ({ status, reason?, readOnly }) delivered through the subscribeCodeAssistantStatus mock:
+  //   • starting → mid-transition, hands-off: the rendered control is disabled, NOT a clickable
+  //                Attach/Close.
+  //   • degraded → recoverable: a USABLE Open (cleanup-then-open) is exposed, NOT Attach/Close
+  //                and NOT an all-dead set of buttons.
+
+  it('test_starting_disables_buttons', async () => {
+    // A CLI that is mid-start is hands-off: the panel shows a disabled control, never a
+    // clickable Attach/Close. RED today — 'starting' !== 'inactive', so isAssistantActive
+    // treats it as active and renders the ENABLED "CLI running" Attach/Close dropdown.
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    const unsubscribe = vi.fn()
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return unsubscribe
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+
+      // Claude CLI is starting (spawned, not yet ready); Codex idle.
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'starting', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+
+      // The rendered assistant control is disabled while starting — hands-off.
+      await vi.waitFor(() => {
+        const control = container.querySelector(
+          'button[aria-label="Manage code assistant"], button[aria-label="Open code assistant"]',
+        )
+        expect(control).toBeTruthy()
+        expect((control as HTMLButtonElement).disabled).toBe(true)
+      })
+
+      // …and no Attach/Close action is offered as a clickable (enabled) button.
+      const enabledActionLabels = Array.from(container.querySelectorAll('button'))
+        .filter((button) => !(button as HTMLButtonElement).disabled)
+        .map((button) => button.textContent ?? '')
+      expect(enabledActionLabels.some((text) => /Attach|Close/.test(text))).toBe(false)
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('test_degraded_exposes_working_open', async () => {
+    // A degraded CLI is recoverable: the panel exposes a USABLE Open (cleanup-then-open), not an
+    // Attach/Close control and not an all-dead set of buttons. RED today — 'degraded' !==
+    // 'inactive', so isAssistantActive treats it as active and renders the Attach/Close ("CLI
+    // running") dropdown, so no "Open code assistant" button exists at all.
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    const unsubscribe = vi.fn()
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return unsubscribe
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+
+      // Claude CLI degraded (started but unhealthy); Codex idle.
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'degraded', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+
+      // A usable Open control is exposed (cleanup-then-open), so recovery is one click away.
+      await vi.waitFor(() => {
+        const openButton = container.querySelector('button[aria-label="Open code assistant"]')
+        expect(openButton).toBeTruthy()
+        // Not an all-dead set (三态全灭): the Open trigger is genuinely clickable, not a stub.
+        expect((openButton as HTMLButtonElement).disabled).toBe(false)
+      })
+
+      // It is the Open control, not the Attach/Close ("CLI running") dropdown.
+      expect(container.querySelector('button[aria-label="Manage code assistant"]')).toBeNull()
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
   it('shows the thinking indicator while an assistant turn is running with no text yet', () => {
     mocks.useCopilot.mockReturnValue(copilotState({
       messages: [

@@ -365,6 +365,25 @@ fn classify_config_ownership(config_path: &Path) -> ConfigOwnership {
     ConfigOwnership { read_only }
 }
 
+/// Lifecycle-command entry guard (Req 5.9). `start`/`stop`/`kill` may run ONLY
+/// against a Studio-managed temp config; a workspace-owned config discovered by
+/// walking up (`find_ah_config`) belongs to the operator's own fleet and is
+/// read-only. The verdict is sourced from the single ownership authority
+/// `classify_config_ownership` (底座一/SSOT), never a second guess. Read-only
+/// commands (status / events / observational attach) do NOT pass through this
+/// guard — only the paths that can emit a lifecycle command do.
+fn ensure_lifecycle_command_allowed(config_path: &Path) -> Result<(), String> {
+    if classify_config_ownership(config_path).read_only {
+        return Err(format!(
+            "refusing lifecycle command (start/stop/kill) on workspace-owned ah config {}: it \
+             lives outside the Studio-managed temp namespace and belongs to the operator's own \
+             fleet (Req 5.9)",
+            config_path.display()
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CodeAssistant {
     Claude,
@@ -962,22 +981,37 @@ fn command_result(mut command: Command, label: &str) -> Result<CommandResult, St
         .map_err(|error| format!("failed to run {label}: {error}"))
 }
 
+/// The bash `-c` script the Windows `wsl.exe -e bash -lc` path runs for an ah
+/// command (Req 4.7 / 坑洞 3.5). The state-dir env — `AH_STATE_DIR`,
+/// `CCBD_STATE_DIR`, `XDG_STATE_HOME` — is clamped to empty INSIDE the script
+/// string, before the ah command reads the environment: a `-lc` login shell
+/// re-sources the user profile AFTER inheriting Rust's `Command::env`, so a
+/// Rust-side clamp would be silently overwritten, whereas an in-script `export`
+/// runs after the profile and wins. Both `run_ah_config_command_output` and
+/// `spawn_ah_events_command` build their Windows script through this single seam
+/// so the clamp cannot drift between the two call sites.
+fn build_ah_bash_script(config_path: &Path, ah_args: &[&str]) -> String {
+    let args = ah_args
+        .iter()
+        .map(|arg| sh_single_quote_str(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "export AH_STATE_DIR=\"\"; export CCBD_STATE_DIR=\"\"; export XDG_STATE_HOME=\"\"; \
+export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; \
+ah --config {} {}",
+        sh_single_quote_str(&windows_path_to_wsl(config_path)),
+        args
+    )
+}
+
 fn run_ah_config_command_output(
     config_path: &Path,
     ah_args: &[&str],
 ) -> Result<CommandResult, String> {
     if cfg!(target_os = "windows") {
         let mut command = Command::new("wsl.exe");
-        let args = ah_args
-            .iter()
-            .map(|arg| sh_single_quote_str(arg))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let script = format!(
-            "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; ah --config {} {}",
-            sh_single_quote_str(&windows_path_to_wsl(config_path)),
-            args
-        );
+        let script = build_ah_bash_script(config_path, ah_args);
         command.args(["-e", "bash", "-lc", &script]);
         return command_result(command, "ah");
     }
@@ -995,10 +1029,7 @@ fn run_ah_config_command(config_path: &Path, ah_args: &[&str]) -> Result<bool, S
 fn spawn_ah_events_command(config_path: &Path) -> Result<Child, String> {
     let mut command = if cfg!(target_os = "windows") {
         let mut command = Command::new("wsl.exe");
-        let script = format!(
-            "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; export SYSTEMD_LOG_LEVEL=err; ah --config {} events --format json",
-            sh_single_quote_str(&windows_path_to_wsl(config_path))
-        );
+        let script = build_ah_bash_script(config_path, &["events", "--format", "json"]);
         command.args(["-e", "bash", "-lc", &script]);
         command
     } else {
@@ -1158,6 +1189,13 @@ fn inspect_ah_runtime(config_path: &Path, tmux_socket_hint: Option<&str>) -> AhR
 }
 
 fn force_cleanup_ah_runtime(config_path: &Path, probe: &AhRuntimeProbe) {
+    if let Err(error) = ensure_lifecycle_command_allowed(config_path) {
+        log::warn!(
+            "phase=code-assistant-cleanup action=force-cleanup-refused config={} error={error}",
+            config_path.display()
+        );
+        return;
+    }
     for session_id in &probe.session_ids {
         match run_ah_config_command(config_path, &["kill", "--session", session_id, "--force"]) {
             Ok(true) => log::info!(
@@ -1217,6 +1255,7 @@ fn wait_for_code_assistant_shutdown(
 }
 
 fn cleanup_code_assistant_config(config_path: &Path) -> Result<bool, String> {
+    ensure_lifecycle_command_allowed(config_path)?;
     check_ah_version_cached()?;
     let before = inspect_ah_runtime(config_path, None);
     if code_assistant_shutdown_is_complete(before.snapshot) {
@@ -2572,6 +2611,7 @@ fn open_code_assistant(workspace_root: &Path, assistant: CodeAssistant) -> Resul
         }
         CodeAssistantOpenAction::StartFresh => {
             let config_path = ah_config_for_workspace(workspace_root, assistant)?;
+            ensure_lifecycle_command_allowed(&config_path)?;
             let launcher =
                 write_code_assistant_launcher_script(workspace_root, &config_path, assistant)?;
             let window_title = code_assistant_window_title(workspace_root, assistant);

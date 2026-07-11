@@ -6,7 +6,7 @@ import type {
   CopilotTextDeltaEvent,
   CopilotThinkingDeltaEvent,
 } from '../../types/copilot'
-import { buildAssistantTranscript, formatProcessedDuration, partitionAssistantView } from './transcript'
+import { buildAssistantTranscript, formatProcessedDuration, buildAssistantView } from './transcript'
 
 function message(
   events: CopilotEvent[],
@@ -95,13 +95,10 @@ describe('buildAssistantTranscript', () => {
   })
 })
 
-// R7-A (PM 2026-07-02「最后只保留最终输出，把上面所有过程收束到一个折叠的过程行，
-// 加处理时间 processed 44s」): a settled turn splits into the collapsible PROCESS
-// (thinking / tools / context / intermediate narration) and the final ANSWER
-// (the last text run), plus the turn duration for the "Processed Ns" summary.
-describe('partitionAssistantView', () => {
-  it('splits the final text answer from the preceding process', () => {
-    const view = partitionAssistantView(
+// R7-A: buildAssistantView preserves all events chronologically in the view.segments array.
+describe('buildAssistantView', () => {
+  it('identifies the final text answer from the preceding and succeeding segments', () => {
+    const view = buildAssistantView(
       message(
         [
           contextResolved('c1'),
@@ -117,26 +114,72 @@ describe('partitionAssistantView', () => {
       ),
     )
 
-    expect(view.process.map((s) => s.kind)).toEqual(['event', 'thinking', 'text', 'event', 'event'])
-    expect(view.answer).toMatchObject({ content: 'Final answer' })
+    expect(view.segments.map((s) => s.kind)).toEqual(['event', 'thinking', 'text', 'event', 'event', 'text'])
+    expect(view.lastTextIndex).toBe(5)
     expect(view.durationMs).toBe(44_999)
   })
 
-  it('has a null answer when the turn produced only process (tools, no final text)', () => {
-    const view = partitionAssistantView(
+  it('has lastTextIndex = -1 when the turn produced only process (tools, no final text)', () => {
+    const view = buildAssistantView(
       message([thinkingDelta('th1', 'hmm'), toolUseStart('tool1'), doneAt('d1', 3_000)], '', 'success'),
     )
 
-    expect(view.answer).toBeNull()
-    expect(view.process.map((s) => s.kind)).toEqual(['thinking', 'event'])
+    expect(view.lastTextIndex).toBe(-1)
+    expect(view.segments.map((s) => s.kind)).toEqual(['thinking', 'event'])
     expect(view.durationMs).toBe(2_999)
   })
 
+function toolApprovalRequired(
+  id: string,
+  toolUseId: string,
+  toolName: string,
+  detail: string,
+): CopilotEvent {
+  return {
+    id,
+    type: 'tool_approval_required',
+    status: 'pending',
+    receivedAt: 1,
+    raw: null,
+    toolUseId,
+    toolName,
+    detail,
+  }
+}
+
   it('reports null duration while the turn is still streaming (no done event)', () => {
-    const view = partitionAssistantView(message([textDelta('t1', 'partial')]))
+    const view = buildAssistantView(message([textDelta('t1', 'partial')]))
 
     expect(view.durationMs).toBeNull()
-    expect(view.answer).toMatchObject({ content: 'partial' })
+    expect(view.lastTextIndex).toBe(0)
+  })
+
+  it('retains all trailing events after a mid-turn text delta (accident replay test)', () => {
+    const view = buildAssistantView(
+      message(
+        [
+          contextResolved('c1'),
+          thinkingDelta('th1', 'reason'),
+          textDelta('t1', 'Let我先全面…'),
+          toolUseStart('tool1'),
+          toolResult('tr1'),
+          toolUseStart('tool2'),
+          toolApprovalRequired('approve1', 'call_bash_1', 'Bash', 'Get-ChildItem -Recurse -Depth 3 …'),
+          toolUseStart('tool3'),
+          toolUseStart('tool4'),
+        ],
+        'Let我先全面…',
+        'running',
+      ),
+    )
+
+    expect(view.segments).toHaveLength(9)
+    expect(view.lastTextIndex).toBe(2)
+    const approvalSegment = view.segments[6]
+    expect(approvalSegment.kind).toBe('event')
+    if (approvalSegment.kind === 'event') {
+      expect(approvalSegment.event.type).toBe('tool_approval_required')
+    }
   })
 })
 

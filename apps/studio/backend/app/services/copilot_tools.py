@@ -211,6 +211,35 @@ async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
 _ROLE_UPDATE_OPS = ("set_model_groups", "model_fallback_enabled", "intent")
 
 
+def _model_groups_violation(groups: list[Any]) -> str | None:
+    """路由词汇表一致性(fail fast at the boundary):`route_id` 的格式是
+    `<endpoint_id>:<canonical_id>`,组的 canonical_id 必须与其每条路由的
+    canonical 部分一致。实测教训(2026-07-11 人工验收):agent 把
+    "anthropic.claude-opus-4.8" 这类带 provider 前缀的模型名当 canonical_id
+    写入,保存校验只查 route 存在性(通过),但前端按注册表词汇找不到该组 →
+    Settings 展示为空,随后的自动保存把空状态写回真相,模型组静默丢失。"""
+
+    problems: list[str] = []
+    for group in groups:
+        for provider_model in group.provider_models:
+            route_id = provider_model.route_id
+            _, _, canonical_part = route_id.partition(":")
+            if canonical_part != group.canonical_id:
+                problems.append(
+                    f"route {route_id!r} does not belong to canonical model"
+                    f" {group.canonical_id!r}"
+                )
+    if not problems:
+        return None
+    return (
+        "model_groups 词汇不一致:\n"
+        + "\n".join(f"  - {p}" for p in problems)
+        + "\ncanonical_id 必须等于 route_id 冒号后的模型部分"
+        "(route_id 格式: <endpoint_id>:<canonical_id>);"
+        "先用 get_llm_roles 查现有角色的取值当参照。"
+    )
+
+
 def _role_snapshot(role: Any) -> dict[str, Any]:
     dumped = role.model_dump(mode="json")
     return {
@@ -275,6 +304,9 @@ async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
         role = RoleEntry(**fields)
     except ValidationError as exc:
         return _text_result(f"角色配置无效:\n{exc}", is_error=True)
+    violation = _model_groups_violation(role.model_groups)
+    if violation is not None:
+        return _text_result(violation, is_error=True)
     try:
         saved_role = await _save_single_role(name, role)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
@@ -329,6 +361,9 @@ async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
         updated = role.model_copy(update=update_fields)
     except ValidationError as exc:
         return _text_result(f"角色配置无效:\n{exc}", is_error=True)
+    violation = _model_groups_violation(updated.model_groups)
+    if violation is not None:
+        return _text_result(violation, is_error=True)
     try:
         saved_role = await _save_single_role(role_name, updated)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error

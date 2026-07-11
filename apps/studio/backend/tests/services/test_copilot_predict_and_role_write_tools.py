@@ -136,7 +136,7 @@ _GROUPS = [
     {
         "canonical_id": "openai/gpt-5",
         "display_name": "GPT-5",
-        "provider_models": [{"route_id": "route-a"}],
+        "provider_models": [{"route_id": "prov-x:openai/gpt-5"}],
     }
 ]
 
@@ -189,7 +189,7 @@ def test_update_llm_role_returns_before_after_and_applies_ops(
             RoleModelGroup(
                 canonical_id="old/model",
                 display_name="Old",
-                provider_models=[RoleProviderModel(route_id="route-old")],
+                provider_models=[RoleProviderModel(route_id="prov-x:old/model")],
             )
         ]
     )

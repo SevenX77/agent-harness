@@ -223,7 +223,7 @@ sequenceDiagram
 
 - Use `ah stop` as the normal close path, and only ever against a Studio-managed config (per the ownership classifier).
 - Re-read the current snapshot (events-primary, `status --json` fallback) after stop.
-- Escalate only with `ah kill --session <id> --force` for session ids from the selected config's latest identity-checked snapshot, and only where the snapshot marks that session `cleanup_required`/not `safe_to_cleanup`.
+- Escalate only with `ah kill --session <id> --force` for session ids from the selected config's latest identity-checked snapshot, and only where the snapshot marks that session `cleanup_required`. `safe_to_cleanup` is ah's **safety gate** (false = live work that cleanup would destroy), NOT a kill trigger, so `!safe_to_cleanup` alone must never escalate a kill — targeting is driven solely by `cleanup_required`, per Requirement 4.2 (trust ah's own per-session fields; Studio never re-derives "non-terminal therefore kill"). The earlier `cleanup_required`/not `safe_to_cleanup` OR-reading was falsified by task7's rollback self-check (it selected a healthy live stack, `safe_to_cleanup:false`, as a `--force` kill target); see `task7-cross-lane-review-2026-07-11.md` §2.
 - Do not directly kill tmux sessions during normal cleanup.
 - Ignore ahd stacks outside the Studio-managed temp config namespace, including a workspace-owned config found by directory walk-up.
 - `degraded`-state cleanup (Requirement 3.7) runs only at the same four user-triggered timings as normal cleanup: Open prepare, Attach's CleanupStale branch, Close, app quit — never as a side effect of the passive events-snapshot handler.

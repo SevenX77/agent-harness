@@ -181,18 +181,27 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 生命周期规则:
 
 - `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
-- Studio 显式管理入口是 `Open in CLI` 位置:没有活跃 ahd 时显示 Claude code/Codex 打开菜单。活跃判定必须是
-  **事件源双事实**:Studio 订阅 `ah events --format json` 的 runtime snapshot,活跃判定只认 `ahd_has_inventory=true` 与 `master_tmux_alive=true` 同时成立。只有 ahd inventory、只有 master
-  tmux、或残留 worker/agent tmux 都是 stale 状态;Studio 必须先按 workspace 清理所有 Studio-managed ah
+- Studio 显式管理入口是 `Open in CLI` 位置:没有活跃 ahd 时显示 Claude code/Codex 打开菜单。活跃判定读 Studio 订阅
+  `ah events --format json` 得到的 runtime snapshot 里的**结构化 `runtime_state` 相位**(见下方相位语义),不再
+  靠 `ahd_has_inventory`/`master_tmux_alive` 双布尔同时成立来猜 stale;ahd 活但 `active=false` 是合法的可 Open
+  态,不当错误。需要清理的相位(如 `degraded`)下,Studio 必须先按 workspace 清理所有 Studio-managed ah
   config,再允许重新打开。
   **诊断结论(2026-07-06)——事件快照只投影状态,绝不触发清理**:`ah start` 冷启动窗口(session 已
   ACTIVE、master tmux 还要 ~15s 才活)在快照布尔上与 stale 完全同形(`ahd_has_inventory=true,
-  master_tmux_alive=false`),ah 的 `runtime_state` 也只有 Active/Degraded/Inactive、没有 Starting 相位。
+  master_tmux_alive=false`),而当时 Studio 读到的 ah 快照还没有相位字段、只能靠这两个布尔猜——这正是根因。
   若在事件流处理里做"stale 即自动 cleanup",Studio 会 `ah stop` 掉自己正在启动的 runtime,终端里阻塞在
   `spawn_master_pane` RPC 上的 `ah start` 被断连,报 `invalid JSON response from daemon: EOF`(exit 3)。
   因此 stale 判定 + 清理**只允许发生在用户动作时机**:Open 前的 prepare 决策、Attach 的 CleanupStale
-  分支、Close、app quit;事件快照 handler 只更新状态缓存并 emit 给前端。ah 侧补 `Starting` 相位后,
-  Open/Attach 的判定可再升级为"master 曾 alive 后消失才算 stale"(见 ccbd-rust 跟进项)。
+  分支、Close、app quit;事件快照 handler 只更新状态缓存并 emit 给前端,前向绝不接清理(否则下面的 `starting` 冷启动窗口会被
+  passive handler 误清)。
+  **相位语义(ah 1.3.4 起,现为 Studio 基线)**:`runtime_state` 是**四值相位** `active` / `inactive` /
+  `starting` / `degraded`(权威数据模型见 `.kiro/specs/studio-ah-state-contract-v1/design.md`),不是布尔——
+  上面那个冷启动窗口现在由 `starting` 正式表达,与 stale 从「同形」拆成两个可判别的相位:
+    - `starting`:**hands-off**——不清理、不重复启动、UI 显示 starting 不报错。它根除了 2026-07-06
+      自杀式 cleanup 的根因(冷启动不再被误判为 stale)。
+    - `degraded`:ahd 活但编队掉线(如 master tmux 死、session 仍 ACTIVE)。**必须暴露可用的
+      cleanup-then-open 路径**,三个按钮不得全灭;清理目标由 ah 自己的 per-session `cleanup_required`
+      字段驱动,`safe_to_cleanup` 是安全闸不是 kill 触发器,Studio 不再自行推导「非终态即 kill」。
 - workspace 内只允许一个 Studio-managed ahd。Open 同一个 assistant 且双探测活跃时只 attach 到既有
   master,不再 `ah start`;Open 另一个 assistant 且已有 ahd 活跃时直接拒绝,要求先关闭现有 assistant。
   Open 命令返回的 config path 同时是该 workspace 本轮状态身份的真相源:当 skill 自带 `ah.toml` 时,
@@ -550,7 +559,7 @@ description: Studio Open in CLI 启动后，用 MoirAI 的角色文档和当前�
 信息来源:
 1. 已加载的 MoirAI / Clotho / Lachesis / Atropos 角色文档。
 2. 当前目录事实:`pwd`、`GRAPH.md`、`phases/`、目录名;不要做大范围仓库扫描。
-3. `ah ps` 的编队状态。`ah status` 不是可用命令,不要调用;无法确认就写"未确认"。
+3. 编队状态优先用 `ah status --json`(1.4.0 起可用的结构化 bootstrap/fallback 读),必要时辅以 `ah ps`;注意 daemon 不存在时 `status --json` 会非零退出且无 JSON(F1),无法确认就写“未确认”。
 
 输出:中文短答,每点一行,然后停下等用户:
 1. 你是谁。
@@ -626,7 +635,7 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
 - Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
   launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;
-- `watch_code_assistant_status` 不轮询 `ah ps`,而是订阅 `ah events --format json`;活跃判定必须同时要求事件快照里 `ahd_has_inventory=true` 与 `master_tmux_alive=true`;只有 ahd、只有 master tmux、残留 worker tmux 均判 stale;
+- 状态检测与生命周期决策以 `ah events --format json` 为**主决策面**、`ah status --json` 为 bootstrap/fallback 读,按 `sequence` 仲裁;绝不解析 `ah ps` 文本、绝不探测 tmux 存活来做常规决策。活跃/相位判定读结构化 `runtime_state`(`active`/`inactive`/`starting`/`degraded`),不再用 `ahd_has_inventory`/`master_tmux_alive` 双布尔同时成立去猜 stale。每帧快照先按请求 config 做身份校验(权威判据 `state_dir` + 会话身份 `session_id`/`path`/`project_id`,`config_path` 仅诊断),不匹配即丢弃;
 - 事件快照 handler **只更新状态缓存 + emit,前向不接任何 cleanup**;冷启动窗口与 stale 在快照布尔上
   同形,事件驱动的自动清理会杀掉正在启动的 runtime(2026-07-06 事故,详见 §4 生命周期规则的诊断结论);
   stale 清理只在 Open 前 prepare 决策、Attach CleanupStale、Close、app quit 这四个用户动作时机执行;
@@ -634,14 +643,12 @@ Windows/WSL 规则:未来如果重新启用写进 `ah.toml` 的路径,必须是 
   双 active 或 ahd/master 脱钩时先清理所有 Studio-managed ah configs 再重新打开;
 - Open 命令返回的 config path 必须注册为本轮 workspace 状态身份源,优先于扫描发现的 config 身份;
   Windows 首次启动 payload 必须在 `ah start --wait` 非 0 时中止,不能继续 attach;
-- `ah ps` 输出解析必须提取 `tmux -L <socket>` 与 `sess_*` session id,供后续 tmux double-check 与
-  `ah kill --session` 兜底使用;
-- Close / Window close / app quit 的 cleanup 必须在 `ah stop` 后确认 ahd inventory、`master_*`、
-  `agent_*`/`worker_*` tmux sessions 全灭;未全灭时走强制 kill,仍残留则返回/记录错误;
+- 清理目标不再靠解析 `ah ps` 文本提取 `tmux -L <socket>`/`sess_*` session id、也不做 tmux double-check;强清只对**身份校验通过的快照**里 ah 自己标记 `cleanup_required` 的 session 发 `ah kill --session <id> --force`(`safe_to_cleanup` 是 ah 的安全闸、不是 kill 触发器,Studio 绝不自行推导「非终态即 kill」)。生命周期命令前先过所有权分类(ownership guard):只有 Studio-managed temp config 可执行 start/stop/kill,walk-up 发现的 workspace-owned config 只读;
+- Close / Window close / app quit 的 cleanup:先确认目标 config 是 Studio-managed,再 `ah stop`,然后**重读结构化快照**(events-primary,`status --json` fallback)确认收敛;仍有 `cleanup_required` session 时只对这些 session id 发 `ah kill --session <id> --force`,**不直接 kill tmux session**;walk-up 发现的 workspace-owned config 在 quit 清理里透明跳过、不发任何生命周期命令;
 - 原生窗口关闭必须与 app quit 一样清理 Studio-managed ah configs,否则 tmux/ahd 会在重启 Studio 后被
   `watch_code_assistant_status` 再收到事件时重新投影成 inactive;
 - `.ah/rules`/`.ah/skills` 生成带受管头,用户改过的文件不被覆盖;
-- `.ah/skills/moirai-intro/SKILL.md` 明确使用 `ah ps` 确认三位子 agent 状态,并声明 `ah status` 不是可用命令;
+- `.ah/skills/moirai-intro/SKILL.md` 用 `ah status --json`(1.4.0 起可用的结构化 bootstrap/fallback 读)确认三位子 agent 状态,必要时辅以 `ah ps`;并注明 daemon 不存在时 `status --json` 非零退出且无 JSON(F1),无法确认就写“未确认”;
 - `transient_ah_config_content` 不输出 `[sandbox] additional_ro_binds`,避免 WSL systemd user scope
   拒绝 `BindReadOnlyPaths` 后导致 `TMUX_COMMAND_FAILED`;
 - 已存在 `ah.toml` 时不自动生成 MoirAI 配置,继续走用户配置。

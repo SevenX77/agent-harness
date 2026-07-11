@@ -596,7 +596,7 @@ description: Studio Open in CLI 启动后，用 MoirAI 的角色文档和当前�
 
 1. 先使用已经加载的 MoirAI / Clotho / Lachesis / Atropos 角色文档确认身份与分工。
 2. 用当前工作目录事实判断 skill：优先看 `pwd`、`GRAPH.md`、`phases/`、当前目录名；不要做大范围仓库扫描。
-3. 用 `ah ps` 确认三位子 agent 的运行状态。`ah status` 不是可用命令，不要调用；如果 `ah ps` 也无法确认，状态写“未确认”。
+3. 优先用 `ah status --json` 确认三位子 agent 的运行状态，必要时辅以 `ah ps`；daemon 不存在时 `ah status --json` 会非零退出且无 JSON，无法确认就写“未确认”。
 
 ## 输出
 

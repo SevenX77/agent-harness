@@ -54,7 +54,15 @@ revision_trace: REVISION-TRACE.md
   - 保持已有安装/provisioning 入口，不让旧版本继续进入生命周期命令。
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 5.4_
 
-- [x] 3. 用结构化 snapshot 替换一次性状态检测，并加身份校验（须与任务 4 同批落地）
+- [ ] 3. 用结构化 snapshot 替换一次性状态检测，并加身份校验（须与任务 4 同批落地）
+  - **2026-07-10 复核发现,取消勾选**：见 `task6-wiring-gap-finding-2026-07-10.md`。
+    typed 决策面（`AhRuntimeSnapshot`/`parse_ah_runtime_snapshot`/
+    `reconcile_snapshot_lifecycle`,lib.rs:3228 起）只在单测里被直接构造 fixture
+    调用，真实的 `prepare_code_assistant_open`/`attach_code_assistant_terminal`/
+    `force_cleanup_ah_runtime` 三个命令入口仍在调 `inspect_ah_runtime`
+    （lib.rs:1157-1191，跑 `ah ps` 文本解析 + tmux 探测），本条"移除 normal
+    decision path 对 `ah ps` 文本解析和 tmux 探测的依赖"这一验收标准并未达成。
+    前次勾选（76ef06b8）仅凭 `cargo test --lib` 通过，未核实此条。收尾见任务 6.1。
   - **先写红测试**：`test_identity_rejects_config_path_match_state_dir_mismatch`（NF1 回显 fixture → 断言丢弃 + 诊断，Req 5.10a）；`test_identity_canonicalizes_windows_wsl_path`（`C:\...` vs `/mnt/c/...` 同 canonical → 断言接受，raw string 比对会红，Req 5.10b）。
   - 将 one-shot bootstrap 读切到 `ah --config <path> status --json`，但不把它的非结构化失败当作权威"无 runtime"信号（见任务 4 的 events-primary 仲裁）。二者高度耦合，必须同一 PR 落地，避免出现 task 3 单独存在时 status 仍被当主决策面的中间态。
   - 引入 typed parser，显式校验 `schema_version`，字段按 design.md 修订后的模型（`ahdAlive`、`sequence`、`reason`、可空 `configPath`、`liveAgents`/`dbTrackedAgents`、`safeToCleanup`/`cleanupRequired`、`sessions[].sessionId`/`path`/`projectId`）。
@@ -63,7 +71,13 @@ revision_trace: REVISION-TRACE.md
   - 移除 normal decision path 对 `ah ps` 文本解析和 tmux 探测的依赖。
   - _Requirements: 2.1, 2.4→2.5(schema), 2.6, 2.7, 3.5, 3.8, 4.8, 5.2, 5.10_
 
-- [x] 4. 升级 live status subscription 为主决策面 + sequence 仲裁（须与任务 3 同批落地）
+- [ ] 4. 升级 live status subscription 为主决策面 + sequence 仲裁（须与任务 3 同批落地）
+  - **2026-07-10 复核发现,取消勾选**：见 `task6-wiring-gap-finding-2026-07-10.md`。
+    "将 `ah events --format json` ... 设为 open/attach/close 决策的主输入"这条未
+    达成——后台 `ah events` 订阅（`start_code_assistant_status_stream`,lib.rs:1513
+    起）的快照只喂 UI 状态显示（该函数自己的注释 lib.rs:1492-1496 明写
+    "Snapshots only drive the status display... Cleanup happens on user actions
+    only"），三个真实生命周期入口不读它。收尾见任务 6.1。
   - **先写红测试**：`test_sequence_reset_on_reason_initial`（流内升到 >1 后来一帧 `reason:"initial"`/`sequence:1` → 断言无条件重置并应用，而非按旧序号丢弃；含 `session_id` 变化分支，Req 5.13）；`test_sequence_guard_within_stream`（同流内真正的旧序号仍被丢弃）；`test_daemon_absent_prefers_events_over_status_stderr`（Req 5.11）。
   - 将 `ah events --format json` 的每一行都按完整 snapshot 解析，设为 open/attach/close 决策的主输入。
   - `sequence` 仲裁限定在**单订阅流 / 同 `session_id` 生命周期内**：识别到新（重）建订阅、`reason:"initial"` 帧、或 `session_id` 变化时，**无条件重置** applied-sequence 缓存再应用，不得用旧序号挡新帧；重置后同流内旧序号才不覆盖新序号已应用的状态（Req 2.1 / 坑洞 3.2）。
@@ -91,6 +105,15 @@ revision_trace: REVISION-TRACE.md
   - `runtime_state=degraded` 时按 `sessions[].cleanup_required`/`safe_to_cleanup` 先清理再 start，Open 按钮必须可用，不得三态全灭。
   - 同 config 已有 active stack 时的 duplicate-start 处理，必须基于任务 0 记录的真实 `ah start` 行为实现，不得凭假设实现。
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 5.6, 5.7, 5.8_
+
+- [ ] 6.1. 收尾：把 events-primary 决策面真正接入 Open/Attach/Close 命令入口（2026-07-10 复核新增，见 `task6-wiring-gap-finding-2026-07-10.md`）
+  - 任务 3/4/6 新增的 `AhRuntimeSnapshot`/`reconcile_snapshot_lifecycle` 只在单测里被 fixture 调用，真实入口 `prepare_code_assistant_open`（lib.rs:2543）/`attach_code_assistant_terminal`（lib.rs:2626）/`force_cleanup_ah_runtime`（lib.rs:1193）仍在调 `inspect_ah_runtime`（lib.rs:1157，跑 `ah ps` 文本解析 + tmux 探测），直接违反 design.md:27/178/325 "Never use `ah ps` text or tmux probing for normal lifecycle decisions"。
+  - 把这三个入口的决策输入切到事件驱动快照（events-primary，`status --json` fallback，按 design.md:92-158 的 sequence graph），用 `reconcile_snapshot_lifecycle`/新的 open 决策函数替代 `decide_code_assistant_open`+`reconcile_code_assistant_lifecycle`。
+  - 按项目"无向后兼容"铁律删除旧路径：`AhLifecycleSnapshot`（lib.rs:445）、`code_assistant_lifecycle_is_active`（lib.rs:497）、`reconcile_code_assistant_lifecycle`（lib.rs:501）、`decide_code_assistant_open`（lib.rs:534）、`inspect_ah_runtime` 里 `ah ps` 分支及其文本解析辅助函数（`extract_tmux_socket_label`/`ah_ps_output_has_inventory`/`extract_ah_session_ids`），不得双轨并存。
+  - `force_cleanup_ah_runtime` 不得再直接调 `kill_tmux_session`（design.md:227 "Do not directly kill tmux sessions during normal cleanup"），改走 `ah kill --session <id> --force`，目标 session id 来自 identity-checked 快照里 `cleanup_required`/非 `safe_to_cleanup` 的 session（呼应任务 7 的验收标准，须与任务 7 协调，不得各自重复实现）。
+  - 完成后任务 6 已有的两个红测试（`test_starting_is_hands_off`/`test_degraded_exposes_working_open`）必须继续绿，且新增一条端到端/集成级断言证明 `prepare_code_assistant_open`/`attach_code_assistant_terminal` 真的调用了新决策面而非旧 `inspect_ah_runtime`（例如对旧函数做编译期删除，删不掉编译报错即为证据）。
+  - 排期：须先于任务 7（Close/quit 依赖同一决策面，不能继续叠在 `ah ps` 路径上）、任务 9（前端按钮投影依赖任务 6 真实闭环）之前完成。
+  - _Requirements: 2.1, 2.2, 2.3, 2.6, 2.7, 3.1-3.8, 4.1-4.6, 5.1, 5.2, 5.10, 5.11, 5.13_
 
 - [ ] 7. 重做 Close 和 app quit cleanup
   - **先写红测试**：`test_cleanup_targets_only_cleanup_required_sessions`（多 session 快照 → 只对 `cleanup_required`/非 `safe_to_cleanup` 的 session id 发 `ah kill`，Req 5.5）；`test_quit_leaves_workspace_owned_config_untouched`（本仓根 `ah.toml` fixture → Close/quit 不发任何生命周期命令，Req 5.9）。

@@ -463,6 +463,8 @@ enum CodeAssistantLifecycleAction {
     StartFresh,
     AttachExisting,
     CleanupStale,
+    // Take no lifecycle action: startup is in progress and must be left alone (Req 3.6).
+    HandsOff,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2643,6 +2645,12 @@ fn attach_code_assistant_terminal(
         CodeAssistantLifecycleAction::StartFresh => {
             return Err(format!("{} is not running", assistant.display_name()));
         }
+        CodeAssistantLifecycleAction::HandsOff => {
+            return Err(format!(
+                "{} is still starting; wait for startup to finish before attaching.",
+                assistant.display_name()
+            ));
+        }
     }
     let launcher =
         write_code_assistant_attach_launcher_script(&workspace_root, &config_path, assistant)?;
@@ -3249,11 +3257,37 @@ fn parse_ah_runtime_snapshot(snapshot_json: &str) -> Result<AhRuntimeSnapshot, S
     Ok(snapshot)
 }
 
+/// Project a typed runtime snapshot onto the lifecycle action Open/Attach should take.
+///
+/// Decided from the `runtime_state` PHASE, not `active` alone: keying on `active` collapses
+/// every non-active phase to `StartFresh`, which would fire a duplicate `ah start` on a
+/// `starting` runtime (Req 3.6 forbids it) and skip the cleanup-then-start path on a
+/// `degraded` one (Req 3.7). Each phase maps to exactly one outcome:
+/// - `Active`   → attach the existing runtime.
+/// - `Inactive` → sessions are terminal, so start fresh.
+/// - `Starting` → hands-off: startup is in progress, take no lifecycle action (Req 3.6).
+/// - `Degraded` → cleanup the stale sessions first; the Open flow resolves `CleanupStale`
+///   to cleanup + a fresh start, so Open stays usable rather than three-buttons-dark
+///   (Req 3.7/5.7).
 fn reconcile_snapshot_lifecycle(snapshot: &AhRuntimeSnapshot) -> CodeAssistantLifecycleAction {
-    if snapshot.active {
-        CodeAssistantLifecycleAction::AttachExisting
-    } else {
-        CodeAssistantLifecycleAction::StartFresh
+    match snapshot.runtime_state {
+        AhRuntimeState::Active => CodeAssistantLifecycleAction::AttachExisting,
+        AhRuntimeState::Inactive => CodeAssistantLifecycleAction::StartFresh,
+        AhRuntimeState::Starting => CodeAssistantLifecycleAction::HandsOff,
+        AhRuntimeState::Degraded => CodeAssistantLifecycleAction::CleanupStale,
+    }
+}
+
+/// SSOT projection of ah's `runtime_state` phase onto the per-assistant `AssistantStatus`
+/// the frontend renders (tasks.md:90, design.md:132-133, Req 5.6/6.1). This is the single
+/// mapping every UI surface projects; `Error` is produced upstream on parse/identity
+/// failure and never from a `runtime_state` value.
+fn assistant_status_for_runtime_state(state: AhRuntimeState) -> AssistantStatus {
+    match state {
+        AhRuntimeState::Active => AssistantStatus::Active,
+        AhRuntimeState::Inactive => AssistantStatus::Inactive,
+        AhRuntimeState::Starting => AssistantStatus::Starting,
+        AhRuntimeState::Degraded => AssistantStatus::Degraded,
     }
 }
 

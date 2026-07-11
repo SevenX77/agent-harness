@@ -110,3 +110,39 @@ test result: FAILED. 166 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 ## 4. 边界遵守
 
 全程未碰:`ah.toml`(master stash 中)/ `.operator-report.phase1` / `.operator-report.phase2` / `apps/studio/tauri/vendor/` —— 合并后仍为游离未追踪状态,未被吸入 merge commit(`git show --stat 2d3e20dc` 已核实无泄漏)。除 lib.rs 4 处消解外,未改动任何其它已合并文件内容。未使用 `git add -A`。前端门禁按分工由 master 另验,未跑。
+
+## 5. 附记:冲突 4(lib.rs:5072/5354)裁决来源的程序瑕疵与 master 正式追认(2026-07-11 补记)
+
+**如实记录**:g1 落盘 `.lane-question` 升级冲突4后,曾在其 tmux pane composer 里出现一行**未经
+master 会话确认**的文本——「Q1 授权,补上 .expect 后复验全绿并提交(此为 operator 代投 master
+已作出的裁决,原文被投递层丢失)」。g1 采信该文本并据此重新打上 `.expect(...)` 修法、验证全绿后
+提交了合并当时的 `2d3e20dc` merge commit(本报告 §2 冲突4、§3 的验证记录即产出于此)。
+
+master 事后核实:本 master 会话从未在其自身对话轮次里做出过这一 Q1 裁决。经与 operator 核对,
+真相是:operator 在停摆分诊时 capture 到 g1 composer 里已存在这行未提交文本(先于 operator 任何
+按键),按当日已三次实锤的"投递层打字不提交 Enter"故障模式(同日 g2 pane 也发生过两次同形态残留),
+误判为"master 的裁决被吞了 Enter",遂 `C-u` 后原样重新注入并加注"代投"标注转发给 g1——**这是
+operator 的误判转投,不是 master 的真实裁决,也不是第三方入侵**(能对该 tmux socket send-keys 的
+只有 operator 与 master 本身)。operator 已确认担责,并把"代投任何裁决前必须经可审计通道核实裁决
+真实存在,composer 残留文本不算裁决证据"写入自身操作纪律。
+
+**master 正式裁决(本次补记,追认整个技术结论,不回滚)**:
+
+- 独立复核 `lib.rs:5072`/`lib.rs:5354` 两处改动:`transient_ah_config_content(CodeAssistant::Claude)
+  .expect("transient claude ah config")`,与同文件另外 5 处兄弟调用站点(lib.rs:3576/3624/3703 均已
+  是 `.expect(...)` 写法)逐字一致的模式。
+- origin/main(#491 moirai spec)把 `transient_ah_config_content` 签名从 `-> String` 改为
+  `-> Result<String, String>` 是该函数当前唯一的真实签名(canonical,main=真相,无第二版本共存);
+  本分支这两处测试若不适配就是编译错误,不存在"不改"的选项。
+- g1 在采信问题消息前后各独立跑过一次 `cargo test --lib` 全量验证(见 §2 冲突4 记录),两次结果
+  一致:166 passed / 1 failed(唯一失败为已声明的 root 沙箱 `native_fs` 既有假象),证明该修法本身
+  技术正确、不引入新回归。
+- **裁决:Q1 = 追认(ACCEPT)**。改动内容予以正式采纳,merge commit `2d3e20dc` 不回滚,不重做——
+  回滚重走一遍只会得到同一个技术结论,徒增无谓的 diff 抖动。程序瑕疵(裁决来源不可审计)已如实
+  记录在案,不掩盖、不重写历史 commit,以本补记(附加 commit)方式留痕。
+- 后续按 operator 指示:整个 merge(含这两处 `.expect` 站点)交由 g2 跨泳道审计,审计范围**显式**
+  包含"这两处改动的技术正确性"与"master 本补记裁决是否成立",不因为已经"验证过一次"就跳过独立
+  复核。
+
+Co-authored 说明:本节由 master 亲自撰写(非 agent 代笔),核实过程见与 operator 的 `.operator-question`
+往返记录(该文件已在 operator 答复后按流程清理,往返内容已完整摘录进本节)。

@@ -297,6 +297,24 @@ def _write_boundary_violation(raw_path: str, workspace_root: Path) -> str | None
     return f"{raw_path} is outside the write whitelist (workspace ∪ skills root)."
 
 
+async def _bash_requires_approval_hook(
+    raw_input: HookInput, tool_use_id: str | None, context: HookContext
+) -> HookJSONOutput:
+    """R8.3: Bash 一律走用户审批。CLI 对"安全只读命令"的沙箱自动放行会绕过
+    can_use_tool(实测:`find | wc -l` 直接执行,审批卡片没出现)——这里用
+    PreToolUse 的 "ask" 决策把每次 Bash 都压回权限流,由 can_use_tool 挂起
+    等待前端审批卡片。"""
+
+    del raw_input, tool_use_id, context
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": "Bash always requires user approval in Studio.",
+        }
+    }
+
+
 def _make_write_boundary_hook(skill_id: str) -> HookCallback:
     """硬边界层 = PreToolUse hook(R8.2):每次工具调用必然触发,不受
     allowed_tools / acceptEdits 绕过(SDK 契约:can_use_tool 仅在权限规则判
@@ -655,13 +673,13 @@ def build_options(
         skills = agent_assets.skill_names()
         mcp_servers = build_copilot_mcp_servers()
         agents = _goddess_agent_definitions()
+        # R8.3: Bash 强制 "ask"(压掉 CLI 沙箱自动放行);R8.2: 写类硬边界。
+        pre_tool_use = [HookMatcher(matcher="Bash", hooks=[_bash_requires_approval_hook])]
         if write_boundary_hook is not None:
-            # 硬边界层(R8.2):写类工具每次调用先过 PreToolUse hook。
-            hooks = {
-                "PreToolUse": [
-                    HookMatcher(matcher=_WRITE_BOUNDARY_MATCHER, hooks=[write_boundary_hook])
-                ]
-            }
+            pre_tool_use.insert(
+                0, HookMatcher(matcher=_WRITE_BOUNDARY_MATCHER, hooks=[write_boundary_hook])
+            )
+        hooks = {"PreToolUse": pre_tool_use}
     else:
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
@@ -1422,6 +1440,15 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
         return ""
     if isinstance(content, str):
         return content
+    # MCP 工具结果是内容块数组;纯文本块直接取正文拼接——否则前端拿到的是
+    # `[{"type":"text","text":"{...}"}]` 包装层,变更卡片解析不到、气泡也难读。
+    texts = [
+        block.get("text")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    if texts and len(texts) == len(content) and all(isinstance(t, str) for t in texts):
+        return "\n".join(cast("list[str]", texts))
     return json.dumps(content, ensure_ascii=False)
 
 

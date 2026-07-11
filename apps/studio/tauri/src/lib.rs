@@ -4273,6 +4273,128 @@ mod tests {
         );
     }
 
+    // ── studio-ah-state-contract-v1 task 6 (Open/Attach redo: starting/degraded) RED ──
+    //
+    // Authored by g1 (泳道1 gatekeeper) test-first per the lane's TDD contract: g1-m1
+    // (antigravity) turns these GREEN by reworking the Open/Attach decision to cover the
+    // `starting`/`degraded` phases, and MUST NOT edit this test file. Anchored to the TYPED
+    // decision plane (`reconcile_snapshot_lifecycle`, the task-3/4 seam that
+    // `test_decision_plane_consumes_typed_snapshot_not_ps_text` already exercises) plus a
+    // new phase→UI-status projection seam — never to a `starting`/`degraded` internal flag.
+    //
+    // The gap these pin (current production, lib.rs:3252-3258): `reconcile_snapshot_lifecycle`
+    // decides on `active` ALONE, so EVERY non-active phase collapses to `StartFresh`. That is
+    // the exact bug — `starting` would fire a duplicate `ah start` (Req 3.6 forbids it) and
+    // `degraded` would skip the cleanup-then-open path (Req 3.7). These tests fail until g1-m1
+    // teaches the decision plane the two phases.
+    //
+    // One new production seam g1-m1 must add (crate scope, PURE — no subprocess, no live
+    // fleet), the compile-time RED (E0425) mechanism used by tasks 2/3/4/8:
+    //
+    //   /// SSOT phase→UI-status projection (tasks.md:90, design.md:132-133, Req 5.6/6.1).
+    //   /// Maps ah's `runtime_state` phase to the per-assistant `AssistantStatus` the
+    //   /// frontend renders: Active→Active, Inactive→Inactive, Starting→Starting,
+    //   /// Degraded→Degraded. `Error` is produced upstream (parse / identity failure),
+    //   /// never from a runtime_state value. This is the single mapping every UI surface
+    //   /// projects — task 8's payload and task 9's button states layer on top of it.
+    //   fn assistant_status_for_runtime_state(state: AhRuntimeState) -> AssistantStatus
+
+    /// Req 5.6 / 3.6 — a `starting` runtime is HANDS-OFF: Studio runs no cleanup, starts no
+    /// duplicate runtime, raises no error, and the UI shows a distinct `starting` state (not
+    /// error, not a stale/degraded projection). Req 3.6 keeps Open/Attach/Close all disabled
+    /// while starting ("no action taken"), so the decision for a starting snapshot must be
+    /// NONE of the three lifecycle actions — start, attach, or cleanup. Anchored to the typed
+    /// decision plane + the phase→status wire projection, both fed the frozen task-1
+    /// `SNAPSHOT_STARTING` fixture.
+    /// Rollback self-check: revert g1-m1's starting branch so `reconcile_snapshot_lifecycle`
+    /// falls back to the `active`-only rule → starting decides `StartFresh` → the "no
+    /// duplicate start" assertion reds; regress the projection to active/inactive-only → the
+    /// `"starting"` wire assertion reds. Not self-anchored: it reads the same frozen fixture
+    /// the parser test consumes and asserts on the decision/wire outputs, not on itself.
+    #[test]
+    fn test_starting_is_hands_off() {
+        use ah_contract_fixtures::SNAPSHOT_STARTING;
+
+        let starting = parse_snapshot_or_panic(SNAPSHOT_STARTING);
+        // Precondition: the fixture really is the starting phase (Req 3.6 input shape).
+        assert_eq!(starting.runtime_state, AhRuntimeState::Starting);
+
+        // Hands-off decision: no duplicate start, no cleanup, and no attach either — Req 3.6
+        // keeps every lifecycle control disabled while startup is in progress ("no action
+        // taken"), so a starting snapshot must map to a distinct no-action outcome, i.e. none
+        // of the three existing lifecycle actions.
+        let action = reconcile_snapshot_lifecycle(&starting);
+        assert_ne!(
+            action,
+            CodeAssistantLifecycleAction::StartFresh,
+            "starting must NOT start a duplicate runtime (Req 3.6: 'shall not start a duplicate')"
+        );
+        assert_ne!(
+            action,
+            CodeAssistantLifecycleAction::CleanupStale,
+            "starting must NOT run cleanup — startup is in progress and must be left alone (Req 3.6)"
+        );
+        assert_ne!(
+            action,
+            CodeAssistantLifecycleAction::AttachExisting,
+            "starting takes NO action (Req 3.6 keeps Open/Attach/Close disabled), so it must not attach either"
+        );
+
+        // UI projection: a starting phase shows a distinct `starting` state on the wire —
+        // never `error`, never a stale `degraded` projection (Req 5.6). Asserted on the
+        // serialized wire tag, so a Rust rename cannot dodge the frontend contract.
+        let ui = assistant_status_for_runtime_state(AhRuntimeState::Starting);
+        assert_eq!(
+            serde_json::to_value(ui).expect("AssistantStatus serializes to its wire tag"),
+            serde_json::Value::String("starting".to_string()),
+            "starting phase projects to the `starting` wire status the frontend renders (Req 5.6)"
+        );
+        assert_ne!(
+            ui,
+            AssistantStatus::Error,
+            "starting is a real phase, not an error state (Req 5.6/3.6: 'shall not report an error')"
+        );
+        assert_ne!(
+            ui,
+            AssistantStatus::Degraded,
+            "starting must not be projected as a stale degraded state (Req 5.6)"
+        );
+    }
+
+    /// Req 5.7 / 3.7 — a `degraded` runtime with `cleanup_required=true` on a session must
+    /// leave the user a WORKING Open path (cleanup-then-start), never a fully-disabled button
+    /// set. The typed decision for such a snapshot is `CleanupStale`, which the Open flow
+    /// (`prepare_code_assistant_open`, lib.rs:2591-2593) resolves to cleanup + a fresh start —
+    /// so Open stays usable. Anchored to the typed decision plane fed the frozen task-1
+    /// `SNAPSHOT_DEGRADED` fixture (recorded shape: session ACTIVE, master tmux dead,
+    /// cleanup_required=true).
+    /// Rollback self-check: revert g1-m1's degraded branch so `reconcile_snapshot_lifecycle`
+    /// falls back to the `active`-only rule → degraded decides `StartFresh` (skips cleanup) →
+    /// the `CleanupStale` assertion reds. Control: active still attaches and terminal still
+    /// starts fresh (test_decision_plane_consumes_typed_snapshot_not_ps_text), so this is a
+    /// real projection of the degraded phase, not a constant.
+    #[test]
+    fn test_degraded_exposes_working_open() {
+        use ah_contract_fixtures::SNAPSHOT_DEGRADED;
+
+        let degraded = parse_snapshot_or_panic(SNAPSHOT_DEGRADED);
+        // Preconditions: this fixture is the Req 5.7 degraded + cleanup_required shape.
+        assert_eq!(degraded.runtime_state, AhRuntimeState::Degraded);
+        assert!(
+            degraded.sessions.iter().any(|s| s.cleanup_required),
+            "Req 5.7 requires cleanup_required=true on at least one session to drive cleanup-then-open"
+        );
+
+        // Working Open path: degraded decides CleanupStale, which the Open flow turns into
+        // cleanup + a fresh start (lib.rs:2591-2593). Open is therefore available — not the
+        // three-buttons-dark deadlock the prior spec wording produced (Req 3.7/5.7).
+        assert_eq!(
+            reconcile_snapshot_lifecycle(&degraded),
+            CodeAssistantLifecycleAction::CleanupStale,
+            "degraded must expose a working cleanup-then-start Open path, not zero actions (Req 3.7/5.7)"
+        );
+    }
+
     #[test]
     fn claude_wsl_payload_links_windows_credentials() {
         // The Windows .credentials.json is the single auth file; WSL root links

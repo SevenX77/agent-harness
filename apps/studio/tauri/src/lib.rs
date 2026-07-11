@@ -4715,6 +4715,165 @@ mod tests {
         );
     }
 
+    // ── studio-ah-state-contract-v1 task 5 (ownership guard + env clamp) RED tests ──
+    //
+    // Authored by g1 (泳道1 gatekeeper) test-first for the cross-lane hand-off: g2
+    // turns these GREEN by adding ONLY the production seams named below and must NOT
+    // edit this test file. This task is "护栏先行" (tasks.md:23/77): the ownership
+    // classifier + env clamp MUST land before any task (6/7) can emit `ah start`/
+    // `stop`/`kill`, so there is never a "can fire lifecycle commands but the guard
+    // is not wired" middle state.
+    //
+    // Two production seams g2 must implement (crate scope), both PURE (no subprocess,
+    // no live-fleet touch) so these tests are compile-time RED (E0425) until g2 lands
+    // them — the same RED mechanism as tasks 2/3/4/8:
+    //
+    //   /// Lifecycle-command entry guard (tasks.md:79/82, Req 5.9). Lifecycle commands
+    //   /// (`start`/`stop`/`kill`) may run ONLY against a Studio-managed temp config;
+    //   /// a workspace-owned config discovered by walking up (`find_ah_config`) is
+    //   /// read-only. Ownership MUST be sourced from the single authority
+    //   /// `classify_config_ownership` (底座一/SSOT), never a second guess. Ok(()) for
+    //   /// Studio-managed; Err(diagnostic) for workspace-owned. Read-only commands
+    //   /// (status/events/observational attach) do NOT pass through this guard.
+    //   /// g2 must call it at the top of every start/stop/kill entry point
+    //   /// (`cleanup_code_assistant_config`/`force_cleanup_ah_runtime`/the start path)
+    //   /// BEFORE any subprocess — the gatekeeper verifies that wiring at GREEN.
+    //   fn ensure_lifecycle_command_allowed(config_path: &Path) -> Result<(), String>
+    //
+    //   /// The bash `-c` script the Windows `wsl.exe -e bash -lc` path runs for an ah
+    //   /// command (tasks.md:81, Req 4.7 / 坑洞 3.5). Extracted from
+    //   /// `run_ah_config_command_output` (lib.rs:965) and reused by
+    //   /// `spawn_ah_events_command` (lib.rs:995) so both call sites carry the clamp.
+    //   /// It MUST clamp `AH_STATE_DIR`/`CCBD_STATE_DIR`/`XDG_STATE_HOME` INSIDE the
+    //   /// script string itself (`export AH_STATE_DIR=""; …`), not via Rust
+    //   /// `Command::env` — a `-lc` login shell re-sources the user profile AFTER
+    //   /// inheriting Command::env and would overwrite it. Pure string builder →
+    //   /// testable on Linux even though the wsl.exe path is Windows-only.
+    //   fn build_ah_bash_script(config_path: &Path, ah_args: &[&str]) -> String
+
+    /// Req 5.9 / 4.6: a workspace-owned ah config (walked-up `ah.toml`) is read-only —
+    /// it must REFUSE `start`/`stop`/`kill` — while a Studio-managed temp config allows
+    /// the full lifecycle; and read-only status/events discovery is NOT gated by
+    /// ownership. Anchored to the frozen task-1 ownership fixtures + the single
+    /// ownership authority (`classify_config_ownership`). Kept fully pure so no `ah stop`
+    /// is ever fired at the operator's live fleet while the guard is still absent.
+    /// Rollback self-check: an always-Ok guard reds the workspace-owned refusal; an
+    /// always-Err guard reds the Studio-managed allow; the two fixtures are opposite
+    /// classes so no constant satisfies the ownership-authority consistency loop.
+    #[test]
+    fn test_lifecycle_only_on_studio_managed_config() {
+        use ah_contract_fixtures::{
+            ALL_CONFIG_OWNERSHIP_FIXTURES, CONFIG_STUDIO_MANAGED, CONFIG_WORKSPACE_OWNED,
+        };
+
+        // Frozen fixture facts: workspace-owned = read-only, Studio-managed temp = lifecycle-ok.
+        assert!(CONFIG_WORKSPACE_OWNED.read_only, "workspace-owned fixture is readOnly:true");
+        assert!(!CONFIG_STUDIO_MANAGED.read_only, "Studio-managed temp fixture is readOnly:false");
+
+        // A workspace-owned config REFUSES lifecycle commands; a Studio-managed temp
+        // config allows them.
+        assert!(
+            ensure_lifecycle_command_allowed(Path::new(CONFIG_WORKSPACE_OWNED.config_path)).is_err(),
+            "workspace-owned config must refuse start/stop/kill (Req 5.9)"
+        );
+        assert!(
+            ensure_lifecycle_command_allowed(Path::new(CONFIG_STUDIO_MANAGED.config_path)).is_ok(),
+            "Studio-managed temp config allows the full lifecycle (Req 4.6 class b)"
+        );
+
+        // The guard's verdict MUST be sourced from the single ownership authority:
+        // lifecycle-allowed ⇔ NOT read-only, for every registered ownership class.
+        for f in ALL_CONFIG_OWNERSHIP_FIXTURES {
+            let path = Path::new(f.config_path);
+            let allowed = ensure_lifecycle_command_allowed(path).is_ok();
+            assert_eq!(
+                allowed,
+                !classify_config_ownership(path).read_only,
+                "lifecycle permission must derive from classify_config_ownership, not a second guess"
+            );
+            assert_eq!(allowed, !f.read_only, "guard must agree with the frozen ownership class");
+        }
+
+        // Read-only status/events discovery is NOT gated by ownership: the SAME
+        // workspace-owned config is still surfaced for observation (status), yet its
+        // lifecycle commands stay refused. Built on a throwaway temp workspace so the
+        // real fleet is never touched.
+        let workspace = temp_path("lifecycle-guard-workspace");
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).unwrap();
+        let discovered_config = workspace.join("ah.toml");
+        std::fs::write(
+            &discovered_config,
+            transient_ah_config_content(CodeAssistant::Claude),
+        )
+        .unwrap();
+
+        let status_config = ah_config_for_status(&workspace, CodeAssistant::Claude)
+            .expect("read-only status discovery still surfaces the workspace ah.toml");
+        assert_eq!(
+            status_config, discovered_config,
+            "status/events observation is unaffected by ownership"
+        );
+        assert!(
+            classify_config_ownership(&status_config).read_only,
+            "a walked-up ah.toml outside the Studio temp namespace is workspace-owned"
+        );
+        assert!(
+            ensure_lifecycle_command_allowed(&status_config).is_err(),
+            "same config: observable via status/events, but start/stop/kill refused (Req 5.9)"
+        );
+
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    /// Req 4.7 / 坑洞 3.5: the ah bash `-c` script must clamp `AH_STATE_DIR`,
+    /// `CCBD_STATE_DIR`, and `XDG_STATE_HOME` INSIDE the script string itself
+    /// (`export AH_STATE_DIR=""; …`), before the ah command runs — a `-lc` login shell
+    /// re-sources the user profile after inheriting `Command::env`, so a Rust-side
+    /// `Command::env` clamp would be silently overwritten. Anchored to the pure builder
+    /// `build_ah_bash_script`, the exact string the Windows `wsl.exe -e bash -lc` path
+    /// executes. Rollback self-check: drop the in-string clamp (or move it to
+    /// `Command::env`) and the `export …=""` assertions red; the ordering assertion
+    /// reds if the clamp is emitted after the ah command.
+    #[test]
+    fn test_env_clamp_in_bash_string() {
+        let config = Path::new("/tmp/skill-studio-ah/0123456789abcdef/claude/ah.toml");
+        let script = build_ah_bash_script(config, &["status", "--json"]);
+
+        for clamp in [
+            r#"export AH_STATE_DIR="""#,
+            r#"export CCBD_STATE_DIR="""#,
+            r#"export XDG_STATE_HOME="""#,
+        ] {
+            assert!(
+                script.contains(clamp),
+                "state-dir env must be clamped in the bash -c string, missing `{clamp}`\nscript: {script}"
+            );
+        }
+
+        // The clamp must be exported BEFORE the ah invocation reads the environment.
+        let clamp_at = script
+            .find(r#"export AH_STATE_DIR="""#)
+            .expect("AH_STATE_DIR clamp present");
+        let ah_at = script.find("ah --config").expect("ah command present in the script");
+        assert!(
+            clamp_at < ah_at,
+            "state-dir clamp must precede the ah command so ah reads the clamped env\nscript: {script}"
+        );
+
+        // Regression guard: the refactored builder still carries the existing env
+        // shaping and the requested config + ah args.
+        assert!(
+            script.contains("SYSTEMD_LOG_LEVEL=err"),
+            "existing SYSTEMD_LOG_LEVEL shaping must survive the refactor\nscript: {script}"
+        );
+        assert!(script.contains("ah.toml"), "script targets the requested config path");
+        assert!(
+            script.contains("status") && script.contains("--json"),
+            "script carries the requested ah args"
+        );
+    }
+
     #[test]
     fn ah_ps_probe_extracts_tmux_socket_label_and_session_ids() {
         let output = r#"

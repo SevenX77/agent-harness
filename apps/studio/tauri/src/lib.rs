@@ -3110,6 +3110,87 @@ fn shutdown_application<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, reas
     });
 }
 
+#[allow(dead_code)]
+#[derive(Deserialize, Debug, Clone)]
+struct IdentitySession {
+    session_id: String,
+    project_id: String,
+    path: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct IdentitySnapshot {
+    schema_version: u64,
+    state_dir: String,
+    #[serde(default)]
+    sessions: Vec<IdentitySession>,
+}
+
+fn verify_snapshot_identity(
+    snapshot_json: &str,
+    requested_config_path: &Path,
+    requested_workspace_dir: &Path,
+) -> Result<(), String> {
+    let _ = requested_config_path;
+    let snapshot: IdentitySnapshot = serde_json::from_str(snapshot_json)
+        .map_err(|e| format!("Invalid JSON in snapshot: {e}"))?;
+
+    if snapshot.schema_version != 2 {
+        return Err(format!(
+            "Unsupported schema version: {} (expected 2)",
+            snapshot.schema_version
+        ));
+    }
+
+    let requested_wsl = windows_path_to_wsl(requested_workspace_dir);
+    let requested_wsl_path = Path::new(&requested_wsl);
+
+    let slashed = requested_workspace_dir.to_string_lossy().replace('\\', "/");
+    let expected_project_id = slashed
+        .split('/')
+        .last()
+        .unwrap_or("")
+        .to_string();
+
+    if expected_project_id.is_empty() {
+        return Err("Derived expected project_id is empty".to_string());
+    }
+
+    let state_dir_wsl = windows_path_to_wsl(Path::new(&snapshot.state_dir));
+    let state_dir_wsl_path = Path::new(&state_dir_wsl);
+    
+    let hash = workspace_hash(requested_workspace_dir);
+    let is_state_dir_under_workspace = state_dir_wsl_path.starts_with(requested_wsl_path)
+        || state_dir_wsl.contains(&requested_wsl);
+    let is_state_dir_matching_hash = state_dir_wsl.contains(&hash);
+
+    if !is_state_dir_under_workspace && !is_state_dir_matching_hash {
+        return Err(format!(
+            "state_dir mismatch: snapshot state_dir '{}' (WSL: '{}') is not associated with requested workspace '{}' (WSL: '{}', Hash: '{}')",
+            snapshot.state_dir, state_dir_wsl, requested_workspace_dir.display(), requested_wsl, hash
+        ));
+    }
+
+    if !snapshot.sessions.is_empty() {
+        let mut matched = false;
+        for session in &snapshot.sessions {
+            let session_path_wsl = windows_path_to_wsl(Path::new(&session.path));
+            if session_path_wsl == requested_wsl && session.project_id == expected_project_id {
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return Err(format!(
+                "session identity mismatch: expected project_id '{}' and path '{}' (WSL: '{}'), but got sessions: {:?}",
+                expected_project_id, requested_workspace_dir.display(), requested_wsl, snapshot.sessions
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

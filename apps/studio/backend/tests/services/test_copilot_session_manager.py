@@ -249,27 +249,24 @@ def test_build_options_enables_summarized_thinking(tmp_path: Path) -> None:
     assert options.thinking == {"type": "adaptive", "display": "summarized"}
 
 
-def test_build_options_mounts_reference_doc_dirs(tmp_path: Path) -> None:
-    # F3 渐进暴露: skill-spec + engine 契约 + gateway 概念 + studio 配置地图
-    # 全部挂载,copilot 按需 Read;这些目录同时是读护栏的放行集。
+def test_build_options_mounts_knowledge_base_only(tmp_path: Path) -> None:
+    # 挂载收敛(R4.4/4.5):只剩随包知识库一条;契约事实经 KB-00 路由按需 Read。
     options = copilot.build_options(None, "claude-key", tmp_path)
 
     entries = [str(entry) for entry in options.add_dirs]
-    assert any("02-skill-syntax" in entry for entry in entries), entries
-    assert any(entry.endswith("01-contract") for entry in entries), entries
-    assert any("graph-agent-gateway" in entry for entry in entries), entries
-    assert any("mounted" in entry for entry in entries), entries
+    assert len(entries) == 1, entries
+    assert entries[0].endswith("knowledge"), entries
 
 
-def test_build_options_carries_session_system_prompt(tmp_path: Path) -> None:
-    # 规则文档走 SDK 的 system_prompt 参数(会话级),不再拼进用户消息。
+def test_build_options_carries_preset_system_prompt(tmp_path: Path) -> None:
+    # 会话基座 = 完整 claude_code preset + MoirAI 资产 append(R6.1);
+    # 纯字符串会把基座整体替换,是已定谳的缺陷用法。
     options = copilot.build_options(None, "claude-key", tmp_path)
 
-    assert options.system_prompt == copilot.build_session_system_prompt()
-    prompt = str(options.system_prompt)
-    assert "graph_skill" in prompt
-    assert "v0.3.0" in prompt
-    assert "skill-spec" in prompt  # mounted-spec pointer
+    assert isinstance(options.system_prompt, dict)
+    assert options.system_prompt["type"] == "preset"
+    assert options.system_prompt["preset"] == "claude_code"
+    assert "assembled-by=studio" in options.system_prompt["append"]
 
 
 def test_build_options_isolates_filesystem_settings(tmp_path: Path) -> None:

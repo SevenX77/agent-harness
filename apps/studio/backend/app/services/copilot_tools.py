@@ -141,6 +141,203 @@ async def run_role_test_tool(args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+_PREDICT_DIAGNOSTICS_LIMIT = 20
+
+
+@tool(
+    "predict_skill",
+    "对指定 skill 做无 LLM 空跑(Predict):编译干净但行为可疑时用它——"
+    "返回 phase 路径、path diff、诊断摘要;深查细节去 .workspace/runs/<run_id>/。"
+    "compile_skill 干净之后的第二级诊断;真实运行(Run)只能由用户在 UI 触发。",
+    {"skill_id": str},
+)
+async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
+    import asyncio
+
+    from app.services import predictor
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        result = await asyncio.to_thread(
+            predictor.predictor_service.dispatch_predict_job, skill_id
+        )
+        export = predictor.predictor_service.export_diagnostics(result)
+    except predictor.PredictArtifactError as exc:
+        return _text_result(
+            {"error_code": exc.error_code, "message": str(exc), "run_id": exc.run_id},
+            is_error=True,
+        )
+    except predictor.PredictDeadlockError as exc:
+        return _text_result(
+            {
+                "error_code": "engine.predict_deadlock",
+                "message": str(exc),
+                "phase_name": exc.phase_name,
+                "actual_path": exc.actual_path,
+            },
+            is_error=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"predict_skill 失败: {exc}", is_error=True)
+
+    diagnostics = [d.model_dump(mode="json") for d in export.diagnostics]
+    truncated = export.diagnostics_truncated or len(diagnostics) > _PREDICT_DIAGNOSTICS_LIMIT
+    return _text_result(
+        {
+            "success": export.status == "success",
+            "run_id": result.run_id,
+            "phases": [
+                {
+                    "phase_name": p.phase_name,
+                    "type": p.type,
+                    "mocked_source": p.mocked_source,
+                }
+                for p in export.phases
+            ],
+            "path_diff": export.path_diff.model_dump(mode="json") if export.path_diff else None,
+            "diagnostics": diagnostics[:_PREDICT_DIAGNOSTICS_LIMIT],
+            "diagnostics_truncated": truncated,
+            "diagnostics_total": len(diagnostics),
+            "diagnostic_counts": export.diagnostic_counts,
+            "detail_hint": f".workspace/runs/{result.run_id}/",
+        }
+    )
+
+
+# 角色配置写工具(R10):经 routers/llm.py 背后同一条服务链(校验/canonicalize/
+# 级联/领域事件全复用),绝不直写配置文件;凭据与 endpoint 不提供写入(R10.3)。
+_ROLE_UPDATE_OPS = ("set_model_groups", "model_fallback_enabled", "intent")
+
+
+def _role_snapshot(role: Any) -> dict[str, Any]:
+    dumped = role.model_dump(mode="json")
+    return {
+        "role_kind": dumped.get("role_kind"),
+        "model_fallback_enabled": dumped.get("model_fallback_enabled"),
+        "intent": dumped.get("intent"),
+        "model_groups": dumped.get("model_groups", []),
+    }
+
+
+async def _save_single_role(role_name: str, role: Any) -> Any:
+    """put_llm_roles 的单角色等价路径:merge → materialize → save → 领域事件。"""
+
+    from app.routers import llm
+    from app.services import llm_credentials, runtime_activity
+
+    current = llm._load_roles_or_empty()
+    merged = current.model_copy(update={"roles": {**current.roles, role_name: role}})
+    credentials = llm_credentials.load_credentials()
+    materialized = llm._materialize_roles_for_response(merged, credentials)
+    saved = llm._save_roles_with_active_routes(materialized)
+    await llm._publish_roles_changed()
+    runtime_activity.record_runtime_activity(
+        source_id="llm_roles",
+        action="copilot_role_write",
+        message=f"Copilot tool saved LLM role '{role_name}'.",
+        changes={"role_name": role_name},
+    )
+    return saved.roles[role_name]
+
+
+@tool(
+    "create_llm_role",
+    "新建一个 LLM 角色:给角色名和模型组列表(每组 canonical_id/display_name/"
+    "provider_models[{route_id}]),可选 intent(thinking/max_output_tokens/"
+    "temperature)。走与 Settings 保存完全相同的服务链;返回 before/after 变更摘要"
+    "(before=null)。凭据与 endpoint 不可写。",
+    {"name": str, "model_groups": list, "intent": dict},
+)
+async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.models.llm_config import RoleEntry, RoleIntent, RoleModelGroup
+    from app.routers import llm
+
+    name = str(args.get("name", "")).strip()
+    if not name:
+        return _text_result("name 不能为空", is_error=True)
+    data = llm._load_roles_or_empty()
+    if name in data.roles:
+        return _text_result(
+            f"角色 {name} 已存在;改配置用 update_llm_role", is_error=True
+        )
+    try:
+        fields: dict[str, Any] = {
+            "model_groups": [
+                RoleModelGroup.model_validate(g) for g in (args.get("model_groups") or [])
+            ]
+        }
+        if args.get("intent") is not None:
+            fields["intent"] = RoleIntent.model_validate(args["intent"])
+        role = RoleEntry(**fields)
+    except ValidationError as exc:
+        return _text_result(f"角色配置无效:\n{exc}", is_error=True)
+    try:
+        saved_role = await _save_single_role(name, role)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"create_llm_role 失败: {exc}", is_error=True)
+    return _text_result(
+        {"role_name": name, "before": None, "after": _role_snapshot(saved_role)}
+    )
+
+
+@tool(
+    "update_llm_role",
+    "修改既有 LLM 角色。ops 支持:set_model_groups(整表替换=增删/排序)、"
+    "model_fallback_enabled(开关)、intent(部分更新 thinking/max_output_tokens/"
+    "temperature)。走与 Settings 保存完全相同的服务链;返回 before/after 变更摘要,"
+    "用户可据 before 一键撤销。凭据与 endpoint 不可写。",
+    {"role_name": str, "ops": dict},
+)
+async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.models.llm_config import RoleIntent, RoleModelGroup
+    from app.routers import llm
+
+    role_name = str(args.get("role_name", "")).strip()
+    if not role_name:
+        return _text_result("role_name 不能为空", is_error=True)
+    ops = args.get("ops") or {}
+    unknown = sorted(set(ops) - set(_ROLE_UPDATE_OPS))
+    if unknown:
+        return _text_result(
+            f"未知 ops {unknown};支持的操作: {list(_ROLE_UPDATE_OPS)}", is_error=True
+        )
+    data = llm._load_roles_or_empty()
+    role = data.roles.get(role_name)
+    if role is None:
+        return _text_result(
+            f"未知 LLM 角色: {role_name};现有角色: {sorted(data.roles)}", is_error=True
+        )
+    before = _role_snapshot(role)
+    try:
+        update_fields: dict[str, Any] = {}
+        if "set_model_groups" in ops:
+            update_fields["model_groups"] = [
+                RoleModelGroup.model_validate(g) for g in (ops["set_model_groups"] or [])
+            ]
+        if "model_fallback_enabled" in ops:
+            update_fields["model_fallback_enabled"] = bool(ops["model_fallback_enabled"])
+        if "intent" in ops:
+            update_fields["intent"] = RoleIntent.model_validate(
+                {**role.intent.model_dump(mode="json"), **(ops["intent"] or {})}
+            )
+        updated = role.model_copy(update=update_fields)
+    except ValidationError as exc:
+        return _text_result(f"角色配置无效:\n{exc}", is_error=True)
+    try:
+        saved_role = await _save_single_role(role_name, updated)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"update_llm_role 失败: {exc}", is_error=True)
+    return _text_result(
+        {"role_name": role_name, "before": before, "after": _role_snapshot(saved_role)}
+    )
+
+
 def build_copilot_mcp_servers() -> dict[str, McpServerConfig]:
     """Chat 会话的 in-process MCP server 集(probe 路不挂,保持探测确定性)。"""
 
@@ -148,6 +345,13 @@ def build_copilot_mcp_servers() -> dict[str, McpServerConfig]:
         COPILOT_MCP_SERVER_NAME: create_sdk_mcp_server(
             name=COPILOT_MCP_SERVER_NAME,
             version="1.0.0",
-            tools=[get_llm_roles_tool, compile_skill_tool, run_role_test_tool],
+            tools=[
+                get_llm_roles_tool,
+                compile_skill_tool,
+                run_role_test_tool,
+                predict_skill_tool,
+                create_llm_role_tool,
+                update_llm_role_tool,
+            ],
         )
     }

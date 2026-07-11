@@ -54,8 +54,10 @@ revision_trace: REVISION-TRACE.md
   - 保持已有安装/provisioning 入口，不让旧版本继续进入生命周期命令。
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 5.4_
 
-- [ ] 3. 用结构化 snapshot 替换一次性状态检测，并加身份校验（须与任务 4 同批落地）
-  - **2026-07-10 复核发现,取消勾选**：见 `task6-wiring-gap-finding-2026-07-10.md`。
+- [x] 3. 用结构化 snapshot 替换一次性状态检测，并加身份校验（须与任务 4 同批落地）
+  - **2026-07-11 任务6.1(432bad03)收口后复勾**：三个真实命令入口已切到 typed 决策面
+    （见任务 6.1 及 `task6.1-cross-lane-review-2026-07-11.md`）。
+  - **2026-07-10 复核发现,曾取消勾选**：见 `task6-wiring-gap-finding-2026-07-10.md`。
     typed 决策面（`AhRuntimeSnapshot`/`parse_ah_runtime_snapshot`/
     `reconcile_snapshot_lifecycle`,lib.rs:3228 起）只在单测里被直接构造 fixture
     调用，真实的 `prepare_code_assistant_open`/`attach_code_assistant_terminal`/
@@ -71,8 +73,10 @@ revision_trace: REVISION-TRACE.md
   - 移除 normal decision path 对 `ah ps` 文本解析和 tmux 探测的依赖。
   - _Requirements: 2.1, 2.4→2.5(schema), 2.6, 2.7, 3.5, 3.8, 4.8, 5.2, 5.10_
 
-- [ ] 4. 升级 live status subscription 为主决策面 + sequence 仲裁（须与任务 3 同批落地）
-  - **2026-07-10 复核发现,取消勾选**：见 `task6-wiring-gap-finding-2026-07-10.md`。
+- [x] 4. 升级 live status subscription 为主决策面 + sequence 仲裁（须与任务 3 同批落地）
+  - **2026-07-11 任务6.1(432bad03)收口后复勾**：events 订阅流/缓存/UI 投影已切到
+    typed 决策面（见任务 6.1 及 `task6.1-cross-lane-review-2026-07-11.md`）。
+  - **2026-07-10 复核发现,曾取消勾选**：见 `task6-wiring-gap-finding-2026-07-10.md`。
     "将 `ah events --format json` ... 设为 open/attach/close 决策的主输入"这条未
     达成——后台 `ah events` 订阅（`start_code_assistant_status_stream`,lib.rs:1513
     起）的快照只喂 UI 状态显示（该函数自己的注释 lib.rs:1492-1496 明写
@@ -106,7 +110,9 @@ revision_trace: REVISION-TRACE.md
   - 同 config 已有 active stack 时的 duplicate-start 处理，必须基于任务 0 记录的真实 `ah start` 行为实现，不得凭假设实现。
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 5.6, 5.7, 5.8_
 
-- [ ] 6.1. 收尾：把 events-primary 决策面真正接入 Open/Attach/Close 命令入口（2026-07-10 复核新增，见 `task6-wiring-gap-finding-2026-07-10.md`）
+- [x] 6.1. 收尾：把 events-primary 决策面真正接入 Open/Attach/Close 命令入口（2026-07-10 复核新增，见 `task6-wiring-gap-finding-2026-07-10.md`）
+  - **完成于 432bad03**，RED=04d788d7，跨泳道审计 ACCEPT=`task6.1-cross-lane-review-2026-07-11.md`（00db907c）。
+    `force_cleanup_ah_runtime` 相关部分仍归任务 7，未在本条范围内。
   - 任务 3/4/6 新增的 `AhRuntimeSnapshot`/`reconcile_snapshot_lifecycle` 只在单测里被 fixture 调用，真实入口 `prepare_code_assistant_open`（lib.rs:2543）/`attach_code_assistant_terminal`（lib.rs:2626）/`force_cleanup_ah_runtime`（lib.rs:1193）仍在调 `inspect_ah_runtime`（lib.rs:1157，跑 `ah ps` 文本解析 + tmux 探测），直接违反 design.md:27/178/325 "Never use `ah ps` text or tmux probing for normal lifecycle decisions"。
   - 把这三个入口的决策输入切到事件驱动快照（events-primary，`status --json` fallback，按 design.md:92-158 的 sequence graph），用 `reconcile_snapshot_lifecycle`/新的 open 决策函数替代 `decide_code_assistant_open`+`reconcile_code_assistant_lifecycle`。
   - 按项目"无向后兼容"铁律删除旧路径：`AhLifecycleSnapshot`（lib.rs:445）、`code_assistant_lifecycle_is_active`（lib.rs:497）、`reconcile_code_assistant_lifecycle`（lib.rs:501）、`decide_code_assistant_open`（lib.rs:534）、`inspect_ah_runtime` 里 `ah ps` 分支及其文本解析辅助函数（`extract_tmux_socket_label`/`ah_ps_output_has_inventory`/`extract_ah_session_ids`），不得双轨并存。

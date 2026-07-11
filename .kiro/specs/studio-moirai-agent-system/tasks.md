@@ -2,70 +2,70 @@
 
 > 依赖:任务 1(资产)是 2.1–2.3 与任务 3 的前置;2.4/2.5/2.6 与资产撰写无数据依赖可并行。全程遵守 AGENTS.md 开发原则与 CI 门禁;资产文件一律 UTF-8+LF、英文。
 
-- [ ] 1. 资产层:app/agents/ 四层重组与内容撰写(全英文)
-- [ ] 1.1 目录更名与骨架
+- [x] 1. 资产层:app/agents/ 四层重组与内容撰写(全英文)
+- [x] 1.1 目录更名与骨架
   - `app/prompts` → `app/agents`;建 roles/、contexts/、knowledge/ 与 agent-skill-map.json(含两条交叉映射);定义拼装契约(源文件编辑头;落盘产物=BEGIN/END 分段标记,内存产物=仅头部来源清单);contexts 薄层按新范围撰写(panel=R6.5;cli=仅女神 id 绑定+工作区事实,不复述 ah 命令语法,R7.5/7.6)
   - _Requirements: 1.1, 1.4, 1.5, 5.3, 5.5, 7.5, 7.6_
-- [ ] 1.2 四份角色文档(英文重打磨)
+- [x] 1.2 四份角色文档(英文重打磨)
   - MoirAI 六步代理人协议(scope 契合为唯一派遣判据;任务包=目标/输入/边界/交付);三女神职责句重写;三段式+人格方法论;零 few-shot;零实现层词汇/修订语境/防御性否认
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 7.4, 8.7_
-- [ ] 1.3 操作手册
+- [x] 1.3 操作手册
   - 诊断优先级决策树;证据先行/根因修复/渐进披露/predict 禁作 golden;沟通规则(语言跟随/结论先行/讲 why);审批被拒后的判断义务;KB-00 路由入口内置于手册(R3.8);delta 纪律(基座已有的不写,基线=完整基座;关键纪律显式承载以保薄基座自足,R3.9)
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 8.7_
-- [ ] 1.4 (P) 知识库·语法契约族(KB-00 hub + 01..06)
+- [x] 1.4 (P) 知识库·语法契约族(KB-00 hub + 01..06)
   - hub=场景路由+链接解析规则+链接图;每篇 frontmatter related + 正文 [[KB-xx]] 互链;标提炼来源
   - _Requirements: 4.1, 4.2, 4.3_
-- [ ] 1.5 (P) 知识库·生命周期族(KB-07..11)
+- [x] 1.5 (P) 知识库·生命周期族(KB-07..11)
   - compile 诊断体系/predict/run·trace·checkpoint/golden/workspace 运行时
   - _Requirements: 4.1, 4.2, 4.3_
-- [ ] 1.6 (P) 知识库·配置与工具族(KB-12..13)
+- [x] 1.6 (P) 知识库·配置与工具族(KB-12..13)
   - LLM roles 心智模型+排障表+配置写工具能力面;studio 阶段门与六工具地图(吸收 studio-config-map 后 mounted/ 退役)
   - _Requirements: 4.1, 4.2, 4.3, 4.5, 10.4_
-- [ ] 1.7 技能池统一(英文重写,事实引用 KB)
+- [x] 1.7 技能池统一(英文重写,事实引用 KB)
   - eval-judgement、moirai-intro 自 lib.rs 迁出;六技能只写方法论、契约事实改 [[KB-xx]] 引用;moirai-intro 表面中立化(状态动词交给 contexts)
   - _Requirements: 1.2, 5.1, 5.2, 5.4_
-- [ ] 1.8 知识库对照设计源复核
+- [x] 1.8 知识库对照设计源复核
   - 逐篇对照提炼来源核对契约事实;drift 处按设计优先标注
   - _Requirements: 4.3_
 
-- [ ] 2. Backend:装载、护栏与工具
-- [ ] 2.1 资产装载模块与指纹回显
+- [x] 2. Backend:装载、护栏与工具
+- [x] 2.1 资产装载模块与指纹回显
   - agent_assets 统一装载(缓存+缺文件清单+fail loud);assets 指纹覆盖全资产(roles+manual+contexts+knowledge+skills+map);context_resolved 改 assets@;删 copilot-rules 及其装载函数
   - _Requirements: 1.3, 1.6, 1.7, 1.8_
-- [ ] 2.2 会话拼装:preset+append 与原生 subagents
+- [x] 2.2 会话拼装:preset+append 与原生 subagents
   - system_prompt 改 preset claude_code + append(moirai+manual+panel;KB 路由随手册);注册三 AgentDefinition(prompt 拼装、skills=map、lachesis 带 compile+predict 工具;薄基座前提见 research §T6);allowed_tools 声明式=读类三件+六 MCP 工具名;评估 exclude_dynamic_sections;probe 路维持裸配置
   - _Requirements: 3.1, 3.8, 5.5, 6.1, 6.2, 6.3, 6.6, 8.1_
-- [ ] 2.3 挂载收敛
+- [x] 2.3 挂载收敛
   - _mounted_doc_dirs 仅剩 knowledge/ 一条;删全部开发仓 docs 条目
   - _Requirements: 4.4, 4.5_
-- [ ] 2.4 (P) 工具护栏改造(两层结构)
+- [x] 2.4 (P) 工具护栏改造(两层结构)
   - 硬边界层=PreToolUse hook:写白名单=工作区∪Skills root,显式排除 llm/ 配置真相与 app_settings,越界直接 deny;invariant 回归测试(Write 误入 allowed_tools 后 hook 仍拦);审批 UX 层=can_use_tool:白名单内写走 patch_proposed、Bash 挂起;审批超时改可配长时限(默认 30min)+超时停任务(interrupt+前端明示「会话保留」+会话可续);拒绝路径回传理由;验证 CLI 控制协议无内部超时截断
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
-- [ ] 2.5 (P) predict_skill MCP 工具
+- [x] 2.5 (P) predict_skill MCP 工具
   - 走后端既有 predict 出口;摘要/截断/深查提示;异常结构化;run 不做工具
   - _Requirements: 9.1, 9.2, 9.4_
-- [ ] 2.6 (P) LLM 角色配置写工具
+- [x] 2.6 (P) LLM 角色配置写工具
   - create_llm_role / update_llm_role 经服务层出口(校验/canonicalize/级联/领域事件复用,不直写文件);返回结构化变更摘要含 before/after;前端卡片一键撤销(before 快照经同服务层写回);凭据/endpoint 不提供写入
   - _Requirements: 10.1, 10.2, 10.3_
 
-- [ ] 3. Tauri:运行时物化改造
-- [ ] 3.1 资产源目录解析
+- [x] 3. Tauri:运行时物化改造
+- [x] 3.1 资产源目录解析
   - studio_agents_dir dev/打包双分支(与 sidecar backend 判据一致);缺失 fail loud
   - _Requirements: 1.2, 1.3_
-- [ ] 3.2 工作区物化对齐四层
+- [x] 3.2 工作区物化对齐四层
   - StartFresh 物化 .ah/rules(按拼装契约:role+manual+cli,BEGIN/END 标记)+ .ah/skills + .ah/knowledge,全带受管头;缺失中止列清单;拒覆盖/用户 ah.toml 优先等既有语义保持;rules 知识引用指向 .ah/knowledge
   - _Requirements: 1.3, 1.4, 4.4, 7.1, 7.2, 7.4, 7.5_
-- [ ] 3.3 ah.toml 派生与常量退役
+- [x] 3.3 ah.toml 派生与常量退役
   - skills 由 map 派生;window_size/moirai-intro 等阶段 2 约束保持;删六常量与 include_str!;内容断言测试迁移为物化产物断言
   - _Requirements: 1.2, 5.5, 7.3_
 
-- [ ] 4. 集成验证与文档回写
-- [ ] 4.1 集成测试
+- [x] 4. 集成验证与文档回写
+- [x] 4.1 集成测试
   - SDK 冒烟(preset+append/assets@/knowledge 可读/Agent 派遣);tauri 端到端(落盘/幂等/拒覆盖/两路一致);诊断链 fixture(compile 干净 predict 报错,主线程与 lachesis 各走通);角色配置链(写后 registry 反映+领域事件;撤销回到 before 并再发事件);审批超时链(超时后同会话续发消息可应答)
   - _Requirements: 3.2, 6.4, 8.4, 9.3, 10.1, 10.2_
-- [ ] 4.2 设计文档回写
+- [x] 4.2 设计文档回写
   - ah-orchestration-design §9.8 替换/§7 升级/§8-2 完成;copilot region mvp1-alignment 核对;INDEX 登记;涉 audited 哈希锁同 PR 重钉;ah 路工具边界差距记录
   - _Requirements: 4.7, 8.8_
-- [ ] 4.3 vendor 重建与鲁棒性人工验收
+- [x] 4.3 vendor 重建与鲁棒性人工验收
   - rebuild vendor+预热 pyc,打包形态资产一致;零 few-shot 验收:「分析这个 skill」派遣形状、人格通读(PM 认可)、update_llm_role 场景(含一键撤销)、审批超时停任务(会话保留可续)/拒绝改道场景、CLI intro(`ah ps`)与面板 intro(不提 ah)
   - _Requirements: 2.4, 2.9, 4.6, 6.4, 8.4, 8.5, 10.2_

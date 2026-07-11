@@ -49,7 +49,8 @@ import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bu
 import { RolePicker, copilotRoleOptions } from './role-picker'
 import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
-import { formatProcessedDuration, partitionAssistantView, type TranscriptSegment } from './transcript'
+import { cn } from '@/lib/utils'
+import { formatProcessedDuration, buildAssistantView, type TranscriptSegment } from './transcript'
 
 interface ChatMessageItemProps {
   message: CopilotMessage
@@ -73,7 +74,7 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
       </Message>
     )
   }
-  const view = partitionAssistantView(message)
+  const view = buildAssistantView(message)
   const streaming = message.status === 'running'
   // F6-7/F8: the wait shimmer covers everything up to the first VISIBLE
   // activity — the first thinking or answer token. context_resolved / tool
@@ -82,7 +83,26 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
   const waiting =
     streaming && !message.content && !message.events.some((event) => event.type === 'thinking_delta')
   const ctx: ProcessRenderContext = { streaming, skillId, workspaceRoot, onFileChanged }
-  const processNodes = view.process.map((segment) => renderProcessSegment(segment, ctx))
+
+  const renderSegmentNode = (segment: TranscriptSegment, isFinalAnswer: boolean) => {
+    if (segment.kind === 'text') {
+      return (
+        <div
+          key={segment.id}
+          className={cn(
+            "copilot-prose leading-relaxed",
+            isFinalAnswer 
+              ? "text-[13px] text-foreground font-normal"
+              : "text-xs text-muted-foreground font-normal"
+          )}
+        >
+          <ReactMarkdown>{segment.content}</ReactMarkdown>
+        </div>
+      )
+    }
+    return renderProcessSegment(segment, ctx)
+  }
+
   return (
     // R7-A: chat content is selectable (PM「聊天内容无法选择」) — opt into the
     // global text-selection allowlist (FRONTEND_UI_SPEC §2.11).
@@ -90,27 +110,34 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
       <MessageContent>
         {waiting ? <ThinkingRow /> : null}
         <div className="space-y-1.5">
-          {view.process.length > 0 ? (
-            streaming ? (
-              // Live: the process streams inline so the user watches it happen.
-              processNodes
-            ) : (
-              // Settled: the whole process folds into ONE "Processed 44s" row —
-              // PM「最后只保留最终输出,把上面所有过程收束到一个折叠的过程行,加处理时间」.
-              <details className="text-xs text-muted-foreground">
-                <summary className="flex cursor-pointer select-none items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground">
-                  <span className="transition-transform group-open:rotate-90">›</span>
-                  Processed{view.durationMs != null ? ` ${formatProcessedDuration(view.durationMs)}` : ''}
-                </summary>
-                <div className="mt-1 space-y-1.5 pl-2">{processNodes}</div>
-              </details>
+          {streaming ? (
+            // Live: the process streams inline in natural chronological order
+            view.segments.map((segment, index) =>
+              renderSegmentNode(segment, index === view.lastTextIndex)
             )
-          ) : null}
-          {view.answer ? (
-            <div className="copilot-prose text-[13px] leading-relaxed text-foreground">
-              <ReactMarkdown>{view.answer.content}</ReactMarkdown>
-            </div>
-          ) : null}
+          ) : (
+            // Settled: process folds into details, final answer stays expanded
+            <>
+              {view.segments.some((_, index) => index !== view.lastTextIndex) && (
+                <details className="text-xs text-muted-foreground group">
+                  <summary className="flex cursor-pointer select-none items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground">
+                    <span className="transition-transform group-open:rotate-90">›</span>
+                    Processed{view.durationMs != null ? ` ${formatProcessedDuration(view.durationMs)}` : ''}
+                  </summary>
+                  <div className="mt-1 space-y-1.5 pl-2">
+                    {view.segments
+                      .map((segment, index) => ({ segment, index }))
+                      .filter(({ index }) => index !== view.lastTextIndex)
+                      .map(({ segment }) => renderSegmentNode(segment, false))
+                    }
+                  </div>
+                </details>
+              )}
+              {view.lastTextIndex >= 0 && (
+                renderSegmentNode(view.segments[view.lastTextIndex], true)
+              )}
+            </>
+          )}
         </div>
       </MessageContent>
     </Message>

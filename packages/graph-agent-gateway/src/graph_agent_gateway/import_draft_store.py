@@ -235,7 +235,6 @@ def materialize_import_draft_candidates(
             endpoint_id=candidate.endpoint_id,
             route_slug=candidate.route_slug,
             provider_model_id=candidate.provider_model_id,
-            canonical_id=candidate.canonical_id,
             status="unverified_manual",
             capabilities=candidate.capabilities,
             metadata=candidate.metadata,

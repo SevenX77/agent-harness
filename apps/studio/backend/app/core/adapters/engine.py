@@ -979,6 +979,8 @@ class EngineAdapter:
             execution_context["mock_llm"] = payload["mock_llm"]
         if "current_hashes" in payload and "current_hashes" not in execution_context:
             execution_context["current_hashes"] = payload["current_hashes"]
+        if "event_subscriber" in payload and "event_subscriber" not in execution_context:
+            execution_context["event_subscriber"] = payload["event_subscriber"]
         artifact_root = self._ensure_local_artifact_root(
             artifact_ref_data,
             allow_dev_refresh=bool(payload.get("dev_mode", True)),

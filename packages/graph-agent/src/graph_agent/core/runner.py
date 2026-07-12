@@ -954,6 +954,7 @@ def _run_compiled_artifact_predict_graph(
     runtime_config = request.execution_context.get("runtime_config")
     if not isinstance(runtime_config, dict):
         runtime_config = None
+    event_subscriber = request.execution_context.get("event_subscriber")
     return predict_skill(
         artifact_root,
         workspace_dir=workspace_dir,
@@ -965,6 +966,7 @@ def _run_compiled_artifact_predict_graph(
         mock_llm=request.execution_context.get("mock_llm"),
         current_hashes=request.execution_context.get("current_hashes") or {},
         runtime_config=runtime_config,
+        event_subscriber=event_subscriber if callable(event_subscriber) else None,
         **request.inputs,
     )
 

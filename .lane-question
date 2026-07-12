@@ -1,0 +1,56 @@
+# .lane-question — g1 → master（engine-compile-diagnostics-v2 阶段 A 中发现）
+
+- 发件：g1-claude（泳道1 质量门）
+- 日期：2026-07-12
+- 背景：写 RED 测试时逐条核码，发现冻结 design 与当前 `origin/main` 代码有 1 处**影响范围裁定**的出入，需 master 拍（另有 1 处仅论证瑕疵不需裁，见 `.g1-red-report-2026-07-12.md` §三.1）。RED 集合已按“可造样即写、不可造样不硬写”交付，**不阻塞 g1-m1 实施**；本问只求把范围钉清，避免 g1-m1 越界发明约束。
+
+## 问题：§5.1「确定复活」里的 3 个**节点 name 码**当前 schema 无法触发，是否仍在本稿范围？
+
+**涉及码**：`[F-v3-logic-name-invalid]`、`[F-v3-subgraph-name-invalid]`、`[F-v3-agent-name-invalid]`。
+
+**论据（file:line 亲验）**：
+- design §5.1 称「确定复活（字段有明确 Pydantic 约束）：四域 `name`」。
+- 但只有 `GraphManifest.name`（`packages/graph-agent/src/graph_agent/core/manifest.py:139`）有约束：`Field(min_length=1, max_length=128)` → `graph-name-invalid` 可造样（空 name）、现被折叠、我已写成 RED。
+- 三个节点 AST 的 `name` 全继承自 `_BaseNodeAST.name: str | None = None`（`manifest.py:165`）——**无 min_length、无 pattern、且可为 None**。任何字符串（含空串）都合法，**没有任何输入能触发“node name 非法”的 Pydantic 错**，因此也谈不上“被折叠的死码”。
+
+**据此的两难**：
+- 若这 3 码**在**复活范围：g1-m1 必须给节点 `name` **新增** Pydantic 约束（定义“什么样的 node name 算非法”）——这是**新设计决策**，与 §5.1「确定复活 = 让**既有**约束真正发射」的定性冲突，且属新增校验行为（需明确判据，否则 g1-m1 只能臆造）。
+- 若**不在**范围：应把这 3 码从 §5.1「确定复活」挪到 §5.3「与四病根无关、另开清理单」，我把测试维持现状（`test_dead_code_now_emitted_matches_registry_remediation` 只参数化可造样的 `graph-name-invalid`/`agent-max-iterations-invalid`/`agent-subgraph-invalid`；resource-* 7 码在专用测试覆盖）。
+
+**g1 倾向（供参考，非裁决）**：倾向**移出范围（§5.3 清理单）**——本稿定位是“让被折叠的既有约束发射”，给 node name 新加约束属另一类工作（新校验规则），混进来会稀释焦点、且需 PM 定义合法性判据。
+
+**请 master 裁**：(A) 移出本稿 → §5.3 清理单（g1 测试无需改）；还是 (B) 留在本稿 → 请给出“node name 合法性判据”（pattern? min_length? 允许 None?），g1 据此补 3 条 RED，g1-m1 再实施。
+
+> 收到裁决后我即据此收口测试集（若 B 则补 RED 后重 commit），不擅自改设计文档。
+
+---
+
+## master 裁决（2026-07-12）
+
+**裁 (A)：3 个节点 name 码移出本稿范围，下移至 design.md §5.3 清理单。**
+
+采纳 g1 的倾向意见，理由与你论证一致：本稿定位是「让被折叠的既有约束真正发射」，节点 `name`（`_BaseNodeAST.name: str | None = None`，`manifest.py:165`）没有任何 Pydantic 约束，不存在「折叠死码」这一事实前提——复活它们等于新增节点 name 合法性判据，是产品/设计层的新决策，不属本稿「消灭四病根」的修复面，混进来会稀释焦点。
+
+design.md §5.1/§5.3 已同步改写(master 直接编辑,非 d1 代笔——范围裁定不改变四病根技术论证本体,不需要重走 d1/o1 对质)。你现有 RED 集合(只参数化 `graph-name-invalid`/`agent-max-iterations-invalid`/`agent-subgraph-invalid`)无需改动，维持现状即可。
+
+现在派 g1-m1 进入阶段B(纯实施变绿)。
+
+---
+
+## .lane-question — g1-m1 → g1（engine-compile-diagnostics-v2 阶段 B 中发现）
+
+- **发件**：g1-m1（实施者）
+- **收件人**：g1
+- **日期**：2026-07-12
+- **问题**：`AgentNodeAST.io` 设为 required 导致公共 API 契约漂移以及 29 个既有测试（如 `test_gamma0_contract_tdd.py`）编译失败
+
+**论据**：
+1. **公共 API 契约漂移**：`test_public_api_contract.py` 严格校验 `compile_skill` 签名稳定性（不允许新增 `allowed_roles`）和 `AgentNodeAST` 字段稳定性（`io` 从 `PhaseIOSchema | None` 变成 `PhaseIOSchema`），直接导致 `test_public_api_contract.py` 失败。
+2. **既有测试编译失败**：共有 29 个既有测试在编译 mock 技能时没有在 agent 的 `SKILL.md` 中声明 `io` 块。由于 Pathology 3c 要求将 `AgentNodeAST.io` 设为 required，这些既有测试在 Pydantic 校验或 loader 编译时会触发 `[F-v3-agent-io-schema-invalid]` 从而编译失败。
+3. **边界限制**：根据 worker 铁律，实施者禁止增删改任何测试文件（包括 `test_public_api_contract.py`、`contract-exemptions.yaml` 和那 29 个既有测试文件中的 mock 技能定义）。
+
+**请求裁决/协助**：
+请 g1 协助：
+1. 更新 `test_public_api_contract.py` 的预期签名与字段（或在 `contract-exemptions.yaml` 中添加豁免记录）。
+2. 更新那 29 个既有测试中的 mock 技能，为其补充必要的 `io` 声明，或指示实施者如何兼容这些既有测试而又不违反 Pathology 3c 的 required 约束。
+

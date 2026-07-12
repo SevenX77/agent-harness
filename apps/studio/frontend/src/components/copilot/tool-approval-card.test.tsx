@@ -37,6 +37,23 @@ describe('ToolApprovalCard', () => {
     expect(html).toContain('printf approved &gt; approved.txt')
   })
 
+  it('renders an LLM configuration write hold with a settings-specific title', () => {
+    const html = renderToStaticMarkup(
+      <ToolApprovalCard
+        event={heldEvent({
+          toolName: 'mcp__studio__create_llm_role',
+          detail: 'Action: Create LLM Role\nParameters:\n{}',
+        })}
+        skillId="text-segmentation"
+      />,
+    )
+
+    expect(html).toContain('LLM configuration')
+    expect(html).toContain('create_llm_role')
+    // NOT the misleading "outside workspace" copy used for out-of-fence reads.
+    expect(html).not.toContain('outside workspace')
+  })
+
   it('renders an out-of-fence read hold with the target path', () => {
     const html = renderToStaticMarkup(
       <ToolApprovalCard

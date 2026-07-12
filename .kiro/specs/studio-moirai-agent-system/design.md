@@ -6,7 +6,7 @@
 
 **Users**: skill 作者(面板 copilot / 「Open in CLI」);Studio 维护者(维护 `app/agents/` 资产与装载代码)。
 
-**Impact**: `app/prompts/` 更名重组为 `apps/studio/backend/app/agents/`;`copilot.py` 改 preset+append 装载、注册 subagents、护栏两层化(PreToolUse hook 硬边界 + can_use_tool 审批 UX)、审批超时改停任务(会话保留);`copilot_tools.py` 增 predict 与角色配置写工具(带撤销卡);`lib.rs` 常量全退役改运行时物化;删除 `copilot-rules.md` 与开发仓 docs 挂载;回写 ah-orchestration-design §9.8/§7。
+**Impact**: `app/prompts/` 更名重组为 `apps/studio/backend/app/agents/`;`copilot.py` 改 preset+append 装载、注册 subagents、护栏两层化(PreToolUse hook 硬边界 + can_use_tool 审批 UX)、审批超时改停任务(会话保留)、**配置写工具移出免审批白名单经 can_use_tool 挂起事前审批**;`copilot_tools.py` 增 predict + 补齐与 Settings 鼠标能力对齐的 LLM 配置工具全集(词汇发现 get_llm_registry、角色/endpoint/route 增删改、探测),**写工具返回纯成功状态、删除 before/after 撤销卡**;`lib.rs` 常量全退役改运行时物化;删除 `copilot-rules.md`、开发仓 docs 挂载与前端 `role-change-card` 撤销组件;回写 ah-orchestration-design §9.8/§7。
 
 ### Goals
 
@@ -32,7 +32,7 @@
 | 2 | 结构设计 | 画布建节点/连线;定根 io 边界 | 三种 phase 模式取舍;根 io→phase 拆分→DAG→每 phase io;三名一致;无环无孤岛 | KB-01/02;skill: graph-design(Clotho) |
 | 3 | 节点落盘与编辑 | Properties/Editor/Rust 唯一写者 | 合法字段;io schema 三硬规则;action 签名与纯度;SUBGRAPH inputs 宽松 outputs 严格;mention 可达 | KB-01/03/04/05/06 |
 | 4 | agent prompt 设计 | 编辑 `<role>/<goal>/<step>/<protocol>/<example>` | 五段结构;输出字段结构化对齐 golden;一次一变量迭代 | skill: agent-prompt-design(Clotho;交叉 Atropos) |
-| 5 | LLM 配置 | 选 llm_role;建/调角色;节点 role test | roles→routes→endpoints 概念链;fallback 物化;6 态;排障表 | KB-12;MCP: get_llm_roles / run_role_test / **update_llm_role·create_llm_role(新)** |
+| 5 | LLM 配置 | 选 llm_role;建/调/删角色;endpoint·route 增删改;节点 role test/endpoint test/route probe | roles→routes→endpoints 概念链;fallback 物化;6 态;排障表 | KB-12;MCP 读/探测: get_llm_roles·get_llm_registry·run_role_test·test_llm_endpoint(_models)·probe_llm_route;MCP 写(**需审批**): create/update/delete_llm_role·apply_model_profile_to_role·upsert/delete_llm_endpoint·update/delete_llm_route |
 | 6 | 输入数据准备 | i/o 面板导入绑定 | runtime_config.json 唯一配置层;import_files 布局 | KB-11 |
 | 7 | 编译诊断 | 实时 lint + Compile 抽屉 | 诊断 SSOT 单出口全量聚合;`[F-v3-*]` 码族;compile 能查/不能查 | KB-07;MCP: compile_skill;skill: compile-error-repair(Lachesis) |
 | 8 | Predict 空跑 | Predict(compile-pass 解锁) | LLM-free;mock 四档;path diff;predict-pass 是 Run 硬门 | KB-08;MCP: **predict_skill(新)** |
@@ -149,7 +149,8 @@ sequenceDiagram
 | 7.1–7.6 | .ah 物化对齐/受管语义/ah.toml 派生/去 docs 路径/cli 薄层(仅 delta)/ah≥1.4.0 基线 | TauriMaterializer |
 | 8.1–8.8 | 读放开(声明式 allowed_tools)/写白名单经 PreToolUse hook(排除配置真相)/Bash 审批/超时停任务(会话保留)/拒绝回传/协议侧验证/不写机制/ah 差距 | ToolGuardrails |
 | 9.1–9.4 | predict 工具/摘要截断/子 agent 可用/run 不做 | PredictTool |
-| 10.1–10.4 | 角色配置写工具经服务层/变更摘要卡+一键撤销+注入风险记账/密钥留 UI/KB 说明 | LlmRoleConfigTools |
+| 10.1–10.5 | 配置写工具经服务层/事前审批(删 Undo)/endpoint·route 写补齐+脱敏/KB 说明/明文密钥不进上下文 | LlmConfigTools · ToolGuardrails |
+| 11.1–11.4 | 读写对称/get_llm_registry 词汇发现/探测复用/审批统一 | LlmConfigTools · ToolGuardrails |
 
 ## Components and Interfaces
 
@@ -227,7 +228,8 @@ sequenceDiagram
 #### ToolGuardrails(copilot.py)——两层结构
 
 - **硬边界层 = `PreToolUse` hook**(每次工具调用必然触发):写类白名单 `workspace_root ∪ DEFAULT_SKILLS_ROOT`,**显式排除** `llm/` 配置真相目录与 `app_settings.json`(即使日后白名单扩到 settings 目录也保持排除)——越界/命中排除项直接 deny 附原因(R8.2)。机制依据:SDK 契约明确 `can_use_tool` 仅在权限规则判 "ask" 时触发、被 `allowed_tools`/`acceptEdits` 静默绕过;门禁每一次调用的官方机制是 PreToolUse hook(types.py:1747-1756)。这消除了"Write 必须恒处 ask 态"的隐含不变量——即使未来有人误把 Write 放进 allowed_tools,硬边界不失效(配 invariant 回归测试)。
-- **审批 UX 层 = `can_use_tool`**:读类与零审批 MCP 已由 `allowed_tools` 声明式放行,不到达回调;白名单内 Write/Edit 走 patch_proposed 事件 + Allow(diff 卡机制不变);Bash 挂起审批。
+- **审批 UX 层 = `can_use_tool`**:读/探测类 MCP(`get_llm_roles`/`get_llm_registry`/`compile_skill`/`run_role_test`/`predict_skill`/`test_llm_endpoint`/`test_llm_endpoint_models`/`probe_llm_route`)已由 `allowed_tools`(`_DECLARATIVE_ALLOWED_TOOLS`)声明式放行,不到达回调;白名单内 Write/Edit 走 patch_proposed 事件 + Allow(diff 卡机制不变);Bash 挂起审批。
+- **配置写工具挂起审批(R10.2 revised)**:`_DECLARATIVE_ALLOWED_TOOLS` **移除** `create_llm_role`/`update_llm_role`,且所有新增写工具(`delete_llm_role`/`apply_model_profile_to_role`/`upsert_llm_endpoint`/`delete_llm_endpoint`/`update_llm_route`/`delete_llm_route`)一律**不入白名单**;`can_use_tool` 对 `_MCP_CONFIG_WRITE_TOOLS` 里的工具调 `_hold_for_tool_approval` 挂起审批,`_build_config_tool_approval_detail` 格式化明细并硬脱敏 `api_key`。**实测坐实(2026-07-11,探测真 claude CLI):MCP 写工具移出白名单后确实经 `can_use_tool` 触发(不像 Bash 有沙箱自动放行),故 MCP 写审批仅靠 `can_use_tool` 即成立,不需要额外的 PreToolUse hook**(Bash 才需要 `_bash_requires_approval_hook` 压掉沙箱自动放行)。
 - **超时策略改造**(R8.4/8.5):`_hold_for_tool_approval` 的 `wait_for` 时限改为可配置常量(默认 1800s);超时路径不再返回 Deny-and-continue,而是:向前端发「approval timed out → task stopped (session preserved)」事件 + interrupt 当前任务(可用 `PermissionResultDeny(interrupt=True)`,types.py:247),**会话上下文保留**——用户返回后直接续起对话;用户拒绝路径返回 Deny(拒绝理由传给 agent,后续行为由手册 R3.5 约束)。
 - 实施验证项(R8.6):确认 CLI 控制协议对 pending can_use_tool 无内部超时;若有,调 SDK/CLI 参数解决,不回退计时器拒绝。
 
@@ -235,12 +237,16 @@ sequenceDiagram
 
 `predict_skill(skill_id)` → 后端既有 predict 出口;返回 `{success, run_id, phases[{phase_id,mocked_source,ok}], path_diff, diagnostics(截断+总数), detail_hint:".workspace/runs/<run_id>/"}`;异常结构化;零审批(R9)。
 
-#### LlmRoleConfigTools(copilot_tools.py,新,R10)
+#### LlmConfigTools(copilot_tools.py,R10/R11)——Settings 鼠标能力全对齐
 
-- `create_llm_role(name, model_groups, intent?)` / `update_llm_role(role_name, ops)`(ops:模型组增删/排序、fallback 开关、意图参数)→ 调 `routers/llm.py` 背后同一服务层函数(校验/canonicalize/级联/领域事件全复用),**绝不直接写 yaml/json**。
-- 返回结构化变更摘要含 before/after 快照,前端渲染为卡片;**卡片带一键撤销**——经同一服务层把 before 快照写回,撤销本身也产生变更卡(R10.2)。失败结构化返回。零审批。
-- 注入风险记账(R10.2):会话可读外部来料(skill 文件/导入材料),零审批写工具理论上可被藏在来料里的指令驱动;接受依据 = 密钥不经对话(R10.3)+ 变更可见(卡片)+ 一键可逆(撤销)。详见 research.md 风险节 R6。
-- 不提供凭据/endpoint 写入(R10.3)。
+所有工具走 `routers/llm.py` 背后同一服务层函数(校验/canonicalize/级联/领域事件全复用),**绝不直接写 yaml/json**;写工具全部经 R10.2 审批,返回纯成功状态(`{status,role_name/endpoint_id/route_id,message}`),失败结构化返回;**before/after 快照与一键撤销机制整体删除**。
+
+- **词汇发现(只读,零审批)**:`get_llm_registry()` → 复用 `routers/llm.get_llm_registry()`,返回完整 Redacted 注册表(endpoints/routes/model_profiles/roles + canonical_groups/model_groups),`SecretStr` 自动脱敏;MoirAI 写前据此核对合法词汇,消灭毒数据(R11.2)。
+- **角色写(需审批)**:`create_llm_role(name, model_groups, intent?)` / `update_llm_role(role_name, ops)`(ops:模型组增删/排序、fallback 开关、意图参数,保留 `_model_groups_violation` 词汇一致性校验)/ `delete_llm_role(role_name)`(固定角色拒删)/ `apply_model_profile_to_role(role_name, model_profile_id)`。
+- **Endpoint 写(需审批)**:`upsert_llm_endpoint(endpoint_id, display_name, protocol, base_url, api_key?)` → `put_registry_endpoints`;`delete_llm_endpoint(endpoint_id)` → `delete_registry_endpoint`(级联删路由+清角色引用)。`protocol` 取真 schema 的 `openai_compatible/anthropic_compatible/google_genai/ark_runtime`;`api_key` 审批明细硬脱敏。
+- **Route 写(需审批)**:`update_llm_route(route_id, display_name, canonical_id, status)` → `put_route_metadata`;`delete_llm_route(route_id)` → `delete_registry_route`(被引用则后端拒绝)。
+- **探测/测试(只读,零审批)**:`test_llm_endpoint(endpoint_id)` / `test_llm_endpoint_models(endpoint_id, model_ids)` / `probe_llm_route(route_id)` / `run_role_test(role_name)`——只探测不改词汇,排障凭结构化状态判断,绝不读明文密钥(R11.3)。
+- **明文密钥物理隔离(R10.5)**:读取明文密钥的 `/registry/endpoints/{id}/secret` REST 接口**绝不投影**给 MCP 工具面。
 
 ### Tauri(lib.rs)
 
@@ -261,7 +267,7 @@ ah-orchestration-design:§9.8 资料表→随包知识库方案;§7 SDK 路定�
 - 受管文件头机制不变;新增拼装分段标记(见拼装契约,落盘/内存两档)。
 - `assets_fingerprint = sha256(sorted("relpath:sha256(content)" for roles/,manual,contexts/,knowledge/,skills/,agent-skill-map.json))[:8]` → `assets@<8hex>`(全资产覆盖,R1.7)。
 - `agent-skill-map.json` schema:`{ <role>: [<skill-name>...] }`。
-- 契约变更:`context_resolved.summary` 的 `rules@`→`assets@`(前端透传);MCP 工具集 3→6(predict_skill、create_llm_role、update_llm_role)。
+- 契约变更:`context_resolved.summary` 的 `rules@`→`assets@`(前端透传);MCP 工具集 3→16(补 predict_skill、get_llm_registry、create/update/delete_llm_role、apply_model_profile_to_role、upsert/delete_llm_endpoint、update/delete_llm_route、test_llm_endpoint(_models)、probe_llm_route);写工具经审批、读/探测工具零审批。
 
 ## Error Handling
 
@@ -272,18 +278,18 @@ ah-orchestration-design:§9.8 资料表→随包知识库方案;§7 SDK 路定�
 | 写工具越界或命中配置真相排除项 | 直接 deny+原因(结构化回模型,可改道走 R10 工具) |
 | 审批超时(默认 30min) | 停整个任务(interrupt)+ 前端明示「等待审批超时,任务已停止(会话保留)」;不折算为拒绝续跑;会话上下文保留,用户可续起 |
 | 用户拒绝审批 | Deny+理由回 agent;手册判断义务接管(换路或停下说明) |
-| 配置写工具被注入滥用 | 已评估接受:密钥不经对话 + 变更卡可见 + 一键撤销(research.md 风险 R6) |
-| predict / 角色配置工具异常 | 结构化 `{success:false,error}`,不抛栈 |
+| 配置写工具被注入滥用 | 已消除:所有写工具事前审批,配置改变发生前必暴露于用户视觉内(脱敏卡),用户可拒绝(research.md 风险 R6) |
+| predict / 配置工具异常 | 结构化 `{status/success:error}`,不抛栈 |
 | 打包版资产缺失 | 与装载缺资产同一失败面(vendor rebuild 缺步的显性信号) |
 
 ## Testing Strategy
 
 ### Unit
 1. agent_assets:四层装载、指纹稳定且覆盖全资产(含 skills+map)、缺文件清单;拼装标记格式(落盘=BEGIN/END+sources 头,内存=仅 sources 头)。
-2. build_options:preset+append 形状;三 AgentDefinition(prompt 拼装、skills=map、lachesis 工具含 compile+predict);`allowed_tools` 恰为读类+六 MCP 工具名;probe 路裸配置。
-3. 护栏:读经 allowed_tools 放行(不达回调);写白名单经 PreToolUse hook(工作区/subskill/Skills root 放行,llm/ 与 app_settings 排除,越界 deny 消息);**invariant 回归:人为把 Write 加入 allowed_tools 后,白名单外写仍被 hook 拒绝**;审批超时→interrupt+会话保留路径、拒绝→Deny 路径。
+2. build_options:preset+append 形状;三 AgentDefinition(prompt 拼装、skills=map、lachesis 工具含 compile+predict);`allowed_tools` 恰为读类 + 读/探测 MCP 工具名(写工具不在内);probe 路裸配置。
+3. 护栏:读/探测 MCP 经 allowed_tools 放行(不达回调);写白名单经 PreToolUse hook(工作区/subskill/Skills root 放行,llm/ 与 app_settings 排除,越界 deny 消息);**invariant 回归:人为把 Write 加入 allowed_tools 后,白名单外写仍被 hook 拒绝**;**MCP 配置写工具经 `can_use_tool` 挂起审批(held→approve=Allow、deny=Deny、批准前不落盘)、审批明细脱敏 api_key**;审批超时→interrupt+会话保留路径、拒绝→Deny 路径。
 4. lib.rs:agents_dir 双分支;物化产物断言(标记/受管头/缺失中止/ah.toml=map 派生/阶段 2 约束保持);无 include_str! 残留。
-5. 工具:predict_skill 摘要/截断/异常;create/update_llm_role 走服务层(mock 层断言未直写文件)、变更摘要含 before/after、撤销写回同服务层。
+5. 工具:predict_skill 摘要/截断/异常;create/update/delete_llm_role · endpoint/route 增删 · apply_profile 走服务层(mock 层断言复用 router 函数、未直写文件)、返回纯成功状态(无 before/after);`get_llm_registry` 输出脱敏(明文 key 不出现);词汇校验(`_model_groups_violation`)保留。
 
 ### Integration
 1. SDK 冒烟:preset+append 生效、assets@ 回显、knowledge 可读、Agent 工具派遣可用。

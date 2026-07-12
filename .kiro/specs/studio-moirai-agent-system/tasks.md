@@ -47,6 +47,12 @@
 - [x] 2.6 (P) LLM 角色配置写工具
   - create_llm_role / update_llm_role 经服务层出口(校验/canonicalize/级联/领域事件复用,不直写文件);返回结构化变更摘要含 before/after;前端卡片一键撤销(before 快照经同服务层写回);凭据/endpoint 不提供写入
   - _Requirements: 10.1, 10.2, 10.3_
+- [x] 2.7 MCP 配置能力全对齐 + 写工具接入事前审批 + 删 Undo(2026-07-11)
+  - 补齐与 Settings 鼠标能力对齐的工具全集:词汇发现 `get_llm_registry`;角色 `delete_llm_role`/`apply_model_profile_to_role`;endpoint `upsert_llm_endpoint`/`delete_llm_endpoint`;route `update_llm_route`/`delete_llm_route`;探测 `test_llm_endpoint`/`test_llm_endpoint_models`/`probe_llm_route`——全走 routers/llm.py 同一服务层
+  - 所有配置写工具移出 `_DECLARATIVE_ALLOWED_TOOLS`,经 `can_use_tool` 挂起事前审批(`_MCP_CONFIG_WRITE_TOOLS` + `_build_config_tool_approval_detail` 脱敏 api_key);读/探测工具入白名单零审批
+  - **删除整套 Undo**:后端 `_role_snapshot` + create/update 的 before/after 返回删净;前端 `role-change-card.tsx`(+ 测试)整文件删除,`tool-call-bubble.tsx` 的 import/解析/渲染分支删净;`tool-approval-card.tsx` 增 LLM 配置写审批卡样式
+  - 命门实测坐实:MCP 写工具移出白名单后经 `can_use_tool` 触发(无 Bash 式沙箱绕过),无需 PreToolUse hook
+  - _Requirements: 10.2, 10.3, 10.5, 11.1, 11.2, 11.3, 11.4_
 
 - [x] 3. Tauri:运行时物化改造
 - [x] 3.1 资产源目录解析
@@ -61,11 +67,11 @@
 
 - [x] 4. 集成验证与文档回写
 - [x] 4.1 集成测试
-  - SDK 冒烟(preset+append/assets@/knowledge 可读/Agent 派遣);tauri 端到端(落盘/幂等/拒覆盖/两路一致);诊断链 fixture(compile 干净 predict 报错,主线程与 lachesis 各走通);角色配置链(写后 registry 反映+领域事件;撤销回到 before 并再发事件);审批超时链(超时后同会话续发消息可应答)
+  - SDK 冒烟(preset+append/assets@/knowledge 可读/Agent 派遣);tauri 端到端(落盘/幂等/拒覆盖/两路一致);诊断链 fixture(compile 干净 predict 报错,主线程与 lachesis 各走通);角色配置链(写工具经审批挂起→批准后落盘、registry 反映+领域事件;拒绝不落盘);审批超时链(超时后同会话续发消息可应答)
   - _Requirements: 3.2, 6.4, 8.4, 9.3, 10.1, 10.2_
 - [x] 4.2 设计文档回写
   - ah-orchestration-design §9.8 替换/§7 升级/§8-2 完成;copilot region mvp1-alignment 核对;INDEX 登记;涉 audited 哈希锁同 PR 重钉;ah 路工具边界差距记录
   - _Requirements: 4.7, 8.8_
 - [x] 4.3 vendor 重建与鲁棒性人工验收
-  - rebuild vendor+预热 pyc,打包形态资产一致;零 few-shot 验收:「分析这个 skill」派遣形状、人格通读(PM 认可)、update_llm_role 场景(含一键撤销)、审批超时停任务(会话保留可续)/拒绝改道场景、CLI intro(`ah ps`)与面板 intro(不提 ah)
+  - rebuild vendor+预热 pyc,打包形态资产一致;零 few-shot 验收:「分析这个 skill」派遣形状、人格通读(PM 认可)、update_llm_role 场景(经审批卡批准后生效)、审批超时停任务(会话保留可续)/拒绝改道场景、CLI intro(`ah ps`)与面板 intro(不提 ah)
   - _Requirements: 2.4, 2.9, 4.6, 6.4, 8.4, 8.5, 10.2_

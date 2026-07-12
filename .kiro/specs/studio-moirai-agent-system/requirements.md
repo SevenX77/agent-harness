@@ -148,7 +148,19 @@
 
 #### Acceptance Criteria
 
-1. The studio MCP 工具集 shall 新增角色配置写工具(如 `update_llm_role` / `create_llm_role`:模型组增删与排序、fallback 开关、thinking/max_output_tokens/temperature 意图参数),一律经 studio 后端既有服务层/FastAPI 出口写入 gateway 真相——复用既有校验、canonicalize、级联与领域事件;shall 不直接写配置文件(底座一:配置写入走 frontend→FastAPI→gateway 通道,agent 即另一个前端)。
-2. The 配置写工具 shall 零审批,但返回 shall 回显结构化变更摘要含 before/after 快照(前端以卡片呈现);the 变更卡片 shall 提供一键撤销——经同一服务层把 before 快照写回(撤销本身也产生变更卡);写入失败 shall 结构化返回错误,不抛栈。「零审批写配置 + 会话可读外部来料(skill 文件/导入材料)」的提示注入风险为**已评估接受**:密钥不经对话(10.3)、变更可见(卡片)且一键可逆(本条),记录于 research.md 风险节。
-3. The 凭据/endpoint 的新增与密钥录入 shall 维持 UI 通道(密钥不经模型上下文往返);后续按需另评估。
+1. The studio MCP 工具集 shall 新增角色配置写工具(如 `update_llm_role` / `create_llm_role` / `delete_llm_role` / `apply_model_profile_to_role`:模型组增删与排序、fallback 开关、thinking/max_output_tokens/temperature 意图参数),一律经 studio 后端既有服务层/FastAPI 出口写入 gateway 真相——复用既有校验、canonicalize、级联与领域事件;shall 不直接写配置文件(底座一:配置写入走 frontend→FastAPI→gateway 通道,agent 即另一个前端)。
+2. 所有配置写工具(创建/更新/删除 角色·凭据·路由)在后端实际持久化前 shall 必须经 `can_use_tool` 挂起,并向前端提交交互审批卡片;仅在用户批准后 CLI 才执行该工具、结果回到模型上下文。零审批直写 + before/after 快照 + 一键撤销(Undo)机制 shall 整体废除、不再支持。写入失败 shall 结构化返回错误,不抛栈。**实测坐实(2026-07-11,探测真 claude CLI)**:`mcp__studio__` 写工具移出免审批白名单后确实经 `can_use_tool` 触发(MCP 工具无 Bash 式沙箱自动放行),故审批仅靠 `can_use_tool` 即成立,无需 PreToolUse hook。
+3. The 凭据/endpoint 与路由写能力 shall 经 `upsert_llm_endpoint` / `delete_llm_endpoint` / `update_llm_route` / `delete_llm_route` 补齐,与角色写工具同走事前审批;审批明细 shall 硬脱敏 `api_key`,且读取明文密钥的 REST 接口(`/registry/endpoints/{id}/secret`)shall 绝不投影给 MCP 工具面——明文密钥永不进入模型上下文(见 10.5)。
 4. The KB(LLM roles 篇)shall 说明这些工具的能力面与选用时机。
+5. **明文密钥不进上下文不变量**:不论何种交互,MoirAI 在 Context 与聊天流中 shall 永远读不到现有明文 API Key——注册表读工具(`get_llm_registry`)靠 `SecretStr` 默认脱敏,写工具审批明细靠主动过滤。
+
+### Requirement 11: MCP 工具面与 Settings 鼠标能力的对齐(读写对称 + 探测复用)
+
+**Objective:** As a skill 作者, I want MoirAI 能做我在 Settings 里用鼠标能做的全部 LLM 配置动作, so that 配置这一环不必在对话与 Settings 之间来回切。
+
+#### Acceptance Criteria
+
+1. **读写对称**:用户在 Settings 能通过表单读/改的任何实体(endpoints/routes/roles/model_profiles),MoirAI shall 具备对等的读取(词汇/注册表)与写(mutation)工具。
+2. **词汇发现**:The studio MCP 工具集 shall 提供只读的 `get_llm_registry`,投射完整 Redacted 注册表(endpoints/routes/model_profiles/roles + canonical_groups/model_groups 法定词汇及其 route_id 映射);MoirAI 生成写调用前 shall 以此核对合法词汇,从根消灭拼错的 `canonical_id` / `route_id`(毒数据)。
+3. **探测复用**:Settings 里用于验证/测试连通的动作(Endpoint Test、Endpoint Models Test、Route Probe、Role Connection Test),MoirAI shall 能经对应只读工具(`test_llm_endpoint` / `test_llm_endpoint_models` / `probe_llm_route` / `run_role_test`)直接调用,实现在线排障闭环;这些工具只探测、不改配置词汇,零审批放行。
+4. **审批统一**:任何造成配置真相修改的 mutation 工具 shall 剥离出零审批白名单,统一走 R10.2 的挂起审批卡(单一 consent 出口)。

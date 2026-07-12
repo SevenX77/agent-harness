@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, FileSearch, TerminalSquare, X } from 'lucide-react'
+import { Check, FileSearch, Settings, TerminalSquare, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { resolveCopilotToolApproval, type CopilotToolApprovalResponse } from '../../api/client'
@@ -72,10 +72,16 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
 
   const disabled = !skillId || isResolving || Boolean(decisionLabel)
   const isBash = event.toolName === 'Bash'
-  const Icon = isBash ? TerminalSquare : FileSearch
+  // A copilot config-truth write (mcp__studio__<tool>) is held for consent BEFORE
+  // it persists — it is a Settings-scoped change, not an out-of-workspace read, so
+  // it gets a settings icon + a clear "LLM configuration" title.
+  const isMcpConfigWrite = event.toolName.startsWith('mcp__studio__')
+  const Icon = isBash ? TerminalSquare : isMcpConfigWrite ? Settings : FileSearch
   const title = isBash
     ? 'Bash held for approval'
-    : `${event.toolName} outside workspace held for approval`
+    : isMcpConfigWrite
+      ? `LLM configuration: ${event.toolName.slice('mcp__studio__'.length)} held for approval`
+      : `${event.toolName} outside workspace held for approval`
 
   return (
     <div className="mt-2 rounded-md border border-border bg-card p-2 text-xs ring-1 ring-foreground/10 ring-inset">

@@ -104,7 +104,10 @@ io:
         SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert "GRAPH.md" in str(excinfo.value)
-    assert "manifest validation failed" in str(excinfo.value)
+    # engine-compile-diagnostics-v2 §5.1: empty graph name now surfaces the revived
+    # specific code instead of the generic collapsed "manifest validation failed" wrap.
+    assert excinfo.value.payload is not None
+    assert excinfo.value.payload.code == "[F-v3-graph-name-invalid]"
 
 
 def test_graph_frontmatter_validation_payload_uses_relative_source_and_field_path(

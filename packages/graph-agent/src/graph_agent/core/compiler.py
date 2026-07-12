@@ -56,6 +56,7 @@ def compile_skill(
     cache: bool = True,
     skill_resolver: SkillResolverProtocol | None = None,
     runtime_input_fields: dict[str, set[str]] | None = None,
+    allowed_roles: set[str] | None = None,
 ) -> CompiledSkill:
     """Compile a V2.1 skill root into a CompiledSkill.
 
@@ -78,6 +79,7 @@ def compile_skill(
         skill_root,
         skill_resolver=resolver,
         runtime_input_fields=runtime_input_fields,
+        allowed_roles=allowed_roles,
     )
     if cache:
         save_to_cache(compute_cache_key(skill_root), compiled)

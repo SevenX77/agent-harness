@@ -13,7 +13,19 @@ from typing import Any
 
 from graph_agent.core.graph_assembler import _resolve_phase_chat_model
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import AgentNodeAST, GraphManifest, effective_llm_role
+from graph_agent.core.manifest import (
+    AgentNodeAST,
+    GraphManifest,
+    PhaseIOSchema,
+    effective_llm_role,
+)
+
+# io is a required AgentNodeAST field; effective-role tests build the node directly
+# and don't exercise io, so they use a minimal valid schema.
+_MINIMAL_IO = PhaseIOSchema(
+    inputs={"type": "object", "properties": {}},
+    outputs={"type": "object", "properties": {}},
+)
 
 
 def _write_minimal_agent_skill(
@@ -129,30 +141,30 @@ def test_agent_node_use_graph_llm_role_defaults_to_false(
 
 def test_effective_role_switch_on_graph_wins() -> None:
     ast = AgentNodeAST(
-        mode="agent", role="r", goal="g", llm_role="analyst", use_graph_llm_role=True
+        mode="agent", role="r", goal="g", llm_role="analyst", use_graph_llm_role=True, io=_MINIMAL_IO
     )
     assert effective_llm_role(ast, "fast") == "fast"
 
 
 def test_effective_role_switch_on_without_graph_default_falls_back() -> None:
     ast = AgentNodeAST(
-        mode="agent", role="r", goal="g", llm_role="analyst", use_graph_llm_role=True
+        mode="agent", role="r", goal="g", llm_role="analyst", use_graph_llm_role=True, io=_MINIMAL_IO
     )
     assert effective_llm_role(ast, None) == "graph_agent"
 
 
 def test_effective_role_switch_off_node_wins() -> None:
-    ast = AgentNodeAST(mode="agent", role="r", goal="g", llm_role="analyst")
+    ast = AgentNodeAST(mode="agent", role="r", goal="g", llm_role="analyst", io=_MINIMAL_IO)
     assert effective_llm_role(ast, "fast") == "analyst"
 
 
 def test_effective_role_switch_off_without_node_inherits_graph() -> None:
-    ast = AgentNodeAST(mode="agent", role="r", goal="g")
+    ast = AgentNodeAST(mode="agent", role="r", goal="g", io=_MINIMAL_IO)
     assert effective_llm_role(ast, "fast") == "fast"
 
 
 def test_effective_role_both_unset_uses_conventional_default() -> None:
-    ast = AgentNodeAST(mode="agent", role="r", goal="g")
+    ast = AgentNodeAST(mode="agent", role="r", goal="g", io=_MINIMAL_IO)
     assert effective_llm_role(ast, None) == "graph_agent"
 
 

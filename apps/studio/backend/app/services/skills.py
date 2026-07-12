@@ -302,6 +302,7 @@ def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) 
             skill_path,
             skill_resolver=build_studio_skill_resolver(),
             runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
+            allowed_roles=_configured_role_names(),
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         # compile-lint F6: lint projects the engine's FULL aggregated defect set
@@ -321,11 +322,9 @@ def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) 
     # "role not configured" is surfaced here as a NON-FATAL warning on the llm_role field
     # — compile still passes; the Properties panel / node badge / editor underline light
     # up from this same diagnostic.
-    role_warnings = _llm_role_lint_errors(compiled, _configured_role_names())
+    role_warnings = []
     preflight_errors = (
-        _studio_preflight_lint_errors(compiled, skill_path, runtime_config)
-        if include_studio_preflight
-        else []
+        _studio_preflight_lint_errors(compiled, skill_path, runtime_config) if include_studio_preflight else []
     )
     return LintResult(
         status="failed" if any(error.severity == "error" for error in preflight_errors) else "passed",
@@ -383,38 +382,7 @@ def _frontmatter_llm_role_value(frontmatter: dict[str, Any]) -> str | None:
     return value or None
 
 
-def _unconfigured_role_error(file: str, role: str, phase_name: str | None) -> LintError:
-    return LintError(
-        file=file,
-        line=None,
-        column=None,
-        error_code="STUDIO_LLM_ROLE_NOT_CONFIGURED",
-        severity="warning",
-        message=(
-            f"llm_role '{role}' is not a configured role. "
-            "Configure it in Settings > LLM Roles, or pick an existing role."
-        ),
-        phase_name=phase_name,
-        field_path="llm_role",
-        source_path=file,
-    )
-
-
-def _llm_role_lint_errors(compiled: CompiledSkill, role_names: set[str]) -> list[LintError]:
-    """Warn for any llm_role (graph default or an agent SKILL.md) not in role_names."""
-    errors: list[LintError] = []
-    graph_raw = compiled.raw.get("graph")
-    graph_frontmatter = graph_raw.get("frontmatter", {}) if isinstance(graph_raw, dict) else {}
-    graph_role = _frontmatter_llm_role_value(graph_frontmatter if isinstance(graph_frontmatter, dict) else {})
-    if graph_role and graph_role not in role_names:
-        errors.append(_unconfigured_role_error("GRAPH.md", graph_role, None))
-    for phase in compiled.nodes:
-        if phase.mode != "agent":
-            continue
-        role = _frontmatter_llm_role_value(phase.frontmatter)
-        if role and role not in role_names:
-            errors.append(_unconfigured_role_error(f"phases/{phase.phase_name}/SKILL.md", role, phase.phase_name))
-    return errors
+# LLM role warnings are now handled directly by the engine compiler via allowed_roles.
 
 
 def lint_skill_changed_markdown(
@@ -541,6 +509,7 @@ async def compile_skill_for_studio(
             cache=False,
             skill_resolver=build_studio_skill_resolver(),
             runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
+            allowed_roles=_configured_role_names(),
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         failure = _compile_failure_from_exception(exc, skill_dir)
@@ -596,7 +565,7 @@ async def compile_skill_for_studio(
     )
     lint_result = LintResult(
         status="passed",
-        errors=_llm_role_lint_errors(compiled, _configured_role_names()),
+        errors=[],
         phases_summary=_phase_summary_from_compiled(compiled),
     )
     detail = await _detail_from_manifest_async(
@@ -826,8 +795,7 @@ def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> lis
                     field=f"{node_id}.io.outputs",
                     severity="fatal",
                     message=(
-                        f"Output schema for agent node '{node_id}' is invalid for golden "
-                        f"validation: {exc.message}"
+                        f"Output schema for agent node '{node_id}' is invalid for golden validation: {exc.message}"
                     ),
                     error_code="STUDIO_GOLDEN_SCHEMA_INVALID",
                 )
@@ -1555,8 +1523,7 @@ def _graph_topology_projection_or_empty(
         # The repair-state view depends on this graceful ([], []) degradation,
         # so Studio only logs visibility while Engine/core owns GRAPH parsing.
         logger.warning(
-            "Failed to parse broken GRAPH.md at %s: %s: %s; "
-            "degrading to empty topology/phases for repair view",
+            "Failed to parse broken GRAPH.md at %s: %s: %s; degrading to empty topology/phases for repair view",
             graph_path,
             type(exc).__name__,
             exc,
@@ -1813,9 +1780,7 @@ async def serialize_skill_graph_markdown(
 ) -> SerializeGraphRes:
     """Serialize a Canvas topology snapshot against the latest on-disk GRAPH.md."""
     started = time.perf_counter()
-    skill_dir = await _resolve_canvas_serialize_dir(
-        user_id, skill_id, request.workspace_root, storage, metadata
-    )
+    skill_dir = await _resolve_canvas_serialize_dir(user_id, skill_id, request.workspace_root, storage, metadata)
     graph_path = skill_dir / "GRAPH.md"
     original_md = await storage.read_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)
@@ -1868,6 +1833,7 @@ async def serialize_skill_graph_markdown(
         elapsed_ms=elapsed_ms,
         current_hash=current_hash,
     )
+
 
 def _serializer_fatal_from_engine_error(exc: Exception, elapsed_ms: float) -> CanvasSerializerFatal:
     message = str(exc)
@@ -2052,10 +2018,7 @@ def _lint_error_from_issue(issue: object, skill_dir: Path | None) -> LintError:
         file=_lint_file_from_payload(issue, skill_dir),
         line=line if isinstance(line, int) else None,
         column=None,
-        error_code=(
-            _normalize_error_code(getattr(issue, "rule_id", None))
-            or _error_code_from_message(message)
-        ),
+        error_code=(_normalize_error_code(getattr(issue, "rule_id", None)) or _error_code_from_message(message)),
         severity="warning" if severity == "warning" else "error",
         message=message,
         phase_name=None,
@@ -2077,19 +2040,13 @@ def _lint_error_from_exception(exc: Exception, skill_dir: Path | None = None) ->
     field_path = _lint_str_attr(exc, "field_path")
     source_path = _lint_str_attr(exc, "source_path")
     return LintError(
-        file=(
-            _file_from_error_message(message, skill_dir)
-            or _lint_file_from_payload(payload, skill_dir)
-        ),
+        file=(_file_from_error_message(message, skill_dir) or _lint_file_from_payload(payload, skill_dir)),
         line=line,
         column=None,
         error_code=_lint_code_from_payload(payload) or _error_code_from_message(message),
         severity="error",
         message=message,
-        phase_name=(
-            _lint_phase_from_payload(payload)
-            or _phase_from_location(match.group("loc") if match else None)
-        ),
+        phase_name=(_lint_phase_from_payload(payload) or _phase_from_location(match.group("loc") if match else None)),
         field_path=field_path,
         source_path=source_path,
     )
@@ -2150,9 +2107,7 @@ def _file_from_error_message(message: str, skill_dir: Path | None = None) -> str
 
 
 def _location_file_from_error_message(message: str, skill_dir: Path | None) -> str | None:
-    pattern = re.compile(
-        r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\n]*?(?:GRAPH|LOGIC|SUBGRAPH|SKILL)\.md):(?P<line>\d+)"
-    )
+    pattern = re.compile(r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\n]*?(?:GRAPH|LOGIC|SUBGRAPH|SKILL)\.md):(?P<line>\d+)")
     match = pattern.search(message)
     if match is None:
         return None
@@ -2193,9 +2148,7 @@ def _compile_error_from_issue(issue: object, skill_dir: Path) -> CompileError:
     # CompileIssue carries explicit skill-relative source_path/line/field_path
     # axes; no location-string parsing.
     source_path = getattr(issue, "source_path", None)
-    file_path = (
-        _relative_compile_path(source_path, skill_dir) if isinstance(source_path, str) else None
-    )
+    file_path = _relative_compile_path(source_path, skill_dir) if isinstance(source_path, str) else None
     line = getattr(issue, "line", None)
     field = getattr(issue, "field_path", None)
     severity = str(getattr(issue, "severity", "fatal")).lower()
@@ -2215,9 +2168,8 @@ def _compile_error_from_exception(exc: Exception, skill_dir: Path) -> CompileErr
     line = getattr(exc, "line", None)
     if line is None and match:
         line = int(match.group("line"))
-    file_path = (
-        _file_from_error_message(message, skill_dir)
-        or _relative_compile_path(getattr(exc, "skill_path", None), skill_dir)
+    file_path = _file_from_error_message(message, skill_dir) or _relative_compile_path(
+        getattr(exc, "skill_path", None), skill_dir
     )
     return CompileError(
         file=file_path,
@@ -2295,8 +2247,7 @@ def _raise_manifest_validation_failed(lint: LintResult) -> None:
 def _rewrite_forked_skill_content(content: str, *, old_id: str, new_id: str) -> str:
     """Update frontmatter identity fields that exactly match the source id."""
     return "".join(
-        _rewrite_identity_line(line, old_id=old_id, new_id=new_id)
-        for line in content.splitlines(keepends=True)
+        _rewrite_identity_line(line, old_id=old_id, new_id=new_id) for line in content.splitlines(keepends=True)
     )
 
 

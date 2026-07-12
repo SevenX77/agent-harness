@@ -28,6 +28,7 @@ from graph_agent.core.manifest import (
     GraphManifest,
     IterateSpec,
     LogicNodeAST,
+    PhaseIOSchema,
     SubgraphNodeAST,
 )
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
@@ -159,6 +160,7 @@ class SkillLoader:
         runtime_input_fields: dict[str, set[str]] | None = None,
         _loading_stack: tuple[str, ...] = (),
         _compilation_cache: dict[str, CompiledSkill] | None = None,
+        allowed_roles: set[str] | None = None,
     ) -> CompiledSkill:
         root = Path(skill_root)
         resolver = skill_resolver or default_local_resolver_for_skill(root)
@@ -194,61 +196,183 @@ class SkillLoader:
         graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
         del line_meta
         _reject_deprecated_physical_io(root)
-        manifest = _build_graph_manifest(graph_path, graph_frontmatter)
+        manifest, fm_diags, manifest_poisoned = _build_graph_manifest(graph_path, graph_frontmatter)
         body_phase_refs = _extract_body_phase_refs(graph_path, graph_body)
         phase_tokens: dict[str, PhaseTokenInfo] = {ref.name: ref.token for ref in body_phase_refs}
-        # Collect-all: the pre-barrier segments — graph topology, root IO schema,
-        # and per-node parsing — are independent of each other, so their defects
-        # accumulate into one batch instead of the first segment masking the
-        # rest. The batch raises at the barrier below, before the post-loop
-        # validators, which assume a complete, valid node set.
+
         batch_errors: list[SkillLoadError] = []
+        if fm_diags:
+            batch_errors.append(_diags_error(fm_diags))
+
+        # R3.1 llm_role check
+        if allowed_roles is not None:
+            if manifest.llm_role is not None and manifest.llm_role not in allowed_roles:
+                graph_role_line = _frontmatter_key_line(graph_path, "llm_role")
+                batch_errors.append(
+                    _diags_error(
+                        [
+                            _Diag(
+                                graph_path,
+                                graph_role_line,
+                                "[F-v3-graph-llm-role-unknown]",
+                                f"Graph default LLM role {manifest.llm_role!r} "
+                                "is not declared in the host allowed roles set",
+                                field_path="llm_role",
+                            )
+                        ]
+                    )
+                )
+
         graph_diags: list[_Diag] = []
-        graph_topology = _validate_graph_topology(
-            graph_path,
-            manifest.phases,
-            body_phase_refs,
-            root,
-            graph_diags,
-        )
-        if graph_diags:
-            batch_errors.append(_diags_error(graph_diags))
+        graph_topology = {}
+        if not manifest_poisoned:
+            graph_topology = _validate_graph_topology(
+                graph_path,
+                manifest.phases,
+                body_phase_refs,
+                root,
+                graph_diags,
+            )
+            if graph_diags:
+                batch_errors.append(_diags_error(graph_diags))
+
         io_inputs: dict[str, Any] = {}
         io_outputs: dict[str, Any] = {}
-        try:
-            io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
-            io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
-        except SkillLoadError as exc:
-            batch_errors.append(exc)
+        if not manifest_poisoned:
+            try:
+                io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
+                io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
+            except SkillLoadError as exc:
+                batch_errors.append(exc)
+
         discovered: list[tuple[str, Path, str]] = []
         try:
             discovered = _discover_phase_files(root)
         except SkillLoadError as exc:
             batch_errors.append(exc)
+
         phase_docs: list[PhaseDocument] = []
+        poisoned_phases: set[str] = set()
         for phase_name, phase_file, mode in discovered:
             try:
                 frontmatter, body, _ = parse_markdown_parts(phase_file)
                 _reject_phase_forbidden_metadata(phase_file, frontmatter)
                 scan_forbidden_topology_tags(phase_file, body)
-                phase_docs.append(
-                    _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
-                )
+                doc = _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
+                phase_docs.append(doc)
+
+                # R3.1 check node-level role
+                if allowed_roles is not None and isinstance(doc.ast, AgentNodeAST):
+                    if doc.ast.llm_role is not None and doc.ast.llm_role not in allowed_roles:
+                        agent_role_line = _frontmatter_key_line(doc.path, "llm_role")
+                        batch_errors.append(
+                            _diags_error(
+                                [
+                                    _Diag(
+                                        doc.path,
+                                        agent_role_line,
+                                        "[F-v3-agent-llm-role-unknown]",
+                                        f"Agent node LLM role {doc.ast.llm_role!r} in phase {doc.phase_name!r} "
+                                        "is not declared in the host allowed roles set",
+                                        field_path="llm_role",
+                                    )
+                                ]
+                            )
+                        )
+
+                # R3.2 check validator.py statically
+                if isinstance(doc.ast, LogicNodeAST) and doc.ast.validator:
+                    validator_file = doc.path.parent / "validator.py"
+                    if not validator_file.exists():
+                        batch_errors.append(
+                            _diags_error(
+                                [
+                                    _Diag(
+                                        doc.path,
+                                        _frontmatter_key_line(doc.path, "validator"),
+                                        "[F-v3-logic-validator-missing]",
+                                        f"validator is set to true in logic phase {doc.phase_name!r} "
+                                        "but validator.py is missing",
+                                        field_path="validator",
+                                    )
+                                ]
+                            )
+                        )
+                    else:
+                        try:
+                            content = validator_file.read_text(encoding="utf-8")
+                            tree = ast.parse(content, filename=str(validator_file))
+                            has_validate = False
+                            for node in tree.body:
+                                if isinstance(node, ast.FunctionDef) and node.name == "validate":
+                                    has_validate = True
+                                    break
+                            if not has_validate:
+                                batch_errors.append(
+                                    _diags_error(
+                                        [
+                                            _Diag(
+                                                doc.path,
+                                                _frontmatter_key_line(doc.path, "validator"),
+                                                "[F-v3-logic-validator-entrypoint-missing]",
+                                                f"validator.py in logic phase {doc.phase_name!r} "
+                                                "does not define a top-level 'validate' function",
+                                                field_path="validator",
+                                            )
+                                        ]
+                                    )
+                                )
+                        except SyntaxError as exc:
+                            batch_errors.append(
+                                _diags_error(
+                                    [
+                                        _Diag(
+                                            doc.path,
+                                            _frontmatter_key_line(doc.path, "validator"),
+                                            "[F-v3-logic-validator-entrypoint-missing]",
+                                            f"validator.py in logic phase {doc.phase_name!r} has syntax error: {exc}",
+                                            field_path="validator",
+                                        )
+                                    ]
+                                )
+                            )
+                        except Exception as exc:
+                            batch_errors.append(
+                                _diags_error(
+                                    [
+                                        _Diag(
+                                            doc.path,
+                                            _frontmatter_key_line(doc.path, "validator"),
+                                            "[F-v3-logic-validator-missing]",
+                                            f"validator.py in logic phase {doc.phase_name!r} could not be read: {exc}",
+                                            field_path="validator",
+                                        )
+                                    ]
+                                )
+                            )
             except SkillLoadError as exc:
                 batch_errors.append(exc)
+                poisoned_phases.add(phase_name)
+
         if batch_errors:
             _raise_collected_errors(batch_errors)
+
         input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
-        _validate_agent_resource_paths(root, phase_docs)
+
+        post_diags: list[_Diag] = []
+
+        _validate_agent_resource_paths(root, phase_docs, post_diags)
         _validate_subgraph_io_contracts(
             root,
             phase_docs,
             skill_resolver=resolver,
             _loading_stack=loading_stack,
             _compilation_cache=_compilation_cache,
+            diags=post_diags,
+            poisoned_phases=poisoned_phases,
         )
-        _validate_iterate_compile_contracts(phase_docs)
+        _validate_iterate_compile_contracts(phase_docs, post_diags)
         _validate_static_dataflow(
             graph_path,
             graph_topology,
@@ -257,25 +381,57 @@ class SkillLoader:
             io_outputs,
             manifest.iterate,
             runtime_input_fields=runtime_input_fields,
+            diags=post_diags,
+            poisoned_phases=poisoned_phases,
         )
-        _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs)
+        _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs, post_diags)
 
-        actions, tools = _discover_actions_and_tools(root, discovered)
-        subagents_by_phase = _compile_subagent_metadata(
-            phase_docs,
-            skill_resolver=resolver,
-            _loading_stack=loading_stack,
-            _compilation_cache=_compilation_cache,
-        )
-        tools = _inject_subagent_tools(tools, subagents_by_phase)
-        _validate_agent_declared_tools(phase_docs, tools)
-        _validate_logic_action_return_keys(
-            phase_docs,
-            actions,
-            input_schema_keys,
-            output_schema_keys,
-            validate_context_writes=self.validate_context_writes,
-        )
+        discovery_failed = False
+        subagent_failed = False
+        injection_failed = False
+        actions = ActionRegistry.empty()
+        tools = ToolRegistry.empty()
+        subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
+
+        try:
+            actions, tools = _discover_actions_and_tools(root, discovered)
+        except SkillLoadError as exc:
+            _append_issues_as_diags(post_diags, exc)
+            discovery_failed = True
+
+        if not discovery_failed:
+            try:
+                subagents_by_phase = _compile_subagent_metadata(
+                    phase_docs,
+                    skill_resolver=resolver,
+                    _loading_stack=loading_stack,
+                    _compilation_cache=_compilation_cache,
+                )
+            except SkillLoadError as exc:
+                _append_issues_as_diags(post_diags, exc)
+                subagent_failed = True
+
+        if not discovery_failed and not subagent_failed:
+            try:
+                tools = _inject_subagent_tools(tools, subagents_by_phase)
+            except SkillLoadError as exc:
+                _append_issues_as_diags(post_diags, exc)
+                injection_failed = True
+
+        if not discovery_failed and not subagent_failed and not injection_failed:
+            _validate_agent_declared_tools(phase_docs, tools, post_diags)
+        if not discovery_failed:
+            _validate_logic_action_return_keys(
+                phase_docs,
+                actions,
+                input_schema_keys,
+                output_schema_keys,
+                validate_context_writes=self.validate_context_writes,
+                diags=post_diags,
+            )
+
+        if post_diags:
+            _raise_diags(post_diags)
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
@@ -283,9 +439,7 @@ class SkillLoader:
             "io": {
                 "inputs": io_inputs,
                 "outputs": io_outputs,
-                "output_schema_keys": sorted(output_schema_keys)
-                if output_schema_keys is not None
-                else None,
+                "output_schema_keys": sorted(output_schema_keys) if output_schema_keys is not None else None,
             },
             "phases": [
                 {
@@ -426,9 +580,7 @@ class _Diag:
     field_path: str | None = None
 
 
-def _make_diag(
-    path: Path, line: int, raw_message: str, *, field_path: str | None = None
-) -> _Diag:
+def _make_diag(path: Path, line: int, raw_message: str, *, field_path: str | None = None) -> _Diag:
     code, clean = _split_code_message("[F-v3-graph-root-missing]", raw_message)
     return _Diag(path, line, code, clean, field_path)
 
@@ -503,6 +655,24 @@ def _issues_of(exc: SkillLoadError) -> list[Any]:
     ]
 
 
+def _append_issues_as_diags(diags: list[_Diag], exc: SkillLoadError) -> None:
+    for issue in _issues_of(exc):
+        source_path = getattr(issue, "source_path", None)
+        line = getattr(issue, "line", None)
+        rule_id = getattr(issue, "rule_id", getattr(issue, "code", None))
+        message = getattr(issue, "message", str(exc))
+        field_path = getattr(issue, "field_path", None)
+        diags.append(
+            _Diag(
+                Path(str(source_path)) if source_path else Path("GRAPH.md"),
+                line if isinstance(line, int) else 1,
+                str(rule_id or "[F-v3-graph-root-missing]"),
+                str(message),
+                field_path=str(field_path) if field_path is not None else None,
+            )
+        )
+
+
 def _raise_collected_errors(errors: list[SkillLoadError]) -> NoReturn:
     """Re-raise the first error verbatim, with every error's defects merged.
 
@@ -518,9 +688,7 @@ def _raise_collected_errors(errors: list[SkillLoadError]) -> NoReturn:
     raise primary
 
 
-def _graph_fatal(
-    path: Path, line: int, message: str, *, field_path: str | None = None
-) -> NoReturn:
+def _graph_fatal(path: Path, line: int, message: str, *, field_path: str | None = None) -> NoReturn:
     code, clean = _split_code_message("[F-v3-graph-schema-unknown-field]", message)
     detail = f"{path}:{line} {clean}"
     raise SkillLoadError(
@@ -668,23 +836,19 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
                 code="[F-v3-graph-root-missing]",
             )
 
-        phase_files = [
-            phase_dir / name for name in _PHASE_FILE_TO_MODE if (phase_dir / name).exists()
-        ]
+        phase_files = [phase_dir / name for name in _PHASE_FILE_TO_MODE if (phase_dir / name).exists()]
         if len(phase_files) > 1:
             names = ", ".join(path.name for path in phase_files)
             _fatal(
                 phase_files[1],
                 1,
-                "[F-v3-graph-phase-mode-ambiguous] "
-                f"phase directory contains multiple node files: {names}",
+                f"[F-v3-graph-phase-mode-ambiguous] phase directory contains multiple node files: {names}",
             )
         if not phase_files:
             _fatal(
                 phase_dir,
                 1,
-                "[F-v3-graph-phase-node-missing] "
-                "phase directory must contain LOGIC.md, SUBGRAPH.md, or SKILL.md",
+                "[F-v3-graph-phase-node-missing] phase directory must contain LOGIC.md, SUBGRAPH.md, or SKILL.md",
             )
 
         phase_file = phase_files[0]
@@ -706,11 +870,7 @@ def _discover_actions_and_tools(
 ) -> tuple[ActionRegistry, ToolRegistry]:
     actions_by_phase: dict[str, dict[str, ActionDef]] = {}
     tools_by_phase: dict[str, list[ToolDef]] = {}
-    root_tools = (
-        _load_tool_dir(skill_root / "tools", phase_id=None)
-        if (skill_root / "tools").exists()
-        else []
-    )
+    root_tools = _load_tool_dir(skill_root / "tools", phase_id=None) if (skill_root / "tools").exists() else []
 
     for phase_id, phase_file, mode in discovered:
         phase_dir = phase_file.parent
@@ -753,9 +913,7 @@ def _discover_actions_and_tools(
                     code="[F-v3-agent-tool-unknown]",
                 )
 
-    return ActionRegistry(actions_by_phase), ToolRegistry(
-        root_tools=root_tools, by_phase=tools_by_phase
-    )
+    return ActionRegistry(actions_by_phase), ToolRegistry(root_tools=root_tools, by_phase=tools_by_phase)
 
 
 def _reject_deprecated_physical_io(skill_root: Path) -> None:
@@ -765,8 +923,7 @@ def _reject_deprecated_physical_io(skill_root: Path) -> None:
             _io_fatal(
                 path,
                 1,
-                "[F-v3-graph-io-physical-file-deprecated] "
-                f"physical root IO file {relative!r} is not supported",
+                f"[F-v3-graph-io-physical-file-deprecated] physical root IO file {relative!r} is not supported",
             )
 
 
@@ -777,29 +934,50 @@ def _validate_subgraph_io_contracts(
     skill_resolver: SkillResolverProtocol | None,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
+    diags: list[_Diag],
+    poisoned_phases: set[str],
 ) -> None:
-    """Compile each subgraph's child so a parent compile validates its children.
-
-    The old parent/child ``io.outputs`` schema-equality gate (which raised
-    ``[F-v3-subgraph-io-mismatch]``) was relaxed per mvp1 skill-syntax §2.4 /
-    cutover item ⑦: a SUBGRAPH node slices its inputs from, and merges its
-    declared outputs back into, the parent blackboard like any normal node —
-    ``StateMapper`` enforces that at runtime — so parent and child field sets are
-    NOT required to match 1:1. The recursive child compile is kept: a subgraph
-    that points at a non-compilable child still fails at the parent's compile
-    time (path resolution + child validity), only the field-equality gate is gone.
-    """
+    """Compile each subgraph's child so a parent compile validates its children."""
     for doc in phase_docs:
         if not isinstance(doc.ast, SubgraphNodeAST):
             continue
-        resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
-        child_root = _resolve_subgraph_path_root(skill_root, doc.path, doc.ast.path)
-        SkillLoader(validate_context_writes=False).compile_skill(
-            child_root,
-            skill_resolver=resolver,
-            _loading_stack=_loading_stack,
-            _compilation_cache=_compilation_cache,
-        )
+        child_root: Path | None = None
+        try:
+            resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
+            child_root = _resolve_subgraph_path_root(skill_root, doc.path, doc.ast.path)
+            SkillLoader(validate_context_writes=False).compile_skill(
+                child_root,
+                skill_resolver=resolver,
+                _loading_stack=_loading_stack,
+                _compilation_cache=_compilation_cache,
+            )
+        except SkillLoadError as exc:
+            for issue in _issues_of(exc):
+                path = Path(issue.source_path) if issue.source_path else doc.path
+                if not path.is_absolute():
+                    path = (child_root if child_root is not None else skill_root) / path
+                diags.append(
+                    _Diag(
+                        path=path,
+                        line=issue.line or 1,
+                        code=issue.rule_id,
+                        message=issue.message,
+                        field_path=issue.field_path,
+                    )
+                )
+            poisoned_phases.add(doc.phase_name)
+            diags.append(
+                _Diag(
+                    path=doc.path,
+                    line=1,
+                    code="[F-v3-agent-subgraph-invalid]",
+                    message=(
+                        "[F-v3-agent-subgraph-invalid] Subgraph compile failed: "
+                        f"skipped cascade check due to poisoned child skill at path {doc.ast.path}"
+                    ),
+                    field_path="path",
+                )
+            )
 
 
 def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str) -> Path:
@@ -815,28 +993,29 @@ def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str)
         _fatal(
             source_path,
             _frontmatter_key_line(source_path, "path"),
-            "[F-v3-subgraph-target-skill-invalid] "
-            f"subgraph path {value!r} escapes skill root {root_resolved}",
+            f"[F-v3-subgraph-target-skill-invalid] subgraph path {value!r} escapes skill root {root_resolved}",
         )
         raise AssertionError("unreachable") from exc
     if not resolved.is_dir():
         _fatal(
             source_path,
             _frontmatter_key_line(source_path, "path"),
-            "[F-v3-subgraph-target-skill-invalid] "
-            f"subgraph path {value!r} is not a directory",
+            f"[F-v3-subgraph-target-skill-invalid] subgraph path {value!r} is not a directory",
         )
     if not (resolved / "GRAPH.md").is_file():
         _fatal(
             source_path,
             _frontmatter_key_line(source_path, "path"),
-            "[F-v3-subgraph-target-skill-invalid] "
-            f"subgraph path {value!r} has no GRAPH.md",
+            f"[F-v3-subgraph-target-skill-invalid] subgraph path {value!r} has no GRAPH.md",
         )
     return resolved
 
 
-def _validate_agent_resource_paths(skill_root: Path, phase_docs: list[PhaseDocument]) -> None:
+def _validate_agent_resource_paths(
+    skill_root: Path,
+    phase_docs: list[PhaseDocument],
+    diags: list[_Diag],
+) -> None:
     root_resolved = skill_root.resolve()
     for doc in phase_docs:
         if not isinstance(doc.ast, AgentNodeAST):
@@ -851,6 +1030,7 @@ def _validate_agent_resource_paths(skill_root: Path, phase_docs: list[PhaseDocum
                 value=reference.path,
                 field_path="references",
                 code="[F-v3-resource-reference-path-invalid]",
+                diags=diags,
             )
         for example in doc.ast.examples:
             _validate_declared_resource_path(
@@ -862,6 +1042,7 @@ def _validate_agent_resource_paths(skill_root: Path, phase_docs: list[PhaseDocum
                 value=example.path,
                 field_path="examples",
                 code="[F-v3-resource-example-path-invalid]",
+                diags=diags,
             )
 
 
@@ -875,29 +1056,42 @@ def _validate_declared_resource_path(
     value: str,
     field_path: str,
     code: str,
+    diags: list[_Diag],
 ) -> None:
-    relative_parts = _portable_resource_path_parts(
-        source_path,
-        kind=kind,
-        item_id=item_id,
-        value=value,
-        field_path=field_path,
-        code=code,
-    )
-    if not _declared_resource_file_is_readable(skill_root, relative_parts, code):
-        detail = (
-            f"{source_path}:{_frontmatter_key_line(source_path, field_path)} "
-            f"{kind} {item_id!r} path {value!r} is not a readable file inside the skill root"
+    try:
+        relative_parts = _portable_resource_path_parts(
+            source_path,
+            kind=kind,
+            item_id=item_id,
+            value=value,
+            field_path=field_path,
+            code=code,
         )
-        raise SkillLoadError(
-            detail,
-            payload=make_error_payload(
-                code,
-                detail,
-                field_path=field_path,
-                source_path=_payload_source_path(source_path),
-            ),
-        )
+        if not _declared_resource_file_is_readable(skill_root, relative_parts, code):
+            detail = (
+                f"{source_path}:{_frontmatter_key_line(source_path, field_path)} "
+                f"{kind} {item_id!r} path {value!r} is not a readable file inside the skill root"
+            )
+            diags.append(
+                _Diag(
+                    path=source_path,
+                    line=_frontmatter_key_line(source_path, field_path),
+                    code=code,
+                    message=detail,
+                    field_path=field_path,
+                )
+            )
+    except SkillLoadError as exc:
+        for issue in _issues_of(exc):
+            diags.append(
+                _Diag(
+                    path=source_path,
+                    line=issue.line or 1,
+                    code=issue.rule_id,
+                    message=issue.message,
+                    field_path=issue.field_path,
+                )
+            )
 
 
 def _declared_resource_file_is_readable(
@@ -991,9 +1185,7 @@ def _compile_subagent_metadata(
                 _fatal(
                     doc.path,
                     _frontmatter_key_line(doc.path, "subagents"),
-                    "subagent "
-                    f"{spec.name!r} at {spec.target_skill!r} must declare "
-                    "a non-empty io.inputs schema",
+                    f"subagent {spec.name!r} at {spec.target_skill!r} must declare a non-empty io.inputs schema",
                     code="[F-v3-agent-subagent-invalid]",
                 )
             try:
@@ -1039,8 +1231,7 @@ def _inject_subagent_tools(
                 _actions_fatal(
                     subagent.root,
                     1,
-                    f"subagent {subagent.name!r} dynamic tool {tool_name!r} "
-                    "conflicts with an existing tool",
+                    f"subagent {subagent.name!r} dynamic tool {tool_name!r} conflicts with an existing tool",
                     code="[F-v3-agent-tool-unknown]",
                 )
             existing_names.add(tool_name)
@@ -1048,7 +1239,11 @@ def _inject_subagent_tools(
     return ToolRegistry(root_tools=registry.root_tools, by_phase=by_phase)
 
 
-def _validate_agent_declared_tools(phase_docs: list[PhaseDocument], registry: ToolRegistry) -> None:
+def _validate_agent_declared_tools(
+    phase_docs: list[PhaseDocument],
+    registry: ToolRegistry,
+    diags: list[_Diag],
+) -> None:
     root_tool_names = {tool.id for tool in registry.root_tools}
     framework_tool_names = {"finish_task", "read_reference", "read_example", "log_ambiguity"}
     for doc in phase_docs:
@@ -1059,13 +1254,14 @@ def _validate_agent_declared_tools(phase_docs: list[PhaseDocument], registry: To
         for tool_name in doc.ast.tools:
             if tool_name in available or _is_critic_tool_name(tool_name):
                 continue
-            _fatal(
-                doc.path,
-                _frontmatter_key_line(doc.path, "tools"),
-                "[F-v3-agent-tool-unknown] "
-                f"tool {tool_name!r} in SKILL phase {doc.phase_name!r} is not declared",
-                code="[F-v3-agent-tool-unknown]",
-                field_path=f"tools.{tool_name}",
+            diags.append(
+                _Diag(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "tools"),
+                    "[F-v3-agent-tool-unknown]",
+                    f"tool {tool_name!r} in SKILL phase {doc.phase_name!r} is not declared",
+                    field_path="tools",
+                )
             )
 
 
@@ -1292,7 +1488,7 @@ def _reject_phase_forbidden_metadata(path: Path, frontmatter: dict[str, Any]) ->
 def _build_graph_manifest(
     path: Path,
     frontmatter: dict[str, Any],
-) -> GraphManifest:
+) -> tuple[GraphManifest, list[_Diag], bool]:
     data = dict(frontmatter)
     if data.get("schema_version") != "v0.3.0":
         _graph_fatal(
@@ -1302,13 +1498,12 @@ def _build_graph_manifest(
             field_path="schema_version",
         )
     if "io_inputs_ref" in data or "io_outputs_ref" in data:
-        field_path = "io_inputs_ref" if "io_inputs_ref" in data else "io_outputs_ref"
+        deprecated_field_path = "io_inputs_ref" if "io_inputs_ref" in data else "io_outputs_ref"
         _graph_fatal(
             path,
             1,
-            "[F-v3-graph-io-physical-file-deprecated] "
-            "io_inputs_ref/io_outputs_ref are not supported",
-            field_path=field_path,
+            "[F-v3-graph-io-physical-file-deprecated] io_inputs_ref/io_outputs_ref are not supported",
+            field_path=deprecated_field_path,
         )
     if "phases" not in data:
         _graph_fatal(
@@ -1326,16 +1521,57 @@ def _build_graph_manifest(
         )
 
     try:
-        return GraphManifest.model_validate(data)
+        manifest = GraphManifest.model_validate(data)
+        return manifest, [], False
     except ValidationError as exc:
-        loc = _first_validation_loc(exc)
-        _fatal(
-            path,
-            _frontmatter_loc_line(path, frontmatter, loc),
-            f"GRAPH.md manifest validation failed: {exc}",
-            code="[F-v3-graph-schema-unknown-field]",
-            field_path=_field_path_from_loc(loc),
-        )
+        diags: list[_Diag] = []
+        for error in exc.errors():
+            loc = error.get("loc", ())
+            msg = error.get("msg", "")
+            type_ = error.get("type", "")
+            line = _frontmatter_loc_line(path, frontmatter, loc)
+            field_path = _field_path_from_loc(loc)
+
+            code = None
+            clean_msg = msg
+
+            if loc == ("io",):
+                if type_ == "missing":
+                    code = "[F-v3-graph-io-schema-invalid]"
+                else:
+                    code = "[F-v3-graph-io-not-object]"
+            elif type_ == "missing" and loc == ("name",):
+                code = "[F-v3-graph-name-invalid]"
+
+            if code is None:
+                match = re.search(r"\[(F-v3-[a-z0-9-]+)\]", msg)
+                if match:
+                    code = f"[{match.group(1)}]"
+                    clean_msg = msg.replace(code, "").strip()
+                    if clean_msg.startswith("Value error, "):
+                        clean_msg = clean_msg[len("Value error, ") :]
+
+            if code is None:
+                code = "[F-v3-graph-schema-unknown-field]"
+
+            diags.append(
+                _Diag(
+                    path=path,
+                    line=line,
+                    code=code,
+                    message=clean_msg,
+                    field_path=field_path,
+                )
+            )
+
+        constructed_data = dict(data)
+        if "io" not in constructed_data or not isinstance(constructed_data["io"], dict):
+            constructed_data["io"] = PhaseIOSchema(
+                inputs={"dummy": {"type": "string"}},
+                outputs={"dummy": {"type": "string"}},
+            )
+        manifest = GraphManifest.model_construct(**constructed_data)
+        return manifest, diags, True
 
 
 def get_phase_token_info(compiled: CompiledSkill, phase_id: str) -> PhaseTokenInfo | None:
@@ -1393,9 +1629,7 @@ def _extract_body_phase_refs(graph_path: Path, graph_body: str) -> list[BodyPhas
             )
         depends_raw = attrs.get("depends_on")
         depends_on = (
-            tuple(dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep)
-            if depends_raw is not None
-            else ()
+            tuple(dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep) if depends_raw is not None else ()
         )
         attr_raw_start = match.start(1)
         token = PhaseTokenInfo(
@@ -1565,8 +1799,7 @@ def _collect_graph_dependencies(
                     _make_diag(
                         graph_path,
                         ref.diag_line,
-                        f"[F-v3-graph-depends-unknown] phase {ref.name!r} "
-                        f"depends_on unknown phase {dep!r}",
+                        f"[F-v3-graph-depends-unknown] phase {ref.name!r} depends_on unknown phase {dep!r}",
                         field_path=f"{ref.name}.depends_on",
                     )
                 )
@@ -1681,15 +1914,12 @@ def _validate_output_phases(
             _make_diag(
                 graph_path,
                 1,
-                "[F-v3-graph-output-phase-invalid] output phase has downstream edges: "
-                + ", ".join(invalid),
+                "[F-v3-graph-output-phase-invalid] output phase has downstream edges: " + ", ".join(invalid),
             )
         )
 
 
-def _validate_phase_dir(
-    graph_path: Path, phase: str, skill_root: Path, diags: list[_Diag]
-) -> None:
+def _validate_phase_dir(graph_path: Path, phase: str, skill_root: Path, diags: list[_Diag]) -> None:
     phases_root = str((skill_root / "phases").resolve())
     candidate_str = os.path.normpath(os.path.join(phases_root, phase))
     if not candidate_str.startswith(phases_root + os.sep):
@@ -1702,9 +1932,7 @@ def _validate_phase_dir(
         )
         return
     candidate = Path(candidate_str)
-    if not candidate.is_dir() or not any(
-        (candidate / name).is_file() for name in _PHASE_FILE_TO_MODE
-    ):
+    if not candidate.is_dir() or not any((candidate / name).is_file() for name in _PHASE_FILE_TO_MODE):
         diags.append(
             _make_diag(
                 graph_path,
@@ -1791,8 +2019,7 @@ def _validate_inline_io_schema(
         _io_fatal(
             path,
             1,
-            f"inline {kind} schema required fields are missing from properties: "
-            + ", ".join(missing_required),
+            f"inline {kind} schema required fields are missing from properties: " + ", ".join(missing_required),
             field_path=f"{field_path}.required",
             code=invalid_code,
         )
@@ -1828,34 +2055,67 @@ def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
     return {key for key in properties if isinstance(key, str)}
 
 
-def _validate_iterate_compile_contracts(phase_docs: list[PhaseDocument]) -> None:
+def _validate_iterate_compile_contracts(
+    phase_docs: list[PhaseDocument],
+    diags: list[_Diag],
+) -> None:
     for doc in phase_docs:
         iterate = getattr(doc.ast, "iterate", None)
-        if iterate is None or iterate.mode != "loop":
-            continue
         io = getattr(doc.ast, "io", None)
         input_keys = _extract_output_schema_keys(io.inputs) if io is not None else set()
-        accumulate = iterate.accumulate
-        if accumulate is None:
-            _iterate_fields_fatal(doc.path, "accumulate")
-        missing = [
-            name
-            for name in (iterate.item_var, accumulate.var)
-            if input_keys is not None and name not in input_keys
-        ]
-        if missing:
-            _iterate_fields_fatal(doc.path, ", ".join(missing))
+
+        if iterate is not None and iterate.mode == "loop":
+            accumulate = iterate.accumulate
+            if accumulate is None:
+                diags.append(
+                    _Diag(
+                        path=doc.path,
+                        line=_frontmatter_key_line(doc.path, "iterate"),
+                        code="[F-v3-iterate-accumulate-fields-missing]",
+                        message="loop iterate io.inputs must declare accumulate",
+                        field_path="iterate",
+                    )
+                )
+            else:
+                missing = [
+                    name
+                    for name in (iterate.item_var, accumulate.var)
+                    if input_keys is not None and name not in input_keys
+                ]
+                if missing:
+                    diags.append(
+                        _Diag(
+                            path=doc.path,
+                            line=_frontmatter_key_line(doc.path, "iterate"),
+                            code="[F-v3-iterate-accumulate-fields-missing]",
+                            message=f"loop iterate io.inputs must declare {', '.join(missing)}",
+                            field_path="iterate",
+                        )
+                    )
+
+        batch = getattr(doc.ast, "batch", None)
+        if batch is not None:
+            if input_keys is not None and batch.item_var not in input_keys:
+                diags.append(
+                    _Diag(
+                        path=doc.path,
+                        line=_frontmatter_key_line(doc.path, "batch"),
+                        code="[F-v3-iterate-accumulate-fields-missing]",
+                        message=f"batch iterate io.inputs must declare {batch.item_var}",
+                        field_path="batch",
+                    )
+                )
 
 
 def _iterate_fields_fatal(path: Path, missing: str) -> NoReturn:
     _fatal(
         path,
         _frontmatter_key_line(path, "iterate"),
-        "[F-v3-iterate-accumulate-fields-missing] "
-        f"loop iterate io.inputs must declare {missing}",
+        f"[F-v3-iterate-accumulate-fields-missing] loop iterate io.inputs must declare {missing}",
         code="[F-v3-iterate-accumulate-fields-missing]",
         field_path="iterate",
     )
+
 
 def _validate_static_dataflow(
     graph_path: Path,
@@ -1866,6 +2126,8 @@ def _validate_static_dataflow(
     graph_iterate: IterateSpec | None = None,
     *,
     runtime_input_fields: dict[str, set[str]] | None = None,
+    diags: list[_Diag],
+    poisoned_phases: set[str],
 ) -> None:
     docs_by_phase = {doc.phase_name: doc for doc in phase_docs}
     rows = graph_topology.get("phases")
@@ -1886,20 +2148,47 @@ def _validate_static_dataflow(
     if not order:
         order = [doc.phase_name for doc in phase_docs]
 
-    dataflow_diags: list[_Diag] = []
     root_input_keys = set(_schema_property_paths(root_inputs))
     available_after: dict[str, set[str]] = {}
+
+    local_poisoned = set(poisoned_phases)
+
     for phase_name in order:
         doc = docs_by_phase.get(phase_name)
         if doc is None:
             continue
+
+        io_line = _frontmatter_key_line(doc.path, "io")
+
+        deps = deps_by_phase.get(phase_name, [])
+        poisoned_deps = [dep for dep in deps if dep in local_poisoned]
+
+        if phase_name in local_poisoned or poisoned_deps:
+            local_poisoned.add(phase_name)
+            reason = (
+                f"phase {phase_name!r} itself is poisoned"
+                if phase_name in poisoned_phases
+                else f"upstream dependencies {poisoned_deps} are poisoned"
+            )
+            diags.append(
+                _Diag(
+                    doc.path,
+                    io_line,
+                    "[F-v3-graph-dataflow-source-missing]",
+                    f"skipped dataflow check for phase {phase_name!r} "
+                    f"due to poisoned upstream or self compile error ({reason})",
+                    field_path=f"{phase_name}.io",
+                )
+            )
+            continue
+
         available = set()
-        for dep in deps_by_phase.get(phase_name, []):
+        for dep in deps:
             if dep == "input":
                 available.update(root_input_keys)
             else:
                 available.update(available_after.get(dep, set()))
-        io_line = _frontmatter_key_line(doc.path, "io")
+
         input_schema = _phase_input_schema(doc)
         for input_key in _schema_property_paths(input_schema):
             if (
@@ -1908,7 +2197,7 @@ def _validate_static_dataflow(
                 or _schema_field_has_iterate_source(doc, input_key, graph_iterate)
             ):
                 continue
-            dataflow_diags.append(
+            diags.append(
                 _Diag(
                     doc.path,
                     io_line,
@@ -1922,11 +2211,14 @@ def _validate_static_dataflow(
 
     terminal_output_keys: set[str] = set()
     for phase_name in output_phases:
+        if phase_name in local_poisoned:
+            continue
         terminal_output_keys.update(available_after.get(phase_name, set()))
+
     for required_key in _schema_required_keys(root_outputs):
         if _field_is_supplied(required_key, terminal_output_keys):
             continue
-        dataflow_diags.append(
+        diags.append(
             _Diag(
                 graph_path,
                 _frontmatter_key_line(graph_path, "io"),
@@ -1935,8 +2227,6 @@ def _validate_static_dataflow(
                 field_path=f"io.outputs.required.{required_key}",
             )
         )
-    if dataflow_diags:
-        _raise_diags(dataflow_diags)
 
 
 def _phase_input_schema(doc: PhaseDocument) -> dict[str, Any]:
@@ -2139,6 +2429,7 @@ def _validate_logic_action_return_keys(
     output_schema_keys: set[str] | None,
     *,
     validate_context_writes: bool,
+    diags: list[_Diag],
 ) -> None:
     del input_schema_keys, output_schema_keys, validate_context_writes
     for doc in phase_docs:
@@ -2151,7 +2442,19 @@ def _validate_logic_action_return_keys(
             action_def = actions.for_phase(doc.phase_name).get(action_name)
             if action_def is None:
                 continue
-            _validate_action_return_keys(action_def.path, phase_output_schema_keys)
+            try:
+                _validate_action_return_keys(action_def.path, phase_output_schema_keys)
+            except SkillLoadError as exc:
+                for issue in _issues_of(exc):
+                    diags.append(
+                        _Diag(
+                            path=action_def.path,
+                            line=issue.line or 1,
+                            code=issue.rule_id,
+                            message=issue.message,
+                            field_path=issue.field_path,
+                        )
+                    )
 
 
 def _validate_action_return_keys(
@@ -2247,8 +2550,7 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
     _fatal(
         path,
         _frontmatter_key_line(path, "phase_config"),
-        "[F-v3-agent-schema-unknown-field] phase_config is not supported; "
-        "declare Agent fields at top level",
+        "[F-v3-agent-schema-unknown-field] phase_config is not supported; declare Agent fields at top level",
         code="[F-v3-agent-schema-unknown-field]",
         field_path="phase_config",
     )
@@ -2260,24 +2562,53 @@ def _phase_validation_fatal(
     frontmatter: dict[str, Any],
     exc: ValidationError,
 ) -> NoReturn:
-    loc = _first_validation_loc(exc)
-    field_path = _field_path_from_loc(loc)
-    line = _frontmatter_loc_line(path, frontmatter, loc)
-    text = str(exc)
-    if mode == "logic" and "validator" in text:
-        _fatal(
-            path,
-            line,
-            "[F-v3-logic-validator-type-invalid] validator must be boolean",
-            field_path=field_path or "validator",
-        )
+    diags: list[_Diag] = []
     domain = {"agent": "agent", "logic": "logic", "subgraph": "subgraph"}.get(mode, "graph")
-    _fatal(
-        path,
-        line,
-        f"[F-v3-{domain}-schema-unknown-field] {path.name} AST validation failed: {exc}",
-        field_path=field_path,
-    )
+    for error in exc.errors():
+        loc = error.get("loc", ())
+        msg = error.get("msg", "")
+        type_ = error.get("type", "")
+
+        line = _frontmatter_loc_line(path, frontmatter, loc)
+        field_path = _field_path_from_loc(loc)
+
+        code = None
+        clean_msg = msg
+
+        if loc == ("io",):
+            code = f"[F-v3-{domain}-io-schema-invalid]"
+        elif type_ == "missing":
+            if loc == ("role",):
+                code = "[F-v3-agent-role-missing]"
+            elif loc == ("goal",):
+                code = "[F-v3-agent-goal-missing]"
+
+        if code is None and mode == "logic" and any(isinstance(seg, str) and "validator" in seg for seg in loc):
+            code = "[F-v3-logic-validator-type-invalid]"
+            clean_msg = "validator must be boolean"
+
+        if code is None:
+            match = re.search(r"\[(F-v3-[a-z0-9-]+)\]", msg)
+            if match:
+                code = f"[{match.group(1)}]"
+                clean_msg = msg.replace(code, "").strip()
+                if clean_msg.startswith("Value error, "):
+                    clean_msg = clean_msg[len("Value error, ") :]
+
+        if code is None:
+            code = f"[F-v3-{domain}-schema-unknown-field]"
+
+        diags.append(
+            _Diag(
+                path=path,
+                line=line,
+                code=code,
+                message=clean_msg,
+                field_path=field_path,
+            )
+        )
+
+    _raise_diags(diags)
 
 
 def _extract_logic_actions(path: Path, body: str) -> list[str]:
@@ -2309,8 +2640,7 @@ def _validate_logic_actions_declared(path: Path, ast: LogicNodeAST, body: str) -
         _fatal(
             path,
             _frontmatter_key_line(path, "actions"),
-            "[F-v3-logic-actions-empty] LOGIC.md frontmatter actions must match "
-            "body <action> order",
+            "[F-v3-logic-actions-empty] LOGIC.md frontmatter actions must match body <action> order",
         )
 
 
@@ -2502,6 +2832,7 @@ def _validate_sequential_overwrites(
     graph_path: Path,
     body_phase_refs: list[BodyPhaseRef],
     phase_docs: list[PhaseDocument],
+    diags: list[_Diag],
 ) -> None:
     depends_on_map = {ref.name: list(ref.depends_on) for ref in body_phase_refs}
 
@@ -2540,11 +2871,19 @@ def _validate_sequential_overwrites(
                 for key in overlap:
                     if key not in allowed_overwrites:
                         detail = (
-                            f"[F-v3-sequential-overwrite-unauthorized] Phase '{phase_name}' "
-                            f"sequentially overwrites field '{key}' outputted by upstream phase '{ancestor_name}'. "
+                            f"Phase '{phase_name}' sequentially overwrites field '{key}' "
+                            f"outputted by upstream phase '{ancestor_name}'. "
                             f"Declare '{key}' in allow_sequential_overwrite in {doc.path.name} to allow this."
                         )
-                        _fatal(doc.path, 1, detail, code="[F-v3-sequential-overwrite-unauthorized]")
+                        diags.append(
+                            _Diag(
+                                path=doc.path,
+                                line=1,
+                                code="[F-v3-sequential-overwrite-unauthorized]",
+                                message=detail,
+                                field_path="allow_sequential_overwrite",
+                            )
+                        )
 
 
 def _frontmatter_key_line(path: Path, key: str) -> int:

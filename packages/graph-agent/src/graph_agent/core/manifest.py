@@ -47,6 +47,28 @@ class AgentRegistryItem(BaseModel):
     path: str = Field(min_length=1)
     description: str = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_subgraph(cls, data: Any) -> Any:
+        import re
+
+        if not isinstance(data, dict):
+            return data
+        allowed = {"name", "path", "description"}
+        for k in data:
+            if k not in allowed:
+                raise ValueError(f"[F-v3-agent-subgraph-invalid] Extra field {k!r} not allowed in subgraph spec")
+        name = data.get("name")
+        if name is None or not isinstance(name, str) or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+            raise ValueError("[F-v3-agent-subgraph-invalid] Subgraph name is missing or invalid")
+        path = data.get("path")
+        if path is None or not isinstance(path, str) or len(path) == 0:
+            raise ValueError("[F-v3-agent-subgraph-invalid] Subgraph path is missing or invalid")
+        description = data.get("description")
+        if description is None or not isinstance(description, str) or len(description) == 0:
+            raise ValueError("[F-v3-agent-subgraph-invalid] Subgraph description is missing or invalid")
+        return data
+
 
 class ReferenceSpec(BaseModel):
     """Reference resource declared on an Agent."""
@@ -57,6 +79,28 @@ class ReferenceSpec(BaseModel):
     path: str = Field(min_length=1)
     summary: str = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_reference(cls, data: Any) -> Any:
+        import re
+
+        if not isinstance(data, dict):
+            return data
+        allowed = {"id", "path", "summary"}
+        for k in data:
+            if k not in allowed:
+                raise ValueError(f"[F-v3-resource-reference-invalid] Extra field {k!r} not allowed in reference spec")
+        val_id = data.get("id")
+        if val_id is None or not isinstance(val_id, str) or not re.match(r"^[A-Z][A-Za-z0-9_-]*$", val_id):
+            raise ValueError("[F-v3-resource-reference-id-invalid] Reference id is missing or invalid")
+        path = data.get("path")
+        if path is None or not isinstance(path, str) or len(path) == 0:
+            raise ValueError("[F-v3-resource-reference-invalid] Reference path is missing or invalid")
+        summary = data.get("summary")
+        if summary is None or not isinstance(summary, str) or len(summary) == 0:
+            raise ValueError("[F-v3-resource-reference-summary-missing] Reference summary is missing or invalid")
+        return data
+
 
 class ExampleSpec(BaseModel):
     """Document example declared on an Agent frontmatter."""
@@ -66,6 +110,28 @@ class ExampleSpec(BaseModel):
     id: str = Field(pattern=r"^[A-Z][A-Za-z0-9_-]*$")
     path: str = Field(min_length=1)
     summary: str = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_example(cls, data: Any) -> Any:
+        import re
+
+        if not isinstance(data, dict):
+            return data
+        allowed = {"id", "path", "summary"}
+        for k in data:
+            if k not in allowed:
+                raise ValueError(f"[F-v3-resource-example-invalid] Extra field {k!r} not allowed in example spec")
+        val_id = data.get("id")
+        if val_id is None or not isinstance(val_id, str) or not re.match(r"^[A-Z][A-Za-z0-9_-]*$", val_id):
+            raise ValueError("[F-v3-resource-example-id-invalid] Example id is missing or invalid")
+        path = data.get("path")
+        if path is None or not isinstance(path, str) or len(path) == 0:
+            raise ValueError("[F-v3-resource-example-path-missing] Example path is missing or invalid")
+        summary = data.get("summary")
+        if summary is None or not isinstance(summary, str) or len(summary) == 0:
+            raise ValueError("[F-v3-resource-example-summary-missing] Example summary is missing or invalid")
+        return data
 
 
 class AgentExample(BaseModel):
@@ -146,6 +212,15 @@ class GraphManifest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     iterate: IterateSpec | None = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, value: Any) -> Any:
+        if value is not None:
+            val_str = str(value)
+            if len(val_str) == 0 or len(val_str) > 128:
+                raise ValueError("[F-v3-graph-name-invalid] Graph name must be between 1 and 128 characters")
+        return value
+
 
 class BatchSpec(BaseModel):
     """Declarative batch processing spec for a phase."""
@@ -212,7 +287,7 @@ class AgentNodeAST(_BaseNodeAST):
     goal: str = Field(min_length=1)
     steps: list[AgentStep] = Field(default_factory=list)
     protocols: list[AgentProtocol] = Field(default_factory=list)
-    io: PhaseIOSchema | None = None
+    io: PhaseIOSchema
     # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
     validator: StrictBool = False
     tools: list[str] = Field(default_factory=list)
@@ -223,6 +298,19 @@ class AgentNodeAST(_BaseNodeAST):
     examples_inline: list[AgentExample] = Field(default_factory=list)
     max_iterations: int = Field(default=10, ge=1, le=50)
     llm_role: str | None = None
+
+    @field_validator("max_iterations", mode="before")
+    @classmethod
+    def _validate_max_iterations(cls, value: Any) -> Any:
+        if value is not None:
+            try:
+                val = int(value)
+                if not (1 <= val <= 50):
+                    raise ValueError("[F-v3-agent-max-iterations-invalid] max_iterations must be between 1 and 50")
+            except (ValueError, TypeError) as err:
+                raise ValueError("[F-v3-agent-max-iterations-invalid] max_iterations must be an integer") from err
+        return value
+
     # Priority switch: true makes the graph-level default llm_role win over
     # this node's own llm_role, WITHOUT rewriting/erasing the node value
     # (skill-spec 00-FORMAT-GROUND-TRUTH §5).
@@ -233,9 +321,7 @@ class AgentNodeAST(_BaseNodeAST):
     def _render_legacy_system_prompt(self) -> AgentNodeAST:
         if not self.system_prompt:
             step_lines = "\n".join(f"- {step.name}: {step.content}" for step in self.steps)
-            protocol_lines = "\n".join(
-                f"- {protocol.id}: {protocol.content}" for protocol in self.protocols
-            )
+            protocol_lines = "\n".join(f"- {protocol.id}: {protocol.content}" for protocol in self.protocols)
             parts = [f"Role: {self.role}", f"Goal: {self.goal}"]
             if step_lines:
                 parts.append("Steps:\n" + step_lines)

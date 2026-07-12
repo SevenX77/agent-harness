@@ -17,13 +17,13 @@
 ### Atom actions
 | # | 动作 | 区域 | status |
 |---|---|---|---|
-| B1 | 点 [Predict] 触发试飞 | 动作条 | placeholder(onPredict=桩) |
+| B1 | 点 [Predict] 触发试飞 | 动作条 | live(onPredict=handlePredict→postPredictRun;Workspace.tsx:2655 / 2115) |
 | B2 | 选测试输入(节点自身 io 配置,含 G2「任意节点导入文件→注入黑板」) | i/o 面板 | (配置项) |
 | B3 | validate 输入合 schema(predict 流程内一步,非独立) | — | backend live |
 | B4 | logic 节点真跑(确定性、不烧 token) | canvas | backend live |
 | B5 | agent 节点走 mock(无 golden→启发式占位 / 有 golden→吐 golden) | canvas | backend |
 | B6 | 409 守卫:predict 来源 trace 不可晋升 golden | — | backend-only |
-| B7 | stage 推进 predict-pass → 解锁 Run | 动作条 | placeholder(永不置位) |
+| B7 | stage 推进 predict-pass → 解锁 Run | 动作条 | live(predict-pass 已置位;Workspace.tsx:2137 / 2175,门控 handleRun:2156) |
 
 ### 决策
 - **predict 是 run 硬前提**(P6);golden 非前提;mock 由 golden 状态自动决定(g-b),无手动选择器。
@@ -43,11 +43,11 @@
 ### Atom actions
 | # | 动作 | 区域 | status |
 |---|---|---|---|
-| C1 | 点 [Run] 触发真跑 | 动作条 | placeholder(onRun=桩) |
-| C2 | 发起单次运行(startRun → POST /runs) | — | placeholder(零 caller) |
+| C1 | 点 [Run] 触发真跑 | 动作条 | live(onRun=handleRun;Workspace.tsx:2656 / 2153) |
+| C2 | 发起单次运行(startRun → POST /runs) | — | live(startRun 已被 handleRun 调用;Workspace.tsx:2165 → 后端 runs.py:37) |
 | C3 | 后端 spawn run_skill 跑真引擎、落盘 final_state/metrics/trace | 后端 | live |
-| C4 | 运行状态指示(运行中/暂停/失败/成功) | 动作条·画布 | placeholder |
-| C5 | 节点呼吸灯 + 红绿(随执行逐个亮) | 画布 | placeholder(statusByNodeId 未传) |
+| C4 | 运行状态指示(运行中/暂停/失败/成功) | 动作条·画布 | live(阶段机 center-action-bar.tsx:10-71 + handleRun 置 running:2160;画布态 statusByNodeId) |
+| C5 | 节点呼吸灯 + 红绿(随执行逐个亮) | 画布 | live(statusByNodeId=deriveNodeStatuses(runStream.events) 已传画布;Workspace.tsx:665 / 2608 → build-nodes.ts:270 / 375) |
 | C6 | focus 自动跟随当前运行节点 | 画布 | target-design(G9) |
 | C7 | Run 历史列表(run_id/状态/耗时/token) | timeline | live |
 | C8 | Toolbar 'Trace Timeline' 命名混淆 → 正名 | toolbar | stale-doc |
@@ -84,12 +84,12 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 ### Atom actions（04+05 去重）
 | # | 动作 | status |
 |---|---|---|
-| D1 | run 时实时 trace 控制台(流式;agent 输出流式+分类折叠) | orphan + agent 折叠为新 |
-| D2 | run 后从列表回看某次完整 trace | placeholder(useRunHistory live) |
+| D1 | run 时实时 trace 控制台(流式;agent 输出流式+分类折叠) | live 挂载(TracePanel + useRunStream;Workspace.tsx:583 / Panels.tsx:237);agent 分类折叠摘要细化以代码逐项核 |
+| D2 | run 后从列表回看某次完整 trace | live(无 active run 时 TimelinePanel 历史列表 + useRunHistory;Panels.tsx:49 分支) |
 | D3 | run 概要(focus 空画布=全局) | target-design |
 | D4 | 看完整 trace:timeline + 只读编辑器(人读格式) | target-design |
 | D5 | focus 某节点 → 只显该节点 trace + 编辑器跳该节点范围 | orphan(过滤)+ target(跳) |
-| D6 | 点线上 dot → 双态:未跑=静态黑板字段推断;跑后=黑板状态机内容 + "上节点 end→下节点 start"操作记录 | placeholder(定义已明确;双态见核心概念) |
+| D6 | 点线上 dot → 双态:未跑=静态黑板字段推断;跑后=黑板状态机内容 + "上节点 end→下节点 start"操作记录 | live(双态已实现:未跑 staticEdgeInference + 跑后 edgeContextFromEvents;GraphCanvas.tsx:1429-1434,lib/edge-static-inference.ts:139) |
 | D7 | 点状态 → 编辑器只读看完整黑板详情(深层可折叠) | target-design |
 | D8 | Prompt 透视:点 llm_call → 模板/喂入变量/渲染后 三视图 | orphan(PromptInspector) |
 | D9 | agent 节点 '+' 内联展开执行子树 | target-design |
@@ -149,4 +149,4 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 3. **trace 后端**→ 引擎 [`02-observability`](../../../engine/mvp1/02-mechanism/06-seam/02-observability/mvp1-alignment.md):节点间操作事件 + 嵌套链路 + reducer diff。
 
 ## 整层定性
-本节点整层 = **后端实 / 前端虚**:predict/run/golden 后端 live 或 backend-only,但 TracePanel/useRunStream/PromptInspector/BatchRunner/RunDetailDrawer/useGoldenDiff 全套已建却零挂载。**主要工程 = 接线孤儿 + 实现 target-design 件 + 引擎补缺口。**
+**（2026-07 对账更新)** 旧定性「后端实 / 前端虚 · 全套已建却零挂载」已过时:predict→run→trace→golden 主脊已接线(2026-06/07 PR 批量落地)——动作条 Compile/Predict/Run 阶段机 + onPredict/onRun 真处理器(Workspace.tsx:2091-2181)、startRun 真调用(2165)、predict-pass 门控真置位(2137/2156)、statusByNodeId 真跑态派生并传画布(665 / 2608 → build-nodes.ts:270/375)、useRunStream + TracePanel live 挂载(583 / Panels.tsx:237)、PromptInspector(2688)、useGoldenDiff(701)、dot 双态(GraphCanvas.tsx:1429-1434) 均已挂载。**剩余工程 = target-design 细化件(agent 分类折叠摘要 / run 概要 + 只读编辑器粒度 / 模型对比顶部 tab / 批量运行 UI / RunDetailDrawer 回看详情)+ 引擎补缺口。**

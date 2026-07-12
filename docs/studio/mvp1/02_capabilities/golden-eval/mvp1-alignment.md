@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/golden-eval
 doc: mvp1-alignment
-status: FROZEN（后端 golden 以整次 run final_state 复制为 baseline；per-agent-node golden 目标未落 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07 对账:后端 golden 已落 per-agent-node cases（set_golden_baseline_for_run(node_id) + cases/{id}.json,golden_diff.py:58-79 / 186-208），旧"整次 run final_state 复制"已废；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [golden-per-agent-node]
 aligns_with: 01_workflows/04_run-and-verify.md（golden-eval 段）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/04_run-and-verify.md（golden-eval 段）
 
 # golden-eval — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `golden-per-agent-node`（Studio golden 编辑 / diff owner；落点/eval 引 engine） | **现状**: 后端 golden 以整次 run final_state 复制为 baseline；per-agent-node golden 目标未落 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`
+> **Tier**: capability | **Owns**: `golden-per-agent-node`（Studio golden 编辑 / diff owner；落点/eval 引 engine） | **现状**: 2026-07 对账:后端 golden 已按 per-agent-node 管理(set_golden_baseline_for_run(node_id) 写 cases/{id}.json + plan_manual_golden_for_node,golden_diff.py:58-79 / 82-179 / 186-208);旧整次 run final_state 复制已废。 | **Related**: [baseline](./baseline.md)（双向）· `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`
 
 ## 1. 定义
 `golden-eval` owns per-agent-node expected outputs: node golden state, predict mock selection, manual/copilot golden creation, output-schema invalidation, and run-after actual-vs-golden diff.
@@ -59,7 +59,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - 决策: golden is for acceptance quality after Run, not a prerequisite for Run.
 - 原话/来源: `01_workflows/04_run-and-verify.md:128` lists field diff; `01_workflows/04_run-and-verify.md:136` records run-after diff.
 - 测试: changed/missing/extra fields show scores and values; route mismatch between frontend and backend is fixed.
-- Status: backend whole-run diff live; per-node target-design; frontend orphan/mismatch.
+- Status: 后端 per-node golden 已落(golden_diff.py:58-79 / 186-208)+ compare 端点 live(runs.py:42-65);前端 useGoldenDiff 已挂载(Workspace.tsx:701,非 orphan);字段级 diff 编辑器渲染完善度以代码逐项核。(2026-07 对账)
 - 归属: capability `golden-eval`; regions `editor`(详细 diff), `input`(入口); platform `engine`。**不在 `properties`**(PM 2026-06-04:golden 完全不在 Properties)。
 
 ### F6. Predict 不可入 golden,但 Run 输出可做默认种子
@@ -91,7 +91,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 | GOLDEN_EVAL-3 | predict guard | 单元 `golden-per-agent-node`；**为什么**：predict 假数据不可提升成 golden(409)，run 真实输出可做默认种子 |
 
 ## 6. 测试关键点
-1. 粒度: baseline 现状为 `set_golden_baseline_for_run` 复制整次 final_state ⚠️；目标为 按 agent node 管 golden case / output。
+1. 粒度: `set_golden_baseline_for_run` 已按 agent node 管 golden case(node_id 参数 + cases/{id}.json,golden_diff.py:58-79 / 186-208);旧"复制整次 final_state"已废。(2026-07 对账)
 2. 入口: baseline 现状为 旧文档曾留 sonner/Properties 入口 ⚠️；目标为 入口为 I/O output + Assets + editor diff + Copilot analysis bar。
 3. predict guard: baseline 现状为 predict trace promotion 被 409 挡；目标为 predict 不可入 golden；run 输出可做默认种子。
 
@@ -99,7 +99,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`
 
 ## 8. gaps / 报警
-- 🚨 粒度: `set_golden_baseline_for_run` 复制整次 final_state ⚠️；目标 按 agent node 管 golden case / output。
+- ✅ 粒度(2026-07 对账清除旧报警): `set_golden_baseline_for_run` 已按 agent node 管 golden case/output(node_id + cases/{id}.json,golden_diff.py:58-79 / 186-208);旧"复制整次 final_state"报警清除。
 - 🚨 入口: 旧文档曾留 sonner/Properties 入口 ⚠️；目标 入口为 I/O output + Assets + editor diff + Copilot analysis bar。
 
 ## 交叉引用（链接, 不复制）

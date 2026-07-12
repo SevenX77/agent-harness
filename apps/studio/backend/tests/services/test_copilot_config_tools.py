@@ -19,11 +19,15 @@ def _payload(result: dict[str, Any]) -> Any:
     return json.loads(result["content"][0]["text"])
 
 
-# ── get_llm_registry (词汇发现,只读,脱敏) ──────────────────────────────────
+# ── search_llm_registry (词汇发现,搜索驱动,结果有界,脱敏) ────────────────────
 
 
-def test_get_llm_registry_redacts_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.models.llm_config import ProviderEndpoint
+def test_search_llm_registry_redacts_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.models.llm_config import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistryResponse,
+    )
     from app.routers import llm
 
     endpoint = ProviderEndpoint(
@@ -33,24 +37,37 @@ def test_get_llm_registry_redacts_api_key(monkeypatch: pytest.MonkeyPatch) -> No
         base_url="https://api.prov-x.test",
         api_key="sk-super-secret-should-never-leak",
     )
-
-    class _Registry:
-        def model_dump(self, mode: str = "json") -> dict[str, Any]:
-            # SecretStr serializes to "**********" in json mode — mirror that.
-            return {
-                "endpoints": [json.loads(endpoint.model_dump_json())],
-            }
+    route = ProviderRoute.model_validate(
+        {
+            "route_id": "prov-x:gpt-x",
+            "endpoint_id": "prov-x",
+            "route_slug": "gpt-x",
+            "provider_model_id": "gpt-x",
+            "canonical_id": "gpt-x",
+        }
+    )
+    registry = RegistryResponse(
+        provider_endpoints={endpoint.endpoint_id: endpoint},
+        provider_routes={route.route_id: route},
+        canonical_groups=[
+            {"canonical_id": "gpt-x", "display_name": "gpt-x", "routes": [route.route_id]}
+        ],
+    )
 
     async def _fake_registry() -> Any:
-        return _Registry()
+        return registry
 
     monkeypatch.setattr(llm, "get_llm_registry", _fake_registry)
 
-    result = asyncio.run(copilot_tools.get_llm_registry_tool.handler({}))
+    result = asyncio.run(
+        copilot_tools.search_llm_registry_tool.handler({"query": "gpt-x"})
+    )
 
     assert "is_error" not in result, result
     text = result["content"][0]["text"]
+    # 搜索工具只投影词汇字段,api_key 明文物理不可达。
     assert "sk-super-secret-should-never-leak" not in text
+    assert "api_key" not in text
 
 
 # ── delete_llm_role (写,需审批;固定角色拒绝) ───────────────────────────────
@@ -312,7 +329,7 @@ def test_mcp_server_exposes_full_parity_toolset() -> None:
     tool_names = {t.name for t in copilot_tools._copilot_mcp_tools()}
     assert {
         "get_llm_roles",
-        "get_llm_registry",
+        "search_llm_registry",
         "compile_skill",
         "run_role_test",
         "predict_skill",

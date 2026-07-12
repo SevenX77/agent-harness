@@ -1,10 +1,17 @@
 """Copilot 结构化工具 — in-process MCP server 暴露 Studio 后端能力。
 
-设计原则:工具由后端实现并做参数校验,天然安全 → can_use_tool 对它们默认
-放行(零审批);配置真相只经既有服务路径(gateway truth),copilot 绝不直改
-`llm/` 配置文件。已上非破坏面:角色配置快照(只读)、编译(纯校验)、角色测试
-(只探测不改配置)。真·mutation 类(update_role 写配置真相、图结构 mutation)
-各自契约敲定后单独 PR 补,不上线半生不熟的写接口。
+与 Settings 鼠标能力对齐(读写对称 + 探测复用):MoirAI 能看/能测/能改的实体,
+Settings 也能,反之亦然。所有工具走 routers/llm.py 背后同一条服务链(校验/
+canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文件。
+
+- 只读/探测(get_llm_roles/get_llm_registry/compile/run_role_test/predict/
+  test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批放行
+  (copilot._DECLARATIVE_ALLOWED_TOOLS)。
+- 配置真相写(create/update/delete role、endpoint 增删、route 增删、apply
+  profile):一律经 can_use_tool 挂起事前审批(copilot._MCP_CONFIG_WRITE_TOOLS),
+  失败返回结构化错误。旧的「零审批直写 + before/after 一键撤销」已整体废除。
+- 明文密钥安全隔离:注册表读工具靠 SecretStr 自动脱敏;endpoint 写工具的审批
+  明细硬脱敏 api_key。读取明文密钥的 REST 接口绝不投影给 MCP 工具面。
 """
 
 from __future__ import annotations
@@ -240,16 +247,6 @@ def _model_groups_violation(groups: list[Any]) -> str | None:
     )
 
 
-def _role_snapshot(role: Any) -> dict[str, Any]:
-    dumped = role.model_dump(mode="json")
-    return {
-        "role_kind": dumped.get("role_kind"),
-        "model_fallback_enabled": dumped.get("model_fallback_enabled"),
-        "intent": dumped.get("intent"),
-        "model_groups": dumped.get("model_groups", []),
-    }
-
-
 async def _save_single_role(role_name: str, role: Any) -> Any:
     """put_llm_roles 的单角色等价路径:merge → materialize → save → 领域事件。"""
 
@@ -275,8 +272,8 @@ async def _save_single_role(role_name: str, role: Any) -> Any:
     "create_llm_role",
     "新建一个 LLM 角色:给角色名和模型组列表(每组 canonical_id/display_name/"
     "provider_models[{route_id}]),可选 intent(thinking/max_output_tokens/"
-    "temperature)。走与 Settings 保存完全相同的服务链;返回 before/after 变更摘要"
-    "(before=null)。凭据与 endpoint 不可写。",
+    "temperature)。走与 Settings 保存完全相同的服务链;属于写配置操作, 需用户审批。"
+    "凭据与 endpoint 不可写。先用 get_llm_registry 查合法 canonical_id / route_id。",
     {"name": str, "model_groups": list, "intent": dict},
 )
 async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -308,11 +305,11 @@ async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
     if violation is not None:
         return _text_result(violation, is_error=True)
     try:
-        saved_role = await _save_single_role(name, role)
+        await _save_single_role(name, role)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
         return _text_result(f"create_llm_role 失败: {exc}", is_error=True)
     return _text_result(
-        {"role_name": name, "before": None, "after": _role_snapshot(saved_role)}
+        {"status": "success", "role_name": name, "message": f"LLM Role '{name}' 创建成功。"}
     )
 
 
@@ -320,8 +317,8 @@ async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
     "update_llm_role",
     "修改既有 LLM 角色。ops 支持:set_model_groups(整表替换=增删/排序)、"
     "model_fallback_enabled(开关)、intent(部分更新 thinking/max_output_tokens/"
-    "temperature)。走与 Settings 保存完全相同的服务链;返回 before/after 变更摘要,"
-    "用户可据 before 一键撤销。凭据与 endpoint 不可写。",
+    "temperature)。走与 Settings 保存完全相同的服务链;属于写配置操作, 需用户审批。"
+    "凭据与 endpoint 不可写。",
     {"role_name": str, "ops": dict},
 )
 async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -345,7 +342,6 @@ async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
         return _text_result(
             f"未知 LLM 角色: {role_name};现有角色: {sorted(data.roles)}", is_error=True
         )
-    before = _role_snapshot(role)
     try:
         update_fields: dict[str, Any] = {}
         if "set_model_groups" in ops:
@@ -365,12 +361,310 @@ async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
     if violation is not None:
         return _text_result(violation, is_error=True)
     try:
-        saved_role = await _save_single_role(role_name, updated)
+        await _save_single_role(role_name, updated)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
         return _text_result(f"update_llm_role 失败: {exc}", is_error=True)
     return _text_result(
-        {"role_name": role_name, "before": before, "after": _role_snapshot(saved_role)}
+        {
+            "status": "success",
+            "role_name": role_name,
+            "message": f"LLM Role '{role_name}' 更新成功。",
+        }
     )
+
+
+# ── 词汇发现 · 只读 ──────────────────────────────────────────────────────────
+
+
+@tool(
+    "get_llm_registry",
+    "读取完整的 Studio 注册表与词汇库(只读, 密钥已脱敏):endpoints(提供商凭据状态)、"
+    "routes(可用模型路由与 capabilities)、model_profiles(预设包)、roles(现有角色)、"
+    "以及 canonical_groups / model_groups(可供配置使用的法定模型 ID 及其 route_id 映射)。"
+    "新增/更新角色或凭据前先用它核对合法词汇, 消灭拼错的 canonical_id / route_id。",
+    {},
+)
+async def get_llm_registry_tool(args: dict[str, Any]) -> dict[str, Any]:
+    del args
+    # 与 GET /api/llm/registry 同一条真相路径(载入凭据+角色→CPU-bound 投影→
+    # SecretStr 自动脱敏),不自建第二份读取逻辑。
+    from app.routers import llm
+
+    try:
+        registry = await llm.get_llm_registry()
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"get_llm_registry 失败: {exc}", is_error=True)
+    return _text_result(registry.model_dump(mode="json"))
+
+
+# ── 角色写工具(需审批) ──────────────────────────────────────────────────────
+
+
+@tool(
+    "delete_llm_role",
+    "删除一个持久化的自定义 LLM 角色。内置固定角色(如 copilot)不可删除。"
+    "属于写配置操作, 需用户审批。",
+    {"role_name": str},
+)
+async def delete_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+    from app.services.llm_fixed_roles import is_fixed_role
+
+    role_name = str(args.get("role_name", "")).strip()
+    if not role_name:
+        return _text_result("role_name 不能为空", is_error=True)
+    if is_fixed_role(role_name):
+        return _text_result(f"固定内置角色无法删除: {role_name}", is_error=True)
+    try:
+        await llm.delete_llm_role(role_name)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"delete_llm_role 失败: {exc}", is_error=True)
+    return _text_result(
+        {"status": "success", "role_name": role_name, "message": f"LLM Role '{role_name}' 已删除。"}
+    )
+
+
+@tool(
+    "apply_model_profile_to_role",
+    "将预设的 Model Profile(某模型推荐的路由组配置)整表应用覆盖到指定角色。"
+    "属于写配置操作, 需用户审批。",
+    {"role_name": str, "model_profile_id": str},
+)
+async def apply_model_profile_to_role_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+    from app.routers.llm import RoleApplyProfileRequest
+
+    role_name = str(args.get("role_name", "")).strip()
+    profile_id = str(args.get("model_profile_id", "")).strip()
+    if not role_name or not profile_id:
+        return _text_result("role_name 和 model_profile_id 不能为空", is_error=True)
+    try:
+        req = RoleApplyProfileRequest(model_profile_id=profile_id, mode="replace")
+        await llm.apply_model_profile(role_name, req)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"apply_model_profile_to_role 失败: {exc}", is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "role_name": role_name,
+            "message": f"已将 Profile '{profile_id}' 应用于角色 '{role_name}'。",
+        }
+    )
+
+
+# ── Endpoint 写工具(需审批) ────────────────────────────────────────────────
+
+
+@tool(
+    "upsert_llm_endpoint",
+    "新增或修改一个 LLM 提供商凭据(Endpoint):endpoint_id 已存在则更新、否则创建。"
+    "protocol 取 openai_compatible / anthropic_compatible / google_genai / ark_runtime;"
+    "api_key 留空代表不改动已有 key(审批明细里会自动脱敏)。属于写配置操作, 需用户审批。",
+    {
+        "endpoint_id": str,
+        "display_name": str,
+        "protocol": str,
+        "base_url": str,
+        "api_key": str,
+    },
+)
+async def upsert_llm_endpoint_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.models.llm_config import ProviderEndpoint
+    from app.routers import llm
+    from app.routers.llm import EndpointUpsertRequest
+
+    eid = str(args.get("endpoint_id", "")).strip()
+    if not eid:
+        return _text_result("endpoint_id 不能为空", is_error=True)
+    fields: dict[str, Any] = {
+        "endpoint_id": eid,
+        "display_name": str(args.get("display_name") or eid),
+        "protocol": str(args.get("protocol") or "openai_compatible"),
+        "base_url": str(args.get("base_url") or ""),
+    }
+    if args.get("api_key"):
+        fields["api_key"] = args["api_key"]
+    try:
+        endpoint = ProviderEndpoint.model_validate(fields)
+        req = EndpointUpsertRequest(provider_endpoints={eid: endpoint})
+        await llm.put_registry_endpoints(req)
+    except ValidationError as exc:
+        return _text_result(f"endpoint 配置无效:\n{exc}", is_error=True)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"upsert_llm_endpoint 失败: {exc}", is_error=True)
+    return _text_result(
+        {"status": "success", "endpoint_id": eid, "message": f"Endpoint '{eid}' 配置已更新。"}
+    )
+
+
+@tool(
+    "delete_llm_endpoint",
+    "删除指定 Endpoint 凭据 —— 级联删除其下属所有 Route, 并清除所有角色对这些 Route 的引用。"
+    "影响较大, 属于写配置操作, 需用户审批。",
+    {"endpoint_id": str},
+)
+async def delete_llm_endpoint_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+
+    eid = str(args.get("endpoint_id", "")).strip()
+    if not eid:
+        return _text_result("endpoint_id 不能为空", is_error=True)
+    try:
+        await llm.delete_registry_endpoint(eid)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"delete_llm_endpoint 失败: {exc}", is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "endpoint_id": eid,
+            "message": f"Endpoint '{eid}' 及其关联路由/角色引用已清除。",
+        }
+    )
+
+
+# ── Route 写工具(需审批) ────────────────────────────────────────────────────
+
+
+@tool(
+    "update_llm_route",
+    "修改一条 Route 的可编辑元数据(不改身份):display_name、canonical_id、status"
+    "(verified/unverified_manual/disabled/failed)。属于写配置操作, 需用户审批。",
+    {"route_id": str, "display_name": str, "canonical_id": str, "status": str},
+)
+async def update_llm_route_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.routers import llm
+    from app.routers.llm import RouteEditableUpdate
+
+    route_id = str(args.get("route_id", "")).strip()
+    if not route_id:
+        return _text_result("route_id 不能为空", is_error=True)
+    try:
+        req = RouteEditableUpdate(
+            display_name=str(args.get("display_name") or ""),
+            canonical_id=str(args.get("canonical_id") or ""),
+            status=str(args.get("status") or "unverified_manual"),  # type: ignore[arg-type]
+        )
+        await llm.put_route_metadata(route_id, req)
+    except ValidationError as exc:
+        return _text_result(f"route 配置无效:\n{exc}", is_error=True)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"update_llm_route 失败: {exc}", is_error=True)
+    return _text_result(
+        {"status": "success", "route_id": route_id, "message": f"Route '{route_id}' 已更新。"}
+    )
+
+
+@tool(
+    "delete_llm_route",
+    "删除一条 Route。仍被角色/预设包引用时后端会拒绝(先解除引用再删)。"
+    "属于写配置操作, 需用户审批。",
+    {"route_id": str},
+)
+async def delete_llm_route_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+
+    route_id = str(args.get("route_id", "")).strip()
+    if not route_id:
+        return _text_result("route_id 不能为空", is_error=True)
+    try:
+        await llm.delete_registry_route(route_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"delete_llm_route 失败: {exc}", is_error=True)
+    return _text_result(
+        {"status": "success", "route_id": route_id, "message": f"Route '{route_id}' 已删除。"}
+    )
+
+
+# ── 探测/测试工具(只读, 免审批) ────────────────────────────────────────────
+
+
+@tool(
+    "test_llm_endpoint",
+    "测试一个 Endpoint 的连通性(发 provider 的最小 models-list 调用), 返回注册表快照。"
+    "只探测、不改配置词汇。排障凭结构化状态判断, 绝不读取明文密钥。",
+    {"endpoint_id": str},
+)
+async def test_llm_endpoint_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+
+    eid = str(args.get("endpoint_id", "")).strip()
+    if not eid:
+        return _text_result("endpoint_id 不能为空", is_error=True)
+    try:
+        response = await llm.test_endpoint(eid)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"test_llm_endpoint 失败: {exc}", is_error=True)
+    return _text_result(response.model_dump(mode="json"))
+
+
+@tool(
+    "test_llm_endpoint_models",
+    "对一个 Endpoint 探测一批模型 ID 的可用性(逐模型 status + message), 并 upsert 路由结果。"
+    "只探测、不改配置词汇。",
+    {"endpoint_id": str, "model_ids": list},
+)
+async def test_llm_endpoint_models_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+    from app.routers.llm import EndpointModelTestRequest
+
+    eid = str(args.get("endpoint_id", "")).strip()
+    if not eid:
+        return _text_result("endpoint_id 不能为空", is_error=True)
+    try:
+        req = EndpointModelTestRequest(model_ids=list(args.get("model_ids") or []))
+        response = await llm.test_endpoint_models(eid, req)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"test_llm_endpoint_models 失败: {exc}", is_error=True)
+    return _text_result(response.model_dump(mode="json"))
+
+
+@tool(
+    "probe_llm_route",
+    "探测一条 Route 的连通性/能力(真实探测该模型), 返回更新后的注册表快照。"
+    "只探测、不改配置词汇。",
+    {"route_id": str},
+)
+async def probe_llm_route_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers import llm
+    from app.routers.llm import RouteProbeRequest
+
+    route_id = str(args.get("route_id", "")).strip()
+    if not route_id:
+        return _text_result("route_id 不能为空", is_error=True)
+    try:
+        response = await llm.probe_route(route_id, RouteProbeRequest(), force=True)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"probe_llm_route 失败: {exc}", is_error=True)
+    return _text_result(response.model_dump(mode="json"))
+
+
+def _copilot_mcp_tools() -> list[Any]:
+    """MoirAI 面向 Settings 鼠标能力的 MCP 工具全集(读写对称 + 探测复用)。
+    写工具经 can_use_tool 挂起审批(见 copilot._MCP_CONFIG_WRITE_TOOLS),读/探测
+    工具在 copilot._DECLARATIVE_ALLOWED_TOOLS 免审批放行。"""
+
+    return [
+        get_llm_roles_tool,
+        get_llm_registry_tool,
+        compile_skill_tool,
+        run_role_test_tool,
+        predict_skill_tool,
+        create_llm_role_tool,
+        update_llm_role_tool,
+        delete_llm_role_tool,
+        apply_model_profile_to_role_tool,
+        upsert_llm_endpoint_tool,
+        delete_llm_endpoint_tool,
+        update_llm_route_tool,
+        delete_llm_route_tool,
+        test_llm_endpoint_tool,
+        test_llm_endpoint_models_tool,
+        probe_llm_route_tool,
+    ]
 
 
 def build_copilot_mcp_servers() -> dict[str, McpServerConfig]:
@@ -381,12 +675,7 @@ def build_copilot_mcp_servers() -> dict[str, McpServerConfig]:
             name=COPILOT_MCP_SERVER_NAME,
             version="1.0.0",
             tools=[
-                get_llm_roles_tool,
-                compile_skill_tool,
-                run_role_test_tool,
-                predict_skill_tool,
-                create_llm_role_tool,
-                update_llm_role_tool,
+                *_copilot_mcp_tools(),
             ],
         )
     }

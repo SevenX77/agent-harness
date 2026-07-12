@@ -13,7 +13,7 @@ from claude_agent_sdk import PermissionResultAllow
 def test_mcp_server_exposes_tools() -> None:
     servers = copilot_tools.build_copilot_mcp_servers()
     assert set(servers) == {"studio"}
-    # SdkMcpTool names — 只读快照 + 编译 + 角色测试(slice2 免审批、非破坏)。
+    # 读/探测三件的免审批基线仍在(完整全集见 test_copilot_config_tools.py)。
     tool_names = {
         t.name
         for t in (

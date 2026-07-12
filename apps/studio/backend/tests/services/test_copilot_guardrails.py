@@ -189,3 +189,112 @@ def test_approval_timeout_stops_task_but_preserves_session(
 
 def test_default_timeout_is_thirty_minutes() -> None:
     assert copilot._TOOL_APPROVAL_TIMEOUT_S == 1800.0
+
+
+# ── MCP config-write tools hold for approval (命门) ──────────────────────────
+#
+# Empirically proven (probe against the real claude CLI): an ``mcp__studio__``
+# config-write tool removed from the pre-allowed whitelist DOES reach
+# ``can_use_tool`` — MCP tools have no Bash-style sandbox auto-run — so approval
+# fires through can_use_tool alone (no PreToolUse hook needed for MCP writes).
+
+
+async def _hold_and_resolve(
+    skill_id: str, tool_name: str, tool_input: dict[str, Any], *, approve: bool
+):  # noqa: ANN202
+    cb = copilot._make_safe_write_can_use_tool(skill_id)
+    task = asyncio.ensure_future(
+        cb(tool_name, tool_input, ToolPermissionContext(tool_use_id="tu-cfg"))
+    )
+    # Let the callback register the pending approval + emit the event.
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if (skill_id, "tu-cfg") in copilot._pending_tool_approvals:
+            break
+    held = not task.done()
+    copilot.resolve_tool_approval(skill_id, "tu-cfg", approve=approve)
+    result = await task
+    return held, result
+
+
+def test_mcp_config_write_holds_for_approval_then_approves(tmp_path: Path) -> None:
+    queue = _register_sink("s-cfg", tmp_path)
+
+    held, result = asyncio.run(
+        _hold_and_resolve(
+            "s-cfg",
+            "mcp__studio__create_llm_role",
+            {"name": "writer", "model_groups": []},
+            approve=True,
+        )
+    )
+
+    assert held is True  # the write did NOT proceed before user approval
+    assert isinstance(result, PermissionResultAllow)
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    approval_events = [
+        e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
+    ]
+    assert approval_events and approval_events[0].tool_name == "mcp__studio__create_llm_role"
+
+
+def test_mcp_config_write_denied_returns_deny(tmp_path: Path) -> None:
+    _register_sink("s-cfg-deny", tmp_path)
+
+    held, result = asyncio.run(
+        _hold_and_resolve(
+            "s-cfg-deny",
+            "mcp__studio__delete_llm_endpoint",
+            {"endpoint_id": "prov-x"},
+            approve=False,
+        )
+    )
+
+    assert held is True
+    assert isinstance(result, PermissionResultDeny)
+
+
+def test_mcp_config_write_detail_redacts_api_key(tmp_path: Path) -> None:
+    queue = _register_sink("s-cfg-key", tmp_path)
+
+    def _run():  # noqa: ANN202
+        return asyncio.run(
+            _hold_and_resolve(
+                "s-cfg-key",
+                "mcp__studio__upsert_llm_endpoint",
+                {"endpoint_id": "prov-x", "api_key": "sk-supersecret-123"},
+                approve=False,
+            )
+        )
+
+    _run()
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    approval = next(
+        e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
+    )
+    assert "sk-supersecret-123" not in approval.detail
+    assert "upsert_llm_endpoint" in approval.detail.lower() or "Endpoint" in approval.detail
+
+
+def test_read_probe_mcp_tools_are_pre_allowed_not_held() -> None:
+    # Read/probe MCP tools ride the declarative allow-list (never reach approval);
+    # write tools do NOT appear there.
+    allowed = set(copilot._DECLARATIVE_ALLOWED_TOOLS)
+    assert "mcp__studio__get_llm_registry" in allowed
+    assert "mcp__studio__test_llm_endpoint" in allowed
+    assert "mcp__studio__probe_llm_route" in allowed
+    for write_tool in (
+        "mcp__studio__create_llm_role",
+        "mcp__studio__update_llm_role",
+        "mcp__studio__delete_llm_role",
+        "mcp__studio__upsert_llm_endpoint",
+        "mcp__studio__delete_llm_endpoint",
+        "mcp__studio__update_llm_route",
+        "mcp__studio__delete_llm_route",
+        "mcp__studio__apply_model_profile_to_role",
+    ):
+        assert write_tool not in allowed

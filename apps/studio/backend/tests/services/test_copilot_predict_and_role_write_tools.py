@@ -3,7 +3,8 @@
 predict_skill rides the existing backend predict exit (PredictorService) and
 compacts the result; the role write tools go through the SAME service chain as
 PUT /api/llm/roles (validate → materialize → save → domain event) and return a
-structured before/after change summary. Credentials/endpoints stay read-only.
+plain success status (the before/after undo snapshot is deleted — writes hold
+for approval instead). Credentials/endpoints have dedicated write tools.
 """
 
 from __future__ import annotations
@@ -155,8 +156,10 @@ def test_create_llm_role_saves_via_service_chain_and_returns_summary(
     assert "is_error" not in result, result
     payload = _payload(result)
     assert payload["role_name"] == "writer"
-    assert payload["before"] is None
-    assert payload["after"]["model_groups"][0]["canonical_id"] == "openai/gpt-5"
+    assert payload["status"] == "success"
+    # Undo snapshot deleted: no before/after in the response.
+    assert "before" not in payload
+    assert "after" not in payload
     assert state["saved"] is not None and "writer" in state["saved"].roles
     assert state["published"] == 1
 
@@ -178,7 +181,7 @@ def test_create_llm_role_rejects_existing_name(monkeypatch: pytest.MonkeyPatch) 
     assert state["saved"] is None
 
 
-def test_update_llm_role_returns_before_after_and_applies_ops(
+def test_update_llm_role_returns_success_and_applies_ops(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.models.llm_config import RoleEntry, RoleModelGroup, RoleProviderModel
@@ -209,12 +212,15 @@ def test_update_llm_role_returns_before_after_and_applies_ops(
 
     assert "is_error" not in result, result
     payload = _payload(result)
-    assert payload["before"]["model_groups"][0]["canonical_id"] == "old/model"
-    assert payload["after"]["model_groups"][0]["canonical_id"] == "openai/gpt-5"
-    assert payload["after"]["model_fallback_enabled"] is False
-    assert payload["after"]["intent"]["thinking"] is True
+    assert payload["status"] == "success"
+    assert payload["role_name"] == "writer"
+    # Undo snapshot deleted: the ops still applied through the service chain.
+    assert "before" not in payload
+    assert "after" not in payload
     saved_role = state["saved"].roles["writer"]
     assert saved_role.model_fallback_enabled is False
+    assert saved_role.model_groups[0].canonical_id == "openai/gpt-5"
+    assert saved_role.intent.thinking is True
     assert state["published"] == 1
 
 

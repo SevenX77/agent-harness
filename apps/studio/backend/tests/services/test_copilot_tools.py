@@ -6,6 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from app.models.llm_config import ProviderEndpoint, ProviderRoute, RegistryResponse
 from app.services import copilot, copilot_tools
 from claude_agent_sdk import PermissionResultAllow
 
@@ -132,6 +133,157 @@ def test_run_role_test_tool_compacts_result(monkeypatch) -> None:  # noqa: ANN00
     # 冗长明细(evidence / 逐条 warnings)被压掉,每个路由只留 status+message。
     assert set(group["routes"][0]) == {"status", "message"}
     assert group["routes"][0]["status"] == "ok"
+
+
+# ── search_llm_registry(搜索驱动、结果有界的词汇发现) ─────────────────────────
+
+
+def _endpoint(
+    endpoint_id: str,
+    *,
+    provider_kind: str = "third_party",
+    api_key: str | None = None,
+) -> ProviderEndpoint:
+    fields: dict[str, object] = {
+        "endpoint_id": endpoint_id,
+        "display_name": endpoint_id,
+        "protocol": "openai_compatible",
+        "base_url": f"https://{endpoint_id}.example/v1",
+        "provider_kind": provider_kind,
+    }
+    if api_key is not None:
+        fields["api_key"] = api_key
+    return ProviderEndpoint.model_validate(fields)
+
+
+def _route(endpoint_id: str, canonical_id: str, *, status: str = "verified") -> ProviderRoute:
+    return ProviderRoute.model_validate(
+        {
+            "route_id": f"{endpoint_id}:{canonical_id}",
+            "endpoint_id": endpoint_id,
+            "route_slug": canonical_id,
+            "provider_model_id": canonical_id,
+            "canonical_id": canonical_id,
+            "status": status,
+        }
+    )
+
+
+def _registry(
+    routes: list[ProviderRoute],
+    endpoints: list[ProviderEndpoint],
+) -> RegistryResponse:
+    routes_by_canonical: dict[str, list[str]] = {}
+    for route in routes:
+        routes_by_canonical.setdefault(route.canonical_id, []).append(route.route_id)
+    return RegistryResponse(
+        provider_endpoints={e.endpoint_id: e for e in endpoints},
+        provider_routes={r.route_id: r for r in routes},
+        canonical_groups=[
+            {"canonical_id": cid, "display_name": cid, "routes": rids}
+            for cid, rids in sorted(routes_by_canonical.items())
+        ],
+    )
+
+
+def _patch_registry(monkeypatch, registry: RegistryResponse) -> None:  # noqa: ANN001
+    from app.routers import llm
+
+    async def _fake() -> RegistryResponse:
+        return registry
+
+    monkeypatch.setattr(llm, "get_llm_registry", _fake)
+
+
+def test_search_llm_registry_filters_and_groups(monkeypatch) -> None:  # noqa: ANN001
+    endpoints = [
+        _endpoint("anthropic", provider_kind="official"),
+        _endpoint("openrouter"),
+        _endpoint("openai"),
+    ]
+    routes = [
+        _route("anthropic", "claude-opus-4.8"),
+        _route("openrouter", "anthropic.claude-opus-4.8"),
+        _route("openai", "gpt-4o"),
+    ]
+    _patch_registry(monkeypatch, _registry(routes, endpoints))
+
+    result = asyncio.run(copilot_tools.search_llm_registry_tool.handler({"query": "opus"}))
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    matched = {g["canonical_id"] for g in payload["canonical_groups"]}
+    # 只命中含 "opus" 的两个 canonical 组;gpt-4o 被过滤掉。
+    assert matched == {"claude-opus-4.8", "anthropic.claude-opus-4.8"}
+    official = next(
+        g for g in payload["canonical_groups"] if g["canonical_id"] == "claude-opus-4.8"
+    )
+    # 每条 route 只投影有界的词汇字段;官方直连端点 is_official=True。
+    assert official["routes"] == [
+        {
+            "route_id": "anthropic:claude-opus-4.8",
+            "endpoint_id": "anthropic",
+            "status": "verified",
+            "is_official": True,
+        }
+    ]
+    third_party = next(
+        g
+        for g in payload["canonical_groups"]
+        if g["canonical_id"] == "anthropic.claude-opus-4.8"
+    )
+    assert third_party["routes"][0]["is_official"] is False
+
+
+def test_search_llm_registry_result_is_bounded(monkeypatch) -> None:  # noqa: ANN001
+    endpoints = [_endpoint("bigprov")]
+    routes = [_route("bigprov", f"model-{i:03d}") for i in range(200)]
+    _patch_registry(monkeypatch, _registry(routes, endpoints))
+
+    result = asyncio.run(copilot_tools.search_llm_registry_tool.handler({"query": "model"}))
+
+    payload = json.loads(result["content"][0]["text"])
+    # 200 条全部匹配,但只返回默认 limit(20)条,total_count 反映匹配总数。
+    assert payload["total_count"] == 200
+    assert len(payload["canonical_groups"]) == 20
+    # 结构上根除 token 撑爆:整串序列化远小于 50KB。
+    assert len(result["content"][0]["text"]) < 50_000
+
+
+def test_search_llm_registry_hard_caps_limit(monkeypatch) -> None:  # noqa: ANN001
+    endpoints = [_endpoint("bigprov")]
+    routes = [_route("bigprov", f"model-{i:03d}") for i in range(200)]
+    _patch_registry(monkeypatch, _registry(routes, endpoints))
+
+    result = asyncio.run(
+        copilot_tools.search_llm_registry_tool.handler({"query": "model", "limit": 999})
+    )
+
+    payload = json.loads(result["content"][0]["text"])
+    assert len(payload["canonical_groups"]) <= 50
+
+
+def test_search_llm_registry_never_leaks_api_key(monkeypatch) -> None:  # noqa: ANN001
+    secret = "sk-supersecret-do-not-leak-abc123"
+    endpoints = [_endpoint("anthropic", provider_kind="official", api_key=secret)]
+    routes = [_route("anthropic", "claude-opus-4.8")]
+    _patch_registry(monkeypatch, _registry(routes, endpoints))
+
+    result = asyncio.run(copilot_tools.search_llm_registry_tool.handler({"query": "opus"}))
+
+    text = result["content"][0]["text"]
+    assert secret not in text
+    assert "api_key" not in text
+
+
+def test_get_llm_registry_tool_is_removed() -> None:
+    # 旧的全量转储工具被彻底废除(不留别名、不进白名单)。
+    assert not hasattr(copilot_tools, "get_llm_registry_tool")
+    tool_names = {t.name for t in copilot_tools._copilot_mcp_tools()}
+    assert "get_llm_registry" not in tool_names
+    assert "search_llm_registry" in tool_names
+    assert "mcp__studio__get_llm_registry" not in copilot._DECLARATIVE_ALLOWED_TOOLS
+    assert "mcp__studio__search_llm_registry" in copilot._DECLARATIVE_ALLOWED_TOOLS
 
 
 def test_build_options_attaches_studio_mcp_for_chat_only(tmp_path: Path) -> None:

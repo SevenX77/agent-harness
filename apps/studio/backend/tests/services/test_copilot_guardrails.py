@@ -284,7 +284,7 @@ def test_read_probe_mcp_tools_are_pre_allowed_not_held() -> None:
     # Read/probe MCP tools ride the declarative allow-list (never reach approval);
     # write tools do NOT appear there.
     allowed = set(copilot._DECLARATIVE_ALLOWED_TOOLS)
-    assert "mcp__studio__get_llm_registry" in allowed
+    assert "mcp__studio__search_llm_registry" in allowed
     assert "mcp__studio__test_llm_endpoint" in allowed
     assert "mcp__studio__probe_llm_route" in allowed
     for write_tool in (

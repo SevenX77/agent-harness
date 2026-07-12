@@ -459,7 +459,7 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
             if not isinstance(raw_capabilities, dict):
                 raw_capabilities = {}
             route_slug = _route_slug(model_id)
-            canonical = canonicalize_model(endpoint_id=endpoint_id, provider_model_id=route_slug)
+            canonical = canonicalize_model(endpoint_id=endpoint_id, provider_model_id=model_id)
             route_id = f"{endpoint_id}:{route_slug}"
             routes[route_id] = ProviderRoute(
                 route_id=route_id,

@@ -178,7 +178,15 @@ def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) ->
     openrouter_endpoint_id = _url_endpoint_id("https://openrouter.ai/api")
     assert openrouter_endpoint_id in migrated.provider_endpoints
     assert "98593eb6-764b-497e-808d-6610935f0e0a" not in migrated.provider_endpoints
-    assert f"{openrouter_endpoint_id}:anthropic.claude-sonnet-4-6" in migrated.provider_routes
+    # The proxy ``anthropic/`` transport prefix is stripped so this route groups
+    # with the official Claude Sonnet 4.6, while the raw id used to call the
+    # provider is preserved and route_id suffix stays == canonical_id.
+    route_id = f"{openrouter_endpoint_id}:claude-sonnet-4.6"
+    assert route_id in migrated.provider_routes
+    route = migrated.provider_routes[route_id]
+    assert route.canonical_id == "claude-sonnet-4.6"
+    assert route.route_id.partition(":")[2] == route.canonical_id
+    assert route.provider_model_id == "anthropic/claude-sonnet-4-6"
 
 
 def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secret(

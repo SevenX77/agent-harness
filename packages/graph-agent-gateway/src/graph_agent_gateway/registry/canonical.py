@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from graph_agent_gateway.registry.route_identity import route_slug, strip_transport_prefix
+
 CanonicalConfidence = Literal["transport_normalized", "explicit_alias", "orphan"]
 
 
@@ -35,17 +37,19 @@ def canonicalize_model(
             confidence="explicit_alias",
         )
 
-    if provider_model_id.startswith("anthropic/"):
-        canonical = _slug(provider_model_id.removeprefix("anthropic/"))
-        return CanonicalModel(
-            canonical_id=canonical,
-            confidence="transport_normalized",
-        )
-
-    canonical = _slug(provider_model_id)
+    # canonical_id MUST equal route_slug(provider_model_id): the copilot vocab
+    # guard requires the route_id suffix (route_slug) to equal the group's
+    # canonical_id. route_slug already strips the transport prefix; deriving
+    # canonical from it keeps the two byte-identical. A stripped prefix means the
+    # grouping was transport-normalized; otherwise it stands alone (orphan).
+    confidence: CanonicalConfidence = (
+        "transport_normalized"
+        if strip_transport_prefix(provider_model_id) != provider_model_id.strip()
+        else "orphan"
+    )
     return CanonicalModel(
-        canonical_id=canonical,
-        confidence="orphan",
+        canonical_id=route_slug(provider_model_id),
+        confidence=confidence,
     )
 
 

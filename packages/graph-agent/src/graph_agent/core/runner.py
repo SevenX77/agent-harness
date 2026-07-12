@@ -346,6 +346,7 @@ def predict_skill(  # noqa: C901
         runtime_config=runtime_config,
         predict_context=predict_context,
         unattended=unattended,
+        persist_declared_outputs=False,
         **inputs,
     )
 
@@ -1786,6 +1787,7 @@ def _finalize_successful_v030_run(
     trace_output: Path,
     wall_time: float,
     runtime_config: dict[str, Any] | None,
+    persist_declared_outputs: bool = True,
 ) -> dict[str, Any]:
     final_context = result["data"].model_dump()
     output_context = _context_with_framework_output_sources(final_context, result)
@@ -1794,18 +1796,19 @@ def _finalize_successful_v030_run(
         compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
     )
     _validate_v030_root_outputs(output_schema, final_context)
-    _save_v030_declared_file_outputs(
-        output_schema,
-        output_context,
-        default_output_dir=trace_output / "artifacts",
-    )
-    manifest_artifacts = _runtime_artifacts_from_config(runtime_config)
-    if manifest_artifacts:
-        write_manifest_artifacts(
-            manifest_artifacts,
+    if persist_declared_outputs:
+        _save_v030_declared_file_outputs(
+            output_schema,
             output_context,
-            trace_output / "artifacts",
+            default_output_dir=trace_output / "artifacts",
         )
+        manifest_artifacts = _runtime_artifacts_from_config(runtime_config)
+        if manifest_artifacts:
+            write_manifest_artifacts(
+                manifest_artifacts,
+                output_context,
+                trace_output / "artifacts",
+            )
     _emit_v030_event(
         event_sink,
         RunEndedEvent(
@@ -1998,6 +2001,7 @@ def _run_v030_skill_dict(
     runtime_config: dict[str, Any] | None = None,
     predict_context: SDKPredictContext | None = None,
     unattended: bool = False,
+    persist_declared_outputs: bool = True,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
@@ -2114,6 +2118,7 @@ def _run_v030_skill_dict(
         trace_output=trace_output,
         wall_time=wall_time,
         runtime_config=runtime_config,
+        persist_declared_outputs=persist_declared_outputs,
     )
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
     return {

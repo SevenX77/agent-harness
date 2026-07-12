@@ -2,9 +2,10 @@
 
 1. MCP tool results are content-block ARRAYS; the summary must surface the
    inner text (the JSON-array wrapper broke the role-change card silently).
-2. Role-write tools must reject canonical_id/route_id vocabulary mismatches at
-   the boundary — the poison entry rendered empty in Settings and the next
-   autosave wiped the group from truth.
+2. Role-write tools take a FLAT route_id list and DERIVE canonical_id server-side
+   (Requirement 12), so the client can never submit the poison prefixed canonical
+   that rendered empty in Settings and let the next autosave wipe the group. Unknown
+   route_ids fail fast at the boundary instead.
 3. Bash must ALWAYS enter the ask flow: the CLI's sandbox auto-run for
    read-only commands bypassed can_use_tool, so no approval card ever showed.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from app.services import copilot, copilot_tools
 from claude_agent_sdk import PermissionResultAllow
 
@@ -47,101 +49,56 @@ def _credentials_with_routes(*specs: tuple[str, str]) -> object:
     return LLMCredentialsFile(provider_routes=routes)
 
 
-def test_create_llm_role_rejects_canonical_route_mismatch(monkeypatch) -> None:  # noqa: ANN001
-    from app.services import llm_credentials
-
-    # The route exists and derives the clean canonical; the poison group labels it
-    # with the prefixed form, so the decoupled guard catches the mismatch.
-    monkeypatch.setattr(
-        llm_credentials,
-        "load_credentials",
-        lambda *a, **k: _credentials_with_routes(
-            ("anthropic-official:claude-opus-4.8", "claude-opus-4-8")
-        ),
+def test_flat_route_input_derives_clean_canonical_not_poison_prefix() -> None:
+    # The route derives the clean canonical from its provider_model_id; because the
+    # client only sends the route_id (no canonical), the provider-prefixed poison
+    # ("anthropic.claude-opus-4.8") that broke Settings is structurally unreachable.
+    credentials = _credentials_with_routes(
+        ("anthropic-official:claude-opus-4.8", "claude-opus-4-8"),
     )
 
-    result = asyncio.run(
-        copilot_tools.create_llm_role_tool.handler(
-            {
-                "name": "poison",
-                "model_groups": [
-                    {
-                        # the exact failure shape from the acceptance run:
-                        # provider-prefixed model name used as canonical_id
-                        "canonical_id": "anthropic.claude-opus-4.8",
-                        "display_name": "Claude Opus 4.8",
-                        "provider_models": [
-                            {"route_id": "anthropic-official:claude-opus-4.8"}
-                        ],
-                    }
-                ],
-            }
+    groups = copilot_tools._transform_fallback_chain_to_model_groups(
+        ["anthropic-official:claude-opus-4.8"], credentials
+    )
+
+    assert len(groups) == 1
+    assert groups[0].canonical_id == "claude-opus-4.8"
+    assert groups[0].canonical_id != "anthropic.claude-opus-4.8"
+
+
+def test_flat_route_input_unknown_route_fails_fast() -> None:
+    credentials = _credentials_with_routes(
+        ("deepseek-official:deepseek-v4-pro", "deepseek-v4-pro"),
+    )
+
+    with pytest.raises(copilot_tools._FlatRouteInputError) as excinfo:
+        copilot_tools._transform_fallback_chain_to_model_groups(
+            ["deepseek-official:deepseek-v4-pro", "ghost-endpoint:missing"], credentials
         )
-    )
 
-    assert result["is_error"] is True
-    text = result["content"][0]["text"]
-    assert "anthropic-official:claude-opus-4.8" in text
-    assert "canonical" in text
+    assert "ghost-endpoint:missing" in str(excinfo.value)
 
 
-def test_update_llm_role_rejects_canonical_route_mismatch(monkeypatch) -> None:  # noqa: ANN001
-    from app.models.llm_config import RoleEntry, RolesData
-    from app.routers import llm
-    from app.services import llm_credentials
-
-    data = RolesData()
-    data.roles["writer"] = RoleEntry()
-    monkeypatch.setattr(llm, "_load_roles_or_empty", lambda: data)
-    monkeypatch.setattr(
-        llm_credentials,
-        "load_credentials",
-        lambda *a, **k: _credentials_with_routes(
-            ("deepseek-official:deepseek-v4-pro", "deepseek-v4-pro")
-        ),
-    )
-
-    result = asyncio.run(
-        copilot_tools.update_llm_role_tool.handler(
-            {
-                "role_name": "writer",
-                "ops": {
-                    "set_model_groups": [
-                        {
-                            "canonical_id": "deepseek.deepseek-v4-pro",
-                            "display_name": "DeepSeek V4 Pro",
-                            "provider_models": [
-                                {"route_id": "deepseek-official:deepseek-v4-pro"}
-                            ],
-                        }
-                    ]
-                },
-            }
-        )
-    )
-
-    assert result["is_error"] is True
-    assert "deepseek-official:deepseek-v4-pro" in result["content"][0]["text"]
-
-
-def test_matching_vocabulary_passes_boundary_check() -> None:
-    from app.models.llm_config import RoleModelGroup, RoleProviderModel
-
+def test_same_canonical_routes_collapse_to_one_group() -> None:
     credentials = _credentials_with_routes(
         ("anthropic-official:claude-opus-4-8", "claude-opus-4-8"),
         ("openrouter-x:claude-opus-4.8", "anthropic/claude-opus-4.8"),
     )
-    groups = [
-        RoleModelGroup(
-            canonical_id="claude-opus-4.8",
-            display_name="Claude Opus 4.8",
-            provider_models=[
-                RoleProviderModel(route_id="anthropic-official:claude-opus-4-8"),
-                RoleProviderModel(route_id="openrouter-x:claude-opus-4.8"),
-            ],
-        )
+
+    groups = copilot_tools._transform_fallback_chain_to_model_groups(
+        [
+            "anthropic-official:claude-opus-4-8",
+            "openrouter-x:claude-opus-4.8",
+        ],
+        credentials,
+    )
+
+    assert len(groups) == 1
+    assert groups[0].canonical_id == "claude-opus-4.8"
+    assert [pm.route_id for pm in groups[0].provider_models] == [
+        "anthropic-official:claude-opus-4-8",
+        "openrouter-x:claude-opus-4.8",
     ]
-    assert copilot_tools._model_groups_violation(groups, credentials) is None
 
 
 def test_bash_hook_forces_ask_flow(tmp_path: Path) -> None:

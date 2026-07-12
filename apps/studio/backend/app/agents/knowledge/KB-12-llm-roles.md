@@ -41,8 +41,8 @@ Use this table to diagnose common gateway errors:
 Conversation agents can manage LLM configurations using dedicated write tools, bypassing the need for manual file editing or UI click-throughs.
 
 ### Core Write Tools:
-*   `create_llm_role(name, model_groups, intent?)`: Declares a new role.
-*   `update_llm_role(role_name, ops)`: Modifies routes, priorities, fallback switches, or parameter presets (thinking, max output tokens, temperature) for an existing role.
+*   `create_llm_role(name, fallback_chain, intent?)`: Declares a new role. `fallback_chain` is a **flat `route_id` list** (each item a `route_id` string or `{route_id}` object); the server looks each route up in the registry, derives its `canonical_id`, and auto-groups — the client never assembles `model_groups` or supplies a `canonical_id`.
+*   `update_llm_role(role_name, ops)`: Modifies an existing role. `ops.set_fallback_chain` takes the same **flat `route_id` list** (whole-list replace = add/remove/reorder; the exact `fallback_chain` shape `get_llm_roles` returns can be written straight back, extra fields like `runtime_settings` are ignored). `ops.model_fallback_enabled` toggles fallback; `ops.intent` patches thinking / max output tokens / temperature. Unknown `route_id`s are rejected at the boundary with every invalid route listed.
 
 ### Safety and Operation Guarantees:
 1.  **Service-Layer Execution**: Tools route changes exclusively through the FastAPI service layer (`routers/llm.py`). They never modify registry files (`llm_roles.json`, etc.) directly, ensuring cascade updates and domain events are handled correctly.

@@ -33,8 +33,8 @@ def test_provider_route_transport_normalizes_and_keeps_vocab_invariant() -> None
     )
 
     assert route.canonical_id == "claude-opus-4.8"
-    # Vocab guard (copilot_tools._model_groups_violation): route_id suffix after the
-    # endpoint prefix must equal canonical_id, else role writes fail.
+    # A freshly probed route's route_id suffix (route_slug) equals its derived
+    # canonical_id; the copilot flat-route transform groups on the derived value.
     assert route.route_id.partition(":")[2] == route.canonical_id
     assert route.route_slug == route.canonical_id
     # The raw id used to actually CALL the provider is preserved untouched.

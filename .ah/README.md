@@ -1,7 +1,7 @@
 # .ah/ · ah 编程 SOP(agent-harness 实例)
 
 用 [ah](https://github.com/SevenX77/ah)(≥ 1.4.0)在本仓编排 agent 团队做工程的配置实例,源自
-[ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) v0.5.1 `dual-lane/` 模板(双泳道并发拓扑;沿用 v0.5.0 执笔权铁律:gate 文档——design/spec/tasks/TDD 框线/验收测试——一律严谨 agent 执笔,发散型只有辩论席位与实施位)。
+[ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) **v0.6.0 `classic/` 模板**(经典拓扑:master + c1/c2 双 codex 实施 + o1 辩论 + d1 主笔/r2 + r1 统一审核 + test 测试席;2026-07-12 自 v0.5.1 dual-lane 迁入,沿用执笔权铁律:gate 文档——design/spec/tasks/TDD 框线/验收测试——一律严谨 agent 执笔,发散型只有辩论席位与实施位)。
 协作方法论(三层拓扑 / SOP 闭环 / 设计管线 / 代理实践 / 纪律清单)读 pack 的 `GUIDE.md` / `ROLES.md`,
 **operator(用户代理)角色规范读 pack `OPERATOR.md`**——那是人读层;本目录只放注入 agent 的实例层。
 
@@ -149,7 +149,12 @@ tzutil /g   # (Windows 侧) ↔  readlink -f /etc/localtime | sed 's|.*/zoneinfo
    (上游修复前的操作项)。已知上游问题另见:kill→up 重生偶发单 agent CRASHED;
    `~/.cache/ah/sandboxes/` 尸体累积无 GC。
 
-### 栈重建/复活的三条追加配方(2026-07-11 凭据事故复盘实测)
+### 栈重建/复活的追加配方(2026-07-11/12 事故复盘实测)
+
+0. **拉栈前 `loginctl enable-linger root`(一次性,根治)**:没有 linger 时,最后一个
+   WSL 登录会话退出即回收 root 的 systemd user manager,所有 agent(user scope)+
+   ahd(user service)+tmux 全部连坐死(2026-07-12 实犯,整栈灭)。`ah start` 输出里
+   的 linger 提示不是装饰,必须执行;keepalive 会话只是带子不是根治。
 
 5. **`ah start` 必须在 login shell 里跑**(`wsl -- bash -lc '... ah start --wait'`):
    daemon unit 的 Environment 是从 start 时的客户端环境烤进去的,再传给全部 spawn scope。

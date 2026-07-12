@@ -1,67 +1,56 @@
-# ah 编程 SOP · agent-harness 实例(双泳道拓扑)
-# 源自 SevenX77/ah-scenario-pack v0.5.1 dual-lane 模板:
-#   master(项目经理/小组长,全体 agents 由其管辖调配)+ 泳道1(g1 闸门 + g1-m1 实施)+ 泳道2(g2 + g2-m1,对称并发)
-#   + o1 设计辩论席 + d1 设计执笔席。泳道内事务由该泳道闸门终裁,不过 master。
+# ah 编程 SOP · agent-harness 实例(经典版拓扑)
+# 源自 SevenX77/ah-scenario-pack v0.6.0 classic 模板:
+#   master(项目经理)+ 实施线 c1/c2(dual codex,全链路自写自测 TDD)
+#   + 设计线(o1 辩论席 + d1 主笔/r2 后备审核)+ r1 统一审核席 + test 测试席。
+# 与模板的有意差异(模板 ah.toml.example 有三处会翻车的配置错,按 ah 官方 schema 修正):
+#   ① 补 version="1"(缺失则 validate 直接失败);
+#   ② master 用顶层 [master] 表(写 [agents.master] 会孵化假 master worker,v0.2.0 教训);
+#   ③ hook 推送放 [completion] 表(裸键被静默忽略,完成信号根本不开)。
 # 启动方式与本机(Windows/WSL)注意事项:.ah/README.md;验证命令档案:.ah/VERIFY.md。
 version = "1"
 
-# 项目经理(PM/小组长):全体 agents 在其管辖之下、由其派单调配;泳道内技术裁决
-# 下放给各泳道闸门(管理带宽安排,管辖权仍在 master)。其上是 operator(用户代理 CEO)。
-# 注意:master 由本表决定(ah 官方模板形式),不要写成 [agents.master]——那会
-# 额外孵化一个名叫 "master" 的普通 worker,真 master 反而落在默认配置上
-# (pack v0.2.0 教训;v0.5.1 dual-lane 模板此处复发了该 drift,已报上游)。
+# 项目经理:派单/排期/辩论主持/哨兵;其上是 operator(用户代理 CEO)。
 [master]
 cmd = "claude"
 enabled = true
-# WSL 以 root 运行且需要 bypass 权限时改用(claude 对 root 强制要求 IS_SANDBOX=1):
-# cmd = "IS_SANDBOX=1 claude --dangerously-skip-permissions"
+# WSL 以 root 运行且需要 bypass 权限时改用(claude 对 root 强制 IS_SANDBOX=1;
+# 必须 env 形式承载,systemd-run 直连路径不展开裸 VAR=1 前缀):
+# cmd = "env IS_SANDBOX=1 claude --dangerously-skip-permissions"
 
-# 完成信号:provider Stop hook 直推 ahd,是「内部后台任务型假完成」的编排器侧根治
+# 完成信号:provider Stop hook 直推 ahd(「内部后台任务型假完成」的编排器侧根治)
 [completion]
 hook_push_enabled = true
 hook_push_events = ["stop"]
 hook_push_providers = ["claude", "codex", "antigravity"]
 
-# 泳道1 闸门(gatekeeper):RED 验收测试执笔 + 逐任务审计 + e2e;g1-m1 的终裁上级
-[agents.g1]
-provider = "claude"
+# 实施线(dual codex,同角色两实例纯为并发;全链路自写自测 TDD,真实性由 r1 回滚自检把关)
+[agents.c1]
+provider = "codex"
 
-# 泳道1 实施(code monkey):对着 g1 的 RED 测试纯实施变绿;只向 g1 汇报。
-# 实施位首选 codex(机械精确);本机 codex 配额恢复前用 antigravity——
-# g1-m1.md 的「发散型附加护栏」一节在 provider 是发散型期间必须保留。
-[agents.g1-m1]
-provider = "antigravity"
+[agents.c2]
+provider = "codex"
 
-# 泳道2(与泳道1 完全对称,纯为并发;单泳道够用时可整段注释掉连同其 rules)
-[agents.g2]
-provider = "claude"
-
-[agents.g2-m1]
-provider = "antigravity"
-
-# 设计辩论席(oracle):第一性质疑/替代方案/推翻问法 + spec 忠实度对抗审;
-# markdown-only;必须与 master 异族(同族发散=回音壁)。
-# 执笔权:o1 出的是辩论意见书,不出交付稿;gate 文档的笔在 d1(见下)。
+# 设计辩论席(oracle):第一性质疑/替代方案/推翻问法 + 对质回合 + spec 忠实度对抗审;
+# markdown-only 且产物必须落盘;必须与 master/d1 异族(同族发散=回音壁)。
 [agents.o1]
 provider = "antigravity"
 
-# 设计执笔席(design scribe):design 稿主笔 + 冻结设计→spec/tasks 转写。
-# v0.5.1 模板在 VPS 资源受限环境的妥协形态=master 兼执笔(用户拍板确认);
-# 本机内存充足,设专职席替代 master 兼笔,发散输入(o1)与执笔(d1)保持分离。
+# 设计主笔 + r2 后备审核(双角色,帽子由 master 派单类型决定;自证闭环回避见 rules)
 [agents.d1]
 provider = "claude"
 
-# ── CLI 层配置(模型 / effort / statusline / autoCompact)──────────────────────
-# 源自 pack v0.4.0 实战拍板值,移植到双泳道:质量门顶配,编排位经济档。
-# ah 把 [master.settings] / [agents.<id>.settings] 深合并进该角色沙箱的
-# .claude/settings.json(嵌套表=嵌套对象;同名键覆盖)。
-# 硬限制:仅 provider = "claude" 的角色支持——给 antigravity(g*-m1/o1)写 settings
-# 会在配置加载时直接报错,它们的模型/effort 配在宿主全局
-# ~/.gemini/antigravity-cli/settings.json 的 model 名里内嵌(本机实测值
-# "Gemini 3.5 Flash (High)"——检查 effort 就看这个字段),随沙箱物化继承。
-# 分档:闸门(g1/g2)= 旗舰 + 最高持久化档(effortLevel 上限 xhigh,max 仅 session)
-# ——闸门是唯一质量门,不偷懒;master = 中档 + medium(零裁决中继是短视野决策,
-# 又是最烧 token 的常驻角色);实施走便宜模型。
+# 统一审核席:只审不写,统一审 c1/c2;回滚自检必跑
+[agents.r1]
+provider = "claude"
+
+# 测试席:e2e + 验收测试执笔(安全关键时先写 RED);要真 e2e/深度语义验证选 claude 类
+[agents.test]
+provider = "claude"
+
+# ── CLI 层配置(模型 / effort / statusline)──────────────────────────────
+# 仅 claude provider 支持 settings;codex(c1/c2)与 antigravity(o1)的模型档在各自宿主全局配置。
+# 分档:质量门(r1 审核 + d1 执笔)= Opus 4.8 + xhigh 顶配;master = Sonnet 5 + medium(编排是
+# 短视野决策、又是最烧 token 的常驻位);test = Sonnet 5 + high(e2e 判断要强,执笔量中等)。
 # 生效时机=沙箱物化(spawn)时;在跑的 agent 需 kill+up / 重启栈才带新配置。
 
 [master.settings]
@@ -69,29 +58,9 @@ model = "claude-sonnet-5"
 effortLevel = "medium"
 autoCompactEnabled = true
 
-# statusline 按 operator 监控需求配:角色(pane 对号)· 模型+effort(验证配置真生效)
-# · context 占用%(compaction 临近=会吞消息的高危窗口,capture-pane 一眼可读)。
 [master.settings.statusLine]
 type = "command"
 command = "jq -r '\"master · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
-
-[agents.g1.settings]
-model = "claude-opus-4-8"
-effortLevel = "xhigh"
-autoCompactEnabled = true
-
-[agents.g1.settings.statusLine]
-type = "command"
-command = "jq -r '\"g1-gate · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
-
-[agents.g2.settings]
-model = "claude-opus-4-8"
-effortLevel = "xhigh"
-autoCompactEnabled = true
-
-[agents.g2.settings.statusLine]
-type = "command"
-command = "jq -r '\"g2-gate · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
 
 [agents.d1.settings]
 model = "claude-opus-4-8"
@@ -101,3 +70,24 @@ autoCompactEnabled = true
 [agents.d1.settings.statusLine]
 type = "command"
 command = "jq -r '\"d1-design · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+
+[agents.r1.settings]
+model = "claude-opus-4-8"
+effortLevel = "xhigh"
+autoCompactEnabled = true
+
+[agents.r1.settings.statusLine]
+type = "command"
+command = "jq -r '\"r1-review · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+
+[agents.test.settings]
+model = "claude-sonnet-5"
+effortLevel = "high"
+autoCompactEnabled = true
+
+[agents.test.settings.statusLine]
+type = "command"
+command = "jq -r '\"test-seat · \\(.model.display_name) \\(.effort.level // \"?\") · ctx \\(.context_window.used_percentage // 0)%\"'"
+
+# 注意:worker 代理 env([agents.<id>.env] HTTP(S)_PROXY 三行 ×6)与 master 的 env 变体
+# 属本机运行时注入,不入库——拉栈前跑 .ah/README.md 的注入自检(grep -c HTTP_PROXY 应=6)。

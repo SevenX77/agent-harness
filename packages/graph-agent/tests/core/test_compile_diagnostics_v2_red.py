@@ -297,6 +297,37 @@ def test_static_dataflow_error_not_masked_by_earlier_validator(
     assert "[F-v3-graph-dataflow-source-missing]" in codes, codes
 
 
+def test_discover_phase_error_preserves_already_collected_dataflow_diag(
+    tmp_path: Path, mock_skill_resolver: SkillResolverProtocol
+) -> None:
+    # RED (REVIEW-line1 F1): B4 discovery validators run after static dataflow
+    # has already appended diagnostics. A discovery SkillLoadError must be added
+    # to the same bag instead of escaping and discarding earlier diagnostics.
+    _graph_md(
+        tmp_path,
+        phases=["needs_input", "bad_discovery"],
+        body='<phase depends_on="input">needs_input</phase>\n'
+        '<phase depends_on="needs_input" output>bad_discovery</phase>',
+    )
+    dataflow_io = """io:
+  inputs:
+    type: object
+    properties:
+      orphan:
+        type: string
+    required: [orphan]
+  outputs:
+    type: object
+    properties: {}"""
+    _write(tmp_path / "phases" / "needs_input" / "SKILL.md", _agent_md(io_block=dataflow_io))
+    _write(tmp_path / "phases" / "bad_discovery" / "LOGIC.md", _logic_md())
+    _write(tmp_path / "phases" / "bad_discovery" / "tools" / "ghost.py", "def ghost():\n    return None\n")
+
+    codes = _codes(_raises(tmp_path, mock_skill_resolver))
+    assert "[F-v3-graph-dataflow-source-missing]" in codes, codes
+    assert "[F-v3-agent-tool-unknown]" in codes, codes
+
+
 def _poisoned_subgraph_skill(root: Path) -> None:
     # `broken`  : subgraph delegating to a child whose GRAPH.md omits `io`
     #             (child compile fails => `broken` is poisoned).

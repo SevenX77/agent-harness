@@ -386,23 +386,49 @@ class SkillLoader:
         )
         _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs, post_diags)
 
-        actions, tools = _discover_actions_and_tools(root, discovered)
-        subagents_by_phase = _compile_subagent_metadata(
-            phase_docs,
-            skill_resolver=resolver,
-            _loading_stack=loading_stack,
-            _compilation_cache=_compilation_cache,
-        )
-        tools = _inject_subagent_tools(tools, subagents_by_phase)
-        _validate_agent_declared_tools(phase_docs, tools, post_diags)
-        _validate_logic_action_return_keys(
-            phase_docs,
-            actions,
-            input_schema_keys,
-            output_schema_keys,
-            validate_context_writes=self.validate_context_writes,
-            diags=post_diags,
-        )
+        discovery_failed = False
+        subagent_failed = False
+        injection_failed = False
+        actions = ActionRegistry.empty()
+        tools = ToolRegistry.empty()
+        subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
+
+        try:
+            actions, tools = _discover_actions_and_tools(root, discovered)
+        except SkillLoadError as exc:
+            _append_issues_as_diags(post_diags, exc)
+            discovery_failed = True
+
+        if not discovery_failed:
+            try:
+                subagents_by_phase = _compile_subagent_metadata(
+                    phase_docs,
+                    skill_resolver=resolver,
+                    _loading_stack=loading_stack,
+                    _compilation_cache=_compilation_cache,
+                )
+            except SkillLoadError as exc:
+                _append_issues_as_diags(post_diags, exc)
+                subagent_failed = True
+
+        if not discovery_failed and not subagent_failed:
+            try:
+                tools = _inject_subagent_tools(tools, subagents_by_phase)
+            except SkillLoadError as exc:
+                _append_issues_as_diags(post_diags, exc)
+                injection_failed = True
+
+        if not discovery_failed and not subagent_failed and not injection_failed:
+            _validate_agent_declared_tools(phase_docs, tools, post_diags)
+        if not discovery_failed:
+            _validate_logic_action_return_keys(
+                phase_docs,
+                actions,
+                input_schema_keys,
+                output_schema_keys,
+                validate_context_writes=self.validate_context_writes,
+                diags=post_diags,
+            )
 
         if post_diags:
             _raise_diags(post_diags)
@@ -627,6 +653,24 @@ def _issues_of(exc: SkillLoadError) -> list[Any]:
             message=str(exc),
         )
     ]
+
+
+def _append_issues_as_diags(diags: list[_Diag], exc: SkillLoadError) -> None:
+    for issue in _issues_of(exc):
+        source_path = getattr(issue, "source_path", None)
+        line = getattr(issue, "line", None)
+        rule_id = getattr(issue, "rule_id", getattr(issue, "code", None))
+        message = getattr(issue, "message", str(exc))
+        field_path = getattr(issue, "field_path", None)
+        diags.append(
+            _Diag(
+                Path(str(source_path)) if source_path else Path("GRAPH.md"),
+                line if isinstance(line, int) else 1,
+                str(rule_id or "[F-v3-graph-root-missing]"),
+                str(message),
+                field_path=str(field_path) if field_path is not None else None,
+            )
+        )
 
 
 def _raise_collected_errors(errors: list[SkillLoadError]) -> NoReturn:
@@ -1453,12 +1497,12 @@ def _build_graph_manifest(
             field_path="schema_version",
         )
     if "io_inputs_ref" in data or "io_outputs_ref" in data:
-        field_path = "io_inputs_ref" if "io_inputs_ref" in data else "io_outputs_ref"
+        deprecated_field_path = "io_inputs_ref" if "io_inputs_ref" in data else "io_outputs_ref"
         _graph_fatal(
             path,
             1,
             "[F-v3-graph-io-physical-file-deprecated] io_inputs_ref/io_outputs_ref are not supported",
-            field_path=field_path,
+            field_path=deprecated_field_path,
         )
     if "phases" not in data:
         _graph_fatal(

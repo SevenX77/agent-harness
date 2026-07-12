@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 from app.core.adapters.engine import (
+    CallbackEvent,
     RunResult,
 )
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
+from app.services.run_manager import run_manager
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
@@ -83,21 +88,37 @@ class PredictorService:
         # Route through EngineAdapter predict_artifact
         from app.core.adapters.http_transport import StudioAdapterError
 
-        try:
-            result = adapter.predict_artifact(
-                {
-                    "artifact_ref": _public_artifact_ref(art_ref),
-                    "mock_llm": mock_param,
-                    "current_hashes": current_hashes,
-                    "inputs": input_data or {},
-                    "workspace_dir": str(workspace_dir_for(skill_dir)),
-                    "execution_context": {"runtime_config": runtime_config},
-                }
+        predict_run_id = f"predict-{uuid.uuid4().hex}"
+        workspace_dir = workspace_dir_for(skill_dir)
+        event_subscriber: Callable[[CallbackEvent], None] | None = None
+        if getattr(adapter, "transport", None) == "in_process":
+            run_manager.register_transient_predict_run(
+                skill_id=skill_id,
+                run_id=predict_run_id,
+                run_dir=workspace_dir / "runs" / predict_run_id,
             )
+            event_subscriber = _predict_event_subscriber(predict_run_id)
+
+        try:
+            payload: dict[str, Any] = {
+                "artifact_ref": _public_artifact_ref(art_ref),
+                "mock_llm": mock_param,
+                "current_hashes": current_hashes,
+                "inputs": input_data or {},
+                "workspace_dir": str(workspace_dir),
+                "thread_id": predict_run_id,
+                "execution_context": {"runtime_config": runtime_config},
+            }
+            if event_subscriber is not None:
+                payload["event_subscriber"] = event_subscriber
+            result = adapter.predict_artifact(payload)
         except StudioAdapterError as exc:
             if exc.error_code == "engine.predict_deadlock":
                 raise PredictDeadlockError(exc.error_payload["phase_name"], exc.error_payload["actual_path"]) from exc
             raise exc
+        finally:
+            if event_subscriber is not None:
+                _finish_predict_event_stream(predict_run_id)
 
         if isinstance(result, dict) and "error_code" in result and "success" not in result:
             error_payload = result.get("error_payload")
@@ -210,6 +231,36 @@ def _artifact_store_metadata(source: str, artifact_ref: dict[str, Any]) -> dict[
     for key, value in public.items():
         metadata[key] = value
     return metadata
+
+
+def _predict_event_subscriber(run_id: str) -> Callable[[CallbackEvent], None]:
+    loop = _current_event_loop()
+
+    def _emit(event: CallbackEvent) -> None:
+        payload = event.model_dump(mode="json") if hasattr(event, "model_dump") else event
+        if not isinstance(payload, dict):
+            return
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(run_manager.emit_transient_run_event, run_id, payload)
+        else:
+            run_manager.emit_transient_run_event(run_id, payload)
+
+    return _emit
+
+
+def _finish_predict_event_stream(run_id: str) -> None:
+    loop = _current_event_loop()
+    if loop is not None and loop.is_running():
+        loop.call_soon_threadsafe(run_manager.finish_transient_predict_run, run_id)
+    else:
+        run_manager.finish_transient_predict_run(run_id)
+
+
+def _current_event_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 __all__ = [
     "MAX_PHASE_REVISITS",

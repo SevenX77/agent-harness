@@ -61,6 +61,17 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
 max_iterations: {max_iterations}
 llm_role: graph_agent
 tools:
@@ -112,6 +123,15 @@ phases:
     _write(
         root / "phases" / "child" / "SKILL.md",
         """---
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+  outputs:
+    type: object
+    properties: {}
 max_iterations: 1
 llm_role: graph_agent
 ---
@@ -149,6 +169,15 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+  outputs:
+    type: object
+    properties: {{}}
 max_iterations: 3
 llm_role: graph_agent
 subagents:

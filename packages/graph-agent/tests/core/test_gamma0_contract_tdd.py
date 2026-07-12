@@ -64,6 +64,13 @@ Return via finish_task.
         root / "phases" / "main" / "SKILL.md",
         f"""---
 {validator_line}
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties: {{}}
 tools:
   - finish_task
 ---
@@ -128,6 +135,7 @@ def test_γ0_2_agent_node_validator_defaults_false() -> None:
             "mode": "agent",
             "role": "Research assistant.",
             "goal": "Return a concise answer.",
+            "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
         }
     )
 

@@ -92,6 +92,17 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
 max_iterations: 3
 tools:
   - ask_clarification

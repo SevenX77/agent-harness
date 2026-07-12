@@ -5509,7 +5509,7 @@ def _provider_route(
     raw_capabilities: dict[str, Any] | None = None,
 ) -> ProviderRoute:
     route_slug = _route_slug(model_id)
-    canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=route_slug)
+    canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=model_id)
     return ProviderRoute(
         route_id=f"{endpoint.endpoint_id}:{route_slug}",
         endpoint_id=endpoint.endpoint_id,

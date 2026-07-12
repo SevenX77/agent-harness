@@ -16,6 +16,29 @@ _PROTOCOL_ID_SUFFIX: dict[Protocol, str] = {
     "ark_runtime": "ark",
 }
 
+# Vendor/transport routing prefixes that identify HOW a model is reached (via a
+# proxy such as openrouter), NOT which model it is. Stripped from the grouping
+# identity so the same model reached officially and via a proxy shares one
+# canonical group (and thus one model_group with fallback routes). The raw
+# ``provider_model_id`` used to actually call the provider is stored separately
+# and never touched.
+_TRANSPORT_PREFIXES: tuple[str, ...] = ("anthropic/",)
+
+
+def strip_transport_prefix(provider_model_id: str) -> str:
+    """Strip a known transport/vendor routing prefix from a provider model id.
+
+    Only the exact known transport prefix is removed; the remaining model
+    identity (including real variant suffixes like ``-fast``) is preserved.
+    """
+
+    value = provider_model_id.strip()
+    lowered = value.lower()
+    for prefix in _TRANSPORT_PREFIXES:
+        if lowered.startswith(prefix):
+            return value[len(prefix) :]
+    return value
+
 
 def stable_endpoint_id(*, protocol: Protocol, base_url: str) -> str:
     """Return the persisted endpoint id for a protocol/base-url pair."""
@@ -40,7 +63,7 @@ def stable_route_id(
 def route_slug(provider_model_id: str) -> str:
     """Return the route-safe slug for a provider model id."""
 
-    slug = provider_model_id.strip().lower().replace("/", ".").replace("_", "-")
+    slug = strip_transport_prefix(provider_model_id).lower().replace("/", ".").replace("_", "-")
     slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
     slug = re.sub(r"-+", "-", slug).strip("-")
     slug = re.sub(r"^(claude-(?:sonnet|opus|haiku)-\d+)-(\d+)$", r"\1.\2", slug)
@@ -58,4 +81,9 @@ def _base_url_slug(base_url: str) -> str:
     return slug or "endpoint"
 
 
-__all__ = ["route_slug", "stable_endpoint_id", "stable_route_id"]
+__all__ = [
+    "route_slug",
+    "stable_endpoint_id",
+    "stable_route_id",
+    "strip_transport_prefix",
+]

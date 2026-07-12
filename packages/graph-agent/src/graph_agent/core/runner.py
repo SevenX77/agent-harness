@@ -288,8 +288,6 @@ def predict_skill(  # noqa: C901
     from graph_agent.core._predict_internal.strategy import MockStrategy
     from graph_agent.core._predict_internal.tracing import PredictTracingCallback
     from graph_agent.core.compiler import compile_skill
-    from graph_agent.core.graph_assembler import assemble_graph
-    from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
     resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
     workspace_root = _validate_workspace_dir(workspace_dir)
@@ -304,16 +302,12 @@ def predict_skill(  # noqa: C901
 
     mock_llm = inputs.pop("mock_llm", None)
     current_hashes = inputs.pop("current_hashes", None) or {}
-    root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_root)
-    if root_runtime_inputs:
-        inputs = {**inputs, **root_runtime_inputs}
 
     compiled = compile_skill(
         skill_path_obj,
         skill_resolver=resolver,
         runtime_input_fields=_runtime_input_fields_from_config(runtime_config),
     )
-
 
     # 1. Strategy setup
     strategy = MockStrategy.from_param(mock_llm)
@@ -339,65 +333,27 @@ def predict_skill(  # noqa: C901
     run_id = thread_id or str(uuid.uuid4())
     trace_output = workspace_root / "runs" / run_id
 
-    # 4. Prepare Composite event sink for tracking events and trace.jsonl output
-    event_sink = _prepare_v030_event_sink(
-        trace_output=trace_output,
+    raw = _run_v030_skill_dict(
+        skill_path_obj,
+        workspace_dir=workspace_root,
+        thread_id=run_id,
         event_subscriber=event_subscriber,
         callbacks=[tracing_callback],
-    )
-
-    # 5. Assemble and run graph in intercept mode
-    assembled = assemble_graph(
-        compiled,
-        chat_model=None,
+        skill_resolver=resolver,
         model_resolver=model_resolver,
         llm_provider=llm_provider,
-        callbacks=cast(Any, event_sink),
-        skill_resolver=resolver,
-        predict_context=predict_context,
+        checkpointer_spec=None,
         runtime_config=runtime_config,
+        predict_context=predict_context,
+        unattended=unattended,
+        **inputs,
     )
-    graph = assembled.graph
-
-    initial_state = WorkflowState(
-        data=BusinessData.model_validate(dict(inputs)),
-        flow=FrameworkState.model_validate({
-            "run_id": run_id,
-            "thread_id": run_id,
-            "unattended": unattended,
-            "persistent_storage_config": {"workspace_dir": str(workspace_root)},
-        }),
-        messages=[],
-    )
-
-    try:
-        final_state = graph.invoke(
-            initial_state,
-            config={"configurable": {"thread_id": run_id}},
-        )
-    except Exception as exc:
-        finished_at = datetime.now(UTC)
-        wall_time = round(time.monotonic() - started_monotonic, 3)
-        failed_result = RunResult(
-            success=False,
-            run_id=run_id,
-            skill_id=skill_id,
-            context={},
-            metrics=WorkflowMetrics(wall_time_sec=wall_time),
-            error=make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
-            started_at=started_at,
-            finished_at=finished_at,
-            wall_time_sec=wall_time,
-            source="predict",
-        )
-        _write_workflow_result_artifacts(trace_output, failed_result)
-        return failed_result
 
     finished_at = datetime.now(UTC)
-    wall_time = round(time.monotonic() - started_monotonic, 3)
+    wall_time = float(raw.get("wall_time_sec", round(time.monotonic() - started_monotonic, 3)))
 
     # 5. Extract results, path & deadlocks
-    final_context = final_state["data"].model_dump()
+    final_context = dict(raw.get("context", {}))
     raw_phases = tracing_callback.phases or []
     phases = [assemble_phase_record(item) for item in raw_phases]
     actual_path = [phase.phase_name for phase in phases]
@@ -432,8 +388,8 @@ def predict_skill(  # noqa: C901
         run_id=run_id,
         skill_id=skill_id,
         context=final_context,
-        metrics=WorkflowMetrics(wall_time_sec=wall_time),
-        trace_path=trace_output / "trace.jsonl",
+        metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
+        trace_path=Path(raw["trace_path"]) if raw.get("trace_path") else trace_output / "trace.jsonl",
         started_at=started_at,
         finished_at=finished_at,
         wall_time_sec=wall_time,
@@ -799,6 +755,7 @@ def _run_skill_dict(
             model_resolver=model_resolver,
             llm_provider=llm_provider,
             runtime_config=runtime_config,
+            unattended=unattended,
             **inputs,
         )
 
@@ -2039,6 +1996,8 @@ def _run_v030_skill_dict(
     llm_provider: LLMProvider | None = None,
     checkpointer_spec: Any = "auto",
     runtime_config: dict[str, Any] | None = None,
+    predict_context: SDKPredictContext | None = None,
+    unattended: bool = False,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
@@ -2090,6 +2049,7 @@ def _run_v030_skill_dict(
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
             runtime_config=runtime_config,
+            predict_context=predict_context,
         )
         graph = assembled.graph
 
@@ -2099,7 +2059,7 @@ def _run_v030_skill_dict(
             flow=FrameworkState.model_validate({
                 "run_id": run_id,
                 "thread_id": run_id,
-                "unattended": inputs.get("_unattended", False),
+                "unattended": unattended,
                 "persistent_storage_config": {"workspace_dir": str(workspace_dir)},
             }),
             messages=[],

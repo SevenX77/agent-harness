@@ -36,7 +36,6 @@ from app.core.adapters.gateway import (
     build_runtime_setting_descriptors,
     call_method_client_compatibility,
     call_method_ids_for_endpoint,
-    canonicalize_model,
     lint_role_routes,
     normalize_route_capabilities,
     select_verified_profile,
@@ -5224,7 +5223,6 @@ def _gateway_probe_route(endpoint: ProviderEndpoint, model_id: str) -> ProviderR
         endpoint_id=endpoint.endpoint_id,
         route_slug=route_slug,
         provider_model_id=model_id,
-        canonical_id=model_id,
     )
 
 
@@ -5509,13 +5507,11 @@ def _provider_route(
     raw_capabilities: dict[str, Any] | None = None,
 ) -> ProviderRoute:
     route_slug = _route_slug(model_id)
-    canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=model_id)
     return ProviderRoute(
         route_id=f"{endpoint.endpoint_id}:{route_slug}",
         endpoint_id=endpoint.endpoint_id,
         route_slug=route_slug,
         provider_model_id=model_id,
-        canonical_id=canonical.canonical_id,
         status=status,
         capabilities=_merge_profile_capabilities(
             {
@@ -6221,7 +6217,6 @@ async def _gateway_test_provider_model(
         endpoint_id=endpoint.endpoint_id,
         route_slug=route_slug,
         provider_model_id=model_id,
-        canonical_id=model_id,
     )
     return await _gateway_test_provider_route(endpoint, route, runtime_settings=runtime_settings)
 

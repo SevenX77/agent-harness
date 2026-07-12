@@ -23,7 +23,6 @@ from pydantic import SecretStr, ValidationError
 from app.core.adapters.gateway import (
     CapabilitySource,
     canonicalize_base_url,
-    canonicalize_model,
     normalize_route_capabilities,
 )
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
@@ -459,14 +458,12 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
             if not isinstance(raw_capabilities, dict):
                 raw_capabilities = {}
             route_slug = _route_slug(model_id)
-            canonical = canonicalize_model(endpoint_id=endpoint_id, provider_model_id=model_id)
             route_id = f"{endpoint_id}:{route_slug}"
             routes[route_id] = ProviderRoute(
                 route_id=route_id,
                 endpoint_id=endpoint_id,
                 route_slug=route_slug,
                 provider_model_id=model_id,
-                canonical_id=canonical.canonical_id,
                 display_name=str(raw_capabilities.get("display_name") or model_id),
                 status=endpoint.status,
                 capabilities=normalize_route_capabilities(
@@ -571,7 +568,13 @@ def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) 
 
 
 def _credentials_payload_for_storage(data: LLMCredentialsFile) -> dict[str, Any]:
-    payload = data.model_dump(mode="json")
+    # canonical_id is a computed field on every ProviderRoute (derived live from
+    # provider_model_id); persisting it would re-introduce the stale-grouping drift
+    # this design removed, so it is excluded from the on-disk payload.
+    payload = data.model_dump(
+        mode="json",
+        exclude={"provider_routes": {"__all__": {"canonical_id"}}},
+    )
     for endpoint_id, endpoint in data.provider_endpoints.items():
         api_key = endpoint.api_key
         payload["provider_endpoints"][endpoint_id]["api_key"] = (

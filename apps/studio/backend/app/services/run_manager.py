@@ -980,6 +980,53 @@ class RunManager:
             )
         return RunMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
 
+    def register_transient_predict_run(
+        self,
+        *,
+        skill_id: str,
+        run_id: str,
+        run_dir: Path,
+    ) -> RunRecord:
+        metadata = RunMetadata(
+            run_id=run_id,
+            status="running",
+            started_at=datetime.now(UTC),
+        )
+        record = RunRecord(
+            metadata=metadata,
+            skill_id=skill_id,
+            run_dir=run_dir,
+            process=None,
+            process_queue=None,
+            auto_commit=False,
+        )
+        self._runs[run_id] = record
+        return record
+
+    def emit_transient_run_event(self, run_id: str, raw_event: dict[str, Any]) -> None:
+        record = self._runs.get(run_id)
+        if record is None:
+            return
+        event = _event_envelope_from_callback(
+            raw_event,
+            run_id=record.metadata.run_id,
+            seq=len(record.events) + 1,
+        )
+        record.events.append(event)
+        event_json = event.model_dump(mode="json")
+        record.ws_queue.put_nowait(event_json)
+        for subscriber in list(record.subscribers):
+            subscriber.put_nowait(event_json)
+
+    def finish_transient_predict_run(self, run_id: str) -> None:
+        record = self._runs.pop(run_id, None)
+        if record is None:
+            return
+        record.ws_queue.put_nowait(None)
+        for subscriber in list(record.subscribers):
+            subscriber.put_nowait(None)
+        record.subscribers.clear()
+
     async def _drain_process_queue(self, record: RunRecord) -> None:
         terminal_metadata: RunMetadata | None = None
         while True:

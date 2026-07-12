@@ -288,8 +288,6 @@ def predict_skill(  # noqa: C901
     from graph_agent.core._predict_internal.strategy import MockStrategy
     from graph_agent.core._predict_internal.tracing import PredictTracingCallback
     from graph_agent.core.compiler import compile_skill
-    from graph_agent.core.graph_assembler import assemble_graph
-    from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
     resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
     workspace_root = _validate_workspace_dir(workspace_dir)
@@ -304,16 +302,12 @@ def predict_skill(  # noqa: C901
 
     mock_llm = inputs.pop("mock_llm", None)
     current_hashes = inputs.pop("current_hashes", None) or {}
-    root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_root)
-    if root_runtime_inputs:
-        inputs = {**inputs, **root_runtime_inputs}
 
     compiled = compile_skill(
         skill_path_obj,
         skill_resolver=resolver,
         runtime_input_fields=_runtime_input_fields_from_config(runtime_config),
     )
-
 
     # 1. Strategy setup
     strategy = MockStrategy.from_param(mock_llm)
@@ -339,65 +333,28 @@ def predict_skill(  # noqa: C901
     run_id = thread_id or str(uuid.uuid4())
     trace_output = workspace_root / "runs" / run_id
 
-    # 4. Prepare Composite event sink for tracking events and trace.jsonl output
-    event_sink = _prepare_v030_event_sink(
-        trace_output=trace_output,
+    raw = _run_v030_skill_dict(
+        skill_path_obj,
+        workspace_dir=workspace_root,
+        thread_id=run_id,
         event_subscriber=event_subscriber,
         callbacks=[tracing_callback],
-    )
-
-    # 5. Assemble and run graph in intercept mode
-    assembled = assemble_graph(
-        compiled,
-        chat_model=None,
+        skill_resolver=resolver,
         model_resolver=model_resolver,
         llm_provider=llm_provider,
-        callbacks=cast(Any, event_sink),
-        skill_resolver=resolver,
-        predict_context=predict_context,
+        checkpointer_spec=None,
         runtime_config=runtime_config,
+        predict_context=predict_context,
+        unattended=unattended,
+        persist_declared_outputs=False,
+        **inputs,
     )
-    graph = assembled.graph
-
-    initial_state = WorkflowState(
-        data=BusinessData.model_validate(dict(inputs)),
-        flow=FrameworkState.model_validate({
-            "run_id": run_id,
-            "thread_id": run_id,
-            "unattended": unattended,
-            "persistent_storage_config": {"workspace_dir": str(workspace_root)},
-        }),
-        messages=[],
-    )
-
-    try:
-        final_state = graph.invoke(
-            initial_state,
-            config={"configurable": {"thread_id": run_id}},
-        )
-    except Exception as exc:
-        finished_at = datetime.now(UTC)
-        wall_time = round(time.monotonic() - started_monotonic, 3)
-        failed_result = RunResult(
-            success=False,
-            run_id=run_id,
-            skill_id=skill_id,
-            context={},
-            metrics=WorkflowMetrics(wall_time_sec=wall_time),
-            error=make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
-            started_at=started_at,
-            finished_at=finished_at,
-            wall_time_sec=wall_time,
-            source="predict",
-        )
-        _write_workflow_result_artifacts(trace_output, failed_result)
-        return failed_result
 
     finished_at = datetime.now(UTC)
-    wall_time = round(time.monotonic() - started_monotonic, 3)
+    wall_time = float(raw.get("wall_time_sec", round(time.monotonic() - started_monotonic, 3)))
 
     # 5. Extract results, path & deadlocks
-    final_context = final_state["data"].model_dump()
+    final_context = dict(raw.get("context", {}))
     raw_phases = tracing_callback.phases or []
     phases = [assemble_phase_record(item) for item in raw_phases]
     actual_path = [phase.phase_name for phase in phases]
@@ -432,8 +389,8 @@ def predict_skill(  # noqa: C901
         run_id=run_id,
         skill_id=skill_id,
         context=final_context,
-        metrics=WorkflowMetrics(wall_time_sec=wall_time),
-        trace_path=trace_output / "trace.jsonl",
+        metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
+        trace_path=Path(raw["trace_path"]) if raw.get("trace_path") else trace_output / "trace.jsonl",
         started_at=started_at,
         finished_at=finished_at,
         wall_time_sec=wall_time,
@@ -799,6 +756,7 @@ def _run_skill_dict(
             model_resolver=model_resolver,
             llm_provider=llm_provider,
             runtime_config=runtime_config,
+            unattended=unattended,
             **inputs,
         )
 
@@ -996,6 +954,7 @@ def _run_compiled_artifact_predict_graph(
     runtime_config = request.execution_context.get("runtime_config")
     if not isinstance(runtime_config, dict):
         runtime_config = None
+    event_subscriber = request.execution_context.get("event_subscriber")
     return predict_skill(
         artifact_root,
         workspace_dir=workspace_dir,
@@ -1007,6 +966,7 @@ def _run_compiled_artifact_predict_graph(
         mock_llm=request.execution_context.get("mock_llm"),
         current_hashes=request.execution_context.get("current_hashes") or {},
         runtime_config=runtime_config,
+        event_subscriber=event_subscriber if callable(event_subscriber) else None,
         **request.inputs,
     )
 
@@ -1829,6 +1789,7 @@ def _finalize_successful_v030_run(
     trace_output: Path,
     wall_time: float,
     runtime_config: dict[str, Any] | None,
+    persist_declared_outputs: bool = True,
 ) -> dict[str, Any]:
     final_context = result["data"].model_dump()
     output_context = _context_with_framework_output_sources(final_context, result)
@@ -1837,18 +1798,19 @@ def _finalize_successful_v030_run(
         compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
     )
     _validate_v030_root_outputs(output_schema, final_context)
-    _save_v030_declared_file_outputs(
-        output_schema,
-        output_context,
-        default_output_dir=trace_output / "artifacts",
-    )
-    manifest_artifacts = _runtime_artifacts_from_config(runtime_config)
-    if manifest_artifacts:
-        write_manifest_artifacts(
-            manifest_artifacts,
+    if persist_declared_outputs:
+        _save_v030_declared_file_outputs(
+            output_schema,
             output_context,
-            trace_output / "artifacts",
+            default_output_dir=trace_output / "artifacts",
         )
+        manifest_artifacts = _runtime_artifacts_from_config(runtime_config)
+        if manifest_artifacts:
+            write_manifest_artifacts(
+                manifest_artifacts,
+                output_context,
+                trace_output / "artifacts",
+            )
     _emit_v030_event(
         event_sink,
         RunEndedEvent(
@@ -2039,6 +2001,9 @@ def _run_v030_skill_dict(
     llm_provider: LLMProvider | None = None,
     checkpointer_spec: Any = "auto",
     runtime_config: dict[str, Any] | None = None,
+    predict_context: SDKPredictContext | None = None,
+    unattended: bool = False,
+    persist_declared_outputs: bool = True,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
@@ -2090,6 +2055,7 @@ def _run_v030_skill_dict(
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
             runtime_config=runtime_config,
+            predict_context=predict_context,
         )
         graph = assembled.graph
 
@@ -2099,7 +2065,7 @@ def _run_v030_skill_dict(
             flow=FrameworkState.model_validate({
                 "run_id": run_id,
                 "thread_id": run_id,
-                "unattended": inputs.get("_unattended", False),
+                "unattended": unattended,
                 "persistent_storage_config": {"workspace_dir": str(workspace_dir)},
             }),
             messages=[],
@@ -2154,6 +2120,7 @@ def _run_v030_skill_dict(
         trace_output=trace_output,
         wall_time=wall_time,
         runtime_config=runtime_config,
+        persist_declared_outputs=persist_declared_outputs,
     )
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
     return {

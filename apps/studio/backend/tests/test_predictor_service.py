@@ -6,12 +6,14 @@ from typing import Any
 
 import pytest
 from app.services import predictor as predictor_module
+from app.services import run_manager as run_manager_module
 from app.services.predictor import (
     PredictArtifactError,
     PredictDeadlockError,
     PredictorService,
 )
 from graph_agent import PathDiff, PhaseRecord, RunResult
+from graph_agent.callbacks.events import PhaseStartEvent, RunEndedEvent, RunStartedEvent
 
 
 @pytest.fixture(autouse=True)
@@ -215,3 +217,208 @@ def test_dispatch_predict_job_projects_artifact_error_result(
     assert exc_info.value.error_payload == {"message": "LLM Provider is not configured"}
     assert exc_info.value.run_id == "predict-error-1"
     assert exc_info.value.retryable is False
+
+
+def test_predict_event_subscriber_threaded_three_layers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import app.core.adapters.engine as engine_adapter_module
+    import graph_agent.core.runner as sdk_runner
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
+
+    art_ref = {
+        "artifact_id": "skill",
+        "content_hash": "sha256:" + "1" * 64,
+        "store": "ephemeral",
+        "manifest_ref": "manifest_ref",
+    }
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "compile", lambda *_args, **_kwargs: art_ref)
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "_ensure_local_artifact_root",
+        lambda *_args, **_kwargs: skill_dir,
+    )
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "_build_studio_skill_resolver",
+        lambda _self: object(),
+    )
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "_build_engine_llm_provider",
+        lambda _self: None,
+    )
+
+    adapter_subscribers: list[Any] = []
+    sdk_subscribers: list[Any] = []
+    predict_subscribers: list[Any] = []
+
+    original_sdk_predict_artifact = sdk_runner.predict_artifact
+
+    def recording_sdk_predict_artifact(request: Any, **kwargs: Any) -> Any:
+        sdk_subscribers.append(request.execution_context.get("event_subscriber"))
+        return original_sdk_predict_artifact(request, **kwargs)
+
+    def fake_predict_skill(*_args: Any, **kwargs: Any) -> RunResult:
+        predict_subscribers.append(kwargs.get("event_subscriber"))
+        return RunResult(
+            success=True,
+            run_id="predict-s1-threaded",
+            skill_id="skill",
+            context={},
+            source="predict",
+            phases=[],
+        )
+
+    def fake_bytes_result_payload(result: Any, _store: Any) -> Any:
+        return RunResult(
+            success=True,
+            run_id=getattr(result, "run_id", "predict-s1-threaded"),
+            skill_id="skill",
+            context={},
+            source="predict",
+            phases=[],
+        ).model_dump(mode="json")
+
+    def recording_predict_artifact(self: object, payload: dict[str, Any]) -> Any:
+        adapter_subscribers.append(payload.get("event_subscriber"))
+        return original_predict_artifact(self, payload)
+
+    original_predict_artifact = engine_adapter_module.EngineAdapter.predict_artifact
+    monkeypatch.setattr(sdk_runner, "predict_artifact", recording_sdk_predict_artifact)
+    monkeypatch.setattr(sdk_runner, "predict_skill", fake_predict_skill)
+    monkeypatch.setattr(engine_adapter_module, "predict_artifact", recording_sdk_predict_artifact)
+    monkeypatch.setattr(engine_adapter_module, "_bytes_result_payload", fake_bytes_result_payload)
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", recording_predict_artifact)
+
+    result = PredictorService().dispatch_predict_job("skill")
+
+    assert result.source == "predict"
+    assert callable(adapter_subscribers[0])
+    assert callable(sdk_subscribers[0])
+    assert callable(predict_subscribers[0])
+
+
+def test_predict_events_reach_transient_run_record_ws_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import app.core.adapters.engine as engine_adapter_module
+    import graph_agent.core.runner as sdk_runner
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
+
+    art_ref = {
+        "artifact_id": "skill",
+        "content_hash": "sha256:" + "2" * 64,
+        "store": "ephemeral",
+        "manifest_ref": "manifest_ref",
+    }
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "compile", lambda *_args, **_kwargs: art_ref)
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "_ensure_local_artifact_root",
+        lambda *_args, **_kwargs: skill_dir,
+    )
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "_build_studio_skill_resolver",
+        lambda _self: object(),
+    )
+    captured_queue: list[Any] = []
+
+    def fake_predict_skill(*_args: Any, **kwargs: Any) -> RunResult:
+        run_id = str(kwargs["thread_id"])
+        captured_queue.append(run_manager_module.run_manager._runs[run_id].ws_queue)
+        subscriber = kwargs["event_subscriber"]
+        subscriber(RunStartedEvent(run_id=run_id, thread_id=run_id, initial_context={}))
+        subscriber(PhaseStartEvent(phase_name="draft", context={}))
+        subscriber(RunEndedEvent(run_id=run_id, thread_id=run_id, status="completed", wall_time_seconds=0.1))
+        return RunResult(
+            success=True,
+            run_id=run_id,
+            skill_id="skill",
+            context={},
+            source="predict",
+            phases=[],
+        )
+
+    def fake_bytes_result_payload(result: Any, _store: Any) -> Any:
+        return RunResult(
+            success=True,
+            run_id=getattr(result, "run_id", "predict-s1-events"),
+            skill_id="skill",
+            context={},
+            source="predict",
+            phases=[],
+        ).model_dump(mode="json")
+
+    monkeypatch.setattr(sdk_runner, "predict_skill", fake_predict_skill)
+    monkeypatch.setattr(engine_adapter_module, "_bytes_result_payload", fake_bytes_result_payload)
+
+    result = PredictorService().dispatch_predict_job("skill")
+
+    assert result.source == "predict"
+    assert captured_queue
+    queue = captured_queue[0]
+    first = queue.get_nowait()
+    second = queue.get_nowait()
+    third = queue.get_nowait()
+    sentinel = queue.get_nowait()
+    assert [first["event_type"], second["event_type"], third["event_type"]] == [
+        "run_started",
+        "phase_start",
+        "run_ended",
+    ]
+    assert sentinel is None
+    assert result.run_id not in run_manager_module.run_manager._runs
+
+
+def test_predict_dispatch_api_stays_synchronous(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import app.core.adapters.engine as engine_adapter_module
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
+
+    art_ref = {
+        "artifact_id": "skill",
+        "content_hash": "sha256:" + "3" * 64,
+        "store": "ephemeral",
+        "manifest_ref": "manifest_ref",
+    }
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "compile", lambda *_args, **_kwargs: art_ref)
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "predict_artifact",
+        lambda *_args, **_kwargs: RunResult(
+            success=True,
+            run_id="predict-sync",
+            skill_id="skill",
+            context={},
+            source="predict",
+            phases=[],
+        ).model_dump(mode="json"),
+    )
+
+    result = PredictorService().dispatch_predict_job("skill")
+
+    assert isinstance(result, RunResult)

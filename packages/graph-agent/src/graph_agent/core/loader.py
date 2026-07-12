@@ -941,6 +941,7 @@ def _validate_subgraph_io_contracts(
     for doc in phase_docs:
         if not isinstance(doc.ast, SubgraphNodeAST):
             continue
+        child_root: Path | None = None
         try:
             resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
             child_root = _resolve_subgraph_path_root(skill_root, doc.path, doc.ast.path)
@@ -954,7 +955,7 @@ def _validate_subgraph_io_contracts(
             for issue in _issues_of(exc):
                 path = Path(issue.source_path) if issue.source_path else doc.path
                 if not path.is_absolute():
-                    path = child_root / path
+                    path = (child_root if child_root is not None else skill_root) / path
                 diags.append(
                     _Diag(
                         path=path,

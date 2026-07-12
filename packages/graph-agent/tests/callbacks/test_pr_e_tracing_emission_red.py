@@ -79,6 +79,17 @@ phases:
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
 tools:
   - finish_task
 references:

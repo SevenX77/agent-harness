@@ -108,6 +108,10 @@ def _agent_ast_payload(subgraph_path: Path) -> dict[str, Any]:
         "mode": "agent",
         "role": "Planner",
         "goal": "Plan the work.",
+        "io": {
+            "inputs": {"type": "object", "properties": {}},
+            "outputs": {"type": "object", "properties": {}},
+        },
         "subagents": [
             {
                 "name": "worker",
@@ -286,7 +290,9 @@ def test_agent_subgraphs_reject_target_skill_registry_id(tmp_path: Path) -> None
         "description": "Registry ids are for subagents, not subgraphs.",
     }
 
-    with pytest.raises(ValidationError, match="path"):
+    # engine-compile-diagnostics-v2 §5.1: the revived agent-subgraph-invalid validator
+    # rejects the registry-id field target_skill (subgraphs are addressed by path).
+    with pytest.raises(ValidationError, match="target_skill"):
         AgentNodeAST.model_validate(payload)
 
 

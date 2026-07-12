@@ -68,7 +68,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 - **失效追踪**(目标):上游/拓扑/输出 schema 变 → 下游 checkpoint 失效 → 前端 [Resume] 置灰(归 `05-invalidation`)。
 
 ### 3.3 Compile API 面(SSOT = `compiler.py` / `compile-rules`)
-- `compile_skill(root, *, chat_model=None, cache=True, skill_resolver=None) -> CompiledSkill`(`compiler.py:41`);`CompileResult{issues; fatals; warnings; passed}`(`compiler.py:23`,诊断容器)。省略 `skill_resolver` 时使用默认本地 resolver;宿主可显式覆盖。
+- `compile_skill(root, *, chat_model=None, cache=True, skill_resolver=None, runtime_input_fields=None, allowed_roles=None) -> CompiledSkill`(`compiler.py:52`);`CompileResult{issues; fatals; warnings; passed}`(`compiler.py:23`,诊断容器)。省略 `skill_resolver` 时使用默认本地 resolver;宿主可显式覆盖。
 - `ErrorPayload`(`exceptions.py:21`,跨 compile+runtime 共用,形状归 `data-contracts`):四轴 `level`(severity)/`stage`/`phase_id`/`field_path`/`source_path` + `code`/`message`/`doc_link`——前端 canvas 节点/属性/编辑器行 3 处标记靠这四轴。**V2 增补**(`compile-rules §3.1.1`):`source_span`/`details`/`remediation`/`stage_id` + Task 3(逐码审 emit 四轴填全)。
 - 端点:compile / lint / serialize / validate_input(见 §3 表)。
 

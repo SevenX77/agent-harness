@@ -68,7 +68,6 @@ phases:
     )
     (skill_dir / "phases" / "segment" / "SKILL.md").write_text(
         f"""---
-llm_role: analyst
 io:
   inputs:
     type: object

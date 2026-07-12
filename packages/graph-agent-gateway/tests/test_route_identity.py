@@ -34,9 +34,22 @@ def test_stable_route_id_uses_provider_model_slug_without_random_identity() -> N
         base_url="https://openrouter.ai/api/v1",
     )
 
-    assert route_slug("anthropic/claude_opus 4.7") == "anthropic.claude-opus-4.7"
+    # The ``anthropic/`` transport prefix (proxy routing marker, not model identity)
+    # is stripped so a model reached via a proxy groups with the official route.
+    assert route_slug("anthropic/claude_opus 4.7") == "claude-opus-4.7"
     assert stable_route_id(
         protocol="openai_compatible",
         base_url="https://openrouter.ai/api/v1",
         provider_model_id="anthropic/claude_opus 4.7",
-    ) == f"{endpoint_id}:anthropic.claude-opus-4.7"
+    ) == f"{endpoint_id}:claude-opus-4.7"
+
+
+def test_route_slug_strips_known_transport_prefix_but_keeps_model_identity() -> None:
+    # The known ``anthropic/`` transport prefix is stripped ...
+    assert route_slug("anthropic/claude-opus-4.8") == "claude-opus-4.8"
+    # ... but a real variant suffix is part of the model identity and stays,
+    # keeping it a distinct route/canonical from the base model.
+    assert route_slug("anthropic/claude-opus-4.8-fast") == "claude-opus-4.8-fast"
+    # Only the known transport prefix is stripped; other ``vendor/model`` shapes
+    # keep their vendor segment (dot-joined) as identity.
+    assert route_slug("deepseek/deepseek-v3") == "deepseek.deepseek-v3"

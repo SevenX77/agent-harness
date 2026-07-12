@@ -16,6 +16,48 @@ def test_transport_normalization_strips_known_proxy_prefix() -> None:
     assert "display_name" not in result.model_dump()
 
 
+def test_transport_normalized_canonical_equals_route_slug_invariant() -> None:
+    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry.route_identity import route_slug
+
+    result = canonicalize_model(
+        endpoint_id="openrouter-prod",
+        provider_model_id="anthropic/claude-opus-4.8",
+    )
+
+    assert result.canonical_id == "claude-opus-4.8"
+    assert result.confidence == "transport_normalized"
+    # The copilot vocab guard requires route_id suffix (route_slug) == canonical_id;
+    # canonicalize must produce exactly what route_slug produces for the same input.
+    assert result.canonical_id == route_slug("anthropic/claude-opus-4.8")
+
+
+def test_variant_suffix_stays_a_distinct_canonical() -> None:
+    from graph_agent_gateway.registry.canonical import canonicalize_model
+
+    base = canonicalize_model(
+        endpoint_id="ep",
+        provider_model_id="anthropic/claude-opus-4.8",
+    )
+    fast = canonicalize_model(
+        endpoint_id="ep",
+        provider_model_id="anthropic/claude-opus-4.8-fast",
+    )
+
+    assert fast.canonical_id == "claude-opus-4.8-fast"
+    assert fast.confidence == "transport_normalized"
+    assert base.canonical_id != fast.canonical_id
+
+
+def test_official_and_proxy_forms_share_one_canonical() -> None:
+    from graph_agent_gateway.registry.canonical import canonicalize_model
+
+    official = canonicalize_model(endpoint_id="official", provider_model_id="claude-opus-4-8")
+    proxy = canonicalize_model(endpoint_id="openrouter", provider_model_id="anthropic/claude-opus-4.8")
+
+    assert official.canonical_id == proxy.canonical_id == "claude-opus-4.8"
+
+
 def test_explicit_alias_can_merge_variant() -> None:
     from graph_agent_gateway.registry.canonical import canonicalize_model
 

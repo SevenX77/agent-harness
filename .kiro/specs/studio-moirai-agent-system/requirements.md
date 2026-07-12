@@ -164,3 +164,14 @@
 2. **词汇发现**:The studio MCP 工具集 shall 提供只读的 `get_llm_registry`,投射完整 Redacted 注册表(endpoints/routes/model_profiles/roles + canonical_groups/model_groups 法定词汇及其 route_id 映射);MoirAI 生成写调用前 shall 以此核对合法词汇,从根消灭拼错的 `canonical_id` / `route_id`(毒数据)。
 3. **探测复用**:Settings 里用于验证/测试连通的动作(Endpoint Test、Endpoint Models Test、Route Probe、Role Connection Test),MoirAI shall 能经对应只读工具(`test_llm_endpoint` / `test_llm_endpoint_models` / `probe_llm_route` / `run_role_test`)直接调用,实现在线排障闭环;这些工具只探测、不改配置词汇,零审批放行。
 4. **审批统一**:任何造成配置真相修改的 mutation 工具 shall 剥离出零审批白名单,统一走 R10.2 的挂起审批卡(单一 consent 出口)。
+
+### Requirement 12: LLM 角色配置写工具的扁平化 round-trip 对称
+
+**Objective:** As a skill 作者, I want MoirAI 把 `get_llm_roles` 读到的扁平 `fallback_chain` 原样写回 `update_llm_role`/`create_llm_role` 就能配好角色, so that 配 llm_role 不再因客户端自行拼装 `model_groups`(需 `canonical_id`)而反复 round-trip 校验失败。
+
+#### Acceptance Criteria
+
+1. **写工具入参扁平化**:The `create_llm_role` 与 `update_llm_role` shall 接收扁平的路由列表——create 用 `fallback_chain`、update 用 `ops.set_fallback_chain`(均为 `list[str | dict]`)——替换原先需客户端拼 `canonical_id` 的嵌套 `model_groups` 入参;底层 `RoleModelGroup` / `llm_roles.yaml` / Settings 表单 shall 不变,转换只在 MCP 边界完成。
+2. **宽容性与 round-trip 兼容**:When 列表元素为 dict 且带 `runtime_settings`(或其他物化衍生字段), the 服务端 shall 仅提取 `route_id`、静默丢弃多余字段,shall 不因此返回 ValidationError——保障「读到什么能原样写回什么」。
+3. **服务端自动分组与 display_name 补齐**:The 服务端 shall 在保存前对每个 `route_id` 查 `LLMCredentialsFile.provider_routes` 的 ProviderRoute,取其**派生** `canonical_id`(computed field),按 canonical 首次出现顺序自动组装 `RoleModelGroup`(组内保持传入顺序、同组去重同一 route),`display_name` 从路由推导、缺失时降级为 `canonical_id`;客户端 shall 永不提交 `canonical_id`,故 provider 前缀式毒 canonical 在结构上不可表示。
+4. **Fail-fast 路由存在性校验**:The 传入列表中每个 `route_id` shall 必须在当前 `LLMCredentialsFile` 注册表中存在;if 出现任一未知路由, then the 系统 shall 在边界处立即拒绝并一次列全所有非法 route_id(不止第一个),shall 不落任何毒数据。

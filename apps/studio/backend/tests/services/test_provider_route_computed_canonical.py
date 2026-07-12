@@ -8,8 +8,8 @@ until a re-probe rewrote the field. These tests lock the fix end to end:
   ``load_credentials`` (zero probing), expose the FRESH derived value;
 * official + proxy Opus then collapse into one canonical group;
 * saving must not write ``canonical_id`` back to disk;
-* the copilot vocab guard compares the route's DERIVED canonical, not a
-  string-parse of ``route_id``.
+* the copilot flat-route transform groups by the route's DERIVED canonical, not a
+  string-parse of ``route_id``, and fails fast on unknown routes.
 """
 
 from __future__ import annotations
@@ -106,15 +106,14 @@ def test_save_credentials_does_not_persist_canonical_id(tmp_path: Path) -> None:
         assert "provider_model_id" in route  # the real persisted identity survives
 
 
-def test_vocab_guard_matches_on_derived_canonical_not_route_id_suffix(tmp_path: Path) -> None:
-    """route_slug suffix != derived canonical must still MATCH when the group's
-    canonical_id equals the route's DERIVED canonical (the decoupled contract)."""
-    from app.models.llm_config import RoleModelGroup, RoleProviderModel
+def test_transform_groups_on_derived_canonical_not_route_id_suffix(tmp_path: Path) -> None:
+    """A route whose route_id suffix (route_slug) is the OLD prefixed form must still
+    group under its DERIVED clean canonical — the flat-route transform reads the
+    computed field, never the route_id string (the decoupled contract)."""
+    import pytest
     from app.services import copilot_tools
     from app.services.llm_credentials import load_credentials
 
-    # A legacy route whose route_id suffix (route_slug) is the OLD prefixed form,
-    # while its provider_model_id derives the clean canonical.
     payload = _stale_credentials_payload()
     legacy_route_id = f"{_PROXY_ENDPOINT_ID}:anthropic.claude-opus-4.8"
     payload["provider_routes"][legacy_route_id] = {
@@ -127,36 +126,30 @@ def test_vocab_guard_matches_on_derived_canonical_not_route_id_suffix(tmp_path: 
     path.write_text(json.dumps(payload), encoding="utf-8")
     creds = load_credentials(path)
 
-    good = [
-        RoleModelGroup(
-            canonical_id="claude-opus-4.8",
-            display_name="Claude Opus 4.8",
-            provider_models=[RoleProviderModel(route_id=legacy_route_id)],
+    groups = copilot_tools._transform_fallback_chain_to_model_groups(
+        [legacy_route_id], creds
+    )
+
+    assert len(groups) == 1
+    # Grouped under the clean derived canonical, NOT the stale prefixed route_id suffix.
+    assert groups[0].canonical_id == "claude-opus-4.8"
+    assert groups[0].provider_models[0].route_id == legacy_route_id
+
+    with pytest.raises(copilot_tools._FlatRouteInputError):
+        copilot_tools._transform_fallback_chain_to_model_groups(
+            ["ghost-endpoint:missing"], creds
         )
-    ]
-    assert copilot_tools._model_groups_violation(good, creds) is None
-
-    bad = [
-        RoleModelGroup(
-            canonical_id="anthropic.claude-opus-4.8",  # a stale prefixed key
-            display_name="Claude Opus 4.8",
-            provider_models=[RoleProviderModel(route_id=legacy_route_id)],
-        )
-    ]
-    assert copilot_tools._model_groups_violation(bad, creds) is not None
 
 
-def test_vocab_guard_rejects_unknown_route(tmp_path: Path) -> None:
-    from app.models.llm_config import RoleModelGroup, RoleProviderModel
+def test_transform_rejects_unknown_route(tmp_path: Path) -> None:
+    import pytest
     from app.services import copilot_tools
     from app.services.llm_credentials import load_credentials
 
     creds = load_credentials(_write_credentials(tmp_path))
-    groups = [
-        RoleModelGroup(
-            canonical_id="claude-opus-4.8",
-            display_name="Claude Opus 4.8",
-            provider_models=[RoleProviderModel(route_id="ghost-endpoint:missing")],
+
+    with pytest.raises(copilot_tools._FlatRouteInputError) as excinfo:
+        copilot_tools._transform_fallback_chain_to_model_groups(
+            ["ghost-endpoint:missing"], creds
         )
-    ]
-    assert copilot_tools._model_groups_violation(groups, creds) is not None
+    assert "ghost-endpoint:missing" in str(excinfo.value)

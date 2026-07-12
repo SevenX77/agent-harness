@@ -215,45 +215,95 @@ async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 # 角色配置写工具(R10):经 routers/llm.py 背后同一条服务链(校验/canonicalize/
 # 级联/领域事件全复用),绝不直写配置文件;凭据与 endpoint 不提供写入(R10.3)。
-_ROLE_UPDATE_OPS = ("set_model_groups", "model_fallback_enabled", "intent")
+# 入参形状=扁平路由链(读写对称,Requirement 12):客户端只给 route_id 列表,组结构
+# (canonical_id/display_name/分组)一律由服务端查注册表派生,客户端永不拼 canonical。
+_ROLE_UPDATE_OPS = ("set_fallback_chain", "model_fallback_enabled", "intent")
 
 
-def _model_groups_violation(groups: list[Any], credentials: Any) -> str | None:
-    """路由词汇表一致性(fail fast at the boundary):每组的 canonical_id 必须等于
-    该组每条路由的**派生 canonical_id**(由 ProviderRoute 从 provider_model_id
-    实时算出),而不是 `route_id` 冒号后的字符串。实测教训(2026-07-11 人工验收):
-    agent 把 "anthropic.claude-opus-4.8" 这类带 provider 前缀的模型名当 canonical_id
-    写入,保存校验只查 route 存在性(通过),但前端按注册表词汇找不到该组 →
-    Settings 展示为空,随后的自动保存把空状态写回真相,模型组静默丢失。
+class _FlatRouteInputError(ValueError):
+    """MCP 边界拒绝:扁平路由链里出现无法解析或注册表中不存在的 route_id。
 
-    改按 route_id 查 loaded 的 ProviderRoute 再比派生 canonical:route_id(角色引用
-    的持久身份)可以和派生 canonical 不一致(旧 route_slug 保留),这里桥接到最新
-    canonical,规避分裂与静默丢失。"""
+    诊断信息本身即最终返回给模型的文本,一次列全所有非法项(不止第一个)。"""
+
+
+def _route_id_from_item(item: Any, index: int) -> str:
+    """宽容解包一个扁平路由项 → route_id。
+
+    元素可为纯 `str`(route_id),或含 `route_id` 键的 `dict`(其余字段——如 MoirAI
+    从 get_llm_roles 读回来的物化 `runtime_settings`——静默丢弃)。这样 MoirAI「读到
+    什么原样写回什么」不会因携带多余字段爆 ValidationError(Requirement 12.2)。"""
+
+    if isinstance(item, str):
+        route_id = item.strip()
+    elif isinstance(item, dict):
+        raw = item.get("route_id")
+        route_id = raw.strip() if isinstance(raw, str) else ""
+    else:
+        raise _FlatRouteInputError(
+            f"fallback_chain[{index}] 无法解析出 route_id"
+            f"(元素须为 route_id 字符串或含 route_id 键的对象): {item!r}"
+        )
+    if not route_id:
+        raise _FlatRouteInputError(f"fallback_chain[{index}] 的 route_id 为空")
+    return route_id
+
+
+def _route_display_name(route: Any, canonical_id: str) -> str:
+    """组的 display_name 派生源:优先 ProviderRoute.display_name,其次 metadata,
+    都缺则降级为 canonical_id(不假设字段一定存在)。"""
+
+    name = getattr(route, "display_name", None)
+    if isinstance(name, str) and name.strip():
+        return name
+    metadata = getattr(route, "metadata", None)
+    if isinstance(metadata, dict):
+        meta_name = metadata.get("display_name")
+        if isinstance(meta_name, str) and meta_name.strip():
+            return meta_name
+    return canonical_id
+
+
+def _transform_fallback_chain_to_model_groups(
+    fallback_chain: list[Any],
+    credentials: Any,
+) -> list[Any]:
+    """把 MoirAI 传入的扁平路由链转换成底层的 RoleModelGroup 列表(Requirement 12.3)。
+
+    对每个 route_id 查 `credentials.provider_routes` 的 ProviderRoute,取其**派生**
+    `canonical_id`(gateway 的 computed_field),按 canonical 首次出现顺序建组、组内
+    保持传入顺序、同组内去重同一 route_id。任一 route_id 不在注册表中 → 一次列全所有
+    非法项后 fail-fast(Requirement 12.4),杜绝毒数据落盘。"""
+
+    from app.models.llm_config import RoleModelGroup, RoleProviderModel
 
     provider_routes = credentials.provider_routes
-    problems: list[str] = []
-    for group in groups:
-        for provider_model in group.provider_models:
-            route_id = provider_model.route_id
-            route = provider_routes.get(route_id)
-            if route is None:
-                problems.append(
-                    f"route {route_id!r} 不在当前凭据注册表中(先用 search_llm_registry 查合法 route_id)"
-                )
-                continue
-            if route.canonical_id != group.canonical_id:
-                problems.append(
-                    f"route {route_id!r}(派生 canonical: {route.canonical_id!r})"
-                    f" 不属于 canonical model {group.canonical_id!r}"
-                )
-    if not problems:
-        return None
-    return (
-        "model_groups 词汇不一致:\n"
-        + "\n".join(f"  - {p}" for p in problems)
-        + "\ncanonical_id 必须等于该组每条 route 的派生 canonical_id;"
-        "先用 get_llm_roles 查现有角色的取值当参照。"
-    )
+    route_ids = [_route_id_from_item(item, i) for i, item in enumerate(fallback_chain)]
+
+    unknown = [rid for rid in dict.fromkeys(route_ids) if rid not in provider_routes]
+    if unknown:
+        raise _FlatRouteInputError(
+            "以下 route_id 不在当前凭据注册表中"
+            "(先用 search_llm_registry 查合法 route_id):\n"
+            + "\n".join(f"  - {rid}" for rid in unknown)
+        )
+
+    groups_map: dict[str, Any] = {}
+    ordered_canonicals: list[str] = []
+    for route_id in route_ids:
+        route = provider_routes[route_id]
+        canonical_id = route.canonical_id
+        group = groups_map.get(canonical_id)
+        if group is None:
+            group = RoleModelGroup(
+                canonical_id=canonical_id,
+                display_name=_route_display_name(route, canonical_id),
+                provider_models=[],
+            )
+            groups_map[canonical_id] = group
+            ordered_canonicals.append(canonical_id)
+        if not any(pm.route_id == route_id for pm in group.provider_models):
+            group.provider_models.append(RoleProviderModel(route_id=route_id))
+    return [groups_map[cid] for cid in ordered_canonicals]
 
 
 async def _save_single_role(role_name: str, role: Any) -> Any:
@@ -279,17 +329,19 @@ async def _save_single_role(role_name: str, role: Any) -> Any:
 
 @tool(
     "create_llm_role",
-    "新建一个 LLM 角色:给角色名和模型组列表(每组 canonical_id/display_name/"
-    "provider_models[{route_id}]),可选 intent(thinking/max_output_tokens/"
-    "temperature)。走与 Settings 保存完全相同的服务链;属于写配置操作, 需用户审批。"
-    "凭据与 endpoint 不可写。先用 search_llm_registry 查合法 canonical_id / route_id。",
-    {"name": str, "model_groups": list, "intent": dict},
+    "新建一个 LLM 角色:给角色名和 fallback_chain(**扁平 route_id 列表**,元素为 "
+    "route_id 字符串或 {route_id} 对象;服务端查注册表按派生 canonical 自动分组、补 "
+    "display_name,你不用自己拼 canonical/组结构)。可选 intent(thinking/"
+    "max_output_tokens/temperature)。走与 Settings 保存完全相同的服务链;属于写配置操作, "
+    "需用户审批。凭据与 endpoint 不可写。先用 search_llm_registry 查合法 route_id。",
+    {"name": str, "fallback_chain": list, "intent": dict},
 )
 async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
     from pydantic import ValidationError
 
-    from app.models.llm_config import RoleEntry, RoleIntent, RoleModelGroup
+    from app.models.llm_config import RoleEntry, RoleIntent
     from app.routers import llm
+    from app.services import llm_credentials
 
     name = str(args.get("name", "")).strip()
     if not name:
@@ -301,20 +353,17 @@ async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
         )
     try:
         fields: dict[str, Any] = {
-            "model_groups": [
-                RoleModelGroup.model_validate(g) for g in (args.get("model_groups") or [])
-            ]
+            "model_groups": _transform_fallback_chain_to_model_groups(
+                list(args.get("fallback_chain") or []), llm_credentials.load_credentials()
+            )
         }
         if args.get("intent") is not None:
             fields["intent"] = RoleIntent.model_validate(args["intent"])
         role = RoleEntry(**fields)
+    except _FlatRouteInputError as exc:
+        return _text_result(str(exc), is_error=True)
     except ValidationError as exc:
         return _text_result(f"角色配置无效:\n{exc}", is_error=True)
-    from app.services import llm_credentials
-
-    violation = _model_groups_violation(role.model_groups, llm_credentials.load_credentials())
-    if violation is not None:
-        return _text_result(violation, is_error=True)
     try:
         await _save_single_role(name, role)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
@@ -326,17 +375,19 @@ async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "update_llm_role",
-    "修改既有 LLM 角色。ops 支持:set_model_groups(整表替换=增删/排序)、"
-    "model_fallback_enabled(开关)、intent(部分更新 thinking/max_output_tokens/"
-    "temperature)。走与 Settings 保存完全相同的服务链;属于写配置操作, 需用户审批。"
-    "凭据与 endpoint 不可写。",
+    "修改既有 LLM 角色。ops 支持:set_fallback_chain(**扁平 route_id 列表**,整表替换"
+    "=增删/排序;元素为 route_id 字符串或 {route_id} 对象,服务端按派生 canonical 自动"
+    "分组,你可把 get_llm_roles 读到的 fallback_chain 原样写回)、model_fallback_enabled"
+    "(开关)、intent(部分更新 thinking/max_output_tokens/temperature)。走与 Settings 保存"
+    "完全相同的服务链;属于写配置操作, 需用户审批。凭据与 endpoint 不可写。",
     {"role_name": str, "ops": dict},
 )
 async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
     from pydantic import ValidationError
 
-    from app.models.llm_config import RoleIntent, RoleModelGroup
+    from app.models.llm_config import RoleIntent
     from app.routers import llm
+    from app.services import llm_credentials
 
     role_name = str(args.get("role_name", "")).strip()
     if not role_name:
@@ -355,10 +406,10 @@ async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
         )
     try:
         update_fields: dict[str, Any] = {}
-        if "set_model_groups" in ops:
-            update_fields["model_groups"] = [
-                RoleModelGroup.model_validate(g) for g in (ops["set_model_groups"] or [])
-            ]
+        if "set_fallback_chain" in ops:
+            update_fields["model_groups"] = _transform_fallback_chain_to_model_groups(
+                list(ops["set_fallback_chain"] or []), llm_credentials.load_credentials()
+            )
         if "model_fallback_enabled" in ops:
             update_fields["model_fallback_enabled"] = bool(ops["model_fallback_enabled"])
         if "intent" in ops:
@@ -366,13 +417,10 @@ async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
                 {**role.intent.model_dump(mode="json"), **(ops["intent"] or {})}
             )
         updated = role.model_copy(update=update_fields)
+    except _FlatRouteInputError as exc:
+        return _text_result(str(exc), is_error=True)
     except ValidationError as exc:
         return _text_result(f"角色配置无效:\n{exc}", is_error=True)
-    from app.services import llm_credentials
-
-    violation = _model_groups_violation(updated.model_groups, llm_credentials.load_credentials())
-    if violation is not None:
-        return _text_result(violation, is_error=True)
     try:
         await _save_single_role(role_name, updated)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error

@@ -393,6 +393,10 @@
     "loadingDescription": "Edit model and provider fallback order.",
     "description": "Edit model and provider fallback order. Changes auto-save.",
     "validationFailed": "Validation failed: {{error}}",
+    "unresolvedModel": {
+      "badge": "Unavailable in registry",
+      "hint": "This model group is not in the current provider registry (its route may have been removed or its credentials expired). Your configuration is kept — remove it or re-add a live model."
+    },
     "fixedRole": {
       "infoAria": "What is the {{role}} role for?",
       "recommendedLabel": "Recommended models",

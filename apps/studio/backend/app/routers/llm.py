@@ -5854,20 +5854,29 @@ def _materialize_bundle_for_response(
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:
     active_path = roles_path()
-    active_route_ids = set(load_credentials().provider_routes)
+    # Save-time validation is DECOUPLED from the active route registry
+    # (data-loss fix). A route being temporarily offline — credential expired,
+    # model retired, route deleted — must not block persisting the user's
+    # authoring intent; otherwise the frontend is forced to silently prune the
+    # offline model group before it can save anything, destroying real config.
+    # Route existence is a READ/materialization concern (surfaced there as a
+    # ``route_not_in_registry`` warning), not a write gate — so ``known_route_ids``
+    # is intentionally ``None`` here.
+    #
     # #51: bundle ids are slugged by model_profile_id; a role's bundle_id must
-    # point at one of these or it is a dangling reference.
+    # point at one of these or it is a dangling reference. That IS a structural
+    # authoring error, so bundle references stay validated at save time.
     known_bundle_ids = {bundle.model_profile_id for bundle in data.model_bundles.values()}
     try:
         validate_references(
             data,
-            known_route_ids=active_route_ids,
+            known_route_ids=None,
             known_bundle_ids=known_bundle_ids,
         )
         save_roles_file(
             active_path,
             data,
-            known_route_ids=active_route_ids,
+            known_route_ids=None,
             known_bundle_ids=known_bundle_ids,
         )
         reloaded = load_roles_file(active_path)

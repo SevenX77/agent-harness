@@ -58,6 +58,24 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRoleResult:
                 continue
             route = _mapping_get(_value(credentials, "provider_routes", {}), route_id)
             if route is None:
+                # The role references a route the current registry does not know
+                # (route deleted / credential expired / model retired). It cannot
+                # run, so it stays out of the executable chain — but a silent
+                # ``continue`` would erase the fact that the role is partially
+                # broken. Surface a diagnostic warning the host can project into
+                # the UI instead (data-loss fix: authoring intent is preserved on
+                # disk; the UI must be able to explain why it is not resolving).
+                warning = {
+                    "code": "route_not_in_registry",
+                    "route_id": route_id,
+                    "canonical_id": _value(group, "canonical_id"),
+                    "message": (
+                        f"Route {route_id} is not in the current registry; the "
+                        "model group is kept but cannot be used until the route "
+                        "is restored."
+                    ),
+                }
+                report["warnings"].append(warning)
                 continue
             endpoint = _mapping_get(_value(credentials, "provider_endpoints", {}), _value(route, "endpoint_id"))
             if endpoint is None:

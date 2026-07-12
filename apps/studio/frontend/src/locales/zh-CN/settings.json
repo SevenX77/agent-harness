@@ -393,6 +393,10 @@
     "loadingDescription": "编辑模型和服务商 fallback 顺序。",
     "description": "编辑模型和服务商 fallback 顺序。修改会自动保存。",
     "validationFailed": "验证失败：{{error}}",
+    "unresolvedModel": {
+      "badge": "注册表中不可用",
+      "hint": "该模型组不在当前的服务商注册表中（路由可能已被删除或凭证已过期）。你的配置已保留——请移除它或重新添加一个可用模型。"
+    },
     "fixedRole": {
       "infoAria": "{{role}} 角色是干嘛的？",
       "recommendedLabel": "推荐模型",

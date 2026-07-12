@@ -7,7 +7,15 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from graph_agent_gateway.registry.contracts import (
     SecretLifetimePolicy,
@@ -216,13 +224,43 @@ class ProviderRoute(BaseModel):
     endpoint_id: str
     route_slug: str
     provider_model_id: str
-    canonical_id: str
     status: RouteStatus = "unverified_manual"
     ui_state: ProviderUiState = "untested"
     snapshot_version: SnapshotVersion | None = None
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     verified_profiles: list[VerifiedProfile] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_persisted_canonical_id(cls, data: Any) -> Any:
+        """Drop any legacy persisted ``canonical_id`` so it never re-enters state.
+
+        canonical_id is a pure function of ``provider_model_id`` (see the computed
+        field below). It used to be a stored field; a file written before a
+        canonicalization rule change (e.g. #500's transport-normalize) still carries
+        the stale value. Popping it here — instead of leaving ``extra='forbid'`` to
+        reject it — makes the "stale canonical" state structurally unrepresentable.
+        """
+        if isinstance(data, dict):
+            data.pop("canonical_id", None)
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def canonical_id(self) -> str:
+        """The route's execution grouping key, derived live from provider_model_id.
+
+        Never persisted (excluded on save) and re-derived on every load, so a
+        canonicalization rule change takes effect the instant the code ships — no
+        re-probe, no on-disk migration.
+        """
+        from graph_agent_gateway.registry.canonical import canonicalize_model
+
+        return canonicalize_model(
+            endpoint_id=self.endpoint_id,
+            provider_model_id=self.provider_model_id,
+        ).canonical_id
 
     @field_validator("endpoint_id")
     @classmethod

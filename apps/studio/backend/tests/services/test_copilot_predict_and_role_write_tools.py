@@ -105,14 +105,26 @@ def test_predict_skill_tool_reports_failure_structurally(
 def _fake_roles_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Stub the routers.llm service chain; capture what got saved/published."""
 
-    from app.models.llm_config import RolesData
+    from app.models.llm_config import LLMCredentialsFile, ProviderRoute, RolesData
     from app.routers import llm
     from app.services import llm_credentials, runtime_activity
 
     state: dict[str, Any] = {"saved": None, "published": 0, "data": RolesData()}
 
+    # The vocab guard now looks the route up in credentials and compares its DERIVED
+    # canonical_id, so the stubbed credentials must carry the route the groups cite.
+    credentials = LLMCredentialsFile(
+        provider_routes={
+            "prov-x:gpt-5": ProviderRoute(
+                route_id="prov-x:gpt-5",
+                endpoint_id="prov-x",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+            )
+        }
+    )
     monkeypatch.setattr(llm, "_load_roles_or_empty", lambda: state["data"])
-    monkeypatch.setattr(llm_credentials, "load_credentials", lambda: None)
+    monkeypatch.setattr(llm_credentials, "load_credentials", lambda: credentials)
     monkeypatch.setattr(
         llm, "_materialize_roles_for_response", lambda data, credentials=None: data
     )
@@ -135,9 +147,9 @@ def _fake_roles_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 _GROUPS = [
     {
-        "canonical_id": "openai/gpt-5",
+        "canonical_id": "gpt-5",
         "display_name": "GPT-5",
-        "provider_models": [{"route_id": "prov-x:openai/gpt-5"}],
+        "provider_models": [{"route_id": "prov-x:gpt-5"}],
     }
 ]
 
@@ -219,7 +231,7 @@ def test_update_llm_role_returns_success_and_applies_ops(
     assert "after" not in payload
     saved_role = state["saved"].roles["writer"]
     assert saved_role.model_fallback_enabled is False
-    assert saved_role.model_groups[0].canonical_id == "openai/gpt-5"
+    assert saved_role.model_groups[0].canonical_id == "gpt-5"
     assert saved_role.intent.thinking is True
     assert state["published"] == 1
 

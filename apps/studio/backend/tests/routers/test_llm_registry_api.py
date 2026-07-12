@@ -1622,7 +1622,10 @@ def test_registry_merges_model_groups_by_projected_display_name(
     ]
     assert len(matching_groups) == 1
     model_group = matching_groups[0]
-    assert model_group["canonical_id"] == "claude-opus-4-7"
+    # canonical_id is derived live from provider_model_id: both "claude-opus-4-7"
+    # (official) and "anthropic/claude-opus-4-7" (proxy) normalize to the dotted
+    # "claude-opus-4.7", so the two routes share one canonical group.
+    assert model_group["canonical_id"] == "claude-opus-4.7"
     assert model_group["section_label"] == "anthropic"
     assert {
         option["route_id"]
@@ -6230,7 +6233,9 @@ def test_role_test_probes_role_routes_concurrently(
                 route_id="openrouter-prod:gpt-5",
                 endpoint_id="openrouter-prod",
                 route_slug="gpt-5",
-                provider_model_id="openai/gpt-5",
+                # Same model reached via a proxy: canonical_id is derived from this
+                # id, so both routes must share it to land in one canonical group.
+                provider_model_id="gpt-5",
                 canonical_id="gpt-5",
                 display_name="GPT-5",
                 status="verified",

@@ -1,7 +1,9 @@
 import { memo, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Trash2 } from "lucide-react"
+import { CircleAlert, Trash2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Item,
@@ -47,8 +49,14 @@ export const ModelItem = memo(function ModelItem({
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
+  const { t } = useTranslation("settings")
   const role = data.roles[roleName]
   const roleModel = role.models[modelCode]
+  // Data-loss fix: an unresolved model group is a persisted routing intent the
+  // CURRENT registry can no longer resolve (route deleted / credential expired /
+  // model retired). It must be shown as an explicit broken state the user can act
+  // on (remove, or re-add a live model) — never silently hidden or auto-dropped.
+  const isUnresolved = Boolean(data.models[modelCode]?.is_unresolved)
   const providers = useMemo(() => (
     ownedProviderCodes
       ? roleModel.providers.filter((providerCode) => ownedProviderCodes.has(providerCode))
@@ -85,7 +93,11 @@ export const ModelItem = memo(function ModelItem({
         size="sm"
         data-model-row="true"
         data-dnd-drag-surface="model"
-        className="cursor-grab select-none items-center gap-3 bg-background/60 p-3 ring-inset ring-1 ring-foreground/10 active:cursor-grabbing"
+        data-model-unresolved={isUnresolved || undefined}
+        className={cn(
+          "cursor-grab select-none items-center gap-3 bg-background/60 p-3 ring-inset ring-1 ring-foreground/10 active:cursor-grabbing",
+          isUnresolved && "border-warning-border bg-warning-background/10 ring-warning-border",
+        )}
         {...attributes}
         {...listeners}
         role="listitem"
@@ -101,9 +113,23 @@ export const ModelItem = memo(function ModelItem({
           >
             <span data-model-name="true" className="min-w-0 truncate whitespace-nowrap">{modelName}</span>
             <span data-model-badge-group="true" className="flex shrink-0 items-center gap-2.5">
+              {isUnresolved ? (
+                <Badge variant="warning" className="gap-1" data-model-unresolved-badge="true">
+                  <CircleAlert className="size-3" />
+                  {t("llmRoles.unresolvedModel.badge")}
+                </Badge>
+              ) : null}
               {data.models[modelCode]?.reasoning ? <ThinkingBadge /> : null}
             </span>
           </ItemTitle>
+          {isUnresolved ? (
+            <p
+              data-model-unresolved-hint="true"
+              className="text-xs leading-snug text-warning-foreground"
+            >
+              {t("llmRoles.unresolvedModel.hint")}
+            </p>
+          ) : null}
         </ItemContent>
         <ItemActions
           className="ml-auto shrink-0 gap-1"

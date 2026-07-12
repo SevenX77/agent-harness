@@ -575,6 +575,12 @@ export interface ModelEntry {
   fc_supported?: boolean
   providers: Record<string, string>
   provider_options?: Record<string, Record<string, unknown>> | null
+  // Lossless-hydration marker: this model is a placeholder synthesized for a
+  // role-referenced canonical id that the CURRENT registry does not know. It
+  // exists only so the draft normalizer / provider pruner keep the real
+  // model_group instead of silently deleting it (and the debounced autosave
+  // then persisting the loss). Display-only — never serialized back to truth.
+  is_unresolved?: boolean
 }
 
 export interface ProviderEntry {
@@ -589,6 +595,9 @@ export interface ProviderEntry {
   timeout?: number | null
   trust_env?: boolean | null
   retry_strategy?: string | null
+  // Companion to ModelEntry.is_unresolved: a placeholder route entry for a
+  // model_group provider whose route_id is not in the current registry.
+  is_unresolved?: boolean
 }
 
 export interface RolesData {
@@ -758,7 +767,7 @@ function bundleRouteIds(bundle: ModelBundleEntry): string[] {
   return [...new Set(routeIds.filter(Boolean))]
 }
 
-function rolesDataFromBackend(
+export function rolesDataFromBackend(
   data: RolesData,
   registry: RegistryResponse | null,
 ): RolesData {
@@ -768,28 +777,25 @@ function rolesDataFromBackend(
   const modelGroups = registry
     ? [...modelBundleGroupsFromBackend(data, registryModelGroups), ...registryModelGroups]
     : []
-  const models = Object.fromEntries(
-    modelGroups.map((group) => [
-      group.canonical_id,
-      {
-        name: group.display_name,
-        reasoning: modelGroupSupportsThinking(group) || undefined,
-        providers: Object.fromEntries(
-          group.provider_models.map((option) => [option.route_id, option.provider_model_id]),
-        ),
-      },
-    ]),
-  )
-  const providers = registry
-    ? Object.fromEntries(
-        modelGroups.flatMap((group) => (
-          group.provider_models.map((option) => [
-            option.route_id,
-            providerEntryFromModelOption(registry, option),
-          ])
-        )),
-      )
-    : {}
+  const models: Record<string, ModelEntry> = {}
+  for (const group of modelGroups) {
+    models[group.canonical_id] = {
+      name: group.display_name,
+      reasoning: modelGroupSupportsThinking(group) || undefined,
+      providers: Object.fromEntries(
+        group.provider_models.map((option) => [option.route_id, option.provider_model_id]),
+      ),
+    }
+  }
+  const providers: Record<string, ProviderEntry> = {}
+  if (registry) {
+    for (const group of modelGroups) {
+      for (const option of group.provider_models) {
+        providers[option.route_id] = providerEntryFromModelOption(registry, option)
+      }
+    }
+  }
+  synthesizeUnresolvedRoleVocab(data, models, providers)
   return {
     ...data,
     schema_version: data.schema_version ?? 3,
@@ -801,6 +807,46 @@ function rolesDataFromBackend(
         roleEntryFromBackend(roleName, role, data),
       ]),
     ),
+  }
+}
+
+/**
+ * Lossless hydration (data-loss fix). A role's persisted ``model_groups`` are its
+ * routing INTENT and must survive even when the current registry no longer knows
+ * their vocabulary (route deleted, credential expired, model retired, canonical id
+ * renamed). For any referenced canonical id / route id absent from the registry-built
+ * directories, synthesize an ``is_unresolved`` placeholder so:
+ *   - ``normalizeRolesDraft``'s ``Boolean(models[code])`` gate keeps the group instead
+ *     of silently deleting it (which the debounced autosave then persists as a loss);
+ *   - ``pruneInvalidRoleProviders``'s ``Boolean(providers[route])`` gate keeps the route.
+ * The placeholder carries the ORIGINAL display name verbatim so the serializer writes
+ * the group back byte-identical — the "unavailable in registry" decoration is a UI-only
+ * concern keyed off ``is_unresolved`` and NEVER enters the persisted payload.
+ */
+function synthesizeUnresolvedRoleVocab(
+  backend: RolesData,
+  models: Record<string, ModelEntry>,
+  providers: Record<string, ProviderEntry>,
+): void {
+  for (const role of Object.values(backend.roles ?? {})) {
+    for (const group of role.model_groups ?? []) {
+      if (models[group.canonical_id]) continue
+      const routeIds = group.provider_models.map((providerModel) => providerModel.route_id)
+      models[group.canonical_id] = {
+        name: group.display_name,
+        providers: Object.fromEntries(routeIds.map((routeId) => [routeId, routeId])),
+        is_unresolved: true,
+      }
+      for (const routeId of routeIds) {
+        if (providers[routeId]) continue
+        providers[routeId] = {
+          name: routeId,
+          type: 'openai_compatible',
+          endpoint_id: endpointIdFromRouteId(routeId),
+          is_unresolved: true,
+        }
+      }
+    }
   }
 }
 

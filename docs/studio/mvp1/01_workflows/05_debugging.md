@@ -3,7 +3,7 @@
 > **Tier**: workflow
 > **旅程**: [04 运行与验收](./04_run-and-verify.md) 运行失败/暂停 → 就地节点级干预续跑
 > **走查完整记录**(全部 atom actions + 决策 + 原话 + 测试关键点)。
-> **定性**: 能力表标"全孤儿待新建";后端零碎原语(resume 端点 501、checkpoint 仅 thread/run 级),前端几乎全无。**真要新建,核心难点落引擎。**
+> **定性(2026-07 对账更新)**: 旧定性「resume 端点 501、前端几乎全无」已过时:resume / resume-validity 端点已实现(**非 501**;runs.py:215-313 → adapter engine.py:1036 / 1171),节点级续跑 / HitL / 篡改前端均已挂载(ResumeNodeToolbar GraphCanvas.tsx:2525、HitlNodeToolbar :2517、EdgeTamperEditor EdgeContextView.tsx:256)。**剩余核心难点(节点级 checkpoint 失效追踪 + debug/loop 统一状态机)仍落引擎。**
 
 ## 旅程位
 04 真跑失败/暂停 → 在**出问题的那个节点/那条边上就地干预**,从该点精准续跑(不重跑上游)。三场景:B 节点级续跑、A HitL 人工干预、C 篡改 Context 续跑。
@@ -11,14 +11,14 @@
 ## Atom actions（三场景 A/B/C）
 | # | 动作 | 场景 | status |
 |---|---|---|---|
-| F1 | 失败节点亮红灯 + Error Message(Timeline 停在错误节点) | B 视觉 | placeholder |
-| F2 | **节点级 [Resume] 按钮**(节点上;改完 prompt/代码点它,用 checkpoint 已有数据从该节点精准续跑,上游不重跑) | B 核心 | backend-only(端点 501) |
-| F3 | **脏状态失效**:改上游节点/拓扑/输出 schema → 受影响下游节点 [Resume] 自动置灰,只有上游 checkpoint 有效的节点可 Resume | B | target-design |
+| F1 | 失败节点亮红灯 + Error Message(Timeline 停在错误节点) | B 视觉 | live(deriveNodeStatuses→error 态 + deriveNodeErrorMessages;node-status.ts,Workspace.tsx:44 / 665) |
+| F2 | **节点级 [Resume] 按钮**(节点上;改完 prompt/代码点它,用 checkpoint 已有数据从该节点精准续跑,上游不重跑) | B 核心 | live(端点已实现非 501;runs.py:259-313 → engine.py:1036;ResumeNodeToolbar 挂载 GraphCanvas.tsx:2525) |
+| F3 | **脏状态失效**:改上游节点/拓扑/输出 schema → 受影响下游节点 [Resume] 自动置灰,只有上游 checkpoint 有效的节点可 Resume | B | backend live(resume/validity 端点 runs.py:215-256 → engine.py:1171;ResumeNodeToolbar 消费 resumeValidity);前端置灰细化以代码逐项核 |
 | F4 | 场景A HitL:agent 调请求人类输入 → run 暂停 → **节点 debug bar 上方悬浮富文本输入框**(锚定节点,非固定顶栏)→ PM 输入 | A | target-design |
-| F5 | 场景A 注入答案续跑:答完点 [Resume] → 答案作为消息注入,Graph 续跑 | A | backend-only |
+| F5 | 场景A 注入答案续跑:答完点 [Resume] → 答案作为消息注入,Graph 续跑 | A | live(resume 带 human_response;runs.py:289-291;HitlNodeToolbar 挂载 GraphCanvas.tsx:2517) |
 | F6 | 场景C 篡改 Context:点边 dot → **复用 Monaco 编辑器(切可写)**展开上轮真实 Context → 手改 JSON → 存 | C | target-design |
-| F7 | 场景C 用伪造数据续跑:篡改保存后点下游 [Resume] → 拿伪造 JSON 续跑下游 | C | backend-only |
-| F8 | 上游入口:进 debug 前需先有一次真实 Run(产出 trace+checkpoint) | 前置 | placeholder(Run 桩) |
+| F7 | 场景C 用伪造数据续跑:篡改保存后点下游 [Resume] → 拿伪造 JSON 续跑下游 | C | live(resume 带 context_overrides;runs.py:278;EdgeTamperEditor 挂载 EdgeContextView.tsx:256) |
+| F8 | 上游入口:进 debug 前需先有一次真实 Run(产出 trace+checkpoint) | 前置 | live(Run 已接线,见 04 C1/C2;handleRun→startRun Workspace.tsx:2165) |
 
 ## 决策
 - **Q3 编辑器复用**:篡改用的可写 Monaco = trace 只读编辑器切 readonly。

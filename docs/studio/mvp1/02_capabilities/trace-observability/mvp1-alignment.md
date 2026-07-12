@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);缺口=未跑时 dot 无静态推断 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 01_workflows/05_debugging.md（debug trace）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 
 
 # trace-observability — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `trace-dot-blackboard`（dot/黑板语义）+ `run-execution-node-status` 的事件消费切面 | **现状**: TracePanel 已挂 timeline 主路径(Panels.tsx:active run→TracePanel/无 run→TimelinePanel),EdgeContextView 已挂 selectedEdge 分支;dot 数据真实事件派生;⚠️ 缺口=未跑时 dot 无静态推断(仅空态)。 | **Related**: [baseline](./baseline.md)（双向）· `canvas` · `timeline` · `properties` · `debug-resume` · `state-engine` · `engine` observability
+> **Tier**: capability | **Owns**: `trace-dot-blackboard`（dot/黑板语义）+ `run-execution-node-status` 的事件消费切面 | **现状**: TracePanel 已挂 timeline 主路径(Panels.tsx:active run→TracePanel/无 run→TimelinePanel),EdgeContextView 已挂 selectedEdge 分支;dot 数据真实事件派生;2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备。 | **Related**: [baseline](./baseline.md)（双向）· `canvas` · `timeline` · `properties` · `debug-resume` · `state-engine` · `engine` observability
 
 ## 1. 定义
 `trace-observability` owns making a graph run inspectable: live trace stream, run-after timeline, human-readable trace document, node-focused trace, edge-dot blackboard transitions, prompt inspection, and the shared event-to-node-state derivation.
@@ -52,7 +52,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策: dot is the between-node state-machine transition point;**默认显示静态推断,选中某次 run 切换为该 run 的真实快照/操作记录**(PM 2026-07-02 扩充)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:76` defines dot semantics; `01_workflows/04_run-and-verify.md:109` keeps the PM wording;PM 2026-07-02:"我说的不是跑过一次后拿到trace,我说的是在没跑之前,也要像node的io一样,给出一个schema推断,这个dot在这里应该会有哪些字段。当然你说的这些(运行期快照/操作记录)都要加上"。
 - 测试: 未跑时 dot 显示静态字段推断且逐边不同、随 io 声明/拓扑变化即时更新;dot shows reducer/filter/inject/persist operations for the selected run; parallel branches show shared filtered input(`branch_index` 区分)。
-- Status: placeholder/mock(静态推断 = 2026-07-02 新增目标)。
+- Status: live(双态齐备:运行期 edgeContextFromEvents + 未跑期 staticEdgeInference;GraphCanvas.tsx:1429-1434 / lib/edge-static-inference.ts:139,2026-07 对账)。
 - 归属: rendering `graph-authoring`/`canvas`; data `trace-observability`.
 
 ### F5. Prompt Inspector
@@ -92,14 +92,14 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 
 ## 6. 测试关键点
 1. trace 挂载: baseline 现状为 TracePanel 已挂 timeline 主路径(active run 流式,结束回 TimelinePanel 历史)；细化项(agent 分类折叠摘要等)以代码逐项核。
-2. dot 黑板: baseline 现状为 真实事件派生 live(edgeContextFromEvents,mock 已删),未跑时仅空态 ⚠️；目标为 dot 双态——未跑显示静态字段推断(前端按拓扑+io 声明推导),跑后打开真实 transition blackboard / before-after。
+2. dot 黑板: 双态均 live——运行期真实事件派生(edgeContextFromEvents,mock 已删)+ 未跑期静态字段推断(staticEdgeInference,前端按拓扑 + io 声明 + runtime_config 推导,GraphCanvas.tsx:1429-1434 / lib/edge-static-inference.ts:139);跑后打开真实 transition blackboard / before-after。(2026-07 对账:旧"未跑时仅空态"已落地静态推断。)
 3. 节点态: baseline 现状为 event -> node state 派生未成统一源；目标为 state-engine 消费 trace events 并投影 canvas/timeline。
 
 ## 7. 涉及 region / platform
 `canvas` · `timeline` · `properties` · `debug-resume` · `state-engine` · `engine` observability
 
 ## 8. gaps / 报警
-- 🚨 dot 静态推断: 未跑时 dot 仅空态、无字段推断 ⚠️；目标 dot 双态(未跑静态推断 + 跑后真实 transition blackboard / before-after)。(trace 挂载与 dot 真实数据已 live,2026-07-02 按代码核对清除旧报警。)
+- ✅ dot 双态已齐备(2026-07 对账清除旧报警): 未跑期静态字段推断 staticEdgeInference(lib/edge-static-inference.ts:139)+ 跑后真实 transition blackboard edgeContextFromEvents,均挂 GraphCanvas.tsx:1429-1434。(trace 挂载与 dot 真实数据 2026-07-02 已 live。)
 
 ## 交叉引用（链接, 不复制）
 [baseline](./baseline.md)（现状,双向）· `canvas` · `timeline` · `properties` · `debug-resume` · `state-engine` · `engine` observability

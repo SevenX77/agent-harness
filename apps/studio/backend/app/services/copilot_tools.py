@@ -4,7 +4,7 @@
 Settings 也能,反之亦然。所有工具走 routers/llm.py 背后同一条服务链(校验/
 canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文件。
 
-- 只读/探测(get_llm_roles/get_llm_registry/compile/run_role_test/predict/
+- 只读/探测(get_llm_roles/search_llm_registry/compile/run_role_test/predict/
   test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批放行
   (copilot._DECLARATIVE_ALLOWED_TOOLS)。
 - 配置真相写(create/update/delete role、endpoint 增删、route 增删、apply
@@ -273,7 +273,7 @@ async def _save_single_role(role_name: str, role: Any) -> Any:
     "新建一个 LLM 角色:给角色名和模型组列表(每组 canonical_id/display_name/"
     "provider_models[{route_id}]),可选 intent(thinking/max_output_tokens/"
     "temperature)。走与 Settings 保存完全相同的服务链;属于写配置操作, 需用户审批。"
-    "凭据与 endpoint 不可写。先用 get_llm_registry 查合法 canonical_id / route_id。",
+    "凭据与 endpoint 不可写。先用 search_llm_registry 查合法 canonical_id / route_id。",
     {"name": str, "model_groups": list, "intent": dict},
 )
 async def create_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -376,25 +376,87 @@ async def update_llm_role_tool(args: dict[str, Any]) -> dict[str, Any]:
 # ── 词汇发现 · 只读 ──────────────────────────────────────────────────────────
 
 
+# 结果有界纪律:搜索工具单次最多返回这么多 canonical 组,把 JSON 字符量硬压在
+# MCP 工具结果上限内,从结构上根除全量转储撑爆上下文(旧 get_llm_registry 的病根)。
+_SEARCH_REGISTRY_LIMIT_DEFAULT = 20
+_SEARCH_REGISTRY_LIMIT_MAX = 50
+
+
+def _search_registry_projection(
+    registry: Any,
+    query: str,
+    limit: int,
+) -> dict[str, Any]:
+    """把全量注册表投影成搜索驱动、结果有界的紧凑词汇视图。
+
+    只投影配置写调用真正需要的词汇字段:每个 canonical 组 → display_name →
+    其 routes[{route_id, endpoint_id, status, is_official}]。probe_catalog /
+    社区目录 / 逐路由运行时元数据 / lint 结果一律不投影(结构上不可能撑爆上下文)。
+    分组只认注册表当前产出的 canonical_id —— 对 canonicalization 结果保持中立。
+    """
+
+    tokens = [t for t in query.lower().split() if t]
+    matched: list[dict[str, Any]] = []
+    for group in registry.canonical_groups:
+        canonical_id = str(group.get("canonical_id", ""))
+        display_name = str(group.get("display_name", canonical_id))
+        route_ids = [str(rid) for rid in group.get("routes", [])]
+        routes: list[dict[str, Any]] = []
+        endpoint_ids: list[str] = []
+        for route_id in route_ids:
+            route = registry.provider_routes.get(route_id)
+            if route is None:
+                continue
+            endpoint = registry.provider_endpoints.get(route.endpoint_id)
+            endpoint_ids.append(route.endpoint_id)
+            routes.append(
+                {
+                    "route_id": route.route_id,
+                    "endpoint_id": route.endpoint_id,
+                    "status": route.status,
+                    "is_official": endpoint is not None
+                    and endpoint.provider_kind == "official",
+                }
+            )
+        haystack = " ".join([canonical_id, display_name, *endpoint_ids]).lower()
+        if all(token in haystack for token in tokens):
+            matched.append(
+                {
+                    "canonical_id": canonical_id,
+                    "display_name": display_name,
+                    "routes": routes,
+                }
+            )
+    return {
+        "canonical_groups": matched[:limit],
+        "total_count": len(matched),
+        "returned_count": min(len(matched), limit),
+    }
+
+
 @tool(
-    "get_llm_registry",
-    "读取完整的 Studio 注册表与词汇库(只读, 密钥已脱敏):endpoints(提供商凭据状态)、"
-    "routes(可用模型路由与 capabilities)、model_profiles(预设包)、roles(现有角色)、"
-    "以及 canonical_groups / model_groups(可供配置使用的法定模型 ID 及其 route_id 映射)。"
-    "新增/更新角色或凭据前先用它核对合法词汇, 消灭拼错的 canonical_id / route_id。",
-    {},
+    "search_llm_registry",
+    "模糊搜索 Studio 注册表里可用的法定模型(canonical groups)及其路由。配置发现的"
+    "首选第一步:结果按 canonical_id 分组、结果有界(默认 20 条、硬上限 50),对 "
+    "canonical_id / display_name / endpoint_id 做模糊匹配。每条 route 只给 route_id / "
+    "endpoint_id / status / is_official(官方直连)。新增/更新角色前先用它核对合法的 "
+    "canonical_id / route_id, 消灭拼错。",
+    {"query": str, "limit": int},
 )
-async def get_llm_registry_tool(args: dict[str, Any]) -> dict[str, Any]:
-    del args
+async def search_llm_registry_tool(args: dict[str, Any]) -> dict[str, Any]:
     # 与 GET /api/llm/registry 同一条真相路径(载入凭据+角色→CPU-bound 投影→
-    # SecretStr 自动脱敏),不自建第二份读取逻辑。
+    # SecretStr 自动脱敏),不自建第二份读取逻辑;拿到全量后服务端过滤 + 紧凑投影。
     from app.routers import llm
 
+    query = str(args.get("query") or "").strip()
+    raw_limit = args.get("limit")
+    limit = _SEARCH_REGISTRY_LIMIT_DEFAULT if raw_limit is None else int(raw_limit)
+    limit = max(1, min(limit, _SEARCH_REGISTRY_LIMIT_MAX))
     try:
         registry = await llm.get_llm_registry()
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
-        return _text_result(f"get_llm_registry 失败: {exc}", is_error=True)
-    return _text_result(registry.model_dump(mode="json"))
+        return _text_result(f"search_llm_registry 失败: {exc}", is_error=True)
+    return _text_result(_search_registry_projection(registry, query, limit))
 
 
 # ── 角色写工具(需审批) ──────────────────────────────────────────────────────
@@ -649,7 +711,7 @@ def _copilot_mcp_tools() -> list[Any]:
 
     return [
         get_llm_roles_tool,
-        get_llm_registry_tool,
+        search_llm_registry_tool,
         compile_skill_tool,
         run_role_test_tool,
         predict_skill_tool,

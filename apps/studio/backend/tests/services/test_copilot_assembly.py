@@ -13,7 +13,7 @@ from claude_agent_sdk import PermissionResultAllow
 # WRITE tools are deliberately absent — they hold for approval via can_use_tool.
 _MCP_TOOL_NAMES = [
     "mcp__studio__get_llm_roles",
-    "mcp__studio__get_llm_registry",
+    "mcp__studio__search_llm_registry",
     "mcp__studio__compile_skill",
     "mcp__studio__run_role_test",
     "mcp__studio__predict_skill",

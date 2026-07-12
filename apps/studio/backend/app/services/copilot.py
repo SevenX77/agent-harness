@@ -103,7 +103,7 @@ _DECLARATIVE_ALLOWED_TOOLS = [
     "Glob",
     "Grep",
     "mcp__studio__get_llm_roles",
-    "mcp__studio__get_llm_registry",
+    "mcp__studio__search_llm_registry",
     "mcp__studio__compile_skill",
     "mcp__studio__run_role_test",
     "mcp__studio__predict_skill",

@@ -158,7 +158,8 @@ def _runtime_input_fields_for_engine(
     if not isinstance(runtime_config, dict):
         return None
     inputs = runtime_config.get("inputs")
-    phases = inputs.get("phases") if isinstance(inputs, dict) else None
+    active = inputs.get("active") if isinstance(inputs, dict) else None
+    phases = active.get("phases") if isinstance(active, dict) else None
     if not isinstance(phases, dict):
         return None
     result: dict[str, set[str]] = {}

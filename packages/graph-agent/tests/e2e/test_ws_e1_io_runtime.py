@@ -134,13 +134,15 @@ def test_real_run_imports_workspace_file_into_phase_input(
         skill_resolver=mock_skill_resolver,
         runtime_config={
             "inputs": {
-                "phases": {
-                    "report": {
-                        "body": {
-                            "path": "import_files/.phase/report/body.md",
-                            "value_type": "string",
+                "active": {
+                    "phases": {
+                        "report": {
+                            "body": {
+                                "path": "import_files/.phase/report/body.md",
+                                "value_type": "string",
+                            }
                         }
-                    }
+                    },
                 }
             }
         },
@@ -198,10 +200,12 @@ def test_real_run_imports_root_workspace_file_into_graph_input(
         skill_resolver=mock_skill_resolver,
         runtime_config={
             "inputs": {
-                "root": {
-                    "body": {
-                        "path": "import_files/body.md",
-                        "value_type": "string",
+                "active": {
+                    "root": {
+                        "body": {
+                            "path": "import_files/body.md",
+                            "value_type": "string",
+                        }
                     }
                 }
             }
@@ -291,14 +295,16 @@ def test_real_run_batch_file_import_aggregates_numbered_json_files(
         skill_resolver=mock_skill_resolver,
         runtime_config={
             "inputs": {
-                "phases": {
-                    "report": {
-                        "chapters": {
-                            "dir": "import_files/.phase/report/abc_segmentation",
-                            "pattern": "chapter_{n}_latest_*.json",
-                            "value_type": "json",
+                "active": {
+                    "phases": {
+                        "report": {
+                            "chapters": {
+                                "dir": "import_files/.phase/report/abc_segmentation",
+                                "pattern": "chapter_{n}_latest_*.json",
+                                "value_type": "json",
+                            }
                         }
-                    }
+                    },
                 }
             }
         },

@@ -250,7 +250,7 @@ def test_lint_accepts_runtime_config_root_text_input(
     assert response.status_code == 200
     assert response.json()["status"] == "passed"
     runtime_config = json.loads((skill_dir / ".workspace" / "runtime_config.json").read_text(encoding="utf-8"))
-    assert runtime_config["inputs"]["root"]["input_text"]["value_type"] == "string"
+    assert runtime_config["inputs"]["active"]["root"]["input_text"]["value_type"] == "string"
 
 
 def test_lint_without_body_still_lints_disk_path(

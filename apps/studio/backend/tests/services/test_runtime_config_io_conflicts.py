@@ -21,9 +21,11 @@ def test_runtime_config_accepts_utf8_bom_import_json(
 
     config = refresh_runtime_config(skill_dir)
 
-    root = config["inputs"]["root"]
-    assert root["chapters"]["type"] == "array"
-    assert root["topic"]["type"] == "string"
+    fields = config["inputs"]["manifest"]["root"][0]["fields"]
+    by_name = {field["name"]: field for field in fields}
+    assert by_name["chapters"]["type"] == "array"
+    assert by_name["topic"]["type"] == "string"
+    assert config["inputs"]["active"]["root"] == {}
 
 
 def test_lint_reports_runtime_input_conflict_before_compile(

@@ -147,8 +147,10 @@ def test_compile_skill_for_studio_returns_artifact_identity_from_engine_adapter(
     class FakeAdapter:
         def compile(self, payload: dict[str, Any]) -> dict[str, Any]:
             runtime_config = payload.pop("runtime_config")
-            assert runtime_config["schema_version"] == "studio.runtime_config.v1"
+            assert runtime_config["schema_version"] == "studio.runtime_config.v2"
             assert runtime_config["inputs"]["import_root"] == "import_files"
+            assert "active" in runtime_config["inputs"]
+            assert "removed" in runtime_config["inputs"]
             assert "golden" not in runtime_config
             assert "ui" not in runtime_config
             assert payload == {

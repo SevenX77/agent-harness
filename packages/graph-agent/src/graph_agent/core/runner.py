@@ -98,7 +98,10 @@ def _runtime_input_fields_from_config(
     inputs = runtime_config.get("inputs")
     if not isinstance(inputs, dict):
         return None
-    phases = inputs.get("phases")
+    active = inputs.get("active")
+    if not isinstance(active, dict):
+        return None
+    phases = active.get("phases")
     if not isinstance(phases, dict):
         return None
     result: dict[str, set[str]] = {}
@@ -131,7 +134,10 @@ def _runtime_root_inputs_from_config(
     inputs = runtime_config.get("inputs")
     if not isinstance(inputs, dict):
         return {}
-    root = inputs.get("root")
+    active = inputs.get("active")
+    if not isinstance(active, dict):
+        return {}
+    root = active.get("root")
     if not isinstance(root, dict):
         return {}
     materialized: dict[str, Any] = {}

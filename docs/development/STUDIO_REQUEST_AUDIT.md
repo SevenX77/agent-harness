@@ -173,6 +173,8 @@ BACKEND POST /api/skills/{skill_id}/lint
 BACKEND POST /api/skills/{skill_id}/publish
 BACKEND POST /api/skills/{skill_id}/releases/{release_version}/runs
 BACKEND POST /api/skills/{skill_id}/revert
+BACKEND POST /api/skills/{skill_id}/runtime-config/inputs/remove
+BACKEND POST /api/skills/{skill_id}/runtime-config/inputs/restore
 BACKEND POST /api/skills/{skill_id}/runs
 BACKEND POST /api/skills/{skill_id}/runs/batch-run
 BACKEND POST /api/skills/{skill_id}/runs/predict
@@ -391,6 +393,8 @@ BACKEND POST /api/skills/{skill_id}/lint | ok | specific | Explicit/debounced di
 BACKEND POST /api/skills/{skill_id}/publish | ok | specific | Explicit publish command; productization tests cover package payload/native-writer boundary and remote-sync skip states.
 BACKEND POST /api/skills/{skill_id}/releases/{release_version}/runs | ok | specific | Explicit run-from-release command; returns RunMetadata for the launched release run.
 BACKEND POST /api/skills/{skill_id}/revert | ok | specific | Explicit Local History revert command; returns canonical SkillDetail and frontend projects it without a broad follow-up read.
+BACKEND POST /api/skills/{skill_id}/runtime-config/inputs/remove | ok | specific | Explicit runtime input intent write; returns the canonical runtime_config snapshot with the removed tombstone persisted.
+BACKEND POST /api/skills/{skill_id}/runtime-config/inputs/restore | ok | specific | Explicit runtime input intent restore; returns the canonical runtime_config snapshot after removed intent is cleared and active bindings are reconciled.
 BACKEND POST /api/skills/{skill_id}/runs | ok | specific | Explicit Run command; returns RunMetadata and does not require a run-list refetch.
 BACKEND POST /api/skills/{skill_id}/runs/batch-run | ok | specific | Explicit batch run over selected test inputs; subsequent status reads are scoped to batch_id.
 BACKEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict command; returns diagnostic export used for local projection, not broad refresh.

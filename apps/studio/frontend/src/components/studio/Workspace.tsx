@@ -82,7 +82,7 @@ interface WorkspaceProps {
 const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
 
 function isIoDocumentPath(path: string) {
-  return path === "GRAPH.md" || /^subgraph\/[^/]+\/SUBGRAPH\.md$/.test(path)
+  return path === "GRAPH.md" || /^phases\/[^/]+\/SUBGRAPH\.md$/.test(path)
 }
 
 function diagnosticError(message: string, details: string[] = []): CompileError {

@@ -1214,7 +1214,7 @@ describe('Workspace WS-1 local writer contracts', () => {
         ...skillDetail('writer-smoke'),
         files: {
           ...skillDetail('writer-smoke').files,
-          'subgraph/child/SUBGRAPH.md': 'child io document\n',
+          'phases/child/SUBGRAPH.md': 'child io document\n',
         },
       }
       mocks.getSkillDetail.mockResolvedValueOnce(updatedDetail)
@@ -1222,7 +1222,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       await act(async () => {
         mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
           skillId: 'writer-smoke',
-          path: 'subgraph/child/SUBGRAPH.md',
+          path: 'phases/child/SUBGRAPH.md',
         })
         await Promise.resolve()
         await Promise.resolve()

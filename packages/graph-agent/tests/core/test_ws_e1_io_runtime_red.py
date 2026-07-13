@@ -36,14 +36,16 @@ def _error_text(result: RunResult) -> str:
 def _runtime_text_file(phase_id: str, field: str, path: str) -> dict[str, Any]:
     return {
         "inputs": {
-            "phases": {
-                phase_id: {
-                    field: {
-                        "path": path,
-                        "value_type": "string",
-                        "content_type": "text/plain",
+            "active": {
+                "phases": {
+                    phase_id: {
+                        field: {
+                            "path": path,
+                            "value_type": "string",
+                            "content_type": "text/plain",
+                        }
                     }
-                }
+                },
             }
         }
     }
@@ -298,26 +300,28 @@ def test_runtime_config_imports_structured_and_file_ref_formats(
         skill_resolver=mock_skill_resolver,
         runtime_config={
             "inputs": {
-                "phases": {
-                    "reader": {
-                        "records": {
-                            "path": "import_files/.phase/reader/records.jsonl",
-                            "value_type": "jsonl",
+                "active": {
+                    "phases": {
+                        "reader": {
+                            "records": {
+                                "path": "import_files/.phase/reader/records.jsonl",
+                                "value_type": "jsonl",
+                            },
+                            "rows": {
+                                "path": "import_files/.phase/reader/people.csv",
+                                "value_type": "csv",
+                            },
+                            "tsv_rows": {
+                                "path": "import_files/.phase/reader/codes.tsv",
+                                "value_type": "tsv",
+                            },
+                            "asset": {
+                                "path": "import_files/.phase/reader/brief.pdf",
+                                "value_type": "file_ref",
+                                "content_type": "application/pdf",
+                            },
                         },
-                        "rows": {
-                            "path": "import_files/.phase/reader/people.csv",
-                            "value_type": "csv",
-                        },
-                        "tsv_rows": {
-                            "path": "import_files/.phase/reader/codes.tsv",
-                            "value_type": "tsv",
-                        },
-                        "asset": {
-                            "path": "import_files/.phase/reader/brief.pdf",
-                            "value_type": "file_ref",
-                            "content_type": "application/pdf",
-                        },
-                    }
+                    },
                 }
             }
         },

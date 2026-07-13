@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-_SCHEMA_VERSION = "studio.runtime_config.v1"
+_SCHEMA_VERSION = "studio.runtime_config.v2"
 _ARCHIVE_DIR_NAMES = {"history", ".history"}
 _STRUCTURED_SUFFIXES = {".json", ".jsonl", ".ndjson", ".csv", ".tsv"}
 _TEXT_SUFFIXES = {".txt", ".md"}
@@ -38,8 +38,8 @@ def default_runtime_config() -> dict[str, Any]:
         "inputs": {
             "import_root": "import_files",
             "manifest": {"root": [], "phases": {}},
-            "root": {},
-            "phases": {},
+            "active": {"root": {}, "phases": {}},
+            "removed": {"root": [], "phases": {}},
             "conflicts": {"root": [], "phases": {}},
         },
         "llm": {
@@ -58,7 +58,15 @@ def read_runtime_config(skill_dir: Path) -> dict[str, Any]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     config = default_runtime_config()
     if isinstance(raw, dict):
-        _deep_update(config, raw)
+        if _has_v2_import_inputs(raw):
+            _deep_update(config, raw)
+        else:
+            non_import = {
+                key: value
+                for key, value in raw.items()
+                if key not in {"inputs", "schema_version", "updated_at", "fingerprint"}
+            }
+            _deep_update(config, non_import)
     config["schema_version"] = _SCHEMA_VERSION
     return _with_fingerprint(config)
 
@@ -88,17 +96,43 @@ def refresh_runtime_config(skill_dir: Path) -> dict[str, Any]:
         workspace_dir_for_runtime(skill_dir),
         phase_ids=phase_ids,
     )
+    active = _dict_slot(inputs, "active")
+    removed = _dict_slot(inputs, "removed")
+    declared_root_fields = _graph_input_fields(skill_dir)
+    declared_phase_fields = _phase_input_fields(skill_dir, phase_ids)
     inputs["import_root"] = "import_files"
     inputs["manifest"] = manifest
-    inputs["root"] = root_bindings
-    inputs["phases"] = phase_bindings
+    active["root"] = _reconcile_active_scope(
+        _dict_slot(active, "root"),
+        _string_list(removed.get("root")),
+        root_bindings,
+        declared_root_fields,
+    )
+    active_phases = _dict_slot(active, "phases")
+    removed_phases = _dict_slot(removed, "phases")
+    next_active_phases: dict[str, Any] = {}
+    for phase_id in phase_ids:
+        next_active_phases[phase_id] = _reconcile_active_scope(
+            active_phases.get(phase_id) if isinstance(active_phases.get(phase_id), dict) else {},
+            _string_list(removed_phases.get(phase_id)),
+            phase_bindings.get(phase_id, {}),
+            declared_phase_fields.get(phase_id, set()),
+        )
+    active["phases"] = next_active_phases
+    removed["root"] = _string_list(removed.get("root"))
+    removed["phases"] = {
+        phase_id: _string_list(removed_phases.get(phase_id))
+        for phase_id in phase_ids
+        if _string_list(removed_phases.get(phase_id))
+    }
     inputs["conflicts"] = conflicts
     return write_runtime_config(skill_dir, config)
 
 
 def runtime_input_fields_for_engine(config: dict[str, Any]) -> dict[str, set[str]]:
     inputs = config.get("inputs")
-    phases = inputs.get("phases") if isinstance(inputs, dict) else None
+    active = inputs.get("active") if isinstance(inputs, dict) else None
+    phases = active.get("phases") if isinstance(active, dict) else None
     if not isinstance(phases, dict):
         return {}
     result: dict[str, set[str]] = {}
@@ -109,6 +143,41 @@ def runtime_input_fields_for_engine(config: dict[str, Any]) -> dict[str, set[str
         if fields:
             result[phase_id] = fields
     return result
+
+
+def remove_runtime_input_binding(skill_dir: Path, *, scope: str, field: str) -> dict[str, Any]:
+    config = refresh_runtime_config(skill_dir)
+    inputs = _dict_slot(config, "inputs")
+    active = _dict_slot(inputs, "active")
+    removed = _dict_slot(inputs, "removed")
+    scope_kind, phase_id = _parse_input_scope(scope)
+    if scope_kind == "root":
+        _dict_slot(active, "root").pop(field, None)
+        removed["root"] = _append_unique_string(_string_list(removed.get("root")), field)
+    else:
+        active_phases = _dict_slot(active, "phases")
+        phase_active = active_phases.get(phase_id)
+        if isinstance(phase_active, dict):
+            phase_active.pop(field, None)
+        removed_phases = _dict_slot(removed, "phases")
+        removed_phases[phase_id] = _append_unique_string(_string_list(removed_phases.get(phase_id)), field)
+    return write_runtime_config(skill_dir, config)
+
+
+def restore_runtime_input_binding(skill_dir: Path, *, scope: str, field: str) -> dict[str, Any]:
+    config = read_runtime_config(skill_dir)
+    inputs = _dict_slot(config, "inputs")
+    removed = _dict_slot(inputs, "removed")
+    scope_kind, phase_id = _parse_input_scope(scope)
+    if scope_kind == "root":
+        removed["root"] = [item for item in _string_list(removed.get("root")) if item != field]
+    else:
+        removed_phases = _dict_slot(removed, "phases")
+        removed_phases[phase_id] = [
+            item for item in _string_list(removed_phases.get(phase_id)) if item != field
+        ]
+    write_runtime_config(skill_dir, config)
+    return refresh_runtime_config(skill_dir)
 
 
 def runtime_config_fingerprint(config: dict[str, Any]) -> str:
@@ -169,6 +238,133 @@ def _dict_slot(parent: dict[str, Any], key: str) -> dict[str, Any]:
         value = {}
         parent[key] = value
     return value
+
+
+def _has_v2_import_inputs(raw: dict[str, Any]) -> bool:
+    if raw.get("schema_version") != _SCHEMA_VERSION:
+        return False
+    inputs = raw.get("inputs")
+    if not isinstance(inputs, dict):
+        return False
+    return isinstance(inputs.get("active"), dict) and isinstance(inputs.get("removed"), dict)
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _append_unique_string(values: list[str], value: str) -> list[str]:
+    if value in values:
+        return values
+    return [*values, value]
+
+
+def _parse_input_scope(scope: str) -> tuple[str, str]:
+    if scope == "root":
+        return "root", ""
+    prefix = "phase:"
+    if scope.startswith(prefix) and _is_safe_phase_id(scope[len(prefix) :]):
+        return "phase", scope[len(prefix) :]
+    raise ValueError(f"unsupported runtime input scope: {scope!r}")
+
+
+_BINDING_DESCRIPTOR_KEYS = {
+    "path",
+    "dir",
+    "pattern",
+    "numbers",
+    "value_type",
+    "content_type",
+    "sha256",
+    "type",
+    "json_path",
+}
+
+
+def _reconcile_active_scope(
+    existing_active: Any,
+    removed_fields: list[str],
+    candidate_bindings: dict[str, Any],
+    declared_fields: set[str],
+) -> dict[str, Any]:
+    active = existing_active if isinstance(existing_active, dict) else {}
+    removed_normalized = {_normalize_field_name(field) for field in removed_fields}
+    candidates_by_normalized = _candidate_bindings_by_normalized(candidate_bindings)
+    next_active: dict[str, Any] = {}
+    for field, binding in active.items():
+        if not isinstance(field, str) or not isinstance(binding, dict):
+            continue
+        normalized = _normalize_field_name(field)
+        current = candidates_by_normalized.get(normalized)
+        if current is None:
+            next_active[field] = {**binding, "status": "source-missing"}
+        else:
+            next_active[field] = _merge_binding_descriptor(binding, current)
+    active_normalized = {_normalize_field_name(field) for field in next_active}
+    for declared_field in sorted(declared_fields):
+        normalized = _normalize_field_name(declared_field)
+        if normalized in active_normalized or normalized in removed_normalized:
+            continue
+        current = candidates_by_normalized.get(normalized)
+        if current is not None:
+            next_active[declared_field] = dict(current)
+            active_normalized.add(normalized)
+    return dict(sorted(next_active.items()))
+
+
+def _candidate_bindings_by_normalized(candidate_bindings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for field, binding in candidate_bindings.items():
+        if isinstance(field, str) and isinstance(binding, dict):
+            result[_normalize_field_name(field)] = binding
+    return result
+
+
+def _merge_binding_descriptor(existing: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in existing.items():
+        if key not in _BINDING_DESCRIPTOR_KEYS and key != "status":
+            merged[key] = value
+    return merged
+
+
+def _graph_input_fields(skill_dir: Path) -> set[str]:
+    return _input_fields_from_markdown(skill_dir / "GRAPH.md")
+
+
+def _phase_input_fields(skill_dir: Path, phase_ids: list[str]) -> dict[str, set[str]]:
+    return {
+        phase_id: _input_fields_from_markdown(skill_dir / "phases" / phase_id / "LOGIC.md")
+        for phase_id in phase_ids
+    }
+
+
+def _input_fields_from_markdown(path: Path) -> set[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    frontmatter = _frontmatter_block(text)
+    if frontmatter is None:
+        return set()
+    try:
+        loaded = yaml.safe_load(frontmatter)
+    except yaml.YAMLError:
+        return set()
+    if not isinstance(loaded, dict):
+        return set()
+    io_block = loaded.get("io")
+    if not isinstance(io_block, dict):
+        return set()
+    inputs = io_block.get("inputs")
+    if not isinstance(inputs, dict):
+        return set()
+    properties = inputs.get("properties")
+    if not isinstance(properties, dict):
+        return set()
+    return {field for field in properties if isinstance(field, str)}
 
 
 def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:

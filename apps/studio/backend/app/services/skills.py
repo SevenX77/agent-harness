@@ -637,7 +637,8 @@ def _validate_runtime_inputs_against_raw_input_schema(
     if not isinstance(properties, dict):
         return []
     inputs = runtime_config.get("inputs")
-    root_bindings = inputs.get("root") if isinstance(inputs, dict) else None
+    active = inputs.get("active") if isinstance(inputs, dict) else None
+    root_bindings = active.get("root") if isinstance(active, dict) else None
     if not isinstance(root_bindings, dict):
         root_bindings = {}
     raw_conflicts = inputs.get("conflicts") if isinstance(inputs, dict) else None

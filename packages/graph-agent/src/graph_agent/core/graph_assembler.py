@@ -1243,7 +1243,10 @@ def _runtime_input_file_specs(
     inputs = runtime_config.get("inputs")
     if not isinstance(inputs, dict):
         return []
-    phases = inputs.get("phases")
+    active = inputs.get("active")
+    if not isinstance(active, dict):
+        return []
+    phases = active.get("phases")
     if not isinstance(phases, dict):
         return []
     phase_bindings = phases.get(phase_id)

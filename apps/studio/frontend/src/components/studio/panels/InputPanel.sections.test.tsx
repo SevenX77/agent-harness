@@ -52,7 +52,7 @@ function detail(): SkillDetail {
 
 function runtimeConfig(): RuntimeConfig {
   return {
-    schema_version: "studio.runtime_config.v1",
+    schema_version: "studio.runtime_config.v2",
     inputs: {
       import_root: "import_files",
       manifest: {
@@ -74,8 +74,8 @@ function runtimeConfig(): RuntimeConfig {
         ],
         phases: {},
       },
-      root: {},
-      phases: {},
+      active: { root: {}, phases: {} },
+      removed: { root: [], phases: {} },
     },
     artifacts: [
       { stem: "story_framework", mode: "single", fields: ["result"] },

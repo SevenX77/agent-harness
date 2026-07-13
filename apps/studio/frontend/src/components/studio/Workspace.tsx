@@ -81,6 +81,10 @@ interface WorkspaceProps {
 
 const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
 
+function isIoDocumentPath(path: string) {
+  return path === "GRAPH.md" || /^phases\/[^/]+\/SUBGRAPH\.md$/.test(path)
+}
+
 function diagnosticError(message: string, details: string[] = []): CompileError {
   return {
     file: null,
@@ -1933,6 +1937,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       ) {
         void mutateRuntimeConfig()
       }
+      const isIoDocumentChange = isIoDocumentPath(normalizedChangedPath)
+      const skillDetailPromise = isIoDocumentChange ? getSkillDetail(currentSkillId) : null
+      if (skillDetailPromise) {
+        void skillDetailPromise.then((detail) => {
+          void mutateSkillDetail(detail, { revalidate: false })
+        })
+      }
       // Keep the file tree live like a native explorer's watcher: refresh every
       // already-loaded ancestor folder of the changed path so external edits AND
       // Studio's own native-fs create/delete/rename show up without a manual
@@ -1945,18 +1956,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           tree.reloadDirectory(dir)
         }
       }
-      const entries = (["left", "right"] as const).filter((side) => activeFileDetails[side]?.path === event.path)
+      const entries = (["left", "right"] as const).filter(
+        (side) => activeFileDetails[side]?.path.replace(/\\/g, "/") === normalizedChangedPath,
+      )
       for (const side of entries) {
         const file = activeFileDetails[side]
         if (!file) continue
-        void getSkillDetail(currentSkillId).then(async (detail) => {
-          const remoteContent = detail.files?.[event.path]
+        void (skillDetailPromise ?? getSkillDetail(currentSkillId)).then(async (detail) => {
+          const remoteContent = detail.files?.[normalizedChangedPath]
           if (remoteContent === undefined) return
           const remoteHash = await sha256Hex(remoteContent)
           if (file.dirty || inFlightRef.current[side]) {
             setConflict({
               skillId: currentSkillId,
-              path: event.path,
+              path: normalizedChangedPath,
               side,
               localContent: file.content,
               remoteContent,
@@ -1973,7 +1986,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 dirty: false,
               },
             }))
-            void mutateSkillDetail(detail, { revalidate: false })
+            if (!isIoDocumentChange) {
+              void mutateSkillDetail(detail, { revalidate: false })
+            }
           }
         })
       }

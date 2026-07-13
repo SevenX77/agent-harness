@@ -1146,6 +1146,154 @@ describe('Workspace WS-1 local writer contracts', () => {
     }
   })
 
+  it('refreshes skill detail when GRAPH.md changes even if GRAPH.md is not open in the editor', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      mocks.getSkillDetail.mockClear()
+      mocks.mutateSkillDetail.mockClear()
+      const updatedDetail = {
+        ...skillDetail('writer-smoke'),
+        files: {
+          ...skillDetail('writer-smoke').files,
+          'GRAPH.md': 'graph with new io frontmatter\n',
+        },
+      }
+      mocks.getSkillDetail.mockResolvedValueOnce(updatedDetail)
+
+      await act(async () => {
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'GRAPH.md',
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.getSkillDetail).toHaveBeenCalledWith('writer-smoke')
+      expect(mocks.mutateSkillDetail).toHaveBeenCalledWith(updatedDetail, { revalidate: false })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('refreshes skill detail when a child io document changes outside the editor', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      mocks.getSkillDetail.mockClear()
+      mocks.mutateSkillDetail.mockClear()
+      const updatedDetail = {
+        ...skillDetail('writer-smoke'),
+        files: {
+          ...skillDetail('writer-smoke').files,
+          'phases/child/SUBGRAPH.md': 'child io document\n',
+        },
+      }
+      mocks.getSkillDetail.mockResolvedValueOnce(updatedDetail)
+
+      await act(async () => {
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'phases/child/SUBGRAPH.md',
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.getSkillDetail).toHaveBeenCalledWith('writer-smoke')
+      expect(mocks.mutateSkillDetail).toHaveBeenCalledWith(updatedDetail, { revalidate: false })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('refreshes a clean open GRAPH.md editor buffer when a same-file skill_changed event arrives', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      act(() => {
+        mocks.graphCanvasProps?.onNodeFileOpen?.('GRAPH.md')
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('graph before\n')
+
+      const updatedDetail = {
+        ...skillDetail('writer-smoke'),
+        files: {
+          ...skillDetail('writer-smoke').files,
+          'GRAPH.md': 'remote graph\n',
+        },
+      }
+      mocks.getSkillDetail.mockResolvedValueOnce(updatedDetail)
+
+      await act(async () => {
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'GRAPH.md',
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('remote graph\n')
+      expect(mocks.conflictDialogProps?.conflict).toBeNull()
+      expect(mocks.mutateSkillDetail).toHaveBeenCalledWith(updatedDetail, { revalidate: false })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
   it('handles runtime_config_changed as a scoped runtime-config revalidation', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)

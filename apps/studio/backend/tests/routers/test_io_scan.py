@@ -275,10 +275,12 @@ def test_import_copies_node_file_under_node_import_files(
     )
     assert "golden" not in runtime_config
     assert "ui" not in runtime_config
-    assert runtime_config["inputs"]["phases"]["setup"]["project_id"]["json_path"] == ["project_id"]
-    assert runtime_config["inputs"]["phases"]["setup"]["project_id"]["path"] == (
+    phase_entry = runtime_config["inputs"]["manifest"]["phases"]["setup"][0]["entries"][0]
+    assert phase_entry["fields"][0]["json_path"] == ["project_id"]
+    assert phase_entry["path"] == (
         "import_files/.phase/setup/material/quality_report.json"
     )
+    assert runtime_config["inputs"]["active"]["phases"]["setup"] == {}
 
 
 def test_import_single_file_lands_under_named_dir(
@@ -315,13 +317,9 @@ def test_runtime_config_get_refreshes_import_manifest(
 
     assert body["inputs"]["manifest"]["root"][0]["name"] == "brief.md"
     assert body["inputs"]["manifest"]["root"][0]["content_type"] == "text/markdown"
-    assert body["inputs"]["root"]["brief"]["path"] == "import_files/brief.md"
-    assert body["inputs"]["root"]["brief"]["value_type"] == "string"
-    assert body["inputs"]["root"]["brief"]["content_type"] == "text/markdown"
+    assert body["inputs"]["active"]["root"] == {}
     assert body["inputs"]["manifest"]["phases"]["setup"][0]["name"] == "chapters.json"
-    assert body["inputs"]["phases"]["setup"]["chapters"]["path"] == (
-        "import_files/.phase/setup/chapters.json"
-    )
+    assert body["inputs"]["active"]["phases"]["setup"] == {}
 
 
 def test_import_rejects_unknown_node_id(
@@ -370,7 +368,7 @@ def test_runtime_config_ignores_dot_history_and_reports_duplicate_conflicts(
     body = resp.json()
 
     assert [entry["name"] for entry in body["inputs"]["manifest"]["root"]] == ["a.json", "b.json"]
-    assert "input_text" not in body["inputs"]["root"]
+    assert "input_text" not in body["inputs"]["active"]["root"]
     conflicts = body["inputs"]["conflicts"]["root"]
     assert conflicts == [
         {

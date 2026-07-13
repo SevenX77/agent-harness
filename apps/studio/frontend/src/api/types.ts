@@ -131,8 +131,14 @@ export interface RuntimeConfig {
       root: RuntimeImportEntry[]
       phases: Record<string, RuntimeImportEntry[]>
     }
-    root: Record<string, RuntimeInputBinding>
-    phases: Record<string, Record<string, RuntimeInputBinding>>
+    active: {
+      root: Record<string, RuntimeInputBinding>
+      phases: Record<string, Record<string, RuntimeInputBinding>>
+    }
+    removed: {
+      root: string[]
+      phases: Record<string, string[]>
+    }
     conflicts?: {
       root?: RuntimeInputConflict[]
       phases?: Record<string, RuntimeInputConflict[]>

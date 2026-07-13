@@ -293,7 +293,7 @@ describe('applyIoInputChecks', () => {
 
 describe('runtimeFileFieldsInImportScope', () => {
   const runtimeConfig = {
-    schema_version: 'studio.runtime_config.v1',
+    schema_version: 'studio.runtime_config.v2',
     inputs: {
       import_root: 'import_files',
       manifest: {
@@ -330,8 +330,8 @@ describe('runtimeFileFieldsInImportScope', () => {
           ],
         },
       },
-      root: {},
-      phases: {},
+      active: { root: {}, phases: {} },
+      removed: { root: [], phases: {} },
     },
     artifacts: [],
   } satisfies RuntimeConfig
@@ -448,12 +448,12 @@ actions: [seg]
 describe('runtime artifacts manifest', () => {
   it('reads artifact rows from runtime_config', () => {
     const rows = runtimeArtifactsOf({
-      schema_version: 'studio.runtime_config.v1',
+      schema_version: 'studio.runtime_config.v2',
       inputs: {
         import_root: 'import_files',
         manifest: { root: [], phases: {} },
-        root: {},
-        phases: {},
+        active: { root: {}, phases: {} },
+        removed: { root: [], phases: {} },
       },
       artifacts: [
         { stem: 'story_framework', mode: 'single', fields: ['story_framework'] },

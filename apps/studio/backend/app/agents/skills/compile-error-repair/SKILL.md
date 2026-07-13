@@ -17,6 +17,7 @@ This skill defines the debugging process to resolve graph compilation, linting, 
     *   *DAG Cycle or Island*: Check `depends_on` connections to ensure all nodes trace back to `"input"` and resolve to `"output"`.
     *   *Schema Incompatibilities*: Align upstream output schemas with downstream input keys.
     *   *Action Signature Defects*: Match Python function definitions (`def phase_name(inputs): ...`) with LOGIC file specifications (`[[KB-03-logic-actions]]`).
+    *   *Predict Mock / finish_task Shape*: If the failure appears only in Predict with custom mocks on an agent node using `tools: [finish_task]`, check the P1 mock format in `[[KB-08-predict]]`. The mock must be a `{phase_name: output_object}` JSON payload; Predict wraps it into the `finish_task` tool call and `## item-1` fenced JSON internally.
 5.  **Apply Minimal Target Repairs**: Modify only the code or files responsible for the root defect. Avoid broad, unrelated refactorings that mask the primary issue.
 6.  **Re-Compile & Verify**: Trigger compilation to verify the fix. Repeat the steps if new error codes emerge.
 

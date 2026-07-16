@@ -16,7 +16,6 @@ import type {
   GoldenBaseline,
   GoldenBaselineContent,
   GoldenBaselinePlan,
-  GoldenTemplate,
   JsonObject,
   NodeLlmParams,
   NodeLlmParamsMap,
@@ -437,8 +436,7 @@ export async function listGoldenBaselines(skillId: string): Promise<GoldenBaseli
  * The list endpoint only carries per-node case metadata (an `expected_output_ref`); this
  * resolves the ref to the actual `expected_output` so the I/O panel can show an editable
  * JSON view. With `nodeId` the backend scopes the response to that node's single case.
- * Read-only — saving an edit still goes through `saveManualGolden`
- * (`POST /golden/manual/plan` → Rust native-fs, D12); this adds NO new write path.
+ * Read-only — this adds NO write path.
  */
 export async function fetchGoldenContent(
   skillId: string,
@@ -451,53 +449,6 @@ export async function fetchGoldenContent(
     nodeId ? { params: { node_id: nodeId } } : undefined,
   )
   return response.data
-}
-
-/**
- * N4 atom #33 create-path B: fetch a schema-valid empty golden template for an agent
- * node (generated from its io.outputs schema) so the author can hand-fill it.
- */
-export async function fetchGoldenTemplate(skillId: string, nodeId: string): Promise<GoldenTemplate> {
-  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
-  const response = await api.get<GoldenTemplate>(`/skills/${apiSkillId}/golden/template`, {
-    params: { node_id: nodeId },
-  })
-  return response.data
-}
-
-/**
- * N4 atom #33 manual write: save an author-defined golden keyed by node_id (run-less).
- * D12: the manual golden write ALWAYS goes through the Rust native-fs sole writer — it
- * asks the backend for the file plan (`/golden/manual/plan`, read-only, no disk write)
- * and writes each plan file through `writeWorkspaceFile`. There is NO browser HTTP
- * disk-write fallback: outside the desktop runtime `writeWorkspaceFile` throws
- * "Desktop only" and nothing persists (the MVP1 desktop-first web boundary); the caller
- * surfaces that as an error. This never rides the run-keyed promote path.
- */
-export async function saveManualGolden(
-  skillId: string,
-  nodeId: string,
-  expectedOutput: JsonObject,
-  workspaceRoot?: string | null,
-): Promise<GoldenBaseline> {
-  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
-  const manualRequest = { node_id: nodeId, expected_output: expectedOutput }
-  const response = await api.post<GoldenBaselinePlan>(
-    `/skills/${apiSkillId}/golden/manual/plan`,
-    manualRequest,
-  )
-  const plan = response.data
-  const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
-  for (const file of plan.files) {
-    await writeWorkspaceFile(
-      targetRoot,
-      file.path,
-      file.content,
-      null,
-      { createIfAbsent: true },
-    )
-  }
-  return plan.baseline
 }
 
 export async function startRun(skillId: string, inputData: JsonObject): Promise<RunMetadata> {

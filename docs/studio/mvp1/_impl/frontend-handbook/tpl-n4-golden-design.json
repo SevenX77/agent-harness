@@ -2,7 +2,7 @@
   "page_id": "n4_golden_design",
   "title": "Golden 验收 · 操作设计",
   "region": "run-verify:golden",
-  "intro": "本页是 N4 第 4 个 surface「Golden 验收」的 MVP1 设计（应该怎样）：golden 是逐节点的作者期望值（取代旧的整次 run 快照，spec g-a），它一不是 run 的前提、二只决定 agent 节点 predict 时拿哪份 mock。用户在这一面给 agent 节点固化期望（两路创建：copilot 协作自动写 / 按输出 schema 手填空模版），run 跑完做实际输出 vs golden 的字段级 diff 验收。每张卡讲一个操作的设计；现状/差距见 n4_golden_impl，golden 存储 + headless 对比 + 409 两守卫见 n4_golden_mech。注：spec 把 useGoldenDiff 标『orphan』、E 段多标 target-design——真代码里 golden 列表、字段级 diff（editor 分屏覆盖层）、promote、copilot 分析 bar 已接线，缺口收敛到『agent 三态上画布 + 创建路 B 手填模版 + 失效编译联动』，本页以真代码为准。",
+  "intro": "本页是 N4 第 4 个 surface「Golden 验收」的 MVP1 设计（应该怎样）：golden 是逐节点的作者期望值（取代旧的整次 run 快照，spec g-a），它一不是 run 的前提、二只决定 agent 节点 predict 时拿哪份 mock。用户在这一面给 agent 节点固化期望（创建入口：copilot 协作自动写 / editor diff Promote / TracePanel run 与 per-node promote；旧『按输出 schema 手填空模版』路 B 已按 PM 2026-07-15 裁决整链删除，golden 手填/编辑归 I/O 数据流设计方向、已搁置），run 跑完做实际输出 vs golden 的字段级 diff 验收。每张卡讲一个操作的设计；现状/差距见 n4_golden_impl，golden 存储 + headless 对比 + 409 两守卫见 n4_golden_mech。注：spec 把 useGoldenDiff 标『orphan』、E 段多标 target-design——真代码里 golden 徽章数据链、字段级 diff（editor 分屏覆盖层）、promote、copilot 分析 bar 已接线，本页以真代码为准。",
   "atoms": [
     {
       "n": 29,
@@ -20,9 +20,9 @@
           "iface_ref": "iface-golden-0"
         }
       ],
-      "fe_status": "符合",
+      "fe_status": "未实施",
       "be_status": "已实现",
-      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：列表 + 打开编辑都齐了——GoldenSection.tsx:97-234 里 GoldenBaselineRow（基线行组件）展开后用 SWR 经 fetchGoldenContent 拉 GET /golden/{id}/content，GoldenCaseEditor（golden case 编辑器）改 expected_output、经 saveManualGolden 保存；api/client.ts:261-308（fetchGoldenContent/saveManualGolden）；后端 routers/golden.py:39-52（GET /{golden_id}/content）+ services/golden_diff.py:397（read_golden_baseline_content，读基线内容）+ models/golden.py:43-73（GoldenCaseContent/GoldenBaselineContent DTO）。原『编辑需 golden-content read 端点（follow-on）』的唯一缺口已 shipped。",
+      "gap_brief": "数据链 live、面板 UI 归搁置方向（2026-07-15 对账）：golden 列表数据由 Workspace 的 SWR GET /golden 拉取、经 goldenTriStateByNode 投影成画布节点徽章（Workspace.tsx:692/2419）；但 I/O 面板的 GoldenSection 列表/编辑 UI 已不在代码中。后端读端点齐备：GET /golden（列表）+ GET /golden/{id}/content（routers/golden.py:39-52，read_golden_baseline_content）——content 端点当前无 UI caller，作为『golden json 同构实例』I/O 数据流设计方向（2026-07-02 锁定、已搁置）的脚手架保留。旧编辑保存链（GoldenCaseEditor → saveManualGolden）已随路 B 删除（PM 2026-07-15）。",
       "impl_ref": "fn-29"
     },
     {
@@ -100,21 +100,14 @@
       "n": 33,
       "cap": "golden-create-template",
       "module": "Golden 创建两路",
-      "func": "设计：创建路 B（手动）——某 agent 节点还没 golden 时，按它的 io.outputs schema 自动生成一个符合 schema 的空 golden 模版 json，放 I/O 面板让用户手填期望值。",
-      "action": "用户在 I/O 面板对无 golden 的节点点『生成空模版』，手填后保存为 golden。",
-      "fe_design": "无 golden 时按该节点 io.outputs（输出 schema）自动生成符合 schema 的空 golden 模版 json，在 I/O 面板手填、填好存为 golden。这需要一个『按输出 schema 生成空模版』的后端能力 + I/O 面板的模版编辑 UI（与 #29 golden 内容读/编辑端点配套）。设计意图（spec E4）：不靠 copilot 也能手动给节点定 golden。",
+      "func": "已删除（PM 2026-07-15 裁决）：旧创建路 B（按 io.outputs schema 生成空 golden 模版、I/O 面板手填保存）整链移除——该链从未有 UI caller，manual golden 的价值场景已被 run-seed（F6）+ copilot 覆盖。",
+      "action": "无（入口已删；golden 手填/编辑归 I/O 数据流设计方向，2026-07-02 锁定、已搁置）。",
+      "fe_design": "删除范围：前端 fetchGoldenTemplate/saveManualGolden（api/client.ts）+ GoldenTemplate 类型 + templatableAgentNodeIds（node-golden.ts）；后端 GET /golden/template + POST /golden/manual/plan 两端点 + services/golden_template.py + plan_manual_golden_for_node/set_manual_golden_for_node（golden_diff.py）+ GoldenTemplate/SetManualGoldenReq DTO（models/golden.py）。removal lock：tests/routers/test_golden_dead_entry_removal.py 守两端点保持 404/405；PropertiesPanel.golden-lock.test.tsx 守 Properties 无 golden 入口（F5）。",
       "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "GET /api/skills/{id}/golden/template",
-          "purpose": "按节点 io.outputs schema 生成符合 schema 的空 golden 模版供手填（routers/golden.py:88-96，generate_golden_template 已实现）。",
-          "mechanism_ref": "n4_golden_mech",
-          "iface_ref": "iface-golden-1"
-        }
-      ],
+      "be_contract": [],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：创建路 B 手填模版已 shipped——GoldenSection.tsx:36-87 的 templatableAgentNodeIds 驱动『Fill golden by template』区，239-349 的 GoldenTemplateRow（模版行：『Generate template』→ fetchGoldenTemplate → 编辑 JSON → saveManualGolden）；node-golden.ts:70-79（templatableAgentNodeIds = 无 golden 的 agent 节点）；api/client.ts:278-285（fetchGoldenTemplate → GET /golden/template）。后端：services/golden_template.py:23（generate_golden_template，按 io.outputs 建符合 schema 的空 stub）+ routers/golden.py:88-96（GET /template）+ models/golden.py:91-105（GoldenTemplate DTO）。原标『后端无此端点』已过时。",
+      "gap_brief": "符合裁决后设计（2026-07-15）：死链已整链删除并加 removal lock 测试；`GET /golden/{id}/content` read path 保留为 I/O 数据流方向（golden json 同构实例，已搁置）的脚手架。同批删除：Properties 面板 per-node promote（NodeGoldenSection，违反 F5『golden 不进 Properties』的 drift）——per-node promote 的正主入口在 TracePanel（见 #32）。",
       "impl_ref": "fn-33"
     },
     {

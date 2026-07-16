@@ -296,7 +296,6 @@ export function Panels({
         onActionDelete={propertiesActionDelete}
         onValidatorCreate={propertiesValidatorCreate}
         onResumeNode={onResumeNode}
-        onPromoteNode={onPromoteNode}
         onOpenSettings={onOpenSettings}
         onSelectGraph={onSelectGraph}
         onStartNodeCompare={onStartNodeCompare}

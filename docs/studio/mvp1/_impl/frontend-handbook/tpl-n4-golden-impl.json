@@ -2,17 +2,17 @@
  "id": "n4_golden_impl",
  "title": "Golden 验收 · 实施详情",
  "design_ref": "n4_golden_design",
- "intro": "本页是 Golden 验收 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_golden_design（原子 #29–#36）。代码按『文件名 + 函数/对象名』引用。golden 存储 + headless 对比 + 409 两守卫见 n4_golden_mech。现状：字段级 diff（editor 覆盖层）、mock-by-golden、两道 409 守卫已接实且符合；基线只读列已接但缺编辑；缺口集中在 agent 三态上画布（#30）、创建路 A 的 per-node 入口（#32）、创建路 B 手填模版（#33）、失效编译联动（#35）。本 surface 复用登记的『golden 对比 hook（useGoldenDiff）』。",
+ "intro": "本页是 Golden 验收 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_golden_design（原子 #29–#36）。代码按『文件名 + 函数/对象名』引用。golden 存储 + headless 对比 + 409 两守卫见 n4_golden_mech。现状：字段级 diff（editor 覆盖层）、mock-by-golden、两道 409 守卫、agent 三态徽章、创建路 A（copilot 分析 bar + trace per-node/run promote）均已接实且符合；旧创建路 B 手填模版（#33）与 Properties per-node 入口已按 PM 2026-07-15 裁决整链删除；golden 打开/编辑 UI 归 I/O 数据流设计方向（已搁置）。本 surface 复用登记的『golden 对比 hook（useGoldenDiff）』。",
  "functions": [
   {
    "n": 29,
    "cap": "golden-list",
    "design_ref": "n4-atom-29",
-   "current": "现状：偏差。GoldenSection.tsx 用 SWR 拉 GET /skills/{id}/golden 列基线（id/源 run/locked🔒/相对时间），只读；文件头注释明确『打开 golden 文件编辑需 golden-content read 端点（follow-on）』——即编辑能力是后续项。",
-   "gap": "差距：补 golden 内容读端点 + I/O 面板内编辑（与创建路 B 手填 #33 配套）。列基线已符合，编辑缺。",
-   "fe_status": "符合",
-   "be_dep": "部分就绪。GET /golden（list）已实现；golden-content read（供编辑）端点缺，待后端补。",
-   "fe_resync": "golden 后端+前端齐(2026-06-20)"
+   "current": "现状：数据链 live、面板 UI 归搁置方向。golden 列表由 Workspace 的 SWR GET /golden 拉取、goldenTriStateByNode 投影成画布节点徽章（Workspace.tsx:692/2419）；I/O 面板 GoldenSection 列表 UI 已不在代码中。GET /golden/{id}/content 读端点已实现（routers/golden.py:39-52）但无 UI caller——作为 I/O 数据流方向（golden json 同构实例，2026-07-02 锁定、已搁置）的脚手架保留；旧编辑保存链（saveManualGolden）已随路 B 删除（PM 2026-07-15）。",
+   "gap": "差距：golden 打开/编辑 UI 归 I/O 数据流设计方向（已搁置）——无当前工作项，待方向解冻后按『golden json 同构实例』设计实作。",
+   "fe_status": "未实施",
+   "be_dep": "已就绪。GET /golden（list）+ GET /golden/{id}/content（read）都已实现。",
+   "fe_resync": "2026-07-15 对账:路B删除,编辑归IO数据流方向(搁置)"
   },
   {
    "n": 30,
@@ -38,23 +38,23 @@
    "n": 32,
    "cap": "golden-create-copilot",
    "design_ref": "n4-atom-32",
-   "current": "现状：偏差。入口②完整接通：Workspace.tsx completedRunId（检测 run_ended）→ CopilotPanel 渲 AnalysisBar（analysis-bar.tsx）→ 确认走 autoWriteGoldenIfAbsent（仅当 skill 尚无 golden 才 promote，F7）+ prepareCopilotJudgeContext。run 级 Compare/Promote 在 TracePanel 顶栏 + DiffView 覆盖层。缺入口①——设计要『trace 内逐占位节点旁』按钮，现有是整次 run 级工具栏按钮，粒度不符 E3①。",
-   "gap": "差距：补入口① per-node——在 trace 内每个占位（无 golden）节点旁加创建按钮，对单节点 promote/写 golden。但**不能复用现契约**：SetGoldenReq（models/golden.py）只有 run_id+lock、无 node_id；plan_golden_baseline_for_run 遍历所有 agent node 生成整份 baseline；autoWriteGoldenIfAbsent 是 run 级。需先扩展 SetGoldenReq + plan/set 服务支持 node_id/case 选择 + 合并策略。入口②已符合。",
+   "current": "现状：符合。入口①per-node 已通：TracePanel『Promote node to golden』（TracePanel.tsx canPromoteFocusedNode → onPromoteNode）+ Workspace handlePromoteNode 接 saveGoldenBaseline(node_id)。入口②完整接通：completedRunId → CopilotPanel 渲 AnalysisBar → autoWriteGoldenIfAbsent（仅当 skill 尚无 golden 才 promote，F7）。run 级 Compare/Promote 在 TracePanel 顶栏 + DiffView 覆盖层。注：Properties 面板曾有的 per-node promote（NodeGoldenSection）违反 F5『golden 不进 Properties』，已按 PM 2026-07-15 裁决删除并加 lock 测试（PropertiesPanel.golden-lock.test.tsx）。",
+   "gap": "差距：无。旧『不能复用现契约』已过时——SetGoldenReq.node_id + set/plan_golden_baseline_for_run 的 per-node 写与合并策略已 shipped（models/golden.py / golden_diff.py）。",
    "fe_status": "符合",
-   "be_dep": "契约问题。run-level 晋升（POST /golden、/golden/plan）已实现；per-node 写入需扩展 SetGoldenReq（加 node_id/case 选择）+ plan/set 服务 + 合并策略。D7.4 Copilot judge 边界（bad）另影响 judge 闭环。",
+   "be_dep": "已实现。run-level 晋升（POST /golden、/golden/plan）+ per-node 写（SetGoldenReq.node_id）都已落地。",
    "fe_status_prev": "偏差",
-   "fe_resync": "batch5 已修复+测试通过(2026-06-20)"
+   "fe_resync": "2026-07-15 对账:per-node契约已shipped;Properties入口删除+lock"
   },
   {
    "n": 33,
    "cap": "golden-create-template",
    "design_ref": "n4-atom-33",
-   "current": "现状：未实施。GoldenSection 只读列基线；InputPanel 的 io.outputs 引用只是输出 artifact 路径配置、与模版生成无关；后端无『按 output schema 生成空 golden 模版』端点。E4 未落地。",
-   "gap": "差距：① 后端补『按节点 io.outputs schema 生成符合 schema 的空 golden 模版 json』端点；② 前端 I/O 面板加模版手填 UI（与 #29 golden 内容编辑端点配套），填好存为 golden。",
+   "current": "现状：已删除（PM 2026-07-15 裁决）。旧创建路 B（空模版手填）整链移除：前端 fetchGoldenTemplate/saveManualGolden/templatableAgentNodeIds + 后端 GET /golden/template、POST /golden/manual/plan、golden_template.py、plan/set_manual_golden_for_node、GoldenTemplate/SetManualGoldenReq DTO。removal lock：test_golden_dead_entry_removal.py 守两端点 404/405。",
+   "gap": "差距：无（原子已按裁决关闭）。golden 手填/编辑归 I/O 数据流设计方向（已搁置）；GET /golden/{id}/content read path 保留为脚手架。",
    "fe_status": "符合",
-   "be_dep": "未实现。后端需新增『按 output schema 生成空 golden 模版』端点（当前无）。",
+   "be_dep": "n/a（端点已删，removal lock 在测）。",
    "fe_status_prev": "未实施",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+   "fe_resync": "2026-07-15 裁决:路B整链删除+removal lock"
   },
   {
    "n": 34,
@@ -95,14 +95,14 @@
   },
   {
    "step": 2,
-   "what": "#32 创建路 A 入口①：trace 内每个占位（无 golden）节点旁加 per-node 创建按钮，对单节点写 golden。**不能复用 run 级 saveGoldenBaseline 契约**——SetGoldenReq 只有 run_id+lock、无 node_id；plan_golden_baseline_for_run 遍历所有 node 生成整份 baseline。需先新增 per-node 写入契约：扩展 SetGoldenReq 加 node_id/case 选择 + plan/set 服务 + 与既有 baseline 的合并策略。入口②已符合。",
+   "what": "#32 创建路 A 入口①：trace 内每个占位（无 golden）节点旁加 per-node 创建按钮，对单节点写 golden。**不能复用 run 级 saveGoldenBaseline 契约**——SetGoldenReq 只有 run_id+lock、无 node_id；plan_golden_baseline_for_run 遍历所有 node 生成整份 baseline。需先新增 per-node 写入契约：扩展 SetGoldenReq 加 node_id/case 选择 + plan/set 服务 + 与既有 baseline 的合并策略。入口②已符合。【2026-07-15 对账：per-node 契约（SetGoldenReq.node_id）+ TracePanel per-node 按钮已 shipped，本步关闭】",
    "depends_on": "等后端：per-node 写入契约（扩展 SetGoldenReq + plan/set + 合并策略）。前端还依赖 #30 的『哪些节点无 golden』判定（占位节点 = 无 golden 节点）。",
    "why": "后端先于前端：per-node 写入现契约写不出，得先扩展 SetGoldenReq；前端按钮再接。",
    "block": "等后端（契约）"
   },
   {
    "step": 3,
-   "what": "#29 golden 内容编辑 + #33 创建路 B 手填模版：后端补 golden-content read 端点 + 『按 io.outputs schema 生成空模版』端点；前端 I/O 面板加模版手填 + golden 编辑 UI。",
+   "what": "#29 golden 内容编辑 + #33 创建路 B 手填模版：后端补 golden-content read 端点 + 『按 io.outputs schema 生成空模版』端点；前端 I/O 面板加模版手填 + golden 编辑 UI。【2026-07-15 对账：#29 content read 端点已 shipped；#33 创建路 B 已按 PM 裁决整链删除，本步关闭；golden 编辑 UI 归 I/O 数据流方向（搁置）】",
    "depends_on": "等后端：golden-content read 端点 + 按 schema 生成空模版端点（当前缺）。",
    "why": "后端先于前端——这两条依赖后端新端点，契约到位前前端做不了，排后。",
    "block": "等后端"
@@ -207,7 +207,7 @@
     "按 output schema 生成空 golden 模版手填",
     "改 output schema 缺字段触发编译错误挡 predict"
    ],
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
+   "fe_resync": "2026-07-15 裁决:#33 路B整链删除(removal lock 在测);#35 编译联动已 shipped"
   }
  ]
 }

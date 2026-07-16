@@ -1,12 +1,15 @@
-import { AlertOctagon, ChevronDown, ChevronRight, Hash, ListTree, MessageSquare, Plus, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
+import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, MessageSquare, Plus, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
+import type { LlmFallbackDetails } from '../../utils/trace'
 import {
   errorStack,
   eventColor,
   eventMessage,
   eventMockedSource,
+  eventModelName,
   eventPhase,
+  llmFallbackDetails,
   mockedSourceClass,
   mockedSourceLabel,
   payloadPreview,
@@ -56,6 +59,10 @@ export function TraceEventRow({
   // n4-trace #25: retries-exhausted (and per-attempt validation_fail) carry a
   // list of failure reasons surfaced as an explicit Error Stack.
   const failures = errorStack(event)
+  // trace-observability F7: provider fallback renders as an explicit amber block,
+  // and rows that know which model served the call carry a model chip.
+  const fallback = llmFallbackDetails(event)
+  const modelName = eventModelName(event)
 
   return (
     <div className="relative pl-6" style={{ minHeight: TRACE_EVENT_ROW_HEIGHT - 20 }}>
@@ -94,6 +101,16 @@ export function TraceEventRow({
               {tokens}
             </span>
           ) : null}
+          {modelName ? (
+            <span
+              data-trace-model-chip
+              title={`Model: ${modelName}`}
+              className="flex max-w-[180px] items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs text-muted-foreground"
+            >
+              <Cpu className="h-3 w-3 shrink-0" />
+              <span className="truncate">{modelName}</span>
+            </span>
+          ) : null}
           {retry ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -127,6 +144,7 @@ export function TraceEventRow({
             {event.error_message}
           </p>
         ) : null}
+        {fallback ? <FallbackBlock details={fallback} /> : null}
         {inspectable ? (
           <span
             role="button"
@@ -185,6 +203,45 @@ export function TraceEventRow({
       </button>
       {toolCall && subtreeOpen && !isExpanded ? <ToolCallSubtree summary={toolCall} /> : null}
       {isExpanded ? <ExpandedPayload event={event} /> : null}
+    </div>
+  )
+}
+
+// trace-observability F7: the failing route → takeover route (with the models
+// behind them) plus the gateway's failure reason. Mirrors the Error Stack
+// pattern but in warning amber — a fallback degrades the run, it does not
+// fail it.
+function FallbackBlock({ details }: { details: LlmFallbackDetails }) {
+  return (
+    <div className="mt-2 rounded border border-warning-border/60 bg-warning/10 p-2">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-warning">
+        <AlertTriangle className="h-3.5 w-3.5" />
+        Provider fallback
+        {details.roleName ? (
+          <span className="font-normal text-muted-foreground">role: {details.roleName}</span>
+        ) : null}
+        {details.statusCode !== null ? (
+          <span className="font-normal text-muted-foreground">HTTP {details.statusCode}</span>
+        ) : null}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground">
+        <span className="rounded border border-border bg-background px-1.5 py-0.5">
+          {details.fromModel ?? details.fromProvider}
+        </span>
+        <ArrowRight className="h-3 w-3 shrink-0 text-warning" />
+        {details.exhausted ? (
+          <span className="rounded border border-destructive-border/60 bg-destructive/10 px-1.5 py-0.5 text-destructive">
+            no remaining route
+          </span>
+        ) : (
+          <span className="rounded border border-border bg-background px-1.5 py-0.5">
+            {details.toModel ?? details.toProvider}
+          </span>
+        )}
+      </div>
+      {details.reason ? (
+        <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground">{details.reason}</p>
+      ) : null}
     </div>
   )
 }

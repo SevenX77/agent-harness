@@ -388,6 +388,58 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
   })
 })
 
+// trace-observability F7: a run that silently fell back to another provider must
+// announce it at the run level, not only as one row lost in the stream.
+const fallbackEnvelope = (seq: number, phase: string): EventEnvelope => ({
+  schema_version: 'studio.event.v1',
+  stream_id: 'run:run-3',
+  seq,
+  cursor: `run:run-3:${seq}`,
+  run_id: 'run-3',
+  event_type: 'llm_fallback',
+  timestamp: '2026-07-16T00:00:00Z',
+  payload: {
+    schema_version: '1.0',
+    event_type: 'llm_fallback',
+    phase_name: phase,
+    timestamp: '2026-07-16T00:00:00Z',
+    from_provider: 'openai:gpt-4o',
+    to_provider: 'zhipu:glm-4.7',
+    reason: 'RateLimitError: 429 too many requests',
+  },
+})
+
+describe('TracePanel LLM fallback summary chip (trace-observability F7)', () => {
+  it('surfaces a run-level fallback count chip when fallbacks happened', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[...twoPhaseEvents, fallbackEnvelope(4, 'nodeA'), fallbackEnvelope(5, 'nodeB')]}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).toContain('2 LLM fallbacks')
+    expect(html).toContain('aria-label="Filter 2 LLM fallback events"')
+  })
+
+  it('uses the singular label for a single fallback', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[...twoPhaseEvents, fallbackEnvelope(4, 'nodeA')]}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).toContain('1 LLM fallback')
+    expect(html).not.toContain('1 LLM fallbacks')
+  })
+
+  it('omits the chip entirely for a run without fallbacks', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel traceLogs={twoPhaseEvents} onSelectPrompt={() => undefined} />,
+    )
+    expect(html).not.toContain('LLM fallback')
+  })
+})
+
 describe('TracePanel model-compare tabs (PR2 node-compare)', () => {
   const compareTabs = [
     { candidateId: 'fast', label: 'deepseek-v4', runId: 'run-f', failed: false, running: false },

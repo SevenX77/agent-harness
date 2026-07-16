@@ -2,6 +2,7 @@ import type { CallbackEvent, EventEnvelope } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
+import { countLlmFallbacks } from '../utils/trace'
 import { AlertTriangle, BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { HitlPromptForm } from './studio/HitlPromptForm'
@@ -126,6 +127,10 @@ export function TracePanel({
   const focusLabel = selectedNode?.data.label ?? focusPhase
   const filter = useTraceFilter(traceEvents, linkEnabled ? focusPhase : null)
   const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
+  // trace-observability F7: a run that silently fell back to another provider
+  // announces it up front; clicking the chip narrows the trace to the fallback
+  // events via the existing type filter.
+  const fallbackCount = countLlmFallbacks(traceEvents)
 
   const [nodePromoting, setNodePromoting] = useState(false)
   // atom #32 entry①: offer per-node golden creation for the focused, golden-less
@@ -281,6 +286,26 @@ export function TracePanel({
           <span>
             Showing {filter.filteredEvents.length} of {traceEvents.length} events
           </span>
+          {fallbackCount > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Filter ${fallbackCount} LLM fallback event${fallbackCount === 1 ? '' : 's'}`}
+                  aria-pressed={filter.selectedTypes.includes('llm_fallback')}
+                  onClick={() => filter.toggleType('llm_fallback')}
+                  className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  {fallbackCount} LLM fallback{fallbackCount === 1 ? '' : 's'}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                A provider failed during this run and calls fell back to another route — the model actually
+                used may differ from the configured one. Click to show only the fallback events.
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
           {canPromoteFocusedNode ? (
             <Tooltip>
               <TooltipTrigger asChild>

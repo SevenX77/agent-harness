@@ -1,7 +1,7 @@
 import { CheckCircle, MessageSquare } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../api/types'
-import { eventPhase, jsonText } from '../utils/trace'
+import { eventModelName, eventPhase, jsonText } from '../utils/trace'
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,9 @@ export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) 
     return null
   }
 
+  // trace-observability F7: name the model that served this call.
+  const model = eventModelName(promptEvent)
+
   return (
     <Dialog
       open={Boolean(promptEvent)}
@@ -38,6 +41,15 @@ export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) 
           <DialogTitle className="flex items-center gap-2 text-base">
             <MessageSquare className="size-5 text-primary" />
             Prompt Inspector: {eventPhase(promptEvent)}
+            {model ? (
+              <span
+                data-prompt-inspector-model
+                title={`Model that served this call: ${model}`}
+                className="rounded-full border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs font-normal text-muted-foreground"
+              >
+                {model}
+              </span>
+            ) : null}
           </DialogTitle>
         </DialogHeader>
 

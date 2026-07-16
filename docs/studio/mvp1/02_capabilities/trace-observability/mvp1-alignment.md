@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit；2026-07-16 增补:F7 LLM fallback 可见性落地(纯前端消费 gateway llm_fallback 事件,PM 排队单第一优先)）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 01_workflows/05_debugging.md（debug trace）
@@ -72,6 +72,15 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 测试: running/success/error/paused states match event order and reset between runs.
 - Status: target-design.
 - 归属: capability `trace-observability`; capabilities `run-execution`, `debug-resume`; region `canvas`.
+
+### F7. LLM Fallback Visibility
+
+- 机制: gateway 的 `llm_fallback` 事件（provider route 失败、同 role 兜底 route 接手时发射）作为一等 trace UI 渲染：事件行人话化消息（`LLM fallback: A → B`；`to_provider='<none>'` 显 `failed — no remaining route`）、琥珀 warning 徽章/时间线圆点、FallbackBlock（`context.from_route/to_route` 的 provider_model_id 双模型 + 失败原因 + role + HTTP 码）、run 级 fallback 计数 chip（点击经 trace 类型过滤器只看降级事件）、模型 chip（`prompt_captured`/`model_resolved` 的 `resolved_model` = 解析时真值，`llm_call.response_data.model_name` = provider 回报的 post-call 真值，PromptInspector 标题同显）。纯前端消费：事件链 gateway emit（`gateway_chat_model.py` 三处）→ studio `run_manager._queue_event_subscriber` → WS + trace.jsonl 此前已 live，本条零后端改动。
+- 决策: 降级不可见则模型对比不可信——run 可能静默从模型 A 降到模型 B，用户拿着 B 的产物当 A 的结论。因此任何 LLM 对比类功能之前必须先落本条（PM 排队单 2026-07-16 第一优先）。
+- 原话/来源: PM 排队单 2026-07-16「用户做模型对比时可能『以为测的是模型 A、实际已降级到 B』而不自知」；事件契约 `graph_agent_gateway/events.py` LLMFallbackEvent（code `[F-v3-gateway-llm-fallback]`）；手册设计页原子 n4-trace #29。
+- 测试: `utils/trace.test.ts`（message/color/details 解析/count/模型名三来源）、`TraceEventRow.fallback.test.tsx`（FallbackBlock/exhausted/模型 chip）、`TracePanel.test.tsx`（run 级 chip 单复数与 aria-label）、`PromptInspector.test.tsx`（标题模型 chip）。
+- Status: live（2026-07-16 落地：utils/trace.ts `llmFallbackDetails`/`countLlmFallbacks`/`eventModelName` + TraceEventRow FallbackBlock + TracePanel fallback chip + PromptInspector 模型 chip；活跑与历史回看共用同一渲染链）。
+- 归属: capability `trace-observability`; region `timeline`.
 
 ## 3. 接口契约
 - Runtime input: run_id websocket events plus persisted `trace.jsonl`.

@@ -16,8 +16,6 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-from app.models.golden import SetManualGoldenReq
-from app.services.golden_diff import set_manual_golden_for_node
 from fastapi.testclient import TestClient
 
 from tests.conftest import register_skill_index_entry
@@ -102,6 +100,57 @@ def _write_test_input(skills_dir: Path, content: dict[str, object], *, name: str
     path.write_text(json.dumps(content), encoding="utf-8")
 
 
+def _write_golden_fixture(skills_dir: Path, node_id: str, expected_output: dict[str, object]) -> None:
+    """Persist the on-disk golden layout (baseline/report/case) for one node.
+
+    Test-local writer: the product only creates goldens through the run-promote plan
+    (written by the Rust native-fs sole writer), which needs a sealed run. Tests that
+    just need "a golden exists on disk" write the same three-file layout directly.
+    """
+    golden_dir = skills_dir / AGENT_SKILL / ".workspace" / "golden" / node_id
+    (golden_dir / "cases").mkdir(parents=True, exist_ok=True)
+    case_record = {
+        "case_id": node_id,
+        "node_id": node_id,
+        "phase_id": node_id,
+        "expected_output_ref": f"cases/{node_id}.json",
+    }
+    (golden_dir / "baseline.json").write_text(
+        json.dumps(
+            {
+                "baseline_id": node_id,
+                "source_run_id": None,
+                "locked": False,
+                "cases": [case_record],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (golden_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "baseline_id": node_id,
+                "source_run_id": None,
+                "case_count": 1,
+                "node_ids": [node_id],
+                "created_at": "2026-07-15T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (golden_dir / "cases" / f"{node_id}.json").write_text(
+        json.dumps(
+            {
+                "case_id": node_id,
+                "node_id": node_id,
+                "phase_id": node_id,
+                "expected_output": expected_output,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _write_graph_with_source_file_and_missing_runtime_input(skill_dir: Path) -> None:
     (skill_dir / "GRAPH.md").write_text(
         """---
@@ -147,10 +196,15 @@ def agent_skill(studio_roots: tuple[Path, Path]) -> str:
 # --------------------------------------------------------------------------- #29
 
 
-def test_read_golden_content_returns_expected_output(agent_skill: str, client: TestClient) -> None:
-    """After a manual golden write, GET /content returns that node's expected_output."""
-    expected = {"segments": [{"start": 0}], "headline": "Intro"}
-    set_manual_golden_for_node(agent_skill, SetManualGoldenReq(node_id="segment", expected_output=expected))
+def test_read_golden_content_returns_expected_output(
+    agent_skill: str,
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    """With a golden persisted on disk, GET /content returns that node's expected_output."""
+    skills_dir, _workspaces = studio_roots
+    expected: dict[str, object] = {"segments": [{"start": 0}], "headline": "Intro"}
+    _write_golden_fixture(skills_dir, "segment", expected)
 
     response = client.get(f"/api/skills/{agent_skill}/golden/segment/content")
 
@@ -165,12 +219,14 @@ def test_read_golden_content_returns_expected_output(agent_skill: str, client: T
     assert case["expected_output"] == expected
 
 
-def test_read_golden_content_node_filter(agent_skill: str, client: TestClient) -> None:
+def test_read_golden_content_node_filter(
+    agent_skill: str,
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
     """?node_id= narrows the returned cases to the requested node only."""
-    set_manual_golden_for_node(
-        agent_skill,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": []}),
-    )
+    skills_dir, _workspaces = studio_roots
+    _write_golden_fixture(skills_dir, "segment", {"segments": []})
 
     response = client.get(
         f"/api/skills/{agent_skill}/golden/segment/content",
@@ -188,11 +244,13 @@ def test_read_golden_content_unknown_baseline_404(agent_skill: str, client: Test
     assert response.json()["error_code"] == "golden.baseline_not_found"
 
 
-def test_read_golden_content_unknown_node_422(agent_skill: str, client: TestClient) -> None:
-    set_manual_golden_for_node(
-        agent_skill,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": []}),
-    )
+def test_read_golden_content_unknown_node_422(
+    agent_skill: str,
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    skills_dir, _workspaces = studio_roots
+    _write_golden_fixture(skills_dir, "segment", {"segments": []})
 
     response = client.get(
         f"/api/skills/{agent_skill}/golden/segment/content",
@@ -203,12 +261,14 @@ def test_read_golden_content_unknown_node_422(agent_skill: str, client: TestClie
     assert response.json()["error_code"] == "golden.case_not_found"
 
 
-def test_read_golden_content_is_read_only_no_write_guard(agent_skill: str, client: TestClient) -> None:
+def test_read_golden_content_is_read_only_no_write_guard(
+    agent_skill: str,
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
     """The content read needs no X-Studio-Write-Fallback header (it is read-only)."""
-    set_manual_golden_for_node(
-        agent_skill,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": []}),
-    )
+    skills_dir, _workspaces = studio_roots
+    _write_golden_fixture(skills_dir, "segment", {"segments": []})
 
     # No write-guard header supplied -> still 200 (would be 409 NATIVE_FS_REQUIRED on a write route).
     response = client.get(f"/api/skills/{agent_skill}/golden/segment/content")
@@ -226,10 +286,7 @@ def test_compile_passes_when_golden_satisfies_output_schema(
     """A golden carrying every required output field compiles cleanly."""
     skills_dir, _workspaces = studio_roots
     _write_test_input(skills_dir, {"chapter_content": "chapter one"})
-    set_manual_golden_for_node(
-        agent_skill,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
-    )
+    _write_golden_fixture(skills_dir, "segment", {"segments": [{"start": 0}]})
 
     response = client.post(f"/api/skills/{agent_skill}/compile")
 
@@ -333,10 +390,7 @@ def test_compile_fails_when_golden_missing_newly_required_field(
     _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
     # Golden written WITHOUT the (later) required headline field.
-    set_manual_golden_for_node(
-        AGENT_SKILL,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
-    )
+    _write_golden_fixture(skills_dir, "segment", {"segments": [{"start": 0}]})
 
     response = client.post(f"/api/skills/{AGENT_SKILL}/compile")
 
@@ -360,10 +414,7 @@ def test_compile_fails_when_golden_value_violates_output_schema(
     _write_agent_skill(skills_dir, required_outputs="[segments]")
     _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
-    set_manual_golden_for_node(
-        AGENT_SKILL,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": "not an array"}),
-    )
+    _write_golden_fixture(skills_dir, "segment", {"segments": "not an array"})
 
     response = client.post(f"/api/skills/{AGENT_SKILL}/compile")
 
@@ -389,10 +440,7 @@ def test_compile_gate_binds_to_output_schema_not_prompt(
     _write_agent_skill(skills_dir, required_outputs="[segments]")
     _write_test_input(skills_dir, {"chapter_content": "chapter one"})
     register_skill_index_entry(AGENT_SKILL, skills_dir / AGENT_SKILL)
-    set_manual_golden_for_node(
-        AGENT_SKILL,
-        SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
-    )
+    _write_golden_fixture(skills_dir, "segment", {"segments": [{"start": 0}]})
 
     skill_md = skills_dir / AGENT_SKILL / "phases" / "segment" / "SKILL.md"
     skill_md.write_text(

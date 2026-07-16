@@ -119,7 +119,6 @@ BACKEND GET /api/settings
 BACKEND GET /api/skills/{skill_id}
 BACKEND GET /api/skills/{skill_id}/compare-candidates
 BACKEND GET /api/skills/{skill_id}/golden
-BACKEND GET /api/skills/{skill_id}/golden/template
 BACKEND GET /api/skills/{skill_id}/golden/{golden_id}/content
 BACKEND GET /api/skills/{skill_id}/history
 BACKEND GET /api/skills/{skill_id}/node-llm-params
@@ -165,7 +164,6 @@ BACKEND POST /api/skills/{skill_id}/copilot/tool-approval
 BACKEND POST /api/skills/{skill_id}/files/{file_path:path}
 BACKEND POST /api/skills/{skill_id}/fork
 BACKEND POST /api/skills/{skill_id}/golden
-BACKEND POST /api/skills/{skill_id}/golden/manual/plan
 BACKEND POST /api/skills/{skill_id}/golden/plan
 BACKEND POST /api/skills/{skill_id}/graph/serialize
 BACKEND POST /api/skills/{skill_id}/io/import
@@ -230,7 +228,6 @@ FRONTEND GET /api/settings
 FRONTEND GET /api/skills/{skill_id}
 FRONTEND GET /api/skills/{skill_id}/compare-candidates
 FRONTEND GET /api/skills/{skill_id}/golden
-FRONTEND GET /api/skills/{skill_id}/golden/template
 FRONTEND GET /api/skills/{skill_id}/golden/{golden_id}/content
 FRONTEND GET /api/skills/{skill_id}/history
 FRONTEND GET /api/skills/{skill_id}/node-llm-params
@@ -264,7 +261,6 @@ FRONTEND POST /api/skills/{skill_id}/copilot/judge
 FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval
 FRONTEND POST /api/skills/{skill_id}/files/{file_path:path}
 FRONTEND POST /api/skills/{skill_id}/golden
-FRONTEND POST /api/skills/{skill_id}/golden/manual/plan
 FRONTEND POST /api/skills/{skill_id}/golden/plan
 FRONTEND POST /api/skills/{skill_id}/graph/serialize
 FRONTEND POST /api/skills/{skill_id}/io/import
@@ -339,7 +335,6 @@ BACKEND GET /api/settings | ok | specific | Scoped app-settings read; backend te
 BACKEND GET /api/skills/{skill_id} | ok | shared | Canonical SkillDetail projection for one skill; consumers cold-load by skill id or revalidate from precise skill/file events.
 BACKEND GET /api/skills/{skill_id}/compare-candidates | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
 BACKEND GET /api/skills/{skill_id}/golden | ok | shared | Per-skill golden metadata projection; used for cold-load node badges and explicit golden flows, not focus/reconnect refresh.
-BACKEND GET /api/skills/{skill_id}/golden/template | ok | specific | Explicit manual-golden template read for one node; no content is hydrated unless the user starts that create flow.
 BACKEND GET /api/skills/{skill_id}/golden/{golden_id}/content | ok | specific | Explicit read of one golden content ref; list responses do not hydrate content implicitly.
 BACKEND GET /api/skills/{skill_id}/history | ok | shared | Local history list read scoped to a skill; frontend owns it in the History UI and uses precise run-ended/revert revalidation.
 BACKEND GET /api/skills/{skill_id}/node-llm-params | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
@@ -385,7 +380,6 @@ BACKEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Expl
 BACKEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser fallback for explicit file save with expected-hash semantics; Tauri native-fs remains the normal sole writer.
 BACKEND POST /api/skills/{skill_id}/fork | ok | specific | Explicit fork command; returns the new SkillSummary and does not re-read all skills as a side effect.
 BACKEND POST /api/skills/{skill_id}/golden | ok | specific | Browser fallback for explicit Promote to Golden; native-fs plan path is preferred in desktop and tests guard fallback header use.
-BACKEND POST /api/skills/{skill_id}/golden/manual/plan | ok | specific | Explicit manual-golden save planner; backend returns a file plan and writes nothing itself.
 BACKEND POST /api/skills/{skill_id}/golden/plan | ok | specific | Explicit promote-to-golden planner for native-fs; backend returns planned files plus baseline projection.
 BACKEND POST /api/skills/{skill_id}/graph/serialize | ok | specific | Explicit canvas topology save; response is canonical hash/update metadata for the edited GRAPH.md.
 BACKEND POST /api/skills/{skill_id}/io/import | ok | specific | Explicit import command for selected I/O material; not run from panel visibility or focus.
@@ -450,7 +444,6 @@ FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and
 FRONTEND GET /api/skills/{skill_id} | ok | shared | Shared per-skill SkillDetail cold load uses Studio truth SWR policy; manual Compile, Local History revert, and source-write/file events project canonical snapshots or revalidate only the exact skill key.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
 FRONTEND GET /api/skills/{skill_id}/golden | ok | shared | Workspace cold-loads per-skill golden metadata once for canvas node badges through Studio truth SWR policy; per-node promote projects the returned baseline into the loaded list without broad refresh.
-FRONTEND GET /api/skills/{skill_id}/golden/template | ok | specific | Explicit manual-golden create action for one agent node; not triggered by panel open, node selection, focus, timer, or reconnect.
 FRONTEND GET /api/skills/{skill_id}/golden/{golden_id}/content | ok | specific | Explicit open/edit of one golden baseline content ref; list metadata does not hydrate content implicitly.
 FRONTEND GET /api/skills/{skill_id}/history | ok | shared | Local History list is owned by the History UI cold-load key; Workspace uses a revalidator-only hook for run-ended refreshes, so skill open does not subscribe to or cold-load the list.
 FRONTEND GET /api/skills/{skill_id}/node-llm-params | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
@@ -484,7 +477,6 @@ FRONTEND POST /api/skills/{skill_id}/copilot/judge | ok | specific | Explicit Co
 FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Explicit approve/reject action for one held Copilot tool call; result is scoped to that tool_use_id.
 FRONTEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser-only explicit file-save fallback; Tauri uses native-fs as sole writer, and editor/panel saves are user edits with expected-hash conflict handling.
 FRONTEND POST /api/skills/{skill_id}/golden | ok | specific | Browser-only explicit Promote to Golden fallback; Tauri uses the plan endpoint plus native-fs writes, and callers project the returned baseline.
-FRONTEND POST /api/skills/{skill_id}/golden/manual/plan | ok | specific | Explicit manual-golden save asks backend for a write plan, then persists through native-fs; it is not a lifecycle refresh.
 FRONTEND POST /api/skills/{skill_id}/golden/plan | ok | specific | Explicit promote-to-golden in Tauri asks for a write plan and projects the returned baseline after native-fs writes.
 FRONTEND POST /api/skills/{skill_id}/graph/serialize | ok | specific | Explicit canvas topology mutation persists GRAPH.md with expected_hash and returns the canonical hash/update metadata; selection alone never serializes.
 FRONTEND POST /api/skills/{skill_id}/io/import | ok | specific | Explicit I/O import command writes the chosen import mapping/runtime files; create/delete projections or precise runtime events handle follow-up state.

@@ -9,10 +9,10 @@ aligns_with: 01_workflows/04_run-and-verify.md（golden-eval 段）
 
 # golden-eval — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `golden-per-agent-node`（Studio golden 编辑 / diff owner；落点/eval 引 engine） | **现状**: 2026-07 对账:后端 golden 已按 per-agent-node 管理(set_golden_baseline_for_run(node_id) 写 cases/{id}.json + plan_manual_golden_for_node,golden_diff.py:58-79 / 82-179 / 186-208);旧整次 run final_state 复制已废。 | **Related**: [baseline](./baseline.md)（双向）· `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`
+> **Tier**: capability | **Owns**: `golden-per-agent-node`（Studio golden 编辑 / diff owner；落点/eval 引 engine） | **现状**: 2026-07 对账:后端 golden 已按 per-agent-node 管理(set_golden_baseline_for_run(node_id) 写 cases/{id}.json,golden_diff.py);旧整次 run final_state 复制已废;手动空模板链 + Properties per-node promote 已删(PM 2026-07-15,见 F3)。 | **Related**: [baseline](./baseline.md)（双向）· `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`
 
 ## 1. 定义
-`golden-eval` owns per-agent-node expected outputs: node golden state, predict mock selection, manual/copilot golden creation, output-schema invalidation, and run-after actual-vs-golden diff.
+`golden-eval` owns per-agent-node expected outputs: node golden state, predict mock selection, golden creation（editor diff promote / copilot auto-write / trace per-node & run promote）, output-schema invalidation, and run-after actual-vs-golden diff.
 
 Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04_run-and-verify.md:131`, `01_workflows/04_run-and-verify.md:135`.
 
@@ -37,11 +37,11 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 
 ### F3. Create Golden Manually Or With Copilot
 
-- 机制: i/o panel 从 output schema 生成空 JSON 模版;per-node trace 按钮开单个 copilot chat;**批量入口 = Copilot 输入框上方分析 bar**(predict/run 后弹窗,自动写无 golden 节点)——旧 sonner 批量已细化为分析 bar,见 `copilot-assist` F7。
-- 决策: contextual trace 按钮 + Copilot 分析 bar(batch);**旧 sonner 批量入口已被分析 bar 取代**。
-- 原话/来源: `01_workflows/04_run-and-verify.md:124` and `01_workflows/04_run-and-verify.md:125` list the two creation paths; `01_workflows/04_run-and-verify.md:137` records "两者都要".
-- 测试: manual template matches output schema; trace button opens one chat for one node; batch entry opens chats for all missing-golden agent nodes.
-- Status: 部分 live(2026-07 深核:editor diff `DiffView` "Promote to Golden"(Workspace.tsx:2674/2683→handlePromoteToGolden:748)+ Copilot analysis bar auto-write(`AnalysisBar`,copilot-panel.tsx:975→`autoWriteGoldenIfAbsent` analysis-bar.tsx:53/105)+ TracePanel run/per-node promote 均接 `saveGoldenBaseline`;**i/o output 手动模板 `fetchGoldenTemplate`/`saveManualGolden` 与 Assets 文件树入口无 UI caller、尚未接线**)。
+- 机制: per-node trace 按钮开单个 copilot chat;**批量入口 = Copilot 输入框上方分析 bar**(predict/run 后弹窗,自动写无 golden 节点)——旧 sonner 批量已细化为分析 bar,见 `copilot-assist` F7;editor diff `DiffView` Promote 与 TracePanel run/per-node promote 提供从真实输出创建 golden 的入口。
+- 决策: contextual trace 按钮 + Copilot 分析 bar(batch);**旧 sonner 批量入口已被分析 bar 取代**。**PM 2026-07-15 裁决:i/o 空 JSON 模板手填链(create-path B:`GET /golden/template` + `POST /golden/manual/plan` + 前端 fetchGoldenTemplate/saveManualGolden)整链删除**——从未有 UI caller,manual golden 的价值场景已被 run-seed(F6)+ copilot 覆盖;golden 手填/编辑入口归 I/O 数据流设计方向(golden json 同构实例,2026-07-02 锁定、已搁置),`GET /golden/{id}/content` read path 保留为该方向脚手架。
+- 原话/来源: `01_workflows/04_run-and-verify.md:124` and `01_workflows/04_run-and-verify.md:125` list the two creation paths; `01_workflows/04_run-and-verify.md:137` records "两者都要";手动模板链删除 = PM 2026-07-15 裁决("golden①② 删代码")。
+- 测试: trace button opens one chat for one node; batch entry opens chats for all missing-golden agent nodes; 已删的 `GET /golden/template` 与 `POST /golden/manual/plan` 保持 404/405(tests/routers/test_golden_dead_entry_removal.py)。
+- Status: live(editor diff `DiffView` "Promote to Golden"(Workspace.tsx→handlePromoteToGolden)+ Copilot analysis bar auto-write(`AnalysisBar`→`autoWriteGoldenIfAbsent`)+ TracePanel run/per-node promote 均接 `saveGoldenBaseline`;手动模板链已删)。
 - 归属: capability `golden-eval`; capability `copilot-assist`; regions `input`, `timeline`, `copilot`.
 
 ### F4. Output Schema Invalidation
@@ -92,7 +92,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 
 ## 6. 测试关键点
 1. 粒度: `set_golden_baseline_for_run` 已按 agent node 管 golden case(node_id 参数 + cases/{id}.json,golden_diff.py:58-79 / 186-208);旧"复制整次 final_state"已废。(2026-07 对账)
-2. 入口: sonner 批量已删;editor diff(DiffView Promote)+ Copilot analysis bar(auto-write)+ TracePanel run/per-node promote 已 live;I/O output 手动模板(fetchGoldenTemplate/saveManualGolden)与 Assets 文件树入口无 UI caller、未接线;Properties per-node promote(NodeGoldenSection)仍在(与 F5"不在 Properties"相悖)。(2026-07 深核)
+2. 入口: sonner 批量已删;editor diff(DiffView Promote)+ Copilot analysis bar(auto-write)+ TracePanel run/per-node promote 已 live;手动模板链(fetchGoldenTemplate/saveManualGolden + template/manual-plan 端点)与 Properties per-node promote(NodeGoldenSection)已按 PM 2026-07-15 裁决删除,removal lock 测试守住(PropertiesPanel.golden-lock.test.tsx / test_golden_dead_entry_removal.py)。
 3. predict guard: baseline 现状为 predict trace promotion 被 409 挡；目标为 predict 不可入 golden；run 输出可做默认种子。
 
 ## 7. 涉及 region / platform
@@ -100,7 +100,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 
 ## 8. gaps / 报警
 - ✅ 粒度(2026-07 对账清除旧报警): `set_golden_baseline_for_run` 已按 agent node 管 golden case/output(node_id + cases/{id}.json,golden_diff.py:58-79 / 186-208);旧"复制整次 final_state"报警清除。
-- 🟡 入口(2026-07 深核,部分 live): editor diff(`DiffView` "Promote to Golden",Workspace.tsx:2674/2683)+ Copilot analysis bar(auto-write,copilot-panel.tsx:975 / analysis-bar.tsx:53-105)+ TracePanel run/per-node promote(TracePanel.tsx:241/293)已 live 接 `saveGoldenBaseline`;sonner 批量入口已删。**仍缺**:I/O output 手动模板(`fetchGoldenTemplate`/`saveManualGolden`,client.ts:460/477)与 Assets 文件树入口无任何 UI caller、未接线;且 Properties 仍有 per-node promote(`NodeGoldenSection`,PropertiesPanel.tsx:1281),与 F5"golden 不在 Properties"相悖(drift 待泳道处理)。
+- ✅ 入口(2026-07-15 清账): editor diff(`DiffView` "Promote to Golden")+ Copilot analysis bar(auto-write)+ TracePanel run/per-node promote 已 live 接 `saveGoldenBaseline`;sonner 批量入口已删;旧 drift 两项——I/O output 手动模板链(无 UI caller)与 Properties per-node promote(`NodeGoldenSection`,违反 F5)——已按 PM 2026-07-15 裁决整链删除并加 removal lock 测试。golden 手填/编辑入口留给 I/O 数据流方向(已搁置),`GET /golden/{id}/content` read path 保留为脚手架。
 
 ## 交叉引用（链接, 不复制）
 [baseline](./baseline.md)（现状,双向）· `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`

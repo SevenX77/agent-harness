@@ -1,4 +1,4 @@
-import type { GoldenBaseline, GraphTopologyItem, PredictDiagnosticExport } from "@/api/types"
+import type { GoldenBaseline, PredictDiagnosticExport } from "@/api/types"
 
 /**
  * Per-node golden state channel (N4 golden-design atom #30: golden-tristate).
@@ -59,23 +59,6 @@ export function goldenTriStateByNode(
     byNode[nodeId] = state
   }
   return byNode
-}
-
-/**
- * N4 atom #33 create-path B gating: the agent node ids eligible for a manual golden
- * template — AGENT nodes (graph_topology mode === 'agent') that do NOT yet have golden.
- * Logic/subgraph nodes are excluded (they never get golden); 🟢 has-golden nodes are
- * excluded (template-fill is for non-🟢 agent nodes). Pure projection of backend data.
- */
-export function templatableAgentNodeIds(
-  graphTopology: readonly GraphTopologyItem[] | null | undefined,
-  baselines: readonly GoldenBaseline[] | null | undefined,
-): string[] {
-  const goldenByNode = goldenStateByNode(baselines)
-  return (graphTopology ?? [])
-    .filter((item) => item.mode === "agent")
-    .map((item) => item.id)
-    .filter((nodeId) => goldenByNode[nodeId] !== "has-golden")
 }
 
 /**

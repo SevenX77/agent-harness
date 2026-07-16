@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 01_workflows/05_debugging.md（debug trace）
@@ -23,7 +23,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策: agent output should feel like copilot output: summary first, details expandable.
 - 原话/来源: `01_workflows/04_run-and-verify.md:79` and `01_workflows/04_run-and-verify.md:86` define live trace; `01_workflows/04_run-and-verify.md:110` keeps the PM quote.
 - 测试: live events append without duplication; agent chunks collapse/expand; source switch resets by run_id.
-- Status: orphan + target-design.
+- Status: live(2026-07 对账:TracePanel 已挂 live 路径,`handleRun`→`setActivePanel("timeline")`(Workspace.tsx:2172);agent 输出折叠已实现——tool_call 按语义 verb 分类 + args→result 子树(ToolCallSubtree,TraceEventRow.tsx:220-243),长 payload 默认折叠 ~2KB head 带展开钮(GenericPayload,TraceEventRow.tsx:255-280 / `TRACE_PAYLOAD_AUTO_EXPAND_BYTES=2048` utils/trace.ts:119);旧 orphan 已过时)。
 - 归属: capability `trace-observability`; regions `timeline`, `canvas`.
 
 ### F2. Run-after Summary And Full Trace
@@ -61,7 +61,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策: PM needs to inspect why a model saw what it saw, without leaving the trace flow.
 - 原话/来源: `01_workflows/04_run-and-verify.md:93` lists the prompt inspector action.
 - 测试: llm_call event opens inspector with all three tabs populated.
-- Status: orphan.
+- Status: live(2026-07 对账:PromptInspector 已挂 live+历史两路径(Workspace.tsx:2688 / TimelinePanel.tsx:153);点 llm_call/prompt_captured 的"Inspect prompt"控件经 `findPromptEvent` 打开(TraceEventRow.tsx:51/136 · utils/trace.ts:291-306);Template/Variables/Rendered 三视图分别填 `template_source`/`variables`/`resolved_prompt|messages`(PromptInspector.tsx:55/58/62-64);旧 orphan 已过时)。
 - 归属: capability `trace-observability`; region `timeline`.
 
 ### F6. Event To Node State Deriver
@@ -91,7 +91,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 | TRACE_OBSERVABILITY-3 | 节点态 | 单元 `run-execution-node-status`；**为什么**：事件→节点态投影的实现归共享 state(state-engine)，trace 只拥有语义 |
 
 ## 6. 测试关键点
-1. trace 挂载: baseline 现状为 TracePanel 已挂 timeline 主路径(active run 流式,结束回 TimelinePanel 历史)；细化项(agent 分类折叠摘要等)以代码逐项核。
+1. trace 挂载: TracePanel 已挂 timeline 主路径(active run 流式,结束回 TimelinePanel 历史);agent 分类折叠摘要已实现(ToolCallSubtree verb 分类 + ~2KB 折叠,TraceEventRow.tsx:220-280);PromptInspector 三视图已挂 live+历史两路径(F1/F5 旧 orphan 标注已过时,2026-07 对账)。
 2. dot 黑板: 双态均 live——运行期真实事件派生(edgeContextFromEvents,mock 已删)+ 未跑期静态字段推断(staticEdgeInference,前端按拓扑 + io 声明 + runtime_config 推导,GraphCanvas.tsx:1429-1434 / lib/edge-static-inference.ts:139);跑后打开真实 transition blackboard / before-after。(2026-07 对账:旧"未跑时仅空态"已落地静态推断。)
 3. 节点态: baseline 现状为 event -> node state 派生未成统一源；目标为 state-engine 消费 trace events 并投影 canvas/timeline。
 

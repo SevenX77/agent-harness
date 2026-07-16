@@ -46,8 +46,7 @@ class GoldenCaseContent(BaseModel):
     N4 atom #29 read path: the list endpoint only projects per-node case metadata
     (``case_id``/``node_id``/``expected_output_ref``); this model carries the actual
     ``expected_output`` the ref points at, so the I/O panel can open a golden file for
-    editing. Read-only — the editing write still goes through ``/golden/manual/plan``
-    (the Rust native-fs sole writer under D12).
+    editing. Read-only — this model carries no write path.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -86,36 +85,6 @@ class SetGoldenReq(BaseModel):
     run_id: str
     lock: bool
     node_id: str | None = None
-
-
-class GoldenTemplate(BaseModel):
-    """N4 atom #33: a schema-valid empty golden template for an agent node.
-
-    Generated from the node's ``io.outputs`` JSON schema so the author can hand-fill
-    expected values without a copilot/run source. The output schema serializes under the
-    wire key ``schema`` (the Python attribute is ``output_schema`` to avoid shadowing
-    ``BaseModel.schema``); ``template`` is the structure-valid empty stub matching it.
-    """
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    skill_id: str
-    node_id: str
-    output_schema: dict[str, Any] = Field(alias="schema")
-    template: dict[str, Any]
-
-
-class SetManualGoldenReq(BaseModel):
-    """N4 atom #33 manual write: author-defined golden, keyed by node_id, run-less.
-
-    First-class contract distinct from ``SetGoldenReq`` — it carries no ``run_id``
-    because a manual golden has no source run; the expected output is author-defined.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    node_id: str
-    expected_output: dict[str, Any]
 
 
 class CopilotJudgeRequest(BaseModel):

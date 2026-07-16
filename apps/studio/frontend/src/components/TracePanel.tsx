@@ -77,10 +77,9 @@ function envelopePayload(event: EventEnvelope): CallbackEvent {
 /**
  * atom #32 entry①: which focused node may get a per-node golden created from the
  * trace. Pure projection of the data the trace already holds — no golden coverage
- * is re-derived here. A node qualifies only when it is an AGENT node (the same
- * mode set the Properties panel gates NodeGoldenSection on: skill/llm/agent; logic
- * & subgraph never get golden, design g-c) and does NOT already have golden
- * ('has-golden' → already captured, nothing to create).
+ * is re-derived here. A node qualifies only when it is an AGENT node (skill/llm/
+ * agent; logic & subgraph never get golden, design g-c) and does NOT already have
+ * golden ('has-golden' → already captured, nothing to create).
  */
 export function isGoldenlessAgentNode(
   node: { data: { mode?: string; goldenState?: GoldenNodeState } } | null | undefined,

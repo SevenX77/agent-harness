@@ -40,7 +40,7 @@ units: [golden-per-agent-node]
 | 维度 | 现状（baseline） | 目标（alignment） |
 |---|---|---|
 | 粒度 | `set_golden_baseline_for_run(node_id)` 写 cases/{id}.json,按 agent node 管(golden_diff.py:58-79/186-208)✅ | 按 agent node 管 golden case / output |
-| 入口 | sonner 批量入口已删;editor diff(DiffView Promote,Workspace.tsx:2674/2683)+ Copilot analysis bar(auto-write,copilot-panel.tsx:975)+ TracePanel run/per-node promote 已 live;I/O output 手动模板(fetchGoldenTemplate/saveManualGolden)与 Assets 文件树入口**无 UI caller**、未接线;Properties per-node promote(NodeGoldenSection)仍在(与 F5"不在 Properties"相悖)🟡 | 入口为 I/O output + Assets + editor diff + Copilot analysis bar |
+| 入口 | sonner 批量入口已删;editor diff(DiffView Promote)+ Copilot analysis bar(auto-write)+ TracePanel run/per-node promote 已 live;手动模板链(fetchGoldenTemplate/saveManualGolden + `GET /golden/template` + `POST /golden/manual/plan`)与 Properties per-node promote(NodeGoldenSection)已按 PM 2026-07-15 裁决删除,removal lock 测试守住 ✅ | 入口为 editor diff + Copilot analysis bar + TracePanel promote;golden 手填/编辑入口归 I/O 数据流方向(已搁置,`GET /golden/{id}/content` read path 留作脚手架) |
 | predict guard | predict trace promotion 被 409 挡 | predict 不可入 golden；run 输出可做默认种子 |
 > **验"是否按目标改了"**：1. 粒度；2. 入口；3. predict guard。
 
@@ -51,7 +51,7 @@ units: [golden-per-agent-node]
 
 ## WS-6 Studio-only Closeout Update
 
-- **Manual Per-Node Golden Drafts**: Live. Users can now save manual per-node golden expected output drafts. Predict-source golden saves are strictly guarded and rejected with 409 `PREDICT_TRACE_CANNOT_BE_GOLDEN`.
+- **Manual Per-Node Golden Drafts**: 已删除(PM 2026-07-15)。该链(空模板 + manual plan 写盘)从未有 UI caller,整链移除;golden 手填/编辑归 I/O 数据流设计方向(已搁置)。Predict-source golden saves 仍被 409 `PREDICT_TRACE_CANNOT_BE_GOLDEN` 严格拒绝。
 - **Deferred Items**: Engine exact per-node golden layout and actual-vs-golden run artifact diff remain deferred.
 
 ## 交叉引用（链接, 不复制）

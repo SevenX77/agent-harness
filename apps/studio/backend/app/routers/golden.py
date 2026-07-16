@@ -10,19 +10,15 @@ from app.models.golden import (
     GoldenBaseline,
     GoldenBaselineContent,
     GoldenBaselinePlan,
-    GoldenTemplate,
     SetGoldenReq,
-    SetManualGoldenReq,
 )
 from app.services.golden_diff import (
     delete_golden_baseline_for_skill,
     list_golden_baselines_for_skill,
     plan_golden_baseline_for_run,
-    plan_manual_golden_for_node,
     read_golden_baseline_content,
     set_golden_baseline_for_run,
 )
-from app.services.golden_template import generate_golden_template
 
 router = APIRouter(prefix="/api/skills/{skill_id}/golden", tags=["golden"])
 
@@ -83,31 +79,6 @@ async def plan_golden_baseline(skill_id: str, request: SetGoldenReq) -> GoldenBa
         lock=request.lock,
         node_id=request.node_id,
     )
-
-
-@router.get(
-    "/template",
-    response_model=GoldenTemplate,
-    responses={422: {"model": ErrorResponse}},
-)
-async def get_golden_template(skill_id: str, node_id: str) -> GoldenTemplate:
-    # N4 atom #33 create-path B: empty schema-valid template for an agent node so the
-    # author can hand-fill expected values without a copilot/run source.
-    return generate_golden_template(skill_id, node_id)
-
-
-@router.post(
-    "/manual/plan",
-    response_model=GoldenBaselinePlan,
-    responses={422: {"model": ErrorResponse}},
-)
-async def plan_manual_golden(skill_id: str, request: SetManualGoldenReq) -> GoldenBaselinePlan:
-    # N4 atom #33 manual write (D12 Rust sole writer): return the file plan
-    # (baseline/report/cases) the Rust native-fs writer writes per file. Plan-only,
-    # so it carries no write guard — mirrors the run-promote /golden/plan endpoint.
-    # There is no Python HTTP disk-write endpoint for the manual golden: the frontend
-    # always writes via Rust (web degrades to Desktop-only, no persist).
-    return plan_manual_golden_for_node(skill_id, request.node_id, request.expected_output)
 
 
 @router.delete(

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { GoldenBaseline, GoldenBaselineCase, GraphTopologyItem } from "@/api/types"
-import {
-  goldenTriStateByNode,
-  ranAgentNodesFromPredict,
-  templatableAgentNodeIds,
-} from "./node-golden"
+import type { GoldenBaseline, GoldenBaselineCase } from "@/api/types"
+import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
 
 const EMPTY_PREDICT_DIAGNOSTICS = {
   error: null,
@@ -99,33 +95,5 @@ describe("ranAgentNodesFromPredict (agent-only filter from phases presence)", ()
         ...EMPTY_PREDICT_DIAGNOSTICS,
       }),
     ).toEqual(new Set())
-  })
-})
-
-function topo(id: string, mode: string): GraphTopologyItem {
-  return { id, src: `phases/${id}`, depends_on: [], mode }
-}
-
-describe("templatableAgentNodeIds (manual-template gating #33)", () => {
-  const topology: GraphTopologyItem[] = [
-    topo("setup", "logic"),
-    topo("draft", "agent"),
-    topo("expand", "agent"),
-    topo("sub", "subgraph"),
-  ]
-
-  it("returns only agent nodes that lack golden (excludes logic/subgraph and 🟢)", () => {
-    const ids = templatableAgentNodeIds(topology, [baseline("b1", [goldenCase("draft")])])
-    // draft has golden -> excluded; setup/sub are not agent -> excluded; expand stays.
-    expect(ids).toEqual(["expand"])
-  })
-
-  it("returns all agent nodes when no golden exists yet", () => {
-    expect(templatableAgentNodeIds(topology, [])).toEqual(["draft", "expand"])
-  })
-
-  it("returns nothing for null/empty topology", () => {
-    expect(templatableAgentNodeIds(null, [])).toEqual([])
-    expect(templatableAgentNodeIds([], [])).toEqual([])
   })
 })

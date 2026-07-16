@@ -37,4 +37,16 @@ describe("PromptInspector", () => {
     expect(html).not.toContain("bg-gray")
     expect(html).not.toContain("text-violet")
   })
+
+  // trace-observability F7: the inspector names the model that served the call.
+  it("shows the resolved model in the header when the event carries one", () => {
+    const withModel = { ...promptEvent, resolved_model: "claude-sonnet-4-6" } as unknown as CallbackEvent
+    const html = renderToStaticMarkup(<PromptInspector promptEvent={withModel} onClose={vi.fn()} />)
+    expect(html).toContain("claude-sonnet-4-6")
+  })
+
+  it("renders no model chip when the event carries no model", () => {
+    const html = renderToStaticMarkup(<PromptInspector promptEvent={promptEvent} onClose={vi.fn()} />)
+    expect(html).not.toContain("prompt-inspector-model")
+  })
 })

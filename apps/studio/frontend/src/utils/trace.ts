@@ -36,6 +36,19 @@ export function eventMessage(event: CallbackEvent): string {
       return `Run ended: ${event.status ?? 'completed'}`
     case 'internal_error':
       return typeof event.error_message === 'string' ? event.error_message : 'Internal error'
+    case 'llm_fallback': {
+      const details = llmFallbackDetails(event)
+      if (!details) {
+        return event.event_type
+      }
+      return details.exhausted
+        ? `LLM fallback: ${details.fromProvider} failed — no remaining route`
+        : `LLM fallback: ${details.fromProvider} → ${details.toProvider ?? 'unknown'}`
+    }
+    case 'model_resolved':
+      return typeof event.resolved_model === 'string' && event.resolved_model !== ''
+        ? `Model resolved: ${event.resolved_model}`
+        : 'Model resolved'
     default:
       return event.event_type
   }
@@ -56,6 +69,9 @@ export function eventColor(eventType: string): string {
   }
   if (eventType === 'internal_error' || eventType === 'validation_fail') {
     return 'bg-destructive'
+  }
+  if (eventType === 'llm_fallback') {
+    return 'bg-warning'
   }
   return 'bg-muted-foreground'
 }
@@ -286,6 +302,81 @@ export function errorStack(event: CallbackEvent): string[] {
     return stringList(event.errors)
   }
   return []
+}
+
+// ── LLM fallback visibility (trace-observability F7) ────────────────────────
+// The gateway emits `llm_fallback` (graph_agent_gateway/events.py, code
+// [F-v3-gateway-llm-fallback]) when a provider route fails and the next
+// candidate takes over; `context.from_route` / `to_route` carry the route
+// diagnostics (provider_model_id / canonical_id). Surfacing it keeps a model
+// comparison honest: without it a run can silently return "model A" results
+// that model B actually produced.
+
+export interface LlmFallbackDetails {
+  /** Route id the call was leaving, e.g. "openai:gpt-4o". */
+  fromProvider: string
+  /** Route id that took over; null when the chain is exhausted. */
+  toProvider: string | null
+  /** True when the gateway reported no remaining candidate ("<none>"). */
+  exhausted: boolean
+  /** Model id behind the failing route, when the event carries diagnostics. */
+  fromModel: string | null
+  /** Model id behind the takeover route. */
+  toModel: string | null
+  /** Failure reason, e.g. "RateLimitError: 429 too many requests". */
+  reason: string
+  /** LLM role whose chain fell back, e.g. "graph_agent". */
+  roleName: string | null
+  /** Provider HTTP status when the failure was classified, e.g. 429. */
+  statusCode: number | null
+}
+
+function routeModelId(route: JsonValue | undefined): string | null {
+  if (!isJsonObject(route)) {
+    return null
+  }
+  const model = route.provider_model_id ?? route.canonical_id
+  return typeof model === 'string' && model !== '' ? model : null
+}
+
+export function llmFallbackDetails(event: CallbackEvent): LlmFallbackDetails | null {
+  if (event.event_type !== 'llm_fallback') {
+    return null
+  }
+  const context = isJsonObject(event.context) ? event.context : {}
+  const rawTo = typeof event.to_provider === 'string' ? event.to_provider : ''
+  const exhausted = rawTo === '' || rawTo === '<none>'
+  return {
+    fromProvider: typeof event.from_provider === 'string' ? event.from_provider : 'unknown provider',
+    toProvider: exhausted ? null : rawTo,
+    exhausted,
+    fromModel: routeModelId(context.from_route),
+    toModel: routeModelId(context.to_route),
+    reason: typeof event.reason === 'string' ? event.reason : '',
+    roleName: typeof context.role_name === 'string' && context.role_name !== '' ? context.role_name : null,
+    statusCode: typeof context.provider_status_code === 'number' ? context.provider_status_code : null,
+  }
+}
+
+export function countLlmFallbacks(events: CallbackEvent[]): number {
+  return events.reduce((count, event) => (event.event_type === 'llm_fallback' ? count + 1 : count), 0)
+}
+
+/**
+ * The model a trace row is known to have used: `resolved_model` on
+ * prompt_captured / model_resolved is the resolution-time answer, while
+ * `response_data.model_name` on llm_call is the provider-reported post-call
+ * answer — the one that survives a mid-call fallback.
+ */
+export function eventModelName(event: CallbackEvent): string | null {
+  if (event.event_type === 'prompt_captured' || event.event_type === 'model_resolved') {
+    return typeof event.resolved_model === 'string' && event.resolved_model !== '' ? event.resolved_model : null
+  }
+  if (event.event_type === 'llm_call' && isJsonObject(event.response_data)) {
+    const model = event.response_data.model_name
+    return typeof model === 'string' && model !== '' ? model : null
+  }
+  return null
 }
 
 export function findPromptEvent(events: CallbackEvent[], selectedIndex: number): CallbackEvent | null {

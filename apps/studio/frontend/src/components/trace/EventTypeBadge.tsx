@@ -6,6 +6,9 @@ function badgeClass(eventType: string): string {
   if (eventType === 'internal_error' || eventType === 'validation_fail') {
     return 'border-destructive-border bg-destructive/10 text-destructive'
   }
+  if (eventType === 'llm_fallback') {
+    return 'border-warning-border bg-warning/10 text-warning'
+  }
   if (eventType === 'llm_call' || eventType === 'prompt_captured') {
     return 'border-primary/50 bg-primary/10 text-primary'
   }

@@ -287,6 +287,31 @@
       "be_status": "已实现",
       "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：完整纵切已 shipped。① 选择 UI——CompareRunDialog.tsx（shadcn Dialog+Checkbox 多选 Settings 已建 role，经 getRoles 拉），在 Workspace.tsx:1419 渲染；② 请求——candidatesFromRoleNames（run-compare.ts）→ startCompareRun → 后端 POST /runs/compare（backend/app/routers/runs.py:42-51），DTO RunCandidate/CompareCandidateRun/CompareRunResponse（backend/app/models/runs.py:26-129）；③ 临时 role 物化——run_compare.py:54-132 的临时 role materializer 复用 roles 基础设施、按候选写 llm_roles__<id>.yaml 并经 STUDIO_LLM_ROLES_PATH 指向，不改 frozen engine/gateway；④ 结果 tab——compareTabsFromGroup → TracePanel 顶部 compareTabs 条（TracePanel.tsx:157-191），按 metadata.status 显每候选 failed/running，候选切换 handleSelectCandidate（Workspace.tsx:1039-1048）。原标『未建契约』已过时。",
       "impl_ref": "fn-23"
+    },
+    {
+      "n": 29,
+      "cap": "trace-llm-fallback-visibility",
+      "module": "Trace 面板 · 流式与回看",
+      "func": "设计：gateway 降级（llm_fallback）在 trace 里显式可见——哪个节点、从哪条 route 降到哪条、背后模型是什么、为什么降；run 级有汇总提示。这样做模型对比时不会『以为测的是模型 A、实际已降级到 B』而不自知。",
+      "action": "跑一个 primary route 会失败的 skill → Trace 面板看 run 级琥珀 chip 与 llm_fallback 事件行；点 chip 过滤到降级事件；带模型 chip 的行直接读该调用实际用的模型。",
+      "fe_design": "四层可见性：① utils/trace.ts 消费 gateway llm_fallback 事件——eventMessage 人话化（『LLM fallback: A → B』，to_provider='<none>' 显『failed — no remaining route』）、eventColor/EventTypeBadge 琥珀 warning；② TraceEventRow 渲 FallbackBlock（context.from_route/to_route 的 provider_model_id 双模型 + reason + role + HTTP 码，样式镜像 Error Stack 但用 warning——降级是劣化不是失败）；③ TracePanel 头部 run 级 chip『⚠ N LLM fallback(s)』，点击经 useTraceFilter.toggleType('llm_fallback') 过滤；④ 模型 chip：prompt_captured/model_resolved 的 resolved_model（解析时真值）与 llm_call 的 response_data.model_name（provider 回报的 post-call 真值，降级后仍准确）渲 monospace chip，PromptInspector 标题同显。纯前端消费，零后端改动（事件链 gateway emit → studio run_manager 队列 → WS + trace.jsonl 此前已 live）。",
+      "fe_modules": [
+        {
+          "name": "Trace 事件渲染（utils/trace + TraceEventRow/TracePanel/PromptInspector）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}（llm_fallback 事件）",
+          "purpose": "gateway 降级事件已在事件流内（graph_agent_gateway/events.py LLMFallbackEvent，code [F-v3-gateway-llm-fallback]；emit 点 gateway_chat_model.py 三处；studio run_manager._queue_event_subscriber 序列化进 WS/trace.jsonl），本原子只是前端消费，无新端点。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-07-16 落地）：此前前端 grep llm_fallback 零命中=零消费，事件渲成灰点+裸事件名不可读；现消息/徽章/FallbackBlock/run 级 chip/模型 chip 五件齐。",
+      "impl_ref": "fn-29"
     }
   ]
 }

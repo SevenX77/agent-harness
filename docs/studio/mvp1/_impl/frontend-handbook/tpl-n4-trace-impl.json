@@ -2,7 +2,7 @@
  "id": "n4_trace_impl",
  "title": "Trace 去黑盒 · 实施详情",
  "design_ref": "n4_trace_design",
- "intro": "本页是 Trace 去黑盒 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_trace_design（原子 #14–#28）。代码按『文件名 + 函数/对象名』引用。事件契约 EventEnvelope + 消费者图见 n4_trace_mech。现状：事件流式（#14）、历史回看（#15）、检索（#21）、失败红灯（#22）、Properties 净化（#26）已接实且符合；缺口集中在去黑盒的可读化——agent 折叠（#16）、focus 粒度（#17）、完整 trace 文档（#18）、dot 操作记录（#19，依赖引擎）、Prompt 三视图回溯/历史接线（#20，findPromptEvent 死代码 + 历史 trace no-op）、模型对比（#23，P8 未建契约）、agent 内联展开（#24）、重试徽章（#25）、payload 截断（#27）、命名正名（#28）。本 surface 不产单独 femods，复用 run 登记的『运行事件流订阅 / 事件→节点态派生』。",
+ "intro": "本页是 Trace 去黑盒 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_trace_design（原子 #14–#29）。代码按『文件名 + 函数/对象名』引用。事件契约 EventEnvelope + 消费者图见 n4_trace_mech。现状：事件流式（#14）、历史回看（#15）、检索（#21）、失败红灯（#22）、Properties 净化（#26）已接实且符合；缺口集中在去黑盒的可读化——agent 折叠（#16）、focus 粒度（#17）、完整 trace 文档（#18）、dot 操作记录（#19，依赖引擎）、Prompt 三视图回溯/历史接线（#20，findPromptEvent 死代码 + 历史 trace no-op）、模型对比（#23，P8 未建契约）、agent 内联展开（#24）、重试徽章（#25）、payload 截断（#27）、命名正名（#28）。本 surface 不产单独 femods，复用 run 登记的『运行事件流订阅 / 事件→节点态派生』。",
  "functions": [
   {
    "n": 14,
@@ -156,6 +156,15 @@
    "be_dep": "无后端依赖（命名 cleanup）。",
    "fe_status_prev": "偏差",
    "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 29,
+   "cap": "trace-llm-fallback-visibility",
+   "design_ref": "n4-atom-29",
+   "current": "现状：已实现且符合（2026-07-16）。utils/trace.ts 新增 llmFallbackDetails()（解析 from/to_provider、context.from_route/to_route 的 provider_model_id、reason/role_name/provider_status_code、'<none>'=exhausted）、countLlmFallbacks()、eventModelName()（prompt_captured/model_resolved.resolved_model + llm_call.response_data.model_name），eventMessage/eventColor 补 llm_fallback/model_resolved 分支；EventTypeBadge 琥珀档；TraceEventRow 渲 FallbackBlock + 模型 chip；TracePanel 头部 run 级 fallback chip（点击 toggleType 过滤）；PromptInspector 标题显模型 chip。",
+   "gap": "符合设计，无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接（本原子零后端改动）：gateway emit_llm_fallback_event（gateway_chat_model.py probe 异常/probe false/dispatch 异常三处发射）→ studio run_manager._queue_event_subscriber 已序列化进 WS + trace.jsonl（test_run_manager_gateway_events.py 钉死信封）。"
   }
  ],
  "plan": [
@@ -344,6 +353,27 @@
     "run 模型对比顶部 tab 切候选结果（P8，待契约）"
    ],
    "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#29 llm-fallback-visibility",
+   "atoms": [
+    29
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "utils/trace.test.ts：eventMessage 人话化（A → B / failed — no remaining route）、eventColor='bg-warning'、llmFallbackDetails 解析双模型/reason/role/429/exhausted 且无 context 不炸、非 fallback 事件返 null、countLlmFallbacks 计数、eventModelName 三来源（prompt_captured/model_resolved.resolved_model + llm_call.response_data.model_name）+空值返 null。",
+    "TraceEventRow.fallback.test.tsx：fallback 行渲 Provider fallback 块（双模型 + reason）、exhausted 显 no remaining route、普通事件不渲块；模型 chip 在 prompt_captured/llm_call 行出现、无模型不渲。",
+    "TracePanel.test.tsx：run 级 chip 计数与单复数文案 + aria-label（Filter N LLM fallback events）、无降级的 run 不渲 chip。",
+    "PromptInspector.test.tsx：标题渲 resolved_model chip、无模型不渲。"
+   ],
+   "layer2": [
+    "真跑一个 primary route 故障（如错 API key 的首选 route + 可用兜底 route）的 skill：Trace 面板出现琥珀 llm_fallback 行与 run 级『N LLM fallback』chip，点 chip 只剩降级事件；点 prompt 行模型 chip 与 PromptInspector 标题读到实际模型。"
+   ],
+   "shots": [
+    "trace 琥珀 Provider fallback 块（模型 A → 模型 B + 原因）",
+    "run 级 LLM fallback 计数 chip（点击过滤）",
+    "prompt_captured 行模型 chip 与 PromptInspector 标题模型"
+   ]
   }
  ]
 }

@@ -5,13 +5,14 @@ Settings 也能,反之亦然。所有工具走 routers/llm.py 背后同一条服
 canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文件。
 
 - 只读/探测(get_llm_roles/search_llm_registry/compile/run_role_test/predict/
-  get_run_detail/list_golden/get_golden_content/test_llm_endpoint(_models)/
-  probe_llm_route):天然安全,免审批放行(copilot._DECLARATIVE_ALLOWED_TOOLS)。
+  get_run_detail/list_golden/get_golden_content/get_resume_validity/
+  test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批放行
+  (copilot._DECLARATIVE_ALLOWED_TOOLS)。
 - 写/执行(配置真相:create/update/delete role、endpoint 增删、route 增删、apply
-  profile;skill 实体:create_skill;真实执行:run_skill;golden 基准:
-  set/delete_golden_baseline):一律经 can_use_tool 挂起事前审批
-  (copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回结构化错误。旧的
-  「零审批直写 + before/after 一键撤销」已整体废除。
+  profile;skill 实体:create_skill/fork_skill/publish_skill;真实执行:
+  run_skill/resume_run;golden 基准:set/delete_golden_baseline):一律经
+  can_use_tool 挂起事前审批(copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回
+  结构化错误。旧的「零审批直写 + before/after 一键撤销」已整体废除。
 - 明文密钥安全隔离:注册表读工具靠 SecretStr 自动脱敏;endpoint 写工具的审批
   明细硬脱敏 api_key。读取明文密钥的 REST 接口绝不投影给 MCP 工具面。
 """
@@ -518,6 +519,173 @@ async def delete_golden_baseline_tool(args: dict[str, Any]) -> dict[str, Any]:
             "status": "success",
             "golden_id": golden_id,
             "message": f"Golden 基准 '{golden_id}' 已删除。",
+        }
+    )
+
+
+@tool(
+    "get_resume_validity",
+    "检查一次失败/中断的 run 能否从某个 checkpoint 或节点续跑:返回 resume_allowed "
+    "与不允许时的原因(dirty_upstream / checkpoint.not_found 等)。resume_run 之前"
+    "先用它。只读。",
+    {
+        "skill_id": str,
+        "run_id": str,
+        "checkpoint_id": str,
+        "resume_from_node_id": str,
+        "resume_to_node_id": str,
+    },
+)
+async def get_resume_validity_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.models.runs import ResumeValidityReq
+    from app.routers import runs
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    request = ResumeValidityReq(
+        checkpoint_id=str(args.get("checkpoint_id") or "").strip() or None,
+        resume_from_node_id=str(args.get("resume_from_node_id") or "").strip() or None,
+        resume_to_node_id=str(args.get("resume_to_node_id") or "").strip() or None,
+    )
+    try:
+        response = await runs.get_resume_validity(skill_id, run_id, request)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"get_resume_validity 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(response.model_dump(mode="json"))
+
+
+@tool(
+    "resume_run",
+    "从 checkpoint / 指定节点续跑一次 run(真实执行,消耗 token):先用 "
+    "get_resume_validity 确认可续,再调本工具;可带 human_input(给等待人工输入的"
+    "节点)与 context_overrides(覆盖上游产出,谨慎)。返回 run_id 后用 "
+    "get_run_detail 轮询。属于真实执行操作, 需用户审批。",
+    {
+        "skill_id": str,
+        "run_id": str,
+        "checkpoint_id": str,
+        "resume_from_node_id": str,
+        "resume_to_node_id": str,
+        "human_input": str,
+        "context_overrides": dict,
+    },
+)
+async def resume_run_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.models.runs import ResumeReq
+    from app.routers import runs
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    overrides = args.get("context_overrides")
+    if overrides is not None and not isinstance(overrides, dict):
+        return _text_result("context_overrides 必须是 JSON 对象", is_error=True)
+    request = ResumeReq(
+        checkpoint_id=str(args.get("checkpoint_id") or "").strip() or None,
+        resume_from_node_id=str(args.get("resume_from_node_id") or "").strip() or None,
+        resume_to_node_id=str(args.get("resume_to_node_id") or "").strip() or None,
+        human_input=str(args.get("human_input") or "").strip() or None,
+        context_overrides=overrides,
+    )
+    try:
+        metadata = await runs.resume_run(skill_id, run_id, request)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"resume_run 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": metadata.status,
+            "run_id": metadata.run_id,
+            "started_at": metadata.started_at.isoformat(),
+            "detail_hint": f".workspace/runs/{metadata.run_id}/",
+            "message": "续跑已启动;用 get_run_detail 轮询状态与结果(勿高频)。",
+        }
+    )
+
+
+@tool(
+    "publish_skill",
+    "发布 skill:本地 release 存档(git),配置了发布身份时同步远端 Artifact "
+    "Registry(缺身份只做本地档,照常成功)。version 可选,默认 1.0.0,只允许"
+    "字母/数字/./_/+/-。属于写操作, 需用户审批。",
+    {"skill_id": str, "version": str},
+)
+async def publish_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.core.backends import (
+        get_backend_config,
+        get_metadata,
+        get_registry_client,
+        get_storage,
+    )
+    from app.models.publish import PublishSkillReq
+    from app.routers import skills as skills_router
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        request = (
+            PublishSkillReq(version=str(args["version"]))
+            if args.get("version")
+            else PublishSkillReq()
+        )
+    except ValidationError as exc:
+        return _text_result(f"publish_skill 入参无效:\n{exc}", is_error=True)
+    try:
+        # 路由函数即发布管线唯一入口(幂等键/本地 release/远端同步逻辑都在里面),
+        # 依赖按 HTTP 路径的同一组 provider 显式供给,不复制第二份发布逻辑。
+        result = await skills_router.publish_skill(
+            skill_id,
+            request,
+            idempotency_key=None,
+            user_id=get_backend_config().default_user_id,
+            storage=get_storage(),
+            metadata=get_metadata(),
+            registry=get_registry_client(),
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"publish_skill 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(result.model_dump(mode="json"))
+
+
+@tool(
+    "fork_skill",
+    "把一个 skill(含只读/社区 skill)复制成自己的新 skill:new_skill_id 用小写"
+    "字母开头、只含小写字母/数字/连字符。属于写操作, 需用户审批。",
+    {"skill_id": str, "new_skill_id": str},
+)
+async def fork_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.core.backends import get_backend_config, get_metadata, get_storage
+    from app.services import skills as skills_service
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    new_skill_id = str(args.get("new_skill_id", "")).strip()
+    if not skill_id or not new_skill_id:
+        return _text_result("skill_id 与 new_skill_id 都不能为空", is_error=True)
+    try:
+        summary = await skills_service.fork_skill(
+            get_backend_config().default_user_id,
+            skill_id,
+            new_skill_id,
+            get_storage(),
+            get_metadata(),
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"fork_skill 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "skill_id": summary.id,
+            "directory_path": summary.directory_path,
+            "message": f"已从 '{skill_id}' fork 出 '{summary.id}'。",
         }
     )
 
@@ -1092,6 +1260,10 @@ def _copilot_mcp_tools() -> list[Any]:
         get_golden_content_tool,
         set_golden_baseline_tool,
         delete_golden_baseline_tool,
+        get_resume_validity_tool,
+        resume_run_tool,
+        publish_skill_tool,
+        fork_skill_tool,
         create_llm_role_tool,
         update_llm_role_tool,
         delete_llm_role_tool,

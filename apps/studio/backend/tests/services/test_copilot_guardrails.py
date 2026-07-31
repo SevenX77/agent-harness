@@ -288,6 +288,7 @@ def test_read_probe_mcp_tools_are_pre_allowed_not_held() -> None:
     assert "mcp__studio__test_llm_endpoint" in allowed
     assert "mcp__studio__probe_llm_route" in allowed
     for write_tool in (
+        "mcp__studio__create_skill",
         "mcp__studio__create_llm_role",
         "mcp__studio__update_llm_role",
         "mcp__studio__delete_llm_role",
@@ -298,3 +299,27 @@ def test_read_probe_mcp_tools_are_pre_allowed_not_held() -> None:
         "mcp__studio__apply_model_profile_to_role",
     ):
         assert write_tool not in allowed
+
+
+def test_mcp_create_skill_holds_for_approval_then_approves(tmp_path: Path) -> None:
+    # skill 实体写与配置写同一条审批语义:先挂起、用户批准后放行。
+    queue = _register_sink("s-skill", tmp_path)
+
+    held, result = asyncio.run(
+        _hold_and_resolve(
+            "s-skill",
+            "mcp__studio__create_skill",
+            {"skill_id": "brand-new"},
+            approve=True,
+        )
+    )
+
+    assert held is True
+    assert isinstance(result, PermissionResultAllow)
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    approval_events = [
+        e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
+    ]
+    assert approval_events and approval_events[0].tool_name == "mcp__studio__create_skill"

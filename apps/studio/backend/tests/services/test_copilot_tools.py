@@ -295,3 +295,113 @@ def test_build_options_attaches_studio_mcp_for_chat_only(tmp_path: Path) -> None
 
     assert set(chat_options.mcp_servers) == {"studio"}
     assert probe_options.mcp_servers == {}
+
+
+# ── create_skill(skill 实体写工具,经审批;审批面契约见 test_copilot_guardrails)──
+
+
+def test_create_skill_tool_requires_skill_id() -> None:
+    result = asyncio.run(copilot_tools.create_skill_tool.handler({"skill_id": "  "}))
+
+    assert result["is_error"] is True
+    assert "skill_id" in result["content"][0]["text"]
+
+
+def test_create_skill_tool_rejects_invalid_skill_id(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # 与 POST /api/skills 相同的边界校验(CreateSkillReq pattern),拼写错误在
+    # 工具边界一次拒绝,不落半成品目录。
+    del studio_roots
+    result = asyncio.run(
+        copilot_tools.create_skill_tool.handler({"skill_id": "Bad_Name!"})
+    )
+
+    assert result["is_error"] is True
+
+
+def test_create_skill_tool_creates_scaffold_and_registers_index(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _ = studio_roots
+
+    result = asyncio.run(
+        copilot_tools.create_skill_tool.handler({"skill_id": "my-new-skill"})
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["skill_id"] == "my-new-skill"
+    assert payload["directory_path"] == str(skills_dir / "my-new-skill")
+    # 索引落库 = UI 可见性的根据;files 缺省时走服务端脚手架,不留裸目录。
+    from app.core.backends import get_metadata
+
+    entry = asyncio.run(get_metadata().get_skill_index_entry("my-new-skill"))
+    assert entry is not None
+    assert (skills_dir / "my-new-skill" / "GRAPH.md").exists()
+
+
+def test_create_skill_tool_accepts_seed_files(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # 种子文件必须是合法 skill(与 POST /api/skills 同一条 manifest 校验);
+    # 这里用服务端脚手架当种子,验证 files 参数原样落盘而非被忽略。
+    from app.services.skills import _scaffold_files_for
+
+    skills_dir, _ = studio_roots
+    seed = _scaffold_files_for("seeded-skill")
+
+    result = asyncio.run(
+        copilot_tools.create_skill_tool.handler(
+            {"skill_id": "seeded-skill", "files": seed}
+        )
+    )
+
+    assert "is_error" not in result
+    graph = (skills_dir / "seeded-skill" / "GRAPH.md").read_text(encoding="utf-8")
+    assert "name: seeded-skill" in graph
+
+
+def test_create_skill_tool_rejects_invalid_seed_manifest(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # 非法种子(裸标题、无 phases)在创建即被 manifest 校验拒绝,不留半成品。
+    del studio_roots
+    result = asyncio.run(
+        copilot_tools.create_skill_tool.handler(
+            {"skill_id": "broken-seed", "files": {"GRAPH.md": "# broken\n"}}
+        )
+    )
+
+    assert result["is_error"] is True
+    assert "MANIFEST_VALIDATION_FAILED" in result["content"][0]["text"]
+
+
+def test_create_skill_tool_failed_create_rolls_back_and_id_stays_usable(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # 失败的创建必须回滚目录,skill_id 不被半成品毒死:同名重试(合法内容)成功。
+    skills_dir, _ = studio_roots
+
+    bad = asyncio.run(
+        copilot_tools.create_skill_tool.handler(
+            {"skill_id": "retry-skill", "files": {"GRAPH.md": "# broken\n"}}
+        )
+    )
+    assert bad["is_error"] is True
+    assert not (skills_dir / "retry-skill").exists()
+
+    good = asyncio.run(copilot_tools.create_skill_tool.handler({"skill_id": "retry-skill"}))
+    assert "is_error" not in good
+
+
+def test_create_skill_tool_duplicate_reports_error(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    del studio_roots
+    result = asyncio.run(
+        copilot_tools.create_skill_tool.handler({"skill_id": "text-segmentation"})
+    )
+
+    assert result["is_error"] is True
+    assert "text-segmentation" in result["content"][0]["text"]

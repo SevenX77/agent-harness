@@ -248,6 +248,9 @@ one-page orientation, not the full design.
 
 ## Standard Documents
 
+- **交付台账(当前活动工作的唯一可变状态)**:
+  `docs/development/DELIVERY_LEDGER.md` — 在做什么、到哪一步、被什么挡住、
+  过哪道门算完。**新会话接手推进工作先读它**;合并在册 PR 时同步更新对应行。
 - **MVP1 design = source of truth — align to the design, NOT the code.** When the
   code and the MVP1 design disagree, the design wins: fix the code, do not
   retrofit the design to match drift. The design body lives in two places:

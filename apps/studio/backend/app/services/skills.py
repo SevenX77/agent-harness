@@ -1078,13 +1078,20 @@ async def create_new_skill(
     write_skill_files_atomic(skill_dir, files or _scaffold_files_for(skill_id))
     workspace_dir_for(skill_dir).mkdir(parents=True, exist_ok=True)
     initialize_skill_repository(skill_dir)
-    summary = await _summary_for_skill_dir_async(
-        user_id,
-        skill_dir,
-        storage,
-        metadata,
-        skill_id=skill_id,
-    )
+    try:
+        summary = await _summary_for_skill_dir_async(
+            user_id,
+            skill_dir,
+            storage,
+            metadata,
+            skill_id=skill_id,
+        )
+    except Exception:
+        # 创建即校验失败(如非法种子 manifest)必须回滚刚写出的目录:失败的
+        # create 不得留下半成品占住 skill_id,否则同名重试会被
+        # _is_importable_skill_directory 误判为 SKILL_ALREADY_EXISTS。
+        _rmtree_with_retry(skill_dir)
+        raise
     summary = summary.model_copy(update={"directory_path": str(skill_dir)})
     await metadata.save_skill_index_entry(
         skill_id,

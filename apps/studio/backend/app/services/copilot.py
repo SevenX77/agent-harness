@@ -94,10 +94,10 @@ _ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
 COPILOT_SDK_SUPPORTED_METHOD_IDS = call_method_ids_for_client("anthropic_messages_client")
 
 # 读/探测类 MCP 工具声明式直放(R8.1/R9.1/R10.2):由后端实现并自校验参数、
-# 只读或只探测,天然安全。配置写工具(create/update/delete role · endpoint/route
-# 增删 · apply profile)一律不在此列 —— 它们走 can_use_tool 挂起审批(实测:MCP
-# 工具无 Bash 式沙箱自动放行,移出白名单即触发 can_use_tool)。Write/Edit/Bash
-# 同样留在 "ask" 审批路径。
+# 只读或只探测,天然安全。写工具(配置真相:create/update/delete role ·
+# endpoint/route 增删 · apply profile;skill 实体:create_skill)一律不在此列
+# —— 它们走 can_use_tool 挂起审批(实测:MCP 工具无 Bash 式沙箱自动放行,
+# 移出白名单即触发 can_use_tool)。Write/Edit/Bash 同样留在 "ask" 审批路径。
 _DECLARATIVE_ALLOWED_TOOLS = [
     "Read",
     "Glob",
@@ -112,10 +112,12 @@ _DECLARATIVE_ALLOWED_TOOLS = [
     "mcp__studio__probe_llm_route",
 ]
 
-# 配置真相写工具(凭据/路由/角色):必须经事前审批,绝不进免审批白名单。命名与
-# copilot_tools.py 的 @tool 名一一对应;can_use_tool 据此拦截并挂起。
-_MCP_CONFIG_WRITE_TOOLS = frozenset(
+# 需审批的 MCP 写工具(配置真相:凭据/路由/角色 + skill 实体):必须经事前审批,
+# 绝不进免审批白名单。命名与 copilot_tools.py 的 @tool 名一一对应;can_use_tool
+# 据此拦截并挂起。
+_MCP_APPROVAL_WRITE_TOOLS = frozenset(
     {
+        "mcp__studio__create_skill",
         "mcp__studio__create_llm_role",
         "mcp__studio__update_llm_role",
         "mcp__studio__delete_llm_role",
@@ -127,7 +129,8 @@ _MCP_CONFIG_WRITE_TOOLS = frozenset(
     }
 )
 
-_CONFIG_TOOL_ACTION_LABELS = {
+_WRITE_TOOL_ACTION_LABELS = {
+    "mcp__studio__create_skill": "Create Skill",
     "mcp__studio__create_llm_role": "Create LLM Role",
     "mcp__studio__update_llm_role": "Update LLM Role",
     "mcp__studio__delete_llm_role": "Delete LLM Role",
@@ -137,20 +140,20 @@ _CONFIG_TOOL_ACTION_LABELS = {
     "mcp__studio__update_llm_route": "Update Provider Route",
     "mcp__studio__delete_llm_route": "Delete Provider Route",
 }
-_CONFIG_TOOL_REDACTED_KEYS = ("api_key",)
+_WRITE_TOOL_REDACTED_KEYS = ("api_key",)
 
 
-def _build_config_tool_approval_detail(
+def _build_write_tool_approval_detail(
     tool_name: str, tool_input: Mapping[str, Any]
 ) -> str:
     """人机审批明细:工具动作标签 + 参数(敏感字段硬脱敏)。密钥明文绝不进入
     审批卡片渲染或日志(不变量 3)。"""
 
     clean: dict[str, Any] = dict(tool_input)
-    for key in _CONFIG_TOOL_REDACTED_KEYS:
+    for key in _WRITE_TOOL_REDACTED_KEYS:
         if clean.get(key):
             clean[key] = "******** (hidden)"
-    label = _CONFIG_TOOL_ACTION_LABELS.get(tool_name, tool_name)
+    label = _WRITE_TOOL_ACTION_LABELS.get(tool_name, tool_name)
     params = json.dumps(clean, ensure_ascii=False, indent=2, sort_keys=True)
     return f"Action: {label}\nParameters:\n{params}"
 
@@ -603,11 +606,12 @@ def _make_safe_write_can_use_tool(
             return await _hold_for_tool_approval(
                 skill_id, sink, tool_name="Bash", detail=command, tool_use_id=tool_use_id
             )
-        if tool_name in _MCP_CONFIG_WRITE_TOOLS:
-            # R10.2 (revised): config-truth writes (credentials/routes/roles) are
-            # never zero-approval — they hold for an explicit approval card before
-            # the CLI executes the tool, so nothing is written pre-consent. The
-            # old zero-approval + before/after undo path is deleted.
+        if tool_name in _MCP_APPROVAL_WRITE_TOOLS:
+            # R10.2 (revised): writes (config truth: credentials/routes/roles;
+            # skill entities: create_skill) are never zero-approval — they hold
+            # for an explicit approval card before the CLI executes the tool, so
+            # nothing is written pre-consent. The old zero-approval +
+            # before/after undo path is deleted.
             if sink is None:
                 return PermissionResultDeny(
                     message=(
@@ -620,7 +624,7 @@ def _make_safe_write_can_use_tool(
                 skill_id,
                 sink,
                 tool_name=tool_name,
-                detail=_build_config_tool_approval_detail(tool_name, tool_input),
+                detail=_build_write_tool_approval_detail(tool_name, tool_input),
                 tool_use_id=tool_use_id,
             )
         return PermissionResultAllow()

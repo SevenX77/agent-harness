@@ -333,6 +333,7 @@ def test_mcp_server_exposes_full_parity_toolset() -> None:
         "compile_skill",
         "run_role_test",
         "predict_skill",
+        "create_skill",
         "create_llm_role",
         "update_llm_role",
         "delete_llm_role",

@@ -40,8 +40,8 @@
 
 | # | 项 | 状态 | 关键坐标 |
 |---|---|---|---|
-| W1-1 | `create_skill` 工具(包 `POST /api/skills`,走索引落库) | 待开工 | 后端 `apps/studio/backend/app/routers/skills.py:312`;索引 `services/skills.py`(`save_skill_index_entry`) |
-| W1-2 | `run_skill` + `get_run_detail` 工具 + 真跑审批放行 | 待开工 | 后端 `routers/runs.py:37`(start run)/ `:97`(detail);改 `copilot_tools.py:158` 描述;审批复用 `copilot.py:606-625` |
+| W1-1 | `create_skill` 工具(包 `POST /api/skills`,走索引落库) | ✅ 已合并(#526) | 8 测试 + 完整 backend 套件绿;顺带修服务层缺陷:失败创建现在回滚目录,skill_id 不再被半成品毒死 |
+| W1-2 | `run_skill` + `get_run_detail` 工具 + 真跑审批放行 | ✅ 随本行同 PR 合入 | 真跑走审批卡(推翻旧"只能 UI 触发"禁令);get_run_detail 有界投影(事件只给计数+错误摘录,final_context 4000 字符截断);9 测试 |
 | W1-3 | golden 工具组(list / read / set / plan / delete) | 待开工 | 后端 `routers/golden.py:26/35/51/70/84` |
 | W1-4 | `resume_run` + resume 有效性工具 | 待开工 | 后端 `routers/runs.py:215`(validity)/ `:259`(resume) |
 | W1-5 | `publish_skill` / `fork_skill` 工具 | 待开工 | 后端 `routers/skills.py:564`(publish)/ `:953`(fork) |
@@ -67,7 +67,7 @@
 | # | 项 | 状态 | 处置 |
 |---|---|---|---|
 | B-1 | `gh` CLI 被失效的 `GITHUB_TOKEN` 环境变量压制(keyring 登录本身有效) | 已绕过(2026-07-30) | 调 gh 一律 `env -u GITHUB_TOKEN gh ...`;根治 = 从系统环境变量删除该变量 |
-| B-2 | dependabot 开放 PR 积压(#520-#524,2026-07-24 起) | 待处理 | 冲刺间隙逐个审并合;pip-audit 门禁会因陈旧依赖新增 CVE 变红 |
+| B-2 | dependabot 开放 PR 积压(#520-#524,2026-07-24 起) | 部分处理 | 预言应验:mcp/pyasn1 共 6 个 CVE 曾把全部 PR 拦死,已修(#527);npm/cargo/actions 的 #520-#524 仍待审合 |
 
 ### 在册搁置项(非本冲刺,重启 = 用户裁决)
 

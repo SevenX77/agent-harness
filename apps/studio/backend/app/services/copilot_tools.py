@@ -5,12 +5,12 @@ Settings 也能,反之亦然。所有工具走 routers/llm.py 背后同一条服
 canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文件。
 
 - 只读/探测(get_llm_roles/search_llm_registry/compile/run_role_test/predict/
-  test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批放行
-  (copilot._DECLARATIVE_ALLOWED_TOOLS)。
-- 写(配置真相:create/update/delete role、endpoint 增删、route 增删、apply
-  profile;skill 实体:create_skill):一律经 can_use_tool 挂起事前审批
-  (copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回结构化错误。旧的「零审批直写 +
-  before/after 一键撤销」已整体废除。
+  get_run_detail/test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批
+  放行(copilot._DECLARATIVE_ALLOWED_TOOLS)。
+- 写/执行(配置真相:create/update/delete role、endpoint 增删、route 增删、apply
+  profile;skill 实体:create_skill;真实执行:run_skill):一律经 can_use_tool
+  挂起事前审批(copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回结构化错误。旧的
+  「零审批直写 + before/after 一键撤销」已整体废除。
 - 明文密钥安全隔离:注册表读工具靠 SecretStr 自动脱敏;endpoint 写工具的审批
   明细硬脱敏 api_key。读取明文密钥的 REST 接口绝不投影给 MCP 工具面。
 """
@@ -156,7 +156,8 @@ _PREDICT_DIAGNOSTICS_LIMIT = 20
     "predict_skill",
     "对指定 skill 做无 LLM 空跑(Predict):编译干净但行为可疑时用它——"
     "返回 phase 路径、path diff、诊断摘要;深查细节去 .workspace/runs/<run_id>/。"
-    "compile_skill 干净之后的第二级诊断;真实运行(Run)只能由用户在 UI 触发。",
+    "compile_skill 干净之后的第二级诊断;predict 干净后可用 run_skill"
+    "(需用户审批)发起真实运行。",
     {"skill_id": str},
 )
 async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -256,6 +257,113 @@ async def create_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
             "skill_id": summary.id,
             "directory_path": summary.directory_path,
             "message": f"Skill '{summary.id}' 已创建并登记索引。",
+        }
+    )
+
+
+@tool(
+    "run_skill",
+    "真实运行指定 skill(调用真实 LLM、消耗 token):异步启动,立即返回 run_id 与 "
+    "running 状态,之后用 get_run_detail 查询进度与结果。input_data 可选(skill 的"
+    "根输入对象);golden_id 可选(用该 golden 用例的输入起跑)。跑前先保证 "
+    "compile_skill 干净、predict_skill 无结构性诊断。属于真实执行操作, 需用户审批。",
+    {"skill_id": str, "input_data": dict, "golden_id": str},
+)
+async def run_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.models.runs import RunRequest
+    from app.services.run_manager import run_manager
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    raw_input = args.get("input_data")
+    if raw_input is not None and not isinstance(raw_input, dict):
+        return _text_result("input_data 必须是 JSON 对象", is_error=True)
+    golden_id = str(args.get("golden_id") or "").strip() or None
+    try:
+        metadata = await run_manager.start_run(
+            skill_id, RunRequest(input_data=raw_input, golden_id=golden_id)
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        detail = getattr(exc, "detail", None)
+        payload: Any = detail if detail is not None else f"run_skill 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": metadata.status,
+            "run_id": metadata.run_id,
+            "started_at": metadata.started_at.isoformat(),
+            "detail_hint": f".workspace/runs/{metadata.run_id}/",
+            "message": "Run 已启动;用 get_run_detail 轮询状态与结果(勿高频)。",
+        }
+    )
+
+
+# get_run_detail 的有界投影参数:错误摘录条数与 final_context 字符上限,把工具
+# 结果的 JSON 字符量硬压在 MCP 上限内(同 search_llm_registry 的有界纪律)。
+_RUN_ERRORS_LIMIT = 5
+_RUN_FINAL_CONTEXT_CHAR_LIMIT = 4000
+
+
+@tool(
+    "get_run_detail",
+    "查询一次真实 run 的状态与结果(紧凑投影):整体状态、token 用量、事件类型"
+    "计数、错误摘录(最多 5 条)、最终输出(final_context,超长截断)与产物清单。"
+    "只读;run 还是 running 时隔一会儿再查,不要高频轮询。逐事件细节用 Read 打开 "
+    ".workspace/runs/<run_id>/。",
+    {"skill_id": str, "run_id": str},
+)
+async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.run_manager import run_manager
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    try:
+        detail = run_manager.get_run_detail(skill_id=skill_id, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"get_run_detail 失败: {exc}"
+        return _text_result(payload, is_error=True)
+
+    event_type_counts: dict[str, int] = {}
+    errors: list[dict[str, Any]] = []
+    for event in detail.events:
+        event_type_counts[event.event_type] = event_type_counts.get(event.event_type, 0) + 1
+        if event.error_code or event.error_payload:
+            errors.append(
+                {
+                    "event_type": event.event_type,
+                    "error_code": event.error_code
+                    or (event.error_payload.error_code if event.error_payload else None),
+                    "message": event.error_payload.message if event.error_payload else None,
+                }
+            )
+
+    final_context_json: str | None = None
+    final_context_truncated = False
+    if detail.final_context is not None:
+        final_context_json = json.dumps(detail.final_context, ensure_ascii=False)
+        if len(final_context_json) > _RUN_FINAL_CONTEXT_CHAR_LIMIT:
+            final_context_json = final_context_json[:_RUN_FINAL_CONTEXT_CHAR_LIMIT]
+            final_context_truncated = True
+
+    metadata = detail.metadata
+    return _text_result(
+        {
+            "run_id": metadata.run_id,
+            "status": metadata.status,
+            "started_at": metadata.started_at.isoformat(),
+            "metrics": metadata.metrics.model_dump(mode="json") if metadata.metrics else None,
+            "input_summary": metadata.input_summary,
+            "events_total": len(detail.events),
+            "event_type_counts": event_type_counts,
+            "errors": errors[-_RUN_ERRORS_LIMIT:],
+            "errors_total": len(errors),
+            "artifacts": detail.artifacts,
+            "final_context_json": final_context_json,
+            "final_context_truncated": final_context_truncated,
+            "detail_hint": f".workspace/runs/{metadata.run_id}/",
         }
     )
 
@@ -824,6 +932,8 @@ def _copilot_mcp_tools() -> list[Any]:
         run_role_test_tool,
         predict_skill_tool,
         create_skill_tool,
+        run_skill_tool,
+        get_run_detail_tool,
         create_llm_role_tool,
         update_llm_role_tool,
         delete_llm_role_tool,

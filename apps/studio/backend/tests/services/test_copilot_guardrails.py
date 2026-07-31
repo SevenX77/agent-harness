@@ -287,8 +287,10 @@ def test_read_probe_mcp_tools_are_pre_allowed_not_held() -> None:
     assert "mcp__studio__search_llm_registry" in allowed
     assert "mcp__studio__test_llm_endpoint" in allowed
     assert "mcp__studio__probe_llm_route" in allowed
+    assert "mcp__studio__get_run_detail" in allowed
     for write_tool in (
         "mcp__studio__create_skill",
+        "mcp__studio__run_skill",
         "mcp__studio__create_llm_role",
         "mcp__studio__update_llm_role",
         "mcp__studio__delete_llm_role",
@@ -323,3 +325,27 @@ def test_mcp_create_skill_holds_for_approval_then_approves(tmp_path: Path) -> No
         e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
     ]
     assert approval_events and approval_events[0].tool_name == "mcp__studio__create_skill"
+
+
+def test_mcp_run_skill_holds_for_approval_then_approves(tmp_path: Path) -> None:
+    # 真实执行(调 LLM、花钱)与写工具同一条审批语义:先挂起、批准后放行。
+    queue = _register_sink("s-run", tmp_path)
+
+    held, result = asyncio.run(
+        _hold_and_resolve(
+            "s-run",
+            "mcp__studio__run_skill",
+            {"skill_id": "text-segmentation", "input_data": {"text": "hi"}},
+            approve=True,
+        )
+    )
+
+    assert held is True
+    assert isinstance(result, PermissionResultAllow)
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    approval_events = [
+        e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
+    ]
+    assert approval_events and approval_events[0].tool_name == "mcp__studio__run_skill"

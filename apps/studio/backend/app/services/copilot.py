@@ -94,10 +94,11 @@ _ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
 COPILOT_SDK_SUPPORTED_METHOD_IDS = call_method_ids_for_client("anthropic_messages_client")
 
 # 读/探测类 MCP 工具声明式直放(R8.1/R9.1/R10.2):由后端实现并自校验参数、
-# 只读或只探测,天然安全。写工具(配置真相:create/update/delete role ·
-# endpoint/route 增删 · apply profile;skill 实体:create_skill)一律不在此列
-# —— 它们走 can_use_tool 挂起审批(实测:MCP 工具无 Bash 式沙箱自动放行,
-# 移出白名单即触发 can_use_tool)。Write/Edit/Bash 同样留在 "ask" 审批路径。
+# 只读或只探测,天然安全。写/执行工具(配置真相:create/update/delete role ·
+# endpoint/route 增删 · apply profile;skill 实体:create_skill;真实执行:
+# run_skill)一律不在此列 —— 它们走 can_use_tool 挂起审批(实测:MCP 工具无
+# Bash 式沙箱自动放行,移出白名单即触发 can_use_tool)。Write/Edit/Bash 同样
+# 留在 "ask" 审批路径。
 _DECLARATIVE_ALLOWED_TOOLS = [
     "Read",
     "Glob",
@@ -107,17 +108,19 @@ _DECLARATIVE_ALLOWED_TOOLS = [
     "mcp__studio__compile_skill",
     "mcp__studio__run_role_test",
     "mcp__studio__predict_skill",
+    "mcp__studio__get_run_detail",
     "mcp__studio__test_llm_endpoint",
     "mcp__studio__test_llm_endpoint_models",
     "mcp__studio__probe_llm_route",
 ]
 
-# 需审批的 MCP 写工具(配置真相:凭据/路由/角色 + skill 实体):必须经事前审批,
-# 绝不进免审批白名单。命名与 copilot_tools.py 的 @tool 名一一对应;can_use_tool
-# 据此拦截并挂起。
+# 需审批的 MCP 写/执行工具(配置真相:凭据/路由/角色 + skill 实体 + 真实执行):
+# 必须经事前审批,绝不进免审批白名单。命名与 copilot_tools.py 的 @tool 名一一
+# 对应;can_use_tool 据此拦截并挂起。
 _MCP_APPROVAL_WRITE_TOOLS = frozenset(
     {
         "mcp__studio__create_skill",
+        "mcp__studio__run_skill",
         "mcp__studio__create_llm_role",
         "mcp__studio__update_llm_role",
         "mcp__studio__delete_llm_role",
@@ -131,6 +134,7 @@ _MCP_APPROVAL_WRITE_TOOLS = frozenset(
 
 _WRITE_TOOL_ACTION_LABELS = {
     "mcp__studio__create_skill": "Create Skill",
+    "mcp__studio__run_skill": "Run Skill",
     "mcp__studio__create_llm_role": "Create LLM Role",
     "mcp__studio__update_llm_role": "Update LLM Role",
     "mcp__studio__delete_llm_role": "Delete LLM Role",

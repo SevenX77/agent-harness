@@ -21,6 +21,7 @@ _MCP_TOOL_NAMES = [
     "mcp__studio__get_run_detail",
     "mcp__studio__list_golden",
     "mcp__studio__get_golden_content",
+    "mcp__studio__get_resume_validity",
     "mcp__studio__test_llm_endpoint",
     "mcp__studio__test_llm_endpoint_models",
     "mcp__studio__probe_llm_route",
@@ -29,6 +30,9 @@ _MCP_TOOL_NAMES = [
 _MCP_APPROVAL_WRITE_TOOL_NAMES = [
     "mcp__studio__create_skill",
     "mcp__studio__run_skill",
+    "mcp__studio__resume_run",
+    "mcp__studio__publish_skill",
+    "mcp__studio__fork_skill",
     "mcp__studio__set_golden_baseline",
     "mcp__studio__delete_golden_baseline",
     "mcp__studio__create_llm_role",

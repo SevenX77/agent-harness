@@ -32,7 +32,29 @@
 1. **真实 run 允许 agent 触发**,交互走与 LLM 配置写工具相同的阻塞式审批卡(`can_use_tool` 挂起,机制见 `apps/studio/backend/app/services/copilot.py:606-625`)。此决定推翻 `copilot_tools.py:158` 工具描述中"真实运行只能由用户在 UI 触发"的禁令。
 2. **新工具全部是既有后端端点的薄包装**,照 `copilot_tools.py` 既有 16 工具的模式实现;业务逻辑留在 routers/services 层,工具层不长逻辑。
 3. **引擎并联缺陷两步走**:先在编译期对并联拓扑发正式 `[F-v3-*]` 诊断(堵住"编译绿灯→运行炸框架原生错"的谎),后做真修(执行态状态写入迁 delta 语义 + 接上已有的 `blackboard_data_merge` 合并器),真修合并时撤除编译拦截。
-4. **明确后置项**(重启条件 = 用户重新裁决):CLI 路 MCP 暴露(N5,需后端先长出对外 MCP 出口);新建向导/模板 UI(copilot 成为新建主路后降级);gateway 状态投影 7 条毛刺(不阻断闭环);文档系统工程(类型学 / docs 门禁 / AGENTS.md 瘦身)。
+4. **明确后置项**(重启条件 = 用户重新裁决):~~CLI 路 MCP 暴露(N5)~~(已被 2026-07-31 裁决提为最高优先,见下);新建向导/模板 UI(copilot 成为新建主路后降级);gateway 状态投影 7 条毛刺(不阻断闭环);文档系统工程(类型学 / docs 门禁 / AGENTS.md 瘦身)。
+
+### 第二轮裁决(用户裁决,2026-07-31,首次真机测试后)
+
+用户在面板里真跑了一轮 demo-loop(session 证据:`~/.claude/projects/D--coding-skills-demo-loop/54db2ab2….jsonl`,编译诊断 4→2→1 收敛后卡死在 `STUDIO_RUNTIME_INPUT_MISSING`),据此裁决:
+
+1. **CLI 路(N5)提为最高优先**:"先修 Open in CLI,因为 cli 是成熟的 agent,不需要调试这些细节"。面板细节修复全部排在 N5 之后。
+2. 真机测试坐实的面板缺口(N5 之后按序清账,登记为 P-系列):
+   - P-1 **运行输入缺工具**:copilot 无法供给/绑定 test input,`STUDIO_RUNTIME_INPUT_MISSING` 是对话闭环的死墙;应能在无真实输入文件时自行 mock 一份 test input。
+   - P-2 **AskUserQuestion 黑洞**:模型提问但面板不渲染、SDK 空答继续(session 记录 24-25 实证);用户从未收到提问。处置方向:面板会话禁用该工具,让模型用正文提问收尾。
+   - P-3 **Bash 只读白名单**:`ls` 等无害只读命令免审批(代码强制解析:单命令、无管道/重定向/连接符才放行),不靠提示词。
+   - P-4 **审批卡状态服务端权威化**:决议状态只存组件本地 state,重渲染即复活可点(`tool-approval-card.tsx:49-73`);后端 resolve 时应发 resolved 事件,前端从事件流投影。
+   - P-5 **编译诊断结构化渲染**:is_error 工具结果(编译诊断集)不该渲染成系统故障样的红色 JSON 堆;中断后 CLI 聚合错误回声("SDK returned an error: …McpToolCallError×N")一并评估降噪。
+   - P-6 **copilot 面板宽度自适应**:随窗口宽度伸缩(clamp + 可拖拽),窗口宽裕时面板加宽。
+3. **新讨论项(设计探讨,未裁决实施)**:把 Open in CLI 的终端内嵌进 copilot 面板区域,启动 CLI 时以终端界面替代对话界面("CLI 即 copilot");依赖 N5 工具面先就位。
+
+#### N5 · Open in CLI 工具面(当前最高优先)
+
+| # | 项 | 状态 | 关键坐标 |
+|---|---|---|---|
+| N5-1 | 设计:sidecar 对外 MCP 出口(streamable HTTP + STUDIO_API_TOKEN 鉴权)+ CLI 注册方案(claude 原生 http mcp 配置;codex 经 stdio 桥)| 进行中 | 工具集 `app/services/copilot_tools.py`(27 工具复用同一进程内实现);拉起点 `apps/studio/tauri/src/lib.rs:727-748` |
+| N5-2 | 实现:后端 MCP HTTP 出口 + 审批语义在 CLI 表面的等价物(CLI 有自己的审批 UI,写工具是否二次审批需设计定) | 待开工 | — |
+| N5-3 | 实现:lib.rs 两条 master cmd 注册 studio MCP + KB-13/cli.md 回写 | 待开工 | `app/agents/contexts/cli.md` |
 
 ### 冲刺清单
 

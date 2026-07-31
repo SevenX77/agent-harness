@@ -845,3 +845,186 @@ def test_delete_golden_baseline_tool_deletes(monkeypatch) -> None:  # noqa: ANN0
     payload = json.loads(result["content"][0]["text"])
     assert payload["status"] == "success"
     assert captured == {"skill_id": "text-segmentation", "golden_id": "g-1"}
+
+
+# ── resume / publish / fork(旅程 05 调试续跑 + 06 发布)───────────────────────
+
+
+def test_get_resume_validity_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.get_resume_validity_tool.handler({"skill_id": "s", "run_id": " "})
+    )
+
+    assert result["is_error"] is True
+
+
+def test_get_resume_validity_tool_projects_response(monkeypatch) -> None:  # noqa: ANN001
+    from app.models.runs import ResumeValidityReq, ResumeValidityResponse
+    from app.routers import runs as runs_router
+
+    captured: dict[str, object] = {}
+
+    async def _fake_validity(
+        skill_id: str, run_id: str, request: ResumeValidityReq
+    ) -> ResumeValidityResponse:
+        captured["request"] = request
+        return ResumeValidityResponse.model_validate(
+            {"run_id": run_id, "resume_allowed": False, "reason": "dirty_upstream"}
+        )
+
+    monkeypatch.setattr(runs_router, "get_resume_validity", _fake_validity)
+
+    result = asyncio.run(
+        copilot_tools.get_resume_validity_tool.handler(
+            {
+                "skill_id": "text-segmentation",
+                "run_id": "run-1",
+                "resume_from_node_id": "draft",
+            }
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["resume_allowed"] is False
+    assert payload["reason"] == "dirty_upstream"
+    request = captured["request"]
+    assert isinstance(request, ResumeValidityReq)
+    assert request.resume_from_node_id == "draft"
+
+
+def test_resume_run_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.resume_run_tool.handler({"skill_id": " ", "run_id": "r"})
+    )
+
+    assert result["is_error"] is True
+
+
+def test_resume_run_tool_resumes_and_returns_metadata(monkeypatch) -> None:  # noqa: ANN001
+    from datetime import UTC, datetime
+
+    from app.models.runs import ResumeReq, RunMetadata
+    from app.routers import runs as runs_router
+
+    captured: dict[str, object] = {}
+
+    async def _fake_resume(skill_id: str, run_id: str, request: ResumeReq) -> RunMetadata:
+        captured["request"] = request
+        return RunMetadata(
+            run_id="run-1", status="running", started_at=datetime.now(UTC)
+        )
+
+    monkeypatch.setattr(runs_router, "resume_run", _fake_resume)
+
+    result = asyncio.run(
+        copilot_tools.resume_run_tool.handler(
+            {
+                "skill_id": "text-segmentation",
+                "run_id": "run-1",
+                "resume_from_node_id": "draft",
+                "human_input": "use the second variant",
+            }
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["run_id"] == "run-1"
+    assert payload["status"] == "running"
+    request = captured["request"]
+    assert isinstance(request, ResumeReq)
+    assert request.resume_from_node_id == "draft"
+    assert request.human_input == "use the second variant"
+
+
+def test_publish_skill_tool_requires_skill_id() -> None:
+    result = asyncio.run(copilot_tools.publish_skill_tool.handler({"skill_id": "  "}))
+
+    assert result["is_error"] is True
+
+
+def test_publish_skill_tool_publishes(monkeypatch) -> None:  # noqa: ANN001
+    from app.models.publish import PublishResult, PublishSkillReq
+    from app.routers import skills as skills_router
+
+    captured: dict[str, object] = {}
+
+    async def _fake_publish(skill_id: str, request: PublishSkillReq, **kwargs: object) -> PublishResult:
+        captured["skill_id"] = skill_id
+        captured["version"] = request.version
+        return PublishResult(status="ok", message="released", artifact_id="art-1")
+
+    monkeypatch.setattr(skills_router, "publish_skill", _fake_publish)
+
+    result = asyncio.run(
+        copilot_tools.publish_skill_tool.handler(
+            {"skill_id": "text-segmentation", "version": "1.2.0"}
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["status"] == "ok"
+    assert payload["artifact_id"] == "art-1"
+    assert captured == {"skill_id": "text-segmentation", "version": "1.2.0"}
+
+
+def test_fork_skill_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.fork_skill_tool.handler({"skill_id": "s", "new_skill_id": " "})
+    )
+
+    assert result["is_error"] is True
+
+
+def test_fork_skill_tool_forks(monkeypatch) -> None:  # noqa: ANN001
+    from app.models.skills import SkillSummary
+    from app.services import skills as skills_service
+
+    captured: dict[str, object] = {}
+
+    async def _fake_fork(
+        user_id: str, skill_id: str, new_skill_id: str, storage: object, metadata: object
+    ) -> SkillSummary:
+        captured.update({"skill_id": skill_id, "new_skill_id": new_skill_id})
+        return SkillSummary(
+            id=new_skill_id,
+            name=new_skill_id,
+            description="",
+            phase_count=1,
+            has_golden=False,
+            directory_path=f"/skills/{new_skill_id}",
+        )
+
+    monkeypatch.setattr(skills_service, "fork_skill", _fake_fork)
+
+    result = asyncio.run(
+        copilot_tools.fork_skill_tool.handler(
+            {"skill_id": "text-segmentation", "new_skill_id": "my-fork"}
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["status"] == "success"
+    assert payload["skill_id"] == "my-fork"
+    assert captured == {"skill_id": "text-segmentation", "new_skill_id": "my-fork"}
+
+
+def test_fork_skill_tool_reports_failure_as_tool_error(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import skills as skills_service
+
+    async def _boom(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("fork target exists")
+
+    monkeypatch.setattr(skills_service, "fork_skill", _boom)
+
+    result = asyncio.run(
+        copilot_tools.fork_skill_tool.handler(
+            {"skill_id": "text-segmentation", "new_skill_id": "my-fork"}
+        )
+    )
+
+    assert result["is_error"] is True
+    assert "fork target exists" in result["content"][0]["text"]

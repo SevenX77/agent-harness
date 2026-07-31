@@ -43,8 +43,8 @@
 | W1-1 | `create_skill` 工具(包 `POST /api/skills`,走索引落库) | ✅ 已合并(#526) | 8 测试 + 完整 backend 套件绿;顺带修服务层缺陷:失败创建现在回滚目录,skill_id 不再被半成品毒死 |
 | W1-2 | `run_skill` + `get_run_detail` 工具 + 真跑审批放行 | ✅ 随本行同 PR 合入 | 真跑走审批卡(推翻旧"只能 UI 触发"禁令);get_run_detail 有界投影(事件只给计数+错误摘录,final_context 4000 字符截断);9 测试 |
 | W1-3 | golden 工具组(list / read / set / delete) | ✅ 随本行同 PR 合入 | 四工具:读免审批、写走审批卡;写直调 golden_diff 服务层(HTTP 层 browser-fallback 护栏是防浏览器绕 Rust 的边界,copilot 后端写=DEF-027 同族的已接受写路径);plan 端点不包(其写计划无人执行);10 测试 |
-| W1-4 | `resume_run` + resume 有效性工具 | 待开工 | 后端 `routers/runs.py:215`(validity)/ `:259`(resume) |
-| W1-5 | `publish_skill` / `fork_skill` 工具 | 待开工 | 后端 `routers/skills.py:564`(publish)/ `:953`(fork) |
+| W1-4 | `resume_run` + resume 有效性工具 | ✅ 随本行同 PR 合入(与 W1-5 同 PR) | get_resume_validity 免审批;resume_run 走审批卡,支持 checkpoint/节点区间/human_input/context_overrides;9 测试(与 W1-5 合计) |
+| W1-5 | `publish_skill` / `fork_skill` 工具 | ✅ 随本行同 PR 合入(与 W1-4 同 PR) | 两工具都走审批卡;publish 直调路由函数并显式供给同组依赖(不复制发布管线);fork 走服务层 |
 | W1-6 | 资产纠偏:KB-13 工具清单与"Rust 唯一写者"两处失实 | 待开工 | `apps/studio/backend/app/agents/knowledge/KB-13-studio-gates-tools.md:27-42`;随 W1-2 或单独小 PR |
 
 #### 第二波 · 引擎(run 路径的诚实与补全)

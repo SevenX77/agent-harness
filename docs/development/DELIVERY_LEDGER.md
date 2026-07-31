@@ -45,7 +45,7 @@
 | W1-3 | golden 工具组(list / read / set / delete) | ✅ 随本行同 PR 合入 | 四工具:读免审批、写走审批卡;写直调 golden_diff 服务层(HTTP 层 browser-fallback 护栏是防浏览器绕 Rust 的边界,copilot 后端写=DEF-027 同族的已接受写路径);plan 端点不包(其写计划无人执行);10 测试 |
 | W1-4 | `resume_run` + resume 有效性工具 | ✅ 随本行同 PR 合入(与 W1-5 同 PR) | get_resume_validity 免审批;resume_run 走审批卡,支持 checkpoint/节点区间/human_input/context_overrides;9 测试(与 W1-5 合计) |
 | W1-5 | `publish_skill` / `fork_skill` 工具 | ✅ 随本行同 PR 合入(与 W1-4 同 PR) | 两工具都走审批卡;publish 直调路由函数并显式供给同组依赖(不复制发布管线);fork 走服务层 |
-| W1-6 | 资产纠偏:KB-13 工具清单与"Rust 唯一写者"两处失实 | 待开工 | `apps/studio/backend/app/agents/knowledge/KB-13-studio-gates-tools.md:27-42`;随 W1-2 或单独小 PR |
+| W1-6 | 资产纠偏:KB-13 工具清单与"Rust 唯一写者"两处失实 | ✅ 随本行同 PR 合入 | §2 重写为 27 工具两审批档真相 + CLI 表面"无工具"诚实声明;§3 改为三条写路径(Rust D12 / Write-Edit 直写例外 / MCP 审批写) |
 
 #### 第二波 · 引擎(run 路径的诚实与补全)
 

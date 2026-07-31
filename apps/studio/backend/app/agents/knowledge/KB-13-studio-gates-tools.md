@@ -25,21 +25,41 @@ Design ──> [ Compile Gate ] ──> [ Predict Gate ] ──> [ Run / Executi
 3.  **Run / Execution**: Executes the graph using live LLM connections and actual inputs, producing full trace files (`[[KB-09-run-trace-checkpoint]]`) and outputs.
 
 ## 2. MCP Tools Map
-The Studio exposes six specialized Model Context Protocol (MCP) tools to conversational agents. All six tools run with **zero approval** (implicitly allowed by the host environment):
+The Studio panel exposes its MCP tools through an in-process server named `studio`. Two approval classes exist — do not assume zero approval for writes:
 
-| MCP Tool | Purpose | Primary Consumer |
-|---|---|---|
-| `compile_skill` | Compiles the skill and returns the complete set of diagnostics. | Lachesis, MoirAI |
-| `predict_skill` | Runs a dry-run prediction simulation and returns diffs. | Lachesis, MoirAI |
-| `get_llm_roles` | Queries registered LLM roles and route configurations. | MoirAI, Clotho |
-| `run_role_test` | Initiates a 1-token probe request to test route connectivity. | MoirAI |
-| `create_llm_role` | Creates a new role configuration via the FastAPI service layer. | MoirAI |
-| `update_llm_role` | Modifies model parameters, routing, or fallbacks for a role. | MoirAI |
+*   **Read / probe tools run with zero approval** (declaratively allowed).
+*   **Write / execute tools always hold for an explicit user approval card** before anything happens. Expect the card; never try to route around it.
 
-## 3. Rust Native-FS Writing Boundary
-To prevent write conflicts and guarantee file integrity:
-*   **The Sole Writer**: The Tauri Rust native-fs layer (`apps/studio/tauri`) is the **sole writer** authorized to modify skill source files (`GRAPH.md`, phase `.md` files) on disk.
-*   **Agent Boundary**: The Python backend and conversation agents operate in a read-only space for skill files. They cannot write source files directly. Instead, agents propose changes as patch requests to the client, which are then written to disk by the Rust native-fs layer.
+**Read / probe (zero approval):**
+
+| MCP Tool | Purpose |
+|---|---|
+| `compile_skill` | Compiles the skill and returns the complete diagnostics set. |
+| `predict_skill` | LLM-free dry run: phase path, path diff, diagnostics. |
+| `get_run_detail` | Bounded projection of a real run: status, token metrics, event counts, error excerpts, final output. |
+| `list_golden` / `get_golden_content` | List golden baselines / read a baseline's actual expected_output. |
+| `get_resume_validity` | Check whether a run can resume from a checkpoint or node range, and why not. |
+| `get_llm_roles` / `search_llm_registry` | Role snapshot / fuzzy search of legal canonical groups and routes. |
+| `run_role_test` / `test_llm_endpoint` / `test_llm_endpoint_models` / `probe_llm_route` | Real connectivity probes; never mutate config vocabulary. |
+
+**Write / execute (approval card required):**
+
+| MCP Tool | Purpose |
+|---|---|
+| `create_skill` | Create a skill in the default Skills root, registered in the index (UI-visible), scaffolded when no seed files are given. |
+| `run_skill` / `resume_run` | Start a real run / resume from a checkpoint (real LLM calls, costs tokens). Poll with `get_run_detail`. |
+| `set_golden_baseline` / `delete_golden_baseline` | Promote a sealed run to golden / delete a baseline. |
+| `publish_skill` / `fork_skill` | Local release archive (+ remote registry sync when identity configured) / clone any skill into an editable copy. |
+| `create_llm_role` / `update_llm_role` / `delete_llm_role` / `apply_model_profile_to_role` | Role configuration writes via the same service chain as Settings. |
+| `upsert_llm_endpoint` / `delete_llm_endpoint` / `update_llm_route` / `delete_llm_route` | Credential / route vocabulary writes (api_key redacted in approval details). |
+
+**Surface caveat**: this map applies to the Studio panel session. An Open-in-CLI session (codex / claude launched from Studio) currently has **none** of these tools registered — do not claim or call them there; compile/predict in a CLI session must go through the user until the CLI MCP surface ships.
+
+## 3. Skill File Writing Boundary
+Three write paths coexist, each with its own guard:
+*   **Studio's own writes** (editor save, graph serialize, test inputs, golden promote from UI, publish artifacts) go through the Tauri Rust native-fs layer — the sole writer for Studio-originated file mutations (D12).
+*   **Agent direct writes**: conversational agents MAY use `Write`/`Edit` directly on skill files — an accepted MVP1 exception (PM ruling 2026-06-14, DEF-027). A PreToolUse hard boundary confines them to the workspace and skills root and excludes the `llm/` config directory and `app_settings.json`; every write emits a patch event for review/undo.
+*   **Agent structured writes** (skill create/fork/publish, golden set/delete, run/resume, LLM config) go through the approval-gated MCP tools above — never by hand-editing config files.
 
 ## 4. Configuration Map
 Configurations and environment mappings are partitioned to prevent unauthorized access:

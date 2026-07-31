@@ -638,3 +638,210 @@ def test_get_run_detail_tool_reports_failure_as_tool_error(monkeypatch) -> None:
 
     assert result["is_error"] is True
     assert "run not sealed" in result["content"][0]["text"]
+
+
+# ── golden 工具组(旅程 04:验收基准)─────────────────────────────────────────
+
+
+def _golden_baseline_fixture() -> object:
+    from datetime import UTC, datetime
+
+    from app.models.golden import GoldenBaseline, GoldenBaselineCase
+
+    return GoldenBaseline(
+        id="g-1",
+        source_run_id="run-1",
+        linked_input_id="input-1",
+        created_at=datetime.now(UTC),
+        locked=False,
+        content_path="golden/g-1",
+        cases=[
+            GoldenBaselineCase(
+                case_id="c-1",
+                node_id="analyze",
+                phase_id="analyze",
+                expected_output_ref="cases/c-1.json",
+            )
+        ],
+    )
+
+
+def test_list_golden_tool_requires_skill_id() -> None:
+    result = asyncio.run(copilot_tools.list_golden_tool.handler({"skill_id": "  "}))
+
+    assert result["is_error"] is True
+
+
+def test_list_golden_tool_returns_compact_listing(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import golden_diff
+
+    monkeypatch.setattr(
+        golden_diff,
+        "list_golden_baselines_for_skill",
+        lambda skill_id: [_golden_baseline_fixture()],
+    )
+
+    result = asyncio.run(
+        copilot_tools.list_golden_tool.handler({"skill_id": "text-segmentation"})
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["golden_count"] == 1
+    entry = payload["baselines"][0]
+    assert entry["id"] == "g-1"
+    assert entry["source_run_id"] == "run-1"
+    assert entry["locked"] is False
+    assert entry["cases"] == [{"case_id": "c-1", "node_id": "analyze"}]
+
+
+def test_get_golden_content_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.get_golden_content_tool.handler({"skill_id": "s", "golden_id": " "})
+    )
+
+    assert result["is_error"] is True
+
+
+def test_get_golden_content_tool_bounds_expected_output(monkeypatch) -> None:  # noqa: ANN001
+    from app.models.golden import GoldenBaselineContent, GoldenCaseContent
+    from app.services import golden_diff
+
+    captured: dict[str, object] = {}
+
+    def _fake_read(skill_id: str, golden_id: str, *, node_id: object = None) -> object:
+        captured["node_id"] = node_id
+        return GoldenBaselineContent(
+            id=golden_id,
+            source_run_id="run-1",
+            locked=True,
+            cases=[
+                GoldenCaseContent(
+                    case_id="c-1",
+                    node_id="analyze",
+                    phase_id="analyze",
+                    expected_output={"answer": 42},
+                ),
+                GoldenCaseContent(
+                    case_id="c-2",
+                    node_id="draft",
+                    phase_id="draft",
+                    expected_output={"blob": "x" * 20_000},
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(golden_diff, "read_golden_baseline_content", _fake_read)
+
+    result = asyncio.run(
+        copilot_tools.get_golden_content_tool.handler(
+            {"skill_id": "text-segmentation", "golden_id": "g-1", "node_id": "analyze"}
+        )
+    )
+
+    assert "is_error" not in result
+    assert captured["node_id"] == "analyze"
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["id"] == "g-1"
+    assert payload["locked"] is True
+    small, big = payload["cases"]
+    assert json.loads(small["expected_output_json"]) == {"answer": 42}
+    assert small["expected_output_truncated"] is False
+    assert big["expected_output_truncated"] is True
+    assert len(big["expected_output_json"]) <= copilot_tools._GOLDEN_CASE_CHAR_LIMIT
+
+
+def test_set_golden_baseline_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.set_golden_baseline_tool.handler({"skill_id": "s", "run_id": " "})
+    )
+
+    assert result["is_error"] is True
+
+
+def test_set_golden_baseline_tool_promotes_run(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import golden_diff
+
+    captured: dict[str, object] = {}
+
+    def _fake_set(
+        skill_id: str, run_id: str, *, lock: bool, node_id: object = None
+    ) -> object:
+        captured.update(
+            {"skill_id": skill_id, "run_id": run_id, "lock": lock, "node_id": node_id}
+        )
+        return _golden_baseline_fixture()
+
+    monkeypatch.setattr(golden_diff, "set_golden_baseline_for_run", _fake_set)
+
+    result = asyncio.run(
+        copilot_tools.set_golden_baseline_tool.handler(
+            {
+                "skill_id": "text-segmentation",
+                "run_id": "run-1",
+                "lock": True,
+                "node_id": "analyze",
+            }
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["status"] == "success"
+    assert payload["golden_id"] == "g-1"
+    assert captured == {
+        "skill_id": "text-segmentation",
+        "run_id": "run-1",
+        "lock": True,
+        "node_id": "analyze",
+    }
+
+
+def test_set_golden_baseline_tool_reports_failure_as_tool_error(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import golden_diff
+
+    def _boom(skill_id: str, run_id: str, *, lock: bool, node_id: object = None) -> object:
+        raise RuntimeError("run not sealed")
+
+    monkeypatch.setattr(golden_diff, "set_golden_baseline_for_run", _boom)
+
+    result = asyncio.run(
+        copilot_tools.set_golden_baseline_tool.handler(
+            {"skill_id": "text-segmentation", "run_id": "run-1"}
+        )
+    )
+
+    assert result["is_error"] is True
+    assert "run not sealed" in result["content"][0]["text"]
+
+
+def test_delete_golden_baseline_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.delete_golden_baseline_tool.handler(
+            {"skill_id": "s", "golden_id": " "}
+        )
+    )
+
+    assert result["is_error"] is True
+
+
+def test_delete_golden_baseline_tool_deletes(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import golden_diff
+
+    captured: dict[str, object] = {}
+
+    def _fake_delete(skill_id: str, golden_id: str) -> None:
+        captured.update({"skill_id": skill_id, "golden_id": golden_id})
+
+    monkeypatch.setattr(golden_diff, "delete_golden_baseline_for_skill", _fake_delete)
+
+    result = asyncio.run(
+        copilot_tools.delete_golden_baseline_tool.handler(
+            {"skill_id": "text-segmentation", "golden_id": "g-1"}
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["status"] == "success"
+    assert captured == {"skill_id": "text-segmentation", "golden_id": "g-1"}

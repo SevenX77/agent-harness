@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC
 from pathlib import Path
 
 from app.models.llm_config import ProviderEndpoint, ProviderRoute, RegistryResponse
@@ -405,3 +406,235 @@ def test_create_skill_tool_duplicate_reports_error(
 
     assert result["is_error"] is True
     assert "text-segmentation" in result["content"][0]["text"]
+
+
+# ── run_skill / get_run_detail(旅程 04:真跑与看结果)────────────────────────
+
+
+def test_run_skill_tool_requires_skill_id() -> None:
+    result = asyncio.run(copilot_tools.run_skill_tool.handler({"skill_id": "  "}))
+
+    assert result["is_error"] is True
+    assert "skill_id" in result["content"][0]["text"]
+
+
+def test_run_skill_tool_starts_run_and_returns_run_id(monkeypatch) -> None:  # noqa: ANN001
+    from datetime import datetime
+
+    from app.models.runs import RunMetadata, RunRequest
+    from app.services import run_manager as run_manager_module
+
+    captured: dict[str, object] = {}
+
+    async def _fake_start(skill_id: str, request: RunRequest) -> RunMetadata:
+        captured["skill_id"] = skill_id
+        captured["request"] = request
+        return RunMetadata(
+            run_id="run-1", status="running", started_at=datetime.now(UTC)
+        )
+
+    monkeypatch.setattr(run_manager_module.run_manager, "start_run", _fake_start)
+
+    result = asyncio.run(
+        copilot_tools.run_skill_tool.handler(
+            {"skill_id": "text-segmentation", "input_data": {"text": "hi"}}
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["run_id"] == "run-1"
+    assert payload["status"] == "running"
+    assert payload["detail_hint"] == ".workspace/runs/run-1/"
+    assert captured["skill_id"] == "text-segmentation"
+    request = captured["request"]
+    assert isinstance(request, RunRequest)
+    assert request.input_data == {"text": "hi"}
+    assert request.golden_id is None
+
+
+def test_run_skill_tool_passes_golden_id(monkeypatch) -> None:  # noqa: ANN001
+    from datetime import datetime
+
+    from app.models.runs import RunMetadata, RunRequest
+    from app.services import run_manager as run_manager_module
+
+    captured: dict[str, object] = {}
+
+    async def _fake_start(skill_id: str, request: RunRequest) -> RunMetadata:
+        captured["request"] = request
+        return RunMetadata(
+            run_id="run-2", status="running", started_at=datetime.now(UTC)
+        )
+
+    monkeypatch.setattr(run_manager_module.run_manager, "start_run", _fake_start)
+
+    result = asyncio.run(
+        copilot_tools.run_skill_tool.handler(
+            {"skill_id": "text-segmentation", "golden_id": "g-1"}
+        )
+    )
+
+    assert "is_error" not in result
+    request = captured["request"]
+    assert isinstance(request, RunRequest)
+    assert request.golden_id == "g-1"
+    assert request.input_data is None
+
+
+def test_run_skill_tool_reports_failure_as_tool_error(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import run_manager as run_manager_module
+
+    async def _boom(skill_id: str, request: object) -> object:
+        raise RuntimeError("engine unavailable")
+
+    monkeypatch.setattr(run_manager_module.run_manager, "start_run", _boom)
+
+    result = asyncio.run(
+        copilot_tools.run_skill_tool.handler({"skill_id": "text-segmentation"})
+    )
+
+    assert result["is_error"] is True
+    assert "engine unavailable" in result["content"][0]["text"]
+
+
+def _run_detail_fixture(events: list, final_context: object) -> object:  # noqa: ANN001
+    from datetime import datetime
+
+    from app.models.runs import RunDetail, RunMetadata, TokensMetrics
+
+    return RunDetail(
+        metadata=RunMetadata(
+            run_id="run-9",
+            status="failed",
+            started_at=datetime.now(UTC),
+            metrics=TokensMetrics(input_tokens=10, output_tokens=5, total_tokens=15),
+            input_summary="golden g-1",
+        ),
+        input_data={"text": "hi"},
+        events=events,
+        final_context=final_context,  # type: ignore[arg-type]
+        artifacts=["artifacts/result_latest.json"],
+    )
+
+
+def _event(seq: int, event_type: str, *, error: bool = False) -> object:
+    from datetime import datetime
+
+    from graph_agent.core.event_contracts import EventEnvelope, TransportErrorPayload
+
+    return EventEnvelope(
+        stream_id="s",
+        seq=seq,
+        run_id="run-9",
+        event_type=event_type,
+        payload={},
+        cursor=str(seq),
+        timestamp=datetime.now(UTC),
+        error_code="engine.phase_failed" if error else None,
+        error_payload=(
+            TransportErrorPayload(
+                error_code="engine.phase_failed",
+                message="phase exploded",
+                retryable=False,
+            )
+            if error
+            else None
+        ),
+    )
+
+
+def test_get_run_detail_tool_requires_ids() -> None:
+    missing_run = asyncio.run(
+        copilot_tools.get_run_detail_tool.handler({"skill_id": "s", "run_id": " "})
+    )
+    missing_skill = asyncio.run(
+        copilot_tools.get_run_detail_tool.handler({"skill_id": " ", "run_id": "r"})
+    )
+
+    assert missing_run["is_error"] is True
+    assert missing_skill["is_error"] is True
+
+
+def test_get_run_detail_tool_compacts_detail(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import run_manager as run_manager_module
+
+    detail = _run_detail_fixture(
+        events=[
+            _event(1, "phase_started"),
+            _event(2, "phase_started"),
+            _event(3, "phase_failed", error=True),
+        ],
+        final_context={"answer": 42},
+    )
+    monkeypatch.setattr(
+        run_manager_module.run_manager,
+        "get_run_detail",
+        lambda skill_id, run_id: detail,
+    )
+
+    result = asyncio.run(
+        copilot_tools.get_run_detail_tool.handler(
+            {"skill_id": "text-segmentation", "run_id": "run-9"}
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["run_id"] == "run-9"
+    assert payload["status"] == "failed"
+    assert payload["metrics"]["total_tokens"] == 15
+    # 事件不整段转储:只给计数 + 错误摘录(结构上防止撑爆上下文)。
+    assert "events" not in payload
+    assert payload["events_total"] == 3
+    assert payload["event_type_counts"] == {"phase_started": 2, "phase_failed": 1}
+    assert payload["errors"] == [
+        {
+            "event_type": "phase_failed",
+            "error_code": "engine.phase_failed",
+            "message": "phase exploded",
+        }
+    ]
+    assert payload["artifacts"] == ["artifacts/result_latest.json"]
+    assert json.loads(payload["final_context_json"]) == {"answer": 42}
+    assert payload["final_context_truncated"] is False
+    assert payload["detail_hint"] == ".workspace/runs/run-9/"
+
+
+def test_get_run_detail_tool_truncates_large_final_context(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import run_manager as run_manager_module
+
+    detail = _run_detail_fixture(events=[], final_context={"blob": "x" * 20_000})
+    monkeypatch.setattr(
+        run_manager_module.run_manager,
+        "get_run_detail",
+        lambda skill_id, run_id: detail,
+    )
+
+    result = asyncio.run(
+        copilot_tools.get_run_detail_tool.handler(
+            {"skill_id": "text-segmentation", "run_id": "run-9"}
+        )
+    )
+
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["final_context_truncated"] is True
+    assert len(payload["final_context_json"]) <= copilot_tools._RUN_FINAL_CONTEXT_CHAR_LIMIT
+
+
+def test_get_run_detail_tool_reports_failure_as_tool_error(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import run_manager as run_manager_module
+
+    def _boom(skill_id: str, run_id: str) -> object:
+        raise RuntimeError("run not sealed")
+
+    monkeypatch.setattr(run_manager_module.run_manager, "get_run_detail", _boom)
+
+    result = asyncio.run(
+        copilot_tools.get_run_detail_tool.handler(
+            {"skill_id": "text-segmentation", "run_id": "run-9"}
+        )
+    )
+
+    assert result["is_error"] is True
+    assert "run not sealed" in result["content"][0]["text"]

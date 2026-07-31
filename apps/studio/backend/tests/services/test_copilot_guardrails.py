@@ -288,9 +288,13 @@ def test_read_probe_mcp_tools_are_pre_allowed_not_held() -> None:
     assert "mcp__studio__test_llm_endpoint" in allowed
     assert "mcp__studio__probe_llm_route" in allowed
     assert "mcp__studio__get_run_detail" in allowed
+    assert "mcp__studio__list_golden" in allowed
+    assert "mcp__studio__get_golden_content" in allowed
     for write_tool in (
         "mcp__studio__create_skill",
         "mcp__studio__run_skill",
+        "mcp__studio__set_golden_baseline",
+        "mcp__studio__delete_golden_baseline",
         "mcp__studio__create_llm_role",
         "mcp__studio__update_llm_role",
         "mcp__studio__delete_llm_role",

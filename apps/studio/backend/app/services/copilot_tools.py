@@ -5,11 +5,12 @@ Settings 也能,反之亦然。所有工具走 routers/llm.py 背后同一条服
 canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文件。
 
 - 只读/探测(get_llm_roles/search_llm_registry/compile/run_role_test/predict/
-  get_run_detail/test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批
-  放行(copilot._DECLARATIVE_ALLOWED_TOOLS)。
+  get_run_detail/list_golden/get_golden_content/test_llm_endpoint(_models)/
+  probe_llm_route):天然安全,免审批放行(copilot._DECLARATIVE_ALLOWED_TOOLS)。
 - 写/执行(配置真相:create/update/delete role、endpoint 增删、route 增删、apply
-  profile;skill 实体:create_skill;真实执行:run_skill):一律经 can_use_tool
-  挂起事前审批(copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回结构化错误。旧的
+  profile;skill 实体:create_skill;真实执行:run_skill;golden 基准:
+  set/delete_golden_baseline):一律经 can_use_tool 挂起事前审批
+  (copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回结构化错误。旧的
   「零审批直写 + before/after 一键撤销」已整体废除。
 - 明文密钥安全隔离:注册表读工具靠 SecretStr 自动脱敏;endpoint 写工具的审批
   明细硬脱敏 api_key。读取明文密钥的 REST 接口绝不投影给 MCP 工具面。
@@ -364,6 +365,159 @@ async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
             "final_context_json": final_context_json,
             "final_context_truncated": final_context_truncated,
             "detail_hint": f".workspace/runs/{metadata.run_id}/",
+        }
+    )
+
+
+# golden 基准工具(旅程 04 验收面):读走与 GET /golden 同一条服务链;写(set/
+# delete)直调 golden_diff 服务层——HTTP 路由上的 X-Studio-Write-Fallback 护栏
+# 是针对"浏览器绕过 Rust native-fs"的边界,copilot 后端写是 MVP1 已接受的独立
+# 授权写路径(同 Write/Edit 例外,DEF-027),权限由审批卡兜底,不装浏览器头。
+
+
+@tool(
+    "list_golden",
+    "列出指定 skill 的全部 golden 基准(验收基线):每条给 id、来源 run、锁定态、"
+    "创建时间与各节点 case 概览。只读;看某条基准里到底存了什么用 "
+    "get_golden_content。",
+    {"skill_id": str},
+)
+async def list_golden_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services import golden_diff
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        baselines = golden_diff.list_golden_baselines_for_skill(skill_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"list_golden 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "golden_count": len(baselines),
+            "baselines": [
+                {
+                    "id": b.id,
+                    "source_run_id": b.source_run_id,
+                    "linked_input_id": b.linked_input_id,
+                    "created_at": b.created_at.isoformat(),
+                    "locked": b.locked,
+                    "cases": [
+                        {"case_id": c.case_id, "node_id": c.node_id} for c in b.cases
+                    ],
+                }
+                for b in baselines
+            ],
+        }
+    )
+
+
+# 单个 golden case 的 expected_output 字符上限(有界纪律,同 get_run_detail)。
+_GOLDEN_CASE_CHAR_LIMIT = 4000
+
+
+@tool(
+    "get_golden_content",
+    "读取一条 golden 基准的实际内容:每个节点 case 的 expected_output(超长截断)。"
+    "node_id 可选,只看某一个节点的 case。只读。",
+    {"skill_id": str, "golden_id": str, "node_id": str},
+)
+async def get_golden_content_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services import golden_diff
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    golden_id = str(args.get("golden_id", "")).strip()
+    if not skill_id or not golden_id:
+        return _text_result("skill_id 与 golden_id 都不能为空", is_error=True)
+    node_id = str(args.get("node_id") or "").strip() or None
+    try:
+        content = golden_diff.read_golden_baseline_content(
+            skill_id, golden_id, node_id=node_id
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"get_golden_content 失败: {exc}"
+        return _text_result(payload, is_error=True)
+
+    cases: list[dict[str, Any]] = []
+    for case in content.cases:
+        expected_json = json.dumps(case.expected_output, ensure_ascii=False)
+        truncated = len(expected_json) > _GOLDEN_CASE_CHAR_LIMIT
+        cases.append(
+            {
+                "case_id": case.case_id,
+                "node_id": case.node_id,
+                "phase_id": case.phase_id,
+                "expected_output_json": expected_json[:_GOLDEN_CASE_CHAR_LIMIT],
+                "expected_output_truncated": truncated,
+            }
+        )
+    return _text_result(
+        {
+            "id": content.id,
+            "source_run_id": content.source_run_id,
+            "locked": content.locked,
+            "cases": cases,
+        }
+    )
+
+
+@tool(
+    "set_golden_baseline",
+    "把一次已完成的真实 run 的输出定为 golden 基准(验收基线):run 必须已成功收口"
+    "(sealed)。node_id 可选(只提升该节点);lock 可选(锁定基准防误改)。"
+    "属于写操作, 需用户审批。",
+    {"skill_id": str, "run_id": str, "lock": bool, "node_id": str},
+)
+async def set_golden_baseline_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services import golden_diff
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    node_id = str(args.get("node_id") or "").strip() or None
+    lock = bool(args.get("lock", False))
+    try:
+        baseline = golden_diff.set_golden_baseline_for_run(
+            skill_id, run_id, lock=lock, node_id=node_id
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"set_golden_baseline 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "golden_id": baseline.id,
+            "locked": baseline.locked,
+            "case_count": len(baseline.cases),
+            "message": f"Run '{run_id}' 已定为 golden 基准 '{baseline.id}'。",
+        }
+    )
+
+
+@tool(
+    "delete_golden_baseline",
+    "删除一条 golden 基准。属于写操作, 需用户审批。",
+    {"skill_id": str, "golden_id": str},
+)
+async def delete_golden_baseline_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services import golden_diff
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    golden_id = str(args.get("golden_id", "")).strip()
+    if not skill_id or not golden_id:
+        return _text_result("skill_id 与 golden_id 都不能为空", is_error=True)
+    try:
+        golden_diff.delete_golden_baseline_for_skill(skill_id, golden_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"delete_golden_baseline 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "golden_id": golden_id,
+            "message": f"Golden 基准 '{golden_id}' 已删除。",
         }
     )
 
@@ -934,6 +1088,10 @@ def _copilot_mcp_tools() -> list[Any]:
         create_skill_tool,
         run_skill_tool,
         get_run_detail_tool,
+        list_golden_tool,
+        get_golden_content_tool,
+        set_golden_baseline_tool,
+        delete_golden_baseline_tool,
         create_llm_role_tool,
         update_llm_role_tool,
         delete_llm_role_tool,

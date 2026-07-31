@@ -7,9 +7,10 @@ canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文
 - 只读/探测(get_llm_roles/search_llm_registry/compile/run_role_test/predict/
   test_llm_endpoint(_models)/probe_llm_route):天然安全,免审批放行
   (copilot._DECLARATIVE_ALLOWED_TOOLS)。
-- 配置真相写(create/update/delete role、endpoint 增删、route 增删、apply
-  profile):一律经 can_use_tool 挂起事前审批(copilot._MCP_CONFIG_WRITE_TOOLS),
-  失败返回结构化错误。旧的「零审批直写 + before/after 一键撤销」已整体废除。
+- 写(配置真相:create/update/delete role、endpoint 增删、route 增删、apply
+  profile;skill 实体:create_skill):一律经 can_use_tool 挂起事前审批
+  (copilot._MCP_APPROVAL_WRITE_TOOLS),失败返回结构化错误。旧的「零审批直写 +
+  before/after 一键撤销」已整体废除。
 - 明文密钥安全隔离:注册表读工具靠 SecretStr 自动脱敏;endpoint 写工具的审批
   明细硬脱敏 api_key。读取明文密钥的 REST 接口绝不投影给 MCP 工具面。
 """
@@ -209,6 +210,52 @@ async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
             "diagnostics_total": len(diagnostics),
             "diagnostic_counts": export.diagnostic_counts,
             "detail_hint": f".workspace/runs/{result.run_id}/",
+        }
+    )
+
+
+@tool(
+    "create_skill",
+    "新建一个 skill:落到默认 Skills 目录并登记索引(UI 立即可见)。skill_id 用"
+    "小写字母开头、只含小写字母/数字/连字符;files 可选(相对路径→内容),缺省时"
+    "服务端自动铺可编译的骨架文件,不留裸目录。创建后用 Write/Edit 完善内容、"
+    "compile_skill 验证。属于写操作, 需用户审批。",
+    {"skill_id": str, "files": dict},
+)
+async def create_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.core.backends import get_backend_config, get_metadata, get_storage
+    from app.models.skills import CreateSkillReq
+    from app.services.skills import create_new_skill
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        # 与 POST /api/skills 同一份入参契约(CreateSkillReq 的 pattern/字段校验),
+        # 拼写错误在工具边界一次拒绝,不落半成品目录。
+        req = CreateSkillReq(skill_id=skill_id, files=dict(args.get("files") or {}))
+    except ValidationError as exc:
+        return _text_result(f"create_skill 入参无效:\n{exc}", is_error=True)
+    try:
+        summary = await create_new_skill(
+            get_backend_config().default_user_id,
+            req.skill_id,
+            req.files,
+            get_storage(),
+            get_metadata(),
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        detail = getattr(exc, "detail", None)
+        payload: Any = detail if detail is not None else f"create_skill 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "skill_id": summary.id,
+            "directory_path": summary.directory_path,
+            "message": f"Skill '{summary.id}' 已创建并登记索引。",
         }
     )
 
@@ -767,7 +814,7 @@ async def probe_llm_route_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 def _copilot_mcp_tools() -> list[Any]:
     """MoirAI 面向 Settings 鼠标能力的 MCP 工具全集(读写对称 + 探测复用)。
-    写工具经 can_use_tool 挂起审批(见 copilot._MCP_CONFIG_WRITE_TOOLS),读/探测
+    写工具经 can_use_tool 挂起审批(见 copilot._MCP_APPROVAL_WRITE_TOOLS),读/探测
     工具在 copilot._DECLARATIVE_ALLOWED_TOOLS 免审批放行。"""
 
     return [
@@ -776,6 +823,7 @@ def _copilot_mcp_tools() -> list[Any]:
         compile_skill_tool,
         run_role_test_tool,
         predict_skill_tool,
+        create_skill_tool,
         create_llm_role_tool,
         update_llm_role_tool,
         delete_llm_role_tool,

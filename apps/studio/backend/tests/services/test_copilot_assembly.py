@@ -9,8 +9,9 @@ from pathlib import Path
 from app.services import agent_assets, copilot
 from claude_agent_sdk import PermissionResultAllow
 
-# Read/probe MCP tools ride the declarative allow-list (zero approval). Config
-# WRITE tools are deliberately absent — they hold for approval via can_use_tool.
+# Read/probe MCP tools ride the declarative allow-list (zero approval). WRITE
+# tools (config truth + skill entities) are deliberately absent — they hold for
+# approval via can_use_tool.
 _MCP_TOOL_NAMES = [
     "mcp__studio__get_llm_roles",
     "mcp__studio__search_llm_registry",
@@ -22,7 +23,8 @@ _MCP_TOOL_NAMES = [
     "mcp__studio__probe_llm_route",
 ]
 
-_MCP_CONFIG_WRITE_TOOL_NAMES = [
+_MCP_APPROVAL_WRITE_TOOL_NAMES = [
+    "mcp__studio__create_skill",
     "mcp__studio__create_llm_role",
     "mcp__studio__update_llm_role",
     "mcp__studio__delete_llm_role",
@@ -89,8 +91,8 @@ def test_allowed_tools_declarative_reads_and_zero_approval_mcp(tmp_path: Path) -
     # Write/Edit/Bash stay OFF the allowlist so they route through approval UX
     for gated in ("Write", "Edit", "Bash"):
         assert gated not in options.allowed_tools
-    # Config-write MCP tools are gated too: they hold for approval via can_use_tool.
-    for gated in _MCP_CONFIG_WRITE_TOOL_NAMES:
+    # Write MCP tools are gated too: they hold for approval via can_use_tool.
+    for gated in _MCP_APPROVAL_WRITE_TOOL_NAMES:
         assert gated not in options.allowed_tools
     assert options.permission_mode == "default"
 

@@ -91,6 +91,28 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         logger.error("[ExitControlMiddleware] Iteration limit exceeded. Raising fatal error.")
         raise GraphAgentFatalError(msg)
 
+    async def abefore_model(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime[Any],
+    ) -> dict[str, Any] | None:
+        # Async graph executions dispatch to the async hook only; without this
+        # counterpart the iteration budget silently never advances there (the
+        # sibling CognitiveFlow middleware ships both hooks for this reason).
+        return self.before_model(state, runtime)
+
+    @hook_config(can_jump_to=["end", "model"])
+    async def aafter_agent(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime[Any],
+    ) -> dict[str, Any] | None:
+        # Same async-dispatch requirement: without this, a model turn that
+        # neither calls tools nor finishes ends the phase silently instead of
+        # being nudged back to the model (field evidence: run
+        # 2026-08-01T12-52-39, review phase, 1 llm_call, no tool_call).
+        return self.after_agent(state, runtime)
+
     @hook_config(can_jump_to=["end", "model"])
     def after_agent(
         self,

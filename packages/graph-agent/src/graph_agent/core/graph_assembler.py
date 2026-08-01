@@ -2002,6 +2002,22 @@ def _build_skill_node(
         has_finish_task=has_finish_task,
     )
 
+    from graph_agent.middleware.runtime_input import RuntimeInputMiddleware
+
+    input_schema = phase_ast.io.inputs if phase_ast.io is not None else None
+    declared_input_keys = (
+        tuple(input_schema.get("properties", {}).keys())
+        if isinstance(input_schema, dict)
+        else ()
+    )
+    # The system prompt is baked at assembly time, so runtime input delivery
+    # (placeholder rendering + first-turn input seeding) must happen per model
+    # call — outermost in the chain, before cognitive/tracing middlewares.
+    middleware_chain = (
+        RuntimeInputMiddleware(phase_id, declared_input_keys),
+        *middleware_chain,
+    )
+
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.errors import GraphRecursionError
 

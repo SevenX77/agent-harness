@@ -53,7 +53,7 @@ The Studio panel exposes its MCP tools through an in-process server named `studi
 | `create_llm_role` / `update_llm_role` / `delete_llm_role` / `apply_model_profile_to_role` | Role configuration writes via the same service chain as Settings. |
 | `upsert_llm_endpoint` / `delete_llm_endpoint` / `update_llm_route` / `delete_llm_route` | Credential / route vocabulary writes (api_key redacted in approval details). |
 
-**Surface caveat**: this map applies to the Studio panel session. An Open-in-CLI session (codex / claude launched from Studio) currently has **none** of these tools registered — do not claim or call them there; compile/predict in a CLI session must go through the user until the CLI MCP surface ships.
+**Surface caveat**: an Open-in-CLI session (codex / claude launched from Studio) gets the same tools over HTTP, minus `delete_llm_endpoint` and `delete_llm_route` (credential-cascading deletes stay UI-only), and its human gate is the CLI's own approval prompt rather than Studio's approval card. The surface is present only when the Studio sidecar was reachable at launch; if the tools are missing, work without them instead of shelling into the engine.
 
 ## 3. Skill File Writing Boundary
 Three write paths coexist, each with its own guard:

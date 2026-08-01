@@ -468,6 +468,7 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
 
     middleware_names = [type(middleware).__name__ for middleware in kwargs["middleware"]]
     assert middleware_names == [
+        "RuntimeInputMiddleware",
         "ProtocolValidationMiddleware",
         "CognitiveFlowMiddleware",
         "ExecutionControlMiddleware",

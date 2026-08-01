@@ -97,6 +97,11 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         self._business_validator = business_validator
         self._phase_name = phase_name
         self._interrupt_fn = interrupt_fn or interrupt
+        # 一轮模型回复最多接受一次 finish_task:并行重复提交若都走接受分支,
+        # 会在同一超步对无 reducer 的 flow 通道写两次(InvalidUpdateError)。
+        # 以"接受时的父 AI 消息标识"为键:同轮并行重复共享同一条父消息,
+        # 新一轮产生新消息,门自动重开(iterate 复用实例也无需生命周期钩子)。
+        self._accepted_finish_turn_key: str | None = None
 
     @staticmethod
     def validate_finish_task_with_schema_gate(
@@ -475,6 +480,22 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             },
         )
 
+    def _duplicate_finish_response(self, tool_call_id: str) -> Command[Any]:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=(
+                            "[提交已接受] 本轮的另一个 finish_task 已被接受,"
+                            "此重复提交被忽略。"
+                        ),
+                        name=self._FINISH_TOOL,
+                        tool_call_id=tool_call_id,
+                    )
+                ]
+            },
+        )
+
     def _handle_finish_task(
         self,
         args: dict[str, Any],
@@ -482,6 +503,9 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         *,
         tool_call_id: str,
     ) -> Command[Any]:
+        turn_key = _finish_turn_key(state)
+        if turn_key is not None and turn_key == self._accepted_finish_turn_key:
+            return self._duplicate_finish_response(tool_call_id)
         validation = self._validate_finish_args(args)
         if not validation.ok:
             return self._reject_finish(tool_call_id, list(validation.errors))
@@ -506,6 +530,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             self._phase_name,
             validation.schema_validation,
         )
+        self._accepted_finish_turn_key = _finish_turn_key(state)
         return Command(
             update={
                 "data": next_state["data"],
@@ -899,6 +924,19 @@ def _has_strict_output_schema(output_schema: dict[str, Any] | SchemaObject | Non
         return bool(output_schema.fields)
     properties = output_schema.get("properties")
     return isinstance(properties, dict) and bool(properties)
+
+
+def _finish_turn_key(state: Any) -> str | None:
+    """Identity of the model turn whose tool_calls are being executed: the
+    last AI message's id (parallel duplicates share it; a new turn mints a
+    new one). Falls back to the message-list length, which is stable within
+    a superstep because updates only apply when the step commits."""
+    messages = state.get("messages") if isinstance(state, dict) else None
+    if not messages:
+        return None
+    last = messages[-1]
+    identity = getattr(last, "id", None)
+    return str(identity) if identity else f"len:{len(messages)}"
 
 
 def _finish_task_accept_response(

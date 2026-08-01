@@ -32,7 +32,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
-import type { LintError, RuntimeInputConflict } from "@/api/types"
+import type { LintError } from "@/api/types"
 import type {
   ArtifactRow,
   FileFieldDecl,
@@ -622,7 +622,6 @@ export interface InputConfigInlineProps {
   onSave: (checks: { blackboard: IoInputCheckRow[]; files: FileFieldDecl[]; fileFieldNames?: string[] }) => Promise<string | null>
   onRuntimeConfigRefresh?: () => Promise<unknown> | unknown
   workspaceRoot?: string | null
-  conflicts?: RuntimeInputConflict[]
   /** Open an imported file in the editor (P5 edit button). */
   onFileOpen?: (path: string) => void
   /** true for the Input pseudo-node / GRAPH.md (declared entry fields, no blackboard). */
@@ -644,7 +643,6 @@ export function InputConfigInline({
   onSave,
   onRuntimeConfigRefresh,
   workspaceRoot,
-  conflicts = [],
   onFileOpen,
   isGraphInput = false,
   diagnosticsByField = {},
@@ -706,15 +704,6 @@ export function InputConfigInline({
       <div className="flex justify-end">
         {saving ? <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">saving</Badge> : null}
       </div>
-      {conflicts.length > 0 ? (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-          {conflicts.map((conflict) => (
-            <div key={conflict.field}>
-              {conflict.field}: multiple runtime file candidates. Lint/compile will fail until only one remains.
-            </div>
-          ))}
-        </div>
-      ) : null}
       <div className="overflow-hidden rounded-md border border-border">
         <div className={GROUP_HEAD_CLASS}>
           <span className="text-xs font-medium text-foreground">

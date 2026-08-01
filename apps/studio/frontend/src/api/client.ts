@@ -713,11 +713,17 @@ export async function getTestInput(skillId: string, inputId: string): Promise<Te
 }
 
 /**
- * F4: resolve the Predict/Run input payload. With a selected test input, fetch
- * its full content. Missing selection is a preflight configuration error; do
- * not silently run `{}` because compile owns the complete input-file path.
- * A failed fetch (e.g. the input was deleted) propagates so the caller surfaces
- * a clear error instead of silently running empty.
+ * F4: resolve the Predict/Run input payload. A selected test input overrides
+ * the payload with its stored content; with no selection the payload is empty
+ * and the graph's root inputs come from the runtime_config import bindings the
+ * backend already owns ("predict 和 run 就是按照配置来跑就行了",
+ * `docs/studio/mvp1/01_workflows/04_run-and-verify.md:35`).
+ *
+ * The client deliberately does NOT gate on selection: whether the inputs are
+ * actually sourced is a preflight verdict, and it belongs to the one
+ * diagnostics pipeline (STUDIO_RUNTIME_INPUT_MISSING / _CONFLICT), not to a
+ * second opinion invented here. A failed fetch still propagates, so a deleted
+ * selection surfaces as an error instead of silently running empty.
  */
 export async function resolveRunInput(
   skillId: string,
@@ -725,7 +731,7 @@ export async function resolveRunInput(
   getInput: (skillId: string, inputId: string) => Promise<TestInputDetail> = getTestInput,
 ): Promise<JsonObject> {
   if (!selectedTestInputId) {
-    throw new Error("Select a compile-valid test input before Predict/Run.")
+    return {}
   }
   const detail = await getInput(skillId, selectedTestInputId)
   return detail.content

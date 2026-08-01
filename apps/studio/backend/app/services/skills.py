@@ -652,15 +652,24 @@ def _validate_runtime_inputs_against_raw_input_schema(
     }
 
     errors: list[CompileError] = []
-    required = raw_inputs.get("required")
-    if isinstance(required, list):
-        for field in required:
-            if not isinstance(field, str):
-                continue
-            if field in conflicts_by_field:
-                errors.append(_conflict_runtime_input_error(field, conflicts_by_field[field]))
-            elif field not in root_bindings:
-                errors.append(_missing_runtime_input_error(field))
+    raw_required = raw_inputs.get("required")
+    required = [field for field in raw_required if isinstance(field, str)] if isinstance(raw_required, list) else []
+    for field in required:
+        if field in conflicts_by_field:
+            errors.append(_conflict_runtime_input_error(field, conflicts_by_field[field], blocking=True))
+        elif field not in root_bindings:
+            errors.append(_missing_runtime_input_error(field))
+
+    # A conflict silently drops the binding (runtime_config only records the
+    # clash, see runtime_config._bindings_from_entries), so a DECLARED optional
+    # field loses its source with nothing else to show for it. Design
+    # 03_regions/input/mvp1-alignment.md:42 scopes conflicts to schema fields —
+    # report every declared one, but only the required ones block.
+    for field in properties:
+        if not isinstance(field, str) or field in required:
+            continue
+        if field in conflicts_by_field:
+            errors.append(_conflict_runtime_input_error(field, conflicts_by_field[field], blocking=False))
 
     for field, binding in root_bindings.items():
         if not isinstance(field, str) or not isinstance(binding, dict):
@@ -724,17 +733,24 @@ def _missing_runtime_input_error(field: str) -> CompileError:
     )
 
 
-def _conflict_runtime_input_error(field: str, conflict: dict[str, Any]) -> CompileError:
+def _conflict_runtime_input_error(
+    field: str, conflict: dict[str, Any], *, blocking: bool
+) -> CompileError:
     candidates = conflict.get("candidates")
     count = len(candidates) if isinstance(candidates, list) else 0
+    consequence = (
+        "This field is required, so predict/run cannot start until one remains."
+        if blocking
+        else "This optional field stays unbound until one remains."
+    )
     return CompileError(
         file=".workspace/runtime_config.json",
         field=field,
-        severity="fatal",
+        severity="fatal" if blocking else "warning",
         message=(
             f"Graph input schema field '{field}' has multiple runtime import candidates"
             f" ({count}). Keep only one matching field under .workspace/import_files "
-            "or rename the extra candidates."
+            f"or rename the extra candidates. {consequence}"
         ),
         error_code="STUDIO_RUNTIME_INPUT_CONFLICT",
     )

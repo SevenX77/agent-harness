@@ -54,16 +54,35 @@ describe('ToolApprovalCard', () => {
     expect(html).not.toContain('outside workspace')
   })
 
-  it('renders an out-of-fence read hold with the target path', () => {
+  it('renders a held PowerShell command like Bash (execution class)', () => {
+    // exp-B 事故回归:PowerShell 与 Bash 同档,审批卡展示原始命令行。
     const html = renderToStaticMarkup(
       <ToolApprovalCard
-        event={heldEvent({ toolName: 'Read', detail: 'D:/somewhere/outside.md' })}
+        event={heldEvent({
+          toolName: 'PowerShell',
+          detail: 'Set-Content -Path x.json -Value "{}"',
+        })}
         skillId="text-segmentation"
       />,
     )
 
-    expect(html).toContain('Read outside workspace held for approval')
-    expect(html).toContain('D:/somewhere/outside.md')
+    expect(html).toContain('PowerShell held for approval')
+    expect(html).toContain('Set-Content')
+    expect(html).not.toContain('outside workspace')
+  })
+
+  it('renders an unclassified tool hold with a neutral title', () => {
+    // 后端默认档:未知工具一律挂起审批;卡片不再使用误导性的
+    // "outside workspace" 旧读护栏文案。
+    const html = renderToStaticMarkup(
+      <ToolApprovalCard
+        event={heldEvent({ toolName: 'FutureExecTool', detail: 'Action: FutureExecTool' })}
+        skillId="text-segmentation"
+      />,
+    )
+
+    expect(html).toContain('FutureExecTool held for approval')
+    expect(html).not.toContain('outside workspace')
   })
 
   it('approves a held tool call through the Copilot approval endpoint', async () => {

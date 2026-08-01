@@ -103,7 +103,7 @@ def test_same_canonical_routes_collapse_to_one_group() -> None:
 
 def test_bash_hook_forces_ask_flow(tmp_path: Path) -> None:
     output = asyncio.run(
-        copilot._bash_requires_approval_hook(
+        copilot._execution_requires_approval_hook(
             {
                 "hook_event_name": "PreToolUse",
                 "tool_name": "Bash",
@@ -119,12 +119,12 @@ def test_bash_hook_forces_ask_flow(tmp_path: Path) -> None:
     assert spec["permissionDecisionReason"]
 
 
-def test_build_options_registers_bash_ask_matcher(tmp_path: Path) -> None:
+def test_build_options_registers_execution_ask_matcher(tmp_path: Path) -> None:
     async def cb(name, tool_input, ctx):  # noqa: ANN001
         return PermissionResultAllow()
 
     options = copilot.build_options(None, "key", tmp_path, can_use_tool=cb)
     assert options.hooks is not None
     matchers = {m.matcher: m for m in options.hooks["PreToolUse"]}
-    assert "Bash" in matchers
-    assert matchers["Bash"].hooks == [copilot._bash_requires_approval_hook]
+    matcher = matchers[copilot._EXECUTION_BOUNDARY_MATCHER]
+    assert matcher.hooks == [copilot._execution_requires_approval_hook]

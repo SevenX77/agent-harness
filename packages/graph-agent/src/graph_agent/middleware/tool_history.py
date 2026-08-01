@@ -26,20 +26,36 @@ _ORPHAN_NOTICE = (
 
 
 def _repair_orphaned_tool_calls(messages: list[Any]) -> list[Any]:
+    """Enforce the provider contract: each AI(tool_calls) is IMMEDIATELY
+    followed by one ToolMessage per id. Existing responses are moved up into
+    adjacency (inner-loop jumps can interleave a later model reply between a
+    submission and its feedback); only truly missing ones are synthesised."""
+    consumed: set[int] = set()
     repaired: list[Any] = []
-    for message in messages:
+    for position, message in enumerate(messages):
+        if id(message) in consumed:
+            continue
         repaired.append(message)
         if not isinstance(message, AIMessage) or not message.tool_calls:
             continue
-        position = len(repaired)
-        answered_after = {
-            later.tool_call_id
-            for later in messages[position:]
-            if isinstance(later, ToolMessage)
-        }
         for tool_call in message.tool_calls:
             call_id = tool_call.get("id")
-            if call_id and call_id not in answered_after:
+            if not call_id:
+                continue
+            response = next(
+                (
+                    later
+                    for later in messages[position + 1 :]
+                    if isinstance(later, ToolMessage)
+                    and later.tool_call_id == call_id
+                    and id(later) not in consumed
+                ),
+                None,
+            )
+            if response is not None:
+                consumed.add(id(response))
+                repaired.append(response)
+            else:
                 repaired.append(
                     ToolMessage(
                         content=_ORPHAN_NOTICE,

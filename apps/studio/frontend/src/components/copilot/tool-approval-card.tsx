@@ -71,17 +71,20 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
   }
 
   const disabled = !skillId || isResolving || Boolean(decisionLabel)
-  const isBash = event.toolName === 'Bash'
+  // Mirrors the backend's _EXECUTION_CLASS_TOOLS: command runners whose detail
+  // is the raw command line.
+  const isExecution = event.toolName === 'Bash' || event.toolName === 'PowerShell'
   // A copilot config-truth write (mcp__studio__<tool>) is held for consent BEFORE
-  // it persists — it is a Settings-scoped change, not an out-of-workspace read, so
-  // it gets a settings icon + a clear "LLM configuration" title.
+  // it persists — it is a Settings-scoped change, so it gets a settings icon +
+  // a clear "LLM configuration" title. Anything else here is a write-class or
+  // not-yet-classified tool held by the default-approval tier.
   const isMcpConfigWrite = event.toolName.startsWith('mcp__studio__')
-  const Icon = isBash ? TerminalSquare : isMcpConfigWrite ? Settings : FileSearch
-  const title = isBash
-    ? 'Bash held for approval'
+  const Icon = isExecution ? TerminalSquare : isMcpConfigWrite ? Settings : FileSearch
+  const title = isExecution
+    ? `${event.toolName} held for approval`
     : isMcpConfigWrite
       ? `LLM configuration: ${event.toolName.slice('mcp__studio__'.length)} held for approval`
-      : `${event.toolName} outside workspace held for approval`
+      : `${event.toolName} held for approval`
 
   return (
     <div className="mt-2 rounded-md border border-border bg-card p-2 text-xs ring-1 ring-foreground/10 ring-inset">

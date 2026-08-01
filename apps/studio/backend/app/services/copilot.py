@@ -93,16 +93,20 @@ _ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
 
 COPILOT_SDK_SUPPORTED_METHOD_IDS = call_method_ids_for_client("anthropic_messages_client")
 
-# 读/探测类 MCP 工具声明式直放(R8.1/R9.1/R10.2):由后端实现并自校验参数、
-# 只读或只探测,天然安全。写/执行工具(配置真相:create/update/delete role ·
-# endpoint/route 增删 · apply profile;skill 实体:create_skill;真实执行:
-# run_skill)一律不在此列 —— 它们走 can_use_tool 挂起审批(实测:MCP 工具无
-# Bash 式沙箱自动放行,移出白名单即触发 can_use_tool)。Write/Edit/Bash 同样
-# 留在 "ask" 审批路径。
+# 读/声明式工具免审批名单(R8.1/R9.1/R10.2 + exp-B):只收语义已知且无文件系统
+# 写/命令执行副作用的工具 —— 读三件套;TodoWrite(只写 CLI 内部计划状态);
+# Skill(只加载随包场景技能说明,其后续工具调用逐一走本权限流);读/探测类
+# MCP 工具(后端实现并自校验参数,只读或只探测)。这份名单是权限模型的单一
+# 事实源:build_options 用它预放行,can_use_tool 用它直放 —— 名单之外的一切
+# 工具(执行类 Bash/PowerShell、写类、MCP 写、以及任何未知工具)一律挂起审批,
+# 绝无默认放行(exp-B 事故:未知工具 fall-through Allow 让 PowerShell 零审批
+# 写进了无权目录)。
 _DECLARATIVE_ALLOWED_TOOLS = [
     "Read",
     "Glob",
     "Grep",
+    "TodoWrite",
+    "Skill",
     "mcp__studio__get_llm_roles",
     "mcp__studio__search_llm_registry",
     "mcp__studio__compile_skill",
@@ -116,10 +120,12 @@ _DECLARATIVE_ALLOWED_TOOLS = [
     "mcp__studio__test_llm_endpoint_models",
     "mcp__studio__probe_llm_route",
 ]
+_ZERO_APPROVAL_TOOLS = frozenset(_DECLARATIVE_ALLOWED_TOOLS)
 
 # 需审批的 MCP 写/执行工具(配置真相:凭据/路由/角色 + skill 实体 + 真实执行):
 # 必须经事前审批,绝不进免审批白名单。命名与 copilot_tools.py 的 @tool 名一一
-# 对应;can_use_tool 据此拦截并挂起。
+# 对应。强制不再依赖这份枚举(can_use_tool 对名单外一切工具默认挂起审批),它
+# 存在的意义是显式登记已知 MCP 写工具,并由测试锁定它与免审批名单永不相交。
 _MCP_APPROVAL_WRITE_TOOLS = frozenset(
     {
         "mcp__studio__create_skill",
@@ -233,14 +239,16 @@ _gateway_adapter_factory: Callable[[], GatewayAdapter] = _default_gateway_adapte
 # ── F5 safe-write + 读护栏 + 挂起式审批 ─────────────────────────────────────
 #
 # The SDK consults ``can_use_tool`` only for tools NOT pre-allowed via
-# ``allowed_tools`` (verified by PoC), so NOTHING is pre-allowed and every tool
-# flows through the callback:
+# ``allowed_tools`` (verified by PoC). Pre-allowed = _DECLARATIVE_ALLOWED_TOOLS
+# only; every other tool flows through the callback, in three explicit tiers:
 # - Write/Edit: workspace 圈定(出界拒绝) + ``patch_proposed`` diff 事件后放行。
-# - Read/Glob/Grep: workspace + 挂载 spec 目录内直接放行;出圈挂起等用户审批。
-# - Bash: 一律挂起等审批。批准 = callback 返回 Allow → CLI 自己执行,结果回到
-#   模型上下文(旧「先拒绝 + 后端代跑」已删:代跑输出只到前端,模型看到的是
-#   deny,断掉了基于结果的续推)。审批经 ``tool_approval_required`` 事件 →
-#   前端卡片 → POST /copilot/tool-approval → resolve_tool_approval。
+# - _ZERO_APPROVAL_TOOLS(声明式免审批,与 allowed_tools 同源):直接放行。
+# - 其余一切 —— 执行类(Bash/PowerShell)、写类、MCP 写、未知工具 —— 一律挂起
+#   等审批;没有默认放行档(exp-B 事故回归)。批准 = callback 返回 Allow → CLI
+#   自己执行,结果回到模型上下文(旧「先拒绝 + 后端代跑」已删:代跑输出只到
+#   前端,模型看到的是 deny,断掉了基于结果的续推)。审批经
+#   ``tool_approval_required`` 事件 → 前端卡片 → POST /copilot/tool-approval →
+#   resolve_tool_approval。
 # The callback feeds events into the active query's queue via a per-skill
 # registry — one active query per skill.
 
@@ -325,6 +333,11 @@ _SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit target must stay inside the 
 _TOOL_APPROVAL_TIMEOUT_S = float(os.environ.get("STUDIO_TOOL_APPROVAL_TIMEOUT_S", "1800"))
 _WRITE_CLASS_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 _WRITE_BOUNDARY_MATCHER = "|".join(_WRITE_CLASS_TOOLS)
+# 执行类工具 = 能跑任意命令、路径无法静态圈定的工具。Windows 上 CLI 自带
+# PowerShell(exp-B 实测:写白名单拒掉 Write 后,模型用它零审批写进无权目录),
+# 与 Bash 同档:PreToolUse "ask" hook + can_use_tool 挂起审批,两处共用此定义。
+_EXECUTION_CLASS_TOOLS = ("Bash", "PowerShell")
+_EXECUTION_BOUNDARY_MATCHER = "|".join(_EXECUTION_CLASS_TOOLS)
 
 
 def _is_under(path: Path, root: Path) -> bool:
@@ -364,20 +377,23 @@ def _write_boundary_violation(raw_path: str, workspace_root: Path) -> str | None
     return f"{raw_path} is outside the write whitelist (workspace ∪ skills root)."
 
 
-async def _bash_requires_approval_hook(
+async def _execution_requires_approval_hook(
     raw_input: HookInput, tool_use_id: str | None, context: HookContext
 ) -> HookJSONOutput:
-    """R8.3: Bash 一律走用户审批。CLI 对"安全只读命令"的沙箱自动放行会绕过
-    can_use_tool(实测:`find | wc -l` 直接执行,审批卡片没出现)——这里用
-    PreToolUse 的 "ask" 决策把每次 Bash 都压回权限流,由 can_use_tool 挂起
-    等待前端审批卡片。"""
+    """R8.3(exp-B 扩展至全部执行类):Bash/PowerShell 一律走用户审批。CLI 对
+    "安全只读命令"的沙箱自动放行会绕过 can_use_tool(实测:`find | wc -l` 直接
+    执行,审批卡片没出现)——这里用 PreToolUse 的 "ask" 决策把每次执行类调用
+    都压回权限流,由 can_use_tool 挂起等待前端审批卡片。"""
 
-    del raw_input, tool_use_id, context
+    del tool_use_id, context
+    tool_name = str(cast("dict[str, Any]", raw_input).get("tool_name", "")) or "This tool"
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
-            "permissionDecisionReason": "Bash always requires user approval in Studio.",
+            "permissionDecisionReason": (
+                f"{tool_name} always requires user approval in Studio."
+            ),
         }
     }
 
@@ -611,40 +627,30 @@ def _make_safe_write_can_use_tool(
                     )
                     await sink.queue.put(event)
             return PermissionResultAllow()
-        if tool_name == "Bash":
-            command = str(tool_input.get("command", ""))
-            if sink is None:
-                return PermissionResultDeny(
-                    message=(
-                        "Bash requires user approval, but there is no active session stream."
-                    ),
-                    interrupt=False,
-                )
-            return await _hold_for_tool_approval(
-                skill_id, sink, tool_name="Bash", detail=command, tool_use_id=tool_use_id
+        if tool_name in _ZERO_APPROVAL_TOOLS:
+            # 声明式免审批名单(与 allowed_tools 同一份定义):正常情况下 SDK 已
+            # 预放行、不会走到这里;此分支保证两层语义一致。
+            return PermissionResultAllow()
+        # 名单之外 = 执行类(Bash/PowerShell)/ 写类 / MCP 写(R10.2:配置真相与
+        # skill 实体写绝不零审批)/ 未知工具,一律挂起等用户审批。默认档就是
+        # 审批 —— 权限模型是"已知语义白名单",不是"已知危险黑名单"(exp-B
+        # 事故:未知工具默认 Allow 让 PowerShell 零审批写进无权目录)。
+        if sink is None:
+            return PermissionResultDeny(
+                message=(
+                    f"{tool_name} requires user approval, but there is no active"
+                    " session stream."
+                ),
+                interrupt=False,
             )
-        if tool_name in _MCP_APPROVAL_WRITE_TOOLS:
-            # R10.2 (revised): writes (config truth: credentials/routes/roles;
-            # skill entities: create_skill) are never zero-approval — they hold
-            # for an explicit approval card before the CLI executes the tool, so
-            # nothing is written pre-consent. The old zero-approval +
-            # before/after undo path is deleted.
-            if sink is None:
-                return PermissionResultDeny(
-                    message=(
-                        f"{tool_name} requires user approval, but there is no active"
-                        " session stream."
-                    ),
-                    interrupt=False,
-                )
-            return await _hold_for_tool_approval(
-                skill_id,
-                sink,
-                tool_name=tool_name,
-                detail=_build_write_tool_approval_detail(tool_name, tool_input),
-                tool_use_id=tool_use_id,
-            )
-        return PermissionResultAllow()
+        detail = (
+            str(tool_input.get("command", ""))
+            if tool_name in _EXECUTION_CLASS_TOOLS
+            else _build_write_tool_approval_detail(tool_name, tool_input)
+        )
+        return await _hold_for_tool_approval(
+            skill_id, sink, tool_name=tool_name, detail=detail, tool_use_id=tool_use_id
+        )
 
     return can_use_tool
 
@@ -731,10 +737,11 @@ def build_options(
     natively via ``ClaudeAgentOptions.model`` so EVERY route sends the right model
     (R7-H). None falls back to the CLI default; production always passes one.
 
-    With ``can_use_tool`` (the F5 safe-write path) only Read is pre-allowed and
-    permission_mode is "default", so the SDK routes Write/Edit/Bash through the
-    callback. Without it (the SDK probe path) the legacy acceptEdits + full
-    allow-list is kept so the probe applies edits without prompting.
+    With ``can_use_tool`` (the F5 safe-write path) only the declarative
+    read/no-side-effect tools are pre-allowed and permission_mode is "default",
+    so the SDK routes everything else through the callback. Without it (the SDK
+    probe path) the legacy acceptEdits + full allow-list is kept so the probe
+    applies edits without prompting.
     """
 
     env = {"ANTHROPIC_API_KEY": api_key}
@@ -751,9 +758,9 @@ def build_options(
     agents: dict[str, AgentDefinition] | None
     hooks: dict[HookEvent, list[HookMatcher]] | None = None
     if can_use_tool is not None:
-        # 读类三件 + 零审批 MCP 声明式直放(R8.1;这些不再进 can_use_tool);
-        # Write/Edit/Bash 留在 "ask" 路径:白名单圈定 + 审批 UX 照旧。硬边界
-        # 由 PreToolUse hook 承担(每次调用必触发,不受 allowed_tools 绕过)。
+        # 声明式免审批名单直放(R8.1;这些不再进 can_use_tool);名单之外的
+        # 一切工具留在 "ask" 路径:白名单圈定 + 审批 UX 照旧。硬边界由
+        # PreToolUse hook 承担(每次调用必触发,不受 allowed_tools 绕过)。
         allowed_tools = _DECLARATIVE_ALLOWED_TOOLS.copy()
         permission_mode = "default"
         # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
@@ -761,8 +768,14 @@ def build_options(
         skills = agent_assets.skill_names()
         mcp_servers = build_copilot_mcp_servers()
         agents = _goddess_agent_definitions()
-        # R8.3: Bash 强制 "ask"(压掉 CLI 沙箱自动放行);R8.2: 写类硬边界。
-        pre_tool_use = [HookMatcher(matcher="Bash", hooks=[_bash_requires_approval_hook])]
+        # R8.3: 执行类(Bash/PowerShell)强制 "ask"(压掉 CLI 沙箱自动放行),
+        # matcher 与 can_use_tool 共用 _EXECUTION_CLASS_TOOLS;R8.2: 写类硬边界。
+        pre_tool_use = [
+            HookMatcher(
+                matcher=_EXECUTION_BOUNDARY_MATCHER,
+                hooks=[_execution_requires_approval_hook],
+            )
+        ]
         if write_boundary_hook is not None:
             pre_tool_use.insert(
                 0, HookMatcher(matcher=_WRITE_BOUNDARY_MATCHER, hooks=[write_boundary_hook])

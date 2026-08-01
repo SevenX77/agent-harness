@@ -77,10 +77,13 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         if isinstance(flow, dict):
             finish_result = flow.get("finish_task_result")
 
-        if finish_result is not None:
-            if finish_result.get("schema_validation") == "passed":
-                return True
-        return False
+        if finish_result is None:
+            return False
+        if finish_result.get("schema_validation") != "passed":
+            return False
+        # Only THIS phase's own marker counts: the framework state carries the
+        # previous phase's marker across the boundary.
+        return bool(finish_result.get("phase_name") == self._phase_name)
 
     def _raise_fatal_error(self, max_iterations: int) -> None:
         from graph_agent.core.exceptions import GraphAgentFatalError

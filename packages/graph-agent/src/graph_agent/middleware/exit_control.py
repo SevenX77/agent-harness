@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware, hook_config
@@ -34,32 +34,32 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         self._phase_name = phase_name
         self._callbacks = list(callbacks or [])
         self._has_finish_task = has_finish_task
+        # Per-thread iteration budget, held OUTSIDE the flow channel: a flow
+        # write from before_model races other legitimate flow writers in the
+        # same superstep and the reducer-less LastValue channel raises
+        # InvalidUpdateError (field evidence: runs 2026-08-01T12-16-44 /
+        # 13-14-57). Keying by thread_id keeps the pinned contract that a
+        # reused graph gives every invoke a fresh budget.
+        self._iterations_by_thread: dict[str, int] = {}
+
+    def _thread_key(self) -> str:
+        from langgraph.config import get_config
+
+        config = get_config()
+        return str(config.get("configurable", {}).get("thread_id") or "default")
 
     def before_model(
         self,
         state: AgentState[Any],
         runtime: Runtime[Any],
     ) -> dict[str, Any] | None:
+        del runtime
         if not self._has_finish_task:
             return None
 
-        # 从 state 的 working_memory 读取和累加当前 run 独占的 iteration 数
-        flow = state.get("flow")
-        working_memory: dict[str, Any] = {}
-        if flow and hasattr(flow, "working_memory") and isinstance(flow.working_memory, dict):
-            working_memory = dict(flow.working_memory)
-        elif isinstance(flow, dict) and isinstance(flow.get("working_memory"), dict):
-            working_memory = dict(flow["working_memory"])
-
-        key = f"exit_control_iteration_{self._phase_name}"
-        current_iteration = working_memory.get(key, 0) + 1
-        working_memory[key] = current_iteration
-
-        from graph_agent.core.state import StateManager, WorkflowState
-        next_state = StateManager.update_framework(
-            cast(WorkflowState, state),
-            working_memory=working_memory,
-        )
+        thread_key = self._thread_key()
+        current_iteration = self._iterations_by_thread.get(thread_key, 0) + 1
+        self._iterations_by_thread[thread_key] = current_iteration
 
         # 进行预算判断
         from langgraph.config import get_config
@@ -69,7 +69,7 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         if not self._has_valid_finish(state) and current_iteration > max_iterations:
             self._raise_fatal_error(max_iterations)
 
-        return {"flow": next_state["flow"]}
+        return None
 
     def _has_valid_finish(self, state: AgentState[Any]) -> bool:
         flow = state.get("flow")
@@ -134,15 +134,7 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         config = get_config()
         max_iterations = config.get("configurable", {}).get("max_iterations", 20)
 
-        flow = state.get("flow")
-        working_memory: dict[str, Any] = {}
-        if flow and hasattr(flow, "working_memory") and isinstance(flow.working_memory, dict):
-            working_memory = flow.working_memory
-        elif isinstance(flow, dict) and isinstance(flow.get("working_memory"), dict):
-            working_memory = flow["working_memory"]
-
-        key = f"exit_control_iteration_{self._phase_name}"
-        current_iteration = working_memory.get(key, 0)
+        current_iteration = self._iterations_by_thread.get(self._thread_key(), 0)
 
         if current_iteration >= max_iterations:
             self._raise_fatal_error(max_iterations)

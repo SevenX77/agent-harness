@@ -2013,10 +2013,10 @@ def _build_skill_node(
     # The system prompt is baked at assembly time, so runtime input delivery
     # (placeholder rendering + first-turn input seeding) must happen per model
     # call — outermost in the chain, before cognitive/tracing middlewares.
-    middleware_chain = [
+    middleware_chain = (
         RuntimeInputMiddleware(phase_id, declared_input_keys),
         *middleware_chain,
-    ]
+    )
 
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.errors import GraphRecursionError

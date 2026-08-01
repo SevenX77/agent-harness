@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from app.core.backends import clear_backend_caches
@@ -136,6 +137,33 @@ def _is_valid_token(token: str | None) -> bool:
     return any(_constant_time_compare(token, valid_token) for valid_token in _VALID_TOKENS)
 
 
+class _CliMcpAsgiApp:
+    """`/mcp` 的 ASGI 端点:转发到 lifespan 期间活着的 session manager。
+
+    是类而非函数——Starlette 的 Route 把函数端点当 `func(request)` 包装,把
+    类实例当裸 ASGI 直通,而 streamable HTTP 需要裸 ASGI(SSE 流式响应)。
+    """
+
+    def __init__(self, studio_app: FastAPI) -> None:
+        self._studio_app = studio_app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        manager = getattr(self._studio_app.state, "cli_mcp_manager", None)
+        if manager is None:
+            # lifespan 外(如未启动的裸 TestClient)明确 503,而不是把请求砸进
+            # 未 run 的 manager。
+            response = JSONResponse(
+                {
+                    "error_code": "MCP_SURFACE_NOT_STARTED",
+                    "message": "CLI MCP surface is only available while the app lifespan is running",
+                },
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+            await response(scope, receive, send)
+            return
+        await manager.handle_request(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     """Create the Studio FastAPI application."""
     studio_app = FastAPI(
@@ -171,23 +199,16 @@ def create_app() -> FastAPI:
     studio_app.include_router(websockets.router)
     studio_app.include_router(system.router)
 
-    async def cli_mcp_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
-        # 转发到 lifespan 期间活着的 manager;lifespan 外(如未启动的裸
-        # TestClient)明确 503,而不是把请求砸进未 run 的 manager。
-        manager = getattr(studio_app.state, "cli_mcp_manager", None)
-        if manager is None:
-            response = JSONResponse(
-                {
-                    "error_code": "MCP_SURFACE_NOT_STARTED",
-                    "message": "CLI MCP surface is only available while the app lifespan is running",
-                },
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-            await response(scope, receive, send)
-            return
-        await manager.handle_request(scope, receive, send)
-
-    studio_app.mount("/mcp", cli_mcp_endpoint)
+    # Route(+ 类实例 ASGI endpoint),不是 Mount:Mount("/mcp") 会把裸 `/mcp`
+    # 307 到 `/mcp/`,而跨重定向丢 Authorization 头的 MCP 客户端会因此整片
+    # 拿不到工具面。官方 SDK(mcp.server.fastmcp)同样用 Route + ASGI 类实例。
+    studio_app.router.routes.append(
+        Route(
+            "/mcp",
+            endpoint=_CliMcpAsgiApp(studio_app),
+            methods=["GET", "POST", "DELETE"],
+        )
+    )
     return studio_app
 
 

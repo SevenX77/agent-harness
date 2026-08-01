@@ -28,7 +28,6 @@ def anyio_backend() -> str:
 def metadata_store(tmp_path: Path) -> LocalJsonMetadataStore:
     return LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=tmp_path / "workspaces",
     )
 
 

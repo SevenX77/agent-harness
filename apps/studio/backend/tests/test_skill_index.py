@@ -16,7 +16,6 @@ def anyio_backend() -> str:
 def metadata_store(tmp_path: Path) -> LocalJsonMetadataStore:
     return LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=tmp_path / "workspaces",
     )
 
 
@@ -92,7 +91,6 @@ async def test_skill_index_bad_json_returns_empty(tmp_path: Path) -> None:
     (global_config_dir / "skill_index.json").write_text("{not json", encoding="utf-8")
     metadata_store = LocalJsonMetadataStore(
         global_config_dir=global_config_dir,
-        workspaces_root=tmp_path / "workspaces",
     )
 
     assert await metadata_store.list_skill_index() == {}

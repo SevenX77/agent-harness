@@ -22,10 +22,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_metadata(tmp_path: Path, workspaces_dir: Path) -> LocalJsonMetadataStore:
+def _make_metadata(tmp_path: Path) -> LocalJsonMetadataStore:
     return LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=workspaces_dir,
     )
 
 
@@ -40,7 +39,7 @@ async def test_create_new_skill_indexes_without_persisting_summary(
     directory_path = tmp_path / "external" / skill_id
     directory_path.mkdir(parents=True)
 
-    metadata = _make_metadata(tmp_path, workspaces_dir)
+    metadata = _make_metadata(tmp_path)
     storage = LocalFilesystemBackend(tmp_path)
 
     summary = await create_new_skill(
@@ -74,13 +73,13 @@ async def test_delete_skill_removes_index_entry_keeping_source(
     studio_roots: tuple[Path, Path],
     tmp_path: Path,
 ) -> None:
-    _skills_dir, workspaces_dir = studio_roots
+    _skills_dir, _workspaces_dir = studio_roots
     user_id = "default"
     skill_id = "deletable-skill"
     directory_path = tmp_path / "external" / skill_id
     directory_path.mkdir(parents=True)
 
-    metadata = _make_metadata(tmp_path, workspaces_dir)
+    metadata = _make_metadata(tmp_path)
     storage = LocalFilesystemBackend(tmp_path)
 
     await create_new_skill(
@@ -106,12 +105,12 @@ async def test_second_skill_on_same_directory_conflicts_via_index_guard(
     studio_roots: tuple[Path, Path],
     tmp_path: Path,
 ) -> None:
-    _skills_dir, workspaces_dir = studio_roots
+    _skills_dir, _workspaces_dir = studio_roots
     user_id = "default"
     directory_path = tmp_path / "external" / "shared-folder"
     directory_path.mkdir(parents=True)
 
-    metadata = _make_metadata(tmp_path, workspaces_dir)
+    metadata = _make_metadata(tmp_path)
     storage = LocalFilesystemBackend(tmp_path)
 
     await create_new_skill(

@@ -82,3 +82,27 @@ def test_mcp_endpoint_initializes_with_token(studio_roots: tuple[Path, Path]) ->
 
     assert response.status_code == 200
     assert "mcp-session-id" in response.headers
+
+
+def test_mcp_endpoint_serves_exact_path_without_redirect(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # The URL handed to CLI clients is `<base>/mcp`. A Starlette Mount would
+    # 307 that to `/mcp/`, and an MCP client that drops Authorization across a
+    # redirect (or refuses to re-POST) silently loses the whole tool surface.
+    del studio_roots
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers={
+                "Authorization": "Bearer studio-test-token",
+                "Accept": "application/json, text/event-stream",
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code != 307, "/mcp must be served directly, not redirected"

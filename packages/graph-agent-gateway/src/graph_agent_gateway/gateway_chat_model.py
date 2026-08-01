@@ -45,16 +45,36 @@ def _raise_all_providers_failed(
     for failure in failures:
         logger.warning(
             "phase=gateway_chat_model action=provider_failure role=%s phase_name=%s "
-            "route=%s error=%s status=%s decision=%s message=%s",
+            "route=%s error=%s status=%s decision=%s shape=%s message=%s",
             role_name,
             phase_name,
             failure.get("route_id"),
             failure.get("error_type"),
             failure.get("provider_status_code"),
             failure.get("fallback_decision"),
+            failure.get("history_shape"),
             str(failure.get("message"))[:500],
         )
     raise AllProvidersFailedError(role_name, failures, phase_name=phase_name) from cause
+
+
+def _history_shape(messages: Sequence[Any]) -> str:
+    """Compact per-message trace of the outgoing history: role + tool_call ids
+    an AI message carries, and which id a ToolMessage answers — enough to spot
+    an orphaned tool_call in a provider-rejected request without dumping
+    content."""
+    parts: list[str] = []
+    for message in messages:
+        kind = type(message).__name__.removesuffix("Message") or "?"
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            ids = ",".join(str(tc.get("id")) for tc in tool_calls)
+            parts.append(f"{kind}[{ids}]")
+        elif isinstance(message, ToolMessage):
+            parts.append(f"Tool->{message.tool_call_id}")
+        else:
+            parts.append(kind)
+    return " ".join(parts)
 
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
 ActualRuntimeSettings = dict[str, dict[str, object]]
@@ -318,6 +338,7 @@ class GatewayChatModel(BaseChatModel):
                     failure = _failure_record(candidate, exc, classification.decision)
                     failure["unclassified_default"] = classification.unclassified_default
                     failure["provider_status_code"] = classification.provider_status_code
+                    failure["history_shape"] = _history_shape(request_messages)
                     failures.append(failure)
                     if classification.action == "retry_same_route" and not retry_same_used:
                         retry_same_used = True

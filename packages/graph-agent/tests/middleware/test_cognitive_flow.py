@@ -137,6 +137,9 @@ class TestFinishTask:
         new_flow = result.update["flow"]
         assert isinstance(new_flow, FrameworkState)
         assert new_flow.finish_task_result == {
+            # The marker names its producing phase so the NEXT phase's exit
+            # gate cannot mistake it for its own completion.
+            "phase_name": "segment",
             "reasoning": "done",
             "diagnostics_md": "ok",
             "business_data_md": VALID_BUSINESS_MD.strip(),

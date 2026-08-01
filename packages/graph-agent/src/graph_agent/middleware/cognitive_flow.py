@@ -511,6 +511,10 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             return self._reject_finish(tool_call_id, list(validation.errors))
 
         finish_result: dict[str, Any] = {
+            # The marker names its producing phase: FrameworkState survives
+            # phase boundaries, and an unlabelled marker let the NEXT agent
+            # phase's exit gate read it as its own completion.
+            "phase_name": self._phase_name,
             "reasoning": str(args.get("reasoning") or "").strip(),
             "diagnostics_md": str(args.get("diagnostics_md") or "").strip(),
             "business_data_md": str(args.get("business_data_md") or "").strip(),

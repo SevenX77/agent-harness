@@ -70,6 +70,25 @@ def test_missing_response_still_synthesised_adjacent() -> None:
     assert _shape(repaired)[:2] == ["AI[x]", "T->x"]
 
 
+def test_trailing_duplicate_tool_response_is_dropped() -> None:
+    """A ToolMessage whose id was already answered earlier is a stray: it
+    trails the history with no adjacent assistant message, and providers
+    reject it ("Messages with role 'tool' must be a response to a preceding
+    message with 'tool_calls'"; field evidence: run 2026-08-01T16-15-23,
+    where a retry replayed one response after later turns had moved on)."""
+    messages = [
+        _ai("a"),
+        _tool("a"),
+        _ai("b"),
+        _tool("b"),
+        _tool("a"),
+    ]
+
+    repaired = _repair_orphaned_tool_calls(messages)
+
+    assert _shape(repaired) == ["AI[a]", "T->a", "AI[b]", "T->b"]
+
+
 def test_already_adjacent_history_untouched() -> None:
     messages = [_ai("a"), _tool("a"), _ai(None, "结语")]
 

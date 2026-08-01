@@ -38,6 +38,15 @@ def _repair_orphaned_tool_calls(messages: list[Any]) -> list[Any]:
     for position, message in enumerate(messages):
         if id(message) in consumed:
             continue
+        if isinstance(message, ToolMessage):
+            # Reached here means no assistant message claimed it: a stray
+            # replay of an already-answered call. Providers reject a tool
+            # message that does not follow its tool_calls message.
+            logger.debug(
+                "phase=tool_history action=drop_stray_tool_message id=%s",
+                message.tool_call_id,
+            )
+            continue
         repaired.append(message)
         if not isinstance(message, AIMessage) or not message.tool_calls:
             continue

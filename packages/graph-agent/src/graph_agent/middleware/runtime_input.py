@@ -40,11 +40,7 @@ class RuntimeInputMiddleware(AgentMiddleware):
         self._phase_name = phase_name
         self._input_keys = input_keys
 
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Any],
-    ) -> Any:
+    def _transformed_request(self, request: ModelRequest) -> ModelRequest:
         view = _blackboard_view(request.state)
 
         system_message = request.system_message
@@ -70,5 +66,20 @@ class RuntimeInputMiddleware(AgentMiddleware):
                 ),
             )
 
-        request = request.override(system_message=system_message, messages=messages)
-        return handler(request)
+        return request.override(system_message=system_message, messages=messages)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Any],
+    ) -> Any:
+        return handler(self._transformed_request(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Any],
+    ) -> Any:
+        # Async graph executions dispatch to the async hook only; without this
+        # counterpart input delivery silently never runs there.
+        return await handler(self._transformed_request(request))

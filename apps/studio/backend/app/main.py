@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from starlette.types import Receive, Scope, Send
 
 from app.core.backends import clear_backend_caches
 from app.core.config import DEFAULT_STUDIO_PORT
@@ -41,6 +43,7 @@ from app.routers import (
     test_inputs,
     websockets,
 )
+from app.services.cli_mcp_surface import build_cli_mcp_server
 from app.services.community_catalog_runtime import sync_verified_community_catalog_into_credentials
 from app.services.copilot import cleanup_all_sessions
 from app.services.file_watcher import file_watcher
@@ -54,7 +57,7 @@ _VALID_TOKENS: list[str] = []
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(studio_app: FastAPI) -> AsyncIterator[None]:
     """Start and stop Studio background services."""
     start_orphan_parent_monitor()
     clear_backend_caches()
@@ -63,8 +66,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await _sync_verified_community_catalog_on_startup()
     terminal_manager.start_reaper()
     file_watcher.start(asyncio.get_running_loop())
+    # CLI 表面 MCP 出口(N5):manager 一个实例只能 run 一次,所以每次 lifespan
+    # 都新建(Server + manager),经 app.state 交给 /mcp 挂载点转发。
+    cli_mcp_manager = StreamableHTTPSessionManager(app=build_cli_mcp_server())
     try:
-        yield
+        async with cli_mcp_manager.run():
+            studio_app.state.cli_mcp_manager = cli_mcp_manager
+            try:
+                yield
+            finally:
+                studio_app.state.cli_mcp_manager = None
     finally:
         file_watcher.stop()
         await cleanup_all_sessions()
@@ -159,6 +170,24 @@ def create_app() -> FastAPI:
     studio_app.include_router(debug.router)
     studio_app.include_router(websockets.router)
     studio_app.include_router(system.router)
+
+    async def cli_mcp_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+        # 转发到 lifespan 期间活着的 manager;lifespan 外(如未启动的裸
+        # TestClient)明确 503,而不是把请求砸进未 run 的 manager。
+        manager = getattr(studio_app.state, "cli_mcp_manager", None)
+        if manager is None:
+            response = JSONResponse(
+                {
+                    "error_code": "MCP_SURFACE_NOT_STARTED",
+                    "message": "CLI MCP surface is only available while the app lifespan is running",
+                },
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+            await response(scope, receive, send)
+            return
+        await manager.handle_request(scope, receive, send)
+
+    studio_app.mount("/mcp", cli_mcp_endpoint)
     return studio_app
 
 

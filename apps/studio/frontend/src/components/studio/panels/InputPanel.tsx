@@ -13,7 +13,6 @@ import {
   reconcileOutputFields,
   runtimeArtifactsOf,
   runtimeFileFieldsInImportScope,
-  runtimeInputConflictsInImportScope,
   type ArtifactRow,
   type FileFieldDecl,
   type IoInputChecks,
@@ -357,7 +356,6 @@ export function InputPanel({
 
   const importNodeId = view.isGraphLevel ? null : selectedNode?.id ?? null
   const declaredFiles = runtimeFileFieldsInImportScope(runtimeConfig, importNodeId)
-  const inputConflicts = runtimeInputConflictsInImportScope(runtimeConfig, importNodeId)
   // Reconciled input fields (matched/available/missing), nested. For an interior
   // node this reconciles io.inputs against upstream blackboard + runtime files.
   const blackboard = reconcileInputFields(skillDetail, view.isGraphLevel ? "" : selectedNode?.id ?? "", declaredFiles)
@@ -398,7 +396,6 @@ export function InputPanel({
                         declaredFiles={declaredFiles}
                         declaredInputNames={declaredInputFieldNames(view.content)}
                         importNodeId={importNodeId}
-                        conflicts={inputConflicts}
                         onSave={handleInputConfigSave}
                         onRuntimeConfigRefresh={onRuntimeConfigRefresh}
                         onFileOpen={onFileOpen}

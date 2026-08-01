@@ -190,15 +190,28 @@ def dump_without_invented_nones(parsed_model: BaseModel) -> dict[str, Any]:
     Declared defaults must materialise (they are real values), but an optional
     field with no default dumps as None — and downstream jsonschema validation
     rejects null where the schema declares object/array. Only keys that were
-    NOT submitted AND resolved to None are dropped.
+    NOT submitted AND resolved to None are dropped, at every nesting depth
+    (a parent's ``model_dump`` materialises nested optionals too).
     """
-    dumped = parsed_model.model_dump()
-    submitted = parsed_model.model_fields_set
-    return {
-        key: value
-        for key, value in dumped.items()
-        if not (value is None and key not in submitted)
-    }
+    dumped = _prune_invented_nones(parsed_model)
+    return dumped if isinstance(dumped, dict) else {}
+
+
+def _prune_invented_nones(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        submitted = value.model_fields_set
+        return {
+            key: _prune_invented_nones(getattr(value, key))
+            for key in type(value).model_fields
+            if not (getattr(value, key) is None and key not in submitted)
+        }
+    if isinstance(value, dict):
+        return {key: _prune_invented_nones(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_prune_invented_nones(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_prune_invented_nones(item) for item in value)
+    return value
 
 
 @lru_cache(maxsize=128)

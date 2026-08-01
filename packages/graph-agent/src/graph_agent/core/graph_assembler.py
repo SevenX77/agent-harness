@@ -2003,6 +2003,7 @@ def _build_skill_node(
     )
 
     from graph_agent.middleware.runtime_input import RuntimeInputMiddleware
+    from graph_agent.middleware.tool_history import ToolHistoryIntegrityMiddleware
 
     input_schema = phase_ast.io.inputs if phase_ast.io is not None else None
     declared_input_keys = (
@@ -2015,6 +2016,7 @@ def _build_skill_node(
     # call — outermost in the chain, before cognitive/tracing middlewares.
     middleware_chain = (
         RuntimeInputMiddleware(phase_id, declared_input_keys),
+        ToolHistoryIntegrityMiddleware(),
         *middleware_chain,
     )
 

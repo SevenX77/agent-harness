@@ -363,5 +363,4 @@ async def test_resolve_child_graph_topology_missing_graph_md(
 def metadata_store(tmp_path: Path) -> LocalJsonMetadataStore:
     return LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=tmp_path / "workspaces",
     )

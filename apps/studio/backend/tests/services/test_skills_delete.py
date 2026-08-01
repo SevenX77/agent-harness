@@ -29,7 +29,6 @@ async def test_delete_skill_unregisters_workspace_skill_without_removing_files(
 
     metadata = LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=workspaces_dir,
     )
     storage = LocalFilesystemBackend(tmp_path)
     await metadata.save_skill_index_entry(
@@ -55,7 +54,6 @@ async def test_delete_skill_unindexes_builtin_public_skill_without_removing_file
     skill_dir = skills_dir / skill_id
     metadata = LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=workspaces_dir,
     )
     storage = LocalFilesystemBackend(tmp_path)
 
@@ -76,7 +74,6 @@ async def test_delete_skill_rejects_path_traversal_without_removing_files(
     skills_dir, workspaces_dir = studio_roots
     metadata = LocalJsonMetadataStore(
         global_config_dir=tmp_path / "global-config",
-        workspaces_root=workspaces_dir,
     )
     storage = LocalFilesystemBackend(tmp_path)
 

@@ -48,7 +48,6 @@ async def test_resolve_skill_dir_async_requires_index_entry(
     _write_minimal_skill(isolated_paths / "legacy-workspace-skill")
     metadata = LocalJsonMetadataStore(
         global_config_dir=tmp_path / "settings",
-        workspaces_root=tmp_path / "workspaces",
     )
 
     with pytest.raises(HTTPException) as exc_info:

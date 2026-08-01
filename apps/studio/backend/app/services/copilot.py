@@ -930,13 +930,16 @@ def _resolve_copilot_workspace_dir(
     the backend dir *inside the agent-harness repo*, so running the claude CLI
     there makes its `initialize` discover and try to start the repo's MCP servers
     / project settings — which hangs init until the SDK's control-request timeout.
-    The skill workspace dir (under STUDIO_CONFIG_DIR) is clean of that config.
-    """
-    from app.core import config
 
+    Without a requested ``workspace_root`` the skill index is the only truth: an
+    unregistered skill is an error, never a silently created shared directory
+    (the retired DEFAULT_SKILLS_ROOT fallback handed the CLI the shared skills
+    root itself, so it saw an "empty skill" and rummaged the filesystem for the
+    real one).
+    """
+    registered_workspace = _registered_copilot_workspace_root(skill_id)
     requested_workspace = _validate_requested_workspace_root(workspace_root)
     if requested_workspace is not None:
-        registered_workspace = _registered_copilot_workspace_root(skill_id)
         if registered_workspace is not None:
             registered_resolved = registered_workspace.resolve(strict=False)
             if requested_workspace != registered_resolved:
@@ -952,12 +955,17 @@ def _resolve_copilot_workspace_dir(
             )
         return requested_workspace
 
-    skills_root = config.DEFAULT_SKILLS_ROOT
-    skill_dir = skills_root / skill_id
-    if skill_dir.is_dir():
-        return skill_dir
-    skills_root.mkdir(parents=True, exist_ok=True)
-    return skills_root
+    if registered_workspace is None:
+        raise ValueError(
+            f"skill {skill_id} is not registered in Studio's skill index; "
+            "cannot resolve a copilot workspace"
+        )
+    registered_resolved = registered_workspace.resolve(strict=False)
+    if not registered_resolved.is_dir():
+        raise ValueError(
+            f"registered workspace for skill {skill_id} does not exist: {registered_resolved}"
+        )
+    return registered_resolved
 
 
 def _validate_requested_workspace_root(workspace_root: str | Path | None) -> Path | None:

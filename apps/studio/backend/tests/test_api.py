@@ -31,7 +31,7 @@ from tests.conftest import copy_skill
 FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
 
 
-def _open_skills_into_index(workspaces_dir: Path, dirs_by_id: dict[str, Path]) -> None:
+def _open_skills_into_index(dirs_by_id: dict[str, Path]) -> None:
     """Record folders in the native-fs skill index so Home (IDE model) lists them.
 
     Home does not auto-scan a bundled skills registry (01_init.md D11);
@@ -44,7 +44,6 @@ def _open_skills_into_index(workspaces_dir: Path, dirs_by_id: dict[str, Path]) -
 
     metadata = LocalJsonMetadataStore(
         global_config_dir=config.APP_SETTINGS_DIR,
-        workspaces_root=workspaces_dir,
     )
 
     async def _register() -> None:
@@ -125,7 +124,7 @@ def test_skill_detail_uses_real_skill_files(
     # GET /api/skills/{id} detail compiles the real on-disk files of an opened skill
     # (IDE model, 01_init.md D11 无注册表 — no Python LIST aggregation).
     skills_dir, workspaces_dir = studio_roots
-    _open_skills_into_index(workspaces_dir, {"text-segmentation": skills_dir / "text-segmentation"})
+    _open_skills_into_index({"text-segmentation": skills_dir / "text-segmentation"})
 
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200

@@ -24,9 +24,8 @@ logger = logging.getLogger(__name__)
 class LocalJsonMetadataStore:
     """Metadata store that treats run_metadata.json files as records."""
 
-    def __init__(self, global_config_dir: Path, workspaces_root: Path) -> None:
+    def __init__(self, global_config_dir: Path) -> None:
         self._global_config_dir = global_config_dir
-        self._workspaces_root = workspaces_root
         self._app_settings_lock = threading.Lock()
 
     async def list_skill_index(self) -> dict[str, SkillIndexEntry]:
@@ -86,9 +85,10 @@ class LocalJsonMetadataStore:
         await asyncio.to_thread(self._write_app_settings_sync, settings)
 
     async def list_runs(self, user_id: str, skill_id: str) -> list[RunMetadata]:
-        """Load run metadata files for one skill."""
-        runs_root = await self._runs_root(user_id, skill_id)
-        if not await asyncio.to_thread(runs_root.exists):
+        """Load run metadata files for one skill; an unregistered skill has none."""
+        del user_id
+        runs_root = await self._runs_root(skill_id)
+        if runs_root is None or not await asyncio.to_thread(runs_root.exists):
             return []
 
         runs: list[RunMetadata] = []
@@ -111,22 +111,24 @@ class LocalJsonMetadataStore:
         skill_id: str,
         metadata: RunMetadata,
     ) -> None:
-        """Persist one run metadata document."""
-        metadata_path = (
-            (await self._runs_root(user_id, skill_id)) / metadata.run_id / "run_metadata.json"
-        )
+        """Persist one run metadata document under the indexed skill workspace."""
+        del user_id
+        runs_root = await self._runs_root(skill_id)
+        if runs_root is None:
+            raise LookupError(
+                f"skill {skill_id} is not registered in Studio's skill index; "
+                "cannot persist run metadata"
+            )
+        metadata_path = runs_root / metadata.run_id / "run_metadata.json"
         await asyncio.to_thread(metadata_path.parent.mkdir, parents=True, exist_ok=True)
         async with aiofiles.open(metadata_path, "w", encoding="utf-8") as file:
             await file.write(metadata.model_dump_json())
 
-    def _skills_root(self, user_id: str) -> Path:
-        return self._workspaces_root / user_id / "skills"
-
-    async def _runs_root(self, user_id: str, skill_id: str) -> Path:
+    async def _runs_root(self, skill_id: str) -> Path | None:
         entry = await self.get_skill_index_entry(skill_id)
-        if entry:
-            return Path(entry["absolute_path"]) / ".workspace" / "runs"
-        return self._skills_root(user_id) / skill_id / "runs"
+        if entry is None:
+            return None
+        return Path(entry["absolute_path"]) / ".workspace" / "runs"
 
     def _skill_index_path(self) -> Path:
         return self._global_config_dir / "skill_index.json"

@@ -3,9 +3,12 @@
 Hard boundary = PreToolUse hook (fires on EVERY tool call, immune to
 allowed_tools/acceptEdits bypass): write whitelist = workspace ∪ skills root,
 with the llm/ config truth dir and app_settings.json explicitly excluded.
-Approval UX = can_use_tool: reads never reach it any more, in-whitelist
-Write/Edit emit patch_proposed, Bash holds; approval timeout now STOPS the
-task (interrupt=True) while preserving the session, instead of a silent
+Approval UX = can_use_tool, three explicit tiers: the declarative allow-list
+(reads + TodoWrite/Skill + read/probe MCP tools) passes; in-whitelist
+Write/Edit emit patch_proposed; EVERYTHING else — execution class
+(Bash/PowerShell), MCP writes, unknown tools — holds for approval (exp-B
+regression: no default-allow tier exists). Approval timeout STOPS the task
+(interrupt=True) while preserving the session, instead of a silent
 deny-and-continue.
 """
 
@@ -357,3 +360,140 @@ def test_mcp_run_skill_holds_for_approval_then_approves(tmp_path: Path) -> None:
         e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
     ]
     assert approval_events and approval_events[0].tool_name == "mcp__studio__run_skill"
+
+
+# ── exp-B 事故回归:白名单之外一律审批,未知工具绝不默认放行 ──────────────────
+#
+# 实测事故(2026-08-01 无头实验 exp-B):Write 被写白名单拒绝后,模型改用 Windows
+# CLI 自带的 PowerShell 工具把 runtime_config.json 和 import 文件直接写进了无权
+# 目录,全程零审批 —— 根源是 can_use_tool 末行对一切未显式处理的工具默认
+# PermissionResultAllow。权限模型必须是"已知语义白名单"(声明式名单直放,其余
+# 一律挂起审批),不是"已知危险黑名单"。
+
+
+def test_powershell_holds_for_approval_then_approves(tmp_path: Path) -> None:
+    queue = _register_sink("s-pwsh", tmp_path)
+    command = 'Set-Content -Path "D:/elsewhere/runtime_config.json" -Value "{}"'
+
+    held, result = asyncio.run(
+        _hold_and_resolve("s-pwsh", "PowerShell", {"command": command}, approve=True)
+    )
+
+    assert held is True  # the command did NOT run before user approval
+    assert isinstance(result, PermissionResultAllow)
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    approval_events = [
+        e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
+    ]
+    assert approval_events and approval_events[0].tool_name == "PowerShell"
+    assert command in approval_events[0].detail
+
+
+def test_powershell_denied_returns_deny(tmp_path: Path) -> None:
+    _register_sink("s-pwsh-deny", tmp_path)
+
+    held, result = asyncio.run(
+        _hold_and_resolve(
+            "s-pwsh-deny", "PowerShell", {"command": "Remove-Item x"}, approve=False
+        )
+    )
+
+    assert held is True
+    assert isinstance(result, PermissionResultDeny)
+
+
+def test_unknown_tool_holds_for_approval_not_allowed(tmp_path: Path) -> None:
+    # 未来 SDK 新增的任何执行/写类工具,在被显式分类前必须走审批,不是放行。
+    queue = _register_sink("s-unknown", tmp_path)
+
+    held, result = asyncio.run(
+        _hold_and_resolve(
+            "s-unknown", "FutureExecTool", {"target": "anything"}, approve=True
+        )
+    )
+
+    assert held is True
+    assert isinstance(result, PermissionResultAllow)
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    approval_events = [
+        e for e in events if isinstance(e, CopilotEventToolApprovalRequired)
+    ]
+    assert approval_events and approval_events[0].tool_name == "FutureExecTool"
+
+
+def test_unknown_tool_without_session_is_denied() -> None:
+    # 没有活跃会话流就无法挂审批卡:未知工具必须 Deny,而不是静默 Allow。
+    cb = copilot._make_safe_write_can_use_tool("s-no-sink")
+
+    result = asyncio.run(
+        cb("FutureExecTool", {}, ToolPermissionContext(tool_use_id="tu-x"))
+    )
+
+    assert isinstance(result, PermissionResultDeny)
+
+
+def test_execution_hook_forces_ask_for_powershell() -> None:
+    # R8.3 同因:CLI 沙箱对"安全只读命令"的自动放行会绕过 can_use_tool,
+    # PowerShell 与 Bash 同等对待,PreToolUse "ask" 压回权限流。
+    output = asyncio.run(
+        copilot._execution_requires_approval_hook(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "PowerShell",
+                "tool_input": {"command": "Get-ChildItem"},
+                "tool_use_id": "tu-pwsh",
+            },
+            "tu-pwsh",
+            {},
+        )
+    )
+
+    spec = output["hookSpecificOutput"]
+    assert spec["permissionDecision"] == "ask"
+    assert "PowerShell" in spec["permissionDecisionReason"]
+
+
+def test_build_options_execution_ask_matcher_covers_powershell(tmp_path: Path) -> None:
+    # 执行类工具集合是单一事实源:hook matcher 从 _EXECUTION_CLASS_TOOLS 派生,
+    # 不再在 build_options 里手写第二份 "Bash" 字符串。
+    async def cb(name, tool_input, ctx):  # noqa: ANN001
+        return PermissionResultAllow()
+
+    options = copilot.build_options(None, "key", tmp_path, can_use_tool=cb)
+
+    assert set(copilot._EXECUTION_CLASS_TOOLS) == {"Bash", "PowerShell"}
+    assert options.hooks is not None
+    matchers = {m.matcher: m for m in options.hooks["PreToolUse"]}
+    matcher = matchers[copilot._EXECUTION_BOUNDARY_MATCHER]
+    assert matcher.hooks == [copilot._execution_requires_approval_hook]
+
+
+def test_todowrite_and_skill_ride_declarative_allow_list(tmp_path: Path) -> None:
+    # 默认档翻成审批后,已知声明式工具必须显式进免审批名单,不能靠 fall-through:
+    # TodoWrite 只写 CLI 内部计划状态,Skill 只加载随包场景技能说明(其后续工具
+    # 调用逐一走本权限流)。
+    allowed = set(copilot._DECLARATIVE_ALLOWED_TOOLS)
+    assert "TodoWrite" in allowed
+    assert "Skill" in allowed
+
+    queue = _register_sink("s-decl", tmp_path)
+    cb = copilot._make_safe_write_can_use_tool("s-decl")
+    result = asyncio.run(
+        cb("TodoWrite", {"todos": []}, ToolPermissionContext(tool_use_id="tu-td"))
+    )
+
+    assert isinstance(result, PermissionResultAllow)
+    assert queue.empty()
+    assert not copilot._pending_tool_approvals
+
+
+def test_gated_tool_classes_never_enter_declarative_list() -> None:
+    # 三档分类互斥:执行类 / 写类 / MCP 写类与声明式免审批名单永不相交。
+    declarative = set(copilot._DECLARATIVE_ALLOWED_TOOLS)
+    assert not set(copilot._EXECUTION_CLASS_TOOLS) & declarative
+    assert not set(copilot._WRITE_CLASS_TOOLS) & declarative
+    assert not copilot._MCP_APPROVAL_WRITE_TOOLS & declarative

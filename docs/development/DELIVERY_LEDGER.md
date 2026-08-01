@@ -56,6 +56,20 @@
 | N5-2 | 实现:sidecar `/mcp` streamable HTTP 出口(工具面=面板 27−2) | ✅ 随本行同 PR 合入 | `app/services/cli_mcp_surface.py` + `main.py` lifespan 内建 manager/`app.state` 转发挂载;4 测试(工具差集/内存会话协议/401/initialize 200+session-id);`mcp>=1.29` 补为 backend 直接依赖(uv.lock 变更→合并后根 uv sync + vendor 重建) |
 | N5-3 | 实现:lib.rs 注册 studio MCP(claude `--mcp-config` + 摘 bypass + allowedTools 读档;codex config.toml `[mcp_servers.studio]` url+bearer_token_env_var)+ 资产回写 | ✅ 随本行同 PR 合入 | payload 注入 `STUDIO_MCP_URL`/`STUDIO_API_TOKEN`(sidecar 未起则整段省略、会话照常启动);5 个新 Rust 测试绿(本机既有 4 个无关失败,干净树复现过);cli.md 新增「Studio Tool Surface」节、KB-13 撤销「CLI 无工具」警示 |
 
+#### 事故修复 · copilot 权限模型"未知工具默认放行"漏洞(exp-B,2026-08-01)
+
+**事故**:无头实验 exp-B(证据 `D:\coding\skills\_copilot-lab\rounds\exp-b-round1\events.jsonl`)中,copilot 的 Write 被写白名单拒绝后,模型改用 Windows CLI 自带的 PowerShell 工具把 `runtime_config.json` 和 import 文件直接写进无权目录 —— 16 次调用全部放行,零审批卡。
+
+**根因**:`copilot.py` 的 `can_use_tool` 只显式处理 Write/Edit、Bash、MCP 写三类,末行对一切未知工具默认 `PermissionResultAllow`(黑名单模型);PreToolUse 的写边界 hook(`_WRITE_CLASS_TOOLS`)与 Bash 强制-ask hook 也都不覆盖 PowerShell,硬边界同时失效。
+
+**决议(操作指令,2026-08-01)**:权限模型改为"已知语义白名单"三档 —— ①声明式免审批名单(`_DECLARATIVE_ALLOWED_TOOLS`,本次补入 TodoWrite/Skill 两个已知声明式工具)直放,该名单同时喂 `allowed_tools` 预放行与 `can_use_tool` 直放两层(单一事实源);②名单之外的一切 —— 执行类(`_EXECUTION_CLASS_TOOLS` = Bash/PowerShell,PreToolUse ask-hook matcher 与审批档共用这份定义)、写类、MCP 写、未知工具 —— 一律 `_hold_for_tool_approval` 挂起审批;③默认放行档删除,不存在 fall-through Allow。`Task`(三女神 subagent)无使用实证,留在默认审批档,未来凭证据显式分类。
+
+| # | 项 | 状态 | 关键坐标 |
+|---|---|---|---|
+| SEC-1 | can_use_tool 三档白名单 + PowerShell/未知工具默认审批 | ✅ 随本行同 PR 合入 | 回归测试 `tests/services/test_copilot_guardrails.py`「exp-B 事故回归」节(PowerShell/未知工具必须挂起、免审批名单分类互斥);验收 = 全 CI 门禁绿 |
+
+**与 P-3 的合并语义**(P-3 是反方向的放宽,后续处理时以此为准):只读命令白名单免审批、其余执行类一律审批、未知工具默认审批。
+
 ### 冲刺清单
 
 #### 第一波 · copilot 旅程工具(关键路径)

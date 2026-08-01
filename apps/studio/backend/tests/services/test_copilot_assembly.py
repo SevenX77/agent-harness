@@ -97,9 +97,17 @@ def test_three_goddesses_registered_as_native_subagents(tmp_path: Path) -> None:
 
 def test_allowed_tools_declarative_reads_and_zero_approval_mcp(tmp_path: Path) -> None:
     options = _chat_options(tmp_path)
-    assert options.allowed_tools == ["Read", "Glob", "Grep", *_MCP_TOOL_NAMES]
-    # Write/Edit/Bash stay OFF the allowlist so they route through approval UX
-    for gated in ("Write", "Edit", "Bash"):
+    assert options.allowed_tools == [
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+        "Skill",
+        *_MCP_TOOL_NAMES,
+    ]
+    # Execution/write tools stay OFF the allowlist so they route through
+    # approval UX (exp-B: PowerShell is execution-class, same as Bash).
+    for gated in ("Write", "Edit", "Bash", "PowerShell"):
         assert gated not in options.allowed_tools
     # Write MCP tools are gated too: they hold for approval via can_use_tool.
     for gated in _MCP_APPROVAL_WRITE_TOOL_NAMES:

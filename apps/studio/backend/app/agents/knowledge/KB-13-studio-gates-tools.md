@@ -60,6 +60,7 @@ Three write paths coexist, each with its own guard:
 *   **Studio's own writes** (editor save, graph serialize, test inputs, golden promote from UI, publish artifacts) go through the Tauri Rust native-fs layer — the sole writer for Studio-originated file mutations (D12).
 *   **Agent direct writes**: conversational agents MAY use `Write`/`Edit` directly on skill files — an accepted MVP1 exception (PM ruling 2026-06-14, DEF-027). A PreToolUse hard boundary confines them to the workspace and skills root and excludes the `llm/` config directory and `app_settings.json`; every write emits a patch event for review/undo.
 *   **Agent structured writes** (skill create/fork/publish, golden set/delete, run/resume, LLM config) go through the approval-gated MCP tools above — never by hand-editing config files.
+*   **Shell / execution tools** (`Bash`, `PowerShell`) always hold for a user approval card, every invocation, read-only commands included; any tool outside the declarative read list holds for approval by default. A denied `Write`/`Edit` means the target is out of bounds — never retry the same write through a shell command or any other tool.
 
 ## 4. Configuration Map
 Configurations and environment mappings are partitioned to prevent unauthorized access:

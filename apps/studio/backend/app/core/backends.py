@@ -86,10 +86,7 @@ def get_metadata() -> MetadataStore:
     cfg = get_backend_config()
     if cfg.metadata_type != "local":
         raise ValueError(f"Unsupported metadata backend: {cfg.metadata_type}")
-    return LocalJsonMetadataStore(
-        global_config_dir=cfg.global_config_dir,
-        workspaces_root=cfg.workspaces_root,
-    )
+    return LocalJsonMetadataStore(global_config_dir=cfg.global_config_dir)
 
 
 @lru_cache

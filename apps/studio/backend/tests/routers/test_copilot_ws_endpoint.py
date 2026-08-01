@@ -935,21 +935,29 @@ def test_stream_query_preserves_resource_terminal_error_code_and_payload(
     }
 
 
-def test_resolve_copilot_workspace_dir_uses_skill_dir_not_process_cwd(
+def test_resolve_copilot_workspace_dir_uses_skill_index_not_process_cwd(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    # The copilot CLI cwd must be the skill workspace dir, never the process CWD
-    # (in the packaged app that is the backend dir inside the repo, which makes
-    # the SDK initialize load the repo's MCP/settings and hang).
+    # Without a requested workspace_root the resolver reads the skill index —
+    # the single source of truth for opened skills. The result must never be
+    # the process CWD (in the packaged app that is the backend dir inside the
+    # repo, which makes the SDK initialize load the repo's MCP/settings and hang).
     from app.core import config
 
-    skills_root = tmp_path / "default-skills"
-    skill_dir = skills_root / "demo"
-    skill_dir.mkdir(parents=True)
-    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_root)
+    skill_dir = tmp_path / "demo"
+    skill_dir.mkdir()
+    index_path = tmp_path / "skill-index.json"
+    index_path.write_text(
+        json.dumps({"demo": {"absolute_path": str(skill_dir), "l2_remote_url": ""}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", index_path)
 
-    assert copilot_service._resolve_copilot_workspace_dir("demo") == skill_dir
+    resolved = copilot_service._resolve_copilot_workspace_dir("demo")
+
+    assert resolved == skill_dir.resolve()
+    assert resolved != Path.cwd()
 
 
 def test_resolve_copilot_workspace_dir_accepts_registered_imported_root(
@@ -1062,20 +1070,45 @@ def test_stream_query_uses_imported_workspace_root_as_sdk_cwd(
     assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
-def test_resolve_copilot_workspace_dir_falls_back_to_skills_root(
+def test_resolve_copilot_workspace_dir_rejects_unregistered_skill(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # No workspace_root + skill absent from the index = fail fast. The retired
+    # DEFAULT_SKILLS_ROOT fallback returned the shared root itself, so the CLI
+    # saw an "empty skill" there and went hunting the filesystem for the real one.
+    from app.core import config
+
+    index_path = tmp_path / "skill-index.json"
+    index_path.write_text("{}", encoding="utf-8")
+    skills_root = tmp_path / "default-skills"
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", index_path)
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_root)
+
+    with pytest.raises(ValueError, match="not registered"):
+        copilot_service._resolve_copilot_workspace_dir("missing-skill")
+
+    # Fail fast means no silent directory creation either.
+    assert not skills_root.exists()
+
+
+def test_resolve_copilot_workspace_dir_rejects_indexed_dir_gone(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     from app.core import config
 
-    skills_root = tmp_path / "skills"
+    index_path = tmp_path / "skill-index.json"
+    index_path.write_text(
+        json.dumps({"demo": {"absolute_path": str(tmp_path / "gone"), "l2_remote_url": ""}}),
+        encoding="utf-8",
+    )
+    skills_root = tmp_path / "default-skills"
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", index_path)
     monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", skills_root)
 
-    resolved = copilot_service._resolve_copilot_workspace_dir("missing-skill")
-
-    assert resolved == skills_root
-    assert resolved.is_dir()
-    assert resolved != Path.cwd()
+    with pytest.raises(ValueError, match="does not exist"):
+        copilot_service._resolve_copilot_workspace_dir("demo")
 
 
 async def _events(*items: object) -> AsyncIterator[object]:

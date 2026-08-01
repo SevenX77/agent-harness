@@ -448,13 +448,15 @@ def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
     assert options.include_partial_messages is True
 
 
-def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stream_query_errors_when_api_key_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
         lambda _model_override, role="copilot_chat": _runtime(_resolved_route(), ""),
     )
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
+    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
     assert isinstance(events[0], CopilotEventContextResolved)  # F4: first event echoes context
     assert events[1:] == [

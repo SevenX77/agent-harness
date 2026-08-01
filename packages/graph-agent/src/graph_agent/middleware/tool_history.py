@@ -13,11 +13,14 @@ tool_call gets a synthetic ToolMessage before the request leaves the engine.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware, ModelRequest
 from langchain_core.messages import AIMessage, ToolMessage
+
+logger = logging.getLogger(__name__)
 
 _ORPHAN_NOTICE = (
     "[系统] 该工具调用未获得独立结果:同一轮的提交已被系统处理,"
@@ -70,13 +73,32 @@ def _repair_orphaned_tool_calls(messages: list[Any]) -> list[Any]:
 class ToolHistoryIntegrityMiddleware(AgentMiddleware):
     """Per-model-call repair of unanswered tool_calls in the request history."""
 
+    def _repaired_request(self, request: ModelRequest) -> ModelRequest:
+        messages = list(request.messages)
+        repaired = _repair_orphaned_tool_calls(messages)
+        changed = repaired != messages
+        logger.debug(
+            "phase=tool_history action=wrap_model_call messages=%d repaired=%s",
+            len(messages),
+            changed,
+        )
+        if changed:
+            request = request.override(messages=repaired)
+        return request
+
     def wrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Any],
     ) -> Any:
-        messages = list(request.messages)
-        repaired = _repair_orphaned_tool_calls(messages)
-        if len(repaired) != len(messages):
-            request = request.override(messages=repaired)
-        return handler(request)
+        return handler(self._repaired_request(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Any],
+    ) -> Any:
+        # The runtime dispatches async graph executions to the async hook only;
+        # without this counterpart the repair silently never runs there (the
+        # sibling CognitiveFlow middleware ships both for the same reason).
+        return await handler(self._repaired_request(request))

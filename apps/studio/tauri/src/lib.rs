@@ -724,10 +724,27 @@ fn studio_ah_managed_payloads() -> Result<Vec<(String, String)>, String> {
 ///   continue". (No `/remote-control` either — that opens claude's *phone*
 ///   remote-control dialog, irrelevant to a local terminal attach.)
 /// - The trailing prompt auto-submits as the first turn → the status report.
+/// Studio read/probe tools pre-allowed in a CLI session. Write and execute
+/// tools are deliberately absent: they surface claude's own approval prompt,
+/// which is the human gate for a session the user is sitting in front of —
+/// Studio does not build a second approval system on top of it. For the same
+/// reason the interactive launch drops `--dangerously-skip-permissions`.
+const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
+    "mcp__studio__compile_skill,",
+    "mcp__studio__predict_skill,",
+    "mcp__studio__get_run_detail,",
+    "mcp__studio__list_golden,",
+    "mcp__studio__get_golden_content,",
+    "mcp__studio__get_resume_validity,",
+    "mcp__studio__get_llm_roles,",
+    "mcp__studio__search_llm_registry"
+);
+
 fn claude_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
+    let claude_allowed_tools = CLAUDE_STUDIO_ALLOWED_TOOLS;
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; export IS_SANDBOX=1; exec \"$claude_real\" --dangerously-skip-permissions {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; exec \"$claude_real\" $studio_mcp_args {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -742,7 +759,7 @@ fn claude_master_cmd() -> String {
 fn codex_master_cmd() -> String {
     let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -1610,6 +1627,18 @@ fn sh_single_quote_str(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// Double-quoted shell literal, for values that must stay readable inside an
+/// exported env line. Escapes the four characters the shell still expands
+/// inside double quotes.
+fn sh_double_quote_str(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`");
+    format!("\"{escaped}\"")
+}
+
 fn sh_single_quote(value: &Path) -> String {
     sh_single_quote_str(&value.display().to_string())
 }
@@ -1678,12 +1707,25 @@ json.dump(d, open(p, 'w'), indent=2)
 /// its prompt instead of blocking, then `ah start`s and attaches the master —
 /// all in ONE wsl session so the interactive attach holds the distro alive and
 /// the master persists.
+/// Where a CLI session reaches the running Studio sidecar's MCP surface.
+///
+/// WSL mirrored networking (the default on this project's Windows hosts) makes
+/// the Windows sidecar reachable at 127.0.0.1 from inside the distro, so the
+/// sidecar keeps its loopback-only bind. A distro without mirrored networking
+/// simply cannot resolve it — the launcher then omits the env and the session
+/// runs without Studio tools rather than failing to start.
+pub(crate) struct StudioMcpEndpoint {
+    pub port: u16,
+    pub token: String,
+}
+
 fn wsl_payload_script(
     wsl_workspace: &str,
     wsl_config: &str,
     assistant: CodeAssistant,
     windows_codex_home: Option<&str>,
     windows_claude_home: Option<&str>,
+    studio_mcp: Option<&StudioMcpEndpoint>,
 ) -> String {
     let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
     let min_major = min_parts.get(0).copied().unwrap_or("1");
@@ -1753,6 +1795,14 @@ fi
     } else {
         String::new()
     };
+    let studio_mcp_env = match studio_mcp {
+        Some(endpoint) => format!(
+            "export STUDIO_MCP_URL=\"http://127.0.0.1:{port}/mcp\"\nexport STUDIO_API_TOKEN={token}\n",
+            port = endpoint.port,
+            token = sh_double_quote_str(&endpoint.token),
+        ),
+        None => String::new(),
+    };
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -1760,7 +1810,7 @@ WS={workspace}
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
 export STUDIO_AH_HOST_HOME="$HOME"
-{codex_auth_sync}{claude_auth_bridge}
+{studio_mcp_env}{codex_auth_sync}{claude_auth_bridge}
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found in WSL."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
@@ -2107,6 +2157,7 @@ fn write_code_assistant_launcher_script(
     workspace_root: &Path,
     config_path: &Path,
     assistant: CodeAssistant,
+    studio_mcp: Option<&StudioMcpEndpoint>,
 ) -> Result<PathBuf, String> {
     let script_path = launcher_script_path(workspace_root, assistant);
     let parent = script_path
@@ -2127,6 +2178,7 @@ fn write_code_assistant_launcher_script(
                 assistant,
                 windows_codex_home_wsl().as_deref(),
                 windows_claude_home_wsl().as_deref(),
+                studio_mcp,
             ),
         )
         .map_err(|error| format!("failed to write WSL payload: {error}"))?;
@@ -2439,10 +2491,25 @@ fn prepare_code_assistant_open(
     }
 }
 
+/// Read the live sidecar's MCP endpoint, if the sidecar is up. A CLI session
+/// opened before the sidecar is ready simply gets no Studio tools — the
+/// session must still launch (N5 design: never hard-fail the terminal on a
+/// tool-surface problem).
+fn studio_mcp_endpoint(app: &tauri::AppHandle) -> Option<StudioMcpEndpoint> {
+    let state = app.try_state::<SidecarAppState>()?;
+    let manager = state.manager.lock().ok()?;
+    let runtime = manager.as_ref()?.runtime_config();
+    Some(StudioMcpEndpoint {
+        port: runtime.port,
+        token: runtime.api_token,
+    })
+}
+
 fn open_code_assistant(
     state: &CodeAssistantRuntimeState,
     workspace_root: &Path,
     assistant: CodeAssistant,
+    studio_mcp: Option<&StudioMcpEndpoint>,
 ) -> Result<PathBuf, String> {
     check_ah_version_cached()?;
     match prepare_code_assistant_open(state, workspace_root, assistant)? {
@@ -2459,8 +2526,12 @@ fn open_code_assistant(
         CodeAssistantOpenAction::StartFresh => {
             let config_path = ah_config_for_workspace(workspace_root, assistant)?;
             ensure_lifecycle_command_allowed(&config_path)?;
-            let launcher =
-                write_code_assistant_launcher_script(workspace_root, &config_path, assistant)?;
+            let launcher = write_code_assistant_launcher_script(
+                workspace_root,
+                &config_path,
+                assistant,
+                studio_mcp,
+            )?;
             let window_title = code_assistant_window_title(workspace_root, assistant);
             spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?;
             Ok(config_path)
@@ -2521,7 +2592,13 @@ fn open_claude_code(
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let config = open_code_assistant(&state, &workspace_root, CodeAssistant::Claude)?;
+    let studio_mcp = studio_mcp_endpoint(&app);
+    let config = open_code_assistant(
+        &state,
+        &workspace_root,
+        CodeAssistant::Claude,
+        studio_mcp.as_ref(),
+    )?;
     state
         .configs
         .lock()
@@ -2545,7 +2622,13 @@ fn open_codex_cli(
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
     let workspace_root = existing_directory(&workspace_root)?;
-    let config = open_code_assistant(&state, &workspace_root, CodeAssistant::Codex)?;
+    let studio_mcp = studio_mcp_endpoint(&app);
+    let config = open_code_assistant(
+        &state,
+        &workspace_root,
+        CodeAssistant::Codex,
+        studio_mcp.as_ref(),
+    )?;
     state
         .configs
         .lock()
@@ -3523,6 +3606,85 @@ mod tests {
     }
 
     #[test]
+    fn claude_master_cmd_registers_studio_mcp_with_native_approvals() {
+        // N5-3: the CLI surface gets the same Studio tools as the panel. Approval
+        // is claude's OWN prompt (bypass flag dropped) — Studio does not build a
+        // second approval system for a session the user is sitting in.
+        let cmd = claude_master_cmd();
+
+        assert!(cmd.contains("$HOME/.claude/studio-mcp.json"));
+        assert!(cmd.contains("\"type\":\"http\""));
+        assert!(cmd.contains("${STUDIO_MCP_URL}"));
+        // The token reaches the CLI through env expansion, never as plaintext in
+        // the config file (a skill repo's Local History would snapshot it).
+        assert!(cmd.contains("${STUDIO_API_TOKEN}"));
+        assert!(cmd.contains("--mcp-config"));
+        assert!(cmd.contains("--allowedTools"));
+        assert!(cmd.contains("mcp__studio__compile_skill"));
+        assert!(
+            !cmd.contains("--dangerously-skip-permissions"),
+            "interactive Open in CLI must keep claude's native approval prompts"
+        );
+    }
+
+    #[test]
+    fn claude_master_cmd_skips_mcp_when_sidecar_unreachable() {
+        // No STUDIO_MCP_URL (sidecar not up / non-mirrored network): the session
+        // must still launch, just without the Studio tools — never hard-fail.
+        let cmd = claude_master_cmd();
+
+        assert!(cmd.contains("if [ -n \"${STUDIO_MCP_URL:-}\" ]"));
+        assert!(cmd.contains("studio_mcp_args="));
+    }
+
+    #[test]
+    fn codex_master_cmd_registers_studio_mcp_streamable_http() {
+        // codex 0.142.5 speaks streamable HTTP natively (--url +
+        // --bearer-token-env-var), so no stdio bridge is needed.
+        let cmd = codex_master_cmd();
+
+        assert!(cmd.contains("[mcp_servers.studio]"));
+        assert!(cmd.contains("bearer_token_env_var = \"STUDIO_API_TOKEN\""));
+        assert!(cmd.contains("${STUDIO_MCP_URL}"));
+    }
+
+    #[test]
+    fn wsl_payload_exports_studio_mcp_env_when_sidecar_known() {
+        // The payload carries the sidecar's port+token into WSL. WSL mirrored
+        // networking reaches the Windows sidecar on localhost (verified on this
+        // host); a non-mirrored distro simply gets no URL and no Studio tools.
+        let payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/d/ws/ah.toml",
+            CodeAssistant::Claude,
+            None,
+            None,
+            Some(&StudioMcpEndpoint {
+                port: 8787,
+                token: "tkn-abc".to_string(),
+            }),
+        );
+
+        assert!(payload.contains("export STUDIO_MCP_URL=\"http://127.0.0.1:8787/mcp\""));
+        assert!(payload.contains("export STUDIO_API_TOKEN=\"tkn-abc\""));
+    }
+
+    #[test]
+    fn wsl_payload_omits_studio_mcp_env_when_sidecar_unknown() {
+        let payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/d/ws/ah.toml",
+            CodeAssistant::Claude,
+            None,
+            None,
+            None,
+        );
+
+        assert!(!payload.contains("STUDIO_MCP_URL"));
+        assert!(!payload.contains("STUDIO_API_TOKEN"));
+    }
+
+    #[test]
     fn codex_master_cmd_rejects_interop_binaries_and_prefers_standalone() {
         let cmd = codex_master_cmd();
         let standalone = "$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex";
@@ -3722,6 +3884,7 @@ mod tests {
             CodeAssistant::Claude,
             None,
             Some("/mnt/c/Users/u/.claude"),
+            None,
         );
         assert!(windows_payload.contains("ah_version="));
         assert!(windows_payload.contains("requires ah >= 1.3.4"));
@@ -3817,6 +3980,7 @@ mod tests {
                 CodeAssistant::Claude,
                 None,
                 Some("/mnt/c/Users/u/.claude"),
+                None,
             ),
             wsl_attach_payload_script("/mnt/c/tmp/ah.toml", CodeAssistant::Claude),
             unix_code_assistant_launcher_script(
@@ -4577,6 +4741,7 @@ mod tests {
             CodeAssistant::Claude,
             None,
             Some("/mnt/c/Users/u/.claude"),
+            None,
         );
         assert!(payload.contains("WIN_CLAUDE_HOME='/mnt/c/Users/u/.claude'"));
         assert!(payload.contains("ln -sfn \"$WIN_CLAUDE_HOME/.credentials.json\""));
@@ -4593,6 +4758,7 @@ mod tests {
             "/mnt/c/tmp/ah.toml",
             CodeAssistant::Codex,
             Some("/mnt/c/Users/u/.codex"),
+            None,
             None,
         );
         assert!(!codex_payload.contains("WIN_CLAUDE_HOME"));
@@ -5494,6 +5660,7 @@ sessions
             CodeAssistant::Claude,
             None,
             Some("/mnt/c/Users/Test User/.claude"),
+            None,
         );
 
         assert!(script.contains("WS='/mnt/c/Users/Test User/skill'"));
@@ -5519,6 +5686,7 @@ sessions
             "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
             CodeAssistant::Codex,
             Some("/mnt/c/Users/Test User/.codex"),
+            None,
             None,
         );
 

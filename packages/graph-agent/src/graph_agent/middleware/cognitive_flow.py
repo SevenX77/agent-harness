@@ -36,7 +36,11 @@ from pydantic import ValidationError as PydanticValidationError
 
 from graph_agent.core.exceptions import ErrorPayload, GraphAgentError, make_error_payload
 from graph_agent.core.io_manager import IOManager
-from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+from graph_agent.core.schema_engine import (
+    SchemaEngine,
+    SchemaObject,
+    dump_without_invented_nones,
+)
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 from graph_agent.tools.md_to_json import parse_md
 
@@ -637,7 +641,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             instance = model.model_validate(block.data)
         except PydanticValidationError as exc:
             return {}, _finish_block_validation_errors(item_id, exc)
-        return instance.model_dump(), []
+        return dump_without_invented_nones(instance), []
 
     def _run_business_validator(self, parsed_items: list[dict[str, Any]]) -> list[str]:
         """Phase 2 A2 v3: invoke the optional business validator and

@@ -174,7 +174,7 @@ class SchemaEngine:
 
         return ValidationResult(
             ok=True,
-            parsed=parsed_model.model_dump(),
+            parsed=dump_without_invented_nones(parsed_model),
         )
 
     def get_json_schema(self, schema: SchemaObject) -> dict[str, Any]:
@@ -182,6 +182,23 @@ class SchemaEngine:
 
         model = self.get_pydantic_model(schema)
         return model.model_json_schema()
+
+
+def dump_without_invented_nones(parsed_model: BaseModel) -> dict[str, Any]:
+    """Dump a validated model without inventing fields the submitter omitted.
+
+    Declared defaults must materialise (they are real values), but an optional
+    field with no default dumps as None — and downstream jsonschema validation
+    rejects null where the schema declares object/array. Only keys that were
+    NOT submitted AND resolved to None are dropped.
+    """
+    dumped = parsed_model.model_dump()
+    submitted = parsed_model.model_fields_set
+    return {
+        key: value
+        for key, value in dumped.items()
+        if not (value is None and key not in submitted)
+    }
 
 
 @lru_cache(maxsize=128)

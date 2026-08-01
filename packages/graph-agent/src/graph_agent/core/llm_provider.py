@@ -56,7 +56,11 @@ class LLMProviderChatModel(BaseChatModel):
     role: str
     phase_name: str | None = None
     model_name: str | None = None
-    callbacks: Any = Field(default_factory=tuple)
+    # Engine trace callbacks ride their own field (same convention as
+    # PredictGatewayChatModel.event_callbacks): LangChain's inherited
+    # ``callbacks`` field is reserved for real LangChain handlers, and stuffing
+    # engine objects into it crashes CallbackManager.configure on invoke.
+    event_callbacks: tuple[Any, ...] = Field(default_factory=tuple)
     model_override: str | None = None
     bound_tools: tuple[Any, ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
@@ -103,7 +107,7 @@ class LLMProviderChatModel(BaseChatModel):
         metadata = {
             "phase_name": self.phase_name,
             "model_override": self.model_override,
-            "callbacks": self.callbacks,
+            "callbacks": self.event_callbacks,
             "stop": stop,
             "bound_tools": list(self.bound_tools),
             "tool_choice": self.tool_choice,

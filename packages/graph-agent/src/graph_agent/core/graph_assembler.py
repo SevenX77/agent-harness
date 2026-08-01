@@ -2165,7 +2165,7 @@ def _resolve_phase_chat_model(
             provider=llm_provider,
             role=llm_role,
             phase_name=phase_id,
-            callbacks=callbacks,
+            event_callbacks=callbacks,
         )
     if model_resolver is None:
         return None

@@ -176,7 +176,7 @@ class LLMPhaseNode(PhaseNode):
                 role=phase.tier,
                 phase_name=phase.name,
                 model_override=phase.model_override,
-                callbacks=tuple(runtime.active_callbacks),
+                event_callbacks=tuple(runtime.active_callbacks),
             )
         else:
             resolver = self.container.legacy_model_resolver

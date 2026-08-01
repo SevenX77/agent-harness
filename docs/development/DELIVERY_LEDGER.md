@@ -52,9 +52,9 @@
 
 | # | 项 | 状态 | 关键坐标 |
 |---|---|---|---|
-| N5-1 | 设计:sidecar 对外 MCP 出口(streamable HTTP + STUDIO_API_TOKEN 鉴权)+ CLI 注册方案(claude 原生 http mcp 配置;codex 经 stdio 桥)| 进行中 | 工具集 `app/services/copilot_tools.py`(27 工具复用同一进程内实现);拉起点 `apps/studio/tauri/src/lib.rs:727-748` |
-| N5-2 | 实现:后端 MCP HTTP 出口 + 审批语义在 CLI 表面的等价物(CLI 有自己的审批 UI,写工具是否二次审批需设计定) | 待开工 | — |
-| N5-3 | 实现:lib.rs 两条 master cmd 注册 studio MCP + KB-13/cli.md 回写 | 待开工 | `app/agents/contexts/cli.md` |
+| N5-1 | 设计(operator 自决 2026-07-31,免上抛,以效果为裁) | ✅ 已定 | 决定:①出口=同一批工具对象再建 Server,官方 `StreamableHTTPSessionManager` 挂 sidecar `/mcp`,复用全局 Bearer 中间件,sidecar 保持只绑 127.0.0.1(本机 WSL mirrored 网络实测 localhost 直通 HTTP 200);②审批=A 案,交互式 Open in CLI 摘 bypass 旗标,用 CLI 原生审批当闸,读档经 allowedTools 预放行;③CLI 首版不暴露 delete_llm_endpoint/delete_llm_route(级联删凭据);④claude 用 `--mcp-config`(装机 2.1.199 实证支持 http+headers),token 走 `.mcp.json` 的 `${STUDIO_API_TOKEN}` env 展开不落明文;⑤codex 0.142.5 原生 `--url`+`--bearer-token-env-var`,无需桥。**不确定项(以效果为裁)**:U1 非 mirrored 网络的机器 localhost 不通→改为 lib.rs 注入宿主 IP;U2 codex 摘 bypass 对 ah 编队流的影响→先只动 claude,codex 看效果;U3 FastAPI BaseHTTPMiddleware 与 SSE 流的兼容→TestClient 已过,真机 CLI 长会话再验 |
+| N5-2 | 实现:sidecar `/mcp` streamable HTTP 出口(工具面=面板 27−2) | ✅ 随本行同 PR 合入 | `app/services/cli_mcp_surface.py` + `main.py` lifespan 内建 manager/`app.state` 转发挂载;4 测试(工具差集/内存会话协议/401/initialize 200+session-id);`mcp>=1.29` 补为 backend 直接依赖(uv.lock 变更→合并后根 uv sync + vendor 重建) |
+| N5-3 | 实现:lib.rs claude 拉起注册 studio MCP(--mcp-config + env 展开 + allowedTools 读档 + 摘 bypass)+ codex config 注册 + KB-13/cli.md 回写 | 待开工 | `apps/studio/tauri/src/lib.rs:727-748`;`app/agents/contexts/cli.md`、`knowledge/KB-13` |
 
 ### 冲刺清单
 

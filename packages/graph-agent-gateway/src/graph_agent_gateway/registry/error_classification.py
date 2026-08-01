@@ -166,6 +166,23 @@ def classify_error_context(
             provider_error_message,
             fallback_eligible=True,
         )
+    if status_code == 400 and _looks_like_billing_error(
+        provider_error_type,
+        provider_error_message,
+    ):
+        # Anthropic encodes account-credit exhaustion as 400 invalid_request_error;
+        # semantically it is a 402-class endpoint/billing failure, so the next
+        # route (different account/provider) must get its chance.
+        return _action_classification(
+            "fallback_route",
+            "credential",
+            exc,
+            ctx,
+            status_code,
+            provider_error_type,
+            provider_error_message,
+            fallback_eligible=True,
+        )
     if status_code in FAIL_REQUEST_STATUS_CODES:
         return _action_classification(
             "fail_request",
@@ -286,6 +303,28 @@ def _looks_like_route_capability_error(
             "unknown parameter",
             "invalid model",
             "model not found",
+        )
+    )
+
+
+def _looks_like_billing_error(
+    provider_error_type: str | None,
+    provider_error_message: str | None,
+) -> bool:
+    text = " ".join(
+        item.lower()
+        for item in (provider_error_type, provider_error_message)
+        if item is not None
+    )
+    return any(
+        marker in text
+        for marker in (
+            "credit balance",
+            "insufficient credit",
+            "insufficient funds",
+            "insufficient quota",
+            "purchase credits",
+            "billing",
         )
     )
 

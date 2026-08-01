@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.base import LanguageModelInput
@@ -26,6 +27,34 @@ from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
 from graph_agent_gateway.temperature import provider_temperature_from_authored
 from graph_agent_gateway.tracing import emit_llm_fallback_event
+
+logger = logging.getLogger(__name__)
+
+
+def _raise_all_providers_failed(
+    role_name: str,
+    failures: list[dict[str, Any]],
+    *,
+    phase_name: str,
+    cause: BaseException | None = None,
+) -> NoReturn:
+    """Log every per-candidate failure, then raise.
+
+    Upstream wrappers flatten the exception to its message, so without these
+    log lines a crashed run leaves no trace of WHY each provider failed."""
+    for failure in failures:
+        logger.warning(
+            "phase=gateway_chat_model action=provider_failure role=%s phase_name=%s "
+            "route=%s error=%s status=%s decision=%s message=%s",
+            role_name,
+            phase_name,
+            failure.get("route_id"),
+            failure.get("error_type"),
+            failure.get("provider_status_code"),
+            failure.get("fallback_decision"),
+            str(failure.get("message"))[:500],
+        )
+    raise AllProvidersFailedError(role_name, failures, phase_name=phase_name) from cause
 
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
 ActualRuntimeSettings = dict[str, dict[str, object]]
@@ -144,11 +173,12 @@ class GatewayChatModel(BaseChatModel):
                     failure["provider_status_code"] = classification.provider_status_code
                     failures.append(failure)
                     if classification.decision != "fallback_allowed":
-                        raise AllProvidersFailedError(
+                        _raise_all_providers_failed(
                             self.role_name,
                             failures,
                             phase_name=self.phase_name or "<gateway>",
-                        ) from exc
+                            cause=exc,
+                        )
                     _mark_down(self.client_manager, candidate, exc, runtime_policy)
                     emit_llm_fallback_event(
                         callbacks=self.event_callbacks,
@@ -293,11 +323,12 @@ class GatewayChatModel(BaseChatModel):
                         retry_same_used = True
                         continue
                     if classification.decision != "fallback_allowed":
-                        raise AllProvidersFailedError(
+                        _raise_all_providers_failed(
                             self.role_name,
                             failures,
                             phase_name=self.phase_name or "<gateway>",
-                        ) from exc
+                            cause=exc,
+                        )
                     _mark_down(self.client_manager, candidate, exc, runtime_policy)
                     emit_llm_fallback_event(
                         callbacks=self.event_callbacks,
@@ -316,7 +347,7 @@ class GatewayChatModel(BaseChatModel):
                     )
                     break
 
-        raise AllProvidersFailedError(
+        _raise_all_providers_failed(
             self.role_name,
             failures,
             phase_name=self.phase_name or "<gateway>",

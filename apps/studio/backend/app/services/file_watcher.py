@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from watchfiles import Change, watch
+from watchfiles import Change, DefaultFilter, watch
 
 from app.core import config
 from app.core.adapters.eventbus_memory import InMemoryEventBus
@@ -22,6 +22,19 @@ _ECHO_TTL_SECONDS = 2.0
 # thread exit within one 50ms rust-notify step; the only non-responsive sections
 # are bounded native watcher setup/teardown, which this comfortably outlasts.
 _STOP_JOIN_TIMEOUT_SECONDS = 30.0
+
+
+class _SkillWatchFilter(DefaultFilter):
+    """DefaultFilter (.git etc.) plus Studio-owned hidden dirs.
+
+    `.workspace/runs/**` are run PRODUCTS: on Windows the spawned run worker
+    holds checkpoints.db locked (stat/read raise PermissionError) and every
+    trace.jsonl append wakes the watcher. `.ah`/`.claude` are CLI-session
+    materializations. None of them are skill content, so they are cut at the
+    rust notify layer before any event reaches Python.
+    """
+
+    ignore_dirs = (*DefaultFilter.ignore_dirs, ".workspace", ".ah", ".claude")
 
 
 class _WatchTrigger:
@@ -192,6 +205,7 @@ class FileWatcherService:
                     *[str(root) for root in roots],
                     stop_event=_WatchTrigger(stop, rewatch),
                     recursive=True,
+                    watch_filter=_SkillWatchFilter(),
                 ):
                     # Also re-check between (and within) change batches: a batch
                     # yielded just before stop() must not keep the thread busy
@@ -208,7 +222,7 @@ class FileWatcherService:
                     break
 
     def _handle_path(self, change: Change, path: Path) -> None:
-        if path.name.startswith(".") or path.is_dir():
+        if path.name.startswith(".") or _safe_is_dir(path):
             return
         resolved = path.resolve()
         if self._is_echo(resolved):
@@ -290,7 +304,7 @@ class FileWatcherService:
                 relative = resolved.relative_to(root)
             except ValueError:
                 continue
-            if not relative.parts:
+            if not relative.parts or _has_hidden_component(relative):
                 continue
             return skill_id, relative.as_posix()
         return None
@@ -306,9 +320,12 @@ def register_workspace(root: Path, skill_id: str) -> None:
 
 
 def file_hash(path: Path) -> str | None:
+    # OSError covers the file vanishing AND Windows sharing violations
+    # (PermissionError from a file another process holds locked): the hash is
+    # advisory, and one unreadable file must not kill a whole change batch.
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
-    except FileNotFoundError:
+    except OSError:
         return None
 
 
@@ -321,6 +338,16 @@ def _is_within(child: Path, ancestor: Path) -> bool:
         return False
 
 
+def _has_hidden_component(relative: Path) -> bool:
+    """True when any path component BELOW the watched root is dot-prefixed.
+
+    Hidden components (`.workspace` run products, `.git`, `.ah`, `.claude`) are
+    not skill content; only components below the root count, so a root that
+    itself lives under a hidden directory stays watchable.
+    """
+    return any(part.startswith(".") for part in relative.parts)
+
+
 def _locate_skill_path(path: Path) -> tuple[str, str] | None:
     resolved = path.resolve()
     for root in _watch_roots():
@@ -328,7 +355,7 @@ def _locate_skill_path(path: Path) -> tuple[str, str] | None:
             relative = resolved.relative_to(root.resolve())
         except ValueError:
             continue
-        if len(relative.parts) < 2:
+        if len(relative.parts) < 2 or _has_hidden_component(relative):
             return None
         return relative.parts[0], Path(*relative.parts[1:]).as_posix()
     return None
@@ -346,10 +373,22 @@ def _watch_roots() -> list[Path]:
     return roots
 
 
+def _safe_is_dir(path: Path) -> bool:
+    # Path.is_dir() on 3.11 re-raises EACCES (only ENOENT-class errors are
+    # swallowed), so a Windows sharing violation on a locked FILE would crash
+    # the gate. Unreadable -> treat as a file; downstream helpers degrade.
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
 def _safe_mtime(path: Path) -> float | None:
+    # Same contract as file_hash: mtime is advisory, so a locked or vanished
+    # file degrades to "unknown" instead of crashing the watch generation.
     try:
         return path.stat().st_mtime
-    except FileNotFoundError:
+    except OSError:
         return None
 
 

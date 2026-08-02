@@ -42,6 +42,96 @@ def test_registered_workspace_root_maps_changes_to_its_skill_id(tmp_path: Path) 
     assert event["change"] == "modified"
 
 
+def test_run_products_under_workspace_are_not_skill_events(tmp_path: Path) -> None:
+    """`.workspace/runs/**` are run PRODUCTS, not skill content: on Windows the
+    spawned run worker holds checkpoints.db locked, and every trace.jsonl append
+    used to storm the watcher. Any hidden path component ends the mapping."""
+    root = tmp_path / "skillA"
+    run_dir = root / ".workspace" / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    locked = run_dir / "checkpoints.db"
+    locked.write_bytes(b"sqlite")
+
+    svc = _service()
+    svc.register_workspace(root, "skillA")
+
+    assert svc._skill_event_for_path(Change.modified, locked) is None
+
+
+def test_hidden_component_under_static_root_is_not_skill_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core import config
+    from app.services.file_watcher import _locate_skill_path
+
+    static_root = tmp_path / "skills"
+    hidden = static_root / "skillB" / ".workspace" / "runs" / "r2" / "trace.jsonl"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", static_root)
+
+    assert _locate_skill_path(hidden) is None
+
+
+def test_locked_file_mtime_and_hash_degrade_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file held with an exclusive lock (Windows sharing violation) raises
+    PermissionError from stat()/read_bytes(); both helpers must degrade to None
+    instead of blowing up the watch generation."""
+    from app.services.file_watcher import _safe_mtime, file_hash
+
+    target = tmp_path / "GRAPH.md"
+    target.write_text("x", encoding="utf-8")
+
+    def _denied_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError(13, "locked", str(self))
+
+    def _denied_read(self: Path) -> bytes:
+        raise PermissionError(13, "locked", str(self))
+
+    monkeypatch.setattr(Path, "stat", _denied_stat)
+    monkeypatch.setattr(Path, "read_bytes", _denied_read)
+
+    assert _safe_mtime(target) is None
+    assert file_hash(target) is None
+
+
+def test_handle_path_survives_a_locked_visible_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One unreadable file must not kill the whole change batch: _handle_path
+    still emits the event (hash/mtime unknown) instead of raising."""
+    root = tmp_path / "skillA"
+    (root / "phases" / "p").mkdir(parents=True)
+    target = root / "phases" / "p" / "SKILL.md"
+    target.write_text("body", encoding="utf-8")
+
+    svc = _service()
+    svc.register_workspace(root, "skillA")
+
+    def _denied_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError(13, "locked", str(self))
+
+    def _denied_read(self: Path) -> bytes:
+        raise PermissionError(13, "locked", str(self))
+
+    monkeypatch.setattr(Path, "stat", _denied_stat)
+    monkeypatch.setattr(Path, "read_bytes", _denied_read)
+
+    broadcasts: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        svc._bus, "broadcast_from_thread", lambda event: broadcasts.append(event)
+    )
+
+    svc._handle_path(Change.modified, target)
+
+    assert len(broadcasts) == 1
+    assert broadcasts[0]["type"] == "skill_changed"
+    assert broadcasts[0]["hash"] is None
+    assert broadcasts[0]["mtime"] is None
+
+
 def test_deleted_file_under_workspace_still_emits_with_null_hash(tmp_path: Path) -> None:
     root = tmp_path / "skillA"
     (root / "phases" / "p").mkdir(parents=True)

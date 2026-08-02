@@ -473,16 +473,11 @@ class LocalRuntimeStateStore:
                 detail="SQLite checkpointer path must be absolute",
             )
 
-        root_resolved = self.root.resolve(strict=False)
+        # No containment root is enforced: a skill is a git repo at an arbitrary
+        # user-chosen path, so its .workspace/runs/<run_id>/checkpoints.db can be
+        # anywhere on disk. The per-run shape check below (exact filename, run_id
+        # directory, runs/ parent) plus the existence check are the invariants.
         candidate_resolved = candidate.resolve(strict=False)
-        try:
-            candidate_resolved.relative_to(root_resolved)
-        except ValueError as exc:
-            raise self._invalid_checkpointer_error(
-                run_id,
-                checkpointer_spec,
-                detail="SQLite checkpointer path must stay within the runtime state root",
-            ) from exc
 
         if (
             candidate_resolved.name != "checkpoints.db"

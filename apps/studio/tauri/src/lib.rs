@@ -156,6 +156,13 @@ enum AssistantStatus {
     Inactive,
     Starting,
     Active,
+    /// ah 的运行时仍然存在，但其中已经没有活的 CLI 会话。
+    ///
+    /// 它不表示 CLI 进程还在跑：`/exit` 之后 ah 把会话标成终态，却把 tmux 会话和
+    /// `remain-on-exit` 留下的死窗格原样留着（ah 生产代码里回收 tmux 的唯一位置是 ahd
+    /// 收到 SIGTERM 时的整体清理）。此时面板必须继续提供 Close，而不是谎称运行时已经
+    /// 消失、可以重新打开——否则再点 Open 只会 attach 回那块死窗格。
+    Lingering,
     Degraded,
     Error,
 }
@@ -1239,13 +1246,13 @@ fn code_assistant_status_from_snapshots(
     };
 
     for (config, spec) in specs {
-        // Project the typed `runtime_state` PHASE straight onto the UI status (SSOT, design
-        // .md:132-133): inactive/starting/active/degraded now each render distinctly instead of
-        // collapsing every non-active phase to "inactive". A config with no cached events frame
-        // yet reads as inactive.
+        // Project the typed snapshot onto the UI status (SSOT, design.md:132-133): each phase
+        // renders distinctly instead of collapsing every non-active phase to "inactive", and an
+        // `inactive` phase whose ahd is still alive projects to `lingering` (决议 2026-08-02
+        // D-A1). A config with no cached events frame yet reads as inactive.
         let status_val = snapshots
             .get(config)
-            .map(|snapshot| assistant_status_for_runtime_state(snapshot.runtime_state))
+            .map(assistant_status_for_snapshot)
             .unwrap_or(AssistantStatus::Inactive);
         let read_only = classify_config_ownership(config).read_only;
         let state = AssistantState {
@@ -1702,6 +1709,26 @@ while True:
 json.dump(d, open(p, 'w'), indent=2)
 "#;
 
+/// Open 之前在宿主 HOME 刷新 Claude CLI 的片段（决议 2026-08-02 D-B1..D-B5）。
+///
+/// Claude CLI 的自更新是"运行中的进程更新它自己 `$HOME` 底下那份安装"。ah 给每个会话指定
+/// 独立的临时 `HOME` 并在会话结束时删除，所以沙箱里跑出来的更新永远回不到宿主那份安装——
+/// 宿主 HOME、进入 ah 沙箱之前，是这套官方机制唯一能生效的位置。
+///
+/// Studio 只负责给官方机制这个位置和时机：调用官方安装器入口，自己不比对版本号、不下载、
+/// 不安装。24 小时节流是因为 native build 是约 250 MB 的单文件，尚无法确证"已是最新时安装器
+/// 立即返回"；失败一律放行，因为能否打开 CLI 不该由一次网络抖动决定。
+const CLAUDE_CLI_REFRESH_SH: &str = r#"STUDIO_CLAUDE_UPDATE_STAMP="$HOME/.cache/studio-claude-cli-update-check"
+if [ ! -f "$STUDIO_CLAUDE_UPDATE_STAMP" ] || [ -n "$(find "$STUDIO_CLAUDE_UPDATE_STAMP" -mmin +1440 2>/dev/null)" ]; then
+  printf '%s\n' "Checking for a newer Claude Code CLI (official installer)..."
+  if timeout 300 claude install latest </dev/null; then
+    mkdir -p "$(dirname "$STUDIO_CLAUDE_UPDATE_STAMP")" && : > "$STUDIO_CLAUDE_UPDATE_STAMP"
+  else
+    printf '%s\n' "Claude Code CLI refresh skipped (offline, or the installer failed); continuing with the installed version."
+  fi
+fi
+"#;
+
 /// The bash payload ah + claude run inside WSL. It pre-accepts the onboarding
 /// gates (see `CLAUDE_ONBOARDING_PRESEED_PY`) so the interactive master reaches
 /// its prompt instead of blocking, then `ah start`s and attaches the master —
@@ -1825,6 +1852,11 @@ fi
         } else {
             String::new()
         };
+    let claude_cli_refresh = if matches!(assistant, CodeAssistant::Claude) {
+        CLAUDE_CLI_REFRESH_SH
+    } else {
+        ""
+    };
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -1858,7 +1890,7 @@ if [ "$ah_ok" -ne 1 ]; then
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
-{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
+{claude_cli_refresh}{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - "$WS" <<'PY'
 {preseed}
 PY
@@ -1881,6 +1913,7 @@ exec bash -i
         assistant_name = assistant.display_name(),
         codex_auth_sync = codex_auth_sync,
         claude_auth_bridge = claude_auth_bridge,
+        claude_cli_refresh = claude_cli_refresh,
         claude_config_patch = claude_config_patch,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
         min_version = AH_VERSION_MIN,
@@ -3320,12 +3353,22 @@ fn decide_code_assistant_open_v2(
 /// the frontend renders (tasks.md:90, design.md:132-133, Req 5.6/6.1). This is the single
 /// mapping every UI surface projects; `Error` is produced upstream on parse/identity
 /// failure and never from a `runtime_state` value.
-fn assistant_status_for_runtime_state(state: AhRuntimeState) -> AssistantStatus {
-    match state {
+/// 把一帧运行时快照投影成面板呈现的助手状态。
+///
+/// `inactive` 这个 phase 只说明"没有活的会话"，它并不说明"这套运行时已经被回收"。ah 只在
+/// ahd 进程退出时才回收 tmux（整体 `kill-server`），因此 `ahd_alive` 就是"tmux 及其死窗格
+/// 是否还在"的同一件事：ahd 还活着 ⇒ 投影为 `Lingering`（面板给 Close），ahd 没了 ⇒ 才是
+/// `Inactive`（Open 才诚实）。
+///
+/// 判据取 `ahd_alive` 而非 `sessions[].cleanup_required`：后者一旦为真便永远为真（ah 没有任何
+/// 路径把 `master_pid` 清零），用它驱动 UI 会把面板永久钉死在"运行中"，Close 也解不开。
+fn assistant_status_for_snapshot(snapshot: &AhRuntimeSnapshot) -> AssistantStatus {
+    match snapshot.runtime_state {
         AhRuntimeState::Active => AssistantStatus::Active,
-        AhRuntimeState::Inactive => AssistantStatus::Inactive,
         AhRuntimeState::Starting => AssistantStatus::Starting,
         AhRuntimeState::Degraded => AssistantStatus::Degraded,
+        AhRuntimeState::Inactive if snapshot.ahd_alive => AssistantStatus::Lingering,
+        AhRuntimeState::Inactive => AssistantStatus::Inactive,
     }
 }
 
@@ -3761,6 +3804,70 @@ mod tests {
         );
 
         assert!(!payload.contains("[providers.claude]"));
+    }
+
+    /// 决议 2026-08-02 D-B1/D-B2/D-B5 — Claude CLI 的自更新只有在宿主 HOME、沙箱之外
+    /// 才可能生效(ah 给每个会话指定临时 HOME,更新落进去就随会话删掉),所以 Open 的
+    /// payload 必须在 `ah start` 之前调用官方安装器入口 `claude install latest`,
+    /// 并且失败不得阻断打开。
+    #[test]
+    fn wsl_open_payload_refreshes_claude_cli_before_ah_start() {
+        let payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/c/Users/u/AppData/Local/Temp/skill-studio-ah/abc/claude/ah.toml",
+            CodeAssistant::Claude,
+            None,
+            None,
+            None,
+            true,
+        );
+
+        let update_index = payload
+            .find("claude install latest")
+            .expect("Open must call the OFFICIAL installer entry, not a hand-rolled version check");
+        let start_index = payload
+            .find("start --wait")
+            .expect("the Open payload still starts ah");
+        assert!(
+            update_index < start_index,
+            "the refresh must run in the host HOME BEFORE ah start hands claude a throwaway sandbox HOME"
+        );
+        assert!(
+            payload.contains("timeout 300 claude install latest"),
+            "the refresh is bounded so a stalled download cannot hang the launch (D-B5)"
+        );
+        assert!(
+            payload.contains("STUDIO_CLAUDE_UPDATE_STAMP"),
+            "the 24h throttle stamp gates the refresh so every Open does not re-download (D-B4)"
+        );
+    }
+
+    /// 决议 2026-08-02 D-B2/D-B3 — attach 连的是已在运行的会话(升级无意义且拖慢),
+    /// codex 的分发路径不同(Windows 侧为权威),两者都不得带上这段。
+    #[test]
+    fn claude_cli_refresh_is_scoped_to_the_claude_open_path() {
+        let attach_payload = wsl_attach_payload_script(
+            "/mnt/c/Users/u/AppData/Local/Temp/skill-studio-ah/abc/claude/ah.toml",
+            CodeAssistant::Claude,
+        );
+        assert!(
+            !attach_payload.contains("claude install latest"),
+            "attach reuses a running session; refreshing there only delays the attach"
+        );
+
+        let codex_payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/c/Users/u/AppData/Local/Temp/skill-studio-ah/abc/codex/ah.toml",
+            CodeAssistant::Codex,
+            None,
+            None,
+            None,
+            true,
+        );
+        assert!(
+            !codex_payload.contains("claude install latest"),
+            "codex's distribution is Windows-authoritative and out of this decision's scope"
+        );
     }
 
     #[test]
@@ -4419,6 +4526,54 @@ mod tests {
         );
     }
 
+    /// 决议 2026-08-02 D-A1/D-A2 — `/exit` 让 CLI 进程退出后,ah 把会话标成终态却不回收
+    /// tmux(生产代码里回收 tmux 的唯一位置是 ahd 收到 SIGTERM 时的整体清理),于是
+    /// `runtime_state` 落到 `inactive` 而 ahd、tmux server 和那块 remain-on-exit 死窗格
+    /// 都还在。此时 UI 若投影成 `inactive`(前端渲染 `Open in CLI`)就是在撒谎,再点 Open
+    /// 只会 attach 回那块死窗格。判据取 `ahd_alive` 而非 `sessions[].cleanup_required`:
+    /// 后者一旦为真便永远为真(ah 无处清零 `master_pid`),会把 UI 永久钉死。
+    #[test]
+    fn test_lingering_runtime_is_not_projected_as_openable() {
+        use ah_contract_fixtures::{
+            SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_INACTIVE, SNAPSHOT_TERMINAL_CLOSED,
+        };
+
+        for (name, fixture) in [
+            ("SNAPSHOT_TERMINAL_CLOSED", SNAPSHOT_TERMINAL_CLOSED),
+            ("SNAPSHOT_INACTIVE", SNAPSHOT_INACTIVE),
+        ] {
+            let snapshot = parse_snapshot_or_panic(fixture);
+            // 前置:fixture 真的是"phase=inactive 且 ahd 仍在"这一形状。
+            assert_eq!(
+                snapshot.runtime_state,
+                AhRuntimeState::Inactive,
+                "{name} precondition: the phase really is inactive"
+            );
+            assert!(
+                snapshot.ahd_alive,
+                "{name} precondition: ahd is still holding this runtime"
+            );
+
+            let ui = assistant_status_for_snapshot(&snapshot);
+            assert_eq!(
+                serde_json::to_value(ui).expect("AssistantStatus serializes to its wire tag"),
+                serde_json::Value::String("lingering".to_string()),
+                "{name}: ahd alive ⇒ the tmux server (and its dead pane) was never reaped, so the \
+                 UI must keep offering Close instead of claiming the runtime is gone and openable"
+            );
+        }
+
+        // 对照组:ahd 真的没了,运行时才算被回收,Open 才是诚实的 —— 两个不同结果证明这是
+        // 真投影,不是恒返回 `lingering` 的常量。
+        let absent = parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT);
+        assert!(!absent.ahd_alive, "precondition: the daemon really is gone");
+        assert_eq!(
+            assistant_status_for_snapshot(&absent),
+            AssistantStatus::Inactive,
+            "with ahd gone ah's shutdown path already ran kill-server, so Open is honest again"
+        );
+    }
+
     /// Task 3 (tasks.md:63) — the normal decision plane consumes a TYPED snapshot, not
     /// `ah ps` text. `reconcile_snapshot_lifecycle` takes `&AhRuntimeSnapshot`, so it
     /// structurally cannot reach `ah_ps_output_has_inventory` / `extract_ah_session_ids`
@@ -4655,7 +4810,7 @@ mod tests {
         // UI projection: a starting phase shows a distinct `starting` state on the wire —
         // never `error`, never a stale `degraded` projection (Req 5.6). Asserted on the
         // serialized wire tag, so a Rust rename cannot dodge the frontend contract.
-        let ui = assistant_status_for_runtime_state(AhRuntimeState::Starting);
+        let ui = assistant_status_for_snapshot(&starting);
         assert_eq!(
             serde_json::to_value(ui).expect("AssistantStatus serializes to its wire tag"),
             serde_json::Value::String("starting".to_string()),

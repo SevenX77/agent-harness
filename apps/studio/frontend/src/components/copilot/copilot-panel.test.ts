@@ -283,6 +283,23 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantCloseButtonLabel({ claude: active, codex: active })).toBe('Close assistants')
   })
 
+  it('offers Close but never Attach for a lingering runtime', () => {
+    // 决议 2026-08-02 D-A3 — `lingering` = ah 的运行时还在,但里面已经没有活的 CLI 会话
+    // (`/exit` 之后 ah 把会话标终态却不回收 tmux)。它必须留在"可关闭"那一类,否则面板
+    // 会谎称什么都没在跑;但它绝不能出现在 Attach 菜单里 —— attach 上去就是那块
+    // remain-on-exit 留下的死窗格,等于把缺陷换个位置重现。
+    const lingering = { status: 'lingering', readOnly: false } as const
+    const inactive = { status: 'inactive', readOnly: false } as const
+    const active = { status: 'active', readOnly: false } as const
+
+    expect(codeAssistantCloseButtonLabel({ claude: lingering, codex: inactive })).toBe('Close Claude code')
+    expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: lingering })).toBe('Close Codex')
+    expect(codeAssistantCloseButtonLabel({ claude: lingering, codex: active })).toBe('Close assistants')
+
+    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: inactive })).toEqual([])
+    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: active })).toEqual(['Attach Codex'])
+  })
+
   it('subscribes to ah runtime events so a delayed CLI start updates the button without polling', async () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval')
     const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
@@ -592,6 +609,58 @@ describe('buildCopilotJudgeDraft', () => {
 
       // It is the Open control, not the Attach/Close ("CLI running") dropdown.
       expect(container.querySelector('button[aria-label="Manage code assistant"]')).toBeNull()
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('test_lingering_keeps_a_close_control_instead_of_open', async () => {
+    // 决议 2026-08-02 D-A2/D-A3 — `/exit` 之后 ah 的运行时(ahd + tmux server + 那块死窗格)
+    // 都还在,只是没有活的 CLI 会话了。面板此时必须继续呈现管理控件(里面有 Close),而不是
+    // 变回 `Open in CLI` —— 否则用户再点 Open 打开的就是那块死窗格。
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    const unsubscribe = vi.fn()
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return unsubscribe
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'lingering', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+
+      await vi.waitFor(() => {
+        const manageButton = container.querySelector('button[aria-label="Manage code assistant"]')
+        expect(manageButton).toBeTruthy()
+        expect((manageButton as HTMLButtonElement).disabled).toBe(false)
+      })
+
+      // 关键反向断言:不得回落到 Open 控件。
+      expect(container.querySelector('button[aria-label="Open code assistant"]')).toBeNull()
     } finally {
       act(() => {
         root?.unmount()

@@ -200,8 +200,10 @@ jobs:
     # Windows/macOS observation signal (docs/development/CROSS_PLATFORM.md,
     # layer 5). NOT a required check — a red run here never blocks a merge;
     # it exists so platform-specific breakage is visible instead of unknown.
+    # 45min: the tauri cargo test step below compiles the Rust stack cold on
+    # cache misses (~10min on the Windows runner) on top of the pytest suites.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -246,3 +248,32 @@ jobs:
 
       - name: frontend build
         run: npm --prefix apps/studio/frontend run build
+
+      # ── tauri Rust unit tests ─────────────────────────────────────────────
+      # These broke silently on Windows for weeks (stale #536 assertion +
+      # Linux-shaped ownership fixtures) precisely because no CI job ran them.
+      # The tauri-build script only needs the vendor resources glob to match
+      # SOMETHING; the real vendor closure (build_vendor.py) is overkill for
+      # unit tests, so a stub file satisfies it.
+      # Windows-only: the platform-sensitive code (WSL launcher scripts, temp-
+      # namespace ownership paths) is exactly what regressed, and macOS/Linux
+      # would pay a full Rust compile (plus webkit system deps on Linux) for
+      # little extra signal.
+      - name: Stub tauri vendor resources
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p apps/studio/tauri/vendor
+          echo "ci stub — real vendor is produced by build_vendor.py" \
+            > apps/studio/tauri/vendor/ci-stub.txt
+
+      - name: Rust cache
+        if: matrix.os == 'windows-latest'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/studio/tauri
+
+      - name: cargo test (tauri lib)
+        if: matrix.os == 'windows-latest'
+        working-directory: apps/studio/tauri
+        run: cargo test --lib

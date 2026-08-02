@@ -241,12 +241,38 @@ pub(crate) const SEQUENCE_RESET_FRAME_NEW_SESSION: &str = r#"{"schema_version":2
 /// (lifecycle commands forbidden); `read_only == false` ⇔ Studio-managed temp config
 /// (full lifecycle allowed).
 pub(crate) struct ConfigOwnershipFixture {
-    /// The ah config path Studio would act on.
+    /// The ah config path SHAPE this class is defined by (frozen, authored on
+    /// Linux). Classifier/guard assertions must go through
+    /// `resolved_config_path()` instead: the Studio-managed class means "under
+    /// the RUNTIME `{temp}/skill-studio-ah` namespace", and no static string
+    /// can satisfy that on every platform (Windows temp is per-user).
     pub config_path: &'static str,
     /// Req 6.1 `readOnly` flag: true = workspace-owned, false = Studio-managed temp.
     pub read_only: bool,
     /// Human note on WHY this is the class it is.
     pub note: &'static str,
+}
+
+impl ConfigOwnershipFixture {
+    /// Platform-resolved path carrying this fixture's ownership class on the
+    /// machine actually running the tests. Studio-managed: the frozen shape's
+    /// suffix rebased onto the single temp-namespace authority
+    /// (`studio_ah_temp_root`). Workspace-owned: the frozen path as-is — an
+    /// absolute path outside the temp namespace classifies workspace-owned on
+    /// every platform.
+    pub fn resolved_config_path(&self) -> std::path::PathBuf {
+        if self.read_only {
+            return std::path::PathBuf::from(self.config_path);
+        }
+        let suffix = self
+            .config_path
+            .split_once("skill-studio-ah/")
+            .map(|(_, rest)| rest)
+            .expect("Studio-managed fixture path contains the temp namespace segment");
+        suffix
+            .split('/')
+            .fold(crate::studio_ah_temp_root(), |acc, seg| acc.join(seg))
+    }
 }
 
 /// Workspace-owned config: an `ah.toml` reachable by walking up from the workspace

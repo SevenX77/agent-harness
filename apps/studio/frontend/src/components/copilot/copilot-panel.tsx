@@ -337,11 +337,19 @@ function isAssistantActive(state: AssistantStateInput): boolean {
       return true
     case 'inactive':
     case 'starting':
+    case 'lingering':
     case 'degraded':
       return false
     default:
       return false
   }
+}
+
+// lingering = ah 的运行时仍在（ahd 存活 ⇒ tmux 及其 remain-on-exit 死窗格没被回收），但里面
+// 已经没有活的 CLI 会话。它不是 active（attach 上去就是那块死窗格），也不能算 inactive
+// （那会让面板谎称什么都没在跑、把用户导回 Open）——它自己是一类：只能 Close。
+function isAssistantLingering(state: AssistantStateInput): boolean {
+  return getAssistantStatus(state) === 'lingering'
 }
 
 // starting = the CLI is spawned but not yet ready: hands-off until it settles, so the
@@ -369,18 +377,27 @@ export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssista
   ]
 }
 
+// 需要收尾的助手 = 真正在跑的 + 只剩残留运行时的。前者靠 Close 停掉会话，后者靠 Close 让
+// ah 回收 tmux；两者都必须让头部停在管理控件上，不能回落成 `Open in CLI`。
+export function closableCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
+  return [
+    ...(isAssistantActive(status?.claude) || isAssistantLingering(status?.claude) ? (['claude'] as const) : []),
+    ...(isAssistantActive(status?.codex) || isAssistantLingering(status?.codex) ? (['codex'] as const) : []),
+  ]
+}
+
 export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): string | null {
-  const active = activeCodeAssistantIds(status)
-  if (active.length === 0) {
+  const closable = closableCodeAssistantIds(status)
+  if (closable.length === 0) {
     return null
   }
-  if (active.every(id => isAssistantReadOnly(status?.[id]))) {
+  if (closable.every(id => isAssistantReadOnly(status?.[id]))) {
     return 'Detach'
   }
-  if (active.length > 1) {
+  if (closable.length > 1) {
     return 'Close assistants'
   }
-  return active[0] === 'claude' ? 'Close Claude code' : 'Close Codex'
+  return closable[0] === 'claude' ? 'Close Claude code' : 'Close Codex'
 }
 
 function codeAssistantLabel(assistant: CodeAssistantId): string {
@@ -564,7 +581,10 @@ export function CopilotPanel({
   const selectedOption = roleOptions.find((option) => option.role === selectedRole) ?? roleOptions[0] ?? null
   const selectedRoleKey = selectedOption?.role ?? ''
   const defaultRouteId = selectedOption?.fallbackChain[0]?.route_id ?? ''
+  // activeCodeAssistants 只驱动 Attach（attach 必须落在真正在跑的会话上）；
+  // closableCodeAssistants 驱动 Close，额外包含只剩残留运行时的助手。
   const activeCodeAssistants = activeCodeAssistantIds(codeAssistantStatus)
+  const closableCodeAssistants = closableCodeAssistantIds(codeAssistantStatus)
   const codeAssistantCloseLabel = codeAssistantCloseButtonLabel(codeAssistantStatus)
   const codeAssistantAttachLabels = codeAssistantAttachMenuLabels(codeAssistantStatus)
   const isClaudeOpenDisabled = getAssistantStatus(codeAssistantStatus?.claude) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.claude)
@@ -663,13 +683,13 @@ export function CopilotPanel({
   }
 
   async function handleCloseCodeAssistants() {
-    if (activeCodeAssistants.length === 0) {
+    if (closableCodeAssistants.length === 0) {
       return
     }
     setClosingCodeAssistant(true)
     try {
-      const readOnlyAssistants = activeCodeAssistants.filter((id) => isAssistantReadOnly(codeAssistantStatus[id]))
-      const writeAssistants = activeCodeAssistants.filter((id) => !isAssistantReadOnly(codeAssistantStatus[id]))
+      const readOnlyAssistants = closableCodeAssistants.filter((id) => isAssistantReadOnly(codeAssistantStatus[id]))
+      const writeAssistants = closableCodeAssistants.filter((id) => !isAssistantReadOnly(codeAssistantStatus[id]))
 
       if (writeAssistants.length > 0) {
         await Promise.all(

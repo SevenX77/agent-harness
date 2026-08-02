@@ -141,7 +141,9 @@ export async function openCodexCli(workspaceRoot: string | null | undefined): Pr
 }
 
 export interface AssistantState {
-  status: 'inactive' | 'starting' | 'active' | 'degraded' | 'error'
+  // `lingering` = ah 的运行时还在（ahd 存活 ⇒ tmux 及其死窗格未被回收），但里面已经没有
+  // 活的 CLI 会话。它可以 Close，不可以 Attach——attach 上去就是那块死窗格。
+  status: 'inactive' | 'starting' | 'active' | 'lingering' | 'degraded' | 'error'
   reason?: string
   readOnly: boolean
 }

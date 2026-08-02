@@ -1141,6 +1141,46 @@ def test_runtime_state_store_accepts_per_run_sqlite_checkpointer_spec(
     assert resolve_calls == [checkpointer_spec]
 
 
+def test_runtime_state_store_accepts_checkpointer_in_run_workspace_outside_storage_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A skill is a git repo at an arbitrary path, so the run workspace owning
+    ``runs/<run_id>/checkpoints.db`` normally sits outside Studio's storage root.
+    The per-run shape and existence checks are the invariants — no containment
+    root exists that could hold for every legitimate skill location."""
+    LocalRuntimeStateStore = _load_symbol(
+        "app.core.adapters.runtime_state_store_local",
+        "LocalRuntimeStateStore",
+    )
+    StateSnapshot = _load_symbol(
+        "app.core.adapters.runtime_state_store_local",
+        "StateSnapshot",
+    )
+    checkpointer_module = importlib.import_module("graph_agent.core.checkpointer")
+    resolved = object()
+    resolve_calls: list[str] = []
+
+    def fake_resolve(spec: str) -> object:
+        resolve_calls.append(spec)
+        return resolved
+
+    monkeypatch.setattr(checkpointer_module, "resolve_checkpointer", fake_resolve)
+    store = LocalRuntimeStateStore(root=tmp_path / "storage")
+    checkpointer_path = tmp_path / "external" / "demo.skill" / ".workspace" / "runs" / "run-safe" / "checkpoints.db"
+    checkpointer_path.parent.mkdir(parents=True)
+    checkpointer_path.write_bytes(b"")
+    checkpointer_spec = f"sqlite:{checkpointer_path}"
+    snapshot = StateSnapshot(
+        run_id="run-safe",
+        state={"checkpointer_spec": checkpointer_spec},
+        fencing_token=1,
+    )
+
+    assert store.restore_checkpointer(snapshot) is resolved
+    assert resolve_calls == [checkpointer_spec]
+
+
 def test_runtime_state_store_rejects_missing_per_run_checkpointer_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

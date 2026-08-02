@@ -2457,6 +2457,82 @@ def test_engine_adapter_run_artifact_persists_outputs_through_run_artifact_store
     assert result["metrics"] == {"total_tokens": 3}
 
 
+def test_engine_adapter_run_artifact_snapshots_runtime_state_for_workspace_outside_storage_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runs the REAL runtime state store against a skill workspace that lives
+    outside Studio's storage root — the normal case now that a skill is a git
+    repo at an arbitrary path. A successful engine run must stay successful:
+    the post-run snapshot may not reject its own per-run checkpoints.db."""
+    import app.core.adapters.engine as engine_module
+    from app.core import config
+    from app.core.adapters.engine import EngineAdapter
+    from graph_agent.core.adapter_contracts import RunSession
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+
+    workspace_dir = tmp_path / "external" / "demo.skill" / ".workspace"
+    checkpoints_db = workspace_dir / "runs" / "run-123" / "checkpoints.db"
+    checkpoints_db.parent.mkdir(parents=True)
+    checkpoints_db.write_bytes(b"")
+
+    class _Checkpoint:
+        config = {"configurable": {"checkpoint_id": "checkpoint-1", "checkpoint_ns": ""}}
+
+    class _Checkpointer:
+        def list(self, query: dict[str, Any]) -> list[_Checkpoint]:
+            assert query == {"configurable": {"thread_id": "run-123"}}
+            return [_Checkpoint()]
+
+    checkpointer_module = importlib.import_module("graph_agent.core.checkpointer")
+    monkeypatch.setattr(checkpointer_module, "resolve_checkpointer", lambda _spec: _Checkpointer())
+
+    def fake_run_artifact(request: object, **kwargs: object) -> RunSession:
+        store = kwargs["run_artifact_store"]
+        run_id = "run-123"
+        store.begin_run(run_id, metadata={"artifact_id": "demo.skill"})
+        payload = {
+            "run_id": run_id,
+            "success": True,
+            "context": {"ok": True},
+            "metrics": {},
+        }
+        refs = store.put_batch(run_id, {"outputs.json": json.dumps(payload).encode("utf-8")})
+        store.seal_run(run_id)
+        ref = refs["outputs.json"] if isinstance(refs, dict) else refs[0]
+        return RunSession(
+            run_id=run_id,
+            event_stream_ref=f"stream://{run_id}",
+            result_ref=ref.bytes_ref,
+            status_ref=f"state://{run_id}/status",
+        )
+
+    monkeypatch.setattr(engine_module, "run_artifact", fake_run_artifact)
+    _seed_ephemeral_artifact_root(tmp_path, "e")
+
+    adapter = EngineAdapter(transport="in_process")
+    result = adapter.run_artifact(
+        {
+            "artifact_ref": {
+                "artifact_id": "demo.skill",
+                "content_hash": f"sha256:{'e' * 64}",
+                "store": "ephemeral",
+                "manifest_ref": "manifests/demo.skill.json",
+            },
+            "inputs": {},
+            "workspace_dir": str(workspace_dir),
+            "thread_id": "run-123",
+        }
+    )
+
+    assert result["success"] is True
+    snapshot_file = tmp_path / "workspaces" / "default" / "runs" / "run-123" / "snapshot.json"
+    snapshot_state = json.loads(snapshot_file.read_text(encoding="utf-8"))["state"]
+    assert snapshot_state["checkpoint_id"] == "checkpoint-1"
+    assert snapshot_state["checkpointer_spec"] == f"sqlite:{checkpoints_db.as_posix()}"
+
+
 def test_engine_adapter_run_artifact_does_not_fail_sealed_result_when_snapshot_spec_uses_different_run_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

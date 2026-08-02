@@ -45,7 +45,7 @@
    - P-3 **Bash 只读白名单**:`ls` 等无害只读命令免审批(代码强制解析:单命令、无管道/重定向/连接符才放行),不靠提示词。
    - P-4 **审批卡状态服务端权威化**:决议状态只存组件本地 state,重渲染即复活可点(`tool-approval-card.tsx:49-73`);后端 resolve 时应发 resolved 事件,前端从事件流投影。
    - P-5 **编译诊断结构化渲染**:is_error 工具结果(编译诊断集)不该渲染成系统故障样的红色 JSON 堆;中断后 CLI 聚合错误回声("SDK returned an error: …McpToolCallError×N")一并评估降噪。
-   - P-6 **copilot 面板宽度自适应**:随窗口宽度伸缩(clamp + 可拖拽),窗口宽裕时面板加宽。
+   - P-6 **copilot 面板宽度自适应**:随窗口宽度伸缩(clamp + 可拖拽),窗口宽裕时面板加宽。✅ 已修(2026-08-02):宽度真相改为画布宿主宽度的比例(默认 0.275,历史默认 352px@1280 不变),拖拽把手回写比例,ResizeObserver 跟随窗口重算,仍夹在 280-720px;纯函数 `rightPanelWidthPx`/`rightPanelRatioFromPx` 带单测,复用规则已入 FRONTEND_UI_SPEC §4。
 3. **新讨论项(设计探讨,未裁决实施)**:把 Open in CLI 的终端内嵌进 copilot 面板区域,启动 CLI 时以终端界面替代对话界面("CLI 即 copilot");依赖 N5 工具面先就位。
 
 #### N5 · Open in CLI 工具面(当前最高优先)

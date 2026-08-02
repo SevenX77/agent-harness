@@ -56,7 +56,12 @@ import { SettingsPageView, useSettingsPageController, type SettingsTab } from ".
 import { Toolbar, type PanelKind } from "./Toolbar"
 import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
 import { WorkspaceLeftPanelOverlay } from "./WorkspaceLeftPanelOverlay"
-import { WorkspaceRightPanelOverlay } from "./WorkspaceRightPanelOverlay"
+import {
+  RIGHT_PANEL_DEFAULT_RATIO,
+  WorkspaceRightPanelOverlay,
+  rightPanelRatioFromPx,
+  rightPanelWidthPx,
+} from "./WorkspaceRightPanelOverlay"
 import { applyPhaseName } from "./panels/phase-frontmatter"
 import { useSkillSubgraphMembershipTree } from "./panels/use-subgraph-membership-tree"
 import { useWorkspaceDirectoryTree } from "./panels/use-workspace-directory-tree"
@@ -419,15 +424,51 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [navStack, setNavStack] = useState<string[]>(() => (skillId ? [skillId] : []))
   const [activePanel, setActivePanel] = useState<PanelKind | null>(skillId ? "assets" : null)
   const [copilotOpen, setCopilotOpen] = useState(Boolean(skillId))
-  // User-resizable overlay sizes (px). The editor height is null until first drag
+  // User-resizable overlay sizes. The editor height is null until first drag
   // so it keeps the responsive CSS default (min(52%, 34rem)) until then. These
   // feed both the overlay sizes and the canvas safe-area vars, so fit-view tracks.
   const [leftPanelWidth, setLeftPanelWidth] = useState(384)
-  const [copilotWidth, setCopilotWidth] = useState(352)
+  // P-6: the copilot panel's width truth is a share of the canvas host, so it
+  // widens with the window instead of staying a fixed pixel count. Drags from
+  // the handle come in as px and are converted back to a ratio against the
+  // host width they were made at.
+  const [copilotWidthRatio, setCopilotWidthRatio] = useState(RIGHT_PANEL_DEFAULT_RATIO)
+  const [hostWidth, setHostWidth] = useState<number | null>(null)
   // FAB position on the canvas; null = default top-right anchor. Persists across
   // open/close within the session (survives the panel collapse animation).
   const [fabPosition, setFabPosition] = useState<Point | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
+  // Callback ref, not a mount effect: the host div only exists while a skill is
+  // open (the welcome view renders without it), so the observer must attach the
+  // moment the node appears — a []-deps effect would run once pre-attach and
+  // never observe anything.
+  const hostObserverCleanup = useRef<(() => void) | null>(null)
+  const observeHost = useCallback((node: HTMLDivElement | null) => {
+    hostRef.current = node
+    hostObserverCleanup.current?.()
+    hostObserverCleanup.current = null
+    if (!node || typeof ResizeObserver === "undefined") return
+    let frameId = 0
+    const measure = () => {
+      frameId = 0
+      setHostWidth(node.clientWidth)
+    }
+    const scheduleMeasure = () => {
+      if (frameId === 0) {
+        frameId = window.requestAnimationFrame(measure)
+      }
+    }
+    measure()
+    const observer = new ResizeObserver(scheduleMeasure)
+    observer.observe(node)
+    hostObserverCleanup.current = () => {
+      observer.disconnect()
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [])
+  const copilotWidth = rightPanelWidthPx(copilotWidthRatio, hostWidth)
   // Active FAB↔panel container-transform morph, or null. Exactly one of the
   // FAB / morph / panel renders at a time, gated on this + copilotOpen.
   const [morph, setMorph] = useState<{ mode: "open" | "close"; fab: Point; logo: Point; panel: Rect } | null>(null)
@@ -2523,7 +2564,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     if (mode === "close") setCopilotOpen(false)
   }
   const rightPanelOverlay = copilotOpen && !morph ? (
-    <WorkspaceRightPanelOverlay width={copilotWidth} onResize={setCopilotWidth}>
+    <WorkspaceRightPanelOverlay
+      width={copilotWidth}
+      onResize={(widthPx) => setCopilotWidthRatio(rightPanelRatioFromPx(widthPx, hostWidth))}
+    >
       <CopilotPanel
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
@@ -2591,7 +2635,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               ) : (
                 <>
                   <div
-                    ref={hostRef}
+                    ref={observeHost}
                     data-studio-canvas-overlay-host="true"
                     className="relative size-full"
                   >

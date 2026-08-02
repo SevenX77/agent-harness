@@ -245,6 +245,7 @@ Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分�
   - `Main Workspace (SplitEditor)` 包含上下或左右分割的 Canvas 画布和 Monaco 代码编辑器。
   - `Right Drawer (Copilot / Golden)` 按需滑出。
 - **重要 caveat**: 拖拽调节窗体大小时，必须确保 `ReactFlow` 和 `Monaco Editor` 及时监听 Resize Observer，触发自我边界更新 (`fit-to-screen` 和 `layout()`)，否则可能产生渲染撕裂。
+- **可拖拽 overlay 的宽度真相 = 宿主宽度的比例，不是固定像素**（P-6，2026-08-02）：用户可拖拽的悬浮面板（如 copilot 面板）把宽度存成「占画布宿主宽度的比例」，拖拽把手回报的 px 换算回比例存储；窗口/宿主尺寸变化时由比例重新推导 px，并夹在拖拽把手的 min/max 之间。这样窗口放大面板等比加宽、缩小时不糊死画布。参照实现：`WorkspaceRightPanelOverlay.tsx` 的 `rightPanelWidthPx` / `rightPanelRatioFromPx`（纯函数，带单测）+ `Workspace.tsx` 的 host ResizeObserver。测试环境（jsdom 无 ResizeObserver）宿主永不测量，按参考宿主 1280px 回落到历史默认值，既有像素断言不破。
 
 ## 5. Tauri Native API 桥接层最佳实践
 将网页代码安全接入 Tauri 本地能力的护城河机制：

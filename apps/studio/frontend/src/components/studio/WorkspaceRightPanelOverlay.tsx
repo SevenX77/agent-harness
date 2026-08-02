@@ -4,6 +4,23 @@ import { OverlayResizeHandle } from "./OverlayResizeHandle"
 export const RIGHT_PANEL_MIN_WIDTH = 280
 export const RIGHT_PANEL_MAX_WIDTH = 720
 
+// P-6: the panel's width truth is a share of the canvas host, not a pixel
+// count, so enlarging the window widens the panel proportionally. 0.275 of the
+// 1280px reference host reproduces the historical 352px default, which is also
+// what jsdom (no ResizeObserver → host never measured) renders in tests.
+export const RIGHT_PANEL_DEFAULT_RATIO = 0.275
+const REFERENCE_HOST_WIDTH = 1280
+
+export function rightPanelWidthPx(ratio: number, hostWidth: number | null): number {
+  const host = hostWidth != null && hostWidth > 0 ? hostWidth : REFERENCE_HOST_WIDTH
+  return Math.min(RIGHT_PANEL_MAX_WIDTH, Math.max(RIGHT_PANEL_MIN_WIDTH, Math.round(ratio * host)))
+}
+
+export function rightPanelRatioFromPx(widthPx: number, hostWidth: number | null): number {
+  const host = hostWidth != null && hostWidth > 0 ? hostWidth : REFERENCE_HOST_WIDTH
+  return widthPx / host
+}
+
 interface WorkspaceRightPanelOverlayProps {
   children: ReactNode
   width: number

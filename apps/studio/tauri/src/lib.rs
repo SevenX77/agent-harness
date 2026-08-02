@@ -1719,6 +1719,21 @@ pub(crate) struct StudioMcpEndpoint {
     pub token: String,
 }
 
+/// Bash snippet appended to launcher scripts that own a Studio transient
+/// ah.toml: ah >= 1.7.0 requires `providers.claude.shared_credentials_dir`
+/// (it becomes CLAUDE_SECURESTORAGE_CONFIG_DIR inside every sandbox), and the
+/// value is the launching user's `$HOME/.claude` — resolvable only in the
+/// launcher's own shell, never at config-write time on the Windows side.
+fn claude_provider_config_patch(config_ref: &str) -> String {
+    format!(
+        r#"if ! grep -q '^\[providers\.claude\]' {config_ref} 2>/dev/null; then
+  mkdir -p "$HOME/.claude"
+  printf '\n[providers.claude]\nshared_credentials_dir = "%s"\n' "$HOME/.claude" >> {config_ref}
+fi
+"#
+    )
+}
+
 fn wsl_payload_script(
     wsl_workspace: &str,
     wsl_config: &str,
@@ -1726,6 +1741,7 @@ fn wsl_payload_script(
     windows_codex_home: Option<&str>,
     windows_claude_home: Option<&str>,
     studio_mcp: Option<&StudioMcpEndpoint>,
+    patch_transient_claude_config: bool,
 ) -> String {
     let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
     let min_major = min_parts.get(0).copied().unwrap_or("1");
@@ -1803,6 +1819,12 @@ fi
         ),
         None => String::new(),
     };
+    let claude_config_patch =
+        if patch_transient_claude_config && matches!(assistant, CodeAssistant::Claude) {
+            claude_provider_config_patch("\"$CFG\"")
+        } else {
+            String::new()
+        };
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -1836,7 +1858,7 @@ if [ "$ah_ok" -ne 1 ]; then
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
-if command -v python3 >/dev/null 2>&1; then
+{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - "$WS" <<'PY'
 {preseed}
 PY
@@ -1859,6 +1881,7 @@ exec bash -i
         assistant_name = assistant.display_name(),
         codex_auth_sync = codex_auth_sync,
         claude_auth_bridge = claude_auth_bridge,
+        claude_config_patch = claude_config_patch,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
         min_version = AH_VERSION_MIN,
         min_major = min_major,
@@ -1969,11 +1992,18 @@ fn unix_code_assistant_launcher_script(
     workspace_root: &Path,
     config_path: &Path,
     assistant: CodeAssistant,
+    patch_transient_claude_config: bool,
 ) -> String {
     let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
     let min_major = min_parts.get(0).copied().unwrap_or("1");
     let min_minor = min_parts.get(1).copied().unwrap_or("4");
     let min_patch = min_parts.get(2).copied().unwrap_or("0");
+    let claude_config_patch =
+        if patch_transient_claude_config && matches!(assistant, CodeAssistant::Claude) {
+            claude_provider_config_patch(&sh_single_quote(config_path))
+        } else {
+            String::new()
+        };
 
     format!(
         r#"#!/bin/sh
@@ -2005,7 +2035,7 @@ if [ "$ah_ok" -ne 1 ]; then
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-if command -v python3 >/dev/null 2>&1; then
+{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - {workspace} <<'PY'
 {preseed}
 PY
@@ -2025,6 +2055,7 @@ exec "${{SHELL:-/bin/sh}}"
         workspace = sh_single_quote(workspace_root),
         config = sh_single_quote(config_path),
         assistant_name = assistant.display_name(),
+        claude_config_patch = claude_config_patch,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
         min_version = AH_VERSION_MIN,
         min_major = min_major,
@@ -2165,6 +2196,9 @@ fn write_code_assistant_launcher_script(
         .ok_or_else(|| format!("cannot resolve launcher parent: {}", script_path.display()))?;
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create launcher script dir: {error}"))?;
+    // Only Studio's own transient config may be patched at launch time; a
+    // user-owned ah.toml keeps ah's diagnostics untouched.
+    let patch_transient_claude_config = config_path.starts_with(studio_ah_temp_root());
     let content = if cfg!(target_os = "windows") {
         // ah + claude live inside WSL2 on Windows: write the bash payload, then a
         // .ps1 that runs it through wsl.exe. Both paths are translated to the
@@ -2179,6 +2213,7 @@ fn write_code_assistant_launcher_script(
                 windows_codex_home_wsl().as_deref(),
                 windows_claude_home_wsl().as_deref(),
                 studio_mcp,
+                patch_transient_claude_config,
             ),
         )
         .map_err(|error| format!("failed to write WSL payload: {error}"))?;
@@ -2189,7 +2224,12 @@ fn write_code_assistant_launcher_script(
             &window_title,
         )
     } else {
-        unix_code_assistant_launcher_script(workspace_root, config_path, assistant)
+        unix_code_assistant_launcher_script(
+            workspace_root,
+            config_path,
+            assistant,
+            patch_transient_claude_config,
+        )
     };
     std::fs::write(&script_path, content).map_err(|error| {
         format!(
@@ -3663,10 +3703,77 @@ mod tests {
                 port: 8787,
                 token: "tkn-abc".to_string(),
             }),
+            false,
         );
 
         assert!(payload.contains("export STUDIO_MCP_URL=\"http://127.0.0.1:8787/mcp\""));
         assert!(payload.contains("export STUDIO_API_TOKEN=\"tkn-abc\""));
+    }
+
+    #[test]
+    fn wsl_payload_patches_transient_config_with_claude_shared_credentials() {
+        // ah >= 1.7.0 refuses to start claude-provider agents unless
+        // providers.claude.shared_credentials_dir is set. Only the launcher's
+        // shell knows the WSL $HOME, so the payload patches Studio's OWN
+        // transient ah.toml right before `ah start`.
+        let payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/c/Users/u/AppData/Local/Temp/skill-studio-ah/abc/claude/ah.toml",
+            CodeAssistant::Claude,
+            None,
+            None,
+            None,
+            true,
+        );
+
+        assert!(payload.contains("[providers.claude]"));
+        assert!(payload.contains("shared_credentials_dir"));
+        assert!(payload.contains("$HOME/.claude"));
+    }
+
+    #[test]
+    fn wsl_payload_never_patches_a_user_owned_ah_toml() {
+        // A checked-in workspace ah.toml belongs to the user; if it is missing
+        // the provider section, ah's own diagnostic must surface untouched.
+        let payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/d/ws/ah.toml",
+            CodeAssistant::Claude,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(!payload.contains("[providers.claude]"));
+    }
+
+    #[test]
+    fn codex_wsl_payload_never_patches_claude_provider_config() {
+        let payload = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/c/Users/u/AppData/Local/Temp/skill-studio-ah/abc/codex/ah.toml",
+            CodeAssistant::Codex,
+            None,
+            None,
+            None,
+            true,
+        );
+
+        assert!(!payload.contains("[providers.claude]"));
+    }
+
+    #[test]
+    fn unix_launcher_patches_transient_config_with_claude_shared_credentials() {
+        let script = unix_code_assistant_launcher_script(
+            Path::new("/ws"),
+            Path::new("/tmp/skill-studio-ah/abc/claude/ah.toml"),
+            CodeAssistant::Claude,
+            true,
+        );
+
+        assert!(script.contains("[providers.claude]"));
+        assert!(script.contains("shared_credentials_dir"));
     }
 
     #[test]
@@ -3678,6 +3785,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         );
 
         assert!(!payload.contains("STUDIO_MCP_URL"));
@@ -3885,6 +3993,7 @@ mod tests {
             None,
             Some("/mnt/c/Users/u/.claude"),
             None,
+            false,
         );
         assert!(windows_payload.contains("ah_version="));
         assert!(windows_payload.contains("requires ah >= 1.3.4"));
@@ -3893,6 +4002,7 @@ mod tests {
             Path::new("/tmp/skill"),
             Path::new("/tmp/ah.toml"),
             CodeAssistant::Claude,
+            false,
         );
         assert!(unix_payload.contains("ah_version="));
         assert!(unix_payload.contains("requires ah >= 1.3.4"));
@@ -3981,12 +4091,14 @@ mod tests {
                 None,
                 Some("/mnt/c/Users/u/.claude"),
                 None,
+                false,
             ),
             wsl_attach_payload_script("/mnt/c/tmp/ah.toml", CodeAssistant::Claude),
             unix_code_assistant_launcher_script(
                 Path::new("/tmp/skill"),
                 Path::new("/tmp/ah.toml"),
                 CodeAssistant::Claude,
+                false,
             ),
             unix_code_assistant_attach_launcher_script(
                 Path::new("/tmp/ah.toml"),
@@ -4742,6 +4854,7 @@ mod tests {
             None,
             Some("/mnt/c/Users/u/.claude"),
             None,
+            false,
         );
         assert!(payload.contains("WIN_CLAUDE_HOME='/mnt/c/Users/u/.claude'"));
         assert!(payload.contains("ln -sfn \"$WIN_CLAUDE_HOME/.credentials.json\""));
@@ -4760,6 +4873,7 @@ mod tests {
             Some("/mnt/c/Users/u/.codex"),
             None,
             None,
+            false,
         );
         assert!(!codex_payload.contains("WIN_CLAUDE_HOME"));
         assert!(codex_payload.contains("auth.json"));
@@ -5661,6 +5775,7 @@ sessions
             None,
             Some("/mnt/c/Users/Test User/.claude"),
             None,
+            false,
         );
 
         assert!(script.contains("WS='/mnt/c/Users/Test User/skill'"));
@@ -5688,6 +5803,7 @@ sessions
             Some("/mnt/c/Users/Test User/.codex"),
             None,
             None,
+            false,
         );
 
         assert!(script.contains("WIN_CODEX_HOME='/mnt/c/Users/Test User/.codex'"));
@@ -5842,6 +5958,7 @@ sessions
             Path::new("/tmp/skill root"),
             Path::new("/tmp/studio ah/ah.toml"),
             CodeAssistant::Claude,
+            false,
         );
 
         assert!(script.starts_with("#!/bin/sh"));

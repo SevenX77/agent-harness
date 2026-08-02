@@ -3851,8 +3851,9 @@ mod tests {
             config.contains("window_size = \"follow\""),
             "ah 1.3.0 defaults master tmux sizing to fixed; Studio must opt into follow"
         );
-        // IS_SANDBOX (root escape hatch) + skip-permissions + the auto-report
-        // prompt; NOT --continue (aborts on a fresh workspace) or /remote-control.
+        // IS_SANDBOX (root escape hatch) + the auto-report prompt; NOT
+        // skip-permissions (#536: claude's own approval prompt is the human
+        // gate), --continue (aborts on a fresh workspace), or /remote-control.
         assert!(config.contains("cmd = \"bash -c "));
         assert!(config.contains("STUDIO_AH_HOST_HOME"));
         assert!(config.contains("export IS_SANDBOX=1"));
@@ -3863,7 +3864,10 @@ mod tests {
             "Claude sandbox must reuse the host preseeded trust/onboarding file"
         );
         assert!(config.contains("$HOME/.claude.json"));
-        assert!(config.contains("--dangerously-skip-permissions"));
+        // PR #536: the interactive master deliberately DROPS skip-permissions —
+        // claude's own approval prompt is the human gate for a session the user
+        // sits in front of (lib.rs claude_master_cmd doc).
+        assert!(!config.contains("--dangerously-skip-permissions"));
         assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
         assert!(config.contains("skills = [\"moirai-intro\"]"));
         assert!(!config.contains("--continue"));
@@ -5212,12 +5216,12 @@ mod tests {
         // Referencing classify_config_ownership here is the compile-time RED seam (task 5) and
         // proves the payload agrees with the real classifier for each config.
         assert_eq!(
-            classify_config_ownership(Path::new(CONFIG_WORKSPACE_OWNED.config_path)).read_only,
+            classify_config_ownership(&CONFIG_WORKSPACE_OWNED.resolved_config_path()).read_only,
             CONFIG_WORKSPACE_OWNED.read_only,
             "classifier must agree with the frozen workspace-owned class"
         );
         assert_eq!(
-            classify_config_ownership(Path::new(CONFIG_STUDIO_MANAGED.config_path)).read_only,
+            classify_config_ownership(&CONFIG_STUDIO_MANAGED.resolved_config_path()).read_only,
             CONFIG_STUDIO_MANAGED.read_only,
             "classifier must agree with the frozen Studio-managed class"
         );
@@ -5225,8 +5229,8 @@ mod tests {
         // Claude on the workspace-owned config, Codex on the Studio-managed config; both active
         // (readOnly is orthogonal to running state — a workspace-owned stack can be attached
         // for observation).
-        let claude_config = PathBuf::from(CONFIG_WORKSPACE_OWNED.config_path);
-        let codex_config = PathBuf::from(CONFIG_STUDIO_MANAGED.config_path);
+        let claude_config = CONFIG_WORKSPACE_OWNED.resolved_config_path();
+        let codex_config = CONFIG_STUDIO_MANAGED.resolved_config_path();
         let claude_workspace = claude_config
             .parent()
             .expect("config path has a parent dir")
@@ -5326,22 +5330,24 @@ mod tests {
         // A workspace-owned config REFUSES lifecycle commands; a Studio-managed temp
         // config allows them.
         assert!(
-            ensure_lifecycle_command_allowed(Path::new(CONFIG_WORKSPACE_OWNED.config_path)).is_err(),
+            ensure_lifecycle_command_allowed(&CONFIG_WORKSPACE_OWNED.resolved_config_path())
+                .is_err(),
             "workspace-owned config must refuse start/stop/kill (Req 5.9)"
         );
         assert!(
-            ensure_lifecycle_command_allowed(Path::new(CONFIG_STUDIO_MANAGED.config_path)).is_ok(),
+            ensure_lifecycle_command_allowed(&CONFIG_STUDIO_MANAGED.resolved_config_path())
+                .is_ok(),
             "Studio-managed temp config allows the full lifecycle (Req 4.6 class b)"
         );
 
         // The guard's verdict MUST be sourced from the single ownership authority:
         // lifecycle-allowed ⇔ NOT read-only, for every registered ownership class.
         for f in ALL_CONFIG_OWNERSHIP_FIXTURES {
-            let path = Path::new(f.config_path);
-            let allowed = ensure_lifecycle_command_allowed(path).is_ok();
+            let path = f.resolved_config_path();
+            let allowed = ensure_lifecycle_command_allowed(&path).is_ok();
             assert_eq!(
                 allowed,
-                !classify_config_ownership(path).read_only,
+                !classify_config_ownership(&path).read_only,
                 "lifecycle permission must derive from classify_config_ownership, not a second guess"
             );
             assert_eq!(allowed, !f.read_only, "guard must agree with the frozen ownership class");
@@ -5623,11 +5629,13 @@ mod tests {
         assert!(CONFIG_WORKSPACE_OWNED.read_only, "workspace-owned fixture is readOnly:true");
         assert!(!CONFIG_STUDIO_MANAGED.read_only, "Studio-managed temp fixture is readOnly:false");
         assert!(
-            ensure_lifecycle_command_allowed(Path::new(CONFIG_WORKSPACE_OWNED.config_path)).is_err(),
+            ensure_lifecycle_command_allowed(&CONFIG_WORKSPACE_OWNED.resolved_config_path())
+                .is_err(),
             "workspace-owned config must refuse start/stop/kill (Req 5.9)"
         );
         assert!(
-            ensure_lifecycle_command_allowed(Path::new(CONFIG_STUDIO_MANAGED.config_path)).is_ok(),
+            ensure_lifecycle_command_allowed(&CONFIG_STUDIO_MANAGED.resolved_config_path())
+                .is_ok(),
             "Studio-managed temp config allows the full lifecycle — the skip is selective, not blanket"
         );
 

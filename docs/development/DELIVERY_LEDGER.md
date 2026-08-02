@@ -111,6 +111,11 @@
 - ah 编队(用户 2026-07-16 原话"忽略ah编队");
 - N5 CLI 路 Studio MCP 工具(本决议后置,见关键设计决定 4);
 - gateway 状态投影毛刺(含 `route.status` 与 `ui_state` 双状态字段的实体收敛,勘察 2026-07-30 记录);
+- `ah attach master` 落到非活跃窗口(ah 仓缺陷,用户 2026-08-02 裁决"不改 ah" ⇒ 搁置):
+  attach 是 session 级(`src/bin/ah.rs:1617-1624`),而新 master 以 `new-window -d` 建窗、
+  不切换当前窗口,于是 attach 显示的是上一轮 `remain-on-exit` 留下的死窗格。Studio 侧已用
+  `lingering` 状态(残留运行时保持可 Close)规避,取证与范围边界见
+  `.kiro/specs/studio-ah-state-contract-v1/decision-2026-08-02-lingering-state-and-cli-autoupdate.md`;
 - 更早的跨 spec 延期项见 `docs/deferred-items.md`(停更于 2026-06-21,恢复维护待用户排程)。
 
 ### 勘察证据存档

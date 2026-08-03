@@ -1,3 +1,4 @@
+mod cli_terminal;
 mod native_fs;
 mod sidecar;
 
@@ -1619,9 +1620,6 @@ fn cleanup_registered_code_assistants(configs: BTreeSet<PathBuf>) {
     }
 }
 
-fn powershell_single_quote_str(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
 
 fn sh_single_quote_str(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
@@ -1871,12 +1869,13 @@ if [ "$status" -ne 0 ]; then
   printf 'ah start failed with exit code %s\n' "$status"
   exec bash -i
 fi
-printf '%s\n' "Attaching - {assistant_name} will auto-report its status (detach: Ctrl-b then d)."
+{tmux_mouse}printf '%s\n' "Attaching - {assistant_name} will auto-report its status (detach: Ctrl-b then d)."
 ah --config "$CFG" attach master
 printf '[attach ended; exit=%s]\n' "$?"
 exec bash -i
 "#,
         workspace = sh_single_quote_str(wsl_workspace),
+        tmux_mouse = tmux_mouse_enable_snippet("\"$WS\""),
         config = sh_single_quote_str(wsl_config),
         assistant_name = assistant.display_name(),
         codex_auth_sync = codex_auth_sync,
@@ -1890,32 +1889,42 @@ exec bash -i
     )
 }
 
-/// On Windows, ah + claude live inside WSL2, so the .ps1 just runs the bash
-/// payload through `wsl.exe` in this console window (keeping the attach
-/// interactive).
-fn windows_code_assistant_launcher_script(
-    wsl_payload_path: &str,
-    assistant: CodeAssistant,
-    window_title: &str,
-) -> String {
+/// tmux ships with `mouse off` and ah sets no tmux options of its own (the ah
+/// repository has no `mouse` setting anywhere), so inside an attached pane the
+/// wheel scrolls nothing. The embedded terminal is a mouse-first surface, so
+/// the launcher turns the option on for the tmux server that owns THIS
+/// workspace's session, right before attaching.
+///
+/// The server is located by matching a session's working directory against the
+/// workspace — deliberately NOT by recomputing ah's socket-name hash
+/// (`ahd-<sha256(state_dir)[..16]>`), which would weld Studio to an ah
+/// internal. Every failure path is silent: with the option unset, scrolling
+/// still works through tmux's keyboard route (prefix `Ctrl-b`, then `[`).
+fn tmux_mouse_enable_snippet(workspace_expr: &str) -> String {
     format!(
-        r#"$ErrorActionPreference = "Stop"
-$studioWindowTitle = {window_title}
-$Host.UI.RawUI.WindowTitle = $studioWindowTitle
-[Console]::Title = $studioWindowTitle
-Write-Host "Opening {assistant_name} through ah (WSL)..."
-wsl.exe -e bash {payload}
-if ($LASTEXITCODE -ne 0) {{
-  Read-Host "Could not start WSL (exit $LASTEXITCODE). Is WSL2 installed? Press Enter to close"
+        r#"studio_enable_tmux_mouse() {{
+  command -v tmux >/dev/null 2>&1 || return 0
+  studio_uid="$(id -u 2>/dev/null)" || return 0
+  for studio_sock in "/tmp/tmux-$studio_uid"/ahd-*; do
+    [ -S "$studio_sock" ] || continue
+    tmux -S "$studio_sock" list-sessions -F '#{{session_path}}' 2>/dev/null \
+      | grep -Fxq {workspace_expr} || continue
+    tmux -S "$studio_sock" set-option -g mouse on >/dev/null 2>&1 || true
+    return 0
+  done
+  return 0
 }}
-"#,
-        assistant_name = assistant.display_name(),
-        payload = powershell_single_quote_str(wsl_payload_path),
-        window_title = powershell_single_quote_str(window_title),
+studio_enable_tmux_mouse
+"#
     )
 }
 
-fn wsl_attach_payload_script(wsl_config: &str, assistant: CodeAssistant) -> String {
+
+fn wsl_attach_payload_script(
+    wsl_config: &str,
+    wsl_workspace: &str,
+    assistant: CodeAssistant,
+) -> String {
     let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
     let min_major = min_parts.get(0).copied().unwrap_or("1");
     let min_minor = min_parts.get(1).copied().unwrap_or("4");
@@ -1951,12 +1960,13 @@ if [ "$ah_ok" -ne 1 ]; then
   printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
   exec bash -i
 fi
-printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
+{tmux_mouse}printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
 ah --config "$CFG" attach master
 printf '[attach ended; exit=%s]\n' "$?"
 exec bash -i
 "#,
         config = sh_single_quote_str(wsl_config),
+        tmux_mouse = tmux_mouse_enable_snippet(&sh_single_quote_str(wsl_workspace)),
         assistant_name = assistant.display_name(),
         min_version = AH_VERSION_MIN,
         min_major = min_major,
@@ -1965,27 +1975,6 @@ exec bash -i
     )
 }
 
-fn windows_code_assistant_attach_launcher_script(
-    wsl_payload_path: &str,
-    assistant: CodeAssistant,
-    window_title: &str,
-) -> String {
-    format!(
-        r#"$ErrorActionPreference = "Stop"
-$studioWindowTitle = {window_title}
-$Host.UI.RawUI.WindowTitle = $studioWindowTitle
-[Console]::Title = $studioWindowTitle
-Write-Host "Attaching {assistant_name} through ah (WSL)..."
-wsl.exe -e bash {payload}
-if ($LASTEXITCODE -ne 0) {{
-  Read-Host "Could not start WSL (exit $LASTEXITCODE). Is WSL2 installed? Press Enter to close"
-}}
-"#,
-        assistant_name = assistant.display_name(),
-        payload = powershell_single_quote_str(wsl_payload_path),
-        window_title = powershell_single_quote_str(window_title),
-    )
-}
 
 /// On native Linux ah runs directly. macOS is not yet supported by ah.
 fn unix_code_assistant_launcher_script(
@@ -2048,11 +2037,12 @@ if [ "$status" -ne 0 ]; then
   printf 'ah start failed with exit code %s\n' "$status"
   exec "${{SHELL:-/bin/sh}}"
 fi
-ah --config {config} attach master
+{tmux_mouse}ah --config {config} attach master
 printf '[attach ended]\n'
 exec "${{SHELL:-/bin/sh}}"
 "#,
         workspace = sh_single_quote(workspace_root),
+        tmux_mouse = tmux_mouse_enable_snippet(&sh_single_quote(workspace_root)),
         config = sh_single_quote(config_path),
         assistant_name = assistant.display_name(),
         claude_config_patch = claude_config_patch,
@@ -2065,6 +2055,7 @@ exec "${{SHELL:-/bin/sh}}"
 }
 
 fn unix_code_assistant_attach_launcher_script(
+    workspace_root: &Path,
     config_path: &Path,
     assistant: CodeAssistant,
 ) -> String {
@@ -2103,12 +2094,13 @@ if [ "$ah_ok" -ne 1 ]; then
   printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
+{tmux_mouse}printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
 ah --config {config} attach master
 printf '[attach ended]\n'
 exec "${{SHELL:-/bin/sh}}"
 "#,
         config = sh_single_quote(config_path),
+        tmux_mouse = tmux_mouse_enable_snippet(&sh_single_quote(workspace_root)),
         assistant_name = assistant.display_name(),
         min_version = AH_VERSION_MIN,
         min_major = min_major,
@@ -2117,55 +2109,31 @@ exec "${{SHELL:-/bin/sh}}"
     )
 }
 
-fn launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
-    let extension = if cfg!(target_os = "windows") {
-        "ps1"
-    } else if cfg!(target_os = "macos") {
-        "command"
-    } else {
-        "sh"
-    };
+/// Every launcher is a shell script now: on Windows it is the bash payload WSL
+/// runs, elsewhere it is the script the PTY runs directly.
+fn launcher_script_path_with_stem(workspace_root: &Path, assistant: CodeAssistant, stem: &str) -> PathBuf {
     std::env::temp_dir()
         .join("skill-studio-ah")
         .join(workspace_hash(workspace_root))
         .join(assistant.slug())
-        .join(format!("{}.{extension}", assistant.launcher_stem()))
+        .join(format!("{stem}.sh"))
+}
+
+fn launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
+    launcher_script_path_with_stem(workspace_root, assistant, assistant.launcher_stem())
 }
 
 fn attach_launcher_script_path(workspace_root: &Path, assistant: CodeAssistant) -> PathBuf {
-    let extension = if cfg!(target_os = "windows") {
-        "ps1"
-    } else if cfg!(target_os = "macos") {
-        "command"
-    } else {
-        "sh"
-    };
-    std::env::temp_dir()
-        .join("skill-studio-ah")
-        .join(workspace_hash(workspace_root))
-        .join(assistant.slug())
-        .join(format!("{}.{extension}", assistant.attach_launcher_stem()))
+    launcher_script_path_with_stem(workspace_root, assistant, assistant.attach_launcher_stem())
 }
 
-fn code_assistant_window_title(workspace_root: &Path, assistant: CodeAssistant) -> String {
-    let path_str = workspace_root.to_string_lossy();
-    let workspace_name = if let Some(last_slash) = path_str.rfind('\\') {
-        &path_str[last_slash + 1..]
-    } else {
-        workspace_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("workspace")
-    };
-    let workspace_name = if workspace_name.is_empty() {
-        "workspace"
-    } else {
-        workspace_name
-    };
+/// Owns one embedded terminal. A workspace + assistant pair has exactly one
+/// live CLI session, so this is the dedupe key: reopening replaces the previous
+/// client instead of stacking a second one.
+fn cli_terminal_owner_key(workspace_root: &Path, assistant: CodeAssistant) -> String {
     format!(
-        "Studio {} master - {} - {}",
-        assistant.display_name(),
-        workspace_name,
+        "{}-{}",
+        assistant.slug(),
         workspace_hash(workspace_root)
     )
 }
@@ -2184,44 +2152,86 @@ fn windows_claude_home_wsl() -> Option<String> {
     ))
 }
 
-fn write_code_assistant_launcher_script(
-    workspace_root: &Path,
-    config_path: &Path,
+/// Windows runs the bash payload through `wsl.exe`; every other platform runs
+/// the launcher script directly. Either way the embedded PTY (see
+/// `cli_terminal`) is the only console involved.
+fn launcher_command_for_script(script_path: &Path) -> cli_terminal::LauncherCommand {
+    if cfg!(target_os = "windows") {
+        cli_terminal::LauncherCommand {
+            program: "wsl.exe".to_string(),
+            args: vec![
+                "-e".to_string(),
+                "bash".to_string(),
+                windows_path_to_wsl(script_path),
+            ],
+        }
+    } else {
+        cli_terminal::LauncherCommand {
+            program: script_path.display().to_string(),
+            args: Vec::new(),
+        }
+    }
+}
+
+fn write_launcher_file(
+    script_path: &Path,
+    content: String,
     assistant: CodeAssistant,
-    studio_mcp: Option<&StudioMcpEndpoint>,
-) -> Result<PathBuf, String> {
-    let script_path = launcher_script_path(workspace_root, assistant);
+) -> Result<(), String> {
     let parent = script_path
         .parent()
         .ok_or_else(|| format!("cannot resolve launcher parent: {}", script_path.display()))?;
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create launcher script dir: {error}"))?;
+    std::fs::write(script_path, content).map_err(|error| {
+        format!(
+            "failed to write {} launcher: {error}",
+            assistant.display_name()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(script_path)
+            .map_err(|error| {
+                format!(
+                    "failed to stat {} launcher: {error}",
+                    assistant.display_name()
+                )
+            })?
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(script_path, permissions).map_err(|error| {
+            format!(
+                "failed to chmod {} launcher: {error}",
+                assistant.display_name()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn write_code_assistant_launcher_script(
+    workspace_root: &Path,
+    config_path: &Path,
+    assistant: CodeAssistant,
+    studio_mcp: Option<&StudioMcpEndpoint>,
+) -> Result<cli_terminal::LauncherCommand, String> {
+    let script_path = launcher_script_path(workspace_root, assistant);
     // Only Studio's own transient config may be patched at launch time; a
     // user-owned ah.toml keeps ah's diagnostics untouched.
     let patch_transient_claude_config = config_path.starts_with(studio_ah_temp_root());
     let content = if cfg!(target_os = "windows") {
-        // ah + claude live inside WSL2 on Windows: write the bash payload, then a
-        // .ps1 that runs it through wsl.exe. Both paths are translated to the
-        // /mnt/... form the distro sees.
-        let payload_path = parent.join(format!("{}.wsl.sh", assistant.launcher_stem()));
-        std::fs::write(
-            &payload_path,
-            wsl_payload_script(
-                &windows_path_to_wsl(workspace_root),
-                &windows_path_to_wsl(config_path),
-                assistant,
-                windows_codex_home_wsl().as_deref(),
-                windows_claude_home_wsl().as_deref(),
-                studio_mcp,
-                patch_transient_claude_config,
-            ),
-        )
-        .map_err(|error| format!("failed to write WSL payload: {error}"))?;
-        let window_title = code_assistant_window_title(workspace_root, assistant);
-        windows_code_assistant_launcher_script(
-            &windows_path_to_wsl(&payload_path),
+        // ah + claude live inside WSL2 on Windows, so the launcher IS the bash
+        // payload; paths are translated to the /mnt/... form the distro sees.
+        wsl_payload_script(
+            &windows_path_to_wsl(workspace_root),
+            &windows_path_to_wsl(config_path),
             assistant,
-            &window_title,
+            windows_codex_home_wsl().as_deref(),
+            windows_claude_home_wsl().as_deref(),
+            studio_mcp,
+            patch_transient_claude_config,
         )
     } else {
         unix_code_assistant_launcher_script(
@@ -2231,225 +2241,27 @@ fn write_code_assistant_launcher_script(
             patch_transient_claude_config,
         )
     };
-    std::fs::write(&script_path, content).map_err(|error| {
-        format!(
-            "failed to write {} launcher: {error}",
-            assistant.display_name()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&script_path)
-            .map_err(|error| {
-                format!(
-                    "failed to stat {} launcher: {error}",
-                    assistant.display_name()
-                )
-            })?
-            .permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&script_path, permissions).map_err(|error| {
-            format!(
-                "failed to chmod {} launcher: {error}",
-                assistant.display_name()
-            )
-        })?;
-    }
-    Ok(script_path)
+    write_launcher_file(&script_path, content, assistant)?;
+    Ok(launcher_command_for_script(&script_path))
 }
 
 fn write_code_assistant_attach_launcher_script(
     workspace_root: &Path,
     config_path: &Path,
     assistant: CodeAssistant,
-) -> Result<PathBuf, String> {
+) -> Result<cli_terminal::LauncherCommand, String> {
     let script_path = attach_launcher_script_path(workspace_root, assistant);
-    let parent = script_path.parent().ok_or_else(|| {
-        format!(
-            "cannot resolve attach launcher parent: {}",
-            script_path.display()
-        )
-    })?;
-    std::fs::create_dir_all(parent)
-        .map_err(|error| format!("failed to create attach launcher script dir: {error}"))?;
     let content = if cfg!(target_os = "windows") {
-        let payload_path = parent.join(format!("{}.wsl.sh", assistant.attach_launcher_stem()));
-        std::fs::write(
-            &payload_path,
-            wsl_attach_payload_script(&windows_path_to_wsl(config_path), assistant),
-        )
-        .map_err(|error| format!("failed to write WSL attach payload: {error}"))?;
-        let window_title = code_assistant_window_title(workspace_root, assistant);
-        windows_code_assistant_attach_launcher_script(
-            &windows_path_to_wsl(&payload_path),
+        wsl_attach_payload_script(
+            &windows_path_to_wsl(config_path),
+            &windows_path_to_wsl(workspace_root),
             assistant,
-            &window_title,
         )
     } else {
-        unix_code_assistant_attach_launcher_script(config_path, assistant)
+        unix_code_assistant_attach_launcher_script(workspace_root, config_path, assistant)
     };
-    std::fs::write(&script_path, content).map_err(|error| {
-        format!(
-            "failed to write {} attach launcher: {error}",
-            assistant.display_name()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&script_path)
-            .map_err(|error| {
-                format!(
-                    "failed to stat {} attach launcher: {error}",
-                    assistant.display_name()
-                )
-            })?
-            .permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&script_path, permissions).map_err(|error| {
-            format!(
-                "failed to chmod {} attach launcher: {error}",
-                assistant.display_name()
-            )
-        })?;
-    }
-    Ok(script_path)
-}
-
-fn spawn_linux_terminal(script_path: &Path) -> Result<(), String> {
-    let script = script_path.display().to_string();
-    let candidates: [(&str, Vec<&str>); 7] = [
-        ("x-terminal-emulator", vec!["-e", script.as_str()]),
-        ("gnome-terminal", vec!["--", script.as_str()]),
-        ("konsole", vec!["-e", script.as_str()]),
-        ("xfce4-terminal", vec!["-e", script.as_str()]),
-        ("kitty", vec![script.as_str()]),
-        ("alacritty", vec!["-e", script.as_str()]),
-        ("xterm", vec!["-e", script.as_str()]),
-    ];
-    let mut errors = Vec::new();
-    for (program, args) in candidates {
-        match Command::new(program).args(args).spawn() {
-            Ok(_) => return Ok(()),
-            Err(error) => errors.push(format!("{program}: {error}")),
-        }
-    }
-    Err(format!(
-        "failed to open a terminal; tried x-terminal-emulator, gnome-terminal, konsole, xfce4-terminal, kitty, alacritty, xterm ({})",
-        errors.join("; ")
-    ))
-}
-
-fn windows_cmd_start_powershell_args(
-    script_path: &Path,
-    window_title: &str,
-) -> Vec<std::ffi::OsString> {
-    vec![
-        std::ffi::OsString::from("/C"),
-        std::ffi::OsString::from("start"),
-        // cmd.exe's `start` treats the first quoted token as the window title.
-        // Keeping it explicit prevents assistant names such as "Codex" from
-        // being interpreted as the command/program.
-        std::ffi::OsString::from(window_title),
-        std::ffi::OsString::from("powershell.exe"),
-        std::ffi::OsString::from("-NoExit"),
-        std::ffi::OsString::from("-ExecutionPolicy"),
-        std::ffi::OsString::from("Bypass"),
-        std::ffi::OsString::from("-File"),
-        script_path.as_os_str().to_os_string(),
-    ]
-}
-
-fn windows_focus_existing_terminal_command(window_title: &str) -> String {
-    format!(
-        r#"$ErrorActionPreference = "Stop"
-$needle = {window_title}
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-
-public static class StudioWindowFocus {{
-  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-}}
-"@
-$target = [IntPtr]::Zero
-$callback = [StudioWindowFocus+EnumWindowsProc]{{
-  param([IntPtr] $hWnd, [IntPtr] $lParam)
-  if (-not [StudioWindowFocus]::IsWindowVisible($hWnd)) {{ return $true }}
-  $title = New-Object System.Text.StringBuilder 512
-  [void][StudioWindowFocus]::GetWindowText($hWnd, $title, $title.Capacity)
-  if ($title.ToString().Contains($needle)) {{
-    $script:target = $hWnd
-    return $false
-  }}
-  return $true
-}}
-[void][StudioWindowFocus]::EnumWindows($callback, [IntPtr]::Zero)
-if ($target -eq [IntPtr]::Zero) {{ exit 1 }}
-[void][StudioWindowFocus]::ShowWindow($target, 9)
-[void][StudioWindowFocus]::SetForegroundWindow($target)
-exit 0
-"#,
-        window_title = powershell_single_quote_str(window_title),
-    )
-}
-
-fn focus_existing_windows_terminal(window_title: &str) -> bool {
-    let command = windows_focus_existing_terminal_command(window_title);
-    Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &command,
-        ])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn spawn_terminal_with_launcher(
-    script_path: &Path,
-    assistant: CodeAssistant,
-    window_title: &str,
-    reuse_existing_window: bool,
-) -> Result<(), String> {
-    if cfg!(target_os = "windows") {
-        if reuse_existing_window && focus_existing_windows_terminal(window_title) {
-            return Ok(());
-        }
-        return Command::new("cmd")
-            .args(windows_cmd_start_powershell_args(script_path, window_title))
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("failed to open PowerShell: {error}"));
-    }
-
-    if cfg!(target_os = "macos") {
-        return Command::new("open")
-            .args(["-a", "Terminal"])
-            .arg(script_path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("failed to open Terminal.app: {error}"));
-    }
-
-    if cfg!(target_os = "linux") {
-        return spawn_linux_terminal(script_path);
-    }
-
-    Err(format!(
-        "opening {} is not supported on this platform",
-        assistant.display_name()
-    ))
+    write_launcher_file(&script_path, content, assistant)?;
+    Ok(launcher_command_for_script(&script_path))
 }
 
 enum CodeAssistantOpenAction {
@@ -2545,23 +2357,35 @@ fn studio_mcp_endpoint(app: &tauri::AppHandle) -> Option<StudioMcpEndpoint> {
     })
 }
 
+/// Grid the CLI session starts at when the caller has not measured one yet.
+const CLI_TERMINAL_FALLBACK_COLS: u16 = 100;
+const CLI_TERMINAL_FALLBACK_ROWS: u16 = 30;
+
+struct OpenedCodeAssistant {
+    config_path: PathBuf,
+    session_id: String,
+}
+
 fn open_code_assistant(
+    on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
     state: &CodeAssistantRuntimeState,
+    terminals: &cli_terminal::CliTerminalState,
     workspace_root: &Path,
     assistant: CodeAssistant,
     studio_mcp: Option<&StudioMcpEndpoint>,
-) -> Result<PathBuf, String> {
+    cols: u16,
+    rows: u16,
+) -> Result<OpenedCodeAssistant, String> {
     check_ah_version_cached()?;
-    match prepare_code_assistant_open(state, workspace_root, assistant)? {
+    let (config_path, launcher) = match prepare_code_assistant_open(state, workspace_root, assistant)?
+    {
         CodeAssistantOpenAction::AttachExisting(config_path) => {
             let launcher = write_code_assistant_attach_launcher_script(
                 workspace_root,
                 &config_path,
                 assistant,
             )?;
-            let window_title = code_assistant_window_title(workspace_root, assistant);
-            spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)?;
-            Ok(config_path)
+            (config_path, launcher)
         }
         CodeAssistantOpenAction::StartFresh => {
             let config_path = ah_config_for_workspace(workspace_root, assistant)?;
@@ -2572,18 +2396,32 @@ fn open_code_assistant(
                 assistant,
                 studio_mcp,
             )?;
-            let window_title = code_assistant_window_title(workspace_root, assistant);
-            spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?;
-            Ok(config_path)
+            (config_path, launcher)
         }
-    }
+    };
+    let session_id = cli_terminal::spawn(
+        on_event,
+        terminals,
+        &cli_terminal_owner_key(workspace_root, assistant),
+        &launcher,
+        workspace_root,
+        cli_terminal::initial_size(cols, rows),
+    )?;
+    Ok(OpenedCodeAssistant {
+        config_path,
+        session_id,
+    })
 }
 
 fn attach_code_assistant_terminal(
+    on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
     state: &CodeAssistantRuntimeState,
+    terminals: &cli_terminal::CliTerminalState,
     workspace_root: String,
     assistant: CodeAssistant,
-) -> Result<(), String> {
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
     check_ah_version_cached()?;
     let workspace_root = existing_directory(&workspace_root)?;
     let Some(config_path) = ah_config_for_status(&workspace_root, assistant) else {
@@ -2621,8 +2459,54 @@ fn attach_code_assistant_terminal(
     }
     let launcher =
         write_code_assistant_attach_launcher_script(&workspace_root, &config_path, assistant)?;
-    let window_title = code_assistant_window_title(&workspace_root, assistant);
-    spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)
+    cli_terminal::spawn(
+        on_event,
+        terminals,
+        &cli_terminal_owner_key(&workspace_root, assistant),
+        &launcher,
+        &workspace_root,
+        cli_terminal::initial_size(cols, rows),
+    )
+}
+
+/// Both Open-in-CLI commands differ only in which assistant they start; the
+/// registration + status-stream tail is identical, so it lives here once.
+fn open_code_assistant_command(
+    app: tauri::AppHandle,
+    workspace_root: String,
+    state: tauri::State<'_, CodeAssistantRuntimeState>,
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+    assistant: CodeAssistant,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
+) -> Result<String, String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    let studio_mcp = studio_mcp_endpoint(&app);
+    let opened = open_code_assistant(
+        on_event,
+        &state,
+        &terminals,
+        &workspace_root,
+        assistant,
+        studio_mcp.as_ref(),
+        cols.unwrap_or(CLI_TERMINAL_FALLBACK_COLS),
+        rows.unwrap_or(CLI_TERMINAL_FALLBACK_ROWS),
+    )?;
+    state
+        .configs
+        .lock()
+        .expect("code assistant state poisoned")
+        .insert(opened.config_path.clone());
+    register_opened_code_assistant_status_spec(
+        &state,
+        &workspace_root,
+        assistant,
+        &opened.config_path,
+    );
+    ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
+    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
+    Ok(opened.session_id)
 }
 
 #[tauri::command]
@@ -2630,29 +2514,21 @@ fn open_claude_code(
     app: tauri::AppHandle,
     workspace_root: String,
     state: tauri::State<'_, CodeAssistantRuntimeState>,
-) -> Result<(), String> {
-    let workspace_root = existing_directory(&workspace_root)?;
-    let studio_mcp = studio_mcp_endpoint(&app);
-    let config = open_code_assistant(
-        &state,
-        &workspace_root,
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
+) -> Result<String, String> {
+    open_code_assistant_command(
+        app,
+        workspace_root,
+        state,
+        terminals,
         CodeAssistant::Claude,
-        studio_mcp.as_ref(),
-    )?;
-    state
-        .configs
-        .lock()
-        .expect("code assistant state poisoned")
-        .insert(config.clone());
-    register_opened_code_assistant_status_spec(
-        &state,
-        &workspace_root,
-        CodeAssistant::Claude,
-        &config,
-    );
-    ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
-    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
-    Ok(())
+        cols,
+        rows,
+        on_event,
+    )
 }
 
 #[tauri::command]
@@ -2660,29 +2536,21 @@ fn open_codex_cli(
     app: tauri::AppHandle,
     workspace_root: String,
     state: tauri::State<'_, CodeAssistantRuntimeState>,
-) -> Result<(), String> {
-    let workspace_root = existing_directory(&workspace_root)?;
-    let studio_mcp = studio_mcp_endpoint(&app);
-    let config = open_code_assistant(
-        &state,
-        &workspace_root,
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
+) -> Result<String, String> {
+    open_code_assistant_command(
+        app,
+        workspace_root,
+        state,
+        terminals,
         CodeAssistant::Codex,
-        studio_mcp.as_ref(),
-    )?;
-    state
-        .configs
-        .lock()
-        .expect("code assistant state poisoned")
-        .insert(config.clone());
-    register_opened_code_assistant_status_spec(
-        &state,
-        &workspace_root,
-        CodeAssistant::Codex,
-        &config,
-    );
-    ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
-    emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
-    Ok(())
+        cols,
+        rows,
+        on_event,
+    )
 }
 
 #[tauri::command]
@@ -2690,9 +2558,50 @@ fn attach_code_assistant(
     workspace_root: String,
     assistant: String,
     state: tauri::State<'_, CodeAssistantRuntimeState>,
-) -> Result<(), String> {
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
+) -> Result<String, String> {
     let assistant = CodeAssistant::from_slug(assistant.trim())?;
-    attach_code_assistant_terminal(&state, workspace_root, assistant)
+    attach_code_assistant_terminal(
+        on_event,
+        &state,
+        &terminals,
+        workspace_root,
+        assistant,
+        cols.unwrap_or(CLI_TERMINAL_FALLBACK_COLS),
+        rows.unwrap_or(CLI_TERMINAL_FALLBACK_ROWS),
+    )
+}
+
+#[tauri::command]
+fn cli_terminal_write(
+    session_id: String,
+    data: String,
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+) -> Result<(), String> {
+    cli_terminal::write(&terminals, &session_id, &data)
+}
+
+#[tauri::command]
+fn cli_terminal_resize(
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+) -> Result<(), String> {
+    cli_terminal::resize(&terminals, &session_id, cols, rows)
+}
+
+/// Ends the local terminal client only — detach semantics. The ah runtime keeps
+/// running; `close_code_assistant` is the one command that stops it.
+#[tauri::command]
+fn cli_terminal_detach(
+    session_id: String,
+    terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
+) -> bool {
+    cli_terminal::close(&terminals, &session_id)
 }
 
 #[tauri::command]
@@ -2977,6 +2886,9 @@ pub fn run() {
             open_claude_code,
             open_codex_cli,
             attach_code_assistant,
+            cli_terminal_write,
+            cli_terminal_resize,
+            cli_terminal_detach,
             watch_code_assistant_status,
             unwatch_code_assistant_status,
             close_code_assistant,
@@ -3012,6 +2924,7 @@ pub fn run() {
             app.manage(QuitFlushState {
                 ready: AtomicBool::new(false),
             });
+            app.manage(cli_terminal::CliTerminalState::default());
             app.manage(CodeAssistantRuntimeState {
                 configs: Mutex::new(BTreeSet::new()),
                 status_streams: Mutex::new(BTreeMap::new()),
@@ -3163,6 +3076,11 @@ fn shutdown_application<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, reas
         // so the user is never trapped — and log a warning so silent loss is
         // visible per rules/logging.md.
         wait_for_quit_flush(&app_handle, QUIT_FLUSH_BUDGET);
+        // Embedded terminals are local tmux clients: dropping them first is a
+        // detach, so the ah cleanup below decides what actually stops.
+        if let Some(terminals) = app_handle.try_state::<cli_terminal::CliTerminalState>() {
+            cli_terminal::close_all(&terminals);
+        }
         let mut code_assistant_configs = BTreeSet::new();
         if let Some(state) = app_handle.try_state::<CodeAssistantRuntimeState>() {
             code_assistant_configs.extend(
@@ -4097,7 +4015,7 @@ mod tests {
                 None,
                 false,
             ),
-            wsl_attach_payload_script("/mnt/c/tmp/ah.toml", CodeAssistant::Claude),
+            wsl_attach_payload_script("/mnt/c/tmp/ah.toml", "/mnt/d/skill", CodeAssistant::Claude),
             unix_code_assistant_launcher_script(
                 Path::new("/tmp/skill"),
                 Path::new("/tmp/ah.toml"),
@@ -4105,6 +4023,7 @@ mod tests {
                 false,
             ),
             unix_code_assistant_attach_launcher_script(
+                Path::new("/tmp/skill"),
                 Path::new("/tmp/ah.toml"),
                 CodeAssistant::Claude,
             ),
@@ -4881,21 +4800,6 @@ mod tests {
         );
         assert!(!codex_payload.contains("WIN_CLAUDE_HOME"));
         assert!(codex_payload.contains("auth.json"));
-    }
-
-    #[test]
-    fn windows_launcher_only_runs_wsl_payload_for_claude_auth() {
-        let claude_ps1 =
-            windows_code_assistant_launcher_script("/mnt/c/x.sh", CodeAssistant::Claude, "title");
-        assert!(claude_ps1.contains("wsl.exe -e bash"));
-        assert!(!claude_ps1.contains("CLAUDE_CODE_OAUTH_TOKEN"));
-        assert!(!claude_ps1.contains("setup-token"));
-        assert!(!claude_ps1.contains("WSLENV"));
-        assert!(!claude_ps1.contains("claude /login"));
-
-        let codex_ps1 =
-            windows_code_assistant_launcher_script("/mnt/c/x.sh", CodeAssistant::Codex, "title");
-        assert!(!codex_ps1.contains("CLAUDE_CODE_OAUTH_TOKEN"));
     }
 
     #[test]
@@ -5822,44 +5726,100 @@ sessions
     }
 
     #[test]
-    fn windows_launcher_runs_wsl_bash_payload() {
-        let script = windows_code_assistant_launcher_script(
-            "/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh",
-            CodeAssistant::Claude,
-            "Studio Claude Code master - skill - abc123",
-        );
+    fn launcher_command_runs_the_payload_without_an_outer_console() {
+        // ah-orchestration-design.md §10 D2: the embedded PTY runs the payload
+        // itself — no PowerShell window, no terminal emulator in between.
+        let script = Path::new(r"C:\Users\Test User\AppData\Local\Temp\open-claude-code.sh");
+        let command = launcher_command_for_script(script);
 
-        assert!(
-            script.contains("$studioWindowTitle = 'Studio Claude Code master - skill - abc123'")
-        );
-        assert!(script.contains("$Host.UI.RawUI.WindowTitle = $studioWindowTitle"));
-        assert!(script.contains("[Console]::Title = $studioWindowTitle"));
-        assert!(
-            script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/open-claude-code.wsl.sh'")
+        if cfg!(target_os = "windows") {
+            assert_eq!(command.program, "wsl.exe");
+            assert_eq!(command.args[0], "-e");
+            assert_eq!(command.args[1], "bash");
+            assert!(command.args[2].starts_with("/mnt/"));
+        } else {
+            assert_eq!(command.program, script.display().to_string());
+            assert!(command.args.is_empty());
+        }
+        assert!(!command.program.contains("powershell"));
+        assert!(!command.program.contains("cmd"));
+    }
+
+    #[test]
+    fn cli_terminal_owner_key_is_stable_per_workspace_and_assistant() {
+        // The OWNER is stable, so reopening replaces that pair's previous
+        // client; the session ids minted under it are not (a remount must not
+        // be able to kill the session a newer mount just started).
+        let root =
+            Path::new(r"D:\coding\skills\story-deconstruction-v3\subgraph\text-segmentation");
+        let owner = cli_terminal_owner_key(root, CodeAssistant::Codex);
+
+        assert!(owner.starts_with("codex-"));
+        assert_eq!(owner, cli_terminal_owner_key(root, CodeAssistant::Codex));
+        assert_ne!(owner, cli_terminal_owner_key(root, CodeAssistant::Claude));
+        assert_ne!(
+            owner,
+            cli_terminal_owner_key(Path::new(r"D:\coding\skills\other"), CodeAssistant::Codex)
         );
     }
 
     #[test]
-    fn code_assistant_window_title_is_stable_per_workspace_and_assistant() {
-        let root =
-            Path::new(r"D:\coding\skills\story-deconstruction-v3\subgraph\text-segmentation");
-        let title = code_assistant_window_title(root, CodeAssistant::Codex);
+    fn every_launcher_enables_tmux_mouse_before_attaching() {
+        // §10 D6: tmux defaults to `mouse off` and ah sets no tmux options, so
+        // the wheel would scroll nothing in the embedded terminal. Each
+        // launcher opts the workspace's own tmux server in, by session-path
+        // discovery rather than by recomputing ah's socket hash.
+        let scripts = [
+            wsl_payload_script(
+                "/mnt/d/skill",
+                "/mnt/c/tmp/ah.toml",
+                CodeAssistant::Claude,
+                None,
+                None,
+                None,
+                false,
+            ),
+            wsl_attach_payload_script("/mnt/c/tmp/ah.toml", "/mnt/d/skill", CodeAssistant::Claude),
+            unix_code_assistant_launcher_script(
+                Path::new("/tmp/skill"),
+                Path::new("/tmp/ah.toml"),
+                CodeAssistant::Claude,
+                false,
+            ),
+            unix_code_assistant_attach_launcher_script(
+                Path::new("/tmp/skill"),
+                Path::new("/tmp/ah.toml"),
+                CodeAssistant::Claude,
+            ),
+        ];
 
-        assert!(title.starts_with("Studio Codex master - text-segmentation - "));
-        assert_eq!(
-            title,
-            code_assistant_window_title(root, CodeAssistant::Codex)
-        );
-        assert_ne!(
-            title,
-            code_assistant_window_title(root, CodeAssistant::Claude)
-        );
+        for script in &scripts {
+            let mouse_at = script
+                .find("set-option -g mouse on")
+                .unwrap_or_else(|| panic!("launcher must enable tmux mouse mode:\n{script}"));
+            let attach_at = script
+                .find("attach master")
+                .unwrap_or_else(|| panic!("launcher must attach the master pane:\n{script}"));
+            assert!(
+                mouse_at < attach_at,
+                "mouse mode must be set BEFORE attaching (afterwards the shell is blocked):\n{script}"
+            );
+            assert!(
+                script.contains("list-sessions -F '#{session_path}'"),
+                "the tmux server must be found by session path, never by recomputing ah's socket hash:\n{script}"
+            );
+            assert!(
+                !script.contains("ahd-<"),
+                "no hand-rolled copy of ah's socket naming:\n{script}"
+            );
+        }
     }
 
     #[test]
     fn wsl_attach_payload_only_attaches_master() {
         let script = wsl_attach_payload_script(
             "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
+            "/mnt/d/coding/skills/text-segmentation",
             CodeAssistant::Codex,
         );
 
@@ -5867,84 +5827,6 @@ sessions
         assert!(script.contains("ah --config \"$CFG\" attach master"));
         assert!(!script.contains("start --wait"));
         assert!(!script.contains("Starting Codex through ah"));
-    }
-
-    #[test]
-    fn windows_attach_launcher_runs_wsl_attach_payload() {
-        let script = windows_code_assistant_attach_launcher_script(
-            "/mnt/c/tmp/skill-studio-ah/attach-codex-cli.wsl.sh",
-            CodeAssistant::Codex,
-            "Studio Codex master - skill - def456",
-        );
-
-        assert!(script.contains("$studioWindowTitle = 'Studio Codex master - skill - def456'"));
-        assert!(script.contains("$Host.UI.RawUI.WindowTitle = $studioWindowTitle"));
-        assert!(script.contains("Attaching Codex through ah (WSL)"));
-        assert!(
-            script.contains("wsl.exe -e bash '/mnt/c/tmp/skill-studio-ah/attach-codex-cli.wsl.sh'")
-        );
-    }
-
-    #[test]
-    fn windows_terminal_launcher_uses_stable_start_title() {
-        let script_path = Path::new(r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1");
-        let args = windows_cmd_start_powershell_args(
-            script_path,
-            "Studio Codex master - text-segmentation - abc123",
-        );
-        let as_text: Vec<String> = args
-            .iter()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect();
-
-        assert_eq!(as_text[0], "/C");
-        assert_eq!(as_text[1], "start");
-        assert_eq!(
-            as_text[2], "Studio Codex master - text-segmentation - abc123",
-            "cmd start needs an explicit title before the program name"
-        );
-        assert_eq!(as_text[3], "powershell.exe");
-        assert!(as_text.contains(&"-NoExit".to_string()));
-        assert_eq!(
-            as_text.last().unwrap(),
-            r"C:\Users\Test User\AppData\Local\Temp\open-codex-cli.ps1"
-        );
-        assert_ne!(
-            as_text[3], "Codex",
-            "Codex must never be passed as the start command/program"
-        );
-    }
-
-    #[test]
-    fn windows_focus_command_targets_existing_studio_terminal_title() {
-        let command = windows_focus_existing_terminal_command(
-            "Studio Codex master - text-segmentation - abc123",
-        );
-
-        assert!(command.contains("$needle = 'Studio Codex master - text-segmentation - abc123'"));
-        assert!(command.contains("EnumWindows"));
-        assert!(command.contains("IsWindowVisible"));
-        assert!(command.contains("GetWindowText"));
-        assert!(command.contains(".Contains($needle)"));
-        assert!(command.contains("ShowWindow($target, 9)"));
-        assert!(command.contains("SetForegroundWindow($target)"));
-        assert!(command.contains("exit 1"));
-    }
-
-    #[test]
-    fn attach_reuses_existing_terminal_but_open_always_runs_launcher() {
-        let source = include_str!("lib.rs");
-
-        assert!(
-            source.contains("spawn_terminal_with_launcher(&launcher, assistant, &window_title, false)?"),
-            "initial open must always run the launcher so stale terminal shells cannot block ah start"
-        );
-        assert!(
-            source.contains(
-                "spawn_terminal_with_launcher(&launcher, assistant, &window_title, true)"
-            ),
-            "attach should focus an existing target window before opening a duplicate"
-        );
     }
 
     #[test]
@@ -5979,6 +5861,7 @@ sessions
     #[test]
     fn unix_attach_launcher_does_not_start_ah() {
         let script = unix_code_assistant_attach_launcher_script(
+            Path::new("/tmp/skill"),
             Path::new("/tmp/studio ah/ah.toml"),
             CodeAssistant::Claude,
         );

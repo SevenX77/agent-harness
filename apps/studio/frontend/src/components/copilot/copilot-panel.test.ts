@@ -234,7 +234,10 @@ describe('buildCopilotJudgeDraft', () => {
     expect(mocks.useTemplates).toHaveBeenCalledWith({ enabled: true })
   })
 
-  it('opens the current workspace through the Claude code/Codex CLI menu', async () => {
+  it('starts the CLI session from the menu click, not from a render effect', async () => {
+    // §10 D2: starting a CLI is a user intent. React mounts effects twice in
+    // development, and `ah start` rejects the second call as "still starting",
+    // so the launch must hang off the click handler and nothing else.
     const html = renderToStaticMarkup(
       React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
@@ -246,27 +249,24 @@ describe('buildCopilotJudgeDraft', () => {
     const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open code assistant')
     expect(openButton).toBeTruthy()
     expect(html).toContain('Open in CLI')
-    expect(html).toContain('Claude code')
-    expect(html).toContain('Codex')
+
+    // Rendering the panel alone must not have launched anything.
+    expect(mocks.openClaudeCode).not.toHaveBeenCalled()
 
     const menuText = (props: Record<string, unknown>) =>
       renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
     const claudeItem = mocks.menuItemProps.find((props) => menuText(props).includes('Claude code'))
-    const codexItem = mocks.menuItemProps.find((props) => menuText(props).includes('Codex'))
     expect(claudeItem).toBeTruthy()
-    expect(codexItem).toBeTruthy()
 
     ;(claudeItem?.onSelect as (() => void) | undefined)?.()
 
     await vi.waitFor(() => {
-      expect(mocks.openClaudeCode).toHaveBeenCalledWith('/tmp/text-segmentation')
+      expect(mocks.openClaudeCode).toHaveBeenCalledTimes(1)
     })
-
-    ;(codexItem?.onSelect as (() => void) | undefined)?.()
-
-    await vi.waitFor(() => {
-      expect(mocks.openCodexCli).toHaveBeenCalledWith('/tmp/text-segmentation')
-    })
+    const [workspaceRoot, grid] = mocks.openClaudeCode.mock.calls[0] as [string, { cols: number; rows: number }]
+    expect(workspaceRoot).toBe('/tmp/text-segmentation')
+    expect(grid.cols).toBeGreaterThan(0)
+    expect(grid.rows).toBeGreaterThan(0)
   })
 
   it('derives the close button state from live ahd status', () => {

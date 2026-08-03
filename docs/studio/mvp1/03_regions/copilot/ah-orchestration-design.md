@@ -2,7 +2,7 @@
 region: copilot
 kind: target-direction design（ah 编排底座）
 created: 2026-07-03
-updated: 2026-07-07
+updated: 2026-08-02
 状态: 【阶段 1 完成 / 阶段 2 设计确定】方向已定(PM 2026-07-03) + 里程碑 1(身份认知)经三轮人格打磨
       已端到端验证、PM 验收通过;阶段 2 进入"接活闭环"(rules+skills+知识挂载+Studio 自动生成)设计,
       并补齐后续 Studio 功能开发执行规则;2026-07-05 对齐 ah 1.3.0 的 `window_size="follow"`
@@ -10,6 +10,8 @@ updated: 2026-07-07
       Attach master pane 与 Close;Attach 会复用已打开的目标终端窗口,没有窗口时才新开。2026-07-05
       生命周期兜底升级:状态必须同时看 ahd inventory 与 master tmux,ahd-only/master-only 属 stale;
       workspace 内只允许一个 Studio-managed ahd,关闭按钮与 app 退出共用同一套 ah/tmux cleanup。
+      2026-08-02 PM 裁决阶段 3「CLI 即 copilot」:终端界面内嵌进 copilot 面板区域、外部终端窗口路径
+      删除,决策与验收判据见 §10。
       本文档是这一阶段全部信息的单一汇总(设计/调研/踩坑/机制/拓扑/实测/最终人格配置/下一阶段方案/
       开发规则),供提交 PR。
 关系: 与本目录 mvp1-alignment.md 的 F1–F9(SDK 面板流式)并列的**另一套编排底座**;
@@ -748,7 +750,114 @@ frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled 
    `.gemini/AGENTS.md` 的人格注入和 skill 物化。
 3. **Studio 配置 UI**:只在真实可用后显示更细的 agent 状态;在此之前不做装饰性角色 UI。
 
-## 10. 权威引用
+## 10. 阶段 3:CLI 终端内嵌 copilot 面板(PM 裁决 2026-08-02)
+
+### 10.1 决策
+
+**Open in CLI 启动的 CLI 会话,其终端界面在 copilot 面板区域内就地渲染,替代同一区域的对话界面;
+产品不再弹出外部终端窗口。** 一句话概括这条决策的名字:「CLI 即 copilot」。
+
+决策链的两处出处:
+
+- `docs/development/DELIVERY_LEDGER.md`「第二轮裁决(2026-07-31)」第 3 条把这件事登记为
+  **新讨论项(设计探讨,未裁决实施)**,并写明前置条件是 N5 工具面先就位。
+- N5 三行(N5-1 设计 / N5-2 sidecar `/mcp` 出口 / N5-3 lib.rs 注册 studio MCP)已全部合并,前置条件解除;
+  PM 2026-08-02 裁决实施,并给出三条修正,分别落在下面的 D5、D4、D6。
+
+### 10.2 关键设计决定
+
+**D1 · 呈现:同一区域内两种视图互斥。** copilot 面板区域在任一时刻只显示一种界面:没有活动 CLI 会话时
+显示 MoirAI 对话界面;有活动 CLI 会话时显示该会话的终端界面。两种界面共用面板的 header 与外框,
+不新增第二块浮层、不新开窗口。
+
+**D2 · 进程:PTY 宿主落在 Rust(Tauri)层。** CLI 的启动真相(瞬态 `ah.toml`、`.ah` 资产物化、
+WSL payload、`ah start --wait`、attach)已经全部由 `apps/studio/tauri/src/lib.rs` 拥有,内嵌不改变这个
+所有权:Rust 在一个伪终端(pseudo terminal,让子进程以为自己连着真终端的内核设施;Windows 上是
+ConPTY)中直接运行既有的启动脚本,把输出推给前端,把键盘输入与尺寸变化经 Tauri command 收回来。
+前端只负责渲染与转发,不持有任何启动逻辑。**这条同时是安全边界**:前端不能指定"跑什么命令",
+所以社区通用的 pty 插件(把 spawn 权交给前端、且用前端轮询 `read()` 拉输出)不适用,只借鉴其
+portable-pty + xterm.js 选型。
+
+内嵌路径直接运行 WSL payload(Windows)或 `.sh` 启动脚本(Linux),不再套一层 PowerShell:那一层
+`.ps1` 的全部职责是设置外部窗口标题和在 WSL 缺失时停住窗口提示,内嵌后两者都失去意义。
+
+**D2.1 · 输出走 Tauri channel,不走全局事件总线。** channel 由面板创建、作为参数传进启动命令,
+所以**投递通道先于进程存在**;Tauri 官方文档把 channel 定为流式数据机制(有序、低延迟,Tauri 自身
+就用它传子进程输出),而全局事件总线明确"不是为低延迟/高吞吐设计"。这不是性能偏好而是正确性要求:
+见 D2.2。
+
+**D2.2 · ConPTY 开场握手(Windows,实测坐实)。** Windows 的 ConPTY 一开就发送光标位置查询
+(`ESC [ 6 n`),**在收到回答之前不再吐出任何字节**。真实终端模拟器(xterm.js)会自动回答,
+所以这条链有一个硬约束:**从进程启动到终端能收字节之间,一个字节都不能丢**。任何"先广播、
+接收方再按 id 过滤"的传输都会丢掉开场那 4 个字节(id 要等启动命令返回才有),结果是会话永久静默——
+实测中表现为读到 4 字节后卡死 427 秒。channel 传输 + D2.3 的历史重放共同消除了这个可能。
+
+**D2.3 · 会话所有权:面板持有会话,终端组件只是渲染器。** 启动一个 CLI 运行时是**用户意图**,
+只能由 header 控件的点击触发,**绝不能由组件渲染副作用触发**——React 在开发模式下故意把副作用跑两遍,
+而 `ah start` 是有状态机的生命周期命令,第二次调用会被合法拒绝("still starting"),表现为终端一闪即关。
+因此:面板负责起会话与结束会话,终端组件挂载时只是 attach 到已存在的会话。会话持有**可重放的输出历史**
+(有上限),每个 attach 上来的渲染器都重放同一份历史而不是"取走"它;否则被丢弃的那次挂载会带走开场
+字节,再次踩中 D2.2。
+
+**D3 · 生命周期:关闭视图 = detach,不杀会话。** 切回对话界面、收起面板、切换 skill、关闭 app 窗口,
+都只结束本地的终端客户端进程;ah 的 tmux 会话继续由 ahd 持有,再次进入即可看到完整历史与仍在运行的
+agent。**只有** D4 的 Close 才真正结束 ah 运行时。这条的理由是:agent 任务动辄跑几十分钟,
+"关掉一个视图"绝不能等于"杀掉一个正在工作的编队"。
+
+**D4 · 控制:copilot header 的 CLI 控制按钮是唯一控制面(PM 修正 ②)。** 保留现有 header 右上角控制
+按钮及其下拉菜单(运行中显示 `CLI running`,含 Attach 与 Close 两类动作);**关 CLI 只经这里**,
+终端视图自身不另设关闭按钮或右键菜单出口。Attach 的语义相应从"复用外部终端窗口"改为
+"把该会话的终端重新显示在面板内"。
+
+**D5 · 宽度:沿用现状,不为终端放宽(PM 修正 ①)。** copilot 面板宽度继续走 P-6 的比例自适应
+(默认宿主宽度的 0.275,夹在 280–720 像素之间,可拖拽);**不**引入"宿主 60% 或 1100 像素"一类
+更宽的上限——PM 实测现状宽度对终端已经够用。
+
+**D6 · 滚动:进入面板前先把 tmux 的鼠标模式打开(PM 修正 ③)。** ah 不设置任何 tmux 鼠标选项
+(ah 仓库全库检索 `mouse` 无命中),而 tmux 默认 `mouse off` 时滚轮不滚动历史。因此启动/attach 脚本在
+执行 `ah ... attach master` **之前**,按 **会话名发现** ah 的 tmux socket(遍历 `/tmp/tmux-<uid>/` 下的
+socket,用 `has-session` 命中我们要 attach 的那个 master 会话),命中后对该 tmux 服务器
+`set-option -g mouse on`;发现失败或设置失败一律静默跳过,绝不阻断会话启动。
+
+这里刻意**不复制 ah 的 socket 命名算法**(ah 用 `ahd-<state_dir 的 sha256 前 16 位>`,见 ah 仓库
+`src/tmux/mod.rs` 的 `compute_socket_name`):复制哈希会把 Studio 焊死在 ah 的内部实现上,而按会话名
+发现只依赖 `ah attach` 已经公开的行为。键盘路径(tmux 前缀键 `Ctrl-b` 后按 `[` 进入复制模式,再用
+`PgUp`/方向键滚动)在任何配置下都可用,作为兜底。
+
+**D7 · 本阶段删干净的旧路径。** 按「不向后兼容」原则,被替代的实现不留并行版本。两批删除按
+「一个任务一个 PR」拆开落地:第一批与内嵌实现同 PR(它就是被替代的那条路径),第二批紧随其后单独一个
+PR(它是与内嵌实现无调用关系的孤儿栈,且要动依赖清单):
+
+- 外部终端窗口的全部代码:窗口生成与复用(`spawn_terminal_with_launcher`、
+  `focus_existing_windows_terminal`、`windows_cmd_start_powershell_args`、`spawn_linux_terminal`)、
+  两个 PowerShell 启动脚本生成器、以及为窗口复用而生的稳定窗口标题。
+- mvp0 遗留的后端终端栈:`apps/studio/backend/app/routers/terminal.py`、
+  `app/services/terminal_manager.py`、`app/models/terminal.py`、其 WebSocket 路由,以及前端从未被任何
+  界面引用的孤儿组件 `apps/studio/frontend/src/components/TerminalPanel.tsx`。这套栈依赖
+  `ptyprocess`,在 Windows 上根本不可用,且与 D2 的 Rust PTY 宿主构成两个所有者。(前端孤儿组件随第一批
+  一起删除——它与新终端共用 xterm 依赖;Python 侧与 `ptyprocess` 依赖清单随第二批。)
+- 前端终端依赖从早已改名的 `xterm` / `xterm-addon-fit`(5.3)换成维护中的 `@xterm/xterm` /
+  `@xterm/addon-fit`(5.5+),与社区内嵌终端项目一致。
+
+### 10.3 验收判据
+
+1. 在打开的 skill 里点 Open in CLI → 终端界面出现在 copilot 面板区域内,CLI 的文本界面正常渲染,
+   键盘输入(含 `Ctrl-C`、方向键、`Ctrl-b` 前缀键)正常送达。
+2. 拖拽面板宽度或改变窗口大小 → 终端按新尺寸重排,tmux 内容跟随,无错位与截断。
+3. 鼠标滚轮可以在终端里上下滚动 tmux pane 的历史。
+4. 切回对话界面再回到终端 → 同一个会话仍在,历史完整(detach/attach 语义,D3)。
+5. header 控制按钮的 Close → ah 运行时结束,终端界面消失,面板回到对话界面。
+6. 收起面板或切换 skill 后重新进入 → 会话仍在(未被误杀)。
+7. 全程不出现任何外部终端窗口;删除 D7 所列旧路径后,三模块的既有门禁全绿。
+
+### 10.4 边界(本阶段不做)
+
+- 不做面板内的多终端标签页:一个工作区同时只允许一个 Studio-managed ah 运行时,这条既有生命周期规则
+  不变(见 §4.6)。
+- 不为终端做主题/字体的用户配置项,终端配色跟随 Studio 主题 token。
+- 不把 tmux 状态栏或窗口列表另做一层 Studio UI 投影;用户看到的就是 tmux 自己的界面。
+
+## 11. 权威引用
 
 - ah 官方仓库:github.com/SevenX77/ah v1.3.0 —— `README.md`、
   `docs/plugin-bundles.md`;schema 源 `src/cli/config.rs`;规则组合 `src/provider/home_layout.rs`
@@ -759,7 +868,7 @@ frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled 
 - Studio 拉起入口:`apps/studio/tauri/src/lib.rs`(`open_claude_code` / `ah_config_for_workspace`)。
 - 并列设计:本目录 `mvp1-alignment.md`(F1–F9,SDK 面板流式)。
 
-## 11. 附录:阶段 1 的完整可跑配置(逐字内嵌)
+## 12. 附录:阶段 1 的完整可跑配置(逐字内嵌)
 
 > 里程碑 1 验证用的工作区 = `/home/sevenx/coding/moirai-ah-test/`(临时,未入库)。以下把该工作区的
 > `ah.toml` 与四份 `.ah/rules/*.md`(R3 最终版)逐字抄录,使本文档自洽可复现:新建目录、按下面落文件、

@@ -582,12 +582,6 @@ export interface CompareResult {
   node_groups: NodeGoldenGroup[]
 }
 
-export interface TerminalSession {
-  term_id: string
-  ws_url: string
-  cwd: string
-  ttl_seconds: number
-}
 
 export interface IoInput {
   name: string

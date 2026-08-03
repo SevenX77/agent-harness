@@ -100,44 +100,116 @@ export async function openLocalPath(path: string): Promise<boolean> {
   return false
 }
 
+/** Grid the CLI session should start at, measured by the panel's terminal. */
+export interface CliTerminalGrid {
+  cols: number
+  rows: number
+}
+
 async function openCodeAssistant(
   workspaceRoot: string | null | undefined,
   command: 'open_claude_code' | 'open_codex_cli',
   label: 'Claude Code' | 'Codex',
-): Promise<boolean> {
+  grid: CliTerminalGrid,
+  handlers: CliTerminalHandlers,
+): Promise<string | null> {
   const targetPath = workspaceRoot?.trim() ?? ''
   if (!targetPath) {
     toast.error('No workspace path available')
-    return false
+    return null
   }
 
   if (!isTauriRuntime()) {
     toast.info('Desktop-only feature', { description: targetPath })
-    return false
+    return null
   }
   if (!nativeHelpersAreAvailable()) {
     toastDesktopRuntimeUnavailable()
-    return false
+    return null
   }
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    await invoke(command, { workspaceRoot: targetPath })
-    toast.success(`Opening ${label}`)
-    return true
+    // The returned session id is what keystrokes and resizes are addressed to;
+    // output comes back on the channel handed in here (§10 D2).
+    return await invoke<string>(command, {
+      workspaceRoot: targetPath,
+      cols: grid.cols,
+      rows: grid.rows,
+      onEvent: await cliTerminalChannel(handlers),
+    })
   } catch (error) {
     const description = error instanceof Error ? error.message : String(error)
     toast.error(`Failed to open ${label}`, { description })
-    return false
+    return null
   }
 }
 
-export async function openClaudeCode(workspaceRoot: string | null | undefined): Promise<boolean> {
-  return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code')
+export async function openClaudeCode(
+  workspaceRoot: string | null | undefined,
+  grid: CliTerminalGrid,
+  handlers: CliTerminalHandlers,
+): Promise<string | null> {
+  return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code', grid, handlers)
 }
 
-export async function openCodexCli(workspaceRoot: string | null | undefined): Promise<boolean> {
-  return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex')
+export async function openCodexCli(
+  workspaceRoot: string | null | undefined,
+  grid: CliTerminalGrid,
+  handlers: CliTerminalHandlers,
+): Promise<string | null> {
+  return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex', grid, handlers)
+}
+
+/**
+ * One CLI session's output, streamed over a Tauri channel. The channel is
+ * created here and passed INTO the launch command, so the delivery path exists
+ * before the process starts — the transport Tauri itself uses for child process
+ * output, and the reason no byte can be lost between spawn and subscribe.
+ */
+export type CliTerminalEvent =
+  /** base64 of the raw PTY bytes — decoded by the terminal, never by JS strings. */
+  | { event: 'output'; chunk: string }
+  | { event: 'exit'; code: number | null }
+
+export interface CliTerminalHandlers {
+  onOutput: (chunk: string) => void
+  onExit: (code: number | null) => void
+}
+
+async function cliTerminalChannel(handlers: CliTerminalHandlers) {
+  const { Channel } = await import('@tauri-apps/api/core')
+  const channel = new Channel<CliTerminalEvent>()
+  channel.onmessage = (message) => {
+    if (message.event === 'output') handlers.onOutput(message.chunk)
+    else handlers.onExit(message.code)
+  }
+  return channel
+}
+
+export async function writeCliTerminal(sessionId: string, data: string): Promise<void> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('cli_terminal_write', { sessionId, data })
+}
+
+export async function resizeCliTerminal(
+  sessionId: string,
+  grid: CliTerminalGrid,
+): Promise<void> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('cli_terminal_resize', { sessionId, cols: grid.cols, rows: grid.rows })
+}
+
+/**
+ * Ends the local terminal client only. The ah runtime keeps running — leaving
+ * the terminal view is a tmux detach, not a shutdown (design §10 D3).
+ */
+export async function detachCliTerminal(sessionId: string): Promise<void> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('cli_terminal_detach', { sessionId })
 }
 
 export interface AssistantState {
@@ -252,32 +324,38 @@ export async function closeCodeAssistant(
 export async function attachCodeAssistant(
   workspaceRoot: string | null | undefined,
   assistant: 'claude' | 'codex',
-): Promise<boolean> {
+  grid: CliTerminalGrid,
+  handlers: CliTerminalHandlers,
+): Promise<string | null> {
   const targetPath = workspaceRoot?.trim() ?? ''
   const label = assistant === 'claude' ? 'Claude Code' : 'Codex'
   if (!targetPath) {
     toast.error('No workspace path available')
-    return false
+    return null
   }
 
   if (!isTauriRuntime()) {
     toast.info('Desktop-only feature', { description: targetPath })
-    return false
+    return null
   }
   if (!nativeHelpersAreAvailable()) {
     toastDesktopRuntimeUnavailable()
-    return false
+    return null
   }
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('attach_code_assistant', { workspaceRoot: targetPath, assistant })
-    toast.success(`Attaching ${label}`)
-    return true
+    return await invoke<string>('attach_code_assistant', {
+      workspaceRoot: targetPath,
+      assistant,
+      cols: grid.cols,
+      rows: grid.rows,
+      onEvent: await cliTerminalChannel(handlers),
+    })
   } catch (error) {
     const description = error instanceof Error ? error.message : String(error)
     toast.error(`Failed to attach ${label}`, { description })
-    return false
+    return null
   }
 }
 

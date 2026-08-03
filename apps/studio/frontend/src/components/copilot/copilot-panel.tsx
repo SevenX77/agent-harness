@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, ChevronDown, CircleAlert, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
@@ -11,11 +11,8 @@ import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
 import {
-  attachCodeAssistant,
   closeCodeAssistant,
   ensureCodeAssistantStatusEvents,
-  openClaudeCode,
-  openCodexCli,
   subscribeCodeAssistantStatus,
   type AssistantState,
   type CodeAssistantStatus,
@@ -47,6 +44,7 @@ import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
 import { RolePicker, copilotRoleOptions } from './role-picker'
+import { startCliTerminalSession, type CliTerminalSession } from './cli-terminal-session'
 import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
 import { cn } from '@/lib/utils'
@@ -420,6 +418,10 @@ export function nextDraftJudgeContext(
   return nextDraft === buildCopilotJudgeDraft(context) && judgeContextMatchesScope(context, scope) ? context : null
 }
 
+const CliTerminalView = lazy(() =>
+  import('./cli-terminal-view').then((module) => ({ default: module.CliTerminalView })),
+)
+
 export function CopilotPanel({
   skillId,
   workspaceRoot,
@@ -443,9 +445,11 @@ export function CopilotPanel({
   const [rolesSettled, setRolesSettled] = useState(false)
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
-  const [openingCodeAssistant, setOpeningCodeAssistant] = useState<'claude' | 'codex' | null>(null)
-  const [attachingCodeAssistant, setAttachingCodeAssistant] = useState<'claude' | 'codex' | null>(null)
   const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
+  // The CLI session this panel owns, or null for the chat view. §10 D1:
+  // exactly one of the two is on screen. The panel owns the session's lifetime;
+  // the terminal component only renders it.
+  const [cliSession, setCliSession] = useState<CliTerminalSession | null>(null)
   const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(inactiveCodeAssistantStatus)
   const shouldLoadTemplates = !skillId && copilot.messages.length === 0
   const { templates, templatesLoading } = useTemplates({ enabled: shouldLoadTemplates })
@@ -633,33 +637,37 @@ export function CopilotPanel({
     }
   }, [codeAssistantWorkspace])
 
-  async function handleOpenCodeAssistant(assistant: CodeAssistantId) {
+  // Starting a CLI is a user intent, so it happens here in the click handler —
+  // never inside the terminal's render effect, which React runs twice in
+  // development and would turn into a second `ah start` (§10 D2).
+  async function startCliSession(assistant: CodeAssistantId, mode: 'open' | 'attach') {
+    if (!codeAssistantWorkspace) return
+    cliSession?.detach()
+    const session = await startCliTerminalSession({
+      workspaceRoot: codeAssistantWorkspace,
+      assistant,
+      mode,
+      // The renderer reports its measured grid as soon as it mounts; this only
+      // shapes the very first frame.
+      grid: { cols: 100, rows: 30 },
+      onExit: () => {
+        setCliSession(null)
+        void refreshCodeAssistantStatus()
+      },
+    })
+    setCliSession(session)
+    if (session) await refreshCodeAssistantStatus()
+  }
+
+  function handleOpenCodeAssistant(assistant: CodeAssistantId) {
     if (isAssistantReadOnly(codeAssistantStatus[assistant])) {
       return
     }
-    setOpeningCodeAssistant(assistant)
-    try {
-      const opened = assistant === 'claude'
-        ? await openClaudeCode(codeAssistantWorkspace)
-        : await openCodexCli(codeAssistantWorkspace)
-      if (opened) {
-        await refreshCodeAssistantStatus()
-      }
-    } finally {
-      setOpeningCodeAssistant(null)
-    }
+    void startCliSession(assistant, 'open')
   }
 
-  async function handleAttachCodeAssistant(assistant: CodeAssistantId) {
-    setAttachingCodeAssistant(assistant)
-    try {
-      const attached = await attachCodeAssistant(codeAssistantWorkspace, assistant)
-      if (attached) {
-        await refreshCodeAssistantStatus()
-      }
-    } finally {
-      setAttachingCodeAssistant(null)
-    }
+  function handleAttachCodeAssistant(assistant: CodeAssistantId) {
+    void startCliSession(assistant, 'attach')
   }
 
   async function handleCloseCodeAssistants() {
@@ -667,6 +675,10 @@ export function CopilotPanel({
       return
     }
     setClosingCodeAssistant(true)
+    // Drop the local terminal client first, so the ah cleanup below is not
+    // racing a live tmux attach.
+    cliSession?.detach()
+    setCliSession(null)
     try {
       const readOnlyAssistants = activeCodeAssistants.filter((id) => isAssistantReadOnly(codeAssistantStatus[id]))
       const writeAssistants = activeCodeAssistants.filter((id) => !isAssistantReadOnly(codeAssistantStatus[id]))
@@ -786,7 +798,7 @@ export function CopilotPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={closingCodeAssistant || attachingCodeAssistant !== null || !codeAssistantWorkspace}
+                    disabled={closingCodeAssistant || !codeAssistantWorkspace}
                     aria-label="Manage code assistant"
                     className="studio-canvas-input-surface shrink-0"
                   >
@@ -799,9 +811,9 @@ export function CopilotPanel({
                   {activeCodeAssistants.map((assistant, index) => (
                     <DropdownMenuItem
                       key={`attach-${assistant}`}
-                      disabled={attachingCodeAssistant !== null || closingCodeAssistant || !codeAssistantWorkspace}
+                      disabled={closingCodeAssistant || !codeAssistantWorkspace}
                       onSelect={() => {
-                        void handleAttachCodeAssistant(assistant)
+                        handleAttachCodeAssistant(assistant)
                       }}
                     >
                       <SquareTerminal data-icon="inline-start" />
@@ -827,7 +839,7 @@ export function CopilotPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || allReadOnlyInactive || isAnyCodeAssistantStarting}
+                    disabled={!codeAssistantWorkspace || allReadOnlyInactive || isAnyCodeAssistantStarting}
                     aria-label="Open code assistant"
                     className="studio-canvas-input-surface shrink-0"
                     title={allReadOnlyInactive ? 'Workspace-owned config is read-only' : undefined}
@@ -839,18 +851,18 @@ export function CopilotPanel({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-36">
                   <DropdownMenuItem
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || isClaudeOpenDisabled}
+                    disabled={!codeAssistantWorkspace || isClaudeOpenDisabled}
                     onSelect={() => {
-                      void handleOpenCodeAssistant('claude')
+                      handleOpenCodeAssistant('claude')
                     }}
                     title={codeAssistantStatus.claude.readOnly ? 'Workspace-owned config is read-only' : undefined}
                   >
                     Claude code {isClaudeOpenDisabled && '(read-only)'}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={openingCodeAssistant !== null || !codeAssistantWorkspace || isCodexOpenDisabled}
+                    disabled={!codeAssistantWorkspace || isCodexOpenDisabled}
                     onSelect={() => {
-                      void handleOpenCodeAssistant('codex')
+                      handleOpenCodeAssistant('codex')
                     }}
                     title={codeAssistantStatus.codex.readOnly ? 'Workspace-owned config is read-only' : undefined}
                   >
@@ -863,6 +875,15 @@ export function CopilotPanel({
         </div>
       </header>
 
+      {cliSession ? (
+        /* §10 D1: the CLI session's terminal takes over this region — chat and
+           terminal are mutually exclusive, and the header control above stays
+           the only way to attach or close a CLI (§10 D4). */
+        <Suspense fallback={<div className="min-h-0 flex-1" />}>
+          <CliTerminalView key={cliSession.id} session={cliSession} />
+        </Suspense>
+      ) : (
+      <>
       <SessionTabs
         sessions={copilot.sessions}
         activeSessionId={copilot.activeSessionId}
@@ -1052,6 +1073,8 @@ export function CopilotPanel({
           />
         </div>
       </form>
+      </>
+      )}
     </aside>
   )
 }

@@ -7,6 +7,10 @@ import {
   shouldGiveUpOnAuthFailures,
   shouldShowConnectionLost,
 } from "./event-stream-backoff"
+import {
+  parseSkillGateEvent,
+  type SkillGateEvent,
+} from "@/components/studio/gate-state"
 
 export interface StudioEventStreamCallbacks {
   /** A registry_changed event arrived after credentials truth changed. */
@@ -19,6 +23,11 @@ export interface StudioEventStreamCallbacks {
   onSkillChanged?: (event: { skillId: string; path: string }) => void
   /** A runtime-config dataset changed after the backend/native watcher observed a real mutation. */
   onRuntimeConfigChanged?: (event: { skillId: string; dataset: string; nodeId?: string }) => void
+  /**
+   * A compile/predict/run gate settled — whoever started it. Studio's build stage
+   * follows this instead of only the buttons in this window (决议 2026-08-03 D4).
+   */
+  onSkillGate?: (event: SkillGateEvent) => void
 }
 
 const CONNECTION_LOST_TICK_MS = 1_000
@@ -141,6 +150,20 @@ function dispatchEvent(event: { type?: string } & Record<string, unknown>): void
     )
     for (const subscriber of subscribers.values()) {
       subscriber.callbacksRef.current.onRuntimeConfigChanged?.({ skillId, dataset, nodeId })
+    }
+    return
+  }
+  if (event.type === "skill_gate") {
+    const gateEvent = parseSkillGateEvent(event)
+    if (!gateEvent) return
+    console.info(
+      "phase=studio-event-stream action=dispatch type=skill_gate skill_id=%s gate=%s outcome=%s",
+      gateEvent.skillId,
+      gateEvent.gate,
+      gateEvent.outcome,
+    )
+    for (const subscriber of subscribers.values()) {
+      subscriber.callbacksRef.current.onSkillGate?.(gateEvent)
     }
     return
   }

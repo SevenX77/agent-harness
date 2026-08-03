@@ -37,8 +37,14 @@ def build_skill_gate_event(
     content_hash: str | None = None,
     run_id: str | None = None,
     defect_count: int = 0,
+    errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Assemble one gate-outcome event payload."""
+    """Assemble one gate-outcome event payload.
+
+    A failed gate carries its full aggregated defect set, because the receiver must
+    render the SAME list every other surface renders; a receiver that re-derived its
+    own would be the parallel validation pass the diagnostics-SSOT rule forbids.
+    """
     return {
         "type": SKILL_GATE_EVENT_TYPE,
         "timestamp": datetime.now(UTC).isoformat(),
@@ -49,6 +55,7 @@ def build_skill_gate_event(
         "content_hash": content_hash,
         "run_id": run_id,
         "defect_count": defect_count,
+        "errors": errors or [],
     }
 
 
@@ -60,6 +67,7 @@ async def publish_skill_gate(
     content_hash: str | None = None,
     run_id: str | None = None,
     defect_count: int = 0,
+    errors: list[dict[str, Any]] | None = None,
 ) -> None:
     """Broadcast one gate outcome; never let the broadcast break the gate."""
     event = build_skill_gate_event(
@@ -69,6 +77,7 @@ async def publish_skill_gate(
         content_hash=content_hash,
         run_id=run_id,
         defect_count=defect_count,
+        errors=errors,
     )
     try:
         await event_bus.publish(STUDIO_EVENTS_TOPIC, event)

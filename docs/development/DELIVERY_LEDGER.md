@@ -65,7 +65,7 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 | # | 项 | 状态 | 关键坐标 |
 |---|---|---|---|
 | P4-A | 后端三关领域事件(compile/predict/run 在 service 层发 `skill_gate`) | ✅ 随本行同 PR 合入 | 新模块 `app/services/gate_events.py`(载荷构造 + async/from-thread 两个发布入口,广播失败只记日志不影响闸门);发布点:`compile_skill_for_studio` 包一层薄壳分派 pass/fail、`predictor.dispatch_predict_job` 用**同一个投影函数** `export_predict_diagnostics(result).status` 判定通过与否(与前端判定同源)、`run_manager.start_run` 发 started 且 `_finalize_terminal_run` 的 `finally` 发终态;6 测试含一条**结构断言**钉住"router 不得自行发布、三个 service 必须发布"——若发布点漂回 router,MCP 路径就不发事件,而只走 HTTP 的行为测试看不出来 |
-| P4-B | 前端闸门归约器重构 + 订阅 | 待开工(依赖 P4-A 事件契约) | 决议 D4;现状是状态机与副作用内联在 `Workspace.tsx:1174-1200` 的 `handleCompile`,外部事件无入口;验收=双路径状态迁移序列逐条相同(自动化) |
+| P4-B | 前端闸门归约器重构 + 订阅 | ✅ 随本行同 PR 合入 | 决议 D4;新模块 `apps/studio/frontend/src/components/studio/gate-state.ts`(纯函数 `projectGateEvent` + 去重键 `gateEventKey` + 载荷解析),`Workspace` 里唯一施加点 `applyGateEvent`——**点击处理器与事件流都走它**,两条路径不可能分叉;去重键让本地投影与随后到达的广播只生效一次(抽屉不弹两回),作用域限定当前打开的skill(别的 skill 只更新 stage、不夺走视图);失败事件带上**同一份聚合诊断**,接收方不再自算一份(diagnostics SSOT);10 条前端测试含一条双路径投影一致性断言 |
 | P4-C | run 可观测性:`query_run_trace` + `wait_for_run` | 待开工 | 决议 D6;`wait_for_run` 挂 `run_manager` 既有 `subscribers` 队列(`run_manager.py:78-80`);消除轮询,并消除会话手搓 `trace.jsonl`/`strings` WAL |
 | P4-D | `set_output_artifacts` 工具 | 待开工 | I/O 面板 "Configure output artifacts" 的后端等价物;schema 实测为 `{stem, fields[], mode, format}` |
 | P4-E | CLI 会话注入 `skill_id` + `workspace_root` | 待开工 | 修 F3/F13(两次独立复现) |

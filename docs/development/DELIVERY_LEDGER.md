@@ -64,13 +64,16 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 
 | # | 项 | 状态 | 关键坐标 |
 |---|---|---|---|
-| P4-A | 后端三关领域事件(compile/predict/run 在 service 层发 `skill_gate`) | 待开工 | 决议 D2/D3;通道复用 `/ws/events`(`STUDIO_EVENTS_TOPIC`),范式见 `routers/llm.py:5928`;契约测试须覆盖"HTTP 路径与 MCP 路径发出同一条事件" |
+| P4-A | 后端三关领域事件(compile/predict/run 在 service 层发 `skill_gate`) | ✅ 随本行同 PR 合入 | 新模块 `app/services/gate_events.py`(载荷构造 + async/from-thread 两个发布入口,广播失败只记日志不影响闸门);发布点:`compile_skill_for_studio` 包一层薄壳分派 pass/fail、`predictor.dispatch_predict_job` 用**同一个投影函数** `export_predict_diagnostics(result).status` 判定通过与否(与前端判定同源)、`run_manager.start_run` 发 started 且 `_finalize_terminal_run` 的 `finally` 发终态;6 测试含一条**结构断言**钉住"router 不得自行发布、三个 service 必须发布"——若发布点漂回 router,MCP 路径就不发事件,而只走 HTTP 的行为测试看不出来 |
 | P4-B | 前端闸门归约器重构 + 订阅 | 待开工(依赖 P4-A 事件契约) | 决议 D4;现状是状态机与副作用内联在 `Workspace.tsx:1174-1200` 的 `handleCompile`,外部事件无入口;验收=双路径状态迁移序列逐条相同(自动化) |
 | P4-C | run 可观测性:`query_run_trace` + `wait_for_run` | 待开工 | 决议 D6;`wait_for_run` 挂 `run_manager` 既有 `subscribers` 队列(`run_manager.py:78-80`);消除轮询,并消除会话手搓 `trace.jsonl`/`strings` WAL |
 | P4-D | `set_output_artifacts` 工具 | 待开工 | I/O 面板 "Configure output artifacts" 的后端等价物;schema 实测为 `{stem, fields[], mode, format}` |
 | P4-E | CLI 会话注入 `skill_id` + `workspace_root` | 待开工 | 修 F3/F13(两次独立复现) |
 | P4-F | engine 编译期校验未知声明 | 待开工 | 决议 D5;实测 `target: __probe_invalid__` 编译 0 缺陷且透传进 manifest,而运行期只认 `{file, artifact}`(`runner.py:1952`) |
-| P4-G..J | P1 数据面读工具(`get_skill_overview`/`read_skill_file`/`get_workspace_config`/`list+read_run_artifacts`)+ KB 补写 | 待排期 | KB 新增「产物与落盘」;修 KB-08 第 22 行与第 27 行的互斥表述 |
+| P4-G | `get_skill_overview(skill_id)`:manifest 摘要 + phase 列表 + 每 phase 的 io 字段名与类型 + validator 有无 + llm_role | 待开工 | 只给结构不给正文,天然有界;数据源 `app/services/skills.py`,与前端 `GET /api/skills/{id}` 同一份真相 |
+| P4-H | `read_skill_file(skill_id, path, range?)` | 待开工 | 经 skill 索引解析、限定 skill 目录内,替代会话裸用 Bash/Read 摸文件 |
+| P4-I | `get_workspace_config(skill_id)` + `list_run_artifacts` / `read_run_artifact` | 待开工 | runtime_config 的结构化投影(输入绑定 / test inputs / artifacts 声明 / llm 覆盖);现状 `get_run_detail` 的 artifacts 字段永远是空数组 |
+| P4-J | 知识资产:新增 KB「产物与落盘」;KB-09 补 `query_run_trace` 诊断套路;KB-13 随工具面更新;修 KB-08 矛盾 | 待开工 | KB-08 第 22 行 "users cannot override this behavior manually" 与第 27 行 P1 档 "manual mock overrides are supplied ... in the test panel or copilot callbacks" 互斥 |
 | P4-K | P2 写工具收口(`write_skill_file`/`bind_test_input`) | 待排期 | 现状:CLI 会话直接 Write 磁盘,绕过「Rust native-fs 是 skill 文件唯一写者」 |
 
 #### 阶段 3 · CLI 终端内嵌 copilot 面板(「CLI 即 copilot」,2026-08-02)

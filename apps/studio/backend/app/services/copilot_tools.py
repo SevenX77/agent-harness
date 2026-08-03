@@ -377,6 +377,54 @@ async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "set_output_artifacts",
+    "声明这个 skill 的 run 产物(写运行配置,等价于 I/O 面板的 Configure output "
+    "artifacts):每条给 stem(文件名前缀)与 fields(要写进该文件的黑板字段名),"
+    "mode 取 single 或 per-item,format 取 json 或 md。engine 在 run 结束时把它们写成 "
+    "runs/<run_id>/artifacts/<stem>_latest_<时间戳>.<后缀>;不声明就不产出文件。"
+    "整份清单**全量替换**,传空清单即取消全部声明。字段名写错会在 compile 报缺陷。",
+    {"skill_id": str, "artifacts": list[dict[str, Any]]},
+)
+async def set_output_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from app.models.runtime_config import RuntimeArtifactsRequest
+    from app.services.runtime_config import refresh_runtime_config, update_artifacts_payload
+    from app.services.skills import resolve_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    raw = args.get("artifacts")
+    if not isinstance(raw, list):
+        return _text_result("artifacts 必须是数组(传空数组表示取消全部声明)", is_error=True)
+    try:
+        # 与 I/O 面板路由同一个 schema:两个写入方不允许各自校验一套。
+        request = RuntimeArtifactsRequest.model_validate({"artifacts": raw})
+    except ValidationError as exc:
+        return _text_result({"detail": "artifacts 形状不合法", "errors": exc.errors()}, is_error=True)
+
+    try:
+        skill_dir = resolve_skill_dir(skill_id)
+        refresh_runtime_config(skill_dir)
+        config = update_artifacts_payload(
+            skill_dir,
+            [artifact.model_dump(mode="json") for artifact in request.artifacts],
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"set_output_artifacts 失败: {exc}"
+        return _text_result(payload, is_error=True)
+
+    return _text_result(
+        {
+            "skill_id": skill_id,
+            "artifacts": config.get("artifacts", []),
+            "message": "产物声明已写入运行配置;下一次真实 run 会把它们写进 artifacts/。",
+        }
+    )
+
+
+@tool(
     "list_golden",
     "列出指定 skill 的全部 golden 基准(验收基线):每条给 id、来源 run、锁定态、"
     "创建时间与各节点 case 概览。只读;看某条基准里到底存了什么用 "

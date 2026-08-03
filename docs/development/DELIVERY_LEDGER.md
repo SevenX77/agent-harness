@@ -56,6 +56,23 @@
 | N5-2 | 实现:sidecar `/mcp` streamable HTTP 出口(工具面=面板 27−2) | ✅ 随本行同 PR 合入 | `app/services/cli_mcp_surface.py` + `main.py` lifespan 内建 manager/`app.state` 转发挂载;4 测试(工具差集/内存会话协议/401/initialize 200+session-id);`mcp>=1.29` 补为 backend 直接依赖(uv.lock 变更→合并后根 uv sync + vendor 重建) |
 | N5-3 | 实现:lib.rs 注册 studio MCP(claude `--mcp-config` + 摘 bypass + allowedTools 读档;codex config.toml `[mcp_servers.studio]` url+bearer_token_env_var)+ 资产回写 | ✅ 随本行同 PR 合入 | payload 注入 `STUDIO_MCP_URL`/`STUDIO_API_TOKEN`(sidecar 未起则整段省略、会话照常启动);5 个新 Rust 测试绿(本机既有 4 个无关失败,干净树复现过);cli.md 新增「Studio Tool Surface」节、KB-13 撤销「CLI 无工具」警示 |
 
+#### 阶段 4 · copilot 工具面的能力对等与状态对等(2026-08-03 用户批准)
+
+决议正本:`docs/design/2026-08-03-copilot-state-parity-and-tool-surface-decision.md`
+(两条原则、6 条关键设计决定、PR 拆分、8 条验收判据、边界)。事实基础全部来自
+exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp-b-round3/`。
+
+| # | 项 | 状态 | 关键坐标 |
+|---|---|---|---|
+| P4-A | 后端三关领域事件(compile/predict/run 在 service 层发 `skill_gate`) | 待开工 | 决议 D2/D3;通道复用 `/ws/events`(`STUDIO_EVENTS_TOPIC`),范式见 `routers/llm.py:5928`;契约测试须覆盖"HTTP 路径与 MCP 路径发出同一条事件" |
+| P4-B | 前端闸门归约器重构 + 订阅 | 待开工(依赖 P4-A 事件契约) | 决议 D4;现状是状态机与副作用内联在 `Workspace.tsx:1174-1200` 的 `handleCompile`,外部事件无入口;验收=双路径状态迁移序列逐条相同(自动化) |
+| P4-C | run 可观测性:`query_run_trace` + `wait_for_run` | 待开工 | 决议 D6;`wait_for_run` 挂 `run_manager` 既有 `subscribers` 队列(`run_manager.py:78-80`);消除轮询,并消除会话手搓 `trace.jsonl`/`strings` WAL |
+| P4-D | `set_output_artifacts` 工具 | 待开工 | I/O 面板 "Configure output artifacts" 的后端等价物;schema 实测为 `{stem, fields[], mode, format}` |
+| P4-E | CLI 会话注入 `skill_id` + `workspace_root` | 待开工 | 修 F3/F13(两次独立复现) |
+| P4-F | engine 编译期校验未知声明 | 待开工 | 决议 D5;实测 `target: __probe_invalid__` 编译 0 缺陷且透传进 manifest,而运行期只认 `{file, artifact}`(`runner.py:1952`) |
+| P4-G..J | P1 数据面读工具(`get_skill_overview`/`read_skill_file`/`get_workspace_config`/`list+read_run_artifacts`)+ KB 补写 | 待排期 | KB 新增「产物与落盘」;修 KB-08 第 22 行与第 27 行的互斥表述 |
+| P4-K | P2 写工具收口(`write_skill_file`/`bind_test_input`) | 待排期 | 现状:CLI 会话直接 Write 磁盘,绕过「Rust native-fs 是 skill 文件唯一写者」 |
+
 #### 阶段 3 · CLI 终端内嵌 copilot 面板(「CLI 即 copilot」,2026-08-02)
 
 | # | 项 | 状态 | 关键坐标 |

@@ -311,8 +311,8 @@ _RUN_FINAL_CONTEXT_CHAR_LIMIT = 4000
     "get_run_detail",
     "查询一次真实 run 的状态与结果(紧凑投影):整体状态、token 用量、事件类型"
     "计数、错误摘录(最多 5 条)、最终输出(final_context,超长截断)与产物清单。"
-    "只读;run 还是 running 时隔一会儿再查,不要高频轮询。逐事件细节用 Read 打开 "
-    ".workspace/runs/<run_id>/。",
+    "只读;逐 phase 的循环细节与被驳回原因用 query_run_trace,等 run 结束用 "
+    "wait_for_run(不要高频轮询)。",
     {"skill_id": str, "run_id": str},
 )
 async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -420,6 +420,115 @@ async def set_output_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
             "skill_id": skill_id,
             "artifacts": config.get("artifacts", []),
             "message": "产物声明已写入运行配置;下一次真实 run 会把它们写进 artifacts/。",
+        }
+    )
+
+
+@tool(
+    "query_run_trace",
+    "查一次 run 的执行内情(有界):按 phase 汇总循环轮数、llm/tool 调用数、"
+    "finish_task 提交与被驳回次数、以及被驳回原因 top-N;并可按 phase / 事件类型 / "
+    "序号切片取事件(默认 50 条,上限 200,返回 next_seq 供翻页)。"
+    "事件已投影成小体积,prompt 与完整上下文不在其中——那些留在 run 产物里。"
+    "诊断'agent 为什么反复重投/卡在某个 phase'先用它,不要手工解析 trace.jsonl。",
+    {
+        "skill_id": str,
+        "run_id": str,
+        "phase": (str, None),
+        "event_types": (list[str], None),
+        "since_seq": (int, None),
+        "limit": (int, None),
+    },
+)
+async def query_run_trace_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.run_manager import run_manager
+    from app.services.run_trace_query import slice_events, summarize_phases
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    try:
+        detail = run_manager.get_run_detail(skill_id=skill_id, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"query_run_trace 失败: {exc}"
+        return _text_result(payload, is_error=True)
+
+    raw_types = args.get("event_types")
+    event_types = [str(item) for item in raw_types] if isinstance(raw_types, list) else None
+    raw_since = args.get("since_seq")
+    raw_limit = args.get("limit")
+    sliced = slice_events(
+        detail.events,
+        phase=str(args["phase"]) if args.get("phase") else None,
+        event_types=event_types,
+        since_seq=int(raw_since) if isinstance(raw_since, int) else None,
+        limit=int(raw_limit) if isinstance(raw_limit, int) else None,
+    )
+    return _text_result(
+        {
+            "run_id": detail.metadata.run_id,
+            "status": detail.metadata.status,
+            "events_total": len(detail.events),
+            "phase_summary": summarize_phases(detail.events),
+            **sliced,
+        }
+    )
+
+
+#: How long `wait_for_run` may block before answering "still running".
+_WAIT_FOR_RUN_DEFAULT_TIMEOUT = 120
+_WAIT_FOR_RUN_MAX_TIMEOUT = 600
+
+
+@tool(
+    "wait_for_run",
+    "等一次 run 结束(阻塞,最长 600 秒):run 已结束时立刻返回终态,否则挂在事件流上"
+    "直到结束或超时。超时返回 timed_out 与当前状态,可以再等一次。"
+    "有它就不要用轮询 get_run_detail 的方式等待。",
+    {"skill_id": str, "run_id": str, "timeout_s": (int, None)},
+)
+async def wait_for_run_tool(args: dict[str, Any]) -> dict[str, Any]:
+    import asyncio
+
+    from app.services.run_manager import run_manager
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    raw_timeout = args.get("timeout_s")
+    timeout = int(raw_timeout) if isinstance(raw_timeout, int) else _WAIT_FOR_RUN_DEFAULT_TIMEOUT
+    timeout = max(1, min(timeout, _WAIT_FOR_RUN_MAX_TIMEOUT))
+
+    try:
+        # 挂在 run_manager 既有的订阅队列上:run 结束时该队列收到 None,
+        # 于是"等待"由事件驱动,不需要任何轮询。
+        queue = await run_manager.stream_run(run_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"wait_for_run 失败: {exc}"
+        return _text_result(payload, is_error=True)
+
+    timed_out = False
+    try:
+        async with asyncio.timeout(timeout):
+            while await queue.get() is not None:
+                continue
+    except TimeoutError:
+        timed_out = True
+
+    try:
+        metadata = run_manager.get_run_detail(skill_id=skill_id, run_id=run_id).metadata
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload = getattr(exc, "detail", None) or f"wait_for_run 失败: {exc}"
+        return _text_result(payload, is_error=True)
+
+    return _text_result(
+        {
+            "run_id": metadata.run_id,
+            "status": metadata.status,
+            "timed_out": timed_out,
+            "metrics": metadata.metrics.model_dump(mode="json") if metadata.metrics else None,
         }
     )
 

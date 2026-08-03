@@ -3833,6 +3833,7 @@ mod tests {
     fn claude_cli_refresh_is_scoped_to_the_claude_open_path() {
         let attach_payload = wsl_attach_payload_script(
             "/mnt/c/Users/u/AppData/Local/Temp/skill-studio-ah/abc/claude/ah.toml",
+            "/mnt/d/ws",
             CodeAssistant::Claude,
         );
         assert!(

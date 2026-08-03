@@ -19,6 +19,8 @@ _MCP_TOOL_NAMES = [
     "mcp__studio__run_role_test",
     "mcp__studio__predict_skill",
     "mcp__studio__get_run_detail",
+    "mcp__studio__query_run_trace",
+    "mcp__studio__wait_for_run",
     "mcp__studio__list_golden",
     "mcp__studio__get_golden_content",
     "mcp__studio__get_resume_validity",

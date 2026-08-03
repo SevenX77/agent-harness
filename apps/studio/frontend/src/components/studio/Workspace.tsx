@@ -7,6 +7,7 @@ import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
+import type { CliTerminalSession } from "@/components/copilot/cli-terminal-session"
 import { CopilotFab } from "@/components/copilot/copilot-fab"
 import { CopilotPanelMorph } from "@/components/copilot/copilot-panel-morph"
 import { defaultFabPosition, headerLogoTarget, panelRect, type Point, type Rect } from "@/components/copilot/copilot-fab-geometry"
@@ -437,6 +438,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // FAB position on the canvas; null = default top-right anchor. Persists across
   // open/close within the session (survives the panel collapse animation).
   const [fabPosition, setFabPosition] = useState<Point | null>(null)
+  // The CLI session belongs to the workspace, not to the copilot panel: the
+  // panel unmounts on every collapse, and a session parked there would take the
+  // running CLI down with it (ah-orchestration-design.md §10 D3 — collapsing is
+  // a detach at most, never a shutdown).
+  const [cliSession, setCliSession] = useState<CliTerminalSession | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   // Callback ref, not a mount effect: the host div only exists while a skill is
   // open (the welcome view renders without it), so the observer must attach the
@@ -480,6 +486,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   )
   const currentSkillId = currentWorkspaceIdentity.skillId
   const currentWorkspaceRoot = currentWorkspaceIdentity.workspaceRoot
+  useEffect(() => {
+    // A session belongs to ONE workspace; leaving that workspace ends the local
+    // terminal client (the ah runtime keeps running, §10 D3).
+    return () => {
+      setCliSession((current) => {
+        current?.detach()
+        return null
+      })
+    }
+  }, [currentWorkspaceRoot])
   const displayNavStack = useMemo(
     () => navStack.map((item) => resolveWorkspaceIdentity(item).skillId).filter((item): item is string => Boolean(item)),
     [navStack],
@@ -2571,6 +2587,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       <CopilotPanel
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
+        cliSession={cliSession}
+        onCliSessionChange={setCliSession}
         copilot={copilot}
         view={copilotJudgeRefs ? "eval" : "edit"}
         judgeRefs={copilotJudgeRefs}

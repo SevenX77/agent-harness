@@ -245,6 +245,15 @@ Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分�
   - `Main Workspace (SplitEditor)` 包含上下或左右分割的 Canvas 画布和 Monaco 代码编辑器。
   - `Right Drawer (Copilot / Golden)` 按需滑出。
 - **重要 caveat**: 拖拽调节窗体大小时，必须确保 `ReactFlow` 和 `Monaco Editor` 及时监听 Resize Observer，触发自我边界更新 (`fit-to-screen` 和 `layout()`)，否则可能产生渲染撕裂。
+- **长生命周期的外部会话由容器持有，渲染组件只 attach**（2026-08-02，内嵌 CLI 终端）：像终端会话、
+  长连接这类"启动一次、活很久"的资源，启动动作必须挂在用户操作（点击）上，**不能写在渲染组件的
+  副作用里** —— React 开发模式故意把副作用执行两遍，任何非幂等的启动都会被第二次调用破坏。容器
+  持有会话对象并负责结束它；渲染组件挂载时 attach、卸载时 detach，且**会话的输出历史必须可重放**
+  （每个 attach 上来的渲染器都拿到同一份历史，而不是"取走"缓冲），否则被丢弃的那次挂载会带走
+  最早的数据。参照实现：`components/copilot/cli-terminal-session.ts` + `cli-terminal-view.tsx`。
+- **Rust→前端的流式数据走 Tauri channel，不走全局事件**（同上）：channel 由前端创建、作为命令参数传入，
+  投递通道先于数据源存在，天然没有"订阅晚于第一批数据"的竞态；全局事件总线按 Tauri 官方说明不是为
+  低延迟/高吞吐设计的。
 - **可拖拽 overlay 的宽度真相 = 宿主宽度的比例，不是固定像素**（P-6，2026-08-02）：用户可拖拽的悬浮面板（如 copilot 面板）把宽度存成「占画布宿主宽度的比例」，拖拽把手回报的 px 换算回比例存储；窗口/宿主尺寸变化时由比例重新推导 px，并夹在拖拽把手的 min/max 之间。这样窗口放大面板等比加宽、缩小时不糊死画布。参照实现：`WorkspaceRightPanelOverlay.tsx` 的 `rightPanelWidthPx` / `rightPanelRatioFromPx`（纯函数，带单测）+ `Workspace.tsx` 的 host ResizeObserver。测试环境（jsdom 无 ResizeObserver）宿主永不测量，按参考宿主 1280px 回落到历史默认值，既有像素断言不破。
 
 ## 5. Tauri Native API 桥接层最佳实践

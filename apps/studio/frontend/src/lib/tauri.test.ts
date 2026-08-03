@@ -30,6 +30,11 @@ import {
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+  // The CLI terminal streams over a Tauri channel; the real class needs the
+  // desktop IPC bridge, so tests stand in a minimal message sink.
+  Channel: class {
+    onmessage: ((message: unknown) => void) | null = null
+  },
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -176,6 +181,8 @@ describe('selectFile', () => {
   })
 })
 
+const noopTerminalHandlers = { onOutput: () => {}, onExit: () => {} }
+
 describe('desktop shell helpers', () => {
   it('invokes the reveal command when only the sidecar is degraded', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
@@ -193,12 +200,20 @@ describe('desktop shell helpers', () => {
   it('opens Claude Code through the native ah launcher', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
-    mockInvoke.mockResolvedValue(undefined)
+    mockInvoke.mockResolvedValue('claude-abc123')
 
-    await expect(openClaudeCode('/tmp/workspace')).resolves.toBe(true)
+    // The launcher hands back the embedded terminal's session id, and takes the
+    // output channel as an argument so the delivery path exists before the
+    // process does (§10 D2).
+    await expect(
+      openClaudeCode('/tmp/workspace', { cols: 100, rows: 30 }, noopTerminalHandlers),
+    ).resolves.toBe('claude-abc123')
 
     expect(mockInvoke).toHaveBeenCalledWith('open_claude_code', {
       workspaceRoot: '/tmp/workspace',
+      cols: 100,
+      rows: 30,
+      onEvent: expect.anything(),
     })
   })
 
@@ -206,7 +221,9 @@ describe('desktop shell helpers', () => {
     vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
     await resetRuntimeForTest()
 
-    await expect(openClaudeCode('/tmp/workspace')).resolves.toBe(false)
+    await expect(
+      openClaudeCode('/tmp/workspace', { cols: 100, rows: 30 }, noopTerminalHandlers),
+    ).resolves.toBeNull()
 
     expect(mockInvoke).not.toHaveBeenCalled()
     expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
@@ -217,12 +234,17 @@ describe('desktop shell helpers', () => {
   it('opens Codex CLI through the native ah launcher', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
-    mockInvoke.mockResolvedValue(undefined)
+    mockInvoke.mockResolvedValue('codex-abc123')
 
-    await expect(openCodexCli('/tmp/workspace')).resolves.toBe(true)
+    await expect(
+      openCodexCli('/tmp/workspace', { cols: 100, rows: 30 }, noopTerminalHandlers),
+    ).resolves.toBe('codex-abc123')
 
     expect(mockInvoke).toHaveBeenCalledWith('open_codex_cli', {
       workspaceRoot: '/tmp/workspace',
+      cols: 100,
+      rows: 30,
+      onEvent: expect.anything(),
     })
   })
 
@@ -230,7 +252,9 @@ describe('desktop shell helpers', () => {
     vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
     await resetRuntimeForTest()
 
-    await expect(openCodexCli('/tmp/workspace')).resolves.toBe(false)
+    await expect(
+      openCodexCli('/tmp/workspace', { cols: 100, rows: 30 }, noopTerminalHandlers),
+    ).resolves.toBeNull()
 
     expect(mockInvoke).not.toHaveBeenCalled()
     expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
@@ -332,13 +356,18 @@ describe('desktop shell helpers', () => {
   it('attaches the selected code assistant master pane through ah', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
-    mockInvoke.mockResolvedValue(undefined)
+    mockInvoke.mockResolvedValue('claude-abc123')
 
-    await expect(attachCodeAssistant('/tmp/workspace', 'claude')).resolves.toBe(true)
+    await expect(
+      attachCodeAssistant('/tmp/workspace', 'claude', { cols: 90, rows: 24 }, noopTerminalHandlers),
+    ).resolves.toBe('claude-abc123')
 
     expect(mockInvoke).toHaveBeenCalledWith('attach_code_assistant', {
       workspaceRoot: '/tmp/workspace',
       assistant: 'claude',
+      cols: 90,
+      rows: 24,
+      onEvent: expect.anything(),
     })
   })
 })

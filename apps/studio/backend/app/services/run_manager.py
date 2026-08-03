@@ -53,6 +53,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
+from app.services.gate_events import publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
@@ -559,6 +560,16 @@ class RunManager:
         )
         _write_run_metadata(run_dir, metadata)
         await self._save_run_metadata(skill_id, metadata)
+
+        # 状态对等(决议 2026-08-03 D2/D3):run 一起动就广播,前端据此把 runId
+        # 指过去并切到 Trace——不再只认自己按下的那个 Run 按钮。
+        await publish_skill_gate(
+            skill_id=skill_id,
+            gate="run",
+            outcome="started",
+            content_hash=str(art_ref.get("content_hash") or "") or None,
+            run_id=run_id,
+        )
 
         process_queue = self.queue_factory()
         process = self.process_factory(
@@ -1093,6 +1104,12 @@ class RunManager:
             await self._save_run_metadata(record.skill_id, metadata)
         finally:
             record.metadata = metadata
+            await publish_skill_gate(
+                skill_id=record.skill_id,
+                gate="run",
+                outcome="pass" if metadata.status == "success" else "fail",
+                run_id=metadata.run_id,
+            )
 
     async def _save_run_metadata(self, skill_id: str, metadata: RunMetadata) -> None:
         metadata_store = self._metadata_store()

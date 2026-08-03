@@ -16,6 +16,7 @@ from app.core.adapters.engine import (
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
+from app.services.gate_events import publish_skill_gate_from_thread
 from app.services.run_manager import run_manager
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
@@ -138,6 +139,14 @@ class PredictorService:
             content_hash=art_ref["content_hash"],
             artifact_ref=art_ref,
             runtime_config=runtime_config,
+        )
+        # 状态对等(决议 2026-08-03 D2):广播的通过/失败必须与前端自己的判定同源,
+        # 故用同一个投影函数导出 status,而不是另立一套判定。
+        publish_skill_gate_from_thread(
+            skill_id=skill_id,
+            gate="predict",
+            outcome="pass" if export_predict_diagnostics(result).status == "success" else "fail",
+            content_hash=art_ref["content_hash"],
         )
         return cast(RunResult, result)
 

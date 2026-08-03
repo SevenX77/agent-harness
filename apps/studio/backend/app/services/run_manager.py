@@ -1076,15 +1076,23 @@ class RunManager:
             record.process.join(timeout=0)
 
     async def _finalize_terminal_run(self, record: RunRecord, metadata: RunMetadata) -> None:
-        await self._copy_final_state_to_storage(record)
-        if metadata.status == "success" and record.auto_commit:
-            metadata = await self._auto_commit_successful_run(record, metadata)
-            _write_run_metadata(record.run_dir, metadata)
-            await asyncio.to_thread(_sync_latest_run, record.run_dir)
-        else:
-            _write_run_metadata(record.run_dir, metadata)
-        await self._save_run_metadata(record.skill_id, metadata)
-        record.metadata = metadata
+        # The record is what every reader asks for the run's status, and it is
+        # deliberately the LAST thing to go terminal: whoever sees it flip may
+        # immediately read the sealed run dir and its `latest/` copy, so the
+        # flip has to trail finalization, not lead it. The assignment sits in
+        # `finally` because a storage write that fails must not strand the
+        # record — and every future reader of it — on "running" forever.
+        try:
+            await self._copy_final_state_to_storage(record)
+            if metadata.status == "success" and record.auto_commit:
+                metadata = await self._auto_commit_successful_run(record, metadata)
+                _write_run_metadata(record.run_dir, metadata)
+                await asyncio.to_thread(_sync_latest_run, record.run_dir)
+            else:
+                _write_run_metadata(record.run_dir, metadata)
+            await self._save_run_metadata(record.skill_id, metadata)
+        finally:
+            record.metadata = metadata
 
     async def _save_run_metadata(self, skill_id: str, metadata: RunMetadata) -> None:
         metadata_store = self._metadata_store()

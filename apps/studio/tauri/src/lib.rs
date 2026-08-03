@@ -947,8 +947,27 @@ fn prepare_studio_ah_workspace(workspace_root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Serialize one TOML basic string.
+///
+/// A basic string may not contain a literal newline, so a value carrying one
+/// silently produced an unparseable config: `ah start` died with `invalid basic
+/// string` (exit 3) and the CLI session could not open at all. Control
+/// characters are therefore escaped, not passed through.
 fn toml_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    escaped.push('"');
+    escaped
 }
 
 fn toml_string_array(values: &[String]) -> String {
@@ -3729,6 +3748,37 @@ mod tests {
             source.contains("close_code_assistant,"),
             "close_code_assistant must be registered in the Tauri invoke handler"
         );
+    }
+
+    #[test]
+    fn toml_string_escapes_control_characters_instead_of_breaking_the_line() {
+        // A literal newline ends a TOML basic string early, so a value carrying
+        // one produced a config `ah start` refused to parse.
+        assert_eq!(toml_string("a\nb"), "\"a\\nb\"");
+        assert_eq!(toml_string("a\tb"), "\"a\\tb\"");
+        assert_eq!(toml_string("a\r\nb"), "\"a\\r\\nb\"");
+        assert_eq!(toml_string("say \"hi\""), "\"say \\\"hi\\\"\"");
+    }
+
+    #[test]
+    fn transient_config_parses_as_toml_with_a_bound_skill() {
+        // The regression this file exists for: the identity injected into the
+        // master prompt carried newlines, the config stopped parsing, and
+        // `Open in CLI` died at `ah start` (exit 3) — while a
+        // `cmd.contains("<skill id>")` assertion stayed happily green.
+        let context = SessionSkillContext {
+            skill_id: "exp-b-round4".to_string(),
+            workspace_root: "D:\\coding\\skills\\exp-b-round4".to_string(),
+        };
+
+        for assistant in [CodeAssistant::Claude, CodeAssistant::Codex] {
+            let content = transient_ah_config_content(assistant, None, Some(&context))
+                .expect("config content");
+            let parsed: toml::Table = toml::from_str(&content)
+                .unwrap_or_else(|error| panic!("{assistant:?} transient config must parse: {error}"));
+            let cmd = parsed["master"]["cmd"].as_str().expect("cmd string");
+            assert!(cmd.contains("exp-b-round4"), "identity must survive escaping");
+        }
     }
 
     #[test]

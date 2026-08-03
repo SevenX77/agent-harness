@@ -46,7 +46,7 @@
    - P-4 **审批卡状态服务端权威化**:决议状态只存组件本地 state,重渲染即复活可点(`tool-approval-card.tsx:49-73`);后端 resolve 时应发 resolved 事件,前端从事件流投影。
    - P-5 **编译诊断结构化渲染**:is_error 工具结果(编译诊断集)不该渲染成系统故障样的红色 JSON 堆;中断后 CLI 聚合错误回声("SDK returned an error: …McpToolCallError×N")一并评估降噪。
    - P-6 **copilot 面板宽度自适应**:随窗口宽度伸缩(clamp + 可拖拽),窗口宽裕时面板加宽。✅ 已修(2026-08-02):宽度真相改为画布宿主宽度的比例(默认 0.275,历史默认 352px@1280 不变),拖拽把手回写比例,ResizeObserver 跟随窗口重算,仍夹在 280-720px;纯函数 `rightPanelWidthPx`/`rightPanelRatioFromPx` 带单测,复用规则已入 FRONTEND_UI_SPEC §4。
-3. **新讨论项(设计探讨,未裁决实施)**:把 Open in CLI 的终端内嵌进 copilot 面板区域,启动 CLI 时以终端界面替代对话界面("CLI 即 copilot");依赖 N5 工具面先就位。
+3. ~~**新讨论项(设计探讨,未裁决实施)**:把 Open in CLI 的终端内嵌进 copilot 面板区域,启动 CLI 时以终端界面替代对话界面("CLI 即 copilot");依赖 N5 工具面先就位。~~ → **PM 2026-08-02 裁决实施**(三条修正:宽度沿用现状不放宽、保留 header CLI 控制按钮作为唯一关 CLI 出口、tmux 滚动必须可用)。设计与验收判据落在 `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md` §10;实现见下「阶段 3」行。
 
 #### N5 · Open in CLI 工具面(当前最高优先)
 
@@ -55,6 +55,15 @@
 | N5-1 | 设计(operator 自决 2026-07-31,免上抛,以效果为裁) | ✅ 已定 | 决定:①出口=同一批工具对象再建 Server,官方 `StreamableHTTPSessionManager` 挂 sidecar `/mcp`,复用全局 Bearer 中间件,sidecar 保持只绑 127.0.0.1(本机 WSL mirrored 网络实测 localhost 直通 HTTP 200);②审批=A 案,交互式 Open in CLI 摘 bypass 旗标,用 CLI 原生审批当闸,读档经 allowedTools 预放行;③CLI 首版不暴露 delete_llm_endpoint/delete_llm_route(级联删凭据);④claude 用 `--mcp-config`(装机 2.1.199 实证支持 http+headers),token 走 `.mcp.json` 的 `${STUDIO_API_TOKEN}` env 展开不落明文;⑤codex 0.142.5 原生 `--url`+`--bearer-token-env-var`,无需桥。**不确定项(以效果为裁)**:U1 非 mirrored 网络的机器 localhost 不通→改为 lib.rs 注入宿主 IP;U2 codex 摘 bypass 对 ah 编队流的影响→先只动 claude,codex 看效果;U3 FastAPI BaseHTTPMiddleware 与 SSE 流的兼容→TestClient 已过,真机 CLI 长会话再验 |
 | N5-2 | 实现:sidecar `/mcp` streamable HTTP 出口(工具面=面板 27−2) | ✅ 随本行同 PR 合入 | `app/services/cli_mcp_surface.py` + `main.py` lifespan 内建 manager/`app.state` 转发挂载;4 测试(工具差集/内存会话协议/401/initialize 200+session-id);`mcp>=1.29` 补为 backend 直接依赖(uv.lock 变更→合并后根 uv sync + vendor 重建) |
 | N5-3 | 实现:lib.rs 注册 studio MCP(claude `--mcp-config` + 摘 bypass + allowedTools 读档;codex config.toml `[mcp_servers.studio]` url+bearer_token_env_var)+ 资产回写 | ✅ 随本行同 PR 合入 | payload 注入 `STUDIO_MCP_URL`/`STUDIO_API_TOKEN`(sidecar 未起则整段省略、会话照常启动);5 个新 Rust 测试绿(本机既有 4 个无关失败,干净树复现过);cli.md 新增「Studio Tool Surface」节、KB-13 撤销「CLI 无工具」警示 |
+
+#### 阶段 3 · CLI 终端内嵌 copilot 面板(「CLI 即 copilot」,2026-08-02)
+
+| # | 项 | 状态 | 关键坐标 |
+|---|---|---|---|
+| T3-1 | Rust PTY 宿主 + 输出走 Tauri channel;外部终端窗口路径整条删除 | ✅ 随本行同 PR 合入 | 新模块 `apps/studio/tauri/src/cli_terminal.rs`(portable-pty + channel + 会话 owner 去重);删 `spawn_terminal_with_launcher`/`focus_existing_windows_terminal`/`windows_cmd_start_powershell_args`/`spawn_linux_terminal`/两个 .ps1 生成器/窗口标题;PTY 字节链有实测单测(`pty_delivers_the_child_process_output`,含 ConPTY 光标查询应答) |
+| T3-2 | 面板内终端视图:面板持有会话、组件只渲染;xterm 依赖升到 `@xterm/*` | ✅ 随本行同 PR 合入 | `cli-terminal-session.ts`(会话工厂 + 可重放输出历史)+ `cli-terminal-view.tsx`(纯渲染器,懒加载);删孤儿 `TerminalPanel.tsx` 与 `TerminalSession`/`TerminalStatus` 类型 |
+| T3-3 | tmux 鼠标滚动(D6) | ✅ 随本行同 PR 合入 | 启动/attach 脚本 attach 前按**会话工作目录**发现 ah 的 tmux socket 并 `set-option -g mouse on`(不复制 ah 的 socket 哈希);真机实测 `mouse on` 已生效、滚轮上下滚动可逆 |
+| T3-4 | mvp0 遗留后端终端栈删除(`routers/terminal.py` / `terminal_manager.py` / `models/terminal.py` / ws 路由 / `ptyprocess` 依赖) | 待开工(单独 PR) | 与 T3-1/2 无调用关系,且要动依赖清单(uv.lock + vendor 重建),按「一个任务一个 PR」拆出 |
 
 #### 事故修复 · copilot 权限模型"未知工具默认放行"漏洞(exp-B,2026-08-01)
 

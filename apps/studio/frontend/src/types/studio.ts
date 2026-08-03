@@ -4,7 +4,6 @@ export type ActiveTab = 'code' | 'trace' | 'diff' | 'history' | 'batch' | 'termi
 export type LintStatus = 'idle' | 'checking' | 'passed' | 'failed'
 export type RunStatus = 'idle' | 'running' | 'success' | 'error'
 export type ToastKind = 'info' | 'success' | 'error'
-export type TerminalStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
 
 export interface Toast {
   id: string

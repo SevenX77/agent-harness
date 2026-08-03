@@ -1424,6 +1424,27 @@ fn git_has_staged_changes(skill_dir: &Path) -> Result<bool, String> {
     Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
+/// The registered skill id whose workspace is `root`, if the index knows one.
+///
+/// A CLI session used to be told nothing about which skill it was bound to, so
+/// the model guessed one from the manifest `name:` — and once guessed the id of
+/// a DIFFERENT, protected skill and edited that instead (exp-B R0, 2026-07-31).
+/// The index is the registry that answers this, so the id is read from there
+/// rather than accepted from whoever opened the session.
+pub fn registered_skill_id_for_root(config_dir: &Path, root: &Path) -> Option<String> {
+    let index = read_skill_index(&config_dir.join("skill_index.json"));
+    let wanted = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    for (skill_id, entry) in index {
+        let absolute_path = entry.get("absolute_path")?.as_str()?.to_string();
+        let candidate = PathBuf::from(&absolute_path);
+        let candidate = std::fs::canonicalize(&candidate).unwrap_or(candidate);
+        if candidate == wanted {
+            return Some(skill_id);
+        }
+    }
+    None
+}
+
 /// Upsert one `skill_index.json` entry, serialized byte-for-byte to Python
 /// `_write_skill_index` (metadata_local.py): a JSON object keyed by skill id,
 /// each value `{absolute_path, l2_remote_url}`, dumped with sorted keys + 2-space
@@ -2952,6 +2973,32 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn registered_skill_id_for_root_reads_the_registry_not_the_manifest() {
+        let temp = temp_root("registered-skill-id");
+        let config_dir = temp.join("global-config");
+        std::fs::create_dir_all(&config_dir).expect("config dir");
+        let skill_root = temp.join("skills").join("demo");
+        std::fs::create_dir_all(&skill_root).expect("skill dir");
+        std::fs::write(
+            config_dir.join("skill_index.json"),
+            format!(
+                "{{\n  \"registered-id\": {{\n    \"absolute_path\": {path},\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
+                path = serde_json::Value::String(skill_root.display().to_string())
+            ),
+        )
+        .expect("write index");
+
+        assert_eq!(
+            registered_skill_id_for_root(&config_dir, &skill_root),
+            Some("registered-id".to_string())
+        );
+        assert_eq!(
+            registered_skill_id_for_root(&config_dir, &temp.join("skills").join("other")),
+            None
+        );
     }
 
     #[test]

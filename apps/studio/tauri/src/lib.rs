@@ -3281,17 +3281,24 @@ fn parse_ah_runtime_snapshot(snapshot_json: &str) -> Result<AhRuntimeSnapshot, S
 /// `starting` runtime (Req 3.6 forbids it) and skip the cleanup-then-start path on a
 /// `degraded` one (Req 3.7). Each phase maps to exactly one outcome:
 /// - `Active`   → attach the existing runtime.
-/// - `Inactive` → sessions are terminal, so start fresh.
 /// - `Starting` → hands-off: startup is in progress, take no lifecycle action (Req 3.6).
 /// - `Degraded` → cleanup the stale sessions first; the Open flow resolves `CleanupStale`
 ///   to cleanup + a fresh start, so Open stays usable rather than three-buttons-dark
 ///   (Req 3.7/5.7).
+/// - `Inactive` 且 ahd 仍在 → 这是残留(`lingering`)而不是干净的空位:ah 只在 ahd 退出时才
+///   回收 tmux,所以运行时和 `remain-on-exit` 留下的死窗格都还在。一个 workspace 同一时刻
+///   只允许一个 CLI 运行时存在,启动之前必须先把它清掉(决议 2026-08-02 D-A4),否则新的
+///   master 会以 `new-window -d` 挂进同一个 tmux 会话,而 attach 落回那块死窗格。
+/// - `Inactive` 且 ahd 已不在 → 运行时确实被回收过,直接启动。
 fn reconcile_snapshot_lifecycle(snapshot: &AhRuntimeSnapshot) -> CodeAssistantLifecycleAction {
     match snapshot.runtime_state {
         AhRuntimeState::Active => CodeAssistantLifecycleAction::AttachExisting,
-        AhRuntimeState::Inactive => CodeAssistantLifecycleAction::StartFresh,
         AhRuntimeState::Starting => CodeAssistantLifecycleAction::HandsOff,
         AhRuntimeState::Degraded => CodeAssistantLifecycleAction::CleanupStale,
+        AhRuntimeState::Inactive if snapshot.ahd_alive => {
+            CodeAssistantLifecycleAction::CleanupStale
+        }
+        AhRuntimeState::Inactive => CodeAssistantLifecycleAction::StartFresh,
     }
 }
 
@@ -3301,10 +3308,11 @@ fn reconcile_snapshot_lifecycle(snapshot: &AhRuntimeSnapshot) -> CodeAssistantLi
 /// (task6.1-seam-decision-2026-07-10.md, master 裁决 2).
 ///
 /// The requested runtime's phase decides the base action via `reconcile_snapshot_lifecycle`
-/// (Active→attach, Inactive→start fresh, Degraded→cleanup-then-start, Starting→hands-off). The
-/// single-ahd-per-workspace arbitration over `others` is copied verbatim from the old function,
-/// with the "is the other active" judgment swapped from the boolean plane to `runtime_state ==
-/// Active` (equivalently: `others` that reconcile to `AttachExisting`).
+/// (Active→attach, Degraded/lingering→cleanup-then-start, Inactive-with-ahd-gone→start fresh,
+/// Starting→hands-off). `others` 的残留同样触发清理:一个 workspace 同一时刻只允许一个 CLI
+/// 运行时存在,所以启动之前必须把全部残留清干净——否则本次启动完就凑成"某个助手有残留 +
+/// 另一个正在跑"这个不允许的组合(决议 2026-08-02 D-A4)。而"另一个真的在跑"由
+/// `RejectOtherActive` 单独拦住,优先于清理:那是让用户自己去关,不是替他关。
 ///
 /// A `Starting` requested runtime is hands-off regardless of `others`: it is the requested
 /// runtime's own phase that governs, so Open leaves the in-progress startup alone rather than
@@ -3334,6 +3342,13 @@ fn decide_code_assistant_open_v2(
         .iter()
         .filter(|action| **action == CodeAssistantLifecycleAction::AttachExisting)
         .count();
+
+    // 只允许一个 CLI 在跑:另一个助手真的在跑时一律拒绝,让用户自己先关掉它。这一条必须排在
+    // 清理之前——"启动前清全部残留"针对的是残留,不能被扩大解释成"替用户关掉正在干活的 CLI"
+    // (决议 2026-08-02 D-A4)。
+    if requested_action != CodeAssistantLifecycleAction::AttachExisting && other_active_count > 0 {
+        return CodeAssistantOpenDecision::RejectOtherActive;
+    }
 
     if has_stale
         || (requested_action == CodeAssistantLifecycleAction::AttachExisting
@@ -4592,12 +4607,16 @@ mod tests {
             "an active snapshot attaches — decided from runtime_state/active, not ps inventory"
         );
 
+        // 会话终态但 ahd 还活着 ⇒ 运行时(tmux + 死窗格)没被回收,这是残留而不是"干净的空位":
+        // 用户裁决 2026-08-02(第二轮)——启动任何 CLI 之前必须把全部残留清干净,所以它先清后启,
+        // 不是直接 StartFresh。
         let closed = parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED);
+        assert!(closed.ahd_alive, "前置:这一帧的 ahd 仍在,残留未被回收");
         assert_eq!(
             reconcile_snapshot_lifecycle(&closed),
-            CodeAssistantLifecycleAction::StartFresh,
-            "an inactive/all-terminal snapshot starts fresh — decided from the session's own \
-             terminal status, not from re-derived `ah ps` inventory"
+            CodeAssistantLifecycleAction::CleanupStale,
+            "a lingering runtime is reaped before starting — decided from the snapshot itself, \
+             not from re-derived `ah ps` inventory"
         );
 
         // Control: the two outcomes differ, so this is a genuine projection of snapshot
@@ -4873,6 +4892,58 @@ mod tests {
     /// `CodeAssistantOpenDecision::HandsOff` variant do not exist yet, so the whole `cargo test --lib`
     /// fails to COMPILE until g2 implements them — the standard TDD intermediate state, not a defect.
     ///
+    /// 用户裁决 2026-08-02(第二轮):**一个 workspace 同一时刻只允许一个 CLI 运行时存在**,
+    /// **启动任何 CLI 之前必须把全部残留清干净**。"某个助手有残留 + 另一个正在跑"这个组合
+    /// 本身就是不允许的状态——它之所以会出现,正是因为上一次启动没清残留;把启动前清残留做实,
+    /// 这个组合就不再产生。
+    ///
+    /// 三条边界各自独立:
+    /// - 请求方自己有残留 → 先清后启(否则 attach/start 会落到上一轮的死窗格);
+    /// - 另一个助手有残留 → 同样先清后启(否则启动完就凑成那个不允许的组合);
+    /// - 另一个助手**真的在跑** → 拒绝,让用户先关它。只允许一个在跑,而"清残留"不该被扩大成
+    ///   "替用户关掉正在干活的 CLI"。
+    #[test]
+    fn test_open_cleans_every_residual_runtime_before_starting() {
+        use ah_contract_fixtures::{
+            SNAPSHOT_ACTIVE_CODEX, SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_TERMINAL_CLOSED,
+        };
+
+        let lingering = parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED);
+        let reaped = parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT);
+        let other_lingering = [parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED)];
+        let other_running = [parse_snapshot_or_panic(SNAPSHOT_ACTIVE_CODEX)];
+
+        // 前置:两帧确实是"残留"与"已回收"的对照。
+        assert_eq!(lingering.runtime_state, AhRuntimeState::Inactive);
+        assert!(lingering.ahd_alive, "残留的前提:ahd 还在");
+        assert_eq!(reaped.runtime_state, AhRuntimeState::Inactive);
+        assert!(!reaped.ahd_alive, "已回收的前提:ahd 不在了");
+        assert_eq!(other_running[0].runtime_state, AhRuntimeState::Active);
+
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&lingering), &[]),
+            CodeAssistantOpenDecision::CleanupStale,
+            "请求方自己的残留必须先清,否则启动/attach 会落到上一轮的死窗格"
+        );
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&reaped), &other_lingering),
+            CodeAssistantOpenDecision::CleanupStale,
+            "另一个助手的残留同样要先清,否则本次启动完就凑成「残留 + 在跑」这个不允许的组合"
+        );
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&lingering), &other_running),
+            CodeAssistantOpenDecision::RejectOtherActive,
+            "另一个助手真的在跑时只拒绝,不替用户关掉它——只允许一个在跑"
+        );
+
+        // 对照组:两边都确实被回收过才直接启动,证明这不是恒返回 CleanupStale 的常量。
+        assert_eq!(
+            decide_code_assistant_open_v2(Some(&reaped), &[]),
+            CodeAssistantOpenDecision::StartFresh,
+            "没有任何残留时不该凭空跑一次清理"
+        );
+    }
+
     /// This test pins the single-runtime (no others) phase→decision map. The starting branch mirrors
     /// `test_starting_is_hands_off`'s style: a starting REQUESTED runtime must resolve to a distinct
     /// no-action outcome (`HandsOff`), never a duplicate start / cleanup / attach / reject. The `assert_ne!`
@@ -4880,17 +4951,20 @@ mod tests {
     #[test]
     fn test_open_decision_v2_maps_requested_phase() {
         use ah_contract_fixtures::{
-            SNAPSHOT_ACTIVE, SNAPSHOT_DEGRADED, SNAPSHOT_INACTIVE, SNAPSHOT_STARTING,
+            SNAPSHOT_ACTIVE, SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_DEGRADED, SNAPSHOT_STARTING,
         };
 
         let active = parse_snapshot_or_panic(SNAPSHOT_ACTIVE);
-        let inactive = parse_snapshot_or_panic(SNAPSHOT_INACTIVE);
+        // 真 inactive = ahd 也不在了(运行时确实被回收过)。`SNAPSHOT_INACTIVE` 的 ahd 还活着,
+        // 那是残留(lingering),归 test_open_cleans_every_residual_runtime_before_starting 覆盖。
+        let inactive = parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT);
         let degraded = parse_snapshot_or_panic(SNAPSHOT_DEGRADED);
         let starting = parse_snapshot_or_panic(SNAPSHOT_STARTING);
 
         // Fixture preconditions: each frozen snapshot really carries the phase under test.
         assert_eq!(active.runtime_state, AhRuntimeState::Active);
         assert_eq!(inactive.runtime_state, AhRuntimeState::Inactive);
+        assert!(!inactive.ahd_alive, "真 inactive 的前提:ahd 已经不在了");
         assert_eq!(degraded.runtime_state, AhRuntimeState::Degraded);
         assert_eq!(starting.runtime_state, AhRuntimeState::Starting);
 
@@ -4900,7 +4974,7 @@ mod tests {
             CodeAssistantOpenDecision::AttachRequested,
             "active requested runtime attaches — decided from runtime_state, not `ah ps` inventory"
         );
-        // Inactive (all sessions terminal) → start fresh.
+        // Inactive (ahd gone, nothing left to reap) → start fresh.
         assert_eq!(
             decide_code_assistant_open_v2(Some(&inactive), &[]),
             CodeAssistantOpenDecision::StartFresh,
@@ -4973,10 +5047,14 @@ mod tests {
     /// NOT asserted here.
     #[test]
     fn test_open_decision_v2_arbitrates_other_active_runtime() {
-        use ah_contract_fixtures::{SNAPSHOT_ACTIVE, SNAPSHOT_ACTIVE_CODEX, SNAPSHOT_INACTIVE};
+        use ah_contract_fixtures::{
+            SNAPSHOT_ACTIVE, SNAPSHOT_ACTIVE_CODEX, SNAPSHOT_DAEMON_ABSENT,
+        };
 
         let requested_active = parse_snapshot_or_panic(SNAPSHOT_ACTIVE);
-        let requested_inactive = parse_snapshot_or_panic(SNAPSHOT_INACTIVE);
+        // 请求方没有任何运行时(ahd 也不在),排除"请求方自己也有残留"这个变量,
+        // 这里单测的就是「另一个真的在跑」这一条仲裁。
+        let requested_inactive = parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT);
         // A DIFFERENT assistant's runtime that is active (distinct workspace/session_id).
         let other_active = [parse_snapshot_or_panic(SNAPSHOT_ACTIVE_CODEX)];
         assert_eq!(other_active[0].runtime_state, AhRuntimeState::Active);

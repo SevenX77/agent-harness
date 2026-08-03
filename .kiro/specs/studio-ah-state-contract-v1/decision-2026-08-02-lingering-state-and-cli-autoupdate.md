@@ -76,18 +76,38 @@ ah 侧 `degraded` 的既有语义（有 ACTIVE 会话但 master/worker 的 tmux 
 **理由**：`lingering` 下 attach 上去就是那块死窗格——正是用户报告的现象。给出一个必然导向
 死窗格的入口，等于把缺陷换个位置重现。
 
-#### D-A4：本次不修改 Open 决策平面（对上一轮方案的收缩，附理由）
+#### D-A4：启动任何 CLI 之前，清掉该 workspace 下的全部残留运行时
 
-**决定**：`reconcile_snapshot_lifecycle` / `decide_code_assistant_open_v2` 保持不变，
-`lingering` 不引入新的 Open 决策分支。
+**规则（PM 裁决 2026-08-02 第二轮，原话）**：只允许一个 CLI 在跑；启动一个 CLI 之前必须把
+全部残留清干净。
 
-**理由**：实施前核对发现，`CodeAssistantOpenDecision::CleanupStale` 的落地动作是
-`cleanup_workspace_code_assistants(workspace_root)`（`lib.rs:2519`），**它会 stop 掉该 workspace
-下的全部 code assistant config**。若让 `lingering` 映射为 `CleanupStale`，则"请求方残留 + 另一个
-助手正在运行"这一组合会从既有的 `RejectOtherActive`（拒绝启动、保护正在运行的那个）变成
-"把正在运行的那个一并关掉"——这是行为倒退，且超出本次要求。
+**决定**：
+1. `lingering` 与 `degraded` 一样映射为 `CleanupStale`——Open 先清理该 workspace 下的全部
+   运行时残留，再启动。
+2. `RejectOtherActive` 的判定**优先于** `CleanupStale`：当另一个助手真的处于 `active` 时，
+   Open 一律拒绝并提示先关闭它。
 
-**该 fail-safe 的缺失不影响目标**：`lingering` 状态下前端呈现的是管理控件，Open 入口本就点不到。
+**理由**：本决议初版曾以"`CleanupStale` 的落地动作 `cleanup_workspace_code_assistants`
+（`lib.rs`）会 stop 掉该 workspace 下的全部 config"为由放弃这条清理，担心
+"请求方有残留 + 另一个助手正在运行"时误关正在运行的那个。PM 指出**该组合本身就是不允许的
+状态**：它之所以能出现，恰恰是因为上一次启动没有清残留。把"启动前清残留"做实，这个组合
+就不再产生；而"另一个真的在跑"这一条由 `RejectOtherActive` 单独拦住，不被"清残留"扩大解释成
+"替用户关掉正在干活的 CLI"。
+
+**由此确定的决策表**（requested 的相位 × 其他助手的相位）：
+
+| requested | others | 决策 |
+|---|---|---|
+| `starting` | 任意 | `HandsOff` |
+| 非 `active` | 含 `active` | `RejectOtherActive` |
+| `lingering` / `degraded` | 无 `active` | `CleanupStale` |
+| `inactive` | 含 `lingering`/`degraded` | `CleanupStale` |
+| `inactive` | 全 `inactive` | `StartFresh` |
+| `active` | 含 `active` | `CleanupStale` |
+| `active` | 无 `active` | `AttachRequested` |
+
+其中 `inactive` 一律指 `ahd_alive == false` 的真空位（运行时确实被回收过）；`ahd_alive == true`
+的 `inactive` 相位一律是 `lingering`。
 
 ### 5. 验收判据（缺陷 A）
 
@@ -98,6 +118,10 @@ ah 侧 `degraded` 的既有语义（有 ACTIVE 会话但 master/worker 的 tmux 
 | A-3 | `lingering` 渲染管理控件（含 Close），不渲染 `Open in CLI` | 前端单测 |
 | A-4 | `lingering` 的下拉中不出现该助手的 Attach 项 | 前端单测 |
 | A-5 | 真机：`/exit` 后控件保持可关闭态；点 Close 后 tmux 会话与死窗格消失，控件才变回 `Open in CLI` | PM 点验（清单见 PR） |
+| A-6 | 请求方自身是 `lingering` → Open 决策为 `CleanupStale`（先清后启） | Rust 单测 |
+| A-7 | 另一个助手是 `lingering` → 同样 `CleanupStale`（不留下"残留 + 在跑"的组合） | Rust 单测 |
+| A-8 | 另一个助手是 `active` → `RejectOtherActive`，且该判定优先于清理 | Rust 单测 |
+| A-9 | 两侧运行时都已被回收（`ahd_alive:false`）→ `StartFresh`，不跑多余的清理 | Rust 单测（对照组，证明不是常量） |
 
 ## 二、缺陷 B：WSL 里的 Claude CLI 停在旧版本
 

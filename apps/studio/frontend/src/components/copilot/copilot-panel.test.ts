@@ -269,6 +269,33 @@ describe('buildCopilotJudgeDraft', () => {
     expect(grid.rows).toBeGreaterThan(0)
   })
 
+  it('renders the CLI terminal from the session the WORKSPACE owns, not its own state', () => {
+    // Collapsing the panel unmounts it. If the panel owned the session, the
+    // running CLI would be lost on every collapse (and its terminal client
+    // leaked); the workspace owns it and hands it down, so re-expanding
+    // re-renders the same live session.
+    const session = {
+      id: 'claude-abc-1',
+      assistant: 'claude' as const,
+      attach: () => () => {},
+      write: () => {},
+      resize: () => {},
+      detach: () => {},
+    }
+    const html = renderToStaticMarkup(
+      React.createElement(CopilotPanel, {
+        skillId: 'text-segmentation',
+        copilot: mocks.useCopilot(),
+        workspaceRoot: '/tmp/text-segmentation',
+        cliSession: session,
+        onCliSessionChange: () => {},
+      }),
+    )
+
+    expect(html).toContain('data-studio-cli-terminal-region="true"')
+    expect(html).not.toContain('to mention nodes')
+  })
+
   it('derives the close button state from live ahd status', () => {
     // Migrated from the old `{claude,codex}` bool shape to the task-8 per-assistant payload
     // (design.md:290-297); the normal (non-read-only) close-label semantic is unchanged.

@@ -515,6 +515,7 @@ async def compile_skill_for_studio(
             gate="compile",
             outcome="fail",
             defect_count=len(exc.failure.errors),
+            errors=[error.model_dump(mode="json") for error in exc.failure.errors],
         )
         raise
     await publish_skill_gate(

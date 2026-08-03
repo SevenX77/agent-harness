@@ -140,6 +140,11 @@ def test_compile_failure_publishes_a_fail_event_with_the_defect_count(
     assert events[0]["outcome"] == "fail"
     assert events[0]["skill_id"] == "text-segmentation"
     assert int(events[0]["defect_count"]) >= 1
+    # 诊断随事件下发:接收方渲染的必须是同一份聚合诊断,而不是自己再算一遍
+    # (AGENTS.md「diagnostics SSOT」)。
+    carried = events[0]["errors"]
+    assert isinstance(carried, list) and len(carried) == int(events[0]["defect_count"])
+    assert all("message" in row and "severity" in row for row in carried)
 
 
 def test_gate_events_are_published_from_services_not_routers() -> None:

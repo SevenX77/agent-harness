@@ -42,6 +42,11 @@ import { applyPhaseValidator } from "@/components/studio/panels/phase-frontmatte
 import { validatorFilePath, validatorStubContent } from "@/components/studio/panels/phase-validator"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
+import {
+  gateEventKey,
+  projectGateEvent,
+  type SkillGateEvent,
+} from "./gate-state"
 import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
@@ -639,6 +644,59 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setCompileStages((current) => ({ ...current, [id]: stage }))
   }, [])
 
+  // Outcomes already applied, so the click handler's own projection and the
+  // backend broadcast of that same outcome do not fire the side effects twice.
+  const appliedGateOutcomes = useRef<string[]>([])
+
+  // Read inside the applier without making it depend on the open skill: the
+  // event-stream subscription must not tear down and re-register on every switch.
+  const currentSkillIdRef = useRef(currentSkillId)
+  currentSkillIdRef.current = currentSkillId
+
+  /**
+   * The one place a settled gate outcome turns into Studio state.
+   *
+   * Both origins land here — the click handler projects its HTTP response, the
+   * event stream projects the backend broadcast — so a compile driven by copilot
+   * moves the toolbar and opens the drawer exactly like a clicked one
+   * (决议 2026-08-03「状态对等」D4).
+   */
+  const applyGateEvent = useCallback((event: SkillGateEvent) => {
+    const key = gateEventKey(event)
+    if (appliedGateOutcomes.current.includes(key)) return
+    appliedGateOutcomes.current = [...appliedGateOutcomes.current.slice(-63), key]
+
+    const { stage, effects } = projectGateEvent(event)
+    updateStage(event.skillId, stage)
+
+    // Drawers and the trace stream belong to the skill on screen; another skill's
+    // outcome updates its stage but must not yank this view around.
+    if (event.skillId !== currentSkillIdRef.current) return
+
+    for (const effect of effects) {
+      if (effect.kind === "close-drawers") {
+        setCompileDrawerOpen(false)
+        setPredictDrawerOpen(false)
+        setRunDrawerOpen(false)
+        continue
+      }
+      if (effect.kind === "follow-run") {
+        setRunId(effect.runId)
+        continue
+      }
+      if (effect.gate === "compile") {
+        setCompileErrors((current) => ({ ...current, [event.skillId]: effect.errors }))
+        setCompileDrawerOpen(true)
+      } else if (effect.gate === "predict") {
+        setPredictErrors(effect.errors)
+        setPredictDrawerOpen(true)
+      } else {
+        setRunErrors(effect.errors)
+        setRunDrawerOpen(true)
+      }
+    }
+  }, [updateStage])
+
   // F5 (trace): index of the trace event whose prompt is open in the inspector.
   const [promptIndex, setPromptIndex] = useState<number | null>(null)
   const runStream = useRunStream(runId)
@@ -1180,23 +1238,37 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const result = await compileSkill(targetSkillId)
       if ("code" in result) {
-        updateStage(targetSkillId, "compile-fail")
-        setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
-        setCompileDrawerOpen(true)
+        applyGateEvent({
+          skillId: targetSkillId,
+          gate: "compile",
+          outcome: "fail",
+          defectCount: result.errors.length,
+          errors: result.errors,
+        })
         return
       }
       if (result.status === "ok") {
-        updateStage(targetSkillId, "compile-pass")
+        applyGateEvent({
+          skillId: targetSkillId,
+          gate: "compile",
+          outcome: "pass",
+          contentHash: result.artifact_ref.content_hash,
+        })
         setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
-        setCompileDrawerOpen(false)
         toast.success(
           `Compiled ${result.manifest_name} (${shortHash(result.artifact_ref.content_hash)}, fp ${shortHash(result.execution_fingerprint)})`,
         )
         void mutateSkillDetail(result.detail, { revalidate: false })
       }
     } catch (error: unknown) {
-      updateStage(targetSkillId, "compile-fail")
       const message = errorMessage(error)
+      applyGateEvent({
+        skillId: targetSkillId,
+        gate: "compile",
+        outcome: "fail",
+        defectCount: 1,
+        errors: requestDiagnosticErrors(error),
+      })
       setCompileErrors((current) => ({
         ...current,
         [targetSkillId]: [diagnosticError(message, errorDiagnosticDetails(error))],
@@ -1204,7 +1276,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setCompileDrawerOpen(true)
       toast.error(message)
     }
-  }, [mutateSkillDetail, updateStage])
+  }, [applyGateEvent, mutateSkillDetail, updateStage])
 
   const clearStaleCompileProjection = useCallback((targetSkillId: string) => {
     setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
@@ -2059,6 +2131,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     onRolesChanged: ignoreStudioEvent,
     onRuntimeConfigChanged: handleRuntimeConfigChangedEvent,
     onSkillChanged: handleSkillChangedEvent,
+    onSkillGate: applyGateEvent,
   }, { enabled: Boolean(currentSkillId) })
 
 
@@ -2192,10 +2265,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (predict.status !== "success") {
         // predict-fail: clear stale 🟡 logic-OK and show why the prediction failed.
         setRanAgentNodesBySkill((prev) => ({ ...prev, [targetSkillId]: new Set<string>() }))
-        updateStage(targetSkillId, "predict-fail")
         const errors = predictStatusFailureErrors(predict)
-        setPredictErrors(errors)
-        setPredictDrawerOpen(true)
+        applyGateEvent({
+          skillId: targetSkillId,
+          gate: "predict",
+          outcome: "fail",
+          defectCount: errors.length,
+          errors,
+        })
         toast.error(`Predict failed: ${errors[0]?.message ?? "see predicted execution path"}`)
         return
       }
@@ -2206,21 +2283,23 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         [targetSkillId]: ranAgentNodesFromPredict(predict),
       }))
       clearCopilotJudgeResult()
-      updateStage(targetSkillId, "predict-pass")
+      applyGateEvent({ skillId: targetSkillId, gate: "predict", outcome: "pass" })
       setPredictErrors([])
-      setPredictDrawerOpen(false)
       setRunErrors([])
-      setRunDrawerOpen(false)
       toast.success("Predict run completed successfully")
     } catch (error: unknown) {
       setRanAgentNodesBySkill((prev) => ({ ...prev, [targetSkillId]: new Set<string>() }))
-      updateStage(targetSkillId, "predict-fail")
       const errors = requestDiagnosticErrors(error)
-      setPredictErrors(errors)
-      setPredictDrawerOpen(true)
+      applyGateEvent({
+        skillId: targetSkillId,
+        gate: "predict",
+        outcome: "fail",
+        defectCount: errors.length,
+        errors,
+      })
       toast.error(`Predict failed: ${errors[0]?.message ?? "Predict request failed"}`)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, selectedTestInputId, updateStage])
+  }, [applyGateEvent, clearCopilotJudgeResult, currentSkillId, selectedTestInputId, updateStage])
 
   const handleRun = useCallback(async () => {
     if (!currentSkillId) return

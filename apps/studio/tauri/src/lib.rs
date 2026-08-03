@@ -431,10 +431,14 @@ impl CodeAssistant {
         }
     }
 
-    fn master_cmd(self, studio_mcp: Option<&StudioMcpEndpoint>) -> String {
+    fn master_cmd(
+        self,
+        studio_mcp: Option<&StudioMcpEndpoint>,
+        skill: Option<&SessionSkillContext>,
+    ) -> String {
         match self {
-            Self::Claude => claude_master_cmd(studio_mcp),
-            Self::Codex => codex_master_cmd(studio_mcp),
+            Self::Claude => claude_master_cmd(studio_mcp, skill),
+            Self::Codex => codex_master_cmd(studio_mcp, skill),
         }
     }
 
@@ -511,6 +515,33 @@ impl CommandResult {
 /// user turn does not hard-code the answer it expects. Kept free of quotes so it
 /// embeds cleanly in both the TOML `cmd` string and the shell argument.
 const MOIRAI_MASTER_REPORT_PROMPT: &str = "使用 moirai-intro 介绍你自己。";
+
+/// The identity a session is opened against: which skill, and where it lives.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionSkillContext {
+    pub skill_id: String,
+    pub workspace_root: String,
+}
+
+/// First message for the master: the report prompt plus who it is bound to.
+///
+/// Without this the model has no way to learn its own `skill_id` — `context_resolved`
+/// carries only an assets summary — so it infers one from the manifest `name:`.
+/// That inference is what let a session operate on a different, protected skill
+/// (exp-B R0), and what sent a later one grepping the disk for its own id (round2).
+fn master_prompt(skill: Option<&SessionSkillContext>) -> String {
+    match skill {
+        None => MOIRAI_MASTER_REPORT_PROMPT.to_string(),
+        Some(context) => format!(
+            "{MOIRAI_MASTER_REPORT_PROMPT}\n\n\
+             [Studio 会话上下文] 你绑定的 skill_id 是 `{skill_id}`,工作区在 `{workspace_root}`。\
+             调用 Studio 工具时一律用这个 skill_id,不要从 manifest 的 name 推断,\
+             也不要去磁盘上搜。",
+            skill_id = context.skill_id,
+            workspace_root = context.workspace_root,
+        ),
+    }
+}
 
 const STUDIO_AH_MANAGED_MARKER_PREFIX: &str = "<!-- studio-ah-managed hash:";
 const STUDIO_AH_MANAGED_MARKER_SUFFIX: &str = " -->";
@@ -764,8 +795,11 @@ fn studio_mcp_exports(studio_mcp: Option<&StudioMcpEndpoint>) -> String {
     }
 }
 
-fn claude_master_cmd(studio_mcp: Option<&StudioMcpEndpoint>) -> String {
-    let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
+fn claude_master_cmd(
+    studio_mcp: Option<&StudioMcpEndpoint>,
+    skill: Option<&SessionSkillContext>,
+) -> String {
+    let prompt = sh_single_quote_str(&master_prompt(skill));
     let claude_allowed_tools = CLAUDE_STUDIO_ALLOWED_TOOLS;
     let studio_mcp_exports = studio_mcp_exports(studio_mcp);
     let script = format!(
@@ -781,8 +815,11 @@ fn claude_master_cmd(studio_mcp: Option<&StudioMcpEndpoint>) -> String {
 /// - `$HOME/.codex/AGENTS.md` for the MoirAI master instructions.
 /// - `$HOME/.agents/skills` for Studio-managed skills, matching Codex's
 ///   documented local skill discovery path.
-fn codex_master_cmd(studio_mcp: Option<&StudioMcpEndpoint>) -> String {
-    let prompt = sh_single_quote_str(MOIRAI_MASTER_REPORT_PROMPT);
+fn codex_master_cmd(
+    studio_mcp: Option<&StudioMcpEndpoint>,
+    skill: Option<&SessionSkillContext>,
+) -> String {
+    let prompt = sh_single_quote_str(&master_prompt(skill));
     let studio_mcp_exports = studio_mcp_exports(studio_mcp);
     let script = format!(
         "set -e; {studio_mcp_exports}export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
@@ -924,6 +961,7 @@ fn toml_string_array(values: &[String]) -> String {
 fn transient_ah_config_content(
     assistant: CodeAssistant,
     studio_mcp: Option<&StudioMcpEndpoint>,
+    skill: Option<&SessionSkillContext>,
 ) -> Result<String, String> {
     let provider = assistant.provider();
     let assets_dir = studio_agents_dir()?;
@@ -939,7 +977,7 @@ fn transient_ah_config_content(
     Ok(format!(
         "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\nskills = {master_skills}\n\n[agents.clotho]\nprovider = {provider_toml}\nskills = {clotho_skills}\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = {lachesis_skills}\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = {atropos_skills}\n",
         provider_toml = toml_string(provider),
-        cmd = toml_string(&assistant.master_cmd(studio_mcp)),
+        cmd = toml_string(&assistant.master_cmd(studio_mcp, skill)),
         master_skills = toml_string_array(&master_skills),
         clotho_skills = toml_string_array(&clotho_skills),
         lachesis_skills = toml_string_array(&lachesis_skills),
@@ -951,6 +989,7 @@ fn ah_config_for_workspace(
     workspace_root: &Path,
     assistant: CodeAssistant,
     studio_mcp: Option<&StudioMcpEndpoint>,
+    skill: Option<&SessionSkillContext>,
 ) -> Result<PathBuf, String> {
     if let Some(config) = find_ah_config(workspace_root) {
         return Ok(config);
@@ -962,7 +1001,7 @@ fn ah_config_for_workspace(
         .ok_or_else(|| format!("cannot resolve ah config parent: {}", config.display()))?;
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create transient ah config dir: {error}"))?;
-    std::fs::write(&config, transient_ah_config_content(assistant, studio_mcp)?)
+    std::fs::write(&config, transient_ah_config_content(assistant, studio_mcp, skill)?)
         .map_err(|error| format!("failed to write transient ah config: {error}"))?;
     Ok(config)
 }
@@ -2480,6 +2519,14 @@ fn open_code_assistant(
     rows: u16,
 ) -> Result<OpenedCodeAssistant, String> {
     check_ah_version_cached()?;
+    // Read the id off the registry rather than trusting the opener: the session
+    // must be told which skill it is bound to, and it must be the registered one.
+    let skill = native_fs::registered_skill_id_for_root(&resolve_config_dir(), workspace_root).map(
+        |skill_id| SessionSkillContext {
+            skill_id,
+            workspace_root: workspace_root.display().to_string(),
+        },
+    );
     let (config_path, launcher) = match prepare_code_assistant_open(state, workspace_root, assistant)?
     {
         CodeAssistantOpenAction::AttachExisting(config_path) => {
@@ -2491,7 +2538,8 @@ fn open_code_assistant(
             (config_path, launcher)
         }
         CodeAssistantOpenAction::StartFresh => {
-            let config_path = ah_config_for_workspace(workspace_root, assistant, studio_mcp)?;
+            let config_path =
+                ah_config_for_workspace(workspace_root, assistant, studio_mcp, skill.as_ref())?;
             ensure_lifecycle_command_allowed(&config_path)?;
             let launcher = write_code_assistant_launcher_script(
                 workspace_root,
@@ -3682,8 +3730,46 @@ mod tests {
     }
 
     #[test]
+    fn master_prompt_tells_the_session_which_skill_it_is_bound_to() {
+        // F3/F13: the session was never told its own skill_id, so the model
+        // inferred one from the manifest name — and once operated on a different,
+        // protected skill because the names matched (exp-B R0).
+        let context = SessionSkillContext {
+            skill_id: "exp-b-round3".to_string(),
+            workspace_root: "/mnt/d/coding/skills/exp-b-round3".to_string(),
+        };
+
+        let prompt = master_prompt(Some(&context));
+
+        assert!(prompt.starts_with(MOIRAI_MASTER_REPORT_PROMPT));
+        assert!(prompt.contains("exp-b-round3"));
+        assert!(prompt.contains("/mnt/d/coding/skills/exp-b-round3"));
+    }
+
+    #[test]
+    fn master_prompt_stays_bare_when_the_workspace_is_not_a_registered_skill() {
+        assert_eq!(master_prompt(None), MOIRAI_MASTER_REPORT_PROMPT);
+    }
+
+    #[test]
+    fn master_cmd_carries_the_skill_identity_into_the_launched_command() {
+        let context = SessionSkillContext {
+            skill_id: "exp-b-round3".to_string(),
+            workspace_root: "/mnt/d/coding/skills/exp-b-round3".to_string(),
+        };
+
+        for assistant in [CodeAssistant::Claude, CodeAssistant::Codex] {
+            let cmd = assistant.master_cmd(None, Some(&context));
+            assert!(
+                cmd.contains("exp-b-round3"),
+                "{assistant:?} master cmd must name the bound skill"
+            );
+        }
+    }
+
+    #[test]
     fn claude_master_cmd_rejects_interop_binaries() {
-        let cmd = claude_master_cmd(None);
+        let cmd = claude_master_cmd(None, None);
 
         assert!(cmd.contains("claude_target=$(readlink -f \"$claude_real\""));
         assert!(cmd.contains("case \"$claude_target\" in /mnt/*)"));
@@ -3712,8 +3798,8 @@ mod tests {
         };
 
         for cmd in [
-            claude_master_cmd(Some(&endpoint)),
-            codex_master_cmd(Some(&endpoint)),
+            claude_master_cmd(Some(&endpoint), None),
+            codex_master_cmd(Some(&endpoint), None),
         ] {
             let url_at = cmd
                 .find("export STUDIO_MCP_URL=")
@@ -3735,7 +3821,7 @@ mod tests {
 
         // Sidecar unreachable: no endpoint, no exports, and the session still
         // starts (just without Studio tools).
-        for cmd in [claude_master_cmd(None), codex_master_cmd(None)] {
+        for cmd in [claude_master_cmd(None, None), codex_master_cmd(None, None)] {
             assert!(!cmd.contains("export STUDIO_MCP_URL="));
             assert!(!cmd.contains("export STUDIO_API_TOKEN="));
         }
@@ -3746,7 +3832,7 @@ mod tests {
         // N5-3: the CLI surface gets the same Studio tools as the panel. Approval
         // is claude's OWN prompt (bypass flag dropped) — Studio does not build a
         // second approval system for a session the user is sitting in.
-        let cmd = claude_master_cmd(None);
+        let cmd = claude_master_cmd(None, None);
 
         assert!(cmd.contains("$HOME/.claude/studio-mcp.json"));
         assert!(cmd.contains("\"type\":\"http\""));
@@ -3767,7 +3853,7 @@ mod tests {
     fn claude_master_cmd_skips_mcp_when_sidecar_unreachable() {
         // No STUDIO_MCP_URL (sidecar not up / non-mirrored network): the session
         // must still launch, just without the Studio tools — never hard-fail.
-        let cmd = claude_master_cmd(None);
+        let cmd = claude_master_cmd(None, None);
 
         assert!(cmd.contains("if [ -n \"${STUDIO_MCP_URL:-}\" ]"));
         assert!(cmd.contains("studio_mcp_args="));
@@ -3777,7 +3863,7 @@ mod tests {
     fn codex_master_cmd_registers_studio_mcp_streamable_http() {
         // codex 0.142.5 speaks streamable HTTP natively (--url +
         // --bearer-token-env-var), so no stdio bridge is needed.
-        let cmd = codex_master_cmd(None);
+        let cmd = codex_master_cmd(None, None);
 
         assert!(cmd.contains("[mcp_servers.studio]"));
         assert!(cmd.contains("bearer_token_env_var = \"STUDIO_API_TOKEN\""));
@@ -3955,7 +4041,7 @@ mod tests {
 
     #[test]
     fn codex_master_cmd_rejects_interop_binaries_and_prefers_standalone() {
-        let cmd = codex_master_cmd(None);
+        let cmd = codex_master_cmd(None, None);
         let standalone = "$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex";
         let standalone_index = cmd
             .find(standalone)
@@ -4004,7 +4090,7 @@ mod tests {
     #[test]
     fn transient_ah_config_starts_moirai_team() {
         let config =
-            transient_ah_config_content(CodeAssistant::Claude, None).expect("transient claude ah config");
+            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config");
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
@@ -4056,7 +4142,7 @@ mod tests {
     #[test]
     fn transient_ah_config_starts_codex_moirai_team() {
         let config =
-            transient_ah_config_content(CodeAssistant::Codex, None).expect("transient codex ah config");
+            transient_ah_config_content(CodeAssistant::Codex, None, None).expect("transient codex ah config");
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
@@ -4143,7 +4229,7 @@ mod tests {
     #[test]
     fn transient_ah_config_omits_systemd_scope_ro_binds() {
         let config =
-            transient_ah_config_content(CodeAssistant::Claude, None).expect("transient claude ah config");
+            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config");
 
         assert!(!config.contains("additional_ro_binds"));
         assert!(!config.contains("BindReadOnlyPaths"));
@@ -5210,7 +5296,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
-        let config = ah_config_for_workspace(&root, CodeAssistant::Claude, None)
+        let config = ah_config_for_workspace(&root, CodeAssistant::Claude, None, None)
             .expect("generated transient ah config");
 
         assert!(config.is_file());
@@ -5274,7 +5360,7 @@ mod tests {
         std::fs::write(root.join("ah.toml"), "version = \"1\"\n").unwrap();
 
         let config =
-            ah_config_for_workspace(&child, CodeAssistant::Claude, None).expect("existing ah config");
+            ah_config_for_workspace(&child, CodeAssistant::Claude, None, None).expect("existing ah config");
 
         assert_eq!(config, root.join("ah.toml"));
         assert!(!root.join(".ah").exists());
@@ -5296,7 +5382,7 @@ mod tests {
         std::fs::create_dir_all(&transient_dir).unwrap();
         std::fs::write(
             &transient,
-            transient_ah_config_content(CodeAssistant::Codex, None).expect("codex config"),
+            transient_ah_config_content(CodeAssistant::Codex, None, None).expect("codex config"),
         )
         .unwrap();
 
@@ -5669,7 +5755,7 @@ mod tests {
         let discovered_config = workspace.join("ah.toml");
         std::fs::write(
             &discovered_config,
-            transient_ah_config_content(CodeAssistant::Claude, None).expect("transient claude ah config"),
+            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config"),
         )
         .unwrap();
 
@@ -5953,7 +6039,7 @@ mod tests {
         let discovered_config = workspace.join("ah.toml");
         std::fs::write(
             &discovered_config,
-            transient_ah_config_content(CodeAssistant::Claude, None).expect("transient claude ah config"),
+            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config"),
         )
         .unwrap();
 
@@ -6060,7 +6146,7 @@ sessions
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(
             root.join("ah.toml"),
-            transient_ah_config_content(CodeAssistant::Claude, None).expect("claude config"),
+            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("claude config"),
         )
         .unwrap();
 

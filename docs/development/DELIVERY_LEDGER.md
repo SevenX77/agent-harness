@@ -64,6 +64,7 @@
 | T3-2 | 面板内终端视图:面板持有会话、组件只渲染;xterm 依赖升到 `@xterm/*` | ✅ 随本行同 PR 合入 | `cli-terminal-session.ts`(会话工厂 + 可重放输出历史)+ `cli-terminal-view.tsx`(纯渲染器,懒加载);删孤儿 `TerminalPanel.tsx` 与 `TerminalSession`/`TerminalStatus` 类型 |
 | T3-3 | tmux 鼠标滚动(D6) | ✅ 随本行同 PR 合入 | 启动/attach 脚本 attach 前按**会话工作目录**发现 ah 的 tmux socket 并 `set-option -g mouse on`(不复制 ah 的 socket 哈希);真机实测 `mouse on` 已生效、滚轮上下滚动可逆 |
 | T3-5 | PM 反馈两处修正:动作栏压面板 + 收起面板丢终端 | ✅ 随本行同 PR 合入 | ①动作栏改为在画布安全区之间居中(`center-action-bar.tsx`,与 minimap 同一组 safe-area 变量);②CLI 会话所有权从 copilot 面板上移到 `Workspace`——面板收起会被卸载,会话存那里必然随之消失且泄漏终端客户端;设计源 §10 D3 同步修正 |
+| T3-6 | **CLI 会话拿不到 Studio 工具面(N5 实际失效)** | ✅ 随本行同 PR 合入 | 根因:master 由 ahd 派生,ahd **不继承** launcher shell 的 export(实测 daemon 与其下所有进程 STUDIO_* 变量为 0),`--mcp-config` 整段被 `${STUDIO_MCP_URL:-}` 守卫静默丢弃,会话起来后 `/mcp` 报 No MCP servers configured;修复=端点与 token 烤进 master `cmd` 串本身(ahd 原样执行),与 `build_ah_bash_script` 的同类推理一致。真机实证:修前 `No MCP servers configured` → 修后 `studio · ✔ connected · 25 tools` |
 | T3-4 | mvp0 遗留后端终端栈删除(`routers/terminal.py` / `terminal_manager.py` / `models/terminal.py` / ws 路由 / `ptyprocess` 依赖) | 待开工(单独 PR) | 与 T3-1/2 无调用关系,且要动依赖清单(uv.lock + vendor 重建),按「一个任务一个 PR」拆出 |
 
 #### 事故修复 · copilot 权限模型"未知工具默认放行"漏洞(exp-B,2026-08-01)

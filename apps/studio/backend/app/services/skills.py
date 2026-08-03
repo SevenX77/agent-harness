@@ -64,6 +64,7 @@ from app.models.skills import (
 from app.services.canvas_data_gap import build_phase_io_index, compute_field_supply
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
 from app.services.file_watcher import record_api_write, register_workspace
+from app.services.gate_events import publish_skill_gate
 from app.services.git_local import initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
 from app.services.runtime_config import refresh_runtime_config, runtime_input_fields_for_engine
@@ -495,6 +496,37 @@ def _strip_sandbox_prefix(file_path: str, sandbox_str: str) -> str:
 
 
 async def compile_skill_for_studio(
+    user_id: str,
+    skill_id: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> CompileSuccess:
+    """Compile a resolved skill, broadcast the outcome, return the Studio contract.
+
+    The broadcast lives here rather than in the HTTP route because this function is
+    the only common downstream of the route and the MCP tool — the frontend must
+    learn about a compile whoever started it (决议 2026-08-03 D2).
+    """
+    try:
+        success = await _compile_skill_for_studio(user_id, skill_id, storage, metadata)
+    except CompileFailedError as exc:
+        await publish_skill_gate(
+            skill_id=skill_id,
+            gate="compile",
+            outcome="fail",
+            defect_count=len(exc.failure.errors),
+        )
+        raise
+    await publish_skill_gate(
+        skill_id=skill_id,
+        gate="compile",
+        outcome="pass",
+        content_hash=str(success.artifact_ref.get("content_hash") or "") or None,
+    )
+    return success
+
+
+async def _compile_skill_for_studio(
     user_id: str,
     skill_id: str,
     storage: StorageBackend,

@@ -109,6 +109,33 @@ ah 侧 `degraded` 的既有语义（有 ACTIVE 会话但 master/worker 的 tmux 
 其中 `inactive` 一律指 `ahd_alive == false` 的真空位（运行时确实被回收过）；`ahd_alive == true`
 的 `inactive` 相位一律是 `lingering`。
 
+#### D-A5：残留清理的主路径是"关闭时清"，启动时清是双保险
+
+**规则（PM 澄清 2026-08-02，原话）**：一个 CLI 关闭时就应该把残留清干净；启动时清理是双保险。
+
+**现状**：Close 已经走 `ah stop`，ah 侧的 SIGTERM 处理路径会逐个 `kill-session` 并
+`tmux kill-server`（ah 仓 `src/bin/ahd.rs:214-241`），所以"关闭 ⇒ 残留被回收"这条链本身成立。
+
+**缺口在宣布时机**：ah 的 shutdown handler 先返回 RPC，再 spawn 一个 50 毫秒后给自己发 SIGTERM
+的任务（ah 仓 `src/rpc/handlers/system.rs:10-22`）。因此 `ah stop` 返回时 ahd 尚未退出、tmux
+尚未回收；而 Studio 在命令返回后立即清空状态缓存并 emit（`lib.rs` 的 `close_code_assistant`），
+UI 会在残留还在时就变回 `Open in CLI`——这正是"命令发出即宣布成功"，违反 AGENTS.md 的因果验证
+铁律，也破坏 D-A1 建立的不变量。
+
+**决定**：Close 在 `ah stop` 之后轮询确认 ah 运行时确实消失（探测不到快照，或快照自报
+`ahd_alive:false`），确认之后才清空状态缓存；确认不了就**保留 `lingering` 状态**，让使用者
+可以再关一次，而不是谎报已清理。
+
+#### D-A6：Studio 内不存在"一个 CLI 开着还能开另一个"的入口
+
+**事实（PM 澄清 2026-08-02）**：面板头部只有一个控件位——只要任一助手处于 `active` 或
+`lingering`，渲染的就是管理控件（Attach/Close），`Open in CLI` 根本不出现。因此"另一个助手
+正在运行时点 Open"这个交互在 Studio 内不可达。
+
+**因此**：`RejectOtherActive` 保留为**后端边界的 fail-fast**（Tauri command 可被直接调用，
+边界校验不能省），而不是一个 UI 会走到的分支。它不应被当作"使用者可能遇到的交互"来设计，
+也不构成放弃 D-A4 清理规则的理由。
+
 ### 5. 验收判据（缺陷 A）
 
 | # | 判据 | 验证方式 |
@@ -122,6 +149,8 @@ ah 侧 `degraded` 的既有语义（有 ACTIVE 会话但 master/worker 的 tmux 
 | A-7 | 另一个助手是 `lingering` → 同样 `CleanupStale`（不留下"残留 + 在跑"的组合） | Rust 单测 |
 | A-8 | 另一个助手是 `active` → `RejectOtherActive`，且该判定优先于清理 | Rust 单测 |
 | A-9 | 两侧运行时都已被回收（`ahd_alive:false`）→ `StartFresh`，不跑多余的清理 | Rust 单测（对照组，证明不是常量） |
+| A-10 | Close 在 `ah stop` 之后持续探测，直到运行时确实消失才确认；每一轮都重新探测 | Rust 单测（注入探测器） |
+| A-11 | 运行时卡住不退时，确认返回失败而不是假装已清理，且状态缓存不被清空（UI 保持可关闭） | Rust 单测 |
 
 ## 二、缺陷 B：WSL 里的 Claude CLI 停在旧版本
 

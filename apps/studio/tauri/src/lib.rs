@@ -1132,6 +1132,33 @@ fn cleanup_code_assistant_config(
     Ok(stopped || killed_any)
 }
 
+/// 每轮确认之间的等待。ah 的 shutdown 是"先回 RPC、50ms 后自发 SIGTERM、再在信号路径里
+/// 逐个 kill-session 并 kill-server",所以确认必然要跨若干轮。
+const AH_STOP_CONFIRM_POLL_INTERVAL: Duration = Duration::from_millis(300);
+
+/// 确认运行时消失的最多轮数。用满仍未确认就如实报告失败，由调用方保留可关闭状态。
+const AH_STOP_CONFIRM_MAX_ATTEMPTS: u32 = 5;
+
+/// 轮询确认 ah 运行时确实消失了。
+///
+/// 因果验证(AGENTS.md 铁律):`ah stop` 只是把停止命令送达 ahd,命令返回不能证明 tmux 已被
+/// 回收——ahd 是先回 RPC、再自发 SIGTERM,真正的回收发生在信号处理路径里。在确认之前就对外
+/// 宣布"已清理",面板会在残留还在时把控件变回 `Open in CLI`,破坏"控件可开 ⇒ 残留已清"这条
+/// 不变量。
+///
+/// 探测器由调用方注入(生产实现在其中读快照并退避等待),因此这段判定逻辑可以脱离子进程离线
+/// 验证。返回 `true` 表示已确认消失(探测不到快照,或快照自报 `ahd_alive:false`);
+/// `false` 表示用满轮数仍未确认——调用方必须据此保留可关闭状态,不得谎报已清理。
+fn wait_until_ah_runtime_gone<P>(mut probe: P, max_attempts: u32) -> bool
+where
+    P: FnMut(u32) -> Option<AhRuntimeSnapshot>,
+{
+    (0..max_attempts).any(|attempt| match probe(attempt) {
+        None => true,
+        Some(snapshot) => !snapshot.ahd_alive,
+    })
+}
+
 fn workspace_code_assistant_configs(workspace_root: &Path) -> BTreeSet<PathBuf> {
     CodeAssistant::ALL
         .iter()
@@ -1142,6 +1169,7 @@ fn workspace_code_assistant_configs(workspace_root: &Path) -> BTreeSet<PathBuf> 
 struct CodeAssistantCleanupResult {
     configs: BTreeSet<PathBuf>,
     closed_any: bool,
+    runtime_confirmed_gone: bool,
 }
 
 fn cleanup_workspace_code_assistants(
@@ -1152,9 +1180,29 @@ fn cleanup_workspace_code_assistants(
     for config in &configs {
         closed_any |= cleanup_code_assistant_config(config, Some(workspace_root))?;
     }
+
+    // 因果验证(AGENTS.md 铁律):上面只是把停止命令送达 ahd —— ahd 先回 RPC、再自发 SIGTERM,
+    // 真正的 kill-session / kill-server 发生在信号处理路径里。所以这里必须观察到运行时确实
+    // 消失,才能对外说"清干净了";只要有一个 config 没确认,整次清理就不算确认——不能被其中
+    // 一个成功的掩盖。工作区自己的 ah.toml 不归 Studio 管(上面就跳过了没发命令),自然也不
+    // 该因它把面板卡在可关闭态。
+    let runtime_confirmed_gone = configs.iter().all(|config| {
+        classify_config_ownership(config).read_only
+            || wait_until_ah_runtime_gone(
+                |attempt| {
+                    if attempt > 0 {
+                        std::thread::sleep(AH_STOP_CONFIRM_POLL_INTERVAL);
+                    }
+                    resolve_cleanup_snapshot(config, Some(workspace_root))
+                },
+                AH_STOP_CONFIRM_MAX_ATTEMPTS,
+            )
+    });
+
     Ok(CodeAssistantCleanupResult {
         configs,
         closed_any,
+        runtime_confirmed_gone,
     })
 }
 
@@ -2773,7 +2821,11 @@ fn close_code_assistant(
         .lock()
         .expect("code assistant state poisoned")
         .retain(|registered_config| !cleanup.configs.contains(registered_config));
-    clear_status_snapshots_for_workspace(&state, &workspace_root);
+    // 只有确认运行时真的消失了，才把状态缓存清成"什么都没有"。否则保留最后一帧快照，
+    // 面板继续呈现 `lingering`（可再关一次），而不是在残留还在时谎报可以重新打开。
+    if cleanup.runtime_confirmed_gone {
+        clear_status_snapshots_for_workspace(&state, &workspace_root);
+    }
     emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(cleanup.closed_any)
 }
@@ -4587,6 +4639,54 @@ mod tests {
             AssistantStatus::Inactive,
             "with ahd gone ah's shutdown path already ran kill-server, so Open is honest again"
         );
+    }
+
+    /// 因果验证(AGENTS.md 铁律)——`ah stop` 只是把停止命令送达 ahd:ahd 先回 RPC,再自发
+    /// SIGTERM,真正的 `kill-session` / `tmux kill-server` / 删 socket 发生在信号处理路径里。
+    /// 所以"命令返回"不能证明运行时已被回收。Close 若在确认之前就对外宣布已清理,面板会在
+    /// 残留还在时把控件变回 `Open in CLI`,破坏"控件可开 ⇒ 残留已清"这条不变量
+    /// (决议 2026-08-02 D-A1;PM 澄清 2026-08-02:一个 CLI 关闭时就应该把残留清干净)。
+    #[test]
+    fn test_close_waits_until_the_ah_runtime_is_actually_gone() {
+        use ah_contract_fixtures::{SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_TERMINAL_CLOSED};
+
+        let lingering = parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED);
+        assert!(lingering.ahd_alive, "前置:这一帧的 ahd 仍在应答");
+
+        // ahd 还在应答的那几轮都不算数,直到探测不到它才算确认。
+        let mut probed = 0;
+        let confirmed = wait_until_ah_runtime_gone(
+            |_| {
+                probed += 1;
+                (probed < 3).then(|| lingering.clone())
+            },
+            5,
+        );
+        assert!(confirmed, "ahd 消失之后必须确认成功");
+        assert_eq!(
+            probed, 3,
+            "确认之前每一轮都要重新探测,不能只读第一帧就下结论"
+        );
+
+        // 快照自报 ahd 不在,同样算确认(读得到帧但 ahd_alive=false)。
+        let absent = parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT);
+        assert!(!absent.ahd_alive, "前置:这一帧自报 ahd 不在");
+        assert!(
+            wait_until_ah_runtime_gone(|_| Some(absent.clone()), 1),
+            "快照自报 ahd 不在时即可确认,不必等到探测失败"
+        );
+
+        // 卡住不退的 ahd:用满上限仍未确认,必须如实返回 false,不能假装已经清干净。
+        let mut attempts = 0;
+        let never = wait_until_ah_runtime_gone(
+            |_| {
+                attempts += 1;
+                Some(lingering.clone())
+            },
+            4,
+        );
+        assert!(!never, "ahd 没退就不能宣布已清理");
+        assert_eq!(attempts, 4, "上限必须被真正用满,而不是提前放弃");
     }
 
     /// Task 3 (tasks.md:63) — the normal decision plane consumes a TYPED snapshot, not

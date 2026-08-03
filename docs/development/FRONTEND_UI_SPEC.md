@@ -245,10 +245,14 @@ Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分�
   - `Main Workspace (SplitEditor)` 包含上下或左右分割的 Canvas 画布和 Monaco 代码编辑器。
   - `Right Drawer (Copilot / Golden)` 按需滑出。
 - **重要 caveat**: 拖拽调节窗体大小时，必须确保 `ReactFlow` 和 `Monaco Editor` 及时监听 Resize Observer，触发自我边界更新 (`fit-to-screen` 和 `layout()`)，否则可能产生渲染撕裂。
+- **画布浮层必须让开侧边面板**（2026-08-03）：任何属于画布的浮层（动作栏、minimap、画布控件）都在
+  **画布区域内**定位，即读 `--studio-canvas-left-safe-area` / `--studio-canvas-right-safe-area`
+  在两侧浮层之间的空档里居中或贴边。按窗口居中（`fixed left-1/2`）在侧边面板展开时必然压到面板上。
 - **长生命周期的外部会话由容器持有，渲染组件只 attach**（2026-08-02，内嵌 CLI 终端）：像终端会话、
   长连接这类"启动一次、活很久"的资源，启动动作必须挂在用户操作（点击）上，**不能写在渲染组件的
   副作用里** —— React 开发模式故意把副作用执行两遍，任何非幂等的启动都会被第二次调用破坏。容器
-  持有会话对象并负责结束它；渲染组件挂载时 attach、卸载时 detach，且**会话的输出历史必须可重放**
+  持有会话对象并负责结束它——**容器要选在会被卸载的那层之上**（收起面板会卸载面板，会话存在面板里
+  就会随之消失、并把后台客户端漏在那儿）；渲染组件挂载时 attach、卸载时 detach，且**会话的输出历史必须可重放**
   （每个 attach 上来的渲染器都拿到同一份历史，而不是"取走"缓冲），否则被丢弃的那次挂载会带走
   最早的数据。参照实现：`components/copilot/cli-terminal-session.ts` + `cli-terminal-view.tsx`。
 - **Rust→前端的流式数据走 Tauri channel，不走全局事件**（同上）：channel 由前端创建、作为命令参数传入，

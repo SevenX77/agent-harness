@@ -281,6 +281,11 @@ interface CopilotPanelProps {
   onFileChanged?: (path: string, action: CopilotFileAction) => void
   // R5-E: collapse the panel back to the canvas MoirAI FAB (header control).
   onCollapse?: () => void
+  // The CLI session belongs to the WORKSPACE, not to this panel: collapsing the
+  // panel unmounts it, and a session owned here would die with it (design
+  // ah-orchestration-design.md §10 D3 — collapsing is a detach, not a shutdown).
+  cliSession?: CliTerminalSession | null
+  onCliSessionChange?: (session: CliTerminalSession | null) => void
 }
 
 /** F6: Enter sends, Shift+Enter breaks the line, and an IME composition never sends. */
@@ -449,6 +454,8 @@ export function CopilotPanel({
   onJudgePrepared,
   onFileChanged,
   onCollapse,
+  cliSession = null,
+  onCliSessionChange,
 }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
@@ -463,10 +470,6 @@ export function CopilotPanel({
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
-  // The CLI session this panel owns, or null for the chat view. §10 D1:
-  // exactly one of the two is on screen. The panel owns the session's lifetime;
-  // the terminal component only renders it.
-  const [cliSession, setCliSession] = useState<CliTerminalSession | null>(null)
   const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(inactiveCodeAssistantStatus)
   const shouldLoadTemplates = !skillId && copilot.messages.length === 0
   const { templates, templatesLoading } = useTemplates({ enabled: shouldLoadTemplates })
@@ -671,11 +674,11 @@ export function CopilotPanel({
       // shapes the very first frame.
       grid: { cols: 100, rows: 30 },
       onExit: () => {
-        setCliSession(null)
+        onCliSessionChange?.(null)
         void refreshCodeAssistantStatus()
       },
     })
-    setCliSession(session)
+    onCliSessionChange?.(session)
     if (session) await refreshCodeAssistantStatus()
   }
 
@@ -698,7 +701,7 @@ export function CopilotPanel({
     // Drop the local terminal client first, so the ah cleanup below is not
     // racing a live tmux attach.
     cliSession?.detach()
-    setCliSession(null)
+    onCliSessionChange?.(null)
     try {
       const readOnlyAssistants = closableCodeAssistants.filter((id) => isAssistantReadOnly(codeAssistantStatus[id]))
       const writeAssistants = closableCodeAssistants.filter((id) => !isAssistantReadOnly(codeAssistantStatus[id]))
@@ -899,9 +902,11 @@ export function CopilotPanel({
         /* §10 D1: the CLI session's terminal takes over this region — chat and
            terminal are mutually exclusive, and the header control above stays
            the only way to attach or close a CLI (§10 D4). */
-        <Suspense fallback={<div className="min-h-0 flex-1" />}>
-          <CliTerminalView key={cliSession.id} session={cliSession} />
-        </Suspense>
+        <div data-studio-cli-terminal-region="true" className="flex min-h-0 flex-1 flex-col">
+          <Suspense fallback={<div className="min-h-0 flex-1" />}>
+            <CliTerminalView key={cliSession.id} session={cliSession} />
+          </Suspense>
+        </div>
       ) : (
       <>
       <SessionTabs

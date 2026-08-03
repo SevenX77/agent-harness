@@ -63,6 +63,7 @@
 | T3-1 | Rust PTY 宿主 + 输出走 Tauri channel;外部终端窗口路径整条删除 | ✅ 随本行同 PR 合入 | 新模块 `apps/studio/tauri/src/cli_terminal.rs`(portable-pty + channel + 会话 owner 去重);删 `spawn_terminal_with_launcher`/`focus_existing_windows_terminal`/`windows_cmd_start_powershell_args`/`spawn_linux_terminal`/两个 .ps1 生成器/窗口标题;PTY 字节链有实测单测(`pty_delivers_the_child_process_output`,含 ConPTY 光标查询应答) |
 | T3-2 | 面板内终端视图:面板持有会话、组件只渲染;xterm 依赖升到 `@xterm/*` | ✅ 随本行同 PR 合入 | `cli-terminal-session.ts`(会话工厂 + 可重放输出历史)+ `cli-terminal-view.tsx`(纯渲染器,懒加载);删孤儿 `TerminalPanel.tsx` 与 `TerminalSession`/`TerminalStatus` 类型 |
 | T3-3 | tmux 鼠标滚动(D6) | ✅ 随本行同 PR 合入 | 启动/attach 脚本 attach 前按**会话工作目录**发现 ah 的 tmux socket 并 `set-option -g mouse on`(不复制 ah 的 socket 哈希);真机实测 `mouse on` 已生效、滚轮上下滚动可逆 |
+| T3-5 | PM 反馈两处修正:动作栏压面板 + 收起面板丢终端 | ✅ 随本行同 PR 合入 | ①动作栏改为在画布安全区之间居中(`center-action-bar.tsx`,与 minimap 同一组 safe-area 变量);②CLI 会话所有权从 copilot 面板上移到 `Workspace`——面板收起会被卸载,会话存那里必然随之消失且泄漏终端客户端;设计源 §10 D3 同步修正 |
 | T3-4 | mvp0 遗留后端终端栈删除(`routers/terminal.py` / `terminal_manager.py` / `models/terminal.py` / ws 路由 / `ptyprocess` 依赖) | 待开工(单独 PR) | 与 T3-1/2 无调用关系,且要动依赖清单(uv.lock + vendor 重建),按「一个任务一个 PR」拆出 |
 
 #### 事故修复 · copilot 权限模型"未知工具默认放行"漏洞(exp-B,2026-08-01)

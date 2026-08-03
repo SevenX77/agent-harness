@@ -102,7 +102,14 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
   return (
     <div
       data-studio-center-action-bar="true"
-      className="studio-center-action-bar fixed bottom-6 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-0 rounded-full border p-1"
+      className="studio-center-action-bar absolute bottom-6 z-40 inline-flex -translate-x-1/2 items-center gap-0 rounded-full border p-1"
+      style={{
+        // The bar belongs to the canvas, so it centres on the canvas — the gap
+        // between the side overlays — not on the window, which slid it under
+        // the copilot panel. Same safe-area vars the minimap and the canvas
+        // controls read; `100%` is the canvas host this sits in.
+        left: `calc(var(--studio-canvas-left-safe-area, 0px) + (100% - var(--studio-canvas-left-safe-area, 0px) - var(--studio-canvas-right-safe-area, 0px)) / 2)`,
+      }}
     >
       <Button
         variant="ghost"

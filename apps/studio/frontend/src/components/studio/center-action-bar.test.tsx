@@ -65,12 +65,15 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).toContain('studio-center-action-button--active')
   })
 
-  it('is fixed to the viewport center and exposes a stable measurement hook', () => {
+  it('centres on the canvas gap, not the window, and exposes a stable measurement hook', () => {
+    // The bar is a canvas overlay: centring it on the window slides it under
+    // the copilot panel once that panel claims the right side.
     const html = renderBar('idle')
 
     expect(html).toContain('data-studio-center-action-bar="true"')
-    expect(html).toContain('fixed')
-    expect(html).toContain('left-1/2')
     expect(html).toContain('-translate-x-1/2')
+    expect(html).toContain('--studio-canvas-left-safe-area')
+    expect(html).toContain('--studio-canvas-right-safe-area')
+    expect(html).not.toContain('left-1/2')
   })
 })

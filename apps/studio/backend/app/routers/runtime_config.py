@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.models.runtime_config import RuntimeArtifactsRequest
 from app.services.runtime_config import (
     refresh_runtime_config,
     remove_runtime_input_binding,
@@ -16,17 +15,6 @@ from app.services.runtime_config import (
 from app.services.skills import resolve_skill_dir
 
 router = APIRouter(prefix="/api/skills/{skill_id}/runtime-config", tags=["runtime-config"])
-
-
-class RuntimeArtifact(BaseModel):
-    stem: str
-    mode: Literal["single", "per-item"] = "single"
-    format: Literal["json", "md"] = "json"
-    fields: list[str] = Field(default_factory=list)
-
-
-class RuntimeArtifactsRequest(BaseModel):
-    artifacts: list[RuntimeArtifact] = Field(default_factory=list)
 
 
 class RuntimeInputIntentRequest(BaseModel):
@@ -43,16 +31,10 @@ def get_runtime_config(skill_id: str) -> dict[str, object]:
 def put_runtime_artifacts(skill_id: str, request: RuntimeArtifactsRequest) -> dict[str, object]:
     skill_dir = resolve_skill_dir(skill_id)
     refresh_runtime_config(skill_dir)
-    artifacts = [
-        {
-            "stem": artifact.stem,
-            "mode": artifact.mode,
-            "format": artifact.format,
-            "fields": artifact.fields,
-        }
-        for artifact in request.artifacts
-    ]
-    return update_artifacts_payload(skill_dir, artifacts)
+    return update_artifacts_payload(
+        skill_dir,
+        [artifact.model_dump(mode="json") for artifact in request.artifacts],
+    )
 
 
 @router.post("/inputs/remove")

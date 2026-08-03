@@ -1959,6 +1959,13 @@ def _topological_order(adjacency: dict[str, list[str]], phases: list[str]) -> li
     return order
 
 
+#: Values of `io.outputs.<field>.target` that make the runner write a file.
+#: Anything else used to compile clean and then silently produce nothing — a
+#: session probing the contract with a junk value got `status: ok`, 0 defects,
+#: and its junk carried straight into the manifest (exp-b-round3, 2026-08-03).
+DECLARED_OUTPUT_TARGETS = frozenset({"file", "artifact"})
+
+
 def _validate_inline_io_schema(
     path: Path,
     schema: dict[str, Any],
@@ -2026,6 +2033,17 @@ def _validate_inline_io_schema(
     for field_name, field_schema in properties.items():
         if not isinstance(field_name, str) or not isinstance(field_schema, dict):
             continue
+        target = field_schema.get("target")
+        if kind == "output" and target is not None and target not in DECLARED_OUTPUT_TARGETS:
+            allowed = ", ".join(sorted(DECLARED_OUTPUT_TARGETS))
+            _io_fatal(
+                path,
+                1,
+                f"inline {kind} field {field_name!r} declares target {target!r}; "
+                f"a written output must declare one of: {allowed}",
+                field_path=f"{field_path}.properties.{field_name}.target",
+                code=invalid_code,
+            )
         if field_schema.get("source") == "file":
             _io_fatal(
                 path,

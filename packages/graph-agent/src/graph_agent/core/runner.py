@@ -71,6 +71,7 @@ from graph_agent.core.exceptions import (
 )
 from graph_agent.core.graph_assembler import assemble_graph, read_runtime_input_binding_value
 from graph_agent.core.llm_provider import LLMProvider, LLMProviderError
+from graph_agent.core.loader import DECLARED_OUTPUT_TARGETS
 from graph_agent.core.local_workspace_resolver import (
     LocalWorkspaceResolver,
     default_local_resolver_for_skill,
@@ -1949,7 +1950,7 @@ def _save_v030_declared_file_outputs(
         for name, schema in properties.items()
         if isinstance(name, str)
         and isinstance(schema, dict)
-        and schema.get("target") in {"file", "artifact"}
+        and schema.get("target") in DECLARED_OUTPUT_TARGETS
     ]
     if not file_outputs:
         return

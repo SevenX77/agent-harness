@@ -278,10 +278,13 @@ export interface BatchRunResponse {
   sub_run_ids: string[]
 }
 
+/** What a run can be. `cancelled` is the user stopping it, which is not a failure. */
+export type RunStatus = 'running' | 'success' | 'failed' | 'paused' | 'cancelled'
+
 export interface BatchRunItem {
   input_id: string
   run_id: string
-  status: 'running' | 'success' | 'failed'
+  status: RunStatus
   started_at: string
   metrics: TokensMetrics | null
 }
@@ -289,7 +292,7 @@ export interface BatchRunItem {
 export interface BatchRunStatus {
   batch_id: string
   skill_id: string
-  status: 'running' | 'success' | 'failed'
+  status: RunStatus
   total: number
   completed: number
   items: BatchRunItem[]
@@ -297,7 +300,7 @@ export interface BatchRunStatus {
 
 export interface RunMetadata {
   run_id: string
-  status: 'running' | 'success' | 'failed'
+  status: RunStatus
   started_at: string
   metrics: TokensMetrics | null
   input_summary: string | null

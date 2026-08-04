@@ -81,4 +81,29 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).toContain('--studio-action-bar-width')
     expect(html).not.toContain('left-1/2')
   })
+
+  it('offers Pause while a run is in flight, not a disabled Run', () => {
+    // A disabled Run button says "wait" without saying how to not wait. Pausing is
+    // possible because a halted run keeps the checkpoint it can be resumed from.
+    const running = renderBar('running')
+
+    expect(running).toContain('Pause')
+    expect(running).not.toContain('Resume')
+  })
+
+  it('offers both futures of a paused run: resume it or end it', () => {
+    const paused = renderBar('paused')
+
+    expect(paused).toContain('Resume')
+    expect(paused).toContain('Stop')
+    expect(paused).not.toContain('Pause')
+  })
+
+  it('goes back to Run once nothing is in flight', () => {
+    const idle = renderBar('predict-pass')
+
+    expect(idle).toContain('Run')
+    expect(idle).not.toContain('Pause')
+    expect(idle).not.toContain('Stop')
+  })
 })

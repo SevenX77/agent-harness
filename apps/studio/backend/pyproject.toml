@@ -18,7 +18,7 @@ dependencies = [
     "starlette>=0.37.2",
     "claude-agent-sdk>=0.1.80",
     "mcp>=1.29",
-    "cryptography>=44",
+    "cryptography>=50",
 ]
 
 [tool.uv.sources]

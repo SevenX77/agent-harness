@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Hammer, Play, Zap } from "lucide-react"
+import { Hammer, Play, Square, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -23,6 +23,7 @@ interface CenterActionBarProps {
   onCompile?: () => void
   onPredict?: () => void
   onRun?: () => void
+  onStop?: () => void
 }
 
 interface ButtonDerivation {
@@ -97,7 +98,7 @@ function LockableButton({ disabled, lockReason, children }: LockableButtonProps)
   )
 }
 
-export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
+export function CenterActionBar({ stage, onCompile, onPredict, onRun, onStop }: CenterActionBarProps) {
   const d = deriveButtons(stage)
   return (
     <div
@@ -133,18 +134,32 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
           Predict
         </Button>
       </LockableButton>
-      <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
+      {stage === "running" ? (
+        // While a run is in flight the only useful thing to offer here is ending
+        // it. A disabled Run button says "wait" without saying how to not wait.
         <Button
           variant="ghost"
           size="default"
-          disabled={d.runDisabled}
-          onClick={onRun}
-          className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
+          onClick={onStop}
+          className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
         >
-          <Play fill="currentColor" className="size-3.5" />
-          Run
+          <Square fill="currentColor" className="size-3.5" />
+          Stop
         </Button>
-      </LockableButton>
+      ) : (
+        <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
+          <Button
+            variant="ghost"
+            size="default"
+            disabled={d.runDisabled}
+            onClick={onRun}
+            className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
+          >
+            <Play fill="currentColor" className="size-3.5" />
+            Run
+          </Button>
+        </LockableButton>
+      )}
     </div>
   )
 }

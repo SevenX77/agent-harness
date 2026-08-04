@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import TypeAdapter
 
@@ -53,7 +53,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.gate_events import publish_skill_gate
+from app.services.gate_events import GateOutcome, publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
@@ -930,6 +930,38 @@ class RunManager:
             artifacts=_read_run_artifact_paths(run_dir),
         )
 
+    #: Every terminal run status maps to exactly one thing the surfaces are told,
+    #: so a new status cannot silently fall through to "fail".
+    _GATE_OUTCOME_BY_RUN_STATUS: ClassVar[dict[str, GateOutcome]] = {
+        "success": "pass",
+        "failed": "fail",
+        "cancelled": "stopped",
+        "running": "started",
+    }
+
+    async def cancel_run(self, skill_id: str, run_id: str) -> RunMetadata:
+        """Stop a running run, keeping everything it produced.
+
+        Deleting was the only way to end a run early, and it removes the run
+        directory — so "stop this and look at how far it got" could not be
+        asked for. Cancelling ends the worker and then finalizes through the
+        same path a natural ending takes, so the run seals, syncs and announces
+        itself exactly like any other terminal outcome.
+        """
+        record = self._runs.get(run_id)
+        if record is None or record.metadata.status != "running":
+            raise standard_http_exception(
+                "RUN_NOT_RUNNING",
+                f"Run is not running: {run_id}",
+                {"skill_id": skill_id, "run_id": run_id},
+            )
+        process = record.process
+        if process is not None and hasattr(process, "terminate"):
+            process.terminate()
+        metadata = record.metadata.model_copy(update={"status": "cancelled"})
+        await self._finalize_terminal_run(record, metadata)
+        return metadata
+
     def delete_run(self, skill_id: str, run_id: str) -> None:
         _validate_run_id_segment(run_id)
         record = self._runs.pop(run_id, None)
@@ -1107,7 +1139,7 @@ class RunManager:
             await publish_skill_gate(
                 skill_id=record.skill_id,
                 gate="run",
-                outcome="pass" if metadata.status == "success" else "fail",
+                outcome=self._GATE_OUTCOME_BY_RUN_STATUS[metadata.status],
                 run_id=metadata.run_id,
             )
 

@@ -73,11 +73,18 @@ class BatchRunRequest(BaseModel):
     input_ids: list[str]
 
 
+#: What a run can be. ``cancelled`` is its own terminal outcome: the user stopped
+#: it, so calling it failed would report a defect that never happened. Declared
+#: once because a run's status travels through the batch views too, and a
+#: vocabulary that is only half-extended rejects its own data at validation.
+RunStatus = Literal["running", "success", "failed", "cancelled"]
+
+
 class RunMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
-    status: Literal["running", "success", "failed"]
+    status: RunStatus
     started_at: datetime
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
@@ -143,7 +150,7 @@ class BatchRunItem(BaseModel):
 
     input_id: str
     run_id: str
-    status: Literal["running", "success", "failed"]
+    status: RunStatus
     started_at: datetime
     metrics: TokensMetrics | None = None
 
@@ -153,7 +160,7 @@ class BatchRunStatus(BaseModel):
 
     batch_id: str
     skill_id: str
-    status: Literal["running", "success", "failed"]
+    status: RunStatus
     total: int
     completed: int
     items: list[BatchRunItem]

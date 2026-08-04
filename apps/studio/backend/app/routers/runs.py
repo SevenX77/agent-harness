@@ -206,6 +206,16 @@ def _tokens_metrics_payload(raw: Any) -> TokensMetrics | None:
     )
 
 
+@router.post(
+    "/{run_id}/cancel",
+    response_model=RunMetadata,
+    responses={409: {"model": ErrorResponse}},
+)
+async def cancel_run(skill_id: str, run_id: str) -> RunMetadata:
+    """Stop a running run and keep it. Deleting is a separate, destructive act."""
+    return await run_manager.cancel_run(skill_id=skill_id, run_id=run_id)
+
+
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_run(skill_id: str, run_id: str) -> Response:
     run_manager.delete_run(skill_id=skill_id, run_id=run_id)

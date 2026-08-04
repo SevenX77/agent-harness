@@ -76,4 +76,20 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).toContain('--studio-canvas-right-safe-area')
     expect(html).not.toContain('left-1/2')
   })
+
+  it('offers Stop while a run is in flight, not a disabled Run', () => {
+    // A disabled Run button says "wait" without saying how to stop waiting; the
+    // only useful action during a run is ending it.
+    const running = renderBar('running')
+
+    expect(running).toContain('Stop')
+    expect(running).not.toContain('>Run<')
+  })
+
+  it('goes back to Run once nothing is in flight', () => {
+    const idle = renderBar('predict-pass')
+
+    expect(idle).toContain('Run')
+    expect(idle).not.toContain('Stop')
+  })
 })

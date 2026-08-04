@@ -26,7 +26,7 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { cancelRun, compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
@@ -2455,6 +2455,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     skillContentSignature,
   ])
 
+  const handleStop = useCallback(async () => {
+    if (!currentSkillId || !runId) return
+    try {
+      // The stage and the panel follow the run/stopped broadcast the cancel
+      // triggers, the same way they follow a run that ended on its own.
+      await cancelRun(currentSkillId, runId)
+      toast.success("Run stopped")
+    } catch (error) {
+      toast.error(`Stop failed: ${errorMessage(error)}`)
+    }
+  }, [currentSkillId, runId])
+
   const handleResume = useCallback(async () => {
     if (!currentSkillId || !runId) return
     setResumeLoading(true)
@@ -2810,6 +2822,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     onCompile={handleCompile}
                     onPredict={handlePredict}
                     onRun={handleRun}
+                    onStop={handleStop}
                   />
                 </>
               ) : null}

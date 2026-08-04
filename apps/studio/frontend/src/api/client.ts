@@ -458,6 +458,12 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
   return response.data
 }
 
+/** Stop a run without destroying it; DELETE remains the destructive option. */
+export async function cancelRun(skillId: string, runId: string): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(`/skills/${skillId}/runs/${runId}/cancel`)
+  return response.data
+}
+
 export interface CopilotToolApprovalRequest {
   toolUseId: string
   approve: boolean

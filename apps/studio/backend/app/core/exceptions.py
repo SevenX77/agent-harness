@@ -37,6 +37,7 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "COMPILE_FAILED": ErrorDefinition(http_status=200, retry_strategy="not_retryable"),
     "RUN_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
     "RUN_REQUIRES_PREDICT": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
+    "RUN_NOT_RUNNING": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
     "TERMINAL_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
     "TERMINAL_LIMIT_REACHED": ErrorDefinition(http_status=503, retry_strategy="backoff"),
     "WEBSOCKET_DISCONNECTED": ErrorDefinition(http_status=499, retry_strategy="backoff"),

@@ -178,6 +178,7 @@ BACKEND POST /api/skills/{skill_id}/runs/batch-run
 BACKEND POST /api/skills/{skill_id}/runs/predict
 BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/cancel
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity
 BACKEND POST /api/skills/{skill_id}/sync
@@ -270,6 +271,7 @@ FRONTEND POST /api/skills/{skill_id}/revert
 FRONTEND POST /api/skills/{skill_id}/runs
 FRONTEND POST /api/skills/{skill_id}/runs/predict
 FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare
+FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/cancel
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity
 FRONTEND POST /api/skills/{skill_id}/sync
@@ -394,6 +396,7 @@ BACKEND POST /api/skills/{skill_id}/runs/batch-run | ok | specific | Explicit ba
 BACKEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict command; returns diagnostic export used for local projection, not broad refresh.
 BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | ok | specific | Explicit node-compare command keyed by base_run_id; returns compare group metadata.
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit compare command alias for one run id; response is scoped compare result.
+BACKEND POST /api/skills/{skill_id}/runs/{run_id}/cancel | ok | specific | Explicit stop command; returns the cancelled RunMetadata and broadcasts the run/stopped gate outcome, so no surface polls to learn the run ended.
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume | ok | specific | Explicit resume command; returns RunMetadata for the resumed run and emits scoped run stream events.
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | ok | specific | Scoped resume-validity/dirty-downstream probe for one run and resume target; not a broad truth refresh.
 BACKEND POST /api/skills/{skill_id}/sync | ok | specific | Explicit collaboration sync command; no background sync runs on focus/reconnect.
@@ -486,6 +489,7 @@ FRONTEND POST /api/skills/{skill_id}/revert | ok | specific | Explicit Local His
 FRONTEND POST /api/skills/{skill_id}/runs | ok | specific | Explicit Run command; backend returns RunMetadata and Workspace projects it into the shared run-history cache without subscribing to or refetching the list.
 FRONTEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict button command; input content is resolved from the selected test input and the returned diagnostic export is projected locally.
 FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | ok | specific | Explicit node Compare LLMs command from Properties; node selection itself is covered as network-silent and never starts compare jobs.
+FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/cancel | ok | specific | Fired only by the Stop button on the run in flight; the toolbar and panel follow the broadcast gate outcome rather than refetching run state.
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume | ok | specific | Explicit resume commands return RunMetadata and Workspace projects the resumed run into the shared run-history cache without a follow-up /runs GET.
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | ok | specific | Scoped dirty-downstream probe runs for a failed run after skill content changes or resume UI needs validity; it is not triggered by selecting arbitrary nodes.
 FRONTEND POST /api/skills/{skill_id}/sync | ok | specific | Explicit collaboration Sync command from the publish/collaboration UI; no background sync runs on skill open, focus, or reconnect.

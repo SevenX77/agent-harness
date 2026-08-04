@@ -213,9 +213,11 @@ export async function detachCliTerminal(sessionId: string): Promise<void> {
 }
 
 export interface AssistantState {
+  // `unknown` = Studio 还没拿到任何一帧描述这个助手的运行时快照。它不是 `inactive`：
+  // `inactive` 是一句断言（这套运行时确实被回收过），`unknown` 只说明尚未观测。
   // `lingering` = ah 的运行时还在（ahd 存活 ⇒ tmux 及其死窗格未被回收），但里面已经没有
   // 活的 CLI 会话。它可以 Close，不可以 Attach——attach 上去就是那块死窗格。
-  status: 'inactive' | 'starting' | 'active' | 'lingering' | 'degraded' | 'error'
+  status: 'unknown' | 'inactive' | 'starting' | 'active' | 'lingering' | 'degraded' | 'error'
   reason?: string
   readOnly: boolean
 }
@@ -230,9 +232,21 @@ interface CodeAssistantStatusEventPayload {
   status: CodeAssistantStatus
 }
 
+// 非 Tauri 运行时（浏览器预览）没有原生能力 ⇒ 不可能有 Studio 管理的 CLI 运行时。
+// 这是一次真实观测，所以是 `inactive` 而不是 `unknown`。
 const inactiveCodeAssistantStatus: CodeAssistantStatus = {
   claude: { status: 'inactive', readOnly: false },
   codex: { status: 'inactive', readOnly: false },
+}
+
+// 订阅还没拿到任何一帧时的诚实取值：说不出运行时在不在，就不说。
+const unknownCodeAssistantStatus: CodeAssistantStatus = {
+  claude: { status: 'unknown', readOnly: false },
+  codex: { status: 'unknown', readOnly: false },
+}
+
+export function unobservedCodeAssistantStatus(): CodeAssistantStatus {
+  return unknownCodeAssistantStatus
 }
 
 const CODE_ASSISTANT_STATUS_EVENT = 'code-assistant-status-changed'
@@ -282,13 +296,16 @@ export async function subscribeCodeAssistantStatus(
     await invoke('watch_code_assistant_status', { workspaceRoot: targetPath })
   } catch {
     unlisten()
-    onStatus(inactiveCodeAssistantStatus)
+    // 观察失败 ≠ 观察到"什么都没在跑"。报 unknown，面板据此 hands-off。
+    onStatus(unknownCodeAssistantStatus)
     return () => {}
   }
 
+  // 订阅结束只撤销**它自己建立的**那个本地监听器。`ah events` 生产者由 Tauri 侧的
+  // CodeAssistantRuntimeState 拥有，视图的卸载不得销毁共享的数据源——这正是 2026-08-03
+  // 缺陷 C 的根因（决议 D-C1：反向的 unwatch 命令已连同这里的调用一起删除）。
   return () => {
     unlisten()
-    void invoke('unwatch_code_assistant_status', { workspaceRoot: targetPath }).catch(() => {})
   }
 }
 

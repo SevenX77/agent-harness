@@ -378,6 +378,55 @@ async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "get_skill_output_contract",
+    "看清这个 skill 的产出这一端:图声明的 io.outputs、跑到出口时黑板上实际有哪些字段"
+    "(每个字段由谁产出、类型、是否被 io.outputs 声明)、当前 runtime_config 里已声明的"
+    "落盘产物, 以及三者是否自洽。**一个 skill 有输入契约就有产出契约**——'这个 skill 做完"
+    "应该留下什么'和'它需要什么才能开始'是同一层问题, 默认没人配过不等于它不需要。"
+    "多数 skill 需要把结果落盘(下游、人、下一次运行都要读它);也确有 skill 的价值只在"
+    "黑板里传给同图下游, 那就该判断为不需要, 而不是漏掉。据此判断后用 set_output_artifacts "
+    "写声明, 或明确说明这个 skill 为什么不需要产物。",
+    {"skill_id": str},
+)
+async def get_skill_output_contract_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.core.adapters.transport_factory import build_engine_adapter
+    from app.services.runtime_config import refresh_runtime_config
+    from app.services.skills import ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id)
+        contract = build_engine_adapter().get_output_contract(str(skill_dir))
+        runtime_config = refresh_runtime_config(skill_dir)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"get_skill_output_contract 失败: {exc}", is_error=True)
+
+    artifacts = runtime_config.get("artifacts") or []
+    landed_fields = {
+        str(field)
+        for artifact in artifacts
+        if isinstance(artifact, dict)
+        for field in (artifact.get("fields") or [])
+    }
+    declared_outputs = [field for field in contract["fields"] if field["declared_output"]]
+    return _text_result(
+        {
+            "declared_outputs": declared_outputs,
+            "blackboard_at_output": contract["fields"],
+            "declared_but_unproduced": contract["declared_but_unproduced"],
+            "output_artifacts": artifacts,
+            # The judgement this tool exists for: a graph that declares an output
+            # and lands none of it produced nothing a later reader can open.
+            "declared_outputs_not_landed": [
+                field["name"] for field in declared_outputs if field["name"] not in landed_fields
+            ],
+        }
+    )
+
+
+@tool(
     "set_output_artifacts",
     "声明这个 skill 的 run 产物(写运行配置,等价于 I/O 面板的 Configure output "
     "artifacts):每条给 stem(文件名前缀)与 fields(要写进该文件的黑板字段名),"
@@ -1410,6 +1459,7 @@ def _copilot_mcp_tools() -> list[Any]:
         search_llm_registry_tool,
         compile_skill_tool,
         run_role_test_tool,
+        get_skill_output_contract_tool,
         predict_skill_tool,
         create_skill_tool,
         run_skill_tool,

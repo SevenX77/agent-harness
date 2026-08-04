@@ -42,6 +42,7 @@ import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
 import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
+import { runningPhaseOf } from '@/components/studio/node-status'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
 import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
@@ -1456,9 +1457,10 @@ export function GraphCanvas({
     () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes)),
     [phaseNodes, rawNodes.length],
   )
+  const runningPhase = useMemo(() => runningPhaseOf(statusByNodeId ?? {}), [statusByNodeId])
   const rawEdges = useMemo(
-    () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, traceEvents)),
-    [phaseNodes, rawNodes.length, traceEvents],
+    () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, traceEvents, runningPhase)),
+    [phaseNodes, rawNodes.length, runningPhase, traceEvents],
   )
   const layoutCanvasHeight = layoutCanvasHeightForMode(canvasHeight, compactRatio)
   const layoutSignature = useMemo(

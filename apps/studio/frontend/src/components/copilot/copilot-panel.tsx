@@ -14,6 +14,7 @@ import {
   closeCodeAssistant,
   ensureCodeAssistantStatusEvents,
   subscribeCodeAssistantStatus,
+  unobservedCodeAssistantStatus,
   type AssistantState,
   type CodeAssistantStatus,
 } from '../../lib/tauri'
@@ -314,30 +315,24 @@ interface DraftJudgeContextScope {
 
 type CodeAssistantId = 'claude' | 'codex'
 
-// Live status is the AssistantState object; the boolean shape is the legacy
-// per-assistant flag still emitted through the ahd-events path (and its regression
-// test), so every projector defensively accepts both.
-type AssistantStateInput = AssistantState | boolean | null | undefined
-
-function getAssistantStatus(state: AssistantStateInput): string {
-  if (typeof state === 'boolean') {
-    return state ? 'active' : 'inactive'
-  }
-  return state?.status ?? 'inactive'
-}
-
-// The 5-state code-assistant contract (tauri.ts AssistantState:
-// inactive | starting | active | degraded | error) decides which header control the
-// panel projects — not a bare inactive-vs-not binary. Only a genuinely running
-// assistant exposes the Attach/Close management control; 'error' keeps its
+// 状态一律是 AssistantState 对象。这里曾经还接受 boolean / null / undefined 并把它们
+// 折成 'inactive'——那条兼容分支自 task 8 起就是死路径(Rust 侧只发 AssistantState),
+// 而 `?? 'inactive'` 本身就是"未知冒充没在跑"这个缺陷在前端的复制品,已随决议
+// 2026-08-03 D-C6 一起删除。
+//
+// The code-assistant phase contract (tauri.ts AssistantState:
+// unknown | inactive | starting | active | lingering | degraded | error) decides which
+// header control the panel projects — not a bare inactive-vs-not binary. Only a genuinely
+// running assistant exposes the Attach/Close management control; 'error' keeps its
 // pre-existing running-control mapping (unchanged, out of task-9 scope), while
-// 'starting' (mid-transition, hands-off) and 'degraded' (recoverable → Open) are not
-// attachable and route to the Open control instead.
-function isAssistantActive(state: AssistantStateInput): boolean {
-  switch (getAssistantStatus(state)) {
+// 'starting' (mid-transition, hands-off), 'unknown' (尚未观测, hands-off) and
+// 'degraded' (recoverable → Open) are not attachable and route to the Open control instead.
+function isAssistantActive(state: AssistantState): boolean {
+  switch (state.status) {
     case 'active':
     case 'error':
       return true
+    case 'unknown':
     case 'inactive':
     case 'starting':
     case 'lingering':
@@ -351,32 +346,26 @@ function isAssistantActive(state: AssistantStateInput): boolean {
 // lingering = ah 的运行时仍在（ahd 存活 ⇒ tmux 及其 remain-on-exit 死窗格没被回收），但里面
 // 已经没有活的 CLI 会话。它不是 active（attach 上去就是那块死窗格），也不能算 inactive
 // （那会让面板谎称什么都没在跑、把用户导回 Open）——它自己是一类：只能 Close。
-function isAssistantLingering(state: AssistantStateInput): boolean {
-  return getAssistantStatus(state) === 'lingering'
+function isAssistantLingering(state: AssistantState): boolean {
+  return state.status === 'lingering'
 }
 
 // starting = the CLI is spawned but not yet ready: hands-off until it settles, so the
 // panel offers no clickable lifecycle action while it is in flight.
-function isAssistantStarting(state: AssistantStateInput): boolean {
-  return getAssistantStatus(state) === 'starting'
+// unknown = Studio 还没拿到任何一帧快照(决议 2026-08-03 D-C3)。同样 hands-off:
+// 说不出运行时在不在,就不能给出一个可点击的 Open 入口。
+function isAssistantHandsOff(state: AssistantState): boolean {
+  return state.status === 'starting' || state.status === 'unknown'
 }
 
-function isAssistantReadOnly(state: AssistantStateInput): boolean {
-  if (state && typeof state === 'object') {
-    return !!state.readOnly
-  }
-  return false
-}
-
-const inactiveCodeAssistantStatus: CodeAssistantStatus = {
-  claude: { status: 'inactive', readOnly: false },
-  codex: { status: 'inactive', readOnly: false },
+function isAssistantReadOnly(state: AssistantState): boolean {
+  return state.readOnly
 }
 
 export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
   return [
-    ...(isAssistantActive(status?.claude) ? (['claude'] as const) : []),
-    ...(isAssistantActive(status?.codex) ? (['codex'] as const) : []),
+    ...(isAssistantActive(status.claude) ? (['claude'] as const) : []),
+    ...(isAssistantActive(status.codex) ? (['codex'] as const) : []),
   ]
 }
 
@@ -384,8 +373,8 @@ export function activeCodeAssistantIds(status: CodeAssistantStatus): CodeAssista
 // ah 回收 tmux；两者都必须让头部停在管理控件上，不能回落成 `Open in CLI`。
 export function closableCodeAssistantIds(status: CodeAssistantStatus): CodeAssistantId[] {
   return [
-    ...(isAssistantActive(status?.claude) || isAssistantLingering(status?.claude) ? (['claude'] as const) : []),
-    ...(isAssistantActive(status?.codex) || isAssistantLingering(status?.codex) ? (['codex'] as const) : []),
+    ...(isAssistantActive(status.claude) || isAssistantLingering(status.claude) ? (['claude'] as const) : []),
+    ...(isAssistantActive(status.codex) || isAssistantLingering(status.codex) ? (['codex'] as const) : []),
   ]
 }
 
@@ -394,7 +383,7 @@ export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): stri
   if (closable.length === 0) {
     return null
   }
-  if (closable.every(id => isAssistantReadOnly(status?.[id]))) {
+  if (closable.every(id => isAssistantReadOnly(status[id]))) {
     return 'Detach'
   }
   if (closable.length > 1) {
@@ -470,7 +459,7 @@ export function CopilotPanel({
   const [selectedRole, setSelectedRole] = useState('')
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
-  const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(inactiveCodeAssistantStatus)
+  const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(unobservedCodeAssistantStatus())
   const shouldLoadTemplates = !skillId && copilot.messages.length === 0
   const { templates, templatesLoading } = useTemplates({ enabled: shouldLoadTemplates })
   const inEvalView = view === 'eval'
@@ -594,13 +583,15 @@ export function CopilotPanel({
   const closableCodeAssistants = closableCodeAssistantIds(codeAssistantStatus)
   const codeAssistantCloseLabel = codeAssistantCloseButtonLabel(codeAssistantStatus)
   const codeAssistantAttachLabels = codeAssistantAttachMenuLabels(codeAssistantStatus)
-  const isClaudeOpenDisabled = getAssistantStatus(codeAssistantStatus?.claude) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.claude)
-  const isCodexOpenDisabled = getAssistantStatus(codeAssistantStatus?.codex) === 'inactive' && isAssistantReadOnly(codeAssistantStatus?.codex)
+  const isClaudeOpenDisabled = codeAssistantStatus.claude.status === 'inactive' && isAssistantReadOnly(codeAssistantStatus.claude)
+  const isCodexOpenDisabled = codeAssistantStatus.codex.status === 'inactive' && isAssistantReadOnly(codeAssistantStatus.codex)
   const allReadOnlyInactive = isClaudeOpenDisabled && isCodexOpenDisabled
-  // While either CLI is mid-start the Open control is hands-off: a disabled trigger
-  // makes its lifecycle items unreachable until the state settles.
-  const isAnyCodeAssistantStarting =
-    isAssistantStarting(codeAssistantStatus?.claude) || isAssistantStarting(codeAssistantStatus?.codex)
+  // While either CLI is mid-start — or while Studio has not yet observed one at all —
+  // the Open control is hands-off: a disabled trigger makes its lifecycle items
+  // unreachable until the state settles. 未观测就给出可点击的 Open,正是缺陷 C 的
+  // 可见形态(决议 2026-08-03 D-C3)。
+  const isAnyCodeAssistantHandsOff =
+    isAssistantHandsOff(codeAssistantStatus.claude) || isAssistantHandsOff(codeAssistantStatus.codex)
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -620,7 +611,7 @@ export function CopilotPanel({
 
   const refreshCodeAssistantStatus = useCallback(async () => {
     if (!codeAssistantWorkspace) {
-      setCodeAssistantStatus(inactiveCodeAssistantStatus)
+      setCodeAssistantStatus(unobservedCodeAssistantStatus())
       return
     }
     await ensureCodeAssistantStatusEvents(codeAssistantWorkspace)
@@ -629,14 +620,14 @@ export function CopilotPanel({
   useEffect(() => {
     let cancelled = false
     if (!codeAssistantWorkspace) {
-      setCodeAssistantStatus(inactiveCodeAssistantStatus)
+      setCodeAssistantStatus(unobservedCodeAssistantStatus())
       return () => {
         cancelled = true
       }
     }
 
     let unsubscribe: (() => void) | null = null
-    setCodeAssistantStatus(inactiveCodeAssistantStatus)
+    setCodeAssistantStatus(unobservedCodeAssistantStatus())
     void subscribeCodeAssistantStatus(codeAssistantWorkspace, (nextStatus) => {
       if (!cancelled) {
         setCodeAssistantStatus(nextStatus)
@@ -651,7 +642,7 @@ export function CopilotPanel({
       })
       .catch(() => {
         if (!cancelled) {
-          setCodeAssistantStatus(inactiveCodeAssistantStatus)
+          setCodeAssistantStatus(unobservedCodeAssistantStatus())
         }
       })
     return () => {
@@ -862,7 +853,7 @@ export function CopilotPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!codeAssistantWorkspace || allReadOnlyInactive || isAnyCodeAssistantStarting}
+                    disabled={!codeAssistantWorkspace || allReadOnlyInactive || isAnyCodeAssistantHandsOff}
                     aria-label="Open code assistant"
                     className="studio-canvas-input-surface shrink-0"
                     title={allReadOnlyInactive ? 'Workspace-owned config is read-only' : undefined}

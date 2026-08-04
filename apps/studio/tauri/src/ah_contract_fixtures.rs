@@ -139,6 +139,16 @@ pub(crate) const SNAPSHOT_TERMINAL_CLOSED: &str = r#"{"schema_version":2,"event"
 /// the degraded cleanup-then-open fixture.
 pub(crate) const SNAPSHOT_TERMINAL_FAILED: &str = r#"{"schema_version":2,"event":"snapshot","sequence":1,"reason":"initial","runtime_state":"inactive","active":false,"ahd_alive":true,"ahd_has_inventory":true,"config_path":null,"workspace_path":null,"state_dir":"/root/.local/state/ah/f2647adf","tmux_socket":null,"tmux_server_alive":true,"master_tmux_alive":false,"worker_tmux_alive":false,"worker_tmux_expected_count":0,"agents":[],"sessions":[{"session_id":"sess_6ddea78e-0ea9-4f00-9b9a-15226e3cce28","project_id":"feat-studio-ah-state-contract-impl","path":"/root/agent-harness/.worktrees/feat-studio-ah-state-contract-impl","status":"FAILED","master_state":null,"master_tmux_session":"master_feat-studio-ah-state-contract-impl","master_tmux_alive":false,"master_pane_id":null,"master_pid":null,"master_last_exit_reason":null,"db_tracked_agents":0,"live_agents":0,"cleanup_required":false,"safe_to_cleanup":true}],"jobs":[],"job_events":[],"job_event_cursor":0}"#;
 
+/// ahd 活着但 **tmux server 已经不在** — CAPTURED（2026-08-04，本机 WSL，配置
+/// `skill-studio-ah/bb57aa92d7ace818/claude/ah.toml`，`ah 1.7.0`）。
+///
+/// 这一帧是 D-A1 判据的反例：`runtime_state:"inactive"` + `ahd_alive:true`（旧判据据此
+/// 报 `lingering`／面板显示 `CLI running`），但 `tmux_server_alive:false` +
+/// `ahd_has_inventory:false` + 全部 agent `state:"KILLED"`/`tmux_alive:false` ——
+/// **没有任何 tmux server，没有窗格可 attach，也没有东西需要回收**。它是机器重启把
+/// tmux 全带走、而 ahd 又被重新拉起之后的真实形状。
+pub(crate) const SNAPSHOT_AHD_ALIVE_TMUX_GONE: &str = r#"{"schema_version":2,"event":"snapshot","sequence":1,"reason":"initial","runtime_state":"inactive","config_path":"/mnt/c/Users/test/AppData/Local/Temp/skill-studio-ah/bb57aa92d7ace818/claude/ah.toml","workspace_path":null,"state_dir":"/root/.local/state/ah/7b294a1c","tmux_socket":"ahd-c62390d91839febd","ahd_alive":true,"active":false,"ahd_has_inventory":false,"tmux_server_alive":false,"master_tmux_alive":false,"worker_tmux_alive":true,"worker_tmux_expected_count":0,"sessions":[{"session_id":"sess_f257e2a9-6b63-44ea-b8e6-0c5d345c1f33","project_id":"exp-b-round4","path":"/mnt/d/coding/skills/exp-b-round4","status":"CLOSED","master_state":"IDLE","master_tmux_session":"master_exp-b-round4","master_tmux_alive":false,"master_pane_id":"%0","master_pid":938,"master_last_exit_reason":"IDLE_MASTER_EXIT","db_tracked_agents":0,"live_agents":0,"cleanup_required":true,"safe_to_cleanup":true}],"agents":[{"agent_id":"atropos","session_id":"sess_f257e2a9-6b63-44ea-b8e6-0c5d345c1f33","provider":"claude","state":"KILLED","sub_state":"Matched","pid":982,"tmux_session":"agent_atropos","tmux_alive":false},{"agent_id":"clotho","session_id":"sess_f257e2a9-6b63-44ea-b8e6-0c5d345c1f33","provider":"claude","state":"KILLED","sub_state":"Matched","pid":1020,"tmux_session":"agent_clotho","tmux_alive":false},{"agent_id":"lachesis","session_id":"sess_f257e2a9-6b63-44ea-b8e6-0c5d345c1f33","provider":"claude","state":"KILLED","sub_state":"Matched","pid":1073,"tmux_session":"agent_lachesis","tmux_alive":false}],"jobs":[],"job_events":[],"job_event_cursor":0}"#;
+
 /// Unsupported schema — SchemaDerived. `schema_version:999` on an otherwise-shaped
 /// snapshot; Req 2.5: Studio surfaces an unsupported-contract error and does NOT fall
 /// back to local probing. The value 999 stands in for any version the typed parser
@@ -174,6 +184,11 @@ pub(crate) const ALL_SNAPSHOT_FIXTURES: &[(&str, &str, Provenance)] = &[
         "SNAPSHOT_TERMINAL_FAILED",
         SNAPSHOT_TERMINAL_FAILED,
         Provenance::SchemaDerived,
+    ),
+    (
+        "SNAPSHOT_AHD_ALIVE_TMUX_GONE",
+        SNAPSHOT_AHD_ALIVE_TMUX_GONE,
+        Provenance::Captured,
     ),
     (
         "SNAPSHOT_UNSUPPORTED_SCHEMA",
@@ -403,9 +418,13 @@ mod self_validation {
         }
     }
 
-    /// Provenance registry sanity: exactly the two verbatim captures are tagged
+    /// Provenance registry sanity: exactly the verbatim captures are tagged
     /// `Captured`; `degraded` is the sole `SpecTranscribed`; the rest are
     /// `SchemaDerived`. Guards against a fixture silently mislabelling its origin.
+    ///
+    /// 前两条来自 task 0（2026-07-10）；`SNAPSHOT_AHD_ALIVE_TMUX_GONE` 是
+    /// 2026-08-04 在本机 WSL（`ah 1.7.0`）重新捕获的一帧，用来推翻 D-A1 的
+    /// `ahd_alive` 判据 —— 它同样是逐字捕获，所以同属 `Captured`。
     #[test]
     fn snapshot_provenance_matches_task0_evidence() {
         let captured: Vec<&str> = ALL_SNAPSHOT_FIXTURES
@@ -413,7 +432,14 @@ mod self_validation {
             .filter(|(_, _, p)| *p == Provenance::Captured)
             .map(|(n, _, _)| *n)
             .collect();
-        assert_eq!(captured, vec!["SNAPSHOT_ACTIVE", "SNAPSHOT_DAEMON_ABSENT"]);
+        assert_eq!(
+            captured,
+            vec![
+                "SNAPSHOT_ACTIVE",
+                "SNAPSHOT_DAEMON_ABSENT",
+                "SNAPSHOT_AHD_ALIVE_TMUX_GONE"
+            ]
+        );
 
         let transcribed: Vec<&str> = ALL_SNAPSHOT_FIXTURES
             .iter()

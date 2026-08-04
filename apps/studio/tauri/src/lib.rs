@@ -3410,6 +3410,11 @@ struct AhRuntimeSnapshot {
     sequence: u64,
     reason: Option<String>,
     config_path: Option<String>,
+    /// 这套运行时的 tmux server 是否还在。死窗格活在 server 里，server 没了就什么都
+    /// 没剩下——所以它才是"还有没有东西需要收尾"的判据（见
+    /// `assistant_status_for_snapshot`），`ahd_alive` 不是。
+    #[serde(default)]
+    tmux_server_alive: bool,
     #[serde(default)]
     master_tmux_alive: bool,
     #[serde(default)]
@@ -3530,19 +3535,35 @@ fn decide_code_assistant_open_v2(
 /// failure and never from a `runtime_state` value.
 /// 把一帧运行时快照投影成面板呈现的助手状态。
 ///
-/// `inactive` 这个 phase 只说明"没有活的会话"，它并不说明"这套运行时已经被回收"。ah 只在
-/// ahd 进程退出时才回收 tmux（整体 `kill-server`），因此 `ahd_alive` 就是"tmux 及其死窗格
-/// 是否还在"的同一件事：ahd 还活着 ⇒ 投影为 `Lingering`（面板给 Close），ahd 没了 ⇒ 才是
-/// `Inactive`（Open 才诚实）。
+/// `inactive` 这个 phase 只说明"没有活的会话"，它并不说明"这套运行时已经被回收"。`/exit`
+/// 之后 ah 把会话标成终态却**不回收 tmux**（生产代码里回收 tmux 的唯一位置是 ahd 收到
+/// SIGTERM 时的整体 `kill-server`），那块 `remain-on-exit` 死窗格还在，面板必须继续给
+/// Close 而不是谎称可以重新打开 —— 这是 2026-08-02 决议 D-A1 要解决的问题，不变。
 ///
-/// 判据取 `ahd_alive` 而非 `sessions[].cleanup_required`：后者一旦为真便永远为真（ah 没有任何
-/// 路径把 `master_pid` 清零），用它驱动 UI 会把面板永久钉死在"运行中"，Close 也解不开。
+/// **判据取 `tmux_server_alive`，不取 `ahd_alive`（2026-08-04 修正）。** D-A1 原文推的是
+/// "ah 只在 ahd 退出时才回收 tmux ⇒ `ahd_alive == true` 与 tmux 未回收是同一件事"，但这个
+/// 蕴含只有一个方向：ahd 活着**不代表** tmux server 存在——它可以从来没建过，也可以被外部
+/// 带走（机器重启把 tmux 全清掉、而 ahd 又被重新拉起，就是本机实测到的形状）。实测
+/// 2026-08-04：Studio 管的 6 份 config 里有 4 份处于 `ahd_alive:true` +
+/// `tmux_server_alive:false` + `ahd_has_inventory:false`，旧判据把它们全报成"运行中"，
+/// 面板给出一个 attach 不到任何东西、也无事可关的 Close 控件。
+///
+/// 而"还有没有东西需要收尾"这件事，快照里本来就直接带着：死窗格活在 tmux server 里，
+/// server 没了就什么都没剩下。所以 `Lingering` 的条件是 tmux server 仍在。
+///
+/// 判据同样不取 `sessions[].cleanup_required`：后者一旦为真便永远为真（ah 没有任何路径把
+/// `master_pid` 清零），用它驱动 UI 会把面板永久钉死在"运行中"，Close 也解不开。
+///
+/// 注意这里只改**面板呈现**这条道。启动前该不该先清残留是另一条道
+/// （`reconcile_snapshot_lifecycle`），它继续用 `ahd_alive`：游离的 ahd 即使没有 tmux
+/// 也该在启动新运行时之前清掉（D-A4"一个 workspace 同一时刻只允许一个运行时"），
+/// 那一层宁可多清，与"要不要告诉用户有东西在跑"是两个不同的问题。
 fn assistant_status_for_snapshot(snapshot: &AhRuntimeSnapshot) -> AssistantStatus {
     match snapshot.runtime_state {
         AhRuntimeState::Active => AssistantStatus::Active,
         AhRuntimeState::Starting => AssistantStatus::Starting,
         AhRuntimeState::Degraded => AssistantStatus::Degraded,
-        AhRuntimeState::Inactive if snapshot.ahd_alive => AssistantStatus::Lingering,
+        AhRuntimeState::Inactive if snapshot.tmux_server_alive => AssistantStatus::Lingering,
         AhRuntimeState::Inactive => AssistantStatus::Inactive,
     }
 }
@@ -4831,22 +4852,23 @@ mod tests {
             ("SNAPSHOT_INACTIVE", SNAPSHOT_INACTIVE),
         ] {
             let snapshot = parse_snapshot_or_panic(fixture);
-            // 前置:fixture 真的是"phase=inactive 且 ahd 仍在"这一形状。
+            // 前置:fixture 真的是"phase=inactive 且 tmux server 仍在"这一形状——死窗格
+            // 活在 server 里,server 还在才谈得上有东西需要收尾。
             assert_eq!(
                 snapshot.runtime_state,
                 AhRuntimeState::Inactive,
                 "{name} precondition: the phase really is inactive"
             );
             assert!(
-                snapshot.ahd_alive,
-                "{name} precondition: ahd is still holding this runtime"
+                snapshot.tmux_server_alive,
+                "{name} precondition: the tmux server still holds this runtime"
             );
 
             let ui = assistant_status_for_snapshot(&snapshot);
             assert_eq!(
                 serde_json::to_value(ui).expect("AssistantStatus serializes to its wire tag"),
                 serde_json::Value::String("lingering".to_string()),
-                "{name}: ahd alive ⇒ the tmux server (and its dead pane) was never reaped, so the \
+                "{name}: the tmux server (and its dead pane) was never reaped, so the \
                  UI must keep offering Close instead of claiming the runtime is gone and openable"
             );
         }
@@ -4859,6 +4881,52 @@ mod tests {
             assistant_status_for_snapshot(&absent),
             AssistantStatus::Inactive,
             "with ahd gone ah's shutdown path already ran kill-server, so Open is honest again"
+        );
+    }
+
+    /// 2026-08-04 修正 D-A1:`ahd_alive` 不能代表"tmux 还没被回收"。
+    ///
+    /// 真机取证(本机 WSL,`ah 1.7.0`):Studio 管的 6 份 config 里有 4 份处于
+    /// `runtime_state:"inactive"` + `ahd_alive:true` + `tmux_server_alive:false` +
+    /// `ahd_has_inventory:false`——机器重启把 tmux 全带走、ahd 又被重新拉起之后的形状。
+    /// 旧判据把这 4 份全报成"运行中",面板给出一个 attach 不到任何东西、也无事可关的
+    /// Close 控件。而"还有没有东西需要收尾"这件事快照里直接带着:死窗格活在 tmux server
+    /// 里,server 没了就什么都没剩下。
+    ///
+    /// 回滚自检:把判据改回 `snapshot.ahd_alive`,本例立刻红;而上一条
+    /// `test_lingering_runtime_is_not_projected_as_openable` 证明 `/exit` 留下死窗格
+    /// (server 仍在)的场景没有被这次修正牺牲掉——两条一起才是完整的判据。
+    #[test]
+    fn test_ahd_alive_without_a_tmux_server_is_not_lingering() {
+        use ah_contract_fixtures::SNAPSHOT_AHD_ALIVE_TMUX_GONE;
+
+        let snapshot = parse_snapshot_or_panic(SNAPSHOT_AHD_ALIVE_TMUX_GONE);
+        assert_eq!(snapshot.runtime_state, AhRuntimeState::Inactive, "前置:phase 是 inactive");
+        assert!(snapshot.ahd_alive, "前置:ahd 确实还活着——这正是旧判据会误判的原因");
+        assert!(!snapshot.tmux_server_alive, "前置:tmux server 已经不在了");
+
+        assert_eq!(
+            assistant_status_for_snapshot(&snapshot),
+            AssistantStatus::Inactive,
+            "没有 tmux server 就没有窗格可 attach、也没有东西需要回收,面板不得谎称有 CLI 在跑"
+        );
+    }
+
+    /// 面板呈现改了判据,**启动前的清理没有跟着改**:游离的 ahd 即使没有 tmux,也该在启动
+    /// 新运行时之前被清掉(D-A4「一个 workspace 同一时刻只允许一个运行时」)。那一层宁可
+    /// 多清,与"要不要告诉用户有东西在跑"是两个不同的问题。
+    ///
+    /// 回滚自检:把 `reconcile_snapshot_lifecycle` 也改成看 `tmux_server_alive`,本例
+    /// 立刻红——它会退化成 `StartFresh`,把那个游离 daemon 留在原地。
+    #[test]
+    fn test_stray_daemon_without_tmux_is_still_cleaned_before_starting() {
+        use ah_contract_fixtures::SNAPSHOT_AHD_ALIVE_TMUX_GONE;
+
+        let snapshot = parse_snapshot_or_panic(SNAPSHOT_AHD_ALIVE_TMUX_GONE);
+        assert_eq!(
+            reconcile_snapshot_lifecycle(&snapshot),
+            CodeAssistantLifecycleAction::CleanupStale,
+            "生命周期这条道仍看 ahd_alive:游离 daemon 必须在启动之前清掉"
         );
     }
 

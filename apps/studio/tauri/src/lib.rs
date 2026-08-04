@@ -498,6 +498,21 @@ enum CodeAssistantLifecycleAction {
     HandsOff,
 }
 
+/// attach 这条道的结论。它和 `CodeAssistantLifecycleAction` 分开，因为两条道对同一帧
+/// 快照问的是不同的问题：Open 问「要不要先清再启」，attach 问「有没有一块可看的窗格」。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CodeAssistantAttachAction {
+    /// 落到还活着的会话上。
+    AttachLive,
+    /// 落到残留的死窗格上——事后看最后一屏，这是 attach 的正当用途，不销毁任何东西。
+    AttachResidue,
+    /// `degraded`：坏状态，没有可读的窗格，先清干净。
+    CleanupStale,
+    NotRunning,
+    /// 启动中：hands-off，等它自己settle。
+    HandsOff,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CodeAssistantOpenDecision {
     StartFresh,
@@ -2710,21 +2725,23 @@ fn attach_code_assistant_terminal(
     let snapshot = resolve_open_snapshot(cached.as_ref(), &config_path, &workspace_root);
     let action = snapshot
         .as_ref()
-        .map(reconcile_snapshot_lifecycle)
-        .unwrap_or(CodeAssistantLifecycleAction::StartFresh);
+        .map(reconcile_snapshot_attach)
+        .unwrap_or(CodeAssistantAttachAction::NotRunning);
     match action {
-        CodeAssistantLifecycleAction::AttachExisting => {}
-        CodeAssistantLifecycleAction::CleanupStale => {
+        // 活会话和残留的死窗格都直接 attach：后者正是 ah 用 `remain-on-exit` 留下来
+        // 供事后取证的那一屏，观察它不该销毁它（PM 裁决 2026-08-04）。
+        CodeAssistantAttachAction::AttachLive | CodeAssistantAttachAction::AttachResidue => {}
+        CodeAssistantAttachAction::CleanupStale => {
             cleanup_workspace_code_assistants(&workspace_root)?;
             return Err(format!(
                 "{} was stale and has been closed; reopen it from Open in.",
                 assistant.display_name()
             ));
         }
-        CodeAssistantLifecycleAction::StartFresh => {
+        CodeAssistantAttachAction::NotRunning => {
             return Err(format!("{} is not running", assistant.display_name()));
         }
-        CodeAssistantLifecycleAction::HandsOff => {
+        CodeAssistantAttachAction::HandsOff => {
             return Err(format!(
                 "{} is still starting; wait for startup to finish before attaching.",
                 assistant.display_name()
@@ -3563,8 +3580,42 @@ fn assistant_status_for_snapshot(snapshot: &AhRuntimeSnapshot) -> AssistantStatu
         AhRuntimeState::Active => AssistantStatus::Active,
         AhRuntimeState::Starting => AssistantStatus::Starting,
         AhRuntimeState::Degraded => AssistantStatus::Degraded,
-        AhRuntimeState::Inactive if snapshot.tmux_server_alive => AssistantStatus::Lingering,
+        AhRuntimeState::Inactive if runtime_has_unreaped_residue(snapshot) => {
+            AssistantStatus::Lingering
+        }
         AhRuntimeState::Inactive => AssistantStatus::Inactive,
+    }
+}
+
+/// 这套运行时里还有没有**没被回收的东西**——也就是 tmux server（以及 `remain-on-exit`
+/// 留下的那块死窗格）是否还在，而会话已经走到终态。
+///
+/// 「面板要不要说还有运行时」和「attach 能不能落到一块可看的窗格上」问的是同一件事，
+/// 所以只有这一个定义，两条道共用。
+fn runtime_has_unreaped_residue(snapshot: &AhRuntimeSnapshot) -> bool {
+    snapshot.runtime_state == AhRuntimeState::Inactive && snapshot.tmux_server_alive
+}
+
+/// attach 这条道该做什么。它和 Open 那条道（`reconcile_snapshot_lifecycle`）读同一帧快照，
+/// 但问的问题不同，所以判据也不同。
+///
+/// **残留 → 照常 attach，不清理（PM 裁决 2026-08-04，取代 D-A3）。** ah 有意用
+/// `remain-on-exit` 把死窗格留着供事后取证，而那一屏正是使用者想看的——CLI 是怎么退的、
+/// 最后报了什么。原先 D-A3 把「不给 attach」实现成了「attach 即销毁」
+/// （落到 `CleanupStale` 分支，清掉运行时再报错），等于用一次观察动作毁掉观察对象。
+/// 销毁只能由 Close 显式发起。
+///
+/// `degraded` 仍然走清理：那是「有 ACTIVE 会话但 master/worker 的 tmux 不在」的坏状态，
+/// 不是一块可以读的死窗格，attach 上去没有任何东西可看。
+fn reconcile_snapshot_attach(snapshot: &AhRuntimeSnapshot) -> CodeAssistantAttachAction {
+    match snapshot.runtime_state {
+        AhRuntimeState::Active => CodeAssistantAttachAction::AttachLive,
+        AhRuntimeState::Starting => CodeAssistantAttachAction::HandsOff,
+        AhRuntimeState::Degraded => CodeAssistantAttachAction::CleanupStale,
+        AhRuntimeState::Inactive if runtime_has_unreaped_residue(snapshot) => {
+            CodeAssistantAttachAction::AttachResidue
+        }
+        AhRuntimeState::Inactive => CodeAssistantAttachAction::NotRunning,
     }
 }
 
@@ -4910,6 +4961,81 @@ mod tests {
             AssistantStatus::Inactive,
             "没有 tmux server 就没有窗格可 attach、也没有东西需要回收,面板不得谎称有 CLI 在跑"
         );
+    }
+
+    /// PM 裁决 2026-08-04(取代 D-A3):残留 = 当作还有运行时,attach 就打开那块死窗格。
+    ///
+    /// ah 有意用 `remain-on-exit` 把死窗格留着供事后取证,而那一屏正是使用者想看的
+    /// ——CLI 是怎么退的、最后报了什么。旧实现把"不给 attach"落地成了"attach 即销毁"
+    /// (走 `CleanupStale` 分支,清掉运行时再报错),等于用一次观察动作毁掉观察对象。
+    /// 销毁只能由 Close 显式发起。
+    ///
+    /// 回滚自检:把残留分支改回 `CleanupStale`,第一条断言立刻红;`degraded` 那条对照组
+    /// 证明这不是"attach 一律放行"——坏状态没有可读窗格,仍然先清。
+    #[test]
+    fn test_attach_opens_the_dead_pane_instead_of_destroying_it() {
+        use ah_contract_fixtures::{
+            SNAPSHOT_ACTIVE, SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_DEGRADED, SNAPSHOT_STARTING,
+            SNAPSHOT_TERMINAL_CLOSED,
+        };
+
+        // 残留:会话终态,但 tmux server 和那块死窗格还在 → attach 上去看它。
+        let residue = parse_snapshot_or_panic(SNAPSHOT_TERMINAL_CLOSED);
+        assert!(residue.tmux_server_alive, "前置:这一帧确实还留着 tmux server");
+        assert_eq!(
+            reconcile_snapshot_attach(&residue),
+            CodeAssistantAttachAction::AttachResidue,
+            "残留的死窗格是 attach 的正当目标,不是要被这次点击清掉的东西"
+        );
+
+        // 活会话照常 attach。
+        assert_eq!(
+            reconcile_snapshot_attach(&parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
+            CodeAssistantAttachAction::AttachLive
+        );
+
+        // 对照组一:`degraded` 是坏状态,没有可读窗格,仍然先清。
+        assert_eq!(
+            reconcile_snapshot_attach(&parse_snapshot_or_panic(SNAPSHOT_DEGRADED)),
+            CodeAssistantAttachAction::CleanupStale,
+            "degraded 没有可读的窗格,attach 上去什么也看不到"
+        );
+
+        // 对照组二:运行时真的被回收过 → 没东西可 attach。
+        assert_eq!(
+            reconcile_snapshot_attach(&parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT)),
+            CodeAssistantAttachAction::NotRunning
+        );
+
+        // 对照组三:启动中 hands-off。
+        assert_eq!(
+            reconcile_snapshot_attach(&parse_snapshot_or_panic(SNAPSHOT_STARTING)),
+            CodeAssistantAttachAction::HandsOff
+        );
+    }
+
+    /// 「面板说还有运行时」和「attach 能落到一块可看的窗格」必须是同一个判据,否则会出现
+    /// 面板给了 Attach、点下去却报 not running(或反过来)的裂缝。
+    #[test]
+    fn test_lingering_and_attachable_are_the_same_judgement() {
+        use ah_contract_fixtures::{
+            SNAPSHOT_AHD_ALIVE_TMUX_GONE, SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_TERMINAL_CLOSED,
+        };
+
+        for (name, fixture) in [
+            ("SNAPSHOT_TERMINAL_CLOSED", SNAPSHOT_TERMINAL_CLOSED),
+            ("SNAPSHOT_AHD_ALIVE_TMUX_GONE", SNAPSHOT_AHD_ALIVE_TMUX_GONE),
+            ("SNAPSHOT_DAEMON_ABSENT", SNAPSHOT_DAEMON_ABSENT),
+        ] {
+            let snapshot = parse_snapshot_or_panic(fixture);
+            let says_lingering = assistant_status_for_snapshot(&snapshot) == AssistantStatus::Lingering;
+            let can_attach =
+                reconcile_snapshot_attach(&snapshot) == CodeAssistantAttachAction::AttachResidue;
+            assert_eq!(
+                says_lingering, can_attach,
+                "{name}: 面板呈现与 attach 落点必须同源,不能一个说有、另一个说没有"
+            );
+        }
     }
 
     /// 面板呈现改了判据,**启动前的清理没有跟着改**:游离的 ahd 即使没有 tmux,也该在启动

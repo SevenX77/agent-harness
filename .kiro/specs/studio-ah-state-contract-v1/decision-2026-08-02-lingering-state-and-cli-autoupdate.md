@@ -90,7 +90,39 @@ ah 侧 `degraded` 的既有语义（有 ACTIVE 会话但 master/worker 的 tmux 
 **措辞约束**：该状态**不表示 CLI 进程还在运行**。UI 文案与文档一律表述为"运行时仍在"，
 不得表述为"Claude 正在运行"。
 
-#### D-A3：`lingering` 可 Close，不可 Attach
+#### D-A3：~~`lingering` 可 Close，不可 Attach~~ → **已被 PM 裁决 2026-08-04 取代**
+
+> **现行规则（PM 裁决 2026-08-04，原话）**：「有残留的状态就当作还在 running，用户点击
+> attach 就打开死 pane，必须点击 close 把所有残留清干净才能再点击 open。」
+>
+> **即**：残留 = 还有运行时，Attach 与 Close 覆盖同一个集合；`Open in CLI` 在残留清干净
+> 之前不出现（这一条本来就是现状——有残留时头部渲染的是管理控件）。
+>
+> **推翻本条的理由**：D-A3 的出发点是「attach 上去就是那块死窗格，等于把缺陷换个位置
+> 重现」。但那块死窗格恰恰是 ah **有意**用 `remain-on-exit` 留下来供事后取证的东西，
+> 而那一屏正是使用者想看的——CLI 是怎么退的、最后报了什么。原方案等于：保留一份证据，
+> 然后让自己的 UI 拒绝展示它。
+>
+> **更严重的是它的落地方式**：D-A3 把「不给 attach」实现成了「attach 即销毁」——
+> attach 走到 `CleanupStale` 分支，先 `cleanup_workspace_code_assistants` 清掉整个
+> 运行时，再返回一句 "was stale and has been closed"。一次**观察**动作把**观察对象**
+> 毁掉了。销毁只能由 Close 显式发起。
+>
+> **落地**：attach 这条道有自己的判据 `reconcile_snapshot_attach`（与 Open 的
+> `reconcile_snapshot_lifecycle` 分开，因为两条道对同一帧快照问的是不同的问题）：
+> 残留 → `AttachResidue`（直接 attach，不清理）；`degraded` → 仍然 `CleanupStale`
+> （坏状态，没有可读的窗格，attach 上去什么也看不到）；`active` → attach；
+> 真空位 → not running；`starting` → hands-off。
+>
+> **附加约束**：残留的 Attach 菜单项必须标明会话已退出（`Attach X (exited)`）。不标出来，
+> 点下去看到一块冻住的窗格会被读成卡死——那是把一个诚实的入口做成了陷阱。
+>
+> **判据同源**：「面板说还有运行时（`lingering`）」与「attach 能落到一块可看的窗格上」
+> 是同一个问题，因此共用同一个谓词 `runtime_has_unreaped_residue`（会话终态 + tmux
+> server 仍在，见 D-A1 的 2026-08-04 修正），并有测试锁住两者一致，避免出现「面板给了
+> Attach、点下去却报 not running」的裂缝。
+
+（以下为已被取代的原文，保留供追溯）
 
 **决定**：前端把 `lingering` 归入"有运行时需要关闭"的一类，头部呈现管理控件而非 Open 控件；
 但下拉中的 **Attach 项只列真正 `active` 的助手**。

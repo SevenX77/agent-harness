@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CopilotMessage } from '../../types/copilot'
 import {
-  activeCodeAssistantIds,
   buildCopilotJudgeDraft,
   codeAssistantAttachMenuLabels,
   codeAssistantCloseButtonLabel,
@@ -335,18 +334,19 @@ describe('buildCopilotJudgeDraft', () => {
     // the read-only Detach case is covered by test_readonly_active_close_is_detach.
     const active = { status: 'active', readOnly: false } as const
     const inactive = { status: 'inactive', readOnly: false } as const
-    expect(activeCodeAssistantIds({ claude: inactive, codex: inactive })).toEqual([])
     expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: inactive })).toBeNull()
     expect(codeAssistantCloseButtonLabel({ claude: active, codex: inactive })).toBe('Close Claude code')
     expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: active })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: active, codex: active })).toBe('Close assistants')
   })
 
-  it('offers Close but never Attach for a lingering runtime', () => {
-    // 决议 2026-08-02 D-A3 — `lingering` = ah 的运行时还在,但里面已经没有活的 CLI 会话
-    // (`/exit` 之后 ah 把会话标终态却不回收 tmux)。它必须留在"可关闭"那一类,否则面板
-    // 会谎称什么都没在跑;但它绝不能出现在 Attach 菜单里 —— attach 上去就是那块
-    // remain-on-exit 留下的死窗格,等于把缺陷换个位置重现。
+  it('offers BOTH Attach and Close for a lingering runtime, and says the session exited', () => {
+    // PM 裁决 2026-08-04(取代决议 2026-08-02 D-A3):有残留就当作还有运行时——既能 attach
+    // 上去看那块 `remain-on-exit` 留下的死窗格(ah 就是为了事后取证才留着它,那一屏正是
+    // 使用者想看的:CLI 怎么退的、最后报了什么),也能 Close 把它清干净;清干净之前
+    // `Open in CLI` 不出现。
+    //
+    // 但残留的入口必须标出"已退出",否则点下去看到一块冻住的窗格会被读成卡死。
     const lingering = { status: 'lingering', readOnly: false } as const
     const inactive = { status: 'inactive', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
@@ -355,8 +355,15 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: lingering })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: lingering, codex: active })).toBe('Close assistants')
 
-    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: inactive })).toEqual([])
-    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: active })).toEqual(['Attach Codex'])
+    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: inactive })).toEqual([
+      'Attach Claude code (exited)',
+    ])
+    // 对照组:活会话不带后缀 —— 证明后缀是按相位算出来的,不是常量。
+    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: active })).toEqual([
+      'Attach Claude code (exited)',
+      'Attach Codex',
+    ])
+    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: inactive })).toEqual([])
   })
 
   it('subscribes to ah runtime events so a delayed CLI start updates the button without polling', async () => {
@@ -764,7 +771,6 @@ describe('buildCopilotJudgeDraft', () => {
     const unknown = { status: 'unknown', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
 
-    expect(activeCodeAssistantIds({ claude: unknown, codex: unknown })).toEqual([])
     expect(codeAssistantCloseButtonLabel({ claude: unknown, codex: unknown })).toBeNull()
     expect(codeAssistantAttachMenuLabels({ claude: unknown, codex: unknown })).toEqual([])
     // 对照组:另一侧真的在跑时,只有它进这两类。

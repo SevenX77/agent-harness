@@ -79,7 +79,9 @@ def test_predict_skill_tool_compacts_success(monkeypatch: pytest.MonkeyPatch) ->
     ]
     assert payload["path_diff"]["actual_path"] == ["extract"]
     assert payload["diagnostic_counts"] == {"error": 0}
-    assert ".workspace/runs/run-123" in payload["detail_hint"]
+    # Pointing at the directory is what sent a real session off parsing files by
+    # hand; the hint must name the tool that answers the question instead.
+    assert payload["detail_hint"] == "query_run_trace(skill_id='s1', run_id='run-123')"
 
 
 def test_predict_skill_tool_reports_failure_structurally(

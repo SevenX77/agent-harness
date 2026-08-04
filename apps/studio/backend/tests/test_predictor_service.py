@@ -422,3 +422,116 @@ def test_predict_dispatch_api_stays_synchronous(
     result = PredictorService().dispatch_predict_job("skill")
 
     assert isinstance(result, RunResult)
+
+
+def _predict_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    run_id: str,
+    success: bool,
+) -> Path:
+    """Wire a predict dispatch over fakes and return the skill dir."""
+    import app.core.adapters.engine as engine_adapter_module
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
+
+    art_ref = {
+        "artifact_id": "skill",
+        "content_hash": "sha256:" + "4" * 64,
+        "store": "ephemeral",
+        "manifest_ref": "manifest_ref",
+    }
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "compile", lambda *_a, **_k: art_ref)
+
+    def fake_predict_artifact(_adapter: object, _payload: dict[str, Any]) -> dict[str, Any]:
+        # The engine drops the trace into the run directory before Studio seals it;
+        # reproduce that here, because whether the seal picks the trace up is exactly
+        # what these tests are about.
+        run_dir = skill_dir / ".workspace" / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "trace.jsonl").write_text(
+            json.dumps({"event_type": "phase_start", "phase": "draft", "seq": 1}) + "\n",
+            encoding="utf-8",
+        )
+        return RunResult(
+            success=success,
+            run_id=run_id,
+            skill_id="skill",
+            context={"topic": "predict"},
+            source="predict",
+            phases=[],
+        ).model_dump(mode="json")
+
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", fake_predict_artifact)
+    return skill_dir
+
+
+def test_finished_predict_leaves_the_status_account_a_run_reader_needs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A sealed predict directory used to carry every artifact except an account of
+    # what happened, so nothing could answer questions about it once the process
+    # ended: `_metadata_for` found no record and no run_metadata.json, and
+    # get_run_detail / query_run_trace raised RESUME_CHECKPOINT_NOT_FOUND.
+    from app.models.runs import RunMetadata
+    from app.services.skills import workspace_dir_for
+
+    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-account", success=True)
+
+    PredictorService().dispatch_predict_job("skill")
+
+    account = workspace_dir_for(skill_dir) / "runs" / "predict-account" / "run_metadata.json"
+    assert account.exists(), "a sealed predict run must record its own outcome"
+    metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
+    assert metadata.run_id == "predict-account"
+    assert metadata.status == "success"
+
+
+def test_failed_predict_records_the_same_verdict_the_gate_broadcasts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # One judge only: the account must agree with export_predict_diagnostics,
+    # the projection the gate event and the frontend already decide on.
+    from app.models.runs import RunMetadata
+    from app.services.skills import workspace_dir_for
+
+    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-bad", success=False)
+
+    result = PredictorService().dispatch_predict_job("skill")
+
+    account = workspace_dir_for(skill_dir) / "runs" / "predict-bad" / "run_metadata.json"
+    metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
+    assert metadata.status == "failed"
+    assert metadata.status == predictor_module.export_predict_diagnostics(result).status
+
+
+def test_query_run_trace_can_answer_for_a_finished_predict_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The seam the session actually walked into: it asked what a phase received
+    # during predict, no tool could answer, and it fell back to parsing files by
+    # hand — while the trace sat in the run directory the whole time.
+    from app.services import skills as skills_module
+    from app.services.run_manager import run_manager
+
+    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-readable", success=True)
+    # get_run_detail resolves the run dir through the skill registry, which this
+    # fixture never populates; point it at the same directory predict wrote to.
+    monkeypatch.setattr(skills_module, "resolve_skill_dir", lambda _skill_id: skill_dir)
+
+    PredictorService().dispatch_predict_job("skill")
+
+    detail = run_manager.get_run_detail(skill_id="skill", run_id="predict-readable")
+
+    assert detail.metadata.status == "success"
+    assert [event.event_type for event in detail.events] == ["phase_start"]
+    assert detail.final_context == {"topic": "predict"}

@@ -112,6 +112,21 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 使用本地 Radix/shadcn `Tooltip` 的同一个 trigger 元素不得同时保留原生 `title` 属性，避免桌面 WebView 同时显示系统 tooltip 和 shadcn tooltip；需要可访问说明时用 `aria-label` / `aria-describedby`，视觉说明交给 `TooltipContent`。全局 tooltip 默认 hover 延迟为 500ms，不要为普通说明 tooltip 覆盖成 0ms；`TooltipContent` 必须限制到视口内宽度并允许长 request id、route id、JSON 错误等无空格文本换行，不能横向溢出卡片或窗口。
 - 卡片 `⋮` / 右键菜单里**移除/删除类**的菜单项必须用本地 `DropdownMenuItem` / `ContextMenuItem` 的 `variant="destructive"` 拿语义化销毁色（`data-[variant=destructive]:text-destructive`），**不要硬编码 red / 一次性 Tailwind 调色**；配一个 lucide 销毁图标（如 `Trash2`）。是否二次确认按**破坏性**分级：删除持久化配置/数据（如角色 DELETE，见 §2.9）必须走 `AlertDialog` 二次确认（`useDeleteConfirm`，见上方删除确认条，2026-07-02 R6-2）；只是清理一条列表项、底层数据/文件原样保留且可轻易恢复的低风险操作（如「从最近移除」——skill 文件不删、随时能再 Open folder 打开），用一个 `toast.success` 通知即可，不必拦一道确认弹窗。
 
+### 2.7a 进行态 vs 不可用（禁用不是万能挡板）
+
+- **"结果还没出来"和"这个功能你用不了"是两件事，不能长同一个样子。** 一个既没有文案变化、
+  也没有动效的禁用按钮，读起来就是"坏了/没权限"——使用者的第一反应是反复点它，而不是等它。
+  凡是控件因为**某件事正在进行、或系统还没拿到判断依据**而不可点，必须呈现为**进行态**：
+  换成说明当下在等什么的文案 + `Loader2` 旋转图标（`className="size-3.5 animate-spin"`，
+  仓内既有写法见 `copilot/role-picker.tsx`），并带 `aria-busy="true"`。真正的"不可用"
+  （无权限、只读配置、前置条件不满足）才保持原文案 + `disabled` + 说明原因的 `title`/tooltip。
+- 文案要说**在等什么**，不要只写 "Loading"：`Checking…`（系统还没观测到状态）、
+  `Starting…`（已经拉起、还没就绪）之类，各相位一句。多个相位同时成立时，**更具体的事实优先**。
+- **进行态不得顶掉此刻唯一有用的动作。** 一个对象已经在跑、另一个正在启动时，头部要给
+  前者的管理动作，而不是被一个 spinner 整个盖住。渲染优先级：有真实可执行动作 > 进行态 > 空闲入口。
+- 反例（2026-08-04，MoirAI 头部 CLI 控件）：状态未观测时渲染的是一个**外观与不可用无异**的
+  `Open in CLI` 禁用按钮，使用者无法区分"正在查"和"这功能挂了"。
+
 ### 2.8 输入框、搜索与行内动作
 - 带图标、清空、复制、显示/隐藏等行内动作的输入框，优先使用本地 `InputGroup` / `InputGroupButton` / `InputGroupAddon`。不要用绝对定位按钮硬盖在 `Input` 上；这种做法容易被 input 拦截点击，也更难保证窄宽度布局。
 - 搜索框应支持清空操作：有 query 时显示清空按钮，清空后恢复列表并把焦点放回搜索输入框。

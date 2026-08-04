@@ -458,6 +458,18 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
   return response.data
 }
 
+/** Halt the worker but keep the run continuable from its checkpoint. */
+export async function pauseRun(skillId: string, runId: string): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(`/skills/${skillId}/runs/${runId}/pause`)
+  return response.data
+}
+
+/** End a run for good, keeping it; DELETE remains the destructive option. */
+export async function stopRun(skillId: string, runId: string): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(`/skills/${skillId}/runs/${runId}/stop`)
+  return response.data
+}
+
 export interface CopilotToolApprovalRequest {
   toolUseId: string
   approve: boolean

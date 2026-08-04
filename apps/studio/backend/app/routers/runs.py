@@ -206,6 +206,26 @@ def _tokens_metrics_payload(raw: Any) -> TokensMetrics | None:
     )
 
 
+@router.post(
+    "/{run_id}/pause",
+    response_model=RunMetadata,
+    responses={409: {"model": ErrorResponse}},
+)
+async def pause_run(skill_id: str, run_id: str) -> RunMetadata:
+    """Halt the worker but keep the run continuable from its checkpoint."""
+    return await run_manager.pause_run(skill_id=skill_id, run_id=run_id)
+
+
+@router.post(
+    "/{run_id}/stop",
+    response_model=RunMetadata,
+    responses={409: {"model": ErrorResponse}},
+)
+async def stop_run(skill_id: str, run_id: str) -> RunMetadata:
+    """End a run for good, keeping it. Deleting is a separate, destructive act."""
+    return await run_manager.stop_run(skill_id=skill_id, run_id=run_id)
+
+
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_run(skill_id: str, run_id: str) -> Response:
     run_manager.delete_run(skill_id=skill_id, run_id=run_id)

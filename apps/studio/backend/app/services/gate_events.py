@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 SKILL_GATE_EVENT_TYPE = "skill_gate"
 
 Gate = Literal["compile", "predict", "run"]
-GateOutcome = Literal["started", "pass", "fail"]
+#: ``paused`` (waiting to be resumed) and ``stopped`` (ended by the user) are
+#: neither failures: a surface told "fail" would show an error report for a defect
+#: that never was, and one told "pass" would hide that the run never finished.
+GateOutcome = Literal["started", "pass", "fail", "paused", "stopped"]
 
 
 def build_skill_gate_event(

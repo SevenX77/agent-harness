@@ -6,10 +6,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CopilotMessage } from '../../types/copilot'
 import {
-  activeCodeAssistantIds,
   buildCopilotJudgeDraft,
   codeAssistantAttachMenuLabels,
   codeAssistantCloseButtonLabel,
+  codeAssistantPendingLabel,
   copilotBackendErrorMessage,
   CopilotPanel,
   isComposerSendKey,
@@ -243,17 +243,36 @@ describe('buildCopilotJudgeDraft', () => {
     // §10 D2: starting a CLI is a user intent. React mounts effects twice in
     // development, and `ah start` rejects the second call as "still starting",
     // so the launch must hang off the click handler and nothing else.
-    const html = renderToStaticMarkup(
-      React.createElement(CopilotPanel, {
+    // 挂载初值是"尚未观测",此时头部是进行态控件、根本没有 Open 菜单,所以这条必须先
+    // 喂一帧真实快照把面板带到可 Open 的状态,再验"启动只由点击触发"。
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return vi.fn()
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root: Root = createRoot(container)
+    await act(async () => {
+      root.render(React.createElement(CopilotPanel, {
         skillId: 'text-segmentation',
         copilot: mocks.useCopilot(),
         workspaceRoot: '/tmp/text-segmentation',
-      }),
-    )
+      }))
+    })
+    await act(async () => {
+      emitStatus?.({
+        claude: { status: 'inactive', readOnly: false },
+        codex: { status: 'inactive', readOnly: false },
+      })
+    })
 
     const openButton = mocks.buttonProps.find((props) => props['aria-label'] === 'Open code assistant')
     expect(openButton).toBeTruthy()
-    expect(html).toContain('Open in CLI')
+    expect(container.textContent).toContain('Open in CLI')
 
     // Rendering the panel alone must not have launched anything.
     expect(mocks.openClaudeCode).not.toHaveBeenCalled()
@@ -272,6 +291,13 @@ describe('buildCopilotJudgeDraft', () => {
     expect(workspaceRoot).toBe('/tmp/text-segmentation')
     expect(grid.cols).toBeGreaterThan(0)
     expect(grid.rows).toBeGreaterThan(0)
+
+    act(() => {
+      root.unmount()
+    })
+    document.body.removeChild(container)
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      previousReactActEnvironment
   })
 
   it('renders the CLI terminal from the session the WORKSPACE owns, not its own state', () => {
@@ -308,18 +334,19 @@ describe('buildCopilotJudgeDraft', () => {
     // the read-only Detach case is covered by test_readonly_active_close_is_detach.
     const active = { status: 'active', readOnly: false } as const
     const inactive = { status: 'inactive', readOnly: false } as const
-    expect(activeCodeAssistantIds({ claude: inactive, codex: inactive })).toEqual([])
     expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: inactive })).toBeNull()
     expect(codeAssistantCloseButtonLabel({ claude: active, codex: inactive })).toBe('Close Claude code')
     expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: active })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: active, codex: active })).toBe('Close assistants')
   })
 
-  it('offers Close but never Attach for a lingering runtime', () => {
-    // 决议 2026-08-02 D-A3 — `lingering` = ah 的运行时还在,但里面已经没有活的 CLI 会话
-    // (`/exit` 之后 ah 把会话标终态却不回收 tmux)。它必须留在"可关闭"那一类,否则面板
-    // 会谎称什么都没在跑;但它绝不能出现在 Attach 菜单里 —— attach 上去就是那块
-    // remain-on-exit 留下的死窗格,等于把缺陷换个位置重现。
+  it('offers BOTH Attach and Close for a lingering runtime, and says the session exited', () => {
+    // PM 裁决 2026-08-04(取代决议 2026-08-02 D-A3):有残留就当作还有运行时——既能 attach
+    // 上去看那块 `remain-on-exit` 留下的死窗格(ah 就是为了事后取证才留着它,那一屏正是
+    // 使用者想看的:CLI 怎么退的、最后报了什么),也能 Close 把它清干净;清干净之前
+    // `Open in CLI` 不出现。
+    //
+    // 但残留的入口必须标出"已退出",否则点下去看到一块冻住的窗格会被读成卡死。
     const lingering = { status: 'lingering', readOnly: false } as const
     const inactive = { status: 'inactive', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
@@ -328,8 +355,15 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: lingering })).toBe('Close Codex')
     expect(codeAssistantCloseButtonLabel({ claude: lingering, codex: active })).toBe('Close assistants')
 
-    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: inactive })).toEqual([])
-    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: active })).toEqual(['Attach Codex'])
+    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: inactive })).toEqual([
+      'Attach Claude code (exited)',
+    ])
+    // 对照组:活会话不带后缀 —— 证明后缀是按相位算出来的,不是常量。
+    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: active })).toEqual([
+      'Attach Claude code (exited)',
+      'Attach Codex',
+    ])
+    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: inactive })).toEqual([])
   })
 
   it('subscribes to ah runtime events so a delayed CLI start updates the button without polling', async () => {
@@ -579,12 +613,15 @@ describe('buildCopilotJudgeDraft', () => {
       })
 
       // The rendered assistant control is disabled while starting — hands-off.
+      // 它现在呈现为带 spinner 的进行态("Starting…"),而不是一个外观与不可用无异的
+      // 禁用 Open 触发器;hands-off 这条不变量本身没变。
       await vi.waitFor(() => {
         const control = container.querySelector(
-          'button[aria-label="Manage code assistant"], button[aria-label="Open code assistant"]',
+          'button[aria-label="Code assistant pending"], button[aria-label="Manage code assistant"], button[aria-label="Open code assistant"]',
         )
         expect(control).toBeTruthy()
         expect((control as HTMLButtonElement).disabled).toBe(true)
+        expect(control?.textContent).toContain('Starting…')
       })
 
       // …and no Attach/Close action is offered as a clickable (enabled) button.
@@ -605,12 +642,29 @@ describe('buildCopilotJudgeDraft', () => {
 
   // ── 决议 2026-08-03(status-stream ownership)—— 判据 C-8 / C-9 ──
 
-  it('leaves the Open control disabled until a runtime frame is actually observed', async () => {
-    // 缺陷 C 的可见形态:CLI 明明在跑,面板却渲染可点击的 `Open in CLI`。根因之一是挂载
-    // 初值把"尚未观测"当成"确定没有在跑"。挂载后一帧都还没到时,面板必须 hands-off。
+  it('names the pending phase so a hands-off control never reads as broken', () => {
+    // 进行态 ≠ 功能不可用。一个外观与"不可用"无异的禁用按钮会被读成"坏了",于是被反复
+    // 点击;所以 hands-off 的两个相位各自有文案,渲染成带 spinner 的进行态。
+    // `starting` 是更具体的事实(CLI 已经拉起),与 `unknown` 同时出现时它优先。
+    const unknown = { status: 'unknown', readOnly: false } as const
+    const starting = { status: 'starting', readOnly: false } as const
+    const inactive = { status: 'inactive', readOnly: false } as const
+    const active = { status: 'active', readOnly: false } as const
+
+    expect(codeAssistantPendingLabel({ claude: unknown, codex: unknown })).toBe('Checking…')
+    expect(codeAssistantPendingLabel({ claude: starting, codex: inactive })).toBe('Starting…')
+    expect(codeAssistantPendingLabel({ claude: unknown, codex: starting })).toBe('Starting…')
+    // 对照组:没有任何进行中的相位就没有进行态控件。
+    expect(codeAssistantPendingLabel({ claude: inactive, codex: inactive })).toBeNull()
+    expect(codeAssistantPendingLabel({ claude: active, codex: inactive })).toBeNull()
+  })
+
+  it('renders a spinning pending control instead of a look-alike disabled Open', async () => {
+    // 挂载后一帧都还没到 ⇒ `unknown`:头部必须是"Checking…"+ spinner 的进行态,
+    // 而不是一个看起来跟"不可用"一样的 `Open in CLI`。
     //
-    // 回滚自检:把挂载初值改回 inactive/inactive,第一段断言(disabled)立刻红;
-    // 而后半段(收到 active 帧后变成可管理控件)证明它不是恒定禁用。
+    // 回滚自检:把进行态分支删掉退回禁用的 Open 触发器,第一段断言立刻红;
+    // 收到 active 帧后变成可管理控件那一段证明它不是恒定进行态。
     const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
       .IS_REACT_ACT_ENVIRONMENT
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -632,15 +686,17 @@ describe('buildCopilotJudgeDraft', () => {
         }))
       })
 
-      // 一帧都没到:Open 控件在,但不可点。
       await vi.waitFor(() => {
-        const control = container.querySelector('button[aria-label="Open code assistant"]')
-        expect(control).toBeTruthy()
-        expect((control as HTMLButtonElement).disabled).toBe(true)
+        const pending = container.querySelector('button[aria-label="Code assistant pending"]')
+        expect(pending).toBeTruthy()
+        expect((pending as HTMLButtonElement).disabled).toBe(true)
+        expect(pending?.getAttribute('aria-busy')).toBe('true')
+        expect(pending?.textContent).toContain('Checking…')
+        expect(pending?.querySelector('.animate-spin')).toBeTruthy()
       })
-      expect(container.querySelector('button[aria-label="Manage code assistant"]')).toBeNull()
+      expect(container.textContent).not.toContain('Open in CLI')
 
-      // 观测到运行时在跑之后,才切到可管理控件。
+      // 观测到运行时在跑之后,进行态让位给真正有用的动作。
       await act(async () => {
         emitStatus?.({
           claude: { status: 'active', readOnly: false },
@@ -648,10 +704,56 @@ describe('buildCopilotJudgeDraft', () => {
         })
       })
       await vi.waitFor(() => {
+        expect(container.querySelector('button[aria-label="Manage code assistant"]')).toBeTruthy()
+        expect(container.querySelector('button[aria-label="Code assistant pending"]')).toBeNull()
+      })
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('keeps the running control when one assistant is live and the other is mid-start', async () => {
+    // 进行态不得顶掉"此刻唯一有用的动作":claude 在跑、codex 正在启动时,头部仍然是
+    // Attach/Close。回滚自检:把进行态分支提到 close 分支之前,本例立刻红。
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return vi.fn()
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'active', readOnly: false },
+          codex: { status: 'starting', readOnly: false },
+        })
+      })
+
+      await vi.waitFor(() => {
         const control = container.querySelector('button[aria-label="Manage code assistant"]')
         expect(control).toBeTruthy()
         expect((control as HTMLButtonElement).disabled).toBe(false)
       })
+      expect(container.querySelector('button[aria-label="Code assistant pending"]')).toBeNull()
     } finally {
       act(() => {
         root?.unmount()
@@ -669,7 +771,6 @@ describe('buildCopilotJudgeDraft', () => {
     const unknown = { status: 'unknown', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
 
-    expect(activeCodeAssistantIds({ claude: unknown, codex: unknown })).toEqual([])
     expect(codeAssistantCloseButtonLabel({ claude: unknown, codex: unknown })).toBeNull()
     expect(codeAssistantAttachMenuLabels({ claude: unknown, codex: unknown })).toEqual([])
     // 对照组:另一侧真的在跑时,只有它进这两类。

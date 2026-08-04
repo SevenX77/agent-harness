@@ -1029,6 +1029,26 @@ class RunManager:
         for subscriber in list(record.subscribers):
             subscriber.put_nowait(event_json)
 
+    def record_predict_outcome(
+        self,
+        *,
+        run_id: str,
+        run_dir: Path,
+        status: Literal["success", "failed"],
+        started_at: datetime,
+    ) -> None:
+        """Leave a finished predict the same on-disk account a run leaves.
+
+        A predict is dropped from the in-memory registry the moment it ends, so
+        without this file nothing can answer questions about it afterwards:
+        ``_metadata_for`` finds neither a record nor a metadata file and every
+        reader — ``get_run_detail``, and through it ``query_run_trace`` — fails
+        with RESUME_CHECKPOINT_NOT_FOUND while the trace sits unread in the very
+        same directory. The account format belongs here, so predict reports its
+        verdict rather than writing the file itself.
+        """
+        _write_run_metadata(run_dir, RunMetadata(run_id=run_id, status=status, started_at=started_at))
+
     def finish_transient_predict_run(self, run_id: str) -> None:
         record = self._runs.pop(run_id, None)
         if record is None:

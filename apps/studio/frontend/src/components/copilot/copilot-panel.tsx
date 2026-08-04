@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, ChevronDown, CircleAlert, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ChevronDown, CircleAlert, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -350,12 +350,20 @@ function isAssistantLingering(state: AssistantState): boolean {
   return state.status === 'lingering'
 }
 
-// starting = the CLI is spawned but not yet ready: hands-off until it settles, so the
-// panel offers no clickable lifecycle action while it is in flight.
-// unknown = Studio 还没拿到任何一帧快照(决议 2026-08-03 D-C3)。同样 hands-off:
-// 说不出运行时在不在,就不能给出一个可点击的 Open 入口。
-function isAssistantHandsOff(state: AssistantState): boolean {
-  return state.status === 'starting' || state.status === 'unknown'
+// 两个 hands-off 相位各自的进行态文案。它们不是"功能不可用",而是"正在发生的事还没有
+// 结论",所以头部渲染的是一个**带 spinner 的进行态控件**,而不是一个外观与不可用无异的
+// 禁用按钮——后者会被读成"坏了",于是被反复点击(FRONTEND_UI_SPEC §2「进行态 vs 不可用」)。
+//
+// starting = CLI 已经拉起但还没就绪;unknown = Studio 还没拿到任何一帧快照
+// (决议 2026-08-03 D-C3)。`starting` 是更具体的事实,同时出现时它优先。
+export function codeAssistantPendingLabel(status: CodeAssistantStatus): string | null {
+  if (status.claude.status === 'starting' || status.codex.status === 'starting') {
+    return 'Starting…'
+  }
+  if (status.claude.status === 'unknown' || status.codex.status === 'unknown') {
+    return 'Checking…'
+  }
+  return null
 }
 
 function isAssistantReadOnly(state: AssistantState): boolean {
@@ -586,12 +594,9 @@ export function CopilotPanel({
   const isClaudeOpenDisabled = codeAssistantStatus.claude.status === 'inactive' && isAssistantReadOnly(codeAssistantStatus.claude)
   const isCodexOpenDisabled = codeAssistantStatus.codex.status === 'inactive' && isAssistantReadOnly(codeAssistantStatus.codex)
   const allReadOnlyInactive = isClaudeOpenDisabled && isCodexOpenDisabled
-  // While either CLI is mid-start — or while Studio has not yet observed one at all —
-  // the Open control is hands-off: a disabled trigger makes its lifecycle items
-  // unreachable until the state settles. 未观测就给出可点击的 Open,正是缺陷 C 的
-  // 可见形态(决议 2026-08-03 D-C3)。
-  const isAnyCodeAssistantHandsOff =
-    isAssistantHandsOff(codeAssistantStatus.claude) || isAssistantHandsOff(codeAssistantStatus.codex)
+  // 进行态优先级低于"真有东西在跑":claude 在跑而 codex 正在启动时,头部仍然给
+  // Attach/Close(那是此刻唯一有用的动作),不被一个 spinner 顶掉。
+  const codeAssistantPending = codeAssistantPendingLabel(codeAssistantStatus)
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -846,6 +851,19 @@ export function CopilotPanel({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            ) : codeAssistantPending ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled
+                aria-label="Code assistant pending"
+                aria-busy="true"
+                className="studio-canvas-input-surface shrink-0"
+              >
+                <Loader2 className="size-3.5 animate-spin" data-icon="inline-start" />
+                {codeAssistantPending}
+              </Button>
             ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -853,7 +871,7 @@ export function CopilotPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!codeAssistantWorkspace || allReadOnlyInactive || isAnyCodeAssistantHandsOff}
+                    disabled={!codeAssistantWorkspace || allReadOnlyInactive}
                     aria-label="Open code assistant"
                     className="studio-canvas-input-surface shrink-0"
                     title={allReadOnlyInactive ? 'Workspace-owned config is read-only' : undefined}

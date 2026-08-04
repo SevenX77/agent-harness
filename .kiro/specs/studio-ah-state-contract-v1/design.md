@@ -134,6 +134,19 @@ sequenceDiagram
   Tauri-->>UI: code-assistant-status-changed
 ```
 
+**订阅的所有权（决议 2026-08-03 D-C1/D-C2/D-C4）**：`ah events` 生产者由 Tauri 侧的
+`CodeAssistantRuntimeState` 拥有，前端只是观察者。
+
+- `watch_code_assistant_status(workspaceRoot)` 是**幂等的"确保存在"**：确保该 workspace
+  的每个 spec 都有生产者，并停掉**其它** workspace 的生产者（Studio 同一时刻只显示一个
+  工作区，用它给生产者数量定上界）。
+- **没有反向的 unwatch 命令。** 前端订阅结束只撤销它自己建立的东西——一个本地监听器。
+  视图的卸载不得销毁共享的数据源；生产者只在两处终止：`watch` 切到别的 workspace，
+  以及 app 退出。
+- 生产者启动时若该 config 还没有任何缓存帧，先做一次 `status --json` bootstrap 播种
+  （即 Requirement 2.2 的 bootstrap 规则，同样适用于 UI 投影这条道，不只适用于生命周期
+  判定），在首帧到达之前，投影结果是 `unknown` 而不是 `inactive`。
+
 ### Close cleanup
 
 ```mermaid
@@ -290,13 +303,26 @@ This TypeScript-like shape is descriptive. The implementation should use Rust ty
 ### Frontend event payload (per-assistant, replaces the two-boolean shape)
 
 ```typescript
-type AssistantStatus = 'inactive' | 'starting' | 'active' | 'degraded' | 'error'
+type AssistantStatus =
+  | 'unknown'     // Studio 知道这个助手有一份 ah 配置，但还没拿到任何一帧快照（决议 2026-08-03 D-C3）
+  | 'inactive'    // 断言：该 config 的 ah 运行时确实被回收过（ahdAlive:false）
+  | 'starting'
+  | 'active'
+  | 'lingering'   // ah 运行时仍在，但里面已无活的 CLI 会话（决议 2026-08-02 D-A2）
+  | 'degraded'
+  | 'error'
 
 type CodeAssistantStatusChangedPayload = {
   claude: { status: AssistantStatus; reason?: string; readOnly: boolean }
   codex: { status: AssistantStatus; reason?: string; readOnly: boolean }
 }
 ```
+
+`unknown` 与 `inactive` 是两件不同的事，不得互相顶替：`inactive` 是一句关于运行时的
+断言，`unknown` 是关于 Studio 自身观测状态的陈述。产生 `unknown` 的唯一位置是投影层
+——某个助手有 spec 但 `status_snapshots` 中没有对应帧；完全没有 ah 配置的助手仍投影为
+`inactive`（磁盘上没有配置就是一次真实观测）。前端把 `unknown` 与 `starting` 同归
+hands-off 一类：渲染**禁用**的 Open 控件，既不可点 Open，也不出现 Attach/Close。
 
 This replaces `{claude: bool, codex: bool}` outright (lib.rs:63-73) and removes the claude-wins suppression at lib.rs:1244-1246 (Requirement 6.1/6.2). The `readOnly` flag (true for a workspace-owned config, false for a Studio-managed temp config — Requirement 4.6/6.1) lets the UI present controls that never fire a lifecycle command the backend will reject: a read-only `active` assistant's Close becomes **Detach** (local tab close only, no `ah stop`/`ah kill`), and a read-only `inactive` assistant's Open is disabled with guidance (Requirement 6.4). This is a direct breaking change to the payload shape — no dual-format emission, no version-sniffing on the frontend — consistent with this repository's no-backward-compatibility rule.
 

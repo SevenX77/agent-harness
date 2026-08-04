@@ -154,6 +154,13 @@ struct CodeAssistantStatusSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum AssistantStatus {
+    /// Studio 知道这个助手有一份 ah 配置，但还没拿到任何一帧描述它的运行时快照。
+    ///
+    /// 它不是 `Inactive`：`Inactive` 是一句关于运行时的**断言**（该 config 的 ah 运行时
+    /// 确实被回收过），而这里 Studio 只是**还没观测到**。把"没观测到"塞进那句断言，
+    /// 面板就会在缺乏依据时给出一个可点击、语义错误的 Open 入口——那正是 2026-08-03
+    /// 缺陷 C 的可见形态（决议 D-C3）。面板对它的处理与 `Starting` 同类：hands-off。
+    Unknown,
     Inactive,
     Starting,
     Active,
@@ -1380,11 +1387,13 @@ fn code_assistant_status_from_snapshots(
         // Project the typed snapshot onto the UI status (SSOT, design.md:132-133): each phase
         // renders distinctly instead of collapsing every non-active phase to "inactive", and an
         // `inactive` phase whose ahd is still alive projects to `lingering` (决议 2026-08-02
-        // D-A1). A config with no cached events frame yet reads as inactive.
+        // D-A1). 有 spec 但一帧都还没拿到 ⇒ `Unknown`：这时 Studio 只是尚未观测，说不出
+        // 「运行时已被回收」这句断言（决议 2026-08-03 D-C3）。而**没有 spec** 的助手保持
+        // 下面的 `Inactive` 默认值——磁盘上没有 ah 配置本身就是一次真实观测。
         let status_val = snapshots
             .get(config)
             .map(assistant_status_for_snapshot)
-            .unwrap_or(AssistantStatus::Inactive);
+            .unwrap_or(AssistantStatus::Unknown);
         let read_only = classify_config_ownership(config).read_only;
         let state = AssistantState {
             status: status_val,
@@ -1482,9 +1491,43 @@ fn stop_code_assistant_status_stream(stream: CodeAssistantStatusStream) {
     }
 }
 
+/// 冷启动播种：该 config 一帧都没有时，读一次 `status --json` 并按与 events 帧完全相同的
+/// 路径写进缓存（决议 2026-08-03 D-C4）。读不到就什么也不做——投影层保持 `unknown`，
+/// 由随后到达的 events 首帧接手。
+fn seed_bootstrap_snapshot(app: &tauri::AppHandle, config_path: &Path, workspace_root: &Path) {
+    let Some(state) = app.try_state::<CodeAssistantRuntimeState>() else {
+        return;
+    };
+    let needs_seed = {
+        let snapshots = state
+            .status_snapshots
+            .lock()
+            .expect("code assistant status snapshots poisoned");
+        needs_bootstrap_seed(&snapshots, config_path)
+    };
+    if !needs_seed {
+        return;
+    }
+    match resolve_open_snapshot(None, config_path, workspace_root) {
+        Some(snapshot) => {
+            log::info!(
+                "phase=code-assistant-status action=bootstrap-seeded config={} runtime_state={:?}",
+                config_path.display(),
+                snapshot.runtime_state
+            );
+            handle_code_assistant_status_snapshot(app, config_path, snapshot);
+        }
+        None => log::info!(
+            "phase=code-assistant-status action=bootstrap-empty config={}",
+            config_path.display()
+        ),
+    }
+}
+
 fn start_code_assistant_status_stream(
     app: tauri::AppHandle,
     config_path: PathBuf,
+    workspace_root: PathBuf,
 ) -> Result<CodeAssistantStatusStream, String> {
     check_ah_version_cached()?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -1492,6 +1535,12 @@ fn start_code_assistant_status_stream(
     let thread_stop = Arc::clone(&stop);
     let thread_child = Arc::clone(&child_slot);
     std::thread::spawn(move || {
+        // events 为主、`status --json` 作 bootstrap（design.md「Live status subscription」）
+        // ——这条规则原先只接在生命周期判定那条道上（`resolve_open_snapshot`），UI 投影
+        // 这条道没接，于是"还没观测到"被投影成 `inactive` 那句断言。在这里补上（决议
+        // 2026-08-03 D-C4）。放在流线程而不是 `watch` 命令里：这一读要跨 WSL，耗时以秒计，
+        // 阻塞 IPC 会拖住前台；这段时间面板呈现的是诚实的 `unknown`。
+        seed_bootstrap_snapshot(&app, &config_path, &workspace_root);
         // The events child can die for reasons that are not stop requests —
         // WSL still booting when the app comes up, `wsl --shutdown`, crashes.
         // A one-shot child would leave the status frozen on its last
@@ -1583,40 +1632,100 @@ fn start_code_assistant_status_stream(
     })
 }
 
+/// 观察用生产者集合的**策略**：谁该存在、谁该停。与 spawn/kill 的**机制**分离，
+/// 所以它可以被纯数据单测（AGENTS.md「副作用隔离」）。
+#[derive(Debug, PartialEq, Eq)]
+struct StatusStreamPlan {
+    start: Vec<PathBuf>,
+    stop: Vec<PathBuf>,
+}
+
+/// 决议 2026-08-03 D-C2：生产者集合只由「当前被观察的 workspace」决定。
+///
+/// - **该存在的** = `watched`（当前 workspace 的全部 config）。Studio 同一时刻只显示一个
+///   工作区，用这条不变量给生产者数量定上界——这是删掉订阅者驱动的 teardown（D-C1）
+///   之后仍然需要的资源上界。
+/// - **该停的** = 已登记或已在跑、但不在 `watched` 里的：切走的工作区，以及本工作区里
+///   已经消失的 config。**正在被观察的生产者永远不在这个集合里**，缺陷 C 里"卸载一个
+///   视图就杀掉活着的订阅者的数据源"因此在结构上不可能再发生。
+fn plan_status_streams(
+    registered: &BTreeSet<PathBuf>,
+    running: &BTreeSet<PathBuf>,
+    watched: &BTreeSet<PathBuf>,
+) -> StatusStreamPlan {
+    StatusStreamPlan {
+        start: watched
+            .iter()
+            .filter(|config| !running.contains(*config))
+            .cloned()
+            .collect(),
+        stop: registered
+            .union(running)
+            .filter(|config| !watched.contains(*config))
+            .cloned()
+            .collect(),
+    }
+}
+
+/// 决议 2026-08-03 D-C4：只有该 config 一帧都没有时才做 `status --json` 播种。
+/// 子进程重生时缓存里已有帧，重复播种只会多一次跨 WSL 的秒级读取。
+fn needs_bootstrap_seed(
+    snapshots: &BTreeMap<PathBuf, AhRuntimeSnapshot>,
+    config_path: &Path,
+) -> bool {
+    !snapshots.contains_key(config_path)
+}
+
+fn drop_status_stream(state: &CodeAssistantRuntimeState, config: &Path) {
+    if let Some(stream) = state
+        .status_streams
+        .lock()
+        .expect("code assistant status streams poisoned")
+        .remove(config)
+    {
+        stop_code_assistant_status_stream(stream);
+        log::info!(
+            "phase=code-assistant-status action=stream-stop config={}",
+            config.display()
+        );
+    }
+    state
+        .status_specs
+        .lock()
+        .expect("code assistant status specs poisoned")
+        .remove(config);
+    state
+        .status_snapshots
+        .lock()
+        .expect("code assistant status snapshots poisoned")
+        .remove(config);
+}
+
 fn ensure_code_assistant_status_streams_for_workspace(
     app: &tauri::AppHandle,
     state: &CodeAssistantRuntimeState,
     workspace_root: &Path,
 ) -> Result<(), String> {
     let next_specs = next_status_specs_for_workspace(state, workspace_root);
-    let next_configs = next_specs.keys().cloned().collect::<BTreeSet<_>>();
-    let stale_streams = {
-        let specs = status_specs_for_workspace(state, workspace_root);
-        specs
-            .keys()
-            .filter(|config| !next_configs.contains(*config))
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    for config in stale_streams {
-        if let Some(stream) = state
-            .status_streams
-            .lock()
-            .expect("code assistant status streams poisoned")
-            .remove(&config)
-        {
-            stop_code_assistant_status_stream(stream);
-        }
-        state
-            .status_specs
-            .lock()
-            .expect("code assistant status specs poisoned")
-            .remove(&config);
-        state
-            .status_snapshots
-            .lock()
-            .expect("code assistant status snapshots poisoned")
-            .remove(&config);
+    let watched = next_specs.keys().cloned().collect::<BTreeSet<_>>();
+    let registered = state
+        .status_specs
+        .lock()
+        .expect("code assistant status specs poisoned")
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let running = state
+        .status_streams
+        .lock()
+        .expect("code assistant status streams poisoned")
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    let plan = plan_status_streams(&registered, &running, &watched);
+    for config in plan.stop {
+        drop_status_stream(state, &config);
     }
 
     {
@@ -1629,25 +1738,24 @@ fn ensure_code_assistant_status_streams_for_workspace(
         }
     }
 
-    for config in next_configs {
-        let should_start = {
-            let streams = state
-                .status_streams
-                .lock()
-                .expect("code assistant status streams poisoned");
-            !streams.contains_key(&config)
-        };
-        if should_start {
-            let stream = start_code_assistant_status_stream(app.clone(), config.clone())?;
-            let mut streams = state
-                .status_streams
-                .lock()
-                .expect("code assistant status streams poisoned");
-            if let std::collections::btree_map::Entry::Vacant(e) = streams.entry(config) {
-                e.insert(stream);
-            } else {
-                stop_code_assistant_status_stream(stream);
-            }
+    for config in plan.start {
+        let stream = start_code_assistant_status_stream(
+            app.clone(),
+            config.clone(),
+            workspace_root.to_path_buf(),
+        )?;
+        let mut streams = state
+            .status_streams
+            .lock()
+            .expect("code assistant status streams poisoned");
+        if let std::collections::btree_map::Entry::Vacant(entry) = streams.entry(config.clone()) {
+            entry.insert(stream);
+            log::info!(
+                "phase=code-assistant-status action=stream-start config={}",
+                config.display()
+            );
+        } else {
+            stop_code_assistant_status_stream(stream);
         }
     }
     Ok(())
@@ -1670,36 +1778,6 @@ fn register_opened_code_assistant_status_spec(
                 assistant,
             },
         );
-}
-
-fn unwatch_code_assistant_status_streams_for_workspace(
-    state: &CodeAssistantRuntimeState,
-    workspace_root: &Path,
-) {
-    let configs = status_specs_for_workspace(state, workspace_root)
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
-    for config in configs {
-        if let Some(stream) = state
-            .status_streams
-            .lock()
-            .expect("code assistant status streams poisoned")
-            .remove(&config)
-        {
-            stop_code_assistant_status_stream(stream);
-        }
-        state
-            .status_specs
-            .lock()
-            .expect("code assistant status specs poisoned")
-            .remove(&config);
-        state
-            .status_snapshots
-            .lock()
-            .expect("code assistant status snapshots poisoned")
-            .remove(&config);
-    }
 }
 
 fn stop_all_code_assistant_status_streams(state: &CodeAssistantRuntimeState) {
@@ -2776,6 +2854,12 @@ fn cli_terminal_detach(
     cli_terminal::close(&terminals, &session_id)
 }
 
+/// 前端观察状态的唯一入口，语义是**幂等的「确保生产者存在」**：确保该 workspace 的每个
+/// spec 都有一条 `ah events` 流，并停掉别的 workspace 的流（决议 2026-08-03 D-C2）。
+///
+/// 没有反向命令。生产者由 `CodeAssistantRuntimeState` 拥有，前端只是观察者——订阅结束
+/// 时它只撤销自己建立的那个本地监听器，不得销毁共享的数据源（D-C1）。生产者只在两处
+/// 终止：`watch` 切到别的 workspace，以及 app 退出。
 #[tauri::command]
 fn watch_code_assistant_status(
     app: tauri::AppHandle,
@@ -2783,21 +2867,12 @@ fn watch_code_assistant_status(
     state: tauri::State<'_, CodeAssistantRuntimeState>,
 ) -> Result<(), String> {
     let workspace_root = existing_directory(&workspace_root)?;
+    log::info!(
+        "phase=code-assistant-status action=watch workspace={}",
+        workspace_root.display()
+    );
     ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
     emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
-    Ok(())
-}
-
-#[tauri::command]
-fn unwatch_code_assistant_status(
-    workspace_root: String,
-    state: tauri::State<'_, CodeAssistantRuntimeState>,
-) -> Result<(), String> {
-    let workspace_root = PathBuf::from(workspace_root.trim());
-    if workspace_root.as_os_str().is_empty() {
-        return Ok(());
-    }
-    unwatch_code_assistant_status_streams_for_workspace(&state, &workspace_root);
     Ok(())
 }
 
@@ -3066,7 +3141,6 @@ pub fn run() {
             cli_terminal_resize,
             cli_terminal_detach,
             watch_code_assistant_status,
-            unwatch_code_assistant_status,
             close_code_assistant,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
@@ -3739,10 +3813,6 @@ mod tests {
         assert!(
             source.contains("watch_code_assistant_status,"),
             "watch_code_assistant_status must be registered in the Tauri invoke handler"
-        );
-        assert!(
-            source.contains("unwatch_code_assistant_status,"),
-            "unwatch_code_assistant_status must be registered in the Tauri invoke handler"
         );
         assert!(
             source.contains("close_code_assistant,"),
@@ -5469,7 +5539,7 @@ mod tests {
         // event snapshots must ONLY drive the status display — never cleanup.
         // Cleanup stays on user actions: prepare_code_assistant_open,
         // attach (CleanupStale), Close, and app quit.
-        use ah_contract_fixtures::{SNAPSHOT_ACTIVE, SNAPSHOT_STARTING};
+        use ah_contract_fixtures::{SNAPSHOT_ACTIVE, SNAPSHOT_DAEMON_ABSENT, SNAPSHOT_STARTING};
 
         let workspace = PathBuf::from("/tmp/studio-skill");
         let claude_config = workspace.join(".claude-ah.toml");
@@ -5493,9 +5563,18 @@ mod tests {
 
         // task 6.1 cutover: the status cache is now the typed `AhRuntimeSnapshot` plane, so this
         // feeds frozen typed fixtures (was the old boolean `AhLifecycleSnapshot::new(...)`); the
-        // display-only contract is unchanged. claude active; codex (no snapshot) inactive.
-        let snapshots =
-            BTreeMap::from([(claude_config.clone(), parse_snapshot_or_panic(SNAPSHOT_ACTIVE))]);
+        // display-only contract is unchanged. claude active; codex 的运行时确实被回收过。
+        //
+        // codex 两次都喂一帧真实的 daemon-absent 快照,而不是"不给快照"——决议 2026-08-03
+        // D-C3 起,"没有帧"投影为 `unknown`,那是关于 Studio 观测状态的陈述,不是这条
+        // display-only 契约要断言的运行时事实。
+        let snapshots = BTreeMap::from([
+            (claude_config.clone(), parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
+            (
+                codex_config.clone(),
+                parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT),
+            ),
+        ]);
         let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &snapshots))
             .expect("payload must serialize to the frontend wire shape");
         assert_eq!(v["claude"]["status"], "active");
@@ -5504,8 +5583,10 @@ mod tests {
         // The startup window (session STARTING, master tmux not yet alive) now projects as the
         // distinct `starting` phase — the typed plane no longer collapses it to `inactive`. It is
         // still display-only: reaching this phase never triggers cleanup.
-        let starting =
-            BTreeMap::from([(claude_config, parse_snapshot_or_panic(SNAPSHOT_STARTING))]);
+        let starting = BTreeMap::from([
+            (claude_config, parse_snapshot_or_panic(SNAPSHOT_STARTING)),
+            (codex_config, parse_snapshot_or_panic(SNAPSHOT_DAEMON_ABSENT)),
+        ]);
         let v_starting =
             serde_json::to_value(code_assistant_status_from_snapshots(&specs, &starting))
                 .expect("payload must serialize to the frontend wire shape");
@@ -5627,12 +5708,20 @@ mod tests {
             "codex active reports its OWN active state — no claude-wins suppression (Req 6.2)"
         );
 
-        // Control: claude active, codex has no active stack → per-assistant derivation must
-        // report codex inactive (defeats a constant-`active` impl that would fake the pair above,
-        // and proves both keys are always present).
-        let claude_only =
-            BTreeMap::from([(claude_config, parse_snapshot_or_panic(SNAPSHOT_ACTIVE))]);
-        let v2 = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &claude_only))
+        // Control: claude active, codex 的运行时确实被回收过（daemon-absent 快照）→ 逐助手
+        // 推导必须报 codex `inactive`（defeats a constant-`active` impl that would fake the
+        // pair above, and proves both keys are always present）。
+        //
+        // 这里必须喂一帧**真实的** daemon-absent 快照，不能靠"不给 codex 快照"来制造
+        // inactive：决议 2026-08-03 D-C3 起，"没有帧"投影为 `unknown` 而不是 `inactive`。
+        let mixed = BTreeMap::from([
+            (claude_config, parse_snapshot_or_panic(SNAPSHOT_ACTIVE)),
+            (
+                codex_config,
+                parse_snapshot_or_panic(ah_contract_fixtures::SNAPSHOT_DAEMON_ABSENT),
+            ),
+        ]);
+        let v2 = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &mixed))
             .expect("payload must serialize to the frontend wire shape");
         assert_eq!(v2["claude"]["status"], "active");
         assert_eq!(
@@ -5713,6 +5802,188 @@ mod tests {
         assert_eq!(
             v["codex"]["readOnly"], false,
             "Studio-managed temp config → readOnly:false so the normal lifecycle controls show (Req 6.1)"
+        );
+    }
+
+    // ── 决议 2026-08-03(status-stream ownership)RED tests ──
+    //
+    // 缺陷 C:CLI 在跑,面板却渲染 `Open in CLI`。取证见
+    // `.kiro/specs/studio-ah-state-contract-v1/decision-2026-08-03-status-stream-ownership.md`
+    // 一.2:ah 侧 `runtime_state:"active"`,而 Studio 侧一个 `ah events` 生产者都不剩。
+    // 根因是所有权错误——生产者的生死被 React 订阅者的 teardown 决定(D-C1),叠加
+    // "尚未观测"被投影成 `inactive` 这句断言(D-C3)。
+    //
+    // 下面的测试锁住两条不变量:
+    //   ① 生产者集合只由「当前被观察的 workspace」决定,订阅者来去不改变它(D-C1/D-C2);
+    //   ② 有 spec 但没有任何快照帧 ⇒ `unknown`,绝不是 `inactive`(D-C3)。
+
+    /// 判据 C-1:同一 workspace 连续 watch,已在跑的生产者不得被停掉再重启。
+    ///
+    /// 回滚自检:把 `stop` 改成「registered 全停」,本例立刻红——它正是缺陷 C 里
+    /// 「teardown 杀掉活着的订阅者的生产者」那条路径的纯函数形态。
+    #[test]
+    fn test_watch_is_idempotent_for_a_live_producer() {
+        let config = PathBuf::from("/tmp/ws-a/claude/ah.toml");
+        let registered = BTreeSet::from([config.clone()]);
+        let running = BTreeSet::from([config.clone()]);
+        let watched = BTreeSet::from([config.clone()]);
+
+        let plan = plan_status_streams(&registered, &running, &watched);
+
+        assert!(
+            plan.start.is_empty(),
+            "生产者已在跑,重复 watch 不得再起一个"
+        );
+        assert!(
+            plan.stop.is_empty(),
+            "重复 watch 不得停掉正在被观察的生产者(缺陷 C 的核心不变量)"
+        );
+    }
+
+    /// 判据 C-1 的对照组:没有生产者时必须起一个,证明上一条不是恒空。
+    #[test]
+    fn test_watch_starts_a_missing_producer() {
+        let claude = PathBuf::from("/tmp/ws-a/claude/ah.toml");
+        let codex = PathBuf::from("/tmp/ws-a/codex/ah.toml");
+        let watched = BTreeSet::from([claude.clone(), codex.clone()]);
+
+        let plan = plan_status_streams(&BTreeSet::new(), &BTreeSet::new(), &watched);
+
+        assert_eq!(plan.start, vec![claude, codex], "缺席的生产者要补齐");
+        assert!(plan.stop.is_empty(), "没有多余的生产者可停");
+    }
+
+    /// 判据 C-4:切到另一个 workspace 时,只停别的 workspace 的生产者,新的要起来。
+    /// Studio 同一时刻只显示一个工作区,这条就是删掉 unwatch 之后生产者数量的上界(D-C2)。
+    #[test]
+    fn test_watching_another_workspace_stops_only_the_other_producers() {
+        let ws_a = PathBuf::from("/tmp/ws-a/claude/ah.toml");
+        let ws_b = PathBuf::from("/tmp/ws-b/claude/ah.toml");
+        let registered = BTreeSet::from([ws_a.clone()]);
+        let running = BTreeSet::from([ws_a.clone()]);
+        let watched = BTreeSet::from([ws_b.clone()]);
+
+        let plan = plan_status_streams(&registered, &running, &watched);
+
+        assert_eq!(plan.start, vec![ws_b], "新观察的 workspace 要有生产者");
+        assert_eq!(plan.stop, vec![ws_a], "旧 workspace 的生产者才是该停的那个");
+    }
+
+    /// 判据 C-4 的另一半:本 workspace 里已经消失的 config(临时配置被删)也要停掉,
+    /// 否则生产者会挂在一个不存在的配置上空转。
+    #[test]
+    fn test_plan_stops_a_config_that_left_this_workspace() {
+        let kept = PathBuf::from("/tmp/ws-a/claude/ah.toml");
+        let gone = PathBuf::from("/tmp/ws-a/codex/ah.toml");
+        let registered = BTreeSet::from([kept.clone(), gone.clone()]);
+        let running = BTreeSet::from([kept.clone(), gone.clone()]);
+        let watched = BTreeSet::from([kept]);
+
+        let plan = plan_status_streams(&registered, &running, &watched);
+
+        assert!(plan.start.is_empty());
+        assert_eq!(plan.stop, vec![gone]);
+    }
+
+    /// 判据 C-3:不存在任何"订阅者可以停掉共享生产者"的命令入口。
+    /// 断言范围严格限定在 `generate_handler!` 注册块内,避免把本测试自己的文本算进去。
+    #[test]
+    fn invoke_handler_exposes_no_subscriber_driven_teardown_command() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("generate_handler![")
+            .expect("invoke handler registry must exist");
+        let registry = &source[start..];
+        let end = registry
+            .find("])")
+            .expect("invoke handler registry must be closed");
+        let registry = &registry[..end];
+
+        assert!(
+            registry.contains("watch_code_assistant_status,"),
+            "watch(确保生产者存在)仍然是前端唯一的订阅入口"
+        );
+        assert!(
+            !registry.contains("unwatch"),
+            "决议 2026-08-03 D-C1:视图的卸载不得销毁共享的数据源,因此不存在反向命令"
+        );
+    }
+
+    /// 判据 C-5:有 spec 但一帧快照都没拿到 ⇒ `unknown`。
+    ///
+    /// `inactive` 在本契约里是一句断言(「该 config 的 ah 运行时确实被回收过」,
+    /// 见 2026-08-02 决议 D-A1/D-A4 决策表末行),把"还没观测到"塞进这句断言,就是
+    /// 缺陷 C 在界面上的可见形态:面板给出一个可点击但语义错误的 Open 入口。
+    ///
+    /// 回滚自检:把投影改回 `.unwrap_or(AssistantStatus::Inactive)`,本例立刻红。
+    #[test]
+    fn test_spec_without_a_frame_projects_unknown_not_inactive() {
+        let workspace = PathBuf::from("/tmp/studio-skill");
+        let claude_config = workspace.join(".claude-ah.toml");
+        let specs = BTreeMap::from([(
+            claude_config,
+            CodeAssistantStatusSpec {
+                workspace_root: workspace,
+                assistant: CodeAssistant::Claude,
+            },
+        )]);
+
+        let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &BTreeMap::new()))
+            .expect("payload must serialize to the frontend wire shape");
+
+        assert_eq!(
+            v["claude"]["status"], "unknown",
+            "有配置但还没有任何快照 = 尚未观测,不得冒充「确定没有在跑」"
+        );
+    }
+
+    /// 判据 C-6(对照组,证明 `unknown` 不是恒定值):磁盘上根本没有 ah 配置的助手,
+    /// 是一次真实观测——没有配置就没有 Studio 管理的运行时——仍然是 `inactive`。
+    #[test]
+    fn test_assistant_without_a_config_stays_inactive() {
+        let workspace = PathBuf::from("/tmp/studio-skill");
+        let claude_config = workspace.join(".claude-ah.toml");
+        let specs = BTreeMap::from([(
+            claude_config.clone(),
+            CodeAssistantStatusSpec {
+                workspace_root: workspace,
+                assistant: CodeAssistant::Claude,
+            },
+        )]);
+        let snapshots = BTreeMap::from([(
+            claude_config,
+            parse_snapshot_or_panic(ah_contract_fixtures::SNAPSHOT_ACTIVE),
+        )]);
+
+        let v = serde_json::to_value(code_assistant_status_from_snapshots(&specs, &snapshots))
+            .expect("payload must serialize to the frontend wire shape");
+
+        assert_eq!(v["claude"]["status"], "active", "前置:claude 侧确有帧");
+        assert_eq!(
+            v["codex"]["status"], "inactive",
+            "codex 根本没有 spec ⇒ 没有配置 ⇒ 真实观测到「没有运行时」,不是 unknown"
+        );
+    }
+
+    /// 判据 D-C4:bootstrap 只在该 config 一帧都没有时播种。
+    /// 子进程重生(`events-exited-respawning`)时缓存里已有帧,不得再跨 WSL 读一次
+    /// `status --json` 拖慢重连。
+    #[test]
+    fn test_bootstrap_seeds_only_when_the_cache_has_no_frame() {
+        let config = PathBuf::from("/tmp/ws-a/claude/ah.toml");
+        let empty: BTreeMap<PathBuf, AhRuntimeSnapshot> = BTreeMap::new();
+        let seeded = BTreeMap::from([(
+            config.clone(),
+            parse_snapshot_or_panic(ah_contract_fixtures::SNAPSHOT_ACTIVE),
+        )]);
+
+        assert!(
+            needs_bootstrap_seed(&empty, &config),
+            "冷启动:没有任何帧才需要 status --json 播种"
+        );
+        assert!(
+            !needs_bootstrap_seed(&seeded, &config),
+            "已有帧(含重生场景)不得重复播种"
         );
     }
 

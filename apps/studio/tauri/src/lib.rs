@@ -311,6 +311,20 @@ fn existing_path(path: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// Render a path the way the platform's file manager expects to receive it.
+///
+/// Windows Explorer does not accept `/` as a separator: handed
+/// `D:/skills/demo/.workspace/import_files` it silently opens Documents instead
+/// of the folder, with no error to notice. Studio builds its workspace paths
+/// with forward slashes, so the conversion happens here — at the single point
+/// where a path leaves Rust for the file manager — rather than at each caller.
+fn file_manager_argument(path: &Path) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        return PathBuf::from(path.to_string_lossy().replace('/', "\\"));
+    }
+    path.to_path_buf()
+}
+
 fn existing_directory(path: &str) -> Result<PathBuf, String> {
     let target = existing_path(path)?;
     if !target.is_dir() {
@@ -2945,7 +2959,7 @@ fn open_path(path: String) -> Result<(), String> {
 
     if cfg!(target_os = "windows") {
         return Command::new("explorer")
-            .arg(target)
+            .arg(file_manager_argument(&target))
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open Explorer: {error}"));
@@ -6429,6 +6443,26 @@ sessions
         assert!(QUIT_FLUSH_BUDGET >= Duration::from_millis(500));
         assert!(QUIT_FLUSH_BUDGET <= Duration::from_millis(5000));
         assert!(QUIT_FLUSH_POLL_INTERVAL < QUIT_FLUSH_BUDGET);
+    }
+
+    #[test]
+    fn file_manager_argument_uses_the_separator_the_file_manager_accepts() {
+        // Studio builds workspace paths with forward slashes. Explorer treats such
+        // a path as unresolvable and opens Documents instead — silently, so the
+        // only symptom is the wrong folder appearing.
+        let mixed = Path::new("D:/coding/skills/demo/.workspace/import_files");
+
+        // Compared as text, not as PathBuf: on Windows both separators are path
+        // separators, so two PathBufs differing only in slash direction are equal
+        // and an assertion on them passes without the conversion ever happening.
+        // What reaches Explorer is the argument string, so that is what is checked.
+        let rendered = file_manager_argument(mixed).to_string_lossy().into_owned();
+
+        if cfg!(target_os = "windows") {
+            assert_eq!(rendered, r"D:\coding\skills\demo\.workspace\import_files");
+        } else {
+            assert_eq!(rendered, "D:/coding/skills/demo/.workspace/import_files");
+        }
     }
 
     #[test]

@@ -50,6 +50,28 @@ tmux（根因第 2 条），因此 `ahd_alive == true` 与"tmux 尚未回收"是
 ——Close 走 `ah stop`（ah 仓 `src/bin/ah.rs:1225-1229` → `system.shutdown` → 自发 SIGTERM →
 上述整体清理），ahd 一死，Studio 就再也取不到快照，状态自然归零。
 
+> **修正（2026-08-04）：面板呈现这条道的判据改为 `tmux_server_alive`。**
+>
+> 本条的推理是"ah 只在 ahd 退出时才回收 tmux ⇒ `ahd_alive == true` 与『tmux 尚未回收』
+> 是同一件事"。这个蕴含**只有一个方向**：ahd 活着并**不代表** tmux server 存在——它可以
+> 从来没建过，也可以被外部带走（机器重启把 tmux 全清掉、而 ahd 又被重新拉起，就是本机
+> 实测到的形状）。
+>
+> 真机取证（2026-08-04，本机 WSL，`ah 1.7.0`）：Studio 管的 6 份 config 里有 **4 份**处于
+> `runtime_state:"inactive"` + `ahd_alive:true` + `tmux_server_alive:false` +
+> `ahd_has_inventory:false`，全部 agent `state:"KILLED"`/`tmux_alive:false`。旧判据把这
+> 4 份都报成 `lingering`，面板给出一个 **attach 不到任何东西、也无事可关**的 Close 控件。
+> 逐字捕获的那一帧已冻结为 fixture `SNAPSHOT_AHD_ALIVE_TMUX_GONE`。
+>
+> **修正后的判据**：`runtime_state == inactive && tmux_server_alive == true` ⇒ `lingering`。
+> 依据是本条本来就想表达的那件事——**死窗格活在 tmux server 里，server 没了就什么都没
+> 剩下**，而这个事实快照里直接带着，不需要经由 ahd 推断。本条要解决的原始场景（`/exit`
+> 之后 ah 标终态却不回收 tmux）里 server 仍在，因此判定不变、缺陷 A 的修复不受影响。
+>
+> **范围**：只改**面板呈现**。启动前该不该先清残留是另一条道
+> （`reconcile_snapshot_lifecycle`），它**继续用 `ahd_alive`**——游离的 ahd 即使没有 tmux
+> 也该在启动新运行时之前清掉（D-A4），那一层宁可多清。两条道用各自真正需要的那个事实。
+
 **被否决的替代项**：用快照里的 `sessions[].cleanup_required`。该字段定义为
 `终态状态 && (… || master_pid > 0 || …)`（ah 仓 `src/runtime_events.rs:635-648`），而 ah 没有
 任何路径把 `master_pid` 清零——连 `ah kill --session --force` 的终态分支也只改 status 不清 pid

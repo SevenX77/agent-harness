@@ -318,6 +318,20 @@ fn existing_path(path: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// Render a path the way the platform's file manager expects to receive it.
+///
+/// Windows Explorer does not accept `/` as a separator: handed
+/// `D:/skills/demo/.workspace/import_files` it silently opens Documents instead
+/// of the folder, with no error to notice. Studio builds its workspace paths
+/// with forward slashes, so the conversion happens here — at the single point
+/// where a path leaves Rust for the file manager — rather than at each caller.
+fn file_manager_argument(path: &Path) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        return PathBuf::from(path.to_string_lossy().replace('/', "\\"));
+    }
+    path.to_path_buf()
+}
+
 fn existing_directory(path: &str) -> Result<PathBuf, String> {
     let target = existing_path(path)?;
     if !target.is_dir() {
@@ -1431,16 +1445,26 @@ fn emit_code_assistant_status_for_workspace(
     }
 }
 
-fn clear_status_snapshots_for_workspace(state: &CodeAssistantRuntimeState, workspace_root: &Path) {
-    let configs = status_specs_for_workspace(state, workspace_root)
-        .keys()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    state
-        .status_snapshots
-        .lock()
-        .expect("code assistant status snapshots poisoned")
-        .retain(|config, _| !configs.contains(config));
+/// 重开这个 workspace 的观察流,让它对着**当前**的 daemon 事实重新基线。
+///
+/// 为什么不是"清空快照缓存"就够(2026-08-04 真机复现):`ah stop` 杀掉的是 ahd,而这个
+/// config 的 `ah events` 子进程**不会随之退出**——它只是从此永远不再发帧(实测:ahd 停掉
+/// 后子进程仍存活 3 分钟以上,监督循环零重生、日志零 `events-exited-respawning`)。所以
+/// 只清缓存的话,缓存就再也没有任何东西能把它填回来:投影按「尚未观测」给出 `unknown`,
+/// 面板把 Open 控件永久禁用,使用者连重新打开 CLI 的入口都没有了。
+///
+/// 一条流绑定的是**某一个 daemon 实例**,不是这份 config。Studio 自己改变了 daemon 的
+/// 存亡,就必须把观察者一起重开——重开后的 `ah events` 立刻发一帧 `daemon_absent`
+/// (`ahd_alive:false`),投影成 `inactive`,Open 恢复可点。
+fn restart_status_streams_for_workspace(
+    app: &tauri::AppHandle,
+    state: &CodeAssistantRuntimeState,
+    workspace_root: &Path,
+) -> Result<(), String> {
+    for config in status_specs_for_workspace(state, workspace_root).keys() {
+        drop_status_stream(state, config);
+    }
+    ensure_code_assistant_status_streams_for_workspace(app, state, workspace_root)
 }
 
 fn handle_code_assistant_status_snapshot(
@@ -2886,7 +2910,7 @@ fn close_code_assistant(
     let workspace_root = existing_directory(&workspace_root)?;
     let assistant = CodeAssistant::from_slug(assistant.trim())?;
     if ah_config_for_status(&workspace_root, assistant).is_none() {
-        clear_status_snapshots_for_workspace(&state, &workspace_root);
+        restart_status_streams_for_workspace(&app, &state, &workspace_root)?;
         emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
         return Ok(false);
     }
@@ -2896,10 +2920,11 @@ fn close_code_assistant(
         .lock()
         .expect("code assistant state poisoned")
         .retain(|registered_config| !cleanup.configs.contains(registered_config));
-    // 只有确认运行时真的消失了，才把状态缓存清成"什么都没有"。否则保留最后一帧快照，
+    // 只有确认运行时真的消失了，才动观察流：把它重开，让它对着"没有 daemon"重新基线
+    // (`daemon_absent` → `inactive`，Open 恢复可点)。确认不了就保留最后一帧快照，
     // 面板继续呈现 `lingering`（可再关一次），而不是在残留还在时谎报可以重新打开。
     if cleanup.runtime_confirmed_gone {
-        clear_status_snapshots_for_workspace(&state, &workspace_root);
+        restart_status_streams_for_workspace(&app, &state, &workspace_root)?;
     }
     emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
     Ok(cleanup.closed_any)
@@ -3020,7 +3045,7 @@ fn open_path(path: String) -> Result<(), String> {
 
     if cfg!(target_os = "windows") {
         return Command::new("explorer")
-            .arg(target)
+            .arg(file_manager_argument(&target))
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open Explorer: {error}"));
@@ -5885,6 +5910,29 @@ mod tests {
         assert_eq!(plan.stop, vec![gone]);
     }
 
+    /// 2026-08-04 真机复现的回归:Close 之后面板永久停在 `unknown`、Open 控件禁用点不动。
+    ///
+    /// 根因是"清空快照缓存"这个动作本身:`ah stop` 杀掉 ahd 之后,该 config 的 `ah events`
+    /// 子进程不退出、只是永远不再发帧(实测存活 3 分钟以上、零重生),所以被清空的缓存再也
+    /// 没有东西能填回来。修法是让"确认消失"走**重开观察流**这一条路——因此代码里不应再
+    /// 存在任何"只清缓存、不重开流"的入口。这条测试把那个入口的消失钉住。
+    ///
+    /// 回滚自检:把 `clear_status_snapshots_for_workspace` 加回来,本例立刻红。
+    #[test]
+    fn no_cache_clearing_entry_survives_without_restarting_the_observer() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("fn restart_status_streams_for_workspace"),
+            "确认运行时消失之后,必须由重开观察流来接管"
+        );
+        // needle 在运行期拼出来,否则 `include_str!` 会把这条断言自己的字面量也算进去。
+        let clear_only_entry = format!("fn clear_status_snapshots{}", "_for_workspace");
+        assert!(
+            !source.contains(&clear_only_entry),
+            "只清缓存不重开流的入口必须彻底消失——它会把面板永久钉在 unknown"
+        );
+    }
+
     /// 判据 C-3:不存在任何"订阅者可以停掉共享生产者"的命令入口。
     /// 断言范围严格限定在 `generate_handler!` 注册块内,避免把本测试自己的文本算进去。
     #[test]
@@ -6700,6 +6748,26 @@ sessions
         assert!(QUIT_FLUSH_BUDGET >= Duration::from_millis(500));
         assert!(QUIT_FLUSH_BUDGET <= Duration::from_millis(5000));
         assert!(QUIT_FLUSH_POLL_INTERVAL < QUIT_FLUSH_BUDGET);
+    }
+
+    #[test]
+    fn file_manager_argument_uses_the_separator_the_file_manager_accepts() {
+        // Studio builds workspace paths with forward slashes. Explorer treats such
+        // a path as unresolvable and opens Documents instead — silently, so the
+        // only symptom is the wrong folder appearing.
+        let mixed = Path::new("D:/coding/skills/demo/.workspace/import_files");
+
+        // Compared as text, not as PathBuf: on Windows both separators are path
+        // separators, so two PathBufs differing only in slash direction are equal
+        // and an assertion on them passes without the conversion ever happening.
+        // What reaches Explorer is the argument string, so that is what is checked.
+        let rendered = file_manager_argument(mixed).to_string_lossy().into_owned();
+
+        if cfg!(target_os = "windows") {
+            assert_eq!(rendered, r"D:\coding\skills\demo\.workspace\import_files");
+        } else {
+            assert_eq!(rendered, "D:/coding/skills/demo/.workspace/import_files");
+        }
     }
 
     #[test]

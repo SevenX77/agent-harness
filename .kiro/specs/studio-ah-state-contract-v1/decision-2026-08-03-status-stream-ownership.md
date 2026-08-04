@@ -195,19 +195,39 @@ AGENTS.md「No backward compatibility」必须在同一改动里删干净。更�
 | C-8 | `unknown` 渲染**禁用**的 Open 控件，既不可点 Open，也不出现 Attach/Close | 前端单测 |
 | C-9 | 面板卸载→重挂载后，面板不会因为收不到事件而停在"可以 Open"的错误呈现 | 前端单测（挂载态初值为 `unknown`） |
 | C-10 | 投影器不再接受 boolean / null 形状（类型层面），既有语义测试全绿 | `npm run typecheck` + 前端单测 |
-| C-11 | 真机：CLI 开着时反复折叠/展开 MoirAI 面板，`ah events` 进程始终存在，控件始终是 `CLI running` | 操作者实测（进程表 + 界面） |
+| C-11 | 真机：CLI 开着时反复折叠/展开 MoirAI 面板，`ah events` 进程始终存在，控件始终是 `CLI running` | 操作者实测（进程表 + 界面）— ✅ 2026-08-03 通过：三轮折叠/展开，同一 PID 全程存活，日志 `stream-start=1 / stream-stop=0` |
+| C-12 | 代码里不存在"只清快照缓存、不重开观察流"的入口（D-C7） | Rust 源码断言测试 |
+| C-13 | 真机：Close 之后控件在数秒内回到**可点**的 `Open in CLI`，不停在禁用态 | 操作者实测（采样按钮 disabled 状态） |
 
-### 6. 一处被接受的取舍：Close 之后的短暂 `unknown` 窗口
+### 6. D-C7：Close 确认消失之后必须**重开观察流**，而不是只清缓存
 
-Close 在确认运行时消失后会清空状态缓存（2026-08-02 决议 D-A5）。缓存被清空 ⇒ 没有帧 ⇒
-按 D-C3 投影为 `unknown`，于是从 Close 成功到下一帧到达之间（`ah events` 子进程随 ahd
-一起退出、监督循环退避 3 秒后重生，重生的 `ah events` 立刻发一帧 daemon-absent 的
-`initial`），Open 控件是**禁用**的，约 3~5 秒。
+> 本节由 2026-08-04 的真机点验推翻并重写。原文曾把"Close 之后的 `unknown` 窗口"记为一处
+> 被接受的取舍，其依据是"`ah events` 子进程会随 ahd 一起退出、监督循环 3 秒后重生"。
+> **这个依据经实测为假**，原结论随之作废。
 
-**接受它，不为它加旁路。** 这段窗口里 Studio 确实没有任何依据说运行时在不在，禁用是诚实的；
-把它改成"立刻显示可 Open"就是重新引入"未观测冒充已观测"。若日后实测这段等待影响手感，
-正确的做法是把"确认消失"这次观测本身写成一帧快照播种进缓存（Close 的探测器已经拿到过
-`ahd_alive:false` 的快照），而不是让投影层再猜一次。
+**实测事实（2026-08-04）**：`ah stop` 杀掉 ahd 之后，该 config 的 `ah events` 子进程
+**不会退出**——它只是从此永远不再发帧。现场：ahd 停止后子进程仍存活 3 分 08 秒，app 日志
+里 `events-exited-respawning` 计数为 **0**，面板停在 `unknown` 超过 30 秒无任何变化。
+（对照实验证明 ah 侧行为正常：`ah stop` 后 socket 确实消失、`status --json` 退 1、
+新起一个 `ah events` 立刻发出 `reason:"daemon_absent"` / `ahd_alive:false` 的首帧，
+并且它不会把 ahd 重新拉起来。）
+
+**后果**：`clear_status_snapshots_for_workspace` 清空缓存之后，**再没有任何东西能把它
+填回来**——投影按 D-C3 给出 `unknown`，面板把 Open 控件**永久禁用**，使用者连重新打开
+CLI 的入口都没有了。这比修复前更糟：修复前"未知冒充 inactive"至少让按钮可点。
+
+**决定**：删除"只清缓存"这个动作本身，`close_code_assistant` 的两条分支都改走
+`restart_status_streams_for_workspace`——停掉该 workspace 的观察流并立即重建。重建后的
+`ah events` 立刻发一帧 `daemon_absent`，投影成 `inactive`，Open 恢复可点；未知窗口是
+新流从启动到首帧的一两秒，有界且诚实。
+
+**一般规则**：**一条 `ah events` 流绑定的是某一个 daemon 实例，不是那份 config。**
+Studio 自己改变了 daemon 的存亡，就必须把观察者一起重开——否则观察者会安静地对着一个
+已经不存在的 daemon 继续"运行"，而这种沉默与"什么都没发生"不可区分。
+
+**被否决的替代项**：给快照缓存加一个 `Absent` 变体来记录"确认消失"这次观测。它能表达得
+更准，但没有触及真正的病灶——那条流已经死了却还占着位置；下一次 daemon 起来时它同样
+不会有任何反应。修观察者的生命周期才是那一层。
 
 ## 三、范围边界
 

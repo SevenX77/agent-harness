@@ -157,9 +157,10 @@ _PREDICT_DIAGNOSTICS_LIMIT = 20
 @tool(
     "predict_skill",
     "对指定 skill 做无 LLM 空跑(Predict):编译干净但行为可疑时用它——"
-    "返回 phase 路径、path diff、诊断摘要;深查细节去 .workspace/runs/<run_id>/。"
-    "compile_skill 干净之后的第二级诊断;predict 干净后可用 run_skill"
-    "(需用户审批)发起真实运行。",
+    "返回 phase 路径、path diff、诊断摘要;想知道某个 phase 在这次空跑里究竟"
+    "收到/产出了什么, 用 query_run_trace 带上返回的 run_id 查, 不要手工翻"
+    ".workspace/runs/。compile_skill 干净之后的第二级诊断;predict 干净后可用 "
+    "run_skill(需用户审批)发起真实运行。",
     {"skill_id": str},
 )
 async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -212,7 +213,7 @@ async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
             "diagnostics_truncated": truncated,
             "diagnostics_total": len(diagnostics),
             "diagnostic_counts": export.diagnostic_counts,
-            "detail_hint": f".workspace/runs/{result.run_id}/",
+            "detail_hint": f"query_run_trace(skill_id={skill_id!r}, run_id={result.run_id!r})",
         }
     )
 
@@ -475,7 +476,7 @@ async def set_output_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "query_run_trace",
-    "查一次 run 的执行内情(有界):按 phase 汇总循环轮数、llm/tool 调用数、"
+    "查一次执行的内情(有界), run 与 predict 的 run_id 都能查:按 phase 汇总循环轮数、llm/tool 调用数、"
     "finish_task 提交与被驳回次数、以及被驳回原因 top-N;并可按 phase / 事件类型 / "
     "序号切片取事件(默认 50 条,上限 200,返回 next_seq 供翻页)。"
     "事件已投影成小体积,prompt 与完整上下文不在其中——那些留在 run 产物里。"

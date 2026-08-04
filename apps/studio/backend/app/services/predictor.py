@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from app.core.adapters.engine import (
     CallbackEvent,
@@ -140,20 +142,22 @@ class PredictorService:
         if isinstance(result, dict):
             result = RunResult.model_validate(result)
         result = result.model_copy(update=_result_artifact_fields(art_ref))
+        # 状态对等(决议 2026-08-03 D2):这次 Predict 的结论只判一次。落盘的账、
+        # 广播的 gate、前端的判定共用它,不各自再推一遍。
+        status = export_predict_diagnostics(result).status
         self._persist_predict_result(
             skill_dir,
             result.run_id,
             result,
+            status=status,
             content_hash=art_ref["content_hash"],
             artifact_ref=art_ref,
             runtime_config=runtime_config,
         )
-        # 状态对等(决议 2026-08-03 D2):广播的通过/失败必须与前端自己的判定同源,
-        # 故用同一个投影函数导出 status,而不是另立一套判定。
         publish_skill_gate_from_thread(
             skill_id=skill_id,
             gate="predict",
-            outcome="pass" if export_predict_diagnostics(result).status == "success" else "fail",
+            outcome="pass" if status == "success" else "fail",
             content_hash=art_ref["content_hash"],
         )
         return cast(RunResult, result)
@@ -168,6 +172,7 @@ class PredictorService:
         run_id: str,
         result: RunResult,
         *,
+        status: Literal["success", "failed"],
         content_hash: str,
         artifact_ref: dict[str, Any],
         runtime_config: dict[str, Any],
@@ -175,17 +180,36 @@ class PredictorService:
         workspace_dir = workspace_dir_for(skill_dir)
         from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
+        run_dir = workspace_dir / "runs" / run_id
+        trace_file = run_dir / "trace.jsonl"
         store = LocalRunArtifactStore(root=workspace_dir)
         store.begin_run(run_id, metadata=_artifact_store_metadata("predict", artifact_ref))
-        store.put_batch(run_id, {"result.json": result.model_dump_json().encode("utf-8")})
+        # Readers reach a sealed run through its manifest, so anything left out of
+        # the seal is unreachable however plainly it sits in the directory. Predict
+        # used to seal result.json alone while the engine wrote the trace and the
+        # final context beside it, which is why every question about a finished
+        # predict came back artifact.not_found.
+        store.put_batch(
+            run_id,
+            {
+                "result.json": result.model_dump_json().encode("utf-8"),
+                "final_state.json": json.dumps(result.context, ensure_ascii=False, default=str).encode("utf-8"),
+                "trace.jsonl": trace_file.read_bytes() if trace_file.exists() else b"",
+            },
+        )
         store.seal_run(run_id)
 
-        run_dir = workspace_dir / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         write_runtime_snapshot(run_dir, runtime_config)
         (run_dir / "result.json").write_text(
             result.model_dump_json(),
             encoding="utf-8",
+        )
+        run_manager.record_predict_outcome(
+            run_id=run_id,
+            run_dir=run_dir,
+            status=status,
+            started_at=result.started_at or datetime.now(UTC),
         )
         if result.success:
             # Persist predict-pass server-side so the run-spawn path can enforce the

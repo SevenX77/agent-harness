@@ -53,6 +53,8 @@ export type GateEffect =
   | { kind: "open-drawer"; gate: SkillGate; errors: CompileError[] }
   | { kind: "close-drawers" }
   | { kind: "follow-run"; runId: string }
+  /** Bring the live trace into view; predict and run both stream events into it. */
+  | { kind: "open-trace" }
 
 export interface GateProjection {
   stage: SkillBuildStage
@@ -92,6 +94,12 @@ export function projectGateEvent(event: SkillGateEvent): GateProjection {
   }
   if (event.gate === "run" && event.outcome === "started" && event.runId) {
     effects.push({ kind: "follow-run", runId: event.runId })
+  }
+  // Predict and run both stream phase events, so both put the trace on screen —
+  // and both do it from here, so a gate driven by copilot lands the human on the
+  // same panel their own click would have.
+  if ((event.gate === "predict" || event.gate === "run") && event.outcome === "started") {
+    effects.push({ kind: "open-trace" })
   }
 
   return { stage, effects }

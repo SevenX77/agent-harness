@@ -1386,6 +1386,36 @@ class EngineAdapter:
             for phase_name in compiled.manifest.phases
         ]
 
+    def get_output_contract(self, skill_dir: str) -> dict[str, Any]:
+        """Project what the graph can produce and what it declares as its output.
+
+        The engine owns this because it is a fact about the graph, derived from
+        the same compile that validates those schemas — not something a surface
+        should work out for itself from the files.
+        """
+        from graph_agent.core.blackboard_contract import (
+            blackboard_fields_at_output,
+            undeclared_output_names,
+        )
+
+        loader = SkillLoader()
+        compiled = loader.compile_skill(
+            Path(skill_dir),
+            skill_resolver=self._build_studio_skill_resolver(),
+        )
+        return {
+            "fields": [
+                {
+                    "name": field.name,
+                    "type": field.type,
+                    "produced_by": field.produced_by,
+                    "declared_output": field.declared_output,
+                }
+                for field in blackboard_fields_at_output(compiled)
+            ],
+            "declared_but_unproduced": undeclared_output_names(compiled),
+        }
+
     def resolve_agent_node_output_schema(self, skill_dir: str, node_id: str) -> dict[str, Any] | None:
         """Return an agent node's ``io.outputs`` JSON schema for golden-template generation.
 

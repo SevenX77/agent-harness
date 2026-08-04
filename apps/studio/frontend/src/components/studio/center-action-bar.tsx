@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react"
-import { Hammer, Play, Zap } from "lucide-react"
+import { Hammer, Pause, Play, Square, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -16,6 +16,7 @@ export type SkillBuildStage =
   | "predict-fail"
   | "predict-pass"
   | "running"
+  | "paused"
   | "run-fail"
 
 interface CenterActionBarProps {
@@ -23,6 +24,9 @@ interface CenterActionBarProps {
   onCompile?: () => void
   onPredict?: () => void
   onRun?: () => void
+  onPause?: () => void
+  onResume?: () => void
+  onStop?: () => void
 }
 
 interface ButtonDerivation {
@@ -97,7 +101,7 @@ function LockableButton({ disabled, lockReason, children }: LockableButtonProps)
   )
 }
 
-export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
+export function CenterActionBar({ stage, onCompile, onPredict, onRun, onPause, onResume, onStop }: CenterActionBarProps) {
   const d = deriveButtons(stage)
   const barRef = useRef<HTMLDivElement>(null)
   // Its own width, published so the clamp below can reason about its edges.
@@ -148,18 +152,57 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
           Predict
         </Button>
       </LockableButton>
-      <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
+      {stage === "running" ? (
+        // A disabled Run button says "wait" without saying how to not wait.
+        // Pausing is what a run in flight can offer: the engine only clears a
+        // run's checkpoints when it finishes on its own, so a run halted
+        // part-way can be picked up again from where it stopped.
         <Button
           variant="ghost"
           size="default"
-          disabled={d.runDisabled}
-          onClick={onRun}
-          className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
+          onClick={onPause}
+          className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
         >
-          <Play fill="currentColor" className="size-3.5" />
-          Run
+          <Pause fill="currentColor" className="size-3.5" />
+          Pause
         </Button>
-      </LockableButton>
+      ) : stage === "paused" ? (
+        // A paused run has two futures and both are offered outright: carry on
+        // from the checkpoint, or end it here. Neither is implied by the other.
+        <>
+          <Button
+            variant="ghost"
+            size="default"
+            onClick={onResume}
+            className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
+          >
+            <Play fill="currentColor" className="size-3.5" />
+            Resume
+          </Button>
+          <Button
+            variant="ghost"
+            size="default"
+            onClick={onStop}
+            className="studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs"
+          >
+            <Square fill="currentColor" className="size-3.5" />
+            Stop
+          </Button>
+        </>
+      ) : (
+        <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
+          <Button
+            variant="ghost"
+            size="default"
+            disabled={d.runDisabled}
+            onClick={onRun}
+            className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
+          >
+            <Play fill="currentColor" className="size-3.5" />
+            Run
+          </Button>
+        </LockableButton>
+      )}
     </div>
   )
 }

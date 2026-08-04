@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import TypeAdapter
 
@@ -53,7 +53,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.gate_events import publish_skill_gate
+from app.services.gate_events import GateOutcome, publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
@@ -930,6 +930,69 @@ class RunManager:
             artifacts=_read_run_artifact_paths(run_dir),
         )
 
+    #: Every run status maps to exactly one thing the surfaces are told, so a new
+    #: status cannot silently fall through to "fail".
+    _GATE_OUTCOME_BY_RUN_STATUS: ClassVar[dict[str, GateOutcome]] = {
+        "success": "pass",
+        "failed": "fail",
+        "paused": "paused",
+        "cancelled": "stopped",
+        "running": "started",
+    }
+
+    async def pause_run(self, skill_id: str, run_id: str) -> RunMetadata:
+        """Stop the worker but leave the run continuable.
+
+        The engine only clears a run's checkpoints when the run finishes on its
+        own, so a worker stopped part-way leaves one behind and ``resume_skill``
+        can pick the run up from there. Pausing is that: end the process, keep
+        everything, and say the run is waiting rather than over.
+        """
+        record = self._runs.get(run_id)
+        if record is None or record.metadata.status != "running":
+            raise standard_http_exception(
+                "RUN_NOT_RUNNING",
+                f"Run is not running: {run_id}",
+                {"skill_id": skill_id, "run_id": run_id},
+            )
+        self._terminate_worker(record)
+        metadata = record.metadata.model_copy(update={"status": "paused"})
+        record.metadata = metadata
+        _write_run_metadata(record.run_dir, metadata)
+        await self._save_run_metadata(skill_id, metadata)
+        await publish_skill_gate(
+            skill_id=skill_id,
+            gate="run",
+            outcome=self._GATE_OUTCOME_BY_RUN_STATUS[metadata.status],
+            run_id=run_id,
+        )
+        return metadata
+
+    async def stop_run(self, skill_id: str, run_id: str) -> RunMetadata:
+        """End a run for good, keeping what it produced.
+
+        Deleting was the only way to end a run early and it removes the run
+        directory, so "end this and keep what it got" could not be said. This is
+        the ending; pausing is the other choice, and both leave the run readable.
+        """
+        record = self._runs.get(run_id)
+        if record is None or record.metadata.status not in {"running", "paused"}:
+            raise standard_http_exception(
+                "RUN_NOT_RUNNING",
+                f"Run is neither running nor paused: {run_id}",
+                {"skill_id": skill_id, "run_id": run_id},
+            )
+        self._terminate_worker(record)
+        metadata = record.metadata.model_copy(update={"status": "cancelled"})
+        await self._finalize_terminal_run(record, metadata)
+        return metadata
+
+    @staticmethod
+    def _terminate_worker(record: RunRecord) -> None:
+        process = record.process
+        if process is not None and hasattr(process, "terminate"):
+            process.terminate()
+
     def delete_run(self, skill_id: str, run_id: str) -> None:
         _validate_run_id_segment(run_id)
         record = self._runs.pop(run_id, None)
@@ -1107,7 +1170,7 @@ class RunManager:
             await publish_skill_gate(
                 skill_id=record.skill_id,
                 gate="run",
-                outcome="pass" if metadata.status == "success" else "fail",
+                outcome=self._GATE_OUTCOME_BY_RUN_STATUS[metadata.status],
                 run_id=metadata.run_id,
             )
 

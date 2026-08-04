@@ -91,6 +91,14 @@ class PredictorService:
 
         predict_run_id = f"predict-{uuid.uuid4().hex}"
         workspace_dir = workspace_dir_for(skill_dir)
+        # 状态对等(决议 2026-08-03 D3):predict 也流事件, 所以它开跑同样要广播——
+        # 否则 copilot 发起的 predict 不会把人带到 Trace 面板, 而人自己点会。
+        publish_skill_gate_from_thread(
+            skill_id=skill_id,
+            gate="predict",
+            outcome="started",
+            run_id=predict_run_id,
+        )
         event_subscriber: Callable[[CallbackEvent], None] | None = None
         if getattr(adapter, "transport", None) == "in_process":
             run_manager.register_transient_predict_run(

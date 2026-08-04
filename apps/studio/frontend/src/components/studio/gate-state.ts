@@ -19,8 +19,14 @@ import type { CompileError, PredictDiagnosticExport } from "@/api/types"
 import type { SkillBuildStage } from "./center-action-bar"
 
 export type SkillGate = "compile" | "predict" | "run"
+
+const GATE_OUTCOMES = ["started", "pass", "fail", "paused", "stopped"] as const
+
+function isGateOutcome(value: unknown): value is GateOutcome {
+  return GATE_OUTCOMES.includes(value as GateOutcome)
+}
 /** `stopped` is the user ending a run on purpose — a terminal outcome, not a defect. */
-export type GateOutcome = "started" | "pass" | "fail" | "stopped"
+export type GateOutcome = "started" | "pass" | "fail" | "paused" | "stopped"
 
 export interface SkillGateEvent {
   skillId: string
@@ -54,12 +60,12 @@ export interface GateProjection {
 }
 
 const STAGE_BY_OUTCOME: Record<SkillGate, Record<GateOutcome, SkillBuildStage>> = {
-  compile: { started: "compiling", pass: "compile-pass", fail: "compile-fail", stopped: "compile-pass" },
-  predict: { started: "predicting", pass: "predict-pass", fail: "predict-fail", stopped: "predict-pass" },
+  compile: { started: "compiling", pass: "compile-pass", fail: "compile-fail", paused: "compile-pass", stopped: "compile-pass" },
+  predict: { started: "predicting", pass: "predict-pass", fail: "predict-fail", paused: "predict-pass", stopped: "predict-pass" },
   // A finished run leaves the toolbar on predict-pass: the skill is still
   // predict-clean and immediately runnable again, which is the state a human sees
   // after their own run completes.
-  run: { started: "running", pass: "predict-pass", fail: "run-fail", stopped: "predict-pass" },
+  run: { started: "running", pass: "predict-pass", fail: "run-fail", paused: "paused", stopped: "predict-pass" },
 }
 
 /**
@@ -81,7 +87,7 @@ export function projectGateEvent(event: SkillGateEvent): GateProjection {
   if (event.outcome === "fail") {
     effects.push({ kind: "open-drawer", gate: event.gate, errors: event.errors ?? [] })
   }
-  if (event.outcome === "started" || event.outcome === "pass" || event.outcome === "stopped") {
+  if (event.outcome !== "fail") {
     effects.push({ kind: "close-drawers" })
   }
   if (event.gate === "run" && event.outcome === "started" && event.runId) {
@@ -99,7 +105,7 @@ export function parseSkillGateEvent(raw: Record<string, unknown>): SkillGateEven
   const outcome = raw.outcome
   if (!skillId) return null
   if (gate !== "compile" && gate !== "predict" && gate !== "run") return null
-  if (outcome !== "started" && outcome !== "pass" && outcome !== "fail" && outcome !== "stopped") return null
+  if (!isGateOutcome(outcome)) return null
   return {
     skillId,
     gate,

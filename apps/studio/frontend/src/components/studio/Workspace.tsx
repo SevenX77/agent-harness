@@ -26,7 +26,7 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { cancelRun, compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, serializeSkillGraph, startNodeCompareRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, pauseRun, serializeSkillGraph, startNodeCompareRun, stopRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
@@ -2455,12 +2455,22 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     skillContentSignature,
   ])
 
+  // Both follow the gate outcome the backend broadcasts rather than setting the
+  // stage here, so a pause or stop driven by copilot moves the toolbar identically.
+  const handlePause = useCallback(async () => {
+    if (!currentSkillId || !runId) return
+    try {
+      await pauseRun(currentSkillId, runId)
+      toast.success("Run paused")
+    } catch (error) {
+      toast.error(`Pause failed: ${errorMessage(error)}`)
+    }
+  }, [currentSkillId, runId])
+
   const handleStop = useCallback(async () => {
     if (!currentSkillId || !runId) return
     try {
-      // The stage and the panel follow the run/stopped broadcast the cancel
-      // triggers, the same way they follow a run that ended on its own.
-      await cancelRun(currentSkillId, runId)
+      await stopRun(currentSkillId, runId)
       toast.success("Run stopped")
     } catch (error) {
       toast.error(`Stop failed: ${errorMessage(error)}`)
@@ -2822,6 +2832,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     onCompile={handleCompile}
                     onPredict={handlePredict}
                     onRun={handleRun}
+                    onPause={handlePause}
+                    onResume={handleResume}
                     onStop={handleStop}
                   />
                 </>

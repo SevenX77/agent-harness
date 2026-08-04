@@ -1,10 +1,10 @@
-"""Stopping a run must end it without destroying what it produced.
+"""A run in flight can be paused, and a paused run can be resumed or ended.
 
 The only way to end a run early used to be DELETE, which terminates the worker
-and then removes the whole run directory — so "stop and look at how far it got"
-was not expressible. Cancelling is its own terminal outcome: the worker stops,
-the run keeps its evidence, and every surface hears about it the same way it
-hears about a run that finished on its own.
+and then removes the whole run directory. Two things were missing, not one: the
+engine clears a run's checkpoints only when the run finishes on its own, so a
+worker halted part-way leaves one behind and the run can be picked up again —
+pausing is therefore not an ending. Ending it is the separate, deliberate act.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _start_hanging_run(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> s
     return str(body["run_id"])
 
 
-def test_cancelling_a_run_stops_the_worker_and_keeps_the_run(
+def test_pausing_halts_the_worker_and_leaves_the_run_waiting(
     client: TestClient,
     studio_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -69,32 +69,58 @@ def test_cancelling_a_run_stops_the_worker_and_keeps_the_run(
     del studio_roots
     run_id = _start_hanging_run(client, monkeypatch)
 
-    response = client.post(f"/api/skills/text-segmentation/runs/{run_id}/cancel")
+    response = client.post(f"/api/skills/text-segmentation/runs/{run_id}/pause")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "cancelled"
+    assert response.json()["status"] == "paused"
 
-    # Stopping is not deleting: the directory and its account survive, which is
-    # what DELETE takes away. (Reading a cancelled run's full detail additionally
-    # needs its artifacts sealed — a worker killed mid-flight never sealed any.
-    # Tracked separately; this test states only what cancel itself promises.)
+    # Pausing is not deleting, which is what DELETE would have done to it.
     listed = client.get("/api/skills/text-segmentation/runs")
-    assert listed.status_code == 200
     statuses = {run["run_id"]: run["status"] for run in listed.json()["runs"]}
-    assert statuses[run_id] == "cancelled"
+    assert statuses[run_id] == "paused"
 
 
-def test_cancelling_a_run_that_already_ended_is_rejected(
+def test_pausing_a_run_that_is_not_running_is_rejected(
     client: TestClient,
     studio_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     del studio_roots
     run_id = _start_hanging_run(client, monkeypatch)
-    assert client.post(f"/api/skills/text-segmentation/runs/{run_id}/cancel").status_code == 200
+    assert client.post(f"/api/skills/text-segmentation/runs/{run_id}/pause").status_code == 200
 
-    # A second stop has nothing to stop; saying so beats silently reporting success.
-    again = client.post(f"/api/skills/text-segmentation/runs/{run_id}/cancel")
+    again = client.post(f"/api/skills/text-segmentation/runs/{run_id}/pause")
 
     assert again.status_code == 409
     assert again.json()["error_code"] == "RUN_NOT_RUNNING"
+
+
+def test_a_paused_run_can_still_be_ended(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The two futures of a paused run are resuming it and ending it; ending has to
+    # be reachable from paused, not only from running.
+    del studio_roots
+    run_id = _start_hanging_run(client, monkeypatch)
+    assert client.post(f"/api/skills/text-segmentation/runs/{run_id}/pause").status_code == 200
+
+    stopped = client.post(f"/api/skills/text-segmentation/runs/{run_id}/stop")
+
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "cancelled"
+
+
+def test_stopping_a_run_in_flight_skips_the_pause(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del studio_roots
+    run_id = _start_hanging_run(client, monkeypatch)
+
+    stopped = client.post(f"/api/skills/text-segmentation/runs/{run_id}/stop")
+
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "cancelled"

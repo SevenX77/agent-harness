@@ -279,7 +279,7 @@ export interface BatchRunResponse {
 }
 
 /** What a run can be. `cancelled` is the user stopping it, which is not a failure. */
-export type RunStatus = 'running' | 'success' | 'failed' | 'cancelled'
+export type RunStatus = 'running' | 'success' | 'failed' | 'paused' | 'cancelled'
 
 export interface BatchRunItem {
   input_id: string

@@ -73,11 +73,17 @@ class BatchRunRequest(BaseModel):
     input_ids: list[str]
 
 
-#: What a run can be. ``cancelled`` is its own terminal outcome: the user stopped
-#: it, so calling it failed would report a defect that never happened. Declared
-#: once because a run's status travels through the batch views too, and a
+#: What a run can be.
+#:
+#: ``paused`` and ``cancelled`` are different things and the engine is why: a run
+#: only cleans up its checkpoints when it finishes on its own, so a worker stopped
+#: mid-flight leaves a checkpoint that ``resume_skill`` can pick up. Pausing is
+#: therefore not an ending — the run is waiting to be continued. ``cancelled`` is
+#: the ending the user chose, and neither is a failure.
+#:
+#: Declared once because a run's status travels through the batch views too, and a
 #: vocabulary that is only half-extended rejects its own data at validation.
-RunStatus = Literal["running", "success", "failed", "cancelled"]
+RunStatus = Literal["running", "success", "failed", "paused", "cancelled"]
 
 
 class RunMetadata(BaseModel):

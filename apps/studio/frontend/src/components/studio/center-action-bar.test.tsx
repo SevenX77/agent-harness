@@ -65,15 +65,20 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).toContain('studio-center-action-button--active')
   })
 
-  it('centres on the canvas gap, not the window, and exposes a stable measurement hook', () => {
-    // The bar is a canvas overlay: centring it on the window slides it under
-    // the copilot panel once that panel claims the right side.
+  it('holds the canvas centre and only gives way to an overlay that would cover it', () => {
+    // Two reports, one rule. Centring on the window slid the bar under the copilot
+    // panel; recentring on the gap between the overlays made it jump sideways on
+    // every panel toggle. It therefore stays at the host centre and is clamped
+    // only by an overlay it would actually collide with.
     const html = renderBar('idle')
 
     expect(html).toContain('data-studio-center-action-bar="true"')
     expect(html).toContain('-translate-x-1/2')
+    expect(html).toContain('clamp(')
+    expect(html).toContain('50%')
     expect(html).toContain('--studio-canvas-left-safe-area')
     expect(html).toContain('--studio-canvas-right-safe-area')
+    expect(html).toContain('--studio-action-bar-width')
     expect(html).not.toContain('left-1/2')
   })
 })

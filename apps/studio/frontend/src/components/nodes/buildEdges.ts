@@ -15,12 +15,23 @@ export const OUTPUT_ID = '__global_output__'
 
 type TraceEventInput = CallbackEvent | EventEnvelope
 
-export function createContextEdge(source: string, target: string, traceEvents: TraceEventInput[] = []): Edge<ContextEdgeData> {
+export function createContextEdge(
+  source: string,
+  target: string,
+  traceEvents: TraceEventInput[] = [],
+  runningPhase: string | null = null,
+): Edge<ContextEdgeData> {
   // hasTraceData reflects whether the run actually dispatched data across this
   // edge — i.e. a matching `input_dispatch` event exists in the stream. Without
   // a run (empty events) every edge is inert, replacing the old `!isGlobal`
   // design-time heuristic.
   const hasTraceData = edgeContextFromEvents(traceEvents, source, target) !== null
+  // Carrying data and carrying it *right now* are different facts. The flow
+  // animation used to key off hasTraceData, which never goes back to false, so
+  // the canvas kept animating after the run had finished. Context is flowing on
+  // exactly the edge feeding the phase that is executing, and nothing is
+  // executing once the run ends.
+  const flowing = runningPhase !== null && target === runningPhase
   return {
     id: `${source}->${target}`,
     source,
@@ -30,6 +41,7 @@ export function createContextEdge(source: string, target: string, traceEvents: T
     type: 'contextEdge',
     data: {
       hasTraceData,
+      flowing,
       sourcePhaseId: source,
       targetPhaseId: target,
       showContextControl: true,
@@ -41,14 +53,15 @@ export function createContextEdge(source: string, target: string, traceEvents: T
 export function buildEdges(
   phaseNodes: SkillGraphNode[],
   traceEvents: TraceEventInput[] = [],
+  runningPhase: string | null = null,
 ): Edge<ContextEdgeData>[] {
   const edges: Edge<ContextEdgeData>[] = []
   for (const node of phaseNodes) {
     for (const source of node.data.dependsOn) {
-      edges.push(createContextEdge(source === 'input' ? INPUT_ID : source, node.id, traceEvents))
+      edges.push(createContextEdge(source === 'input' ? INPUT_ID : source, node.id, traceEvents, runningPhase))
     }
     if (node.data.isOutput === true) {
-      edges.push(createContextEdge(node.id, OUTPUT_ID, traceEvents))
+      edges.push(createContextEdge(node.id, OUTPUT_ID, traceEvents, runningPhase))
     }
   }
   return edges

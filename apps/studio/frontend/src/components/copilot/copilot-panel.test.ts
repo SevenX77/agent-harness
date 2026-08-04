@@ -62,6 +62,11 @@ vi.mock('../../lib/tauri', () => ({
   ensureCodeAssistantStatusEvents: mocks.ensureCodeAssistantStatusEvents,
   subscribeCodeAssistantStatus: mocks.subscribeCodeAssistantStatus,
   closeCodeAssistant: mocks.closeCodeAssistant,
+  // 挂载初值 = 尚未观测(决议 2026-08-03 D-C3);用真实实现,面板的 hands-off 断言才有意义。
+  unobservedCodeAssistantStatus: () => ({
+    claude: { status: 'unknown', readOnly: false },
+    codex: { status: 'unknown', readOnly: false },
+  }),
 }))
 
 vi.mock('./analysis-bar', () => ({
@@ -332,11 +337,15 @@ describe('buildCopilotJudgeDraft', () => {
     const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
       .IS_REACT_ACT_ENVIRONMENT
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-    let emitStatus: ((status: { claude: boolean; codex: boolean }) => void) | null = null
+    // 决议 2026-08-03 D-C6:投影器不再接受 boolean 兼容形状,这里改用真实 payload。
+    let emitStatus: ((status: unknown) => void) | null = null
     const unsubscribe = vi.fn()
     mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
       emitStatus = onStatus
-      onStatus({ claude: false, codex: false })
+      onStatus({
+        claude: { status: 'inactive', readOnly: false },
+        codex: { status: 'inactive', readOnly: false },
+      })
       return unsubscribe
     })
     const container = document.createElement('div')
@@ -356,7 +365,10 @@ describe('buildCopilotJudgeDraft', () => {
       })
 
       await act(async () => {
-        emitStatus?.({ claude: false, codex: true })
+        emitStatus?.({
+          claude: { status: 'inactive', readOnly: false },
+          codex: { status: 'active', readOnly: false },
+        })
       })
 
       await vi.waitFor(() => {
@@ -589,6 +601,80 @@ describe('buildCopilotJudgeDraft', () => {
       ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
         previousReactActEnvironment
     }
+  })
+
+  // ── 决议 2026-08-03(status-stream ownership)—— 判据 C-8 / C-9 ──
+
+  it('leaves the Open control disabled until a runtime frame is actually observed', async () => {
+    // 缺陷 C 的可见形态:CLI 明明在跑,面板却渲染可点击的 `Open in CLI`。根因之一是挂载
+    // 初值把"尚未观测"当成"确定没有在跑"。挂载后一帧都还没到时,面板必须 hands-off。
+    //
+    // 回滚自检:把挂载初值改回 inactive/inactive,第一段断言(disabled)立刻红;
+    // 而后半段(收到 active 帧后变成可管理控件)证明它不是恒定禁用。
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return vi.fn()
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | null = createRoot(container)
+
+    try {
+      await act(async () => {
+        root?.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+
+      // 一帧都没到:Open 控件在,但不可点。
+      await vi.waitFor(() => {
+        const control = container.querySelector('button[aria-label="Open code assistant"]')
+        expect(control).toBeTruthy()
+        expect((control as HTMLButtonElement).disabled).toBe(true)
+      })
+      expect(container.querySelector('button[aria-label="Manage code assistant"]')).toBeNull()
+
+      // 观测到运行时在跑之后,才切到可管理控件。
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'active', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+      await vi.waitFor(() => {
+        const control = container.querySelector('button[aria-label="Manage code assistant"]')
+        expect(control).toBeTruthy()
+        expect((control as HTMLButtonElement).disabled).toBe(false)
+      })
+    } finally {
+      act(() => {
+        root?.unmount()
+      })
+      root = null
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('never routes an unobserved assistant into the closable set', async () => {
+    // `unknown` 既不是"在跑"也不是"已回收":它不进 Attach 菜单,也不进 Close 那一类,
+    // 否则面板会拿一个没有依据的状态去驱动生命周期动作。
+    const unknown = { status: 'unknown', readOnly: false } as const
+    const active = { status: 'active', readOnly: false } as const
+
+    expect(activeCodeAssistantIds({ claude: unknown, codex: unknown })).toEqual([])
+    expect(codeAssistantCloseButtonLabel({ claude: unknown, codex: unknown })).toBeNull()
+    expect(codeAssistantAttachMenuLabels({ claude: unknown, codex: unknown })).toEqual([])
+    // 对照组:另一侧真的在跑时,只有它进这两类。
+    expect(codeAssistantCloseButtonLabel({ claude: unknown, codex: active })).toBe('Close Codex')
+    expect(codeAssistantAttachMenuLabels({ claude: unknown, codex: active })).toEqual(['Attach Codex'])
   })
 
   it('test_degraded_exposes_working_open', async () => {

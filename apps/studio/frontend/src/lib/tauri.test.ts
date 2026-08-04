@@ -274,7 +274,14 @@ describe('desktop shell helpers', () => {
     })
   })
 
-  it('subscribes to code assistant status events and unwatches on dispose', async () => {
+  it('disposes only its own listener and never tears down the shared producer', async () => {
+    // 决议 2026-08-03 D-C1 —— `ah events` 生产者由 Tauri 侧的 CodeAssistantRuntimeState
+    // 拥有,订阅者的 teardown 只能撤销它自己建立的东西(一个本地监听器)。旧实现在这里
+    // 发 `unwatch_code_assistant_status`,把共享的生产者杀掉并清空快照缓存;这个命令与
+    // 另一个订阅者的 `watch` 之间没有顺序保证,后落地就会让活着的订阅者永远收不到状态
+    // ——面板于是停在"什么都没在跑"的初值,即缺陷 C 的现场。
+    //
+    // 回滚自检:把 dispose 里的 invoke 加回来,末尾那条 not-toHaveBeenCalledWith 立刻红。
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeReady()
     mockInvoke.mockResolvedValue(undefined)
@@ -318,9 +325,11 @@ describe('desktop shell helpers', () => {
       codex: { status: 'inactive', readOnly: false },
     })
     expect(unlisten).toHaveBeenCalledTimes(1)
-    expect(mockInvoke).toHaveBeenCalledWith('unwatch_code_assistant_status', {
-      workspaceRoot: '/tmp/workspace',
-    })
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      'unwatch_code_assistant_status',
+      expect.anything(),
+    )
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
   })
 
   it('treats code assistants as inactive outside desktop runtime', async () => {

@@ -47,7 +47,7 @@ import {
   projectGateEvent,
   type SkillGateEvent,
 } from "./gate-state"
-import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
+import { deriveNodeErrorMessages, deriveNodeStatuses, runningPhaseOf } from "./node-status"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -684,6 +684,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         setRunId(effect.runId)
         continue
       }
+      if (effect.kind === "open-trace") {
+        setActivePanel("timeline")
+        continue
+      }
       if (effect.gate === "compile") {
         setCompileErrors((current) => ({ ...current, [event.skillId]: effect.errors }))
         setCompileDrawerOpen(true)
@@ -796,10 +800,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [selectedNodeId, selectedNode?.data.status, statusByNodeId],
   )
   // The currently-running phase, used to highlight/link the live trace stream.
-  const activeTracePhase = useMemo(() => {
-    const running = Object.entries(statusByNodeId).find(([, status]) => status === "running")
-    return running?.[0] ?? null
-  }, [statusByNodeId])
+  const activeTracePhase = useMemo(() => runningPhaseOf(statusByNodeId), [statusByNodeId])
 
   // N4 atom #30: per-node golden state badge. Fetch the skill's golden baselines
   // (same SWR key the I/O panel's GoldenSection uses, so the request dedupes) and
@@ -2319,8 +2320,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setRunId(result.run_id)
       setRunErrors([])
       setRunDrawerOpen(false)
-      // F1: starting a run opens the timeline region to stream live trace events.
-      setActivePanel("timeline")
+      // The timeline is opened by the run/started projection, which the backend
+      // broadcasts before this request returns — so a copilot-driven run lands on
+      // the same panel, from the same rule, instead of a second copy of it here.
       toast.success("Run started successfully")
     } catch (error: unknown) {
       updateStage(targetSkillId, "predict-pass")

@@ -150,3 +150,34 @@ describe("two-path parity", () => {
     expect(gateEventKey(fromClick)).toBe(gateEventKey(fromBroadcast!))
   })
 })
+
+describe("trace panel follows both gates", () => {
+  it("puts the trace on screen when predict or run starts", () => {
+    // The click path opened the timeline itself, so a copilot-driven gate left the
+    // human on whatever panel they had open while events streamed out of sight.
+    for (const gate of ["predict", "run"] as const) {
+      const { effects } = projectGateEvent({
+        skillId: "s",
+        gate,
+        outcome: "started",
+        runId: gate === "run" ? "run-1" : "predict-1",
+      })
+
+      expect(effects.some((effect) => effect.kind === "open-trace")).toBe(true)
+    }
+  })
+
+  it("leaves the panel alone once a gate finishes", () => {
+    for (const outcome of ["pass", "fail"] as const) {
+      const { effects } = projectGateEvent({ skillId: "s", gate: "run", outcome, runId: "run-1" })
+
+      expect(effects.some((effect) => effect.kind === "open-trace")).toBe(false)
+    }
+  })
+
+  it("does not open the trace for a compile", () => {
+    const { effects } = projectGateEvent({ skillId: "s", gate: "compile", outcome: "started" })
+
+    expect(effects.some((effect) => effect.kind === "open-trace")).toBe(false)
+  })
+})

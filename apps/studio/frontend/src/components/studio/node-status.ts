@@ -170,3 +170,17 @@ export function deriveNodeErrorMessages(
   }
   return messages
 }
+
+/**
+ * The phase executing right now, or null when nothing is.
+ *
+ * One rule with two consumers — the trace panel highlights this phase, and the
+ * canvas animates the edge feeding it. Deriving it separately in each would let
+ * the two disagree about what "running" means.
+ */
+export function runningPhaseOf(
+  statuses: Record<string, SkillNodeStatus>,
+): string | null {
+  const running = Object.entries(statuses).find(([, status]) => status === "running")
+  return running?.[0] ?? null
+}

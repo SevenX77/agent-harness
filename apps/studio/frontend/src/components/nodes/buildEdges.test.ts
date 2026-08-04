@@ -112,3 +112,34 @@ describe("buildEdges", () => {
     expect(edgeIds(buildEdges([]))).toEqual([])
   })
 })
+
+describe('edge flow animation', () => {
+  const nodes = [
+    { id: 'segment', data: { dependsOn: ['setup'], isOutput: false } },
+    { id: 'review', data: { dependsOn: ['segment'], isOutput: true } },
+  ] as unknown as Parameters<typeof buildEdges>[0]
+
+  const dispatched = [
+    { event_type: 'input_dispatch', from_phase: 'setup', to_phase: 'segment', changed_keys: ['chapter_lines'], after: { chapter_lines: [] } },
+    { event_type: 'input_dispatch', from_phase: 'segment', to_phase: 'review', changed_keys: ['segments'], after: { segments: [] } },
+  ] as unknown as Parameters<typeof buildEdges>[1]
+
+  it('flows only into the phase that is executing right now', () => {
+    const edges = buildEdges(nodes, dispatched, 'segment')
+
+    const intoSegment = edges.find((edge) => edge.target === 'segment')
+    const intoReview = edges.find((edge) => edge.target === 'review')
+    expect(intoSegment?.data?.flowing).toBe(true)
+    expect(intoReview?.data?.flowing).toBe(false)
+  })
+
+  it('stops flowing when the run ends, though the edges still carry data', () => {
+    // The animation used to key off hasTraceData, which stays true forever once a
+    // run has dispatched anything — so the canvas kept animating long after the
+    // run finished and read as "still running".
+    const edges = buildEdges(nodes, dispatched, null)
+
+    expect(edges.some((edge) => edge.data?.hasTraceData)).toBe(true)
+    expect(edges.every((edge) => edge.data?.flowing === false)).toBe(true)
+  })
+})

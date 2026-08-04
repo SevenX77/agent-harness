@@ -4,6 +4,8 @@ import type { KeyboardEvent, MouseEvent } from 'react'
 
 export interface ContextEdgeData extends Record<string, unknown> {
   hasTraceData: boolean
+  /** Context is crossing this edge right now, i.e. its target phase is executing. */
+  flowing?: boolean
   contextJson?: unknown
   sourcePhaseId: string
   targetPhaseId: string
@@ -137,6 +139,7 @@ export function ContextEdge({
         targetPosition,
       })
   const hasTraceData = data?.hasTraceData === true
+  const isFlowing = data?.flowing === true
   const showContextControl = data?.showContextControl !== false
   const globalProcess = (globalThis as GlobalWithProcess).process
   const isTestEnv = globalProcess?.env?.NODE_ENV === 'test'
@@ -158,12 +161,13 @@ export function ContextEdge({
         }}
       />
 
-      {/* Overlay animated flowing connection line for active/trace state */}
+      {/* Accent overlay marks an edge that carried context; it only *moves* while
+          that context is actually crossing, so a finished run leaves a still canvas. */}
       {hasTraceData && (
         <ReactFlow.BaseEdge
           id={`${id}-flow`}
           path={edgePath}
-          className="animated-flow-line"
+          className={isFlowing ? "animated-flow-line" : undefined}
           style={{
             stroke: 'var(--studio-canvas-accent, var(--primary))',
             strokeWidth: 2,

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useLayoutEffect, useRef, type ReactNode } from "react"
 import { Hammer, Play, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -99,16 +99,31 @@ function LockableButton({ disabled, lockReason, children }: LockableButtonProps)
 
 export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
   const d = deriveButtons(stage)
+  const barRef = useRef<HTMLDivElement>(null)
+  // Its own width, published so the clamp below can reason about its edges.
+  // Measured rather than assumed: the bar's labels change with the stage.
+  useLayoutEffect(() => {
+    const bar = barRef.current
+    if (!bar) return
+    bar.style.setProperty("--studio-action-bar-width", `${bar.offsetWidth}px`)
+  }, [stage])
   return (
     <div
+      ref={barRef}
       data-studio-center-action-bar="true"
       className="studio-center-action-bar absolute bottom-6 z-40 inline-flex -translate-x-1/2 items-center gap-0 rounded-full border p-1"
       style={{
-        // The bar belongs to the canvas, so it centres on the canvas — the gap
-        // between the side overlays — not on the window, which slid it under
-        // the copilot panel. Same safe-area vars the minimap and the canvas
-        // controls read; `100%` is the canvas host this sits in.
-        left: `calc(var(--studio-canvas-left-safe-area, 0px) + (100% - var(--studio-canvas-left-safe-area, 0px) - var(--studio-canvas-right-safe-area, 0px)) / 2)`,
+        // Centred on the canvas host and held there: recentring on the gap between
+        // the side overlays made the bar jump sideways every time a panel opened
+        // or closed, since both panels float above the canvas rather than shrink
+        // it. It gives way only when an overlay would actually cover it — a panel
+        // dragged wide on a narrow window — which is the case that once slid it
+        // under the copilot panel. `100%` is the canvas host this sits in.
+        left: `clamp(
+          calc(var(--studio-canvas-left-safe-area, 0px) + var(--studio-action-bar-width, 0px) / 2),
+          50%,
+          calc(100% - var(--studio-canvas-right-safe-area, 0px) - var(--studio-action-bar-width, 0px) / 2)
+        )`,
       }}
     >
       <Button

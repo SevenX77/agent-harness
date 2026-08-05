@@ -2062,73 +2062,66 @@ fn wsl_payload_script(
     wsl_workspace: &str,
     wsl_config: &str,
     assistant: CodeAssistant,
-    windows_codex_home: Option<&str>,
-    windows_claude_home: Option<&str>,
+    _windows_codex_home: Option<&str>,
+    _windows_claude_home: Option<&str>,
     studio_mcp: Option<&StudioMcpEndpoint>,
     patch_transient_claude_config: bool,
 ) -> String {
     let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_WSL, "bash -i");
 
+    // One credential chain per environment (ah decision 0006): refresh tokens
+    // rotate on every use, so a Windows auth.json copied into WSL forks the
+    // chain and whichever side refreshes less dies of "refresh token already
+    // used" — this launcher's copy is exactly how the WSL Codex login died on
+    // a real machine. The WSL login is authoritative; when it is missing, the
+    // launcher runs Codex's own sign-in right here in this terminal.
     let codex_auth_sync = if matches!(assistant, CodeAssistant::Codex) {
-        let windows_home = windows_codex_home
-            .map(sh_single_quote_str)
-            .unwrap_or_else(|| "''".to_string());
-        format!(
-            r#"WIN_CODEX_HOME={windows_home}
-if [ -z "$WIN_CODEX_HOME" ] || [ ! -f "$WIN_CODEX_HOME/auth.json" ]; then
-  printf '%s\n' "Windows Codex auth was not found."
-  printf '%s\n' "Run Codex login on Windows first, then reopen Studio's Codex menu item."
-  exec bash -i
+        r#"if [ ! -f "$HOME/.codex/auth.json" ]; then
+  printf '%s
+' "No Codex login in this WSL environment yet; starting codex login..."
+  printf '%s
+' "Complete the sign-in in the browser, then the launch continues."
+  if ! codex login; then
+    printf '%s
+' "Codex login did not complete."
+    printf '%s
+' "Run codex login in WSL, then reopen Studio's Codex menu item."
+    exec bash -i
+  fi
 fi
-mkdir -p "$HOME/.codex"
-cp "$WIN_CODEX_HOME/auth.json" "$HOME/.codex/auth.json"
-chmod 600 "$HOME/.codex/auth.json"
-"#,
-            windows_home = windows_home
-        )
+"#
+        .to_string()
     } else {
         String::new()
     };
-    // Claude auth bridge: the Windows `.credentials.json` is the single auth
-    // file. WSL root and the ah sandbox link to it instead of copying it, so
-    // the user only signs in to Claude Code on Windows.
+    // Same rule for Claude. The old bridge symlinked the WSL store to the
+    // Windows `.credentials.json`; Claude writes credentials by rename, so the
+    // first WSL-side refresh replaced the link with a private file, forked the
+    // chain, and killed the other side's login later (ah #18). A leftover
+    // bridge link is removed so the environment can hold its own login.
     let claude_auth_bridge = if matches!(assistant, CodeAssistant::Claude) {
-        let windows_home = windows_claude_home
-            .map(sh_single_quote_str)
-            .unwrap_or_else(|| "''".to_string());
-        format!(
-            r#"WIN_CLAUDE_HOME={windows_home}
-CLAUDE_CRED="$HOME/.claude/.credentials.json"
-if [ -z "$WIN_CLAUDE_HOME" ] || [ ! -f "$WIN_CLAUDE_HOME/.credentials.json" ]; then
-  printf '%s\n' "Windows Claude login was not found."
-  printf '%s\n' "Sign in to Claude Code on Windows, then reopen Studio's Open in CLI > Claude code item."
-  exec bash -i
-fi
+        r#"CLAUDE_CRED="$HOME/.claude/.credentials.json"
 mkdir -p "$HOME/.claude"
-ln -sfn "$WIN_CLAUDE_HOME/.credentials.json" "$CLAUDE_CRED"
-claude_auth_ok=0
-if [ -f "$CLAUDE_CRED" ] && command -v python3 >/dev/null 2>&1; then
-  if python3 - "$CLAUDE_CRED" <<'CREDPY'
-import json
-import sys
-try:
-    oauth = json.load(open(sys.argv[1])).get("claudeAiOauth") or {{}}
-except Exception:
-    sys.exit(1)
-sys.exit(0 if (oauth.get("accessToken") or oauth.get("refreshToken")) else 1)
-CREDPY
-  then
-    claude_auth_ok=1
+if [ -L "$CLAUDE_CRED" ]; then
+  printf '%s
+' "Removing the legacy Windows credential link (one login per environment)."
+  rm -f "$CLAUDE_CRED"
+fi
+if [ ! -f "$CLAUDE_CRED" ]; then
+  printf '%s
+' "No Claude login in this WSL environment yet; starting claude auth login..."
+  printf '%s
+' "Complete the sign-in in the browser, then the launch continues."
+  if ! claude auth login; then
+    printf '%s
+' "Claude login did not complete."
+    printf '%s
+' "Run claude auth login in WSL, then reopen Studio's Open in CLI > Claude code item."
+    exec bash -i
   fi
 fi
-if [ "$claude_auth_ok" -ne 1 ]; then
-  printf '%s\n' "Windows Claude credentials are present but not logged in."
-  printf '%s\n' "Sign in to Claude Code on Windows, then reopen Studio's Open in CLI > Claude code item."
-  exec bash -i
-fi
-"#,
-            windows_home = windows_home
-        )
+"#
+        .to_string()
     } else {
         String::new()
     };
@@ -5614,9 +5607,10 @@ mod tests {
     }
 
     #[test]
-    fn claude_wsl_payload_links_windows_credentials() {
-        // The Windows .credentials.json is the single auth file; WSL root links
-        // to it instead of copying it or requiring a second WSL login.
+    fn claude_wsl_payload_respects_the_native_wsl_login() {
+        // One credential chain per environment (ah decision 0006): the WSL
+        // login is authoritative; the launcher signs in natively when it is
+        // missing and removes the legacy Windows credential link.
         let payload = wsl_payload_script(
             "/mnt/d/skill",
             "/mnt/c/tmp/ah.toml",
@@ -5626,16 +5620,16 @@ mod tests {
             None,
             false,
         );
-        assert!(payload.contains("WIN_CLAUDE_HOME='/mnt/c/Users/u/.claude'"));
-        assert!(payload.contains("ln -sfn \"$WIN_CLAUDE_HOME/.credentials.json\""));
-        assert!(payload.contains("Windows Claude login was not found"));
+        assert!(!payload.contains("WIN_CLAUDE_HOME"));
+        assert!(!payload.contains("ln -sfn \"$WIN_CLAUDE_HOME"));
+        assert!(payload.contains("if [ -L \"$CLAUDE_CRED\" ]"));
+        assert!(payload.contains("claude auth login"));
         assert!(payload.contains(".claude/.credentials.json"));
         assert!(!payload.contains("CLAUDE_CODE_OAUTH_TOKEN"));
         assert!(!payload.contains("setup-token"));
         assert!(!payload.contains("claude /login"));
 
-        // Codex has its own auth sync (Windows auth.json copy); the Claude
-        // bridge must not leak into its payload.
+        // The Claude doorway must not leak into the Codex payload.
         let codex_payload = wsl_payload_script(
             "/mnt/d/skill",
             "/mnt/c/tmp/ah.toml",
@@ -6778,7 +6772,10 @@ sessions
     }
 
     #[test]
-    fn wsl_payload_syncs_codex_auth_from_windows_home() {
+    fn wsl_payload_runs_codex_login_when_wsl_has_no_native_login() {
+        // The old launcher copied the Windows auth.json into WSL on every
+        // start, forking the rotating refresh-token chain — the recorded cause
+        // of a real WSL Codex login death. Never copy; sign in natively.
         let script = wsl_payload_script(
             "/mnt/c/Users/Test User/skill",
             "/mnt/c/Users/Test User/AppData/Local/Temp/ah.toml",
@@ -6789,10 +6786,10 @@ sessions
             false,
         );
 
-        assert!(script.contains("WIN_CODEX_HOME='/mnt/c/Users/Test User/.codex'"));
-        assert!(script.contains("cp \"$WIN_CODEX_HOME/auth.json\" \"$HOME/.codex/auth.json\""));
-        assert!(script.contains("chmod 600 \"$HOME/.codex/auth.json\""));
-        assert!(script.contains("Run Codex login on Windows first"));
+        assert!(!script.contains("WIN_CODEX_HOME"));
+        assert!(!script.contains("cp \"$WIN_CODEX_HOME/auth.json\""));
+        assert!(script.contains("if [ ! -f \"$HOME/.codex/auth.json\" ]"));
+        assert!(script.contains("codex login"));
         assert!(script.contains("Starting Codex through ah"));
     }
 

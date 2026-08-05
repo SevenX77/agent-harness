@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- fix(studio): the WSL launchers no longer share one credential chain across
+  the Windows/WSL boundary (ah decision 0006). The Codex launcher copied the
+  Windows `auth.json` into WSL on every start and the Claude launcher force-
+  symlinked the WSL store to the Windows `.credentials.json`; refresh tokens
+  rotate on every use, so both arrangements fork the chain and whichever side
+  refreshes less dies of "refresh token already used" — the recorded cause of
+  a real WSL Codex login death, and the re-armed fuse ah's doorman kept
+  flagging for Claude. The WSL-native login is now authoritative: a leftover
+  Windows credential link is removed, and when the environment has no login
+  the launcher runs the provider's own sign-in (`codex login`,
+  `claude auth login`) right in the launch terminal before continuing.
+
 ### Changed
 - **Baseline cleanup (2026-05-19)**: 200 份历史文档收敛到 5 支柱 (~30 份精华 doc)
   - 物理归档 160+ 份到 `docs/archive/*` + `.kiro/specs/_archive/`

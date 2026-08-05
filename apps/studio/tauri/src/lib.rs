@@ -33,7 +33,11 @@ use tauri_plugin_dialog::DialogExt;
 const QUIT_FLUSH_BUDGET: Duration = Duration::from_millis(1500);
 const QUIT_FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-const AH_VERSION_MIN: &str = "1.4.0";
+/// 1.8.2 是 `[master.env]` 落地的版本(ah#37)。Studio 的 MCP 端点与 token 现在只走这条
+/// 通道，而**旧版 ah 会静默忽略未知的配置段**——不报错、不警告，master 起来了却没有工具面，
+/// 使用者只会看到 `/mcp` 空空如也，查不到原因。所以门禁必须挡在启动之前，把一次无声降级
+/// 换成一句明确的版本要求。
+const AH_VERSION_MIN: &str = "1.8.2";
 
 static AH_VERSION_CACHE: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
 
@@ -817,17 +821,25 @@ const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
     "mcp__studio__search_llm_registry"
 );
 
-/// The master runs under ahd, which does NOT inherit the environment of the
-/// shell that ran `ah start`: a session started against an already-running
-/// daemon sees none of the launcher's exports. Anything the master needs must
-/// therefore travel inside the command string ahd runs verbatim — the same
-/// reason `build_ah_bash_script` clamps state-dir vars in-script.
-fn studio_mcp_exports(studio_mcp: Option<&StudioMcpEndpoint>) -> String {
+/// The master runs under ahd, which does NOT inherit the environment of the shell that ran
+/// `ah start`: a session started against an already-running daemon sees none of the
+/// launcher's exports. Studio therefore used to bake these two into the master **command**
+/// — the only channel that existed — which put the bearer token in the command line, where
+/// `ps` shows it to every process on the machine.
+///
+/// ah 1.8.2 gave the master seat its own env channel (`[master.env]`, ah#37), so the
+/// secrets travel as configuration instead of as argv. The launch scripts read them from
+/// the environment exactly as before (`${STUDIO_MCP_URL:-}` / `${STUDIO_API_TOKEN}`), so
+/// nothing downstream changes — the values simply stop being world-readable.
+///
+/// Emitting nothing when the sidecar is unreachable is deliberate: the scripts guard on
+/// `STUDIO_MCP_URL` being non-empty and launch without the Studio tools rather than fail.
+fn studio_mcp_master_env_toml(studio_mcp: Option<&StudioMcpEndpoint>) -> String {
     match studio_mcp {
         Some(endpoint) => format!(
-            "export STUDIO_MCP_URL={url}; export STUDIO_API_TOKEN={token}; ",
-            url = sh_single_quote_str(&format!("http://127.0.0.1:{}/mcp", endpoint.port)),
-            token = sh_single_quote_str(&endpoint.token),
+            "\n[master.env]\nSTUDIO_MCP_URL = {url}\nSTUDIO_API_TOKEN = {token}\n",
+            url = toml_string(&format!("http://127.0.0.1:{}/mcp", endpoint.port)),
+            token = toml_string(&endpoint.token),
         ),
         None => String::new(),
     }
@@ -839,9 +851,8 @@ fn claude_master_cmd(
 ) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
     let claude_allowed_tools = CLAUDE_STUDIO_ALLOWED_TOOLS;
-    let studio_mcp_exports = studio_mcp_exports(studio_mcp);
     let script = format!(
-        "set -e; {studio_mcp_exports}export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; exec \"$claude_real\" $studio_mcp_args {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; exec \"$claude_real\" $studio_mcp_args {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -858,9 +869,8 @@ fn codex_master_cmd(
     skill: Option<&SessionSkillContext>,
 ) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
-    let studio_mcp_exports = studio_mcp_exports(studio_mcp);
     let script = format!(
-        "set -e; {studio_mcp_exports}export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -1032,9 +1042,10 @@ fn transient_ah_config_content(
     // ah >= 1.3.4 injects worker sandbox env natively. Studio only keeps the
     // Claude master root escape via `export IS_SANDBOX=1` in its cmd string.
     Ok(format!(
-        "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\nskills = {master_skills}\n\n[agents.clotho]\nprovider = {provider_toml}\nskills = {clotho_skills}\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = {lachesis_skills}\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = {atropos_skills}\n",
+        "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\nskills = {master_skills}\n{master_env}\n[agents.clotho]\nprovider = {provider_toml}\nskills = {clotho_skills}\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = {lachesis_skills}\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = {atropos_skills}\n",
         provider_toml = toml_string(provider),
         cmd = toml_string(&assistant.master_cmd(studio_mcp, skill)),
+        master_env = studio_mcp_master_env_toml(studio_mcp),
         master_skills = toml_string_array(&master_skills),
         clotho_skills = toml_string_array(&clotho_skills),
         lachesis_skills = toml_string_array(&lachesis_skills),
@@ -2116,7 +2127,7 @@ if ! command -v ah >/dev/null 2>&1; then
   exec bash -i
 fi
 ah_version="$(ah version 2>/dev/null)"
-# requires ah >= 1.3.4
+# requires ah >= {min_major}.{min_minor}.{min_patch}
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
@@ -2221,7 +2232,7 @@ if ! command -v ah >/dev/null 2>&1; then
   exec bash -i
 fi
 ah_version="$(ah version 2>/dev/null)"
-# requires ah >= 1.3.4
+# requires ah >= {min_major}.{min_minor}.{min_patch}
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
@@ -2285,7 +2296,7 @@ if ! command -v ah >/dev/null 2>&1; then
   exec "${{SHELL:-/bin/sh}}"
 fi
 ah_version="$(ah version 2>/dev/null)"
-# requires ah >= 1.3.4
+# requires ah >= {min_major}.{min_minor}.{min_patch}
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
@@ -2355,7 +2366,7 @@ if ! command -v ah >/dev/null 2>&1; then
   exec "${{SHELL:-/bin/sh}}"
 fi
 ah_version="$(ah version 2>/dev/null)"
-# requires ah >= 1.3.4
+# requires ah >= {min_major}.{min_minor}.{min_patch}
 ah_major="${{ah_version%%.*}}"
 ah_rest="${{ah_version#*.}}"
 ah_minor="${{ah_rest%%.*}}"
@@ -4001,49 +4012,45 @@ mod tests {
     }
 
     #[test]
-    fn master_cmd_carries_the_mcp_endpoint_itself_instead_of_inheriting_it() {
-        // The master is spawned by ahd, and ahd does not inherit the launcher
-        // shell's environment — measured on a live session: the daemon and every
-        // process under it had zero STUDIO_* variables, so the guarded
-        // --mcp-config block silently dropped and the CLI came up with "No MCP
-        // servers configured" while the launcher believed it had wired the tool
-        // surface. The endpoint therefore travels INSIDE the command string,
-        // which ahd runs verbatim. (Same reasoning as build_ah_bash_script:
-        // an in-script export is the only env a spawned shell is guaranteed to
-        // see.)
+    fn master_env_carries_the_mcp_endpoint_and_keeps_the_token_out_of_argv() {
+        // ahd 不继承启动它的 shell 的环境——实测过:daemon 及其下每个进程的 STUDIO_* 全为空,
+        // 于是被守卫的 --mcp-config 段静默失效,CLI 起来后 `/mcp` 报 No MCP servers configured,
+        // 而启动方以为工具面已经接上(T3-6)。所以这两个值必须由 Studio 显式送达。
+        //
+        // 送达方式在 ah 1.8.2 之后改成 `[master.env]`(ah#37):此前它们只能烤进 master 的
+        // **命令串**,而命令串在进程表里对全机可读——`ps` 一眼就能看到 bearer token。
+        //
+        // 回滚自检:把 export 前缀加回命令串,第二段(命令里不得出现 token)立刻红;
+        // 把 `[master.env]` 拿掉,第一段立刻红。两段一起才是完整约束。
         let endpoint = StudioMcpEndpoint {
             port: 8787,
             token: "tok-abc".to_string(),
         };
 
+        let env_block = studio_mcp_master_env_toml(Some(&endpoint));
+        assert!(env_block.contains("[master.env]"), "{env_block}");
+        assert!(
+            env_block.contains("STUDIO_MCP_URL = \"http://127.0.0.1:8787/mcp\""),
+            "{env_block}"
+        );
+        assert!(env_block.contains("STUDIO_API_TOKEN = \"tok-abc\""), "{env_block}");
+
         for cmd in [
             claude_master_cmd(Some(&endpoint), None),
             codex_master_cmd(Some(&endpoint), None),
         ] {
-            let url_at = cmd
-                .find("export STUDIO_MCP_URL=")
-                .unwrap_or_else(|| panic!("the endpoint must be baked into the command: {cmd}"));
-            assert!(cmd.contains("http://127.0.0.1:8787/mcp"), "{cmd}");
             assert!(
-                cmd.contains("export STUDIO_API_TOKEN="),
-                "the token must be baked into the command: {cmd}"
+                !cmd.contains("tok-abc"),
+                "the bearer token must never reach the command line — `ps` shows it to                  every process on the machine: {cmd}"
             );
-            assert!(cmd.contains("tok-abc"), "{cmd}");
-            let guard_at = cmd
-                .find("${STUDIO_MCP_URL:-}")
-                .unwrap_or_else(|| panic!("the MCP block must still be guarded: {cmd}"));
-            assert!(
-                url_at < guard_at,
-                "the export has to run BEFORE the guard reads it: {cmd}"
-            );
+            assert!(!cmd.contains("export STUDIO_API_TOKEN="), "{cmd}");
+            assert!(!cmd.contains("export STUDIO_MCP_URL="), "{cmd}");
+            // 但脚本照旧从环境里读它们 —— 通道换了,读法没变。
+            assert!(cmd.contains("${STUDIO_MCP_URL:-}"), "{cmd}");
         }
 
-        // Sidecar unreachable: no endpoint, no exports, and the session still
-        // starts (just without Studio tools).
-        for cmd in [claude_master_cmd(None, None), codex_master_cmd(None, None)] {
-            assert!(!cmd.contains("export STUDIO_MCP_URL="));
-            assert!(!cmd.contains("export STUDIO_API_TOKEN="));
-        }
+        // Sidecar 不可达:没有 env 段,会话照样起(只是没有 Studio 工具),绝不硬失败。
+        assert_eq!(studio_mcp_master_env_toml(None), "");
     }
 
     #[test]
@@ -4466,7 +4473,7 @@ mod tests {
             false,
         );
         assert!(windows_payload.contains("ah_version="));
-        assert!(windows_payload.contains("requires ah >= 1.3.4"));
+        assert!(windows_payload.contains(&format!("requires ah >= {AH_VERSION_MIN}")));
 
         let unix_payload = unix_code_assistant_launcher_script(
             Path::new("/tmp/skill"),
@@ -4475,7 +4482,7 @@ mod tests {
             false,
         );
         assert!(unix_payload.contains("ah_version="));
-        assert!(unix_payload.contains("requires ah >= 1.3.4"));
+        assert!(unix_payload.contains(&format!("requires ah >= {AH_VERSION_MIN}")));
     }
 
     // ── studio-ah-state-contract-v1 task 2 (version gate) RED tests ──────────
@@ -4511,7 +4518,7 @@ mod tests {
     /// test can't observe subprocess non-spawn without a live WSL/ah + Tauri
     /// AppHandle, so the gate's `Err` verdict is the load-bearing unit assertion.
     #[test]
-    fn test_version_gate_rejects_below_1_4_0() {
+    fn test_version_gate_rejects_below_the_master_env_floor() {
         use ah_contract_fixtures::{
             AH_VERSION_MIN_SUPPORTED, AH_VERSION_SUPPORTED, AH_VERSION_UNSUPPORTED,
         };
@@ -4522,7 +4529,7 @@ mod tests {
         let rejected = ah_version_gate(AH_VERSION_UNSUPPORTED);
         assert!(
             rejected.is_err(),
-            "ah 1.3.4 is below the 1.4.0 floor and must be blocked (Req 1.1/5.4)"
+            "1.8.1 缺少 [master.env],必须在启动前被拦下,而不是无声丢掉工具面 (Req 1.1/5.4)"
         );
         assert!(
             !rejected.unwrap_err().is_empty(),
@@ -4533,11 +4540,11 @@ mod tests {
         // not a constant-reject that would 'block' events for every version.
         assert!(
             ah_version_gate(AH_VERSION_MIN_SUPPORTED).is_ok(),
-            "exactly 1.4.0 is the supported floor and must pass (Req 1.1)"
+            "1.8.2 正是门槛本身,必须通过 (Req 1.1)"
         );
         assert!(
             ah_version_gate(AH_VERSION_SUPPORTED).is_ok(),
-            "1.5.0 is above the floor and must pass"
+            "高于门槛的版本必须通过——证明这是真比较,不是恒拒绝"
         );
     }
 

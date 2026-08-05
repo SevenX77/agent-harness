@@ -41,6 +41,47 @@ const AH_VERSION_MIN: &str = "1.8.2";
 
 static AH_VERSION_CACHE: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
 
+/// launcher 脚本里的 ah 版本门禁。四个模板（Windows/WSL × unix，open × attach）此前
+/// **各自复制一份**，然后各自腐烂：其中两份混进了拿同一个东西跟自己比的垃圾条件——
+/// `[ "$min_minor" -eq "$min_minor" ]`（`min_minor` 是个从未赋值的 shell 变量，恒假）
+/// 和 `[ "$----" = "$----" ]`（恒真）。前者让「主次版本相等、只看 patch」那条分支彻底
+/// 失效；门槛还是 1.4.0 时没人看得出来（装的都是 1.7/1.8，minor 更大，走前一条分支就过了），
+/// 门槛抬到 1.8.2 之后立刻显形：装着 1.8.2 的机器被自己的门禁挡在门外（2026-08-04 真机复现）。
+///
+/// 所以这里只留一份，并且把三分支比较换成**一次数值比较**：没有分支，就没有地方藏一个
+/// 恒真恒假的条件。版本串不是纯数字时（ah 缺失时那句 "unknown"）落进 case 的拒绝分支，
+/// 照旧报版本不足，而不是让 `$(( ))` 炸在用户脸上。
+fn ah_version_gate_script(remediation: &str, fallback_shell: &str) -> String {
+    let parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
+    let major: u64 = parts.first().and_then(|p| p.parse().ok()).unwrap_or(1);
+    let minor: u64 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch: u64 = parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0);
+    let min_num = major * 1_000_000 + minor * 1_000 + patch;
+    format!(
+        r#"ah_version="$(ah version 2>/dev/null)"
+# requires ah >= {AH_VERSION_MIN}
+ah_major="${{ah_version%%.*}}"
+ah_rest="${{ah_version#*.}}"
+ah_minor="${{ah_rest%%.*}}"
+ah_patch="${{ah_rest#*.}}"
+[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
+ah_ok=0
+case "$ah_major$ah_minor$ah_patch" in
+  ''|*[!0-9]*) ;;
+  *) [ "$(( ah_major * 1000000 + ah_minor * 1000 + ah_patch ))" -ge {min_num} ] && ah_ok=1 ;;
+esac
+if [ "$ah_ok" -ne 1 ]; then
+  printf 'ah %s is installed; Studio requires ah >= {AH_VERSION_MIN} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
+  printf '%s\n' "{remediation}"
+  exec {fallback_shell}
+fi"#
+    )
+}
+
+const AH_GATE_REMEDIATION_WSL: &str = "Run scripts/install-claude-code-wsl.ps1, then reopen Studio.";
+const AH_GATE_REMEDIATION_UNIX: &str =
+    "Install ah from https://github.com/SevenX77/ah, then reopen Studio.";
+
 fn run_ah_version() -> Result<String, String> {
     if cfg!(target_os = "windows") {
         let mut command = Command::new("wsl.exe");
@@ -2026,10 +2067,7 @@ fn wsl_payload_script(
     studio_mcp: Option<&StudioMcpEndpoint>,
     patch_transient_claude_config: bool,
 ) -> String {
-    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
-    let min_major = min_parts.get(0).copied().unwrap_or("1");
-    let min_minor = min_parts.get(1).copied().unwrap_or("4");
-    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_WSL, "bash -i");
 
     let codex_auth_sync = if matches!(assistant, CodeAssistant::Codex) {
         let windows_home = windows_codex_home
@@ -2126,26 +2164,7 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec bash -i
 fi
-ah_version="$(ah version 2>/dev/null)"
-# requires ah >= {min_major}.{min_minor}.{min_patch}
-ah_major="${{ah_version%%.*}}"
-ah_rest="${{ah_version#*.}}"
-ah_minor="${{ah_rest%%.*}}"
-ah_patch="${{ah_rest#*.}}"
-[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
-ah_ok=0
-if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$min_minor" -eq "$min_minor" ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
-  ah_ok=1
-fi
-if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
-  printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
-  exec bash -i
-fi
+{version_gate}
 {claude_cli_refresh}{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - "$WS" <<'PY'
 {preseed}
@@ -2173,10 +2192,6 @@ exec bash -i
         claude_cli_refresh = claude_cli_refresh,
         claude_config_patch = claude_config_patch,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
-        min_version = AH_VERSION_MIN,
-        min_major = min_major,
-        min_minor = min_minor,
-        min_patch = min_patch,
     )
 }
 
@@ -2216,10 +2231,7 @@ fn wsl_attach_payload_script(
     wsl_workspace: &str,
     assistant: CodeAssistant,
 ) -> String {
-    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
-    let min_major = min_parts.get(0).copied().unwrap_or("1");
-    let min_minor = min_parts.get(1).copied().unwrap_or("4");
-    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_WSL, "bash -i");
 
     format!(
         r#"#!/usr/bin/env bash
@@ -2231,26 +2243,7 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec bash -i
 fi
-ah_version="$(ah version 2>/dev/null)"
-# requires ah >= {min_major}.{min_minor}.{min_patch}
-ah_major="${{ah_version%%.*}}"
-ah_rest="${{ah_version#*.}}"
-ah_minor="${{ah_rest%%.*}}"
-ah_patch="${{ah_rest#*.}}"
-[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
-ah_ok=0
-if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$----" = "$----" ] 2>/dev/null && [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
-  ah_ok=1
-fi
-if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
-  printf '%s\n' "Run scripts/install-claude-code-wsl.ps1, then reopen Studio."
-  exec bash -i
-fi
+{version_gate}
 {tmux_mouse}printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
 ah --config "$CFG" attach master
 printf '[attach ended; exit=%s]\n' "$?"
@@ -2259,10 +2252,6 @@ exec bash -i
         config = sh_single_quote_str(wsl_config),
         tmux_mouse = tmux_mouse_enable_snippet(&sh_single_quote_str(wsl_workspace)),
         assistant_name = assistant.display_name(),
-        min_version = AH_VERSION_MIN,
-        min_major = min_major,
-        min_minor = min_minor,
-        min_patch = min_patch,
     )
 }
 
@@ -2274,10 +2263,7 @@ fn unix_code_assistant_launcher_script(
     assistant: CodeAssistant,
     patch_transient_claude_config: bool,
 ) -> String {
-    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
-    let min_major = min_parts.get(0).copied().unwrap_or("1");
-    let min_minor = min_parts.get(1).copied().unwrap_or("4");
-    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_UNIX, "\"${SHELL:-/bin/sh}\"");
     let claude_config_patch =
         if patch_transient_claude_config && matches!(assistant, CodeAssistant::Claude) {
             claude_provider_config_patch(&sh_single_quote(config_path))
@@ -2295,26 +2281,7 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-ah_version="$(ah version 2>/dev/null)"
-# requires ah >= {min_major}.{min_minor}.{min_patch}
-ah_major="${{ah_version%%.*}}"
-ah_rest="${{ah_version#*.}}"
-ah_minor="${{ah_rest%%.*}}"
-ah_patch="${{ah_rest#*.}}"
-[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
-ah_ok=0
-if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
-  ah_ok=1
-fi
-if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
-  printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
-  exec "${{SHELL:-/bin/sh}}"
-fi
+{version_gate}
 {claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - {workspace} <<'PY'
 {preseed}
@@ -2338,10 +2305,6 @@ exec "${{SHELL:-/bin/sh}}"
         assistant_name = assistant.display_name(),
         claude_config_patch = claude_config_patch,
         preseed = CLAUDE_ONBOARDING_PRESEED_PY,
-        min_version = AH_VERSION_MIN,
-        min_major = min_major,
-        min_minor = min_minor,
-        min_patch = min_patch,
     )
 }
 
@@ -2350,10 +2313,7 @@ fn unix_code_assistant_attach_launcher_script(
     config_path: &Path,
     assistant: CodeAssistant,
 ) -> String {
-    let min_parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
-    let min_major = min_parts.get(0).copied().unwrap_or("1");
-    let min_minor = min_parts.get(1).copied().unwrap_or("4");
-    let min_patch = min_parts.get(2).copied().unwrap_or("0");
+    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_UNIX, "\"${SHELL:-/bin/sh}\"");
 
     format!(
         r#"#!/bin/sh
@@ -2365,26 +2325,7 @@ if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
   exec "${{SHELL:-/bin/sh}}"
 fi
-ah_version="$(ah version 2>/dev/null)"
-# requires ah >= {min_major}.{min_minor}.{min_patch}
-ah_major="${{ah_version%%.*}}"
-ah_rest="${{ah_version#*.}}"
-ah_minor="${{ah_rest%%.*}}"
-ah_patch="${{ah_rest#*.}}"
-[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
-ah_ok=0
-if [ "$ah_major" -gt {min_major} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -gt {min_minor} ] 2>/dev/null; then
-  ah_ok=1
-elif [ "$ah_major" -eq {min_major} ] 2>/dev/null && [ "$ah_minor" -eq {min_minor} ] 2>/dev/null && [ "$ah_patch" -ge {min_patch} ] 2>/dev/null; then
-  ah_ok=1
-fi
-if [ "$ah_ok" -ne 1 ]; then
-  printf 'ah %s is installed; Studio requires ah >= {min_version} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
-  printf '%s\n' "Install ah from https://github.com/SevenX77/ah, then reopen Studio."
-  exec "${{SHELL:-/bin/sh}}"
-fi
+{version_gate}
 {tmux_mouse}printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
 ah --config {config} attach master
 printf '[attach ended]\n'
@@ -2393,10 +2334,6 @@ exec "${{SHELL:-/bin/sh}}"
         config = sh_single_quote(config_path),
         tmux_mouse = tmux_mouse_enable_snippet(&sh_single_quote(workspace_root)),
         assistant_name = assistant.display_name(),
-        min_version = AH_VERSION_MIN,
-        min_major = min_major,
-        min_minor = min_minor,
-        min_patch = min_patch,
     )
 }
 
@@ -4517,6 +4454,80 @@ mod tests {
     /// path gate call → an unsupported ah spawns `ah events` again) — a pure unit
     /// test can't observe subprocess non-spawn without a live WSL/ah + Tauri
     /// AppHandle, so the gate's `Err` verdict is the load-bearing unit assertion.
+    #[test]
+    /// launcher 脚本里的版本门禁必须**按语义**正确,而不是"文本里有个比较"。
+    ///
+    /// 2026-08-04 真机复现:装着 1.8.2 的机器被自己的门禁挡住,报
+    /// `ah 1.8.2 is installed; Studio requires ah >= 1.8.2`。原因是那段脚本被复制成四份、
+    /// 各自腐烂,其中一份的第三分支写成了 `[ "$min_minor" -eq "$min_minor" ]`——拿一个**从未
+    /// 赋值**的 shell 变量跟自己比,恒假,于是「主次版本相等、只看 patch」这条路彻底不通。
+    /// 门槛是 1.4.0 时看不出来(装的都是 1.7/1.8,minor 更大,走前一条分支就过了)。
+    ///
+    /// 所以这条测试不看文本,而是把生成出来的片段喂给真的 `sh` 跑一遍,断言它对边界版本的
+    /// **判断结果**。回滚自检:把任意一个恒真/恒假条件塞回去,等值那一档立刻红。
+    #[test]
+    fn test_generated_version_gate_accepts_exactly_the_floor() {
+        let gate = ah_version_gate_script("remediation", "true");
+        // 门槛本身、以及各方向的邻居;`unknown` 模拟 ah 缺失时的非数字输出。
+        let cases = [
+            (AH_VERSION_MIN, true),
+            ("1.8.1", false),
+            ("1.7.9", false),
+            ("1.8.3", true),
+            ("1.9.0", true),
+            ("2.0.0", true),
+            ("0.9.9", false),
+            ("unknown", false),
+        ];
+
+        for (version, expected_ok) in cases {
+            // 用一个假的 `ah` 函数顶掉真命令,脚本原样跑;门禁放行时会走到 marker。
+            let script = format!(
+                "ah() {{ printf '%s\\n' '{version}'; }}\n{gate}\nprintf 'GATE_OK\\n'\n"
+            );
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&script)
+                .output();
+            let Ok(output) = output else {
+                // 没有 POSIX sh(裸 Windows CI)时跳过——这条断言的价值在有 sh 的机器上。
+                return;
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                stdout.contains("GATE_OK"),
+                expected_ok,
+                "ah {version} 的放行判断错了(门槛 {AH_VERSION_MIN});脚本输出: {stdout}"
+            );
+        }
+    }
+
+    /// 四个 launcher 模板共用同一份门禁——此前是四份复制,已经各自腐烂到两份混进了
+    /// 恒真/恒假的垃圾条件。共用之后这种漂移不可能再发生,这条测试把"只有一份"钉住。
+    #[test]
+    fn test_every_launcher_shares_one_version_gate() {
+        let source = include_str!("lib.rs");
+        // needle 在运行期拼出来,否则 `include_str!` 会把本测试自己的字面量也数进去。
+        let definition = format!("fn ah_version_gate{}(", "_script");
+        let call = format!("ah_version_gate{}(AH_GATE_REMEDIATION", "_script");
+        // 生成门禁的函数只能有一个定义。
+        assert_eq!(
+            source.matches(definition.as_str()).count(),
+            1,
+            "门禁只能有一处定义,复制就是腐烂的开始"
+        );
+        // 四个模板都从它取,没有谁再手写一段比较。
+        assert_eq!(
+            source.matches(call.as_str()).count(),
+            4,
+            "四个 launcher 模板都必须用同一份门禁"
+        );
+        assert!(
+            !source.contains("ah_ok=1\nelif"),
+            "手写的多分支比较应当已经被单次数值比较取代"
+        );
+    }
+
     #[test]
     fn test_version_gate_rejects_below_the_master_env_floor() {
         use ah_contract_fixtures::{

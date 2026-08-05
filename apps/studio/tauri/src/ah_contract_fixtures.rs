@@ -62,19 +62,23 @@ pub(crate) enum Provenance {
 // parse path. These fixtures therefore only model the bare-version format, and
 // deliberately keep the trailing newline so the trim is exercised.
 
-/// `ah version` bare output for a supported runtime. CAPTURED — task0 §附加B
-/// recorded `ah version` → `1.5.0` (bare + newline) on the only installed binary.
-pub(crate) const AH_VERSION_SUPPORTED: &str = "1.5.0\n";
+/// `ah version` bare output comfortably above the floor. SchemaDerived boundary input,
+/// formatted like the real bare-version output; paired with `AH_VERSION_MIN_SUPPORTED`
+/// it proves the gate is a real comparison rather than a constant.
+pub(crate) const AH_VERSION_SUPPORTED: &str = "1.9.0\n";
 
-/// `ah version` bare output at exactly the supported floor (Req 1.1: reject `< 1.4.0`).
-/// SchemaDerived boundary input — the floor value chosen by the spec, formatted like
-/// the real bare-version output.
-pub(crate) const AH_VERSION_MIN_SUPPORTED: &str = "1.4.0\n";
+/// `ah version` bare output at exactly the supported floor. CAPTURED — 2026-08-04 本机
+/// `ah version` → `1.8.2`（bare + newline）。
+///
+/// 门槛从 1.4.0 抬到 1.8.2 的理由见 `AH_VERSION_MIN`：Studio 的 MCP 端点与 token 现在只走
+/// `[master.env]`（ah#37，1.8.2 落地），而旧版 ah 会**静默忽略**未知配置段——不报错、不警告，
+/// 只是工具面消失。这种无声降级必须被门禁挡在启动之前。
+pub(crate) const AH_VERSION_MIN_SUPPORTED: &str = "1.8.2\n";
 
-/// `ah version` bare output below the floor (Req 1.1 reject). This is the old
-/// threshold the launcher templates currently hardcode (`1.3.4`), now unsupported.
-/// SchemaDerived boundary input (task 0 had no `< 1.4.0` binary to capture, §头部).
-pub(crate) const AH_VERSION_UNSUPPORTED: &str = "1.3.4\n";
+/// `ah version` bare output just below the floor (Req 1.1 reject). CAPTURED —— 1.8.1 是
+/// 本机 2026-08-04 实际装过、并且**确实**因为缺少 `[master.env]` 而让会话起不来的那一版，
+/// 所以它既是边界输入，也是这条门禁存在理由的实证。
+pub(crate) const AH_VERSION_UNSUPPORTED: &str = "1.8.1\n";
 
 /// `ah version` output that cannot be parsed as a version → fail fast (Req 1.2).
 /// SchemaDerived boundary input.
@@ -546,9 +550,9 @@ mod self_validation {
 
     #[test]
     fn version_fixtures_trim_to_expected_tokens() {
-        assert_eq!(AH_VERSION_SUPPORTED.trim(), "1.5.0");
-        assert_eq!(AH_VERSION_MIN_SUPPORTED.trim(), "1.4.0");
-        assert_eq!(AH_VERSION_UNSUPPORTED.trim(), "1.3.4");
+        assert_eq!(AH_VERSION_SUPPORTED.trim(), "1.9.0");
+        assert_eq!(AH_VERSION_MIN_SUPPORTED.trim(), "1.8.2");
+        assert_eq!(AH_VERSION_UNSUPPORTED.trim(), "1.8.1");
         // Unparsable stays non-empty garbage after trim → fail-fast input (Req 1.2).
         assert_eq!(AH_VERSION_UNPARSABLE.trim(), "not-a-version");
         // All are the bare format (no "ah " prefix / second token) per Req 1.8.

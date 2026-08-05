@@ -190,6 +190,27 @@ UI 会在残留还在时就变回 `Open in CLI`——这正是"命令发出即�
 边界校验不能省），而不是一个 UI 会走到的分支。它不应被当作"使用者可能遇到的交互"来设计，
 也不构成放弃 D-A4 清理规则的理由。
 
+#### 观测状态更新（2026-08-05，ah 1.8.2）：本决议针对的那个现象已经不复现
+
+**实测**：在 ah 1.8.2 上开一个真会话，向 master 窗格发 `/exit`，随后的快照是
+`runtime_state=inactive` + `ahd_alive=true` + **`tmux_server_alive=false`** ——
+整个 tmux server 连同那块死窗格一起被回收了，没有残留留下。
+
+**机制（ah 仓源码）**：master 空闲退出走 `src/master_revival.rs:385-400`，把 session 标成
+`CLOSED` / `IDLE_MASTER_EXIT`，并触发 `cascade_kill_session_agents`；agent 的窗口被连坐
+回收，最后一个窗口消失后 tmux server 自己退出。`remain-on-exit` 仍然在设
+（`src/tmux/session.rs:327`），但死窗格活不过它所在的 server。
+
+**因此**：本决议第 1 节描述的现象（`/exit` 之后死窗格还在、Studio 却谎称可以重开）在
+1.8.2 上**不再由这条路径产生**。`lingering` 相位、以及 2026-08-04 裁决给它配的
+「attach 打开死窗格、Close 才销毁」行为，目前处于**已实现、单测覆盖、但真机未观测到**的
+状态——代码保留（真出现时行为是对的，且判据同源、有测试锁住），但不得把它当作"已在真机
+验证过"的能力来汇报。
+
+**未坐实**：是否还有别的路径能产生 `inactive` + `tmux_server_alive:true`（例如 worker
+崩溃而 master 仍在、或 ahd 被外部 kill -9 而 tmux 幸存）。没有证据，就不下"已彻底不可达"
+的结论。
+
 ### 5. 验收判据（缺陷 A）
 
 | # | 判据 | 验证方式 |

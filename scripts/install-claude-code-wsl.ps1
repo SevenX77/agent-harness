@@ -391,45 +391,40 @@ if (($codexWslPresent -join "") -match "MISSING") {
 
 # ---------------------------------------------------------------------------
 Write-Step "B2 auth (subscription login — not an API key)"
-$winClaudeCredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json"
-$claudeCredUsable = $false
-if (Test-Path $winClaudeCredPath) {
-  try {
-    $oauth = (Get-Content -Path $winClaudeCredPath -Raw | ConvertFrom-Json).claudeAiOauth
-    $claudeCredUsable = [bool]($oauth.accessToken -or $oauth.refreshToken)
-  } catch {
-    $claudeCredUsable = $false
-  }
-}
-if (-not $claudeCredUsable) {
-  Write-Warn2 "Claude auth is not ready: sign in to Claude Code on Windows, then re-run this script."
-  Write-Host "      Studio uses Windows Claude's normal login file as the single auth source." -ForegroundColor Yellow
-  Write-Host "      It does not require a WSL Claude login and does not copy .credentials.json." -ForegroundColor Yellow
-  exit 0
+# One credential chain per environment (ah decision 0006): WSL signs in for
+# itself. Never copy or symlink Windows auth files into WSL — refresh tokens
+# rotate on every use, so a chain shared by two environments dies on whichever
+# side refreshes less ("refresh token already used"). This script used to do
+# exactly that; the launcher and ah's login doorman now sign in natively.
+$browserBridge = @'
+if command -v xdg-open >/dev/null 2>&1 || command -v wslview >/dev/null 2>&1; then exit 0; fi
+printf '#!/bin/sh
+# ah/studio: WSL browser bridge - hand URLs to the Windows default browser.
+exec /mnt/c/Windows/System32/rundll32.exe url.dll,FileProtocolHandler "$1"
+' > /usr/local/bin/xdg-open
+chmod 755 /usr/local/bin/xdg-open
+'@
+Invoke-InDistro $browserBridge
+Write-Ok "WSL browser bridge present (sign-in pages open in your Windows browser)"
+
+$claudeAuth = Test-ClaudeReusableAuth
+if (($claudeAuth -join "") -match "PRESENT") {
+  Write-Skip "WSL Claude login present"
 } else {
-  $wslClaudeCredPath = "/mnt/" + $env:USERPROFILE.Substring(0,1).ToLower() + ($env:USERPROFILE.Substring(2) -replace "\\", "/") + "/.claude/.credentials.json"
-  $quotedClaudeCredPath = ConvertTo-BashSingleQuoted $wslClaudeCredPath
-  Invoke-InDistro "mkdir -p ~/.claude && ln -sfn $quotedClaudeCredPath ~/.claude/.credentials.json"
-  $claudeAuth = Test-ClaudeReusableAuth
-  if (($claudeAuth -join "") -match "PRESENT") {
-    Write-Ok "linked Windows Claude login into WSL"
-  } else {
-    Write-Warn2 "Windows Claude credentials were linked, but WSL could not read a usable Claude login."
-    exit 0
-  }
+  Write-Warn2 "one-time manual step — sign in to Claude inside WSL (its own login, separate from Windows):"
+  Write-Host "      wsl -e bash -lc 'claude auth login'" -ForegroundColor Yellow
+  Write-Host "      (a browser window opens; paste the code back into that terminal)" -ForegroundColor Yellow
+  Write-Host "      Or just use Studio's assistant menu - the launcher starts the sign-in itself." -ForegroundColor Yellow
 }
-$winCodexAuthPath = Join-Path $env:USERPROFILE ".codex\auth.json"
-if (Test-Path $winCodexAuthPath) {
-  $wslCodexAuthPath = "/mnt/" + $env:USERPROFILE.Substring(0,1).ToLower() + ($env:USERPROFILE.Substring(2) -replace "\\", "/") + "/.codex/auth.json"
-  Invoke-InDistro "mkdir -p ~/.codex && cp '$wslCodexAuthPath' ~/.codex/auth.json && chmod 600 ~/.codex/auth.json"
-  Write-Ok "copied your Windows Codex login into WSL"
+
+$codexStatus = Invoke-InDistro "test -f ~/.codex/auth.json && echo PRESENT || echo MISSING" -AllowFail
+if (($codexStatus -join "") -match "PRESENT") {
+  Write-Skip "WSL Codex login present"
 } else {
-  Write-Warn2 "one-time manual step needed — Codex auth must be created on Windows first:"
-  Write-Host "      1. Open a NEW PowerShell and run:" -ForegroundColor Yellow
-  Write-Host "         & '$codexWinBin' login --device-auth" -ForegroundColor Yellow
-  Write-Host "      2. Complete the browser login." -ForegroundColor Yellow
-  Write-Host "      3. Re-run this exact script — it will copy the login into WSL." -ForegroundColor Yellow
-  exit 0
+  Write-Warn2 "one-time manual step — sign in to Codex inside WSL (its own login, separate from Windows):"
+  Write-Host "      wsl -e bash -lc 'codex login'" -ForegroundColor Yellow
+  Write-Host "      (a browser window opens; the flow completes by itself)" -ForegroundColor Yellow
+  Write-Host "      Or just use Studio's assistant menu - the launcher starts the sign-in itself." -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------------

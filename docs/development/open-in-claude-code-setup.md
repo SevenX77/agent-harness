@@ -45,13 +45,14 @@ powershell -ExecutionPolicy Bypass -File scripts\install-claude-code-wsl.ps1
 1. **装 WSL2 要重启一次电脑。** 首次装 WSL2 功能后 Windows 需要重启;脚本会提示
    你重启,重启后再跑一遍命令。
    - 如果提示需要管理员权限:用「以管理员身份运行」的 PowerShell 再跑一次。
-2. **首次登录 Claude / Codex 要你在浏览器里过一次 OAuth。** Claude 只需要你在
-   Windows Claude Code 里正常登录一次;安装脚本和 Open 入口会把 WSL root / ah sandbox 的
-   `.claude/.credentials.json` 直接 symlink 到 Windows 这一份登录文件,不要求 WSL 登录,
-   也不复制第二份 OAuth 文件。
-   Codex 也一样:脚本会先在 Windows 用户目录安装 standalone Codex CLI,需要时提示你在
-   Windows PowerShell 里跑 `codex login --device-auth`,然后把
-   `%USERPROFILE%\.codex\auth.json` 复制到 WSL 的 `~/.codex/auth.json`。
+2. **首次登录 Claude / Codex 要你在浏览器里过一次 OAuth——在 WSL 里各登录一次。**
+   每个环境(Windows、WSL)各持自己的一条登录链(ah 决议 0006):refresh token 每次
+   刷新都会轮换,两个环境共用一条链(拷贝或 symlink 授权文件)会让刷新较少的一侧
+   报 "refresh token already used" 而死——旧版脚本正是这么做的,已废除。
+   现在:缺登录时,Studio 的启动终端会**当场拉起** `claude auth login` / `codex login`,
+   浏览器自动弹出(脚本装好了 WSL→Windows 浏览器桥),照做即可;也可以手动
+   `wsl -e bash -lc 'claude auth login'` / `wsl -e bash -lc 'codex login'`。
+   Windows 侧要不要登录只取决于你是否在 Windows 上直接用这些 CLI,与 WSL 互不影响。
    - 用的是你的**订阅登录**,不是 API key。
 
 装完最后看到 `Done. Go back to Studio and use the Open in CLI menu.` 就 OK 了。脚本会检查
@@ -90,9 +91,9 @@ runtime 状态、worker sandbox env 和窗口尺寸跟随都不完整。
 | 按钮点了没反应 / 灰着 | 按钮在没有工作区时会禁用;先确认进了某个 skill 的画布。 |
 | 终端弹出但报 `Could not start WSL` | WSL2 没装好。跑第 1 步的安装脚本。 |
 | 终端里 `ah CLI was not found in WSL` | `ah` 没装。跑安装脚本(会装 `ah`)。 |
-| 选 Claude 后提示 `Windows Claude login was not found` | 在 Windows Claude Code 里正常登录,然后重新点 Claude 或重跑安装脚本。 |
-| 选 Claude 后提示 `Windows Claude credentials are present but not logged in` | Windows 的 `.credentials.json` 存在但没有有效 token;重新在 Windows Claude Code 登录。 |
-| 选 Codex 后提示 `Windows Codex auth was not found` | 先在 Windows PowerShell 里跑 `codex login --device-auth`,再重跑安装脚本或重新点 Codex。 |
+| 选 Claude 后终端提示 `No Claude login in this WSL environment yet` | 正常流程:launcher 正在当场拉起 `claude auth login`,在弹出的浏览器完成授权、把代码贴回终端即可。 |
+| 选 Codex 后终端提示 `No Codex login in this WSL environment yet` | 正常流程:launcher 正在当场拉起 `codex login`,在弹出的浏览器点批准即可(无需贴码)。 |
+| 登录时浏览器没有自动弹出 | WSL→Windows 浏览器桥缺失。跑 `wsl -e ah setup --fix`(安装 `/usr/local/bin/xdg-open`),或点击终端里打印的 URL。 |
 | 终端提示 `Studio requires ah >= 1.3.4` | WSL 里还是旧 ah。跑安装脚本,它会升级 ah/ahd 并停掉旧 daemon。 |
 | 终端顶部出现 systemd 的黄色 `Scope command line contains environment variable` | 正常情况下 launcher 会用 `SYSTEMD_LOG_LEVEL=err` 压掉。若仍出现,说明你开的不是最新 Studio 生成的 launcher,重启 Studio 后再点。 |
 | Claude 顶部出现 `.local/bin/claude missing or broken` | 正常情况下 master 启动前会在沙盒 HOME 内补 `$HOME/.local/bin/claude` 链接。若仍出现,重启 Studio 后再点;若用户自写 `ah.toml`,需要自行在 master cmd 里做同样处理。 |
@@ -117,10 +118,12 @@ runtime 状态、worker sandbox env 和窗口尺寸跟随都不完整。
   Req 1)。在 `ah` 接管前,脚本作为**临时桥**代劳;一旦 `ah` 自装运行环境,PART A
   整段删掉。
 - **PART B — Studio 自己的 provider 层**(装 `ah`、装 `claude` / Codex CLI、
-  订阅登录)。这是 Studio 的**长期职责** —— provider CLI 和用户登录**明确不归 `ah`
-  管**。Claude 的登录源是 Windows `%USERPROFILE%\.claude\.credentials.json`;WSL 和 ah
-  sandbox 只建 symlink,不复制。Codex 的登录源在 Windows `%USERPROFILE%\.codex\auth.json`;
-  WSL 和 ah sandbox 只拿复制/链接后的 auth 副本。
+  登录引导)。provider CLI 的安装是 Studio 的长期职责;**登录归每个环境自己**
+  (ah 决议 0006):WSL 的登录源就是 WSL 里的 `~/.claude/.credentials.json` 与
+  `~/.codex/auth.json`,由你在 WSL 里各登录一次产生,ah sandbox 通过环境内 symlink
+  共享它们。**任何跨 Windows/WSL 边界的拷贝或 symlink 都已废除**——那会分叉轮换的
+  refresh token 链,是旧版"隔几天就要重登"的根因。缺登录时,Studio 启动器和
+  `ah start` 的门卫都会在终端里当场拉起官方登录流程。
 
 启动逻辑(点菜单那条链路)在 `apps/studio/tauri/src/lib.rs` 的 `open_claude_code` /
 `open_codex_cli` 命令里:

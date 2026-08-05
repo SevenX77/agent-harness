@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- fix(install-script): install-claude-code-wsl.ps1 no longer links or copies
+  Windows auth files into WSL (the same chain-forking the launcher fix removed).
+  It installs the WSL-to-Windows browser bridge and, when a WSL login is
+  missing, prints the native sign-in command instead of bridging; the launcher
+  or ah's doorman completes the sign-in in the terminal. The setup guide's
+  login, troubleshooting and ownership sections describe the
+  one-chain-per-environment model.
 - fix(studio): the WSL launchers no longer share one credential chain across
   the Windows/WSL boundary (ah decision 0006). The Codex launcher copied the
   Windows `auth.json` into WSL on every start and the Claude launcher force-

@@ -535,7 +535,8 @@ _WAIT_FOR_RUN_MAX_TIMEOUT = 600
     "wait_for_run",
     "等一次 run 结束(阻塞,最长 600 秒):run 已结束时立刻返回终态,否则挂在事件流上"
     "直到结束或超时。超时返回 timed_out 与当前状态,可以再等一次。"
-    "有它就不要用轮询 get_run_detail 的方式等待。",
+    "成功时附带 artifacts_landed(这次真正写出的产物文件);一个都没有时会提醒你"
+    "核对产出契约——不要略过那句提醒。有它就不要用轮询 get_run_detail 的方式等待。",
     {"skill_id": str, "run_id": str, "timeout_s": (int, None)},
 )
 async def wait_for_run_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -568,19 +569,33 @@ async def wait_for_run_tool(args: dict[str, Any]) -> dict[str, Any]:
         timed_out = True
 
     try:
-        metadata = run_manager.get_run_detail(skill_id=skill_id, run_id=run_id).metadata
+        detail = run_manager.get_run_detail(skill_id=skill_id, run_id=run_id)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
         payload = getattr(exc, "detail", None) or f"wait_for_run 失败: {exc}"
         return _text_result(payload, is_error=True)
 
-    return _text_result(
-        {
-            "run_id": metadata.run_id,
-            "status": metadata.status,
-            "timed_out": timed_out,
-            "metrics": metadata.metrics.model_dump(mode="json") if metadata.metrics else None,
-        }
-    )
+    metadata = detail.metadata
+    result: dict[str, Any] = {
+        "run_id": metadata.run_id,
+        "status": metadata.status,
+        "timed_out": timed_out,
+        "metrics": metadata.metrics.model_dump(mode="json") if metadata.metrics else None,
+    }
+    if metadata.status == "success":
+        # 产出契约的主动触发点:两轮真机实验(round4/round5)都是 run success、
+        # artifacts/ 空目录、全程无人问过"这个 skill 该产出什么"。被动工具只帮
+        # 已经决定要问的人;这句话放在 agent 读到成功的那一刻。
+        landed = detail.artifacts or []
+        result["artifacts_landed"] = landed
+        if not landed:
+            result["output_contract_reminder"] = (
+                "run 成功但没有落盘任何产物文件。一个 skill 的产出契约和输入契约"
+                "同属它的固有两端:多数 skill 需要把结果落盘给下游/人/下一次运行读,"
+                "也确有 skill 只在黑板里传结果。用 get_skill_output_contract 看清"
+                "这个 skill 声明了什么产出、黑板上实际有什么, 然后判断:该落盘就用 "
+                "set_output_artifacts 声明并重新 run, 不该落盘就明确说出理由。"
+            )
+    return _text_result(result)
 
 
 @tool(

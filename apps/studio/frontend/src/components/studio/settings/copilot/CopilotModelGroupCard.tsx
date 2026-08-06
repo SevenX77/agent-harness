@@ -143,18 +143,20 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
         </ItemTitle>
       </ItemContent>
       <ItemActions className="ml-auto shrink-0 gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={t("copilot.routeCard.removeModelGroup", { model: modelName })}
-          data-copilot-model-group-remove="true"
-          className="text-muted-foreground hover:text-destructive"
-          onClick={onRemoveModelGroup}
-          disabled={!onRemoveModelGroup}
-        >
-          <Trash2 data-role-icon="true" className="size-3 text-muted-foreground" />
-        </Button>
+        {/* 固定角色(内置 copilot)的模型不可换,连看起来能点的置灰垃圾桶都不给(2026-08-06)。 */}
+        {onRemoveModelGroup ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("copilot.routeCard.removeModelGroup", { model: modelName })}
+            data-copilot-model-group-remove="true"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={onRemoveModelGroup}
+          >
+            <Trash2 data-role-icon="true" className="size-3 text-muted-foreground" />
+          </Button>
+        ) : null}
       </ItemActions>
       <div className="basis-full pt-2">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

@@ -548,7 +548,7 @@ def test_resolve_copilot_runtime_prefers_anthropic_messages_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    route_id = "deepseek-official:deepseek-v4-pro"
+    route_id = "deepseek-official:deepseek-v4-flash"
     credentials = LLMCredentialsFile(
         provider_endpoints={
             "deepseek-official": ProviderEndpoint(
@@ -564,9 +564,9 @@ def test_resolve_copilot_runtime_prefers_anthropic_messages_profile(
             route_id: ProviderRoute(
                 route_id=route_id,
                 endpoint_id="deepseek-official",
-                route_slug="deepseek-v4-pro",
-                provider_model_id="deepseek-v4-pro",
-                canonical_id="deepseek-v4-pro",
+                route_slug="deepseek-v4-flash",
+                provider_model_id="deepseek-v4-flash",
+                canonical_id="deepseek-v4-flash",
                 status="verified",
                 verified_profiles=[
                     VerifiedProfile(
@@ -593,7 +593,7 @@ def test_resolve_copilot_runtime_prefers_anthropic_messages_profile(
     )
     roles = RolesData(
         roles={
-            "copilot_deepseek_v4_pro": RoleEntry(
+            "copilot_deepseek_v4_flash": RoleEntry(
                 role_kind="copilot",
                 fallback_chain=[RoleRouteEntry(route_id=route_id)],
             )
@@ -613,7 +613,7 @@ def test_resolve_copilot_runtime_prefers_anthropic_messages_profile(
 
     routes, _credential_provider = copilot._resolve_copilot_runtime(
         route_id,
-        role="copilot_deepseek_v4_pro",
+        role="copilot_deepseek_v4_flash",
     )
 
     assert routes[0].route_id == route_id

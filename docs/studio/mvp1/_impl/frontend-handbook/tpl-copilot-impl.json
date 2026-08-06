@@ -124,7 +124,7 @@
     },
     {
       "step": 2,
-      "what": "✅ 已落地：#56 role-seed-fallback(动态浮出)。pickDefaultCopilotGroupIds(copilot-role-derivation.ts)已接进 CopilotTab——无 copilot 角色/首次进入时按阶梯浮出默认内置角色卡(deepseek-v4-flash 第一 = copilot 默认模型,PM 裁决 2026-08-06;其后 opus4.8→4.7、V4Pro→V3.2Pro),都没有则不浮出。",
+      "what": "✅ 已落地：#56 role-seed-fallback(动态浮出)。pickDefaultCopilotGroupIds(copilot-role-derivation.ts)已接进 CopilotTab——无 copilot 角色/首次进入时按阶梯浮出默认内置角色卡(deepseek-v4-flash 第一 = copilot 默认模型,PM 裁决 2026-08-06;其后 opus4.8→4.7;pro 梯队同日退出),都没有则不浮出。固定 copilot 角色模型不可移除/换组:前端无入口 + 后端 PUT 422(fixed_copilot_model_change_error)。",
       "depends_on": "前端依赖:复用现有 deriveCopilotCandidateGroups + pickDefaultCopilotGroupIds(已存在)。后端不动。",
       "why": "纯前端、后端契约不变,可与 step 1 并行或紧随;把孤儿的择优函数接上,补齐 §3.2 动态浮出。",
       "block": "✅ 完成"

@@ -408,8 +408,8 @@
       "copilot_claude_opus_4_8": {
         "description": "内置编码 copilot 角色，与后端 fallback 链保持同步。"
       },
-      "copilot_deepseek_v4_pro": {
-        "description": "编码 copilot 角色，与后端 fallback 链保持同步。"
+      "copilot_deepseek_v4_flash": {
+        "description": "内置默认编码 copilot 角色（copilot 默认模型），与后端 fallback 链保持同步。"
       }
     }
   },

@@ -14,10 +14,10 @@
         {"canonical_id": "claude-opus-4.8", "display_name": "Claude Opus 4.8"}
       ]
     },
-    "copilot_deepseek_v4_pro": {
+    "copilot_deepseek_v4_flash": {
       "role_kind": "copilot",
       "recommended_models": [
-        {"canonical_id": "deepseek-v4-pro", "display_name": "DeepSeek V4 Pro"}
+        {"canonical_id": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash"}
       ]
     }
   }

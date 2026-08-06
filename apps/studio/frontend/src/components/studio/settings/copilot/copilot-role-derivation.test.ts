@@ -76,7 +76,6 @@ describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
     expect(pickDefaultCopilotGroupIds(candidates)).toEqual([
       "deepseek-v4-flash",
       "claude-opus-4.8",
-      "deepseek-v4-pro",
     ])
   })
 
@@ -93,7 +92,7 @@ describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
     expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-4.7"])
   })
 
-  it("floats one per family — Claude best + DeepSeek best", () => {
+  it("DeepSeek pro 梯队不再浮出(2026-08-06 裁决:v4 pro 退出内置,flash 是唯一 DeepSeek 默认)", () => {
     const candidates = deriveCopilotCandidateGroups(
       [
         group("claude-opus-4.8", "Claude Opus 4.8"),
@@ -102,7 +101,7 @@ describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
       ],
       anthropicCredentials,
     )
-    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-4.8", "deepseek-v4-pro"])
+    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-4.8"])
   })
 
   it("floats nothing when neither family has a ladder model", () => {
@@ -198,10 +197,10 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
 
   it("keeps DeepSeek Official visible when Anthropic SDK support is a candidate beside its default OpenAI method", () => {
     const deepseekGroup = {
-      canonical_id: "deepseek-v4-pro",
-      display_name: "DeepSeek V4 Pro",
+      canonical_id: "deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
       provider_models: [
-        route("deepseek-official", "deepseek-v4-pro", "ready", "deepseek_chat_completions", {}, [
+        route("deepseek-official", "deepseek-v4-flash", "ready", "deepseek_chat_completions", {}, [
           "deepseek_chat_completions",
           "deepseek_anthropic_messages",
         ], true),
@@ -232,7 +231,7 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
 
     expect(candidates).toHaveLength(1)
     expect(candidates[0].source).toBe("built_in")
-    expect(candidates[0].availableRoutes[0].id).toBe("deepseek-official:deepseek-v4-pro")
+    expect(candidates[0].availableRoutes[0].id).toBe("deepseek-official:deepseek-v4-flash")
     expect(candidates[0].availableRoutes[0].methodId).toBe("deepseek_chat_completions")
     expect(candidates[0].availableRoutes[0].candidateMethodIds).toEqual([
       "deepseek_chat_completions",

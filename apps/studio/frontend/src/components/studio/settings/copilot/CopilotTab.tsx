@@ -304,6 +304,14 @@ export function CopilotTab({
   // 隐藏删除入口、渲染问号说明,并在缺推荐模型时给警告。推荐清单是静态的,拉一次即可。
   const [fixedRoleNames, setFixedRoleNames] = useState<ReadonlySet<string>>(() => new Set())
   const [fixedRoleRecommended, setFixedRoleRecommended] = useState<Record<string, FixedRoleRecommendedModel[]>>({})
+  const fixedRoleNamesRef = useRef(fixedRoleNames)
+  const fixedRoleRecommendedRef = useRef(fixedRoleRecommended)
+  useEffect(() => {
+    fixedRoleNamesRef.current = fixedRoleNames
+  }, [fixedRoleNames])
+  useEffect(() => {
+    fixedRoleRecommendedRef.current = fixedRoleRecommended
+  }, [fixedRoleRecommended])
   useEffect(() => {
     let alive = true
     getFixedRoleNames()
@@ -419,6 +427,19 @@ export function CopilotTab({
   const dropCopilotModelOnRole = useCallback((roleId: string, modelGroupId: string): boolean => {
     const current = dataRef.current
     if (!current) return false
+    // 固定 copilot 角色 = 固定模型:只接受它自己的推荐模型组(空卡修复),换组一律拒绝。
+    const fixedRecommended = fixedRoleRecommendedRef.current[roleId]
+    if (fixedRoleNamesRef.current.has(roleId) && fixedRecommended) {
+      const allowed = fixedRecommended.map((model) => model.canonicalId)
+      if (!allowed.includes(modelGroupId)) {
+        toast.error(modelDropFailureMessage({
+          modelId: modelGroupId || "unknown model",
+          destination: roleId,
+          reason: "fixed copilot role's model is fixed",
+        }))
+        return false
+      }
+    }
     const modelGroup = allModelGroupPreviewsRef.current.find((candidate) => candidate.id === modelGroupId)
     if (!modelGroup) {
       toast.error(modelDropFailureMessage({
@@ -798,7 +819,9 @@ export function CopilotTab({
                     onTest={() => testRoleRoutes(role)}
                     onDeleteRole={() => requestDeleteCopilotRole(role)}
                     onUpdateRouteOrder={(nextOrder) => updateRouteOrder(role.id, nextOrder)}
-                    onRemoveModelGroup={() => removeModelGroup(role.id)}
+                    onRemoveModelGroup={
+                      role.source === "third_party" && !isFixed ? () => removeModelGroup(role.id) : undefined
+                    }
                     onNavigateToApiKeys={onNavigateToApiKeys}
                   />
                 )
@@ -981,7 +1004,7 @@ function CopilotRoleCard({
   onTest: () => void
   onDeleteRole: () => void
   onUpdateRouteOrder: (nextOrder: string[]) => void
-  onRemoveModelGroup: () => void
+  onRemoveModelGroup?: () => void
   onNavigateToApiKeys?: () => void
 }) {
   // R-F17: per-card a11y text needs i18n so it tracks the active language.

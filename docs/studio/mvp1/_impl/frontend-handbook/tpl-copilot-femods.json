@@ -21,7 +21,7 @@
     "duties": [
       "派生候选组:deriveCopilotCandidateGroups 从后端 model_groups + credentials 读取 provider_models[].copilot_sdk_compatible,再叠加 tools/tool_use 显式 unsupported 证据过滤 route,产出 CopilotRolePreview(含 availableRoutes + 6 态 ui_state)。",
       "eligible 判据:只消费后端 copilot_sdk_compatible 布尔投影；method/protocol/provider 名单归 gateway call_methods.json 的 endpoint_method_candidates + client compatibility,前端不再按 provider_type 或名字猜。",
-      "择优默认:pickDefaultCopilotGroupIds 按阶梯浮出默认 canonical 组并决定排序(deepseek-v4-flash 第一 = copilot 默认模型,PM 裁决 2026-08-06;其后 Claude opus4.8→4.7、DeepSeek 候选梯队 V4Pro→V3.2Pro,逐档回退、都没有则不浮出),返回浮出组的 canonical_id 列表——已接进 CopilotTab 渲染链与 composer role picker 排序(orderCopilotDisplayRoles),排位第一的浮出组就是 composer 初始角色。它既驱动 #56 浮出,又是 #55 built_in 判定的唯一真相。",
+      "择优默认:pickDefaultCopilotGroupIds 按阶梯浮出默认 canonical 组并决定排序(deepseek-v4-flash 第一 = copilot 默认模型,PM 裁决 2026-08-06;其后 Claude opus4.8→4.7,逐档回退、都没有则不浮出;DeepSeek pro 梯队 2026-08-06 退出),返回浮出组的 canonical_id 列表——已接进 CopilotTab 渲染链与 composer role picker 排序(orderCopilotDisplayRoles),排位第一的浮出组就是 composer 初始角色。它既驱动 #56 浮出,又是 #55 built_in 判定的唯一真相。",
       "选组保语义:applyCopilotModelGroupSelection 选组时保留 role key、只写 active_model/models/fallback_chain,role_kind 仍 copilot——修掉旧的『丢 copilot_ 前缀致后端误判』bug。",
       "顺序真相:configuredCopilotRouteIds 已保存角色优先读 fallback_chain,不让 model_groups/providers 候选全集覆盖用户兜底序;orderCopilotDisplayRoles 让已保存内置卡保持 Claude→DeepSeek 默认顺序。",
       "Built-in 判定(偏差):现状 isBuiltIn 是一段与浮出阶梯重复的独立硬编码 canonical_id 白名单 + description 走 includes('Claude') 模板。#55 目标=收敛成『复用 pickDefaultCopilotGroupIds 判这个组在不在系统浮出的 canonical 组里』⟺ built_in、描述直接取归一化 display_name——纯前端收敛,不需后端补元数据契约(canonical_id 已在 registry model_group DTO,§3.2 PM 2026-06-18 澄清)。"

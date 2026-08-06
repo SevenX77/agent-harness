@@ -921,7 +921,7 @@ fn claude_master_cmd(skill: Option<&SessionSkillContext>, mode: MasterLaunchMode
         ),
     };
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ]; then mkdir -p \"$STUDIO_AH_HOST_HOME/.claude/projects\"; ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/projects\" \"$HOME/.claude/projects\"; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; {exec_tail}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; host_home=$(getent passwd \"$(id -un)\" 2>/dev/null | cut -d: -f6); if [ -n \"$host_home\" ] && [ \"$host_home\" != \"$HOME\" ]; then mkdir -p \"$host_home/.claude/projects\"; rmdir \"$HOME/.claude/projects\" 2>/dev/null; if [ ! -e \"$HOME/.claude/projects\" ] || [ -L \"$HOME/.claude/projects\" ]; then ln -sfn \"$host_home/.claude/projects\" \"$HOME/.claude/projects\"; fi; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; {exec_tail}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -4273,18 +4273,39 @@ mod tests {
         assert!(intro.contains("ah ps"));
     }
 
-    /// 决议 2026-08-05 D-F1 —— 对话记录必须经宿主 HOME 持久化,新开与恢复**都**做
-    /// projects 软链:新开必须写得持久,之后才有得恢复;恢复必须能读到上次写下的。
-    /// 回滚自检:把软链那段从包装脚本里删掉,两个断言立刻红。
+    /// 决议 2026-08-05 D-F1(2026-08-05 真机修订)—— 对话记录必须经宿主 HOME 持久化,
+    /// 新开与恢复**都**做 projects 软链。
+    ///
+    /// 真机复验抓到的两层坑,这条测试逐一钉死:
+    /// ① 初版把链段挂在 `STUDIO_AH_HOST_HOME` 守卫后面——照抄旁边凭据段的手法,但那批
+    ///    守卫自 #596 起已是死代码(master 环境里该变量不存在,实测),链被静默跳过。
+    ///    宿主 home 是 WSL 里**可查询的事实**,现在由脚本自己从 `getent passwd` 派生,
+    ///    零注入依赖;断言里同时钉死"不得回归到已死的守卫"。
+    /// ② ah 的 home 材料化会把 `.claude/projects` 预建成空目录,而 `ln -sfn` 对已存在的
+    ///    **目录**不是替换、是把链建进目录里——先 `rmdir`(只删得动空目录;非空说明有
+    ///    真数据,保留并跳过,安全降级),再仅在空位/旧链上建链。
     #[test]
     fn test_both_launch_modes_link_projects_into_the_host_home() {
         for mode in [MasterLaunchMode::Fresh, MasterLaunchMode::ResumeLastConversation] {
             let cmd = claude_master_cmd(None, mode);
             assert!(
-                cmd.contains("$STUDIO_AH_HOST_HOME/.claude/projects"),
-                "{mode:?} 模式必须把对话目录软链到宿主 HOME,否则对话活不过沙箱删除: {cmd}"
+                cmd.contains("getent passwd"),
+                "{mode:?}: 宿主 home 必须由脚本自己派生,不依赖任何注入变量: {cmd}"
             );
-            assert!(cmd.contains("$HOME/.claude/projects"), "{mode:?}: {cmd}");
+            assert!(
+                cmd.contains("$host_home/.claude/projects"),
+                "{mode:?}: 对话目录必须软链到派生出的宿主 HOME: {cmd}"
+            );
+            let link_at = cmd.find("ln -sfn \"$host_home/.claude/projects\"").expect("link line");
+            let rmdir_at = cmd.find("rmdir \"$HOME/.claude/projects\"").expect("rmdir line");
+            assert!(
+                rmdir_at < link_at,
+                "{mode:?}: 必须先清掉 ah 预建的空目录再建链,否则 ln -sfn 会把链建进目录里"
+            );
+            assert!(
+                !cmd.contains("STUDIO_AH_HOST_HOME/.claude/projects"),
+                "{mode:?}: 不得回归到已死的 STUDIO_AH_HOST_HOME 守卫(实测 master 环境无此变量)"
+            );
         }
     }
 

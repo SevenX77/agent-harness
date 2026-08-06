@@ -45,6 +45,17 @@ $HOME/.claude/projects  →  $STUDIO_AH_HOST_HOME/.claude/projects
 
 对话记录经软链写进宿主 WSL home，活过沙箱删除、活过 Studio 重启。
 
+> **修订（2026-08-05 真机复验）**：初版把链段挂在 `STUDIO_AH_HOST_HOME` 守卫后面——
+> 照抄了旁边凭据软链段的手法，但真机取证发现那批守卫**已是死代码**：master 环境里该
+> 变量不存在（#596 改凭据链路后无人再注入它），`.claude.json` 是 ah 材料化拷的普通
+> 文件、`.credentials.json` 不存在——凭据实际由 ah 的 `shared_credentials_dir` 机制
+> 接管，那些软链段全部静默跳过。教训与 D-A3 同款：**照抄邻居的手法之前，先验证邻居
+> 还活着。** 修正：宿主 home 是 WSL 里可查询的事实，脚本自己 `getent passwd` 派生，
+> 零注入依赖；同时处理 ah 材料化预建空目录的坑（`ln -sfn` 对已存在目录会把链建进
+> 目录里——先 `rmdir` 空目录再建链，非空则保留跳过，安全降级）。
+> 已死的 `STUDIO_AH_HOST_HOME` 段（claude_real 回退、.claude.json/凭据软链、codex
+> auth 同步）是 #596 的遗留，涉及凭据面，另案清理。
+
 - **新开与恢复都做这条链**：新开必须写得持久，之后才有得恢复。
 - **worker 不受影响**：worker 由 ah 直接拉起、不经 Studio 的包装脚本，无软链——
   worker 的对话留在各自沙箱里随之销毁。这是**特性**：master 的 `--continue` 按

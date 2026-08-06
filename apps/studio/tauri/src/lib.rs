@@ -3622,16 +3622,26 @@ fn resolve_bootstrap_snapshot(
     }
 }
 
+/// 验证一帧快照确实在描述被请求的工作区(Req 2.7/4.8:身份不符的快照必须丢弃)。
+///
+/// **锚点只有请求方能预测的字段**(决议 2026-08-05 D-D1):工作区路径(跨 Windows↔WSL
+/// 规范化)与它的 basename(= `project_id`)。`state_dir` 不在其中——它是 ah 用**自己的
+/// 内部算法**从 config 路径派生的 hash(实测 `/root/.local/state/ah/9cc1e7dd`,与工作区
+/// 路径无关、与 Studio 的 workspace hash 也无关),Studio 无法独立形成期望值;要预测它
+/// 就得复刻 ah 的内部实现,ah 换算法这里就静默坏掉。旧版把它当前置门,两个条件恒假,
+/// 把每一次 bootstrap 都拦死(`bootstrap-seeded` 恒 0,2026-08-05 真机观测),连带 Close
+/// 的 kill 升级永远选不出目标。验证 = 比较预期与观察;无法形成预期的字段不能当验证条件。
+///
+/// 空 `sessions` = 无证据,不是反证(D-D2):接受。消费者在该形状下天然无动作
+/// (open → StartFresh,kill 升级 → 无目标),拒绝它只会用错误的语义换来相同的行为。
+/// NF1 echo 那类"错 daemon"由非空 sessions 的路径不匹配拦截。
 fn verify_snapshot_identity(
     snapshot_json: &str,
-    requested_config_path: &Path,
     requested_workspace_dir: &Path,
 ) -> Result<(), String> {
-    let _ = requested_config_path;
     let snapshot = parse_ah_runtime_snapshot(snapshot_json)?;
 
     let requested_wsl = windows_path_to_wsl(requested_workspace_dir);
-    let requested_wsl_path = Path::new(&requested_wsl);
 
     let slashed = requested_workspace_dir.to_string_lossy().replace('\\', "/");
     let expected_project_id = slashed
@@ -3642,21 +3652,6 @@ fn verify_snapshot_identity(
 
     if expected_project_id.is_empty() {
         return Err("Derived expected project_id is empty".to_string());
-    }
-
-    let state_dir_wsl = windows_path_to_wsl(Path::new(&snapshot.state_dir));
-    let state_dir_wsl_path = Path::new(&state_dir_wsl);
-    
-    let hash = workspace_hash(requested_workspace_dir);
-    let is_state_dir_under_workspace = state_dir_wsl_path.starts_with(requested_wsl_path)
-        || state_dir_wsl.contains(&requested_wsl);
-    let is_state_dir_matching_hash = state_dir_wsl.contains(&hash);
-
-    if !is_state_dir_under_workspace && !is_state_dir_matching_hash {
-        return Err(format!(
-            "state_dir mismatch: snapshot state_dir '{}' (WSL: '{}') is not associated with requested workspace '{}' (WSL: '{}', Hash: '{}')",
-            snapshot.state_dir, state_dir_wsl, requested_workspace_dir.display(), requested_wsl, hash
-        ));
     }
 
     if !snapshot.sessions.is_empty() {
@@ -3702,7 +3697,7 @@ fn resolve_open_snapshot(
         Err(status.stderr.as_str())
     };
     let snapshot = resolve_bootstrap_snapshot(status_result, None).ok()?;
-    verify_snapshot_identity(status.stdout.as_str(), config_path, workspace_dir).ok()?;
+    verify_snapshot_identity(status.stdout.as_str(), workspace_dir).ok()?;
     Some(snapshot)
 }
 
@@ -4644,6 +4639,62 @@ mod tests {
     // `test_identity_rejects_config_path_match_state_dir_mismatch` — so no trivial
     // constant implementation can turn the pair GREEN.
 
+    /// 决议 2026-08-05 D-D1/D-D3 —— 身份校验必须放行真实形状的快照。
+    ///
+    /// fixture 是 2026-08-04 的逐字捕获:`state_dir=/root/.local/state/ah/7b294a1c`
+    /// (ah 用自己的内部算法从 config 路径派生的 hash,与工作区路径无关、与 Studio 的
+    /// workspace hash 也无关),session 指向 `/mnt/d/coding/skills/exp-b-round4`。
+    /// 修复前 RED:恒假的 state_dir 前置门把这帧真快照拒绝,`bootstrap-seeded` 因此
+    /// 恒为 0(2026-08-05 真机观测)。
+    ///
+    /// 回滚自检:把「state_dir 必须在工作区下或含 Studio hash」那道门加回来,本例立刻红。
+    #[test]
+    fn test_identity_accepts_a_verbatim_captured_snapshot_for_its_own_workspace() {
+        use ah_contract_fixtures::SNAPSHOT_AHD_ALIVE_TMUX_GONE;
+
+        let verdict = verify_snapshot_identity(
+            SNAPSHOT_AHD_ALIVE_TMUX_GONE,
+            Path::new(r"D:\coding\skills\exp-b-round4"),
+        );
+        assert!(
+            verdict.is_ok(),
+            "真捕获快照 + 它自己的工作区必须通过——session path/project_id 双双匹配,             不可预测的 state_dir 不得参与判定: {verdict:?}"
+        );
+    }
+
+    /// D-D1 的对照组:同一帧真快照,换一个工作区 → 必须以 session 不匹配拒绝。
+    /// 证明上一条不是"删了校验后恒通过"。
+    #[test]
+    fn test_identity_rejects_the_same_snapshot_for_another_workspace() {
+        use ah_contract_fixtures::SNAPSHOT_AHD_ALIVE_TMUX_GONE;
+
+        let verdict = verify_snapshot_identity(
+            SNAPSHOT_AHD_ALIVE_TMUX_GONE,
+            Path::new(r"D:\coding\skills\some-other-skill"),
+        );
+        let err = verdict.expect_err("别的工作区必须被拒绝");
+        assert!(
+            err.contains("session identity mismatch"),
+            "拒绝理由必须落在请求方可预测的 session 身份上,而不是 state_dir: {err}"
+        );
+    }
+
+    /// D-D2 —— 空 sessions = 无证据,不是反证。
+    ///
+    /// 消费者动作矩阵:open 决策拿到空会话的 inactive 快照 → StartFresh(本该如此);
+    /// kill 升级拿到空列表 → 无目标(无害)。拒绝它的下游效果与接受完全相同,却把
+    /// "ah 如实说没有会话"标成身份不符——用错误语义换相同行为,不做。
+    /// 修复前 RED:SNAPSHOT_INACTIVE 的 state_dir 同样是 hash 形状,被恒假门拒绝。
+    #[test]
+    fn test_identity_accepts_an_empty_sessions_snapshot() {
+        use ah_contract_fixtures::SNAPSHOT_INACTIVE;
+
+        let verdict =
+            verify_snapshot_identity(SNAPSHOT_INACTIVE, Path::new(r"D:\coding\skills\whatever"));
+        assert!(verdict.is_ok(), "空 sessions 不构成反证,必须接受: {verdict:?}");
+    }
+
+
     /// Req 5.10(a) / 2.7 / 4.8 — the NF1 echo-through failure form. The fixture's
     /// snapshot echoes the REQUESTED `config_path` (`/tmp/ah-fixture-nf1/ah.toml`)
     /// straight back, yet its authoritative `state_dir`/session identity belongs to
@@ -4657,7 +4708,7 @@ mod tests {
     /// g1-m1's comparison regresses to trusting `config_path` (or accepts
     /// unconditionally), the echoed match is accepted and this test reds again.
     #[test]
-    fn test_identity_rejects_config_path_match_state_dir_mismatch() {
+    fn test_identity_rejects_config_path_echo_with_foreign_sessions() {
         use ah_contract_fixtures::IDENTITY_NF1_ECHO_MISMATCH;
         let f = &IDENTITY_NF1_ECHO_MISMATCH;
 
@@ -4671,13 +4722,12 @@ mod tests {
 
         let verdict = verify_snapshot_identity(
             f.snapshot_json,
-            Path::new(f.requested_config_path),
             Path::new(f.requested_workspace_dir),
         );
 
         assert!(
             verdict.is_err(),
-            "NF1 echo: config_path matches but state_dir/session identity is another \
+            "NF1 echo: config_path matches but the SESSION identity is another \
              live daemon — the snapshot MUST be discarded, not accepted (Req 2.7/5.10a)"
         );
         assert!(
@@ -4716,7 +4766,6 @@ mod tests {
 
         let verdict = verify_snapshot_identity(
             f.snapshot_json,
-            Path::new(f.requested_config_path),
             Path::new(f.requested_workspace_dir),
         );
 

@@ -269,6 +269,7 @@ describe('desktop shell helpers', () => {
       workspaceRoot: '/tmp/workspace',
       cols: 100,
       rows: 30,
+      resume: false,
       onEvent: expect.anything(),
     })
   })

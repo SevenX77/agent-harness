@@ -123,7 +123,9 @@ export async function startCliTerminalSession({
         ? await openClaudeCode(workspaceRoot, grid, handlers, {
             resumeLastConversation: mode === 'resume',
           })
-        : await openCodexCli(workspaceRoot, grid, handlers)
+        : await openCodexCli(workspaceRoot, grid, handlers, {
+            resumeLastConversation: mode === 'resume',
+          })
   if (!id) return null
 
   return {

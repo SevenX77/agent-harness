@@ -36,6 +36,7 @@ const serverSettings: AppSettings = {
   default_skills_directory: '/Users/alice/AgentStudio/Skills',
   language: 'zh-CN',
   remote_model_catalog_enabled: true,
+  cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
 }
 
 function renderJsx(node: ReactNode): { container: HTMLDivElement; root: Root } {
@@ -119,6 +120,7 @@ describe('useAppSettings helpers', () => {
       default_skills_directory: '/Users/bob/Skills',
       language: 'en',
       remote_model_catalog_enabled: false,
+      cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
 
@@ -135,6 +137,7 @@ describe('useAppSettings helpers', () => {
       default_skills_directory: '/Users/bob/Skills',
       language: 'en',
       remote_model_catalog_enabled: true,
+      cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     vi.mocked(updateAppSettings).mockRejectedValue(new Error('write failed'))
 
@@ -150,6 +153,7 @@ describe('useAppSettings helpers', () => {
       default_skills_directory: '/Users/bob/Skills',
       language: 'zh-CN',
       remote_model_catalog_enabled: true,
+      cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
 
@@ -172,6 +176,7 @@ describe('useAppSettings language field', () => {
       default_skills_directory: '/Skills',
       language: 'en',
       remote_model_catalog_enabled: true,
+      cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     const switched: AppSettings = { ...base, language: 'zh-CN' }
 
@@ -239,6 +244,7 @@ describe('useAppSettings remote model catalog flag', () => {
       default_skills_directory: '/Skills',
       language: 'en',
       remote_model_catalog_enabled: true,
+      cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     const disabled: AppSettings = { ...base, remote_model_catalog_enabled: false }
 

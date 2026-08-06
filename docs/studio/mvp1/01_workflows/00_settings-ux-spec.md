@@ -309,12 +309,21 @@
   ok/missing/broken/outdated/unknown,颜色沿用 route 灯 token(success/warning/
   destructive/muted)。进区冷加载一次 + 显式「重新检测」;探测失败入口层如实标
   broken,链上其余项标 unknown 不猜。
-- **一键安装(PR-2,待实施)**:missing/outdated 行旁安装钮,流式输出,完成自动重探;
-  WSL 本体只给引导不给按钮(需管理员+重启)。
-- **会话配置(PR-3/PR-4,待实施)**:truth 在 backend settings,前端随 open invoke
-  传给 Tauri 注入启动命令——claude `--model`/`--effort`(CLI 原生旗标,2026-08-06
-  实测在案),codex `-m`/`-c model_reasoning_effort=`;MoirAI 四角色
-  (moirai/clotho/lachesis/atropos)可逐角色覆盖,落 ah.toml `[agents.*]`。
+- **一键安装(设计修订 2026-08-06 后落地)**:任一行 missing/broken/outdated 时区头
+  显示「安装 / 修复」钮,点击 = Tauri 拉起**可见 PowerShell 控制台**跑仓内
+  `scripts/install-claude-code-wsl.ps1`(全链:WSL/tmux/ah/claude/codex)。原提案的
+  「流式输出到只读视图」被否:安装含**交互式 OAuth 登录**步骤,只读流承载不了;装完
+  用户点「重新检测」刷新。脚本沿祖先目录定位,打包构建找不到时明确报错。macOS/Linux
+  无此脚本,按钮报错引导包管理器。
+- **会话配置(落地)**:truth 在 backend settings(`AppSettings.cli_sessions`:
+  claude/codex 各 {model, effort} + agents 字典),经 `useAppSettings` 同一实例
+  autosave;open 是显式用户命令,点击时读 settings 传入 invoke。注入:claude
+  `--model`/`--effort`(全部 exec 位点,含 --continue),codex `-m`/
+  `-c model_reasoning_effort=`(只注入全新启动,resume 沿用会话记录的模型);
+  claude 的 effort 档位 low/medium/high/xhigh/max(--help 实测),codex 档位
+  minimal/low/medium/high。**MoirAI worker 覆盖**:仅 claude provider,经 ah.toml
+  `[agents.X].env` 的 `ANTHROPIC_MODEL`(ah AgentConfig.env 原生透传);codex worker
+  与 worker 级 effort 均无环境变量证据,不注入(能力扩展另议)。
 - **边界**:绝不代填凭据;凭据共享唯一通道仍是 ah `shared_credentials_dir`;
   MoirAI 角色的 prompt/技能不在本区(归 `.ah/` 与 agent-skill-map)。
 

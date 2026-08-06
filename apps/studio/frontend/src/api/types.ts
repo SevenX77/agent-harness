@@ -175,12 +175,24 @@ export interface SkillTemplate {
  */
 export type AppLanguage = 'en' | 'zh-CN'
 
+export interface CliSessionProviderSettings {
+  model: string
+  effort: string
+}
+
+export interface CliSessionSettings {
+  claude: CliSessionProviderSettings
+  codex: CliSessionProviderSettings
+  agents: Record<string, CliSessionProviderSettings>
+}
+
 export interface AppSettings {
   user_id: string
   gitea_host: string
   default_skills_directory: string
   language: AppLanguage
   remote_model_catalog_enabled: boolean
+  cli_sessions: CliSessionSettings
 }
 
 export interface CollaborateResult {

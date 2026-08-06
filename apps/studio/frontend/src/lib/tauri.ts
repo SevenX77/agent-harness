@@ -147,14 +147,26 @@ async function openCodeAssistant(
   }
 }
 
+export interface CliSessionLaunchOptions {
+  resumeLastConversation?: boolean
+  /** 会话配置(设计 §3.9):truth 在 backend settings,open 时读出传入。 */
+  model?: string
+  effort?: string
+  /** MoirAI worker 模型覆盖,仅 claude provider 生效。 */
+  agentModels?: Record<string, string>
+}
+
 export async function openClaudeCode(
   workspaceRoot: string | null | undefined,
   grid: CliTerminalGrid,
   handlers: CliTerminalHandlers,
-  options: { resumeLastConversation?: boolean } = {},
+  options: CliSessionLaunchOptions = {},
 ): Promise<string | null> {
   return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code', grid, handlers, {
     resume: options.resumeLastConversation ?? false,
+    model: options.model ?? '',
+    effort: options.effort ?? '',
+    agentModels: options.agentModels ?? {},
   })
 }
 
@@ -162,13 +174,30 @@ export async function openCodexCli(
   workspaceRoot: string | null | undefined,
   grid: CliTerminalGrid,
   handlers: CliTerminalHandlers,
-  options: { resumeLastConversation?: boolean } = {},
+  options: CliSessionLaunchOptions = {},
 ): Promise<string | null> {
   // codex 的恢复走它自己的 `resume --last`(按 cwd 过滤),语义与 claude 的
-  // `--continue` 对齐(决议 2026-08-06 D-G3)。
+  // `--continue` 对齐(决议 2026-08-06 D-G3)。agentModels 对 codex 不适用(§3.9)。
   return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex', grid, handlers, {
     resume: options.resumeLastConversation ?? false,
+    model: options.model ?? '',
+    effort: options.effort ?? '',
   })
+}
+
+/** 一键安装:拉起真控制台跑仓内安装脚本(设计 §3.9;含交互式 OAuth,只读流不承载)。
+ *  成功返回 null,失败返回错误消息(调用方 toast,不吞)。 */
+export async function launchCliInstaller(): Promise<string | null> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    return 'Desktop-only feature'
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('launch_cli_installer')
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
 }
 
 export interface CliDependencyRow {

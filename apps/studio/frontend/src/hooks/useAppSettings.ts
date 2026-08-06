@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import i18n from '../i18n'
 import { apiClientConfigChangedEvent, authenticatedApiReady, getAppSettings, updateAppSettings } from '../api/client'
-import type { AppLanguage, AppSettings } from '../api/types'
+import type { AppLanguage, AppSettings, CliSessionSettings } from '../api/types'
 import type { SaveStatus } from './useDebouncedCredentialsSave'
 import { runtimeDefaultSkillsDirectory } from '../utils/skill-paths'
 
@@ -19,12 +19,19 @@ function syncI18nLanguage(language: AppLanguage): void {
   })
 }
 
+export const DEFAULT_CLI_SESSIONS: CliSessionSettings = {
+  claude: { model: '', effort: '' },
+  codex: { model: '', effort: '' },
+  agents: {},
+}
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   user_id: '',
   gitea_host: '',
   default_skills_directory: '',
   language: 'en',
   remote_model_catalog_enabled: true,
+  cli_sessions: DEFAULT_CLI_SESSIONS,
 }
 
 const APP_SETTINGS_SAVE_DELAY_MS = 300
@@ -64,6 +71,7 @@ export function appSettingsEqual(left: AppSettings, right: AppSettings) {
     && left.default_skills_directory === right.default_skills_directory
     && left.language === right.language
     && left.remote_model_catalog_enabled === right.remote_model_catalog_enabled
+    && JSON.stringify(left.cli_sessions) === JSON.stringify(right.cli_sessions)
 }
 
 export function resetAppSettingsCacheForTests(): void {
@@ -229,6 +237,10 @@ export function useAppSettings() {
     updateSettings({ remote_model_catalog_enabled: remoteModelCatalogEnabled })
   }, [updateSettings])
 
+  const setCliSessions = useCallback((cliSessions: CliSessionSettings) => {
+    updateSettings({ cli_sessions: cliSessions })
+  }, [updateSettings])
+
   const save = useCallback(async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
@@ -253,6 +265,7 @@ export function useAppSettings() {
     setDefaultSkillsDirectory,
     setLanguage,
     setRemoteModelCatalogEnabled,
+    setCliSessions,
     save,
     isLoading,
     error,

@@ -69,6 +69,8 @@ function makeAppSettings(overrides: Partial<AppSettingsProp> = {}): AppSettingsP
     setDefaultSkillsDirectory: vi.fn(),
     setLanguage: vi.fn(),
     setRemoteModelCatalogEnabled: vi.fn(),
+    cliSessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
+    setCliSessions: vi.fn(),
     ...overrides,
   }
 }

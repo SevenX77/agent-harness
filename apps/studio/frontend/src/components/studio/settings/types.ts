@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { AppLanguage } from "@/api/types"
+import type { AppLanguage, CliSessionSettings } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
@@ -73,6 +73,8 @@ export interface SettingsPageContentProps {
     setDefaultSkillsDirectory: (value: string) => void
     setLanguage: (value: AppLanguage) => void
     setRemoteModelCatalogEnabled: (value: boolean) => void
+    cliSessions: CliSessionSettings
+    setCliSessions: (value: CliSessionSettings) => void
   }
   /**
    * N0 Settings · Shell (atoms #5/#6): true only after the /ws/events stream's

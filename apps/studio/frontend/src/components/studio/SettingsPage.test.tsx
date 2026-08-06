@@ -159,6 +159,8 @@ function baseViewProps(
       setDefaultSkillsDirectory: vi.fn(),
       setLanguage: vi.fn(),
       setRemoteModelCatalogEnabled: vi.fn(),
+      cliSessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
+      setCliSessions: vi.fn(),
     },
     onClose: vi.fn(),
     onTabChange: vi.fn(),

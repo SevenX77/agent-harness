@@ -34,6 +34,8 @@ function baseProps(overrides: Partial<SettingsPageContentProps> = {}): SettingsP
       setDefaultSkillsDirectory: vi.fn(),
       setLanguage: vi.fn(),
       setRemoteModelCatalogEnabled: vi.fn(),
+      cliSessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
+      setCliSessions: vi.fn(),
     },
     connectionLost: false,
     onClose: vi.fn(),

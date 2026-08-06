@@ -857,6 +857,7 @@ fn studio_ah_managed_payloads() -> Result<Vec<(String, String)>, String> {
 /// reason the interactive launch drops `--dangerously-skip-permissions`.
 const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
     "mcp__studio__compile_skill,",
+    "mcp__studio__get_skill_overview,",
     "mcp__studio__predict_skill,",
     "mcp__studio__get_run_detail,",
     "mcp__studio__query_run_trace,",

@@ -300,6 +300,71 @@ describe('buildCopilotJudgeDraft', () => {
       previousReactActEnvironment
   })
 
+  it('offers Resume Claude code and launches it with the resume semantic', async () => {
+    // 决议 2026-08-05 D-F2/F-5 —— Open 下拉里有 "Resume Claude code",点击走与 Open
+    // 同一条启动流程,但以 resume 语义调用(openClaudeCode 收到
+    // { resumeLastConversation: true });普通 Open 不带该语义。仅 claude 有此项。
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return vi.fn()
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root: Root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'inactive', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+
+      const menuText = (props: Record<string, unknown>) =>
+        renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
+      const resumeItem = mocks.menuItemProps.find((props) => menuText(props).includes('Resume Claude code'))
+      expect(resumeItem).toBeTruthy()
+
+      ;(resumeItem?.onSelect as (() => void) | undefined)?.()
+      await vi.waitFor(() => {
+        expect(mocks.openClaudeCode).toHaveBeenCalledTimes(1)
+      })
+      const resumeCall = mocks.openClaudeCode.mock.calls[0] as unknown[]
+      expect(resumeCall[0]).toBe('/tmp/text-segmentation')
+      expect(resumeCall[3]).toEqual({ resumeLastConversation: true })
+
+      // 对照:普通 Open 不带 resume 语义。
+      const claudeItem = mocks.menuItemProps.find((props) => {
+        const text = menuText(props)
+        return text.includes('Claude code') && !text.includes('Resume')
+      })
+      ;(claudeItem?.onSelect as (() => void) | undefined)?.()
+      await vi.waitFor(() => {
+        expect(mocks.openClaudeCode).toHaveBeenCalledTimes(2)
+      })
+      const openCall = mocks.openClaudeCode.mock.calls[1] as unknown[]
+      expect(openCall[3]).toEqual({ resumeLastConversation: false })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
   it('renders the CLI terminal from the session the WORKSPACE owns, not its own state', () => {
     // Collapsing the panel unmounts it. If the panel owned the session, the
     // running CLI would be lost on every collapse (and its terminal client

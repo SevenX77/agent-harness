@@ -213,6 +213,31 @@ describe('desktop shell helpers', () => {
       workspaceRoot: '/tmp/workspace',
       cols: 100,
       rows: 30,
+      // 不带 resume 选项时明确送 false —— Fresh 是显式语义,不靠后端默认值
+      // (决议 2026-08-05 D-F2)。
+      resume: false,
+      onEvent: expect.anything(),
+    })
+  })
+
+  it('passes the resume semantic through to the launcher', async () => {
+    // 决议 2026-08-05 D-F2 —— resume 只是同一条启动调用上的一个显式布尔,
+    // 由后端在生成 master cmd 时分叉;前端不自己发明第二条启动通道。
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue('claude-abc456')
+
+    await expect(
+      openClaudeCode('/tmp/workspace', { cols: 100, rows: 30 }, noopTerminalHandlers, {
+        resumeLastConversation: true,
+      }),
+    ).resolves.toBe('claude-abc456')
+
+    expect(mockInvoke).toHaveBeenCalledWith('open_claude_code', {
+      workspaceRoot: '/tmp/workspace',
+      cols: 100,
+      rows: 30,
+      resume: true,
       onEvent: expect.anything(),
     })
   })

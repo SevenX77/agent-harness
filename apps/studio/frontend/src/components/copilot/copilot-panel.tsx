@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, ChevronDown, CircleAlert, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ChevronDown, CircleAlert, History, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -661,7 +661,7 @@ export function CopilotPanel({
   // Starting a CLI is a user intent, so it happens here in the click handler —
   // never inside the terminal's render effect, which React runs twice in
   // development and would turn into a second `ah start` (§10 D2).
-  async function startCliSession(assistant: CodeAssistantId, mode: 'open' | 'attach') {
+  async function startCliSession(assistant: CodeAssistantId, mode: 'open' | 'attach' | 'resume') {
     if (!codeAssistantWorkspace) return
     cliSession?.detach()
     const session = await startCliTerminalSession({
@@ -685,6 +685,16 @@ export function CopilotPanel({
       return
     }
     void startCliSession(assistant, 'open')
+  }
+
+  // Resume 走与 Open 完全相同的决策/清理/启动流程,只是让 claude 用 --continue 续上
+  // 该工作区最近一次对话(决议 2026-08-05 D-F2)。仅 claude——codex 的恢复机制不同,
+  // 它的命令边界不暴露该选项。
+  function handleResumeClaudeCode() {
+    if (isAssistantReadOnly(codeAssistantStatus.claude)) {
+      return
+    }
+    void startCliSession('claude', 'resume')
   }
 
   function handleAttachCodeAssistant(assistant: CodeAssistantId) {
@@ -901,6 +911,17 @@ export function CopilotPanel({
                     title={codeAssistantStatus.codex.readOnly ? 'Workspace-owned config is read-only' : undefined}
                   >
                     Codex {isCodexOpenDisabled && '(read-only)'}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={!codeAssistantWorkspace || isClaudeOpenDisabled}
+                    onSelect={() => {
+                      handleResumeClaudeCode()
+                    }}
+                    title={codeAssistantStatus.claude.readOnly ? 'Workspace-owned config is read-only' : undefined}
+                  >
+                    <History data-icon="inline-start" />
+                    Resume Claude code
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

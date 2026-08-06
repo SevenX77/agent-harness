@@ -25,7 +25,9 @@ import {
  */
 
 export type CliTerminalAssistant = 'claude' | 'codex'
-export type CliTerminalMode = 'open' | 'attach'
+// 'resume' = 与 'open' 同一条启动流程,但让 claude 用 --continue 续上该工作区
+// 最近一次对话(决议 2026-08-05 D-F2)。仅 claude 支持。
+export type CliTerminalMode = 'open' | 'attach' | 'resume'
 
 /** base64 chunk → the exact bytes the PTY produced (a chunk boundary can fall
  * inside a multi-byte character, so text decoding belongs to the emulator). */
@@ -118,7 +120,9 @@ export async function startCliTerminalSession({
     mode === 'attach'
       ? await attachCodeAssistant(workspaceRoot, assistant, grid, handlers)
       : assistant === 'claude'
-        ? await openClaudeCode(workspaceRoot, grid, handlers)
+        ? await openClaudeCode(workspaceRoot, grid, handlers, {
+            resumeLastConversation: mode === 'resume',
+          })
         : await openCodexCli(workspaceRoot, grid, handlers)
   if (!id) return null
 

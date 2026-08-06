@@ -497,9 +497,9 @@ impl CodeAssistant {
         }
     }
 
-    fn master_cmd(self, skill: Option<&SessionSkillContext>) -> String {
+    fn master_cmd(self, skill: Option<&SessionSkillContext>, mode: MasterLaunchMode) -> String {
         match self {
-            Self::Claude => claude_master_cmd(skill),
+            Self::Claude => claude_master_cmd(skill, mode),
             Self::Codex => codex_master_cmd(skill),
         }
     }
@@ -528,6 +528,16 @@ impl AhLifecycleSnapshot {
             worker_tmux_alive,
         }
     }
+}
+
+/// master 会话的启动语义（决议 2026-08-05 D-F2）。`Fresh` 带初始 prompt 全新开始;
+/// `ResumeLastConversation` 用 claude 自己的 `--continue` 续上该工作区最近一次对话——
+/// skill 绑定上下文已在历史里,不重发。仅 claude 支持;codex 的恢复机制不同,
+/// 其命令边界不暴露该选项（类型层面不可表达）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MasterLaunchMode {
+    Fresh,
+    ResumeLastConversation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -886,11 +896,32 @@ fn studio_mcp_master_env_toml(studio_mcp: Option<&StudioMcpEndpoint>) -> String 
 /// endpoint and bearer token travel via `[master.env]`, and keeping them out of this
 /// signature makes "the token can never reach the command line" a type-level fact
 /// instead of a runtime assertion — a builder cannot leak what it cannot see.
-fn claude_master_cmd(skill: Option<&SessionSkillContext>) -> String {
+fn claude_master_cmd(skill: Option<&SessionSkillContext>, mode: MasterLaunchMode) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
     let claude_allowed_tools = CLAUDE_STUDIO_ALLOWED_TOOLS;
+    // 执行尾按模式分叉（决议 2026-08-05 D-F2）。恢复模式先看该工作区的对话目录:
+    // 非空 → `--continue` 续上（不带初始 prompt,绑定上下文已在历史里）;空 → 打一行
+    // 说明回落到全新启动——`--continue` 在无对话时会失败退出,master 秒死会把 ah 会话
+    // 拖进 FAILED,回落是唯一不把用户扔在错误屏上的行为,且不是静默偷换。
+    // 对话目录的 slug 规则（非字母数字替换为 `-`）是 claude 的存储约定,只用作
+    // "有没有得恢复"的预判;判错的最坏后果 = 回落到全新启动（安全降级）。
+    let exec_tail = match mode {
+        MasterLaunchMode::Fresh => {
+            format!("exec {q}$claude_real{q} $studio_mcp_args {prompt}", q = '"')
+        }
+        MasterLaunchMode::ResumeLastConversation => format!(
+            concat!(
+                "proj_slug=$(printf '%s' \"$PWD\" | sed 's|[^A-Za-z0-9-]|-|g'); ",
+                "if [ -n \"$(ls -A \"$HOME/.claude/projects/$proj_slug\" 2>/dev/null)\" ]; ",
+                "then exec \"$claude_real\" $studio_mcp_args --continue; fi; ",
+                "printf '%s\\n' 'No previous conversation for this workspace; starting fresh.'; ",
+                "exec \"$claude_real\" $studio_mcp_args {prompt}"
+            ),
+            prompt = prompt
+        ),
+    };
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; exec \"$claude_real\" $studio_mcp_args {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ]; then mkdir -p \"$STUDIO_AH_HOST_HOME/.claude/projects\"; ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/projects\" \"$HOME/.claude/projects\"; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; {exec_tail}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -1064,6 +1095,7 @@ fn transient_ah_config_content(
     assistant: CodeAssistant,
     studio_mcp: Option<&StudioMcpEndpoint>,
     skill: Option<&SessionSkillContext>,
+    mode: MasterLaunchMode,
 ) -> Result<String, String> {
     let provider = assistant.provider();
     let assets_dir = studio_agents_dir()?;
@@ -1079,7 +1111,7 @@ fn transient_ah_config_content(
     Ok(format!(
         "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\nskills = {master_skills}\n{master_env}\n[agents.clotho]\nprovider = {provider_toml}\nskills = {clotho_skills}\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = {lachesis_skills}\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = {atropos_skills}\n",
         provider_toml = toml_string(provider),
-        cmd = toml_string(&assistant.master_cmd(skill)),
+        cmd = toml_string(&assistant.master_cmd(skill, mode)),
         master_env = studio_mcp_master_env_toml(studio_mcp),
         master_skills = toml_string_array(&master_skills),
         clotho_skills = toml_string_array(&clotho_skills),
@@ -1093,6 +1125,7 @@ fn ah_config_for_workspace(
     assistant: CodeAssistant,
     studio_mcp: Option<&StudioMcpEndpoint>,
     skill: Option<&SessionSkillContext>,
+    mode: MasterLaunchMode,
 ) -> Result<PathBuf, String> {
     if let Some(config) = find_ah_config(workspace_root) {
         return Ok(config);
@@ -1104,7 +1137,7 @@ fn ah_config_for_workspace(
         .ok_or_else(|| format!("cannot resolve ah config parent: {}", config.display()))?;
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create transient ah config dir: {error}"))?;
-    std::fs::write(&config, transient_ah_config_content(assistant, studio_mcp, skill)?)
+    std::fs::write(&config, transient_ah_config_content(assistant, studio_mcp, skill, mode)?)
         .map_err(|error| format!("failed to write transient ah config: {error}"))?;
     Ok(config)
 }
@@ -2588,6 +2621,7 @@ fn open_code_assistant(
     workspace_root: &Path,
     assistant: CodeAssistant,
     studio_mcp: Option<&StudioMcpEndpoint>,
+    mode: MasterLaunchMode,
     cols: u16,
     rows: u16,
 ) -> Result<OpenedCodeAssistant, String> {
@@ -2612,7 +2646,7 @@ fn open_code_assistant(
         }
         CodeAssistantOpenAction::StartFresh => {
             let config_path =
-                ah_config_for_workspace(workspace_root, assistant, studio_mcp, skill.as_ref())?;
+                ah_config_for_workspace(workspace_root, assistant, studio_mcp, skill.as_ref(), mode)?;
             ensure_lifecycle_command_allowed(&config_path)?;
             let launcher = write_code_assistant_launcher_script(
                 workspace_root,
@@ -2703,6 +2737,7 @@ fn open_code_assistant_command(
     state: tauri::State<'_, CodeAssistantRuntimeState>,
     terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
     assistant: CodeAssistant,
+    mode: MasterLaunchMode,
     cols: Option<u16>,
     rows: Option<u16>,
     on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
@@ -2716,6 +2751,7 @@ fn open_code_assistant_command(
         &workspace_root,
         assistant,
         studio_mcp.as_ref(),
+        mode,
         cols.unwrap_or(CLI_TERMINAL_FALLBACK_COLS),
         rows.unwrap_or(CLI_TERMINAL_FALLBACK_ROWS),
     )?;
@@ -2743,14 +2779,21 @@ fn open_claude_code(
     terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
     cols: Option<u16>,
     rows: Option<u16>,
+    resume: Option<bool>,
     on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
 ) -> Result<String, String> {
+    let mode = if resume.unwrap_or(false) {
+        MasterLaunchMode::ResumeLastConversation
+    } else {
+        MasterLaunchMode::Fresh
+    };
     open_code_assistant_command(
         app,
         workspace_root,
         state,
         terminals,
         CodeAssistant::Claude,
+        mode,
         cols,
         rows,
         on_event,
@@ -2773,6 +2816,7 @@ fn open_codex_cli(
         state,
         terminals,
         CodeAssistant::Codex,
+        MasterLaunchMode::Fresh,
         cols,
         rows,
         on_event,
@@ -3869,7 +3913,7 @@ mod tests {
         };
 
         for assistant in [CodeAssistant::Claude, CodeAssistant::Codex] {
-            let content = transient_ah_config_content(assistant, None, Some(&context))
+            let content = transient_ah_config_content(assistant, None, Some(&context), MasterLaunchMode::Fresh)
                 .expect("config content");
             let parsed: toml::Table = toml::from_str(&content)
                 .unwrap_or_else(|error| panic!("{assistant:?} transient config must parse: {error}"));
@@ -3908,7 +3952,7 @@ mod tests {
         };
 
         for assistant in [CodeAssistant::Claude, CodeAssistant::Codex] {
-            let cmd = assistant.master_cmd(Some(&context));
+            let cmd = assistant.master_cmd(Some(&context), MasterLaunchMode::Fresh);
             assert!(
                 cmd.contains("exp-b-round3"),
                 "{assistant:?} master cmd must name the bound skill"
@@ -3918,7 +3962,7 @@ mod tests {
 
     #[test]
     fn claude_master_cmd_rejects_interop_binaries() {
-        let cmd = claude_master_cmd(None);
+        let cmd = claude_master_cmd(None, MasterLaunchMode::Fresh);
 
         assert!(cmd.contains("claude_target=$(readlink -f \"$claude_real\""));
         assert!(cmd.contains("case \"$claude_target\" in /mnt/*)"));
@@ -3954,7 +3998,7 @@ mod tests {
         );
         assert!(env_block.contains("STUDIO_API_TOKEN = \"tok-abc\""), "{env_block}");
 
-        for cmd in [claude_master_cmd(None), codex_master_cmd(None)] {
+        for cmd in [claude_master_cmd(None, MasterLaunchMode::Fresh), codex_master_cmd(None)] {
             assert!(
                 !cmd.contains("tok-abc"),
                 "the bearer token must never reach the command line — `ps` shows it to                  every process on the machine: {cmd}"
@@ -3974,7 +4018,7 @@ mod tests {
         // N5-3: the CLI surface gets the same Studio tools as the panel. Approval
         // is claude's OWN prompt (bypass flag dropped) — Studio does not build a
         // second approval system for a session the user is sitting in.
-        let cmd = claude_master_cmd(None);
+        let cmd = claude_master_cmd(None, MasterLaunchMode::Fresh);
 
         assert!(cmd.contains("$HOME/.claude/studio-mcp.json"));
         assert!(cmd.contains("\"type\":\"http\""));
@@ -3995,7 +4039,7 @@ mod tests {
     fn claude_master_cmd_skips_mcp_when_sidecar_unreachable() {
         // No STUDIO_MCP_URL (sidecar not up / non-mirrored network): the session
         // must still launch, just without the Studio tools — never hard-fail.
-        let cmd = claude_master_cmd(None);
+        let cmd = claude_master_cmd(None, MasterLaunchMode::Fresh);
 
         assert!(cmd.contains("if [ -n \"${STUDIO_MCP_URL:-}\" ]"));
         assert!(cmd.contains("studio_mcp_args="));
@@ -4229,10 +4273,69 @@ mod tests {
         assert!(intro.contains("ah ps"));
     }
 
+    /// 决议 2026-08-05 D-F1 —— 对话记录必须经宿主 HOME 持久化,新开与恢复**都**做
+    /// projects 软链:新开必须写得持久,之后才有得恢复;恢复必须能读到上次写下的。
+    /// 回滚自检:把软链那段从包装脚本里删掉,两个断言立刻红。
+    #[test]
+    fn test_both_launch_modes_link_projects_into_the_host_home() {
+        for mode in [MasterLaunchMode::Fresh, MasterLaunchMode::ResumeLastConversation] {
+            let cmd = claude_master_cmd(None, mode);
+            assert!(
+                cmd.contains("$STUDIO_AH_HOST_HOME/.claude/projects"),
+                "{mode:?} 模式必须把对话目录软链到宿主 HOME,否则对话活不过沙箱删除: {cmd}"
+            );
+            assert!(cmd.contains("$HOME/.claude/projects"), "{mode:?}: {cmd}");
+        }
+    }
+
+    /// D-F2 —— 恢复模式的执行尾:有对话就 `--continue`(不带初始 prompt,绑定上下文已在
+    /// 历史里),没对话就打一行说明回落到带 prompt 的全新启动(`--continue` 在无对话时
+    /// 失败退出会把 ah 会话拖进 FAILED,回落是唯一不把用户扔在错误屏上的行为)。
+    ///
+    /// 断言顺序而不只是包含:`--continue` 的 exec 必须在回落说明之前,回落说明必须在
+    /// 带 prompt 的 exec 之前——三段次序就是这条分支逻辑本身。
+    #[test]
+    fn test_resume_continues_when_possible_and_falls_back_honestly() {
+        let context = SessionSkillContext {
+            skill_id: "exp-a-round3".to_string(),
+            workspace_root: r"D:\coding\skills\exp-a-round3".to_string(),
+        };
+        let fresh = claude_master_cmd(Some(&context), MasterLaunchMode::Fresh);
+        let resume = claude_master_cmd(Some(&context), MasterLaunchMode::ResumeLastConversation);
+
+        assert!(!fresh.contains("--continue"), "全新启动不得携带续话标志: {fresh}");
+        assert!(fresh.contains("exp-a-round3"), "全新启动带 skill 绑定 prompt");
+
+        let continue_at = resume.find("--continue").expect("恢复模式必须走 --continue");
+        let fallback_at = resume
+            .find("No previous conversation")
+            .expect("恢复模式必须有诚实的回落说明");
+        let prompt_at = resume.find("exp-a-round3").expect("回落分支仍带 skill 绑定 prompt");
+        assert!(
+            continue_at < fallback_at && fallback_at < prompt_at,
+            "次序必须是: 续话 exec → 回落说明 → 带 prompt 的 exec: {resume}"
+        );
+    }
+
+    /// D-F2 —— 模式要一路进到生成的 ah.toml:Resume 生成的 master cmd 含 `--continue`,
+    /// Fresh 的不含。这条测的是链条(transient_ah_config_content → master_cmd),
+    /// 不是 builder 本身。
+    #[test]
+    fn test_launch_mode_reaches_the_transient_config() {
+        let fresh = transient_ah_config_content(
+            CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh,
+        ).expect("fresh config");
+        let resume = transient_ah_config_content(
+            CodeAssistant::Claude, None, None, MasterLaunchMode::ResumeLastConversation,
+        ).expect("resume config");
+        assert!(!fresh.contains("--continue"));
+        assert!(resume.contains("--continue"));
+    }
+
     #[test]
     fn transient_ah_config_starts_moirai_team() {
         let config =
-            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config");
+            transient_ah_config_content(CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh).expect("transient claude ah config");
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
@@ -4284,7 +4387,7 @@ mod tests {
     #[test]
     fn transient_ah_config_starts_codex_moirai_team() {
         let config =
-            transient_ah_config_content(CodeAssistant::Codex, None, None).expect("transient codex ah config");
+            transient_ah_config_content(CodeAssistant::Codex, None, None, MasterLaunchMode::Fresh).expect("transient codex ah config");
 
         assert!(config.contains("version = \"1\""));
         assert!(config.contains("[master]"));
@@ -4371,7 +4474,7 @@ mod tests {
     #[test]
     fn transient_ah_config_omits_systemd_scope_ro_binds() {
         let config =
-            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config");
+            transient_ah_config_content(CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh).expect("transient claude ah config");
 
         assert!(!config.contains("additional_ro_binds"));
         assert!(!config.contains("BindReadOnlyPaths"));
@@ -5689,7 +5792,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
-        let config = ah_config_for_workspace(&root, CodeAssistant::Claude, None, None)
+        let config = ah_config_for_workspace(&root, CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh)
             .expect("generated transient ah config");
 
         assert!(config.is_file());
@@ -5753,7 +5856,7 @@ mod tests {
         std::fs::write(root.join("ah.toml"), "version = \"1\"\n").unwrap();
 
         let config =
-            ah_config_for_workspace(&child, CodeAssistant::Claude, None, None).expect("existing ah config");
+            ah_config_for_workspace(&child, CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh).expect("existing ah config");
 
         assert_eq!(config, root.join("ah.toml"));
         assert!(!root.join(".ah").exists());
@@ -5775,7 +5878,7 @@ mod tests {
         std::fs::create_dir_all(&transient_dir).unwrap();
         std::fs::write(
             &transient,
-            transient_ah_config_content(CodeAssistant::Codex, None, None).expect("codex config"),
+            transient_ah_config_content(CodeAssistant::Codex, None, None, MasterLaunchMode::Fresh).expect("codex config"),
         )
         .unwrap();
 
@@ -6372,7 +6475,7 @@ mod tests {
         let discovered_config = workspace.join("ah.toml");
         std::fs::write(
             &discovered_config,
-            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config"),
+            transient_ah_config_content(CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh).expect("transient claude ah config"),
         )
         .unwrap();
 
@@ -6656,7 +6759,7 @@ mod tests {
         let discovered_config = workspace.join("ah.toml");
         std::fs::write(
             &discovered_config,
-            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("transient claude ah config"),
+            transient_ah_config_content(CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh).expect("transient claude ah config"),
         )
         .unwrap();
 
@@ -6763,7 +6866,7 @@ sessions
         std::fs::create_dir_all(&child).unwrap();
         std::fs::write(
             root.join("ah.toml"),
-            transient_ah_config_content(CodeAssistant::Claude, None, None).expect("claude config"),
+            transient_ah_config_content(CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh).expect("claude config"),
         )
         .unwrap();
 

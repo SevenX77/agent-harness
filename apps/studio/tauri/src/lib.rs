@@ -921,7 +921,7 @@ fn claude_master_cmd(skill: Option<&SessionSkillContext>, mode: MasterLaunchMode
         ),
     };
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/claude\" ]; then claude_real=\"$STUDIO_AH_HOST_HOME/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude.json\" \"$HOME/.claude.json\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.claude/.credentials.json\" \"$HOME/.claude/.credentials.json\"; fi; host_home=$(getent passwd \"$(id -un)\" 2>/dev/null | cut -d: -f6); if [ -n \"$host_home\" ] && [ \"$host_home\" != \"$HOME\" ]; then mkdir -p \"$host_home/.claude/projects\"; rmdir \"$HOME/.claude/projects\" 2>/dev/null; if [ ! -e \"$HOME/.claude/projects\" ] || [ -L \"$HOME/.claude/projects\" ]; then ln -sfn \"$host_home/.claude/projects\" \"$HOME/.claude/projects\"; fi; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; {exec_tail}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; host_home=$(getent passwd \"$(id -un)\" 2>/dev/null | cut -d: -f6); claude_real=$(command -v claude || true); if [ -z \"$claude_real\" ] && [ -n \"$host_home\" ] && [ -x \"$host_home/.local/bin/claude\" ]; then claude_real=\"$host_home/.local/bin/claude\"; fi; if [ -z \"$claude_real\" ]; then printf '%s\\n' 'claude CLI was not found on PATH.' >&2; exit 127; fi; claude_target=$(readlink -f \"$claude_real\" 2>/dev/null || printf '%s' \"$claude_real\"); case \"$claude_target\" in /mnt/*) printf '%s\\n' \"claude resolves to a Windows binary ($claude_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\"; if [ \"$claude_real\" != \"$HOME/.local/bin/claude\" ]; then ln -sfn \"$claude_real\" \"$HOME/.local/bin/claude\"; fi; if [ -n \"$host_home\" ] && [ \"$host_home\" != \"$HOME\" ]; then mkdir -p \"$host_home/.claude/projects\"; rmdir \"$HOME/.claude/projects\" 2>/dev/null; if [ ! -e \"$HOME/.claude/projects\" ] || [ -L \"$HOME/.claude/projects\" ]; then ln -sfn \"$host_home/.claude/projects\" \"$HOME/.claude/projects\"; fi; fi; export IS_SANDBOX=1; studio_mcp_args=; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_cfg=\"$HOME/.claude/studio-mcp.json\"; printf '%s\\n' '{{\"mcpServers\":{{\"studio\":{{\"type\":\"http\",\"url\":\"${{STUDIO_MCP_URL}}\",\"headers\":{{\"Authorization\":\"Bearer ${{STUDIO_API_TOKEN}}\"}}}}}}}}' > \"$studio_mcp_cfg\"; studio_mcp_args=\"--mcp-config $studio_mcp_cfg --allowedTools {claude_allowed_tools}\"; fi; {exec_tail}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -936,7 +936,7 @@ fn claude_master_cmd(skill: Option<&SessionSkillContext>, mode: MasterLaunchMode
 fn codex_master_cmd(skill: Option<&SessionSkillContext>) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; host_home=$(getent passwd \"$(id -un)\" 2>/dev/null | cut -d: -f6); codex_real=; if [ -n \"$host_home\" ] && [ -x \"$host_home/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$host_home/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"$host_home\" ] && [ -x \"$host_home/.local/bin/codex\" ]; then codex_real=\"$host_home/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -2177,7 +2177,6 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 WS={workspace}
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
-export STUDIO_AH_HOST_HOME="$HOME"
 {studio_mcp_env}{codex_auth_sync}{claude_auth_bridge}
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found in WSL."
@@ -2295,7 +2294,6 @@ fn unix_code_assistant_launcher_script(
         r#"#!/bin/sh
 set -u
 export SYSTEMD_LOG_LEVEL=err
-export STUDIO_AH_HOST_HOME="$HOME"
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found on PATH."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
@@ -2339,7 +2337,6 @@ fn unix_code_assistant_attach_launcher_script(
         r#"#!/bin/sh
 set -u
 export SYSTEMD_LOG_LEVEL=err
-export STUDIO_AH_HOST_HOME="$HOME"
 if ! command -v ah >/dev/null 2>&1; then
   printf '%s\n' "ah CLI was not found on PATH."
   printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
@@ -3970,8 +3967,9 @@ mod tests {
         assert!(cmd.contains("HOME injection"));
         assert!(cmd.contains("scripts/install-claude-code-wsl.ps1"));
         assert!(cmd.contains("mkdir -p \"$HOME/.local/bin\" \"$HOME/.claude\""));
-        assert!(cmd.contains("$STUDIO_AH_HOST_HOME/.claude/.credentials.json"));
-        assert!(cmd.contains("$HOME/.claude/.credentials.json"));
+        // #596 起凭据由 ah 的 shared_credentials_dir 机制接管(实测:沙箱里根本没有
+        // .credentials.json 而登录正常),cmd 不得再自建任何凭据软链。
+        assert!(!cmd.contains(".credentials.json"));
     }
 
     #[test]
@@ -4228,7 +4226,7 @@ mod tests {
     #[test]
     fn codex_master_cmd_rejects_interop_binaries_and_prefers_standalone() {
         let cmd = codex_master_cmd(None);
-        let standalone = "$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex";
+        let standalone = "$host_home/.codex/packages/standalone/current/bin/codex";
         let standalone_index = cmd
             .find(standalone)
             .expect("codex master should prefer the native standalone install");
@@ -4303,8 +4301,8 @@ mod tests {
                 "{mode:?}: 必须先清掉 ah 预建的空目录再建链,否则 ln -sfn 会把链建进目录里"
             );
             assert!(
-                !cmd.contains("STUDIO_AH_HOST_HOME/.claude/projects"),
-                "{mode:?}: 不得回归到已死的 STUDIO_AH_HOST_HOME 守卫(实测 master 环境无此变量)"
+                !cmd.contains("STUDIO_AH_HOST_HOME"),
+                "{mode:?}: 该变量已整体退役(2026-08-05 全量清理)——payload 三处 export 无人                 读取,master 又收不到它;生成物里出现任何引用都是回归"
             );
         }
     }
@@ -4368,15 +4366,14 @@ mod tests {
         // skip-permissions (#536: claude's own approval prompt is the human
         // gate), --continue (aborts on a fresh workspace), or /remote-control.
         assert!(config.contains("cmd = \"bash -c "));
-        assert!(config.contains("STUDIO_AH_HOST_HOME"));
+        // 宿主 home 由脚本自己从 getent 派生(#601),不再依赖任何注入变量;
+        // .claude.json/.credentials.json 由 ah 的材料化与 shared_credentials_dir 接管
+        // (#596,实测),cmd 不再自建这两条软链。
+        assert!(config.contains("getent passwd"));
+        assert!(!config.contains("STUDIO_AH_HOST_HOME"));
         assert!(config.contains("export IS_SANDBOX=1"));
         assert!(config.contains("ln -sfn"));
         assert!(config.contains("$HOME/.local/bin/claude"));
-        assert!(
-            config.contains("$STUDIO_AH_HOST_HOME/.claude.json"),
-            "Claude sandbox must reuse the host preseeded trust/onboarding file"
-        );
-        assert!(config.contains("$HOME/.claude.json"));
         // PR #536: the interactive master deliberately DROPS skip-permissions —
         // claude's own approval prompt is the human gate for a session the user
         // sits in front of (lib.rs claude_master_cmd doc).
@@ -4414,9 +4411,12 @@ mod tests {
         assert!(config.contains("[master]"));
         assert!(config.contains("window_size = \"follow\""));
         assert!(config.contains("cmd = \"bash -c "));
-        assert!(config.contains("STUDIO_AH_HOST_HOME"));
+        // 同 claude:宿主 home 由 getent 派生;auth.json 自 ah 1.8.x 起与宿主共享一份
+        // (ah 3a9c130),cmd 不再自建软链。
+        assert!(config.contains("getent passwd"));
+        assert!(!config.contains("STUDIO_AH_HOST_HOME"));
         assert!(config.contains("$HOME/.local/bin/codex"));
-        assert!(config.contains("$HOME/.codex/auth.json"));
+        assert!(!config.contains("auth.json"));
         assert!(config.contains("$HOME/.codex/AGENTS.md"));
         assert!(config.contains("$HOME/.agents/skills"));
         assert!(config.contains("rm -rf \\\"$HOME/.agents/skills\\\""));

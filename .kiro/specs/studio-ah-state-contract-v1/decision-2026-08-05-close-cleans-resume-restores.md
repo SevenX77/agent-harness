@@ -53,8 +53,11 @@ $HOME/.claude/projects  →  $STUDIO_AH_HOST_HOME/.claude/projects
 > 还活着。** 修正：宿主 home 是 WSL 里可查询的事实，脚本自己 `getent passwd` 派生，
 > 零注入依赖；同时处理 ah 材料化预建空目录的坑（`ln -sfn` 对已存在目录会把链建进
 > 目录里——先 `rmdir` 空目录再建链，非空则保留跳过，安全降级）。
-> 已死的 `STUDIO_AH_HOST_HOME` 段（claude_real 回退、.claude.json/凭据软链、codex
-> auth 同步）是 #596 的遗留，涉及凭据面，另案清理。
+> 已死的 `STUDIO_AH_HOST_HOME` 段已全量清理（另案完成，2026-08-05）：payload 三处
+> `export` 无人读取且 master 收不到 → 删；`.claude.json`/`.credentials.json`/codex
+> `auth.json` 三条软链由 ah 的材料化与 shared_credentials_dir 接管（实测）→ 删；
+> claude/codex 的 binary 回退查找**用途仍活**（daemon PATH 无保证含 `~/.local/bin`）
+> → 重锚到 getent 派生的 `host_home`。该变量整体退役，测试锁「生成物零引用」。
 
 - **新开与恢复都做这条链**：新开必须写得持久，之后才有得恢复。
 - **worker 不受影响**：worker 由 ah 直接拉起、不经 Studio 的包装脚本，无软链——

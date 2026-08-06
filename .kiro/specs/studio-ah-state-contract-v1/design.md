@@ -19,7 +19,7 @@ The important behavior change is conceptual, in three parts:
 2. `runtime_state` is a **four-value phase**, not a boolean: `active`, `inactive`, `starting`, `degraded`. `starting` is hands-off (startup in progress); `degraded` must expose a working Open-with-cleanup path, never a fully dead button set. Cleanup is driven by ah's own per-session cleanup-eligibility fields, not by Studio re-deriving "non-terminal therefore kill".
 3. Ownership is not just "which config", but **who owns the config**: a config Studio discovers by walking up the directory tree may belong to someone else's already-running ah session (including this very repository's own operator-managed fleet). Only Studio-generated temp configs are eligible for lifecycle mutation; every snapshot is identity-checked against the config Studio actually asked about before it is trusted.
 
-Second-round hardening (2026-07-10, from d1-review NF1/NF2 + o1 坑洞 3.1/3.2/3.3/3.4/3.5, all re-verified by read-only 1.5.0 testing): the identity check is authoritative on `state_dir` + session identity, not `config_path` (which is `null` on a config-less daemon and echoed back to the requested path, so a `config_path` match proves nothing), and all path comparison is canonicalized across the Windows↔WSL boundary rather than raw-string-compared. The env clamp is injected into the bash command string (a login shell would otherwise re-source the user's profile over it) and — critically — does **not** isolate which daemon the read plane (`status`/`events`) talks to on 1.5.0, so the identity check, not the clamp, is the load-bearing isolation control. `sequence` arbitration is scoped to a single subscription stream / `session_id` lifetime, resetting unconditionally on a `reason:"initial"` baseline. The frontend payload carries a `readOnly` flag so a read-only assistant's Close renders as Detach and its inactive Open is disabled — otherwise the UI deadlocks on controls the backend rejects.
+Second-round hardening (2026-07-10, from d1-review NF1/NF2 + o1 坑洞 3.1/3.2/3.3/3.4/3.5, all re-verified by read-only 1.5.0 testing): the identity check is authoritative on session identity, not `config_path`（修订 2026-08-05，决议 D-D1：requester 侧判定锚只有 session 身份——`state_dir` 是 ah 内部从 config 路径派生的 hash，请求方无法独立形成期望值，不能充当校验条件；降为 advisory 诊断，与 `config_path` 同级。见 `decision-2026-08-05-identity-anchor-and-tmux-server-alive.md`） (which is `null` on a config-less daemon and echoed back to the requested path, so a `config_path` match proves nothing), and all path comparison is canonicalized across the Windows↔WSL boundary rather than raw-string-compared. The env clamp is injected into the bash command string (a login shell would otherwise re-source the user's profile over it) and — critically — does **not** isolate which daemon the read plane (`status`/`events`) talks to on 1.5.0, so the identity check, not the clamp, is the load-bearing isolation control. `sequence` arbitration is scoped to a single subscription stream / `session_id` lifetime, resetting unconditionally on a `reason:"initial"` baseline. The frontend payload carries a `readOnly` flag so a read-only assistant's Close renders as Detach and its inactive Open is disabled — otherwise the UI deadlocks on controls the backend rejects.
 
 ## Goals
 
@@ -63,7 +63,7 @@ flowchart LR
   ADAPTER --> ENV["Env clamp (in-string export): AH_STATE_DIR / CCBD_STATE_DIR / XDG_STATE_HOME\n(write-plane only; does NOT isolate read-plane daemon on 1.5.0)"]
   ADAPTER --> STATUS["ah status --json (bootstrap/fallback)"]
   ADAPTER --> EVENTS["ah events --format json (primary decision plane)"]
-  ADAPTER --> IDCHECK["Snapshot identity check (load-bearing)\n(state_dir + sessions[].sessionId/path/projectId; config_path advisory)"]
+  ADAPTER --> IDCHECK["Snapshot identity check (load-bearing)\n(sessions[].sessionId/path/projectId; state_dir + config_path advisory)"]
   ADAPTER --> CLOSE["ah stop / ah kill (Studio-managed configs only)"]
   STATUS --> AHD["ahd state contract"]
   EVENTS --> AHD
@@ -128,7 +128,7 @@ sequenceDiagram
   participant Tauri
   participant UI
   AH-->>Tauri: complete JSON snapshot (with sequence)
-  Tauri->>Tauri: parse, validate schema, identity-check config_path/state_dir
+  Tauri->>Tauri: parse, validate schema, identity-check session identity
   Tauri->>Tauri: apply only if sequence > last-applied sequence
   Tauri->>Tauri: map runtime_state phase to per-assistant enum (Requirement 6.1)
   Tauri-->>UI: code-assistant-status-changed
@@ -169,7 +169,7 @@ sequenceDiagram
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
 | 1.1-1.8 | ah version gate, single-sourced (single `ah version` command + trim), covers events subscription | Studio ah adapter | `ah version` | open, attach, cleanup, events subscription |
-| 2.1-2.7 | events-primary status SSOT, status as bootstrap/fallback, stream-scoped sequence arbitration, state_dir/session identity check | Runtime snapshot parser | `status --json`, `events --format json` | status, live events |
+| 2.1-2.7 | events-primary status SSOT, status as bootstrap/fallback, stream-scoped sequence arbitration, session identity check | Runtime snapshot parser | `status --json`, `events --format json` | status, live events |
 | 3.1-3.8 | runtime_state phase + active-state UI semantics, incl. starting/degraded | Tauri event projection, Copilot panel | `code-assistant-status-changed` | open decision |
 | 4.1-4.8 (incl. 4.7a) | cleanup safety, config ownership classification, in-string env clamp + its scope limit, snapshot identity (load-bearing) | Cleanup orchestrator, config ownership classifier, env clamp | `ah stop`, `ah kill` | close cleanup |
 | 5.1-5.14 | tests | fixtures and unit tests | mocked/recorded ah CLI output | all flows |
@@ -222,7 +222,7 @@ sequenceDiagram
   - ah-provided `active` and `runtimeState` are authoritative once identity-checked.
   - Unknown schema is rejected.
   - Unknown status is displayed diagnostically and not silently treated as healthy.
-  - Identity is validated on `stateDir` + session identity (`sessions[].sessionId`/`path`/`projectId`), NOT on `configPath` (advisory only: `null` on a config-less daemon, and echoed back to the requested path per NF1). Path comparisons are canonicalized across the Windows↔WSL boundary, never raw-string. A snapshot whose authoritative identity does not match the requested config is discarded, not applied (Requirement 2.7/4.8).
+  - Identity is validated on session identity (`sessions[].sessionId`/`path`/`projectId`) （修订 2026-08-05，决议 D-D1：requester 侧判定锚只有 session 身份——`state_dir` 是 ah 内部从 config 路径派生的 hash，请求方无法独立形成期望值，不能充当校验条件；降为 advisory 诊断，与 `config_path` 同级。见 `decision-2026-08-05-identity-anchor-and-tmux-server-alive.md`）, NOT on `configPath` (advisory only: `null` on a config-less daemon, and echoed back to the requested path per NF1). Path comparisons are canonicalized across the Windows↔WSL boundary, never raw-string. A snapshot whose authoritative identity does not match the requested config is discarded, not applied (Requirement 2.7/4.8).
   - `sequence` is monotonic only *within a single subscription stream / `sessionId` lifetime*; the applied-`sequence` cache is unconditionally reset on a re-established subscription, a `reason:"initial"` snapshot, or a changed `sessionId`, and only after that reset does an older-or-equal `sequence` fail to overwrite a newer applied snapshot (Requirement 2.1/2.6, o1 坑洞 3.2).
 
 ### Cleanup orchestrator
@@ -257,7 +257,7 @@ type AhRuntimeSnapshot = {
   sequence: number            // per-stream baseline, NOT globally monotonic; resets to 1 with reason:"initial" (Req 2.1)
   configPath: string | null   // ADVISORY ONLY (Req 2.7): null on a config-less daemon, and echoed back to the requested path — never an authoritative identity field
   workspacePath?: string
-  stateDir?: string           // authoritative identity field (Req 2.7); canonicalize across Windows↔WSL before compare
+  stateDir?: string           // ADVISORY(修订 2026-08-05 D-D1): ah 内部从 config 路径派生的 hash，请求方不可预测，不参与判定
   sessions: AhSessionSnapshot[]
   agents: AhAgentSnapshot[]
 }
@@ -295,7 +295,7 @@ Changes from the prior draft, all sourced from F8's real-snapshot evidence:
 
 Second-round additions (2026-07-10, per NF1 + o1 坑洞 3.1/3.2):
 
-- Added `path`/`projectId` to `AhSessionSnapshot` and annotated `sessionId` — these plus top-level `stateDir` are the authoritative identity fields (Requirement 2.7). `configPath` is demoted to an advisory diagnostic because it is `null` on a config-less daemon and echoed back to the requested path (NF1), giving a `config_path` match zero discriminating power. All path fields are canonicalized across the Windows↔WSL boundary before comparison; `projectId` (directory-basename-derived) is the platform-neutral anchor.
+- Added `path`/`projectId` to `AhSessionSnapshot` and annotated `sessionId` — these are the authoritative identity fields (Requirement 2.7; 修订 2026-08-05 D-D1——`stateDir` 同样降为 advisory，理由与 `configPath` 同构：请求方无法独立形成期望值). `configPath` is demoted to an advisory diagnostic because it is `null` on a config-less daemon and echoed back to the requested path (NF1), giving a `config_path` match zero discriminating power. All path fields are canonicalized across the Windows↔WSL boundary before comparison; `projectId` (directory-basename-derived) is the platform-neutral anchor.
 - Annotated `sequence`/`reason` — `sequence` is a per-stream baseline, not globally monotonic; `reason:"initial"` (and a changed `sessionId`, or a re-established subscription) forces an unconditional sequence-cache reset before the monotonic guard applies (Requirement 2.1, o1 坑洞 3.2).
 
 This TypeScript-like shape is descriptive. The implementation should use Rust types in the Tauri layer.

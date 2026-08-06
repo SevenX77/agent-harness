@@ -46,6 +46,7 @@ import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
 import { RolePicker, copilotRoleOptions } from './role-picker'
+import { loadAppSettings } from '../../hooks/useAppSettings'
 import { startCliTerminalSession, type CliTerminalSession } from './cli-terminal-session'
 import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
@@ -684,10 +685,28 @@ export function CopilotPanel({
   async function startCliSession(assistant: CodeAssistantId, mode: 'open' | 'attach' | 'resume') {
     if (!codeAssistantWorkspace) return
     cliSession?.detach()
+    // 会话配置 truth 在 backend settings(设计 §3.9);open 是显式用户命令,此刻读取
+    // (loadAppSettings 模块级缓存,不重复打后端)。读不到就退回 CLI 自身默认,不拦启动。
+    const cliDefaults = await loadAppSettings().then(
+      (loaded) => loaded.cli_sessions,
+      () => null,
+    )
+    const provider = cliDefaults?.[assistant]
+    const agentModels =
+      assistant === 'claude' && cliDefaults
+        ? Object.fromEntries(
+            Object.entries(cliDefaults.agents)
+              .filter(([, entry]) => entry.model.trim() !== '')
+              .map(([name, entry]) => [name, entry.model]),
+          )
+        : undefined
     const session = await startCliTerminalSession({
       workspaceRoot: codeAssistantWorkspace,
       assistant,
       mode,
+      sessionOptions: provider
+        ? { model: provider.model, effort: provider.effort, agentModels }
+        : undefined,
       // The renderer reports its measured grid as soon as it mounts; this only
       // shapes the very first frame.
       grid: { cols: 100, rows: 30 },

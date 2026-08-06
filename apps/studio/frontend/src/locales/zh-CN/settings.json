@@ -435,6 +435,21 @@
       "broken": "损坏",
       "outdated": "版本过旧",
       "unknown": "未知"
+    },
+    "install": "安装 / 修复",
+    "installStarted": "安装控制台已打开",
+    "installStartedDetail": "在控制台完成各步骤(含登录),装完点「重新检测」。",
+    "installFailed": "安装器启动失败",
+    "sessionConfig": {
+      "title": "会话默认值",
+      "description": "注入新 CLI 会话的模型与 effort;留空 = 跟随 CLI 自身默认。",
+      "modelPlaceholder": "CLI 默认模型",
+      "modelAria": "{{provider}} 的默认模型",
+      "effortDefault": "默认 effort",
+      "effortAria": "{{provider}} 的 effort",
+      "agentsHint": "MoirAI worker 模型覆盖(仅 Claude 会话生效;留空 = 跟随 provider 默认):",
+      "agentModelPlaceholder": "跟随 provider 默认",
+      "agentModelAria": "{{agent}} 的模型覆盖"
     }
   },
   "copilot": {

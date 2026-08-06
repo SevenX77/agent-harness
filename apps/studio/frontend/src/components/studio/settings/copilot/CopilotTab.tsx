@@ -62,6 +62,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { getRoleTestResults } from "@/api/client"
 import { getFixedRoleNames, getFixedRoleStatus } from "@/api/llm"
 import type { CredentialsState, FixedRoleRecommendedModel, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
+import type { CliSessionSettings } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
 /**
@@ -176,6 +177,7 @@ function copilotPreviewFromModelGroup(
 }
 
 export function CopilotTab({
+  cliSettings,
   data = null,
   credentials = { providers: [] },
   modelGroups = [],
@@ -186,6 +188,7 @@ export function CopilotTab({
   onBeforeRoleTest,
   onNavigateToApiKeys,
 }: {
+  cliSettings?: { value: CliSessionSettings; onChange: (next: CliSessionSettings) => void }
   data?: RolesData | null
   credentials?: CredentialsState
   modelGroups?: ModelGroup[]
@@ -835,7 +838,7 @@ export function CopilotTab({
               {t("cli.title")}
             </CatalogAccordionTrigger>
             <CatalogAccordionContent className="space-y-4 pb-5">
-              <CliSection />
+              <CliSection settings={cliSettings} />
             </CatalogAccordionContent>
           </CatalogAccordionItem>
         </CatalogAccordion>

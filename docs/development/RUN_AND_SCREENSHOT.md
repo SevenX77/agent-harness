@@ -269,3 +269,39 @@ The `wave2/` dir has no `index.html`, so the file is reached by its full name in
 URL path (the `grep` above prints only the host — append the filename). Refresh = same
 as N6: after a wave2 PR merges, `git -C "$ROOT" pull`. Keep one 8903 serve + tunnel;
 if it 502s, restart the origin on 8903 (the tunnel URL is unchanged).
+
+## 5. Per-item verification on Windows — drive the real window over CDP
+
+The desktop app's UI is a WebView2 (Chromium) instance, so the real window can
+be driven over the Chrome DevTools Protocol: DOM-level assertions and real
+mouse events, no screenshot-pixel guessing. This is the standard way the agent
+runs the post-merge per-item verification itself (AGENTS.md "Studio Feature
+Development", decision 2026-08-06). Unlike §2 this drives the REAL Tauri
+window, so native `invoke` paths are live too.
+
+```powershell
+# launch WITH a debug port (the env var only affects processes started under it)
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1
+```
+
+- **Page target**: `GET http://127.0.0.1:9222/json` → the entry with
+  `type == "page"` whose url matches the Vite **port** (`/:5173/`). Match the
+  port, not the hostname — it may be `127.0.0.1`, not `localhost`.
+- **Assertions / navigation**: `Runtime.evaluate` over the target's WebSocket
+  (`returnByValue: true, awaitPromise: true`). Read `document.body.innerText`
+  FIRST to see which screen is actually up before clicking anything — the app
+  may have restored the last workspace instead of the home screen.
+- **Clicks**: Radix/shadcn menus need REAL pointer events —
+  `Input.dispatchMouseEvent` (mouseMoved → mousePressed → mouseReleased) at
+  the element's `getBoundingClientRect()` center; synthetic `.click()` does
+  not open them.
+- **Screenshots for the verification report**: `Page.captureScreenshot`.
+- **Transients** (sub-second loading states): run a sampling loop INSIDE the
+  page via one `Runtime.evaluate` (poll every 100 ms, record state changes,
+  return the timeline).
+- **Close the debug port when done**: restart the app with the env var
+  explicitly empty, then VERIFY with `curl http://127.0.0.1:9222/json/version`
+  that the port is really gone — while it is open, any local process can fully
+  control the page. Do not restart a session the user is actively using
+  without asking first.

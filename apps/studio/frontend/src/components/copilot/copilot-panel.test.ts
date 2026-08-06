@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   prepareCopilotJudgeContext: vi.fn(),
   openClaudeCode: vi.fn(),
   openCodexCli: vi.fn(),
+  lastOpenedCodeAssistant: vi.fn(),
   attachCodeAssistant: vi.fn(),
   ensureCodeAssistantStatusEvents: vi.fn(),
   subscribeCodeAssistantStatus: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock('../../hooks/useTemplates', () => ({
 vi.mock('../../lib/tauri', () => ({
   openClaudeCode: mocks.openClaudeCode,
   openCodexCli: mocks.openCodexCli,
+  lastOpenedCodeAssistant: mocks.lastOpenedCodeAssistant,
   attachCodeAssistant: mocks.attachCodeAssistant,
   ensureCodeAssistantStatusEvents: mocks.ensureCodeAssistantStatusEvents,
   subscribeCodeAssistantStatus: mocks.subscribeCodeAssistantStatus,
@@ -141,6 +143,8 @@ describe('buildCopilotJudgeDraft', () => {
     mocks.openClaudeCode.mockResolvedValue(true)
     mocks.openCodexCli.mockReset()
     mocks.openCodexCli.mockResolvedValue(true)
+    mocks.lastOpenedCodeAssistant.mockReset()
+    mocks.lastOpenedCodeAssistant.mockResolvedValue('claude')
     mocks.attachCodeAssistant.mockReset()
     mocks.attachCodeAssistant.mockResolvedValue(true)
     mocks.ensureCodeAssistantStatusEvents.mockReset()
@@ -301,9 +305,10 @@ describe('buildCopilotJudgeDraft', () => {
   })
 
   it('offers Resume Claude code and launches it with the resume semantic', async () => {
-    // 决议 2026-08-05 D-F2/F-5 —— Open 下拉里有 "Resume Claude code",点击走与 Open
-    // 同一条启动流程,但以 resume 语义调用(openClaudeCode 收到
-    // { resumeLastConversation: true });普通 Open 不带该语义。仅 claude 有此项。
+    // 决议 2026-08-05 D-F2/F-5 + 2026-08-06 D-G2 —— Open 下拉里的 Resume 项指向
+    // 「上次打开的 CLI」(此处 mock 为 claude),点击走与 Open 同一条启动流程,但以
+    // resume 语义调用(openClaudeCode 收到 { resumeLastConversation: true });
+    // 普通 Open 不带该语义。
     const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
       .IS_REACT_ACT_ENVIRONMENT
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -355,6 +360,104 @@ describe('buildCopilotJudgeDraft', () => {
       })
       const openCall = mocks.openClaudeCode.mock.calls[1] as unknown[]
       expect(openCall[3]).toEqual({ resumeLastConversation: false })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('labels Resume after the last-opened CLI and resumes codex with the resume semantic', async () => {
+    // 决议 2026-08-06 D-G2/D-G3 —— 上次用 codex 打开的工作区,Resume 项显示
+    // "Resume Codex",点击以 resume 语义调用 openCodexCli。
+    mocks.lastOpenedCodeAssistant.mockResolvedValue('codex')
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return vi.fn()
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root: Root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'inactive', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+
+      const menuText = (props: Record<string, unknown>) =>
+        renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
+      expect(mocks.menuItemProps.find((props) => menuText(props).includes('Resume Claude code'))).toBeFalsy()
+      const resumeItem = mocks.menuItemProps.find((props) => menuText(props).includes('Resume Codex'))
+      expect(resumeItem).toBeTruthy()
+
+      ;(resumeItem?.onSelect as (() => void) | undefined)?.()
+      await vi.waitFor(() => {
+        expect(mocks.openCodexCli).toHaveBeenCalledTimes(1)
+      })
+      const resumeCall = mocks.openCodexCli.mock.calls[0] as unknown[]
+      expect(resumeCall[0]).toBe('/tmp/text-segmentation')
+      expect(resumeCall[3]).toEqual({ resumeLastConversation: true })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      document.body.removeChild(container)
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+        previousReactActEnvironment
+    }
+  })
+
+  it('hides the Resume item when the workspace has no launch record', async () => {
+    // 决议 2026-08-06 D-G2 —— 没有「上次打开」记录就没有可恢复对象,不渲染 Resume 项
+    // (读不到记录 = 安全降级为隐藏,不是置灰假按钮)。
+    mocks.lastOpenedCodeAssistant.mockResolvedValue(null)
+    const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    let emitStatus: ((status: unknown) => void) | null = null
+    mocks.subscribeCodeAssistantStatus.mockImplementation(async (_workspaceRoot, onStatus) => {
+      emitStatus = onStatus
+      return vi.fn()
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root: Root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(CopilotPanel, {
+          skillId: 'text-segmentation',
+          copilot: mocks.useCopilot(),
+          workspaceRoot: '/tmp/text-segmentation',
+        }))
+      })
+      await act(async () => {
+        emitStatus?.({
+          claude: { status: 'inactive', readOnly: false },
+          codex: { status: 'inactive', readOnly: false },
+        })
+      })
+
+      const menuText = (props: Record<string, unknown>) =>
+        renderToStaticMarkup(React.createElement(React.Fragment, null, props.children as React.ReactNode))
+      expect(mocks.menuItemProps.find((props) => menuText(props).includes('Resume'))).toBeFalsy()
     } finally {
       act(() => {
         root.unmount()

@@ -153,8 +153,6 @@ export async function openClaudeCode(
   handlers: CliTerminalHandlers,
   options: { resumeLastConversation?: boolean } = {},
 ): Promise<string | null> {
-  // resume 只对 claude 存在:codex 的恢复机制不同,它的命令边界不暴露该参数
-  // (决议 2026-08-05 D-F3)。
   return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code', grid, handlers, {
     resume: options.resumeLastConversation ?? false,
   })
@@ -164,8 +162,34 @@ export async function openCodexCli(
   workspaceRoot: string | null | undefined,
   grid: CliTerminalGrid,
   handlers: CliTerminalHandlers,
+  options: { resumeLastConversation?: boolean } = {},
 ): Promise<string | null> {
-  return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex', grid, handlers)
+  // codex 的恢复走它自己的 `resume --last`(按 cwd 过滤),语义与 claude 的
+  // `--continue` 对齐(决议 2026-08-06 D-G3)。
+  return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex', grid, handlers, {
+    resume: options.resumeLastConversation ?? false,
+  })
+}
+
+/** 这个工作区上次用哪个 CLI 打开(决议 2026-08-06 D-G1;owner = Tauri 层的启动记录)。
+ *  读不到(非桌面环境 / 无记录 / 记录损坏)一律返回 null——Resume 菜单随之隐藏,安全降级。 */
+export async function lastOpenedCodeAssistant(
+  workspaceRoot: string | null | undefined,
+): Promise<'claude' | 'codex' | null> {
+  const targetPath = workspaceRoot?.trim() ?? ''
+  if (!targetPath || !isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    return null
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const value = await invoke<string | null>('last_opened_code_assistant', {
+      workspaceRoot: targetPath,
+    })
+    return value === 'claude' || value === 'codex' ? value : null
+  } catch (error) {
+    console.warn('last_opened_code_assistant query failed:', error)
+    return null
+  }
 }
 
 /**

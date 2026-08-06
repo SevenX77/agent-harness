@@ -21,7 +21,7 @@ Rust 层(apps/studio/tauri)或顶层架构调整才退回全局重型 SOP。
 1. apps/studio/frontend/CLAUDE.md —— 单 agent 功能 SOP,必读第一份。你一个 agent
    直接写代码(不派 subagent、不走 12 步审计、不写 kiro spec);照其「五、端到端
    SOP」走:锁范围 → 开 worktree → 设计对齐 → 实施 → 验证环境&截图 → 门禁 →
-   回写手册 → 发 PR+收尾 → 报 done 附 PM 验证清单。
+   回写手册 → 发 PR+收尾 → 自己逐项点验 → 报 done 附逐项验证报告+截图。
 2. AGENTS.md(每会话自动加载)——「Development Principles」三条原则(不向后兼容 /
    第一性原理不打补丁 / 模块边界不是禁区也不是借口)+「Three-Module Architecture」
    两条 SSOT 铁律:数据读取 SSOT(mount/focus/轮询/重连都不许 refetch mutable
@@ -49,20 +49,22 @@ Rust 层(apps/studio/tauri)或顶层架构调整才退回全局重型 SOP。
 - 手册随代码同步:收尾据代码真相回写切片状态(fe_status / be_status / 机制卡
   backend_status[].status / tests / 截图 / shot_na),重生成 index.html,与代码同一个
   PR;状态老实标——导航圆点 = 全页徽章取最差。
-- 验证环境自己备,逐项点验归 PM(PM 决策 2026-07-06):在自己 worktree 起
-  scripts/wt-dev.sh(改了 backend/engine/gateway 用 --backend 起本树私有 sidecar,
-  绝不拿 main 的后端充数),确认 app 能起、受影响界面能打开不报错,顺手截手册要的
-  真机图;不在 5173 验自己的活、不起第二套 Tauri。
+- 验证环境自己备,逐项点验也自己做(PM 决策 2026-08-06,取代 2026-07-06 的「点验归
+  PM」):在自己 worktree 起 scripts/wt-dev.sh(改了 backend/engine/gateway 用
+  --backend 起本树私有 sidecar,绝不拿 main 的后端充数),确认 app 能起、受影响界面
+  能打开不报错,顺手截手册要的真机图;不在 5173 验自己的活、不起第二套 Tauri。合并
+  收尾后在主 app 上逐项点验(webview UI 用 CDP 驱动真窗口,RUN_AND_SCREENSHOT.md §5)。
 - 推送前门禁全绿:前端四件套(lint/typecheck/test/build)+ 按 AGENTS.md「CI Gates」
   的 ruff / mypy(SDK --strict)/ pytest。scripts/wt-ship.sh 发 PR、上 auto-merge;
   不直接 push main。
 - 合并后收尾全部自己做:scripts/wt-clean.sh 清自己的树(只清自己的)、主仓根 git
   pull、依赖清单变了补装(npm install / uv sync)、engine/gateway 源码变了重建
   vendor + 重启 app —— 机械步骤绝不列清单甩给 PM。
-- 报 done ≠ 收敛:附逐项 PM 验证清单,格式强制
-  | # | 改动(PR) | ① 界面路径 | ② 操作 | ③ 预期 | ④ 状态 |;一条改动一行不合并、
-  只列验证步骤不列机械步骤、跨 PR 的会话汇总所有待确认 + 已确认项。PM 逐条确认完才算
-  收敛,反馈问题本任务内继续修(小修可开后续 PR)。
+- 报 done ≠ 收敛:附逐项验证报告 + 截图,格式强制
+  | # | 改动(PR) | ① 界面路径 | ② 操作 | ③ 预期 | ④ 实测结果+截图 | ⑤ 状态 |;
+  一条改动一行不合并、每条必须有实测证据(没实测不许标 ✅)、跨 PR 的会话汇总所有
+  已交付项。报告全绿才算收敛;PM 抽查推翻或报告有 ❌ 的条目,本任务内继续修
+  (小修可开后续 PR)。
 
 任务:<在这里写你这次要做的功能改动>
 

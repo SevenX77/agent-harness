@@ -64,6 +64,22 @@ const anthropicCredentials: CredentialsState = {
 }
 
 describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
+  it("puts deepseek-v4-flash first across families (PM 决策 2026-08-06: copilot 默认模型)", () => {
+    const candidates = deriveCopilotCandidateGroups(
+      [
+        group("claude-opus-4.8", "Claude Opus 4.8"),
+        group("deepseek-v4-flash", "DeepSeek V4 Flash"),
+        group("deepseek-v4-pro", "DeepSeek V4 Pro"),
+      ],
+      anthropicCredentials,
+    )
+    expect(pickDefaultCopilotGroupIds(candidates)).toEqual([
+      "deepseek-v4-flash",
+      "claude-opus-4.8",
+      "deepseek-v4-pro",
+    ])
+  })
+
   it("prefers opus-4.8 over 4.7 when both are present", () => {
     const candidates = deriveCopilotCandidateGroups(
       [group("claude-opus-4.8", "Claude Opus 4.8"), group("claude-opus-4.7", "Claude Opus 4.7")],

@@ -408,8 +408,8 @@
       "copilot_claude_opus_4_8": {
         "description": "Built-in coding copilot role, kept in sync with the backend fallback chain."
       },
-      "copilot_deepseek_v4_pro": {
-        "description": "Coding copilot role, kept in sync with the backend fallback chain."
+      "copilot_deepseek_v4_flash": {
+        "description": "Built-in default coding copilot role (the copilot default model), kept in sync with the backend fallback chain."
       }
     }
   },

@@ -214,7 +214,8 @@ export function pickDefaultCopilotGroupIds(candidates: CopilotRolePreview[]): st
   const defaults: string[] = []
 
   // copilot 默认模型 = DeepSeek V4 Flash(PM 决策 2026-08-06,取代 2026-07-02 的 opus4.8 默认):
-  // 排位第一 → 面板选择器的初始角色就是它;家族梯队保持在后作为候选。
+  // 排位第一 → 面板选择器的初始角色就是它。DeepSeek pro 梯队同日退出内置
+  // (用户裁决「去掉 deepseek v4 pro」),Claude 梯队保留在后作候选。
   if (ids.includes('deepseek-v4-flash')) {
     defaults.push('deepseek-v4-flash')
   }
@@ -224,13 +225,6 @@ export function pickDefaultCopilotGroupIds(candidates: CopilotRolePreview[]): st
     defaults.push('claude-opus-4.8')
   } else if (ids.includes('claude-opus-4.7')) {
     defaults.push('claude-opus-4.7')
-  }
-
-  // DeepSeek 优先级
-  if (ids.includes('deepseek-v4-pro')) {
-    defaults.push('deepseek-v4-pro')
-  } else if (ids.includes('deepseek-v3.2-pro')) {
-    defaults.push('deepseek-v3.2-pro')
   }
 
   return defaults

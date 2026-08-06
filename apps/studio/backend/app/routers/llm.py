@@ -1559,7 +1559,12 @@ async def get_llm_roles() -> RolesProjectionResponse:
 @router.put("/roles", response_model=RolesProjectionResponse)
 async def put_llm_roles(request: RolesData) -> RolesProjectionResponse:
     """Upsert submitted roles; absent roles are retained."""
+    from app.services.llm_fixed_roles import fixed_copilot_model_change_error
+
     current = _load_roles_or_empty()
+    fixed_model_error = fixed_copilot_model_change_error(current.roles, request.roles)
+    if fixed_model_error:
+        raise HTTPException(status_code=422, detail=fixed_model_error)
     merged = current.model_copy(
         update={
             "roles": {**current.roles, **request.roles},
@@ -1616,7 +1621,12 @@ async def get_llm_role(role_name: str) -> RoleEntry:
 @router.put("/roles/{role_name}", response_model=RoleEntry)
 async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     """Full replace one role."""
+    from app.services.llm_fixed_roles import fixed_copilot_model_change_error
+
     data = _load_roles_or_empty()
+    fixed_model_error = fixed_copilot_model_change_error(data.roles, {role_name: request})
+    if fixed_model_error:
+        raise HTTPException(status_code=422, detail=fixed_model_error)
     credentials = load_credentials()
     adapter = build_gateway_adapter()
     role = (

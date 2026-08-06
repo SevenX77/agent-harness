@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Literal
 
 from app.core.adapters.engine import required_builtin_roles as _engine_required_builtin_roles
@@ -156,6 +157,36 @@ def reconcile_fixed_roles(
     if not changed:
         return roles, []
     return roles.model_copy(update={"schema_version": 3, "roles": updated}), changed
+
+
+def fixed_copilot_model_change_error(
+    current_roles: Mapping[str, RoleEntry],
+    incoming_roles: Mapping[str, RoleEntry],
+) -> str | None:
+    """固定 copilot 角色的模型不可变。
+
+    非法写入:把已绑定的推荐模型组掏空(生产空壳),或绑定到推荐之外的模型组。
+    合法写入:冷态(本就无绑定)的原样回显,以及把空绑定修复为推荐模型组——
+    冷态本身由 reconcile 负责,不归用户写路径管。
+    """
+    config = studio_fixed_role_config()
+    for role_name, incoming in incoming_roles.items():
+        spec = config.roles.get(role_name)
+        if spec is None or spec.role_kind != "copilot":
+            continue
+        recommended = set(recommended_models_for_role(role_name))
+        incoming_groups = {group.canonical_id for group in incoming.model_groups}
+        foreign = incoming_groups - recommended
+        if foreign:
+            return (
+                f"{role_name}: fixed copilot role is bound to {sorted(recommended)}; "
+                f"cannot bind {sorted(foreign)}"
+            )
+        current = current_roles.get(role_name)
+        current_groups = {group.canonical_id for group in current.model_groups} if current else set()
+        if current_groups and not incoming_groups:
+            return f"{role_name}: fixed copilot role model cannot be removed"
+    return None
 
 
 def _fixed_role_kind(role_name: str) -> Literal["graph_agent", "copilot"]:

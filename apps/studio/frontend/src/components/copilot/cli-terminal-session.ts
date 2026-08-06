@@ -3,6 +3,7 @@ import {
   detachCliTerminal,
   openClaudeCode,
   openCodexCli,
+  type CliSessionLaunchOptions,
   resizeCliTerminal,
   writeCliTerminal,
   type CliTerminalGrid,
@@ -101,6 +102,8 @@ interface StartCliTerminalSessionParams {
   mode: CliTerminalMode
   /** Grid to start at; the renderer re-reports its real one once it mounts. */
   grid: CliTerminalGrid
+  /** 会话配置(设计 §3.9):model/effort/agentModels,open 时从 settings 读出。 */
+  sessionOptions?: Pick<CliSessionLaunchOptions, 'model' | 'effort' | 'agentModels'>
   onExit: () => void
 }
 
@@ -109,6 +112,7 @@ export async function startCliTerminalSession({
   assistant,
   mode,
   grid,
+  sessionOptions,
   onExit,
 }: StartCliTerminalSessionParams): Promise<CliTerminalSession | null> {
   const pump = createCliOutputPump()
@@ -122,9 +126,11 @@ export async function startCliTerminalSession({
       : assistant === 'claude'
         ? await openClaudeCode(workspaceRoot, grid, handlers, {
             resumeLastConversation: mode === 'resume',
+            ...sessionOptions,
           })
         : await openCodexCli(workspaceRoot, grid, handlers, {
             resumeLastConversation: mode === 'resume',
+            ...sessionOptions,
           })
   if (!id) return null
 

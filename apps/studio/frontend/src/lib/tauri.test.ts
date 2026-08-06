@@ -214,8 +214,11 @@ describe('desktop shell helpers', () => {
       cols: 100,
       rows: 30,
       // 不带 resume 选项时明确送 false —— Fresh 是显式语义,不靠后端默认值
-      // (决议 2026-08-05 D-F2)。
+      // (决议 2026-08-05 D-F2)。会话配置同理:空值显式送出,不靠后端默认。
       resume: false,
+      model: '',
+      effort: '',
+      agentModels: {},
       onEvent: expect.anything(),
     })
   })
@@ -238,6 +241,9 @@ describe('desktop shell helpers', () => {
       cols: 100,
       rows: 30,
       resume: true,
+      model: '',
+      effort: '',
+      agentModels: {},
       onEvent: expect.anything(),
     })
   })
@@ -270,6 +276,8 @@ describe('desktop shell helpers', () => {
       cols: 100,
       rows: 30,
       resume: false,
+      model: '',
+      effort: '',
       onEvent: expect.anything(),
     })
   })

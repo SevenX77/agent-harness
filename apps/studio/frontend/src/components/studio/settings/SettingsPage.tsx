@@ -1186,6 +1186,8 @@ export function useSettingsPageController(): SettingsPageController {
       setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
       setLanguage: appSettings.setLanguage,
       setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
+      cliSessions: appSettings.settings.cli_sessions,
+      setCliSessions: appSettings.setCliSessions,
     },
     connectionLost,
     backendReachable,

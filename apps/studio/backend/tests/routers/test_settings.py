@@ -81,6 +81,7 @@ def test_get_settings_returns_defaults(client: TestClient) -> None:
         "default_skills_directory": str(config.DEFAULT_SKILLS_ROOT),
         "language": "en",
         "remote_model_catalog_enabled": True,
+        "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
 
@@ -91,6 +92,7 @@ def test_put_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
         "default_skills_directory": str(tmp_path / "graph-skills"),
         "language": "en",
         "remote_model_catalog_enabled": False,
+        "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
     put_response = client.put("/api/settings", json=payload)
@@ -114,6 +116,7 @@ def test_put_blank_default_skills_directory_uses_effective_default(client: TestC
             "gitea_host": "",
             "default_skills_directory": "",
             "remote_model_catalog_enabled": True,
+            "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
     get_response = client.get("/api/settings")
@@ -131,6 +134,7 @@ def test_put_validates_strip(client: TestClient) -> None:
             "gitea_host": "",
             "default_skills_directory": "  /tmp/studio-skills  ",
             "remote_model_catalog_enabled": True,
+            "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
     get_response = client.get("/api/settings")
@@ -151,6 +155,7 @@ def test_get_defaults_language_when_omitted(client: TestClient, tmp_path: Path) 
             "gitea_host": "",
             "default_skills_directory": str(tmp_path / "skills"),
             "remote_model_catalog_enabled": True,
+            "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
     get_response = client.get("/api/settings")
@@ -168,6 +173,7 @@ def test_put_language_roundtrips(client: TestClient, tmp_path: Path) -> None:
         "default_skills_directory": str(tmp_path / "skills"),
         "language": "zh-CN",
         "remote_model_catalog_enabled": True,
+        "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
     put_response = client.put("/api/settings", json=payload)
@@ -187,6 +193,7 @@ def test_put_rejects_unsupported_language(client: TestClient, tmp_path: Path) ->
             "default_skills_directory": str(tmp_path / "skills"),
             "language": "fr-FR",
             "remote_model_catalog_enabled": True,
+            "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
 
@@ -204,6 +211,7 @@ def test_put_persists_across_app_restart(
         "default_skills_directory": str(tmp_path / "team-skills"),
         "language": "zh-CN",
         "remote_model_catalog_enabled": False,
+        "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
     first_client = TestClient(create_app())
@@ -296,3 +304,27 @@ def test_put_settings_event_publish_failure_does_not_break_save(
     assert metadata.write_count == 1
     assert metadata.settings == updated
     assert any("publish_settings_changed" in record.getMessage() for record in caplog.records)
+
+
+def test_cli_session_settings_roundtrip(client, tmp_path, monkeypatch):
+    """CLI 会话配置(提案 2026-08-06 PR-3/4):claude/codex 默认 + MoirAI 分角色覆盖,
+    随 app_settings.json 持久化;省缺值为全空(= 跟随 CLI 自身默认)。"""
+    resp = client.get("/api/settings")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cli_sessions"] == {
+        "claude": {"model": "", "effort": ""},
+        "codex": {"model": "", "effort": ""},
+        "agents": {},
+    }
+
+    body["cli_sessions"] = {
+        "claude": {"model": "claude-opus-4-8", "effort": "high"},
+        "codex": {"model": "gpt-5.3-codex-spark", "effort": "low"},
+        "agents": {"clotho": {"model": "claude-haiku-4-5", "effort": ""}},
+    }
+    resp = client.put("/api/settings", json=body)
+    assert resp.status_code == 200
+    resp = client.get("/api/settings")
+    assert resp.json()["cli_sessions"]["claude"]["effort"] == "high"
+    assert resp.json()["cli_sessions"]["agents"]["clotho"]["model"] == "claude-haiku-4-5"

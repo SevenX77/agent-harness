@@ -435,6 +435,21 @@
       "broken": "Broken",
       "outdated": "Outdated",
       "unknown": "Unknown"
+    },
+    "install": "Install / repair",
+    "installStarted": "Installer console opened",
+    "installStartedDetail": "Finish the steps in the console (sign-in included), then click Re-check.",
+    "installFailed": "Could not launch the installer",
+    "sessionConfig": {
+      "title": "Session defaults",
+      "description": "Model and effort injected into new CLI sessions. Empty = follow the CLI's own default.",
+      "modelPlaceholder": "CLI default model",
+      "modelAria": "Default model for {{provider}}",
+      "effortDefault": "Default effort",
+      "effortAria": "Effort for {{provider}}",
+      "agentsHint": "MoirAI worker model overrides (Claude sessions only; empty = provider default):",
+      "agentModelPlaceholder": "Provider default",
+      "agentModelAria": "Model override for {{agent}}"
     }
   },
   "copilot": {

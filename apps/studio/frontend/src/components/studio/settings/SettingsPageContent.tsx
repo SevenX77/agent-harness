@@ -188,6 +188,7 @@ export function SettingsPageContent({
                   <RolesTabSkeleton />
                 ) : (
                   <CopilotTab
+                    cliSettings={{ value: appSettings.cliSessions, onChange: appSettings.setCliSessions }}
                     data={rolesData}
                     credentials={credentials}
                     modelGroups={modelGroups}

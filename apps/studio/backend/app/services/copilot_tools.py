@@ -62,6 +62,85 @@ async def get_llm_roles_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "get_skill_overview",
+    "读取 skill 的结构总览:graph 的 io 字段与默认 llm_role、phase 列表(模式/依赖/"
+    "是否图输出/每 phase 的 io 字段名与类型/validator 有无/llm_role)。会话第一步就该"
+    "用它认识 skill,不要去磁盘上摸文件。只给结构不给正文——看正文用 Read,验证正确性"
+    "用 compile_skill。",
+    {"skill_id": str},
+)
+async def get_skill_overview_tool(args: dict[str, Any]) -> dict[str, Any]:
+    # 与 GET /api/skills/{id} 同一条编译路径(_load_compiled/_graph_topology),不自建
+    # 第二份读取逻辑;但不做 detail 的副作用(git init/工作区 watch/读全部正文)——
+    # 读工具不该有副作用,也不该把正文抬进上下文(D6 有界)。
+    from app.services.skills import _graph_topology, _load_compiled, ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id)
+        compiled = _load_compiled(skill_dir)
+        topology_rows = _graph_topology(compiled, skill_dir)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        # 结构总览不复述完整诊断(诊断 SSOT 归 compile_skill),fail-fast 并指路。
+        return _text_result(
+            f"get_skill_overview 失败: {exc}。该 skill 当前编译不过,用 compile_skill 拿完整诊断。",
+            is_error=True,
+        )
+
+    def io_fields(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
+        properties = (schema or {}).get("properties") or {}
+        required = set((schema or {}).get("required") or [])
+        return [
+            {
+                "name": name,
+                "type": (field or {}).get("type", "unknown") if isinstance(field, dict) else "unknown",
+                "required": name in required,
+            }
+            for name, field in properties.items()
+        ]
+
+    topology_by_id = {str(row.get("id", "")): row for row in topology_rows}
+    manifest = compiled.manifest
+    phases: list[dict[str, Any]] = []
+    for node in compiled.nodes:
+        row = topology_by_id.get(node.phase_name, {})
+        ast = node.ast
+        depends_on_raw = row.get("depends_on")
+        entry: dict[str, Any] = {
+            "id": node.phase_name,
+            "mode": node.mode,
+            "inputs": io_fields(ast.io.inputs),
+            "outputs": io_fields(ast.io.outputs),
+            "validator": bool(getattr(ast, "validator", False)),
+            "llm_role": getattr(ast, "llm_role", None),
+            "depends_on": [str(dep) for dep in depends_on_raw] if isinstance(depends_on_raw, list) else [],
+            "is_graph_output": row.get("output") is True,
+        }
+        if node.mode == "subgraph":
+            entry["subgraph_path"] = str(row.get("path") or "")
+        phases.append(entry)
+
+    return _text_result(
+        {
+            "skill_id": skill_id,
+            "name": manifest.name,
+            "description": manifest.description,
+            "schema_version": manifest.schema_version,
+            "graph_llm_role": manifest.llm_role,
+            "graph_io": {
+                "inputs": io_fields(manifest.io.inputs),
+                "outputs": io_fields(manifest.io.outputs),
+            },
+            "iterate": manifest.iterate.model_dump(mode="json") if manifest.iterate else None,
+            "phase_count": len(phases),
+            "phases": phases,
+        }
+    )
+
+
+@tool(
     "compile_skill",
     "编译指定 skill 并返回结果:成功给编译产物摘要,失败给完整错误列表"
     "([F-v3-*] 错误码 + 文件 + 行号)。改完 skill 文件后必须用它验证,"
@@ -1473,6 +1552,7 @@ def _copilot_mcp_tools() -> list[Any]:
         get_llm_roles_tool,
         search_llm_registry_tool,
         compile_skill_tool,
+        get_skill_overview_tool,
         run_role_test_tool,
         get_skill_output_contract_tool,
         predict_skill_tool,

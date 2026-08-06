@@ -33,6 +33,7 @@ import {
   useAvailableModelPointerDrag,
 } from "../available-model-pointer-drag"
 import { agentStatusForRoute, CopilotModelGroupCard } from "./CopilotModelGroupCard"
+import { CliSection } from "../cli/CliSection"
 import {
   deriveCopilotCandidateGroups,
   hostFromBaseUrl,
@@ -827,6 +828,14 @@ export function CopilotTab({
                 )
               })}
               <AddCopilotModelButton onClick={addDraftCopilotRole} />
+            </CatalogAccordionContent>
+          </CatalogAccordionItem>
+          <CatalogAccordionItem value="cli">
+            <CatalogAccordionTrigger>
+              {t("cli.title")}
+            </CatalogAccordionTrigger>
+            <CatalogAccordionContent className="space-y-4 pb-5">
+              <CliSection />
             </CatalogAccordionContent>
           </CatalogAccordionItem>
         </CatalogAccordion>

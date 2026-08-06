@@ -233,8 +233,9 @@
 - **eligible 判据 = 后端投影的 `copilot_sdk_compatible`**。前端不看 protocol、不维护 method 白名单；Studio 后端从 gateway 的 `call_methods.json` 读取 method 对 `anthropic_messages_client` 的兼容性：已知支持(anthropic / deepseek / ark / openrouter 的 Anthropic Messages method)放行，已知 OpenAI/Gemini/普通 chat method 不兼容则过滤，未知 method 保留可测，再叠加 tool loop capability 的显式不支持证据。它**取代前端 `isClaudeAgentSdkCompatibleRoute` 名字启发式**。
 - **未测试也显示、不预过滤**〔#3〕：PM 原话"你没测试的时候不知道，所以还是会显示在 available models 里面（just keep them in there）"。即 SDK 工具调用能力**未测时未知**，不能据此把 route 滤掉 —— 与 §2「untested/failed 不滤」同一原则；真 SDK 测试（§3.4）才确证。
 - **内置角色 = 动态浮出**〔#2〕：**不写死 2 个**，而是**默认只浮出 Claude 和 DeepSeek 在 available models 里最新最好的模型**，按 family 偏好阶梯择优：
+  - **copilot 默认模型 = DeepSeek V4 Flash（PM 裁决 2026-08-06）**：available 里有 `deepseek-v4-flash` → 它浮出且**排位第一**（composer role picker 的初始角色 = 排位第一的浮出组），取代 2026-07-02 的「默认 opus4.8」。
   - Claude：优先 **opus 4.8**，没有则退 **opus 4.7**（再往后退更旧）。
-  - DeepSeek：优先 **V4 Pro**，没有则退 **V3.2 Pro**。
+  - DeepSeek 候选梯队：优先 **V4 Pro**，没有则退 **V3.2 Pro**（V4 Flash 的默认位在上一条，独立于本梯队）。
   - 都没有 → 不浮出默认，用户自建。现码硬编码映射 `copilot_opus_4_7`↔`claude-opus-4.7`（`CopilotTab.tsx:132-133`）需改为此动态择优。
 - **本质（2026-06-18 PM 澄清）：copilot 的"内置角色"= 自动选了一个 canonical model-group**（如名为 `opus4.7` 的组），**复用 model-group 现成的 canonical_id 归一化**（各 provider 五花八门的 opus4.7 model name 归一成同一个标准 name —— 这套 §2.1「相同模型合并 / singleton 按 canonical_id 键」已经有）。所以**「内置 vs 第三方」不需要新的后端 role 元数据契约**：内置 = 自动选了 canonical 组、third-party = 用户自建组；前端**不要靠硬编码 model-id 白名单 + `includes('Claude')` 套模板判定**（现码 #55 的脆做法），而是看这个 copilot role 选的是不是系统按阶梯自动浮出的 canonical 组。
 
@@ -266,7 +267,7 @@
 - **真 SDK 测试**：Test 走 `ClaudeSDKClient`（非 `AsyncAnthropic`）—— 验 spawn/env 注入/tool loop 真跑通（测试通 ⟺ 运行通，消灭假测试）。
 - **copilot_ 前缀**：新建 + 选组后 role key **仍带 `copilot_`** → 后端 `_is_copilot_role` 归 copilot、不错存 graph-agent。
 - **未测也显示**：未测 route（SDK 能力未知）**仍在** copilot 可用模型（不预过滤）；测试才确证。
-- **默认浮出阶梯**：available 里有 opus 4.8 → 浮出 4.8；只有 4.7 → 浮出 4.7；deepseek 同理 V4 Pro→V3.2 Pro。
+- **默认浮出阶梯**：`deepseek-v4-flash` 在 available 里 → 浮出且排第一（copilot 默认模型，PM 裁决 2026-08-06）；Claude 有 opus 4.8 → 浮出 4.8，只有 4.7 → 浮出 4.7；DeepSeek 候选梯队 V4 Pro→V3.2 Pro。
 - **fallback**：多 route 按顺序尝试（非只首条）。
 - **保存反馈**：改完显保存中/已保存；失败显式告警不静默。
 - **去 mock**：无真数据时空态/骨架屏（非 mock 种子）。

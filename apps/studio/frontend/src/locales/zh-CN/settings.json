@@ -413,6 +413,30 @@
       }
     }
   },
+  "cli": {
+    "title": "CLI",
+    "description": "Open in CLI 在本机所需的全部依赖:运行链与登录状态。",
+    "reprobe": "重新检测",
+    "probing": "正在检测依赖…",
+    "desktopOnly": "CLI 状态仅在桌面应用中可用。",
+    "deps": {
+      "wsl": "WSL",
+      "shell": "Shell",
+      "ah": "ah",
+      "tmux": "tmux",
+      "claude": "Claude CLI",
+      "codex": "Codex CLI",
+      "claude_auth": "Claude 登录",
+      "codex_auth": "Codex 登录"
+    },
+    "states": {
+      "ok": "就绪",
+      "missing": "未安装",
+      "broken": "损坏",
+      "outdated": "版本过旧",
+      "unknown": "未知"
+    }
+  },
   "copilot": {
     "title": "Copilot",
     "description": "使用与 LLM Roles 相同的模型组 fallback 模式配置 copilot 角色。",

@@ -171,6 +171,28 @@ export async function openCodexCli(
   })
 }
 
+export interface CliDependencyRow {
+  id: string
+  state: 'ok' | 'missing' | 'broken' | 'outdated' | 'unknown'
+  version: string | null
+  detail: string | null
+}
+
+/** Settings →「CLI」区的依赖链探测(提案 2026-08-06 §2;owner = Tauri,分 OS)。
+ *  非桌面环境返回 null——组件据此显示 desktop-only 空态,不渲染假数据。 */
+export async function cliDependencyStatus(): Promise<CliDependencyRow[] | null> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    return null
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return await invoke<CliDependencyRow[]>('cli_dependency_status')
+  } catch (error) {
+    console.warn('cli_dependency_status failed:', error)
+    return null
+  }
+}
+
 /** 这个工作区上次用哪个 CLI 打开(决议 2026-08-06 D-G1;owner = Tauri 层的启动记录)。
  *  读不到(非桌面环境 / 无记录 / 记录损坏)一律返回 null——Resume 菜单随之隐藏,安全降级。 */
 export async function lastOpenedCodeAssistant(

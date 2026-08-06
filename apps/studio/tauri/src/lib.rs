@@ -166,6 +166,143 @@ fn check_ah_version_cached() -> Result<(), String> {
     }).clone()
 }
 
+/// Settings → Copilot →「CLI」区的一行依赖状态(决议 2026-08-06,提案 §2)。
+/// 探测是桌面本机事实,owner = Tauri;backend 不参与。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CliDependencyStatus {
+    id: String,
+    state: String,
+    version: Option<String>,
+    detail: Option<String>,
+}
+
+impl CliDependencyStatus {
+    fn new(id: &str, state: &str, version: Option<String>, detail: Option<String>) -> Self {
+        Self { id: id.to_string(), state: state.to_string(), version, detail }
+    }
+}
+
+/// 依赖探测脚本:一次 shell 调用打完 tmux/claude/codex/两个登录态,每行
+/// `id<TAB>state<TAB>version<TAB>detail`。Windows 下经 wsl 跑,macOS/Linux 直接跑
+/// (分 OS 的差异只在入口 shell,脚本本体同一份)。/mnt 检测沿用 launcher 的
+/// Windows-binary 陷阱判据;登录态只读存在性/有效期,不碰凭据内容。
+const CLI_DEPENDENCY_PROBE_SCRIPT: &str = r#"host_home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6); [ -n "$host_home" ] || host_home="$HOME"
+if v=$(tmux -V 2>/dev/null); then printf 'tmux\tok\t%s\t\n' "$v"; else printf 'tmux\tmissing\t\t\n'; fi
+probe_cli() {
+  name="$1"; fallback="$2"
+  real=$(command -v "$name" 2>/dev/null || true)
+  [ -z "$real" ] && [ -x "$fallback" ] && real="$fallback"
+  if [ -z "$real" ]; then printf '%s\tmissing\t\t\n' "$name"; return; fi
+  target=$(readlink -f "$real" 2>/dev/null || printf '%s' "$real")
+  case "$target" in
+    /mnt/*) printf '%s\tbroken\t\tWindows binary on PATH (%s)\n' "$name" "$target" ;;
+    *) v=$("$real" --version 2>/dev/null | head -1); printf '%s\tok\t%s\t\n' "$name" "$v" ;;
+  esac
+}
+probe_cli claude "$host_home/.local/bin/claude"
+probe_cli codex "$host_home/.codex/packages/standalone/current/bin/codex"
+cred="$host_home/.claude/.credentials.json"
+if [ -s "$cred" ] && grep -q '"accessToken"' "$cred" 2>/dev/null; then
+  exp=$(grep -o '"expiresAt":[0-9]*' "$cred" | head -1 | cut -d: -f2)
+  now_ms=$(( $(date +%s) * 1000 ))
+  if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\n'
+  else printf 'claude_auth\tbroken\t\ttoken expired\n'; fi
+else printf 'claude_auth\tmissing\t\t\n'; fi
+if [ -s "$host_home/.codex/auth.json" ]; then printf 'codex_auth\tok\t\t\n'; else printf 'codex_auth\tmissing\t\t\n'; fi"#;
+
+fn parse_cli_dependency_lines(raw: &str) -> Vec<CliDependencyStatus> {
+    raw.lines()
+        .filter_map(|line| {
+            let mut cols = line.split('\t');
+            let id = cols.next()?.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let state = cols.next().unwrap_or("").trim();
+            if state.is_empty() {
+                return None;
+            }
+            let version = cols.next().unwrap_or("").trim();
+            let detail = cols.next().unwrap_or("").trim();
+            Some(CliDependencyStatus::new(
+                id,
+                state,
+                (!version.is_empty()).then(|| version.to_string()),
+                (!detail.is_empty()).then(|| detail.to_string()),
+            ))
+        })
+        .collect()
+}
+
+/// ah 行独立于探测脚本:版本门禁逻辑已有唯一定义(run_ah_version + ah_version_gate),
+/// 不在 shell 里再抄一份。
+fn ah_dependency_status() -> CliDependencyStatus {
+    match run_ah_version() {
+        Ok(output) => {
+            let version = output.trim().to_string();
+            match ah_version_gate(&output) {
+                Ok(()) => CliDependencyStatus::new("ah", "ok", Some(version), None),
+                Err(_) => CliDependencyStatus::new(
+                    "ah",
+                    "outdated",
+                    Some(version),
+                    Some(format!("Studio requires ah >= {AH_VERSION_MIN}")),
+                ),
+            }
+        }
+        Err(error) => CliDependencyStatus::new("ah", "missing", None, Some(error)),
+    }
+}
+
+fn run_cli_dependency_probe() -> Result<String, String> {
+    let output = if cfg!(target_os = "windows") {
+        let mut command = Command::new("wsl.exe");
+        command.args(["-e", "bash", "-c", CLI_DEPENDENCY_PROBE_SCRIPT]);
+        command.output().map_err(|error| format!("failed to execute wsl.exe: {error}"))?
+    } else {
+        let mut command = Command::new("bash");
+        command.args(["-c", CLI_DEPENDENCY_PROBE_SCRIPT]);
+        command.output().map_err(|error| format!("failed to execute bash: {error}"))?
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "dependency probe exited with {:?}: {}",
+            output.status.code(),
+            stderr.trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[tauri::command]
+fn cli_dependency_status() -> Vec<CliDependencyStatus> {
+    let mut rows: Vec<CliDependencyStatus> = Vec::new();
+    match run_cli_dependency_probe() {
+        Ok(raw) => {
+            if cfg!(target_os = "windows") {
+                rows.push(CliDependencyStatus::new("wsl", "ok", None, None));
+            }
+            rows.push(ah_dependency_status());
+            rows.extend(parse_cli_dependency_lines(&raw));
+        }
+        Err(error) => {
+            // Windows 下探测入口就是 wsl:入口失败 = WSL 不可用,链上其余项无从谈起,
+            // 如实标 unknown 而不是猜 missing。
+            if cfg!(target_os = "windows") {
+                rows.push(CliDependencyStatus::new("wsl", "broken", None, Some(error)));
+            } else {
+                rows.push(CliDependencyStatus::new("shell", "broken", None, Some(error)));
+            }
+            for id in ["ah", "tmux", "claude", "codex", "claude_auth", "codex_auth"] {
+                rows.push(CliDependencyStatus::new(id, "unknown", None, None));
+            }
+        }
+    }
+    rows
+}
+
 struct SidecarAppState {
     manager: Mutex<Option<sidecar::SidecarManager>>,
     startup_error: Mutex<Option<String>>,
@@ -3228,6 +3365,7 @@ pub fn run() {
             open_claude_code,
             open_codex_cli,
             last_opened_code_assistant,
+            cli_dependency_status,
             attach_code_assistant,
             cli_terminal_write,
             cli_terminal_resize,
@@ -4430,6 +4568,58 @@ mod tests {
                 "已有段的超时补丁路径必须保留: {cmd}"
             );
         }
+    }
+
+    /// 提案 §2 —— 探测输出解析:合法行进表、残行丢弃、空 version/detail 归 None。
+    #[test]
+    fn test_parse_cli_dependency_lines() {
+        let raw = "tmux\tok\ttmux 3.4\t\nclaude\tbroken\t\tWindows binary on PATH (/mnt/c/x)\n\nbad-line\nclaude_auth\tmissing\t\t\n";
+        let rows = parse_cli_dependency_lines(raw);
+        assert_eq!(rows.len(), 3, "残行与空行必须丢弃: {rows:?}");
+        assert_eq!(rows[0], CliDependencyStatus::new("tmux", "ok", Some("tmux 3.4".into()), None));
+        assert_eq!(
+            rows[1],
+            CliDependencyStatus::new(
+                "claude",
+                "broken",
+                None,
+                Some("Windows binary on PATH (/mnt/c/x)".into())
+            )
+        );
+        assert_eq!(rows[2], CliDependencyStatus::new("claude_auth", "missing", None, None));
+    }
+
+    /// 探测脚本必须覆盖提案 §2 的整条链(tmux/claude/codex/两个登录态),且 /mnt
+    /// Windows-binary 陷阱与 launcher 同判据、凭据只 grep 存在性不打印内容。
+    #[test]
+    fn test_cli_probe_script_covers_the_dependency_chain() {
+        for needle in [
+            "tmux -V",
+            "probe_cli claude",
+            "probe_cli codex",
+            "/mnt/*",
+            ".claude/.credentials.json",
+            ".codex/auth.json",
+            "expiresAt",
+        ] {
+            assert!(
+                CLI_DEPENDENCY_PROBE_SCRIPT.contains(needle),
+                "探测脚本缺少 {needle}"
+            );
+        }
+        assert!(
+            !CLI_DEPENDENCY_PROBE_SCRIPT.contains("cat \"$cred\""),
+            "凭据文件只判存在性/有效期,不得整读打印"
+        );
+    }
+
+    #[test]
+    fn invoke_handler_registers_cli_dependency_status_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("cli_dependency_status,"),
+            "cli_dependency_status must be registered in the Tauri invoke handler"
+        );
     }
 
     /// D-G3 —— codex 的恢复与 claude 同构:先查 host 侧 sessions 里有没有本 cwd 的

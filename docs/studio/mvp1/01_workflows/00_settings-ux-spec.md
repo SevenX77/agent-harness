@@ -293,6 +293,31 @@
 
 ---
 
+### 3.9 Copilot 页「CLI」区（PM 需求 2026-08-06,提案获批 2026-08-06）
+
+> 需求原话:「加一个与Claude sdk平行的设置,cli的设置,把在copilot里面使用open in cli
+> 所需要的所有的包安装、登录鉴权等状态和一键安装功能都做上去,还得分不同操作系统。
+> 再加上一些配置选项,比如使用的默认模型,effort等配置,Moirai的不同角色的不同配置」。
+> 完整设计:`docs/design/2026-08-06-cli-settings-section-proposal.md`(已批,四期交付)。
+
+- **形态**:Copilot 页内与「Claude Agent SDK」并列的 CatalogAccordion section「CLI」。
+- **依赖与鉴权状态(PR-1)**:Tauri 命令 `cli_dependency_status()` 一次探测整条链——
+  Windows:WSL → ah(复用 `run_ah_version`+`ah_version_gate` 唯一定义)→ tmux →
+  claude CLI(/mnt Windows-binary 陷阱同 launcher 判据)→ codex CLI → 两个登录态
+  (claude `.credentials.json` 存在+expiresAt 未过期、codex `auth.json` 存在;只读
+  存在性/有效期,不读凭据内容);macOS/Linux 去掉 WSL 层同脚本直跑。状态词汇:
+  ok/missing/broken/outdated/unknown,颜色沿用 route 灯 token(success/warning/
+  destructive/muted)。进区冷加载一次 + 显式「重新检测」;探测失败入口层如实标
+  broken,链上其余项标 unknown 不猜。
+- **一键安装(PR-2,待实施)**:missing/outdated 行旁安装钮,流式输出,完成自动重探;
+  WSL 本体只给引导不给按钮(需管理员+重启)。
+- **会话配置(PR-3/PR-4,待实施)**:truth 在 backend settings,前端随 open invoke
+  传给 Tauri 注入启动命令——claude `--model`/`--effort`(CLI 原生旗标,2026-08-06
+  实测在案),codex `-m`/`-c model_reasoning_effort=`;MoirAI 四角色
+  (moirai/clotho/lachesis/atropos)可逐角色覆盖,落 ah.toml `[agents.*]`。
+- **边界**:绝不代填凭据;凭据共享唯一通道仍是 ah `shared_credentials_dir`;
+  MoirAI 角色的 prompt/技能不在本区(归 `.ah/` 与 agent-skill-map)。
+
 ## 4. 三条横切机制（贯穿三页）
 
 ### 4.1 Probe Knowledge Catalog 赋能 / 写回

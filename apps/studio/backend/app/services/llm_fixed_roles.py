@@ -8,10 +8,10 @@ are runtime config in ``app/data/llm_fixed_roles.json``.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Literal
 
 from app.core.adapters.engine import required_builtin_roles as _engine_required_builtin_roles

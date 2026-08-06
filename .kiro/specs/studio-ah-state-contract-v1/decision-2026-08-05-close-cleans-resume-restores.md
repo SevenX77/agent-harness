@@ -110,3 +110,44 @@ $HOME/.claude/projects  →  $STUDIO_AH_HOST_HOME/.claude/projects
 
 不改 ah；不动 codex；不动退出清扫（裁决 R1 已确认现状）；不做"对话列表/多条恢复"
 （`--resume <id>` 选单是后续需求，本决议只做"回到最近一次"）。
+
+---
+
+## 修订（2026-08-06）：Resume 指向上次打开的 CLI，codex 纳入范围
+
+用户裁决（原话）：「resume功能不要resume Claude code，应该是上次用什么打开的，
+resume就用这个cli打开」。本节推翻 D-F3 的「仅 claude」范围限定。
+
+### D-G1：「上次用什么打开」的唯一 owner = Tauri 层
+
+- Tauri 是唯一的 CLI launcher，启动事实归它记：`open_code_assistant_command` 成功后
+  把 `{工作区路径 → provider slug}` 写进 Studio 配置目录的
+  `code_assistant_last_opened.json`；新增查询命令 `last_opened_code_assistant`。
+- 记录写失败只降级 Resume 菜单准确性，不拦已成功的打开（warn 日志）。
+
+### D-G2：Resume 菜单动态指向
+
+- Open 下拉的 Resume 项按记录显示 `Resume Claude code` / `Resume Codex`；
+  无记录（含读取失败）→ 不渲染 Resume 项（隐藏是安全降级，不给置灰假按钮）。
+- 点击走与 Open 完全相同的决策/清理/启动流程，resume 语义传给对应 provider。
+
+### D-G3：codex 恢复机制（机制证据）
+
+- `codex resume` **默认按 cwd 过滤会话**（`--all` 才解除并显示 CWD 列），
+  `--last` 即「本工作区最近一条」——证据：codex-cli 0.142.5 `resume --help`。
+  bypass 两旗标在 resume 子命令上同样可用（`--help` 各命中 1 次）。
+- codex 会话落 `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`。ah 关会话删 sandbox
+  home，故 codex master cmd 两种模式都把 `$HOME/.codex/sessions` 软链回 host home
+  （与 claude projects 软链同构：先 rmdir 让位、非空安全降级）。
+- resume 尾巴先 grep host 侧 sessions 树里本 cwd（`"cwd":"$PWD"`）的记录：有 →
+  `exec codex … resume --last`；没有 → 打说明回落全新启动（与 claude 同构的诚实降级）。
+
+### 验收判据（增补）
+
+| # | 判据 | 验证方式 |
+|---|---|---|
+| G-1 | last-opened 记录：写→读→覆盖→未知工作区 None | Rust 单测 |
+| G-2 | codex 两种模式都含 sessions 软链（rmdir 先行） | Rust 单测 |
+| G-3 | codex resume cmd：cwd 预判 → `resume --last` → 回落说明 → 带 prompt 的 exec，次序锁定 | Rust 单测 |
+| G-4 | 前端：上次 codex → 菜单 "Resume Codex" 且以 resume 语义调 openCodexCli；无记录 → 无 Resume 项 | 前端单测 |
+| G-5 | 真机：claude 开→关→Resume 续上（F-6 已验）；codex 开→说一句→关→Resume 续上 | 操作者实测 |

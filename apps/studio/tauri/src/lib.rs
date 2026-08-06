@@ -500,7 +500,7 @@ impl CodeAssistant {
     fn master_cmd(self, skill: Option<&SessionSkillContext>, mode: MasterLaunchMode) -> String {
         match self {
             Self::Claude => claude_master_cmd(skill, mode),
-            Self::Codex => codex_master_cmd(skill),
+            Self::Codex => codex_master_cmd(skill, mode),
         }
     }
 
@@ -530,10 +530,11 @@ impl AhLifecycleSnapshot {
     }
 }
 
-/// master 会话的启动语义（决议 2026-08-05 D-F2）。`Fresh` 带初始 prompt 全新开始;
-/// `ResumeLastConversation` 用 claude 自己的 `--continue` 续上该工作区最近一次对话——
-/// skill 绑定上下文已在历史里,不重发。仅 claude 支持;codex 的恢复机制不同,
-/// 其命令边界不暴露该选项（类型层面不可表达）。
+/// master 会话的启动语义（决议 2026-08-05 D-F2;2026-08-06 D-G 扩展到 codex）。
+/// `Fresh` 带初始 prompt 全新开始;`ResumeLastConversation` 续上该工作区最近一次对话——
+/// claude 走 `--continue`,codex 走 `resume --last`(codex 自带按 cwd 过滤会话,`--all`
+/// 才解除过滤,所以 `--last` 天然就是「本工作区最近一条」)。skill 绑定上下文已在
+/// 历史里,不重发。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MasterLaunchMode {
     Fresh,
@@ -934,10 +935,32 @@ fn claude_master_cmd(skill: Option<&SessionSkillContext>, mode: MasterLaunchMode
 /// - `$HOME/.codex/AGENTS.md` for the MoirAI master instructions.
 /// - `$HOME/.agents/skills` for Studio-managed skills, matching Codex's
 ///   documented local skill discovery path.
-fn codex_master_cmd(skill: Option<&SessionSkillContext>) -> String {
+/// - `$HOME/.codex/sessions` is a symlink into the host home（决议 2026-08-06 D-G3）:
+///   ah 关会话时整个 sandbox home 会被删,不软链的话对话历史一起陪葬,resume 永远
+///   无货可续。与 claude 的 projects 软链同构:预建目录先 rmdir(空则让位、非空则
+///   安全降级),再 ln -sfn。
+fn codex_master_cmd(skill: Option<&SessionSkillContext>, mode: MasterLaunchMode) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
+    // 恢复模式先在 host 侧的 sessions 树里找本工作区(cwd)的会话记录:有 → 交给
+    // codex 自己的 `resume --last`(它默认按 cwd 过滤,--last 即本工作区最近一条);
+    // 没有 → 打一行说明回落到全新启动——空恢复会让 master 秒死拖垮 ah 会话,回落
+    // 是唯一不把用户扔在错误屏上的行为,且不是静默偷换。
+    let exec_tail = match mode {
+        MasterLaunchMode::Fresh => format!(
+            "exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+        ),
+        MasterLaunchMode::ResumeLastConversation => format!(
+            concat!(
+                "if [ -n \"$(grep -rls -- \"\\\"cwd\\\":\\\"$PWD\\\"\" \"$HOME/.codex/sessions\" 2>/dev/null | head -1)\" ]; ",
+                "then exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust resume --last; fi; ",
+                "printf '%s\n' 'No previous conversation for this workspace; starting fresh.'; ",
+                "exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+            ),
+            prompt = prompt
+        ),
+    };
     let script = format!(
-        "set -e; export SYSTEMD_LOG_LEVEL=err; host_home=$(getent passwd \"$(id -un)\" 2>/dev/null | cut -d: -f6); codex_real=; if [ -n \"$host_home\" ] && [ -x \"$host_home/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$host_home/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"$host_home\" ] && [ -x \"$host_home/.local/bin/codex\" ]; then codex_real=\"$host_home/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
+        "set -e; export SYSTEMD_LOG_LEVEL=err; host_home=$(getent passwd \"$(id -un)\" 2>/dev/null | cut -d: -f6); codex_real=; if [ -n \"$host_home\" ] && [ -x \"$host_home/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$host_home/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"$host_home\" ] && [ -x \"$host_home/.local/bin/codex\" ]; then codex_real=\"$host_home/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; if [ -n \"$host_home\" ] && [ \"$host_home\" != \"$HOME\" ]; then mkdir -p \"$host_home/.codex/sessions\"; rmdir \"$HOME/.codex/sessions\" 2>/dev/null; if [ ! -e \"$HOME/.codex/sessions\" ] || [ -L \"$HOME/.codex/sessions\" ]; then ln -sfn \"$host_home/.codex/sessions\" \"$HOME/.codex/sessions\"; fi; fi; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; {exec_tail}"
     );
     format!("bash -c {}", sh_single_quote_str(&script))
 }
@@ -2729,6 +2752,37 @@ fn attach_code_assistant_terminal(
 
 /// Both Open-in-CLI commands differ only in which assistant they start; the
 /// registration + status-stream tail is identical, so it lives here once.
+/// 「这个工作区上次用哪个 CLI 打开」的唯一 owner = Tauri 层(它是唯一的 CLI
+/// launcher,决议 2026-08-06 D-G1)。落在 Studio 配置目录一个 json 里,键 = 工作区
+/// 路径、值 = provider slug;Resume 菜单据此显示「Resume Claude code / Resume Codex」。
+const CODE_ASSISTANT_LAST_OPENED_FILE: &str = "code_assistant_last_opened.json";
+
+fn load_code_assistant_last_opened(config_dir: &Path) -> BTreeMap<String, String> {
+    let path = config_dir.join(CODE_ASSISTANT_LAST_OPENED_FILE);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return BTreeMap::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn record_code_assistant_last_opened(
+    config_dir: &Path,
+    workspace_root: &Path,
+    assistant: CodeAssistant,
+) -> Result<(), String> {
+    let mut map = load_code_assistant_last_opened(config_dir);
+    map.insert(workspace_root.display().to_string(), assistant.slug().to_string());
+    std::fs::create_dir_all(config_dir)
+        .map_err(|error| format!("failed to create config dir: {error}"))?;
+    let body = serde_json::to_string_pretty(&map).expect("string map is serializable");
+    std::fs::write(config_dir.join(CODE_ASSISTANT_LAST_OPENED_FILE), body)
+        .map_err(|error| format!("failed to write last-opened record: {error}"))
+}
+
+fn code_assistant_last_opened_in(config_dir: &Path, workspace_root: &Path) -> Option<String> {
+    load_code_assistant_last_opened(config_dir).remove(&workspace_root.display().to_string())
+}
+
 fn open_code_assistant_command(
     app: tauri::AppHandle,
     workspace_root: String,
@@ -2766,6 +2820,12 @@ fn open_code_assistant_command(
     );
     ensure_code_assistant_status_streams_for_workspace(&app, &state, &workspace_root)?;
     emit_code_assistant_status_for_workspace(&app, &state, &workspace_root);
+    // 记录失败只降级 Resume 菜单的准确性,不该拦下已经成功的打开——警告即可。
+    if let Err(error) =
+        record_code_assistant_last_opened(&resolve_config_dir(), &workspace_root, assistant)
+    {
+        log::warn!("failed to record last-opened code assistant: {error}");
+    }
     Ok(opened.session_id)
 }
 
@@ -2806,19 +2866,31 @@ fn open_codex_cli(
     terminals: tauri::State<'_, cli_terminal::CliTerminalState>,
     cols: Option<u16>,
     rows: Option<u16>,
+    resume: Option<bool>,
     on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
 ) -> Result<String, String> {
+    let mode = if resume.unwrap_or(false) {
+        MasterLaunchMode::ResumeLastConversation
+    } else {
+        MasterLaunchMode::Fresh
+    };
     open_code_assistant_command(
         app,
         workspace_root,
         state,
         terminals,
         CodeAssistant::Codex,
-        MasterLaunchMode::Fresh,
+        mode,
         cols,
         rows,
         on_event,
     )
+}
+
+#[tauri::command]
+fn last_opened_code_assistant(workspace_root: String) -> Result<Option<String>, String> {
+    let workspace_root = existing_directory(&workspace_root)?;
+    Ok(code_assistant_last_opened_in(&resolve_config_dir(), &workspace_root))
 }
 
 #[tauri::command]
@@ -3155,6 +3227,7 @@ pub fn run() {
             open_path,
             open_claude_code,
             open_codex_cli,
+            last_opened_code_assistant,
             attach_code_assistant,
             cli_terminal_write,
             cli_terminal_resize,
@@ -3997,7 +4070,7 @@ mod tests {
         );
         assert!(env_block.contains("STUDIO_API_TOKEN = \"tok-abc\""), "{env_block}");
 
-        for cmd in [claude_master_cmd(None, MasterLaunchMode::Fresh), codex_master_cmd(None)] {
+        for cmd in [claude_master_cmd(None, MasterLaunchMode::Fresh), codex_master_cmd(None, MasterLaunchMode::Fresh)] {
             assert!(
                 !cmd.contains("tok-abc"),
                 "the bearer token must never reach the command line — `ps` shows it to                  every process on the machine: {cmd}"
@@ -4048,7 +4121,7 @@ mod tests {
     fn codex_master_cmd_registers_studio_mcp_streamable_http() {
         // codex 0.142.5 speaks streamable HTTP natively (--url +
         // --bearer-token-env-var), so no stdio bridge is needed.
-        let cmd = codex_master_cmd(None);
+        let cmd = codex_master_cmd(None, MasterLaunchMode::Fresh);
 
         assert!(cmd.contains("[mcp_servers.studio]"));
         assert!(cmd.contains("bearer_token_env_var = \"STUDIO_API_TOKEN\""));
@@ -4226,7 +4299,7 @@ mod tests {
 
     #[test]
     fn codex_master_cmd_rejects_interop_binaries_and_prefers_standalone() {
-        let cmd = codex_master_cmd(None);
+        let cmd = codex_master_cmd(None, MasterLaunchMode::Fresh);
         let standalone = "$host_home/.codex/packages/standalone/current/bin/codex";
         let standalone_index = cmd
             .find(standalone)
@@ -4334,6 +4407,89 @@ mod tests {
         assert!(
             continue_at < fallback_at && fallback_at < prompt_at,
             "次序必须是: 续话 exec → 回落说明 → 带 prompt 的 exec: {resume}"
+        );
+    }
+
+    /// D-G3 —— codex 的恢复与 claude 同构:先查 host 侧 sessions 里有没有本 cwd 的
+    /// 会话记录,有 → `resume --last`(codex 自带 cwd 过滤),没有 → 诚实说明后回落全新。
+    #[test]
+    fn test_codex_resume_continues_when_possible_and_falls_back_honestly() {
+        let context = SessionSkillContext {
+            skill_id: "exp-a-round3".to_string(),
+            workspace_root: r"D:\coding\skills\exp-a-round3".to_string(),
+        };
+        let fresh = codex_master_cmd(Some(&context), MasterLaunchMode::Fresh);
+        let resume = codex_master_cmd(Some(&context), MasterLaunchMode::ResumeLastConversation);
+
+        assert!(!fresh.contains("resume --last"), "全新启动不得携带续话子命令: {fresh}");
+        assert!(fresh.contains("exp-a-round3"), "全新启动带 skill 绑定 prompt");
+
+        let resume_at = resume.find("resume --last").expect("恢复模式必须走 resume --last");
+        let fallback_at = resume
+            .find("No previous conversation")
+            .expect("恢复模式必须有诚实的回落说明");
+        let prompt_at = resume.find("exp-a-round3").expect("回落分支仍带 skill 绑定 prompt");
+        assert!(
+            resume_at < fallback_at && fallback_at < prompt_at,
+            "次序必须是: 续话 exec → 回落说明 → 带 prompt 的 exec: {resume}"
+        );
+        assert!(
+            resume.contains("cwd") && resume.contains(".codex/sessions"),
+            "恢复预判必须查 host 侧 sessions 树里本 cwd 的记录: {resume}"
+        );
+    }
+
+    /// D-G3 —— codex 两种模式都要把 sessions 软链回 host home,否则 ah 关会话删
+    /// sandbox home 时对话历史陪葬,resume 永远无货可续。rmdir 让位与安全降级的
+    /// 语义与 claude projects 软链一致。
+    #[test]
+    fn test_both_codex_launch_modes_link_sessions_into_the_host_home() {
+        for mode in [MasterLaunchMode::Fresh, MasterLaunchMode::ResumeLastConversation] {
+            let cmd = codex_master_cmd(None, mode);
+            let link_at = cmd
+                .find(r#"ln -sfn "$host_home/.codex/sessions" "$HOME/.codex/sessions""#)
+                .expect("sessions 必须软链回 host home");
+            let rmdir_at = cmd
+                .find(r#"rmdir "$HOME/.codex/sessions""#)
+                .expect("预建目录必须先 rmdir 让位(空则让位、非空则安全降级)");
+            assert!(rmdir_at < link_at, "必须先 rmdir 再 ln -sfn: {cmd}");
+        }
+    }
+
+    /// D-G1 —— 「上次用哪个 CLI」的记录:写入 → 读回 → 覆盖 → 未知工作区为 None。
+    #[test]
+    fn test_last_opened_code_assistant_roundtrip() {
+        let dir = std::env::temp_dir().join(format!(
+            "studio-last-opened-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let workspace = Path::new(r"D:\coding\skills\exp-a-round3");
+        let other = Path::new(r"D:\coding\skills\other");
+
+        assert_eq!(code_assistant_last_opened_in(&dir, workspace), None);
+        record_code_assistant_last_opened(&dir, workspace, CodeAssistant::Claude)
+            .expect("record claude");
+        assert_eq!(
+            code_assistant_last_opened_in(&dir, workspace),
+            Some("claude".to_string())
+        );
+        record_code_assistant_last_opened(&dir, workspace, CodeAssistant::Codex)
+            .expect("record codex overwrites");
+        assert_eq!(
+            code_assistant_last_opened_in(&dir, workspace),
+            Some("codex".to_string())
+        );
+        assert_eq!(code_assistant_last_opened_in(&dir, other), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn invoke_handler_registers_last_opened_code_assistant_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("last_opened_code_assistant,"),
+            "last_opened_code_assistant must be registered in the Tauri invoke handler"
         );
     }
 

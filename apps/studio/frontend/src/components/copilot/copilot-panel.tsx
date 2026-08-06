@@ -13,6 +13,7 @@ import type { CopilotMessage } from '../../types/copilot'
 import {
   closeCodeAssistant,
   ensureCodeAssistantStatusEvents,
+  lastOpenedCodeAssistant,
   subscribeCodeAssistantStatus,
   unobservedCodeAssistantStatus,
   type AssistantState,
@@ -471,6 +472,9 @@ export function CopilotPanel({
   const [draftJudgeContext, setDraftJudgeContext] = useState<CopilotJudgeContext | null>(null)
   const [closingCodeAssistant, setClosingCodeAssistant] = useState(false)
   const [codeAssistantStatus, setCodeAssistantStatus] = useState<CodeAssistantStatus>(unobservedCodeAssistantStatus())
+  // Resume 菜单的指向 = 这个工作区上次用哪个 CLI 打开(决议 2026-08-06 D-G2)。
+  // owner 是 Tauri 层的启动记录;这里按工作区冷加载一次,本窗口成功 Open 后刷新。
+  const [lastOpenedAssistant, setLastOpenedAssistant] = useState<CodeAssistantId | null>(null)
   const shouldLoadTemplates = !skillId && copilot.messages.length === 0
   const { templates, templatesLoading } = useTemplates({ enabled: shouldLoadTemplates })
   const inEvalView = view === 'eval'
@@ -479,6 +483,22 @@ export function CopilotPanel({
     [rolesData, registry],
   )
   const codeAssistantWorkspace = workspaceRoot?.trim() || null
+
+  useEffect(() => {
+    let cancelled = false
+    if (!codeAssistantWorkspace) {
+      setLastOpenedAssistant(null)
+      return () => {
+        cancelled = true
+      }
+    }
+    void lastOpenedCodeAssistant(codeAssistantWorkspace).then((assistant) => {
+      if (!cancelled) setLastOpenedAssistant(assistant)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [codeAssistantWorkspace])
 
   async function askCopilotJudge() {
     if (!skillId || !judgeRefs) {
@@ -677,7 +697,10 @@ export function CopilotPanel({
       },
     })
     onCliSessionChange?.(session)
-    if (session) await refreshCodeAssistantStatus()
+    if (session) {
+      await refreshCodeAssistantStatus()
+      setLastOpenedAssistant(await lastOpenedCodeAssistant(codeAssistantWorkspace))
+    }
   }
 
   function handleOpenCodeAssistant(assistant: CodeAssistantId) {
@@ -687,14 +710,17 @@ export function CopilotPanel({
     void startCliSession(assistant, 'open')
   }
 
-  // Resume 走与 Open 完全相同的决策/清理/启动流程,只是让 claude 用 --continue 续上
-  // 该工作区最近一次对话(决议 2026-08-05 D-F2)。仅 claude——codex 的恢复机制不同,
-  // 它的命令边界不暴露该选项。
-  function handleResumeClaudeCode() {
-    if (isAssistantReadOnly(codeAssistantStatus.claude)) {
+  // Resume 走与 Open 完全相同的决策/清理/启动流程,指向上次打开的那个 CLI
+  // (决议 2026-08-06 D-G2):claude 用 --continue、codex 用 resume --last 续上
+  // 该工作区最近一次对话。没有启动记录就没有 Resume 项。
+  function handleResumeLastCli() {
+    if (!lastOpenedAssistant) {
       return
     }
-    void startCliSession('claude', 'resume')
+    if (isAssistantReadOnly(codeAssistantStatus[lastOpenedAssistant])) {
+      return
+    }
+    void startCliSession(lastOpenedAssistant, 'resume')
   }
 
   function handleAttachCodeAssistant(assistant: CodeAssistantId) {
@@ -912,17 +938,28 @@ export function CopilotPanel({
                   >
                     Codex {isCodexOpenDisabled && '(read-only)'}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={!codeAssistantWorkspace || isClaudeOpenDisabled}
-                    onSelect={() => {
-                      handleResumeClaudeCode()
-                    }}
-                    title={codeAssistantStatus.claude.readOnly ? 'Workspace-owned config is read-only' : undefined}
-                  >
-                    <History data-icon="inline-start" />
-                    Resume Claude code
-                  </DropdownMenuItem>
+                  {lastOpenedAssistant && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        disabled={
+                          !codeAssistantWorkspace ||
+                          (lastOpenedAssistant === 'claude' ? isClaudeOpenDisabled : isCodexOpenDisabled)
+                        }
+                        onSelect={() => {
+                          handleResumeLastCli()
+                        }}
+                        title={
+                          codeAssistantStatus[lastOpenedAssistant].readOnly
+                            ? 'Workspace-owned config is read-only'
+                            : undefined
+                        }
+                      >
+                        <History data-icon="inline-start" />
+                        Resume {codeAssistantLabel(lastOpenedAssistant)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}

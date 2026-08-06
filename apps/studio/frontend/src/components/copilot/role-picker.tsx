@@ -61,8 +61,8 @@ interface RolePickerProps {
   loading?: boolean
 }
 
-/** R7-C: the fixed default label shown while roles load (PM: opus4.8). */
-const LOADING_DEFAULT_LABEL = 'Opus 4.8'
+/** R7-C: the fixed default label shown while roles load (PM 2026-08-06: deepseek-v4-flash). */
+const LOADING_DEFAULT_LABEL = 'DeepSeek V4 Flash'
 
 export function RolePicker({ options, selectedRole, onSelect, loading = false }: RolePickerProps) {
   // R7-C (PM 2026-07-02): the picker anchor is ALWAYS present. While config loads

@@ -348,11 +348,17 @@ not water a feature down to keep it frontend-only.
 - Before reporting done, boot the app from your own worktree
   (`scripts/wt-dev.sh`, `--backend` when backend/engine/gateway changed) and
   smoke-check that the touched screens open without errors, capturing the
-  handbook screenshots along the way. Detailed per-item click-through
-  verification belongs to the PM (decision 2026-07-06, replacing the old
-  agent self-inspection rule): deliver a per-item verification checklist and a
-  ready-to-click app instead of self-testing every flow. Tests and builds
-  alone still do not count as the smoke check.
+  handbook screenshots along the way. After merge, the agent ALSO runs the
+  detailed per-item click-through verification itself on the real main app
+  (decision 2026-08-06, replacing 2026-07-06's "verification belongs to the
+  PM"): drive the real window (WebView2/CDP recipe:
+  `docs/development/RUN_AND_SCREENSHOT.md` §5), test every delivered item, and
+  hand the PM a per-item verification REPORT — item / action / expected /
+  observed result / screenshot — instead of a checklist for the PM to click
+  through. The PM reviews the report and screenshots; any item the PM
+  spot-checks and overturns goes back into the same task. Tests and builds
+  alone still do not count as the smoke check, and a report line without
+  first-hand evidence must not be marked verified.
 - **Parallel tasks: one worktree per task, preview via `scripts/wt-dev.sh`.**
   The repo root runs the ONE full app (`studio-dev.ps1`: Tauri + sidecar
   :8787 + Vite 5173, showing `main`'s code). Each worktree starts its own

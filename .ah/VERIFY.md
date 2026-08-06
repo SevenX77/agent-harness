@@ -91,11 +91,10 @@ uv run --with pip-audit pip-audit                # 必须 0 CVE
 | 改动类型 | 验收方式 | 工具 | 人参与? |
 |---|---|---|---|
 | 纯逻辑 / engine / gateway / studio backend | 自动化:定向迭代 + 收口全量 | pytest / mypy / ruff | 否 |
-| **前端 / UI** | 默认 **`user` 模式**:agent 起 worktree 预览 + 冒烟 + 截图 + 逐项验收清单,详细点验归 PM(2026-07-06 决议) | `scripts/wt-dev.sh`(动后端加 `--backend`),验自己端口,绝不验 5173 | **是** |
-| | brief 显式写 `agent` 模式才允许自验 | Playwright DOM 断言 + sidecar bearer token | 否 |
+| **前端 / UI** | 默认 **`agent` 自验**(2026-08-06 决议,取代 2026-07-06「详细点验归 PM」):agent 起 worktree 预览 + 冒烟 + 截图;合并收尾后在主 app 上**自己逐项点验**,交「逐项验证报告 + 截图」,PM 只看报告 | `scripts/wt-dev.sh`(动后端加 `--backend`),验自己端口,绝不验 5173;主 app 点验用 CDP 驱动真窗口(`RUN_AND_SCREENSHOT.md` §5)或 Playwright + sidecar bearer token | 否(PM 看报告,抽查可推翻) |
 | 文档 / 纯 markdown | 物理实证:落盘路径 + wc/grep 关键内容;设计 doc 改动查哈希重钉 | ls / wc / grep | 否 |
 
-**验收开关(acceptance-mode)**:涉及 UI 的任务,master 派单 brief 必须写明 `agent` 还是 `user`,本仓默认 `user`;用户不在场时不允许选 `user` 后干等——把可自动验收的部分先收口,UI 签收作为挂起项上报。
+**验收开关(acceptance-mode)**:涉及 UI 的任务默认 `agent` 自验(2026-08-06 决议);只有 brief 显式写 `user`(需要真人观感等 agent 测不了的维度)才把点验交给 PM,且用户不在场时不允许选 `user` 后干等——把可自动验收的部分先收口,UI 签收作为挂起项上报。
 
 ## 4. 红灯处置(收口全量红了怎么办)
 

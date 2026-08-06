@@ -413,6 +413,30 @@
       }
     }
   },
+  "cli": {
+    "title": "CLI",
+    "description": "Everything Open in CLI needs on this machine: runtime chain and sign-in state.",
+    "reprobe": "Re-check",
+    "probing": "Checking dependencies…",
+    "desktopOnly": "CLI status is only available in the desktop app.",
+    "deps": {
+      "wsl": "WSL",
+      "shell": "Shell",
+      "ah": "ah",
+      "tmux": "tmux",
+      "claude": "Claude CLI",
+      "codex": "Codex CLI",
+      "claude_auth": "Claude sign-in",
+      "codex_auth": "Codex sign-in"
+    },
+    "states": {
+      "ok": "Ready",
+      "missing": "Not installed",
+      "broken": "Broken",
+      "outdated": "Outdated",
+      "unknown": "Unknown"
+    }
+  },
   "copilot": {
     "title": "Copilot",
     "description": "Configure copilot roles with the same model group fallback pattern used by LLM Roles.",

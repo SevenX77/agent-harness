@@ -357,7 +357,7 @@ pub(crate) const IDENTITY_NF1_ECHO_MISMATCH: IdentityFixture = IdentityFixture {
     snapshot_json: r#"{"schema_version":2,"event":"snapshot","sequence":1,"reason":"initial","runtime_state":"active","active":true,"ahd_alive":true,"config_path":"/tmp/ah-fixture-nf1/ah.toml","workspace_path":null,"state_dir":"/root/.local/state/ah/f2647adf","tmux_socket":"ahd-5a709091c406a3fa","sessions":[{"session_id":"sess_6ddea78e-0ea9-4f00-9b9a-15226e3cce28","project_id":"feat-studio-ah-state-contract-impl","path":"/root/agent-harness/.worktrees/feat-studio-ah-state-contract-impl","status":"ACTIVE","live_agents":6,"db_tracked_agents":6,"cleanup_required":false,"safe_to_cleanup":false,"master_tmux_alive":true}],"agents":[]}"#,
     expect_identity_match: false,
     provenance: Provenance::Captured,
-    note: "config_path matches request but state_dir/session identity is another live daemon (NF1) → discard",
+    note: "config_path matches request but the session identity is another live daemon (NF1) → discard",
 };
 
 /// Windows↔WSL canonical match — SchemaDerived. A Windows host requests
@@ -368,11 +368,14 @@ pub(crate) const IDENTITY_NF1_ECHO_MISMATCH: IdentityFixture = IdentityFixture {
 /// `project_id` basename (`myproj`) matches → accept. `expect_identity_match: true`.
 /// (Constructed: task 0 ran only on Linux, so no Windows-host capture exists; the
 /// `/mnt/c/...` mount convention is real.)
+/// `state_dir` 用真实形状(ah 内部 hash,与工作区无关):它**不参与**身份判定
+/// (决议 2026-08-05 D-D1)。此前这里被发明成 `<workspace>/.ah-state`——正是那种
+/// 让恒假的 state_dir 门在测试里显得能通过的、按错误预期构造的数据。
 pub(crate) const IDENTITY_WINDOWS_WSL_CANONICAL_MATCH: IdentityFixture = IdentityFixture {
     requested_config_path: r"C:\Users\dev\myproj\ah.toml",
     requested_workspace_dir: r"C:\Users\dev\myproj",
     expected_project_id: "myproj",
-    snapshot_json: r#"{"schema_version":2,"event":"snapshot","sequence":1,"reason":"initial","runtime_state":"active","active":true,"ahd_alive":true,"config_path":"/mnt/c/Users/dev/myproj/ah.toml","workspace_path":"/mnt/c/Users/dev/myproj","state_dir":"/mnt/c/Users/dev/myproj/.ah-state","tmux_socket":"ahd-winwslcanonical0001","sessions":[{"session_id":"sess_windows-wsl-canonical-0001","project_id":"myproj","path":"/mnt/c/Users/dev/myproj","status":"ACTIVE","live_agents":1,"db_tracked_agents":1,"cleanup_required":false,"safe_to_cleanup":false,"master_tmux_alive":true}],"agents":[]}"#,
+    snapshot_json: r#"{"schema_version":2,"event":"snapshot","sequence":1,"reason":"initial","runtime_state":"active","active":true,"ahd_alive":true,"config_path":"/mnt/c/Users/dev/myproj/ah.toml","workspace_path":"/mnt/c/Users/dev/myproj","state_dir":"/root/.local/state/ah/1a2b3c4d","tmux_socket":"ahd-winwslcanonical0001","sessions":[{"session_id":"sess_windows-wsl-canonical-0001","project_id":"myproj","path":"/mnt/c/Users/dev/myproj","status":"ACTIVE","live_agents":1,"db_tracked_agents":1,"cleanup_required":false,"safe_to_cleanup":false,"master_tmux_alive":true}],"agents":[]}"#,
     expect_identity_match: true,
     provenance: Provenance::SchemaDerived,
     note: "C:\\ request vs /mnt/c WSL snapshot: raw compare fails, canonical path + project_id match → accept",

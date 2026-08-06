@@ -497,14 +497,10 @@ impl CodeAssistant {
         }
     }
 
-    fn master_cmd(
-        self,
-        studio_mcp: Option<&StudioMcpEndpoint>,
-        skill: Option<&SessionSkillContext>,
-    ) -> String {
+    fn master_cmd(self, skill: Option<&SessionSkillContext>) -> String {
         match self {
-            Self::Claude => claude_master_cmd(studio_mcp, skill),
-            Self::Codex => codex_master_cmd(studio_mcp, skill),
+            Self::Claude => claude_master_cmd(skill),
+            Self::Codex => codex_master_cmd(skill),
         }
     }
 
@@ -886,10 +882,11 @@ fn studio_mcp_master_env_toml(studio_mcp: Option<&StudioMcpEndpoint>) -> String 
     }
 }
 
-fn claude_master_cmd(
-    studio_mcp: Option<&StudioMcpEndpoint>,
-    skill: Option<&SessionSkillContext>,
-) -> String {
+/// The builder deliberately has NO access to the MCP endpoint: since ah#37 the
+/// endpoint and bearer token travel via `[master.env]`, and keeping them out of this
+/// signature makes "the token can never reach the command line" a type-level fact
+/// instead of a runtime assertion — a builder cannot leak what it cannot see.
+fn claude_master_cmd(skill: Option<&SessionSkillContext>) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
     let claude_allowed_tools = CLAUDE_STUDIO_ALLOWED_TOOLS;
     let script = format!(
@@ -905,10 +902,7 @@ fn claude_master_cmd(
 /// - `$HOME/.codex/AGENTS.md` for the MoirAI master instructions.
 /// - `$HOME/.agents/skills` for Studio-managed skills, matching Codex's
 ///   documented local skill discovery path.
-fn codex_master_cmd(
-    studio_mcp: Option<&StudioMcpEndpoint>,
-    skill: Option<&SessionSkillContext>,
-) -> String {
+fn codex_master_cmd(skill: Option<&SessionSkillContext>) -> String {
     let prompt = sh_single_quote_str(&master_prompt(skill));
     let script = format!(
         "set -e; export SYSTEMD_LOG_LEVEL=err; codex_real=; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then codex_real=$(command -v codex || true); fi; if [ -z \"$codex_real\" ] && [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -x \"$STUDIO_AH_HOST_HOME/.local/bin/codex\" ]; then codex_real=\"$STUDIO_AH_HOST_HOME/.local/bin/codex\"; fi; if [ -z \"$codex_real\" ]; then printf '%s\\n' 'codex CLI was not found on PATH.' >&2; exit 127; fi; codex_target=$(readlink -f \"$codex_real\" 2>/dev/null || printf '%s' \"$codex_real\"); case \"$codex_target\" in /mnt/*) printf '%s\\n' \"codex resolves to a Windows binary ($codex_target).\" >&2; printf '%s\\n' \"A Windows process cannot run inside ah's sandbox (it ignores HOME injection).\" >&2; printf '%s\\n' 'Fix: re-run scripts/install-claude-code-wsl.ps1 (it repairs the native install).' >&2; exit 127 ;; esac; mkdir -p \"$HOME/.local/bin\" \"$HOME/.codex\" \"$HOME/.agents\"; codex_config=\"$HOME/.codex/config.toml\"; if [ \"$codex_real\" != \"$HOME/.local/bin/codex\" ]; then ln -sfn \"$codex_real\" \"$HOME/.local/bin/codex\"; fi; if [ -n \"${{STUDIO_AH_HOST_HOME:-}}\" ] && [ -f \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" ]; then ln -sfn \"$STUDIO_AH_HOST_HOME/.codex/auth.json\" \"$HOME/.codex/auth.json\"; fi; codex_project_key=$(printf '%s' \"$PWD\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'); codex_trust_header=\"[projects.\\\"$codex_project_key\\\"]\"; if ! grep -Fqx \"$codex_trust_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\ntrust_level = \"trusted\"\\n' \"$codex_trust_header\"; }} >> \"$codex_config\"; fi; codex_mcp_header=\"[mcp_servers.codex_apps]\"; if grep -Fqx \"$codex_mcp_header\" \"$codex_config\" 2>/dev/null; then if awk 'BEGIN{{in_section=0; found=1}} /^\\[mcp_servers\\.codex_apps\\]$/{{in_section=1; next}} /^\\[/{{in_section=0}} in_section && /^[[:space:]]*startup_timeout_sec[[:space:]]*=/{{found=0}} END{{exit found}}' \"$codex_config\"; then sed -i '/^\\[mcp_servers\\.codex_apps\\]$/,/^\\[/ s/^[[:space:]]*startup_timeout_sec[[:space:]]*=.*/startup_timeout_sec = 120/' \"$codex_config\"; else sed -i '/^\\[mcp_servers\\.codex_apps\\]$/a startup_timeout_sec = 120' \"$codex_config\"; fi; else {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nstartup_timeout_sec = 120\\n' \"$codex_mcp_header\"; }} >> \"$codex_config\"; fi; if [ -f \"$PWD/.ah/rules/master.md\" ]; then ln -sfn \"$PWD/.ah/rules/master.md\" \"$HOME/.codex/AGENTS.md\"; fi; if [ -d \"$PWD/.ah/skills\" ]; then rm -rf \"$HOME/.agents/skills\"; ln -sfn \"$PWD/.ah/skills\" \"$HOME/.agents/skills\"; fi; if [ -n \"${{STUDIO_MCP_URL:-}}\" ]; then studio_mcp_header=\"[mcp_servers.studio]\"; if ! grep -Fqx \"$studio_mcp_header\" \"$codex_config\" 2>/dev/null; then {{ if [ -s \"$codex_config\" ]; then printf '\\n'; fi; printf '%s\\nurl = \"%s\"\\nbearer_token_env_var = \"STUDIO_API_TOKEN\"\\n' \"$studio_mcp_header\" \"${{STUDIO_MCP_URL}}\"; }} >> \"$codex_config\"; fi; fi; exec \"$codex_real\" --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {prompt}"
@@ -1085,7 +1079,7 @@ fn transient_ah_config_content(
     Ok(format!(
         "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\nskills = {master_skills}\n{master_env}\n[agents.clotho]\nprovider = {provider_toml}\nskills = {clotho_skills}\n\n[agents.lachesis]\nprovider = {provider_toml}\nskills = {lachesis_skills}\n\n[agents.atropos]\nprovider = {provider_toml}\nskills = {atropos_skills}\n",
         provider_toml = toml_string(provider),
-        cmd = toml_string(&assistant.master_cmd(studio_mcp, skill)),
+        cmd = toml_string(&assistant.master_cmd(skill)),
         master_env = studio_mcp_master_env_toml(studio_mcp),
         master_skills = toml_string_array(&master_skills),
         clotho_skills = toml_string_array(&clotho_skills),
@@ -3914,7 +3908,7 @@ mod tests {
         };
 
         for assistant in [CodeAssistant::Claude, CodeAssistant::Codex] {
-            let cmd = assistant.master_cmd(None, Some(&context));
+            let cmd = assistant.master_cmd(Some(&context));
             assert!(
                 cmd.contains("exp-b-round3"),
                 "{assistant:?} master cmd must name the bound skill"
@@ -3924,7 +3918,7 @@ mod tests {
 
     #[test]
     fn claude_master_cmd_rejects_interop_binaries() {
-        let cmd = claude_master_cmd(None, None);
+        let cmd = claude_master_cmd(None);
 
         assert!(cmd.contains("claude_target=$(readlink -f \"$claude_real\""));
         assert!(cmd.contains("case \"$claude_target\" in /mnt/*)"));
@@ -3960,10 +3954,7 @@ mod tests {
         );
         assert!(env_block.contains("STUDIO_API_TOKEN = \"tok-abc\""), "{env_block}");
 
-        for cmd in [
-            claude_master_cmd(Some(&endpoint), None),
-            codex_master_cmd(Some(&endpoint), None),
-        ] {
+        for cmd in [claude_master_cmd(None), codex_master_cmd(None)] {
             assert!(
                 !cmd.contains("tok-abc"),
                 "the bearer token must never reach the command line — `ps` shows it to                  every process on the machine: {cmd}"
@@ -3983,7 +3974,7 @@ mod tests {
         // N5-3: the CLI surface gets the same Studio tools as the panel. Approval
         // is claude's OWN prompt (bypass flag dropped) — Studio does not build a
         // second approval system for a session the user is sitting in.
-        let cmd = claude_master_cmd(None, None);
+        let cmd = claude_master_cmd(None);
 
         assert!(cmd.contains("$HOME/.claude/studio-mcp.json"));
         assert!(cmd.contains("\"type\":\"http\""));
@@ -4004,7 +3995,7 @@ mod tests {
     fn claude_master_cmd_skips_mcp_when_sidecar_unreachable() {
         // No STUDIO_MCP_URL (sidecar not up / non-mirrored network): the session
         // must still launch, just without the Studio tools — never hard-fail.
-        let cmd = claude_master_cmd(None, None);
+        let cmd = claude_master_cmd(None);
 
         assert!(cmd.contains("if [ -n \"${STUDIO_MCP_URL:-}\" ]"));
         assert!(cmd.contains("studio_mcp_args="));
@@ -4014,7 +4005,7 @@ mod tests {
     fn codex_master_cmd_registers_studio_mcp_streamable_http() {
         // codex 0.142.5 speaks streamable HTTP natively (--url +
         // --bearer-token-env-var), so no stdio bridge is needed.
-        let cmd = codex_master_cmd(None, None);
+        let cmd = codex_master_cmd(None);
 
         assert!(cmd.contains("[mcp_servers.studio]"));
         assert!(cmd.contains("bearer_token_env_var = \"STUDIO_API_TOKEN\""));
@@ -4192,7 +4183,7 @@ mod tests {
 
     #[test]
     fn codex_master_cmd_rejects_interop_binaries_and_prefers_standalone() {
-        let cmd = codex_master_cmd(None, None);
+        let cmd = codex_master_cmd(None);
         let standalone = "$STUDIO_AH_HOST_HOME/.codex/packages/standalone/current/bin/codex";
         let standalone_index = cmd
             .find(standalone)

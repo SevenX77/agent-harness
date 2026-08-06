@@ -112,6 +112,7 @@ async function openCodeAssistant(
   label: 'Claude Code' | 'Codex',
   grid: CliTerminalGrid,
   handlers: CliTerminalHandlers,
+  extraArgs: Record<string, unknown> = {},
 ): Promise<string | null> {
   const targetPath = workspaceRoot?.trim() ?? ''
   if (!targetPath) {
@@ -136,6 +137,7 @@ async function openCodeAssistant(
       workspaceRoot: targetPath,
       cols: grid.cols,
       rows: grid.rows,
+      ...extraArgs,
       onEvent: await cliTerminalChannel(handlers),
     })
   } catch (error) {
@@ -149,8 +151,13 @@ export async function openClaudeCode(
   workspaceRoot: string | null | undefined,
   grid: CliTerminalGrid,
   handlers: CliTerminalHandlers,
+  options: { resumeLastConversation?: boolean } = {},
 ): Promise<string | null> {
-  return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code', grid, handlers)
+  // resume 只对 claude 存在:codex 的恢复机制不同,它的命令边界不暴露该参数
+  // (决议 2026-08-05 D-F3)。
+  return openCodeAssistant(workspaceRoot, 'open_claude_code', 'Claude Code', grid, handlers, {
+    resume: options.resumeLastConversation ?? false,
+  })
 }
 
 export async function openCodexCli(

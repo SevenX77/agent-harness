@@ -11,6 +11,7 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
+    RoleModelGroup,
     RolesData,
 )
 from app.services.llm_credentials import credentials_path, save_credentials
@@ -98,7 +99,7 @@ def _haiku_deepseek_credentials() -> LLMCredentialsFile:
 
 
 def _copilot_credentials() -> LLMCredentialsFile:
-    """Opus 4.8 (official + third-party) + DeepSeek V4 Pro (third-party) routes."""
+    """Opus 4.8 (official + third-party) + DeepSeek V4 Flash (third-party) routes."""
     return LLMCredentialsFile(
         provider_endpoints={
             "anthropic-official": ProviderEndpoint(
@@ -141,12 +142,12 @@ def _copilot_credentials() -> LLMCredentialsFile:
                 provider_model_id="anthropic/claude-opus-4.8",
                 canonical_id="anthropic.claude-opus-4.8",
             ),
-            "qiniu:deepseek.deepseek-v4-pro": ProviderRoute(
-                route_id="qiniu:deepseek.deepseek-v4-pro",
+            "qiniu:deepseek.deepseek-v4-flash": ProviderRoute(
+                route_id="qiniu:deepseek.deepseek-v4-flash",
                 endpoint_id="qiniu",
-                route_slug="deepseek.deepseek-v4-pro",
-                provider_model_id="deepseek/deepseek-v4-pro",
-                canonical_id="deepseek.deepseek-v4-pro",
+                route_slug="deepseek.deepseek-v4-flash",
+                provider_model_id="deepseek/deepseek-v4-flash",
+                canonical_id="deepseek.deepseek-v4-flash",
             ),
         },
     )
@@ -164,9 +165,9 @@ def test_copilot_roles_are_fixed() -> None:
     # 内置 copilot 角色也是固定角色(不可删/不可改名)。
     roles = fixed_role_names()
     assert "copilot_claude_opus_4_8" in roles
-    assert "copilot_deepseek_v4_pro" in roles
+    assert "copilot_deepseek_v4_flash" in roles
     assert is_fixed_role("copilot_claude_opus_4_8") is True
-    assert is_fixed_role("copilot_deepseek_v4_pro") is True
+    assert is_fixed_role("copilot_deepseek_v4_flash") is True
 
 
 def test_copilot_default_role_entry_has_copilot_kind_and_all_endpoints() -> None:
@@ -179,9 +180,9 @@ def test_copilot_default_role_entry_has_copilot_kind_and_all_endpoints() -> None
         "wavespeed:anthropic.claude-opus-4.8",
     }
 
-    deepseek = default_role_entry("copilot_deepseek_v4_pro", credentials)
+    deepseek = default_role_entry("copilot_deepseek_v4_flash", credentials)
     assert deepseek.role_kind == "copilot"
-    assert [group.display_name for group in deepseek.model_groups] == ["DeepSeek V4 Pro"]
+    assert [group.display_name for group in deepseek.model_groups] == ["DeepSeek V4 Flash"]
 
 
 def test_delete_fixed_copilot_role_is_rejected(
@@ -189,12 +190,12 @@ def test_delete_fixed_copilot_role_is_rejected(
 ) -> None:
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path / "settings")
     save_credentials(LLMCredentialsFile(), credentials_path())
-    roles = {"copilot_deepseek_v4_pro": RoleEntry(role_kind="copilot")}
+    roles = {"copilot_deepseek_v4_flash": RoleEntry(role_kind="copilot")}
     save_roles_file(roles_path(), RolesData(roles=roles), known_route_ids=set(), known_bundle_ids=set())
 
-    resp = client.delete("/api/llm/roles/copilot_deepseek_v4_pro")
+    resp = client.delete("/api/llm/roles/copilot_deepseek_v4_flash")
     assert resp.status_code == 409
-    assert "copilot_deepseek_v4_pro" in load_roles_file(roles_path()).roles
+    assert "copilot_deepseek_v4_flash" in load_roles_file(roles_path()).roles
 
 
 def _seed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, role_names: list[str]) -> None:
@@ -467,3 +468,49 @@ def test_upsert_endpoints_triggers_reconcile_fills_fixed_role(
         "Claude Haiku 4.5",
         "DeepSeek V4 Flash",
     ]
+
+
+def test_put_cannot_strip_or_swap_a_fixed_copilot_model(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """固定 copilot 角色 = 固定模型:掏空或换组的写入在边界被拒;冷态回显与绑定修复放行。"""
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path / "settings")
+    save_credentials(LLMCredentialsFile(), credentials_path())
+    flash_group = RoleModelGroup(canonical_id="deepseek-v4-flash", display_name="DeepSeek V4 Flash")
+    save_roles_file(
+        roles_path(),
+        RolesData(roles={"copilot_deepseek_v4_flash": RoleEntry(role_kind="copilot", model_groups=[flash_group])}),
+        known_route_ids=set(),
+        known_bundle_ids=set(),
+    )
+
+    husk = {"role_kind": "copilot"}
+    resp = client.put("/api/llm/roles", json={"roles": {"copilot_deepseek_v4_flash": husk}})
+    assert resp.status_code == 422
+    resp = client.put("/api/llm/roles/copilot_deepseek_v4_flash", json=husk)
+    assert resp.status_code == 422
+
+    foreign = {
+        "role_kind": "copilot",
+        "model_groups": [{"canonical_id": "claude-opus-4.8", "display_name": "Claude Opus 4.8"}],
+    }
+    resp = client.put("/api/llm/roles/copilot_deepseek_v4_flash", json=foreign)
+    assert resp.status_code == 422
+
+    on_disk = load_roles_file(roles_path()).roles["copilot_deepseek_v4_flash"]
+    assert [group.canonical_id for group in on_disk.model_groups] == ["deepseek-v4-flash"]
+
+    save_roles_file(
+        roles_path(),
+        RolesData(roles={"copilot_deepseek_v4_flash": RoleEntry(role_kind="copilot")}),
+        known_route_ids=set(),
+        known_bundle_ids=set(),
+    )
+    resp = client.put("/api/llm/roles", json={"roles": {"copilot_deepseek_v4_flash": husk}})
+    assert resp.status_code == 200
+    repair = {
+        "role_kind": "copilot",
+        "model_groups": [{"canonical_id": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash"}],
+    }
+    resp = client.put("/api/llm/roles/copilot_deepseek_v4_flash", json=repair)
+    assert resp.status_code == 200

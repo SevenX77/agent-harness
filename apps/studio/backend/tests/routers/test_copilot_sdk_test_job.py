@@ -146,21 +146,21 @@ def test_get_role_test_results_returns_persisted_copilot_diagnostics_verbatim(
         llm,
         "load_role_test_results",
         lambda: {
-            "copilot_deepseek_v4_pro": {
-                "role_name": "copilot_deepseek_v4_pro",
+            "copilot_deepseek_v4_flash": {
+                "role_name": "copilot_deepseek_v4_flash",
                 "status": "failed",
                 "message": persisted_message,
                 "updated_at": "2026-07-05T00:00:00+00:00",
                 "result": {
-                    "role_name": "copilot_deepseek_v4_pro",
+                    "role_name": "copilot_deepseek_v4_flash",
                     "status": "failed",
                     "warnings": [],
                     "model_groups": [
                         {
-                            "canonical_id": "deepseek-v4-pro",
+                            "canonical_id": "deepseek-v4-flash",
                             "provider_results": [
                                 {
-                                    "route_id": "qiniu:deepseek-v4-pro",
+                                    "route_id": "qiniu:deepseek-v4-flash",
                                     "status": "failed",
                                     "message": persisted_message,
                                 }
@@ -172,7 +172,7 @@ def test_get_role_test_results_returns_persisted_copilot_diagnostics_verbatim(
                         "passed": 0,
                         "total": 1,
                         "routes": {
-                            "qiniu:deepseek-v4-pro": {
+                            "qiniu:deepseek-v4-flash": {
                                 "status": "failed",
                                 "message": persisted_message,
                                 "retry_after_seconds": None,
@@ -186,9 +186,9 @@ def test_get_role_test_results_returns_persisted_copilot_diagnostics_verbatim(
 
     response = asyncio.run(llm.get_role_test_results())
 
-    persisted = response.results["copilot_deepseek_v4_pro"]
+    persisted = response.results["copilot_deepseek_v4_flash"]
     assert persisted.message == persisted_message
-    sdk_route = persisted.result["sdk_evidence"]["routes"]["qiniu:deepseek-v4-pro"]
+    sdk_route = persisted.result["sdk_evidence"]["routes"]["qiniu:deepseek-v4-flash"]
     assert sdk_route["message"] == persisted_message
     provider_result = persisted.result["model_groups"][0]["provider_results"][0]
     assert provider_result["message"] == persisted_message
@@ -231,33 +231,33 @@ def test_run_copilot_sdk_test_job_profiles_official_route_for_copilot_method_bef
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     route = SimpleNamespace(
-        route_id="deepseek-official:deepseek-v4-pro",
+        route_id="deepseek-official:deepseek-v4-flash",
         endpoint_id="deepseek-official",
-        canonical_id="deepseek-v4-pro",
-        provider_model_id="deepseek-v4-pro",
+        canonical_id="deepseek-v4-flash",
+        provider_model_id="deepseek-v4-flash",
         call_method_id="deepseek_chat_completions",
     )
     prepared_route = SimpleNamespace(
-        route_id="deepseek-official:deepseek-v4-pro",
+        route_id="deepseek-official:deepseek-v4-flash",
         endpoint_id="deepseek-official",
-        canonical_id="deepseek-v4-pro",
-        provider_model_id="deepseek-v4-pro",
+        canonical_id="deepseek-v4-flash",
+        provider_model_id="deepseek-v4-flash",
         call_method_id="deepseek_anthropic_messages",
     )
     job_id = "job-copilot-deepseek"
     llm._role_test_jobs[job_id] = llm.RoleTestJobResponse(
         job_id=job_id,
-        role_name="copilot_deepseek_v4_pro",
+        role_name="copilot_deepseek_v4_flash",
         status="queued",
         message="queued",
         provider_statuses=[llm._copilot_route_progress(route, "queued")],
     )
     raw_route = ProviderRoute(
-        route_id="deepseek-official:deepseek-v4-pro",
+        route_id="deepseek-official:deepseek-v4-flash",
         endpoint_id="deepseek-official",
-        route_slug="deepseek-v4-pro",
-        provider_model_id="deepseek-v4-pro",
-        canonical_id="deepseek-v4-pro",
+        route_slug="deepseek-v4-flash",
+        provider_model_id="deepseek-v4-flash",
+        canonical_id="deepseek-v4-flash",
         status="verified",
         verified_profiles=[
             VerifiedProfile(
@@ -311,14 +311,14 @@ def test_run_copilot_sdk_test_job_profiles_official_route_for_copilot_method_bef
                 }
             ),
             llm.OfficialModelProfileProbeResult(
-                model_id="deepseek-v4-pro",
+                model_id="deepseek-v4-flash",
                 profiles=[profile],
             ),
         )
 
     def fake_runtime(role_name: str, *, route_override: str | None = None, **_kwargs):
-        assert role_name == "copilot_deepseek_v4_pro"
-        assert route_override == "deepseek-official:deepseek-v4-pro"
+        assert role_name == "copilot_deepseek_v4_flash"
+        assert route_override == "deepseek-official:deepseek-v4-flash"
         return SimpleNamespace(routes=[prepared_route], credential_provider="fresh-provider")
 
     async def fake_sdk_test(route_arg: SimpleNamespace, provider: object, *, timeout_s: float = 60.0):
@@ -333,9 +333,9 @@ def test_run_copilot_sdk_test_job_profiles_official_route_for_copilot_method_bef
     monkeypatch.setattr(llm, "_persist_copilot_sdk_evidence", lambda _results: None)
 
     try:
-        asyncio.run(llm._run_copilot_sdk_test_job(job_id, "copilot_deepseek_v4_pro", [route], object()))
+        asyncio.run(llm._run_copilot_sdk_test_job(job_id, "copilot_deepseek_v4_flash", [route], object()))
         assert profile_calls == [
-            ("deepseek-official", "deepseek-official:deepseek-v4-pro")
+            ("deepseek-official", "deepseek-official:deepseek-v4-flash")
         ]
         assert sdk_calls == [("deepseek_anthropic_messages", "fresh-provider")]
         final = llm._role_test_jobs[job_id]

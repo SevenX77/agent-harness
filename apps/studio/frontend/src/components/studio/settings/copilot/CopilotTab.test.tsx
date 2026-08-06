@@ -207,15 +207,15 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
 
 function deepseekV4ModelGroup(): ModelGroup {
   return {
-    canonical_id: "deepseek-v4-pro",
-    display_name: "DeepSeek V4 Pro",
+    canonical_id: "deepseek-v4-flash",
+    display_name: "DeepSeek V4 Flash",
     provider_models: [
       {
-        route_id: "deepseek-official:deepseek-v4-pro",
+        route_id: "deepseek-official:deepseek-v4-flash",
         endpoint_id: "deepseek-official",
         provider_label: "DeepSeek Official",
         provider_kind: "official",
-        provider_model_id: "deepseek-v4-pro",
+        provider_model_id: "deepseek-v4-flash",
         ui_state: "ready",
         ui_detail: null,
         retry_at: null,
@@ -392,24 +392,24 @@ describe("CopilotTab route status projection", () => {
 })
 
 describe("CopilotTab order truth", () => {
-  it("renders persisted built-in cards in the default Claude then DeepSeek order, not yaml insertion order", () => {
+  it("renders persisted built-in cards with the copilot default (DeepSeek V4 Flash) first, not yaml insertion order", () => {
     const data: RolesData = {
       ...emptyRoles(),
       roles: {
-        copilot_deepseek_v4_pro: {
+        copilot_deepseek_v4_flash: {
           role_kind: "copilot",
           system_prompt_prefix: "",
           model_fallback_enabled: true,
           intent: { provider_preference: "manual_order" },
           model_groups: [],
-          active_model: "deepseek-v4-pro",
+          active_model: "deepseek-v4-flash",
           models: {
-            "deepseek-v4-pro": {
-              providers: ["deepseek-official:deepseek-v4-pro"],
+            "deepseek-v4-flash": {
+              providers: ["deepseek-official:deepseek-v4-flash"],
             },
           },
           fallback_chain: [
-            { route_id: "deepseek-official:deepseek-v4-pro", runtime_settings: {} },
+            { route_id: "deepseek-official:deepseek-v4-flash", runtime_settings: {} },
           ],
           lint_requirements: {},
         },
@@ -442,7 +442,7 @@ describe("CopilotTab order truth", () => {
     )
     const roleIds = [...html.matchAll(/data-copilot-role-id="([^"]+)"/g)].map((match) => match[1])
 
-    expect(roleIds.slice(0, 2)).toEqual(["copilot_claude_opus_4_8", "copilot_deepseek_v4_pro"])
+    expect(roleIds.slice(0, 2)).toEqual(["copilot_deepseek_v4_flash", "copilot_claude_opus_4_8"])
   })
 
   it("renders configured route chips in fallback_chain order before model-group provider order", () => {
@@ -704,9 +704,40 @@ describe("CopilotTab broken-legacy copilot record skip (no group binding + has f
 })
 
 describe("CopilotTab #61 model-group remove control", () => {
-  it("renders an enabled group-level Remove button on a configured role", () => {
-    const html = renderToStaticMarkup(
+  it("shows the remove control only on third-party roles; built-in fixed-model cards get none (2026-08-06)", () => {
+    // 内置角色 = 固定模型:roles() 的组是阶梯浮出的 canonical(built_in),不给移除钮。
+    const builtinHtml = renderToStaticMarkup(
       <CopilotTab data={roles()} credentials={credentials()} modelGroups={registryModelGroups()} />,
+    )
+    expect(builtinHtml.match(/data-copilot-model-group-remove="true"/)).toBeNull()
+
+    // 第三方自建组(不在阶梯里)保留可用的移除钮。
+    const base = registryModelGroups()[0]
+    const privateGroup = { ...base, canonical_id: "my-private-model", display_name: "My Private Model" }
+    const data: RolesData = {
+      ...emptyRoles(),
+      roles: {
+        copilot_private: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "my-private-model",
+          models: {
+            "my-private-model": {
+              providers: ["anthropic-official:claude-opus-4-7"],
+            },
+          },
+          fallback_chain: [
+            { route_id: "anthropic-official:claude-opus-4-7", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+      },
+    }
+    const html = renderToStaticMarkup(
+      <CopilotTab data={data} credentials={credentials()} modelGroups={[...registryModelGroups(), privateGroup]} />,
     )
     const removeButton = html.match(/<button[^>]*data-copilot-model-group-remove="true"[^>]*>/)
     expect(removeButton).not.toBeNull()

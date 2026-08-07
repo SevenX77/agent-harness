@@ -157,6 +157,17 @@ def test_list_run_artifacts_without_runs_is_empty_not_error(
     assert payload["runs"] == []
 
 
+def test_optional_params_are_declared_optional_in_the_tool_schema() -> None:
+    # 真机 /mcp 抓到的缺陷:dict schema 里裸类型 = 必填,导致"不带 range 的整读"与
+    # "不带 run_id 的枚举"被 SDK 的输入校验直接拒。可选参数必须用 (type, None) 声明。
+    from app.services.copilot_tools import list_run_artifacts_tool, read_skill_file_tool
+
+    read_schema = read_skill_file_tool.input_schema
+    assert read_schema["start_line"] == (int, None)
+    assert read_schema["end_line"] == (int, None)
+    assert list_run_artifacts_tool.input_schema["run_id"] == (str, None)
+
+
 def test_data_read_tools_are_pre_allowed_on_both_surfaces() -> None:
     # 三面注册:MCP 工具表、免审批清单、CLI allowlist(lib.rs 由 Rust 测试锁)。
     from app.services.copilot import _DECLARATIVE_ALLOWED_TOOLS

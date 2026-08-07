@@ -67,7 +67,7 @@ async def get_llm_roles_tool(args: dict[str, Any]) -> dict[str, Any]:
     "读取 skill 目录内一个文件的内容(有界):默认最多 400 行,可用 start_line/end_line"
     "(1 基,含端点)取片段;返回 total_lines 与 truncated 标记。路径限定在 skill 目录内,"
     "越界与绝对路径一律拒绝。",
-    {"skill_id": str, "path": str, "start_line": int, "end_line": int},
+    {"skill_id": str, "path": str, "start_line": (int, None), "end_line": (int, None)},
 )
 async def read_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.services.skills import ensure_workspace_skill_dir
@@ -145,7 +145,7 @@ def _runs_root(skill_dir: Path) -> Path:
     "list_run_artifacts",
     "枚举 skill 的 run 产物:.workspace/runs/<run_id>/artifacts/ 下的文件名与大小。"
     "不传 run_id 列最近 20 个 run;读单个产物用 read_run_artifact。",
-    {"skill_id": str, "run_id": str},
+    {"skill_id": str, "run_id": (str, None)},
 )
 async def list_run_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.services.skills import ensure_workspace_skill_dir

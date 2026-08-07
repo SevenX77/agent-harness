@@ -77,7 +77,7 @@ def test_scorecard_workflow_matches_design_contract() -> None:
     assert checkout_steps[0]["with"]["persist-credentials"] is False
 
     scorecard_steps = [
-        step for step in steps if step.get("uses") == "ossf/scorecard-action@v2.4.3"
+        step for step in steps if step.get("uses") == "ossf/scorecard-action@v2.4.4"
     ]
     assert len(scorecard_steps) == 1
     assert scorecard_steps[0]["with"] == {

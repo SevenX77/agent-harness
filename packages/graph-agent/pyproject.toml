@@ -44,7 +44,6 @@ studio = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "watchdog>=4.0",
-    "ptyprocess>=0.7",
 ]
 e2e = [
     "playwright>=1.40",

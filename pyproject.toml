@@ -110,7 +110,7 @@ exclude = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["langgraph.checkpoint.postgres", "langgraph.checkpoint.postgres.*", "ptyprocess.*"]
+module = ["langgraph.checkpoint.postgres", "langgraph.checkpoint.postgres.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -9,7 +9,6 @@ from app.core.backends import get_eventbus
 from app.core.ports.eventbus import EventBus
 from app.services.event_bus import STUDIO_EVENTS_TOPIC
 from app.services.run_manager import run_manager
-from app.services.terminal_manager import terminal_manager
 
 router = APIRouter(tags=["websockets"])
 
@@ -39,13 +38,6 @@ async def run_events(websocket: WebSocket, run_id: str) -> None:
             return
         await websocket.send_json(event)
 
-
-@router.websocket("/ws/terminal/{term_id}")
-async def terminal_stream(websocket: WebSocket, term_id: str) -> None:
-    if not _websocket_token_is_valid(websocket):
-        await _close_unauthorized(websocket)
-        return
-    await terminal_manager.bridge(websocket, term_id)
 
 
 @router.websocket("/ws/events")

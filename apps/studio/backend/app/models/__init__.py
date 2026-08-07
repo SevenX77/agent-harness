@@ -31,7 +31,6 @@ from app.models.skills import (
     UpdateSkillFileRes,
     UpdateSkillReq,
 )
-from app.models.terminal import TerminalSession
 from app.models.test_inputs import TestInputMetadata
 
 __all__ = [
@@ -59,7 +58,6 @@ __all__ = [
     "SetGoldenReq",
     "SkillDetail",
     "SkillSummary",
-    "TerminalSession",
     "TestInputMetadata",
     "TokensMetrics",
     "UpdateSkillFileReq",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import multiprocessing
 import os
@@ -32,7 +31,6 @@ from app.core import config  # noqa: E402
 from app.core.backends import clear_backend_caches  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.services.run_manager import run_manager  # noqa: E402
-from app.services.terminal_manager import terminal_manager  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 _TEST_TOKEN = "studio-test-token"
@@ -150,10 +148,6 @@ def client(studio_roots: tuple[Path, Path]) -> Iterator[TestClient]:
     # threads (and pty processes), which then SIGSEGV during interpreter/coverage
     # teardown — the flaky `exit 139 after "N passed"` on quality-gates.
     run_manager.reset_for_tests()
-    for term_id in list(terminal_manager._sessions):
-        with contextlib.suppress(Exception):
-            terminal_manager.close(term_id)
-    terminal_manager._sessions.clear()
     clear_backend_caches()
 
 

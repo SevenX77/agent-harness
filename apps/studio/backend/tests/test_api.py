@@ -14,7 +14,6 @@ from app.services.event_bus import event_bus
 from app.services.predict_gate import record_predict_pass
 from app.services.run_manager import run_manager
 from app.services.skills import resolve_skill_dir
-from app.services.terminal_manager import terminal_manager
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
     FinishTaskEvent,
@@ -89,7 +88,6 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/runs/batch-run",
         "/api/skills/{skill_id}/runs/{run_id}",
         "/api/skills/{skill_id}/runs/{run_id}/resume",
-        "/api/skills/{skill_id}/terminal",
         "/api/skills/{skill_id}/test_inputs",
         "/api/skills/{skill_id}/test_inputs/{input_id}",
         "/api/skills/{skill_id}/golden",
@@ -1218,27 +1216,6 @@ def test_run_after_passing_predict_is_allowed(
     assert response.json()["status"] == "running"
 
 
-def test_terminal_endpoint_spawns_pty_and_reaps_expired_session(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("app.services.terminal_manager.PtyProcess", FakePtyFactory)
-
-    response = client.post("/api/skills/text-segmentation/terminal")
-
-    assert response.status_code == 201
-    body = response.json()
-    assert body["ws_url"] == f"/ws/terminal/{body['term_id']}"
-    with client.websocket_connect(body["ws_url"]) as websocket:
-        assert websocket.receive_text() == "claude>"
-        websocket.send_text("help\n")
-        websocket.close()
-    record = terminal_manager._sessions[body["term_id"]]
-    record.expires_at = 0
-    terminal_manager.reap_expired()
-    assert body["term_id"] not in terminal_manager._sessions
-
-
 def test_events_ws_broadcasts_to_multiple_clients(client: TestClient) -> None:
     with (
         client.websocket_connect("/ws/events") as first,
@@ -1446,27 +1423,6 @@ class FakeGitService:
         return object()
 
 
-class FakePty:
-    def __init__(self) -> None:
-        self.terminated = False
-
-    def read_nonblocking(self, size: int = 4096, timeout: float = 0.1) -> str | None:
-        del size, timeout
-        return "claude>"
-
-    def write(self, data: object) -> None:
-        del data
-
-    def terminate(self, force: bool = False) -> None:
-        del force
-        self.terminated = True
-
-
-class FakePtyFactory:
-    @staticmethod
-    def spawn(command: list[str], cwd: str) -> FakePty:
-        del command, cwd
-        return FakePty()
 
 
 def _agent_skill_content(skill_id: str) -> str:

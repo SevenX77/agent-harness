@@ -33,7 +33,6 @@ def test_model_exports_cover_phase0_contracts() -> None:
         "SetGoldenReq",
         "SkillDetail",
         "SkillSummary",
-        "TerminalSession",
         "TestInputMetadata",
         "TokensMetrics",
         "UpdateSkillFileReq",

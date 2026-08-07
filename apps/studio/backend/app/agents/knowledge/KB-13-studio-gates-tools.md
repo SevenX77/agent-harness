@@ -60,6 +60,7 @@ The Studio panel exposes its MCP tools through an in-process server named `studi
 | `write_skill_file` | Write one skill source file through the validated service chain (path whitelist, conflict hash) — never raw `Write`/`Edit` into a skill directory. |
 | `bind_test_input` | Drop a JSON test input into `.workspace/import_files/` (same chain as the I/O panel import) and re-derive the input bindings. |
 | `set_golden_baseline` / `delete_golden_baseline` | Promote a sealed run to golden / delete a baseline. |
+| `write_golden_case` | Overwrite one node's golden case with authored content (run output is only the default seed); locked baselines refuse the edit. |
 | `publish_skill` / `fork_skill` | Local release archive (+ remote registry sync when identity configured) / clone any skill into an editable copy. |
 | `create_llm_role` / `update_llm_role` / `delete_llm_role` / `apply_model_profile_to_role` | Role configuration writes via the same service chain as Settings. |
 | `upsert_llm_endpoint` / `delete_llm_endpoint` / `update_llm_route` / `delete_llm_route` | Credential / route vocabulary writes (api_key redacted in approval details). |

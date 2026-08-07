@@ -1154,6 +1154,41 @@ async def set_golden_baseline_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "write_golden_case",
+    "以自定义内容改写 golden 基准中指定节点 case 的 expected_output(F6:golden 的"
+    "作者是人或经人确认的判断, run 输出只是默认种子)。整个对象整体替换, 写入后即为"
+    "该节点的验收基准并标记 origin=authored;锁定(locked)的基准拒绝改写。"
+    "属于写操作, 需用户审批。",
+    {"skill_id": str, "golden_id": str, "node_id": str, "expected_output": dict},
+)
+async def write_golden_case_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services import golden_diff
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    golden_id = str(args.get("golden_id", "")).strip()
+    node_id = str(args.get("node_id", "")).strip()
+    if not skill_id or not golden_id or not node_id:
+        return _text_result("skill_id、golden_id 与 node_id 都不能为空", is_error=True)
+    expected_output = args.get("expected_output")
+    if not isinstance(expected_output, dict):
+        return _text_result("expected_output 必须是 JSON 对象", is_error=True)
+    try:
+        case = golden_diff.write_golden_case_content(skill_id, golden_id, node_id, expected_output)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"write_golden_case 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result(
+        {
+            "status": "success",
+            "golden_id": golden_id,
+            "node_id": case.node_id,
+            "origin": "authored",
+            "message": f"节点 '{case.node_id}' 的 golden case 已按自定义内容改写(基准 '{golden_id}')。",
+        }
+    )
+
+
+@tool(
     "delete_golden_baseline",
     "删除一条 golden 基准。属于写操作, 需用户审批。",
     {"skill_id": str, "golden_id": str},
@@ -1928,6 +1963,7 @@ def _copilot_mcp_tools() -> list[Any]:
         list_golden_tool,
         get_golden_content_tool,
         set_golden_baseline_tool,
+        write_golden_case_tool,
         delete_golden_baseline_tool,
         get_resume_validity_tool,
         resume_run_tool,

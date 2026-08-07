@@ -40,7 +40,6 @@ from app.routers import (
     skills,
     system,
     templates,
-    terminal,
     test_inputs,
     websockets,
 )
@@ -51,7 +50,6 @@ from app.services.file_watcher import file_watcher
 from app.services.run_manager import run_manager
 from app.services.runtime_truth_init import ensure_runtime_truth_sources
 from app.services.skills import ensure_workspace_layout
-from app.services.terminal_manager import terminal_manager
 
 logger = logging.getLogger(__name__)
 _VALID_TOKENS: list[str] = []
@@ -65,7 +63,6 @@ async def lifespan(studio_app: FastAPI) -> AsyncIterator[None]:
     ensure_workspace_layout()
     ensure_runtime_truth_sources()
     await _sync_verified_community_catalog_on_startup()
-    terminal_manager.start_reaper()
     file_watcher.start(asyncio.get_running_loop())
     # CLI 表面 MCP 出口(N5):manager 一个实例只能 run 一次,所以每次 lifespan
     # 都新建(Server + manager),经 app.state 交给 /mcp 挂载点转发。
@@ -80,7 +77,6 @@ async def lifespan(studio_app: FastAPI) -> AsyncIterator[None]:
     finally:
         file_watcher.stop()
         await cleanup_all_sessions()
-        await terminal_manager.shutdown()
         await run_manager.shutdown()
 
 
@@ -182,7 +178,6 @@ def create_app() -> FastAPI:
     studio_app.include_router(runs.router)
     studio_app.include_router(runs.batch_router)
     studio_app.include_router(settings.router)
-    studio_app.include_router(terminal.router)
     studio_app.include_router(test_inputs.router)
     studio_app.include_router(golden.router)
     studio_app.include_router(io_scan.router)

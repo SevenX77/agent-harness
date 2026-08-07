@@ -183,7 +183,6 @@ BACKEND POST /api/skills/{skill_id}/runs/{run_id}/stop
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity
 BACKEND POST /api/skills/{skill_id}/sync
-BACKEND POST /api/skills/{skill_id}/terminal
 BACKEND POST /api/skills/{skill_id}/test_inputs
 BACKEND POST /api/skills/{skill_id}/validate_input
 BACKEND POST /engine/compile
@@ -211,7 +210,6 @@ BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
 BACKEND WS /api/skills/{skill_id}/copilot/ws
 BACKEND WS /ws/events
 BACKEND WS /ws/runs/{run_id}
-BACKEND WS /ws/terminal/{term_id}
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id}
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id}
 FRONTEND DELETE /api/llm/roles/{role_name}
@@ -403,7 +401,6 @@ BACKEND POST /api/skills/{skill_id}/runs/{run_id}/stop | ok | specific | Explici
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume | ok | specific | Explicit resume command; returns RunMetadata for the resumed run and emits scoped run stream events.
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/resume/validity | ok | specific | Scoped resume-validity/dirty-downstream probe for one run and resume target; not a broad truth refresh.
 BACKEND POST /api/skills/{skill_id}/sync | ok | specific | Explicit collaboration sync command; no background sync runs on focus/reconnect.
-BACKEND POST /api/skills/{skill_id}/terminal | ok | specific | Explicit terminal session creation; returns one ws_url and subsequent traffic is isolated to that terminal id.
 BACKEND POST /api/skills/{skill_id}/test_inputs | ok | specific | Browser fallback for explicit Test Input create; desktop path writes through native-fs and frontend projects returned metadata.
 BACKEND POST /api/skills/{skill_id}/validate_input | ok | specific | Explicit validation command for a submitted payload; returns scoped validation diagnostics.
 BACKEND POST /engine/compile | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
@@ -431,7 +428,6 @@ BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specif
 BACKEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; future @mentions must travel in this message payload, not via background context POST.
 BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect must not refresh broad truth.
 BACKEND WS /ws/runs/{run_id} | ok | specific | Scoped run event stream keyed by run_id; it observes one execution and does not refresh registry/settings truth.
-BACKEND WS /ws/terminal/{term_id} | ok | specific | Scoped terminal stream keyed by term_id; lifecycle is tied to an explicit terminal session.
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id} | ok | specific | Explicit model-bundle delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit provider delete command; client projects the returned canonical registry snapshot without a follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.

@@ -1,6 +1,10 @@
 # Local dev (git worktrees container + IDE config)
 .worktrees/
 .cursor/
+# Machine-local AI-tool config (Antigravity/Gemini rules; not project truth)
+.gemini/
+# Operator session-handoff work files — self-declared "不进 git/PR"
+/HANDOFF-*.md
 
 # Python
 .coverage

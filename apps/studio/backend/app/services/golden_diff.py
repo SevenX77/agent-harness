@@ -373,6 +373,115 @@ def read_golden_baseline_content(
     )
 
 
+def write_golden_case_content(
+    skill_id: str,
+    golden_id: str,
+    node_id: str,
+    expected_output: dict[str, Any],
+) -> GoldenCaseContent:
+    """Overwrite one node's golden case with authored content (F6: run 输出只是种子).
+
+    The baseline container keeps its run lineage (``source_run_id`` untouched);
+    only the case file is rewritten, stamped ``origin: authored`` so a hand-edited
+    golden is distinguishable from a run-promoted one. This is the first write
+    path that enforces ``locked`` — promote/delete predate the flag and their
+    lock semantics are a separate ruling (decision doc 2026-08-07, 不做什么).
+    """
+    logger.info(
+        "golden_write_case action=start skill_id=%s golden_id=%s node_id=%s",
+        skill_id,
+        golden_id,
+        node_id,
+    )
+    if not expected_output:
+        raise_error_response(
+            error_response(
+                error_code="golden.invalid_expected_output",
+                http_status=422,
+                message="Golden expected_output must be a non-empty JSON object",
+                details={"skill_id": skill_id, "golden_id": golden_id, "node_id": node_id},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    baseline_dir = _golden_dir_for(skill_id, golden_id)
+    baseline_path = baseline_dir / BASELINE_FILENAME
+    # codeql[py/path-injection] baseline_dir is confined to the skill golden root by _golden_dir_for.
+    if not baseline_path.exists():
+        raise_error_response(
+            error_response(
+                error_code="golden.baseline_not_found",
+                http_status=404,
+                message=f"Golden baseline not found: {golden_id}",
+                details={"skill_id": skill_id, "golden_id": golden_id},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    payload = _read_json(baseline_path)
+    locked = payload.get("locked") if isinstance(payload, dict) else None
+    if locked is True:
+        raise_error_response(
+            error_response(
+                error_code="golden.baseline_locked",
+                http_status=409,
+                message=f"Golden baseline is locked and cannot be edited: {golden_id}",
+                details={"skill_id": skill_id, "golden_id": golden_id, "node_id": node_id},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    records = payload.get("cases") if isinstance(payload, dict) else None
+    case_records = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+    record = next((item for item in case_records if item.get("node_id") == node_id), None)
+    if record is None:
+        raise_error_response(
+            error_response(
+                error_code="golden.case_not_found",
+                http_status=422,
+                message=f"Golden case not found for node: {node_id}",
+                details={"skill_id": skill_id, "golden_id": golden_id, "node_id": node_id},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    raw_case_id = record.get("case_id")
+    case_id = raw_case_id if isinstance(raw_case_id, str) and raw_case_id else node_id
+    raw_ref = record.get("expected_output_ref")
+    expected_output_ref = raw_ref if isinstance(raw_ref, str) and raw_ref else f"{CASES_DIRNAME}/{case_id}.json"
+    case_path = _resolve_case_path(baseline_dir, expected_output_ref)
+    if case_path is None:
+        _raise_golden_case_not_found(skill_id, golden_id, node_id, "case_ref_invalid")
+    case_path.parent.mkdir(parents=True, exist_ok=True)
+    case_path.write_text(
+        json.dumps(
+            {
+                "case_id": case_id,
+                "node_id": node_id,
+                "phase_id": node_id,
+                "expected_output": expected_output,
+                "origin": "authored",
+                "authored_at": datetime.now(UTC).isoformat(),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    logger.info(
+        "golden_write_case action=end skill_id=%s golden_id=%s node_id=%s origin=authored",
+        skill_id,
+        golden_id,
+        node_id,
+    )
+    return GoldenCaseContent(
+        case_id=case_id,
+        node_id=node_id,
+        phase_id=node_id,
+        expected_output=expected_output,
+    )
+
+
 def iter_golden_cases_for_skill(skill_dir: Path) -> Iterator[tuple[str, dict[str, Any]]]:
     """Yield ``(node_id, expected_output)`` for every persisted golden case of a skill.
 

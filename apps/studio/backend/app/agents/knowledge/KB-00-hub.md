@@ -13,6 +13,7 @@ related:
   - KB-11-workspace-runtime
   - KB-12-llm-roles
   - KB-13-studio-gates-tools
+  - KB-14-artifacts-persistence
 ---
 
 # KB-00: Knowledge Hub Index
@@ -40,3 +41,4 @@ Welcome to the Graph Skill Knowledge Base. This index maps development scenarios
 | **Workspace Paths & Configurations** | `[[KB-11-workspace-runtime]]` | `.workspace/` layout, runtime configurations, and mirrors. |
 | **LLM Roles, Credentials, & fallbacks**| `[[KB-12-llm-roles]]` | The credential-to-role routing chain, fallback resolution, health states, and role write tools. |
 | **Compilation Gates & Tool Maps** | `[[KB-13-studio-gates-tools]]` | The compile-predict-run pipeline gates, client MCP tools, and Rust native-fs writing boundaries. |
+| **Run Artifacts & Persistence** | `[[KB-14-artifacts-persistence]]` | The two artifact declaration paths, on-disk naming, fingerprint participation, and bounded verification tools. |

@@ -34,3 +34,22 @@ This document details the telemetry, state persistence, and debugging overrides 
 *   **Dot Double State**: The edges connecting phases represent state transitions (dot points).
     *   *Pre-run (Static)*: Shows static blackboard field inferences (what variables are predicted to exist at this transition).
     *   *Post-run (Dynamic)*: Displays actual blackboard values captured after the parent phase ends, including any reduction or file injections.
+
+## 5. Bounded Trace Diagnostics with `query_run_trace`
+
+A full `trace.jsonl` can reach ~250 KB per run — never pull it whole. Use
+`query_run_trace(skill_id, run_id, phase?, event_types?, since_seq?, limit?)`:
+slices are bounded, and every response carries per-phase aggregates (iteration
+count, `llm_call` count, `tool_call` count, rejection count with top-N reasons).
+
+The routine that converges fastest:
+
+1. **Aggregates first** — call with no phase filter; the per-phase table tells
+   you where the run spent iterations or got rejected.
+2. **Zoom one phase** — re-query with `phase=` and `event_types=` narrowed to
+   the suspicious class (e.g. validator rejections).
+3. **Walk by sequence** — page with `since_seq`/`limit` instead of raising the
+   limit; the sequence numbers are stable within a run.
+4. For final-state questions prefer `get_run_detail`; for produced files use
+   `list_run_artifacts` / `read_run_artifact` (`[[KB-14-artifacts-persistence]]`).
+

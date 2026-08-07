@@ -67,7 +67,16 @@ async def get_llm_roles_tool(args: dict[str, Any]) -> dict[str, Any]:
     "读取 skill 目录内一个文件的内容(有界):默认最多 400 行,可用 start_line/end_line"
     "(1 基,含端点)取片段;返回 total_lines 与 truncated 标记。路径限定在 skill 目录内,"
     "越界与绝对路径一律拒绝。",
-    {"skill_id": str, "path": str, "start_line": (int, None), "end_line": (int, None)},
+    {
+        "type": "object",
+        "properties": {
+            "skill_id": {"type": "string"},
+            "path": {"type": "string"},
+            "start_line": {"type": "integer"},
+            "end_line": {"type": "integer"},
+        },
+        "required": ["skill_id", "path"],
+    },
 )
 async def read_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.services.skills import ensure_workspace_skill_dir
@@ -145,7 +154,11 @@ def _runs_root(skill_dir: Path) -> Path:
     "list_run_artifacts",
     "枚举 skill 的 run 产物:.workspace/runs/<run_id>/artifacts/ 下的文件名与大小。"
     "不传 run_id 列最近 20 个 run;读单个产物用 read_run_artifact。",
-    {"skill_id": str, "run_id": (str, None)},
+    {
+        "type": "object",
+        "properties": {"skill_id": {"type": "string"}, "run_id": {"type": "string"}},
+        "required": ["skill_id"],
+    },
 )
 async def list_run_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.services.skills import ensure_workspace_skill_dir
@@ -732,12 +745,16 @@ async def set_output_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
     "事件已投影成小体积,prompt 与完整上下文不在其中——那些留在 run 产物里。"
     "诊断'agent 为什么反复重投/卡在某个 phase'先用它,不要手工解析 trace.jsonl。",
     {
-        "skill_id": str,
-        "run_id": str,
-        "phase": (str, None),
-        "event_types": (list[str], None),
-        "since_seq": (int, None),
-        "limit": (int, None),
+        "type": "object",
+        "properties": {
+            "skill_id": {"type": "string"},
+            "run_id": {"type": "string"},
+            "phase": {"type": "string"},
+            "event_types": {"type": "array", "items": {"type": "string"}},
+            "since_seq": {"type": "integer"},
+            "limit": {"type": "integer"},
+        },
+        "required": ["skill_id", "run_id"],
     },
 )
 async def query_run_trace_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -787,7 +804,15 @@ _WAIT_FOR_RUN_MAX_TIMEOUT = 600
     "直到结束或超时。超时返回 timed_out 与当前状态,可以再等一次。"
     "成功时附带 artifacts_landed(这次真正写出的产物文件);一个都没有时会提醒你"
     "核对产出契约——不要略过那句提醒。有它就不要用轮询 get_run_detail 的方式等待。",
-    {"skill_id": str, "run_id": str, "timeout_s": (int, None)},
+    {
+        "type": "object",
+        "properties": {
+            "skill_id": {"type": "string"},
+            "run_id": {"type": "string"},
+            "timeout_s": {"type": "integer"},
+        },
+        "required": ["skill_id", "run_id"],
+    },
 )
 async def wait_for_run_tool(args: dict[str, Any]) -> dict[str, Any]:
     import asyncio
@@ -1730,10 +1755,13 @@ def _copilot_mcp_tools() -> list[Any]:
         read_run_artifact_tool,
         run_role_test_tool,
         get_skill_output_contract_tool,
+        set_output_artifacts_tool,
         predict_skill_tool,
         create_skill_tool,
         run_skill_tool,
         get_run_detail_tool,
+        query_run_trace_tool,
+        wait_for_run_tool,
         list_golden_tool,
         get_golden_content_tool,
         set_golden_baseline_tool,

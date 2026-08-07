@@ -20,6 +20,7 @@ canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
@@ -59,6 +60,176 @@ async def get_llm_roles_tool(args: dict[str, Any]) -> dict[str, Any]:
             "fallback_chain": dumped.get("fallback_chain", []),
         }
     return _text_result({"roles": snapshot, "role_count": len(snapshot)})
+
+
+@tool(
+    "read_skill_file",
+    "读取 skill 目录内一个文件的内容(有界):默认最多 400 行,可用 start_line/end_line"
+    "(1 基,含端点)取片段;返回 total_lines 与 truncated 标记。路径限定在 skill 目录内,"
+    "越界与绝对路径一律拒绝。",
+    {"skill_id": str, "path": str, "start_line": int, "end_line": int},
+)
+async def read_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.skills import ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    rel_path = str(args.get("path", "")).strip()
+    if not skill_id or not rel_path:
+        return _text_result("skill_id 与 path 都不能为空", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id).resolve()
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"read_skill_file 失败: {exc}", is_error=True)
+    if Path(rel_path).is_absolute():
+        return _text_result("path 必须是 skill 目录内的相对路径", is_error=True)
+    candidate = (skill_dir / rel_path).resolve()
+    if not candidate.is_relative_to(skill_dir):
+        return _text_result(f"path 越出了 skill 目录: {rel_path}", is_error=True)
+    if not candidate.is_file():
+        return _text_result(f"文件不存在: {rel_path}", is_error=True)
+    try:
+        lines = candidate.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError:
+        return _text_result(f"不是 UTF-8 文本文件: {rel_path}", is_error=True)
+
+    total = len(lines)
+    max_lines = 400
+    start = int(args.get("start_line") or 1)
+    end_raw = args.get("end_line")
+    end = int(end_raw) if end_raw else min(total, start + max_lines - 1)
+    if start < 1 or end < start:
+        return _text_result(f"非法行区间: start_line={start} end_line={end}", is_error=True)
+    end = min(end, total, start + max_lines - 1)
+    selected = lines[start - 1 : end]
+    truncated = end < total or start > 1
+    return _text_result(
+        {
+            "skill_id": skill_id,
+            "path": rel_path,
+            "total_lines": total,
+            "start_line": start,
+            "end_line": end,
+            "truncated": truncated,
+            "content": "\n".join(selected),
+        }
+    )
+
+
+@tool(
+    "get_workspace_config",
+    "读取 skill 的 .workspace/runtime_config.json 结构化投影:输入绑定(存路径与"
+    "json_path,不含数据本体)、artifacts 声明、节点级 llm 覆盖、fingerprint。"
+    "改它用对应写工具,不要手改文件。",
+    {"skill_id": str},
+)
+async def get_workspace_config_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.runtime_config import read_runtime_config
+    from app.services.skills import ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id)
+        config = read_runtime_config(skill_dir)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"get_workspace_config 失败: {exc}", is_error=True)
+    return _text_result(config)
+
+
+def _runs_root(skill_dir: Path) -> Path:
+    return skill_dir / ".workspace" / "runs"
+
+
+@tool(
+    "list_run_artifacts",
+    "枚举 skill 的 run 产物:.workspace/runs/<run_id>/artifacts/ 下的文件名与大小。"
+    "不传 run_id 列最近 20 个 run;读单个产物用 read_run_artifact。",
+    {"skill_id": str, "run_id": str},
+)
+async def list_run_artifacts_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.skills import ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    if not skill_id:
+        return _text_result("skill_id 不能为空", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"list_run_artifacts 失败: {exc}", is_error=True)
+    runs_root = _runs_root(skill_dir)
+    wanted = str(args.get("run_id", "")).strip()
+    run_dirs = (
+        [runs_root / wanted]
+        if wanted
+        else sorted(
+            (entry for entry in runs_root.iterdir() if entry.is_dir()),
+            key=lambda entry: entry.stat().st_mtime,
+            reverse=True,
+        )[:20]
+        if runs_root.is_dir()
+        else []
+    )
+    runs: list[dict[str, Any]] = []
+    for run_dir in run_dirs:
+        artifacts_dir = run_dir / "artifacts"
+        entries = (
+            sorted(entry for entry in artifacts_dir.iterdir() if entry.is_file())
+            if artifacts_dir.is_dir()
+            else []
+        )
+        runs.append(
+            {
+                "run_id": run_dir.name,
+                "artifacts": [
+                    {"name": entry.name, "size_bytes": entry.stat().st_size} for entry in entries
+                ],
+            }
+        )
+    return _text_result({"skill_id": skill_id, "runs": runs})
+
+
+@tool(
+    "read_run_artifact",
+    "读取一个 run 产物文件(有界,最多 48000 字节,超出如实截断标注)。"
+    "name 限定在该 run 的 artifacts 目录内。",
+    {"skill_id": str, "run_id": str, "name": str},
+)
+async def read_run_artifact_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.skills import ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    name = str(args.get("name", "")).strip()
+    if not skill_id or not run_id or not name:
+        return _text_result("skill_id / run_id / name 都不能为空", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"read_run_artifact 失败: {exc}", is_error=True)
+    artifacts_dir = (_runs_root(skill_dir) / run_id / "artifacts").resolve()
+    candidate = (artifacts_dir / name).resolve()
+    if not candidate.is_relative_to(artifacts_dir):
+        return _text_result(f"name 越出了 artifacts 目录: {name}", is_error=True)
+    if not candidate.is_file():
+        return _text_result(f"产物不存在: {run_id}/{name}", is_error=True)
+    max_bytes = 48_000
+    raw = candidate.read_bytes()
+    truncated = len(raw) > max_bytes
+    try:
+        content = raw[:max_bytes].decode("utf-8", errors="replace")
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"read_run_artifact 解码失败: {exc}", is_error=True)
+    return _text_result(
+        {
+            "skill_id": skill_id,
+            "run_id": run_id,
+            "name": name,
+            "size_bytes": len(raw),
+            "truncated": truncated,
+            "content": content,
+        }
+    )
 
 
 @tool(
@@ -1553,6 +1724,10 @@ def _copilot_mcp_tools() -> list[Any]:
         search_llm_registry_tool,
         compile_skill_tool,
         get_skill_overview_tool,
+        read_skill_file_tool,
+        get_workspace_config_tool,
+        list_run_artifacts_tool,
+        read_run_artifact_tool,
         run_role_test_tool,
         get_skill_output_contract_tool,
         predict_skill_tool,

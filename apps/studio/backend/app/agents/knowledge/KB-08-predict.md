@@ -18,7 +18,7 @@ Predict mode enables developers and agents to run a compiled skill without invok
 *   **Hard Pre-Run Gate**: Predict-pass is a strict prerequisite for triggering a real Run. If a skill fails Predict, execution remains locked (`[[KB-13-studio-gates-tools]]`).
 
 ## 2. Automatic Mock Selection (P0-P2)
-When an agent phase is executed in Predict, the system resolves mock outputs automatically using the following hierarchy (users cannot override this behavior manually):
+When an agent phase is executed in Predict, the system resolves mock outputs automatically using the following hierarchy (the selection ORDER P0→P1→P2 is fixed and cannot be reordered; users influence the outcome by supplying goldens or P1 manual mocks, not by picking a level):
 
 | Mock Level | Condition | Execution Behavior |
 |---|---|---|

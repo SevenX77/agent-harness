@@ -26,7 +26,10 @@ function terminalThemeFromTokens(): ITheme {
   return {
     background: read('--background'),
     foreground: read('--foreground'),
-    cursor: read('--primary'),
+    // The cursor follows the text colour, i.e. the classic terminal look
+    // (white block in the dark theme). `--primary` made it near-invisible
+    // against the terminal background (PM report 2026-08-07).
+    cursor: read('--foreground'),
     selectionBackground: read('--muted'),
   }
 }

@@ -246,6 +246,108 @@ async def read_run_artifact_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "write_skill_file",
+    "写一个 skill 文件(经 Studio 校验后写盘,与 I/O 面板同一条 service):路径校验、"
+    "冲突哈希(expected_hash 不匹配即拒)、写入登记全套。不要用裸 Write/Edit 直写"
+    "skill 目录——那会绕过写边界。属写操作,需用户审批。",
+    {
+        "type": "object",
+        "properties": {
+            "skill_id": {"type": "string"},
+            "path": {"type": "string"},
+            "content": {"type": "string"},
+            "expected_hash": {"type": "string"},
+        },
+        "required": ["skill_id", "path", "content"],
+    },
+)
+async def write_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.core.backends import get_backend_config, get_metadata, get_storage
+    from app.services.canvas_errors import CanvasConflictError
+    from app.services.skills import update_skill_file
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    rel_path = str(args.get("path", "")).strip()
+    content = args.get("content")
+    if not skill_id or not rel_path or not isinstance(content, str):
+        return _text_result("skill_id / path / content 都不能为空", is_error=True)
+    expected_hash = str(args.get("expected_hash") or "").strip() or None
+    try:
+        new_hash = await update_skill_file(
+            get_backend_config().default_user_id,
+            skill_id,
+            rel_path,
+            content,
+            get_storage(),
+            get_metadata(),
+            expected_hash=expected_hash,
+        )
+    except CanvasConflictError as exc:
+        return _text_result(
+            {
+                "error": "snapshot_conflict",
+                "message": "文件已被并发修改(hash conflict);先 read_skill_file 拿最新内容再改。",
+                "current_hash": exc.current_hash,
+            },
+            is_error=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"write_skill_file 失败: {exc}", is_error=True)
+    return _text_result({"skill_id": skill_id, "path": rel_path, "hash": new_hash})
+
+
+@tool(
+    "bind_test_input",
+    "把一份测试输入绑定给 skill:内容落 .workspace/import_files/<name>/<name>.json"
+    "(import = 运行时工作区数据,与 I/O 面板 import 同一条链与同一命名规则),随后"
+    "刷新 runtime_config 物化绑定——绑定从 import 文件派生,顶层键 = 要绑定的图输入"
+    "字段。返回物化后的 root 绑定。属写操作,需用户审批。",
+    {
+        "type": "object",
+        "properties": {
+            "skill_id": {"type": "string"},
+            "name": {"type": "string"},
+            "content": {"type": "object"},
+        },
+        "required": ["skill_id", "name", "content"],
+    },
+)
+async def bind_test_input_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.routers.io_scan import _IMPORT_NAME_RE
+    from app.services.runtime_config import read_runtime_config, refresh_runtime_config
+    from app.services.skills import ensure_workspace_skill_dir
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    name = str(args.get("name", "")).strip()
+    content = args.get("content")
+    if not skill_id or not name:
+        return _text_result("skill_id 与 name 都不能为空", is_error=True)
+    if not _IMPORT_NAME_RE.match(name):
+        return _text_result(f"非法的测试输入名(同 I/O 面板 import 命名规则): {name}", is_error=True)
+    if not isinstance(content, dict):
+        return _text_result("content 必须是 JSON 对象(顶层键 = 要绑定的输入字段)", is_error=True)
+    try:
+        skill_dir = ensure_workspace_skill_dir(skill_id)
+        target_dir = (skill_dir / ".workspace" / "import_files" / name).resolve()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / f"{name}.json").write_text(
+            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        refresh_runtime_config(skill_dir)
+        config = read_runtime_config(skill_dir)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"bind_test_input 失败: {exc}", is_error=True)
+    bindings = ((config.get("inputs") or {}).get("active") or {})
+    return _text_result(
+        {
+            "skill_id": skill_id,
+            "file": f"import_files/{name}/{name}.json",
+            "bindings": {"root": bindings.get("root") or {}},
+        }
+    )
+
+
+@tool(
     "get_skill_overview",
     "读取 skill 的结构总览:graph 的 io 字段与默认 llm_role、phase 列表(模式/依赖/"
     "是否图输出/每 phase 的 io 字段名与类型/validator 有无/llm_role)。会话第一步就该"
@@ -1756,6 +1858,8 @@ def _copilot_mcp_tools() -> list[Any]:
         run_role_test_tool,
         get_skill_output_contract_tool,
         set_output_artifacts_tool,
+        write_skill_file_tool,
+        bind_test_input_tool,
         predict_skill_tool,
         create_skill_tool,
         run_skill_tool,

@@ -5,6 +5,7 @@ related:
   - KB-07-compile-diagnostics
   - KB-08-predict
   - KB-12-llm-roles
+  - KB-14-artifacts-persistence
 ---
 
 > Distilled from: `docs/studio/mvp1/03_compile.md` & `docs/studio/mvp1/04_run-and-verify.md` & Design Spec §Requirements 8 & 13
@@ -34,6 +35,12 @@ The Studio panel exposes its MCP tools through an in-process server named `studi
 
 | MCP Tool | Purpose |
 |---|---|
+| `get_skill_overview` | First call of a session: graph io + per-phase io field names/types, validator, llm_role — structure only, never body text. |
+| `read_skill_file` | Bounded file read confined to the skill directory (line ranges; 400-line cap; escape paths rejected). |
+| `get_workspace_config` | Structured projection of `.workspace/runtime_config.json`: input bindings (paths, not payloads), artifacts declarations, node llm overrides, fingerprint. |
+| `list_run_artifacts` / `read_run_artifact` | Enumerate / read (48 KB-bounded) files under `runs/<run_id>/artifacts/` (`[[KB-14-artifacts-persistence]]`). |
+| `query_run_trace` / `wait_for_run` | Bounded trace slices with per-phase aggregates / block until a run terminates instead of polling. |
+| `get_skill_output_contract` | The skill's output contract projection. |
 | `compile_skill` | Compiles the skill and returns the complete diagnostics set. |
 | `predict_skill` | LLM-free dry run: phase path, path diff, diagnostics. |
 | `get_run_detail` | Bounded projection of a real run: status, token metrics, event counts, error excerpts, final output. |
@@ -48,6 +55,7 @@ The Studio panel exposes its MCP tools through an in-process server named `studi
 |---|---|
 | `create_skill` | Create a skill in the default Skills root, registered in the index (UI-visible), scaffolded when no seed files are given. |
 | `run_skill` / `resume_run` | Start a real run / resume from a checkpoint (real LLM calls, costs tokens). Poll with `get_run_detail`. |
+| `set_output_artifacts` | Replace the skill's `runtime_config.artifacts` declarations via the same service as the I/O panel. |
 | `set_golden_baseline` / `delete_golden_baseline` | Promote a sealed run to golden / delete a baseline. |
 | `publish_skill` / `fork_skill` | Local release archive (+ remote registry sync when identity configured) / clone any skill into an editable copy. |
 | `create_llm_role` / `update_llm_role` / `delete_llm_role` / `apply_model_profile_to_role` | Role configuration writes via the same service chain as Settings. |

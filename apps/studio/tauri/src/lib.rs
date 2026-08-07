@@ -1052,6 +1052,10 @@ fn studio_ah_managed_payloads() -> Result<Vec<(String, String)>, String> {
 const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
     "mcp__studio__compile_skill,",
     "mcp__studio__get_skill_overview,",
+    "mcp__studio__read_skill_file,",
+    "mcp__studio__get_workspace_config,",
+    "mcp__studio__list_run_artifacts,",
+    "mcp__studio__read_run_artifact,",
     "mcp__studio__predict_skill,",
     "mcp__studio__get_run_detail,",
     "mcp__studio__query_run_trace,",

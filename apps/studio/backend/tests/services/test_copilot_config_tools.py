@@ -345,6 +345,8 @@ def test_mcp_server_exposes_full_parity_toolset() -> None:
         "query_run_trace",
         "wait_for_run",
         "set_output_artifacts",
+        "write_skill_file",
+        "bind_test_input",
         "list_golden",
         "get_golden_content",
         "set_golden_baseline",

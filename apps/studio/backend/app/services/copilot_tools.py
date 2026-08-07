@@ -673,12 +673,25 @@ _RUN_ERRORS_LIMIT = 5
 _RUN_FINAL_CONTEXT_CHAR_LIMIT = 4000
 
 
+#: 「run 成功却零产物 → 把产出契约的问题递到眼前」是一条业务规则,只允许一个
+#: 权威文案。round6 实证:提醒只挂在 wait_for_run 时,一个用 get_run_detail 轮询
+#: 终态的会话一次都收不到——终态是同一个事实,agent 从哪条工具读到它,提醒就在
+#: 哪条工具出现。
+_OUTPUT_CONTRACT_REMINDER = (
+    "run 成功但没有落盘任何产物文件。一个 skill 的产出契约和输入契约"
+    "同属它的固有两端:多数 skill 需要把结果落盘给下游/人/下一次运行读,"
+    "也确有 skill 只在黑板里传结果。用 get_skill_output_contract 看清"
+    "这个 skill 声明了什么产出、黑板上实际有什么, 然后判断:该落盘就用 "
+    "set_output_artifacts 声明并重新 run, 不该落盘就明确说出理由。"
+)
+
+
 @tool(
     "get_run_detail",
     "查询一次真实 run 的状态与结果(紧凑投影):整体状态、token 用量、事件类型"
     "计数、错误摘录(最多 5 条)、最终输出(final_context,超长截断)与产物清单。"
     "只读;逐 phase 的循环细节与被驳回原因用 query_run_trace,等 run 结束用 "
-    "wait_for_run(不要高频轮询)。",
+    "wait_for_run(不要高频轮询)。成功而零产物时会附产出契约提醒——不要略过。",
     {"skill_id": str, "run_id": str},
 )
 async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -717,23 +730,24 @@ async def get_run_detail_tool(args: dict[str, Any]) -> dict[str, Any]:
             final_context_truncated = True
 
     metadata = detail.metadata
-    return _text_result(
-        {
-            "run_id": metadata.run_id,
-            "status": metadata.status,
-            "started_at": metadata.started_at.isoformat(),
-            "metrics": metadata.metrics.model_dump(mode="json") if metadata.metrics else None,
-            "input_summary": metadata.input_summary,
-            "events_total": len(detail.events),
-            "event_type_counts": event_type_counts,
-            "errors": errors[-_RUN_ERRORS_LIMIT:],
-            "errors_total": len(errors),
-            "artifacts": detail.artifacts,
-            "final_context_json": final_context_json,
-            "final_context_truncated": final_context_truncated,
-            "detail_hint": f".workspace/runs/{metadata.run_id}/",
-        }
-    )
+    projection: dict[str, Any] = {
+        "run_id": metadata.run_id,
+        "status": metadata.status,
+        "started_at": metadata.started_at.isoformat(),
+        "metrics": metadata.metrics.model_dump(mode="json") if metadata.metrics else None,
+        "input_summary": metadata.input_summary,
+        "events_total": len(detail.events),
+        "event_type_counts": event_type_counts,
+        "errors": errors[-_RUN_ERRORS_LIMIT:],
+        "errors_total": len(errors),
+        "artifacts": detail.artifacts,
+        "final_context_json": final_context_json,
+        "final_context_truncated": final_context_truncated,
+        "detail_hint": f".workspace/runs/{metadata.run_id}/",
+    }
+    if metadata.status == "success" and not detail.artifacts:
+        projection["output_contract_reminder"] = _OUTPUT_CONTRACT_REMINDER
+    return _text_result(projection)
 
 
 # golden 基准工具(旅程 04 验收面):读走与 GET /golden 同一条服务链;写(set/
@@ -965,14 +979,57 @@ async def wait_for_run_tool(args: dict[str, Any]) -> dict[str, Any]:
         landed = detail.artifacts or []
         result["artifacts_landed"] = landed
         if not landed:
-            result["output_contract_reminder"] = (
-                "run 成功但没有落盘任何产物文件。一个 skill 的产出契约和输入契约"
-                "同属它的固有两端:多数 skill 需要把结果落盘给下游/人/下一次运行读,"
-                "也确有 skill 只在黑板里传结果。用 get_skill_output_contract 看清"
-                "这个 skill 声明了什么产出、黑板上实际有什么, 然后判断:该落盘就用 "
-                "set_output_artifacts 声明并重新 run, 不该落盘就明确说出理由。"
-            )
+            result["output_contract_reminder"] = _OUTPUT_CONTRACT_REMINDER
     return _text_result(result)
+
+
+# run 控制(与工具栏 Pause/Stop 按钮同链):两个工具直调 run_manager 的同名方法,
+# gate 事件照常广播,UI 随之走到对应状态。状态规则(哪些状态可暂停/可终止)由
+# run_manager 独家拥有,这里只转达它的诊断,不重复防御。
+
+
+@tool(
+    "pause_run",
+    "暂停一次正在跑的 run:停下 worker 但保留断点——引擎只在 run 自然跑完时清理"
+    " checkpoint, 暂停的 run 之后可用 resume_run 从断点继续, 也可用 stop_run 终止。"
+    "只对 status=running 的 run 有效。",
+    {"skill_id": str, "run_id": str},
+)
+async def pause_run_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.run_manager import run_manager
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    try:
+        metadata = await run_manager.pause_run(skill_id=skill_id, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"pause_run 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result({"run_id": metadata.run_id, "status": metadata.status})
+
+
+@tool(
+    "stop_run",
+    "终止一次 run(终局, 从 running 或 paused 都可达):走终态封存, run 记录与已"
+    "产出的东西保留可读。它不是删除——删除记录是另一个破坏性动作。判断一次 run "
+    "已注定失败时用它止损, 不要干等它耗完。",
+    {"skill_id": str, "run_id": str},
+)
+async def stop_run_tool(args: dict[str, Any]) -> dict[str, Any]:
+    from app.services.run_manager import run_manager
+
+    skill_id = str(args.get("skill_id", "")).strip()
+    run_id = str(args.get("run_id", "")).strip()
+    if not skill_id or not run_id:
+        return _text_result("skill_id 与 run_id 都不能为空", is_error=True)
+    try:
+        metadata = await run_manager.stop_run(skill_id=skill_id, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        payload: Any = getattr(exc, "detail", None) or f"stop_run 失败: {exc}"
+        return _text_result(payload, is_error=True)
+    return _text_result({"run_id": metadata.run_id, "status": metadata.status})
 
 
 @tool(
@@ -1866,6 +1923,8 @@ def _copilot_mcp_tools() -> list[Any]:
         get_run_detail_tool,
         query_run_trace_tool,
         wait_for_run_tool,
+        pause_run_tool,
+        stop_run_tool,
         list_golden_tool,
         get_golden_content_tool,
         set_golden_baseline_tool,

@@ -20,7 +20,7 @@ This document outlines the surface mechanisms and runtime assumptions unique to 
 
 ## Studio Tool Surface
 - When Studio launched this session with its sidecar running, the `studio` MCP server is registered and the tool map in `[[KB-13-studio-gates-tools]]` applies here — call `compile_skill` / `predict_skill` directly instead of invoking the engine through ad-hoc Python.
-- Read and probe tools are pre-allowed. Write and execute tools (skill create/fork/publish, run/resume, golden writes, LLM configuration) surface this CLI's own approval prompt: answer it in the terminal. The two credential-cascading deletes (`delete_llm_endpoint`, `delete_llm_route`) are intentionally absent from the CLI surface; do those in the Studio UI.
+- Read and probe tools are pre-allowed. Write and execute tools (skill create/fork/publish, run/resume/pause/stop, golden writes, LLM configuration) surface this CLI's own approval prompt: answer it in the terminal. The two credential-cascading deletes (`delete_llm_endpoint`, `delete_llm_route`) are intentionally absent from the CLI surface; do those in the Studio UI.
 - If the `studio` tools are absent, the sidecar was unreachable at launch (Studio not running, or a WSL distro without mirrored networking). Say so and continue without them — do not reconstruct them by shelling into the engine.
 
 ## Subagent Dispatch and ID Bindings

@@ -1049,11 +1049,16 @@ fn studio_ah_managed_payloads() -> Result<Vec<(String, String)>, String> {
 /// which is the human gate for a session the user is sitting in front of —
 /// Studio does not build a second approval system on top of it. For the same
 /// reason the interactive launch drops `--dangerously-skip-permissions`.
+// Pre-allowed = the read/probe tier of cli.md's "Studio Tool Surface" rule
+// (read and probe pre-allowed; write and execute prompt). This is a hand-kept
+// copy of that tier — when a read or probe tool is added on the Python side,
+// it must be added here too, or approval cards nag for harmless reads.
 const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
     "mcp__studio__compile_skill,",
     "mcp__studio__get_skill_overview,",
     "mcp__studio__read_skill_file,",
     "mcp__studio__get_workspace_config,",
+    "mcp__studio__get_skill_output_contract,",
     "mcp__studio__list_run_artifacts,",
     "mcp__studio__read_run_artifact,",
     "mcp__studio__predict_skill,",
@@ -1064,7 +1069,11 @@ const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
     "mcp__studio__get_golden_content,",
     "mcp__studio__get_resume_validity,",
     "mcp__studio__get_llm_roles,",
-    "mcp__studio__search_llm_registry"
+    "mcp__studio__search_llm_registry,",
+    "mcp__studio__run_role_test,",
+    "mcp__studio__test_llm_endpoint,",
+    "mcp__studio__test_llm_endpoint_models,",
+    "mcp__studio__probe_llm_route"
 );
 
 /// The master runs under ahd, which does NOT inherit the environment of the shell that ran
@@ -4371,6 +4380,15 @@ mod tests {
         assert!(cmd.contains("--mcp-config"));
         assert!(cmd.contains("--allowedTools"));
         assert!(cmd.contains("mcp__studio__compile_skill"));
+        // cli.md's tier rule, both directions (P4-E10 — this hand-kept list
+        // drifted three times): reads/probes added later must ride along, and
+        // no write/execute tool may ever be pre-allowed here.
+        assert!(cmd.contains("mcp__studio__get_skill_output_contract"));
+        assert!(cmd.contains("mcp__studio__probe_llm_route"));
+        assert!(!cmd.contains("mcp__studio__run_skill"));
+        assert!(!cmd.contains("mcp__studio__pause_run"));
+        assert!(!cmd.contains("mcp__studio__stop_run"));
+        assert!(!cmd.contains("mcp__studio__write_skill_file"));
         assert!(
             !cmd.contains("--dangerously-skip-permissions"),
             "interactive Open in CLI must keep claude's native approval prompts"

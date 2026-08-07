@@ -55,6 +55,7 @@ The Studio panel exposes its MCP tools through an in-process server named `studi
 |---|---|
 | `create_skill` | Create a skill in the default Skills root, registered in the index (UI-visible), scaffolded when no seed files are given. |
 | `run_skill` / `resume_run` | Start a real run / resume from a checkpoint (real LLM calls, costs tokens). Poll with `get_run_detail`. |
+| `pause_run` / `stop_run` | The human's Pause/Stop buttons, as tools: pause keeps the checkpoint (resume later), stop ends the run for good but keeps everything it produced. Use stop to cut a doomed run's losses instead of waiting it out. |
 | `set_output_artifacts` | Replace the skill's `runtime_config.artifacts` declarations via the same service as the I/O panel. |
 | `write_skill_file` | Write one skill source file through the validated service chain (path whitelist, conflict hash) — never raw `Write`/`Edit` into a skill directory. |
 | `bind_test_input` | Drop a JSON test input into `.workspace/import_files/` (same chain as the I/O panel import) and re-derive the input bindings. |

@@ -157,15 +157,36 @@ def test_list_run_artifacts_without_runs_is_empty_not_error(
     assert payload["runs"] == []
 
 
-def test_optional_params_are_declared_optional_in_the_tool_schema() -> None:
-    # 真机 /mcp 抓到的缺陷:dict schema 里裸类型 = 必填,导致"不带 range 的整读"与
-    # "不带 run_id 的枚举"被 SDK 的输入校验直接拒。可选参数必须用 (type, None) 声明。
-    from app.services.copilot_tools import list_run_artifacts_tool, read_skill_file_tool
+def test_optional_params_use_full_json_schema_with_required_lists() -> None:
+    # 真机 /mcp 两连抓:① {名:类型} 字典在 SDK 侧一律全必填;② (type, None) 元组
+    # 落进 SDK 转换的 string 兜底——从未生效过。可选参数唯一正确姿势 = 传完整
+    # JSON schema(SDK 原样透传),required 里只列必填项。
+    from app.services.copilot_tools import (
+        list_run_artifacts_tool,
+        query_run_trace_tool,
+        read_skill_file_tool,
+        wait_for_run_tool,
+    )
 
-    read_schema = read_skill_file_tool.input_schema
-    assert read_schema["start_line"] == (int, None)
-    assert read_schema["end_line"] == (int, None)
-    assert list_run_artifacts_tool.input_schema["run_id"] == (str, None)
+    assert read_skill_file_tool.input_schema["required"] == ["skill_id", "path"]
+    assert "start_line" in read_skill_file_tool.input_schema["properties"]
+    assert list_run_artifacts_tool.input_schema["required"] == ["skill_id"]
+    assert query_run_trace_tool.input_schema["required"] == ["skill_id", "run_id"]
+    assert wait_for_run_tool.input_schema["required"] == ["skill_id", "run_id"]
+
+
+def test_every_defined_tool_is_registered() -> None:
+    # 真机抓到 query_run_trace/wait_for_run/set_output_artifacts 定义了却没进注册表,
+    # 在两个面上都是死工具。防漂移:模块里每个 @tool 定义都必须在 _copilot_mcp_tools()。
+    from app.services import copilot_tools
+
+    registered = {tool.name for tool in copilot_tools._copilot_mcp_tools()}
+    defined = {
+        obj.name
+        for name, obj in vars(copilot_tools).items()
+        if name.endswith("_tool") and hasattr(obj, "name") and hasattr(obj, "handler")
+    }
+    assert defined <= registered, f"定义了但未注册: {sorted(defined - registered)}"
 
 
 def test_data_read_tools_are_pre_allowed_on_both_surfaces() -> None:

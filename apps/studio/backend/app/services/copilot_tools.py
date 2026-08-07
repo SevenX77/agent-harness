@@ -263,7 +263,8 @@ async def read_run_artifact_tool(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def write_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.core.backends import get_backend_config, get_metadata, get_storage
-    from app.services.skills import CanvasConflictError, update_skill_file
+    from app.services.canvas_errors import CanvasConflictError
+    from app.services.skills import update_skill_file
 
     skill_id = str(args.get("skill_id", "")).strip()
     rel_path = str(args.get("path", "")).strip()

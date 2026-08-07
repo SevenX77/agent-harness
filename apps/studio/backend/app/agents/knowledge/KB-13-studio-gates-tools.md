@@ -56,6 +56,8 @@ The Studio panel exposes its MCP tools through an in-process server named `studi
 | `create_skill` | Create a skill in the default Skills root, registered in the index (UI-visible), scaffolded when no seed files are given. |
 | `run_skill` / `resume_run` | Start a real run / resume from a checkpoint (real LLM calls, costs tokens). Poll with `get_run_detail`. |
 | `set_output_artifacts` | Replace the skill's `runtime_config.artifacts` declarations via the same service as the I/O panel. |
+| `write_skill_file` | Write one skill source file through the validated service chain (path whitelist, conflict hash) — never raw `Write`/`Edit` into a skill directory. |
+| `bind_test_input` | Drop a JSON test input into `.workspace/import_files/` (same chain as the I/O panel import) and re-derive the input bindings. |
 | `set_golden_baseline` / `delete_golden_baseline` | Promote a sealed run to golden / delete a baseline. |
 | `publish_skill` / `fork_skill` | Local release archive (+ remote registry sync when identity configured) / clone any skill into an editable copy. |
 | `create_llm_role` / `update_llm_role` / `delete_llm_role` / `apply_model_profile_to_role` | Role configuration writes via the same service chain as Settings. |

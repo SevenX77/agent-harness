@@ -141,6 +141,8 @@ _MCP_APPROVAL_WRITE_TOOLS = frozenset(
         "mcp__studio__publish_skill",
         "mcp__studio__fork_skill",
         "mcp__studio__set_output_artifacts",
+        "mcp__studio__write_skill_file",
+        "mcp__studio__bind_test_input",
         "mcp__studio__set_golden_baseline",
         "mcp__studio__delete_golden_baseline",
         "mcp__studio__create_llm_role",

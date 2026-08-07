@@ -847,6 +847,106 @@ def test_delete_golden_baseline_tool_deletes(monkeypatch) -> None:  # noqa: ANN0
     assert captured == {"skill_id": "text-segmentation", "golden_id": "g-1"}
 
 
+def test_write_golden_case_tool_requires_ids() -> None:
+    result = asyncio.run(
+        copilot_tools.write_golden_case_tool.handler(
+            {"skill_id": "s", "golden_id": " ", "node_id": "n", "expected_output": {"a": 1}}
+        )
+    )
+
+    assert result["is_error"] is True
+
+
+def test_write_golden_case_tool_requires_object_expected_output() -> None:
+    result = asyncio.run(
+        copilot_tools.write_golden_case_tool.handler(
+            {
+                "skill_id": "text-segmentation",
+                "golden_id": "g-1",
+                "node_id": "analyze",
+                "expected_output": "not-an-object",
+            }
+        )
+    )
+
+    assert result["is_error"] is True
+
+
+def test_write_golden_case_tool_writes_authored_content(monkeypatch) -> None:  # noqa: ANN001
+    from app.models.golden import GoldenCaseContent
+    from app.services import golden_diff
+
+    captured: dict[str, object] = {}
+
+    def _fake_write(
+        skill_id: str, golden_id: str, node_id: str, expected_output: dict[str, object]
+    ) -> object:
+        captured.update(
+            {
+                "skill_id": skill_id,
+                "golden_id": golden_id,
+                "node_id": node_id,
+                "expected_output": expected_output,
+            }
+        )
+        return GoldenCaseContent(
+            case_id=node_id,
+            node_id=node_id,
+            phase_id=node_id,
+            expected_output=expected_output,
+        )
+
+    monkeypatch.setattr(golden_diff, "write_golden_case_content", _fake_write)
+
+    result = asyncio.run(
+        copilot_tools.write_golden_case_tool.handler(
+            {
+                "skill_id": "text-segmentation",
+                "golden_id": "g-1",
+                "node_id": "analyze",
+                "expected_output": {"answer": "authored"},
+            }
+        )
+    )
+
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["status"] == "success"
+    assert payload["golden_id"] == "g-1"
+    assert payload["node_id"] == "analyze"
+    assert captured == {
+        "skill_id": "text-segmentation",
+        "golden_id": "g-1",
+        "node_id": "analyze",
+        "expected_output": {"answer": "authored"},
+    }
+
+
+def test_write_golden_case_tool_reports_failure_as_tool_error(monkeypatch) -> None:  # noqa: ANN001
+    from app.services import golden_diff
+
+    def _boom(
+        skill_id: str, golden_id: str, node_id: str, expected_output: dict[str, object]
+    ) -> object:
+        raise RuntimeError("baseline is locked")
+
+    monkeypatch.setattr(golden_diff, "write_golden_case_content", _boom)
+
+    result = asyncio.run(
+        copilot_tools.write_golden_case_tool.handler(
+            {
+                "skill_id": "text-segmentation",
+                "golden_id": "g-1",
+                "node_id": "analyze",
+                "expected_output": {"answer": "authored"},
+            }
+        )
+    )
+
+    assert result["is_error"] is True
+    assert "baseline is locked" in result["content"][0]["text"]
+
+
 # ── resume / publish / fork(旅程 05 调试续跑 + 06 发布)───────────────────────
 
 

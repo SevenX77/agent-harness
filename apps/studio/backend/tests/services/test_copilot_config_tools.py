@@ -352,6 +352,7 @@ def test_mcp_server_exposes_full_parity_toolset() -> None:
         "list_golden",
         "get_golden_content",
         "set_golden_baseline",
+        "write_golden_case",
         "delete_golden_baseline",
         "get_resume_validity",
         "resume_run",

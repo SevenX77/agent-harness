@@ -513,3 +513,64 @@ describe('TracePanel model-compare tabs (PR2 node-compare)', () => {
     expect(html).not.toContain('aria-label="Model compare candidates"')
   })
 })
+
+describe('failed run reason', () => {
+  const failedMetadata = {
+    run_id: 'run-1',
+    status: 'failed' as const,
+    started_at: '2026-08-08T09:47:48Z',
+    metrics: null,
+    input_summary: null,
+    error: {
+      code: 'llm.provider_invoke_failed',
+      message: "resource.no_available_route - {'role': 'analyst'}",
+      details: {},
+    },
+  }
+
+  it('shows why the run failed', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={events}
+        activePhase={null}
+        selectedNode={null}
+        onSelectPrompt={() => undefined}
+        runId="run-1"
+        metadata={failedMetadata}
+      />,
+    )
+
+    expect(html).toContain('llm.provider_invoke_failed')
+    expect(html).toContain('no_available_route')
+  })
+
+  it('shows the reason even when the run died before emitting any event', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[]}
+        activePhase={null}
+        selectedNode={null}
+        onSelectPrompt={() => undefined}
+        runId="run-1"
+        metadata={failedMetadata}
+      />,
+    )
+
+    expect(html).toContain('llm.provider_invoke_failed')
+  })
+
+  it('shows nothing extra for a successful run', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={events}
+        activePhase={null}
+        selectedNode={null}
+        onSelectPrompt={() => undefined}
+        runId="run-1"
+        metadata={{ ...failedMetadata, status: 'success', error: null }}
+      />,
+    )
+
+    expect(html).not.toContain('llm.provider_invoke_failed')
+  })
+})

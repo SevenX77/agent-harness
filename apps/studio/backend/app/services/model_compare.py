@@ -134,12 +134,23 @@ def build_candidate_roles(
     """
     # Deferred import: the builder lives with the llm router; importing at module
     # load would create a router<->service cycle.
+    from app.core.adapters.transport_factory import build_gateway_adapter
     from app.routers.llm import CompareCandidateTestRequest, _compare_candidate_role
     from app.services.llm_credentials import load_credentials
 
     route = None if candidate.route in (None, "", "auto") else candidate.route
     request = CompareCandidateTestRequest(canonical_id=candidate.model_group_id, route_id=route)
-    role_entry = _compare_candidate_role(request, load_credentials())
+    credentials = load_credentials()
+    # `model_groups` is authoring intent; the engine resolves a role through its
+    # `fallback_chain`. Settings materializes on save (PUT /llm/roles/{name}) and
+    # a candidate role owes the engine the same executable shape — without this
+    # the side-run resolves to nothing and dies with `resource.no_available_route`.
+    role_entry = build_gateway_adapter().materialize_role(
+        {
+            "role": _compare_candidate_role(request, credentials),
+            "credentials": credentials,
+        }
+    )
 
     effective = node_effective_role(skill_dir, node_id)
     roles = {effective: role_entry.model_copy(deep=True)}

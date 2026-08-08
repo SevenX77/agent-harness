@@ -310,6 +310,16 @@ export interface BatchRunStatus {
   items: BatchRunItem[]
 }
 
+/**
+ * Why a run failed. The backend normalizes the engine / gateway / bare-exception
+ * shapes into these two fields so every surface renders one thing.
+ */
+export interface RunError {
+  code: string
+  message: string
+  details?: Record<string, unknown>
+}
+
 export interface RunMetadata {
   run_id: string
   status: RunStatus
@@ -319,7 +329,9 @@ export interface RunMetadata {
   kind?: 'run' | 'predict'
   metrics: TokensMetrics | null
   input_summary: string | null
-  git_status?: 'committed' | 'locked' | 'failed' | 'no_git' | null
+  git_status?: 'committed' | 'unchanged' | 'locked' | 'failed' | 'no_git' | null
+  // Present exactly when status === 'failed'.
+  error?: RunError | null
   artifact_ref?: ArtifactRef | null
   source_map_ref?: string | null
   execution_fingerprint?: string | null

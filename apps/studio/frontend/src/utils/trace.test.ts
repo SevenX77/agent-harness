@@ -383,3 +383,28 @@ describe('eventPhase (which node an event belongs to)', () => {
     expect(isRunScopedEvent(ev({ event_type: 'phase_start', phase_name: 'segment' }))).toBe(false)
   })
 })
+
+describe('llm_call model', () => {
+  it('names the model that answered', () => {
+    expect(
+      eventMessage({
+        schema_version: '1.0',
+        event_type: 'llm_call',
+        timestamp: '2026-08-08T00:00:00Z',
+        phase_name: 'review',
+        resolved_model: 'deepseek-v4-flash',
+      } as CallbackEvent),
+    ).toBe('LLM call completed · deepseek-v4-flash')
+  })
+
+  it('stays generic when the provider reported no model', () => {
+    expect(
+      eventMessage({
+        schema_version: '1.0',
+        event_type: 'llm_call',
+        timestamp: '2026-08-08T00:00:00Z',
+        phase_name: 'review',
+      } as CallbackEvent),
+    ).toBe('LLM call completed')
+  })
+})

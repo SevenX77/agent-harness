@@ -75,6 +75,10 @@ class LLMCallEvent(_EventBase):
     phase_name: str
     input_tokens: int
     output_tokens: int
+    # The model that actually answered this call, as the provider reported it on
+    # the response. A fallback chain means the role does not decide it up front,
+    # so per-call is the only place it is true.
+    resolved_model: str | None = None
     messages: list[dict[str, Any]] | None = None
     response_data: dict[str, Any] | None = None
     parent_node_id: str | None = None

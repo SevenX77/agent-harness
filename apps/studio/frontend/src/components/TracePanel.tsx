@@ -436,9 +436,12 @@ export function TracePanel({
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}
       <RunStatusBadge live={live} metadata={metadata} outcome={runOutcome} />
+      {/* When the strip runs out of room the run id gives way, not this: a node
+          name truncated to a bare "→" says nothing, while a run id shortened
+          from its tail still says which run. */}
       {linkEnabled && focusPhase ? (
         <span
-          className="min-w-0 shrink truncate text-xs text-muted-foreground"
+          className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground"
           title={`Linked to ${focusPhase}`}
         >
           → {focusPhase}

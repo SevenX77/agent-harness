@@ -10,7 +10,7 @@ function badgeClass(eventType: string): string {
     return 'border-warning-border bg-warning/10 text-warning'
   }
   if (eventType === 'llm_call' || eventType === 'prompt_captured') {
-    return 'border-primary/50 bg-primary/10 text-primary'
+    return 'border-primary/50 bg-primary/10 text-foreground'
   }
   if (eventType.includes('tool')) {
     return 'border-success-border bg-success/10 text-success'

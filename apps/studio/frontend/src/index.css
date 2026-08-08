@@ -51,6 +51,7 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-link: var(--link);
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
@@ -132,6 +133,10 @@
     --popover-foreground: oklch(0.145 0 0);
     --primary: oklch(0.457 0.24 277.023);
     --primary-foreground: oklch(0.962 0.018 272.314);
+    /* Brand hue that is legible AS TEXT. --primary is a fill: on light it
+       already clears AA (8.07:1 on white) so --link matches it here, and on
+       dark it is lifted (see .dark). Locked by src/color-language.test.ts. */
+    --link: oklch(0.457 0.24 277.023);
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.21 0.006 285.885);
     --muted: oklch(0.97 0 0);
@@ -205,6 +210,9 @@
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.398 0.195 277.366);
     --primary-foreground: oklch(0.962 0.018 272.314);
+    /* Same hue as --primary, lifted from 1.78:1 to 6.54:1 on --card so brand
+       coloured text is actually readable in the theme the product ships. */
+    --link: oklch(0.7 0.13 277.366);
     --secondary: oklch(0.274 0.006 286.033);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);

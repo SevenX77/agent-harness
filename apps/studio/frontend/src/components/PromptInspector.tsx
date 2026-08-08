@@ -39,7 +39,7 @@ export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) 
       <DialogContent className="flex h-[80vh] max-w-5xl flex-col overflow-hidden p-0 sm:max-w-5xl">
         <DialogHeader className="border-b border-border bg-muted/30 px-6 py-4">
           <DialogTitle className="flex items-center gap-2 text-base">
-            <MessageSquare className="size-5 text-primary" />
+            <MessageSquare className="size-5 text-link" />
             Prompt Inspector: {eventPhase(promptEvent)}
             {model ? (
               <span
@@ -75,7 +75,7 @@ export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) 
                 ? jsonText(promptEvent.resolved_prompt)
                 : jsonText(promptEvent.messages ?? undefined)}
             </PromptPayload>
-            <div className="mt-3 flex items-center gap-1 text-xs font-medium text-primary">
+            <div className="mt-3 flex items-center gap-1 text-xs font-medium text-muted-foreground">
               <CheckCircle className="size-3" />
               Rendered prompt payload
             </div>

@@ -579,9 +579,7 @@ export function TracePanel({
       <div className="min-h-0 flex-1 p-4 pb-0">
         <TraceEventList
           events={filter.filteredEvents}
-          activePhase={focusPhase}
           selectedEventId={selectedEventId}
-          linkEnabled={linkEnabled}
           followStream={live}
           streamKey={runId}
           onSelectPrompt={onSelectPrompt}

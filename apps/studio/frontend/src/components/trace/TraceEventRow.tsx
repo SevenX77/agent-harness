@@ -27,7 +27,6 @@ interface TraceEventRowProps {
   index: number
   eventId: string
   selected?: boolean
-  highlighted?: boolean
   expanded?: boolean
   onToggleExpanded?: () => void
   onSelectPrompt: (index: number) => void
@@ -39,7 +38,6 @@ export function TraceEventRow({
   index,
   eventId,
   selected = false,
-  highlighted = false,
   expanded,
   onToggleExpanded,
   onSelectPrompt,
@@ -86,11 +84,9 @@ export function TraceEventRow({
         className={`block w-full rounded-md border-0 px-2.5 py-1.5 text-left transition-colors ${
           selected
             ? 'bg-accent'
-            : highlighted
-              ? 'bg-warning/10'
-              : isError
-                ? 'bg-destructive/10 hover:bg-destructive/15'
-                : 'hover:bg-accent/50'
+            : isError
+              ? 'bg-destructive/10 hover:bg-destructive/15'
+              : 'hover:bg-accent/50'
         }`}
       >
         <div className="flex items-center justify-between gap-2">

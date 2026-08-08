@@ -49,7 +49,7 @@ describe('TraceDocumentPanel (n4-trace #18)', () => {
 
   it('shows a long value in full rather than cutting it off', () => {
     const huge = 'z'.repeat(5000)
-    const html = render([event({ event_type: 'phase_end', phase_name: 'draft', outputs: { blob: huge } })])
+    const html = render([event({ event_type: 'input_dispatch', to_phase: 'draft', blackboard_snapshot: { blob: huge } })])
 
     expect(html).toContain(huge)
     expect(html).not.toContain('truncated')

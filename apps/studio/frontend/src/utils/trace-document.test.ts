@@ -48,7 +48,7 @@ describe('buildTraceDocument (n4-trace #18 read-only full-trace document)', () =
 
   it("carries a state's full blackboard detail (D7)", () => {
     const doc = buildTraceDocument([
-      event({ event_type: 'phase_end', phase_name: 'draft', outputs: { chapter_title: 'Prologue', word_count: 1200 } }),
+      event({ event_type: 'input_dispatch', to_phase: 'draft', blackboard_snapshot: { chapter_title: 'Prologue', word_count: 1200 } }),
     ])
 
     const [blackboard] = doc.sections[0].entries[0].details
@@ -63,7 +63,7 @@ describe('buildTraceDocument (n4-trace #18 read-only full-trace document)', () =
     // surface that could not show it.
     const huge = 'z'.repeat(5000)
     const doc = buildTraceDocument([
-      event({ event_type: 'phase_end', phase_name: 'draft', outputs: { blob: huge } }),
+      event({ event_type: 'input_dispatch', to_phase: 'draft', blackboard_snapshot: { blob: huge } }),
     ])
 
     const [blackboard] = doc.sections[0].entries[0].details
@@ -77,5 +77,77 @@ describe('buildTraceDocument (n4-trace #18 read-only full-trace document)', () =
     ])
 
     expect(doc.sections[0].entries[0].errorMessage).toBe('boom')
+  })
+})
+
+describe('buildTraceDocument detail projection (engine field names)', () => {
+  it('shows the blackboard an input_dispatch actually carries', () => {
+    // The engine emits `blackboard_snapshot`; the document used to look for a
+    // field called `blackboard`, so every real run rendered as bare headlines
+    // with no content under them at all.
+    const doc = buildTraceDocument([
+      event({
+        event_type: 'input_dispatch',
+        to_phase: 'segment',
+        changed_keys: ['chapter_content'],
+        blackboard_snapshot: { chapter_content: 'once upon a time' },
+        dispatched_keys: ['chapter_content'],
+      }),
+    ])
+
+    const labels = doc.sections[0].entries[0].details.map((d) => d.label)
+    expect(labels).toContain('Blackboard')
+    const blackboard = doc.sections[0].entries[0].details.find((d) => d.label === 'Blackboard')
+    expect(blackboard?.content).toContain('once upon a time')
+  })
+
+  it('shows what an llm_call sent and got back', () => {
+    const doc = buildTraceDocument([
+      event({
+        event_type: 'llm_call',
+        phase_name: 'segment',
+        messages: [{ role: 'user', content: 'segment this' }],
+        response_data: { content: 'here you go' },
+      }),
+    ])
+
+    const details = doc.sections[0].entries[0].details
+    expect(details.map((d) => d.label)).toEqual(['Messages', 'Response'])
+    expect(details[0].content).toContain('segment this')
+    expect(details[1].content).toContain('here you go')
+  })
+
+  it('shows a tool call\'s arguments and its result', () => {
+    const doc = buildTraceDocument([
+      event({
+        event_type: 'tool_call',
+        phase_name: 'segment',
+        tool_name: 'Read',
+        args: { path: 'chapter.md' },
+        result: 'read 4kb',
+      }),
+    ])
+
+    const details = doc.sections[0].entries[0].details
+    expect(details.map((d) => d.label)).toEqual(['Args', 'Result'])
+    expect(details[1].content).toBe('read 4kb')
+  })
+
+  it('shows the context a phase started and ended with', () => {
+    const doc = buildTraceDocument([
+      event({ event_type: 'phase_start', phase_name: 'setup', context: { topic: 'a' } }),
+      event({ event_type: 'phase_end', phase_name: 'setup', context: { topic: 'b' }, metrics: { ms: 12 } }),
+    ])
+
+    expect(doc.sections[0].entries[0].details.map((d) => d.label)).toEqual(['Context'])
+    expect(doc.sections[0].entries[1].details.map((d) => d.label)).toEqual(['Context', 'Metrics'])
+  })
+
+  it('leaves out empty structures so short states stay one line', () => {
+    const doc = buildTraceDocument([
+      event({ event_type: 'phase_start', phase_name: 'setup', context: {} }),
+    ])
+
+    expect(doc.sections[0].entries[0].details).toEqual([])
   })
 })

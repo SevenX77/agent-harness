@@ -1,4 +1,4 @@
-import type { CallbackEvent, JsonObject, JsonValue } from '../api/types'
+import type { CallbackEvent, JsonValue } from '../api/types'
 import { eventMessage, eventPhase, eventTimeLabel, jsonText, tokenText } from './trace'
 
 // ── Read-only full-trace document (n4-trace #18, spec 04 D4/D7) ─────────────
@@ -40,34 +40,59 @@ export interface TraceDocument {
   sections: TraceDocumentSection[]
 }
 
-function isJsonObject(value: JsonValue | undefined): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function detail(label: string, value: JsonValue | undefined): TraceDocumentDetail[] {
-  if (value === undefined || value === null) {
-    return []
-  }
-  const serialized = jsonText(value)
-  if (serialized === '' || serialized === '{}' || serialized === '[]') {
-    return []
-  }
-  return [{ label, content: serialized }]
-}
-
 /**
- * Every structured value a state carries: its blackboard snapshot, the inputs it
- * received, the prompt variables and the resolved prompt.
+ * The structured fields the engine's events actually carry, in reading order,
+ * with the name a person would call them.
+ *
+ * Taken from the event contracts in
+ * `packages/graph-agent/src/graph_agent/callbacks/events.py` — the document is
+ * only as complete as this list is faithful. It once looked for `blackboard` /
+ * `inputs` / `outputs`, which no engine event emits, so every real run rendered
+ * as bare headlines with nothing beneath them.
  */
+const DETAIL_FIELDS: ReadonlyArray<readonly [field: string, label: string]> = [
+  ['initial_context', 'Initial context'],
+  ['blackboard_snapshot', 'Blackboard'],
+  ['changed_keys', 'Changed keys'],
+  ['dispatched_keys', 'Dispatched keys'],
+  ['context', 'Context'],
+  ['variables', 'Variables'],
+  ['resolved_prompt', 'Resolved prompt'],
+  ['messages', 'Messages'],
+  ['response_data', 'Response'],
+  ['args', 'Args'],
+  ['result', 'Result'],
+  ['content', 'Working memory'],
+  ['errors', 'Errors'],
+  ['feedback', 'Feedback'],
+  ['evidence', 'Evidence'],
+  ['payload', 'Payload'],
+  ['metadata', 'Metadata'],
+  ['metrics', 'Metrics'],
+  ['final_context', 'Final context'],
+]
+
+function detailContent(value: JsonValue | undefined): string | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+  // A plain string is already the readable form; quoting it would only add noise.
+  const serialized = typeof value === 'string' ? value : jsonText(value)
+  const trimmed = serialized.trim()
+  if (trimmed === '' || trimmed === '{}' || trimmed === '[]') {
+    return null
+  }
+  return serialized
+}
+
+/** Every structured value this state carries, complete and in reading order. */
 function entryDetails(event: CallbackEvent): TraceDocumentDetail[] {
-  const blackboard = isJsonObject(event.blackboard) ? event.blackboard : event.outputs
-  const details = [
-    ...detail('Blackboard', blackboard),
-    ...detail('Inputs', event.inputs),
-    ...detail('Variables', event.variables),
-  ]
-  if (Array.isArray(event.resolved_prompt) && event.resolved_prompt.length > 0) {
-    details.push(...detail('Resolved prompt', event.resolved_prompt))
+  const details: TraceDocumentDetail[] = []
+  for (const [field, label] of DETAIL_FIELDS) {
+    const content = detailContent(event[field])
+    if (content !== null) {
+      details.push({ label, content })
+    }
   }
   return details
 }

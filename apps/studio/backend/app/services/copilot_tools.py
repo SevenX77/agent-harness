@@ -946,7 +946,7 @@ async def wait_for_run_tool(args: dict[str, Any]) -> dict[str, Any]:
     try:
         # 挂在 run_manager 既有的订阅队列上:run 结束时该队列收到 None,
         # 于是"等待"由事件驱动,不需要任何轮询。
-        queue = await run_manager.stream_run(run_id)
+        queue = await run_manager.stream_run(skill_id, run_id)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
         payload: Any = getattr(exc, "detail", None) or f"wait_for_run 失败: {exc}"
         return _text_result(payload, is_error=True)

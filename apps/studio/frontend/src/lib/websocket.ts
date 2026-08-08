@@ -2,9 +2,9 @@ import { wsUrl } from '../api/client'
 
 export type WebSocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
-export function runEventsWsUrl(runId: string, cursor?: string | null) {
+export function runEventsWsUrl(skillId: string, runId: string, cursor?: string | null) {
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
-  return wsUrl(`/ws/runs/${runId}${query}`)
+  return wsUrl(`/ws/skills/${encodeURIComponent(skillId)}/runs/${encodeURIComponent(runId)}${query}`)
 }
 
 export function nextBackoffMs(attempt: number) {

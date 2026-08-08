@@ -38,7 +38,7 @@ def _wire(monkeypatch: pytest.MonkeyPatch, *, status: str, artifacts: list[str])
 
     from app.services import run_manager as run_manager_module
 
-    async def fake_stream_run(_run_id: str) -> _Queue:
+    async def fake_stream_run(_skill_id: str, _run_id: str) -> _Queue:
         return _Queue()
 
     detail = SimpleNamespace(

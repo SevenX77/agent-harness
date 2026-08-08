@@ -1007,14 +1007,16 @@ class RunManager:
             )
         shutil.rmtree(run_dir)
 
-    async def stream_run(self, run_id: str, *, cursor: str | None = None) -> asyncio.Queue[dict[str, Any] | None]:
+    async def stream_run(
+        self,
+        skill_id: str,
+        run_id: str,
+        *,
+        cursor: str | None = None,
+    ) -> asyncio.Queue[dict[str, Any] | None]:
         record = self._runs.get(run_id)
         if record is None:
-            raise standard_http_exception(
-                "RESUME_CHECKPOINT_NOT_FOUND",
-                f"Run not found: {run_id}",
-                {"run_id": run_id},
-            )
+            return await self._replay_finished_run(skill_id, run_id, cursor=cursor)
         replay: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         try:
             events = _events_after_cursor(record.events, cursor=cursor)
@@ -1028,6 +1030,41 @@ class RunManager:
             record.subscribers.append(replay)
         else:
             await replay.put(None)
+        return replay
+
+    async def _replay_finished_run(
+        self,
+        skill_id: str,
+        run_id: str,
+        *,
+        cursor: str | None,
+    ) -> asyncio.Queue[dict[str, Any] | None]:
+        """Serve a run that no longer has an in-memory record from its files.
+
+        A record lives only as long as the run and only inside the process that
+        ran it — a predict's transient record lasts a few hundred milliseconds,
+        and every record dies with a restart. The run's own directory outlives
+        both, so it is what a late subscriber reads. Only a run that exists
+        nowhere is refused.
+        """
+        run_dir = run_dir_for(skill_id, run_id)
+        if not (run_dir / "run_metadata.json").exists():
+            raise standard_http_exception(
+                "RESUME_CHECKPOINT_NOT_FOUND",
+                f"Run not found: {run_id}",
+                {"skill_id": skill_id, "run_id": run_id},
+            )
+        replay: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        events = _read_events(run_dir / "trace.jsonl", run_id=run_id)
+        try:
+            events = _events_after_cursor(events, cursor=cursor)
+        except (StreamCursorExpiredError, StreamCursorGapError, ValueError) as exc:
+            await replay.put(_stream_error_envelope(run_id, exc).model_dump(mode="json"))
+            await replay.put(None)
+            return replay
+        for event in events:
+            await replay.put(event.model_dump(mode="json"))
+        await replay.put(None)
         return replay
 
     async def shutdown(self) -> None:

@@ -2,7 +2,7 @@ import type { CallbackEvent, EventEnvelope, RunMetadata } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { countLlmFallbacks, isPredictTrace } from '../utils/trace'
+import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
 import { AlertTriangle, ArrowLeft, BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge } from './ui/badge'
@@ -13,13 +13,17 @@ import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
 import { TraceFilter } from './trace/TraceFilter'
 import { TraceSearchBar } from './trace/TraceSearchBar'
-import { VirtualTraceList } from './trace/VirtualTraceList'
+import { TraceEventList } from './trace/TraceEventList'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 // Re-exported so existing importers (`@/components/TracePanel`) keep working;
 // the canonical definition now lives in studio/hitl-prompt to give the
 // node-anchored box and this panel one shared source of truth.
 export type { TraceHitlResumeRequest }
+
+// The fallback shortcut narrows through the filter's own search, rather than
+// owning a fifth kind of filter state that only one badge can set.
+const FALLBACK_SEARCH_TERM = 'llm_fallback'
 
 interface TracePanelProps {
   traceLogs: EventEnvelope[]
@@ -113,7 +117,26 @@ export function isGoldenlessAgentNode(
 }
 
 /** Header status: live view shows the stream state, history shows the verdict. */
-function RunStatusBadge({ live, metadata }: { live: boolean; metadata?: RunMetadata | null }) {
+function RunStatusBadge({
+  live,
+  metadata,
+  outcome,
+}: {
+  live: boolean
+  metadata?: RunMetadata | null
+  outcome: TraceRunOutcome
+}) {
+  if (live && outcome !== 'running') {
+    // The stream went quiet because the run finished — say which way it went
+    // rather than pulsing "Live" at a run that ended.
+    if (outcome === 'success') {
+      return <Badge variant="outline" className="text-success">Success</Badge>
+    }
+    if (outcome === 'interrupted') {
+      return <Badge variant="outline" className="text-warning">Interrupted</Badge>
+    }
+    return <Badge variant="outline" className="text-destructive">Failed</Badge>
+  }
   if (live) {
     return (
       <Badge variant="outline" className="gap-1.5 text-muted-foreground">
@@ -179,6 +202,7 @@ export function TracePanel({
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
+  const runOutcome = runOutcomeFromEvents(traceEvents)
 
   const [nodePromoting, setNodePromoting] = useState(false)
   // atom #32 entry①: offer per-node golden creation for the focused, golden-less
@@ -273,7 +297,7 @@ export function TracePanel({
       {isPredict ? (
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}
-      <RunStatusBadge live={live} metadata={metadata} />
+      <RunStatusBadge live={live} metadata={metadata} outcome={runOutcome} />
     </div>
   )
 
@@ -355,13 +379,12 @@ export function TracePanel({
         </div>
         <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
         <TraceFilter
-          eventTypes={filter.eventTypes}
           phases={filter.phases}
-          selectedTypes={filter.selectedTypes}
+          selectedCategories={filter.selectedCategories}
           selectedPhases={filter.selectedPhases}
           activePhase={linkEnabled ? focusPhase : null}
-          onToggleType={filter.toggleType}
-          onTogglePhase={filter.togglePhase}
+          onSelectCategories={filter.setSelectedCategories}
+          onSelectPhases={filter.setSelectedPhases}
           onClear={filter.clearFilters}
         />
         <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -386,8 +409,10 @@ export function TracePanel({
                 <button
                   type="button"
                   aria-label={`Filter ${fallbackCount} LLM fallback event${fallbackCount === 1 ? '' : 's'}`}
-                  aria-pressed={filter.selectedTypes.includes('llm_fallback')}
-                  onClick={() => filter.toggleType('llm_fallback')}
+                  aria-pressed={filter.searchTerm === FALLBACK_SEARCH_TERM}
+                  onClick={() => filter.setSearchTerm(
+                    filter.searchTerm === FALLBACK_SEARCH_TERM ? '' : FALLBACK_SEARCH_TERM,
+                  )}
                   className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
                 >
                   <AlertTriangle className="size-3" />
@@ -429,7 +454,7 @@ export function TracePanel({
         ) : null}
       </div>
       <div className="min-h-0 flex-1 p-4 pb-0">
-        <VirtualTraceList
+        <TraceEventList
           events={filter.filteredEvents}
           activePhase={focusPhase}
           selectedEventId={selectedEventId}

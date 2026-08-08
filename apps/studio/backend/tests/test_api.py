@@ -24,6 +24,7 @@ from graph_agent.callbacks.events import (
     RunStartedEvent,
 )
 from graph_agent.core.result_contracts import NodeRunResult, RunResultSnapshot, RunResultsRef
+from starlette.websockets import WebSocketDisconnect
 
 from tests.conftest import copy_skill
 
@@ -630,7 +631,7 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert body["status"] == "running"
     run_id = body["run_id"]
 
-    with client.websocket_connect(f"/ws/runs/{run_id}") as websocket:
+    with client.websocket_connect(f"/ws/skills/text-segmentation/runs/{run_id}") as websocket:
         stream_events = [websocket.receive_json() for _ in range(6)]
     event_types = [event["event_type"] for event in stream_events]
     assert event_types == [
@@ -646,7 +647,7 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert [event["seq"] for event in stream_events] == [1, 2, 3, 4, 5, 6]
     assert stream_events[0]["payload"]["event_type"] == "run_started"
 
-    with client.websocket_connect(f"/ws/runs/{run_id}?cursor={stream_events[1]['cursor']}") as websocket:
+    with client.websocket_connect(f"/ws/skills/text-segmentation/runs/{run_id}?cursor={stream_events[1]['cursor']}") as websocket:
         resumed_events = [websocket.receive_json() for _ in range(4)]
     assert [event["seq"] for event in resumed_events] == [3, 4, 5, 6]
 
@@ -668,6 +669,58 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert (run_dir / "artifacts").is_dir()
     assert (run_dir / "checkpoints.db").exists()
     assert (run_dir.parent / "latest" / "run_metadata.json").exists()
+
+
+def test_ws_replays_a_finished_run_from_disk(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run whose in-memory record is gone still streams, replayed from its trace file.
+
+    The in-memory record is the only live event source, and it dies with the run
+    (a predict's transient record lives ~0.3s — shorter than the frontend needs to
+    learn the run id, render the panel and finish the WebSocket handshake). The
+    account on disk outlives it, so a subscriber that arrives late reads the run
+    from there instead of being turned away with RESUME_CHECKPOINT_NOT_FOUND.
+    """
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
+
+    run_id = client.post(
+        "/api/skills/text-segmentation/runs",
+        json={"input_data": {"input_text": "hello"}},
+    ).json()["run_id"]
+
+    for _ in range(20):
+        detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "success":
+            break
+        time.sleep(0.05)
+
+    # Drop the in-memory record: exactly the state a late subscriber meets.
+    run_manager._runs.pop(run_id, None)
+
+    with client.websocket_connect(f"/ws/skills/text-segmentation/runs/{run_id}") as websocket:
+        replayed = [websocket.receive_json() for _ in range(6)]
+
+    assert [event["event_type"] for event in replayed] == [
+        "run_started",
+        "phase_start",
+        "llm_call",
+        "phase_end",
+        "finish_task",
+        "run_ended",
+    ]
+    assert [event["seq"] for event in replayed] == [1, 2, 3, 4, 5, 6]
+    assert [event["run_id"] for event in replayed] == [run_id] * 6
+
+
+def test_ws_rejects_a_run_that_exists_nowhere(client: TestClient) -> None:
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/skills/text-segmentation/runs/never-ran") as websocket:
+            websocket.receive_json()
 
 
 def test_successful_run_triggers_auto_commit(

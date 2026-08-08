@@ -33,8 +33,6 @@ interface TraceEventRowProps {
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
-export const TRACE_EVENT_ROW_HEIGHT = 128
-
 export function TraceEventRow({
   event,
   index,
@@ -69,8 +67,8 @@ export function TraceEventRow({
   const timeLabel = eventTimeLabel(event)
 
   return (
-    <div className="relative pl-6" style={{ minHeight: TRACE_EVENT_ROW_HEIGHT - 20 }}>
-      <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-background ${eventColor(event.event_type)}`} />
+    <div className="relative pl-5">
+      <div className={`absolute -left-[7px] top-2 size-3 rounded-full border-2 border-background ${eventColor(event.event_type)}`} />
       <button
         type="button"
         data-trace-event-id={eventId}
@@ -84,7 +82,7 @@ export function TraceEventRow({
           }
           onSelectEvent?.(index, event)
         }}
-        className={`block w-full rounded-md border p-3 text-left shadow-sm transition-colors ${
+        className={`block w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
           selected
             ? 'border-primary/60 bg-primary/10'
             : highlighted
@@ -94,7 +92,7 @@ export function TraceEventRow({
                 : 'border-border bg-card hover:bg-accent/50'
         }`}
       >
-        <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2">
             {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
             <EventTypeBadge eventType={event.event_type} />
@@ -144,8 +142,11 @@ export function TraceEventRow({
             </span>
           ) : null}
         </div>
-        <div className="text-xs font-medium uppercase text-muted-foreground">{eventPhase(event)}</div>
-        <p className="mt-1 text-sm text-muted-foreground">{eventMessage(event)}</p>
+        <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
+          <span className="font-medium uppercase text-foreground/70">{eventPhase(event)}</span>
+          <span className="mx-1.5 text-border">·</span>
+          {eventMessage(event)}
+        </p>
         {isError && typeof event.error_message === 'string' ? (
           <p className="mt-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive">
             {event.error_message}

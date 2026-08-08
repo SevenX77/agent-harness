@@ -127,40 +127,43 @@ class PredictorService:
             if exc.error_code == "engine.predict_deadlock":
                 raise PredictDeadlockError(exc.error_payload["phase_name"], exc.error_payload["actual_path"]) from exc
             raise exc
+        else:
+            if isinstance(result, dict) and "error_code" in result and "success" not in result:
+                error_payload = result.get("error_payload")
+                raise PredictArtifactError(
+                    str(result["error_code"]),
+                    error_payload if isinstance(error_payload, dict) else {},
+                    run_id=result.get("run_id") if isinstance(result.get("run_id"), str) else None,
+                    retryable=bool(result.get("retryable", False)),
+                )
+            if isinstance(result, dict):
+                result = RunResult.model_validate(result)
+            result = result.model_copy(update=_result_artifact_fields(art_ref))
+            # 状态对等(决议 2026-08-03 D2):这次 Predict 的结论只判一次。落盘的账、
+            # 广播的 gate、前端的判定共用它,不各自再推一遍。
+            status = export_predict_diagnostics(result).status
+            self._persist_predict_result(
+                skill_dir,
+                result.run_id,
+                result,
+                status=status,
+                content_hash=art_ref["content_hash"],
+                artifact_ref=art_ref,
+                runtime_config=runtime_config,
+            )
+            publish_skill_gate_from_thread(
+                skill_id=skill_id,
+                gate="predict",
+                outcome="pass" if status == "success" else "fail",
+                content_hash=art_ref["content_hash"],
+            )
+            return cast(RunResult, result)
         finally:
+            # The live record dies only after the run has an account on disk to be
+            # read from; dropping it first leaves a window where a subscriber finds
+            # the run neither in memory nor on disk (decision 2026-08-08 D1).
             if event_subscriber is not None:
                 _finish_predict_event_stream(predict_run_id)
-
-        if isinstance(result, dict) and "error_code" in result and "success" not in result:
-            error_payload = result.get("error_payload")
-            raise PredictArtifactError(
-                str(result["error_code"]),
-                error_payload if isinstance(error_payload, dict) else {},
-                run_id=result.get("run_id") if isinstance(result.get("run_id"), str) else None,
-                retryable=bool(result.get("retryable", False)),
-            )
-        if isinstance(result, dict):
-            result = RunResult.model_validate(result)
-        result = result.model_copy(update=_result_artifact_fields(art_ref))
-        # 状态对等(决议 2026-08-03 D2):这次 Predict 的结论只判一次。落盘的账、
-        # 广播的 gate、前端的判定共用它,不各自再推一遍。
-        status = export_predict_diagnostics(result).status
-        self._persist_predict_result(
-            skill_dir,
-            result.run_id,
-            result,
-            status=status,
-            content_hash=art_ref["content_hash"],
-            artifact_ref=art_ref,
-            runtime_config=runtime_config,
-        )
-        publish_skill_gate_from_thread(
-            skill_id=skill_id,
-            gate="predict",
-            outcome="pass" if status == "success" else "fail",
-            content_hash=art_ref["content_hash"],
-        )
-        return cast(RunResult, result)
 
     def export_diagnostics(self, result: RunResult) -> PredictDiagnosticExport:
         """Expose PredictResult through the Studio in-process diagnostic contract."""

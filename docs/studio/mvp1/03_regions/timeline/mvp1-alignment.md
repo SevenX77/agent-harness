@@ -1,7 +1,7 @@
 ---
 module: 03_regions/timeline
 doc: mvp1-alignment
-status: FROZEN（TimelinePanel 只列历史 run；TracePanel/PromptInspector/RunDetailDrawer/useRunStream 都存在但未挂主流程 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-08-07 viewed-run 决议落地:timeline 区域三视图=历史列表/所查 run 的 Trace 视图/EdgeContext,由 Workspace viewedTrace 状态分流(Panels.tsx timeline 分支);run 结束可返回列表;predict 以 kind 判别入列;命名统一 区域=Timeline/视图=Trace/文档=Full Trace。决议:docs/design/2026-08-07-timeline-viewed-run-and-trace-ui-decision.md；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [compile-lint-structured-error, trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（run history / trace）· 01_workflows/03_compile.md（compile drawer coordination）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/04_run-and-verify.md（run history / trace）· 01_wor
 
 # timeline — MVP1 Alignment
 
-> **Tier**: region | **Owns**: `trace-dot-blackboard` inspector/timeline 切面 + `run-execution-node-status` 历史/trace 显示 + `compile-lint-structured-error` 布局协调切面 | **现状**: TimelinePanel 只列历史 run；TracePanel/PromptInspector/RunDetailDrawer/useRunStream 都存在但未挂主流程 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `trace-observability` · `run-execution` · `compile-lint` · `golden-eval` · `copilot-assist`
+> **Tier**: region | **Owns**: `trace-dot-blackboard` inspector/timeline 切面 + `run-execution-node-status` 历史/trace 显示 + `compile-lint-structured-error` 布局协调切面 | **现状**: viewed-run 模型已落地(2026-08-07):列表行点击进该 run 的 Trace 视图(历史一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件源),live run 流式复用同一视图并带返回;predict 行以 `RunMetadata.kind` 判别、仅 icon 区分。 | **Related**: [baseline](./baseline.md)（双向）· `trace-observability` · `run-execution` · `compile-lint` · `golden-eval` · `copilot-assist`
 
 ## 1. 定义
 `timeline` owns time-based runtime inspection: run/predict history, live trace stream, run-after full trace timeline, prompt inspector entry, model comparison tabs, and selected run summary.
@@ -23,7 +23,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策: run-after review starts from a run_id row.
 - 原话/来源: `01_workflows/04_run-and-verify.md:52` lists run history; `01_workflows/04_run-and-verify.md:81` defines clicking a run to see summary.
 - 测试: run row opens selected run summary; refresh updates rows; empty state is clear.
-- Status: run list live, detail click missing.
+- Status: live(2026-08-07:行点击经 Workspace.handleSelectRun 打开该 run 的 Trace 视图;predict 行以 kind 判别入列、仅 icon(FlaskConical)区分;run 结束由 archive 效果把终态 metadata 投影回列表)。run_id 概要层仍 target-design(见 F3)。
 - 归属: region `timeline`; capability `run-execution`.
 
 ### F2. Live Trace Auto-open
@@ -32,7 +32,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策: user should see tracing live while the graph runs.
 - 原话/来源: `01_workflows/04_run-and-verify.md:79` and `01_workflows/04_run-and-verify.md:86` define live trace.
 - 测试: Run opens panel; events append live; reconnection does not duplicate events.
-- Status: orphan.
+- Status: live(gate started(predict 与 run 同权)→ follow-run + open-trace(gate-state.ts);流式列表贴底跟随走 message-scroller;返回按钮任何时刻可回列表——2026-08-07 viewed-run 决议修复「跑过一次后列表不可达」)。
 - 归属: region `timeline`; capability `trace-observability`.
 
 ### F3. Full Trace Timeline And Editor
@@ -95,8 +95,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 `trace-observability` · `run-execution` · `compile-lint` · `golden-eval` · `copilot-assist`
 
 ## 8. gaps / 报警
-- 🚨 live trace: TracePanel/useRunStream 未挂主流程 ⚠️；目标 run/predict 时 Timeline 自动打开 live trace。
-- 🚨 run detail: RunDetailDrawer 不由 row 打开 ⚠️；目标 row 可开 detail/replay/compare/export。
+- ✅ live trace 已挂主流程(2026-08-07 清除旧报警):run/predict started 自动开面板并 follow 流;run 结束可返回列表(viewed-run 决议)。
+- ✅ run detail 回看已 live(行点击 → 该 run 完整 Trace 视图,只读回放)。仍缺:run_id 概要层(F3)、Replay 重跑、detail/export 动作。
 - 🚨 golden actions: 旧 sonner/batch copilot 入口残留 ⚠️；目标 golden analysis 入口为 Copilot analysis bar，Timeline 只提供 compare/detail。
 
 ## 交叉引用（链接, 不复制）

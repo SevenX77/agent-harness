@@ -32,7 +32,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策: full trace must be human-readable, not raw jsonl.
 - 原话/来源: `01_workflows/04_run-and-verify.md:81` defines run-after behavior; `01_workflows/04_run-and-verify.md:104` records the readable-doc decision.
 - 测试: summary appears for selected run; full trace opens timeline and read-only editor; payload truncation does not crash UI.
-- Status: target-design.
+- Status: 部分 live(2026-08-07 viewed-run 决议:列表点某次 → 该 run 完整 trace 视图(一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件缓存,修复「Full Trace 永远读实时流」的脱钩);predict 行以 RunMetadata.kind 判别。仍 target-design:run_id 概要中间层、编辑器跳段)。
 - 归属: regions `timeline`, `editor`; platform `engine`.
 
 ### F3. Focus Determines Trace Granularity

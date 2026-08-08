@@ -314,6 +314,9 @@ export interface RunMetadata {
   run_id: string
   status: RunStatus
   started_at: string
+  // Timeline F1: predict attempts share the run list and differ by this field
+  // alone (PM: predict 行仅用 icon 区分); absent on pre-kind data means "run".
+  kind?: 'run' | 'predict'
   metrics: TokensMetrics | null
   input_summary: string | null
   git_status?: 'committed' | 'locked' | 'failed' | 'no_git' | null

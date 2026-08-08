@@ -67,6 +67,7 @@ describe('Panels timeline HitL bridge', () => {
           skillId="story-deconstruction"
           selectedNode={null}
           runId="run-1"
+          traceView={{ source: "live" }}
           traceEvents={oneEvent}
           onSubmitHitlResponse={onSubmitHitlResponse}
         />

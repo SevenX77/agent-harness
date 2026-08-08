@@ -1,379 +1,396 @@
 {
- "id": "n4_trace_impl",
- "title": "Trace 去黑盒 · 实施详情",
- "design_ref": "n4_trace_design",
- "intro": "本页是 Trace 去黑盒 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_trace_design（原子 #14–#29）。代码按『文件名 + 函数/对象名』引用。事件契约 EventEnvelope + 消费者图见 n4_trace_mech。现状：事件流式（#14）、历史回看（#15）、检索（#21）、失败红灯（#22）、Properties 净化（#26）已接实且符合；缺口集中在去黑盒的可读化——agent 折叠（#16）、focus 粒度（#17）、完整 trace 文档（#18）、dot 操作记录（#19，依赖引擎）、Prompt 三视图回溯/历史接线（#20，findPromptEvent 死代码 + 历史 trace no-op）、模型对比（#23，P8 未建契约）、agent 内联展开（#24）、重试徽章（#25）、payload 截断（#27）、命名正名（#28）。本 surface 不产单独 femods，复用 run 登记的『运行事件流订阅 / 事件→节点态派生』。",
- "functions": [
-  {
-   "n": 14,
-   "cap": "trace-live-stream",
-   "design_ref": "n4-atom-14",
-   "current": "现状：已实现且符合。handleRun 成功 setActivePanel('timeline') 自动开面板；useRunStream(runId) 连 WS、按 seq 去重 + gap 检测 + 100ms flush 进 events[]；TracePanel 经 VirtualTraceList 渲染。2026-07-05 运行参数可观测性补齐:gateway 在 LLM response_metadata 同时写 effective_runtime_settings(角色/route 解析结果)与 actual_runtime_settings(本次真实传给 provider 的 max_output_tokens、temperature authored/provider value、reasoning.enabled 及 source);Studio engine adapter 合并该 metadata,graph-agent callback_bridge 把它保留在 llm_call.response.response_metadata 中，Full Trace/事件 JSON 可直接看到真实调用值。",
-   "gap": "符合设计，无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。WS /ws/runs/{run_id}（D11 ok）live；gateway actual_runtime_settings + engine callback_bridge metadata 保留链路已覆盖。"
-  },
-  {
-   "n": 15,
-   "cap": "trace-history-replay",
-   "design_ref": "n4-atom-15",
-   "current": "现状：已实现且符合。timeline 点历史 run → getRunDetail 拉含 events 的封存详情 → TracePanel 同套渲染（历史态读封存 events、不流式）。",
-   "gap": "符合设计，无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接。GET /runs/{run_id}（get_run，trace 走 sealed store）live。"
-  },
-  {
-   "n": 16,
-   "cap": "trace-agent-folding",
-   "design_ref": "n4-atom-16",
-   "current": "现状：偏差。TraceEventRow.tsx 展开态 = `<pre>{JSON.stringify(event,null,2)}</pre>` 原始 JSON 倾倒，无分类/摘要/末尾总结。折叠源 copilot/tool-call-bubble.tsx（Read/Write/Bash→Explored/Worked/Ran 映射）存在但未接 TracePanel。",
-   "gap": "差距：把 copilot 侧的折叠思路（tool-call-bubble 的分类摘要）接进 TracePanel 的 agent 事件行，做『一行摘要可折叠 + 末尾自然语言总结』。数据已在事件流里，折叠是前端的活。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（agent tool_call/llm_call 事件已在流里）。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
-  },
-  {
-   "n": 17,
-   "cap": "trace-focus-granularity",
-   "design_ref": "n4-atom-17",
-   "current": "现状：偏差。TracePanelProps 无 selectedNode 入参（只有 activePhase 用于 Link views 高亮、不收窄列表）；历史回看 TimelinePanel 把 activePhase 写死 null；Workspace 算出 selectedNode/selectedNodeId/activeTracePhase 却不下传。",
-   "gap": "差距：TracePanel 加 selectedNode 入参——空（focus 空画布）显 run_id 概要；某节点显该节点 trace（按 phase 过滤事件）。把 Workspace 已有的节点焦点下传 TracePanel。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（事件带 phase_name，过滤纯前端）。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
-  },
-  {
-   "n": 18,
-   "cap": "trace-doc-editor",
-   "design_ref": "n4-atom-18",
-   "current": "现状：已实现且符合（2026-06-23 据代码核实，旧『未实施』已过时并订正）。trace-document.ts:90 buildTraceDocument 把整条 trace 渲成人能读、轻度格式化的只读文档；MonacoPanel（:184/187『Full Trace』）以只读模式承载，与 trace events 已连接。",
-   "gap": "已闭合（2026-06-23 核实）：只读 trace 文档编辑器已落地（buildTraceDocument + MonacoPanel Full Trace 只读模式），渲染纯前端。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（trace 数据已在 events / RunDetail，渲染纯前端）。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "修补+审计后真修通,重新翻绿(2026-06-20)"
-  },
-  {
-   "n": 19,
-   "cap": "trace-dot-blackboard",
-   "design_ref": "n4-atom-19",
-   "current": "现状：已实现且符合（2026-06-23 据代码核实，旧『偏差—缺操作记录流』已过时并订正）。EdgeContextView 既显黑板 snapshot + changed_keys，也显『上节点 end→下节点 start』的操作记录流：collectEdgeOperations（lib/edge-context.ts:90）按 from/to phase 从事件流收集 reduce（blackboard_reduce）/ dispatch（input_dispatch）/ inject（input_file_injected）/ persist（artifact_saved）四类 micro 操作，渲成『Operations (end → start)』（EdgeContextView.test.tsx:118/143 锁断言）。引擎确已推这些事件，非空占位。",
-   "gap": "已闭合（2026-06-23 核实）：节点间操作记录流已落地——引擎已推 reduce/dispatch/inject/persist 事件，前端 collectEdgeOperations 收集并渲染，不再是空槽/占位。",
-   "fe_status": "符合",
-   "be_dep": "已就绪并接通。节点间 micro 操作事件（blackboard_reduce/input_dispatch/input_file_injected/artifact_saved）已在事件流里、前端 collectEdgeOperations 消费；旧『契约待引擎定』已闭合。",
-   "fe_resync": "BE分析确认纯前端,已修复+测试(2026-06-20)"
-  },
-  {
-   "n": 20,
-   "cap": "trace-prompt-inspector",
-   "design_ref": "n4-atom-20",
-   "current": "现状：已实现且符合（2026-06-23 据代码核实，旧『偏差—回溯/历史未接线』已过时并订正）。PromptInspector 三视图 Template/Variables/Rendered 已接 findPromptEvent（utils/trace.ts:291）：live 在 TimelinePanel.tsx:93 调它回溯同 phase prompt_captured 的 template_source/variables 驱动三视图；历史 trace 的 TimelinePanel 也带 inspector 选择态、不再传 no-op handler。findPromptEvent 已被真调用，非死代码。",
-   "gap": "已闭合（2026-06-23 核实）：live + 历史均接 findPromptEvent，点 llm_call 回溯同 phase prompt_captured 补全 Template/Variables，no-op handler 已替换。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（prompt_captured 事件带 template_source/variables/resolved_prompt）。缺口在前端回溯/历史接线，非后端。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 21,
-   "cap": "trace-filter",
-   "design_ref": "n4-atom-21",
-   "current": "现状：已实现且符合。useTraceFilter 按类型+关键字+activePhase 联动过滤；TraceSearchBar + TraceFilter；顶栏『Showing N of M events』。",
-   "gap": "符合设计，无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（前端过滤）。"
-  },
-  {
-   "n": 22,
-   "cap": "trace-fail-redlight",
-   "design_ref": "n4-atom-22",
-   "current": "现状：已实现且符合。deriveNodeStatuses.isFailureEvent 显式判 validation_fail/retry_exhausted → 画布 error 红灯；TraceEventRow 对 internal_error/validation_fail 显 error_message。",
-   "gap": "符合设计，无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（失败事件已在流里）。"
-  },
-  {
-   "n": 23,
-   "cap": "trace-model-compare",
-   "design_ref": "n4-atom-23",
-   "current": "现状：已实现且符合（2026-06-23 据代码核实，旧『未实施—P8 纵切无契约』已过时并订正）。CompareRunDialog（components/studio/CompareRunDialog.tsx）是对比 run 启动器：候选直接引用 Settings 里已建好的角色（getRoles 读 llm_roles.yaml 的 role 名），多选后把 role 名交给 Workspace 的 onStartCompare，每个角色各跑一次该 skill，结果在 Trace 顶部 tab 间切换（run-compare.ts + 后端 run_compare.py）。注：落地用『引用现有 Settings 角色作候选』而非 spec 草案的『临时 role 物化』路径——是设计一致的简化（不在对话框里新建角色），非缺口。",
-   "gap": "已闭合（2026-06-23 核实）：模型对比已落地——候选=现有 Settings 角色多选、各跑一次、Trace tab 分组切换（CompareRunDialog + run-compare.ts + 后端 run_compare.py）。与 spec 草案差异：用现有角色作候选取代『临时 role 物化』，设计一致的简化。",
-   "fe_status": "符合",
-   "be_dep": "已就绪并接通。后端 run_compare.py 承接多角色对比，候选复用现有 llm_roles（无需临时 role 物化）；旧『未建契约』已闭合。",
-   "fe_resync": "trace/canvas/node 后端+前端齐(2026-06-20)"
-  },
-  {
-   "n": 24,
-   "cap": "trace-agent-inline-expand",
-   "design_ref": "n4-atom-24",
-   "current": "现状：偏差。无 agent **节点侧** '+' 内联展开执行子树入口；仅 Trace 面板事件行有 '+'（TraceEventRow.tsx:155-179）展开**单条 tool_call** 的 input/result（ToolCallSubtree，:213-241），落在 #16 面板侧、且只一条 tool 调用，缺设计要的节点侧载体 +『走了哪些子节点』维度。（旧标 fe_status=符合 与本 current=未实施 自相矛盾，已据代码改判偏差。）",
-   "gap": "差距：agent **节点侧** 提供 '+' 内联展开，就地显示该次执行的 tool / 子步骤子树（含走了哪些子节点；数据已在事件流，缺的是节点侧渲染）。与 #16 面板内折叠互补、是不同载体。target-design 未落地。",
-   "fe_status": "偏差",
-   "be_dep": "已就绪可接（agent 子步骤事件已在流里）。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
-  },
-  {
-   "n": 25,
-   "cap": "trace-retry-nudge",
-   "design_ref": "n4-atom-25",
-   "current": "现状：偏差。deriveNodeStatuses 已用 attempt 取最新重试、失败节点红灯 + TraceEventRow 显 error_message；缺『2/3 重试徽章』与重试用尽的 Error Stack 汇总视图。",
-   "gap": "差距：在 Trace 行/节点显示『当前重试/上限』徽章（2/3），retry_exhausted 时展开 Error Stack 列每次失败原因。attempt 数据事件里已有。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（validation_fail/retry/retry_exhausted 带 attempt）。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
-  },
-  {
-   "n": 26,
-   "cap": "trace-properties-clean",
-   "design_ref": "n4-atom-26",
-   "current": "现状：已实现且符合（已清）。PropertiesPanel.tsx 已无 selectedEdge / JSON.stringify / edge 倾倒；边/dot 黑板转移信息改道 EdgeContextView。",
-   "gap": "符合设计，无需改。",
-   "fe_status": "符合",
-   "be_dep": "无后端依赖（前端 cleanup 已完成）。"
-  },
-  {
-   "n": 27,
-   "cap": "trace-resilience",
-   "design_ref": "n4-atom-27",
-   "current": "现状：偏差。空态『Waiting for run events』已有（TracePanel traceEvents 为空时）；源切换 runId 重置已有（useRunStream 以 runId 为依赖整体重置）；缺 payload 截断——单条超大 payload 展开为原始 JSON 时无截断上限。",
-   "gap": "差距：补单条 payload 截断（展开/渲染前按上限截断 + 显式标注『已截断』），防超大 trace OOM。空态/源切换已符合。",
-   "fe_status": "符合",
-   "be_dep": "无后端依赖（前端截断）。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 28,
-   "cap": "trace-panel-naming",
-   "design_ref": "n4-atom-28",
-   "current": "现状：偏差。TracePanel 标题/aria-label 用『Trace Timeline』，与 run 历史 timeline 概念易混。",
-   "gap": "差距：把面板/工具条混淆的『Trace Timeline』命名正名为无歧义术语（与 run 历史 timeline、事件 trace 区分），命名逐字与导航/标题一致。纯前端 cleanup。",
-   "fe_status": "符合",
-   "be_dep": "无后端依赖（命名 cleanup）。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
-  },
-  {
-   "n": 29,
-   "cap": "trace-llm-fallback-visibility",
-   "design_ref": "n4-atom-29",
-   "current": "现状：已实现且符合（2026-07-16）。utils/trace.ts 新增 llmFallbackDetails()（解析 from/to_provider、context.from_route/to_route 的 provider_model_id、reason/role_name/provider_status_code、'<none>'=exhausted）、countLlmFallbacks()、eventModelName()（prompt_captured/model_resolved.resolved_model + llm_call.response_data.model_name），eventMessage/eventColor 补 llm_fallback/model_resolved 分支；EventTypeBadge 琥珀档；TraceEventRow 渲 FallbackBlock + 模型 chip；TracePanel 头部 run 级 fallback chip（点击 toggleType 过滤）；PromptInspector 标题显模型 chip。",
-   "gap": "符合设计，无需改。",
-   "fe_status": "符合",
-   "be_dep": "已就绪可接（本原子零后端改动）：gateway emit_llm_fallback_event（gateway_chat_model.py probe 异常/probe false/dispatch 异常三处发射）→ studio run_manager._queue_event_subscriber 已序列化进 WS + trace.jsonl（test_run_manager_gateway_events.py 钉死信封）。"
-  }
- ],
- "plan": [
-  {
-   "step": 1,
-   "what": "#17 focus 粒度：TracePanel 加 selectedNode 入参，把 Workspace 已有的节点焦点下传——空=run 概要、节点=该节点 trace（按 phase 过滤）。这是去黑盒最核心、纯前端、数据已就绪的缺口。",
-   "depends_on": "无（Workspace 已算出 selectedNode；事件带 phase_name）。",
-   "why": "前端独立、价值最高（focus 决定粒度是 spec D 段核心交互），先做。",
-   "block": "前端独立"
-  },
-  {
-   "step": 2,
-   "what": "#16 agent 折叠 + #24 agent 内联展开 + #25 重试徽章 + #20 Prompt 三视图回溯/历史接线：把 copilot tool-call-bubble 折叠思路接进 TracePanel（#16）、agent 节点 '+' 内联子树（#24）、重试徽章 + Error Stack（#25）；#20 让 live+历史都接 findPromptEvent（点 llm_call 回溯同 phase prompt_captured 补全 Template/Variables）、历史 TimelinePanel 自带 inspector 选择态替掉 no-op。四项都是 trace 可读化前端接线、数据已在事件流。",
-   "depends_on": "前端依赖 #17 的 focus 粒度（折叠/子树在某节点 trace 视图内更自然）。#20 数据（prompt_captured 字段）已具备，纯前端接线。",
-   "why": "前端独立但依赖 focus 粒度先落地的视图骨架，排第二。",
-   "block": "前端独立"
-  },
-  {
-   "step": 3,
-   "what": "#18 完整 trace 文档只读编辑器 + #27 payload 截断 + #28 命名正名。编辑器复用 MonacoPanel 只读；截断防 OOM；正名 cleanup。",
-   "depends_on": "前端依赖 #17（编辑器 focus 跳节点范围与 focus 粒度联动）。",
-   "why": "前端独立，体量较大（编辑器视图），排在核心交互之后。",
-   "block": "前端独立"
-  },
-  {
-   "step": 4,
-   "what": "#19 dot 操作记录 + #23 模型对比：前端先做空槽/占位 UI，等引擎补推节点间 micro 操作事件 / 多模型结果后填数据。",
-   "depends_on": "等后端：引擎 02-observability 补节点间 micro 操作事件 + 同一步多模型结果契约。",
-   "why": "后端先于前端——引擎契约没定前，前端只能做占位，排最后。",
-   "block": "等后端（引擎）"
-  },
-  {
-   "step": 5,
-   "what": "#14/#15/#21/#22/#26 无功能性改动：流式、历史回看、检索、失败红灯、Properties 净化现状均已接实且符合。现状留底 + 测试方案。（注：#20 Prompt 三视图为偏差，其回溯/历史接线已列在 step 2 的可读化返工里、不在本组。）",
-   "depends_on": "无。",
-   "why": "这几项已 live，相较 spec『零挂载』领先；不开实施任务。",
-   "block": "前端独立"
-  }
- ],
- "tests": [
-  {
-   "covers": "#14 live-stream + #15 history-replay + #27 resilience",
-   "atoms": [
-    14,
-    15,
-    27
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock WS 推 3 条事件（seq 1/2/3）→ 断言 useRunStream events[] 有 3 条、按序、去重。",
-    "推 seq 1/3（缺 2）→ 断言报 Run stream gap（可观测）。",
-    "无事件 → 断言 TracePanel 渲『Waiting for run events』空态。",
-    "runId 从 A 切到 B → 断言 events[] 重置、不串 A 的事件。",
-    "gateway test_gateway_response_metadata_reports_actual_call_runtime_settings:断言 response_metadata.actual_runtime_settings 展示 max_output_tokens、temperature authored/provider value、reasoning.enabled 及 source,同时 effective_runtime_settings 保留 role/route 解析值。",
-    "graph-agent test_callback_bridge_regression.py:断言 message.response_metadata.actual_runtime_settings 被 callback_bridge 保留到 llm_call.response.response_metadata。",
-    "RED：超大 payload 展开 → 断言『已截断』标注存在（待实现转 GREEN）。"
-   ],
-   "layer2": [
-    "真跑一个 skill，看 Trace 面板事件实时流入、自动开面板。",
-    "跑完点历史 run，看完整 trace 回放。",
-    "切 live run → 历史 run，确认事件不串台。"
-   ],
-   "shots": [
-    "run 时事件流式进 Trace 面板",
-    "历史 run 回看完整 trace",
-    "无事件时显 Waiting for run events 空态"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#16 agent-folding + #24 inline-expand + #25 retry-nudge（偏差/未实施 · RED）",
-   "atoms": [
-    16,
-    24,
-    25
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED #16：当前 TraceEventRow 展开=原始 JSON → 断言『agent 事件显分类折叠摘要 + 末尾总结』失败（待实现）。",
-    "RED #24：断言『agent 节点 + 内联展开执行子树』入口存在失败（待实现）。",
-    "#25：mock retry/validation_fail 带 attempt=2、上限 3 → 断言显『2/3』重试徽章；retry_exhausted → 断言 Error Stack 列每次失败。"
-   ],
-   "layer2": [
-    "真跑一个含 agent 节点的 skill，看 agent 输出是否分类折叠（目标）vs 现状原始 JSON。",
-    "点 agent 节点 '+'，看是否内联展开执行子树。",
-    "造一个会重试的 validator，看 2/3 徽章 + 失败 Error Stack。"
-   ],
-   "shots": [
-    "agent 输出分类折叠摘要（Worked/Explored/Thought）",
-    "agent 节点 + 内联展开执行子树",
-    "validator 重试显 2/3 徽章 + 失败 Error Stack"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
-  },
-  {
-   "covers": "#17 focus-granularity + #18 doc-editor（偏差/未实施 · RED）",
-   "atoms": [
-    17,
-    18
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED #17：当前 TracePanelProps 无 selectedNode → 断言『focus 某节点时 trace 收窄到该节点』失败（待实现）。",
-    "实现后 #17：mock selectedNode=节点A → 断言事件过滤到 A 的 phase；selectedNode=null → 断言显 run 概要。",
-    "RED #18：断言『存在只读 trace 文档编辑器』失败（待实现）。"
-   ],
-   "layer2": [
-    "目标落地前：点节点 trace 不收窄、无 run 概要、无完整 trace 文档编辑器。",
-    "落地后：点空白看 run 概要、点节点看该节点 trace + 编辑器跳该节点范围。"
-   ],
-   "shots": [
-    "focus 空画布显 run 概要",
-    "focus 节点显该节点 trace + 编辑器跳范围"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
-  },
-  {
-   "covers": "#19 dot-blackboard（偏差，操作记录依赖引擎 · RED）",
-   "atoms": [
-    19
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock input_dispatch/edge_transition → 断言 EdgeContextView 显黑板 snapshot + changed_keys（现状已符合部分）。",
-    "RED：断言『dot 显 end→start 操作记录流（reduce/截断/注入/落盘）』失败——依赖引擎 micro 事件（待引擎契约 + 前端填槽转 GREEN）。"
-   ],
-   "layer2": [
-    "真跑后点画布连线上的 dot，看黑板内容 + changed_keys（现状）。",
-    "目标：dot 同显节点间操作记录（待引擎 micro 事件到位后真跑验证）。"
-   ],
-   "shots": [
-    "点 dot 看黑板 snapshot + Keys changed",
-    "dot 显 end→start 操作记录（待引擎）"
-   ],
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
-  },
-  {
-   "covers": "#21 filter + #22 fail-redlight + #26 properties-clean（符合）",
-   "atoms": [
-    21,
-    22,
-    26
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "#21：输关键字/勾类型 → 断言 useTraceFilter 过滤后『Showing N of M』正确。",
-    "#22：validation_fail/retry_exhausted 事件 → 断言对应节点 error 红灯 + Error Message 显示。",
-    "#26：断言 PropertiesPanel 不渲 selectedEdge 原始 JSON（dot 改道 EdgeContextView）。"
-   ],
-   "layer2": [
-    "用关键字筛事件，看计数。",
-    "真跑一个会失败的节点，看红灯 + Error Message。"
-   ],
-   "shots": [
-    "关键字筛事件 + Showing N of M",
-    "失败节点红灯 + Error Message"
-   ]
-  },
-  {
-   "covers": "#20 prompt-inspector（偏差·回溯/历史 RED）+ #23 model-compare（未实施 P8）+ #28 panel-naming（偏差 RED）",
-   "atoms": [
-    20,
-    23,
-    28
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "#20 符合部分：点一条 prompt_captured『Inspect prompt』→ 断言 PromptInspector 三视图 Template/Variables/Rendered 各取对字段。",
-    "RED #20：点一条 llm_call『Inspect prompt』→ 断言三视图 Template/Variables 有数据（经 findPromptEvent 回溯同 phase prompt_captured）失败——现 Workspace 直接传 events[promptIndex].payload、findPromptEvent 零调用（待接线转 GREEN）。",
-    "RED #20 历史：历史 trace（TimelinePanel 传 onSelectPrompt no-op）点事件 → 断言打开 Inspector 失败（待补历史 inspector 选择态）。",
-    "RED #23：断言『run 选 model-group/bundle/role → 临时 role 解析 → Trace 顶部对比 tab』存在失败——P8 纵切无契约（待补）。",
-    "RED #28：断言面板命名已正名（非混淆的 Trace Timeline）失败（待实现）。"
-   ],
-   "layer2": [
-    "现状：点 llm_call 的三视图 Template/Variables 空；历史 trace 点事件打不开 Inspector。",
-    "落地后 #20：点 llm_call 三视图经回溯补全；历史 trace 也能 Inspect。",
-    "落地后 #23：run 选候选跑对比，顶部 tab 切不同候选结果。",
-    "落地后 #28：面板名无歧义。"
-   ],
-   "shots": [
-    "点 llm_call 三视图经回溯补全 Template/Variables",
-    "历史 trace 可 Inspect prompt",
-    "run 模型对比顶部 tab 切候选结果（P8，待契约）"
-   ],
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
-  },
-  {
-   "covers": "#29 llm-fallback-visibility",
-   "atoms": [
-    29
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "utils/trace.test.ts：eventMessage 人话化（A → B / failed — no remaining route）、eventColor='bg-warning'、llmFallbackDetails 解析双模型/reason/role/429/exhausted 且无 context 不炸、非 fallback 事件返 null、countLlmFallbacks 计数、eventModelName 三来源（prompt_captured/model_resolved.resolved_model + llm_call.response_data.model_name）+空值返 null。",
-    "TraceEventRow.fallback.test.tsx：fallback 行渲 Provider fallback 块（双模型 + reason）、exhausted 显 no remaining route、普通事件不渲块；模型 chip 在 prompt_captured/llm_call 行出现、无模型不渲。",
-    "TracePanel.test.tsx：run 级 chip 计数与单复数文案 + aria-label（Filter N LLM fallback events）、无降级的 run 不渲 chip。",
-    "PromptInspector.test.tsx：标题渲 resolved_model chip、无模型不渲。"
-   ],
-   "layer2": [
-    "真跑一个 primary route 故障（如错 API key 的首选 route + 可用兜底 route）的 skill：Trace 面板出现琥珀 llm_fallback 行与 run 级『N LLM fallback』chip，点 chip 只剩降级事件；点 prompt 行模型 chip 与 PromptInspector 标题读到实际模型。"
-   ],
-   "shots": [
-    "trace 琥珀 Provider fallback 块（模型 A → 模型 B + 原因）",
-    "run 级 LLM fallback 计数 chip（点击过滤）",
-    "prompt_captured 行模型 chip 与 PromptInspector 标题模型"
-   ]
-  }
- ]
+  "id": "n4_trace_impl",
+  "title": "Trace 去黑盒 · 实施详情",
+  "design_ref": "n4_trace_design",
+  "intro": "本页是 Trace 去黑盒 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_trace_design（原子 #14–#29）。代码按『文件名 + 函数/对象名』引用。事件契约 EventEnvelope + 消费者图见 n4_trace_mech。现状：事件流式（#14）、历史回看（#15）、检索（#21）、失败红灯（#22）、Properties 净化（#26）已接实且符合；缺口集中在去黑盒的可读化——agent 折叠（#16）、focus 粒度（#17）、完整 trace 文档（#18）、dot 操作记录（#19，依赖引擎）、Prompt 三视图回溯/历史接线（#20，findPromptEvent 死代码 + 历史 trace no-op）、模型对比（#23，P8 未建契约）、agent 内联展开（#24）、重试徽章（#25）、payload 截断（#27）、命名正名（#28）。本 surface 不产单独 femods，复用 run 登记的『运行事件流订阅 / 事件→节点态派生』。",
+  "functions": [
+    {
+      "n": 14,
+      "cap": "trace-live-stream",
+      "design_ref": "n4-atom-14",
+      "current": "现状：已实现且符合(2026-08-07 viewed-run 决议落地并订正)。gate started(predict 与 run 同权)→ follow-run + open-trace(gate-state.ts:95-103)自动开面板并把流指向新 run;useRunStream(runId) 连 WS、按 seq 去重 + gap 检测 + 100ms flush;TracePanel 经 VirtualTraceList 渲染,流式贴底跟随/上滚释放/回到底部按钮走本地 message-scroller(spec §2.6);头部身份条含 run_id + Live 徽章 + 返回按钮(任何时刻可回历史列表,修复『跑过一次后列表不可达』)。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。WS /ws/runs/{run_id}（D11 ok）live；gateway actual_runtime_settings + engine callback_bridge metadata 保留链路已覆盖。"
+    },
+    {
+      "n": 15,
+      "cap": "trace-history-replay",
+      "design_ref": "n4-atom-15",
+      "current": "现状：已实现且符合(2026-08-07 viewed-run 决议重构)。Timeline 列表行点击 → Workspace.handleSelectRun 经 getRunDetail一次性拉取并缓存到 viewedTrace(source='history'),TracePanel 只读回放(无 Resume/Compare/Golden 动作),Full Trace 文档与PromptInspector 共读同一事件缓存(diagnostics 同源);predict 尝试同列表展示,以 RunMetadata.kind 判别、仅 icon(FlaskConical)区分;run 结束由 archive 效果把终态 metadata 投影回列表行。",
+      "gap": "符合设计,无需改。仍缺:run_id 概要中间层(D3/D4 target-design)与 Replay 重跑。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。GET /runs/{run_id}（get_run，trace 走 sealed store）live。"
+    },
+    {
+      "n": 16,
+      "cap": "trace-agent-folding",
+      "design_ref": "n4-atom-16",
+      "current": "现状：偏差。TraceEventRow.tsx 展开态 = `<pre>{JSON.stringify(event,null,2)}</pre>` 原始 JSON 倾倒，无分类/摘要/末尾总结。折叠源 copilot/tool-call-bubble.tsx（Read/Write/Bash→Explored/Worked/Ran 映射）存在但未接 TracePanel。",
+      "gap": "差距：把 copilot 侧的折叠思路（tool-call-bubble 的分类摘要）接进 TracePanel 的 agent 事件行，做『一行摘要可折叠 + 末尾自然语言总结』。数据已在事件流里，折叠是前端的活。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（agent tool_call/llm_call 事件已在流里）。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
+    },
+    {
+      "n": 17,
+      "cap": "trace-focus-granularity",
+      "design_ref": "n4-atom-17",
+      "current": "现状：已实现且符合(2026-08-07 据代码订正旧『偏差』)。TracePanel 有 selectedNode 入参(TracePanel.tsx focusPhase = selectedNode?.id ?? activePhase),focus 节点收窄列表并显 Focus chip,空画布=whole run;历史回看视图同样传 selectedNode(粒度规则两态一致)。",
+      "gap": "已闭合(focus 收窄)。仍缺:focus 空画布时的 run_id 概要层(属 #15 的概要 target-design)与编辑器跳该节点范围。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（事件带 phase_name，过滤纯前端）。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
+    },
+    {
+      "n": 18,
+      "cap": "trace-doc-editor",
+      "design_ref": "n4-atom-18",
+      "current": "现状：已实现且符合(2026-08-07 修复事件源脱钩)。buildTraceDocument 渲染人读只读文档(MonacoPanel『Full Trace』);trace-doc 面板读 viewed-run 的同一事件源(Panels.tsx trace-doc 分支消费 Workspace viewedTraceEvents)——回看历史 run 时 Full Trace即该 run 的文档,不再固定读实时流。",
+      "gap": "已闭合;与 timeline 视图/PromptInspector 同源(diagnostics SSOT)。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（trace 数据已在 events / RunDetail，渲染纯前端）。",
+      "fe_status_prev": "未实施",
+      "fe_resync": "修补+审计后真修通,重新翻绿(2026-06-20)"
+    },
+    {
+      "n": 19,
+      "cap": "trace-dot-blackboard",
+      "design_ref": "n4-atom-19",
+      "current": "现状：已实现且符合（2026-06-23 据代码核实，旧『偏差—缺操作记录流』已过时并订正）。EdgeContextView 既显黑板 snapshot + changed_keys，也显『上节点 end→下节点 start』的操作记录流：collectEdgeOperations（lib/edge-context.ts:90）按 from/to phase 从事件流收集 reduce（blackboard_reduce）/ dispatch（input_dispatch）/ inject（input_file_injected）/ persist（artifact_saved）四类 micro 操作，渲成『Operations (end → start)』（EdgeContextView.test.tsx:118/143 锁断言）。引擎确已推这些事件，非空占位。",
+      "gap": "已闭合（2026-06-23 核实）：节点间操作记录流已落地——引擎已推 reduce/dispatch/inject/persist 事件，前端 collectEdgeOperations 收集并渲染，不再是空槽/占位。",
+      "fe_status": "符合",
+      "be_dep": "已就绪并接通。节点间 micro 操作事件（blackboard_reduce/input_dispatch/input_file_injected/artifact_saved）已在事件流里、前端 collectEdgeOperations 消费；旧『契约待引擎定』已闭合。",
+      "fe_resync": "BE分析确认纯前端,已修复+测试(2026-06-20)"
+    },
+    {
+      "n": 20,
+      "cap": "trace-prompt-inspector",
+      "design_ref": "n4-atom-20",
+      "current": "现状：已实现且符合(2026-08-07 收敛为单挂载点)。PromptInspector 收敛到 Workspace 层单实例,live 与历史回看共用:promptIndex 经 findPromptEvent(utils/trace.ts)对 viewedTraceEvents 回溯同 phase prompt_captured;TimelinePanel 内部副本已删。",
+      "gap": "已闭合:live + 历史一条链,无并行第二实现。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（prompt_captured 事件带 template_source/variables/resolved_prompt）。缺口在前端回溯/历史接线，非后端。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 21,
+      "cap": "trace-filter",
+      "design_ref": "n4-atom-21",
+      "current": "现状：已实现且符合。useTraceFilter 按类型+关键字+activePhase 联动过滤；TraceSearchBar + TraceFilter；顶栏『Showing N of M events』。",
+      "gap": "符合设计，无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（前端过滤）。"
+    },
+    {
+      "n": 22,
+      "cap": "trace-fail-redlight",
+      "design_ref": "n4-atom-22",
+      "current": "现状：已实现且符合。deriveNodeStatuses.isFailureEvent 显式判 validation_fail/retry_exhausted → 画布 error 红灯；TraceEventRow 对 internal_error/validation_fail 显 error_message。",
+      "gap": "符合设计，无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（失败事件已在流里）。"
+    },
+    {
+      "n": 23,
+      "cap": "trace-model-compare",
+      "design_ref": "n4-atom-23",
+      "current": "现状：已实现且符合（2026-06-23 据代码核实，旧『未实施—P8 纵切无契约』已过时并订正）。CompareRunDialog（components/studio/CompareRunDialog.tsx）是对比 run 启动器：候选直接引用 Settings 里已建好的角色（getRoles 读 llm_roles.yaml 的 role 名），多选后把 role 名交给 Workspace 的 onStartCompare，每个角色各跑一次该 skill，结果在 Trace 顶部 tab 间切换（run-compare.ts + 后端 run_compare.py）。注：落地用『引用现有 Settings 角色作候选』而非 spec 草案的『临时 role 物化』路径——是设计一致的简化（不在对话框里新建角色），非缺口。",
+      "gap": "已闭合（2026-06-23 核实）：模型对比已落地——候选=现有 Settings 角色多选、各跑一次、Trace tab 分组切换（CompareRunDialog + run-compare.ts + 后端 run_compare.py）。与 spec 草案差异：用现有角色作候选取代『临时 role 物化』，设计一致的简化。",
+      "fe_status": "符合",
+      "be_dep": "已就绪并接通。后端 run_compare.py 承接多角色对比，候选复用现有 llm_roles（无需临时 role 物化）；旧『未建契约』已闭合。",
+      "fe_resync": "trace/canvas/node 后端+前端齐(2026-06-20)"
+    },
+    {
+      "n": 24,
+      "cap": "trace-agent-inline-expand",
+      "design_ref": "n4-atom-24",
+      "current": "现状：偏差。无 agent **节点侧** '+' 内联展开执行子树入口；仅 Trace 面板事件行有 '+'（TraceEventRow.tsx:155-179）展开**单条 tool_call** 的 input/result（ToolCallSubtree，:213-241），落在 #16 面板侧、且只一条 tool 调用，缺设计要的节点侧载体 +『走了哪些子节点』维度。（旧标 fe_status=符合 与本 current=未实施 自相矛盾，已据代码改判偏差。）",
+      "gap": "差距：agent **节点侧** 提供 '+' 内联展开，就地显示该次执行的 tool / 子步骤子树（含走了哪些子节点；数据已在事件流，缺的是节点侧渲染）。与 #16 面板内折叠互补、是不同载体。target-design 未落地。",
+      "fe_status": "偏差",
+      "be_dep": "已就绪可接（agent 子步骤事件已在流里）。",
+      "fe_status_prev": "未实施",
+      "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
+    },
+    {
+      "n": 25,
+      "cap": "trace-retry-nudge",
+      "design_ref": "n4-atom-25",
+      "current": "现状：偏差。deriveNodeStatuses 已用 attempt 取最新重试、失败节点红灯 + TraceEventRow 显 error_message；缺『2/3 重试徽章』与重试用尽的 Error Stack 汇总视图。",
+      "gap": "差距：在 Trace 行/节点显示『当前重试/上限』徽章（2/3），retry_exhausted 时展开 Error Stack 列每次失败原因。attempt 数据事件里已有。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（validation_fail/retry/retry_exhausted 带 attempt）。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
+    },
+    {
+      "n": 26,
+      "cap": "trace-properties-clean",
+      "design_ref": "n4-atom-26",
+      "current": "现状：已实现且符合（已清）。PropertiesPanel.tsx 已无 selectedEdge / JSON.stringify / edge 倾倒；边/dot 黑板转移信息改道 EdgeContextView。",
+      "gap": "符合设计，无需改。",
+      "fe_status": "符合",
+      "be_dep": "无后端依赖（前端 cleanup 已完成）。"
+    },
+    {
+      "n": 27,
+      "cap": "trace-resilience",
+      "design_ref": "n4-atom-27",
+      "current": "现状：偏差。空态『Waiting for run events』已有（TracePanel traceEvents 为空时）；源切换 runId 重置已有（useRunStream 以 runId 为依赖整体重置）；缺 payload 截断——单条超大 payload 展开为原始 JSON 时无截断上限。",
+      "gap": "差距：补单条 payload 截断（展开/渲染前按上限截断 + 显式标注『已截断』），防超大 trace OOM。空态/源切换已符合。",
+      "fe_status": "符合",
+      "be_dep": "无后端依赖（前端截断）。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 28,
+      "cap": "trace-panel-naming",
+      "design_ref": "n4-atom-28",
+      "current": "现状：已实现且符合(D3 命名统一,决议 2026-08-07)。一套口径:区域=Timeline(Toolbar 第4格 aria-label='Timeline'+列表标题)/视图=Trace(TracePanel 身份条 h3 'Trace'+run_id+状态徽章)/文档=Full Trace(第5格)。歧义的『Trace Timeline』不回归(测试锁定)。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "无后端依赖（命名 cleanup）。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "batch2 已修复+测试通过(2026-06-20)"
+    },
+    {
+      "n": 29,
+      "cap": "trace-llm-fallback-visibility",
+      "design_ref": "n4-atom-29",
+      "current": "现状：已实现且符合（2026-07-16）。utils/trace.ts 新增 llmFallbackDetails()（解析 from/to_provider、context.from_route/to_route 的 provider_model_id、reason/role_name/provider_status_code、'<none>'=exhausted）、countLlmFallbacks()、eventModelName()（prompt_captured/model_resolved.resolved_model + llm_call.response_data.model_name），eventMessage/eventColor 补 llm_fallback/model_resolved 分支；EventTypeBadge 琥珀档；TraceEventRow 渲 FallbackBlock + 模型 chip；TracePanel 头部 run 级 fallback chip（点击 toggleType 过滤）；PromptInspector 标题显模型 chip。",
+      "gap": "符合设计，无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接（本原子零后端改动）：gateway emit_llm_fallback_event（gateway_chat_model.py probe 异常/probe false/dispatch 异常三处发射）→ studio run_manager._queue_event_subscriber 已序列化进 WS + trace.jsonl（test_run_manager_gateway_events.py 钉死信封）。"
+    }
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#17 focus 粒度：TracePanel 加 selectedNode 入参，把 Workspace 已有的节点焦点下传——空=run 概要、节点=该节点 trace（按 phase 过滤）。这是去黑盒最核心、纯前端、数据已就绪的缺口。",
+      "depends_on": "无（Workspace 已算出 selectedNode；事件带 phase_name）。",
+      "why": "前端独立、价值最高（focus 决定粒度是 spec D 段核心交互），先做。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#16 agent 折叠 + #24 agent 内联展开 + #25 重试徽章 + #20 Prompt 三视图回溯/历史接线：把 copilot tool-call-bubble 折叠思路接进 TracePanel（#16）、agent 节点 '+' 内联子树（#24）、重试徽章 + Error Stack（#25）；#20 让 live+历史都接 findPromptEvent（点 llm_call 回溯同 phase prompt_captured 补全 Template/Variables）、历史 TimelinePanel 自带 inspector 选择态替掉 no-op。四项都是 trace 可读化前端接线、数据已在事件流。",
+      "depends_on": "前端依赖 #17 的 focus 粒度（折叠/子树在某节点 trace 视图内更自然）。#20 数据（prompt_captured 字段）已具备，纯前端接线。",
+      "why": "前端独立但依赖 focus 粒度先落地的视图骨架，排第二。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "#18 完整 trace 文档只读编辑器 + #27 payload 截断 + #28 命名正名。编辑器复用 MonacoPanel 只读；截断防 OOM；正名 cleanup。",
+      "depends_on": "前端依赖 #17（编辑器 focus 跳节点范围与 focus 粒度联动）。",
+      "why": "前端独立，体量较大（编辑器视图），排在核心交互之后。",
+      "block": "前端独立"
+    },
+    {
+      "step": 4,
+      "what": "#19 dot 操作记录 + #23 模型对比：前端先做空槽/占位 UI，等引擎补推节点间 micro 操作事件 / 多模型结果后填数据。",
+      "depends_on": "等后端：引擎 02-observability 补节点间 micro 操作事件 + 同一步多模型结果契约。",
+      "why": "后端先于前端——引擎契约没定前，前端只能做占位，排最后。",
+      "block": "等后端（引擎）"
+    },
+    {
+      "step": 5,
+      "what": "#14/#15/#21/#22/#26 无功能性改动：流式、历史回看、检索、失败红灯、Properties 净化现状均已接实且符合。现状留底 + 测试方案。（注：#20 Prompt 三视图为偏差，其回溯/历史接线已列在 step 2 的可读化返工里、不在本组。）",
+      "depends_on": "无。",
+      "why": "这几项已 live，相较 spec『零挂载』领先；不开实施任务。",
+      "block": "前端独立"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#14 live-stream + #15 history-replay + #27 resilience",
+      "atoms": [
+        14,
+        15,
+        27
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock WS 推 3 条事件(seq 1/2/3)→ 断言 useRunStream events[] 有 3 条、按序、去重。",
+        "推 seq 1/3(缺 2)→ 断言报 Run stream gap(可观测)。",
+        "无事件 → 断言 TracePanel 渲『Waiting for run events』空态。",
+        "viewed-run 分流(Panels.trace-mount.test.tsx):live 视图渲流式 TracePanel;traceView=null 且 runId 仍在 → 仍显历史列表(修 A 回归锁);history 视图渲只读回放且带返回按钮、无 Resume 动作。",
+        "gate-state.test.ts:predict started 与 run started 同样发 follow-run(修 B live 半边)。",
+        "trace-initial-scroll.test.ts:live=follow-end / 历史=start(回看从第一条读起)。"
+      ],
+      "layer2": [
+        "真跑一个 skill,看 Trace 面板事件实时流入、自动开面板。",
+        "跑完点返回 → 回到历史列表 → 点某次 → 完整 trace 只读回放(修 A)。",
+        "回看历史 run 时切 Full Trace,文档事件数 = 该 run 的事件数(修 C)。",
+        "切 live run → 历史 run,确认事件不串台。"
+      ],
+      "shots": [
+        {
+          "file": "n4-90-timeline-list.png",
+          "caption": "Timeline 列表:7 runs,predict 行与 run 行同款、仅 icon 不同"
+        },
+        {
+          "file": "n4-90-timeline-list-closeup.png",
+          "caption": "列表特写:新 predict 行 = 烧瓶 icon(kind=predict),run 行 = 状态 icon"
+        },
+        {
+          "file": "n4-91-trace-history.png",
+          "caption": "历史 run 只读回放:身份条(← Trace / run_id / Success)+ 从第一条 run_started 读起,行带时刻"
+        },
+        {
+          "file": "n4-94-predict-trace-view.png",
+          "caption": "predict 的 Trace 视图:身份条含 Predict 徽章 + Showing 17 of 17 events"
+        },
+        {
+          "file": "n4-93-full-trace.png",
+          "caption": "Full Trace 文档跟随所查 run(事件数与 Trace 视图一致)"
+        }
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "viewed-run 决议 2026-08-07 实测复核:列表↔Trace 视图↔Full Trace 三者同源;run 结束可返回列表;predict 以 kind 入列。真机证据见 shots。"
+    },
+    {
+      "covers": "#16 agent-folding + #24 inline-expand + #25 retry-nudge（偏差/未实施 · RED）",
+      "atoms": [
+        16,
+        24,
+        25
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED #16：当前 TraceEventRow 展开=原始 JSON → 断言『agent 事件显分类折叠摘要 + 末尾总结』失败（待实现）。",
+        "RED #24：断言『agent 节点 + 内联展开执行子树』入口存在失败（待实现）。",
+        "#25：mock retry/validation_fail 带 attempt=2、上限 3 → 断言显『2/3』重试徽章；retry_exhausted → 断言 Error Stack 列每次失败。"
+      ],
+      "layer2": [
+        "真跑一个含 agent 节点的 skill，看 agent 输出是否分类折叠（目标）vs 现状原始 JSON。",
+        "点 agent 节点 '+'，看是否内联展开执行子树。",
+        "造一个会重试的 validator，看 2/3 徽章 + 失败 Error Stack。"
+      ],
+      "shots": [
+        "agent 输出分类折叠摘要（Worked/Explored/Thought）",
+        "agent 节点 + 内联展开执行子树",
+        "validator 重试显 2/3 徽章 + 失败 Error Stack"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖项已全绿(2026-06-20)"
+    },
+    {
+      "covers": "#17 focus-granularity + #18 doc-editor（偏差/未实施 · RED）",
+      "atoms": [
+        17,
+        18
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED #17：当前 TracePanelProps 无 selectedNode → 断言『focus 某节点时 trace 收窄到该节点』失败（待实现）。",
+        "实现后 #17：mock selectedNode=节点A → 断言事件过滤到 A 的 phase；selectedNode=null → 断言显 run 概要。",
+        "RED #18：断言『存在只读 trace 文档编辑器』失败（待实现）。"
+      ],
+      "layer2": [
+        "目标落地前：点节点 trace 不收窄、无 run 概要、无完整 trace 文档编辑器。",
+        "落地后：点空白看 run 概要、点节点看该节点 trace + 编辑器跳该节点范围。"
+      ],
+      "shots": [
+        "focus 空画布显 run 概要",
+        "focus 节点显该节点 trace + 编辑器跳范围"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖项已全绿(2026-06-20)"
+    },
+    {
+      "covers": "#19 dot-blackboard（偏差，操作记录依赖引擎 · RED）",
+      "atoms": [
+        19
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock input_dispatch/edge_transition → 断言 EdgeContextView 显黑板 snapshot + changed_keys（现状已符合部分）。",
+        "RED：断言『dot 显 end→start 操作记录流（reduce/截断/注入/落盘）』失败——依赖引擎 micro 事件（待引擎契约 + 前端填槽转 GREEN）。"
+      ],
+      "layer2": [
+        "真跑后点画布连线上的 dot，看黑板内容 + changed_keys（现状）。",
+        "目标：dot 同显节点间操作记录（待引擎 micro 事件到位后真跑验证）。"
+      ],
+      "shots": [
+        "点 dot 看黑板 snapshot + Keys changed",
+        "dot 显 end→start 操作记录（待引擎）"
+      ],
+      "fe_resync": "覆盖项已全绿(2026-06-20)"
+    },
+    {
+      "covers": "#21 filter + #22 fail-redlight + #26 properties-clean（符合）",
+      "atoms": [
+        21,
+        22,
+        26
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "#21：输关键字/勾类型 → 断言 useTraceFilter 过滤后『Showing N of M』正确。",
+        "#22：validation_fail/retry_exhausted 事件 → 断言对应节点 error 红灯 + Error Message 显示。",
+        "#26：断言 PropertiesPanel 不渲 selectedEdge 原始 JSON（dot 改道 EdgeContextView）。"
+      ],
+      "layer2": [
+        "用关键字筛事件，看计数。",
+        "真跑一个会失败的节点，看红灯 + Error Message。"
+      ],
+      "shots": [
+        "关键字筛事件 + Showing N of M",
+        "失败节点红灯 + Error Message"
+      ]
+    },
+    {
+      "covers": "#20 prompt-inspector（偏差·回溯/历史 RED）+ #23 model-compare（未实施 P8）+ #28 panel-naming（偏差 RED）",
+      "atoms": [
+        20,
+        23,
+        28
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "#20 符合部分：点一条 prompt_captured『Inspect prompt』→ 断言 PromptInspector 三视图 Template/Variables/Rendered 各取对字段。",
+        "RED #20：点一条 llm_call『Inspect prompt』→ 断言三视图 Template/Variables 有数据（经 findPromptEvent 回溯同 phase prompt_captured）失败——现 Workspace 直接传 events[promptIndex].payload、findPromptEvent 零调用（待接线转 GREEN）。",
+        "RED #20 历史：历史 trace（TimelinePanel 传 onSelectPrompt no-op）点事件 → 断言打开 Inspector 失败（待补历史 inspector 选择态）。",
+        "RED #23：断言『run 选 model-group/bundle/role → 临时 role 解析 → Trace 顶部对比 tab』存在失败——P8 纵切无契约（待补）。",
+        "RED #28：断言面板命名已正名（非混淆的 Trace Timeline）失败（待实现）。"
+      ],
+      "layer2": [
+        "现状：点 llm_call 的三视图 Template/Variables 空；历史 trace 点事件打不开 Inspector。",
+        "落地后 #20：点 llm_call 三视图经回溯补全；历史 trace 也能 Inspect。",
+        "落地后 #23：run 选候选跑对比，顶部 tab 切不同候选结果。",
+        "落地后 #28：面板名无歧义。"
+      ],
+      "shots": [
+        "点 llm_call 三视图经回溯补全 Template/Variables",
+        "历史 trace 可 Inspect prompt",
+        "run 模型对比顶部 tab 切候选结果（P8，待契约）"
+      ],
+      "fe_resync": "覆盖项已全绿(2026-06-20)"
+    },
+    {
+      "covers": "#29 llm-fallback-visibility",
+      "atoms": [
+        29
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "utils/trace.test.ts：eventMessage 人话化（A → B / failed — no remaining route）、eventColor='bg-warning'、llmFallbackDetails 解析双模型/reason/role/429/exhausted 且无 context 不炸、非 fallback 事件返 null、countLlmFallbacks 计数、eventModelName 三来源（prompt_captured/model_resolved.resolved_model + llm_call.response_data.model_name）+空值返 null。",
+        "TraceEventRow.fallback.test.tsx：fallback 行渲 Provider fallback 块（双模型 + reason）、exhausted 显 no remaining route、普通事件不渲块；模型 chip 在 prompt_captured/llm_call 行出现、无模型不渲。",
+        "TracePanel.test.tsx：run 级 chip 计数与单复数文案 + aria-label（Filter N LLM fallback events）、无降级的 run 不渲 chip。",
+        "PromptInspector.test.tsx：标题渲 resolved_model chip、无模型不渲。"
+      ],
+      "layer2": [
+        "真跑一个 primary route 故障（如错 API key 的首选 route + 可用兜底 route）的 skill：Trace 面板出现琥珀 llm_fallback 行与 run 级『N LLM fallback』chip，点 chip 只剩降级事件；点 prompt 行模型 chip 与 PromptInspector 标题读到实际模型。"
+      ],
+      "shots": [
+        "trace 琥珀 Provider fallback 块（模型 A → 模型 B + 原因）",
+        "run 级 LLM fallback 计数 chip（点击过滤）",
+        "prompt_captured 行模型 chip 与 PromptInspector 标题模型"
+      ]
+    }
+  ]
 }

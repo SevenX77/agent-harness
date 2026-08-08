@@ -12,7 +12,9 @@
       "action": "无显式动作（点 Run 后自动切到 timeline 面板，事件随 run 推进流式进入）。",
       "fe_design": "handleRun 成功后 setActivePanel('timeline') 自动开面板；useRunStream(runId) 连 WS /ws/runs/{run_id}，onmessage 解析 EventEnvelope（事件信封）→ 按 seq 去重 + 连续性校验（缺口报 Run stream gap，可观测）+ 100ms 批量 flush 进 events[] → TracePanel 经 VirtualTraceList（虚拟滚动事件列表）渲染。设计意图：run 时自动开面板、流式进事件，且去重/缺口检测让流可靠。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [
         {
@@ -24,7 +26,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（run 自动开面板 + useRunStream 流式 + seq 去重/gap 检测/终态停重连）。spec 标『零挂载』过时。",
+      "gap_brief": "符合设计(2026-08-07):predict/run started 同权 follow-run + open-trace;流式贴底走 message-scroller;Trace 视图带返回按钮,历史列表任何时刻可达。",
       "impl_ref": "fn-14"
     },
     {
@@ -35,7 +37,9 @@
       "action": "用户在 timeline 面板的 run 历史列表点某一次历史 run。",
       "fe_design": "timeline 面板点历史 run → getRunDetail（client.ts，按 run_id 拉含 events 的详情）拿该次封存的 trace 事件 → TracePanel 用同一套 VirtualTraceList 渲染（历史态不再流式、读封存 events）。设计意图：run 后能回看任意一次完整 trace。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [
         {
@@ -47,7 +51,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计（历史列表点击 → getRunDetail 回看完整 trace 已接）。",
+      "gap_brief": "符合设计(2026-08-07 viewed-run 决议):列表点击→只读回放,与 Full Trace/PromptInspector 共读同一事件缓存;predict 行以 RunMetadata.kind 判别仅 icon 区分;run 结束可返回列表。",
       "impl_ref": "fn-15"
     },
     {
@@ -58,7 +62,9 @@
       "action": "无显式动作（无事件 / 超大 payload / 源切换时面板自动稳态处理）。",
       "fe_design": "三条韧性：① 空态——traceEvents 为空时 TracePanel 渲『Waiting for run events』占位；② 源切换重置——useRunStream 以 runId 为依赖，runId 变（live run → 点历史 run）时整体重置 events/seq，不把上一个 run 的事件串进来；③ payload 截断——单条事件 payload 过大时在展开/渲染前截断（防 OOM），截断显式标注。设计意图（spec D15）：失败退路完整，超大 trace 不撑爆、源切换干净。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -116,7 +122,9 @@
       "action": "无显式动作（节点发生 validator 重试时显重试徽章；失败显 Error Stack）。",
       "fe_design": "事件流里 validation_fail/retry/retry_exhausted 携带 attempt（第几次重试）。设计要：在 Trace 行/节点上显示『当前重试 / 上限』徽章（如 2/3），retry_exhausted（重试用尽）时展开一个 Error Stack 列出每次失败原因。设计意图（spec D10）：重试过程与最终失败原因不黑盒。",
       "fe_modules": [
-        { "name": "事件→节点态派生（deriveNodeStatuses）" }
+        {
+          "name": "事件→节点态派生（deriveNodeStatuses）"
+        }
       ],
       "be_contract": [
         {
@@ -139,7 +147,9 @@
       "action": "用户在画布上点选某节点（focus 该节点）/ 点空白（focus 空画布）。",
       "fe_design": "TracePanel 接 selectedNode（当前 focus 的节点）入参：selectedNode 为空（focus 空画布）→ 显 run_id 概要（整张图全局）；selectedNode 为某节点 → 把事件流过滤到该节点的 trace（按 phase 收窄）。Workspace 已算出 selectedNode/selectedNodeId/activeTracePhase，要把节点焦点下传给 TracePanel 收窄粒度。设计意图（spec D3/D5『概要是这一次 run_id 的概要，focus 空画布=全局；focus 节点就直接显示该节点的 trace』）。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -155,7 +165,9 @@
       "action": "用户点『看完整 trace』，在只读编辑器里读格式化后的 trace 文档；点节点编辑器跳范围。",
       "fe_design": "补一个只读编辑器视图（复用 MonacoPanel 这类通用代码编辑器，只读模式）把整条 trace 渲成轻度格式化、人能读的文档；focus 某节点时编辑器跳到该节点范围（与 #17 focus 粒度联动）；点某状态可只读展开看完整黑板详情、深层可折叠。设计意图（spec D4/D7『完整 trace 文档 = 人能读、简单调整格式；点状态→编辑器只读看完整黑板详情』）。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [],
       "fe_status": "符合",
@@ -171,7 +183,9 @@
       "action": "用户点画布连线中间的 dot。",
       "fe_design": "点 dot → EdgeContextView（dot 黑板转移视图）：从事件流取该边最后一次转移的扁平黑板 snapshot + changed_keys（这次转移改了哪些键），渲 source→target 头 + 『Keys changed』徽章 + 『Blackboard dispatched into target』键值列表。设计还要：补『上节点 end→下节点 start』的操作记录流（reduce/截断/注入/落盘），它依赖引擎推送节点间 micro 操作事件。设计意图（spec D6『dot = langgraph 中间节点，点 dot 看黑板状态机当时内容 + 上节点 end 到下节点 start 之间所有操作记录』）。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [
         {
@@ -194,7 +208,9 @@
       "action": "用户在 Trace 面板点某条 llm_call/prompt_captured 事件的『Inspect prompt』。",
       "fe_design": "点『Inspect prompt』→ PromptInspector（三视图弹窗）：Dialog + Tabs——Template（template_source 模板原文）/ Variables（variables 喂入变量）/ Rendered（prompt_captured 的 resolved_prompt 或 llm_call 的 messages 渲染后）。正确设计：点一条 llm_call 时要用 findPromptEvent（trace.ts 里从 llm_call 回溯同 phase 的 prompt_captured 的函数）把数据补全，否则 llm_call 自身 payload 没有 template_source/variables、三视图只能渲 Rendered 一半；live trace 与历史 trace 都要能 Inspect。设计意图（spec D8）：模型调用的 prompt 不黑盒，模板/变量/渲染分层可查。",
       "fe_modules": [
-        { "name": "运行事件流订阅（useRunStream）" }
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
       ],
       "be_contract": [
         {
@@ -231,7 +247,9 @@
       "action": "无显式动作（节点 validation_fail/retry_exhausted/internal_error 时自动红灯 + 错误信息）。",
       "fe_design": "deriveNodeStatuses 的 isFailureEvent 把 validation_fail/retry_exhausted 显式列入失败集（这两类不含 'error' 子串、必须显式列），internal_error 则经 'error' 子串命中——三者都判节点 error 红灯；TraceEventRow 对 internal_error/validation_fail 显 error_message。设计意图（spec D12『失败节点亮红灯 + Error Message』）。",
       "fe_modules": [
-        { "name": "事件→节点态派生（deriveNodeStatuses）" }
+        {
+          "name": "事件→节点态派生（deriveNodeStatuses）"
+        }
       ],
       "be_contract": [
         {
@@ -266,12 +284,12 @@
       "module": "检索 · 失败 · 净化 · 模型对比",
       "func": "设计：Toolbar / 面板上『Trace Timeline』这个命名要正名，消除与其它 timeline 概念的混淆，让用户一眼知道这是事件 trace 时间线。",
       "action": "无显式动作（面板/工具条标题正名）。",
-      "fe_design": "把 Toolbar/面板里混淆的『Trace Timeline』命名按统一术语正名（与 run 历史 timeline、事件 trace 区分清楚），命名逐字与导航/标题一致。设计意图（spec C8『Toolbar Trace Timeline 命名混淆 → 正名』）。",
+      "fe_design": "命名一套口径(D3 决议 2026-08-07,设计源 04_run-and-verify.md C8):区域=Timeline(Toolbar+run 历史列表)/视图=Trace(单次 run 的事件流,头部为 run 身份条)/文档=Full Trace(只读 Monaco 文档)。歧义的『Trace Timeline』永不回归。",
       "fe_modules": [],
       "be_contract": [],
       "fe_status": "符合",
       "be_status": "n/a",
-      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：已正名为『Event Trace』——TracePanel.tsx:195,205 aria-label='Event Trace'、line 209 <h3>Event Trace</h3>（不再是『Trace Timeline』）；Toolbar.tsx:19 把 timeline 面板标为『Event Trace』、line 20 另加独立的『Full Trace』（trace-doc）面板，与 run 历史 timeline 区分清楚。测试断言：TracePanel.test.tsx:223『names the panel \"Event Trace\" rather than the ambiguous \"Trace Timeline\"』。",
+      "gap_brief": "符合设计(2026-08-07 D3 落地):Toolbar 第4格 label='Timeline',TracePanel 标题/aria-label='Trace',列表标题 'Timeline',第5格 'Full Trace';旧『Event Trace』口径同轮换下。",
       "impl_ref": "fn-28"
     },
     {

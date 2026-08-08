@@ -201,6 +201,10 @@ class RunDetail(BaseModel):
     events: list[EventEnvelope]
     final_context: dict[str, Any] | None = None
     artifacts: list[str] | None = None
+    #: Absolute path of this run's `report.md`, or None when the run left none.
+    #: Derived at read time from the run directory — the report stays a pure
+    #: projection, this only tells a reader with no shell where to find it.
+    report_path: str | None = None
 
 
 class ResumeReq(BaseModel):

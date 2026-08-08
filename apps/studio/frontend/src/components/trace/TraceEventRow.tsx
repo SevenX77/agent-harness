@@ -8,9 +8,9 @@ import {
   eventMessage,
   eventMockedSource,
   eventModelName,
+  eventMessageIsRedundant,
   eventPhase,
   eventTimeLabel,
-  isRunScopedEvent,
   llmFallbackDetails,
   mockedSourceClass,
   mockedSourceLabel,
@@ -83,14 +83,14 @@ export function TraceEventRow({
           }
           onSelectEvent?.(index, event)
         }}
-        className={`block w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
+        className={`block w-full rounded-md border-0 px-2.5 py-1.5 text-left transition-colors ${
           selected
-            ? 'border-primary/60 bg-primary/10'
+            ? 'bg-accent'
             : highlighted
-              ? 'border-warning-border bg-warning/10'
+              ? 'bg-warning/10'
               : isError
-                ? 'border-destructive-border/60 bg-destructive/10 hover:bg-destructive/15'
-                : 'border-border bg-card hover:bg-accent/50'
+                ? 'bg-destructive/10 hover:bg-destructive/15'
+                : 'hover:bg-accent/50'
         }`}
       >
         <div className="flex items-center justify-between gap-2">
@@ -143,15 +143,11 @@ export function TraceEventRow({
             </span>
           ) : null}
         </div>
-        <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
-          {isRunScopedEvent(event) ? null : (
-            <>
-              <span className="font-medium uppercase text-foreground/70">{eventPhase(event)}</span>
-              <span className="mx-1.5 text-border">·</span>
-            </>
-          )}
-          {eventMessage(event)}
-        </p>
+        {eventMessageIsRedundant(event) ? null : (
+          <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-foreground/80">
+            {eventMessage(event)}
+          </p>
+        )}
         {isError && typeof event.error_message === 'string' ? (
           <p className="mt-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive">
             {event.error_message}
@@ -182,9 +178,9 @@ export function TraceEventRow({
         {toolCall ? (
           <span className="mt-2 flex items-center gap-2 text-xs">
             {toolCall.toolName === 'Bash' ? (
-              <TerminalSquare className="h-3.5 w-3.5 text-success" />
+              <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
             ) : (
-              <Wrench className="h-3.5 w-3.5 text-success" />
+              <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
             )}
             <span className="font-medium text-foreground">{toolCall.headline}</span>
             {toolCall.durationLabel ? (
@@ -205,7 +201,7 @@ export function TraceEventRow({
                   setSubtreeOpen((open) => !open)
                 }
               }}
-              className="inline-flex items-center gap-1 rounded border border-success-border px-1.5 py-0.5 font-medium text-success hover:bg-success/10"
+              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-medium text-muted-foreground hover:bg-accent"
             >
               {subtreeOpen ? <ListTree className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
               {subtreeOpen ? 'Subtree' : 'Expand'}
@@ -289,14 +285,14 @@ function ErrorStack({ failures }: { failures: string[] }) {
 // is not a black box and the user never has to read raw JSON.
 function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof toolCallSummary>> }) {
   return (
-    <div className="mt-2 rounded-md border border-success-border/60 bg-success/10 p-2 text-xs">
-      <div className="flex items-center gap-1.5 font-medium text-success">
+    <div className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
+      <div className="flex items-center gap-1.5 font-medium text-foreground">
         <ListTree className="h-3.5 w-3.5" />
         {summary.headline}
       </div>
       {summary.args ? (
         <div className="mt-1.5">
-          <div className="text-[10px] font-semibold uppercase text-success/80">Input</div>
+          <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
           <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
             {summary.args}
           </pre>
@@ -304,7 +300,7 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
       ) : null}
       {summary.resultSummary ? (
         <div className="mt-1.5">
-          <div className="text-[10px] font-semibold uppercase text-success/80">Result</div>
+          <div className="text-[10px] font-semibold uppercase text-muted-foreground">Result</div>
           <p className="mt-0.5 whitespace-pre-wrap leading-relaxed text-foreground">{summary.resultSummary}</p>
         </div>
       ) : null}

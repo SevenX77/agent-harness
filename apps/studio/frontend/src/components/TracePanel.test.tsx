@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import type { CallbackEvent, EventEnvelope } from '../api/types'
-import { TracePanel, isGoldenlessAgentNode } from './TracePanel'
+import { TracePanel, isGoldenlessAgentNode, traceRunActions } from './TracePanel'
 
 const events = [
   {
@@ -265,38 +265,81 @@ describe('TracePanel naming (atom #28 / D3 命名统一 2026-08-07)', () => {
   })
 })
 
-describe('TracePanel Resume action', () => {
-  // Action buttons render only when their handler is wired (a historical view
-  // passes no handlers and stays read-only, decision 2026-08-07); these tests
-  // wire the handler and probe the canResume gating.
-  it('shows a Resume button enabled when the run can be resumed', () => {
-    const html = render({ canResume: true, onResume: () => undefined })
-    expect(html).toContain('Resume')
-    expect(html).toContain('aria-label="Resume run from last checkpoint"')
-    // Enabled: the resume button markup should not carry the disabled attribute.
-    const resumeButton = html.slice(html.indexOf('Resume run from last checkpoint') - 200, html.indexOf('Resume run from last checkpoint') + 200)
-    expect(resumeButton).not.toContain('disabled=""')
+describe('TracePanel run actions (⋮ menu)', () => {
+  // Run-level actions live in one overflow menu on the identity strip, so the
+  // search row keeps its full width (decision 2026-08-08 D4). Radix renders the
+  // menu's items only once it is open, which static rendering cannot do — so the
+  // items are decided by a pure function and asserted here, while the markup
+  // tests below assert the trigger itself.
+  const resumeOnly = {
+    canResume: true,
+    resumeLoading: false,
+    onResume: () => undefined,
+    canCompare: false,
+    compareLoading: false,
+    reportPath: null,
+  }
+
+  it('offers Resume, enabled, when the run can be resumed', () => {
+    const [action] = traceRunActions(resumeOnly)
+    expect(action.key).toBe('resume')
+    expect(action.label).toBe('Resume from last checkpoint')
+    expect(action.disabled).toBe(false)
   })
 
   it('disables Resume when there is no resumable run', () => {
-    const html = render({ canResume: false, onResume: () => undefined })
-    const idx = html.indexOf('Resume run from last checkpoint')
-    // The disabled attribute follows aria-label + title on the same button.
-    expect(html.slice(idx, idx + 200)).toContain('disabled')
+    const [action] = traceRunActions({ ...resumeOnly, canResume: false })
+    expect(action.disabled).toBe(true)
   })
 
-  it('shows a Resuming label while a resume is in flight', () => {
-    const html = render({ canResume: true, resumeLoading: true, onResume: () => undefined })
-    expect(html).toContain('Resuming')
+  it('says Resuming, and refuses a second click, while a resume is in flight', () => {
+    const [action] = traceRunActions({ ...resumeOnly, resumeLoading: true })
+    expect(action.label).toBe('Resuming')
+    expect(action.disabled).toBe(true)
   })
 
-  it('omits Resume affordance content when there are no trace events', () => {
+  it('offers no actions at all for a read-only historical view', () => {
+    expect(traceRunActions({
+      canResume: false,
+      resumeLoading: false,
+      canCompare: false,
+      compareLoading: false,
+      reportPath: null,
+    })).toEqual([])
+  })
+
+  it('offers the run report exactly when the run left one on disk', () => {
+    const withReport = traceRunActions({
+      canResume: false,
+      resumeLoading: false,
+      canCompare: false,
+      compareLoading: false,
+      reportPath: 'D:/runs/run-1/report.md',
+    })
+    expect(withReport.map((action) => action.key)).toEqual(['report'])
+    expect(withReport[0].label).toBe('Open run report')
+  })
+
+  it('renders the overflow trigger when at least one action is wired', () => {
+    const html = render({ canResume: true, onResume: () => undefined })
+    expect(html).toContain('aria-label="Run actions"')
+  })
+
+  it('renders no overflow trigger when nothing is wired', () => {
+    const html = render({})
+    expect(html).not.toContain('aria-label="Run actions"')
+  })
+
+  it('drops the search and filter shell when there are no events, keeping the run identity', () => {
     const html = renderToStaticMarkup(
       <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} canResume onResume={() => undefined} live />,
     )
-    // Empty state shows the waiting message, not the action bar.
     expect(html).toContain('Waiting for run events')
-    expect(html).not.toContain('Resume run from last checkpoint')
+    // Nothing to search or filter yet, so neither control is mounted...
+    expect(html).not.toContain('Search trace events')
+    expect(html).not.toContain('aria-label="Filter events"')
+    // ...but the run is still the run: its identity strip and actions stay put.
+    expect(html).toContain('aria-label="Run actions"')
   })
 
   it('shows a HitL answer form from the latest interrupted EventEnvelope', () => {

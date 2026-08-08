@@ -92,26 +92,31 @@ export function eventMessage(event: CallbackEvent): string {
   }
 }
 
+/**
+ * True when the row's message would only repeat the event type back.
+ *
+ * `eventMessage` falls through to `event.event_type` for every kind it has no
+ * sentence for (`input_dispatch`, `agent_loop_iteration`, `run_started`, …), so
+ * the row would print the same token twice — once as the kind, once as the
+ * message. Rows drop the second line in that case.
+ */
+export function eventMessageIsRedundant(event: CallbackEvent): boolean {
+  return eventMessage(event) === event.event_type
+}
+
+/**
+ * Colour on the timeline rail encodes SEVERITY, never the kind of event
+ * (FRONTEND_UI_SPEC §2.2). A run that went fine has a monochrome rail, so the
+ * one dot that is coloured is the one worth looking at.
+ */
 export function eventColor(eventType: string): string {
-  if (eventType === 'predict_chain_start') {
-    return 'bg-warning'
-  }
-  if (eventType === 'phase_start') {
-    return 'bg-multimodal-border'
-  }
-  if (eventType === 'phase_end' || eventType === 'run_ended') {
-    return 'bg-success'
-  }
-  if (eventType === 'llm_call' || eventType === 'prompt_captured') {
-    return 'bg-primary'
-  }
   if (eventType === 'internal_error' || eventType === 'validation_fail') {
     return 'bg-destructive'
   }
   if (eventType === 'llm_fallback') {
     return 'bg-warning'
   }
-  return 'bg-muted-foreground'
+  return 'bg-muted-foreground/50'
 }
 
 export function isPredictRootEvent(event: CallbackEvent): boolean {

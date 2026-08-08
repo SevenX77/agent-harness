@@ -49,7 +49,7 @@ export function PhaseDrawer({
         side="right"
       >
         <SheetHeader className="border-b border-border bg-background px-5 py-4">
-          <SheetDescription className="font-semibold uppercase tracking-wide text-primary">
+          <SheetDescription className="font-semibold uppercase tracking-wide text-muted-foreground">
             Phase form
           </SheetDescription>
           <SheetTitle className="text-lg font-bold">
@@ -65,7 +65,7 @@ export function PhaseDrawer({
         </div>
 
         <SheetFooter className="flex-row items-center justify-between border-t border-border bg-background px-5 py-4">
-          <span className={`text-xs font-medium ${dirty ? 'text-primary' : 'text-muted-foreground'}`}>
+          <span className={`text-xs font-medium ${dirty ? 'text-foreground' : 'text-muted-foreground'}`}>
             {dirty ? 'Unsaved form edits' : 'Synced with SKILL.md'}
           </span>
           <div className="flex items-center gap-2">

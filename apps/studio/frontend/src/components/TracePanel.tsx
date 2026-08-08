@@ -250,7 +250,7 @@ export function TracePanel({
             className={[
               'flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs font-semibold transition-colors',
               isActive
-                ? 'border-primary bg-primary/10 text-primary'
+                ? 'border-primary bg-primary/10 text-foreground'
                 : 'border-border bg-card text-muted-foreground hover:bg-accent',
               tab.failed ? 'text-destructive' : '',
             ].join(' ')}
@@ -351,7 +351,7 @@ export function TracePanel({
                 aria-label="Link trace to the focused node"
                 aria-pressed={linkEnabled}
                 onClick={() => onToggleLink?.(!linkEnabled)}
-                className={linkEnabled ? 'text-primary' : 'text-muted-foreground'}
+                className={linkEnabled ? 'text-link' : 'text-muted-foreground'}
               >
                 {linkEnabled ? <Link2 className="size-4" /> : <Link2Off className="size-4" />}
               </Button>
@@ -389,7 +389,7 @@ export function TracePanel({
               aria-label="Compare trace to golden baseline"
               disabled={!canCompare || compareLoading}
               onClick={onCompareToGolden}
-              className="text-primary hover:text-primary"
+              className="text-link hover:text-link"
             >
               <GitCompareArrows className="size-3.5" />
               {compareLoading ? 'Comparing' : 'Compare'}

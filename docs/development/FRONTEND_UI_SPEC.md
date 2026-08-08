@@ -64,6 +64,29 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - **中文字形必须打包字体兜底**: `--font-sans` 在 `Inter Variable`(拉丁)之后、系统 CJK(`PingFang SC`/`Microsoft YaHei`)之后,必须以**打包的 webfont** `Noto Sans SC Variable`(`@fontsource-variable/noto-sans-sc`,随 `index.css` `@import`)收尾。原因:Tauri 壳用 WebKitGTK,目标机常无系统中文字体,只靠系统字体会渲染成豆腐块;打包字体保证任何环境中文都出字。新增字体不要只改字体栈而漏装 `@fontsource` 依赖。
 - **markdown 排版**: 渲染 markdown(ReactMarkdown)一律用 `index.css` 的 `.copilot-prose`(全语义 token + `--font-mono` 代码块)。**禁止**使用 `prose*` 类——`@tailwindcss/typography` 未安装,这些类是死类(2026-07-02 R5-D 教训:copilot 面板 markdown 因此裸奔了数轮);也不要通过安装该插件来"救活"它们,插件自带灰阶调色会引入第二套颜色世界。聊天类 UI 的气泡/系统注记优先用本地 `ui/bubble.tsx` / shadcn chat 原语,不手搓 `div.bg-muted`。
 - **颜色原则**: 开发人员写新组件时, **严禁 Hardcode 任何十六进制颜色码或 Tailwind 具体色值** (如 `bg-gray-800`)。必须使用语义化的 CSS 变量类 (如 `bg-background`, `text-muted-foreground`, `border-border`)。
+- **`--primary` 是填充色，永远不做文字色；品牌色文字用 `--link`。** 暗色主题下
+  `--primary` 是 `oklch(0.398 0.195 277.366)`（sRGB `55,42,172`），压在 `--card`
+  （`23,23,23`）上实测对比度 **1.78:1**——低于 WCAG AA 正文的 4.5，也低于大字的 3.0，
+  是整套 token 里唯一一个当文字用不可读的（对照：`--muted-foreground` 6.9、
+  `--destructive` 6.2、`--success` 8.1、`--warning` 9.4、`--foreground` 17.2）。
+  原因是它按设计就是**填充**，配套的是压在它上面的 `--primary-foreground`（近白）。
+  因此：
+  - 需要"这里是主色"→ 用**填充**承载：实心 `bg-primary text-primary-foreground`，
+    或淡底 `bg-primary/10` + `text-foreground`（底色已经携带品牌，文字只需可读）。
+  - 需要**可交互文字**（`Button`/`Badge` 的 `variant="link"`、行内动作、链接 hover）
+    → 用 `text-link`。`--link` 是 `--primary` 的同色相（277.4）提亮版，暗色下
+    `oklch(0.7 0.13 277.366)` = **6.54:1**，保住品牌识别又能读。
+  - `text-primary-foreground` 压在 `bg-primary` 上不受影响，仍是正确用法。
+  - **裸用 `text-primary` 由测试封死**：`src/color-language.test.ts` 扫描
+    `src/**/*.ts(x)` 断言零命中，并按 oklch→linear-sRGB→WCAG 相对亮度算出所有
+    "允许当文字用"的 token 对 `--card` 的对比度、断言 ≥4.5。改 token 值会被它拦住。
+- **颜色只表达严重度，不表达分类。** Studio 里 `success` / `warning` / `destructive`
+  / `primary` 只允许编码**事情的好坏程度**（成功 / 需要注意 / 失败 / 进行中）；
+  "这是哪一类东西"（事件类型、资源种类、有没有基准）一律用**文字与排版**表达——
+  等宽字体、字重、分组标题、图标形状。理由：一屏里若每条记录都按类型着色，颜色的
+  信噪比归零，真正出错的那一条反而不突出（2026-08-08 Trace 面板实证：40 条事件里
+  39 条带彩色胶囊）。判据：把一屏截图去饱和，信息不该丢失；丢了说明颜色在扛分类。
+  决议：`docs/design/2026-08-08-studio-color-language-and-trace-density-decision.md`
 
 ### 2.3 暗黑极客主题 (Dark Theme Only)
 默认强制并专注于高对比度的暗色环境，营造专业生产力环境，不要求完美兼顾白昼模式的降级体验。

@@ -121,7 +121,7 @@ export function InputPlayground({
         <button
           type="button"
           onClick={() => setShowPreview((open) => !open)}
-          className="mt-4 text-xs font-medium text-primary hover:text-primary/80"
+          className="mt-4 text-xs font-medium text-link hover:text-link/80"
         >
           {showPreview ? 'Hide JSON preview' : 'Show JSON preview'}
         </button>

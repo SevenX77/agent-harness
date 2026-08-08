@@ -96,7 +96,7 @@ function TraceDocumentState({ entry }: { entry: TraceDocumentEntry }) {
           <span className="font-mono text-[10px] text-muted-foreground/80">{entry.timeLabel}</span>
         ) : null}
         {entry.tokens ? (
-          <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+          <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-foreground">
             <Hash className="size-3" />
             {entry.tokens}
           </span>

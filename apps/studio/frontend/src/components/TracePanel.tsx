@@ -426,12 +426,17 @@ export function TracePanel({
           <TooltipContent>Back to the run list</TooltipContent>
         </Tooltip>
       ) : null}
-      <h3 className="text-sm font-semibold text-foreground">Trace</h3>
+      {/* The run IS the title here. A separate "Trace" label costs 46px of a
+          331px strip to repeat what the back arrow, the event rows and the
+          panel's own aria-label already say; the run id is the one thing on
+          this row nothing else can tell you. */}
       {runId ? (
-        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-          {runId.slice(0, 16)}{runId.length > 16 ? '…' : ''}
-        </span>
-      ) : null}
+        <h3 title={runId} className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground">
+          {runId}
+        </h3>
+      ) : (
+        <h3 className="text-sm font-semibold text-foreground">Trace</h3>
+      )}
       {isPredict ? (
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}

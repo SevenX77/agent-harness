@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
 import { traceEventId } from '../../hooks/useTraceSelection'
-import { eventPhase, isPredictTrace } from '../../utils/trace'
+import { RUN_SCOPE, eventPhase, isPredictTrace } from '../../utils/trace'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -163,9 +163,14 @@ export function TraceEventList({
             }`}
           >
             <MessageScrollerContent className="block h-max min-h-0 gap-0">
-              <div className="ml-3 space-y-1.5 border-l-2 border-border py-1">
-                {events.map(({ event, index }) => {
+              <div className="ml-3 space-y-0.5 border-l border-border py-1">
+                {events.map(({ event, index }, position) => {
                   const eventId = traceEventId(event, index)
+                  const phase = eventPhase(event)
+                  // A node's name belongs to the RUN of events it owns, not to
+                  // each row: eight consecutive `segment` events used to print
+                  // `SEGMENT` eight times (decision 2026-08-08 D3).
+                  const opensGroup = position === 0 || eventPhase(events[position - 1].event) !== phase
                   return (
                     <div
                       key={`${event.timestamp}-${index}`}
@@ -173,6 +178,14 @@ export function TraceEventList({
                       role="option"
                       aria-selected={selectedEventId === eventId}
                     >
+                      {opensGroup ? (
+                        <div
+                          data-trace-group-header={phase}
+                          className="mt-2 mb-1 pl-5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 first:mt-0"
+                        >
+                          {phase === RUN_SCOPE ? 'Run' : phase}
+                        </div>
+                      ) : null}
                       <TraceEventRow
                         event={event}
                         index={index}

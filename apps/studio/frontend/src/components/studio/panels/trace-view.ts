@@ -11,4 +11,4 @@ import type { RunMetadata } from "@/api/types"
  */
 export type TraceView =
   | { source: "live" }
-  | { source: "history"; runId: string; metadata: RunMetadata }
+  | { source: "history"; runId: string; metadata: RunMetadata; reportPath: string | null }

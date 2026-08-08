@@ -592,7 +592,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // PromptInspector read the same viewed events (diagnostics stay one source).
   const [viewedTrace, setViewedTrace] = useState<
     | { source: "live" }
-    | { source: "history"; runId: string; metadata: RunMetadata; events: EventEnvelope[] }
+    | {
+        source: "history"
+        runId: string
+        metadata: RunMetadata
+        events: EventEnvelope[]
+        reportPath: string | null
+      }
     | null
   >(null)
   const [historyLoadingRunId, setHistoryLoadingRunId] = useState<string | null>(null)
@@ -765,6 +771,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // same (skill, run) de-dupe key as the history refresh and guard the async race:
   // if the run changes while the fetch is in flight, the stale result is dropped.
   const archiveFeedbackRunRef = useRef<string | null>(null)
+  // A run's report.md only exists once the run has sealed, so the LIVE view
+  // learns its path from the same terminal-detail fetch that reports the
+  // archive status. Kept with its run id so a finished run's report can never
+  // be offered as the next run's (decision 2026-08-08 D5).
+  const [liveRunReport, setLiveRunReport] = useState<{ runId: string; path: string | null } | null>(null)
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({
       skillId: currentSkillId,
@@ -783,6 +794,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         if (cancelled || !detail) {
           return
         }
+        setLiveRunReport({ runId: completedRunId, path: detail.report_path })
         // The run row was projected at start with status "running"; project the
         // terminal metadata so the Timeline list is truthful when the user goes
         // back to it (single backend truth, no extra revalidation round-trip).
@@ -2389,6 +2401,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         runId: run.run_id,
         metadata: detail.metadata,
         events: detail.events,
+        reportPath: detail.report_path,
       })
     } catch (error) {
       toast.error(`Failed to load run trace: ${errorMessage(error)}`)
@@ -2708,6 +2721,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onPromoteNode={handlePromoteNode}
         traceCanResume={Boolean(runId)}
         traceResumeLoading={resumeLoading}
+        traceReportPath={liveRunReport?.runId === runId ? liveRunReport.path : null}
         onResumeRun={handleResume}
         onResumeNode={runId ? handleResumeNode : undefined}
         onSubmitHitlResponse={handleSubmitHitlResponse}

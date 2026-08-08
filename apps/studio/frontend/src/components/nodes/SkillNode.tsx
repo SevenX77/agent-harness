@@ -127,13 +127,16 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                 <TooltipContent side="top">{subagentCount} subagents available</TooltipContent>
               </Tooltip>
             ) : null}
+            {/* Golden coverage is a CLASSIFICATION of the node, not a verdict on
+                this run, so it is carried by the shield glyph alone — colour on
+                the canvas is reserved for severity (decision 2026-08-08 D2). */}
             <NodeCompileErrorBadge errors={compileErrors} scope="node" />
             {hasGolden ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
                     aria-label="Golden captured"
-                    className="inline-flex size-5 items-center justify-center rounded-md border border-success-border/60 bg-success/10 text-success"
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
                   >
                     <ShieldCheck className="size-3" />
                   </span>
@@ -145,7 +148,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                 <TooltipTrigger asChild>
                   <span
                     aria-label="Logic OK (predict ran, no golden yet)"
-                    className="inline-flex size-5 items-center justify-center rounded-md border border-warning-border/60 bg-warning/10 text-warning"
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
                   >
                     <ShieldHalf className="size-3" />
                   </span>

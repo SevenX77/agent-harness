@@ -82,12 +82,6 @@ export function useTraceFilter(events: CallbackEvent[], activePhase: string | nu
     [activePhase, events, searchTerm, selectedCategories, selectedPhases],
   )
 
-  const clearFilters = () => {
-    setSearchTerm('')
-    setSelectedCategories([])
-    setSelectedPhases([])
-  }
-
   return {
     searchTerm,
     selectedCategories,
@@ -97,6 +91,5 @@ export function useTraceFilter(events: CallbackEvent[], activePhase: string | nu
     setSearchTerm,
     setSelectedCategories,
     setSelectedPhases,
-    clearFilters,
   }
 }

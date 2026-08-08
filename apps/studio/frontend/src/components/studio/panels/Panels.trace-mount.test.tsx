@@ -111,6 +111,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
           metrics: null,
           input_summary: null,
         },
+        reportPath: null,
       },
     })
 

@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
 
 def _seal_run(run_dir: Path, *, status: str = "success", error: dict[str, str] | None = None) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -193,3 +196,58 @@ def test_writing_the_report_puts_it_in_the_run_dir(tmp_path: Path) -> None:
 
     assert path == run_dir / "report.md"
     assert path.read_text(encoding="utf-8").startswith("# Run report")
+
+
+def _registered_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A skill in the index with one sealed run, so RunDetail can be read back."""
+    from app.core import config
+    from app.core.backends import clear_backend_caches
+
+    from tests.conftest import register_skill_index_entry
+
+    skill_dir = tmp_path / "skills" / "demo"
+    run_dir = skill_dir / ".workspace" / "runs" / "run-detail"
+    (skill_dir / "GRAPH.md").parent.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
+    _seal_run(run_dir)
+    # RunDetail reads a run through the artifact store, so the fixture seals it
+    # the same way a real run does rather than faking a manifest.
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    store.begin_run(run_dir.name)
+    store.put_batch(
+        run_dir.name,
+        {
+            "final_state.json": json.dumps({"answer": "ok"}).encode("utf-8"),
+            "trace.jsonl": (run_dir / "trace.jsonl").read_bytes(),
+        },
+    )
+    store.seal_run(run_dir.name)
+    global_config_dir = tmp_path / "global-config"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", global_config_dir)
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", global_config_dir / "skill_index.json")
+    register_skill_index_entry("demo.skill", skill_dir)
+    clear_backend_caches()
+    return run_dir
+
+
+def test_run_detail_points_at_the_report_so_the_ui_can_open_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The report exists on disk; a reader with no shell needs its path (D5)."""
+    from app.services.run_manager import RunManager
+    from app.services.run_report import write_run_report
+
+    run_dir = _registered_run_dir(tmp_path, monkeypatch)
+    write_run_report(run_dir)
+
+    detail = RunManager().get_run_detail(skill_id="demo.skill", run_id=run_dir.name)
+
+    assert detail.report_path == str(run_dir / "report.md")
+
+
+def test_run_detail_reports_no_path_when_the_run_left_no_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.run_manager import RunManager
+
+    run_dir = _registered_run_dir(tmp_path, monkeypatch)
+
+    detail = RunManager().get_run_detail(skill_id="demo.skill", run_id=run_dir.name)
+
+    assert detail.report_path is None

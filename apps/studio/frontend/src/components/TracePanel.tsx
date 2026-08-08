@@ -3,14 +3,22 @@ import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
-import { AlertTriangle, ArrowLeft, BadgeCheck, GitCompareArrows, Link2, Link2Off, Play, ShieldCheck } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BadgeCheck, FileText, GitCompareArrows, Link2, Link2Off, MoreVertical, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { openLocalPath } from '../lib/tauri'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
 import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
-import { TraceFilter } from './trace/TraceFilter'
+import { TraceFilterButton, TraceFilterChips } from './trace/TraceFilter'
 import { TraceSearchBar } from './trace/TraceSearchBar'
 import { TraceEventList } from './trace/TraceEventList'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
@@ -76,6 +84,14 @@ interface TracePanelProps {
   canResume?: boolean
   resumeLoading?: boolean
   onResume?: () => void
+  /**
+   * Absolute path of this run's `report.md` (RUN_EXECUTION F6), as reported by
+   * the backend. Gives the report a user entry point — the `⋮` menu opens it in
+   * the OS default application (decision 2026-08-08 D5). Null while a run has
+   * not sealed one, which is also why the menu item is absent rather than
+   * disabled: a report either exists on disk or does not.
+   */
+  reportPath?: string | null
   hitlSubmitting?: boolean
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
   /**
@@ -113,6 +129,85 @@ export function isGoldenlessAgentNode(
     return false
   }
   return node.data.goldenState !== 'has-golden'
+}
+
+/** One entry of the run's `⋮` overflow menu. */
+export interface TraceRunAction {
+  key: 'resume' | 'compare' | 'promote' | 'report'
+  label: string
+  icon: LucideIcon
+  disabled: boolean
+  run: () => void
+}
+
+/**
+ * Which run-level actions this trace offers, and which of them are currently
+ * available.
+ *
+ * An action exists only when the view wired its handler — a historical view
+ * passes none and stays read-only (decision 2026-08-07). Availability is
+ * separate: a wired action can still be unavailable right now (no resumable
+ * run, a compare already in flight), which is what `disabled` says. The report
+ * is the exception with no `can…` flag: a report either exists on disk or does
+ * not, so its absence removes the item instead of grating it out.
+ */
+export function traceRunActions({
+  canResume,
+  resumeLoading,
+  onResume,
+  canCompare,
+  compareLoading,
+  onCompareToGolden,
+  onPromoteToGolden,
+  reportPath,
+}: {
+  canResume: boolean
+  resumeLoading: boolean
+  onResume?: () => void
+  canCompare: boolean
+  compareLoading: boolean
+  onCompareToGolden?: () => void
+  onPromoteToGolden?: () => void
+  reportPath: string | null
+}): TraceRunAction[] {
+  const actions: TraceRunAction[] = []
+  if (onResume) {
+    actions.push({
+      key: 'resume',
+      label: resumeLoading ? 'Resuming' : 'Resume from last checkpoint',
+      icon: Play,
+      disabled: !canResume || resumeLoading,
+      run: onResume,
+    })
+  }
+  if (onCompareToGolden) {
+    actions.push({
+      key: 'compare',
+      label: compareLoading ? 'Comparing' : 'Compare to golden',
+      icon: GitCompareArrows,
+      disabled: !canCompare || compareLoading,
+      run: onCompareToGolden,
+    })
+  }
+  if (onPromoteToGolden) {
+    actions.push({
+      key: 'promote',
+      label: 'Promote to golden',
+      icon: BadgeCheck,
+      disabled: !canCompare,
+      run: onPromoteToGolden,
+    })
+  }
+  if (reportPath) {
+    actions.push({
+      key: 'report',
+      label: 'Open run report',
+      icon: FileText,
+      disabled: false,
+      run: () => { void openLocalPath(reportPath) },
+    })
+  }
+  return actions
 }
 
 /** Header status: live view shows the stream state, history shows the verdict. */
@@ -180,6 +275,7 @@ export function TracePanel({
   canResume = false,
   resumeLoading = false,
   onResume,
+  reportPath = null,
   hitlSubmitting = false,
   onSubmitHitlResponse,
   compareTabs,
@@ -198,6 +294,7 @@ export function TracePanel({
   // announces it up front; clicking the chip narrows the trace to the fallback
   // events via the existing type filter.
   const fallbackCount = countLlmFallbacks(traceEvents)
+  const hasFilterChips = filter.selectedCategories.length > 0 || filter.selectedPhases.length > 0
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
@@ -266,6 +363,45 @@ export function TracePanel({
     </div>
   ) : null
 
+  const runActions = traceRunActions({
+    canResume,
+    resumeLoading,
+    onResume,
+    canCompare,
+    compareLoading,
+    onCompareToGolden,
+    onPromoteToGolden,
+    reportPath,
+  })
+  // Run-level actions belong to the run's identity, not to the event list, so
+  // they collapse into one overflow menu instead of each taking a labelled
+  // button out of the search row's width (decision 2026-08-08 D4/D5).
+  const runActionsMenu = runActions.length > 0 ? (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Run actions">
+              <MoreVertical className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Actions for this run</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-56">
+        {runActions.map((action) => {
+          const ActionIcon = action.icon
+          return (
+            <DropdownMenuItem key={action.key} disabled={action.disabled} onSelect={action.run}>
+              <ActionIcon />
+              {action.label}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null
+
   // Identity strip: which run this trace belongs to, and how it stands. Shared
   // by the live and history views so the region reads as ONE surface (D3 命名:
   // 区域=Timeline / 本视图=Trace / 文档=Full Trace).
@@ -300,11 +436,53 @@ export function TracePanel({
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}
       <RunStatusBadge live={live} metadata={metadata} outcome={runOutcome} />
+      {linkEnabled && focusPhase ? (
+        <span
+          className="min-w-0 shrink truncate text-xs text-muted-foreground"
+          title={`Linked to ${focusPhase}`}
+        >
+          → {focusPhase}
+        </span>
+      ) : null}
       <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
         {filter.filteredEvents.length === traceEvents.length
           ? `${traceEvents.length} events`
           : `${filter.filteredEvents.length} / ${traceEvents.length}`}
       </span>
+      {traceEvents.length > 0 ? (
+        <TraceFilterButton
+          phases={filter.phases}
+          selectedCategories={filter.selectedCategories}
+          selectedPhases={filter.selectedPhases}
+          onSelectCategories={filter.setSelectedCategories}
+          onSelectPhases={filter.setSelectedPhases}
+        />
+      ) : null}
+      {/* A read-only historical view wires no toggle, and a control that cannot
+          change anything is not worth its place on the strip. */}
+      {onToggleLink ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Link trace to the focused node"
+              aria-pressed={linkEnabled}
+              onClick={() => onToggleLink(!linkEnabled)}
+              className={linkEnabled ? 'text-link' : 'text-muted-foreground'}
+            >
+              {linkEnabled ? <Link2 className="size-4" /> : <Link2Off className="size-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {linkEnabled
+              ? 'Linked: focusing a node narrows the trace to it'
+              : 'Unlinked: the trace ignores canvas focus'}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+      {runActionsMenu}
     </div>
   )
 
@@ -338,89 +516,15 @@ export function TracePanel({
       {identityStrip}
       {failureBanner}
       <div className="shrink-0 space-y-2 border-b border-border bg-card p-3">
-        <div className="flex items-center gap-1.5">
-          <div className="min-w-0 flex-1">
-            <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Link trace to the focused node"
-                aria-pressed={linkEnabled}
-                onClick={() => onToggleLink?.(!linkEnabled)}
-                className={linkEnabled ? 'text-link' : 'text-muted-foreground'}
-              >
-                {linkEnabled ? <Link2 className="size-4" /> : <Link2Off className="size-4" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {linkEnabled
-                ? 'Linked: focusing a node narrows the trace to it'
-                : 'Unlinked: the trace ignores canvas focus'}
-            </TooltipContent>
-          </Tooltip>
-          {onResume ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Resume run from last checkpoint"
-                  disabled={!canResume || resumeLoading}
-                  onClick={onResume}
-                  className="text-success hover:text-success"
-                >
-                  <Play className="size-3.5" />
-                  {resumeLoading ? 'Resuming' : 'Resume'}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Continue this run from its last checkpoint</TooltipContent>
-            </Tooltip>
-          ) : null}
-          {onCompareToGolden ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Compare trace to golden baseline"
-              disabled={!canCompare || compareLoading}
-              onClick={onCompareToGolden}
-              className="text-link hover:text-link"
-            >
-              <GitCompareArrows className="size-3.5" />
-              {compareLoading ? 'Comparing' : 'Compare'}
-            </Button>
-          ) : null}
-          {onPromoteToGolden ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Promote run to golden baseline"
-              disabled={!canCompare}
-              onClick={onPromoteToGolden}
-              className="text-warning hover:text-warning"
-            >
-              <BadgeCheck className="size-3.5" />
-              Golden
-            </Button>
-          ) : null}
-        </div>
-        <TraceFilter
-          phases={filter.phases}
-          selectedCategories={filter.selectedCategories}
-          selectedPhases={filter.selectedPhases}
-          activePhase={linkEnabled ? focusPhase : null}
-          onSelectCategories={filter.setSelectedCategories}
-          onSelectPhases={filter.setSelectedPhases}
-          onClear={filter.clearFilters}
-        />
-        {fallbackCount > 0 || canPromoteFocusedNode ? (
+        <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
+        {hasFilterChips || fallbackCount > 0 || canPromoteFocusedNode ? (
         <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+          <TraceFilterChips
+            selectedCategories={filter.selectedCategories}
+            selectedPhases={filter.selectedPhases}
+            onSelectCategories={filter.setSelectedCategories}
+            onSelectPhases={filter.setSelectedPhases}
+          />
           {fallbackCount > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>

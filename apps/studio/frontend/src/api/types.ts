@@ -434,6 +434,10 @@ export interface RunDetail {
   events: EventEnvelope[]
   final_context: JsonObject | null
   artifacts: string[] | null
+  // Absolute path of this run's `report.md`, or null when the run left none.
+  // The report stays a pure projection of the sealed artifacts; this only tells
+  // a UI with no shell where to open it.
+  report_path: string | null
 }
 
 export interface ResumeValidityResponse {

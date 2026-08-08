@@ -965,6 +965,7 @@ class RunManager:
             events=_read_run_artifact_events(run_dir),
             final_context=final_context,
             artifacts=_read_run_artifact_paths(run_dir),
+            report_path=_run_report_path(run_dir),
         )
 
     #: Every run status maps to exactly one thing the surfaces are told, so a new
@@ -1621,6 +1622,14 @@ def _read_run_artifact_events(run_dir: Path) -> list[EventEnvelope]:
             "artifact.corrupt_trace",
             {"run_id": run_dir.name, "path": "trace.jsonl", "detail": str(exc)},
         ) from exc
+
+
+def _run_report_path(run_dir: Path) -> str | None:
+    """Where this run's report lives, for a UI that can only open a path."""
+    from app.services.run_report import REPORT_FILENAME
+
+    report = run_dir / REPORT_FILENAME
+    return str(report) if report.is_file() else None
 
 
 def _read_run_artifact_paths(run_dir: Path) -> list[str]:

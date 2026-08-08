@@ -69,6 +69,8 @@ interface PanelsProps {
   onPromoteToGolden?: () => void
   traceCanResume?: boolean
   traceResumeLoading?: boolean
+  /** Path of the LIVE run's `report.md` once it has sealed one; null before. */
+  traceReportPath?: string | null
   onResumeRun?: () => void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
@@ -125,6 +127,7 @@ export function Panels({
   onPromoteToGolden,
   traceCanResume,
   traceResumeLoading,
+  traceReportPath = null,
   onResumeRun,
   onResumeNode,
   onSubmitHitlResponse,
@@ -260,6 +263,7 @@ export function Panels({
           onPromoteNode={onPromoteNode}
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
+          reportPath={traceReportPath}
           onResume={onResumeRun}
           hitlSubmitting={traceResumeLoading}
           onSubmitHitlResponse={onSubmitHitlResponse}
@@ -279,6 +283,7 @@ export function Panels({
           onBack={onCloseTraceView}
           runId={traceView.runId}
           metadata={traceView.metadata}
+          reportPath={traceView.reportPath}
         />
       )
     }

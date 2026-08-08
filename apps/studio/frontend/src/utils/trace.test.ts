@@ -5,6 +5,7 @@ import {
   countLlmFallbacks,
   errorStack,
   eventColor,
+  eventMessageIsRedundant,
   eventMessage,
   eventModelName,
   eventPhase,
@@ -238,6 +239,19 @@ describe('llm_fallback visibility (trace-observability F7)', () => {
     expect(eventColor('llm_fallback')).toBe('bg-warning')
   })
 
+  // Colour means severity, never kind (FRONTEND_UI_SPEC §2.2): a run that went
+  // fine reads monochrome, so the one coloured dot is the one worth looking at.
+  it('leaves every ordinary event kind uncoloured', () => {
+    for (const eventType of ['phase_start', 'phase_end', 'run_ended', 'llm_call', 'prompt_captured', 'tool_call']) {
+      expect(eventColor(eventType)).toBe('bg-muted-foreground/50')
+    }
+  })
+
+  it('colors only failures as destructive', () => {
+    expect(eventColor('internal_error')).toBe('bg-destructive')
+    expect(eventColor('validation_fail')).toBe('bg-destructive')
+  })
+
   it('extracts provider ids, models, reason and status code from the event', () => {
     const details = llmFallbackDetails(fallbackEvent())
     expect(details).not.toBeNull()
@@ -406,5 +420,26 @@ describe('llm_call model', () => {
         phase_name: 'review',
       } as CallbackEvent),
     ).toBe('LLM call completed')
+  })
+})
+
+describe('redundant row messages', () => {
+  const ev = (partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent => ({
+    schema_version: '1.0',
+    timestamp: '2026-08-08T00:00:00Z',
+    ...partial,
+  } as CallbackEvent)
+
+  // A row prints the kind and then a sentence about it; when `eventMessage` has
+  // no sentence for that kind it falls through to the kind itself, and the row
+  // would say the same word twice (decision 2026-08-08 D3).
+  it('spots the kinds whose message only repeats the kind', () => {
+    for (const eventType of ['input_dispatch', 'agent_loop_iteration', 'run_started']) {
+      expect(eventMessageIsRedundant(ev({ event_type: eventType }))).toBe(true)
+    }
+  })
+
+  it('keeps a message that actually says something', () => {
+    expect(eventMessageIsRedundant(ev({ event_type: 'phase_start', phase_name: 'segment' }))).toBe(false)
   })
 })

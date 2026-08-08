@@ -101,7 +101,7 @@ describe('useRunStream EventEnvelope handling', () => {
   })
 
   it('stores cursors, ignores duplicate seq events, and exposes a local gap error', () => {
-    useRunStream('run-1')
+    useRunStream('skill-1', 'run-1')
     const socket = FakeWebSocket.instances[0]
     socket.onopen?.()
 
@@ -120,7 +120,7 @@ describe('useRunStream EventEnvelope handling', () => {
   })
 
   it('reconnects with the latest cursor', () => {
-    useRunStream('run-1')
+    useRunStream('skill-1', 'run-1')
     const socket = FakeWebSocket.instances[0]
     socket.onopen?.()
     socket.emit(envelope(1, { event_type: 'phase_start', phase_name: 'draft' }))
@@ -130,11 +130,11 @@ describe('useRunStream EventEnvelope handling', () => {
     vi.advanceTimersByTime(1000)
 
     expect(FakeWebSocket.instances).toHaveLength(2)
-    expect(FakeWebSocket.instances[1].url).toContain('/ws/runs/run-1?cursor=run%3Arun-1%3A1')
+    expect(FakeWebSocket.instances[1].url).toContain('/ws/skills/skill-1/runs/run-1?cursor=run%3Arun-1%3A1')
   })
 
   it('surfaces stream error envelopes without appending them as trace events', () => {
-    useRunStream('run-1')
+    useRunStream('skill-1', 'run-1')
     const socket = FakeWebSocket.instances[0]
     socket.onopen?.()
 

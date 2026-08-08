@@ -36,7 +36,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
     const events = sampleEvents()
     const result = filterTraceEvents(events, {
       searchTerm: '',
-      selectedTypes: [],
+      selectedCategories: [],
       selectedPhases: [],
       activePhase: null,
     })
@@ -52,7 +52,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
     // "llm_call" appears in exactly one event's serialized text.
     const result = filterTraceEvents(events, {
       searchTerm: 'llm_call',
-      selectedTypes: [],
+      selectedCategories: [],
       selectedPhases: [],
       activePhase: null,
     })
@@ -65,7 +65,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
     const events = sampleEvents()
     const result = filterTraceEvents(events, {
       searchTerm: '  REVIEW  ',
-      selectedTypes: [],
+      selectedCategories: [],
       selectedPhases: [],
       activePhase: null,
     })
@@ -78,7 +78,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
     const events = sampleEvents()
     const result = filterTraceEvents(events, {
       searchTerm: '',
-      selectedTypes: [],
+      selectedCategories: [],
       selectedPhases: ['review'],
       activePhase: null,
     })
@@ -91,7 +91,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
     const events = sampleEvents()
     const result = filterTraceEvents(events, {
       searchTerm: '',
-      selectedTypes: [],
+      selectedCategories: [],
       selectedPhases: [],
       activePhase: 'draft',
     })
@@ -99,11 +99,25 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
     expect(result.map(({ index }) => index)).toEqual([0, 1, 2])
   })
 
+  it('clause 2: a category shows only the event types in that bucket', () => {
+    const events = sampleEvents()
+    const result = filterTraceEvents(events, {
+      searchTerm: '',
+      selectedCategories: ['llm'],
+      selectedPhases: [],
+      activePhase: null,
+    })
+
+    // The four buckets replace the raw event_type list: picking "llm" keeps the
+    // model call and drops the run skeleton around it.
+    expect(result.map(({ event }) => event.event_type)).toEqual(['llm_call'])
+  })
+
   it('combines search + phase as an AND, both applied to the same received batch', () => {
     const events = sampleEvents()
     const result = filterTraceEvents(events, {
       searchTerm: 'phase_start',
-      selectedTypes: [],
+      selectedCategories: [],
       selectedPhases: ['draft'],
       activePhase: null,
     })
@@ -129,7 +143,7 @@ describe('useTraceFilter (hook surface over the pure projection)', () => {
     // Default: everything received is shown (no fetch, no drop).
     expect(hook!.filteredEvents).toHaveLength(events.length)
     expect(hook!.phases).toEqual(['draft', 'review'])
-    expect(hook!.eventTypes).toContain('llm_call')
+    expect(hook!.selectedCategories).toEqual([])
   })
 
   it('narrows to the active phase passed by the focused-node link', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
@@ -12,9 +12,9 @@ import {
   MessageScrollerViewport,
 } from '../ui/message-scroller'
 import { initialTracePosition } from './trace-initial-scroll'
-import { TRACE_EVENT_ROW_HEIGHT, TraceEventRow } from './TraceEventRow'
+import { TraceEventRow } from './TraceEventRow'
 
-interface VirtualTraceListProps {
+interface TraceEventListProps {
   events: IndexedTraceEvent[]
   activePhase: string | null
   selectedEventId: string | null
@@ -35,7 +35,16 @@ interface VirtualTraceListProps {
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
-export function VirtualTraceList({
+/**
+ * The trace as a plain scrolling list.
+ *
+ * Rows take the height of what they contain and their spacing is declared once,
+ * on the list. The previous windowed version sized rows to a fixed 128px slot
+ * AND spaced them a further 20px apart, which both padded every short row with
+ * dead space and made the scroll container shorter than its own contents, so a
+ * run's last events were unreachable (decision 2026-08-08 D3).
+ */
+export function TraceEventList({
   events,
   activePhase,
   selectedEventId,
@@ -44,37 +53,15 @@ export function VirtualTraceList({
   streamKey = null,
   onSelectPrompt,
   onSelectEvent,
-}: VirtualTraceListProps) {
-  // The scroll container is the message-scroller primitive's viewport; the
-  // virtualization window reads its scroll box through this lookup (the
-  // primitive owns follow-bottom, we own which rows exist).
+}: TraceEventListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState<HTMLElement | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
-  const [viewportHeight, setViewportHeight] = useState(0)
-  const [scrollTop, setScrollTop] = useState(0)
 
   useEffect(() => {
     const found = containerRef.current?.querySelector<HTMLElement>('[data-slot="message-scroller-viewport"]') ?? null
     setViewport(found)
   }, [])
-
-  useEffect(() => {
-    if (!viewport) {
-      return undefined
-    }
-    const updateViewport = () => {
-      setViewportHeight(viewport.clientHeight)
-      setScrollTop(viewport.scrollTop)
-    }
-    updateViewport()
-    viewport.addEventListener('scroll', updateViewport, { passive: true })
-    window.addEventListener('resize', updateViewport)
-    return () => {
-      viewport.removeEventListener('scroll', updateViewport)
-      window.removeEventListener('resize', updateViewport)
-    }
-  }, [viewport])
 
   // Park the list where this mode should start reading. The scroll primitive's
   // own default is the bottom (it is built for chat), which would open a
@@ -84,61 +71,42 @@ export function VirtualTraceList({
       return
     }
     viewport.scrollTop = 0
-    setScrollTop(0)
   }, [viewport, followStream, streamKey])
 
-  const virtual = useMemo(() => {
-    const visibleCount = Math.ceil(viewportHeight / TRACE_EVENT_ROW_HEIGHT)
-    const firstVisible = Math.floor(scrollTop / TRACE_EVENT_ROW_HEIGHT)
-    const startIdx = Math.max(0, firstVisible - 8)
-    const endIdx = Math.min(events.length, firstVisible + visibleCount + 9)
-    return {
-      startIdx,
-      endIdx,
-      totalHeight: events.length * TRACE_EVENT_ROW_HEIGHT,
-      offsetTop: startIdx * TRACE_EVENT_ROW_HEIGHT,
+  const predictTrace = isPredictTrace(events.map(({ event }) => event))
+  const selectedPosition = selectedEventId
+    ? events.findIndex(({ event, index }) => traceEventId(event, index) === selectedEventId)
+    : -1
+
+  const rowElement = (position: number): HTMLElement | null => {
+    const target = events[position]
+    if (!target || !containerRef.current) {
+      return null
     }
-  }, [events.length, scrollTop, viewportHeight])
-  const visibleEvents = events.slice(virtual.startIdx, virtual.endIdx)
-  const predictTrace = useMemo(
-    () => isPredictTrace(events.map(({ event }) => event)),
-    [events],
-  )
-  const selectedPosition = useMemo(
-    () => selectedEventId ? events.findIndex(({ event, index }) => traceEventId(event, index) === selectedEventId) : -1,
-    [events, selectedEventId],
-  )
+    return containerRef.current.querySelector<HTMLElement>(
+      `#trace-event-${CSS.escape(traceEventId(target.event, target.index))}`,
+    )
+  }
 
   useEffect(() => {
-    if (selectedPosition < 0 || !viewport) {
+    if (selectedPosition < 0) {
       return
     }
-
-    const top = selectedPosition * TRACE_EVENT_ROW_HEIGHT
-    const bottom = top + TRACE_EVENT_ROW_HEIGHT
-    if (top < viewport.scrollTop || bottom > viewport.scrollTop + viewport.clientHeight) {
-      viewport.scrollTo({ top: Math.max(0, top - TRACE_EVENT_ROW_HEIGHT), behavior: 'smooth' })
-    }
-  }, [selectedPosition, viewport])
+    rowElement(selectedPosition)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    // Row lookup depends on the rendered list; re-running on selection is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPosition])
 
   const focusEventAt = (position: number) => {
     const target = events[position]
     if (!target) {
       return
     }
-    viewport?.scrollTo({
-      top: Math.max(0, position * TRACE_EVENT_ROW_HEIGHT),
-      behavior: 'smooth',
-    })
+    rowElement(position)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     onSelectEvent?.(target.index, target.event)
   }
 
-  const toggleExpandedAt = (position: number) => {
-    const target = events[position]
-    if (!target) {
-      return
-    }
-    const eventId = traceEventId(target.event, target.index)
+  const toggleExpanded = (eventId: string) => {
     setExpandedIds((current) => {
       const next = new Set(current)
       if (next.has(eventId)) {
@@ -148,6 +116,14 @@ export function VirtualTraceList({
       }
       return next
     })
+  }
+
+  const toggleExpandedAt = (position: number) => {
+    const target = events[position]
+    if (!target) {
+      return
+    }
+    toggleExpanded(traceEventId(target.event, target.index))
     onSelectEvent?.(target.index, target.event)
   }
 
@@ -181,28 +157,21 @@ export function VirtualTraceList({
             tabIndex={0}
             onKeyDown={handleKeyDown}
             data-predict-trace={predictTrace ? 'true' : undefined}
-            data-virtualized-count={events.length}
+            data-trace-event-count={events.length}
             className={`pr-1 outline-none focus:ring-2 focus:ring-ring/50 ${
               predictTrace ? 'border-l border-warning-border/50 pl-2' : ''
             }`}
           >
             <MessageScrollerContent className="block h-max min-h-0 gap-0">
-              <div className="relative ml-3 border-l-2 border-border" style={{ height: virtual.totalHeight }}>
-                <div
-                  className="absolute left-0 right-0 top-0 space-y-5"
-                  style={{ transform: `translateY(${virtual.offsetTop}px)` }}
-                >
-                  {visibleEvents.map(({ event, index }) => {
-                    const eventId = traceEventId(event, index)
-                    const absolutePosition = events.findIndex((item) => item.index === index)
-                    return (
+              <div className="ml-3 space-y-1.5 border-l-2 border-border py-1">
+                {events.map(({ event, index }) => {
+                  const eventId = traceEventId(event, index)
+                  return (
                     <div
                       key={`${event.timestamp}-${index}`}
                       id={`trace-event-${eventId}`}
                       role="option"
                       aria-selected={selectedEventId === eventId}
-                      data-virtual-index={absolutePosition}
-                      style={{ minHeight: TRACE_EVENT_ROW_HEIGHT }}
                     >
                       <TraceEventRow
                         event={event}
@@ -211,22 +180,13 @@ export function VirtualTraceList({
                         selected={selectedEventId === eventId}
                         highlighted={Boolean(linkEnabled && activePhase && activePhase === eventPhase(event))}
                         expanded={expandedIds.has(eventId)}
-                        onToggleExpanded={() => setExpandedIds((current) => {
-                          const next = new Set(current)
-                          if (next.has(eventId)) {
-                            next.delete(eventId)
-                          } else {
-                            next.add(eventId)
-                          }
-                          return next
-                        })}
+                        onToggleExpanded={() => toggleExpanded(eventId)}
                         onSelectPrompt={onSelectPrompt}
                         onSelectEvent={onSelectEvent}
                       />
                     </div>
-                    )
-                  })}
-                </div>
+                  )
+                })}
               </div>
             </MessageScrollerContent>
           </MessageScrollerViewport>

@@ -2,11 +2,10 @@ import type { ResumeRunOptions } from "@/api/client"
 import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
-import { TraceDocumentPanel } from "@/components/MonacoPanel"
+import { TraceDocumentPanel } from "@/components/trace/TraceDocumentPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { CompareTab } from "../run-compare"
 import { useSkills } from "@/hooks/useSkills"
-import { useThemeValue } from "@/store/themeStore"
 import type { PanelKind } from "../Toolbar"
 import type { SettingsTab } from "../SettingsPage"
 import { useWorkspaceContext } from "../WorkspaceContext"
@@ -139,7 +138,6 @@ export function Panels({
   onSelectGraph,
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
-  const isDarkMode = useThemeValue() === "dark"
   const selectedNodeSkillId = selectedNode?.data.skillId ?? null
   const selectedNodeWorkspaceRoot = selectedNode?.data.workspaceRoot ?? null
   const selectedNodeUsesDifferentSkill = Boolean(
@@ -296,7 +294,6 @@ export function Panels({
     return (
       <TraceDocumentPanel
         events={traceDocumentEvents}
-        isDarkMode={isDarkMode}
         focusNodeId={selectedNode?.id ?? null}
       />
     )

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { CallbackEvent } from '../api/types'
+import { traceEventCategory, type TraceCategory } from '../components/trace/trace-category'
 import { eventMessage, eventPhase } from '../utils/trace'
 
 export interface IndexedTraceEvent {
@@ -9,7 +10,7 @@ export interface IndexedTraceEvent {
 
 export interface TraceFilterState {
   searchTerm: string
-  selectedTypes: string[]
+  selectedCategories: TraceCategory[]
   selectedPhases: string[]
 }
 
@@ -20,13 +21,9 @@ export interface TraceFilterState {
  */
 export interface TraceFilterCriteria {
   searchTerm: string
-  selectedTypes: string[]
+  selectedCategories: TraceCategory[]
   selectedPhases: string[]
   activePhase: string | null
-}
-
-function includesValue(values: string[], value: string): string[] {
-  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
 }
 
 function eventSearchText(event: CallbackEvent): string {
@@ -43,7 +40,7 @@ function eventSearchText(event: CallbackEvent): string {
  * Trace panel's client-side filter. It runs over the events the panel has
  * ALREADY received (no re-request) and keeps each surviving event's original
  * `index` so selection/scroll positions stay stable. An event survives when it
- * matches the search term AND the selected type set AND the selected phase set
+ * matches the search term AND the selected category set AND the selected phase set
  * AND the focused-node active phase — empty criteria are no-ops.
  */
 export function filterTraceEvents(
@@ -57,50 +54,45 @@ export function filterTraceEvents(
       const phase = eventPhase(event)
       const matchesSearch = normalizedSearch.length === 0
         || eventSearchText(event).includes(normalizedSearch)
-      const matchesType = criteria.selectedTypes.length === 0
-        || criteria.selectedTypes.includes(event.event_type)
+      const matchesCategory = criteria.selectedCategories.length === 0
+        || criteria.selectedCategories.includes(traceEventCategory(event.event_type))
       const matchesPhase = criteria.selectedPhases.length === 0
         || criteria.selectedPhases.includes(phase)
       const matchesActivePhase = !criteria.activePhase || phase === criteria.activePhase
-      return matchesSearch && matchesType && matchesPhase && matchesActivePhase
+      return matchesSearch && matchesCategory && matchesPhase && matchesActivePhase
     })
 }
 
 export function useTraceFilter(events: CallbackEvent[], activePhase: string | null = null) {
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [selectedCategories, setSelectedCategories] = useState<TraceCategory[]>([])
   const [selectedPhases, setSelectedPhases] = useState<string[]>([])
 
-  const eventTypes = useMemo(
-    () => Array.from(new Set(events.map((event) => event.event_type))).sort(),
-    [events],
-  )
   const phases = useMemo(
     () => Array.from(new Set(events.map((event) => eventPhase(event)))).sort(),
     [events],
   )
 
   const filteredEvents = useMemo<IndexedTraceEvent[]>(
-    () => filterTraceEvents(events, { searchTerm, selectedTypes, selectedPhases, activePhase }),
-    [activePhase, events, searchTerm, selectedPhases, selectedTypes],
+    () => filterTraceEvents(events, { searchTerm, selectedCategories, selectedPhases, activePhase }),
+    [activePhase, events, searchTerm, selectedCategories, selectedPhases],
   )
 
   const clearFilters = () => {
     setSearchTerm('')
-    setSelectedTypes([])
+    setSelectedCategories([])
     setSelectedPhases([])
   }
 
   return {
     searchTerm,
-    selectedTypes,
+    selectedCategories,
     selectedPhases,
-    eventTypes,
     phases,
     filteredEvents,
     setSearchTerm,
-    toggleType: (eventType: string) => setSelectedTypes((values) => includesValue(values, eventType)),
-    togglePhase: (phase: string) => setSelectedPhases((values) => includesValue(values, phase)),
+    setSelectedCategories,
+    setSelectedPhases,
     clearFilters,
   }
 }

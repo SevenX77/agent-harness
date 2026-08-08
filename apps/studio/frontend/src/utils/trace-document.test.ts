@@ -12,68 +12,70 @@ function event(partial: Partial<CallbackEvent> & { event_type: string }): Callba
 }
 
 describe('buildTraceDocument (n4-trace #18 read-only full-trace document)', () => {
-  it('renders an empty-state document with no node ranges when there are no events', () => {
+  it('is empty, with no sections, when there are no events', () => {
     const doc = buildTraceDocument([])
-    expect(doc.text).toContain('No trace events captured yet')
-    expect(doc.nodeRanges).toHaveLength(0)
+
+    expect(doc.sections).toHaveLength(0)
+    expect(doc.eventCount).toBe(0)
+    expect(doc.runId).toBeNull()
   })
 
-  it('renders a lightly-formatted document (human sentences, not raw jsonl)', () => {
+  it('reads as human sentences, not raw jsonl', () => {
     const doc = buildTraceDocument([
       event({ event_type: 'phase_start', phase_name: 'draft', run_id: 'run-1' }),
       event({ event_type: 'llm_call', phase_name: 'draft', input_tokens: 10, output_tokens: 5 }),
     ])
 
-    // Document framing + readable sentences, not a JSON array dump.
-    expect(doc.text).toContain('# Run trace · run-1')
-    expect(doc.text).toContain('## draft')
-    expect(doc.text).toContain('Phase started: draft')
-    expect(doc.text).toContain('LLM call completed')
-    expect(doc.text).toContain('tokens 10/5')
-    // It must not be a raw jsonl / JSON.stringify of the event list.
-    expect(doc.text).not.toContain('"event_type":')
-    expect(doc.text).not.toContain('"schema_version"')
+    expect(doc.runId).toBe('run-1')
+    expect(doc.sections).toHaveLength(1)
+    const [start, call] = doc.sections[0].entries
+    expect(start.headline).toContain('Phase started: draft')
+    expect(call.headline).toContain('LLM call completed')
+    expect(call.tokens).toBe('10/5')
   })
 
-  it('groups events by node/phase and exposes a line range per node for focus jumps', () => {
+  it('groups events into one block per node, in run order', () => {
     const doc = buildTraceDocument([
       event({ event_type: 'phase_start', phase_name: 'draft' }),
       event({ event_type: 'phase_end', phase_name: 'draft' }),
       event({ event_type: 'phase_start', phase_name: 'review' }),
     ])
 
-    const draft = doc.nodeRanges.find((range) => range.nodeId === 'draft')
-    const review = doc.nodeRanges.find((range) => range.nodeId === 'review')
-    expect(draft).toBeDefined()
-    expect(review).toBeDefined()
-    // Each range is a valid 1-based span and they do not overlap (sequential blocks).
-    expect(draft!.startLine).toBeGreaterThan(0)
-    expect(draft!.endLine).toBeGreaterThanOrEqual(draft!.startLine)
-    expect(review!.startLine).toBeGreaterThan(draft!.endLine)
-
-    // The heading really sits on the recorded start line.
-    const lines = doc.text.split('\n')
-    expect(lines[draft!.startLine - 1]).toBe('## draft')
-    expect(lines[review!.startLine - 1]).toBe('## review')
+    expect(doc.sections.map((section) => section.nodeId)).toEqual(['draft', 'review'])
+    expect(doc.sections[0].entries.map((entry) => entry.position)).toEqual([1, 2])
+    expect(doc.sections[1].entries).toHaveLength(1)
   })
 
-  it('inlines a state\'s full blackboard detail beneath its line (D7), not a one-off raw dump', () => {
+  it("carries a state's full blackboard detail (D7)", () => {
     const doc = buildTraceDocument([
       event({ event_type: 'phase_end', phase_name: 'draft', outputs: { chapter_title: 'Prologue', word_count: 1200 } }),
     ])
 
-    expect(doc.text).toContain('Blackboard:')
-    expect(doc.text).toContain('chapter_title')
-    expect(doc.text).toContain('Prologue')
+    const [blackboard] = doc.sections[0].entries[0].details
+    expect(blackboard.label).toBe('Blackboard')
+    expect(blackboard.content).toContain('chapter_title')
+    expect(blackboard.content).toContain('Prologue')
   })
 
-  it('truncates oversized state detail so a huge blackboard never floods the document', () => {
+  it('keeps an oversized blackboard whole — the full trace is complete or it is not full', () => {
+    // The document used to cut every detail at 1200 characters with no way to
+    // reach the rest, so the one surface promising the WHOLE run was the one
+    // surface that could not show it.
     const huge = 'z'.repeat(5000)
     const doc = buildTraceDocument([
       event({ event_type: 'phase_end', phase_name: 'draft', outputs: { blob: huge } }),
     ])
 
-    expect(doc.text).toContain('truncated')
-    expect(doc.text).not.toContain(huge)
+    const [blackboard] = doc.sections[0].entries[0].details
+    expect(blackboard.content).toContain(huge)
+    expect(blackboard.content).not.toContain('truncated')
+  })
+
+  it('carries an error message on the state that failed', () => {
+    const doc = buildTraceDocument([
+      event({ event_type: 'internal_error', phase_name: 'draft', error_message: 'boom' }),
+    ])
+
+    expect(doc.sections[0].entries[0].errorMessage).toBe('boom')
   })
 })

@@ -1,71 +1,93 @@
 import { FilterX } from 'lucide-react'
+import { Button } from '../ui/button'
+import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
+import { TRACE_CATEGORIES, TRACE_CATEGORY_LABEL, type TraceCategory } from './trace-category'
 
 interface TraceFilterProps {
-  eventTypes: string[]
   phases: string[]
-  selectedTypes: string[]
+  selectedCategories: TraceCategory[]
   selectedPhases: string[]
   activePhase: string | null
-  onToggleType: (eventType: string) => void
-  onTogglePhase: (phase: string) => void
+  onSelectCategories: (categories: TraceCategory[]) => void
+  onSelectPhases: (phases: string[]) => void
   onClear: () => void
 }
 
-function chipClass(selected: boolean): string {
-  return selected
-    ? 'border-primary/60 bg-primary/10 text-primary'
-    : 'border-border bg-card text-muted-foreground hover:bg-muted/40'
-}
-
+/**
+ * Two rows, both of fixed height: the four semantic buckets, then the run's
+ * nodes. Node chips scroll sideways rather than wrapping — the filter is a
+ * control strip, and a control strip that grows a row per handful of nodes eats
+ * the panel it is meant to serve.
+ */
 export function TraceFilter({
-  eventTypes,
   phases,
-  selectedTypes,
+  selectedCategories,
   selectedPhases,
   activePhase,
-  onToggleType,
-  onTogglePhase,
+  onSelectCategories,
+  onSelectPhases,
   onClear,
 }: TraceFilterProps) {
+  const hasFilters = selectedCategories.length > 0 || selectedPhases.length > 0
+
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase text-muted-foreground">
-          Filters {activePhase ? <span className="normal-case text-primary">active phase: {activePhase}</span> : null}
-        </div>
-        <button
-          type="button"
-          onClick={onClear}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <ToggleGroup
+          type="multiple"
+          size="sm"
+          variant="outline"
+          spacing={1}
+          value={selectedCategories}
+          onValueChange={(value: string[]) => onSelectCategories(value as TraceCategory[])}
+          aria-label="Filter by event category"
         >
-          <FilterX className="h-3.5 w-3.5" />
+          {TRACE_CATEGORIES.map((category) => (
+            <ToggleGroupItem key={category} value={category} aria-label={TRACE_CATEGORY_LABEL[category]}>
+              {TRACE_CATEGORY_LABEL[category]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {activePhase ? (
+          <span className="truncate text-xs text-primary" title={`Linked to ${activePhase}`}>
+            → {activePhase}
+          </span>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-6 shrink-0 px-2 text-xs"
+          onClick={onClear}
+          disabled={!hasFilters}
+        >
+          <FilterX className="size-3.5" />
           Clear
-        </button>
+        </Button>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {eventTypes.map((eventType) => (
-          <button
-            key={eventType}
-            type="button"
-            onClick={() => onToggleType(eventType)}
-            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${chipClass(selectedTypes.includes(eventType))}`}
+      {phases.length > 0 ? (
+        <div
+          data-trace-node-filter
+          className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <ToggleGroup
+            type="multiple"
+            size="sm"
+            variant="outline"
+            spacing={1}
+            value={selectedPhases}
+            onValueChange={onSelectPhases}
+            aria-label="Filter by node"
+            className="w-max flex-nowrap"
           >
-            {eventType}
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {phases.map((phase) => (
-          <button
-            key={phase}
-            type="button"
-            onClick={() => onTogglePhase(phase)}
-            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${chipClass(selectedPhases.includes(phase))}`}
-          >
-            {phase}
-          </button>
-        ))}
-      </div>
+            {phases.map((phase) => (
+              <ToggleGroupItem key={phase} value={phase} className="shrink-0 font-mono">
+                {phase}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+      ) : null}
     </div>
   )
 }

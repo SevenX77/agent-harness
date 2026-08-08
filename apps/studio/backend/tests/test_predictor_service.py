@@ -386,6 +386,35 @@ def test_predict_events_reach_transient_run_record_ws_queue(
     assert result.run_id not in run_manager_module.run_manager._runs
 
 
+def test_predict_writes_its_account_before_dropping_the_live_record(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The run must never exist nowhere.
+
+    The transient record is the live event source; run_metadata.json is the
+    account a later reader replays from. If the record is dropped first there is
+    a window in which a subscriber finds neither, and the trace panel is told the
+    run does not exist.
+    """
+    import app.services.run_manager as run_manager_module
+
+    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-order", success=True)
+    run_dir = skill_dir / ".workspace" / "runs" / "predict-order"
+    account_existed_at_teardown: list[bool] = []
+    real_finish = run_manager_module.run_manager.finish_transient_predict_run
+
+    def recording_finish(run_id: str) -> None:
+        account_existed_at_teardown.append((run_dir / "run_metadata.json").exists())
+        real_finish(run_id)
+
+    monkeypatch.setattr(run_manager_module.run_manager, "finish_transient_predict_run", recording_finish)
+
+    PredictorService().dispatch_predict_job("skill")
+
+    assert account_existed_at_teardown == [True]
+
+
 def test_predict_dispatch_api_stays_synchronous(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

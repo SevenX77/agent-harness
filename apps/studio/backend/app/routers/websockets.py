@@ -24,13 +24,19 @@ async def _close_unauthorized(websocket: WebSocket) -> None:
     await websocket.close(code=4401, reason="Unauthorized")
 
 
-@router.websocket("/ws/runs/{run_id}")
-async def run_events(websocket: WebSocket, run_id: str) -> None:
+@router.websocket("/ws/skills/{skill_id}/runs/{run_id}")
+async def run_events(websocket: WebSocket, skill_id: str, run_id: str) -> None:
+    """Stream one run's events.
+
+    The run's owning skill is part of the address because a finished run is
+    replayed from its own directory on disk, and that directory is only
+    addressable as (skill, run).
+    """
     if not _websocket_token_is_valid(websocket):
         await _close_unauthorized(websocket)
         return
     await websocket.accept()
-    queue = await run_manager.stream_run(run_id, cursor=websocket.query_params.get("cursor"))
+    queue = await run_manager.stream_run(skill_id, run_id, cursor=websocket.query_params.get("cursor"))
     while True:
         event = await queue.get()
         if event is None:

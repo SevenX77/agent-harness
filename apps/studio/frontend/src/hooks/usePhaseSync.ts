@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { MonacoApi, MonacoEditor } from '../components/MonacoPanel'
+import type { MonacoApi, MonacoEditor } from '../components/monaco-editor-types'
 import { phaseRange, replacePhaseBlock } from '../utils/yamlAst'
 
 interface UsePhaseSyncParams {

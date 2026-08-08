@@ -718,7 +718,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   // F5 (trace): index of the trace event whose prompt is open in the inspector.
   const [promptIndex, setPromptIndex] = useState<number | null>(null)
-  const runStream = useRunStream(runId)
+  const runStream = useRunStream(skillId, runId)
   // The ONE event source every trace surface reads (timeline trace view, Full
   // Trace document, PromptInspector): live stream while viewing live, the
   // fetched history otherwise — fix C, decision 2026-08-07.

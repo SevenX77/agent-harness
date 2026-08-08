@@ -10,7 +10,13 @@ interface RunStreamState {
   cursor: string | null
 }
 
-export function useRunStream(runId: string | null) {
+/**
+ * Subscribe to one run's event stream.
+ *
+ * The run's owning skill is part of the address: a finished run is replayed
+ * from its own directory on disk, which is only addressable as (skill, run).
+ */
+export function useRunStream(skillId: string | null, runId: string | null) {
   const [state, setState] = useState<RunStreamState>({
     events: [],
     status: 'idle',
@@ -21,7 +27,7 @@ export function useRunStream(runId: string | null) {
   const queueRef = useRef<EventEnvelope[]>([])
 
   useEffect(() => {
-    if (!runId) {
+    if (!skillId || !runId) {
       setState({ events: [], status: 'idle', reconnectInMs: null, error: null, cursor: null })
       return undefined
     }
@@ -55,7 +61,7 @@ export function useRunStream(runId: string | null) {
         error: null,
       }))
 
-      socket = new WebSocket(runEventsWsUrl(runId, cursorRef.current))
+      socket = new WebSocket(runEventsWsUrl(skillId, runId, cursorRef.current))
       socket.onopen = () => {
         attempt = 0
         setState((current) => ({ ...current, status: 'open', reconnectInMs: null, error: null }))
@@ -119,7 +125,7 @@ export function useRunStream(runId: string | null) {
       socket?.close()
       queueRef.current = []
     }
-  }, [runId])
+  }, [skillId, runId])
 
   return state
 }

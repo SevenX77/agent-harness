@@ -29,10 +29,10 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ### F2. Run-after Summary And Full Trace
 
 - 机制: clicking a past predict/run shows run_id summary; a button opens the full timeline and a read-only formatted trace document.
-- 决策: full trace must be human-readable, not raw jsonl.
+- 决策: full trace must be human-readable, not raw jsonl. 2026-08-08(PM):承载形态是**面板内的排版文档**,不是只读编辑器("在 panel 里面不要用编辑器的样式");且文档必须**完整**——长值折叠可展开,不做不可恢复的截断。Trace(区域内视图)负责**定位**(过滤/搜索/联动),Full Trace(文档)负责**通读与取证**(全文/分组/不过滤)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:81` defines run-after behavior; `01_workflows/04_run-and-verify.md:104` records the readable-doc decision.
-- 测试: summary appears for selected run; full trace opens timeline and read-only editor; payload truncation does not crash UI.
-- Status: 部分 live(2026-08-07 viewed-run 决议:列表点某次 → 该 run 完整 trace 视图(一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件缓存,修复「Full Trace 永远读实时流」的脱钩);predict 行以 RunMetadata.kind 判别。仍 target-design:run_id 概要中间层、编辑器跳段)。
+- 测试: summary appears for selected run; full trace opens as a grouped read-only document (no editor chrome); an oversized value is kept whole and expandable rather than truncated.
+- Status: 部分 live(2026-08-07 viewed-run 决议:列表点某次 → 该 run 完整 trace 视图(一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件缓存,修复「Full Trace 永远读实时流」的脱钩);predict 行以 RunMetadata.kind 判别。2026-08-08 决议:Full Trace 去 Monaco 化为按节点分块的排版文档、删除 1200 字符硬截断(长值折叠可展开);predict 与已完成 run 的事件流由 `stream_run` 从该 run 目录回放,不再因内存 record 消失而失联。仍 target-design:run_id 概要中间层、从 trace 行跳到文档对应状态)。
 - 归属: regions `timeline`, `editor`; platform `engine`.
 
 ### F3. Focus Determines Trace Granularity

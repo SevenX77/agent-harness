@@ -1,5 +1,5 @@
 import type { LintResult } from "@/api/types"
-import type { MonacoApi, MonacoEditor } from "@/components/MonacoPanel"
+import type { MonacoApi, MonacoEditor } from "@/components/monaco-editor-types"
 import { lintErrorsForFile, lintErrorsToMarkers, type LintMarkerDescriptor } from "./field-compile-errors"
 
 /**

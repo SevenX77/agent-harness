@@ -16,9 +16,7 @@ import { TraceEventRow } from './TraceEventRow'
 
 interface TraceEventListProps {
   events: IndexedTraceEvent[]
-  activePhase: string | null
   selectedEventId: string | null
-  linkEnabled: boolean
   /**
    * True while the list renders a LIVE stream: the message-scroller sticks to
    * the bottom as events append (release-on-scroll + back-to-bottom button come
@@ -46,9 +44,7 @@ interface TraceEventListProps {
  */
 export function TraceEventList({
   events,
-  activePhase,
   selectedEventId,
-  linkEnabled,
   followStream = false,
   streamKey = null,
   onSelectPrompt,
@@ -191,7 +187,6 @@ export function TraceEventList({
                         index={index}
                         eventId={eventId}
                         selected={selectedEventId === eventId}
-                        highlighted={Boolean(linkEnabled && activePhase && activePhase === eventPhase(event))}
                         expanded={expandedIds.has(eventId)}
                         onToggleExpanded={() => toggleExpanded(eventId)}
                         onSelectPrompt={onSelectPrompt}

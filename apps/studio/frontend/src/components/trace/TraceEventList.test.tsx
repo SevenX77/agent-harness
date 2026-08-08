@@ -20,9 +20,7 @@ function markup(count: number): string {
   return renderToStaticMarkup(
     <TraceEventList
       events={indexedEvents(count)}
-      activePhase={null}
       selectedEventId={null}
-      linkEnabled={false}
       onSelectPrompt={() => {}}
     />,
   )

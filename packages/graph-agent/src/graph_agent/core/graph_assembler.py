@@ -34,6 +34,7 @@ from graph_agent.callbacks.events import (
     PhaseStartEvent,
     ToolCallEvent,
 )
+from graph_agent.callbacks.token_accounting import account_llm_call
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -2110,17 +2111,27 @@ def _build_skill_node(
                     if tc_name not in valid_tool_names:
                         _graph_fatal(f"LLM called unknown tool {tc_name!r} in phase {phase_id!r}")
 
+        # The agent node is its own micro-event emitter (there is no callback
+        # bridge on this path), so it also owes the run its token accounting and
+        # the node attribution every micro event carries.
+        phase_metrics: dict[str, Any] = {}
         for i, msg in enumerate(new_messages):
             if isinstance(msg, AIMessage):
                 input_tokens, output_tokens = _extract_token_usage(msg)
+                account_llm_call(phase_metrics, input_tokens, output_tokens)
+                response_metadata = getattr(msg, "response_metadata", None) or {}
+                resolved_model = response_metadata.get("model_name") or response_metadata.get("model")
                 _safe_emit_event(
                     callbacks,
                     LLMCallEvent(
                         phase_name=phase_id,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        resolved_model=str(resolved_model) if resolved_model else None,
                         messages=None,
                         response_data=None,
+                        parent_node_id=phase_id,
+                        node_type="agent",
                     ),
                 )
                 for tc in getattr(msg, "tool_calls", []) or []:
@@ -2139,15 +2150,22 @@ def _build_skill_node(
                             tool_name=str(tc_name or ""),
                             args=tc_args if isinstance(tc_args, dict) else {},
                             result=tc_result,
+                            parent_node_id=phase_id,
+                            node_type="agent",
                         ),
                     )
 
         if result is not None and isinstance(result, dict) and "flow" in result:
             retries = getattr(state["flow"], "subagent_validation_retries", {})
+            run_metrics = dict(getattr(state["flow"], "metrics", {}) or {})
+            for key, spent in phase_metrics.items():
+                run_metrics[key] = int(run_metrics.get(key, 0)) + int(spent)
             if isinstance(result["flow"], dict):
                 result["flow"]["subagent_validation_retries"] = retries
+                result["flow"]["metrics"] = run_metrics
             else:
                 result["flow"].subagent_validation_retries = retries
+                result["flow"].metrics = run_metrics
         return cast(dict[str, Any] | WorkflowState, result)
 
     return _skill_node

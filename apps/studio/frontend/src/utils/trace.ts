@@ -63,7 +63,11 @@ export function eventMessage(event: CallbackEvent): string {
     case 'prompt_captured':
       return `Prompt captured${typeof event.template_source === 'string' ? ` from ${event.template_source}` : ''}`
     case 'llm_call':
-      return 'LLM call completed'
+      // A role resolves through a fallback chain, so which model answered is a
+      // per-call fact — name it on the line that reports the call.
+      return typeof event.resolved_model === 'string' && event.resolved_model !== ''
+        ? `LLM call completed · ${event.resolved_model}`
+        : 'LLM call completed'
     case 'finish_task':
       return typeof event.reasoning === 'string' ? event.reasoning : 'Task finished'
     case 'run_ended':

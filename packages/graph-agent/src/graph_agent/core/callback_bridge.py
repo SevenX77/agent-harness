@@ -13,6 +13,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.token_accounting import account_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -142,12 +143,7 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
         del kwargs
         input_tokens, output_tokens = self._extract_tokens(response)
 
-        self._metrics["total_input_tokens"] = (
-            self._metrics.get("total_input_tokens", 0) + input_tokens
-        )
-        self._metrics["total_output_tokens"] = (
-            self._metrics.get("total_output_tokens", 0) + output_tokens
-        )
+        account_llm_call(self._metrics, input_tokens, output_tokens)
 
         run_key = str(run_id) if run_id is not None else ""
         prompt_messages = self._pending_messages.pop(run_key, [])

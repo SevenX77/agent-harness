@@ -62,6 +62,35 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - Status: backend-only live.
 - 归属: capability `publish`; platform `native-fs`.
 
+### F6. Run Report
+
+- 机制: 每次 run 结束(成功或失败)后,在该 run 目录写出一份 `report.md`——把这次 run
+  "花了多久 / 花了多少 token / 每个节点做了什么 / 用的哪个模型 / 读了哪些输入文件 /
+  产出了哪些 artifact / 哪里报错"汇成一页可读的账,并用相对链接指向同目录里的原始记录。
+- 决策 RUN_EXECUTION-5(报告 = 投影,不是第四份真相): report.md 由一个**纯函数**从该 run
+  **已封存**的输入生成(`run_metadata.json` / `metrics.json` / `trace.jsonl` /
+  `runtime_config.snapshot.json` / `artifacts/` 目录),不新增任何只存在于报告里的数据。
+  因此它随时可以被重新生成,删掉不丢信息;它也**不得**成为任何读者的事实来源——
+  需要精确数值的消费者读原始文件,报告只负责"人能一眼看懂"。
+  **为什么**:底座一(config/run truth 单一所有权)不允许再立一份并行真相;而用户要的是
+  "一次 run 到底发生了什么"的可读汇总,这恰好是投影而不是新事实。
+- 决策 RUN_EXECUTION-6(token 与模型只认事件流): 报告的 token 合计与逐节点 token 由
+  `trace.jsonl` 的 `llm_call` 事件聚合得出,模型名取同一事件的 `resolved_model`。
+  **为什么**:一个 role 通过 fallback chain 解析,"这次用了哪个模型"只有逐次调用才为真;
+  而 `metrics.json` 是引擎侧的汇总,两者必须能对上——对不上就是引擎缺陷(2026-08-08 修复:
+  agent 节点此前不把 token 折进 run metrics,见 engine `02-observability` §8 #1)。
+- 决策 RUN_EXECUTION-7(格式 = 单份 markdown): 只写 `report.md`,不并写 `report.json`。
+  **为什么**:结构化真相已经在 `trace.jsonl` / `metrics.json` 里;再存一份 JSON 投影
+  等于第三份副本(违 KISS/YAGNI 与 SSOT),而 markdown 在文件管理器、编辑器和 Studio 里
+  都能直接读,相对链接也能直接点开。
+- 原话/来源: PM 2026-08-08 "每一次run结束要出一个报告放在run id文件夹,展示这一次run的
+  整体情况、内容细节、文件给链接,花费时间、token;每一个节点时间,token,什么模型;
+  batch/loop 详细情况;llm vs 结果链接;input files链接;artifacts结果链接;每个节点报错详情"。
+- 测试: 报告纯函数对同一份封存输入产出稳定结果;失败 run 的报告写出失败原因;
+  逐节点 token 合计等于 `llm_call` 事件之和;没有任何一节引用 run 目录之外的绝对路径。
+- Status: target-design。
+- 归属: capability `run-execution`(owner);数据来源 `engine:02-observability`(引)。
+
 ## 3. 接口契约
 - Entry: Run is enabled only after compile-pass and predict-pass.
 - Input: i/o panel supplies single or batch input selection.
@@ -80,12 +109,16 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 | RUN_EXECUTION-2 | 节点态 | 单元 `run-execution-node-status`；**为什么**：run events 经 state-engine 投到节点灯/边，非画布默认假态 |
 | RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
 | RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
+| RUN_EXECUTION-5 | run 报告 = 已封存产物的纯投影 | F6；**为什么**：用户要一页可读的 run 总账，但底座一不允许再立一份并行真相——投影可重生成、删了不丢信息 |
+| RUN_EXECUTION-6 | 报告的 token / 模型只认 `llm_call` 事件 | F6；**为什么**：role 走 fallback chain，"这次用了哪个模型"只有逐次调用才为真；与 `metrics.json` 对不上即引擎缺陷 |
+| RUN_EXECUTION-7 | 只写 `report.md`，不并写 `report.json` | F6；**为什么**：结构化真相已在 trace/metrics 里，再存一份 JSON 投影是第三份副本 |
 
 ## 6. 测试关键点
 1. Run 入口: baseline 现状为 `onRun` 只日志 ⚠️；目标为 Run 真调用 `startRun`，携带选中 input/settings。
 2. 节点态: baseline 现状为 GraphCanvas 默认/假态 ⚠️；目标为 run events 经 state-engine 投到节点灯/边。
 3. batch: baseline 现状为 后端与 hook 存在但未挂 Workspace ⚠️；目标为 批量/循环入口与结果展示可用。
 4. golden seed: baseline 现状为 run final output 可做 golden 默认种子；目标为 predict fake trace 不可做 golden。
+5. run 报告: 目标为 每次 run 结束在 run 目录写出 `report.md`；判据为 (a) 纯函数、同输入同输出；(b) 失败 run 写出失败原因；(c) 逐节点 token 合计 == `llm_call` 事件之和；(d) 全部链接为 run 目录内相对路径。
 
 ## 7. 涉及 region / platform
 `predict` · `canvas` · `timeline` · `state-engine` · `golden-eval` · `engine` iterate/observability

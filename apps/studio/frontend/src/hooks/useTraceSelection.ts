@@ -1,49 +1,28 @@
 import { useCallback, useState } from 'react'
 import type { CallbackEvent } from '../api/types'
-import { eventPhase } from '../utils/trace'
-
-export interface TraceSelectionState {
-  linkEnabled: boolean
-  selectedPhaseId: string | null
-  selectedEventId: string | null
-}
 
 export function traceEventId(event: CallbackEvent, index: number): string {
   return `${event.timestamp}-${event.event_type}-${index}`
 }
 
+/**
+ * The trace's own view state.
+ *
+ * `linkEnabled` decides whether canvas focus narrows the list — focus deciding
+ * granularity is the designed behaviour (`docs/studio/mvp1/01_workflows/
+ * 04_run-and-verify.md` D5), and this is the escape hatch from it.
+ * `selectedEventId` is the row the user last opened.
+ *
+ * WHICH node is focused is deliberately NOT held here: `Workspace.selectedNodeId`
+ * owns that, and a second copy would be a second truth to keep in sync.
+ */
 export function useTraceSelection() {
-  const [state, setState] = useState<TraceSelectionState>({
-    linkEnabled: true,
-    selectedPhaseId: null,
-    selectedEventId: null,
-  })
-
-  const setLinkEnabled = useCallback((linkEnabled: boolean) => {
-    setState((current) => ({ ...current, linkEnabled }))
-  }, [])
-
-  const selectPhase = useCallback((phaseId: string | null) => {
-    setState((current) => ({ ...current, selectedPhaseId: phaseId }))
-  }, [])
+  const [linkEnabled, setLinkEnabled] = useState(true)
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
 
   const selectEvent = useCallback((event: CallbackEvent, index: number) => {
-    setState((current) => ({
-      ...current,
-      selectedEventId: traceEventId(event, index),
-      selectedPhaseId: eventPhase(event),
-    }))
+    setSelectedEventId(traceEventId(event, index))
   }, [])
 
-  const clearSelection = useCallback(() => {
-    setState((current) => ({ ...current, selectedPhaseId: null, selectedEventId: null }))
-  }, [])
-
-  return {
-    ...state,
-    setLinkEnabled,
-    selectPhase,
-    selectEvent,
-    clearSelection,
-  }
+  return { linkEnabled, setLinkEnabled, selectedEventId, selectEvent }
 }

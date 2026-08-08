@@ -5,6 +5,7 @@ import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
 import { AlertTriangle, ArrowLeft, BadgeCheck, GitCompareArrows, Link2, Link2Off, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { HitlPromptForm } from './studio/HitlPromptForm'
@@ -307,11 +308,23 @@ export function TracePanel({
     </div>
   )
 
+  // A failed run that cannot say why is undiagnosable. The reason travels on the
+  // run's own metadata, so it renders whether or not the run got far enough to
+  // emit events.
+  const failureBanner = metadata?.error ? (
+    <Alert variant="destructive" className="shrink-0 rounded-none border-x-0 border-t-0">
+      <AlertTriangle className="size-4" />
+      <AlertTitle className="font-mono text-xs">{metadata.error.code}</AlertTitle>
+      <AlertDescription className="break-words text-xs">{metadata.error.message}</AlertDescription>
+    </Alert>
+  ) : null
+
   if (traceEvents.length === 0) {
     return (
       <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
         {compareTabStrip}
         {identityStrip}
+        {failureBanner}
         <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
           {live ? 'Waiting for run events' : 'No events recorded for this run'}
         </div>
@@ -323,6 +336,7 @@ export function TracePanel({
     <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
       {compareTabStrip}
       {identityStrip}
+      {failureBanner}
       <div className="shrink-0 space-y-2 border-b border-border bg-card p-3">
         <div className="flex items-center gap-1.5">
           <div className="min-w-0 flex-1">

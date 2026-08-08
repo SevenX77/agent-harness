@@ -127,11 +127,12 @@ def test_run_worker_treats_artifact_error_result_as_failed_and_preserves_payload
 
     assert queue.items[-1]["type"] == "status"
     assert queue.items[-1]["status"] == "failed"
+    # The worker normalizes every failure shape into one RunError before it leaves
+    # the child; the artifact envelope's code and message must both survive that.
     assert queue.items[-1]["error"] == {
-        "error_code": "llm.provider_not_configured",
-        "error_payload": {"message": "LLM Provider is not configured"},
-        "run_id": "run-error-result",
-        "retryable": False,
+        "code": "llm.provider_not_configured",
+        "message": "LLM Provider is not configured",
+        "details": {},
     }
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)

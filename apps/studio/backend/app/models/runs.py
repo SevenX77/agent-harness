@@ -24,6 +24,21 @@ class TokensMetrics(BaseModel):
     wall_time_sec: float | None = None
 
 
+class RunError(BaseModel):
+    """Why a run failed, in the shape every reader can render.
+
+    The worker sees the failure in whatever shape the engine, the gateway or a
+    bare exception produced it; it normalizes here once so run metadata, the run
+    detail API and the trace panel all read the same two fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -98,6 +113,9 @@ class RunMetadata(BaseModel):
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
     git_status: Literal["committed", "unchanged", "locked", "failed", "no_git"] | None = None
+    # Set exactly when status == "failed": a failed run that cannot say why is
+    # undiagnosable from the UI and from the sealed run dir alike.
+    error: RunError | None = Field(default=None, exclude_if=lambda value: value is None)
     artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
     execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)

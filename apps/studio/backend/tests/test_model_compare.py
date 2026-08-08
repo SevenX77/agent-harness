@@ -170,3 +170,65 @@ def test_node_effective_role_falls_back_to_graph_agent(tmp_path: Path) -> None:
     skill = _two_phase_skill(tmp_path / "skill")
     # logic node, no graph llm_role -> conventional fallback
     assert node_effective_role(skill, "score") == "graph_agent"
+
+
+def test_build_candidate_roles_materializes_an_executable_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A compare candidate's role must arrive at the engine ready to run.
+
+    The engine resolves a role through its ``fallback_chain``; ``model_groups``
+    is authoring intent that Settings materializes on save. A candidate role
+    written with groups only resolves to nothing, and the side-run dies with
+    ``resource.no_available_route`` before it makes a single call.
+    """
+    from app.core import config
+    from app.core.backends import clear_backend_caches
+    from app.models.llm_config import (
+        LLMCredentialsFile,
+        ProviderEndpoint,
+        ProviderRoute,
+    )
+    from app.models.model_compare import CompareCandidate
+    from app.services.llm_credentials import save_credentials
+    from app.services.model_compare import build_candidate_roles
+
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    monkeypatch.delenv("STUDIO_GATEWAY_TRANSPORT", raising=False)
+    clear_backend_caches()
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": ProviderEndpoint(
+                    endpoint_id="openai-direct",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+            provider_routes={
+                "openai-direct:gpt-5": ProviderRoute(
+                    route_id="openai-direct:gpt-5",
+                    endpoint_id="openai-direct",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="verified",
+                )
+            },
+        ),
+        settings_dir / "llm" / "llm_credentials.json",
+    )
+
+    skill = _two_phase_skill(tmp_path / "skill")
+    roles = build_candidate_roles(
+        skill,
+        "score",
+        CompareCandidate(candidate_id="c1", model_group_id="gpt-5", route="auto"),
+    )
+
+    entry = roles.roles["graph_agent"]
+    assert [route.route_id for route in entry.fallback_chain] == ["openai-direct:gpt-5"]

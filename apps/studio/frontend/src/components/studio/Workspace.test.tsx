@@ -135,6 +135,13 @@ const mocks = vi.hoisted(() => ({
     current: {
       onSkillChanged?: (event: { skillId: string; path: string }) => void
       onRuntimeConfigChanged?: (event: { skillId: string; dataset: string; nodeId?: string }) => void
+      onSkillGate?: (event: {
+        skillId: string
+        gate: 'compile' | 'predict' | 'run'
+        outcome: 'started' | 'pass' | 'fail' | 'paused' | 'stopped'
+        runId?: string | null
+        defectCount?: number
+      }) => void
     }
   }>,
 }))
@@ -190,6 +197,13 @@ vi.mock('@/hooks/useStudioEventStream', async () => {
       callbacks: {
         onSkillChanged?: (event: { skillId: string; path: string }) => void
         onRuntimeConfigChanged?: (event: { skillId: string; dataset: string; nodeId?: string }) => void
+        onSkillGate?: (event: {
+          skillId: string
+          gate: 'compile' | 'predict' | 'run'
+          outcome: 'started' | 'pass' | 'fail' | 'paused' | 'stopped'
+          runId?: string | null
+          defectCount?: number
+        }) => void
       },
       options: { enabled?: boolean } = {},
     ) => {
@@ -2041,7 +2055,14 @@ describe('Workspace run_ended history wiring (integration)', () => {
   // Predict → Run sets runId='run-1' (the run trace stream already carries the
   // run_ended event), flipping completedRunId on the not-ended → ended edge so
   // the history effects fire under a real client render.
-  async function startRunToCompletion(gitStatus: RunDetail['metadata']['git_status']) {
+  /**
+   * Drive a run to the point the ENGINE says it ended — which is NOT the point
+   * the run's finished state exists. The studio backend still has to
+   * auto-commit, write the run metadata and write `report.md` after that event;
+   * only then does it publish the terminal `run` gate. Callers that want the
+   * finished-run truth must therefore also call {@link emitTerminalRunGate}.
+   */
+  async function startRunToEngineEnd(gitStatus: RunDetail['metadata']['git_status']) {
     mocks.runStreamEvents = [runEndedEvent('run-1')]
     mocks.getRunDetail.mockResolvedValue(runDetailWithGitStatus('run-1', gitStatus))
     renderWithEffects()
@@ -2051,12 +2072,48 @@ describe('Workspace run_ended history wiring (integration)', () => {
     await act(async () => {
       await mocks.centerActionBarProps?.onRun?.()
     })
-    // Let the run_ended effects (getRunDetail microtask chain) settle.
     await act(async () => {
       await Promise.resolve()
       await Promise.resolve()
     })
   }
+
+  /** The backend's post-finalization signal: everything on disk is now written. */
+  async function emitTerminalRunGate(outcome: 'pass' | 'fail' = 'pass') {
+    await act(async () => {
+      mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillGate?.({
+        skillId: 'writer-smoke',
+        gate: 'run',
+        outcome,
+        runId: 'run-1',
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  async function startRunToCompletion(gitStatus: RunDetail['metadata']['git_status']) {
+    await startRunToEngineEnd(gitStatus)
+    await emitTerminalRunGate()
+  }
+
+  it('does not read the finished run while the backend is still finalizing it', async () => {
+    // The engine's run_ended arrives BEFORE the studio backend auto-commits and
+    // writes report.md, so reading the run here yields a run with no archive
+    // status and no report — the exact stale answer that used to be cached for
+    // the rest of the session.
+    await startRunToEngineEnd('committed')
+
+    expect(mocks.getRunDetail).not.toHaveBeenCalled()
+    expect(toastMocks.success).not.toHaveBeenCalledWith(expect.stringMatching(/Local History/i))
+  })
+
+  it('reads the finished run once the backend publishes the terminal run gate', async () => {
+    await startRunToEngineEnd('committed')
+    await emitTerminalRunGate()
+
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('writer-smoke', 'run-1')
+  })
 
   it('re-fetches the run detail and surfaces a successful, revertable archive toast when committed', async () => {
     await startRunToCompletion('committed')

@@ -692,6 +692,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     // outcome updates its stage but must not yank this view around.
     if (event.skillId !== currentSkillIdRef.current) return
 
+    // Any run-gate outcome other than "started" is published after the backend
+    // has finished writing the run out (see `finalizedRunId`), so this is the
+    // moment the finished run may be read.
+    if (event.gate === "run" && event.outcome !== "started" && event.runId) {
+      setFinalizedRunId(event.runId)
+    }
+
     for (const effect of effects) {
       if (effect.kind === "close-drawers") {
         setCompileDrawerOpen(false)
@@ -733,6 +740,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
     ? runId
     : null
+  // The run the BACKEND has finished finalizing, which is a strictly later thing
+  // than the engine's `run_ended`. Between the two the backend still auto-commits
+  // the skill, writes the run metadata and writes `report.md`; a reader that
+  // fires on `run_ended` sees a run with no archive status and no report, and
+  // caches that stale answer for the rest of the session. `publish_skill_gate`
+  // is emitted after all of it, so it — not the stream event — is what anything
+  // reading FINISHED-run state must wait for (SSOT: revalidate on the backend's
+  // post-commit domain event for the exact dataset).
+  const [finalizedRunId, setFinalizedRunId] = useState<string | null>(null)
 
   // N6 #2 (history-auto-refresh): a successful run autocommits a new "Auto run"
   // snapshot on the backend (GET /skills/{id}/history). Revalidate the Local
@@ -753,7 +769,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   useEffect(() => {
     const refreshKey = nextLocalHistoryRefreshKey({
       skillId: currentSkillId,
-      completedRunId,
+      completedRunId: finalizedRunId,
       lastRefreshedKey: refreshedRunRef.current,
     })
     if (!refreshKey) {
@@ -761,7 +777,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     refreshedRunRef.current = refreshKey
     void refreshLocalHistory()
-  }, [completedRunId, currentSkillId, refreshLocalHistory])
+  }, [currentSkillId, finalizedRunId, refreshLocalHistory])
 
   // N6 #1 (autocommit-feedback): on the not-ended → ended edge, the run is done
   // but the `run_ended` stream event carries no metadata, so we re-fetch the run
@@ -779,22 +795,23 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({
       skillId: currentSkillId,
-      completedRunId,
+      completedRunId: finalizedRunId,
       lastRefreshedKey: archiveFeedbackRunRef.current,
     })
-    if (!feedbackKey || !completedRunId || !currentSkillId) {
+    if (!feedbackKey || !finalizedRunId || !currentSkillId) {
       return
     }
     const targetSkillId = currentSkillId
+    const finishedRunId = finalizedRunId
     archiveFeedbackRunRef.current = feedbackKey
     let cancelled = false
     const announceArchiveOutcome = async () => {
       try {
-        const detail = await getRunDetail(targetSkillId, completedRunId)
+        const detail = await getRunDetail(targetSkillId, finishedRunId)
         if (cancelled || !detail) {
           return
         }
-        setLiveRunReport({ runId: completedRunId, path: detail.report_path })
+        setLiveRunReport({ runId: finishedRunId, path: detail.report_path })
         // The run row was projected at start with status "running"; project the
         // terminal metadata so the Timeline list is truthful when the user goes
         // back to it (single backend truth, no extra revalidation round-trip).
@@ -818,7 +835,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return () => {
       cancelled = true
     }
-  }, [completedRunId, currentSkillId, projectRun])
+  }, [currentSkillId, finalizedRunId, projectRun])
 
   const statusByNodeId = useMemo(
     () => deriveNodeStatuses(runStream.events, runId),

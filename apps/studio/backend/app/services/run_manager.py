@@ -57,6 +57,7 @@ from app.models.runs import (
 from app.services.gate_events import GateOutcome, publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
+from app.services.run_report import write_run_report
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
@@ -1257,12 +1258,17 @@ class RunManager:
         # record — and every future reader of it — on "running" forever.
         try:
             await self._copy_final_state_to_storage(record)
+            # The report reads the run's FINAL metadata (outcome, failure reason,
+            # archive status), so it is written after that lands and before
+            # `latest/` is synced — `latest/` must carry the report too.
             if metadata.status == "success" and record.auto_commit:
                 metadata = await self._auto_commit_successful_run(record, metadata)
                 _write_run_metadata(record.run_dir, metadata)
+                await asyncio.to_thread(write_run_report, record.run_dir)
                 await asyncio.to_thread(_sync_latest_run, record.run_dir)
             else:
                 _write_run_metadata(record.run_dir, metadata)
+                await asyncio.to_thread(write_run_report, record.run_dir)
             await self._save_run_metadata(record.skill_id, metadata)
         finally:
             record.metadata = metadata

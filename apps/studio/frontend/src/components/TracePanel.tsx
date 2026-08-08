@@ -515,7 +515,7 @@ export function TracePanel({
       {compareTabStrip}
       {identityStrip}
       {failureBanner}
-      <div className="shrink-0 space-y-2 border-b border-border bg-card p-3">
+      <div className="shrink-0 space-y-2 border-b border-border bg-card px-3 py-2">
         <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
         {hasFilterChips || fallbackCount > 0 || canPromoteFocusedNode ? (
         <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">

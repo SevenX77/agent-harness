@@ -102,7 +102,7 @@ export function TraceEventRow({
             ) : null}
           </span>
           {tokens ? (
-            <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-foreground">
+            <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
               <Hash className="h-3 w-3" />
               {tokens}
             </span>

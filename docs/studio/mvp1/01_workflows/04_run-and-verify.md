@@ -49,13 +49,13 @@
 | C4 | 运行状态指示(运行中/暂停/失败/成功) | 动作条·画布 | live(阶段机 center-action-bar.tsx:10-71 + handleRun 置 running:2160;画布态 statusByNodeId) |
 | C5 | 节点呼吸灯 + 红绿(随执行逐个亮) | 画布 | live(statusByNodeId=deriveNodeStatuses(runStream.events) 已传画布;Workspace.tsx:665 / 2608 → build-nodes.ts:270 / 375) |
 | C6 | focus 自动跟随当前运行节点 | 画布 | target-design(G9) |
-| C7 | Run 历史列表(run_id/状态/耗时/token) | timeline | live |
-| C8 | Toolbar 'Trace Timeline' 命名混淆 → 正名 | toolbar | stale-doc |
+| C7 | Run 历史列表(run_id/状态/耗时/token;predict 行同列表、以 `RunMetadata.kind` 判别仅 icon 区分) | timeline | live(2026-08-07) |
+| C8 | 命名正名:区域=Timeline(Toolbar 第4格+列表)/ 视图=Trace / 文档=Full Trace,"Trace Timeline"不回归 | toolbar | live(D3 决议 2026-08-07) |
 | C9 | 批量运行(选多个输入各跑一次) | i/o 面板 | orphan(后端 live) |
 | C10 | 命名序列(chapter1/2…)建议自动批量 | i/o 面板 | target-design |
 | C11 | 批量进度轮询(总数/完成/逐项状态) | i/o 面板 | orphan |
 | C12 | 批量某项失败 → 显式上报不静默 | i/o 面板 | backend-only |
-| C13 | 回看某次历史运行详情 + Replay 重跑 | timeline | orphan |
+| C13 | 回看某次历史运行详情(行点击→完整 trace 只读回放,viewed-run 决议 2026-08-07)+ Replay 重跑 | timeline | 回看 live;Replay target-design |
 | C14 | 成功运行后 autocommit + git_status | 后端 | backend-only(**归保存与发布**) |
 
 ### 决策
@@ -85,7 +85,7 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 | # | 动作 | status |
 |---|---|---|
 | D1 | run 时实时 trace 控制台(流式;agent 输出流式+分类折叠) | live 挂载(TracePanel + useRunStream;Workspace.tsx:583 / Panels.tsx:237);agent 分类折叠摘要细化以代码逐项核 |
-| D2 | run 后从列表回看某次完整 trace | live(无 active run 时 TimelinePanel 历史列表 + useRunHistory;Panels.tsx:49 分支) |
+| D2 | run 后从列表回看某次完整 trace | live(viewed-run 决议 2026-08-07:Workspace viewedTrace 分流,run 结束可返回列表,历史事件与 Full Trace 文档/PromptInspector 共读同一缓存) |
 | D3 | run 概要(focus 空画布=全局) | target-design |
 | D4 | 看完整 trace:timeline + 只读编辑器(人读格式) | target-design |
 | D5 | focus 某节点 → 只显该节点 trace + 编辑器跳该节点范围 | orphan(过滤)+ target(跳) |

@@ -1,10 +1,14 @@
-import type { CallbackEvent, EventEnvelope } from '../api/types'
+import type { CallbackEvent, EventEnvelope, RunMetadata } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { countLlmFallbacks } from '../utils/trace'
-import { AlertTriangle, BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
+import { countLlmFallbacks, isPredictTrace } from '../utils/trace'
+import { AlertTriangle, ArrowLeft, BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { Badge } from './ui/badge'
+import { Button } from './ui/button'
+import { Label } from './ui/label'
+import { Switch } from './ui/switch'
 import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
 import { TraceFilter } from './trace/TraceFilter'
@@ -41,6 +45,18 @@ interface TracePanelProps {
   onToggleLink?: (enabled: boolean) => void
   onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
+  /**
+   * viewed-run model (decision 2026-08-07): the trace is one view of the
+   * timeline region, so it can always hand the user back to the run list —
+   * during a live stream and after the run ends alike.
+   */
+  onBack?: () => void
+  /** The viewed run's id, shown in the header identity strip. */
+  runId?: string | null
+  /** Historical view: the persisted metadata behind the header status badge. */
+  metadata?: RunMetadata | null
+  /** True while this panel renders the live stream (streaming indicator). */
+  live?: boolean
   canCompare?: boolean
   compareLoading?: boolean
   onCompareToGolden?: () => void
@@ -96,6 +112,31 @@ export function isGoldenlessAgentNode(
   return node.data.goldenState !== 'has-golden'
 }
 
+/** Header status: live view shows the stream state, history shows the verdict. */
+function RunStatusBadge({ live, metadata }: { live: boolean; metadata?: RunMetadata | null }) {
+  if (live) {
+    return (
+      <Badge variant="outline" className="gap-1.5 text-muted-foreground">
+        <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-primary" />
+        Live
+      </Badge>
+    )
+  }
+  if (!metadata) {
+    return null
+  }
+  if (metadata.status === 'success') {
+    return <Badge variant="outline" className="text-success">Success</Badge>
+  }
+  if (metadata.status === 'paused') {
+    return <Badge variant="outline" className="text-warning">Paused</Badge>
+  }
+  if (metadata.status === 'running') {
+    return <Badge variant="outline" className="text-muted-foreground">Running</Badge>
+  }
+  return <Badge variant="outline" className="text-destructive">{metadata.status === 'cancelled' ? 'Cancelled' : 'Failed'}</Badge>
+}
+
 export function TracePanel({
   traceLogs,
   activePhase = null,
@@ -105,6 +146,10 @@ export function TracePanel({
   onToggleLink,
   onSelectPrompt,
   onSelectEvent,
+  onBack,
+  runId = null,
+  metadata = null,
+  live = false,
   canCompare = false,
   compareLoading = false,
   onCompareToGolden,
@@ -131,6 +176,9 @@ export function TracePanel({
   // announces it up front; clicking the chip narrows the trace to the fallback
   // events via the existing type filter.
   const fallbackCount = countLlmFallbacks(traceEvents)
+  // History views judge by the persisted metadata; a live stream judges by its
+  // own events (predict root event) — no run_id prefix sniffing either way.
+  const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
 
   const [nodePromoting, setNodePromoting] = useState(false)
   // atom #32 entry①: offer per-node golden creation for the focused, golden-less
@@ -195,68 +243,114 @@ export function TracePanel({
     </div>
   ) : null
 
+  // Identity strip: which run this trace belongs to, and how it stands. Shared
+  // by the live and history views so the region reads as ONE surface (D3 命名:
+  // 区域=Timeline / 本视图=Trace / 文档=Full Trace).
+  const identityStrip = (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+      {onBack ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={onBack}
+              aria-label="Back to timeline"
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Back to the run list</TooltipContent>
+        </Tooltip>
+      ) : null}
+      <h3 className="text-sm font-semibold text-foreground">Trace</h3>
+      {runId ? (
+        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+          {runId.slice(0, 16)}{runId.length > 16 ? '…' : ''}
+        </span>
+      ) : null}
+      {isPredict ? (
+        <Badge variant="outline" className="text-warning">Predict</Badge>
+      ) : null}
+      <RunStatusBadge live={live} metadata={metadata} />
+    </div>
+  )
+
   if (traceEvents.length === 0) {
     return (
-      <div role="log" aria-live="polite" aria-label="Event Trace" className="flex h-full min-h-0 flex-col">
+      <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
         {compareTabStrip}
+        {identityStrip}
         <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
-          Waiting for run events
+          {live ? 'Waiting for run events' : 'No events recorded for this run'}
         </div>
       </div>
     )
   }
 
   return (
-    <div role="log" aria-live="polite" aria-label="Event Trace" className="flex h-full min-h-0 flex-col">
+    <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
       {compareTabStrip}
-      <div className="shrink-0 space-y-3 border-b border-border bg-card p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="font-semibold text-foreground">Event Trace</h3>
-          <div className="flex items-center gap-2">
+      {identityStrip}
+      <div className="shrink-0 space-y-3 border-b border-border bg-card p-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {onResume ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label="Resume run from last checkpoint"
                   disabled={!canResume || resumeLoading}
                   onClick={onResume}
-                  className="flex items-center gap-1 rounded-md border border-success-border px-2 py-1 text-xs font-semibold text-success hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="text-success hover:text-success"
                 >
-                  <Play className="h-3.5 w-3.5" />
+                  <Play className="size-3.5" />
                   {resumeLoading ? 'Resuming' : 'Resume'}
-                </button>
+                </Button>
               </TooltipTrigger>
               <TooltipContent>Continue this run from its last checkpoint</TooltipContent>
             </Tooltip>
-            <button
+          ) : null}
+          {onCompareToGolden ? (
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               aria-label="Compare trace to golden baseline"
               disabled={!canCompare || compareLoading}
               onClick={onCompareToGolden}
-              className="flex items-center gap-1 rounded-md border border-primary/40 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="text-primary hover:text-primary"
             >
-              <GitCompareArrows className="h-3.5 w-3.5" />
+              <GitCompareArrows className="size-3.5" />
               {compareLoading ? 'Comparing' : 'Compare'}
-            </button>
-            <button
+            </Button>
+          ) : null}
+          {onPromoteToGolden ? (
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               aria-label="Promote run to golden baseline"
               disabled={!canCompare}
               onClick={onPromoteToGolden}
-              className="flex items-center gap-1 rounded-md border border-warning-border px-2 py-1 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="text-warning hover:text-warning"
             >
-              <BadgeCheck className="h-3.5 w-3.5" />
+              <BadgeCheck className="size-3.5" />
               Golden
-            </button>
-            <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={linkEnabled}
-                onChange={(event) => onToggleLink?.(event.target.checked)}
-                className="h-3.5 w-3.5 rounded border-border accent-primary"
-              />
+            </Button>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <Switch
+              id="trace-link-views"
+              checked={linkEnabled}
+              onCheckedChange={(checked) => onToggleLink?.(checked === true)}
+            />
+            <Label htmlFor="trace-link-views" className="text-xs font-medium text-muted-foreground">
               Link views
-            </label>
+            </Label>
           </div>
         </div>
         <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
@@ -296,7 +390,7 @@ export function TracePanel({
                   onClick={() => filter.toggleType('llm_fallback')}
                   className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
                 >
-                  <AlertTriangle className="h-3 w-3" />
+                  <AlertTriangle className="size-3" />
                   {fallbackCount} LLM fallback{fallbackCount === 1 ? '' : 's'}
                 </button>
               </TooltipTrigger>
@@ -318,7 +412,7 @@ export function TracePanel({
                   }}
                   className="flex items-center gap-1 rounded-full border border-warning-border px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <ShieldCheck className="size-3.5" />
                   {nodePromoting ? 'Promoting node' : 'Promote node to golden'}
                 </button>
               </TooltipTrigger>
@@ -334,12 +428,14 @@ export function TracePanel({
           />
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 p-4">
+      <div className="min-h-0 flex-1 p-4 pb-0">
         <VirtualTraceList
           events={filter.filteredEvents}
           activePhase={focusPhase}
           selectedEventId={selectedEventId}
           linkEnabled={linkEnabled}
+          followStream={live}
+          streamKey={runId}
           onSelectPrompt={onSelectPrompt}
           onSelectEvent={onSelectEvent}
         />

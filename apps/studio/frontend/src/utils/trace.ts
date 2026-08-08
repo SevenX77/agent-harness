@@ -7,6 +7,20 @@ export function jsonText(value: JsonValue | undefined): string {
   return JSON.stringify(value, null, 2)
 }
 
+/**
+ * Wall-clock time of one trace event, local HH:MM:SS. A timeline without time
+ * is only an ordering (design analogy: LangSmith 式竖向时间轴), so every row
+ * carries its moment; null when the event has no parseable timestamp.
+ */
+export function eventTimeLabel(event: CallbackEvent): string | null {
+  const raw = (event as { timestamp?: unknown }).timestamp
+  if (typeof raw !== 'string') return null
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return null
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
 export function eventPhase(event: CallbackEvent): string {
   return event.phase_name ?? event.current_phase ?? event.run_id ?? 'system'
 }

@@ -17,13 +17,14 @@ function render(settingsOpen = false): string {
   )
 }
 
-describe('Toolbar trace nav naming (atom #28)', () => {
-  it('labels the trace nav entry "Event Trace" instead of the ambiguous "Trace Timeline"', () => {
+describe('Toolbar trace nav naming (atom #28 / D3 命名统一 2026-08-07)', () => {
+  it('labels the region nav entry "Timeline" and never the ambiguous "Trace Timeline"', () => {
     const html = render()
     // The label rides on the button aria-label (rendered inline, not portaled),
     // so it is observable in static markup.
-    expect(html).toContain('aria-label="Event Trace"')
+    expect(html).toContain('aria-label="Timeline"')
     expect(html).not.toContain('Trace Timeline')
+    expect(html).not.toContain('aria-label="Event Trace"')
   })
 
   it('exposes the settings button as a toggle when settings are open', () => {

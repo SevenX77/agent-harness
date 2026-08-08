@@ -7,6 +7,7 @@ import {
   eventColor,
   eventMessage,
   eventModelName,
+  eventTimeLabel,
   findPromptEvent,
   llmFallbackDetails,
   payloadPreview,
@@ -310,5 +311,17 @@ describe('eventModelName (which model a call actually used)', () => {
     expect(eventModelName(event({ event_type: 'prompt_captured', phase_name: 'draft', resolved_model: '' }))).toBeNull()
     expect(eventModelName(event({ event_type: 'llm_call', phase_name: 'draft' }))).toBeNull()
     expect(eventModelName(event({ event_type: 'phase_start', phase_name: 'draft' }))).toBeNull()
+  })
+})
+
+describe('eventTimeLabel (timeline rows carry the wall-clock time)', () => {
+  it('formats a valid ISO timestamp as local HH:MM:SS', () => {
+    const label = eventTimeLabel(event({ event_type: 'phase_start', timestamp: '2026-06-14T08:05:09Z' }))
+    expect(label).toMatch(/^\d{2}:\d{2}:\d{2}$/)
+  })
+
+  it('returns null for a missing or unparseable timestamp', () => {
+    expect(eventTimeLabel(event({ event_type: 'phase_start', timestamp: 'not-a-date' }))).toBeNull()
+    expect(eventTimeLabel({ schema_version: '1.0', event_type: 'phase_start' } as never)).toBeNull()
   })
 })

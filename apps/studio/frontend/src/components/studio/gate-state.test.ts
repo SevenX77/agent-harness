@@ -59,6 +59,20 @@ describe("projectGateEvent", () => {
     })
   })
 
+  it("points the trace stream at a predict as soon as it starts", () => {
+    // B-fix (decision 2026-08-07): predict streams events through the same run
+    // websocket, so a started predict must re-point the stream — otherwise the
+    // opened trace panel keeps showing the PREVIOUS run's events.
+    const projection = projectGateEvent(
+      event({ gate: "predict", outcome: "started", runId: "predict-abc" }),
+    )
+
+    expect(projection.effects).toContainEqual({
+      kind: "follow-run",
+      runId: "predict-abc",
+    })
+  })
+
   it("leaves a finished run on predict-pass so it stays immediately runnable", () => {
     expect(projectGateEvent(event({ gate: "run", outcome: "pass", runId: "r1" })).stage).toBe(
       "predict-pass",

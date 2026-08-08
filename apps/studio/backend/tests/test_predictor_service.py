@@ -492,6 +492,18 @@ def test_finished_predict_leaves_the_status_account_a_run_reader_needs(
     metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
     assert metadata.run_id == "predict-account"
     assert metadata.status == "success"
+    # Timeline design (03_regions/timeline F1): predict rows are told apart from
+    # run rows by the metadata itself, not by sniffing the run_id prefix.
+    assert metadata.kind == "predict"
+
+
+def test_run_metadata_kind_defaults_to_run() -> None:
+    from app.models.runs import RunMetadata
+
+    metadata = RunMetadata.model_validate(
+        {"run_id": "r1", "status": "success", "started_at": "2026-08-07T00:00:00Z"}
+    )
+    assert metadata.kind == "run"
 
 
 def test_failed_predict_records_the_same_verdict_the_gate_broadcasts(

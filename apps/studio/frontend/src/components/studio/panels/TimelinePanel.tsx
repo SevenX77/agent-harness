@@ -1,17 +1,10 @@
-import { useEffect, useMemo, useState } from "react"
-import { AlertCircle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react"
+import { AlertCircle, CheckCircle2, CirclePause, FlaskConical, Loader2, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { TracePanel } from "@/components/TracePanel"
-import { PromptInspector } from "@/components/PromptInspector"
-import { getRunDetail } from "@/api/client"
-import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
-import { findPromptEvent } from "@/utils/trace"
+import type { RunMetadata } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
-import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { Button } from "../../ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip"
-import { EdgeContextView } from "./EdgeContextView"
 import { PanelHeader } from "./_shared/PanelHeader"
 
 const formatDuration = (sec?: number | null) => {
@@ -51,7 +44,7 @@ const shortRefTail = (value?: string | null): string | null => {
   return parts.at(-1) || value
 }
 
-function RunIdentityInline({ run }: { run: RunMetadata }) {
+export function RunIdentityInline({ run }: { run: RunMetadata }) {
   const artifactId = run.artifact_ref?.artifact_id ?? null
   const contentHash = shortHash(run.artifact_ref?.content_hash)
   const fingerprint = shortHash(run.execution_fingerprint ?? run.artifact_ref?.execution_fingerprint)
@@ -79,81 +72,50 @@ function RunIdentityInline({ run }: { run: RunMetadata }) {
   )
 }
 
-export function TimelinePanel() {
-  const { currentSkillId, selectedEdge, setSelectedEdge } = useWorkspaceContext()
+/**
+ * Row-leading icon. A predict attempt differs from a real run by ICON ONLY (PM:
+ * predict 历史行仅用 icon 与真实 run 行区分,其余样式一致) — the flask keeps the
+ * status color so a failed predict still reads as failed.
+ */
+function RunRowIcon({ run }: { run: RunMetadata }) {
+  const statusColor =
+    run.status === "success"
+      ? "text-success"
+      : run.status === "running"
+        ? "text-muted-foreground"
+        : run.status === "paused"
+          ? "text-warning"
+          : "text-destructive"
+  if (run.kind === "predict") {
+    return <FlaskConical aria-label="Predict attempt" className={`size-4 ${statusColor}`} />
+  }
+  if (run.status === "running") {
+    return <Loader2 aria-label="Run in progress" className="size-4 animate-spin text-muted-foreground" />
+  }
+  if (run.status === "paused") {
+    return <CirclePause aria-label="Run paused" className="size-4 text-warning" />
+  }
+  if (run.status === "success") {
+    return <CheckCircle2 className="size-4 text-success" />
+  }
+  return <AlertCircle className="size-4 text-destructive" />
+}
+
+interface TimelinePanelProps {
+  /** Open one run's trace (viewed-run model: Workspace owns the fetch + view). */
+  onSelectRun?: (run: RunMetadata) => void
+  /** The run whose detail is currently being fetched (progress affordance). */
+  loadingRunId?: string | null
+}
+
+/**
+ * Timeline region, list view: every predict/run attempt for the current skill,
+ * newest first. Viewing a run's trace is owned by the Workspace-level viewed-run
+ * state (decision 2026-08-07); this panel only reports the row click.
+ */
+export function TimelinePanel({ onSelectRun, loadingRunId = null }: TimelinePanelProps) {
+  const { currentSkillId } = useWorkspaceContext()
   const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
-  // F2 (trace): clicking a past run loads its full trace (RunDetail.events) in place.
-  const [selected, setSelected] = useState<{ runId: string; events: EventEnvelope[]; metadata: RunMetadata } | null>(null)
-  const [traceError, setTraceError] = useState<string | null>(null)
-  const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
-  // D8 (prompt 回溯): the historical trace owns its own PromptInspector selection
-  // state. Clicking "Inspect prompt" on any row resolves — via findPromptEvent —
-  // back to the driving prompt_captured event in the same phase.
-  const [promptIndex, setPromptIndex] = useState<number | null>(null)
-  const promptEvent = useMemo<CallbackEvent | null>(() => {
-    if (!selected || promptIndex === null) return null
-    return findPromptEvent(selected.events.map((envelope) => envelope.payload as CallbackEvent), promptIndex)
-  }, [selected, promptIndex])
-
-  // D14 mode precedence: the panel has three mutually-exclusive views (edge dot
-  // context, a selected run's trace, the run list). A dot click (selectedEdge)
-  // takes over, so clear any open run-detail; opening a run clears the dot.
-  useEffect(() => {
-    if (selectedEdge) {
-      setSelected(null)
-    }
-  }, [selectedEdge])
-
-  const openRun = async (runId: string) => {
-    if (!currentSkillId) return
-    setSelectedEdge?.(null)
-    setLoadingRunId(runId)
-    setTraceError(null)
-    try {
-      const detail = await getRunDetail(currentSkillId, runId)
-      setSelected({ runId, events: detail.events, metadata: detail.metadata })
-    } catch (caught) {
-      setTraceError(errorMessage(caught))
-    } finally {
-      setLoadingRunId(null)
-    }
-  }
-
-  // Dot/edge context is trace-owned (D14 / properties F3); it takes precedence.
-  if (selectedEdge) {
-    return <EdgeContextView selectedEdge={selectedEdge} onClear={() => setSelectedEdge?.(null)} />
-  }
-
-  if (selected) {
-    return (
-      <div className="flex h-full flex-col bg-background">
-        <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-lg"
-            onClick={() => {
-              setSelected(null)
-              setPromptIndex(null)
-            }}
-            aria-label="Back to timeline"
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div className="min-w-0 flex-1">
-            <span className="block truncate font-mono text-xs text-muted-foreground">
-              Run {selected.runId.slice(0, 12)}…
-            </span>
-            <RunIdentityInline run={selected.metadata} />
-          </div>
-        </div>
-        <div className="min-h-0 flex-1">
-          <TracePanel traceLogs={selected.events} activePhase={null} onSelectPrompt={setPromptIndex} />
-        </div>
-        <PromptInspector promptEvent={promptEvent} onClose={() => setPromptIndex(null)} />
-      </div>
-    )
-  }
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -188,11 +150,6 @@ export function TimelinePanel() {
               Failed to load run history
             </div>
           ) : null}
-          {traceError ? (
-            <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-              {traceError}
-            </div>
-          ) : null}
           {!isLoading && !error && runs.length === 0 ? (
             <div className="p-3 text-center text-xs text-muted-foreground">
               No runs recorded yet. Compile and run your skill to see them here!
@@ -202,18 +159,14 @@ export function TimelinePanel() {
             <button
               type="button"
               key={run.run_id}
-              onClick={() => void openRun(run.run_id)}
+              onClick={() => onSelectRun?.(run)}
               disabled={loadingRunId !== null}
               aria-label={`View trace for run ${run.run_id}`}
-              className="group w-full cursor-pointer rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-accent disabled:opacity-60"
+              className="group w-full cursor-pointer rounded-md px-2 py-2 text-left transition-colors hover:bg-accent disabled:opacity-60"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  {run.status === "success" ? (
-                    <CheckCircle2 className="size-4 text-success" />
-                  ) : (
-                    <AlertCircle className="size-4 text-destructive" />
-                  )}
+                  <RunRowIcon run={run} />
                   <span className="max-w-[120px] truncate font-mono text-xs text-muted-foreground group-hover:text-foreground">
                     {run.run_id.slice(0, 12)}...
                   </span>

@@ -439,7 +439,12 @@ export function TracePanel({
           <TooltipContent>Back to the run list</TooltipContent>
         </Tooltip>
       ) : null}
-      <h3 className="shrink-0 text-sm font-semibold text-foreground">Trace</h3>
+      {/* With a run on screen the strip is full: the back arrow, the verdict,
+          what the list is showing and three controls need 316 of its 331px. The
+          label is what gives — it repeats the back arrow's destination and the
+          panel's own aria-label, and the run itself is the subject here. With
+          no run there is nothing to name but the view, so the label stays. */}
+      {runId ? null : <h3 className="shrink-0 text-sm font-semibold text-foreground">Trace</h3>}
       {isPredict ? (
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}

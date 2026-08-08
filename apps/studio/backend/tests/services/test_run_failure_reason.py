@@ -107,3 +107,22 @@ def test_a_successful_run_carries_no_error(tmp_path: Path, monkeypatch: pytest.M
 
     assert record.metadata.error is None  # type: ignore[attr-defined]
     assert "error" not in json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+
+
+def test_finishing_a_run_leaves_a_report_beside_its_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every finished run gets its report (run-execution mvp1-alignment F6)."""
+    from app.services.run_manager import RunManager
+
+    run_dir = _demo_run_dir(tmp_path, monkeypatch)
+    record = _record_with(
+        run_dir,
+        {"type": "status", "status": "success", "metrics": {"wall_time_sec": 1.0}},
+    )
+
+    asyncio.run(RunManager()._drain_process_queue(record))  # type: ignore[attr-defined]
+
+    report = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert report.startswith("# Run report")
+    assert run_dir.name in report

@@ -28,6 +28,7 @@ from pydantic import Field
 from graph_agent.callbacks.events import CallbackEvent
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
+from graph_agent.core.runner import run_skill
 
 VALID_BUSINESS_MD = """## item-1
 - answer: ok
@@ -195,3 +196,32 @@ def test_agent_node_tool_call_is_attributed_to_its_node(
     assert tool_calls, "the agent node must emit a tool_call event"
     assert tool_calls[0].parent_node_id == "main"
     assert tool_calls[0].node_type == "agent"
+
+
+def test_run_result_metrics_report_the_tokens_the_run_actually_spent(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
+    """``metrics.json`` must report the run's real token spend, not a zero.
+
+    Both phase runtimes accumulate into ``flow.metrics``; the runner is what
+    turns a finished graph into a ``RunResult``, so it owes that state to the
+    caller. Observed 2026-08-08 on exp-b-round7 run
+    2026-08-08T12-53-23_f90d8d60: 11 llm_call events totalling 120073 input
+    tokens, ``metrics.json`` still reporting ``total_tokens: 0``.
+    """
+    skill_root = tmp_path / "skill"
+    _agent_skill(skill_root)
+
+    result = run_skill(
+        skill_root,
+        mock_llm=_OneShotChatModel(),
+        workspace_dir=tmp_path / "workspace",
+        skill_resolver=mock_skill_resolver,
+        topic="contracts",
+    )
+
+    assert result.success is True
+    assert result.metrics.input_tokens == 3
+    assert result.metrics.output_tokens == 5
+    assert result.metrics.total_tokens == 8
+    assert result.metrics.wall_time_sec > 0.0

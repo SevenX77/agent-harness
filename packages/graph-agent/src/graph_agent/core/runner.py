@@ -1753,6 +1753,22 @@ def _business_context_from_graph_result(result: Any) -> dict[str, Any]:
     return {}
 
 
+def _run_metrics_from_graph_result(result: Any, *, wall_time: float) -> dict[str, Any]:
+    """Project the finished graph's own accounting into the run's metrics.
+
+    Both phase runtimes accumulate token spend into ``flow.metrics`` — the
+    legacy LLM phase node through ``_HarnessCallbackBridge``, the V4 agent node
+    inline. Wall time is the runner's own measurement, so it is layered on top.
+    """
+    metrics: dict[str, Any] = {}
+    flow = result.get("flow") if isinstance(result, dict) else None
+    raw = flow.get("metrics") if isinstance(flow, dict) else getattr(flow, "metrics", None)
+    if isinstance(raw, dict):
+        metrics.update(raw)
+    metrics["wall_time_sec"] = wall_time
+    return metrics
+
+
 def _emit_v030_interrupted_run(
     event_sink: Any,
     *,
@@ -2098,7 +2114,7 @@ def _run_v030_skill_dict(
             return {
                 "run_id": run_id,
                 "context": final_context,
-                "metrics": {"wall_time_sec": wall_time},
+                "metrics": _run_metrics_from_graph_result(result, wall_time=wall_time),
                 "trace_path": saved_trace_path,
                 "run_dir": str(trace_output),
                 "wall_time_sec": wall_time,
@@ -2133,7 +2149,7 @@ def _run_v030_skill_dict(
     return {
         "run_id": run_id,
         "context": final_context,
-        "metrics": {"wall_time_sec": wall_time},
+        "metrics": _run_metrics_from_graph_result(result, wall_time=wall_time),
         "trace_path": saved_trace_path,
         "run_dir": str(trace_output),
         "wall_time_sec": wall_time,

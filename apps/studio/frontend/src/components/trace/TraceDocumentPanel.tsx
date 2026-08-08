@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertOctagon, ChevronDown, ChevronRight, FileText, Hash } from 'lucide-react'
 import type { CallbackEvent } from '../../api/types'
 import { buildTraceDocument, type TraceDocumentDetail, type TraceDocumentEntry } from '../../utils/trace-document'
+import { RUN_SCOPE } from '../../utils/trace'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { ScrollArea } from '../ui/scroll-area'
@@ -46,7 +47,7 @@ export function TraceDocumentPanel({ events, focusNodeId = null }: TraceDocument
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-card" aria-label="Full trace document">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border py-2 pl-3 pr-10">
         <FileText className="size-3.5 text-muted-foreground" />
         <h2 className="text-sm font-semibold text-foreground">Full Trace</h2>
         <span className="text-xs text-muted-foreground">{document.eventCount} events</span>
@@ -62,7 +63,9 @@ export function TraceDocumentPanel({ events, focusNodeId = null }: TraceDocument
             document.sections.map((section, sectionIndex) => (
               <section key={`${section.nodeId}-${sectionIndex}`} data-trace-doc-node={section.nodeId}>
                 <header className="sticky top-0 z-10 -mx-1 mb-2 flex items-center gap-2 bg-card/95 px-1 py-1 backdrop-blur">
-                  <h3 className="font-mono text-sm font-semibold text-foreground">{section.nodeId}</h3>
+                  <h3 className="font-mono text-sm font-semibold text-foreground">
+                    {section.nodeId === RUN_SCOPE ? 'Run' : section.nodeId}
+                  </h3>
                   <Badge variant="secondary" className="text-[10px]">
                     {section.entries.length} states
                   </Badge>

@@ -7,11 +7,14 @@ import {
   eventColor,
   eventMessage,
   eventModelName,
+  eventPhase,
   eventTimeLabel,
   findPromptEvent,
+  isRunScopedEvent,
   llmFallbackDetails,
   payloadPreview,
   retryBadge,
+  RUN_SCOPE,
   runOutcomeFromEvents,
   toolCallSummary,
 } from './trace'
@@ -346,5 +349,37 @@ describe('runOutcomeFromEvents', () => {
 
   it('treats a run_ended with no status as a completed run', () => {
     expect(runOutcomeFromEvents([event({ event_type: 'run_ended' })])).toBe('success')
+  })
+})
+
+describe('eventPhase (which node an event belongs to)', () => {
+  const ev = (partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent => ({
+    schema_version: '1.0',
+    timestamp: '2026-08-08T00:00:00Z',
+    ...partial,
+  } as CallbackEvent)
+
+  it('uses the phase the event names', () => {
+    expect(eventPhase(ev({ event_type: 'phase_start', phase_name: 'segment' }))).toBe('segment')
+  })
+
+  it('files an edge event under the node it dispatches into', () => {
+    // input_dispatch / blackboard_reduce carry from_phase → to_phase instead of
+    // phase_name; they describe what arrives at `to_phase`, so that is the node
+    // they belong to. They used to fall through to a bucket called "system".
+    expect(eventPhase(ev({ event_type: 'input_dispatch', from_phase: 'setup', to_phase: 'segment' }))).toBe('segment')
+  })
+
+  it('files run-level events under the run, never under a node named after the run id', () => {
+    // run_started / run_ended belong to no node. Falling back to run_id turned a
+    // 40-character id into a "node" — a filter chip and a document heading.
+    expect(eventPhase(ev({ event_type: 'run_started', run_id: 'predict-a7b54afac9774857bf81a99e62fa284c' })))
+      .toBe(RUN_SCOPE)
+    expect(RUN_SCOPE).toBe('run')
+  })
+
+  it('tells run-scoped events apart from node events', () => {
+    expect(isRunScopedEvent(ev({ event_type: 'run_ended', run_id: 'r1' }))).toBe(true)
+    expect(isRunScopedEvent(ev({ event_type: 'phase_start', phase_name: 'segment' }))).toBe(false)
   })
 })

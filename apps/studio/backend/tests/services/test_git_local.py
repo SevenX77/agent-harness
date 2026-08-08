@@ -192,7 +192,7 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden(
 
     result = service.auto_commit_run(skill_dir, "run-1")
 
-    assert result is not None
+    assert result == "committed"
     ignored_status = service.status(skill_dir, ignored=True).stdout
     assert "!! .workspace/runs/" in ignored_status
     committed_files = run_git(skill_dir, "show", "--name-only", "--format=", "HEAD").stdout
@@ -362,3 +362,48 @@ def test_commit_empty_snapshot_uses_concurrent_existing_marker_after_cas_failure
 
 def test_studio_gitignore_template_is_exact(tmp_path: Path) -> None:
     assert write_studio_gitignore(tmp_path).read_text(encoding="utf-8") == STUDIO_GITIGNORE
+
+
+def test_auto_commit_run_makes_no_commit_when_nothing_changed(tmp_path: Path) -> None:
+    """An unchanged skill gets no archive commit.
+
+    A run that changed nothing is not a new version of the skill. Committing it
+    anyway (git commit --allow-empty) buries the real history under one
+    "auto-run-<id>" commit per run.
+    """
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    write_studio_gitignore(skill_dir)
+    service = GitLocalService()
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+    before = run_git(skill_dir, "rev-parse", "HEAD").stdout.strip()
+
+    result = service.auto_commit_run(skill_dir, "run-1")
+
+    assert result == "unchanged"
+    assert run_git(skill_dir, "rev-parse", "HEAD").stdout.strip() == before
+
+
+def test_auto_commit_run_commits_when_the_skill_changed(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    write_studio_gitignore(skill_dir)
+    service = GitLocalService()
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+    before = run_git(skill_dir, "rev-parse", "HEAD").stdout.strip()
+
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nchanged: true\n---\n", encoding="utf-8")
+    result = service.auto_commit_run(skill_dir, "run-1")
+
+    assert result == "committed"
+    assert run_git(skill_dir, "rev-parse", "HEAD").stdout.strip() != before

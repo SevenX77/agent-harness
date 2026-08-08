@@ -138,6 +138,14 @@ const phases = useMemo(
   (同文件 :82)——PM 2026-08-08 明确要求 panel 内不使用编辑器样式。
 - 删除 `DETAIL_CHAR_BUDGET` 硬截断。长内容默认折叠到固定高度并显示尺寸,用户点开即得全文;
   "完整 trace"必须真的完整。
+- **detail 投影必须读引擎真实发出的字段**(2026-08-08 补,PR #638)。原实现读的是
+  `blackboard` / `inputs` / `outputs` —— 引擎的事件契约里**没有任何一个事件**发出这三个名字
+  (真机核对一次 78 事件的 run:payload 键为 `blackboard_snapshot` / `context` /
+  `initial_context` / `final_context` / `messages` / `response_data` / `args` / `result` /
+  `changed_keys` / `dispatched_keys` / `metrics` …,匹配 `blackboard`/`inputs`/`outputs` 的
+  事件数 = 0)。所以在删掉截断之前,这份"完整文档"对真实 run **一条内容都没显示过**,
+  只有标题行。字段清单以
+  `packages/graph-agent/src/graph_agent/callbacks/events.py` 的事件契约为准。
 - 保留按节点分组与 focus 跳转能力(atom #17):focus 某节点时文档滚动到该节点区块。
 
 ### D5. 两个 Trace 面的分工写进 UI(消歧)

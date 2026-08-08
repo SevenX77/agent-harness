@@ -1,5 +1,5 @@
 import type { ResumeRunOptions } from "@/api/client"
-import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
+import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TraceDocumentPanel } from "@/components/MonacoPanel"
@@ -18,6 +18,7 @@ import { PanelHeader } from "./_shared/PanelHeader"
 import { EdgeContextView } from "./EdgeContextView"
 import { PropertiesPanel } from "./PropertiesPanel"
 import { TimelinePanel } from "./TimelinePanel"
+import type { TraceView } from "./trace-view"
 import type { SubgraphMembershipTree } from "./use-subgraph-membership-tree"
 import type { WorkspaceDirectoryTree } from "./use-workspace-directory-tree"
 
@@ -45,8 +46,14 @@ interface PanelsProps {
   onActionCreate?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
   onActionDelete?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
   onValidatorCreate?: (phaseId: string, target?: ChildSaveTarget) => Promise<void> | void
-  // trace-observability F1: while a run is active the timeline region streams
-  // live trace events (TracePanel); with no active run it shows run history (F2).
+  // trace-observability F1/F2 (viewed-run model, decision 2026-08-07): the
+  // timeline region renders whichever run `traceView` points at — the live
+  // stream, a fetched historical run, or (null) the run-history list. `runId`
+  // stays the LIVE run for Properties/resume affordances.
+  traceView?: TraceView | null
+  onCloseTraceView?: () => void
+  onSelectRun?: (run: RunMetadata) => void
+  historyLoadingRunId?: string | null
   runId?: string | null
   selectedNodeStatus?: SkillNodeStatus | null
   resumeValidity?: ResumeValidityResponse | null
@@ -100,6 +107,10 @@ export function Panels({
   onActionCreate,
   onActionDelete,
   onValidatorCreate,
+  traceView,
+  onCloseTraceView,
+  onSelectRun,
+  historyLoadingRunId = null,
   runId,
   selectedNodeStatus,
   resumeValidity,
@@ -231,14 +242,19 @@ export function Panels({
         />
       )
     }
-    // Active run → live trace stream; otherwise the run-history list.
-    if (runId) {
+    // viewed-run model (decision 2026-08-07): the region shows the run the user
+    // is LOOKING AT, not whichever run last streamed. Live view keeps every run
+    // action; a historical view is a read-only replay of the same TracePanel.
+    if (traceView?.source === "live" && runId) {
       return (
         <TracePanel
           traceLogs={traceEvents ?? []}
           activePhase={activeTracePhase ?? null}
           selectedNode={selectedNode}
           onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
+          onBack={onCloseTraceView}
+          runId={runId}
+          live
           canCompare={traceCanCompare}
           compareLoading={traceCompareLoading}
           onCompareToGolden={onCompareToGolden}
@@ -255,7 +271,20 @@ export function Panels({
         />
       )
     }
-    return <TimelinePanel />
+    if (traceView?.source === "history") {
+      return (
+        <TracePanel
+          traceLogs={traceEvents ?? []}
+          activePhase={null}
+          selectedNode={selectedNode}
+          onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
+          onBack={onCloseTraceView}
+          runId={traceView.runId}
+          metadata={traceView.metadata}
+        />
+      )
+    }
+    return <TimelinePanel onSelectRun={onSelectRun} loadingRunId={historyLoadingRunId} />
   }
   if (activePanel === "trace-doc") {
     // n4-trace #18: the same run-stream events the live Event Trace panel renders,

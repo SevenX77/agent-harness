@@ -9,6 +9,7 @@ import {
   eventMockedSource,
   eventModelName,
   eventPhase,
+  eventTimeLabel,
   llmFallbackDetails,
   mockedSourceClass,
   mockedSourceLabel,
@@ -63,6 +64,9 @@ export function TraceEventRow({
   // and rows that know which model served the call carry a model chip.
   const fallback = llmFallbackDetails(event)
   const modelName = eventModelName(event)
+  // A timeline needs time: each row shows its wall-clock moment (muted mono,
+  // secondary info one shade dimmer — same hierarchy as copilot tool activity).
+  const timeLabel = eventTimeLabel(event)
 
   return (
     <div className="relative pl-6" style={{ minHeight: TRACE_EVENT_ROW_HEIGHT - 20 }}>
@@ -86,14 +90,17 @@ export function TraceEventRow({
             : highlighted
               ? 'border-warning-border bg-warning/10'
               : isError
-                ? 'border-destructive-border/60 bg-destructive/10 hover:border-destructive-border'
-                : 'border-border bg-card hover:border-muted-foreground/40'
+                ? 'border-destructive-border/60 bg-destructive/10 hover:bg-destructive/15'
+                : 'border-border bg-card hover:bg-accent/50'
         }`}
       >
         <div className="mb-1 flex items-center justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2">
             {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
             <EventTypeBadge eventType={event.event_type} />
+            {timeLabel ? (
+              <span data-trace-time className="font-mono text-[10px] text-muted-foreground/80">{timeLabel}</span>
+            ) : null}
           </span>
           {tokens ? (
             <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">

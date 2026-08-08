@@ -92,7 +92,11 @@ export function projectGateEvent(event: SkillGateEvent): GateProjection {
   if (event.outcome !== "fail") {
     effects.push({ kind: "close-drawers" })
   }
-  if (event.gate === "run" && event.outcome === "started" && event.runId) {
+  // Predict streams its events through the same run websocket (transient predict
+  // record), so BOTH started gates re-point the stream — a trace panel opened for
+  // a predict must never keep showing the previous run's events (decision
+  // 2026-08-07 viewed-run).
+  if ((event.gate === "predict" || event.gate === "run") && event.outcome === "started" && event.runId) {
     effects.push({ kind: "follow-run", runId: event.runId })
   }
   // Predict and run both stream phase events, so both put the trace on screen —

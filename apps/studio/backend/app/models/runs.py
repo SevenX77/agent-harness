@@ -92,6 +92,9 @@ class RunMetadata(BaseModel):
     run_id: str
     status: RunStatus
     started_at: datetime
+    # Timeline F1: predict attempts sit in the same run list as real runs and
+    # are told apart by this field alone (PM: predict 行仅用 icon 区分).
+    kind: Literal["run", "predict"] = "run"
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
     git_status: Literal["committed", "locked", "failed", "no_git"] | None = None

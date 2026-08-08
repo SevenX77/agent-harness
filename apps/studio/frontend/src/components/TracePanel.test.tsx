@@ -219,25 +219,57 @@ describe('TracePanel focus granularity (atom #17)', () => {
   })
 })
 
-describe('TracePanel naming (atom #28)', () => {
-  it('names the panel "Event Trace" rather than the ambiguous "Trace Timeline"', () => {
+describe('TracePanel naming (atom #28 / D3 命名统一 2026-08-07)', () => {
+  // 一套口径: 区域=Timeline(Toolbar+列表) / 本视图=Trace / 文档=Full Trace。
+  // atom #28 的底线不变: 歧义的 "Trace Timeline" 永不回归。
+  it('names the view "Trace" and never the ambiguous "Trace Timeline"', () => {
     const html = render({})
-    expect(html).toContain('Event Trace')
+    expect(html).toContain('>Trace<')
     expect(html).not.toContain('Trace Timeline')
   })
 
-  it('uses "Event Trace" as the empty-state aria-label', () => {
+  it('uses "Trace" as the empty-state aria-label', () => {
     const html = renderToStaticMarkup(
       <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} />,
     )
-    expect(html).toContain('aria-label="Event Trace"')
+    expect(html).toContain('aria-label="Trace"')
     expect(html).not.toContain('Trace Timeline')
+  })
+
+  it('shows the viewed run id and a live badge in the identity strip', () => {
+    const html = render({ runId: 'run-abcdef123456', live: true })
+    expect(html).toContain('run-abcdef123456'.slice(0, 16))
+    expect(html).toContain('Live')
+  })
+
+  it('offers a back-to-timeline affordance when a close handler is wired', () => {
+    const html = render({ onBack: () => undefined })
+    expect(html).toContain('aria-label="Back to timeline"')
+  })
+
+  it('marks a historical predict view with a Predict badge from metadata.kind', () => {
+    const html = render({
+      metadata: {
+        run_id: 'predict-1',
+        status: 'success',
+        started_at: '2026-08-07T00:00:00Z',
+        kind: 'predict',
+        metrics: null,
+        input_summary: null,
+      },
+      runId: 'predict-1',
+    })
+    expect(html).toContain('Predict')
+    expect(html).toContain('Success')
   })
 })
 
 describe('TracePanel Resume action', () => {
+  // Action buttons render only when their handler is wired (a historical view
+  // passes no handlers and stays read-only, decision 2026-08-07); these tests
+  // wire the handler and probe the canResume gating.
   it('shows a Resume button enabled when the run can be resumed', () => {
-    const html = render({ canResume: true })
+    const html = render({ canResume: true, onResume: () => undefined })
     expect(html).toContain('Resume')
     expect(html).toContain('aria-label="Resume run from last checkpoint"')
     // Enabled: the resume button markup should not carry the disabled attribute.
@@ -246,20 +278,20 @@ describe('TracePanel Resume action', () => {
   })
 
   it('disables Resume when there is no resumable run', () => {
-    const html = render({ canResume: false })
+    const html = render({ canResume: false, onResume: () => undefined })
     const idx = html.indexOf('Resume run from last checkpoint')
     // The disabled attribute follows aria-label + title on the same button.
     expect(html.slice(idx, idx + 200)).toContain('disabled')
   })
 
   it('shows a Resuming label while a resume is in flight', () => {
-    const html = render({ canResume: true, resumeLoading: true })
+    const html = render({ canResume: true, resumeLoading: true, onResume: () => undefined })
     expect(html).toContain('Resuming')
   })
 
   it('omits Resume affordance content when there are no trace events', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} canResume />,
+      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} canResume onResume={() => undefined} live />,
     )
     // Empty state shows the waiting message, not the action bar.
     expect(html).toContain('Waiting for run events')
@@ -467,7 +499,7 @@ describe('TracePanel model-compare tabs (PR2 node-compare)', () => {
 
   it('renders the tab strip even while a candidate run has no events yet', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} compareTabs={compareTabs} activeCandidateId="fast" />,
+      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} compareTabs={compareTabs} activeCandidateId="fast" live />,
     )
     // Empty-state still shows the candidate tabs so the user can switch.
     expect(html).toContain('aria-label="Model compare candidates"')

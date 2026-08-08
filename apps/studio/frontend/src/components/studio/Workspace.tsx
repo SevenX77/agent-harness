@@ -27,7 +27,7 @@ import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, pauseRun, serializeSkillGraph, startNodeCompareRun, stopRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { CompareCandidateRun, EngineErrorPayload, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
+import type { CompareCandidateRun, EngineErrorPayload, EventEnvelope, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
@@ -586,12 +586,25 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // prior empty-payload behaviour). Reset when the active skill changes.
   const [selectedTestInputId, setSelectedTestInputId] = useState<string | null>(null)
 
+  // viewed-run model (decision 2026-08-07): which run the timeline REGION shows
+  // is separate from which run the stream subscribes to. `live` renders the
+  // runStream; `history` renders a fetched, cached trace — Full Trace and the
+  // PromptInspector read the same viewed events (diagnostics stay one source).
+  const [viewedTrace, setViewedTrace] = useState<
+    | { source: "live" }
+    | { source: "history"; runId: string; metadata: RunMetadata; events: EventEnvelope[] }
+    | null
+  >(null)
+  const [historyLoadingRunId, setHistoryLoadingRunId] = useState<string | null>(null)
+
   useEffect(() => {
     setRunId(null)
     setSelectedTestInputId(null)
     setCompareGroupId(null)
     setCompareRuns([])
     setCompareCandidateId(null)
+    setViewedTrace(null)
+    setHistoryLoadingRunId(null)
   }, [currentSkillId])
 
   const handleRuntimeArtifactsSave = useCallback(async (artifacts: RuntimeArtifactRow[]): Promise<string | null> => {
@@ -682,6 +695,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
       if (effect.kind === "follow-run") {
         setRunId(effect.runId)
+        // A newly started predict/run is what the timeline region should show.
+        setViewedTrace({ source: "live" })
         continue
       }
       if (effect.kind === "open-trace") {
@@ -704,6 +719,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // F5 (trace): index of the trace event whose prompt is open in the inspector.
   const [promptIndex, setPromptIndex] = useState<number | null>(null)
   const runStream = useRunStream(runId)
+  // The ONE event source every trace surface reads (timeline trace view, Full
+  // Trace document, PromptInspector): live stream while viewing live, the
+  // fetched history otherwise — fix C, decision 2026-08-07.
+  const viewedTraceEvents = viewedTrace?.source === "history" ? viewedTrace.events : runStream.events
   // F7: a finished run (run_ended in the stream) drives the copilot analysis bar.
   const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
     ? runId
@@ -764,6 +783,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         if (cancelled || !detail) {
           return
         }
+        // The run row was projected at start with status "running"; project the
+        // terminal metadata so the Timeline list is truthful when the user goes
+        // back to it (single backend truth, no extra revalidation round-trip).
+        await projectRun(detail.metadata)
         const feedback = archiveFeedbackForGitStatus(detail.metadata.git_status)
         if (!feedback) {
           return
@@ -783,7 +806,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return () => {
       cancelled = true
     }
-  }, [completedRunId, currentSkillId])
+  }, [completedRunId, currentSkillId, projectRun])
 
   const statusByNodeId = useMemo(
     () => deriveNodeStatuses(runStream.events, runId),
@@ -2318,6 +2341,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       clearCopilotJudgeResult()
       await projectRun(result)
       setRunId(result.run_id)
+      setViewedTrace({ source: "live" })
       setRunErrors([])
       setRunDrawerOpen(false)
       // The timeline is opened by the run/started projection, which the backend
@@ -2342,9 +2366,43 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setCompareCandidateId(candidateId)
       clearCopilotJudgeResult()
       setRunId(target.metadata.run_id)
+      setViewedTrace({ source: "live" })
     },
     [compareRuns, clearCopilotJudgeResult],
   )
+
+  // viewed-run model (fix A): open one run's trace from the Timeline list. The
+  // live run re-uses the stream; a past run is fetched once and cached so the
+  // trace view + Full Trace document + PromptInspector all read the same events.
+  const handleSelectRun = useCallback(async (run: RunMetadata) => {
+    if (!currentSkillId) return
+    setPromptIndex(null)
+    if (runId && run.run_id === runId) {
+      setViewedTrace({ source: "live" })
+      return
+    }
+    setHistoryLoadingRunId(run.run_id)
+    try {
+      const detail = await getRunDetail(currentSkillId, run.run_id)
+      setViewedTrace({
+        source: "history",
+        runId: run.run_id,
+        metadata: detail.metadata,
+        events: detail.events,
+      })
+    } catch (error) {
+      toast.error(`Failed to load run trace: ${errorMessage(error)}`)
+    } finally {
+      setHistoryLoadingRunId(null)
+    }
+  }, [currentSkillId, runId])
+
+  // Back to the run list — available during AND after a run (fix A: the list
+  // must never become unreachable once a run has streamed).
+  const handleCloseTraceView = useCallback(() => {
+    setViewedTrace(null)
+    setPromptIndex(null)
+  }, [])
 
   // Launch the node's Compare LLMs: off the current base run, spawn one isolated
   // single-node side-run per persisted candidate (each fed the node's real input,
@@ -2490,6 +2548,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
+      setViewedTrace({ source: "live" })
       toast.success("Run resumed from checkpoint")
     } catch (error) {
       // Surface the backend's typed reason (e.g. RESUME_CHECKPOINT_NOT_FOUND for
@@ -2510,6 +2569,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
+      setViewedTrace({ source: "live" })
       toast.success("Run resumed with human input")
     } catch (error) {
       toast.error(`Resume failed: ${errorMessage(error)}`)
@@ -2528,6 +2588,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
+      setViewedTrace({ source: "live" })
       toast.success("Run resumed from tampered edge context")
     } catch (error) {
       toast.error(`Resume failed: ${errorMessage(error)}`)
@@ -2546,6 +2607,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await projectRun(result)
       setRunId(null)
       setRunId(result.run_id)
+      setViewedTrace({ source: "live" })
       toast.success("Run resumed from selected node")
     } catch (error) {
       toast.error(`Resume failed: ${errorMessage(error)}`)
@@ -2628,11 +2690,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onActionDelete={handleActionDelete}
         onValidatorCreate={handleValidatorCreate}
         runId={runId}
+        traceView={viewedTrace}
+        onCloseTraceView={handleCloseTraceView}
+        onSelectRun={handleSelectRun}
+        historyLoadingRunId={historyLoadingRunId}
         lintErrors={propertiesFieldErrors}
         resumeValidity={resumeValidity}
         resumeValidityLoading={resumeValidityLoading}
         resumeValidityError={resumeValidityError}
-        traceEvents={runStream.events}
+        traceEvents={viewedTraceEvents}
         activeTracePhase={activeTracePhase}
         onSelectTracePrompt={setPromptIndex}
         traceCanCompare={Boolean(runId)}
@@ -2870,7 +2936,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               ) : null}
               <PromptInspector
                 promptEvent={promptIndex != null
-                  ? findPromptEvent(runStream.events.map((envelope) => envelope.payload), promptIndex)
+                  ? findPromptEvent(viewedTraceEvents.map((envelope) => envelope.payload), promptIndex)
                   : null}
                 onClose={() => setPromptIndex(null)}
               />

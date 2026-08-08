@@ -1065,6 +1065,7 @@ class RunManager:
             run_id=run_id,
             status="running",
             started_at=datetime.now(UTC),
+            kind="predict",
         )
         record = RunRecord(
             metadata=metadata,
@@ -1110,7 +1111,10 @@ class RunManager:
         same directory. The account format belongs here, so predict reports its
         verdict rather than writing the file itself.
         """
-        _write_run_metadata(run_dir, RunMetadata(run_id=run_id, status=status, started_at=started_at))
+        _write_run_metadata(
+            run_dir,
+            RunMetadata(run_id=run_id, status=status, started_at=started_at, kind="predict"),
+        )
 
     def finish_transient_predict_run(self, run_id: str) -> None:
         record = self._runs.pop(run_id, None)

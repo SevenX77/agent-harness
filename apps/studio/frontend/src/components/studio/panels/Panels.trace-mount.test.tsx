@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { EventEnvelope } from '@/api/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../WorkspaceContext'
 import { Panels } from './Panels'
+import type { TraceView } from './trace-view'
 
 // History panel pulls run history over SWR/API; stub it so the no-run branch
 // renders deterministically without a network layer.
@@ -29,7 +30,7 @@ const workspaceContextStub: WorkspaceContextValue = {
 }
 
 function renderTimelinePanel(
-  props: { runId: string | null; traceEvents: EventEnvelope[] },
+  props: { runId: string | null; traceEvents: EventEnvelope[]; traceView?: TraceView | null },
   context: WorkspaceContextValue = workspaceContextStub,
 ): string {
   return renderToStaticMarkup(
@@ -39,6 +40,8 @@ function renderTimelinePanel(
         skillId="story-deconstruction"
         selectedNode={null}
         runId={props.runId}
+        traceView={props.traceView ?? null}
+        onCloseTraceView={() => undefined}
         traceEvents={props.traceEvents}
         onResumeEdgeDownstream={() => undefined}
       />
@@ -65,9 +68,9 @@ const oneEvent: EventEnvelope[] = [
   },
 ]
 
-describe('Panels timeline region — live trace mount (F1)', () => {
-  it('mounts the live TracePanel fed by run-stream events when a run is active', () => {
-    const html = renderTimelinePanel({ runId: 'run-1', traceEvents: oneEvent })
+describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-07)', () => {
+  it('mounts the live TracePanel fed by run-stream events while viewing the live run', () => {
+    const html = renderTimelinePanel({ runId: 'run-1', traceEvents: oneEvent, traceView: { source: 'live' } })
 
     // TracePanel-only markers (search/filter shell + event count summary).
     expect(html).toContain('Showing 1 of 1 events')
@@ -75,16 +78,51 @@ describe('Panels timeline region — live trace mount (F1)', () => {
     expect(html).not.toContain('No runs recorded yet')
   })
 
-  it('shows the run-history TimelinePanel when no run is active (F2)', () => {
+  it('shows the run-history TimelinePanel when nothing is being viewed (F2)', () => {
     const html = renderTimelinePanel({ runId: null, traceEvents: [] })
 
     expect(html).toContain('No runs recorded yet')
     expect(html).not.toContain('Showing 0 of 0 events')
   })
 
+  it('fix A regression lock: a lingering runId with no viewed run still shows the list', () => {
+    // Before the viewed-run model, `runId` alone pinned this region to the last
+    // run's stream forever — the history list became unreachable after the
+    // first run. A closed trace view (traceView null) must show the list even
+    // while runId is still set.
+    const html = renderTimelinePanel({ runId: 'run-1', traceEvents: oneEvent, traceView: null })
+
+    expect(html).toContain('No runs recorded yet')
+    expect(html).not.toContain('Showing 1 of 1 events')
+  })
+
+  it('mounts a read-only TracePanel for a fetched historical run', () => {
+    const html = renderTimelinePanel({
+      runId: null,
+      traceEvents: oneEvent,
+      traceView: {
+        source: 'history',
+        runId: 'hist-1',
+        metadata: {
+          run_id: 'hist-1',
+          status: 'success',
+          started_at: '2026-08-07T00:00:00Z',
+          kind: 'run',
+          metrics: null,
+          input_summary: null,
+        },
+      },
+    })
+
+    expect(html).toContain('Showing 1 of 1 events')
+    expect(html).toContain('aria-label="Back to timeline"')
+    // Read-only replay: no run actions are wired for a historical view.
+    expect(html).not.toContain('Resume run from last checkpoint')
+  })
+
   it('gives an active selected edge precedence over the live trace stream', () => {
     const html = renderTimelinePanel(
-      { runId: 'run-1', traceEvents: oneEvent },
+      { runId: 'run-1', traceEvents: oneEvent, traceView: { source: 'live' } },
       {
         ...workspaceContextStub,
         selectedEdge: {

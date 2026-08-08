@@ -97,8 +97,17 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - `ScrollArea` 不应让 scrollbar 占用内容宽度；需要隐藏 scrollbar 时使用本地 `ScrollArea` wrapper 的 slot selector，且必须验证内容宽度没有被挤压。
 - 本地 `ScrollArea` wrapper 必须在根节点裁剪溢出，并在 viewport 上隐藏浏览器原生 scrollbar；业务面板不要再用裸 `overflow-y-auto` 承担主滚动。
 - 系统原生 scrollbar 外观由 `index.css` `@layer base` 的全局规则统一接管（`scrollbar-width: thin` + token 化 `scrollbar-color`，附 `::-webkit-scrollbar` 兜底旧 WebKit）：`pre` 代码块、局部 `overflow-auto` 容器等剩余原生滚动一律走这套细滚动条，不要在单个组件里再写一次性 `::-webkit-scrollbar` 覆写或引入第二套滚动条外观。
-- 流式追加的消息/日志列表（Copilot 聊天、未来 trace 流）必须使用本地 `components/ui/message-scroller.tsx`（封装 shadcn radix message-scroller primitive）：流式时贴底跟随、用户上滚即释放跟随并浮现回到底部按钮、用户轮次 `scrollAnchor` 锚定；不要为流式列表手写 scrollTop 启发式或再造第二套贴底逻辑。注意 markdown 会把单个 `
+- 流式追加的消息/日志列表（Copilot 聊天、Trace 事件流）必须使用本地 `components/ui/message-scroller.tsx`（封装 shadcn radix message-scroller primitive）：流式时贴底跟随、用户上滚即释放跟随并浮现回到底部按钮、用户轮次 `scrollAnchor` 锚定；不要为流式列表手写 scrollTop 启发式或再造第二套贴底逻辑。注意 markdown 会把单个 `
 ` 折叠成同一段落——验证“长回复溢出滚动”时要用列表/多段内容，不要用单换行文本。
+- **同一个滚动容器的「初始落点」是模式属性，必须显式声明，不能交给 primitive 的默认值。**
+  `message-scroller` 是为聊天造的，默认落在**底部**；把它复用到「回看一份已完成的记录」
+  （历史 run 的 Trace 回放、归档日志）时，默认值会让读者一打开就撞见记录的**结尾**。
+  实测：打开一次历史 run，viewport 停在 `scrollTop 9507 / 10204`，首个渲染行是第 66 条。
+  规则：区分 `follow-end`（活的流，贴底跟随）与 `start`（已完结的记录，从第一条读起），
+  把这个判断写成一个具名的纯函数（仓内实现：`components/trace/trace-initial-scroll.ts`
+  的 `initialTracePosition`）由容器消费，并用「当前在读哪一份」的 id 作为 reset key——
+  切换记录时不得继承上一份的滚动偏移。不要用 `autoScroll={false}` 就当作已经解决：
+  它只关掉**持续**跟随，管不到**初始**落点。
 - 任何固定宽度或最小宽度都必须有响应式约束。窄面板下卡片、ring、badge、按钮和长文本不能横向溢出，也不能被父级裁掉关键反馈。
 
 ### 2.7 卡片、选中态与即时反馈

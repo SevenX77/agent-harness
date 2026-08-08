@@ -14,8 +14,8 @@ def test_run_events_ws_requires_query_token(
 ) -> None:
     client = _client(monkeypatch, studio_roots)
 
-    _assert_ws_rejected(client, "/ws/runs/example")
-    _assert_ws_rejected(client, "/ws/runs/example?token=wrong")
+    _assert_ws_rejected(client, "/ws/skills/text-segmentation/runs/example")
+    _assert_ws_rejected(client, "/ws/skills/text-segmentation/runs/example?token=wrong")
 
 
 def test_events_ws_accepts_valid_query_token(

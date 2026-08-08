@@ -79,7 +79,8 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 
 ### 看 trace 两态(P2)
 - **run 时**:自动开面板,事件流式进;**agent 输出流式 + 分类折叠摘要**(参考 agent IDE「Worked for ▾ / Explored ▾ / Thought ▾」,一行摘要点开看详情 + 末尾自然语言总结);节点灯随跑。
-- **run 后**:predict/run 列表 → 点某次看 **run_id 概要**(focus 空白画布=全局)→ 点 button 看完整 trace timeline + **只读编辑器看完整 trace 文档(人能读、轻度格式化)** → **focus 决定粒度**(空画布=run 概要 / 节点=该节点 trace + 编辑器跳该节点范围);节点间过程点线上 dot。
+- **run 后**:predict/run 列表 → 点某次看 **run_id 概要**(focus 空白画布=全局)→ 点 button 看完整 trace timeline + **只读文档看完整 trace(人能读、轻度格式化)** → **focus 决定粒度**(空画布=run 概要 / 节点=该节点 trace + 文档跳该节点区块);节点间过程点线上 dot。
+- **两个面各司其职(决议 2026-08-08 D5)**:**Trace**(Timeline 区域内的视图)= 交互式事件时间线,可过滤/搜索/展开单条/与画布节点联动,用途是**定位**;**Full Trace**(独立文档)= 同一次 run 的**全文**,不过滤、按节点分组通读、长内容可展开到底,用途是**通读与取证**。两者共读同一份事件缓存,永远描述同一次运行。
 
 ### Atom actions（04+05 去重）
 | # | 动作 | status |
@@ -87,10 +88,10 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 | D1 | run 时实时 trace 控制台(流式;agent 输出流式+分类折叠) | live 挂载(TracePanel + useRunStream;Workspace.tsx:583 / Panels.tsx:237);agent 分类折叠摘要细化以代码逐项核 |
 | D2 | run 后从列表回看某次完整 trace | live(viewed-run 决议 2026-08-07:Workspace viewedTrace 分流,run 结束可返回列表,历史事件与 Full Trace 文档/PromptInspector 共读同一缓存) |
 | D3 | run 概要(focus 空画布=全局) | target-design |
-| D4 | 看完整 trace:timeline + 只读编辑器(人读格式) | target-design |
+| D4 | 看完整 trace:timeline + 只读文档(人读格式,按节点分组;长值折叠可展开、不截断) | live(2026-08-08:TraceDocumentPanel 去 Monaco 化,按节点分块渲染,删除 DETAIL_CHAR_BUDGET) |
 | D5 | focus 某节点 → 只显该节点 trace + 编辑器跳该节点范围 | orphan(过滤)+ target(跳) |
 | D6 | 点线上 dot → 双态:未跑=静态黑板字段推断;跑后=黑板状态机内容 + "上节点 end→下节点 start"操作记录 | live(双态已实现:未跑 staticEdgeInference + 跑后 edgeContextFromEvents;GraphCanvas.tsx:1429-1434,lib/edge-static-inference.ts:139) |
-| D7 | 点状态 → 编辑器只读看完整黑板详情(深层可折叠) | target-design |
+| D7 | 点状态 → 只读看完整黑板详情(深层可折叠) | 部分 live(2026-08-08:Full Trace 文档内每条状态的黑板/inputs/variables/prompt 完整内联、长值可展开;仍 target-design:从 trace 行单点跳到该状态) |
 | D8 | Prompt 透视:点 llm_call → 模板/喂入变量/渲染后 三视图 | orphan(PromptInspector) |
 | D9 | agent 节点 '+' 内联展开执行子树 | target-design |
 | D10 | Validator 重试 Nudge:2/3 徽章 + 失败 Error Stack | target-design |
@@ -102,7 +103,7 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 | D16 | (引擎)推流运行态微观事件 Payload schema + 结构化前后态 diff(REQ-7) | target-design,依赖引擎 |
 
 ### 决策
-- 完整 trace 文档 = **人能读、轻度格式化**(非原始 jsonl);agent 输出**流式 + 分类折叠摘要**(参考 agent IDE)。
+- 完整 trace 文档 = **人能读、轻度格式化**(非原始 jsonl);agent 输出**流式 + 分类折叠摘要**(参考 agent IDE)。**承载形态 = 面板内的排版文档,不是编辑器**(PM 2026-08-08:panel 里不要用编辑器的样式);文档内容必须**完整**,长值折叠可展开,不做不可恢复的截断。
 - **dot = 节点间状态机转移点**;P8 模型对比 = **顶部 tab**;概要=run_id 概要,focus 空画布=全局 / focus 节点=该节点 trace。
 - **P8 对比运行机制(PM 2026-07-02 重定)**:候选在**节点 Properties 面板**配置(只选 model group + route,不做 role/bundle),Studio 后端按 skill+node 持久化。对比在真 run 时跑,但**不往图里注入并联节点**(实证坐实当前引擎跑不了任意"两节点同超步并联",`WorkflowState.data` 无 reducer)——改为**旁路单节点多跑**:主图用基准模型照常跑一次;Studio 抓对比节点在主 run 的 `InputDispatchEvent` 输入切片,对每个候选把**该单个 phase** 物化成 `depends_on=input` 单节点临时 skill 变体 + 候选临时 roles,走现成 `run_artifact` 各跑一遍。独立单节点 run ⇒ 不改 engine 执行、永不写主黑板、per-candidate artifacts 各自分目录。旧整图按角色扇出链(`CompareRunDialog` + `POST /runs/compare` fan-out + `run_compare.py`)删除。细节见 `00_settings-ux-spec.md §2.8` + `03_regions/properties` F5 + `03_regions/timeline` F6。
 - Q4:"事件→节点态"派生器归 **trace**(run 节点灯 + debug 红灯共用)。

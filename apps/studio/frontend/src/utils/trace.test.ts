@@ -12,6 +12,7 @@ import {
   llmFallbackDetails,
   payloadPreview,
   retryBadge,
+  runOutcomeFromEvents,
   toolCallSummary,
 } from './trace'
 
@@ -323,5 +324,27 @@ describe('eventTimeLabel (timeline rows carry the wall-clock time)', () => {
   it('returns null for a missing or unparseable timestamp', () => {
     expect(eventTimeLabel(event({ event_type: 'phase_start', timestamp: 'not-a-date' }))).toBeNull()
     expect(eventTimeLabel({ schema_version: '1.0', event_type: 'phase_start' } as never)).toBeNull()
+  })
+})
+
+describe('runOutcomeFromEvents', () => {
+  const event = (partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent => ({
+    schema_version: '1.0',
+    timestamp: '2026-08-08T00:00:00Z',
+    ...partial,
+  } as CallbackEvent)
+
+  it('reports running while no run_ended has arrived', () => {
+    expect(runOutcomeFromEvents([event({ event_type: 'phase_start' })])).toBe('running')
+  })
+
+  it('reads the verdict off run_ended', () => {
+    expect(runOutcomeFromEvents([event({ event_type: 'run_ended', status: 'completed' })])).toBe('success')
+    expect(runOutcomeFromEvents([event({ event_type: 'run_ended', status: 'crashed' })])).toBe('failed')
+    expect(runOutcomeFromEvents([event({ event_type: 'run_ended', status: 'interrupted' })])).toBe('interrupted')
+  })
+
+  it('treats a run_ended with no status as a completed run', () => {
+    expect(runOutcomeFromEvents([event({ event_type: 'run_ended' })])).toBe('success')
   })
 })

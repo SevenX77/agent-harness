@@ -159,20 +159,20 @@
     },
     {
       "n": 18,
-      "cap": "trace-doc-editor",
-      "module": "focus 粒度与完整 trace 文档",
-      "func": "设计：看完整 trace = 事件 timeline + 一个只读编辑器渲染『人能读、轻度格式化』的完整 trace 文档（不是原始 jsonl）；点某节点编辑器跳到该节点范围，点状态可只读看完整黑板详情（深层可折叠）。",
-      "action": "用户点『看完整 trace』，在只读编辑器里读格式化后的 trace 文档；点节点编辑器跳范围。",
-      "fe_design": "补一个只读编辑器视图（复用 MonacoPanel 这类通用代码编辑器，只读模式）把整条 trace 渲成轻度格式化、人能读的文档；focus 某节点时编辑器跳到该节点范围（与 #17 focus 粒度联动）；点某状态可只读展开看完整黑板详情、深层可折叠。设计意图（spec D4/D7『完整 trace 文档 = 人能读、简单调整格式；点状态→编辑器只读看完整黑板详情』）。",
+      "cap": "trace-doc",
+      "module": "focus 决定粒度 · 完整 trace 文档",
+      "func": "设计:看完整 trace = 事件 timeline + 一份只读文档,渲染成人能读、轻度格式化的完整 trace 文档(不是原始 jsonl);focus 某节点时文档跳到该节点区块;点状态可只读看到完整黑板详情(长值可展开)。承载形态是面板内的排版文档,不是编辑器(PM 2026-08-08:panel 里不要用编辑器的样式)。",
+      "action": "用户点「看完整 trace」→ 打开按节点分块的只读文档 → focus 某节点时滚动到该节点区块。",
+      "fe_design": "一份只读文档视图:按节点分块(sticky 分块标题 + 每条状态一张卡片),状态卡片内联该状态的 Blackboard/Inputs/Variables/Resolved prompt 完整内容,长值默认收起到固定高度并给出行数、点 Expand 展开全文——声称『完整』的视图不允许做不可恢复的截断。使用面板自身的排版语言(分组标题 + 卡片 + 等宽代码块),不引入代码编辑器外观(行号/编辑器配色/编辑器滚动条)。focus 某节点时滚动到该节点区块(接 #17 focus 决定粒度)。与 Trace 视图的分工:Trace 负责定位(过滤/搜索/联动),Full Trace 负责通读与取证(全文/分组/不过滤),两者共读同一份事件缓存。设计源:spec 04 D4/D7 + trace-observability F2(均已于 2026-08-08 按本决议更新)。",
       "fe_modules": [
         {
           "name": "运行事件流订阅（useRunStream）"
         }
       ],
       "be_contract": [],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：只读 trace 文档编辑器已补——MonacoPanel.tsx:156-209 的 TraceDocumentPanel（只读 Monaco 渲完整 trace 文档的面板）以 readOnly:true、markdown 渲染构建出的文档，并按 focusNodeId 用 revealLineInCenter 把视口跳到该节点的行范围；utils/trace-document.ts:90-129 的 buildTraceDocument（把事件流编织成可读文档的函数）按 node/phase 分组、记 nodeRanges、并内联每个状态的 Blackboard/Inputs/Variables/Resolved-prompt 详情（D7）且带深度预算（line 30）。挂载为『trace-doc』/『Full Trace』面板（Panels.tsx:155-168、Toolbar.tsx:20）。",
+      "fe_status": "已实施",
+      "be_status": "已实施",
+      "gap_brief": "2026-08-08 决议 D4 落地并已实测:TraceDocumentPanel(components/trace/TraceDocumentPanel.tsx)按节点分块渲染,Monaco 已移除(真机实测 .monaco-editor = 0),buildTraceDocument(utils/trace-document.ts)改为输出结构化 sections/entries/details 并删除 DETAIL_CHAR_BUDGET 硬截断。仍 target-design:从 trace 行单点跳到文档对应状态(D7 后半)。",
       "impl_ref": "fn-18"
     },
     {

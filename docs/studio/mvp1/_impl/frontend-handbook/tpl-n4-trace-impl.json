@@ -46,12 +46,12 @@
     },
     {
       "n": 18,
-      "cap": "trace-doc-editor",
+      "cap": "trace-doc",
       "design_ref": "n4-atom-18",
-      "current": "现状：已实现且符合(2026-08-07 修复事件源脱钩)。buildTraceDocument 渲染人读只读文档(MonacoPanel『Full Trace』);trace-doc 面板读 viewed-run 的同一事件源(Panels.tsx trace-doc 分支消费 Workspace viewedTraceEvents)——回看历史 run 时 Full Trace即该 run 的文档,不再固定读实时流。",
-      "gap": "已闭合;与 timeline 视图/PromptInspector 同源(diagnostics SSOT)。",
-      "fe_status": "符合",
-      "be_dep": "已就绪可接（trace 数据已在 events / RunDetail，渲染纯前端）。",
+      "current": "现状(已实测):Full Trace = 面板内的排版文档,不是编辑器(2026-08-08 决议 D4)。buildTraceDocument 产出结构化投影(按节点分块 → 每条状态 → 完整 detail),TraceDocumentPanel(components/trace/TraceDocumentPanel.tsx)按节点分块渲染;Monaco 已移除(实测 .monaco-editor 计数 = 0),原 MonacoPanel.tsx 只剩编辑器类型别名并更名 monaco-editor-types.ts。DETAIL_CHAR_BUDGET=1200 的硬截断已删除:长值默认收起到固定高度并给出行数,点 Expand 展开全文。事件源仍与 timeline 视图/PromptInspector 同一份 viewed-run 缓存。",
+      "gap": "已闭合;仍 target-design:从 trace 行单点跳到文档对应状态(D7 后半)。",
+      "fe_status": "已实施",
+      "be_dep": "已具备(trace 事件来自 events / RunDetail;渲染在前端)。",
       "fe_status_prev": "未实施",
       "fe_resync": "修补+审计后真修通,重新翻绿(2026-06-20)"
     },
@@ -250,7 +250,13 @@
         }
       ],
       "fe_status_prev": "偏差",
-      "fe_resync": "viewed-run 决议 2026-08-07 实测复核:列表↔Trace 视图↔Full Trace 三者同源;run 结束可返回列表;predict 以 kind 入列。真机证据见 shots。"
+      "fe_resync": "viewed-run 决议 2026-08-07 实测复核:列表↔Trace 视图↔Full Trace 三者同源;run 结束可返回列表;predict 以 kind 入列。真机证据见 shots。",
+      "screenshots": [
+        {
+          "file": "n4-97-predict-live-stream.png",
+          "caption": "Predict 实时流:身份条 t+1.0s 指向新 predict(Live),t+1.5s 收到 17 条事件并切成 Success。"
+        }
+      ]
     },
     {
       "covers": "#16 agent-folding + #24 inline-expand + #25 retry-nudge（偏差/未实施 · RED）",
@@ -299,7 +305,13 @@
         "focus 节点显该节点 trace + 编辑器跳范围"
       ],
       "fe_status_prev": "偏差",
-      "fe_resync": "覆盖项已全绿(2026-06-20)"
+      "fe_resync": "覆盖项已全绿(2026-06-20)",
+      "screenshots": [
+        {
+          "file": "n4-96-full-trace-document.png",
+          "caption": "Full Trace = 按节点分块的排版文档(sticky 节点标题 + 状态卡片),无 Monaco 行号/编辑器配色(实测 .monaco-editor = 0)。"
+        }
+      ]
     },
     {
       "covers": "#19 dot-blackboard（偏差，操作记录依赖引擎 · RED）",

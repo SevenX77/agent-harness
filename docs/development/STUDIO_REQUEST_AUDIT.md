@@ -209,7 +209,7 @@ BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
 BACKEND WS /api/skills/{skill_id}/copilot/ws
 BACKEND WS /ws/events
-BACKEND WS /ws/runs/{run_id}
+BACKEND WS /ws/skills/{skill_id}/runs/{run_id}
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id}
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id}
 FRONTEND DELETE /api/llm/roles/{role_name}
@@ -285,7 +285,7 @@ FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
 FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts
 FRONTEND WS /api/skills/{skill_id}/copilot/ws
 FRONTEND WS /ws/events
-FRONTEND WS /ws/runs/{run_id}
+FRONTEND WS /ws/skills/{skill_id}/runs/{run_id}
 ```
 
 ## Machine-Readable Verdict Ledger
@@ -427,7 +427,7 @@ BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | spe
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=node_llm_params, node_id).
 BACKEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; future @mentions must travel in this message payload, not via background context POST.
 BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect must not refresh broad truth.
-BACKEND WS /ws/runs/{run_id} | ok | specific | Scoped run event stream keyed by run_id; it observes one execution and does not refresh registry/settings truth.
+BACKEND WS /ws/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run event stream keyed by (skill_id, run_id); it observes one execution — live from memory, or replayed from that run's own directory once the record is gone — and does not refresh registry/settings truth.
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id} | ok | specific | Explicit model-bundle delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit provider delete command; client projects the returned canonical registry snapshot without a follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
@@ -503,7 +503,7 @@ FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | sp
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params autosave for one node; debounced saves project the returned node config without broad refetch.
 FRONTEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; it opens for the active skill conversation and future @mentions must travel in the message payload, with no background context POST.
 FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys. Consumers must share the singleton hub; Workspace file/runtime watchers are covered and must not create a workspace-local events socket.
-FRONTEND WS /ws/runs/{run_id} | ok | specific | Scoped run event stream keyed by run_id; it observes a single execution and does not refresh registry/settings/skill-list truth.
+FRONTEND WS /ws/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run event stream keyed by (skill_id, run_id); it observes a single execution and does not refresh registry/settings/skill-list truth.
 ```
 
 ## Audit Procedure

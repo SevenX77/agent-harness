@@ -9,7 +9,7 @@ import { isTauriRuntime } from '@/config/runtime'
 import { useDebouncedLint } from '@/hooks/useDebouncedLint'
 import { sha256Hex } from '@/lib/hash'
 import type { LintResult } from '@/api/types'
-import { type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
+import { type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/monaco-editor-types'
 import { applyLintMarkers } from '@/components/studio/lint-monaco-markers'
 import { isReadOnlySkillError } from '@/components/GraphCanvas/drill-edit'
 

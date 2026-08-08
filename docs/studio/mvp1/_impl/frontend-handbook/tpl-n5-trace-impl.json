@@ -38,9 +38,9 @@
       "n": 13,
       "cap": "trace-search-filter",
       "design_ref": "atom-13",
-      "current": "现状:符合。过滤逻辑已抽成纯函数 filterTraceEvents(useTraceFilter.ts:在已收事件上按搜索词 + phase 过滤的纯函数),TracePanel.tsx 内 VirtualTraceList 经 useTraceFilter hook 消费它,在已收事件上客户端即筛即显(仍虚拟滚动),不重请求。",
-      "gap": "符合设计,无需改。过滤纯函数 filterTraceEvents 已抽出并单测覆盖。",
-      "fe_status": "符合",
+      "current": "现状(已实测):过滤逻辑仍是纯函数 filterTraceEvents(useTraceFilter.ts),但类型维度不再罗列原始 event_type——改为 4 个固定语义桶 Errors/LLM/Tools/Flow(components/trace/trace-category.ts 的 traceEventCategory,全覆盖且互斥,未知类型落 Flow,测试锁住);节点维度保留真实节点名,单行横向滚动不换行。控件用 shadcn ToggleGroup;整块过滤器实测高 54px(改造前为标题行 + 类型行 + phase 行 + Clear 行共四行)。消费方从 VirtualTraceList 改为 TraceEventList(2026-08-08 决议 D2/D3)。",
+      "gap": "已闭合。",
+      "fe_status": "已实施",
       "be_status": "n/a",
       "be_dep": "n/a(纯前端在已收事件上过滤,无后端契约)。",
       "fe_resync": "过滤逻辑抽成纯函数 filterTraceEvents(useTraceFilter.ts)并由 useTraceFilter.test.ts 单测(搜索词→只剩匹配、phase 切换→只剩该 phase、在已收事件上筛)+ hook 表面;另加 e2e run-trace.spec.ts;verified by green gates + post-audit(2026-06-20)"
@@ -124,7 +124,13 @@
       "layer2": [
         "e2e run-trace.spec.ts:真跑后在 Trace 搜索某关键词、按某节点过滤,确认即筛即显。"
       ],
-      "fe_resync": "已真覆盖:纯函数 filterTraceEvents 抽到 useTraceFilter.ts 并由 useTraceFilter.test.ts 单测(搜索词、phase 切换、在已收事件上筛)+ hook 表面;e2e run-trace.spec.ts;verified by green gates + post-audit(2026-06-20)"
+      "fe_resync": "已真覆盖:纯函数 filterTraceEvents 抽到 useTraceFilter.ts 并由 useTraceFilter.test.ts 单测(搜索词、phase 切换、在已收事件上筛)+ hook 表面;e2e run-trace.spec.ts;verified by green gates + post-audit(2026-06-20)",
+      "screenshots": [
+        {
+          "file": "n4-95-trace-filter-compact.png",
+          "caption": "过滤器两行:固定 4 个语义桶(Errors/LLM/Tools/Flow)+ 节点标签单行横向滚动;整块实测 54px,事件块间距 6px。"
+        }
+      ]
     }
   ]
 }

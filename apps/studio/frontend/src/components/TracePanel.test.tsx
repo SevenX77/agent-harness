@@ -237,10 +237,15 @@ describe('TracePanel naming (atom #28 / D3 命名统一 2026-08-07)', () => {
     expect(html).not.toContain('Trace Timeline')
   })
 
-  it('shows the viewed run id and a live badge in the identity strip', () => {
+  // The identity strip keeps what you read while working — status, what the
+  // list is showing, the controls. The run id moved into the ⋮ menu: at the
+  // panel's 383px it could not coexist with them (331px of content box against
+  // 361px of demand), and it is wanted exactly when you go looking for the run
+  // on disk, which is what that menu is for.
+  it('shows the run state in the identity strip and keeps the id one click away', () => {
     const html = render({ runId: 'run-abcdef123456', live: true })
-    expect(html).toContain('run-abcdef123456'.slice(0, 16))
     expect(html).toContain('Live')
+    expect(html).toContain('aria-label="Run actions"')
   })
 
   it('offers a back-to-timeline affordance when a close handler is wired', () => {

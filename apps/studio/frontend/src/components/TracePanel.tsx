@@ -3,12 +3,10 @@ import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
-import { AlertTriangle, ArrowLeft, BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BadgeCheck, GitCompareArrows, Link2, Link2Off, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
-import { Label } from './ui/label'
-import { Switch } from './ui/switch'
 import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
 import { TraceFilter } from './trace/TraceFilter'
@@ -271,7 +269,10 @@ export function TracePanel({
   // by the live and history views so the region reads as ONE surface (D3 命名:
   // 区域=Timeline / 本视图=Trace / 文档=Full Trace).
   const identityStrip = (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+    // pr-10 is the lane the overlay's floating close button occupies
+    // (WorkspaceLeftPanelOverlay: absolute right-3 top-3) — content must not run
+    // under it (FRONTEND_UI_SPEC §2.6).
+    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card py-2 pl-3 pr-10">
       {onBack ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -298,6 +299,11 @@ export function TracePanel({
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}
       <RunStatusBadge live={live} metadata={metadata} outcome={runOutcome} />
+      <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+        {filter.filteredEvents.length === traceEvents.length
+          ? `${traceEvents.length} events`
+          : `${filter.filteredEvents.length} / ${traceEvents.length}`}
+      </span>
     </div>
   )
 
@@ -317,8 +323,31 @@ export function TracePanel({
     <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
       {compareTabStrip}
       {identityStrip}
-      <div className="shrink-0 space-y-3 border-b border-border bg-card p-3">
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="shrink-0 space-y-2 border-b border-border bg-card p-3">
+        <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Link trace to the focused node"
+                aria-pressed={linkEnabled}
+                onClick={() => onToggleLink?.(!linkEnabled)}
+                className={linkEnabled ? 'text-primary' : 'text-muted-foreground'}
+              >
+                {linkEnabled ? <Link2 className="size-4" /> : <Link2Off className="size-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {linkEnabled
+                ? 'Linked: focusing a node narrows the trace to it'
+                : 'Unlinked: the trace ignores canvas focus'}
+            </TooltipContent>
+          </Tooltip>
           {onResume ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -366,18 +395,7 @@ export function TracePanel({
               Golden
             </Button>
           ) : null}
-          <div className="flex items-center gap-2">
-            <Switch
-              id="trace-link-views"
-              checked={linkEnabled}
-              onCheckedChange={(checked) => onToggleLink?.(checked === true)}
-            />
-            <Label htmlFor="trace-link-views" className="text-xs font-medium text-muted-foreground">
-              Link views
-            </Label>
-          </div>
         </div>
-        <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
         <TraceFilter
           phases={filter.phases}
           selectedCategories={filter.selectedCategories}
@@ -387,22 +405,8 @@ export function TracePanel({
           onSelectPhases={filter.setSelectedPhases}
           onClear={filter.clearFilters}
         />
+        {fallbackCount > 0 || canPromoteFocusedNode ? (
         <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5">
-                {linkEnabled && focusPhase ? `Focus: ${focusLabel}` : 'Focus: whole run'}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {linkEnabled && focusPhase
-                ? `Focused on node "${focusLabel}" — showing this node's executions`
-                : 'Whole-run trace — focus a node to narrow to its executions'}
-            </TooltipContent>
-          </Tooltip>
-          <span>
-            Showing {filter.filteredEvents.length} of {traceEvents.length} events
-          </span>
           {fallbackCount > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -445,6 +449,7 @@ export function TracePanel({
             </Tooltip>
           ) : null}
         </div>
+        ) : null}
         {hitlPrompt ? (
           <HitlPromptForm
             prompt={hitlPrompt}

@@ -97,16 +97,13 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
         capture_output=True,
         text=True, encoding="utf-8", errors="replace",
     ).stdout
-    assert "initial-skill" in git_log
-    assert f"auto-run-{run_id}" in git_log
-    committed_files = subprocess.run(
-        ["git", "show", "--name-only", "--format=", "HEAD"],
-        cwd=skill_dir,
-        check=True,
-        capture_output=True,
-        text=True, encoding="utf-8", errors="replace",
-    ).stdout
-    assert ".workspace/runs/latest" not in committed_files
+    # The run only wrote .workspace/ (git-ignored), so the skill is byte-identical
+    # to "initial-skill": there is no new version to archive.
+    assert git_log.splitlines() == [line for line in git_log.splitlines() if "initial-skill" in line]
+    assert f"auto-run-{run_id}" not in git_log
+    assert client.get(f"/api/skills/p0-skill/runs/{run_id}").json()["metadata"][
+        "git_status"
+    ] == "unchanged"
 
     golden_response = client.post(
         "/api/skills/p0-skill/golden",

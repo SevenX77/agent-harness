@@ -10,6 +10,7 @@ import {
   eventModelName,
   eventPhase,
   eventTimeLabel,
+  isRunScopedEvent,
   llmFallbackDetails,
   mockedSourceClass,
   mockedSourceLabel,
@@ -143,8 +144,12 @@ export function TraceEventRow({
           ) : null}
         </div>
         <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
-          <span className="font-medium uppercase text-foreground/70">{eventPhase(event)}</span>
-          <span className="mx-1.5 text-border">·</span>
+          {isRunScopedEvent(event) ? null : (
+            <>
+              <span className="font-medium uppercase text-foreground/70">{eventPhase(event)}</span>
+              <span className="mx-1.5 text-border">·</span>
+            </>
+          )}
           {eventMessage(event)}
         </p>
         {isError && typeof event.error_message === 'string' ? (

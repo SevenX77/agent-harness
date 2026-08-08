@@ -1288,24 +1288,19 @@ class RunManager:
         self, record: RunRecord, metadata: RunMetadata
     ) -> RunMetadata:
         skill_dir = record.run_dir.parent.parent.parent
-        git_status: Literal["committed", "locked", "failed", "no_git"]
+        git_status: Literal["committed", "unchanged", "locked", "failed", "no_git"]
         try:
-            commit_result = await asyncio.to_thread(
+            # The archiver reports what it did; "not a git repo" and "the run
+            # changed nothing" are both benign and both worth telling apart.
+            git_status = await asyncio.to_thread(
                 self.git_service.auto_commit_run,
                 skill_dir,
                 record.metadata.run_id,
             )
-            if commit_result is None:
-                # auto_commit_run returns None only when the workspace is not a
-                # git repository. F1/native-fs treats this as a benign boundary:
-                # no autocommit safety net, but the run still succeeds.
+            if git_status != "committed":
                 logger.info(
-                    "auto commit skipped: workspace is not a git repository skill_dir=%s",
-                    skill_dir,
+                    "auto commit made no archive (%s) skill_dir=%s", git_status, skill_dir
                 )
-                git_status = "no_git"
-            else:
-                git_status = "committed"
         except GitFileLockedError as exc:
             logger.warning("auto commit skipped due to git lock: %s", exc)
             git_status = "locked"

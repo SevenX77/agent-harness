@@ -97,7 +97,7 @@ class RunMetadata(BaseModel):
     kind: Literal["run", "predict"] = "run"
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
-    git_status: Literal["committed", "locked", "failed", "no_git"] | None = None
+    git_status: Literal["committed", "unchanged", "locked", "failed", "no_git"] | None = None
     artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
     execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)

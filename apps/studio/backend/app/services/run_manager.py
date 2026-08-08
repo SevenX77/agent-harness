@@ -48,6 +48,7 @@ from app.models.runs import (
     CompareRunResponse,
     ResumeReq,
     RunDetail,
+    RunError,
     RunListResponse,
     RunMetadata,
     RunRequest,
@@ -157,7 +158,7 @@ def _run_worker_main(
             )
             process_queue.put({"type": "status", "status": "success", "metrics": metrics})
         else:
-            run_error = _result_error(result)
+            run_error = _run_error(_result_error(result))
             metrics_payload = {"status": "failed", "error": run_error, **metrics}
             _persist_run_artifacts(
                 skill_id,
@@ -178,7 +179,8 @@ def _run_worker_main(
             )
     except Exception as exc:  # noqa: BLE001
         metrics = {"wall_time_sec": round(time.monotonic() - started, 3)}
-        metrics_payload = {"status": "failed", "error": str(exc), **metrics}
+        run_error = _run_error(str(exc))
+        metrics_payload = {"status": "failed", "error": run_error, **metrics}
         _persist_run_artifacts(
             skill_id,
             run_dir,
@@ -197,7 +199,7 @@ def _run_worker_main(
                 "type": "status",
                 "status": "failed",
                 "metrics": metrics,
-                "error": str(exc),
+                "error": run_error,
             },
         )
 
@@ -263,6 +265,40 @@ def _result_error(result: Any) -> Any:
     if hasattr(error, "model_dump"):
         return error.model_dump(mode="json")
     return error
+
+
+def _run_error(raw: Any) -> dict[str, Any] | None:
+    """Normalize whatever the failure came wrapped in into one RunError shape.
+
+    Three producers reach here: the engine's ``ErrorPayload`` (``code``/``message``),
+    the artifact-run error envelope (``error_code`` + nested ``error_payload``), and
+    a bare exception string from the worker's own guard. Readers must not have to
+    tell them apart.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return {"code": "run.failed", "message": raw, "details": {}}
+    if not isinstance(raw, dict):
+        return {"code": "run.failed", "message": str(raw), "details": {}}
+
+    payload = raw.get("error_payload")
+    if isinstance(payload, dict):
+        details = payload.get("details")
+        return {
+            "code": str(raw.get("error_code") or payload.get("error_code") or "run.failed"),
+            "message": str(payload.get("message") or raw.get("error_code") or "run failed"),
+            "details": dict(details) if isinstance(details, dict) else {},
+        }
+
+    details = raw.get("details")
+    code = raw.get("code") or raw.get("error_code")
+    message = raw.get("message")
+    return {
+        "code": str(code or "run.failed"),
+        "message": str(message or code or "run failed"),
+        "details": dict(details) if isinstance(details, dict) else {},
+    }
 
 
 def _artifact_error_result_payload(result: Any) -> dict[str, Any] | None:
@@ -1189,10 +1225,12 @@ class RunManager:
             elif message_type == "status":
                 status: Literal["success", "failed"] = "success" if message.get("status") == "success" else "failed"
                 metrics = _tokens_metrics(message.get("metrics"))
+                raw_error = message.get("error") if status == "failed" else None
                 terminal_metadata = record.metadata.model_copy(
                     update={
                         "status": status,
                         "metrics": metrics,
+                        "error": RunError.model_validate(_run_error(raw_error)) if raw_error else None,
                     }
                 )
                 break

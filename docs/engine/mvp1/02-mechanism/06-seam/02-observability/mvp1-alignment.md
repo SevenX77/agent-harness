@@ -42,7 +42,7 @@ engine 全权;trace 被 studio trace-inspector 消费(前端挂载归 studio)。
 
 ## 8. gaps / 待设计(设计已定,实现归 kiro;reducer-diff 见 OB5)
 1. **V4 trace 增补(目标事件,impl 归 kiro)**:
-   - **微观拓扑事件**:agent 节点内子事件带 `parent_node_id`(=该 agent phase_id)+ `node_type`——TracingMiddleware 的 `before_model`/`after_model`/`wrap_tool_call` 天然产出,只需把微观事件 schema 定义进 trace 契约(无引擎改动;源 06 #4 + studio canvas REQ-13)。
+   - **微观拓扑事件 = 已落地(2026-08-08)**:agent 节点(`graph_assembler._build_skill_node`)发出的 `LLMCallEvent`/`ToolCallEvent` 现在带 `parent_node_id`(=该 agent phase_id)+ `node_type="agent"`,并同时补齐两件同源事实:①`LLMCallEvent.resolved_model` = provider 在响应上报的实际模型(fallback chain 决定的模型只有逐次调用才为真);②该节点的 token 经 `callbacks/token_accounting.account_llm_call` 折进 `flow.metrics`——与 legacy LLM phase node 的 `_HarnessCallbackBridge` 共用同一条累计规则,两条路径不会对"这次 run 花了多少"给出不同答案。(修复前:agent 路径逐次 llm_call 有 token 但 `metrics.json` 恒为 0,且全 trace 无模型名。)
    - **3 个边操作事件**(`BlackboardReduceEvent` 输出并入黑板 / `InputDispatchEvent` 输入按 io.inputs 切片喂节点·**并联各一条** / `InputFileInjectedEvent` 文件注入)+ 已有 `ArtifactSavedEvent`/`CompactionEvent` 同归"边操作"族,前端点 dot 按 `from_phase`/`to_phase`(edge)聚合该族 + 黑板快照(OB4,机制落点 `graph-exec`,双向;源 11-io E5)。
      - **字段草案(studio 消费契约,2026-06-06 定;impl 归 kiro 时按此建类)** —— 三者共享(继承 `_EventBase` 的 `event_type`/`run_id`/`thread_id`/`seq`/`ts`)+ edge 聚合字段:
        - **共有**:`from_phase: str | None`(源节点 id;图入口为 `None`)· `to_phase: str`(目标节点 id)· `changed_keys: list[str]`(本次操作触及的黑板 key)· `blackboard_snapshot: dict[str, Any]`(操作后黑板快照,供 OB5 前端按 phase 边界近似 reducer-diff)。事件类型本身 = 操作类型(判别字段 `event_type`,无需另设 `op`)。

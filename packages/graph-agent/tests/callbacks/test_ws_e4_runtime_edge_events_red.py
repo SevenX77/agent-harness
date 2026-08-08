@@ -113,10 +113,15 @@ def test_batch_iterate_emits_input_dispatch_for_each_branch_with_stable_branch_i
         for event in events
         if isinstance(event, InputDispatchEvent) and event.to_phase == "worker"
     ]
-    assert [event.branch_index for event in dispatches] == [1, 2, 3]
-    assert [event.dispatched_keys for event in dispatches] == [["item"], ["item"], ["item"]]
-    assert [event.changed_keys for event in dispatches] == [["item"], ["item"], ["item"]]
-    assert [event.blackboard_snapshot["item"] for event in dispatches] == ["a", "b", "c"]
+    # The guarantee is the PAIRING — branch_index identifies which item a
+    # dispatch carried, so the frontend can draw one edge per branch. Arrival
+    # order is not part of it: the branches fan out concurrently, and asserting
+    # the emission order made this test fail whenever they interleaved.
+    by_index = {event.branch_index: event for event in dispatches}
+    assert sorted(by_index) == [1, 2, 3]
+    assert [by_index[index].blackboard_snapshot["item"] for index in (1, 2, 3)] == ["a", "b", "c"]
+    assert all(event.dispatched_keys == ["item"] for event in dispatches)
+    assert all(event.changed_keys == ["item"] for event in dispatches)
 
 
 def test_loop_accumulate_emits_blackboard_reduce_after_each_declared_merge(

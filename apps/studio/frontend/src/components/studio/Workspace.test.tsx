@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
     workspaceRoot?: string | null
     onOpenSettings?: (tab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot') => void
     lintErrors?: LintError[] | null
+    traceLinkEnabled?: boolean
+    onToggleTraceLink?: (enabled: boolean) => void
+    traceSelectedEventId?: string | null
+    onSelectTraceEvent?: (index: number, event: unknown) => void
   },
   graphCanvasProps: null as null | {
     skillId?: string | null
@@ -2141,6 +2145,42 @@ describe('Workspace run_ended history wiring (integration)', () => {
     expect(toastMocks.warning).toHaveBeenCalledWith(expect.stringMatching(/not archived/i))
   })
 
+  // Link views (99d31800) let a user stop canvas focus from narrowing the trace.
+  // The wiring was lost when App.tsx/RightPanel.tsx became Workspace/Panels,
+  // leaving a toggle on screen that could not toggle anything; these pin the
+  // seam so it cannot rot again silently.
+  it('hands the panels a link state that starts linked', () => {
+    renderWithEffects()
+
+    expect(mocks.panelsProps?.traceLinkEnabled).toBe(true)
+    expect(mocks.panelsProps?.onToggleTraceLink).toBeTypeOf('function')
+  })
+
+  it('unlinks when the panel asks it to', () => {
+    renderWithEffects()
+
+    act(() => {
+      mocks.panelsProps?.onToggleTraceLink?.(false)
+    })
+
+    expect(mocks.panelsProps?.traceLinkEnabled).toBe(false)
+  })
+
+  it('remembers which trace row the user opened', () => {
+    renderWithEffects()
+
+    act(() => {
+      mocks.panelsProps?.onSelectTraceEvent?.(2, {
+        schema_version: '1.0',
+        event_type: 'llm_call',
+        timestamp: '2026-08-08T00:00:00Z',
+        phase_name: 'segment',
+      })
+    })
+
+    expect(mocks.panelsProps?.traceSelectedEventId).toBe('2026-08-08T00:00:00Z-llm_call-2')
+  })
+
   it('refreshes Local History exactly once on the run_ended edge', async () => {
     await startRunToCompletion('committed')
 
@@ -2153,6 +2193,20 @@ describe('Workspace run_ended history wiring (integration)', () => {
     expect(mocks.projectRunHistory).toHaveBeenCalledWith(expect.objectContaining({
       run_id: 'run-1',
       status: 'running',
+    }))
+  })
+
+  // The timeline row prints `run.metrics.wall_time_sec`; a run whose row still
+  // carries the STARTED metadata shows "n/a" forever, because a started run has
+  // no metrics yet. The terminal projection is what replaces it, so it has to
+  // carry the finished numbers.
+  it('replaces the running row with the finished run, duration and all', async () => {
+    await startRunToCompletion('committed')
+
+    expect(mocks.projectRunHistory).toHaveBeenCalledWith(expect.objectContaining({
+      run_id: 'run-1',
+      status: 'success',
+      metrics: expect.objectContaining({ wall_time_sec: 207.566, total_tokens: 115117 }),
     }))
   })
 })
@@ -2179,7 +2233,7 @@ function runDetailWithGitStatus(
       run_id: runId,
       status: 'success',
       started_at: '2026-06-17T00:00:00Z',
-      metrics: null,
+      metrics: { input_tokens: 99364, output_tokens: 15753, total_tokens: 115117, cost_estimate: null, wall_time_sec: 207.566 },
       input_summary: null,
       git_status: gitStatus,
     },

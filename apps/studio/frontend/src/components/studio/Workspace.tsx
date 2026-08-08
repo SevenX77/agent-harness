@@ -20,6 +20,7 @@ import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
 import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistoryRevalidator, useRunHistoryProjection } from "@/hooks/useRunHistory"
+import { useTraceSelection } from "@/hooks/useTraceSelection"
 import { useSkills } from "@/hooks/useSkills"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
 import { DiffView } from "@/components/diff/DiffView"
@@ -522,6 +523,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("general")
   const settingsController = useSettingsPageController()
+  // Link views: canvas focus narrows the trace unless the user turns it off, and
+  // the trace remembers the row they opened.
+  const traceSelection = useTraceSelection()
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
   // Which boundary pseudo-node (Input / Output) is selected, so the i/o panel can
@@ -2736,6 +2740,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onCompareToGolden={handleCompareToGolden}
         onPromoteToGolden={handlePromoteToGolden}
         onPromoteNode={handlePromoteNode}
+        traceLinkEnabled={traceSelection.linkEnabled}
+        onToggleTraceLink={traceSelection.setLinkEnabled}
+        traceSelectedEventId={traceSelection.selectedEventId}
+        onSelectTraceEvent={(index, event) => traceSelection.selectEvent(event, index)}
         traceCanResume={Boolean(runId)}
         traceResumeLoading={resumeLoading}
         traceReportPath={liveRunReport?.runId === runId ? liveRunReport.path : null}

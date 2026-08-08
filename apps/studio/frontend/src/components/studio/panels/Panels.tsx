@@ -69,6 +69,12 @@ interface PanelsProps {
   onPromoteToGolden?: () => void
   traceCanResume?: boolean
   traceResumeLoading?: boolean
+  /** Link views: whether canvas focus narrows the trace, and the toggle for it. */
+  traceLinkEnabled?: boolean
+  onToggleTraceLink?: (enabled: boolean) => void
+  /** The trace row the user last opened, so it stays marked as they scroll. */
+  traceSelectedEventId?: string | null
+  onSelectTraceEvent?: (index: number, event: CallbackEvent) => void
   /** Path of the LIVE run's `report.md` once it has sealed one; null before. */
   traceReportPath?: string | null
   onResumeRun?: () => void
@@ -127,6 +133,10 @@ export function Panels({
   onPromoteToGolden,
   traceCanResume,
   traceResumeLoading,
+  traceLinkEnabled = true,
+  onToggleTraceLink,
+  traceSelectedEventId = null,
+  onSelectTraceEvent,
   traceReportPath = null,
   onResumeRun,
   onResumeNode,
@@ -253,6 +263,10 @@ export function Panels({
           activePhase={activeTracePhase ?? null}
           selectedNode={selectedNode}
           onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
+          onSelectEvent={onSelectTraceEvent}
+          selectedEventId={traceSelectedEventId}
+          linkEnabled={traceLinkEnabled}
+          onToggleLink={onToggleTraceLink}
           onBack={onCloseTraceView}
           runId={runId}
           live
@@ -280,6 +294,10 @@ export function Panels({
           activePhase={null}
           selectedNode={selectedNode}
           onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
+          onSelectEvent={onSelectTraceEvent}
+          selectedEventId={traceSelectedEventId}
+          linkEnabled={traceLinkEnabled}
+          onToggleLink={onToggleTraceLink}
           onBack={onCloseTraceView}
           runId={traceView.runId}
           metadata={traceView.metadata}

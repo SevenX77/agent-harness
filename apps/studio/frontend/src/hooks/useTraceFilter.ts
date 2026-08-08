@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { CallbackEvent } from '../api/types'
 import { traceEventCategory, type TraceCategory } from '../components/trace/trace-category'
-import { eventMessage, eventPhase } from '../utils/trace'
+import { eventMessage, eventPhase, RUN_SCOPE } from '../utils/trace'
 
 export interface IndexedTraceEvent {
   event: CallbackEvent
@@ -68,8 +68,12 @@ export function useTraceFilter(events: CallbackEvent[], activePhase: string | nu
   const [selectedCategories, setSelectedCategories] = useState<TraceCategory[]>([])
   const [selectedPhases, setSelectedPhases] = useState<string[]>([])
 
+  // Only real nodes are offered as filters: the run scope is not a node, and a
+  // chip for it would filter to "the two events that belong to no node".
   const phases = useMemo(
-    () => Array.from(new Set(events.map((event) => eventPhase(event)))).sort(),
+    () => Array.from(new Set(events.map((event) => eventPhase(event))))
+      .filter((phase) => phase !== RUN_SCOPE)
+      .sort(),
     [events],
   )
 

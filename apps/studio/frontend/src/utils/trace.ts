@@ -21,8 +21,28 @@ export function eventTimeLabel(event: CallbackEvent): string | null {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
+/**
+ * The bucket for events that belong to the run itself rather than to any node
+ * (`run_started`, `run_ended`). They used to fall back to the run id, which put
+ * a 40-character identifier where a node name goes — a filter chip, a document
+ * heading, and a prefix on every such row.
+ */
+export const RUN_SCOPE = 'run'
+
+/**
+ * Which node an event belongs to.
+ *
+ * Most events name their node in `phase_name`. Edge events (`input_dispatch`,
+ * `blackboard_reduce`) instead describe what arrives at `to_phase`, so that is
+ * the node they belong to. Anything left over is the run itself.
+ */
 export function eventPhase(event: CallbackEvent): string {
-  return event.phase_name ?? event.current_phase ?? event.run_id ?? 'system'
+  const phase = event.phase_name ?? event.current_phase ?? event.to_phase
+  return typeof phase === 'string' && phase !== '' ? phase : RUN_SCOPE
+}
+
+export function isRunScopedEvent(event: CallbackEvent): boolean {
+  return eventPhase(event) === RUN_SCOPE
 }
 
 export function tokenText(event: CallbackEvent): string | null {

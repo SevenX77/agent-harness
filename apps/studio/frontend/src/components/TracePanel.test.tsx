@@ -84,7 +84,7 @@ describe('TracePanel EventEnvelope contract', () => {
 
     const html = render({})
 
-    expect(html).toContain('Showing 1 of 1 events')
+    expect(html).toContain('1 events')
   })
 
   it('does not accept a raw CallbackEvent fixture as trace logs', () => {
@@ -102,25 +102,28 @@ describe('TracePanel EventEnvelope contract', () => {
 })
 
 describe('TracePanel focus granularity label (F3)', () => {
-  it('labels the trace as whole-run when no node is focused', () => {
+  // Whole-run is the resting state and carries no chrome; only a LIVE link to a
+  // focused node is worth a marker, and it sits on the filter row next to the
+  // node chips it narrows.
+  it('says nothing about focus when no node is focused', () => {
     const html = render({})
-    expect(html).toContain('Focus: whole run')
+    expect(html).not.toContain('&rarr; phase1')
   })
 
-  it('labels the trace with the focused node when link is on and a phase is active', () => {
+  it('marks the linked node when link is on and a phase is active', () => {
     const html = render({ activePhase: 'phase1', linkEnabled: true })
-    expect(html).toContain('Focus: phase1')
+    expect(html).toContain('phase1')
+    expect(html).toContain('Linked to phase1')
   })
 
-  it('falls back to whole-run when link views is disabled even with an active phase', () => {
+  it('shows no link marker when link views is disabled even with an active phase', () => {
     const html = render({ activePhase: 'phase1', linkEnabled: false })
-    expect(html).toContain('Focus: whole run')
-    expect(html).not.toContain('Focus: phase1')
+    expect(html).not.toContain('Linked to phase1')
   })
 })
 
 // Two phases (nodeA, nodeB) so focus narrowing is observable via the
-// "Showing N of M" count and the Focus chip (atom #17).
+// event count in the identity strip (atom #17).
 const twoPhaseEvents: EventEnvelope[] = [
   {
     schema_version: 'studio.event.v1',
@@ -174,8 +177,7 @@ describe('TracePanel focus granularity (atom #17)', () => {
     const html = renderToStaticMarkup(
       <TracePanel traceLogs={twoPhaseEvents} selectedNode={null} onSelectPrompt={() => undefined} />,
     )
-    expect(html).toContain('Showing 3 of 3 events')
-    expect(html).toContain('Focus: whole run')
+    expect(html).toContain('3 events')
   })
 
   it('narrows the trace to the focused node phase when a node is selected', () => {
@@ -187,8 +189,8 @@ describe('TracePanel focus granularity (atom #17)', () => {
       />,
     )
     // nodeA carries two events (phase_start + phase_end); nodeB's is excluded.
-    expect(html).toContain('Showing 2 of 3 events')
-    expect(html).toContain('Focus: Node A')
+    expect(html).toContain('2 / 3')
+    expect(html).toContain('Linked to nodeA')
   })
 
   it('lets the focused node override the running activePhase for granularity', () => {
@@ -201,8 +203,8 @@ describe('TracePanel focus granularity (atom #17)', () => {
       />,
     )
     // selectedNode (nodeA) wins over the running phase (nodeB): narrows to nodeA.
-    expect(html).toContain('Showing 2 of 3 events')
-    expect(html).toContain('Focus: Node A')
+    expect(html).toContain('2 / 3')
+    expect(html).toContain('Linked to nodeA')
   })
 
   it('does not narrow when link views is disabled even with a focused node', () => {
@@ -214,8 +216,7 @@ describe('TracePanel focus granularity (atom #17)', () => {
         onSelectPrompt={() => undefined}
       />,
     )
-    expect(html).toContain('Showing 3 of 3 events')
-    expect(html).toContain('Focus: whole run')
+    expect(html).toContain('3 events')
   })
 })
 

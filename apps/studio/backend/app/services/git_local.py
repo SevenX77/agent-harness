@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from app.core import config
 from app.models.git_history import GitHistoryItem, GitHistoryKind
@@ -84,6 +84,9 @@ class GitRevertConflictError(GitCommandError):
     """Raised when a revert/reset cannot proceed cleanly."""
 
     error_code = "GIT_REVERT_CONFLICT"
+
+
+AutoCommitOutcome = Literal["committed", "unchanged", "no_git"]
 
 
 class GitLocalService:
@@ -521,11 +524,22 @@ class GitLocalService:
             lock_retry_delays=self.lock_retry_delays,
         )
 
-    def auto_commit_run(self, skill_dir: Path, run_id: str) -> GitCommandResult | None:
+    def auto_commit_run(self, skill_dir: Path, run_id: str) -> AutoCommitOutcome:
+        """Archive what a run changed, and only if it changed something.
+
+        A run that changed nothing is not a new version of the skill, so it gets
+        no commit — one empty `auto-run-…` commit per run buries the real
+        history. The three outcomes are named rather than folded into
+        present/absent, because "not a git repo" and "nothing to archive" are
+        different facts about the run and both are reported to the user.
+        """
         if not (skill_dir / ".git").exists():
-            return None
+            return "no_git"
         self.add(skill_dir)
-        return self.commit(skill_dir, f"auto-run-{run_id}", allow_empty=True)
+        if not self.status(skill_dir).stdout.strip():
+            return "unchanged"
+        self.commit(skill_dir, f"auto-run-{run_id}")
+        return "committed"
 
 
 def initialize_skill_repository(skill_dir: Path, *, user_id: str | None = None) -> None:

@@ -64,15 +64,15 @@ def test_successful_run_in_non_git_workspace_reports_no_git_without_error(
     assert updated.git_status == "no_git"
 
 
-def test_auto_commit_run_returns_none_when_workspace_is_not_git(tmp_path: Path) -> None:
+def test_auto_commit_run_reports_no_git_when_workspace_is_not_git(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
     service = GitLocalService()
 
-    assert service.auto_commit_run(skill_dir, "run-1") is None
+    assert service.auto_commit_run(skill_dir, "run-1") == "no_git"
 
 
-@pytest.mark.parametrize("git_status", ["committed", "locked", "failed", "no_git"])
+@pytest.mark.parametrize("git_status", ["committed", "unchanged", "locked", "failed", "no_git"])
 def test_git_status_literal_round_trips_through_run_metadata(git_status: str) -> None:
     metadata = RunMetadata(
         run_id="run-1",

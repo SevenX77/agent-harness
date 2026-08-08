@@ -155,7 +155,7 @@ export function mockedSourceClass(source: MockedSource): string {
   if (source === 'manual') {
     return 'border-success-border bg-success/10 text-success'
   }
-  return 'border-primary/50 bg-primary/10 text-primary'
+  return 'border-primary/50 bg-primary/10 text-foreground'
 }
 
 export interface RetryBadge {

@@ -44,7 +44,7 @@ export function AgentStepsInlineView({
 }: AgentStepsInlineViewProps) {
   return (
     <div className="mt-3 rounded-md border border-primary/25 bg-primary/5 p-2 text-xs">
-      <div className="flex items-center justify-between font-medium text-primary">
+      <div className="flex items-center justify-between font-medium text-foreground">
         <span className="flex items-center gap-2">
           <ListTree className="size-3.5" />
           Steps

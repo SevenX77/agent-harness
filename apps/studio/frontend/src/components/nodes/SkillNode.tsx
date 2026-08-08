@@ -24,7 +24,7 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
   },
   running: {
     label: 'Running',
-    className: 'animate-pulse-primary border-primary bg-primary/10 text-primary',
+    className: 'animate-pulse-primary border-primary bg-primary/10 text-link',
     icon: Radio,
   },
   success: {
@@ -44,7 +44,7 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
   },
   breakpoint: {
     label: 'Breakpoint',
-    className: 'border-primary/45 bg-primary/10 text-primary',
+    className: 'border-primary/45 bg-primary/10 text-link',
     icon: Workflow,
   },
 }

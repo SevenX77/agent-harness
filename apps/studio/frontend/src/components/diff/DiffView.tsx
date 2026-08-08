@@ -59,7 +59,7 @@ function fieldButton(
       onClick={() => setSelectedPath(field.field_path)}
       className={`block w-full rounded-md border px-2 py-2 text-start text-xs ${
         isSelected
-          ? 'border-primary/60 bg-primary/10 text-primary'
+          ? 'border-primary/60 bg-primary/10 text-foreground'
           : 'border-border bg-card text-muted-foreground hover:bg-muted/40'
       }`}
     >

@@ -90,7 +90,7 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
     <div className="mt-2 rounded-md border border-border bg-card p-2 text-xs ring-1 ring-foreground/10 ring-inset">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
-          <Icon className="size-3.5 text-primary" />
+          <Icon className="size-3.5 text-link" />
           <span>{title}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">

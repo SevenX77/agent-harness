@@ -49,7 +49,7 @@ export function TraceFilter({
           ))}
         </ToggleGroup>
         {activePhase ? (
-          <span className="truncate text-xs text-primary" title={`Linked to ${activePhase}`}>
+          <span className="truncate text-xs text-muted-foreground" title={`Linked to ${activePhase}`}>
             → {activePhase}
           </span>
         ) : null}

@@ -35,7 +35,7 @@ export function ListField({ input, value, error, onChange }: FieldProps) {
         <button
           type="button"
           onClick={() => onChange([...items, ''])}
-          className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-sm font-medium text-primary hover:bg-primary/15"
+          className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-sm font-medium text-link hover:bg-primary/15"
         >
           <Plus className="h-4 w-4" />
           Item

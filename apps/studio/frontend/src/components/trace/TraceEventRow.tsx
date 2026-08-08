@@ -102,7 +102,7 @@ export function TraceEventRow({
             ) : null}
           </span>
           {tokens ? (
-            <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-foreground">
               <Hash className="h-3 w-3" />
               {tokens}
             </span>
@@ -173,7 +173,7 @@ export function TraceEventRow({
                 onSelectPrompt(index)
               }
             }}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-link hover:text-link/80"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             Inspect prompt <ChevronRight className="h-3 w-3" />
@@ -340,7 +340,7 @@ function GenericPayload({ event }: { event: CallbackEvent }) {
             clickEvent.stopPropagation()
             setShowFull((open) => !open)
           }}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-link hover:text-link/80"
         >
           {showFull ? 'Collapse payload' : `Show full payload (${preview.sizeLabel})`}
         </button>

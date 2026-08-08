@@ -10,7 +10,8 @@ import type { SVGProps } from 'react'
  *  - a **node-and-edge graph** — the DAG this copilot weaves a skill into.
  *
  * Colour comes from `currentColor`, so callers theme it via text colour
- * (`text-primary`, `text-primary-foreground`, …) — no hardcoded palette.
+ * (`text-link`, `text-primary-foreground`, …) — no hardcoded palette, and
+ * never the raw fill token (see src/color-language.test.ts).
  */
 export function MoiraiMark({
   title,

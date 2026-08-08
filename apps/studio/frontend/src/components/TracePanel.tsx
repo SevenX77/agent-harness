@@ -14,6 +14,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { HitlPromptForm } from './studio/HitlPromptForm'
@@ -376,7 +378,7 @@ export function TracePanel({
   // Run-level actions belong to the run's identity, not to the event list, so
   // they collapse into one overflow menu instead of each taking a labelled
   // button out of the search row's width (decision 2026-08-08 D4/D5).
-  const runActionsMenu = runActions.length > 0 ? (
+  const runActionsMenu = runActions.length > 0 || runId ? (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -388,7 +390,18 @@ export function TracePanel({
         </TooltipTrigger>
         <TooltipContent>Actions for this run</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-64">
+        {/* Which run this is: needed exactly when you go looking for it on disk
+            or in a report, which is what this menu is for. On the strip it cost
+            ~100px of 331 to say what the row you clicked already said. */}
+        {runId ? (
+          <>
+            <DropdownMenuLabel className="font-mono text-[10px] leading-tight break-all text-muted-foreground">
+              {runId}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         {runActions.map((action) => {
           const ActionIcon = action.icon
           return (
@@ -426,33 +439,19 @@ export function TracePanel({
           <TooltipContent>Back to the run list</TooltipContent>
         </Tooltip>
       ) : null}
-      {/* The run IS the title here. A separate "Trace" label costs 46px of a
-          331px strip to repeat what the back arrow, the event rows and the
-          panel's own aria-label already say; the run id is the one thing on
-          this row nothing else can tell you. */}
-      {runId ? (
-        <h3 title={runId} className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground">
-          {runId}
-        </h3>
-      ) : (
-        <h3 className="text-sm font-semibold text-foreground">Trace</h3>
-      )}
+      <h3 className="shrink-0 text-sm font-semibold text-foreground">Trace</h3>
       {isPredict ? (
         <Badge variant="outline" className="text-warning">Predict</Badge>
       ) : null}
       <RunStatusBadge live={live} metadata={metadata} outcome={runOutcome} />
-      {/* When the strip runs out of room the run id gives way, not this: a node
-          name truncated to a bare "→" says nothing, while a run id shortened
-          from its tail still says which run. */}
-      {linkEnabled && focusPhase ? (
-        <span
-          className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground"
-          title={`Linked to ${focusPhase}`}
-        >
-          → {focusPhase}
-        </span>
-      ) : null}
-      <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+      {/* What the list is showing is ONE fact, so it is one element: a separate
+          "→ node" chip and "24 / 37" count spent two slots and a gap of a 331px
+          strip saying the same thing twice. */}
+      <span
+        className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground"
+        title={linkEnabled && focusPhase ? `Linked to ${focusPhase}` : undefined}
+      >
+        {linkEnabled && focusPhase ? `→ ${focusPhase} ` : ''}
         {filter.filteredEvents.length === traceEvents.length
           ? `${traceEvents.length} events`
           : `${filter.filteredEvents.length} / ${traceEvents.length}`}

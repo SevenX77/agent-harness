@@ -6,6 +6,10 @@
   真正拦住 token 流的是 gateway 的 `GatewayChatModel`,而它被初稿划在范围外。
   PM 就此答复「开工」,同意把 gateway 纳入范围。本次修订涉及:范围行、B2、§3 判据 1 与新增 SG 判据、
   新增 D9、§4 作废「不触碰 gateway 模块」、§6 新增 SG 行并改排序。**D1–D8 未作任何改动。**
+- 修订(2026-08-09,SG 合并后):PM 提出「gateway 的错误、熔断、报错、重试、使用哪个路由,也需要进 trace」。
+  本次修订涉及:新增 D10 与 §3 的 SO 判据、§6 新增 SO 行(排在 S3 之前)并改排序;
+  同时把 §6 的 S3 行订正为剩余三项 —— 其①②已分别由 PR #675 与 #677 交付。
+  **D1–D9 未作任何改动。**
 - 权威设计源:`packages/graph-agent/src/graph_agent/callbacks/events.py`(引擎事件契约)、
   `packages/graph-agent/src/graph_agent/core/llm_provider.py`(引擎 LLM Port 契约)、
   `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`、
@@ -542,6 +546,58 @@ token 升配在流式路径上全部保留,行为与今天一致。SG 的验收�
 **D9-d. 边界方向不变。** gateway 纳入范围只意味着「流式能力在 gateway 里补齐」,
 不意味着 Studio 的关切可以进 gateway。gateway 依旧不认识 run、trace、seq、WebSocket。
 
+### D10 · gateway 的路由决策是一件事,不是七件(2026-08-09 增补)
+
+> 增补背景:PM 2026-08-09 提出「gateway 的错误、熔断、报错、重试、使用哪个路由,也需要进 trace」。
+> 本条是 SO 的设计决定。触发它的直接缺口是 SG 自己造出来的:SG 让重试作废已经流出去的内容,
+> 而这件事今天对 trace **完全不可见** —— 等 S5 把逐字追加接上,前端会把已被作废的文字继续显示着。
+
+#### D10-a. 今天已有的与今天缺的(逐条以代码坐实)
+
+`GatewayChatModel._answer` 每一次退出候选、每一次重试,都是一个可观察的时刻。
+下表逐一对照,坐标为 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`:
+
+| gateway 的动作 | 今天有没有事件 |
+|---|---|
+| 跨路由回退(探活抛异常 / 探活返回 false / 调用失败 三处) | **有**。`emit_llm_fallback_event(...)` → `llm_fallback`;前端已渲染(`utils/trace.ts:77` 文案、`:116` warning 色、`components/trace/EventTypeBadge.tsx:17` 徽章、`TracePanel.tsx:42` 搜索词) |
+| 候选因**先前**已被熔断而跳过 | **没有**。`_is_marked_down(...)` 为真直接 `continue`,静默 |
+| 熔断本身(`_mark_down`) | **没有**独立事件,只在回退事件的 `reason` 里间接体现 |
+| 同路由重试(`classification.action == "retry_same_route"`) | **没有** |
+| token 升配重试(答案被截断后加倍预算) | **没有** |
+| **已流出的内容被作废**(SG 引入) | **没有** |
+| 最终落在哪条路由 / 端点 | **没有**。`route_id` / `endpoint_id` 只进 `response_metadata`(消息元数据,不是事件);agent 路径连 `ModelResolvedEvent` 都不发 —— 它全仓唯一构造点是 `core/phase_nodes/llm_phase_node.py:196`,即旧 LLM phase 路径 |
+| 全部候选都失败 | **没有**事件,抛 `AllProvidersFailedError` |
+
+#### D10-b. 一个事件类型,不是七个
+
+上面缺的六项不是六件事,是**同一件事的六种取值**:gateway 在这次调用里做了一个路由决策。
+为每一项各加一种事件,会让前端为同一族事实写六处渲染,并且第七种决策出现时还要再改一次契约。
+因此定义**一种**事件,用一个判别字段说明是哪种决策,取值是一个封闭枚举
+(呼应 `AGENTS.md`「让非法状态不可表示」)。
+
+`llm_fallback` 是这一族里已经实现的那一种取值。依「No backward compatibility」,
+新事件**取代**它:同一个变更里删掉 `llm_fallback` 的两处定义与前端对它的专门分支,
+不留双读、不留别名。
+
+**「作废」不是一种决策,是决策的后果。** 升配会作废、回退会作废,而作废本身不是一个独立时刻。
+因此它是决策事件上的一个布尔字段(「这次决策还丢弃了已经流出去的内容」),不是第八种取值。
+
+#### D10-c. 这一族全是步骤帧,不是增量帧
+
+按 §0 的定义:它们低频(一次调用最多几次)、数量有界、并且**运行结束后回看仍然提供信息**
+(这次运行在哪条路由上重试过、熔断过什么、最终由谁回答)。
+所以走引擎现有的 `CallbackEvent` 通道,落盘、占 seq、进 `report.md` 与取证查询 ——
+与 S3 第五项要定义的增量帧**分属两层,互不混用**。
+
+#### D10-d. 两处定义是依赖方向的结果,不是缺陷
+
+`LLMFallbackEvent` 今天在 gateway(`events.py` 的 dataclass + 手写 `model_dump`)与引擎
+(`callbacks/events.py` 的 Pydantic 变体)各有一份。这**不是**要消除的重复:
+`packages/graph-agent-gateway/pyproject.toml` 的依赖只有 langchain-core / langchain-openai /
+langchain-anthropic / pydantic —— **gateway 不依赖 engine**,因此它无法引用引擎的事件契约。
+新事件沿用同一范式:gateway 侧一个自带 `model_dump` 的 DTO,引擎侧一个进入 `CallbackEvent`
+判别联合的 Pydantic 变体。改动这个方向属于三模块架构变更,不在本决议范围。
+
 ---
 
 ## 3. 验收判据
@@ -568,6 +624,14 @@ token 升配在流式路径上全部保留,行为与今天一致。SG 的验收�
    不含被作废的那次(以一条构造截断再升配的测试为证)。
 2-c. gateway 既有测试套件全绿,`mypy --strict packages/graph-agent-gateway/src` 全绿 ——
    证明既有失败策略未因流式而弱化(D9-c)。
+
+**SO(gateway 决策可见)**
+
+2-d. D10-a 表中标为「没有」的六项,每一项都能在一次运行的事件流里找到对应的路由决策事件 ——
+   证据形式为构造出该情形的测试所断言的事件序列。
+2-e. `llm_fallback` 在 `packages/graph-agent-gateway/src`、`packages/graph-agent/src`
+   与 `apps/studio/frontend/src` 三处**全域 grep 为零**(取代即删除,不留双读)。
+2-f. 一次真实运行的 trace 里能读出「这次回答最终由哪条路由 / 哪个端点给出」。
 
 **S2(单一出口)**
 
@@ -656,7 +720,7 @@ LLM 步骤的开始帧在 agent 路径上不存在,导致该决议 D4(LLM 步骤
 
 ## 6. 实施切分
 
-一个 PR 一件事,顺序即 S1 → S2 → **SG** → S3 → S4 → S5,不可乱序。
+一个 PR 一件事,顺序即 S1 → S2 → **SG** → **SO** → S3 → S4 → S5,不可乱序。
 (初稿写的是「D7 的 S1 → S5」;SG 于 2026-08-09 增补并插在 S3 之前,理由见该行与 D9。)
 
 | PR | 内容 | 落点模块 | 必须同步更新的设计源 |
@@ -664,7 +728,8 @@ LLM 步骤的开始帧在 agent 路径上不存在,导致该决议 D4(LLM 步骤
 | S1 | `LLMProvider` Port 增流式方法;`LLMProviderChatModel` 实现流式;Studio adapter 改用 chat model 的流式出口 | engine + studio backend | `docs/engine/mvp1/` 对应机制档(LLM Port 契约) |
 | S2 | 新建 `graph_agent/tracing/` 单一出口,收编 B8 三处发射点;对外契约不变 | engine | `docs/engine/mvp1/` 对应机制档(事件发射) |
 | **SG** | **gateway 会流**:`GatewayChatModel` / `PredictGatewayChatModel` 实现 `_stream`,`_generate` 改为它的折叠;重试作废已流出的片段(D9);引擎 Port 的 `LLMProviderChunk` 增显式作废字段,折叠方按它丢弃已累积内容。**排在 S3 之前**:不做完 SG,S3 第五项的增量帧契约无从验证,S4/S5 是空管道 | gateway + engine + studio backend | `docs/graph-agent-gateway/mvp1/` 对应机制档(chat model 出口) |
-| S3 | ①agent 路径补发 LLM 步骤开始信号,使 `prompt_captured` 在两条路径上都成立;②补齐 `LLMCallEvent` 结束帧承载模型最终产出,消除 agent 路径(`core/graph_assembler.py:2131-2132`)与 legacy 路径(`core/callback_bridge.py:154-160`)的载荷不一致;③`response_data` 改必填;④删除 `llm_call.messages` 字段 + 删除 `TraceStepRow.tsx:206-208` 的回退分支;⑤增量帧契约(正文增量 / 推理增量),每帧携带所属步骤标识,与步骤帧分道。**五项同一个 PR,不拆分**(理由见 D7) | engine + studio frontend | `docs/engine/mvp1/` 对应机制档 |
+| **SO** | **gateway 的路由决策进 trace**:新增一种路由决策事件(判别字段为封闭枚举:熔断跳过 / 探活失败 / 调用失败 / 同路由重试 / 升配重试 / 跨路由回退 / 最终由谁回答 / 全部耗尽),并带「本次决策是否作废了已流出的内容」布尔字段;**取代并删除** `llm_fallback`(gateway DTO + 引擎变体 + 前端专门分支);Studio 透传,前端渲染。理由与逐条缺口见 D10 | gateway + engine + studio backend + studio frontend | `docs/graph-agent-gateway/mvp1/` 对应机制档(事件) |
+| S3 | ~~①agent 路径补发 LLM 步骤开始信号~~(**已由 #675 交付**:`prompt_captured` 改由`LLMProviderChatModel._generate` 在请求发出前发出,两条路径共用;`TracingClientProxy` 已删除)· ~~②结束帧承载模型最终产出、消除两条路径载荷不一致~~(**已由 #677 交付**:开始与结束两半都归chat model,agent 节点的消息列表补报循环与 bridge 的 `on_llm_end` 已删除)。**剩余三项**:③`llm_call.response_data` 改必填;④删除 `llm_call.messages` 字段 + 删除`TraceStepRow.tsx` 的对应回退分支;⑤增量帧契约(正文增量 / 推理增量),每帧携带所属步骤标识,与步骤帧分道。**三项同一个 PR,不拆分** | engine + studio frontend | `docs/engine/mvp1/` 对应机制档 |
 | S4 | 传输分道与背压:跨进程通道、WebSocket 通道、不占 seq、不落盘 | studio backend | `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`(如上锁则重钉哈希) |
 | S5 | 步骤条目内逐字追加 | studio frontend | `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`(如上锁则重钉哈希) |
 

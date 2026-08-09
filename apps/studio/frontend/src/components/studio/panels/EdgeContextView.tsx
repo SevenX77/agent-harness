@@ -134,7 +134,7 @@ export function EdgeContextView({
           variant="ghost"
           size="icon-lg"
           onClick={onClear}
-          aria-label="Back to timeline"
+          aria-label="Back to run list"
         >
           <ArrowLeft className="size-4" />
         </Button>

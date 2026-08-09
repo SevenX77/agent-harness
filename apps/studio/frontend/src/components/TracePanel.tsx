@@ -423,7 +423,7 @@ export function TracePanel({
               variant="ghost"
               size="icon-sm"
               onClick={onBack}
-              aria-label="Back to timeline"
+              aria-label="Back to run list"
             >
               <ArrowLeft className="size-4" />
             </Button>

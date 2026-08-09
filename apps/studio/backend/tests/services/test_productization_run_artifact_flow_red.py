@@ -3295,10 +3295,14 @@ def test_run_detail_reads_trace_and_artifact_list_from_sealed_run_artifact_store
     assert detail.artifacts == ["artifacts/output.json"]
 
 
-def test_run_detail_does_not_recreate_latest_snapshot_during_read_path(
+def test_run_detail_writes_nothing_into_the_runs_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Reading a run is a read. This used to be phrased as "does not recreate the
+    # `latest/` mirror"; the mirror is gone (decision 2026-08-09 D13), but the
+    # invariant it was guarding — a detail read leaves the runs root alone — is
+    # the part worth keeping.
     from app.core import config
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
     from app.models.runs import RunMetadata
@@ -3307,7 +3311,6 @@ def test_run_detail_does_not_recreate_latest_snapshot_during_read_path(
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
     skill_dir = tmp_path / "workspaces" / "default" / "skills" / "demo.skill"
     run_dir = skill_dir / ".workspace" / "runs" / "run-read-no-latest"
-    latest_dir = skill_dir / ".workspace" / "runs" / "latest"
     skill_dir.mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text("# Demo\n", encoding="utf-8")
     _register_demo_skill(monkeypatch, tmp_path, skill_dir)
@@ -3320,10 +3323,13 @@ def test_run_detail_does_not_recreate_latest_snapshot_during_read_path(
     store.put_batch("run-read-no-latest", {"final_state.json": b"{}", "trace.jsonl": b""})
     store.seal_run("run-read-no-latest")
 
+    runs_root = run_dir.parent
+    before = sorted(entry.name for entry in runs_root.iterdir())
+
     detail = RunManager().get_run_detail("demo.skill", "run-read-no-latest")
 
     assert detail.metadata.run_id == "run-read-no-latest"
-    assert not latest_dir.exists()
+    assert sorted(entry.name for entry in runs_root.iterdir()) == before
 
 
 def test_run_detail_validates_artifact_list_object_hashes(

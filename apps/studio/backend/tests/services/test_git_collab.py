@@ -71,11 +71,15 @@ def test_save_to_team_403_returns_requires_review(tmp_path: Path) -> None:
     assert result.extra["dev_branch"].startswith("team-save/alice-")
 
 
-def test_save_to_team_force_adds_latest_when_present(tmp_path: Path) -> None:
+def test_save_to_team_force_adds_the_newest_run_when_present(tmp_path: Path) -> None:
+    # Decision 2026-08-09 D13: the `latest/` mirror is gone. Team save publishes
+    # the newest run directory ITSELF — git never needed a stable path, only a
+    # path, and the mirror cost a full copy of every run.
     skill_dir = _init_repo(tmp_path)
-    latest_dir = skill_dir / ".workspace" / "runs" / "latest"
-    latest_dir.mkdir(parents=True)
-    (latest_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
+    runs = skill_dir / ".workspace" / "runs"
+    for run_id in ("2026-08-09T10-00-00_aaaaaaaa", "2026-08-09T12-00-00_bbbbbbbb"):
+        (runs / run_id).mkdir(parents=True)
+        (runs / run_id / "run_metadata.json").write_text("{}", encoding="utf-8")
     local_git = RecordingGit(existing_remote="https://gitea.example.test/alice/skill-repo.git")
     service = _service(local_git)
 
@@ -84,7 +88,7 @@ def test_save_to_team_force_adds_latest_when_present(tmp_path: Path) -> None:
     assert result.extra["latest_included"] is True
     assert local_git.calls == [
         ("remote_get_url", "origin"),
-        ("force_add_path", ".workspace/runs/latest"),
+        ("force_add_path", ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb"),
         ("commit", "team-save: include latest snapshot", "allow_empty=False"),
         ("push", "origin", "main"),
     ]
@@ -213,9 +217,9 @@ def test_sync_from_team_surfaces_latest_restored_true_when_present(tmp_path: Pat
     skill_dir = _init_repo(tmp_path)
 
     def restore_latest(pulled_skill_dir: Path) -> None:
-        latest_dir = pulled_skill_dir / ".workspace" / "runs" / "latest"
-        latest_dir.mkdir(parents=True)
-        (latest_dir / "x.json").write_text("{}", encoding="utf-8")
+        run_dir = pulled_skill_dir / ".workspace" / "runs" / "2026-08-09T12-00-00_bbbbbbbb"
+        run_dir.mkdir(parents=True)
+        (run_dir / "x.json").write_text("{}", encoding="utf-8")
 
     local_git = RecordingGit(
         existing_remote="https://gitea.example.test/alice/skill-repo.git",

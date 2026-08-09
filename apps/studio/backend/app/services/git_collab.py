@@ -13,10 +13,31 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.git_local import GitCommandError, GitLocalService
 
-LATEST_RUN_PATH = ".workspace/runs/latest"
+RUNS_PATH = ".workspace/runs"
 TEAM_SAVE_COMMIT_MESSAGE = "team-save: include latest snapshot"
 
 logger = logging.getLogger(__name__)
+
+
+def _newest_run_path(skill_dir: Path) -> str | None:
+    """Repo-relative path of the run a team save should carry, newest first.
+
+    Runs are gitignored, so publishing one takes an explicit force-add. There
+    used to be a `runs/latest` mirror — a full copy of the run — purely to give
+    this call a fixed path to name. Git never needed a fixed path, only a path,
+    so the mirror was a second copy of every run bought for nothing.
+
+    Newest is decided by directory mtime rather than by id, so a run whose id
+    says one thing and whose contents were written later cannot be missed.
+    """
+    runs_root = skill_dir / RUNS_PATH
+    if not runs_root.is_dir():
+        return None
+    runs = [entry for entry in runs_root.iterdir() if entry.is_dir()]
+    if not runs:
+        return None
+    newest = max(runs, key=lambda entry: (entry.stat().st_mtime, entry.name))
+    return f"{RUNS_PATH}/{newest.name}"
 
 CollaborateStatus = Literal["ok", "requires_review", "conflict", "error"]
 
@@ -214,10 +235,11 @@ class GitCollaborateService:
         return f"{self.gitea_host}/{owner}/{repo}.git"
 
     def _include_latest_snapshot(self, skill_dir: Path) -> bool:
-        if not (skill_dir / LATEST_RUN_PATH).exists():
+        newest_run = _newest_run_path(skill_dir)
+        if newest_run is None:
             return False
-        logger.info("force-adding latest run snapshot before team save")
-        self.local_git.force_add_path(skill_dir, LATEST_RUN_PATH)
+        logger.info("force-adding latest run snapshot before team save: %s", newest_run)
+        self.local_git.force_add_path(skill_dir, newest_run)
         try:
             self.local_git.commit(skill_dir, TEAM_SAVE_COMMIT_MESSAGE)
         except GitCommandError as exc:
@@ -227,8 +249,10 @@ class GitCollaborateService:
         return True
 
     def _latest_snapshot_present(self, skill_dir: Path) -> bool:
-        latest_dir = skill_dir / LATEST_RUN_PATH
-        return latest_dir.is_dir() and any(latest_dir.iterdir())
+        newest_run = _newest_run_path(skill_dir)
+        if newest_run is None:
+            return False
+        return any((skill_dir / newest_run).iterdir())
 
     def _fallback_to_review(
         self,

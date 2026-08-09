@@ -89,7 +89,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
 
     run_dir = workspace_dir / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
-    assert (workspace_dir / "runs" / "latest" / "run_metadata.json").exists()
+    assert (run_dir / "run_metadata.json").exists()
     git_log = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=skill_dir,

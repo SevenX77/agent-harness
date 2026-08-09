@@ -1357,8 +1357,6 @@ def latest_run_metadata(skill_id: str) -> RunMetadata | None:
         return None
     candidates: list[RunMetadata] = []
     for metadata_path in runs_dir.glob("*/run_metadata.json"):
-        if metadata_path.parent.name == "latest":
-            continue
         try:
             candidates.append(
                 RunMetadata.model_validate_json(metadata_path.read_bytes().decode("utf-8")),

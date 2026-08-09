@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { CallbackEvent } from '../api/types'
-import { filterTraceEvents, useTraceFilter } from './useTraceFilter'
+import { filterTraceEvents, useTraceFilter, type TraceFilterCriteria } from './useTraceFilter'
 
 // n5-trace atom #13 (trace-search-filter): the trace panel filters the events it
 // has ALREADY received — client-side, no re-request. These tests pin the three
@@ -38,7 +38,6 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: [],
       selectedPhases: [],
-      activePhase: null,
     })
 
     expect(result).toHaveLength(events.length)
@@ -54,7 +53,6 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: 'llm_call',
       selectedCategories: [],
       selectedPhases: [],
-      activePhase: null,
     })
 
     expect(result.map(({ event }) => event.event_type)).toEqual(['llm_call'])
@@ -67,7 +65,6 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '  REVIEW  ',
       selectedCategories: [],
       selectedPhases: [],
-      activePhase: null,
     })
 
     // Both review-phase events match (phase name is part of the search text).
@@ -80,23 +77,25 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: [],
       selectedPhases: ['review'],
-      activePhase: null,
     })
 
     expect(result.every(({ event }) => event.phase_name === 'review')).toBe(true)
     expect(result.map(({ index }) => index)).toEqual([3, 4])
   })
 
-  it('clause 2: the active (focused) phase narrows the trace to that phase', () => {
+  // Canvas focus used to be a fourth clause here, which is what made the trace
+  // unreadable end to end (decision 2026-08-09 D2). Focus now scrolls the list;
+  // only the three USER-driven clauses can remove an event.
+  it('has no focus clause: only the user can hide an event', () => {
     const events = sampleEvents()
     const result = filterTraceEvents(events, {
       searchTerm: '',
       selectedCategories: [],
       selectedPhases: [],
-      activePhase: 'draft',
     })
 
-    expect(result.map(({ index }) => index)).toEqual([0, 1, 2])
+    expect(result.map(({ index }) => index)).toEqual(events.map((_, index) => index))
+    expectTypeOf<TraceFilterCriteria>().not.toHaveProperty('activePhase')
   })
 
   it('clause 2: a category shows only the event types in that bucket', () => {
@@ -105,7 +104,6 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: ['llm'],
       selectedPhases: [],
-      activePhase: null,
     })
 
     // The four buckets replace the raw event_type list: picking "llm" keeps the
@@ -119,7 +117,6 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: 'phase_start',
       selectedCategories: [],
       selectedPhases: ['draft'],
-      activePhase: null,
     })
 
     // Only the draft phase_start survives both predicates.
@@ -146,18 +143,19 @@ describe('useTraceFilter (hook surface over the pure projection)', () => {
     expect(hook!.selectedCategories).toEqual([])
   })
 
-  it('narrows to the active phase passed by the focused-node link', () => {
+  it('takes the events and nothing else — there is no focus argument to pass', () => {
     let hook: ReturnType<typeof useTraceFilter> | null = null
     const events = sampleEvents()
 
     function Probe() {
-      hook = useTraceFilter(events, 'review')
+      hook = useTraceFilter(events)
       return null
     }
 
     renderToStaticMarkup(createElement(Probe))
 
     expect(hook).not.toBeNull()
-    expect(hook!.filteredEvents.map(({ index }) => index)).toEqual([3, 4])
+    expect(hook!.filteredEvents.map(({ index }) => index)).toEqual(events.map((_, index) => index))
+    expectTypeOf<typeof useTraceFilter>().parameters.toEqualTypeOf<[CallbackEvent[]]>()
   })
 })

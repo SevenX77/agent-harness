@@ -6,23 +6,20 @@ export function traceEventId(event: CallbackEvent, index: number): string {
 }
 
 /**
- * The trace's own view state.
+ * The trace's own view state: `selectedEventId` is the row the user last opened.
  *
- * `linkEnabled` decides whether canvas focus narrows the list — focus deciding
- * granularity is the designed behaviour (`docs/studio/mvp1/01_workflows/
- * 04_run-and-verify.md` D5), and this is the escape hatch from it.
- * `selectedEventId` is the row the user last opened.
+ * There is no link switch any more — canvas focus scrolls the trace instead of
+ * narrowing it (decision 2026-08-09 D2), so there is nothing left to switch off.
  *
  * WHICH node is focused is deliberately NOT held here: `Workspace.selectedNodeId`
  * owns that, and a second copy would be a second truth to keep in sync.
  */
 export function useTraceSelection() {
-  const [linkEnabled, setLinkEnabled] = useState(true)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
 
   const selectEvent = useCallback((event: CallbackEvent, index: number) => {
     setSelectedEventId(traceEventId(event, index))
   }, [])
 
-  return { linkEnabled, setLinkEnabled, selectedEventId, selectEvent }
+  return { selectedEventId, selectEvent }
 }

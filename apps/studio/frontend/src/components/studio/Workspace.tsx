@@ -2740,8 +2740,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onCompareToGolden={handleCompareToGolden}
         onPromoteToGolden={handlePromoteToGolden}
         onPromoteNode={handlePromoteNode}
-        traceLinkEnabled={traceSelection.linkEnabled}
-        onToggleTraceLink={traceSelection.setLinkEnabled}
         traceSelectedEventId={traceSelection.selectedEventId}
         onSelectTraceEvent={(index, event) => traceSelection.selectEvent(event, index)}
         traceCanResume={Boolean(runId)}

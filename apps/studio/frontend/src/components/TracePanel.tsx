@@ -4,18 +4,30 @@ import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
 import type { LucideIcon } from 'lucide-react'
-import { AlertTriangle, ArrowLeft, BadgeCheck, FileText, GitCompareArrows, Link2, Link2Off, MoreVertical, Play, ShieldCheck } from 'lucide-react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  BadgeCheck,
+  CheckCircle2,
+  CirclePause,
+  FileText,
+  FlaskConical,
+  GitCompareArrows,
+  Loader2,
+  MoreVertical,
+  Play,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { openLocalPath } from '../lib/tauri'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
-import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { HitlPromptForm } from './studio/HitlPromptForm'
@@ -38,10 +50,9 @@ interface TracePanelProps {
   traceLogs: EventEnvelope[]
   activePhase?: string | null
   /**
-   * The node the user has focused on the canvas (atom #17: focus decides trace
-   * granularity). When set, the trace narrows to that node's phase ("focus a
-   * node = its trace"); when null, the panel shows the whole-run overview
-   * ("focus empty canvas = run overview"). A node's phase key equals its id,
+   * The node the user has focused on the canvas. The trace SCROLLS to that
+   * node's group and shows every event regardless (decision 2026-08-09 D2 —
+   * focus locates, it does not hide). A node's phase key equals its id,
    * matching how events carry `phase_name` and how `activeTracePhase` is keyed.
    */
   selectedNode?: {
@@ -54,8 +65,6 @@ interface TracePanelProps {
     data: { label?: string; mode?: string; goldenState?: GoldenNodeState }
   } | null
   selectedEventId?: string | null
-  linkEnabled?: boolean
-  onToggleLink?: (enabled: boolean) => void
   onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
   /**
@@ -212,8 +221,43 @@ export function traceRunActions({
   return actions
 }
 
-/** Header status: live view shows the stream state, history shows the verdict. */
-function RunStatusBadge({
+/**
+ * How the run stands, as ONE icon.
+ *
+ * The strip has 331px of content box and one job per element (decision
+ * 2026-08-09 D3); a word like "Success" spends a third of that saying what a
+ * check mark says. The word survives in the tooltip and the aria-label, so
+ * nothing is lost to a screen reader or to a user who hovers.
+ */
+function runStatusMark(
+  live: boolean,
+  metadata: RunMetadata | null | undefined,
+  outcome: TraceRunOutcome,
+): { icon: LucideIcon; label: string; tone: string } | null {
+  // A live stream that went quiet says which way it went, rather than pulsing
+  // "in progress" at a run that already ended.
+  if (live && outcome === 'running') {
+    return null
+  }
+  const status = live ? outcome : metadata?.status
+  switch (status) {
+    case 'success':
+      return { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' }
+    case 'interrupted':
+    case 'paused':
+      return { icon: CirclePause, label: 'Run paused', tone: 'text-warning' }
+    case 'running':
+      return { icon: Loader2, label: 'Run in progress', tone: 'animate-spin text-muted-foreground' }
+    case 'cancelled':
+      return { icon: XCircle, label: 'Run cancelled', tone: 'text-destructive' }
+    case undefined:
+      return null
+    default:
+      return { icon: AlertCircle, label: 'Run failed', tone: 'text-destructive' }
+  }
+}
+
+function RunStatusMark({
   live,
   metadata,
   outcome,
@@ -222,38 +266,34 @@ function RunStatusBadge({
   metadata?: RunMetadata | null
   outcome: TraceRunOutcome
 }) {
-  if (live && outcome !== 'running') {
-    // The stream went quiet because the run finished — say which way it went
-    // rather than pulsing "Live" at a run that ended.
-    if (outcome === 'success') {
-      return <Badge variant="outline" className="text-success">Success</Badge>
-    }
-    if (outcome === 'interrupted') {
-      return <Badge variant="outline" className="text-warning">Interrupted</Badge>
-    }
-    return <Badge variant="outline" className="text-destructive">Failed</Badge>
-  }
-  if (live) {
+  if (live && outcome === 'running') {
     return (
-      <Badge variant="outline" className="gap-1.5 text-muted-foreground">
-        <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-primary" />
-        Live
-      </Badge>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            aria-label="Run in progress"
+            className="flex size-4 shrink-0 items-center justify-center"
+          >
+            <span aria-hidden className="size-2 animate-pulse rounded-full bg-primary" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Running</TooltipContent>
+      </Tooltip>
     )
   }
-  if (!metadata) {
+  const mark = runStatusMark(live, metadata, outcome)
+  if (!mark) {
     return null
   }
-  if (metadata.status === 'success') {
-    return <Badge variant="outline" className="text-success">Success</Badge>
-  }
-  if (metadata.status === 'paused') {
-    return <Badge variant="outline" className="text-warning">Paused</Badge>
-  }
-  if (metadata.status === 'running') {
-    return <Badge variant="outline" className="text-muted-foreground">Running</Badge>
-  }
-  return <Badge variant="outline" className="text-destructive">{metadata.status === 'cancelled' ? 'Cancelled' : 'Failed'}</Badge>
+  const Icon = mark.icon
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Icon aria-label={mark.label} className={`size-4 shrink-0 ${mark.tone}`} />
+      </TooltipTrigger>
+      <TooltipContent>{mark.label}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 export function TracePanel({
@@ -261,8 +301,6 @@ export function TracePanel({
   activePhase = null,
   selectedNode = null,
   selectedEventId = null,
-  linkEnabled = true,
-  onToggleLink,
   onSelectPrompt,
   onSelectEvent,
   onBack,
@@ -285,12 +323,12 @@ export function TracePanel({
   onSelectCandidate,
 }: TracePanelProps) {
   const traceEvents = traceLogs.map(envelopePayload)
-  // atom #17: a user-focused node decides trace granularity and wins over the
-  // running-phase link highlight. With no focused node we fall back to
-  // activePhase (the live link-views behavior) so existing wiring is unchanged.
+  // Where the reader's attention is: the node they focused on the canvas, or —
+  // with nothing focused — the phase currently running. It decides where the
+  // list SCROLLS, never what it contains.
   const focusPhase = selectedNode?.id ?? activePhase
   const focusLabel = selectedNode?.data.label ?? focusPhase
-  const filter = useTraceFilter(traceEvents, linkEnabled ? focusPhase : null)
+  const filter = useTraceFilter(traceEvents)
   const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
   // trace-observability F7: a run that silently fell back to another provider
   // announces it up front; clicking the chip narrows the trace to the fallback
@@ -304,14 +342,12 @@ export function TracePanel({
 
   const [nodePromoting, setNodePromoting] = useState(false)
   // atom #32 entry①: offer per-node golden creation for the focused, golden-less
-  // agent node — only while a node is actually focused in the trace (link on),
-  // a run exists to promote from (canCompare === Boolean(runId)), and the wiring
-  // is present. We narrow to the focused node, so this button is the trace's
-  // node-scoped counterpart to the run-level Golden button above it.
+  // agent node — only while a node is actually focused, a run exists to promote
+  // from (canCompare === Boolean(runId)), and the wiring is present. It is the
+  // trace's node-scoped counterpart to the run-level Golden action.
   const canPromoteFocusedNode =
     Boolean(onPromoteNode) &&
     canCompare &&
-    linkEnabled &&
     isGoldenlessAgentNode(selectedNode)
   const handlePromoteFocusedNode = async () => {
     if (!onPromoteNode || !selectedNode || nodePromoting) {
@@ -378,7 +414,7 @@ export function TracePanel({
   // Run-level actions belong to the run's identity, not to the event list, so
   // they collapse into one overflow menu instead of each taking a labelled
   // button out of the search row's width (decision 2026-08-08 D4/D5).
-  const runActionsMenu = runActions.length > 0 || runId ? (
+  const runActionsMenu = runActions.length > 0 ? (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -391,17 +427,6 @@ export function TracePanel({
         <TooltipContent>Actions for this run</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
-        {/* Which run this is: needed exactly when you go looking for it on disk
-            or in a report, which is what this menu is for. On the strip it cost
-            ~100px of 331 to say what the row you clicked already said. */}
-        {runId ? (
-          <>
-            <DropdownMenuLabel className="font-mono text-[10px] leading-tight break-all text-muted-foreground">
-              {runId}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
         {runActions.map((action) => {
           const ActionIcon = action.icon
           return (
@@ -438,28 +463,25 @@ export function TracePanel({
           <TooltipContent>Back to the run list</TooltipContent>
         </Tooltip>
       ) : null}
-      {/* With a run on screen the strip is full: the back arrow, the verdict,
-          what the list is showing and three controls need 316 of its 331px. The
-          label is what gives — it repeats the back arrow's destination and the
-          panel's own aria-label, and the run itself is the subject here. With
-          no run there is nothing to name but the view, so the label stays. */}
-      {runId ? null : <h3 className="shrink-0 text-sm font-semibold text-foreground">Trace</h3>}
+      {/* WHICH run, in full. It was truncated to a 12-char head elsewhere and
+          hidden behind the ⋮ menu here; both made the one identifying fact the
+          hardest thing on screen to read. */}
       {isPredict ? (
-        <Badge variant="outline" className="text-warning">Predict</Badge>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <FlaskConical aria-label="Predict attempt" className="size-4 shrink-0 text-muted-foreground" />
+          </TooltipTrigger>
+          <TooltipContent>Predict attempt — no tokens spent on a real run</TooltipContent>
+        </Tooltip>
       ) : null}
-      <RunStatusBadge live={live} metadata={metadata} outcome={runOutcome} />
-      {/* What the list is showing is ONE fact, so it is one element: a separate
-          "→ node" chip and "24 / 37" count spent two slots and a gap of a 331px
-          strip saying the same thing twice. */}
-      <span
-        className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground"
-        title={linkEnabled && focusPhase ? `Linked to ${focusPhase}` : undefined}
-      >
-        {linkEnabled && focusPhase ? `→ ${focusPhase} ` : ''}
-        {filter.filteredEvents.length === traceEvents.length
-          ? `${traceEvents.length} events`
-          : `${filter.filteredEvents.length} / ${traceEvents.length}`}
-      </span>
+      {runId ? (
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground" title={runId}>
+          {runId}
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">Trace</span>
+      )}
+      <RunStatusMark live={live} metadata={metadata} outcome={runOutcome} />
       {traceEvents.length > 0 ? (
         <TraceFilterButton
           phases={filter.phases}
@@ -468,30 +490,6 @@ export function TracePanel({
           onSelectCategories={filter.setSelectedCategories}
           onSelectPhases={filter.setSelectedPhases}
         />
-      ) : null}
-      {/* A read-only historical view wires no toggle, and a control that cannot
-          change anything is not worth its place on the strip. */}
-      {onToggleLink ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Link trace to the focused node"
-              aria-pressed={linkEnabled}
-              onClick={() => onToggleLink(!linkEnabled)}
-              className={linkEnabled ? 'text-link' : 'text-muted-foreground'}
-            >
-              {linkEnabled ? <Link2 className="size-4" /> : <Link2Off className="size-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {linkEnabled
-              ? 'Linked: focusing a node narrows the trace to it'
-              : 'Unlinked: the trace ignores canvas focus'}
-          </TooltipContent>
-        </Tooltip>
       ) : null}
       {runActionsMenu}
     </div>
@@ -593,6 +591,7 @@ export function TracePanel({
           selectedEventId={selectedEventId}
           followStream={live}
           streamKey={runId}
+          focusPhase={focusPhase}
           onSelectPrompt={onSelectPrompt}
           onSelectEvent={onSelectEvent}
         />

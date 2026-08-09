@@ -29,6 +29,12 @@ interface TraceEventListProps {
    * not inherit the previous run's scroll offset.
    */
   streamKey?: string | null
+  /**
+   * The node the reader is focused on. It SCROLLS this list to that node's
+   * group and marks the group header; it never removes an event (decision
+   * 2026-08-09 D2).
+   */
+  focusPhase?: string | null
   onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
@@ -47,6 +53,7 @@ export function TraceEventList({
   selectedEventId,
   followStream = false,
   streamKey = null,
+  focusPhase = null,
   onSelectPrompt,
   onSelectEvent,
 }: TraceEventListProps) {
@@ -68,6 +75,19 @@ export function TraceEventList({
     }
     viewport.scrollTop = 0
   }, [viewport, followStream, streamKey])
+
+  // Canvas focus locates instead of filtering, so the list has to take the
+  // reader there itself — otherwise focusing a node deep in a long run changes
+  // nothing the reader can see.
+  useEffect(() => {
+    if (!focusPhase || !containerRef.current) {
+      return
+    }
+    const header = containerRef.current.querySelector<HTMLElement>(
+      `[data-trace-group-header="${CSS.escape(focusPhase)}"]`,
+    )
+    header?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [focusPhase, events.length])
 
   const predictTrace = isPredictTrace(events.map(({ event }) => event))
   const selectedPosition = selectedEventId
@@ -177,7 +197,10 @@ export function TraceEventList({
                       {opensGroup ? (
                         <div
                           data-trace-group-header={phase}
-                          className="mt-2 mb-1 pl-5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 first:mt-0"
+                          data-trace-focus-group={phase === focusPhase ? 'true' : undefined}
+                          className={`mt-2 mb-1 pl-5 font-mono text-[10px] font-semibold uppercase tracking-wider first:mt-0 ${
+                            phase === focusPhase ? 'text-foreground' : 'text-muted-foreground/70'
+                          }`}
                         >
                           {phase === RUN_SCOPE ? 'Run' : phase}
                         </div>

@@ -145,15 +145,36 @@
 
 ### B8. 同一发射逻辑已出现三份拷贝
 
-`ToolCallEvent` 在引擎中有三处各自独立的构造与分发点,每一处都自己构造事件对象、
-自己遍历 callbacks、自己用 try/except 兜异常:
+> **2026-08-09 订正(S2 实施时机械复核)。** 本条初稿把「构造事件」与「遍历 callbacks 分发」
+> 两件事合并成一句话说三处都做,与代码不符。下面是逐处核对后的准确事实,结论(没有单一出口)不变。
 
-- `packages/graph-agent/src/graph_agent/middleware/tracing.py:110`
-- `packages/graph-agent/src/graph_agent/callbacks/tracing.py:262`
-- `packages/graph-agent/src/graph_agent/core/graph_assembler.py:2153`
+`ToolCallEvent` 在引擎中有三处各自独立的**构造**点,每一处都自己决定这次调用的身份
+(`tool_call_id`)、自己决定装不装 `duration_ms`:
+
+- `packages/graph-agent/src/graph_agent/middleware/tracing.py:110` —— agent 路径的包裹点。
+  **这一处确实自己遍历 callbacks、自己 try/except 兜异常**(该分发循环是 PR #655 引入的)。
+- `packages/graph-agent/src/graph_agent/callbacks/tracing.py:262` —— **这一处不是发射点,是文件 sink。**
+  `TracingCallback` 自己就是一个 callback;它构造 `ToolCallEvent` 只是为了把 legacy 钩子
+  `on_tool_call(...)` 收到的调用写成 `trace.jsonl` 的记录格式(经由
+  `_write_typed_event`,该方法只写文件、不分发给任何 callback)。它之所以要自己造事件对象,
+  是因为 legacy 钩子的入参里根本没有事件对象可用 —— 病根在 legacy 路径(见下条),不在这个 sink。
+- `packages/graph-agent/src/graph_agent/core/graph_assembler.py:2153` —— agent 节点的事后补报点。
+  它构造事件后调用共享分发 `callbacks/emit.py::_safe_emit_event`,**没有**自己遍历 callbacks。
+
+另有**第四处**本条初稿漏列,且它才是第二份真正的手搓分发循环:
+`packages/graph-agent/src/graph_agent/core/callback_bridge.py:216-236` —— legacy LLM phase 路径上
+`_HarnessCallbackBridge.on_tool_end` 自己 `for cb in self._callbacks` 逐个调 legacy 钩子,
+外层 `except TypeError` 再降级重试一次不带 `duration_ms` 的旧签名。
+那个降级分支是向后兼容垫片,违反 `AGENTS.md`「Development Principles」的「No backward compatibility」。
+同一路径的 `on_tool_start`(`callback_bridge.py:175-197`)握有真实的「工具即将开始」时刻,
+却只把它塞进 `_pending_tools` 字典,不上报任何东西。
 
 这是「上报动作没有单一出口」的直接证据 —— 违反 `AGENTS.md`「Coding Standards」的
 「低耦合、高内聚」与「DRY,但三次成律」:同一业务含义的第三份拷贝已经出现。
+
+**处置归属**:S2 收编第一处与第三处(两者改为向 `graph_agent/tracing/` 的单一出口报告);
+第二处作为文件 sink 保持不动;第四处连同 legacy 路径的载荷不一致一起归 S3
+(S3 本就要改 `callback_bridge.py:154-160`,见 B9),不在 S2 里顺手动。
 
 ### B9. 结束帧今天不承载模型最终产出,且两条执行路径的载荷不一致
 

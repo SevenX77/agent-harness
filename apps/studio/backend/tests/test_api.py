@@ -668,7 +668,7 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert (run_dir / "metrics.json").exists()
     assert (run_dir / "artifacts").is_dir()
     assert (run_dir / "checkpoints.db").exists()
-    assert (run_dir.parent / "latest" / "run_metadata.json").exists()
+    assert (run_dir / "run_metadata.json").exists()
 
 
 def test_ws_replays_a_finished_run_from_disk(

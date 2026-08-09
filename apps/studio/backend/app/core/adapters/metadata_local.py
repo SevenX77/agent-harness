@@ -96,8 +96,6 @@ class LocalJsonMetadataStore:
             lambda: sorted(runs_root.glob("*/run_metadata.json")),
         )
         for metadata_path in metadata_paths:
-            if metadata_path.parent.name == "latest":
-                continue
             try:
                 async with aiofiles.open(metadata_path, encoding="utf-8") as file:
                     runs.append(RunMetadata.model_validate_json(str(await file.read())))

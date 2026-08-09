@@ -149,8 +149,8 @@ def test_git_service_wrappers_build_expected_commands(
     service = GitLocalService(timeout_seconds=5)
 
     service.add(tmp_path)
-    service.add(tmp_path, ".workspace/runs/latest", force=True)
-    service.force_add_path(tmp_path, ".workspace/runs/latest")
+    service.add(tmp_path, ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb", force=True)
+    service.force_add_path(tmp_path, ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb")
     service.create_branch(tmp_path, "team-save/tester-1")
     service.commit(tmp_path, "auto-run-1")
     assert service.log(tmp_path) == ["abc auto-run-1"]
@@ -158,7 +158,7 @@ def test_git_service_wrappers_build_expected_commands(
     service.status(tmp_path, ignored=True)
 
     assert ["git", "add", "-A"] in commands
-    assert ["git", "add", "-f", ".workspace/runs/latest"] in commands
+    assert ["git", "add", "-f", ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb"] in commands
     assert ["git", "checkout", "-b", "team-save/tester-1"] in commands
     assert ["git", "commit", "-m", "auto-run-1"] in commands
     assert ["git", "log", "--oneline", "-n50"] in commands
@@ -166,7 +166,7 @@ def test_git_service_wrappers_build_expected_commands(
     assert ["git", "status", "--short", "--ignored"] in commands
 
 
-def test_auto_commit_respects_gitignore_latest_but_commits_golden(
+def test_auto_commit_respects_gitignore_runs_but_commits_golden(
     tmp_path: Path,
 ) -> None:
     skill_dir = tmp_path / "skill"
@@ -180,9 +180,9 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden(
     service.add(skill_dir)
     service.commit(skill_dir, "initial")
 
-    latest_dir = skill_dir / ".workspace" / "runs" / "latest"
-    latest_dir.mkdir(parents=True)
-    (latest_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
+    run_dir = skill_dir / ".workspace" / "runs" / "2026-08-09T12-00-00_bbbbbbbb"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
     golden_dir = skill_dir / ".workspace" / "golden" / "run-1"
     golden_dir.mkdir(parents=True)
     (golden_dir / "baseline.json").write_text("{}", encoding="utf-8")
@@ -200,7 +200,7 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden(
     assert ".workspace/golden/run-1/report.json" in committed_files
     assert ".workspace/golden/run-1/cases/setup.json" in committed_files
     assert ".workspace/predict/" not in committed_files
-    assert ".workspace/runs/latest" not in committed_files
+    assert ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb" not in committed_files
 
 
 def test_force_add_path_overrides_gitignore(tmp_path: Path) -> None:
@@ -215,16 +215,16 @@ def test_force_add_path_overrides_gitignore(tmp_path: Path) -> None:
     service.add(skill_dir)
     service.commit(skill_dir, "initial")
 
-    latest_dir = skill_dir / ".workspace" / "runs" / "latest"
-    latest_dir.mkdir(parents=True)
-    (latest_dir / "x.json").write_text("data\n", encoding="utf-8")
+    run_dir = skill_dir / ".workspace" / "runs" / "2026-08-09T12-00-00_bbbbbbbb"
+    run_dir.mkdir(parents=True)
+    (run_dir / "x.json").write_text("data\n", encoding="utf-8")
 
     service.add(skill_dir)
-    assert ".workspace/runs/latest/x.json" not in service.status(skill_dir).stdout
+    assert ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb/x.json" not in service.status(skill_dir).stdout
 
-    service.force_add_path(skill_dir, ".workspace/runs/latest")
+    service.force_add_path(skill_dir, ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb")
 
-    assert "A  .workspace/runs/latest/x.json" in service.status(skill_dir).stdout
+    assert "A  .workspace/runs/2026-08-09T12-00-00_bbbbbbbb/x.json" in service.status(skill_dir).stdout
 
 
 def test_create_branch_checks_out_new_branch(tmp_path: Path) -> None:

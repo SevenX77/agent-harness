@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import tempfile
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -64,7 +63,6 @@ from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
 logger = logging.getLogger(__name__)
-_LATEST_SYNC_LOCK = threading.Lock()
 _SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -581,7 +579,7 @@ class RunManager:
         require_passing_predict(skill_id, content_hash=art_ref["content_hash"])
 
         inputs = _runtime_inputs_from_request(request)
-        run_id = _new_run_id()
+        run_id = new_run_id()
         run_dir = run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
@@ -745,7 +743,7 @@ class RunManager:
         runtime_config: dict[str, Any] | None,
     ) -> RunMetadata:
         """Spawn one isolated single-node candidate side-run tagged with its group."""
-        run_id = _new_run_id()
+        run_id = new_run_id()
         run_dir = run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
@@ -832,7 +830,7 @@ class RunManager:
         runtime_config: dict[str, Any] | None = None
         with contextlib.suppress(Exception):
             runtime_config = refresh_runtime_config(resolve_skill_dir(skill_id))
-        run_id = _new_run_id()
+        run_id = new_run_id()
         run_dir = _source_less_run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
@@ -887,7 +885,7 @@ class RunManager:
         if not input_ids:
             raise ValueError("input_ids must not be empty")
 
-        batch_id = f"batch-{_new_run_id()}"
+        batch_id = f"batch-{new_run_id()}"
         items: list[tuple[str, str]] = []
         for input_id in input_ids:
             inputs = _load_test_input(skill_id, input_id)
@@ -946,8 +944,6 @@ class RunManager:
             return RunListResponse(runs=[], total=0)
         metadata: list[RunMetadata] = []
         for metadata_path in runs_root.glob("*/run_metadata.json"):
-            if metadata_path.parent.name == "latest":
-                continue
             try:
                 metadata.append(_metadata_with_input_summary(metadata_path))
             except Exception:
@@ -1253,23 +1249,18 @@ class RunManager:
     async def _finalize_terminal_run(self, record: RunRecord, metadata: RunMetadata) -> None:
         # The record is what every reader asks for the run's status, and it is
         # deliberately the LAST thing to go terminal: whoever sees it flip may
-        # immediately read the sealed run dir and its `latest/` copy, so the
-        # flip has to trail finalization, not lead it. The assignment sits in
+        # immediately read the sealed run dir, so the flip has to trail
+        # finalization, not lead it. The assignment sits in
         # `finally` because a storage write that fails must not strand the
         # record — and every future reader of it — on "running" forever.
         try:
             await self._copy_final_state_to_storage(record)
             # The report reads the run's FINAL metadata (outcome, failure reason,
-            # archive status), so it is written after that lands and before
-            # `latest/` is synced — `latest/` must carry the report too.
+            # archive status), so it is written after that lands.
             if metadata.status == "success" and record.auto_commit:
                 metadata = await self._auto_commit_successful_run(record, metadata)
-                _write_run_metadata(record.run_dir, metadata)
-                await asyncio.to_thread(write_run_report, record.run_dir)
-                await asyncio.to_thread(_sync_latest_run, record.run_dir)
-            else:
-                _write_run_metadata(record.run_dir, metadata)
-                await asyncio.to_thread(write_run_report, record.run_dir)
+            _write_run_metadata(record.run_dir, metadata)
+            await asyncio.to_thread(write_run_report, record.run_dir)
             await self._save_run_metadata(record.skill_id, metadata)
         finally:
             record.metadata = metadata
@@ -1409,9 +1400,31 @@ def _resume_audit_event(
     )
 
 
-def _new_run_id() -> str:
-    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
-    return f"{stamp}_{uuid.uuid4().hex[:8]}"
+def _local_now() -> datetime:
+    """The wall clock on the machine producing the run.
+
+    Run ids are read by a person looking at a folder listing, and a UTC stamp
+    reads as the wrong time to that person. This is deliberately naive: the id
+    is a label for humans, never a value anything computes with.
+    """
+    return datetime.now()
+
+
+def _id_stamp() -> str:
+    return _local_now().strftime("%Y-%m-%dT%H-%M-%S")
+
+
+def new_run_id() -> str:
+    return f"{_id_stamp()}_{uuid.uuid4().hex[:8]}"
+
+
+def new_predict_run_id() -> str:
+    """A predict id is a run id wearing a prefix.
+
+    Same producer, so the two shapes cannot drift apart — which is exactly how
+    predict ended up as a bare uuid that sorted by nothing.
+    """
+    return f"predict-{new_run_id()}"
 
 
 def _validate_run_id_segment(run_id: str) -> None:
@@ -1649,16 +1662,6 @@ def _read_run_artifact_paths(run_dir: Path) -> list[str]:
 
 def test_inputs_dir_for(skill_id: str) -> Path:
     return test_inputs_dir_for_skill(resolve_skill_dir(skill_id))
-
-
-def _sync_latest_run(run_dir: Path) -> None:
-    with _LATEST_SYNC_LOCK:
-        latest_dir = run_dir.parent / "latest"
-        if latest_dir == run_dir:
-            return
-        if latest_dir.exists():
-            shutil.rmtree(latest_dir)
-        shutil.copytree(run_dir, latest_dir)
 
 
 def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:

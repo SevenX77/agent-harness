@@ -65,6 +65,18 @@ function numberField(value: unknown): number | null {
   return null
 }
 
+// A run that has ended has nothing still executing. `run_ended` is run-scoped
+// (RunEndedEvent in packages/graph-agent/.../callbacks/events.py:336-344 carries
+// run_id + status, no phase_name), so a node left mid-flight has no per-phase
+// event that will ever close it — the run's own verdict is the only truth
+// available, and deferring to it is what stops a finished run from showing a
+// node spinning forever.
+const RUN_END_STATUS_TO_NODE_STATUS: Readonly<Record<string, SkillNodeStatus>> = {
+  completed: "success",
+  crashed: "error",
+  interrupted: "paused",
+}
+
 function eventAttempt(event: CallbackEvent): number | null {
   return numberField(event.attempt)
     ?? numberField(event.attempt_number)
@@ -80,6 +92,10 @@ function eventAttempt(event: CallbackEvent): number | null {
  * phase that fails validation but then retries and passes (validation_fail →
  * validation_pass / phase_end) end up green, while a phase whose final state is
  * a failure (validation_fail with no recovery, or retry_exhausted) ends up red.
+ *
+ * `run_ended` then closes out whatever is still marked running: the run is the
+ * owner of "is anything executing", so a phase with no ending event of its own
+ * takes the run's verdict rather than spinning after the run is over.
  */
 export function deriveNodeStatuses(
   events: readonly TraceEventInput[] | null | undefined,
@@ -88,17 +104,24 @@ export function deriveNodeStatuses(
   const statuses: Record<string, SkillNodeStatus> = {}
   const attempts: Record<string, number> = {}
   if (!events) return statuses
+  // Last run_ended wins: a resumed run ends more than once, and only its final
+  // verdict describes the state the reader is looking at.
+  let runEndStatus: SkillNodeStatus | null = null
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
     const eventRun = eventRunId(traceEvent, event)
     if (runId && eventRun && eventRun !== runId) continue
+    const type = event.event_type || ""
+    if (type === "run_ended") {
+      runEndStatus = RUN_END_STATUS_TO_NODE_STATUS[event.status ?? "completed"] ?? "success"
+      continue
+    }
     const phaseName = event.phase_name || event.current_phase
     if (!phaseName) continue
     const attempt = eventAttempt(event)
     const latestAttempt = attempts[phaseName]
     if (attempt !== null && latestAttempt !== undefined && attempt < latestAttempt) continue
     if (attempt !== null) attempts[phaseName] = attempt
-    const type = event.event_type || ""
     if (isFailureEvent(type, event.status)) {
       statuses[phaseName] = "error"
     } else if (isPausedEvent(type, event.status)) {
@@ -107,6 +130,11 @@ export function deriveNodeStatuses(
       statuses[phaseName] = "running"
     } else if (type === "phase_end") {
       statuses[phaseName] = "success"
+    }
+  }
+  if (runEndStatus) {
+    for (const [phaseName, status] of Object.entries(statuses)) {
+      if (status === "running") statuses[phaseName] = runEndStatus
     }
   }
   return statuses

@@ -182,3 +182,76 @@ describe("deriveNodeErrorMessages", () => {
     expect(deriveNodeErrorMessages(events, "run-1")).toEqual({ review: "right run" })
   })
 })
+
+// D7 (decision 2026-08-09), the "still shows running" defect: node status is
+// derived per phase from phase_start/phase_end, but the RUN owns the fact
+// "is anything still executing". `run_ended` is run-scoped (no phase_name), so
+// before this it was dropped by the phase filter and a phase whose phase_end
+// never arrived stayed spinning forever, on a run that was demonstrably over.
+describe("deriveNodeStatuses run_ended clamp", () => {
+  it("closes a phase left running when the run ended with the run's own verdict", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "draft" }),
+      event({ event_type: "phase_end", phase_name: "draft" }),
+      event({ event_type: "phase_start", phase_name: "review" }),
+      event({ event_type: "run_ended", status: "completed" }),
+    ]
+
+    expect(deriveNodeStatuses(events)).toEqual({ draft: "success", review: "success" })
+  })
+
+  it("marks the in-flight phase red when the run crashed", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "review" }),
+      event({ event_type: "run_ended", status: "crashed" }),
+    ]
+
+    expect(deriveNodeStatuses(events)).toEqual({ review: "error" })
+  })
+
+  it("marks the in-flight phase paused when the run was interrupted", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "review" }),
+      event({ event_type: "run_ended", status: "interrupted" }),
+    ]
+
+    expect(deriveNodeStatuses(events)).toEqual({ review: "paused" })
+  })
+
+  it("does not overwrite a phase that already reported its own outcome", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "validation_fail", phase_name: "review", errors: ["bad"] }),
+      event({ event_type: "run_ended", status: "completed" }),
+    ]
+
+    expect(deriveNodeStatuses(events)).toEqual({ review: "error" })
+  })
+
+  it("leaves a running phase running while the run is still going", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "review" }),
+    ]
+
+    expect(deriveNodeStatuses(events)).toEqual({ review: "running" })
+  })
+
+  it("ignores a run_ended belonging to a different run", () => {
+    const events = [
+      envelope({ event_type: "phase_start", phase_name: "review" }, { runId: "run-1", seq: 1 }),
+      envelope({ event_type: "run_ended", status: "crashed" }, { runId: "run-2", seq: 2 }),
+    ]
+
+    expect(deriveNodeStatuses(events, "run-1")).toEqual({ review: "running" })
+  })
+
+  it("clamps to the LAST run_ended when a resumed run ends twice", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "review" }),
+      event({ event_type: "run_ended", status: "interrupted" }),
+      event({ event_type: "phase_start", phase_name: "review" }),
+      event({ event_type: "run_ended", status: "completed" }),
+    ]
+
+    expect(deriveNodeStatuses(events)).toEqual({ review: "success" })
+  })
+})

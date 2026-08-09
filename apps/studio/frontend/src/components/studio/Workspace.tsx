@@ -41,8 +41,8 @@ import { applyPhaseValidator } from "@/components/studio/panels/phase-frontmatte
 import { validatorFilePath, validatorStubContent } from "@/components/studio/panels/phase-validator"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
+import { createGateEffectFold } from "./gate-effect-fold"
 import {
-  gateEventKey,
   projectGateEvent,
   type SkillGateEvent,
 } from "./gate-state"
@@ -664,9 +664,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setCompileStages((current) => ({ ...current, [id]: stage }))
   }, [])
 
-  // Outcomes already applied, so the click handler's own projection and the
-  // backend broadcast of that same outcome do not fire the side effects twice.
-  const appliedGateOutcomes = useRef<string[]>([])
+  // The click handler's own projection and the backend broadcast of that same
+  // outcome must not fire the side effects twice; see gate-effect-fold for why the
+  // comparison is the projection and not the compiled artifact's identity.
+  const gateEffectFold = useRef(createGateEffectFold())
 
   // Read inside the applier without making it depend on the open skill: the
   // event-stream subscription must not tear down and re-register on every switch.
@@ -682,12 +683,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
    * (决议 2026-08-03「状态对等」D4).
    */
   const applyGateEvent = useCallback((event: SkillGateEvent) => {
-    const key = gateEventKey(event)
-    if (appliedGateOutcomes.current.includes(key)) return
-    appliedGateOutcomes.current = [...appliedGateOutcomes.current.slice(-63), key]
-
     const { stage, effects } = projectGateEvent(event)
+    // Unconditional, and deliberately ahead of every test below: a settled outcome
+    // that fails to land is what strands the toolbar mid-gate, with Compile lit but
+    // unclickable and no further event able to free it (决议 2026-08-09 D1). An
+    // effect skipped once costs a drawer; a state skipped once costs the screen.
     updateStage(event.skillId, stage)
+
+    if (!gateEffectFold.current.shouldRunEffects(event.skillId, { stage, effects })) return
 
     // Drawers and the trace stream belong to the skill on screen; another skill's
     // outcome updates its stage but must not yank this view around.

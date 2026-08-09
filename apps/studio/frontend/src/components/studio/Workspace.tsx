@@ -17,7 +17,7 @@ import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk }
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistoryRevalidator, useRunHistoryProjection } from "@/hooks/useRunHistory"
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, runOutcomeFeedback, useLocalHistoryRevalidator, useRunHistoryProjection } from "@/hooks/useRunHistory"
 import { useTraceSelection } from "@/hooks/useTraceSelection"
 import { useSkills } from "@/hooks/useSkills"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
@@ -815,6 +815,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         // terminal metadata so the Timeline list is truthful when the user goes
         // back to it (single backend truth, no extra revalidation round-trip).
         await projectRun(detail.metadata)
+        // D7: how the RUN ended and whether a git SNAPSHOT was taken are two
+        // different facts about this same moment, so both are announced. The
+        // outcome comes first — it is what the user was waiting for.
+        const outcome = runOutcomeFeedback(detail.metadata)
+        if (outcome) {
+          if (outcome.variant === "success") {
+            toast.success(outcome.message)
+          } else if (outcome.variant === "error") {
+            toast.error(outcome.message)
+          } else {
+            toast.warning(outcome.message)
+          }
+        }
         const feedback = archiveFeedbackForGitStatus(detail.metadata.git_status)
         if (!feedback) {
           return

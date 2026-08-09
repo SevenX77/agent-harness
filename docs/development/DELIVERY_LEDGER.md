@@ -174,6 +174,10 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
   流式 tracing 架构(§1 事实 B1-B11、§2 决策 D1-D8、§3 验收判据 1-13、§6 实施切分 S1-S5)。
   它**取代**前一份 §4「明确不做」的第一条(LLM 输出逐 token 流式);前一份其余条目全部有效。
   **交付闸门(用户裁决 2026-08-09)**:S1+S2 完成后由实施者自评,无问题直接推进 S3-S5,不再逐段审批。
+  已按实测两次修订本身:#673 把范围从三模块扩到四模块并作废「不触碰 gateway」那条(S1
+  自评实测:`GatewayChatModel` 只实现 `_generate`,LangChain 据此判定它不可流式,
+  `stream()` 退化成一次阻塞调用 —— 决议自己的验收判据 1 因此不成立);#678 立 D10 与
+  SO 判据(gateway 的路由决策进 trace)。
 
 ### 第一阶段 · Trace 信息架构与呈现(已收口)
 
@@ -188,13 +192,16 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 | S1 | `LLMProvider` Port 改流式:`stream()` 成为唯一取答案的方式(`invoke` 删除),`LLMProviderChatModel._generate` 改为消费切片再折叠,Studio adapter 直通 gateway chat model 的流 | ✅ 已合并(#669) | `packages/graph-agent/src/graph_agent/core/llm_provider.py`;`apps/studio/backend/app/core/adapters/engine.py` 的 `_GatewayBackedLLMProvider.stream` |
 | S1-a | S1 自评补票:测试里手搓的切片合并规则(后来的覆盖先来的)与真实 `AIMessageChunk`(相加)不符,换成真类型并补回程用例 | ✅ 已合并(#671) | `apps/studio/backend/tests/core/adapters/test_llm_provider_streaming.py`。核对结论:openai 兼容协议的 `stream_usage` 由 gateway `provider_profiles.py:20-21` 显式钉住,不依赖 langchain 那个「仅 base_url 为空才自动打开」的默认(`langchain_openai/chat_models/base.py:1144-1163`),所以流式下 token 用量不丢 |
 | S2 | 新建 `graph_agent/tracing/` 步骤单出口,收编 B8 的发射点;对外事件契约不变 | ✅ 已合并(#670) | `packages/graph-agent/src/graph_agent/tracing/steps.py`(`StepReporter` / `ToolCallStep`)。同 PR 订正了决议 B8 的事实描述,并把漏列的第四处手搓分发(`core/callback_bridge.py:216-236`,含一个违反 no-backward-compat 的 `except TypeError` 旧签名降级垫片)归给 S3 |
-| S3 | ①agent 路径补发 LLM 步骤开始信号,使 `prompt_captured` 两条路径都成立;②结束帧承载模型最终产出,消除 agent 路径与 legacy 路径的载荷不一致;③`llm_call.response_data` 改必填;④删 `llm_call.messages` 字段及前端回退分支;⑤增量帧契约(正文增量 / 推理增量,每帧带所属步骤标识)。**五项同一个 PR,不拆分** | 待开工 | `core/graph_assembler.py:2131-2132`(agent 路径不装产出)与 `core/callback_bridge.py:154-160`(legacy 路径装);前端回退分支 `TraceStepRow.tsx:206-208`。另需在本 PR 回写两处决议偏差:D2 第三层(`agent_graph.invoke`)不改的理由、B8 第四处的处置 |
+| SG | gateway 也得会流式:`GatewayChatModel` 补 `_stream`,候选/失败策略只保留**一份**实现(`_answer` 生成器),`_stream` 与 `_generate` 都从它取;重试作废已推出的正文用发布出去的`ANSWER_RESTARTED` 标记贯通 gateway → adapter → engine | ✅ 已合并(#674) | `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`;engine `LLMProviderChunk.restarts_answer`;adapter `answer_restarts_here(chunk)`。实测:同一次真实调用从 **1 片 / 167 字符 / 全部堆在 4.51s** 变成 **104 片 / 12.12s→12.71s 逐片到达**。语义要点:截断只有在回答结束时才知道,所以重试必然发生在正文已经流出去之后 —— 把两次尝试拼起来得到的是**错的答案**,不只是错的显示 |
+| SO | gateway 的动作进 trace(用户 2026-08-09 追加):跳过熔断路由、探活失败、原路重试、抬预算重试、跨路由回退、终止性失败、答成、路由耗尽 —— 八种结局是**同一件事**,收敛成一个`llm_route_decision` 事件加一个封闭 `decision` 枚举,**取代并删除** `llm_fallback`;严重度从事件类型移到 decision(同一类型既报「答成」也报「无路可走」) | ✅ 已合并(#680) | gateway `events.py` / `tracing.py`;engine `callbacks/events.py`;前端 `utils/trace.ts` 的 `routeDecisionDetails` / `eventSeverity`、`TraceStepRow.tsx` 的 `RouteDecisionBlock`。验收:`llm_fallback` 在 gateway src / engine src / 前端 src 三处 grep 为零。`voided_streamed_answer` 挂在造成它的那个决策上 —— 面板正显示着这次决策刚作废的文字,只有它能说出这件事 |
+| S3 | ~~①agent 路径补发 LLM 步骤开始信号~~(#675 已交付)、~~②结束帧承载模型最终产出~~(#677 已交付);**余下三项**:③`llm_call.response_data` 改必填;④删 `llm_call.messages` 字段及前端回退分支;⑤增量帧契约(正文增量 / 推理增量,每帧带所属步骤标识)。**余下三项同一个 PR,不拆分** | 推进中(①② 已合并,③④⑤ 待开工) | ①=`core/graph_assembler.py` 起始信号从启动它的地方发出(#675);②=LLM 步骤在调用返回时收口,而非等整个 phase 结束(#677);前端回退分支 `TraceStepRow.tsx`。另需在本 PR 回写两处决议偏差:D2 第三层(`agent_graph.invoke`)不改的理由、B8 第四处的处置 |
 | S4 | 传输分道与背压:增量帧走独立跨进程通道与 WebSocket 通道,不占 seq、不落盘 | 待开工 | `apps/studio/backend/app/services/run_manager.py` 的事件队列与 seq 编号 |
 | S5 | 前端在步骤条目内逐字追加 | 待开工 | `apps/studio/frontend/src/components/studio/trace/` |
 
 **过哪道门算完**:决议 §3 的 13 条验收判据。
-**已知需同步的操作**:S1/S2/S3 都改 `packages/graph-agent` 源码,合并后必须按 AGENTS.md
-「Workflow Pipeline」第 7 条重建 vendor 快照,否则运行中的桌面 app 仍跑旧引擎。
+**已知需同步的操作**:S1/S2/SG/SO/S3 都改 `packages/graph-agent`(engine)或
+`packages/graph-agent-gateway`(gateway)源码,合并后必须按 AGENTS.md「Workflow Pipeline」
+第 7 条重建 vendor 快照,否则运行中的桌面 app 仍跑旧 SDK。
 
 ### 环境 blocker(在册)
 

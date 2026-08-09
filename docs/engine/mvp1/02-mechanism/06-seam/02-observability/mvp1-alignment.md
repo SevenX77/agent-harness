@@ -13,7 +13,7 @@ aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·接缝）
 observability = 引擎执行的**可观测事件流**——把"发生了什么"以 33 类 typed `CallbackEvent`(phase_start/llm_call/tool_call…)发出:`event_subscriber` 回调 + `trace.jsonl`(落盘 SSOT)+ WS。**它是事件流,不是"所有返回的消息"**(messages 归 `08-messages-state`/`cognitive`,RunResult 归 `data-contracts`)。
 
 ## 2. 数据流 / 机制
-外层 phase 事件 + 内层**微观事件**(带 `parent_node_id` 挂回外层节点)。内层 **Tracing 中间件**(发 llm_call/tool_call 微观事件)是内层发射器,**实现在 `02-middleware` 槽 4,逻辑归本域**(双向引用)。有些事件**内嵌内容快照**(`LLMCallEvent.messages`、`CompactionEvent.content_ref`)= 为 trace 复制,不拥有消息状态。
+外层 phase 事件 + 内层**微观事件**(带 `parent_node_id` 挂回外层节点)。内层发射器有两个,各自贴着它报告的那件事(OB6):**Tracing 中间件**套在工具执行外面,发 `tool_call_started`/`tool_call`(**实现在 `02-middleware` 槽 4,逻辑归本域**,双向引用);**chat model** 自己在请求 provider 前发 `prompt_captured`、由 phase 节点在拿到回答后发 `llm_call`。有些事件**内嵌内容快照**(`LLMCallEvent.messages`、`CompactionEvent.content_ref`)= 为 trace 复制,不拥有消息状态。
 
 > **⚠️ 现状 vs 目标**:33 类 typed event + `trace.jsonl` 落盘 **live**(`events.py:56-443`/`emit.py:15`)。但**内层 Tracing 中间件 emit = no-op 现状**(`02-middleware` 后 3 槽空壳,微观 llm_call/tool_call 事件经中间件发射 = 目标)。V4 trace 增补(微观拓扑 `parent_node_id`/3 边操作事件/subagent lifecycle)= **目标事件、归 kiro**(§8);Prompt 三视图**已满足**(§8 #1);reducer-diff = **前端近似**(OB5,engine 不加 authoritative 事件)。
 
@@ -30,12 +30,18 @@ observability = 引擎执行的**可观测事件流**——把"发生了什么"�
 | OB2 | 内层 Tracing 发射器逻辑归本域,实现在 middleware 槽 | 机制相同≠同模块,双向引用 |
 | OB3 | 回调覆盖全事件类型 | 新增事件须同步所有回调(防遗漏) |
 | OB4 | 边操作事件成系列(3 新 + 2 已有),按 edge 聚合;并联节点输入分发**各发一条** | dot = 节点间全部操作可观测;机制在 `graph-exec`、事件在本域(源 11-io E5) |
+| OB6 | **"某一步开始了"由执行这一步的那个单元自己发**,不由包在某类调用方外面的装饰器发。LLM 往返的开始事件 `prompt_captured` 发自 chat model 内部(`LLMProviderChatModel._generate`,在请求 provider **之前**);工具调用的开始事件 `tool_call_started` 发自 Tracing 中间件(它就套在工具执行外面) | 装饰器只对"以它预期的方式调用模型"的调用方生效:旧实现 `TracingClientProxy` 拦 `.invoke()`,只有 LLM phase 节点那样调;AGENT phase 把模型交给 `create_agent`,LangChain 走 `_generate`,于是**耗时最长的那条路一个开始信号都没有**——一次 5 分钟的 phase 在 UI 上全程空白(实测 2026-08-09)。放到调用点后,新增节点类型不可能漏发、也没有能被绕过的包装层。代价:模型现在多背 `sub_run_id`/`group_key` 两个只用于上报的字段,换掉的是"同一事实两个 owner" |
 | OB5 | reducer 前后态 diff(REQ-7)= **前端近似**(从 OB4 边操作事件带的黑板快照 + phase 边界比对),engine **不加** authoritative 逐 reducer diff 事件(PM 2026-06-06 选 A) | 边操作事件已带黑板快照、足够前端近似"哪个 key 变了";authoritative 逐 reducer emit = 引擎复杂度↑、调试边际价值↓,deferred(工程取舍,非业务判断) |
 
 ## 6. 测试关键点
 1. 迁到 create_agent 后现有 LLMCallEvent/ToolCallEvent 覆盖不减(D-test)。
 2. 微观事件 `parent_node_id` 正确关联外层 phase 节点。
 3. trace.jsonl 一行一 event;predict trace usage 归零。
+4. **OB6:开始事件必须先于工作发生,且 AGENT phase 也要有。** 两层各钉一条:
+   单元层——provider 被要求干活时,`prompt_captured` 已经发出去了;端到端层——
+   跑一个 AGENT phase,事件序列里 `prompt_captured` 出现在 `llm_call` 之前
+   (`tests/core/test_llm_call_announces_its_start.py`)。只测"事件类型存在"
+   会漏掉这次的缺陷:事件类型一直都在,缺的是它出现的**时机和路径**。
 
 ## 7. 涉及 region / platform
 engine 全权;trace 被 studio trace-inspector 消费(前端挂载归 studio)。

@@ -95,6 +95,14 @@ class LLMProviderChatModel(BaseChatModel):
     bound_tools: tuple[Any, ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
     tool_kwargs: dict[str, Any] = Field(default_factory=dict)
+    # Run-scoped identity a parallel sub-run carries on everything it emits.
+    # The phase that builds the model knows it; the model is what emits.
+    sub_run_id: str | None = None
+    group_key: str | None = None
+    # Shared so a bound copy keeps counting where the original left off: the
+    # agent loop binds tools once and then invokes the bound copy every turn,
+    # and "call 1, call 1, call 1" is not a sequence anyone can read.
+    call_counter: list[int] = Field(default_factory=lambda: [0])
 
     @property
     def _llm_type(self) -> str:
@@ -148,6 +156,23 @@ class LLMProviderChatModel(BaseChatModel):
             metadata={key: value for key, value in metadata.items() if value is not None},
         )
 
+    def _announce_call(self, messages: list[BaseMessage]) -> None:
+        """Tell the run a round-trip is starting, and what it was asked."""
+        from graph_agent.callbacks.emit import _safe_emit_event
+        from graph_agent.callbacks.events import PromptCapturedEvent
+
+        self.call_counter[0] += 1
+        event = PromptCapturedEvent(
+            phase_name=self.phase_name or "unknown",
+            llm_role=self.role,
+            resolved_model=self.model_name,
+            resolved_prompt=[_as_prompt_entry(message) for message in messages],
+            sub_run_id=self.sub_run_id,
+            group_key=self.group_key,
+            loop_index=self.call_counter[0],
+        )
+        _safe_emit_event(self.event_callbacks, event)
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -156,6 +181,14 @@ class LLMProviderChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         del run_manager
+        # Announcing belongs here, at the call, rather than in a wrapper around
+        # some callers: an AGENT phase hands this model to LangChain's agent
+        # loop, which reaches `_generate` and never touches a wrapper's
+        # `invoke`. That path is where the minutes are spent, so a wrapper is
+        # exactly the wrong place to keep the one signal that says "still
+        # working". Emitted BEFORE the round-trip, because after it the answer
+        # is already the news.
+        self._announce_call(messages)
         # The answer is consumed slice by slice even though the agent loop is
         # handed the finished message: the loop needs the whole answer to decide
         # its next move, while everything watching the run needs to know the
@@ -177,6 +210,16 @@ class LLMProviderChatModel(BaseChatModel):
             generations=[ChatGeneration(message=message)],
             llm_output=response_metadata,
         )
+
+
+def _as_prompt_entry(message: BaseMessage) -> dict[str, Any]:
+    """The light-weight shape a reader renders: who spoke and what they said.
+
+    ``_generate`` is handed messages LangChain has already normalised, so unlike
+    a wrapper sitting at ``invoke`` — which had to cope with strings, tuples and
+    raw dicts — there is exactly one shape to read here.
+    """
+    return {"role": str(getattr(message, "type", None) or "unknown"), "content": message.content}
 
 
 def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:

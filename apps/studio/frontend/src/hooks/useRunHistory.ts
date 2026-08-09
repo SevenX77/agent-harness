@@ -165,6 +165,59 @@ export interface ArchiveFeedback {
   message: string
 }
 
+export type RunOutcomeVariant = 'success' | 'error' | 'warning'
+
+export interface RunOutcomeFeedback {
+  variant: RunOutcomeVariant
+  message: string
+}
+
+const RUN_OUTCOME_WORDING: Readonly<
+  Partial<Record<RunMetadata['status'], { variant: RunOutcomeVariant; verb: string }>>
+> = {
+  success: { variant: 'success', verb: 'succeeded' },
+  failed: { variant: 'error', verb: 'failed' },
+  cancelled: { variant: 'warning', verb: 'was interrupted' },
+}
+
+/**
+ * Render a run's wall time the way the Timeline list does: sub-second runs read
+ * as milliseconds, everything else as one decimal of a second.
+ */
+function outcomeDuration(seconds: number): string {
+  return seconds < 1 ? `${(seconds * 1000).toFixed(0)}ms` : `${seconds.toFixed(1)}s`
+}
+
+/**
+ * D7 (decision 2026-08-09) read projection: reaching a terminal state must say
+ * so. This is NOT a rewording of `archiveFeedbackForGitStatus` — that one reports
+ * whether a git snapshot was taken, this one reports how the run itself ended.
+ * Two different facts about the same moment, so both toasts may appear.
+ *
+ * Returns `null` for a run that has not concluded (running / paused) so the
+ * caller stays silent rather than announcing an outcome that does not exist yet.
+ * Metrics clauses are dropped rather than filled with placeholders: a toast
+ * saying "n/a tokens" tells the reader nothing the absence would not.
+ */
+export function runOutcomeFeedback(metadata: RunMetadata): RunOutcomeFeedback | null {
+  const wording = RUN_OUTCOME_WORDING[metadata.status]
+  if (!wording) {
+    return null
+  }
+  const subject = metadata.kind === 'predict' ? 'Predict' : 'Run'
+  const facts: string[] = []
+  const seconds = metadata.metrics?.wall_time_sec
+  if (typeof seconds === 'number' && Number.isFinite(seconds)) {
+    facts.push(outcomeDuration(seconds))
+  }
+  const tokens = metadata.metrics?.total_tokens
+  if (typeof tokens === 'number' && Number.isFinite(tokens)) {
+    facts.push(`${tokens.toLocaleString('en-US')} tokens`)
+  }
+  const detail = facts.length > 0 ? ` — ${facts.join(' · ')}` : ''
+  return { variant: wording.variant, message: `${subject} ${wording.verb}${detail}` }
+}
+
 /**
  * N6 #1 (autocommit-feedback) read projection. After a successful run the backend
  * autocommits a local "Auto run" snapshot and records the outcome on the run

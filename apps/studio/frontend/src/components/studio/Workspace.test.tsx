@@ -2064,9 +2064,12 @@ describe('Workspace run_ended history wiring (integration)', () => {
    * only then does it publish the terminal `run` gate. Callers that want the
    * finished-run truth must therefore also call {@link emitTerminalRunGate}.
    */
-  async function startRunToEngineEnd(gitStatus: RunDetail['metadata']['git_status']) {
+  async function startRunToEngineEnd(
+    gitStatus: RunDetail['metadata']['git_status'],
+    status: RunDetail['metadata']['status'] = 'success',
+  ) {
     mocks.runStreamEvents = [runEndedEvent('run-1')]
-    mocks.getRunDetail.mockResolvedValue(runDetailWithGitStatus('run-1', gitStatus))
+    mocks.getRunDetail.mockResolvedValue(runDetailWithGitStatus('run-1', gitStatus, status))
     renderWithEffects()
     await act(async () => {
       await mocks.centerActionBarProps?.onPredict?.()
@@ -2094,8 +2097,11 @@ describe('Workspace run_ended history wiring (integration)', () => {
     })
   }
 
-  async function startRunToCompletion(gitStatus: RunDetail['metadata']['git_status']) {
-    await startRunToEngineEnd(gitStatus)
+  async function startRunToCompletion(
+    gitStatus: RunDetail['metadata']['git_status'],
+    status: RunDetail['metadata']['status'] = 'success',
+  ) {
+    await startRunToEngineEnd(gitStatus, status)
     await emitTerminalRunGate()
   }
 
@@ -2177,6 +2183,27 @@ describe('Workspace run_ended history wiring (integration)', () => {
   // carries the STARTED metadata shows "n/a" forever, because a started run has
   // no metrics yet. The terminal projection is what replaces it, so it has to
   // carry the finished numbers.
+  // D7 (decision 2026-08-09): a finished run must SAY it finished. The archive
+  // toast reports a git snapshot, which is a different fact — so the outcome
+  // toast is additive, and asserting both appear is the point of this test.
+  it('announces the run outcome alongside — not instead of — the archive toast', async () => {
+    await startRunToCompletion('committed')
+
+    const messages = toastMocks.success.mock.calls.map((call) => String(call[0]))
+    expect(messages).toContainEqual(expect.stringMatching(/Local History/i))
+    const outcome = messages.find((message) => /run succeeded/i.test(message))
+    expect(outcome).toBeDefined()
+    expect(outcome).toContain('207.6s')
+    expect(outcome).toContain('115,117 tokens')
+  })
+
+  it('reports a failed run as an error toast, not a success one', async () => {
+    await startRunToCompletion(null, 'failed')
+
+    expect(toastMocks.error).toHaveBeenCalledWith(expect.stringMatching(/run failed/i))
+    expect(toastMocks.success).not.toHaveBeenCalledWith(expect.stringMatching(/run succeeded/i))
+  })
+
   it('replaces the running row with the finished run, duration and all', async () => {
     await startRunToCompletion('committed')
 
@@ -2204,11 +2231,12 @@ function runEndedEvent(runId: string): EventEnvelope {
 function runDetailWithGitStatus(
   runId: string,
   gitStatus: RunDetail['metadata']['git_status'],
+  status: RunDetail['metadata']['status'] = 'success',
 ): RunDetail {
   return {
     metadata: {
       run_id: runId,
-      status: 'success',
+      status,
       started_at: '2026-06-17T00:00:00Z',
       metrics: { input_tokens: 99364, output_tokens: 15753, total_tokens: 115117, cost_estimate: null, wall_time_sec: 207.566 },
       input_summary: null,

@@ -107,7 +107,7 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
     # 验证是否成功持久化了 result.json 到 runs 目录
     from app.services.skills import workspace_dir_for
 
-    expected_result_json = workspace_dir_for(skill_dir) / "runs" / "predict-run-777" / "result.json"
+    expected_result_json = workspace_dir_for(skill_dir) / "predicts" / "predict-run-777" / "result.json"
     assert expected_result_json.exists()
     saved_data = json.loads(expected_result_json.read_text(encoding="utf-8"))
     assert saved_data["run_id"] == "predict-run-777"
@@ -400,7 +400,7 @@ def test_predict_writes_its_account_before_dropping_the_live_record(
     import app.services.run_manager as run_manager_module
 
     skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-order", success=True)
-    run_dir = skill_dir / ".workspace" / "runs" / "predict-order"
+    run_dir = skill_dir / ".workspace" / "predicts" / "predict-order"
     account_existed_at_teardown: list[bool] = []
     real_finish = run_manager_module.run_manager.finish_transient_predict_run
 
@@ -482,7 +482,7 @@ def _predict_fixture(
         # The engine drops the trace into the run directory before Studio seals it;
         # reproduce that here, because whether the seal picks the trace up is exactly
         # what these tests are about.
-        run_dir = skill_dir / ".workspace" / "runs" / run_id
+        run_dir = skill_dir / ".workspace" / "predicts" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "trace.jsonl").write_text(
             json.dumps({"event_type": "phase_start", "phase": "draft", "seq": 1}) + "\n",
@@ -516,7 +516,7 @@ def test_finished_predict_leaves_the_status_account_a_run_reader_needs(
 
     PredictorService().dispatch_predict_job("skill")
 
-    account = workspace_dir_for(skill_dir) / "runs" / "predict-account" / "run_metadata.json"
+    account = workspace_dir_for(skill_dir) / "predicts" / "predict-account" / "run_metadata.json"
     assert account.exists(), "a sealed predict run must record its own outcome"
     metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
     assert metadata.run_id == "predict-account"
@@ -548,7 +548,7 @@ def test_failed_predict_records_the_same_verdict_the_gate_broadcasts(
 
     result = PredictorService().dispatch_predict_job("skill")
 
-    account = workspace_dir_for(skill_dir) / "runs" / "predict-bad" / "run_metadata.json"
+    account = workspace_dir_for(skill_dir) / "predicts" / "predict-bad" / "run_metadata.json"
     metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
     assert metadata.status == "failed"
     assert metadata.status == predictor_module.export_predict_diagnostics(result).status

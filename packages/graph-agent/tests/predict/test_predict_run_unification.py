@@ -9,6 +9,7 @@ import pytest
 from graph_agent.core import runner as runner_module
 from graph_agent.core._predict_internal.strategy import HeuristicStubStrategy
 from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.io.run_layout import predicts_root, runs_root
 
 
 class _DumpData:
@@ -130,11 +131,13 @@ def test_predict_context_threaded_to_assemble_graph(
     runner_module._run_v030_skill_dict(
         skill_root,
         workspace_dir=tmp_path / "workspace-run",
+        run_root=runs_root(tmp_path / "workspace-run"),
         skill_resolver=mock_skill_resolver,
     )
     runner_module._run_v030_skill_dict(
         skill_root,
         workspace_dir=tmp_path / "workspace-predict",
+        run_root=predicts_root(tmp_path / "workspace-predict"),
         skill_resolver=mock_skill_resolver,
         predict_context=runner_module.SDKPredictContext(HeuristicStubStrategy(), None),
     )
@@ -168,6 +171,7 @@ def test_predict_root_output_schema_validated_like_run(
         runner_module._run_v030_skill_dict(
             skill_root,
             workspace_dir=tmp_path / "workspace-run",
+            run_root=runs_root(tmp_path / "workspace-run"),
             skill_resolver=mock_skill_resolver,
         )
     with pytest.raises(GraphAgentFatalError) as predict_exc:

@@ -5,6 +5,7 @@ from typing import Any
 
 from graph_agent.core import runner as runner_module
 from graph_agent.core._predict_internal.strategy import HeuristicStubStrategy
+from graph_agent.io.run_layout import runs_root
 
 
 def _write_logic_skill(root: Path) -> Path:
@@ -69,6 +70,7 @@ def test_run_path_behavior_unchanged_after_predict_context_param(
     raw = runner_module._run_v030_skill_dict(
         skill_root,
         workspace_dir=tmp_path / "workspace-run",
+        run_root=runs_root(tmp_path / "workspace-run"),
         thread_id="run-contract-guard",
         skill_resolver=mock_skill_resolver,
     )

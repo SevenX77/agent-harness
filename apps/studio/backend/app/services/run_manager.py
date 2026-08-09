@@ -12,7 +12,6 @@ import re
 import shutil
 import tempfile
 import time
-import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +32,7 @@ from app.core.adapters.engine import (
     TransportErrorPayload,
     make_event_envelope,
 )
+from app.core.adapters.run_layout import predicts_root, runs_root
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -56,10 +56,17 @@ from app.models.runs import (
 from app.services.gate_events import GateOutcome, publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
+from app.services.run_ids import is_predict_run_id, new_run_id
 from app.services.run_report import write_run_report
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
-from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
+from app.services.skills import (
+    predicts_dir_for,
+    resolve_skill_dir,
+    run_dir_for,
+    runs_dir_for,
+    test_inputs_dir_for_skill,
+)
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
 logger = logging.getLogger(__name__)
@@ -938,16 +945,19 @@ class RunManager:
         )
 
     def list_runs(self, skill_id: str) -> RunListResponse:
-        resolve_skill_dir(skill_id)
-        runs_root = run_dir_for(skill_id, "_").parent
-        if not runs_root.exists():
-            return RunListResponse(runs=[], total=0)
+        # Runs and predicts are stored apart and read together: the split is a
+        # storage fact, the single history is the product (decision 2026-08-09
+        # D13). Which kind a row is stays on RunMetadata.kind, as before.
+        skill_dir = resolve_skill_dir(skill_id)
         metadata: list[RunMetadata] = []
-        for metadata_path in runs_root.glob("*/run_metadata.json"):
-            try:
-                metadata.append(_metadata_with_input_summary(metadata_path))
-            except Exception:
+        for root in (runs_dir_for(skill_dir), predicts_dir_for(skill_dir)):
+            if not root.exists():
                 continue
+            for metadata_path in root.glob("*/run_metadata.json"):
+                try:
+                    metadata.append(_metadata_with_input_summary(metadata_path))
+                except Exception:
+                    continue
         runs = sorted(metadata, key=lambda item: item.started_at, reverse=True)
         return RunListResponse(runs=runs, total=len(runs))
 
@@ -1400,33 +1410,6 @@ def _resume_audit_event(
     )
 
 
-def _local_now() -> datetime:
-    """The wall clock on the machine producing the run.
-
-    Run ids are read by a person looking at a folder listing, and a UTC stamp
-    reads as the wrong time to that person. This is deliberately naive: the id
-    is a label for humans, never a value anything computes with.
-    """
-    return datetime.now()
-
-
-def _id_stamp() -> str:
-    return _local_now().strftime("%Y-%m-%dT%H-%M-%S")
-
-
-def new_run_id() -> str:
-    return f"{_id_stamp()}_{uuid.uuid4().hex[:8]}"
-
-
-def new_predict_run_id() -> str:
-    """A predict id is a run id wearing a prefix.
-
-    Same producer, so the two shapes cannot drift apart — which is exactly how
-    predict ended up as a bare uuid that sorted by nothing.
-    """
-    return f"predict-{new_run_id()}"
-
-
 def _validate_run_id_segment(run_id: str) -> None:
     if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id or not _SAFE_RUN_ID_RE.fullmatch(run_id):
         response = error_response(
@@ -1456,7 +1439,9 @@ def _source_less_run_dir_for(skill_id: str, run_id: str) -> Path:
         )
         raise_error_response(response)
     _validate_run_id_segment(run_id)
-    return config.DEFAULT_SKILLS_ROOT / skill_id / ".workspace" / "runs" / run_id
+    workspace = config.DEFAULT_SKILLS_ROOT / skill_id / ".workspace"
+    root = predicts_root(workspace) if is_predict_run_id(run_id) else runs_root(workspace)
+    return root / run_id
 
 
 def _write_run_metadata(run_dir: Path, metadata: RunMetadata) -> None:

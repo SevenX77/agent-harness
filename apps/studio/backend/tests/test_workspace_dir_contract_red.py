@@ -51,7 +51,7 @@ def test_skill_detail_file_paths_do_not_expose_predict_dir(client: TestClient) -
     assert "predict_dir" not in response.json()["file_paths"]
 
 
-def test_predictor_dispatch_writes_predict_artifacts_under_workspace_runs(
+def test_predictor_dispatch_writes_predict_artifacts_under_workspace_predicts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -89,7 +89,7 @@ def test_predictor_dispatch_writes_predict_artifacts_under_workspace_runs(
     result = service.dispatch_predict_job("skill", None, input_data={"topic": "predict"})
 
     assert result.status == "success"
-    run_dir = workspace_dir / "runs" / "predict-workspace-run"
+    run_dir = workspace_dir / "predicts" / "predict-workspace-run"
     assert (run_dir / "result.json").is_file()
     assert not (run_dir / "latest_predict.json").exists()
     assert not (workspace_dir / "predict").exists()

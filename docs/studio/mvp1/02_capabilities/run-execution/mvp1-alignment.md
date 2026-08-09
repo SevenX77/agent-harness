@@ -31,20 +31,30 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - 机制: 一个 id 生产者铸造两种 id —— run 是 `<本地时间戳>_<uuid8>`,predict 是同一形状加 `predict-` 前缀。
   时间戳取**运行所在机器的本地墙钟**(naive),因为 id 的唯一读者是看文件夹列表的人;
   它从不参与计算,不承担时序语义。
+  两种执行**分目录存放**:run 在 `<workspace>/runs/<run_id>`,predict 在 `<workspace>/predicts/<run_id>`。
+  引擎的执行入口接收**宿主指定的 run 根目录**(`run_root`,必填,不设默认值),
+  由知道自己在跑什么的那一层决定:`run_skill` / `resume_skill` / 编译产物 run 路径给 runs 根,
+  `predict_skill` 给 predicts 根。Studio 侧由** id 前缀**决定根 —— Studio 是这两种 id 的唯一铸造者,
+  所以它读得回自己写下的类型;引擎不做这件事,因为引擎收到的 id 不是它铸的。
 - 决策(2026-08-09 D13): ① 不用 UTC —— UTC 戳对着文件树的人读起来就是错的时间;
   ② predict 与 run **同一形状**,由同一个函数产出,避免第二处 strftime 造成漂移
   (旧 predict id 是裸 uuid,排序无意义、信息为零);
   ③ 删除 `.workspace/runs/latest/` 镜像 —— 它是整个 run 目录的第二份拷贝,
   存在的唯一理由是给 team-save 一个固定路径可 force-add;git 需要的是路径而不是**固定**路径,
   所以改为直接 force-add **最新的那个 run 目录**(按目录 mtime 取)。
+  ④ predict 与 run **分目录** —— 合在一起时,每个读者都要为这个区别付钱:
+  列 run 要过滤掉排练、清排练要小心别删掉 run、"最新的那个目录"是哪种取决于最后跑的是哪种。
+  分开只多一个名字,这些全部消失。**磁盘分开、UI 仍是一个列表**:`list_runs` 同时扫两个根,
+  行的类型仍由 `RunMetadata.kind` 区分(C7 / 2026-08-07 D2 不变)。
+  按不向后兼容原则,已存在的 run/predict 目录直接丢弃,不写迁移。
 - 原话/来源: `01_workflows/04_run-and-verify.md` C17;决议
   `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D13。
 - 测试: 冻结本地时钟后 run/predict id 形状锁定且共享同一戳;两者都能通过 run-id 路径段校验;
-  team-save force-add 的是最新 run 目录本身。
-- Status: live(2026-08-09)。**仍 target-design**: predict 与 run 分目录存放 ——
-  run 目录路径由引擎按 `<workspace>/runs/<run_id>` 组装,分目录需要引擎先让宿主指定 run 目录根,
-  另行排期;届时 `list_runs` 同时扫描两个根,UI 仍是一个列表(C7 不变)。
-- 归属: capability `run-execution`; platform `engine`(目录根契约)。
+  team-save force-add 的是最新 run 目录本身;predict 跑完后 trace 落在 predicts 根、
+  `runs/` 根**根本不存在**;`list_runs` 在两个根各放一条时返回两条;
+  引擎的执行入口**缺少 `run_root` 直接 TypeError**(不给默认值,才不会有人默默继承错的根)。
+- Status: live(2026-08-09)。
+- 归属: capability `run-execution`; platform `engine`(run 根由宿主指定的契约)。
 
 ### F2. Live Run State And Node Lights
 

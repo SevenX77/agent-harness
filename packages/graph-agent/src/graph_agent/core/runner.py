@@ -81,6 +81,7 @@ from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, requ
 from graph_agent.core.state import BusinessData
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
 from graph_agent.io.artifact_manifest import write_manifest_artifacts
+from graph_agent.io.run_layout import predicts_root, runs_root
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -338,11 +339,13 @@ def predict_skill(  # noqa: C901
     tracing_callback.on_chain_start(metadata={})
 
     run_id = thread_id or str(uuid.uuid4())
-    trace_output = workspace_root / "runs" / run_id
+    run_root = predicts_root(workspace_root)
+    trace_output = run_root / run_id
 
     raw = _run_v030_skill_dict(
         skill_path_obj,
         workspace_dir=workspace_root,
+        run_root=run_root,
         thread_id=run_id,
         event_subscriber=event_subscriber,
         callbacks=[tracing_callback],
@@ -476,7 +479,7 @@ def run_skill(
             wall_time_sec=wall_time,
         )
         _write_workflow_result_artifacts(
-            workspace_root / "runs" / failed_result.run_id,
+            runs_root(workspace_root) / failed_result.run_id,
             failed_result,
         )
         return failed_result
@@ -495,7 +498,7 @@ def run_skill(
         finished_at=finished_at,
         wall_time_sec=wall_time,
     )
-    run_dir = Path(raw.get("run_dir") or workspace_root / "runs" / workflow_result.run_id)
+    run_dir = Path(raw.get("run_dir") or runs_root(workspace_root) / workflow_result.run_id)
     _write_workflow_result_artifacts(run_dir, workflow_result)
     return workflow_result
 
@@ -537,7 +540,7 @@ def resume_skill(
         else skill_path_obj.stem
     )
 
-    trace_output = workspace_root / "runs" / run_id
+    trace_output = runs_root(workspace_root) / run_id
     event_sink = _prepare_v030_event_sink(
         trace_output=trace_output,
         event_subscriber=event_subscriber,
@@ -755,6 +758,7 @@ def _run_skill_dict(
         return _run_v030_skill_dict(
             skill_path,
             workspace_dir=workspace_dir,
+            run_root=runs_root(workspace_dir),
             mock_llm=mock_llm,
             thread_id=thread_id,
             event_subscriber=event_subscriber,
@@ -907,6 +911,7 @@ def _run_compiled_artifact_graph(
     raw = _run_v030_skill_dict(
         artifact_root,
         workspace_dir=workspace_dir,
+        run_root=runs_root(workspace_dir),
         mock_llm=_NO_MOCK_LLM,
         thread_id=run_id,
         event_subscriber=event_subscriber if callable(event_subscriber) else None,
@@ -930,7 +935,7 @@ def _run_compiled_artifact_graph(
         finished_at=datetime.now(UTC),
         wall_time_sec=wall_time,
     )
-    run_dir = Path(raw.get("run_dir") or workspace_dir / "runs" / workflow_result.run_id)
+    run_dir = Path(raw.get("run_dir") or runs_root(workspace_dir) / workflow_result.run_id)
     _write_workflow_result_artifacts(run_dir, workflow_result)
     return workflow_result
 
@@ -978,10 +983,10 @@ def _run_compiled_artifact_predict_graph(
     )
 
 
-def _workflow_result_ref(result: WorkflowResult | RunResult, workspace_dir: Path | None) -> str | None:
-    if workspace_dir is None:
+def _workflow_result_ref(result: WorkflowResult | RunResult, run_root: Path | None) -> str | None:
+    if run_root is None:
         return None
-    result_path = workspace_dir / "runs" / result.run_id / "result.json"
+    result_path = run_root / result.run_id / "result.json"
     if result_path.is_file():
         return f"file://{result_path}"
     return None
@@ -1171,7 +1176,11 @@ def run_artifact(
             retryable=retryable,
         )
 
-    result_ref = _workflow_result_ref(outputs, workspace_dir) if isinstance(outputs, RunResult) else None
+    result_ref = (
+        _workflow_result_ref(outputs, runs_root(workspace_dir) if workspace_dir else None)
+        if isinstance(outputs, RunResult)
+        else None
+    )
     if run_artifact_store is not None:
         result_ref = _run_artifact_store_result(
             run_artifact_store=run_artifact_store,
@@ -1236,7 +1245,7 @@ def predict_artifact(
                 retryable=retryable,
             )
         workspace_dir = _resolve_artifact_workspace_dir(request)
-        result_ref = _workflow_result_ref(result, workspace_dir)
+        result_ref = _workflow_result_ref(result, predicts_root(workspace_dir) if workspace_dir else None)
         if run_artifact_store is not None:
             result_ref = _run_artifact_store_result(
                 run_artifact_store=run_artifact_store,
@@ -2016,6 +2025,7 @@ def _run_v030_skill_dict(
     *,
     mock_llm: Any = _NO_MOCK_LLM,
     workspace_dir: Path,
+    run_root: Path,
     thread_id: str | None = None,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     callbacks: list[Any] | None = None,
@@ -2039,7 +2049,7 @@ def _run_v030_skill_dict(
     resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()
     run_id = thread_id or str(uuid.uuid4())
-    trace_output = workspace_dir / "runs" / run_id
+    trace_output = run_root / run_id
     root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_dir)
     if root_runtime_inputs:
         inputs = {**inputs, **root_runtime_inputs}

@@ -44,6 +44,7 @@ from app.core.adapters.engine import (
     parse_markdown_parts,
     read_subgraph_path,
 )
+from app.core.adapters.run_layout import predicts_root, runs_root
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
@@ -67,6 +68,7 @@ from app.services.file_watcher import record_api_write, register_workspace
 from app.services.gate_events import publish_skill_gate
 from app.services.git_local import initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
+from app.services.run_ids import is_predict_run_id
 from app.services.runtime_config import refresh_runtime_config, runtime_input_fields_for_engine
 from app.services.skill_resolver import build_studio_skill_resolver
 
@@ -1311,9 +1313,14 @@ def resolve_skill_dir(skill_id: str) -> Path:
 
 
 def run_dir_for(skill_id: str, run_id: str) -> Path:
-    """Return the Studio V3 run directory for a skill run."""
+    """Return the Studio V3 directory holding this run's artifacts.
+
+    A predict lands in its own root (decision 2026-08-09 D13). The id is what
+    says which, so every caller stays a two-argument call instead of carrying a
+    kind it does not always know.
+    """
     safe_run_id = validate_run_id_segment(run_id)
-    return runs_dir_for(resolve_skill_dir(skill_id)) / safe_run_id
+    return run_root_for(resolve_skill_dir(skill_id), safe_run_id) / safe_run_id
 
 
 def workspace_dir_for(skill_dir: Path) -> Path:
@@ -1321,7 +1328,16 @@ def workspace_dir_for(skill_dir: Path) -> Path:
 
 
 def runs_dir_for(skill_dir: Path) -> Path:
-    return workspace_dir_for(skill_dir) / "runs"
+    return runs_root(workspace_dir_for(skill_dir))
+
+
+def predicts_dir_for(skill_dir: Path) -> Path:
+    return predicts_root(workspace_dir_for(skill_dir))
+
+
+def run_root_for(skill_dir: Path, run_id: str) -> Path:
+    """Which of the two roots this run's artifacts belong under."""
+    return predicts_dir_for(skill_dir) if is_predict_run_id(run_id) else runs_dir_for(skill_dir)
 
 
 def golden_dir_for(skill_dir: Path) -> Path:

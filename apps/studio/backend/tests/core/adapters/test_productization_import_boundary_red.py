@@ -38,6 +38,13 @@ SDK_IMPORT_ALLOWLIST = {
         "expiry": "remove per-file entries when DTO ports no longer need SDK concrete imports",
         "gate": "test_studio_business_layer_does_not_import_sdk_internals_directly",
     },
+    "app/core/adapters/run_layout.py": {
+        "owner": "studio-platform",
+        "reason": "run/predict directory names are Engine-owned; this re-exports them so no Studio service imports the SDK for a path",
+        "risk": "an Engine layout change reaches Studio through this one file instead of being caught at a port",
+        "expiry": "remove when run artifacts are addressed through an Engine-owned storage port instead of filesystem paths",
+        "gate": "test_studio_business_layer_does_not_import_sdk_internals_directly",
+    },
     "app/core/adapters/runtime_state_resume_bridge.py": {
         "owner": "studio-platform",
         "reason": "runtime resume bridge is the narrow adapter boundary for Engine resume_skill",

@@ -116,7 +116,7 @@ def test_predict_suppresses_declared_file_output_writes(
 
     assert result.success is True
     assert calls == []
-    assert not (workspace_dir / "runs" / result.run_id / "artifacts" / "report.json").exists()
+    assert not (workspace_dir / "predicts" / result.run_id / "artifacts" / "report.json").exists()
 
 
 def test_predict_suppresses_manifest_artifact_writes(
@@ -150,7 +150,7 @@ def test_predict_suppresses_manifest_artifact_writes(
         },
     )
 
-    artifacts_dir = workspace_dir / "runs" / result.run_id / "artifacts"
+    artifacts_dir = workspace_dir / "predicts" / result.run_id / "artifacts"
     assert result.success is True
     assert calls == []
     assert not list(artifacts_dir.glob("report_manifest_latest_*.json"))
@@ -200,7 +200,7 @@ def test_predict_diagnostic_artifacts_unchanged(
 
     result = _run_predict(skill_root, workspace_dir, mock_skill_resolver)
 
-    run_dir = workspace_dir / "runs" / result.run_id
+    run_dir = workspace_dir / "predicts" / result.run_id
     trace_path = run_dir / "trace.jsonl"
     result_path = run_dir / "result.json"
     final_state_path = run_dir / "final_state.json"

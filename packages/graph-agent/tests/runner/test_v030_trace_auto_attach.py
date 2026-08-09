@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from graph_agent.core.runner import _run_v030_skill_dict
+from graph_agent.io.run_layout import runs_root
 
 
 def _write(path: Path, text: str) -> None:
@@ -100,11 +101,12 @@ def _run_without_subscriber(
         thread_id=run_id,
         skill_resolver=mock_skill_resolver,
         workspace_dir=trace_dir,
+        run_root=runs_root(trace_dir),
         topic="observability",
         request_id=run_id,
     )
     assert result["run_id"] == run_id
-    return trace_dir / "runs" / run_id / "trace.jsonl"
+    return runs_root(trace_dir) / run_id / "trace.jsonl"
 
 
 def _read_trace_events(trace_path: Path) -> list[dict[str, Any]]:
@@ -218,6 +220,7 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
             thread_id=run_id,
             skill_resolver=mock_skill_resolver,
             workspace_dir=trace_dir,
+            run_root=runs_root(trace_dir),
             topic="observability",
             request_id=run_id,
         )

@@ -523,7 +523,7 @@ def test_predict_artifact_without_executor_executes_predict_graph_with_mock(
     session = runner.predict_artifact(request, skill_resolver=mock_skill_resolver)
 
     assert isinstance(session, RunSession)
-    result_path = workspace_dir / "runs" / session.run_id / "result.json"
+    result_path = workspace_dir / "predicts" / session.run_id / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     assert result["source"] == "predict"
     assert result["context"]["prepared"] == "prepared:venus"
@@ -562,7 +562,7 @@ def test_predict_artifact_agent_phase_never_invokes_live_llm_provider(
 
     assert isinstance(session, RunSession)
     assert provider.calls == 0
-    result_path = workspace_dir / "runs" / session.run_id / "result.json"
+    result_path = workspace_dir / "predicts" / session.run_id / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     assert result["source"] == "predict"
     assert result["success"] is True
@@ -607,7 +607,7 @@ def test_predict_artifact_agent_phase_accepts_complex_mock_payload(
     session = runner.predict_artifact(request, skill_resolver=mock_skill_resolver)
 
     assert isinstance(session, RunSession)
-    result_path = workspace_dir / "runs" / session.run_id / "result.json"
+    result_path = workspace_dir / "predicts" / session.run_id / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     assert result["source"] == "predict"
     assert result["success"] is True

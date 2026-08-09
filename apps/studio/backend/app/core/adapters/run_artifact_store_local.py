@@ -8,6 +8,8 @@ from typing import Any, overload
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactIndex
 
 from app.core.adapters.http_transport import StudioAdapterError
+from app.core.adapters.run_layout import predicts_root, runs_root
+from app.services.run_ids import is_predict_run_id
 
 
 class LocalRunArtifactStore:
@@ -194,7 +196,8 @@ class LocalRunArtifactStore:
     def _run_dir(self, run_id: str) -> Path:
         if not _is_safe_run_id(run_id):
             raise StudioAdapterError("artifact.invalid_run_id", {"run_id": run_id})
-        return self.root / "runs" / run_id
+        root = predicts_root(self.root) if is_predict_run_id(run_id) else runs_root(self.root)
+        return root / run_id
 
     def _manifest_object_refs(self, manifest: dict[str, Any], manifest_file: Path) -> list[ObjectRef]:
         refs = [

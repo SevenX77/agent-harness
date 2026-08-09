@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from graph_agent.core import runner as runner_module
+from graph_agent.io.run_layout import runs_root
 
 
 class _DumpData:
@@ -158,6 +159,7 @@ def test_predict_does_not_pollute_real_run_checkpoint_db(
         raw_run = runner_module._run_v030_skill_dict(
             skill_root,
             workspace_dir=tmp_path / "workspace-run",
+            run_root=runs_root(tmp_path / "workspace-run"),
             thread_id=thread_id,
             skill_resolver=mock_skill_resolver,
             checkpointer_spec="auto",

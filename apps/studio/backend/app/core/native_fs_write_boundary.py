@@ -6,6 +6,8 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from app.core.adapters.run_layout import PREDICTS_DIRNAME, RUNS_DIRNAME
+
 
 @dataclass(frozen=True)
 class WorkspaceWriteClassification:
@@ -13,7 +15,10 @@ class WorkspaceWriteClassification:
     requires_native_fs_source_writer: bool
 
 
-_RUNTIME_ARTIFACT_PREFIX = (".workspace", "runs")
+_RUNTIME_ARTIFACT_PREFIXES = (
+    (".workspace", RUNS_DIRNAME),
+    (".workspace", PREDICTS_DIRNAME),
+)
 _STUDIO_WORKSPACE_DATA_PREFIXES = (
     (".workspace", "import_files"),
     (".workspace", "golden"),
@@ -75,7 +80,7 @@ def classify_workspace_write_path(path: str | Path) -> WorkspaceWriteClassificat
             kind="invalid_path",
             requires_native_fs_source_writer=False,
         )
-    if parts[:2] == _RUNTIME_ARTIFACT_PREFIX:
+    if parts[:2] in _RUNTIME_ARTIFACT_PREFIXES:
         return WorkspaceWriteClassification(
             kind="runtime_artifact",
             requires_native_fs_source_writer=False,

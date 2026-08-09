@@ -14,11 +14,13 @@ from app.core.adapters.engine import (
     CallbackEvent,
     RunResult,
 )
+from app.core.adapters.run_layout import predicts_root
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.gate_events import publish_skill_gate_from_thread
-from app.services.run_manager import new_predict_run_id, run_manager
+from app.services.run_ids import new_predict_run_id
+from app.services.run_manager import run_manager
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
@@ -105,7 +107,7 @@ class PredictorService:
             run_manager.register_transient_predict_run(
                 skill_id=skill_id,
                 run_id=predict_run_id,
-                run_dir=workspace_dir / "runs" / predict_run_id,
+                run_dir=predicts_root(workspace_dir) / predict_run_id,
             )
             event_subscriber = _predict_event_subscriber(predict_run_id)
 
@@ -182,7 +184,7 @@ class PredictorService:
         workspace_dir = workspace_dir_for(skill_dir)
         from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
-        run_dir = workspace_dir / "runs" / run_id
+        run_dir = predicts_root(workspace_dir) / run_id
         trace_file = run_dir / "trace.jsonl"
         store = LocalRunArtifactStore(root=workspace_dir)
         store.begin_run(run_id, metadata=_artifact_store_metadata("predict", artifact_ref))

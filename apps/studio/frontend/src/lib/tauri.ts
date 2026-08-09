@@ -713,6 +713,12 @@ export async function readWorkspaceFile(
 export interface WorkspaceDirEntry {
   name: string
   kind: 'file' | 'dir'
+  /**
+   * Last modification time in epoch milliseconds, or null when the filesystem
+   * did not report one. Run directories are listed newest-first from it
+   * (decision 2026-08-09 D13); everywhere else it is unused.
+   */
+  modifiedMs: number | null
 }
 
 export async function listWorkspaceDir(

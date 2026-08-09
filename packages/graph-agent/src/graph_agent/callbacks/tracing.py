@@ -255,8 +255,12 @@ class TracingCallback(Callback):
                 "duration_ms": round(duration_ms, 2) if duration_ms is not None else None,
             },
         )
+        # The legacy hook hands over a call that already finished and carries no
+        # identity, so this sink mints one. Nothing announced a start for it
+        # either — there is no such moment to report from here.
         self._write_typed_event(
             ToolCallEvent(
+                tool_call_id=uuid.uuid4().hex,
                 phase_name=phase_name,
                 tool_name=tool_name,
                 args=args,

@@ -440,6 +440,7 @@ EXPECTED_CALLBACK_EVENT_VARIANTS = frozenset({'AgentLoopIterationEvent',
            'RunStartedEvent',
            'ThreadCleanedUpEvent',
            'ToolCallEvent',
+           'ToolCallStartedEvent',
            'ValidationFailEvent',
            'ValidationPassEvent',
            'WorkingMemoryUpdateEvent'})

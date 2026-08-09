@@ -601,6 +601,7 @@ features:
   events_primary:
   - FinishTaskEvent
   - ToolCallEvent
+  - ToolCallStartedEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:

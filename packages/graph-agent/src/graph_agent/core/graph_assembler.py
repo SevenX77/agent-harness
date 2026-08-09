@@ -2143,9 +2143,15 @@ def _build_skill_node(
                         if getattr(follow_msg, "tool_call_id", None) == tc_id:
                             tc_result = str(follow_msg.content)
                             break
+                    # This loop reads finished calls off the message list after
+                    # the inner graph returned, so the moment a call *started*
+                    # is long gone — no started event is emitted here. The
+                    # provider id is the same one TracingMiddleware announced
+                    # with, so the pair still closes.
                     _safe_emit_event(
                         callbacks,
                         ToolCallEvent(
+                            tool_call_id=str(tc_id) if tc_id else uuid.uuid4().hex,
                             phase_name=phase_id,
                             tool_name=str(tc_name or ""),
                             args=tc_args if isinstance(tc_args, dict) else {},

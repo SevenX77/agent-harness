@@ -166,6 +166,7 @@ class RecordingCallback(Callback):
         ),
         (
             ToolCallEvent(
+                tool_call_id="call-1",
                 phase_name="draft",
                 tool_name="read_file",
                 args={"path": "a.md"},

@@ -693,14 +693,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     // outcome updates its stage but must not yank this view around.
     if (event.skillId !== currentSkillIdRef.current) return
 
-    // Any run-gate outcome other than "started" is published after the backend
-    // has finished writing the run out (see `finalizedRunId`), so this is the
-    // moment the finished run may be read.
-    if (event.gate === "run" && event.outcome !== "started" && event.runId) {
-      setFinalizedRunId(event.runId)
-    }
-
     for (const effect of effects) {
+      if (effect.kind === "finalize-run") {
+        // Published after the backend finished writing the run out, so this is
+        // the moment the finished run may be read (see `finalizedRunId`).
+        setFinalizedRunId(effect.runId)
+        continue
+      }
       if (effect.kind === "close-drawers") {
         setCompileDrawerOpen(false)
         setPredictDrawerOpen(false)

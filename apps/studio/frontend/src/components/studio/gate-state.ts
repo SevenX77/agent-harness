@@ -55,6 +55,12 @@ export type GateEffect =
   | { kind: "follow-run"; runId: string }
   /** Bring the live trace into view; predict and run both stream events into it. */
   | { kind: "open-trace" }
+  /**
+   * This run is over and written out, so its record can now be read: its row
+   * belongs in the run list, its outcome belongs in a toast, and any node still
+   * painted "running" belongs to a run that no longer is.
+   */
+  | { kind: "finalize-run"; runId: string }
 
 export interface GateProjection {
   stage: SkillBuildStage
@@ -104,6 +110,13 @@ export function projectGateEvent(event: SkillGateEvent): GateProjection {
   // same panel their own click would have.
   if ((event.gate === "predict" || event.gate === "run") && event.outcome === "started") {
     effects.push({ kind: "open-trace" })
+  }
+  // A predict is a run for everything that happens at the end of one: it has a
+  // directory, an account, a `run_ended`, a row in the same list and the same
+  // node badges. Only a compile produces no run, and only "started" is not an
+  // ending — so those two are the exclusions, not the gate's name.
+  if (event.gate !== "compile" && event.outcome !== "started" && event.runId) {
+    effects.push({ kind: "finalize-run", runId: event.runId })
   }
 
   return { stage, effects }

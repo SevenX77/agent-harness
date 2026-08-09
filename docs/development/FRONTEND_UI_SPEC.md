@@ -56,6 +56,20 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - **基础库选型**: 抛弃内联 CSS 和手写类名，全面基于 `TailwindCSS v4` 配合无头组件库 [`shadcn/ui`](https://ui.shadcn.com/) (官方主页) / [组件文档](https://ui.shadcn.com/docs/components)。
 - *(新)* 诸如 `RadioGroup` 等新增组件，必须优先从 `shadcn` 统一引入，并统一落户在 `src/components/ui/` 目录下；销毁性确认统一走 `AlertDialog`（见 §2 删除确认条），**不再用 Sonner toast 承载确认**（2026-07-02 R6-2 推翻旧「统一走 Sonner」规则）。
 - **严禁重新发明轮子**：业务代码中如需模态框，必须复用 `ui/dialog.tsx`，除非有极为特殊的交互理由，才允许手写封装。
+- **`src/components/ui/` 下的封装是官方源的落地副本，不做本地魔改（2026-08-09 D10）**：这些文件由
+  `npx shadcn@latest add <component>` 从官方 registry 生成，按本仓 `components.json`（`style: radix-mira`、
+  `rtl: true`）解析。需要改它时，先问「这是不是官方封装本来就提供的能力」——**尺寸走 variant、
+  间距和布局走使用方的 `className`、颜色和字号走 design token**，都不需要动封装文件本身。
+  真要改封装，必须在同一个 PR 里写清改了哪一行、为什么官方版本不够用，并逐一真机复核所有使用方
+  （封装是共享文件，一处改动波及全部界面；并行任务不得同时改它，需先定唯一 owner）。
+- **不要在使用方覆盖封装已经声明的东西**：`InputGroupAddon` 自带图标尺寸规则
+  （`[&>svg:not([class*='size-'])]:size-3.5`）和 `text-muted-foreground`，`InputGroupButton` 的
+  `xs` 变体自带 `size-3`。在图标上再写 `className="h-4 w-4 text-muted-foreground"` 会同时打掉
+  这两条并把 16px 图标塞进 28px 高（`h-7`）的输入框，是「照官方示例用就不会有的问题」。
+  照官方示例写 `<SearchIcon />`，让持有它的容器决定它多大。
+- **`rtl: true` 的仓库一律用逻辑属性**：官方封装用 `ps-*` / `pe-*` / `ms-*` / `me-*`；使用方的
+  覆盖也必须用逻辑属性。混用 `pl-*` / `pr-*` 与 `ps-*` / `pe-*` 会写同一个 CSS 属性、由样式表
+  先后顺序决定谁赢，是不可预期的样式竞争，不是覆盖。
 
 ### 2.2 样式 Token 化 (Design Tokens)
 **本项目样式真实来源**: shadcn `radix-mira` preset (preset id `b38miVIYq`, style `mira`, theme `indigo`), 可直接预览 demo: <https://ui.shadcn.com/create?preset=b38miVIYq&template=vite&pointer=true&rtl=true>。
@@ -179,6 +193,12 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 带图标、清空、复制、显示/隐藏等行内动作的输入框，优先使用本地 `InputGroup` / `InputGroupButton` / `InputGroupAddon`。不要用绝对定位按钮硬盖在 `Input` 上；这种做法容易被 input 拦截点击，也更难保证窄宽度布局。
 - 搜索框应支持清空操作：有 query 时显示清空按钮，清空后恢复列表并把焦点放回搜索输入框。
 - 搜索结果数量应在标题附近展示，让用户知道当前 filter 后剩余多少项。
+- **筛选跟随搜索框，不另占一条常驻控件行（2026-08-09 D11）**：搜索与筛选是同一件事——「让我少看点」——
+  所以同处一地、同时出现。搜索区获得焦点时，其下方展开**一行**筛选标签；标签放不下时横向滚动，
+  **只允许一行**（它夹在搜索框和内容之间，换行就是把内容挤下屏）。焦点判定必须用**包住搜索框和标签行的
+  共同 `focus-within` 作用域**（本仓用 `group/trace-search`），不能只看输入框——点标签的瞬间焦点就移出
+  输入框了，标签会在指针底下消失。收起**不清空**已选条件，仍在生效的筛选以**计数**显示在搜索框内，
+  不回到面板顶条。收起态的标签必须 `invisible`（而非仅 0 高度），否则键盘 Tab 会走进看不见的控件。
 - 搜索匹配在数据密集列表中应尽量宽容：支持名称、分组、provider/vendor 等关键字段，并避免 `-`、`.`、空格等符号成为强制精确匹配门槛。
 - API Key 输入框必须始终使用 `type="text"`，避免触发浏览器/扩展密码管理器。已有密钥的 ProviderCard 隐藏且未编辑时必须渲染与真实 key 等长的 mask 字符串，不把真实 key 作为 input 可见 value；输入框获得焦点或用户开始录入时进入编辑态，直接用真实草稿值作为受控 value 并明文显示，保证用户能看清正在输入和修改的内容，失焦后回到等长 mask 字符串；点 Eye 显示后也明文渲染真实 key。新建 provider 的 API Key 输入保持明文录入；空输入不得 mask placeholder。
 - 已有可展示数据时，后台刷新、secret hydration、保存回写和 event-stream resync 都必须原地更新数据，不得把主列表切回 loading skeleton 或让状态区消失后重建。Skeleton 只用于首次没有可展示数据的冷加载。

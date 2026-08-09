@@ -32,7 +32,7 @@ import {
 } from './ui/dropdown-menu'
 import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
-import { TraceFilterButton, TraceFilterChips } from './trace/TraceFilter'
+import { TraceFilterRow } from './trace/TraceFilterRow'
 import { TraceSearchBar } from './trace/TraceSearchBar'
 import { TraceEventList } from './trace/TraceEventList'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
@@ -334,7 +334,7 @@ export function TracePanel({
   // announces it up front; clicking the chip narrows the trace to the fallback
   // events via the existing type filter.
   const fallbackCount = countLlmFallbacks(traceEvents)
-  const hasFilterChips = filter.selectedCategories.length > 0 || filter.selectedPhases.length > 0
+  const activeFilterCount = filter.selectedCategories.length + filter.selectedPhases.length
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
@@ -482,15 +482,6 @@ export function TracePanel({
         <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">Trace</span>
       )}
       <RunStatusMark live={live} metadata={metadata} outcome={runOutcome} />
-      {traceEvents.length > 0 ? (
-        <TraceFilterButton
-          phases={filter.phases}
-          selectedCategories={filter.selectedCategories}
-          selectedPhases={filter.selectedPhases}
-          onSelectCategories={filter.setSelectedCategories}
-          onSelectPhases={filter.setSelectedPhases}
-        />
-      ) : null}
       {runActionsMenu}
     </div>
   )
@@ -525,15 +516,24 @@ export function TracePanel({
       {identityStrip}
       {failureBanner}
       <div className="shrink-0 space-y-2 border-b border-border bg-card px-3 py-2">
-        <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
-        {hasFilterChips || fallbackCount > 0 || canPromoteFocusedNode ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-          <TraceFilterChips
+        {/* One focus scope over the box and its tags: reaching for a tag must not
+            be what closes the tags (decision 2026-08-09 D11). */}
+        <div className="group/trace-search">
+          <TraceSearchBar
+            value={filter.searchTerm}
+            onChange={filter.setSearchTerm}
+            activeFilterCount={activeFilterCount}
+          />
+          <TraceFilterRow
+            phases={filter.phases}
             selectedCategories={filter.selectedCategories}
             selectedPhases={filter.selectedPhases}
             onSelectCategories={filter.setSelectedCategories}
             onSelectPhases={filter.setSelectedPhases}
           />
+        </div>
+        {fallbackCount > 0 || canPromoteFocusedNode ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
           {fallbackCount > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>

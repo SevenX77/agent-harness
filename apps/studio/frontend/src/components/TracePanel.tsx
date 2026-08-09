@@ -3,25 +3,20 @@ import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
+import { traceOutcomeEntry } from '../utils/trace-outcome'
+import { runStatusMark, type RunStatusMark } from '../utils/run-status-mark'
 import type { LucideIcon } from 'lucide-react'
 import {
-  AlertCircle,
   AlertTriangle,
   ArrowLeft,
   BadgeCheck,
-  CheckCircle2,
-  CirclePause,
-  FileText,
   FlaskConical,
   GitCompareArrows,
-  Loader2,
   MoreVertical,
   Play,
   ShieldCheck,
-  XCircle,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { openLocalPath } from '../lib/tauri'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Button } from './ui/button'
 import {
@@ -74,7 +69,12 @@ interface TracePanelProps {
   onBack?: () => void
   /** The viewed run's id, shown in the header identity strip. */
   runId?: string | null
-  /** Historical view: the persisted metadata behind the header status badge. */
+  /**
+   * The run's sealed record: the header status badge reads it, and so does the
+   * trace's terminal entry (token total + report path, decision 2026-08-09 D8).
+   * Null until the backend has finalized the run — a live stream shows the
+   * verdict and wall time it already has and gains the rest when this arrives.
+   */
   metadata?: RunMetadata | null
   /** True while this panel renders the live stream (streaming indicator). */
   live?: boolean
@@ -94,14 +94,6 @@ interface TracePanelProps {
   canResume?: boolean
   resumeLoading?: boolean
   onResume?: () => void
-  /**
-   * Absolute path of this run's `report.md` (RUN_EXECUTION F6), as reported by
-   * the backend. Gives the report a user entry point — the `⋮` menu opens it in
-   * the OS default application (decision 2026-08-08 D5). Null while a run has
-   * not sealed one, which is also why the menu item is absent rather than
-   * disabled: a report either exists on disk or does not.
-   */
-  reportPath?: string | null
   hitlSubmitting?: boolean
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
   /**
@@ -157,9 +149,12 @@ export interface TraceRunAction {
  * An action exists only when the view wired its handler — a historical view
  * passes none and stays read-only (decision 2026-08-07). Availability is
  * separate: a wired action can still be unavailable right now (no resumable
- * run, a compare already in flight), which is what `disabled` says. The report
- * is the exception with no `can…` flag: a report either exists on disk or does
- * not, so its absence removes the item instead of grating it out.
+ * run, a compare already in flight), which is what `disabled` says.
+ *
+ * The run report is deliberately NOT here. It moved to the trace's terminal
+ * entry and to the run list row (decision 2026-08-09 D8 relocating 2026-08-08
+ * D5): a product of the run belongs at the end of the run, not behind a menu
+ * the reader has to think to open.
  */
 export function traceRunActions({
   canResume,
@@ -169,7 +164,6 @@ export function traceRunActions({
   compareLoading,
   onCompareToGolden,
   onPromoteToGolden,
-  reportPath,
 }: {
   canResume: boolean
   resumeLoading: boolean
@@ -178,7 +172,6 @@ export function traceRunActions({
   compareLoading: boolean
   onCompareToGolden?: () => void
   onPromoteToGolden?: () => void
-  reportPath: string | null
 }): TraceRunAction[] {
   const actions: TraceRunAction[] = []
   if (onResume) {
@@ -208,52 +201,28 @@ export function traceRunActions({
       run: onPromoteToGolden,
     })
   }
-  if (reportPath) {
-    actions.push({
-      key: 'report',
-      label: 'Open run report',
-      icon: FileText,
-      disabled: false,
-      run: () => { void openLocalPath(reportPath) },
-    })
-  }
   return actions
 }
 
 /**
- * How the run stands, as ONE icon.
+ * How the run stands in the strip, as ONE icon.
  *
  * The strip has 331px of content box and one job per element (decision
  * 2026-08-09 D3); a word like "Success" spends a third of that saying what a
- * check mark says. The word survives in the tooltip and the aria-label, so
- * nothing is lost to a screen reader or to a user who hovers.
+ * check mark says. The icon vocabulary itself is shared with the run list
+ * (D9) — this only decides WHICH status the strip is describing.
  */
-function runStatusMark(
+function stripStatusMark(
   live: boolean,
   metadata: RunMetadata | null | undefined,
   outcome: TraceRunOutcome,
-): { icon: LucideIcon; label: string; tone: string } | null {
+): RunStatusMark | null {
   // A live stream that went quiet says which way it went, rather than pulsing
   // "in progress" at a run that already ended.
   if (live && outcome === 'running') {
     return null
   }
-  const status = live ? outcome : metadata?.status
-  switch (status) {
-    case 'success':
-      return { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' }
-    case 'interrupted':
-    case 'paused':
-      return { icon: CirclePause, label: 'Run paused', tone: 'text-warning' }
-    case 'running':
-      return { icon: Loader2, label: 'Run in progress', tone: 'animate-spin text-muted-foreground' }
-    case 'cancelled':
-      return { icon: XCircle, label: 'Run cancelled', tone: 'text-destructive' }
-    case undefined:
-      return null
-    default:
-      return { icon: AlertCircle, label: 'Run failed', tone: 'text-destructive' }
-  }
+  return runStatusMark(live ? outcome : metadata?.status)
 }
 
 function RunStatusMark({
@@ -280,7 +249,7 @@ function RunStatusMark({
       </Tooltip>
     )
   }
-  const mark = runStatusMark(live, metadata, outcome)
+  const mark = stripStatusMark(live, metadata, outcome)
   if (!mark) {
     return null
   }
@@ -313,7 +282,6 @@ export function TracePanel({
   canResume = false,
   resumeLoading = false,
   onResume,
-  reportPath = null,
   hitlSubmitting = false,
   onSubmitHitlResponse,
   compareTabs,
@@ -337,6 +305,9 @@ export function TracePanel({
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
   const runOutcome = runOutcomeFromEvents(traceEvents)
+  // D8: the run's conclusion is the last thing in its own trace. Fed the full
+  // event list, not the filtered one — the ending of a run is not a search hit.
+  const outcome = traceOutcomeEntry(traceEvents, metadata)
 
   const [nodePromoting, setNodePromoting] = useState(false)
   // atom #32 entry①: offer per-node golden creation for the focused, golden-less
@@ -407,7 +378,6 @@ export function TracePanel({
     compareLoading,
     onCompareToGolden,
     onPromoteToGolden,
-    reportPath,
   })
   // Run-level actions belong to the run's identity, not to the event list, so
   // they collapse into one overflow menu instead of each taking a labelled
@@ -590,6 +560,7 @@ export function TracePanel({
           followStream={live}
           streamKey={runId}
           focusPhase={focusPhase}
+          outcome={outcome}
           onSelectEvent={onSelectEvent}
         />
       </div>

@@ -10,8 +10,10 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from '../ui/message-scroller'
+import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
 import { buildTraceSteps, type TraceStepStatus } from '../../utils/trace-steps'
 import { initialTracePosition } from './trace-initial-scroll'
+import { TraceOutcomeRow } from './TraceOutcomeRow'
 import { TraceStepRow } from './TraceStepRow'
 
 interface TraceEventListProps {
@@ -35,6 +37,12 @@ interface TraceEventListProps {
    * 2026-08-09 D2).
    */
   focusPhase?: string | null
+  /**
+   * How the run ended, appended after the last step. Null while the run is
+   * still going — the conclusion is the last thing in the trace, so it lives
+   * here rather than in a separate panel section (decision 2026-08-09 D8).
+   */
+  outcome?: TraceOutcomeEntry | null
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
@@ -53,6 +61,7 @@ export function TraceEventList({
   followStream = false,
   streamKey = null,
   focusPhase = null,
+  outcome = null,
   onSelectEvent,
 }: TraceEventListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -214,6 +223,7 @@ export function TraceEventList({
                     </div>
                   )
                 })}
+                {outcome ? <TraceOutcomeRow outcome={outcome} /> : null}
               </div>
             </MessageScrollerContent>
           </MessageScrollerViewport>

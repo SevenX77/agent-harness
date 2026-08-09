@@ -3,6 +3,7 @@ import { useSWRConfig } from 'swr'
 import useSWR from 'swr'
 import { api, fetcher, getLocalHistory, revertSkill } from '../api/client'
 import type { GitHistoryItem, RunListResponse, RunMetadata } from '../api/types'
+import { formatRunDuration, formatRunTokens } from '../utils/run-format'
 import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
 
 const runHistoryKey = (skillId: string) => `/skills/${skillId}/runs`
@@ -181,14 +182,6 @@ const RUN_OUTCOME_WORDING: Readonly<
 }
 
 /**
- * Render a run's wall time the way the Timeline list does: sub-second runs read
- * as milliseconds, everything else as one decimal of a second.
- */
-function outcomeDuration(seconds: number): string {
-  return seconds < 1 ? `${(seconds * 1000).toFixed(0)}ms` : `${seconds.toFixed(1)}s`
-}
-
-/**
  * D7 (decision 2026-08-09) read projection: reaching a terminal state must say
  * so. This is NOT a rewording of `archiveFeedbackForGitStatus` — that one reports
  * whether a git snapshot was taken, this one reports how the run itself ended.
@@ -205,15 +198,10 @@ export function runOutcomeFeedback(metadata: RunMetadata): RunOutcomeFeedback | 
     return null
   }
   const subject = metadata.kind === 'predict' ? 'Predict' : 'Run'
-  const facts: string[] = []
-  const seconds = metadata.metrics?.wall_time_sec
-  if (typeof seconds === 'number' && Number.isFinite(seconds)) {
-    facts.push(outcomeDuration(seconds))
-  }
-  const tokens = metadata.metrics?.total_tokens
-  if (typeof tokens === 'number' && Number.isFinite(tokens)) {
-    facts.push(`${tokens.toLocaleString('en-US')} tokens`)
-  }
+  const facts = [
+    formatRunDuration(metadata.metrics?.wall_time_sec),
+    formatRunTokens(metadata.metrics?.total_tokens),
+  ].filter((fact): fact is string => fact !== null)
   const detail = facts.length > 0 ? ` — ${facts.join(' · ')}` : ''
   return { variant: wording.variant, message: `${subject} ${wording.verb}${detail}` }
 }

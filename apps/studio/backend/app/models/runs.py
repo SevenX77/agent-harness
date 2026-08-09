@@ -126,6 +126,21 @@ class RunMetadata(BaseModel):
     compare_node_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     candidate_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     candidate_label: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # D8: every run row can reach its own report, so the path travels with the
+    # row and not only with the detail. DERIVED at read time from the report
+    # file's existence — see ``persisted_json``.
+    report_path: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    def persisted_json(self) -> str:
+        """The stored document, which is narrower than the API document.
+
+        ``report.md`` stays a pure projection (decision 2026-08-09 D8), so its
+        path is read back off the filesystem every time rather than stored. A
+        stored path outlives the file it names — delete the report or move the
+        skill and the record starts asserting something false, with nothing left
+        to correct it.
+        """
+        return self.model_dump_json(exclude={"report_path"})
 
 
 class RunListResponse(BaseModel):
@@ -201,10 +216,6 @@ class RunDetail(BaseModel):
     events: list[EventEnvelope]
     final_context: dict[str, Any] | None = None
     artifacts: list[str] | None = None
-    #: Absolute path of this run's `report.md`, or None when the run left none.
-    #: Derived at read time from the run directory — the report stays a pure
-    #: projection, this only tells a reader with no shell where to find it.
-    report_path: str | None = None
 
 
 class ResumeReq(BaseModel):

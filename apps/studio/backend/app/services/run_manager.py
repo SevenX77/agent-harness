@@ -962,8 +962,15 @@ class RunManager:
         return RunListResponse(runs=runs, total=len(runs))
 
     def get_run_detail(self, skill_id: str, run_id: str) -> RunDetail:
-        metadata = self._metadata_for(skill_id, run_id)
         run_dir = run_dir_for(skill_id, run_id)
+        # The report path rides on the metadata, the same place the run LIST
+        # carries it (D8), so a reader never has to know which endpoint it came
+        # from. Derived here rather than in ``_metadata_for`` because a still-
+        # registered run holds its metadata in memory, from before the report
+        # existed.
+        metadata = self._metadata_for(skill_id, run_id).model_copy(
+            update={"report_path": _run_report_path(run_dir)}
+        )
         final_context = _read_run_artifact_json(run_dir, "final_state.json")
         return RunDetail(
             metadata=metadata,
@@ -971,7 +978,6 @@ class RunManager:
             events=_read_run_artifact_events(run_dir),
             final_context=final_context,
             artifacts=_read_run_artifact_paths(run_dir),
-            report_path=_run_report_path(run_dir),
         )
 
     #: Every run status maps to exactly one thing the surfaces are told, so a new
@@ -1446,7 +1452,7 @@ def _source_less_run_dir_for(skill_id: str, run_id: str) -> Path:
 
 def _write_run_metadata(run_dir: Path, metadata: RunMetadata) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
+    (run_dir / "run_metadata.json").write_text(metadata.persisted_json(), encoding="utf-8")
 
 
 def _persist_run_input_artifact(
@@ -1670,11 +1676,18 @@ def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:
 
 
 def _metadata_with_input_summary(metadata_path: Path) -> RunMetadata:
+    """One row of the run list, with the two fields the stored record lacks.
+
+    ``input_summary`` is backfilled from the sealed input artifact; ``report_path``
+    is probed off the report file, which is where that truth lives (D8).
+    """
+    run_dir = metadata_path.parent
     metadata = RunMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
-    if metadata.input_summary:
-        return metadata
-    input_data = _read_run_artifact_json_if_present(metadata_path.parent, "input_data.json") or {}
-    return metadata.model_copy(update={"input_summary": _input_summary(input_data)})
+    updates: dict[str, Any] = {"report_path": _run_report_path(run_dir)}
+    if not metadata.input_summary:
+        input_data = _read_run_artifact_json_if_present(run_dir, "input_data.json") or {}
+        updates["input_summary"] = _input_summary(input_data)
+    return metadata.model_copy(update=updates)
 
 
 def _input_summary(input_data: dict[str, Any]) -> str | None:

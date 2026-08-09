@@ -84,7 +84,7 @@ describe('TracePanel EventEnvelope contract', () => {
 
     const html = render({})
 
-    expect(html).toContain('1 events')
+    expect(html).toContain('data-trace-event-count="1"')
   })
 
   it('does not accept a raw CallbackEvent fixture as trace logs', () => {
@@ -101,29 +101,8 @@ describe('TracePanel EventEnvelope contract', () => {
   })
 })
 
-describe('TracePanel focus granularity label (F3)', () => {
-  // Whole-run is the resting state and carries no chrome; only a LIVE link to a
-  // focused node is worth a marker, and it sits on the filter row next to the
-  // node chips it narrows.
-  it('says nothing about focus when no node is focused', () => {
-    const html = render({})
-    expect(html).not.toContain('&rarr; phase1')
-  })
-
-  it('marks the linked node when link is on and a phase is active', () => {
-    const html = render({ activePhase: 'phase1', linkEnabled: true })
-    expect(html).toContain('phase1')
-    expect(html).toContain('Linked to phase1')
-  })
-
-  it('shows no link marker when link views is disabled even with an active phase', () => {
-    const html = render({ activePhase: 'phase1', linkEnabled: false })
-    expect(html).not.toContain('Linked to phase1')
-  })
-})
-
-// Two phases (nodeA, nodeB) so focus narrowing is observable via the
-// event count in the identity strip (atom #17).
+// Two phases (nodeA, nodeB) so focus can be observed to LOCATE without removing
+// anything (decision 2026-08-09 D2).
 const twoPhaseEvents: EventEnvelope[] = [
   {
     schema_version: 'studio.event.v1',
@@ -172,15 +151,12 @@ const twoPhaseEvents: EventEnvelope[] = [
   },
 ]
 
-describe('TracePanel focus granularity (atom #17)', () => {
-  it('shows the whole-run overview (all events) when no node is focused', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel traceLogs={twoPhaseEvents} selectedNode={null} onSelectPrompt={() => undefined} />,
-    )
-    expect(html).toContain('3 events')
-  })
-
-  it('narrows the trace to the focused node phase when a node is selected', () => {
+describe('TracePanel focus behaviour (decision 2026-08-09 D2)', () => {
+  // Focusing a node used to FILTER the trace down to that node. With the
+  // narrowing hint and its toggle both gone from the strip, keeping the filter
+  // would leave an invisible, unclosable one — and the trace is now the only
+  // surface that has to read end to end. Focus therefore locates, never hides.
+  it('keeps every event when a node is focused', () => {
     const html = renderToStaticMarkup(
       <TracePanel
         traceLogs={twoPhaseEvents}
@@ -188,35 +164,39 @@ describe('TracePanel focus granularity (atom #17)', () => {
         onSelectPrompt={() => undefined}
       />,
     )
-    // nodeA carries two events (phase_start + phase_end); nodeB's is excluded.
-    expect(html).toContain('2 / 3')
-    expect(html).toContain('Linked to nodeA')
+    expect(html).toContain('data-trace-event-count="3"')
+    expect(html).not.toContain('2 / 3')
+    expect(html).not.toContain('Linked to nodeA')
   })
 
-  it('lets the focused node override the running activePhase for granularity', () => {
+  it('keeps every event while a phase is running', () => {
     const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        activePhase="nodeB"
-        selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
-        onSelectPrompt={() => undefined}
-      />,
+      <TracePanel traceLogs={twoPhaseEvents} activePhase="nodeB" onSelectPrompt={() => undefined} />,
     )
-    // selectedNode (nodeA) wins over the running phase (nodeB): narrows to nodeA.
-    expect(html).toContain('2 / 3')
-    expect(html).toContain('Linked to nodeA')
+    expect(html).toContain('data-trace-event-count="3"')
   })
 
-  it('does not narrow when link views is disabled even with a focused node', () => {
+  it('marks the focused node group so the list can scroll to it', () => {
     const html = renderToStaticMarkup(
       <TracePanel
         traceLogs={twoPhaseEvents}
         selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
-        linkEnabled={false}
         onSelectPrompt={() => undefined}
       />,
     )
-    expect(html).toContain('3 events')
+    expect(html).toContain('data-trace-group-header="nodeA"')
+    expect(html).toContain('data-trace-focus-group="true"')
+  })
+
+  it('offers no link toggle — canvas focus no longer filters anything', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Link trace to the focused node')
   })
 })
 
@@ -225,7 +205,7 @@ describe('TracePanel naming (decision 2026-08-09 D1)', () => {
   // atom #28 的底线不变: 歧义的 "Trace Timeline" 永不回归。
   it('names the view "Trace" and never the ambiguous "Trace Timeline"', () => {
     const html = render({})
-    expect(html).toContain('>Trace<')
+    expect(html).toContain('aria-label="Trace"')
     expect(html).not.toContain('Trace Timeline')
   })
 
@@ -237,36 +217,54 @@ describe('TracePanel naming (decision 2026-08-09 D1)', () => {
     expect(html).not.toContain('Trace Timeline')
   })
 
-  // The identity strip keeps what you read while working — status, what the
-  // list is showing, the controls. The run id moved into the ⋮ menu: at the
-  // panel's 383px it could not coexist with them (331px of content box against
-  // 361px of demand), and it is wanted exactly when you go looking for the run
-  // on disk, which is what that menu is for.
-  it('shows the run state in the identity strip and keeps the id one click away', () => {
-    const html = render({ runId: 'run-abcdef123456', live: true })
-    expect(html).toContain('Live')
-    expect(html).toContain('aria-label="Run actions"')
+  // The strip answers two questions and no more: WHICH run this is, and HOW it
+  // stands (decision 2026-08-09 D3). Everything that used to compete for the
+  // 331px content box — the view's own name, the narrowing hint, the link
+  // toggle — said something the user could already see or no longer needs.
+  it('puts the full run id on the strip, untruncated', () => {
+    const html = render({ runId: '2026-08-09T13-40-42_80960a2c', live: true })
+
+    expect(html).toContain('2026-08-09T13-40-42_80960a2c')
+    // Truncation is CSS, so the full id stays in the DOM and in the title.
+    expect(html).toContain('title="2026-08-09T13-40-42_80960a2c"')
+  })
+
+  it('says the outcome with an icon and puts the words in a tooltip', () => {
+    const html = render({
+      metadata: {
+        run_id: 'r1',
+        status: 'success',
+        started_at: '2026-08-09T00:00:00Z',
+        metrics: null,
+        input_summary: null,
+      },
+    })
+
+    expect(html).toContain('aria-label="Run succeeded"')
+    // The word itself is not spent on strip width.
+    expect(html).not.toMatch(/>Success</)
+  })
+
+  it('marks a predict run with the same flask used everywhere else', () => {
+    const html = render({
+      runId: 'predict-2026-08-09T13-40-42_80960a2c',
+      metadata: {
+        run_id: 'p1',
+        kind: 'predict',
+        status: 'success',
+        started_at: '2026-08-09T00:00:00Z',
+        metrics: null,
+        input_summary: null,
+      },
+    })
+
+    expect(html).toContain('aria-label="Predict attempt"')
+    expect(html).not.toMatch(/>Predict</)
   })
 
   it('offers a back-to-timeline affordance when a close handler is wired', () => {
     const html = render({ onBack: () => undefined })
     expect(html).toContain('aria-label="Back to timeline"')
-  })
-
-  it('marks a historical predict view with a Predict badge from metadata.kind', () => {
-    const html = render({
-      metadata: {
-        run_id: 'predict-1',
-        status: 'success',
-        started_at: '2026-08-07T00:00:00Z',
-        kind: 'predict',
-        metrics: null,
-        input_summary: null,
-      },
-      runId: 'predict-1',
-    })
-    expect(html).toContain('Predict')
-    expect(html).toContain('Success')
   })
 })
 
@@ -448,20 +446,6 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
         traceLogs={twoPhaseEvents}
         selectedNode={goldenlessAgentNode}
         canCompare
-        onSelectPrompt={() => undefined}
-      />,
-    )
-    expect(html).not.toContain('Promote node to golden')
-  })
-
-  it('omits the per-node button when link views is off (no node focus)', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        selectedNode={goldenlessAgentNode}
-        canCompare
-        linkEnabled={false}
-        onPromoteNode={() => undefined}
         onSelectPrompt={() => undefined}
       />,
     )

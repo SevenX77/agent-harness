@@ -19,8 +19,6 @@ const mocks = vi.hoisted(() => ({
     workspaceRoot?: string | null
     onOpenSettings?: (tab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot') => void
     lintErrors?: LintError[] | null
-    traceLinkEnabled?: boolean
-    onToggleTraceLink?: (enabled: boolean) => void
     traceSelectedEventId?: string | null
     onSelectTraceEvent?: (index: number, event: unknown) => void
   },
@@ -2143,27 +2141,6 @@ describe('Workspace run_ended history wiring (integration)', () => {
 
     expect(mocks.getRunDetail).toHaveBeenCalledWith('writer-smoke', 'run-1')
     expect(toastMocks.warning).toHaveBeenCalledWith(expect.stringMatching(/not archived/i))
-  })
-
-  // Link views (99d31800) let a user stop canvas focus from narrowing the trace.
-  // The wiring was lost when App.tsx/RightPanel.tsx became Workspace/Panels,
-  // leaving a toggle on screen that could not toggle anything; these pin the
-  // seam so it cannot rot again silently.
-  it('hands the panels a link state that starts linked', () => {
-    renderWithEffects()
-
-    expect(mocks.panelsProps?.traceLinkEnabled).toBe(true)
-    expect(mocks.panelsProps?.onToggleTraceLink).toBeTypeOf('function')
-  })
-
-  it('unlinks when the panel asks it to', () => {
-    renderWithEffects()
-
-    act(() => {
-      mocks.panelsProps?.onToggleTraceLink?.(false)
-    })
-
-    expect(mocks.panelsProps?.traceLinkEnabled).toBe(false)
   })
 
   it('remembers which trace row the user opened', () => {

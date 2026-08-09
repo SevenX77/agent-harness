@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit；2026-07-16 增补:F7 LLM fallback 可见性落地(纯前端消费 gateway llm_fallback 事件,PM 排队单第一优先)）
+status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit；2026-07-16 增补:F7 LLM fallback 可见性落地(纯前端消费 gateway llm_fallback 事件,PM 排队单第一优先)；2026-08-09 决议改写:F3 聚焦语义由「过滤收窄」改为「滚动定位」(D2 作废原过滤语义)、F2 删除 Full Trace 独立文档面(D1)、新增 F8 顶条形态(D3/D9)）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 01_workflows/05_debugging.md（debug trace）
@@ -29,20 +29,49 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ### F2. Run-after Summary And Full Trace
 
 - 机制: clicking a past predict/run shows run_id summary; a button opens the full timeline and a read-only formatted trace document.
-- 决策: full trace must be human-readable, not raw jsonl. 2026-08-08(PM):承载形态是**面板内的排版文档**,不是只读编辑器("在 panel 里面不要用编辑器的样式");且文档必须**完整**——长值折叠可展开,不做不可恢复的截断。Trace(区域内视图)负责**定位**(过滤/搜索/联动),Full Trace(文档)负责**通读与取证**(全文/分组/不过滤)。
+- 决策: 运行记录必须人类可读,不是裸 jsonl;必须**完整**——长值折叠可展开,不做不可恢复的截断。
+  2026-08-08 曾把职责拆成两个面(Trace 定位 / Full Trace 通读),**2026-08-09 决议 D1 撤销该拆分并删除 Full Trace**:
+  两个面读的是同一份事件,拆开只是同一件事做了两遍,且「哪个面是真相」不可判定。
+  定位与通读现由**同一个 Trace 视图**同时承担——搜索与筛选是用户主动的取景,聚焦只滚动不删减(见 F3)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:81` defines run-after behavior; `01_workflows/04_run-and-verify.md:104` records the readable-doc decision.
 - 测试: summary appears for selected run; full trace opens as a grouped read-only document (no editor chrome); an oversized value is kept whole and expandable rather than truncated.
 - Status: 部分 live(2026-08-07 viewed-run 决议:列表点某次 → 该 run 完整 trace 视图(一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件缓存,修复「Full Trace 永远读实时流」的脱钩);predict 行以 RunMetadata.kind 判别。2026-08-08 决议:Full Trace 去 Monaco 化为按节点分块的排版文档、删除 1200 字符硬截断(长值折叠可展开);predict 与已完成 run 的事件流由 `stream_run` 从该 run 目录回放,不再因内存 record 消失而失联。仍 target-design:run_id 概要中间层、从 trace 行跳到文档对应状态)。
 - 归属: regions `timeline`, `editor`; platform `engine`.
 
-### F3. Focus Determines Trace Granularity
+### F3. Focus Locates The Reader, It Never Filters The Trace
 
-- 机制: blank canvas focus shows whole-run summary; node focus shows all executions for that node and jumps editor range.
-- 决策: loop/retry/batch must not collapse history to the latest attempt only.
-- 原话/来源: `01_workflows/04_run-and-verify.md:81` defines focus behavior; `01_workflows/04_run-and-verify.md:105` clarifies blank canvas versus node focus.
-- 测试: node with three attempts shows all three grouped executions; blank focus returns to run summary.
-- Status: target-design, engine id dependency.
+- 机制: 选中画布节点 → Trace **滚动定位**到该节点的分组标题并把标题提亮;列表内容**一条不减**。
+  取消选中只是不再有定位目标,不改变列表内容。节点的多次执行(loop / retry / batch)按原有分组保留,
+  不折叠为「最后一次尝试」。
+- 决策: 2026-08-09 决议 D2 **作废了本条原先的过滤语义**(「blank focus = 全run摘要 / node focus = 只看该节点」)。
+  作废理由有二:(一)删掉 link 开关与收窄提示后仍保留过滤,等于给用户一个**看不见、也关不掉**的过滤器;
+  (二)同一决议 D1 删除了 Full Trace 文档,通读职责回到 Trace 自身,一个会被聚焦悄悄截断的列表无法承担通读。
+  「聚焦决定用户注意力落点」这一原始意图,改由滚动定位承接。
+- 原话/来源: `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` §D2(含被作废条目的完整交代);
+  PM 原话「full trace删掉,功能重复,本来就应该显示full tracing」「link删掉」。
+- 测试: 聚焦某节点后列表长度不变、该节点分组标题带 `data-trace-focus-group="true"`;
+  过滤投影 `filterTraceEvents` 的入参类型中不存在 `activePhase`(类型级断言,防止过滤悄悄回归)。
+- Status: live(2026-08-09:`useTraceFilter` 已删 `activePhase` 条件;`TraceEventList` 接 `focusPhase`
+  只做 `scrollIntoView` 与标题提亮;link 开关及其贯穿 Workspace/Panels 的接线已删除)。
 - 归属: capability `trace-observability`; regions `canvas`, `timeline`, `editor`.
+
+### F8. Trace 顶条只回答两个问题
+
+- 机制: 顶条自左至右只有四件:`←` 返回运行列表 · **完整 run_id**(等宽,不截断,溢出靠 CSS 截断且 `title` 保留全文)·
+  **状态图标徽章**(成功 ✓ / 失败 ✗ / 暂停 ⏸ / 取消 ✗,不带文字,文字进 tooltip;运行中保留脉冲点,
+  因为「还在跑」是静态图标表达不了的持续态)· `⋮` run 级动作菜单(Resume / Compare to golden / Promote to golden)。
+  predict 运行在 run_id 左侧加**烧瓶图标**(`FlaskConical`),与运行列表、全站其他 predict 标识同一个图标。
+- 决策: 顶条只回答「这是哪一次运行」和「它现在怎么样」;其余曾经挤占该行的元素都已删除——
+  `Trace` 标题(视图名两条挂载路径下恒被 run_id 取代,是够不着的兜底)、`Predict` 文字徽章(改图标)、
+  收窄提示与 link 开关(过滤行为本身已按 D2 删除)、run_id 重复出现在 `⋮` 菜单里的那一份。
+  状态用图标不用词,是因为文字状态在窄面板里与 run_id 争同一行宽度,而 run_id 是不可缩写的那个。
+- 原话/来源: `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` §D3 / §D9;
+  PM 原话「顶条只显示run_id,后面跟状态徽章,状态徽章不需要一串字,用打勾、错误等原型徽章就行,加上tooltip显示文字success等」
+  「predict徽章用一个图标就可以了,而且所有ui代表predict的都要统一」。
+- 测试: 顶条含完整 run_id 且 `title` 为同一字符串;状态以 `aria-label` 表达而**不**渲染 `>Success<` 字样;
+  predict 视图渲染 `aria-label="Predict attempt"` 而不渲染 `>Predict<` 文字;无 run 级动作时不渲染 `⋮`。
+- Status: live(2026-08-09)。
+- 归属: capability `trace-observability`; region `timeline`。
 
 ### F4. Edge Dot Blackboard Transition(双态:静态推断 + 运行期真实)
 
@@ -84,13 +113,16 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 
 ## 3. 接口契约
 - Runtime input: run_id websocket events plus persisted `trace.jsonl`.
-- UI output: timeline stream/list, node status map, prompt inspector, read-only editor document, dot context.
+- UI output: timeline stream/list, node status map, prompt inspector, dot context。(独立的只读文档面已按 2026-08-09 D1 删除,见 F2。)
 - Engine dependency: structured phase/transition events and enough ids for loop/retry/batch grouping.
 - Region links: `timeline`, `canvas`, `properties`, `editor`.
 - Capability links: `run-execution`, `golden-eval`, `debug-resume`.
 
 ## 4. 设计决策基础（PM 原话）
 - 长 trace **默认折叠大块**;自动展开 payload 上限 **~2KB**(超出给"展开"按钮)。
+- 2026-08-09:「full trace删掉,功能重复,本来就应该显示full tracing」——通读职责回到 Trace 自身(F2/F3)。
+- 2026-08-09:「顶条只显示run_id,后面跟状态徽章,状态徽章不需要一串字,用打勾、错误等原型徽章就行,加上tooltip显示文字success等」(F8)。
+- 2026-08-09:「predict徽章用一个图标就可以了,而且所有ui代表predict的都要统一」(F8)。
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |

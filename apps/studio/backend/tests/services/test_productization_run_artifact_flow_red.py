@@ -3015,7 +3015,7 @@ def test_predictor_persists_predict_result_through_run_artifact_store(
     result = PredictorService().dispatch_predict_job("demo.skill", input_data={"topic": "store"})
 
     assert result.run_id == "predict-store-run"
-    manifest_path = skill_dir / ".workspace" / "runs" / result.run_id / "manifest.json"
+    manifest_path = skill_dir / ".workspace" / "predicts" / result.run_id / "manifest.json"
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     result_ref = manifest["object_refs"]["result.json"]
@@ -3074,7 +3074,7 @@ def test_predictor_preserves_artifact_identity_in_runtime_payload_and_predict_re
     assert result_payload["source_map_ref"] == artifact_ref["source_map_ref"]
     assert result_payload["execution_fingerprint"] == artifact_ref["execution_fingerprint"]
 
-    manifest_path = skill_dir / ".workspace" / "runs" / result.run_id / "manifest.json"
+    manifest_path = skill_dir / ".workspace" / "predicts" / result.run_id / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["metadata"]["artifact_ref"] == artifact_ref
     assert manifest["metadata"]["source_map_ref"] == artifact_ref["source_map_ref"]

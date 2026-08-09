@@ -15,6 +15,7 @@ from graph_agent.callbacks.events import (
 )
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.runner import _run_v030_skill_dict, run_skill
+from graph_agent.io.run_layout import runs_root
 
 
 class SpyCallback:
@@ -265,6 +266,7 @@ def test_v030_run_skill_emits_phase_end_when_agent_raises(
             mock_llm=V030UnknownToolChatModel(),
             callbacks=[spy],
             workspace_dir=tmp_path / "workspace",
+            run_root=runs_root(tmp_path / "workspace"),
             skill_resolver=mock_skill_resolver,
             topic="observability",
             request_id="req-error",

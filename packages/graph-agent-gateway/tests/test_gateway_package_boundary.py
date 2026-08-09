@@ -5,28 +5,43 @@ from __future__ import annotations
 from pathlib import Path
 
 GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "graph_agent_gateway"
-FALLBACK_EVENT_CODE = "[F-v3-gateway-llm-fallback]"
+ROUTE_DECISION_EVENT_CODE = "[F-v3-gateway-llm-route-decision]"
 
 
-def test_gateway_owns_llm_fallback_event_schema() -> None:
-    from graph_agent_gateway.events import LLMFallbackEvent
-    from graph_agent_gateway.tracing import build_llm_fallback_event
+def test_gateway_owns_route_decision_event_schema() -> None:
+    from graph_agent_gateway.events import LLMRouteDecisionEvent
+    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.tracing import build_route_decision_event
 
-    event = build_llm_fallback_event(
-        phase_name="draft",
-        from_provider="openai/gpt-5",
-        to_provider="anthropic/claude-opus",
-        reason="RateLimitError: quota exceeded",
-        context={"role_name": "balanced"},
+    route = ResolvedRoute(
+        role_name="balanced",
+        route_id="openai:gpt-5",
+        endpoint_id="openai",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        credential_ref="endpoint:openai",
+        credential_fingerprint="fp",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
     )
 
-    assert isinstance(event, LLMFallbackEvent)
+    event = build_route_decision_event(
+        phase_name="draft",
+        decision="fell_back",
+        route=route,
+        reason="RateLimitError: quota exceeded",
+        next_route_id="anthropic:claude-opus",
+    )
+
+    assert isinstance(event, LLMRouteDecisionEvent)
     assert event.phase_name == "draft"
-    assert event.from_provider == "openai/gpt-5"
-    assert event.to_provider == "anthropic/claude-opus"
+    assert event.decision == "fell_back"
+    assert event.route_id == "openai:gpt-5"
+    assert event.endpoint_id == "openai"
+    assert event.provider_model_id == "gpt-5"
+    assert event.next_route_id == "anthropic:claude-opus"
     assert event.reason == "RateLimitError: quota exceeded"
-    assert event.code == FALLBACK_EVENT_CODE
-    assert event.context == {"role_name": "balanced"}
+    assert event.code == ROUTE_DECISION_EVENT_CODE
 
 
 def test_gateway_errors_do_not_inherit_engine_execution_error() -> None:

@@ -143,7 +143,7 @@ class Callback:
         back to the matching legacy ``on_*`` hook so subclasses that only
         override the old hooks keep working. Override this method directly
         to receive the full typed payload (including the new
-        ``prompt_captured`` / ``llm_fallback`` events and the
+        ``prompt_captured`` / ``llm_route_decision`` events and the
         ``sub_run_id`` / ``group_key`` grouping fields).
         """
         if _dispatch_legacy_event(self, event):
@@ -209,7 +209,7 @@ def _typed_only_event_types() -> tuple[type[Any], ...]:
         InputDispatchEvent,
         InputFileInjectedEvent,
         InternalErrorEvent,
-        LLMFallbackEvent,
+        LLMRouteDecisionEvent,
         ModelResolvedEvent,
         ParallelMapGroupEndedEvent,
         ParallelMapGroupStartedEvent,
@@ -224,7 +224,7 @@ def _typed_only_event_types() -> tuple[type[Any], ...]:
     return (
         PromptCapturedEvent,
         ToolCallStartedEvent,
-        LLMFallbackEvent,
+        LLMRouteDecisionEvent,
         AmbiguityLoggedEvent,
         BuiltinSubagentEnterEvent,
         BuiltinSubagentExitEvent,

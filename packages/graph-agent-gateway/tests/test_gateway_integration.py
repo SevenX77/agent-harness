@@ -267,7 +267,12 @@ def test_gateway_failure_path_emits_event_and_structured_exception(
     assert exc.context["failed_provider_codes"] == ["openai:gpt-5"]
     assert exc.context["last_error_chain"][0]["provider"] == "openai:gpt-5"
     assert exc.context["last_error_chain"][0]["route_id"] == "openai:gpt-5"
-    assert len(callback.events) == 0
+    # A failed call is no longer silent. This classification forbids falling
+    # back, so the route that died is the last thing said before it raises —
+    # `exhausted` belongs to the walk that runs out of candidates, not to one
+    # that is stopped on the first.
+    assert [e.decision for e in callback.events] == ["failed_terminal"]
+    assert callback.events[0].route_id == "openai:gpt-5"
 
 
 def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
@@ -354,25 +359,16 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
     ]
     assert factory.builds[0]["kwargs"]["max_tokens"] == 222
     assert factory.builds[0]["kwargs"]["temperature"] == 0.2
-    assert len(callback.events) == 1
-    assert callback.events[0].from_provider == "dead:claude"
-    assert callback.events[0].to_provider == "anthropic-official:claude-sonnet-4.6"
+    assert [e.decision for e in callback.events] == ["probe_failed", "answered"]
+    assert callback.events[0].route_id == "dead:claude"
+    assert callback.events[0].next_route_id == "anthropic-official:claude-sonnet-4.6"
+    assert callback.events[1].route_id == "anthropic-official:claude-sonnet-4.6"
     event_payload = callback.events[0].model_dump(mode="json")
-    assert event_payload["event_type"] == "llm_fallback"
-    assert event_payload["context"]["role_name"] == "graph_agent"
-    assert event_payload["context"]["fallback_decision"] == "fallback_allowed"
-    assert event_payload["context"]["from_route"] == {
-        "route_id": "dead:claude",
-        "endpoint_id": "dead",
-        "provider_model_id": "claude-sonnet-4-6",
-        "canonical_id": "claude-sonnet-4.6",
-        "protocol": "anthropic_compatible",
-    }
-    assert event_payload["context"]["to_route"]["route_id"] == "anthropic-official:claude-sonnet-4.6"
-    assert event_payload["context"]["effective_runtime_settings"] == {
-        "max_output_tokens": {"value": 111, "source": "route_setting", "message": None},
-        "temperature": {"value": 0.1, "source": "route_setting", "message": None},
-    }
+    assert event_payload["event_type"] == "llm_route_decision"
+    assert event_payload["endpoint_id"] == "dead"
+    assert event_payload["provider_model_id"] == "claude-sonnet-4-6"
+    assert event_payload["protocol"] == "anthropic_compatible"
+    assert event_payload["next_route_id"] == "anthropic-official:claude-sonnet-4.6"
 
 
 def test_probe_missing_model_error_falls_back_to_next_route(
@@ -433,10 +429,10 @@ def test_probe_missing_model_error_falls_back_to_next_route(
     assert result.content == "ok after missing model fallback"
     assert [item["route"].route_id for item in factory.builds] == ["fallback:model"]
     assert client_manager.marked_down == ["missing:model"]
-    assert len(callback.events) == 1
+    assert [e.decision for e in callback.events] == ["probe_failed", "answered"]
     event_payload = callback.events[0].model_dump(mode="json")
-    assert event_payload["context"]["fallback_decision"] == "fallback_allowed"
-    assert event_payload["context"]["provider_status_code"] == 404
+    assert event_payload["route_id"] == "missing:model"
+    assert event_payload["provider_status_code"] == 404
 
 
 def test_gateway_passes_effective_runtime_settings_to_route_factory(

@@ -1,7 +1,7 @@
 ---
 module: 03_regions/timeline
 doc: mvp1-alignment
-status: FROZEN（2026-08-07 viewed-run 决议落地:timeline 区域三视图=历史列表/所查 run 的 Trace 视图/EdgeContext,由 Workspace viewedTrace 状态分流(Panels.tsx timeline 分支);run 结束可返回列表;predict 以 kind 判别入列;命名统一 区域=Timeline/视图=Trace/文档=Full Trace。决议:docs/design/2026-08-07-timeline-viewed-run-and-trace-ui-decision.md；目标结构已按 R4-R8 retrofit）
+status: FROZEN（2026-08-07 viewed-run 决议落地:本区域三视图=运行列表/所查 run 的 Trace 视图/EdgeContext,由 Workspace viewedTrace 状态分流;run 结束可返回列表;predict 以 kind 判别入列。2026-08-09 D1 决议:区域改名 **Trace**（Toolbar 第4格,PanelKind 值 `trace`）,独立 `Full Trace` 文档面板删除——"Timeline"与"Full Trace"两个名词退役;D12:点击画布空白不再关闭本区域面板。决议:docs/design/2026-08-07-timeline-viewed-run-and-trace-ui-decision.md、docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [compile-lint-structured-error, trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（run history / trace）· 01_workflows/03_compile.md（compile drawer coordination）
@@ -9,10 +9,10 @@ aligns_with: 01_workflows/04_run-and-verify.md（run history / trace）· 01_wor
 
 # timeline — MVP1 Alignment
 
-> **Tier**: region | **Owns**: `trace-dot-blackboard` inspector/timeline 切面 + `run-execution-node-status` 历史/trace 显示 + `compile-lint-structured-error` 布局协调切面 | **现状**: viewed-run 模型已落地(2026-08-07):列表行点击进该 run 的 Trace 视图(历史一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件源),live run 流式复用同一视图并带返回;predict 行以 `RunMetadata.kind` 判别、仅 icon 区分。 | **Related**: [baseline](./baseline.md)（双向）· `trace-observability` · `run-execution` · `compile-lint` · `golden-eval` · `copilot-assist`
+> **Tier**: region | **Owns**: `trace-dot-blackboard` inspector/trace 切面 + `run-execution-node-status` 历史/trace 显示 + `compile-lint-structured-error` 布局协调切面 | **现状**: viewed-run 模型已落地(2026-08-07):列表行点击进该 run 的 Trace 视图(历史一次性拉取,该 run 的所有读者共读同一事件源),live run 流式复用同一视图并带返回;predict 行以 `RunMetadata.kind` 判别、仅 icon 区分。2026-08-09 D1 起区域名为 **Trace**,不再有第二个 trace 面。 | **Related**: [baseline](./baseline.md)（双向）· `trace-observability` · `run-execution` · `compile-lint` · `golden-eval` · `copilot-assist`
 
 ## 1. 定义
-`timeline` owns time-based runtime inspection: run/predict history, live trace stream, run-after full trace timeline, prompt inspector entry, model comparison tabs, and selected run summary.
+本区域(Toolbar 第 4 格,名为 **Trace**)owns time-based runtime inspection: run/predict history, live trace stream, run-after replay of one run's full trace, model comparison tabs, and selected run summary. 自 2026-08-09 D1 起它是**唯一**的 trace 面——通读与定位由同一个视图承担,不再有独立的 `Full Trace` 文档面板。
 
 Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_run-and-verify.md:79`, `01_workflows/04_run-and-verify.md:83`.
 

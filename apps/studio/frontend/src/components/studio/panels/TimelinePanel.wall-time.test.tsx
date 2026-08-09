@@ -66,7 +66,7 @@ const workspaceContextStub: WorkspaceContextValue = {
 function renderTimeline(): string {
   return renderToStaticMarkup(
     <WorkspaceProvider value={workspaceContextStub}>
-      <Panels activePanel="timeline" skillId="demo.skill" selectedNode={null} runId={null} traceEvents={[]} />
+      <Panels activePanel="trace" skillId="demo.skill" selectedNode={null} runId={null} traceEvents={[]} />
     </WorkspaceProvider>,
   )
 }

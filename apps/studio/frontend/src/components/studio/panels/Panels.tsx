@@ -2,7 +2,6 @@ import type { ResumeRunOptions } from "@/api/client"
 import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
-import { TraceDocumentPanel } from "@/components/trace/TraceDocumentPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { CompareTab } from "../run-compare"
 import { useSkills } from "@/hooks/useSkills"
@@ -242,7 +241,7 @@ export function Panels({
       />
     )
   }
-  if (activePanel === "timeline") {
+  if (activePanel === "trace") {
     if (selectedEdge) {
       return (
         <EdgeContextView
@@ -306,20 +305,6 @@ export function Panels({
       )
     }
     return <TimelinePanel onSelectRun={onSelectRun} loadingRunId={historyLoadingRunId} />
-  }
-  if (activePanel === "trace-doc") {
-    // n4-trace #18: the same run-stream events the live Event Trace panel renders,
-    // projected into a read-only full-trace document. Run-stream payloads arrive as
-    // EventEnvelope; unwrap to the CallbackEvent the document builder consumes (same
-    // unwrap TracePanel does). Focus the document on the canvas-selected node so its
-    // line-jump stays in lockstep with node focus.
-    const traceDocumentEvents: CallbackEvent[] = (traceEvents ?? []).map((event) => event.payload)
-    return (
-      <TraceDocumentPanel
-        events={traceDocumentEvents}
-        focusNodeId={selectedNode?.id ?? null}
-      />
-    )
   }
   if (activePanel === "local-history") {
     return <HistoryPanel skillId={skillId} />

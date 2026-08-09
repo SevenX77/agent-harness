@@ -416,8 +416,7 @@ export function TracePanel({
   ) : null
 
   // Identity strip: which run this trace belongs to, and how it stands. Shared
-  // by the live and history views so the region reads as ONE surface (D3 命名:
-  // 区域=Timeline / 本视图=Trace / 文档=Full Trace).
+  // by the live and history views so the region reads as ONE surface.
   const identityStrip = (
     // pr-10 is the lane the overlay's floating close button occupies
     // (WorkspaceLeftPanelOverlay: absolute right-3 top-3) — content must not run

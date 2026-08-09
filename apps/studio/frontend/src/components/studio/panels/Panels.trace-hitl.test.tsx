@@ -63,7 +63,7 @@ describe('Panels timeline HitL bridge', () => {
     renderToStaticMarkup(
       <WorkspaceProvider value={workspaceContextStub}>
         <Panels
-          activePanel="timeline"
+          activePanel="trace"
           skillId="story-deconstruction"
           selectedNode={null}
           runId="run-1"

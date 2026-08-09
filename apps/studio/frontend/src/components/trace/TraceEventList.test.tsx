@@ -21,7 +21,6 @@ function markup(count: number): string {
     <TraceEventList
       events={indexedEvents(count)}
       selectedEventId={null}
-      onSelectPrompt={() => {}}
     />,
   )
 }
@@ -34,7 +33,7 @@ describe('TraceEventList', () => {
     const html = markup(100)
 
     expect(html.match(/role="option"/g)).toHaveLength(100)
-    expect(html).toContain('data-trace-event-count="100"')
+    expect(html).toContain('data-trace-step-count="100"')
   })
 
   it('gives rows no fixed height, so a row is as tall as what it contains', () => {
@@ -42,5 +41,29 @@ describe('TraceEventList', () => {
 
     expect(html).not.toContain('min-height:128px')
     expect(html).not.toContain('height:128px')
+  })
+})
+
+describe('TraceEventList step expansion (decision 2026-08-09 D4)', () => {
+  function stepEvents(): IndexedTraceEvent[] {
+    return [
+      { index: 0, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:00Z', event_type: 'prompt_captured', phase_name: 'draft' } as CallbackEvent },
+      { index: 1, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:01Z', event_type: 'llm_call', phase_name: 'draft' } as CallbackEvent },
+      { index: 2, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:02Z', event_type: 'prompt_captured', phase_name: 'review' } as CallbackEvent },
+    ]
+  }
+
+  it('opens a running step and folds a finished one, without being told', () => {
+    // Two steps: draft answered, review still waiting. The unfinished one is
+    // where the reader's attention belongs, so it is the one left open.
+    const html = renderToStaticMarkup(
+      <TraceEventList events={stepEvents()} selectedEventId={null} />,
+    )
+
+    expect(html).toContain('data-trace-step-count="2"')
+    expect(html).toContain('data-trace-step-status="running"')
+    expect(html).toContain('data-trace-step-status="done"')
+    expect(html.match(/aria-expanded="true"/g)).toHaveLength(1)
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(1)
   })
 })

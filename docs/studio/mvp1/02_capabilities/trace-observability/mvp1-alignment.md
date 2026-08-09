@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
-status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit；2026-07-16 增补:F7 LLM fallback 可见性落地(纯前端消费 gateway llm_fallback 事件,PM 排队单第一优先)；2026-08-09 决议改写:F3 聚焦语义由「过滤收窄」改为「滚动定位」(D2 作废原过滤语义)、F2 删除 Full Trace 独立文档面(D1)、新增 F8 顶条形态(D3/D9)）
+status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit；2026-07-16 增补:F7 LLM fallback 可见性落地(纯前端消费 gateway llm_fallback 事件,PM 排队单第一优先)；2026-08-09 决议改写:F3 聚焦语义由「过滤收窄」改为「滚动定位」(D2 作废原过滤语义)、F2 删除 Full Trace 独立文档面(D1)、新增 F8 顶条形态(D3/D9)；2026-08-09 第二轮:呈现单位改为步骤(新增 F9,D4/D6)、F5 由独立 Prompt Inspector 改为步骤内三段(D5 删除该组件)、F1 补上「开始即可见」的时机契约）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 01_workflows/05_debugging.md（debug trace）
@@ -19,8 +19,14 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ## 2. 数据流 / 机制（设计细节）
 ### F1. Live Trace While Run Is Running
 
-- 机制: starting a run opens the trace panel and streams events, with agent output summarized/collapsible.
-- 决策: agent output should feel like copilot output: summary first, details expandable.
+- 机制: starting a run opens the trace panel and streams events。呈现单位是**步骤**而不是事件行(见 F9):
+  一步在**开始时就出现并默认展开**,显示这一步在做什么(LLM 步骤显示模板/变量/渲染后 prompt,
+  工具步骤显示工具名与入参);**完成后就地转为完成态并自动折叠**为一行摘要(模型 / token / 耗时 / 结果)。
+- 决策: agent output should feel like copilot output —— PM 原话「running的时候…要把每一步具体做了什么都流式的显示出来,
+  就和copilot一样。不要直接显示折叠结果,而是和copilot一样,等完成后再折叠」(2026-08-09)。
+  关键在**时机**不在信息量:一次 LLM 调用是一次运行里最慢的一段,而它期间面板此前一个字都不说,
+  等结束才打印一条完成摘要——看起来就是死的。**注意本轮不做 token 级流式**(引擎的 LLM 调用路径没有
+  token 流,见决议 §4「明确不做」);做到的是「开始即可见」,不是逐字打字机。
 - 原话/来源: `01_workflows/04_run-and-verify.md:79` and `01_workflows/04_run-and-verify.md:86` define live trace; `01_workflows/04_run-and-verify.md:110` keeps the PM quote.
 - 测试: live events append without duplication; agent chunks collapse/expand; source switch resets by run_id.
 - Status: live(2026-07 对账:TracePanel 已挂 live 路径,`handleRun`→`setActivePanel("timeline")`(Workspace.tsx:2172);agent 输出折叠已实现——tool_call 按语义 verb 分类 + args→result 子树(ToolCallSubtree,TraceEventRow.tsx:220-243),长 payload 默认折叠 ~2KB head 带展开钮(GenericPayload,TraceEventRow.tsx:255-280 / `TRACE_PAYLOAD_AUTO_EXPAND_BYTES=2048` utils/trace.ts:119);旧 orphan 已过时)。
@@ -73,6 +79,28 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: live(2026-08-09)。
 - 归属: capability `trace-observability`; region `timeline`。
 
+### F9. 呈现单位 = 步骤(开始即出现,完成才折叠)
+
+- 机制: 纯投影 `buildTraceSteps(events)`(`src/utils/trace-steps.ts`)把事件流合成步骤:
+  - **LLM 步骤**:`prompt_captured`(开始)+ 同一节点的下一条 `llm_call`(完成)合成一条。
+    按**节点**配对,因为 `prompt_captured` 不带调用 id,而同一节点的下一次完成必定属于它。
+  - **工具步骤**:`tool_call_started`(开始)+ 同 `tool_call_id` 的 `tool_call`(完成)合成一条。
+    按 **id** 配对而不是按位置:一个 agent 回合可以有多个调用同时在飞,谁先回来不确定
+    (引擎侧契约见 PR #655 / 决议 D14)。
+  - 其余事件各自成一条,形态不变;**只有完成半边、没有开始半边**的事件也自成一条完成态步骤
+    (筛选会藏掉开始半边,答案是显示手上这半边,而不是把事件丢掉)。
+- 默认展开态由**步骤状态**决定:进行中默认展开,完成默认折叠;**用户的手动切换优先**且此后一直生效
+  (只记录被显式切换过的步骤,其余跟随状态,所以完成时会自动折叠而不会推翻读者的选择)。
+- 分组沿用 2026-08-08 D3:相邻步骤同节点时只在组首标一次节点名。
+- 中间结果**不设固定高度框**(D6):删掉工具输入的 `max-h-32` 与 payload 的 `max-h-40` 内层滚动。
+  面板本身已有滚动,嵌套滚动更难读;超长内容靠折叠/展开(用户可控),不靠固定高度截断(强加)。
+- 原话/来源: 决议 D4 / D6;PM 原话「tracing里面的中间结果不要用一个固定高度的框框住,本来panel就有scroll」。
+- 测试: 只有 `prompt_captured` 时步骤为 running 且 `end` 为空;补上 `llm_call` 后合成一条 done;
+  一个节点的答复不会关掉另一个节点的 prompt;两个工具调用在飞时按 id 各自关闭;
+  列表里 running 步骤 `aria-expanded="true"`、done 步骤 `false`。
+- Status: live(2026-08-09)。
+- 归属: capability `trace-observability`; region `timeline`; platform `engine`(`tool_call_started` 半边)。
+
 ### F4. Edge Dot Blackboard Transition(双态:静态推断 + 运行期真实)
 
 - 机制: dot 有两态,同一个 dot 面板承载:
@@ -84,13 +112,21 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: live(双态齐备:运行期 edgeContextFromEvents + 未跑期 staticEdgeInference;GraphCanvas.tsx:1429-1434 / lib/edge-static-inference.ts:139,2026-07 对账)。
 - 归属: rendering `graph-authoring`/`canvas`; data `trace-observability`.
 
-### F5. Prompt Inspector
+### F5. Prompt 就在它自己的步骤里(原 Prompt Inspector 已删除)
 
-- 机制: selecting an LLM call opens Template, Variables, and Rendered prompt views.
-- 决策: PM needs to inspect why a model saw what it saw, without leaving the trace flow.
-- 原话/来源: `01_workflows/04_run-and-verify.md:93` lists the prompt inspector action.
-- 测试: llm_call event opens inspector with all three tabs populated.
-- Status: live(2026-07 对账:PromptInspector 已挂 live+历史两路径(Workspace.tsx:2688 / TimelinePanel.tsx:153);点 llm_call/prompt_captured 的"Inspect prompt"控件经 `findPromptEvent` 打开(TraceEventRow.tsx:51/136 · utils/trace.ts:291-306);Template/Variables/Rendered 三视图分别填 `template_source`/`variables`/`resolved_prompt|messages`(PromptInspector.tsx:55/58/62-64);旧 orphan 已过时)。
+- 机制: 展开一条 LLM 步骤,就地看到 **Template / Variables / Rendered** 三段(以及完成后的 Response);
+  数据分别来自 `prompt_captured` 的 `template_source` / `variables` / `resolved_prompt`
+  (无 `prompt_captured` 半边时退到 `llm_call.messages`)。**没有第二个入口**——
+  没有 "Inspect prompt" 链接,没有独立弹窗。
+- 决策: 2026-08-09 D5 **删除 `components/PromptInspector.tsx` 及 `promptIndex` / `findPromptEvent` 整条链**。
+  理由是 F9 落地后 prompt 本来就要在步骤开始时展示——PM 原话「这个prompt inspect是什么东西?
+  不要搞那么复杂,如果显示清楚每一步做了什么,就能直接从tracing里面看到具体的prompt,不用搞特殊化」。
+  一个信息只有一个家:两个入口意味着两处要同步、两处会不一致。
+- 原话/来源: 决议 `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D5;
+  上述 PM 原话(2026-08-09)。本条**取代** `01_workflows/04_run-and-verify.md:93` 的独立 inspector 动作。
+- 测试: 展开的 LLM 步骤同时含 Template / Variables / Rendered 三段与其内容;
+  任何步骤都不再渲染 "Inspect prompt"。
+- Status: live(2026-08-09)。
 - 归属: capability `trace-observability`; region `timeline`.
 
 ### F6. Event To Node State Deriver
@@ -123,6 +159,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 2026-08-09:「full trace删掉,功能重复,本来就应该显示full tracing」——通读职责回到 Trace 自身(F2/F3)。
 - 2026-08-09:「顶条只显示run_id,后面跟状态徽章,状态徽章不需要一串字,用打勾、错误等原型徽章就行,加上tooltip显示文字success等」(F8)。
 - 2026-08-09:「predict徽章用一个图标就可以了,而且所有ui代表predict的都要统一」(F8)。
+- 2026-08-09:「running的时候,timeline的显示要和copilot一样显示动态过程啊,内部处理的过程显示太少了,要把每一步具体做了什么都流式的显示出来,就和copilot一样。不要直接显示折叠结果,而是和copilot一样,等完成后再折叠」(F1/F9)。
+- 2026-08-09:「tracing里面的中间结果不要用一个固定高度的框框住,本来panel就有scroll」(F9)。
+- 2026-08-09:「这个prompt inspect是什么东西?不要搞那么复杂,如果显示清楚每一步做了什么,就能直接从tracing里面看到具体的prompt,不用搞特殊化」(F5)。
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |

@@ -10,7 +10,6 @@ import {
   eventModelName,
   eventPhase,
   eventTimeLabel,
-  findPromptEvent,
   isRunScopedEvent,
   llmFallbackDetails,
   payloadPreview,
@@ -27,43 +26,6 @@ function event(partial: Partial<CallbackEvent> & { event_type: string }): Callba
     ...partial,
   } as CallbackEvent
 }
-
-describe('findPromptEvent (D8 prompt 回溯)', () => {
-  it('returns the selected event itself when it is a prompt_captured event', () => {
-    const events = [
-      event({ event_type: 'phase_start', phase_name: 'draft' }),
-      event({ event_type: 'prompt_captured', phase_name: 'draft', template_source: 'tpl' }),
-    ]
-    expect(findPromptEvent(events, 1)).toBe(events[1])
-  })
-
-  it('walks back to the nearest prompt_captured in the same phase when an llm_call is selected', () => {
-    const events = [
-      event({ event_type: 'prompt_captured', phase_name: 'draft', template_source: 'draft-tpl' }),
-      event({ event_type: 'prompt_captured', phase_name: 'review', template_source: 'review-tpl' }),
-      event({ event_type: 'llm_call', phase_name: 'review' }),
-    ]
-    // Selecting the llm_call (index 2) must resolve to the review-phase prompt, not draft.
-    expect(findPromptEvent(events, 2)).toBe(events[1])
-  })
-
-  it('falls back to the llm_call event itself when no prompt_captured precedes it', () => {
-    const events = [
-      event({ event_type: 'phase_start', phase_name: 'solo' }),
-      event({ event_type: 'llm_call', phase_name: 'solo' }),
-    ]
-    expect(findPromptEvent(events, 1)).toBe(events[1])
-  })
-
-  it('returns null for a non-inspectable event with no upstream prompt', () => {
-    const events = [event({ event_type: 'phase_start', phase_name: 'draft' })]
-    expect(findPromptEvent(events, 0)).toBeNull()
-  })
-
-  it('returns null when the index is out of range', () => {
-    expect(findPromptEvent([], 0)).toBeNull()
-  })
-})
 
 describe('retryBadge (D10 validator retry nudge)', () => {
   it('returns null for events that carry no attempt information', () => {

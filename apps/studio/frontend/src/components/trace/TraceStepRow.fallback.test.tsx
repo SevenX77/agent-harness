@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import type { CallbackEvent } from '../../api/types'
-import { TraceEventRow } from './TraceEventRow'
+import { eventPhase } from '../../utils/trace'
+import { TraceStepRow } from './TraceStepRow'
 
 // trace-observability F7: a gateway llm_fallback event must render as an explicit
 // amber "Provider fallback" block (models + reason), and rows that know which
@@ -19,16 +20,22 @@ function makeEvent(partial: Partial<CallbackEvent> & { event_type: string }): Ca
 
 function render(event: CallbackEvent): string {
   return renderToStaticMarkup(
-    <TraceEventRow
-      event={event}
-      index={0}
+    <TraceStepRow
+      step={{
+        key: 'evt-0',
+        phase: eventPhase(event),
+        status: 'done',
+        start: { event, index: 0 },
+        end: null,
+      }}
       eventId="evt-0"
-      onSelectPrompt={() => undefined}
+      expanded={false}
+      onToggleExpanded={() => undefined}
     />,
   )
 }
 
-describe('TraceEventRow llm_fallback rendering', () => {
+describe('TraceStepRow llm_fallback rendering', () => {
   const fallback = makeEvent({
     event_type: 'llm_fallback',
     phase_name: 'draft',
@@ -68,7 +75,7 @@ describe('TraceEventRow llm_fallback rendering', () => {
   })
 })
 
-describe('TraceEventRow model chip', () => {
+describe('TraceStepRow model chip', () => {
   it('shows the resolved model on a prompt_captured row', () => {
     const html = render(makeEvent({
       event_type: 'prompt_captured',

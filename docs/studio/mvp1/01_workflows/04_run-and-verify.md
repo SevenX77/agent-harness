@@ -50,13 +50,16 @@
 | C5 | 节点呼吸灯 + 红绿(随执行逐个亮) | 画布 | live(statusByNodeId=deriveNodeStatuses(runStream.events) 已传画布;Workspace.tsx:665 / 2608 → build-nodes.ts:270 / 375) |
 | C6 | focus 自动跟随当前运行节点 | 画布 | target-design(G9) |
 | C7 | Run 历史列表(run_id/状态/耗时/token;predict 行同列表、以 `RunMetadata.kind` 判别仅 icon 区分) | timeline | live(2026-08-07) |
-| C8 | 命名正名:区域=Timeline(Toolbar 第4格+列表)/ 视图=Trace / 文档=Full Trace,"Trace Timeline"不回归 | toolbar | live(D3 决议 2026-08-07) |
+| C8 | 命名正名:**区域=Trace**(Toolbar 第4格)/ 区域默认视图=运行列表 / 该次运行的踪迹视图=Trace。"Timeline"与"Full Trace"两个名词退役 | toolbar | target-design(D1 决议 2026-08-09,取代 2026-08-07 D3 的三段式命名) |
 | C9 | 批量运行(选多个输入各跑一次) | i/o 面板 | orphan(后端 live) |
 | C10 | 命名序列(chapter1/2…)建议自动批量 | i/o 面板 | target-design |
 | C11 | 批量进度轮询(总数/完成/逐项状态) | i/o 面板 | orphan |
 | C12 | 批量某项失败 → 显式上报不静默 | i/o 面板 | backend-only |
 | C13 | 回看某次历史运行详情(行点击→完整 trace 只读回放,viewed-run 决议 2026-08-07)+ Replay 重跑 | timeline | 回看 live;Replay target-design |
 | C14 | 成功运行后 autocommit + git_status | 后端 | backend-only(**归保存与发布**) |
+| C15 | 运行到达终态弹结论 toast(成功/失败/中断 + 耗时 + token);归档 toast 语义不同,不互相替代 | 全局 | target-design(2026-08-09 D7) |
+| C16 | 报告入口两处:Trace 末尾终结条目 + 运行列表每行(需 `RunMetadata.report_path`) | timeline | target-design(2026-08-09 D8,取代 2026-08-08 D5 的 `⋮` 菜单入口) |
+| C17 | run/predict 目录布局:id = `[predict-]<本地时间戳>_<uuid8>`;删 `latest/`;predict 与 run 分目录存放但同列表显示 | 后端 | target-design(2026-08-09 D13) |
 
 ### 决策
 - run 入口在 i/o 面板(单次=选一个,批量=选多个)。
@@ -80,22 +83,24 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 ### 看 trace 两态(P2)
 - **run 时**:自动开面板,事件流式进;**agent 输出流式 + 分类折叠摘要**(参考 agent IDE「Worked for ▾ / Explored ▾ / Thought ▾」,一行摘要点开看详情 + 末尾自然语言总结);节点灯随跑。
 - **run 后**:predict/run 列表 → 点某次看 **run_id 概要**(focus 空白画布=全局)→ 点 button 看完整 trace timeline + **只读文档看完整 trace(人能读、轻度格式化)** → **focus 决定粒度**(空画布=run 概要 / 节点=该节点 trace + 文档跳该节点区块);节点间过程点线上 dot。
-- **两个面各司其职(决议 2026-08-08 D5)**:**Trace**(Timeline 区域内的视图)= 交互式事件时间线,可过滤/搜索/展开单条/与画布节点联动,用途是**定位**;**Full Trace**(独立文档)= 同一次 run 的**全文**,不过滤、按节点分组通读、长内容可展开到底,用途是**通读与取证**。两者共读同一份事件缓存,永远描述同一次运行。
+- **一个面同时承担定位与通读(决议 2026-08-09 D1/D2,作废 2026-08-08 D5 的两面分工)**:Trace 视图既要能**定位**(搜索 + 按需筛选 + 单条展开),也要能**通读取证**(不过滤、按节点分组、长内容折叠可展开到底、不设固定高度截断)。`Full Trace` 独立文档面板删除——它承诺的三件事在步骤化改造后由 Trace 自身满足,留着即是重复。
+- **画布聚焦不再过滤 Trace(决议 2026-08-09 D2)**:选中画布节点使 Trace **滚动定位**到该节点的分组标题,列表内容一条不减。atom #17「focus decides trace granularity」的**过滤语义作废**;若既删收窄提示又删 link 开关却保留过滤,得到的是一个不可见、不可关的过滤器,并与本节「Trace 必须能通读」直接冲突。
+- **呈现单位是"步骤"而非"事件"(决议 2026-08-09 D4)**:LLM 步骤由 `prompt_captured`(开始)与 `llm_call`(完成)合成一条,工具步骤由 `tool_call_started`(开始)与 `tool_call`(完成)按 `tool_call_id` 合成一条;开始时出现并展开,完成后自动折叠为摘要。**不含**模型逐 token 流式——引擎 LLM 调用链路当前不流式,那是独立排期件。
 
 ### Atom actions（04+05 去重）
 | # | 动作 | status |
 |---|---|---|
-| D1 | run 时实时 trace 控制台(流式;agent 输出流式+分类折叠) | live 挂载(TracePanel + useRunStream;Workspace.tsx:583 / Panels.tsx:237);agent 分类折叠摘要细化以代码逐项核 |
+| D1 | run 时实时 trace 控制台:**步骤开始即出现并展开,完成后自动折叠为摘要** | live 挂载(TracePanel + useRunStream;Workspace.tsx:583 / Panels.tsx:237);步骤化呈现 target-design(2026-08-09 D4,工具步骤依赖引擎 `tool_call_started`) |
 | D2 | run 后从列表回看某次完整 trace | live(viewed-run 决议 2026-08-07:Workspace viewedTrace 分流,run 结束可返回列表,历史事件与 Full Trace 文档/PromptInspector 共读同一缓存) |
 | D3 | run 概要(focus 空画布=全局) | target-design |
-| D4 | 看完整 trace:timeline + 只读文档(人读格式,按节点分组;长值折叠可展开、不截断) | live(2026-08-08:TraceDocumentPanel 去 Monaco 化,按节点分块渲染,删除 DETAIL_CHAR_BUDGET) |
-| D5 | focus 某节点 → 只显该节点 trace + 编辑器跳该节点范围 | orphan(过滤)+ target(跳) |
+| D4 | 看完整 trace:**单一 Trace 视图**(人读格式,按节点分组;长值折叠可展开、不截断、不设固定高度框) | target-design(2026-08-09 D1/D6:独立 Full Trace 文档面板删除,能力并入 Trace) |
+| D5 | focus 某节点 → **滚动定位**到该节点分组 + 编辑器跳该节点范围 | target-design(2026-08-09 D2:过滤语义作废,改定位) |
 | D6 | 点线上 dot → 双态:未跑=静态黑板字段推断;跑后=黑板状态机内容 + "上节点 end→下节点 start"操作记录 | live(双态已实现:未跑 staticEdgeInference + 跑后 edgeContextFromEvents;GraphCanvas.tsx:1429-1434,lib/edge-static-inference.ts:139) |
 | D7 | 点状态 → 只读看完整黑板详情(深层可折叠) | 部分 live(2026-08-08:Full Trace 文档内每条状态的黑板/inputs/variables/prompt 完整内联、长值可展开;仍 target-design:从 trace 行单点跳到该状态) |
-| D8 | Prompt 透视:点 llm_call → 模板/喂入变量/渲染后 三视图 | orphan(PromptInspector) |
+| D8 | Prompt 透视:模板/喂入变量/渲染后 三段,**就地呈现在 LLM 步骤条目的展开态**(步骤开始时本就要显示这次问什么) | target-design(2026-08-09 D5:独立 PromptInspector 抽屉删除,第二入口即冗余) |
 | D9 | agent 节点 '+' 内联展开执行子树 | target-design |
 | D10 | Validator 重试 Nudge:2/3 徽章 + 失败 Error Stack | target-design |
-| D11 | 检索/筛选(事件类型 + 关键字) | orphan |
+| D11 | 检索/筛选(事件类型 + 关键字):搜索框独占一行,筛选标签在其**聚焦时**于下方单行出现、可横向滚动、失焦收起且不清空条件 | target-design(2026-08-09 D11,取代 2026-08-08 D4 的"筛选挂身份条 Popover") |
 | D12 | 失败节点亮红灯(Timeline 停 + Error Message) | placeholder |
 | D13 | 模型对比:**顶部 tab** 切换看不同 llm 结果(P8);候选=节点级 model+route,运行=旁路单节点多跑(见决策) | target-design |
 | D14 | 净化 PropertiesPanel(移除 selectedEdge JSON 倾倒,dot 改道本能力) | stale-code(清理) |

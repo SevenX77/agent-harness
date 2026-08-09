@@ -21,7 +21,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     InternalErrorEvent,
     InterruptedEvent,
     LLMCallEvent,
-    LLMFallbackEvent,
+    LLMRouteDecisionEvent,
     ModelResolvedEvent,
     NudgeEvent,
     ParallelMapGroupEndedEvent,
@@ -57,7 +57,7 @@ _ALL_EVENT_CLASSES = [
     CompactionEvent,
     AmbiguityReportEvent,
     PromptCapturedEvent,
-    LLMFallbackEvent,
+    LLMRouteDecisionEvent,
     # Tier 1 Commit A — core lifecycle
     RunStartedEvent,
     RunEndedEvent,
@@ -102,10 +102,9 @@ _MIN_CTOR: dict[type, dict] = {
         "decision": "d",
     },
     PromptCapturedEvent: {"phase_name": "p"},
-    LLMFallbackEvent: {
+    LLMRouteDecisionEvent: {
         "phase_name": "p",
-        "from_provider": "a",
-        "to_provider": "b",
+        "decision": "fell_back",
         "reason": "r",
     },
     # Tier 1 Commit A — core lifecycle
@@ -278,12 +277,13 @@ class TestNewEventShapes:
             with pytest.raises(ValidationError):
                 PromptCapturedEvent(phase_name="p", loop_index=loop_index)
 
-    def test_llm_fallback_captures_provider_transition(self) -> None:
-        ev = LLMFallbackEvent(
+    def test_a_route_decision_captures_the_provider_transition(self) -> None:
+        ev = LLMRouteDecisionEvent(
             phase_name="analyse",
-            from_provider="deepseek-reasoner",
-            to_provider="deepseek-chat",
+            decision="fell_back",
+            route_id="deepseek-reasoner",
+            next_route_id="deepseek-chat",
             reason="HTTP 429 rate limit",
         )
-        assert ev.from_provider != ev.to_provider
+        assert ev.route_id != ev.next_route_id
         assert "rate" in ev.reason.lower()

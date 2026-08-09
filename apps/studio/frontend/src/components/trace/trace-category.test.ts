@@ -14,7 +14,7 @@ const KNOWN_EVENT_TYPES = [
   'finish_task',
   'llm_call',
   'prompt_captured',
-  'llm_fallback',
+  'llm_route_decision',
   'tool_call',
   'internal_error',
   'validation_fail',
@@ -36,7 +36,7 @@ describe('traceEventCategory', () => {
   it('groups model interaction under llm', () => {
     expect(traceEventCategory('llm_call')).toBe('llm')
     expect(traceEventCategory('prompt_captured')).toBe('llm')
-    expect(traceEventCategory('llm_fallback')).toBe('llm')
+    expect(traceEventCategory('llm_route_decision')).toBe('llm')
   })
 
   it('groups tool execution under tools', () => {

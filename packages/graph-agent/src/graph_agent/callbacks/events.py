@@ -14,7 +14,7 @@ New events introduced by this revision:
 * ``prompt_captured`` — fired by the chat model right before an
   LLM call so Studio can show the exact ``(template_source, variables,
   resolved_prompt)`` triple that reached the model.
-* ``llm_fallback`` — fired by the ModelResolver when the primary provider
+* ``llm_route_decision`` — fired by the gateway when the primary provider
   fails and a peer-group fallback takes over.
 
 Parallel-map grouping: every event optionally carries ``sub_run_id`` /
@@ -273,16 +273,44 @@ class PromptCapturedEvent(_EventBase):
     loop_index: int = Field(default=1, ge=1)
 
 
-class LLMFallbackEvent(_EventBase):
-    """Fired by ModelResolver when a peer-group fallback swaps the provider."""
+class LLMRouteDecisionEvent(_EventBase):
+    """One decision the gateway made while getting an answer for a role.
 
-    event_type: Literal["llm_fallback"] = "llm_fallback"
+    Skipping a circuit-broken route, failing a probe, retrying the same route,
+    doubling a budget, falling back, and finally answering are the same kind of
+    fact with different outcomes, so ``decision`` is a closed set rather than
+    this being several event types.
+
+    ``voided_streamed_answer`` says the decision also discarded content that had
+    already been streamed to whoever is watching — escalating and falling back
+    both replace the answer rather than continuing it, and a surface showing the
+    abandoned text has no other way to learn it is stale.
+
+    The gateway defines its own copy of this shape (it does not depend on this
+    package); the two are kept in step by hand.
+    """
+
+    event_type: Literal["llm_route_decision"] = "llm_route_decision"
     phase_name: str
-    from_provider: str
-    to_provider: str
-    reason: str
+    decision: Literal[
+        "skipped_circuit_open",
+        "probe_failed",
+        "retried_same_route",
+        "escalated_budget",
+        "fell_back",
+        "failed_terminal",
+        "answered",
+        "exhausted",
+    ]
+    route_id: str | None = None
+    endpoint_id: str | None = None
+    provider_model_id: str | None = None
+    protocol: str | None = None
+    reason: str | None = None
+    provider_status_code: int | None = None
+    next_route_id: str | None = None
+    voided_streamed_answer: bool = False
     code: str | None = None
-    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class BlackboardReduceEvent(_EventBase):
@@ -542,7 +570,7 @@ CallbackEvent = Annotated[
     | BuiltinSubagentExitEvent
     | BuiltinSubagentFallbackEvent
     | PromptCapturedEvent
-    | LLMFallbackEvent
+    | LLMRouteDecisionEvent
     | RunStartedEvent
     | RunEndedEvent
     | ValidationPassEvent
@@ -586,7 +614,7 @@ __all__ = [
     "BuiltinSubagentExitEvent",
     "BuiltinSubagentFallbackEvent",
     "PromptCapturedEvent",
-    "LLMFallbackEvent",
+    "LLMRouteDecisionEvent",
     "RunStartedEvent",
     "RunEndedEvent",
     "ValidationPassEvent",

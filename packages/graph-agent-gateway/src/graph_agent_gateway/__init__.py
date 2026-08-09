@@ -7,7 +7,7 @@ from graph_agent_gateway.credential_resolver import (
     CredentialResolveRequest,
     CredentialResolveResponse,
 )
-from graph_agent_gateway.events import LLMFallbackEvent
+from graph_agent_gateway.events import LLMRouteDecisionEvent, RouteDecision
 from graph_agent_gateway.exceptions import (
     AllProvidersFailedError,
     GatewayResolverMissingError,
@@ -60,7 +60,8 @@ __all__ = [
     "answer_restarts_here",
     "GatewayResolverMissingError",
     "GatewayRoleNotConfiguredError",
-    "LLMFallbackEvent",
+    "LLMRouteDecisionEvent",
+    "RouteDecision",
     "MaterializeRoleRequest",
     "MaterializedProbeCatalogCandidates",
     "MaterializedRoleResult",

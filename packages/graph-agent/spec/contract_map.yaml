@@ -74,7 +74,7 @@ public_api_symbols:
   LLMCallEvent:
     feature_ids:
     - F-llm-execution
-  LLMFallbackEvent:
+  LLMRouteDecisionEvent:
     feature_ids:
     - F-llm-execution
   LocalWorkspaceResolver:

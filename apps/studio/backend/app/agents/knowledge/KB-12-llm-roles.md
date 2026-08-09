@@ -35,7 +35,7 @@ Use this table to diagnose common gateway errors:
 | **401 Unauthorized** or Credential Errors | The credential reference points to an invalid or empty environment variable. | Verify that the target environment variable is loaded in the terminal/host session. |
 | **Connection Timeout / 404 Not Found** | The endpoint `base_url` is invalid, malformed, or missing standard prefixes. | Inspect the endpoint configuration. Check that the normalization rules applied on save matched the required provider format. |
 | **Route Cooling Down or Marked Down** | A route failed a health check or token execution and is in a cooldown period. | Wait for the cooldown TTL to expire or trigger a manual role test to force-revalidate. |
-| **LLMFallbackEvent Emitted** | The primary route failed, triggering a fallback. | Inspect `events.py` `LLMFallbackEvent` in the logs to see the transition details (from Route A to Route B) and root exception. |
+| **LLMRouteDecisionEvent Emitted** | The gateway skipped, probed, retried, escalated, fell back from, or ran out of routes. | Read the event's `decision` field in the trace: it names the outcome (`skipped_circuit_open` / `probe_failed` / `retried_same_route` / `escalated_budget` / `fell_back` / `failed_terminal` / `answered` / `exhausted`) alongside the route, endpoint, provider status code and, for a fall-back, the route taking over. |
 
 ## 3. Configuration Tooling & Write Capabilities
 Conversation agents can manage LLM configurations using dedicated write tools, bypassing the need for manual file editing or UI click-throughs.

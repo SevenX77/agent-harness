@@ -569,7 +569,7 @@ features:
   error_codes_secondary: []
   events_primary:
   - LLMCallEvent
-  - LLMFallbackEvent
+  - LLMRouteDecisionEvent
   - ModelResolvedEvent
   - PromptCapturedEvent
   events_secondary: []
@@ -578,7 +578,7 @@ features:
   - tests/models/test_predict_gateway_chat_model.py::test_generate_uses_p0_golden_before_p1_override_and_p2_stub
   public_api_symbols:
   - LLMCallEvent
-  - LLMFallbackEvent
+  - LLMRouteDecisionEvent
   - PredictGatewayChatModel
 - id: F-tool-call-binding
   description: Bind tools into LLM phases while preserving finish_task and provider

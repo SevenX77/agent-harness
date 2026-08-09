@@ -23,7 +23,7 @@ export function traceEventCategory(eventType: string): TraceCategory {
   if (eventType === 'internal_error' || eventType === 'validation_fail') {
     return 'errors'
   }
-  if (eventType === 'llm_call' || eventType === 'prompt_captured' || eventType === 'llm_fallback') {
+  if (eventType === 'llm_call' || eventType === 'prompt_captured' || eventType === 'llm_route_decision') {
     return 'llm'
   }
   if (eventType.includes('tool')) {

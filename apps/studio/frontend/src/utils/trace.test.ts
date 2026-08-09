@@ -2,16 +2,17 @@ import { describe, expect, it } from 'vitest'
 
 import type { CallbackEvent } from '../api/types'
 import {
-  countLlmFallbacks,
+  countRouteDegradations,
   errorStack,
   eventColor,
   eventMessageIsRedundant,
   eventMessage,
   eventModelName,
+  eventSeverity,
   eventPhase,
   eventTimeLabel,
   isRunScopedEvent,
-  llmFallbackDetails,
+  routeDecisionDetails,
   payloadPreview,
   retryBadge,
   RUN_SCOPE,
@@ -152,110 +153,142 @@ describe('payloadPreview (D1 / §4 default-collapse big payloads)', () => {
   })
 })
 
-// The gateway emits llm_fallback (graph_agent_gateway/events.py) when a provider
-// route fails and a peer-group fallback takes over. The trace must surface it so
-// a model comparison never silently reads "model A" results that model B produced.
-function fallbackEvent(overrides: Partial<CallbackEvent> = {}): CallbackEvent {
+// The gateway emits llm_route_decision (graph_agent_gateway/events.py) for
+// every candidate it skips, probes, retries, escalates, falls back from or
+// answers on. The trace must surface it so a model comparison never silently
+// reads "model A" results that model B produced, and so a call that took two
+// minutes on the second-choice endpoint does not just look slow.
+function decisionEvent(overrides: Partial<CallbackEvent> = {}): CallbackEvent {
   return event({
-    event_type: 'llm_fallback',
+    event_type: 'llm_route_decision',
     phase_name: 'draft',
-    from_provider: 'openai:gpt-4o',
-    to_provider: 'zhipu:glm-4.7',
+    decision: 'fell_back',
+    route_id: 'openai:gpt-4o',
+    endpoint_id: 'openai',
+    provider_model_id: 'gpt-4o-2024-11-20',
+    protocol: 'openai_compatible',
+    next_route_id: 'zhipu:glm-4.7',
     reason: 'RateLimitError: 429 too many requests',
-    code: '[F-v3-gateway-llm-fallback]',
-    context: {
-      role_name: 'graph_agent',
-      fallback_decision: 'fallback_allowed',
-      error_type: 'RateLimitError',
-      provider_status_code: 429,
-      from_route: {
-        route_id: 'openai:gpt-4o',
-        endpoint_id: 'openai',
-        provider_model_id: 'gpt-4o-2024-11-20',
-        canonical_id: 'gpt-4o',
-        protocol: 'openai',
-      },
-      to_route: {
-        route_id: 'zhipu:glm-4.7',
-        endpoint_id: 'zhipu',
-        provider_model_id: 'glm-4.7',
-        canonical_id: 'glm-4.7',
-        protocol: 'openai',
-      },
-    },
+    provider_status_code: 429,
+    voided_streamed_answer: false,
+    code: '[F-v3-gateway-llm-route-decision]',
     ...overrides,
   })
 }
 
-describe('llm_fallback visibility (trace-observability F7)', () => {
-  it('renders a human-readable fallback message instead of the raw event name', () => {
-    expect(eventMessage(fallbackEvent())).toBe('LLM fallback: openai:gpt-4o → zhipu:glm-4.7')
+describe('llm_route_decision visibility (trace-observability F7)', () => {
+  it('renders a human-readable sentence per outcome instead of the raw event name', () => {
+    expect(eventMessage(decisionEvent())).toBe('openai:gpt-4o failed → zhipu:glm-4.7')
+    expect(eventMessage(decisionEvent({ decision: 'answered' }))).toBe('Answered by openai:gpt-4o')
+    expect(eventMessage(decisionEvent({ decision: 'skipped_circuit_open' })))
+      .toBe('Skipped openai:gpt-4o — circuit open')
+    expect(eventMessage(decisionEvent({ decision: 'probe_failed' })))
+      .toBe('Probe failed on openai:gpt-4o')
+    expect(eventMessage(decisionEvent({ decision: 'retried_same_route' })))
+      .toBe('Retrying openai:gpt-4o')
+    expect(eventMessage(decisionEvent({ decision: 'escalated_budget' })))
+      .toBe('Answer was cut off — retrying openai:gpt-4o with a bigger budget')
+    expect(eventMessage(decisionEvent({ decision: 'failed_terminal' })))
+      .toBe('openai:gpt-4o failed — no fallback allowed')
   })
 
-  it('says the chain is exhausted when the gateway reports no remaining route', () => {
-    const message = eventMessage(fallbackEvent({ to_provider: '<none>' }))
-    expect(message).toBe('LLM fallback: openai:gpt-4o failed — no remaining route')
+  it('says the chain is exhausted when every candidate failed', () => {
+    expect(eventMessage(decisionEvent({ decision: 'exhausted', route_id: null })))
+      .toBe('No route left — every candidate failed')
   })
 
-  it('colors the fallback timeline dot as a warning', () => {
-    expect(eventColor('llm_fallback')).toBe('bg-warning')
+  // Severity is a property of the DECISION, not of the event type: the same
+  // type reports the route that answered and the run that died.
+  it('colors a degraded routing decision as a warning', () => {
+    expect(eventColor(decisionEvent())).toBe('bg-warning')
+    expect(eventColor(decisionEvent({ decision: 'retried_same_route' }))).toBe('bg-warning')
+    expect(eventColor(decisionEvent({ decision: 'escalated_budget' }))).toBe('bg-warning')
   })
 
-  // Colour means severity, never kind (FRONTEND_UI_SPEC §2.2): a run that went
+  it('leaves the route that answered uncoloured, so a healthy run stays monochrome', () => {
+    expect(eventColor(decisionEvent({ decision: 'answered' }))).toBe('bg-muted-foreground/50')
+    expect(eventSeverity(decisionEvent({ decision: 'answered' }))).toBe('normal')
+  })
+
+  it('colors a terminal routing failure as destructive, like any other run-killer', () => {
+    expect(eventColor(decisionEvent({ decision: 'exhausted' }))).toBe('bg-destructive')
+    expect(eventColor(decisionEvent({ decision: 'failed_terminal' }))).toBe('bg-destructive')
+  })
+
+  // Colour means severity, never kind (FRONTEND_UI_SPEC 2.2): a run that went
   // fine reads monochrome, so the one coloured dot is the one worth looking at.
   it('leaves every ordinary event kind uncoloured', () => {
     for (const eventType of ['phase_start', 'phase_end', 'run_ended', 'llm_call', 'prompt_captured', 'tool_call']) {
-      expect(eventColor(eventType)).toBe('bg-muted-foreground/50')
+      expect(eventColor(event({ event_type: eventType }))).toBe('bg-muted-foreground/50')
     }
   })
 
   it('colors only failures as destructive', () => {
-    expect(eventColor('internal_error')).toBe('bg-destructive')
-    expect(eventColor('validation_fail')).toBe('bg-destructive')
+    expect(eventColor(event({ event_type: 'internal_error' }))).toBe('bg-destructive')
+    expect(eventColor(event({ event_type: 'validation_fail' }))).toBe('bg-destructive')
   })
 
-  it('extracts provider ids, models, reason and status code from the event', () => {
-    const details = llmFallbackDetails(fallbackEvent())
+  it('extracts the route identity, reason and status code from the event', () => {
+    const details = routeDecisionDetails(decisionEvent())
     expect(details).not.toBeNull()
-    expect(details?.fromProvider).toBe('openai:gpt-4o')
-    expect(details?.toProvider).toBe('zhipu:glm-4.7')
-    expect(details?.fromModel).toBe('gpt-4o-2024-11-20')
-    expect(details?.toModel).toBe('glm-4.7')
+    expect(details?.decision).toBe('fell_back')
+    expect(details?.routeId).toBe('openai:gpt-4o')
+    expect(details?.endpointId).toBe('openai')
+    expect(details?.providerModelId).toBe('gpt-4o-2024-11-20')
+    expect(details?.protocol).toBe('openai_compatible')
+    expect(details?.nextRouteId).toBe('zhipu:glm-4.7')
     expect(details?.reason).toBe('RateLimitError: 429 too many requests')
-    expect(details?.roleName).toBe('graph_agent')
     expect(details?.statusCode).toBe(429)
-    expect(details?.exhausted).toBe(false)
+    expect(details?.voidedStreamedAnswer).toBe(false)
   })
 
-  it('marks the "<none>" next candidate as exhausted with a null toProvider', () => {
-    const details = llmFallbackDetails(fallbackEvent({ to_provider: '<none>' }))
-    expect(details?.exhausted).toBe(true)
-    expect(details?.toProvider).toBeNull()
-  })
-
-  it('survives a fallback event with no context payload', () => {
-    const details = llmFallbackDetails(
-      event({ event_type: 'llm_fallback', phase_name: 'draft', from_provider: 'a', to_provider: 'b', reason: 'x' }),
+  // Retrying is only possible AFTER a truncated answer has streamed, so the
+  // panel is showing text the decision just threw away.
+  it('reports that a decision discarded text the panel had already shown', () => {
+    const details = routeDecisionDetails(
+      decisionEvent({ decision: 'escalated_budget', voided_streamed_answer: true }),
     )
-    expect(details?.fromModel).toBeNull()
-    expect(details?.toModel).toBeNull()
-    expect(details?.roleName).toBeNull()
+    expect(details?.voidedStreamedAnswer).toBe(true)
+  })
+
+  it('survives a decision that names no route at all', () => {
+    const details = routeDecisionDetails(
+      event({ event_type: 'llm_route_decision', phase_name: 'draft', decision: 'exhausted' }),
+    )
+    expect(details?.decision).toBe('exhausted')
+    expect(details?.routeId).toBeNull()
+    expect(details?.endpointId).toBeNull()
+    expect(details?.providerModelId).toBeNull()
     expect(details?.statusCode).toBeNull()
+    expect(details?.voidedStreamedAnswer).toBe(false)
   })
 
-  it('returns null for non-fallback events', () => {
-    expect(llmFallbackDetails(event({ event_type: 'llm_call', phase_name: 'draft' }))).toBeNull()
+  // An outcome this build has never heard of must not be rendered as one it
+  // has: the row prints the raw event instead of guessing a severity.
+  it('refuses to interpret an unknown decision', () => {
+    const unknown = decisionEvent({ decision: 'teleported' })
+    expect(routeDecisionDetails(unknown)).toBeNull()
+    expect(eventMessage(unknown)).toBe('llm_route_decision')
+    expect(eventColor(unknown)).toBe('bg-muted-foreground/50')
   })
 
-  it('counts the fallback events in a trace', () => {
+  it('returns null for events that are not routing decisions', () => {
+    expect(routeDecisionDetails(event({ event_type: 'llm_call', phase_name: 'draft' }))).toBeNull()
+  })
+
+  // Every healthy call ends on `answered`, so counting it would put a permanent
+  // warning badge on every run.
+  it('counts the routing decisions that went the wrong way, not the ones that worked', () => {
     const events = [
       event({ event_type: 'phase_start', phase_name: 'draft' }),
-      fallbackEvent(),
-      fallbackEvent({ phase_name: 'review' }),
+      decisionEvent(),
+      decisionEvent({ phase_name: 'review', decision: 'retried_same_route' }),
+      decisionEvent({ phase_name: 'review', decision: 'answered' }),
       event({ event_type: 'llm_call', phase_name: 'draft' }),
     ]
-    expect(countLlmFallbacks(events)).toBe(2)
-    expect(countLlmFallbacks([event({ event_type: 'phase_start' })])).toBe(0)
+    expect(countRouteDegradations(events)).toBe(2)
+    expect(countRouteDegradations([decisionEvent({ decision: 'answered' })])).toBe(0)
+    expect(countRouteDegradations([event({ event_type: 'phase_start' })])).toBe(0)
   })
 })
 

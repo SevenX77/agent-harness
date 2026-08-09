@@ -11,6 +11,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
+from graph_agent.tracing.steps import StepReporter
+
 
 class LLMProviderRequest(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
@@ -95,10 +97,13 @@ class LLMProviderChatModel(BaseChatModel):
     bound_tools: tuple[Any, ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
     tool_kwargs: dict[str, Any] = Field(default_factory=dict)
-    # Run-scoped identity a parallel sub-run carries on everything it emits.
-    # The phase that builds the model knows it; the model is what emits.
+    # Run-scoped identity a parallel sub-run carries on everything it emits, and
+    # the node a call belongs to. The phase that builds the model knows both;
+    # the model is what emits.
     sub_run_id: str | None = None
     group_key: str | None = None
+    parent_node_id: str | None = None
+    node_type: str | None = None
     # Shared so a bound copy keeps counting where the original left off: the
     # agent loop binds tools once and then invokes the bound copy every turn,
     # and "call 1, call 1, call 1" is not a sequence anyone can read.
@@ -156,23 +161,6 @@ class LLMProviderChatModel(BaseChatModel):
             metadata={key: value for key, value in metadata.items() if value is not None},
         )
 
-    def _announce_call(self, messages: list[BaseMessage]) -> None:
-        """Tell the run a round-trip is starting, and what it was asked."""
-        from graph_agent.callbacks.emit import _safe_emit_event
-        from graph_agent.callbacks.events import PromptCapturedEvent
-
-        self.call_counter[0] += 1
-        event = PromptCapturedEvent(
-            phase_name=self.phase_name or "unknown",
-            llm_role=self.role,
-            resolved_model=self.model_name,
-            resolved_prompt=[_as_prompt_entry(message) for message in messages],
-            sub_run_id=self.sub_run_id,
-            group_key=self.group_key,
-            loop_index=self.call_counter[0],
-        )
-        _safe_emit_event(self.event_callbacks, event)
-
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -181,45 +169,51 @@ class LLMProviderChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         del run_manager
-        # Announcing belongs here, at the call, rather than in a wrapper around
-        # some callers: an AGENT phase hands this model to LangChain's agent
-        # loop, which reaches `_generate` and never touches a wrapper's
-        # `invoke`. That path is where the minutes are spent, so a wrapper is
-        # exactly the wrong place to keep the one signal that says "still
-        # working". Emitted BEFORE the round-trip, because after it the answer
-        # is already the news.
-        self._announce_call(messages)
-        # The answer is consumed slice by slice even though the agent loop is
-        # handed the finished message: the loop needs the whole answer to decide
-        # its next move, while everything watching the run needs to know the
-        # step is still running. Only the arrival is incremental.
-        response = _assemble(self.provider.stream(self._request(messages, stop, kwargs)))
-        response_metadata = dict(response.metadata)
-        tool_calls = response_metadata.pop("tool_calls", None) or []
-        usage_metadata = response_metadata.pop("usage_metadata", None)
-        resolved_model = response_metadata.get("model_name") or response_metadata.get("model")
-        if resolved_model is not None and self.model_name != str(resolved_model):
-            object.__setattr__(self, "model_name", str(resolved_model))
-        message = AIMessage(
-            content=response.content,
-            tool_calls=tool_calls,
-            response_metadata=response_metadata,
-            usage_metadata=usage_metadata,
-        )
+        # Both halves of the report belong here, at the call, rather than in a
+        # wrapper around some callers or a reader of the messages afterwards.
+        # An AGENT phase hands this model to LangChain's agent loop, which
+        # reaches `_generate` and never touches a wrapper's `invoke`; that path
+        # is where the minutes are spent, so a wrapper is exactly the wrong
+        # place to keep the signal that says "still working". And a phase that
+        # reconstructed its calls from the finished message list could only
+        # close them all at once, when the phase was already over — which is
+        # what left five steps spinning on a finished run (measured 2026-08-09).
+        self.call_counter[0] += 1
+        with self._steps().llm_call(
+            messages,
+            llm_role=self.role,
+            resolved_model=self.model_name,
+            loop_index=self.call_counter[0],
+            parent_node_id=self.parent_node_id,
+            node_type=self.node_type,
+            sub_run_id=self.sub_run_id,
+            group_key=self.group_key,
+        ) as step:
+            # The answer is consumed slice by slice even though the agent loop
+            # is handed the finished message: the loop needs the whole answer to
+            # decide its next move, while everything watching the run needs to
+            # know the step is still running. Only the arrival is incremental.
+            response = _assemble(self.provider.stream(self._request(messages, stop, kwargs)))
+            response_metadata = dict(response.metadata)
+            tool_calls = response_metadata.pop("tool_calls", None) or []
+            usage_metadata = response_metadata.pop("usage_metadata", None)
+            resolved_model = response_metadata.get("model_name") or response_metadata.get("model")
+            if resolved_model is not None and self.model_name != str(resolved_model):
+                object.__setattr__(self, "model_name", str(resolved_model))
+            message = AIMessage(
+                content=response.content,
+                tool_calls=tool_calls,
+                response_metadata=response_metadata,
+                usage_metadata=usage_metadata,
+            )
+            step.finished(message)
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output=response_metadata,
         )
 
-
-def _as_prompt_entry(message: BaseMessage) -> dict[str, Any]:
-    """The light-weight shape a reader renders: who spoke and what they said.
-
-    ``_generate`` is handed messages LangChain has already normalised, so unlike
-    a wrapper sitting at ``invoke`` — which had to cope with strings, tuples and
-    raw dicts — there is exactly one shape to read here.
-    """
-    return {"role": str(getattr(message, "type", None) or "unknown"), "content": message.content}
+    def _steps(self) -> StepReporter:
+        return StepReporter(callbacks=self.event_callbacks, phase_name=self.phase_name or "unknown")
 
 
 def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:
@@ -256,6 +250,46 @@ def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:
             for block in (part if isinstance(part, list) else [part])
         ]
     return LLMProviderResponse(content=content, metadata=metadata)
+
+
+class ChatModelProvider:
+    """A chat model the caller brought, seen as what it actually is: a provider.
+
+    ``run_skill(mock_llm=...)`` hands the engine a ready-made LangChain model.
+    Driving it directly would mean a second kind of model inside the engine —
+    one that cannot report its own calls, because the engine did not write it —
+    and a run driven by it would go unobserved for that reason alone. Behind the
+    Port it is just another way of answering, and every phase above keeps the
+    one model, the one reporter and the one set of events.
+    """
+
+    def __init__(self, model: Any) -> None:
+        self._model = model
+
+    def stream(self, request: LLMProviderRequest) -> Iterator[LLMProviderChunk]:
+        """A model invoked whole has nothing to reveal gradually: one slice."""
+        model = self._model
+        tools = request.metadata.get("bound_tools")
+        if tools:
+            kwargs = dict(request.metadata.get("tool_kwargs") or {})
+            tool_choice = request.metadata.get("tool_choice")
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
+            model = model.bind_tools(tools, **kwargs)
+        # Only what was actually asked for is passed on. A caller's model is
+        # written to whatever signature that caller needs, so handing it a
+        # ``stop=None`` nobody requested is how an adapter breaks a model that
+        # was working.
+        stop = request.metadata.get("stop")
+        answer = model.invoke(request.messages, **({"stop": stop} if stop else {}))
+        metadata: dict[str, Any] = dict(getattr(answer, "response_metadata", None) or {})
+        tool_calls = list(getattr(answer, "tool_calls", None) or [])
+        if tool_calls:
+            metadata["tool_calls"] = tool_calls
+        usage = getattr(answer, "usage_metadata", None)
+        if usage:
+            metadata["usage_metadata"] = usage
+        yield LLMProviderChunk(content=answer.content, metadata=metadata)
 
 
 class FakeLLMProvider:

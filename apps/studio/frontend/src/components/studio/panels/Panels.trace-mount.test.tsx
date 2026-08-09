@@ -115,7 +115,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     })
 
     expect(html).toContain('data-trace-step-count="1"')
-    expect(html).toContain('aria-label="Back to timeline"')
+    expect(html).toContain('aria-label="Back to run list"')
     // Read-only replay: no run actions are wired for a historical view.
     expect(html).not.toContain('Resume run from last checkpoint')
   })

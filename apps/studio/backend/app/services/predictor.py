@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,7 +18,7 @@ from app.core.adapters.transport_factory import build_engine_adapter
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.gate_events import publish_skill_gate_from_thread
-from app.services.run_manager import run_manager
+from app.services.run_manager import new_predict_run_id, run_manager
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
@@ -91,7 +90,7 @@ class PredictorService:
         # Route through EngineAdapter predict_artifact
         from app.core.adapters.http_transport import StudioAdapterError
 
-        predict_run_id = f"predict-{uuid.uuid4().hex}"
+        predict_run_id = new_predict_run_id()
         workspace_dir = workspace_dir_for(skill_dir)
         # 状态对等(决议 2026-08-03 D3):predict 也流事件, 所以它开跑同样要广播——
         # 否则 copilot 发起的 predict 不会把人带到 Trace 面板, 而人自己点会。

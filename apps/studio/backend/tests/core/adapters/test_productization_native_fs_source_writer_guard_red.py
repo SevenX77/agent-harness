@@ -19,7 +19,6 @@ def test_workspace_run_artifacts_do_not_require_native_fs_source_writer() -> Non
         ".workspace/runs/run-1/trace.jsonl",
         ".workspace/runs/run-1/metrics.json",
         ".workspace/runs/run-1/run_metadata.json",
-        ".workspace/runs/latest/run_metadata.json",
     )
 
     for workspace_path in runtime_paths:

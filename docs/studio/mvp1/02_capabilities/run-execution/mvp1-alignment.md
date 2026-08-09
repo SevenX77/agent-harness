@@ -26,6 +26,26 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - Status: backend live, frontend stub.
 - 归属: capability `run-execution`; region `center-action-bar`, `input`; platform `engine`.
 
+### F1b. Run/Predict Id Shape And On-Disk Layout
+
+- 机制: 一个 id 生产者铸造两种 id —— run 是 `<本地时间戳>_<uuid8>`,predict 是同一形状加 `predict-` 前缀。
+  时间戳取**运行所在机器的本地墙钟**(naive),因为 id 的唯一读者是看文件夹列表的人;
+  它从不参与计算,不承担时序语义。
+- 决策(2026-08-09 D13): ① 不用 UTC —— UTC 戳对着文件树的人读起来就是错的时间;
+  ② predict 与 run **同一形状**,由同一个函数产出,避免第二处 strftime 造成漂移
+  (旧 predict id 是裸 uuid,排序无意义、信息为零);
+  ③ 删除 `.workspace/runs/latest/` 镜像 —— 它是整个 run 目录的第二份拷贝,
+  存在的唯一理由是给 team-save 一个固定路径可 force-add;git 需要的是路径而不是**固定**路径,
+  所以改为直接 force-add **最新的那个 run 目录**(按目录 mtime 取)。
+- 原话/来源: `01_workflows/04_run-and-verify.md` C17;决议
+  `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D13。
+- 测试: 冻结本地时钟后 run/predict id 形状锁定且共享同一戳;两者都能通过 run-id 路径段校验;
+  team-save force-add 的是最新 run 目录本身。
+- Status: live(2026-08-09)。**仍 target-design**: predict 与 run 分目录存放 ——
+  run 目录路径由引擎按 `<workspace>/runs/<run_id>` 组装,分目录需要引擎先让宿主指定 run 目录根,
+  另行排期;届时 `list_runs` 同时扫描两个根,UI 仍是一个列表(C7 不变)。
+- 归属: capability `run-execution`; platform `engine`(目录根契约)。
+
 ### F2. Live Run State And Node Lights
 
 - 机制: run websocket events derive graph node statuses, edge animation, and current focus.

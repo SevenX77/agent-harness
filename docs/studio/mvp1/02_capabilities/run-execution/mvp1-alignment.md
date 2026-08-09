@@ -42,6 +42,14 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   ③ 删除 `.workspace/runs/latest/` 镜像 —— 它是整个 run 目录的第二份拷贝,
   存在的唯一理由是给 team-save 一个固定路径可 force-add;git 需要的是路径而不是**固定**路径,
   所以改为直接 force-add **最新的那个 run 目录**(按目录 mtime 取)。
+  「哪个是最新」这个问题**改由 UI 回答**:资产树里 `.workspace/runs` 与 `.workspace/predicts`
+  两个目录的子项**按修改时间倒序**(最新在最上),首条挂一个 `latest` 小徽章
+  (`components/studio/panels/run-directory-order.ts` 的 `orderRunDirectories` /
+  `latestRunDirectory`,徽章走 `components/ui/badge` 的 `outline` variant)。
+  时间来自 Rust native-fs:`WorkspaceDirEntry.modified_ms`,取自列目录时**本来就要做**的
+  `metadata()` 调用,不多一次 syscall;取不到时退回按名字倒序——run id 以可排序的本地时间戳打头,
+  所以名字倒序依然是时间倒序。**只有这两个目录这样排**:树里其余位置按字母序,
+  因为读者是在找一个自己叫得出名字的文件,而 run 目录的名字是机器生成的时刻,没人按名字找它。
   ④ predict 与 run **分目录** —— 合在一起时,每个读者都要为这个区别付钱:
   列 run 要过滤掉排练、清排练要小心别删掉 run、"最新的那个目录"是哪种取决于最后跑的是哪种。
   分开只多一个名字,这些全部消失。**磁盘分开、UI 仍是一个列表**:`list_runs` 同时扫两个根,
@@ -52,9 +60,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - 测试: 冻结本地时钟后 run/predict id 形状锁定且共享同一戳;两者都能通过 run-id 路径段校验;
   team-save force-add 的是最新 run 目录本身;predict 跑完后 trace 落在 predicts 根、
   `runs/` 根**根本不存在**;`list_runs` 在两个根各放一条时返回两条;
+  `list_workspace_dir` 为每个条目报出 `modified_ms`;两个 run 根按 mtime 倒序、
+  首个**目录**(不是文件)得 `latest`,其余目录路径一律无徽章;
   引擎的执行入口**缺少 `run_root` 直接 TypeError**(不给默认值,才不会有人默默继承错的根)。
 - Status: live(2026-08-09)。
-- 归属: capability `run-execution`; platform `engine`(run 根由宿主指定的契约)。
+- 归属: capability `run-execution`; platform `engine`(run 根由宿主指定的契约)、
+  `native-fs`(`modified_ms`)、region `assets`(排序与徽章)。
 
 ### F2. Live Run State And Node Lights
 

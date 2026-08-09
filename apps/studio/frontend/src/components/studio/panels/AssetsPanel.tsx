@@ -24,6 +24,7 @@ import { FolderRow } from "./_shared/FolderRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { RootPathSuffix } from "./_shared/RootPathSuffix"
 import { applyPhaseFrontmatterForm, parsePhaseFrontmatter, phaseFrontmatterToForm } from "./phase-frontmatter"
+import { latestRunDirectory } from "./run-directory-order"
 import {
   ancestorDirsForFile,
   assetTreeTargetForNode,
@@ -99,6 +100,11 @@ function AssetTreeRows({
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{emptyLabel}</div>
   }
 
+  // D13 deleted the `runs/latest/` mirror — a second full copy of a run on disk,
+  // written only to answer "which one is current". The listing already answers
+  // it (newest first), so the answer is a badge on that first entry.
+  const latestRunPath = latestRunDirectory(directoryPath, directory.entries)
+
   return (
     <>
       <TreeStatusLine state={directory} subtle />
@@ -110,6 +116,9 @@ function AssetTreeRows({
               key={child.path}
               name={child.name}
               absolutePath={childAbsolutePath}
+              endAdornment={child.path === latestRunPath ? (
+                <Badge data-latest-run variant="outline" className="font-mono">latest</Badge>
+              ) : undefined}
               expanded={reveal ? reveal.expandedDirs.has(child.path) : undefined}
               onExpandedChange={(expanded) => {
                 if (expanded) {

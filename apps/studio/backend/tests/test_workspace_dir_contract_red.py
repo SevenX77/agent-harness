@@ -80,7 +80,10 @@ def test_predictor_dispatch_writes_predict_artifacts_under_workspace_predicts(
 
     def fake_predict_artifact(_adapter: object, payload: dict[str, object]) -> dict[str, object]:
         calls.append(payload)
-        return _raw_predict_result()
+        # The engine runs under the thread_id Studio hands it and reports that id
+        # back; a stub that invents its own id would file the account somewhere
+        # no reader looks.
+        return {**_raw_predict_result(), "run_id": payload["thread_id"]}
 
     monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", fake_predict_artifact)
 
@@ -89,7 +92,7 @@ def test_predictor_dispatch_writes_predict_artifacts_under_workspace_predicts(
     result = service.dispatch_predict_job("skill", None, input_data={"topic": "predict"})
 
     assert result.status == "success"
-    run_dir = workspace_dir / "predicts" / "predict-workspace-run"
+    run_dir = workspace_dir / "predicts" / str(calls[0]["thread_id"])
     assert (run_dir / "result.json").is_file()
     assert not (run_dir / "latest_predict.json").exists()
     assert not (workspace_dir / "predict").exists()

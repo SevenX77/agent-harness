@@ -1,10 +1,10 @@
-import { Clock, FileInput, Files, FileText, History, Moon, Settings, Settings2, Sun } from "lucide-react"
+import { Activity, FileInput, Files, History, Moon, Settings, Settings2, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { toggleTheme, useThemeValue } from "@/store/themeStore"
 
-export type PanelKind = "assets" | "input" | "timeline" | "trace-doc" | "properties" | "local-history"
+export type PanelKind = "assets" | "input" | "trace" | "properties" | "local-history"
 
 interface ToolbarProps {
   activePanel: PanelKind | null
@@ -17,9 +17,11 @@ const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut:
   { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
   { id: "properties", icon: Settings2, label: "Properties", shortcut: "2" },
   { id: "input", icon: FileInput, label: "I/O", shortcut: "3" },
-  { id: "timeline", icon: Clock, label: "Timeline", shortcut: "4" },
-  { id: "trace-doc", icon: FileText, label: "Full Trace", shortcut: "5" },
-  { id: "local-history", icon: History, label: "Local History", shortcut: "6" },
+  // One trace surface, named after what it holds (decision 2026-08-09 D1). The
+  // second slot used to be "Full Trace"; the trace itself now reads end to end,
+  // so a document view of the same events was the same thing twice.
+  { id: "trace", icon: Activity, label: "Trace", shortcut: "4" },
+  { id: "local-history", icon: History, label: "Local History", shortcut: "5" },
 ]
 
 export function Toolbar({ activePanel, onPanelChange, settingsOpen, onSettingsToggle }: ToolbarProps) {

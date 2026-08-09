@@ -1442,7 +1442,7 @@ export function GraphCanvas({
     })
     // D14: the dot is trace-owned. Route to the timeline (trace) panel, not
     // Properties, which no longer renders edge JSON.
-    currentWorkspace.onPanelChange('timeline')
+    currentWorkspace.onPanelChange('trace')
   }, [])
   const edgeHandlers = useMemo<ContextEdgeHandlers>(
     () => ({
@@ -2362,11 +2362,11 @@ export function GraphCanvas({
     onNodeDeselect?.()
     setEdgeMenuConnection(null)
     setNodeMenuPhaseId(null)
-    // Clicking empty canvas clears the workspace: close the open side panel AND
-    // the file editor(s). It no longer opens the graph.md panel.
-    onPanelChange?.(null)
+    // Clicking empty canvas is a DESELECT gesture, not "close my workspace"
+    // (decision 2026-08-09 D12). The open side panel stays: taking it away costs
+    // the user the panel they were reading, which they never asked to close.
     onCloseEditors?.()
-  }, [onCloseEditors, onNodeDeselect, onPanelChange, syncCanvasSelection])
+  }, [onCloseEditors, onNodeDeselect, syncCanvasSelection])
 
   return (
     <ContextMenu>

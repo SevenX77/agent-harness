@@ -3,7 +3,7 @@ import type { EventEnvelope, LintResult } from '@/api/types'
 import type { FileOpenInput, FileMeta } from './file-types'
 
 export type EditorSide = 'left' | 'right'
-export type WorkspacePanelKind = 'assets' | 'input' | 'timeline' | 'properties' | 'local-history' | null
+export type WorkspacePanelKind = 'assets' | 'input' | 'trace' | 'properties' | 'local-history' | null
 
 // One node-to-node micro operation recorded between the upstream phase end and
 // the downstream phase start. The engine already emits each of these on the run

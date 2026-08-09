@@ -590,10 +590,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // prior empty-payload behaviour). Reset when the active skill changes.
   const [selectedTestInputId, setSelectedTestInputId] = useState<string | null>(null)
 
-  // viewed-run model (decision 2026-08-07): which run the timeline REGION shows
+  // viewed-run model (decision 2026-08-07): which run the Trace REGION shows
   // is separate from which run the stream subscribes to. `live` renders the
-  // runStream; `history` renders a fetched, cached trace — Full Trace and the
-  // PromptInspector read the same viewed events (diagnostics stay one source).
+  // runStream; `history` renders a fetched, cached trace — every reader of this
+  // run takes the same viewed events (diagnostics stay one source).
   const [viewedTrace, setViewedTrace] = useState<
     | { source: "live" }
     | {
@@ -717,7 +717,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         continue
       }
       if (effect.kind === "open-trace") {
-        setActivePanel("timeline")
+        setActivePanel("trace")
         continue
       }
       if (effect.gate === "compile") {
@@ -2404,9 +2404,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [compareRuns, clearCopilotJudgeResult],
   )
 
-  // viewed-run model (fix A): open one run's trace from the Timeline list. The
-  // live run re-uses the stream; a past run is fetched once and cached so the
-  // trace view + Full Trace document + PromptInspector all read the same events.
+  // viewed-run model (fix A): open one run's trace from the run list. The live
+  // run re-uses the stream; a past run is fetched once and cached so every
+  // reader of that run takes the same events.
   const handleSelectRun = useCallback(async (run: RunMetadata) => {
     if (!currentSkillId) return
     setPromptIndex(null)
@@ -2576,7 +2576,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setResumeLoading(true)
     try {
       const result = await resumeRun(currentSkillId, runId)
-      setActivePanel("timeline")
+      setActivePanel("trace")
       // Re-subscribe the trace stream to the resumed run (new id, or re-attach).
       clearCopilotJudgeResult()
       await projectRun(result)
@@ -2598,7 +2598,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setResumeLoading(true)
     try {
       const result = await resumeRun(currentSkillId, runId, hitlResumeOptionsFromRequest(request))
-      setActivePanel("timeline")
+      setActivePanel("trace")
       clearCopilotJudgeResult()
       await projectRun(result)
       setRunId(null)
@@ -2617,7 +2617,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setResumeLoading(true)
     try {
       const result = await resumeRun(currentSkillId, runId, options)
-      setActivePanel("timeline")
+      setActivePanel("trace")
       clearCopilotJudgeResult()
       await projectRun(result)
       setRunId(null)
@@ -2636,7 +2636,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setResumeLoading(true)
     try {
       const result = await resumeRun(currentSkillId, runId, options)
-      setActivePanel("timeline")
+      setActivePanel("trace")
       clearCopilotJudgeResult()
       await projectRun(result)
       setRunId(null)

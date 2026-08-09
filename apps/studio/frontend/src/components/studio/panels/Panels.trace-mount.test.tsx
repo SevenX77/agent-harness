@@ -36,7 +36,7 @@ function renderTimelinePanel(
   return renderToStaticMarkup(
     <WorkspaceProvider value={context}>
       <Panels
-        activePanel="timeline"
+        activePanel="trace"
         skillId="story-deconstruction"
         selectedNode={null}
         runId={props.runId}

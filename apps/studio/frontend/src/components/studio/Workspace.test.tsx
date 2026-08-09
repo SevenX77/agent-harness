@@ -649,6 +649,44 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(toastMocks.success).toHaveBeenCalledWith(expect.stringContaining('fp sha256:22222222'))
   })
 
+  it('leaves Compile pressable after a second compile of unchanged source', async () => {
+    // Reported 2026-08-09: Compile, watch the highlight move to Predict, press
+    // Compile again — the button lit up and went dead, and opening a file could not
+    // free it. Unchanged source recompiles to the SAME content hash, and the ledger
+    // keyed on that hash read the second outcome as already applied, so the
+    // optimistic `compiling` was never replaced and no later event could replace it.
+    // The state now lands unconditionally (决议 2026-08-09 D1), which is what this
+    // asserts: the worst case where BOTH compiles project identically.
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          <Workspace skillId="writer-smoke" onSelectSkill={vi.fn()} onCloseSkill={vi.fn()} />,
+        )
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
+      })
+
+      expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
+      })
+
+      expect(mocks.compileSkill).toHaveBeenCalledTimes(2)
+      expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
   it('projects compile success detail without broad skill-detail refetch', async () => {
     const compiledDetail = {
       ...skillDetail('writer-smoke'),

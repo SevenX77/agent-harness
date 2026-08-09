@@ -508,7 +508,14 @@ async def compile_skill_for_studio(
     The broadcast lives here rather than in the HTTP route because this function is
     the only common downstream of the route and the MCP tool — the frontend must
     learn about a compile whoever started it (决议 2026-08-03 D2).
+
+    A compile announces its start as well as its outcome, the way predict and run do.
+    That opening event is what separates two consecutive occurrences: recompiling
+    unchanged source settles on the identical outcome, and without something between
+    them the receiver reads the second settle as a redelivery of the first and folds
+    its side effects away (决议 2026-08-09 D4).
     """
+    await publish_skill_gate(skill_id=skill_id, gate="compile", outcome="started")
     try:
         success = await _compile_skill_for_studio(user_id, skill_id, storage, metadata)
     except CompileFailedError as exc:
@@ -519,6 +526,13 @@ async def compile_skill_for_studio(
             defect_count=len(exc.failure.errors),
             errors=[error.model_dump(mode="json") for error in exc.failure.errors],
         )
+        raise
+    except Exception:
+        # Announcing a start obliges this gate to announce an end. A `started` with no
+        # terminal parks every receiver on `compiling` with nothing left able to move
+        # it (决议 2026-08-09 D1) — a crash is an end, so it is reported as one. The
+        # exception itself still propagates; the caller decides what it means.
+        await publish_skill_gate(skill_id=skill_id, gate="compile", outcome="fail")
         raise
     await publish_skill_gate(
         skill_id=skill_id,

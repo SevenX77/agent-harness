@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import { gateEventKey, parseSkillGateEvent, projectGateEvent, type SkillGateEvent } from "./gate-state"
+import { createGateEffectFold } from "./gate-effect-fold"
+import { parseSkillGateEvent, projectGateEvent, type SkillGateEvent } from "./gate-state"
 
 function event(overrides: Partial<SkillGateEvent> = {}): SkillGateEvent {
   return {
@@ -133,25 +134,6 @@ describe("projectGateEvent", () => {
   })
 })
 
-describe("gateEventKey", () => {
-  it("gives the same identity to a locally projected outcome and its broadcast", () => {
-    const local = event({ outcome: "fail", errors: [{ file: null, line: null, field: null, severity: "fatal", message: "from the http response" }] })
-    const broadcast = event({ outcome: "fail", errors: [{ file: null, line: null, field: null, severity: "fatal", message: "from the event bus" }] })
-
-    expect(gateEventKey(local)).toBe(gateEventKey(broadcast))
-  })
-
-  it("separates outcomes of different skills, gates, artifacts and runs", () => {
-    const base = event()
-    expect(gateEventKey(base)).not.toBe(gateEventKey(event({ skillId: "other" })))
-    expect(gateEventKey(base)).not.toBe(gateEventKey(event({ gate: "predict" })))
-    expect(gateEventKey(base)).not.toBe(gateEventKey(event({ contentHash: "sha256:zzz" })))
-    expect(gateEventKey(event({ gate: "run", runId: "r1" }))).not.toBe(
-      gateEventKey(event({ gate: "run", runId: "r2" })),
-    )
-  })
-})
-
 describe("parseSkillGateEvent", () => {
   it("reads the backend payload", () => {
     const parsed = parseSkillGateEvent({
@@ -211,7 +193,34 @@ describe("two-path parity", () => {
 
     expect(fromBroadcast).not.toBeNull()
     expect(projectGateEvent(fromClick)).toEqual(projectGateEvent(fromBroadcast!))
-    expect(gateEventKey(fromClick)).toBe(gateEventKey(fromBroadcast!))
+  })
+
+  it("projects one occurrence identically enough for the effect fold to collapse it", () => {
+    // This is what lets `gate-effect-fold` recognise a redelivery without any event
+    // id: the two transports must project the same thing, byte differences in how
+    // each built its payload included. If this ever diverges, the drawer pops twice.
+    const fold = createGateEffectFold()
+    const fromClick: SkillGateEvent = {
+      skillId: "demo",
+      gate: "compile",
+      outcome: "fail",
+      contentHash: "sha256:abc",
+      defectCount: 1,
+      errors: [{ file: null, line: null, field: null, severity: "fatal", message: "boom" }],
+    }
+    const fromBroadcast = parseSkillGateEvent({
+      type: "skill_gate",
+      skill_id: "demo",
+      gate: "compile",
+      outcome: "fail",
+      content_hash: "sha256:abc",
+      run_id: null,
+      defect_count: 1,
+      errors: [{ file: null, line: null, field: null, severity: "fatal", message: "boom" }],
+    })
+
+    expect(fold.shouldRunEffects("demo", projectGateEvent(fromClick))).toBe(true)
+    expect(fold.shouldRunEffects("demo", projectGateEvent(fromBroadcast!))).toBe(false)
   })
 })
 

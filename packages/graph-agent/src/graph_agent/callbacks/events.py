@@ -11,7 +11,7 @@ event and the legacy dict for a transition period (see Task 3.5).
 
 New events introduced by this revision:
 
-* ``prompt_captured`` — fired by the TracingClientProxy right before an
+* ``prompt_captured`` — fired by the chat model right before an
   LLM call so Studio can show the exact ``(template_source, variables,
   resolved_prompt)`` triple that reached the model.
 * ``llm_fallback`` — fired by the ModelResolver when the primary provider
@@ -251,7 +251,7 @@ class BuiltinSubagentFallbackEvent(_EventBase):
 
 
 class PromptCapturedEvent(_EventBase):
-    """Fired by TracingClientProxy right before the LLM round-trip.
+    """Fired by the chat model right before the LLM round-trip.
 
     ``template_source`` is the filename / id of the prompt template when
     the caller tracks one; ``variables`` is the rendered placeholder dict;
@@ -259,8 +259,8 @@ class PromptCapturedEvent(_EventBase):
     ``loop_index`` is the 1-based count of this LLM call within the
     phase's ReAct loop: the first call inside a phase emits
     ``loop_index=1``, the second emits ``2``, and so on. The counter
-    naturally restarts at 1 in each phase because TracingClientProxy is
-    per-phase (see tracing_proxy.py module docstring).
+    naturally restarts at 1 in each phase because the model that counts is
+    built per phase.
     """
 
     event_type: Literal["prompt_captured"] = "prompt_captured"

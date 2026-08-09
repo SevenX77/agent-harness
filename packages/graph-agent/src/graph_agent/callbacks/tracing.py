@@ -114,7 +114,7 @@ class TracingCallback(Callback):
         """New-style sink: log the typed event to trace.jsonl.
 
         Emitters that call ``cb.on_event(event)`` directly (for example the
-        forthcoming ``TracingClientProxy`` in Step 4 and the ``parallel_map``
+        ``prompt_captured`` emitter in the chat model and the ``parallel_map``
         builtin in Task 4.3) bypass the legacy on_* dispatch entirely and
         land here. We deliberately do NOT call the base-class dispatcher,
         which would double-count events that also flow through the legacy

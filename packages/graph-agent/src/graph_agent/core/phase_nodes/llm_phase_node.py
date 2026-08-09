@@ -64,7 +64,6 @@ from graph_agent.core.state import (
 )
 from graph_agent.core.template import _render_user_prompt, _safe_render_template
 from graph_agent.core.tool_wrapper import _wrap_tool_for_langchain
-from graph_agent.core.tracing_proxy import TracingClientProxy
 from graph_agent.core.types import Phase
 
 logger = logging.getLogger(__name__)
@@ -177,6 +176,10 @@ class LLMPhaseNode(PhaseNode):
                 phase_name=phase.name,
                 model_override=phase.model_override,
                 event_callbacks=tuple(runtime.active_callbacks),
+                # A parallel sub-run stamps its identity on what it emits, and
+                # the model is now what emits the start of a call.
+                sub_run_id=runtime.state["flow"].sub_run_id,
+                group_key=runtime.state["flow"].group_key,
             )
         else:
             resolver = self.container.legacy_model_resolver
@@ -200,19 +203,7 @@ class LLMPhaseNode(PhaseNode):
                 call_chain=[],
             ),
         )
-        effective_llm_role = phase.llm_role or phase.tier
-        return cast(
-            BaseChatModel,
-            TracingClientProxy(
-                wrapped_client=model,
-                callbacks=runtime.active_callbacks,
-                phase_name=phase.name,
-                llm_role=effective_llm_role,
-                resolved_model=str(resolved_model_name) if resolved_model_name else None,
-                sub_run_id=runtime.state["flow"].sub_run_id,
-                group_key=runtime.state["flow"].group_key,
-            ),
-        )
+        return cast(BaseChatModel, model)
 
     def _langchain_tools(
         self,

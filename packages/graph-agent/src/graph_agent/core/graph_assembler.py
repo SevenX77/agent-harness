@@ -32,7 +32,6 @@ from graph_agent.callbacks.events import (
     LLMCallEvent,
     PhaseEndEvent,
     PhaseStartEvent,
-    ToolCallEvent,
 )
 from graph_agent.callbacks.token_accounting import account_llm_call
 from graph_agent.cognitive.critic import (
@@ -87,6 +86,7 @@ from graph_agent.tools.builtin.read_file import (
     read_workspace_text_file,
 )
 from graph_agent.tools.builtin.read_reference import read_declared_reference, read_resource_file
+from graph_agent.tracing import StepReporter
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
@@ -2041,6 +2041,7 @@ def _build_skill_node(
         checkpointer=wrapped_checkpointer,
     )
 
+    step_reporter = StepReporter(callbacks=callbacks, phase_name=phase_id)
 
     def _skill_node(
         state: WorkflowState,
@@ -2143,22 +2144,17 @@ def _build_skill_node(
                         if getattr(follow_msg, "tool_call_id", None) == tc_id:
                             tc_result = str(follow_msg.content)
                             break
-                    # This loop reads finished calls off the message list after
-                    # the inner graph returned, so the moment a call *started*
-                    # is long gone — no started event is emitted here. The
-                    # provider id is the same one TracingMiddleware announced
-                    # with, so the pair still closes.
-                    _safe_emit_event(
-                        callbacks,
-                        ToolCallEvent(
-                            tool_call_id=str(tc_id) if tc_id else uuid.uuid4().hex,
-                            phase_name=phase_id,
-                            tool_name=str(tc_name or ""),
-                            args=tc_args if isinstance(tc_args, dict) else {},
-                            result=tc_result,
-                            parent_node_id=phase_id,
-                            node_type="agent",
-                        ),
+                    # These calls are read off the message list after the
+                    # inner graph returned, so the moment each one started is
+                    # long gone; the reporter is told they are already over
+                    # rather than being asked to invent a start.
+                    step_reporter.completed_tool_call(
+                        tool_call_id=str(tc_id) if tc_id else uuid.uuid4().hex,
+                        tool_name=str(tc_name or ""),
+                        args=tc_args if isinstance(tc_args, dict) else {},
+                        result=tc_result,
+                        parent_node_id=phase_id,
+                        node_type="agent",
                     )
 
         if result is not None and isinstance(result, dict) and "flow" in result:

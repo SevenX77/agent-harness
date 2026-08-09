@@ -502,7 +502,11 @@ class TestExecuteLLMPhaseMiddlewareIntegration:
         assert middleware_kwargs["summarization_trigger_fraction"] == 0.8
         assert middleware_kwargs["summarization_keep_messages"] == 20
         assert middleware_kwargs["clarification"] is True
-        assert agent_model._wrapped is captured["resolver_model"]
+        # The phase hands the resolved model to the agent as-is. It used to
+        # arrive wrapped in a prompt-capture proxy, which only ever observed
+        # callers that invoked the model directly; announcing moved into the
+        # model itself, so there is nothing left to wrap.
+        assert agent_model is captured["resolver_model"]
 
 
 class TestExecuteLLMPhaseSchemaRoutingPhase3M7:

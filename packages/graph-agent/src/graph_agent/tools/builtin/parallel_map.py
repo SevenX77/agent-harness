@@ -13,7 +13,7 @@ Behaviour:
   sub-run, so we never race on the cached-harness instance that
   ``run_skill`` uses for serial callers.
 * Every sub-run receives a unique ``sub_run_id`` plus a shared
-  ``group_key`` via ``runtime_inputs``. ``TracingClientProxy`` reads
+  ``group_key`` via ``runtime_inputs``. The chat model reads
   these two keys off the context and stamps every ``prompt_captured``
   event with them so Studio can collapse the fan-out into one folded
   timeline group (Gemini audit Major #1).
@@ -292,7 +292,7 @@ def _run_one_item(
     inputs = dict(base_inputs)
     inputs[item_as] = item
     # The harness reads these two off the context to stamp grouping fields
-    # on TracingClientProxy events (see harness.py Step 4 integration).
+    # on the model's prompt_captured events.
     inputs["_sub_run_id"] = sub_run_id
     inputs["_group_key"] = group_key
 

@@ -48,6 +48,7 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/io-declarations.test.ts
 !apps/studio/frontend/src/lib/io-config.ts
 !apps/studio/frontend/src/lib/io-config.test.ts
+!apps/studio/frontend/src/lib/websocket.test.ts
 lib64/
 parts/
 sdist/

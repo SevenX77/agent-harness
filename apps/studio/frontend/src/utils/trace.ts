@@ -422,24 +422,6 @@ export function eventModelName(event: CallbackEvent): string | null {
   return null
 }
 
-export function findPromptEvent(events: CallbackEvent[], selectedIndex: number): CallbackEvent | null {
-  const selected = events[selectedIndex]
-  if (!selected) {
-    return null
-  }
-  if (selected.event_type === 'prompt_captured') {
-    return selected
-  }
-
-  for (let index = selectedIndex; index >= 0; index -= 1) {
-    const candidate = events[index]
-    if (candidate.event_type === 'prompt_captured' && eventPhase(candidate) === eventPhase(selected)) {
-      return candidate
-    }
-  }
-  return selected.event_type === 'llm_call' ? selected : null
-}
-
 function isJsonObject(value: JsonValue | undefined): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import type { CallbackEvent } from '../../api/types'
-import { TraceEventRow } from './TraceEventRow'
+import { eventPhase } from '../../utils/trace'
+import { TraceStepRow } from './TraceStepRow'
 
 function event(partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent {
   return {
@@ -14,18 +15,22 @@ function event(partial: Partial<CallbackEvent> & { event_type: string }): Callba
 
 function renderRow(event: CallbackEvent, expanded = false): string {
   return renderToStaticMarkup(
-    <TraceEventRow
-      event={event}
-      index={0}
+    <TraceStepRow
+      step={{
+        key: 'evt-0',
+        phase: eventPhase(event),
+        status: 'done',
+        start: { event, index: 0 },
+        end: null,
+      }}
       eventId="evt-0"
       expanded={expanded}
       onToggleExpanded={() => undefined}
-      onSelectPrompt={() => undefined}
     />,
   )
 }
 
-describe('TraceEventRow retry badge (D10)', () => {
+describe('TraceStepRow retry badge (D10)', () => {
   it('renders a 2/3 retry badge for a validation_fail with attempt info', () => {
     const html = renderRow(event({ event_type: 'validation_fail', attempt: 2, max_attempts: 3, error_message: 'schema mismatch' }))
 
@@ -49,7 +54,7 @@ describe('TraceEventRow retry badge (D10)', () => {
   })
 })
 
-describe('TraceEventRow payload collapse (D1 / §4)', () => {
+describe('TraceStepRow payload collapse (D1 / §4)', () => {
   it('renders the full payload inline when it is under the ~2KB auto-expand limit', () => {
     const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }), true)
 
@@ -60,7 +65,7 @@ describe('TraceEventRow payload collapse (D1 / §4)', () => {
 
   it('collapses an oversized payload and offers a sized "show full" toggle', () => {
     const big = 'z'.repeat(4000)
-    const html = renderRow(event({ event_type: 'llm_call', big_field: big }), true)
+    const html = renderRow(event({ event_type: 'phase_end', big_field: big }), true)
 
     expect(html).toContain('Show full payload')
     // The size label is surfaced so the PM knows how big the hidden blob is.
@@ -70,7 +75,7 @@ describe('TraceEventRow payload collapse (D1 / §4)', () => {
   })
 })
 
-describe('TraceEventRow agent tool-call folding (D1/P2, n4-trace #16)', () => {
+describe('TraceStepRow agent tool-call folding (D1/P2, n4-trace #16)', () => {
   it('renders the classified verb headline (Explored · Read) for an agent tool_call instead of raw JSON', () => {
     const html = renderRow(
       event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Read', args: { path: 'a.py' }, result: 'file body' }),
@@ -93,21 +98,20 @@ describe('TraceEventRow agent tool-call folding (D1/P2, n4-trace #16)', () => {
   })
 })
 
-describe('TraceEventRow agent execution subtree inline expand (D9, n4-trace #24)', () => {
-  it("renders a '+' inline expand affordance on an agent tool_call row", () => {
-    const html = renderRow(event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Read', result: 'x' }))
+describe('TraceStepRow has one expander, not two (decision 2026-08-09 D4)', () => {
+  it('opens the tool subtree from the row itself, with no second control', () => {
+    // The row used to carry a separate '+ Expand' for the subtree next to its
+    // own chevron: two controls for one fold, disagreeing about what was open.
+    const collapsed = renderRow(event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Read', result: 'x' }))
+    const opened = renderRow(event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Read', result: 'x' }), true)
 
-    expect(html).toContain('aria-label="Expand execution subtree"')
-  })
-
-  it('does not render the subtree affordance for a non-tool event', () => {
-    const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }))
-
-    expect(html).not.toContain('execution subtree')
+    expect(collapsed).not.toContain('execution subtree')
+    expect(collapsed).toContain('Explored · Read')
+    expect(opened).toContain('Result')
   })
 })
 
-describe('TraceEventRow retry-exhausted Error Stack (D10, n4-trace #25)', () => {
+describe('TraceStepRow retry-exhausted Error Stack (D10, n4-trace #25)', () => {
   it('renders an Error Stack listing each prior failure reason when retries are exhausted', () => {
     const html = renderRow(
       event({ event_type: 'retry_exhausted', phase_name: 'draft', max_retries: 3, final_errors: ['schema mismatch', 'missing field x'] }),
@@ -132,16 +136,74 @@ describe('TraceEventRow retry-exhausted Error Stack (D10, n4-trace #25)', () => 
   })
 })
 
-describe('TraceEventRow inspect-prompt affordance (D8 click target)', () => {
-  it('renders the Inspect prompt control for an llm_call event', () => {
-    const html = renderRow(event({ event_type: 'llm_call', phase_name: 'draft' }))
+describe('TraceStepRow shows the prompt in place (decision 2026-08-09 D5)', () => {
+  it('puts template, variables and rendered prompt inside the opened step', () => {
+    const html = renderRow(
+      event({
+        event_type: 'prompt_captured',
+        phase_name: 'draft',
+        template_source: 'draft.md',
+        variables: { topic: 'venus' },
+        resolved_prompt: [{ role: 'user', content: 'write about venus' }],
+      }),
+      true,
+    )
 
-    expect(html).toContain('Inspect prompt')
+    expect(html).toContain('Template')
+    expect(html).toContain('draft.md')
+    expect(html).toContain('Variables')
+    expect(html).toContain('venus')
+    expect(html).toContain('Rendered')
   })
 
-  it('does not render the Inspect prompt control for a plain phase event', () => {
-    const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }))
+  it('offers no link out to a separate inspector', () => {
+    // A second home for the prompt is a second thing to keep in sync, and the
+    // step has to show it on open anyway.
+    const html = renderRow(event({ event_type: 'llm_call', phase_name: 'draft' }), true)
 
     expect(html).not.toContain('Inspect prompt')
+  })
+})
+
+describe('TraceStepRow status (decision 2026-08-09 D4)', () => {
+  it('says it is still running, so a long call does not look like a dead panel', () => {
+    const running = renderToStaticMarkup(
+      <TraceStepRow
+        step={{
+          key: 'evt-0',
+          phase: 'draft',
+          status: 'running',
+          start: { event: event({ event_type: 'prompt_captured', phase_name: 'draft' }), index: 0 },
+          end: null,
+        }}
+        eventId="evt-0"
+        expanded
+        onToggleExpanded={() => undefined}
+      />,
+    )
+
+    expect(running).toContain('data-trace-step-status="running"')
+    expect(running).toContain('aria-label="Step in progress"')
+  })
+
+  it('reports the finished half\'s numbers once the answer arrives', () => {
+    const done = renderToStaticMarkup(
+      <TraceStepRow
+        step={{
+          key: 'evt-0',
+          phase: 'draft',
+          status: 'done',
+          start: { event: event({ event_type: 'prompt_captured', phase_name: 'draft' }), index: 0 },
+          end: { event: event({ event_type: 'llm_call', phase_name: 'draft', input_tokens: 10, output_tokens: 20 }), index: 1 },
+        }}
+        eventId="evt-0"
+        expanded={false}
+        onToggleExpanded={() => undefined}
+      />,
+    )
+
+    expect(done).toContain('data-trace-step-status="done"')
+    expect(done).not.toContain('aria-label="Step in progress"')
+    expect(done).toContain('10/20')
   })
 })

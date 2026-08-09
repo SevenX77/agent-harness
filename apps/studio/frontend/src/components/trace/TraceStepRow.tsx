@@ -1,4 +1,4 @@
-import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, MessageSquare, Plus, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
+import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { LlmFallbackDetails } from '../../utils/trace'
@@ -11,6 +11,7 @@ import {
   eventMessageIsRedundant,
   eventPhase,
   eventTimeLabel,
+  jsonText,
   llmFallbackDetails,
   mockedSourceClass,
   mockedSourceLabel,
@@ -19,67 +20,61 @@ import {
   tokenText,
   toolCallSummary,
 } from '../../utils/trace'
+import type { TraceStep } from '../../utils/trace-steps'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { EventTypeBadge } from './EventTypeBadge'
 
-interface TraceEventRowProps {
-  event: CallbackEvent
-  index: number
+interface TraceStepRowProps {
+  step: TraceStep
   eventId: string
   selected?: boolean
-  expanded?: boolean
-  onToggleExpanded?: () => void
-  onSelectPrompt: (index: number) => void
+  expanded: boolean
+  onToggleExpanded: () => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
-export function TraceEventRow({
-  event,
-  index,
+/**
+ * One step of a run: what is happening, or what happened.
+ *
+ * While the step runs it shows the work going in — the prompt for an LLM call,
+ * the arguments for a tool call — because that is the only thing there is to
+ * show yet, and showing nothing for the duration of the slowest part of a run
+ * is what made the panel feel dead. When the step finishes it settles into a
+ * one-line summary (decision 2026-08-09 D4). The caller owns expansion so the
+ * default can follow the step's status while a deliberate toggle still sticks.
+ */
+export function TraceStepRow({
+  step,
   eventId,
   selected = false,
   expanded,
   onToggleExpanded,
-  onSelectPrompt,
   onSelectEvent,
-}: TraceEventRowProps) {
-  const [localExpanded, setLocalExpanded] = useState(false)
-  const [subtreeOpen, setSubtreeOpen] = useState(false)
-  const isExpanded = expanded ?? localExpanded
-  const tokens = tokenText(event)
-  const mockedSource = eventMockedSource(event)
-  const retry = retryBadge(event)
-  const inspectable = event.event_type === 'prompt_captured' || event.event_type === 'llm_call'
-  const isError = event.event_type === 'internal_error' || event.event_type === 'validation_fail'
-  // n4-trace #16/#24: agent tool_call events fold under a semantic verb and
-  // expose an inline subtree (args → result) instead of a raw JSON dump.
-  const toolCall = toolCallSummary(event)
-  // n4-trace #25: retries-exhausted (and per-attempt validation_fail) carry a
-  // list of failure reasons surfaced as an explicit Error Stack.
-  const failures = errorStack(event)
-  // trace-observability F7: provider fallback renders as an explicit amber block,
-  // and rows that know which model served the call carry a model chip.
-  const fallback = llmFallbackDetails(event)
-  const modelName = eventModelName(event)
-  // A timeline needs time: each row shows its wall-clock moment (muted mono,
-  // secondary info one shade dimmer — same hierarchy as copilot tool activity).
-  const timeLabel = eventTimeLabel(event)
+}: TraceStepRowProps) {
+  const running = step.status === 'running'
+  // Chips describe the outcome, so they read from the half that HAS one.
+  const settled = step.end?.event ?? step.start.event
+  const tokens = tokenText(settled)
+  const mockedSource = eventMockedSource(settled)
+  const retry = retryBadge(settled)
+  const isError = settled.event_type === 'internal_error' || settled.event_type === 'validation_fail'
+  const failures = errorStack(settled)
+  const fallback = llmFallbackDetails(settled)
+  const modelName = eventModelName(settled)
+  const timeLabel = eventTimeLabel(step.start.event)
 
   return (
     <div className="relative pl-5">
-      <div className={`absolute -left-[7px] top-2 size-3 rounded-full border-2 border-background ${eventColor(event.event_type)}`} />
+      <div className={`absolute -left-[7px] top-2 size-3 rounded-full border-2 border-background ${eventColor(settled.event_type)}`} />
       <button
         type="button"
         data-trace-event-id={eventId}
-        aria-label={`Trace event ${event.event_type} in ${eventPhase(event)}`}
-        aria-expanded={isExpanded}
+        data-trace-step-status={step.status}
+        aria-label={`Trace step ${settled.event_type} in ${eventPhase(settled)}`}
+        aria-expanded={expanded}
         onClick={() => {
-          if (onToggleExpanded) {
-            onToggleExpanded()
-          } else {
-            setLocalExpanded((open) => !open)
-          }
-          onSelectEvent?.(index, event)
+          onToggleExpanded()
+          onSelectEvent?.(step.start.index, step.start.event)
         }}
         className={`block w-full rounded-md border-0 px-2.5 py-1.5 text-left transition-colors ${
           selected
@@ -91,8 +86,11 @@ export function TraceEventRow({
       >
         <div className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2">
-            {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-            <EventTypeBadge eventType={event.event_type} />
+            {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+            <EventTypeBadge eventType={settled.event_type} />
+            {running ? (
+              <Loader2 aria-label="Step in progress" className="h-3 w-3 animate-spin text-muted-foreground" />
+            ) : null}
             {timeLabel ? (
               <span data-trace-time className="font-mono text-[10px] text-muted-foreground/80">{timeLabel}</span>
             ) : null}
@@ -139,75 +137,106 @@ export function TraceEventRow({
             </span>
           ) : null}
         </div>
-        {eventMessageIsRedundant(event) ? null : (
+        {eventMessageIsRedundant(settled) ? null : (
           <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-foreground/80">
-            {eventMessage(event)}
+            {eventMessage(settled)}
           </p>
         )}
-        {isError && typeof event.error_message === 'string' ? (
+        {isError && typeof settled.error_message === 'string' ? (
           <p className="mt-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive">
-            {event.error_message}
+            {settled.error_message}
           </p>
         ) : null}
         {fallback ? <FallbackBlock details={fallback} /> : null}
-        {inspectable ? (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(clickEvent) => {
-              clickEvent.stopPropagation()
-              onSelectPrompt(index)
-            }}
-            onKeyDown={(keyEvent) => {
-              if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
-                keyEvent.preventDefault()
-                keyEvent.stopPropagation()
-                onSelectPrompt(index)
-              }
-            }}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-link hover:text-link/80"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            Inspect prompt <ChevronRight className="h-3 w-3" />
-          </span>
-        ) : null}
-        {toolCall ? (
-          <span className="mt-2 flex items-center gap-2 text-xs">
-            {toolCall.toolName === 'Bash' ? (
-              <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-            <span className="font-medium text-foreground">{toolCall.headline}</span>
-            {toolCall.durationLabel ? (
-              <span className="text-muted-foreground">{toolCall.durationLabel}</span>
-            ) : null}
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={subtreeOpen ? 'Collapse execution subtree' : 'Expand execution subtree'}
-              onClick={(clickEvent) => {
-                clickEvent.stopPropagation()
-                setSubtreeOpen((open) => !open)
-              }}
-              onKeyDown={(keyEvent) => {
-                if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
-                  keyEvent.preventDefault()
-                  keyEvent.stopPropagation()
-                  setSubtreeOpen((open) => !open)
-                }
-              }}
-              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-medium text-muted-foreground hover:bg-accent"
-            >
-              {subtreeOpen ? <ListTree className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-              {subtreeOpen ? 'Subtree' : 'Expand'}
-            </span>
-          </span>
-        ) : null}
+        <ToolHeadline step={step} />
         {failures.length > 0 ? <ErrorStack failures={failures} /> : null}
       </button>
-      {toolCall && subtreeOpen && !isExpanded ? <ToolCallSubtree summary={toolCall} /> : null}
-      {isExpanded ? <ExpandedPayload event={event} /> : null}
+      {expanded ? <StepBody step={step} /> : null}
+    </div>
+  )
+}
+
+/** The tool call named on the collapsed row, so a folded step still says what it did. */
+function ToolHeadline({ step }: { step: TraceStep }) {
+  const summary = toolCallSummary(step.end?.event ?? step.start.event)
+  const startedName = typeof step.start.event.tool_name === 'string' ? step.start.event.tool_name : null
+  const headline = summary?.headline ?? startedName
+  if (!headline) {
+    return null
+  }
+  return (
+    <span className="mt-2 flex items-center gap-2 text-xs">
+      {headline.includes('Bash') ? (
+        <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
+      ) : (
+        <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+      )}
+      <span className="font-medium text-foreground">{headline}</span>
+      {summary?.durationLabel ? (
+        <span className="text-muted-foreground">{summary.durationLabel}</span>
+      ) : null}
+    </span>
+  )
+}
+
+function StepBody({ step }: { step: TraceStep }) {
+  const opener = step.start.event
+  if (opener.event_type === 'prompt_captured' || opener.event_type === 'llm_call') {
+    return <PromptSections step={step} />
+  }
+  const summary = toolCallSummary(step.end?.event ?? opener)
+  if (summary) {
+    return <ToolCallSubtree summary={summary} />
+  }
+  if (opener.event_type === 'tool_call_started') {
+    return <ToolArguments event={opener} />
+  }
+  return <GenericPayload event={step.end?.event ?? opener} />
+}
+
+/**
+ * The prompt, where it belongs: inside the step that sent it (decision
+ * 2026-08-09 D5). This used to be a separate modal reached from a link on the
+ * row, which is a second home for something the step already has to show the
+ * moment it opens.
+ */
+function PromptSections({ step }: { step: TraceStep }) {
+  const prompt = step.start.event
+  const answered = step.end?.event
+  const rendered = prompt.event_type === 'prompt_captured'
+    ? jsonText(prompt.resolved_prompt)
+    : jsonText(prompt.messages ?? undefined)
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
+      <PromptSection label="Template">{prompt.template_source ?? 'inline'}</PromptSection>
+      <PromptSection label="Variables">{jsonText(prompt.variables)}</PromptSection>
+      <PromptSection label="Rendered">{rendered}</PromptSection>
+      {answered ? (
+        <PromptSection label="Response">{jsonText(answered.response_data ?? undefined)}</PromptSection>
+      ) : null}
+    </div>
+  )
+}
+
+function PromptSection({ label, children }: { label: string, children: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
+      <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] leading-relaxed text-foreground">
+        {children}
+      </pre>
+    </div>
+  )
+}
+
+/** What a tool was asked to do, while it is still doing it. */
+function ToolArguments({ event }: { event: CallbackEvent }) {
+  return (
+    <div className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
+      <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
+        {jsonText(event.args)}
+      </pre>
     </div>
   )
 }
@@ -276,9 +305,8 @@ function ErrorStack({ failures }: { failures: string[] }) {
   )
 }
 
-// n4-trace #16/#24: in-place execution subtree for an agent tool_call — the
-// verb-classified call with its args (input) and result (output), so the agent
-// is not a black box and the user never has to read raw JSON.
+// n4-trace #16/#24: the verb-classified call with its args (input) and result
+// (output), so the agent is not a black box and nobody has to read raw JSON.
 function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof toolCallSummary>> }) {
   return (
     <div className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
@@ -289,7 +317,10 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
       {summary.args ? (
         <div className="mt-1.5">
           <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
-          <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
+          {/* No height cap and no inner scrollbar: the panel already scrolls, and
+              a scroller inside a scroller is a worse way to read a long value
+              than a fold the reader controls (decision 2026-08-09 D6). */}
+          <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
             {summary.args}
           </pre>
         </div>
@@ -304,16 +335,6 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
   )
 }
 
-function ExpandedPayload({ event }: { event: CallbackEvent }) {
-  // n4-trace #16: agent tool_call events fold under their classified subtree
-  // (verb · tool, input, result) instead of a raw JSON dump.
-  const toolCall = toolCallSummary(event)
-  if (toolCall) {
-    return <ToolCallSubtree summary={toolCall} />
-  }
-  return <GenericPayload event={event} />
-}
-
 function GenericPayload({ event }: { event: CallbackEvent }) {
   // §4: long payloads default to a collapsed ~2KB head; only the user opts in to
   // the full dump so a multi-megabyte trace event never floods (or OOMs) the panel.
@@ -322,7 +343,7 @@ function GenericPayload({ event }: { event: CallbackEvent }) {
   const body = showFull ? JSON.stringify(event, null, 2) : preview.text
   return (
     <div className="mt-2">
-      <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground shadow-sm">
+      <pre className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed whitespace-pre-wrap text-foreground shadow-sm">
         {body}
       </pre>
       {preview.truncated ? (

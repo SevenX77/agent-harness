@@ -12,9 +12,7 @@ import { CopilotFab } from "@/components/copilot/copilot-fab"
 import { CopilotPanelMorph } from "@/components/copilot/copilot-panel-morph"
 import { defaultFabPosition, headerLogoTarget, panelRect, type Point, type Rect } from "@/components/copilot/copilot-fab-geometry"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
-import { PromptInspector } from "@/components/PromptInspector"
 import { useCopilot } from "@/hooks/useCopilot"
-import { findPromptEvent } from "@/utils/trace"
 import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
@@ -733,11 +731,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [updateStage])
 
-  // F5 (trace): index of the trace event whose prompt is open in the inspector.
-  const [promptIndex, setPromptIndex] = useState<number | null>(null)
   const runStream = useRunStream(skillId, runId)
-  // The ONE event source every trace surface reads (timeline trace view, Full
-  // Trace document, PromptInspector): live stream while viewing live, the
+  // The ONE event source the trace reads: live stream while viewing live, the
   // fetched history otherwise — fix C, decision 2026-08-07.
   const viewedTraceEvents = viewedTrace?.source === "history" ? viewedTrace.events : runStream.events
   // F7: a finished run (run_ended in the stream) drives the copilot analysis bar.
@@ -2409,7 +2404,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // reader of that run takes the same events.
   const handleSelectRun = useCallback(async (run: RunMetadata) => {
     if (!currentSkillId) return
-    setPromptIndex(null)
     if (runId && run.run_id === runId) {
       setViewedTrace({ source: "live" })
       return
@@ -2435,7 +2429,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // must never become unreachable once a run has streamed).
   const handleCloseTraceView = useCallback(() => {
     setViewedTrace(null)
-    setPromptIndex(null)
   }, [])
 
   // Launch the node's Compare LLMs: off the current base run, spawn one isolated
@@ -2734,7 +2727,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         resumeValidityError={resumeValidityError}
         traceEvents={viewedTraceEvents}
         activeTracePhase={activeTracePhase}
-        onSelectTracePrompt={setPromptIndex}
         traceCanCompare={Boolean(runId)}
         traceCompareLoading={goldenDiff.loading}
         onCompareToGolden={handleCompareToGolden}
@@ -2971,12 +2963,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   </div>
                 </div>
               ) : null}
-              <PromptInspector
-                promptEvent={promptIndex != null
-                  ? findPromptEvent(viewedTraceEvents.map((envelope) => envelope.payload), promptIndex)
-                  : null}
-                onClose={() => setPromptIndex(null)}
-              />
             </div>
           </ResizablePanel>
 

@@ -79,7 +79,10 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
 
     def fake_predict_artifact(_adapter: object, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append(payload)
-        return mock_result.model_dump(mode="json")
+        # The engine runs under the thread_id Studio handed it and reports that
+        # id back; a stub that invents its own hides an id mismatch instead of
+        # exercising one.
+        return mock_result.model_copy(update={"run_id": payload["thread_id"]}).model_dump(mode="json")
 
     monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", fake_predict_artifact)
 
@@ -94,6 +97,7 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
     # 验证返回值携带本次 Predict 绑定的 artifact identity
     assert result.model_dump(mode="json") == {
         **mock_result.model_dump(mode="json"),
+        "run_id": str(calls[0]["thread_id"]),
         "artifact_ref": mock_art_ref,
     }
 
@@ -107,10 +111,11 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
     # 验证是否成功持久化了 result.json 到 runs 目录
     from app.services.skills import workspace_dir_for
 
-    expected_result_json = workspace_dir_for(skill_dir) / "predicts" / "predict-run-777" / "result.json"
+    predict_run_id = str(calls[0]["thread_id"])
+    expected_result_json = workspace_dir_for(skill_dir) / "predicts" / predict_run_id / "result.json"
     assert expected_result_json.exists()
     saved_data = json.loads(expected_result_json.read_text(encoding="utf-8"))
-    assert saved_data["run_id"] == "predict-run-777"
+    assert saved_data["run_id"] == predict_run_id
     assert saved_data["success"] is True
 
     # 验证成功 predict 在 .workspace 落了 predict-pass 记录(供 run-spawn gate 消费)
@@ -121,7 +126,7 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
     )
     assert predict_pass_record["success"] is True
     assert predict_pass_record["skill_id"] == "skill"
-    assert predict_pass_record["run_id"] == "predict-run-777"
+    assert predict_pass_record["run_id"] == predict_run_id
 
 
 def test_dispatch_predict_job_translates_sdk_deadlock_error(
@@ -399,12 +404,13 @@ def test_predict_writes_its_account_before_dropping_the_live_record(
     """
     import app.services.run_manager as run_manager_module
 
-    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-order", success=True)
-    run_dir = skill_dir / ".workspace" / "predicts" / "predict-order"
+    skill_dir, _seen = _predict_fixture(monkeypatch, tmp_path, success=True)
     account_existed_at_teardown: list[bool] = []
     real_finish = run_manager_module.run_manager.finish_transient_predict_run
 
     def recording_finish(run_id: str) -> None:
+        # Ask about the id being torn down, which is the id a reader would use.
+        run_dir = skill_dir / ".workspace" / "predicts" / run_id
         account_existed_at_teardown.append((run_dir / "run_metadata.json").exists())
         real_finish(run_id)
 
@@ -457,10 +463,16 @@ def _predict_fixture(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
-    run_id: str,
     success: bool,
-) -> Path:
-    """Wire a predict dispatch over fakes and return the skill dir."""
+) -> tuple[Path, dict[str, str]]:
+    """Wire a predict dispatch over fakes; return the skill dir and the run id.
+
+    The run id is NOT the test's to pick. Studio mints it, registers the live
+    stream under it and hands it to the engine as ``thread_id``; the fake echoes
+    it back the way the real engine does, and the caller reads it out of
+    ``seen``. Pinning a literal here let the account and its reader disagree
+    about which directory a predict is.
+    """
     import app.core.adapters.engine as engine_adapter_module
     from app.core import config
 
@@ -478,10 +490,14 @@ def _predict_fixture(
     }
     monkeypatch.setattr(engine_adapter_module.EngineAdapter, "compile", lambda *_a, **_k: art_ref)
 
-    def fake_predict_artifact(_adapter: object, _payload: dict[str, Any]) -> dict[str, Any]:
+    seen: dict[str, str] = {}
+
+    def fake_predict_artifact(_adapter: object, payload: dict[str, Any]) -> dict[str, Any]:
         # The engine drops the trace into the run directory before Studio seals it;
         # reproduce that here, because whether the seal picks the trace up is exactly
         # what these tests are about.
+        run_id = str(payload["thread_id"])
+        seen["run_id"] = run_id
         run_dir = skill_dir / ".workspace" / "predicts" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "trace.jsonl").write_text(
@@ -498,7 +514,7 @@ def _predict_fixture(
         ).model_dump(mode="json")
 
     monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", fake_predict_artifact)
-    return skill_dir
+    return skill_dir, seen
 
 
 def test_finished_predict_leaves_the_status_account_a_run_reader_needs(
@@ -512,14 +528,14 @@ def test_finished_predict_leaves_the_status_account_a_run_reader_needs(
     from app.models.runs import RunMetadata
     from app.services.skills import workspace_dir_for
 
-    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-account", success=True)
+    skill_dir, seen = _predict_fixture(monkeypatch, tmp_path, success=True)
 
     PredictorService().dispatch_predict_job("skill")
 
-    account = workspace_dir_for(skill_dir) / "predicts" / "predict-account" / "run_metadata.json"
+    account = workspace_dir_for(skill_dir) / "predicts" / seen["run_id"] / "run_metadata.json"
     assert account.exists(), "a sealed predict run must record its own outcome"
     metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
-    assert metadata.run_id == "predict-account"
+    assert metadata.run_id == seen["run_id"]
     assert metadata.status == "success"
     # Timeline design (03_regions/timeline F1): predict rows are told apart from
     # run rows by the metadata itself, not by sniffing the run_id prefix.
@@ -544,11 +560,11 @@ def test_failed_predict_records_the_same_verdict_the_gate_broadcasts(
     from app.models.runs import RunMetadata
     from app.services.skills import workspace_dir_for
 
-    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-bad", success=False)
+    skill_dir, seen = _predict_fixture(monkeypatch, tmp_path, success=False)
 
     result = PredictorService().dispatch_predict_job("skill")
 
-    account = workspace_dir_for(skill_dir) / "predicts" / "predict-bad" / "run_metadata.json"
+    account = workspace_dir_for(skill_dir) / "predicts" / seen["run_id"] / "run_metadata.json"
     metadata = RunMetadata.model_validate_json(account.read_text(encoding="utf-8"))
     assert metadata.status == "failed"
     assert metadata.status == predictor_module.export_predict_diagnostics(result).status
@@ -564,15 +580,151 @@ def test_query_run_trace_can_answer_for_a_finished_predict_run(
     from app.services import skills as skills_module
     from app.services.run_manager import run_manager
 
-    skill_dir = _predict_fixture(monkeypatch, tmp_path, run_id="predict-readable", success=True)
+    skill_dir, seen = _predict_fixture(monkeypatch, tmp_path, success=True)
     # get_run_detail resolves the run dir through the skill registry, which this
     # fixture never populates; point it at the same directory predict wrote to.
     monkeypatch.setattr(skills_module, "resolve_skill_dir", lambda _skill_id: skill_dir)
 
     PredictorService().dispatch_predict_job("skill")
 
-    detail = run_manager.get_run_detail(skill_id="skill", run_id="predict-readable")
+    detail = run_manager.get_run_detail(skill_id="skill", run_id=seen["run_id"])
 
     assert detail.metadata.status == "success"
     assert [event.event_type for event in detail.events] == ["phase_start"]
     assert detail.final_context == {"topic": "predict"}
+
+
+def _predict_account_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    predict_artifact: Any,
+) -> Path:
+    """Wire a skill whose predict behaves however the caller says, return its dir."""
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
+
+    import app.core.adapters.engine as engine_adapter_module
+
+    sha_val = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "compile",
+        lambda *a, **k: {
+            "artifact_id": "skill",
+            "content_hash": f"sha256:{sha_val}",
+            "store": "ephemeral",
+            "manifest_ref": "manifest_ref",
+        },
+    )
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", predict_artifact)
+    return skill_dir
+
+
+def _predict_accounts(skill_dir: Path) -> list[dict[str, Any]]:
+    from app.services.skills import workspace_dir_for
+
+    predicts = workspace_dir_for(skill_dir) / "predicts"
+    if not predicts.exists():
+        return []
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(predicts.glob("*/run_metadata.json"))
+    ]
+
+
+# Reproduced on the real app 2026-08-09 ("predict完,timeline里面什么都没"): a predict
+# that fails leaves its 337KB trace.jsonl on disk and nothing else, so
+# `RunManager.stream_run` -> `_replay_finished_run` refuses it for want of a
+# `run_metadata.json` and the panel sits on "Waiting for run events" forever. The
+# guarantee is already written down in `record_predict_outcome`'s docstring — it
+# just was not true on the paths that raise.
+def test_a_predict_that_raises_still_leaves_its_account(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_predict_artifact(_adapter: object, _payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "error_code": "llm.provider_not_configured",
+            "error_payload": {"message": "LLM Provider is not configured"},
+            "retryable": False,
+            "run_id": "predict-error-1",
+        }
+
+    skill_dir = _predict_account_fixture(monkeypatch, tmp_path, fake_predict_artifact)
+
+    service = PredictorService()
+    with pytest.raises(PredictArtifactError):
+        service.dispatch_predict_job("skill", None)
+
+    accounts = _predict_accounts(skill_dir)
+    assert len(accounts) == 1, "a failed predict must leave exactly one account"
+    assert accounts[0]["status"] == "failed"
+    assert accounts[0]["kind"] == "predict"
+
+
+def test_a_predict_that_deadlocks_still_leaves_its_account(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The other raising path: an adapter error translated into a domain error."""
+
+    def fake_predict_artifact(_adapter: object, _payload: dict[str, Any]) -> None:
+        from app.core.adapters.http_transport import StudioAdapterError
+
+        raise StudioAdapterError(
+            "engine.predict_deadlock",
+            {"phase_name": "draft", "actual_path": ["draft"] * 11},
+        )
+
+    skill_dir = _predict_account_fixture(monkeypatch, tmp_path, fake_predict_artifact)
+
+    service = PredictorService()
+    with pytest.raises(PredictDeadlockError):
+        service.dispatch_predict_job("skill", None)
+
+    accounts = _predict_accounts(skill_dir)
+    assert len(accounts) == 1
+    assert accounts[0]["status"] == "failed"
+
+
+def test_the_account_is_filed_under_the_id_the_stream_used(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """One predict, one id.
+
+    Studio mints the id, registers the live stream under it and hands it to the
+    engine as `thread_id`; a reader that later asks for that run asks by that id.
+    Filing the account under whatever id the engine happened to echo back means
+    the reader looks in a directory that does not exist.
+    """
+    seen: dict[str, Any] = {}
+
+    def fake_predict_artifact(_adapter: object, payload: dict[str, Any]) -> dict[str, Any]:
+        seen["thread_id"] = payload["thread_id"]
+        return RunResult(
+            success=True,
+            run_id="an-id-the-engine-made-up",
+            skill_id="skill",
+            context={},
+            source="predict",
+            phases=[],
+            path_diff=PathDiff(
+                expected_path=[], actual_path=[], missing=[], extra=[], order_mismatch=False
+            ),
+        ).model_dump(mode="json")
+
+    skill_dir = _predict_account_fixture(monkeypatch, tmp_path, fake_predict_artifact)
+
+    PredictorService().dispatch_predict_job("skill", None)
+
+    from app.services.skills import workspace_dir_for
+
+    predict_run_id = seen["thread_id"]
+    assert (workspace_dir_for(skill_dir) / "predicts" / predict_run_id / "result.json").exists()
+    assert _predict_accounts(skill_dir)[0]["run_id"] == predict_run_id

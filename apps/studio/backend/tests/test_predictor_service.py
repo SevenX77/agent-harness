@@ -594,6 +594,53 @@ def test_query_run_trace_can_answer_for_a_finished_predict_run(
     assert detail.final_context == {"topic": "predict"}
 
 
+def test_the_settled_predict_gate_names_the_run_it_settled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The `started` broadcast names the run; the settle broadcast did not, so no
+    # listener could tell WHICH predict had finished. The frontend needs that id
+    # to conclude the run it was streaming — project the finished row into the run
+    # list, announce the outcome, stop the node badges reading "running" — and
+    # without it a finished predict simply never concluded (observed 2026-08-09,
+    # PM: "predict完,timeline里面什么都没"). An event that cannot identify the
+    # dataset it changed is a broken event contract, not a frontend problem.
+    published: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        predictor_module,
+        "publish_skill_gate_from_thread",
+        lambda **kwargs: published.append(kwargs),
+    )
+    _skill_dir, seen = _predict_fixture(monkeypatch, tmp_path, success=True)
+
+    PredictorService().dispatch_predict_job("skill")
+
+    settled = [event for event in published if event["outcome"] != "started"]
+    assert [event["outcome"] for event in settled] == ["pass"]
+    assert settled[0]["run_id"] == seen["run_id"]
+
+
+def test_a_failed_predict_gate_names_its_run_too(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A predict that failed is still a predict that finished: it has a directory,
+    # an account and a row in the run list, so its settle event owes the same id.
+    published: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        predictor_module,
+        "publish_skill_gate_from_thread",
+        lambda **kwargs: published.append(kwargs),
+    )
+    _skill_dir, seen = _predict_fixture(monkeypatch, tmp_path, success=False)
+
+    PredictorService().dispatch_predict_job("skill")
+
+    settled = [event for event in published if event["outcome"] != "started"]
+    assert [event["outcome"] for event in settled] == ["fail"]
+    assert settled[0]["run_id"] == seen["run_id"]
+
+
 def _predict_account_fixture(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

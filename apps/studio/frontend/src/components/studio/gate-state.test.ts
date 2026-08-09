@@ -13,6 +13,56 @@ function event(overrides: Partial<SkillGateEvent> = {}): SkillGateEvent {
   }
 }
 
+describe("a settled run announces itself the same way whether it was a run or a predict", () => {
+  // Decision 2026-08-09 D7/D9: a predict produces a run record, streams the same
+  // events, ends with the same `run_ended`, and appears in the same list. What
+  // concludes a run must therefore conclude a predict; gating the conclusion on
+  // `gate === "run"` left a finished predict with no outcome toast, no list row,
+  // and node badges still reading "running" (observed 2026-08-09).
+  it("finalizes a predict that passed", () => {
+    const { effects } = projectGateEvent(
+      event({ gate: "predict", outcome: "pass", runId: "predict-2026-08-09T01-40-49_7754a5e9" }),
+    )
+
+    expect(effects).toContainEqual({
+      kind: "finalize-run",
+      runId: "predict-2026-08-09T01-40-49_7754a5e9",
+    })
+  })
+
+  it("finalizes a run that passed", () => {
+    const { effects } = projectGateEvent(
+      event({ gate: "run", outcome: "pass", runId: "2026-08-09T01-42-54_1fd5582d" }),
+    )
+
+    expect(effects).toContainEqual({ kind: "finalize-run", runId: "2026-08-09T01-42-54_1fd5582d" })
+  })
+
+  it("finalizes a predict that failed — how it ended is still how it ended", () => {
+    const { effects } = projectGateEvent(event({ gate: "predict", outcome: "fail", runId: "predict-x" }))
+
+    expect(effects).toContainEqual({ kind: "finalize-run", runId: "predict-x" })
+  })
+
+  it("does not finalize a gate that only just started", () => {
+    const { effects } = projectGateEvent(event({ gate: "predict", outcome: "started", runId: "predict-x" }))
+
+    expect(effects.some((effect) => effect.kind === "finalize-run")).toBe(false)
+  })
+
+  it("does not finalize a compile — it produces no run", () => {
+    const { effects } = projectGateEvent(event({ gate: "compile", outcome: "pass", runId: "predict-x" }))
+
+    expect(effects.some((effect) => effect.kind === "finalize-run")).toBe(false)
+  })
+
+  it("finalizes nothing when the event does not name a run", () => {
+    const { effects } = projectGateEvent(event({ gate: "predict", outcome: "pass", runId: null }))
+
+    expect(effects.some((effect) => effect.kind === "finalize-run")).toBe(false)
+  })
+})
+
 describe("projectGateEvent", () => {
   it("advances the toolbar to Predict when compile passes", () => {
     expect(projectGateEvent(event()).stage).toBe("compile-pass")

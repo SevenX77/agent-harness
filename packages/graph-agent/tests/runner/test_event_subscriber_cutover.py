@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from graph_agent_gateway.tracing import emit_llm_fallback_event
+from graph_agent_gateway.tracing import emit_route_decision_event
 from langchain_core.messages import AIMessage
 
 from graph_agent.core.runner import run_skill
@@ -58,13 +58,12 @@ class GatewayFallbackChatModel:
 
     def invoke(self, messages: list[Any]) -> AIMessage:
         del messages
-        emit_llm_fallback_event(
+        emit_route_decision_event(
             callbacks=self.event_callbacks,
             phase_name="agent",
-            from_provider="primary:route",
-            to_provider="fallback:route",
+            decision="fell_back",
+            next_route_id="fallback:route",
             reason="RuntimeError: probe failed",
-            context={"role_name": "graph_agent"},
         )
         return AIMessage(
             content="",
@@ -349,7 +348,7 @@ def test_model_resolver_gateway_fallback_event_reaches_subscriber_and_trace(
     )
 
     assert result.success is True
-    assert any(_event_type(event) == "llm_fallback" for event in subscriber_events)
+    assert any(_event_type(event) == "llm_route_decision" for event in subscriber_events)
 
     trace_events = _read_jsonl(workspace_dir / "runs" / result.run_id / "trace.jsonl")
-    assert any(event["event_type"] == "llm_fallback" for event in trace_events)
+    assert any(event["event_type"] == "llm_route_decision" for event in trace_events)

@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Any
 
 
-def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
+def test_studio_queue_callback_serializes_a_gateway_route_decision() -> None:
+    """The gateway's events carry no Pydantic, and still have to cross a process."""
     from app.services.run_manager import _queue_event_subscriber
-    from graph_agent_gateway.events import LLMFallbackEvent
+    from graph_agent_gateway.events import LLMRouteDecisionEvent
 
     class RecordingQueue:
         def __init__(self) -> None:
@@ -20,15 +21,17 @@ def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
     subscriber = _queue_event_subscriber(queue)
 
     subscriber(
-        LLMFallbackEvent(
+        LLMRouteDecisionEvent(
             phase_name="e2e",
-            from_provider="primary:route",
-            to_provider="fallback:route",
+            decision="fell_back",
+            route_id="primary:route",
+            endpoint_id="primary",
+            provider_model_id="gpt-5",
+            protocol="openai_compatible",
             reason="RuntimeError: probe failed",
-            context={
-                "role_name": "graph_agent",
-                "fallback_decision": "fallback_allowed",
-            },
+            provider_status_code=404,
+            next_route_id="fallback:route",
+            voided_streamed_answer=True,
         )
     )
 
@@ -36,16 +39,18 @@ def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
         {
             "type": "event",
             "event": {
-                "event_type": "llm_fallback",
+                "event_type": "llm_route_decision",
                 "phase_name": "e2e",
-                "from_provider": "primary:route",
-                "to_provider": "fallback:route",
+                "decision": "fell_back",
+                "route_id": "primary:route",
+                "endpoint_id": "primary",
+                "provider_model_id": "gpt-5",
+                "protocol": "openai_compatible",
                 "reason": "RuntimeError: probe failed",
-                "code": "[F-v3-gateway-llm-fallback]",
-                "context": {
-                    "role_name": "graph_agent",
-                    "fallback_decision": "fallback_allowed",
-                },
+                "provider_status_code": 404,
+                "next_route_id": "fallback:route",
+                "voided_streamed_answer": True,
+                "code": "[F-v3-gateway-llm-route-decision]",
             },
         }
     ]

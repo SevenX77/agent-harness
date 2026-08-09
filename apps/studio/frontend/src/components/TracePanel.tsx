@@ -2,7 +2,7 @@ import type { CallbackEvent, EventEnvelope, RunMetadata } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { countLlmFallbacks, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
+import { countRouteDegradations, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
 import { traceOutcomeEntry } from '../utils/trace-outcome'
 import { runStatusMark, type RunStatusMark } from '../utils/run-status-mark'
 import type { LucideIcon } from 'lucide-react'
@@ -39,7 +39,7 @@ export type { TraceHitlResumeRequest }
 
 // The fallback shortcut narrows through the filter's own search, rather than
 // owning a fifth kind of filter state that only one badge can set.
-const FALLBACK_SEARCH_TERM = 'llm_fallback'
+const ROUTE_DECISION_SEARCH_TERM = 'llm_route_decision'
 
 interface TracePanelProps {
   traceLogs: EventEnvelope[]
@@ -299,7 +299,7 @@ export function TracePanel({
   // trace-observability F7: a run that silently fell back to another provider
   // announces it up front; clicking the chip narrows the trace to the fallback
   // events via the existing type filter.
-  const fallbackCount = countLlmFallbacks(traceEvents)
+  const degradedRouteCount = countRouteDegradations(traceEvents)
   const activeFilterCount = filter.selectedCategories.length + filter.selectedPhases.length
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
@@ -500,27 +500,29 @@ export function TracePanel({
             onSelectPhases={filter.setSelectedPhases}
           />
         </div>
-        {fallbackCount > 0 || canPromoteFocusedNode ? (
+        {degradedRouteCount > 0 || canPromoteFocusedNode ? (
         <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-          {fallbackCount > 0 ? (
+          {degradedRouteCount > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label={`Filter ${fallbackCount} LLM fallback event${fallbackCount === 1 ? '' : 's'}`}
-                  aria-pressed={filter.searchTerm === FALLBACK_SEARCH_TERM}
+                  aria-label={`Show routing decisions — ${degradedRouteCount} route issue${degradedRouteCount === 1 ? '' : 's'}`}
+                  aria-pressed={filter.searchTerm === ROUTE_DECISION_SEARCH_TERM}
                   onClick={() => filter.setSearchTerm(
-                    filter.searchTerm === FALLBACK_SEARCH_TERM ? '' : FALLBACK_SEARCH_TERM,
+                    filter.searchTerm === ROUTE_DECISION_SEARCH_TERM ? '' : ROUTE_DECISION_SEARCH_TERM,
                   )}
                   className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
                 >
                   <AlertTriangle className="size-3" />
-                  {fallbackCount} LLM fallback{fallbackCount === 1 ? '' : 's'}
+                  {degradedRouteCount} route issue{degradedRouteCount === 1 ? '' : 's'}
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                A provider failed during this run and calls fell back to another route — the model actually
-                used may differ from the configured one. Click to show only the fallback events.
+                The gateway had to skip, probe, retry, escalate or fall back {degradedRouteCount} time
+                {degradedRouteCount === 1 ? '' : 's'} during this run — the model actually used may differ
+                from the configured one. Click to show every routing decision, including the route that
+                finally answered.
               </TooltipContent>
             </Tooltip>
           ) : null}

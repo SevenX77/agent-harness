@@ -1,10 +1,11 @@
 import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
-import type { LlmFallbackDetails } from '../../utils/trace'
+import type { RouteDecisionDetails, TraceSeverity } from '../../utils/trace'
 import {
   errorStack,
   eventColor,
+  eventSeverity,
   eventMessage,
   eventMockedSource,
   eventModelName,
@@ -12,7 +13,7 @@ import {
   eventPhase,
   eventTimeLabel,
   jsonText,
-  llmFallbackDetails,
+  routeDecisionDetails,
   mockedSourceClass,
   mockedSourceLabel,
   payloadPreview,
@@ -59,13 +60,14 @@ export function TraceStepRow({
   const retry = retryBadge(settled)
   const isError = settled.event_type === 'internal_error' || settled.event_type === 'validation_fail'
   const failures = errorStack(settled)
-  const fallback = llmFallbackDetails(settled)
+  const routeDecision = routeDecisionDetails(settled)
+  const severity = eventSeverity(settled)
   const modelName = eventModelName(settled)
   const timeLabel = eventTimeLabel(step.start.event)
 
   return (
     <div className="relative pl-5">
-      <div className={`absolute -left-[7px] top-2 size-3 rounded-full border-2 border-background ${eventColor(settled.event_type)}`} />
+      <div className={`absolute -left-[7px] top-2 size-3 rounded-full border-2 border-background ${eventColor(settled)}`} />
       <button
         type="button"
         data-trace-event-id={eventId}
@@ -87,7 +89,7 @@ export function TraceStepRow({
         <div className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2">
             {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-            <EventTypeBadge eventType={settled.event_type} />
+            <EventTypeBadge eventType={settled.event_type} severity={severity} />
             {running ? (
               <Loader2 aria-label="Step in progress" className="h-3 w-3 animate-spin text-muted-foreground" />
             ) : null}
@@ -147,7 +149,7 @@ export function TraceStepRow({
             {settled.error_message}
           </p>
         ) : null}
-        {fallback ? <FallbackBlock details={fallback} /> : null}
+        {routeDecision ? <RouteDecisionBlock details={routeDecision} severity={severity} /> : null}
         <ToolHeadline step={step} />
         {failures.length > 0 ? <ErrorStack failures={failures} /> : null}
       </button>
@@ -241,18 +243,58 @@ function ToolArguments({ event }: { event: CallbackEvent }) {
   )
 }
 
-// trace-observability F7: the failing route → takeover route (with the models
-// behind them) plus the gateway's failure reason. Mirrors the Error Stack
-// pattern but in warning amber — a fallback degrades the run, it does not
-// fail it.
-function FallbackBlock({ details }: { details: LlmFallbackDetails }) {
+// trace-observability F7: which route the gateway used and what it decided
+// about it — the endpoint and model behind the route, the provider's own status
+// code, where a fall-back went, and the failure reason. Tone follows severity
+// rather than the event kind, because the same event reports the route that
+// answered and the run that ran out of routes.
+const DECISION_TITLE: Record<RouteDecisionDetails['decision'], string> = {
+  answered: 'Route used',
+  skipped_circuit_open: 'Route skipped — circuit open',
+  probe_failed: 'Probe failed',
+  retried_same_route: 'Retried same route',
+  escalated_budget: 'Token budget raised',
+  fell_back: 'Provider fallback',
+  failed_terminal: 'Route failed — no fallback',
+  exhausted: 'All routes exhausted',
+}
+
+const DECISION_TONE: Record<TraceSeverity, { box: string; title: string; arrow: string }> = {
+  error: {
+    box: 'border-destructive-border/60 bg-destructive/10',
+    title: 'text-destructive',
+    arrow: 'text-destructive',
+  },
+  warning: {
+    box: 'border-warning-border/60 bg-warning/10',
+    title: 'text-warning',
+    arrow: 'text-warning',
+  },
+  normal: {
+    box: 'border-border bg-muted/40',
+    title: 'text-muted-foreground',
+    arrow: 'text-muted-foreground',
+  },
+}
+
+function RouteDecisionBlock({
+  details,
+  severity,
+}: {
+  details: RouteDecisionDetails
+  severity: TraceSeverity
+}) {
+  const tone = DECISION_TONE[severity]
   return (
-    <div className="mt-2 rounded border border-warning-border/60 bg-warning/10 p-2">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-warning">
-        <AlertTriangle className="h-3.5 w-3.5" />
-        Provider fallback
-        {details.roleName ? (
-          <span className="font-normal text-muted-foreground">role: {details.roleName}</span>
+    <div className={`mt-2 rounded border p-2 ${tone.box}`}>
+      <div className={`flex flex-wrap items-center gap-1.5 text-xs font-semibold ${tone.title}`}>
+        {severity === 'normal' ? <Cpu className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+        {DECISION_TITLE[details.decision]}
+        {details.endpointId ? (
+          <span className="font-normal text-muted-foreground">endpoint: {details.endpointId}</span>
+        ) : null}
+        {details.protocol ? (
+          <span className="font-normal text-muted-foreground">{details.protocol}</span>
         ) : null}
         {details.statusCode !== null ? (
           <span className="font-normal text-muted-foreground">HTTP {details.statusCode}</span>
@@ -260,19 +302,32 @@ function FallbackBlock({ details }: { details: LlmFallbackDetails }) {
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground">
         <span className="rounded border border-border bg-background px-1.5 py-0.5">
-          {details.fromModel ?? details.fromProvider}
+          {details.providerModelId ?? details.routeId ?? 'unknown route'}
         </span>
-        <ArrowRight className="h-3 w-3 shrink-0 text-warning" />
-        {details.exhausted ? (
-          <span className="rounded border border-destructive-border/60 bg-destructive/10 px-1.5 py-0.5 text-destructive">
-            no remaining route
-          </span>
-        ) : (
-          <span className="rounded border border-border bg-background px-1.5 py-0.5">
-            {details.toModel ?? details.toProvider}
-          </span>
-        )}
+        {details.decision === 'fell_back' ? (
+          <>
+            <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
+            <span className="rounded border border-border bg-background px-1.5 py-0.5">
+              {details.nextRouteId ?? 'unknown route'}
+            </span>
+          </>
+        ) : null}
+        {details.decision === 'exhausted' ? (
+          <>
+            <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
+            <span className="rounded border border-destructive-border/60 bg-destructive/10 px-1.5 py-0.5 text-destructive">
+              no remaining route
+            </span>
+          </>
+        ) : null}
       </div>
+      {/* The panel is showing text this decision just threw away; leaving that
+          unsaid lets the reader keep reading an answer that no longer counts. */}
+      {details.voidedStreamedAnswer ? (
+        <p className="mt-1.5 text-xs font-medium text-warning">
+          Discarded the partial answer already shown above.
+        </p>
+      ) : null}
       {details.reason ? (
         <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground">{details.reason}</p>
       ) : null}

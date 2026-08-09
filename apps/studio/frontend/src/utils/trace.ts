@@ -74,14 +74,9 @@ export function eventMessage(event: CallbackEvent): string {
       return `Run ended: ${event.status ?? 'completed'}`
     case 'internal_error':
       return typeof event.error_message === 'string' ? event.error_message : 'Internal error'
-    case 'llm_fallback': {
-      const details = llmFallbackDetails(event)
-      if (!details) {
-        return event.event_type
-      }
-      return details.exhausted
-        ? `LLM fallback: ${details.fromProvider} failed — no remaining route`
-        : `LLM fallback: ${details.fromProvider} → ${details.toProvider ?? 'unknown'}`
+    case 'llm_route_decision': {
+      const details = routeDecisionDetails(event)
+      return details ? routeDecisionMessage(details) : event.event_type
     }
     case 'model_resolved':
       return typeof event.resolved_model === 'string' && event.resolved_model !== ''
@@ -104,19 +99,43 @@ export function eventMessageIsRedundant(event: CallbackEvent): boolean {
   return eventMessage(event) === event.event_type
 }
 
+export type TraceSeverity = 'error' | 'warning' | 'normal'
+
+/**
+ * How much of the reader's attention an event has earned.
+ *
+ * This used to be a function of the event TYPE, which worked while every type
+ * meant exactly one thing. `llm_route_decision` broke that: the same type
+ * reports the route that answered (nothing to see) and the route that ran out
+ * of candidates (the run's cause of death). Severity therefore reads the
+ * event, and both surfaces that colour by severity — the rail dot and the kind
+ * pill — ask this one function rather than each keeping a list of types.
+ */
+export function eventSeverity(event: CallbackEvent): TraceSeverity {
+  if (event.event_type === 'internal_error' || event.event_type === 'validation_fail') {
+    return 'error'
+  }
+  const decision = routeDecisionDetails(event)?.decision
+  if (decision === undefined || decision === 'answered') {
+    return 'normal'
+  }
+  return decision === 'failed_terminal' || decision === 'exhausted' ? 'error' : 'warning'
+}
+
 /**
  * Colour on the timeline rail encodes SEVERITY, never the kind of event
  * (FRONTEND_UI_SPEC §2.2). A run that went fine has a monochrome rail, so the
  * one dot that is coloured is the one worth looking at.
  */
-export function eventColor(eventType: string): string {
-  if (eventType === 'internal_error' || eventType === 'validation_fail') {
-    return 'bg-destructive'
+export function eventColor(event: CallbackEvent): string {
+  switch (eventSeverity(event)) {
+    case 'error':
+      return 'bg-destructive'
+    case 'warning':
+      return 'bg-warning'
+    default:
+      return 'bg-muted-foreground/50'
   }
-  if (eventType === 'llm_fallback') {
-    return 'bg-warning'
-  }
-  return 'bg-muted-foreground/50'
 }
 
 export function isPredictRootEvent(event: CallbackEvent): boolean {
@@ -347,62 +366,121 @@ export function errorStack(event: CallbackEvent): string[] {
   return []
 }
 
-// ── LLM fallback visibility (trace-observability F7) ────────────────────────
-// The gateway emits `llm_fallback` (graph_agent_gateway/events.py, code
-// [F-v3-gateway-llm-fallback]) when a provider route fails and the next
-// candidate takes over; `context.from_route` / `to_route` carry the route
-// diagnostics (provider_model_id / canonical_id). Surfacing it keeps a model
-// comparison honest: without it a run can silently return "model A" results
-// that model B actually produced.
+// ── Gateway routing visibility (trace-observability F7) ─────────────────────
+// The gateway emits `llm_route_decision` (graph_agent_gateway/events.py, code
+// [F-v3-gateway-llm-route-decision]) for every candidate it skips because the
+// circuit is open, probes, retries, escalates the budget on, falls back from,
+// answers on, or runs out of. Only the fall-back used to reach anyone; the rest
+// happened in silence, so a call that took two minutes and answered from the
+// second-choice endpoint just looked slow.
+//
+// They are one fact with different outcomes, so `decision` is a closed set on
+// one event rather than a family of event types. Surfacing it also keeps a
+// model comparison honest: without it a run can silently return "model A"
+// results that model B actually produced.
 
-export interface LlmFallbackDetails {
-  /** Route id the call was leaving, e.g. "openai:gpt-4o". */
-  fromProvider: string
-  /** Route id that took over; null when the chain is exhausted. */
-  toProvider: string | null
-  /** True when the gateway reported no remaining candidate ("<none>"). */
-  exhausted: boolean
-  /** Model id behind the failing route, when the event carries diagnostics. */
-  fromModel: string | null
-  /** Model id behind the takeover route. */
-  toModel: string | null
+export const ROUTE_DECISIONS = [
+  'skipped_circuit_open',
+  'probe_failed',
+  'retried_same_route',
+  'escalated_budget',
+  'fell_back',
+  'failed_terminal',
+  'answered',
+  'exhausted',
+] as const
+
+export type RouteDecision = (typeof ROUTE_DECISIONS)[number]
+
+export interface RouteDecisionDetails {
+  /** What the gateway did. */
+  decision: RouteDecision
+  /** The route the decision is about, e.g. "openai:gpt-4o". */
+  routeId: string | null
+  /** Endpoint behind that route, i.e. WHERE the call went. */
+  endpointId: string | null
+  /** Model id the provider was asked for. */
+  providerModelId: string | null
+  /** Wire protocol the endpoint speaks, e.g. "anthropic_compatible". */
+  protocol: string | null
+  /** Route taking over; set only when falling back. */
+  nextRouteId: string | null
   /** Failure reason, e.g. "RateLimitError: 429 too many requests". */
   reason: string
-  /** LLM role whose chain fell back, e.g. "graph_agent". */
-  roleName: string | null
   /** Provider HTTP status when the failure was classified, e.g. 429. */
   statusCode: number | null
+  /**
+   * True when this decision discarded text the panel had ALREADY shown.
+   * Retrying is only possible after a truncated answer streamed, so without
+   * this the reader is left looking at a paragraph that no longer counts.
+   */
+  voidedStreamedAnswer: boolean
 }
 
-function routeModelId(route: JsonValue | undefined): string | null {
-  if (!isJsonObject(route)) {
-    return null
-  }
-  const model = route.provider_model_id ?? route.canonical_id
-  return typeof model === 'string' && model !== '' ? model : null
+function optionalString(value: JsonValue | undefined): string | null {
+  return typeof value === 'string' && value !== '' ? value : null
 }
 
-export function llmFallbackDetails(event: CallbackEvent): LlmFallbackDetails | null {
-  if (event.event_type !== 'llm_fallback') {
+export function routeDecisionDetails(event: CallbackEvent): RouteDecisionDetails | null {
+  if (event.event_type !== 'llm_route_decision') {
     return null
   }
-  const context = isJsonObject(event.context) ? event.context : {}
-  const rawTo = typeof event.to_provider === 'string' ? event.to_provider : ''
-  const exhausted = rawTo === '' || rawTo === '<none>'
+  // An outcome this build has never heard of is not rendered as one it has:
+  // the row falls back to printing the raw event rather than guessing.
+  const decision = ROUTE_DECISIONS.find((known) => known === event.decision)
+  if (decision === undefined) {
+    return null
+  }
   return {
-    fromProvider: typeof event.from_provider === 'string' ? event.from_provider : 'unknown provider',
-    toProvider: exhausted ? null : rawTo,
-    exhausted,
-    fromModel: routeModelId(context.from_route),
-    toModel: routeModelId(context.to_route),
+    decision,
+    routeId: optionalString(event.route_id),
+    endpointId: optionalString(event.endpoint_id),
+    providerModelId: optionalString(event.provider_model_id),
+    protocol: optionalString(event.protocol),
+    nextRouteId: optionalString(event.next_route_id),
     reason: typeof event.reason === 'string' ? event.reason : '',
-    roleName: typeof context.role_name === 'string' && context.role_name !== '' ? context.role_name : null,
-    statusCode: typeof context.provider_status_code === 'number' ? context.provider_status_code : null,
+    statusCode: typeof event.provider_status_code === 'number' ? event.provider_status_code : null,
+    voidedStreamedAnswer: event.voided_streamed_answer === true,
   }
 }
 
-export function countLlmFallbacks(events: CallbackEvent[]): number {
-  return events.reduce((count, event) => (event.event_type === 'llm_fallback' ? count + 1 : count), 0)
+function routeLabel(details: RouteDecisionDetails): string {
+  return details.routeId ?? details.endpointId ?? 'unknown route'
+}
+
+/** One sentence per outcome — the row's headline, not the full block. */
+export function routeDecisionMessage(details: RouteDecisionDetails): string {
+  switch (details.decision) {
+    case 'answered':
+      return `Answered by ${routeLabel(details)}`
+    case 'skipped_circuit_open':
+      return `Skipped ${routeLabel(details)} — circuit open`
+    case 'probe_failed':
+      return `Probe failed on ${routeLabel(details)}`
+    case 'retried_same_route':
+      return `Retrying ${routeLabel(details)}`
+    case 'escalated_budget':
+      return `Answer was cut off — retrying ${routeLabel(details)} with a bigger budget`
+    case 'fell_back':
+      return `${routeLabel(details)} failed → ${details.nextRouteId ?? 'unknown route'}`
+    case 'failed_terminal':
+      return `${routeLabel(details)} failed — no fallback allowed`
+    case 'exhausted':
+      return 'No route left — every candidate failed'
+  }
+}
+
+/**
+ * How many routing decisions went the wrong way.
+ *
+ * `answered` is the outcome every healthy call ends on, so counting it would
+ * put a permanent warning badge on every run.
+ */
+export function countRouteDegradations(events: CallbackEvent[]): number {
+  return events.reduce((count, event) => {
+    const decision = routeDecisionDetails(event)?.decision
+    return decision !== undefined && decision !== 'answered' ? count + 1 : count
+  }, 0)
 }
 
 /**

@@ -21,12 +21,13 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ConfigDict, Field
 
+from graph_agent_gateway.events import RouteDecision
 from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
 from graph_agent_gateway.temperature import provider_temperature_from_authored
-from graph_agent_gateway.tracing import emit_llm_fallback_event
+from graph_agent_gateway.tracing import emit_route_decision_event
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,7 @@ class GatewayChatModel(BaseChatModel):
         for index, candidate in enumerate(self.resolved_role.routes):
             candidate_id = _candidate_id(candidate)
             if _is_marked_down(self.client_manager, candidate, runtime_policy):
+                self._decided("skipped_circuit_open", route=candidate)
                 continue
             if self.probe_before_call:
                 try:
@@ -289,6 +291,12 @@ class GatewayChatModel(BaseChatModel):
                     failure["provider_status_code"] = classification.provider_status_code
                     failures.append(failure)
                     if classification.decision != "fallback_allowed":
+                        self._decided(
+                            "failed_terminal",
+                            route=candidate,
+                            reason=f"{type(exc).__name__}: {exc}",
+                            provider_status_code=classification.provider_status_code,
+                        )
                         _raise_all_providers_failed(
                             self.role_name,
                             failures,
@@ -296,20 +304,12 @@ class GatewayChatModel(BaseChatModel):
                             cause=exc,
                         )
                     _mark_down(self.client_manager, candidate, exc, runtime_policy)
-                    emit_llm_fallback_event(
-                        callbacks=self.event_callbacks,
-                        phase_name=self.phase_name or "<gateway>",
-                        from_provider=candidate_id,
-                        to_provider=self._next_candidate_id(index + 1),
+                    self._decided(
+                        "probe_failed",
+                        route=candidate,
                         reason=f"{type(exc).__name__}: {exc}",
-                        context=self._fallback_event_context(
-                            candidate,
-                            index + 1,
-                            fallback_decision=classification.decision,
-                            error_type=type(exc).__name__,
-                            provider_status_code=classification.provider_status_code,
-                            unclassified_default=classification.unclassified_default,
-                        ),
+                        provider_status_code=classification.provider_status_code,
+                        next_route_id=self._next_candidate_id(index + 1),
                     )
                     continue
                 if not probe_ok:
@@ -333,19 +333,11 @@ class GatewayChatModel(BaseChatModel):
                         RuntimeError("probe failed"),
                         runtime_policy,
                     )
-                    emit_llm_fallback_event(
-                        callbacks=self.event_callbacks,
-                        phase_name=self.phase_name or "<gateway>",
-                        from_provider=candidate_id,
-                        to_provider=self._next_candidate_id(index + 1),
-                        reason="RuntimeError: probe failed",
-                        context=self._fallback_event_context(
-                            candidate,
-                            index + 1,
-                            fallback_decision="fallback_allowed",
-                            error_type="RuntimeError",
-                            provider_status_code=None,
-                        ),
+                    self._decided(
+                        "probe_failed",
+                        route=candidate,
+                        reason="probe returned false",
+                        next_route_id=self._next_candidate_id(index + 1),
                     )
                     continue
             retry_same_used = False
@@ -431,7 +423,15 @@ class GatewayChatModel(BaseChatModel):
                         yield piece
                     response = _as_answer(accumulated)
                     if _is_truncated_response(response) and attempt.can_escalate():
+                        # Read before voiding: void() is what clears the flag.
+                        voided = attempt.streamed
                         attempt.escalate()
+                        self._decided(
+                            "escalated_budget",
+                            route=candidate,
+                            reason=f"answer was cut off; budget raised to {attempt.budget}",
+                            voided_streamed_answer=voided,
+                        )
                         yield from attempt.void()
                         continue
                     after_usage = _usage_total_calls(self.client_manager, candidate)
@@ -448,6 +448,7 @@ class GatewayChatModel(BaseChatModel):
                         candidate,
                         actual_runtime_settings,
                     )
+                    self._decided("answered", route=candidate)
                     return
                 except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
                     classification = classify_exception(exc, route_id=candidate.route_id)
@@ -458,9 +459,23 @@ class GatewayChatModel(BaseChatModel):
                     failures.append(failure)
                     if classification.action == "retry_same_route" and not retry_same_used:
                         retry_same_used = True
+                        self._decided(
+                            "retried_same_route",
+                            route=candidate,
+                            reason=f"{type(exc).__name__}: {exc}",
+                            provider_status_code=classification.provider_status_code,
+                            voided_streamed_answer=attempt.streamed,
+                        )
                         yield from attempt.void()
                         continue
                     if classification.decision != "fallback_allowed":
+                        self._decided(
+                            "failed_terminal",
+                            route=candidate,
+                            reason=f"{type(exc).__name__}: {exc}",
+                            provider_status_code=classification.provider_status_code,
+                            voided_streamed_answer=attempt.streamed,
+                        )
                         _raise_all_providers_failed(
                             self.role_name,
                             failures,
@@ -468,28 +483,44 @@ class GatewayChatModel(BaseChatModel):
                             cause=exc,
                         )
                     _mark_down(self.client_manager, candidate, exc, runtime_policy)
-                    emit_llm_fallback_event(
-                        callbacks=self.event_callbacks,
-                        phase_name=self.phase_name or "<gateway>",
-                        from_provider=candidate_id,
-                        to_provider=self._next_candidate_id(index + 1),
+                    self._decided(
+                        "fell_back",
+                        route=candidate,
                         reason=f"{type(exc).__name__}: {exc}",
-                        context=self._fallback_event_context(
-                            candidate,
-                            index + 1,
-                            fallback_decision=classification.decision,
-                            error_type=type(exc).__name__,
-                            provider_status_code=classification.provider_status_code,
-                            unclassified_default=classification.unclassified_default,
-                        ),
+                        provider_status_code=classification.provider_status_code,
+                        next_route_id=self._next_candidate_id(index + 1),
+                        voided_streamed_answer=attempt.streamed,
                     )
                     yield from attempt.void()
                     break
 
+        self._decided("exhausted", reason=f"{len(failures)} candidate(s) failed")
         _raise_all_providers_failed(
             self.role_name,
             failures,
             phase_name=self.phase_name or "<gateway>",
+        )
+
+    def _decided(
+        self,
+        decision: RouteDecision,
+        *,
+        route: ResolvedRoute | None = None,
+        reason: str | None = None,
+        provider_status_code: int | None = None,
+        next_route_id: str | None = None,
+        voided_streamed_answer: bool = False,
+    ) -> None:
+        """Say what was just decided, bound to this model's phase and listeners."""
+        emit_route_decision_event(
+            callbacks=self.event_callbacks,
+            phase_name=self.phase_name or "<gateway>",
+            decision=decision,
+            route=route,
+            reason=reason,
+            provider_status_code=provider_status_code,
+            next_route_id=next_route_id,
+            voided_streamed_answer=voided_streamed_answer,
         )
 
     def bind_tools(
@@ -654,28 +685,6 @@ class GatewayChatModel(BaseChatModel):
             ):
                 return candidate
         return None
-
-    def _fallback_event_context(
-        self,
-        candidate: ResolvedRoute,
-        next_index: int,
-        *,
-        fallback_decision: str,
-        error_type: str,
-        provider_status_code: int | None,
-        unclassified_default: bool = False,
-    ) -> dict[str, object]:
-        return {
-            "role_name": self.role_name,
-            "fallback_decision": fallback_decision,
-            "error_type": error_type,
-            "provider_status_code": provider_status_code,
-            "unclassified_default": unclassified_default,
-            "from_route": _route_diagnostics(candidate),
-            "to_route": _route_diagnostics(self._next_candidate(next_index)),
-            "effective_runtime_settings": _runtime_settings_metadata(candidate),
-        }
-
 
 def _candidate_id(candidate: ResolvedRoute) -> str:
     return candidate.route_id

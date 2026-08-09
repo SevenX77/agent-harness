@@ -259,3 +259,67 @@ def test_running_out_of_routes_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert _decisions(events) == ["fell_back", "exhausted"]
+
+
+# The three properties below moved here from `test_llm_fallback_event.py` when
+# the fall-back event was replaced by the decision event it is one outcome of.
+# They are properties of announcing a decision, not of that one outcome.
+
+
+class _FailingCallback:
+    def on_event(self, event: Any) -> None:
+        del event
+        raise RuntimeError("a listener must not be able to mask the run's own failure")
+
+
+def test_a_failing_listener_does_not_stop_the_others_from_hearing() -> None:
+    from graph_agent_gateway.tracing import emit_route_decision_event
+
+    recorder = _Recorder()
+
+    emit_route_decision_event(
+        callbacks=(_FailingCallback(), recorder),
+        phase_name="draft",
+        decision="exhausted",
+        reason="TimeoutError: request timed out",
+    )
+
+    assert [e.decision for e in recorder.events] == ["exhausted"]
+
+
+def test_the_event_code_is_not_something_a_call_site_chooses() -> None:
+    """One code per event type, decided by the type — not per emission."""
+    from graph_agent_gateway.events import ROUTE_DECISION_EVENT_CODE, LLMRouteDecisionEvent
+    from graph_agent_gateway.tracing import build_route_decision_event
+
+    with pytest.raises(TypeError):
+        LLMRouteDecisionEvent(  # type: ignore[call-arg]
+            phase_name="draft",
+            decision="fell_back",
+            code="[F-v3-gateway-all-providers-failed]",
+        )
+
+    with pytest.raises(TypeError):
+        build_route_decision_event(
+            phase_name="draft",
+            decision="fell_back",
+            **{"code": "[F-v3-gateway-all-providers-failed]"},
+        )
+
+    assert build_route_decision_event(phase_name="draft", decision="fell_back").code == (
+        ROUTE_DECISION_EVENT_CODE
+    )
+
+
+def test_a_decision_serialises_to_the_shape_a_host_stores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The host serialises every event the same way; this one carries no Pydantic."""
+    route = _route()
+    events = _ask([route], _Factory({route.route_id: _Behaviour([AIMessage(content="ok")])}), monkeypatch)
+
+    payload = events[0].model_dump(mode="json")
+    assert payload["event_type"] == "llm_route_decision"
+    assert payload["decision"] == "answered"
+    assert payload["route_id"] == route.route_id
+    assert payload["voided_streamed_answer"] is False

@@ -478,53 +478,68 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
   })
 })
 
-// trace-observability F7: a run that silently fell back to another provider must
-// announce it at the run level, not only as one row lost in the stream.
-const fallbackEnvelope = (seq: number, phase: string): EventEnvelope => ({
+// trace-observability F7: a run that silently skipped, retried or fell back
+// between providers must announce it at the run level, not only as one row lost
+// in the stream.
+const decisionEnvelope = (seq: number, phase: string, decision = 'fell_back'): EventEnvelope => ({
   schema_version: 'studio.event.v1',
   stream_id: 'run:run-3',
   seq,
   cursor: `run:run-3:${seq}`,
   run_id: 'run-3',
-  event_type: 'llm_fallback',
+  event_type: 'llm_route_decision',
   timestamp: '2026-07-16T00:00:00Z',
   payload: {
     schema_version: '1.0',
-    event_type: 'llm_fallback',
+    event_type: 'llm_route_decision',
     phase_name: phase,
     timestamp: '2026-07-16T00:00:00Z',
-    from_provider: 'openai:gpt-4o',
-    to_provider: 'zhipu:glm-4.7',
+    decision,
+    route_id: 'openai:gpt-4o',
+    endpoint_id: 'openai',
+    provider_model_id: 'gpt-4o-2024-11-20',
+    next_route_id: 'zhipu:glm-4.7',
     reason: 'RateLimitError: 429 too many requests',
   },
 })
 
-describe('TracePanel LLM fallback summary chip (trace-observability F7)', () => {
-  it('surfaces a run-level fallback count chip when fallbacks happened', () => {
+describe('TracePanel routing decision summary chip (trace-observability F7)', () => {
+  it('surfaces a run-level chip counting the routing decisions that went wrong', () => {
     const html = renderToStaticMarkup(
       <TracePanel
-        traceLogs={[...twoPhaseEvents, fallbackEnvelope(4, 'nodeA'), fallbackEnvelope(5, 'nodeB')]}
+        traceLogs={[...twoPhaseEvents, decisionEnvelope(4, 'nodeA'), decisionEnvelope(5, 'nodeB')]}
       />,
     )
-    expect(html).toContain('2 LLM fallbacks')
-    expect(html).toContain('aria-label="Filter 2 LLM fallback events"')
+    expect(html).toContain('2 route issues')
+    expect(html).toContain('Show routing decisions')
   })
 
-  it('uses the singular label for a single fallback', () => {
+  it('uses the singular label for a single degraded decision', () => {
     const html = renderToStaticMarkup(
       <TracePanel
-        traceLogs={[...twoPhaseEvents, fallbackEnvelope(4, 'nodeA')]}
+        traceLogs={[...twoPhaseEvents, decisionEnvelope(4, 'nodeA')]}
       />,
     )
-    expect(html).toContain('1 LLM fallback')
-    expect(html).not.toContain('1 LLM fallbacks')
+    expect(html).toContain('1 route issue')
+    expect(html).not.toContain('1 route issues')
   })
 
-  it('omits the chip entirely for a run without fallbacks', () => {
+  // Every healthy call ends on `answered`, so counting it would pin a permanent
+  // warning chip to every run.
+  it('omits the chip for a run whose routes all answered first time', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[...twoPhaseEvents, decisionEnvelope(4, 'nodeA', 'answered')]}
+      />,
+    )
+    expect(html).not.toContain('route issue')
+  })
+
+  it('omits the chip entirely for a run with no routing decisions at all', () => {
     const html = renderToStaticMarkup(
       <TracePanel traceLogs={twoPhaseEvents} />,
     )
-    expect(html).not.toContain('LLM fallback')
+    expect(html).not.toContain('route issue')
   })
 })
 

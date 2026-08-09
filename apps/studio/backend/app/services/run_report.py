@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app.core.adapters.atomic_file import read_published_text
+
 __all__ = ["build_run_report", "write_run_report"]
 
 REPORT_FILENAME = "report.md"
@@ -114,7 +116,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(read_published_text(path))
     except json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}

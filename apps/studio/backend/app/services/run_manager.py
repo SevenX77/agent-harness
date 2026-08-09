@@ -21,6 +21,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import TypeAdapter
 
 from app.core import config
+from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.core.adapters.engine import (
     CallbackEvent,
     EventEnvelope,
@@ -954,10 +955,21 @@ class RunManager:
             if not root.exists():
                 continue
             for metadata_path in root.glob("*/run_metadata.json"):
+                # A record that cannot be read is a fault in the store, not a
+                # run that does not exist. Skipping it returned a history that
+                # was silently one run shorter — which is how a mid-save read
+                # spent months looking like "the run was never there".
                 try:
                     metadata.append(_metadata_with_input_summary(metadata_path))
-                except Exception:
-                    continue
+                except Exception as exc:
+                    response = error_response(
+                        error_code="RUN_METADATA_UNREADABLE",
+                        http_status=500,
+                        message=f"Cannot read run record {metadata_path.parent.name}: {exc}",
+                        details={"skill_id": skill_id, "metadata_path": str(metadata_path)},
+                        retry_strategy="idempotent",
+                    )
+                    raise_error_response(response)
         runs = sorted(metadata, key=lambda item: item.started_at, reverse=True)
         return RunListResponse(runs=runs, total=len(runs))
 
@@ -1139,7 +1151,7 @@ class RunManager:
                 f"Run not found: {run_id}",
                 {"skill_id": skill_id, "run_id": run_id},
             )
-        return RunMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
+        return RunMetadata.model_validate_json(read_published_text(metadata_path))
 
     def register_transient_predict_run(
         self,
@@ -1451,8 +1463,9 @@ def _source_less_run_dir_for(skill_id: str, run_id: str) -> Path:
 
 
 def _write_run_metadata(run_dir: Path, metadata: RunMetadata) -> None:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "run_metadata.json").write_text(metadata.persisted_json(), encoding="utf-8")
+    # Same document as the metadata store writes, so it gets the same guarantee:
+    # readers of a run's record never catch it between two versions.
+    write_text_atomically(run_dir / "run_metadata.json", metadata.persisted_json())
 
 
 def _persist_run_input_artifact(
@@ -1682,7 +1695,7 @@ def _metadata_with_input_summary(metadata_path: Path) -> RunMetadata:
     is probed off the report file, which is where that truth lives (D8).
     """
     run_dir = metadata_path.parent
-    metadata = RunMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
+    metadata = RunMetadata.model_validate_json(read_published_text(metadata_path))
     updates: dict[str, Any] = {"report_path": _run_report_path(run_dir)}
     if not metadata.input_summary:
         input_data = _read_run_artifact_json_if_present(run_dir, "input_data.json") or {}

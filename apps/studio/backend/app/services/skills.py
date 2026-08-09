@@ -25,6 +25,7 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
 from app.core import config
+from app.core.adapters.atomic_file import read_published_text
 from app.core.adapters.engine import (
     AgentNodeAST,
     CompiledSkill,
@@ -1389,7 +1390,7 @@ def latest_run_metadata(skill_id: str) -> RunMetadata | None:
     for metadata_path in runs_dir.glob("*/run_metadata.json"):
         try:
             candidates.append(
-                RunMetadata.model_validate_json(metadata_path.read_bytes().decode("utf-8")),
+                RunMetadata.model_validate_json(read_published_text(metadata_path)),
             )
         except Exception:
             continue

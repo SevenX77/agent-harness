@@ -99,6 +99,31 @@ def test_the_closing_slice_carries_what_the_run_bills_and_routes_on() -> None:
     assert closing.metadata["model_name"] == "claude-opus-5"
 
 
+def test_usage_reported_in_pieces_is_billed_as_a_whole() -> None:
+    """Some providers report the two halves of usage at opposite ends of a stream.
+
+    Anthropic sends `input_tokens` with the opening event and `output_tokens`
+    with the closing one, so a stream in which no single slice carries the whole
+    count is the normal case, not an edge case. Whatever folds the slices back
+    together has to add those halves up; taking the last slice's word for it
+    bills the run for an answer with no prompt.
+    """
+    resolver = _StreamingResolver(
+        [
+            _Chunk("", usage_metadata={"input_tokens": 7, "output_tokens": 0}),
+            _Chunk("Hel"),
+            _Chunk("lo"),
+            _Chunk("", usage_metadata={"input_tokens": 0, "output_tokens": 3}),
+        ]
+    )
+
+    slices = list(_GatewayBackedLLMProvider(resolver).stream(_request()))
+
+    usage = slices[-1].metadata["usage_metadata"]
+    assert usage["input_tokens"] == 7, "the prompt was counted before the first word arrived"
+    assert usage["output_tokens"] == 3
+
+
 def test_a_model_that_yields_nothing_still_closes_the_answer() -> None:
     slices = list(_GatewayBackedLLMProvider(_StreamingResolver([])).stream(_request()))
 

@@ -7,11 +7,13 @@ requirements.md §4.1 (Studio backend -> ModelResolver -> Gateway failure payloa
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from pydantic import SecretStr
+from stream_fakes import as_one_piece
 
 
 class FakeRouteChatModel:
@@ -19,15 +21,18 @@ class FakeRouteChatModel:
         self.factory = factory
         self.route = route
 
-    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+    def stream(self, messages: list[BaseMessage], **kwargs: Any) -> Iterator[AIMessageChunk]:
+        del kwargs
         self.factory.invocations.append({"route": self.route, "messages": messages})
         behavior = self.factory.behaviors.get(self.route.route_id, self.factory.default_behavior)
         if isinstance(behavior, BaseException):
             raise behavior
-        return AIMessage(
-            content=str(behavior),
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            response_metadata={"finish_reason": "stop"},
+        yield from as_one_piece(
+            AIMessage(
+                content=str(behavior),
+                usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                response_metadata={"finish_reason": "stop"},
+            )
         )
 
 

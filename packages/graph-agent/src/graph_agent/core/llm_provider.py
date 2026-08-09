@@ -32,11 +32,19 @@ class LLMProviderChunk(BaseModel):
     whatever the provider reported alongside it; a provider names the model,
     the tool calls and the token usage on whichever slice it knows them, and
     the assembler merges the slices in arrival order.
+
+    ``restarts_answer`` says this slice begins the answer over: everything
+    delivered before it belongs to an attempt that was abandoned and is no part
+    of the answer. Hosts behind this Port retry — a larger budget after an
+    answer was cut off, another route after one failed — and a retry replaces
+    the answer rather than continuing it. Without a way to say so, folding the
+    slices produces a message stitched from two attempts, which no model wrote.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
     content: Any = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    restarts_answer: bool = False
 
 
 class LLMProviderError(Exception):
@@ -183,6 +191,13 @@ def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:
     parts: list[Any] = []
     metadata: dict[str, Any] = {}
     for chunk in chunks:
+        if chunk.restarts_answer:
+            # Not "prefer the newer value" — the abandoned attempt's own claims
+            # (which route answered, why it stopped) describe an answer nobody
+            # received, and keeping the ones the replacement does not happen to
+            # overwrite would leave them describing this one.
+            parts.clear()
+            metadata.clear()
         if chunk.content != "" and chunk.content is not None:
             parts.append(chunk.content)
         metadata.update(chunk.metadata)

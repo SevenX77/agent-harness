@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import httpx
 import openai
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from stream_fakes import as_one_piece
 
 
 def _route(
@@ -75,12 +76,13 @@ class FakeChatModel:
         self.responses = responses
         self.invocations: list[list[BaseMessage]] = []
 
-    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+    def stream(self, messages: list[BaseMessage], **kwargs: Any) -> Iterator[AIMessageChunk]:
+        del kwargs
         self.invocations.append(list(messages))
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
-        return response
+        yield from as_one_piece(response)
 
 
 class FakeFactory:
@@ -252,12 +254,15 @@ class RouteAwareFactory:
         factory = self
 
         class RouteAwareChatModel:
-            def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+            def stream(
+                self, messages: list[BaseMessage], **kwargs: Any
+            ) -> Iterator[AIMessageChunk]:
+                del messages, kwargs
                 factory.invoked_routes.append(route.route_id)
                 behavior = factory.behaviors[route.route_id]
                 if isinstance(behavior, BaseException):
                     raise behavior
-                return behavior
+                yield from as_one_piece(behavior)
 
         return RouteAwareChatModel()
 
@@ -335,16 +340,19 @@ def test_gateway_chat_model_retries_same_route_before_switching_on_retryable_sta
             factory = self
 
             class RouteAwareChatModel:
-                def invoke(self, messages: list[BaseMessage]) -> AIMessage:
-                    del messages
+                def stream(
+                    self, messages: list[BaseMessage], **kwargs: Any
+                ) -> Iterator[AIMessageChunk]:
+                    del messages, kwargs
                     factory.invoked_routes.append(route.route_id)
                     attempt = factory.route_attempts.get(route.route_id, 0)
                     factory.route_attempts[route.route_id] = attempt + 1
                     if route.route_id == primary_route.route_id and attempt == 0:
                         raise ProviderHTTPError(503, "transient upstream overload")
                     if route.route_id == primary_route.route_id:
-                        return AIMessage(content="primary-recovered")
-                    return AIMessage(content="fallback-used")
+                        yield from as_one_piece(AIMessage(content="primary-recovered"))
+                        return
+                    yield from as_one_piece(AIMessage(content="fallback-used"))
 
             return RouteAwareChatModel()
 

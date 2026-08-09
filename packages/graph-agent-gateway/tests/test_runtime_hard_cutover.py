@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, SystemMessage
 from pydantic import SecretStr
+from stream_fakes import as_one_piece
 
 
 def _snapshot():
@@ -105,12 +107,15 @@ class FakeRouteChatModel:
         self.factory = factory
         self.route = route
 
-    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+    def stream(self, messages: list[BaseMessage], **kwargs: Any) -> Iterator[AIMessageChunk]:
+        del kwargs
         self.factory.invocations.append({"route": self.route, "messages": messages})
-        return AIMessage(
-            content="ok",
-            usage_metadata={"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
-            response_metadata={"finish_reason": "stop"},
+        yield from as_one_piece(
+            AIMessage(
+                content="ok",
+                usage_metadata={"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+                response_metadata={"finish_reason": "stop"},
+            )
         )
 
 

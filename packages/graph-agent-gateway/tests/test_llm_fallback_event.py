@@ -7,10 +7,12 @@ requirements.md §4.1 (structured fallback diagnostics).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
+from stream_fakes import as_one_piece
 
 FALLBACK_EVENT_CODE = "[F-v3-gateway-llm-fallback]"
 
@@ -37,15 +39,18 @@ class FakeRouteChatModel:
         self.factory = factory
         self.route = route
 
-    def invoke(self, messages: list[Any]) -> AIMessage:
+    def stream(self, messages: list[Any], **kwargs: Any) -> Iterator[AIMessageChunk]:
+        del kwargs
         self.factory.invocations.append({"route": self.route, "messages": messages})
         behavior = self.factory.behaviors.get(self.route.route_id, self.factory.default_behavior)
         if isinstance(behavior, BaseException):
             raise behavior
-        return AIMessage(
-            content=str(behavior),
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            response_metadata={"finish_reason": "stop"},
+        yield from as_one_piece(
+            AIMessage(
+                content=str(behavior),
+                usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                response_metadata={"finish_reason": "stop"},
+            )
         )
 
 

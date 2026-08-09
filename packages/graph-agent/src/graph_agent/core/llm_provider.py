@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, Protocol, cast, runtime_checkable
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
@@ -25,6 +25,20 @@ class LLMProviderResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class LLMProviderChunk(BaseModel):
+    """One slice of an answer that is still arriving.
+
+    ``content`` is this slice's text, not the text so far. ``metadata`` holds
+    whatever the provider reported alongside it; a provider names the model,
+    the tool calls and the token usage on whichever slice it knows them, and
+    the assembler merges the slices in arrival order.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    content: Any = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class LLMProviderError(Exception):
     def __init__(self, error_code: str, message: str, retryable: bool, details: dict[str, Any]) -> None:
         super().__init__(message)
@@ -45,7 +59,15 @@ class LLMProviderMissingError(RuntimeError):
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    def invoke(self, request: LLMProviderRequest) -> LLMProviderResponse:
+    def stream(self, request: LLMProviderRequest) -> Iterator[LLMProviderChunk]:
+        """Yield the answer in arrival order.
+
+        This is the only way to ask a provider for an answer. A blocking
+        alternative would let a caller discard the fact that the answer is
+        still arriving — which is the very capability the engine needs — so
+        there is no blocking alternative. A client with nothing to reveal
+        gradually satisfies this by yielding one slice.
+        """
         ...
 
 
@@ -96,14 +118,12 @@ class LLMProviderChatModel(BaseChatModel):
             ),
         )
 
-    def _generate(
+    def _request(
         self,
         messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        del run_manager
+        stop: list[str] | None,
+        kwargs: dict[str, Any],
+    ) -> LLMProviderRequest:
         metadata = {
             "phase_name": self.phase_name,
             "model_override": self.model_override,
@@ -114,13 +134,25 @@ class LLMProviderChatModel(BaseChatModel):
             "tool_kwargs": dict(self.tool_kwargs),
             **kwargs,
         }
-        response = self.provider.invoke(
-            LLMProviderRequest(
-                role=self.role,
-                messages=list(messages),
-                metadata={key: value for key, value in metadata.items() if value is not None},
-            )
+        return LLMProviderRequest(
+            role=self.role,
+            messages=list(messages),
+            metadata={key: value for key, value in metadata.items() if value is not None},
         )
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del run_manager
+        # The answer is consumed slice by slice even though the agent loop is
+        # handed the finished message: the loop needs the whole answer to decide
+        # its next move, while everything watching the run needs to know the
+        # step is still running. Only the arrival is incremental.
+        response = _assemble(self.provider.stream(self._request(messages, stop, kwargs)))
         response_metadata = dict(response.metadata)
         tool_calls = response_metadata.pop("tool_calls", None) or []
         usage_metadata = response_metadata.pop("usage_metadata", None)
@@ -139,6 +171,35 @@ class LLMProviderChatModel(BaseChatModel):
         )
 
 
+def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:
+    """Fold the slices back into the one answer the agent loop is given.
+
+    Text slices concatenate. A provider that reports structured content blocks
+    instead of text keeps them as blocks — joining those into a string would
+    destroy the structure the caller asked for. Metadata merges in arrival
+    order, so a key the provider only knows at the end (usage, the model that
+    actually served the call) wins over an earlier guess.
+    """
+    parts: list[Any] = []
+    metadata: dict[str, Any] = {}
+    for chunk in chunks:
+        if chunk.content != "" and chunk.content is not None:
+            parts.append(chunk.content)
+        metadata.update(chunk.metadata)
+    if all(isinstance(part, str) for part in parts):
+        content: Any = "".join(parts)
+    else:
+        # A slice of block content is a list of blocks, so the slices nest one
+        # level deeper than the answer does; flattening that level restores the
+        # single block list a caller would have received in one piece.
+        content = [
+            block
+            for part in parts
+            for block in (part if isinstance(part, list) else [part])
+        ]
+    return LLMProviderResponse(content=content, metadata=metadata)
+
+
 class FakeLLMProvider:
     def __init__(
         self,
@@ -149,10 +210,10 @@ class FakeLLMProvider:
         self.error = error
         self.requests: list[LLMProviderRequest] = []
 
-    def invoke(self, request: LLMProviderRequest) -> LLMProviderResponse:
+    def stream(self, request: LLMProviderRequest) -> Iterator[LLMProviderChunk]:
+        """A canned answer has nothing to reveal gradually, so it is one slice."""
         self.requests.append(request)
         if self.error is not None:
             raise self.error
-        if self.response is not None:
-            return self.response
-        return LLMProviderResponse(content="fake response", metadata={})
+        response = self.response or LLMProviderResponse(content="fake response", metadata={})
+        yield LLMProviderChunk(content=response.content, metadata=response.metadata)

@@ -9,6 +9,7 @@ import re
 import shutil
 import uuid
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import unquote, urlparse
@@ -49,7 +50,7 @@ from graph_agent.core.graph_serializer import (
 from graph_agent.core.graph_serializer import (
     serialize_graph_topology_from_markdown as serialize_graph_topology_from_markdown,
 )
-from graph_agent.core.llm_provider import LLMProviderError, LLMProviderRequest, LLMProviderResponse
+from graph_agent.core.llm_provider import LLMProviderChunk, LLMProviderError, LLMProviderRequest
 from graph_agent.core.loader import SkillLoader as SkillLoader
 from graph_agent.core.manifest import (
     AgentNodeAST as AgentNodeAST,
@@ -354,49 +355,24 @@ class _GatewayBackedLLMProvider:
     def __init__(self, resolver: Any) -> None:
         self._resolver = resolver
 
-    def invoke(self, request: LLMProviderRequest) -> LLMProviderResponse:
+    def stream(self, request: LLMProviderRequest) -> Iterator[LLMProviderChunk]:
+        """Pass the gateway model's own stream through, slice by slice.
+
+        The closing slice carries no text and all of the metadata: tool calls,
+        usage and the model that answered are only complete once the accumulated
+        message is, and LangChain's own chunk addition is what completes them —
+        re-deriving them from the slices here would be a second, worse
+        implementation of merging the provider already defined.
+        """
         metadata = dict(request.metadata)
         try:
-            phase_name = metadata.get("phase_name")
-            overrides = _node_param_overrides(phase_name)
-            model = self._resolver.resolve(
-                request.role,
-                model_override=metadata.get("model_override"),
-                callbacks=tuple(metadata.get("callbacks") or ()),
-                phase_name=phase_name,
-                thinking_enabled=overrides.get("thinking"),
-                max_output_tokens=overrides.get("max_output_tokens"),
-                temperature=overrides.get("temperature"),
-            )
-            tools = metadata.get("bound_tools") or []
-            if tools and hasattr(model, "bind_tools"):
-                model = model.bind_tools(
-                    tools,
-                    tool_choice=metadata.get("tool_choice"),
-                    **dict(metadata.get("tool_kwargs") or {}),
-                )
-            result = model._generate(
-                request.messages,
-                stop=metadata.get("stop"),
-            )
-            message = result.generations[0].message
-            response_metadata = dict(getattr(message, "response_metadata", None) or {})
-            llm_output = dict(getattr(result, "llm_output", None) or {})
-            response_metadata.update(llm_output)
-            tool_calls = list(getattr(message, "tool_calls", None) or [])
-            if tool_calls:
-                response_metadata["tool_calls"] = tool_calls
-            usage_metadata = getattr(message, "usage_metadata", None)
-            if usage_metadata is not None:
-                response_metadata["usage_metadata"] = usage_metadata
-            model_name = (
-                getattr(model, "model_name", None)
-                or getattr(model, "model", None)
-                or getattr(model, "name", None)
-            )
-            if model_name is not None:
-                response_metadata.setdefault("model_name", str(model_name))
-            return LLMProviderResponse(content=message.content, metadata=response_metadata)
+            model = self._bound_model(request, metadata)
+            accumulated: Any = None
+            for chunk in model.stream(request.messages, stop=metadata.get("stop")):
+                accumulated = chunk if accumulated is None else accumulated + chunk
+                if chunk.content:
+                    yield LLMProviderChunk(content=chunk.content)
+            yield LLMProviderChunk(content="", metadata=_answer_metadata(accumulated, model))
         except Exception as exc:
             details = _safe_provider_error_details(getattr(exc, "details", {}))
             details.setdefault("exception_type", type(exc).__name__)
@@ -406,6 +382,48 @@ class _GatewayBackedLLMProvider:
                 retryable=bool(getattr(exc, "retryable", False)),
                 details=details,
             ) from None
+
+    def _bound_model(self, request: LLMProviderRequest, metadata: dict[str, Any]) -> Any:
+        phase_name = metadata.get("phase_name")
+        overrides = _node_param_overrides(phase_name)
+        model = self._resolver.resolve(
+            request.role,
+            model_override=metadata.get("model_override"),
+            callbacks=tuple(metadata.get("callbacks") or ()),
+            phase_name=phase_name,
+            thinking_enabled=overrides.get("thinking"),
+            max_output_tokens=overrides.get("max_output_tokens"),
+            temperature=overrides.get("temperature"),
+        )
+        tools = metadata.get("bound_tools") or []
+        if tools and hasattr(model, "bind_tools"):
+            model = model.bind_tools(
+                tools,
+                tool_choice=metadata.get("tool_choice"),
+                **dict(metadata.get("tool_kwargs") or {}),
+            )
+        return model
+
+
+def _answer_metadata(accumulated: Any, model: Any) -> dict[str, Any]:
+    """Everything about the answer that is not its text."""
+    if accumulated is None:
+        return {}
+    metadata = dict(getattr(accumulated, "response_metadata", None) or {})
+    tool_calls = list(getattr(accumulated, "tool_calls", None) or [])
+    if tool_calls:
+        metadata["tool_calls"] = tool_calls
+    usage_metadata = getattr(accumulated, "usage_metadata", None)
+    if usage_metadata is not None:
+        metadata["usage_metadata"] = usage_metadata
+    model_name = (
+        getattr(model, "model_name", None)
+        or getattr(model, "model", None)
+        or getattr(model, "name", None)
+    )
+    if model_name is not None:
+        metadata.setdefault("model_name", str(model_name))
+    return metadata
 
 
 def _safe_provider_error_details(raw_details: Any) -> dict[str, Any]:

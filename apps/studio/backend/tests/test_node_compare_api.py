@@ -120,9 +120,6 @@ def test_node_compare_spawns_isolated_side_runs(
 
     # Stub the base run's events (the node's real input) and the roles-file writer
     # (roles building is covered by the candidate-test path; it needs credentials).
-    monkeypatch.setattr(
-        run_manager, "_reap_finished_runs", lambda: None, raising=False
-    )
     import app.services.run_manager as rm
 
     monkeypatch.setattr(rm, "_read_run_artifact_events", lambda run_dir: _dispatch_events(base_run_id, "setup", captured))

@@ -14,6 +14,7 @@ from typing import Any
 import aiofiles  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
+from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.core.adapters.run_layout import predicts_root, runs_root
 from app.core.ports.metadata import SkillIndexEntry
 from app.models.runs import RunMetadata
@@ -102,11 +103,8 @@ class LocalJsonMetadataStore:
             ),
         )
         for metadata_path in metadata_paths:
-            try:
-                async with aiofiles.open(metadata_path, encoding="utf-8") as file:
-                    runs.append(RunMetadata.model_validate_json(str(await file.read())))
-            except Exception:
-                continue
+            text = await asyncio.to_thread(read_published_text, metadata_path)
+            runs.append(RunMetadata.model_validate_json(text))
         return sorted(runs, key=lambda item: item.started_at, reverse=True)
 
     async def save_run_metadata(
@@ -125,9 +123,11 @@ class LocalJsonMetadataStore:
             )
         root = predicts_root(workspace) if is_predict_run_id(metadata.run_id) else runs_root(workspace)
         metadata_path = root / metadata.run_id / "run_metadata.json"
-        await asyncio.to_thread(metadata_path.parent.mkdir, parents=True, exist_ok=True)
-        async with aiofiles.open(metadata_path, "w", encoding="utf-8") as file:
-            await file.write(metadata.persisted_json())
+        # One thread hop for the whole publish, not one per file operation: an
+        # await between truncating the destination and writing its new content
+        # is exactly what let a listing read an empty run_metadata.json and drop
+        # the run from the history (compare-group flake, 2026-08-09).
+        await asyncio.to_thread(write_text_atomically, metadata_path, metadata.persisted_json())
 
     async def _workspace_dir(self, skill_id: str) -> Path | None:
         entry = await self.get_skill_index_entry(skill_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import stat
@@ -7,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from app.core.adapters.atomic_file import read_published_text
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.models.runs import RunMetadata
 from app.models.settings import AppSettings
@@ -121,3 +123,50 @@ async def test_app_settings_file_permissions_0o600(
 
     settings_path = tmp_path / "global-config" / "app_settings.json"
     assert stat.S_IMODE(settings_path.stat().st_mode) == 0o600
+
+
+@pytest.mark.anyio
+async def test_saving_run_metadata_never_shows_a_reader_a_half_written_document(
+    metadata_store: LocalJsonMetadataStore,
+    tmp_path: Path,
+) -> None:
+    """A save publishes the next document; it never un-publishes the current one.
+
+    The save used to open the destination in "w" mode — truncating it — and then
+    await before the content was written. Everything that lists runs reads these
+    files straight off the event loop, so that await handed readers a zero-byte
+    ``run_metadata.json``. ``RunManager.list_runs`` could not parse it and (per
+    its own bare except) dropped the run from the listing entirely: a run that
+    existed, was fine, and had simply been caught mid-save silently vanished
+    from the history. That is the compare-group flake, seen from below.
+    """
+    skill_dir = tmp_path / "opened-skill"
+    skill_dir.mkdir()
+    await metadata_store.save_skill_index_entry(
+        "opened-skill",
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
+    await metadata_store.save_run_metadata("default", "opened-skill", _run_metadata("run-1"))
+    metadata_path = skill_dir / ".workspace" / "runs" / "run-1" / "run_metadata.json"
+
+    observed: list[str] = []
+    for _ in range(20):
+        save = asyncio.create_task(
+            metadata_store.save_run_metadata("default", "opened-skill", _run_metadata("run-1"))
+        )
+        # Exactly what a reader does: read the path from the event loop, through
+        # the same helper every real reader uses, while the save is in flight.
+        # Nothing here slows the save down or reaches into it.
+        while not save.done():
+            observed.append(read_published_text(metadata_path))
+            await asyncio.sleep(0)
+        await save
+
+    unreadable = [text for text in observed if not text.strip()]
+    assert observed, "the save finished before any read landed; the probe proved nothing"
+    assert not unreadable, (
+        f"{len(unreadable)} of {len(observed)} reads saw an empty run_metadata.json "
+        "while the save was in flight"
+    )
+    for text in observed:
+        assert RunMetadata.model_validate_json(text).run_id == "run-1"

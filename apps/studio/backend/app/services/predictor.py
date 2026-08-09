@@ -155,11 +155,18 @@ class PredictorService:
                 runtime_config=runtime_config,
             )
             accounted = True
+            # The run id rides along on the settle event for the same reason it
+            # rides along on the `started` one: a listener has to know WHICH
+            # predict this is. Without it the finished predict cannot be projected
+            # into the run list, its outcome cannot be announced, and its node
+            # badges keep reading "running" — the event named a change nobody
+            # could locate.
             publish_skill_gate_from_thread(
                 skill_id=skill_id,
                 gate="predict",
                 outcome="pass" if status == "success" else "fail",
                 content_hash=art_ref["content_hash"],
+                run_id=predict_run_id,
             )
             return cast(RunResult, result)
         finally:

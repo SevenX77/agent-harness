@@ -162,6 +162,38 @@ def test_what_the_run_bills_survives_the_trip_back_to_one_message() -> None:
     assert answer.usage_metadata["output_tokens"] == 5
 
 
+def test_an_answer_the_gateway_restarted_is_passed_on_as_a_restart() -> None:
+    """The gateway retries; the engine folds. One has to tell the other.
+
+    A retry replaces the answer instead of continuing it, so the adapter cannot
+    quietly keep accumulating — it would hand the engine one message stitched
+    from two attempts. It also must not swallow the fact: the engine is the one
+    doing the folding, so the engine is who needs to hear it.
+    """
+    from graph_agent_gateway import ANSWER_RESTARTED
+
+    resolver = _StreamingResolver(
+        [
+            _chunk("cut off ha", response_metadata={"finish_reason": "length"}),
+            _chunk("", response_metadata={ANSWER_RESTARTED: True}),
+            _chunk("the whole "),
+            _chunk("answer", usage_metadata=_usage(11, 5), response_metadata={"finish_reason": "stop"}),
+        ]
+    )
+
+    slices = list(_GatewayBackedLLMProvider(resolver).stream(_request()))
+
+    restarts = [index for index, s in enumerate(slices) if s.restarts_answer]
+    assert len(restarts) == 1, "the engine has to be told the earlier slices are void"
+    after = "".join(str(s.content) for s in slices[restarts[0] + 1 :])
+    assert after == "the whole answer"
+    closing = slices[-1]
+    assert closing.metadata["usage_metadata"] == _usage(11, 5)
+    assert closing.metadata["finish_reason"] == "stop", (
+        "the closing metadata must describe the answer that survived, not the one voided"
+    )
+
+
 def test_a_model_that_yields_nothing_still_closes_the_answer() -> None:
     slices = list(_GatewayBackedLLMProvider(_StreamingResolver([])).stream(_request()))
 

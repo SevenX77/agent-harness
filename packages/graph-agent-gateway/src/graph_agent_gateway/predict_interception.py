@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.protocol import PredictContext
@@ -52,4 +53,27 @@ class PredictGatewayChatModel(GatewayChatModel):
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"provider": "predict", "model_name": self.role_name},
+        )
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        """A rehearsal has nothing to reveal gradually, so it is one piece.
+
+        It still has to be a piece: callers reach every model the same way now,
+        and a model without this override is one LangChain reads as unable to
+        stream — which would quietly route predict through a different call
+        path than a real run takes.
+        """
+        result = self._generate(messages, stop, run_manager, **kwargs)
+        message = result.generations[0].message
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content=message.content,
+                response_metadata=message.response_metadata,
+            )
         )

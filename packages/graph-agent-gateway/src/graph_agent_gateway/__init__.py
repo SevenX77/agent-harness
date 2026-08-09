@@ -18,7 +18,11 @@ from graph_agent_gateway.fallback_decision import (
     FallbackDecisionRequest,
     decide_fallback,
 )
-from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+from graph_agent_gateway.gateway_chat_model import (
+    ANSWER_RESTARTED,
+    GatewayChatModel,
+    answer_restarts_here,
+)
 from graph_agent_gateway.probe_catalog import (
     MaterializedProbeCatalogCandidates,
     ProbeCatalogStore,
@@ -51,7 +55,9 @@ __all__ = [
     "CredentialResolveResponse",
     "FallbackDecision",
     "FallbackDecisionRequest",
+    "ANSWER_RESTARTED",
     "GatewayChatModel",
+    "answer_restarts_here",
     "GatewayResolverMissingError",
     "GatewayRoleNotConfiguredError",
     "LLMFallbackEvent",

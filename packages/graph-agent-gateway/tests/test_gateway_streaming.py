@@ -72,6 +72,12 @@ class _Manager:
         self.usage_records.append((provider_code, prompt, completion))
 
 
+class _MidStreamFailure(RuntimeError):
+    """A failure the gateway is willing to fall back from (a 404 from the route)."""
+
+    status_code = 404
+
+
 class _Attempt:
     """One provider answer, expressed the way a provider expresses it."""
 
@@ -91,7 +97,7 @@ class _Attempt:
     def chunks(self) -> Iterator[AIMessageChunk]:
         for index, piece in enumerate(self.pieces):
             if self.raises_after is not None and index == self.raises_after:
-                raise RuntimeError("provider dropped the connection mid-answer")
+                raise _MidStreamFailure("the route stopped answering mid-stream")
             yield AIMessageChunk(content=piece)
         yield AIMessageChunk(
             content="",
@@ -209,7 +215,9 @@ def test_a_route_that_fails_after_streaming_voids_what_it_streamed(
         monkeypatch,
         _Factory(
             {
-                first.route_id: _StreamingChatModel([_Attempt(["half an ans"], raises_after=1)]),
+                first.route_id: _StreamingChatModel(
+                    [_Attempt(["half an ", "answer"], raises_after=1)]
+                ),
                 second.route_id: _StreamingChatModel([_Attempt(["a complete ", "answer"])]),
             }
         ),

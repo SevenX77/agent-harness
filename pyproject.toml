@@ -43,6 +43,11 @@ pythonpath = [
     "packages/graph-agent/src",
     "packages/graph-agent-gateway/src",
     "apps/studio/backend",
+    # Shared test support for the gateway suite. `--import-mode=importlib` does
+    # not put a test file's own directory on the path, so a helper several test
+    # modules agree on has to be reachable some other way — and four copies of
+    # "what a provider chunk looks like" is four places for it to drift.
+    "packages/graph-agent-gateway/tests",
 ]
 addopts = ["--import-mode=importlib"]
 consider_namespace_packages = true

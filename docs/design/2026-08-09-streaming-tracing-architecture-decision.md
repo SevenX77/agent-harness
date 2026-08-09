@@ -2,6 +2,10 @@
 
 - 日期:2026-08-09
 - 状态:已批准。PM 对本文件 §2 的 D1–D8 八条逐条答复「全部接受」。交付闸门:S1 与 S2 完成后由实施者自评效果,无问题则直接推进 S3–S5,不需再次审批。
+- 修订(2026-08-09,S1+S2 自评后):自评实测判定 §3 判据 1 **不通过**,根因是 B2 少数了一层 ——
+  真正拦住 token 流的是 gateway 的 `GatewayChatModel`,而它被初稿划在范围外。
+  PM 就此答复「开工」,同意把 gateway 纳入范围。本次修订涉及:范围行、B2、§3 判据 1 与新增 SG 判据、
+  新增 D9、§4 作废「不触碰 gateway 模块」、§6 新增 SG 行并改排序。**D1–D8 未作任何改动。**
 - 权威设计源:`packages/graph-agent/src/graph_agent/callbacks/events.py`(引擎事件契约)、
   `packages/graph-agent/src/graph_agent/core/llm_provider.py`(引擎 LLM Port 契约)、
   `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`、
@@ -10,8 +14,15 @@
 - 前置决议:`docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md`
   (Trace 信息架构 + 步骤流式呈现 + run 目录布局)。本决议**取代**该决议 §4「明确不做」的第一条
   「LLM 输出逐 token 流式」;该决议的 D1–D14、§4 其余条目、§5 其余处置**全部保持有效**。
-- 范围:`packages/graph-agent`(engine)、`apps/studio/backend`、`apps/studio/frontend` 三处。
-  **不含** `packages/graph-agent-gateway`(gateway)。
+- 范围:`packages/graph-agent`(engine)、`packages/graph-agent-gateway`(gateway)、
+  `apps/studio/backend`、`apps/studio/frontend` 四处。
+  > **2026-08-09 订正。** 初稿写的是「三处,不含 gateway」。该边界建立在 B2 数错层数的前提上
+  > (以为 gateway resolver 交出来的就是能流的 LangChain 原生 chat model);真机实测证明
+  > **gateway 的 `GatewayChatModel` 是唯一真正拦住 token 流的那一层**(证据见 B2 订正段)。
+  > 前提垮了,边界随之失效:按 `AGENTS.md`「Development Principles」的
+  > 「Module boundaries say WHERE a fix lands — they are never a reason to put it somewhere worse」,
+  > 为守住这条线而在 Studio 层绕路,正是该条禁止的做法。gateway 因此纳入范围,
+  > 落点为新增的 SG(见 §6);仍然禁止的是反方向 —— 把 Studio 专属关切塞进 gateway。
 
 ---
 
@@ -42,9 +53,15 @@
 这 37 种描述的都是「某件事开始了」或「某件事结束了」,没有任何一种描述「某件事正在进行中又产出了一小段」。
 换句话说:**引擎的事件契约今天只能表达步骤帧,不能表达增量帧。**
 
-### B2. 流式能力不是缺失,是在三层被逐层丢弃
+### B2. 流式能力不是缺失,是在四层被逐层丢弃
 
-这是本决议最重要的事实。底层的模型客户端本来就会流式吐字,能力在向上传递的过程中被主动放弃了三次:
+> **2026-08-09 订正(S1 完成后的真机自评)。** 本条初稿写的是「三层」,并称 gateway resolver
+> 解析出来的 model 是「真正的 LangChain chat model」。**这两句都错。** 实际是**四层**,
+> 而第四层在 gateway 里 —— 恰好是本决议初稿划在范围外的模块。订正内容见本条 D 段。
+> 结论(能力被逐层放弃)不变,但少数的那一层是唯一真正拦住 token 流的那一层,
+> 因此本决议的范围与 §4「不触碰 gateway 模块」一并订正,见下。
+
+这是本决议最重要的事实。底层的模型客户端本来就会流式吐字,能力在向上传递的过程中被主动放弃了四次:
 
 - **Studio adapter 层丢弃**:`apps/studio/backend/app/core/adapters/engine.py:378`
   ```
@@ -54,8 +71,11 @@
               )
   ```
   这里的 `model` 是 `_GatewayBackedLLMProvider.invoke` 内由 gateway resolver 解析得到的
-  **真正的 LangChain chat model**。LangChain 的 `BaseChatModel` 原生具备 `_stream` / `_astream`
-  两个流式出口,而此处调用的是 `_generate` —— 一次性把全量响应取回来。**能力在这一行被主动放弃。**
+  chat model。`BaseChatModel` 的子类**可以**提供 `_stream` / `_astream` 两个流式出口,
+  而此处调用的是 `_generate` —— 一次性把全量响应取回来。**这一层主动放弃了流式。**
+  > **订正:** 初稿此处称该对象是「真正的 LangChain chat model」,这句是错的。
+  > 它是 gateway 自己的 `GatewayChatModel`,而 `GatewayChatModel` 恰恰不提供那两个出口;
+  > 真正的 LangChain chat model 还在它下面一层。详见本条最后一段。
 
 - **引擎 Port 层无法表达**:`packages/graph-agent/src/graph_agent/core/llm_provider.py:47-49`
   ```
@@ -72,6 +92,44 @@
   ```
   图的执行走 `invoke(...)` —— 同步的整体调用,等全部跑完一次性返回,
   而不是 `.stream()` / `.astream()` 那种边跑边往外交付的形态。
+
+- **(订正新增)gateway chat model 层根本不具备流式出口 —— 这一层才是真正的墙。**
+  Studio 的 `_GatewayBackedLLMProvider` 从 gateway resolver 拿到的**不是** LangChain 原生的
+  `ChatOpenAI` / `ChatAnthropic`,而是 gateway 自己的
+  `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:84` 的
+  `GatewayChatModel`(role 走 predict 时是同模块体系里的 `PredictGatewayChatModel`)。
+  这两个类**都只实现 `_generate`,不实现 `_stream` / `_astream`**;
+  在 `packages/graph-agent-gateway/src/` 全域搜索 `def _stream` / `def _astream`,
+  除 `fallback_decision.py:159` 一个同名无关函数外**零命中**。
+
+  LangChain 判定「这次调用要不要走流式 API」的第一行就是这个:
+  ```
+  sync_not_implemented = type(self)._stream == BaseChatModel._stream
+  ...
+  if (not async_api) and sync_not_implemented:
+      return False
+  ```
+  (`langchain_core.language_models.chat_models.BaseChatModel._should_stream`)
+  子类没覆写 `_stream` 即判定为「不会流」,`stream()` 直接退化成一次 `invoke()` 再包成单块。
+
+  真正的 provider chat model 在更下面一层:`GatewayChatModel._generate` 内经
+  `_dispatch(...)` → `_invoke_with_token_escalation(...)` 由
+  `RouteChatModelFactory.build(...)` 现造,然后在
+  `gateway_chat_model.py:780` 上以 `chat_model.invoke(messages)` **一次阻塞调用**取回整包。
+  能力就是在这一行被放弃的,而且这一行在 gateway 里。
+
+  **因果证据(真实 provider 实测,2026-08-09,S1 合并后)。** 用仓根 Python(导入工作区源码,
+  非 vendor 快照)构造 Studio 的 gateway resolver,以 role `fast`(deepseek-v4-flash)
+  请求一段约 120 字的中文散文,逐片记录到达时刻:
+  ```
+  文本切片数: 1
+  第一片 4.51s / 最后一片 4.51s / 流结束 4.51s
+  答案长度: 167 字
+  usage: input 104 / output 153
+  ```
+  167 字一次性到达,切片数为 1 —— **S1 之后的引擎 Port 是流式的,而真实数据不是流式的。**
+  (同一次实测也确认 token 用量在流式下不丢:openai 兼容协议的 `stream_usage` 由 gateway
+  `provider_profiles.py:20-21` 显式钉住,不依赖 langchain「仅 base_url 为空才自动打开」的默认。)
 
 ### B3. 引擎侧不存在任何真实 provider 流式
 
@@ -452,6 +510,38 @@ S2 不做,则 S3 的增量帧发射会成为 B8 之外的**第四个散落发射
 该决议的其余部分 —— D1 至 D14 全部条目、§4「明确不做」的其余条目、§5 的其余处置 ——
 **全部保持有效,不受本决议影响**。
 
+### D9 · gateway 只有一种取答案的方式,那就是流式(2026-08-09 增补)
+
+> 增补背景:B2 订正坐实 gateway 的 `GatewayChatModel` 是唯一拦住 token 流的一层,
+> 用户 2026-08-09 裁决「开工」,同意把 gateway 纳入范围。本条是 SG 的设计决定。
+
+**D9-a. `_generate` 是 `_stream` 的折叠,不是它的平行实现。**
+`GatewayChatModel` 里挑选候选路由、mark-down、探活、失败分类、跨路由回退、发 fallback 事件、
+token 升配、用量记账 —— 这一整套失败策略约两百行,是 gateway 的核心职责。
+如果流式另起一个实现,这套策略就有了第二份拷贝,而两份拷贝会各自漂移;这正是 B8 记录的病,
+只是规模大一个量级。因此:**取答案的唯一实现是流式的那个,阻塞形态由它折叠得到。**
+这与本决议已经对引擎 Port 采用的原则(D:「没有阻塞的替代方法」)同源。
+
+**D9-b. 重试作废它已经流出去的片段。**
+gateway 有两种重试:答案被 `max_tokens` 截断后加倍预算重来
+(`gateway_chat_model.py:_invoke_with_token_escalation`,`token_escalation_rounds` 默认 **2**,
+见 `registry/schema.py:106`),以及一次调用失败后换下一条候选路由。
+截断只能在响应结束时才判定得出(`_is_truncated_response` 读 `finish_reason`),
+也就是说**重试发生时,上一次尝试的文字已经流出去了**。
+若不处理,消费端把两次尝试首尾相接,最终答案就是错的 —— 这不只是显示问题,是正确性问题。
+因此:**gateway 在重试之前,先发出一片「作废」标记;累积答案的一方收到它就丢弃已累积的内容。**
+如此,流式路径给出的最终答案与今天阻塞路径给出的逐字一致,而观众仍能看见过程。
+作废标记是**显式的类型化字段**,不是元数据里的魔法键 —— 依
+`AGENTS.md`「Coding Standards」的「让非法状态不可表示」。
+
+**D9-c. 提交之后不再回退。**
+一旦某条候选路由已经吐出内容而后才失败,gateway 按 D9-b 作废并继续既有策略;
+但**不为了流式而弱化任何一条既有失败策略**:探活、mark-down、失败分类、跨路由回退、
+token 升配在流式路径上全部保留,行为与今天一致。SG 的验收判据里以既有 gateway 测试全绿为证。
+
+**D9-d. 边界方向不变。** gateway 纳入范围只意味着「流式能力在 gateway 里补齐」,
+不意味着 Studio 的关切可以进 gateway。gateway 依旧不认识 run、trace、seq、WebSocket。
+
 ---
 
 ## 3. 验收判据
@@ -464,8 +554,20 @@ S2 不做,则 S3 的增量帧发射会成为 B8 之外的**第四个散落发射
 1. 一次**真实**模型调用被证明是分多次增量返回的,而非一次性返回 ——
    证据形式为该次调用收到的分片记录:分片数 > 1,且各分片的到达时刻依次递增。
    只拿到一个完整响应即判不通过。
+   > **2026-08-09 判定:本条在 S1 合并后实测为不通过**(分片数 = 1,167 字一次性到达,
+   > 实测记录见 B2 订正段)。判据本身没有问题 —— 它恰好抓住了 B2 数错的那一层。
+   > 本条改由 **SG 完成后复测**,复测通过才算 S1+SG 共同交付。
 2. `apps/studio/backend/app/core/adapters/engine.py` 的 `model._generate(...)`
    在流式路径上不再是唯一出口;流式路径确实走到 chat model 的流式方法。
+
+**SG(gateway 会流)**
+
+2-a. `GatewayChatModel` 与 `PredictGatewayChatModel` 均实现 `_stream`,
+   且 `BaseChatModel._should_stream` 对它们判定为真(以断言该判定结果的测试为证)。
+2-b. 一次尝试被截断后升配重试时,消费端拿到的最终答案**只含最后一次尝试**,
+   不含被作废的那次(以一条构造截断再升配的测试为证)。
+2-c. gateway 既有测试套件全绿,`mypy --strict packages/graph-agent-gateway/src` 全绿 ——
+   证明既有失败策略未因流式而弱化(D9-c)。
 
 **S2(单一出口)**
 
@@ -518,7 +620,10 @@ S2 不做,则 S3 的增量帧发射会成为 B8 之外的**第四个散落发射
   已存在的 run 数据直接丢弃,不写版本嗅探分支,不写兼容读取路径。
 - **不引入新的第三方依赖来实现流式。** 底层 chat model 已具备该能力(B2),
   需要的是打通通路,不是引进新库。
-- **不触碰 gateway 模块**(`packages/graph-agent-gateway`)。
+- ~~**不触碰 gateway 模块**(`packages/graph-agent-gateway`)。~~
+  **2026-08-09 作废。** 本条与 B2 一同基于「gateway 交出来的是能流的原生 chat model」这一错误事实。
+  实测证明 gateway 正是唯一拦住 token 流的那一层,不动它则 S4 传输与 S5 呈现都是空管道。
+  gateway 已纳入范围,落点为 SG。作废理由与证据见范围行订正与 B2 订正段。
 - **不在本轮解决 `finish_task` 无开始事件的缺口**(B7 记录)。
   该缺口的根因是中间件顺序契约与 `CognitiveFlow` 自行应答两者共同造成的,
   修它需要先裁决「agent 路径上究竟由谁拥有 tracing」——那是一个独立的架构裁决,不在本决议范围。
@@ -551,17 +656,20 @@ LLM 步骤的开始帧在 agent 路径上不存在,导致该决议 D4(LLM 步骤
 
 ## 6. 实施切分
 
-一个 PR 一件事,顺序即 D7 的 S1 → S5,不可乱序。
+一个 PR 一件事,顺序即 S1 → S2 → **SG** → S3 → S4 → S5,不可乱序。
+(初稿写的是「D7 的 S1 → S5」;SG 于 2026-08-09 增补并插在 S3 之前,理由见该行与 D9。)
 
 | PR | 内容 | 落点模块 | 必须同步更新的设计源 |
 |---|---|---|---|
 | S1 | `LLMProvider` Port 增流式方法;`LLMProviderChatModel` 实现流式;Studio adapter 改用 chat model 的流式出口 | engine + studio backend | `docs/engine/mvp1/` 对应机制档(LLM Port 契约) |
 | S2 | 新建 `graph_agent/tracing/` 单一出口,收编 B8 三处发射点;对外契约不变 | engine | `docs/engine/mvp1/` 对应机制档(事件发射) |
+| **SG** | **gateway 会流**:`GatewayChatModel` / `PredictGatewayChatModel` 实现 `_stream`,`_generate` 改为它的折叠;重试作废已流出的片段(D9);引擎 Port 的 `LLMProviderChunk` 增显式作废字段,折叠方按它丢弃已累积内容。**排在 S3 之前**:不做完 SG,S3 第五项的增量帧契约无从验证,S4/S5 是空管道 | gateway + engine + studio backend | `docs/graph-agent-gateway/mvp1/` 对应机制档(chat model 出口) |
 | S3 | ①agent 路径补发 LLM 步骤开始信号,使 `prompt_captured` 在两条路径上都成立;②补齐 `LLMCallEvent` 结束帧承载模型最终产出,消除 agent 路径(`core/graph_assembler.py:2131-2132`)与 legacy 路径(`core/callback_bridge.py:154-160`)的载荷不一致;③`response_data` 改必填;④删除 `llm_call.messages` 字段 + 删除 `TraceStepRow.tsx:206-208` 的回退分支;⑤增量帧契约(正文增量 / 推理增量),每帧携带所属步骤标识,与步骤帧分道。**五项同一个 PR,不拆分**(理由见 D7) | engine + studio frontend | `docs/engine/mvp1/` 对应机制档 |
 | S4 | 传输分道与背压:跨进程通道、WebSocket 通道、不占 seq、不落盘 | studio backend | `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`(如上锁则重钉哈希) |
 | S5 | 步骤条目内逐字追加 | studio frontend | `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`(如上锁则重钉哈希) |
 
-**S1、S2、S3 合并后必须重建 vendor 快照。** 三者都改动 `packages/graph-agent` 源码。
+**S1、S2、SG、S3 合并后必须重建 vendor 快照。** 四者都改动 `packages/graph-agent` 源码,
+SG 还改动 `packages/graph-agent-gateway` 源码 —— 两个包都是以构建好的 wheel 冻进快照的。
 桌面 app 的 Python sidecar 无论是否 dev 构建,都从冻结的
 `apps/studio/tauri/vendor/site-packages` 快照 import `graph_agent`;
 不重建则运行中的 app 仍跑旧引擎代码,新字段会被 `extra_forbidden` 拒绝。

@@ -321,7 +321,10 @@ describe('GraphCanvas', () => {
     expect(onNodeFileOpen).not.toHaveBeenCalled()
   })
 
-  it('closes the panel and editors and clears selection when the empty pane is clicked', () => {
+  // Decision 2026-08-09 D12: clicking empty canvas is a deselect gesture, not a
+  // "close my workspace" gesture. Taking the open panel away costs the user the
+  // panel they were reading; deselecting costs them nothing they did not ask for.
+  it('clears selection and editors on an empty-pane click but leaves the panel open', () => {
     const onNodeDeselect = vi.fn()
     const onPanelChange = vi.fn()
     const onCloseEditors = vi.fn()
@@ -343,9 +346,9 @@ describe('GraphCanvas', () => {
     props?.onPaneClick?.()
 
     expect(onNodeDeselect).toHaveBeenCalled()
-    expect(onPanelChange).toHaveBeenCalledWith(null)
     expect(onCloseEditors).toHaveBeenCalled()
     expect(onNodeFileOpen).not.toHaveBeenCalled()
+    expect(onPanelChange).not.toHaveBeenCalled()
   })
 
   it('treats a node click after an empty-pane click as a fresh first click (no panel)', () => {

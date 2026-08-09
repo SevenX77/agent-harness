@@ -6,8 +6,8 @@ import type { RunMetadata } from "@/api/types"
  *
  * - `live`    — 展示当前实时流(Workspace 的 runStream;predict 与 run 共用)。
  * - `history` — 回看一次已落盘的 run:事件由 Workspace 一次性拉取并缓存,
- *               timeline 与 Full Trace 文档共读同一份(diagnostics 同源)。
- * - `null`    — 没有在看任何 run:timeline 区域显示历史列表。
+ *               该 run 的所有读者共读同一份(diagnostics 同源)。
+ * - `null`    — 没有在看任何 run:Trace 区域显示运行列表。
  */
 export type TraceView =
   | { source: "live" }

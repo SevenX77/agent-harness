@@ -220,8 +220,8 @@ describe('TracePanel focus granularity (atom #17)', () => {
   })
 })
 
-describe('TracePanel naming (atom #28 / D3 命名统一 2026-08-07)', () => {
-  // 一套口径: 区域=Timeline(Toolbar+列表) / 本视图=Trace / 文档=Full Trace。
+describe('TracePanel naming (decision 2026-08-09 D1)', () => {
+  // 一套口径: 区域=Trace(Toolbar 第4格) / 区域默认视图=运行列表 / 该次运行的踪迹视图=Trace。
   // atom #28 的底线不变: 歧义的 "Trace Timeline" 永不回归。
   it('names the view "Trace" and never the ambiguous "Trace Timeline"', () => {
     const html = render({})

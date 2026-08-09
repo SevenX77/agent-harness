@@ -1,4 +1,4 @@
-"""LangChain callback bridge and response extraction helpers."""
+"""LangChain callback bridge: tool reporting and per-phase token accounting."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from typing import Any
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.token_accounting import account_llm_call
@@ -57,20 +56,6 @@ def _extract_text_block(block: Any) -> str:
     return text
 
 
-def _extract_thinking_content(content: Any) -> str | None:
-    """Extract hidden reasoning blocks when providers expose them separately."""
-    if not isinstance(content, list):
-        return None
-    thinking_parts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict) or block.get("type") != "thinking":
-            continue
-        text = block.get("thinking") or block.get("text")
-        if isinstance(text, str) and text:
-            thinking_parts.append(text)
-    return "\n".join(thinking_parts) if thinking_parts else None
-
-
 def _first_generation(generations: Any) -> Any | None:
     if not generations or len(generations) <= 0:
         return None
@@ -114,7 +99,6 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
         self.phase_name = phase_name
         self._callbacks = callbacks
         self._metrics = metrics
-        self._pending_messages: dict[str, list[dict[str, Any]]] = {}
         self._pending_tools: dict[str, dict[str, Any]] = {}
         self._tool_call_count: int = 0
         self._max_tool_calls: int = max(0, int(max_tool_calls))
@@ -123,48 +107,18 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
         """Return True when phase-level tool budget is exhausted."""
         return self._max_tool_calls > 0 and self._tool_call_count >= self._max_tool_calls
 
-    def on_chat_model_start(
-        self,
-        serialized: dict[str, Any],
-        messages: list[list[BaseMessage]],
-        *,
-        run_id: UUID | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """Capture full prompt messages for structured tracing."""
-        del serialized, kwargs
-        if run_id is None:
-            return
-        batch = messages[0] if messages else []
-        self._pending_messages[str(run_id)] = [self._serialize_message(msg) for msg in batch]
-
     def on_llm_end(self, response: Any, *, run_id: UUID | None = None, **kwargs: Any) -> None:
-        """Extract tokens and response payload from LLM results."""
-        del kwargs
+        """Fold what the call cost into the phase's running totals.
+
+        Reporting the call is the chat model's, not this handler's: the model
+        knows the moment a round-trip starts, and a run watching itself needs
+        that moment far more than it needs a second copy of the ending. What is
+        left here is the accounting, because the phase's metrics dict is a piece
+        of phase state the model has no business holding.
+        """
+        del kwargs, run_id
         input_tokens, output_tokens = self._extract_tokens(response)
-
         account_llm_call(self._metrics, input_tokens, output_tokens)
-
-        run_key = str(run_id) if run_id is not None else ""
-        prompt_messages = self._pending_messages.pop(run_key, [])
-        response_data = self._extract_response_data(response)
-
-        for cb in self._callbacks:
-            try:
-                cb.on_llm_call(
-                    self.phase_name,
-                    input_tokens,
-                    output_tokens,
-                    messages=prompt_messages,
-                    response_data=response_data,
-                )
-            except TypeError:
-                try:
-                    cb.on_llm_call(self.phase_name, input_tokens, output_tokens)
-                except Exception as exc:
-                    logger.warning("[Bridge] callback error in %s: %s", self.phase_name, exc)
-            except Exception as exc:
-                logger.warning("[Bridge] callback error in %s: %s", self.phase_name, exc)
 
     def on_tool_start(
         self,
@@ -239,8 +193,7 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
         self, error: BaseException, *, run_id: UUID | None = None, **kwargs: Any
     ) -> None:
         del kwargs
-        run_key = str(run_id) if run_id is not None else ""
-        self._pending_messages.pop(run_key, None)
+        del run_id
         logger.warning("[Bridge] LLM error in %s: %s", self.phase_name, error)
 
     def on_tool_error(
@@ -282,92 +235,8 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
 
         return (0, 0)
 
-    @staticmethod
-    def _serialize_message(msg: BaseMessage) -> dict[str, Any]:
-        """Normalize LangChain messages into trace-friendly dictionaries."""
-        role = "assistant"
-        if isinstance(msg, HumanMessage):
-            role = "user"
-        elif isinstance(msg, SystemMessage):
-            role = "system"
-        elif isinstance(msg, ToolMessage):
-            role = "tool"
-        elif isinstance(msg, AIMessage):
-            role = "assistant"
-
-        payload: dict[str, Any] = {"role": role, "content": msg.content}
-        if isinstance(msg, ToolMessage):
-            payload["tool_call_id"] = msg.tool_call_id
-        return payload
-
-    @staticmethod
-    def _extract_response_data(response: Any) -> dict[str, Any]:
-        """Extract assistant content, thinking blocks, tool calls + llm metadata.
-
-        Tier 1 Commit B (T-A4): always populates the usage / model_name /
-        provider keys even when the response shape is non-standard so
-        Studio's cost-and-latency view has something to render. Fields
-        default to ``None`` rather than being absent to keep the JSON
-        shape stable across providers.
-        """
-        data: dict[str, Any] = {
-            "content": "",
-            "thinking": None,
-            "tool_calls": [],
-            "stop_reason": None,
-            # T-A4: fill in provider-side metadata from response.llm_output
-            "usage": None,
-            "model_name": None,
-            "response_metadata": None,
-        }
-
-        # Provider-side metadata: usage / model_name / finish_reason often
-        # arrive on response.llm_output or message.response_metadata.
-        llm_output = getattr(response, "llm_output", None) or {}
-        if isinstance(llm_output, dict):
-            data["usage"] = (
-                llm_output.get("usage")
-                or llm_output.get("token_usage")
-                or llm_output.get("usage_metadata")
-            )
-            data["model_name"] = llm_output.get("model_name") or llm_output.get("model")
-
-        generations = getattr(response, "generations", None)
-        if not generations or not generations[0]:
-            return data
-
-        gen = generations[0][0]
-        msg = getattr(gen, "message", None)
-        if isinstance(msg, AIMessage):
-            raw_content = msg.content
-            data["tool_calls"] = list(getattr(msg, "tool_calls", None) or [])
-            data["content"] = _extract_text_content(raw_content)
-            data["thinking"] = _extract_thinking_content(raw_content)
-            if data["thinking"] is None:
-                addl = getattr(msg, "additional_kwargs", {}) or {}
-                data["thinking"] = addl.get("reasoning_content") or addl.get("thinking")
-            # Per-message metadata often carries the richer usage breakdown
-            # that llm_output sometimes misses (e.g. Anthropic cache stats).
-            rm = getattr(msg, "response_metadata", None)
-            if rm:
-                data["response_metadata"] = rm
-                if data["usage"] is None:
-                    data["usage"] = rm.get("usage") or rm.get("token_usage")
-                if data["model_name"] is None:
-                    data["model_name"] = rm.get("model_name") or rm.get("model")
-        else:
-            data["content"] = getattr(gen, "text", "") or ""
-
-        gen_info = getattr(gen, "generation_info", None) or {}
-        if isinstance(gen_info, dict):
-            data["stop_reason"] = (
-                gen_info.get("finish_reason") or gen_info.get("stop_reason") or gen_info.get("stop")
-            )
-        return data
-
 
 __all__ = [
     "_HarnessCallbackBridge",
     "_extract_text_content",
-    "_extract_thinking_content",
 ]

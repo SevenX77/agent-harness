@@ -25,6 +25,7 @@ from graph_agent.callbacks.base import Callback
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy, MockedSource
 from graph_agent.core._predict_internal.stub import generate_heuristic_stub
 from graph_agent.core._predict_internal.tracing import record_mock_source
+from graph_agent.tracing.steps import StepReporter
 
 
 class _PredictGatewayChatModelMixin:
@@ -39,6 +40,7 @@ class _PredictGatewayChatModelMixin:
     bound_tools: tuple[Any, ...]
     tool_choice: str | None
     tool_kwargs: dict[str, object]
+    call_counter: list[int]
     probe_before_call: bool
     thinking_enabled: bool | None
     cache: Any
@@ -59,9 +61,26 @@ class _PredictGatewayChatModelMixin:
         **kwargs: Any,
     ) -> ChatResult:
         """Short-circuit provider calls and return P0/P1/P2 mock output."""
-        del messages, stop, run_manager, kwargs
-        payload, source = self._select_mock_payload()
-        return self._build_predict_chat_result(payload, source)
+        del stop, run_manager, kwargs
+        # A mocked round-trip is still a round-trip as far as anyone reading the
+        # run is concerned, and it reports itself for the same reason a real one
+        # does: the unit that performs a step is the only one that knows when it
+        # started and when it ended.
+        self.call_counter[0] += 1
+        with StepReporter(
+            callbacks=self.event_callbacks,
+            phase_name=self._predict_phase_name,
+        ).llm_call(
+            messages,
+            llm_role=self.role_name,
+            loop_index=self.call_counter[0],
+            parent_node_id=self.phase_name,
+            node_type="agent",
+        ) as step:
+            payload, source = self._select_mock_payload()
+            result = self._build_predict_chat_result(payload, source)
+            step.finished(cast(AIMessage, result.generations[0].message))
+        return result
 
     async def _agenerate(
         self,
@@ -171,6 +190,9 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
     bound_tools: tuple[Any, ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
     tool_kwargs: dict[str, object] = Field(default_factory=dict)
+    # Shared with the copy ``bind_tools`` makes, so the loop count a phase
+    # reports keeps rising instead of restarting at 1 on every turn.
+    call_counter: list[int] = Field(default_factory=lambda: [0])
     profile: Any = None
 
     def __init__(
@@ -235,6 +257,7 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
             bound_tools=tuple(_normalise_predict_tool(tool) for tool in tools),
             tool_choice=tool_choice,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
+            call_counter=self.call_counter,
             name=self.name,
             cache=self.cache,
             verbose=self.verbose,

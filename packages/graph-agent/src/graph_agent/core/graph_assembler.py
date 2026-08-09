@@ -29,11 +29,10 @@ from graph_agent.callbacks.events import (
     BuiltinSubagentFallbackEvent,
     InputDispatchEvent,
     InputFileInjectedEvent,
-    LLMCallEvent,
     PhaseEndEvent,
     PhaseStartEvent,
 )
-from graph_agent.callbacks.token_accounting import account_llm_call
+from graph_agent.callbacks.token_accounting import account_llm_call, token_usage_of
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -50,7 +49,7 @@ from graph_agent.cognitive.prompt import (
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
-from graph_agent.core.llm_provider import LLMProvider, LLMProviderChatModel
+from graph_agent.core.llm_provider import ChatModelProvider, LLMProvider, LLMProviderChatModel
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.local_workspace_resolver import default_local_resolver_for_compiled
 from graph_agent.core.manifest import (
@@ -2112,29 +2111,15 @@ def _build_skill_node(
                     if tc_name not in valid_tool_names:
                         _graph_fatal(f"LLM called unknown tool {tc_name!r} in phase {phase_id!r}")
 
-        # The agent node is its own micro-event emitter (there is no callback
-        # bridge on this path), so it also owes the run its token accounting and
-        # the node attribution every micro event carries.
+        # What the phase spent is the fold of its calls, and this list is where
+        # the phase learns of them all. Reporting each call is NOT done here —
+        # the model does that as the call happens, because a reader of a
+        # finished list can only ever say the work is already over.
         phase_metrics: dict[str, Any] = {}
         for i, msg in enumerate(new_messages):
             if isinstance(msg, AIMessage):
-                input_tokens, output_tokens = _extract_token_usage(msg)
+                input_tokens, output_tokens = token_usage_of(msg)
                 account_llm_call(phase_metrics, input_tokens, output_tokens)
-                response_metadata = getattr(msg, "response_metadata", None) or {}
-                resolved_model = response_metadata.get("model_name") or response_metadata.get("model")
-                _safe_emit_event(
-                    callbacks,
-                    LLMCallEvent(
-                        phase_name=phase_id,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        resolved_model=str(resolved_model) if resolved_model else None,
-                        messages=None,
-                        response_data=None,
-                        parent_node_id=phase_id,
-                        node_type="agent",
-                    ),
-                )
                 for tc in getattr(msg, "tool_calls", []) or []:
                     tc_id = tc.get("id")
                     tc_name = tc.get("name")
@@ -2197,13 +2182,17 @@ def _resolve_phase_chat_model(
             phase_name=phase_id,
         )
     if chat_model is not None:
-        return chat_model
+        llm_provider = ChatModelProvider(chat_model)
     if llm_provider is not None:
         return LLMProviderChatModel(
             provider=llm_provider,
             role=llm_role,
             phase_name=phase_id,
             event_callbacks=callbacks,
+            # The model reports its own calls, so it is told which node they
+            # belong to rather than having a later reader stamp them.
+            parent_node_id=phase_id,
+            node_type="agent",
         )
     if model_resolver is None:
         return None
@@ -2367,38 +2356,6 @@ def _phase_end_context(
                             if k == "review":
                                 ctx["phase_outputs"]["review"] = {"review": v}
     return ctx
-
-
-def _extract_token_usage(response: Any) -> tuple[int, int]:
-    metadata = getattr(response, "response_metadata", None)
-    usage = metadata.get("token_usage") if isinstance(metadata, dict) else None
-    if not isinstance(usage, dict):
-        usage = metadata.get("usage") if isinstance(metadata, dict) else None
-    if not isinstance(usage, dict):
-        usage = getattr(response, "usage_metadata", None)
-    if not isinstance(usage, dict):
-        return 0, 0
-    input_tokens = _coerce_token_count(
-        usage.get("input_tokens", usage.get("prompt_tokens", usage.get("total_input_tokens")))
-    )
-    output_tokens = _coerce_token_count(
-        usage.get(
-            "output_tokens",
-            usage.get("completion_tokens", usage.get("total_output_tokens")),
-        )
-    )
-    return input_tokens, output_tokens
-
-
-def _coerce_token_count(value: Any) -> int:
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, int):
-        return max(value, 0)
-    try:
-        return max(int(value), 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _stringify_tool_result(result: Any) -> str:

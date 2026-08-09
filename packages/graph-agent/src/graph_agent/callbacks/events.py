@@ -85,8 +85,36 @@ class LLMCallEvent(_EventBase):
     node_type: str | None = None
 
 
+class ToolCallStartedEvent(_EventBase):
+    """Fired the moment a tool call is handed to the tool, before it runs.
+
+    ``ToolCallEvent`` reports a finished call, so a consumer that only sees it
+    cannot show work in progress. This is the other half: same
+    ``tool_call_id``, no result yet.
+
+    ``args`` is repeated on both halves on purpose. ``ToolCallEvent`` has to
+    stay independently readable — it is persisted, replayed, and consumed by
+    readers that never pair events at all (metrics, golden eval) — and forcing
+    every one of them to join two events to learn what a call was for would be
+    the wrong trade.
+    """
+
+    event_type: Literal["tool_call_started"] = "tool_call_started"
+    tool_call_id: str
+    phase_name: str
+    tool_name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    parent_node_id: str | None = None
+    node_type: str | None = None
+
+
 class ToolCallEvent(_EventBase):
+    # ``tool_call_id`` is the identity of the call, shared with the matching
+    # ToolCallStartedEvent. One agent turn can have several calls in flight, so
+    # (phase_name, tool_name) does not identify one — hence required, not
+    # defaulted.
     event_type: Literal["tool_call"] = "tool_call"
+    tool_call_id: str
     phase_name: str
     tool_name: str
     args: dict[str, Any] = Field(default_factory=dict)
@@ -499,6 +527,7 @@ CallbackEvent = Annotated[
     | PredictChainStartEvent
     | PhaseEndEvent
     | LLMCallEvent
+    | ToolCallStartedEvent
     | ToolCallEvent
     | ValidationFailEvent
     | RetryEvent
@@ -542,6 +571,7 @@ __all__ = [
     "PredictChainStartEvent",
     "PhaseEndEvent",
     "LLMCallEvent",
+    "ToolCallStartedEvent",
     "ToolCallEvent",
     "ValidationFailEvent",
     "RetryEvent",

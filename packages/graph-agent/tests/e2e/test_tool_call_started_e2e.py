@@ -1,15 +1,15 @@
-"""End to end: a real run announces each tool call before the tool body runs.
+"""End to end: a real run announces a tool call before it reports one.
 
-The middleware unit tests pin the contract in isolation; this one proves the
-event actually reaches a run's callbacks ahead of the tool's own side effects,
-and that the identity minted at the start survives to whichever emitter reports
-the completion — including ``finish_task``, whose completion is reconstructed by
-the agent node rather than by the tracing middleware.
+The middleware unit tests pin the ordering against the tool body in isolation
+(skill tools must be pure, so a real one cannot record that it ran). What this
+proves is that the started event reaches a run's callbacks at all, and that the
+identity it announces survives to whichever emitter reports the completion.
+
+It also pins the one tool that is NOT announced — see the second test.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -19,18 +19,12 @@ from graph_agent.callbacks.events import ToolCallEvent, ToolCallStartedEvent
 from graph_agent.core.runner import run_skill
 
 
-class TimelineCallback:
-    """Append every event to the same log the skill's tool writes to."""
-
-    def __init__(self, log_path: Path) -> None:
-        self._log_path = log_path
+class SpyCallback:
+    def __init__(self) -> None:
         self.events: list[Any] = []
 
     def on_event(self, event: Any) -> None:
         self.events.append(event)
-        if isinstance(event, ToolCallStartedEvent | ToolCallEvent):
-            with self._log_path.open("a", encoding="utf-8") as handle:
-                handle.write(f"{type(event).__name__}:{event.tool_name}\n")
 
 
 class _ToolCallingChatModel:
@@ -76,7 +70,7 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _write_skill(root: Path, log_path: Path) -> None:
+def _write_skill(root: Path) -> None:
     _write(
         root / "GRAPH.md",
         """---
@@ -135,54 +129,76 @@ Return the answer through finish_task.
     )
     _write(
         root / "phases" / "main" / "tools" / "inspect_payload.py",
-        f'''from pathlib import Path
-
-
-def inspect_payload(topic: str) -> dict:
-    """Record that the tool body ran, so the event order is assertable."""
-    log = Path({json.dumps(str(log_path))})
-    with log.open("a", encoding="utf-8") as handle:
-        handle.write("tool-body:inspect_payload\\n")
-    return {{"topic": topic}}
+        '''def inspect_payload(topic: str) -> dict:
+    """Return the topic so the completion half carries a result."""
+    return {"topic": topic}
 ''',
     )
 
 
-def test_run_announces_tool_calls_before_they_execute(
-    tmp_path: Path,
-    mock_skill_resolver: object,
-) -> None:
-    log_path = tmp_path / "timeline.log"
+def _run(tmp_path: Path, resolver: object) -> SpyCallback:
     skill_root = tmp_path / "started_skill"
     output_dir = tmp_path / "out"
-    _write_skill(skill_root, log_path)
-    callback = TimelineCallback(log_path)
+    _write_skill(skill_root)
+    spy = SpyCallback()
 
     result = run_skill(
         skill_root,
         mock_llm=_ToolCallingChatModel(),
-        callbacks=[callback],
+        callbacks=[spy],
         workspace_dir=output_dir,
-        skill_resolver=mock_skill_resolver,
+        skill_resolver=resolver,
         topic="observability",
         output_dir=str(output_dir),
     )
     assert result.success is True
+    return spy
 
-    timeline = log_path.read_text(encoding="utf-8").splitlines()
-    started_at = timeline.index("ToolCallStartedEvent:inspect_payload")
-    body_at = timeline.index("tool-body:inspect_payload")
-    assert started_at < body_at, f"started event must precede the tool body: {timeline}"
 
-    started = [e for e in callback.events if isinstance(e, ToolCallStartedEvent)]
-    assert {e.tool_name: e.tool_call_id for e in started} == {
-        "inspect_payload": "inspect-1",
-        "finish_task": "finish-1",
-    }
+def test_run_announces_a_tool_call_with_the_provider_identity(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    spy = _run(tmp_path, mock_skill_resolver)
 
-    # finish_task never reaches the tracing middleware's completion path (it
-    # returns a Command), so its pair is closed by the agent node — which must
-    # report the same provider id.
-    finished_ids = {e.tool_name: e.tool_call_id for e in callback.events if isinstance(e, ToolCallEvent)}
-    assert finished_ids["finish_task"] == "finish-1"
-    assert finished_ids["inspect_payload"] == "inspect-1"
+    started = [e for e in spy.events if isinstance(e, ToolCallStartedEvent)]
+    assert [e.tool_name for e in started] == ["inspect_payload"]
+    assert started[0].tool_call_id == "inspect-1"
+    assert started[0].phase_name == "main"
+    assert started[0].args == {"topic": "observability"}
+
+    # Every emitter reads the same provider id, so the halves pair even when a
+    # different one reports the completion.
+    finished = [e for e in spy.events if isinstance(e, ToolCallEvent)]
+    assert {e.tool_call_id for e in finished if e.tool_name == "inspect_payload"} == {"inspect-1"}
+    assert {e.tool_call_id for e in finished if e.tool_name == "finish_task"} == {"finish-1"}
+
+    announced_at = spy.events.index(started[0])
+    reported_at = [
+        index
+        for index, event in enumerate(spy.events)
+        if isinstance(event, ToolCallEvent) and event.tool_call_id == "inspect-1"
+    ]
+    assert reported_at and min(reported_at) > announced_at
+
+
+def test_finish_task_is_not_announced_because_cognitive_flow_intercepts_it(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    """A known gap, pinned so it cannot change silently.
+
+    `MVP0_MIDDLEWARE_ORDER_CONTRACT` puts CognitiveFlow ahead of Tracing, and
+    `CognitiveFlowMiddleware.wrap_tool_call` answers `finish_task` itself
+    instead of calling the inner handler. Tracing therefore never sees that
+    call, and nothing else on the path holds the moment it starts — the agent
+    node only reconstructs it afterwards from the message list. Closing this
+    needs a decision about who owns tracing on the agent path, so it is not
+    papered over with a synthesised start here.
+    """
+    spy = _run(tmp_path, mock_skill_resolver)
+
+    started = {e.tool_name for e in spy.events if isinstance(e, ToolCallStartedEvent)}
+    reported = {e.tool_name for e in spy.events if isinstance(e, ToolCallEvent)}
+    assert "finish_task" in reported
+    assert "finish_task" not in started

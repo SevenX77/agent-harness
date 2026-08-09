@@ -29,6 +29,7 @@ def test_v4_micro_topology_fields_are_available_on_llm_and_tool_events() -> None
         node_type="llm_call",
     )
     tool = ToolCallEvent(
+        tool_call_id="call-1",
         phase_name="draft",
         tool_name="lookup",
         result="ok",
@@ -44,7 +45,9 @@ def test_v4_micro_topology_fields_are_available_on_llm_and_tool_events() -> None
 
 def test_v4_micro_topology_fields_default_to_none_for_legacy_construction() -> None:
     llm = LLMCallEvent(phase_name="draft", input_tokens=10, output_tokens=3)
-    tool = ToolCallEvent(phase_name="draft", tool_name="lookup", result="ok")
+    tool = ToolCallEvent(
+        tool_call_id="call-1", phase_name="draft", tool_name="lookup", result="ok"
+    )
 
     assert llm.model_dump()["parent_node_id"] is None
     assert llm.model_dump()["node_type"] is None

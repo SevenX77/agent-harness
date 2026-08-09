@@ -134,11 +134,11 @@ def test_provider_without_a_tool_call_id_still_yields_one_shared_identity() -> N
 
 
 def test_started_event_is_emitted_even_when_the_tool_returns_a_command() -> None:
-    """``finish_task`` returns a Command, not a ToolMessage.
+    """The announcement happens before the result exists, so its shape is moot.
 
-    The completion half of that call is emitted elsewhere (the agent node
-    reconstructs it from the message list), but the moment it *starts* is only
-    observable here — so the started event must not be gated on the result shape.
+    The completion half is only emitted for a ToolMessage; a Command-returning
+    tool has its completion reported by the agent node instead. That asymmetry
+    must not leak backwards into whether the call was announced.
     """
     from langgraph.types import Command
 

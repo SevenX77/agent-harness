@@ -36,6 +36,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     RunStartedEvent,
     ThreadCleanedUpEvent,
     ToolCallEvent,
+    ToolCallStartedEvent,
     ValidationFailEvent,
     ValidationPassEvent,
     WorkingMemoryUpdateEvent,
@@ -46,6 +47,7 @@ _ALL_EVENT_CLASSES = [
     PhaseEndEvent,
     LLMCallEvent,
     ToolCallEvent,
+    ToolCallStartedEvent,
     ValidationFailEvent,
     RetryEvent,
     FinishTaskEvent,
@@ -84,7 +86,8 @@ _MIN_CTOR: dict[type, dict] = {
     PhaseStartEvent: {"phase_name": "p"},
     PhaseEndEvent: {"phase_name": "p"},
     LLMCallEvent: {"phase_name": "p", "input_tokens": 10, "output_tokens": 5},
-    ToolCallEvent: {"phase_name": "p", "tool_name": "t", "result": "r"},
+    ToolCallStartedEvent: {"tool_call_id": "c1", "phase_name": "p", "tool_name": "t"},
+    ToolCallEvent: {"tool_call_id": "c1", "phase_name": "p", "tool_name": "t", "result": "r"},
     ValidationFailEvent: {"phase_name": "p", "retry_count": 1},
     RetryEvent: {"phase_name": "p", "target_phase": "p2"},
     FinishTaskEvent: {"phase_name": "p", "reasoning": "done"},
@@ -247,7 +250,7 @@ class TestParallelMapGrouping:
         assert data["group_key"] == "pmap-xyz"
 
     def test_default_grouping_fields_are_none(self) -> None:
-        ev = ToolCallEvent(phase_name="p", tool_name="t", result="r")
+        ev = ToolCallEvent(tool_call_id="c1", phase_name="p", tool_name="t", result="r")
         assert ev.sub_run_id is None
         assert ev.group_key is None
 

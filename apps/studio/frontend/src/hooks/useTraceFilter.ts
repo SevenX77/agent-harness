@@ -16,14 +16,16 @@ export interface TraceFilterState {
 
 /**
  * The active filter predicates the trace panel applies to its received events.
- * `activePhase` is the focused-node link narrowing (atom #17); the other three
- * are the user-driven search box / type chips / phase chips (atom #13).
+ *
+ * All three are USER-driven (atom #13): the search box, the type chips, the
+ * node chips. Canvas focus is deliberately absent — it used to narrow the list
+ * silently, which made the trace unable to be read end to end (decision
+ * 2026-08-09 D2). Focus now scrolls, and only the user hides anything.
  */
 export interface TraceFilterCriteria {
   searchTerm: string
   selectedCategories: TraceCategory[]
   selectedPhases: string[]
-  activePhase: string | null
 }
 
 function eventSearchText(event: CallbackEvent): string {
@@ -40,8 +42,8 @@ function eventSearchText(event: CallbackEvent): string {
  * Trace panel's client-side filter. It runs over the events the panel has
  * ALREADY received (no re-request) and keeps each surviving event's original
  * `index` so selection/scroll positions stay stable. An event survives when it
- * matches the search term AND the selected category set AND the selected phase set
- * AND the focused-node active phase — empty criteria are no-ops.
+ * matches the search term AND the selected category set AND the selected phase
+ * set — empty criteria are no-ops.
  */
 export function filterTraceEvents(
   events: CallbackEvent[],
@@ -58,12 +60,11 @@ export function filterTraceEvents(
         || criteria.selectedCategories.includes(traceEventCategory(event.event_type))
       const matchesPhase = criteria.selectedPhases.length === 0
         || criteria.selectedPhases.includes(phase)
-      const matchesActivePhase = !criteria.activePhase || phase === criteria.activePhase
-      return matchesSearch && matchesCategory && matchesPhase && matchesActivePhase
+      return matchesSearch && matchesCategory && matchesPhase
     })
 }
 
-export function useTraceFilter(events: CallbackEvent[], activePhase: string | null = null) {
+export function useTraceFilter(events: CallbackEvent[]) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategories, setSelectedCategories] = useState<TraceCategory[]>([])
   const [selectedPhases, setSelectedPhases] = useState<string[]>([])
@@ -78,8 +79,8 @@ export function useTraceFilter(events: CallbackEvent[], activePhase: string | nu
   )
 
   const filteredEvents = useMemo<IndexedTraceEvent[]>(
-    () => filterTraceEvents(events, { searchTerm, selectedCategories, selectedPhases, activePhase }),
-    [activePhase, events, searchTerm, selectedCategories, selectedPhases],
+    () => filterTraceEvents(events, { searchTerm, selectedCategories, selectedPhases }),
+    [events, searchTerm, selectedCategories, selectedPhases],
   )
 
   return {

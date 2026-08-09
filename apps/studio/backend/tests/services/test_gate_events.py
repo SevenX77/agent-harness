@@ -111,11 +111,13 @@ def test_compile_success_publishes_a_pass_event(
 
     assert response.status_code == 200
     events = recorded.of_gate("compile")
-    assert len(events) == 1
-    assert events[0]["outcome"] == "pass"
-    assert events[0]["skill_id"] == "text-segmentation"
-    assert str(events[0]["content_hash"]).startswith("sha256:")
-    assert events[0]["defect_count"] == 0
+    # 每一次闸门发生由 started 定界(决议 2026-08-09 D4),与 predict / run 对称。
+    # 没有它,copilot 连续两次编译出同样产物时,两条终态事件在前端紧邻,第二条的
+    # 副作用会被当成重复到达折叠掉,错误抽屉不弹。
+    assert [event["outcome"] for event in events] == ["started", "pass"]
+    assert all(event["skill_id"] == "text-segmentation" for event in events)
+    assert str(events[-1]["content_hash"]).startswith("sha256:")
+    assert events[-1]["defect_count"] == 0
 
 
 def test_compile_failure_publishes_a_fail_event_with_the_defect_count(
@@ -136,15 +138,43 @@ def test_compile_failure_publishes_a_fail_event_with_the_defect_count(
 
     assert response.status_code >= 400
     events = recorded.of_gate("compile")
-    assert len(events) == 1
-    assert events[0]["outcome"] == "fail"
-    assert events[0]["skill_id"] == "text-segmentation"
-    assert int(events[0]["defect_count"]) >= 1
+    assert [event["outcome"] for event in events] == ["started", "fail"]
+    assert events[-1]["skill_id"] == "text-segmentation"
+    assert int(events[-1]["defect_count"]) >= 1
     # 诊断随事件下发:接收方渲染的必须是同一份聚合诊断,而不是自己再算一遍
     # (AGENTS.md「diagnostics SSOT」)。
-    carried = events[0]["errors"]
-    assert isinstance(carried, list) and len(carried) == int(events[0]["defect_count"])
+    carried = events[-1]["errors"]
+    assert isinstance(carried, list) and len(carried) == int(events[-1]["defect_count"])
     assert all("message" in row and "severity" in row for row in carried)
+
+
+def test_a_crashed_compile_still_announces_an_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    """宣告了开始就必须宣告结束——否则接收方永远停在 `compiling`。
+
+    补 `started` 之后,编译如果死在 CompileFailedError 之外的异常上(skill 找不到、
+    磁盘错、引擎内部崩),而没有任何终态事件跟上,前端就会停在开始事件写下的
+    `compiling` 上,再没有事件能推走它——正是决议 2026-08-09 D1 要根除的那类卡死。
+    崩溃也是一种结束,按结束上报;异常本身照常抛出,不被吞掉。
+    """
+    import asyncio
+
+    from app.services import skills as skills_module
+
+    recorded = _RecordedEvents(monkeypatch)
+
+    async def _explode(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("engine adapter blew up")
+
+    monkeypatch.setattr(skills_module, "_compile_skill_for_studio", _explode)
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            skills_module.compile_skill_for_studio(
+                "user", "demo.skill", storage=None, metadata=None
+            )
+        )
+
+    assert [event["outcome"] for event in recorded.of_gate("compile")] == ["started", "fail"]
 
 
 def test_gate_events_are_published_from_services_not_routers() -> None:

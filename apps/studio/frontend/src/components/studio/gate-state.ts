@@ -76,18 +76,6 @@ const STAGE_BY_OUTCOME: Record<SkillGate, Record<GateOutcome, SkillBuildStage>> 
   run: { started: "running", pass: "predict-pass", fail: "run-fail", paused: "paused", stopped: "predict-pass" },
 }
 
-/**
- * Identity of a gate outcome, used to drop repeats.
- *
- * A locally projected outcome and the backend broadcast of the same outcome carry
- * the same identity, so applying both is a no-op the second time — the drawer must
- * not pop twice because the click handler and the event stream both saw it.
- */
-export function gateEventKey(event: SkillGateEvent): string {
-  const subject = event.runId ?? event.contentHash ?? ""
-  return `${event.skillId}|${event.gate}|${event.outcome}|${subject}`
-}
-
 export function projectGateEvent(event: SkillGateEvent): GateProjection {
   const stage = STAGE_BY_OUTCOME[event.gate][event.outcome]
   const effects: GateEffect[] = []

@@ -8,7 +8,7 @@
       "n": 14,
       "cap": "trace-live-stream",
       "design_ref": "n4-atom-14",
-      "current": "现状：已实现且符合(2026-08-07 viewed-run 决议落地并订正)。gate started(predict 与 run 同权)→ follow-run + open-trace(gate-state.ts:95-103)自动开面板并把流指向新 run;useRunStream(runId) 连 WS、按 seq 去重 + gap 检测 + 100ms flush;TracePanel 经 VirtualTraceList 渲染,流式贴底跟随/上滚释放/回到底部按钮走本地 message-scroller(spec §2.6);头部身份条含 run_id + Live 徽章 + 返回按钮(任何时刻可回历史列表,修复『跑过一次后列表不可达』)。",
+      "current": "现状：已实现且符合(2026-08-07 viewed-run 决议落地并订正)。gate started(predict 与 run 同权)→ follow-run + open-trace(gate-state.ts:89-101)自动开面板并把流指向新 run;useRunStream(runId) 连 WS、按 seq 去重 + gap 检测 + 100ms flush;TracePanel 经 VirtualTraceList 渲染,流式贴底跟随/上滚释放/回到底部按钮走本地 message-scroller(spec §2.6);头部身份条含 run_id + Live 徽章 + 返回按钮(任何时刻可回历史列表,修复『跑过一次后列表不可达』)。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_dep": "已就绪可接。WS /ws/runs/{run_id}（D11 ok）live；gateway actual_runtime_settings + engine callback_bridge metadata 保留链路已覆盖。"

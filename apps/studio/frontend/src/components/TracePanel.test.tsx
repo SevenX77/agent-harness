@@ -292,7 +292,7 @@ describe('TracePanel naming (decision 2026-08-09 D1)', () => {
 
   it('offers a back-to-timeline affordance when a close handler is wired', () => {
     const html = render({ onBack: () => undefined })
-    expect(html).toContain('aria-label="Back to timeline"')
+    expect(html).toContain('aria-label="Back to run list"')
   })
 })
 

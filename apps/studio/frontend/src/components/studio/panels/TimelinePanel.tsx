@@ -141,9 +141,14 @@ interface TimelinePanelProps {
 }
 
 /**
- * Timeline region, list view: every predict/run attempt for the current skill,
+ * Trace region, list view: every predict/run attempt for the current skill,
  * newest first. Viewing a run's trace is owned by the Workspace-level viewed-run
  * state (decision 2026-08-07); this panel only reports the row click.
+ *
+ * The header says "Trace" because that is the region's name — 2026-08-09 D1
+ * retired "Timeline" as a user-facing noun. The nav slot was renamed with the
+ * decision; this header was not, so the same region announced itself by two
+ * different names depending on where you looked.
  */
 export function TimelinePanel({ onSelectRun, loadingRunId = null }: TimelinePanelProps) {
   const { currentSkillId } = useWorkspaceContext()
@@ -152,7 +157,7 @@ export function TimelinePanel({ onSelectRun, loadingRunId = null }: TimelinePane
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader
-        title="Timeline"
+        title="Trace"
         extra={<span className="text-[11px] text-muted-foreground">{runs.length} runs</span>}
         right={(
           <Tooltip>
@@ -162,12 +167,12 @@ export function TimelinePanel({ onSelectRun, loadingRunId = null }: TimelinePane
                 variant="ghost"
                 size="icon-lg"
                 onClick={() => void refresh()}
-                aria-label="Refresh timeline"
+                aria-label="Refresh run list"
               >
                 <RefreshCw className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Refresh timeline</TooltipContent>
+            <TooltipContent>Refresh run list</TooltipContent>
           </Tooltip>
         )}
       />

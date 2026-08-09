@@ -68,20 +68,17 @@ def test_missing_file_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert _node_param_overrides("writer") == {}
 
 
-class _FakeMessage:
-    content = "ok"
-    response_metadata: dict[str, Any] = {}
-    tool_calls: list[Any] = []
-    usage_metadata = None
+class _FakeChunk:
+    """One slice, addable the way LangChain chunks are."""
 
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.response_metadata: dict[str, Any] = {}
+        self.tool_calls: list[Any] = []
+        self.usage_metadata = None
 
-class _FakeGeneration:
-    message = _FakeMessage()
-
-
-class _FakeResult:
-    generations = [_FakeGeneration()]
-    llm_output: dict[str, Any] = {}
+    def __add__(self, other: _FakeChunk) -> _FakeChunk:
+        return _FakeChunk(self.content + other.content)
 
 
 class _RecordingResolver:
@@ -94,14 +91,14 @@ class _RecordingResolver:
         class _Model:
             model_name = "fake"
 
-            def _generate(self, messages: Any, stop: Any = None) -> Any:
+            def stream(self, messages: Any, stop: Any = None) -> Any:
                 del messages, stop
-                return _FakeResult()
+                yield _FakeChunk("ok")
 
         return _Model()
 
 
-def test_invoke_passes_node_overrides_to_resolve(
+def test_streaming_passes_node_overrides_to_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     params = tmp_path / "runtime_config.json"
@@ -110,8 +107,10 @@ def test_invoke_passes_node_overrides_to_resolve(
 
     resolver = _RecordingResolver()
     provider = _GatewayBackedLLMProvider(resolver)
-    provider.invoke(
-        LLMProviderRequest(role="graph_agent", messages=[], metadata={"phase_name": "writer"})
+    list(
+        provider.stream(
+            LLMProviderRequest(role="graph_agent", messages=[], metadata={"phase_name": "writer"})
+        )
     )
 
     assert resolver.resolve_kwargs["thinking_enabled"] is True
@@ -120,14 +119,16 @@ def test_invoke_passes_node_overrides_to_resolve(
     assert resolver.resolve_kwargs["phase_name"] == "writer"
 
 
-def test_invoke_without_override_passes_none(
+def test_streaming_without_override_passes_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("STUDIO_RUNTIME_CONFIG_PATH", raising=False)
     resolver = _RecordingResolver()
     provider = _GatewayBackedLLMProvider(resolver)
-    provider.invoke(
-        LLMProviderRequest(role="graph_agent", messages=[], metadata={"phase_name": "writer"})
+    list(
+        provider.stream(
+            LLMProviderRequest(role="graph_agent", messages=[], metadata={"phase_name": "writer"})
+        )
     )
     assert resolver.resolve_kwargs["thinking_enabled"] is None
     assert resolver.resolve_kwargs["max_output_tokens"] is None

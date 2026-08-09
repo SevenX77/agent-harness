@@ -16,7 +16,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from graph_agent.core.llm_provider import FakeLLMProvider, LLMProviderResponse
+from graph_agent.core.llm_provider import FakeLLMProvider, LLMProviderChunk
 from graph_agent.core.runner import run_skill
 
 _GRAPH_MD = """---
@@ -89,7 +89,7 @@ class _RejectedFinishProvider(FakeLLMProvider):
         super().__init__()
         self._counter = 0
 
-    def invoke(self, request):  # type: ignore[override]
+    def stream(self, request):  # type: ignore[override]
         self.requests.append(request)
         bad = {"wrong_field": "no summary here"}
         payload = {
@@ -99,7 +99,7 @@ class _RejectedFinishProvider(FakeLLMProvider):
             + "\n```\n",
         }
         self._counter += 1
-        return LLMProviderResponse(
+        yield LLMProviderChunk(
             content="",
             metadata={
                 "tool_calls": [

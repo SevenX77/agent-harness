@@ -15,7 +15,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from graph_agent.core.llm_provider import FakeLLMProvider, LLMProviderResponse
+from graph_agent.core.llm_provider import FakeLLMProvider, LLMProviderChunk
 from graph_agent.core.runner import run_skill
 
 _GRAPH_MD = """---
@@ -107,7 +107,7 @@ def _fixture_skill(tmp_path: Path) -> Path:
 class _DraftFinishesReviewStallsProvider(FakeLLMProvider):
     """draft submits a valid finish_task; review replies with prose only."""
 
-    def invoke(self, request):  # type: ignore[override]
+    def stream(self, request):  # type: ignore[override]
         self.requests.append(request)
         phase = (request.metadata or {}).get("phase_name")
         if phase == "draft":
@@ -117,7 +117,7 @@ class _DraftFinishesReviewStallsProvider(FakeLLMProvider):
                 + json.dumps({"summary": "一句话摘要"}, ensure_ascii=False)
                 + "\n```\n",
             }
-            return LLMProviderResponse(
+            yield LLMProviderChunk(
                 content="",
                 metadata={
                     "tool_calls": [
@@ -125,7 +125,8 @@ class _DraftFinishesReviewStallsProvider(FakeLLMProvider):
                     ]
                 },
             )
-        return LLMProviderResponse(content="复核完成,无需修改。", metadata={})
+            return
+        yield LLMProviderChunk(content="复核完成,无需修改。", metadata={})
 
 
 def test_next_phase_is_not_finished_by_the_previous_phase_marker(

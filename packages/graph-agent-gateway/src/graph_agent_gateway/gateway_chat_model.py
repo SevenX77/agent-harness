@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, NoReturn, cast
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, message_chunk_to_message
 from langchain_core.messages.ai import AIMessage as LangChainAIMessage
 from langchain_core.messages.human import HumanMessage
 from langchain_core.messages.system import SystemMessage
 from langchain_core.messages.tool import ToolMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -79,6 +79,64 @@ def _history_shape(messages: Sequence[Any]) -> str:
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
 ActualRuntimeSettings = dict[str, dict[str, object]]
 _MAX_TOKENS_UNSET = object()
+ANSWER_RESTARTED = "gateway_answer_restarted"
+"""Key a chunk carries to say the answer begins again from here.
+
+Published rather than private: the host folding the gateway's chunks back
+into one answer is the party that has to honour it, and a contract only one
+side can name is one the other side has to guess at."""
+
+
+def answer_restarts_here(message: Any) -> bool:
+    """True for the piece that voids every piece before it in this answer.
+
+    The gateway retries: a bigger token budget after an answer was cut off, the
+    next route after one fails. A retry produces a *different* answer, not more
+    of the same one, so anyone folding the pieces back together has to drop what
+    it holds when it sees this — otherwise it ends up with two attempts spliced
+    into one, which is a wrong answer and not merely a wrong picture.
+    """
+    metadata = getattr(message, "response_metadata", None)
+    return bool(isinstance(metadata, dict) and metadata.get(ANSWER_RESTARTED))
+
+
+class _Conclusion:
+    """Where the candidate loop leaves the finished answer for whoever wanted it whole."""
+
+    def __init__(self) -> None:
+        self.result: ChatResult | None = None
+
+
+class _Attempt:
+    """One try at one route, and what is left to try with it."""
+
+    def __init__(self, *, budget: int, cap: int | None, escalations_left: int) -> None:
+        self.budget = budget
+        self.cap = cap
+        self.escalations_left = escalations_left
+        self.streamed = False
+
+    def can_escalate(self) -> bool:
+        return self.escalations_left > 0 and self._next_budget() > self.budget
+
+    def escalate(self) -> None:
+        self.budget = self._next_budget()
+        self.escalations_left -= 1
+
+    def void(self) -> Iterator[AIMessageChunk]:
+        """Announce that this attempt's pieces are to be discarded.
+
+        Silent when nothing was emitted: a marker for pieces that never existed
+        would ask the caller to discard someone else's answer.
+        """
+        if not self.streamed:
+            return
+        self.streamed = False
+        yield AIMessageChunk(content="", response_metadata={ANSWER_RESTARTED: True})
+
+    def _next_budget(self) -> int:
+        doubled = self.budget * 2
+        return min(doubled, self.cap) if self.cap is not None else doubled
 
 
 class GatewayChatModel(BaseChatModel):
@@ -159,6 +217,17 @@ class GatewayChatModel(BaseChatModel):
             "candidates": [_candidate_id(candidate) for candidate in self.resolved_role.routes],
         }
 
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        del stop, run_manager
+        for chunk in self._answer(messages, kwargs, _Conclusion()):
+            yield ChatGenerationChunk(message=chunk)
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -167,6 +236,33 @@ class GatewayChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         del stop, run_manager
+        conclusion = _Conclusion()
+        for _ in self._answer(messages, kwargs, conclusion):
+            pass
+        # `_answer` either concludes or raises, so a drained stream without a
+        # conclusion would mean the candidate loop found a third way out.
+        assert conclusion.result is not None
+        return conclusion.result
+
+    def _answer(
+        self,
+        messages: list[BaseMessage],
+        kwargs: dict[str, Any],
+        conclusion: _Conclusion,
+    ) -> Iterator[AIMessageChunk]:
+        """Get one answer, in the pieces it arrives in.
+
+        This is the only place the gateway asks a provider anything: which
+        candidate route is tried, when one is skipped or marked down, when the
+        same route is retried, when the budget is escalated, and when the next
+        route takes over. Streaming and blocking are two ways of reading the
+        same walk through that policy, never two implementations of it.
+
+        Every retry here replaces the answer rather than extending it, so
+        before retrying, whatever was already yielded is voided (see
+        `answer_restarts_here`). Without that, a caller folding the pieces back
+        together would end up holding two attempts spliced into one.
+        """
         request_messages = _apply_system_prompt_prefix(
             messages,
             self.resolved_role.system_prompt_prefix,
@@ -253,14 +349,21 @@ class GatewayChatModel(BaseChatModel):
                     )
                     continue
             retry_same_used = False
+            attempt = _Attempt(
+                budget=_runtime_max_tokens(
+                    candidate,
+                    self.max_tokens,
+                    self.runtime_setting_sources,
+                    kwargs.get("max_tokens"),
+                ),
+                cap=_max_output_token_cap(candidate),
+                escalations_left=int(getattr(runtime_policy, "token_escalation_rounds", 0) or 0),
+            )
+            # Bracketing the whole escalation sequence, not each attempt: an
+            # answer that took three tries is still one answer to bill for.
+            before_usage = _usage_total_calls(self.client_manager, candidate)
             while True:
                 try:
-                    max_tokens = _runtime_max_tokens(
-                        candidate,
-                        self.max_tokens,
-                        self.runtime_setting_sources,
-                        kwargs.get("max_tokens"),
-                    )
                     temperature = _runtime_temperature(
                         candidate,
                         self.temperature,
@@ -276,7 +379,7 @@ class GatewayChatModel(BaseChatModel):
                     )
                     actual_runtime_settings = _actual_runtime_settings(
                         candidate,
-                        max_tokens=max_tokens,
+                        max_tokens=attempt.budget,
                         max_tokens_source=_runtime_source(
                             candidate,
                             "max_output_tokens",
@@ -298,13 +401,13 @@ class GatewayChatModel(BaseChatModel):
                             has_kwarg="reasoning" in kwargs,
                         ),
                     )
-                    before_usage = _usage_total_calls(self.client_manager, candidate)
-                    response = _dispatch(
+                    accumulated: AIMessageChunk | None = None
+                    for piece in _dispatch(
                         self.client_manager,
                         candidate,
                         request_messages,
                         credential_provider=self.credential_provider,
-                        max_tokens=max_tokens,
+                        max_tokens=attempt.budget,
                         temperature=temperature,
                         reasoning=reasoning,
                         thinking_budget_tokens=_optional_int_kwarg(
@@ -322,7 +425,15 @@ class GatewayChatModel(BaseChatModel):
                         reasoning_effort=_effective_text(candidate, "reasoning.effort"),
                         call_method_id=candidate.call_method_id,
                         request_mapper_id=candidate.request_mapper_id,
-                    )
+                    ):
+                        accumulated = piece if accumulated is None else accumulated + piece
+                        attempt.streamed = True
+                        yield piece
+                    response = _as_answer(accumulated)
+                    if _is_truncated_response(response) and attempt.can_escalate():
+                        attempt.escalate()
+                        yield from attempt.void()
+                        continue
                     after_usage = _usage_total_calls(self.client_manager, candidate)
                     if after_usage == before_usage:
                         usage = _usage_from_response(response)
@@ -332,7 +443,12 @@ class GatewayChatModel(BaseChatModel):
                             usage["prompt_tokens"],
                             usage["completion_tokens"],
                         )
-                    return self._build_chat_result(response, candidate, actual_runtime_settings)
+                    conclusion.result = self._build_chat_result(
+                        response,
+                        candidate,
+                        actual_runtime_settings,
+                    )
+                    return
                 except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
                     classification = classify_exception(exc, route_id=candidate.route_id)
                     failure = _failure_record(candidate, exc, classification.decision)
@@ -342,6 +458,7 @@ class GatewayChatModel(BaseChatModel):
                     failures.append(failure)
                     if classification.action == "retry_same_route" and not retry_same_used:
                         retry_same_used = True
+                        yield from attempt.void()
                         continue
                     if classification.decision != "fallback_allowed":
                         _raise_all_providers_failed(
@@ -366,6 +483,7 @@ class GatewayChatModel(BaseChatModel):
                             unclassified_default=classification.unclassified_default,
                         ),
                     )
+                    yield from attempt.void()
                     break
 
         _raise_all_providers_failed(
@@ -733,67 +851,44 @@ def _dispatch(
     candidate: ResolvedRoute,
     messages: list[BaseMessage],
     **kwargs: Any,
-) -> AIMessage:
+) -> Iterator[AIMessageChunk]:
+    """Ask one route for one answer, and hand back the pieces as they land.
+
+    Always `stream()`, never `invoke()`, and without asking first whether this
+    provider can stream: a client that has nothing to reveal gradually answers
+    a stream with a single piece, which is the same answer. Asking would mean
+    two call paths to keep honest for no gain.
+    """
     del client_manager
     credential_provider = kwargs.pop("credential_provider", None)
-    runtime_policy = kwargs.pop("runtime_policy", None)
+    kwargs.pop("runtime_policy", None)
     tools = kwargs.pop("tools", None)
     tool_choice = kwargs.pop("tool_choice", None)
     factory = RouteChatModelFactory(credential_provider=credential_provider)
-    return _invoke_with_token_escalation(
-        factory,
+    # Typed by the one capability this needs: binding tools hands back a
+    # Runnable rather than the chat model itself, and both know how to stream.
+    chat_model: Runnable[LanguageModelInput, AIMessage] = factory.build(
         candidate,
-        messages,
-        runtime_policy=runtime_policy,
-        tools=tools,
-        tool_choice=tool_choice,
-        **kwargs,
+        **{key: value for key, value in kwargs.items() if value is not None},
     )
+    if tools and hasattr(chat_model, "bind_tools"):
+        if tool_choice is not None:
+            chat_model = chat_model.bind_tools(tools, tool_choice=tool_choice)
+        else:
+            chat_model = chat_model.bind_tools(tools)
+    for piece in chat_model.stream(messages):
+        yield piece if isinstance(piece, AIMessageChunk) else AIMessageChunk(content=str(piece))
 
 
-def _invoke_with_token_escalation(
-    factory: Any,
-    candidate: ResolvedRoute,
-    messages: list[BaseMessage],
-    *,
-    runtime_policy: Any = None,
-    tools: list[dict[str, object]] | None = None,
-    tool_choice: str | None = None,
-    **kwargs: Any,
-) -> AIMessage:
-    rounds = int(getattr(runtime_policy, "token_escalation_rounds", 0) or 0)
-    token_budget = _int_kwarg(kwargs.get("max_tokens"), 1)
-    cap = _max_output_token_cap(candidate)
+def _as_answer(accumulated: AIMessageChunk | None) -> AIMessage:
+    """The pieces, read as the one message the rest of the gateway works with.
 
-    for attempt in range(rounds + 1):
-        build_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if value is not None
-        }
-        build_kwargs["max_tokens"] = token_budget
-        chat_model = factory.build(candidate, **build_kwargs)
-        if tools and hasattr(chat_model, "bind_tools"):
-            if tool_choice is not None:
-                chat_model = chat_model.bind_tools(tools, tool_choice=tool_choice)
-            else:
-                chat_model = chat_model.bind_tools(tools)
-        raw_response = chat_model.invoke(messages)
-        response: AIMessage = (
-            raw_response
-            if isinstance(raw_response, AIMessage)
-            else AIMessage(content=str(raw_response))
-        )
-        if not _is_truncated_response(response) or attempt >= rounds:
-            return response
-        next_budget = token_budget * 2
-        if cap is not None:
-            next_budget = min(next_budget, cap)
-        if next_budget <= token_budget:
-            return response
-        token_budget = next_budget
-
-    return response
+    A provider that yielded nothing still answered — with nothing — and the
+    candidate loop has to be able to say so rather than crash on the absence.
+    """
+    if accumulated is None:
+        return AIMessage(content="")
+    return cast(AIMessage, message_chunk_to_message(accumulated))
 
 
 def _supports_credential_provider(method: Any) -> bool:

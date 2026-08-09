@@ -113,6 +113,7 @@ from graph_agent.core.topology_projection import (
 )
 from graph_agent.core.topology_projection import phase_mode_for as phase_mode_for
 from graph_agent.core.topology_projection import read_subgraph_path as read_subgraph_path
+from graph_agent_gateway import answer_restarts_here
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
@@ -369,6 +370,15 @@ class _GatewayBackedLLMProvider:
             model = self._bound_model(request, metadata)
             accumulated: Any = None
             for chunk in model.stream(request.messages, stop=metadata.get("stop")):
+                if answer_restarts_here(chunk):
+                    # The gateway went back for a different answer — a bigger
+                    # budget, or another route. Accumulating across that would
+                    # hand the engine one message stitched from two attempts,
+                    # so the accumulation starts over and the engine is told to
+                    # do the same with what it has.
+                    accumulated = None
+                    yield LLMProviderChunk(restarts_answer=True)
+                    continue
                 accumulated = chunk if accumulated is None else accumulated + chunk
                 if chunk.content:
                     yield LLMProviderChunk(content=chunk.content)

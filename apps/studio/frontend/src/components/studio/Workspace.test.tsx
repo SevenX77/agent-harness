@@ -2246,7 +2246,6 @@ function runDetailWithGitStatus(
     events: [],
     final_context: null,
     artifacts: null,
-    report_path: null,
   }
 }
 

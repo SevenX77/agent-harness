@@ -341,6 +341,11 @@ export interface RunMetadata {
   compare_node_id?: string | null
   candidate_id?: string | null
   candidate_label?: string | null
+  // D8: absolute path of this run's `report.md`, or null when the run left none.
+  // Present on LIST rows and on the detail's metadata alike, so every surface
+  // reaches the report the same way. The report stays a pure projection of the
+  // sealed artifacts; this only tells a UI with no shell where to open it.
+  report_path?: string | null
 }
 
 export interface RunListResponse {
@@ -434,10 +439,6 @@ export interface RunDetail {
   events: EventEnvelope[]
   final_context: JsonObject | null
   artifacts: string[] | null
-  // Absolute path of this run's `report.md`, or null when the run left none.
-  // The report stays a pure projection of the sealed artifacts; this only tells
-  // a UI with no shell where to open it.
-  report_path: string | null
 }
 
 export interface ResumeValidityResponse {

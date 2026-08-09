@@ -127,7 +127,7 @@ class LocalJsonMetadataStore:
         metadata_path = root / metadata.run_id / "run_metadata.json"
         await asyncio.to_thread(metadata_path.parent.mkdir, parents=True, exist_ok=True)
         async with aiofiles.open(metadata_path, "w", encoding="utf-8") as file:
-            await file.write(metadata.model_dump_json())
+            await file.write(metadata.persisted_json())
 
     async def _workspace_dir(self, skill_id: str) -> Path | None:
         entry = await self.get_skill_index_entry(skill_id)

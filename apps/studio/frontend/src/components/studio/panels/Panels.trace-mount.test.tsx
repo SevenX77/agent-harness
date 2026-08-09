@@ -73,7 +73,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     const html = renderTimelinePanel({ runId: 'run-1', traceEvents: oneEvent, traceView: { source: 'live' } })
 
     // TracePanel-only marker: the event list publishes what it rendered.
-    expect(html).toContain('data-trace-event-count="1"')
+    expect(html).toContain('data-trace-step-count="1"')
     // Must NOT fall back to the run-history list while a run is streaming.
     expect(html).not.toContain('No runs recorded yet')
   })
@@ -82,7 +82,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     const html = renderTimelinePanel({ runId: null, traceEvents: [] })
 
     expect(html).toContain('No runs recorded yet')
-    expect(html).not.toContain('data-trace-event-count=')
+    expect(html).not.toContain('data-trace-step-count=')
   })
 
   it('fix A regression lock: a lingering runId with no viewed run still shows the list', () => {
@@ -93,7 +93,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     const html = renderTimelinePanel({ runId: 'run-1', traceEvents: oneEvent, traceView: null })
 
     expect(html).toContain('No runs recorded yet')
-    expect(html).not.toContain('data-trace-event-count=')
+    expect(html).not.toContain('data-trace-step-count=')
   })
 
   it('mounts a read-only TracePanel for a fetched historical run', () => {
@@ -115,7 +115,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
       },
     })
 
-    expect(html).toContain('data-trace-event-count="1"')
+    expect(html).toContain('data-trace-step-count="1"')
     expect(html).toContain('aria-label="Back to timeline"')
     // Read-only replay: no run actions are wired for a historical view.
     expect(html).not.toContain('Resume run from last checkpoint')
@@ -144,6 +144,6 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     expect(html).toContain('Blackboard transition')
     expect(html).toContain('draft')
     expect(html).toContain('review')
-    expect(html).not.toContain('data-trace-event-count=')
+    expect(html).not.toContain('data-trace-step-count=')
   })
 })

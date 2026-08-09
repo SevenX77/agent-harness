@@ -65,7 +65,6 @@ interface TracePanelProps {
     data: { label?: string; mode?: string; goldenState?: GoldenNodeState }
   } | null
   selectedEventId?: string | null
-  onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
   /**
    * viewed-run model (decision 2026-08-07): the trace is one view of the
@@ -301,7 +300,6 @@ export function TracePanel({
   activePhase = null,
   selectedNode = null,
   selectedEventId = null,
-  onSelectPrompt,
   onSelectEvent,
   onBack,
   runId = null,
@@ -592,7 +590,6 @@ export function TracePanel({
           followStream={live}
           streamKey={runId}
           focusPhase={focusPhase}
-          onSelectPrompt={onSelectPrompt}
           onSelectEvent={onSelectEvent}
         />
       </div>

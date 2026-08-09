@@ -74,7 +74,7 @@ const multiPendingHitlEvents = [
 
 function render(props: Partial<React.ComponentProps<typeof TracePanel>>): string {
   return renderToStaticMarkup(
-    <TracePanel traceLogs={events} onSelectPrompt={() => undefined} {...props} />,
+    <TracePanel traceLogs={events} {...props} />,
   )
 }
 
@@ -84,7 +84,7 @@ describe('TracePanel EventEnvelope contract', () => {
 
     const html = render({})
 
-    expect(html).toContain('data-trace-event-count="1"')
+    expect(html).toContain('data-trace-step-count="1"')
   })
 
   it('does not accept a raw CallbackEvent fixture as trace logs', () => {
@@ -192,19 +192,18 @@ describe('TracePanel focus behaviour (decision 2026-08-09 D2)', () => {
       <TracePanel
         traceLogs={twoPhaseEvents}
         selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
-        onSelectPrompt={() => undefined}
       />,
     )
-    expect(html).toContain('data-trace-event-count="3"')
+    expect(html).toContain('data-trace-step-count="3"')
     expect(html).not.toContain('2 / 3')
     expect(html).not.toContain('Linked to nodeA')
   })
 
   it('keeps every event while a phase is running', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={twoPhaseEvents} activePhase="nodeB" onSelectPrompt={() => undefined} />,
+      <TracePanel traceLogs={twoPhaseEvents} activePhase="nodeB" />,
     )
-    expect(html).toContain('data-trace-event-count="3"')
+    expect(html).toContain('data-trace-step-count="3"')
   })
 
   it('marks the focused node group so the list can scroll to it', () => {
@@ -212,7 +211,6 @@ describe('TracePanel focus behaviour (decision 2026-08-09 D2)', () => {
       <TracePanel
         traceLogs={twoPhaseEvents}
         selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).toContain('data-trace-group-header="nodeA"')
@@ -224,7 +222,6 @@ describe('TracePanel focus behaviour (decision 2026-08-09 D2)', () => {
       <TracePanel
         traceLogs={twoPhaseEvents}
         selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).not.toContain('Link trace to the focused node')
@@ -242,7 +239,7 @@ describe('TracePanel naming (decision 2026-08-09 D1)', () => {
 
   it('uses "Trace" as the empty-state aria-label', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} />,
+      <TracePanel traceLogs={[]} />,
     )
     expect(html).toContain('aria-label="Trace"')
     expect(html).not.toContain('Trace Timeline')
@@ -366,7 +363,7 @@ describe('TracePanel run actions (⋮ menu)', () => {
 
   it('drops the search and filter shell when there are no events, keeping the run identity', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} canResume onResume={() => undefined} live />,
+      <TracePanel traceLogs={[]} canResume onResume={() => undefined} live />,
     )
     expect(html).toContain('Waiting for run events')
     // Nothing to search or filter yet, so neither control is mounted...
@@ -434,7 +431,6 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
         selectedNode={goldenlessAgentNode}
         canCompare
         onPromoteNode={() => undefined}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).toContain('Promote node to golden')
@@ -452,7 +448,6 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
         selectedNode={{ id: 'nodeA', data: { label: 'Node A', mode: 'agent', goldenState: 'has-golden' } }}
         canCompare
         onPromoteNode={() => undefined}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).not.toContain('Promote node to golden')
@@ -465,7 +460,6 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
         selectedNode={goldenlessAgentNode}
         canCompare={false}
         onPromoteNode={() => undefined}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).not.toContain('Promote node to golden')
@@ -477,7 +471,6 @@ describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
         traceLogs={twoPhaseEvents}
         selectedNode={goldenlessAgentNode}
         canCompare
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).not.toContain('Promote node to golden')
@@ -510,7 +503,6 @@ describe('TracePanel LLM fallback summary chip (trace-observability F7)', () => 
     const html = renderToStaticMarkup(
       <TracePanel
         traceLogs={[...twoPhaseEvents, fallbackEnvelope(4, 'nodeA'), fallbackEnvelope(5, 'nodeB')]}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).toContain('2 LLM fallbacks')
@@ -521,7 +513,6 @@ describe('TracePanel LLM fallback summary chip (trace-observability F7)', () => 
     const html = renderToStaticMarkup(
       <TracePanel
         traceLogs={[...twoPhaseEvents, fallbackEnvelope(4, 'nodeA')]}
-        onSelectPrompt={() => undefined}
       />,
     )
     expect(html).toContain('1 LLM fallback')
@@ -530,7 +521,7 @@ describe('TracePanel LLM fallback summary chip (trace-observability F7)', () => 
 
   it('omits the chip entirely for a run without fallbacks', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={twoPhaseEvents} onSelectPrompt={() => undefined} />,
+      <TracePanel traceLogs={twoPhaseEvents} />,
     )
     expect(html).not.toContain('LLM fallback')
   })
@@ -563,7 +554,7 @@ describe('TracePanel model-compare tabs (PR2 node-compare)', () => {
 
   it('renders the tab strip even while a candidate run has no events yet', () => {
     const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} compareTabs={compareTabs} activeCandidateId="fast" live />,
+      <TracePanel traceLogs={[]} compareTabs={compareTabs} activeCandidateId="fast" live />,
     )
     // Empty-state still shows the candidate tabs so the user can switch.
     expect(html).toContain('aria-label="Model compare candidates"')
@@ -597,7 +588,6 @@ describe('failed run reason', () => {
         traceLogs={events}
         activePhase={null}
         selectedNode={null}
-        onSelectPrompt={() => undefined}
         runId="run-1"
         metadata={failedMetadata}
       />,
@@ -613,7 +603,6 @@ describe('failed run reason', () => {
         traceLogs={[]}
         activePhase={null}
         selectedNode={null}
-        onSelectPrompt={() => undefined}
         runId="run-1"
         metadata={failedMetadata}
       />,
@@ -628,7 +617,6 @@ describe('failed run reason', () => {
         traceLogs={events}
         activePhase={null}
         selectedNode={null}
-        onSelectPrompt={() => undefined}
         runId="run-1"
         metadata={{ ...failedMetadata, status: 'success', error: null }}
       />,

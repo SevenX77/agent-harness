@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
-import { traceEventId } from '../../hooks/useTraceSelection'
-import { RUN_SCOPE, eventPhase, isPredictTrace } from '../../utils/trace'
+import { RUN_SCOPE, isPredictTrace } from '../../utils/trace'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -11,8 +10,9 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from '../ui/message-scroller'
+import { buildTraceSteps, type TraceStepStatus } from '../../utils/trace-steps'
 import { initialTracePosition } from './trace-initial-scroll'
-import { TraceEventRow } from './TraceEventRow'
+import { TraceStepRow } from './TraceStepRow'
 
 interface TraceEventListProps {
   events: IndexedTraceEvent[]
@@ -35,7 +35,6 @@ interface TraceEventListProps {
    * 2026-08-09 D2).
    */
   focusPhase?: string | null
-  onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
@@ -54,12 +53,14 @@ export function TraceEventList({
   followStream = false,
   streamKey = null,
   focusPhase = null,
-  onSelectPrompt,
   onSelectEvent,
 }: TraceEventListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState<HTMLElement | null>(null)
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  // Only DELIBERATE toggles are stored. Everything else follows the step's own
+  // status, so a running step opens itself and folds when it finishes without
+  // ever overruling a reader who said otherwise (decision 2026-08-09 D4).
+  const [overriddenExpansion, setOverriddenExpansion] = useState<Map<string, boolean>>(new Map())
 
   useEffect(() => {
     const found = containerRef.current?.querySelector<HTMLElement>('[data-slot="message-scroller-viewport"]') ?? null
@@ -90,18 +91,20 @@ export function TraceEventList({
   }, [focusPhase, events.length])
 
   const predictTrace = isPredictTrace(events.map(({ event }) => event))
+  const steps = buildTraceSteps(events)
   const selectedPosition = selectedEventId
-    ? events.findIndex(({ event, index }) => traceEventId(event, index) === selectedEventId)
+    ? steps.findIndex((step) => step.key === selectedEventId)
     : -1
 
+  const isExpanded = (key: string, status: TraceStepStatus): boolean =>
+    overriddenExpansion.get(key) ?? status === 'running'
+
   const rowElement = (position: number): HTMLElement | null => {
-    const target = events[position]
+    const target = steps[position]
     if (!target || !containerRef.current) {
       return null
     }
-    return containerRef.current.querySelector<HTMLElement>(
-      `#trace-event-${CSS.escape(traceEventId(target.event, target.index))}`,
-    )
+    return containerRef.current.querySelector<HTMLElement>(`#trace-event-${CSS.escape(target.key)}`)
   }
 
   useEffect(() => {
@@ -114,46 +117,42 @@ export function TraceEventList({
   }, [selectedPosition])
 
   const focusEventAt = (position: number) => {
-    const target = events[position]
+    const target = steps[position]
     if (!target) {
       return
     }
     rowElement(position)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    onSelectEvent?.(target.index, target.event)
+    onSelectEvent?.(target.start.index, target.start.event)
   }
 
-  const toggleExpanded = (eventId: string) => {
-    setExpandedIds((current) => {
-      const next = new Set(current)
-      if (next.has(eventId)) {
-        next.delete(eventId)
-      } else {
-        next.add(eventId)
-      }
+  const toggleExpanded = (key: string, status: TraceStepStatus) => {
+    setOverriddenExpansion((current) => {
+      const next = new Map(current)
+      next.set(key, !isExpanded(key, status))
       return next
     })
   }
 
   const toggleExpandedAt = (position: number) => {
-    const target = events[position]
+    const target = steps[position]
     if (!target) {
       return
     }
-    toggleExpanded(traceEventId(target.event, target.index))
-    onSelectEvent?.(target.index, target.event)
+    toggleExpanded(target.key, target.status)
+    onSelectEvent?.(target.start.index, target.start.event)
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (events.length === 0) {
+    if (steps.length === 0) {
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       const direction = event.key === 'ArrowDown' ? 1 : -1
-      const fallback = direction > 0 ? 0 : events.length - 1
+      const fallback = direction > 0 ? 0 : steps.length - 1
       const nextPosition = selectedPosition < 0
         ? fallback
-        : Math.min(events.length - 1, Math.max(0, selectedPosition + direction))
+        : Math.min(steps.length - 1, Math.max(0, selectedPosition + direction))
       focusEventAt(nextPosition)
     }
     if (event.key === 'Enter' || event.key === ' ') {
@@ -173,26 +172,25 @@ export function TraceEventList({
             tabIndex={0}
             onKeyDown={handleKeyDown}
             data-predict-trace={predictTrace ? 'true' : undefined}
-            data-trace-event-count={events.length}
+            data-trace-step-count={steps.length}
             className={`pr-1 outline-none focus:ring-2 focus:ring-ring/50 ${
               predictTrace ? 'border-l border-warning-border/50 pl-2' : ''
             }`}
           >
             <MessageScrollerContent className="block h-max min-h-0 gap-0">
               <div className="ml-3 space-y-0.5 border-l border-border py-1">
-                {events.map(({ event, index }, position) => {
-                  const eventId = traceEventId(event, index)
-                  const phase = eventPhase(event)
-                  // A node's name belongs to the RUN of events it owns, not to
+                {steps.map((step, position) => {
+                  const phase = step.phase
+                  // A node's name belongs to the RUN of steps it owns, not to
                   // each row: eight consecutive `segment` events used to print
                   // `SEGMENT` eight times (decision 2026-08-08 D3).
-                  const opensGroup = position === 0 || eventPhase(events[position - 1].event) !== phase
+                  const opensGroup = position === 0 || steps[position - 1].phase !== phase
                   return (
                     <div
-                      key={`${event.timestamp}-${index}`}
-                      id={`trace-event-${eventId}`}
+                      key={step.key}
+                      id={`trace-event-${step.key}`}
                       role="option"
-                      aria-selected={selectedEventId === eventId}
+                      aria-selected={selectedEventId === step.key}
                     >
                       {opensGroup ? (
                         <div
@@ -205,14 +203,12 @@ export function TraceEventList({
                           {phase === RUN_SCOPE ? 'Run' : phase}
                         </div>
                       ) : null}
-                      <TraceEventRow
-                        event={event}
-                        index={index}
-                        eventId={eventId}
-                        selected={selectedEventId === eventId}
-                        expanded={expandedIds.has(eventId)}
-                        onToggleExpanded={() => toggleExpanded(eventId)}
-                        onSelectPrompt={onSelectPrompt}
+                      <TraceStepRow
+                        step={step}
+                        eventId={step.key}
+                        selected={selectedEventId === step.key}
+                        expanded={isExpanded(step.key, step.status)}
+                        onToggleExpanded={() => toggleExpanded(step.key, step.status)}
                         onSelectEvent={onSelectEvent}
                       />
                     </div>

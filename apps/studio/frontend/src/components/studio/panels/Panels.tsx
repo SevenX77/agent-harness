@@ -61,7 +61,6 @@ interface PanelsProps {
   lintErrors?: LintError[] | null
   traceEvents?: EventEnvelope[]
   activeTracePhase?: string | null
-  onSelectTracePrompt?: (index: number) => void
   traceCanCompare?: boolean
   traceCompareLoading?: boolean
   onCompareToGolden?: () => void
@@ -123,7 +122,6 @@ export function Panels({
   lintErrors,
   traceEvents,
   activeTracePhase,
-  onSelectTracePrompt,
   traceCanCompare,
   traceCompareLoading,
   onCompareToGolden,
@@ -257,7 +255,6 @@ export function Panels({
           traceLogs={traceEvents ?? []}
           activePhase={activeTracePhase ?? null}
           selectedNode={selectedNode}
-          onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
           onSelectEvent={onSelectTraceEvent}
           selectedEventId={traceSelectedEventId}
           onBack={onCloseTraceView}
@@ -286,7 +283,6 @@ export function Panels({
           traceLogs={traceEvents ?? []}
           activePhase={null}
           selectedNode={selectedNode}
-          onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
           onSelectEvent={onSelectTraceEvent}
           selectedEventId={traceSelectedEventId}
           onBack={onCloseTraceView}

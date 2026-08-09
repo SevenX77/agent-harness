@@ -4,11 +4,18 @@ import { isTauriRuntime } from "@/config/runtime"
 import { listWorkspaceDir, type WorkspaceDirEntry } from "@/lib/tauri"
 import type { FileMeta } from "../file-types"
 import { fileFromDetail, languageForPath } from "./panel-files"
+import { isRunListing, orderRunDirectories } from "./run-directory-order"
 
 export interface AssetTreeEntry {
   name: string
   path: string
   kind: "file" | "dir"
+  /**
+   * Last modification time in epoch milliseconds; absent for the SkillDetail
+   * fallback tree, which is built from an API payload with no filesystem
+   * timestamps. Only the run listings order by it (see `run-directory-order`).
+   */
+  modifiedMs?: number
   file?: FileMeta
 }
 
@@ -92,8 +99,13 @@ function sortNativeEntries(entries: WorkspaceDirEntry[]): WorkspaceDirEntry[] {
   })
 }
 
+/**
+ * Wrap already-ordered entries. It deliberately does NOT sort: order is the
+ * producer's decision (the SkillDetail fallback is alphabetical, a native run
+ * listing is newest-first), and a re-sort here silently overrode it.
+ */
 function createReadySnapshot(entries: AssetTreeEntry[]): DirectoryTreeState {
-  return { status: "ready", entries: sortEntries(entries) }
+  return { status: "ready", entries }
 }
 
 function fallbackSnapshotsFromSkillDetail(
@@ -152,7 +164,7 @@ function fallbackSnapshotsFromSkillDetail(
 
   const snapshots: DirectorySnapshots = {}
   for (const [directoryPath, entries] of entryMaps.entries()) {
-    snapshots[directoryPath] = createReadySnapshot([...entries.values()])
+    snapshots[directoryPath] = createReadySnapshot(sortEntries([...entries.values()]))
   }
   return snapshots
 }
@@ -176,12 +188,13 @@ async function readNativeDirectory({
 }): Promise<AssetTreeEntry[]> {
   const directoryPath = normalizeDirectoryPath(relativeDir)
   const entries = sortNativeEntries(await listWorkspaceDir(workspaceRoot, directoryPath || "."))
-  return entries.map((entry) => {
+  const treeEntries = entries.map((entry) => {
     const path = joinRelativePath(directoryPath, entry.name)
     const treeEntry: AssetTreeEntry = {
       name: entry.name,
       path,
       kind: entry.kind,
+      modifiedMs: entry.modifiedMs ?? undefined,
     }
     if (entry.kind === "file") {
       treeEntry.file = createFileMeta({
@@ -194,6 +207,9 @@ async function readNativeDirectory({
     }
     return treeEntry
   })
+  // The runs roots read newest-first; everything else stays alphabetical, which
+  // is what a reader wants when they are looking for a file they can name.
+  return isRunListing(directoryPath) ? orderRunDirectories(treeEntries) : treeEntries
 }
 
 export function useWorkspaceDirectoryTree({

@@ -925,9 +925,21 @@ pub fn move_workspace_path_impl(workspace_root: &str, from: &str, to: &str) -> R
 }
 
 #[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceDirEntry {
     pub name: String,
     pub kind: String,
+    /// Last modification time, epoch milliseconds. `None` when the platform or
+    /// filesystem does not report one — callers then fall back to name order
+    /// rather than inventing a timestamp.
+    ///
+    /// Read from the `metadata()` call the listing already makes to decide
+    /// file-vs-dir, so it costs no extra syscall. Run directories are named
+    /// after the moment they started, and the UI marks the newest of them
+    /// (decision 2026-08-09 D13, replacing the deleted `runs/latest/` mirror);
+    /// a name is a claim about when a run began, this is the filesystem's own
+    /// answer about when it last changed.
+    pub modified_ms: Option<u64>,
 }
 
 /// List entries directly under `<workspace_root>/<relative_dir>` (non-recursive).
@@ -966,6 +978,11 @@ pub fn list_workspace_dir_impl(
         entries.push(WorkspaceDirEntry {
             name,
             kind: kind.to_string(),
+            modified_ms: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|since_epoch| since_epoch.as_millis() as u64),
         });
     }
     // Deterministic order so callers (and tests) don't rely on filesystem
@@ -2436,22 +2453,41 @@ mod tests {
         // Sort guarantees deterministic order for callers and tests; the
         // platform-native iteration order is not stable.
         assert_eq!(
-            entries,
+            entries
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.kind.clone()))
+                .collect::<Vec<_>>(),
             vec![
-                WorkspaceDirEntry {
-                    name: "a.json".to_string(),
-                    kind: "file".to_string()
-                },
-                WorkspaceDirEntry {
-                    name: "b.json".to_string(),
-                    kind: "file".to_string()
-                },
-                WorkspaceDirEntry {
-                    name: "sub".to_string(),
-                    kind: "dir".to_string()
-                },
+                ("a.json".to_string(), "file".to_string()),
+                ("b.json".to_string(), "file".to_string()),
+                ("sub".to_string(), "dir".to_string()),
             ]
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_workspace_dir_reports_each_entry_modification_time() {
+        // D13 replaced the `runs/latest/` mirror with a UI badge on the newest
+        // run directory, so the listing has to say WHEN each entry last changed;
+        // without it the UI can only guess from the name.
+        let root = temp_root("list-mtime");
+        std::fs::create_dir_all(root.join("older")).unwrap();
+        std::fs::write(root.join("note.md"), "hi").unwrap();
+
+        let entries =
+            list_workspace_dir_impl(root.to_str().unwrap(), ".").expect("list workspace root");
+
+        assert_eq!(entries.len(), 2);
+        for entry in &entries {
+            let modified = entry
+                .modified_ms
+                .unwrap_or_else(|| panic!("{} reported no modification time", entry.name));
+            // Sanity, not a clock assertion: anything created just now is after
+            // 2020-01-01 (1577836800000ms) and before the year 3000.
+            assert!(modified > 1_577_836_800_000, "{} looks unset", entry.name);
+            assert!(modified < 32_503_680_000_000, "{} looks impossible", entry.name);
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

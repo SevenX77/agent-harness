@@ -5,6 +5,13 @@ ability to report progress used to end. What replaces it has to keep the answer
 identical while letting the slices out one at a time — so this pins both: more
 than one slice arrives, and the closing slice still carries everything the
 engine bills and routes on.
+
+The slices here are real ``AIMessageChunk``s. Folding them is LangChain's
+addition, not the adapter's own arithmetic, and a stand-in that merges by some
+other rule proves the adapter against a provider that does not exist: the first
+version of this file used one that let the last slice overwrite usage, and it
+stayed green while silently disagreeing with every provider that reports the
+prompt count up front.
 """
 
 from __future__ import annotations
@@ -12,36 +19,35 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.adapters.engine import _GatewayBackedLLMProvider
-from graph_agent.core.llm_provider import LLMProviderRequest
+from graph_agent.core.llm_provider import LLMProviderChatModel, LLMProviderRequest
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 
-class _Chunk:
-    """A stand-in for AIMessageChunk: addable, and metadata lands on the last."""
+def _chunk(
+    content: str,
+    *,
+    tool_call_chunks: list[Any] | None = None,
+    usage_metadata: Any = None,
+    response_metadata: dict[str, Any] | None = None,
+) -> AIMessageChunk:
+    return AIMessageChunk(
+        content=content,
+        tool_call_chunks=tool_call_chunks or [],
+        usage_metadata=usage_metadata,
+        response_metadata=response_metadata or {},
+    )
 
-    def __init__(
-        self,
-        content: str,
-        *,
-        tool_calls: list[Any] | None = None,
-        usage_metadata: dict[str, int] | None = None,
-        response_metadata: dict[str, Any] | None = None,
-    ) -> None:
-        self.content = content
-        self.tool_calls = tool_calls or []
-        self.usage_metadata = usage_metadata
-        self.response_metadata = response_metadata or {}
 
-    def __add__(self, other: _Chunk) -> _Chunk:
-        return _Chunk(
-            self.content + other.content,
-            tool_calls=self.tool_calls + other.tool_calls,
-            usage_metadata=other.usage_metadata or self.usage_metadata,
-            response_metadata={**self.response_metadata, **other.response_metadata},
-        )
+def _usage(input_tokens: int, output_tokens: int) -> dict[str, int]:
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
 
 
 class _StreamingResolver:
-    def __init__(self, chunks: list[_Chunk]) -> None:
+    def __init__(self, chunks: list[AIMessageChunk]) -> None:
         self._chunks = chunks
         self.streamed_stop: Any = "unset"
 
@@ -65,7 +71,7 @@ def _request() -> LLMProviderRequest:
 
 
 def test_the_answer_arrives_in_more_than_one_slice() -> None:
-    resolver = _StreamingResolver([_Chunk("Hel"), _Chunk("lo, "), _Chunk("world")])
+    resolver = _StreamingResolver([_chunk("Hel"), _chunk("lo, "), _chunk("world")])
 
     slices = list(_GatewayBackedLLMProvider(resolver).stream(_request()))
 
@@ -76,14 +82,15 @@ def test_the_answer_arrives_in_more_than_one_slice() -> None:
 
 
 def test_the_closing_slice_carries_what_the_run_bills_and_routes_on() -> None:
-    tool_call = {"name": "lookup", "args": {}, "id": "call-1", "type": "tool_call"}
     resolver = _StreamingResolver(
         [
-            _Chunk("thinking"),
-            _Chunk(
+            _chunk("thinking"),
+            _chunk(
                 "",
-                tool_calls=[tool_call],
-                usage_metadata={"input_tokens": 7, "output_tokens": 3},
+                tool_call_chunks=[
+                    {"name": "lookup", "args": "{}", "id": "call-1", "index": 0}
+                ],
+                usage_metadata=_usage(7, 3),
                 response_metadata={"finish_reason": "tool_use"},
             ),
         ]
@@ -93,8 +100,8 @@ def test_the_closing_slice_carries_what_the_run_bills_and_routes_on() -> None:
 
     closing = slices[-1]
     assert closing.content == ""
-    assert closing.metadata["tool_calls"] == [tool_call]
-    assert closing.metadata["usage_metadata"] == {"input_tokens": 7, "output_tokens": 3}
+    assert [call["name"] for call in closing.metadata["tool_calls"]] == ["lookup"]
+    assert closing.metadata["usage_metadata"] == _usage(7, 3)
     assert closing.metadata["finish_reason"] == "tool_use"
     assert closing.metadata["model_name"] == "claude-opus-5"
 
@@ -110,10 +117,10 @@ def test_usage_reported_in_pieces_is_billed_as_a_whole() -> None:
     """
     resolver = _StreamingResolver(
         [
-            _Chunk("", usage_metadata={"input_tokens": 7, "output_tokens": 0}),
-            _Chunk("Hel"),
-            _Chunk("lo"),
-            _Chunk("", usage_metadata={"input_tokens": 0, "output_tokens": 3}),
+            _chunk("", usage_metadata=_usage(7, 0)),
+            _chunk("Hel"),
+            _chunk("lo"),
+            _chunk("", usage_metadata=_usage(0, 3)),
         ]
     )
 
@@ -122,6 +129,37 @@ def test_usage_reported_in_pieces_is_billed_as_a_whole() -> None:
     usage = slices[-1].metadata["usage_metadata"]
     assert usage["input_tokens"] == 7, "the prompt was counted before the first word arrived"
     assert usage["output_tokens"] == 3
+
+
+def test_what_the_run_bills_survives_the_trip_back_to_one_message() -> None:
+    """The slices exist for the audience; the run's metrics still read a message.
+
+    This is the seam streaming moved: usage used to come off a single finished
+    response, and now it has to survive being split, merged and handed back
+    through the Port. A provider that streams perfectly but arrives with no
+    usage on the message reports every run as costing nothing.
+    """
+    resolver = _StreamingResolver(
+        [
+            _chunk("", usage_metadata=_usage(11, 0)),
+            _chunk("Hel"),
+            _chunk("lo"),
+            _chunk("", usage_metadata=_usage(0, 5)),
+        ]
+    )
+    model = LLMProviderChatModel(
+        provider=_GatewayBackedLLMProvider(resolver),
+        role="graph_agent",
+        phase_name="draft",
+    )
+
+    answer = model.invoke([])
+
+    assert isinstance(answer, AIMessage)
+    assert answer.content == "Hello"
+    assert answer.usage_metadata is not None
+    assert answer.usage_metadata["input_tokens"] == 11
+    assert answer.usage_metadata["output_tokens"] == 5
 
 
 def test_a_model_that_yields_nothing_still_closes_the_answer() -> None:

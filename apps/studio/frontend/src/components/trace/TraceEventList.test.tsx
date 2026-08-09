@@ -67,3 +67,52 @@ describe('TraceEventList step expansion (decision 2026-08-09 D4)', () => {
     expect(html.match(/aria-expanded="false"/g)).toHaveLength(1)
   })
 })
+
+// D8 (decision 2026-08-09): "运行结束后,Trace 末尾自然长出一条终结条目
+// (结论 / 耗时 / token / 报告链接)。报告是这次运行的产物,产物出现在过程末尾。"
+describe('TraceEventList terminal entry', () => {
+  const outcome = {
+    status: 'success' as const,
+    wallTimeSec: 12.5,
+    totalTokens: 115117,
+    reportPath: 'D:/skills/demo/.workspace/runs/run-1/report.md',
+  }
+
+  function markupWithOutcome(
+    entry: (Omit<typeof outcome, 'reportPath'> & { reportPath: string | null }) | null,
+  ): string {
+    return renderToStaticMarkup(
+      <TraceEventList events={indexedEvents(2)} selectedEventId={null} outcome={entry} />,
+    )
+  }
+
+  it('states the conclusion with its duration, tokens and report link', () => {
+    const html = markupWithOutcome(outcome)
+
+    expect(html).toContain('data-trace-outcome="success"')
+    expect(html).toContain('Run succeeded')
+    expect(html).toContain('12.5s')
+    expect(html).toContain('115,117 tokens')
+    expect(html).toContain('data-trace-outcome-report')
+    expect(html).toContain('Open run report')
+  })
+
+  it('puts it AFTER the last step — a product comes at the end of the process', () => {
+    const html = markupWithOutcome(outcome)
+
+    expect(html.indexOf('data-trace-outcome=')).toBeGreaterThan(html.lastIndexOf('role="option"'))
+  })
+
+  it('offers no report link for a run that left no report', () => {
+    const html = markupWithOutcome({ ...outcome, reportPath: null })
+
+    expect(html).toContain('data-trace-outcome="success"')
+    expect(html).not.toContain('Open run report')
+  })
+
+  it('renders nothing extra while the run is still going', () => {
+    const html = markupWithOutcome(null)
+
+    expect(html).not.toContain('data-trace-outcome')
+  })
+})

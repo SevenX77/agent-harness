@@ -599,7 +599,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         runId: string
         metadata: RunMetadata
         events: EventEnvelope[]
-        reportPath: string | null
       }
     | null
   >(null)
@@ -786,11 +785,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // same (skill, run) de-dupe key as the history refresh and guard the async race:
   // if the run changes while the fetch is in flight, the stale result is dropped.
   const archiveFeedbackRunRef = useRef<string | null>(null)
-  // A run's report.md only exists once the run has sealed, so the LIVE view
-  // learns its path from the same terminal-detail fetch that reports the
-  // archive status. Kept with its run id so a finished run's report can never
-  // be offered as the next run's (decision 2026-08-08 D5).
-  const [liveRunReport, setLiveRunReport] = useState<{ runId: string; path: string | null } | null>(null)
+  // A run's sealed record — token totals, report path — only exists once the
+  // backend has finalized it, so the LIVE view learns it from the same terminal
+  // fetch that reports the archive status. Kept with its run id so a finished
+  // run's numbers can never be shown as the next run's (decision 2026-08-08 D5,
+  // widened from report path to the whole record by 2026-08-09 D8).
+  const [liveRunRecord, setLiveRunRecord] = useState<{ runId: string; metadata: RunMetadata } | null>(null)
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({
       skillId: currentSkillId,
@@ -810,7 +810,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         if (cancelled || !detail) {
           return
         }
-        setLiveRunReport({ runId: finishedRunId, path: detail.report_path })
+        setLiveRunRecord({ runId: finishedRunId, metadata: detail.metadata })
         // The run row was projected at start with status "running"; project the
         // terminal metadata so the Timeline list is truthful when the user goes
         // back to it (single backend truth, no extra revalidation round-trip).
@@ -2429,7 +2429,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         runId: run.run_id,
         metadata: detail.metadata,
         events: detail.events,
-        reportPath: detail.report_path,
       })
     } catch (error) {
       toast.error(`Failed to load run trace: ${errorMessage(error)}`)
@@ -2749,7 +2748,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onSelectTraceEvent={(index, event) => traceSelection.selectEvent(event, index)}
         traceCanResume={Boolean(runId)}
         traceResumeLoading={resumeLoading}
-        traceReportPath={liveRunReport?.runId === runId ? liveRunReport.path : null}
+        traceLiveMetadata={liveRunRecord?.runId === runId ? liveRunRecord.metadata : null}
         onResumeRun={handleResume}
         onResumeNode={runId ? handleResumeNode : undefined}
         onSubmitHitlResponse={handleSubmitHitlResponse}

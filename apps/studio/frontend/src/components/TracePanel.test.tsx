@@ -308,7 +308,6 @@ describe('TracePanel run actions (⋮ menu)', () => {
     onResume: () => undefined,
     canCompare: false,
     compareLoading: false,
-    reportPath: null,
   }
 
   it('offers Resume, enabled, when the run can be resumed', () => {
@@ -335,20 +334,22 @@ describe('TracePanel run actions (⋮ menu)', () => {
       resumeLoading: false,
       canCompare: false,
       compareLoading: false,
-      reportPath: null,
     })).toEqual([])
   })
 
-  it('offers the run report exactly when the run left one on disk', () => {
-    const withReport = traceRunActions({
-      canResume: false,
+  // D8 relocated the report out of this menu and into the trace's terminal
+  // entry + the run list row, so the menu must no longer offer it at all.
+  it('never offers the run report here — it belongs at the end of the trace', () => {
+    const actions = traceRunActions({
+      canResume: true,
       resumeLoading: false,
-      canCompare: false,
+      onResume: () => undefined,
+      canCompare: true,
       compareLoading: false,
-      reportPath: 'D:/runs/run-1/report.md',
+      onCompareToGolden: () => undefined,
+      onPromoteToGolden: () => undefined,
     })
-    expect(withReport.map((action) => action.key)).toEqual(['report'])
-    expect(withReport[0].label).toBe('Open run report')
+    expect(actions.map((action) => action.key)).not.toContain('report')
   })
 
   it('renders the overflow trigger when at least one action is wired', () => {

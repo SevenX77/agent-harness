@@ -71,8 +71,13 @@ interface PanelsProps {
   /** The trace row the user last opened, so it stays marked as they scroll. */
   traceSelectedEventId?: string | null
   onSelectTraceEvent?: (index: number, event: CallbackEvent) => void
-  /** Path of the LIVE run's `report.md` once it has sealed one; null before. */
-  traceReportPath?: string | null
+  /**
+   * The LIVE run's sealed record once the backend has finalized it; null before.
+   * It carries the token total and the report path the streamed events cannot
+   * (decision 2026-08-09 D8), and reaches the panel as the same `metadata` a
+   * historical view passes, so both views build their terminal entry alike.
+   */
+  traceLiveMetadata?: RunMetadata | null
   onResumeRun?: () => void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
@@ -130,7 +135,7 @@ export function Panels({
   traceResumeLoading,
   traceSelectedEventId = null,
   onSelectTraceEvent,
-  traceReportPath = null,
+  traceLiveMetadata = null,
   onResumeRun,
   onResumeNode,
   onSubmitHitlResponse,
@@ -267,7 +272,7 @@ export function Panels({
           onPromoteNode={onPromoteNode}
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
-          reportPath={traceReportPath}
+          metadata={traceLiveMetadata}
           onResume={onResumeRun}
           hitlSubmitting={traceResumeLoading}
           onSubmitHitlResponse={onSubmitHitlResponse}
@@ -288,7 +293,6 @@ export function Panels({
           onBack={onCloseTraceView}
           runId={traceView.runId}
           metadata={traceView.metadata}
-          reportPath={traceView.reportPath}
         />
       )
     }

@@ -240,7 +240,7 @@ def test_run_detail_points_at_the_report_so_the_ui_can_open_it(tmp_path: Path, m
 
     detail = RunManager().get_run_detail(skill_id="demo.skill", run_id=run_dir.name)
 
-    assert detail.report_path == str(run_dir / "report.md")
+    assert detail.metadata.report_path == str(run_dir / "report.md")
 
 
 def test_run_detail_reports_no_path_when_the_run_left_no_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,4 +250,4 @@ def test_run_detail_reports_no_path_when_the_run_left_no_report(tmp_path: Path, 
 
     detail = RunManager().get_run_detail(skill_id="demo.skill", run_id=run_dir.name)
 
-    assert detail.report_path is None
+    assert detail.metadata.report_path is None

@@ -41,7 +41,7 @@ def test_llm_provider_contract_import_does_not_pull_gateway_concrete_module(
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     module = importlib.import_module("graph_agent.core.llm_provider")
 
-    assert callable(getattr(module.LLMProvider, "invoke", None))
+    assert callable(getattr(module.LLMProvider, "stream", None))
     assert blocked_imports == []
 
 

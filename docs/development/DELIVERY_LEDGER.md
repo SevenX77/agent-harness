@@ -159,6 +159,42 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 | W3-2 | 批量 run 挂线(client 函数 + 挂载点;组件/类型/报告模板已就绪) | 待开工 | 后端 `routers/runs.py:92/316`;孤儿组件 `components/history/BatchSummary.tsx` |
 | W3-3 | fork 按钮 + delete skill 接线(消灭 7 处死胡同文案) | 待开工 | 后端 `routers/skills.py:953/985`;文案位 `components/studio/Workspace.tsx:1220` 等 |
 
+## 并行工作线:Trace 流式化(决议 2026-08-09)
+
+> 与上面「Copilot 闭环」冲刺**并行**,不共享它的验收判据。本线要解决的是同一件事的另一半:
+> copilot 闭环让 agent 能把旅程走完,本线让人在旅程进行**当中**看得见正在发生什么 ——
+> Trace 面板此前只是运行结束后的账本。
+
+### 决议正本
+
+- `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` ——
+  Trace 信息架构 + 步骤流式呈现 + run 目录布局(D1-D14)。
+- `docs/design/2026-08-09-streaming-tracing-architecture-decision.md` ——
+  流式 tracing 架构(§1 事实 B1-B11、§2 决策 D1-D8、§3 验收判据 1-13、§6 实施切分 S1-S5)。
+  它**取代**前一份 §4「明确不做」的第一条(LLM 输出逐 token 流式);前一份其余条目全部有效。
+  **交付闸门(用户裁决 2026-08-09)**:S1+S2 完成后由实施者自评,无问题直接推进 S3-S5,不再逐段审批。
+
+### 第一阶段 · Trace 信息架构与呈现(已收口)
+
+| # | 项 | 状态 | 关键坐标 |
+|---|---|---|---|
+| T1 | Trace 面板信息架构改造:单一 Trace 区域、可读 run id、焦点滚动而非隐藏、搜索与筛选、rehearsal 抽屉、进行中步骤、终态收敛、报告独立行、最新 run 用徽章而非拷贝 `latest/`、区域自称统一、predict 失败也留账、流地址与 API 同源、predict 收尾与 run 一致 | ✅ 已合并(#653-#667,15 个 PR) | 决议 D1-D14;面 `apps/studio/frontend/src/components/studio/trace/` |
+
+### 第二阶段 · 流式 tracing(S1-S5,当前推进中)
+
+| # | 项 | 状态 | 关键坐标 |
+|---|---|---|---|
+| S1 | `LLMProvider` Port 改流式:`stream()` 成为唯一取答案的方式(`invoke` 删除),`LLMProviderChatModel._generate` 改为消费切片再折叠,Studio adapter 直通 gateway chat model 的流 | ✅ 已合并(#669) | `packages/graph-agent/src/graph_agent/core/llm_provider.py`;`apps/studio/backend/app/core/adapters/engine.py` 的 `_GatewayBackedLLMProvider.stream` |
+| S1-a | S1 自评补票:测试里手搓的切片合并规则(后来的覆盖先来的)与真实 `AIMessageChunk`(相加)不符,换成真类型并补回程用例 | ✅ 已合并(#671) | `apps/studio/backend/tests/core/adapters/test_llm_provider_streaming.py`。核对结论:openai 兼容协议的 `stream_usage` 由 gateway `provider_profiles.py:20-21` 显式钉住,不依赖 langchain 那个「仅 base_url 为空才自动打开」的默认(`langchain_openai/chat_models/base.py:1144-1163`),所以流式下 token 用量不丢 |
+| S2 | 新建 `graph_agent/tracing/` 步骤单出口,收编 B8 的发射点;对外事件契约不变 | ✅ 已合并(#670) | `packages/graph-agent/src/graph_agent/tracing/steps.py`(`StepReporter` / `ToolCallStep`)。同 PR 订正了决议 B8 的事实描述,并把漏列的第四处手搓分发(`core/callback_bridge.py:216-236`,含一个违反 no-backward-compat 的 `except TypeError` 旧签名降级垫片)归给 S3 |
+| S3 | ①agent 路径补发 LLM 步骤开始信号,使 `prompt_captured` 两条路径都成立;②结束帧承载模型最终产出,消除 agent 路径与 legacy 路径的载荷不一致;③`llm_call.response_data` 改必填;④删 `llm_call.messages` 字段及前端回退分支;⑤增量帧契约(正文增量 / 推理增量,每帧带所属步骤标识)。**五项同一个 PR,不拆分** | 待开工 | `core/graph_assembler.py:2131-2132`(agent 路径不装产出)与 `core/callback_bridge.py:154-160`(legacy 路径装);前端回退分支 `TraceStepRow.tsx:206-208`。另需在本 PR 回写两处决议偏差:D2 第三层(`agent_graph.invoke`)不改的理由、B8 第四处的处置 |
+| S4 | 传输分道与背压:增量帧走独立跨进程通道与 WebSocket 通道,不占 seq、不落盘 | 待开工 | `apps/studio/backend/app/services/run_manager.py` 的事件队列与 seq 编号 |
+| S5 | 前端在步骤条目内逐字追加 | 待开工 | `apps/studio/frontend/src/components/studio/trace/` |
+
+**过哪道门算完**:决议 §3 的 13 条验收判据。
+**已知需同步的操作**:S1/S2/S3 都改 `packages/graph-agent` 源码,合并后必须按 AGENTS.md
+「Workflow Pipeline」第 7 条重建 vendor 快照,否则运行中的桌面 app 仍跑旧引擎。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

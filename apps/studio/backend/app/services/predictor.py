@@ -93,6 +93,7 @@ class PredictorService:
         from app.core.adapters.http_transport import StudioAdapterError
 
         predict_run_id = new_predict_run_id()
+        predict_started_at = datetime.now(UTC)
         workspace_dir = workspace_dir_for(skill_dir)
         # 状态对等(决议 2026-08-03 D3):predict 也流事件, 所以它开跑同样要广播——
         # 否则 copilot 发起的 predict 不会把人带到 Trace 面板, 而人自己点会。
@@ -102,6 +103,7 @@ class PredictorService:
             outcome="started",
             run_id=predict_run_id,
         )
+        accounted = False
         event_subscriber: Callable[[CallbackEvent], None] | None = None
         if getattr(adapter, "transport", None) == "in_process":
             run_manager.register_transient_predict_run(
@@ -145,13 +147,14 @@ class PredictorService:
             status = export_predict_diagnostics(result).status
             self._persist_predict_result(
                 skill_dir,
-                result.run_id,
+                predict_run_id,
                 result,
                 status=status,
                 content_hash=art_ref["content_hash"],
                 artifact_ref=art_ref,
                 runtime_config=runtime_config,
             )
+            accounted = True
             publish_skill_gate_from_thread(
                 skill_id=skill_id,
                 gate="predict",
@@ -160,6 +163,19 @@ class PredictorService:
             )
             return cast(RunResult, result)
         finally:
+            # A predict leaves its account HOWEVER it ends. The paths above that
+            # raise used to return without one, which left the run's trace.jsonl
+            # sitting in a directory no reader could open: the transient record
+            # is gone, `_replay_finished_run` refuses a directory with no
+            # `run_metadata.json`, and the panel waits for events that already
+            # happened (observed 2026-08-09 — PM: "predict完,timeline里面什么都没").
+            if not accounted:
+                run_manager.record_predict_outcome(
+                    run_id=predict_run_id,
+                    run_dir=predicts_root(workspace_dir) / predict_run_id,
+                    status="failed",
+                    started_at=predict_started_at,
+                )
             # The live record dies only after the run has an account on disk to be
             # read from; dropping it first leaves a window where a subscriber finds
             # the run neither in memory nor on disk (decision 2026-08-08 D1).

@@ -3001,9 +3001,11 @@ def test_predictor_persists_predict_result_through_run_artifact_store(
 
         def predict_artifact(self, payload: dict[str, Any]) -> RunResult:
             assert payload["artifact_ref"]["content_hash"] == f"sha256:{'7' * 64}"
+            # Studio mints the run id and hands it over as thread_id; the engine
+            # runs under it and reports it back, so the fake does too.
             return RunResult(
                 success=True,
-                run_id="predict-store-run",
+                run_id=str(payload["thread_id"]),
                 skill_id="demo.skill",
                 context={"prediction": "ok"},
                 source="predict",
@@ -3014,7 +3016,7 @@ def test_predictor_persists_predict_result_through_run_artifact_store(
 
     result = PredictorService().dispatch_predict_job("demo.skill", input_data={"topic": "store"})
 
-    assert result.run_id == "predict-store-run"
+    assert result.run_id.startswith("predict-")
     manifest_path = skill_dir / ".workspace" / "predicts" / result.run_id / "manifest.json"
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -3022,7 +3024,7 @@ def test_predictor_persists_predict_result_through_run_artifact_store(
     stored = LocalRunArtifactStore(root=skill_dir / ".workspace").get_object(hash=result_ref["content_hash"])
     payload = json.loads(stored.decode("utf-8"))
 
-    assert payload["run_id"] == "predict-store-run"
+    assert payload["run_id"] == result.run_id
     assert payload["context"] == {"prediction": "ok"}
 
 
@@ -3057,7 +3059,7 @@ def test_predictor_preserves_artifact_identity_in_runtime_payload_and_predict_re
             captured_payload.update(payload)
             return RunResult(
                 success=True,
-                run_id="predict-identity-run",
+                run_id=str(payload["thread_id"]),
                 skill_id="demo.skill",
                 context={"prediction": "ok"},
                 source="predict",

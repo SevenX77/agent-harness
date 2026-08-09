@@ -217,11 +217,13 @@ def _typed_only_event_types() -> tuple[type[Any], ...]:
         RetryExhaustedEvent,
         RunEndedEvent,
         RunStartedEvent,
+        ToolCallStartedEvent,
         ValidationPassEvent,
     )
 
     return (
         PromptCapturedEvent,
+        ToolCallStartedEvent,
         LLMFallbackEvent,
         AmbiguityLoggedEvent,
         BuiltinSubagentEnterEvent,

@@ -176,7 +176,7 @@ export function AvailableModelsSidebar({
             </Badge>
           </div>
           <InputGroup className="h-8">
-            <InputGroupAddon align="inline-start" className="pl-2 pr-1">
+            <InputGroupAddon align="inline-start" className="ps-2 pe-1">
               <Search data-role-icon="true" className="size-3.5 text-muted-foreground" />
             </InputGroupAddon>
             <InputGroupInput
@@ -187,7 +187,7 @@ export function AvailableModelsSidebar({
               placeholder="Search models"
               className="h-full text-xs"
             />
-            <InputGroupAddon align="inline-end" className="pl-1 pr-1">
+            <InputGroupAddon align="inline-end" className="ps-1 pe-1">
               <InputGroupButton
                 type="button"
                 size="icon-xs"

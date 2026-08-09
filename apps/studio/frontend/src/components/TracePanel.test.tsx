@@ -151,6 +151,37 @@ const twoPhaseEvents: EventEnvelope[] = [
   },
 ]
 
+describe('TracePanel search and filter (decision 2026-08-09 D10/D11)', () => {
+  it('keeps filtering with the search box instead of on the identity strip', () => {
+    const html = render({ runId: 'run-1' })
+
+    // The strip answers WHICH run and HOW it stands; a filter control there was
+    // a third question competing for the same row (D3).
+    expect(html).toContain('aria-label="Filter by event kind"')
+    expect(html).not.toContain('aria-label="Filter events"')
+  })
+
+  it('wraps the box and its tags in one focus scope', () => {
+    // Without a shared scope, clicking a tag blurs the input and the tags
+    // vanish under the pointer.
+    const html = render({})
+    expect(html).toContain('group/trace-search')
+  })
+
+  it('says how many filters are on, so a closed row is never a silent one', () => {
+    const html = render({})
+    expect(html).not.toContain('filters are narrowing this trace')
+  })
+
+  it('lets the search icon take its size from the addon that holds it', () => {
+    // Overriding it is the modification D10 removes: the group is 28px tall and
+    // a hand-set 16px icon does not fit the padding the addon already applies.
+    const html = render({})
+    expect(html).toContain('lucide-search')
+    expect(html).not.toMatch(/lucide-search[^"]*h-4 w-4/)
+  })
+})
+
 describe('TracePanel focus behaviour (decision 2026-08-09 D2)', () => {
   // Focusing a node used to FILTER the trace down to that node. With the
   // narrowing hint and its toggle both gone from the strip, keeping the filter
@@ -340,7 +371,7 @@ describe('TracePanel run actions (⋮ menu)', () => {
     expect(html).toContain('Waiting for run events')
     // Nothing to search or filter yet, so neither control is mounted...
     expect(html).not.toContain('Search trace events')
-    expect(html).not.toContain('aria-label="Filter events"')
+    expect(html).not.toContain('aria-label="Filter by event kind"')
     // ...but the run is still the run: its identity strip and actions stay put.
     expect(html).toContain('aria-label="Run actions"')
   })

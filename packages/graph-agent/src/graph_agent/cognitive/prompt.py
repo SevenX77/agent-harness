@@ -16,6 +16,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# What an AGENT phase's system prompt was made from. A prompt report names its
+# template so a reader can tell "the model was told this because the template
+# says so" from "the model was told this because the phase author wrote it";
+# the id travels with the prompt because no file on disk holds this template.
+V030_COGNITIVE_TEMPLATE_ID = "cognitive/v0.3.0"
+
 V030_AGENT_EXIT_CONTRACT_TEXT = (
     "回答必须调用 finish_task，输出符合下方 Schema 的结构化结果。"
     "business_data_md 遵循 output_schema 列业务字段；diagnostics_md 写自检诊断。\n"

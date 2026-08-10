@@ -41,6 +41,8 @@ class _PredictGatewayChatModelMixin:
     tool_choice: str | None
     tool_kwargs: dict[str, object]
     call_counter: list[int]
+    prompt_template_source: str | None
+    prompt_variables: dict[str, Any]
     probe_before_call: bool
     thinking_enabled: bool | None
     cache: Any
@@ -76,6 +78,8 @@ class _PredictGatewayChatModelMixin:
             loop_index=self.call_counter[0],
             parent_node_id=self.phase_name,
             node_type="agent",
+            template_source=self.prompt_template_source,
+            variables=self.prompt_variables,
         ) as step:
             payload, source = self._select_mock_payload()
             result = self._build_predict_chat_result(payload, source)
@@ -193,6 +197,11 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
     # Shared with the copy ``bind_tools`` makes, so the loop count a phase
     # reports keeps rising instead of restarting at 1 on every turn.
     call_counter: list[int] = Field(default_factory=lambda: [0])
+    # A mocked round-trip reports its prompt's provenance for the same reason a
+    # real one does: the panel showing it makes no distinction, so a gap here
+    # would read as "this prompt came from nowhere".
+    prompt_template_source: str | None = None
+    prompt_variables: dict[str, Any] = Field(default_factory=dict)
     profile: Any = None
 
     def __init__(

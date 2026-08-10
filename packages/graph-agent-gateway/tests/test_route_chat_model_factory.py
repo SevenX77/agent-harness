@@ -276,6 +276,65 @@ def test_factory_remaps_anthropic_temperature_from_authored_two_point_scale(
     assert chat_model.kwargs["temperature"] == pytest.approx(0.75)
 
 
+def test_factory_carries_reasoning_effort_to_anthropic_under_the_name_it_uses() -> None:
+    """Anthropic sells effort too; it just spells it ``output_config.effort``.
+
+    Measured 2026-08-10: ``ChatAnthropic(effort="medium")`` renders
+    ``{'output_config': {'effort': 'medium'}}``. Until this mapping existed the
+    setting was dropped while the request was being built, so a Claude route
+    could be given an effort and never send one byte of it.
+    """
+    from langchain_anthropic import ChatAnthropic
+    from langchain_core.messages import HumanMessage
+
+    chat_model = _factory().build(
+        _route(
+            endpoint_id="wavespeed",
+            route_slug="claude-opus-5",
+            protocol="anthropic_compatible",
+            base_url="https://llm.wavespeed.ai/v1",
+            provider_model_id="claude-opus-5",
+            canonical_id="claude-opus-5",
+        ),
+        max_tokens=333,
+        reasoning_effort="medium",
+    )
+
+    assert isinstance(chat_model, ChatAnthropic)
+    payload = chat_model._get_request_payload([HumanMessage(content="hi")])
+    assert payload["output_config"] == {"effort": "medium"}
+
+
+def test_factory_carries_reasoning_effort_to_google_under_the_name_it_uses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini names the same dial ``thinking_level``."""
+    import graph_agent_gateway.route_chat_model_factory as factory_module
+
+    captured: dict[str, object] = {}
+
+    class FakeGoogleModule:
+        class ChatGoogleGenerativeAI:
+            def __init__(self, **kwargs: object) -> None:
+                captured.update(kwargs)
+
+    monkeypatch.setattr(factory_module, "_import_google_chat_module", lambda: FakeGoogleModule)
+    _factory().build(
+        _route(
+            endpoint_id="google",
+            route_slug="gemini-3-pro",
+            protocol="google_genai",
+            base_url="https://generativelanguage.googleapis.com",
+            provider_model_id="gemini-3-pro",
+            canonical_id="gemini-3-pro",
+        ),
+        max_tokens=333,
+        reasoning_effort="medium",
+    )
+
+    assert captured["thinking_level"] == "medium"
+
+
 def test_factory_keeps_openai_temperature_on_authored_two_point_scale() -> None:
     chat_model = _factory().build(_route(), temperature=1.5)
 

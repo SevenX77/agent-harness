@@ -31,7 +31,11 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from graph_agent_gateway.registry.schema import ResolvedRoute
-from graph_agent_gateway.temperature import provider_temperature_from_authored
+from graph_agent_gateway.settings_bounds import (
+    bounds_for,
+    fit,
+    provider_temperature_from_authored,
+)
 
 # One runtime setting as the finished answer describes it: the value that was
 # asked for and where that value came from.
@@ -164,82 +168,155 @@ def compose_call_settings(
     tool_choice: str | None,
 ) -> CallSettings:
     """Settle every setting for one call against one route."""
-    temperature = _runtime_temperature(
-        route,
-        defaults.temperature,
-        defaults.runtime_setting_sources,
-        call_kwargs.get("temperature"),
-    )
-    reasoning = _runtime_reasoning(
-        route,
-        defaults.thinking_enabled,
-        defaults.runtime_setting_sources,
-        call_kwargs.get("reasoning"),
-        has_kwarg="reasoning" in call_kwargs,
-    )
+    asked = _asked_preferences(route, defaults, call_kwargs)
+    sent, adjustments = _fit_to_route(route, asked)
     return CallSettings(
-        call=SettingsLayer(
-            kwargs={
-                "max_tokens": budget,
-                "structured_output": _effective_structured_output(route),
-                "call_method_id": route.call_method_id,
-                "request_mapper_id": route.request_mapper_id,
-            },
-            reported={
-                "max_output_tokens": {
-                    "value": budget,
-                    "source": _runtime_source(
-                        route,
-                        "max_output_tokens",
-                        defaults.runtime_setting_sources,
-                        has_kwarg=call_kwargs.get("max_tokens") is not None,
-                    ),
-                },
-            },
-        ),
+        call=_call_layer(route, defaults, call_kwargs, budget),
         preferences=SettingsLayer(
-            kwargs={
-                "temperature": temperature,
-                "reasoning": reasoning,
-                "reasoning_effort": _effective_text(route, "reasoning.effort"),
-                "thinking_budget_tokens": _optional_int_kwarg(
-                    call_kwargs.get("thinking_budget_tokens"),
-                    _effective_optional_int(route, "reasoning.budget_tokens"),
-                ),
-                "top_p": _effective_optional_float(route, "top_p"),
-                "seed": _effective_optional_int(route, "seed"),
-                "stop_sequences": _effective_string_list(route, "stop_sequences"),
-                "parallel_tool_calls": _effective_optional_bool(route, "parallel_tool_calls"),
-            },
-            reported={
-                "temperature": {
-                    "authored_value": temperature,
-                    "provider_value": provider_temperature_from_authored(
-                        temperature,
-                        route.protocol,
-                    ),
-                    "source": _runtime_source(
-                        route,
-                        "temperature",
-                        defaults.runtime_setting_sources,
-                        has_kwarg=call_kwargs.get("temperature") is not None,
-                    ),
-                    "protocol": route.protocol,
-                },
-                "reasoning.enabled": {
-                    "value": reasoning,
-                    "source": _runtime_source(
-                        route,
-                        "reasoning.enabled",
-                        defaults.runtime_setting_sources,
-                        has_kwarg="reasoning" in call_kwargs,
-                    ),
-                },
-            },
+            kwargs=sent,
+            reported=_with_adjustments(
+                _preference_report(route, defaults, call_kwargs, sent),
+                adjustments,
+            ),
         ),
         tools=tools,
         tool_choice=tool_choice or _effective_text(route, "tool_choice"),
     )
+
+
+# The setting each request keyword argument carries. A bound belongs to the
+# setting under its registry name; the keyword is only how one request spells it.
+_SETTING_OF_KWARG: Mapping[str, str] = {
+    "temperature": "temperature",
+    "top_p": "top_p",
+    "reasoning_effort": "reasoning.effort",
+    "thinking_budget_tokens": "reasoning.budget_tokens",
+}
+
+
+def _asked_preferences(
+    route: ResolvedRoute,
+    defaults: ModelDefaults,
+    call_kwargs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Every preference this call would like, before any route says what it takes."""
+    return {
+        "temperature": _runtime_temperature(
+            route,
+            defaults.temperature,
+            defaults.runtime_setting_sources,
+            call_kwargs.get("temperature"),
+        ),
+        "reasoning": _runtime_reasoning(
+            route,
+            defaults.thinking_enabled,
+            defaults.runtime_setting_sources,
+            call_kwargs.get("reasoning"),
+            has_kwarg="reasoning" in call_kwargs,
+        ),
+        "reasoning_effort": _effective_text(route, "reasoning.effort"),
+        "thinking_budget_tokens": _optional_int_kwarg(
+            call_kwargs.get("thinking_budget_tokens"),
+            _effective_optional_int(route, "reasoning.budget_tokens"),
+        ),
+        "top_p": _effective_optional_float(route, "top_p"),
+        "seed": _effective_optional_int(route, "seed"),
+        "stop_sequences": _effective_string_list(route, "stop_sequences"),
+        "parallel_tool_calls": _effective_optional_bool(route, "parallel_tool_calls"),
+    }
+
+
+def _fit_to_route(
+    route: ResolvedRoute,
+    asked: Mapping[str, Any],
+) -> tuple[dict[str, Any], ActualRuntimeSettings]:
+    """The preferences as this route will take them, and which ones had to move.
+
+    An adjustment that goes unrecorded is the same silence this whole design
+    exists to remove: the call would succeed on a value nobody chose.
+    """
+    sent: dict[str, Any] = {}
+    adjustments: ActualRuntimeSettings = {}
+    for keyword, value in asked.items():
+        setting = _SETTING_OF_KWARG.get(keyword)
+        fitted = value if setting is None else fit(value, bounds_for(route, setting))
+        sent[keyword] = fitted
+        if setting is not None and fitted != value:
+            adjustments[setting] = {"asked": value}
+    return sent, adjustments
+
+
+def _with_adjustments(
+    reported: ActualRuntimeSettings,
+    adjustments: ActualRuntimeSettings,
+) -> ActualRuntimeSettings:
+    """The report, with each adjusted setting also saying what was asked for."""
+    merged = dict(reported)
+    for setting, adjustment in adjustments.items():
+        merged[setting] = {**merged.get(setting, {}), **adjustment}
+    return merged
+
+
+def _call_layer(
+    route: ResolvedRoute,
+    defaults: ModelDefaults,
+    call_kwargs: Mapping[str, Any],
+    budget: int,
+) -> SettingsLayer:
+    """The part of the request that is the call itself, and cannot be dropped."""
+    reported: dict[str, object] = {
+        "value": budget,
+        "source": _runtime_source(
+            route,
+            "max_output_tokens",
+            defaults.runtime_setting_sources,
+            has_kwarg=call_kwargs.get("max_tokens") is not None,
+        ),
+    }
+    cap = budget_cap(route)
+    asked = _asked_budget(route, defaults, call_kwargs)
+    if cap is not None and asked > cap:
+        reported["asked"] = asked
+    return SettingsLayer(
+        kwargs={
+            "max_tokens": budget,
+            "structured_output": _effective_structured_output(route),
+            "call_method_id": route.call_method_id,
+            "request_mapper_id": route.request_mapper_id,
+        },
+        reported={"max_output_tokens": reported},
+    )
+
+
+def _preference_report(
+    route: ResolvedRoute,
+    defaults: ModelDefaults,
+    call_kwargs: Mapping[str, Any],
+    sent: Mapping[str, Any],
+) -> ActualRuntimeSettings:
+    """What the answer says this call asked its provider to do."""
+    return {
+        "temperature": {
+            "authored_value": sent["temperature"],
+            "provider_value": provider_temperature_from_authored(sent["temperature"], route),
+            "source": _runtime_source(
+                route,
+                "temperature",
+                defaults.runtime_setting_sources,
+                has_kwarg=call_kwargs.get("temperature") is not None,
+            ),
+            "protocol": route.protocol,
+        },
+        "reasoning.enabled": {
+            "value": sent["reasoning"],
+            "source": _runtime_source(
+                route,
+                "reasoning.enabled",
+                defaults.runtime_setting_sources,
+                has_kwarg="reasoning" in call_kwargs,
+            ),
+        },
+    }
 
 
 def initial_budget(
@@ -247,7 +324,20 @@ def initial_budget(
     defaults: ModelDefaults,
     call_kwargs: Mapping[str, Any],
 ) -> int:
-    """The output token budget a call starts on, before any escalation."""
+    """The output token budget a call starts on, before any escalation.
+
+    Bounded by the same ceiling escalation obeys: a limit that only holds on
+    the way up is a limit the opening request can walk straight past.
+    """
+    asked = _asked_budget(route, defaults, call_kwargs)
+    return int(fit(asked, bounds_for(route, "max_output_tokens")))
+
+
+def _asked_budget(
+    route: ResolvedRoute,
+    defaults: ModelDefaults,
+    call_kwargs: Mapping[str, Any],
+) -> int:
     kwarg_value = call_kwargs.get("max_tokens")
     if kwarg_value is not None:
         return token_budget(kwarg_value, defaults.max_tokens)

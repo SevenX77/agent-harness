@@ -184,6 +184,17 @@ def effort_bounds(*, levels: Sequence[str] = (), protocol: str | None = None) ->
     return Bounds(allowed=documented_effort_levels(protocol))
 
 
+def effort_probe_candidates(protocol: str | None) -> tuple[str, ...]:
+    """The levels worth asking a route of this protocol about.
+
+    Bounded by the protocol's vocabulary where its API pins one — a name that
+    cannot be spelled in that request body would spend a round trip to be told
+    so. Where the protocol pins nothing, the whole ladder is offered, because
+    that is exactly the case no document answers.
+    """
+    return documented_effort_levels(protocol) or EFFORT_LADDER
+
+
 def documented_effort_levels(protocol: str | None) -> tuple[str, ...]:
     """The effort levels this protocol's request body can name at all.
 
@@ -230,6 +241,7 @@ __all__ = [
     "bounds_for",
     "documented_effort_levels",
     "effort_bounds",
+    "effort_probe_candidates",
     "fit",
     "provider_temperature_from_authored",
     "temperature_ceiling",

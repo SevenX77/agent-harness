@@ -149,18 +149,15 @@ class PredictTracingCallback(TracingCallback):
         input_tokens: int,
         output_tokens: int,
         *,
-        messages: list[dict[str, Any]] | None = None,
-        response_data: dict[str, Any] | None = None,
+        response_data: dict[str, Any],
     ) -> None:
         """Record Predict LLM activity while forcing all usage counters to zero."""
 
-        zeroed_response = _zero_usage_values(response_data or {})
         super().on_llm_call(
             phase_name,
             0,
             0,
-            messages=messages,
-            response_data=zeroed_response,
+            response_data=_zero_usage_values(response_data),
         )
 
     def save(self, output_dir: str | Path) -> str:

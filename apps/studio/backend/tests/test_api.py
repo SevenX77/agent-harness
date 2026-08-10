@@ -1426,7 +1426,13 @@ def fake_run_worker(
     events = [
         RunStartedEvent(run_id=run_dir.name, thread_id="thread", initial_context={}),
         PhaseStartEvent(phase_name="setup", context={}),
-        LLMCallEvent(phase_name="setup", input_tokens=1, output_tokens=2),
+        LLMCallEvent(
+            phase_name="setup",
+            step_id="step-1",
+            input_tokens=1,
+            output_tokens=2,
+            response_data={"content": "ok"},
+        ),
         PhaseEndEvent(phase_name="setup", context={}, metrics={}),
         FinishTaskEvent(phase_name="setup", reasoning="done"),
         RunEndedEvent(

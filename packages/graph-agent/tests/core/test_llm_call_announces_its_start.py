@@ -206,3 +206,37 @@ def test_an_agent_phase_announces_its_llm_call_before_reporting_it(tmp_path: Pat
     assert result.success is True
     assert "prompt_captured" in seen
     assert seen.index("prompt_captured") < seen.index("llm_call")
+
+
+def test_an_agent_phase_says_which_template_made_its_prompt(tmp_path: Path) -> None:
+    # The prompt panel promises the triple (template, variables, rendered): what
+    # the prompt was made from, what it was made with, and what came out. An
+    # AGENT prompt IS made from a template — the cognitive template, filled with
+    # the phase's role / goal / steps — so reporting only the rendered result
+    # hides the two inputs a reader needs to know WHY the prompt says what it
+    # says, and leaves two fields of the contract that no producer ever fills.
+    skill = tmp_path / "template-probe"
+    (skill / "phases" / "work").mkdir(parents=True)
+    (skill / "GRAPH.md").write_text(GRAPH_MD, encoding="utf-8")
+    (skill / "phases" / "work" / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+
+    captured: list[Any] = []
+    run_skill(
+        skill,
+        workspace_dir=tmp_path / "ws",
+        llm_provider=SubmittingProvider(),
+        event_subscriber=lambda event: captured.append(event),
+        unattended=True,
+        text="hello",
+    )
+
+    prompts = [e for e in captured if e.event_type == "prompt_captured"]
+    assert prompts, "the phase never announced a prompt"
+    for prompt in prompts:
+        assert prompt.template_source, "no template named"
+        assert prompt.variables, "no variables reported"
+        # The values are the ones the template was actually filled with, not a
+        # summary written beside it.
+        assert prompt.variables["role"] == "summariser"
+        assert prompt.variables["goal"].startswith("Summarise the text")
+        assert [step["id"] for step in prompt.variables["steps"]] == ["S1"]

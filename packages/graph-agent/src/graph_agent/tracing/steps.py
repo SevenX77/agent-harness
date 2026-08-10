@@ -180,6 +180,8 @@ class StepReporter:
         node_type: str | None = None,
         sub_run_id: str | None = None,
         group_key: str | None = None,
+        template_source: str | None = None,
+        variables: dict[str, Any] | None = None,
     ) -> Iterator[LlmCallStep]:
         """Announce a round-trip, then hand back the step that is now in flight.
 
@@ -195,6 +197,8 @@ class StepReporter:
                 llm_role=llm_role,
                 resolved_model=resolved_model,
                 resolved_prompt=[_prompt_entry(message) for message in messages],
+                template_source=template_source,
+                variables=dict(variables or {}),
                 loop_index=loop_index,
                 sub_run_id=sub_run_id,
                 group_key=group_key,

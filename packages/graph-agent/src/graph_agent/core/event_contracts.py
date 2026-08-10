@@ -78,6 +78,33 @@ class EventEnvelope(BaseModel):
     error_payload: TransportErrorPayload | None = None
 
 
+class DeltaEnvelope(BaseModel):
+    """One piece of a step's output, on its way to whoever is watching.
+
+    It deliberately has no ``seq`` and no ``cursor``. Those two are what make a
+    frame replayable — a reader who dropped off asks for everything after
+    number N — and that only works while every number exists. A delta may be
+    merged with its neighbour or dropped when a watcher falls behind, so
+    numbering it would turn every permitted drop into a hole the reader reports
+    as data loss. Nothing is lost by leaving them off: the text spelled out
+    here is written whole, once, on the step's closing frame, which does carry
+    a number.
+
+    ``step_id`` is what makes a piece usable at all. An agent turn runs several
+    calls at once, so a piece that cannot name its call cannot be shown.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    schema_version: str = "studio.delta.v1"
+    stream_id: str
+    run_id: str
+    step_id: str
+    channel: str
+    text: str = ""
+    restarts_step: bool = False
+    timestamp: datetime
+
+
 class TransportErrorPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
     error_code: str

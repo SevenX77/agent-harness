@@ -34,6 +34,7 @@ from graph_agent.core._predict_internal.golden_eval import calculate_score as ca
 from graph_agent.core._predict_internal.golden_eval import diff_outputs as diff_outputs
 from graph_agent.core._predict_internal.path_diff import compute_diff as compute_diff
 from graph_agent.core._predict_internal.stub import generate_heuristic_stub as generate_heuristic_stub
+from graph_agent.core.event_contracts import DeltaEnvelope as DeltaEnvelope
 from graph_agent.core.event_contracts import EventEnvelope as EventEnvelope
 from graph_agent.core.event_contracts import StreamCursorExpiredError as StreamCursorExpiredError
 from graph_agent.core.event_contracts import StreamCursorGapError as StreamCursorGapError

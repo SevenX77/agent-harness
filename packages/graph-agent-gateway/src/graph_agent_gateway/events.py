@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 ROUTE_DECISION_EVENT_CODE = "[F-v3-gateway-llm-route-decision]"
+CALL_SETTINGS_EVENT_CODE = "[F-v3-gateway-llm-call-settings]"
 
 RouteDecision = Literal[
     "skipped_circuit_open",
@@ -72,5 +73,43 @@ class LLMRouteDecisionEvent:
             "provider_status_code": self.provider_status_code,
             "next_route_id": self.next_route_id,
             "voided_streamed_answer": self.voided_streamed_answer,
+            "code": self.code,
+        }
+
+
+@dataclass(frozen=True)
+class LLMCallSettingsEvent:
+    """What one call asked its route to do, and what became of each of it.
+
+    Separate from ``LLMRouteDecisionEvent`` because they answer different
+    questions: that one says which route was used and why it changed, this one
+    says what parameters the answer was produced under. Two questions, two
+    reasons to change.
+
+    It is emitted when the answer closes rather than when the request goes out,
+    because one of the verdicts — reasoning asked for and absent — cannot be
+    known until there is an answer to read.
+
+    The gateway defines its own copy of this shape (it does not depend on the
+    engine); the two are kept in step by hand.
+    """
+
+    phase_name: str
+    settings: tuple[dict[str, Any], ...]
+    route_id: str | None = None
+    provider_model_id: str | None = None
+    protocol: str | None = None
+    code: str = field(default=CALL_SETTINGS_EVENT_CODE, init=False)
+    event_type: str = field(default="llm_call_settings", init=False)
+
+    def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
+        del mode
+        return {
+            "event_type": self.event_type,
+            "phase_name": self.phase_name,
+            "settings": [dict(setting) for setting in self.settings],
+            "route_id": self.route_id,
+            "provider_model_id": self.provider_model_id,
+            "protocol": self.protocol,
             "code": self.code,
         }

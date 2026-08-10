@@ -350,11 +350,21 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
     ]
     assert factory.builds[-1]["kwargs"]["max_tokens"] == 222
     assert factory.builds[-1]["kwargs"]["temperature"] == 0.2
-    assert [e.decision for e in callback.events] == ["probe_failed", "answered"]
-    assert callback.events[0].route_id == "dead:claude"
-    assert callback.events[0].next_route_id == "anthropic-official:claude-sonnet-4.6"
-    assert callback.events[1].route_id == "anthropic-official:claude-sonnet-4.6"
-    event_payload = callback.events[0].model_dump(mode="json")
+    # The answered call also says what became of the settings it asked for:
+    # the route decision says WHICH route answered, this says under WHAT.
+    settings_events = [e for e in callback.events if e.event_type == "llm_call_settings"]
+    assert [e.route_id for e in settings_events] == ["anthropic-official:claude-sonnet-4.6"]
+    assert {entry["setting"]: entry["verdict"] for entry in settings_events[0].settings} == {
+        "max_output_tokens": "sent",
+        "temperature": "sent",
+    }
+
+    decisions = [e for e in callback.events if e.event_type == "llm_route_decision"]
+    assert [e.decision for e in decisions] == ["probe_failed", "answered"]
+    assert decisions[0].route_id == "dead:claude"
+    assert decisions[0].next_route_id == "anthropic-official:claude-sonnet-4.6"
+    assert decisions[1].route_id == "anthropic-official:claude-sonnet-4.6"
+    event_payload = decisions[0].model_dump(mode="json")
     assert event_payload["event_type"] == "llm_route_decision"
     assert event_payload["endpoint_id"] == "dead"
     assert event_payload["provider_model_id"] == "claude-sonnet-4-6"

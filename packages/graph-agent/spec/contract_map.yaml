@@ -77,6 +77,9 @@ public_api_symbols:
   LLMDeltaEvent:
     feature_ids:
     - F-llm-execution
+  LLMCallSettingsEvent:
+    feature_ids:
+    - F-llm-execution
   LLMRouteDecisionEvent:
     feature_ids:
     - F-llm-execution

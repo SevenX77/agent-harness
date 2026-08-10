@@ -282,7 +282,7 @@ Family mapping summary:
 - **Source module**: `graph_agent.callbacks.events`
 - **Consumer files**: apps/studio/backend/app/models/runs.py:8; apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/models/runs.py:8; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `Union variants: AgentLoopIterationEvent, AmbiguityLoggedEvent, AmbiguityReportEvent, ArtifactSavedEvent, BuiltinSubagentEnterEvent, BuiltinSubagentExitEvent, BuiltinSubagentFallbackEvent, CompactionEvent, DeadEndPrunedEvent, FinishTaskEvent, HeartbeatEvent, InternalErrorEvent, InterruptedEvent, LLMCallEvent, LLMDeltaEvent, LLMRouteDecisionEvent, ModelResolvedEvent, NudgeEvent, ParallelMapGroupEndedEvent, ParallelMapGroupStartedEvent, PhaseEndEvent, PhaseStartEvent, PredictChainStartEvent, PromptCapturedEvent, ResumedEvent, RetryEvent, RetryExhaustedEvent, RunEndedEvent, RunStartedEvent, ThreadCleanedUpEvent, ToolCallEvent, ValidationFailEvent, ValidationPassEvent, WorkingMemoryUpdateEvent`
+- **Fields**: `Union variants: AgentLoopIterationEvent, AmbiguityLoggedEvent, AmbiguityReportEvent, ArtifactSavedEvent, BuiltinSubagentEnterEvent, BuiltinSubagentExitEvent, BuiltinSubagentFallbackEvent, CompactionEvent, DeadEndPrunedEvent, FinishTaskEvent, HeartbeatEvent, InternalErrorEvent, InterruptedEvent, LLMCallEvent, LLMCallSettingsEvent, LLMDeltaEvent, LLMRouteDecisionEvent, ModelResolvedEvent, NudgeEvent, ParallelMapGroupEndedEvent, ParallelMapGroupStartedEvent, PhaseEndEvent, PhaseStartEvent, PredictChainStartEvent, PromptCapturedEvent, ResumedEvent, RetryEvent, RetryExhaustedEvent, RunEndedEvent, RunStartedEvent, ThreadCleanedUpEvent, ToolCallEvent, ValidationFailEvent, ValidationPassEvent, WorkingMemoryUpdateEvent`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -431,6 +431,16 @@ Family mapping summary:
 - **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['llm_delta']`, `phase_name: str`, `step_id: str`, `channel: Literal['text', 'thinking']`, `text: str`, `restarts_step: bool`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them. `persisted` is `False` on this class: the frame may be merged with its neighbours or dropped, and must not be written to `trace.jsonl`.
+- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
+
+## LLMCallSettingsEvent
+
+- **Source module**: `graph_agent.callbacks.events`
+- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:8
+- **Contract status**: `@stable`; non-`__all__` external dep
+- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['llm_call_settings']`, `phase_name: str`, `settings: list[dict[str, Any]]`, `route_id: str | None`, `provider_model_id: str | None`, `protocol: str | None`, `code: str | None`
+- **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values. Each `settings` entry carries `setting`, `requested`, `verdict` (one of `applied`, `sent`, `adjusted`, `unsupported`, `rejected`, `ignored`) and `reason`.
+- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
 ## LLMRouteDecisionEvent

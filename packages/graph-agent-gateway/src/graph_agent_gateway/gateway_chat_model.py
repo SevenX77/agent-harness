@@ -34,9 +34,13 @@ from graph_agent_gateway.events import RouteDecision
 from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
-from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+from graph_agent_gateway.route_chat_model_factory import (
+    RouteChatModelFactory,
+    provider_request_keys,
+)
+from graph_agent_gateway.settings_outcome import judge_settings
 from graph_agent_gateway.settings_probe import probe_call_settings
-from graph_agent_gateway.tracing import emit_route_decision_event
+from graph_agent_gateway.tracing import emit_call_settings_event, emit_route_decision_event
 
 logger = logging.getLogger(__name__)
 
@@ -420,6 +424,12 @@ class GatewayChatModel(BaseChatModel):
                         candidate,
                         settings.reported,
                     )
+                    self._said_what_happened(
+                        candidate,
+                        settings.reported,
+                        refused=refused_settings or (),
+                        reasoned=_answer_reasoned(response),
+                    )
                     self._decided("answered", route=candidate)
                     return
                 except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
@@ -522,6 +532,27 @@ class GatewayChatModel(BaseChatModel):
     def _route_factory(self) -> RouteChatModelFactory:
         """The one builder the probe and the call it precedes both come off."""
         return RouteChatModelFactory(credential_provider=self.credential_provider)
+
+    def _said_what_happened(
+        self,
+        route: ResolvedRoute,
+        reported: ActualRuntimeSettings,
+        *,
+        refused: tuple[str, ...],
+        reasoned: bool | None,
+    ) -> None:
+        """Report what became of this call's settings, now the answer can be read."""
+        emit_call_settings_event(
+            callbacks=self.event_callbacks,
+            phase_name=self.phase_name or "<gateway>",
+            route=route,
+            outcomes=judge_settings(
+                reported=reported,
+                carried=provider_request_keys(str(route.protocol)),
+                refused=refused,
+                reasoned=reasoned,
+            ),
+        )
 
     def _decided(
         self,
@@ -881,6 +912,16 @@ def _additional_kwargs_from_response(response: Mapping[str, object]) -> dict[str
     if isinstance(reasoning, str) and reasoning:
         result["reasoning_content"] = reasoning
     return result
+
+
+def _answer_reasoned(answer: AIMessage) -> bool:
+    """Whether the finished answer shows any reasoning at all.
+
+    Read off the answer the caller receives, not off a parallel record of it:
+    "did it reason" and "what was handed over" cannot then disagree.
+    """
+    reasoning = answer.additional_kwargs.get("reasoning_content")
+    return bool(isinstance(reasoning, str) and reasoning.strip())
 
 
 def _langchain_messages_to_dict(messages: list[BaseMessage]) -> list[dict[str, Any]]:

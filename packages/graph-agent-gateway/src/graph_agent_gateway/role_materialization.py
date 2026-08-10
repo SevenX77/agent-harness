@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
+from graph_agent_gateway.settings_bounds import effort_bounds, fit
 from graph_agent_gateway.state_projection import project_route_state
 
 _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_failed"]
@@ -115,7 +116,9 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRoleResult:
                 entry_report["warnings"].append(warning)
                 report["warnings"].append(warning)
 
-            role_fit = _apply_intent(entry_report, role, group, route)
+            role_fit = _apply_intent(
+                entry_report, role, group, route, _value(endpoint, "protocol")
+            )
             entry_report["role_fit"] = role_fit
             for warning in entry_report["warnings"]:
                 if warning not in report["warnings"]:
@@ -303,12 +306,14 @@ def _apply_intent(
     role: Any,
     group: Any,
     route: Any,
+    protocol: str | None,
 ) -> str:
-    """PR3: apply the three role-level generation params. Role-only — group and
+    """PR3: apply the role-level generation params. Role-only — group and
     provider intent are gone. thinking is best-effort (warn, never not_fit),
     max_output_tokens clamps into the route range (never not_fit), temperature
-    is written through. role_fit stays "using" (cooling_down is stamped by the
-    caller as a warning, not here)."""
+    is written through, reasoning effort is fitted to the levels the route
+    sells. role_fit stays "using" (cooling_down is stamped by the caller as a
+    warning, not here)."""
     del group  # role-only: per-group / per-provider intent is removed.
     role_intent = _value(role, "intent")
 
@@ -334,7 +339,45 @@ def _apply_intent(
     if temperature is not None:
         entry_report["resolved_settings"]["temperature"] = temperature
 
+    _apply_reasoning_effort(
+        entry_report, _value(role_intent, "reasoning_effort"), route, protocol
+    )
+
     return "using"
+
+
+def _apply_reasoning_effort(
+    entry_report: dict[str, Any],
+    requested: Any,
+    route: Any,
+    protocol: str | None,
+) -> None:
+    """Write the chosen effort through, fitted to the levels this route sells.
+
+    Fitted here rather than only at request time so the settings the UI reads
+    back are the settings that will be sent — a level shown as chosen and
+    silently changed on the way out is the same lie in a different place.
+
+    Left alone when nothing was chosen: every provider has its own default, and
+    writing one of ours over it would be a choice nobody made.
+    """
+    if not isinstance(requested, str) or not requested:
+        return
+    reasoning = entry_report["resolved_settings"].setdefault("reasoning", {})
+    reasoning["effort"] = fit(
+        requested,
+        effort_bounds(levels=_route_effort_levels(route), protocol=protocol),
+    )
+
+
+def _route_effort_levels(route: Any) -> tuple[str, ...]:
+    """The effort levels a probe measured on this route, if one has run."""
+    capability = _route_effective_capabilities(route).get("reasoning_effort")
+    value = _capability_value(capability) if capability is not None else None
+    levels = value.get("values") if isinstance(value, dict) else None
+    if not isinstance(levels, list):
+        return ()
+    return tuple(level for level in levels if isinstance(level, str))
 
 
 def _enable_reasoning(entry_report: dict[str, Any]) -> None:

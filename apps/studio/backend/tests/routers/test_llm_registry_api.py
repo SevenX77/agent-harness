@@ -1206,6 +1206,106 @@ def test_registry_and_role_materialization_use_credentials_evidence_refs_for_his
     assert captured["has_evidence_records"] is False
 
 
+def _text_modalities() -> dict[str, CapabilityValue]:
+    return {
+        "input_modalities": CapabilityValue(value=["text"], source="api_list"),
+        "output_modalities": CapabilityValue(value=["text"], source="api_list"),
+    }
+
+
+def test_registry_model_group_offers_the_effort_levels_its_protocol_can_name(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A route nobody probed for effort still has to offer a usable control.
+
+    Which level names a request can even spell is fixed by the protocol, so it
+    is answered from the protocol at read time rather than persisted onto every
+    route and re-learned by probing.
+    """
+    _seed(tmp_path, monkeypatch)
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            )
+        },
+        provider_routes={
+            "anthropic-official:claude-haiku": ProviderRoute(
+                route_id="anthropic-official:claude-haiku",
+                endpoint_id="anthropic-official",
+                route_slug="claude-haiku",
+                provider_model_id="claude-haiku",
+                canonical_id="claude-haiku",
+                display_name="Claude Haiku",
+                status="verified",
+                capabilities=_text_modalities(),
+            )
+        },
+    )
+    save_credentials(credentials, credentials_path())
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    provider_model = response.json()["model_groups"][0]["provider_models"][0]
+    effort = provider_model["capabilities"]["reasoning_effort"]
+    assert effort["value"]["values"] == ["low", "medium", "high", "xhigh", "max"]
+    assert effort["source"] == "provider_doc"
+
+
+def test_registry_model_group_keeps_measured_effort_levels_over_documented_ones(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            )
+        },
+        provider_routes={
+            "anthropic-official:claude-haiku": ProviderRoute(
+                route_id="anthropic-official:claude-haiku",
+                endpoint_id="anthropic-official",
+                route_slug="claude-haiku",
+                provider_model_id="claude-haiku",
+                canonical_id="claude-haiku",
+                display_name="Claude Haiku",
+                status="verified",
+                capabilities={
+                    **_text_modalities(),
+                    "reasoning_effort": CapabilityValue(
+                        value={"supported": True, "values": ["low", "high"]},
+                        source="probed_verified",
+                    ),
+                },
+            )
+        },
+    )
+    save_credentials(credentials, credentials_path())
+
+    response = client.get("/api/llm/registry")
+
+    provider_model = response.json()["model_groups"][0]["provider_models"][0]
+    assert provider_model["capabilities"]["reasoning_effort"]["value"]["values"] == ["low", "high"]
+
+
 def test_registry_model_group_exposes_thinking_capability_from_verified_profile(
     client: TestClient,
     tmp_path: Path,

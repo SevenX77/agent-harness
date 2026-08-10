@@ -107,10 +107,10 @@
       "n": 43,
       "cap": "role-output-token-intent",
       "design_ref": "atom-43",
-      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,1.4=>70%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 只更新本地 draft/readout,不触发 onSubmit/HTTP 保存;onValueCommit 或 pointerup/cancel、keyup、blur 结束兜底才提交当前值给 LlmRolesTab/useDebouncedRolesSave,防止轨道点击只改 UI 不保存。useDebouncedRolesSave 在已有请求 saving 时只保留最新 queued snapshot,旧请求完成后立即保存最新 payload。normalizeRolesDraft + 后端 RoleIntent 默认把缺失/null temperature 归一成 70%(authored 1.4),因此 role settings 几乎不会把 temperature 读成 model default。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed 外部变更事件覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回;窗口 focus 不触发 roles 刷新。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。",
+      "current": "现状:已实现且符合。RoleSettingsFields(RoleSettingsDialog.tsx)集中渲染 thinking / max output tokens / temperature 三个角色运行参数;temperature 使用 shadcn Slider,存储值仍是 provider-neutral 0..2,界面读数显示百分比(0=>0%,1.4=>70%,2=>100%)并通过 HelpTooltip 解释 provider runtime remap。2026-07-05 修正保存抖动:slider onValueChange 只更新本地 draft/readout,不触发 onSubmit/HTTP 保存;onValueCommit 或 pointerup/cancel、keyup、blur 结束兜底才提交当前值给 LlmRolesTab/useDebouncedRolesSave,防止轨道点击只改 UI 不保存。useDebouncedRolesSave 在已有请求 saving 时只保留最新 queued snapshot,旧请求完成后立即保存最新 payload。normalizeRolesDraft + 后端 RoleIntent 默认把缺失/null temperature 归一成 70%(authored 1.4),因此 role settings 几乎不会把 temperature 读成 model default。SettingsPage 在 roles save status 为 pending/saving 时拒绝 roles_changed 外部变更事件覆盖本地草稿,避免慢保存期间继续拖动后被旧快照拉回;窗口 focus 不触发 roles 刷新。gateway 侧 temperature.py / RouteChatModelFactory / ordinary_chat 负责把 authored 0..2 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2);GatewayChatModel.response_metadata.actual_runtime_settings 记录本次实际 authored_value/provider_value/source。 2026-08-10 增补 reasoning effort:RoleSettingsFields 第三列是 shadcn Select(data-role-effort-settings / data-role-effort-input),选项由 llm-effort.ts 的 effortLevelsFromCapabilities 从该角色各路由的 capabilities['reasoning_effort'].value.values 取并集并按强弱排序,首项 Provider default 写回 intent.reasoning_effort=null;无档位可报时控件禁用。后端 RoleIntent 新增 reasoning_effort 字段,gateway role_materialization._apply_reasoning_effort 用 settings_bounds.effort_bounds/fit 把它贴合成该路由卖的最近一档(实测档位优先于协议文档词表),写进 runtime_settings.reasoning.effort;studio 后端 _provider_route_ui_capabilities 在投影 model group 时按端点协议补上文档词表(provider_doc),不落盘。",
       "gap": "符合设计,无需改。已闭合:百分比读数 + tooltip + provider-neutral 0..2 存储 + role 默认 70% + commit 后保存 + saving 期间 latest-wins 覆盖 + gateway provider-scale runtime mapping。",
       "fe_status": "符合",
-      "be_dep": "已就绪可接。PUT /roles 仍保存 role draft;gateway runtime 由 temperature.py / RouteChatModelFactory / ordinary_chat 执行 provider-scale 映射;GatewayChatModel 保留 effective_runtime_settings 并新增 actual_runtime_settings 供 trace 查看真实调用参数。"
+      "be_dep": "已就绪可接。PUT /roles 仍保存 role draft;gateway runtime 由 temperature.py / RouteChatModelFactory / ordinary_chat 执行 provider-scale 映射;GatewayChatModel 保留 effective_runtime_settings 并新增 actual_runtime_settings 供 trace 查看真实调用参数。 reasoning effort 已就绪:PUT /roles 保存 intent.reasoning_effort;materialize 贴合后写 runtime_settings.reasoning.effort;GET /registry 的 model group 路由能力里带 reasoning_effort 档位(实测优先,否则协议文档词表)。尚未接的是 effort 探测(B2):openai_compatible 这类协议没有文档词表,在探测落地前该角色若只有这类路由,控件呈禁用空态。"
     },
     {
       "n": 44,
@@ -710,6 +710,39 @@
       ],
       "layer2": [
         "2026-07-05 wt-dev --backend: Settings -> LLM Roles -> expand fast -> Temperature shows 40%, ? tooltip shows provider remap copy, ArrowRight changes readout to 55%, ArrowLeft restores 40%."
+      ]
+    },
+    {
+      "covers": "#43c role-reasoning-effort",
+      "atoms": [
+        43
+      ],
+      "shots": [
+        "Settings → LLM Roles → 展开角色:Reasoning effort 下拉与 Max output tokens / Temperature 同排;Claude 路由的角色列出 Low/Medium/High/Extra high/Max,选 Extra high 后保存并回读",
+        "只有 openai_compatible 路由且未探测的角色:控件禁用并显示「No model in this role reports effort levels.」"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "llm-effort.test.ts:多路由档位取并集且按强弱排序;认不出的档位名保留在末尾;无路由报档位时返回空。",
+        "RoleSettingsDialog.behavior.test.tsx:选中档位提交 intent.reasoning_effort;清空回到 Provider default 提交 null;空档位时控件禁用且只剩 Provider default 一项。",
+        "LlmRolesTab.test.tsx:draft ↔ intent 映射(未选 → null),字段行渲染出 effort 控件。",
+        "graph-agent-gateway test_role_effort_intent.py:选中的档位写进 runtime_settings.reasoning.effort;未选则不写;xhigh 在只卖 low/high 的路由上贴合成 high;选档位本身不打开 reasoning.enabled。",
+        "studio test_llm_registry_api.py:未探测的 anthropic 路由在 model group 里带 provider_doc 档位;实测档位不被文档词表覆盖。",
+        "studio test_llm_role_materializer_api.py:PUT 角色带 reasoning_effort=xhigh,回包 fallback_chain 的 runtime_settings.reasoning.effort 是 high。"
+      ],
+      "layer2": [
+        "2026-08-10 wt-dev --backend:Settings → LLM 角色 → 展开 fast/analyst,Reasoning effort 下拉列出各路由档位并集;在 analyst 选 Extra high 后自动保存,GET /api/llm/roles/analyst 读回 intent.reasoning_effort=xhigh 且各路由 runtime_settings.reasoning.effort=xhigh。",
+        "2026-08-10 贴合实证(同一环境,直接 PUT intent.reasoning_effort=none):anthropic 协议的路由回读 low(none 不在该协议词表里,就低不就高只能上抬到最弱一档),openai_compatible 路由保持 none(该协议没有文档词表、也未探测,无边界可贴);验完已把该角色恢复成未选。"
+      ],
+      "screenshots": [
+        {
+          "file": "n0-roles-reasoning-effort-row.png",
+          "caption": "2026-08-10 worktree 实测(wt-dev --backend,Vite 5174 + 私有 sidecar 8788):角色参数行变三列 Max output tokens / Temperature / Reasoning effort;未选时显示 Provider default,说明文案「How hard the model works when it reasons; each model runs the nearest level it sells.」"
+        },
+        {
+          "file": "n0-roles-reasoning-effort-levels.png",
+          "caption": "2026-08-10 worktree 实测:fast 角色展开 Reasoning effort 下拉,档位为该角色各路由的并集并按强弱排序(Minimal/Low/Medium/High/Extra high/Max——gemini 词表的 minimal 与 anthropic 词表的 xhigh/max 合并),首项 Provider default 打勾"
+        }
       ]
     }
   ]

@@ -53,7 +53,7 @@ import {
   updateBundleIntent,
 } from "../model-bundle-utils"
 import { ModelItem } from "./ModelItem"
-import { roleTokenLimitSummary } from "./RoleCard"
+import { roleEffortLevels, roleTokenLimitSummary } from "./RoleCard"
 import { RoleNameDialog } from "./RoleNameDialog"
 import { RoleSettingsPanel } from "./RoleSettingsDialog"
 
@@ -129,6 +129,10 @@ export const ModelBundleCard = memo(function ModelBundleCard({
         max: null,
       },
     },
+    [providerModelsByRouteId, role],
+  )
+  const effortLevels = useMemo(
+    () => role ? roleEffortLevels(role, providerModelsByRouteId) : [],
     [providerModelsByRouteId, role],
   )
   const ownedProviderCodesByModel = useMemo<ReadonlyMap<string, ReadonlySet<string>>>(() => {
@@ -264,6 +268,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
             roleName={`bundle-${bundleId}`}
             modelFallbackEnabled={bundle.model_fallback_enabled ?? true}
             intent={bundle.intent}
+            effortLevels={effortLevels}
             tokenLimitSummary={tokenLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleBundleModelFallback(data, bundleId, checked))}
             onSubmit={(intent) => onChange(updateBundleIntent(data, bundleId, intent))}

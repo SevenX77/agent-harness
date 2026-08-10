@@ -155,6 +155,9 @@ from graph_agent_gateway.role_materialization import (
     materialize_role as gateway_materialize_role,
 )
 from graph_agent_gateway.route_handoff import ResolvedRouteChain
+from graph_agent_gateway.settings_bounds import (
+    documented_effort_levels as documented_effort_levels,
+)
 
 # Canonical 6-state route-state projector owned by the gateway package. Studio
 # renders gateway facts and must NOT recompute the state vocabulary inline.
@@ -900,6 +903,7 @@ __all__ = [
     "promotable_route_update",
     "CapabilitySource",
     "canonicalize_base_url",
+    "documented_effort_levels",
     "canonicalize_model",
     "normalize_route_capabilities",
     "build_runtime_setting_descriptors",

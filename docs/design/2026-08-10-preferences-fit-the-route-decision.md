@@ -171,9 +171,28 @@ ChatAnthropic(effort="medium")._get_request_payload(...)
 
 ### D-F. effort 进 UI,top_p 不进
 
-- **effort 进**:选项由该路由的 `RuntimeSettingDescriptor.allowed_values` 供给——
-  只有 `low/high/max` 的模型就只显示这三档,不显示一个选了也没用的 `medium`。
-  探测没跑过、`values` 为空时,控件呈"未探测"态并给出去测的入口,不臆造一份枚举。
+- **effort 进**:控件是角色级的一个下拉(与 temperature、max output tokens 同排),
+  选项 = 该角色所有路由报出的档位并集,按强弱排序——只有 `low/high/max` 的模型
+  就只显示这三档,不显示一个选了也没用的 `medium`。角色只选一次,各路由在
+  materialize 时各自贴合到自己卖的那一档(见 D-B),所以并集不会让某条路由收到
+  它拼不出来的名字。
+- **档位从哪条通道来(2026-08-10 落定,取代本节初稿的"由
+  `RuntimeSettingDescriptor.allowed_values` 供给")**:走
+  `ProviderModelOption.capabilities["reasoning_effort"].value.values`,
+  即 registry 响应里 model group 的路由能力投影。理由:两条通道都是同一份
+  registry 真相的按路由投影,而 capabilities 这条已经铺到角色卡片、
+  旁边那个 max output tokens 控件正是从它读上限的;`route_runtime_settings`
+  这条今天前端没有任何消费者,选它等于为一个控件把新 prop 穿过四层组件。
+  同一批数据、更短的路径,取短的。
+- **协议词表在读时补齐,不落盘**:路由能力里没有 `reasoning_effort` 时,
+  studio 后端在投影 model group 的那一刻按端点协议补上文档词表
+  (`_provider_route_ui_capabilities` → `documented_effort_levels`),
+  `source = "provider_doc"`。写进路由并持久化会随词表更新而变陈旧,
+  而"这个协议能拼出哪些名字"是读时随时可答的常量;实测结果(`probed_verified`)
+  一旦存在就原样保留,不被文档值覆盖。
+- **空态**:协议没有文档词表(如 openai_compatible,各型号档位不同)且探测未跑过时,
+  控件禁用并说明"该角色下没有模型报出档位",不臆造一份枚举。这里**不给"去测"入口**:
+  B2(effort 探测)落地之前,现有的路由测试并不测 effort,指过去等于给一个空承诺。
 - **top_p 不进**:它与 temperature 同向作用(一个改概率分布陡峭度,一个改候选池大小),
   各家文档均建议二选一。既然温度已有控件,再给一个会互相抵消的旋钮是增加误配面积。
   schema 里保留字段(路由/协议层仍需表达它),但没有 UI 写入口。
@@ -195,7 +214,10 @@ provider-doc 常量表并入该模块,`temperature.py` 现有的协议表迁入�
    调用正常返回(不是 400)。
 4. 给 Claude 路由设 effort:请求体里出现 `output_config.effort`(今天一个字节都没有)。
 5. 边界未知的路由:行为与今天完全一致(原样送 + 前决议的拒收兜底),无新增失败。
-6. LLM 角色面板出现 effort 控件,档位与该路由探测结果一致;top_p 无控件。
+6. LLM 角色面板出现 effort 控件:有实测档位的路由显示实测那几档,没实测但协议有文档
+   词表的显示文档词表,两者都没有则控件禁用并说明原因;选中的档位存进角色 intent,
+   materialize 后各路由的 `runtime_settings.reasoning.effort` 是各自贴合过的值;
+   top_p 无控件。
 7. 四道门禁全绿:ruff / mypy --strict ×2 / pytest ×3 / 前端 lint+typecheck+test+build。
 
 ## 4. 明确不做

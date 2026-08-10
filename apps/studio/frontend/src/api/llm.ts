@@ -413,6 +413,8 @@ export interface RoleIntent {
   thinking?: boolean
   max_output_tokens?: number | null
   temperature?: number | null
+  /** How hard the model works when it reasons; null keeps the provider's own default. */
+  reasoning_effort?: string | null
 }
 
 export interface RoleEntry {

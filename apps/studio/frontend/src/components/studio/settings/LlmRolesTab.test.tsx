@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { rolesDataToBackend } from "../../../api/llm"
 import { roleChainStatusKey, type RoleChainStatusMap } from "../../../hooks/useRoleTestChainRunner"
+import { PROVIDER_DEFAULT_EFFORT } from "@/components/studio/llm-effort"
 import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, RoleSettingsFields } from "./LlmRolesTab"
 import { formatThousands, stripThousands } from "./llm-roles/RoleSettingsDialog"
 import {
@@ -2378,7 +2379,9 @@ describe("LlmRolesTab controls", () => {
           thinking: true,
           maxOutputTokens: "128000",
           temperature: "0.7",
+          reasoningEffort: PROVIDER_DEFAULT_EFFORT,
         }}
+        effortLevels={[]}
         tokenLimitSummary={{
           context: {
             knownCount: 2,
@@ -2405,14 +2408,16 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).toContain('data-role-settings-fields="true"')
     expect(fieldsHtml).toContain('data-role-settings-toggles="true"')
     // Model Fallback and Thinking each get their own bordered box and fill the
-    // row (2-col grid) the same way the Max output tokens / Temperature row below
-    // does, instead of being nested inside one merged outer box.
+    // row the same way the Max output tokens / Temperature / Reasoning effort row
+    // below does, instead of being nested inside one merged outer box.
     expect(fieldsHtml).toContain('<div data-role-settings-toggles="true" class="grid gap-3 lg:grid-cols-2">')
     expect(fieldsHtml).toContain('data-role-thinking-setting="true"')
     expect(fieldsHtml).toContain('data-role-output-settings="true"')
     expect(fieldsHtml).toContain('data-role-output-token-input="true"')
     expect(fieldsHtml).toContain('data-role-temperature-settings="true"')
     expect(fieldsHtml).toContain('data-role-temperature-input="true"')
+    expect(fieldsHtml).toContain('data-role-effort-settings="true"')
+    expect(fieldsHtml).toContain('data-role-effort-input="true"')
     expect(fieldsHtml).toContain('data-slot="field-set"')
     expect(fieldsHtml).not.toContain("Provider Order")
     expect(fieldsHtml).not.toContain("Manual order")
@@ -2423,7 +2428,6 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).toContain('data-slot="switch"')
     expect(fieldsHtml).not.toContain('data-slot="radio-group"')
     expect(fieldsHtml).not.toContain("Preferred")
-    expect(fieldsHtml).not.toContain('data-slot="select-trigger"')
     // Context Tokens field is removed entirely.
     expect(fieldsHtml).not.toContain('data-role-context-settings="true"')
     expect(fieldsHtml).not.toContain("Context Tokens")
@@ -2452,17 +2456,19 @@ describe("LlmRolesTab controls", () => {
     expect(formatTemperaturePercent("not-a-number")).toBe("\u2014")
   })
 
-  it("maps the draft to the three-param role intent (empty output -> null, empty temperature -> 70%)", () => {
+  it("maps the draft to the role intent (empty output -> null, empty temperature -> 70%, unchosen effort -> provider default)", () => {
     expect(roleIntentFromSettingsDraft({
       providerPreference: "manual_order",
       thinking: true,
       maxOutputTokens: "128000",
       temperature: "0.7",
+      reasoningEffort: "high",
     })).toEqual({
       provider_preference: "manual_order",
       thinking: true,
       max_output_tokens: 128000,
       temperature: 0.7,
+      reasoning_effort: "high",
     })
 
     expect(roleIntentFromSettingsDraft({
@@ -2470,11 +2476,13 @@ describe("LlmRolesTab controls", () => {
       thinking: false,
       maxOutputTokens: "",
       temperature: "",
+      reasoningEffort: PROVIDER_DEFAULT_EFFORT,
     })).toEqual({
       provider_preference: "manual_order",
       thinking: false,
       max_output_tokens: null,
       temperature: 1.4,
+      reasoning_effort: null,
     })
   })
 
@@ -2498,7 +2506,9 @@ describe("LlmRolesTab controls", () => {
           thinking: false,
           maxOutputTokens: "",
           temperature: "",
+          reasoningEffort: PROVIDER_DEFAULT_EFFORT,
         }}
+        effortLevels={[]}
         tokenLimitSummary={{
           context: {
             knownCount: 0,

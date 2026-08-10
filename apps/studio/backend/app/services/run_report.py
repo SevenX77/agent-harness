@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.adapters.atomic_file import read_published_text
+from app.services.run_report_routes import routes_section
 
 __all__ = ["build_run_report", "write_run_report"]
 
@@ -77,6 +78,7 @@ def build_run_report(run_dir: Path) -> str:
         _failure_section(metadata, nodes),
         _inputs_section(run_dir, runtime_config),
         _nodes_section(nodes),
+        routes_section(events),
         _tools_section(events),
         _artifacts_section(run_dir),
         _compare_section(metadata),

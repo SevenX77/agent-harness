@@ -53,8 +53,6 @@ class RecordingManager:
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
 
-    def probe_provider(self, route: Any, runtime_policy: Any, **kwargs: Any) -> bool:
-        return True
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append(route.route_id)

@@ -85,15 +85,10 @@ def _snapshot():
 
 class RecordingClientManager:
     def __init__(self) -> None:
-        self.probes: list[tuple[str, int]] = []
         self.marked_down: list[tuple[str, str]] = []
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
-
-    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
-        self.probes.append((route.route_id, runtime_policy.probe_timeout_seconds))
-        return True
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append((route.route_id, str(exc)))
@@ -326,10 +321,13 @@ def test_model_override_is_exact_route_id() -> None:
         resolver.resolve("graph_agent", model_override="gpt-5")
 
 
-def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call() -> None:
+def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.route_handoff import ResolvedRouteChain
 
+    factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
     resolver = _resolver_from_snapshot(
         _snapshot(),
@@ -347,7 +345,9 @@ def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call
     ]
     assert not hasattr(resolved, "role_name")
     assert not hasattr(resolved, "lint_results")
-    assert client_manager.probes == []
+    # Resolving a chain asks no provider anything — not even the one cheap
+    # question a call would open with.
+    assert factory.builds == []
     assert client_manager.marked_down == []
 
 
@@ -453,14 +453,19 @@ def test_runtime_uses_route_secret_and_no_provider_env(
     response = model.invoke([HumanMessage(content="hello")])
 
     assert response.content == "ok"
-    assert client_manager.probes == [("openai-direct:gpt-5", 3)]
-    build = factory.builds[0]
+    # The probe is the first thing built: the same request, asking for one
+    # token, and waiting only as long as the policy's probe timeout.
+    probe_build = factory.builds[0]
+    assert probe_build["kwargs"]["timeout_seconds"] == 3
+    assert probe_build["kwargs"]["max_tokens"] == 1
+    build = factory.builds[1]
     assert build["route"].credential_ref == "endpoint:openai-direct"
     assert "api_key" not in build["route"].model_dump(mode="json")
     assert build["route"].credential_fingerprint
     assert factory.init_kwargs["credential_provider"].get("endpoint:openai-direct").get_secret_value() == "route-secret"
-    assert isinstance(factory.invocations[0]["messages"][0], SystemMessage)
-    assert factory.invocations[0]["messages"][0].content == "Always be exact."
+    call = factory.invocations[1]
+    assert isinstance(call["messages"][0], SystemMessage)
+    assert call["messages"][0].content == "Always be exact."
 
 
 def test_thinking_protocol_uses_capability_value_not_field_presence(

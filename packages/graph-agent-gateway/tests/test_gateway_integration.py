@@ -66,41 +66,27 @@ class AlwaysFailingClientManager:
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
 
-    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
-        return True
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         return None
 
 
-class ProbeFallbackClientManager:
+class ProviderStatusError(RuntimeError):
+    """A provider failure that says nothing about this request's settings."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class MarkDownRecordingClientManager:
+    """Health state only: probing is a request now, so the factory owns it."""
+
     def __init__(self) -> None:
         self.marked_down: list[str] = []
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
-
-    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
-        return route.route_id != "dead:claude"
-
-    def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
-        self.marked_down.append(route.route_id)
-
-
-class ProbeRouteFallbackClientManager:
-    def __init__(self) -> None:
-        self.marked_down: list[str] = []
-
-    def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
-        return False
-
-    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
-        if route.route_id == "missing:model":
-            class ProviderStatusError(RuntimeError):
-                status_code = 404
-
-            raise ProviderStatusError("model not found")
-        return True
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append(route.route_id)
@@ -113,8 +99,6 @@ class RecordingSuccessClientManager:
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
 
-    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
-        return True
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         return None
@@ -287,9 +271,12 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    client_manager = ProbeFallbackClientManager()
+    client_manager = MarkDownRecordingClientManager()
     factory = FakeRouteChatModelFactory(
-        behaviors={"anthropic-official:claude-sonnet-4.6": "ok from fallback"}
+        behaviors={
+            "dead:claude": ProviderStatusError("endpoint unreachable", 404),
+            "anthropic-official:claude-sonnet-4.6": "ok from fallback",
+        }
     )
     _install_route_factory(monkeypatch, factory)
     resolved_role = ResolvedRole(
@@ -354,11 +341,15 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
         "temperature": {"value": 0.2, "source": "route_setting", "message": None},
     }
     assert client_manager.marked_down == ["dead:claude"]
+    # Probe, probe, call: each candidate is asked the cheap question first, and
+    # only the route that answered it is asked the real one.
     assert [item["route"].route_id for item in factory.builds] == [
-        "anthropic-official:claude-sonnet-4.6"
+        "dead:claude",
+        "anthropic-official:claude-sonnet-4.6",
+        "anthropic-official:claude-sonnet-4.6",
     ]
-    assert factory.builds[0]["kwargs"]["max_tokens"] == 222
-    assert factory.builds[0]["kwargs"]["temperature"] == 0.2
+    assert factory.builds[-1]["kwargs"]["max_tokens"] == 222
+    assert factory.builds[-1]["kwargs"]["temperature"] == 0.2
     assert [e.decision for e in callback.events] == ["probe_failed", "answered"]
     assert callback.events[0].route_id == "dead:claude"
     assert callback.events[0].next_route_id == "anthropic-official:claude-sonnet-4.6"
@@ -383,9 +374,12 @@ def test_probe_missing_model_error_falls_back_to_next_route(
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    client_manager = ProbeRouteFallbackClientManager()
+    client_manager = MarkDownRecordingClientManager()
     factory = FakeRouteChatModelFactory(
-        behaviors={"fallback:model": "ok after missing model fallback"}
+        behaviors={
+            "missing:model": ProviderStatusError("model not found", 404),
+            "fallback:model": "ok after missing model fallback",
+        }
     )
     _install_route_factory(monkeypatch, factory)
     resolved_role = ResolvedRole(
@@ -427,7 +421,11 @@ def test_probe_missing_model_error_falls_back_to_next_route(
     result = model.invoke([HumanMessage(content="hello")])
 
     assert result.content == "ok after missing model fallback"
-    assert [item["route"].route_id for item in factory.builds] == ["fallback:model"]
+    assert [item["route"].route_id for item in factory.builds] == [
+        "missing:model",
+        "fallback:model",
+        "fallback:model",
+    ]
     assert client_manager.marked_down == ["missing:model"]
     assert [e.decision for e in callback.events] == ["probe_failed", "answered"]
     event_payload = callback.events[0].model_dump(mode="json")
@@ -492,7 +490,13 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
 
     model.invoke([HumanMessage(content="hello")])
 
-    assert [item["kwargs"] for item in factory.builds] == [
+    # The probe asks with the same settings as the call — that is the whole
+    # point of asking — differing only in the one token it pays for.
+    probe_kwargs, call_kwargs = (item["kwargs"] for item in factory.builds)
+    assert probe_kwargs.pop("timeout_seconds") == 5
+    assert probe_kwargs.pop("max_tokens") == 1
+    assert probe_kwargs == {key: value for key, value in call_kwargs.items() if key != "max_tokens"}
+    assert [call_kwargs] == [
         {
             "max_tokens": 333,
             "temperature": 0.4,

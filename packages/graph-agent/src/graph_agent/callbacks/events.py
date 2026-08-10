@@ -342,6 +342,35 @@ class LLMRouteDecisionEvent(_EventBase):
     code: str | None = None
 
 
+class LLMCallSettingsEvent(_EventBase):
+    """What one call asked its route to do, and what became of each of it.
+
+    Separate from :class:`LLMRouteDecisionEvent` because they answer different
+    questions: that one says which route produced the answer and why it
+    changed, this one says what parameters the answer was produced under.
+
+    ``settings`` carries one entry per setting the user actually chose —
+    defaults nobody picked are left out, or the entries that matter would be
+    buried under the ones that do not. Each entry says what was requested and
+    one verdict from a closed set: ``applied`` when the answer itself shows it
+    took effect, ``sent`` when nothing can confirm either way, ``adjusted``
+    when the value had to be moved to fit the route, ``unsupported`` when the
+    protocol had nowhere to put it, ``rejected`` when the provider refused it,
+    and ``ignored`` when it was accepted and the answer contradicts it.
+
+    The gateway defines its own copy of this shape (it does not depend on this
+    package); the two are kept in step by hand.
+    """
+
+    event_type: Literal["llm_call_settings"] = "llm_call_settings"
+    phase_name: str
+    settings: list[dict[str, Any]] = Field(default_factory=list)
+    route_id: str | None = None
+    provider_model_id: str | None = None
+    protocol: str | None = None
+    code: str | None = None
+
+
 class LLMDeltaEvent(_EventBase):
     """A piece of an answer that is still arriving.
 
@@ -629,6 +658,7 @@ CallbackEvent = Annotated[
     | BuiltinSubagentFallbackEvent
     | PromptCapturedEvent
     | LLMRouteDecisionEvent
+    | LLMCallSettingsEvent
     | RunStartedEvent
     | RunEndedEvent
     | ValidationPassEvent
@@ -673,6 +703,7 @@ __all__ = [
     "BuiltinSubagentExitEvent",
     "BuiltinSubagentFallbackEvent",
     "PromptCapturedEvent",
+    "LLMCallSettingsEvent",
     "LLMRouteDecisionEvent",
     "RunStartedEvent",
     "RunEndedEvent",

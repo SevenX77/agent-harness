@@ -193,6 +193,16 @@ _SETTING_OF_KWARG: Mapping[str, str] = {
     "thinking_budget_tokens": "reasoning.budget_tokens",
 }
 
+# The same correspondence read the other way, for callers holding a setting name
+# and needing the keyword a request spells it with. Settings whose name and
+# keyword already agree are absent from both: looking one up falls through to
+# itself.
+KWARG_OF_SETTING: Mapping[str, str] = {
+    **{setting: keyword for keyword, setting in _SETTING_OF_KWARG.items()},
+    "max_output_tokens": "max_tokens",
+    "reasoning.enabled": "reasoning",
+}
+
 
 def _asked_preferences(
     route: ResolvedRoute,

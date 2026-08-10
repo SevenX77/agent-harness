@@ -78,6 +78,10 @@ export function eventMessage(event: CallbackEvent): string {
       const details = routeDecisionDetails(event)
       return details ? routeDecisionMessage(details) : event.event_type
     }
+    case 'llm_call_settings': {
+      const details = callSettingsDetails(event)
+      return details ? callSettingsMessage(details) : event.event_type
+    }
     case 'model_resolved':
       return typeof event.resolved_model === 'string' && event.resolved_model !== ''
         ? `Model resolved: ${event.resolved_model}`
@@ -114,6 +118,10 @@ export type TraceSeverity = 'error' | 'warning' | 'normal'
 export function eventSeverity(event: CallbackEvent): TraceSeverity {
   if (event.event_type === 'internal_error' || event.event_type === 'validation_fail') {
     return 'error'
+  }
+  const settings = callSettingsDetails(event)
+  if (settings !== null) {
+    return settingsCarryWarning(settings.settings) ? 'warning' : 'normal'
   }
   const decision = routeDecisionDetails(event)?.decision
   if (decision === undefined || decision === 'answered') {
@@ -538,4 +546,104 @@ export function runOutcomeFromEvents(events: CallbackEvent[]): TraceRunOutcome {
     return 'interrupted'
   }
   return 'success'
+}
+
+// The gateway emits `llm_call_settings` (graph_agent_gateway/events.py, code
+// [F-v3-gateway-llm-call-settings]) once per answered call, carrying one
+// verdict per setting the user actually chose. It answers a different question
+// from the route decision beside it: not which route produced the answer, but
+// what parameters the answer was produced under.
+//
+// Two verdicts exist so this cannot flatter itself. `sent` is the honest
+// answer for settings whose effect nothing in the response can confirm, and
+// `ignored` is reserved for when the answer contradicts the request.
+
+export const SETTING_VERDICTS = [
+  'applied',
+  'sent',
+  'adjusted',
+  'unsupported',
+  'rejected',
+  'ignored',
+] as const
+
+export type SettingVerdict = (typeof SETTING_VERDICTS)[number]
+
+/** The verdicts that mean the caller did not get what they asked for. */
+const WARNING_VERDICTS: ReadonlySet<SettingVerdict> = new Set<SettingVerdict>([
+  'adjusted',
+  'unsupported',
+  'rejected',
+  'ignored',
+])
+
+export interface SettingOutcome {
+  /** Registry name of the setting, e.g. "reasoning.effort". */
+  setting: string
+  /** The value the user asked for — not the one that was sent, once it moved. */
+  requested: JsonValue
+  verdict: SettingVerdict
+  /** Why, when the verdict alone does not say it. */
+  reason: string | null
+}
+
+export interface CallSettingsDetails {
+  routeId: string | null
+  providerModelId: string | null
+  protocol: string | null
+  settings: SettingOutcome[]
+}
+
+export function callSettingsDetails(event: CallbackEvent): CallSettingsDetails | null {
+  if (event.event_type !== 'llm_call_settings') {
+    return null
+  }
+  const raw = Array.isArray(event.settings) ? event.settings : []
+  return {
+    routeId: optionalString(event.route_id),
+    providerModelId: optionalString(event.provider_model_id),
+    protocol: optionalString(event.protocol),
+    settings: raw.map(settingOutcome).filter((outcome): outcome is SettingOutcome => outcome !== null),
+  }
+}
+
+function settingOutcome(raw: JsonValue): SettingOutcome | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null
+  }
+  const record = raw as Record<string, JsonValue>
+  const setting = optionalString(record.setting)
+  // A verdict this build has never heard of is not rendered as one it has.
+  const verdict = SETTING_VERDICTS.find((known) => known === record.verdict)
+  if (setting === null || verdict === undefined) {
+    return null
+  }
+  return {
+    setting,
+    requested: record.requested ?? null,
+    verdict,
+    reason: optionalString(record.reason),
+  }
+}
+
+export function settingsCarryWarning(settings: readonly SettingOutcome[]): boolean {
+  return settings.some((outcome) => WARNING_VERDICTS.has(outcome.verdict))
+}
+
+/** One line per setting: what was asked for, and what became of it. */
+export function settingOutcomeMessage(outcome: SettingOutcome): string {
+  const requested = outcome.requested === null ? '' : ` ${String(outcome.requested)}`
+  const because = outcome.reason === null ? '' : `: ${outcome.reason}`
+  return `${outcome.setting}${requested} — ${outcome.verdict}${because}`
+}
+
+/** The row's headline: how many settings were judged, and whether any moved. */
+export function callSettingsMessage(details: CallSettingsDetails): string {
+  const count = details.settings.length
+  const noun = count === 1 ? 'setting' : 'settings'
+  if (!settingsCarryWarning(details.settings)) {
+    return `${count} ${noun} sent as asked`
+  }
+  const moved = details.settings.filter((outcome) => WARNING_VERDICTS.has(outcome.verdict)).length
+  return `${moved} of ${count} ${noun} did not run as asked`
 }

@@ -21,6 +21,7 @@ import {
   tokenText,
   toolCallSummary,
 } from '../../utils/trace'
+import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { EventTypeBadge } from './EventTypeBadge'
@@ -32,6 +33,12 @@ interface TraceStepRowProps {
   expanded: boolean
   onToggleExpanded: () => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
+  /**
+   * What this step has produced so far, while it is producing it. Absent once
+   * the step is done — the finished answer is on the closing event, and showing
+   * both would be the same text twice from two sources that can disagree.
+   */
+  liveOutput?: StepOutput
 }
 
 /**
@@ -51,6 +58,7 @@ export function TraceStepRow({
   expanded,
   onToggleExpanded,
   onSelectEvent,
+  liveOutput,
 }: TraceStepRowProps) {
   const running = step.status === 'running'
   // Chips describe the outcome, so they read from the half that HAS one.
@@ -150,6 +158,7 @@ export function TraceStepRow({
           </p>
         ) : null}
         {routeDecision ? <RouteDecisionBlock details={routeDecision} severity={severity} /> : null}
+        {running && liveOutput ? <LiveOutput output={liveOutput} /> : null}
         <ToolHeadline step={step} />
         {failures.length > 0 ? <ErrorStack failures={failures} /> : null}
       </button>
@@ -237,6 +246,39 @@ function ToolArguments({ event }: { event: CallbackEvent }) {
       <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
         {jsonText(event.args)}
       </pre>
+    </div>
+  )
+}
+
+/**
+ * The answer arriving, inside the step that is producing it.
+ *
+ * Not a separate panel: the same text would then have two homes — a live one
+ * and the finished summary on the row — and the two would disagree the moment
+ * a piece is dropped (decision 2026-08-09 D6). It renders only while the step
+ * runs; when the answer lands, the row settles into its own summary and this
+ * goes away, so nothing is ever shown from two sources at once.
+ *
+ * Thinking is kept visually apart from the answer for the same reason it
+ * travels on its own channel: it is the model working, not what it replied.
+ */
+function LiveOutput({ output }: { output: StepOutput }) {
+  if (!output.text && !output.thinking) {
+    return null
+  }
+  return (
+    <div data-trace-live-output className="mt-2 space-y-1.5">
+      {output.thinking ? (
+        <p className="whitespace-pre-wrap rounded border border-border bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground">
+          {output.thinking}
+        </p>
+      ) : null}
+      {output.text ? (
+        <p className="whitespace-pre-wrap text-xs leading-snug text-foreground/90">
+          {output.text}
+          <span aria-hidden className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-foreground/60 align-middle" />
+        </p>
+      ) : null}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
+import type { RunDeltas } from '../../hooks/useRunDeltas'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
 import { RUN_SCOPE, isPredictTrace } from '../../utils/trace'
 import {
@@ -43,6 +44,11 @@ interface TraceEventListProps {
    * here rather than in a separate panel section (decision 2026-08-09 D8).
    */
   outcome?: TraceOutcomeEntry | null
+  /**
+   * Live output keyed by step id. A row takes only its own step's entry — the
+   * whole map would make every row re-render on every token of every step.
+   */
+  deltas?: RunDeltas
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
@@ -63,6 +69,7 @@ export function TraceEventList({
   focusPhase = null,
   outcome = null,
   onSelectEvent,
+  deltas,
 }: TraceEventListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState<HTMLElement | null>(null)
@@ -219,6 +226,7 @@ export function TraceEventList({
                         expanded={isExpanded(step.key, step.status)}
                         onToggleExpanded={() => toggleExpanded(step.key, step.status)}
                         onSelectEvent={onSelectEvent}
+                        liveOutput={step.stepId ? deltas?.[step.stepId] : undefined}
                       />
                     </div>
                   )

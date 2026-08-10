@@ -15,7 +15,7 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
     // This is the whole point: the reader sees "this node is thinking, here is
     // what it was asked" while it happens, not a summary once it is over.
     const steps = buildTraceSteps(indexed([
-      { event_type: 'prompt_captured', phase_name: 'draft' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
     ]))
 
     expect(steps).toHaveLength(1)
@@ -25,8 +25,8 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
 
   it('closes that same step when the call comes back — one step, not two rows', () => {
     const steps = buildTraceSteps(indexed([
-      { event_type: 'prompt_captured', phase_name: 'draft' },
-      { event_type: 'llm_call', phase_name: 'draft' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'llm_call', phase_name: 'draft', step_id: 's1' },
     ]))
 
     expect(steps).toHaveLength(1)
@@ -37,15 +37,33 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
 
   it('does not let one node\'s answer close another node\'s prompt', () => {
     const steps = buildTraceSteps(indexed([
-      { event_type: 'prompt_captured', phase_name: 'draft' },
-      { event_type: 'prompt_captured', phase_name: 'review' },
-      { event_type: 'llm_call', phase_name: 'review' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'prompt_captured', phase_name: 'review', step_id: 's2' },
+      { event_type: 'llm_call', phase_name: 'review', step_id: 's2' },
     ]))
 
     expect(steps).toHaveLength(2)
     expect(steps[0].phase).toBe('draft')
     expect(steps[0].status).toBe('running')
     expect(steps[1].phase).toBe('review')
+    expect(steps[1].status).toBe('done')
+  })
+
+  // Pairing by phase was only ever adequate because two calls in one phase
+  // never overlapped in the trace. An agent turn makes several, so the engine
+  // mints a step id and puts it on both halves — the same reason tool halves
+  // carry a call id.
+  it('pairs LLM halves by step id even when both calls are in one phase', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's2' },
+      { event_type: 'llm_call', phase_name: 'draft', step_id: 's2' },
+    ]))
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0].stepId).toBe('s1')
+    expect(steps[0].status).toBe('running')
+    expect(steps[1].stepId).toBe('s2')
     expect(steps[1].status).toBe('done')
   })
 
@@ -80,7 +98,7 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
     // A filter can hide the opening half, and a trace can be read from any
     // point. Neither is a reason to drop the event on the floor.
     const steps = buildTraceSteps(indexed([
-      { event_type: 'llm_call', phase_name: 'draft' },
+      { event_type: 'llm_call', phase_name: 'draft', step_id: 's1' },
     ]))
 
     expect(steps).toHaveLength(1)
@@ -90,9 +108,9 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
 
   it('keeps steps in the order they started', () => {
     const steps = buildTraceSteps(indexed([
-      { event_type: 'prompt_captured', phase_name: 'draft' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
       { event_type: 'phase_start', phase_name: 'draft' },
-      { event_type: 'llm_call', phase_name: 'draft' },
+      { event_type: 'llm_call', phase_name: 'draft', step_id: 's1' },
     ]))
 
     expect(steps.map((step) => step.start.index)).toEqual([0, 1])

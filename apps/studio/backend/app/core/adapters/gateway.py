@@ -76,6 +76,9 @@ from graph_agent_gateway.registry.capabilities import (
     build_runtime_setting_descriptors as build_runtime_setting_descriptors,
 )
 from graph_agent_gateway.registry.capabilities import (
+    measured_effort_capability as measured_effort_capability,
+)
+from graph_agent_gateway.registry.capabilities import (
     normalize_route_capabilities as normalize_route_capabilities,
 )
 from graph_agent_gateway.registry.contracts import CredentialProviderProtocol as CredentialProviderProtocol
@@ -157,6 +160,9 @@ from graph_agent_gateway.role_materialization import (
 from graph_agent_gateway.route_handoff import ResolvedRouteChain
 from graph_agent_gateway.settings_bounds import (
     documented_effort_levels as documented_effort_levels,
+)
+from graph_agent_gateway.settings_bounds import (
+    effort_probe_candidates as effort_probe_candidates,
 )
 
 # Canonical 6-state route-state projector owned by the gateway package. Studio
@@ -906,6 +912,8 @@ __all__ = [
     "documented_effort_levels",
     "canonicalize_model",
     "normalize_route_capabilities",
+    "measured_effort_capability",
+    "effort_probe_candidates",
     "build_runtime_setting_descriptors",
     "ProfileSelectionError",
     "select_verified_profile",

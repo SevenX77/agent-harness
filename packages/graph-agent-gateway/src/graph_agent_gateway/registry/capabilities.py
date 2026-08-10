@@ -6,7 +6,7 @@ must not encode user runtime intent; role/profile route entries own that.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from graph_agent_gateway.registry.schema import (
@@ -202,6 +202,25 @@ def normalize_route_capabilities(
     return normalized
 
 
+def measured_effort_capability(levels: Sequence[str]) -> CapabilityValue:
+    """The levels a route was measured to accept, as the record fitting reads.
+
+    An empty measurement is recorded too: "it sells none of them" is an answer,
+    while an absent capability reads as "nobody has asked yet" and invites the
+    same spend again.
+    """
+    measured = [level for level in levels if isinstance(level, str)]
+    return CapabilityValue(
+        value={"supported": bool(measured), "values": measured},
+        source="probed_verified",
+        message=(
+            "Measured by asking this route for each level: " + ", ".join(measured) + "."
+            if measured
+            else "This route refused every reasoning effort level it was offered."
+        ),
+    )
+
+
 def build_runtime_setting_descriptors(
     route: ProviderRoute,
 ) -> dict[str, RuntimeSettingDescriptor]:
@@ -364,4 +383,8 @@ def _anthropic_adaptive_thinking_supported(provider_model_id: str) -> bool:
     )
 
 
-__all__ = ["build_runtime_setting_descriptors", "normalize_route_capabilities"]
+__all__ = [
+    "build_runtime_setting_descriptors",
+    "measured_effort_capability",
+    "normalize_route_capabilities",
+]

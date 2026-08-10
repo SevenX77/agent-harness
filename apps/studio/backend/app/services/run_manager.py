@@ -102,6 +102,14 @@ class BatchRecord:
 
 def _queue_event_subscriber(process_queue: Any) -> Any:
     def _emit(event: CallbackEvent) -> None:
+        # This queue is the step-frame road: everything that travels it is given
+        # a sequence number and kept in the replay buffer. A delta frame must
+        # have neither — it is allowed to be merged or dropped, and a droppable
+        # frame holding a sequence number turns every drop into a gap that
+        # reconnect reports as data loss. Until deltas have a road of their own
+        # they do not leave the engine process.
+        if not getattr(type(event), "persisted", True):
+            return
         process_queue.put({"type": "event", "event": event.model_dump(mode="json")})
 
     return _emit

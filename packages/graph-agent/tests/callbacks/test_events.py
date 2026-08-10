@@ -21,6 +21,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     InternalErrorEvent,
     InterruptedEvent,
     LLMCallEvent,
+    LLMDeltaEvent,
     LLMRouteDecisionEvent,
     ModelResolvedEvent,
     NudgeEvent,
@@ -46,6 +47,7 @@ _ALL_EVENT_CLASSES = [
     PhaseStartEvent,
     PhaseEndEvent,
     LLMCallEvent,
+    LLMDeltaEvent,
     ToolCallEvent,
     ToolCallStartedEvent,
     ValidationFailEvent,
@@ -85,7 +87,14 @@ _ALL_EVENT_CLASSES = [
 _MIN_CTOR: dict[type, dict] = {
     PhaseStartEvent: {"phase_name": "p"},
     PhaseEndEvent: {"phase_name": "p"},
-    LLMCallEvent: {"phase_name": "p", "input_tokens": 10, "output_tokens": 5},
+    LLMCallEvent: {
+        "phase_name": "p",
+        "step_id": "step-1",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "response_data": {"content": "ok"},
+    },
+    LLMDeltaEvent: {"phase_name": "p", "step_id": "step-1", "channel": "text"},
     ToolCallStartedEvent: {"tool_call_id": "c1", "phase_name": "p", "tool_name": "t"},
     ToolCallEvent: {"tool_call_id": "c1", "phase_name": "p", "tool_name": "t", "result": "r"},
     ValidationFailEvent: {"phase_name": "p", "retry_count": 1},
@@ -101,7 +110,7 @@ _MIN_CTOR: dict[type, dict] = {
         "question": "q",
         "decision": "d",
     },
-    PromptCapturedEvent: {"phase_name": "p"},
+    PromptCapturedEvent: {"phase_name": "p", "step_id": "step-1"},
     LLMRouteDecisionEvent: {
         "phase_name": "p",
         "decision": "fell_back",
@@ -237,6 +246,7 @@ def test_resume_related_events_carry_checkpoint_identity() -> None:
 class TestParallelMapGrouping:
     def test_sub_run_id_and_group_key_preserved(self) -> None:
         ev = PromptCapturedEvent(
+            step_id="step-1",
             phase_name="p",
             sub_run_id="sub-42",
             group_key="pmap-xyz",
@@ -258,6 +268,7 @@ class TestNewEventShapes:
     def test_prompt_captured_captures_triple(self) -> None:
         ev = PromptCapturedEvent(
             phase_name="extract",
+            step_id="step-1",
             llm_role="writer",
             resolved_model="claude-sonnet-4-6",
             template_source="prompts/writer.j2",
@@ -269,13 +280,13 @@ class TestNewEventShapes:
         assert ev.resolved_prompt[0]["role"] == "system"
 
     def test_prompt_captured_loop_index_default(self) -> None:
-        ev = PromptCapturedEvent(phase_name="p")
+        ev = PromptCapturedEvent(phase_name="p", step_id="step-1")
         assert ev.loop_index == 1
 
     def test_prompt_captured_loop_index_rejects_zero(self) -> None:
         for loop_index in (0, -1):
             with pytest.raises(ValidationError):
-                PromptCapturedEvent(phase_name="p", loop_index=loop_index)
+                PromptCapturedEvent(phase_name="p", step_id="step-1", loop_index=loop_index)
 
     def test_a_route_decision_captures_the_provider_transition(self) -> None:
         ev = LLMRouteDecisionEvent(

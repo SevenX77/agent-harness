@@ -42,7 +42,6 @@ from graph_agent.callbacks.events import (
     CompactionEvent,
     DeadEndPrunedEvent,
     FinishTaskEvent,
-    LLMCallEvent,
     NudgeEvent,
     PhaseEndEvent,
     PhaseStartEvent,
@@ -106,6 +105,9 @@ class TracingCallback(Callback):
         ``trace.jsonl`` filename is the Studio-facing source of truth.
         """
         if self._typed_jsonl_path is None:
+            return
+        # See _TraceJsonlSink.emit: droppable frames stay out of the record.
+        if not getattr(event, "persisted", True):
             return
         with self._typed_jsonl_path.open("a", encoding="utf-8") as f:
             f.write(event.model_dump_json() + "\n")
@@ -186,8 +188,7 @@ class TracingCallback(Callback):
         input_tokens: int,
         output_tokens: int,
         *,
-        messages: list[dict[str, Any]] | None = None,
-        response_data: dict[str, Any] | None = None,
+        response_data: dict[str, Any],
     ) -> None:
         """Append one LLM event to the trace."""
         self._total_llm_calls += 1
@@ -208,24 +209,13 @@ class TracingCallback(Callback):
             EVENT_LLM_CALL,
             phase_name,
             {
-                "messages": messages or [],
-                "response": response_data or {},
+                "response": response_data,
                 "usage": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                 },
             },
         )
-        self._write_typed_event(
-            LLMCallEvent(
-                phase_name=phase_name,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                messages=messages,
-                response_data=response_data,
-            )
-        )
-
     def on_tool_call(
         self,
         phase_name: str,

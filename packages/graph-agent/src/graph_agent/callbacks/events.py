@@ -28,7 +28,7 @@ works without explicit ``model_rebuild`` calls at import.
 """
 
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,6 +43,16 @@ class _EventBase(BaseModel):
     """Fields shared by every ``CallbackEvent`` variant."""
 
     model_config = ConfigDict(extra="forbid")
+
+    # Whether this kind of frame belongs in the permanent record. A step frame
+    # does: it is what `report.md`, evidence queries, canvas node state and the
+    # token totals are all read back out of. A delta frame does not: it may be
+    # merged with its neighbours or dropped under backpressure, and a record
+    # that keeps some of a droppable stream describes a run nobody had.
+    #
+    # It is a ClassVar, not a field: the answer is decided by the kind of frame,
+    # so an instance carrying its own copy could contradict its own type.
+    persisted: ClassVar[bool] = True
 
     schema_version: Literal["1.0"] = SCHEMA_VERSION
     timestamp: str = Field(default_factory=_utc_now_iso)
@@ -71,16 +81,30 @@ class PhaseEndEvent(_EventBase):
 
 
 class LLMCallEvent(_EventBase):
+    """What one LLM round-trip cost and what it produced.
+
+    ``response_data`` is required, and that is the whole reason the deltas
+    streaming the same text are allowed to be dropped: the answer is written
+    down once, in full, here. An optional field would make "the answer exists
+    somewhere" depend on nothing, and the delta stream — which is explicitly
+    droppable — would silently become the only copy.
+
+    The prompt is deliberately absent. It travelled on the opening frame, and a
+    second copy would be both the largest payload of a run written twice and a
+    second truth that can drift from the first.
+    """
+
     event_type: Literal["llm_call"] = "llm_call"
     phase_name: str
+    # Repeats the identity minted on the opening frame — see PromptCapturedEvent.
+    step_id: str
     input_tokens: int
     output_tokens: int
     # The model that actually answered this call, as the provider reported it on
     # the response. A fallback chain means the role does not decide it up front,
     # so per-call is the only place it is true.
     resolved_model: str | None = None
-    messages: list[dict[str, Any]] | None = None
-    response_data: dict[str, Any] | None = None
+    response_data: dict[str, Any]
     parent_node_id: str | None = None
     node_type: str | None = None
 
@@ -265,6 +289,10 @@ class PromptCapturedEvent(_EventBase):
 
     event_type: Literal["prompt_captured"] = "prompt_captured"
     phase_name: str
+    # The identity of the call this frame opens. Its closing frame and every
+    # delta in between repeat it, because a reader watching several concurrent
+    # calls has no other way to tell which one a piece belongs to.
+    step_id: str
     llm_role: str | None = None
     resolved_model: str | None = None
     template_source: str | None = None
@@ -311,6 +339,34 @@ class LLMRouteDecisionEvent(_EventBase):
     next_route_id: str | None = None
     voided_streamed_answer: bool = False
     code: str | None = None
+
+
+class LLMDeltaEvent(_EventBase):
+    """A piece of an answer that is still arriving.
+
+    One event with a ``channel``, not one event type per channel: the model
+    producing reasoning and the model producing its answer are the same fact —
+    a step emitted a bit more output — differing only in which output. A third
+    channel is a new member of that set, not a new contract.
+
+    ``restarts_step`` says the pieces delivered so far belong to an attempt that
+    was abandoned. Truncation is only knowable once a response ends, so a retry
+    necessarily happens after text has already been shown; whoever is displaying
+    it has to hear that it no longer counts.
+
+    Not persisted (see ``_EventBase.persisted``): the text spelled out here is
+    written whole on the closing ``llm_call`` frame, which is what makes losing
+    a delta harmless.
+    """
+
+    persisted: ClassVar[bool] = False
+
+    event_type: Literal["llm_delta"] = "llm_delta"
+    phase_name: str
+    step_id: str
+    channel: Literal["text", "thinking"]
+    text: str = ""
+    restarts_step: bool = False
 
 
 class BlackboardReduceEvent(_EventBase):
@@ -555,6 +611,7 @@ CallbackEvent = Annotated[
     | PredictChainStartEvent
     | PhaseEndEvent
     | LLMCallEvent
+    | LLMDeltaEvent
     | ToolCallStartedEvent
     | ToolCallEvent
     | ValidationFailEvent
@@ -599,6 +656,7 @@ __all__ = [
     "PredictChainStartEvent",
     "PhaseEndEvent",
     "LLMCallEvent",
+    "LLMDeltaEvent",
     "ToolCallStartedEvent",
     "ToolCallEvent",
     "ValidationFailEvent",

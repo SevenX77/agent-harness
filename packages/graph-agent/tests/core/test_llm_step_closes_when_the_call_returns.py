@@ -36,7 +36,18 @@ class Recorder:
         self.events.append(event)
 
     def types(self) -> list[str]:
-        return [getattr(event, "event_type", "?") for event in self.events]
+        """The step frames, which is what "a step opened and closed" is about.
+
+        Delta frames are filtered out because a pairing this file is checking
+        should not change with how many pieces an answer happened to arrive in
+        — that is the delta stream's business, and it is covered where it lives
+        (``tests/tracing/test_delta_frames.py``).
+        """
+        return [
+            getattr(event, "event_type", "?")
+            for event in self.events
+            if getattr(type(event), "persisted", True)
+        ]
 
 
 def test_a_call_reports_its_own_ending(reset_run_state: None = None) -> None:

@@ -23,8 +23,10 @@ def _event_class(name: str) -> type[Any]:
 def test_v4_micro_topology_fields_are_available_on_llm_and_tool_events() -> None:
     llm = LLMCallEvent(
         phase_name="draft",
+        step_id="step-1",
         input_tokens=10,
         output_tokens=3,
+        response_data={"content": "ok"},
         parent_node_id="draft",
         node_type="llm_call",
     )
@@ -44,7 +46,13 @@ def test_v4_micro_topology_fields_are_available_on_llm_and_tool_events() -> None
 
 
 def test_v4_micro_topology_fields_default_to_none_for_legacy_construction() -> None:
-    llm = LLMCallEvent(phase_name="draft", input_tokens=10, output_tokens=3)
+    llm = LLMCallEvent(
+        phase_name="draft",
+        step_id="step-1",
+        input_tokens=10,
+        output_tokens=3,
+        response_data={"content": "ok"},
+    )
     tool = ToolCallEvent(
         tool_call_id="call-1", phase_name="draft", tool_name="lookup", result="ok"
     )

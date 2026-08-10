@@ -11,7 +11,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
-from graph_agent.tracing.steps import StepReporter
+from graph_agent.tracing.steps import LlmCallStep, StepReporter
 
 
 class LLMProviderRequest(BaseModel):
@@ -35,6 +35,12 @@ class LLMProviderChunk(BaseModel):
     the tool calls and the token usage on whichever slice it knows them, and
     the assembler merges the slices in arrival order.
 
+    ``reasoning`` is what the model said while working out the answer, on the
+    slice it said it. It is a separate field rather than more ``content``
+    because it is not part of the answer: a caller that folded it in would hand
+    the agent loop a message the model never gave, and a reader would see the
+    model talking to itself presented as its reply.
+
     ``restarts_answer`` says this slice begins the answer over: everything
     delivered before it belongs to an attempt that was abandoned and is no part
     of the answer. Hosts behind this Port retry — a larger budget after an
@@ -45,6 +51,7 @@ class LLMProviderChunk(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
     content: Any = ""
+    reasoning: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     restarts_answer: bool = False
 
@@ -193,7 +200,9 @@ class LLMProviderChatModel(BaseChatModel):
             # is handed the finished message: the loop needs the whole answer to
             # decide its next move, while everything watching the run needs to
             # know the step is still running. Only the arrival is incremental.
-            response = _assemble(self.provider.stream(self._request(messages, stop, kwargs)))
+            response = _assemble(
+                _reported(self.provider.stream(self._request(messages, stop, kwargs)), step)
+            )
             response_metadata = dict(response.metadata)
             tool_calls = response_metadata.pop("tool_calls", None) or []
             usage_metadata = response_metadata.pop("usage_metadata", None)
@@ -214,6 +223,24 @@ class LLMProviderChatModel(BaseChatModel):
 
     def _steps(self) -> StepReporter:
         return StepReporter(callbacks=self.event_callbacks, phase_name=self.phase_name or "unknown")
+
+
+def _reported(chunks: Iterator[LLMProviderChunk], step: LlmCallStep) -> Iterator[LLMProviderChunk]:
+    """Pass the slices through, reporting each one as it goes by.
+
+    A separate pass rather than a hook inside ``_assemble``: folding slices into
+    an answer is a pure computation and stays one, while telling the run what
+    just arrived is a side effect and stays outside it. Both walk the same
+    iterator once, so nothing is buffered to do it.
+    """
+    for chunk in chunks:
+        if chunk.restarts_answer:
+            step.delta("", restarts_step=True)
+        if chunk.reasoning:
+            step.delta(chunk.reasoning, channel="thinking")
+        if isinstance(chunk.content, str) and chunk.content:
+            step.delta(chunk.content)
+        yield chunk
 
 
 def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:

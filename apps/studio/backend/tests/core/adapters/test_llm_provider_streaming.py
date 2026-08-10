@@ -198,3 +198,27 @@ def test_a_model_that_yields_nothing_still_closes_the_answer() -> None:
     slices = list(_GatewayBackedLLMProvider(_StreamingResolver([])).stream(_request()))
 
     assert [s.content for s in slices] == [""]
+
+
+def test_the_model_thinking_out_loud_is_not_folded_into_its_answer() -> None:
+    """Reasoning arrives on the same wire as the answer and is not the answer.
+
+    An openai-compatible provider reports it in `reasoning_content` alongside an
+    empty `content`, precisely because it is not part of the reply. Passing it
+    through as content would hand the agent loop a message the model never gave;
+    dropping it would lose the only thing there is to show during the longest
+    silence in a run.
+    """
+
+    resolver = _StreamingResolver(
+        [
+            AIMessageChunk(content="", additional_kwargs={"reasoning_content": "let me"}),
+            AIMessageChunk(content="", additional_kwargs={"reasoning_content": " think"}),
+            _chunk("42"),
+        ]
+    )
+
+    slices = list(_GatewayBackedLLMProvider(resolver).stream(_request()))
+
+    assert [s.reasoning for s in slices if s.reasoning] == ["let me", " think"]
+    assert "".join(s.content for s in slices if isinstance(s.content, str)) == "42"

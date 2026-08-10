@@ -21,6 +21,12 @@ class _TraceJsonlSink:
         self._lock = RLock()
 
     def emit(self, event: Any) -> None:
+        # A frame that is allowed to be merged or dropped must not end up in a
+        # file people read as the record of what happened: whatever survived
+        # would describe a run nobody had. The frame answers this itself, so
+        # this sink never keeps a list of kinds that could fall out of date.
+        if not getattr(event, "persisted", True):
+            return
         payload = event.model_dump(mode="json") if hasattr(event, "model_dump") else event
         with self._lock, self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")

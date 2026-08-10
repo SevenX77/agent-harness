@@ -573,6 +573,7 @@ features:
   error_codes_secondary: []
   events_primary:
   - LLMCallEvent
+  - LLMDeltaEvent
   - LLMRouteDecisionEvent
   - ModelResolvedEvent
   - PromptCapturedEvent

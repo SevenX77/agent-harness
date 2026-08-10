@@ -59,15 +59,11 @@ def _role(routes: Sequence[Any], *, token_escalation_rounds: int = 0):
 
 
 class _Manager:
-    def __init__(self, *, marked_down: set[str] | None = None, probe_ok: bool = True) -> None:
+    def __init__(self, *, marked_down: set[str] | None = None) -> None:
         self._marked_down = marked_down or set()
-        self._probe_ok = probe_ok
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return route.route_id in self._marked_down
-
-    def probe_provider(self, route: Any, runtime_policy: Any, **kwargs: Any) -> bool:
-        return self._probe_ok
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self._marked_down.add(route.route_id)
@@ -178,12 +174,19 @@ def test_a_route_skipped_because_it_was_circuit_broken_says_so(
 
 
 def test_a_probe_that_fails_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The probe is a real request now, so an unhealthy route is one that
+    # refuses the cheap question the same way it would refuse the real one.
     unhealthy, healthy = _route(endpoint_id="unhealthy"), _route(endpoint_id="healthy")
     events = _ask(
         [unhealthy, healthy],
-        _Factory({healthy.route_id: _Behaviour([AIMessage(content="ok")])}),
+        _Factory(
+            {
+                unhealthy.route_id: _Behaviour([_FallbackStatusError("model not found")] * 2),
+                healthy.route_id: _Behaviour([AIMessage(content="ok")] * 2),
+            }
+        ),
         monkeypatch,
-        manager=_Manager(probe_ok=False),
+        manager=_Manager(),
         probe=True,
     )
 

@@ -195,9 +195,9 @@ describe('llm_route_decision visibility (trace-observability F7)', () => {
   // Runtime settings are preferences: a provider that will not take one still
   // answers, and the reader has to be told the answer was produced without it.
   it('says when an answer came back without the settings that were asked for', () => {
-    expect(eventMessage(decisionEvent({ decision: 'retried_without_rejected_settings' })))
-      .toBe('openai:gpt-4o refused the runtime settings — retrying without them')
-    expect(eventColor(decisionEvent({ decision: 'retried_without_rejected_settings' })))
+    expect(eventMessage(decisionEvent({ decision: 'dropped_rejected_settings' })))
+      .toBe('openai:gpt-4o refused the runtime settings — running without them')
+    expect(eventColor(decisionEvent({ decision: 'dropped_rejected_settings' })))
       .toBe('bg-warning')
   })
 

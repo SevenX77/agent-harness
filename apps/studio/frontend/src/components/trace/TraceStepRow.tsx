@@ -293,7 +293,7 @@ const DECISION_TITLE: Record<RouteDecisionDetails['decision'], string> = {
   skipped_circuit_open: 'Route skipped — circuit open',
   probe_failed: 'Probe failed',
   retried_same_route: 'Retried same route',
-  retried_without_rejected_settings: 'Runtime settings refused — retried without them',
+  dropped_rejected_settings: 'Runtime settings refused — running without them',
   escalated_budget: 'Token budget raised',
   fell_back: 'Provider fallback',
   failed_terminal: 'Route failed — no fallback',

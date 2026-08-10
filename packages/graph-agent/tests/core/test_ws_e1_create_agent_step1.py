@@ -5,7 +5,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from graph_agent_gateway.client_manager import LLMClientManager
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -712,12 +711,11 @@ def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
     assert "bound_model" in captured, "create_agent must bind tools without losing predict mode"
     bound_model = captured["bound_model"]
     assert isinstance(bound_model, PredictGatewayChatModel)
-    with (
-        patch.object(LLMClientManager, "_probe_provider", side_effect=AssertionError("provider")),
-        patch(
-            "graph_agent_gateway.gateway_chat_model.RouteChatModelFactory.build",
-            side_effect=AssertionError("provider"),
-        ),
+    # One builder now serves both the probe and the call, so blocking it is
+    # enough to prove predict mode never reaches a provider.
+    with patch(
+        "graph_agent_gateway.gateway_chat_model.RouteChatModelFactory.build",
+        side_effect=AssertionError("provider"),
     ):
         response = bound_model.invoke([HumanMessage(content="predict")])
 

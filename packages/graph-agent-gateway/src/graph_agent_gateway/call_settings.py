@@ -26,7 +26,7 @@ Decision: docs/design/2026-08-10-runtime-settings-are-preferences-decision.md
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -95,8 +95,63 @@ class CallSettings:
         return tuple(key for key, value in self.preferences.kwargs.items() if value is not None)
 
     def without_preferences(self) -> CallSettings:
-        """The same call, asking for nothing but itself."""
+        """The same call, asking for nothing but itself.
+
+        For when a refusal has not been pinned to any one setting: nothing is
+        known about which of them the route objects to, so none survives.
+        """
         return replace(self, preferences=SettingsLayer(kwargs={}, reported={}))
+
+    def without(self, names: Sequence[str]) -> CallSettings:
+        """The same call, minus the named preferences and nothing else.
+
+        Once a refusal has a name, the rest of the preferences have just been
+        accepted — dropping those too would take from the caller settings
+        nothing objected to.
+        """
+        dropped = set(names)
+        return replace(
+            self,
+            preferences=SettingsLayer(
+                kwargs={
+                    key: value
+                    for key, value in self.preferences.kwargs.items()
+                    if key not in dropped
+                },
+                reported={
+                    key: value
+                    for key, value in self.preferences.reported.items()
+                    if key.split(".", 1)[0] not in dropped
+                },
+            ),
+        )
+
+    def as_cheap_question(self, *, about: str | None = None) -> CallSettings:
+        """The cheapest request that still asks for these settings.
+
+        One token instead of the budget, and no tools: this asks whether the
+        route takes these settings, not whether the whole call will succeed.
+        Tools would make it a different, more expensive question — and one this
+        answer could not be blamed for.
+
+        Narrowed to one preference (``about``), it asks which setting a refusal
+        was about: a route that answers with everything dropped and refuses with
+        only this one on has named it.
+
+        The reported view is empty on purpose — nothing answers a question, so
+        there is no answer to describe, and a shape built to be refused must not
+        be able to masquerade as one that was applied.
+        """
+        preferences = self.preferences.kwargs
+        if about is not None:
+            preferences = {key: value for key, value in preferences.items() if key == about}
+        return replace(
+            self,
+            call=SettingsLayer(kwargs={**self.call.kwargs, "max_tokens": 1}, reported={}),
+            preferences=SettingsLayer(kwargs=preferences, reported={}),
+            tools=None,
+            tool_choice=None,
+        )
 
 
 def compose_call_settings(

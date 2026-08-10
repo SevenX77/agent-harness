@@ -324,6 +324,7 @@ class LLMRouteDecisionEvent(_EventBase):
         "skipped_circuit_open",
         "probe_failed",
         "retried_same_route",
+        "retried_without_rejected_settings",
         "escalated_budget",
         "fell_back",
         "failed_terminal",

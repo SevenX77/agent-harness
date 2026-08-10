@@ -73,10 +73,10 @@ def _factory():
     )
 
 
-def test_factory_builds_openai_compatible_chat_openai_with_route_kwargs() -> None:
+def test_factory_builds_openai_compatible_chat_openai_with_the_settings_it_is_given() -> None:
     from langchain_openai import ChatOpenAI
 
-    chat_model = _factory().build(_route())
+    chat_model = _factory().build(_route(), temperature=0.2, max_tokens=333)
 
     assert isinstance(chat_model, ChatOpenAI)
     assert chat_model.model_name == "openai/gpt-5"
@@ -86,6 +86,28 @@ def test_factory_builds_openai_compatible_chat_openai_with_route_kwargs() -> Non
     assert chat_model.temperature == 0.2
     assert chat_model.max_tokens == 333
     assert chat_model.stream_usage is True
+
+
+def test_the_factory_sends_only_the_settings_it_was_given() -> None:
+    """The caller composes the settings; the factory maps them onto a client.
+
+    A second reader of the route's settings here would mean a setting the caller
+    deliberately left off still went out — measured 2026-08-10 against
+    api.deepseek.com, where the gateway dropped an out-of-range `top_p` after
+    the provider refused it and the factory put it straight back on the retry.
+    """
+    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting
+
+    route = _route()
+    route.effective_runtime_settings["top_p"] = EffectiveRuntimeSetting(
+        value=5.0,
+        source="route_setting",
+    )
+
+    chat_model = _factory().build(route, max_tokens=512, temperature=0.2)
+
+    assert chat_model.top_p is None
+    assert chat_model.max_tokens == 512
 
 
 def test_deepseek_openai_payload_replays_multiturn_assistant_reasoning_content() -> None:
@@ -215,7 +237,8 @@ def test_factory_builds_anthropic_chat_model_with_canonical_root_base_url() -> N
             base_url="https://llm.wavespeed.ai/v1",
             provider_model_id="claude-sonnet-4-6",
             canonical_id="claude-sonnet-4-6",
-        )
+        ),
+        max_tokens=333,
     )
 
     assert isinstance(chat_model, ChatAnthropic)
@@ -245,8 +268,8 @@ def test_factory_remaps_anthropic_temperature_from_authored_two_point_scale(
             base_url="https://llm.wavespeed.ai/v1",
             provider_model_id="claude-sonnet-4-6",
             canonical_id="claude-sonnet-4-6",
-            temperature=1.5,
-        )
+        ),
+        temperature=1.5,
     )
 
     assert isinstance(chat_model, FakeChatAnthropic)
@@ -254,7 +277,7 @@ def test_factory_remaps_anthropic_temperature_from_authored_two_point_scale(
 
 
 def test_factory_keeps_openai_temperature_on_authored_two_point_scale() -> None:
-    chat_model = _factory().build(_route(temperature=1.5))
+    chat_model = _factory().build(_route(), temperature=1.5)
 
     assert chat_model.temperature == pytest.approx(1.5)
 
@@ -315,7 +338,9 @@ def test_factory_lazy_imports_chat_google_generative_ai(monkeypatch: pytest.Monk
             base_url="https://generativelanguage.googleapis.com",
             provider_model_id="gemini-3-pro",
             canonical_id="gemini-3-pro",
-        )
+        ),
+        temperature=0.2,
+        max_tokens=333,
     )
 
     assert isinstance(chat_model, FakeChatGoogleGenerativeAI)

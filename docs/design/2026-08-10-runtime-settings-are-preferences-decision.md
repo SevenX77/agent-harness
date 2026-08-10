@@ -69,6 +69,20 @@ provider 因为某个参数拒收请求时,正确处理是:**摘掉那一项、�
 继续用这条路由重发**,而不是把路由标记为 down、不是换路、更不是判定全部 provider 失败。
 路由健康与参数可接受性是两个维度,异常分类必须能分开它们。
 
+**2026-08-10 P1 实施补记(实测倒逼的设计更正):「摘掉」必须只有一个地方能决定发什么。**
+P1 首次实测(真实 api.deepseek.com,路由设 `top_p=5.0`,provider 400
+`Invalid top_p value, the valid range of top_p is (0, 1.0]`)拿到的结果是:
+重发确实发生了,但**第二次仍然带着 `top_p`,被同一条错误再拒一次**。
+根因是同一次请求有两个设置合成者——网关走查这一层合成一份,
+`route_chat_model_factory._runtime_kwargs` 又通过 `_caller_or_effective` /
+`_effective_value` 从 `route.effective_runtime_settings` 再读一份补空缺,
+于是「调用方故意不传」和「调用方没提到」在工厂眼里长得一模一样,摘掉的项被原样补回。
+这与 D4 同源(报告与事实必须同源),也是底座一的直接违反。
+更正:**工厂只做映射,不做决定**——那两个函数已删除,工厂只认调用方交给它的值;
+一次调用发什么,唯一由 `call_settings.compose_call_settings` 说了算。
+更正后同一脚本同一设置的实测:`retried_without_rejected_settings` → `answered`,
+拿到真实答案;对照组(`main`)同条件为 `failed_terminal` → `AllProvidersFailedError`。
+
 ### D3. 每项设置的结果是一个封闭枚举(五态)
 
 | 结果 | 含义 | 是否 warning |

@@ -44,6 +44,7 @@ from graph_agent_gateway.registry.schema import (
     RoleEntry as GatewayRoleEntry,
 )
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+from graph_agent_gateway.settings_bounds import AUTHORED_TEMPERATURE_MAX
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
@@ -242,12 +243,25 @@ class RoleIntent(BaseModel):
     provider_preference: Literal["manual_order"] = "manual_order"
     thinking: bool = False
     max_output_tokens: int | None = Field(default=None, ge=1)
-    temperature: float = Field(default=DEFAULT_ROLE_TEMPERATURE, ge=0)
+    temperature: float = DEFAULT_ROLE_TEMPERATURE
 
     @model_validator(mode="before")
     @classmethod
     def _migrate_legacy_provider_preference(cls, value: object) -> object:
         return _migrate_provider_preference(value)
+
+    @field_validator("temperature")
+    @classmethod
+    def _keep_temperature_on_the_dial(cls, value: float) -> float:
+        """Store what the dial can express, rather than rejecting the save.
+
+        Studio's authored temperature is a share of whatever ceiling the route
+        turns out to have, so a value off the dial has no share to name. The
+        ends of the dial are what "past the end" means; a 422 here would make a
+        preference fail a save, which is the same mistake as letting one fail a
+        call.
+        """
+        return min(max(value, 0.0), AUTHORED_TEMPERATURE_MAX)
 
 
 class RoleProviderModel(BaseModel):

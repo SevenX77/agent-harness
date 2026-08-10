@@ -6,10 +6,25 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
+    RoleIntent,
     RoleRouteEntry,
     RolesData,
 )
 from graph_agent_gateway.registry.schema import RegistrySnapshot
+from graph_agent_gateway.settings_bounds import AUTHORED_TEMPERATURE_MAX
+
+
+def test_a_temperature_past_the_end_of_the_dial_is_stored_as_the_end_of_it() -> None:
+    """Studio's dial is its own; a value off it has no meaning to keep.
+
+    Refusing the write would make a setting fail a save, which is the same
+    mistake as letting one fail a call. The dial's ends are the answer to
+    "hotter than it goes", so the write lands there instead of being rejected
+    or stored as a number nothing downstream can read.
+    """
+    assert RoleIntent(temperature=3.0).temperature == AUTHORED_TEMPERATURE_MAX
+    assert RoleIntent(temperature=-1.0).temperature == 0.0
+    assert RoleIntent(temperature=1.4).temperature == 1.4
 
 
 def test_studio_display_fields_are_stripped_from_gateway_runtime_snapshot() -> None:

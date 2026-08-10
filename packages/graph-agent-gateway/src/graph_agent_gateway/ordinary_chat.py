@@ -16,7 +16,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
 from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
-from graph_agent_gateway.temperature import provider_temperature_from_authored
+from graph_agent_gateway.settings_bounds import provider_temperature_from_authored
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,7 @@ def dispatch_ordinary_chat(
     credential_provider: CredentialProviderProtocol | None = None,
 ) -> CallResult:
     """Dispatch one generic ordinary-chat route outside LLMClientManager."""
-    provider_temperature = provider_temperature_from_authored(
-        temperature,
-        str(route.protocol),
-    )
+    provider_temperature = provider_temperature_from_authored(temperature, route)
 
     def invoke(token_budget: int) -> CallResult:
         return _dispatch_provider_call(

@@ -76,7 +76,7 @@ def _next_budget(self) -> int:
 |---|---|---|---|
 | Anthropic | `output_config.effort` | `low` `medium` `high` `xhigh` `max`,**各型号支持子集不同** | `high` |
 | OpenAI | `reasoning_effort` | 按型号:gpt-5 `minimal/low/medium/high`;5.2 加 `xhigh`;5.6 `none/low/medium/high/xhigh/max` | `medium` |
-| DeepSeek | OpenAI 方言 `thinking.type`;Anthropic 方言 `reasoning.effort`;Responses 方言 `output_config.effort` | v4-pro 收 `low/high/max`(`medium`→`high`、`xhigh`→`max` 服务端折叠) | `high` |
+| DeepSeek | OpenAI 方言 `thinking.type`;Anthropic 方言 `reasoning.effort`;Responses 方言 `output_config.effort` | v4-pro **实测收全七档**(见下方 2026-08-10 实测),文档另称 `low/high/max` 且 `medium`→`high`、`xhigh`→`max` 服务端折叠 | `high` |
 | Gemini | 3 代 `thinking_level`(`MINIMAL/LOW/MEDIUM/HIGH`);2.5 代 `thinking_budget`(整数) | — | HIGH |
 
 对照 `route_chat_model_factory.py` 的 `_PROVIDER_KEYS`:
@@ -85,6 +85,28 @@ def _next_budget(self) -> int:
 `reasoning_effort`(按 openai_compatible 处理),与 DeepSeek OpenAI 方言文档所写的
 `thinking.type` 不是同一个字段;探针实测它**收下没报错**,但"收下"不等于"照做"
 (前决议 D3 的 `sent` 与 `ignored` 之分)。
+
+**2026-08-10 实测修正了本表一行(B2 落地后的第一次真机测量)**:对
+`deepseek-official:deepseek-v4-pro` 逐档探测,七档全部返回 ok。为排除"参数根本没上路"
+这一同样能解释 7/7 的读法,在同一条路径上抓了请求体并故意问了一个不存在的档位:
+
+```
+asked effort='high'   -> ok
+  request body: {"model": "deepseek-v4-pro", "max_tokens": 1, "reasoning_effort": "high"}
+asked effort='banana' -> invalid_model
+  HTTP 400 (invalid_request_error): Failed to deserialize the JSON body into the target
+  type: reasoning_effort: unknown variant `banana`, expected one of `none`, `minimal`,
+  `low`, `medium`, `high`, `xhigh`, `max`
+```
+
+两件事同时被坐实:参数确实出门了(请求体里就是 `reasoning_effort`),provider 确实在
+校验它(不认的名字 400 并把完整枚举写在错误里),而它认的这七个名字与探测收下的七档
+完全一致。**所以这一行文档过时,以实测为准**——这正是 D-A 说"随模型变的枚举要探"的原因:
+文档写的是某一时刻某一方言的子集,API 自己才知道现在收哪些。
+
+需要分清的一点:能力记录的是"**这个名字它收不收**",不是"每一档行为是否真的不同"。
+服务端仍可能把几档折叠成同一种行为;贴合需要的恰恰是前者(别递一个会被 400 的名字),
+而后者属于 `sent` 与 `ignored` 之分(前决议 D3),不由这次测量回答。
 
 ### B5. UI 上没有 effort 入口,现有的值是探针副产品
 

@@ -12,6 +12,8 @@ import re
 import shutil
 import tempfile
 import time
+from collections import deque
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +26,7 @@ from app.core import config
 from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.core.adapters.engine import (
     CallbackEvent,
+    DeltaEnvelope,
     EventEnvelope,
     NodeRunResult,
     RunResultSnapshot,
@@ -86,6 +89,7 @@ class RunRecord:
     process_queue: Any
     ws_queue: asyncio.Queue[dict[str, Any] | None] = field(default_factory=asyncio.Queue)
     events: list[EventEnvelope] = field(default_factory=list)
+    delta_watchers: list[_DeltaStream] = field(default_factory=list)
     subscribers: list[asyncio.Queue[dict[str, Any] | None]] = field(default_factory=list)
     drain_task: asyncio.Task[None] | None = None
     auto_commit: bool = True
@@ -100,17 +104,80 @@ class BatchRecord:
     items: list[tuple[str, str]]
 
 
+class _DeltaStream:
+    """One watcher's view of a run's delta frames — bounded, and lossy on purpose.
+
+    Deltas are allowed to be merged or dropped, and that permission is the only
+    reason this queue can have a ceiling: a watcher that stops reading costs a
+    fixed amount of memory instead of growing with the run. What it must never
+    do is make the run wait — the engine emits deltas from the phase's own
+    thread, and a producer blocked on a slow browser tab is a run blocked on a
+    slow browser tab.
+
+    Merging happens against the tail of what is still waiting, so the "time
+    window" the decision calls for is the backlog itself rather than a timer
+    somebody has to tune: a watcher keeping up sees every piece as it was sent,
+    and only a watcher falling behind gets them coalesced.
+    """
+
+    MAX_PENDING = 256
+
+    def __init__(self) -> None:
+        self._pending: deque[DeltaEnvelope] = deque()
+        self._wake = asyncio.Event()
+        self._closed = False
+        self.dropped = 0
+
+    @property
+    def pending(self) -> list[DeltaEnvelope]:
+        return list(self._pending)
+
+    def offer(self, frame: DeltaEnvelope) -> None:
+        tail = self._pending[-1] if self._pending else None
+        if (
+            tail is not None
+            and not tail.restarts_step
+            and not frame.restarts_step
+            and tail.step_id == frame.step_id
+            and tail.channel == frame.channel
+        ):
+            self._pending[-1] = tail.model_copy(
+                update={"text": tail.text + frame.text, "timestamp": frame.timestamp}
+            )
+        else:
+            self._pending.append(frame)
+        while len(self._pending) > self.MAX_PENDING:
+            # The oldest go first: a live view is showing text as it arrives, so
+            # what a backed-up watcher needs is the newest, not the stalest.
+            self._pending.popleft()
+            self.dropped += 1
+        self._wake.set()
+
+    def close(self) -> None:
+        self._closed = True
+        self._wake.set()
+
+    async def __aiter__(self) -> AsyncIterator[DeltaEnvelope]:
+        while True:
+            while self._pending:
+                yield self._pending.popleft()
+            if self._closed:
+                return
+            self._wake.clear()
+            if self._pending or self._closed:
+                continue
+            await self._wake.wait()
+
+
 def _queue_event_subscriber(process_queue: Any) -> Any:
     def _emit(event: CallbackEvent) -> None:
-        # This queue is the step-frame road: everything that travels it is given
-        # a sequence number and kept in the replay buffer. A delta frame must
-        # have neither — it is allowed to be merged or dropped, and a droppable
-        # frame holding a sequence number turns every drop into a gap that
-        # reconnect reports as data loss. Until deltas have a road of their own
-        # they do not leave the engine process.
-        if not getattr(type(event), "persisted", True):
-            return
-        process_queue.put({"type": "event", "event": event.model_dump(mode="json")})
+        # Two roads, sorted here because here is where the frame still knows
+        # which it belongs on. Numbered frames go in the replay buffer and get a
+        # sequence number; deltas may be merged or dropped, and a droppable
+        # frame holding a sequence number turns every permitted drop into a hole
+        # a reconnecting reader reports as data loss.
+        kind = "event" if getattr(type(event), "persisted", True) else "delta"
+        process_queue.put({"type": kind, "event": event.model_dump(mode="json")})
 
     return _emit
 
@@ -1102,6 +1169,33 @@ class RunManager:
             await replay.put(None)
         return replay
 
+    def stream_run_deltas(self, run_id: str) -> _DeltaStream:
+        """Watch a running run's output arrive.
+
+        A finished run has nothing to stream: its deltas were never kept, and
+        what they spelled out is on its step frames. So an unknown or finished
+        run gets a stream that is already over rather than an error — "there is
+        no more text coming" is the true answer to the question asked.
+        """
+        watcher = _DeltaStream()
+        record = self._runs.get(run_id)
+        if record is None or record.metadata.status != "running":
+            watcher.close()
+            return watcher
+        record.delta_watchers.append(watcher)
+        return watcher
+
+    def stop_streaming_deltas(self, run_id: str, watcher: _DeltaStream) -> None:
+        """Let a watcher go when its socket does.
+
+        Without this a run keeps handing pieces to a browser tab that closed
+        twenty minutes ago — and keeps paying for its backlog.
+        """
+        watcher.close()
+        record = self._runs.get(run_id)
+        if record is not None and watcher in record.delta_watchers:
+            record.delta_watchers.remove(watcher)
+
     async def _replay_finished_run(
         self,
         skill_id: str,
@@ -1231,6 +1325,9 @@ class RunManager:
         for subscriber in list(record.subscribers):
             subscriber.put_nowait(None)
         record.subscribers.clear()
+        for watcher in record.delta_watchers:
+            watcher.close()
+        record.delta_watchers.clear()
 
     async def _drain_process_queue(self, record: RunRecord) -> None:
         terminal_metadata: RunMetadata | None = None
@@ -1256,6 +1353,12 @@ class RunManager:
                 await record.ws_queue.put(event_json)
                 for subscriber in list(record.subscribers):
                     await subscriber.put(event_json)
+            elif message_type == "delta" and isinstance(message.get("event"), dict):
+                frame = _delta_envelope_from_callback(
+                    message["event"], run_id=record.metadata.run_id
+                )
+                for watcher in record.delta_watchers:
+                    watcher.offer(frame)
             elif message_type == "status":
                 status: Literal["success", "failed"] = "success" if message.get("status") == "success" else "failed"
                 metrics = _tokens_metrics(message.get("metrics"))
@@ -1279,6 +1382,9 @@ class RunManager:
         for subscriber in list(record.subscribers):
             await subscriber.put(None)
         record.subscribers.clear()
+        for watcher in record.delta_watchers:
+            watcher.close()
+        record.delta_watchers.clear()
         with contextlib.suppress(Exception):
             record.process.join(timeout=0)
 
@@ -1520,6 +1626,18 @@ def _event_envelope_from_callback(raw_event: dict[str, Any], *, run_id: str, seq
         event_type=event_type,
         payload=dict(raw_event),
         cursor=f"{stream_id}:{seq}",
+    )
+
+
+def _delta_envelope_from_callback(raw_event: dict[str, Any], *, run_id: str) -> DeltaEnvelope:
+    return DeltaEnvelope(
+        stream_id=f"run:{run_id}",
+        run_id=run_id,
+        step_id=str(raw_event.get("step_id") or ""),
+        channel=str(raw_event.get("channel") or "text"),
+        text=str(raw_event.get("text") or ""),
+        restarts_step=bool(raw_event.get("restarts_step")),
+        timestamp=datetime.now(UTC),
     )
 
 

@@ -205,6 +205,8 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - Settings / Copilot / sidebar / templates / roles / registry 等 mutable truth 的前端读取必须遵守 SSOT + event-driven revalidation：所属 app/feature scope 首次需要某个 cache key 时可以 cold load 一次，后续消费者共享缓存和 in-flight 请求；只有成功写回的 canonical server snapshot、后端 commit 后发出的精确 domain event、或用户显式 refresh/probe/test 这三类 truth-changing trigger 可以 invalidate/refetch。组件 mount/unmount、弹窗打开/关闭、tab 切换、window focus、timer polling、WebSocket connect/reconnect、泛泛 resync 都不是数据变更，不得触发后端拉取。需要后台持续状态的长任务必须使用精确 job/probe 状态流或 scoped polling，不能借全局 registry/roles/settings/templates 重拉代替。
 - 列表里的新增流程必须进入列表状态模型：点击 Add 后创建一个未持久化的 pending row，并用该 row 承载内联表单；如果列表原本为空，pending row 必须替代 empty state，而不是让 empty state 和表单同时显示。Cancel 删除 pending row，Submit 再把它替换成真实 draft 并进入保存队列。新增第三方 provider 表单的字段顺序必须和真实第三方卡片一致：Provider name → API Key → Base URL(s)，且 Base URL 必须支持添加多行，提交后落成 `ProviderDraft.base_urls[]`，不能压成单个字符串。
 
+- **「未选择」在 Select 里必须是一个非空值（2026-08-10）**：Radix 把空字符串保留给「清空选择、回到 placeholder」，`SelectItem value=""` 会直接抛错并把整棵子树炸成错误边界（本仓 LLM 角色页的 reasoning effort 控件踩过）。所以「跟随上游默认 / 不指定」这类选项要用一个具名常量当哨兵值（如 `PROVIDER_DEFAULT_EFFORT`），由同一个常量负责 draft 表示、选项 value 和「写回 API 时转成 null」三处，不要各写各的字面量。**顺带的验证教训**：单测里把 `@/components/ui/select` mock 成原生 `<select>` 时，原生 select 完全接受空 value，测试全绿也挡不住这个错误——凡是 mock 掉设计系统组件的用例，必须再在真环境（`scripts/wt-dev.sh`）打开那一屏亲眼看一次。
+
 ### 2.9 数据密集列表与 Badge Overflow
 - 数据密集列表中的标签必须尽量可读。不要把每个 Badge 单独截成 `Ope...` 这类不可识别文本。
 - 多标签行的通用模式是：展示能稳定放下的完整标签，末尾用 `+N` overflow badge 表示剩余项；选中或展开后再展示完整标签集合。

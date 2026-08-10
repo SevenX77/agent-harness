@@ -228,12 +228,16 @@ class LLMCredentialsFile(BaseModel):
 class RoleIntent(BaseModel):
     """User intent stored at the Role level.
 
-    PR3: three role-level generation params only. ``thinking`` is a best-effort
-    switch (enable reasoning when the model supports it, else warn — never a fit
+    The role-level generation params. ``thinking`` is a best-effort switch
+    (enable reasoning when the model supports it, else warn — never a fit
     downgrade). ``max_output_tokens`` is a plain number clamped into the route's
     output-token range (or the route max when unset). ``temperature`` defaults
     to 70% on Studio's authored 0..2 slider and is written through to the route
-    runtime settings. The old thinking 3-tier, TokenIntent modes / downgrade,
+    runtime settings. ``reasoning_effort`` names how hard the model should work
+    when it reasons — a separate question from whether it reasons at all — and
+    is fitted to the levels each route sells while the role is materialized;
+    unset leaves the provider's own default, which no level of ours can stand
+    in for. The old thinking 3-tier, TokenIntent modes / downgrade,
     ``target_context_tokens`` and ``cost_priority`` are gone (no backward compat
     — old paths deleted).
     """
@@ -244,6 +248,7 @@ class RoleIntent(BaseModel):
     thinking: bool = False
     max_output_tokens: int | None = Field(default=None, ge=1)
     temperature: float = DEFAULT_ROLE_TEMPERATURE
+    reasoning_effort: str | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -36,6 +36,7 @@ from app.core.adapters.gateway import (
     build_runtime_setting_descriptors,
     call_method_client_compatibility,
     call_method_ids_for_endpoint,
+    documented_effort_levels,
     lint_role_routes,
     normalize_route_capabilities,
     select_verified_profile,
@@ -3190,6 +3191,16 @@ def _provider_route_ui_capabilities(
             value=True,
             source="api_list",
             message="Provider exposes thinking as a dedicated model route.",
+        )
+    documented_effort = documented_effort_levels(endpoint.protocol)
+    if documented_effort and "reasoning_effort" not in capabilities:
+        # Answered from the protocol at read time rather than written onto the
+        # route: which names a request can spell is fixed by the API contract, so
+        # persisting it would only age. A measurement replaces it when one exists.
+        capabilities["reasoning_effort"] = CapabilityValue(
+            value={"values": list(documented_effort)},
+            source="provider_doc",
+            message="Effort levels this protocol's requests can name.",
         )
     return capabilities
 

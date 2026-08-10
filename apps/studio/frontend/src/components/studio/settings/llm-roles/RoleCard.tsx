@@ -54,6 +54,7 @@ import {
 import { handleAvailableModelDragOver, readAvailableModelDropId } from "../available-model-pointer-drag"
 import { ModelItem } from "./ModelItem"
 import { RoleNameDialog } from "./RoleNameDialog"
+import { effortLevelsFromCapabilities } from "@/components/studio/llm-effort"
 import { RoleSettingsPanel, type RoleTokenLimitSummary } from "./RoleSettingsDialog"
 
 export type RoleCategory = "graph-agent" | "copilot"
@@ -129,6 +130,10 @@ export const RoleCard = memo(function RoleCard({
   ), [role.materialization_report?.entries])
   const tokenLimitSummary = useMemo(
     () => roleTokenLimitSummary(role, providerModelsByRouteId),
+    [providerModelsByRouteId, role],
+  )
+  const effortLevels = useMemo(
+    () => roleEffortLevels(role, providerModelsByRouteId),
     [providerModelsByRouteId, role],
   )
   const sensors = useSensors(
@@ -369,6 +374,7 @@ export const RoleCard = memo(function RoleCard({
             roleName={roleName}
             modelFallbackEnabled={role.model_fallback_enabled}
             intent={role.intent}
+            effortLevels={effortLevels}
             tokenLimitSummary={tokenLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
             onSubmit={(intent) => onChange(updateRoleIntent(data, roleName, intent))}
@@ -482,6 +488,18 @@ export const RoleCard = memo(function RoleCard({
     </Collapsible>
   )
 })
+
+/** The effort levels a role can choose from: what any of its routes reported. */
+export function roleEffortLevels(
+  role: RolesData["roles"][string],
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
+): string[] {
+  return effortLevelsFromCapabilities(
+    Object.values(role.models)
+      .flatMap((model) => model.providers)
+      .map((routeId) => providerModelsByRouteId.get(routeId)?.capabilities),
+  )
+}
 
 export function roleTokenLimitSummary(
   role: RolesData["roles"][string],

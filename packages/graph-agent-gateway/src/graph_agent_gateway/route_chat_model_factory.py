@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from langchain_anthropic import ChatAnthropic
@@ -53,7 +53,9 @@ class RouteChatModelFactory:
                 "timeout": route.timeout_seconds,
                 **_openai_runtime_kwargs(common),
             }
-            chat_openai_cls = PatchedChatDeepSeek if _is_deepseek_route(route) else ChatOpenAI
+            chat_openai_cls = (
+                PatchedChatDeepSeek if _is_deepseek_route(route) else OpenAICompatibleChatModel
+            )
             return chat_openai_cls(**_apply_profiles(route, kwargs))
 
         if protocol == "anthropic_compatible":
@@ -179,8 +181,64 @@ def _apply_profiles(route: ResolvedRoute, kwargs: dict[str, Any]) -> dict[str, A
     )
 
 
-class PatchedChatDeepSeek(ChatOpenAI):
-    """OpenAI-compatible DeepSeek ChatX with assistant reasoning replay."""
+class OpenAICompatibleChatModel(ChatOpenAI):
+    """ChatOpenAI, plus the reasoning field openai-compatible providers add.
+
+    A provider that reasons reports it in ``reasoning_content`` next to an empty
+    ``content`` — its way of saying this part is not the reply. That field is
+    not part of OpenAI's own schema, so the base class drops it while converting
+    a stream chunk, and everything downstream sees a model that never reasoned
+    (measured 2026-08-09: api.deepseek.com sent 147 characters of reasoning on a
+    plain call, and the converted chunk carried an empty ``additional_kwargs``).
+
+    Only the streaming seam is covered because the gateway only streams — see
+    ``_dispatch``'s "always stream(), never invoke()". A blocking path added
+    later would need its own passthrough rather than inheriting one that was
+    never exercised.
+    """
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict[str, Any],
+        default_chunk_class: type,
+        base_generation_info: dict[str, Any] | None,
+    ) -> Any:
+        generation = super()._convert_chunk_to_generation_chunk(
+            chunk,
+            default_chunk_class,
+            base_generation_info,
+        )
+        if generation is None:
+            return None
+        reasoning = _streamed_reasoning_content(chunk)
+        if reasoning:
+            generation.message.additional_kwargs["reasoning_content"] = reasoning
+        return generation
+
+
+def _streamed_reasoning_content(chunk: Mapping[str, Any]) -> str:
+    """This slice's reasoning, or empty when the provider sent none.
+
+    Absent and empty are kept apart on purpose: a reader that treated a missing
+    field as "reasoned, said nothing" would report a thinking step for every
+    plain answer.
+    """
+    choices = chunk.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    delta = first.get("delta") if isinstance(first, Mapping) else None
+    reasoning = delta.get("reasoning_content") if isinstance(delta, Mapping) else None
+    return reasoning if isinstance(reasoning, str) else ""
+
+
+class PatchedChatDeepSeek(OpenAICompatibleChatModel):
+    """DeepSeek over the openai-compatible protocol, with reasoning replayed.
+
+    Replaying is a DeepSeek requirement rather than a shared convention: a
+    multi-turn request has to carry back the reasoning of earlier assistant
+    turns, which is the reverse direction from the passthrough above.
+    """
 
     def _get_request_payload(
         self,

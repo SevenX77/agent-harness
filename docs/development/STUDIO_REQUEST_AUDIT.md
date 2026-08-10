@@ -286,6 +286,7 @@ FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts
 FRONTEND WS /api/skills/{skill_id}/copilot/ws
 FRONTEND WS /ws/events
 FRONTEND WS /ws/skills/{skill_id}/runs/{run_id}
+FRONTEND WS /ws/skills/{skill_id}/runs/{run_id}/deltas
 ```
 
 ## Machine-Readable Verdict Ledger
@@ -504,6 +505,7 @@ FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | speci
 FRONTEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; it opens for the active skill conversation and future @mentions must travel in the message payload, with no background context POST.
 FRONTEND WS /ws/events | ok | shared | Domain event stream; only precise events may invalidate exact cache keys. Consumers must share the singleton hub; Workspace file/runtime watchers are covered and must not create a workspace-local events socket.
 FRONTEND WS /ws/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run event stream keyed by (skill_id, run_id); it observes a single execution and does not refresh registry/settings/skill-list truth.
+FRONTEND WS /ws/skills/{skill_id}/runs/{run_id}/deltas | ok | specific | Scoped live-output stream for the run being watched; opened only while that run is live and closed with it. It carries pieces of that run's own LLM output into the step rows producing them, never reconnects (a missed piece is gone by design and its text arrives whole on the step's closing event), and refreshes no truth.
 ```
 
 ## Audit Procedure

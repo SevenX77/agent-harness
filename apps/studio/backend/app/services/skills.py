@@ -23,6 +23,7 @@ from fastapi.encoders import jsonable_encoder
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
+from pydantic import ValidationError
 
 from app.core import config
 from app.core.adapters.atomic_file import read_published_text
@@ -1388,12 +1389,18 @@ def latest_run_metadata(skill_id: str) -> RunMetadata | None:
         return None
     candidates: list[RunMetadata] = []
     for metadata_path in runs_dir.glob("*/run_metadata.json"):
+        # One damaged record must not blank the skill list, which is why this
+        # does not raise the way the run listing does — but it says which record
+        # it could not read, because a "latest run" that silently skips runs is
+        # indistinguishable from one that is simply older than you expect. The
+        # catch names the two ways a record goes bad; anything else is a bug in
+        # this function and belongs in the traceback.
         try:
             candidates.append(
                 RunMetadata.model_validate_json(read_published_text(metadata_path)),
             )
-        except Exception:
-            continue
+        except (OSError, ValidationError) as exc:
+            logger.warning("Skipping unreadable run record %s: %s", metadata_path, exc)
     if not candidates:
         return None
     return max(candidates, key=lambda item: item.started_at)

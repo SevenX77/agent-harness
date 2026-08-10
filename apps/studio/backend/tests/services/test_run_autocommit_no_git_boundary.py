@@ -33,6 +33,9 @@ def _record(run_dir: Path, metadata: RunMetadata) -> RunRecord:
         run_dir=run_dir,
         process=None,
         process_queue=None,
+        # The subject of this file: a run that DOES try to archive the skill,
+        # meeting a workspace that is not a git repository.
+        auto_commit=True,
     )
 
 

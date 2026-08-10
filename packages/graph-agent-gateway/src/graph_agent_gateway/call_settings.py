@@ -252,8 +252,24 @@ def _fit_to_route(
         fitted = value if setting is None else fit(value, bounds_for(route, setting))
         sent[keyword] = fitted
         if setting is not None and fitted != value:
-            adjustments[setting] = {"asked": value}
+            # Carrying the provenance matters even when the report already has
+            # an entry for this setting: a setting known ONLY by having been
+            # moved has no other entry to inherit it from, and a record with no
+            # provenance reads as one nobody chose (measured 2026-08-10: a
+            # fitted top_p went out at the bound and was reported nowhere).
+            adjustments[setting] = {
+                "asked": value,
+                "value": fitted,
+                "source": _settled_source(route, setting),
+            }
     return sent, adjustments
+
+
+def _settled_source(route: ResolvedRoute, setting: str) -> str:
+    """Who chose this setting, as the route recorded when it settled it."""
+    settled = route.effective_runtime_settings.get(setting)
+    source = getattr(settled, "source", None)
+    return str(source) if source else "route_setting"
 
 
 def _with_adjustments(

@@ -51,7 +51,10 @@ def write_text_atomically(path: Path, text: str) -> None:
     handle, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temp_path = Path(temp_name)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as temp_file:
+        # UTF-8 + LF on every platform (docs/development/CROSS_PLATFORM.md).
+        # Left to its default, a publish on Windows rewrites every line ending,
+        # so the same document differs byte for byte depending on who wrote it.
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as temp_file:
             temp_file.write(text)
             temp_file.flush()
             os.fsync(temp_file.fileno())

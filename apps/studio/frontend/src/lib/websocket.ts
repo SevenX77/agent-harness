@@ -21,6 +21,18 @@ export function runEventsWsUrl(skillId: string, runId: string, cursor?: string |
   return wsUrl(`/ws/skills/${encodeURIComponent(apiSkillId)}/runs/${encodeURIComponent(runId)}${query}`)
 }
 
+/**
+ * The socket a run's output arrives on, piece by piece.
+ *
+ * No cursor parameter, unlike its sibling: there is nothing to resume from. A
+ * piece missed while disconnected is gone by design, and what it spelled out
+ * arrives whole on the step's closing event over the event socket.
+ */
+export function runDeltasWsUrl(skillId: string, runId: string) {
+  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  return wsUrl(`/ws/skills/${encodeURIComponent(apiSkillId)}/runs/${encodeURIComponent(runId)}/deltas`)
+}
+
 export function nextBackoffMs(attempt: number) {
   return Math.min(30_000, 1000 * (2 ** Math.max(0, attempt - 1)))
 }

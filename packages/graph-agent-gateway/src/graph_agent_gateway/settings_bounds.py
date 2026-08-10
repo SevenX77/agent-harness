@@ -23,7 +23,7 @@ Decision: docs/design/2026-08-10-preferences-fit-the-route-decision.md
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -101,7 +101,10 @@ def bounds_for(route: ResolvedRoute, name: str) -> Bounds:
             maximum=_capability_number(route, "max_output_tokens"),
         )
     if name == "reasoning.effort":
-        return Bounds(allowed=_effort_levels(route))
+        return effort_bounds(
+            levels=_capability_levels(route, "reasoning_effort"),
+            protocol=str(route.protocol),
+        )
     if name == "reasoning.budget_tokens":
         return Bounds(minimum=_capability_number(route, "min_thinking_budget_tokens"))
     return Bounds()
@@ -164,16 +167,31 @@ def _nearest_level(value: Any, allowed: tuple[str, ...]) -> Any:
     return below[-1] if below else ranked[0][1]
 
 
-def _effort_levels(route: ResolvedRoute) -> tuple[str, ...]:
-    """The effort levels this route takes, measured if it has been, documented if not.
+def effort_bounds(*, levels: Sequence[str] = (), protocol: str | None = None) -> Bounds:
+    """The effort levels a route takes, measured if it has been, documented if not.
 
     A measurement outranks the protocol's vocabulary: the vocabulary says which
     names are spellable, and only the model says which of them it actually sells.
+
+    Stated in levels and a protocol name rather than in a route because effort is
+    also chosen while a role is materialized — before there is a resolved route to
+    read — and one rule has to answer both callers, or the level a role reads back
+    is not the level it sends.
     """
-    measured = _capability_levels(route, "reasoning_effort")
+    measured = tuple(level for level in levels if isinstance(level, str))
     if measured:
-        return measured
-    return _PROTOCOL_EFFORT_LEVELS.get(str(route.protocol), ())
+        return Bounds(allowed=measured)
+    return Bounds(allowed=documented_effort_levels(protocol))
+
+
+def documented_effort_levels(protocol: str | None) -> tuple[str, ...]:
+    """The effort levels this protocol's request body can name at all.
+
+    Empty for a protocol that documents none: OpenAI's set moves between model
+    versions, so there is nothing to state that measuring would not have to
+    correct.
+    """
+    return _PROTOCOL_EFFORT_LEVELS.get(protocol or "", ())
 
 
 def _capability_value(route: ResolvedRoute, key: str) -> Any:
@@ -210,6 +228,8 @@ __all__ = [
     "EFFORT_LADDER",
     "Bounds",
     "bounds_for",
+    "documented_effort_levels",
+    "effort_bounds",
     "fit",
     "provider_temperature_from_authored",
     "temperature_ceiling",

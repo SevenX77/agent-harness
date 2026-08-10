@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { CircleHelp } from "lucide-react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -11,6 +12,7 @@ import {
   formatTemperaturePercent,
   TEMPERATURE_SCALE_HELP,
 } from "@/components/studio/llm-temperature"
+import { formatEffortLabel, PROVIDER_DEFAULT_EFFORT } from "@/components/studio/llm-effort"
 
 export interface TokenLimitSummary {
   knownCount: number
@@ -29,12 +31,15 @@ export interface RoleSettingsDraft {
   thinking: boolean
   maxOutputTokens: string
   temperature: string
+  /** A level name, or PROVIDER_DEFAULT_EFFORT for "leave the provider's default". */
+  reasoningEffort: string
 }
 
 export function RoleSettingsPanel({
   roleName,
   modelFallbackEnabled,
   intent,
+  effortLevels,
   tokenLimitSummary,
   onModelFallbackChange,
   onSubmit,
@@ -42,6 +47,7 @@ export function RoleSettingsPanel({
   roleName: string
   modelFallbackEnabled: boolean
   intent?: RoleIntent
+  effortLevels: string[]
   tokenLimitSummary: RoleTokenLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
   onSubmit: (intent: RoleIntent) => void
@@ -66,6 +72,7 @@ export function RoleSettingsPanel({
       roleName={roleName}
       modelFallbackEnabled={modelFallbackEnabled}
       draft={draft}
+      effortLevels={effortLevels}
       tokenLimitSummary={tokenLimitSummary}
       onModelFallbackChange={onModelFallbackChange}
       onDraftChange={updateDraft}
@@ -78,6 +85,7 @@ export function RoleSettingsFields({
   roleName,
   modelFallbackEnabled,
   draft,
+  effortLevels,
   tokenLimitSummary,
   onModelFallbackChange,
   onDraftChange,
@@ -86,6 +94,7 @@ export function RoleSettingsFields({
   roleName: string
   modelFallbackEnabled: boolean
   draft: RoleSettingsDraft
+  effortLevels: string[]
   tokenLimitSummary: RoleTokenLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
   onDraftChange: (draft: RoleSettingsDraft) => void
@@ -187,7 +196,7 @@ export function RoleSettingsFields({
           </Field>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid gap-3 lg:grid-cols-3">
           <Field
             data-role-output-settings="true"
             className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3"
@@ -241,6 +250,36 @@ export function RoleSettingsFields({
             </div>
             <FieldDescription>Drag to set the role temperature; 70% is the default.</FieldDescription>
           </Field>
+
+          <Field
+            data-role-effort-settings="true"
+            className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3"
+          >
+            <FieldLabel htmlFor={`reasoning-effort-${roleName}`} className="text-xs font-medium">
+              Reasoning effort
+            </FieldLabel>
+            <Select
+              value={draft.reasoningEffort}
+              disabled={effortLevels.length === 0}
+              onValueChange={(reasoningEffort) => onDraftChange({ ...draft, reasoningEffort })}
+            >
+              <SelectTrigger
+                id={`reasoning-effort-${roleName}`}
+                data-role-effort-input="true"
+                aria-label={`Reasoning effort for ${roleName}`}
+                className="h-9 w-full text-xs"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={PROVIDER_DEFAULT_EFFORT}>Provider default</SelectItem>
+                {effortLevels.map((level) => (
+                  <SelectItem key={level} value={level}>{formatEffortLabel(level)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldDescription>{effortSummaryText(effortLevels)}</FieldDescription>
+          </Field>
         </div>
       </FieldGroup>
     </FieldSet>
@@ -270,7 +309,13 @@ function draftFromIntent(intent?: RoleIntent): RoleSettingsDraft {
     thinking: intent?.thinking ?? false,
     maxOutputTokens: intent?.max_output_tokens != null ? String(intent.max_output_tokens) : "",
     temperature: intent?.temperature != null ? String(intent.temperature) : String(DEFAULT_ROLE_TEMPERATURE),
+    reasoningEffort: intent?.reasoning_effort ?? PROVIDER_DEFAULT_EFFORT,
   }
+}
+
+function effortSummaryText(effortLevels: string[]): string {
+  if (effortLevels.length === 0) return "No model in this role reports effort levels."
+  return "How hard the model works when it reasons; each model runs the nearest level it sells."
 }
 
 function outputTokenSummaryText(summary: TokenLimitSummary): string {
@@ -292,6 +337,7 @@ export function roleIntentFromSettingsDraft(draft: RoleSettingsDraft): RoleInten
     thinking: draft.thinking,
     max_output_tokens: parseOptionalInteger(draft.maxOutputTokens),
     temperature: parseOptionalNumber(draft.temperature) ?? DEFAULT_ROLE_TEMPERATURE,
+    reasoning_effort: draft.reasoningEffort === PROVIDER_DEFAULT_EFFORT ? null : draft.reasoningEffort,
   }
 }
 

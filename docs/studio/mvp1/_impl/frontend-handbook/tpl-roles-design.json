@@ -269,9 +269,9 @@
       "cap": "role-output-token-intent",
       "track": "共",
       "module": "角色意图",
-      "func": "设计:Role settings 里的运行参数包含 thinking、max output tokens、temperature。temperature 默认显示 70%(authored 1.4/2),以 provider-neutral 0..2 为存储值,UI 用 0-100% 读数表达,运行时由 gateway 按 provider 协议映射到真实 provider scale。",
+      "func": "设计:Role settings 里的运行参数包含 thinking、max output tokens、temperature、reasoning effort。temperature 默认显示 70%(authored 1.4/2),以 provider-neutral 0..2 为存储值,UI 用 0-100% 读数表达,运行时由 gateway 按 provider 协议映射到真实 provider scale。reasoning effort 回答「思考时使多大劲」(与 thinking 的「思不思考」是两个问题):档位下拉,选项 = 该角色各路由报出的档位并集;未选 = 保留 provider 自己的默认档,Studio 不替它写一个。top_p 与 temperature 同向作用,各家文档建议二选一,故不给控件。",
       "action": "用户在角色设置面板切 Thinking、填写 Max output tokens,或拖动 Temperature slider 后松手提交。",
-      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,1.4=>70%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 只更新本地 draft/readout,不得触发 HTTP 保存;onValueCommit 或 pointer/key/blur 等交互结束兜底才把最后一个 preview 提交给页面级 useDebouncedRolesSave,避免点轨道/拖拽后 UI 变了但没落盘。保存处于 pending/saving 时,新的保存需求覆盖旧的排队 payload,旧请求完成后只保存最新快照;roles_changed 等后端变更事件不得把旧服务端快照覆盖回本地 draft,必须等本轮保存收敛后再重取。窗口 focus 不是数据变更信号,不触发刷新。roles YAML/API 保存 provider-neutral 0..2;缺失或 null 的 role temperature 在 Studio role authoring 层归一成默认 70%(authored 1.4),不再表示 model default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。",
+      "fe_design": "RoleSettingsFields 使用 shadcn Slider 表达 temperature,旁边显示百分比读数(0=>0%,1.4=>70%,2=>100%)并提供 HelpTooltip 解释 Studio authored scale 与 provider runtime scale 的关系。Slider onValueChange 只更新本地 draft/readout,不得触发 HTTP 保存;onValueCommit 或 pointer/key/blur 等交互结束兜底才把最后一个 preview 提交给页面级 useDebouncedRolesSave,避免点轨道/拖拽后 UI 变了但没落盘。保存处于 pending/saving 时,新的保存需求覆盖旧的排队 payload,旧请求完成后只保存最新快照;roles_changed 等后端变更事件不得把旧服务端快照覆盖回本地 draft,必须等本轮保存收敛后再重取。窗口 focus 不是数据变更信号,不触发刷新。roles YAML/API 保存 provider-neutral 0..2;缺失或 null 的 role temperature 在 Studio role authoring 层归一成默认 70%(authored 1.4),不再表示 model default;gateway 在真实调用时按 provider 协议映射,并在 trace metadata 记录 actual_runtime_settings。 reasoning effort 用 shadcn Select(RoleSettingsFields 内,与 Max output tokens / Temperature 同排三列):选项来自 ProviderModelOption.capabilities['reasoning_effort'].value.values 的并集,按强弱(none/minimal/low/medium/high/xhigh/max)排序,认不出的档位名保留并排在末尾——前端只排序不臆造档位。首项固定是「Provider default」(写回 intent.reasoning_effort = null)。角色所有路由都没报出档位时控件禁用并说明原因,不显示一份编出来的枚举。角色只选一次,贴合发生在后端 materialize:每条路由把这一档贴合成它自己卖的最近一档(就低不就高,只有当所选档低于该路由全部档位时才上抬),所以读回的值就是会发出去的值。",
       "fe_modules": [],
       "be_contract": [
         {
@@ -285,11 +285,17 @@
           "purpose": "保存 provider-neutral temperature authored 0..2;Studio role intent 默认 70%(authored 1.4)并随 role draft 保存。gateway runtime 在 RouteChatModelFactory/ordinary_chat 按 protocol 映射到 provider scale(Anthropic 0..1,OpenAI/Gemini/Ark/unknown 0..2)。GatewayChatModel 在响应 metadata 写 effective_runtime_settings(解析来源)和 actual_runtime_settings(本次实际调用值)。",
           "mechanism_ref": "roles_mech_materialize",
           "iface_ref": "gateway-temperature-scale"
+        },
+        {
+          "endpoint": "PUT /api/llm/roles + GET /api/llm/registry",
+          "purpose": "intent.reasoning_effort 随 intent 整表 upsert;materialize 的 _apply_reasoning_effort 把它贴合到该路由卖的档位后写进 runtime_settings.reasoning.effort。控件选项来自 registry 的 model group 路由能力投影:路由有实测档位(capabilities.reasoning_effort,source=probed_verified)就用实测;没有时 studio 后端在投影那一刻按端点协议补上文档词表(source=provider_doc),不写盘。",
+          "mechanism_ref": "roles_mech_materialize",
+          "iface_ref": "iface-1"
         }
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。2026-07-05 已补齐百分比读数、tooltip、UI 立即更新 + HTTP debounce、gateway provider-scale runtime mapping 与 actual_runtime_settings trace。",
+      "gap_brief": "符合设计。2026-07-05 已补齐百分比读数、tooltip、UI 立即更新 + HTTP debounce、gateway provider-scale runtime mapping 与 actual_runtime_settings trace。 2026-08-10 增补 reasoning effort 档位控件(角色级 + 各路由贴合),依据docs/design/2026-08-10-preferences-fit-the-route-decision.md D-F。",
       "impl_ref": "fn-43"
     },
     {

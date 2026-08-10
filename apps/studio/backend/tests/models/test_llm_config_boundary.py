@@ -72,3 +72,11 @@ def test_studio_display_fields_are_stripped_from_gateway_runtime_snapshot() -> N
     assert "display_name" not in payload["provider_routes"]["openai-direct:gpt-5"]
     assert "display_name" not in payload["model_profiles"]["GPT5"]
     RegistrySnapshot.model_validate(payload)
+
+
+def test_a_role_stores_the_effort_it_chose_and_nothing_when_it_chose_none() -> None:
+    """Effort is the control providers now offer for trading quality against
+    cost, so a role can choose one. Absent means the provider's own default,
+    which is a different answer from any level Studio could write."""
+    assert RoleIntent(reasoning_effort="high").reasoning_effort == "high"
+    assert RoleIntent().reasoning_effort is None

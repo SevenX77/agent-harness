@@ -810,3 +810,49 @@ def test_put_role_v3_thinking_on_unsupported_warns_but_still_fits(
     assert entry["role_fit"] == "using"
     assert entry["warnings"][0]["code"] == "thinking_unsupported"
     assert body["fallback_chain"][0]["runtime_settings"]["reasoning"]["enabled"] is None
+
+
+def test_put_role_writes_the_chosen_effort_onto_every_route_it_resolves(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The role chooses once; each route in the chain carries the level it sells.
+
+    The route below was measured to sell low and high only, so a role asking for
+    ``xhigh`` runs at ``high`` rather than being refused by the provider at call
+    time — and reads back as what it will send.
+    """
+    route = _provider_route("ready-provider:gpt-5")
+    route.capabilities["reasoning_effort"] = CapabilityValue(
+        value={"supported": True, "values": ["low", "high"]},
+        source="probed_verified",
+    )
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
+        provider_routes={"ready-provider:gpt-5": route},
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {"provider_preference": "manual_order", "reasoning_effort": "xhigh"},
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [{"route_id": "ready-provider:gpt-5"}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"]["reasoning_effort"] == "xhigh"
+    entry = body["fallback_chain"][0]
+    assert entry["runtime_settings"]["reasoning"]["effort"] == "high"

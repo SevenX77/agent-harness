@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from graph_agent.core.graph_assembler import _resolve_phase_chat_model
+from graph_agent.core.graph_assembler import _AgentSystemPrompt, _resolve_phase_chat_model
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import (
     AgentNodeAST,
@@ -180,6 +180,7 @@ def test_resolver_receives_effective_role() -> None:
         model_resolver=resolver,
         llm_provider=None,
         callbacks=(),
+        system_prompt=_AgentSystemPrompt(text="", template_source="t", variables={}),
     )
     assert model is not None
     assert resolver.calls == ["fast"]

@@ -111,6 +111,12 @@ class LLMProviderChatModel(BaseChatModel):
     group_key: str | None = None
     parent_node_id: str | None = None
     node_type: str | None = None
+    # What the phase's system prompt was made from, and what it was made with.
+    # Constant for the phase, announced on every call: a reader looking at one
+    # call should not have to find the phase that built the model to learn why
+    # the prompt says what it says.
+    prompt_template_source: str | None = None
+    prompt_variables: dict[str, Any] = Field(default_factory=dict)
     # Shared so a bound copy keeps counting where the original left off: the
     # agent loop binds tools once and then invokes the bound copy every turn,
     # and "call 1, call 1, call 1" is not a sequence anyone can read.
@@ -195,6 +201,8 @@ class LLMProviderChatModel(BaseChatModel):
             node_type=self.node_type,
             sub_run_id=self.sub_run_id,
             group_key=self.group_key,
+            template_source=self.prompt_template_source,
+            variables=self.prompt_variables,
         ) as step:
             # The answer is consumed slice by slice even though the agent loop
             # is handed the finished message: the loop needs the whole answer to

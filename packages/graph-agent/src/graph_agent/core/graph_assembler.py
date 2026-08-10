@@ -43,6 +43,7 @@ from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.cognitive.prompt import (
+    V030_COGNITIVE_TEMPLATE_ID,
     apply_v030_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
@@ -102,6 +103,21 @@ class CompiledStateGraph:
     compiled_skill: CompiledSkill
     phase_ids: list[str] = field(default_factory=list)
     edges: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _AgentSystemPrompt:
+    """A phase's system prompt together with what produced it.
+
+    The three travel as one value because they are one fact: these variables,
+    put through that template, made this text. Handing the text on by itself is
+    what left a prompt report able to show the result and nothing about how it
+    came to say that.
+    """
+
+    text: str
+    template_source: str
+    variables: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -1788,6 +1804,21 @@ def _build_skill_node(
     predict_context: Any = None,
 ) -> Any:
     phase_llm_role = effective_llm_role(phase_ast, compiled.manifest.llm_role)
+    knowledge_base_markdown = _build_reference_reader_markdown(
+        phase_id=phase_id,
+        phase_doc=phase_doc,
+        phase_ast=phase_ast,
+        compiled=compiled,
+        callbacks=callbacks,
+    )
+    # Built before the model, because the model is what reports the prompt and
+    # cannot report what it was not given.
+    system_prompt = _agent_system_prompt(
+        phase_id,
+        phase_ast,
+        compiled,
+        knowledge_base_markdown=knowledge_base_markdown,
+    )
     phase_chat_model = _resolve_phase_chat_model(
         phase_id,
         phase_llm_role,
@@ -1796,13 +1827,7 @@ def _build_skill_node(
         llm_provider=llm_provider,
         callbacks=_callback_tuple(callbacks),
         predict_context=predict_context,
-    )
-    knowledge_base_markdown = _build_reference_reader_markdown(
-        phase_id=phase_id,
-        phase_doc=phase_doc,
-        phase_ast=phase_ast,
-        compiled=compiled,
-        callbacks=callbacks,
+        system_prompt=system_prompt,
     )
     business_tools = compiled.tools.for_phase(phase_id)
     business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
@@ -2029,12 +2054,7 @@ def _build_skill_node(
     agent_graph = create_agent(
         model=phase_chat_model,
         tools=all_tools,
-        system_prompt=_agent_system_prompt(
-            phase_id,
-            phase_ast,
-            compiled,
-            knowledge_base_markdown=knowledge_base_markdown,
-        ),
+        system_prompt=system_prompt.text,
         middleware=middleware_chain,
         state_schema=WorkflowState,  # type: ignore[arg-type]
         checkpointer=wrapped_checkpointer,
@@ -2167,6 +2187,7 @@ def _resolve_phase_chat_model(
     llm_provider: LLMProvider | None,
     callbacks: tuple[Any, ...],
     predict_context: Any = None,
+    system_prompt: _AgentSystemPrompt,
 ) -> Any:
     # ``llm_role`` is the phase's EFFECTIVE role, already resolved through the
     # use_graph_llm_role / graph-default chain (manifest.effective_llm_role).
@@ -2180,6 +2201,8 @@ def _resolve_phase_chat_model(
             mock_strategy=predict_strategy,
             callbacks=callbacks,
             phase_name=phase_id,
+            prompt_template_source=system_prompt.template_source,
+            prompt_variables=system_prompt.variables,
         )
     if chat_model is not None:
         llm_provider = ChatModelProvider(chat_model)
@@ -2193,6 +2216,10 @@ def _resolve_phase_chat_model(
             # belong to rather than having a later reader stamp them.
             parent_node_id=phase_id,
             node_type="agent",
+            # Same reason, one layer up: the phase knows what its prompt was
+            # made from, the model is what announces the prompt.
+            prompt_template_source=system_prompt.template_source,
+            prompt_variables=system_prompt.variables,
         )
     if model_resolver is None:
         return None
@@ -2372,7 +2399,7 @@ def _agent_system_prompt(
     compiled: CompiledSkill,
     *,
     knowledge_base_markdown: str = "",
-) -> str:
+) -> _AgentSystemPrompt:
     output_schema = (
         phase_ast.io.outputs
         if phase_ast.io is not None
@@ -2380,20 +2407,27 @@ def _agent_system_prompt(
         if _is_terminal_phase(phase_id, compiled.manifest, compiled)
         else None
     )
-    return apply_v030_cognitive_template(
-        phase_name=phase_id,
-        role=phase_ast.role,
-        goal=phase_ast.goal,
-        steps=[step.model_dump() for step in phase_ast.steps],
-        protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
-        output_schema=output_schema if isinstance(output_schema, dict) else None,
-        knowledge_base_markdown=knowledge_base_markdown,
-        reference_registry_listing=_reference_registry_listing(phase_ast),
-        inline_examples=[example.content for example in phase_ast.examples_inline],
-        example_registry_listing=_example_registry_listing(phase_ast),
-        role_prefix=resolve_role_prefix_from_llm_role(
+    # The dict IS the call: reporting a separately-written copy of the inputs
+    # would let the report drift from what the template actually received.
+    variables: dict[str, Any] = {
+        "phase_name": phase_id,
+        "role": phase_ast.role,
+        "goal": phase_ast.goal,
+        "steps": [step.model_dump() for step in phase_ast.steps],
+        "protocols": [protocol.model_dump() for protocol in phase_ast.protocols],
+        "output_schema": output_schema if isinstance(output_schema, dict) else None,
+        "knowledge_base_markdown": knowledge_base_markdown,
+        "reference_registry_listing": _reference_registry_listing(phase_ast),
+        "inline_examples": [example.content for example in phase_ast.examples_inline],
+        "example_registry_listing": _example_registry_listing(phase_ast),
+        "role_prefix": resolve_role_prefix_from_llm_role(
             effective_llm_role(phase_ast, compiled.manifest.llm_role)
         ),
+    }
+    return _AgentSystemPrompt(
+        text=apply_v030_cognitive_template(**variables),
+        template_source=V030_COGNITIVE_TEMPLATE_ID,
+        variables=variables,
     )
 
 

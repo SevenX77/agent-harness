@@ -654,6 +654,19 @@ langchain-anthropic / pydantic —— **gateway 不依赖 engine**,因此它无�
    **Template / Variables / Rendered / Response 四段均非空**。
    证据为**真机截图**或该次运行 `trace.jsonl` 的实际内容。
    本条直接证伪 B11 记录的缺陷 —— 四段今天在 agent 路径上全空。
+   > **2026-08-09 复测与订正**:S3 合并后实测一次真实运行(`exp-b-round7`,27 个 LLM 步骤),
+   > Rendered / Response 两段已全部非空,**Template / Variables 两段仍全空** ——
+   > 27 条 `prompt_captured` 的 `template_source` 全为 `None`、`variables` 全为 `{}`。
+   > 根因不是没传下去,而是**全仓没有任何生产者**:`template_source` 只在
+   > `packages/graph-agent/tests/callbacks/test_events.py` 里被构造过,生产代码一次都没写过。
+   > agent 路径的 system prompt 确实由模板产出 ——
+   > `graph_assembler._agent_system_prompt` 调用
+   > `apply_v030_cognitive_template(role=…, goal=…, steps=…, …)`,
+   > 模板与入参都在那一层齐备,只是没有随调用报出去。
+   > 修法:`_agent_system_prompt` 改为返回 `(text, template_source, variables)` 三件一体,
+   > **同一个 dict 既是填模板的入参、也是被上报的 variables**(两者不可能漂移);
+   > 该三元组随 phase chat model 构造下传,由报出调用的那一层(`StepReporter.llm_call`)写进
+   > `prompt_captured`。真实运行复测证据见台账 S3 行。
 8. 每一条增量帧都携带其所属步骤的标识;随机抽取的增量帧均可据此贴回唯一的步骤条目。
 9. 跑完一次真实运行后,`trace.jsonl` 中增量帧的出现次数为 **0**。
 

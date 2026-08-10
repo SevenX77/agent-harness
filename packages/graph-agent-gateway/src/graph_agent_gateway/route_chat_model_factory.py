@@ -21,7 +21,7 @@ from graph_agent_gateway.provider_profiles import (
 )
 from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.schema import ResolvedRoute
-from graph_agent_gateway.temperature import provider_temperature_from_authored
+from graph_agent_gateway.settings_bounds import provider_temperature_from_authored
 
 
 class RouteChatModelFactory:
@@ -55,7 +55,7 @@ class RouteChatModelFactory:
         common = _runtime_kwargs(caller_kwargs)
         common["temperature"] = provider_temperature_from_authored(
             common.get("temperature"),
-            protocol,
+            route,
         )
 
         if protocol in {"openai_compatible", "ark_runtime"}:
@@ -147,12 +147,16 @@ _PROVIDER_KEYS: Final[dict[str, dict[str, str]]] = {
         "max_tokens": "max_tokens",
         "top_p": "top_p",
         "stop_sequences": "stop_sequences",
+        # Anthropic sells the same dial; ChatAnthropic renders this field as
+        # ``output_config.effort`` on the wire (measured 2026-08-10).
+        "reasoning_effort": "effort",
     },
     "google_genai": {
         "temperature": "temperature",
         "max_tokens": "max_tokens",
         "top_p": "top_p",
         "stop_sequences": "stop",
+        "reasoning_effort": "thinking_level",
     },
 }
 _PROVIDER_KEYS["ark_runtime"] = _PROVIDER_KEYS["openai_compatible"]

@@ -200,6 +200,18 @@ report.md `## Routes` 汇总;顺手拆 `gateway_chat_model.py` 的四件事)。
 | P4 | `report.md` 新增 `## Routes` 汇总 | 🚧 未开始 | 逐次细节留在 trace,报告只做收敛后的总结;不做运行结束弹窗(否则真正的 warning 被噪音淹掉) |
 | P5 | 前端 trace 条目逐项显示「你要的 → 实际的」 | 🚧 未开始 | 复用现成的 `eventSeverity(event)`,不新造一套颜色规则 |
 
+#### 第三阶段续 · 偏好贴合路由(2026-08-10 立项,PM 四问触发)
+
+决议:`docs/design/2026-08-10-preferences-fit-the-route-decision.md`
+(值超范围先贴合、贴不了才谈拒收;边界按"变不变"分两类来源;新增第六态 `adjusted`;
+effort 进 UI、top_p 不进)。前决议管「被拒之后怎么办」,本决议管「别递一个它接不住的值」。
+
+| 步 | 在做什么 | 状态 | 关键设计决定 |
+|---|---|---|---|
+| A1+A2+B1 | 边界与贴合(网关)+ 写入归一(后端)+ effort 请求形状 | 🚧 本轮 | 新增 `settings_bounds.py`:边界是路由的事实,**文档常量**(温度量程、top_p 上限、协议 effort 词表)进 provider-doc 表,**随模型变的枚举**(effort 到底卖哪几档)靠探;实测优先于文档。`initial_budget` 补上 `budget_cap` 约束——原本上限只管翻倍升级、不管起始值,用户填 999999 原样出门吃 400。温度两层各有唯一 owner:authored 0..2 量程由 Studio 写入边界归一(`RoleIntent` 归一而非 422——拒绝保存与让调用失败是同一个错误),provider 量程由网关按"百分比 × 该路由天花板"换算,天花板优先取路由能力值。贴合过的项在 `actual_runtime_settings` 里带上 `asked`,不静默改值。**B1 的意外发现**:effort 不需要嵌套路径机制——`ChatAnthropic(effort=...)` 实测渲染成 `output_config.effort`,`ChatGoogleGenerativeAI` 叫 `thinking_level`,两个 adapter 的 Literal 类型与官方文档完全一致,映射只是平铺两行。此前 anthropic 映射表里**根本没有 effort**,给 Claude 路由设 effort 一个字节都发不出去 |
+| B2 | effort 探测:候选档位逐个试,写进路由 capabilities | 🚧 未开始 | 各家枚举实测不同(anthropic `low/medium/high/xhigh/max`、gemini `minimal/low/medium/high`、deepseek v4-pro `low/high/max` 且 `medium→high`/`xhigh→max` 服务端折叠、openai 按型号从 `minimal/low/medium/high` 到 `none/…/max`),文档给不出统一答案,只能探。今天路由上那个 `reasoning.effort=low` 是我们自己能力探测的副产品被提升成默认值(`metadata.source=official_test`),用户看不见也改不了 |
+| B3 | effort 控件进 LLM 角色面板 | 🚧 未开始 | 档位由该路由 `RuntimeSettingDescriptor.allowed_values` 供给,不臆造枚举;没探过就呈"未探测"态并给去测的入口。top_p 明确不进 UI(与 temperature 同向作用,各家文档均建议二选一) |
+
 ### 第二阶段 · 流式 tracing(S1-S5,已全部合并)
 
 | # | 项 | 状态 | 关键坐标 |

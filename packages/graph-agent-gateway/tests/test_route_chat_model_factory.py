@@ -142,7 +142,7 @@ def test_factory_applies_protocol_endpoint_and_exact_model_profiles_with_caller_
             self.kwargs = kwargs
 
     monkeypatch.setattr(provider_profiles, "_PROVIDER_PROFILES", {})
-    monkeypatch.setattr(factory_module, "ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr(factory_module, "OpenAICompatibleChatModel", FakeChatOpenAI)
 
     register_provider_profile(
         "protocol:openai_compatible",
@@ -268,7 +268,7 @@ def test_factory_omits_unset_temperature_from_provider_kwargs(
         def __init__(self, **kwargs: object) -> None:
             self.kwargs = kwargs
 
-    monkeypatch.setattr(factory_module, "ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr(factory_module, "OpenAICompatibleChatModel", FakeChatOpenAI)
 
     chat_model = _factory().build(_route(temperature=None))
 
@@ -594,3 +594,59 @@ def test_generic_chat_model_runs_langchain_create_agent_tool_loop() -> None:
     assert tool_message["role"] == "tool"
     assert tool_message["tool_call_id"] == "call_1"
     assert tool_message["content"] == "sunny:Shenzhen"
+
+
+def _reasoning_stream_chunk(*, reasoning: str = "", content: str = "") -> dict:
+    """One raw stream chunk shaped the way an openai-compatible provider sends it.
+
+    The provider puts its reasoning in its own key next to an empty ``content``
+    — measured against api.deepseek.com on 2026-08-09, where a plain streamed
+    call returns 147 characters of ``reasoning_content`` before the answer.
+    """
+    return {
+        "id": "chunk-1",
+        "model": "deepseek-v4-pro",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": content, "reasoning_content": reasoning},
+                "finish_reason": None,
+            }
+        ],
+    }
+
+
+def test_openai_compatible_stream_keeps_the_providers_reasoning() -> None:
+    # Reasoning arrives on the wire in its own field. Dropping it here is what
+    # left every surface downstream — the thinking channel, the trace, the UI —
+    # with nothing to show, while the provider had been sending it all along.
+    from langchain_core.messages import AIMessageChunk
+
+    chat_model = _factory().build(_route())
+
+    generation = chat_model._convert_chunk_to_generation_chunk(  # type: ignore[attr-defined]
+        _reasoning_stream_chunk(reasoning="thinking out loud"),
+        AIMessageChunk,
+        None,
+    )
+
+    assert generation is not None
+    assert generation.message.additional_kwargs["reasoning_content"] == "thinking out loud"
+
+
+def test_a_chunk_without_reasoning_says_nothing_about_reasoning() -> None:
+    # An absent field is not an empty one: a caller that reads "" as "the model
+    # reasoned, and said nothing" would report a thinking step for every plain
+    # answer.
+    from langchain_core.messages import AIMessageChunk
+
+    chat_model = _factory().build(_route())
+
+    generation = chat_model._convert_chunk_to_generation_chunk(  # type: ignore[attr-defined]
+        _reasoning_stream_chunk(content="just the answer"),
+        AIMessageChunk,
+        None,
+    )
+
+    assert generation is not None
+    assert "reasoning_content" not in generation.message.additional_kwargs

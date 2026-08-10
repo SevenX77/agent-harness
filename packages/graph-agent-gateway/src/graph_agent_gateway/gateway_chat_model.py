@@ -21,12 +21,21 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ConfigDict, Field
 
+from graph_agent_gateway.call_settings import (
+    ActualRuntimeSettings,
+    CallSettings,
+    ModelDefaults,
+    budget_cap,
+    compose_call_settings,
+    effective_runtime_settings,
+    initial_budget,
+    token_budget,
+)
 from graph_agent_gateway.events import RouteDecision
 from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
-from graph_agent_gateway.temperature import provider_temperature_from_authored
 from graph_agent_gateway.tracing import emit_route_decision_event
 
 logger = logging.getLogger(__name__)
@@ -78,7 +87,6 @@ def _history_shape(messages: Sequence[Any]) -> str:
     return " ".join(parts)
 
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
-ActualRuntimeSettings = dict[str, dict[str, object]]
 _MAX_TOKENS_UNSET = object()
 ANSWER_RESTARTED = "gateway_answer_restarted"
 """Key a chunk carries to say the answer begins again from here.
@@ -181,7 +189,7 @@ class GatewayChatModel(BaseChatModel):
     ) -> None:
         sources = dict(runtime_setting_sources or {})
         resolved_max_tokens = (
-            4096 if max_tokens is _MAX_TOKENS_UNSET else _int_kwarg(max_tokens, 4096)
+            4096 if max_tokens is _MAX_TOKENS_UNSET else token_budget(max_tokens, 4096)
         )
         if max_tokens is not _MAX_TOKENS_UNSET:
             sources.setdefault("max_output_tokens", "call_override")
@@ -255,9 +263,15 @@ class GatewayChatModel(BaseChatModel):
 
         This is the only place the gateway asks a provider anything: which
         candidate route is tried, when one is skipped or marked down, when the
-        same route is retried, when the budget is escalated, and when the next
-        route takes over. Streaming and blocking are two ways of reading the
-        same walk through that policy, never two implementations of it.
+        same route is retried — with the same request, or without the
+        preferences the provider refused — when the budget is escalated, and
+        when the next route takes over. Streaming and blocking are two ways of
+        reading the same walk through that policy, never two implementations
+        of it.
+
+        What each attempt asks for is settled elsewhere
+        (:mod:`graph_agent_gateway.call_settings`); this walk only decides
+        which route is asked and how many times.
 
         Every retry here replaces the answer rather than extending it, so
         before retrying, whatever was already yielded is voided (see
@@ -270,6 +284,12 @@ class GatewayChatModel(BaseChatModel):
         )
         failures: list[dict[str, Any]] = []
         runtime_policy = self.resolved_role.runtime_policy
+        defaults = ModelDefaults(
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            thinking_enabled=self.thinking_enabled,
+            runtime_setting_sources=self.runtime_setting_sources,
+        )
 
         for index, candidate in enumerate(self.resolved_role.routes):
             candidate_id = _candidate_id(candidate)
@@ -341,82 +361,37 @@ class GatewayChatModel(BaseChatModel):
                     )
                     continue
             retry_same_used = False
+            preferences_dropped = False
             attempt = _Attempt(
-                budget=_runtime_max_tokens(
-                    candidate,
-                    self.max_tokens,
-                    self.runtime_setting_sources,
-                    kwargs.get("max_tokens"),
-                ),
-                cap=_max_output_token_cap(candidate),
+                budget=initial_budget(candidate, defaults, kwargs),
+                cap=budget_cap(candidate),
                 escalations_left=int(getattr(runtime_policy, "token_escalation_rounds", 0) or 0),
             )
             # Bracketing the whole escalation sequence, not each attempt: an
             # answer that took three tries is still one answer to bill for.
             before_usage = _usage_total_calls(self.client_manager, candidate)
             while True:
+                # Settled before the call rather than inside it: the failure
+                # handler below has to be able to say what was asked for, and
+                # composing is arithmetic on settled values — the only thing
+                # that can fail here is the provider.
+                settings = compose_call_settings(
+                    candidate,
+                    defaults=defaults,
+                    call_kwargs=kwargs,
+                    budget=attempt.budget,
+                    tools=list(self.bound_tools) or None,
+                    tool_choice=self.tool_choice,
+                )
+                if preferences_dropped:
+                    settings = settings.without_preferences()
                 try:
-                    temperature = _runtime_temperature(
-                        candidate,
-                        self.temperature,
-                        self.runtime_setting_sources,
-                        kwargs.get("temperature"),
-                    )
-                    reasoning = _runtime_reasoning(
-                        candidate,
-                        self.thinking_enabled,
-                        self.runtime_setting_sources,
-                        kwargs.get("reasoning"),
-                        has_kwarg="reasoning" in kwargs,
-                    )
-                    actual_runtime_settings = _actual_runtime_settings(
-                        candidate,
-                        max_tokens=attempt.budget,
-                        max_tokens_source=_runtime_source(
-                            candidate,
-                            "max_output_tokens",
-                            self.runtime_setting_sources,
-                            has_kwarg=kwargs.get("max_tokens") is not None,
-                        ),
-                        temperature=temperature,
-                        temperature_source=_runtime_source(
-                            candidate,
-                            "temperature",
-                            self.runtime_setting_sources,
-                            has_kwarg=kwargs.get("temperature") is not None,
-                        ),
-                        reasoning=reasoning,
-                        reasoning_source=_runtime_source(
-                            candidate,
-                            "reasoning.enabled",
-                            self.runtime_setting_sources,
-                            has_kwarg="reasoning" in kwargs,
-                        ),
-                    )
                     accumulated: AIMessageChunk | None = None
                     for piece in _dispatch(
-                        self.client_manager,
                         candidate,
                         request_messages,
+                        settings,
                         credential_provider=self.credential_provider,
-                        max_tokens=attempt.budget,
-                        temperature=temperature,
-                        reasoning=reasoning,
-                        thinking_budget_tokens=_optional_int_kwarg(
-                            kwargs.get("thinking_budget_tokens"),
-                            _effective_optional_int(candidate, "reasoning.budget_tokens"),
-                        ),
-                        tools=list(self.bound_tools) or None,
-                        tool_choice=self.tool_choice or _effective_text(candidate, "tool_choice"),
-                        runtime_policy=runtime_policy,
-                        top_p=_effective_optional_float(candidate, "top_p"),
-                        stop_sequences=_effective_string_list(candidate, "stop_sequences"),
-                        seed=_effective_optional_int(candidate, "seed"),
-                        parallel_tool_calls=_effective_optional_bool(candidate, "parallel_tool_calls"),
-                        structured_output=_effective_structured_output(candidate),
-                        reasoning_effort=_effective_text(candidate, "reasoning.effort"),
-                        call_method_id=candidate.call_method_id,
-                        request_mapper_id=candidate.request_mapper_id,
                     ):
                         accumulated = piece if accumulated is None else accumulated + piece
                         attempt.streamed = True
@@ -446,7 +421,7 @@ class GatewayChatModel(BaseChatModel):
                     conclusion.result = self._build_chat_result(
                         response,
                         candidate,
-                        actual_runtime_settings,
+                        settings.reported,
                     )
                     self._decided("answered", route=candidate)
                     return
@@ -463,6 +438,34 @@ class GatewayChatModel(BaseChatModel):
                             "retried_same_route",
                             route=candidate,
                             reason=f"{type(exc).__name__}: {exc}",
+                            provider_status_code=classification.provider_status_code,
+                            voided_streamed_answer=attempt.streamed,
+                        )
+                        yield from attempt.void()
+                        continue
+                    if (
+                        classification.scope == "request"
+                        and not preferences_dropped
+                        and settings.preference_names
+                    ):
+                        # The provider read this request and refused it — the one
+                        # failure a parameter can cause. Runtime settings are
+                        # preferences, and a provider that will not take one has
+                        # not stopped working, so ask the same route again
+                        # without them: the cheapest way to tell "this parameter
+                        # is wrong" from "this route is down". No table of
+                        # provider wordings can do it, and the wordings are what
+                        # providers keep changing. Capacity, credential and route
+                        # failures never reach here: nothing about them is the
+                        # settings, so nothing is gained by asking twice.
+                        preferences_dropped = True
+                        self._decided(
+                            "retried_without_rejected_settings",
+                            route=candidate,
+                            reason=(
+                                f"{type(exc).__name__}: {exc}"
+                                f" | retrying without {', '.join(settings.preference_names)}"
+                            ),
                             provider_status_code=classification.provider_status_code,
                             voided_streamed_answer=attempt.streamed,
                         )
@@ -591,7 +594,7 @@ class GatewayChatModel(BaseChatModel):
                 "protocol": candidate.protocol,
                 "finish_reason": finish_reason,
                 "usage": usage,
-                "effective_runtime_settings": _runtime_settings_metadata(candidate),
+                "effective_runtime_settings": effective_runtime_settings(candidate),
                 "actual_runtime_settings": actual_runtime_settings,
             },
         )
@@ -616,7 +619,7 @@ class GatewayChatModel(BaseChatModel):
                 "endpoint_id": candidate.endpoint_id,
                 "canonical_id": candidate.canonical_id,
                 "protocol": candidate.protocol,
-                "effective_runtime_settings": _runtime_settings_metadata(candidate),
+                "effective_runtime_settings": effective_runtime_settings(candidate),
                 "actual_runtime_settings": actual_runtime_settings,
             },
         )
@@ -642,7 +645,7 @@ class GatewayChatModel(BaseChatModel):
             "protocol": candidate.protocol,
             "finish_reason": finish_reason,
             "usage": usage,
-            "effective_runtime_settings": _runtime_settings_metadata(candidate),
+            "effective_runtime_settings": effective_runtime_settings(candidate),
             "actual_runtime_settings": actual_runtime_settings,
         }
         message = response.model_copy(update={"response_metadata": response_metadata})
@@ -667,7 +670,7 @@ class GatewayChatModel(BaseChatModel):
                 "endpoint_id": candidate.endpoint_id,
                 "canonical_id": candidate.canonical_id,
                 "protocol": candidate.protocol,
-                "effective_runtime_settings": _runtime_settings_metadata(candidate),
+                "effective_runtime_settings": effective_runtime_settings(candidate),
                 "actual_runtime_settings": actual_runtime_settings,
             },
         )
@@ -720,103 +723,6 @@ def _failure_record(
     }
 
 
-def _runtime_settings_metadata(candidate: ResolvedRoute) -> dict[str, dict[str, object]]:
-    return {
-        key: setting.model_dump(mode="json")
-        for key, setting in candidate.effective_runtime_settings.items()
-    }
-
-
-def _actual_runtime_settings(
-    candidate: ResolvedRoute,
-    *,
-    max_tokens: int,
-    max_tokens_source: str,
-    temperature: float | None,
-    temperature_source: str,
-    reasoning: bool,
-    reasoning_source: str,
-) -> ActualRuntimeSettings:
-    return {
-        "max_output_tokens": {
-            "value": max_tokens,
-            "source": max_tokens_source,
-        },
-        "temperature": {
-            "authored_value": temperature,
-            "provider_value": provider_temperature_from_authored(
-                temperature,
-                candidate.protocol,
-            ),
-            "source": temperature_source,
-            "protocol": candidate.protocol,
-        },
-        "reasoning.enabled": {
-            "value": reasoning,
-            "source": reasoning_source,
-        },
-    }
-
-
-def _runtime_source(
-    candidate: ResolvedRoute,
-    key: str,
-    runtime_setting_sources: Mapping[str, str],
-    *,
-    has_kwarg: bool,
-) -> str:
-    if has_kwarg:
-        return "call_override"
-    source = runtime_setting_sources.get(key)
-    if source:
-        return source
-    setting = candidate.effective_runtime_settings.get(key)
-    if setting is not None and setting.source:
-        return str(setting.source)
-    return "model_default"
-
-
-def _runtime_max_tokens(
-    candidate: ResolvedRoute,
-    model_max_tokens: int,
-    runtime_setting_sources: Mapping[str, str],
-    kwarg_value: object,
-) -> int:
-    if kwarg_value is not None:
-        return _int_kwarg(kwarg_value, model_max_tokens)
-    if runtime_setting_sources.get("max_output_tokens") == "call_override":
-        return model_max_tokens
-    return _effective_int(candidate, "max_output_tokens", model_max_tokens)
-
-
-def _runtime_temperature(
-    candidate: ResolvedRoute,
-    model_temperature: float | None,
-    runtime_setting_sources: Mapping[str, str],
-    kwarg_value: object,
-) -> float | None:
-    if kwarg_value is not None:
-        return _optional_float_kwarg(kwarg_value, model_temperature)
-    if runtime_setting_sources.get("temperature") == "call_override":
-        return model_temperature
-    return _effective_optional_float(candidate, "temperature")
-
-
-def _runtime_reasoning(
-    candidate: ResolvedRoute,
-    model_thinking_enabled: bool | None,
-    runtime_setting_sources: Mapping[str, str],
-    kwarg_value: object,
-    *,
-    has_kwarg: bool,
-) -> bool:
-    if has_kwarg:
-        return _bool_kwarg(kwarg_value, False)
-    if runtime_setting_sources.get("reasoning.enabled") == "call_override":
-        return bool(model_thinking_enabled)
-    return _effective_bool(candidate, "reasoning.enabled", False)
-
-
 def _default_client_manager() -> Any:
     from graph_agent_gateway.client_manager import LLMClientManager
 
@@ -856,10 +762,11 @@ def _probe(
 
 
 def _dispatch(
-    client_manager: Any,
     candidate: ResolvedRoute,
     messages: list[BaseMessage],
-    **kwargs: Any,
+    settings: CallSettings,
+    *,
+    credential_provider: Any,
 ) -> Iterator[AIMessageChunk]:
     """Ask one route for one answer, and hand back the pieces as they land.
 
@@ -868,23 +775,18 @@ def _dispatch(
     a stream with a single piece, which is the same answer. Asking would mean
     two call paths to keep honest for no gain.
     """
-    del client_manager
-    credential_provider = kwargs.pop("credential_provider", None)
-    kwargs.pop("runtime_policy", None)
-    tools = kwargs.pop("tools", None)
-    tool_choice = kwargs.pop("tool_choice", None)
     factory = RouteChatModelFactory(credential_provider=credential_provider)
     # Typed by the one capability this needs: binding tools hands back a
     # Runnable rather than the chat model itself, and both know how to stream.
     chat_model: Runnable[LanguageModelInput, AIMessage] = factory.build(
         candidate,
-        **{key: value for key, value in kwargs.items() if value is not None},
+        **settings.build_kwargs(),
     )
-    if tools and hasattr(chat_model, "bind_tools"):
-        if tool_choice is not None:
-            chat_model = chat_model.bind_tools(tools, tool_choice=tool_choice)
+    if settings.tools and hasattr(chat_model, "bind_tools"):
+        if settings.tool_choice is not None:
+            chat_model = chat_model.bind_tools(settings.tools, tool_choice=settings.tool_choice)
         else:
-            chat_model = chat_model.bind_tools(tools)
+            chat_model = chat_model.bind_tools(settings.tools)
     for piece in chat_model.stream(messages):
         yield piece if isinstance(piece, AIMessageChunk) else AIMessageChunk(content=str(piece))
 
@@ -961,116 +863,12 @@ def _is_truncated_response(response: AIMessage) -> bool:
     return finish_reason in {"length", "max_tokens", "max_output_tokens"}
 
 
-def _max_output_token_cap(candidate: ResolvedRoute) -> int | None:
-    capability = candidate.capabilities.get("max_output_tokens")
-    value = getattr(capability, "value", None)
-    if isinstance(value, int | float) and value > 0:
-        return int(value)
-    return None
-
-
 def _int_value(value: object) -> int:
     if isinstance(value, int | float) and value >= 0:
         return int(value)
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return 0
-
-
-def _int_kwarg(value: object, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int | float) and value > 0:
-        return int(value)
-    if isinstance(value, str) and value.isdigit() and int(value) > 0:
-        return int(value)
-    return default
-
-
-def _optional_int_kwarg(value: object, default: int | None) -> int | None:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int | float) and value > 0:
-        return int(value)
-    if isinstance(value, str) and value.isdigit() and int(value) > 0:
-        return int(value)
-    return default
-
-
-def _effective_bool(candidate: ResolvedRoute, key: str, default: bool) -> bool:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return value if isinstance(value, bool) else default
-
-
-def _effective_int(candidate: ResolvedRoute, key: str, default: int) -> int:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return int(value) if isinstance(value, int | float) and value > 0 else default
-
-
-def _effective_optional_int(candidate: ResolvedRoute, key: str) -> int | None:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return int(value) if isinstance(value, int | float) and value > 0 else None
-
-
-def _effective_optional_float(candidate: ResolvedRoute, key: str) -> float | None:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    if isinstance(value, bool):
-        return None
-    return float(value) if isinstance(value, int | float) else None
-
-
-def _effective_optional_bool(candidate: ResolvedRoute, key: str) -> bool | None:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return value if isinstance(value, bool) else None
-
-
-def _effective_text(candidate: ResolvedRoute, key: str) -> str | None:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    return value if isinstance(value, str) and value else None
-
-
-def _effective_string_list(candidate: ResolvedRoute, key: str) -> list[str] | None:
-    setting = candidate.effective_runtime_settings.get(key)
-    value = setting.value if setting is not None else None
-    if not isinstance(value, list):
-        return None
-    result = [item for item in value if isinstance(item, str)]
-    return result or None
-
-
-def _effective_structured_output(candidate: ResolvedRoute) -> dict[str, object] | None:
-    mode = _effective_text(candidate, "structured_output.mode")
-    if mode is None or mode == "none":
-        return None
-    result: dict[str, object] = {"mode": mode}
-    schema_setting = candidate.effective_runtime_settings.get("structured_output.json_schema")
-    if schema_setting is not None and isinstance(schema_setting.value, dict):
-        result["json_schema"] = schema_setting.value
-    strict_setting = candidate.effective_runtime_settings.get("structured_output.strict")
-    if strict_setting is not None and isinstance(strict_setting.value, bool):
-        result["strict"] = strict_setting.value
-    return result
-
-
-def _optional_float_kwarg(value: object, default: float | None) -> float | None:
-    if isinstance(value, bool):
-        return default
-    try:
-        return float(value) if isinstance(value, int | float | str) else default
-    except ValueError:
-        return default
-
-
-def _bool_kwarg(value: object, default: bool) -> bool:
-    return bool(value) if isinstance(value, bool) else default
 
 
 def _optional_text(value: object) -> str | None:

@@ -383,7 +383,10 @@ def test_chatx_retry_exhaustion_400_non_capability_shape_remains_fail_fast(
     with pytest.raises(AllProvidersFailedError) as exc_info:
         model.invoke([HumanMessage(content="hello")])
 
-    assert factory.invoked_routes == [bad_route.route_id]
+    # Asked twice, on the same route: a refused request is the one failure the
+    # runtime settings can cause, so the second ask drops them to find out. The
+    # rule under test is that this refusal never reaches the next route.
+    assert factory.invoked_routes == [bad_route.route_id, bad_route.route_id]
     assert exc_info.value.context["last_error_chain"][0]["fallback_decision"] == "fail_fast"
     assert exc_info.value.context["last_error_chain"][0]["provider_status_code"] == 400
 
@@ -446,7 +449,10 @@ def test_real_openai_bad_request_error_shape_remains_fail_fast(
     with pytest.raises(AllProvidersFailedError) as exc_info:
         model.invoke([HumanMessage(content="hello")])
 
-    assert factory.invoked_routes == [bad_route.route_id]
+    # Asked twice, on the same route: a refused request is the one failure the
+    # runtime settings can cause, so the second ask drops them to find out. The
+    # rule under test is that this refusal never reaches the next route.
+    assert factory.invoked_routes == [bad_route.route_id, bad_route.route_id]
     assert exc_info.value.context["last_error_chain"][0]["fallback_decision"] == "fail_fast"
     assert exc_info.value.context["last_error_chain"][0]["provider_status_code"] == 400
 

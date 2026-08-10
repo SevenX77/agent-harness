@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
-from graph_agent_gateway.events import LLMRouteDecisionEvent, RouteDecision
+from graph_agent_gateway.events import (
+    LLMCallSettingsEvent,
+    LLMRouteDecisionEvent,
+    RouteDecision,
+)
 from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.settings_outcome import SettingOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +62,33 @@ def emit_route_decision_event(
         provider_status_code=provider_status_code,
         next_route_id=next_route_id,
         voided_streamed_answer=voided_streamed_answer,
+    )
+    for callback in callbacks:
+        try:
+            callback.on_event(event)
+        except Exception:
+            logger.exception(
+                "phase=gateway_tracing action=callback_failed callback=%s",
+                type(callback).__name__,
+            )
+
+
+def emit_call_settings_event(
+    *,
+    callbacks: tuple[Any, ...],
+    phase_name: str,
+    route: ResolvedRoute,
+    outcomes: Sequence[SettingOutcome],
+) -> None:
+    """Announce what became of one call's settings, once there is an answer to read."""
+    if not outcomes:
+        return
+    event = LLMCallSettingsEvent(
+        phase_name=phase_name,
+        settings=tuple(outcome.model_dump() for outcome in outcomes),
+        route_id=route.route_id,
+        provider_model_id=route.provider_model_id,
+        protocol=str(route.protocol),
     )
     for callback in callbacks:
         try:

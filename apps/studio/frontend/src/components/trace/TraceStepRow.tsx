@@ -1,7 +1,12 @@
 import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
-import type { RouteDecisionDetails, TraceSeverity } from '../../utils/trace'
+import type {
+  CallSettingsDetails,
+  RouteDecisionDetails,
+  SettingVerdict,
+  TraceSeverity,
+} from '../../utils/trace'
 import {
   errorStack,
   eventColor,
@@ -13,6 +18,7 @@ import {
   eventPhase,
   eventTimeLabel,
   jsonText,
+  callSettingsDetails,
   routeDecisionDetails,
   mockedSourceClass,
   mockedSourceLabel,
@@ -69,6 +75,7 @@ export function TraceStepRow({
   const isError = settled.event_type === 'internal_error' || settled.event_type === 'validation_fail'
   const failures = errorStack(settled)
   const routeDecision = routeDecisionDetails(settled)
+  const callSettings = callSettingsDetails(settled)
   const severity = eventSeverity(settled)
   const modelName = eventModelName(settled)
   const timeLabel = eventTimeLabel(step.start.event)
@@ -158,6 +165,7 @@ export function TraceStepRow({
           </p>
         ) : null}
         {routeDecision ? <RouteDecisionBlock details={routeDecision} severity={severity} /> : null}
+        {callSettings ? <CallSettingsBlock details={callSettings} severity={severity} /> : null}
         {running && liveOutput ? <LiveOutput output={liveOutput} /> : null}
         <ToolHeadline step={step} />
         {failures.length > 0 ? <ErrorStack failures={failures} /> : null}
@@ -454,6 +462,61 @@ function GenericPayload({ event }: { event: CallbackEvent }) {
           {showFull ? 'Collapse payload' : `Show full payload (${preview.sizeLabel})`}
         </button>
       ) : null}
+    </div>
+  )
+}
+
+// A setting that did not run as asked is the whole reason this block exists, so
+// it says the verdict in words rather than colouring the row and hoping.
+const VERDICT_LABEL: Record<SettingVerdict, string> = {
+  applied: 'applied',
+  sent: 'sent',
+  adjusted: 'adjusted to fit',
+  unsupported: 'not supported here',
+  rejected: 'refused',
+  ignored: 'ignored',
+}
+
+function CallSettingsBlock({
+  details,
+  severity,
+}: {
+  details: CallSettingsDetails
+  severity: TraceSeverity
+}) {
+  if (details.settings.length === 0) {
+    return null
+  }
+  const tone = DECISION_TONE[severity]
+  return (
+    <div className={`mt-2 rounded border p-2 ${tone.box}`}>
+      <div className={`flex flex-wrap items-center gap-1.5 text-xs font-semibold ${tone.title}`}>
+        {severity === 'normal' ? <Cpu className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+        Runtime settings
+        {details.providerModelId ? (
+          <span className="font-normal text-muted-foreground">{details.providerModelId}</span>
+        ) : null}
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {details.settings.map((outcome) => (
+          <li
+            key={outcome.setting}
+            className="flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground"
+          >
+            <span className="text-muted-foreground">{outcome.setting}</span>
+            <span className="rounded border border-border bg-background px-1.5 py-0.5">
+              {outcome.requested === null ? '—' : String(outcome.requested)}
+            </span>
+            <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
+            <span className="rounded border border-border bg-background px-1.5 py-0.5">
+              {VERDICT_LABEL[outcome.verdict]}
+            </span>
+            {outcome.reason ? (
+              <span className="font-sans text-muted-foreground">{outcome.reason}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

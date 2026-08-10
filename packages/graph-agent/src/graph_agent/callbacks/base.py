@@ -58,8 +58,7 @@ class Callback:
         input_tokens: int,
         output_tokens: int,
         *,
-        messages: list[dict[str, Any]] | None = None,
-        response_data: dict[str, Any] | None = None,
+        response_data: dict[str, Any],
     ) -> None:
         """Handle one LLM call."""
 
@@ -266,7 +265,6 @@ def _dispatch_llm_call(callback: Callback, event: Any) -> None:
         event.phase_name,
         event.input_tokens,
         event.output_tokens,
-        messages=event.messages,
         response_data=event.response_data,
     )
 

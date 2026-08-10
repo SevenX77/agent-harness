@@ -205,9 +205,7 @@ function StepBody({ step }: { step: TraceStep }) {
 function PromptSections({ step }: { step: TraceStep }) {
   const prompt = step.start.event
   const answered = step.end?.event
-  const rendered = prompt.event_type === 'prompt_captured'
-    ? jsonText(prompt.resolved_prompt)
-    : jsonText(prompt.messages ?? undefined)
+  const rendered = jsonText(prompt.resolved_prompt)
   return (
     <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
       <PromptSection label="Template">{prompt.template_source ?? 'inline'}</PromptSection>

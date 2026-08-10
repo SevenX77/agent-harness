@@ -49,12 +49,9 @@ class RecordingCallback(Callback):
         input_tokens: int,
         output_tokens: int,
         *,
-        messages: list[dict[str, Any]] | None = None,
-        response_data: dict[str, Any] | None = None,
+        response_data: dict[str, Any],
     ) -> None:
-        self.calls.append(
-            ("on_llm_call", phase_name, input_tokens, output_tokens, messages, response_data)
-        )
+        self.calls.append(("on_llm_call", phase_name, input_tokens, output_tokens, response_data))
 
     def on_tool_call(
         self,
@@ -150,19 +147,12 @@ class RecordingCallback(Callback):
         (
             LLMCallEvent(
                 phase_name="draft",
+                step_id="step-1",
                 input_tokens=11,
                 output_tokens=22,
-                messages=[{"role": "user", "content": "hi"}],
                 response_data={"id": "resp-1"},
             ),
-            (
-                "on_llm_call",
-                "draft",
-                11,
-                22,
-                [{"role": "user", "content": "hi"}],
-                {"id": "resp-1"},
-            ),
+            ("on_llm_call", "draft", 11, 22, {"id": "resp-1"}),
         ),
         (
             ToolCallEvent(
@@ -259,6 +249,7 @@ def test_on_event_dispatches_nudge_default_type_to_legacy_hook() -> None:
     [
         PromptCapturedEvent(
             phase_name="draft",
+            step_id="step-1",
             resolved_prompt=[{"role": "user", "content": "hello"}],
         ),
         RunStartedEvent(run_id="run-1", thread_id="thread-1", initial_context={"x": 1}),

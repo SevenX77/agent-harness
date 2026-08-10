@@ -380,8 +380,9 @@ class _GatewayBackedLLMProvider:
                     yield LLMProviderChunk(restarts_answer=True)
                     continue
                 accumulated = chunk if accumulated is None else accumulated + chunk
-                if chunk.content:
-                    yield LLMProviderChunk(content=chunk.content)
+                reasoning = _reasoning_of(chunk)
+                if chunk.content or reasoning:
+                    yield LLMProviderChunk(content=chunk.content, reasoning=reasoning)
             yield LLMProviderChunk(content="", metadata=_answer_metadata(accumulated, model))
         except Exception as exc:
             details = _safe_provider_error_details(getattr(exc, "details", {}))
@@ -413,6 +414,20 @@ class _GatewayBackedLLMProvider:
                 **dict(metadata.get("tool_kwargs") or {}),
             )
         return model
+
+
+def _reasoning_of(chunk: Any) -> str:
+    """What the model said while working out the answer, on this slice.
+
+    An openai-compatible provider reports it in its own key next to an empty
+    ``content``, which is the provider saying it is not part of the reply. Only
+    that shape is read here: a provider that puts its reasoning in the content
+    as typed blocks has already made it part of the content, and picking those
+    blocks apart would mean this adapter deciding which of a provider's own
+    content blocks count as the answer.
+    """
+    reasoning = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+    return reasoning if isinstance(reasoning, str) else ""
 
 
 def _answer_metadata(accumulated: Any, model: Any) -> dict[str, Any]:

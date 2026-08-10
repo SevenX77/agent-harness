@@ -18,15 +18,17 @@ package already has, and what the callbacks do with them is theirs.
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage
 
 from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.callbacks.events import (
     LLMCallEvent,
+    LLMDeltaEvent,
     PromptCapturedEvent,
     ToolCallEvent,
     ToolCallStartedEvent,
@@ -83,22 +85,53 @@ class LlmCallStep:
     call cost and which model served it are facts the answer carries, and every
     reader that extracted them separately is how two reports of one call came to
     disagree.
+
+    ``delta`` reports the answer arriving. Every piece repeats ``step_id``
+    because an agent turn runs several calls at once: neither arrival order nor
+    the phase can say which call a piece belongs to, and a piece nobody can
+    place is a piece nobody can show.
     """
 
     def __init__(
         self,
         reporter: StepReporter,
         *,
+        step_id: str,
         parent_node_id: str | None,
         node_type: str | None,
         sub_run_id: str | None,
         group_key: str | None,
     ) -> None:
         self._reporter = reporter
+        self._step_id = step_id
         self._parent_node_id = parent_node_id
         self._node_type = node_type
         self._sub_run_id = sub_run_id
         self._group_key = group_key
+
+    @property
+    def step_id(self) -> str:
+        return self._step_id
+
+    def delta(
+        self,
+        text: str,
+        *,
+        channel: Literal["text", "thinking"] = "text",
+        restarts_step: bool = False,
+    ) -> None:
+        """Report that a bit more of this step's output just arrived."""
+        self._reporter._emit(
+            LLMDeltaEvent(
+                phase_name=self._reporter.phase_name,
+                step_id=self._step_id,
+                channel=channel,
+                text=text,
+                restarts_step=restarts_step,
+                sub_run_id=self._sub_run_id,
+                group_key=self._group_key,
+            )
+        )
 
     def finished(self, answer: AIMessage) -> None:
         input_tokens, output_tokens = token_usage_of(answer)
@@ -107,12 +140,10 @@ class LlmCallStep:
         self._reporter._emit(
             LLMCallEvent(
                 phase_name=self._reporter.phase_name,
+                step_id=self._step_id,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 resolved_model=str(model) if model else None,
-                # The prompt travelled on the opening half, so repeating it here
-                # would put the largest payload of a run in the trace twice.
-                messages=None,
                 response_data=_answer_report(answer, metadata),
                 parent_node_id=self._parent_node_id,
                 node_type=self._node_type,
@@ -156,9 +187,11 @@ class StepReporter:
         the longest thing a run does, and a report written afterwards can only
         say it is over.
         """
+        step_id = uuid.uuid4().hex
         self._emit(
             PromptCapturedEvent(
                 phase_name=self.phase_name,
+                step_id=step_id,
                 llm_role=llm_role,
                 resolved_model=resolved_model,
                 resolved_prompt=[_prompt_entry(message) for message in messages],
@@ -169,6 +202,7 @@ class StepReporter:
         )
         yield LlmCallStep(
             self,
+            step_id=step_id,
             parent_node_id=parent_node_id,
             node_type=node_type,
             sub_run_id=sub_run_id,
@@ -237,7 +271,11 @@ class StepReporter:
 
     def _emit(
         self,
-        event: ToolCallStartedEvent | ToolCallEvent | PromptCapturedEvent | LLMCallEvent,
+        event: ToolCallStartedEvent
+        | ToolCallEvent
+        | PromptCapturedEvent
+        | LLMCallEvent
+        | LLMDeltaEvent,
     ) -> None:
         _safe_emit_event(self._callbacks, event)
 

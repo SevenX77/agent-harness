@@ -143,3 +143,47 @@ def test_anthropic_haiku_thinking_uses_manual_budget_not_adaptive() -> None:
     assert capabilities["adaptive_thinking"].value is False
     assert capabilities["manual_thinking_budget_supported"].value is True
     assert capabilities["min_thinking_budget_tokens"].value == 1024
+
+
+def test_a_protocol_that_pins_its_effort_vocabulary_bounds_what_is_worth_asking() -> None:
+    """A name the request body cannot spell would spend a round trip to be
+    refused, so it is never offered to the probe."""
+    from graph_agent_gateway.settings_bounds import effort_probe_candidates
+
+    assert effort_probe_candidates("anthropic_compatible") == (
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    )
+    assert effort_probe_candidates("google_genai") == ("minimal", "low", "medium", "high")
+
+
+def test_a_protocol_that_pins_nothing_offers_the_whole_ladder_to_the_probe() -> None:
+    """OpenAI's set moves between model versions — exactly the case a document
+    cannot answer and only asking can."""
+    from graph_agent_gateway.settings_bounds import EFFORT_LADDER, effort_probe_candidates
+
+    assert effort_probe_candidates("openai_compatible") == EFFORT_LADDER
+    assert effort_probe_candidates(None) == EFFORT_LADDER
+
+
+def test_measured_levels_become_the_capability_the_fitting_rules_read() -> None:
+    """A measurement that lands anywhere else has changed nothing."""
+    from graph_agent_gateway.registry.capabilities import measured_effort_capability
+
+    capability = measured_effort_capability(["low", "high", "max"])
+
+    assert capability.source == "probed_verified"
+    assert capability.value == {"supported": True, "values": ["low", "high", "max"]}
+
+
+def test_a_route_that_sells_no_level_records_that_rather_than_staying_silent() -> None:
+    """Absent reads as "nobody asked yet" and invites the same spend again."""
+    from graph_agent_gateway.registry.capabilities import measured_effort_capability
+
+    capability = measured_effort_capability([])
+
+    assert capability.value == {"supported": False, "values": []}
+    assert "refused every" in (capability.message or "")

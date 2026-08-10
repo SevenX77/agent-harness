@@ -37,7 +37,9 @@ from app.core.adapters.gateway import (
     call_method_client_compatibility,
     call_method_ids_for_endpoint,
     documented_effort_levels,
+    effort_probe_candidates,
     lint_role_routes,
+    measured_effort_capability,
     normalize_route_capabilities,
     select_verified_profile,
 )
@@ -222,6 +224,12 @@ OFFICIAL_PROVIDER_TEST_BATCH_SIZE = 8
 NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
 NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE = "No official language call method passed for this model."
 ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE = "Route has no verified invocation profile."
+_EFFORT_CAPABILITY_KEY = "reasoning_effort"
+# Failures that are about the connection or the account rather than the level
+# asked for, so they measure nothing about which levels a route sells.
+_EFFORT_PROBE_INCONCLUSIVE_STATUSES = frozenset(
+    {"rate_limited", "quota_exceeded", "network_error", "timeout", "invalid_key"}
+)
 _THINKING_CAPABILITY_KEYS = (
     "thinking_protocol",
     "thinking",
@@ -3296,6 +3304,7 @@ async def _force_probe_route(
         updated = route.model_copy(
             update={
                 "status": "verified",
+                "capabilities": await _probed_route_capabilities(endpoint, route),
                 "metadata": {
                     key: value
                     for key, value in route.metadata.items()
@@ -3336,6 +3345,57 @@ async def _force_probe_route(
     credentials.provider_routes[route.route_id] = updated
     save_credentials(credentials)
     return updated
+
+
+async def _probed_route_capabilities(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+) -> dict[str, CapabilityValue]:
+    """This route's capabilities, plus whatever the probe could only measure.
+
+    Effort is the one setting no document answers per model, so a verified route
+    is asked which levels it takes. Only a route that says it reasons is asked:
+    a model with no thinking to spend effort on would refuse every level and
+    charge for each refusal.
+    """
+    capabilities = dict(route.capabilities)
+    if not _capability_supported(
+        dict(route_effective_capabilities(route)), _THINKING_CAPABILITY_KEYS
+    ):
+        return capabilities
+    measured = await _accepted_effort_levels(endpoint, route)
+    if measured is None:
+        return capabilities
+    capabilities[_EFFORT_CAPABILITY_KEY] = measured_effort_capability(measured)
+    return capabilities
+
+
+async def _accepted_effort_levels(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+) -> tuple[str, ...] | None:
+    """The candidate levels this route answered, asked one request at a time.
+
+    ``None`` when something other than the level itself went wrong — a rate
+    limit or a dead socket says nothing about which levels the route sells, and
+    recording it as "refused" would delete levels it does sell.
+    """
+    candidates = effort_probe_candidates(endpoint.protocol)
+    results = await asyncio.gather(
+        *(
+            _probe_route_generation_atom(
+                endpoint,
+                route,
+                runtime_settings={"reasoning": {"enabled": True, "effort": level}},
+            )
+            for level in candidates
+        )
+    )
+    if any(result.status in _EFFORT_PROBE_INCONCLUSIVE_STATUSES for result in results):
+        return None
+    return tuple(
+        level for level, result in zip(candidates, results, strict=True) if result.status == "ok"
+    )
 
 
 async def _role_test_provider_result(

@@ -29,6 +29,7 @@ import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
 import { TraceFilterRow } from './trace/TraceFilterRow'
 import { TraceSearchBar } from './trace/TraceSearchBar'
+import { useRunDeltas } from '../hooks/useRunDeltas'
 import { TraceEventList } from './trace/TraceEventList'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
@@ -69,6 +70,11 @@ interface TracePanelProps {
   onBack?: () => void
   /** The viewed run's id, shown in the header identity strip. */
   runId?: string | null
+  /**
+   * The run's owning skill. Needed to address the live-output socket, which is
+   * keyed (skill, run) like its sibling.
+   */
+  skillId?: string | null
   /**
    * The run's sealed record: the header status badge reads it, and so does the
    * trace's terminal entry (token total + report path, decision 2026-08-09 D8).
@@ -287,8 +293,13 @@ export function TracePanel({
   compareTabs,
   activeCandidateId = null,
   onSelectCandidate,
+  skillId = null,
 }: TracePanelProps) {
   const traceEvents = traceLogs.map(envelopePayload)
+  // Live output goes into the step rows that are producing it (decision
+  // 2026-08-09 D6). Only a live view subscribes: a finished run's pieces were
+  // never kept, and its answers are already on its events.
+  const deltas = useRunDeltas(skillId, runId ?? null, Boolean(live))
   // Where the reader's attention is: the node they focused on the canvas, or —
   // with nothing focused — the phase currently running. It decides where the
   // list SCROLLS, never what it contains.
@@ -564,6 +575,7 @@ export function TracePanel({
           focusPhase={focusPhase}
           outcome={outcome}
           onSelectEvent={onSelectEvent}
+          deltas={deltas}
         />
       </div>
     </div>

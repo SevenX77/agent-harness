@@ -264,6 +264,7 @@ export function Panels({
           selectedEventId={traceSelectedEventId}
           onBack={onCloseTraceView}
           runId={runId}
+          skillId={skillId}
           live
           canCompare={traceCanCompare}
           compareLoading={traceCompareLoading}

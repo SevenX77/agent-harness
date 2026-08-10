@@ -47,9 +47,9 @@ describe('TraceEventList', () => {
 describe('TraceEventList step expansion (decision 2026-08-09 D4)', () => {
   function stepEvents(): IndexedTraceEvent[] {
     return [
-      { index: 0, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:00Z', event_type: 'prompt_captured', phase_name: 'draft' } as CallbackEvent },
-      { index: 1, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:01Z', event_type: 'llm_call', phase_name: 'draft' } as CallbackEvent },
-      { index: 2, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:02Z', event_type: 'prompt_captured', phase_name: 'review' } as CallbackEvent },
+      { index: 0, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:00Z', event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' } as CallbackEvent },
+      { index: 1, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:01Z', event_type: 'llm_call', phase_name: 'draft', step_id: 's1' } as CallbackEvent },
+      { index: 2, event: { schema_version: '1.0', timestamp: '2026-08-09T00:00:02Z', event_type: 'prompt_captured', phase_name: 'review', step_id: 's2' } as CallbackEvent },
     ]
   }
 

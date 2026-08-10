@@ -25,6 +25,7 @@ function render(event: CallbackEvent): string {
       step={{
         key: 'evt-0',
         phase: eventPhase(event),
+        stepId: null,
         status: 'done',
         start: { event, index: 0 },
         end: null,

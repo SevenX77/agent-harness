@@ -383,7 +383,7 @@ export const ROUTE_DECISIONS = [
   'skipped_circuit_open',
   'probe_failed',
   'retried_same_route',
-  'retried_without_rejected_settings',
+  'dropped_rejected_settings',
   'escalated_budget',
   'fell_back',
   'failed_terminal',
@@ -460,8 +460,8 @@ export function routeDecisionMessage(details: RouteDecisionDetails): string {
       return `Probe failed on ${routeLabel(details)}`
     case 'retried_same_route':
       return `Retrying ${routeLabel(details)}`
-    case 'retried_without_rejected_settings':
-      return `${routeLabel(details)} refused the runtime settings — retrying without them`
+    case 'dropped_rejected_settings':
+      return `${routeLabel(details)} refused the runtime settings — running without them`
     case 'escalated_budget':
       return `Answer was cut off — retrying ${routeLabel(details)} with a bigger budget`
     case 'fell_back':

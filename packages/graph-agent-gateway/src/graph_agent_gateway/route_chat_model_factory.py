@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.base import LanguageModelInput
@@ -30,7 +30,19 @@ class RouteChatModelFactory:
     def __init__(self, *, credential_provider: Any = None) -> None:
         self.credential_provider = credential_provider
 
-    def build(self, route: ResolvedRoute, **caller_kwargs: Any) -> BaseChatModel:
+    def build(
+        self,
+        route: ResolvedRoute,
+        *,
+        timeout_seconds: float | None = None,
+        **caller_kwargs: Any,
+    ) -> BaseChatModel:
+        """Build the chat model for one route.
+
+        ``timeout_seconds`` overrides the route's own timeout for callers that
+        are asking a deliberately cheap question — a probe waits out the
+        policy's probe timeout, not the minutes a real generation may take.
+        """
         if route.credential_ref.startswith("secret-handle://expired/"):
             raise CredentialResolveError(
                 error_code="credential.secret_expired",
@@ -39,6 +51,7 @@ class RouteChatModelFactory:
         protocol = str(route.protocol)
         base_url = canonicalize_base_url(route.base_url, protocol)
         api_key = _resolve_api_key(route, self.credential_provider)
+        timeout = timeout_seconds if timeout_seconds is not None else route.timeout_seconds
         common = _runtime_kwargs(caller_kwargs)
         common["temperature"] = provider_temperature_from_authored(
             common.get("temperature"),
@@ -50,8 +63,8 @@ class RouteChatModelFactory:
                 "model": route.provider_model_id,
                 "api_key": api_key,
                 "base_url": base_url,
-                "timeout": route.timeout_seconds,
-                **_openai_runtime_kwargs(common),
+                "timeout": timeout,
+                **_mapped_runtime_kwargs(protocol, common),
             }
             chat_openai_cls = (
                 PatchedChatDeepSeek if _is_deepseek_route(route) else OpenAICompatibleChatModel
@@ -63,8 +76,8 @@ class RouteChatModelFactory:
                 "model": route.provider_model_id,
                 "api_key": api_key,
                 "base_url": base_url,
-                "timeout": route.timeout_seconds,
-                **_anthropic_runtime_kwargs(common),
+                "timeout": timeout,
+                **_mapped_runtime_kwargs(protocol, common),
             }
             return ChatAnthropic(**_apply_profiles(route, kwargs))
 
@@ -74,8 +87,8 @@ class RouteChatModelFactory:
             kwargs = {
                 "model": route.provider_model_id,
                 "google_api_key": api_key,
-                "timeout": route.timeout_seconds,
-                **_google_runtime_kwargs(common),
+                "timeout": timeout,
+                **_mapped_runtime_kwargs(protocol, common),
             }
             return cast(BaseChatModel, chat_google(**_apply_profiles(route, kwargs)))
 
@@ -116,47 +129,52 @@ def _runtime_kwargs(caller_kwargs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _openai_runtime_kwargs(common: dict[str, Any]) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-    if common.get("temperature") is not None:
-        kwargs["temperature"] = common["temperature"]
-    if common.get("max_tokens") is not None:
-        kwargs["max_completion_tokens"] = common["max_tokens"]
-    if common.get("top_p") is not None:
-        kwargs["top_p"] = common["top_p"]
-    if common.get("seed") is not None:
-        kwargs["seed"] = common["seed"]
-    if common.get("stop_sequences"):
-        kwargs["stop"] = common["stop_sequences"]
-    if common.get("reasoning_effort") is not None:
-        kwargs["reasoning_effort"] = common["reasoning_effort"]
-    return kwargs
+# Which request key each setting becomes, per protocol. This IS the mapping the
+# request is built from — not a second list describing it. Anything absent has
+# no place in that protocol's request body, so asking a provider about it would
+# be asking about a parameter it was never sent (decision doc D4).
+_PROVIDER_KEYS: Final[dict[str, dict[str, str]]] = {
+    "openai_compatible": {
+        "temperature": "temperature",
+        "max_tokens": "max_completion_tokens",
+        "top_p": "top_p",
+        "seed": "seed",
+        "stop_sequences": "stop",
+        "reasoning_effort": "reasoning_effort",
+    },
+    "anthropic_compatible": {
+        "temperature": "temperature",
+        "max_tokens": "max_tokens",
+        "top_p": "top_p",
+        "stop_sequences": "stop_sequences",
+    },
+    "google_genai": {
+        "temperature": "temperature",
+        "max_tokens": "max_tokens",
+        "top_p": "top_p",
+        "stop_sequences": "stop",
+    },
+}
+_PROVIDER_KEYS["ark_runtime"] = _PROVIDER_KEYS["openai_compatible"]
 
 
-def _anthropic_runtime_kwargs(common: dict[str, Any]) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-    if common.get("temperature") is not None:
-        kwargs["temperature"] = common["temperature"]
-    if common.get("max_tokens") is not None:
-        kwargs["max_tokens"] = common["max_tokens"]
-    if common.get("top_p") is not None:
-        kwargs["top_p"] = common["top_p"]
-    if common.get("stop_sequences"):
-        kwargs["stop_sequences"] = common["stop_sequences"]
-    return kwargs
+def provider_request_keys(protocol: str) -> Mapping[str, str]:
+    """The request key each setting becomes on this protocol, if it becomes one.
+
+    Callers that need to know whether a setting reaches the provider at all —
+    the settings probe, so it does not spend a request asking about one that
+    cannot — read it from here rather than keeping their own idea of it.
+    """
+    return _PROVIDER_KEYS.get(protocol, {})
 
 
-def _google_runtime_kwargs(common: dict[str, Any]) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-    if common.get("temperature") is not None:
-        kwargs["temperature"] = common["temperature"]
-    if common.get("max_tokens") is not None:
-        kwargs["max_tokens"] = common["max_tokens"]
-    if common.get("top_p") is not None:
-        kwargs["top_p"] = common["top_p"]
-    if common.get("stop_sequences"):
-        kwargs["stop"] = common["stop_sequences"]
-    return kwargs
+def _mapped_runtime_kwargs(protocol: str, common: dict[str, Any]) -> dict[str, Any]:
+    """The settings this protocol carries, under the names it carries them."""
+    return {
+        provider_key: common[setting]
+        for setting, provider_key in provider_request_keys(protocol).items()
+        if common.get(setting) is not None and common.get(setting) != []
+    }
 
 
 def _apply_profiles(route: ResolvedRoute, kwargs: dict[str, Any]) -> dict[str, Any]:

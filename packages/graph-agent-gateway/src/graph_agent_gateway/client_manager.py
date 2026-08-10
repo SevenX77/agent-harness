@@ -5,18 +5,15 @@ from __future__ import annotations
 import importlib
 import logging
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import Any, ClassVar, cast
 
 import httpx
 from anthropic import Anthropic
-from anthropic.types import MessageParam
 from openai import OpenAI
-from openai.types.chat import ChatCompletionMessageParam
 from pydantic import SecretStr
 
 from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
-from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
 
 logger = logging.getLogger(__name__)
@@ -50,20 +47,6 @@ class LLMClientManager:
         del runtime_policy
         return cls._is_provider_marked_down(route)
 
-    @classmethod
-    def probe_provider(
-        cls,
-        route: ResolvedRoute,
-        runtime_policy: RuntimePolicy,
-        *,
-        credential_provider: CredentialProviderProtocol | None = None,
-    ) -> bool:
-        """Probe one route using runtime policy instead of class constants."""
-        return cls._probe_provider(
-            route,
-            runtime_policy,
-            credential_provider=credential_provider,
-        )
 
     @classmethod
     def mark_provider_down(
@@ -312,75 +295,6 @@ class LLMClientManager:
             ttl,
         )
 
-    @classmethod
-    def _probe_provider(
-        cls,
-        route: ResolvedRoute,
-        runtime_policy: RuntimePolicy,
-        *,
-        credential_provider: CredentialProviderProtocol | None = None,
-    ) -> bool:
-        """Run a one-token active probe when the provider type supports it."""
-        if route.protocol == "openai_compatible":
-            try:
-                client_kwargs: dict[str, Any] = {
-                    "timeout_override": runtime_policy.probe_timeout_seconds,
-                    "runtime_policy": runtime_policy,
-                }
-                if credential_provider is not None:
-                    client_kwargs["credential_provider"] = credential_provider
-                openai_client = cls._get_openai_client(route, **client_kwargs)
-                openai_client.chat.completions.create(
-                    model=route.provider_model_id,
-                    messages=cast(
-                        Iterable[ChatCompletionMessageParam],
-                        [{"role": "user", "content": "."}],
-                    ),
-                    max_tokens=1,
-                    temperature=0,
-                )
-                return True
-            except Exception as exc:
-                logger.warning(
-                    "phase=llm_client_manager action=probe_fail "
-                    "endpoint=%s route=%s model=%s error=%s",
-                    route.endpoint_id,
-                    route.route_id,
-                    route.provider_model_id,
-                    exc,
-                )
-                if classify_exception(exc, route_id=route.route_id).decision != "fallback_allowed":
-                    raise
-                cls._mark_provider_down(route, runtime_policy)
-                return False
-
-        if route.protocol == "anthropic_compatible":
-            try:
-                client_kwargs = {"runtime_policy": runtime_policy}
-                if credential_provider is not None:
-                    client_kwargs["credential_provider"] = credential_provider
-                anthropic_client = cls._get_anthropic_client(route, **client_kwargs)
-                anthropic_client.messages.create(
-                    model=route.provider_model_id,
-                    messages=[MessageParam(role="user", content=".")],
-                    max_tokens=1,
-                )
-                return True
-            except Exception as exc:
-                logger.warning(
-                    "phase=llm_client_manager action=probe_fail "
-                    "endpoint=%s route=%s model=%s error=%s",
-                    route.endpoint_id,
-                    route.route_id,
-                    route.provider_model_id,
-                    exc,
-                )
-                if classify_exception(exc, route_id=route.route_id).decision != "fallback_allowed":
-                    raise
-                cls._mark_provider_down(route, runtime_policy)
-                return False
-
-        return True
 
     @classmethod
     def _resolve_api_key(

@@ -79,8 +79,6 @@ class _Manager:
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return route.route_id in self.marked_down
 
-    def probe_provider(self, route: Any, runtime_policy: Any, **kwargs: Any) -> bool:
-        return True
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.add(route.route_id)
@@ -132,6 +130,7 @@ def _ask(
     monkeypatch: pytest.MonkeyPatch,
     *,
     manager: Any,
+    probe: bool = False,
 ) -> tuple[list[Any], BaseException | None]:
     from graph_agent_gateway import gateway_chat_model
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
@@ -146,7 +145,7 @@ def _ask(
         max_tokens=512,
         temperature=0.7,
         client_manager=manager,
-        probe_before_call=False,
+        probe_before_call=probe,
         callbacks=[recorder],
     )
     raised: BaseException | None = None
@@ -168,7 +167,7 @@ def test_a_setting_the_route_refuses_does_not_kill_the_call(
     decisions, raised = _ask([route], factory, monkeypatch, manager=manager)
 
     assert raised is None, f"the call died over a preference: {raised}"
-    assert [d.decision for d in decisions] == ["retried_without_rejected_settings", "answered"]
+    assert [d.decision for d in decisions] == ["dropped_rejected_settings", "answered"]
     assert route.route_id not in manager.marked_down, "a refused setting marked the route down"
 
 
@@ -202,3 +201,44 @@ def test_a_refusal_that_is_not_about_the_settings_still_ends_the_call(
 
     assert raised is not None
     assert [d.decision for d in decisions][-1] in {"failed_terminal", "exhausted"}
+
+
+class _RouteThatRefusesOnePreference:
+    """Answers unless the request carries the one setting it will not take."""
+
+    def __init__(self, offending: str = "top_p") -> None:
+        self.offending = offending
+        self.builds: list[dict[str, Any]] = []
+
+    def build(self, route: Any, **kwargs: Any) -> Any:
+        del route
+        self.builds.append(dict(kwargs))
+        return _Behaviour(_RejectedByProvider(self.offending) if self.offending in kwargs else None)
+
+
+def test_a_named_refusal_costs_only_the_setting_that_was_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One refused preference must not cost the caller the others.
+
+    The probe says which setting the route will not take. Dropping the whole
+    preference layer after being told exactly that would throw away settings
+    the route just accepted — the user asked for those, and nothing refused
+    them.
+    """
+    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting
+
+    route = _route()
+    route.effective_runtime_settings["top_p"] = EffectiveRuntimeSetting(
+        value=5.0,
+        source="route_setting",
+    )
+    factory = _RouteThatRefusesOnePreference()
+
+    decisions, raised = _ask([route], factory, monkeypatch, manager=_Manager(), probe=True)
+
+    assert raised is None
+    call = factory.builds[-1]
+    assert "top_p" not in call
+    assert call["temperature"] == 0.7
+    assert [d.decision for d in decisions] == ["dropped_rejected_settings", "answered"]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, NoReturn, cast
@@ -36,6 +35,7 @@ from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+from graph_agent_gateway.settings_probe import probe_call_settings
 from graph_agent_gateway.tracing import emit_route_decision_event
 
 logger = logging.getLogger(__name__)
@@ -292,19 +292,29 @@ class GatewayChatModel(BaseChatModel):
         )
 
         for index, candidate in enumerate(self.resolved_role.routes):
-            candidate_id = _candidate_id(candidate)
             if _is_marked_down(self.client_manager, candidate, runtime_policy):
                 self._decided("skipped_circuit_open", route=candidate)
                 continue
+            retry_same_used = False
+            refused_settings: tuple[str, ...] | None = None
+            attempt = _Attempt(
+                budget=initial_budget(candidate, defaults, kwargs),
+                cap=budget_cap(candidate),
+                escalations_left=int(getattr(runtime_policy, "token_escalation_rounds", 0) or 0),
+            )
             if self.probe_before_call:
-                try:
-                    probe_ok = _probe(
-                        self.client_manager,
-                        candidate,
-                        runtime_policy,
-                        credential_provider=self.credential_provider,
-                    )
-                except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
+                # Asked with this call's own settings, for one token. A route
+                # that will not take a setting says so here, before the long
+                # call starts — the same finding the failure path below can
+                # only make after the request has already been paid for.
+                verdict = probe_call_settings(
+                    candidate,
+                    self._settings_for(candidate, defaults, kwargs, budget=attempt.budget),
+                    factory=self._route_factory(),
+                    timeout_seconds=getattr(runtime_policy, "probe_timeout_seconds", None),
+                )
+                if not verdict.answers_without_them:
+                    exc = verdict.refusal or RuntimeError("probe failed")
                     classification = classify_exception(exc, route_id=candidate.route_id)
                     failure = _failure_record(candidate, exc, classification.decision)
                     failure["unclassified_default"] = classification.unclassified_default
@@ -332,41 +342,23 @@ class GatewayChatModel(BaseChatModel):
                         next_route_id=self._next_candidate_id(index + 1),
                     )
                     continue
-                if not probe_ok:
-                    failure = {
-                        "provider": candidate_id,
-                        "route_id": candidate.route_id,
-                        "endpoint_id": candidate.endpoint_id,
-                        "provider_model_id": candidate.provider_model_id,
-                        "canonical_id": candidate.canonical_id,
-                        "protocol": candidate.protocol,
-                        "error_type": "RuntimeError",
-                        "message": "probe failed",
-                        "fallback_decision": "fallback_allowed",
-                        "unclassified_default": False,
-                        "provider_status_code": None,
-                    }
-                    failures.append(failure)
-                    _mark_down(
-                        self.client_manager,
-                        candidate,
-                        RuntimeError("probe failed"),
-                        runtime_policy,
-                    )
+                if verdict.refused:
+                    refused_settings = verdict.refused
+                    refusal = verdict.refusal
                     self._decided(
-                        "probe_failed",
+                        "dropped_rejected_settings",
                         route=candidate,
-                        reason="probe returned false",
-                        next_route_id=self._next_candidate_id(index + 1),
+                        reason=(
+                            f"probe: {type(refusal).__name__}: {refusal}"
+                            f" | running without {', '.join(verdict.refused)}"
+                        ),
+                        provider_status_code=classify_exception(
+                            refusal,
+                            route_id=candidate.route_id,
+                        ).provider_status_code
+                        if refusal is not None
+                        else None,
                     )
-                    continue
-            retry_same_used = False
-            preferences_dropped = False
-            attempt = _Attempt(
-                budget=initial_budget(candidate, defaults, kwargs),
-                cap=budget_cap(candidate),
-                escalations_left=int(getattr(runtime_policy, "token_escalation_rounds", 0) or 0),
-            )
             # Bracketing the whole escalation sequence, not each attempt: an
             # answer that took three tries is still one answer to bill for.
             before_usage = _usage_total_calls(self.client_manager, candidate)
@@ -375,23 +367,28 @@ class GatewayChatModel(BaseChatModel):
                 # handler below has to be able to say what was asked for, and
                 # composing is arithmetic on settled values — the only thing
                 # that can fail here is the provider.
-                settings = compose_call_settings(
+                settings = self._settings_for(
                     candidate,
-                    defaults=defaults,
-                    call_kwargs=kwargs,
+                    defaults,
+                    kwargs,
                     budget=attempt.budget,
-                    tools=list(self.bound_tools) or None,
-                    tool_choice=self.tool_choice,
                 )
-                if preferences_dropped:
-                    settings = settings.without_preferences()
+                if refused_settings is not None:
+                    # Named by the probe: drop those and keep the rest. Unnamed
+                    # (the failure path below): nothing is known about which
+                    # one, so none of them survives.
+                    settings = (
+                        settings.without(refused_settings)
+                        if refused_settings
+                        else settings.without_preferences()
+                    )
                 try:
                     accumulated: AIMessageChunk | None = None
                     for piece in _dispatch(
                         candidate,
                         request_messages,
                         settings,
-                        credential_provider=self.credential_provider,
+                        factory=self._route_factory(),
                     ):
                         accumulated = piece if accumulated is None else accumulated + piece
                         attempt.streamed = True
@@ -445,7 +442,7 @@ class GatewayChatModel(BaseChatModel):
                         continue
                     if (
                         classification.scope == "request"
-                        and not preferences_dropped
+                        and refused_settings is None
                         and settings.preference_names
                     ):
                         # The provider read this request and refused it — the one
@@ -458,9 +455,9 @@ class GatewayChatModel(BaseChatModel):
                         # providers keep changing. Capacity, credential and route
                         # failures never reach here: nothing about them is the
                         # settings, so nothing is gained by asking twice.
-                        preferences_dropped = True
+                        refused_settings = ()
                         self._decided(
-                            "retried_without_rejected_settings",
+                            "dropped_rejected_settings",
                             route=candidate,
                             reason=(
                                 f"{type(exc).__name__}: {exc}"
@@ -503,6 +500,28 @@ class GatewayChatModel(BaseChatModel):
             failures,
             phase_name=self.phase_name or "<gateway>",
         )
+
+    def _settings_for(
+        self,
+        route: ResolvedRoute,
+        defaults: ModelDefaults,
+        call_kwargs: dict[str, Any],
+        *,
+        budget: int,
+    ) -> CallSettings:
+        """What this model asks this route for, at this budget."""
+        return compose_call_settings(
+            route,
+            defaults=defaults,
+            call_kwargs=call_kwargs,
+            budget=budget,
+            tools=list(self.bound_tools) or None,
+            tool_choice=self.tool_choice,
+        )
+
+    def _route_factory(self) -> RouteChatModelFactory:
+        """The one builder the probe and the call it precedes both come off."""
+        return RouteChatModelFactory(credential_provider=self.credential_provider)
 
     def _decided(
         self,
@@ -742,31 +761,12 @@ def _is_marked_down(
     return bool(manager.is_provider_marked_down(candidate, runtime_policy))
 
 
-def _probe(
-    client_manager: Any,
-    candidate: ResolvedRoute,
-    runtime_policy: Any,
-    *,
-    credential_provider: Any = None,
-) -> bool:
-    manager = _manager(client_manager)
-    if credential_provider is not None and _supports_credential_provider(manager.probe_provider):
-        return bool(
-            manager.probe_provider(
-                candidate,
-                runtime_policy,
-                credential_provider=credential_provider,
-            )
-        )
-    return bool(manager.probe_provider(candidate, runtime_policy))
-
-
 def _dispatch(
     candidate: ResolvedRoute,
     messages: list[BaseMessage],
     settings: CallSettings,
     *,
-    credential_provider: Any,
+    factory: RouteChatModelFactory,
 ) -> Iterator[AIMessageChunk]:
     """Ask one route for one answer, and hand back the pieces as they land.
 
@@ -775,7 +775,6 @@ def _dispatch(
     a stream with a single piece, which is the same answer. Asking would mean
     two call paths to keep honest for no gain.
     """
-    factory = RouteChatModelFactory(credential_provider=credential_provider)
     # Typed by the one capability this needs: binding tools hands back a
     # Runnable rather than the chat model itself, and both know how to stream.
     chat_model: Runnable[LanguageModelInput, AIMessage] = factory.build(
@@ -800,13 +799,6 @@ def _as_answer(accumulated: AIMessageChunk | None) -> AIMessage:
     if accumulated is None:
         return AIMessage(content="")
     return cast(AIMessage, message_chunk_to_message(accumulated))
-
-
-def _supports_credential_provider(method: Any) -> bool:
-    try:
-        return "credential_provider" in inspect.signature(method).parameters
-    except (TypeError, ValueError):
-        return False
 
 
 def _mark_down(

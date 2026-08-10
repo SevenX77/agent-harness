@@ -84,11 +84,14 @@ class RunRecord:
     run_dir: Path
     process: Any
     process_queue: Any
+    # Stated by every spawn, defaulted by none: whether a run archives the skill
+    # on success is a property of what the run IS, and reading it off a default
+    # is how a side experiment ends up owning someone else's edits.
+    auto_commit: bool
     ws_queue: asyncio.Queue[dict[str, Any] | None] = field(default_factory=asyncio.Queue)
     events: list[EventEnvelope] = field(default_factory=list)
     subscribers: list[asyncio.Queue[dict[str, Any] | None]] = field(default_factory=list)
     drain_task: asyncio.Task[None] | None = None
-    auto_commit: bool = True
 
 
 @dataclass
@@ -645,6 +648,7 @@ class RunManager:
             run_dir=run_dir,
             process=process,
             process_queue=process_queue,
+            auto_commit=True,
         )
         self._runs[run_id] = record
         task = asyncio.create_task(self._drain_process_queue(record))
@@ -804,6 +808,10 @@ class RunManager:
             run_dir=run_dir,
             process=process,
             process_queue=process_queue,
+            # A candidate side-run answers "what would this model do here";
+            # it never edits the skill. Committing on its way out would hand
+            # it whatever the user happened to change while it ran.
+            auto_commit=False,
         )
         self._runs[run_id] = record
         task = asyncio.create_task(self._drain_process_queue(record))

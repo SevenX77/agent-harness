@@ -39,7 +39,7 @@ class RouteChatModelFactory:
         protocol = str(route.protocol)
         base_url = canonicalize_base_url(route.base_url, protocol)
         api_key = _resolve_api_key(route, self.credential_provider)
-        common = _runtime_kwargs(route, caller_kwargs)
+        common = _runtime_kwargs(caller_kwargs)
         common["temperature"] = provider_temperature_from_authored(
             common.get("temperature"),
             protocol,
@@ -101,33 +101,19 @@ class RouteChatModelFactory:
         )
 
 
-def _runtime_kwargs(route: ResolvedRoute, caller_kwargs: dict[str, Any]) -> dict[str, Any]:
+def _runtime_kwargs(caller_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The settings this build was handed, under the names the mappers use.
+
+    Read from the caller and from nowhere else. What a call asks a route for is
+    settled in one place — :mod:`graph_agent_gateway.call_settings` — and a
+    second reader of the route's own settings here would put back whatever that
+    place deliberately left off, which is exactly how a preference a provider
+    refuses survives the retry that was supposed to drop it.
+    """
     return {
-        "temperature": _caller_or_effective(caller_kwargs, route, "temperature"),
-        "max_tokens": _caller_or_effective(caller_kwargs, route, "max_tokens", "max_output_tokens"),
-        "top_p": _caller_or_effective(caller_kwargs, route, "top_p"),
-        "stop_sequences": caller_kwargs.get("stop_sequences")
-        or _effective_value(route, "stop_sequences"),
-        "seed": _caller_or_effective(caller_kwargs, route, "seed"),
-        "reasoning_effort": _caller_or_effective(caller_kwargs, route, "reasoning_effort"),
+        key: caller_kwargs.get(key)
+        for key in ("temperature", "max_tokens", "top_p", "stop_sequences", "seed", "reasoning_effort")
     }
-
-
-def _caller_or_effective(
-    caller_kwargs: dict[str, Any],
-    route: ResolvedRoute,
-    caller_key: str,
-    effective_key: str | None = None,
-) -> Any:
-    value = caller_kwargs.get(caller_key)
-    if value is not None:
-        return value
-    return _effective_value(route, effective_key or caller_key)
-
-
-def _effective_value(route: ResolvedRoute, key: str) -> Any:
-    setting = route.effective_runtime_settings.get(key)
-    return setting.value if setting is not None else None
 
 
 def _openai_runtime_kwargs(common: dict[str, Any]) -> dict[str, Any]:

@@ -39,7 +39,7 @@ def test_only_the_settings_a_user_chose_are_judged() -> None:
     """A default nobody picked is not a preference; reporting it buries the ones that are."""
     outcomes = _judge(
         reported={
-            "top_p": {"value": 0.4, "source": "runtime_settings"},
+            "top_p": {"value": 0.4, "source": "route_setting"},
             "seed": {"value": 7, "source": "profile_default"},
         },
     )
@@ -50,7 +50,7 @@ def test_only_the_settings_a_user_chose_are_judged() -> None:
 def test_a_setting_this_protocol_cannot_carry_is_unsupported() -> None:
     """Nothing was sent, so nothing can have been applied, refused or ignored."""
     outcomes = _judge(
-        reported={"stop_sequences": {"value": ["END"], "source": "runtime_settings"}},
+        reported={"stop_sequences": {"value": ["END"], "source": "route_setting"}},
         carried={"temperature": "temperature"},
     )
 
@@ -59,7 +59,7 @@ def test_a_setting_this_protocol_cannot_carry_is_unsupported() -> None:
 
 def test_a_setting_the_provider_refused_is_rejected() -> None:
     outcomes = _judge(
-        reported={"top_p": {"value": 5.0, "source": "runtime_settings"}},
+        reported={"top_p": {"value": 5.0, "source": "route_setting"}},
         refused=("top_p",),
     )
 
@@ -68,7 +68,7 @@ def test_a_setting_the_provider_refused_is_rejected() -> None:
 
 def test_a_setting_that_had_to_be_moved_is_adjusted_and_says_what_was_asked() -> None:
     outcomes = _judge(
-        reported={"top_p": {"value": 1.0, "asked": 5.0, "source": "runtime_settings"}},
+        reported={"top_p": {"value": 1.0, "asked": 5.0, "source": "route_setting"}},
     )
 
     assert outcomes["top_p"].verdict == "adjusted"
@@ -98,8 +98,72 @@ def test_reasoning_asked_for_and_absent_from_the_answer_is_ignored() -> None:
 def test_a_setting_the_answer_cannot_testify_about_is_sent_not_applied() -> None:
     """Silence is not evidence: calling this applied would be a claim nobody checked."""
     outcomes = _judge(
-        reported={"temperature": {"authored_value": 1.4, "source": "runtime_settings"}},
+        reported={"temperature": {"authored_value": 1.4, "source": "route_setting"}},
     )
 
     assert outcomes["temperature"].verdict == "sent"
     assert outcomes["temperature"].requested == 1.4
+
+
+def test_a_setting_known_only_by_having_been_adjusted_still_gets_a_verdict() -> None:
+    """Measured 2026-08-10 against api.deepseek.com: top_p 5.0 went out as 1.0, and
+    the settings event said nothing about it.
+
+    Only settings with their own report entry carry a source. One known solely
+    because it had to be moved carried none, so the "did a user choose this"
+    filter dropped it — and an adjustment nobody is told about is the silence
+    this whole design exists to remove.
+    """
+    from graph_agent_gateway.call_settings import (
+        ModelDefaults,
+        compose_call_settings,
+        initial_budget,
+    )
+    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting, ResolvedRoute
+    from graph_agent_gateway.settings_outcome import judge_settings
+
+    route = ResolvedRoute(
+        role_name="graph_agent",
+        route_id="deepseek-official:deepseek-v4-pro",
+        endpoint_id="deepseek-official",
+        protocol="openai_compatible",
+        base_url="https://api.deepseek.example/v1",
+        credential_ref="endpoint:deepseek-official",
+        credential_fingerprint="fingerprint-a",
+        provider_model_id="deepseek-v4-pro",
+        canonical_id="deepseek-v4-pro",
+        effective_runtime_settings={
+            "top_p": EffectiveRuntimeSetting(value=5.0, source="route_setting"),
+        },
+    )
+    defaults = ModelDefaults(
+        max_tokens=1024, temperature=None, thinking_enabled=None, runtime_setting_sources={}
+    )
+    settings = compose_call_settings(
+        route,
+        defaults=defaults,
+        call_kwargs={},
+        budget=initial_budget(route, defaults, {}),
+        tools=None,
+        tool_choice=None,
+    )
+    outcomes = {
+        outcome.setting: outcome
+        for outcome in judge_settings(
+            reported=settings.reported, carried=CARRIED, refused=(), reasoned=None
+        )
+    }
+
+    assert settings.build_kwargs()["top_p"] == 1.0
+    assert outcomes["top_p"].verdict == "adjusted"
+    assert outcomes["top_p"].requested == 5.0
+
+
+def test_a_source_no_resolver_can_produce_is_not_treated_as_one_that_can() -> None:
+    """``EffectiveRuntimeSetting.source`` is a closed set; membership is checkable."""
+    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting
+    from graph_agent_gateway.settings_outcome import AUTHORED_SOURCES, CALL_OVERRIDE
+
+    resolver_sources = set(EffectiveRuntimeSetting.model_fields["source"].annotation.__args__)
+
+    assert AUTHORED_SOURCES - {CALL_OVERRIDE} <= resolver_sources

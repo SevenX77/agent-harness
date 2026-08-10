@@ -190,7 +190,11 @@ def test_an_adjusted_setting_reports_what_was_asked_for() -> None:
     )
 
     assert settings.build_kwargs()["top_p"] == 1.0
-    assert settings.reported["top_p"] == {"asked": 5.0}
+    assert settings.reported["top_p"] == {
+        "asked": 5.0,
+        "value": 1.0,
+        "source": "route_setting",
+    }
     assert settings.build_kwargs()["max_tokens"] == 8192
     assert settings.reported["max_output_tokens"]["asked"] == 999_999
 

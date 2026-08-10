@@ -29,12 +29,16 @@ from graph_agent_gateway.call_settings import KWARG_OF_SETTING, ActualRuntimeSet
 
 SettingVerdict = Literal["applied", "sent", "adjusted", "unsupported", "rejected", "ignored"]
 
+# What a call's own keyword arguments settle. Not one of the resolver's
+# provenance values — the host chose it for this call, past whatever the route
+# had settled — so it is named here rather than found in that closed set.
+CALL_OVERRIDE: Final = "call_override"
+
 # Where a value has to come from for it to be somebody's choice rather than a
-# floor we picked on their behalf. Everything else — profile, protocol, studio
-# and capability defaults — is ours, and reporting ours back drowns theirs.
-AUTHORED_SOURCES: Final[frozenset[str]] = frozenset(
-    {"runtime_settings", "route_setting", "call_override"}
-)
+# floor we picked on their behalf. Everything else the resolver can stamp —
+# profile, protocol, studio and capability defaults — is ours, and reporting
+# ours back drowns theirs.
+AUTHORED_SOURCES: Final[frozenset[str]] = frozenset({"route_setting", CALL_OVERRIDE})
 
 # The one setting whose effect the answer itself can testify to: asking for
 # reasoning and receiving none is a contradiction, where asking for a
@@ -155,6 +159,7 @@ def _setting_of_kwarg(keyword: str) -> str:
 
 __all__ = [
     "AUTHORED_SOURCES",
+    "CALL_OVERRIDE",
     "SettingOutcome",
     "SettingVerdict",
     "judge_settings",

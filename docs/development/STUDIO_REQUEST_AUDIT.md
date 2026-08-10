@@ -210,6 +210,7 @@ BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
 BACKEND WS /api/skills/{skill_id}/copilot/ws
 BACKEND WS /ws/events
 BACKEND WS /ws/skills/{skill_id}/runs/{run_id}
+BACKEND WS /ws/skills/{skill_id}/runs/{run_id}/deltas
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id}
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id}
 FRONTEND DELETE /api/llm/roles/{role_name}
@@ -428,6 +429,7 @@ BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specif
 BACKEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; future @mentions must travel in this message payload, not via background context POST.
 BACKEND WS /ws/events | ok | shared | Domain event stream; connect and reconnect must not refresh broad truth.
 BACKEND WS /ws/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run event stream keyed by (skill_id, run_id); it observes one execution — live from memory, or replayed from that run's own directory once the record is gone — and does not refresh registry/settings truth.
+BACKEND WS /ws/skills/{skill_id}/runs/{run_id}/deltas | ok | specific | Scoped live-output stream for one running execution; carries only pieces of that run's LLM output, each naming the step it belongs to. It has no cursor and no replay by design — the pieces may be merged or dropped under backpressure, and what they spelled out arrives whole on the step's closing event over the sibling socket. Observes one execution; refreshes no truth.
 FRONTEND DELETE /api/llm/model-bundles/{bundle_id} | ok | specific | Explicit model-bundle delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/registry/endpoints/{endpoint_id} | ok | specific | Explicit provider delete command; client projects the returned canonical registry snapshot without a follow-up /llm/registry GET.
 FRONTEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete command; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.

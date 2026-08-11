@@ -63,7 +63,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 ### 调用层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
-| `09-inv-invocation-runtime` | `call/chat_model.py:_dispatch/_answer/_Attempt/_build_chat_result/_build_chat_result_from_ai_message`、`call/dispatch.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 已记录旧 `client_manager._call_*` 退役;MVP1 主路径为原生 ChatX,generic ordinary path 在 `call/dispatch.py` |
+| `09-inv-invocation-runtime` | `call/chat_model.py:_dispatch/_answer/_Attempt/_build_chat_result/_build_chat_result_from_ai_message`、`call/plain.py:chat_plainly/PlainAnswer` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。MVP1 主路径为原生 ChatX;不要 LangChain 的消费方走 `call/plain.py` 那张脸。旧的自研 generic ordinary path(`call/dispatch.py` / `models.py:GenericRouteChatModel`)已随 #718 删除 |
 | `10-inv-route-chat-model-factory` | `call/factory.py:RouteChatModelFactory`、`call/plain.py:chat_plainly`(原表并列的 `models.py:GenericRouteChatModel` 与 `call/profiles.py` | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。WS-1 后模块源码已存在,剩余为 generic 完整性 deferred |
 | `11-inv-provider-profiles` | `call/profiles.py:ProviderProfile/apply_provider_profile_layers`、`call/factory.py:_apply_profiles` | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。WS-1 后最小 profile registry 已存在,后续按需收束 provider-specific thinking |
 
@@ -73,7 +73,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
 | `01-handoff-interface` | `protocol.py:ModelResolverProtocol.resolve/resolve_routes`、`resolver.py:ModelResolver.resolve_routes`、`__init__.py`、`apps/studio/backend/app/models/copilot.py`(ws 事件)+ 引用 `registry/schema.py:ResolvedRoute/ResolvedRole` | `route` 契约每字段;resolve API 契约;两个消费方各取什么。baseline:route 级 public API 已落地;剩余下游接线与公共门面导出 |
-| `13-x-tracing-events-exceptions` | `events.py:LLMFallbackEvent`、`exceptions.py`、`tracing.py:emit_llm_fallback_event` | fallback 事件 payload(含 from/to route 诊断);各异常类型语义与触发点 |
+| `13-x-tracing-events-exceptions` | `events.py:LLMRouteDecisionEvent/LLMCallSettingsEvent`、`errors.py`、`call/tracing.py:emit_route_decision_event/emit_call_settings_event` | 路由决策事件 payload(一种事件、九种取值,含路由身份与"作废已流出内容"标志);调用设置事件 payload(每项设置的下场);各异常类型语义与触发点 |
 
 > **HTTP 适配壳（原模块 14）已移交 studio**：`routers/llm.py`、`routers/copilot.py` = ③a Studio HTTP 适配壳（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不是 ③b gateway 公共内核。它 delegate 的能力内核（base_url 归一化 / capability / probe 策略 / materialize / 6 态 / Probe Knowledge Catalog / endpoint 拆分）才是 ③b 公共。文档见 `docs/studio/mvp1/04_platform/llm-copilot-http-api/`。
 

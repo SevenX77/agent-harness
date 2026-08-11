@@ -96,8 +96,8 @@ class FakeFactory:
 def test_gateway_invokes_chatx_with_raw_base_messages_for_empty_content_tool_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway import gateway_chat_model
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     chat_model = FakeChatModel(
         [
@@ -155,7 +155,7 @@ def test_gateway_invokes_chatx_with_raw_base_messages_for_empty_content_tool_loo
 
 
 def test_build_chat_result_preserves_ai_message_blocks_and_provider_metadata() -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
 
     route = _route()
     model = GatewayChatModel(
@@ -189,8 +189,8 @@ def test_build_chat_result_preserves_ai_message_blocks_and_provider_metadata() -
 def test_truncated_chatx_response_rebuilds_with_doubled_token_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway import gateway_chat_model
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     chat_model = FakeChatModel(
         [
@@ -270,8 +270,8 @@ def _gateway_with_factory(
     factory: RouteAwareFactory,
     routes: list[Any],
 ):
-    from graph_agent_gateway import gateway_chat_model
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     monkeypatch.setattr(
         gateway_chat_model,
@@ -366,7 +366,7 @@ def test_gateway_chat_model_retries_same_route_before_switching_on_retryable_sta
 def test_chatx_retry_exhaustion_400_non_capability_shape_remains_fail_fast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.exceptions import AllProvidersFailedError
+    from graph_agent_gateway.errors import AllProvidersFailedError
 
     bad_route = _route(endpoint_id="primary", route_slug="bad")
     fallback_route = _route(endpoint_id="fallback", route_slug="ok")
@@ -428,7 +428,7 @@ def test_real_openai_authentication_error_shape_remains_fallback_allowed(
 def test_real_openai_bad_request_error_shape_remains_fail_fast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.exceptions import AllProvidersFailedError
+    from graph_agent_gateway.errors import AllProvidersFailedError
 
     bad_route = _route(endpoint_id="primary", route_slug="bad", protocol="openai_compatible")
     fallback_route = _route(endpoint_id="fallback", route_slug="ok", protocol="openai_compatible")
@@ -458,8 +458,8 @@ def test_real_openai_bad_request_error_shape_remains_fail_fast(
 def test_predict_gateway_model_stays_self_contained_and_skips_chatx_factory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway import gateway_chat_model
-    from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+    from graph_agent_gateway.call import PredictGatewayChatModel
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     class PredictContext:
         def __init__(self) -> None:

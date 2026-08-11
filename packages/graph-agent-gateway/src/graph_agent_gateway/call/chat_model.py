@@ -20,7 +20,13 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ConfigDict, Field
 
-from graph_agent_gateway.call_settings import (
+from graph_agent_gateway.call.factory import (
+    RouteChatModelFactory,
+    provider_request_keys,
+)
+from graph_agent_gateway.call.outcome import judge_settings
+from graph_agent_gateway.call.pre_call_probe import probe_call_settings
+from graph_agent_gateway.call.settings import (
     ActualRuntimeSettings,
     CallSettings,
     ModelDefaults,
@@ -30,17 +36,11 @@ from graph_agent_gateway.call_settings import (
     initial_budget,
     token_budget,
 )
+from graph_agent_gateway.call.tracing import emit_call_settings_event, emit_route_decision_event
+from graph_agent_gateway.errors import AllProvidersFailedError
 from graph_agent_gateway.events import RouteDecision
-from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.resolve import classify_exception
-from graph_agent_gateway.route_chat_model_factory import (
-    RouteChatModelFactory,
-    provider_request_keys,
-)
-from graph_agent_gateway.settings_outcome import judge_settings
-from graph_agent_gateway.settings_probe import probe_call_settings
-from graph_agent_gateway.tracing import emit_call_settings_event, emit_route_decision_event
 
 logger = logging.getLogger(__name__)
 
@@ -774,7 +774,7 @@ def _failure_record(
 
 
 def _default_client_manager() -> Any:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMClientManager
 
     return LLMClientManager
 

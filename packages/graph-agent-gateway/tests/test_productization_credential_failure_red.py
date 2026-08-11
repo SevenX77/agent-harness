@@ -28,7 +28,7 @@ def _error_code(exc: BaseException) -> str | None:
 
 
 def test_fake_vault_5xx_is_reported_as_vault_unreachable() -> None:
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from graph_agent_gateway.call import RouteChatModelFactory
 
     class FakeVault5xxProvider:
         def get(self, ref: str) -> str:
@@ -46,8 +46,8 @@ def test_fake_vault_5xx_is_reported_as_vault_unreachable() -> None:
 
 
 def test_expired_secret_handle_is_rejected_before_provider_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    from graph_agent_gateway import route_chat_model_factory
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from graph_agent_gateway.call import RouteChatModelFactory
+    from graph_agent_gateway.call import factory as route_chat_model_factory
 
     class FakeChatOpenAI:
         def __init__(self, **kwargs: Any) -> None:

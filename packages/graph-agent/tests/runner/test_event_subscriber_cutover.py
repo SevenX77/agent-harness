@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from graph_agent_gateway.tracing import emit_route_decision_event
+from graph_agent_gateway.call import emit_route_decision_event
 from langchain_core.messages import AIMessage
 
 from graph_agent.core.runner import run_skill

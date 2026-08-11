@@ -34,7 +34,7 @@ def _route():
 
 
 def test_runtime_policy_changes_runtime_client_cache_key_not_credential_fingerprint() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call import LLMClientManager
     from graph_agent_gateway.registry import ProviderEndpoint, RuntimePolicy, compute_credential_fingerprint
 
     route = _route()
@@ -71,7 +71,7 @@ def test_runtime_policy_changes_runtime_client_cache_key_not_credential_fingerpr
 
 
 def test_resolve_api_key_uses_credential_provider_ref() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call import LLMClientManager
 
     route = _route()
     provider = StaticCredentialProvider({"endpoint:openai-direct": "secret-from-provider"})
@@ -83,8 +83,8 @@ def test_resolve_api_key_uses_credential_provider_ref() -> None:
 
 
 def test_provider_down_ttl_comes_from_runtime_policy(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call import LLMClientManager
+    from graph_agent_gateway.call import clients as client_manager
     from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route()
@@ -103,7 +103,7 @@ def test_provider_down_ttl_comes_from_runtime_policy(monkeypatch) -> None:
 
 
 def test_token_escalation_rounds_come_from_runtime_policy() -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
     from graph_agent_gateway.registry import CapabilityValue, RuntimePolicy
 
     route = _route().model_copy(
@@ -147,7 +147,7 @@ def test_token_escalation_rounds_come_from_runtime_policy() -> None:
 
 def test_anthropic_thinking_rejects_max_tokens_below_budget_floor(monkeypatch) -> None:
     import pytest
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     def fake_messages_create(_client: object, kwargs: dict[str, object]) -> dict[str, object]:
         raise AssertionError(f"provider should not be called with invalid thinking budget: {kwargs}")
@@ -166,7 +166,7 @@ def test_anthropic_thinking_rejects_max_tokens_below_budget_floor(monkeypatch) -
 
 
 def test_anthropic_thinking_prefers_adaptive_without_budget_tokens(monkeypatch) -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -196,7 +196,7 @@ def test_anthropic_thinking_prefers_adaptive_without_budget_tokens(monkeypatch) 
 
 
 def test_anthropic_request_mapper_forces_adaptive_thinking_payload(monkeypatch) -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -225,7 +225,7 @@ def test_anthropic_request_mapper_forces_adaptive_thinking_payload(monkeypatch) 
 
 
 def test_anthropic_uses_configured_thinking_budget_only_for_manual_fallback(monkeypatch) -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -258,7 +258,7 @@ def test_anthropic_uses_configured_thinking_budget_only_for_manual_fallback(monk
 
 
 def test_anthropic_haiku_thinking_uses_manual_budget_without_adaptive_attempt(monkeypatch) -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -289,7 +289,7 @@ def test_anthropic_haiku_thinking_uses_manual_budget_without_adaptive_attempt(mo
 
 
 def test_anthropic_system_only_messages_keep_required_user_turn() -> None:
-    from graph_agent_gateway.ordinary_chat import _split_anthropic_messages
+    from graph_agent_gateway.call.dispatch import _split_anthropic_messages
 
     system_text, api_messages = _split_anthropic_messages(
         [{"role": "system", "content": "You are a v0.3.0 agent prompt."}]
@@ -300,7 +300,7 @@ def test_anthropic_system_only_messages_keep_required_user_turn() -> None:
 
 
 def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -359,7 +359,7 @@ def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
 
 
 def test_openai_runtime_settings_omit_unset_temperature() -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -392,7 +392,8 @@ def test_openai_runtime_settings_omit_unset_temperature() -> None:
 
 
 def test_dispatch_keeps_openai_temperature_on_authored_two_point_scale(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager, ordinary_chat
+    from graph_agent_gateway.call import clients as client_manager
+    from graph_agent_gateway.call import dispatch as ordinary_chat
     from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route()
@@ -426,8 +427,8 @@ def test_dispatch_keeps_openai_temperature_on_authored_two_point_scale(monkeypat
 
 
 def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
-    from graph_agent_gateway import ordinary_chat
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call import LLMClientManager
+    from graph_agent_gateway.call import dispatch as ordinary_chat
     from graph_agent_gateway.registry import ResolvedRoute, RuntimePolicy
 
     captured: list[dict[str, object]] = []
@@ -488,7 +489,8 @@ def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
 
 
 def test_dispatch_remaps_anthropic_temperature_to_provider_scale(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager, ordinary_chat
+    from graph_agent_gateway.call import clients as client_manager
+    from graph_agent_gateway.call import dispatch as ordinary_chat
     from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route().model_copy(
@@ -531,7 +533,7 @@ def test_dispatch_remaps_anthropic_temperature_to_provider_scale(monkeypatch) ->
 
 
 def test_anthropic_runtime_settings_map_to_messages_kwargs(monkeypatch) -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -572,7 +574,7 @@ def test_anthropic_runtime_settings_map_to_messages_kwargs(monkeypatch) -> None:
 
 
 def test_google_genai_runtime_settings_map_to_generate_content_config() -> None:
-    from graph_agent_gateway import ordinary_chat
+    from graph_agent_gateway.call import dispatch as ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -635,7 +637,8 @@ def test_google_genai_runtime_settings_map_to_generate_content_config() -> None:
 
 
 def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager, ordinary_chat
+    from graph_agent_gateway.call import clients as client_manager
+    from graph_agent_gateway.call import dispatch as ordinary_chat
     from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route().model_copy(
@@ -693,7 +696,7 @@ def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatc
 
 
 def test_ark_runtime_factory_maps_to_chat_openai_kwargs() -> None:
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from graph_agent_gateway.call import RouteChatModelFactory
     from langchain_openai import ChatOpenAI
 
     route = _route().model_copy(
@@ -720,8 +723,8 @@ def test_ark_runtime_factory_maps_to_chat_openai_kwargs() -> None:
 
 
 def test_ark_runtime_target_no_longer_uses_ark_sdk_client(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from graph_agent_gateway.call import RouteChatModelFactory
+    from graph_agent_gateway.call import clients as client_manager
     from langchain_openai import ChatOpenAI
 
     def fail_if_ark_sdk_path_is_used(*_args: object, **_kwargs: object) -> object:

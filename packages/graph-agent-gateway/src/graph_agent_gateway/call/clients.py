@@ -34,7 +34,7 @@ class LLMClientManager:
     _provider_down_cache: ClassVar[dict[str, float]] = {}
 
     # WS-1 moved provider invocation to RouteChatModelFactory + ChatX invoke.
-    # Generic ordinary-chat dispatch now lives in graph_agent_gateway.ordinary_chat.
+    # Generic ordinary-chat dispatch now lives in graph_agent_gateway.call.dispatch.
 
     @classmethod
     def is_provider_marked_down(

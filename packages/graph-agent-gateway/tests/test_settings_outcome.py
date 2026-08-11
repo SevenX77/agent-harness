@@ -23,7 +23,7 @@ CARRIED = {
 
 
 def _judge(**overrides: Any) -> dict[str, Any]:
-    from graph_agent_gateway.settings_outcome import judge_settings
+    from graph_agent_gateway.call import judge_settings
 
     arguments: dict[str, Any] = {
         "reported": {},
@@ -114,13 +114,13 @@ def test_a_setting_known_only_by_having_been_adjusted_still_gets_a_verdict() -> 
     filter dropped it — and an adjustment nobody is told about is the silence
     this whole design exists to remove.
     """
-    from graph_agent_gateway.call_settings import (
+    from graph_agent_gateway.call import (
         ModelDefaults,
         compose_call_settings,
         initial_budget,
+        judge_settings,
     )
     from graph_agent_gateway.registry import EffectiveRuntimeSetting, ResolvedRoute
-    from graph_agent_gateway.settings_outcome import judge_settings
 
     route = ResolvedRoute(
         role_name="graph_agent",
@@ -161,8 +161,8 @@ def test_a_setting_known_only_by_having_been_adjusted_still_gets_a_verdict() -> 
 
 def test_a_source_no_resolver_can_produce_is_not_treated_as_one_that_can() -> None:
     """``EffectiveRuntimeSetting.source`` is a closed set; membership is checkable."""
+    from graph_agent_gateway.call import AUTHORED_SOURCES, CALL_OVERRIDE
     from graph_agent_gateway.registry import EffectiveRuntimeSetting
-    from graph_agent_gateway.settings_outcome import AUTHORED_SOURCES, CALL_OVERRIDE
 
     resolver_sources = set(EffectiveRuntimeSetting.model_fields["source"].annotation.__args__)
 

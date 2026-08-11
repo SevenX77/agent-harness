@@ -14,32 +14,38 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_gateway_package_layout_exists() -> None:
+    """The package is a tree of domains, each answering for itself through its
+    own ``__init__``. Decision:
+    docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md
+    """
+    source_root = PACKAGE_ROOT / "src" / "graph_agent_gateway"
+
     assert (PACKAGE_ROOT / "pyproject.toml").is_file()
-    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "__init__.py").is_file()
-    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "protocol.py").is_file()
-    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "resolver.py").is_file()
-    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "gateway_chat_model.py").is_file()
-    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "predict_interception.py").is_file()
-    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "exceptions.py").is_file()
+    assert (source_root / "__init__.py").is_file()
+    assert (source_root / "errors.py").is_file()
+    assert (source_root / "events.py").is_file()
+    for domain in ("registry", "resolve", "role", "call"):
+        assert (source_root / domain / "__init__.py").is_file(), domain
 
 
 def test_gateway_public_modules_are_importable_without_graph_agent_cycle() -> None:
     modules = [
         "graph_agent_gateway",
-        "graph_agent_gateway.protocol",
-        "graph_agent_gateway.resolver",
-        "graph_agent_gateway.gateway_chat_model",
-        "graph_agent_gateway.predict_interception",
-        "graph_agent_gateway.exceptions",
-        "graph_agent_gateway.tracing",
+        "graph_agent_gateway.registry",
+        "graph_agent_gateway.resolve",
+        "graph_agent_gateway.role",
+        "graph_agent_gateway.call",
+        "graph_agent_gateway.errors",
+        "graph_agent_gateway.events",
     ]
 
     imported = {name: importlib.import_module(name) for name in modules}
 
-    assert imported["graph_agent_gateway.protocol"].ModelResolverProtocol is not None
-    assert imported["graph_agent_gateway.resolver"].ModelResolver is not None
-    assert imported["graph_agent_gateway.gateway_chat_model"].GatewayChatModel is not None
-    assert imported["graph_agent_gateway.exceptions"].AllProvidersFailedError is not None
+    assert imported["graph_agent_gateway.call"].ModelResolverProtocol is not None
+    assert imported["graph_agent_gateway.call"].ModelResolver is not None
+    assert imported["graph_agent_gateway.call"].GatewayChatModel is not None
+    assert imported["graph_agent_gateway.errors"].AllProvidersFailedError is not None
+    assert imported["graph_agent_gateway.role"].materialize_role is not None
 
 
 def test_graph_agent_does_not_import_concrete_gateway_package() -> None:

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from graph_agent_gateway.events import LLMRouteDecisionEvent, RouteDecision
-from graph_agent_gateway.exceptions import (
+from graph_agent_gateway.call import (
+    ANSWER_RESTARTED,
+    GatewayChatModel,
+    ModelResolver,
+    ModelResolverProtocol,
+    answer_restarts_here,
+)
+from graph_agent_gateway.errors import (
     AllProvidersFailedError,
     GatewayResolverMissingError,
     GatewayRoleNotConfiguredError,
 )
-from graph_agent_gateway.gateway_chat_model import (
-    ANSWER_RESTARTED,
-    GatewayChatModel,
-    answer_restarts_here,
-)
-from graph_agent_gateway.protocol import ModelResolverProtocol
+from graph_agent_gateway.events import LLMRouteDecisionEvent, RouteDecision
 from graph_agent_gateway.registry import (
     CredentialResolveError,
     CredentialResolveRequest,
@@ -39,7 +40,6 @@ from graph_agent_gateway.resolve import (
     RouteSkipDiagnostic,
     decide_fallback,
 )
-from graph_agent_gateway.resolver import ModelResolver
 from graph_agent_gateway.role import (
     MaterializedRole,
     MaterializeRoleRequest,

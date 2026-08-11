@@ -366,6 +366,52 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     **压根不在 registry 的 `__all__` 里**——之前能用,是因为大家都在深导入。
     补进契约即可,这正是 D4 想暴露的那类欠账。
 
+#### D5 的 2026-08-15 补记(P3 开工实测:P2c-2 的一处判断错了,连带 P3 整个改写)
+
+20. **更正:`max_completion_tokens` 才是真实调用发的,P2c-2 把它改成 `max_tokens` 是错的。**
+    我在 P2c-2 引用 `call/dispatch.py:239` 的 `_call_openai_compatible` 断言"生产发
+    `max_tokens`"。**那条路生产走不到**:`RouteChatModelFactory.build` 对
+    `ResolvedRoute.protocol` 能取的全部四个值都各有一条分支,分别返回原生 LangChain 模型
+    (ChatOpenAI 系 / ChatAnthropic / ChatGoogleGenerativeAI),`GenericRouteChatModel`
+    只在四个分支之后的兜底里构造——而 `protocol` 的类型就是那四个值的 Literal,
+    **兜底对任何合法路由都不可达**,`dispatch.py` 的六个 `_call_*` 因此也不可达。
+    实测(新增 `tests/test_production_wire_contract.py`,直接读工厂造出来的模型的
+    `_get_request_payload`):
+
+    | protocol | 真实构造的类 | 预算字段 | effort 字段 |
+    |---|---|---|---|
+    | `openai_compatible` | `OpenAICompatibleChatModel`(ChatOpenAI 子类) | `max_completion_tokens` | `reasoning_effort` |
+    | `openai_compatible`(deepseek 路由) | `PatchedChatDeepSeek` | `max_completion_tokens` | `reasoning_effort` |
+    | `ark_runtime` | 同上的 ChatOpenAI 子类 | `max_completion_tokens` | `reasoning_effort` |
+    | `anthropic_compatible` | `ChatAnthropic` | `max_tokens` | `output_config.effort`(无 `thinking` 块) |
+    | `google_genai` | `ChatGoogleGenerativeAI` | `max_output_tokens` | `thinking_level` |
+
+    所以正确值是 **`max_completion_tokens` 一律**,包括 DeepSeek——这也顺带修掉一个
+    比我更早的错(历史上 deepseek 走的是 `max_tokens`)。教训写死在这里:
+    **"生产怎么做"必须实测那个真的会跑的对象,不能读一个名字对得上的函数就下结论**;
+    `dispatch.py` 名字齐全、测试齐全、1026 行,唯独没人调。
+
+21. **P3 原来的写法不成立,改写。** 原定"生产 dispatch 切到同一组 dialect"预设了生产在手搓
+    HTTP。实际生产**根本不发 HTTP 请求体**——它构造 LangChain 模型对象,由 provider SDK
+    去拼请求。dialect 渲染的是原始 HTTP 请求,两者无法直接合并,除非把 SDK 整个换掉
+    (会丢掉流式、工具调用解析、响应类型、鉴权刷新)。方向应当反过来:
+
+    - **预测型探针(A2 `probe_provider_route`,回答"这条路由能不能跑")必须走生产工厂**,
+      和 `call/pre_call_probe.py::build_probe_model` 已经做的一模一样——同一个注入进来的
+      `RouteChatModelFactory`、同设置、预算换成 1。它由此天然发出与生产逐字节相同的请求,
+      **不需要 dialect**。
+    - **发现型探针(A1 模型列表、A3 官方方法)没有生产对应物**:生产从不列模型,也不会去试
+      一个它当前不用的官方方法。它们必须自己发 HTTP,dialect 正是为它们存在的。
+
+    换句话说:dialect 的归宿是"发现",不是"预测";"探测=生产"这条保证由**共用工厂**给,
+    不由共用方言给。
+
+22. **待裁决(结构性,需用户拍板):`call/dispatch.py` + `GenericRouteChatModel` +
+    `LLMClientManager` 的 SDK 客户端构造部分,对合法路由全部不可达。** 按仓规"不留向后兼容、
+    死路径同期删除"应当删掉(约 1000+ 行);但这是跨模块的结构性删除,且 `LLMClientManager`
+    另有活的职责(路由熔断标记与用量计费,`call/chat_model.py` 在用),不能整个删。
+    先摆事实、不动手。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

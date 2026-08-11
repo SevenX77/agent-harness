@@ -371,7 +371,8 @@ async def _request_model_generation(
     payload = {
         "model": model_id,
         "messages": [{"role": "user", "content": "."}],
-        "max_tokens": max_tokens,
+        # The name a real call uses for it — see tests/test_production_wire_contract.py.
+        "max_completion_tokens": max_tokens,
     }
     if effort:
         payload["reasoning_effort"] = effort

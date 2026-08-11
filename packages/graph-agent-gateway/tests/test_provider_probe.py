@@ -85,9 +85,10 @@ async def test_gateway_route_test_is_scoped_to_provider_route() -> None:
             {
                 "model": "anthropic/claude-sonnet",
                 "messages": [{"role": "user", "content": "."}],
-                # `max_tokens` is the field production sends to every
-                # OpenAI-compatible endpoint (call/dispatch.py::_call_openai_compatible).
-                "max_tokens": 1,
+                # The field a real call sends: every openai-compatible route is
+                # built as a ChatOpenAI subclass, which names the budget this
+                # way (tests/test_production_wire_contract.py).
+                "max_completion_tokens": 1,
             },
         )
     ]

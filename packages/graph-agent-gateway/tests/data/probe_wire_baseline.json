@@ -1470,7 +1470,7 @@
      "content": "Reply with one short word."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   }
  },
  "openai_chat_completions|plain|multimodal=True": {
@@ -1497,7 +1497,7 @@
      ]
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   }
  },
  "openai_chat_completions|effort_high|multimodal=False": {
@@ -1513,7 +1513,7 @@
      "content": "Reply with one short word."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   }
  },
@@ -1541,7 +1541,7 @@
      ]
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   }
  },
@@ -1558,7 +1558,7 @@
      "content": "Reply with one short word."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "low"
   }
  },
@@ -1586,7 +1586,7 @@
      ]
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "low"
   }
  },
@@ -1603,7 +1603,7 @@
      "content": "Reply with one short word."
     }
    ],
-   "max_tokens": 1025,
+   "max_completion_tokens": 1025,
    "reasoning_effort": "low"
   }
  },
@@ -1631,7 +1631,7 @@
      ]
     }
    ],
-   "max_tokens": 1025,
+   "max_completion_tokens": 1025,
    "reasoning_effort": "low"
   }
  },

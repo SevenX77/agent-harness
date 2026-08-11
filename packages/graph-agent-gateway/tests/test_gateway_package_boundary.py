@@ -10,7 +10,7 @@ ROUTE_DECISION_EVENT_CODE = "[F-v3-gateway-llm-route-decision]"
 
 def test_gateway_owns_route_decision_event_schema() -> None:
     from graph_agent_gateway.events import LLMRouteDecisionEvent
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
     from graph_agent_gateway.tracing import build_route_decision_event
 
     route = ResolvedRoute(
@@ -59,7 +59,7 @@ def test_gateway_runtime_surface_does_not_export_factory() -> None:
 
 def test_gateway_runtime_surface_exports_route_handoff_dtos() -> None:
     import graph_agent_gateway
-    from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRole, ResolvedRoute
 
     assert graph_agent_gateway.ResolvedRole is ResolvedRole
     assert graph_agent_gateway.ResolvedRoute is ResolvedRoute
@@ -69,25 +69,25 @@ def test_gateway_runtime_surface_exports_route_handoff_dtos() -> None:
 
 def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
     import graph_agent_gateway as gw
-    from graph_agent_gateway.credential_resolver import (
-        CredentialResolveError,
-        CredentialResolveRequest,
-        CredentialResolveResponse,
-    )
     from graph_agent_gateway.fallback_decision import (
         FallbackDecision,
         FallbackDecisionRequest,
         decide_fallback,
     )
-    from graph_agent_gateway.probe_catalog import (
+    from graph_agent_gateway.registry import (
+        CredentialResolveError,
+        CredentialResolveRequest,
+        CredentialResolveResponse,
         MaterializedProbeCatalogCandidates,
         ProbeCatalogStore,
         PromotableRouteUpdate,
+        ProviderModelStateProjection,
         known_model_ids_for_endpoint,
         known_verified_capabilities,
         materialize_probe_catalog_candidates,
         merge_evidence_library,
         probe_priority,
+        project_route_state,
         promotable_route_update,
     )
     from graph_agent_gateway.role_materialization import (
@@ -96,10 +96,6 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         materialize_role,
     )
     from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
-    from graph_agent_gateway.state_projection import (
-        ProviderModelStateProjection,
-        project_route_state,
-    )
 
     expected_exports = {
         "ResolvedRouteChain": ResolvedRouteChain,
@@ -135,7 +131,7 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
 
 def test_registry_surface_exports_skipped_route_diagnostics() -> None:
     import graph_agent_gateway.registry as registry
-    from graph_agent_gateway.registry.schema import SkippedRoute
+    from graph_agent_gateway.registry import SkippedRoute
 
     assert registry.SkippedRoute is SkippedRoute
     assert "SkippedRoute" in registry.__all__
@@ -152,3 +148,77 @@ def test_gateway_phase1_has_no_engine_internal_imports() -> None:
     for relative_path, forbidden_text in forbidden.items():
         source = (GATEWAY_SRC / relative_path).read_text(encoding="utf-8")
         assert forbidden_text not in source
+
+
+# A domain answers for itself through the package it lives in. Reaching past
+# that into one of its files binds the caller to where a definition happens to
+# sit today, and every rearrangement inside the domain then becomes everyone
+# else's problem — which is exactly how 531 import statements came to depend on
+# the gateway's internal layout. Decision:
+# docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md (D4).
+#
+# Each name below is a module the registry package still holds but does not own:
+# it moves to its final domain in a later phase, and this set shrinks to empty
+# there. Nothing may be ADDED to it.
+_AWAITING_REHOME = {
+    "resolver",              # → resolve/  (P1b)
+    "lint",                  # → resolve/  (P1b)
+    "profile_selector",      # → resolve/  (P1b)
+    "error_classification",  # → resolve/  (P1b)
+    "provider_probe",        # → probing/  (P2)
+    "probe_contracts",       # → probing/  (P2)
+}
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SCANNED_TREES = (
+    "packages/graph-agent-gateway/src",
+    "packages/graph-agent-gateway/tests",
+    "packages/graph-agent/src",
+    "packages/graph-agent/tests",
+    "apps/studio/backend/app",
+    "apps/studio/backend/tests",
+)
+_REGISTRY_PACKAGE_DIR = GATEWAY_SRC / "registry"
+
+
+def _deep_registry_imports() -> list[str]:
+    import ast
+
+    offences: list[str] = []
+    for tree_name in _SCANNED_TREES:
+        tree_root = _REPO_ROOT / tree_name
+        if not tree_root.exists():
+            continue
+        for source_path in tree_root.rglob("*.py"):
+            if _REGISTRY_PACKAGE_DIR in source_path.parents:
+                continue  # inside the domain, its own files are its own business
+            try:
+                parsed = ast.parse(source_path.read_text(encoding="utf-8"))
+            except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
+                continue
+            for node in ast.walk(parsed):
+                imported = ()
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    imported = (node.module,)
+                elif isinstance(node, ast.Import):
+                    imported = tuple(alias.name for alias in node.names)
+                for module in imported:
+                    prefix = "graph_agent_gateway.registry."
+                    if not module.startswith(prefix):
+                        continue
+                    submodule = module[len(prefix) :].split(".")[0]
+                    if submodule in _AWAITING_REHOME:
+                        continue
+                    offences.append(
+                        f"{source_path.relative_to(_REPO_ROOT)}:{node.lineno} imports {module}"
+                    )
+    return offences
+
+
+def test_nobody_outside_the_registry_domain_imports_its_files() -> None:
+    offences = _deep_registry_imports()
+
+    assert offences == [], (
+        "import the registry domain through graph_agent_gateway.registry, "
+        "not through the file a name happens to live in:\n  " + "\n  ".join(offences)
+    )

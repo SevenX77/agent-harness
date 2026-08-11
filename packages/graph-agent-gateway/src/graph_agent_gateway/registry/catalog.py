@@ -28,7 +28,7 @@ _PATH_LOCKS: dict[Path, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
-class MaterializedImportDraftCandidates:
+class MaterializedProbeCatalogCandidates:
     provider_endpoints: dict[str, ProviderEndpoint]
     provider_routes: dict[str, ProviderRoute]
     endpoint_display_names: dict[str, str]
@@ -42,7 +42,7 @@ class PromotableRouteUpdate:
     evidence_refs: list[str]
 
 
-class ImportDraftStore:
+class ProbeCatalogStore:
     """Atomic JSON store for provider import drafts and append-only evidence."""
 
     def __init__(self, path: Path) -> None:
@@ -200,9 +200,9 @@ def new_evidence_library(
     )
 
 
-def materialize_import_draft_candidates(
+def materialize_probe_catalog_candidates(
     draft: ProviderImportDraft,
-) -> MaterializedImportDraftCandidates:
+) -> MaterializedProbeCatalogCandidates:
     provider_endpoints: dict[str, ProviderEndpoint] = {}
     endpoint_display_names: dict[str, str] = {}
     for endpoint_id, endpoint in draft.endpoint_candidates.items():
@@ -241,7 +241,7 @@ def materialize_import_draft_candidates(
         )
         route_display_names[route_id] = candidate.display_name
 
-    return MaterializedImportDraftCandidates(
+    return MaterializedProbeCatalogCandidates(
         provider_endpoints=provider_endpoints,
         provider_routes=provider_routes,
         endpoint_display_names=endpoint_display_names,

@@ -16,7 +16,7 @@ from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, Provider
 from app.routers import llm
 from app.services.copilot import RouteSdkTestResult
 from app.services.llm_health_store import ActiveCircuitsIndex
-from graph_agent_gateway.registry.schema import VerifiedProfile
+from graph_agent_gateway.registry import VerifiedProfile
 
 _NO_CIRCUITS = ActiveCircuitsIndex.build([])
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")

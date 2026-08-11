@@ -16,7 +16,7 @@ def _error_payload(exc: BaseException) -> dict[str, object]:
 
 
 def _store_for_role(role_payload: dict[str, object]):
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore
 
     store = InMemoryConfigTruthStore()
     store.put_config(

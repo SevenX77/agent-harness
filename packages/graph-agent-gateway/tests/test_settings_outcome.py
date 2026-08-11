@@ -119,7 +119,7 @@ def test_a_setting_known_only_by_having_been_adjusted_still_gets_a_verdict() -> 
         compose_call_settings,
         initial_budget,
     )
-    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting, ResolvedRoute
+    from graph_agent_gateway.registry import EffectiveRuntimeSetting, ResolvedRoute
     from graph_agent_gateway.settings_outcome import judge_settings
 
     route = ResolvedRoute(
@@ -161,7 +161,7 @@ def test_a_setting_known_only_by_having_been_adjusted_still_gets_a_verdict() -> 
 
 def test_a_source_no_resolver_can_produce_is_not_treated_as_one_that_can() -> None:
     """``EffectiveRuntimeSetting.source`` is a closed set; membership is checkable."""
-    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting
+    from graph_agent_gateway.registry import EffectiveRuntimeSetting
     from graph_agent_gateway.settings_outcome import AUTHORED_SOURCES, CALL_OVERRIDE
 
     resolver_sources = set(EffectiveRuntimeSetting.model_fields["source"].annotation.__args__)

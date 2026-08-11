@@ -46,7 +46,7 @@ class _RejectedByProvider(RuntimeError):
 
 
 def _route(*, endpoint_id: str = "primary", route_slug: str = "deepseek-v4-pro"):
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -62,7 +62,7 @@ def _route(*, endpoint_id: str = "primary", route_slug: str = "deepseek-v4-pro")
 
 
 def _role(routes: Sequence[Any]):
-    from graph_agent_gateway.registry.schema import ResolvedRole, RuntimePolicy
+    from graph_agent_gateway.registry import ResolvedRole, RuntimePolicy
 
     return ResolvedRole(
         role_name="graph_agent",
@@ -226,7 +226,7 @@ def test_a_named_refusal_costs_only_the_setting_that_was_named(
     the route just accepted — the user asked for those, and nothing refused
     them.
     """
-    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting
+    from graph_agent_gateway.registry import EffectiveRuntimeSetting
 
     route = _route()
     route.effective_runtime_settings["top_p"] = EffectiveRuntimeSetting(

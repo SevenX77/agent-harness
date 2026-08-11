@@ -6,7 +6,7 @@ from typing import Any
 
 
 def _route(*, endpoint_id: str, provider_model_id: str):
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     route_slug = provider_model_id.lower().replace("/", ".")
     return ResolvedRoute(

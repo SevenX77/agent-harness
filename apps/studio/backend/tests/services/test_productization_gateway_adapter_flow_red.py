@@ -1048,7 +1048,7 @@ def test_gateway_adapter_keeps_cooling_down_state_before_ready() -> None:
 def test_gateway_adapter_ignores_isolated_probe_evidence_for_historical_ready() -> None:
     from app.core.adapters.gateway import GatewayAdapter
     from app.models.llm_config import ProviderEndpoint, ProviderRoute
-    from graph_agent_gateway.registry.schema import EvidenceRecord
+    from graph_agent_gateway.registry import EvidenceRecord
 
     endpoint = ProviderEndpoint(
         endpoint_id="openai",

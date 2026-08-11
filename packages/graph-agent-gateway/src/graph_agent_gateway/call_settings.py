@@ -30,8 +30,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from graph_agent_gateway.registry.schema import ResolvedRoute
-from graph_agent_gateway.settings_bounds import (
+from graph_agent_gateway.registry import (
+    ResolvedRoute,
     bounds_for,
     fit,
     provider_temperature_from_authored,

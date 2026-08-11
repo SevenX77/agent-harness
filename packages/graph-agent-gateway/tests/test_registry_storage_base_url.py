@@ -6,9 +6,7 @@ from pydantic import SecretStr
 
 
 def test_credential_fingerprint_uses_protocol_canonical_base_url() -> None:
-    from graph_agent_gateway.registry.base_url import canonicalize_base_url
-    from graph_agent_gateway.registry.schema import ProviderEndpoint
-    from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+    from graph_agent_gateway.registry import ProviderEndpoint, canonicalize_base_url, compute_credential_fingerprint
 
     raw_endpoint = ProviderEndpoint(
         endpoint_id="wavespeed-anthropic",

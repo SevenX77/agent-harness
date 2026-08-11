@@ -13,7 +13,7 @@ from pathlib import Path
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_credentials import delete_route, load_credentials, save_credentials
 from app.services.llm_credentials_evidence import merge_route_evidence
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     EvidenceRecord,
     compute_evidence_content_hash,
 )

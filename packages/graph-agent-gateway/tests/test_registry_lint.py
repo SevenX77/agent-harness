@@ -4,8 +4,8 @@ from __future__ import annotations
 
 
 def test_lint_key_mapping_and_error_missing_blocks() -> None:
+    from graph_agent_gateway.registry import ProviderRoute, RoleEntry, RoleRouteEntry
     from graph_agent_gateway.registry.lint import capability_key_for_lint, lint_role_routes
-    from graph_agent_gateway.registry.schema import ProviderRoute, RoleEntry, RoleRouteEntry
 
     assert capability_key_for_lint("thinking") == "thinking_protocol"
     assert capability_key_for_lint("tool_calling") == "tool_protocol"
@@ -30,8 +30,8 @@ def test_lint_key_mapping_and_error_missing_blocks() -> None:
 
 
 def test_verified_capability_satisfies_error_lint() -> None:
+    from graph_agent_gateway.registry import CapabilityValue, ProviderRoute, RoleEntry
     from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderRoute, RoleEntry
 
     role = RoleEntry(lint_requirements={"thinking": "error"}, fallback_chain=[])
     route = ProviderRoute(
@@ -53,8 +53,8 @@ def test_verified_capability_satisfies_error_lint() -> None:
 
 
 def test_runtime_thinking_settings_are_blocked_when_route_cannot_support_them() -> None:
+    from graph_agent_gateway.registry import ProviderRoute, RoleEntry, RoleRouteEntry
     from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import ProviderRoute, RoleEntry, RoleRouteEntry
 
     role = RoleEntry(
         fallback_chain=[
@@ -85,13 +85,13 @@ def test_runtime_thinking_settings_are_blocked_when_route_cannot_support_them() 
 
 
 def test_runtime_token_floor_blocks_invalid_thinking_budget() -> None:
-    from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderRoute,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.lint import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[
@@ -125,13 +125,13 @@ def test_runtime_token_floor_blocks_invalid_thinking_budget() -> None:
 
 
 def test_runtime_thinking_budget_is_blocked_when_manual_budget_is_unsupported() -> None:
-    from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderRoute,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.lint import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[
@@ -169,13 +169,13 @@ def test_runtime_thinking_budget_is_blocked_when_manual_budget_is_unsupported() 
 
 
 def test_adaptive_thinking_without_manual_budget_does_not_require_default_budget_floor() -> None:
-    from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderRoute,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.lint import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[
@@ -211,13 +211,13 @@ def test_adaptive_thinking_without_manual_budget_does_not_require_default_budget
 
 
 def test_manual_thinking_without_explicit_budget_requires_default_budget_room() -> None:
-    from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderRoute,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.lint import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[

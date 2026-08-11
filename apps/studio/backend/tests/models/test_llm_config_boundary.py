@@ -10,8 +10,7 @@ from app.models.llm_config import (
     RoleRouteEntry,
     RolesData,
 )
-from graph_agent_gateway.registry.schema import RegistrySnapshot
-from graph_agent_gateway.settings_bounds import AUTHORED_TEMPERATURE_MAX
+from graph_agent_gateway.registry import AUTHORED_TEMPERATURE_MAX, RegistrySnapshot
 
 
 def test_a_temperature_past_the_end_of_the_dial_is_stored_as_the_end_of_it() -> None:

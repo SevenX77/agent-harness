@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from graph_agent_gateway.registry.route_identity import stable_endpoint_id
+from graph_agent_gateway.registry import stable_endpoint_id
 
 
 def test_upsert_endpoints_persists_protocol_canonical_base_urls(tmp_path: Path) -> None:
@@ -108,8 +108,8 @@ def test_upsert_endpoints_keeps_ark_openai_compatible_endpoint_separate(tmp_path
 
 def test_upserted_canonical_base_url_is_what_resolver_reads(tmp_path: Path) -> None:
     from app.services.llm_credentials import load_credentials, upsert_endpoints, upsert_routes
+    from graph_agent_gateway.registry import RegistrySnapshot, RoleEntry, RoleRouteEntry
     from graph_agent_gateway.registry.resolver import resolve_role
-    from graph_agent_gateway.registry.schema import RegistrySnapshot, RoleEntry, RoleRouteEntry
 
     path = tmp_path / "llm_credentials.json"
     upsert_endpoints(

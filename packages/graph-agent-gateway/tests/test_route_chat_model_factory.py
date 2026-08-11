@@ -31,7 +31,7 @@ def _route(
     temperature: float | None = 0.2,
     max_tokens: int = 333,
 ):
-    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting, ResolvedRoute
+    from graph_agent_gateway.registry import EffectiveRuntimeSetting, ResolvedRoute
     effective_runtime_settings = {
         "max_output_tokens": EffectiveRuntimeSetting(value=max_tokens, source="route_setting"),
     }
@@ -96,7 +96,7 @@ def test_the_factory_sends_only_the_settings_it_was_given() -> None:
     api.deepseek.com, where the gateway dropped an out-of-range `top_p` after
     the provider refused it and the factory put it straight back on the retry.
     """
-    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting
+    from graph_agent_gateway.registry import EffectiveRuntimeSetting
 
     route = _route()
     route.effective_runtime_settings["top_p"] = EffectiveRuntimeSetting(
@@ -442,7 +442,7 @@ def test_factory_reports_missing_google_extra_at_build_time(
 
 
 def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
     from langchain_core.language_models.chat_models import BaseChatModel
 
     route = ResolvedRoute.model_construct(
@@ -491,7 +491,7 @@ def test_generic_chat_model_default_dispatcher_uses_ordinary_chat_core(
 ) -> None:
     from graph_agent_gateway import ordinary_chat
     from graph_agent_gateway.models import GenericRouteChatModel
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",
@@ -535,7 +535,7 @@ def test_generic_chat_model_default_dispatcher_uses_ordinary_chat_core(
 
 def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_context() -> None:
     from graph_agent_gateway.models import GenericRouteChatModel
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",
@@ -604,7 +604,7 @@ def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_co
 
 def test_generic_chat_model_runs_langchain_create_agent_tool_loop() -> None:
     from graph_agent_gateway.models import GenericRouteChatModel
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
     from langchain.agents import create_agent
 
     route = ResolvedRoute.model_construct(

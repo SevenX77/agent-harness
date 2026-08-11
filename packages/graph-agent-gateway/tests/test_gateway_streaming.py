@@ -25,7 +25,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Huma
 
 
 def _route(*, endpoint_id: str = "qiniu-anthropic", route_slug: str = "claude-sonnet-4-6"):
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -41,7 +41,7 @@ def _route(*, endpoint_id: str = "qiniu-anthropic", route_slug: str = "claude-so
 
 
 def _role(routes: Sequence[Any], *, token_escalation_rounds: int = 0):
-    from graph_agent_gateway.registry.schema import ResolvedRole, RuntimePolicy
+    from graph_agent_gateway.registry import ResolvedRole, RuntimePolicy
 
     return ResolvedRole(
         role_name="graph_agent",

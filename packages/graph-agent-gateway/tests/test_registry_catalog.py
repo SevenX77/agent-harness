@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     CapabilityValue,
     EndpointCandidate,
     EvidenceRecord,
@@ -41,9 +41,9 @@ def _draft() -> ProviderImportDraft:
 
 
 def test_gateway_import_draft_store_round_trips_and_appends_evidence(tmp_path: Path) -> None:
-    from graph_agent_gateway.import_draft_store import ImportDraftStore
+    from graph_agent_gateway.registry import ProbeCatalogStore
 
-    store = ImportDraftStore(tmp_path / "import_drafts.json")
+    store = ProbeCatalogStore(tmp_path / "import_drafts.json")
     draft = store.save_draft(_draft())
     evidence = EvidenceRecord(
         evidence_id="evidence-1",
@@ -66,7 +66,7 @@ def test_gateway_import_draft_store_round_trips_and_appends_evidence(tmp_path: P
 
 
 def test_gateway_materializes_import_draft_candidates_with_canonical_runtime_facts() -> None:
-    from graph_agent_gateway.import_draft_store import materialize_import_draft_candidates
+    from graph_agent_gateway.registry import materialize_probe_catalog_candidates
 
     draft = _draft().model_copy(
         update={
@@ -83,7 +83,7 @@ def test_gateway_materializes_import_draft_candidates_with_canonical_runtime_fac
         }
     )
 
-    materialized = materialize_import_draft_candidates(draft)
+    materialized = materialize_probe_catalog_candidates(draft)
 
     assert materialized.provider_endpoints["openai-direct"].base_url == "https://llm.wavespeed.ai"
     assert materialized.provider_routes["openai-direct:gpt-5"].status == "unverified_manual"
@@ -91,7 +91,7 @@ def test_gateway_materializes_import_draft_candidates_with_canonical_runtime_fac
 
 
 def test_gateway_materialization_rejects_routes_with_missing_endpoint_candidates() -> None:
-    from graph_agent_gateway.import_draft_store import materialize_import_draft_candidates
+    from graph_agent_gateway.registry import materialize_probe_catalog_candidates
 
     draft = _draft().model_copy(
         update={
@@ -109,11 +109,11 @@ def test_gateway_materialization_rejects_routes_with_missing_endpoint_candidates
     )
 
     with pytest.raises(ValueError, match="missing endpoint"):
-        materialize_import_draft_candidates(draft)
+        materialize_probe_catalog_candidates(draft)
 
 
 def test_gateway_materialization_preserves_secret_display_names_capabilities_and_metadata() -> None:
-    from graph_agent_gateway.import_draft_store import materialize_import_draft_candidates
+    from graph_agent_gateway.registry import materialize_probe_catalog_candidates
 
     draft = _draft().model_copy(
         update={
@@ -137,7 +137,7 @@ def test_gateway_materialization_preserves_secret_display_names_capabilities_and
         }
     )
 
-    materialized = materialize_import_draft_candidates(draft)
+    materialized = materialize_probe_catalog_candidates(draft)
 
     endpoint = materialized.provider_endpoints["openai-direct"]
     route = materialized.provider_routes["openai-direct:gpt-5"]
@@ -151,11 +151,11 @@ def test_gateway_materialization_preserves_secret_display_names_capabilities_and
 
 
 def test_import_draft_store_uses_shared_path_lock_for_concurrent_append(tmp_path: Path) -> None:
-    from graph_agent_gateway.import_draft_store import ImportDraftStore
+    from graph_agent_gateway.registry import ProbeCatalogStore
 
     path = tmp_path / "import_drafts.json"
-    store_a = ImportDraftStore(path)
-    store_b = ImportDraftStore(path)
+    store_a = ProbeCatalogStore(path)
+    store_b = ProbeCatalogStore(path)
     first_save_started = threading.Event()
     allow_first_save = threading.Event()
     original_save_all = store_a.save_all
@@ -197,7 +197,7 @@ def test_import_draft_store_uses_shared_path_lock_for_concurrent_append(tmp_path
 
 
 def test_gateway_merges_remote_evidence_library_with_dedupe_and_route_metadata() -> None:
-    from graph_agent_gateway.import_draft_store import merge_evidence_library, new_evidence_library
+    from graph_agent_gateway.registry import merge_evidence_library, new_evidence_library
 
     local_route = RouteCandidate(
         endpoint_id="openai-direct",

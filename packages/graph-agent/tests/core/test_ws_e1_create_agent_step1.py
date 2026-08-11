@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
+from graph_agent_gateway.registry import ResolvedRole, ResolvedRoute, RuntimePolicy
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage

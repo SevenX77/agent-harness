@@ -107,7 +107,7 @@ def _default_ordinary_chat_dispatcher() -> OrdinaryChatDispatcher:
 
 
 def _default_runtime_policy() -> object:
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+    from graph_agent_gateway.registry import RuntimePolicy
 
     return RuntimePolicy()
 

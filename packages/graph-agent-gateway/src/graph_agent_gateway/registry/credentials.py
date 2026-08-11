@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from pydantic import SecretStr
 
 from graph_agent_gateway.registry.contracts import CredentialDescriptor, CredentialProviderProtocol
+from graph_agent_gateway.registry.fingerprint import compute_credential_fingerprint
 from graph_agent_gateway.registry.schema import ProviderEndpoint
-from graph_agent_gateway.registry.storage import compute_credential_fingerprint
 
 
 class EndpointCredentialProvider:

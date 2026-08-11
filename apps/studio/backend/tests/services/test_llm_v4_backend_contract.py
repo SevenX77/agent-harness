@@ -22,8 +22,7 @@ from app.services.llm_credentials import (
     upsert_endpoints,
 )
 from app.services.llm_roles import InvalidRoleReference, load_roles_file, save_roles_file
-from graph_agent_gateway.registry.route_identity import stable_endpoint_id
-from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+from graph_agent_gateway.registry import compute_credential_fingerprint, stable_endpoint_id
 from pydantic import SecretStr, ValidationError
 
 

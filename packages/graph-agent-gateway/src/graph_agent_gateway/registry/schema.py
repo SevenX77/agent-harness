@@ -255,7 +255,7 @@ class ProviderRoute(BaseModel):
         canonicalization rule change takes effect the instant the code ships — no
         re-probe, no on-disk migration.
         """
-        from graph_agent_gateway.registry.canonical import canonicalize_model
+        from graph_agent_gateway.registry.identity import canonicalize_model
 
         return canonicalize_model(
             endpoint_id=self.endpoint_id,

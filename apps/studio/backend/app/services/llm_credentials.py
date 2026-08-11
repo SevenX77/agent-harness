@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from graph_agent_gateway.registry.route_identity import (
+from graph_agent_gateway.registry import (
     route_slug as identity_route_slug,
 )
-from graph_agent_gateway.registry.route_identity import (
+from graph_agent_gateway.registry import (
     stable_endpoint_id as url_stable_endpoint_id,
 )
 from pydantic import SecretStr, ValidationError

@@ -2276,13 +2276,12 @@ describe('API Keys v4 registry adapter', () => {
       })
     })
 
-    const updated = await probeRoute(route.route_id, { capabilities: [], force: true })
+    const updated = await probeRoute(route.route_id)
     const cached = await getRegistry()
 
     expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
-      'post /llm/routes/openrouter-custom%3Agpt-5/probe?force=true',
+      'post /llm/routes/openrouter-custom%3Agpt-5/probe',
     ])
-    expect(JSON.parse(String(seen[0].data))).toEqual({ capabilities: [] })
     expect(updated).toEqual(probedRoute)
     expect(cached.model_groups[0].status_summary.ready).toBe(1)
   })

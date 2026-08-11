@@ -120,7 +120,7 @@ def test_gateway_invokes_chatx_with_raw_base_messages_for_empty_content_tool_loo
         "graph_agent",
         _role([_route()]),
         max_tokens=512,
-        client_manager=manager,
+        ledger=manager,
         probe_before_call=False,
     )
     messages = [
@@ -161,7 +161,7 @@ def test_build_chat_result_preserves_ai_message_blocks_and_provider_metadata() -
     model = GatewayChatModel(
         "graph_agent",
         _role([route]),
-        client_manager=RecordingManager(),
+        ledger=RecordingManager(),
         probe_before_call=False,
     )
     message = AIMessage(
@@ -218,7 +218,7 @@ def test_truncated_chatx_response_rebuilds_with_doubled_token_budget(
         "graph_agent",
         _role([route], token_escalation_rounds=1),
         max_tokens=2,
-        client_manager=RecordingManager(),
+        ledger=RecordingManager(),
         probe_before_call=False,
     )
 
@@ -282,7 +282,7 @@ def _gateway_with_factory(
     return GatewayChatModel(
         "graph_agent",
         _role(routes),
-        client_manager=RecordingManager(),
+        ledger=RecordingManager(),
         probe_before_call=False,
     )
 

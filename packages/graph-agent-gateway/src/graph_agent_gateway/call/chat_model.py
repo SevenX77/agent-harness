@@ -169,7 +169,7 @@ class GatewayChatModel(BaseChatModel):
     bound_tools: tuple[dict[str, object], ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
     tool_kwargs: dict[str, object] = Field(default_factory=dict)
-    client_manager: Any = None
+    ledger: Any = None
     credential_provider: Any = None
 
     def __init__(
@@ -187,7 +187,7 @@ class GatewayChatModel(BaseChatModel):
         bound_tools: Sequence[Mapping[str, object]] = (),
         tool_choice: str | None = None,
         tool_kwargs: Mapping[str, object] | None = None,
-        client_manager: Any = None,
+        ledger: Any = None,
         credential_provider: Any = None,
         **kwargs: Any,
     ) -> None:
@@ -214,7 +214,7 @@ class GatewayChatModel(BaseChatModel):
             bound_tools=tuple(dict(item) for item in bound_tools),
             tool_choice=tool_choice,
             tool_kwargs=dict(tool_kwargs or {}),
-            client_manager=client_manager,
+            ledger=ledger,
             credential_provider=credential_provider,
             **kwargs,
         )
@@ -296,7 +296,7 @@ class GatewayChatModel(BaseChatModel):
         )
 
         for index, candidate in enumerate(self.resolved_role.routes):
-            if _is_marked_down(self.client_manager, candidate, runtime_policy):
+            if _is_marked_down(self.ledger, candidate, runtime_policy):
                 self._decided("skipped_circuit_open", route=candidate)
                 continue
             retry_same_used = False
@@ -337,7 +337,7 @@ class GatewayChatModel(BaseChatModel):
                             phase_name=self.phase_name or "<gateway>",
                             cause=exc,
                         )
-                    _mark_down(self.client_manager, candidate, exc, runtime_policy)
+                    _mark_down(self.ledger, candidate, exc, runtime_policy)
                     self._decided(
                         "probe_failed",
                         route=candidate,
@@ -365,7 +365,7 @@ class GatewayChatModel(BaseChatModel):
                     )
             # Bracketing the whole escalation sequence, not each attempt: an
             # answer that took three tries is still one answer to bill for.
-            before_usage = _usage_total_calls(self.client_manager, candidate)
+            before_usage = _usage_total_calls(self.ledger, candidate)
             while True:
                 # Settled before the call rather than inside it: the failure
                 # handler below has to be able to say what was asked for, and
@@ -410,11 +410,11 @@ class GatewayChatModel(BaseChatModel):
                         )
                         yield from attempt.void()
                         continue
-                    after_usage = _usage_total_calls(self.client_manager, candidate)
+                    after_usage = _usage_total_calls(self.ledger, candidate)
                     if after_usage == before_usage:
                         usage = _usage_from_response(response)
                         _record_usage(
-                            self.client_manager,
+                            self.ledger,
                             candidate.endpoint_id,
                             usage["prompt_tokens"],
                             usage["completion_tokens"],
@@ -492,7 +492,7 @@ class GatewayChatModel(BaseChatModel):
                             phase_name=self.phase_name or "<gateway>",
                             cause=exc,
                         )
-                    _mark_down(self.client_manager, candidate, exc, runtime_policy)
+                    _mark_down(self.ledger, candidate, exc, runtime_policy)
                     self._decided(
                         "fell_back",
                         route=candidate,
@@ -601,7 +601,7 @@ class GatewayChatModel(BaseChatModel):
             bound_tools=tuple(_normalise_tool(tool) for tool in tools),
             tool_choice=tool_choice,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
-            client_manager=self.client_manager,
+            ledger=self.ledger,
             credential_provider=self.credential_provider,
             name=self.name,
             cache=self.cache,
@@ -732,7 +732,7 @@ class GatewayChatModel(BaseChatModel):
     def _next_candidate(self, start_index: int) -> ResolvedRoute | None:
         for candidate in self.resolved_role.routes[start_index:]:
             if not _is_marked_down(
-                self.client_manager,
+                self.ledger,
                 candidate,
                 self.resolved_role.runtime_policy,
             ):
@@ -773,23 +773,23 @@ def _failure_record(
     }
 
 
-def _default_client_manager() -> Any:
+def _default_ledger() -> Any:
     from graph_agent_gateway.call.clients import LLMCircuitAndUsageLedger
 
     return LLMCircuitAndUsageLedger
 
 
-def _manager(client_manager: Any) -> Any:
-    return client_manager if client_manager is not None else _default_client_manager()
+def _ledger_or_default(injected: Any) -> Any:
+    return injected if injected is not None else _default_ledger()
 
 
 def _is_marked_down(
-    client_manager: Any,
+    ledger: Any,
     candidate: ResolvedRoute,
     runtime_policy: Any,
 ) -> bool:
-    manager = _manager(client_manager)
-    return bool(manager.is_provider_marked_down(candidate, runtime_policy))
+    ledger = _ledger_or_default(ledger)
+    return bool(ledger.is_provider_marked_down(candidate, runtime_policy))
 
 
 def _dispatch(
@@ -833,13 +833,13 @@ def _as_answer(accumulated: AIMessageChunk | None) -> AIMessage:
 
 
 def _mark_down(
-    client_manager: Any,
+    ledger: Any,
     candidate: ResolvedRoute,
     exc: BaseException,
     runtime_policy: Any,
 ) -> None:
-    manager = _manager(client_manager)
-    manager.mark_provider_down(candidate, exc, runtime_policy)
+    ledger = _ledger_or_default(ledger)
+    ledger.mark_provider_down(candidate, exc, runtime_policy)
 
 
 def _usage_from_response(response: Mapping[str, object] | AIMessage) -> dict[str, int]:
@@ -996,13 +996,13 @@ def _message_role(message: BaseMessage) -> str:
     return "user"
 
 
-def _usage_total_calls(client_manager: Any, candidate: ResolvedRoute) -> int:
-    manager = _manager(client_manager)
-    usage_total_calls = getattr(manager, "usage_total_calls", None)
+def _usage_total_calls(ledger: Any, candidate: ResolvedRoute) -> int:
+    ledger = _ledger_or_default(ledger)
+    usage_total_calls = getattr(ledger, "usage_total_calls", None)
     if usage_total_calls is not None:
         value = usage_total_calls(candidate)
         return value if isinstance(value, int) else 0
-    get_usage_stats = getattr(manager, "get_usage_stats", None)
+    get_usage_stats = getattr(ledger, "get_usage_stats", None)
     if get_usage_stats is None:
         return 0
     stats = get_usage_stats()
@@ -1016,12 +1016,12 @@ def _usage_total_calls(client_manager: Any, candidate: ResolvedRoute) -> int:
 
 
 def _record_usage(
-    client_manager: Any,
+    ledger: Any,
     provider_code: str,
     prompt_tokens: int,
     completion_tokens: int,
 ) -> None:
-    manager = _manager(client_manager)
-    record_usage = getattr(manager, "record_usage", None)
+    ledger = _ledger_or_default(ledger)
+    record_usage = getattr(ledger, "record_usage", None)
     if record_usage is not None:
         record_usage(provider_code, prompt_tokens, completion_tokens)

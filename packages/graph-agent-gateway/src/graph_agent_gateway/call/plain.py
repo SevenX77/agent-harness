@@ -84,7 +84,7 @@ def chat_plainly(
         resolved_role,
         temperature=temperature,
         callbacks=callbacks,
-        client_manager=ledger,
+        ledger=ledger,
         credential_provider=credential_provider,
         **budget,
     )

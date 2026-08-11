@@ -190,6 +190,12 @@ answers = await ask_each(effort_questions(endpoint.protocol), my_asker)
 levels = accepted_effort_levels(answers)   # None = 这批答案什么也没定
 ```
 
+`effort_questions` 除了真实档位,**还会多问一档根本不存在的**
+(`EFFORT_CONTROL_LEVEL`)。这是对照组,不是冗余:一个压根不校验该参数的 provider
+会把每一档都收下,答案长得跟「这七档我全卖」一模一样。所以对照档被收下时
+`accepted_effort_levels` 返回 `None`——**这批答案关于任何一档都不算证据**,
+按「不确定就不写」处理,而不是记下一张没人核过的清单。对照档永远不会出现在返回值里。
+
 `ask_each` 收一个「怎么问」的函数,而不是自己去发请求——因为**「现在允不允许问」和
 「怎么告诉用户正在问」是应用的事**:端点被用户禁用要当场拒、界面要显示探测进行中,
 这些网关不该知道,也不该替你跳过。

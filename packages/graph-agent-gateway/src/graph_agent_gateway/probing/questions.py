@@ -27,6 +27,7 @@ from graph_agent_gateway.registry import Protocol, effort_probe_candidates
 from .results import RouteProbeResult
 
 __all__ = [
+    "EFFORT_CONTROL_LEVEL",
     "INCONCLUSIVE_PROBE_STATUSES",
     "Answered",
     "Question",
@@ -68,16 +69,32 @@ one cannot be read as "these levels are the ones it sells".
 """
 
 
+EFFORT_CONTROL_LEVEL: Final[str] = "graph-agent-gateway-control-effort-level"
+"""An effort level no provider sells, asked alongside the ones that exist.
+
+A route that takes this one takes anything: it is not reading the field. Without
+it in the batch, "accepted every level" and "never looked at the value" arrive as
+the same list of accepted levels, and the record cannot tell them apart. Live
+2026-08-11: deepseek-v4-pro accepted all seven candidates, `none` and `max`
+included, and that list was written down as what the model supports.
+"""
+
+
 def effort_questions(protocol: Protocol) -> tuple[Question, ...]:
     """The effort levels this protocol's route is worth being asked about.
 
     Bounded by the protocol's documented vocabulary where its API pins one, and
     the whole ladder where it pins nothing — the reasoning for that boundary
     lives with the vocabulary itself, in `registry.effort_probe_candidates`.
+
+    The control goes out with them rather than being the caller's to remember:
+    a batch asked without it cannot be read, so it must not be possible to ask
+    for one.
     """
+    levels = (*effort_probe_candidates(protocol), EFFORT_CONTROL_LEVEL)
     return tuple(
         Question(value=level, runtime_settings={"reasoning": {"enabled": True, "effort": level}})
-        for level in effort_probe_candidates(protocol)
+        for level in levels
     )
 
 
@@ -99,11 +116,17 @@ async def ask_each(
 def accepted_effort_levels(answered: Iterable[Answered]) -> tuple[str, ...] | None:
     """The levels this route accepted, or `None` when the batch settles nothing.
 
-    A single inconclusive answer voids the whole batch rather than being read as
-    a refusal: recording it as one would delete levels the route does sell, and a
-    capability that quietly shrinks is worse than one that stays unmeasured.
+    Two ways a batch settles nothing, and both end here rather than in a shorter
+    or longer list. A single inconclusive answer voids it, because reading a rate
+    limit as a refusal would delete levels the route does sell, and a capability
+    that quietly shrinks is worse than one that stays unmeasured. A route that
+    also took `EFFORT_CONTROL_LEVEL` voids it too: it accepted a level that does
+    not exist, so its acceptances are not evidence about any level.
     """
     pairs = tuple(answered)
     if any(result.status in INCONCLUSIVE_PROBE_STATUSES for _, result in pairs):
         return None
-    return tuple(question.value for question, result in pairs if result.status == "ok")
+    accepted = tuple(question.value for question, result in pairs if result.status == "ok")
+    if EFFORT_CONTROL_LEVEL in accepted:
+        return None
+    return accepted

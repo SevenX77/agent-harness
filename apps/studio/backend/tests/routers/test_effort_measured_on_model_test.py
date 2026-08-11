@@ -27,7 +27,7 @@ from app.models.llm_config import (
 from app.routers import llm as llm_router
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from fastapi.testclient import TestClient
-from graph_agent_gateway.probing import RouteProbeResult
+from graph_agent_gateway.probing import EFFORT_CONTROL_LEVEL, RouteProbeResult
 
 
 def _seed(tmp_path: Path, monkeypatch) -> None:
@@ -107,7 +107,7 @@ def test_testing_a_thinking_model_measures_the_effort_levels_it_takes(
     # One generation with no effort named, then one request per candidate level;
     # google_genai pins its own vocabulary, so the ladder is not offered whole.
     assert asked[0] is None
-    assert asked[1:] == ["minimal", "low", "medium", "high"]
+    assert asked[1:] == ["minimal", "low", "medium", "high", EFFORT_CONTROL_LEVEL]
 
 
 def test_a_model_that_does_not_think_is_not_asked_about_effort(

@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
+    CapabilitySource,
     CredentialProviderProtocol,
     EndpointProbeResult,
     GatewayAdapter,
@@ -971,6 +972,7 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
                     model_ids=(verification.verified_model_id,),
                     verified=True,
                     raw_capabilities_by_model=verification.probe_capabilities,
+                    capability_source_by_model=verification.capability_source_by_model,
                 )
                 _merge_probe_evidence_into_route(
                     latest_credentials,
@@ -1306,16 +1308,22 @@ async def test_endpoint_models(
                 results=results,
             )
         list_model_capabilities = await _list_model_capabilities_for_endpoint(latest_endpoint)
+        capabilities_with_provenance = {
+            model_id: _third_party_probe_capabilities(
+                model_id,
+                list_model_capabilities.get(model_id),
+            )
+            for model_id in successful_model_ids
+        }
         latest_credentials, route_ids_by_model = _upsert_third_party_model_probe_routes(
             latest_credentials,
             endpoint=latest_endpoint,
             probe_results=tuple(probe_results),
             raw_capabilities_by_model={
-                model_id: _third_party_probe_capabilities(
-                    model_id,
-                    list_model_capabilities.get(model_id),
-                )
-                for model_id in successful_model_ids
+                model_id: values for model_id, (values, _) in capabilities_with_provenance.items()
+            },
+            capability_source_by_model={
+                model_id: source for model_id, (_, source) in capabilities_with_provenance.items()
             },
         )
         # Return-and-merge BEFORE the single save (R3.3): build each probe result's
@@ -2754,7 +2762,6 @@ def _normalize_route_for_registry_response(
     doc_capabilities = _official_model_type_capability_values(
         endpoint,
         route.provider_model_id,
-        source="probed_verified" if route.status == "verified" else "api_list",
     )
     doc_capabilities.update(
         _provider_doc_limit_capability_values(
@@ -4660,9 +4667,14 @@ def _merged_capability_library_entries(
 def _official_model_type_capability_values(
     endpoint: ProviderEndpoint,
     model_id: str,
-    *,
-    source: Literal["api_list", "probed_verified"],
 ) -> dict[str, CapabilityValue]:
+    """The model type this provider's own documentation states.
+
+    Always `provider_doc`: these values are read out of the official catalog and
+    even carry the doc URLs they came from. Whether the route has since answered
+    a generation request says nothing about where they were read.
+    """
+    source: CapabilitySource = "provider_doc"
     model_type, label = _official_catalog_model_type(endpoint, model_id)
     input_modalities, output_modalities = _official_catalog_modalities(
         endpoint,
@@ -5023,6 +5035,10 @@ class EndpointGenerationVerification:
     verified_model_id: str | None
     message: str
     probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Where each model's capabilities above were read: the endpoint's list-models
+    # response, or the generation this verification just ran. Carried alongside
+    # rather than re-derived, because "the route verified" does not say which.
+    capability_source_by_model: dict[str, ListedOrGenerated] = field(default_factory=dict)
     # True when the failure is protocol-agnostic within this cell (invalid_key /
     # quota_exceeded / protocol_unsupported): the endpoint itself cannot generate,
     # so a prior verified route must NOT be reused.
@@ -5211,16 +5227,16 @@ async def _verify_endpoint_by_generation_probe(
                 endpoint.protocol,
                 model_id,
             )
+            verified_capabilities, verified_capability_source = _third_party_probe_capabilities(
+                model_id,
+                raw_capabilities_by_model.get(model_id),
+            )
             return EndpointGenerationVerification(
                 status="verified",
                 verified_model_id=model_id,
                 message=f"Generation verified via {endpoint.protocol}. Model: {model_id}.",
-                probe_capabilities={
-                    model_id: _third_party_probe_capabilities(
-                        model_id,
-                        raw_capabilities_by_model.get(model_id),
-                    )
-                },
+                probe_capabilities={model_id: verified_capabilities},
+                capability_source_by_model={model_id: verified_capability_source},
                 probe_attempts=probe_attempts,
             )
         last_failure = probe
@@ -5309,20 +5325,34 @@ def _gateway_probe_route(endpoint: ProviderEndpoint, model_id: str) -> ProviderR
     )
 
 
+ListedOrGenerated = Literal["api_list", "probed_verified"]
+"""Where a third-party route's capabilities came from.
+
+Only two answers are possible here: the endpoint's list-models response said so,
+or the generation this probe just ran did. Narrower than `CapabilitySource` on
+purpose — a doc or a human never reaches this path.
+"""
+
+
 def _third_party_probe_capabilities(
     model_id: str,
     raw_capabilities: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Prefer the list-models rich capabilities; fall back to the text-only default.
+) -> tuple[dict[str, Any], ListedOrGenerated]:
+    """The capabilities to record, and which of the two places they came from.
 
     apikeys#27: third-party capability must come from the endpoint's list-models
     rich fields (normalized) when available, not be hard-coded text-only. The
     generation-probe default is only used when the list API gave us nothing.
+
+    The provenance is returned with the values because this is the only place
+    that knows it. A caller that reconstructs it from the route's status instead
+    ends up crediting the list API's claims to a measurement that never asked
+    about them.
     """
     del model_id
     if raw_capabilities:
-        return dict(raw_capabilities)
-    return _successful_generation_probe_capabilities()
+        return dict(raw_capabilities), "api_list"
+    return _successful_generation_probe_capabilities(), "probed_verified"
 
 
 def _third_party_route_capability_values(
@@ -5413,6 +5443,7 @@ def _upsert_discovered_routes(
     verified_profiles_by_model: dict[str, list[VerifiedProfile]] | None = None,
     probe_attempts_by_model: dict[str, list[dict[str, Any]]] | None = None,
     raw_capabilities_by_model: dict[str, dict[str, Any]] | None = None,
+    capability_source_by_model: dict[str, ListedOrGenerated] | None = None,
 ) -> tuple[LLMCredentialsFile, dict[str, str]]:
     routes = dict(credentials.provider_routes)
     route_ids_by_model: dict[str, str] = {}
@@ -5421,7 +5452,9 @@ def _upsert_discovered_routes(
         route_ids_by_model[model_id] = route_id
         existing = routes.get(route_id)
         status: Literal["verified", "unverified_manual"] = "verified" if verified else "unverified_manual"
-        capability_source: Literal["api_list", "probed_verified"] = "probed_verified" if verified else "api_list"
+        # Whether this route answered a generation request is a fact about the
+        # route; where its capabilities were read is a fact about them.
+        capability_source: ListedOrGenerated = (capability_source_by_model or {}).get(model_id, "api_list")
         if existing is None:
             route = _provider_route(
                 endpoint=endpoint,
@@ -5442,7 +5475,6 @@ def _upsert_discovered_routes(
                     _official_model_type_capability_values(
                         endpoint,
                         model_id,
-                        source=capability_source,
                     )
                     if endpoint.provider_kind == "official"
                     else {}
@@ -5497,6 +5529,7 @@ def _upsert_third_party_model_probe_routes(
     endpoint: ProviderEndpoint,
     probe_results: tuple[ModelProbeResult, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]] | None = None,
+    capability_source_by_model: dict[str, ListedOrGenerated] | None = None,
 ) -> tuple[LLMCredentialsFile, dict[str, str]]:
     routes = dict(credentials.provider_routes)
     route_ids_by_model: dict[str, str] = {}
@@ -5522,7 +5555,7 @@ def _upsert_third_party_model_probe_routes(
             endpoint=endpoint,
             model_id=result.model_id,
             status=status,
-            capability_source="probed_verified" if status == "verified" else "api_list",
+            capability_source=(capability_source_by_model or {}).get(result.model_id, "api_list"),
             raw_capabilities=raw_capabilities,
             probe_attempts=metadata["probe_attempts"],
         )
@@ -5602,7 +5635,6 @@ def _provider_route(
                     _official_model_type_capability_values(
                         endpoint,
                         model_id,
-                        source=capability_source,
                     )
                     if endpoint.provider_kind == "official"
                     else {}

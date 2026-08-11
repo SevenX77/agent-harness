@@ -53,12 +53,24 @@ def verified_profile_route_capabilities(
     return capabilities
 
 
+_REASONING_CAPABILITIES = frozenset({"thinking", "reasoning"})
+"""The capability names a probe candidate declares when it asks the model to think.
+
+The candidate tables (`app/data/probe_candidates.json`,
+`probe_candidates_dynamic.json`) name each candidate's capability outright —
+`text_chat`, `thinking`, or `reasoning`. Reading that field is what makes
+`thinking_protocol` measured: a candidate declared `thinking` that came back
+`ready` means a request shaped for thinking was accepted.
+"""
+
+
 def _profile_supports_reasoning(profile: VerifiedProfile) -> bool:
-    haystack = " ".join(
-        [
-            profile.capability,
-            profile.profile_id,
-            profile.request_mapper_id,
-        ]
-    ).lower()
-    return "thinking" in haystack or "reasoning" in haystack
+    """Whether this profile's probe asked the model to think, and got a yes.
+
+    Decided by the declared capability, not by searching the profile's
+    identifiers for the substring "thinking" — a name is a label, and the
+    conclusion here is stamped `probed_verified`. It also gates whether Studio
+    spends one request per effort level, so guessing it wrong costs money in one
+    direction and leaves the levels unmeasured in the other.
+    """
+    return profile.capability in _REASONING_CAPABILITIES

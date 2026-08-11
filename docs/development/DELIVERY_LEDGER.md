@@ -213,6 +213,21 @@ effort 进 UI、top_p 不进)。前决议管「被拒之后怎么办」,本决�
 | A3 | 修:只因被贴合才被知道的设置拿不到判定 | ✅ 已合并(#700);**真机验收(2026-08-10)** | 真机跑合并后的代码抓到的:越界 `top_p` 确实按 1.0 出门了,而设置事件对它只字未提——贴合正确且不可见,正是本决议要消灭的那种沉默。根因:报告表每项一条记录,只有自带记录的项才带 provenance;仅因被移动才被知道的项没有,于是被「这是不是用户选的」那道过滤当成没人选而丢掉。贴合记录现在带上路由结算它时的 provenance 与实际送出的值。顺带删掉 `AUTHORED_SOURCES` 里的 `runtime_settings`——它抄自另一个字段的来源字符串,resolver 根本不会在运行时设置上盖这个章,是个永远匹配不到的成员;现在改由测试对着封闭枚举核对,不再对着我的记忆。**教训**:单测全绿是因为每个用例都亲手喂了一条带 source 的记录,真机跑一遍才抓到 |
 | B3 | effort 成为角色级设置 + 控件进 LLM 角色面板 | ✅ 已合并(#702);**worktree 实测(2026-08-10)** | effort 是角色选一次、各路由各自贴合的设置:`RoleIntent.reasoning_effort` 存所选档位,`role_materialization._apply_reasoning_effort` 在物化时用 `settings_bounds.effort_bounds/fit` 贴合成该路由卖的最近一档(就低不就高),所以面板读回的值就是会发出去的值。**档位通道改了**:决议初稿写的是 `RuntimeSettingDescriptor.allowed_values`,实际走 `ProviderModelOption.capabilities['reasoning_effort']`——两条都是同一份 registry 真相的按路由投影,而后者已经铺到角色卡片(旁边 max output tokens 控件正是从它读上限),前者今天前端没有任何消费者;同一批数据取短路径,D-F 已按此订正。协议文档词表在**读时**补(`_provider_route_ui_capabilities`),不写盘——「这个协议能拼出哪些名字」是随时可答的常量,落盘只会变陈旧;实测档位存在时原样保留。空态给禁用 + 说明,不给"去测"入口:B2 未落地前现有路由测试并不测 effort,指过去是空承诺。top_p 明确不进 UI(与 temperature 同向作用,各家文档均建议二选一)。**验证教训**:单测把 `@/components/ui/select` mock 成原生 `<select>`,而原生 select 接受空 value,于是「`SelectItem value=""` 会被 Radix 拒绝并炸成错误边界」全绿放行,起真环境打开那一屏才看见「LLM Roles failed to render」——mock 掉设计系统组件的用例必须再去真环境看一眼(已写进 FRONTEND_UI_SPEC §2.8) |
 
+#### 第四阶段 · 网关按域成树,测试只有一套方言(2026-08-10 立项,PM 三问触发)
+
+决议:`docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md`
+(测试能力分 T0 静态校验 / T1 可达性 / T2 能力测绘 / T3 行为测试四层;方言唯一实现、生产与探测共用;
+网关按七个域成树、域外禁止深导入)。用户授权:一期一 PR,自测通过即自动推进下一期。
+
+| 步 | 在做什么 | 状态 | 关键设计决定 |
+|---|---|---|---|
+| P0 | 决议落盘 | 🚧 进行中 | 立项证据:①"effort 怎么进请求体"这一句规则在仓里有 8 处赋值、分布在 5 个函数(生产 3 + 探测 5),生产走官方 SDK、探测手搓 httpx——**探测通过不等于生产能跑**;②`provider_probe.py` 全文无 `tools` 字样,四个 Test 按钮没有一个能回答"这条路由能不能进 ReAct 循环",而这正是引擎唯一真正依赖的能力;③外部对网关的 import 共 531 条、绝大多数深入内部文件(`registry.schema` 一处被 import 146 次),内部结构因此变成了公共契约 |
+| P1 | 按域成树的纯搬迁(自底向上,一域一 PR) | ⏳ 待办 | 保留 `registry` 这个名字(AGENTS.md 与 MVP1 设计源的既定术语),改的是它的范围:解析/探测/调用迁出,只留真相。域级契约 = 包 `__init__`,域外只许 `from graph_agent_gateway.<域> import X`,由一条 lint 测试守住 |
+| P2 | 抽 `dialect/` + `judge`,探测侧先切 | ⏳ 待办 | 方言的选择由 `protocol` 显式决定,删掉按主机名猜(`endpoint_probe_backend` 里的 `"deepseek" in base_host`) |
+| P3 | 生产 dispatch 切到同一组 dialect | ⏳ 待办 | 不押后:它动的是所有真实推理的出口,但"探测=生产"这条保证只有它能给。风险由请求体契约测试兜底(切换前先录制当前 body 作基线),不由延期兜底 |
+| P4 | `questions`/`runner` 落地,四入口改成选题;effort 测量归位;删伪造证据分支 | ⏳ 待办 | T2 不拆成"跑通一次"与"全量测绘"两个能力,而是同一能力的深度参数——判据/方言/写入口三者相同,拆开必然长出第二份实现 |
+| P5 | T3:ToolCall(L1) → ReactLoop(L2),copilot CLI 收编为第三种执行器 | ⏳ 待办 | T3 必须走生产同一条调用路径(网关 dispatch + `bind_tools`),不得手搓 HTTP,否则测的不是生产会跑的东西 |
+
 ### 第二阶段 · 流式 tracing(S1-S5,已全部合并)
 
 | # | 项 | 状态 | 关键坐标 |

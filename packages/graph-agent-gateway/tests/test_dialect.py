@@ -17,7 +17,7 @@ from graph_agent_gateway.dialect import (
     Reasoning,
     WireRequest,
     dialect_for_method,
-    official_wire_method_ids,
+    dialect_method_ids,
 )
 
 _BASE_URL = "https://host.example/v1"
@@ -28,15 +28,13 @@ _IMAGE_PROMPT = Prompt(
 )
 
 
-def _officially_probeable_method_ids() -> set[str]:
+def _catalog_method_ids() -> set[str]:
     raw = json.loads(
         resources.files("graph_agent_gateway.registry")
         .joinpath("call_methods.json")
         .read_text(encoding="utf-8")
     )
-    return {
-        method["method_id"] for method in raw["methods"] if method.get("official_probe") is True
-    }
+    return {method["method_id"] for method in raw["methods"]}
 
 
 def _generation(method_id: str, prompt: Prompt = _PROMPT, **kwargs: object) -> WireRequest:
@@ -53,15 +51,16 @@ def _generation(method_id: str, prompt: Prompt = _PROMPT, **kwargs: object) -> W
     )
 
 
-def test_every_officially_probeable_method_speaks_exactly_one_known_dialect() -> None:
-    # A method the catalog offers for probing but no dialect can render is a
-    # method nobody can send: the two lists are one fact, so they must match.
-    assert official_wire_method_ids() == _officially_probeable_method_ids()
+def test_every_call_method_the_catalog_knows_speaks_exactly_one_known_dialect() -> None:
+    # A method the catalog offers but no dialect can render is a method nobody
+    # can send: the two lists are one fact, so they must match. This includes
+    # methods no probe offers — being sendable and being offered are separate.
+    assert dialect_method_ids() == _catalog_method_ids()
 
 
 def test_a_method_no_dialect_speaks_is_refused_by_name() -> None:
-    with pytest.raises(ValueError, match="openrouter_anthropic_messages"):
-        dialect_for_method("openrouter_anthropic_messages")
+    with pytest.raises(ValueError, match="acme_telepathy"):
+        dialect_for_method("acme_telepathy")
 
 
 def test_the_anthropic_wire_names_its_version_and_carries_the_secret_where_each_vendor_wants_it() -> None:
@@ -93,7 +92,7 @@ def test_a_text_only_wire_refuses_an_image_instead_of_quietly_dropping_it() -> N
 def test_every_wire_but_the_legacy_completions_one_can_say_how_hard_to_think() -> None:
     effort = Reasoning(enabled=True, effort="high")
     speechless = set()
-    for method_id in sorted(official_wire_method_ids()):
+    for method_id in sorted(dialect_method_ids()):
         plain = _generation(method_id).body
         asked = _generation(method_id, reasoning=effort).body
         if plain == asked:
@@ -103,5 +102,5 @@ def test_every_wire_but_the_legacy_completions_one_can_say_how_hard_to_think() -
 
 
 def test_an_image_changes_the_body_of_every_wire_that_has_an_image_channel() -> None:
-    for method_id in sorted(official_wire_method_ids() - {"openai_completions"}):
+    for method_id in sorted(dialect_method_ids() - {"openai_completions"}):
         assert _generation(method_id).body != _generation(method_id, _IMAGE_PROMPT).body

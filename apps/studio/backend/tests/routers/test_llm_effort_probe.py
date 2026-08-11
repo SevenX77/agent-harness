@@ -28,7 +28,7 @@ from app.models.llm_config import (
 from app.routers import llm as llm_router
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from fastapi.testclient import TestClient
-from graph_agent_gateway.probing import RouteProbeResult
+from graph_agent_gateway.probing import EFFORT_CONTROL_LEVEL, RouteProbeResult
 
 
 def _seed(tmp_path: Path, monkeypatch, *, thinking: bool, protocol: str) -> None:
@@ -114,7 +114,51 @@ def test_a_probe_records_the_levels_the_route_accepted(
     assert capability.source == "probed_verified"
     # One generation probe with no effort named, then one request per candidate.
     assert asked[0] is None
-    assert asked[1:] == ["low", "medium", "high", "xhigh", "max"]
+    assert asked[1:] == ["low", "medium", "high", "xhigh", "max", EFFORT_CONTROL_LEVEL]
+
+
+def test_a_route_that_takes_every_level_records_no_effort_capability(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Live 2026-08-11: deepseek-v4-pro took all seven, `none` and `max` included.
+
+    A provider that never reads the field answers exactly like one that sells
+    every level, so the run must end with nothing recorded rather than with a
+    list nobody checked. Leaving the capability absent is what the record
+    already means by "unmeasured".
+    """
+    _seed(tmp_path, monkeypatch, thinking=True, protocol="openai_compatible")
+    asked = _record_asked(monkeypatch, accepted=set())
+
+    async def take_everything(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        reasoning = (runtime_settings or {}).get("reasoning")
+        asked.append(reasoning.get("effort") if isinstance(reasoning, dict) else None)
+        return RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend=llm_router._provider_backend_for_endpoint(endpoint),
+            base_url=llm_router._endpoint_probe_base_url(endpoint),
+            model_id=route.provider_model_id,
+            status="ok",
+            message=None,
+        )
+
+    asked.clear()
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", take_everything)
+
+    response = client.post("/api/llm/routes/vendor:thinker/probe")
+
+    assert response.status_code == 200, response.text
+    assert "reasoning_effort" not in load_credentials().provider_routes["vendor:thinker"].capabilities
+    assert EFFORT_CONTROL_LEVEL in asked
 
 
 def test_a_protocol_that_pins_its_vocabulary_is_not_asked_beyond_it(
@@ -128,7 +172,7 @@ def test_a_protocol_that_pins_its_vocabulary_is_not_asked_beyond_it(
 
     client.post("/api/llm/routes/vendor:thinker/probe")
 
-    assert asked[1:] == ["minimal", "low", "medium", "high"]
+    assert asked[1:] == ["minimal", "low", "medium", "high", EFFORT_CONTROL_LEVEL]
 
 
 def test_a_protocol_that_pins_nothing_is_asked_the_whole_ladder(
@@ -143,7 +187,16 @@ def test_a_protocol_that_pins_nothing_is_asked_the_whole_ladder(
 
     client.post("/api/llm/routes/vendor:thinker/probe")
 
-    assert asked[1:] == ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    assert asked[1:] == [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        EFFORT_CONTROL_LEVEL,
+    ]
     capability = load_credentials().provider_routes["vendor:thinker"].capabilities[
         "reasoning_effort"
     ]

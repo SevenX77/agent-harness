@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+from graph_agent_gateway.call import GatewayChatModel, ModelResolver
 from graph_agent_gateway.registry import InMemoryConfigTruthStore
-from graph_agent_gateway.resolver import ModelResolver
 
 import graph_agent
 
@@ -103,7 +102,7 @@ def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
 
 
 def test_resolver_with_predict_context_resolves_to_predict_gateway() -> None:
-    from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+    from graph_agent_gateway.call import PredictGatewayChatModel
 
     class DummyPredictContext:
         def resolve_generation(self, phase_name: str, role_name: str, messages: list[Any]) -> str:

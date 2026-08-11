@@ -101,7 +101,7 @@ class GenericRouteChatModel(BaseChatModel):
 
 
 def _default_ordinary_chat_dispatcher() -> OrdinaryChatDispatcher:
-    from graph_agent_gateway.ordinary_chat import dispatch_ordinary_chat
+    from graph_agent_gateway.call.dispatch import dispatch_ordinary_chat
 
     return dispatch_ordinary_chat
 

@@ -53,7 +53,7 @@ class FakeRouteChatModelFactory:
 
 
 def _install_route_factory(monkeypatch: pytest.MonkeyPatch, factory: FakeRouteChatModelFactory) -> None:
-    from graph_agent_gateway import gateway_chat_model
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     monkeypatch.setattr(
         gateway_chat_model,
@@ -113,8 +113,8 @@ class RecordingCallback:
 
 
 def _resolver_from_snapshot(snapshot: Any, **kwargs: Any) -> Any:
+    from graph_agent_gateway.call import ModelResolver
     from graph_agent_gateway.registry import InMemoryConfigTruthStore
-    from graph_agent_gateway.resolver import ModelResolver
 
     payload = snapshot.model_dump(mode="python")
     store = InMemoryConfigTruthStore()
@@ -142,7 +142,7 @@ def _resolver_from_snapshot(snapshot: Any, **kwargs: Any) -> Any:
 
 
 def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     from graph_agent_gateway.registry import (
         ProviderEndpoint,
         ProviderRoute,
@@ -204,8 +204,8 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
 def test_gateway_failure_path_emits_event_and_structured_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.exceptions import AllProvidersFailedError
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
+    from graph_agent_gateway.errors import AllProvidersFailedError
     from graph_agent_gateway.registry import (
         ResolvedRole,
         ResolvedRoute,
@@ -262,7 +262,7 @@ def test_gateway_failure_path_emits_event_and_structured_exception(
 def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     from graph_agent_gateway.registry import (
         ResolvedRole,
         ResolvedRoute,
@@ -375,7 +375,7 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
 def test_probe_missing_model_error_falls_back_to_next_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     from graph_agent_gateway.registry import (
         ResolvedRole,
         ResolvedRoute,
@@ -446,7 +446,7 @@ def test_probe_missing_model_error_falls_back_to_next_route(
 def test_gateway_passes_effective_runtime_settings_to_route_factory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     from graph_agent_gateway.registry import (
         ResolvedRole,
         ResolvedRoute,
@@ -530,7 +530,7 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
 def test_gateway_response_metadata_reports_actual_call_runtime_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     from graph_agent_gateway.registry import (
         ResolvedRole,
         ResolvedRoute,
@@ -589,6 +589,7 @@ def test_gateway_response_metadata_reports_actual_call_runtime_settings(
 
 
 def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
+    from graph_agent_gateway.call import ResourceTerminalError
     from graph_agent_gateway.registry import (
         ProviderEndpoint,
         ProviderRoute,
@@ -596,7 +597,6 @@ def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.resolver import ResourceTerminalError
 
     snapshot = RegistrySnapshot(
         provider_endpoints={

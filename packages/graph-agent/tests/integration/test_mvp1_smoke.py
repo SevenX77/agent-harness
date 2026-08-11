@@ -50,8 +50,8 @@ from typing import Any
 
 import pytest
 import yaml
+from graph_agent_gateway.call import ModelResolver
 from graph_agent_gateway.registry import InMemoryConfigTruthStore
-from graph_agent_gateway.resolver import ModelResolver
 from langchain_core.messages import HumanMessage
 
 from graph_agent.core.compiler import compile_skill

@@ -5,6 +5,9 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+# Re-exports from graph_agent_gateway for services isolation
+from graph_agent_gateway.call import ModelResolver as ModelResolver
+from graph_agent_gateway.call import ResourceTerminalError as ResourceTerminalError
 from graph_agent_gateway.registry import (
     EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
@@ -163,10 +166,6 @@ from graph_agent_gateway.resolve import lint_role_routes as lint_role_routes
 from graph_agent_gateway.resolve import (
     select_verified_profile as select_verified_profile,
 )
-
-# Re-exports from graph_agent_gateway for services isolation
-from graph_agent_gateway.resolver import ModelResolver as ModelResolver
-from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTerminalError
 from graph_agent_gateway.role import (
     MaterializeRoleRequest as GatewayMaterializeRoleRequest,
 )

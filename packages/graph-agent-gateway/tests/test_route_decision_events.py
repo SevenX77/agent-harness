@@ -107,7 +107,7 @@ class _Factory:
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, factory: _Factory) -> None:
-    from graph_agent_gateway import gateway_chat_model
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     monkeypatch.setattr(
         gateway_chat_model, "RouteChatModelFactory", lambda **_kw: factory, raising=False
@@ -123,7 +123,7 @@ def _ask(
     escalation: int = 0,
     probe: bool = False,
 ) -> list[Any]:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
 
     _install(monkeypatch, factory)
     recorder = _Recorder()
@@ -276,7 +276,7 @@ class _FailingCallback:
 
 
 def test_a_failing_listener_does_not_stop_the_others_from_hearing() -> None:
-    from graph_agent_gateway.tracing import emit_route_decision_event
+    from graph_agent_gateway.call import emit_route_decision_event
 
     recorder = _Recorder()
 
@@ -292,8 +292,8 @@ def test_a_failing_listener_does_not_stop_the_others_from_hearing() -> None:
 
 def test_the_event_code_is_not_something_a_call_site_chooses() -> None:
     """One code per event type, decided by the type — not per emission."""
+    from graph_agent_gateway.call import build_route_decision_event
     from graph_agent_gateway.events import ROUTE_DECISION_EVENT_CODE, LLMRouteDecisionEvent
-    from graph_agent_gateway.tracing import build_route_decision_event
 
     with pytest.raises(TypeError):
         LLMRouteDecisionEvent(  # type: ignore[call-arg]

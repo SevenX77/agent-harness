@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 def test_all_providers_failed_error_exposes_standard_payload() -> None:
-    from graph_agent_gateway.exceptions import AllProvidersFailedError
+    from graph_agent_gateway.errors import AllProvidersFailedError
 
     exc = AllProvidersFailedError(
         role_name="balanced",
@@ -52,7 +52,7 @@ def test_all_providers_failed_error_exposes_standard_payload() -> None:
 
 
 def test_resolver_missing_error_uses_v3_gateway_code() -> None:
-    from graph_agent_gateway.exceptions import GatewayResolverMissingError
+    from graph_agent_gateway.errors import GatewayResolverMissingError
 
     exc = GatewayResolverMissingError(phase_name="draft")
 
@@ -65,7 +65,7 @@ def test_resolver_missing_error_uses_v3_gateway_code() -> None:
 
 
 def test_role_not_configured_error_uses_v3_gateway_code() -> None:
-    from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
+    from graph_agent_gateway.errors import GatewayRoleNotConfiguredError
 
     exc = GatewayRoleNotConfiguredError(role_name="premium", model_override="BAD_MODEL")
 

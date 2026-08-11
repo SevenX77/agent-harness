@@ -23,7 +23,7 @@ def _route(*, endpoint_id: str, provider_model_id: str):
 
 
 def test_provider_profile_merge_order_exact_factory_and_caller_wins() -> None:
-    from graph_agent_gateway.provider_profiles import (
+    from graph_agent_gateway.call import (
         ProviderProfile,
         apply_provider_profile,
         register_provider_profile,
@@ -90,7 +90,7 @@ def test_provider_profile_merge_order_exact_factory_and_caller_wins() -> None:
 
 
 def test_provider_profile_registration_is_additive() -> None:
-    from graph_agent_gateway.provider_profiles import (
+    from graph_agent_gateway.call import (
         ProviderProfile,
         apply_provider_profile,
         register_provider_profile,
@@ -112,7 +112,7 @@ def test_provider_profile_registration_is_additive() -> None:
 
 
 def test_builtin_provider_profile_defaults_are_minimal_stream_usage_flags() -> None:
-    from graph_agent_gateway.provider_profiles import apply_provider_profile
+    from graph_agent_gateway.call import apply_provider_profile
 
     assert apply_provider_profile("protocol:openai_compatible") == {"stream_usage": True}
     assert apply_provider_profile("protocol:ark_runtime") == {"stream_usage": True}

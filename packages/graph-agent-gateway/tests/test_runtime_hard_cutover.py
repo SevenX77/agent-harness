@@ -126,7 +126,7 @@ class FakeRouteChatModelFactory:
 
 
 def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatModelFactory:
-    from graph_agent_gateway import gateway_chat_model
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     factory = FakeRouteChatModelFactory()
 
@@ -142,7 +142,7 @@ def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatMode
 
 
 def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatModelFactory:
-    from graph_agent_gateway import gateway_chat_model
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     factory = FakeRouteChatModelFactory()
 
@@ -191,8 +191,8 @@ def _resolver_from_payloads(
     roles: dict[str, Any],
     **kwargs: Any,
 ) -> Any:
+    from graph_agent_gateway.call import ModelResolver
     from graph_agent_gateway.registry import InMemoryConfigTruthStore
-    from graph_agent_gateway.resolver import ModelResolver
 
     store = InMemoryConfigTruthStore()
     user_id = "test-user"
@@ -230,14 +230,14 @@ def _resolver_from_files(
 
 
 def test_model_resolver_requires_config_truth_store() -> None:
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.call import ModelResolver
 
     with pytest.raises(TypeError, match="config_store"):
         ModelResolver()
 
 
 def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
 
     credentials_path, roles_path = _write_registry_files(tmp_path)
     client_manager = RecordingClientManager()
@@ -264,7 +264,7 @@ def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
 def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
     tmp_path: Path,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
 
     credentials_path, roles_path = _write_registry_files(tmp_path)
     roles_payload = yaml.safe_load(roles_path.read_text(encoding="utf-8"))
@@ -324,7 +324,7 @@ def test_model_override_is_exact_route_id() -> None:
 def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     from graph_agent_gateway.resolve import ResolvedRouteChain
 
     factory = _install_route_factory(monkeypatch)
@@ -364,7 +364,7 @@ def test_resolve_and_resolve_routes_share_the_same_route_resolution() -> None:
 
 
 def test_resolve_routes_projects_resource_terminal_error() -> None:
-    from graph_agent_gateway.resolver import ResourceTerminalError
+    from graph_agent_gateway.call import ResourceTerminalError
 
     resolver = _resolver_from_snapshot(_snapshot())
 
@@ -376,8 +376,8 @@ def test_resolve_routes_projects_resource_terminal_error() -> None:
 
 
 def test_model_resolver_maps_filtered_empty_chain_to_resource_terminal_error() -> None:
+    from graph_agent_gateway.call import ResourceTerminalError
     from graph_agent_gateway.registry import RoleEntry
-    from graph_agent_gateway.resolver import ResourceTerminalError
 
     snapshot = _snapshot()
     snapshot.roles["empty"] = RoleEntry(fallback_chain=[])
@@ -391,7 +391,7 @@ def test_model_resolver_maps_filtered_empty_chain_to_resource_terminal_error() -
 
 
 def test_model_resolver_predict_context_returns_predict_gateway_chat_model() -> None:
-    from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+    from graph_agent_gateway.call import PredictGatewayChatModel
 
     class DummyPredictContext:
         def resolve_generation(

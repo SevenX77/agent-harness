@@ -53,7 +53,7 @@ def _route(
 
 
 def _defaults() -> Any:
-    from graph_agent_gateway.call_settings import ModelDefaults
+    from graph_agent_gateway.call import ModelDefaults
 
     return ModelDefaults(
         max_tokens=1024,
@@ -87,7 +87,7 @@ def test_the_routes_own_temperature_ceiling_wins_over_the_protocol_default() -> 
 
 def test_a_budget_over_the_models_ceiling_starts_at_the_ceiling() -> None:
     """The cap already bounded escalation; the value a call opens with obeys it too."""
-    from graph_agent_gateway.call_settings import initial_budget
+    from graph_agent_gateway.call import initial_budget
 
     route = _route(capabilities={"max_output_tokens": 8192})
 
@@ -176,7 +176,7 @@ def test_a_top_p_above_one_arrives_at_one() -> None:
 
 def test_an_adjusted_setting_reports_what_was_asked_for() -> None:
     """Fitting silently would trade one invisible failure for one invisible success."""
-    from graph_agent_gateway.call_settings import compose_call_settings, initial_budget
+    from graph_agent_gateway.call import compose_call_settings, initial_budget
 
     route = _route(capabilities={"max_output_tokens": 8192}, settings={"top_p": 5.0})
     call_kwargs = {"max_tokens": 999_999}
@@ -201,7 +201,7 @@ def test_an_adjusted_setting_reports_what_was_asked_for() -> None:
 
 def test_a_setting_that_fits_reports_no_asked_for_value() -> None:
     """"Asked for" only means something when it differs from what was sent."""
-    from graph_agent_gateway.call_settings import compose_call_settings, initial_budget
+    from graph_agent_gateway.call import compose_call_settings, initial_budget
 
     route = _route(capabilities={"max_output_tokens": 8192}, settings={"top_p": 0.4})
     call_kwargs = {"max_tokens": 512}

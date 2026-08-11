@@ -6,13 +6,13 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+from graph_agent_gateway.call.outcome import SettingOutcome
 from graph_agent_gateway.events import (
     LLMCallSettingsEvent,
     LLMRouteDecisionEvent,
     RouteDecision,
 )
 from graph_agent_gateway.registry import ResolvedRoute
-from graph_agent_gateway.settings_outcome import SettingOutcome
 
 logger = logging.getLogger(__name__)
 

@@ -9,9 +9,9 @@ ROUTE_DECISION_EVENT_CODE = "[F-v3-gateway-llm-route-decision]"
 
 
 def test_gateway_owns_route_decision_event_schema() -> None:
+    from graph_agent_gateway.call import build_route_decision_event
     from graph_agent_gateway.events import LLMRouteDecisionEvent
     from graph_agent_gateway.registry import ResolvedRoute
-    from graph_agent_gateway.tracing import build_route_decision_event
 
     route = ResolvedRoute(
         role_name="balanced",
@@ -45,7 +45,7 @@ def test_gateway_owns_route_decision_event_schema() -> None:
 
 
 def test_gateway_errors_do_not_inherit_engine_execution_error() -> None:
-    from graph_agent_gateway.exceptions import GatewayError
+    from graph_agent_gateway.errors import GatewayError
 
     assert "ExecutionError" not in {base.__name__ for base in GatewayError.__mro__}
 
@@ -140,9 +140,9 @@ def test_registry_surface_exports_skipped_route_diagnostics() -> None:
 
 def test_gateway_phase1_has_no_engine_internal_imports() -> None:
     forbidden = {
-        "exceptions.py": "graph_agent.core.exceptions",
-        "tracing.py": "graph_agent.callbacks.events",
-        "resolver.py": "graph_agent.core._predict_internal",
+        "errors.py": "graph_agent.core.exceptions",
+        "call/tracing.py": "graph_agent.callbacks.events",
+        "call/resolver.py": "graph_agent.core._predict_internal",
         "__init__.py": "from graph_agent_gateway import factory",
     }
 
@@ -161,7 +161,7 @@ def test_gateway_phase1_has_no_engine_internal_imports() -> None:
 # Each name below is a module the registry package still holds but does not own:
 # it moves to its final domain in a later phase, and this set shrinks to empty
 # there. Nothing may be ADDED to it.
-_SETTLED_DOMAINS = ("registry", "resolve", "role")
+_SETTLED_DOMAINS = ("registry", "resolve", "role", "call")
 
 # Modules a settled domain still holds but does not own: each moves to its final
 # domain in a later phase, and this set shrinks to empty there. Nothing may be

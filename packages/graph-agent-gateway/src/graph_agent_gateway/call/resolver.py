@@ -10,9 +10,9 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
-from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.protocol import PredictContext
+from graph_agent_gateway.call.chat_model import GatewayChatModel
+from graph_agent_gateway.call.protocol import PredictContext
+from graph_agent_gateway.errors import GatewayRoleNotConfiguredError
 from graph_agent_gateway.registry import (
     ConfigTruthStore,
     CredentialProviderProtocol,
@@ -161,7 +161,7 @@ class ModelResolver:
             ),
         }
         if predict_context is not None:
-            from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+            from graph_agent_gateway.call.predict import PredictGatewayChatModel
 
             return PredictGatewayChatModel(
                 resolved.role_name,
@@ -408,7 +408,7 @@ def _gateway_model_bundles_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _default_client_manager() -> Any:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMClientManager
 
     return LLMClientManager
 

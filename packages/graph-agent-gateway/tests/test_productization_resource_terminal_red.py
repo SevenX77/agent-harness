@@ -43,7 +43,7 @@ def _store_for_role(role_payload: dict[str, object]):
 
 
 def _resolver_from_config_store(store: object):
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.call import ModelResolver
 
     params = inspect.signature(ModelResolver.__init__).parameters
     if "config_store" in params:

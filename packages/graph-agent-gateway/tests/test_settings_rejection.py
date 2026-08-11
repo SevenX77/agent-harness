@@ -132,8 +132,8 @@ def _ask(
     manager: Any,
     probe: bool = False,
 ) -> tuple[list[Any], BaseException | None]:
-    from graph_agent_gateway import gateway_chat_model
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     monkeypatch.setattr(
         gateway_chat_model, "RouteChatModelFactory", lambda **_kw: factory, raising=False

@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from graph_agent_gateway.call_settings import KWARG_OF_SETTING, ActualRuntimeSettings
+from graph_agent_gateway.call.settings import KWARG_OF_SETTING, ActualRuntimeSettings
 
 SettingVerdict = Literal["applied", "sent", "adjusted", "unsupported", "rejected", "ignored"]
 

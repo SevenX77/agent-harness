@@ -113,7 +113,7 @@ def _dispatch_provider_call(
     credential_provider: CredentialProviderProtocol | None = None,
 ) -> CallResult:
     """Route an ordinary-chat call by configured endpoint protocol."""
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMClientManager
 
     if route.protocol == "openai_compatible":
         client_kwargs: dict[str, Any] = {"runtime_policy": runtime_policy}
@@ -576,7 +576,7 @@ def _call_wavespeed_any_llm(
     tool_choice: str | None = None,
 ) -> CallResult:
     """Call WaveSpeed's Any-LLM endpoint with 5xx backoff retries."""
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMClientManager
 
     api_key = LLMClientManager._resolve_api_key(route, credential_provider=credential_provider)
     prompt_parts: list[str] = []
@@ -683,7 +683,7 @@ def _call_with_token_escalation(
 
 
 def _record_usage_from_result(provider_code: str, result: Mapping[str, object]) -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMClientManager
 
     usage = result.get("usage")
     if isinstance(usage, Mapping):

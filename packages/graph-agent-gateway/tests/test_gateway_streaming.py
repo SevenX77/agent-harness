@@ -127,7 +127,7 @@ class _Factory:
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, factory: _Factory) -> None:
-    from graph_agent_gateway import gateway_chat_model
+    from graph_agent_gateway.call import chat_model as gateway_chat_model
 
     monkeypatch.setattr(
         gateway_chat_model,
@@ -138,7 +138,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, factory: _Factory) -> None:
 
 
 def _model(routes: Sequence[Any], *, escalation: int = 0, manager: Any = None) -> Any:
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
 
     return GatewayChatModel(
         "graph_agent",
@@ -151,8 +151,7 @@ def _model(routes: Sequence[Any], *, escalation: int = 0, manager: Any = None) -
 
 def test_the_gateway_model_is_one_langchain_calls_streamable() -> None:
     """LangChain decides by looking for an override, so the override must exist."""
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel, PredictGatewayChatModel
 
     for cls in (GatewayChatModel, PredictGatewayChatModel):
         assert cls._stream is not BaseChatModel._stream, (
@@ -177,7 +176,7 @@ def test_a_truncated_attempt_is_voided_when_the_gateway_escalates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Escalation replaces the answer, so the abandoned pieces must not survive."""
-    from graph_agent_gateway.gateway_chat_model import answer_restarts_here
+    from graph_agent_gateway.call import answer_restarts_here
 
     route = _route()
     _install(
@@ -206,7 +205,7 @@ def test_a_truncated_attempt_is_voided_when_the_gateway_escalates(
 def test_a_route_that_fails_after_streaming_voids_what_it_streamed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.gateway_chat_model import answer_restarts_here
+    from graph_agent_gateway.call import answer_restarts_here
 
     first, second = _route(endpoint_id="primary"), _route(endpoint_id="backup")
     _install(

@@ -13,8 +13,8 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from graph_agent_gateway.models import GenericRouteChatModel
-from graph_agent_gateway.provider_profiles import (
+from graph_agent_gateway.call.models import GenericRouteChatModel
+from graph_agent_gateway.call.profiles import (
     apply_provider_profile_layers,
     route_provider_profile_keys,
 )

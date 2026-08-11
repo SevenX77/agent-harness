@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 
 import pytest
-from graph_agent_gateway.exceptions import AllProvidersFailedError
-from graph_agent_gateway.gateway_chat_model import _raise_all_providers_failed
+from graph_agent_gateway.call.chat_model import _raise_all_providers_failed
+from graph_agent_gateway.errors import AllProvidersFailedError
 
 
 def test_raise_helper_logs_each_failure(caplog: pytest.LogCaptureFixture) -> None:

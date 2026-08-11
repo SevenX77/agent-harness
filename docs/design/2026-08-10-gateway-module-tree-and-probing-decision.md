@@ -232,6 +232,41 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
    audited MVP1 设计文件里。树还要再动四期,每期扫一遍是五倍工作量且反复触发哈希锁重钉;
    改为**树定形后一次扫完**(台账新增 P1z)。
 
+#### D5 的 2026-08-12 补记(P2b 实施中发现)
+
+P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 × 有图/无图 = 88 条请求
+逐字段钉死),**P2b** 建 `dialect/` 域并把 A3(`probe_official_call_method` 的请求构造)
+切过去,**P2c** 再收 A1/A2、抽 `judge`、把 `provider_probe.py` / `probe_contracts.py`
+移进 `probing/`。判据始终是那 88 条基线一行不变——**行为要变就得让基线出现 diff,
+不许藏在重构里**。P2b 落地时发现三件事:
+
+8. **`dialect/` 是叶子域:不依赖网关里任何东西。** 它只收「最终 base_url + 密钥 + 模型 id +
+   一轮提示 + 想思考多少」,吐一个**渲染好但没发出去**的 `WireRequest`。"这个方法存不存在"
+   和"它用哪个 base_url"是 registry 的事实,由调用方先问 catalog、再把结果交给 dialect;
+   dialect 反过来 import registry 会做成包级循环(和订正 6 里 `observe/` 死掉的原因同款)。
+   代价是方法 id 在 catalog 和方言表里各列一次,由一条测试钉住两张表必须相等——
+   **重复的事实靠门禁对齐,不靠 import 绑死**。
+
+9. **`anthropic_messages` 的 base_url transform,探测侧原来没应用。** catalog 给它登记的是
+   `anthropic_compatible`,而 A3 里只有 deepseek / ark 两支调了 `apply_call_method_base_url`。
+   现在改成对所有方法一律先过 catalog transform。之所以还能保证基线逐字节不变:
+   canonicalize 会把结尾的 `/v1` 摘掉,而随后的路径拼接又会把 `/v1/messages` 补回去,
+   两者对任何非 deepseek 主机同解;真正的差别只在"给 deepseek 主机配 `anthropic_messages`"
+   这种反常配置上,而那种情况下新写法给出的才是生产会用的那个 URL。
+
+10. **`openrouter_anthropic_messages` 原来会先发一个错方言的请求再拒绝。** 它
+    `official_probe: false`,但旧代码的 11 分支链末尾是**兜底当 openai chat 发**,
+    直到取 backend 时才 `ValueError`——也就是说 provider 那边真收到过一个不该发的请求。
+    现在查方言表查不到就在发之前拒绝。基线记录的结果(refused)不变,少发一个请求。
+    这也是"兜底分支"的典型代价:**它把"没人认识这个方法"翻译成了"当最常见的那种发"**。
+
+11. **A2(`_request_model_generation`)这期没切,因此暂时留着两份重复规则。** 它按 backend
+    名(`claude`/`ark`/…)挑 wire,不知道自己在测哪个 call method,所以问不了方言;
+    `_anthropic_thinking_payload` 与 `_google_thinking_config` 作为它手搓的最后两块留在原地,
+    并在代码里注明去向。P2c 让它先认领 call method、再随 A1 一起归位时删除。
+    没有就地把它接到方言上,是因为两者对 effort 的处理本就不同(A2 从不发 `output_config`),
+    接上去等于**在一次"逐字节不变"的搬迁里偷改一条没被基线钉住的线路**。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

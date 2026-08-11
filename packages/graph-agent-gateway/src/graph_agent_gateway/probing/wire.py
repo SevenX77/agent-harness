@@ -437,14 +437,19 @@ async def _request_model_generation(
     )
 
 
-# 多模态探测(#11):最小合法 1x1 PNG。只为验证 provider 是否**接受**图像输入
-# payload —— 接受(2xx)= 该模型 input_modalities 含 image;不支持 vision 的模型
-# 会以 4xx 拒绝图块。不要求模型"看懂"图,只看它收不收(与文本探测"成功=可达"同构)。
+# 多模态探测(#11):一张 16x16 的纯色 PNG。只为验证 provider 是否**接受**图像输入
+# payload —— 接受(2xx)= 该模型 input_modalities 含 image。不要求模型"看懂"图,
+# 只看它收不收(与文本探测"成功=可达"同构)。
+#
+# 为什么不是"最小合法"的 1x1:provider 对图像 payload 另有自己的下限,1x1 会因为
+# 尺寸被拒,而那次拒绝跟"认不认图"无关。实测 2026-08-11,Ark 对 1x1 回
+# HTTP 400 InvalidParameter "Minimum allowed dimension: 14 pixels"。16 是留了余量
+# 的整数档;探测自己的 payload 不该成为探测失败的原因。
 _PROBE_TEXT = "Reply with one short word."
 _PROBE_IMAGE_MEDIA_TYPE = "image/png"
 _PROBE_IMAGE_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAEElEQVR42m"
+    "NgGAWjYBTAAAADEAAB1y2EYwAAAABJRU5ErkJggg=="
 )
 
 

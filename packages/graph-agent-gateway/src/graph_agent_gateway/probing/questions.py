@@ -27,6 +27,7 @@ from graph_agent_gateway.registry import Protocol, effort_probe_candidates
 from .results import RouteProbeResult
 
 __all__ = [
+    "INCONCLUSIVE_PROBE_STATUSES",
     "Answered",
     "Question",
     "accepted_effort_levels",
@@ -57,7 +58,7 @@ nothing at all.
 """
 
 
-_INCONCLUSIVE_STATUSES: Final[frozenset[str]] = frozenset(
+INCONCLUSIVE_PROBE_STATUSES: Final[frozenset[str]] = frozenset(
     {"rate_limited", "quota_exceeded", "network_error", "timeout", "invalid_key"}
 )
 """Answers that say something about the moment, not about the route.
@@ -103,6 +104,6 @@ def accepted_effort_levels(answered: Iterable[Answered]) -> tuple[str, ...] | No
     capability that quietly shrinks is worse than one that stays unmeasured.
     """
     pairs = tuple(answered)
-    if any(result.status in _INCONCLUSIVE_STATUSES for _, result in pairs):
+    if any(result.status in INCONCLUSIVE_PROBE_STATUSES for _, result in pairs):
         return None
     return tuple(question.value for question, result in pairs if result.status == "ok")

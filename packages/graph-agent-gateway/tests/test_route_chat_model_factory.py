@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import types
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import SecretStr
 
 
@@ -439,247 +438,6 @@ def test_factory_reports_missing_google_extra_at_build_time(
                 canonical_id="gemini-3-pro",
             )
         )
-
-
-def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
-    from graph_agent_gateway.registry import ResolvedRoute
-    from langchain_core.language_models.chat_models import BaseChatModel
-
-    route = ResolvedRoute.model_construct(
-        role_name="graph_agent",
-        route_id="generic:custom-model",
-        endpoint_id="generic",
-        protocol="custom_chat_protocol",
-        base_url="https://generic.example/chat",
-        credential_ref="endpoint:generic",
-        credential_fingerprint="fingerprint-a",
-        timeout_seconds=17,
-        trust_env=False,
-        provider_model_id="custom-model",
-        canonical_id="custom-model",
-        effective_runtime_settings={},
-    )
-
-    chat_model = _factory().build(route)
-
-    assert isinstance(chat_model, BaseChatModel)
-    assert chat_model.__class__.__name__ == "GenericRouteChatModel"
-
-
-def test_client_manager_no_longer_exposes_legacy_ordinary_chat_dispatch_helpers() -> None:
-    from graph_agent_gateway.call import LLMClientManager
-
-    legacy_helpers = {
-        "dispatch_provider_call",
-        "_dispatch_provider_call",
-        "_call_openai_compatible",
-        "_call_openai_responses",
-        "_call_google_genai",
-        "_call_ark_runtime",
-        "_call_anthropic_compatible",
-        "_call_wavespeed_any_llm",
-        "_call_with_token_escalation",
-    }
-
-    remaining = {name for name in legacy_helpers if hasattr(LLMClientManager, name)}
-
-    assert remaining == set()
-
-
-def test_generic_chat_model_default_dispatcher_uses_ordinary_chat_core(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from graph_agent_gateway.call import GenericRouteChatModel
-    from graph_agent_gateway.call import dispatch as ordinary_chat
-    from graph_agent_gateway.registry import ResolvedRoute
-
-    route = ResolvedRoute.model_construct(
-        role_name="graph_agent",
-        route_id="generic:custom-model",
-        endpoint_id="generic",
-        protocol="custom_chat_protocol",
-        base_url="https://generic.example/chat",
-        credential_ref="endpoint:generic",
-        credential_fingerprint="fingerprint-a",
-        timeout_seconds=17,
-        trust_env=False,
-        provider_model_id="custom-model",
-        canonical_id="custom-model",
-        effective_runtime_settings={},
-    )
-    captured: list[dict[str, object]] = []
-
-    def dispatch_ordinary_chat(route_arg, messages, **kwargs):
-        captured.append({"route": route_arg, "messages": messages, "kwargs": kwargs})
-        return {
-            "content": "ordinary-core-ok",
-            "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
-            "finish_reason": "stop",
-        }
-
-    monkeypatch.setattr(ordinary_chat, "dispatch_ordinary_chat", dispatch_ordinary_chat)
-
-    result = GenericRouteChatModel(
-        route=route,
-        credential_provider=StaticCredentialProvider({"endpoint:generic": "generic-secret"}),
-        max_tokens=64,
-        temperature=0.1,
-    ).invoke([HumanMessage(content="hello")])
-
-    assert result.content == "ordinary-core-ok"
-    assert captured[0]["route"] is route
-    assert captured[0]["messages"] == [{"role": "user", "content": "hello"}]
-    assert captured[0]["kwargs"]["max_tokens"] == 64  # type: ignore[index]
-    assert captured[0]["kwargs"]["temperature"] == pytest.approx(0.1)  # type: ignore[index]
-
-
-def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_context() -> None:
-    from graph_agent_gateway.call import GenericRouteChatModel
-    from graph_agent_gateway.registry import ResolvedRoute
-
-    route = ResolvedRoute.model_construct(
-        role_name="graph_agent",
-        route_id="generic:custom-model",
-        endpoint_id="generic",
-        protocol="custom_chat_protocol",
-        base_url="https://generic.example/chat",
-        credential_ref="endpoint:generic",
-        credential_fingerprint="fingerprint-a",
-        timeout_seconds=17,
-        trust_env=False,
-        provider_model_id="custom-model",
-        canonical_id="custom-model",
-        effective_runtime_settings={},
-    )
-    captured: list[dict[str, object]] = []
-
-    def ordinary_chat_dispatcher(route_arg, messages, **kwargs):
-        captured.append({"route": route_arg, "messages": messages, "kwargs": kwargs})
-        return {
-            "content": "ordinary-ok",
-            "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
-            "finish_reason": "stop",
-        }
-
-    chat_model = GenericRouteChatModel(
-        route=route,
-        credential_provider=StaticCredentialProvider({"endpoint:generic": "generic-secret"}),
-        ordinary_chat_dispatcher=ordinary_chat_dispatcher,
-        max_tokens=128,
-        temperature=0.3,
-    )
-
-    result = chat_model.invoke(
-        [
-            HumanMessage(content="hello"),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "lookup_weather",
-                        "args": {"city": "Shenzhen"},
-                        "id": "call_1",
-                    }
-                ],
-            ),
-            ToolMessage(content="sunny", tool_call_id="call_1"),
-        ]
-    )
-
-    assert result.content == "ordinary-ok"
-    assert result.usage_metadata == {"input_tokens": 3, "output_tokens": 5, "total_tokens": 8}
-    assert len(captured) == 1
-    assert captured[0]["route"] is route
-    assert captured[0]["kwargs"]["max_tokens"] == 128  # type: ignore[index]
-    assert captured[0]["kwargs"]["temperature"] == pytest.approx(0.3)  # type: ignore[index]
-    messages = captured[0]["messages"]
-    assert messages[1]["role"] == "assistant"  # type: ignore[index]
-    assert messages[1]["content"] == ""  # type: ignore[index]
-    tool_call = messages[1]["tool_calls"][0]  # type: ignore[index]
-    assert tool_call["function"]["name"] == "lookup_weather"
-    assert json.loads(tool_call["function"]["arguments"]) == {"city": "Shenzhen"}
-    assert messages[2]["role"] == "tool"  # type: ignore[index]
-    assert messages[2]["tool_call_id"] == "call_1"  # type: ignore[index]
-
-
-def test_generic_chat_model_runs_langchain_create_agent_tool_loop() -> None:
-    from graph_agent_gateway.call import GenericRouteChatModel
-    from graph_agent_gateway.registry import ResolvedRoute
-    from langchain.agents import create_agent
-
-    route = ResolvedRoute.model_construct(
-        role_name="graph_agent",
-        route_id="generic:custom-model",
-        endpoint_id="generic",
-        protocol="custom_chat_protocol",
-        base_url="https://generic.example/chat",
-        credential_ref="endpoint:generic",
-        credential_fingerprint="fingerprint-a",
-        timeout_seconds=17,
-        trust_env=False,
-        provider_model_id="custom-model",
-        canonical_id="custom-model",
-        effective_runtime_settings={},
-    )
-    captured_messages: list[list[dict[str, object]]] = []
-
-    def lookup_weather(city: str) -> str:
-        """Look up weather by city."""
-        return f"sunny:{city}"
-
-    def ordinary_chat_dispatcher(_route, messages, **_kwargs):
-        captured_messages.append(messages)
-        if any(message.get("role") == "tool" for message in messages):
-            return {
-                "content": "final answer",
-                "usage": {"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10},
-                "finish_reason": "stop",
-            }
-        return {
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {
-                        "name": "lookup_weather",
-                        "arguments": "{\"city\":\"Shenzhen\"}",
-                    },
-                }
-            ],
-            "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
-            "finish_reason": "tool_calls",
-        }
-
-    chat_model = GenericRouteChatModel(
-        route=route,
-        credential_provider=StaticCredentialProvider({"endpoint:generic": "generic-secret"}),
-        ordinary_chat_dispatcher=ordinary_chat_dispatcher,
-        max_tokens=128,
-        temperature=0.3,
-    )
-    agent = create_agent(
-        model=chat_model,
-        tools=[lookup_weather],
-        system_prompt="Use tools when needed.",
-    )
-
-    result = agent.invoke({"messages": [{"role": "user", "content": "weather?"}]})
-
-    assert result["messages"][-1].content == "final answer"
-    assert len(captured_messages) == 2
-    assistant_message = next(
-        message for message in captured_messages[1] if message.get("role") == "assistant"
-    )
-    assistant_tool_call = assistant_message["tool_calls"][0]
-    assert assistant_tool_call["function"]["name"] == "lookup_weather"
-    assert json.loads(assistant_tool_call["function"]["arguments"]) == {"city": "Shenzhen"}
-    tool_message = next(message for message in captured_messages[1] if message.get("role") == "tool")
-    assert tool_message["role"] == "tool"
-    assert tool_message["tool_call_id"] == "call_1"
-    assert tool_message["content"] == "sunny:Shenzhen"
-
-
 def _reasoning_stream_chunk(*, reasoning: str = "", content: str = "") -> dict:
     """One raw stream chunk shaped the way an openai-compatible provider sends it.
 
@@ -734,3 +492,41 @@ def test_a_chunk_without_reasoning_says_nothing_about_reasoning() -> None:
 
     assert generation is not None
     assert "reasoning_content" not in generation.message.additional_kwargs
+
+
+def test_no_route_can_reach_a_hand_rolled_provider_call() -> None:
+    """Every protocol a route can carry is served by a LangChain model.
+
+    `ResolvedRoute.protocol` is a four-value `Literal` on a model that forbids
+    extras, and `RouteChatModelFactory.build` returns from a branch for each of
+    those four. A dispatch layer below them could only run for a route built by
+    skipping the model's own validation, so it is gone — together with the four
+    provider SDK clients it was the only caller of.
+    """
+
+    import importlib
+
+    from graph_agent_gateway.call import LLMCircuitAndUsageLedger
+    from graph_agent_gateway.registry import Protocol
+
+    assert set(Protocol.__args__) == {
+        "openai_compatible",
+        "anthropic_compatible",
+        "google_genai",
+        "ark_runtime",
+    }
+
+    for module in ("graph_agent_gateway.call.dispatch", "graph_agent_gateway.call.models"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
+
+    gone = {
+        "_get_openai_client",
+        "_get_anthropic_client",
+        "_get_google_client",
+        "_get_ark_client",
+        "_client_cache_key",
+        "_resolve_api_key",
+        "reset_stats",
+    }
+    assert {name for name in gone if hasattr(LLMCircuitAndUsageLedger, name)} == set()

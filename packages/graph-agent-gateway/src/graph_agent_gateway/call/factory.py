@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping, Sequence
-from typing import Any, Final, cast
+from typing import Any, Final, assert_never, cast
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.base import LanguageModelInput
@@ -13,7 +13,6 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from graph_agent_gateway.call.models import GenericRouteChatModel
 from graph_agent_gateway.call.profiles import (
     apply_provider_profile_layers,
     route_provider_profile_keys,
@@ -50,7 +49,7 @@ class RouteChatModelFactory:
                 error_code="credential.secret_expired",
                 error_payload={"credential_ref": route.credential_ref},
             )
-        protocol = str(route.protocol)
+        protocol = route.protocol
         base_url = canonicalize_base_url(route.base_url, protocol)
         api_key = _resolve_api_key(route, self.credential_provider)
         timeout = timeout_seconds if timeout_seconds is not None else route.timeout_seconds
@@ -60,7 +59,7 @@ class RouteChatModelFactory:
             route,
         )
 
-        if protocol in {"openai_compatible", "ark_runtime"}:
+        if protocol == "openai_compatible" or protocol == "ark_runtime":
             kwargs = {
                 "model": route.provider_model_id,
                 "api_key": api_key,
@@ -94,26 +93,10 @@ class RouteChatModelFactory:
             }
             return cast(BaseChatModel, chat_google(**_apply_profiles(route, kwargs)))
 
-        generic_kwargs = {
-            "max_tokens": common.get("max_tokens"),
-            "temperature": common.get("temperature"),
-            "top_p": common.get("top_p"),
-            "stop_sequences": common.get("stop_sequences"),
-            "seed": common.get("seed"),
-            "reasoning_effort": common.get("reasoning_effort"),
-            "runtime_policy": caller_kwargs.get("runtime_policy"),
-            "reasoning": caller_kwargs.get("reasoning"),
-            "thinking_budget_tokens": caller_kwargs.get("thinking_budget_tokens"),
-            "parallel_tool_calls": caller_kwargs.get("parallel_tool_calls"),
-            "structured_output": caller_kwargs.get("structured_output"),
-            "call_method_id": caller_kwargs.get("call_method_id"),
-            "request_mapper_id": caller_kwargs.get("request_mapper_id"),
-        }
-        return GenericRouteChatModel(
-            route=route,
-            credential_provider=self.credential_provider,
-            **{key: value for key, value in generic_kwargs.items() if value is not None},
-        )
+        # Not a fallback: `protocol` is a closed Literal, so reaching here would
+        # mean a fifth protocol was added without a branch — and that fails the
+        # type check rather than quietly building something else.
+        assert_never(protocol)
 
 
 def _runtime_kwargs(caller_kwargs: dict[str, Any]) -> dict[str, Any]:

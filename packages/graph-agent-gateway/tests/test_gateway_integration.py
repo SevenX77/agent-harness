@@ -521,10 +521,14 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
                 "strict": True,
             },
             "reasoning_effort": "medium",
-            "call_method_id": "openai_responses",
-            "request_mapper_id": "openai_responses_reasoning",
         }
     ]
+    # The route's verified call method is deliberately absent. It used to ride
+    # along for `GenericRouteChatModel`, which no route reached; the models the
+    # factory builds do not read it, so a route verified on `openai_responses`
+    # is still called on chat/completions. Making production honour a verified
+    # method is P4's question, not something to imply by passing an id nobody
+    # reads.
 
 
 def test_gateway_response_metadata_reports_actual_call_runtime_settings(

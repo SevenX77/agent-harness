@@ -774,9 +774,9 @@ def _failure_record(
 
 
 def _default_client_manager() -> Any:
-    from graph_agent_gateway.call.clients import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMCircuitAndUsageLedger
 
-    return LLMClientManager
+    return LLMCircuitAndUsageLedger
 
 
 def _manager(client_manager: Any) -> Any:

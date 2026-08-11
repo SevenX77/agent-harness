@@ -168,7 +168,7 @@ Studio Backend import gateway registry，并提供产品 API：
 - `PUT /api/llm/registry/endpoints`，upsert endpoints，缺失 endpoint 不代表删除
 - `DELETE /api/llm/registry/endpoints/{endpoint_id}`
 - `POST /api/llm/endpoints/{endpoint_id}/test`
-- `POST /api/llm/routes/{route_id}/probe`，可接受 runtime-setting capability metadata 并写入 normalized capability/default/bounds records
+- `POST /api/llm/routes/{route_id}/probe`，向该路由发一次真实生成请求，并把它答出来的 normalized capability/default/bounds records 写回注册表
 - `PUT /api/llm/routes/{route_id}`，只更新 route metadata/display/capability/status，不改变 route identity
 - `DELETE /api/llm/routes/{route_id}`
 - `GET /api/llm/model-profiles`

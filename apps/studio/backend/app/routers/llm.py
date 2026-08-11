@@ -392,13 +392,6 @@ class RouteEditableUpdate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class RouteProbeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    capabilities: list[str] = Field(default_factory=list)
-    runtime_settings: dict[str, Any] = Field(default_factory=dict)
-
-
 class RoleApplyProfileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1406,12 +1399,13 @@ async def test_endpoint_models(
 
 
 @router.post("/routes/{route_id}/probe", response_model=RegistryResponse)
-async def probe_route(
-    route_id: str,
-    request: RouteProbeRequest,
-    force: bool = False,
-) -> RegistryResponse:
-    """Probe one route and update normalized capability metadata."""
+async def probe_route(route_id: str) -> RegistryResponse:
+    """Ask this route whether it works, and record what it answered.
+
+    Probing means asking. There is deliberately no way to reach this endpoint
+    without a request going out to the provider, and no way for a caller to
+    supply the answer it would like recorded.
+    """
     credentials = load_credentials()
     route = credentials.provider_routes.get(route_id)
     if route is None:
@@ -1419,30 +1413,8 @@ async def probe_route(
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {route.endpoint_id}")
-    if force:
-        await _force_probe_route(credentials, route, endpoint)
-        return await _write_registry_response(load_credentials())
-    capabilities = dict(route.capabilities)
-    for capability in request.capabilities:
-        key = _capability_key(capability)
-        capabilities[key] = CapabilityValue(
-            value=True,
-            source="probed_verified",
-            observed_at=_now_iso(),
-        )
-    if request.runtime_settings:
-        capabilities.update(
-            normalize_route_capabilities(
-                protocol=endpoint.protocol,
-                provider_model_id=route.provider_model_id,
-                raw_capabilities=request.runtime_settings,
-                source="probed_verified",
-            )
-        )
-    updated = route.model_copy(update={"status": "verified", "capabilities": capabilities})
-    credentials.provider_routes[route_id] = updated
-    save_credentials(credentials)
-    return await _write_registry_response(credentials)
+    await _force_probe_route(credentials, route, endpoint)
+    return await _write_registry_response(load_credentials())
 
 
 def _multimodal_probe_candidate(
@@ -6157,14 +6129,6 @@ def _bundle_route_references(
             if provider_model.route_id in route_ids:
                 refs.append(f"{bundle_id}.model_groups[{group_index}].provider_models[{provider_index}]")
     return refs
-
-
-def _capability_key(value: str) -> str:
-    return {
-        "thinking": "thinking_protocol",
-        "tool_calling": "tool_protocol",
-        "structured_output": "structured_output_protocol",
-    }.get(value, value)
 
 
 def _provider_backend_for_endpoint(endpoint: ProviderEndpoint) -> ProviderProbeBackend:

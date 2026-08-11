@@ -1653,13 +1653,9 @@ function routeFromRegistryResponse(registry: RegistryResponse, routeId: string):
   return route
 }
 
-export async function probeRoute(
-  routeId: string,
-  request: { capabilities: string[]; force?: boolean },
-): Promise<ProviderRoute> {
-  const { force, ...body } = request
-  const forceQuery = force ? '?force=true' : ''
-  const response = await api.post<RegistryResponse>(`/llm/routes/${segment(routeId)}/probe${forceQuery}`, body)
+// 探测就是去问。这个接口没有"不发请求"的形态,调用方也无法把想要的答案递进来。
+export async function probeRoute(routeId: string): Promise<ProviderRoute> {
+  const response = await api.post<RegistryResponse>(`/llm/routes/${segment(routeId)}/probe`)
   return routeFromRegistryResponse(response.data, routeId)
 }
 

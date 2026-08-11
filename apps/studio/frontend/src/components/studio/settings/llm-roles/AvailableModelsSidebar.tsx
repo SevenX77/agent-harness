@@ -149,7 +149,7 @@ export function AvailableModelsSidebar({
   // (no silent swallow) and never thrown out of the handler.
   const handleReprobeRoute = useCallback(async (routeId: string) => {
     try {
-      await probeRoute(routeId, { capabilities: [], force: true })
+      await probeRoute(routeId)
       onReprobed?.()
     } catch (error) {
       console.warn(

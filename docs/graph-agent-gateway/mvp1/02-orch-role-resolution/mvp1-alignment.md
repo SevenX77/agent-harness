@@ -157,12 +157,12 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 ## 附录 B — 覆盖代码（含覆盖率，模块级证据）
 
-覆盖率：4/4 个 brief 指定目标已覆盖，100%。其中 runtime 解析覆盖 `registry/resolver.py:35-234` 与 `resolver.py:42-153`；Studio 装配覆盖 `services/gateway_resolver.py:15-21`；authoring 投影覆盖 `services/llm_role_materializer.py:27-269`。
+覆盖率：4/4 个 brief 指定目标已覆盖，100%。其中 runtime 解析覆盖 `resolve/resolver.py:35-234` 与 `resolver.py:42-153`；Studio 装配覆盖 `services/gateway_resolver.py:15-21`；authoring 投影覆盖 `services/llm_role_materializer.py:27-269`。
 
 | 覆盖目标 | 归属 | MVP1 目标 |
 |---|---|---|
-| `registry/resolver.py:resolve_role`（role 展开成有序 `ResolvedRoute` 链，不调模型） | **③b**（已在包内） | 恢复逐条跳过语义、暴露 skipped diagnostics、过滤后空链抛配置错误、保留精确 `route_override` |
-| `resolver.py:ModelResolver`（把解析结果包成 `GatewayChatModel`/predict mock，或直接返回 route handoff） | **③b**（已在包内） | 兼容 Engine `BaseChatModel` 入口 + 已落地 route 级 `resolve_routes` 一等 API |
+| `resolve/resolver.py:resolve_role`（role 展开成有序 `ResolvedRoute` 链，不调模型） | **③b**（已在包内） | 恢复逐条跳过语义、暴露 skipped diagnostics、过滤后空链抛配置错误、保留精确 `route_override` |
+| `call/resolver.py:ModelResolver`（把解析结果包成 `GatewayChatModel`/predict mock，或直接返回 route handoff） | **③b**（已在包内） | 兼容 Engine `BaseChatModel` 入口 + 已落地 route 级 `resolve_routes` 一等 API |
 | `services/gateway_resolver.py:build_gateway_model_resolver`（Studio v4 creds + roles 构造 resolver） | **③a 装配入口** | 继续作 Studio 装配入口，可复用同一 snapshot 构造 route-only resolver |
 | `services/llm_role_materializer.py:materialize_role`（角色编辑 → fallback_chain） | **③b 编排内核（现散 ③a 待下沉）** | 意图过滤/降级/排链/role-fit 诊断下沉 gateway；report 渲染留 ③a |
 

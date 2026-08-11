@@ -117,7 +117,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 - **测试点**：**canonical 保守不误合并**：不同 provider 的相似模型名 → 默认各自 `orphan`，不被合并到同一 canonical group；同一 provider model id 在不同 endpoint 可通过 `endpoint_id:provider_model_id` explicit alias 映射到不同 canonical group。
 
-- **归属**：**③b** `packages/graph-agent-gateway`：`registry/canonical.py`(保守分组)。**③a** `apps/studio/backend`：`models/llm_config.py`(`RegistryResponse` 展示投影)、`routers/llm.py`(`_registry_response`/`_role_effective_runtime_settings` 展示组装)。**② Rust**：N/A。
+- **归属**：**③b** `packages/graph-agent-gateway`：`registry/identity.py`(保守分组)。**③a** `apps/studio/backend`：`models/llm_config.py`(`RegistryResponse` 展示投影)、`routers/llm.py`(`_registry_response`/`_role_effective_runtime_settings` 展示组装)。**② Rust**：N/A。
 
 ### F3 snapshot 加载校验（v4/v2 hard cutover）
 
@@ -148,8 +148,8 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 - **机制 / 数据流**：
   - **版本字段已落地到 snapshot / route evidence**:`RegistrySnapshot.snapshot_version: SnapshotVersion | None` 表示当前物化版本(`registry/schema.py:404-441`);`ProviderRoute.snapshot_version: SnapshotVersion | None` 表示这条 route 上 verified evidence 的来源版本(`registry/schema.py:207-220`)。旧 snapshot 未带版本时默认 `None`,继续可读。
-  - **resolver 已传播到 resolved route**:`resolve_role` 先通过 `_route_with_live_snapshot_evidence(snapshot, route)` 取得 live evidence(`registry/resolver.py:126-127`),构造每条 `ResolvedRoute` 时写入 `snapshot_version=snapshot.snapshot_version`(`registry/resolver.py:174-175`),让调用层/诊断能看到本次解析使用的 snapshot provenance。
-  - **失效契约(R3.2)已在 resolver 中执行**:就绪证据(`verified_profiles` / `capabilities` 以及由它们派生的 live ready profile、lint、effective runtime defaults)仅当 `route.snapshot_version == snapshot.snapshot_version` 时可信;当前 snapshot 有版本但 route evidence 版本缺失或不同 → `_route_with_live_snapshot_evidence` 返回清空 `capabilities` 与 `verified_profiles` 的 route copy(`registry/resolver.py:258-264`),旧证据视为 **stale → 运行期/admission 算 ready 前必须重探**。
+  - **resolver 已传播到 resolved route**:`resolve_role` 先通过 `_route_with_live_snapshot_evidence(snapshot, route)` 取得 live evidence(`resolve/resolver.py:126-127`),构造每条 `ResolvedRoute` 时写入 `snapshot_version=snapshot.snapshot_version`(`resolve/resolver.py:174-175`),让调用层/诊断能看到本次解析使用的 snapshot provenance。
+  - **失效契约(R3.2)已在 resolver 中执行**:就绪证据(`verified_profiles` / `capabilities` 以及由它们派生的 live ready profile、lint、effective runtime defaults)仅当 `route.snapshot_version == snapshot.snapshot_version` 时可信;当前 snapshot 有版本但 route evidence 版本缺失或不同 → `_route_with_live_snapshot_evidence` 返回清空 `capabilities` 与 `verified_profiles` 的 route copy(`resolve/resolver.py:258-264`),旧证据视为 **stale → 运行期/admission 算 ready 前必须重探**。
   - **失效粒度 = 粗粒度(Claude 定,PM 可推翻)**:任一戳变 → 相关就绪证据**全失效重探**(安全优先);"按戳因果细分哪个废哪个"作后续优化。
   - **交叉 08**:版本-stale 的"曾 verified" route **不应**仅凭旧 `route.status=verified` 投成 🟢 ready —— 它正是 🔵 蓝(以前 verified、现未重验);见 08 回填 E1。
 
@@ -163,7 +163,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 - **测试点**：**snapshot 版本传播(D1)**：给 `RegistrySnapshot.snapshot_version` 赋值后，`resolve_role` 构造的每条 `ResolvedRoute.snapshot_version` 都等于当前 snapshot 版本；当前 snapshot 有版本而 route evidence 版本不同 → 旧 ready verified profile 不再被选为 live ready,capabilities 也不再参与 live lint/defaults(交叉 08)。
 
-- **归属**：**③b** `packages/graph-agent-gateway`：`registry/schema.py`(`ProviderRoute`/`RegistrySnapshot`/`ResolvedRoute` 版本字段)、`registry/resolver.py`(构造 route 时传播 + stale evidence 降级)。**③a**：颜色/呈现(版本-stale 渲染)与具体存储/加载时版本戳来源注入。**② Rust**：N/A。
+- **归属**：**③b** `packages/graph-agent-gateway`：`registry/schema.py`(`ProviderRoute`/`RegistrySnapshot`/`ResolvedRoute` 版本字段)、`resolve/resolver.py`(构造 route 时传播 + stale evidence 降级)。**③a**：颜色/呈现(版本-stale 渲染)与具体存储/加载时版本戳来源注入。**② Rust**：N/A。
 
 ---
 
@@ -203,17 +203,17 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 ## 附录 B — 覆盖代码(含覆盖率)
 
-覆盖率:5/5 个 brief 指定目标已覆盖,100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/canonical.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;`GenericRouteChatModel` 调用层 wrapper 覆盖 `models.py:24-301`。
+覆盖率:5/5 个 brief 指定目标已覆盖,100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/identity.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;`GenericRouteChatModel` 调用层 wrapper 覆盖 `models.py:24-301`。
 
 | 覆盖目标 | 判据归属 | MVP1 目标 |
 |---|---|---|
 | `registry/schema.py`(用途:定义 gateway endpoint/route/role/profile/resolved runtime schema) | **③b 公共契约(权威源)** | 保持 route-chain runtime schema、skipped diagnostics 与 snapshot provenance。schema 字段 = 全包共享的 ③b 公共契约。 |
 | `registry/__init__.py`(用途:把 registry 公共 schema/contract 作为稳定 import surface 导出) | **③b 公共** | 继续只导出稳定 DTO/contract;`SnapshotVersion` 与 skipped diagnostics DTO 已在 public surface 中。 |
-| `registry/canonical.py:canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key) | **③b 公共** | 保持保守 canonical 分组,只在 endpoint-scoped explicit alias、legacy alias 或 transport normalization 时合并。 |
+| `registry/identity.py:canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key) | **③b 公共** | 保持保守 canonical 分组,只在 endpoint-scoped explicit alias、legacy alias 或 transport normalization 时合并。 |
 | `models/llm_config.py`(用途:Studio v4 credentials/v2-v3 roles 文件 DTO,并投影到 gateway snapshot) | **③a 应用加工(display/authoring)+ ③b 剥离 seam** | 保持 Studio display/authoring 与 gateway runtime 的剥离边界。display 字段 = ③a；`to_registry_snapshot` 剥离 seam 输出 ③b snapshot。 |
 | `models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper) | **③b 公共调用层** | `GenericRouteChatModel` 已落地;继续不承载 registry schema,具体 ChatX/provider 构造由调用层模块负责。 |
 
-本 alignment 覆盖 brief 要求的 5 个代码目标,覆盖率 100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/canonical.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;`GenericRouteChatModel` 调用层 wrapper 覆盖 `models.py:24-301`。
+本 alignment 覆盖 brief 要求的 5 个代码目标,覆盖率 100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/identity.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;`GenericRouteChatModel` 调用层 wrapper 覆盖 `models.py:24-301`。
 
 ## 附录 C — 代码索引(clues)
 

@@ -35,7 +35,9 @@ from graph_agent_gateway.registry.call_methods import (
     call_method_is_officially_probeable,
     official_call_method_ids,
     preferred_call_method_for_endpoint,
+    provider_backend_for_endpoint,
     provider_backend_for_method,
+    provider_backend_for_protocol,
 )
 from graph_agent_gateway.registry.capabilities import (
     build_runtime_setting_descriptors,
@@ -227,7 +229,9 @@ __all__ = [
     "ProviderProbeBackend",
     "call_method_is_officially_probeable",
     "preferred_call_method_for_endpoint",
+    "provider_backend_for_endpoint",
     "provider_backend_for_method",
+    "provider_backend_for_protocol",
     "provider_temperature_from_authored",
     "resolve_credential",
     "route_slug",

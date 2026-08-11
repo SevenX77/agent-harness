@@ -22,12 +22,10 @@ from .judge import (
 from .results import EndpointProbeResult, RouteProbeResult
 from .wire import (
     OfficialCallMethod,
-    endpoint_probe_backend,
     endpoint_probe_base_url,
     probe_official_call_method,
     probe_provider_endpoint,
     probe_provider_route,
-    probe_wire_backend,
 )
 
 __all__ = [
@@ -35,7 +33,6 @@ __all__ = [
     "OfficialCallMethod",
     "ProviderProbeStatus",
     "RouteProbeResult",
-    "endpoint_probe_backend",
     "endpoint_probe_base_url",
     "model_capabilities",
     "model_ids",
@@ -43,7 +40,6 @@ __all__ = [
     "probe_provider_endpoint",
     "probe_provider_route",
     "probe_status",
-    "probe_wire_backend",
     "provider_response_message",
     "vendor_error_code",
 ]

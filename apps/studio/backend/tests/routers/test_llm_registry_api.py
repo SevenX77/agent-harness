@@ -50,7 +50,7 @@ def _endpoint_probe_ok(
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
-        backend=llm_router._endpoint_probe_backend(endpoint),
+        backend=llm_router._provider_backend_for_endpoint(endpoint),
         base_url=llm_router._endpoint_probe_base_url(endpoint),
         status="ok",
         latency_ms=latency_ms,
@@ -72,7 +72,7 @@ def _endpoint_probe(
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
-        backend=llm_router._endpoint_probe_backend(endpoint),
+        backend=llm_router._provider_backend_for_endpoint(endpoint),
         base_url=llm_router._endpoint_probe_base_url(endpoint),
         status=status,  # type: ignore[arg-type]
         latency_ms=latency_ms,
@@ -95,7 +95,7 @@ def _route_probe(
         endpoint_id=endpoint.endpoint_id,
         route_id=route.route_id,
         provider_kind=endpoint.provider_kind,
-        backend=llm_router._endpoint_probe_backend(endpoint),
+        backend=llm_router._provider_backend_for_endpoint(endpoint),
         base_url=llm_router._endpoint_probe_base_url(endpoint),
         model_id=route.provider_model_id,
         status=status,  # type: ignore[arg-type]
@@ -2438,7 +2438,7 @@ def test_endpoint_test_probes_only_its_own_protocol_and_never_rewrites_it(
         *,
         runtime_settings: dict[str, object] | None = None,
     ) -> RouteProbeResult:
-        probed_backends.append(llm_router._endpoint_probe_backend(endpoint))
+        probed_backends.append(llm_router._provider_backend_for_endpoint(endpoint))
         return _route_probe(
             endpoint,
             route,
@@ -3420,7 +3420,7 @@ def test_endpoint_test_uses_endpoint_protocol_and_base_url_for_probe(
     assert response.status_code == 200
     # The endpoint's declared anthropic protocol (→ claude backend) and base_url are
     # used for the probe; backend/key resolution is the gateway's job.
-    assert [llm_router._endpoint_probe_backend(e) for e in endpoint_calls] == ["claude"]
+    assert [llm_router._provider_backend_for_endpoint(e) for e in endpoint_calls] == ["claude"]
     assert [e.base_url for e in endpoint_calls] == ["https://anthropic.qnaigc.com/v1"]
     routes = response.json()["registry"]["provider_routes"]
     assert list(routes) == ["qiniu:claude-qiniu"]
@@ -3528,7 +3528,7 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
 
     assert response.status_code == 200
     # The ark_runtime endpoint (→ ark backend) and its base_url drive the probe.
-    assert [llm_router._endpoint_probe_backend(e) for e in endpoint_calls] == ["ark"]
+    assert [llm_router._provider_backend_for_endpoint(e) for e in endpoint_calls] == ["ark"]
     assert [e.base_url for e in endpoint_calls] == ["https://ark.cn-beijing.volces.com/api/v3"]
     assert "ark-official:ep-20260316142940-b74bm" in response.json()["registry"]["provider_routes"]
 
@@ -3586,7 +3586,7 @@ def test_endpoint_test_uses_openai_backend_for_ark_openai_official(
     response = client.post("/api/llm/endpoints/ark-openai-official/test")
 
     assert response.status_code == 200
-    assert [llm_router._endpoint_probe_backend(e) for e in endpoint_calls] == ["openai"]
+    assert [llm_router._provider_backend_for_endpoint(e) for e in endpoint_calls] == ["openai"]
     assert [e.endpoint_id for e in endpoint_calls] == ["ark-openai-official"]
     assert "ark-openai-official:doubao-seed-2-0-pro-260215" in response.json()["registry"]["provider_routes"]
 
@@ -3617,7 +3617,7 @@ def test_endpoint_test_ark_official_verifies_via_generation_probe_not_profile_pr
     )
 
     async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        assert llm_router._endpoint_probe_backend(endpoint) == "ark"
+        assert llm_router._provider_backend_for_endpoint(endpoint) == "ark"
         assert endpoint.base_url == "https://ark.cn-beijing.volces.com/api/v3"
         return _endpoint_probe_ok(
             endpoint,
@@ -4262,7 +4262,7 @@ def test_official_endpoint_test_verifies_via_one_generation_probe(
     )
 
     async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        assert llm_router._endpoint_probe_backend(endpoint) == "openai"
+        assert llm_router._provider_backend_for_endpoint(endpoint) == "openai"
         assert endpoint.base_url == "https://api.openai.com/v1"
         return _endpoint_probe_ok(
             endpoint,

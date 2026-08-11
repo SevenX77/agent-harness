@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from graph_agent_gateway.registry.base_url import canonicalize_base_url
+from graph_agent_gateway.registry.schema import ProviderEndpoint
 
 ProviderProbeBackend = Literal["ark", "claude", "deepseek", "gemini", "openai"]
 ClientCompatibility = Literal["supported", "incompatible", "unknown"]
@@ -127,6 +128,44 @@ def provider_backend_for_method(method_id: str) -> ProviderProbeBackend:
     if definition is None:
         raise ValueError(f"Unknown call method: {method_id}")
     return definition.provider_backend
+
+
+# The two protocols DeepSeek publishes a surface for. A url on that host saying
+# anything else is not a DeepSeek surface, whatever the host suggests.
+_DEEPSEEK_SURFACES = ("openai_compatible", "anthropic_compatible")
+
+
+def provider_backend_for_protocol(protocol: str) -> ProviderProbeBackend:
+    """Which provider implementation a declared protocol implies.
+
+    The protocol is the user's statement about the wire and the thing production
+    dispatches on (`call/dispatch.py`), so a hostname never overrules it: an
+    endpoint declaring `anthropic_compatible` speaks Anthropic's wire wherever it
+    is hosted. No base url is consulted on purpose — host rules answer the vendor
+    question below, not this one.
+    """
+
+    return provider_backend_for_method(preferred_call_method_for_endpoint(protocol, base_url=None))
+
+
+def provider_backend_for_endpoint(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
+    """Whose official API a configured endpoint belongs to.
+
+    A question about the vendor rather than the wire: it decides which official
+    methods and capability ladders are offered for this endpoint. DeepSeek
+    publishes its own method list on both an OpenAI-compatible and an
+    Anthropic-compatible surface, and its url is the only place that identity
+    appears.
+
+    The endpoint's NAME is not consulted. It is a label the user typed, and it
+    used to change which token budget field a probe sent.
+    """
+
+    if endpoint.protocol in _DEEPSEEK_SURFACES and _host_matches(
+        _url_hostname(endpoint.base_url), "deepseek.com"
+    ):
+        return "deepseek"
+    return provider_backend_for_protocol(endpoint.protocol)
 
 
 def call_method_is_officially_probeable(method_id: str) -> bool:
@@ -314,14 +353,27 @@ def _ordered_unique(values: list[str]) -> tuple[str, ...]:
 
 
 def _url_hostname(base_url: str) -> str:
+    """The host a base url names, however completely the user typed it.
+
+    A base url is free text on `ProviderEndpoint`, so `api.example.com/v1` and
+    `https://api.example.com/v1` both arrive here and name the same host; a
+    scheme-blind reading would answer "" for the first and silently drop that
+    endpoint out of every host rule below. The trailing dot of a fully qualified
+    name is stripped for the same reason.
+    """
+
+    if not base_url:
+        return ""
     try:
-        return (urlparse(base_url).hostname or "").lower()
+        parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
     except ValueError:
         return ""
+    return (parsed.hostname or "").lower().rstrip(".")
 
 
 def _host_matches(hostname: str, suffix: str) -> bool:
-    return hostname == suffix or hostname.endswith(f".{suffix}")
+    normalized = suffix.lower().rstrip(".")
+    return hostname == normalized or hostname.endswith(f".{normalized}")
 
 
 def _ark_anthropic_base_url(base_url: str) -> str:

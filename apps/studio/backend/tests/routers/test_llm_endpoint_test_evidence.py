@@ -56,7 +56,7 @@ def _mock_probes(
         return EndpointProbeResult(
             endpoint_id=endpoint.endpoint_id,
             provider_kind=endpoint.provider_kind,
-            backend=llm_router._endpoint_probe_backend(endpoint),
+            backend=llm_router._provider_backend_for_endpoint(endpoint),
             base_url=llm_router._endpoint_probe_base_url(endpoint),
             status="ok",
             latency_ms=42,
@@ -73,7 +73,7 @@ def _mock_probes(
             endpoint_id=endpoint.endpoint_id,
             route_id=route.route_id,
             provider_kind=endpoint.provider_kind,
-            backend=llm_router._endpoint_probe_backend(endpoint),
+            backend=llm_router._provider_backend_for_endpoint(endpoint),
             base_url=llm_router._endpoint_probe_base_url(endpoint),
             model_id=route.provider_model_id,
             status=probe_status,  # type: ignore[arg-type]

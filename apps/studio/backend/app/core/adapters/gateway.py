@@ -18,9 +18,6 @@ from graph_agent_gateway.probing import (
     RouteProbeResult as RouteProbeResult,
 )
 from graph_agent_gateway.probing import (
-    endpoint_probe_backend as endpoint_probe_backend,
-)
-from graph_agent_gateway.probing import (
     endpoint_probe_base_url as endpoint_probe_base_url,
 )
 from graph_agent_gateway.probing import (
@@ -144,6 +141,9 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     promotable_route_update as promotable_route_update,
+)
+from graph_agent_gateway.registry import (
+    provider_backend_for_endpoint as provider_backend_for_endpoint,
 )
 from graph_agent_gateway.registry import (
     resolve_credential as gateway_resolve_credential,

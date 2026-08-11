@@ -412,6 +412,41 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     另有活的职责(路由熔断标记与用量计费,`call/chat_model.py` 在用),不能整个删。
     先摆事实、不动手。
 
+#### D5 的 2026-08-16 补记(P4a 实施:厂商身份归位,把一条主机规则也带了回去)
+
+23. **订正 18:归位的不止 `endpoint_probe_backend`,`probe_wire_backend` 跟着一起走。**
+    订正 18 只点了厂商那一问,因为当时看到的对比是"厂商 vs 线路"。真动手才发现
+    这两个函数共用一副身体:厂商那问的兜底分支**就是**线路那问
+    (`return probe_wire_backend(endpoint.protocol)`),而线路那问整个函数体只有两次
+    registry 查表(`provider_backend_for_method(preferred_call_method_for_endpoint(...))`)。
+    只搬厂商那一个,要么在 registry 里把同一条规则再写一遍,要么让 `probing` 留一个
+    一行转发壳——**正是本决议已经删过两次的那个物种**(`probe_catalog.py`、
+    `probe_contracts.py`)。所以两个一起搬,并按 registry 已有的
+    `provider_backend_for_method` 起同族的名字:`provider_backend_for_protocol`
+    (给一个协议)、`provider_backend_for_endpoint`(给一个已配置的端点)。
+    "probe" 从名字里去掉是同一件事的收尾——它们不发请求,不是探测。
+
+24. **搬迁当场暴露:同一个"主机是不是它"的问题,仓里有两份互不相同的答案。**
+    `probing/wire.py` 的 `_url_hostname` 会给没写协议头的地址补一个 `https://`
+    再解析、并去掉 FQDN 末尾的点;`registry/call_methods.py` 的同名函数直接
+    `urlparse(...).hostname`,拿到 `None` 就当没有主机。而 `ProviderEndpoint.base_url`
+    是**没有任何校验的自由文本**(`registry/schema.py:181` 就一个 `base_url: str`),
+    所以用户填 `api.qnaigc.com/v1` 是能存进去的。实测两条规则因此分岔:
+
+    | base_url | 候选方法(registry 规则) | 厂商(probing 规则) |
+    |---|---|---|
+    | `https://api.qnaigc.com/v1` | `openai_chat_completions` + `anthropic_messages` | — |
+    | `api.qnaigc.com/v1` | 只有 `openai_chat_completions` | — |
+    | `https://api.deepseek.com/v1` | — | `deepseek` |
+    | `api.deepseek.com/v1` | — | `deepseek` |
+
+    同一台主机,少写四个字符,厂商认得出、方法菜单认不出。**统一到宽的那份**
+    (容忍缺协议头与末尾点),理由是这个方向不会悄悄把用户的端点从菜单里删掉。
+    两份基线(88 + 100)一行未动——它们用的地址都带协议头,所以这条修复不改任何
+    已录制的行为,只由新增测试钉住。**遗留一问**:`base_url` 该不该在边界直接拒收
+    没有协议头的字符串(fail fast / 让非法状态不可表示)?那是产品行为改动,
+    不在本期,记在册上。
+
 ### D8. P3b 提案:预测型探针改走生产工厂(结构性,待裁决)
 
 **先说事实。** `probe_provider_route`(A2)今天有两种用法,都在 studio:

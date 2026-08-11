@@ -7,7 +7,9 @@ from graph_agent_gateway.call import (
     GatewayChatModel,
     ModelResolver,
     ModelResolverProtocol,
+    PlainAnswer,
     answer_restarts_here,
+    chat_plainly,
 )
 from graph_agent_gateway.errors import (
     AllProvidersFailedError,
@@ -55,7 +57,9 @@ __all__ = [
     "FallbackDecisionRequest",
     "ANSWER_RESTARTED",
     "GatewayChatModel",
+    "PlainAnswer",
     "answer_restarts_here",
+    "chat_plainly",
     "GatewayResolverMissingError",
     "GatewayRoleNotConfiguredError",
     "LLMRouteDecisionEvent",

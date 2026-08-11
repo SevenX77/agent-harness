@@ -26,6 +26,7 @@ from graph_agent_gateway.call.outcome import (
     SettingOutcome,
     judge_settings,
 )
+from graph_agent_gateway.call.plain import PlainAnswer, chat_plainly
 from graph_agent_gateway.call.pre_call_probe import build_probe_model, probe_call_settings
 from graph_agent_gateway.call.predict import PredictGatewayChatModel
 from graph_agent_gateway.call.profiles import (
@@ -66,6 +67,7 @@ __all__ = [
     "ModelDefaults",
     "ModelResolver",
     "ModelResolverProtocol",
+    "PlainAnswer",
     "PredictContext",
     "PredictGatewayChatModel",
     "ProviderProfile",
@@ -76,6 +78,7 @@ __all__ = [
     "apply_provider_profile",
     "apply_provider_profile_layers",
     "budget_cap",
+    "chat_plainly",
     "build_probe_model",
     "build_route_decision_event",
     "compose_call_settings",

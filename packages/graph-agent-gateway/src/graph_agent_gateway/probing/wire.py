@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
@@ -29,8 +28,9 @@ from graph_agent_gateway.registry import (
     ProviderRoute,
     apply_call_method_base_url,
     call_method_is_officially_probeable,
-    preferred_call_method_for_endpoint,
+    provider_backend_for_endpoint,
     provider_backend_for_method,
+    provider_backend_for_protocol,
 )
 
 from .judge import (
@@ -55,8 +55,8 @@ async def probe_provider_endpoint(
 ) -> EndpointProbeResult:
     """Test one endpoint by asking its provider protocol for a model list."""
 
-    backend = endpoint_probe_backend(endpoint)
-    wire = probe_wire_backend(endpoint.protocol)
+    backend = provider_backend_for_endpoint(endpoint)
+    wire = provider_backend_for_protocol(endpoint.protocol)
     base_url = endpoint_probe_base_url(endpoint)
     secret = _endpoint_secret(endpoint, api_key)
     if not base_url:
@@ -124,8 +124,8 @@ async def probe_provider_route(
 ) -> RouteProbeResult:
     """Probe one concrete provider route with a minimal generation request."""
 
-    backend = endpoint_probe_backend(endpoint)
-    wire = probe_wire_backend(endpoint.protocol)
+    backend = provider_backend_for_endpoint(endpoint)
+    wire = provider_backend_for_protocol(endpoint.protocol)
     base_url = endpoint_probe_base_url(endpoint)
     secret = _endpoint_secret(endpoint, api_key)
     if not base_url:
@@ -242,44 +242,6 @@ async def probe_official_call_method(
         latency_ms=latency_ms,
         message=message,
     )
-
-
-# The two protocols DeepSeek publishes a surface for. A url on that host saying
-# anything else is not a DeepSeek surface, whatever the host suggests.
-_DEEPSEEK_SURFACES = ("openai_compatible", "anthropic_compatible")
-
-
-def endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
-    """Whose official API an endpoint belongs to.
-
-    A question about the vendor, not about the wire: it decides which official
-    methods and capability ladders are offered for this endpoint, while
-    `probe_wire_backend` decides how to speak to it. DeepSeek publishes its own
-    method list on both an OpenAI-compatible and an Anthropic-compatible
-    surface, and its url is the only place that identity appears.
-
-    The endpoint's NAME is not consulted. It is a label the user typed, and it
-    used to change which token budget field the probe sent.
-    """
-
-    if endpoint.protocol in _DEEPSEEK_SURFACES and _host_matches(
-        _url_hostname(endpoint.base_url), "deepseek.com"
-    ):
-        return "deepseek"
-    return probe_wire_backend(endpoint.protocol)
-
-
-def probe_wire_backend(protocol: str) -> ProviderProbeBackend:
-    """How to speak to an endpoint: the protocol it declares.
-
-    The protocol is the user's statement about the wire and the thing
-    production dispatches on (`call/dispatch.py`), so a hostname never
-    overrules it — an endpoint declaring `anthropic_compatible` is probed with
-    Anthropic's wire wherever it is hosted.
-    """
-
-    # No base url on purpose: host rules answer the vendor question, not this one.
-    return provider_backend_for_method(preferred_call_method_for_endpoint(protocol, base_url=None))
 
 
 def endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
@@ -575,28 +537,14 @@ def _official_method_backend(method_id: OfficialCallMethod) -> ProviderProbeBack
 
 
 
-def _url_hostname(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return (parsed.hostname or "").lower().rstrip(".")
-
-
-def _host_matches(hostname: str, domain: str) -> bool:
-    normalized_domain = domain.lower().rstrip(".")
-    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
-
-
 __all__ = [
     "EndpointProbeResult",
     "OfficialCallMethod",
     "ProviderProbeBackend",
     "ProviderProbeStatus",
     "RouteProbeResult",
-    "endpoint_probe_backend",
     "endpoint_probe_base_url",
     "probe_official_call_method",
-    "probe_wire_backend",
     "probe_provider_endpoint",
     "probe_provider_route",
 ]

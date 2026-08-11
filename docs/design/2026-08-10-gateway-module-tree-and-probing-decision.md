@@ -506,6 +506,40 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
   所以 Google 那条路只验到了异常类的签名,没验到 langchain 包装后是否原样抛出——
   P3b-2 里用真实构造的异常对象测,不靠推断。
 
+**P3b-2 开工前实测(2026-08-17):四个协议逐个跑通了,结论比预期干净,但有一处不对称必须写明。**
+用 `httpx.MockTransport` 让每种模型真的发一次请求并失败,看它抛出什么、抛出来的东西里有没有
+判据要的状态码与 body:
+
+| protocol | `invoke()` 抛出的 | 状态码 + body 从哪拿 | 测试怎么替换传输 |
+|---|---|---|---|
+| `openai_compatible` / `ark_runtime` | `openai.APIStatusError` 子类(实测 `AuthenticationError`) | `exc.response` | 构造参数 `http_client=` |
+| `anthropic_compatible` | `anthropic.APIStatusError` 子类(实测 `BadRequestError`) | `exc.response` | **构造参数不收 `http_client`**(会被塞进 `model_kwargs` 然后 TypeError);模型持有的 `_client` 是一个普通 `anthropic.Anthropic`,换掉它即可 |
+| `google_genai` | **`ChatGoogleGenerativeAIError`——langchain 把原始错误包了一层** | `exc.__cause__.response`(原始 `google.genai.errors.ClientError`,带 `code` 与 `.response`) | 构造参数 `client_args={"transport": ...}` |
+
+**不对称之处**:openai 与 anthropic 抛的就是 SDK 原始异常,google 那条被 langchain 包了一层,
+必须走 `__cause__` 才拿得到原件。这不是可以绕过的细节——直接读外层异常,google 的所有失败都会退化成
+`error`,而它本该被判成 `rate_limited` / `quota_exceeded` / `invalid_model`。翻译函数因此要显式地
+先看自身、再看 `__cause__`,并且这条规则要有测试钉住,否则下一次有人"简化"它就静默退化。
+
+**据此定 P3b-2 的判据。** 那份 100 条 endpoint 基线同时录了 endpoint 与 route 两半。
+endpoint 那一半**一行不变**——它还是自己发请求,那条请求就是本包要负责的。
+route 那 80 条**删掉,不重录**,理由不是嫌麻烦:
+
+- 它问的问题("路由探针往线上放了什么")**已经不再是本包能回答的问题**。探针现在把请求交给
+  `RouteChatModelFactory`,发出去的就是生产发的那条,而那条已经在
+  `tests/test_production_wire_contract.py` 里**直接从模型对象上读出来**钉死了(不经过传输)。
+  重录等于把同一个事实用更绕的方式再录一遍——正是本决议一路在删的那种重复。
+- 重录的代价是**往三个第三方对象的私有属性里打补丁**:openai 收 `http_client=`,
+  anthropic 不收(得换掉它持有的 `_client`),google 要 `client_args={"transport": ...}`。
+  为了录一份重复的事实,把测试绑死在三家 SDK 的内部结构上,是拿脆弱换冗余。
+- 那 80 条覆盖的三样东西各有去处,逐样点名:**请求体**→生产契约表(实测);
+  **base_url**→`test_route_chat_model_factory.py` 与 `test_registry_base_url.py`;
+  **请求路径与鉴权头**→provider SDK 自己决定,**网关里已经没有任何代码决定它们了**,
+  而这正是这次改动的全部意义。断言它们等于在测 SDK。
+
+这也是本决议 D2 那句"探到什么 = 生产会发什么"第一次真正被验证,而不是被声明——
+验证方式不是两份记录对得上,而是**根本只剩一份**。
+
 **基线怎么办。** 100 条 endpoint 基线里,route 那 80 条钉的是"探针自己拼的 HTTP",
 随实现退役;endpoint 那 20 条(A1 模型列表)保留。取而代之的判据是
 **探针造出来的模型的 payload 必须等于生产 payload**,与 `test_production_wire_contract.py` 同源

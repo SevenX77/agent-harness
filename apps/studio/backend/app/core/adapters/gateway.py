@@ -8,6 +8,30 @@ from typing import Any, Literal, cast
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.call import ModelResolver as ModelResolver
 from graph_agent_gateway.call import ResourceTerminalError as ResourceTerminalError
+from graph_agent_gateway.probing import (
+    EndpointProbeResult as EndpointProbeResult,
+)
+from graph_agent_gateway.probing import (
+    OfficialCallMethod as OfficialCallMethod,
+)
+from graph_agent_gateway.probing import (
+    RouteProbeResult as RouteProbeResult,
+)
+from graph_agent_gateway.probing import (
+    endpoint_probe_backend as endpoint_probe_backend,
+)
+from graph_agent_gateway.probing import (
+    endpoint_probe_base_url as endpoint_probe_base_url,
+)
+from graph_agent_gateway.probing import (
+    probe_official_call_method as probe_official_call_method,
+)
+from graph_agent_gateway.probing import (
+    probe_provider_endpoint as probe_provider_endpoint,
+)
+from graph_agent_gateway.probing import (
+    probe_provider_route as probe_provider_route,
+)
 from graph_agent_gateway.registry import (
     EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
@@ -34,6 +58,9 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     ProviderImportDraft as ProviderImportDraft,
+)
+from graph_agent_gateway.registry import (
+    ProviderProbeBackend as ProviderProbeBackend,
 )
 from graph_agent_gateway.registry import (
     ProviderRoute as GatewayProviderRoute,
@@ -120,33 +147,6 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     resolve_credential as gateway_resolve_credential,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    EndpointProbeResult as EndpointProbeResult,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    OfficialCallMethod as OfficialCallMethod,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    ProviderProbeBackend as ProviderProbeBackend,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    RouteProbeResult as RouteProbeResult,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    endpoint_probe_backend as endpoint_probe_backend,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    endpoint_probe_base_url as endpoint_probe_base_url,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    probe_official_call_method as probe_official_call_method,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    test_provider_endpoint as test_provider_endpoint,
-)
-from graph_agent_gateway.registry.provider_probe import (
-    test_provider_route as test_provider_route,
 )
 from graph_agent_gateway.resolve import (
     FallbackDecision as GatewayFallbackDecision,

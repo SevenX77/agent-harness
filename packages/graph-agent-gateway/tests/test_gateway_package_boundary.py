@@ -161,15 +161,13 @@ def test_gateway_phase1_has_no_engine_internal_imports() -> None:
 # Each name below is a module the registry package still holds but does not own:
 # it moves to its final domain in a later phase, and this set shrinks to empty
 # there. Nothing may be ADDED to it.
-_SETTLED_DOMAINS = ("registry", "resolve", "role", "call", "dialect")
+_SETTLED_DOMAINS = ("registry", "resolve", "role", "call", "dialect", "probing")
 
-# Modules a settled domain still holds but does not own: each moves to its final
-# domain in a later phase, and this set shrinks to empty there. Nothing may be
-# ADDED to it.
-_AWAITING_REHOME = {
-    "registry.provider_probe",   # → probing/  (P2)
-    "registry.probe_contracts",  # → probing/  (P2)
-}
+# Modules a settled domain held but did not own. The tree is whole: every module
+# sits in the domain that owns it, and this set stays empty. Nothing may be
+# added to it — a module with nowhere to live is a domain that has not been
+# named yet, not an exception to make.
+_AWAITING_REHOME: set[str] = set()
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCANNED_TREES = (

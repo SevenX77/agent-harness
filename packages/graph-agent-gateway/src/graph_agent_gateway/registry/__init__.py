@@ -26,6 +26,7 @@ from graph_agent_gateway.registry.bounds import (
     provider_temperature_from_authored,
 )
 from graph_agent_gateway.registry.call_methods import (
+    ProviderProbeBackend,
     apply_call_method_base_url,
     call_method_auth_token_env,
     call_method_client_compatibility,
@@ -117,6 +118,7 @@ from graph_agent_gateway.registry.schema import (
     Protocol,
     ProviderEndpoint,
     ProviderImportDraft,
+    ProviderKind,
     ProviderRoute,
     ProviderUiState,
     ReasoningSettings,
@@ -171,6 +173,7 @@ __all__ = [
     "ProtocolProbeResult",
     "ProviderEndpoint",
     "ProviderImportDraft",
+    "ProviderKind",
     "ProviderModelStateProjection",
     "ProviderRoute",
     "ProviderUiState",
@@ -221,6 +224,7 @@ __all__ = [
     "project_provider_route_ui_state",
     "project_route_state",
     "promotable_route_update",
+    "ProviderProbeBackend",
     "call_method_is_officially_probeable",
     "preferred_call_method_for_endpoint",
     "provider_backend_for_method",

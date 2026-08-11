@@ -335,6 +335,37 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     方言表相应扩到 catalog 的全部方法,包括 `official_probe: false` 的那个——
     **一条线路能不能渲染,和某个入口愿不愿意提供它,是两个问题。**
 
+#### D5 的 2026-08-14 补记(P2c-3:树合拢)
+
+15. **`probing/` 落地,`_AWAITING_REHOME` 清空,树至此完整。** 六个域各就各位:
+    `registry`(真相)、`resolve`(选路)、`role`(角色物化)、`call`(调用)、
+    `dialect`(线路语言)、`probing`(问一个小到值得问的问题)。域内再分三块:
+    `wire.py`(问哪一个问题、怎么描述这次尝试)、`judge.py`(答案是什么意思)、
+    `results.py`(报回去什么)。判据 = 两份基线(88 + 100)一行未动。
+
+16. **`probe_contracts.py` 不搬,直接删。** 它是 7 行的转发壳,把 `registry/schema.py`
+    的 `ProbeResult` 原样再导出一次,**全仓零个 import**——和 P1a 删掉的 `probe_catalog.py`
+    同一物种。`ProbeResult` 是"记在 import draft 上的探测结果",属于持久化的 registry 真相,
+    留在 schema 里不动。
+
+17. **两个公开入口原来叫 `test_*`。** `test_provider_endpoint` / `test_provider_route`
+    以 `test_` 开头,于是**谁把它们 import 进测试模块,pytest 就把它们当测试用例收集**
+    (写 P2c-1 基线时当场撞上,报"fixture 'endpoint' not found")。随本期搬迁改名
+    `probe_provider_endpoint` / `probe_provider_route`,与 `probe_official_call_method`
+    对齐——**"test" 在这个仓里已经是测试框架的保留词,不该再拿来当动词用**。
+
+18. **留一个未决:`endpoint_probe_backend` 现在住在 `probing/`,但它回答的不是探测的问题。**
+    "这条 endpoint 是哪一家的"是对**已配置对象的识别**,不涉及发任何请求;它的返回类型
+    `ProviderProbeBackend` 也本来就定义在 `registry/call_methods.py`。按 D4 的划分标准
+    (域按不变量而不是按名字相似),它更像 registry 的事实。本期不动,是因为它会再牵一次
+    studio 的 import;归位放进 P4——那一期正要重排"哪个入口问哪些问题",顺势一起做。
+
+19. **域边界门禁又抓到一次深导入。** 搬完 `probing/` 后它立刻报
+    `probing/wire.py` 还在 `from graph_agent_gateway.registry.call_methods import ...`;
+    改成走 `registry` 包入口时发现 `ProviderKind` / `ProviderProbeBackend` 两个名字
+    **压根不在 registry 的 `__all__` 里**——之前能用,是因为大家都在深导入。
+    补进契约即可,这正是 D4 想暴露的那类欠账。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

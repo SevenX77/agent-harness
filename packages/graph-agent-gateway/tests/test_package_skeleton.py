@@ -24,7 +24,7 @@ def test_gateway_package_layout_exists() -> None:
     assert (source_root / "__init__.py").is_file()
     assert (source_root / "errors.py").is_file()
     assert (source_root / "events.py").is_file()
-    for domain in ("registry", "resolve", "role", "call", "dialect"):
+    for domain in ("registry", "resolve", "role", "call", "dialect", "probing"):
         assert (source_root / domain / "__init__.py").is_file(), domain
 
 
@@ -36,6 +36,7 @@ def test_gateway_public_modules_are_importable_without_graph_agent_cycle() -> No
         "graph_agent_gateway.role",
         "graph_agent_gateway.call",
         "graph_agent_gateway.dialect",
+        "graph_agent_gateway.probing",
         "graph_agent_gateway.errors",
         "graph_agent_gateway.events",
     ]

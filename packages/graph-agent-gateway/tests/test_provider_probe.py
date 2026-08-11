@@ -6,13 +6,14 @@ import json
 
 import httpx
 import pytest
-from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute, provider_probe
+from graph_agent_gateway.probing import wire as provider_probe
+from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute
 from pydantic import SecretStr
 
 
 @pytest.mark.anyio
 async def test_gateway_endpoint_test_accepts_third_party_provider() -> None:
-    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+    from graph_agent_gateway.probing import probe_provider_endpoint
 
     endpoint = ProviderEndpoint(
         endpoint_id="openrouter",
@@ -31,7 +32,7 @@ async def test_gateway_endpoint_test_accepts_third_party_provider() -> None:
             request=request,
         )
 
-    result = await test_provider_endpoint(
+    result = await probe_provider_endpoint(
         endpoint,
         transport=httpx.MockTransport(handler),
     )
@@ -45,7 +46,7 @@ async def test_gateway_endpoint_test_accepts_third_party_provider() -> None:
 
 @pytest.mark.anyio
 async def test_gateway_route_test_is_scoped_to_provider_route() -> None:
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="openrouter",
@@ -67,7 +68,7 @@ async def test_gateway_route_test_is_scoped_to_provider_route() -> None:
         requests.append((str(request.url), json.loads(request.content.decode())))
         return httpx.Response(200, json={"id": "chatcmpl-ok"}, request=request)
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -101,7 +102,7 @@ async def test_gateway_route_probe_billing_400_is_quota_exceeded_not_invalid_mod
     invalid_model. Billing failures hit every model on the endpoint, so they must
     surface as quota_exceeded (endpoint-structural), not invalid_model.
     """
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="anthropic-official",
@@ -134,7 +135,7 @@ async def test_gateway_route_probe_billing_400_is_quota_exceeded_not_invalid_mod
             request=request,
         )
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -148,7 +149,7 @@ async def test_gateway_route_probe_billing_400_is_quota_exceeded_not_invalid_mod
 @pytest.mark.anyio
 async def test_gateway_route_probe_capability_400_stays_invalid_model() -> None:
     """A genuine model-level 400 (bad model id / unsupported param) stays invalid_model."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="anthropic-official",
@@ -178,7 +179,7 @@ async def test_gateway_route_probe_capability_400_stays_invalid_model() -> None:
             request=request,
         )
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -194,7 +195,7 @@ async def test_gateway_route_probe_path_404_is_protocol_unsupported() -> None:
     as a model-level invalid_model. Live signature (qiniu, 2026-07-02):
     google_genai probe of api.qnaigc.com/v1 answered a plain-text
     "not found or method not allowed"."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="qiniu-google",
@@ -214,7 +215,7 @@ async def test_gateway_route_probe_path_404_is_protocol_unsupported() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, text="not found or method not allowed", request=request)
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -227,7 +228,7 @@ async def test_gateway_route_probe_path_404_is_protocol_unsupported() -> None:
 async def test_gateway_route_probe_model_shaped_404_stays_invalid_model() -> None:
     """A 404 wrapped in the provider's own error schema proves the protocol
     reached the provider — the model id is what failed, so invalid_model."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="openai-official",
@@ -257,7 +258,7 @@ async def test_gateway_route_probe_model_shaped_404_stays_invalid_model() -> Non
             request=request,
         )
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -272,7 +273,7 @@ async def test_gateway_route_probe_wrong_protocol_guidance_is_protocol_unsupport
     HTTP status. Live signature (design §1.2 / live-verified 2026-06-02):
     POST /v1/chat/completions on anthropic.qnaigc.com answers HTTP 500
     "Use /v1/messages instead"."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="qiniu-anthropic-host-openai",
@@ -296,7 +297,7 @@ async def test_gateway_route_probe_wrong_protocol_guidance_is_protocol_unsupport
             request=request,
         )
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -309,7 +310,7 @@ async def test_gateway_route_probe_wrong_protocol_guidance_is_protocol_unsupport
 async def test_gateway_endpoint_test_path_404_is_protocol_unsupported() -> None:
     """The get-models call hitting a path-level 404 is the same protocol-mismatch
     fact at the endpoint level — not a generic error."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+    from graph_agent_gateway.probing import probe_provider_endpoint
 
     endpoint = ProviderEndpoint(
         endpoint_id="qiniu-google",
@@ -322,7 +323,7 @@ async def test_gateway_endpoint_test_path_404_is_protocol_unsupported() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, text="not found or method not allowed", request=request)
 
-    result = await test_provider_endpoint(
+    result = await probe_provider_endpoint(
         endpoint,
         transport=httpx.MockTransport(handler),
     )
@@ -334,7 +335,7 @@ async def test_gateway_endpoint_test_path_404_is_protocol_unsupported() -> None:
 @pytest.mark.anyio
 async def test_gateway_route_probe_405_is_protocol_unsupported() -> None:
     """405 Method Not Allowed = the path exists but not for this protocol's verb."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="qiniu-google",
@@ -354,7 +355,7 @@ async def test_gateway_route_probe_405_is_protocol_unsupported() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(405, text="method not allowed", request=request)
 
-    result = await test_provider_route(
+    result = await probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),
@@ -370,7 +371,7 @@ async def test_gateway_endpoint_test_unsupported_fixed_route_is_protocol_unsuppo
     anthropic.qnaigc.com × google): GET /v1beta/models -> HTTP 500
     {"type":"error","error":{"message":"Unsupported fixed route: /v1beta/models"}}.
     That is a (URL, protocol) fact, not a transient error."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+    from graph_agent_gateway.probing import probe_provider_endpoint
 
     endpoint = ProviderEndpoint(
         endpoint_id="qiniu-anthropic-host-google",
@@ -387,7 +388,7 @@ async def test_gateway_endpoint_test_unsupported_fixed_route_is_protocol_unsuppo
             request=request,
         )
 
-    result = await test_provider_endpoint(endpoint, transport=httpx.MockTransport(handler))
+    result = await probe_provider_endpoint(endpoint, transport=httpx.MockTransport(handler))
 
     assert result.status == "protocol_unsupported"
     assert result.error_code == "protocol_unsupported"
@@ -400,7 +401,7 @@ async def test_gateway_endpoint_test_misrouted_to_foreign_protocol_is_protocol_u
     Live signature (2026-07-02, anthropic.qnaigc.com × google): the gemini probe
     500s wrapping "OpenAI API error: 401 invalid api key" — a google endpoint that
     answers with an OpenAI error proves it does not speak google."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_endpoint
+    from graph_agent_gateway.probing import probe_provider_endpoint
 
     endpoint = ProviderEndpoint(
         endpoint_id="qiniu-anthropic-host-google",
@@ -423,7 +424,7 @@ async def test_gateway_endpoint_test_misrouted_to_foreign_protocol_is_protocol_u
             request=request,
         )
 
-    result = await test_provider_endpoint(endpoint, transport=httpx.MockTransport(handler))
+    result = await probe_provider_endpoint(endpoint, transport=httpx.MockTransport(handler))
 
     assert result.status == "protocol_unsupported"
     assert result.error_code == "protocol_unsupported"
@@ -434,7 +435,7 @@ async def test_gateway_openai_probe_own_auth_error_stays_invalid_key() -> None:
     """A genuine OpenAI endpoint returning its OWN auth error must stay invalid_key —
     the misroute heuristic only fires when a DIFFERENT protocol's error surfaces, so
     it must not swallow real auth failures on the matching protocol."""
-    from graph_agent_gateway.registry.provider_probe import test_provider_route
+    from graph_agent_gateway.probing import probe_provider_route
 
     endpoint = ProviderEndpoint(
         endpoint_id="openai-real",
@@ -458,7 +459,7 @@ async def test_gateway_openai_probe_own_auth_error_stays_invalid_key() -> None:
             request=request,
         )
 
-    result = await test_provider_route(endpoint, route, transport=httpx.MockTransport(handler))
+    result = await probe_provider_route(endpoint, route, transport=httpx.MockTransport(handler))
 
     assert result.status == "invalid_key"
 
@@ -560,7 +561,7 @@ async def test_ark_openai_compatible_endpoint_probe_uses_existing_api_v3_models_
         requests.append(str(request.url))
         return httpx.Response(200, json={"data": [{"id": "doubao-seed-2-0-pro-260215"}]}, request=request)
 
-    result = await provider_probe.test_provider_endpoint(
+    result = await provider_probe.probe_provider_endpoint(
         endpoint,
         transport=httpx.MockTransport(handler),
     )
@@ -592,7 +593,7 @@ async def test_ark_openai_compatible_route_probe_uses_existing_api_v3_chat_path(
         requests.append(str(request.url))
         return httpx.Response(200, json={"id": "chatcmpl-ok"}, request=request)
 
-    result = await provider_probe.test_provider_route(
+    result = await provider_probe.probe_provider_route(
         endpoint,
         route,
         transport=httpx.MockTransport(handler),

@@ -1,6 +1,6 @@
 """What the endpoint and route probes put on the wire, pinned byte for byte.
 
-``test_provider_endpoint`` and ``test_provider_route`` do not know which call
+``probe_provider_endpoint`` and ``probe_provider_route`` do not know which call
 method they are testing. They infer a vendor from the endpoint's hostname and,
 failing that, from the name the user typed — so the recorded matrix below is
 protocol × host × endpoint id, and it shows the inference overruling the
@@ -27,16 +27,16 @@ from typing import Any
 
 import httpx
 import pytest
-from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute
 
 # Aliased on import: these two are named `test_*`, so pytest collects them as
 # tests wherever they are imported under their own names.
-from graph_agent_gateway.registry.provider_probe import (
-    test_provider_endpoint as probe_provider_endpoint,
+from graph_agent_gateway.probing import (
+    probe_provider_endpoint as probe_provider_endpoint,
 )
-from graph_agent_gateway.registry.provider_probe import (
-    test_provider_route as probe_provider_route,
+from graph_agent_gateway.probing import (
+    probe_provider_route as probe_provider_route,
 )
+from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute
 
 BASELINE = json.loads(
     (Path(__file__).parent / "data" / "endpoint_probe_wire_baseline.json").read_text(

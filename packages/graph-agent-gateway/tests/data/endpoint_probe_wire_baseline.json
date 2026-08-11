@@ -1,0 +1,1808 @@
+{
+ "endpoint|anthropic_compatible|neutral|plain-id": {
+  "method": "GET",
+  "url": "https://host.example/v1/models",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": null,
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|neutral|plain-id|plain": {
+  "method": "POST",
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|neutral|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "adaptive"
+   }
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|neutral|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "adaptive"
+   }
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|neutral|plain-id|budget": {
+  "method": "POST",
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025,
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  },
+  "backend": "claude"
+ },
+ "endpoint|anthropic_compatible|deepseek|plain-id": {
+  "method": "GET",
+  "url": "https://api.deepseek.com/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|anthropic_compatible|deepseek|plain-id|plain": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|anthropic_compatible|deepseek|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|anthropic_compatible|deepseek|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|anthropic_compatible|deepseek|plain-id|budget": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ },
+ "endpoint|anthropic_compatible|ark|plain-id": {
+  "method": "GET",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/models",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": null,
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|ark|plain-id|plain": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|ark|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "adaptive"
+   }
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|ark|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "adaptive"
+   }
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|ark|plain-id|budget": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025,
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  },
+  "backend": "claude"
+ },
+ "endpoint|anthropic_compatible|openrouter|plain-id": {
+  "method": "GET",
+  "url": "https://openrouter.ai/api/v1/models",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": null,
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|openrouter|plain-id|plain": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|openrouter|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "adaptive"
+   }
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|openrouter|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "adaptive"
+   }
+  },
+  "backend": "claude"
+ },
+ "route|anthropic_compatible|openrouter|plain-id|budget": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025,
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  },
+  "backend": "claude"
+ },
+ "endpoint|openai_compatible|neutral|plain-id": {
+  "method": "GET",
+  "url": "https://host.example/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "openai"
+ },
+ "route|openai_compatible|neutral|plain-id|plain": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 1
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|neutral|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|neutral|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 16
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|neutral|plain-id|budget": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 1025
+  },
+  "backend": "openai"
+ },
+ "endpoint|openai_compatible|deepseek|plain-id": {
+  "method": "GET",
+  "url": "https://api.deepseek.com/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|plain-id|plain": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|plain-id|budget": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ },
+ "endpoint|openai_compatible|ark|plain-id": {
+  "method": "GET",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "openai"
+ },
+ "route|openai_compatible|ark|plain-id|plain": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 1
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|ark|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|ark|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 16
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|ark|plain-id|budget": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 1025
+  },
+  "backend": "openai"
+ },
+ "endpoint|openai_compatible|openrouter|plain-id": {
+  "method": "GET",
+  "url": "https://openrouter.ai/api/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "openai"
+ },
+ "route|openai_compatible|openrouter|plain-id|plain": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 1
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|openrouter|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|openrouter|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 16
+  },
+  "backend": "openai"
+ },
+ "route|openai_compatible|openrouter|plain-id|budget": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_completion_tokens": 1025
+  },
+  "backend": "openai"
+ },
+ "endpoint|google_genai|neutral|plain-id": {
+  "method": "GET",
+  "url": "https://host.example/v1/v1beta/models?key=SECRET",
+  "headers": {},
+  "body": null,
+  "backend": "gemini"
+ },
+ "route|google_genai|neutral|plain-id|plain": {
+  "method": "POST",
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|neutral|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {
+     "thinkingLevel": "high"
+    }
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|neutral|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {}
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|neutral|plain-id|budget": {
+  "method": "POST",
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1025,
+    "thinkingConfig": {
+     "thinkingBudget": 1024
+    }
+   }
+  },
+  "backend": "gemini"
+ },
+ "endpoint|google_genai|deepseek|plain-id": {
+  "method": "GET",
+  "url": "https://api.deepseek.com/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|google_genai|deepseek|plain-id|plain": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|google_genai|deepseek|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|google_genai|deepseek|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|google_genai|deepseek|plain-id|budget": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ },
+ "endpoint|google_genai|ark|plain-id": {
+  "method": "GET",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1beta/models?key=SECRET",
+  "headers": {},
+  "body": null,
+  "backend": "gemini"
+ },
+ "route|google_genai|ark|plain-id|plain": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|ark|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {
+     "thinkingLevel": "high"
+    }
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|ark|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {}
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|ark|plain-id|budget": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1025,
+    "thinkingConfig": {
+     "thinkingBudget": 1024
+    }
+   }
+  },
+  "backend": "gemini"
+ },
+ "endpoint|google_genai|openrouter|plain-id": {
+  "method": "GET",
+  "url": "https://openrouter.ai/api/v1/v1beta/models?key=SECRET",
+  "headers": {},
+  "body": null,
+  "backend": "gemini"
+ },
+ "route|google_genai|openrouter|plain-id|plain": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|openrouter|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {
+     "thinkingLevel": "high"
+    }
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|openrouter|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {}
+   }
+  },
+  "backend": "gemini"
+ },
+ "route|google_genai|openrouter|plain-id|budget": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1025,
+    "thinkingConfig": {
+     "thinkingBudget": 1024
+    }
+   }
+  },
+  "backend": "gemini"
+ },
+ "endpoint|ark_runtime|neutral|plain-id": {
+  "method": "GET",
+  "url": "https://host.example/v1/api/v3/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "ark"
+ },
+ "route|ark_runtime|neutral|plain-id|plain": {
+  "method": "POST",
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|neutral|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "high"
+   }
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|neutral|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|neutral|plain-id|budget": {
+  "method": "POST",
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025
+  },
+  "backend": "ark"
+ },
+ "endpoint|ark_runtime|deepseek|plain-id": {
+  "method": "GET",
+  "url": "https://api.deepseek.com/v1/api/v3/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "ark"
+ },
+ "route|ark_runtime|deepseek|plain-id|plain": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|deepseek|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "high"
+   }
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|deepseek|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|deepseek|plain-id|budget": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025
+  },
+  "backend": "ark"
+ },
+ "endpoint|ark_runtime|ark|plain-id": {
+  "method": "GET",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "ark"
+ },
+ "route|ark_runtime|ark|plain-id|plain": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|ark|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "high"
+   }
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|ark|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|ark|plain-id|budget": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025
+  },
+  "backend": "ark"
+ },
+ "endpoint|ark_runtime|openrouter|plain-id": {
+  "method": "GET",
+  "url": "https://openrouter.ai/api/v1/api/v3/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "ark"
+ },
+ "route|ark_runtime|openrouter|plain-id|plain": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|openrouter|plain-id|effort_high": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "high"
+   }
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|openrouter|plain-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  },
+  "backend": "ark"
+ },
+ "route|ark_runtime|openrouter|plain-id|budget": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025
+  },
+  "backend": "ark"
+ },
+ "endpoint|openai_compatible|neutral|deepseek-id": {
+  "method": "GET",
+  "url": "https://host.example/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|neutral|deepseek-id|plain": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|neutral|deepseek-id|effort_high": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|neutral|deepseek-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|neutral|deepseek-id|budget": {
+  "method": "POST",
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ },
+ "endpoint|openai_compatible|deepseek|deepseek-id": {
+  "method": "GET",
+  "url": "https://api.deepseek.com/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|deepseek-id|plain": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|deepseek-id|effort_high": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|deepseek-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|deepseek|deepseek-id|budget": {
+  "method": "POST",
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ },
+ "endpoint|openai_compatible|ark|deepseek-id": {
+  "method": "GET",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|ark|deepseek-id|plain": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|ark|deepseek-id|effort_high": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|ark|deepseek-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|ark|deepseek-id|budget": {
+  "method": "POST",
+  "url": "https://ark.cn-beijing.volces.com/api/v3/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ },
+ "endpoint|openai_compatible|openrouter|deepseek-id": {
+  "method": "GET",
+  "url": "https://openrouter.ai/api/v1/models",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": null,
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|openrouter|deepseek-id|plain": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|openrouter|deepseek-id|effort_high": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|openrouter|deepseek-id|reasoning_on_no_effort": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 16
+  },
+  "backend": "deepseek"
+ },
+ "route|openai_compatible|openrouter|deepseek-id|budget": {
+  "method": "POST",
+  "url": "https://openrouter.ai/api/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "."
+    }
+   ],
+   "max_tokens": 1025
+  },
+  "backend": "deepseek"
+ }
+}

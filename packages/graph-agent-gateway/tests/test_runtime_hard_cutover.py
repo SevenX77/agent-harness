@@ -325,7 +325,7 @@ def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain
+    from graph_agent_gateway.resolve import ResolvedRouteChain
 
     factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()

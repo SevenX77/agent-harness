@@ -85,8 +85,8 @@ def test_model_resolver_protocol_resolve_routes_returns_route_chain_annotation()
 
 def test_model_resolver_resolve_routes_returns_resolved_route_chain() -> None:
     from graph_agent_gateway.registry import InMemoryConfigTruthStore
+    from graph_agent_gateway.resolve import ResolvedRouteChain, RouteSkipDiagnostic
     from graph_agent_gateway.resolver import ModelResolver
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
 
     store = InMemoryConfigTruthStore()
     user_id = "route-handoff-test"

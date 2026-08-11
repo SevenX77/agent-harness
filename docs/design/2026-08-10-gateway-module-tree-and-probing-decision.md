@@ -160,7 +160,7 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
 | `call_settings.py` `settings_outcome.py` | `call/settings.py` `call/outcome.py` | |
 | `resolver.py` `protocol.py` | `call/resolver.py` `call/protocol.py` | 运行时平面入口与它的 Port |
 | `registry/provider_probe.py` | `probing/wire.py` | P1/P3 再拆成 dialect + questions |
-| `settings_probe.py` | `probing/pre_call.py` | 与 wire 探测同域(B6) |
+| `settings_probe.py` | `call/pre_call_probe.py` | 见下方订正 5(依赖方向不允许它进 probing) |
 | `registry/probe_contracts.py` | `probing/contracts.py` | |
 | `events.py` `tracing.py` | `observe/` | |
 | `exceptions.py` | `errors.py` | |
@@ -184,7 +184,39 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
    但今天只有测试在用),`role_materialization.py:39` 签名是 `(request) -> MaterializedRoleResult`
    (返回设计没提过的类型,但 studio 生产在用)。两个都不完全等于设计。本期只做搬迁,
    registry 域按设计名原样导出前者,**裁决留给 `role/` 域那一期**(P1b),届时对着设计源收敛成一个。
-4. **文档里的旧路径不在每期回写。** 全仓 docs 约 120 处提到被搬走的模块名,其中多处在带哈希锁的
+4. **`materialize_role` 同名两物的裁决(P1b 执行,补 D5 订正 3)。** 把两个都读完之后,
+   它们不是重复实现,而是**一个契约被拆成了两半**:
+   - `registry/projection.py` 那个持有设计命名的类型 `MaterializedRole`,**并且带着设计的不变量**
+     ——空 fallback chain 必须显式带终态错误码(旧测试 `test_productization_route_state_contracts.py`
+     断言不带 `error_code` 时构造直接 `ValidationError`);但它今天只有测试在用。
+   - `role_materialization.py` 那个是 studio 生产真正在调的,`error_code` 在整个文件里零命中
+     ——它可以返回一个空的 fallback chain 而不说任何理由。
+   
+   于是一个角色所有路由都挂掉时,网关交回去的是一个沉默的空列表,而调用方只有在真去跑的时候
+   才会撞上 `resource.no_available_route`。裁决:**保留生产那一个的输入输出(它算得更全:自己算投影、
+   应用角色意图、产出带 runtime_settings 的 `RoleRouteEntry`),把设计的名字和不变量搬到它身上**——
+   `MaterializedRoleResult` 改名 `MaterializedRole`,改成 Pydantic 模型并带 `model_validator`:
+   空链必须带 `error_code`;`materialize_role` 空链时返回 `NO_AVAILABLE_ROUTE`。
+   `registry/projection.py` 的重复三件套(`MaterializedRole` / `materialize_role` /
+   `RouteWarning`)与从无调用者的 `MaterializeRoleRequest`(user_id/role/include_diagnostics)一并删除,
+   两条旧契约测试搬到 `tests/test_role_materialization_terminal_error.py` 用存活的 API 重写。
+   
+   **`error_payload` 不保留**:旧那一个需要它是因为它的入参只有一个角色名、没有别的地方放细节;
+   存活的这一个带着 `materialization_report`(每条路由被怎么处理、warning、skipped 明细),
+   再开第二个 payload 通道就是同一事实两个 owner。错误码是**对整个角色的判决**,细节留在报告里。
+   Studio 侧由 adapter 把判决并进它交给前端的那份报告(`materialization_report.error_code`),
+   前端类型同步加上;**具体怎么显示是另一件事**,见台账 P1b-UI。
+
+5. **`settings_probe.py` 留在 `call/`,不去 `probing/`(P1b 查依赖方向时发现)。** D5 初稿把它排给
+   `probing/`,理由是 B6 那条"两个探测家族互不相识"。但依赖方向不允许:
+   `gateway_chat_model.py:42` 从它拿 `probe_call_settings`(call → probing),而它自己要用
+   `call_settings` 与 `route_chat_model_factory`(probing → call)——分成两个域就是互相依赖,
+   等于没分。**"贵问题前先问个便宜的"是一次调用自身生命周期的一部分**(同设置、同构造器、
+   预算换成 1),不是对路由的能力测绘;`probing/` 只管面向 registry 的测量。
+   B6 那条病的治法是**共用同一份方言与同一个裁决器**(P2/P3),不是把两个模块塞进同一个目录——
+   共处一室不等于共用实现。
+
+6. **文档里的旧路径不在每期回写。** 全仓 docs 约 120 处提到被搬走的模块名,其中多处在带哈希锁的
    audited MVP1 设计文件里。树还要再动四期,每期扫一遍是五倍工作量且反复触发哈希锁重钉;
    改为**树定形后一次扫完**(台账新增 P1z)。
 

@@ -97,9 +97,7 @@ from graph_agent_gateway.registry.identity import (
     strip_transport_prefix,
 )
 from graph_agent_gateway.registry.projection import (
-    MaterializedRole,
     ProviderModelStateProjection,
-    materialize_role,
     project_provider_route_ui_state,
     project_route_state,
 )
@@ -162,7 +160,6 @@ __all__ = [
     "InMemoryConfigTruthStore",
     "LintResult",
     "MaterializedProbeCatalogCandidates",
-    "MaterializedRole",
     "ModelBundle",
     "ModelProfile",
     "ProbeCatalogStore",
@@ -213,7 +210,6 @@ __all__ = [
     "known_verified_capabilities",
     "legacy_v3_endpoint_id",
     "materialize_probe_catalog_candidates",
-    "materialize_role",
     "measured_effort_capability",
     "merge_evidence_library",
     "new_evidence_library",

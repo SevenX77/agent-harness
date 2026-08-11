@@ -8,11 +8,6 @@ from graph_agent_gateway.exceptions import (
     GatewayResolverMissingError,
     GatewayRoleNotConfiguredError,
 )
-from graph_agent_gateway.fallback_decision import (
-    FallbackDecision,
-    FallbackDecisionRequest,
-    decide_fallback,
-)
 from graph_agent_gateway.gateway_chat_model import (
     ANSWER_RESTARTED,
     GatewayChatModel,
@@ -37,13 +32,19 @@ from graph_agent_gateway.registry import (
     project_route_state,
     promotable_route_update,
 )
+from graph_agent_gateway.resolve import (
+    FallbackDecision,
+    FallbackDecisionRequest,
+    ResolvedRouteChain,
+    RouteSkipDiagnostic,
+    decide_fallback,
+)
 from graph_agent_gateway.resolver import ModelResolver
-from graph_agent_gateway.role_materialization import (
-    MaterializedRoleResult,
+from graph_agent_gateway.role import (
+    MaterializedRole,
     MaterializeRoleRequest,
     materialize_role,
 )
-from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
 
 __all__ = [
     "AllProvidersFailedError",
@@ -61,7 +62,7 @@ __all__ = [
     "RouteDecision",
     "MaterializeRoleRequest",
     "MaterializedProbeCatalogCandidates",
-    "MaterializedRoleResult",
+    "MaterializedRole",
     "ModelResolver",
     "ModelResolverProtocol",
     "ProbeCatalogStore",

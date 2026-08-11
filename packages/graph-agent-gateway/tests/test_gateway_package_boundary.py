@@ -69,11 +69,6 @@ def test_gateway_runtime_surface_exports_route_handoff_dtos() -> None:
 
 def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
     import graph_agent_gateway as gw
-    from graph_agent_gateway.fallback_decision import (
-        FallbackDecision,
-        FallbackDecisionRequest,
-        decide_fallback,
-    )
     from graph_agent_gateway.registry import (
         CredentialResolveError,
         CredentialResolveRequest,
@@ -90,12 +85,18 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         project_route_state,
         promotable_route_update,
     )
-    from graph_agent_gateway.role_materialization import (
-        MaterializedRoleResult,
+    from graph_agent_gateway.resolve import (
+        FallbackDecision,
+        FallbackDecisionRequest,
+        ResolvedRouteChain,
+        RouteSkipDiagnostic,
+        decide_fallback,
+    )
+    from graph_agent_gateway.role import (
+        MaterializedRole,
         MaterializeRoleRequest,
         materialize_role,
     )
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
 
     expected_exports = {
         "ResolvedRouteChain": ResolvedRouteChain,
@@ -109,7 +110,7 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         "ProviderModelStateProjection": ProviderModelStateProjection,
         "project_route_state": project_route_state,
         "MaterializeRoleRequest": MaterializeRoleRequest,
-        "MaterializedRoleResult": MaterializedRoleResult,
+        "MaterializedRole": MaterializedRole,
         "materialize_role": materialize_role,
         "ProbeCatalogStore": ProbeCatalogStore,
         "MaterializedProbeCatalogCandidates": MaterializedProbeCatalogCandidates,
@@ -160,13 +161,14 @@ def test_gateway_phase1_has_no_engine_internal_imports() -> None:
 # Each name below is a module the registry package still holds but does not own:
 # it moves to its final domain in a later phase, and this set shrinks to empty
 # there. Nothing may be ADDED to it.
+_SETTLED_DOMAINS = ("registry", "resolve", "role")
+
+# Modules a settled domain still holds but does not own: each moves to its final
+# domain in a later phase, and this set shrinks to empty there. Nothing may be
+# ADDED to it.
 _AWAITING_REHOME = {
-    "resolver",              # → resolve/  (P1b)
-    "lint",                  # → resolve/  (P1b)
-    "profile_selector",      # → resolve/  (P1b)
-    "error_classification",  # → resolve/  (P1b)
-    "provider_probe",        # → probing/  (P2)
-    "probe_contracts",       # → probing/  (P2)
+    "registry.provider_probe",   # → probing/  (P2)
+    "registry.probe_contracts",  # → probing/  (P2)
 }
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -178,36 +180,52 @@ _SCANNED_TREES = (
     "apps/studio/backend/app",
     "apps/studio/backend/tests",
 )
-_REGISTRY_PACKAGE_DIR = GATEWAY_SRC / "registry"
 
 
-def _deep_registry_imports() -> list[str]:
+def _deep_domain_imports() -> list[str]:
     import ast
 
+    domain_dirs = {name: GATEWAY_SRC / name for name in _SETTLED_DOMAINS}
     offences: list[str] = []
     for tree_name in _SCANNED_TREES:
         tree_root = _REPO_ROOT / tree_name
         if not tree_root.exists():
             continue
         for source_path in tree_root.rglob("*.py"):
-            if _REGISTRY_PACKAGE_DIR in source_path.parents:
-                continue  # inside the domain, its own files are its own business
+            for domain, domain_dir in domain_dirs.items():
+                if domain_dir in source_path.parents:
+                    own_domain = domain
+                    break
+            else:
+                own_domain = None
             try:
                 parsed = ast.parse(source_path.read_text(encoding="utf-8"))
             except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
                 continue
             for node in ast.walk(parsed):
-                imported = ()
                 if isinstance(node, ast.ImportFrom) and node.module:
-                    imported = (node.module,)
-                elif isinstance(node, ast.Import):
+                    module = node.module
                     imported = tuple(alias.name for alias in node.names)
-                for module in imported:
-                    prefix = "graph_agent_gateway.registry."
+                elif isinstance(node, ast.Import):
+                    module = node.names[0].name
+                    imported = ()
+                else:
+                    continue
+                for domain in _SETTLED_DOMAINS:
+                    prefix = f"graph_agent_gateway.{domain}."
                     if not module.startswith(prefix):
                         continue
-                    submodule = module[len(prefix) :].split(".")[0]
-                    if submodule in _AWAITING_REHOME:
+                    if domain == own_domain:
+                        continue  # inside the domain, its own files are its own business
+                    if module[len("graph_agent_gateway.") :] in _AWAITING_REHOME:
+                        continue
+                    if "tests" in source_path.parts and (
+                        not imported or all(name.startswith("_") for name in imported)
+                    ):
+                        # A test may name the file: a private name is in no package
+                        # contract, and patching one requires the module object. The
+                        # exemption stops at tests — shipping code binding itself to
+                        # where a definition sits today is the thing being prevented.
                         continue
                     offences.append(
                         f"{source_path.relative_to(_REPO_ROOT)}:{node.lineno} imports {module}"
@@ -215,10 +233,10 @@ def _deep_registry_imports() -> list[str]:
     return offences
 
 
-def test_nobody_outside_the_registry_domain_imports_its_files() -> None:
-    offences = _deep_registry_imports()
+def test_nobody_outside_a_settled_domain_imports_its_files() -> None:
+    offences = _deep_domain_imports()
 
     assert offences == [], (
-        "import the registry domain through graph_agent_gateway.registry, "
-        "not through the file a name happens to live in:\n  " + "\n  ".join(offences)
+        "import a domain through graph_agent_gateway.<domain>, not through the "
+        "file a name happens to live in:\n  " + "\n  ".join(offences)
     )

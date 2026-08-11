@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from graph_agent_gateway.route_handoff import ResolvedRouteChain
+from graph_agent_gateway.resolve import ResolvedRouteChain
 
 
 @runtime_checkable

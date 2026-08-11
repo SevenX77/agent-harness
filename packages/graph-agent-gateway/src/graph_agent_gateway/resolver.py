@@ -23,9 +23,10 @@ from graph_agent_gateway.registry import (
     RoleRouteEntry,
     RuntimePolicy,
 )
-from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
-from graph_agent_gateway.route_handoff import (
+from graph_agent_gateway.resolve import (
+    RegistryResolutionError,
     ResolvedRouteChain,
+    resolve_role,
     resolved_role_to_route_chain,
 )
 

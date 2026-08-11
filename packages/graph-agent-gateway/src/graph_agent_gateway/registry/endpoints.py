@@ -31,12 +31,6 @@ _PROTOCOL_ID_SUFFIX: dict[Protocol, str] = {
     "ark_runtime": "ark",
 }
 
-_OFFICIAL_LEGACY_ENDPOINT_IDS = {
-    "api.anthropic.com": "anthropic-official",
-    "api.openai.com": "openai-official",
-    "api.deepseek.com": "deepseek-official",
-    "generativelanguage.googleapis.com": "gemini-official",
-}
 
 ProtocolProbe = Callable[[str, Protocol, str | None], "ProtocolProbeResult"]
 
@@ -171,35 +165,6 @@ def canonical_endpoint_id_base(provider_slug: str, protocol: Protocol) -> str:
     return f"{_endpoint_slug(provider_slug)}-{_PROTOCOL_ID_SUFFIX[protocol]}"
 
 
-def legacy_v3_endpoint_id(provider: dict[str, Any]) -> str:
-    """Return the historical v3->v4 endpoint id for one legacy provider."""
-
-    raw = str(provider.get("id") or provider.get("code") or "").strip()
-    name = str(provider.get("name") or "").lower()
-    base_url = str(provider.get("base_url") or "").strip()
-    base_host = _url_hostname(base_url)
-    base_path = _url_path(base_url)
-    if base_host in _OFFICIAL_LEGACY_ENDPOINT_IDS:
-        return _OFFICIAL_LEGACY_ENDPOINT_IDS[base_host]
-    if _host_matches(base_host, "volces.com"):
-        return "ark-official"
-    if product_endpoint_id := _legacy_product_endpoint_id(base_host, base_path, name):
-        return product_endpoint_id
-    return raw
-
-
-def _legacy_product_endpoint_id(base_host: str, base_path: str, name: str) -> str | None:
-    if _host_matches(base_host, "openrouter.ai") or "openrouter" in name:
-        return "openrouter-prod"
-    if "wavespeed" in base_host or "wavespeed" in name:
-        return "wavespeed-prod"
-    if not _host_matches(base_host, "qnaigc.com"):
-        return None
-    if "anthropic" in base_path or "anthropic" in name:
-        return "qiniu-anthropic"
-    return "qiniu-openai"
-
-
 def _assign_endpoint_ids(
     provider_slug: str,
     detected: list[_DetectedEndpoint],
@@ -278,13 +243,6 @@ def _url_hostname(raw_url: str) -> str:
     return (parsed.hostname or "").lower().rstrip(".")
 
 
-def _url_path(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return parsed.path.lower()
-
-
 def _host_matches(hostname: str, domain: str) -> bool:
     normalized_domain = domain.lower().rstrip(".")
     return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
@@ -296,6 +254,5 @@ __all__ = [
     "ProtocolProbeResult",
     "RawProviderEndpointInput",
     "canonical_endpoint_id_base",
-    "legacy_v3_endpoint_id",
     "standardize_endpoint_candidates",
 ]

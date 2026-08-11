@@ -86,7 +86,6 @@ from graph_agent_gateway.registry.endpoints import (
     ProtocolProbeResult,
     RawProviderEndpointInput,
     canonical_endpoint_id_base,
-    legacy_v3_endpoint_id,
     standardize_endpoint_candidates,
 )
 from graph_agent_gateway.registry.fingerprint import (
@@ -215,7 +214,6 @@ __all__ = [
     "fit",
     "known_model_ids_for_endpoint",
     "known_verified_capabilities",
-    "legacy_v3_endpoint_id",
     "materialize_probe_catalog_candidates",
     "measured_effort_capability",
     "merge_evidence_library",

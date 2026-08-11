@@ -7,6 +7,8 @@ const path = require('node:path')
 const test = require('node:test')
 
 const {
+  LOCAL_PACKAGE_SOURCES,
+  REQUIRED_VENDOR_IMPORTS,
   canImportVendoredPackages,
   ensureVendor,
   localVenvBin,
@@ -34,22 +36,24 @@ test('canImportVendoredPackages returns false when python is missing', () => {
   assert.equal(canImportVendoredPackages({ python: '/missing/python' }), false)
 })
 
-test('canImportVendoredPackages requires gateway submodules used by the sidecar', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-import-'))
-  for (const packageName of ['graph_agent', 'graph_agent_gateway']) {
-    const packageDir = path.join(tmp, packageName)
-    fs.mkdirSync(packageDir, { recursive: true })
-    fs.writeFileSync(path.join(packageDir, '__init__.py'), '', 'utf8')
-  }
+// The gate names modules it will `import` inside the vendored interpreter. A
+// name that no longer exists makes the gate unsatisfiable: ensureVendor keeps
+// rebuilding and then throws, so the desktop app cannot start at all. That is
+// what happened when the gateway's six-domain refactor (#706) folded
+// `graph_agent_gateway.probe_catalog` into the registry domain and this list
+// kept naming the dead module.
+test('every required vendor import exists in the workspace package sources', () => {
+  for (const moduleName of REQUIRED_VENDOR_IMPORTS) {
+    const [packageName, ...submodules] = moduleName.split('.')
+    const source = LOCAL_PACKAGE_SOURCES.find((entry) => entry.packageName === packageName)
+    assert.ok(source, `${moduleName} names a package the vendor gate does not vendor`)
 
-  assert.equal(
-    canImportVendoredPackages({
-      python: pythonExecutable(),
-      target: tmp,
-      backend: tmp,
-    }),
-    false,
-  )
+    const modulePath = path.join(source.sourceRoot, ...submodules)
+    assert.ok(
+      fs.existsSync(`${modulePath}.py`) || fs.existsSync(path.join(modulePath, '__init__.py')),
+      `${moduleName} does not exist under ${source.sourceRoot}`,
+    )
+  }
 })
 
 test('localPackageSourcesAreVendored detects source files missing from vendor', () => {
@@ -70,9 +74,12 @@ test('localPackageSourcesAreVendored detects source files missing from vendor', 
   )
 })
 
+// Any interpreter proves the branch; the workspace venv is the one that exists
+// wherever this suite runs, while the vendored runtime is a downloaded artefact
+// missing from fresh checkouts and worktrees.
 test('ensureVendor skips rebuild when imports already work', () => {
   const result = ensureVendor({
-    python: pythonExecutable(),
+    python: path.join(localVenvBin(), process.platform === 'win32' ? 'python.exe' : 'python'),
     target: __dirname,
     backend: __dirname,
     modules: ['sys'],

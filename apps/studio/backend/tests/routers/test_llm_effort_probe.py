@@ -28,7 +28,7 @@ from app.models.llm_config import (
 from app.routers import llm as llm_router
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.provider_probe import RouteProbeResult
+from graph_agent_gateway.probing import RouteProbeResult
 
 
 def _seed(tmp_path: Path, monkeypatch, *, thinking: bool, protocol: str) -> None:

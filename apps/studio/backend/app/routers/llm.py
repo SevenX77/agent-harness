@@ -53,10 +53,10 @@ from app.core.adapters.gateway import (
     probe_official_call_method as _gateway_probe_official_call_method_request,
 )
 from app.core.adapters.gateway import (
-    test_provider_endpoint as _gateway_test_provider_endpoint_request,
+    probe_provider_endpoint as _gateway_test_provider_endpoint_request,
 )
 from app.core.adapters.gateway import (
-    test_provider_route as _gateway_test_provider_route_request,
+    probe_provider_route as _gateway_test_provider_route_request,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.core.backends import get_backend_config, get_metadata
@@ -5007,7 +5007,7 @@ def _protocol_unsupported_recheck_at(endpoint: ProviderEndpoint) -> datetime | N
 class EndpointGenerationVerification:
     """Outcome of the endpoint batch-inference verification (both provider kinds).
 
-    ``status='verified'`` is set ONLY when a real generation probe (test_provider_route)
+    ``status='verified'`` is set ONLY when a real generation probe (probe_provider_route)
     returned ``ok`` — get-models reachability alone never reaches verified
     (apikeys#24/#25, revised 2026-07-01): a reachable endpoint can still be unable
     to generate, e.g. an exhausted credit balance keeps the model list working
@@ -5297,7 +5297,7 @@ async def _list_model_capabilities_for_endpoint(
 
 
 def _gateway_probe_route(endpoint: ProviderEndpoint, model_id: str) -> ProviderRoute:
-    """Build a throwaway ProviderRoute used only to drive test_provider_route."""
+    """Build a throwaway ProviderRoute used only to drive probe_provider_route."""
     route_slug = _route_slug(model_id)
     return ProviderRoute(
         route_id=f"{endpoint.endpoint_id}:{route_slug}",

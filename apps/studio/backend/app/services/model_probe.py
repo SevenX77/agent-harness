@@ -2,7 +2,7 @@
 
 Studio's own provider-probe implementation used to live in this module (formerly
 named ``copilot_test``); provider probing has since moved to the gateway
-(``graph_agent_gateway.registry.provider_probe``). This model-centric result type
+(``graph_agent_gateway.probing``). This model-centric result type
 is all that remains: the llm router's official-call-method probe
 (``_gateway_probe_official_call_method``) adapts the gateway's ``RouteProbeResult``
 back into this shape for its callers.

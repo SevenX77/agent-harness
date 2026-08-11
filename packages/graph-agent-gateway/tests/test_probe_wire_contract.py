@@ -43,7 +43,7 @@ def _case_keys() -> list[str]:
 
 
 async def _wire_for(method_id: str, case: str, multimodal: bool) -> dict[str, object]:
-    from graph_agent_gateway.registry.provider_probe import probe_official_call_method
+    from graph_agent_gateway.probing import probe_official_call_method
 
     captured: dict[str, object] = {}
 

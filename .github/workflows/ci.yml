@@ -141,6 +141,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: apps/studio/frontend/package-lock.json
 
+      # ── tauri launcher script tests ───────────────────────────────────────
+      # These belong to no npm package and no job ran them, so a launcher that
+      # could not start the desktop app at all sat on main from #706 until
+      # someone happened to restart the app (#732). They need only Node
+      # builtins — no npm install, no Python — so they run before the frontend
+      # install and fail fast. Run from their own directory: `node --test <dir>`
+      # is read as a module path, not a directory to scan.
+      - name: tauri script tests
+        working-directory: apps/studio/tauri/scripts
+        run: node --test
+
       - name: Install frontend dependencies
         working-directory: apps/studio/frontend
         run: npm ci

@@ -161,7 +161,7 @@ def test_gateway_phase1_has_no_engine_internal_imports() -> None:
 # Each name below is a module the registry package still holds but does not own:
 # it moves to its final domain in a later phase, and this set shrinks to empty
 # there. Nothing may be ADDED to it.
-_SETTLED_DOMAINS = ("registry", "resolve", "role", "call")
+_SETTLED_DOMAINS = ("registry", "resolve", "role", "call", "dialect")
 
 # Modules a settled domain still holds but does not own: each moves to its final
 # domain in a later phase, and this set shrinks to empty there. Nothing may be

@@ -5,11 +5,19 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from typing import Any, Literal
-from urllib.parse import urlparse, urlsplit, urlunsplit
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from graph_agent_gateway.dialect import (
+    Image,
+    Prompt,
+    Reasoning,
+    VersionedPath,
+    dialect_for_method,
+    join_base_url_and_path,
+)
 from graph_agent_gateway.registry.call_methods import (
     ProviderProbeBackend,
     apply_call_method_base_url,
@@ -291,26 +299,23 @@ async def _request_models(
 ) -> httpx.Response:
     if backend == "claude":
         return await client.get(
-            _join_base_url_and_endpoint(base_url, "/v1/models"),
+            join_base_url_and_path(base_url, "/v1/models"),
             headers={
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
             },
         )
     if backend in ("ark", "openai", "deepseek"):
-        endpoint_path = (
-            "/api/v3/models"
+        url = (
+            join_base_url_and_path(base_url, "/api/v3/models")
             if backend == "ark"
-            else _openai_compatible_endpoint_path(base_url, "/models")
+            else VersionedPath("/models").url(base_url)
             if backend == "openai"
-            else "/v1/models"
+            else join_base_url_and_path(base_url, "/v1/models")
         )
-        return await client.get(
-            _join_base_url_and_endpoint(base_url, endpoint_path),
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
+        return await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     return await client.get(
-        _join_base_url_and_endpoint(base_url, "/v1beta/models"),
+        join_base_url_and_path(base_url, "/v1beta/models"),
         params={"key": api_key},
     )
 
@@ -337,7 +342,7 @@ async def _request_model_generation(
         if thinking is not None:
             payload["thinking"] = thinking
         return await client.post(
-            _join_base_url_and_endpoint(base_url, "/v1/messages"),
+            join_base_url_and_path(base_url, "/v1/messages"),
             headers={
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
@@ -350,7 +355,7 @@ async def _request_model_generation(
         if thinking_config is not None:
             generation_config["thinkingConfig"] = thinking_config
         return await client.post(
-            _join_base_url_and_endpoint(base_url, f"/v1beta/models/{model_id}:generateContent"),
+            join_base_url_and_path(base_url, f"/v1beta/models/{model_id}:generateContent"),
             params={"key": api_key},
             json={
                 "contents": [{"parts": [{"text": "."}]}],
@@ -366,7 +371,7 @@ async def _request_model_generation(
         if effort:
             payload["reasoning"] = {"effort": effort}
         return await client.post(
-            _join_base_url_and_endpoint(base_url, "/api/v3/responses"),
+            join_base_url_and_path(base_url, "/api/v3/responses"),
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
         )
@@ -378,13 +383,10 @@ async def _request_model_generation(
     if effort:
         payload["reasoning_effort"] = effort
     return await client.post(
-        _join_base_url_and_endpoint(
-            base_url,
-            (
-                _openai_compatible_endpoint_path(base_url, "/chat/completions")
-                if backend == "openai"
-                else "/v1/chat/completions"
-            ),
+        (
+            VersionedPath("/chat/completions").url(base_url)
+            if backend == "openai"
+            else join_base_url_and_path(base_url, "/v1/chat/completions")
         ),
         headers={"Authorization": f"Bearer {api_key}"},
         json=payload,
@@ -400,35 +402,6 @@ _PROBE_IMAGE_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 )
-_PROBE_IMAGE_DATA_URI = f"data:{_PROBE_IMAGE_MEDIA_TYPE};base64,{_PROBE_IMAGE_BASE64}"
-
-
-def _openai_chat_content(multimodal: bool) -> object:
-    """OpenAI/ARK chat 消息 content:文本用裸字符串,多模态用 text+image_url 块。"""
-    if not multimodal:
-        return _PROBE_TEXT
-    return [
-        {"type": "text", "text": _PROBE_TEXT},
-        {"type": "image_url", "image_url": {"url": _PROBE_IMAGE_DATA_URI}},
-    ]
-
-
-def _openai_responses_content_blocks(multimodal: bool) -> list[dict[str, object]]:
-    """OpenAI/ARK responses 的 content 块(input_text [+ input_image])。"""
-    blocks: list[dict[str, object]] = [{"type": "input_text", "text": _PROBE_TEXT}]
-    if multimodal:
-        blocks.append({"type": "input_image", "image_url": _PROBE_IMAGE_DATA_URI})
-    return blocks
-
-
-def _gemini_parts(multimodal: bool) -> list[dict[str, object]]:
-    """Gemini `contents[].parts`:文本 part [+ inline_data 图 part]。"""
-    parts: list[dict[str, object]] = [{"text": _PROBE_TEXT}]
-    if multimodal:
-        parts.append(
-            {"inline_data": {"mime_type": _PROBE_IMAGE_MEDIA_TYPE, "data": _PROBE_IMAGE_BASE64}}
-        )
-    return parts
 
 
 async def _request_official_call_method_generation(
@@ -441,180 +414,38 @@ async def _request_official_call_method_generation(
     runtime_settings: Mapping[str, Any] | None = None,
     multimodal: bool = False,
 ) -> httpx.Response:
-    max_tokens = _runtime_max_output_tokens(runtime_settings, default=16)
-    reasoning = _runtime_reasoning_settings(runtime_settings)
-    effort = _runtime_reasoning_effort(reasoning)
-    if method_id == "openai_completions" and multimodal:
-        # 老式 /v1/completions 是纯 prompt 文本接口,没有图像通道 → 诚实报错,
-        # 不静默发一个没图的探测把 text-only 误判成多模态。
-        raise ValueError("openai_completions 不支持多模态探测(纯文本 prompt 接口)")
-    if method_id == "openai_responses":
-        payload: dict[str, object] = {
-            "model": model_id,
-            "input": (
-                [{"role": "user", "content": _openai_responses_content_blocks(True)}]
-                if multimodal
-                else _PROBE_TEXT
-            ),
-            "max_output_tokens": max_tokens,
-        }
-        if effort or _runtime_reasoning_enabled(reasoning):
-            payload["reasoning"] = {"effort": effort or "low"}
-        return await client.post(
-            _join_base_url_and_endpoint(
-                base_url,
-                _openai_compatible_endpoint_path(base_url, "/responses"),
-            ),
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-        )
-    if method_id == "openai_chat_completions":
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": _openai_chat_content(multimodal)}],
-            "max_completion_tokens": max_tokens,
-        }
-        if effort or _runtime_reasoning_enabled(reasoning):
-            payload["reasoning_effort"] = effort or "low"
-        return await client.post(
-            _join_base_url_and_endpoint(
-                base_url,
-                _openai_compatible_endpoint_path(base_url, "/chat/completions"),
-            ),
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-        )
-    if method_id == "openai_completions":
-        return await client.post(
-            _join_base_url_and_endpoint(
-                base_url,
-                _openai_compatible_endpoint_path(base_url, "/completions"),
-            ),
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": model_id,
-                "prompt": _PROBE_TEXT,
-                "max_tokens": max_tokens,
-            },
-        )
-    if method_id == "anthropic_messages":
-        return await client.post(
-            _join_base_url_and_endpoint(base_url, "/v1/messages"),
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-            json=_anthropic_messages_payload(model_id, max_tokens, reasoning, multimodal=multimodal),
-        )
-    if method_id == "gemini_generate_content":
-        generation_config: dict[str, object] = {"maxOutputTokens": max_tokens}
-        thinking_config = _google_thinking_config(reasoning)
-        if thinking_config is not None:
-            generation_config["thinkingConfig"] = thinking_config
-        return await client.post(
-            _join_base_url_and_endpoint(base_url, f"/v1beta/models/{model_id}:generateContent"),
-            params={"key": api_key},
-            json={
-                "contents": [{"parts": _gemini_parts(multimodal)}],
-                "generationConfig": generation_config,
-            },
-        )
-    if method_id == "deepseek_anthropic_messages":
-        return await client.post(
-            _join_base_url_and_endpoint(apply_call_method_base_url(method_id, base_url), "/v1/messages"),
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-            json=_anthropic_messages_payload(
-                model_id, max_tokens, reasoning, content_as_blocks=True, multimodal=multimodal
-            ),
-        )
-    if method_id == "ark_anthropic_messages":
-        return await client.post(
-            _join_base_url_and_endpoint(apply_call_method_base_url(method_id, base_url), "/v1/messages"),
-            headers={"Authorization": f"Bearer {api_key}", "anthropic-version": "2023-06-01"},
-            json=_anthropic_messages_payload(
-                model_id, max_tokens, reasoning, content_as_blocks=True, multimodal=multimodal
-            ),
-        )
-    if method_id == "ark_chat":
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": _openai_chat_content(multimodal)}],
-            "max_tokens": max_tokens,
-        }
-        thinking = _ark_thinking_payload(reasoning)
-        if thinking is not None:
-            payload["thinking"] = thinking
-        return await client.post(
-            _join_base_url_and_endpoint(base_url, "/api/v3/chat/completions"),
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-        )
-    if method_id == "ark_responses":
-        payload = {
-            "model": model_id,
-            "input": [{"role": "user", "content": _openai_responses_content_blocks(multimodal)}],
-            "max_output_tokens": max_tokens,
-        }
-        thinking = _ark_thinking_payload(reasoning)
-        if thinking is not None:
-            payload["thinking"] = thinking
-        return await client.post(
-            _join_base_url_and_endpoint(base_url, "/api/v3/responses"),
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-        )
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": _openai_chat_content(multimodal)}],
-        "max_tokens": max_tokens,
-    }
-    if effort or _runtime_reasoning_enabled(reasoning):
-        payload["reasoning_effort"] = effort or "low"
+    """Send one probe generation in the wire language that call method speaks.
+
+    The dialect renders the request and this function only sends it: what a
+    provider's payload looks like is decided in one place rather than once per
+    probe, which is what lets a probe result say anything about a real call.
+    """
+
+    request = dialect_for_method(method_id).generation(
+        base_url=apply_call_method_base_url(method_id, base_url),
+        secret=api_key,
+        model_id=model_id,
+        prompt=_probe_prompt(multimodal),
+        max_output_tokens=_runtime_max_output_tokens(runtime_settings, default=16),
+        reasoning=Reasoning.from_runtime_settings(runtime_settings),
+    )
     return await client.post(
-        _join_base_url_and_endpoint(
-            base_url,
-            _openai_compatible_endpoint_path(base_url, "/chat/completions"),
-        ),
-        headers={"Authorization": f"Bearer {api_key}"},
-        json=payload,
+        request.url,
+        headers=request.headers,
+        params=request.params,
+        json=request.body,
     )
 
 
-def _anthropic_messages_payload(
-    model_id: str,
-    max_tokens: int,
-    reasoning: Mapping[str, Any],
-    *,
-    content_as_blocks: bool = False,
-    multimodal: bool = False,
-) -> dict[str, object]:
-    if multimodal:
-        # 多模态必须用 content 块形式携带图块,忽略 content_as_blocks(它只区分
-        # 纯文本的 str vs 单 text 块,与是否带图无关)。
-        content: object = [
-            {"type": "text", "text": _PROBE_TEXT},
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": _PROBE_IMAGE_MEDIA_TYPE,
-                    "data": _PROBE_IMAGE_BASE64,
-                },
-            },
-        ]
-    else:
-        content = (
-            [{"type": "text", "text": _PROBE_TEXT}] if content_as_blocks else _PROBE_TEXT
-        )
-    payload: dict[str, object] = {
-        "model": model_id,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": content}],
-    }
-    thinking = _anthropic_thinking_payload(max_tokens, reasoning)
-    if thinking is not None:
-        payload["thinking"] = thinking
-    effort = _runtime_reasoning_effort(reasoning)
-    if thinking is not None and effort:
-        payload["output_config"] = {"effort": effort}
-    return payload
+def _probe_prompt(multimodal: bool) -> Prompt:
+    return Prompt(
+        text=_PROBE_TEXT,
+        image=(
+            Image(media_type=_PROBE_IMAGE_MEDIA_TYPE, base64_data=_PROBE_IMAGE_BASE64)
+            if multimodal
+            else None
+        ),
+    )
 
 
 # Providers report an exhausted balance in provider-specific ways that do not
@@ -840,28 +671,6 @@ def _extract_vendor_error_message(response: httpx.Response) -> str | None:
     return message if isinstance(message, str) and message else None
 
 
-def _join_base_url_and_endpoint(base_url: str, endpoint_path: str) -> str:
-    normalized_base = base_url.rstrip("/")
-    normalized_endpoint = endpoint_path if endpoint_path.startswith("/") else f"/{endpoint_path}"
-    base_path = urlsplit(normalized_base).path.rstrip("/")
-    endpoint_without_version = normalized_endpoint
-    for prefix in ("/v1", "/v1beta", "/api/v3"):
-        if base_path.endswith(prefix) and endpoint_without_version.startswith(f"{prefix}/"):
-            endpoint_without_version = endpoint_without_version[len(prefix) :]
-            break
-    parts = urlsplit(normalized_base)
-    path = f"{parts.path.rstrip('/')}{endpoint_without_version}"
-    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
-
-
-def _openai_compatible_endpoint_path(base_url: str, suffix: str) -> str:
-    normalized_suffix = suffix if suffix.startswith("/") else f"/{suffix}"
-    base_path = urlsplit(base_url.rstrip("/")).path.rstrip("/")
-    if any(base_path.endswith(version_root) for version_root in ("/v1", "/api/v3")):
-        return normalized_suffix
-    return f"/v1{normalized_suffix}"
-
-
 def _endpoint_secret(endpoint: ProviderEndpoint, api_key: str | None) -> str:
     if api_key is not None:
         return api_key
@@ -964,6 +773,10 @@ def _runtime_reasoning_enabled(reasoning: Mapping[str, Any]) -> bool:
     return reasoning.get("enabled") is True
 
 
+# `_request_model_generation` picks a wire from the backend name rather than from
+# a call method, so it cannot ask a dialect what to send and still renders these
+# two blocks itself. They are the dialects' rules written a second time, and they
+# go when that probe starts naming the call method it is testing.
 def _anthropic_thinking_payload(max_tokens: int, reasoning: Mapping[str, Any]) -> dict[str, object] | None:
     if not _runtime_reasoning_enabled(reasoning):
         return None
@@ -987,12 +800,6 @@ def _google_thinking_config(reasoning: Mapping[str, Any]) -> dict[str, object] |
     if not _runtime_reasoning_enabled(reasoning):
         return None
     return {}
-
-
-def _ark_thinking_payload(reasoning: Mapping[str, Any]) -> dict[str, object] | None:
-    if "enabled" not in reasoning:
-        return None
-    return {"type": "enabled" if _runtime_reasoning_enabled(reasoning) else "disabled"}
 
 
 def _official_method_backend(method_id: OfficialCallMethod) -> ProviderProbeBackend:

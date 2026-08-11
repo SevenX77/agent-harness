@@ -12,6 +12,7 @@ host's decision, made through the registry's own contract.
 from __future__ import annotations
 
 from .judge import (
+    ProviderAnswer,
     ProviderProbeStatus,
     model_capabilities,
     model_ids,
@@ -31,6 +32,7 @@ from .wire import (
 __all__ = [
     "EndpointProbeResult",
     "OfficialCallMethod",
+    "ProviderAnswer",
     "ProviderProbeStatus",
     "RouteProbeResult",
     "endpoint_probe_base_url",

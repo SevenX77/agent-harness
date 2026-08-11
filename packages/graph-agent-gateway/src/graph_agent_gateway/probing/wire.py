@@ -34,6 +34,7 @@ from graph_agent_gateway.registry import (
 )
 
 from .judge import (
+    ProviderAnswer,
     ProviderProbeStatus,
     model_capabilities,
     model_ids,
@@ -82,13 +83,13 @@ async def probe_provider_endpoint(
     started = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
-            response = await _request_models(client, wire, secret, base_url)
+            answer = _answer_from(await _request_models(client, wire, secret, base_url))
     except httpx.TimeoutException:
         return _endpoint_result(endpoint, backend, base_url, "timeout", started, message="Endpoint test timed out.")
     except httpx.HTTPError as exc:
         return _endpoint_result(endpoint, backend, base_url, "network_error", started, message=str(exc))
 
-    status = probe_status(response, model_not_found_status="error", probed_backend=wire)
+    status = probe_status(answer, model_not_found_status="error", probed_backend=wire)
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
@@ -96,9 +97,9 @@ async def probe_provider_endpoint(
         base_url=base_url,
         status=status,
         latency_ms=_elapsed_ms(started),
-        model_ids=model_ids(response) if status == "ok" else (),
-        model_capabilities=model_capabilities(response) if status == "ok" else {},
-        message=None if status == "ok" else provider_response_message(response),
+        model_ids=model_ids(answer) if status == "ok" else (),
+        model_capabilities=model_capabilities(answer) if status == "ok" else {},
+        message=None if status == "ok" else provider_response_message(answer),
         error_code=(
             None
             if status == "ok"
@@ -108,7 +109,7 @@ async def probe_provider_endpoint(
             # and UI key off.
             else "protocol_unsupported"
             if status == "protocol_unsupported"
-            else vendor_error_code(response, default=status)
+            else vendor_error_code(answer, default=status)
         ),
     )
 
@@ -154,20 +155,22 @@ async def probe_provider_route(
     started = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
-            response = await _request_model_generation(
-                client,
-                wire,
-                secret,
-                base_url,
-                route.provider_model_id,
-                runtime_settings=runtime_settings,
+            answer = _answer_from(
+                await _request_model_generation(
+                    client,
+                    wire,
+                    secret,
+                    base_url,
+                    route.provider_model_id,
+                    runtime_settings=runtime_settings,
+                )
             )
     except httpx.TimeoutException:
         return _route_result(endpoint, route, backend, base_url, "timeout", started)
     except httpx.HTTPError as exc:
         return _route_result(endpoint, route, backend, base_url, "network_error", started, message=str(exc))
 
-    status = probe_status(response, model_not_found_status="invalid_model", probed_backend=wire)
+    status = probe_status(answer, model_not_found_status="invalid_model", probed_backend=wire)
     return RouteProbeResult(
         endpoint_id=endpoint.endpoint_id,
         route_id=route.route_id,
@@ -177,7 +180,7 @@ async def probe_provider_route(
         model_id=route.provider_model_id,
         status=status,
         latency_ms=_elapsed_ms(started),
-        message=None if status == "ok" else provider_response_message(response),
+        message=None if status == "ok" else provider_response_message(answer),
     )
 
 
@@ -209,14 +212,16 @@ async def probe_official_call_method(
             timeout=timeout or _official_call_method_timeout(method_id, model_id, runtime_settings),
             transport=transport,
         ) as client:
-            response = await _request_official_call_method_generation(
-                client,
-                method_id,
-                api_key,
-                normalized_base_url,
-                model_id,
-                runtime_settings=runtime_settings,
-                multimodal=multimodal,
+            answer = _answer_from(
+                await _request_official_call_method_generation(
+                    client,
+                    method_id,
+                    api_key,
+                    normalized_base_url,
+                    model_id,
+                    runtime_settings=runtime_settings,
+                    multimodal=multimodal,
+                )
             )
     except httpx.TimeoutException:
         status: ProviderProbeStatus = "timeout"
@@ -227,8 +232,8 @@ async def probe_official_call_method(
         message = str(exc)
         latency_ms = _elapsed_ms(started)
     else:
-        status = probe_status(response, model_not_found_status="invalid_model")
-        message = None if status == "ok" else provider_response_message(response)
+        status = probe_status(answer, model_not_found_status="invalid_model")
+        message = None if status == "ok" else provider_response_message(answer)
         latency_ms = _elapsed_ms(started)
 
     return RouteProbeResult(
@@ -242,6 +247,12 @@ async def probe_official_call_method(
         latency_ms=latency_ms,
         message=message,
     )
+
+
+def _answer_from(response: httpx.Response) -> ProviderAnswer:
+    """The only place a response object becomes something the judge reads."""
+
+    return ProviderAnswer(status_code=response.status_code, body=response.text)
 
 
 def endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:

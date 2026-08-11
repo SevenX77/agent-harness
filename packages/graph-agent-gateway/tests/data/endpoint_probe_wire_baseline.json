@@ -406,7 +406,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "openai"
  },
@@ -424,7 +424,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "openai"
@@ -443,7 +443,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "openai"
  },
@@ -461,7 +461,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "openai"
  },
@@ -488,7 +488,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "deepseek"
  },
@@ -506,7 +506,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "deepseek"
@@ -525,7 +525,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "deepseek"
  },
@@ -543,7 +543,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "deepseek"
  },
@@ -570,7 +570,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "openai"
  },
@@ -588,7 +588,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "openai"
@@ -607,7 +607,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "openai"
  },
@@ -625,7 +625,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "openai"
  },
@@ -652,7 +652,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "openai"
  },
@@ -670,7 +670,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "openai"
@@ -689,7 +689,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "openai"
  },
@@ -707,7 +707,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "openai"
  },
@@ -1526,7 +1526,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "openai"
  },
@@ -1544,7 +1544,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "openai"
@@ -1563,7 +1563,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "openai"
  },
@@ -1581,7 +1581,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "openai"
  },
@@ -1608,7 +1608,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "deepseek"
  },
@@ -1626,7 +1626,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "deepseek"
@@ -1645,7 +1645,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "deepseek"
  },
@@ -1663,7 +1663,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "deepseek"
  },
@@ -1690,7 +1690,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "openai"
  },
@@ -1708,7 +1708,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "openai"
@@ -1727,7 +1727,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "openai"
  },
@@ -1745,7 +1745,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "openai"
  },
@@ -1772,7 +1772,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1
+   "max_completion_tokens": 1
   },
   "backend": "openai"
  },
@@ -1790,7 +1790,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16,
+   "max_completion_tokens": 16,
    "reasoning_effort": "high"
   },
   "backend": "openai"
@@ -1809,7 +1809,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 16
+   "max_completion_tokens": 16
   },
   "backend": "openai"
  },
@@ -1827,7 +1827,7 @@
      "content": "."
     }
    ],
-   "max_tokens": 1025
+   "max_completion_tokens": 1025
   },
   "backend": "openai"
  }

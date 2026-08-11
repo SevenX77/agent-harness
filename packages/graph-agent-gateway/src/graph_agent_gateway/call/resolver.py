@@ -408,9 +408,9 @@ def _gateway_model_bundles_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _default_client_manager() -> Any:
-    from graph_agent_gateway.call.clients import LLMClientManager
+    from graph_agent_gateway.call.clients import LLMCircuitAndUsageLedger
 
-    return LLMClientManager
+    return LLMCircuitAndUsageLedger
 
 
 def _effective_int(route: Any, key: str, default: int) -> int:

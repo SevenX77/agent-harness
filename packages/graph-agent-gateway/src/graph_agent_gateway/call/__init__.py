@@ -1,8 +1,9 @@
 """Making one call: which model answers it, what it asks for, and what came back.
 
 This package is the call domain's whole public contract — the resolver that
-turns a role into a model, the chat model that drives one answer, the provider
-clients and dispatch beneath it, the settings that call carries, the cheap
+turns a role into a model, the chat model that drives one answer, the factory
+that builds the model a route is answered by, the ledger of what a route has
+cost and whether it is marked down, the settings that call carries, the cheap
 question asked before the expensive one, and the report of what became of each
 setting. Reaching past it into one of its files couples the caller to where a
 definition happens to live today.
@@ -17,10 +18,8 @@ from graph_agent_gateway.call.chat_model import (
     GatewayChatModel,
     answer_restarts_here,
 )
-from graph_agent_gateway.call.clients import LLMClientManager
-from graph_agent_gateway.call.dispatch import dispatch_ordinary_chat
+from graph_agent_gateway.call.clients import LLMCircuitAndUsageLedger
 from graph_agent_gateway.call.factory import RouteChatModelFactory, provider_request_keys
-from graph_agent_gateway.call.models import GenericRouteChatModel
 from graph_agent_gateway.call.outcome import (
     AUTHORED_SOURCES,
     CALL_OVERRIDE,
@@ -63,8 +62,7 @@ __all__ = [
     "ActualRuntimeSettings",
     "CallSettings",
     "GatewayChatModel",
-    "GenericRouteChatModel",
-    "LLMClientManager",
+    "LLMCircuitAndUsageLedger",
     "ModelDefaults",
     "ModelResolver",
     "ModelResolverProtocol",
@@ -81,7 +79,6 @@ __all__ = [
     "build_probe_model",
     "build_route_decision_event",
     "compose_call_settings",
-    "dispatch_ordinary_chat",
     "effective_runtime_settings",
     "emit_call_settings_event",
     "emit_route_decision_event",

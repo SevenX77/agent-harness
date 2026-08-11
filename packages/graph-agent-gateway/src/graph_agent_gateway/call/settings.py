@@ -307,8 +307,6 @@ def _call_layer(
         kwargs={
             "max_tokens": budget,
             "structured_output": _effective_structured_output(route),
-            "call_method_id": route.call_method_id,
-            "request_mapper_id": route.request_mapper_id,
         },
         reported={"max_output_tokens": reported},
     )

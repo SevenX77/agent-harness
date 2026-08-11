@@ -111,3 +111,62 @@ def test_every_protocol_a_route_can_declare_is_covered_here() -> None:
     from graph_agent_gateway.registry import Protocol
 
     assert set(_BASE_URLS) == set(Protocol.__args__)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("protocol", "expected"),
+    [
+        (
+            "openai_compatible",
+            {"temperature": 0.5, "top_p": 0.9, "seed": 7, "stop": ["END"]},
+        ),
+        (
+            "ark_runtime",
+            {"temperature": 0.5, "top_p": 0.9, "seed": 7, "stop": ["END"]},
+        ),
+        (
+            "anthropic_compatible",
+            {"temperature": 0.25, "top_p": 0.9, "stop_sequences": ["END"]},
+        ),
+    ],
+)
+def test_each_setting_reaches_the_wire_under_the_name_that_provider_uses(
+    protocol: str,
+    expected: dict[str, Any],
+) -> None:
+    """The rest of `_PROVIDER_KEYS`, measured the same way as budget and effort.
+
+    These names were only ever asserted against a dispatch layer no route could
+    reach, so deleting it would have left the live mapping — including
+    Anthropic's `stop_sequences` and its half-scale temperature — with nothing
+    checking it.
+    """
+
+    factory = RouteChatModelFactory(credential_provider=_StaticCredentials())
+    model = factory.build(
+        _route(protocol),
+        temperature=0.5,
+        top_p=0.9,
+        seed=7,
+        stop_sequences=["END"],
+    )
+    payload = model._get_request_payload([], stop=None)
+
+    for field, value in expected.items():
+        assert payload[field] == value, f"{protocol}: {field}"
+
+
+def test_a_google_call_carries_the_same_settings_as_model_attributes() -> None:
+    """`ChatGoogleGenerativeAI` renders no payload to read; it holds the fields."""
+
+    factory = RouteChatModelFactory(credential_provider=_StaticCredentials())
+    model = factory.build(
+        _route("google_genai"),
+        temperature=0.5,
+        top_p=0.9,
+        stop_sequences=["END"],
+    )
+
+    assert model.temperature == 0.5
+    assert model.top_p == 0.9
+    assert model.stop == ["END"]

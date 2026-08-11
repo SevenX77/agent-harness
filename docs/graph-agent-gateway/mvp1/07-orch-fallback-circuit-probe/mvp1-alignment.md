@@ -9,13 +9,13 @@ units: [fallback-circuit-probe-health]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
-# 07 — Fallback / Circuit / Probe（编排外壳:回退链·熔断·探活）· MVP1 设计
+# 07 — Fallback / Circuit / Probe（编排外壳:回退链·熔断·前置探问）· MVP1 设计
 
 > **组织方式**：**以每个功能为索引** —— 每个功能(F1–F9)一段，把它的机制/数据流·决策+动机·原话·测试点·status·归属(region/platform)**全收在自己段里**；仅「定义」「接口契约」是模块级总览，证据附录(已实现/差异、覆盖代码/覆盖率、代码索引、决策原因反转)挂在文末模块级。现状基线见同目录 `baseline.md`。
-> **Tier**：③b gateway 公共能力内核（`gateway_chat_model._generate` 编排外壳 + `client_manager` probe/熔断/usage 已在包内；`llm_health_store` 熔断持久化现散 ③a 待下沉）
-> **Owns**：fallback 链遍历 + 熔断跳过 + 1-token probe + 异常分类 + mark_down + fallback event + usage 归属 + 截断升级重试 + 批量探测策略；**每条 route 的真实 ChatX invoke 不在本模块**（归 [[09-inv-invocation-runtime]]）
+> **Tier**：③b gateway 公共能力内核（`gateway_chat_model._generate` 编排外壳 + `call/pre_call_probe.py` 前置探问 + `LLMCircuitAndUsageLedger` 熔断/usage 已在包内；`llm_health_store` 熔断持久化现散 ③a 待下沉）
+> **Owns**：fallback 链遍历 + 熔断跳过 + 1-token 前置探问(问设置,不是探活,见 F3) + 异常分类 + mark_down + fallback event + usage 归属 + 截断升级重试 + 批量探测策略；**每条 route 的真实 ChatX invoke 不在本模块**（归 [[09-inv-invocation-runtime]]）
 > **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = `_generate` 编排段保留、调用段换 ChatX(归 09)、token escalation 已落地(现由 `call/chat_model.py:123-152` 的 `_Attempt` 承担)、`llm_health_store` 待下沉 ③b
-> **Related**：[[06-orch-error-classification]]（`classify_exception` 状态码语义权威源，本模块只消费）· [[09-inv-invocation-runtime]]（真实 invoke / ChatX bridge / ordinary-chat generic core / 消息转换 / F4 thinking / F5 metadata 注入落点）· [[13-x-tracing-events-exceptions]]（`LLMFallbackEvent` / `emit_llm_fallback_event` / `AllProvidersFailedError`）· [[04-orch-registry-schema]]（`RuntimePolicy` / `ProbeResult` 字段权威源）· [[03-orch-credentials-endpoints]]（F1 base_url 归一化共享决策的存写主体，probe 用对 base_url）· [[08-orch-test-status-ssot]]（熔断持久化的另一消费视角 + 6 态投影）· studio copilot（copilot-assist + ux-spec §3.8）（copilot 测试的应用侧消费方;`copilot_test.py` 已拆解,见 F9 归属）
+> **Related**：[[06-orch-error-classification]]（`classify_exception` 状态码语义权威源，本模块只消费）· [[09-inv-invocation-runtime]]（真实 invoke / ChatX bridge / ordinary-chat generic core / 消息转换 / F4 thinking / F5 metadata 注入落点）· [[13-x-tracing-events-exceptions]]（`LLMFallbackEvent` / `emit_llm_fallback_event` / `AllProvidersFailedError`）· [[04-orch-registry-schema]]（`RuntimePolicy` / `ProbeResult` 字段权威源）· [[03-orch-credentials-endpoints]]（F1 base_url 归一化共享决策的存写主体，前置探问要打对 base_url）· [[08-orch-test-status-ssot]]（熔断持久化的另一消费视角 + 6 态投影）· studio copilot（copilot-assist + ux-spec §3.8）（copilot 测试的应用侧消费方;`copilot_test.py` 已拆解,见 F9 归属）
 > **决策日志**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离 / M2 client_manager 5 件事 / M3 `_generate` 逐步归属 / F2 retry / F3 截断升级 / F5 usage）的完整逻辑 + PM 原话已就地留底在下文各功能段（F1 收 D1/D2、F3 收 base_url、F4 收 F2 retry、F5 收 F3 截断、F6 收 F5 usage、F8 收批量探测、F9 收熔断持久化反转）；归属反转源 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 第 47-49 行
 > **现状**：见同目录 `baseline.md`
 
@@ -30,11 +30,11 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **批量探测策略(对一批 route 编排 probe 的顺序/并发/跳过历史失败)** = **③b 公共**（探测编排是 gateway 机制,现编排住 `routers/llm.py` 的探测段,只有"批量进度 UI"留 ③a）。
 - **copilot 测试探针** = **③a 应用**（copilot 专属,与 ③b 通用 route probe 不同源,留 studio;详见 F9 归属 + F8 边界 + 文末决策原因，应用侧消费方 = studio copilot（copilot-assist + ux-spec §3.8））。**接线工程已完工**:走真 `ClaudeSDKClient`(`apps/studio/backend/app/routers/llm.py:2052`),`copilot_test.py` 文件已拆解。
 
-不调真实模型(真实 invoke 归 [[09-inv-invocation-runtime]]);前置探问例外——它是**编排层自己**发的 1-token 真请求。**注意与原文的差别**:原设计写"用 client manager 的轻量 SDK client,不走 ChatX",今天恰恰相反——`call/pre_call_probe.py:63-83` 的 `build_probe_model` **刻意复用生产同一个 `RouteChatModelFactory`**,好让"探得通"和"跑得起来"不会各说各话;探问的问题也从"活着吗"换成了"收不收这些设置"(见 F8 ⚠)。
+不调真实模型(真实 invoke 归 [[09-inv-invocation-runtime]]);前置探问例外——它是**编排层自己**发的 1-token 真请求。**注意与原文的差别**:原设计写"用 client manager 的轻量 SDK client,不走 ChatX",今天恰恰相反——`call/pre_call_probe.py:63-81` 的 `build_probe_model` **刻意复用生产同一个 `RouteChatModelFactory`**,好让"探得通"和"跑得起来"不会各说各话;探问的问题也从"活着吗"换成了"收不收这些设置"(见 F3)。
 
 **上下游(全模块总览)**:① resolver 输出 `ResolvedRole`(有序 `ResolvedRoute` + `runtime_policy`)→ **`_generate`(③b 编排外壳)** 按 routes 顺序遍历 → 每条候选先 熔断跳过 / probe → 选中后委派 **[[09-inv-invocation-runtime]] 的 ChatX invoke(③b 调用层)** 真调 → 成功则归 usage + 注 route metadata 返回;失败则 `classify_exception`(③b 错误分类,归 06)决定 fallback / fail-fast,fallback 则 mark_down + 发 fallback event + 继续下一条 → 全失败抛 `AllProvidersFailedError`。
 
-**状态机（route 进入实际调用的判定,目标语义）**:候选 →〔熔断查询:`is_provider_marked_down`==true → `continue` 跳过〕→〔`probe_before_call`==true → 1-token 前置探问(**今天问的是设置收不收,不是路由死没死**,见 F8 ⚠):被拒 → 去掉被拒的偏好重问,而**不是** mark_down;答得上 → 进调用〕→〔ChatX invoke:成功 → 归 usage + metadata 返回;异常 → `classify_exception`:fail-fast → 抛;可 fallback → mark_down + event + 继续〕→ 遍历尽 → `AllProvidersFailedError`。
+**状态机（route 进入实际调用的判定,目标语义）**:候选 →〔熔断查询:`is_provider_marked_down`==true → `continue` 跳过〕→〔`probe_before_call`==true → 1-token 前置探问(**今天问的是设置收不收,不是路由死没死**,见 F3):被拒 → 去掉被拒的偏好重问,而**不是** mark_down;答得上 → 进调用〕→〔ChatX invoke:成功 → 归 usage + metadata 返回;异常 → `classify_exception`:fail-fast → 抛;可 fallback → mark_down + event + 继续〕→ 遍历尽 → `AllProvidersFailedError`。
 
 **编排 / 调用边界（M3 `_generate` 9 步逐步归属,逐步表见 F1 与 F1 D2 决策)**:留编排(2/3/4/6/8/9 步)= 遍历 / 熔断跳过 / probe / usage 记账 / 异常处理 / 全失败;改调用(1/5/7 步)= 消息准备(不再拍 dict)/ 实际调用(build ChatX + invoke)/ 构建结果(augment ChatX `AIMessage`),改的三步归 09。
 
@@ -46,11 +46,11 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 |---|---|
 | **resolver → `_generate`（入参）** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（有序 fallback 链）, `runtime_policy`: `RuntimePolicy`（down TTL / probe timeout / `token_escalation_rounds`,字段权威源 `registry/schema.py:88-98`）}。`_generate` **看得到**"有序候选 + 运行时策略"(通用编排概念),**看不到**"角色怎么被 UI 编辑 / 怎么排序出来"(③a 应用加工 + 02 materialize)。 |
 | **`_generate` → 09 调用层（每条 route）** | 入:一条 `ResolvedRoute` + 原始 `BaseMessage[]`(不拍 dict) + runtime params;出:ChatX `AIMessage`(含 `usage_metadata` + 注入的 route metadata) 或抛异常。**契约要求**:① 抛出的异常形状能被 `classify_exception` 沿异常链找到 `status_code`/`response.status_code`;② 成功 `AIMessage.usage_metadata` 非空可喂 usage 归属;③ thinking content blocks 不被拍平(归 09 F4)。 |
-| **`_generate` → `client_manager`（健康/usage,③b 公共接口）** | 类名今为 `LLMCircuitAndUsageLedger`(`call/clients.py:17`)。`is_provider_marked_down(...) → bool`(`:31`)、`mark_provider_down(..., runtime_policy)`(`:42`)、`record_usage(...)`(`:74`)、`usage_total_calls(route) → int`(`:53`)。**M2 拆解里的 ②probe 已不在这个接口上**:前置探问搬去 `call/pre_call_probe.py:probe_call_settings`,由 `call/chat_model.py:309-320` 直接调,而且语义换了(见 F8 ⚠)。 |
+| **`_generate` → `client_manager`（健康/usage,③b 公共接口）** | 类名今为 `LLMCircuitAndUsageLedger`(`call/clients.py:17`)。`is_provider_marked_down(...) → bool`(`:31`)、`mark_provider_down(..., runtime_policy)`(`:42`)、`record_usage(...)`(`:74`)、`usage_total_calls(route) → int`(`:53`)。**M2 拆解里的 ②probe 已不在这个接口上**:前置探问搬去 `call/pre_call_probe.py:probe_call_settings`,由 `call/chat_model.py:309-320` 直接调,而且语义换了(见 F3)。 |
 | **熔断持久化（③b 公共,现 ③a 待下沉）** | `SqliteLlmHealthStore.open_circuit(circuit: RuntimeCircuit)` 写、`get_active_circuits(route_id, endpoint_id, rate_limit_bucket) → RuntimeCircuit[]`(只返回 `retry_at` 未过的)读;`RuntimeCircuit` DTO 字段 `scope/scope_id/opened_at/retry_at/ttl_seconds/reason_code/failure_count/message`,见 `apps/studio/backend/app/services/llm_health_store.py:14-101`。**存储介质 SQLite 路径由 ③a 注入**,store 逻辑本身 ③b。 |
 | **probe 结果 DTO（③b 公共契约）** | `ProbeResult`(探测结果契约,字段权威源 `registry/schema.py:386`,经 `registry/__init__.py:170` 导出给诊断/SSOT 侧)。执行期 `_generate` 消费的是前置探问的裁决 `probe_call_settings(...)`(`call/pre_call_probe.py:84`);对外发起的**独立**探测(端点/路由/问题集)住 gateway `probing` 域,结果作为诊断/证据流进 [[08-orch-test-status-ssot]]。 |
 | **fallback event（③b 公共,归 13）** | `emit_llm_fallback_event` 入 `LLMFallbackEvent`{ `phase_name`, from/to provider, reason, code, context(含 from/to route 诊断 + fallback decision + provider status code + runtime settings) }。callback 异常被吞,不掩盖运行时错误。 |
-| **错误** | route 全失败 → `AllProvidersFailedError`(payload 来自累积的 failure records,异常类归 13,`exceptions.py:33-60`);invoke fail-fast 异常 → 透传抛出(前置探问的拒绝不再走这条路,它是问题不是故障,见 F8 ⚠)。 |
+| **错误** | route 全失败 → `AllProvidersFailedError`(payload 来自累积的 failure records,异常类归 13,`exceptions.py:33-60`);invoke fail-fast 异常 → 透传抛出(前置探问的拒绝不再走这条路,它是问题不是故障,见 F3)。 |
 | **归属 / 稳定性** | `RuntimePolicy`/`ProbeResult` 字段权威源 = [[04-orch-registry-schema]](`registry/schema.py`);`classify_exception` 状态码语义权威源 = [[06-orch-error-classification]];本模块**只链接不复制**,防 drift。 |
 
 ---
@@ -88,21 +88,34 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **status**：`_is_marked_down` / `_mark_down` / 对应 client_manager 接口已在;保留为编排层接口。
 - **归属**：③b `packages/graph-agent-gateway`(`client_manager` 的熔断,已在)。
 
-### F3 probe（1-token 真请求 + base_url 归一化消费）
+### F3 前置探问（正式请求构造器 + 1 token 预算 + base_url 归一化消费）
+
+> **本节 2026-08-11 按新语义整体重写(台账 P6d)。** 旧标题是「F3 probe(1-token 真请求 + base_url 归一化消费)」,正文讲的是**探活**。改写不是换个名:探问的**问题本身**换了,连带判据、失败处理和归属都跟着换。旧文照录在本节末尾「原文与今天的差别」,不假装那段设计从来不存在。
 
 - **机制/数据流**：
-  - 前置探问的桥接现在住 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:309-320`:`probe_before_call` 为真时直接调 `call/pre_call_probe.py:probe_call_settings`,不再经 client manager。
-  - **⚠ 这一节描述的探活语义已被取代,不是改个名的事。** 旧 `probe_provider`(及它委托的 `_probe_provider`)问的是「这条 route 活着吗」——发 1-token 真请求,失败即 `mark_provider_down`;两个方法今天都不存在了。现在 `probe_call_settings` 问的是「这条 route 收不收这些设置」,并且明确规定**拒绝不等于路由挂了**:`packages/graph-agent-gateway/src/graph_agent_gateway/call/pre_call_probe.py:8-11` 原文——"A refusal here is not a route that is down. It is a question with a follow-up: ask again with the preferences dropped"。取代它的决策是 `docs/design/2026-08-10-runtime-settings-are-preferences-decision.md`。**本次只把死路径改成活路径;F8 这一段按新语义的完整重写另立一条,不在路径回写里顺手做**(见 `docs/development/DELIVERY_LEDGER.md` P6d)。
-  - probe 是**编排层自己**发的 1-token 真请求,用 client manager 的轻量 SDK client,不走 ChatX。
+  - **问的是什么**:正式调用发出去之前,先用**这次调用自己的设置**朝同一条 route 问一句,只要 1 个 token,问「这条 route 收不收这些设置」。桥接住 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:309-320`:`probe_before_call`(默认 `True`,`call/chat_model.py:166`)为真时调 `call/pre_call_probe.py:probe_call_settings`。
+  - **用什么问**:**探针 = 正式请求构造器 + 1 token 预算**。`CallSettings.as_cheap_question()`(`call/settings.py:133-144`)产出同一份设置、把预算换成 1、并摘掉 tools(工具不是设置,带上它问的是另一个问题,而这个问题的答案不该由工具背锅);模型仍由 `RouteChatModelFactory` 造,且**构造器由调用方注入**(`call/pre_call_probe.py:63-81` 的 `build_probe_model`,原文"The builder is handed in rather than made here: the probe and the call it precedes have to come off the same one")。因此探针发出去的那条请求,与紧随其后的正式调用**同源**——判据不是「代码里把设置传给了探针」,而是**成品 payload 同源**(决议判据 2)。
+  - **拒绝意味着什么**:`packages/graph-agent-gateway/src/graph_agent_gateway/call/pre_call_probe.py:8-11` 原文——"A refusal here is not a route that is down. It is a question with a follow-up: ask again with the preferences dropped"。**被拒不写熔断、不换路、不判全体 provider 失败**;摘掉被拒的偏好继续用这条 route(决议 D2)。
+  - **追问的阶梯(只在该追问时发生)**:第一问被拒 → 先看 `classify_exception(...).scope`(`call/pre_call_probe.py:100-105`),**不是 `request`**(凭据、模型不存在、限流、连不上)就直接收工——route 根本没读到设置,再问一遍是白花钱;**是 `request`** 才把偏好整层摘掉再问一次(`:109-113`),若还是被拒,说明这条 route 无论如何都拒,与设置无关,交回调用方自己的 route 处理;若摘掉后能答,才**一次只带一项**逐项点名(`:118-124`),且只问**这个协议的请求体里真的带得动**的项(`provider_request_keys`)——请求体里没位置的项,问出来的请求跟刚被接受的那条一模一样,答案也会一模一样。常规情况(全都接受)永远只有一问。
+  - **超时不跟正式调用走**:`RuntimePolicy.probe_timeout_seconds`(默认 5s)按 `call/chat_model.py:318` 传进去——为省一次长调用而问的问题,不能自己耗得跟长调用一样久。
+  - **它看不见什么**:1 个 token 的回答不足以观察「收下了但没照做」。那一档(`ignored`)归**答案收口时刻**判,不归探问(决议 D5,`call/pre_call_probe.py:14-16`)。
 - **决策 + 动机**：
-  - **F1 — base_url 归一化(与 [[03-orch-credentials-endpoints]] 共享决策,重复留底防 drift)**:**决策 = 主路径在 credential 保存时归一化(每 endpoint 存确定的 canonical 格式,从源头保证对),副路径在调用时做幂等归一化双保险(已 canonical 则 no-op)**。每 protocol 规则确定统一:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark openai-compat `.../api/v3`。本模块只在 **probe 用对 base_url** 上消费它(`_probe` 发 1-token 请求要打到正确端点);归一化的存写主体归 [[03-orch-credentials-endpoints]]、调用时双保险归 [[09-inv-invocation-runtime]] 的 `RouteChatModelFactory`。**重复 OK**:F1 是 03 / 07 / 09 共享决策,各模块都写、用双向模块链接防 drift。**PM 原话见本段下方**:"base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。
+  - **前置探问的语义 = 问设置,不是探活**(决议 `docs/design/2026-08-10-runtime-settings-are-preferences-decision.md` D1/D2/D5)。动机是该决议 B2 的实测:一个参数写错,报出来的结论是「所有 provider 都失败了」——**它伪装成路由故障**,看报错的人根本不会想到去检查设置。路由健康与参数可接受性是两个维度,必须分开判。
+  - **F1 — base_url 归一化(与 [[03-orch-credentials-endpoints]] 共享决策,重复留底防 drift)**:**决策 = 主路径在 credential 保存时归一化(每 endpoint 存确定的 canonical 格式,从源头保证对),副路径在调用时做幂等归一化双保险(已 canonical 则 no-op)**。每 protocol 规则确定统一:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark openai-compat `.../api/v3`。本模块只在**前置探问要打到正确端点**上消费它;归一化的存写主体归 [[03-orch-credentials-endpoints]]、调用时双保险归 [[09-inv-invocation-runtime]] 的 `RouteChatModelFactory`。**重复 OK**:F1 是 03 / 07 / 09 共享决策,各模块都写、用双向模块链接防 drift。**PM 原话见本段下方**:"base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。
 - **原话**：
-  > **F1 base_url 归一化**(本模块关联 probe 用对 base_url;归一化主体见 [[03-orch-credentials-endpoints]])："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"
+  > **F1 base_url 归一化**(本模块关联前置探问要打对 base_url;归一化主体见 [[03-orch-credentials-endpoints]])："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"
 - **测试点**：
-  - **probe 失败 → fallback**:`probe_before_call`==true 且 probe 抛可 fallback 异常 → mark_down + 发 fallback event + 继续下一条 route(不崩在 probe 上)。
-  - **probe 不可 fallback → 抛**:probe 异常经 `classify_exception` 判 fail-fast → 立即抛 `AllProvidersFailedError`,不继续遍历。
-- **status**：前置探问仍在 invoke 前执行(`call/chat_model.py:309-320`),但**不再是 client manager 的轻量 SDK path,也不再是探活**——`call/pre_call_probe.py:63-83` 的 `build_probe_model` 用**生产同一个 `RouteChatModelFactory`** 造模型问一句,探针发的就是真跑时发的那条请求;探得到的结论是「哪个设置不被收」,不是「这条路由死没死」(见上方 ⚠)。
-- **归属**：③b `packages/graph-agent-gateway`(`client_manager` 的 probe,已在)；base_url 归一化存写主体跨 [[03-orch-credentials-endpoints]]、调用时双保险跨 [[09-inv-invocation-runtime]]。
+  - **全都接受 → 只有一问**:route 收下这次调用的全部设置 → `ProbeVerdict(answers_without_them=True, refused=())`,不追问、不摘任何项。
+  - **被拒且 scope 非 `request` → 不追问**:凭据/模型不存在/限流/连不上导致的拒绝,`answers_without_them=False` 且 `refused=()`,**只发出一问**;后续如何处置这条 route 交由调用方的 `classify_exception` 决定(`call/chat_model.py:320-330`)。
+  - **被拒且摘掉偏好后能答 → 逐项点名**:`refused` 精确列出被拒的设置名,且只覆盖 `provider_request_keys(protocol)` 里带得动的项;调用**照常用这条 route 继续**,不 mark_down、不换路。
+  - **摘掉偏好仍被拒 → 与设置无关**:`refused=()` 且带回 provider 原始异常(`refusal`),不把这笔账记到某个设置头上。
+  - **探问超时独立**:探问用 `RuntimePolicy.probe_timeout_seconds`,不继承正式调用的超时。
+- **status**：已落地并与本节一致。`probe_before_call` 默认 `True`(`call/chat_model.py:166`),前置探问仍在 invoke 前执行(`:309-320`),但走 `call/pre_call_probe.py`,与 `LLMCircuitAndUsageLedger` 无关——该类今天只剩熔断与 usage 两件事(`call/clients.py:17-126`,全类无 probe)。
+- **原文与今天的差别(保留旧文,便于对照)**：
+  - 旧文写「probe 是编排层自己发的 1-token 真请求,**用 client manager 的轻量 SDK client,不走 ChatX**」——**今天恰恰相反**:探针刻意复用生产同一个 `RouteChatModelFactory`,好让「探得通」和「跑得起来」不会各说各话;client manager 里那两份手搓请求构造器(openai 一份、anthropic 一份,写死 `max_tokens=1` 且不带用户任何设置)已删除。
+  - 旧 `probe_provider`(及它委托的 `_probe_provider`)问的是「这条 route 活着吗」,失败即 `mark_provider_down`;**两个方法今天都不存在**。
+  - 旧测试点写「probe 失败 → mark_down + 发 fallback event + 继续下一条 route」「probe 不可 fallback → 抛 `AllProvidersFailedError`」——**这两条按新语义都不成立**:拒绝不写熔断;是否换路、是否终止,由调用方拿 `classify_exception` 的结论决定,而不是由「探问失败」本身决定。
+- **归属**：③b `packages/graph-agent-gateway`(前置探问住 `call/pre_call_probe.py`)；base_url 归一化存写主体跨 [[03-orch-credentials-endpoints]]、调用时双保险跨 [[09-inv-invocation-runtime]]。
 
 ### F4 retry（保留 ChatX 瞬时重试，撤回 `max_retries=0`）
 
@@ -176,7 +189,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **已落地**:ChatX 重试耗尽后抛出的核心异常形状已用确定性测试喂给 fallback loop / `classify_exception` 路径,覆盖 fake 401、wrapped network、400 non-capability 与真实 OpenAI SDK 401/400 error shape;分类器当前会沿异常链找 `status_code` 和 `response.status_code`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:223-239`，测试见 `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py`。
 - **疑点(已不成立)**:原疑点记的是——ChatX 主路径 token escalation 包住 factory build + invoke、usage 在收到最终 `AIMessage` 后读一次;而 generic ordinary path 的 `_call_with_token_escalation` 每轮都 `_record_usage_from_result`(该文件已删)。**这条疑点已不成立**:原疑点问的是"ChatX 主路径与 generic ordinary path 两条路径的中间轮 usage 记账策略是否需要完全一致";今天只有一条路径,普通 chat 面复用它(决议 D10),留实现期定。
 - **待办 / 反转后定调**:Studio 的 `SqliteLlmHealthStore` 与执行期 `LLMCircuitAndUsageLedger._provider_down_cache` 的关系——**判据已定二者都属 ③b**(一个是持久化、一个是执行期 TTL 缓存),下沉后应在 gateway 包内统一为同一运行时健康源;当前无源码连接,现状分别在 `apps/studio/backend/app/services/llm_health_store.py:26-124` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:49-52`。**注**:此项原 baseline 记作"疑点:二者是否合并",反转后已不是归属疑点(都 ③b),只剩"下沉后如何合并"的工程问题。
-- **疑点(去重)已随代码消失**:原疑点是「`_probe_provider` 已 `_mark_provider_down`,`_generate` 的 `probe_ok=False` 分支又 `_mark_down` 一次」。两个探活函数都不存在了,现在的前置探问根本不写熔断状态(拒绝≠路由挂,见 F8 ⚠),所以没有第二次 mark_down 可去重。熔断只由真实调用失败后的 `_mark_down` 写入(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:835-844`)。
+- **疑点(去重)已随代码消失**:原疑点是「`_probe_provider` 已 `_mark_provider_down`,`_generate` 的 `probe_ok=False` 分支又 `_mark_down` 一次」。两个探活函数都不存在了,现在的前置探问根本不写熔断状态(拒绝≠路由挂,见 F3),所以没有第二次 mark_down 可去重。熔断只由真实调用失败后的 `_mark_down` 写入(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:835-844`)。
 - **疑点**:`LLMCircuitAndUsageLedger.is_provider_marked_down` 接收 `runtime_policy` 但当前立即 `del runtime_policy`,实际 TTL 判断只看已写入的过期时间;如果 MVP1 要让查询逻辑也感知 policy,需要实现任务另行处理,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-61`。
 
 ## 交叉引用（双向链接，不复制）

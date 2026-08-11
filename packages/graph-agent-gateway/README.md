@@ -91,13 +91,30 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 
 ---
 
-## 4. 内部架构：编排 → [route] → 调用
+## 4. 内部架构：六个域，域的公共契约就是包入口
 
-- **编排（准备期）**：role → 解析出该用哪条 `route`（含 fallback 顺序、熔断 / probe 决策），**不调模型**。
-- **交接**：`route`（`ResolvedRoute` / `ResolvedRole`）= 编排 ↔ 调用的唯一接口。
-- **调用（执行期）**：拿 `route` 真正调（原生 ChatX）。
+包按**领域**成树。划分依据是一组共同的不变量，不是文件名相似；域外只从包入口导入
+（`from graph_agent_gateway.<域> import X`），不深入别人的文件——由
+`tests/test_gateway_package_boundary.py` 的 AST 门禁强制。
+
+| 域 | 负责什么 |
+|---|---|
+| `registry/` | **真相**：凭据 / 端点 / 路由 / 能力的定义、身份、边界、存储 port、状态投影 |
+| `resolve/` | **解析**：从角色推出一条具体路由链（lint / profile / 交接 / fallback / 错误分类） |
+| `role/` | **角色物化**：角色 → 已贴合这条路由的调用设置 |
+| `dialect/` | **方言**：每家 provider 的请求 / 响应形状（生产与探测唯一共用实现） |
+| `call/` | **调用**：客户端、chat model、本次调用的设置与下场 |
+| `probing/` | **探测**：问一个小到值得问的问题（端点通不通 / 路由认不认 / 这档 effort 收不收） |
+
+贯穿的那条线仍然是**编排 → [route] → 调用**：
+
+- **编排（准备期）**：`resolve` + `role` 推出该用哪条 `route`（含 fallback 顺序与跳过原因），**不调模型**。
+- **交接**：`ResolvedRoute` / `ResolvedRole` = 编排 ↔ 调用的唯一接口。
+- **调用（执行期）**：`call` 拿 `route` 真正调。
 
 调用方可以只取"编排"（要 route 自己调，如独立 SDK 运行时），也可以让 gateway 一路调到底。
+
+**怎么用**：见 [`docs/graph-agent-gateway/USAGE.md`](../../docs/graph-agent-gateway/USAGE.md)。
 
 ---
 
@@ -131,10 +148,14 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
 
 ## 7. 现状与下沉路线
 
-- **已在包内**（`src/graph_agent_gateway/`）：`ModelResolver` / `GatewayChatModel` 调用外壳、`client_manager` 调用与熔断、`registry/`（schema / credentials / capabilities / lint / error_classification / probe / canonical / resolver）、events / exceptions / tracing。
-- **对外 API 现状**：顶层 `__init__` 目前只导出 `GatewayChatModel` / `ModelResolver` / 异常——上面 §3 的多数富能力**尚未提升为一等对外 API**（仍埋在 `registry` 子模块，或仍在 studio 侧）。
-- **待下沉**（按判据属公共，当前实现散在 `apps/studio/backend`）：endpoint 标准化拆分、list-models 解析、model group 分组、identity、notable / Probe Knowledge Catalog、6 态投影、熔断持久化、materialize 编排核心、能力合并。
-- **模块级现状 vs 目标**详见 `docs/graph-agent-gateway/mvp1/`。
+- **对外 API**：六个域各有自己的包入口并各自维护 `__all__`，顶层 `__init__` 只是极薄的
+  re-export。域入口就是契约：`registry` / `resolve` / `role` / `call` / `dialect` / `probing`。
+- **待下沉**（按判据属公共，当前实现仍散在 `apps/studio/backend`）：endpoint 标准化拆分、
+  list-models 解析、model group 分组、identity、notable / Probe Knowledge Catalog、
+  6 态投影、熔断持久化、materialize 编排核心、能力合并。
+- **模块级现状 vs 目标**详见 `docs/graph-agent-gateway/mvp1/`；域树是怎么定下来的、
+  每一期改了什么，见
+  [`docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md`](../../docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md)。
 
 ---
 

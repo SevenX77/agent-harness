@@ -112,6 +112,38 @@ def _is_billing_error(answer: ProviderAnswer) -> bool:
     return any(marker in text for marker in _BILLING_ERROR_MARKERS)
 
 
+# A provider can reject the probe's own payload for a rule that has nothing to
+# do with the capability under test — the multimodal probe sends an image, and a
+# provider with a minimum image size refuses it on those grounds alone (live
+# 2026-08-11, Ark: HTTP 400 InvalidParameter, "Image dimensions are too small.
+# Minimum allowed dimension: 14 pixels"). Reading that as invalid_model records
+# "this model does not take images" from an answer that says no such thing. The
+# probe payload is ours; when it is what got refused, the answer is about us.
+_PAYLOAD_REJECTION_MARKERS = (
+    "image dimensions",
+    "image size",
+    "minimum allowed dimension",
+    "image is too large",
+    "image too large",
+    "unsupported image format",
+    "invalid image",
+)
+
+
+def _rejects_our_payload(answer: ProviderAnswer) -> bool:
+    payload = answer.payload()
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    source = error if isinstance(error, dict) else payload
+    text = " ".join(
+        str(value).lower()
+        for value in (source.get("type"), source.get("code"), source.get("message"))
+        if value is not None
+    )
+    return any(marker in text for marker in _PAYLOAD_REJECTION_MARKERS)
+
+
 # A URL that does not serve the probed protocol at all answers with wrong-path
 # signatures instead of a provider-shaped model error. Two observed families
 # (design §1.2 protocol matrix, live-verified on qiniu): explicit guidance to the
@@ -202,6 +234,8 @@ def probe_status(
     if code in (400, 404):
         if _is_billing_error(answer):
             return "quota_exceeded"
+        if _rejects_our_payload(answer):
+            return "error"
         if code == 404 and not _is_provider_error_payload(answer):
             return "protocol_unsupported"
         return model_not_found_status

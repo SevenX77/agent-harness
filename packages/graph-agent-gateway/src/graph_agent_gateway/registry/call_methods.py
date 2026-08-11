@@ -105,11 +105,40 @@ def call_method_client_compatibility(method_id: str | None, client_id: str) -> C
     return definition.client_compatibility.get(client_id, "unknown")
 
 
-def provider_probe_backend_for_method(method_id: str) -> ProviderProbeBackend:
+def preferred_call_method_for_endpoint(protocol: str | None, base_url: str | None) -> str:
+    """The call method an endpoint speaks, before any route has proved one.
+
+    `call_method_ids_for_endpoint` is preference-ordered, so the first candidate
+    is the one a call to this endpoint would reach for. An endpoint whose
+    protocol has no registered method cannot be called at all, which is a
+    catalog gap and not something to paper over with a default.
+    """
+
+    candidates = call_method_ids_for_endpoint(protocol, base_url)
+    if not candidates:
+        raise ValueError(f"No call method is registered for protocol: {protocol!r}")
+    return candidates[0]
+
+
+def provider_backend_for_method(method_id: str) -> ProviderProbeBackend:
+    """Which provider implementation stands behind a call method."""
+
     definition = call_method_definition(method_id)
-    if definition is None or not definition.official_probe:
-        raise ValueError(f"Unknown official call method: {method_id}")
+    if definition is None:
+        raise ValueError(f"Unknown call method: {method_id}")
     return definition.provider_backend
+
+
+def call_method_is_officially_probeable(method_id: str) -> bool:
+    """Whether the official-method probe offers this method.
+
+    Separate from whether the method can be sent at all: every method in the
+    catalog has a dialect, and this flag only says which ones the "test this
+    model against its official API" surface lists.
+    """
+
+    definition = call_method_definition(method_id)
+    return definition is not None and definition.official_probe
 
 
 def apply_call_method_base_url(method_id: str | None, base_url: str) -> str:
@@ -325,5 +354,7 @@ __all__ = [
     "call_method_ids_for_endpoint",
     "call_method_ids_for_client",
     "official_call_method_ids",
-    "provider_probe_backend_for_method",
+    "call_method_is_officially_probeable",
+    "preferred_call_method_for_endpoint",
+    "provider_backend_for_method",
 ]

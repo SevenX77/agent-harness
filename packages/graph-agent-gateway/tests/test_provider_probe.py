@@ -84,7 +84,9 @@ async def test_gateway_route_test_is_scoped_to_provider_route() -> None:
             {
                 "model": "anthropic/claude-sonnet",
                 "messages": [{"role": "user", "content": "."}],
-                "max_completion_tokens": 1,
+                # `max_tokens` is the field production sends to every
+                # OpenAI-compatible endpoint (call/dispatch.py::_call_openai_compatible).
+                "max_tokens": 1,
             },
         )
     ]
@@ -481,7 +483,16 @@ async def test_deepseek_anthropic_probe_keeps_canonical_anthropic_base_path() ->
     assert requests == ["https://api.deepseek.com/anthropic/v1/messages"]
 
 
-def test_deepseek_anthropic_endpoint_backend_uses_deepseek_provider() -> None:
+def test_whose_api_it_is_and_how_to_speak_to_it_are_answered_separately() -> None:
+    """DeepSeek's Anthropic surface is DeepSeek's, and it speaks Anthropic.
+
+    The vendor decides which official methods are offered for the endpoint; the
+    declared protocol decides the wire. Collapsing them is how an endpoint that
+    said `anthropic_compatible` came to be probed with an OpenAI chat request:
+    `probe_official_call_method` already speaks x-api-key and /v1/messages to
+    this very surface.
+    """
+
     endpoint = ProviderEndpoint(
         endpoint_id="deepseek-official",
         protocol="anthropic_compatible",
@@ -491,6 +502,35 @@ def test_deepseek_anthropic_endpoint_backend_uses_deepseek_provider() -> None:
     )
 
     assert provider_probe.endpoint_probe_backend(endpoint) == "deepseek"
+    assert provider_probe.probe_wire_backend(endpoint.protocol) == "claude"
+
+
+def test_a_host_that_does_not_publish_that_protocol_is_not_that_vendor() -> None:
+    # DeepSeek publishes an OpenAI-compatible and an Anthropic-compatible
+    # surface. A url on that host declaring anything else is neither.
+    endpoint = ProviderEndpoint(
+        endpoint_id="odd-one",
+        protocol="ark_runtime",
+        base_url="https://api.deepseek.com/api/v3",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+
+    assert provider_probe.endpoint_probe_backend(endpoint) == "ark"
+
+
+def test_an_endpoint_named_after_a_vendor_is_not_that_vendor() -> None:
+    # The name is a label the user typed. It used to decide which official
+    # method menu the endpoint got and which token budget field it was sent.
+    endpoint = ProviderEndpoint(
+        endpoint_id="deepseek-fast",
+        protocol="openai_compatible",
+        base_url="https://gateway.example/v1",
+        api_key=SecretStr("secret"),
+        provider_kind="third_party",
+    )
+
+    assert provider_probe.endpoint_probe_backend(endpoint) == "openai"
 
 
 def test_ark_openai_compatible_endpoint_backend_uses_openai_protocol() -> None:

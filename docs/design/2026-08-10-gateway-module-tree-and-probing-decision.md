@@ -294,6 +294,47 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     没有就地把它接到方言上,是因为两者对 effort 的处理本就不同(A2 从不发 `output_config`),
     接上去等于**在一次"逐字节不变"的搬迁里偷改一条没被基线钉住的线路**。
 
+#### D5 的 2026-08-13 补记(P2c-2:猜测删除后,判据从"协议"来)
+
+12. **一个 `backend` 原来在回答两个问题,拆成两个函数。** 「这条 endpoint 是哪一家的」
+    (决定官方方法菜单)与「跟它怎么说话」(决定请求长什么样)是两个问题,原来共用
+    `endpoint_probe_backend` 一个答案,于是**主机名能推翻用户声明的协议**。
+    现在:`probe_wire_backend(protocol)` 回答后者——依据是**生产就按协议分派**
+    (`call/dispatch.py:189` 的 `route.protocol == "ark_runtime"`,随后
+    `_call_openai_compatible` / `_call_anthropic_compatible` / `_call_google_genai`);
+    `endpoint_probe_backend` 继续回答前者,但只认 url 里的厂商身份,**不再看 endpoint 的名字**。
+
+    中途差点做错一次,记下来:先做的版本把两个问题合并成"一律按协议",跑完 studio 全量才发现
+    `routers/llm.py:4100` 的官方探测候选菜单正是按这个 backend 取
+    `app/data/probe_candidates.json` 的——合并等于**悄悄删掉 DeepSeek 的官方方法菜单**。
+    教训不是"要跑全量测试"(那是兜底),而是:**删一个概念之前先问它在替谁回答问题**;
+    这里它替两个人回答,只是从名字上看不出来。
+    厂商判定同时收窄了两处:必须是 `deepseek.com` 这个域(原来是 url 里出现 "deepseek" 子串就算),
+    且协议必须是 DeepSeek 真的发布过的那两个面(openai / anthropic 兼容)——
+    一条 `ark_runtime` 的 url 落在 deepseek 主机上,它不是 DeepSeek 的面。
+
+    100 条基线中 37 条变化,全部归因于三件事:声明的协议不再被主机名推翻(anthropic / google
+    落在 deepseek 主机的两组)、endpoint 的名字不再决定菜单和字段、以及下面第 13 条。
+    **DeepSeek 的 openai 兼容 endpoint 一条都没变**(含 backend 标签),这正是第 13 条要保证的。
+
+13. **OpenAI 兼容面的预算字段改成 `max_tokens`,理由是生产就发这个。**
+    `call/dispatch.py:239` 的 `_call_openai_compatible` 对**所有** openai 兼容路由
+    (含 OpenAI 自己)发 `"max_tokens"`,从不发 `max_completion_tokens`;而探测侧原本对
+    "openai" 发 `max_completion_tokens`、对 "deepseek" 发 `max_tokens`。也就是说
+    **探测替 OpenAI 造了一个生产从不发的字段,却替 DeepSeek 发对了**。
+    这一改让两边一致:A3 基线只动 8 行(`openai_chat_completions` 的 8 个用例),
+    A2 侧 deepseek 主机的请求体一字未变——**没有任何一条路由因为删掉猜测而变得更不像生产**。
+    附带结论:`openai_chat_completions` 与 `deepseek_chat_completions` 在线路上至此完全相同,
+    只剩 `provider_backend` 一字之差;要不要合并是 catalog 的题,不在本期动。
+
+14. **"能不能发"与"官方探测给不给选"分开。** `provider_probe_backend_for_method` 原本把
+    「方法不存在」和「这个方法没有官方探测」都报成 `Unknown official call method`,
+    于是 openrouter 的 endpoint 一问 backend 就炸。现在拆成
+    `provider_backend_for_method`(任何已知方法都能问)与
+    `call_method_is_officially_probeable`(A3 入口自己检查并在发请求之前拒绝);
+    方言表相应扩到 catalog 的全部方法,包括 `official_probe: false` 的那个——
+    **一条线路能不能渲染,和某个入口愿不愿意提供它,是两个问题。**
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

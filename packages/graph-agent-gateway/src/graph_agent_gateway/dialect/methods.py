@@ -1,8 +1,13 @@
-"""What a dialect is, and which one each official call method speaks.
+"""What a dialect is, and which one each call method speaks.
 
 The table below is the whole of the per-method wire knowledge: a method that is
 not in it cannot be rendered, which is why lookup fails loudly instead of
 falling back to whatever wire happens to be most common.
+
+Every call method the catalog knows has a dialect, including the ones the
+official-method probe does not offer. Whether a method can be put on a wire and
+whether a particular probe offers it are two different questions, and the
+catalog's ``official_probe`` flag answers only the second.
 """
 
 from __future__ import annotations
@@ -50,9 +55,13 @@ _DIALECTS: dict[str, Dialect] = {
         auth=AuthScheme.BEARER_HEADER,
         content_as_blocks=True,
     ),
+    # `max_tokens`, not `max_completion_tokens`: production reaches every
+    # OpenAI-compatible endpoint through `call/dispatch.py::_call_openai_compatible`,
+    # which sends `max_tokens`. A probe naming the field differently tests a
+    # request no call ever makes.
     "openai_chat_completions": OpenAIChatCompletions(
         path=VersionedPath("/chat/completions"),
-        budget_field="max_completion_tokens",
+        budget_field="max_tokens",
         reasoning_style=ReasoningStyle.NATIVE_EFFORT,
     ),
     "deepseek_chat_completions": OpenAIChatCompletions(
@@ -75,6 +84,10 @@ _DIALECTS: dict[str, Dialect] = {
         reasoning_style=ReasoningStyle.ARK_THINKING,
         input_as_message_list=True,
     ),
+    "openrouter_anthropic_messages": AnthropicMessages(
+        auth=AuthScheme.API_KEY_HEADER,
+        content_as_blocks=False,
+    ),
     "openai_completions": OpenAICompletions(path=VersionedPath("/completions")),
     "gemini_generate_content": GeminiGenerateContent(),
 }
@@ -87,7 +100,7 @@ def dialect_for_method(method_id: str) -> Dialect:
     return dialect
 
 
-def official_wire_method_ids() -> frozenset[str]:
+def dialect_method_ids() -> frozenset[str]:
     """Every call method that can be rendered onto a wire."""
 
     return frozenset(_DIALECTS)

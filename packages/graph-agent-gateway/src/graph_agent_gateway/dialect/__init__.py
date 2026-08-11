@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from .anthropic import AnthropicMessages
 from .google import GeminiGenerateContent
-from .methods import Dialect, dialect_for_method, official_wire_method_ids
+from .methods import Dialect, dialect_for_method, dialect_method_ids
 from .openai import (
     OpenAIChatCompletions,
     OpenAICompletions,
@@ -50,6 +50,6 @@ __all__ = [
     "WirePath",
     "WireRequest",
     "dialect_for_method",
+    "dialect_method_ids",
     "join_base_url_and_path",
-    "official_wire_method_ids",
 ]

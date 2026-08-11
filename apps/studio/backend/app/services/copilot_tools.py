@@ -1921,13 +1921,12 @@ async def test_llm_endpoint_models_tool(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def probe_llm_route_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.routers import llm
-    from app.routers.llm import RouteProbeRequest
 
     route_id = str(args.get("route_id", "")).strip()
     if not route_id:
         return _text_result("route_id 不能为空", is_error=True)
     try:
-        response = await llm.probe_route(route_id, RouteProbeRequest(), force=True)
+        response = await llm.probe_route(route_id)
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
         return _text_result(f"probe_llm_route 失败: {exc}", is_error=True)
     return _text_result(response.model_dump(mode="json"))

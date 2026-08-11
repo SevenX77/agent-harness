@@ -224,7 +224,7 @@ ChatAnthropic(effort="medium")._get_request_payload(...)
   一旦存在就原样保留,不被文档值覆盖。
 - **空态**:协议没有文档词表(如 openai_compatible,各型号档位不同)且探测未跑过时,
   控件禁用并说明"该角色下没有模型报出档位",不臆造一份枚举。这里**不给"去测"入口**:
-  B2 落地后 effort 确实会被测(强制路由探测 `POST /routes/{id}/probe?force=true` 通过后
+  B2 落地后 effort 确实会被测(路由探测 `POST /routes/{id}/probe` 通过后
   逐档追问),但**今天前端触发这条 API 的地方只有 Available Models 里"重探一条 off 路由"
   这一个动作**——把空态文案指向一个健康路由点不到的按钮,还是一个空承诺。
   **未决**:健康路由要不要一个"测一测这个模型"的入口(以及它是复用现有 re-probe 动作

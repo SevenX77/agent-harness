@@ -5586,14 +5586,6 @@ def test_route_metadata_probe_and_profile_apply_conflict(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    probe_response = client.post(
-        "/api/llm/routes/openai-direct:gpt-5/probe",
-        json={"capabilities": ["tool_calling"]},
-    )
-    assert probe_response.status_code == 200
-    probed_route = _registry_response_route(probe_response.json())
-    assert probed_route["capabilities"]["tool_protocol"]["source"] == "probed_verified"
-
     update_response = client.put(
         "/api/llm/routes/openai-direct:gpt-5",
         json={
@@ -5629,43 +5621,7 @@ def test_route_metadata_probe_and_profile_apply_conflict(
     assert conflict.json()["details"]["role_name"] == "graph_agent"
 
 
-def test_route_probe_accepts_runtime_setting_capability_metadata(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _seed(tmp_path, monkeypatch)
-
-    response = client.post(
-        "/api/llm/routes/openai-direct:gpt-5/probe",
-        json={
-            "runtime_settings": {
-                "temperature": {"supported": True, "min": 0, "max": 2, "default": 1},
-                "seed": {"supported": False},
-                "max_output_tokens": {"supported": True, "min": 1, "max": 8192, "default": 2048},
-            }
-        },
-    )
-
-    assert response.status_code == 200
-    capabilities = _registry_response_route(response.json())["capabilities"]
-    assert capabilities["temperature"]["source"] == "probed_verified"
-    assert capabilities["temperature"]["value"] == {
-        "supported": True,
-        "min": 0,
-        "max": 2,
-        "default": 1,
-    }
-    assert capabilities["seed"]["value"] == {"supported": False}
-    assert capabilities["max_output_tokens"]["value"] == {
-        "supported": True,
-        "min": 1,
-        "max": 8192,
-        "default": 2048,
-    }
-
-
-def test_route_probe_force_true_calls_real_provider_probe(
+def test_route_probe_calls_real_provider_probe(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5690,10 +5646,10 @@ def test_route_probe_force_true_calls_real_provider_probe(
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
 
     assert response.status_code == 200
-    # force=true probes the specific route against its endpoint's base_url + model;
+    # the probe targets the specific route against its endpoint's base_url + model;
     # backend/key resolution is the gateway's job.
     assert calls == [
         {
@@ -5705,7 +5661,7 @@ def test_route_probe_force_true_calls_real_provider_probe(
     assert _registry_response_route(response.json())["status"] == "verified"
 
 
-def test_route_probe_force_true_skips_disabled_endpoint(
+def test_route_probe_skips_disabled_endpoint(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5732,7 +5688,7 @@ def test_route_probe_force_true_skips_disabled_endpoint(
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_test_route)
 
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
 
     assert response.status_code == 200
     route = _registry_response_route(response.json())
@@ -5741,7 +5697,7 @@ def test_route_probe_force_true_skips_disabled_endpoint(
     assert route["metadata"]["last_probe_message"] == llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE
 
 
-def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
+def test_route_probe_delegates_scoped_route_probe_to_gateway(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5773,14 +5729,14 @@ def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
         raising=False,
     )
 
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
 
     assert response.status_code == 200
     assert gateway_calls == [("openai-direct", "openai-direct:gpt-5")]
     assert _registry_response_route(response.json())["status"] == "verified"
 
 
-def test_route_probe_force_true_success_closes_active_route_circuit(
+def test_route_probe_success_closes_active_route_circuit(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5799,7 +5755,7 @@ def test_route_probe_force_true_success_closes_active_route_circuit(
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
 
     assert response.status_code == 200
     assert _registry_response_route(response.json())["status"] == "verified"
@@ -5815,7 +5771,7 @@ def test_route_probe_force_true_success_closes_active_route_circuit(
     assert active == []
 
 
-def test_route_probe_force_true_transient_failure_refreshes_route_circuit(
+def test_route_probe_transient_failure_refreshes_route_circuit(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5844,7 +5800,7 @@ def test_route_probe_force_true_transient_failure_refreshes_route_circuit(
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
 
     assert response.status_code == 200
 
@@ -5868,7 +5824,7 @@ def test_route_probe_force_true_transient_failure_refreshes_route_circuit(
     assert provider_model["retry_at"] == active[0].retry_at.isoformat()
 
 
-def test_route_probe_force_true_hard_failure_projects_needs_setup(
+def test_route_probe_hard_failure_projects_needs_setup(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -5890,7 +5846,7 @@ def test_route_probe_force_true_hard_failure_projects_needs_setup(
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
 
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
 
     assert response.status_code == 200
     assert _registry_response_route(response.json())["status"] == "failed"

@@ -96,7 +96,7 @@ def _record_asked(
     return asked
 
 
-def test_a_forced_probe_records_the_levels_the_route_accepted(
+def test_a_probe_records_the_levels_the_route_accepted(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -104,7 +104,7 @@ def test_a_forced_probe_records_the_levels_the_route_accepted(
     _seed(tmp_path, monkeypatch, thinking=True, protocol="anthropic_compatible")
     asked = _record_asked(monkeypatch, accepted={"low", "high", "max"})
 
-    response = client.post("/api/llm/routes/vendor:thinker/probe?force=true", json={})
+    response = client.post("/api/llm/routes/vendor:thinker/probe")
 
     assert response.status_code == 200, response.text
     capability = load_credentials().provider_routes["vendor:thinker"].capabilities[
@@ -126,7 +126,7 @@ def test_a_protocol_that_pins_its_vocabulary_is_not_asked_beyond_it(
     _seed(tmp_path, monkeypatch, thinking=True, protocol="google_genai")
     asked = _record_asked(monkeypatch, accepted={"minimal", "low", "medium", "high"})
 
-    client.post("/api/llm/routes/vendor:thinker/probe?force=true", json={})
+    client.post("/api/llm/routes/vendor:thinker/probe")
 
     assert asked[1:] == ["minimal", "low", "medium", "high"]
 
@@ -141,7 +141,7 @@ def test_a_protocol_that_pins_nothing_is_asked_the_whole_ladder(
     _seed(tmp_path, monkeypatch, thinking=True, protocol="openai_compatible")
     asked = _record_asked(monkeypatch, accepted={"low", "high"})
 
-    client.post("/api/llm/routes/vendor:thinker/probe?force=true", json={})
+    client.post("/api/llm/routes/vendor:thinker/probe")
 
     assert asked[1:] == ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
     capability = load_credentials().provider_routes["vendor:thinker"].capabilities[
@@ -160,7 +160,7 @@ def test_a_route_that_does_not_reason_is_never_asked_about_effort(
     _seed(tmp_path, monkeypatch, thinking=False, protocol="anthropic_compatible")
     asked = _record_asked(monkeypatch, accepted={"low", "high", "max"})
 
-    client.post("/api/llm/routes/vendor:thinker/probe?force=true", json={})
+    client.post("/api/llm/routes/vendor:thinker/probe")
 
     assert asked == [None]
     assert "reasoning_effort" not in load_credentials().provider_routes[
@@ -178,7 +178,7 @@ def test_a_route_that_refuses_every_level_records_that_rather_than_nothing(
     _seed(tmp_path, monkeypatch, thinking=True, protocol="anthropic_compatible")
     _record_asked(monkeypatch, accepted=set())
 
-    client.post("/api/llm/routes/vendor:thinker/probe?force=true", json={})
+    client.post("/api/llm/routes/vendor:thinker/probe")
 
     capability = load_credentials().provider_routes["vendor:thinker"].capabilities[
         "reasoning_effort"
@@ -196,7 +196,7 @@ def test_a_probe_that_hit_a_rate_limit_records_nothing_rather_than_a_wrong_list(
     _seed(tmp_path, monkeypatch, thinking=True, protocol="anthropic_compatible")
     _record_asked(monkeypatch, accepted={"low"}, refusal_status="rate_limited")
 
-    client.post("/api/llm/routes/vendor:thinker/probe?force=true", json={})
+    client.post("/api/llm/routes/vendor:thinker/probe")
 
     assert "reasoning_effort" not in load_credentials().provider_routes[
         "vendor:thinker"

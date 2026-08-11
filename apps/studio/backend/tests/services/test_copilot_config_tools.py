@@ -271,9 +271,8 @@ def test_probe_llm_route_reuses_router(monkeypatch: pytest.MonkeyPatch) -> None:
 
     called: dict[str, Any] = {}
 
-    async def _fake(route_id: str, request: Any, force: bool = False) -> Any:
+    async def _fake(route_id: str) -> Any:
         called["route_id"] = route_id
-        called["force"] = force
 
         class _R:
             def model_dump(self, mode: str = "json") -> dict[str, Any]:

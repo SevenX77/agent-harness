@@ -142,9 +142,7 @@ BACKEND GET /health
 BACKEND POST /api/copilot/roles/{role_name}/test-sdk
 BACKEND POST /api/io/scan
 BACKEND POST /api/llm/catalog/contribute
-BACKEND POST /api/llm/catalog/repository/ensure
 BACKEND POST /api/llm/catalog/share
-BACKEND POST /api/llm/catalog/sync
 BACKEND POST /api/llm/catalog/sync-verified
 BACKEND POST /api/llm/endpoints/{endpoint_id}/models/test
 BACKEND POST /api/llm/endpoints/{endpoint_id}/test
@@ -362,9 +360,7 @@ BACKEND GET /health | internal | none | Backend-owned infrastructure endpoint; n
 BACKEND POST /api/copilot/roles/{role_name}/test-sdk | ok | specific | Explicit Copilot role SDK test command; returns scoped diagnostics/job state and does not mutate broad registry truth.
 BACKEND POST /api/io/scan | ok | specific | Explicit I/O import scan for a chosen file/folder; scanning is not tied to panel mount or selection.
 BACKEND POST /api/llm/catalog/contribute | ok | specific | Explicit community-catalog contribution command; repository/catalog side effects are command-scoped and do not refresh runtime roles/settings.
-BACKEND POST /api/llm/catalog/repository/ensure | ok | specific | Explicit catalog repository setup command; result is catalog-scoped setup metadata.
 BACKEND POST /api/llm/catalog/share | ok | specific | Explicit share command for selected local catalog content; no lifecycle caller remains.
-BACKEND POST /api/llm/catalog/sync | ok | specific | Explicit remote catalog sync command; current Settings lifecycle auto-sync path is removed.
 BACKEND POST /api/llm/catalog/sync-verified | ok | specific | Explicit verified-catalog sync command; controller tests guard that Settings load does not call it automatically.
 BACKEND POST /api/llm/endpoints/{endpoint_id}/models/test | ok | specific | Explicit manual model probe command; backend returns EndpointModelTestResponse with canonical registry projection and scoped results.
 BACKEND POST /api/llm/endpoints/{endpoint_id}/test | ok | specific | Explicit endpoint Test command; backend returns EndpointTestResponse with canonical registry projection and scoped endpoint metadata.

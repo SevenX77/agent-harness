@@ -3,7 +3,7 @@ module: 05-orch-capabilities-and-models
 doc: mvp1-alignment
 status: drafted
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:normalize_route_capabilities/build_runtime_setting_descriptors · packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:lint_role_routes/capability_key_for_lint · packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:select_verified_profile/ProfileSelectionError · packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:resolve_role · apps/studio/backend/app/routers/llm.py:probe_route/_registry_response/_capability_state · apps/studio/backend/app/services/llm_model_identity.py:project_model_identity · apps/studio/backend/app/services/llm_model_groups.py:project_model_group_identity/normalize_model_group_key · apps/studio/backend/app/services/llm_notable_models.py:notable_model_ids/default_provider_notes_dir · apps/studio/backend/app/services/llm_route_capabilities.py:route_effective_capabilities/route_thinking_capability/verified_profile_route_capabilities
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:normalize_route_capabilities/build_runtime_setting_descriptors · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/lint.py:lint_role_routes/capability_key_for_lint · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/profile_selector.py:select_verified_profile/ProfileSelectionError · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:resolve_role · apps/studio/backend/app/routers/llm.py:probe_route/_registry_response/_capability_state · apps/studio/backend/app/services/llm_model_identity.py:project_model_identity · apps/studio/backend/app/services/llm_model_groups.py:project_model_group_identity/normalize_model_group_key · apps/studio/backend/app/services/llm_notable_models.py:notable_model_ids/default_provider_notes_dir · apps/studio/backend/app/services/llm_route_capabilities.py:route_effective_capabilities/route_thinking_capability/verified_profile_route_capabilities
 units: [capability-model-knowledge]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -103,7 +103,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
   > "**lint 校验**（✅ `registry/lint.py:lint_role_routes`）：检查路线配置是否满足能力要求，只 warn / block，不替应用选型。"
 - **测试点**：**lint 只产结果不改链**：blocking lint → `RegistryResolutionError`，但 `fallback_chain` 顺序/成员**不变**；非 blocking → 进 `ResolvedRole.lint_results`（防 lint 退化成动态选型）。
 - **status**：已实现——lint 已覆盖缺 capability、capability incompatible、未验证 error capability 以及 runtime setting 超界/不支持（`registry/lint.py:39-87`、`:90-332`）。
-- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py`（lint）+ `registry/resolver.py`（调用使用链），已在包内。
+- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/lint.py`（lint）+ `registry/resolver.py`（调用使用链），已在包内。
 
 ### F3 profile_selector（单 route 内"怎么调"）（`select_verified_profile`）
 
@@ -114,7 +114,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
   - **profile 选择不跨 route**：单 route 无 ready profile → 返回 `None`（不失败、不去别的 route 找）；要 reasoning 但本 route 无 reasoning profile → `ProfileSelectionError`（不替换 route）。
   - **profile 排序稳定**：default → fallback_rank → profile_id 三键排序，多次解析结果一致（`profile_selector.py:69-73`）。
 - **status**：已实现——profile selection 已按 ready status、required modalities、reasoning intent 和 default/fallback_rank/profile_id 稳定排序（`registry/profile_selector.py:21-52`、`:69-73`）。输出作 `ResolvedRoute` 调用方法提示。
-- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py`（profile 选择）+ `registry/resolver.py`，已在包内。
+- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/profile_selector.py`（profile 选择）+ `registry/resolver.py`，已在包内。
 
 ### F4 model_groups 分组（`project_model_group_identity`）
 

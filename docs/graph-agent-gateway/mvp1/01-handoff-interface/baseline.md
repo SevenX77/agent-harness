@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:ModelResolverProtocol · packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver · apps/studio/backend/app/models/copilot.py:CopilotWsRequestPayload/CopilotEvent
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/protocol.py:ModelResolverProtocol · packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:ModelResolver · apps/studio/backend/app/models/copilot.py:CopilotWsRequestPayload/CopilotEvent
 units: [route-handoff-interface]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -19,7 +19,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 | 覆盖项 | 覆盖状态 | 现状说明 |
 |---|---:|---|
-| `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:ModelResolverProtocol` | 100% | `ModelResolverProtocol` 是 Engine 侧依赖注入协议：当前同时提供 role 级 `resolve(...) -> BaseChatModel` 和 route 级 `resolve_routes(...) -> ResolvedRole`。**判据:③b 公共;route 级直调 public API 已落地,详见 `mvp1-alignment.md` §3。** |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/protocol.py:ModelResolverProtocol` | 100% | `ModelResolverProtocol` 是 Engine 侧依赖注入协议：当前同时提供 role 级 `resolve(...) -> BaseChatModel` 和 route 级 `resolve_routes(...) -> ResolvedRole`。**判据:③b 公共;route 级直调 public API 已落地,详见 `mvp1-alignment.md` §3。** |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py` | 100% | `__init__.py` 是 Gateway 包公开门面：导出 resolver、chat model、异常和 fallback event。**判据:③b 公共。** |
 | `apps/studio/backend/app/models/copilot.py` | 100% | `CopilotWsRequestPayload` 和 `CopilotEvent*` 是 Studio Copilot WebSocket 输入/输出事件模型。manifest 已按实际路径登记。**判据:③a 应用契约——这是 Studio copilot 应用自己的 WS 契约,引用 route(经 ③b 取得)≠ ③b 泄漏;详见 `mvp1-alignment.md` §3/§4。** |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute` | 100% | `ResolvedRoute` 是当前 registry resolver 产出的单条可执行 route 数据：它把 endpoint、protocol、credential、模型和 runtime settings 合并成一条候选。**判据:③b 公共(权威源)。** |
@@ -31,21 +31,21 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 | 字段 | 当前用途 | 代码依据 |
 |---|---|---|
-| `role_name` | 标记本 route 来自哪个逻辑 role，fallback event 和 metadata 用它定位业务上下文。 | `registry/schema.py:420`、`gateway_chat_model.py:383` |
-| `route_id` | route 的唯一执行标识，当前也是 candidate id。 | `registry/schema.py:421`、`gateway_chat_model.py:395` |
-| `endpoint_id` | 指向 endpoint，用于 credential、usage、Copilot session provider key。 | `registry/schema.py:422`、`gateway_chat_model.py:324`、`copilot.py:245` |
+| `role_name` | 标记本 route 来自哪个逻辑 role，fallback event 和 metadata 用它定位业务上下文。 | `registry/schema.py:420`、`call/chat_model.py:383` |
+| `route_id` | route 的唯一执行标识，当前也是 candidate id。 | `registry/schema.py:421`、`call/chat_model.py:395` |
+| `endpoint_id` | 指向 endpoint，用于 credential、usage、Copilot session provider key。 | `registry/schema.py:422`、`call/chat_model.py:324`、`copilot.py:245` |
 | `protocol` | 决定调用协议，如 `openai_compatible`、`anthropic_compatible`。 | `registry/schema.py:423`、`registry/schema.py:19` |
 | `base_url` | 传给调用层或 Copilot SDK 的 endpoint URL；现状仍由调用方局部处理特殊 protocol。 | `registry/schema.py:424`、`copilot.py:460` |
 | `credential_ref` | 指向密钥引用；`ResolvedRoute` 校验它不能为空。 | `registry/schema.py:425`、`registry/schema.py:441` |
 | `credential_fingerprint` | 表示密钥版本/指纹，用于缓存和诊断，不暴露明文。 | `registry/schema.py:426`、`registry/resolver.py:85` |
 | `timeout_seconds` / `trust_env` / `proxy_env` | endpoint 级运行环境参数。 | `registry/schema.py:427`、`registry/schema.py:428`、`registry/schema.py:429` |
-| `provider_model_id` | provider 侧真实模型名，传给 SDK 或写入 response metadata。 | `registry/schema.py:430`、`gateway_chat_model.py:326`、`copilot.py:244` |
-| `canonical_id` | 归一化模型身份，用于展示、分组和诊断。 | `registry/schema.py:431`、`gateway_chat_model.py:327` |
+| `provider_model_id` | provider 侧真实模型名，传给 SDK 或写入 response metadata。 | `registry/schema.py:430`、`call/chat_model.py:326`、`copilot.py:244` |
+| `canonical_id` | 归一化模型身份，用于展示、分组和诊断。 | `registry/schema.py:431`、`call/chat_model.py:327` |
 | `selected_profile_id` / `selected_profile_capability` | 表示 resolver 选中的 verified profile，现状作为 route 诊断信息保留。 | `registry/schema.py:432`、`registry/schema.py:433` |
 | `call_method_id` / `request_mapper_id` | 表示 provider 调用方法和请求映射器；Copilot 用它识别 Ark/DeepSeek 的 Anthropic 兼容路径。 | `registry/schema.py:434`、`registry/schema.py:435`、`copilot.py:462` |
 | `capabilities` | route 能力描述，resolver 用它计算默认 runtime settings。 | `registry/schema.py:436`、`registry/resolver.py:104` |
 | `runtime_settings` | role/profile route entry 上用户保存的 normalized settings。 | `registry/schema.py:437`、`registry/resolver.py:105` |
-| `effective_runtime_settings` | resolver 合成后的实际调用参数及来源，写入 response metadata 和 fallback event。 | `registry/schema.py:438`、`gateway_chat_model.py:331`、`gateway_chat_model.py:391` |
+| `effective_runtime_settings` | resolver 合成后的实际调用参数及来源，写入 response metadata 和 fallback event。 | `registry/schema.py:438`、`call/chat_model.py:331`、`call/chat_model.py:391` |
 | `snapshot_version` | 可选快照版本字段；当前 `resolve_role` 构造 route 时未显式填入。 | `registry/schema.py:439`、`registry/resolver.py:143-179` |
 
 `ResolvedRole` 是当前 role 解析结果：字段定义位于 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:466`。
@@ -53,16 +53,16 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 | 字段 | 当前用途 | 代码依据 |
 |---|---|---|
 | `role_name` | role 名称，传给 `GatewayChatModel` 和异常 payload。 | `registry/schema.py:471`、`resolver.py:222` |
-| `system_prompt_prefix` | role 级系统提示前缀，现状在 gateway 调用前拼到 messages。 | `registry/schema.py:472`、`resolver.py:223`、`gateway_chat_model.py:104` |
-| `runtime_policy` | provider down TTL、probe timeout、token escalation 等运行策略。 | `registry/schema.py:473`、`resolver.py:224`、`gateway_chat_model.py:109` |
-| `routes` | 有序 fallback route 列表，是当前执行循环的候选来源。 | `registry/schema.py:474`、`resolver.py:225`、`gateway_chat_model.py:111` |
+| `system_prompt_prefix` | role 级系统提示前缀，现状在 gateway 调用前拼到 messages。 | `registry/schema.py:472`、`resolver.py:223`、`call/chat_model.py:104` |
+| `runtime_policy` | provider down TTL、probe timeout、token escalation 等运行策略。 | `registry/schema.py:473`、`resolver.py:224`、`call/chat_model.py:109` |
+| `routes` | 有序 fallback route 列表，是当前执行循环的候选来源。 | `registry/schema.py:474`、`resolver.py:225`、`call/chat_model.py:111` |
 | `lint_results` | resolver 对 role-route 能力 lint 的结果。 | `registry/schema.py:475`、`registry/resolver.py:182`、`registry/resolver.py:226` |
 | `skipped_diagnostics` | resolver 跳过的普通 fallback route 诊断列表，记录 route_id、reason_code、message、from_override。 | `registry/schema.py:448-463`、`registry/schema.py:476`、`registry/resolver.py:227` |
 | `source_profile_id` / `source_profile_snapshot` | 记录 role 是否来自 model profile，供 UI 溯源。 | `registry/schema.py:477`、`registry/schema.py:478`、`resolver.py:228-229` |
 
 ## resolve API 契约(现状)
 
-`ModelResolverProtocol` 是 Engine 认识模型解析器的接口：它定义 role 级 `resolve()` 和 route 级 `resolve_routes()` 两个入口,见 `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:26`、`protocol.py:30`、`protocol.py:43`。
+`ModelResolverProtocol` 是 Engine 认识模型解析器的接口：它定义 role 级 `resolve()` 和 route 级 `resolve_routes()` 两个入口,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/protocol.py:26`、`protocol.py:30`、`protocol.py:43`。
 
 1. role 级 `resolve()` 的调用方传 `role_name`，表示当前 phase 要用的逻辑角色；协议允许 `None`，但当前 `ModelResolver.resolve()` 对 `None` 直接抛 `GatewayRoleNotConfiguredError`，见 `protocol.py:32` 和 `resolver.py:85-89`。
 2. role 级 `resolve()` 可传 `thinking_enabled`，表示是否覆盖 reasoning/thinking 开关；当前 resolver 在未传时从首条 route 的 `reasoning.enabled` effective setting 计算，见 `protocol.py:34` 和 `resolver.py:103-110`。
@@ -77,7 +77,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ## 两个消费方各取什么(现状)
 
 1. Graph Agent phase 消费方只取 LangChain 模型。`LLMPhaseNode._resolved_tracing_model` 是 phase 侧解析入口：它调用 `resolver.resolve(phase.tier, model_override=..., callbacks=..., phase_name=...)`，随后把返回模型包进 `TracingClientProxy`，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:167`、`llm_phase_node.py:173`、`llm_phase_node.py:193`。它没有直接读取 `ResolvedRoute`。
-2. Gateway runtime 消费方在模型内部读取 route。`GatewayChatModel._generate` 是当前 fallback 执行循环：它遍历 `self.resolved_role.routes`，做 marked-down、probe、dispatch、usage 和 fallback event，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96`、`gateway_chat_model.py:111`、`gateway_chat_model.py:190`。
+2. Gateway runtime 消费方在模型内部读取 route。`GatewayChatModel._generate` 是当前 fallback 执行循环：它遍历 `self.resolved_role.routes`，做 marked-down、probe、dispatch、usage 和 fallback event，见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:96`、`call/chat_model.py:111`、`call/chat_model.py:190`。
 3. Studio Copilot 消费方已经直接取 route 列表，并已通过 service 内部 helper 接到 `ModelResolver.resolve_routes`。`stream_query` 是 Copilot WebSocket 业务入口：它调用 `_resolve_copilot_runtime()` 得到 `routes` 和 `credential_provider`，再自己用 `ClaudeSDKClient` 调用，见 `apps/studio/backend/app/services/copilot.py`。
 4. `CopilotWsRequestPayload` 是 Copilot WS 请求体：它只含 `user_message` 和 `model_override`，没有 route payload，见 `apps/studio/backend/app/models/copilot.py:21`。
 5. `CopilotEvent` 是 Copilot WS 输出联合类型：它只表达文本、工具开始/结果、done/error，不携带 route diagnostics，见 `apps/studio/backend/app/models/copilot.py:63`。
@@ -89,7 +89,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 3. 当前 `ModelResolver.resolve()` 调 `registry.resolve_role()` 得到 `ResolvedRole`，见 `resolver.py:90-96`。
 4. `registry.resolve_role()` 遍历 role 的 `fallback_chain` 或 override route，逐条 join route、endpoint、credential、profile 和 runtime settings;普通 fallback 坏 route 会进入 `skipped_diagnostics` 并继续,override 坏 route fail-fast,见 `registry/resolver.py:46-58`、`registry/resolver.py:60-140`。
 5. `ModelResolver.resolve()` 把 `ResolvedRole` 塞进 `GatewayChatModel` 或 `PredictGatewayChatModel`;`ModelResolver.resolve_routes()` 则直接返回同一类 `ResolvedRole` handoff 数据,见 `resolver.py:111-153`。
-6. LangChain/agent loop 真正调用模型时，`GatewayChatModel._generate()` 才消费 `resolved_role.routes`，见 `gateway_chat_model.py:111`。
+6. LangChain/agent loop 真正调用模型时，`GatewayChatModel._generate()` 才消费 `resolved_role.routes`，见 `call/chat_model.py:111`。
 7. Copilot 另走 Studio service：`_resolve_copilot_runtime()` 通过 `ModelResolver.resolve_routes()` 取 `ResolvedRoute` 列表，再把每条 route 变成 Claude Agent SDK 的 env/base_url/session。
 
 ## baseline/alignment 差异
@@ -106,10 +106,10 @@ MVP1 剩余差异：Graph Agent 调用层仍走 role 级 `resolve()` 拿 `BaseCh
 
 ## 代码索引 clues
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:ModelResolverProtocol`：Engine resolver 协议，当前同时声明 `resolve()` 和 `resolve_routes()`。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver.resolve`：把 registry `ResolvedRole` 包装成 `GatewayChatModel` 或 `PredictGatewayChatModel`。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver.resolve_routes`：直接返回 registry `ResolvedRole` 的 route 级 handoff API。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:resolve_role`：把 role/override 解析成有序 `ResolvedRoute` 列表。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/protocol.py:ModelResolverProtocol`：Engine resolver 协议，当前同时声明 `resolve()` 和 `resolve_routes()`。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:ModelResolver.resolve`：把 registry `ResolvedRole` 包装成 `GatewayChatModel` 或 `PredictGatewayChatModel`。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:ModelResolver.resolve_routes`：直接返回 registry `ResolvedRole` 的 route 级 handoff API。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:resolve_role`：把 role/override 解析成有序 `ResolvedRoute` 列表。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute`：单条可执行 route 数据契约。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRole`：role 解析后的 metadata + routes 契约。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py`：Gateway 公共导出边界。

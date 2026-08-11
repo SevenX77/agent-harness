@@ -7,7 +7,7 @@ module: predict-migration-to-engine
 doc: migration-note
 workflow_axis: N/A（gateway MVP1 是库/公共能力模块,无独立用户旅程 workflow 文档）
 binds_design: ./README.md · ./DESIGN_UNITS_INDEX.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/predict_interception.py:PredictGatewayChatModel/_generate · packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:PredictContext/resolve_generation/ModelResolverProtocol/resolve · packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver/resolve · apps/studio/backend/app/services/predictor.py:PredictorService/dispatch_predict_job/PredictDeadlockError
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/predict.py:PredictGatewayChatModel/_generate · packages/graph-agent-gateway/src/graph_agent_gateway/call/protocol.py:PredictContext/resolve_generation/ModelResolverProtocol/resolve · packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:ModelResolver/resolve · apps/studio/backend/app/services/predictor.py:PredictorService/dispatch_predict_job/PredictDeadlockError
 units: [predict-migration-to-engine]
 aligns_with: ./README.md（M4 predict scope） · ./DESIGN_UNITS_INDEX.md（predict-migration-to-engine）
 ---
@@ -35,7 +35,7 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 | 关注点 | 代码 |
 |---|---|
 | mock 协议 | `protocol.py:14-21` `PredictContext.resolve_generation(phase, role, messages) → (payload, mocked_source)` |
-| **塞进 gateway 的 mock model** | `predict_interception.py:17,34-55` `PredictGatewayChatModel`(subclass `GatewayChatModel`,`_generate` 不调 provider,直接返回 mock) |
+| **塞进 gateway 的 mock model** | `call/predict.py:17,34-55` `PredictGatewayChatModel`(subclass `GatewayChatModel`,`_generate` 不调 provider,直接返回 mock) |
 | resolver 里的 predict 特判 | `resolver.py:119-134`(`predict_context` 存在时返回 `PredictGatewayChatModel`) |
 | predict 编排服务 | `apps/studio/backend/app/services/predictor.py:41-128`(`predict_skill` + `mock_llm` + `path_diff` + 死锁守卫) |
 
@@ -51,7 +51,7 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 |---|---|
 | **engine predict → gateway（唯一需要）** | engine 跑 predict 时，向 gateway 要"解析好的 route"= `resolve_routes(role)`/`resolve(role)`（[[01-handoff-interface]]/[[02-orch-role-resolution]]）。gateway **只**返回 route/编排结果，**不返回**任何 predict 专用 mock model。 |
 | **mock 注入点（engine 内，gateway 不感知）** | mock「怎么出结果」（原 `PredictContext.resolve_generation(phase, role, messages) → (payload, mocked_source)`）的注入位置 = **engine 自己决定**（skill 运行器调 model 前短路 / engine 级 mock model）。gateway 不持有 `PredictContext` 协议位。 |
-| **gateway 删除项（engine 接口定后执行）** | ① `PredictGatewayChatModel`（`predict_interception.py`）；② `resolver.py:119-134` 的 predict 特判（`resolve` 不再因 `predict_context` 返回不同类型）；③ `protocol.py:PredictContext` 协议位。删除后 `ModelResolver.resolve` 返回类型恒为 `GatewayChatModel`（无 predict 分叉）。 |
+| **gateway 删除项（engine 接口定后执行）** | ① `PredictGatewayChatModel`（`call/predict.py`）；② `resolver.py:119-134` 的 predict 特判（`resolve` 不再因 `predict_context` 返回不同类型）；③ `protocol.py:PredictContext` 协议位。删除后 `ModelResolver.resolve` 返回类型恒为 `GatewayChatModel`（无 predict 分叉）。 |
 | **不变项（gateway 编排保持纯净）** | role→route 一等 API（[[01-handoff-interface]]）+ `GatewayChatModel` 正常调用层（[[09-inv-invocation-runtime]]）不受影响；predict 特判摘除是"减一个分叉"，不改正常路径。 |
 | **归属 / 稳定性** | predict mock = engine 业务逻辑（不在 gateway 包）；gateway 只留 role→route（③b 公共）。接口需求由 engine designer 提出，gateway 据此暴露最小 role→route API。 |
 
@@ -61,7 +61,7 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 > > "predict完全不调用llm 的话为什么要把逻辑写在gateway呢? 这是业务逻辑, 应该在跑predict流程里面自己mock就好了 ... anyway 这不归你管"
 > → mock 移出 gateway、回到 predict 流程自己做；predict 重设计归用户/engine，gateway 本期不动、等接口边界定了再删。**A' 决策**：本期不碰 predict（其 `_generate` 全自走、不经 dispatch），只需保住 `GatewayChatModel` 类 + 构造器 + `bind_tools`，predict 自动不变。
 
-> **M4 — 是什么 + 架构问题**（client 层 A' 重设计决策，本文留底）：`PredictGatewayChatModel` 是 skill（`graph_agent`)的「干跑模拟」，**不调真 LLM**，用 `predict_context.resolve_generation` 出 mock，产 `predict_trace` + `path_diff`；**不是 copilot**（copilot = `claude_agent_sdk` 独立运行时，不跑 skill phase 图）。证据：`predict_interception.py:17`（subclass `GatewayChatModel`）、`:34-55`（mock `_generate`，不调 provider）、`protocol.py:14-21`（`resolve_generation`）、`apps/studio/backend/app/services/predictor.py:41-128`（`predict_skill` + `mock_llm` + `path_diff` + 死锁守卫）。架构问题：mock 是业务逻辑，不该写在 gateway 的 model 类里。
+> **M4 — 是什么 + 架构问题**（client 层 A' 重设计决策，本文留底）：`PredictGatewayChatModel` 是 skill（`graph_agent`)的「干跑模拟」，**不调真 LLM**，用 `predict_context.resolve_generation` 出 mock，产 `predict_trace` + `path_diff`；**不是 copilot**（copilot = `claude_agent_sdk` 独立运行时，不跑 skill phase 图）。证据：`call/predict.py:17`（subclass `GatewayChatModel`）、`:34-55`（mock `_generate`，不调 provider）、`protocol.py:14-21`（`resolve_generation`）、`apps/studio/backend/app/services/predictor.py:41-128`（`predict_skill` + `mock_llm` + `path_diff` + 死锁守卫）。架构问题：mock 是业务逻辑，不该写在 gateway 的 model 类里。
 
 ## ✂️ 给 engine designer 的提示词(可直接转发)
 
@@ -70,7 +70,7 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 产出实际 phase 执行路径,并和期望路径 diff,用于 skill 作者验证路由。
 
 当前实现把 mock 逻辑塞在了 LLM gateway 里:
-- gateway 的 `PredictGatewayChatModel`(predict_interception.py)是一个「假装是 chat model、_generate 直接吐 mock」的类;
+- gateway 的 `PredictGatewayChatModel`(call/predict.py)是一个「假装是 chat model、_generate 直接吐 mock」的类;
 - gateway 的 resolver 要为 predict 特判返回它;
 - mock 内容由 `PredictContext.resolve_generation(phase, role, messages)`(protocol.py)提供;
 - engine 侧编排在 services/predictor.py 的 predict_skill(mock_llm=...)。
@@ -100,7 +100,7 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 ## 涉及 region / platform
 
 - **engine**（`graph_agent` + `apps/studio/backend/app/services/predictor.py`）：predict mock/模拟/path_diff 的归宿，重设计归 engine designer。
-- **③b gateway** `packages/graph-agent-gateway`：迁移后只留 role→route（`resolver.py`/`registry/resolver.py`）；删除 `predict_interception.py` + resolver predict 特判 + `protocol.py:PredictContext`。
+- **③b gateway** `packages/graph-agent-gateway`：迁移后只留 role→route（`resolver.py`/`registry/resolver.py`）；删除 `call/predict.py` + resolver predict 特判 + `protocol.py:PredictContext`。
 - **② Rust**：N/A。
 
 ## Gateway 侧待办(engine 方案定了再做,本期不动)

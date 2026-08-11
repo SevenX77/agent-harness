@@ -3,7 +3,7 @@ module: 03-orch-credentials-endpoints
 doc: baseline
 status: drafted
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/contracts.py:CredentialProviderProtocol · packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:EndpointCredentialProvider/FallbackCredentialProvider · packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:compute_credential_fingerprint · packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py:standardize_endpoint_candidates/legacy_v3_endpoint_id · apps/studio/backend/app/services/llm_credentials.py:upsert_endpoints/v3 migration · apps/studio/backend/app/services/llm_roles.py:load_roles_file/save_roles_file/validate_references · apps/studio/backend/app/services/llm_paths.py:credentials_path/roles_path
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/contracts.py:CredentialProviderProtocol · packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:EndpointCredentialProvider/FallbackCredentialProvider · packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:compute_credential_fingerprint · packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py:standardize_endpoint_candidates/legacy_v3_endpoint_id · apps/studio/backend/app/services/llm_credentials.py:upsert_endpoints/v3 migration · apps/studio/backend/app/services/llm_roles.py:load_roles_file/save_roles_file/validate_references · apps/studio/backend/app/services/llm_paths.py:credentials_path/roles_path
 units: [credentials-endpoints-canonicalization]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -20,7 +20,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 |---|---|---|
 | `registry/contracts.py` | **③b 公共** | `CredentialDescriptor` 是不含明文 secret 的凭证可用性描述;`CredentialProviderProtocol` 是宿主在 readiness 与执行期取 secret 的回调协议;`SecretLifetimePolicy` 是进程内 secret-bearing 对象的生命周期策略;`TerminalRetryPolicy` 是 runtime/probe/SDK retry 默认值集合(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/contracts.py:12`,`:33`,`:43`,`:107`)。 |
 | `registry/credentials.py` | **③b 公共** | `EndpointCredentialProvider` 把 endpoint 与 `credential_ref` 映射到可描述/可获取的凭证;`FallbackCredentialProvider` 先问宿主 provider,再回退 endpoint-backed storage(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:14`,`:48`)。 |
-| `registry/storage.py:compute_credential_fingerprint` | **③b 公共** | `compute_credential_fingerprint` 把 endpoint 身份、协议、base_url、secret、timeout/proxy 等哈希成不可逆 fingerprint,供 cache/变更检测使用(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:13`)。 |
+| `registry/storage.py:compute_credential_fingerprint` | **③b 公共** | `compute_credential_fingerprint` 把 endpoint 身份、协议、base_url、secret、timeout/proxy 等哈希成不可逆 fingerprint,供 cache/变更检测使用(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:13`)。 |
 | `registry/endpoints.py` | **③b 公共** | `standardize_endpoint_candidates` 把原始 provider 输入(一 key + 多 URL)经 protocol probe 编排拆成标准 `EndpointCandidate` list,生成 `{slug}-{protocol}[-n]` canonical endpoint_id,并复用 per-protocol `canonicalize_base_url`;`legacy_v3_endpoint_id` 保留 v3→v4 migration 的历史 host/name id 兼容(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py`)。 |
 | `services/llm_credentials.py` | **③a 存储 + gateway helper caller** | `load_credentials` / `save_credentials` / `upsert_endpoints` / `upsert_routes` 是 Studio v4 credentials 文件的读写边界,负责 endpoint/route 持久化与 secret 保留(`apps/studio/backend/app/services/llm_credentials.py:39`,`:70`,`:107`,`:158`)；v3→v4 migration 调 gateway `legacy_v3_endpoint_id`,不再在 Studio 本地维护 endpoint id 规则(`apps/studio/backend/app/services/llm_credentials.py:299`)。 |
 | `services/llm_roles.py` | **③a 存储** | `load_roles_file` / `save_roles_file` / `validate_references` 是 Studio roles YAML 的读写边界,负责 schema v2/v3 与 route 引用校验(`apps/studio/backend/app/services/llm_roles.py:47`,`:58`,`:88`)。 |
@@ -41,7 +41,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 1. `ResolvedRoute` 是 resolver 输出给运行时的单条 route:它包含 `credential_ref` 和 `credential_fingerprint`,但没有 `api_key` 字段(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`)。
 2. `ResolvedRoute._has_credential_reference` 是 resolved route 的校验器:它要求 `credential_ref` 非空,否则 resolved route 不能成立(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:441-445`)。
-3. `resolve_role` 是 registry 的纯解析函数:它用 endpoint 自带 `credential_ref` 或默认 `endpoint:<endpoint_id>` 生成 route 的 `credential_ref`(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:33-40`,`:64`)。
+3. `resolve_role` 是 registry 的纯解析函数:它用 endpoint 自带 `credential_ref` 或默认 `endpoint:<endpoint_id>` 生成 route 的 `credential_ref`(`packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:33-40`,`:64`)。
 4. `EndpointCredentialProvider` 是 endpoint-backed 凭证 provider:初始化时同时登记 `endpoint:<endpoint_id>` 与 endpoint 自带 `credential_ref`,因此 route 可以只拿 ref,不拿 secret(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:14-22`)。
 5. `EndpointCredentialProvider.describe` 是非明文 readiness 查询:它只返回 exists/status/fingerprint/scope,不返回 secret 值(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:24-36`)。
 6. `EndpointCredentialProvider.get` 是执行期 secret 查询:只有真实调用前才取 `endpoint.api_key`,缺失或空值抛 `KeyError`(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:38-45`)。
@@ -55,9 +55,9 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 1. `upsert_endpoints` 是 endpoint upsert 入口:它先把 payload 校验成 `ProviderEndpoint`,再用 `canonicalize_base_url(incoming.base_url, incoming.protocol)` 更新写入值,同时保留未提交 secret、curated `provider_kind`、`rate_limit_bucket` 等既有行为(`apps/studio/backend/app/services/llm_credentials.py:107-136`)。
 2. `_v3_payload_to_v4` 是 v3→v4 migration 的转换入口:它在构造 `ProviderEndpoint` 前按 legacy provider 的 protocol canonicalize `base_url`,因此 migration 写出的 v4 endpoint 也走同一规则(`apps/studio/backend/app/services/llm_credentials.py:299-326`)。
 3. `apply_draft` 是 import draft 应用入口:它在把 draft `EndpointCandidate` 写成 active `ProviderEndpoint` 时同样调用 `canonicalize_base_url(endpoint.base_url, endpoint.protocol)`,因此 agent draft 中的 raw URL 不再绕过保存侧归一化(`apps/studio/backend/app/services/llm_import_drafts.py:136-202`)。
-4. `compute_credential_fingerprint` 是凭证 fingerprint 计算函数:它把 `endpoint.protocol` 传给 `_normalize_base_url`,后者调用 `canonicalize_base_url`,因此 hash payload 的 `base_url` 输入是 protocol-canonical 值(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:13-42`)。
-5. `resolve_role` 是 route 解析入口:它把保存后的 `endpoint.base_url` 直接写进 `ResolvedRoute.base_url`;保存侧已 canonical 的 endpoint 在 resolver 输出中保持同一路径(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:77-84`)。
-6. `LLMClientManager` 的 OpenAI / Anthropic / Google / Ark client 工厂仍把 `route.base_url` 原样传给 SDK;当前契约依赖保存侧 canonical 与调用层幂等双保险,而不是在这些工厂里重新猜路径(`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:144-285`)。
+4. `compute_credential_fingerprint` 是凭证 fingerprint 计算函数:它把 `endpoint.protocol` 传给 `_normalize_base_url`,后者调用 `canonicalize_base_url`,因此 hash payload 的 `base_url` 输入是 protocol-canonical 值(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:13-42`)。
+5. `resolve_role` 是 route 解析入口:它把保存后的 `endpoint.base_url` 直接写进 `ResolvedRoute.base_url`;保存侧已 canonical 的 endpoint 在 resolver 输出中保持同一路径(`packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:77-84`)。
+6. `LLMClientManager` 的 OpenAI / Anthropic / Google / Ark client 工厂仍把 `route.base_url` 原样传给 SDK;当前契约依赖保存侧 canonical 与调用层幂等双保险,而不是在这些工厂里重新猜路径(`packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:144-285`)。
 7. `test_endpoint` 的 probe helper 仍只对 endpoint base_url 做 `rstrip("/")`;在 upsert / migration / import draft apply 写入的 endpoint 上,它读到的已经是 canonical base_url(`apps/studio/backend/app/routers/llm.py:460-486`,`:4906-4907`)。
 
 ### 4. 写入边界保护 secret,但 active storage 仍保存 secret
@@ -93,24 +93,24 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 1. baseline 已经实现 `credential_ref` 运行时取 secret:resolved route 不带 `api_key`,真实调用前由 `CredentialProviderProtocol.get` 取 secret(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`;`apps/studio/backend/app/services/copilot.py:449-469`)。
 2. baseline 仍把 secret 保存在 active credentials 文件中:它靠 `SecretStr` 响应脱敏和 `0600` 文件权限保护,还不是外部 vault 或纯 host-managed secret store(`apps/studio/backend/app/services/llm_credentials.py:102-104`,`:409-442`)。
-3. baseline 已实现 upsert / v3 migration / import draft apply 保存时按 protocol 归一化 `base_url`,并让 `compute_credential_fingerprint` 使用 canonical base_url 输入(`apps/studio/backend/app/services/llm_credentials.py:107-136`,`:299-326`;`apps/studio/backend/app/services/llm_import_drafts.py:136-202`;`packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:13-42`)。
+3. baseline 已实现 upsert / v3 migration / import draft apply 保存时按 protocol 归一化 `base_url`,并让 `compute_credential_fingerprint` 使用 canonical base_url 输入(`apps/studio/backend/app/services/llm_credentials.py:107-136`,`:299-326`;`apps/studio/backend/app/services/llm_import_drafts.py:136-202`;`packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:13-42`)。
 4. baseline 已实现 endpoint 标准化内核下沉:gateway 生成 canonical endpoint_id、拆分 URL×protocol 探测成功项、输出标准 `EndpointCandidate` list;Studio v3 migration 已改为调用 gateway legacy helper,避免继续在 ③a 维护 endpoint id 规则。
 
 ## 决策原因
 
 1. `credential_ref` 优先于明文下沉 route,原因是 route 是编排与调用的交接物,它会进入诊断、metadata、fallback event 等可观察路径;`ResolvedRoute` 只保留 ref 和 fingerprint,可以降低 secret 泄漏面(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`)。
 2. endpoint 和 route 分层,原因是一个 endpoint 可以承载多个 model route;删除 endpoint 时同步删除其 routes,说明 endpoint 是连接/凭证边界,route 是模型能力边界(`apps/studio/backend/app/services/llm_credentials.py:139-155`)。
-3. fingerprint 纳入 base_url/secret/timeout/proxy,原因是这些字段改变后 SDK client cache 或测试缓存都可能失效;当前 hash payload 明确包含这些字段(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:26-38`)。
-4. 保存时归一化比调用时临时猜路径更稳定,原因是 endpoint 的 canonical `base_url` 一旦确定,probe、runtime、fingerprint、Copilot env 都能看到同一份事实;此前多处原样透传正是这次收敛的风险来源(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:77-84`;`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:161-205`)。
+3. fingerprint 纳入 base_url/secret/timeout/proxy,原因是这些字段改变后 SDK client cache 或测试缓存都可能失效;当前 hash payload 明确包含这些字段(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:26-38`)。
+4. 保存时归一化比调用时临时猜路径更稳定,原因是 endpoint 的 canonical `base_url` 一旦确定,probe、runtime、fingerprint、Copilot env 都能看到同一份事实;此前多处原样透传正是这次收敛的风险来源(`packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:77-84`;`packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:161-205`)。
 
 ## 代码索引 clues
 
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/contracts.py:12-40`: credential readiness 与执行期 secret lookup 合约。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:14-45`: endpoint-backed `credential_ref` 映射与执行期取 secret。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py`: 原始 provider 输入 → 标准 endpoint candidates、canonical endpoint_id、v3 legacy id helper。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:13-42`: credential fingerprint 与 protocol-canonical base_url 输入。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:64-88`: `credential_ref`、`base_url`、`credential_fingerprint` 写入 `ResolvedRoute`。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:144-285`: OpenAI/Anthropic/Google/Ark client 工厂原样使用 `route.base_url`。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:13-42`: credential fingerprint 与 protocol-canonical base_url 输入。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:64-88`: `credential_ref`、`base_url`、`credential_fingerprint` 写入 `ResolvedRoute`。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:144-285`: OpenAI/Anthropic/Google/Ark client 工厂原样使用 `route.base_url`。
 - `apps/studio/backend/app/services/llm_credentials.py:107-136`: endpoint upsert 保存时 canonicalize base_url,并保留 secret/provider_kind/rate_limit_bucket 规则。
 - `apps/studio/backend/app/services/llm_credentials.py:299-326`: v3→v4 migration 保存时 canonicalize base_url,并调用 gateway `legacy_v3_endpoint_id` 保留历史 endpoint id。
 - `apps/studio/backend/app/services/llm_import_drafts.py:136-202`: import draft apply 保存 endpoint 时 canonicalize base_url,并保留 collision/secret/atomic write 行为。
@@ -120,7 +120,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ## 待办/疑点
 
-1. 待办:调用层继续保留幂等 base_url 双保险;SDK 工厂和 probe helper主要消费已保存的 canonical route/endpoint base_url(`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:161-205`;`apps/studio/backend/app/routers/llm.py:4906-4907`)。
+1. 待办:调用层继续保留幂等 base_url 双保险;SDK 工厂和 probe helper主要消费已保存的 canonical route/endpoint base_url(`packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:161-205`;`apps/studio/backend/app/routers/llm.py:4906-4907`)。
 2. 疑点:active credentials 文件仍写入明文 API key,这与 `credential_ref` 不落 route 明文并不冲突,但如果 MVP1 要升级到 host-managed secret store,需要明确迁移边界(`apps/studio/backend/app/services/llm_credentials.py:435-442`)。
 3. 疑点:roles 文件写入没有 chmod `0600`;按当前职责 roles 不含 secret,但若未来把 credential metadata 扩展到 roles,需要重新确认权限边界(`apps/studio/backend/app/services/llm_roles.py:191-206`)。
 

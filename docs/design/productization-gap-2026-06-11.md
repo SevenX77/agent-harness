@@ -9,7 +9,7 @@
 ## 1. 已就位(不动)
 
 - engine、gateway **纯 SDK 无 API**(全包无 HTTP/uvicorn);
-- gateway:角色解析(`resolver.py:140`)、角色→可调用模型(`gateway_chat_model.py:97`)、加工内核(标准化/归一化/lint/canonical 在包内)、产品策略**未污染** gateway;
+- gateway:角色解析(`resolver.py:140`)、角色→可调用模型(`call/chat_model.py:97`)、加工内核(标准化/归一化/lint/canonical 在包内)、产品策略**未污染** gateway;
 - engine:三个注入口在(`model_resolver`/`event_subscriber`/`artifact_saver`,`runner.py:403`)、主运行路径只经一个注入的 `model_resolver.resolve`;
 - studio:copilot 跑 Claude SDK + gateway 出路线(`copilot.py:206/436`)、golden 判定+基线在 studio(`golden_diff.py`)、前端无第二份配置真相、无 per-场景大编排器、templates/test_inputs/audit 干净。
 

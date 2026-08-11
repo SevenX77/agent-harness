@@ -94,7 +94,7 @@ main 在 `92d33c34`（wave3 的基底，已是 main 祖先）之后改过、且 
 
 ## 7. resolver 形式：near-trivial，不是架构分叉（2026-06-11 核实修正）
 
-**核实结论**：`ModelResolver.resolve_routes(role, route_override)`（类方法）的实现**就是** `resolve_role(snapshot, role, ...)`（底层函数）外加一个 `stats.total_resolves` 计数器（`packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:140-153`）。两处真冲突点（copilot.py、routers/llm.py）main 与 wave3 的调用**返回完全相同的 `ResolvedRole.routes`**，且两处都不取 `.resolve()→BaseChatModel`。
+**核实结论**：`ModelResolver.resolve_routes(role, route_override)`（类方法）的实现**就是** `resolve_role(snapshot, role, ...)`（底层函数）外加一个 `stats.total_resolves` 计数器（`packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:140-153`）。两处真冲突点（copilot.py、routers/llm.py）main 与 wave3 的调用**返回完全相同的 `ResolvedRole.routes`**，且两处都不取 `.resolve()→BaseChatModel`。
 
 所以这不是「两套架构选一套」，只是「保留薄壳 `ModelResolver`（多一个 telemetry 计数、留着 `.resolve()`/`.mark_provider_down()` 备用）还是直接调底层 `resolve_role`」：
 

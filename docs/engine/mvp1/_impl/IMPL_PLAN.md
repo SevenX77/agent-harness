@@ -12,7 +12,7 @@ binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-ha
 > **跨模块依赖(与 gateway 不冲突)**:`create_agent`(WS-E1)绑 `model=GatewayChatModel` → 依赖 gateway 保住该类(gateway `IMPL_PLAN §五` 已承诺"本批不碰 engine、保 GatewayChatModel 稳");**可并行**,gateway 核心(WS-1)先落更稳。
 
 ## 一、为什么不是全并发:engine 核心耦合在 graph_assembler.py
-`core/graph_assembler.py` 是**共享热点文件**——create_agent 构造(`:437-576`)、节点级 batch(`:240-300`)、11-io 接线(`:287`)、LOGIC 节点(`:325`)、subagent 派发(`:1057+`)**全在它里面**。所以真正能并发的是**碰不同文件**的工作(错误契约 V2 / V4 事件 / purity / 中间件槽 / 退出闸),`graph_assembler.py` 的改动只能当**一条串行链**(WS-E1)。这与 gateway 把 `gateway_chat_model.py`/`client_manager.py` 当串行热点同构。
+`core/graph_assembler.py` 是**共享热点文件**——create_agent 构造(`:437-576`)、节点级 batch(`:240-300`)、11-io 接线(`:287`)、LOGIC 节点(`:325`)、subagent 派发(`:1057+`)**全在它里面**。所以真正能并发的是**碰不同文件**的工作(错误契约 V2 / V4 事件 / purity / 中间件槽 / 退出闸),`graph_assembler.py` 的改动只能当**一条串行链**(WS-E1)。这与 gateway 把 `call/chat_model.py`/`call/clients.py` 当串行热点同构。
 
 ## 二、依赖图
 ```

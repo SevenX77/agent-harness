@@ -27,7 +27,7 @@ MVP1 的 Probe Knowledge Catalog 是 local-first：
 7. `/Users/sevenx/Documents/coding/agent-harness/docs/graph-agent-gateway/mvp1/05-orch-capabilities-and-models/mvp1-alignment.md`
 8. `/Users/sevenx/Documents/coding/agent-harness/docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/mvp1-alignment.md`
 9. `/Users/sevenx/Documents/coding/agent-harness/docs/graph-agent-gateway/mvp1/08-orch-test-status-ssot/mvp1-alignment.md`
-10. 当前实现参考：`/Users/sevenx/Documents/coding/agent-harness/apps/studio/backend/app/services/llm_probe_catalog.py`、`/Users/sevenx/Documents/coding/agent-harness/packages/graph-agent-gateway/src/graph_agent_gateway/probe_catalog.py`、`/Users/sevenx/Documents/coding/agent-harness/apps/studio/backend/app/routers/llm.py` 中 catalog sync/share 端点。
+10. 当前实现参考：`/Users/sevenx/Documents/coding/agent-harness/apps/studio/backend/app/services/llm_probe_catalog.py`、`/Users/sevenx/Documents/coding/agent-harness/packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py`、`/Users/sevenx/Documents/coding/agent-harness/apps/studio/backend/app/routers/llm.py` 中 catalog sync/share 端点。
 
 ## 设计目标
 

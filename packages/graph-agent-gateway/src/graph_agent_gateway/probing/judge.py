@@ -1,6 +1,6 @@
 """What a provider's answer means.
 
-One reading of one response, shared by every probe: a status, and the few
+One reading of one answer, shared by every probe: a status, and the few
 things worth lifting out of the body. Each probe asks its own question, but
 they must not each decide separately what a 404 or a 402 means — that is how
 one surface reports a dead route and another reports a missing model.
@@ -8,11 +8,34 @@ one surface reports a dead route and another reports a missing model.
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from typing import Any, Literal
 
-import httpx
-
 from graph_agent_gateway.registry import ProviderProbeBackend
+
+
+@dataclass(frozen=True)
+class ProviderAnswer:
+    """A provider's answer, separated from whoever fetched it.
+
+    A status code and the body as it arrived. Both are what an HTTP response
+    carries and what a provider SDK's error exception carries, so one judgment
+    serves a probe that made its own request and a probe that let the
+    production client make it.
+    """
+
+    status_code: int
+    body: str
+
+    def payload(self) -> Any:
+        """The body parsed as JSON, or ``None`` when it is not JSON."""
+
+        try:
+            return json.loads(self.body)
+        except ValueError:
+            return None
+
 
 ProviderProbeStatus = Literal[
     "ok",
@@ -42,11 +65,8 @@ _BILLING_ERROR_MARKERS = (
 )
 
 
-def _is_billing_error(response: httpx.Response) -> bool:
-    try:
-        payload = response.json()
-    except ValueError:
-        return False
+def _is_billing_error(answer: ProviderAnswer) -> bool:
+    payload = answer.payload()
     if not isinstance(payload, dict):
         return False
     error = payload.get("error")
@@ -80,8 +100,8 @@ _PROTOCOL_MISMATCH_MARKERS = (
 )
 
 
-def _has_protocol_mismatch_guidance(response: httpx.Response) -> bool:
-    text = response.text.lower()
+def _has_protocol_mismatch_guidance(answer: ProviderAnswer) -> bool:
+    text = answer.body.lower()
     return any(marker in text for marker in _PROTOCOL_MISMATCH_MARKERS)
 
 
@@ -102,17 +122,17 @@ _FOREIGN_API_ERROR_SIGNATURES: dict[str, tuple[ProviderProbeBackend, ...]] = {
 
 
 def _has_foreign_protocol_error(
-    response: httpx.Response,
+    answer: ProviderAnswer,
     probed_backend: ProviderProbeBackend,
 ) -> bool:
-    text = response.text.lower()
+    text = answer.body.lower()
     return any(
         marker in text and probed_backend not in native_backends
         for marker, native_backends in _FOREIGN_API_ERROR_SIGNATURES.items()
     )
 
 
-def _is_provider_error_payload(response: httpx.Response) -> bool:
+def _is_provider_error_payload(answer: ProviderAnswer) -> bool:
     """True when the body is the protocol's own structured error schema.
 
     Every supported protocol (openai / anthropic / google / ark) wraps request
@@ -120,25 +140,22 @@ def _is_provider_error_payload(response: httpx.Response) -> bool:
     proves the protocol handler answered — the failure is about the request
     (model id), not about the URL not speaking the protocol.
     """
-    try:
-        payload = response.json()
-    except ValueError:
-        return False
+    payload = answer.payload()
     return isinstance(payload, dict) and payload.get("error") is not None
 
 
 def probe_status(
-    response: httpx.Response,
+    answer: ProviderAnswer,
     *,
     model_not_found_status: Literal["invalid_model", "error"],
     probed_backend: ProviderProbeBackend | None = None,
 ) -> ProviderProbeStatus:
-    code = response.status_code
+    code = answer.status_code
     if 200 <= code < 300:
         return "ok"
-    if code == 405 or _has_protocol_mismatch_guidance(response):
+    if code == 405 or _has_protocol_mismatch_guidance(answer):
         return "protocol_unsupported"
-    if probed_backend is not None and _has_foreign_protocol_error(response, probed_backend):
+    if probed_backend is not None and _has_foreign_protocol_error(answer, probed_backend):
         # Misrouted to a different protocol's upstream — the (URL, protocol) cell
         # cannot speak the probed protocol. This precedes the 401 branch so a
         # foreign-protocol auth error is not mistaken for THIS key being invalid.
@@ -150,19 +167,16 @@ def probe_status(
     if code in (402, 403):
         return "quota_exceeded"
     if code in (400, 404):
-        if _is_billing_error(response):
+        if _is_billing_error(answer):
             return "quota_exceeded"
-        if code == 404 and not _is_provider_error_payload(response):
+        if code == 404 and not _is_provider_error_payload(answer):
             return "protocol_unsupported"
         return model_not_found_status
     return "error"
 
 
-def model_ids(response: httpx.Response) -> tuple[str, ...]:
-    try:
-        payload = response.json()
-    except ValueError:
-        return ()
+def model_ids(answer: ProviderAnswer) -> tuple[str, ...]:
+    payload = answer.payload()
     values: list[str] = []
     if isinstance(payload, dict):
         data = payload.get("data")
@@ -180,11 +194,8 @@ def model_ids(response: httpx.Response) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
-def model_capabilities(response: httpx.Response) -> dict[str, dict[str, Any]]:
-    try:
-        payload = response.json()
-    except ValueError:
-        return {}
+def model_capabilities(answer: ProviderAnswer) -> dict[str, dict[str, Any]]:
+    payload = answer.payload()
     capabilities: dict[str, dict[str, Any]] = {}
     if not isinstance(payload, dict):
         return capabilities
@@ -206,23 +217,20 @@ def model_capabilities(response: httpx.Response) -> dict[str, dict[str, Any]]:
     return capabilities
 
 
-def provider_response_message(response: httpx.Response) -> str:
-    error_code = vendor_error_code(response, default="")
-    vendor_message = _extract_vendor_error_message(response)
+def provider_response_message(answer: ProviderAnswer) -> str:
+    error_code = vendor_error_code(answer, default="")
+    vendor_message = _extract_vendor_error_message(answer)
     if error_code:
-        message = f"Provider returned HTTP {response.status_code} ({error_code})."
+        message = f"Provider returned HTTP {answer.status_code} ({error_code})."
     else:
-        message = f"Provider returned HTTP {response.status_code}."
+        message = f"Provider returned HTTP {answer.status_code}."
     if vendor_message:
         message = f"{message} {vendor_message}"
     return message
 
 
-def vendor_error_code(response: httpx.Response, *, default: str) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return default
+def vendor_error_code(answer: ProviderAnswer, *, default: str) -> str:
+    payload = answer.payload()
     if not isinstance(payload, dict):
         return default
     error = payload.get("error")
@@ -234,11 +242,8 @@ def vendor_error_code(response: httpx.Response, *, default: str) -> str:
     return default
 
 
-def _extract_vendor_error_message(response: httpx.Response) -> str | None:
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
+def _extract_vendor_error_message(answer: ProviderAnswer) -> str | None:
+    payload = answer.payload()
     if not isinstance(payload, dict):
         return None
     error = payload.get("error")

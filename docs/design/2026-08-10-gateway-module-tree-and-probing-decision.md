@@ -474,8 +474,37 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
 
 **裁决(用户,2026-08-11):放行。** 原话:"动 ui 没关系,合理就行"。
 即状态词表可以改、前端跟着改,判据是改完的词表本身讲得通,不是"能不能不动 UI"。
-本决议据此把 P3b 从提案转为待实施,四个实现问题按上面四条建议落地;
-词表映射表在实施 PR 内给出,并同步 `apps/studio/frontend` 的类型与展示。
+本决议据此把 P3b 从提案转为待实施,四个实现问题按上面四条建议落地。
+
+**订正(P3b 开工前实测,2026-08-16):第 4 条的前提不成立,词表不用改,前端也不用动。**
+上面第 4 条说"失败从此以 provider SDK 异常的形式出现,不再是 `httpx.Response`",
+据此断定判据要从 `probing/judge.py::probe_status`(读响应)换成 `classify_exception`(读异常),
+**因此外溢到 UI**。核了三家 SDK 的异常签名,这个断定是错的:
+
+| SDK | 失败异常 | 构造签名里有什么 |
+|---|---|---|
+| openai | `openai.APIStatusError` | `(message: str, *, response: httpx.Response, body: object \| None)` |
+| anthropic | `anthropic.APIStatusError` | 同上,逐字一样 |
+| google | `google.genai.errors.APIError` | `(code: int, response_json: Any, response: requests.Response \| httpx.Response, ...)` |
+
+**异常里揣着响应本身。** 而 `probe_status` 需要的只有状态码和响应体——它靠读 body 才能把 400
+分成"模型不存在"与"欠费",靠读 body 才能认出"这个 URL 根本不说这个协议"。这两样从异常里都拿得到;
+连不上与超时那两种确实没有响应,而它们对应的 `network_error` / `timeout` 本来就在词表里。
+所以 `ProviderProbeStatus` 九个值一个不动,`apps/studio/frontend` 不改。
+**用户授权了改 UI,但既然实测表明不动就能做对,就不动**——授权是允许,不是理由。
+
+**据此 P3b 拆成两期,判据各自独立成立:**
+
+- **P3b-1**:判据的输入从 `httpx.Response` 换成网关自己的值对象(状态码 + 响应体原文)。
+  理由不是为了 P3b-2 方便,而是判据本来就不该依赖"是哪个 HTTP 客户端拿回来的"——
+  它实际只碰 `.status_code` / `.json()` / `.text` 三样;Google 那边给的还可能是
+  `requests.Response` 而不是 `httpx.Response`,靠鸭子类型硬凑在 `mypy --strict` 下站不住。
+  判据:88 + 100 两份基线一行不动。
+- **P3b-2**:路由探针(A2)改走 `RouteChatModelFactory`,把三家 SDK 的异常归一成那个值对象。
+  判据:探针发出去的请求与真实调用逐字段一致,即 `tests/test_production_wire_contract.py` 那张表。
+  **一个前置事实尚未核实**:`google.api_core` 不在环境里(只装了 `google-genai`),
+  所以 Google 那条路只验到了异常类的签名,没验到 langchain 包装后是否原样抛出——
+  P3b-2 里用真实构造的异常对象测,不靠推断。
 
 **基线怎么办。** 100 条 endpoint 基线里,route 那 80 条钉的是"探针自己拼的 HTTP",
 随实现退役;endpoint 那 20 条(A1 模型列表)保留。取而代之的判据是

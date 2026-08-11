@@ -1,4 +1,4 @@
-from graph_agent_gateway.registry.call_methods import (
+from graph_agent_gateway.registry import (
     apply_call_method_base_url,
     call_method_client_compatibility,
     call_method_ids_for_client,

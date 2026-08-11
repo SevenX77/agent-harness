@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def test_anthropic_doc_constraints_are_normalized_for_thinking_models() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     capabilities = normalize_route_capabilities(
         protocol="anthropic_compatible",
@@ -33,7 +33,7 @@ def test_anthropic_doc_constraints_are_normalized_for_thinking_models() -> None:
 
 
 def test_provider_model_list_token_limit_aliases_are_normalized() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     gemini_capabilities = normalize_route_capabilities(
         protocol="google_genai",
@@ -61,7 +61,7 @@ def test_provider_model_list_token_limit_aliases_are_normalized() -> None:
 
 
 def test_provider_model_list_nested_modalities_and_token_limits_are_normalized() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     capabilities = normalize_route_capabilities(
         protocol="ark_runtime",
@@ -93,7 +93,7 @@ def test_provider_model_list_nested_modalities_and_token_limits_are_normalized()
 
 
 def test_openai_and_deepseek_models_do_not_get_fake_thinking_budget_tokens() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     openai_caps = normalize_route_capabilities(
         protocol="openai_compatible",
@@ -114,7 +114,7 @@ def test_openai_and_deepseek_models_do_not_get_fake_thinking_budget_tokens() -> 
 
 
 def test_anthropic_opus_47_marks_manual_thinking_budget_unsupported() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     capabilities = normalize_route_capabilities(
         protocol="anthropic_compatible",
@@ -130,7 +130,7 @@ def test_anthropic_opus_47_marks_manual_thinking_budget_unsupported() -> None:
 
 
 def test_anthropic_haiku_thinking_uses_manual_budget_not_adaptive() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     capabilities = normalize_route_capabilities(
         protocol="anthropic_compatible",
@@ -148,7 +148,7 @@ def test_anthropic_haiku_thinking_uses_manual_budget_not_adaptive() -> None:
 def test_a_protocol_that_pins_its_effort_vocabulary_bounds_what_is_worth_asking() -> None:
     """A name the request body cannot spell would spend a round trip to be
     refused, so it is never offered to the probe."""
-    from graph_agent_gateway.settings_bounds import effort_probe_candidates
+    from graph_agent_gateway.registry import effort_probe_candidates
 
     assert effort_probe_candidates("anthropic_compatible") == (
         "low",
@@ -163,7 +163,7 @@ def test_a_protocol_that_pins_its_effort_vocabulary_bounds_what_is_worth_asking(
 def test_a_protocol_that_pins_nothing_offers_the_whole_ladder_to_the_probe() -> None:
     """OpenAI's set moves between model versions — exactly the case a document
     cannot answer and only asking can."""
-    from graph_agent_gateway.settings_bounds import EFFORT_LADDER, effort_probe_candidates
+    from graph_agent_gateway.registry import EFFORT_LADDER, effort_probe_candidates
 
     assert effort_probe_candidates("openai_compatible") == EFFORT_LADDER
     assert effort_probe_candidates(None) == EFFORT_LADDER
@@ -171,7 +171,7 @@ def test_a_protocol_that_pins_nothing_offers_the_whole_ladder_to_the_probe() -> 
 
 def test_measured_levels_become_the_capability_the_fitting_rules_read() -> None:
     """A measurement that lands anywhere else has changed nothing."""
-    from graph_agent_gateway.registry.capabilities import measured_effort_capability
+    from graph_agent_gateway.registry import measured_effort_capability
 
     capability = measured_effort_capability(["low", "high", "max"])
 
@@ -181,7 +181,7 @@ def test_measured_levels_become_the_capability_the_fitting_rules_read() -> None:
 
 def test_a_route_that_sells_no_level_records_that_rather_than_staying_silent() -> None:
     """Absent reads as "nobody asked yet" and invites the same spend again."""
-    from graph_agent_gateway.registry.capabilities import measured_effort_capability
+    from graph_agent_gateway.registry import measured_effort_capability
 
     capability = measured_effort_capability([])
 

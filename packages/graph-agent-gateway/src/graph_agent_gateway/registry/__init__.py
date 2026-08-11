@@ -1,13 +1,76 @@
-"""Shared LLM endpoint/route registry core."""
+"""What is true about endpoints, routes, credentials and their capabilities.
+
+This package is the registry domain's whole public contract: everything the
+rest of the gateway, the engine and the Studio backend may use from it is
+re-exported here. Reaching past this module into one of its files couples the
+caller to where a definition happens to live today — the arrangement inside is
+the domain's own business, and it changes.
+
+Decision: docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md
+"""
 
 from __future__ import annotations
 
+from graph_agent_gateway.registry.base_url import (
+    canonicalize_base_url,
+)
+from graph_agent_gateway.registry.bounds import (
+    AUTHORED_TEMPERATURE_MAX,
+    EFFORT_LADDER,
+    Bounds,
+    bounds_for,
+    documented_effort_levels,
+    effort_bounds,
+    effort_probe_candidates,
+    fit,
+    provider_temperature_from_authored,
+)
+from graph_agent_gateway.registry.call_methods import (
+    apply_call_method_base_url,
+    call_method_auth_token_env,
+    call_method_client_compatibility,
+    call_method_ids_for_client,
+    call_method_ids_for_endpoint,
+    official_call_method_ids,
+    provider_probe_backend_for_method,
+)
+from graph_agent_gateway.registry.capabilities import (
+    build_runtime_setting_descriptors,
+    measured_effort_capability,
+    normalize_route_capabilities,
+)
+from graph_agent_gateway.registry.catalog import (
+    EVIDENCE_LIBRARY_DRAFT_ID,
+    MaterializedProbeCatalogCandidates,
+    ProbeCatalogStore,
+    PromotableRouteUpdate,
+    known_model_ids_for_endpoint,
+    known_verified_capabilities,
+    materialize_probe_catalog_candidates,
+    merge_evidence_library,
+    new_evidence_library,
+    probe_priority,
+    promotable_route_update,
+)
+from graph_agent_gateway.registry.config_store import (
+    ConfigConflictError,
+    ConfigRecord,
+    ConfigTruthStore,
+    InMemoryConfigTruthStore,
+)
 from graph_agent_gateway.registry.contracts import (
     CredentialDescriptor,
     CredentialProviderProtocol,
     SecretLifetimePolicy,
     SnapshotVersion,
+    StandardTerminalRetrySettings,
     TerminalRetryPolicy,
+)
+from graph_agent_gateway.registry.credential_resolver import (
+    CredentialResolveError,
+    CredentialResolveRequest,
+    CredentialResolveResponse,
+    resolve_credential,
 )
 from graph_agent_gateway.registry.credentials import (
     EndpointCredentialProvider,
@@ -21,7 +84,27 @@ from graph_agent_gateway.registry.endpoints import (
     legacy_v3_endpoint_id,
     standardize_endpoint_candidates,
 )
+from graph_agent_gateway.registry.fingerprint import (
+    compute_credential_fingerprint,
+)
+from graph_agent_gateway.registry.identity import (
+    CanonicalConfidence,
+    CanonicalModel,
+    canonicalize_model,
+    route_slug,
+    stable_endpoint_id,
+    stable_route_id,
+    strip_transport_prefix,
+)
+from graph_agent_gateway.registry.projection import (
+    MaterializedRole,
+    ProviderModelStateProjection,
+    materialize_role,
+    project_provider_route_ui_state,
+    project_route_state,
+)
 from graph_agent_gateway.registry.schema import (
+    CapabilitySource,
     CapabilityValue,
     EffectiveRuntimeSetting,
     EndpointCandidate,
@@ -31,6 +114,7 @@ from graph_agent_gateway.registry.schema import (
     ModelBundle,
     ModelProfile,
     ProbeResult,
+    Protocol,
     ProviderEndpoint,
     ProviderImportDraft,
     ProviderRoute,
@@ -43,49 +127,108 @@ from graph_agent_gateway.registry.schema import (
     RoleRouteEntry,
     RouteCandidate,
     RuntimePolicy,
+    RuntimeSettingDescriptor,
     RuntimeSettings,
     SkippedRoute,
     StructuredOutputSettings,
     VerifiedProfile,
+    compute_evidence_content_hash,
 )
 
 __all__ = [
+    "AUTHORED_TEMPERATURE_MAX",
+    "Bounds",
+    "CanonicalConfidence",
+    "CanonicalModel",
+    "CapabilitySource",
     "CapabilityValue",
+    "ConfigConflictError",
+    "ConfigRecord",
+    "ConfigTruthStore",
     "CredentialDescriptor",
     "CredentialProviderProtocol",
+    "CredentialResolveError",
+    "CredentialResolveRequest",
+    "CredentialResolveResponse",
+    "EFFORT_LADDER",
+    "EVIDENCE_LIBRARY_DRAFT_ID",
     "EffectiveRuntimeSetting",
     "EndpointCandidate",
-    "EvidenceRecord",
     "EndpointCredentialProvider",
     "EndpointStandardizationResult",
+    "EvidenceRecord",
     "FallbackCredentialProvider",
     "FieldSource",
+    "InMemoryConfigTruthStore",
     "LintResult",
+    "MaterializedProbeCatalogCandidates",
+    "MaterializedRole",
     "ModelBundle",
     "ModelProfile",
+    "ProbeCatalogStore",
     "ProbeResult",
+    "PromotableRouteUpdate",
+    "Protocol",
+    "ProtocolProbeResult",
     "ProviderEndpoint",
     "ProviderImportDraft",
+    "ProviderModelStateProjection",
     "ProviderRoute",
     "ProviderUiState",
-    "ProtocolProbeResult",
     "RawProviderEndpointInput",
+    "ReasoningSettings",
     "RegistrySnapshot",
     "ResolvedRole",
     "ResolvedRoute",
-    "RuntimeSettings",
-    "ReasoningSettings",
     "RoleEntry",
     "RoleRouteEntry",
     "RouteCandidate",
     "RuntimePolicy",
-    "SkippedRoute",
-    "StructuredOutputSettings",
+    "RuntimeSettingDescriptor",
+    "RuntimeSettings",
     "SecretLifetimePolicy",
+    "SkippedRoute",
     "SnapshotVersion",
+    "StandardTerminalRetrySettings",
+    "StructuredOutputSettings",
     "TerminalRetryPolicy",
     "VerifiedProfile",
+    "apply_call_method_base_url",
+    "bounds_for",
+    "build_runtime_setting_descriptors",
+    "call_method_auth_token_env",
+    "call_method_client_compatibility",
+    "call_method_ids_for_client",
+    "call_method_ids_for_endpoint",
     "canonical_endpoint_id_base",
+    "canonicalize_base_url",
+    "canonicalize_model",
+    "compute_credential_fingerprint",
+    "compute_evidence_content_hash",
+    "documented_effort_levels",
+    "effort_bounds",
+    "effort_probe_candidates",
+    "fit",
+    "known_model_ids_for_endpoint",
+    "known_verified_capabilities",
     "legacy_v3_endpoint_id",
+    "materialize_probe_catalog_candidates",
+    "materialize_role",
+    "measured_effort_capability",
+    "merge_evidence_library",
+    "new_evidence_library",
+    "normalize_route_capabilities",
+    "official_call_method_ids",
+    "probe_priority",
+    "project_provider_route_ui_state",
+    "project_route_state",
+    "promotable_route_update",
+    "provider_probe_backend_for_method",
+    "provider_temperature_from_authored",
+    "resolve_credential",
+    "route_slug",
+    "stable_endpoint_id",
+    "stable_route_id",
     "standardize_endpoint_candidates",
+    "strip_transport_prefix",
 ]

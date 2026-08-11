@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from graph_agent_gateway.registry.schema import Protocol
+from graph_agent_gateway.registry import Protocol
 
 
 def test_standardize_mixed_provider_input_splits_urls_by_detected_protocol() -> None:
-    from graph_agent_gateway.registry.endpoints import (
+    from graph_agent_gateway.registry import (
         ProtocolProbeResult,
         RawProviderEndpointInput,
         standardize_endpoint_candidates,
@@ -80,7 +80,7 @@ def test_standardize_mixed_provider_input_splits_urls_by_detected_protocol() -> 
 
 
 def test_canonical_endpoint_ids_are_stable_when_raw_url_order_changes() -> None:
-    from graph_agent_gateway.registry.endpoints import (
+    from graph_agent_gateway.registry import (
         ProtocolProbeResult,
         RawProviderEndpointInput,
         standardize_endpoint_candidates,
@@ -129,7 +129,7 @@ def test_canonical_endpoint_ids_are_stable_when_raw_url_order_changes() -> None:
 
 
 def test_canonical_endpoint_id_suffix_avoids_reserved_existing_ids() -> None:
-    from graph_agent_gateway.registry.endpoints import (
+    from graph_agent_gateway.registry import (
         ProtocolProbeResult,
         RawProviderEndpointInput,
         standardize_endpoint_candidates,
@@ -159,7 +159,7 @@ def test_canonical_endpoint_id_suffix_avoids_reserved_existing_ids() -> None:
 
 
 def test_legacy_v3_endpoint_id_helper_preserves_known_migration_ids() -> None:
-    from graph_agent_gateway.registry.endpoints import legacy_v3_endpoint_id
+    from graph_agent_gateway.registry import legacy_v3_endpoint_id
 
     assert (
         legacy_v3_endpoint_id(

@@ -7,7 +7,7 @@ from pydantic import SecretStr, ValidationError
 
 
 def test_route_identity_and_resolved_route_has_no_inline_secret() -> None:
-    from graph_agent_gateway.registry.schema import ProviderRoute, ResolvedRoute
+    from graph_agent_gateway.registry import ProviderRoute, ResolvedRoute
 
     route = ProviderRoute(
         route_id="anthropic-official:claude-sonnet-4.6",
@@ -52,7 +52,7 @@ def test_route_identity_and_resolved_route_has_no_inline_secret() -> None:
 
 
 def test_runtime_schema_rejects_display_name_fields() -> None:
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         ModelProfile,
         ProviderEndpoint,
         ProviderRoute,
@@ -123,7 +123,7 @@ def test_runtime_schema_rejects_display_name_fields() -> None:
 
 
 def test_gateway_role_schema_rejects_deprecated_authoring_intent_fields() -> None:
-    from graph_agent_gateway.registry.schema import ModelBundle, RoleEntry, RuntimeSettings
+    from graph_agent_gateway.registry import ModelBundle, RoleEntry, RuntimeSettings
 
     with pytest.raises(ValidationError, match="cost_priority"):
         RoleEntry.model_validate(
@@ -169,7 +169,7 @@ def test_gateway_role_schema_rejects_deprecated_authoring_intent_fields() -> Non
 
 
 def test_invalid_route_id_or_mismatched_parts_fail_validation() -> None:
-    from graph_agent_gateway.registry.schema import ProviderRoute
+    from graph_agent_gateway.registry import ProviderRoute
 
     with pytest.raises(ValidationError):
         ProviderRoute(
@@ -191,7 +191,7 @@ def test_invalid_route_id_or_mismatched_parts_fail_validation() -> None:
 
 
 def test_runtime_policy_defaults_and_ranges() -> None:
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+    from graph_agent_gateway.registry import RuntimePolicy
 
     policy = RuntimePolicy()
 
@@ -215,7 +215,7 @@ def test_runtime_policy_defaults_and_ranges() -> None:
 
 
 def test_control_plane_runtime_contract_models_validate_without_secrets() -> None:
-    from graph_agent_gateway.registry.contracts import (
+    from graph_agent_gateway.registry import (
         CredentialDescriptor,
         SecretLifetimePolicy,
         SnapshotVersion,
@@ -255,8 +255,7 @@ def test_control_plane_runtime_contract_models_validate_without_secrets() -> Non
 
 
 def test_registry_snapshot_and_route_accept_snapshot_version_with_legacy_default() -> None:
-    from graph_agent_gateway.registry.contracts import SnapshotVersion
-    from graph_agent_gateway.registry.schema import ProviderRoute, RegistrySnapshot
+    from graph_agent_gateway.registry import ProviderRoute, RegistrySnapshot, SnapshotVersion
 
     legacy_snapshot = RegistrySnapshot.model_validate({})
 
@@ -283,7 +282,7 @@ def test_registry_snapshot_and_route_accept_snapshot_version_with_legacy_default
 
 
 def test_ark_runtime_protocol_is_first_class() -> None:
-    from graph_agent_gateway.registry.schema import ProviderEndpoint, ResolvedRoute
+    from graph_agent_gateway.registry import ProviderEndpoint, ResolvedRoute
 
     endpoint = ProviderEndpoint(
         endpoint_id="ark-cn",
@@ -308,7 +307,7 @@ def test_ark_runtime_protocol_is_first_class() -> None:
 
 
 def test_role_prefix_and_multi_endpoint_import_draft_validation() -> None:
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         EndpointCandidate,
         ProviderImportDraft,
         RoleEntry,

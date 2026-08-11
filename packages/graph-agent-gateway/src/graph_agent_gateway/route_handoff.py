@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
+from graph_agent_gateway.registry import ResolvedRole, ResolvedRoute
 
 
 class RouteSkipDiagnostic(BaseModel):

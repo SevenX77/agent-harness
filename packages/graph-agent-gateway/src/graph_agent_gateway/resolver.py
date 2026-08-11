@@ -13,23 +13,21 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.protocol import PredictContext
-from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
-from graph_agent_gateway.registry.credentials import (
+from graph_agent_gateway.registry import (
+    ConfigTruthStore,
+    CredentialProviderProtocol,
     EndpointCredentialProvider,
     FallbackCredentialProvider,
-)
-from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
-from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
     RoleEntry,
     RoleRouteEntry,
     RuntimePolicy,
 )
+from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
 from graph_agent_gateway.route_handoff import (
     ResolvedRouteChain,
     resolved_role_to_route_chain,
 )
-from graph_agent_gateway.storage_contracts import ConfigTruthStore
 
 
 class ResourceTerminalError(Exception):

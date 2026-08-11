@@ -19,7 +19,7 @@ def _route(
     protocol: str = "anthropic_compatible",
     provider_model_id: str = "claude-sonnet-4-6",
 ):
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -35,7 +35,7 @@ def _route(
 
 
 def _role(routes: Sequence[Any], *, token_escalation_rounds: int = 0):
-    from graph_agent_gateway.registry.schema import ResolvedRole, RuntimePolicy
+    from graph_agent_gateway.registry import ResolvedRole, RuntimePolicy
 
     return ResolvedRole(
         role_name="graph_agent",

@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 
 def test_config_truth_store_requires_user_scoped_etag_contract() -> None:
-    from graph_agent_gateway.storage_contracts import ConfigTruthStore
+    from graph_agent_gateway.registry import ConfigTruthStore
 
     get_signature = inspect.signature(ConfigTruthStore.get_config)
     put_signature = inspect.signature(ConfigTruthStore.put_config)
@@ -37,7 +37,7 @@ def test_config_truth_store_requires_user_scoped_etag_contract() -> None:
 
 
 def test_config_truth_store_returns_etag_and_rejects_stale_writes() -> None:
-    from graph_agent_gateway.storage_contracts import (
+    from graph_agent_gateway.registry import (
         ConfigConflictError,
         ConfigRecord,
         InMemoryConfigTruthStore,
@@ -94,7 +94,7 @@ def test_config_truth_store_returns_etag_and_rejects_stale_writes() -> None:
 
 @pytest.mark.parametrize("source", ["local_input", "remote_vault"])
 def test_credential_resolve_request_supports_declared_sources(source: str) -> None:
-    from graph_agent_gateway.credential_resolver import CredentialResolveRequest
+    from graph_agent_gateway.registry import CredentialResolveRequest
 
     request = CredentialResolveRequest(
         user_id="user-a",
@@ -110,7 +110,7 @@ def test_credential_resolve_request_supports_declared_sources(source: str) -> No
 
 
 def test_credential_resolve_request_rejects_undeclared_source() -> None:
-    from graph_agent_gateway.credential_resolver import CredentialResolveRequest
+    from graph_agent_gateway.registry import CredentialResolveRequest
 
     with pytest.raises(ValidationError):
         CredentialResolveRequest(
@@ -122,7 +122,7 @@ def test_credential_resolve_request_rejects_undeclared_source() -> None:
 
 
 def test_credential_resolve_response_returns_handle_and_never_raw_secret() -> None:
-    from graph_agent_gateway.credential_resolver import CredentialResolveResponse
+    from graph_agent_gateway.registry import CredentialResolveResponse
 
     expires_at = datetime.now(UTC) + timedelta(minutes=15)
     response = CredentialResolveResponse(
@@ -152,11 +152,11 @@ def test_credential_resolve_response_returns_handle_and_never_raw_secret() -> No
 
 
 def test_credential_resolver_owns_provider_lookup_handle_and_expiry() -> None:
-    from graph_agent_gateway.credential_resolver import (
+    from graph_agent_gateway.registry import (
+        CredentialDescriptor,
         CredentialResolveRequest,
         resolve_credential,
     )
-    from graph_agent_gateway.registry.contracts import CredentialDescriptor
 
     now = datetime.now(UTC)
     raw_secret = "sk-owner-secret"

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+from graph_agent_gateway.registry import InMemoryConfigTruthStore
 from graph_agent_gateway.resolver import ModelResolver
-from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 
 import graph_agent
 

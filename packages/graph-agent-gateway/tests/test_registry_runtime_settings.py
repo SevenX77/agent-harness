@@ -7,7 +7,7 @@ from pydantic import SecretStr, ValidationError
 
 
 def test_role_route_entry_uses_nested_runtime_settings_and_rejects_legacy_scalars() -> None:
-    from graph_agent_gateway.registry.schema import RoleRouteEntry, RuntimeSettings
+    from graph_agent_gateway.registry import RoleRouteEntry, RuntimeSettings
 
     entry = RoleRouteEntry(
         route_id="anthropic-official:claude",
@@ -46,7 +46,7 @@ def test_role_route_entry_uses_nested_runtime_settings_and_rejects_legacy_scalar
 
 
 def test_runtime_settings_defaults_are_fixed_normalized_objects() -> None:
-    from graph_agent_gateway.registry.schema import RuntimeSettings, StructuredOutputSettings
+    from graph_agent_gateway.registry import RuntimeSettings, StructuredOutputSettings
 
     settings = RuntimeSettings()
     structured = StructuredOutputSettings()
@@ -62,8 +62,7 @@ def test_runtime_settings_defaults_are_fixed_normalized_objects() -> None:
 
 
 def test_resolver_produces_effective_runtime_settings_with_sources() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderEndpoint,
         ProviderRoute,
@@ -71,6 +70,7 @@ def test_resolver_produces_effective_runtime_settings_with_sources() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.resolver import resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -136,14 +136,14 @@ def test_resolver_produces_effective_runtime_settings_with_sources() -> None:
 
 
 def test_profile_applied_runtime_defaults_keep_profile_source_without_runtime_dependency() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         ProviderEndpoint,
         ProviderRoute,
         RegistrySnapshot,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.resolver import resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -193,13 +193,13 @@ def test_profile_applied_runtime_defaults_keep_profile_source_without_runtime_de
 
 
 def test_runtime_settings_are_linted_against_capability_bounds() -> None:
-    from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderRoute,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.lint import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[
@@ -252,7 +252,7 @@ def test_runtime_settings_are_linted_against_capability_bounds() -> None:
 
 
 def test_runtime_setting_capabilities_are_normalized_from_provider_metadata() -> None:
-    from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+    from graph_agent_gateway.registry import normalize_route_capabilities
 
     capabilities = normalize_route_capabilities(
         protocol="openai_compatible",
@@ -284,13 +284,13 @@ def test_runtime_setting_capabilities_are_normalized_from_provider_metadata() ->
 
 
 def test_runtime_settings_lint_covers_non_reasoning_controls() -> None:
-    from graph_agent_gateway.registry.lint import lint_role_routes
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         ProviderRoute,
         RoleEntry,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry.lint import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[

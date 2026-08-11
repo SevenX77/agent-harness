@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 
 def _resolved_route():
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -68,7 +68,7 @@ def test_empty_route_chain_requires_explicit_error_payload() -> None:
 
 
 def test_resolved_role_to_route_chain_projects_empty_role_terminal_error() -> None:
-    from graph_agent_gateway.registry.schema import ResolvedRole, RuntimePolicy, SkippedRoute
+    from graph_agent_gateway.registry import ResolvedRole, RuntimePolicy, SkippedRoute
     from graph_agent_gateway.route_handoff import resolved_role_to_route_chain
 
     chain = resolved_role_to_route_chain(
@@ -133,7 +133,7 @@ def test_give_up_fallback_decision_requires_explicit_terminal_error() -> None:
 
 
 def test_materialized_role_empty_fallback_chain_requires_explicit_error() -> None:
-    from graph_agent_gateway.state_projection import MaterializedRole
+    from graph_agent_gateway.registry import MaterializedRole
 
     with pytest.raises(ValidationError):
         MaterializedRole(
@@ -161,7 +161,7 @@ def test_materialized_role_empty_fallback_chain_requires_explicit_error() -> Non
     ["ready", "historical_ready", "untested", "cooling_down", "off"],
 )
 def test_non_failed_six_state_projection_does_not_accept_failed_reason(ui_state: str) -> None:
-    from graph_agent_gateway.state_projection import ProviderModelStateProjection
+    from graph_agent_gateway.registry import ProviderModelStateProjection
 
     projection = ProviderModelStateProjection(route_id="openai:gpt-5", ui_state=ui_state)
     assert projection.ui_state == ui_state
@@ -180,7 +180,7 @@ def test_non_failed_six_state_projection_does_not_accept_failed_reason(ui_state:
     ["missing_config", "endpoint_unreachable", "model_failed"],
 )
 def test_failed_six_state_projection_allows_only_declared_reasons(reason_code: str) -> None:
-    from graph_agent_gateway.state_projection import ProviderModelStateProjection
+    from graph_agent_gateway.registry import ProviderModelStateProjection
 
     projection = ProviderModelStateProjection(
         route_id="openai:gpt-5",
@@ -200,7 +200,7 @@ def test_failed_six_state_projection_allows_only_declared_reasons(reason_code: s
 
 
 def test_cooling_down_projection_carries_retry_at_without_failed_reason() -> None:
-    from graph_agent_gateway.state_projection import ProviderModelStateProjection
+    from graph_agent_gateway.registry import ProviderModelStateProjection
 
     retry_at = datetime.now(UTC) + timedelta(seconds=30)
     projection = ProviderModelStateProjection(
@@ -218,7 +218,7 @@ def test_cooling_down_projection_carries_retry_at_without_failed_reason() -> Non
 def test_credential_evidence_refs_project_historical_ready_with_evidence_ref(
     endpoint_status: str,
 ) -> None:
-    from graph_agent_gateway.state_projection import project_route_state
+    from graph_agent_gateway.registry import project_route_state
 
     projection = project_route_state(
         route_id="openai:gpt-5",
@@ -233,7 +233,7 @@ def test_credential_evidence_refs_project_historical_ready_with_evidence_ref(
 
 
 def test_no_credential_evidence_refs_never_projects_historical_ready() -> None:
-    from graph_agent_gateway.state_projection import project_route_state
+    from graph_agent_gateway.registry import project_route_state
 
     projection = project_route_state(
         route_id="openai:gpt-5",
@@ -265,8 +265,8 @@ def test_provider_route_dto_carries_explicit_six_state_ui_state(
     circuit_retry_at: datetime | None,
     expected_state: str,
 ) -> None:
-    from graph_agent_gateway.registry.schema import ProviderRoute
-    from graph_agent_gateway.state_projection import (
+    from graph_agent_gateway.registry import (
+        ProviderRoute,
         project_provider_route_ui_state,
         project_route_state,
     )
@@ -296,9 +296,9 @@ def test_provider_route_dto_carries_explicit_six_state_ui_state(
 
 
 def test_route_state_projection_materializes_onto_provider_route_dto() -> None:
-    from graph_agent_gateway.registry.schema import ProviderRoute
-    from graph_agent_gateway.state_projection import (
+    from graph_agent_gateway.registry import (
         ProviderModelStateProjection,
+        ProviderRoute,
         project_provider_route_ui_state,
     )
 
@@ -320,9 +320,9 @@ def test_route_state_projection_materializes_onto_provider_route_dto() -> None:
 
 
 def test_route_state_projection_rejects_wrong_route_target() -> None:
-    from graph_agent_gateway.registry.schema import ProviderRoute
-    from graph_agent_gateway.state_projection import (
+    from graph_agent_gateway.registry import (
         ProviderModelStateProjection,
+        ProviderRoute,
         project_provider_route_ui_state,
     )
 
@@ -357,7 +357,7 @@ def test_credential_evidence_refs_do_not_override_terminal_or_cooling_states(
     circuit_retry_at: datetime | None,
     expected_state: str,
 ) -> None:
-    from graph_agent_gateway.state_projection import project_route_state
+    from graph_agent_gateway.registry import project_route_state
 
     projection = project_route_state(
         route_id="openai:gpt-5",
@@ -374,9 +374,8 @@ def test_credential_evidence_refs_do_not_override_terminal_or_cooling_states(
 
 def test_role_materialization_uses_credential_evidence_refs_for_historical_ready(monkeypatch) -> None:
     import graph_agent_gateway.role_materialization as role_materialization
-    from graph_agent_gateway.registry.schema import EvidenceRecord, ProviderEndpoint
+    from graph_agent_gateway.registry import EvidenceRecord, ProviderEndpoint, ProviderModelStateProjection
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
-    from graph_agent_gateway.state_projection import ProviderModelStateProjection
 
     captured: dict[str, Any] = {}
 

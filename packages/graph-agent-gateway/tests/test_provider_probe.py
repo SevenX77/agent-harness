@@ -6,8 +6,7 @@ import json
 
 import httpx
 import pytest
-from graph_agent_gateway.registry import provider_probe
-from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderRoute
+from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute, provider_probe
 from pydantic import SecretStr
 
 

@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent_gateway.registry.canonical import canonicalize_model
-from graph_agent_gateway.registry.schema import ProviderRoute
+from graph_agent_gateway.registry import ProviderRoute, canonicalize_model
 
 
 def _proxy_opus_payload(**overrides: Any) -> dict[str, Any]:

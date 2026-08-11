@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-from graph_agent_gateway.credential_resolver import (
-    CredentialResolveError,
-    CredentialResolveRequest,
-    CredentialResolveResponse,
-)
 from graph_agent_gateway.events import LLMRouteDecisionEvent, RouteDecision
 from graph_agent_gateway.exceptions import (
     AllProvidersFailedError,
@@ -23,19 +18,25 @@ from graph_agent_gateway.gateway_chat_model import (
     GatewayChatModel,
     answer_restarts_here,
 )
-from graph_agent_gateway.probe_catalog import (
+from graph_agent_gateway.protocol import ModelResolverProtocol
+from graph_agent_gateway.registry import (
+    CredentialResolveError,
+    CredentialResolveRequest,
+    CredentialResolveResponse,
     MaterializedProbeCatalogCandidates,
     ProbeCatalogStore,
     PromotableRouteUpdate,
+    ProviderModelStateProjection,
+    ResolvedRole,
+    ResolvedRoute,
     known_model_ids_for_endpoint,
     known_verified_capabilities,
     materialize_probe_catalog_candidates,
     merge_evidence_library,
     probe_priority,
+    project_route_state,
     promotable_route_update,
 )
-from graph_agent_gateway.protocol import ModelResolverProtocol
-from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.resolver import ModelResolver
 from graph_agent_gateway.role_materialization import (
     MaterializedRoleResult,
@@ -43,10 +44,6 @@ from graph_agent_gateway.role_materialization import (
     materialize_role,
 )
 from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
-from graph_agent_gateway.state_projection import (
-    ProviderModelStateProjection,
-    project_route_state,
-)
 
 __all__ = [
     "AllProvidersFailedError",

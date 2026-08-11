@@ -34,9 +34,9 @@ from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from app.services.model_probe import ModelProbeResult
 from fastapi.testclient import TestClient
+from graph_agent_gateway.registry import EvidenceRecord, VerifiedProfile
 from graph_agent_gateway.registry import provider_probe as gateway_provider_probe
 from graph_agent_gateway.registry.provider_probe import EndpointProbeResult, RouteProbeResult
-from graph_agent_gateway.registry.schema import EvidenceRecord, VerifiedProfile
 
 
 def _endpoint_probe_ok(

@@ -21,7 +21,7 @@ from app.services import copilot as copilot_service
 from claude_agent_sdk import ClaudeAgentOptions, ProcessError
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.schema import Protocol, ResolvedRoute
+from graph_agent_gateway.registry import Protocol, ResolvedRoute
 from pydantic import SecretStr
 
 

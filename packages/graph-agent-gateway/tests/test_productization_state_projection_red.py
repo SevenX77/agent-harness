@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def _resolved_route():
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -20,7 +20,7 @@ def _resolved_route():
 
 
 def test_project_route_state_maps_missing_config_to_failed_reason() -> None:
-    from graph_agent_gateway.state_projection import project_route_state
+    from graph_agent_gateway.registry import project_route_state
 
     projection = project_route_state(
         route_id="openai:gpt-5",
@@ -36,7 +36,7 @@ def test_project_route_state_maps_missing_config_to_failed_reason() -> None:
 
 
 def test_project_route_state_uses_credential_evidence_refs_for_history() -> None:
-    from graph_agent_gateway.state_projection import project_route_state
+    from graph_agent_gateway.registry import project_route_state
 
     projection = project_route_state(
         route_id="openai:gpt-5",
@@ -52,7 +52,7 @@ def test_project_route_state_uses_credential_evidence_refs_for_history() -> None
 
 
 def test_materialize_role_skips_failed_routes_and_returns_terminal_error() -> None:
-    from graph_agent_gateway.state_projection import (
+    from graph_agent_gateway.registry import (
         ProviderModelStateProjection,
         materialize_role,
     )

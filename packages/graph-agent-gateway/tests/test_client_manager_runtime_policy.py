@@ -15,7 +15,7 @@ class StaticCredentialProvider:
 
 
 def _route():
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",
@@ -35,8 +35,7 @@ def _route():
 
 def test_runtime_policy_changes_runtime_client_cache_key_not_credential_fingerprint() -> None:
     from graph_agent_gateway.client_manager import LLMClientManager
-    from graph_agent_gateway.registry.schema import ProviderEndpoint, RuntimePolicy
-    from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+    from graph_agent_gateway.registry import ProviderEndpoint, RuntimePolicy, compute_credential_fingerprint
 
     route = _route()
     base_policy = RuntimePolicy(
@@ -86,7 +85,7 @@ def test_resolve_api_key_uses_credential_provider_ref() -> None:
 def test_provider_down_ttl_comes_from_runtime_policy(monkeypatch) -> None:
     from graph_agent_gateway import client_manager
     from graph_agent_gateway.client_manager import LLMClientManager
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+    from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route()
     policy = RuntimePolicy(provider_down_ttl_seconds=9)
@@ -105,7 +104,7 @@ def test_provider_down_ttl_comes_from_runtime_policy(monkeypatch) -> None:
 
 def test_token_escalation_rounds_come_from_runtime_policy() -> None:
     from graph_agent_gateway import ordinary_chat
-    from graph_agent_gateway.registry.schema import CapabilityValue, RuntimePolicy
+    from graph_agent_gateway.registry import CapabilityValue, RuntimePolicy
 
     route = _route().model_copy(
         update={
@@ -394,7 +393,7 @@ def test_openai_runtime_settings_omit_unset_temperature() -> None:
 
 def test_dispatch_keeps_openai_temperature_on_authored_two_point_scale(monkeypatch) -> None:
     from graph_agent_gateway import client_manager, ordinary_chat
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+    from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route()
     captured: list[dict[str, object]] = []
@@ -429,7 +428,7 @@ def test_dispatch_keeps_openai_temperature_on_authored_two_point_scale(monkeypat
 def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
     from graph_agent_gateway import ordinary_chat
     from graph_agent_gateway.client_manager import LLMClientManager
-    from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
+    from graph_agent_gateway.registry import ResolvedRoute, RuntimePolicy
 
     captured: list[dict[str, object]] = []
 
@@ -490,7 +489,7 @@ def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
 
 def test_dispatch_remaps_anthropic_temperature_to_provider_scale(monkeypatch) -> None:
     from graph_agent_gateway import client_manager, ordinary_chat
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+    from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route().model_copy(
         update={
@@ -637,7 +636,7 @@ def test_google_genai_runtime_settings_map_to_generate_content_config() -> None:
 
 def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatch) -> None:
     from graph_agent_gateway import client_manager, ordinary_chat
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+    from graph_agent_gateway.registry import RuntimePolicy
 
     route = _route().model_copy(
         update={

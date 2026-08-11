@@ -9,7 +9,7 @@ gateway schema implements them. These fail until T1.2 adds the two fields plus
 from __future__ import annotations
 
 import pytest
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     EvidenceRecord,
     compute_evidence_content_hash,
 )

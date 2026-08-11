@@ -32,8 +32,8 @@ from graph_agent_gateway.call_settings import (
 )
 from graph_agent_gateway.events import RouteDecision
 from graph_agent_gateway.exceptions import AllProvidersFailedError
+from graph_agent_gateway.registry import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.registry.error_classification import classify_exception
-from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.route_chat_model_factory import (
     RouteChatModelFactory,
     provider_request_keys,

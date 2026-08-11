@@ -144,7 +144,8 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
 | `registry/canonical.py` `registry/route_identity.py` | `registry/identity.py` | 两者都只做身份归一,合并 |
 | `registry/base_url.py` `registry/endpoints.py` `registry/credentials.py` | `registry/` 原位 | |
 | `registry/capabilities.py` `registry/call_methods.py` | `registry/` 原位 | |
-| `registry/storage.py` + `storage_contracts.py` | `registry/storage.py` | 存储 port 只有一份 |
+| `storage_contracts.py` | `registry/config_store.py` | 见下方 2026-08-11 订正 |
+| `registry/storage.py` | `registry/fingerprint.py` | 见下方 2026-08-11 订正 |
 | `import_draft_store.py` | `registry/catalog.py` | `probe_catalog.py` 删除(B4) |
 | `state_projection.py` | `registry/projection.py` | 真相 → UI 状态的投影 |
 | `settings_bounds.py` | `registry/bounds.py` | 边界是路由的事实 |
@@ -163,6 +164,29 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
 | `registry/probe_contracts.py` | `probing/contracts.py` | |
 | `events.py` `tracing.py` | `observe/` | |
 | `exceptions.py` | `errors.py` | |
+
+#### D5 的 2026-08-11 订正(P1a 实施中发现,已按新写法落地)
+
+1. **两个 storage 不合并。** 初稿写"存储 port 只有一份"是按文件名判的,读进去才发现它们是两件事:
+   `storage_contracts.py` 是**配置真相的 Port**(`ConfigTruthStore` 协议 + 内存实现),
+   `registry/storage.py` 是**凭据指纹计算**(`compute_credential_fingerprint`,一个纯函数)。
+   合并只会造出一个"和"式模块。各自改成名副其实的 `registry/config_store.py` 与
+   `registry/fingerprint.py`。
+2. **`probe_catalog` 这一层删除后,活下来的是新名字。** 别名壳里 `ProbeCatalogStore = ImportDraftStore`,
+   两侧都在用。按"一个概念一个名字",保留 catalog 侧命名,`ImportDraftStore` /
+   `MaterializedImportDraftCandidates` / `materialize_import_draft_candidates` 三个 legacy 名整体消失。
+   `tests/test_probe_catalog.py` 随之删除——它守的正是"两个门面不许互相暴露对方的名字"这条只在
+   别名层存在时才有意义的规则;存储行为测试改名 `tests/test_registry_catalog.py` 继续守行为。
+3. **发现 `materialize_role` 同名两物,本期不裁决。** 设计源
+   `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/01-design.md:102` 写的是
+   `materialize_role(request) -> MaterializedRole`;代码里有两个:
+   `registry/projection.py:132` 签名是 `(role, routes, projections) -> MaterializedRole`(返回设计命名的类型,
+   但今天只有测试在用),`role_materialization.py:39` 签名是 `(request) -> MaterializedRoleResult`
+   (返回设计没提过的类型,但 studio 生产在用)。两个都不完全等于设计。本期只做搬迁,
+   registry 域按设计名原样导出前者,**裁决留给 `role/` 域那一期**(P1b),届时对着设计源收敛成一个。
+4. **文档里的旧路径不在每期回写。** 全仓 docs 约 120 处提到被搬走的模块名,其中多处在带哈希锁的
+   audited MVP1 设计文件里。树还要再动四期,每期扫一遍是五倍工作量且反复触发哈希锁重钉;
+   改为**树定形后一次扫完**(台账新增 P1z)。
 
 ### D6. 同期删除(不留别名、不留兼容)
 

@@ -35,7 +35,7 @@ class StaticCredentialProvider:
 
 
 def _route(*, protocol: str = "openai_compatible"):
-    from graph_agent_gateway.registry.schema import EffectiveRuntimeSetting, ResolvedRoute
+    from graph_agent_gateway.registry import EffectiveRuntimeSetting, ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",

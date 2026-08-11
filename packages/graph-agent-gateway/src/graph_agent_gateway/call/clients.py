@@ -117,7 +117,7 @@ class LLMCircuitAndUsageLedger:
         ttl = runtime_policy.provider_down_ttl_seconds
         cls._provider_down_cache[key] = time.monotonic() + ttl
         logger.warning(
-            "phase=llm_client_manager action=mark_down endpoint=%s route=%s model=%s ttl=%d",
+            "phase=llm_circuit_ledger action=mark_down endpoint=%s route=%s model=%s ttl=%d",
             route.endpoint_id,
             route.route_id,
             route.provider_model_id,

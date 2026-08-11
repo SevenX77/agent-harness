@@ -46,7 +46,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 |---|---|
 | **resolver → `_generate`（入参）** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（有序 fallback 链）, `runtime_policy`: `RuntimePolicy`（down TTL / probe timeout / `token_escalation_rounds`,字段权威源 `registry/schema.py:88-98`）}。`_generate` **看得到**"有序候选 + 运行时策略"(通用编排概念),**看不到**"角色怎么被 UI 编辑 / 怎么排序出来"(③a 应用加工 + 02 materialize)。 |
 | **`_generate` → 09 调用层（每条 route）** | 入:一条 `ResolvedRoute` + 原始 `BaseMessage[]`(不拍 dict) + runtime params;出:ChatX `AIMessage`(含 `usage_metadata` + 注入的 route metadata) 或抛异常。**契约要求**:① 抛出的异常形状能被 `classify_exception` 沿异常链找到 `status_code`/`response.status_code`;② 成功 `AIMessage.usage_metadata` 非空可喂 usage 归属;③ thinking content blocks 不被拍平(归 09 F4)。 |
-| **`_generate` → `client_manager`（健康/usage,③b 公共接口）** | 类名今为 `LLMCircuitAndUsageLedger`(`call/clients.py:17`)。`is_provider_marked_down(...) → bool`(`:31`)、`mark_provider_down(..., runtime_policy)`(`:42`)、`record_usage(...)`(`:74`)、`usage_total_calls(route) → int`(`:53`)。**M2 拆解里的 ②probe 已不在这个接口上**:前置探问搬去 `call/pre_call_probe.py:probe_call_settings`,由 `call/chat_model.py:309-320` 直接调,而且语义换了(见 F3)。 |
+| **`_generate` → `ledger`（健康/usage,③b 公共接口）** | 注入形参今为 `ledger`,类名今为 `LLMCircuitAndUsageLedger`(`call/clients.py:17`)。`is_provider_marked_down(...) → bool`(`:31`)、`mark_provider_down(..., runtime_policy)`(`:42`)、`record_usage(...)`(`:74`)、`usage_total_calls(route) → int`(`:53`)。**M2 拆解里的 ②probe 已不在这个接口上**:前置探问搬去 `call/pre_call_probe.py:probe_call_settings`,由 `call/chat_model.py:309-320` 直接调,而且语义换了(见 F3)。 |
 | **熔断持久化（③b 公共,现 ③a 待下沉）** | `SqliteLlmHealthStore.open_circuit(circuit: RuntimeCircuit)` 写、`get_active_circuits(route_id, endpoint_id, rate_limit_bucket) → RuntimeCircuit[]`(只返回 `retry_at` 未过的)读;`RuntimeCircuit` DTO 字段 `scope/scope_id/opened_at/retry_at/ttl_seconds/reason_code/failure_count/message`,见 `apps/studio/backend/app/services/llm_health_store.py:14-101`。**存储介质 SQLite 路径由 ③a 注入**,store 逻辑本身 ③b。 |
 | **probe 结果 DTO（③b 公共契约）** | `ProbeResult`(探测结果契约,字段权威源 `registry/schema.py:386`,经 `registry/__init__.py:170` 导出给诊断/SSOT 侧)。执行期 `_generate` 消费的是前置探问的裁决 `probe_call_settings(...)`(`call/pre_call_probe.py:84`);对外发起的**独立**探测(端点/路由/问题集)住 gateway `probing` 域,结果作为诊断/证据流进 [[08-orch-test-status-ssot]]。 |
 | **fallback event（③b 公共,归 13）** | `emit_llm_fallback_event` 入 `LLMFallbackEvent`{ `phase_name`, from/to provider, reason, code, context(含 from/to route 诊断 + fallback decision + provider status code + runtime settings) }。callback 异常被吞,不掩盖运行时错误。 |
@@ -86,7 +86,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **决策 + 动机**：熔断态 route 在 invoke 前被 `continue` 跳过,不发起调用;mark_down 只在 fallback-eligible 失败后写,按 `RuntimePolicy.provider_down_ttl_seconds` 控制窗口。熔断持久化(跨进程)归 F9(本轮反转 ③b);此处是执行期 TTL 缓存层。
 - **测试点**：**熔断跳过** — `is_provider_marked_down`==true 的 route → 在 invoke 前被 `continue` 跳过,**不发起调用**(回归点:熔断态 route 不应进 ChatX invoke)。
 - **status**：`_is_marked_down` / `_mark_down` / 对应 client_manager 接口已在;保留为编排层接口。
-- **归属**：③b `packages/graph-agent-gateway`(`client_manager` 的熔断,已在)。
+- **归属**：③b `packages/graph-agent-gateway`(`ledger` 的熔断,已在)。
 
 ### F3 前置探问（正式请求构造器 + 1 token 预算 + base_url 归一化消费）
 

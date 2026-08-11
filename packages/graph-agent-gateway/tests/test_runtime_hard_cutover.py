@@ -240,11 +240,11 @@ def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
     from graph_agent_gateway.call import GatewayChatModel
 
     credentials_path, roles_path = _write_registry_files(tmp_path)
-    client_manager = RecordingClientManager()
+    ledger = RecordingClientManager()
     resolver = _resolver_from_files(
         credentials_path,
         roles_path,
-        client_manager=client_manager,
+        ledger=ledger,
     )
 
     model = resolver.resolve("graph_agent", phase_name="draft")
@@ -328,10 +328,10 @@ def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call
     from graph_agent_gateway.resolve import ResolvedRouteChain
 
     factory = _install_route_factory(monkeypatch)
-    client_manager = RecordingClientManager()
+    ledger = RecordingClientManager()
     resolver = _resolver_from_snapshot(
         _snapshot(),
-        client_manager=client_manager,
+        ledger=ledger,
     )
 
     resolved = resolver.resolve_routes("graph_agent")
@@ -348,7 +348,7 @@ def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call
     # Resolving a chain asks no provider anything — not even the one cheap
     # question a call would open with.
     assert factory.builds == []
-    assert client_manager.marked_down == []
+    assert ledger.marked_down == []
 
 
 def test_resolve_and_resolve_routes_share_the_same_route_resolution() -> None:
@@ -418,15 +418,15 @@ def test_model_resolver_predict_context_returns_predict_gateway_chat_model() -> 
 
 def test_mark_provider_down_uses_resolved_executable_route() -> None:
 
-    client_manager = RecordingClientManager()
+    ledger = RecordingClientManager()
     resolver = _resolver_from_snapshot(
         _snapshot(),
-        client_manager=client_manager,
+        ledger=ledger,
     )
 
     resolver.mark_provider_down("openai-direct:gpt-5")
 
-    assert client_manager.marked_down == [("openai-direct:gpt-5", "manual mark down")]
+    assert ledger.marked_down == [("openai-direct:gpt-5", "manual mark down")]
 
 
 def test_runtime_uses_route_secret_and_no_provider_env(
@@ -444,10 +444,10 @@ def test_runtime_uses_route_secret_and_no_provider_env(
         monkeypatch.delenv(key, raising=False)
 
     factory = _install_route_factory(monkeypatch)
-    client_manager = RecordingClientManager()
+    ledger = RecordingClientManager()
     model = _resolver_from_snapshot(
         _snapshot(),
-        client_manager=client_manager,
+        ledger=ledger,
     ).resolve("graph_agent")
 
     response = model.invoke([HumanMessage(content="hello")])
@@ -483,10 +483,10 @@ def test_thinking_protocol_uses_capability_value_not_field_presence(
         }
     )
     factory = _install_route_factory(monkeypatch)
-    client_manager = RecordingClientManager()
+    ledger = RecordingClientManager()
     model = _resolver_from_snapshot(
         snapshot,
-        client_manager=client_manager,
+        ledger=ledger,
     ).resolve("graph_agent")
 
     model.invoke([HumanMessage(content="hello")])
@@ -518,10 +518,10 @@ def test_route_runtime_setting_not_capability_enables_thinking(
         )
     ]
     factory = _install_route_factory(monkeypatch)
-    client_manager = RecordingClientManager()
+    ledger = RecordingClientManager()
     model = _resolver_from_snapshot(
         snapshot,
-        client_manager=client_manager,
+        ledger=ledger,
     ).resolve("graph_agent")
 
     model.invoke([HumanMessage(content="hello")])
@@ -552,11 +552,11 @@ def test_gateway_runtime_source_has_no_engine_llm_imports() -> None:
     root = Path(__file__).resolve().parents[1] / "src" / "graph_agent_gateway"
     source = "\n".join(
         (root / name).read_text(encoding="utf-8")
-        for name in ("resolver.py", "gateway_chat_model.py", "client_manager.py")
+        for name in ("resolver.py", "gateway_chat_model.py", "ledger.py")
         if (root / name).exists()
     )
 
-    assert "graph_agent.models.llm_client_manager" not in source
+    assert "graph_agent.models.llm_ledger" not in source
     assert "graph_agent.config.llm_config" not in source
     assert "_load_default_roles_data" not in source
     assert "GRAPH_AGENT_DEFAULT_ROLE" not in source

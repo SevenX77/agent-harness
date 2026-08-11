@@ -54,7 +54,7 @@ class ModelResolver:
         *,
         config_store: ConfigTruthStore,
         user_id: str,
-        client_manager: Any = None,
+        ledger: Any = None,
         credential_provider: CredentialProviderProtocol | None = None,
     ) -> None:
         credentials = config_store.get_config(user_id, "credentials").value
@@ -76,7 +76,7 @@ class ModelResolver:
         self.config_store = config_store
         self.user_id = user_id
         self.registry_snapshot = registry_snapshot
-        self.client_manager = client_manager
+        self.ledger = ledger
         endpoint_credential_provider = EndpointCredentialProvider(
             registry_snapshot.provider_endpoints
         )
@@ -173,7 +173,7 @@ class ModelResolver:
                 phase_name=phase_name,
                 thinking_enabled=effective_thinking_enabled,
                 runtime_setting_sources=runtime_setting_sources,
-                client_manager=self.client_manager,
+                ledger=self.ledger,
                 credential_provider=self.credential_provider,
                 name=first_route.provider_model_id,
             )
@@ -186,7 +186,7 @@ class ModelResolver:
             phase_name=phase_name,
             thinking_enabled=effective_thinking_enabled,
             runtime_setting_sources=runtime_setting_sources,
-            client_manager=self.client_manager,
+            ledger=self.ledger,
             credential_provider=self.credential_provider,
             name=first_route.provider_model_id,
         )
@@ -287,9 +287,9 @@ class ModelResolver:
             credential_provider=self.credential_provider,
         )
         manager = (
-            self.client_manager
-            if self.client_manager is not None
-            else _default_client_manager()
+            self.ledger
+            if self.ledger is not None
+            else _default_ledger()
         )
         manager.mark_provider_down(
             role.routes[0],
@@ -407,7 +407,7 @@ def _gateway_model_bundles_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return gateway_bundles
 
 
-def _default_client_manager() -> Any:
+def _default_ledger() -> Any:
     from graph_agent_gateway.call.clients import LLMCircuitAndUsageLedger
 
     return LLMCircuitAndUsageLedger

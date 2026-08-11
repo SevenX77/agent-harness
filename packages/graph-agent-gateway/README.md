@@ -69,7 +69,7 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 - **能力对比 / 合并**（🔻 现 `llm_route_capabilities.py`）：把路线静态声明的能力 + 探测验证出的能力合并成一份有效能力。
 
 ### D. 状态
-- **客观健康态 + 熔断**（✅ `client_manager.py` 熔断决策、`registry/probe_contracts.py`）：一条路线现在是否验证通过 / 失败 / 熔断冷却中。
+- **客观健康态 + 熔断**（✅ 熔断决策 `call/clients.py:LLMCircuitAndUsageLedger`、探测结果契约 `registry/schema.py:ProbeResult`）：一条路线现在是否验证通过 / 失败 / 熔断冷却中。（原文点名的 `registry/probe_contracts.py` 已随 #713 删除——它只是七行 re-export，`ProbeResult` 本来就定义在 `registry/schema.py`。）
 - **熔断状态持久化**（🔻 现 `llm_health_store.py`）：把冷却事实存起来跨进程复用。
 - **标准状态总结（6 态）**（🔻 现 `llm_state_projection.py`）：把"配置 + 健康 + 熔断"总结成一套标准状态集（6 态：`ready / 以前联通过(蓝) / untested / failed(带 reason) / cooling_down / off`）——这是 gateway 从自身机制提炼的最佳状态方案，应用选用全套 / 部分 / 不用，**不必自己研究机制重新发明**。
 
@@ -82,9 +82,9 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 - **两级对外接口**：
   - **role 级**（✅ `ModelResolver`）——应用给一个 role name，gateway 解析 → 自动按 fallback 链调用，失败按错误码熔断 / 重试 / 切下一条。
   - **route 级**（🔻 待提升为一等公共 API）——应用给一条 route，gateway 直接调用（不需要编排的应用用这个）。
-- **原生 ChatX 调用**（✅ `gateway_chat_model.py`、`client_manager.py`）：每条路线用原生 langchain ChatX 调通，外层保留 fallback / 熔断 / probe / usage / 路线归属编排。
+- **原生 ChatX 调用**（✅ `call/chat_model.py`、`call/clients.py`）：每条路线用原生 langchain ChatX 调通，外层保留 fallback / 熔断 / 前置探问 / usage / 路线归属编排。
 - **错误分类**（✅ `registry/error_classification.py`）：把 HTTP 状态码 / 异常映射成"该 fallback / 该 fail-fast / 该重试"——应用也可以只要这个错误码语义，自己决定怎么处理。
-- **探活 + 瞬时重试 + 截断升级重试**（✅ `client_manager.py`）。
+- **前置探问 + 瞬时重试 + 截断升级重试**：三件事今天各有各的家——前置探问 `call/pre_call_probe.py`（问的是「这条路收不收这些设置」，**不是**探活，见 `docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/mvp1-alignment.md` F3）、瞬时重试由 ChatX 自己做（有界，只对 429/5xx/连接）、截断升级重试 `call/chat_model.py` 的 `_Attempt`。
 
 ### G. 可观测
 - **usage / metadata、fallback 事件、tracing、结构化异常**（✅ `events.py` / `tracing.py` / `exceptions.py`）。

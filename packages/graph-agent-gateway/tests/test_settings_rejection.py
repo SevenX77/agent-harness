@@ -144,7 +144,7 @@ def _ask(
         _role(routes),
         max_tokens=512,
         temperature=0.7,
-        client_manager=manager,
+        ledger=manager,
         probe_before_call=probe,
         callbacks=[recorder],
     )

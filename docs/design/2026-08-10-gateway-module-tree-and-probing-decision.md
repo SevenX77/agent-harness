@@ -412,6 +412,56 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     另有活的职责(路由熔断标记与用量计费,`call/chat_model.py` 在用),不能整个删。
     先摆事实、不动手。
 
+### D8. P3b 提案:预测型探针改走生产工厂(结构性,待裁决)
+
+**先说事实。** `probe_provider_route`(A2)今天有两种用法,都在 studio:
+`routers/llm.py:5299` 的 `_gateway_probe_route` **临时拼一个 `ProviderRoute`**
+去问"这个 endpoint 能不能跑这个模型"(路由还不存在于注册表),以及对已存在路由的复测。
+两者归结为同一个问题:**一次真实调用会不会成功**。所以它是预测型探针,
+判据只有一个——它发的请求必须和真实调用发的一致。
+
+**提案。** 它不再自己拼 HTTP,而是走 `RouteChatModelFactory` 造模型、问 1 个 token,
+与 `call/pre_call_probe.py::build_probe_model` 同款。四个已知的实现问题与建议解法:
+
+1. **工厂要 `ResolvedRoute`,探针手里只有 endpoint + 一个可能不存在的 route。**
+   建议:studio 既然已经在临时拼 `ProviderRoute`,同理拼 `ResolvedRoute`——
+   protocol / base_url / credential_ref / provider_model_id / timeout_seconds 都现成,
+   role_name 与 fingerprint 是记账字段。**拼一个临时对象不是造假,它就是"这次要试的那条路"**。
+2. **凭据。** 探针现在收裸 `api_key`;工厂收注入的 credential provider(网关既有范式)。
+   建议按范式走注入,由 host 提供。
+3. **归属。** 建议放 `probing/`,对外它就是"探测"这个能力;`probing → call` 是单向依赖
+   (`call` 不 import `probing`),不构成循环。
+4. **判据要换。** 失败从此以 provider SDK **异常**的形式出现,不再是 `httpx.Response`,
+   所以判据从 `probing/judge.py::probe_status`(读响应)换成
+   `resolve/error_classification.py::classify_exception`(读异常)。
+   **这会改变 studio 消费的 `ProviderProbeStatus` 词表**,需要一张显式映射并同步前端——
+   这是本提案唯一真正外溢到 UI 的部分,也是它必须先经裁决的原因。
+
+**基线怎么办。** 100 条 endpoint 基线里,route 那 80 条钉的是"探针自己拼的 HTTP",
+随实现退役;endpoint 那 20 条(A1 模型列表)保留。取而代之的判据是
+**探针造出来的模型的 payload 必须等于生产 payload**,与 `test_production_wire_contract.py` 同源
+——比逐字节对 HTTP 更强,因为它们由同一个工厂产出。
+
+**同期需要一并裁决的一处**:`anthropic_messages` 方言给探测请求加了 `thinking` 块,
+而真实调用只发 `output_config.effort`、不发 `thinking`(实测)。A3 是发现型探针,
+"带 thinking 问一次"本身是合法的问题;但它写出来的 verified profile 会被生产拿去用,
+**用带 thinking 的问题验证一条不带 thinking 的调用**,结论未必成立。
+
+### D9. P3c 待裁决:不可达的调用路径怎么处置
+
+`call/dispatch.py`(1026 行,六个 `_call_*`)+ `call/models.py::GenericRouteChatModel`(301 行)
++ `LLMClientManager` 里构造 provider SDK 客户端的部分,对任何合法路由都不可达(证据见订正 20)。
+三个处置:
+
+1. **全删**:连同 factory 的兜底分支与六个相关测试文件;`LLMClientManager` 只留活着的职责
+   (熔断标记、用量计费,`call/chat_model.py` 在用)。合仓规"死路径同期删除",一次约 1300 行。
+2. **只删入口、留库**:删兜底分支与 `GenericRouteChatModel`,`dispatch.py` 变成显式的未接线备用实现。
+   **不建议**——仓规禁止留"将来可能用到"的路径,而这正是让订正 20 里那次判断出错的东西。
+3. **押后**:记在册上,等 P4/P5 真机验证跑完一起清。
+
+建议 1。理由是这次的教训本身即证据:**一个没人调用但名字齐全、测试齐全的模块,
+会被当成生产事实来引用**——它已经骗过一次了。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

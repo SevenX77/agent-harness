@@ -46,6 +46,33 @@
 `if "deepseek" in base_host` / `if "deepseek" in endpoint_id` 推断方言。
 方言没被显式建模,才需要这种猜。
 
+**2026-08-12 补:这个猜的后果已经录成基线**(`tests/data/endpoint_probe_wire_baseline.json`,
+协议 × 主机 × endpoint 名的 100 条实录)。它不是"偶尔猜错",而是**主机名压过用户声明的协议**:
+
+| endpoint 配置 | 探测实际发出的请求 |
+|---|---|
+| `protocol: anthropic_compatible`,base_url 在 `api.deepseek.com` | `POST /v1/chat/completions`,OpenAI 形状的 `messages` 体 |
+| `protocol: google_genai`,base_url 在 `api.deepseek.com` | 同上,一样的 OpenAI chat 请求 |
+| `protocol: openai_compatible`,主机中性,endpoint **取名**含 `deepseek` | 预算字段从 `max_completion_tokens` 变成 `max_tokens` |
+
+前两行是**用户明说了协议、代码不听**;第三行是**用户起的名字改变了发出去的字段**。
+名字是标签不是事实,主机名也只是线索;判断"这条 endpoint 说哪种话"的权威来源应当是
+catalog 的 `endpoint_method_candidates`——它本来就是为这件事存在的表。
+
+注意这不等于"主机名一概不可用":`api.deepseek.com` + `openai_compatible` 确实**就是**
+DeepSeek 的 OpenAI 兼容面,主机名在这里是提供方身份而不是猜测。真正的缺陷是三条:
+拿主机名去**推翻**用户声明的协议、拿用户起的**名字**当事实、把这套判断**硬写成 if 链**
+而不放进已有的表。`host_overrides` 的表结构本身就挡住了第一条——每条规则都限定在
+`protocols` 之内,跨协议改写在这张表里根本表达不出来。
+
+**同期录到的第三方冲突(留待 P3 裁决,证据先钉在这里)**:同一个 ARK 提供方,今天有三种发法——
+生产 `call/dispatch.py:395` 的 `_call_ark_runtime` 走官方 SDK 的 `chat.completions.create`,
+用 `max_tokens` + `reasoning_effort`;A2 探测发 `POST /api/v3/responses`,用 `reasoning: {effort}`;
+A3 的 `ark_chat` 方言发 `POST /api/v3/chat/completions`,用 `thinking: {type}`。
+接口选择上生产与 `ark_chat` 一致(都是 chat completions),**思考参数的写法三者互不相同**。
+仓内没有 ARK 的权威参数文档可引,不许在重构里替它选一个——这条只能由真机对 ARK 各发一次问出来,
+排进 P3/P4 的真机验收。
+
 ### B4. 存在一个自述"为了向后兼容"的别名壳
 
 `probe_catalog.py:1-5` 原文:实现"currently reuses the legacy import-draft store types for

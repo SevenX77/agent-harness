@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/events.py:LLMFallbackEvent/model_dump · packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayError/AllProvidersFailedError/GatewayResolverMissingError/GatewayRoleNotConfiguredError · packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:build_llm_fallback_event/emit_llm_fallback_event · packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_fallback_event_context/_route_diagnostics/_failure_record · packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py:classify_exception/ErrorClassification
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/events.py:LLMFallbackEvent/model_dump · packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayError/AllProvidersFailedError/GatewayResolverMissingError/GatewayRoleNotConfiguredError · packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:build_llm_fallback_event/emit_llm_fallback_event · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_fallback_event_context/_route_diagnostics/_failure_record · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:classify_exception/ErrorClassification
 units: [tracing-events-exceptions]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -48,16 +48,16 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
 ### F1 fallback 事件 payload（`LLMFallbackEvent`，含 from/to route 诊断）
 
 - **机制 / 数据流**：编排层 `GatewayChatModel._generate` 的 fallback 循环在 probe/dispatch 失败、且分类为 `fallback_allowed` 时构造 `LLMFallbackEvent` 并交给 F3 发射。`LLMFallbackEvent`（fallback 事件 DTO）：MVP1 保留 `phase_name`、`from_provider`、`to_provider`、`reason`、`code`、`context`，其中 `code` 为 `[F-v3-gateway-llm-fallback]` 固有常量，见 `packages/graph-agent-gateway/src/graph_agent_gateway/events.py:9` 到 `events.py:22`。统一编排循环各步骤（与 F2 共享同一循环，F2 负责其中抛异常的分支）：
-  1. 编排层拿到 `ResolvedRole.routes` 后遍历 route。当前循环在 `gateway_chat_model.py:111`，MVP1 保留这个位置的 fallback/probe/mark-down/error 分类职责。
-  2. marked-down route 继续跳过，不发 event，因为没有新失败发生。当前跳过在 `gateway_chat_model.py:113`。
-  3. probe 异常继续走 `classify_exception`；只有 `fallback_allowed` 才发 `LLMFallbackEvent`，非 fallback 直接抛 `AllProvidersFailedError`（抛异常分支属 F2），当前触发在 `gateway_chat_model.py:123` 到 `gateway_chat_model.py:151`；emit 调用不传 `code`。
-  4. probe false 继续当作 fallback_allowed 的探活失败，发 event 并尝试下一条 route，当前触发在 `gateway_chat_model.py:153` 到 `gateway_chat_model.py:188`；emit 调用不传 `code`。
-  5. 调用层从自研 `_dispatch()` 换成 ChatX invoke 后，ChatX 抛出的异常仍回到同一个分类分支（异常来源变化属 F2）；当前 dispatch 异常触发在 `gateway_chat_model.py:236` 到 `gateway_chat_model.py:263`；emit 调用不传 `code`。
-  6. event context 继续包含 `from_route` 和 `to_route`，字段由 `_route_diagnostics`（route 诊断压缩器，只暴露 route_id/endpoint_id/provider_model_id/canonical_id/protocol，不暴露密钥）生成，见 `gateway_chat_model.py:389` 和 `gateway_chat_model.py:399`。
-  7. response metadata 和 event context 继续带 `effective_runtime_settings`，确保 runtime settings 的来源能被 trace 解释，见 `gateway_chat_model.py:331`、`gateway_chat_model.py:391`。
+  1. 编排层拿到 `ResolvedRole.routes` 后遍历 route。当前循环在 `call/chat_model.py:111`，MVP1 保留这个位置的 fallback/probe/mark-down/error 分类职责。
+  2. marked-down route 继续跳过，不发 event，因为没有新失败发生。当前跳过在 `call/chat_model.py:113`。
+  3. probe 异常继续走 `classify_exception`；只有 `fallback_allowed` 才发 `LLMFallbackEvent`，非 fallback 直接抛 `AllProvidersFailedError`（抛异常分支属 F2），当前触发在 `call/chat_model.py:123` 到 `call/chat_model.py:151`；emit 调用不传 `code`。
+  4. probe false 继续当作 fallback_allowed 的探活失败，发 event 并尝试下一条 route，当前触发在 `call/chat_model.py:153` 到 `call/chat_model.py:188`；emit 调用不传 `code`。
+  5. 调用层从自研 `_dispatch()` 换成 ChatX invoke 后，ChatX 抛出的异常仍回到同一个分类分支（异常来源变化属 F2）；当前 dispatch 异常触发在 `call/chat_model.py:236` 到 `call/chat_model.py:263`；emit 调用不传 `code`。
+  6. event context 继续包含 `from_route` 和 `to_route`，字段由 `_route_diagnostics`（route 诊断压缩器，只暴露 route_id/endpoint_id/provider_model_id/canonical_id/protocol，不暴露密钥）生成，见 `call/chat_model.py:389` 和 `call/chat_model.py:399`。
+  7. response metadata 和 event context 继续带 `effective_runtime_settings`，确保 runtime settings 的来源能被 trace 解释，见 `call/chat_model.py:331`、`call/chat_model.py:391`。
 - **决策 + 动机**：
   - **事件 DTO 放在 Gateway 包内**，是为了 Gateway 不 import Graph Agent execution internals；当前权威是本模块与 gateway 包源码：`events.py` 拥有 `LLMFallbackEvent`，`exceptions.py` 拥有 Gateway 结构化异常。**被否的近路**：复用 graph_agent 的 execution event/exception → 会让 ③b 公共网关反向依赖某个 engine 的内部类型，破坏可复用性。
-  - **A' 迁移不能丢 fallback event**：兼容性验证清单第 7 条要求 fallback event payload 仍带 from/to route 诊断（见下方原话留底）；D1 明确 `_generate` 中 fallback/probe/mark-down/usage/metadata 是编排职责（坐实点：`gateway_chat_model.py:111-271` — 熔断跳过 `:113`、probe `:115`、分类 `:124,238`、mark-down `:135,249`、fallback event `:136,250`、usage `:227`、metadata `:313-357`），故调用层迁移不动这些。
+  - **A' 迁移不能丢 fallback event**：兼容性验证清单第 7 条要求 fallback event payload 仍带 from/to route 诊断（见下方原话留底）；D1 明确 `_generate` 中 fallback/probe/mark-down/usage/metadata 是编排职责（坐实点：`call/chat_model.py:111-271` — 熔断跳过 `:113`、probe `:115`、分类 `:124,238`、mark-down `:135,249`、fallback event `:136,250`、usage `:227`、metadata `:313-357`），故调用层迁移不动这些。
 - **原话**：
   > **D1 — 否决 A，保留编排外壳**（client 层 A' 重设计决策，本文留底）。**决策**：resolver/gateway **不**裸返回原生 ChatX、**不**删 `GatewayChatModel`，保留它作为编排外壳，只把「每条 route 的实际调用」从自研消息转换换成原生 langchain ChatX。**否决 A（激进版）的理由**：A =「resolver 直接产 ChatX + 删 GatewayChatModel + 用 `with_fallbacks()`」会回归 fallback / probe / 熔断 / usage / metadata / predict；真机只验证了「调用层换 ChatX 修空-content bug」，**从未验证「删编排层」**；且 `with_fallbacks()` 只按异常类型，表达不了「按 HTTP status 分类」。用户原话：
   > > "不用留A, 这是错误判断, 正确的是A'"
@@ -68,11 +68,11 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
   - **payload 带 route 诊断**：成功切换时 fallback event 的 `context.from_route`/`to_route` 带 route diagnostics（route_id/endpoint_id/provider_model_id/canonical_id/protocol），**不含密钥**；带 `effective_runtime_settings`。
   - **phase 不丢给 SDK**：`phase_name` 由编排层填，不能让 ChatX SDK 自己决定。
 - **status**：事件 DTO 已实现（`events.py:LLMFallbackEvent`，100% 覆盖）；MVP1 = 保留，payload 不随调用层迁移删除；若 route 成一等交接物，payload 应直接使用同一 `ResolvedRoute`。
-- **归属**：③b `packages/graph-agent-gateway`：`events.py`（事件 DTO）、`gateway_chat_model.py:_fallback_event_context`/`_route_diagnostics`（触发点 + context 构造）。region/platform N/A（本模块无 ③a 应用加工成分；② Rust N/A）。
+- **归属**：③b `packages/graph-agent-gateway`：`events.py`（事件 DTO）、`call/chat_model.py:_fallback_event_context`/`_route_diagnostics`（触发点 + context 构造）。region/platform N/A（本模块无 ③a 应用加工成分；② Rust N/A）。
 
 ### F2 异常类型语义（各 exception 类型与触发点）
 
-- **机制 / 数据流**：在 F1 共享的统一编排循环里，`fail_fast` 分支 / 全链失败抛 `AllProvidersFailedError`（带 `failed_provider_codes` + `last_error_chain`）→ 上层（Studio/trace）读结构化字段。具体抛异常的位置即 F1 步骤 3（非 fallback 直接抛 `AllProvidersFailedError`，`gateway_chat_model.py:123-151`）与步骤 5（调用层换 ChatX 后 ChatX 抛出的异常仍回到同一分类分支，`gateway_chat_model.py:237-265`）。`AllProvidersFailedError`（候选链失败异常）：MVP1 继续用它包装 `failed_provider_codes` 和 `last_error_chain`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:33` 和 `exceptions.py:49`。三类异常均继承 `GatewayError`（带稳定 `code` + 机器可读 `context`）：① `GatewayRoleNotConfiguredError`{`role_name`,`model_override`} = 编排期 role/route override 不可解析；② `GatewayResolverMissingError`{`phase_name`,`required_dependency=model_resolver`} = LLM phase 缺 DI；③ `AllProvidersFailedError`{`role_name`,`phase_name`,`failed_provider_codes`,`last_error_chain`} = 执行期候选链全失败 / fail-fast 分类包装。
+- **机制 / 数据流**：在 F1 共享的统一编排循环里，`fail_fast` 分支 / 全链失败抛 `AllProvidersFailedError`（带 `failed_provider_codes` + `last_error_chain`）→ 上层（Studio/trace）读结构化字段。具体抛异常的位置即 F1 步骤 3（非 fallback 直接抛 `AllProvidersFailedError`，`call/chat_model.py:123-151`）与步骤 5（调用层换 ChatX 后 ChatX 抛出的异常仍回到同一分类分支，`call/chat_model.py:237-265`）。`AllProvidersFailedError`（候选链失败异常）：MVP1 继续用它包装 `failed_provider_codes` 和 `last_error_chain`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:33` 和 `errors.py:49`。三类异常均继承 `GatewayError`（带稳定 `code` + 机器可读 `context`）：① `GatewayRoleNotConfiguredError`{`role_name`,`model_override`} = 编排期 role/route override 不可解析；② `GatewayResolverMissingError`{`phase_name`,`required_dependency=model_resolver`} = LLM phase 缺 DI；③ `AllProvidersFailedError`{`role_name`,`phase_name`,`failed_provider_codes`,`last_error_chain`} = 执行期候选链全失败 / fail-fast 分类包装。
 - **决策 + 动机**：
   - **结构化异常替代纯文本 RuntimeError**，是为了 Studio/trace 能读 `last_error_chain` 而不是解析自由文本；当前 `AllProvidersFailedError` 暴露 `failed_provider_codes` 和 `last_error_chain`，并由 `test_all_providers_failed_error_exposes_standard_payload` 覆盖。
   - **异常分类不变**：M5 明确 `classify_exception` 沿用，并纠正 401/402/403/404 是 fallback 不是 fail-fast（见下方原话留底）。本模块只在分类决策上发事件/抛异常，分类语义本身归 [[06-orch-error-classification]]。
@@ -84,11 +84,11 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
   - **错误分类真实语义（防回归旧简写）**：401/402/403/404 → `fallback_allowed`（发 fallback event，尝试下一条 route），**不是** fail-fast；400(非 capability)/413/422 → `fail_fast`（抛 `AllProvidersFailedError`，不发 fallback event）。
   - **fail-fast 不发 fallback event**：fail-fast 分支只抛异常、不发 `LLMFallbackEvent`；PM 已定不补 fail-fast diagnostic event，避免和结构化异常重复。
 - **status**：三类 Gateway 结构化异常已实现（`exceptions.py:GatewayError/AllProvidersFailedError/GatewayResolverMissingError/GatewayRoleNotConfiguredError`，均 100% 覆盖）；MVP1 = 保留语义，仅补清楚编排期错误与执行期错误的边界；执行期分类不变（401/402/403/404 = fallback）。
-- **归属**：③b `packages/graph-agent-gateway`：`exceptions.py`（异常类）、`gateway_chat_model.py:_generate`（抛异常触发点）。region/platform N/A（② Rust N/A；③a 应用加工成分无）。
+- **归属**：③b `packages/graph-agent-gateway`：`exceptions.py`（异常类）、`call/chat_model.py:_generate`（抛异常触发点）。region/platform N/A（② Rust N/A；③a 应用加工成分无）。
 
 ### F3 tracing emit（`emit_llm_fallback_event`）
 
-- **机制 / 数据流**：`emit_llm_fallback_event`（fallback 发射 helper）：MVP1 继续由编排层调用它，而不是让 ChatX 或 provider SDK 直接接触 Gateway callback，见 `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:31`。F1 构造好 `LLMFallbackEvent` 后交给本 helper，逐个调 callback 的 `on_event` 发给 tracing 底座；单个 callback 失败只记日志，不遮蔽 runtime 主流程错误。helper 签名不再接收 `code` 参数，事件码由 DTO 固有常量提供。
+- **机制 / 数据流**：`emit_llm_fallback_event`（fallback 发射 helper）：MVP1 继续由编排层调用它，而不是让 ChatX 或 provider SDK 直接接触 Gateway callback，见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:31`。F1 构造好 `LLMFallbackEvent` 后交给本 helper，逐个调 callback 的 `on_event` 发给 tracing 底座；单个 callback 失败只记日志，不遮蔽 runtime 主流程错误。helper 签名不再接收 `code` 参数，事件码由 DTO 固有常量提供。
 - **决策 + 动机**：
   - **fallback event 通过 callback adapter 发射**，是为了对齐 tracing 底座而不是在 Gateway 内直接处理 callback 循环；当前 `emit_llm_fallback_event` 逐个调用 callback 的 `on_event`，callback 自身异常只记日志，测试覆盖坏 callback 不遮蔽后续事件发射。
   - **callback 失败不能遮蔽 runtime 错误**：观测层是旁路，不应让一个坏 callback 把真实的模型调用错误吞掉或顶替；当前测试验证 failing callback 后仍能给后续 callback 发 event，见 `packages/graph-agent-gateway/tests/test_llm_fallback_event.py:67`。
@@ -138,25 +138,25 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
 | 覆盖项 | 覆盖状态 | MVP1 目标 | 功能 |
 |---|---:|---|---|
 | `packages/graph-agent-gateway/src/graph_agent_gateway/events.py:LLMFallbackEvent`（Gateway 自有 fallback 事件 DTO：保存 phase、from/to provider、原因、专属事件码、context） | 100% | 继续作为 Gateway-owned fallback 事件 DTO。 | F1 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayError`（结构化异常基类：保存稳定 code 和机器可读 context） | 100% | 继续作为稳定 code/context 的异常基类。 | F2 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:AllProvidersFailedError`（一个 role 的候选 route 全部失败或 fail-fast 分类被包装成统一网关错误） | 100% | 继续表达候选链执行失败，并携带 route-level failure chain。 | F2 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayResolverMissingError`（LLM/Agent phase 没有注入 model resolver） | 100% | 继续表达 DI 缺 resolver，不受 ChatX 迁移影响。 | F2 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayRoleNotConfiguredError`（role 或 route override 在 registry 中不可解析） | 100% | 继续表达编排期 role/route 不可解析。 | F2 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:emit_llm_fallback_event`（callback 发射 helper：逐个调用 callback，并吞掉 callback 自身异常） | 100% | 继续作为 fallback event 发射边界，callback 失败不影响主流程。 | F3 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel._generate`（fallback runtime 循环：在 probe/dispatch 失败时分类、记录、发事件或抛异常） | 触发点覆盖 | 继续保留编排循环；只替换调用步骤，不替换 fallback/error/tracing。 | F1/F2 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayError`（结构化异常基类：保存稳定 code 和机器可读 context） | 100% | 继续作为稳定 code/context 的异常基类。 | F2 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:AllProvidersFailedError`（一个 role 的候选 route 全部失败或 fail-fast 分类被包装成统一网关错误） | 100% | 继续表达候选链执行失败，并携带 route-level failure chain。 | F2 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayResolverMissingError`（LLM/Agent phase 没有注入 model resolver） | 100% | 继续表达 DI 缺 resolver，不受 ChatX 迁移影响。 | F2 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayRoleNotConfiguredError`（role 或 route override 在 registry 中不可解析） | 100% | 继续表达编排期 role/route 不可解析。 | F2 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:emit_llm_fallback_event`（callback 发射 helper：逐个调用 callback，并吞掉 callback 自身异常） | 100% | 继续作为 fallback event 发射边界，callback 失败不影响主流程。 | F3 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel._generate`（fallback runtime 循环：在 probe/dispatch 失败时分类、记录、发事件或抛异常） | 触发点覆盖 | 继续保留编排循环；只替换调用步骤，不替换 fallback/error/tracing。 | F1/F2 |
 
 ### 代码索引（clues）
 
 - `packages/graph-agent-gateway/src/graph_agent_gateway/events.py:FALLBACK_EVENT_CODE`：Gateway fallback event 专属 code。（F1）
 - `packages/graph-agent-gateway/src/graph_agent_gateway/events.py:LLMFallbackEvent`：Gateway fallback 事件 DTO。（F1）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:build_llm_fallback_event`：事件构造 helper。（F1）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:emit_llm_fallback_event`：事件发射 helper。（F3）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayError`：结构化异常基类。（F2）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:AllProvidersFailedError`：候选链失败异常。（F2）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayResolverMissingError`：resolver DI 缺失异常。（F2）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:GatewayRoleNotConfiguredError`：role/override 不可解析异常。（F2）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel._generate`：fallback/error/tracing 触发主循环。（F1/F2）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel._fallback_event_context`：fallback event context 构造器。（F1）
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:_route_diagnostics`：route diagnostics 压缩 helper。（F1）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:build_llm_fallback_event`：事件构造 helper。（F1）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:emit_llm_fallback_event`：事件发射 helper。（F3）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayError`：结构化异常基类。（F2）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:AllProvidersFailedError`：候选链失败异常。（F2）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayResolverMissingError`：resolver DI 缺失异常。（F2）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:GatewayRoleNotConfiguredError`：role/override 不可解析异常。（F2）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel._generate`：fallback/error/tracing 触发主循环。（F1/F2）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel._fallback_event_context`：fallback event context 构造器。（F1）
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:_route_diagnostics`：route diagnostics 压缩 helper。（F1）
 - `packages/graph-agent-gateway/tests/test_llm_fallback_event.py:test_callback_failure_does_not_mask_fallback_event_delivery`：callback 失败不遮蔽事件发射的测试。（F3）
 - `packages/graph-agent-gateway/tests/test_all_providers_failed_error.py:test_all_providers_failed_error_exposes_standard_payload`：结构化异常 payload 测试。（F2）

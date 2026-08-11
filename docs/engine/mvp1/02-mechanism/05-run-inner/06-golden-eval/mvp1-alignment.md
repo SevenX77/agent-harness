@@ -13,7 +13,7 @@ aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内�
 golden-eval = 拿各 agent 节点的**期望输出**(golden)和实际输出**逐节点 diff/打分**,辅助优化 skill。**golden 是会失效的临时产物,在 `.workspace/golden`,不写进 skill 本体**(反转决策 A)。
 
 ## 2. 数据流 / 机制
-> **现状 vs 目标**:WS-E7 后,Engine 已有 `evaluate_golden_baseline` 读取 `workspace_dir/golden/<baseline_id>/baseline.json` + `cases/<case_id>.json`,逐节点 diff/score,并写 `report.json`。仍待后续的是 Studio HTTP/UI 消费、空 golden 模版、predict 拦截搬回 engine(`predict_interception.py` 仍 live 在 gateway)以及旧 hash warn 退役。
+> **现状 vs 目标**:WS-E7 后,Engine 已有 `evaluate_golden_baseline` 读取 `workspace_dir/golden/<baseline_id>/baseline.json` + `cases/<case_id>.json`,逐节点 diff/score,并写 `report.json`。仍待后续的是 Studio HTTP/UI 消费、空 golden 模版、predict 拦截搬回 engine(`call/predict.py` 仍 live 在 gateway)以及旧 hash warn 退役。
 - golden 存 `.workspace/golden/`(归 `physical-layout`;**不在** skill 源码 `phases/<id>/golden.json`)。Engine 只认入参 `workspace_dir`;Studio 的 `.workspace` 是 host/root 命名。
 - 回放(目标):从 `.workspace` 按节点加载 golden,喂现有 `resolve_generation` P0(逻辑几乎不动);predict mock 拦截**搬到** `06-seam/01-models`(model 接缝短路;**现 live 在 gateway**,engine `interception.py:29` 仅 skeleton)。
 - 逐节点 diff(live):Engine SDK 纯函数 `evaluate_golden_baseline` 以单节点 output vs 单节点 expected output 为粒度,返回 `passed/failed/stale` summary 与字段 diff。

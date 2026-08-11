@@ -47,7 +47,7 @@ applies_to: 走全局重型多 agent 流水线的实施任务书(见下「适用
 
 ## 二、8 条铁律(违反即打回)
 
-- **IR1 并发按文件切,不按文档模块切。** 每份任务书在 frontmatter 声明 `owns_files`(本 WS 可创建/修改的文件全集)。**两个并发 WS 的 `owns_files` 不得相交**。共享文件(如 `client_manager.py`/`gateway_chat_model.py`)→ 归同一个 WS 串行,或各自 git worktree 隔离后再合。
+- **IR1 并发按文件切,不按文档模块切。** 每份任务书在 frontmatter 声明 `owns_files`(本 WS 可创建/修改的文件全集)。**两个并发 WS 的 `owns_files` 不得相交**。共享文件(如 `call/clients.py`/`call/chat_model.py`)→ 归同一个 WS 串行,或各自 git worktree 隔离后再合。
 - **IR2 grounding 强制(防 Gemini 脑补)。** §3 必须给**完整文件路径** + 对应 alignment §节,并要求执行者"先回读到的关键符号/现状再动手"。
 - **IR3 测试 = 契约,Claude 先审;实施任务书在契约门后由 Codex 写。** Codex 写完测试,Claude 先过"测试是否忠实编码了 alignment 目标"(契约门),通过后**由 Codex** 据已批准测试写 kiro 实施任务书,并输出给 Gemini 的可复制 prompt。**禁止**测试没过契约门就写实施任务书或开始实现;**禁止 Claude 代写实施任务书**(实现步骤是 implementation-level,Claude 越线 = "相当于自己写代码")。
 - **IR4 硬退出,非主观满意。** §8 验收 = 测试全绿 + 验收清单逐条勾 + 至少一条**真实端到端**(非 fake mock 到绿)。Codex 审查以此为退出条件,不是"看着差不多"。

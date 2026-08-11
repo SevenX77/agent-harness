@@ -132,11 +132,11 @@ git worktree add .worktrees/pm-studio-mvp1-interface-2026-06-11 -b codex/pm-stud
 
 实现范围：
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/storage_contracts.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/credential_resolver.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/route_handoff.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/fallback_decision.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/config_store.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/credential_resolver.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/handoff.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/fallback.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/projection.py`
 
 ### Step 3: 功能收口 RED
 

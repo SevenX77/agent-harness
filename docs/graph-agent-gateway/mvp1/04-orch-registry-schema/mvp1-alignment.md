@@ -3,7 +3,7 @@ module: 04-orch-registry-schema
 doc: mvp1-alignment
 status: drafted
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RegistrySnapshot/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:canonicalize_model · packages/graph-agent-gateway/src/graph_agent_gateway/models.py · apps/studio/backend/app/models/llm_config.py:to_registry_snapshot
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RegistrySnapshot/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:canonicalize_model · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py · apps/studio/backend/app/models/llm_config.py:to_registry_snapshot
 units: [registry-schema-contract]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -71,7 +71,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
   10. `SkippedRoute`(用途:表示 resolver 跳过 route 的诊断记录)已定义 route_id、reason_code、message、from_override,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:450-465`;`ResolvedRole`(用途:表示解析后的 role 元数据和有序 routes)已保存 `skipped_diagnostics`,使 `resolve_role` 的跳过语义可观测,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:468-480`。snapshot provenance 的 schema/resolver 回填已落地:`ProviderRoute.snapshot_version` 记录 evidence 版本(`registry/schema.py:218`),`RegistrySnapshot.snapshot_version` 记录当前物化版本(`registry/schema.py:409`),`ResolvedRoute.snapshot_version` 记录 resolver 本次传播出的版本(`registry/schema.py:441`)。
 
-  11. `models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)继续不承载 schema;`GenericRouteChatModel` 已作为调用层通用 wrapper 落地,负责把 `ResolvedRoute` 交给 ordinary-chat dispatcher,具体 ChatX/provider 构造落在调用层模块而不是 registry schema 模块,见 `packages/graph-agent-gateway/src/graph_agent_gateway/models.py:24-301` 与 `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:19-82`。
+  11. `models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)继续不承载 schema;`GenericRouteChatModel` 已作为调用层通用 wrapper 落地,负责把 `ResolvedRoute` 交给 ordinary-chat dispatcher,具体 ChatX/provider 构造落在调用层模块而不是 registry schema 模块,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:24-301` 与 `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:19-82`。
 
 - **决策 + 动机**：
   1. **schema 以 Gateway runtime 为源头(③b 公共，无反转)**：MVP1 架构把 `ResolvedRoute/ResolvedRole` 定为编排↔调用交接物,见 `docs/graph-agent-gateway/mvp1/README.md:13-18`。schema 是 gateway 数据模型，原 review 已判对 ③b，本轮不变。schema 要以 Gateway runtime 为源头,是因为 MVP1 架构把 `ResolvedRoute/ResolvedRole` 定为编排↔调用交接物,见 `docs/graph-agent-gateway/mvp1/README.md:13-18`。
@@ -101,7 +101,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 - **机制 / 数据流**：canonical 是保守 grouping key,只做保守展示和 profile 组织,不驱动动态 route 选择(route 执行仍指精确 route_id)。逐步：
 
-  1. `canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)继续只做保守 canonical grouping;route 执行仍必须指向精确 route_id,当前逻辑见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:22-49`。
+  1. `canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)继续只做保守 canonical grouping;route 执行仍必须指向精确 route_id,当前逻辑见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:22-49`。
 
   2. `RegistryResponse`(用途:表示 redacted registry response 和 grouped display metadata)继续可以包含 canonical groups、model groups、lint、runtime setting descriptors、role effective runtime settings,但这些是 **Studio 展示投影(③a)**,不是 gateway runtime 输入,见 `apps/studio/backend/app/models/llm_config.py:299-319`。
 
@@ -109,7 +109,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
   4. `_role_effective_runtime_settings`(用途:为 registry response 投影每个 role/route 的 effective runtime settings)已使用同一个 route-only resolver API,避免和 public handoff API 分叉;遇到 `RegistryResolutionError` 时仍按 registry response 语义跳过该 role。
 
-- **决策 + 动机**：**canonical 分组不用于自动选型(保守)**：canonical 只是保守 grouping key;`canonicalize_model` 默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:45-49`。保守是为了避免不同 provider 的相似模型名被误合并。canonical 分组不用于自动选型,是因为 canonical 只是保守 grouping key;`canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:45-49`。
+- **决策 + 动机**：**canonical 分组不用于自动选型(保守)**：canonical 只是保守 grouping key;`canonicalize_model` 默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:45-49`。保守是为了避免不同 provider 的相似模型名被误合并。canonical 分组不用于自动选型,是因为 canonical 只是保守 grouping key;`canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:45-49`。
 
 - **原话**：（canonical 保守分组归属判据见模块级「定义」+ F1「原话」判据铁律「换个 app 还原样能用吗?能=③b」;canonical 分组本身无独立 PM 原话。）
 
@@ -123,15 +123,15 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 - **机制 / 数据流**：`load_registry_snapshot` 从显式 v4 credentials 文件和 v2/v3 roles 文件加载 runtime snapshot,执行 hard cutover 校验拒绝旧 schema。逐步：
 
-  1. `load_registry_snapshot`(用途:从显式 v4 credentials 文件和 v2/v3 roles 文件加载 runtime snapshot)继续执行 hard cutover 校验,拒绝旧 schema,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:186-202`。
+  1. `load_registry_snapshot`(用途:从显式 v4 credentials 文件和 v2/v3 roles 文件加载 runtime snapshot)继续执行 hard cutover 校验,拒绝旧 schema,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:186-202`。
 
-  2. `_assert_v4_credentials`(用途:校验 credentials 文件处于 v4 hard cutover 边界)继续要求 schema version 4,并拒绝旧 provider credentials 字段,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:227-237`。
+  2. `_assert_v4_credentials`(用途:校验 credentials 文件处于 v4 hard cutover 边界)继续要求 schema version 4,并拒绝旧 provider credentials 字段,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:227-237`。
 
-  3. `_assert_supported_roles`(用途:校验 roles 文件处于 v2/v3 route-chain schema)继续拒绝旧 models/providers/active_model schema,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:240-261`。
+  3. `_assert_supported_roles`(用途:校验 roles 文件处于 v2/v3 route-chain schema)继续拒绝旧 models/providers/active_model schema,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:240-261`。
 
-  4. `_gateway_roles_payload`(用途:把 Studio v3 roles 文件裁剪成 gateway runtime role payload)继续允许 v3 Studio roles 里有 authoring 字段,但 runtime 只保留 gateway role keys,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:264-289`。
+  4. `_gateway_roles_payload`(用途:把 Studio v3 roles 文件裁剪成 gateway runtime role payload)继续允许 v3 Studio roles 里有 authoring 字段,但 runtime 只保留 gateway role keys,见当前 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:264-289`。
 
-- **决策 + 动机**：**v4/v2 hard cutover**：为了避免旧 schema 混入 runtime。`_assert_v4_credentials` 拒绝旧 credentials 字段,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:227-237`;`_assert_supported_roles` 拒绝旧 role schema,见 `:240-261`。v4/v2 hard cutover 是为了避免旧 schema 混入 runtime。`_assert_v4_credentials`(用途:校验 credentials 文件处于 v4 hard cutover 边界)拒绝旧 credentials 字段,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:227-237`;`_assert_supported_roles`(用途:校验 roles 文件处于 v2/v3 route-chain schema)拒绝旧 role schema,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:240-261`。
+- **决策 + 动机**：**v4/v2 hard cutover**：为了避免旧 schema 混入 runtime。`_assert_v4_credentials` 拒绝旧 credentials 字段,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:227-237`;`_assert_supported_roles` 拒绝旧 role schema,见 `:240-261`。v4/v2 hard cutover 是为了避免旧 schema 混入 runtime。`_assert_v4_credentials`(用途:校验 credentials 文件处于 v4 hard cutover 边界)拒绝旧 credentials 字段,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:227-237`;`_assert_supported_roles`(用途:校验 roles 文件处于 v2/v3 route-chain schema)拒绝旧 role schema,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:240-261`。
 
 - **原话**：（v4/v2 hard cutover 无独立 PM 原话;归属判据见模块级「定义」判据铁律。）
 
@@ -199,7 +199,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 已实现:snapshot provenance 已在 schema/resolve 流程中表达。`ProviderRoute.snapshot_version` 标记 verified evidence 来源版本,`RegistrySnapshot.snapshot_version` 标记当前物化版本,`resolve_role` 构造 `ResolvedRoute` 时传播当前版本;版本不一致时旧 verified profiles/capabilities 不再作为 live evidence 使用。接入侧仍负责在 loader/materializer 产生 snapshot 与 verified evidence 时填入相应版本戳。
 
-已实现:`models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)已落地 `GenericRouteChatModel`,作为调用层通用 wrapper 消费 `ResolvedRoute`;这不改变 registry schema 边界,见 `packages/graph-agent-gateway/src/graph_agent_gateway/models.py:24-301`。RouteChatModelFactory 的具体 ChatX/provider 构造见 `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:19-82`。
+已实现:`models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)已落地 `GenericRouteChatModel`,作为调用层通用 wrapper 消费 `ResolvedRoute`;这不改变 registry schema 边界,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:24-301`。RouteChatModelFactory 的具体 ChatX/provider 构造见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:19-82`。
 
 ## 附录 B — 覆盖代码(含覆盖率)
 
@@ -222,11 +222,11 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:288-385`: legacy import draft / candidate / probe / evidence schema；目标迁移为 `ProbeKnowledgeCatalog` + `EvidenceRecord` schema。**③b 公共契约。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:404-441`: `RegistrySnapshot.snapshot_version` 与 `ResolvedRoute.snapshot_version`。**③b 公共契约(权威源,其它模块只链接)。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-480`: skipped diagnostics 与 resolved role schema。**③b 公共契约。**
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:126-175`: resolver 使用 live snapshot evidence 并传播 `snapshot.snapshot_version` 到 `ResolvedRoute`。**③b 公共。**
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:258-264`: snapshot 版本不一致时清空旧 `capabilities` / `verified_profiles` 的 stale 降级逻辑。**③b 公共。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:126-175`: resolver 使用 live snapshot evidence 并传播 `snapshot.snapshot_version` 到 `ResolvedRoute`。**③b 公共。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:258-264`: snapshot 版本不一致时清空旧 `capabilities` / `verified_profiles` 的 stale 降级逻辑。**③b 公共。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py:41-71`: registry public `__all__`。**③b 公共。**
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:22-56`: `canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)与 `_slug`(用途:把任意模型字符串收敛成小写 slug)。**③b 公共。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:22-56`: `canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)与 `_slug`(用途:把任意模型字符串收敛成小写 slug)。**③b 公共。**
 - `apps/studio/backend/app/models/llm_config.py:89-118`: Studio DTO 到 Gateway DTO 的剥离 helper(③a→③b 剥离 seam)。
 - `apps/studio/backend/app/models/llm_config.py:121-319`: Studio file DTO 与 registry response DTO(display/authoring = ③a)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:186-289`: snapshot 文件加载和 v4/v2-v3 校验。**③b 公共。**
-- `packages/graph-agent-gateway/src/graph_agent_gateway/models.py:24-301`: `GenericRouteChatModel` 通用 route wrapper。**③b 公共调用层,不承载 registry schema。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:186-289`: snapshot 文件加载和 v4/v2-v3 校验。**③b 公共。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:24-301`: `GenericRouteChatModel` 通用 route wrapper。**③b 公共调用层,不承载 registry schema。**

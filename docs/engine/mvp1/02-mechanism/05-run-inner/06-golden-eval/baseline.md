@@ -3,7 +3,7 @@ module: 02-mechanism/05-run-inner/06-golden-eval
 doc: baseline
 status: audited-ready（WS-E7 回写:live=逐节点回放(resolve_generation P0)+ engine 路径 diff(→success)+ prompt+schema 双哈希 warn(退役标的)+ Engine evaluate_golden_baseline 读 workspace_dir/golden 并产逐节点字段 diff/report;Studio 仍有整 final_state diff/整次快照;拦截仍在 gateway 包、engine interception 是未接线 skeleton）
 binds_alignment: ./mvp1-alignment.md
-binds_code: packages/graph-agent/src/graph_agent/core/runner.py:{resolve_generation, _warn_on_stale_golden_hashes_sdk, path diff(:335)} · core/_predict_internal/{models.py:GoldenCase, strategy.py:MockStrategy, interception.py(skeleton), path_diff.py, stub.py} · packages/graph-agent-gateway/src/graph_agent_gateway/{predict_interception.py, resolver.py} · (studio) apps/studio/backend/app/services/{golden_diff.py, diagnostic_export.py, skills.py:golden_dir_for}
+binds_code: packages/graph-agent/src/graph_agent/core/runner.py:{resolve_generation, _warn_on_stale_golden_hashes_sdk, path diff(:335)} · core/_predict_internal/{models.py:GoldenCase, strategy.py:MockStrategy, interception.py(skeleton), path_diff.py, stub.py} · packages/graph-agent-gateway/src/graph_agent_gateway/{call/predict.py, resolver.py} · (studio) apps/studio/backend/app/services/{golden_diff.py, diagnostic_export.py, skills.py:golden_dir_for}
 ---
 
 # 06-golden-eval — Baseline(当下代码实现逻辑)
@@ -31,7 +31,7 @@ N/A(engine 无前端)—— golden 编辑 / diff 展示 / promote 在 studio 侧
 - 故 `.workspace/golden`(`01-physical-layout §2.2` 落点)现在有两类事实:Studio 旧整次快照仍存在;Engine WS-E7 eval 路径已读写 `workspace_dir/golden/<baseline_id>` 的逐节点 case/report 户型。Studio 若继续提供 UI/HTTP,只能消费这个 Engine 户型,不能反向发明 Studio-only schema。
 
 ### 3. predict 拦截现状(gateway 包 live + engine skeleton 未接线)
-- **Live 拦截在 gateway 包**:`packages/graph-agent-gateway/src/graph_agent_gateway/predict_interception.py:17 PredictGatewayChatModel(GatewayChatModel)`,`_generate`(:34)短路 provider、调 `predict_context.resolve_generation`(:42);由同包 `resolver.py:119-122`(`predict_context` 非空时)接线。→ mock **内容**解析在 engine(`resolve_generation`),**拦截层**(短路 ChatModel)在**独立包 `graph-agent-gateway`**(**非** `graph-agent`)。
+- **Live 拦截在 gateway 包**:`packages/graph-agent-gateway/src/graph_agent_gateway/call/predict.py:17 PredictGatewayChatModel(GatewayChatModel)`,`_generate`(:34)短路 provider、调 `predict_context.resolve_generation`(:42);由同包 `resolver.py:119-122`(`predict_context` 非空时)接线。→ mock **内容**解析在 engine(`resolve_generation`),**拦截层**(短路 ChatModel)在**独立包 `graph-agent-gateway`**(**非** `graph-agent`)。
 - **Engine skeleton 未接线**:`graph-agent` 内 `core/_predict_internal/interception.py:29` 同名 `PredictGatewayChatModel`,docstring 标 "skeleton"(:1);`_generate`(:61)走 `_select_mock_payload`(:142)**直接**调 `mock_strategy`(绕过 `resolve_generation`)。⚠️ 它走 golden_case / manual / heuristic 三路(:144-155),**缺 `copilot_predict` 回调这一层**——能借 manual override 的 `source="copilot"` 透出 copilot **标签**(`strategy.py:get_manual_source`:96),但无 `resolve_generation` 里**动态调 `copilot_predict` 回调**(`runner.py:99-111`)的能力;无 resolver 接线 → 现状不 live。= alignment G5"拦截搬进引擎"的目标骨架,记 refactor-target。
 
 ### 4. golden 失效现状(prompt+schema 双哈希 warn,退役标的;与 invalidation 共指)
@@ -77,7 +77,7 @@ N/A(engine 无前端)—— golden 编辑 / diff 展示 / promote 在 studio 侧
 > **验"是否按 mvp1 改了"**:① golden 从 workspace `golden/<baseline_id>/cases` **逐节点**加载(非 skill 源码 golden.json);② diff 是 engine SDK **逐节点字段**纯函数(`evaluate_golden_baseline`);③ 失效在 eval 期、只看 `io.outputs` 必填字段(非编译期)。仍未完成:engine interception 搬迁 + `copilot_predict` 回调层、`_warn_on_stale_golden_hashes_sdk` 退役、Studio HTTP/UI 薄接线。
 
 ## 读代码主路径提示
-回放:`runner.py:resolve_generation`(:84,P0 :94)← gateway `predict_interception.py:_generate`(:34,`resolver.py:119` 接线)。策略选择:`strategy.py:MockStrategy.from_param`(:151)→ `GoldenCaseStrategy`(:103)。engine 路径 diff:`runner.py:335` → `path_diff.py:compute_diff`(:11)→ `RunResult.success`。失效 warn(退役):`runner.py:_warn_on_stale_golden_hashes_sdk`(:127,调用 :246)。studio 字段 diff(待复用):`golden_diff.py:_diff_value`(:130)。engine 拦截 skeleton(G5 标的):`_predict_internal/interception.py:29`。
+回放:`runner.py:resolve_generation`(:84,P0 :94)← gateway `call/predict.py:_generate`(:34,`resolver.py:119` 接线)。策略选择:`strategy.py:MockStrategy.from_param`(:151)→ `GoldenCaseStrategy`(:103)。engine 路径 diff:`runner.py:335` → `path_diff.py:compute_diff`(:11)→ `RunResult.success`。失效 warn(退役):`runner.py:_warn_on_stale_golden_hashes_sdk`(:127,调用 :246)。studio 字段 diff(待复用):`golden_diff.py:_diff_value`(:130)。engine 拦截 skeleton(G5 标的):`_predict_internal/interception.py:29`。
 
 ## 交叉引用(链接, 不复制)
 [mvp1-alignment](./mvp1-alignment.md)· `01-contract/01-physical-layout`(`.workspace/golden` 落点,双向)· `01-contract/05-invalidation`(失效轴 / 退役标的,双向)· `06-seam/01-models`(predict mock 拦截搬引擎 G5)· `01-contract/03-compile-rules`(CR3 golden-stale 码归属)

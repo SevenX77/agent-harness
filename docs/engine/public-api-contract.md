@@ -198,11 +198,11 @@ Family mapping summary:
 ## ModelProviderError
 
 - **Source module**: `graph_agent`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:8
+- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:8
 - **Contract status**: `@stable`
 - **Signature**: `ModelProviderError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
 - **Preconditions**: External callers catch this family for gateway/provider/role/model/fallback failures. Gateway leaves keep their gateway `code` and `context`.
-- **Postconditions**: `graph_agent_gateway.exceptions.GatewayError` and its leaves are `isinstance(..., ModelProviderError)`.
+- **Postconditions**: `graph_agent_gateway.errors.GatewayError` and its leaves are `isinstance(..., ModelProviderError)`.
 - **Drift risk notes**: Gateway errors must not inherit `ExecutionError` as their public family.
 
 ## ResourceNotFoundError
@@ -436,7 +436,7 @@ Family mapping summary:
 ## LLMCallSettingsEvent
 
 - **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:8
+- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:8
 - **Contract status**: `@stable`; non-`__all__` external dep
 - **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['llm_call_settings']`, `phase_name: str`, `settings: list[dict[str, Any]]`, `route_id: str | None`, `provider_model_id: str | None`, `protocol: str | None`, `code: str | None`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values. Each `settings` entry carries `setting`, `requested`, `verdict` (one of `applied`, `sent`, `adjusted`, `unsupported`, `rejected`, `ignored`) and `reason`.
@@ -446,7 +446,7 @@ Family mapping summary:
 ## LLMRouteDecisionEvent
 
 - **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:8
+- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:8
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
 - **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['llm_route_decision']`, `phase_name: str`, `decision: Literal['skipped_circuit_open', 'probe_failed', 'retried_same_route', 'dropped_rejected_settings', 'escalated_budget', 'fell_back', 'failed_terminal', 'answered', 'exhausted']`, `route_id: str | None`, `endpoint_id: str | None`, `provider_model_id: str | None`, `protocol: str | None`, `reason: str | None`, `provider_status_code: int | None`, `next_route_id: str | None`, `voided_streamed_answer: bool`, `code: str | None`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.

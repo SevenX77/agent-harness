@@ -4,7 +4,7 @@ doc: evidence-reference
 status: drafted
 workflow_axis: N/A（gateway MVP1 是库/公共能力模块,无独立用户旅程 workflow 文档）
 binds_design: ../README.md · ../DESIGN_UNITS_INDEX.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py · packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py
 units: [route-chat-model-factory, provider-profiles-init-kwargs, chatx-invocation-runtime, credentials-endpoints-canonicalization]
 aligns_with: ../README.md（10/11 调用层 scope） · ../10-inv-route-chat-model-factory/mvp1-alignment.md · ../11-inv-provider-profiles/mvp1-alignment.md
 ---

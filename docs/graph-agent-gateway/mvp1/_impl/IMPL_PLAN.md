@@ -12,7 +12,7 @@ binds_design: ../DESIGN_UNITS_INDEX.md · ../README.md
 
 ## 一、为什么不是"全并发":gateway 核心是耦合的
 
-`gateway_chat_model.py` 和 `client_manager.py` 是**共享热点文件**(README:50 标「共享」),被模块 07/09/10/11 同时覆盖。`resolver.py` 被 10(工厂实例化)和 01/02(解析纯化)同时碰。所以真正能并发的是**碰不同文件**的工作,核心调用链只能当**一条串行工作流**。
+`call/chat_model.py` 和 `call/clients.py` 是**共享热点文件**(README:50 标「共享」),被模块 07/09/10/11 同时覆盖。`resolver.py` 被 10(工厂实例化)和 01/02(解析纯化)同时碰。所以真正能并发的是**碰不同文件**的工作,核心调用链只能当**一条串行工作流**。
 
 ## 二、依赖图
 
@@ -31,7 +31,7 @@ WS-4 事件/异常 code 细化 ────────────────�
 
 | WS | 名 | 模块 | owns_files(并发锁) | 依赖 | 并发性 | 优先级 |
 |---|---|---|---|---|---|---|
-| **WS-1** | 调用核心 | (0)+11→10→09→07 | `registry/base_url.py`(新,步骤0,共享)·`provider_profiles.py`(新)·`route_chat_model_factory`(新/或 `models.py`)·`gateway_chat_model.py`·`client_manager.py`(`_call_*`/dispatch/token-escalation 部分)·`resolver.py`(构造模型那段) | 无(步骤0 自产 base_url 原语) | **内部串行**(见 WS1 任务书) | P0 关键路径 |
+| **WS-1** | 调用核心 | (0)+11→10→09→07 | `registry/base_url.py`(新,步骤0,共享)·`call/profiles.py`(新)·`route_chat_model_factory`(新/或 `models.py`)·`call/chat_model.py`·`call/clients.py`(`_call_*`/dispatch/token-escalation 部分)·`resolver.py`(构造模型那段) | 无(步骤0 自产 base_url 原语) | **内部串行**(见 WS1 任务书) | P0 关键路径 |
 | **WS-2** | base_url 保存侧归一化 | 03 | `registry/storage.py`(`_normalize_base_url` 改 import `registry/base_url.py`)·`apps/studio/.../llm_credentials.py`(保存时归一化)·endpoint probe 归一化点 | WS-1 步骤0 的 `registry/base_url.py` | 与 WS-1 起步并行 | P0(保存侧主修复) |
 | **WS-3** | 6 态/取消 needs_setup | 08 | `apps/studio/.../llm_state_projection.py`·`llm_role_materializer.py`·router projection helpers + 对应 studio 测试 | 无 | **全并发** | P1 |
 | **WS-4** | 事件/异常 code 细化 | 13 | `events.py`·`exceptions.py`·`tracing.py` | 无 | **全并发** | P2(最后) |
@@ -39,13 +39,13 @@ WS-4 事件/异常 code 细化 ────────────────�
 
 ## 四、WS-1 内部子步骤(关键路径,严格串行)
 
-> 共享 `gateway_chat_model.py`/`client_manager.py`,不能并行编辑,故内部串行。详见 [`WS1-chatx-core.md`](./WS1-chatx-core.md)。
+> 共享 `call/chat_model.py`/`call/clients.py`,不能并行编辑,故内部串行。详见 [`WS1-chatx-core.md`](./WS1-chatx-core.md)。
 
 0. **base_url 共享原语**(新文件 `registry/base_url.py`)— `canonicalize_base_url(url, protocol)` 幂等纯函数 + 逐 protocol 单测;WS-1 自产、WS-2 import。
 1. **11 ProviderProfile**(新文件,加法,最独立)— provider/model→init-kwargs 表;lookup(exact>provider)+ merge(pre_init→init_kwargs→factory→caller-wins);不与 `VerifiedProfile` 合并。
 2. **10 RouteChatModelFactory**(新文件,消费 11)— `ResolvedRoute`→`BaseChatModel`;官方 ChatX 优先 / `GenericRouteChatModel` 兜底;base_url 调用时幂等副保险(import WS-2 helper);第 6 步调 11。
-3. **09 invocation 接线**(改 `gateway_chat_model.py`)— `_generate` 第 1/5/7 步换:原始 `BaseMessage` 直接交 ChatX → `.invoke()` → `_build_chat_result` **augment**(非重建)注 route metadata + 从 `usage_metadata` 取 usage + thinking 不拍平;退役 `_call_*` 的「消息转换+provider 调用」两件。
-4. **07 编排接线**(改 `gateway_chat_model.py`/`client_manager.py`)— 保留编排外壳;`_call_with_token_escalation` 从 `_call_*` 搬到编排层包住 ChatX invoke;probe/熔断/usage 归属保留。
+3. **09 invocation 接线**(改 `call/chat_model.py`)— `_generate` 第 1/5/7 步换:原始 `BaseMessage` 直接交 ChatX → `.invoke()` → `_build_chat_result` **augment**(非重建)注 route metadata + 从 `usage_metadata` 取 usage + thinking 不拍平;退役 `_call_*` 的「消息转换+provider 调用」两件。
+4. **07 编排接线**(改 `call/chat_model.py`/`call/clients.py`)— 保留编排外壳;`_call_with_token_escalation` 从 `_call_*` 搬到编排层包住 ChatX invoke;probe/熔断/usage 归属保留。
 
 ## 五、本批不做(范围锁定,避免再发散)
 

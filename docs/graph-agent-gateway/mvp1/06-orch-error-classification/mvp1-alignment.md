@@ -3,7 +3,7 @@ module: 06-orch-error-classification
 doc: mvp1-alignment
 status: drafted
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py:classify_exception/classify_error_context/ErrorContext/ErrorActionClassification/ErrorClassification
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:classify_exception/classify_error_context/ErrorContext/ErrorActionClassification/ErrorClassification
 units: [error-classification-policy]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -45,12 +45,12 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 
 ### 2.2 编号执行流程（**保留原"编号执行流程"全部**）
 
-1. 调用层或 probe 层捕获异常后，把异常交给 `classify_exception`（把异常映射为 legacy `decision` 以及 v1.1 action/scope 的函数）；它用于为当前 Gateway fallback loop 产出旧 decision（`registry/error_classification.py:75-98`，`gateway_chat_model.py:123-124`，`gateway_chat_model.py:237-238`）。
+1. 调用层或 probe 层捕获异常后，把异常交给 `classify_exception`（把异常映射为 legacy `decision` 以及 v1.1 action/scope 的函数）；它用于为当前 Gateway fallback loop 产出旧 decision（`registry/error_classification.py:75-98`，`call/chat_model.py:123-124`，`call/chat_model.py:237-238`）。
 2. `classify_exception` 内部调用 `classify_error_context`（把异常和 route/endpoint/stream 上下文映射为结构化 retry/fallback/fail action 的函数）；它用于产出更细的 action/scope，方便未来区分同 route retry、跨 route fallback 和请求失败（`registry/error_classification.py:81`，`:101-105`）。
 3. `classify_error_context` 先从 context 或异常链提取 status code 和 provider error payload；这一步要兼容 SDK 直接挂 `status_code` 和 httpx response 两种形态（`registry/error_classification.py:107-109`，`:223-269`）。
 4. 分类器先处理 stream after 200 和网络错误，再处理 retryable status、fallback status、capability 400、fail request status，最后才走 unknown 默认失败（`registry/error_classification.py:111-188`）。**顺序固定**：stream/网络优先于状态码分支，避免把"200 后断流"误判成普通 5xx retry。
-5. `classify_exception` 把 `retry_same_route` / `fallback_route` 统一映射为 `fallback_allowed`；当前 `GatewayChatModel._generate`（gateway 编排外壳的生成入口）看到这个 decision 才会 mark down、发 fallback event、继续下一 route（`registry/error_classification.py:83-84`，`gateway_chat_model.py:129-152`，`:243-255`）。
-6. 如果 decision 是 `fail_fast` 或 `fail_fast_with_route_context`，当前 `GatewayChatModel._generate` 会立刻抛 `AllProvidersFailedError`（全部 provider 失败异常），不会继续试后面的 route（`gateway_chat_model.py:129-134`，`:243-248`）。
+5. `classify_exception` 把 `retry_same_route` / `fallback_route` 统一映射为 `fallback_allowed`；当前 `GatewayChatModel._generate`（gateway 编排外壳的生成入口）看到这个 decision 才会 mark down、发 fallback event、继续下一 route（`registry/error_classification.py:83-84`，`call/chat_model.py:129-152`，`:243-255`）。
+6. 如果 decision 是 `fail_fast` 或 `fail_fast_with_route_context`，当前 `GatewayChatModel._generate` 会立刻抛 `AllProvidersFailedError`（全部 provider 失败异常），不会继续试后面的 route（`call/chat_model.py:129-134`，`:243-248`）。
 
 ## 3. 接口契约
 
@@ -77,7 +77,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 > **保留编排壳 = 保留分类语义 · D1（决策）+ PM 原话（verbatim，不改一字）**：
 > **决策（D1）**：resolver/gateway **不**裸返回原生 ChatX、**不**删 `GatewayChatModel`，保留它作为**编排外壳**，只把「每条 route 的实际调用」从自研消息转换换成原生 langchain ChatX。否决激进版 A（`resolver 直接产 ChatX + 删 GatewayChatModel + 用 with_fallbacks()`），因为 A 会回归 fallback / probe / 熔断 / usage / metadata / predict——第八轮真机只验证了「调用层换 ChatX 修掉空-content bug」，**从未验证「删编排层」**。
 > **PM 原话**："不用留A, 这是错误判断, 正确的是A'"
-> → `with_fallbacks()` 只按异常类型，**表达不了"按 HTTP status + provider payload 组合分类"**，所以必须保留 `GatewayChatModel` 编排壳 + 本分类器（`gateway_chat_model.py:111-271` 编排职责坐实：熔断跳过 `:113` / probe `:115` / 分类 `:124,238` / mark-down `:135,249` / fallback event `:136,250` / usage `:227` / metadata `:313-357`）。
+> → `with_fallbacks()` 只按异常类型，**表达不了"按 HTTP status + provider payload 组合分类"**，所以必须保留 `GatewayChatModel` 编排壳 + 本分类器（`call/chat_model.py:111-271` 编排职责坐实：熔断跳过 `:113` / probe `:115` / 分类 `:124,238` / mark-down `:135,249` / fallback event `:136,250` / usage `:227` / metadata `:313-357`）。
 
 > **真实语义纠正 · M5（决策）+ PM 原话（verbatim 表，纠正多处文档错误简写）**：
 > **决策（M5）**：执行期分类**不变**，沿用 `classify_exception`。真实语义表完整 8 行见上 §2.1，与源码 `error_classification.py:15-17`/`:133-188` 一致。
@@ -92,7 +92,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 
 > 保留原"决策原因"全部条目。
 
-1. **保留 `GatewayChatModel` 编排壳，才能保留本分类语义**：`with_fallbacks()` 只按异常类型，表达不了 HTTP status 和 provider payload 组合出来的分类语义（决策依据 = D1，完整决策 + PM 原话见 §4「保留编排壳」；编排职责坐实 `gateway_chat_model.py:111-271`）。
+1. **保留 `GatewayChatModel` 编排壳，才能保留本分类语义**：`with_fallbacks()` 只按异常类型，表达不了 HTTP status 和 provider payload 组合出来的分类语义（决策依据 = D1，完整决策 + PM 原话见 §4「保留编排壳」；编排职责坐实 `call/chat_model.py:111-271`）。
 2. **401/402/403/404 fallback** 能保住 route/credential scope 的恢复机会；当前源码已把 404 视为 route scope，把 401/402/403 视为 credential scope（`registry/error_classification.py:144-154`）。
 3. **非 capability 400/413/422 fail request** 可以防止错误请求形状被 fallback 掩盖；这与"未知不当作模型选择信号"的原则一致（`registry/error_classification.py:169-188`）。
 4. **capability 400 fallback** 是为 provider/route 能力差异留出口，例如 unsupported parameter 或 invalid model 说明当前 route/mapper 不合适，但不代表整个用户请求非法（`registry/error_classification.py:155-168`，`:272-290`）。
@@ -117,7 +117,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 ## 7. 涉及 region / platform
 
 - **③b** `packages/graph-agent-gateway`：`registry/error_classification.py`（分类器 + 状态码常量 + helper）——纯 ③b，已在包内，本轮不动。
-- **③b 消费方** `packages/graph-agent-gateway`：`gateway_chat_model.py`（`_generate` probe/dispatch 异常分类调用点）、`client_manager.py`（`probe_provider` route probe 复用分类器）。
+- **③b 消费方** `packages/graph-agent-gateway`：`call/chat_model.py`（`_generate` probe/dispatch 异常分类调用点）、`call/clients.py`（`probe_provider` route probe 复用分类器）。
 - **③a / 调用层（A' 后）**：调用适配层（[[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]）需保证 ChatX/SDK 异常对象暴露可分类上下文（status_code / response payload），但**不改本模块语义**。
 - **② Rust**：N/A。
 
@@ -158,9 +158,9 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 - `registry/error_classification.py:75-98` — `classify_exception`（legacy decision 映射的函数）。
 - `registry/error_classification.py:101-188` — `classify_error_context`（action/scope 分类的函数）。
 - `registry/error_classification.py:223-301` — status/payload/capability marker/exception chain helpers。
-- `gateway_chat_model.py:123-152` — probe 异常分类和 fallback event 使用点。
-- `gateway_chat_model.py:237-255` — dispatch 异常分类和 fallback event 使用点。
-- `client_manager.py:352-354` / `client_manager.py:378-380` — route probe 复用分类器判断是否继续。
+- `call/chat_model.py:123-152` — probe 异常分类和 fallback event 使用点。
+- `call/chat_model.py:237-255` — dispatch 异常分类和 fallback event 使用点。
+- `call/clients.py:352-354` / `call/clients.py:378-380` — route probe 复用分类器判断是否继续。
 - `packages/graph-agent-gateway/tests/test_registry_error_classification.py:25-54` — 测试保护 401/402 fallback、413 fail_fast、unknown route context。
 - `packages/graph-agent-gateway/tests/test_registry_error_classification.py:82-105` — 测试保护 stream fallback 和 capability 400 fallback。
 

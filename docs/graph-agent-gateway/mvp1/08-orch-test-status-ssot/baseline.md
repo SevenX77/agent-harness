@@ -90,7 +90,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ### 6. snapshot_version 与版本-stale 的现状
 
 1. `snapshot_version` 字段已在 `ProviderRoute`、`RegistrySnapshot`、`ResolvedRoute` schema 上存在(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:207-221`,`:404-414`,`:417-442`)。
-2. registry resolver 会把当前 `snapshot.snapshot_version` 传给 `ResolvedRoute`,并在 route.snapshot_version 与 snapshot 不一致时剥离 stale capabilities / verified_profiles,避免旧 verified profile 被当成 live ready(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:150-183`,`:258-264`)。
+2. registry resolver 会把当前 `snapshot.snapshot_version` 传给 `ResolvedRoute`,并在 route.snapshot_version 与 snapshot 不一致时剥离 stale capabilities / verified_profiles,避免旧 verified profile 被当成 live ready(`packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:150-183`,`:258-264`)。
 3. resolver 测试已覆盖 snapshot_version 透传和版本不一致时不再选中旧 profile(`packages/graph-agent-gateway/tests/test_registry_resolver.py:98-184`)。
 4. Studio 当前 `RolesData.to_registry_snapshot(credentials)` 只把 credentials/roles join 成 snapshot,不填 `snapshot_version`;因此版本填充仍是 loader/materializer/host 侧责任,不是 08 投影函数内部自动生成(`apps/studio/backend/app/models/llm_config.py:279-296`;`apps/studio/backend/app/services/gateway_resolver.py:15-21`)。
 
@@ -129,7 +129,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 - `apps/studio/backend/app/routers/llm.py:4575-4605`: router 内部 projection helper 和 admission decision 适配六态;`failed`/`off` block,`cooling_down` temporary skip。
 - `apps/studio/frontend/src/api/llm.ts:12-13`,`:109-116`: 前端类型同步六态。
 - `apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:348-378`: ProviderCard 把 `historical_ready` 渲染成蓝色 Tag variant,不输出旧状态值。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:150-183`,`:258-264`: snapshot_version 透传与 stale live evidence 降级。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:150-183`,`:258-264`: snapshot_version 透传与 stale live evidence 降级。
 
 ## 待办/疑点
 

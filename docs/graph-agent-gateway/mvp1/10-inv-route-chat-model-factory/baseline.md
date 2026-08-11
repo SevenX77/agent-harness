@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py:ProviderProfile/apply_provider_profile · packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py:canonicalize_base_url · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py:ProviderProfile/apply_provider_profile · packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py:canonicalize_base_url · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation
 units: [route-chat-model-factory]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -15,7 +15,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ## 覆盖代码(含覆盖率)
 
-本模块当前已有独立生产模块。`packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py` 提供 `RouteChatModelFactory.build`；`packages/graph-agent-gateway/src/graph_agent_gateway/models.py` 提供 `GenericRouteChatModel`，它是 LangChain `BaseChatModel` 包装的最小 ordinary-chat adapter。
+本模块当前已有独立生产模块。`packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py` 提供 `RouteChatModelFactory.build`；`packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py` 提供 `GenericRouteChatModel`，它是 LangChain `BaseChatModel` 包装的最小 ordinary-chat adapter。
 
 覆盖率:100%。这里覆盖的是 MVP1 manifest 指定的 factory 职责来源:route 字段到 ChatX init kwargs、base_url 幂等归一、credential 读取、provider profile overlay、generic ordinary-chat adapter、以及已从 `client_manager` 收编出的 `ordinary_chat` provider core。
 
@@ -23,13 +23,13 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 | 代码 | 覆盖原因 |
 |---|---|
-| `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py` | `RouteChatModelFactory.build` 是 route -> official ChatX 的生产构造器；`PatchedChatDeepSeek` 是 DeepSeek reasoning-content 的单方法 payload patch。 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/models.py` | `GenericRouteChatModel` 是 unknown protocol 的 `BaseChatModel` 兜底，已实现 `bind_tools()`、OpenAI-style ordinary-chat 序列化和 response 桥接。 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py` | factory 通过 `apply_provider_profile` 合并 provider/model init kwargs overlay。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py` | `RouteChatModelFactory.build` 是 route -> official ChatX 的生产构造器；`PatchedChatDeepSeek` 是 DeepSeek reasoning-content 的单方法 payload patch。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py` | `GenericRouteChatModel` 是 unknown protocol 的 `BaseChatModel` 兜底，已实现 `bind_tools()`、OpenAI-style ordinary-chat 序列化和 response 桥接。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py` | factory 通过 `apply_provider_profile` 合并 provider/model init kwargs overlay。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py` | factory 调用 `canonicalize_base_url` 作为调用侧幂等双保险。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-459` | `ResolvedRoute` 是一条运行期 route 候选，`ResolvedRole` 是带 fallback 顺序的 route 列表；这是当前 factory 的输入数据形状。 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` | `_dispatch` 调用 factory + ChatX invoke，保留 `GatewayChatModel` 编排外壳。 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py` | `GenericRouteChatModel` 的默认 ordinary dispatcher；承接从 `client_manager.py` 移出的 provider-call 分派、payload 拼装、响应解析和 ordinary token escalation。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py` | `_dispatch` 调用 factory + ChatX invoke，保留 `GatewayChatModel` 编排外壳。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py` | `GenericRouteChatModel` 的默认 ordinary dispatcher；承接从 `call/clients.py` 移出的 provider-call 分派、payload 拼装、响应解析和 ordinary token escalation。 |
 
 ## 编号执行流程(现状)
 
@@ -50,13 +50,13 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 alignment 目标不是删除 `GatewayChatModel`。client 层 A' 重设计决策已否决“resolver 直接裸返回 ChatX”的方案（方案 A），要求保留 `GatewayChatModel` 做编排外壳，只把每条 route 的真实调用换成原生 LangChain ChatX(完整决策逻辑 + PM 原话见同目录 `mvp1-alignment.md` §4 D1 / §5 决策 1)。
 
-尚未完成的 alignment 差异：generic 仅完成 OpenAI-style ordinary-chat 最小 adapter，streaming、multimodal、provider-specific error normalization 和完整非标 protocol dispatcher 支持仍 deferred；`LLMClientManager` 旧 provider-call helpers 已删除并收编到 `ordinary_chat.py`；DeepSeek reasoning-content 已完成单方法 payload patch，其它 provider-specific thinking 规则仍需独立测试后迁移。
+尚未完成的 alignment 差异：generic 仅完成 OpenAI-style ordinary-chat 最小 adapter，streaming、multimodal、provider-specific error normalization 和完整非标 protocol dispatcher 支持仍 deferred；`LLMClientManager` 旧 provider-call helpers 已删除并收编到 `call/dispatch.py`；DeepSeek reasoning-content 已完成单方法 payload patch，其它 provider-specific thinking 规则仍需独立测试后迁移。
 
 ## 决策原因
 
 1. 需要拆开“编排”和“调用”（D2 编排/调用分离）。编排输入 = role/model override，输出 = `ResolvedRoute` 链；调用层输入是一条 `ResolvedRoute` 加 messages，输出是 `AIMessage`/结果(完整逻辑 + PM 原话见同目录 `mvp1-alignment.md` §4 D2 / §5 决策 1)。
 2. `GatewayChatModel._generate` 仍做 probe、熔断、usage、metadata、异常分类；WS-1 只替换第一个 provider 调用点，不拆 gateway 外壳。
-3. 旧 client_manager 调用层问题集中在消息转换和 provider payload；factory + ChatX 让官方主路径不再散落在 `_call_*`，generic ordinary-chat 兜底所需的旧 provider-call core 已迁到独立 `ordinary_chat.py`。
+3. 旧 client_manager 调用层问题集中在消息转换和 provider payload；factory + ChatX 让官方主路径不再散落在 `_call_*`，generic ordinary-chat 兜底所需的旧 provider-call core 已迁到独立 `call/dispatch.py`。
 4. DeepSeek reasoning-content 属于 payload 必须改的窄例外，所以使用 `PatchedChatDeepSeek._get_request_payload` replay assistant `AIMessage.additional_kwargs["reasoning_content"]`；其它消息转换仍交给 ChatX。
 5. `ProviderProfile` key 已改为 `protocol:{protocol}` → `endpoint:{endpoint_id}` → `endpoint:{endpoint_id}:model:{provider_model_id}` 三层 overlay，分别承载 protocol 默认、endpoint 级覆盖和 exact-model 覆盖；caller kwargs 最终优先。
 
@@ -72,6 +72,6 @@ alignment 目标不是删除 `GatewayChatModel`。client 层 A' 重设计决策�
 ## 待办/疑点
 
 1. 待办:为 `GenericRouteChatModel` 补 streaming、multimodal、provider-specific error normalization 和完整非标 protocol dispatcher 支持。
-2. 已处理:旧 `client_manager` provider-call helpers 已删除；相关行为收编进 `ordinary_chat.py`，并补了 `LLMClientManager` 不再暴露 legacy helper 的测试。
+2. 已处理:旧 `client_manager` provider-call helpers 已删除；相关行为收编进 `call/dispatch.py`，并补了 `LLMClientManager` 不再暴露 legacy helper 的测试。
 3. 待办:base_url 保存时归一化属于 03 模块；10 模块只记录调用时幂等双保险，不能替代保存侧修复。
 4. 已处理:`ProviderProfile` lookup key 改为 protocol / endpoint / exact-model 三层 overlay，避免旧 `endpoint_id:provider_model_id` 临时 key 继续漂移。

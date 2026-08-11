@@ -39,7 +39,7 @@ authored 值本该是 0..2 的"百分比",越出这个区间时缩放的语义�
 
 ### B2. 「按上限取」对 max_output_tokens 也没实现
 
-`call_settings.py:259-265` 已经能读出模型的输出上限:
+`call/settings.py:259-265` 已经能读出模型的输出上限:
 
 ```python
 def budget_cap(route: ResolvedRoute) -> int | None:
@@ -47,7 +47,7 @@ def budget_cap(route: ResolvedRoute) -> int | None:
     capability = route.capabilities.get("max_output_tokens")
 ```
 
-但它只被用在**一个**地方——`gateway_chat_model.py:146-148` 的预算翻倍:
+但它只被用在**一个**地方——`call/chat_model.py:146-148` 的预算翻倍:
 
 ```python
 def _next_budget(self) -> int:
@@ -56,7 +56,7 @@ def _next_budget(self) -> int:
 ```
 
 也就是说:上限只约束"升级后的预算",不约束"起始预算"。
-`initial_budget`(`call_settings.py:245-256`)一路读到用户写的值就直接返回,不看 cap。
+`initial_budget`(`call/settings.py:245-256`)一路读到用户写的值就直接返回,不看 cap。
 用户在角色里填一个超过模型上限的输出长度,今天原样出门吃 400。
 
 ### B3. 能力槽位齐全,但没有人往里填
@@ -79,7 +79,7 @@ def _next_budget(self) -> int:
 | DeepSeek | OpenAI 方言 `thinking.type`;Anthropic 方言 `reasoning.effort`;Responses 方言 `output_config.effort` | v4-pro **实测收全七档**(见下方 2026-08-10 实测),文档另称 `low/high/max` 且 `medium`→`high`、`xhigh`→`max` 服务端折叠 | `high` |
 | Gemini | 3 代 `thinking_level`(`MINIMAL/LOW/MEDIUM/HIGH`);2.5 代 `thinking_budget`(整数) | — | HIGH |
 
-对照 `route_chat_model_factory.py` 的 `_PROVIDER_KEYS`:
+对照 `call/factory.py` 的 `_PROVIDER_KEYS`:
 `anthropic_compatible` 的映射表里**没有 effort 这一项**——给 Claude 路由设 effort,
 今天在请求构造那一步就被丢掉,一个字节都不会出门。而给 DeepSeek 发的是
 `reasoning_effort`(按 openai_compatible 处理),与 DeepSeek OpenAI 方言文档所写的
@@ -235,7 +235,7 @@ ChatAnthropic(effort="medium")._get_request_payload(...)
 
 ### D-G. 模块化:边界与贴合是独立的一件事
 
-新增 `settings_bounds.py`,只负责"这条路由对这一项的边界是什么"与"把一个值贴合进去",
+新增 `registry/bounds.py`,只负责"这条路由对这一项的边界是什么"与"把一个值贴合进去",
 纯计算、无 IO、可离线测。`compose_call_settings` 调它,不自己长出一套 min/max 判断。
 provider-doc 常量表并入该模块,`temperature.py` 现有的协议表迁入后删除
 (不留并列的第二张表)。
@@ -267,7 +267,7 @@ provider-doc 常量表并入该模块,`temperature.py` 现有的协议表迁入�
 
 ## 5. 落地顺序
 
-- **A1 边界与贴合(网关)**:`settings_bounds.py` + `compose_call_settings` 接入 +
+- **A1 边界与贴合(网关)**:`registry/bounds.py` + `compose_call_settings` 接入 +
   `initial_budget` 受 cap 约束 + 温度协议表迁入。对应验收 1(后半)、2、5。
 - **A2 写入归一(Studio 后端)**:角色写入边界归一 authored 温度。对应验收 1(前半)。
 - **B1 effort 请求形状(网关)**:`_PROVIDER_KEYS` 支持嵌套路径 + 四家形状落表。对应验收 4。

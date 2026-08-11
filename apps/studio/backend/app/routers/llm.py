@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1233,6 +1233,12 @@ async def test_endpoint_models(
                     result,
                     route_id=route_ids_by_model.get(result.model_id),
                 )
+            # No effort measurement here: an official endpoint's evidence comes
+            # from its call-method profiles, and this path deliberately never
+            # sends the generic generation request the effort questions ride on.
+            # Asking an official route about effort needs those questions carried
+            # by `probe_official_call_method` instead — a second executor, so it
+            # belongs with P5's rather than bolted on here.
             save_credentials(latest_credentials)
             record_runtime_activity(
                 source_id="llm_credentials",
@@ -1321,6 +1327,11 @@ async def test_endpoint_models(
                 probe_result,
                 route_id=route_ids_by_model.get(probe_result.model_id),
             )
+        await _measure_what_only_asking_settles(
+            latest_credentials,
+            latest_endpoint,
+            route_ids_by_model.values(),
+        )
         status = _endpoint_status_from_model_probe_results(probe_results)
         message = _endpoint_message_from_model_probe_results(probe_results)
         latest_endpoint = latest_endpoint.model_copy(
@@ -3273,10 +3284,9 @@ async def _force_probe_route(
         save_credentials(credentials)
         return updated
     if result.status == "ok":
-        updated = route.model_copy(
+        credentials.provider_routes[route.route_id] = route.model_copy(
             update={
                 "status": "verified",
-                "capabilities": await _probed_route_capabilities(endpoint, route),
                 "metadata": {
                     key: value
                     for key, value in route.metadata.items()
@@ -3284,7 +3294,8 @@ async def _force_probe_route(
                 },
             }
         )
-        credentials.provider_routes[route.route_id] = updated
+        await _measure_what_only_asking_settles(credentials, endpoint, (route.route_id,))
+        updated = credentials.provider_routes[route.route_id]
         save_credentials(credentials)
         _health_store().clear_circuit(scope="route", scope_id=route.route_id)
         return updated
@@ -3340,6 +3351,31 @@ async def _probed_route_capabilities(
         return capabilities
     capabilities[_EFFORT_CAPABILITY_KEY] = measured_effort_capability(measured)
     return capabilities
+
+
+async def _measure_what_only_asking_settles(
+    credentials: LLMCredentialsFile,
+    endpoint: ProviderEndpoint,
+    route_ids: Iterable[str],
+) -> None:
+    """Fill in the capabilities no document answers, for routes just verified.
+
+    A route earns `verified` by answering a real generation request, and that is
+    the moment worth spending the extra requests: the route is known reachable
+    and its own answers are the only source for settings like effort. Applies to
+    every path that verifies a route, so the answer does not depend on which
+    button the user pressed.
+
+    Mutates `credentials` in place, like the evidence merge it runs beside — both
+    sit between the upsert and the single save.
+    """
+    for route_id in route_ids:
+        route = credentials.provider_routes.get(route_id)
+        if route is None or route.status != "verified":
+            continue
+        credentials.provider_routes[route_id] = route.model_copy(
+            update={"capabilities": await _probed_route_capabilities(endpoint, route)}
+        )
 
 
 async def _accepted_effort_levels(

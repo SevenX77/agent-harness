@@ -602,6 +602,10 @@ route 那 80 条**删掉,不重录**,理由不是嫌麻烦:
   `usage_total_calls` / `get_usage_stats`,被 `call/chat_model.py` 与 `call/resolver.py` 调用)。
   剩下的东西不再管理任何 client,名字必须跟着改;`client_manager` 这个 DI 形参全仓
   只在网关内部出现(studio 与 engine 零命中),改名不外溢。
+  **2026-08-11 落地补记**:类已在 #718 改名 `LLMCircuitAndUsageLedger`,DI 形参本轮改成
+  `ledger`——`chat_plainly` 早就这么叫(`call/plain.py:65`),两处一致之后这个名字才
+  指得回它自己。「零命中」在动手前又核过一次:`GatewayChatModel(` 的构造点只出现在
+  网关自己的 src 与 tests 里,studio 与 engine 都是 0。
 - **有一份覆盖会随死代码一起消失,必须点名交代。**
   `test_route_chat_model_factory.py:605` 的 `test_generic_chat_model_runs_langchain_create_agent_tool_loop`
   是在 `GenericRouteChatModel` 上测 ReAct 工具循环的。删掉它本身不是损失(被测对象生产不跑),

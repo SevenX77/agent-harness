@@ -131,7 +131,7 @@ def _ask(
         "graph_agent",
         _role(routes, token_escalation_rounds=escalation),
         max_tokens=512,
-        client_manager=manager or _Manager(),
+        ledger=manager or _Manager(),
         probe_before_call=probe,
         callbacks=[recorder],
     )

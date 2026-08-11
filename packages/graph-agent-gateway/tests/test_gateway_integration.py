@@ -187,7 +187,7 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
 
     resolver = _resolver_from_snapshot(
         snapshot,
-        client_manager=AlwaysFailingClientManager(),
+        ledger=AlwaysFailingClientManager(),
     )
     model = resolver.resolve("balanced", phase_name="draft")
 
@@ -238,7 +238,7 @@ def test_gateway_failure_path_emits_event_and_structured_exception(
         resolved_role=resolved_role,
         callbacks=(callback,),
         phase_name="draft",
-        client_manager=AlwaysFailingClientManager(),
+        ledger=AlwaysFailingClientManager(),
     )
 
     with pytest.raises(AllProvidersFailedError) as exc_info:
@@ -271,7 +271,7 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    client_manager = MarkDownRecordingClientManager()
+    ledger = MarkDownRecordingClientManager()
     factory = FakeRouteChatModelFactory(
         behaviors={
             "dead:claude": ProviderStatusError("endpoint unreachable", 404),
@@ -329,7 +329,7 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
         resolved_role=resolved_role,
         callbacks=(callback,),
         phase_name="e2e",
-        client_manager=client_manager,
+        ledger=ledger,
     )
 
     result = model.invoke([HumanMessage(content="hello")])
@@ -340,7 +340,7 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
         "max_output_tokens": {"value": 222, "source": "route_setting", "message": None},
         "temperature": {"value": 0.2, "source": "route_setting", "message": None},
     }
-    assert client_manager.marked_down == ["dead:claude"]
+    assert ledger.marked_down == ["dead:claude"]
     # Probe, probe, call: each candidate is asked the cheap question first, and
     # only the route that answered it is asked the real one.
     assert [item["route"].route_id for item in factory.builds] == [
@@ -384,7 +384,7 @@ def test_probe_missing_model_error_falls_back_to_next_route(
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    client_manager = MarkDownRecordingClientManager()
+    ledger = MarkDownRecordingClientManager()
     factory = FakeRouteChatModelFactory(
         behaviors={
             "missing:model": ProviderStatusError("model not found", 404),
@@ -425,7 +425,7 @@ def test_probe_missing_model_error_falls_back_to_next_route(
         resolved_role=resolved_role,
         callbacks=(callback,),
         phase_name="e2e",
-        client_manager=client_manager,
+        ledger=ledger,
     )
 
     result = model.invoke([HumanMessage(content="hello")])
@@ -436,7 +436,7 @@ def test_probe_missing_model_error_falls_back_to_next_route(
         "fallback:model",
         "fallback:model",
     ]
-    assert client_manager.marked_down == ["missing:model"]
+    assert ledger.marked_down == ["missing:model"]
     assert [e.decision for e in callback.events] == ["probe_failed", "answered"]
     event_payload = callback.events[0].model_dump(mode="json")
     assert event_payload["route_id"] == "missing:model"
@@ -454,7 +454,7 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
     )
     from langchain_core.messages import HumanMessage
 
-    client_manager = RecordingSuccessClientManager()
+    ledger = RecordingSuccessClientManager()
     factory = FakeRouteChatModelFactory()
     _install_route_factory(monkeypatch, factory)
     route = ResolvedRoute(
@@ -495,7 +495,7 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
             runtime_policy=RuntimePolicy(),
             routes=[route],
         ),
-        client_manager=client_manager,
+        ledger=ledger,
     )
 
     model.invoke([HumanMessage(content="hello")])
@@ -567,7 +567,7 @@ def test_gateway_response_metadata_reports_actual_call_runtime_settings(
             runtime_policy=RuntimePolicy(),
             routes=[route],
         ),
-        client_manager=RecordingSuccessClientManager(),
+        ledger=RecordingSuccessClientManager(),
         max_tokens=555,
         temperature=1.2,
         thinking_enabled=True,
@@ -629,7 +629,7 @@ def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
 
     resolver = _resolver_from_snapshot(
         snapshot,
-        client_manager=AlwaysFailingClientManager(),
+        ledger=AlwaysFailingClientManager(),
     )
 
     with pytest.raises(ResourceTerminalError) as exc_info:

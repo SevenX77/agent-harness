@@ -12,11 +12,6 @@ const TAURI_DIR = path.resolve(__dirname, '..')
 const STUDIO_DIR = path.resolve(TAURI_DIR, '..')
 const REPO_ROOT = path.resolve(TAURI_DIR, '../../..')
 const VENDOR_DIR = path.join(TAURI_DIR, 'vendor')
-const REQUIRED_VENDOR_IMPORTS = [
-  'graph_agent',
-  'graph_agent_gateway',
-  'graph_agent_gateway.probe_catalog',
-]
 const LOCAL_PACKAGE_SOURCES = [
   {
     packageName: 'graph_agent',
@@ -27,6 +22,12 @@ const LOCAL_PACKAGE_SOURCES = [
     sourceRoot: path.join(REPO_ROOT, 'packages', 'graph-agent-gateway', 'src', 'graph_agent_gateway'),
   },
 ]
+// Package roots only, derived from the packages this gate vendors: naming an
+// inner module here would be a second, hand-maintained copy of the SDK module
+// tree, and `localPackageSourcesAreVendored` below already hash-compares every
+// source file against its vendored twin — a stronger check that cannot go
+// stale when a package is reorganised internally.
+const REQUIRED_VENDOR_IMPORTS = LOCAL_PACKAGE_SOURCES.map((entry) => entry.packageName)
 
 function pythonExecutable(vendorDir = VENDOR_DIR, target = hostTargetTriple()) {
   const runtimeDir = path.join(vendorDir, 'python', target)
@@ -175,6 +176,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  LOCAL_PACKAGE_SOURCES,
+  REQUIRED_VENDOR_IMPORTS,
   canImportVendoredPackages,
   ensureVendor,
   localVenvBin,

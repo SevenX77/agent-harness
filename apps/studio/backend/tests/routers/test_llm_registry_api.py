@@ -7112,22 +7112,6 @@ def test_endpoint_notable_provider_key_accepts_qiniu_registered_host() -> None:
     assert llm_router._endpoint_notable_provider_key(endpoint) == "qiniu"
 
 
-def test_sync_catalog_endpoint_is_retired_and_disabled(
-    client: TestClient, tmp_path: Path, monkeypatch
-) -> None:
-    # R9.6: the legacy /catalog/sync remote probe-catalog entry is retired — a no-op
-    # that projects no remote source.
-    _seed(tmp_path, monkeypatch)
-
-    response = client.post("/api/llm/catalog/sync")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "disabled"
-    assert body["catalog_source"] is None
-    assert body["new_records_count"] == 0
-
-
 def test_registry_does_not_project_legacy_remote_catalog_source(
     client: TestClient,
     tmp_path: Path,
@@ -7201,19 +7185,6 @@ def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch)
     assert "Local verified catalog evidence exported successfully" in body["message"]
     assert "does not upload" in body["export_instructions"]
     assert "Pull Request" not in body["export_instructions"]
-
-
-def test_ensure_catalog_repository_endpoint_is_retired(client: TestClient, tmp_path: Path, monkeypatch) -> None:
-    # Phase 9: the legacy GitHub-repo probe-catalog concept is retired. The endpoint is a
-    # no-op — it never reaches GitHub and never creates an llm_probe_catalog.json repo.
-    _seed(tmp_path, monkeypatch)
-
-    response = client.post("/api/llm/catalog/repository/ensure")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "disabled"
-    assert body.get("repository_created") is None
 
 
 def test_registry_build_opens_the_health_store_once_regardless_of_route_count(

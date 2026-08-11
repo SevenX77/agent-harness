@@ -563,44 +563,6 @@ async def delete_registry_endpoint(endpoint_id: str) -> RegistryResponse:
     return await _write_registry_response(data)
 
 
-@router.post("/catalog/sync")
-async def sync_catalog() -> dict[str, Any]:
-    """Retired (R9.6): the legacy remote probe-catalog sync is no longer a runtime path.
-
-    Evidence is owned by ``credentials.provider_routes[*].evidence`` (SSOT); community
-    evidence arrives via the verified sync (``/catalog/sync-verified`` → route.evidence,
-    Phase 5). This endpoint is a no-op kept only so the existing UI button does not 404;
-    it neither reads nor writes ``llm_probe_catalog.json``.
-    """
-    return {
-        "status": "disabled",
-        "message": "The legacy remote probe-catalog sync is retired. Evidence lives in "
-        "credentials route.evidence; community evidence arrives via verified sync.",
-        "route_candidates_count": 0,
-        "evidence_records_count": 0,
-        "new_records_count": 0,
-        "catalog_source": None,
-    }
-
-
-@router.post("/catalog/repository/ensure")
-async def ensure_catalog_repository_endpoint() -> dict[str, Any]:
-    """Retired (Phase 9): the GitHub-repo probe-catalog concept no longer exists.
-
-    Evidence lives in credentials ``route.evidence`` and community evidence arrives via
-    verified sync; there is no remote ``llm_probe_catalog.json`` repository to create.
-    Kept as a disabled no-op so any older client that still calls it gets a clean,
-    networkless reply instead of a 404.
-    """
-    return {
-        "status": "disabled",
-        "message": (
-            "The GitHub-backed remote catalog repository is retired. Evidence lives in "
-            "credentials route.evidence; community evidence arrives via verified sync."
-        ),
-    }
-
-
 @router.post("/catalog/share")
 async def share_catalog() -> dict[str, Any]:
     """Export and return all local successful evidence records ready to be shared with the community."""

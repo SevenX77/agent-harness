@@ -31,6 +31,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, convert_to_messages
 
+from graph_agent_gateway.call.chat_model import GatewayChatModel
 from graph_agent_gateway.registry import ResolvedRole
 
 __all__ = ["PlainAnswer", "chat_plainly"]
@@ -74,8 +75,6 @@ def chat_plainly(
     Everything else the request carries was already settled when the role was
     materialized; re-listing it would invite two answers to the same question.
     """
-    from graph_agent_gateway.call.chat_model import GatewayChatModel
-
     # Left out rather than defaulted: the ChatX face owns what "no budget given"
     # means, and repeating its default here would be a second answer to the same
     # question, free to drift from the first.

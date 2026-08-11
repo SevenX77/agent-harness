@@ -1,0 +1,1856 @@
+{
+ "anthropic_messages|plain|multimodal=False": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ]
+  }
+ },
+ "anthropic_messages|plain|multimodal=True": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "anthropic_messages|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "output_config": {
+    "effort": "high"
+   }
+  }
+ },
+ "anthropic_messages|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "output_config": {
+    "effort": "high"
+   }
+  }
+ },
+ "anthropic_messages|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   }
+  }
+ },
+ "anthropic_messages|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   }
+  }
+ },
+ "anthropic_messages|budget|multimodal=False": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 1025,
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  }
+ },
+ "anthropic_messages|budget|multimodal=True": {
+  "url": "https://host.example/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 1025,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  }
+ },
+ "ark_anthropic_messages|plain|multimodal=False": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "ark_anthropic_messages|plain|multimodal=True": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "ark_anthropic_messages|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "output_config": {
+    "effort": "high"
+   }
+  }
+ },
+ "ark_anthropic_messages|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "output_config": {
+    "effort": "high"
+   }
+  }
+ },
+ "ark_anthropic_messages|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   }
+  }
+ },
+ "ark_anthropic_messages|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   }
+  }
+ },
+ "ark_anthropic_messages|budget|multimodal=False": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 1025,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  }
+ },
+ "ark_anthropic_messages|budget|multimodal=True": {
+  "url": "https://host.example/v1/api/compatible/v1/messages",
+  "headers": {
+   "authorization": "Bearer SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 1025,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  }
+ },
+ "deepseek_anthropic_messages|plain|multimodal=False": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "deepseek_anthropic_messages|plain|multimodal=True": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "deepseek_anthropic_messages|effort_high|multimodal=False": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "output_config": {
+    "effort": "high"
+   }
+  }
+ },
+ "deepseek_anthropic_messages|effort_high|multimodal=True": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "output_config": {
+    "effort": "high"
+   }
+  }
+ },
+ "deepseek_anthropic_messages|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   }
+  }
+ },
+ "deepseek_anthropic_messages|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 16,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "adaptive"
+   }
+  }
+ },
+ "deepseek_anthropic_messages|budget|multimodal=False": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 1025,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  }
+ },
+ "deepseek_anthropic_messages|budget|multimodal=True": {
+  "url": "https://host.example/anthropic/v1/messages",
+  "headers": {
+   "x-api-key": "SECRET",
+   "anthropic-version": "2023-06-01"
+  },
+  "body": {
+   "model": "m-1",
+   "max_tokens": 1025,
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image",
+       "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+   }
+  }
+ },
+ "openrouter_anthropic_messages|plain|multimodal=False": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|plain|multimodal=True": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|effort_high|multimodal=False": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|effort_high|multimodal=True": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|reasoning_on_no_effort|multimodal=False": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|reasoning_on_no_effort|multimodal=True": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|budget|multimodal=False": {
+  "refused": true
+ },
+ "openrouter_anthropic_messages|budget|multimodal=True": {
+  "refused": true
+ },
+ "ark_chat|plain|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 16
+  }
+ },
+ "ark_chat|plain|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 16
+  }
+ },
+ "ark_chat|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_chat|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_chat|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_chat|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_chat|budget|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 1025,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_chat|budget|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 1025,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_responses|plain|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  }
+ },
+ "ark_responses|plain|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  }
+ },
+ "ark_responses|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_responses|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_responses|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_responses|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_responses|budget|multimodal=False": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "ark_responses|budget|multimodal=True": {
+  "url": "https://host.example/v1/api/v3/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025,
+   "thinking": {
+    "type": "enabled"
+   }
+  }
+ },
+ "deepseek_chat_completions|plain|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 16
+  }
+ },
+ "deepseek_chat_completions|plain|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 16
+  }
+ },
+ "deepseek_chat_completions|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  }
+ },
+ "deepseek_chat_completions|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "high"
+  }
+ },
+ "deepseek_chat_completions|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "low"
+  }
+ },
+ "deepseek_chat_completions|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 16,
+   "reasoning_effort": "low"
+  }
+ },
+ "deepseek_chat_completions|budget|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_tokens": 1025,
+   "reasoning_effort": "low"
+  }
+ },
+ "deepseek_chat_completions|budget|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_tokens": 1025,
+   "reasoning_effort": "low"
+  }
+ },
+ "gemini_generate_content|plain|multimodal=False": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16
+   }
+  }
+ },
+ "gemini_generate_content|plain|multimodal=True": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      },
+      {
+       "inline_data": {
+        "mime_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16
+   }
+  }
+ },
+ "gemini_generate_content|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {
+     "thinkingLevel": "high"
+    }
+   }
+  }
+ },
+ "gemini_generate_content|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      },
+      {
+       "inline_data": {
+        "mime_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {
+     "thinkingLevel": "high"
+    }
+   }
+  }
+ },
+ "gemini_generate_content|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {}
+   }
+  }
+ },
+ "gemini_generate_content|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      },
+      {
+       "inline_data": {
+        "mime_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 16,
+    "thinkingConfig": {}
+   }
+  }
+ },
+ "gemini_generate_content|budget|multimodal=False": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1025,
+    "thinkingConfig": {
+     "thinkingBudget": 1024
+    }
+   }
+  }
+ },
+ "gemini_generate_content|budget|multimodal=True": {
+  "url": "https://host.example/v1/v1beta/models/m-1:generateContent?key=SECRET",
+  "headers": {},
+  "body": {
+   "contents": [
+    {
+     "parts": [
+      {
+       "text": "Reply with one short word."
+      },
+      {
+       "inline_data": {
+        "mime_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "generationConfig": {
+    "maxOutputTokens": 1025,
+    "thinkingConfig": {
+     "thinkingBudget": 1024
+    }
+   }
+  }
+ },
+ "openai_chat_completions|plain|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_completion_tokens": 16
+  }
+ },
+ "openai_chat_completions|plain|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_completion_tokens": 16
+  }
+ },
+ "openai_chat_completions|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "high"
+  }
+ },
+ "openai_chat_completions|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "high"
+  }
+ },
+ "openai_chat_completions|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "low"
+  }
+ },
+ "openai_chat_completions|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_completion_tokens": 16,
+   "reasoning_effort": "low"
+  }
+ },
+ "openai_chat_completions|budget|multimodal=False": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Reply with one short word."
+    }
+   ],
+   "max_completion_tokens": 1025,
+   "reasoning_effort": "low"
+  }
+ },
+ "openai_chat_completions|budget|multimodal=True": {
+  "url": "https://host.example/v1/chat/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "image_url",
+       "image_url": {
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+       }
+      }
+     ]
+    }
+   ],
+   "max_completion_tokens": 1025,
+   "reasoning_effort": "low"
+  }
+ },
+ "openai_completions|plain|multimodal=False": {
+  "url": "https://host.example/v1/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "prompt": "Reply with one short word.",
+   "max_tokens": 16
+  }
+ },
+ "openai_completions|plain|multimodal=True": {
+  "refused": true
+ },
+ "openai_completions|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "prompt": "Reply with one short word.",
+   "max_tokens": 16
+  }
+ },
+ "openai_completions|effort_high|multimodal=True": {
+  "refused": true
+ },
+ "openai_completions|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "prompt": "Reply with one short word.",
+   "max_tokens": 16
+  }
+ },
+ "openai_completions|reasoning_on_no_effort|multimodal=True": {
+  "refused": true
+ },
+ "openai_completions|budget|multimodal=False": {
+  "url": "https://host.example/v1/completions",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "prompt": "Reply with one short word.",
+   "max_tokens": 1025
+  }
+ },
+ "openai_completions|budget|multimodal=True": {
+  "refused": true
+ },
+ "openai_responses|plain|multimodal=False": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": "Reply with one short word.",
+   "max_output_tokens": 16
+  }
+ },
+ "openai_responses|plain|multimodal=True": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16
+  }
+ },
+ "openai_responses|effort_high|multimodal=False": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": "Reply with one short word.",
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "high"
+   }
+  }
+ },
+ "openai_responses|effort_high|multimodal=True": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "high"
+   }
+  }
+ },
+ "openai_responses|reasoning_on_no_effort|multimodal=False": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": "Reply with one short word.",
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "low"
+   }
+  }
+ },
+ "openai_responses|reasoning_on_no_effort|multimodal=True": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 16,
+   "reasoning": {
+    "effort": "low"
+   }
+  }
+ },
+ "openai_responses|budget|multimodal=False": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": "Reply with one short word.",
+   "max_output_tokens": 1025,
+   "reasoning": {
+    "effort": "low"
+   }
+  }
+ },
+ "openai_responses|budget|multimodal=True": {
+  "url": "https://host.example/v1/responses",
+  "headers": {
+   "authorization": "Bearer SECRET"
+  },
+  "body": {
+   "model": "m-1",
+   "input": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Reply with one short word."
+      },
+      {
+       "type": "input_image",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+     ]
+    }
+   ],
+   "max_output_tokens": 1025,
+   "reasoning": {
+    "effort": "low"
+   }
+  }
+ }
+}

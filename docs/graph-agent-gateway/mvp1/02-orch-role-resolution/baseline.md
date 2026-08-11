@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:resolve_role · packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver · apps/studio/backend/app/services/gateway_resolver.py:build_gateway_model_resolver · apps/studio/backend/app/services/llm_role_materializer.py:materialize_role
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:resolve_role · packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:ModelResolver · apps/studio/backend/app/services/gateway_resolver.py:build_gateway_model_resolver · apps/studio/backend/app/services/llm_role_materializer.py:materialize_role
 units: [role-resolution-materialize]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -19,8 +19,8 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 | 覆盖目标 | 现状范围 | 覆盖说明 |
 |---|---|---|
-| `registry/resolver.py:resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链,不调用模型) | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:34-230` | 覆盖 role→route、普通 fallback skip、`skipped_diagnostics`、`route_override` fail-fast、credential 检查、profile 选择、effective runtime settings、lint blocking skip、过滤后空链配置错误。 |
-| `resolver.py:ModelResolver`(用途:把 registry 解析结果包成 LangChain `GatewayChatModel` 或 predict mock model,或直接返回 route 级 handoff) | `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:42-180` | 覆盖 `model_override`、`resolve_routes` route 级 API、predict 分支、手动 mark-down。空链配置错误由 `resolve_role` 抛出并在 role 级 `resolve()` 映射为 `GatewayRoleNotConfiguredError`。 |
+| `registry/resolver.py:resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链,不调用模型) | `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:34-230` | 覆盖 role→route、普通 fallback skip、`skipped_diagnostics`、`route_override` fail-fast、credential 检查、profile 选择、effective runtime settings、lint blocking skip、过滤后空链配置错误。 |
+| `resolver.py:ModelResolver`(用途:把 registry 解析结果包成 LangChain `GatewayChatModel` 或 predict mock model,或直接返回 route 级 handoff) | `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:42-180` | 覆盖 `model_override`、`resolve_routes` route 级 API、predict 分支、手动 mark-down。空链配置错误由 `resolve_role` 抛出并在 role 级 `resolve()` 映射为 `GatewayRoleNotConfiguredError`。 |
 | `services/gateway_resolver.py:build_gateway_model_resolver`(用途:从 Studio v4 credentials + v2/v3 roles 构造 gateway resolver) | `apps/studio/backend/app/services/gateway_resolver.py:15-21` | 覆盖 Studio→Gateway 装配入口。 |
 | `services/llm_role_materializer.py:materialize_role`(用途:把 Studio Role 的 model groups 投影成 gateway `fallback_chain`) | `apps/studio/backend/app/services/llm_role_materializer.py:27-96` | 覆盖 authoring 顺序、状态投影、跳过报告、runtime settings 写入。**判据归属:意图过滤/降级/排链/role-fit 诊断 = ③b 编排内核(现散 ③a 待下沉),report 渲染留 ③a;详见 `mvp1-alignment.md`。** |
 
@@ -46,33 +46,33 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 9. `build_gateway_model_resolver`(用途:从 Studio v4 credentials + v2/v3 roles 构造 gateway resolver)读取 active credentials,再读取 roles 文件或空 `RolesData`,最后用 `roles.to_registry_snapshot(credentials)` 生成 `ModelResolver`,见 `apps/studio/backend/app/services/gateway_resolver.py:18-21`。
 
-10. `ModelResolver.__init__`(用途:保存 registry snapshot 并准备 credential provider)要求调用方给 `registry_snapshot` 或显式 credentials/roles 路径;如果给 snapshot,会用 endpoint credentials provider 包一层 fallback credential provider,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:44-69`。
+10. `ModelResolver.__init__`(用途:保存 registry snapshot 并准备 credential provider)要求调用方给 `registry_snapshot` 或显式 credentials/roles 路径;如果给 snapshot,会用 endpoint credentials provider 包一层 fallback credential provider,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:44-69`。
 
-11. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)当前不接受 `role_name=None`;没传 role 会直接抛 `GatewayRoleNotConfiguredError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:73-91`。
+11. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)当前不接受 `role_name=None`;没传 role 会直接抛 `GatewayRoleNotConfiguredError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:73-91`。
 
-12. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)把 `model_override` 原样传给 `resolve_role` 的 `route_override`,所以当前 override 实际是精确 `route_id` override,不是旧模型短码 override,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:92-98`。
+12. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)把 `model_override` 原样传给 `resolve_role` 的 `route_override`,所以当前 override 实际是精确 `route_id` override,不是旧模型短码 override,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:92-98`。
 
-13. `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)先按 role 名取 `snapshot.roles[role_name]`;role 不存在时抛 `RegistryResolutionError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:41-43`。
+13. `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)先按 role 名取 `snapshot.roles[role_name]`;role 不存在时抛 `RegistryResolutionError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:41-43`。
 
-14. `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)有 `route_override` 时只构造单条 `RoleRouteEntry`,否则按 `role.fallback_chain` 原顺序遍历,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:45-55`。
+14. `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)有 `route_override` 时只构造单条 `RoleRouteEntry`,否则按 `role.fallback_chain` 原顺序遍历,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:45-55`。
 
-15. `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)在普通 fallback 链上遇到 route 不存在、route status 不是 `verified/unverified_manual`、endpoint 不存在、endpoint 没有 credential、profile 选择失败时,会追加一条 `SkippedRoute` 到 `skipped_diagnostics` 并继续下一条;同一错误如果来自 `route_override`,则立即抛 `RegistryResolutionError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
+15. `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)在普通 fallback 链上遇到 route 不存在、route status 不是 `verified/unverified_manual`、endpoint 不存在、endpoint 没有 credential、profile 选择失败时,会追加一条 `SkippedRoute` 到 `skipped_diagnostics` 并继续下一条;同一错误如果来自 `route_override`,则立即抛 `RegistryResolutionError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:60-140` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
 
-16. `select_verified_profile`(用途:选择一个 route 上已验证的调用 profile)成功时把 profile id/capability/method/mapper 写入 `ResolvedRoute`;失败时在普通 fallback 链上进入 `profile_unavailable` skipped diagnostic,在 `route_override` 下 fail-fast,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:126-180`。
+16. `select_verified_profile`(用途:选择一个 route 上已验证的调用 profile)成功时把 profile id/capability/method/mapper 写入 `ResolvedRoute`;失败时在普通 fallback 链上进入 `profile_unavailable` skipped diagnostic,在 `route_override` 下 fail-fast,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:126-180`。
 
-17. `_effective_runtime_settings`(用途:把 route entry 的用户设置、route capability 默认值、protocol 默认值合成最终 runtime settings)会给 temperature、max output tokens、reasoning 等字段打 source,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:254`。
+17. `_effective_runtime_settings`(用途:把 route entry 的用户设置、route capability 默认值、protocol 默认值合成最终 runtime settings)会给 temperature、max output tokens、reasoning 等字段打 source,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:254`。
 
-18. `lint_role_routes`(用途:对 role 的 route 链做 capability lint)在可解析 route 集合上运行;普通 fallback 链的 blocking lint 会把对应 route 从 `resolved_routes` 剔除并写入 `skipped_diagnostics(reason_code="lint_blocked")`,其余 route 继续保留;`route_override` 的 blocking lint 仍 fail-fast 抛 `RegistryResolutionError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:182-210`。
+18. `lint_role_routes`(用途:对 role 的 route 链做 capability lint)在可解析 route 集合上运行;普通 fallback 链的 blocking lint 会把对应 route 从 `resolved_routes` 剔除并写入 `skipped_diagnostics(reason_code="lint_blocked")`,其余 route 继续保留;`route_override` 的 blocking lint 仍 fail-fast 抛 `RegistryResolutionError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:182-210`。
 
-19. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)把 `RegistryResolutionError` 统一映射成 `GatewayRoleNotConfiguredError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:99-103`。
+19. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)把 `RegistryResolutionError` 统一映射成 `GatewayRoleNotConfiguredError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:99-103`。
 
-20. `resolve_role` 在遍历和 lint 后如果没有任何 `resolved_routes`,会直接抛 `RegistryResolutionError`:空 fallback chain 有专门 message,全被跳过时 message 带 skipped summary,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:212-219`。`ModelResolver.resolve` 中旧的空链 `AllProvidersFailedError` 后置分支已删除;`_resolve_copilot_runtime` 仍保留自己的防御性空链保护,见 `apps/studio/backend/app/services/copilot.py:429-437`。
+20. `resolve_role` 在遍历和 lint 后如果没有任何 `resolved_routes`,会直接抛 `RegistryResolutionError`:空 fallback chain 有专门 message,全被跳过时 message 带 skipped summary,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:212-219`。`ModelResolver.resolve` 中旧的空链 `AllProvidersFailedError` 后置分支已删除;`_resolve_copilot_runtime` 仍保留自己的防御性空链保护,见 `apps/studio/backend/app/services/copilot.py:429-437`。
 
-21. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)用第一条 route 的 effective `max_output_tokens/temperature/reasoning.enabled` 决定模型构造参数,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:103-110`。
+21. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)用第一条 route 的 effective `max_output_tokens/temperature/reasoning.enabled` 决定模型构造参数,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:103-110`。
 
-22. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)有 `predict_context` 时返回 `PredictGatewayChatModel`,否则返回 `GatewayChatModel`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:111-138`。
+22. `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)有 `predict_context` 时返回 `PredictGatewayChatModel`,否则返回 `GatewayChatModel`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:111-138`。
 
-23. `ModelResolver.resolve_routes`(用途:route 级 handoff API)接收 `role_name` 和可选 `route_override`,调用同一条 `resolve_role` 并直接返回 `ResolvedRole`;该方法不构造 chat model,也不把 `RegistryResolutionError` 映射成 `GatewayRoleNotConfiguredError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:140-153`。
+23. `ModelResolver.resolve_routes`(用途:route 级 handoff API)接收 `role_name` 和可选 `route_override`,调用同一条 `resolve_role` 并直接返回 `ResolvedRole`;该方法不构造 chat model,也不把 `RegistryResolutionError` 映射成 `GatewayRoleNotConfiguredError`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:140-153`。
 
 ## Baseline / Alignment 差异
 
@@ -86,16 +86,16 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 不让 capability/price/latency 动态选型,是因为 MVP1 README 把编排定义为 role→route 的确定性解析,交接物是 `ResolvedRoute/ResolvedRole`,见 `docs/graph-agent-gateway/mvp1/README.md:13-18`。
 
-当前把 `model_override` 解释成 `route_override`,是为了让 override 指向精确可执行 route,避免旧“模型名”在多 provider 下变成模糊匹配;证据是 `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)的传参,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:92-98`。
+当前把 `model_override` 解释成 `route_override`,是为了让 override 指向精确可执行 route,避免旧“模型名”在多 provider 下变成模糊匹配;证据是 `ModelResolver.resolve`(用途:把 role/model override 解析成 LangChain chat model)的传参,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:92-98`。
 
-runtime 跳过语义已经下沉到 `resolve_role`,原因是 save 解耦后 role 可以引用暂未配置或暂不可执行 route;逐条 skip 让后面的可用 route 仍有机会执行,全链不可用时再把配置错误一次性报出并附 skipped summary,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-219`。
+runtime 跳过语义已经下沉到 `resolve_role`,原因是 save 解耦后 role 可以引用暂未配置或暂不可执行 route;逐条 skip 让后面的可用 route 仍有机会执行,全链不可用时再把配置错误一次性报出并附 skipped summary,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:60-219`。
 
 ## 代码索引(clues)
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:26`: `EXECUTABLE_ROUTE_STATUSES`(用途:定义解析期可执行 route status 集合)只允许 `verified/unverified_manual`。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:26`: `EXECUTABLE_ROUTE_STATUSES`(用途:定义解析期可执行 route status 集合)只允许 `verified/unverified_manual`。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`: `SkippedRoute` 与 `ResolvedRole.skipped_diagnostics`(用途:记录被 resolver 跳过的 route、原因和来源)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:34-230`: `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)是 runtime role→route 的核心。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:71-153`: `ModelResolver.resolve` 与 `ModelResolver.resolve_routes` 分别是 role 级 chat model API 和 route 级 handoff API。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:34-230`: `resolve_role`(用途:把一个 role 展开成有序 `ResolvedRoute` 链)是 runtime role→route 的核心。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:71-153`: `ModelResolver.resolve` 与 `ModelResolver.resolve_routes` 分别是 role 级 chat model API 和 route 级 handoff API。
 - `apps/studio/backend/app/services/gateway_resolver.py:15-21`: `build_gateway_model_resolver`(用途:从 Studio v4 credentials + v2/v3 roles 构造 gateway resolver)是 Studio backend 接入点。
 - `apps/studio/backend/app/services/llm_role_materializer.py:27-96`: `materialize_role`(用途:把 Studio Role authoring 投影成 gateway fallback chain)是 authoring→runtime chain 的投影入口。
 - `apps/studio/backend/app/services/copilot.py:_resolve_copilot_runtime`: 解析 `copilot_chat` role 并返回 routes + credential provider，已通过 `ModelResolver.resolve_routes` 把 role→route 用作 Copilot 内部交接。

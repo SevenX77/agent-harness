@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message/_usage_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message/_usage_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute
 units: [chatx-invocation-runtime]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -17,7 +17,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ## 覆盖代码(含覆盖率)
 
-覆盖率：本模块 brief 指定的调用层代码已全部核源码，文档覆盖率 100%。共享文件按 [mvp1 README](../README.md) 第 66 行的边界切分：09 覆盖 `gateway_chat_model.py` 的 ChatX invoke 桥、结果桥和 token escalation；generic ordinary-chat provider core 已从 `client_manager.py` 收编到 `ordinary_chat.py`，仍不是官方 ChatX 生产主调用路径。
+覆盖率：本模块 brief 指定的调用层代码已全部核源码，文档覆盖率 100%。共享文件按 [mvp1 README](../README.md) 第 66 行的边界切分：09 覆盖 `call/chat_model.py` 的 ChatX invoke 桥、结果桥和 token escalation；generic ordinary-chat provider core 已从 `call/clients.py` 收编到 `call/dispatch.py`，仍不是官方 ChatX 生产主调用路径。
 
 | 代码 | 本篇覆盖的用途 |
 |---|---|
@@ -47,7 +47,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 7. 如果 manager 侧没有记录 usage，`GatewayChatModel._generate` 会用 `_usage_from_response` 把 ChatX usage 回写到 `LLMClientManager.record_usage`。
 
-8. 旧 `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已从 `client_manager.py` 删除；generic ordinary adapter 的默认 dispatcher 改为 `ordinary_chat.dispatch_ordinary_chat`。官方 ChatX 主路径仍只走 factory + ChatX invoke。
+8. 旧 `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已从 `call/clients.py` 删除；generic ordinary adapter 的默认 dispatcher 改为 `ordinary_chat.dispatch_ordinary_chat`。官方 ChatX 主路径仍只走 factory + ChatX invoke。
 
 ## Baseline / Alignment 差异
 
@@ -68,15 +68,15 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ## 代码索引 clues
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`：`GatewayChatModel._generate`、`_dispatch`、`_invoke_with_token_escalation`、`_build_chat_result_from_ai_message`。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py`：`RouteChatModelFactory.build`、DeepSeek `PatchedChatDeepSeek._get_request_payload` 单方法 patch。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py`：`dispatch_ordinary_chat/_dispatch_provider_call/_call_*`，从 `client_manager.py` 收编出的 generic ordinary-chat provider core。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/models.py`：`GenericRouteChatModel` 最小 ordinary-chat adapter。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py`：`GatewayChatModel._generate`、`_dispatch`、`_invoke_with_token_escalation`、`_build_chat_result_from_ai_message`。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py`：`RouteChatModelFactory.build`、DeepSeek `PatchedChatDeepSeek._get_request_payload` 单方法 patch。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py`：`dispatch_ordinary_chat/_dispatch_provider_call/_call_*`，从 `call/clients.py` 收编出的 generic ordinary-chat provider core。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py`：`GenericRouteChatModel` 最小 ordinary-chat adapter。
 
 ## 待办/疑点
 
 1. `GenericRouteChatModel` 已完成 OpenAI-style ordinary-chat 最小 adapter；streaming、multimodal、provider-specific error normalization 和完整非标 protocol dispatcher 支持仍未覆盖，不宣称 production 完整。
 
-2. `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已清理；行为收编到 `ordinary_chat.py`，测试已覆盖 `client_manager` 不再暴露旧 helper 与 `GenericRouteChatModel` 默认 dispatcher 的新落点。
+2. `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已清理；行为收编到 `call/dispatch.py`，测试已覆盖 `client_manager` 不再暴露旧 helper 与 `GenericRouteChatModel` 默认 dispatcher 的新落点。
 
 3. thinking 归一化只完成了 ChatX `AIMessage` 不拍平、部分 runtime kwargs 映射和 DeepSeek 单方法 payload replay；其它 provider thinking defaults / 旧 thinking helper 清理仍延期。

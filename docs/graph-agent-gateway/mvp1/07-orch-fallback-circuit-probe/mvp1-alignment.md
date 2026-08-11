@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted
 verified_at: 2026-06-02
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_is_marked_down/_probe/_invoke_with_token_escalation/_mark_down/_usage_total_calls/_record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/probe_provider/is_provider_marked_down/mark_provider_down/record_usage/_probe_provider/_is_provider_marked_down/_mark_provider_down · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RuntimePolicy/ProbeResult · packages/graph-agent-gateway/src/graph_agent_gateway/registry/probe_contracts.py · apps/studio/backend/app/services/copilot_test.py:ModelProbeResult/_probe_model/_probe_official_call_method · apps/studio/backend/app/services/llm_health_store.py:RuntimeCircuit/SqliteLlmHealthStore
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_is_marked_down/_probe/_invoke_with_token_escalation/_mark_down/_usage_total_calls/_record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:LLMClientManager/probe_provider/is_provider_marked_down/mark_provider_down/record_usage/_probe_provider/_is_provider_marked_down/_mark_provider_down · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RuntimePolicy/ProbeResult · apps/studio/backend/app/services/copilot_test.py:ModelProbeResult/_probe_model/_probe_official_call_method · apps/studio/backend/app/services/llm_health_store.py:RuntimeCircuit/SqliteLlmHealthStore
 units: [fallback-circuit-probe-health]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -25,7 +25,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 本模块按判据全部落在 **③b gateway 公共能力内核**,只有少量明确划归 ③a 的应用加工:
 
-- **fallback 链遍历 / 熔断跳过 / probe / 异常分类 / mark_down / fallback event / usage 归属 / 截断升级重试** = **③b 公共**（gateway 机制本身衍生,任何调模型 app 装上就有,已在 `gateway_chat_model.py` + `client_manager.py`）。
+- **fallback 链遍历 / 熔断跳过 / probe / 异常分类 / mark_down / fallback event / usage 归属 / 截断升级重试** = **③b 公共**（gateway 机制本身衍生,任何调模型 app 装上就有,已在 `call/chat_model.py` + `call/clients.py`）。
 - **熔断持久化 `llm_health_store`(把冷却事实跨进程存起来)** = **③b 公共内核**（**本轮反转**:原 baseline 判它「③a seam / 是否打通是疑点」,现按判据已定 ③b 待下沉;存储介质 SQLite 路径由 ③a 注入）。
 - **批量探测策略(对一批 route 编排 probe 的顺序/并发/跳过历史失败)** = **③b 公共**（探测编排是 gateway 机制,现编排住 `routers/llm.py` 的探测段,只有"批量进度 UI"留 ③a）。
 - **`copilot_test`(copilot 假测试探针)** = **③a 应用**（copilot 专属,与 ③b 通用 route probe 不同源,留 studio;详见 F9 归属 + F8 边界 + 文末决策原因，应用侧消费方 = studio copilot（copilot-assist + ux-spec §3.8））。
@@ -46,9 +46,9 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 |---|---|
 | **resolver → `_generate`（入参）** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（有序 fallback 链）, `runtime_policy`: `RuntimePolicy`（down TTL / probe timeout / `token_escalation_rounds`,字段权威源 `registry/schema.py:88-98`）}。`_generate` **看得到**"有序候选 + 运行时策略"(通用编排概念),**看不到**"角色怎么被 UI 编辑 / 怎么排序出来"(③a 应用加工 + 02 materialize)。 |
 | **`_generate` → 09 调用层（每条 route）** | 入:一条 `ResolvedRoute` + 原始 `BaseMessage[]`(不拍 dict) + runtime params;出:ChatX `AIMessage`(含 `usage_metadata` + 注入的 route metadata) 或抛异常。**契约要求**:① 抛出的异常形状能被 `classify_exception` 沿异常链找到 `status_code`/`response.status_code`;② 成功 `AIMessage.usage_metadata` 非空可喂 usage 归属;③ thinking content blocks 不被拍平(归 09 F4)。 |
-| **`_generate` → `client_manager`（健康/probe/usage,③b 公共接口）** | `is_provider_marked_down(endpoint_id, provider_model_id) → bool`、`probe_provider(...) → bool`(可选带 `credential_provider`)、`mark_provider_down(..., runtime_policy)`、`record_usage(endpoint_id, prompt/completion/total tokens)`。这四个是 M2 拆解里**保留的**②③④(probe / 熔断 / usage),签名见 `client_manager.py:53-132,:310-323`。 |
+| **`_generate` → `client_manager`（健康/probe/usage,③b 公共接口）** | `is_provider_marked_down(endpoint_id, provider_model_id) → bool`、`probe_provider(...) → bool`(可选带 `credential_provider`)、`mark_provider_down(..., runtime_policy)`、`record_usage(endpoint_id, prompt/completion/total tokens)`。这四个是 M2 拆解里**保留的**②③④(probe / 熔断 / usage),签名见 `call/clients.py:53-132,:310-323`。 |
 | **熔断持久化（③b 公共,现 ③a 待下沉）** | `SqliteLlmHealthStore.open_circuit(circuit: RuntimeCircuit)` 写、`get_active_circuits(route_id, endpoint_id, rate_limit_bucket) → RuntimeCircuit[]`(只返回 `retry_at` 未过的)读;`RuntimeCircuit` DTO 字段 `scope/scope_id/opened_at/retry_at/ttl_seconds/reason_code/failure_count/message`,见 `apps/studio/backend/app/services/llm_health_store.py:14-101`。**存储介质 SQLite 路径由 ③a 注入**,store 逻辑本身 ③b。 |
-| **probe 结果 DTO（③b 公共契约）** | `ProbeResult`(1-token 探测结果契约,字段权威源 `registry/schema.py:320-329`,经 `registry/probe_contracts.py` 重导出给诊断/SSOT 侧)。执行期 `_generate` 只消费 boolean probe/fallback 结果;探测结果作为诊断/证据流的一部分进 [[08-orch-test-status-ssot]]。 |
+| **probe 结果 DTO（③b 公共契约）** | `ProbeResult`(1-token 探测结果契约,字段权威源 `registry/schema.py:386-395`,经 `registry/__init__.py:170` 导出给诊断/SSOT 侧)。执行期 `_generate` 只消费 boolean probe/fallback 结果;探测结果作为诊断/证据流的一部分进 [[08-orch-test-status-ssot]]。 |
 | **fallback event（③b 公共,归 13）** | `emit_llm_fallback_event` 入 `LLMFallbackEvent`{ `phase_name`, from/to provider, reason, code, context(含 from/to route 诊断 + fallback decision + provider status code + runtime settings) }。callback 异常被吞,不掩盖运行时错误。 |
 | **错误** | route 全失败 → `AllProvidersFailedError`(payload 来自累积的 failure records,异常类归 13,`exceptions.py:33-60`);probe 不可 fallback 异常 / invoke fail-fast 异常 → 透传抛出。 |
 | **归属 / 稳定性** | `RuntimePolicy`/`ProbeResult` 字段权威源 = [[04-orch-registry-schema]](`registry/schema.py`);`classify_exception` 状态码语义权威源 = [[06-orch-error-classification]];本模块**只链接不复制**,防 drift。 |
@@ -60,29 +60,29 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 ### F1 fallback 循环（`_generate` 编排外壳 + 异常分类驱动 + 编排/调用分离）
 
 - **机制/数据流**：
-  - `GatewayChatModel._generate`（③b 编排外壳,fallback 链主循环）是保留的编排外壳;MVP1 不删除它,因为它承载 fallback/probe/熔断/usage/event,现状入口在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96-271`,决策 D1（否决 A、保留 `GatewayChatModel`)的完整理由 + PM 原话见本段下方决策。
-  - `GatewayChatModel._generate` 的输入准备要交给调用层保真处理;MVP1 不再把 `BaseMessage` 先拍成 dict,因为现状 `_langchain_messages_to_dict`(把 LangChain 消息转成 provider dict 的函数)位于 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`,它属于 09 的调用层问题(也是空-content bug 根源)。
+  - `GatewayChatModel._generate`（③b 编排外壳,fallback 链主循环）是保留的编排外壳;MVP1 不删除它,因为它承载 fallback/probe/熔断/usage/event,现状入口在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:96-271`,决策 D1（否决 A、保留 `GatewayChatModel`)的完整理由 + PM 原话见本段下方决策。
+  - `GatewayChatModel._generate` 的输入准备要交给调用层保真处理;MVP1 不再把 `BaseMessage` 先拍成 dict,因为现状 `_langchain_messages_to_dict`(把 LangChain 消息转成 provider dict 的函数)位于 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:661-692`,它属于 09 的调用层问题(也是空-content bug 根源)。
   - `GatewayChatModel._generate` 继续按 `ResolvedRole.routes` 顺序遍历 fallback 链;`ResolvedRole`(resolver 输出的角色运行时结构)字段定义在 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-456`。
-  - `classify_exception`（运行时异常分类入口,把 HTTP 状态码/异常映射成 fallback / fail-fast / retry）继续作为执行期错误分类入口;它把 retry/fallback 类 action 映射为 `fallback_allowed`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py:75-98`,真实状态码语义见 [[06-orch-error-classification]](本模块只消费结果,不复制状态码表)。这是 fallback 循环对每条 route 失败(probe-fail / invoke-fail)做"fallback 还是 fail-fast"分流的决策引擎。
-  - Route invoke 步骤改成调用 09 的 ChatX 调用层;07 只要求它抛出的异常仍能进入 `classify_exception`,成功返回的 `AIMessage.usage_metadata`(ChatX 返回的 token 用量)能供 usage 归属使用(usage 归属落 F6),现状 usage 补记点在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:227-235`。
+  - `classify_exception`（运行时异常分类入口,把 HTTP 状态码/异常映射成 fallback / fail-fast / retry）继续作为执行期错误分类入口;它把 retry/fallback 类 action 映射为 `fallback_allowed`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:75-98`,真实状态码语义见 [[06-orch-error-classification]](本模块只消费结果,不复制状态码表)。这是 fallback 循环对每条 route 失败(probe-fail / invoke-fail)做"fallback 还是 fail-fast"分流的决策引擎。
+  - Route invoke 步骤改成调用 09 的 ChatX 调用层;07 只要求它抛出的异常仍能进入 `classify_exception`,成功返回的 `AIMessage.usage_metadata`(ChatX 返回的 token 用量)能供 usage 归属使用(usage 归属落 F6),现状 usage 补记点在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:227-235`。
   - **编排 / 调用边界（M3 `_generate` 9 步逐步归属）**:留编排(2/3/4/6/8/9 步)= 遍历 / 熔断跳过 / probe / usage 记账 / 异常处理 / 全失败;改调用(1/5/7 步)= 消息准备(不再拍 dict)/ 实际调用(build ChatX + invoke)/ 构建结果(augment ChatX `AIMessage`),改的三步归 09。
 - **决策 + 动机**：
-  - **D1 — A' 保留 `GatewayChatModel`(否决激进版 A)**:`_generate` 里的 fallback、probe、熔断、异常分类、event 和 usage 都是 Gateway 自有语义;裸返回 ChatX 或 LangChain `with_fallbacks()` 不能表达按 route 状态码分类、probe、down TTL、usage 归属和 fallback event。**被否决的方案 A(激进版)**= "resolver 直接产原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`",它会回归 fallback / probe / 熔断 / usage / metadata / predict 全套能力;真机第八轮只验证了"调用层换 ChatX 修掉空-content bug",**从未验证"删编排层"**,且 `with_fallbacks()` 只能按异常类型分流、表达不了"按 HTTP status 分类"(对比 `error_classification.py`,状态码语义归 [[06-orch-error-classification]])。因此 A' = 不删编排外壳、不裸返回 ChatX,只把"每条 route 的实际调用"从自研消息转换换成原生 ChatX。**bug 根源在调用层(消息转换),不在编排层**:`_langchain_messages_to_dict`(把带 `tool_calls` 的 `AIMessage(content="")` 转成 `{"content":""}`)在 `gateway_chat_model.py:661-692`,再经 anthropic dispatch 发出空 content → qiniu-anthropic `400 content must not be empty`(改在调用层,归 [[09-inv-invocation-runtime]])。**PM 原话见本段下方**:"不用留A, 这是错误判断, 正确的是A'"。
+  - **D1 — A' 保留 `GatewayChatModel`(否决激进版 A)**:`_generate` 里的 fallback、probe、熔断、异常分类、event 和 usage 都是 Gateway 自有语义;裸返回 ChatX 或 LangChain `with_fallbacks()` 不能表达按 route 状态码分类、probe、down TTL、usage 归属和 fallback event。**被否决的方案 A(激进版)**= "resolver 直接产原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`",它会回归 fallback / probe / 熔断 / usage / metadata / predict 全套能力;真机第八轮只验证了"调用层换 ChatX 修掉空-content bug",**从未验证"删编排层"**,且 `with_fallbacks()` 只能按异常类型分流、表达不了"按 HTTP status 分类"(对比 `error_classification.py`,状态码语义归 [[06-orch-error-classification]])。因此 A' = 不删编排外壳、不裸返回 ChatX,只把"每条 route 的实际调用"从自研消息转换换成原生 ChatX。**bug 根源在调用层(消息转换),不在编排层**:`_langchain_messages_to_dict`(把带 `tool_calls` 的 `AIMessage(content="")` 转成 `{"content":""}`)在 `call/chat_model.py:661-692`,再经 anthropic dispatch 发出空 content → qiniu-anthropic `400 content must not be empty`(改在调用层,归 [[09-inv-invocation-runtime]])。**PM 原话见本段下方**:"不用留A, 这是错误判断, 正确的是A'"。
   - **D2 — 编排 / 调用分离**:同一个 route 既可被 graph-agent 的 ChatX 调用层消费,也可被 copilot 的独立运行时消费(copilot 走 `claude_agent_sdk`,**不归 gateway 调**);编排层应该输出"该用哪条 route"的决策(`ResolvedRoute`:protocol / base_url / credential_ref / provider_model_id / runtime settings + fallback 顺序 + 熔断/probe 决策),调用层才负责真正 invoke(吃一条 `ResolvedRoute` + messages → 出 `AIMessage`)。落到 `_generate` 内即 M3 九步归属:留编排(遍历 / 熔断跳过 / probe / usage 记账 / 异常处理 / 全失败),改调用(消息准备 / 实际调用 / 构建结果,归 09)。**PM 原话见本段下方**:"你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了...编排和调用是不是应该更模块化更内聚化, API写清楚"。
 - **原话**：
   > **D1 否决 A、保留 `GatewayChatModel`**："不用留A, 这是错误判断, 正确的是A'。" → 不裸返回 ChatX、不删编排外壳,只换每条 route 的实际调用。
   > **D2 编排 / 调用分离**："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么"
 - **测试点**：全失败 — 遍历尽所有 route → `AllProvidersFailedError`,payload 含累积 failure records。(异常分类的分类正确性单测见 F4 — 同 route 重试耗尽后的异常喂分类器 → fallback / fail-fast。)
-- **status**：`_generate` 编排段已在(`gateway_chat_model.py:96-271`);MVP1 = 保留编排外壳、调用段换 ChatX(归 09)。
+- **status**：`_generate` 编排段已在(`call/chat_model.py:96-271`);MVP1 = 保留编排外壳、调用段换 ChatX(归 09)。
 - **归属**：③b `packages/graph-agent-gateway`(`gateway_chat_model._generate` 编排段)；改的 1/5/7 三步(消息准备 / 实际调用 / 构建结果)跨 [[09-inv-invocation-runtime]];异常分类状态码语义跨 [[06-orch-error-classification]]。
 
 ### F2 circuit 熔断 TTL（mark_down + is_marked_down + 跳过）
 
 - **机制/数据流**：
-  - `_is_marked_down`（`_generate` 到健康状态管理器判断 route 是否仍在 down TTL 内的桥接函数）继续在每条 route 调用前跳过 down TTL 内的候选;现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:446-452`。
-  - `LLMClientManager.is_provider_marked_down`（对外判断 route down TTL 的方法）继续保留为编排层接口;它当前委托 `_is_provider_marked_down` 检查进程内 `_provider_down_cache`(执行期 TTL 缓存),代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:53-61` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:340-350`。
-  - `_mark_down`（`_generate` 到 `LLMClientManager.mark_provider_down` 的桥接函数）继续只在 fallback-eligible 失败后写 down 状态;现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:505-512`。
-  - `LLMClientManager.mark_provider_down`（对外写入 route 熔断状态的方法）继续保留为编排层接口;它当前委托 `_mark_provider_down`,按 `RuntimePolicy.provider_down_ttl_seconds`(熔断窗口秒数)写过期时间,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:123-132` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:352-368`。
+  - `_is_marked_down`（`_generate` 到健康状态管理器判断 route 是否仍在 down TTL 内的桥接函数）继续在每条 route 调用前跳过 down TTL 内的候选;现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:446-452`。
+  - `LLMClientManager.is_provider_marked_down`（对外判断 route down TTL 的方法）继续保留为编排层接口;它当前委托 `_is_provider_marked_down` 检查进程内 `_provider_down_cache`(执行期 TTL 缓存),代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-61` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:340-350`。
+  - `_mark_down`（`_generate` 到 `LLMClientManager.mark_provider_down` 的桥接函数）继续只在 fallback-eligible 失败后写 down 状态;现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:505-512`。
+  - `LLMClientManager.mark_provider_down`（对外写入 route 熔断状态的方法）继续保留为编排层接口;它当前委托 `_mark_provider_down`,按 `RuntimePolicy.provider_down_ttl_seconds`(熔断窗口秒数)写过期时间,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:123-132` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:352-368`。
 - **决策 + 动机**：熔断态 route 在 invoke 前被 `continue` 跳过,不发起调用;mark_down 只在 fallback-eligible 失败后写,按 `RuntimePolicy.provider_down_ttl_seconds` 控制窗口。熔断持久化(跨进程)归 F9(本轮反转 ③b);此处是执行期 TTL 缓存层。
 - **测试点**：**熔断跳过** — `is_provider_marked_down`==true 的 route → 在 invoke 前被 `continue` 跳过,**不发起调用**(回归点:熔断态 route 不应进 ChatX invoke)。
 - **status**：`_is_marked_down` / `_mark_down` / 对应 client_manager 接口已在;保留为编排层接口。
@@ -91,8 +91,8 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 ### F3 probe（1-token 真请求 + base_url 归一化消费）
 
 - **机制/数据流**：
-  - `_probe`（`_generate` 到 `LLMClientManager.probe_provider` 的桥接函数）继续在真实 invoke 前按 policy 做 1-token 探活;现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:455-472`。
-  - `LLMClientManager.probe_provider`（对外执行 route 探活的方法）继续保留为编排层接口;它当前委托 `_probe_provider`,后者对 OpenAI-compatible 发 `chat.completions.create(..., max_tokens=1, temperature=0)`、对 Anthropic-compatible 发 `messages.create(..., max_tokens=1)`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:53-66` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:316-383`。
+  - `_probe`（`_generate` 到 `LLMClientManager.probe_provider` 的桥接函数）继续在真实 invoke 前按 policy 做 1-token 探活;现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:455-472`。
+  - `LLMClientManager.probe_provider`（对外执行 route 探活的方法）继续保留为编排层接口;它当前委托 `_probe_provider`,后者对 OpenAI-compatible 发 `chat.completions.create(..., max_tokens=1, temperature=0)`、对 Anthropic-compatible 发 `messages.create(..., max_tokens=1)`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-66` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:316-383`。
   - probe 是**编排层自己**发的 1-token 真请求,用 client manager 的轻量 SDK client,不走 ChatX。
 - **决策 + 动机**：
   - **F1 — base_url 归一化(与 [[03-orch-credentials-endpoints]] 共享决策,重复留底防 drift)**:**决策 = 主路径在 credential 保存时归一化(每 endpoint 存确定的 canonical 格式,从源头保证对),副路径在调用时做幂等归一化双保险(已 canonical 则 no-op)**。每 protocol 规则确定统一:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark openai-compat `.../api/v3`。本模块只在 **probe 用对 base_url** 上消费它(`_probe` 发 1-token 请求要打到正确端点);归一化的存写主体归 [[03-orch-credentials-endpoints]]、调用时双保险归 [[09-inv-invocation-runtime]] 的 `RouteChatModelFactory`。**重复 OK**:F1 是 03 / 07 / 09 共享决策,各模块都写、用双向模块链接防 drift。**PM 原话见本段下方**:"base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。
@@ -106,43 +106,43 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 ### F4 retry（保留 ChatX 瞬时重试，撤回 `max_retries=0`）
 
-- **机制/数据流**：ChatX 瞬时重试保留在同 route invoke 内;`GatewayChatModel._generate` 只在 ChatX 重试耗尽后接收最终异常并决定跨 route fallback。**注**(F2 撤回 `max_retries=0`):ChatX 只对 429/5xx/连接重试、对 429 尊重 Retry-After、不对 400/401 重试,天然是"同 route 防抖动重试";现状 SDK `max_retries=0`(`client_manager.py:171,:206`)反而会把瞬时 429 直接升级成跨 route 跳转。
+- **机制/数据流**：ChatX 瞬时重试保留在同 route invoke 内;`GatewayChatModel._generate` 只在 ChatX 重试耗尽后接收最终异常并决定跨 route fallback。**注**(F2 撤回 `max_retries=0`):ChatX 只对 429/5xx/连接重试、对 429 尊重 Retry-After、不对 400/401 重试,天然是"同 route 防抖动重试";现状 SDK `max_retries=0`(`call/clients.py:171,:206`)反而会把瞬时 429 直接升级成跨 route 跳转。
 - **决策 + 动机**：
-  - **F2 — 保留 ChatX 瞬时重试(撤回 `max_retries=0`)**:**决策 = 保留 ChatX 的瞬时重试(有界,如默认 2),不设 0**。理由:ChatX 只对 429/5xx/连接重试、对 429 尊重 `Retry-After`、不对 400/401 重试 → 天然就是"同 route 防抖动重试",与网关"跨 route fallback"是**两层、不冲突**;当前代码反而**没有同-route 重试**(SDK 显式 `max_retries=0`,`client_manager.py:171,:206`),一次瞬时 429 会被 `_generate` 当 `fallback_allowed`(`gateway_chat_model.py:237-249`)直接跳 route,把所有 route 连环跳废。唯一要钉死的不变量:ChatX 重试**耗尽后**抛出的异常仍能被 `classify_exception` 正确分类(确定性单测)。**PM 原话见本段下方**:"和Claude sdk copilot一样的问题, 防抖动重试可以留"。
+  - **F2 — 保留 ChatX 瞬时重试(撤回 `max_retries=0`)**:**决策 = 保留 ChatX 的瞬时重试(有界,如默认 2),不设 0**。理由:ChatX 只对 429/5xx/连接重试、对 429 尊重 `Retry-After`、不对 400/401 重试 → 天然就是"同 route 防抖动重试",与网关"跨 route fallback"是**两层、不冲突**;当前代码反而**没有同-route 重试**(SDK 显式 `max_retries=0`,`call/clients.py:171,:206`),一次瞬时 429 会被 `_generate` 当 `fallback_allowed`(`call/chat_model.py:237-249`)直接跳 route,把所有 route 连环跳废。唯一要钉死的不变量:ChatX 重试**耗尽后**抛出的异常仍能被 `classify_exception` 正确分类(确定性单测)。**PM 原话见本段下方**:"和Claude sdk copilot一样的问题, 防抖动重试可以留"。
 - **原话**：
   > **F2 保留瞬时重试**："和Claude sdk copilot一样的问题, 防抖动重试可以留"
 - **测试点**：**ChatX 瞬时重试(F2)** — 同 route 瞬时 429/5xx → ChatX 内重试(有界,非 0),**重试耗尽后**的异常才进 `classify_exception` 决定跨 route fallback;关键确定性单测:fake 401 / 400 / 网络错喂分类器 → 分别 fallback / fail-fast / fallback(状态码语义见 06)。
-- **status**：现 OpenAI/Anthropic client `max_retries=0`(`client_manager.py:171`,`:205`)= target；改为保留 ChatX 默认有界瞬时重试,跨 route fallback 仍由 `_generate` 管。
+- **status**：现 OpenAI/Anthropic client `max_retries=0`(`call/clients.py:171`,`:205`)= target；改为保留 ChatX 默认有界瞬时重试,跨 route fallback 仍由 `_generate` 管。
 - **归属**：③b `packages/graph-agent-gateway`(调用细节归 [[09-inv-invocation-runtime]])。
 
 ### F5 截断升级重试（`_call_with_token_escalation` 搬到编排层）
 
 - **机制/数据流**：
-  - `_invoke_with_token_escalation`（遇到截断 finish reason 时扩大 token budget 重试的 ChatX 主路径 helper）已经包住 factory build + ChatX invoke;用途是遇到截断 finish reason 时扩大 token budget 重试,现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:545-587`。generic ordinary path 另有 `ordinary_chat._call_with_token_escalation`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:653-673`。
+  - `_invoke_with_token_escalation`（遇到截断 finish reason 时扩大 token budget 重试的 ChatX 主路径 helper）已经包住 factory build + ChatX invoke;用途是遇到截断 finish reason 时扩大 token budget 重试,现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:545-587`。generic ordinary path 另有 `ordinary_chat._call_with_token_escalation`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:653-673`。
   - `RuntimePolicy.token_escalation_rounds`（控制截断升级轮数的字段）继续控制截断升级轮数;该字段定义在 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:93-98`,MVP1 只是把消费位置从 client manager dispatch 外移到 `_generate` 的 route invoke 包装层。
 - **决策 + 动机**：
-  - **F3 — 截断升级重试保留 + 搬到编排层**:**决策 = 保留 token escalation,ChatX 主路径由 `GatewayChatModel._invoke_with_token_escalation` 包住 ChatX invoke**。它不是某个 SDK 的消息转换能力,而是 Gateway 对"输出被截断"的运行时策略(error-handling 铁律第 7 条要求"截断必须自动重试");ChatX 自身不做这件事,所以它**不能随 `_call_*` 消息转换一起被删**。现状函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:545-587`,消费的轮数字段 `RuntimePolicy.token_escalation_rounds` 在 `registry/schema.py:93-98`(字段权威源归 [[04-orch-registry-schema]])。
+  - **F3 — 截断升级重试保留 + 搬到编排层**:**决策 = 保留 token escalation,ChatX 主路径由 `GatewayChatModel._invoke_with_token_escalation` 包住 ChatX invoke**。它不是某个 SDK 的消息转换能力,而是 Gateway 对"输出被截断"的运行时策略(error-handling 铁律第 7 条要求"截断必须自动重试");ChatX 自身不做这件事,所以它**不能随 `_call_*` 消息转换一起被删**。现状函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:545-587`,消费的轮数字段 `RuntimePolicy.token_escalation_rounds` 在 `registry/schema.py:93-98`(字段权威源归 [[04-orch-registry-schema]])。
 - **测试点**：**截断升级重试(F3)** — 遇截断 finish reason → 按 `token_escalation_rounds` 扩大 token budget 重试,且发生在**编排层**(包住 ChatX invoke),不随旧 `_call_*` 删除。
-- **status**：ChatX 主路径的 `_invoke_with_token_escalation` 已落地,包住每条 ChatX invoke；generic ordinary path 的 `_call_with_token_escalation` 保留在 `ordinary_chat.py`,不再挂在 `LLMClientManager`。
+- **status**：ChatX 主路径的 `_invoke_with_token_escalation` 已落地,包住每条 ChatX invoke；generic ordinary path 的 `_call_with_token_escalation` 保留在 `call/dispatch.py`,不再挂在 `LLMClientManager`。
 - **归属**：③b `packages/graph-agent-gateway`;轮数字段权威源归 [[04-orch-registry-schema]]。
 
 ### F6 usage 归属（`record_usage` + metadata 注入）
 
-- **机制/数据流**：`LLMClientManager.record_usage`（按 endpoint/provider 字符串累计 token 的方法）继续保留为编排/观测接口。现状累计函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:310-323`;其中 `AIMessage` 的 metadata 注入与 `_build_chat_result` 改动属调用层,落点归 [[09-inv-invocation-runtime]] F4/F5,本模块只负责把读到的 token 写进 `record_usage`。成功返回的 `AIMessage.usage_metadata`(ChatX 返回的 token 用量)供 usage 归属,现状 usage 补记点在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:227-235`。
+- **机制/数据流**：`LLMClientManager.record_usage`（按 endpoint/provider 字符串累计 token 的方法）继续保留为编排/观测接口。现状累计函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:310-323`;其中 `AIMessage` 的 metadata 注入与 `_build_chat_result` 改动属调用层,落点归 [[09-inv-invocation-runtime]] F4/F5,本模块只负责把读到的 token 写进 `record_usage`。成功返回的 `AIMessage.usage_metadata`(ChatX 返回的 token 用量)供 usage 归属,现状 usage 补记点在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:227-235`。
 - **决策 + 动机**：
   - **F5(usage / metadata)决策**:MVP1 的 usage 来源从旧 dict response 改为从 ChatX `AIMessage.usage_metadata` 取 token 喂 `record_usage`;并把 route_id / endpoint_id / canonical_id / protocol 注入 ChatX `AIMessage.response_metadata`(改 `_build_chat_result`);同时借 deerflow `stream_usage` 默认开,保证第三方 openai-compat 端点 usage 不为空。
 - **测试点**：**usage 归属(F5)** — 成功响应从 ChatX `AIMessage.usage_metadata` 取 token 喂 `record_usage`;第三方 openai-compat 端点(借 `stream_usage` 默认开)usage 不为空。
-- **status**：现先看 client manager 是否已记账、未记账再从 response dict 补记(`gateway_chat_model.py:191-235`)= target；改从 ChatX `AIMessage.usage_metadata` 取 usage,然后仍写入 `LLMClientManager.record_usage`。
+- **status**：现先看 client manager 是否已记账、未记账再从 response dict 补记(`call/chat_model.py:191-235`)= target；改从 ChatX `AIMessage.usage_metadata` 取 usage,然后仍写入 `LLMClientManager.record_usage`。
 - **归属**：③b `packages/graph-agent-gateway`(`record_usage` 累计)；`AIMessage` metadata 注入与 `_build_chat_result` 改动跨 [[09-inv-invocation-runtime]] F4/F5。
 
 ### F7 fallback event（`emit_llm_fallback_event` + `LLMFallbackEvent`）
 
 - **机制/数据流**：
-  - `emit_llm_fallback_event`（构造 fallback 事件并逐个 callback 发送的函数）继续由 `_generate` 在 fallback 分支调用;它会构造 `LLMFallbackEvent` 并逐个 callback 发送,且 callback 异常不掩盖运行时错误,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:31-55`(事件 DTO/异常归 [[13-x-tracing-events-exceptions]])。
-  - `LLMFallbackEvent`（fallback 事件 DTO,承载 from/to provider 诊断）继续承载 `phase_name`、from/to provider、reason、code 和 context;这个事件 DTO 定义在 `packages/graph-agent-gateway/src/graph_agent_gateway/events.py:9-33`,`_generate` 当前填充 route diagnostics 的位置在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:373-392`。
+  - `emit_llm_fallback_event`（构造 fallback 事件并逐个 callback 发送的函数）继续由 `_generate` 在 fallback 分支调用;它会构造 `LLMFallbackEvent` 并逐个 callback 发送,且 callback 异常不掩盖运行时错误,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py:31-55`(事件 DTO/异常归 [[13-x-tracing-events-exceptions]])。
+  - `LLMFallbackEvent`（fallback 事件 DTO,承载 from/to provider 诊断）继续承载 `phase_name`、from/to provider、reason、code 和 context;这个事件 DTO 定义在 `packages/graph-agent-gateway/src/graph_agent_gateway/events.py:9-33`,`_generate` 当前填充 route diagnostics 的位置在 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:373-392`。
 - **决策 + 动机**：fallback 分支发 event,event context 继续含 route diagnostics 和 runtime settings;callback 异常被吞,不掩盖运行时错误。事件 DTO / 异常类归 [[13-x-tracing-events-exceptions]],本模块只负责在 fallback 分支填充并发出。
 - **测试点**：**fallback event payload** — event context 仍带 from/to route 诊断 + fallback decision + provider status code + runtime settings;callback 抛异常**不掩盖**运行时错误。
-- **status**：`_generate` 已在 probe 和 invoke fallback 分支发 event(`gateway_chat_model.py:136-151`,`:250-265`)；保留,event context 继续含 route diagnostics 和 runtime settings。
+- **status**：`_generate` 已在 probe 和 invoke fallback 分支发 event(`call/chat_model.py:136-151`,`:250-265`)；保留,event context 继续含 route diagnostics 和 runtime settings。
 - **归属**：③b `packages/graph-agent-gateway`(归 [[13-x-tracing-events-exceptions]])。
 
 ### F8 批量探测策略（多条 route 编排 probe）
@@ -173,11 +173,11 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 ## gaps / 待设计
 
 - **代码下沉**(后续工程,非本轮):`llm_health_store` 熔断持久化内核 → gateway 包(SQLite 路径留 ③a 注入);批量探测编排 → gateway 包(进度 UI 留 ③a)。
-- **已落地**:ChatX 重试耗尽后抛出的核心异常形状已用确定性测试喂给 fallback loop / `classify_exception` 路径,覆盖 fake 401、wrapped network、400 non-capability 与真实 OpenAI SDK 401/400 error shape;分类器当前会沿异常链找 `status_code` 和 `response.status_code`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py:223-239`，测试见 `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py`。
-- **疑点**:ChatX 主路径 token escalation 当前包住 factory build + ChatX invoke,usage 在 `_generate` 收到最终 `AIMessage` 后读取;generic ordinary path 的 `_call_with_token_escalation` 每轮都会 `_record_usage_from_result`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:653-687`。两条路径的中间轮 usage 记账策略是否需要完全一致,留实现期定。
-- **待办 / 反转后定调**:Studio 的 `SqliteLlmHealthStore` 与执行期 `LLMClientManager._provider_down_cache` 的关系——**判据已定二者都属 ③b**(一个是持久化、一个是执行期 TTL 缓存),下沉后应在 gateway 包内统一为同一运行时健康源;当前无源码连接,现状分别在 `apps/studio/backend/app/services/llm_health_store.py:26-124` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:49-52`。**注**:此项原 baseline 记作"疑点:二者是否合并",反转后已不是归属疑点(都 ③b),只剩"下沉后如何合并"的工程问题。
-- **疑点(去重,实现期定)**:`_probe_provider` 在可 fallback 异常时已经 `_mark_provider_down` 并返回 false,`_generate` 的 `probe_ok=False` 分支又 `_mark_down` 一次;当前只是覆盖同一个 TTL key,是否需要去重由实现任务决定,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:352-355`、`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:378-381` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:168-173`。
-- **疑点**:`LLMClientManager.is_provider_marked_down` 接收 `runtime_policy` 但当前立即 `del runtime_policy`,实际 TTL 判断只看已写入的过期时间;如果 MVP1 要让查询逻辑也感知 policy,需要实现任务另行处理,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:53-61`。
+- **已落地**:ChatX 重试耗尽后抛出的核心异常形状已用确定性测试喂给 fallback loop / `classify_exception` 路径,覆盖 fake 401、wrapped network、400 non-capability 与真实 OpenAI SDK 401/400 error shape;分类器当前会沿异常链找 `status_code` 和 `response.status_code`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:223-239`，测试见 `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py`。
+- **疑点**:ChatX 主路径 token escalation 当前包住 factory build + ChatX invoke,usage 在 `_generate` 收到最终 `AIMessage` 后读取;generic ordinary path 的 `_call_with_token_escalation` 每轮都会 `_record_usage_from_result`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:653-687`。两条路径的中间轮 usage 记账策略是否需要完全一致,留实现期定。
+- **待办 / 反转后定调**:Studio 的 `SqliteLlmHealthStore` 与执行期 `LLMClientManager._provider_down_cache` 的关系——**判据已定二者都属 ③b**(一个是持久化、一个是执行期 TTL 缓存),下沉后应在 gateway 包内统一为同一运行时健康源;当前无源码连接,现状分别在 `apps/studio/backend/app/services/llm_health_store.py:26-124` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:49-52`。**注**:此项原 baseline 记作"疑点:二者是否合并",反转后已不是归属疑点(都 ③b),只剩"下沉后如何合并"的工程问题。
+- **疑点(去重,实现期定)**:`_probe_provider` 在可 fallback 异常时已经 `_mark_provider_down` 并返回 false,`_generate` 的 `probe_ok=False` 分支又 `_mark_down` 一次;当前只是覆盖同一个 TTL key,是否需要去重由实现任务决定,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:352-355`、`packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:378-381` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:168-173`。
+- **疑点**:`LLMClientManager.is_provider_marked_down` 接收 `runtime_policy` 但当前立即 `del runtime_policy`,实际 TTL 判断只看已写入的过期时间;如果 MVP1 要让查询逻辑也感知 policy,需要实现任务另行处理,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-61`。
 
 ## 交叉引用（双向链接，不复制）
 
@@ -206,14 +206,14 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 | 能力 | baseline 已实现 | MVP1 差异 | 归属 |
 |---|---|---|---|
-| fallback 链 | `GatewayChatModel._generate` 已按 `resolved_role.routes` 遍历,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:111-112`。 | 保留;只是把循环里的 `_dispatch` 换成 09 的 ChatX invoke。 | ③b |
-| 熔断跳过 | `_is_marked_down` 已在每条 route 前执行,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:113-114`。 | 保留;**接入 `SqliteLlmHealthStore` 不再是"是否打通"疑点——判据已定 store 属 ③b,下沉后统一健康源**,store 现状见 `apps/studio/backend/app/services/llm_health_store.py:26-124`。 | ③b(含 store) |
-| probe | `_probe` 已在 invoke 前执行,并对 probe 失败发 fallback event,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:115-189`。 | 保留;probe 仍用 client manager 的轻量 SDK/client path,不跟真实 ChatX invoke 绑定。 | ③b |
-| 异常分类 | 调用前 probe 异常和真实调用异常都走 `classify_exception`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:124` 和 `:238`。 | 保留;ChatX 抛出的 provider/HTTP 异常要继续被分类器识别(状态码语义归 06)。 | ③b |
-| fallback event | `_generate` 已在 probe 和 invoke fallback 分支发 event,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:136-151` 和 `:250-265`。 | 保留;event context 继续含 route diagnostics 和 runtime settings。 | ③b(归 13) |
-| 同 route retry | 当前 OpenAI/Anthropic client `max_retries=0`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:171` 和 `:205`。 | 改为保留 ChatX 默认有界瞬时重试;跨 route fallback 仍由 `_generate` 管。 | ③b(调用细节归 09) |
-| 截断升级 | ChatX 主路径当前由 `GatewayChatModel._invoke_with_token_escalation` 包住 factory build + invoke,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:545-587`;generic ordinary path 在 `ordinary_chat._call_with_token_escalation`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:653-673`。 | 保留该分层,避免随旧 `client_manager._call_*` 删除。 | ③b |
-| usage 归属 | 当前先看 client manager 是否已记账,未记账再从 response dict 补记,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:191-235`。 | 改从 ChatX `AIMessage.usage_metadata` 取 usage,然后仍写入 `LLMClientManager.record_usage`。 | ③b |
+| fallback 链 | `GatewayChatModel._generate` 已按 `resolved_role.routes` 遍历,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:111-112`。 | 保留;只是把循环里的 `_dispatch` 换成 09 的 ChatX invoke。 | ③b |
+| 熔断跳过 | `_is_marked_down` 已在每条 route 前执行,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:113-114`。 | 保留;**接入 `SqliteLlmHealthStore` 不再是"是否打通"疑点——判据已定 store 属 ③b,下沉后统一健康源**,store 现状见 `apps/studio/backend/app/services/llm_health_store.py:26-124`。 | ③b(含 store) |
+| probe | `_probe` 已在 invoke 前执行,并对 probe 失败发 fallback event,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:115-189`。 | 保留;probe 仍用 client manager 的轻量 SDK/client path,不跟真实 ChatX invoke 绑定。 | ③b |
+| 异常分类 | 调用前 probe 异常和真实调用异常都走 `classify_exception`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:124` 和 `:238`。 | 保留;ChatX 抛出的 provider/HTTP 异常要继续被分类器识别(状态码语义归 06)。 | ③b |
+| fallback event | `_generate` 已在 probe 和 invoke fallback 分支发 event,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:136-151` 和 `:250-265`。 | 保留;event context 继续含 route diagnostics 和 runtime settings。 | ③b(归 13) |
+| 同 route retry | 当前 OpenAI/Anthropic client `max_retries=0`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:171` 和 `:205`。 | 改为保留 ChatX 默认有界瞬时重试;跨 route fallback 仍由 `_generate` 管。 | ③b(调用细节归 09) |
+| 截断升级 | ChatX 主路径当前由 `GatewayChatModel._invoke_with_token_escalation` 包住 factory build + invoke,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:545-587`;generic ordinary path 在 `ordinary_chat._call_with_token_escalation`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:653-673`。 | 保留该分层,避免随旧 `client_manager._call_*` 删除。 | ③b |
+| usage 归属 | 当前先看 client manager 是否已记账,未记账再从 response dict 补记,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:191-235`。 | 改从 ChatX `AIMessage.usage_metadata` 取 usage,然后仍写入 `LLMClientManager.record_usage`。 | ③b |
 | 熔断持久化 | `SqliteLlmHealthStore` 已能持久化 circuit,见 `apps/studio/backend/app/services/llm_health_store.py:26-124`。 | **本轮反转**:从"③a seam / 是否打通是疑点"改判 **③b 公共,待下沉**;SQLite 路径留 ③a 注入。 | ③b(现 ③a 待下沉) |
 | copilot 假测试 | `ModelProbeResult`/`_probe_model`/`_probe_official_call_method` 在 `copilot_test.py`,见 `apps/studio/backend/app/services/copilot_test.py:47-204`。 | **补归属标注**:= ③a 应用(copilot 专属,绑 SDK 调用方式),与 ③b route probe 不同源;接线工程改走真 `ClaudeSDKClient`(见 12)。 | ③a |
 
@@ -225,16 +225,16 @@ client 层 A' 重设计的四条决策(D1 保留 `GatewayChatModel`、D2 编排/
 
 ### 代码索引 clues
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:111-189`:MVP1 保留的 route 遍历、熔断跳过、probe 和 probe fallback 分支(③b)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:237-265`:MVP1 保留的 invoke 异常分类、mark_down 和 fallback event 分支(③b)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:53-76`:MVP1 保留的 health/probe 对外接口(③b)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:68-77`:MVP1 保留的 mark_down 对外接口(③b)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:545-587`:ChatX 主路径的截断升级重试 helper(③b)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:653-673`:generic ordinary path 的截断升级重试 helper(③b,调用层兜底路径)。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:111-189`:MVP1 保留的 route 遍历、熔断跳过、probe 和 probe fallback 分支(③b)。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:237-265`:MVP1 保留的 invoke 异常分类、mark_down 和 fallback event 分支(③b)。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-76`:MVP1 保留的 health/probe 对外接口(③b)。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:68-77`:MVP1 保留的 mark_down 对外接口(③b)。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:545-587`:ChatX 主路径的截断升级重试 helper(③b)。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:653-673`:generic ordinary path 的截断升级重试 helper(③b,调用层兜底路径)。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:88-98`:MVP1 继续消费的 `RuntimePolicy`(字段权威源归 04)。
 - `apps/studio/backend/app/services/llm_health_store.py:26-124`:熔断持久化 SQLite store——**本轮反转判 ③b 待下沉**(存储介质 SQLite 路径留 ③a 注入)。
 - `apps/studio/backend/app/services/copilot_test.py:47-204`:Studio copilot 假测试探针(`ModelProbeResult`/`_probe_model`/`_probe_official_call_method`)——**= ③a 应用**(copilot 专属,绑 SDK 调用方式),不是 `_generate` 的执行期 fallback loop。
 
 ### 覆盖率
 
-本 alignment 覆盖 07 brief 的全部要求:`GatewayChatModel._generate` 的编排步骤、`GatewayChatModel._invoke_with_token_escalation`、`LLMClientManager` 的 `probe_provider` / `is_provider_marked_down` / `mark_provider_down`、`registry/probe_contracts.py`、`services/copilot_test.py`、`services/llm_health_store.py` 均已落到真实 `file:line`,并补齐三处判据归属(health_store 反转 ③b、copilot_test 钉 ③a、批量探测 ③b)。调用层 ordinary `_call_*`、消息转换和 `_build_chat_result` 不在本篇展开,交给 [[09-inv-invocation-runtime]]。
+本 alignment 覆盖 07 brief 的全部要求:`GatewayChatModel._generate` 的编排步骤、`GatewayChatModel._invoke_with_token_escalation`、`LLMClientManager` 的 `probe_provider` / `is_provider_marked_down` / `mark_provider_down`、`registry/schema.py` 的 `ProbeResult`、`services/copilot_test.py`、`services/llm_health_store.py` 均已落到真实 `file:line`,并补齐三处判据归属(health_store 反转 ③b、copilot_test 钉 ③a、批量探测 ③b)。调用层 ordinary `_call_*`、消息转换和 `_build_chat_result` 不在本篇展开,交给 [[09-inv-invocation-runtime]]。

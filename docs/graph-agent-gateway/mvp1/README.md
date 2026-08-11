@@ -47,7 +47,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 
 ## 模块清单(覆盖代码来自 Explore 清点,100%)
 
-> ⚠️ 标「共享」的文件:`gateway_chat_model.py` 的 fallback / probe / 熔断 / usage 编排步骤写进 07,单 route ChatX invoke / 结果桥接写进 09;`client_manager.py` 现只覆盖 probe / 熔断 / usage 健康职责,旧 `_call_*` provider 调用已迁到 `ordinary_chat.py` / `route_chat_model_factory.py`。
+> ⚠️ 标「共享」的文件:`call/chat_model.py` 的 fallback / probe / 熔断 / usage 编排步骤写进 07,单 route ChatX invoke / 结果桥接写进 09;`call/clients.py` 现只覆盖 probe / 熔断 / usage 健康职责,旧 `_call_*` provider 调用已迁到 `call/dispatch.py` / `call/factory.py`。
 
 ### 编排层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
@@ -57,15 +57,15 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 | `04-orch-registry-schema` | `registry/schema.py`、`registry/__init__.py`、`registry/canonical.py:canonicalize_model`、`models/llm_config.py`、`models.py`(gateway,占位) | 每个数据结构字段含义;canonical 分组;snapshot v4/v2 加载校验;studio↔gateway schema 衔接 |
 | `05-orch-capabilities-and-models` | `registry/capabilities.py`、`registry/profile_selector.py:select_verified_profile`、`registry/lint.py:lint_role_routes`、`services/llm_model_identity.py`、`services/llm_notable_models.py`、`services/llm_route_capabilities.py`、`services/llm_model_groups.py` | capability 规范化/探测;**lint 只 warn/block、不驱动选型**(决策);profile 选择;模型身份/分组/notable 投影 |
 | `06-orch-error-classification` | `registry/error_classification.py:classify_exception/classify_error_context` | 真实语义表(401/402/403/404 与 400-capability → **fallback**,非 fail-fast);decision 映射。mvp1 **不变**;纠正多处文档错误简写 |
-| `07-orch-fallback-circuit-probe` | `gateway_chat_model.py:_generate`(编排步骤,共享)、`client_manager.py:probe_provider/is_provider_marked_down/mark_provider_down`(共享)、`registry/probe_contracts.py`、`services/copilot_test.py`、`services/llm_health_store.py` | fallback 循环逐步;熔断 TTL;probe 1-token 真请求;**retry 保留 ChatX 瞬时重试(不设 0)**;截断升级重试搬到本层 |
+| `07-orch-fallback-circuit-probe` | `call/chat_model.py:_generate`(编排步骤,共享)、`call/clients.py:probe_provider/is_provider_marked_down/mark_provider_down`(共享)、`registry/probe_contracts.py`、`services/copilot_test.py`、`services/llm_health_store.py` | fallback 循环逐步;熔断 TTL;probe 1-token 真请求;**retry 保留 ChatX 瞬时重试(不设 0)**;截断升级重试搬到本层 |
 | `08-orch-test-status-ssot` | `services/llm_state_projection.py:project_provider_model_state`、`services/llm_import_drafts.py`(legacy 名) | 探测→持久化→投影→复用(**用户核心目标**);UI state(6 态:ready/historical_ready/untested/failed/cooling_down/off，已取消 needs_setup);Probe Knowledge Catalog（探测知识库）+ evidence library。baseline 前端易失态;mvp1 后端 SSOT 回写 |
 
 ### 调用层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
-| `09-inv-invocation-runtime` | `gateway_chat_model.py:_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message`、`ordinary_chat.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 已记录旧 `client_manager._call_*` 退役;MVP1 主路径为原生 ChatX,generic ordinary path 在 `ordinary_chat.py` |
-| `10-inv-route-chat-model-factory` | `route_chat_model_factory.py:RouteChatModelFactory`、`models.py:GenericRouteChatModel`、`provider_profiles.py` | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。WS-1 后模块源码已存在,剩余为 generic 完整性 deferred |
-| `11-inv-provider-profiles` | `provider_profiles.py:ProviderProfile/apply_provider_profile_layers`、`route_chat_model_factory.py:_apply_profiles` | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。WS-1 后最小 profile registry 已存在,后续按需收束 provider-specific thinking |
+| `09-inv-invocation-runtime` | `call/chat_model.py:_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message`、`call/dispatch.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 已记录旧 `client_manager._call_*` 退役;MVP1 主路径为原生 ChatX,generic ordinary path 在 `call/dispatch.py` |
+| `10-inv-route-chat-model-factory` | `call/factory.py:RouteChatModelFactory`、`models.py:GenericRouteChatModel`、`call/profiles.py` | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。WS-1 后模块源码已存在,剩余为 generic 完整性 deferred |
+| `11-inv-provider-profiles` | `call/profiles.py:ProviderProfile/apply_provider_profile_layers`、`call/factory.py:_apply_profiles` | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。WS-1 后最小 profile registry 已存在,后续按需收束 provider-specific thinking |
 
 > **copilot SDK 调用（原模块 12）已移交 studio**：按判据它是 ③a 应用（copilot 的实际调用方式，绑 `claude_agent_sdk`），gateway 库不感知 copilot——只把 `copilot_chat` 当普通 role 解析成 route（[`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md) 的 route 级 API）。SDK 调用 / session / env 注入 / 事件翻译 / 假测试见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `01_workflows/00_settings-ux-spec.md` §3.8/§3.4；两个 base_url 归一化助手归 [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)（③b 归一化原语）。
 
@@ -78,7 +78,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 > **HTTP 适配壳（原模块 14）已移交 studio**：`routers/llm.py`、`routers/copilot.py` = ③a Studio HTTP 适配壳（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不是 ③b gateway 公共内核。它 delegate 的能力内核（base_url 归一化 / capability / probe 策略 / materialize / 6 态 / Probe Knowledge Catalog / endpoint 拆分）才是 ③b 公共。文档见 `docs/studio/mvp1/04_platform/llm-copilot-http-api/`。
 
 ### Predict(单独文档,非 baseline+alignment 模块)
-[`predict-migration-to-engine.md`](./predict-migration-to-engine.md):`predict_interception.py`、`services/predictor.py`、`services/diagnostic_export.py`、`models/runs.py`、`protocol.py:PredictContext`。决策:mock/模拟移交 engine,gateway 只留「role→route」。
+[`predict-migration-to-engine.md`](./predict-migration-to-engine.md):`call/predict.py`、`services/predictor.py`、`services/diagnostic_export.py`、`models/runs.py`、`protocol.py:PredictContext`。决策:mock/模拟移交 engine,gateway 只留「role→route」。
 
 ## 写作 bar(逐条强制)
 1. 出现任何类/函数 → 紧跟一句话说清它干什么,**禁止只丢名字**。

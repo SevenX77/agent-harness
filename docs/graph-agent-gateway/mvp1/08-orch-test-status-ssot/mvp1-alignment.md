@@ -3,7 +3,7 @@ module: 08-orch-test-status-ssot
 doc: mvp1-alignment
 status: drafted
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:ProviderModelStateProjection/project_route_state · packages/graph-agent-gateway/src/graph_agent_gateway/probe_catalog.py:ProbeCatalogStore/materialize_probe_catalog_candidates · apps/studio/backend/app/services/llm_probe_catalog.py:append_evidence_record/sync_remote_probe_catalog/DEFAULT_CATALOG_URL · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:EvidenceRecord/ProviderImportDraft/ProbeResult
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/projection.py:ProviderModelStateProjection/project_route_state · packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py:ProbeCatalogStore/materialize_probe_catalog_candidates · apps/studio/backend/app/services/llm_probe_catalog.py:append_evidence_record/sync_remote_probe_catalog/DEFAULT_CATALOG_URL · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:EvidenceRecord/ProviderImportDraft/ProbeResult
 units: [test-status-ssot-evidence]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md · ../../../development/COMMUNITY_PROBE_CATALOG_SERVICE_DESIGN.md
 ---
@@ -316,7 +316,7 @@ MVP1 目标:测试状态以**active credentials / runtime health store 的后端
 
 > 各功能段已带各自 归属;此处保留跨功能完整 ③a/③b/② 清单作模块级总览。
 
-- **③b** `packages/graph-agent-gateway`:6 态投影内核(`state_projection.py`)、Probe Knowledge Catalog canonical API(`probe_catalog.py`)、熔断持久化内核(现 `services/llm_health_store.py`,与 07 同,待下沉)、`ProbeKnowledgeCatalog`/`EvidenceRecord`/`ProbeResult` 数据结构(目标归 04,现码仍有 legacy `ProviderImportDraft` 容器)、list-models 解析 + 批量探测编排内核(现 `routers/llm.py` 探测段)。
+- **③b** `packages/graph-agent-gateway`:6 态投影内核(`registry/projection.py`)、Probe Knowledge Catalog canonical API(`registry/catalog.py`)、熔断持久化内核(现 `services/llm_health_store.py`,与 07 同,待下沉)、`ProbeKnowledgeCatalog`/`EvidenceRecord`/`ProbeResult` 数据结构(目标归 04,现码仍有 legacy `ProviderImportDraft` 容器)、list-models 解析 + 批量探测编排内核(现 `routers/llm.py` 探测段)。
 - **③a** `apps/studio/backend` + 前端:状态颜色/文案渲染、远端源选择/配置(当前默认 GitHub URL 可被 `url` 参数 / `STUDIO_CATALOG_URL` 覆盖)、上传审批/脱敏、存储介质(catalog/credentials/健康库存哪个文件 / SQLite 路径)、HTTP `/api/llm/*` 探测端点薄壳(归 14)、批量探测进度 UI。Import/apply 工作流不是 MVP1 功能。
 - **② Rust**:N/A(凭证/角色/证据/健康数据永不 Rust)。
 
@@ -325,7 +325,7 @@ MVP1 目标:测试状态以**active credentials / runtime health store 的后端
 1. 已实现:后端已有 `project_provider_model_state`,并且 router 与 materializer 都在调用它,说明 UI 与编排已经共享同一投影口径(`apps/studio/backend/app/services/llm_state_projection.py:26-52`;`apps/studio/backend/app/routers/llm.py:1862-1907`;`apps/studio/backend/app/services/llm_role_materializer.py:142-170`)。**归属:投影内核 = ③b(待下沉)。**
 2. 已实现:route force probe 对 success、temporary failure、hard failure 三类结果有不同持久化路径,这是 SSOT 回写的基础(`apps/studio/backend/app/routers/llm.py:2017-2076`)。
 3. 已实现:runtime circuit 是 SQLite 持久化,不是前端内存态(`apps/studio/backend/app/services/llm_health_store.py:26-101`)。**归属:熔断持久化内核 = ③b(待下沉,与 07 同);SQLite 路径 = ③a 注入。**
-4. 已实现:旧 `needs_setup` 已取消并由 `failed` + reason 取代,`ProviderUiState` 当前为六态,`historical_ready🔵` 已由 credentials route.metadata.evidence_refs 驱动(`packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py`)。
+4. 已实现:旧 `needs_setup` 已取消并由 `failed` + reason 取代,`ProviderUiState` 当前为六态,`historical_ready🔵` 已由 credentials route.metadata.evidence_refs 驱动(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/projection.py`)。
 5. 已实现:compact model status 旧事实已被替代,当前 DTO status 是六态加 `testing`,并通过 `_provider_model_projection(...).ui_state` 复用同一投影(`apps/studio/backend/app/routers/llm.py:196-209`,`:4353-4401`)。
 6. 现码事实:legacy `probe_import_draft` worker / 公开 Import Draft HTTP 主线已移除；可复用逻辑已收敛进 Probe Knowledge Catalog/route probe 写证据链路。
 7. 已实现:前端 `ProviderUiState` / `ModelGroupStatusSummary` / ProviderCard route tag / LLM Roles provider badge 已同步六态(`apps/studio/frontend/src/api/llm.ts:12-13`,`:109-116`;`apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:348-378`;`apps/studio/frontend/src/components/studio/settings/llm-roles/provider-state-badge.tsx:15-59`)。
@@ -345,7 +345,7 @@ MVP1 目标:测试状态以**active credentials / runtime health store 的后端
 ## 附录 D — 代码索引 clues
 
 - `apps/studio/backend/app/services/llm_state_projection.py:15`:`ProviderUiState` Literal 已是六态;旧 `needs_setup` 已被 `failed`+reason 替代。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py`:6 态投影流程——**= ③b 公共内核**;canonical 入参为 `credential_evidence_refs`，不再提供 catalog evidence 直读投影入口。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/projection.py`:6 态投影流程——**= ③b 公共内核**;canonical 入参为 `credential_evidence_refs`，不再提供 catalog evidence 直读投影入口。
 - `apps/studio/backend/app/services/llm_state_projection.py:55-73`:`has_historical_probe_verified` / `_setup_reason`。
 - `apps/studio/backend/app/services/llm_state_projection.py:76-116`:circuit 匹配/scope priority。
 - `apps/studio/backend/app/routers/llm.py:488-600`:endpoint test 回写 active credentials 并追加模型列表观察 evidence(③a 壳 + ③b 写回内核)。
@@ -356,13 +356,13 @@ MVP1 目标:测试状态以**active credentials / runtime health store 的后端
 - `apps/studio/backend/app/routers/llm.py:196-209`,`:4353-4401`:compact model status 六态(+`testing`)收口。
 - `apps/studio/backend/app/services/llm_health_store.py:34-101`:runtime circuit 写入和读取——**熔断持久化内核 = ③b(待下沉);SQLite 路径 ③a 注入**。
 - `apps/studio/backend/app/services/llm_role_materializer.py:48-90`:projection 影响 fallback_chain 物化(跳过 `failed`/`off`、`cooling_down` warning)——旧 `needs_setup` 已并入 `failed`。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/probe_catalog.py`:Probe Knowledge Catalog canonical API；当前复用 legacy store 类型以兼容历史 catalog。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py`:Probe Knowledge Catalog canonical API；当前复用 legacy store 类型以兼容历史 catalog。
 - `apps/studio/backend/app/services/llm_probe_catalog.py`:Studio canonical service facade；`llm_import_drafts.py` 仅是历史存储实现。
 - `apps/studio/backend/app/services/llm_import_drafts.py`:legacy draft/evidence store + remote merge 实现；Import Draft 非 MVP1，apply 路径不作为公开产品功能。
 - `apps/studio/frontend/src/api/llm.ts:12-13`,`:109-116`:前端 ProviderUiState / status summary 六态。
 - `apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:348-378`:ProviderCard 以 `historical_ready` 状态渲染蓝色 Tag variant,不输出旧状态值。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:150-183`,`:258-264`:snapshot_version 透传与 stale live evidence 降级。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:150-183`,`:258-264`:snapshot_version 透传与 stale live evidence 降级。
 
 ## 附录 E — 覆盖率
 
-本 alignment 覆盖 08 brief 的全部要求:`state_projection.py:project_route_state`(6 态投影)+ `probe_catalog.py` / `llm_probe_catalog.py`(Probe Knowledge Catalog canonical 入口)两个核心对象已落到真实代码,并完成设计重新定位:6 态投影内核 = ③b、Probe Knowledge Catalog 内核 = ③b、Import Draft 非 MVP1 主线、`draft` 命名退役为 legacy。为说明"探测→持久化→投影→复用",额外引用 router、health store、role materializer 作为证据线索,均标注 ③a/③b 归属。
+本 alignment 覆盖 08 brief 的全部要求:`registry/projection.py:project_route_state`(6 态投影)+ `registry/catalog.py` / `llm_probe_catalog.py`(Probe Knowledge Catalog canonical 入口)两个核心对象已落到真实代码,并完成设计重新定位:6 态投影内核 = ③b、Probe Knowledge Catalog 内核 = ③b、Import Draft 非 MVP1 主线、`draft` 命名退役为 legacy。为说明"探测→持久化→投影→复用",额外引用 router、health store、role materializer 作为证据线索,均标注 ③a/③b 归属。

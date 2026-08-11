@@ -1,14 +1,14 @@
 ---
 ws_id: WS-4-fallback-event-code
 modules: [13]
-depends_on: [WS-1]   # 已完成;原仅最后一步依赖 WS-1 后删除 gateway_chat_model.py 三处 code= 实参
+depends_on: [WS-1]   # 已完成;原仅最后一步依赖 WS-1 后删除 call/chat_model.py 三处 code= 实参
 blocks: []
 owns_files:
   # 生产代码
   - packages/graph-agent-gateway/src/graph_agent_gateway/events.py              # 改:LLMFallbackEvent.code → init=False 固有常量
-  - packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py             # 改:build/emit_llm_fallback_event 删 code 参数
-  - packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py          # 本轮不改(回归断言对象,列入仅为边界完整 + 防误改全灭码)
-  - packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py  # 仅删 :143/:181/:257 三处 code= 实参(排 WS-1 提交后)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py             # 改:build/emit_llm_fallback_event 删 code 参数
+  - packages/graph-agent-gateway/src/graph_agent_gateway/errors.py          # 本轮不改(回归断言对象,列入仅为边界完整 + 防误改全灭码)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py  # 仅删 :143/:181/:257 三处 code= 实参(排 WS-1 提交后)
   # 连带必改测试(因 DTO/helper 签名变更而 break,不改则套件红;跨 3 包)
   - packages/graph-agent-gateway/tests/test_llm_fallback_event.py
   - packages/graph-agent-gateway/tests/test_gateway_package_boundary.py
@@ -39,7 +39,7 @@ fallback event(`LLMFallbackEvent`,网关记录「一次 route 切换」诊断的
 - **实现前必读源码(先读并向我确认读到的关键符号,再动手,IR2)**:
   - `events.py` 全文 —— `LLMFallbackEvent`(dataclass);`code: str | None = None` 在 `:17`;**已有 `init=False` 范式**参照物 `event_type` 在 `:19`;`model_dump`(序列化方法)`:24-34`。
   - `tracing.py` 全文 —— `build_llm_fallback_event`(事件构造 helper)`:13-30` 带 `code` 参数;`emit_llm_fallback_event`(逐 callback 发射 helper)`:33-59` 带 `code` 参数,内部 `:44-51` 把 code 透传给 build。
-  - `gateway_chat_model.py` 三处 emit 调用 —— `:137-149`(probe 异常分支,code 实参 `:143`)、`:175-187`(probe 返回 false 分支,code 实参 `:181`)、`:251-263`(dispatch 异常分支,code 实参 `:257`)。
+  - `call/chat_model.py` 三处 emit 调用 —— `:137-149`(probe 异常分支,code 实参 `:143`)、`:175-187`(probe 返回 false 分支,code 实参 `:181`)、`:251-263`(dispatch 异常分支,code 实参 `:257`)。
   - `exceptions.py` `:33-60` —— `AllProvidersFailedError`(候选链全灭异常),`code="[F-v3-gateway-all-providers-failed]"` 在 `:58`:**本 WS 不动,它是回归保护对象**。
 
 ## 3. 文件归属(并发锁,IR1)
@@ -47,15 +47,15 @@ fallback event(`LLMFallbackEvent`,网关记录「一次 route 切换」诊断的
 - **本 WS owns**:见 frontmatter。
 - **禁止触碰**:
   - ⚠️ **graph-agent 包里另有一个同名 `LLMFallbackEvent`**(`packages/graph-agent/src/graph_agent/callbacks/events.py:240`,是 Pydantic `_EventBase` 子类,与 gateway 的 dataclass **不同实现、不同类**)→ **绝不碰**。本 WS 只改 gateway 包的 `events.py`。
-  - `gateway_chat_model.py` 除三处 `code=` 行以外的一切 → 归 **WS-1**。
+  - `call/chat_model.py` 除三处 `code=` 行以外的一切 → 归 **WS-1**。
   - fallback event 的 `from_provider`/`to_provider` 字段名 → **保留不改**(P4b=A 已定:改名跨 gateway+graph-agent+studio 三个订阅方,违背「事件结构不变」)。
   - 不补 fail-fast diagnostic event → P5=A 已定不补。
-- **共享文件协调**:`gateway_chat_model.py` 与 WS-1 共享 → **WS-4 排 WS-1 提交之后串行**;动手删那三行前,`git status --short packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 必须为空(已脱离 WS-1 dirty)。
+- **共享文件协调**:`call/chat_model.py` 与 WS-1 共享 → **WS-4 排 WS-1 提交之后串行**;动手删那三行前,`git status --short packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py` 必须为空(已脱离 WS-1 dirty)。
 - **跨包测试纳入说明**:graph-agent 与 studio 的两个测试(见 frontmatter)因本 WS 的 DTO/helper 签名变更而 break,属直接连带,故纳入 owns。WS-4 排在最后(WS-1 之后),届时并发的 WS-3(studio projection)应已完成,与本 WS 改 `test_run_manager_gateway_events.py` 串行无撞;Codex 写测试时仍应核对该文件未被其它在跑 WS 占用。
 
 ## 4. 现状锚点(baseline + 本 WS 已核实事实)
 
-fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/257`)硬编码传同一个全灭码;`events.py`/`tracing.py` 只透传不带值。Claude 已全仓核实:
+fallback event 的 code 由**三处调用点**(`call/chat_model.py:143/181/257`)硬编码传同一个全灭码;`events.py`/`tracing.py` 只透传不带值。Claude 已全仓核实:
 
 1. 三处传的 code 字面量**完全相同**(全灭码)→ 印证「code 对 fallback 是常量非变量」。
 2. **无任何生产代码按 code 值做分支**(grep `F-v3-gateway-*` 在所有 `src/` 下,只命中要删的三处 + `exceptions.py:58`,无 `if event.code == ...` 消费)→ **改 code 值是纯标签变更,零行为副作用**。
@@ -97,7 +97,7 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 
 1. `events.py`:`LLMFallbackEvent.code` → `field(default="[F-v3-gateway-llm-fallback]", init=False)`(建议同时提一个模块级常量 `FALLBACK_EVENT_CODE` 承载字面量,更清晰)。注意 dataclass 字段顺序:`init=False` 字段不进 `__init__`,合法;改后 `__init__` 形参为 phase_name/from_provider/to_provider/reason/context。
 2. `tracing.py`:`build_llm_fallback_event` / `emit_llm_fallback_event` **删 `code` 参数**;`emit` 内调 `build` 时不再传 code。`build` 的 docstring「shared graph-agent callback schema」措辞按需澄清(非强制)。
-3. **等 WS-1 提交、`gateway_chat_model.py` 脱离 dirty 后**:删 `:143/:181/:257` 三处 `code=...` 实参(各一行)。
+3. **等 WS-1 提交、`call/chat_model.py` 脱离 dirty 后**:删 `:143/:181/:257` 三处 `code=...` 实参(各一行)。
 4. 同步修正 §6 列出的现存测试(本包 + 跨包)。
 
 > 说明:本 WS 已完成;原执行约束是步骤 1/2/4(events/tracing/测试)可先并行准备,步骤 3(删调用点实参)须在 WS-1 提交后执行。
@@ -108,10 +108,10 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 - [x] `uv run pytest packages/graph-agent-gateway/tests -q` 全绿。
 - [x] `uv run pytest packages/graph-agent/tests/runner/test_event_subscriber_cutover.py -q` 全绿。
 - [x] `uv run pytest apps/studio/backend/tests/services/test_run_manager_gateway_events.py -q` 全绿。
-- [x] `uv run mypy packages/graph-agent-gateway/src/graph_agent_gateway/events.py packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 0 error。
+- [x] `uv run mypy packages/graph-agent-gateway/src/graph_agent_gateway/events.py packages/graph-agent-gateway/src/graph_agent_gateway/call/tracing.py packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py` 0 error。
 - [x] `AllProvidersFailedError` 回归断言未改、仍绿(③)。
 - [x] 至少一条真实 e2e(经 `_generate` 触发 fallback)断言 `event.code == 专属码`(①c/②)。
-- [x] `git diff packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 仅含删 3 行 `code=` 实参,无其它改动。
+- [x] `git diff packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py` 仅含删 3 行 `code=` 实参,无其它改动。
 
 ## 9. 不做(范围锁定,IR7)
 
@@ -119,7 +119,7 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 - 不补 fail-fast diagnostic event(P5=A 已定不补)。
 - 不动 `AllProvidersFailedError` 的全灭码 / `exceptions.py` 任何逻辑。
 - 不碰 graph-agent 的同名 `LLMFallbackEvent`(`callbacks/events.py:240`)。
-- 不动 `gateway_chat_model.py` 除三处 `code=` 外任何行(那是 WS-1)。
+- 不动 `call/chat_model.py` 除三处 `code=` 外任何行(那是 WS-1)。
 - 范围外问题 → 记 `docs/deferred-items.md`,不顺手改。
 
 ## 10. baseline 回写指令(IR6,实现落地后由 Codex 照真实代码写)
@@ -134,7 +134,7 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 
 - **契约门(Claude 审测试,放 Gemini 前)** 重点查:① 三触发路径(`:143/:181/:257`)是否都被 `event.code` 断言覆盖(尤其漏记过的 `:181`);② 回归断言(`exc.code == 全灭码`)是否被误改成专属码(不该改);③ 是否有真实 e2e(非纯 helper mock);④ `init=False` 的 `TypeError` 契约是否有测。
 - **Codex 审查退出** = §8 全满足。
-- **Claude 终审**:① code 真理确实内聚到 `events.py`(`init=False`),无第二处可传;② `gateway_chat_model.py` 只删 3 行、无越界;③ 跨包测试(graph-agent/studio)已同步且绿;④ `AllProvidersFailedError` 全灭码未被波及;⑤ baseline 回写诚实(含 `:181`)。
+- **Claude 终审**:① code 真理确实内聚到 `events.py`(`init=False`),无第二处可传;② `call/chat_model.py` 只删 3 行、无越界;③ 跨包测试(graph-agent/studio)已同步且绿;④ `AllProvidersFailedError` 全灭码未被波及;⑤ baseline 回写诚实(含 `:181`)。
 
 ## 12. 给 Codex 注意(写测试 + 后续 tasks.md 照此办)
 
@@ -142,7 +142,7 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 2. **删 helper 的 code 参数前先 grep 确认调用方**:Claude 已全仓 grep,传 `code=` 的**不止生产 3 处**,还有跨 3 包的测试(见 §6「同步修正」清单):本包 2 个测试文件、graph-agent 1 个、studio 1 个,**全部要同步改**,否则套件红。**别按「只有 3 处」去删。**
 3. **测试必须覆盖**:① fallback event code == `[F-v3-gateway-llm-fallback]`;② probe-false 分支(`:181`)也发专属码,不漏;③ 回归:`AllProvidersFailedError.code` 仍 == `[F-v3-gateway-all-providers-failed]`,不被误改;④ `LLMFallbackEvent(code=...)` TypeError。
 4. **分清两条 code 线**:异常码(`AllProvidersFailedError`)保留全灭码、其断言不动;事件码(`LLMFallbackEvent`)改专属码、其断言要更新。
-5. **三处调用点删 `code=` 必须排在 WS-1 提交之后**;动手前 `git status --short packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 确认已脱离 WS-1 dirty。
+5. **三处调用点删 `code=` 必须排在 WS-1 提交之后**;动手前 `git status --short packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py` 确认已脱离 WS-1 dirty。
 6. **baseline 回写含 `:181` 漏记**(原 baseline/alignment 只记 `:142/:256`,实际三处)。
 7. **不碰 graph-agent 的同名 `LLMFallbackEvent`**(`callbacks/events.py:240`,另一个类)。
 8. **git 纪律**:只 stage WS-4 owns 文件,绝不 `git add .`;你和 Claude 都不 `git commit`(用户 `::git-stage` 外部管提交)。

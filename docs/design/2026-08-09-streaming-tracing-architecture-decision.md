@@ -100,11 +100,11 @@
 - **(订正新增)gateway chat model 层根本不具备流式出口 —— 这一层才是真正的墙。**
   Studio 的 `_GatewayBackedLLMProvider` 从 gateway resolver 拿到的**不是** LangChain 原生的
   `ChatOpenAI` / `ChatAnthropic`,而是 gateway 自己的
-  `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:84` 的
+  `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:84` 的
   `GatewayChatModel`(role 走 predict 时是同模块体系里的 `PredictGatewayChatModel`)。
   这两个类**都只实现 `_generate`,不实现 `_stream` / `_astream`**;
   在 `packages/graph-agent-gateway/src/` 全域搜索 `def _stream` / `def _astream`,
-  除 `fallback_decision.py:159` 一个同名无关函数外**零命中**。
+  除 `resolve/fallback.py:159` 一个同名无关函数外**零命中**。
 
   LangChain 判定「这次调用要不要走流式 API」的第一行就是这个:
   ```
@@ -119,7 +119,7 @@
   真正的 provider chat model 在更下面一层:`GatewayChatModel._generate` 内经
   `_dispatch(...)` → `_invoke_with_token_escalation(...)` 由
   `RouteChatModelFactory.build(...)` 现造,然后在
-  `gateway_chat_model.py:780` 上以 `chat_model.invoke(messages)` **一次阻塞调用**取回整包。
+  `call/chat_model.py:780` 上以 `chat_model.invoke(messages)` **一次阻塞调用**取回整包。
   能力就是在这一行被放弃的,而且这一行在 gateway 里。
 
   **因果证据(真实 provider 实测,2026-08-09,S1 合并后)。** 用仓根 Python(导入工作区源码,
@@ -133,7 +133,7 @@
   ```
   167 字一次性到达,切片数为 1 —— **S1 之后的引擎 Port 是流式的,而真实数据不是流式的。**
   (同一次实测也确认 token 用量在流式下不丢:openai 兼容协议的 `stream_usage` 由 gateway
-  `provider_profiles.py:20-21` 显式钉住,不依赖 langchain「仅 base_url 为空才自动打开」的默认。)
+  `call/profiles.py:20-21` 显式钉住,不依赖 langchain「仅 base_url 为空才自动打开」的默认。)
 
 ### B3. 引擎侧不存在任何真实 provider 流式
 
@@ -528,7 +528,7 @@ token 升配、用量记账 —— 这一整套失败策略约两百行,是 gate
 
 **D9-b. 重试作废它已经流出去的片段。**
 gateway 有两种重试:答案被 `max_tokens` 截断后加倍预算重来
-(`gateway_chat_model.py:_invoke_with_token_escalation`,`token_escalation_rounds` 默认 **2**,
+(`call/chat_model.py:_invoke_with_token_escalation`,`token_escalation_rounds` 默认 **2**,
 见 `registry/schema.py:106`),以及一次调用失败后换下一条候选路由。
 截断只能在响应结束时才判定得出(`_is_truncated_response` 读 `finish_reason`),
 也就是说**重试发生时,上一次尝试的文字已经流出去了**。
@@ -555,7 +555,7 @@ token 升配在流式路径上全部保留,行为与今天一致。SG 的验收�
 #### D10-a. 今天已有的与今天缺的(逐条以代码坐实)
 
 `GatewayChatModel._answer` 每一次退出候选、每一次重试,都是一个可观察的时刻。
-下表逐一对照,坐标为 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`:
+下表逐一对照,坐标为 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py`:
 
 | gateway 的动作 | 今天有没有事件 |
 |---|---|

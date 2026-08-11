@@ -170,7 +170,7 @@ ground_truth: packages/graph-agent 实际代码 + docs/engine/mvp0/skill-spec (F
 **理由**：
 - 用户实证：Anthropic 写 JSON 几乎不错；DeepSeek v3.2 / Seed 2.0 / Gemini 3.1 flash 经常报错或夹转义符。md+patcher 正是为弱模型做的 provider-agnostic 兜底层。
 - gateway 决策记录印证 provider 异质性：deepseek 要 `PatchedChatDeepSeek` 子类、thinking 归一化、`ProviderProfile` 表（`client-layer-decision-record.md` F4/F6）。
-- **解耦**：迁移的鲁棒性收益来自 ChatX 正确的消息处理（修掉手写转换空-content bug，`gateway_chat_model.py:661-692`），**不等于** structured-output 可靠。两件事分开（见 §1 用户原话注）。
+- **解耦**：迁移的鲁棒性收益来自 ChatX 正确的消息处理（修掉手写转换空-content bug，`call/chat_model.py:661-692`），**不等于** structured-output 可靠。两件事分开（见 §1 用户原话注）。
 
 ---
 

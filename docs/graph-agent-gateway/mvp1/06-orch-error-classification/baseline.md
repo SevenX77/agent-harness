@@ -3,7 +3,7 @@ module: 06-orch-error-classification
 doc: baseline
 status: drafted
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py:classify_exception/classify_error_context/ErrorContext/ErrorActionClassification/ErrorClassification
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:classify_exception/classify_error_context/ErrorContext/ErrorActionClassification/ErrorClassification
 units: [error-classification-policy]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -18,7 +18,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 | 文件 | 覆盖入口 | 覆盖说明 |
 |---|---|---|
-| `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py` | `classify_exception`：用于把异常映射为 legacy `decision` 以及 v1.1 action/scope。`classify_error_context`：用于把异常和 route/endpoint/stream 上下文映射为结构化 retry/fallback/fail action。 | 100%,含状态码常量、网络错误、provider payload、异常链 helper。**判据归属：纯 ③b 公共能力(错误码语义任何调模型 app 可复用，不依赖 UI/产品策略/调用方式/存储介质;disposition 表行 46 已判对，本轮不变);详见 `mvp1-alignment.md` §1。** |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py` | `classify_exception`：用于把异常映射为 legacy `decision` 以及 v1.1 action/scope。`classify_error_context`：用于把异常和 route/endpoint/stream 上下文映射为结构化 retry/fallback/fail action。 | 100%,含状态码常量、网络错误、provider payload、异常链 helper。**判据归属：纯 ③b 公共能力(错误码语义任何调模型 app 可复用，不依赖 UI/产品策略/调用方式/存储介质;disposition 表行 46 已判对，本轮不变);详见 `mvp1-alignment.md` §1。** |
 | 调用点 | `GatewayChatModel._generate`：用于在 probe 和真实 dispatch 失败时调用分类器决定 fallback 还是终止。`LLMClientManager.probe_provider`：用于 probe 多模型时复用分类器判断是否继续。 | 覆盖关键 runtime 使用链。 |
 
 ## 现状逻辑
@@ -53,9 +53,9 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ### 4. runtime 调用点
 
-1. `GatewayChatModel._generate` 在 probe 抛异常时调用 `classify_exception`;decision 不是 `fallback_allowed` 就立刻抛 `AllProvidersFailedError`,否则 mark down 并发 fallback event 后继续下一候选(`gateway_chat_model.py:123-152`)。
-2. `GatewayChatModel._generate` 在真实 dispatch 抛异常时同样调用 `classify_exception`;非 fallback_allowed 终止,fallback_allowed 则 mark down、emit event、继续下一 route(`gateway_chat_model.py:237-255`)。
-3. `LLMClientManager.probe_provider` 在 route probe 中遇到异常时也调用 `classify_exception`;不是 fallback_allowed 的异常会重新抛出,避免把请求级错误误判成“这个模型暂时不通”(`client_manager.py:352-354`, `client_manager.py:378-380`)。
+1. `GatewayChatModel._generate` 在 probe 抛异常时调用 `classify_exception`;decision 不是 `fallback_allowed` 就立刻抛 `AllProvidersFailedError`,否则 mark down 并发 fallback event 后继续下一候选(`call/chat_model.py:123-152`)。
+2. `GatewayChatModel._generate` 在真实 dispatch 抛异常时同样调用 `classify_exception`;非 fallback_allowed 终止,fallback_allowed 则 mark down、emit event、继续下一 route(`call/chat_model.py:237-255`)。
+3. `LLMClientManager.probe_provider` 在 route probe 中遇到异常时也调用 `classify_exception`;不是 fallback_allowed 的异常会重新抛出,避免把请求级错误误判成“这个模型暂时不通”(`call/clients.py:352-354`, `call/clients.py:378-380`)。
 
 ## baseline/alignment 差异
 
@@ -82,8 +82,8 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 - `registry/error_classification.py:254-269` — `_provider_error_payload`：用于读取 provider JSON error payload。
 - `registry/error_classification.py:272-290` — `_looks_like_route_capability_error`：用于识别 400 capability 类错误。
 - `registry/error_classification.py:293-301` — `_exception_chain`：用于沿 cause/context 检查包装异常。
-- `gateway_chat_model.py:123-152` — probe 异常分类调用点。
-- `gateway_chat_model.py:237-255` — dispatch 异常分类调用点。
+- `call/chat_model.py:123-152` — probe 异常分类调用点。
+- `call/chat_model.py:237-255` — dispatch 异常分类调用点。
 - `packages/graph-agent-gateway/tests/test_registry_error_classification.py:25-54` — 测试已断言 401/402 fallback、413 fail_fast、未知 fail_fast_with_route_context。
 - `packages/graph-agent-gateway/tests/test_registry_error_classification.py:82-105` — 测试已断言 SSE after 200 fallback 和 400 unsupported fallback。
 

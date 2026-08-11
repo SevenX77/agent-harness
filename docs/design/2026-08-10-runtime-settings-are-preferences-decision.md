@@ -33,16 +33,16 @@ message=Failed to deserialize the JSON body into the target type:
 ```
 
 一个参数写错,结论是「所有 provider 都失败了」。根因是异常分类只按**路由健康**
-一个维度看世界(`gateway_chat_model.py` 的候选走查 + `classify_exception`),
+一个维度看世界(`call/chat_model.py` 的候选走查 + `classify_exception`),
 它分不清「这条路挂了」和「这条路活着,只是不吃这个参数」。
 
 这比静态能力标记危险得多:它**伪装成路由故障**,看报错的人不会想到去检查设置。
 
 ### B3. 探针已经存在,但问错了问题
 
-`GatewayChatModel.probe_before_call` 默认 `True`(`gateway_chat_model.py:154`),
-每次 LLM 调用在挑候选路由时,正式请求之前先探一次(`gateway_chat_model.py:279`)。
-探针内容是写死的最小请求(`client_manager.py:333`):
+`GatewayChatModel.probe_before_call` 默认 `True`(`call/chat_model.py:154`),
+每次 LLM 调用在挑候选路由时,正式请求之前先探一次(`call/chat_model.py:279`)。
+探针内容是写死的最小请求(`call/clients.py:333`):
 
 ```python
 openai_client.chat.completions.create(
@@ -165,7 +165,7 @@ P1 首次实测(真实 api.deepseek.com,路由设 `top_p=5.0`,provider 400
 
 ### D9. 顺手拆模块:一个文件只围绕一件事
 
-`gateway_chat_model.py` 现有 1196 行,`_answer` 一个方法 255 行,同时承担四件事:
+`call/chat_model.py` 现有 1196 行,`_answer` 一个方法 255 行,同时承担四件事:
 候选路由走查策略、预算与升配、effective settings 合成、结果组装。新功能若继续往里堆,
 只会让它更没法读。**改到哪拆到哪**(不做与本决议无关的大爆炸重构):
 
@@ -197,7 +197,7 @@ P1 首次实测(真实 api.deepseek.com,路由设 `top_p=5.0`,provider 400
 6. **前端呈现**:trace 条目逐项显示「你要的 → 实际的」,任一项为 warning 级时条目呈 warning 色 ——
    真机截图为证。
 7. **模块化落地**:设置合成与设置结果判定各自可被单元测试**直接调用**(不起 provider、
-   不发网络);`gateway_chat_model.py` 的候选走查方法不再同时承担设置合成与结果组装。
+   不发网络);`call/chat_model.py` 的候选走查方法不再同时承担设置合成与结果组装。
 8. **既有行为不倒退**:`uv run pytest packages/graph-agent-gateway/tests` ·
    `packages/graph-agent/tests` · `apps/studio/backend/tests` 全绿,
    `mypy --strict` 两个 SDK 全绿,前端四件门禁全绿。

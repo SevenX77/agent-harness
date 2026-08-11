@@ -4,7 +4,7 @@ modules: [03]
 depends_on: [WS-1 的 registry/base_url.py(仅 import,已在工作区存在;不改它)]
 blocks: []
 owns_files:
-  - packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py   # 改:_normalize_base_url 升级为 per-protocol(调 canonicalize_base_url)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py   # 改:_normalize_base_url 升级为 per-protocol(调 canonicalize_base_url)
   - apps/studio/backend/app/services/llm_credentials.py                        # 改:upsert_endpoints 保存时归一化(+ v3→v4 migration / draft apply 同规则)
   - packages/graph-agent-gateway/tests/test_registry_base_url.py 或 test_registry_*.py  # 加:fingerprint 用 canonical 的测试
   - apps/studio/backend/tests/（credentials 相关测试文件）                     # 加:upsert 保存时 canonicalize 的测试
@@ -25,7 +25,7 @@ status: drafted
 - **现状(起点)**:`../03-orch-credentials-endpoints/baseline.md` §3(base_url 原样透传)、§F5。
 - **复用(只 import,不改)**:`packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py:canonicalize_base_url`(WS-1 已建,per-protocol + 幂等)。
 - **实现前必读源码(先读并确认)**:
-  - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:13-42`(`compute_credential_fingerprint` + 现 `_normalize_base_url` 只 `strip().rstrip("/")`)
+  - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py:13-42`(`compute_credential_fingerprint` + 现 `_normalize_base_url` 只 `strip().rstrip("/")`)
   - `apps/studio/backend/app/services/llm_credentials.py:107-136`(`upsert_endpoints` 现状保存,不归一)、`:299-326`(`_v3_payload_to_v4`)、`:369-393`(`_stable_endpoint_id`,**不动,F4 延期**)
   - `apps/studio/backend/app/services/llm_import_drafts.py:136-202`(`apply_draft` 写 endpoint,同规则候选)
   - 参考(不抄):`apps/studio/backend/app/services/copilot.py:476-491`(现 deepseek/ark 局部 helper,证明规则之前散在调用侧)
@@ -35,7 +35,7 @@ status: drafted
 - **本 WS owns**:见 frontmatter。
 - **禁止触碰**:
   - `registry/base_url.py` → **WS-1 owns**,本 WS **只 import**,不改。
-  - `gateway_chat_model.py`/`route_chat_model_factory.py`/`provider_profiles.py`/`models.py` → WS-1。
+  - `call/chat_model.py`/`call/factory.py`/`call/profiles.py`/`models.py` → WS-1。
   - `registry/resolver.py`/`protocol.py` → WS-5。
   - copilot 调用方式(`copilot.py` 的 `_resolve_route_runtime`)→ ③a 调用层,不在本 WS(只读作参考)。
 - **共享文件协调**:无(本 WS 文件与 WS-1/WS-3/WS-4 不重叠;可与它们并发)。

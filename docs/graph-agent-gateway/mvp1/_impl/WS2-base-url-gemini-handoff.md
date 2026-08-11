@@ -28,7 +28,7 @@ WS-1 已在当前工作区提供 `packages/graph-agent-gateway/src/graph_agent_g
 - `docs/graph-agent-gateway/mvp1/03-orch-credentials-endpoints/mvp1-alignment.md` 的 §F3 / §F5 / base_url 归一化契约
 - `docs/graph-agent-gateway/mvp1/03-orch-credentials-endpoints/baseline.md`
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py`
 - `apps/studio/backend/app/services/llm_credentials.py`
 - `apps/studio/backend/app/services/llm_import_drafts.py`，只读审计，除非 Codex/PM 后续把它加入 owns_files
 
@@ -36,7 +36,7 @@ WS-1 已在当前工作区提供 `packages/graph-agent-gateway/src/graph_agent_g
 
 只改这些文件：
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py`
 - `apps/studio/backend/app/services/llm_credentials.py`
 - `packages/graph-agent-gateway/tests/test_registry_storage_base_url.py`
 - `apps/studio/backend/tests/services/test_llm_base_url_canonicalization.py`
@@ -45,11 +45,11 @@ WS-1 已在当前工作区提供 `packages/graph-agent-gateway/src/graph_agent_g
 禁止改：
 
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/models.py`
-- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py`
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py`
 - 任何 predict_context 相关文件
 
 不要 `git add .`。如需 stage，只按文件名 stage 自己改的文件。
@@ -88,7 +88,7 @@ WS-1 已在当前工作区提供 `packages/graph-agent-gateway/src/graph_agent_g
 uv run pytest packages/graph-agent-gateway/tests/test_registry_storage_base_url.py -q
 uv run pytest apps/studio/backend/tests/services/test_llm_base_url_canonicalization.py -q
 uv run pytest packages/graph-agent-gateway/tests -q
-uv run mypy packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py apps/studio/backend/app/services/llm_credentials.py
+uv run mypy packages/graph-agent-gateway/src/graph_agent_gateway/registry/fingerprint.py apps/studio/backend/app/services/llm_credentials.py
 ```
 
 如果 Studio backend 全套太大，至少跑上述 service 测试；如果失败不是本任务范围，保留原始错误并报告，不要顺手修无关模块。

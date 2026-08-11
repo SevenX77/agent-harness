@@ -5,12 +5,12 @@ depends_on: []   # 不被 WS-2 阻塞:base_url 共享原语由本 WS 步骤 0 �
 blocks: [WS-5]
 owns_files:
   - packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py    # 新建(步骤0:canonicalize_base_url 共享原语;WS-2 import)
-  - packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py   # 新建(11)
-  - packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py  # 新建(10),或并入 models.py
-  - packages/graph-agent-gateway/src/graph_agent_gateway/models.py              # 改(10 落点候选)
-  - packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py  # 改(09/07)
-  - packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py      # 改(09 _call_*/dispatch · 07 token-escalation)
-  - packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py            # 改(09:resolve 构造 ChatX 那段)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py   # 新建(11)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py  # 新建(10),或并入 models.py
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py              # 改(10 落点候选)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py  # 改(09/07)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py      # 改(09 _call_*/dispatch · 07 token-escalation)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py            # 改(09:resolve 构造 ChatX 那段)
   - packages/graph-agent-gateway/pyproject.toml                                # 改(google_genai 可选依赖,见 §5 注)
 spec_ssot:
   - ../11-inv-provider-profiles/mvp1-alignment.md §1/§2/§3/§6
@@ -32,9 +32,9 @@ status: drafted
 - **现状(起点)**:`../09-.../baseline.md`、`../10-.../baseline.md`(诚实声明无 factory)、`../11-.../baseline.md`(诚实声明无 ProviderProfile)。
 - **范本/参考**:`../references/chatx-provider-patterns.md`(deepagents `ProviderProfile` lookup/merge/pre_init/factory;deerflow thinking 归一化 / `stream_usage` / `PatchedChatDeepSeek` 单方法 patch;`GenericRouteChatModel` 5 条序列化规则,已真机 PASS)。
 - **实现前必读源码(先读并确认关键符号再动手)**:
-  - `client_manager.py:440-1012`(`_call_openai_compatible`/`_call_openai_responses`/`_call_google_genai`/`_call_ark_runtime`/`_call_anthropic_compatible`/`_call_wavespeed_any_llm`/`_dispatch_provider_call`/`_call_with_token_escalation` — 要被 ChatX 取代/搬家的现状)
-  - `gateway_chat_model.py:96-271`(`_generate` 编排循环)、`:313-357`(`_build_chat_result`)、`:645-707`(`_coerce_text`/`_langchain_messages_to_dict` — 要退役的拍平/转 dict)
-  - `client_manager.py:144-295`(SDK client 工厂,probe 仍复用)、`:310-323`(`record_usage`)
+  - `call/clients.py:440-1012`(`_call_openai_compatible`/`_call_openai_responses`/`_call_google_genai`/`_call_ark_runtime`/`_call_anthropic_compatible`/`_call_wavespeed_any_llm`/`_dispatch_provider_call`/`_call_with_token_escalation` — 要被 ChatX 取代/搬家的现状)
+  - `call/chat_model.py:96-271`(`_generate` 编排循环)、`:313-357`(`_build_chat_result`)、`:645-707`(`_coerce_text`/`_langchain_messages_to_dict` — 要退役的拍平/转 dict)
+  - `call/clients.py:144-295`(SDK client 工厂,probe 仍复用)、`:310-323`(`record_usage`)
   - `resolver.py:92-146`(`ModelResolver.resolve` 现在如何包成 `GatewayChatModel`)
   - `registry/schema.py:415-459`(`ResolvedRoute`/`ResolvedRole` 字段,**只读**)
 
@@ -46,7 +46,7 @@ status: drafted
   - `registry/resolver.py`(`resolve_role` skip)、`protocol.py` → **WS-5**
   - `events.py`/`exceptions.py`/`tracing.py` → **WS-4**
   - `apps/studio/.../llm_state_projection.py` 等 → **WS-3**
-- **共享文件协调**:`gateway_chat_model.py`/`client_manager.py` 被本 WS 步骤 09 和 07 都改 → **靠内部串行(§7)解决,不并发编辑**。
+- **共享文件协调**:`call/chat_model.py`/`call/clients.py` 被本 WS 步骤 09 和 07 都改 → **靠内部串行(§7)解决,不并发编辑**。
 
 ## 4. 现状锚点(baseline)
 
@@ -82,10 +82,10 @@ status: drafted
 ## 7. 内部子步骤顺序(严格串行,IR1 共享文件)
 
 0. **base_url 共享原语**(新文件 `registry/base_url.py`):纯函数 `canonicalize_base_url(url, protocol)`(幂等;anthropic 去尾 `/v1`、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark `.../api/v3`、wavespeed root)+ 逐 protocol 单测。**WS-1 自产、WS-2 import**(替代原"等 WS-2 给桩"方案:no-op 桩过不了 §6 base_url 测试;真桩与 WS-2 重复 = divergence)。
-1. **11 ProviderProfile**(新文件 `provider_profiles.py`,加法,最独立)。
+1. **11 ProviderProfile**(新文件 `call/profiles.py`,加法,最独立)。
 2. **10 RouteChatModelFactory**(新文件,消费 11;import WS-2 的 base_url helper —— 若 WS-2 未就绪,先用桩,WS-2 落地后替换)。
-3. **09 接线**(改 `gateway_chat_model.py`/`resolver.py`/`client_manager.py`:`_generate` 换调用步、`_build_chat_result` augment、退役 `_call_*` 转换/调用)。
-4. **07 接线**(改 `gateway_chat_model.py`/`client_manager.py`:搬 `_call_with_token_escalation` 到编排层、保留外壳)。
+3. **09 接线**(改 `call/chat_model.py`/`resolver.py`/`call/clients.py`:`_generate` 换调用步、`_build_chat_result` augment、退役 `_call_*` 转换/调用)。
+4. **07 接线**(改 `call/chat_model.py`/`call/clients.py`:搬 `_call_with_token_escalation` 到编排层、保留外壳)。
 
 ## 8. 验收标准(硬退出,IR4)
 

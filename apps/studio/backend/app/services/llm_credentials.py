@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import threading
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -21,9 +19,7 @@ from graph_agent_gateway.registry import (
 from pydantic import SecretStr, ValidationError
 
 from app.core.adapters.gateway import (
-    CapabilitySource,
     canonicalize_base_url,
-    normalize_route_capabilities,
 )
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
@@ -114,26 +110,6 @@ def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None
         pass
     with _credentials_lock:
         _save_credentials_unlocked(data, credential_path)
-
-
-def migrate_v3_credentials_to_v4(path: Path | None = None) -> LLMCredentialsFile:
-    """Convert a legacy Studio v3 credentials file into the v4 route registry.
-
-    The migration is explicit, creates a sibling backup first, preserves
-    secrets, and writes the v4 file atomically through the normal storage path.
-    """
-    credential_path = path or credentials_path()
-    payload = json.loads(credential_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("schema_version") != 3:
-        raise ValueError(f"expected schema_version 3 credentials: {credential_path}")
-
-    backup_path = _next_backup_path(credential_path)
-    shutil.copy2(credential_path, backup_path)
-    backup_path.chmod(0o600)
-
-    migrated = _v3_payload_to_v4(payload)
-    save_credentials(migrated, credential_path)
-    return migrated
 
 
 def serialize_for_response(data: LLMCredentialsFile, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
@@ -251,7 +227,6 @@ def upsert_routes(
     path: Path | None = None,
 ) -> LLMCredentialsFile:
     """Upsert route records while retaining absent routes."""
-    from app.models.llm_config import ProviderRoute
 
     credential_path = path or credentials_path()
     with _credentials_lock:
@@ -418,75 +393,6 @@ def _repair_catalog_candidate_route_statuses(data: LLMCredentialsFile) -> LLMCre
     return data.model_copy(update={"provider_endpoints": endpoints})
 
 
-def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
-    endpoints: dict[str, ProviderEndpoint] = {}
-    routes: dict[str, ProviderRoute] = {}
-    for provider in payload.get("providers") or []:
-        if not isinstance(provider, dict):
-            continue
-        endpoint_id = _stable_endpoint_id(provider)
-        protocol = provider.get("provider_type") or provider.get("type")
-        base_url = str(provider.get("base_url") or "").strip()
-        supported_protocols = {
-            "anthropic_compatible",
-            "openai_compatible",
-            "google_genai",
-            "ark_runtime",
-        }
-        if not endpoint_id or protocol not in supported_protocols:
-            continue
-        canonical_url = canonicalize_base_url(base_url, protocol)
-        endpoint = ProviderEndpoint(
-            endpoint_id=endpoint_id,
-            display_name=str(provider.get("name") or endpoint_id),
-            protocol=protocol,
-            base_url=canonical_url,
-            api_key=provider.get("api_key") or None,
-            status="verified" if provider.get("last_test_status") == "ok" else "unverified_manual",
-            last_test_at=provider.get("last_test_at"),
-            last_test_message=provider.get("last_test_message") or None,
-        )
-        endpoints[endpoint_id] = endpoint
-        capability_source: CapabilitySource = (
-            "probed_verified" if provider.get("last_test_status") == "ok" else "api_list"
-        )
-        for model in _legacy_models(provider):
-            model_id = str(model.get("id") or "").strip()
-            if not model_id:
-                continue
-            raw_capabilities = model.get("capabilities")
-            if not isinstance(raw_capabilities, dict):
-                raw_capabilities = {}
-            route_slug = _route_slug(model_id)
-            route_id = f"{endpoint_id}:{route_slug}"
-            routes[route_id] = ProviderRoute(
-                route_id=route_id,
-                endpoint_id=endpoint_id,
-                route_slug=route_slug,
-                provider_model_id=model_id,
-                display_name=str(raw_capabilities.get("display_name") or model_id),
-                status=endpoint.status,
-                capabilities=normalize_route_capabilities(
-                    protocol=endpoint.protocol,
-                    provider_model_id=model_id,
-                    raw_capabilities=raw_capabilities,
-                    source=capability_source,
-                ),
-                metadata={"legacy_migrated_from": "schema_version_3"},
-            )
-    return LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes)
-
-
-def _legacy_models(provider: dict[str, Any]) -> list[dict[str, Any]]:
-    models = provider.get("available_models")
-    if isinstance(models, list):
-        return [item for item in models if isinstance(item, dict)]
-    models = provider.get("models")
-    if isinstance(models, list):
-        return [item for item in models if isinstance(item, dict)]
-    return []
-
-
 def _stable_endpoint_id(provider: dict[str, Any]) -> str:
     raw = str(provider.get("id") or provider.get("code") or "").strip()
     base_url = str(provider.get("base_url") or "").strip()
@@ -513,14 +419,6 @@ def _url_hostname(raw_url: str) -> str:
 
 def _route_slug(provider_model_id: str) -> str:
     return identity_route_slug(provider_model_id)
-
-
-def _next_backup_path(path: Path) -> Path:
-    backup = path.with_name(f"{path.name}.v3.bak")
-    if not backup.exists():
-        return backup
-    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    return path.with_name(f"{path.name}.v3.{stamp}.bak")
 
 
 def _preserved_secret(
@@ -590,7 +488,6 @@ __all__ = [
     "delete_endpoint",
     "delete_route",
     "load_credentials",
-    "migrate_v3_credentials_to_v4",
     "save_credentials",
     "serialize_for_response",
     "upsert_endpoints",

@@ -1,7 +1,7 @@
 # graph-agent-gateway 使用手册
 
 > **这份文档回答的问题**:我是一个要调大模型的应用,装上这个包之后,**具体怎么用它**——
-> 我要自己提供什么、从哪个入口进、四件常做的事各写几行代码。
+> 我要自己提供什么、从哪个入口进、五件常做的事各写几行代码。
 >
 > **它不回答**:这个包为什么这样划分(那是
 > [`README.md`](../../packages/graph-agent-gateway/README.md) §2 的边界判据),
@@ -71,13 +71,13 @@ class CredentialProviderProtocol(Protocol):
 | `registry` | **真相**:端点/路由/凭证/能力的定义、身份、边界、状态投影 | 造快照、算端点 id、读能力、投影 UI 状态 |
 | `resolve` | **选路**:从角色推出一条有序的路由链,含 lint / profile 选择 / fallback 决策 / 错误分类 | 要知道「这个角色该用哪条路由」 |
 | `role` | **角色物化**:角色 → 已贴合这条路由的调用设置 | 要把角色的意图落成具体参数 |
-| `call` | **调用**:拿路由真正发一次请求 | 要真的调模型 |
+| `call` | **调用**:拿路由真正发一次请求(两张脸:LangChain 的和不要 LangChain 的) | 要真的调模型 |
 | `dialect` | **线路语言**:每家 provider 的请求/响应形状 | 一般不直接用;探测与生产共用它 |
 | `probing` | **问一个小到值得问的问题**:端点通不通、路由认不认、这档 effort 收不收 | 要测一条配置是否可用 |
 
 ---
 
-## 3. 四条常做的路径
+## 3. 五条常做的路径
 
 ### 3.1 角色 → 路由链
 
@@ -125,7 +125,34 @@ answer = await model.ainvoke([HumanMessage(content="...")])
 **只想要路由、自己去调**也可以:`resolve_role` 的结果就是完整交接契约,拿着 `ResolvedRoute`
 用自己的 SDK 发请求,不必用 `GatewayChatModel`。Studio 的 copilot 走的就是这条。
 
-### 3.3 探一个端点:这把 key + 这个 URL 对不对得上话
+### 3.3 不想碰 LangChain:同一条链,朴素的进出
+
+```python
+from graph_agent_gateway import chat_plainly
+
+answer = chat_plainly(
+    resolved,                                        # 3.1 解析出来的那个
+    [{"role": "user", "content": "..."}],            # 普通字典,不用构造任何对象
+    credential_provider=provider,
+)
+answer.text        # 回答
+answer.route_id    # 哪条路由答的——链走过之后,这不是可有可无的信息
+answer.usage       # {"prompt_tokens": ..., "completion_tokens": ..., "total_tokens": ...}
+answer.reasoning   # 有思考内容就在这儿,不会被拌进 text 里
+```
+
+**LangChain 不是普世标准**,一大批 app 直接用普通 chat 协议调模型,根本不 import 它。
+这条路径就是给它们的:**进出没有一个 LangChain 类型**,`PlainAnswer` 是个普通的
+frozen dataclass。
+
+它和 3.2 不是两套实现,是同一条链的两张脸——**同样会逐条试 fallback、同样跳过熔断中的
+路由、同样记用量**。跳过 LangChain 不该顺带把网关的本事也跳过了;真想连调用都自己来,
+那是 3.2 末尾说的 route handoff,不是这条。
+
+只给同步版:编排一路到底是同步的,异步版只会是 `asyncio.to_thread` 的一层包装——
+那是你一行就能写的东西,由网关提供反而像是在假装有真异步。
+
+### 3.4 探一个端点:这把 key + 这个 URL 对不对得上话
 
 ```python
 from graph_agent_gateway.probing import probe_provider_endpoint
@@ -138,7 +165,7 @@ result = await probe_provider_endpoint(endpoint, api_key=secret, timeout=8.0)
 它发一次列模型请求。**能列模型不等于能生成**——余额耗尽的账号照样能列清单。所以
 「这条路由能用吗」要用下面那个。
 
-### 3.4 探一条路由:让它真答一句
+### 3.5 探一条路由:让它真答一句
 
 ```python
 from graph_agent_gateway.probing import probe_provider_route
@@ -173,8 +200,9 @@ levels = accepted_effort_levels(answers)   # None = 这批答案什么也没定
 
 - **不读写任何存储**:快照与密钥都由宿主注入,包内没有文件路径与数据库连接。
 - **不做 UI 与产品策略**:不决定默认推荐谁、什么算「弃用」、状态显示什么颜色。
-- **不替你决定调用方式**:`ResolvedRoute` 交出去之后,用 `GatewayChatModel` 还是自己的
-  SDK,是宿主的选择。
+- **不替你决定调用方式**:三张脸并列摆着——要 LangChain 生态用 `GatewayChatModel`(3.2),
+  不要 LangChain 用 `chat_plainly`(3.3),连调用都想自己来就只拿 `ResolvedRoute`(route
+  handoff)。选哪张是宿主的事,网关不替你选。
 - **不保留向后兼容**:本仓未发布,schema 与 API 可以整体替换;不写迁移垫片,旧数据的处置
   是重新生成,不是双格式读取。
 

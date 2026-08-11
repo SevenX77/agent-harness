@@ -406,7 +406,7 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     换句话说:dialect 的归宿是"发现",不是"预测";"探测=生产"这条保证由**共用工厂**给,
     不由共用方言给。
 
-22. **待裁决(结构性,需用户拍板):`call/dispatch.py` + `GenericRouteChatModel` +
+22. **(已于 2026-08-11 裁决为「全删」,见 D9)结构性:`call/dispatch.py` + `GenericRouteChatModel` +
     `LLMClientManager` 的 SDK 客户端构造部分,对合法路由全部不可达。** 按仓规"不留向后兼容、
     死路径同期删除"应当删掉(约 1000+ 行);但这是跨模块的结构性删除,且 `LLMClientManager`
     另有活的职责(路由熔断标记与用量计费,`call/chat_model.py` 在用),不能整个删。
@@ -447,7 +447,7 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
     没有协议头的字符串(fail fast / 让非法状态不可表示)?那是产品行为改动,
     不在本期,记在册上。
 
-### D8. P3b 提案:预测型探针改走生产工厂(结构性,待裁决)
+### D8. P3b:预测型探针改走生产工厂(已裁决,2026-08-11)
 
 **先说事实。** `probe_provider_route`(A2)今天有两种用法,都在 studio:
 `routers/llm.py:5299` 的 `_gateway_probe_route` **临时拼一个 `ProviderRoute`**
@@ -472,6 +472,11 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
    **这会改变 studio 消费的 `ProviderProbeStatus` 词表**,需要一张显式映射并同步前端——
    这是本提案唯一真正外溢到 UI 的部分,也是它必须先经裁决的原因。
 
+**裁决(用户,2026-08-11):放行。** 原话:"动 ui 没关系,合理就行"。
+即状态词表可以改、前端跟着改,判据是改完的词表本身讲得通,不是"能不能不动 UI"。
+本决议据此把 P3b 从提案转为待实施,四个实现问题按上面四条建议落地;
+词表映射表在实施 PR 内给出,并同步 `apps/studio/frontend` 的类型与展示。
+
 **基线怎么办。** 100 条 endpoint 基线里,route 那 80 条钉的是"探针自己拼的 HTTP",
 随实现退役;endpoint 那 20 条(A1 模型列表)保留。取而代之的判据是
 **探针造出来的模型的 payload 必须等于生产 payload**,与 `test_production_wire_contract.py` 同源
@@ -482,7 +487,7 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
 "带 thinking 问一次"本身是合法的问题;但它写出来的 verified profile 会被生产拿去用,
 **用带 thinking 的问题验证一条不带 thinking 的调用**,结论未必成立。
 
-### D9. P3c 待裁决:不可达的调用路径怎么处置
+### D9. P3c:不可达的调用路径怎么处置(已裁决,2026-08-11)
 
 `call/dispatch.py`(1026 行,六个 `_call_*`)+ `call/models.py::GenericRouteChatModel`(301 行)
 + `LLMClientManager` 里构造 provider SDK 客户端的部分,对任何合法路由都不可达(证据见订正 20)。
@@ -496,6 +501,22 @@ P2 拆成三步走:**P2a** 先录基线(#709,11 个官方方法 × 4 种设置 �
 
 建议 1。理由是这次的教训本身即证据:**一个没人调用但名字齐全、测试齐全的模块,
 会被当成生产事实来引用**——它已经骗过一次了。
+
+**裁决(用户,2026-08-11):按 1 全删。** 原话:"没用的就删"。实施补充两条,都是
+动手前重新核过的事实,不是推断:
+
+- **`LLMClientManager` 砍完要改名。** 四个 `_get_*_client`、`_client_cache_key`、
+  `reset_stats`、以及它自己那份 `_resolve_api_key`(工厂另有一份在 `call/factory.py:309`)
+  的调用者只有 `dispatch.py` 和它们自己的测试;活下来的是熔断标记与用量记账
+  (`is_provider_marked_down` / `mark_provider_down` / `record_usage` /
+  `usage_total_calls` / `get_usage_stats`,被 `call/chat_model.py` 与 `call/resolver.py` 调用)。
+  剩下的东西不再管理任何 client,名字必须跟着改;`client_manager` 这个 DI 形参全仓
+  只在网关内部出现(studio 与 engine 零命中),改名不外溢。
+- **有一份覆盖会随死代码一起消失,必须点名交代。**
+  `test_route_chat_model_factory.py:605` 的 `test_generic_chat_model_runs_langchain_create_agent_tool_loop`
+  是在 `GenericRouteChatModel` 上测 ReAct 工具循环的。删掉它本身不是损失(被测对象生产不跑),
+  但它是全仓唯一一处工具循环测试——**P5 的 T3 必须在真实模型上重新建这份覆盖,
+  不能以为已经有了**。已记进台账。
 
 ### D6. 同期删除(不留别名、不留兼容)
 

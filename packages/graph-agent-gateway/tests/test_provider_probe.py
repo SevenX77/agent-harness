@@ -3,12 +3,59 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import httpx
+import openai
 import pytest
 from graph_agent_gateway.probing import wire as provider_probe
 from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute
+from langchain_core.messages import AIMessage
 from pydantic import SecretStr
+
+
+class _RaisingModel:
+    """A model whose one call fails the way a provider SDK fails it."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def ainvoke(self, *args: object, **kwargs: object) -> object:
+        raise self._exc
+
+
+class _AnsweringModel:
+    async def ainvoke(self, *args: object, **kwargs: object) -> object:
+        return AIMessage(content="ok")
+
+
+class _FactoryReturning:
+    def __init__(self, model: object) -> None:
+        self._model = model
+        self.builds: list[tuple[object, dict[str, object]]] = []
+
+    def build(self, route: object, **kwargs: object) -> object:
+        self.builds.append((route, kwargs))
+        return self._model
+
+
+def _answering() -> _FactoryReturning:
+    return _FactoryReturning(_AnsweringModel())
+
+
+def _failing_with(handler: Callable[[httpx.Request], httpx.Response]) -> _FactoryReturning:
+    """The factory a probe gets when the provider answers the way `handler` says.
+
+    The route probe no longer sends its own request, so a refusal reaches it as
+    the exception the provider's SDK raises — which carries that very response.
+    Building the error from the same handler keeps these tests about what a given
+    body means, which is the part the gateway owns.
+    """
+
+    response = handler(httpx.Request("POST", "https://provider.example/v1/messages"))
+    return _FactoryReturning(
+        _RaisingModel(openai.APIStatusError("provider refused", response=response, body=None))
+    )
 
 
 @pytest.mark.anyio
@@ -62,36 +109,25 @@ async def test_gateway_route_test_is_scoped_to_provider_route() -> None:
         provider_model_id="anthropic/claude-sonnet",
         canonical_id="claude-sonnet",
     )
-    requests: list[tuple[str, dict[str, object]]] = []
+    factory = _answering()
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append((str(request.url), json.loads(request.content.decode())))
-        return httpx.Response(200, json={"id": "chatcmpl-ok"}, request=request)
-
-    result = await probe_provider_route(
-        endpoint,
-        route,
-        transport=httpx.MockTransport(handler),
-    )
+    result = await probe_provider_route(endpoint, route, factory=factory)
 
     assert result.endpoint_id == "openrouter"
     assert result.route_id == "openrouter:anthropic.claude-sonnet"
     assert result.provider_kind == "third_party"
     assert result.model_id == "anthropic/claude-sonnet"
     assert result.status == "ok"
-    assert requests == [
-        (
-            "https://openrouter.ai/api/v1/chat/completions",
-            {
-                "model": "anthropic/claude-sonnet",
-                "messages": [{"role": "user", "content": "."}],
-                # The field a real call sends: every openai-compatible route is
-                # built as a ChatOpenAI subclass, which names the budget this
-                # way (tests/test_production_wire_contract.py).
-                "max_completion_tokens": 1,
-            },
-        )
-    ]
+
+    # What the probe asks for is now the whole of what it sends: the request is
+    # the factory's, and what the factory renders is measured in
+    # tests/test_production_wire_contract.py.
+    (asked_route, asked_kwargs), = factory.builds
+    assert asked_route.route_id == "openrouter:anthropic.claude-sonnet"
+    assert asked_route.provider_model_id == "anthropic/claude-sonnet"
+    assert asked_route.protocol == "openai_compatible"
+    assert asked_route.base_url == "https://openrouter.ai/api/v1"
+    assert asked_kwargs["max_tokens"] == 1
 
 
 @pytest.mark.anyio
@@ -139,7 +175,7 @@ async def test_gateway_route_probe_billing_400_is_quota_exceeded_not_invalid_mod
     result = await probe_provider_route(
         endpoint,
         route,
-        transport=httpx.MockTransport(handler),
+        factory=_failing_with(handler),
     )
 
     assert result.status == "quota_exceeded"
@@ -183,7 +219,7 @@ async def test_gateway_route_probe_capability_400_stays_invalid_model() -> None:
     result = await probe_provider_route(
         endpoint,
         route,
-        transport=httpx.MockTransport(handler),
+        factory=_failing_with(handler),
     )
 
     assert result.status == "invalid_model"
@@ -219,7 +255,7 @@ async def test_gateway_route_probe_path_404_is_protocol_unsupported() -> None:
     result = await probe_provider_route(
         endpoint,
         route,
-        transport=httpx.MockTransport(handler),
+        factory=_failing_with(handler),
     )
 
     assert result.status == "protocol_unsupported"
@@ -262,7 +298,7 @@ async def test_gateway_route_probe_model_shaped_404_stays_invalid_model() -> Non
     result = await probe_provider_route(
         endpoint,
         route,
-        transport=httpx.MockTransport(handler),
+        factory=_failing_with(handler),
     )
 
     assert result.status == "invalid_model"
@@ -301,7 +337,7 @@ async def test_gateway_route_probe_wrong_protocol_guidance_is_protocol_unsupport
     result = await probe_provider_route(
         endpoint,
         route,
-        transport=httpx.MockTransport(handler),
+        factory=_failing_with(handler),
     )
 
     assert result.status == "protocol_unsupported"
@@ -359,7 +395,7 @@ async def test_gateway_route_probe_405_is_protocol_unsupported() -> None:
     result = await probe_provider_route(
         endpoint,
         route,
-        transport=httpx.MockTransport(handler),
+        factory=_failing_with(handler),
     )
 
     assert result.status == "protocol_unsupported"
@@ -460,7 +496,7 @@ async def test_gateway_openai_probe_own_auth_error_stays_invalid_key() -> None:
             request=request,
         )
 
-    result = await probe_provider_route(endpoint, route, transport=httpx.MockTransport(handler))
+    result = await probe_provider_route(endpoint, route, factory=_failing_with(handler))
 
     assert result.status == "invalid_key"
 
@@ -526,20 +562,19 @@ async def test_ark_openai_compatible_route_probe_uses_existing_api_v3_chat_path(
         provider_model_id="doubao-seed-2-0-pro-260215",
         canonical_id="doubao-seed-2-0-pro-260215",
     )
-    requests: list[str] = []
+    factory = _answering()
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(str(request.url))
-        return httpx.Response(200, json={"id": "chatcmpl-ok"}, request=request)
-
-    result = await provider_probe.probe_provider_route(
-        endpoint,
-        route,
-        transport=httpx.MockTransport(handler),
-    )
+    result = await provider_probe.probe_provider_route(endpoint, route, factory=factory)
 
     assert result.status == "ok"
-    assert requests == ["https://ark.cn-beijing.volces.com/api/v3/chat/completions"]
+    # An ARK host declared openai_compatible keeps the path the user gave: the
+    # /api/v3 suffix belongs to the ark_runtime protocol's canonicalization, and
+    # appending it again here would probe a URL that does not exist. The factory
+    # is handed the base url untouched, and where it goes from there is
+    # tests/test_route_chat_model_factory.py's to say.
+    (asked_route, _), = factory.builds
+    assert asked_route.base_url == "https://ark.cn-beijing.volces.com/api/v3"
+    assert asked_route.protocol == "openai_compatible"
 
 
 @pytest.mark.anyio

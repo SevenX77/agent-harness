@@ -37,6 +37,39 @@ class ProviderAnswer:
             return None
 
 
+def answer_from_failed_call(exc: BaseException) -> ProviderAnswer | None:
+    """The answer a provider already gave, dug out of the error it raised.
+
+    A call made through a provider's own SDK fails by raising, but the raise
+    carries the response: `openai.APIStatusError` and `anthropic.APIStatusError`
+    are both constructed with `(message, *, response, body)`. Reading it here is
+    what lets one judgment serve a probe that sends its own request and a probe
+    that lets the production client send it.
+
+    `langchain_google_genai` is the exception to that: it catches the SDK error
+    and re-raises its own `ChatGoogleGenerativeAIError`, which carries neither a
+    status nor a body. The original is still on `__cause__`, so this looks there
+    too — without that hop every Google failure would collapse to `error`, when
+    it is exactly the rate limits and missing models that a probe exists to tell
+    apart.
+
+    Answers `None` when the call never got a response at all: a connection that
+    failed or a request that timed out has nothing for the judge to read, and
+    the caller names those from the exception type instead.
+    """
+
+    for candidate in (exc, exc.__cause__, exc.__context__):
+        if candidate is None:
+            continue
+        response = getattr(candidate, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if not isinstance(status_code, int):
+            continue
+        body = getattr(response, "text", None)
+        return ProviderAnswer(status_code=status_code, body=body if isinstance(body, str) else "")
+    return None
+
+
 ProviderProbeStatus = Literal[
     "ok",
     "invalid_key",

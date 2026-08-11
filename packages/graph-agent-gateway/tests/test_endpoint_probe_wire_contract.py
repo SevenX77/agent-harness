@@ -1,22 +1,25 @@
-"""What the endpoint and route probes put on the wire, pinned byte for byte.
+"""What the endpoint probe puts on the wire, pinned byte for byte.
 
-``probe_provider_endpoint`` and ``probe_provider_route`` do not know which call
-method they are testing. They infer a vendor from the endpoint's hostname and,
-failing that, from the name the user typed — so the recorded matrix below is
-protocol × host × endpoint id, and it shows the inference overruling the
-declared protocol: an ``anthropic_compatible`` endpoint on a deepseek host is
-probed with an OpenAI chat request, and an ``openai_compatible`` endpoint keeps
-its wire but changes its token budget field when the user names it "deepseek".
+``probe_provider_endpoint`` asks for a model list with a request this package
+builds, so the request is this package's to get right and worth recording:
+protocol × host × endpoint id, showing that the declared protocol decides the
+wire and the endpoint's name decides nothing.
 
-Replacing that inference with the call-method catalog will change some of these
-requests. That is the point, and it must be visible: re-record the baseline in
-the same commit that changes it, so the diff on this fixture is the review of
-the wire change.
+The 80 route cases that used to live here are gone. The route probe no longer
+builds a request — it asks through ``RouteChatModelFactory``, the same builder a
+run uses, so what it sends is what a run sends and is measured directly off the
+model in ``test_production_wire_contract.py``. Re-recording it here would mean
+patching a private client on three different SDK objects to replay a wire whose
+every field is already asserted somewhere it can be read without them. Of what those
+cases covered: the body moved to the production wire contract, the base url is
+asserted in ``test_route_chat_model_factory.py`` and ``test_registry_base_url.py``,
+and the request path and auth headers are the provider SDK's doing — no gateway
+code decides them any more, which is the whole point of the change.
 
 Regenerate with: uv run python <scratchpad>/dump_endpoint_wire.py
 
 Decision: docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md
-(B3, D6)
+(B3, D6, D8)
 """
 
 from __future__ import annotations
@@ -33,10 +36,7 @@ import pytest
 from graph_agent_gateway.probing import (
     probe_provider_endpoint as probe_provider_endpoint,
 )
-from graph_agent_gateway.probing import (
-    probe_provider_route as probe_provider_route,
-)
-from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute
+from graph_agent_gateway.registry import ProviderEndpoint
 
 BASELINE = json.loads(
     (Path(__file__).parent / "data" / "endpoint_probe_wire_baseline.json").read_text(
@@ -69,7 +69,7 @@ def _endpoint(protocol: str, host: str, id_key: str) -> ProviderEndpoint:
 
 
 async def _wire_for(case_key: str) -> dict[str, object]:
-    probe, protocol, host, id_key, *rest = case_key.split("|")
+    _, protocol, host, id_key = case_key.split("|")
     endpoint = _endpoint(protocol, host, id_key)
     captured: dict[str, object] = {}
 
@@ -82,26 +82,10 @@ async def _wire_for(case_key: str) -> dict[str, object]:
         captured["body"] = json.loads(request.content) if request.content else None
         return httpx.Response(200, json={"data": []}, request=request)
 
-    transport = httpx.MockTransport(handler)
-    if probe == "endpoint":
-        endpoint_result = await probe_provider_endpoint(
-            endpoint, api_key="SECRET", transport=transport
-        )
-        return {**captured, "backend": endpoint_result.backend}
-
-    route_result = await probe_provider_route(
-        endpoint,
-        ProviderRoute(
-            route_id=f"{endpoint.endpoint_id}:m-1",
-            endpoint_id=endpoint.endpoint_id,
-            route_slug="m-1",
-            provider_model_id="m-1",
-        ),
-        api_key="SECRET",
-        runtime_settings=_CASES[rest[0]],
-        transport=transport,
+    endpoint_result = await probe_provider_endpoint(
+        endpoint, api_key="SECRET", transport=httpx.MockTransport(handler)
     )
-    return {**captured, "backend": route_result.backend}
+    return {**captured, "backend": endpoint_result.backend}
 
 
 @pytest.mark.anyio

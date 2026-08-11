@@ -100,7 +100,7 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 ## 涉及 region / platform
 
 - **engine**（`graph_agent` + `apps/studio/backend/app/services/predictor.py`）：predict mock/模拟/path_diff 的归宿，重设计归 engine designer。
-- **③b gateway** `packages/graph-agent-gateway`：迁移后只留 role→route（`resolver.py`/`registry/resolver.py`）；删除 `call/predict.py` + resolver predict 特判 + `protocol.py:PredictContext`。
+- **③b gateway** `packages/graph-agent-gateway`：迁移后只留 role→route（`resolver.py`/`resolve/resolver.py`）；删除 `call/predict.py` + resolver predict 特判 + `protocol.py:PredictContext`。
 - **② Rust**：N/A。
 
 ## Gateway 侧待办(engine 方案定了再做,本期不动)

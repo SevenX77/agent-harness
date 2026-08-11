@@ -552,6 +552,32 @@ route 那 80 条**删掉,不重录**,理由不是嫌麻烦:
 
 ### D9. P3c:不可达的调用路径怎么处置(已裁决,2026-08-11)
 
+> **⛔ 订正(2026-08-11,写在最前面,因为下面整节的前提有一半是错的)**
+>
+> 本节把三样东西打成一包说"对任何合法路由都不可达",然后按这个前提全删。
+> **对 `GenericRouteChatModel` 成立**:`RouteChatModelFactory` 每个协议都有分支,
+> 兜底轮不到它。**对 `dispatch_ordinary_chat` 不成立。**
+>
+> 证据:`git show 8362d3b5^:packages/graph-agent-gateway/src/graph_agent_gateway/call/__init__.py`
+> ——第 21 行 `from graph_agent_gateway.call.dispatch import dispatch_ordinary_chat`,
+> 第 84 行 `"dispatch_ordinary_chat",` 进 `__all__`。它是 `call` 域的**公开导出**,
+> 签名直接吃 `(route: ResolvedRoute, messages, *, max_tokens, ...)`,**不经工厂**,
+> 所以"工厂每个协议都有分支"这条论证根本没覆盖到它。它在仓内确实没有调用方——
+> 但**一个面向外部消费方的公开 SDK 入口,仓内没有调用方正是常态**,那不是死的证据。
+>
+> 而且它是设计明文要求的:`docs/graph-agent-gateway/mvp1/09-inv-invocation-runtime/mvp1-alignment.md:43-53`
+> 记着 PM 2026-06-04 决策"gateway 必须格式中立,对外三张脸",第二张即
+> "**普通 chat 面**:gateway 用自己的「普通 chat 内核」(`ordinary_chat.dispatch_ordinary_chat`,
+> 序列化→调 provider→解析)调,返回**非-LangChain** 结果,给不想依赖 LangChain 的消费方",
+> PM 原话"现在市面上没有用 chat 协议的 app 了？全部都用 chatX 了？";同篇测试关键点
+> 第 ① 条就是"普通 chat 面返回非-LangChain 结果"。全仓查过,没有更晚的决策废止它。
+>
+> 所以下面那句"没用的就删"的裁决,是用户在我给的错误前提上作出的,
+> 我不把它当成删除这张脸的授权。**处置待用户裁决**,两条路记在
+> `docs/development/DELIVERY_LEDGER.md` 的 `P6-阻` 行。这也正是仓内早有的那条教训:
+> 别拿"我们自己不调它"论证"这东西没价值"。
+
+
 `call/dispatch.py`(1026 行,六个 `_call_*`)+ `call/models.py::GenericRouteChatModel`(301 行)
 + `LLMClientManager` 里构造 provider SDK 客户端的部分,对任何合法路由都不可达(证据见订正 20)。
 三个处置:
@@ -711,7 +737,7 @@ P3 不押后。它动的是所有真实推理的出口,风险最高,但"探测=�
 | 搬了家 | `registry/resolver.py`(15 篇点名) | 拆成 `resolve/resolver.py`(`resolve_role`)与 `call/resolver.py`(运行时平面) |
 | 搬了家 | `registry/error_classification.py` · `registry/lint.py` · `registry/profile_selector.py` | 同名文件在 `resolve/` |
 | 搬了家 | `registry/canonical.py` · `registry/storage.py` | 符号在 `registry/identity.py` · `registry/fingerprint.py` |
-| 被删了 | `call/dispatch.py` · `call/models.py`(P3c)· `registry/probe_contracts.py`(P1a) | 无——那条路任何合法路由都走不到 |
+| 被删了 | `call/dispatch.py` · `call/models.py`(P3c)· `registry/probe_contracts.py`(P1a) | `GenericRouteChatModel` 与 `probe_contracts`:无,那条路任何合法路由都走不到。**`dispatch_ordinary_chat` 例外——它是设计要求的公开入口,删错了,见 D9 订正与台账 `P6-阻`** |
 | 被删了 | `services/copilot_test.py` · `services/llm_import_drafts.py` · `services/llm_probe_catalog.py` · `services/migrations.py` · `models/llm_client_manager.py` | 概念多数还在(import draft / probe catalog 现在住 `registry/catalog.py`),文件不在了 |
 
 **这不是改个路径就完的事。** 第二类("被删了")意味着那几篇 alignment 文档描述的是一个

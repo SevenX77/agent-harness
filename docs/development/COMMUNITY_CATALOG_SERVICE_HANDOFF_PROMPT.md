@@ -27,7 +27,7 @@ MVP1 的 Probe Knowledge Catalog 是 local-first：
 7. `/Users/sevenx/Documents/coding/agent-harness/docs/graph-agent-gateway/mvp1/05-orch-capabilities-and-models/mvp1-alignment.md`
 8. `/Users/sevenx/Documents/coding/agent-harness/docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/mvp1-alignment.md`
 9. `/Users/sevenx/Documents/coding/agent-harness/docs/graph-agent-gateway/mvp1/08-orch-test-status-ssot/mvp1-alignment.md`
-10. 当前实现参考：`/Users/sevenx/Documents/coding/agent-harness/apps/studio/backend/app/services/llm_probe_catalog.py`、`/Users/sevenx/Documents/coding/agent-harness/packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py`、`/Users/sevenx/Documents/coding/agent-harness/apps/studio/backend/app/routers/llm.py` 中 catalog sync/share 端点。
+10. 当前实现参考（仓内相对路径；原文写的是某台机器上的 `/Users/sevenx/...` 绝对路径，换机即失效，且 `llm_probe_catalog.py` 已按职责拆开）：`apps/studio/backend/app/services/community_catalog_sync.py`（远端拉取 + 签名/分片校验）、`apps/studio/backend/app/services/community_catalog_runtime.py`（同步结果落进 credentials）、`packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py`（draft / 证据库 / 候选物化内核）、`apps/studio/backend/app/routers/llm.py` 中 catalog sync/share 端点。
 
 ## 设计目标
 

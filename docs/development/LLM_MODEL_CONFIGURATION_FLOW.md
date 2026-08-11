@@ -8,7 +8,7 @@ linked_code_paths:
   - apps/studio/backend/app/routers/llm.py
   - apps/studio/backend/app/services/llm_credentials.py
   - apps/studio/backend/app/services/llm_roles.py
-  - apps/studio/backend/app/services/llm_probe_catalog.py
+  - apps/studio/backend/app/services/community_catalog_sync.py · apps/studio/backend/app/services/community_catalog_runtime.py（原 llm_probe_catalog.py 已按职责拆开）
   - packages/graph-agent-gateway/src/graph_agent_gateway/registry/
 ---
 

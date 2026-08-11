@@ -35,8 +35,8 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 |---|---|
 | **归一化输入 → ③b** | `normalize_route_capabilities(protocol, provider_model_id, raw_caps) -> dict[str, CapabilityValue]`（`registry/capabilities.py:35-202`）。输入 = provider/API/probe 原始能力字段；输出 = normalized capability 字典，每值带 `source`（`provider_doc`/`probed_verified`/`manual`…）。**③b 看得到**"原始能力字段"（通用），**看不到**"哪个面板展示/什么色"（③a）。 |
 | **控件描述符 → ③b** | `build_runtime_setting_descriptors(route: ProviderRoute) -> dict[str, RuntimeSettingDescriptor]`（`registry/capabilities.py:205-217`，`RuntimeSettingDescriptor` schema `registry/schema.py:147-160`）。按 11 个固定 key 输出控件描述（key/类型/支持状态/上下限/默认/枚举/来源），驱动 ① intent 控件；前端只选"关心哪几种能力"，不硬编码 provider 规则。 |
-| **profile 选择 → ③b** | `select_verified_profile(route, runtime_settings) -> VerifiedProfile | None`（`registry/profile_selector.py:14-52`）。无 ready profile → 返回 `None`（走默认调用方式，不失败）；要求模态/reasoning 无 ready profile 覆盖 → 抛 `ProfileSelectionError`（无 verified profile 满足请求意图的异常）。**单 route 入参**（只接收单个 `ProviderRoute`），结构上保证不跨 route 选型。 |
-| **lint → ③b** | `lint_role_routes(role, routes) -> list[LintResult]`（`registry/lint.py:27-87`）。`LintResult`{ `severity`(warn/error)、`blocking`(bool)、`code`(`requires_probe`/incompatible…) }（`registry/schema.py:388-400`）。**只产出结果**，不改 `fallback_chain`、不补 route。 |
+| **profile 选择 → ③b** | `select_verified_profile(route, runtime_settings) -> VerifiedProfile | None`（`resolve/profile_selector.py:14-52`）。无 ready profile → 返回 `None`（走默认调用方式，不失败）；要求模态/reasoning 无 ready profile 覆盖 → 抛 `ProfileSelectionError`（无 verified profile 满足请求意图的异常）。**单 route 入参**（只接收单个 `ProviderRoute`），结构上保证不跨 route 选型。 |
+| **lint → ③b** | `lint_role_routes(role, routes) -> list[LintResult]`（`resolve/lint.py:27-87`）。`LintResult`{ `severity`(warn/error)、`blocking`(bool)、`code`(`requires_probe`/incompatible…) }（`registry/schema.py:388-400`）。**只产出结果**，不改 `fallback_chain`、不补 route。 |
 | **模型知识 → ③b（现散 ③a 待下沉）** | `project_model_group_identity(route) -> ModelGroupIdentityProjection`（组 key/组展示名/section/剥离 token，`llm_model_groups.py:43-68`）；`project_model_identity(route) -> ModelIdentityProjection`（展示名/section/置信度/unknown_tokens，`llm_model_identity.py:83-121`）；`notable_model_ids(provider, notes_dir) -> list[str]`（`llm_notable_models.py:16-37`）；`route_effective_capabilities(route) -> dict`（静态 + ready verified 合并，`llm_route_capabilities.py:10-64`）。**输出 = 模型知识 DTO**；③b **看得到**"route + endpoint 原始信息"（通用），**看不到**"family 折叠态/弃用区/展示名样式覆盖/数据源在哪个文件"（③a 应用加工）。 |
 | **capability_state 第二轴（D2，四态）** | `_capability_state(capabilities) -> Literal["unknown","callable_only","partial","known"]`（现散 ③a `routers/llm.py`，已按四态落地）。**判据 = 按每个 capability 的 `source` 算（probe-verified vs doc/list/draft 声称 vs 未知），不并入 `route.status`（availability）**。投影侧落点见 [[08-orch-test-status-ssot]] 回填。归属 = route 内在轴（③b 标准总结，现散 ③a待下沉）。机制/决策见 §F8。 |
 | **错误** | profile 无匹配 → `ProfileSelectionError`（route 级不可执行原因，由 `resolve_role` 转 skipped diagnostic 或 override fail-fast，归 [[02-orch-role-resolution]]）；blocking lint → `RegistryResolutionError`（role 级配置错误）。**不抛"找不到更好的 route"类错误**（无动态选型）。 |
@@ -56,7 +56,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 > "凡**不依赖「应用加工四件事」（UI / 产品策略 / 调用方式 / 存储介质）**，都是 ③b 公共能力——**含 model group 分组 / 6 态标准总结 / Probe Knowledge Catalog / materialize 编排内核**（这几项**反转**了旧版"归 ③a"的判断）。"
 
 > **模型知识属 gateway（available models）· README §3.B（verbatim，标注 🔻 = 公共但现散 ③a）**：
-> "**按同类分组（model group）**（🔻 现 `llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"……**品牌 / 家族识别（identity）**（🔻 现 `llm_model_identity.py`）……**Probe Knowledge Catalog + notable**（🔻 现 `probe_catalog.py` / legacy `llm_import_drafts.py` / `llm_notable_models.py`）：记住"哪些 endpoint 连通过、哪些模型存在 / 可用、哪些能力被探测证实、哪些模型值得优先试"……这是 gateway 背后可沉淀、可共享的知识资产。"
+> "**按同类分组（model group）**（🔻 现 `llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"……**品牌 / 家族识别（identity）**（🔻 现 `llm_model_identity.py`）……**Probe Knowledge Catalog + notable**（🔻 现 `probe_catalog.py` / legacy `registry/catalog.py`(原 `llm_import_drafts.py`) / `llm_notable_models.py`）：记住"哪些 endpoint 连通过、哪些模型存在 / 可用、哪些能力被探测证实、哪些模型值得优先试"……这是 gateway 背后可沉淀、可共享的知识资产。"
 
 > **编排 / 调用分离 · D2（决策）+ PM 原话（verbatim，不改一字）· 另见 [[10-inv-route-chat-model-factory]] / [[09-inv-invocation-runtime]]（同一 D2，跨模块共享，重复留底防 drift）**：
 > **决策（D2）**：把「编排（orchestration）」与「调用（invocation）」做成两个内聚模块，各有明确 API。**编排层**：输入 role_name / model_override，输出解析好的 `ResolvedRoute`(s)（protocol / base_url / credential_ref / provider_model_id / runtime settings + fallback 顺序 + 熔断/probe 决策），**只决定「该用哪条 route」，不负责真正调用**。**调用层**：输入一条 `ResolvedRoute` + messages（+ runtime params），输出 `AIMessage` / 结果，负责 build 原生 ChatX + invoke + 取结果。对 05 的含义：05 产出的 capability/profile 编排字段（`call_method_id` / `request_mapper_id` / `capabilities` / `effective_runtime_settings`）是**编排层输出**，A' 迁移时它们成为「route → 原生 ChatX 调用适配（RouteChatModelFactory，M6）」的**输入**，**而不是 gateway 自研消息转换的理由**——gateway 不再自己做消息转换，改由原生 ChatX 消费这些字段。
@@ -67,7 +67,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 **跨功能决策 + 动机**：
 
 1. **模型知识能力内核 = ③b 公共（本轮反转，原 §决策原因 #5 被否）**：把原始 model id 客观**分组（model_groups）/ 归类品牌家族（identity）/ 沉淀已知可用知识（notable）/ 合并静态+探测能力（route_capabilities）**，是 gateway 对模型数据的标准化/组织/知识沉淀，换任何调模型 app 都原样要用 → **③b 公共**（README §3.B、disposition 表行 32-35）。**被否**：原 §决策原因 #5 判"Studio model identity 和 model group 留在后端 service，原因是展示归一化属于**产品解释，不是 Gateway runtime schema**；代码注释要求 routers 调 service 不在路由内联清洗"——其中"调 service 不内联"作为代码组织约束仍对，但"属产品解释/不是 Gateway schema → 留 ③a"的**定调全部反转**为"③b 公共能力内核，现散 ③a `apps/studio/backend/app/services` 待下沉"。**留 ③a 的只有**：展示名样式覆盖、family 折叠、弃用区、notable 数据源路径注入、identity 展示投影渲染。**被否（原 §1 #5）**：原 §1 #5 把它们整体判成"显示/解释层、不改变 runtime route_id、属产品解释"——其能力内核被错划 ③a，现反转为 ③b 公共。**关键边界（判据，目标语义）**：**model group / identity / notable / route_capabilities = 模型知识的客观加工**（分组/归类/合并都不依赖 UI/产品策略/调用方式/存储介质），换任何 app 都要 → **③b 公共**。
-2. **选择显式 route chain 而不是动态能力搜索**（原 #1 保留）：让 role 执行可复现、可解释、可由 Studio 审核；MVP1 README §3.E 已把 lint 定为“不替应用选型”，当前代码也只遍历显式 `fallback_chain[*].route_id`,不会按 provider/capability/price/latency/availability 搜索替代 route（`registry/schema.py:264-273`, `registry/lint.py:27-87`）。**注**：下沉 model_groups/identity/notable/route_capabilities 到 ③b **≠ 引入动态选型**——它们是**分类/知识/能力描述**，runtime 仍按显式 `route_id` 执行（README §3.E lint「不替应用选型」、disposition §0）。
+2. **选择显式 route chain 而不是动态能力搜索**（原 #1 保留）：让 role 执行可复现、可解释、可由 Studio 审核；MVP1 README §3.E 已把 lint 定为“不替应用选型”，当前代码也只遍历显式 `fallback_chain[*].route_id`,不会按 provider/capability/price/latency/availability 搜索替代 route（`registry/schema.py:264-273`, `resolve/lint.py:27-87`）。**注**：下沉 model_groups/identity/notable/route_capabilities 到 ③b **≠ 引入动态选型**——它们是**分类/知识/能力描述**，runtime 仍按显式 `route_id` 执行（README §3.E lint「不替应用选型」、disposition §0）。
 3. **A' 不改 05 核心分类/归一化规则，只迁调用层**（原 §已实现/差异 #5 保留）：MVP1 A' 不要求重写 05 的归一化/分类规则，而是要求调用层换 ChatX 时**继续保留这些编排字段和投影**；selected profile 从 client manager dispatch 输入改为 `ResolvedRoute` 上的调用方法提示，交 RouteChatModelFactory/provider profile 适配层消费（依据 = D2 编排/调用分离，完整决策 + PM 原话见上方「编排 / 调用分离」；调用层落点 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]）。
 
 **跨功能测试关键点**：
@@ -95,26 +95,26 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 
 ### F2 lint（只 warn/block，不驱动选型）（`lint_role_routes`）
 
-- **机制 / 数据流**：role 解析时 → 〔**lint ③b**〕`lint_role_routes` warn/block。lint 是配置守门。`lint_role_routes`（对显式 role fallback chain 逐 route 检查能力要求和 runtime 边界的函数）用于产出 warn/error/blocking，blocking 可让解析失败，但 **lint 不改变 fallback_chain，也不根据 capability 动态补 route**（`registry/lint.py:27-87`，`registry/resolver.py:116-122`）。resolver 对已解析出来的 route 列表调用 `lint_role_routes`；如果有 blocking lint，抛 `RegistryResolutionError`（registry 解析失败异常），否则把 lint_results 带到 `ResolvedRole`（解析后的 role 元数据和有序 routes 的结构）（`registry/resolver.py:116-132`）。**判据 ③b**。
+- **机制 / 数据流**：role 解析时 → 〔**lint ③b**〕`lint_role_routes` warn/block。lint 是配置守门。`lint_role_routes`（对显式 role fallback chain 逐 route 检查能力要求和 runtime 边界的函数）用于产出 warn/error/blocking，blocking 可让解析失败，但 **lint 不改变 fallback_chain，也不根据 capability 动态补 route**（`resolve/lint.py:27-87`，`resolve/resolver.py:116-122`）。resolver 对已解析出来的 route 列表调用 `lint_role_routes`；如果有 blocking lint，抛 `RegistryResolutionError`（registry 解析失败异常），否则把 lint_results 带到 `ResolvedRole`（解析后的 role 元数据和有序 routes 的结构）（`resolve/resolver.py:116-132`）。**判据 ③b**。
   - **关键边界（判据，目标语义）**：lint = 配置守门，不按能力补 route。
-- **决策 + 动机**：**lint 设计成 warn/block**（原 #4 保留）：capability 缺失可能只是需要 probe，不能自动推断"另一个 route 更好"；error 级缺失才 blocking 并给 `requires_probe`（`registry/lint.py:45-57`，`registry/lint.py:74-86`）。
+- **决策 + 动机**：**lint 设计成 warn/block**（原 #4 保留）：capability 缺失可能只是需要 probe，不能自动推断"另一个 route 更好"；error 级缺失才 blocking 并给 `requires_probe`（`resolve/lint.py:45-57`，`resolve/lint.py:74-86`）。
 - **原话**：
   > **lint 不替应用选型 · README §3.E（verbatim）**：
-  > "**lint 校验**（✅ `registry/lint.py:lint_role_routes`）：检查路线配置是否满足能力要求，只 warn / block，不替应用选型。"
+  > "**lint 校验**（✅ `resolve/lint.py:lint_role_routes`）：检查路线配置是否满足能力要求，只 warn / block，不替应用选型。"
 - **测试点**：**lint 只产结果不改链**：blocking lint → `RegistryResolutionError`，但 `fallback_chain` 顺序/成员**不变**；非 blocking → 进 `ResolvedRole.lint_results`（防 lint 退化成动态选型）。
-- **status**：已实现——lint 已覆盖缺 capability、capability incompatible、未验证 error capability 以及 runtime setting 超界/不支持（`registry/lint.py:39-87`、`:90-332`）。
-- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/lint.py`（lint）+ `registry/resolver.py`（调用使用链），已在包内。
+- **status**：已实现——lint 已覆盖缺 capability、capability incompatible、未验证 error capability 以及 runtime setting 超界/不支持（`resolve/lint.py:39-87`、`:90-332`）。
+- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/lint.py`（lint）+ `resolve/resolver.py`（调用使用链），已在包内。
 
 ### F3 profile_selector（单 route 内"怎么调"）（`select_verified_profile`）
 
-- **机制 / 数据流**：role 解析时：`resolve_role` 按 `fallback_chain` 取 route → 〔**profile 选择 ③b**〕`select_verified_profile` 选单 route 内调用方式。profile selection 是单 route 内的"调用方法选择"。`select_verified_profile`（在当前 route 的 ready profiles 中选 method_id/request_mapper_id 的函数）用于在当前 route 选调用方式，**不跨 route 找替代模型**（`registry/profile_selector.py:14-52`）。**判据**：单 route 内选择 = ③b 公共。用户把 model profile 应用到 role 后，role 保存精确 `fallback_chain[*].route_id`；`RoleEntry`（保存可执行 role 的显式 fallback_chain 和 lint_requirements 的结构）用于保存这个显式链和 lint requirements（`registry/schema.py:264-273`）。resolver 解析 role 时按 fallback_chain 顺序取 route，调用 `select_verified_profile` 选当前 route 的 verified profile，并把 profile id、capability、method_id、request_mapper_id 写入 `ResolvedRoute`（一条 runtime-ready route candidate 的结构）（`registry/resolver.py:55-113`）。**判据 ③b**。
+- **机制 / 数据流**：role 解析时：`resolve_role` 按 `fallback_chain` 取 route → 〔**profile 选择 ③b**〕`select_verified_profile` 选单 route 内调用方式。profile selection 是单 route 内的"调用方法选择"。`select_verified_profile`（在当前 route 的 ready profiles 中选 method_id/request_mapper_id 的函数）用于在当前 route 选调用方式，**不跨 route 找替代模型**（`resolve/profile_selector.py:14-52`）。**判据**：单 route 内选择 = ③b 公共。用户把 model profile 应用到 role 后，role 保存精确 `fallback_chain[*].route_id`；`RoleEntry`（保存可执行 role 的显式 fallback_chain 和 lint_requirements 的结构）用于保存这个显式链和 lint requirements（`registry/schema.py:264-273`）。resolver 解析 role 时按 fallback_chain 顺序取 route，调用 `select_verified_profile` 选当前 route 的 verified profile，并把 profile id、capability、method_id、request_mapper_id 写入 `ResolvedRoute`（一条 runtime-ready route candidate 的结构）（`resolve/resolver.py:55-113`）。**判据 ③b**。
   - **关键边界（判据，目标语义）**：profile selection = 单 route 内"怎么调"，不跨 route 选"调谁"。
-- **决策 + 动机**：**verified profile 只在单 route 内选择调用方法**（原 #3 保留）：能支持同一模型 route 的不同 protocol/method 实测结果，但**不会把一条失败 route 替换成另一条未知 route**；`select_verified_profile` 只接收单个 `ProviderRoute` 的签名固化了这条边界（`registry/profile_selector.py:14-19`，`packages/graph-agent-gateway/tests/test_registry_profile_selector.py:246-281`）。
+- **决策 + 动机**：**verified profile 只在单 route 内选择调用方法**（原 #3 保留）：能支持同一模型 route 的不同 protocol/method 实测结果，但**不会把一条失败 route 替换成另一条未知 route**；`select_verified_profile` 只接收单个 `ProviderRoute` 的签名固化了这条边界（`resolve/profile_selector.py:14-19`，`packages/graph-agent-gateway/tests/test_registry_profile_selector.py:246-281`）。
 - **测试点**：
   - **profile 选择不跨 route**：单 route 无 ready profile → 返回 `None`（不失败、不去别的 route 找）；要 reasoning 但本 route 无 reasoning profile → `ProfileSelectionError`（不替换 route）。
   - **profile 排序稳定**：default → fallback_rank → profile_id 三键排序，多次解析结果一致（`profile_selector.py:69-73`）。
-- **status**：已实现——profile selection 已按 ready status、required modalities、reasoning intent 和 default/fallback_rank/profile_id 稳定排序（`registry/profile_selector.py:21-52`、`:69-73`）。输出作 `ResolvedRoute` 调用方法提示。
-- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/profile_selector.py`（profile 选择）+ `registry/resolver.py`，已在包内。
+- **status**：已实现——profile selection 已按 ready status、required modalities、reasoning intent 和 default/fallback_rank/profile_id 稳定排序（`resolve/profile_selector.py:21-52`、`:69-73`）。输出作 `ResolvedRoute` 调用方法提示。
+- **归属**：**③b** `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/profile_selector.py`（profile 选择）+ `resolve/resolver.py`，已在包内。
 
 ### F4 model_groups 分组（`project_model_group_identity`）
 
@@ -154,7 +154,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 - **机制 / 数据流**：route capabilities → 〔**合并 ③b（现散 ③a）**〕`route_effective_capabilities`（并入 ready verified profile facts）→ 供描述符/投影/lint 复用。`route_effective_capabilities`（把静态声明能力 + ready verified profile 派生能力合并的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`apps/studio/backend/app/services/llm_route_capabilities.py:10-64`）。
   - **关键边界（判据，目标语义）**：route_capabilities = 模型知识的客观加工（合并不依赖 UI/产品策略/调用方式/存储介质），换任何 app 都要 → ③b 公共。
 - **决策 + 动机**：能力合并归属反转见「跨功能设计依据」决策 #1（route_capabilities 与 model_groups/identity/notable 同批反转为 ③b 公共能力内核，现散 ③a 待下沉）。
-- **疑点（原 #2）**：resolver 是否应使用 `route_effective_capabilities` 合并 ready verified profile facts 后再 lint，目前源码没有这样做；这可能影响 verified profile 对 thinking capability 的补强（`apps/studio/backend/app/services/llm_route_capabilities.py:10-19`，`registry/resolver.py:104-116`）。下沉 `route_effective_capabilities` 到 ③b 后，resolver 与 Studio 投影可共用同一份合并能力。
+- **疑点（原 #2）**：resolver 是否应使用 `route_effective_capabilities` 合并 ready verified profile facts 后再 lint，目前源码没有这样做；这可能影响 verified profile 对 thinking capability 的补强（`apps/studio/backend/app/services/llm_route_capabilities.py:10-19`，`resolve/resolver.py:104-116`）。下沉 `route_effective_capabilities` 到 ③b 后，resolver 与 Studio 投影可共用同一份合并能力。
 - **status**：能力合并下沉 gateway；可供 resolver lint 复用 = target。
 - **归属**：**③b 公共能力内核（现散 ③a 待下沉）** `apps/studio/backend/app/services/llm_route_capabilities.py`（静态+探测能力合并）。
 
@@ -179,7 +179,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 
 - **代码下沉**（后续工程，非本轮）：`llm_model_groups.py` / `llm_model_identity.py` / `llm_notable_models.py` / `llm_route_capabilities.py` 的能力内核 → gateway 包；family 折叠 / 弃用区 / 展示名样式 / notable 数据源路径注入留 studio（disposition 下沉清单行 58-64）。
 - **待办（原 #1）**：A' 实现 RouteChatModelFactory 时，需明确 `ResolvedRoute.call_method_id` / `request_mapper_id` 与新 provider profile init-kwargs 的映射边界，避免把 verified profile 误用成跨 route 动态选型（`registry/schema.py:432-435`；映射边界归调用层 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]，依据 = D2 + F6 provider init-kwargs profile）。
-- **疑点（原 #3）**：`select_verified_profile` 的 reasoning 判断基于 profile 文本包含 thinking/reasoning，不是结构化 enum；若后续 profile capability 命名变化，需补测试保护（`registry/profile_selector.py:55-66`）。
+- **疑点（原 #3）**：`select_verified_profile` 的 reasoning 判断基于 profile 文本包含 thinking/reasoning，不是结构化 enum；若后续 profile capability 命名变化，需补测试保护（`resolve/profile_selector.py:55-66`）。
 
 ## 交叉引用（链接，不复制）
 
@@ -197,12 +197,12 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 > 保留原"已实现/差异"全部条目 + 判据反转标注。逐功能 status 见各 ### F<n>；下表为全模块差异汇总。
 
 1. **已实现**：capability 归一化已覆盖 token limit 别名、modalities、runtime setting descriptors、tool/vision/structured output 和 Anthropic thinking 规则（`registry/capabilities.py:55-201`）。
-2. **已实现**：profile selection 已按 ready status、required modalities、reasoning intent 和 default/fallback_rank/profile_id 稳定排序（`registry/profile_selector.py:21-52`、`:69-73`）。
-3. **已实现**：lint 已覆盖缺 capability、capability incompatible、未验证 error capability 以及 runtime setting 超界/不支持（`registry/lint.py:39-87`、`:90-332`）。
+2. **已实现**：profile selection 已按 ready status、required modalities、reasoning intent 和 default/fallback_rank/profile_id 稳定排序（`resolve/profile_selector.py:21-52`、`:69-73`）。
+3. **已实现**：lint 已覆盖缺 capability、capability incompatible、未验证 error capability 以及 runtime setting 超界/不支持（`resolve/lint.py:39-87`、`:90-332`）。
 4. **已实现**：Studio registry response 已输出 lint_results、model_groups、route_runtime_settings、role_effective_runtime_settings（`apps/studio/backend/app/routers/llm.py:1361-1383`）。
 5. **与 baseline 差异**：MVP1 A' 不要求重写 05 模块的核心分类/归一化规则，而是要求在调用层换 ChatX 时继续保留这些编排字段和投影（依据 = D2 编排/调用分离，见「跨功能设计依据」编排 / 调用分离）。
-6. **与 baseline 差异**：当前 selected profile 仍服务于 client manager 的 provider-specific dispatch；MVP1 中它应作为 `ResolvedRoute` 上的调用方法提示，交给 RouteChatModelFactory/provider profile 适配层消费（`registry/resolver.py:94-113`；依据 = D2，落点 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]）。
-7. **与 baseline 差异**：05 不新增 capability-based automatic routing；这点不是缺功能，而是架构边界（README §3.E，`registry/lint.py:27-87`, `registry/resolver.py:55-132`）。
+6. **与 baseline 差异**：当前 selected profile 仍服务于 client manager 的 provider-specific dispatch；MVP1 中它应作为 `ResolvedRoute` 上的调用方法提示，交给 RouteChatModelFactory/provider profile 适配层消费（`resolve/resolver.py:94-113`；依据 = D2，落点 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]）。
+7. **与 baseline 差异**：05 不新增 capability-based automatic routing；这点不是缺功能，而是架构边界（README §3.E，`resolve/lint.py:27-87`, `resolve/resolver.py:55-132`）。
 8. **与 baseline 差异（本轮反转）**：原 baseline §差异 #4 把 Studio 投影定调为"显示/解释层，不是 runtime identity"，并据此暗示其归 ③a；本轮按判据反转——`model_groups`/`identity`/`notable`/`route_capabilities` 的**能力内核属 ③b 公共，现散 ③a 待下沉**，只有展示渲染留 ③a。runtime 精确执行保存的 route chain 这一点不变（`apps/studio/backend/app/services/llm_model_groups.py:50-53`）。
 
 ## 覆盖代码（含覆盖率）（模块级证据附录）
@@ -214,8 +214,8 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 | 文件 | 归属 | MVP1 目标 |
 |---|---|---|
 | `registry/capabilities.py`（`normalize_route_capabilities` 归一化 + `build_runtime_setting_descriptors` 控件描述符） | **③b**（已在包内） | 保留归一化规则与 11 控件描述符；A' 换 ChatX 不动 |
-| `registry/profile_selector.py`（`select_verified_profile` 单 route 内选 ready profile） | **③b**（已在包内） | 保留单 route 选择语义；输出作 `ResolvedRoute` 调用方法提示 |
-| `registry/lint.py`（`lint_role_routes` 显式链 lint，不选型） | **③b**（已在包内） | 保留 warn/block，守"不动态选型"边界 |
+| `resolve/profile_selector.py`（`select_verified_profile` 单 route 内选 ready profile） | **③b**（已在包内） | 保留单 route 选择语义；输出作 `ResolvedRoute` 调用方法提示 |
+| `resolve/lint.py`（`lint_role_routes` 显式链 lint，不选型） | **③b**（已在包内） | 保留 warn/block，守"不动态选型"边界 |
 | `services/llm_model_identity.py`（`project_model_identity` 品牌/家族识别） | **③b 能力内核（现散 ③a 待下沉）** | 识别内核下沉 gateway；展示名样式覆盖留 ③a |
 | `services/llm_model_groups.py`（`project_model_group_identity` 同模型折叠成组卡） | **③b 能力内核（现散 ③a 待下沉）** | 分组内核下沉 gateway；family 折叠/弃用区展示留 ③a |
 | `services/llm_notable_models.py`（`notable_model_ids` 已知可用知识） | **③b 能力内核（现散 ③a 待下沉）** | 知识库下沉 gateway；数据源路径注入 + 展示面板留 ③a |
@@ -234,9 +234,9 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 - `registry/capabilities.py:20-32` — `RUNTIME_SETTING_DESCRIPTORS`（固定前端 runtime setting 控件集合的常量）。**③b**。
 - `registry/capabilities.py:35-202` — `normalize_route_capabilities`（归一化 route capabilities 的函数）。**③b**。
 - `registry/capabilities.py:205-269` — `build_runtime_setting_descriptors`（生成前端控件描述的函数）。**③b**。
-- `registry/profile_selector.py:14-52` — `select_verified_profile`（单 route 内选 verified profile 的函数）。**③b**。
-- `registry/lint.py:27-87` — `lint_role_routes`（role route lint，只产出结果的函数）。**③b**。
-- `registry/resolver.py:72-132` — `resolve_role`（把 selected profile 和 lint_results 装入 resolved role 的函数）。**③b**。
+- `resolve/profile_selector.py:14-52` — `select_verified_profile`（单 route 内选 verified profile 的函数）。**③b**。
+- `resolve/lint.py:27-87` — `lint_role_routes`（role route lint，只产出结果的函数）。**③b**。
+- `resolve/resolver.py:72-132` — `resolve_role`（把 selected profile 和 lint_results 装入 resolved role 的函数）。**③b**。
 - `apps/studio/backend/app/services/llm_model_identity.py:83-121` — `project_model_identity`（Studio 模型身份投影函数）。**③b 内核（现散 ③a）**。
 - `apps/studio/backend/app/services/llm_model_groups.py:43-68` — `project_model_group_identity`（Studio 模型组投影函数）。**③b 内核（现散 ③a）**。
 - `apps/studio/backend/app/services/llm_notable_models.py:16-37` — `notable_model_ids`（从文档提取 notable models 的函数）。**③b 内核（现散 ③a）**。

@@ -173,7 +173,7 @@ never as a public default, and never with a client-embedded trigger token.
 #### This changes the client read path — it is a migration, not "unchanged"
 
 Today the client pulls a **single `llm_probe_catalog.json`** and merges it into the
-local evidence library (`apps/studio/backend/app/services/llm_import_drafts.py`;
+local evidence library (kernel now in `packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py`, formerly `apps/studio/backend/app/services/llm_import_drafts.py`;
 `/catalog/sync` in `routers/llm.py`). Phase 2a's manifest + shard + ETag + verify
 flow is a **new client capability** and writes into a **disposable cache separate
 from the local evidence store**. It must be designed as a migration step, not

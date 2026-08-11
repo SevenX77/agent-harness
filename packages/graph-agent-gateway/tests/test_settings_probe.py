@@ -57,7 +57,7 @@ def _route(*, protocol: str = "openai_compatible"):
 
 
 def _settings(route: Any):
-    from graph_agent_gateway.call_settings import ModelDefaults, compose_call_settings
+    from graph_agent_gateway.call import ModelDefaults, compose_call_settings
 
     return compose_call_settings(
         route,
@@ -75,14 +75,14 @@ def _settings(route: Any):
 
 
 def _real_factory():
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from graph_agent_gateway.call import RouteChatModelFactory
 
     return RouteChatModelFactory(credential_provider=StaticCredentialProvider())
 
 
 def test_the_probe_asks_with_the_settings_the_call_will_use() -> None:
     """Same request, same builder, one token — read off the finished payload."""
-    from graph_agent_gateway.settings_probe import build_probe_model
+    from graph_agent_gateway.call import build_probe_model
 
     route = _route()
     model = build_probe_model(route, _settings(route), factory=_real_factory())
@@ -96,7 +96,7 @@ def test_the_probe_asks_with_the_settings_the_call_will_use() -> None:
 
 def test_the_probe_leaves_the_tools_out_of_the_question_it_asks() -> None:
     """Tools are not settings, and binding them would ask a different question."""
-    from graph_agent_gateway.settings_probe import build_probe_model
+    from graph_agent_gateway.call import build_probe_model
 
     route = _route()
     model = build_probe_model(route, _settings(route), factory=_real_factory())
@@ -138,7 +138,7 @@ class _Behaviour:
 
 
 def _probe(route: Any, factory: Any):
-    from graph_agent_gateway import settings_probe
+    from graph_agent_gateway.call import pre_call_probe as settings_probe
 
     return settings_probe.probe_call_settings(route, _settings(route), factory=factory)
 

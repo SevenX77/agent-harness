@@ -119,14 +119,14 @@ B7 那个不发请求就写证据的分支删除。
 ```
 graph_agent_gateway/
   __init__.py     极薄:只 re-export 各域已定的公共 API
-  errors.py       结构化异常
+  errors.py       结构化异常(跨域共用词汇,不是域)
+  events.py       事件 DTO(跨域共用词汇,不是域)
   registry/       真相:凭据/端点/路由/能力的定义、身份、边界、存储 port、状态投影
   resolve/        解析:从角色/请求推出一条具体路由链(lint / profile / handoff / fallback / 错误分类)
   role/           角色物化:角色 → 已贴合这条路由的调用设置
   dialect/        方言:五家 provider 的请求/响应形状(生产与探测唯一共用实现)
   call/           调用:客户端、chat model、dispatch、本次调用的设置与下场、predict 拦截
   probing/        测量:问什么(questions)、谁执行(executors)、怎么判(judge)、写进哪(evidence)
-  observe/        事件与追踪
 ```
 
 保留 `registry` 这个名字:它是 AGENTS.md 与 MVP1 设计源里已定义的术语("credential / route / registry
@@ -162,8 +162,9 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
 | `registry/provider_probe.py` | `probing/wire.py` | P1/P3 再拆成 dialect + questions |
 | `settings_probe.py` | `call/pre_call_probe.py` | 见下方订正 5(依赖方向不允许它进 probing) |
 | `registry/probe_contracts.py` | `probing/contracts.py` | |
-| `events.py` `tracing.py` | `observe/` | |
-| `exceptions.py` | `errors.py` | |
+| `events.py` | 根部原位 | 见下方订正 7(它是跨域词汇,不是域) |
+| `tracing.py` | `call/tracing.py` | 见下方订正 7 |
+| `exceptions.py` | `errors.py` | 根部,同样是跨域词汇 |
 
 #### D5 的 2026-08-11 订正(P1a 实施中发现,已按新写法落地)
 
@@ -216,7 +217,18 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
    B6 那条病的治法是**共用同一份方言与同一个裁决器**(P2/P3),不是把两个模块塞进同一个目录——
    共处一室不等于共用实现。
 
-6. **文档里的旧路径不在每期回写。** 全仓 docs 约 120 处提到被搬走的模块名,其中多处在带哈希锁的
+6. **没有 `observe/` 这个域;事件 DTO 与异常留在根部当共用词汇(P1c 查依赖方向时发现)。**
+   初稿把 `events.py` + `tracing.py` 划成 `observe/` 域。但 `tracing.py:81`
+   `emit_call_settings_event(outcomes: Sequence[SettingOutcome])` 是**拿一次调用的事实去造事件**,
+   而 `SettingOutcome` 来自 `settings_outcome`,后者又依赖 `call_settings`;
+   同时 `gateway_chat_model` 要调 tracing 发事件。三条连起来就是 call ⇄ observe 的包级循环。
+   根因是划分标准错了:**`observe/` 想圈的不是一组共同不变量,而是"这些代码看起来都跟观测有关"**——
+   按名字相似分家,正是 D4 明令要避免的。改法:`tracing.py` 与 `settings_outcome.py` 跟着
+   `call/` 走(发生在一次调用之内、也只描述这次调用),`events.py` 与 `errors.py` 留在根部,
+   和 `__init__.py` 一样是**跨域共用词汇**——纯 DTO / 异常类型,不依赖任何域,谁都可以用。
+   域是有不变量的责任单位;词汇不是域。
+
+7. **文档里的旧路径不在每期回写。** 全仓 docs 约 120 处提到被搬走的模块名,其中多处在带哈希锁的
    audited MVP1 设计文件里。树还要再动四期,每期扫一遍是五倍工作量且反复触发哈希锁重钉;
    改为**树定形后一次扫完**(台账新增 P1z)。
 
@@ -234,7 +246,7 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
 | 期 | 内容 | 验收判据 |
 |---|---|---|
 | P0 | 本决议落盘 | 文档合并 |
-| P1 | 按域成树的纯搬迁(自底向上,一域一 PR:registry → resolve/role → call → probing → observe) | 全门禁绿;新增深导入 lint 测试通过;`git diff` 内除 import 与文件位置外无逻辑改动 |
+| P1 | 按域成树的纯搬迁(自底向上,一域一 PR:registry → resolve/role → call;probing 并入 P2 一起做) | 全门禁绿;新增深导入 lint 测试通过;`git diff` 内除 import 与文件位置外无逻辑改动 |
 | P2 | 抽 `dialect/` + `judge`,**探测侧先切** | 现有探测测试全绿(它们就是护栏);新增 wire 契约测试:每家拼出的请求体逐字段断言 |
 | P3 | 生产 `dispatch` 切到同一组 dialect | 切换前先给现有 6 个 `_call_*` 补齐请求体契约测试(录制当前 body 作为基线),切换后逐字段不变;真机跑一次完整 run |
 | P4 | `questions`/`runner` 落地,四个 HTTP 入口改成选题;effort 测量归位到"测试模型";删 B7 分支 | 真机点四个 Test 各一次,产出逐项报告(动作/预期/实测/截图);effort 档位在"测试模型"后可见变化 |

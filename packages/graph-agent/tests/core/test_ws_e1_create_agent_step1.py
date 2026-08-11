@@ -714,7 +714,7 @@ def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
     # One builder now serves both the probe and the call, so blocking it is
     # enough to prove predict mode never reaches a provider.
     with patch(
-        "graph_agent_gateway.gateway_chat_model.RouteChatModelFactory.build",
+        "graph_agent_gateway.call.chat_model.RouteChatModelFactory.build",
         side_effect=AssertionError("provider"),
     ):
         response = bound_model.invoke([HumanMessage(content="predict")])

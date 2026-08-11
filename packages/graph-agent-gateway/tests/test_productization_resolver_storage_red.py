@@ -11,7 +11,7 @@ GATEWAY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_model_resolver_no_longer_exposes_file_or_snapshot_bypass() -> None:
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.call import ModelResolver
 
     params = inspect.signature(ModelResolver.__init__).parameters
     bypass_params = {"credentials_path", "roles_path", "registry_snapshot"}
@@ -21,7 +21,7 @@ def test_model_resolver_no_longer_exposes_file_or_snapshot_bypass() -> None:
 
 
 def test_legacy_registry_snapshot_loader_is_removed_from_gateway_owner_path() -> None:
-    resolver_source = (GATEWAY_ROOT / "src" / "graph_agent_gateway" / "resolver.py").read_text(encoding="utf-8")
+    resolver_source = (GATEWAY_ROOT / "src" / "graph_agent_gateway" / "call" / "resolver.py").read_text(encoding="utf-8")
 
     assert "def load_registry_snapshot" not in resolver_source
 

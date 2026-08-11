@@ -483,7 +483,7 @@ def test_resolve_copilot_runtime_uses_gateway_model_resolver(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.call import ModelResolver
 
     route_id = "anthropic-official:claude-sonnet"
     credentials = LLMCredentialsFile(

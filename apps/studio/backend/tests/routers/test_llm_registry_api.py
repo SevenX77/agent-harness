@@ -176,7 +176,7 @@ def test_role_effective_runtime_settings_uses_gateway_model_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.core.adapters.gateway import GatewayAdapter
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.call import ModelResolver
 
     route_id = "openai-direct:gpt-5"
     credentials = LLMCredentialsFile(

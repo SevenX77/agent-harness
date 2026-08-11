@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from graph_agent_gateway.call import ModelResolver
 from graph_agent_gateway.registry import (
     ProviderEndpoint,
     ProviderRoute,
@@ -9,7 +10,6 @@ from graph_agent_gateway.registry import (
     RoleEntry,
     RoleRouteEntry,
 )
-from graph_agent_gateway.resolver import ModelResolver
 from langchain_core.messages import HumanMessage
 from pydantic import SecretStr
 
@@ -107,5 +107,5 @@ def test_model_resolver_ignores_predict_context_when_none() -> None:
     # Resolving with predict_context=None should return a regular GatewayChatModel
     model = resolver.resolve("mock-role", predict_context=None)
     
-    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.call import GatewayChatModel
     assert type(model) is GatewayChatModel

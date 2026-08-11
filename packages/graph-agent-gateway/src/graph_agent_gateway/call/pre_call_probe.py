@@ -28,10 +28,10 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from graph_agent_gateway.call_settings import CallSettings
+from graph_agent_gateway.call.factory import provider_request_keys
+from graph_agent_gateway.call.settings import CallSettings
 from graph_agent_gateway.registry import ResolvedRoute
 from graph_agent_gateway.resolve import classify_exception
-from graph_agent_gateway.route_chat_model_factory import provider_request_keys
 
 logger = logging.getLogger(__name__)
 

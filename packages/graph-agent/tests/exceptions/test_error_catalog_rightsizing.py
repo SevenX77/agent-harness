@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from graph_agent_gateway import exceptions as gateway_exceptions
+from graph_agent_gateway import errors as gateway_exceptions
 
 import graph_agent
 from graph_agent.core import exceptions as core_exceptions

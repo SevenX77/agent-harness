@@ -28,7 +28,7 @@ class EmptySkillResolver:
 
 
 def test_model_resolver_protocol_signature_is_complete() -> None:
-    from graph_agent_gateway.protocol import ModelResolverProtocol
+    from graph_agent_gateway.call import ModelResolverProtocol
 
     signature = inspect.signature(ModelResolverProtocol.resolve)
     params = signature.parameters
@@ -58,7 +58,7 @@ def test_model_resolver_protocol_signature_is_complete() -> None:
 
 
 def test_model_resolver_protocol_resolve_routes_signature_is_complete() -> None:
-    from graph_agent_gateway.protocol import ModelResolverProtocol
+    from graph_agent_gateway.call import ModelResolverProtocol
 
     signature = inspect.signature(ModelResolverProtocol.resolve_routes)
     params = signature.parameters
@@ -76,7 +76,7 @@ def test_model_resolver_protocol_resolve_routes_signature_is_complete() -> None:
 
 
 def test_model_resolver_protocol_resolve_routes_returns_route_chain_annotation() -> None:
-    from graph_agent_gateway.protocol import ModelResolverProtocol
+    from graph_agent_gateway.call import ModelResolverProtocol
 
     signature = inspect.signature(ModelResolverProtocol.resolve_routes)
 
@@ -84,9 +84,9 @@ def test_model_resolver_protocol_resolve_routes_returns_route_chain_annotation()
 
 
 def test_model_resolver_resolve_routes_returns_resolved_route_chain() -> None:
+    from graph_agent_gateway.call import ModelResolver
     from graph_agent_gateway.registry import InMemoryConfigTruthStore
     from graph_agent_gateway.resolve import ResolvedRouteChain, RouteSkipDiagnostic
-    from graph_agent_gateway.resolver import ModelResolver
 
     store = InMemoryConfigTruthStore()
     user_id = "route-handoff-test"
@@ -148,7 +148,7 @@ def test_model_resolver_resolve_routes_returns_resolved_route_chain() -> None:
 
 
 def test_protocol_is_runtime_checkable_for_di_validation() -> None:
-    from graph_agent_gateway.protocol import ModelResolverProtocol
+    from graph_agent_gateway.call import ModelResolverProtocol
 
     class FakeResolver:
         def resolve(
@@ -187,7 +187,7 @@ def test_protocol_is_runtime_checkable_for_di_validation() -> None:
 
 
 def test_protocol_rejects_chat_only_resolver_without_route_api() -> None:
-    from graph_agent_gateway.protocol import ModelResolverProtocol
+    from graph_agent_gateway.call import ModelResolverProtocol
 
     class ChatOnlyResolver:
         def resolve(

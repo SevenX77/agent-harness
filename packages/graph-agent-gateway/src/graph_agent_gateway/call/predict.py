@@ -10,8 +10,8 @@ from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.protocol import PredictContext
+from graph_agent_gateway.call.chat_model import GatewayChatModel
+from graph_agent_gateway.call.protocol import PredictContext
 from graph_agent_gateway.registry import ResolvedRole
 
 

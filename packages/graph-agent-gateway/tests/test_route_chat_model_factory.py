@@ -58,7 +58,7 @@ def _route(
 
 
 def _factory():
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from graph_agent_gateway.call import RouteChatModelFactory
 
     return RouteChatModelFactory(
         credential_provider=StaticCredentialProvider(
@@ -155,9 +155,9 @@ def test_deepseek_openai_payload_replays_multiturn_assistant_reasoning_content()
 def test_factory_applies_protocol_endpoint_and_exact_model_profiles_with_caller_wins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import graph_agent_gateway.route_chat_model_factory as factory_module
-    from graph_agent_gateway import provider_profiles
-    from graph_agent_gateway.provider_profiles import ProviderProfile, register_provider_profile
+    import graph_agent_gateway.call.factory as factory_module
+    from graph_agent_gateway.call import ProviderProfile, register_provider_profile
+    from graph_agent_gateway.call import profiles as provider_profiles
 
     class FakeChatOpenAI:
         def __init__(self, **kwargs: object) -> None:
@@ -252,7 +252,7 @@ def test_factory_builds_anthropic_chat_model_with_canonical_root_base_url() -> N
 def test_factory_remaps_anthropic_temperature_from_authored_two_point_scale(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import graph_agent_gateway.route_chat_model_factory as factory_module
+    import graph_agent_gateway.call.factory as factory_module
 
     class FakeChatAnthropic:
         def __init__(self, **kwargs: object) -> None:
@@ -309,7 +309,7 @@ def test_factory_carries_reasoning_effort_to_google_under_the_name_it_uses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Gemini names the same dial ``thinking_level``."""
-    import graph_agent_gateway.route_chat_model_factory as factory_module
+    import graph_agent_gateway.call.factory as factory_module
 
     captured: dict[str, object] = {}
 
@@ -344,7 +344,7 @@ def test_factory_keeps_openai_temperature_on_authored_two_point_scale() -> None:
 def test_factory_omits_unset_temperature_from_provider_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import graph_agent_gateway.route_chat_model_factory as factory_module
+    import graph_agent_gateway.call.factory as factory_module
 
     class FakeChatOpenAI:
         def __init__(self, **kwargs: object) -> None:
@@ -412,8 +412,8 @@ def test_factory_lazy_imports_chat_google_generative_ai(monkeypatch: pytest.Monk
 def test_factory_reports_missing_google_extra_at_build_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import graph_agent_gateway.route_chat_model_factory as factory_module
-    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    import graph_agent_gateway.call.factory as factory_module
+    from graph_agent_gateway.call import RouteChatModelFactory
 
     real_import_module = factory_module.importlib.import_module
 
@@ -467,7 +467,7 @@ def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
 
 
 def test_client_manager_no_longer_exposes_legacy_ordinary_chat_dispatch_helpers() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.call import LLMClientManager
 
     legacy_helpers = {
         "dispatch_provider_call",
@@ -489,8 +489,8 @@ def test_client_manager_no_longer_exposes_legacy_ordinary_chat_dispatch_helpers(
 def test_generic_chat_model_default_dispatcher_uses_ordinary_chat_core(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway import ordinary_chat
-    from graph_agent_gateway.models import GenericRouteChatModel
+    from graph_agent_gateway.call import GenericRouteChatModel
+    from graph_agent_gateway.call import dispatch as ordinary_chat
     from graph_agent_gateway.registry import ResolvedRoute
 
     route = ResolvedRoute.model_construct(
@@ -534,7 +534,7 @@ def test_generic_chat_model_default_dispatcher_uses_ordinary_chat_core(
 
 
 def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_context() -> None:
-    from graph_agent_gateway.models import GenericRouteChatModel
+    from graph_agent_gateway.call import GenericRouteChatModel
     from graph_agent_gateway.registry import ResolvedRoute
 
     route = ResolvedRoute.model_construct(
@@ -603,7 +603,7 @@ def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_co
 
 
 def test_generic_chat_model_runs_langchain_create_agent_tool_loop() -> None:
-    from graph_agent_gateway.models import GenericRouteChatModel
+    from graph_agent_gateway.call import GenericRouteChatModel
     from graph_agent_gateway.registry import ResolvedRoute
     from langchain.agents import create_agent
 

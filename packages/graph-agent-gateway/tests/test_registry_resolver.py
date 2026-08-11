@@ -135,7 +135,7 @@ def _snapshot_with_stale_provider_route(
 
 
 def test_resolver_preserves_declared_route_order_and_role_metadata() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     resolved = resolve_role(_snapshot(), "graph_agent")
 
@@ -167,7 +167,7 @@ def test_resolver_materializes_bundle_reference_with_role_delta_settings() -> No
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import materialize_role_entry, resolve_role
+    from graph_agent_gateway.resolve import materialize_role_entry, resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -277,7 +277,7 @@ def test_resolver_materializes_bundle_reference_with_role_delta_settings() -> No
 
 def test_resolver_propagates_snapshot_version_to_resolved_routes() -> None:
     from graph_agent_gateway.registry import SnapshotVersion
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot = _snapshot()
     snapshot.snapshot_version = SnapshotVersion(
@@ -298,7 +298,7 @@ def test_resolver_propagates_snapshot_version_to_resolved_routes() -> None:
 
 def test_snapshot_version_mismatch_keeps_verified_profile_historical_not_live_ready() -> None:
     from graph_agent_gateway.registry import VerifiedProfile
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot, current_version = _snapshot_with_stale_provider_route(
         verified_profiles=[
@@ -323,7 +323,7 @@ def test_snapshot_version_mismatch_keeps_verified_profile_historical_not_live_re
 
 def test_snapshot_version_mismatch_ignores_stale_capability_runtime_defaults() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot, current_version = _snapshot_with_stale_provider_route(
         capabilities={
@@ -345,7 +345,7 @@ def test_snapshot_version_mismatch_ignores_stale_capability_runtime_defaults() -
 
 def test_snapshot_version_mismatch_ignores_stale_capability_blocking_lint() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot, _current_version = _snapshot_with_stale_provider_route(
         capabilities={
@@ -403,7 +403,7 @@ def test_fallback_chain_skips_each_unusable_reason_and_keeps_later_route() -> No
         RoleRouteEntry,
         VerifiedProfile,
     )
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     def endpoint(endpoint_id: str, *, api_key: str | None = "secret") -> ProviderEndpoint:
         return ProviderEndpoint(
@@ -514,7 +514,7 @@ def test_resolve_role_raises_registry_error_with_skipped_summary_when_all_routes
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -558,7 +558,7 @@ def test_resolve_role_raises_registry_error_with_skipped_summary_when_all_routes
 
 def test_resolve_role_rejects_empty_fallback_chain_in_registry_layer() -> None:
     from graph_agent_gateway.registry import RegistrySnapshot, RoleEntry
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     snapshot = RegistrySnapshot(roles={"graph_agent": RoleEntry(fallback_chain=[])})
 
@@ -576,7 +576,7 @@ def test_route_override_bad_route_fails_fast_without_fallback_skip() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -636,7 +636,7 @@ def test_route_override_lint_blocked_route_fails_fast() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -691,7 +691,7 @@ def test_route_override_lint_blocked_route_fails_fast() -> None:
 
 def test_resolver_rejects_missing_or_disabled_routes_without_dynamic_matching() -> None:
     from graph_agent_gateway.registry import RoleEntry, RoleRouteEntry
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     snapshot = _snapshot()
     snapshot.roles["broken"] = RoleEntry(
@@ -705,7 +705,7 @@ def test_resolver_rejects_missing_or_disabled_routes_without_dynamic_matching() 
 
 
 def test_route_override_must_be_exact_route_id() -> None:
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     resolved = resolve_role(
         _snapshot(),
@@ -727,7 +727,7 @@ def test_resolver_accepts_credential_ref_only_for_future_no_secret_snapshots() -
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={

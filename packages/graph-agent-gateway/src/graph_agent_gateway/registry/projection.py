@@ -1,15 +1,19 @@
+"""What one route looks like to whoever is reading the registry.
+
+Six states, derived from what is stored about the endpoint, the route and the
+credential — never from a live call. Turning that projection into a role's
+runnable chain is a different question with a different owner: see
+``graph_agent_gateway.role``.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from graph_agent_gateway.registry.schema import (
-    ProviderRoute,
-    ProviderUiState,
-    ResolvedRoute,
-)
+from graph_agent_gateway.registry.schema import ProviderRoute, ProviderUiState
 
 
 class ProviderModelStateProjection(BaseModel):
@@ -31,42 +35,6 @@ class ProviderModelStateProjection(BaseModel):
             if self.reason_code is None:
                 raise ValueError("reason_code must be provided when ui_state is 'failed'")
         return self
-
-
-class RouteWarning(BaseModel):
-    route_id: str
-    warning_code: str
-    message: str
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class MaterializedRole(BaseModel):
-    role: str
-    fallback_chain: list[ResolvedRoute]
-    warnings: list[RouteWarning]
-    projections: dict[str, ProviderModelStateProjection]
-    error_code: str | None = None
-    error_payload: dict[str, Any] | None = None
-
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def validate_fallback_chain_error(self) -> MaterializedRole:
-        if not self.fallback_chain:
-            if self.error_code != "resource.no_available_route" or not self.error_payload:
-                raise ValueError(
-                    "Empty fallback_chain requires error_code='resource.no_available_route' and non-empty error_payload"
-                )
-        return self
-
-
-class MaterializeRoleRequest(BaseModel):
-    user_id: str
-    role: str
-    include_diagnostics: bool = True
-
-    model_config = ConfigDict(extra="forbid")
 
 
 def project_route_state(
@@ -128,48 +96,3 @@ def project_provider_route_ui_state(
         )
     return route.model_copy(update={"ui_state": projection.ui_state})
 
-
-def materialize_role(
-    *,
-    role: str,
-    routes: list[ResolvedRoute],
-    projections: dict[str, ProviderModelStateProjection],
-) -> MaterializedRole:
-    fallback_chain = []
-    warnings = []
-
-    for route in routes:
-        proj = projections.get(route.route_id)
-        if proj is None:
-            fallback_chain.append(route)
-            continue
-
-        if proj.ui_state in ("failed", "off"):
-            continue
-        elif proj.ui_state == "cooling_down":
-            warnings.append(
-                RouteWarning(
-                    route_id=route.route_id,
-                    warning_code="route.cooling_down",
-                    message=f"Route {route.route_id} is cooling down",
-                )
-            )
-        else:
-            fallback_chain.append(route)
-
-    if not fallback_chain:
-        return MaterializedRole(
-            role=role,
-            fallback_chain=[],
-            warnings=warnings,
-            projections=projections,
-            error_code="resource.no_available_route",
-            error_payload={"role": role},
-        )
-
-    return MaterializedRole(
-        role=role,
-        fallback_chain=fallback_chain,
-        warnings=warnings,
-        projections=projections,
-    )

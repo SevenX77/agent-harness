@@ -6,13 +6,13 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from graph_agent_gateway.registry.error_classification import (
+from graph_agent_gateway.resolve.error_classification import (
     ErrorActionClassification,
     ErrorContext,
     StreamPhase,
     classify_error_context,
 )
-from graph_agent_gateway.route_handoff import ResolvedRouteChain
+from graph_agent_gateway.resolve.handoff import ResolvedRouteChain
 
 
 class FallbackDecision(BaseModel):

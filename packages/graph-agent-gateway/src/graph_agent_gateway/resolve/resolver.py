@@ -4,15 +4,10 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from graph_agent_gateway.registry.contracts import CredentialDescriptor, CredentialProviderProtocol
-from graph_agent_gateway.registry.fingerprint import compute_credential_fingerprint
-from graph_agent_gateway.registry.lint import lint_role_routes
-from graph_agent_gateway.registry.profile_selector import (
-    ProfileSelectionError,
-    select_verified_profile,
-)
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     CapabilityValue,
+    CredentialDescriptor,
+    CredentialProviderProtocol,
     EffectiveRuntimeSetting,
     ModelBundle,
     ProviderEndpoint,
@@ -25,6 +20,12 @@ from graph_agent_gateway.registry.schema import (
     RuntimeSettings,
     SkippedRoute,
     VerifiedProfile,
+    compute_credential_fingerprint,
+)
+from graph_agent_gateway.resolve.lint import lint_role_routes
+from graph_agent_gateway.resolve.profile_selector import (
+    ProfileSelectionError,
+    select_verified_profile,
 )
 
 EXECUTABLE_ROUTE_STATUSES = {"verified", "unverified_manual"}

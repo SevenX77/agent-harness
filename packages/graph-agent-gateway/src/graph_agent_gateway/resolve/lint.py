@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent_gateway.registry.schema import LintResult, ProviderRoute, RoleEntry, RoleRouteEntry
+from graph_agent_gateway.registry import LintResult, ProviderRoute, RoleEntry, RoleRouteEntry
 
 LINT_TO_CAPABILITY = {
     "thinking": "thinking_protocol",

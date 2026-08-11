@@ -1196,6 +1196,7 @@ def test_registry_and_role_materialization_use_credentials_evidence_refs_for_his
                 "warnings": [],
                 "skipped_provider_details": [],
             },
+            error_code=None,
         )
 
     monkeypatch.setattr(gateway_module, "gateway_materialize_role", _spy, raising=False)

@@ -21,7 +21,7 @@ def _resolved_route(route_id: str):
 
 
 def _chain():
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain
+    from graph_agent_gateway.resolve import ResolvedRouteChain
 
     return ResolvedRouteChain(
         role="graph_agent",
@@ -44,7 +44,7 @@ def _classification(action: str, *, status_code: int | None = None) -> dict[str,
 
 
 def test_public_decide_fallback_switches_to_next_route() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )
@@ -63,7 +63,7 @@ def test_public_decide_fallback_switches_to_next_route() -> None:
 
 
 def test_public_chain_decide_fallback_retries_current_route_from_classification_contract() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )
@@ -83,7 +83,7 @@ def test_public_chain_decide_fallback_retries_current_route_from_classification_
 
 
 def test_public_decide_fallback_fail_fast_from_classification_contract() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )
@@ -105,7 +105,7 @@ def test_public_decide_fallback_fail_fast_from_classification_contract() -> None
 
 
 def test_public_decide_fallback_give_up_is_terminal_error() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )
@@ -126,7 +126,7 @@ def test_public_decide_fallback_give_up_is_terminal_error() -> None:
 
 
 def test_public_decide_fallback_retries_retryable_current_route() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )
@@ -148,7 +148,7 @@ def test_public_decide_fallback_retries_retryable_current_route() -> None:
 
 
 def test_public_decide_fallback_skips_failed_routes_and_reports_exhaustion() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )
@@ -174,7 +174,7 @@ def test_public_decide_fallback_skips_failed_routes_and_reports_exhaustion() -> 
 
 
 def test_public_decide_fallback_empty_route_ids_is_canonical_terminal_error() -> None:
-    from graph_agent_gateway.fallback_decision import (
+    from graph_agent_gateway.resolve import (
         FallbackDecisionRequest,
         decide_fallback,
     )

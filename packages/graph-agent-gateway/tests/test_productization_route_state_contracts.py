@@ -27,7 +27,7 @@ def _resolved_route():
 
 
 def test_resolved_route_chain_handoff_dto_uses_role_routes_and_skipped() -> None:
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
+    from graph_agent_gateway.resolve import ResolvedRouteChain, RouteSkipDiagnostic
 
     skipped = RouteSkipDiagnostic(
         route_id="anthropic:claude",
@@ -50,7 +50,7 @@ def test_resolved_route_chain_handoff_dto_uses_role_routes_and_skipped() -> None
 
 
 def test_empty_route_chain_requires_explicit_error_payload() -> None:
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain
+    from graph_agent_gateway.resolve import ResolvedRouteChain
 
     with pytest.raises(ValidationError):
         ResolvedRouteChain(role="graph_agent", routes=[], skipped=[])
@@ -69,7 +69,7 @@ def test_empty_route_chain_requires_explicit_error_payload() -> None:
 
 def test_resolved_role_to_route_chain_projects_empty_role_terminal_error() -> None:
     from graph_agent_gateway.registry import ResolvedRole, RuntimePolicy, SkippedRoute
-    from graph_agent_gateway.route_handoff import resolved_role_to_route_chain
+    from graph_agent_gateway.resolve import resolved_role_to_route_chain
 
     chain = resolved_role_to_route_chain(
         ResolvedRole(
@@ -94,7 +94,7 @@ def test_resolved_role_to_route_chain_projects_empty_role_terminal_error() -> No
 
 
 def test_fallback_decision_action_contract_and_switch_route_target() -> None:
-    from graph_agent_gateway.fallback_decision import FallbackDecision
+    from graph_agent_gateway.resolve import FallbackDecision
 
     retry = FallbackDecision(action="retry_same", reason_code="transient_error")
     switch = FallbackDecision(
@@ -115,7 +115,7 @@ def test_fallback_decision_action_contract_and_switch_route_target() -> None:
 
 
 def test_give_up_fallback_decision_requires_explicit_terminal_error() -> None:
-    from graph_agent_gateway.fallback_decision import FallbackDecision
+    from graph_agent_gateway.resolve import FallbackDecision
 
     with pytest.raises(ValidationError):
         FallbackDecision(action="give_up", reason_code="all_routes_failed")
@@ -132,28 +132,8 @@ def test_give_up_fallback_decision_requires_explicit_terminal_error() -> None:
     assert decision.error_payload["failed_routes"] == ["openai:gpt-5"]
 
 
-def test_materialized_role_empty_fallback_chain_requires_explicit_error() -> None:
-    from graph_agent_gateway.registry import MaterializedRole
-
-    with pytest.raises(ValidationError):
-        MaterializedRole(
-            role="graph_agent",
-            fallback_chain=[],
-            warnings=[],
-            projections={},
-        )
-
-    materialized = MaterializedRole(
-        role="graph_agent",
-        fallback_chain=[],
-        warnings=[],
-        projections={},
-        error_code="resource.no_available_route",
-        error_payload={"role": "graph_agent"},
-    )
-
-    assert materialized.error_code == "resource.no_available_route"
-    assert materialized.error_payload == {"role": "graph_agent"}
+# "An empty fallback chain must say why" now lives with the one role
+# materialization that produces it: tests/test_role_materialization_terminal_error.py.
 
 
 @pytest.mark.parametrize(
@@ -373,9 +353,9 @@ def test_credential_evidence_refs_do_not_override_terminal_or_cooling_states(
 
 
 def test_role_materialization_uses_credential_evidence_refs_for_historical_ready(monkeypatch) -> None:
-    import graph_agent_gateway.role_materialization as role_materialization
+    import graph_agent_gateway.role.materialization as role_materialization
     from graph_agent_gateway.registry import EvidenceRecord, ProviderEndpoint, ProviderModelStateProjection
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     captured: dict[str, Any] = {}
 

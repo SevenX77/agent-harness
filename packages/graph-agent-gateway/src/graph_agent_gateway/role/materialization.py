@@ -1,10 +1,27 @@
+"""A role, resolved into the routes that will actually be tried, in order.
+
+Every route the role names is looked up, projected, fitted to what it will
+take, and either enters the chain or is reported as excluded. The result is one
+answer to one question — can this role run, and down which path — so a chain
+that came out empty carries the reason it is empty rather than leaving the
+caller to discover it at the moment of the call.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, model_validator
+
 from graph_agent_gateway.registry import CapabilityValue, RoleRouteEntry, effort_bounds, fit, project_route_state
+
+# The one terminal outcome materialization can reach: every route this role
+# names was excluded, so there is nothing left to try. The runtime raises the
+# same code when a call finds no route, and Studio already has human text for
+# it — materialization now reaches that verdict before anything is spent.
+NO_AVAILABLE_ROUTE = "resource.no_available_route"
 
 _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_failed"]
 # Phase 3 / problem 4: only probe-verified evidence embedded on a route projects
@@ -20,10 +37,28 @@ class MaterializeRoleRequest:
     now: datetime | None = None
 
 
-@dataclass(frozen=True)
-class MaterializedRoleResult:
+class MaterializedRole(BaseModel):
+    """What a role resolved to, and — when it resolved to nothing — why.
+
+    ``materialization_report`` is where the per-route detail lives (which route
+    was considered, what was fitted, what was warned about). ``error_code`` is
+    the verdict on the whole role, not a second copy of that detail.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     fallback_chain: list[RoleRouteEntry]
     materialization_report: dict[str, Any]
+    error_code: str | None = None
+
+    @model_validator(mode="after")
+    def _an_empty_chain_says_why(self) -> MaterializedRole:
+        if not self.fallback_chain and self.error_code is None:
+            raise ValueError(
+                "A role with an empty fallback_chain must carry an error_code: "
+                "an empty list is not an answer to whether the role can run."
+            )
+        return self
 
 
 @dataclass(frozen=True)
@@ -34,7 +69,7 @@ class _ProjectionFacts:
     ui_detail: str | None = None
 
 
-def materialize_role(request: MaterializeRoleRequest) -> MaterializedRoleResult:
+def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
     role = request.role
     credentials = request.credentials
     health_store = request.health_store
@@ -131,9 +166,10 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRoleResult:
                 )
             )
 
-    return MaterializedRoleResult(
+    return MaterializedRole(
         fallback_chain=fallback_chain,
         materialization_report=report,
+        error_code=None if fallback_chain else NO_AVAILABLE_ROUTE,
     )
 
 

@@ -81,7 +81,7 @@ def _snapshot(route: object, *, protocol: str = "anthropic_compatible", runtime_
 
 
 def test_resolver_maps_preferred_thinking_to_anthropic_adaptive_profile() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     route = _route(
         "claude-opus-4-7",
@@ -121,7 +121,7 @@ def test_resolver_maps_preferred_thinking_to_anthropic_adaptive_profile() -> Non
 
 
 def test_resolver_maps_manual_thinking_profile_defaults_to_budget_tokens() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     route = _route(
         "claude-opus-4-1-20250805",
@@ -151,7 +151,7 @@ def test_resolver_maps_manual_thinking_profile_defaults_to_budget_tokens() -> No
 
 
 def test_required_thinking_rejects_text_only_verified_profiles() -> None:
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     route = _route(
         "claude-haiku-4-5",
@@ -165,7 +165,7 @@ def test_required_thinking_rejects_text_only_verified_profiles() -> None:
 
 
 def test_openai_defaults_to_responses_when_responses_and_chat_profiles_both_work() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     route = _route(
         "gpt-5",
@@ -197,7 +197,7 @@ def test_openai_defaults_to_responses_when_responses_and_chat_profiles_both_work
 
 
 def test_openai_required_reasoning_does_not_downgrade_to_chat_text_profile() -> None:
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+    from graph_agent_gateway.resolve import RegistryResolutionError, resolve_role
 
     route = _route(
         "gpt-5.3-chat-latest",
@@ -221,7 +221,7 @@ def test_openai_required_reasoning_does_not_downgrade_to_chat_text_profile() -> 
 
 
 def test_ark_chat_only_model_selects_ark_chat_profile() -> None:
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     route = _route(
         "doubao-1-5-pro-32k-250115",
@@ -245,7 +245,7 @@ def test_ark_chat_only_model_selects_ark_chat_profile() -> None:
 
 def test_selector_can_require_image_input_and_thinking_for_deepseek_compatibility() -> None:
     from graph_agent_gateway.registry import RuntimeSettings
-    from graph_agent_gateway.registry.profile_selector import select_verified_profile
+    from graph_agent_gateway.resolve import select_verified_profile
 
     route = _route(
         "deepseek-v4-pro",

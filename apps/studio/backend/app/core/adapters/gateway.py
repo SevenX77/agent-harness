@@ -5,15 +5,6 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from graph_agent_gateway.fallback_decision import (
-    FallbackDecision as GatewayFallbackDecision,
-)
-from graph_agent_gateway.fallback_decision import (
-    FallbackDecisionRequest as GatewayFallbackDecisionRequest,
-)
-from graph_agent_gateway.fallback_decision import (
-    decide_fallback as gateway_decide_fallback,
-)
 from graph_agent_gateway.registry import (
     EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
@@ -127,13 +118,6 @@ from graph_agent_gateway.registry import (
 from graph_agent_gateway.registry import (
     resolve_credential as gateway_resolve_credential,
 )
-from graph_agent_gateway.registry.lint import lint_role_routes as lint_role_routes
-from graph_agent_gateway.registry.profile_selector import (
-    ProfileSelectionError as ProfileSelectionError,
-)
-from graph_agent_gateway.registry.profile_selector import (
-    select_verified_profile as select_verified_profile,
-)
 from graph_agent_gateway.registry.provider_probe import (
     EndpointProbeResult as EndpointProbeResult,
 )
@@ -161,18 +145,34 @@ from graph_agent_gateway.registry.provider_probe import (
 from graph_agent_gateway.registry.provider_probe import (
     test_provider_route as test_provider_route,
 )
-from graph_agent_gateway.registry.resolver import RegistryResolutionError as RegistryResolutionError
+from graph_agent_gateway.resolve import (
+    FallbackDecision as GatewayFallbackDecision,
+)
+from graph_agent_gateway.resolve import (
+    FallbackDecisionRequest as GatewayFallbackDecisionRequest,
+)
+from graph_agent_gateway.resolve import (
+    ProfileSelectionError as ProfileSelectionError,
+)
+from graph_agent_gateway.resolve import RegistryResolutionError as RegistryResolutionError
+from graph_agent_gateway.resolve import ResolvedRouteChain
+from graph_agent_gateway.resolve import (
+    decide_fallback as gateway_decide_fallback,
+)
+from graph_agent_gateway.resolve import lint_role_routes as lint_role_routes
+from graph_agent_gateway.resolve import (
+    select_verified_profile as select_verified_profile,
+)
 
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.resolver import ModelResolver as ModelResolver
 from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTerminalError
-from graph_agent_gateway.role_materialization import (
+from graph_agent_gateway.role import (
     MaterializeRoleRequest as GatewayMaterializeRoleRequest,
 )
-from graph_agent_gateway.role_materialization import (
+from graph_agent_gateway.role import (
     materialize_role as gateway_materialize_role,
 )
-from graph_agent_gateway.route_handoff import ResolvedRouteChain
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
@@ -308,7 +308,13 @@ class GatewayAdapter:
         return role.model_copy(
             update={
                 "fallback_chain": materialized.fallback_chain,
-                "materialization_report": materialized.materialization_report,
+                # The verdict travels with the detail: a role that resolved to
+                # nothing must reach the API saying so, not as an empty list the
+                # caller only understands after trying to run it.
+                "materialization_report": {
+                    **materialized.materialization_report,
+                    "error_code": materialized.error_code,
+                },
             }
         )
 

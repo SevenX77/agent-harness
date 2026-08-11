@@ -17,7 +17,7 @@ from pydantic import SecretStr
 
 def test_refs_read_route_evidence_probe_verified_ignoring_metadata() -> None:
     from graph_agent_gateway.registry import EvidenceRecord
-    from graph_agent_gateway.role_materialization import _route_credential_evidence_refs
+    from graph_agent_gateway.role.materialization import _route_credential_evidence_refs
 
     route = SimpleNamespace(
         evidence=[
@@ -36,7 +36,7 @@ def test_refs_read_route_evidence_probe_verified_ignoring_metadata() -> None:
 
 def test_refs_fall_back_to_evidence_id_without_content_hash() -> None:
     from graph_agent_gateway.registry import EvidenceRecord
-    from graph_agent_gateway.role_materialization import _route_credential_evidence_refs
+    from graph_agent_gateway.role.materialization import _route_credential_evidence_refs
 
     route = SimpleNamespace(
         evidence=[EvidenceRecord(evidence_id="probe-y", evidence_type="probe", trust_state="probe-verified")],
@@ -48,7 +48,7 @@ def test_refs_fall_back_to_evidence_id_without_content_hash() -> None:
 
 def test_refs_exclude_non_probe_verified() -> None:
     from graph_agent_gateway.registry import EvidenceRecord
-    from graph_agent_gateway.role_materialization import _route_credential_evidence_refs
+    from graph_agent_gateway.role.materialization import _route_credential_evidence_refs
 
     route = SimpleNamespace(
         evidence=[
@@ -65,7 +65,7 @@ def test_materialize_role_keeps_endpoint_failed_route_with_probe_verified_eviden
     # The core regression: endpoint failed + probe-verified route.evidence must
     # project historical_ready (not failed), so the route stays in the chain.
     from graph_agent_gateway.registry import EvidenceRecord
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = SimpleNamespace(
         route_id="openai:gpt-5",

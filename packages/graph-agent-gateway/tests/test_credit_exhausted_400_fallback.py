@@ -42,7 +42,7 @@ _ANTHROPIC_CREDIT_PAYLOAD = {
 
 
 def test_credit_exhausted_400_allows_fallback() -> None:
-    from graph_agent_gateway.registry.error_classification import classify_exception
+    from graph_agent_gateway.resolve import classify_exception
 
     result = classify_exception(
         _ProviderError("bad request", 400, _ANTHROPIC_CREDIT_PAYLOAD), route_id="r"
@@ -55,7 +55,7 @@ def test_credit_exhausted_400_allows_fallback() -> None:
 
 
 def test_plain_bad_request_400_still_fails_fast() -> None:
-    from graph_agent_gateway.registry.error_classification import classify_exception
+    from graph_agent_gateway.resolve import classify_exception
 
     result = classify_exception(
         _ProviderError("Error code: 400 - malformed request body", 400), route_id="r"

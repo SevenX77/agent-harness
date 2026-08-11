@@ -70,7 +70,7 @@ def test_resolver_produces_effective_runtime_settings_with_sources() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -143,7 +143,7 @@ def test_profile_applied_runtime_defaults_keep_profile_source_without_runtime_de
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.resolve import resolve_role
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -199,7 +199,7 @@ def test_runtime_settings_are_linted_against_capability_bounds() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.lint import lint_role_routes
+    from graph_agent_gateway.resolve import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[
@@ -290,7 +290,7 @@ def test_runtime_settings_lint_covers_non_reasoning_controls() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.registry.lint import lint_role_routes
+    from graph_agent_gateway.resolve import lint_role_routes
 
     role = RoleEntry(
         fallback_chain=[

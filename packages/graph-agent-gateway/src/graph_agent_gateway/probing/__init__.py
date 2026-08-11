@@ -20,6 +20,7 @@ from .judge import (
     provider_response_message,
     vendor_error_code,
 )
+from .questions import Answered, Question, accepted_effort_levels, ask_each, effort_questions
 from .results import EndpointProbeResult, RouteProbeResult
 from .wire import (
     OfficialCallMethod,
@@ -30,11 +31,16 @@ from .wire import (
 )
 
 __all__ = [
+    "Answered",
     "EndpointProbeResult",
     "OfficialCallMethod",
     "ProviderAnswer",
     "ProviderProbeStatus",
+    "Question",
     "RouteProbeResult",
+    "accepted_effort_levels",
+    "ask_each",
+    "effort_questions",
     "endpoint_probe_base_url",
     "model_capabilities",
     "model_ids",

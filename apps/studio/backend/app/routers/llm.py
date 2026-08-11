@@ -27,17 +27,20 @@ from app.core.adapters.gateway import (
     ProfileSelectionError,
     ProviderModelStateProjection,
     ProviderProbeBackend,
+    Question,
     RegistryResolutionError,
     ResolvedRoute,
     ResourceTerminalError,
     RouteProbeResult,
     RuntimeSettings,
     VerifiedProfile,
+    accepted_effort_levels,
+    ask_each,
     build_runtime_setting_descriptors,
     call_method_client_compatibility,
     call_method_ids_for_endpoint,
     documented_effort_levels,
-    effort_probe_candidates,
+    effort_questions,
     lint_role_routes,
     measured_effort_capability,
     normalize_route_capabilities,
@@ -227,9 +230,6 @@ ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE = "Route has no verified invocation profil
 _EFFORT_CAPABILITY_KEY = "reasoning_effort"
 # Failures that are about the connection or the account rather than the level
 # asked for, so they measure nothing about which levels a route sells.
-_EFFORT_PROBE_INCONCLUSIVE_STATUSES = frozenset(
-    {"rate_limited", "quota_exceeded", "network_error", "timeout", "invalid_key"}
-)
 _THINKING_CAPABILITY_KEYS = (
     "thinking_protocol",
     "thinking",
@@ -3348,26 +3348,20 @@ async def _accepted_effort_levels(
 ) -> tuple[str, ...] | None:
     """The candidate levels this route answered, asked one request at a time.
 
-    ``None`` when something other than the level itself went wrong — a rate
-    limit or a dead socket says nothing about which levels the route sells, and
-    recording it as "refused" would delete levels it does sell.
+    Which levels are worth asking, and what a batch of answers settles, are the
+    gateway's to know. What Studio adds is the asking itself: every request goes
+    through the atom so a disabled endpoint is still refused and the UI still
+    sees the probe start and stop.
     """
-    candidates = effort_probe_candidates(endpoint.protocol)
-    results = await asyncio.gather(
-        *(
-            _probe_route_generation_atom(
-                endpoint,
-                route,
-                runtime_settings={"reasoning": {"enabled": True, "effort": level}},
-            )
-            for level in candidates
+
+    async def ask(question: Question) -> RouteProbeResult:
+        return await _probe_route_generation_atom(
+            endpoint,
+            route,
+            runtime_settings=dict(question.runtime_settings),
         )
-    )
-    if any(result.status in _EFFORT_PROBE_INCONCLUSIVE_STATUSES for result in results):
-        return None
-    return tuple(
-        level for level, result in zip(candidates, results, strict=True) if result.status == "ok"
-    )
+
+    return accepted_effort_levels(await ask_each(effort_questions(endpoint.protocol), ask))
 
 
 async def _role_test_provider_result(

@@ -3,7 +3,7 @@ module: 04-orch-registry-schema
 doc: mvp1-alignment
 status: drafted
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RegistrySnapshot/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:canonicalize_model · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py · apps/studio/backend/app/models/llm_config.py:to_registry_snapshot
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RegistrySnapshot/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:canonicalize_model · apps/studio/backend/app/models/llm_config.py:to_registry_snapshot · packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py:chat_plainly/PlainAnswer
 units: [registry-schema-contract]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -71,13 +71,13 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
   10. `SkippedRoute`(用途:表示 resolver 跳过 route 的诊断记录)已定义 route_id、reason_code、message、from_override,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:450-465`;`ResolvedRole`(用途:表示解析后的 role 元数据和有序 routes)已保存 `skipped_diagnostics`,使 `resolve_role` 的跳过语义可观测,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:468-480`。snapshot provenance 的 schema/resolver 回填已落地:`ProviderRoute.snapshot_version` 记录 evidence 版本(`registry/schema.py:218`),`RegistrySnapshot.snapshot_version` 记录当前物化版本(`registry/schema.py:409`),`ResolvedRoute.snapshot_version` 记录 resolver 本次传播出的版本(`registry/schema.py:441`)。
 
-  11. `models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)继续不承载 schema;`GenericRouteChatModel` 已作为调用层通用 wrapper 落地,负责把 `ResolvedRoute` 交给 ordinary-chat dispatcher,具体 ChatX/provider 构造落在调用层模块而不是 registry schema 模块,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:24-301` 与 `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:19-82`。
+  11. **调用层不承载 registry schema**——这条边界不变,守它的对象换了:`models.py`/`GenericRouteChatModel` 已删,今天调用层的 DTO 是 `call/plain.py:PlainAnswer`(一次调用的**结果**形状),它同样不进 registry schema。具体 ChatX/provider 构造落在调用层模块而不是 registry schema 模块,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py` 与 `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:19-82`。
 
 - **决策 + 动机**：
   1. **schema 以 Gateway runtime 为源头(③b 公共，无反转)**：MVP1 架构把 `ResolvedRoute/ResolvedRole` 定为编排↔调用交接物,见 `docs/graph-agent-gateway/mvp1/README.md:13-18`。schema 是 gateway 数据模型，原 review 已判对 ③b，本轮不变。schema 要以 Gateway runtime 为源头,是因为 MVP1 架构把 `ResolvedRoute/ResolvedRole` 定为编排↔调用交接物,见 `docs/graph-agent-gateway/mvp1/README.md:13-18`。
   2. **Studio wrapper 保留 display/authoring 字段但投影时剥离(③a 加工)**：为了同时满足 UI 可编辑性和 runtime 严格性;`RolesData.to_registry_snapshot` 正是这条边界,见 `apps/studio/backend/app/models/llm_config.py:279-296`。display 字段绑死 UI → ③a；投影剥离保证 gateway runtime snapshot 不被污染。Studio wrapper 保留 display/authoring 字段但投影时剥离,是为了同时满足 UI 可编辑性和 runtime 严格性;`RolesData.to_registry_snapshot`(用途:把 Studio credentials + roles join 成 gateway runtime snapshot)正是这条边界,见 `apps/studio/backend/app/models/llm_config.py:279-296`。
   3. **用 route-chain schema 替代旧 models/providers/active_model schema**：为了让 runtime identifier 变成精确 `route_id`,避免 provider/model 模糊匹配;`ProviderRoute` 强制 `route_id == endpoint_id:route_slug`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:239-244`。
-  4. **`models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)不承担 registry schema**：为了把「编排数据契约」(`ResolvedRoute/ResolvedRole` 这套 schema)和「调用实现适配」(ChatX/model wrapper)分开。这呼应 client 层 A' 重设计 D2「编排/调用分离」(完整逻辑 + PM 原话见本段「原话」D2);编排侧产出纯数据 route,调用侧吃 route 构造 ChatX/model wrapper,两者各自内聚。当前 `models.py` 已提供 `GenericRouteChatModel`,它属于调用层 wrapper,不进入 registry schema;具体 provider ChatX 构造由 `RouteChatModelFactory` 承接([[09-inv-invocation-runtime]]/[[10-inv-route-chat-model-factory]])。
+  4. **调用层的 wrapper / DTO 不承担 registry schema**(原文以 `models.py:GenericRouteChatModel` 为例,该文件已删;今天的例子是 `call/plain.py:PlainAnswer`)：为了把「编排数据契约」(`ResolvedRoute/ResolvedRole` 这套 schema)和「调用实现适配」(ChatX/model wrapper)分开。这呼应 client 层 A' 重设计 D2「编排/调用分离」(完整逻辑 + PM 原话见本段「原话」D2);编排侧产出纯数据 route,调用侧吃 route 构造 ChatX/model wrapper,两者各自内聚。当前 `models.py` 已提供 `GenericRouteChatModel`,它属于调用层 wrapper,不进入 registry schema;具体 provider ChatX 构造由 `RouteChatModelFactory` 承接([[09-inv-invocation-runtime]]/[[10-inv-route-chat-model-factory]])。
 
 - **原话**：
 
@@ -87,7 +87,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
   > **D3 gateway = 可复用服务，数据结构由它定义**(client 层 A' 重设计决策 D3)："前端不归gateway管 ... gateway只管提供服务 ... 要考虑复用其他app" + README §2「存储介质(应用做)：数据结构与读写由它(gateway)定义，存到哪个介质由应用注入」→ schema 是 gateway 定义的数据结构(③b)，存储位置才是 ③a。D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4、[[03-orch-credentials-endpoints]] §4。
 
-- **status**：v4 credentials 与 route registry 已是 Studio active schema、v2/v3 roles 已是 route-chain schema、Studio display fields 已不进 runtime snapshot(剥离边界已对)；snapshot provenance 的 schema/resolver 回填已落地(见 F4;具体版本戳填充由接入侧负责)；`ResolvedRole.skipped_diagnostics` 已落地;`GenericRouteChatModel` 已在 `models.py` 落地,RouteChatModelFactory/provider profiles 属调用层而非 registry schema。
+- **status**：v4 credentials 与 route registry 已是 Studio active schema、v2/v3 roles 已是 route-chain schema、Studio display fields 已不进 runtime snapshot(剥离边界已对)；snapshot provenance 的 schema/resolver 回填已落地(见 F4;具体版本戳填充由接入侧负责)；`ResolvedRole.skipped_diagnostics` 已落地;调用层 DTO 今为 `call/plain.py:PlainAnswer`(原文此处写的 `models.py:GenericRouteChatModel` 已删),RouteChatModelFactory/provider profiles 属调用层而非 registry schema。
 
 - **测试点**：
   - **Studio display 字段被剥离**：endpoint/route/profile 的 `display_name` 等 display/authoring 字段**不进** gateway runtime snapshot(回归 `test_studio_display_fields_are_stripped_from_gateway_runtime_snapshot`，`test_llm_config_boundary.py:53-59`)。
@@ -95,7 +95,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
   - **route_id 形状校验**：`ProviderRoute.route_id == endpoint_id:route_slug`；`RoleRouteEntry.route_id` 走 `ROUTE_ID_RE`。
   - **skipped diagnostics 字段就位**：`ResolvedRole.skipped_diagnostics` 已能表达 route_id / reason_code / message / 是否来自 override(供 02 跳过语义可观测)。
 
-- **归属**：**③b** `packages/graph-agent-gateway`：`registry/schema.py`(全部 runtime DTO，权威源)、`registry/__init__.py`(public surface)、`models.py`(`GenericRouteChatModel` 调用层 wrapper,不承载 registry schema)。**③a** `apps/studio/backend`：`models/llm_config.py`(Studio file DTO + display/authoring 字段 + `to_registry_snapshot` 剥离 seam)。**② Rust**：N/A(角色/凭证/schema 数据永不 Rust)。
+- **归属**：**③b** `packages/graph-agent-gateway`：`registry/schema.py`(全部 runtime DTO，权威源)、`registry/__init__.py`(public surface)、`call/plain.py`(调用层结果 DTO `PlainAnswer`,不承载 registry schema;原文此处是已删的 `models.py:GenericRouteChatModel`)。**③a** `apps/studio/backend`：`models/llm_config.py`(Studio file DTO + display/authoring 字段 + `to_registry_snapshot` 剥离 seam)。**② Rust**：N/A(角色/凭证/schema 数据永不 Rust)。
 
 ### F2 canonical 分组（`canonicalize_model` 保守分组 + Studio 展示投影）
 
@@ -199,11 +199,11 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 已实现:snapshot provenance 已在 schema/resolve 流程中表达。`ProviderRoute.snapshot_version` 标记 verified evidence 来源版本,`RegistrySnapshot.snapshot_version` 标记当前物化版本,`resolve_role` 构造 `ResolvedRoute` 时传播当前版本;版本不一致时旧 verified profiles/capabilities 不再作为 live evidence 使用。接入侧仍负责在 loader/materializer 产生 snapshot 与 verified evidence 时填入相应版本戳。
 
-已实现:`models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper)已落地 `GenericRouteChatModel`,作为调用层通用 wrapper 消费 `ResolvedRoute`;这不改变 registry schema 边界,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:24-301`。RouteChatModelFactory 的具体 ChatX/provider 构造见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:19-82`。
+已实现:调用层消费 `ResolvedRoute`/`ResolvedRole` 而不反向定义它们——原文举的 `GenericRouteChatModel` 已删,今天由 `call/plain.py:chat_plainly` 承担同一角色(吃 `ResolvedRole`,吐 `PlainAnswer`),registry schema 边界未变,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py`。RouteChatModelFactory 的具体 ChatX/provider 构造见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:19-82`。
 
 ## 附录 B — 覆盖代码(含覆盖率)
 
-覆盖率:5/5 个 brief 指定目标已覆盖,100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/identity.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;`GenericRouteChatModel` 调用层 wrapper 覆盖 `models.py:24-301`。
+覆盖率:5/5 个 brief 指定目标已覆盖,100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/identity.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;调用层 wrapper 覆盖 `call/plain.py`(原文覆盖的是已删的 `models.py:24-301`)。
 
 | 覆盖目标 | 判据归属 | MVP1 目标 |
 |---|---|---|
@@ -211,9 +211,9 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 | `registry/__init__.py`(用途:把 registry 公共 schema/contract 作为稳定 import surface 导出) | **③b 公共** | 继续只导出稳定 DTO/contract;`SnapshotVersion` 与 skipped diagnostics DTO 已在 public surface 中。 |
 | `registry/identity.py:canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key) | **③b 公共** | 保持保守 canonical 分组,只在 endpoint-scoped explicit alias、legacy alias 或 transport normalization 时合并。 |
 | `models/llm_config.py`(用途:Studio v4 credentials/v2-v3 roles 文件 DTO,并投影到 gateway snapshot) | **③a 应用加工(display/authoring)+ ③b 剥离 seam** | 保持 Studio display/authoring 与 gateway runtime 的剥离边界。display 字段 = ③a；`to_registry_snapshot` 剥离 seam 输出 ③b snapshot。 |
-| `models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper) | **③b 公共调用层** | `GenericRouteChatModel` 已落地;继续不承载 registry schema,具体 ChatX/provider 构造由调用层模块负责。 |
+| `call/plain.py`(普通 chat 面;原表此格是已删的 `models.py:GenericRouteChatModel`) | **③b 公共调用层** | `PlainAnswer` 是调用结果 DTO,不承载 registry schema;具体 ChatX/provider 构造由 `call/factory.py` 负责。 |
 
-本 alignment 覆盖 brief 要求的 5 个代码目标,覆盖率 100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/identity.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;`GenericRouteChatModel` 调用层 wrapper 覆盖 `models.py:24-301`。
+本 alignment 覆盖 brief 要求的 5 个代码目标,覆盖率 100%。其中 gateway schema 覆盖 `registry/schema.py:16-478`;public surface 覆盖 `registry/__init__.py:5-71`;canonical 覆盖 `registry/identity.py:13-56`;Studio schema 衔接覆盖 `apps/studio/backend/app/models/llm_config.py:1-349`;调用层 wrapper 覆盖 `call/plain.py`(原文覆盖的是已删的 `models.py:24-301`)。
 
 ## 附录 C — 代码索引(clues)
 
@@ -229,4 +229,4 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 - `apps/studio/backend/app/models/llm_config.py:89-118`: Studio DTO 到 Gateway DTO 的剥离 helper(③a→③b 剥离 seam)。
 - `apps/studio/backend/app/models/llm_config.py:121-319`: Studio file DTO 与 registry response DTO(display/authoring = ③a)。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py:186-289`: snapshot 文件加载和 v4/v2-v3 校验。**③b 公共。**
-- `packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:24-301`: `GenericRouteChatModel` 通用 route wrapper。**③b 公共调用层,不承载 registry schema。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py`: 普通 chat 面(`chat_plainly`/`PlainAnswer`)。**③b 公共调用层,不承载 registry schema。**(原文此处是已删的 `call/models.py:GenericRouteChatModel`。)

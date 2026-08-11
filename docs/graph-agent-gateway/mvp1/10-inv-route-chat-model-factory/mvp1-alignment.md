@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted
 verified_at: 2026-07-05
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build/_apply_profiles/_resolve_api_key · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py:ProviderProfile/apply_provider_profile_layers · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation ? packages/graph-agent-gateway/src/graph_agent_gateway/registry/bounds.py:provider_temperature_from_authored
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build/_apply_profiles/_resolve_api_key · packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py:ProviderProfile/apply_provider_profile_layers · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation ? packages/graph-agent-gateway/src/graph_agent_gateway/registry/bounds.py:provider_temperature_from_authored · packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py:chat_plainly/PlainAnswer
 units: [route-chat-model-factory]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -12,8 +12,8 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 # 10-inv-route-chat-model-factory - MVP1 Alignment(目标设计)
 
 > **Tier**：③b gateway 公共能力（MVP1 新增设计单元/调用层核心；`RouteChatModelFactory` 源码已存在并作为 route → ChatX 工厂）
-> **Owns**：把一条 `ResolvedRoute` 构造成一个 LangChain `BaseChatModel`（=「ChatX 面」，给 engine 等 LangChain 消费方）——**`route.protocol` 有官方 ChatX 就用官方（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`），没有就用自定义 `GenericRouteChatModel`（也是 BaseChatModel 子类）兜底**。内部 = 官方/generic 选择 + base_url per-protocol 归一化双保险 + provider profile init-kwargs + thinking 归一化 + stream_usage 默认开 + deepseek 单方法 patch（借鉴）。**只构造模型，不 invoke**（invoke 归 09，编排循环第 5 步调本工厂）。详见 §3.5。
-> **Status**：设计定稿（2026-06 判据复核，归属表判 10=纯 ③b 不变）；代码 = `RouteChatModelFactory` 已落地，官方 ChatX 主路径由本工厂构造，generic ordinary-chat 默认 dispatcher 已迁到 `ordinary_chat.dispatch_ordinary_chat`。
+> **Owns**：把一条 `ResolvedRoute` 构造成一个 LangChain `BaseChatModel`（=「ChatX 面」，给 engine 等 LangChain 消费方）——**`route.protocol` 的四个取值各有一个官方 ChatX 分支**（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`）;原设计里"没有官方就用 `GenericRouteChatModel` 兜底"那一支已删,理由见 §3.5(也是 BaseChatModel 子类）兜底**。内部 = 官方/generic 选择 + base_url per-protocol 归一化双保险 + provider profile init-kwargs + thinking 归一化 + stream_usage 默认开 + deepseek 单方法 patch（借鉴）。**只构造模型，不 invoke**（invoke 归 09，编排循环第 5 步调本工厂）。详见 §3.5。
+> **Status**：设计定稿（2026-06 判据复核，归属表判 10=纯 ③b 不变）；代码 = `RouteChatModelFactory` 已落地,每条路由都由本工厂构造官方 ChatX;generic 兜底分支已删(§3.5)。
 > **Related**：[[09-inv-invocation-runtime]]（invoke 运行时，拿本工厂构造的 ChatX 执行 `.invoke()`）· [[11-inv-provider-profiles]]（本工厂调用 `ProviderProfile` 表合 init-kwargs）· [[03-orch-credentials-endpoints]]（base_url 保存时归一化 = 主修复，本工厂只做调用时副保险）· [[01-handoff-interface]]（`ResolvedRoute` 契约 = 工厂唯一输入）· [[04-orch-registry-schema]]（`ResolvedRoute` 字段权威源）
 > **决策日志**：client 层 A' 重设计决策（M6 `RouteChatModelFactory` 设计单元 / D2 编排-调用分离 / F1 base_url 归一化 / F4 thinking / F5 usage+stream_usage / F6 provider profile init-kwargs / 借鉴 vs 自建）——完整逻辑 + PM 原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 10 纯 ③b）
 > **现状**：见同目录 `baseline.md`（`RouteChatModelFactory` 已是 route → ChatX 工厂）
@@ -23,10 +23,10 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 MVP1 目标：`RouteChatModelFactory`（一条 `ResolvedRoute` → 原生 LangChain ChatX 实例的构造器）。它是 D2「调用层」的落点 —— 编排层只决定用哪条 route，调用层才把 route 变成可 invoke 的原生 ChatX。本工厂**只构造、不 invoke**：[[09-inv-invocation-runtime]] 的编排循环第 5 步调本工厂拿 ChatX，再自己 `.invoke()`。
 
 - **输入**：一条 `ResolvedRoute`（protocol/base_url/credential_ref/provider_model_id/effective runtime settings）。
-- **职责**：解析凭证（经 `CredentialProviderProtocol`，不落明文）→ base_url 调用时 per-protocol 幂等归一化双保险 → **按 protocol 选官方 ChatX，无官方则 `GenericRouteChatModel` 兜底** → 合成 init kwargs（route 字段 + [[11-inv-provider-profiles]] 的 `ProviderProfile` defaults + route runtime settings）→ 返回 `BaseChatModel`。
-- **输出**：一个 LangChain `BaseChatModel` —— 官方 ChatX（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`，已带 thinking 归一化、stream_usage、必要的 deepseek 单方法 patch）**或**自定义 `GenericRouteChatModel`（无官方 ChatX 时兜底，见 §3.5）。
+- **职责**：解析凭证（经 `CredentialProviderProtocol`，不落明文）→ base_url 调用时 per-protocol 幂等归一化双保险 → **按 protocol 选官方 ChatX**(四个 protocol 各一个分支;原文的 `GenericRouteChatModel` 兜底已删,见 §3.5) → 合成 init kwargs（route 字段 + [[11-inv-provider-profiles]] 的 `ProviderProfile` defaults + route runtime settings）→ 返回 `BaseChatModel`。
+- **输出**：一个 LangChain `BaseChatModel` —— 官方 ChatX（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`，已带 thinking 归一化、stream_usage、必要的 deepseek 单方法 patch）——就这一种。原文并列的 `GenericRouteChatModel` 兜底已删,见 §3.5。
 
-本模块**纯 ③b 公共**（"把 route 构造成可调用模型"是任何调模型 app 的刚需），归属表判 10=纯 ③b 新建（`module-disposition-revised.md:53`）。`baseline.md` 记录当前源码事实：本类已存在，官方 ChatX 主路径由它构造；generic ordinary-chat core 位于 `call/dispatch.py`。
+本模块**纯 ③b 公共**（"把 route 构造成可调用模型"是任何调模型 app 的刚需），归属表判 10=纯 ③b 新建（`module-disposition-revised.md:53`）。`baseline.md` 记录当前源码事实：本类已存在，每条路由的 ChatX 都由它构造;原文并列的 `call/dispatch.py` generic ordinary-chat core 已删。
 
 ## 2. 数据流 / 机制(目标设计与编号流程)
 
@@ -39,7 +39,7 @@ MVP1 目标：`RouteChatModelFactory`（一条 `ResolvedRoute` → 原生 LangCh
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-459` | `ResolvedRoute`/`ResolvedRole` 是工厂输入和编排交接物。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py` | `RouteChatModelFactory` 是当前 route → ChatX 工厂；官方 ChatX 主路径从这里构造模型。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py` | `_dispatch` 调用 `RouteChatModelFactory` 构造 ChatX 后 invoke，并由 09 做结果桥接。 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py` | generic ordinary-chat provider core；`GenericRouteChatModel` 默认 dispatcher 使用 `dispatch_ordinary_chat`。 |
+| (已删) `call/dispatch.py` · `call/models.py` | 原 generic ordinary-chat provider core 与 `GenericRouteChatModel`;删除理由见 §3.5,不用 LangChain 的消费方改由 `call/plain.py:chat_plainly` 服务(决议 D10)。 |
 | [chatx-provider-patterns.md](../references/chatx-provider-patterns.md) | `stream_usage` 默认开启的参考，解决第三方 OpenAI-compatible usage 为空。 |
 | [chatx-provider-patterns.md](../references/chatx-provider-patterns.md) | thinking 开关归一化参考，覆盖 Anthropic、OpenAI-compatible extra_body、vLLM、Codex 等形状。 |
 | [chatx-provider-patterns.md](../references/chatx-provider-patterns.md) | 只在 payload 差异必要时子类覆盖单方法的参考。 |
@@ -56,7 +56,7 @@ MVP1 目标：`RouteChatModelFactory`（一条 `ResolvedRoute` → 原生 LangCh
 7. `RouteChatModelFactory` 处理 thinking。thinking(provider reasoning/extended-thinking 开关)由 route runtime settings 和 ProviderProfile 构造期差异共同决定；完整 provider-specific thinking 规则仍需独立测试后继续迁入。
 8. `RouteChatModelFactory` 对 OpenAI-compatible ChatX 默认打开 `stream_usage`。`stream_usage`(让 LangChain streaming 响应携带 token usage 的开关)；deerflow 已说明第三方 base_url 下 LangChain 默认可能不给 usage，因此工厂应显式补上([chatx-provider-patterns.md](../references/chatx-provider-patterns.md); [chatx-provider-patterns.md](../references/chatx-provider-patterns.md))。
 9. `GatewayChatModel._generate`(执行一次模型生成请求的 LangChain 入口)保留编排循环；当前 `_dispatch` 已是“取 ChatX -> 原始 `BaseMessage` invoke -> 取 `AIMessage`”。这样仍保留 probe、熔断、fallback event、usage 汇总和异常分类。
-10. 截断 token 升级重试由编排层包住 ChatX invoke；generic ordinary path 的同类策略在 `call/dispatch.py` 内处理。工厂本身只构造模型。
+10. 截断 token 升级重试归编排层(`call/chat_model.py` 的 `_Attempt`)。工厂本身只构造模型。
 11. 返回 `AIMessage` 后，`GatewayChatModel._build_chat_result`(把响应包成 LangChain `ChatResult` 的函数)或后继桥接逻辑只注入 route metadata，不拍平 thinking content blocks。当前 `_coerce_text`(把任意 content 强制转字符串)会把非字符串内容转字符串，目标是保留 ChatX 的 richer content shape(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:313-357`; `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:645-658`；F4 thinking + F5 usage/metadata 的 augment 逻辑留底于 [[09-inv-invocation-runtime]] §5)。
 
 ## 3. 接口契约
@@ -66,7 +66,7 @@ MVP1 目标：`RouteChatModelFactory`（一条 `ResolvedRoute` → 原生 LangCh
 | 边界 | 契约 |
 |---|---|
 | **09 编排 → 10 工厂（构造入参）** | 一条 `ResolvedRoute`（字段权威源 `registry/schema.py:415-445`）。工厂从中取 protocol（选 ChatX 类）、base_url（双保险后传 ChatX）、credential_ref（解析凭证）、provider_model_id（model 名）、timeout_seconds、effective_runtime_settings（temperature/max tokens/reasoning/tool/structured-output）。**不接受 provider/model 字符串**（与 deepagents `resolve_model` 的 `provider:model` spec 区别，见 §5 决策 2）。 |
-| **10 工厂 → 模型类选择** | `route.protocol`（`registry/schema.py:19` Protocol 字面量）映射：`anthropic_compatible`→`ChatAnthropic`，`openai_compatible`/需 OpenAI shape→`ChatOpenAI`，`google_genai`→`ChatGoogleGenerativeAI`，**`ark_runtime`→`ChatOpenAI`**（✅ 已定 2026-06-04：Ark 官方支持 OpenAI-compatible，不需单独适配）；**以上是「有官方 ChatX」分支。protocol 无对应官方 ChatX → 走自定义 `GenericRouteChatModel` 兜底**（见 §3.5）。 |
+| **10 工厂 → 模型类选择** | `route.protocol`（`registry/schema.py:19` Protocol 字面量）映射：`anthropic_compatible`→`ChatAnthropic`，`openai_compatible`/需 OpenAI shape→`ChatOpenAI`，`google_genai`→`ChatGoogleGenerativeAI`，**`ark_runtime`→`ChatOpenAI`**（✅ 已定 2026-06-04：Ark 官方支持 OpenAI-compatible，不需单独适配）；**以上是「有官方 ChatX」分支。四个 protocol 全部有对应官方 ChatX,没有"无对应"这一档;原文的 `GenericRouteChatModel` 兜底已删**（见 §3.5）。 |
 | **10 工厂 → 11 ProviderProfile（合 init-kwargs）** | 调 [[11-inv-provider-profiles]] 的 `apply_provider_profile`-类入口：以 route 生成基础 kwargs → 叠 provider/model profile defaults（headers / Responses API / 温度默认 / stream_usage / thinking 开关）→ 叠 route runtime settings；**调用方显式 kwargs 最高优先级**（caller-wins）。 |
 | **10 工厂 → 凭证（不落明文）** | 经 `CredentialProviderProtocol`（按 `credential_ref` 取明文 key）解析，明文 key 只进 ChatX init kwargs 的 `api_key`，**绝不写回 `ResolvedRoute`**；现状约束体现于 `route_chat_model_factory._resolve_api_key`（`packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:230-236`）。 |
 | **10 工厂输出（交 09 invoke）** | 一个原生 `BaseChatModel` 子类实例（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`，或必要时 deepseek 单方法子类），已配置 base_url（双保险后）、api_key、model、timeout、thinking、stream_usage 与 provider profile kwargs。09 拿它执行 `.invoke(原始 BaseMessage)`。 |
@@ -84,28 +84,49 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 2. **普通 chat 面**（gateway 自己调、返非-LangChain 结果）→ 给不依赖 LangChain 的消费方（gateway 的基础调用能力，见 [[09-inv-invocation-runtime]]）。
 3. **route handoff**（只给 route、消费方自调）→ copilot 走 `claude_agent_sdk`（见 [[01-handoff-interface]]）。
 
-> **术语**：「ChatX」不是 LangChain 标准类名，是本套文档对官方 `Chat<Provider>` 类（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`）的简称；LangChain 标准基类是 `BaseChatModel`，官方 ChatX 和 `GenericRouteChatModel` **都是它的子类**。
+> **术语**：「ChatX」不是 LangChain 标准类名，是本套文档对官方 `Chat<Provider>` 类（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`）的简称；LangChain 标准基类是 `BaseChatModel`，官方 ChatX 是它的子类(原文并列的 `GenericRouteChatModel` 也曾是,现已删)。
 
-### 工厂 = 官方 ChatX 优先 / GenericRouteChatModel 兜底
+### 工厂 = 每个 protocol 一个官方 ChatX(原兜底分支已删)
 
-`build(route) → BaseChatModel`：
-1. 查 `route.protocol` 有没有官方 ChatX（映射表见 §3「模型类选择」）。
-2. **有** → 用官方 ChatX（provider 有怪癖再叠 [[11-inv-provider-profiles]] 单方法 patch，如 deepseek）。
-3. **没有**（真·非标 protocol）→ 用 `GenericRouteChatModel`（自定义 `BaseChatModel`，内部走 gateway 普通 chat 内核）。
-- **上游接 03 probe**：protocol 不再用户选，由 03 系统自测出"这条 endpoint 能走通哪几个 protocol"（可多个），工厂对每个 protocol 查官方 ChatX（详见 [[03-orch-credentials-endpoints]] F4）。
-- engine 拿到的永远是统一的一个 `BaseChatModel`，非标 route 也能进 engine（**best-effort**：能不能用工具取决于该 provider 是否支持，studio 侧准入过滤建议性提醒，见 [[08-orch-test-status-ssot]]）。
+`build(route) → BaseChatModel`:按 `route.protocol` 选官方 ChatX(映射表见 §3「模型类选择」),
+provider 有怪癖再叠 [[11-inv-provider-profiles]] 的单方法 patch(如 deepseek)。
 
-### `GenericRouteChatModel`（通用适配器）
+- **上游接 03 probe**:protocol 不再用户选,由 03 系统自测出"这条 endpoint 能走通哪几个 protocol"(可多个),
+  工厂对每个 protocol 构造对应官方 ChatX(详见 [[03-orch-credentials-endpoints]] F4)。
+- engine 拿到的永远是统一的一个 `BaseChatModel`。
 
-- **定义**：自定义 `BaseChatModel` 子类，`_generate` + `bind_tools` 内部用 gateway 自己的「普通 chat 内核」（`ordinary_chat.dispatch_ordinary_chat`，序列化→调 provider→解析）。它是「普通 chat 内核」的 LangChain 包装，让没有官方 ChatX 的 route 也能当 `BaseChatModel` 交给 engine。
-- **5 条序列化规则**（实验验出，必须实现）：
-  1. 带 `tool_calls` 的空-content `AIMessage` **不能丢**（下一轮 provider 要看到上次 tool call，否则上下文断）。
-  2. OpenAI `tool_calls[].function.arguments` 必须是 **JSON 字符串**（不是 dict），否则部分 provider 400。
-  3. `ToolMessage.tool_call_id` 必须与上一轮 tool call **对齐**。
-  4. Anthropic 的 assistant tool call 是 **`tool_use` content block**（不是 OpenAI 的 `tool_calls` 字段）；tool result 是 user message 里的 `tool_result` block。
-  5. Anthropic **相邻同 role 消息合并**（tool result 属 user role）。
-- **决策 + 动机**：① 通用适配器把"非标 provider 套不进 ChatX"这条死路打通（包成 `BaseChatModel` 进 engine）；② provider-specific ordinary chat core 已迁到 `call/dispatch.py`，成为 generic 面 + 普通 chat 面共用的内核。
-- **status**：**真机验证 PASS**（spike，与官方 ChatX 行为一致）；production 已补 qiniu 空-content / tool loop 回归测试（`packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py:96-155` 与 `packages/graph-agent-gateway/tests/test_route_chat_model_factory.py:397-540`）。streaming / multimodal / error-normalization 仍 deferred。
+**原设计的第 3 步(没有官方 ChatX → 用 `GenericRouteChatModel` 兜底)已删,而且今天它在类型上不可能存在**:
+`Protocol` 是封闭四值 `Literal["openai_compatible", "anthropic_compatible", "google_genai", "ark_runtime"]`
+(`registry/schema.py:29`),`build` 四个分支齐全,函数以 `assert_never(protocol)` 收尾,
+代码注释写得很直白——`call/factory.py`:"Not a fallback: `protocol` is a closed Literal, so reaching
+here would mean a fifth protocol was added without a branch — and that fails the type check rather
+than quietly building something else."。**加第五个 protocol 却忘了写分支,是编译期红,不是运行期悄悄走兜底。**
+
+**那"真·非标 provider 怎么办"呢?** 两个出口,都不需要 generic 包装:① 它多半能走通四个 protocol 之一
+(这正是 03 的 probe 要测的事);② 真走不通,它就不是这套网关能调的 route,应当在 03 那层被判定为不可用,
+而不是包一层"best-effort 也许能用"交给 engine。原设计里"包成 `BaseChatModel` 让非标 route 也能进 engine"
+的 best-effort 立场,已被 D10 的取舍取代:**说不准能不能用的东西,不该长成一个能被当成可用的对象。**
+
+### 原 `GenericRouteChatModel` 与它那 5 条序列化规则(规则仍然成立,实现方换了)
+
+`GenericRouteChatModel`(自定义 `BaseChatModel`,内部走 gateway 自研的「普通 chat 内核」)与
+`call/dispatch.py` 一并已删(PR #718)。**但它当年实验验出来的 5 条序列化规则不是随代码作废的知识,
+它们说的是 wire 本身的要求**,所以留在这里,同时写清楚今天谁在满足它们:
+
+| 规则(实验验出) | 今天谁满足它 |
+|---|---|
+| 1. 带 `tool_calls` 的空-content `AIMessage` **不能丢**——下一轮 provider 要看到上次 tool call,否则上下文断 | **仍然是我们的责任**:网关把原始 `BaseMessage` 原样交给官方 ChatX、不拍成 dict,这条才成立。回归测试 `tests/test_chatx_invocation_runtime.py::test_gateway_invokes_chatx_with_raw_base_messages_for_empty_content_tool_loop` 就是守它的 |
+| 2. OpenAI `tool_calls[].function.arguments` 必须是 **JSON 字符串**(不是 dict),否则部分 provider 400 | 官方 `ChatOpenAI`。我们不再自己序列化 |
+| 3. `ToolMessage.tool_call_id` 必须与上一轮 tool call **对齐** | 官方 ChatX + 调用方(engine)构造消息时 |
+| 4. Anthropic 的 assistant tool call 是 **`tool_use` content block**(不是 OpenAI 的 `tool_calls` 字段);tool result 是 user message 里的 `tool_result` block | 官方 `ChatAnthropic` |
+| 5. Anthropic **相邻同 role 消息合并**(tool result 属 user role) | 官方 `ChatAnthropic` |
+
+**这张表的用处是排障时别找错地方**:2/4/5 出问题要去看官方 ChatX 版本与 provider 兼容性,
+本仓改不动;1 出问题才是本仓的 bug(有人又把消息拍成 dict 了)。
+
+**决策留底**:当年建 generic 适配器的动机是"把非标 provider 套不进 ChatX 这条死路打通";
+今天四个 protocol 各有官方分支,这条死路不存在了。而它服务的另一半需求——**不想依赖 LangChain 的消费方**
+——不是没了,是换了正门:`call/plain.py:chat_plainly`(决议 D10 / [[09-inv-invocation-runtime]] 三张脸之二)。
 
 ### base_url per-protocol 归一化（实证强化）
 
@@ -147,7 +168,7 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 
 ## 7. 涉及 region / platform
 
-- **③b** `packages/graph-agent-gateway`：`RouteChatModelFactory` 已落地在 `call/factory.py`；`GenericRouteChatModel` 位于 `models.py`；generic ordinary-chat core 位于 `call/dispatch.py`。
+- **③b** `packages/graph-agent-gateway`：`RouteChatModelFactory` 已落地在 `call/factory.py`。原文并列的 `models.py:GenericRouteChatModel` 与 `call/dispatch.py` generic core 已删(§3.5)。
 - **③a** `apps/studio/backend`：N/A（本工厂纯构造层，不含应用加工四件事）。
 - **② Rust**：N/A。
 - **范本（正式归档，仅借鉴，不搬文件）**：[chatx-provider-patterns.md](../references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](../references/chatx-provider-patterns.md)。
@@ -155,7 +176,7 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 ## 8. gaps / 待设计(待办/疑点)
 
 1. 已处理:`RouteChatModelFactory` 已落地，qiniu-anthropic 多轮 tool loop 的空 content 回归由原始 `BaseMessage` + ChatX 主路径覆盖。
-2. 已处理:`ark_runtime` 走 **OpenAI-compatible（`ChatOpenAI`）**——Volcengine Ark 官方支持 OpenAI-compatible，不需要单独适配；generic ordinary path 的 Ark 分支保留在 `call/dispatch.py`。
+2. 已处理:`ark_runtime` 走 **OpenAI-compatible（`ChatOpenAI`）**——Volcengine Ark 官方支持 OpenAI-compatible，不需要单独适配。原文并列的 generic ordinary path Ark 分支随 `call/dispatch.py` 已删。
 3. 已处理:ChatX retry 耗尽后的异常形状已用确定性单测覆盖——fake 401 / network error 仍 fallback,400 non-capability 仍 fail-fast,见 `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py:287-330`（分类语义权威源 [[06-orch-error-classification]]）。
 4. 待办（跨模块协调）:`call_method_id` / `request_mapper_id` 由本工厂消费还是由 [[11-inv-provider-profiles]] 的 `ProviderProfile` 消费，需与 11 §8 待办 2、09 §8 待办 3 一并定（同一悬案）。
 
@@ -165,7 +186,7 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 
 1. `ResolvedRoute` 已经具备工厂所需的大部分输入字段，包括 protocol/base_url/credential/model/runtime settings(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-445`)。
 2. `GatewayChatModel` 已经保留编排外壳和 fallback loop，MVP1 不需要重建这层(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:31-49`; `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:111-271`)。
-3. `RouteChatModelFactory` 已存在并构造 official ChatX；`call/dispatch.py` 已承接 generic ordinary-chat provider core。
+3. `RouteChatModelFactory` 已存在并为每个 protocol 构造 official ChatX;不再有 generic provider core。
 
 未实现:
 
@@ -177,8 +198,8 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 - `RouteChatModelFactory`:调用层工厂，用 `ResolvedRoute` 构造 `ChatAnthropic`、`ChatOpenAI`、`ChatGoogleGenerativeAI` 等原生 ChatX（M6 调用层核心，职责定义见本文 §1 / §2 / §5）。
 - `ResolvedRoute`:一条 runtime-ready route candidate，保存协议、base_url、凭证引用、provider model id 与 runtime settings(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-445`)。
 - `GatewayChatModel._generate`:保留编排外壳；MVP1 只替换它的调用步骤，不替换整个类(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:96-271`)。
-- `ordinary_chat.dispatch_ordinary_chat`:generic ordinary-chat 默认 dispatcher 与普通 chat 面入口。
-- `GenericRouteChatModel`:无官方 ChatX 的真非标 route 的 LangChain `BaseChatModel` 包装。
+- `call/plain.py:chat_plainly`:普通 chat 面入口(不依赖 LangChain 的消费方走这条);它复用本工厂造出的官方 ChatX,不另起 dispatcher。
+- (已删) `GenericRouteChatModel`:原为"无官方 ChatX 的真非标 route"准备的包装;`Protocol` 是封闭四值,四个分支齐全,这个 route 不存在。
 - `deerflow.models.factory.create_chat_model`:deerflow 的模型创建函数，展示 thinking、stream_usage、tracing 等构造期处理，但它依赖 deerflow AppConfig，不适合直接搬([chatx-provider-patterns.md](../references/chatx-provider-patterns.md))。
 - `deepagents._models.resolve_model`:deepagents 的字符串 spec 到 `BaseChatModel` helper，展示 `init_chat_model` 与 provider profile 组合方式([chatx-provider-patterns.md](../references/chatx-provider-patterns.md))。
 
@@ -191,9 +212,23 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 - [[04-orch-registry-schema]]：`ResolvedRoute` 字段权威源（本工厂只消费）
 - client 层 A' 重设计决策（M6/D1/D2/F1/F4/F5/F6/借鉴 vs 自建）：完整逻辑 + PM 原话留底于本文 §4/§5/§6 / 归属表 `module-disposition-revised.md`（§4 判 10 纯 ③b 新建）
 
-## 2026-07-05 ??: RouteChatModelFactory temperature remap
+## 2026-07-05 补记: RouteChatModelFactory 的 temperature 换算
 
-- `RouteChatModelFactory` ??????? caller override ? route effective runtime settings, ?? provider kwargs ????????????? `route.protocol` ??????
-- Anthropic-compatible ChatX ???? `authored / 2` ?? 0..1 ?; OpenAI-compatible?Gemini?Ark?WaveSpeed ? generic ?????? 0..2 ????? temperature ??? provider kwargs ????
-- `GenericRouteChatModel` ?????????? protocol ???? provider ??, ?? generic ordinary-chat ????????????
-- ????: `test_route_chat_model_factory.py` ?? authored 1.5 ? Anthropic ? 0.75?? OpenAI ?? 1.5, ?? `None` ??? provider kwargs?
+> **本节曾被编码事故毁掉**:PR #392(2026-07-05)写入时中文全部变成 `?`,整段无法阅读。
+> 2026-08-11 按**当时的代码事实重新写出**(不是猜那些丢掉的字):依据是
+> `registry/bounds.py` 的 `AUTHORED_TEMPERATURE_MAX`/`_PROTOCOL_TEMPERATURE_MAX`/
+> `temperature_ceiling`/`provider_temperature_from_authored`,以及
+> `tests/test_route_chat_model_factory.py:251/337` 两条断言。
+
+- **authored 尺度是 provider-neutral 的 0..2**(`AUTHORED_TEMPERATURE_MAX = 2.0`,`bounds_for(route, "temperature")`
+  返回 `0.0..2.0`)。Studio 里 role temperature 与 node override temperature 都写在这把尺子上,网关不关心它们谁覆盖谁。
+- **`None` 表示"没人选过"**,一路保持 `None` 传到底,不替换成任何默认值——
+  `provider_temperature_from_authored` 第一行就是 `if temperature is None: return None`。
+- **落到 provider 时按这条路由的上限换算**:`share / 2.0 * temperature_ceiling(route)`。
+  上限先看路由自己声明的能力值(`capability temperature.max`),没有才用协议默认:
+  `anthropic_compatible` = **1.0**,`openai_compatible` / `ark_runtime` / `google_genai` = **2.0**。
+  所以 authored 1.5 到 Anthropic 是 **0.75**,到 OpenAI 仍是 **1.5**(`test_route_chat_model_factory.py:251` 与 `:337`)。
+- **换算发生在构造 provider kwargs 的时候**,不在 role 物化时:同一条 role 的 effective runtime settings
+  可以喂给上限不同的两条路由,各自换算,互不影响。
+- 原文此处还有一句讲 `GenericRouteChatModel` 怎么换算的,该类已删(见 §3.5),不再适用。
+

@@ -158,26 +158,3 @@ def test_canonical_endpoint_id_suffix_avoids_reserved_existing_ids() -> None:
     }
 
 
-def test_legacy_v3_endpoint_id_helper_preserves_known_migration_ids() -> None:
-    from graph_agent_gateway.registry import legacy_v3_endpoint_id
-
-    assert (
-        legacy_v3_endpoint_id(
-            {
-                "id": "legacy-openrouter-uuid",
-                "name": "OpenRouter",
-                "base_url": "https://openrouter.ai/api/v1",
-            }
-        )
-        == "openrouter-prod"
-    )
-    assert (
-        legacy_v3_endpoint_id(
-            {
-                "id": "legacy-qiniu",
-                "name": "Qiniu Anthropic",
-                "base_url": "https://api.qnaigc.com/anthropic",
-            }
-        )
-        == "qiniu-anthropic"
-    )

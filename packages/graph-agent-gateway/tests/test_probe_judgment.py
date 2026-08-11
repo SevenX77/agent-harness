@@ -48,3 +48,40 @@ def test_an_answer_is_exactly_what_an_sdk_exception_can_hand_over() -> None:
         pass
     else:  # pragma: no cover - the assignment above must raise
         raise AssertionError("an answer already given must not be editable")
+
+
+def test_a_rejected_probe_payload_is_not_a_verdict_about_the_model() -> None:
+    """Ark refuses the 1x1 probe image for its size, not for being an image.
+
+    Live 2026-08-11, ark-official × doubao-seed-2-0-pro-260215:
+    HTTP 400 InvalidParameter, "Image dimensions are too small. Minimum allowed
+    dimension: 14 pixels. Current dimensions: width = 1, height = 1."
+    Calling that invalid_model says the model does not take images, which is a
+    claim this answer does not support — the provider rejected OUR request.
+    Same family as the billing and protocol-mismatch cases above.
+    """
+    answer = ProviderAnswer(
+        status_code=400,
+        body=(
+            '{"error": {"code": "InvalidParameter", "message": '
+            '"Image 0 failed: Image dimensions are too small. '
+            'Minimum allowed dimension: 14 pixels. '
+            'Current dimensions: width = 1, height = 1."}}'
+        ),
+    )
+
+    assert probe_status(answer, model_not_found_status="invalid_model") == "error"
+
+
+def test_the_probe_image_clears_the_smallest_dimension_a_provider_demands() -> None:
+    """The probe image is a payload we control; it must not be the reason a
+    probe fails. Ark's floor is 14 pixels (live 2026-08-11)."""
+    import base64
+    import struct
+
+    from graph_agent_gateway.probing import wire
+
+    png = base64.b64decode(wire._PROBE_IMAGE_BASE64)
+    width, height = struct.unpack(">II", png[16:24])
+
+    assert width >= 16 and height >= 16, f"probe image is {width}x{height}"

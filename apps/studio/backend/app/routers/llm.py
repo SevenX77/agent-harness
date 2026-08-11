@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
+    INCONCLUSIVE_PROBE_STATUSES,
     CapabilitySource,
     CredentialProviderProtocol,
     EndpointProbeResult,
@@ -3779,6 +3780,19 @@ def _build_model_probe_evidence(
     )
 
 
+def _probe_answered_about_the_model(result: ModelProbeResult) -> bool:
+    """Whether this probe learned anything about the model it aimed at.
+
+    A refused key, an exhausted balance, a dropped connection or a timeout are
+    facts about the endpoint or the moment, not about the model — recording
+    them as probe-failed evidence lets "we could not ask" masquerade as "the
+    answer was no", and that evidence is shareable. The effort question set
+    already voids a batch on exactly these statuses; this is the same rule,
+    applied where evidence is written.
+    """
+    return result.status not in INCONCLUSIVE_PROBE_STATUSES
+
+
 def _merge_probe_evidence_into_route(
     credentials: LLMCredentialsFile,
     endpoint: ProviderEndpoint,
@@ -3798,6 +3812,8 @@ def _merge_probe_evidence_into_route(
         return
     route = credentials.provider_routes.get(route_id)
     if route is None:
+        return
+    if not _probe_answered_about_the_model(result):
         return
     record = _build_model_probe_evidence(
         endpoint, result, route_id=route_id, multimodal=multimodal

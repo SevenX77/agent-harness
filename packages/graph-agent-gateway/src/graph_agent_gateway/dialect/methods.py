@@ -55,13 +55,14 @@ _DIALECTS: dict[str, Dialect] = {
         auth=AuthScheme.BEARER_HEADER,
         content_as_blocks=True,
     ),
-    # `max_tokens`, not `max_completion_tokens`: production reaches every
-    # OpenAI-compatible endpoint through `call/dispatch.py::_call_openai_compatible`,
-    # which sends `max_tokens`. A probe naming the field differently tests a
-    # request no call ever makes.
+    # `max_completion_tokens` is what a real call sends: every openai-compatible
+    # route is built as a ChatOpenAI subclass, whose payload names the budget
+    # that way (measured in tests/test_production_wire_contract.py, including
+    # for DeepSeek routes). `call/dispatch.py` names it `max_tokens`, but no
+    # route reaches that module.
     "openai_chat_completions": OpenAIChatCompletions(
         path=VersionedPath("/chat/completions"),
-        budget_field="max_tokens",
+        budget_field="max_completion_tokens",
         reasoning_style=ReasoningStyle.NATIVE_EFFORT,
     ),
     "deepseek_chat_completions": OpenAIChatCompletions(

@@ -74,18 +74,41 @@ test('localPackageSourcesAreVendored detects source files missing from vendor', 
   )
 })
 
-// Any interpreter proves the branch; the workspace venv is the one that exists
-// wherever this suite runs, while the vendored runtime is a downloaded artefact
-// missing from fresh checkouts and worktrees.
+// The branch under test is ensureVendor's own: imports report fine, so no
+// rebuild. Running a real interpreter to establish that would tie this to a
+// provisioned Python — the vendored runtime is a downloaded artefact absent
+// from fresh checkouts, and the workspace venv only exists after `uv sync`.
 test('ensureVendor skips rebuild when imports already work', () => {
   const result = ensureVendor({
-    python: path.join(localVenvBin(), process.platform === 'win32' ? 'python.exe' : 'python'),
+    python: __filename,
     target: __dirname,
     backend: __dirname,
     modules: ['sys'],
     packages: [],
+    spawn: () => ({ status: 0 }),
   })
   assert.deepEqual(result, { rebuilt: false })
+})
+
+test('ensureVendor rebuilds when the vendored interpreter cannot import', () => {
+  const calls = []
+  const result = ensureVendor({
+    python: __filename,
+    target: __dirname,
+    backend: __dirname,
+    modules: ['sys'],
+    packages: [],
+    buildScript: __filename,
+    workspaceRoot: __dirname,
+    // Only the first check fails, so the rebuild between them is what changed
+    // the answer — not a check that was going to pass anyway.
+    spawn: (...args) => {
+      calls.push(args)
+      return { status: calls.length === 1 ? 1 : 0 }
+    },
+  })
+  assert.deepEqual(result, { rebuilt: true })
+  assert.equal(calls.length, 3, 'check, rebuild, re-check')
 })
 
 test('withLocalVenvOnPath prepends the workspace venv scripts directory', () => {

@@ -13,7 +13,10 @@ from collections.abc import Mapping
 from typing import Any
 
 import httpx
+from langchain_core.messages import HumanMessage
+from pydantic import SecretStr
 
+from graph_agent_gateway.call import RouteChatModelFactory
 from graph_agent_gateway.dialect import (
     Image,
     Prompt,
@@ -26,6 +29,8 @@ from graph_agent_gateway.registry import (
     ProviderEndpoint,
     ProviderProbeBackend,
     ProviderRoute,
+    ResolvedRoute,
+    RuntimeSettings,
     apply_call_method_base_url,
     call_method_is_officially_probeable,
     provider_backend_for_endpoint,
@@ -36,6 +41,7 @@ from graph_agent_gateway.registry import (
 from .judge import (
     ProviderAnswer,
     ProviderProbeStatus,
+    answer_from_failed_call,
     model_capabilities,
     model_ids,
     probe_status,
@@ -120,10 +126,16 @@ async def probe_provider_route(
     *,
     api_key: str | None = None,
     runtime_settings: Mapping[str, Any] | None = None,
-    transport: httpx.AsyncBaseTransport | None = None,
+    factory: Any | None = None,
     timeout: float = 15.0,
 ) -> RouteProbeResult:
-    """Probe one concrete provider route with a minimal generation request."""
+    """Ask this route the cheapest real question there is: one token.
+
+    The model is built the way a run builds it, because the answer is only
+    worth having if the request was the one a run would send. The builder can
+    be handed in — the same seam `call/pre_call_probe.py` uses — so a test can
+    replay the wire without this function knowing which client it is talking to.
+    """
 
     backend = provider_backend_for_endpoint(endpoint)
     wire = provider_backend_for_protocol(endpoint.protocol)
@@ -153,22 +165,27 @@ async def probe_provider_route(
         )
 
     started = time.perf_counter()
+    model = (factory or _production_factory(secret)).build(
+        _route_as_a_run_would_resolve_it(endpoint, route, runtime_settings),
+        timeout_seconds=timeout,
+        max_tokens=1,
+    )
     try:
-        async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
-            answer = _answer_from(
-                await _request_model_generation(
-                    client,
-                    wire,
-                    secret,
-                    base_url,
-                    route.provider_model_id,
-                    runtime_settings=runtime_settings,
-                )
+        await model.ainvoke([HumanMessage(content="ping")])
+    except BaseException as exc:  # noqa: BLE001 - every failure is an answer about the route
+        answer = answer_from_failed_call(exc)
+        if answer is None:
+            return _route_result(
+                endpoint,
+                route,
+                backend,
+                base_url,
+                _status_without_an_answer(exc),
+                started,
+                message=str(exc),
             )
-    except httpx.TimeoutException:
-        return _route_result(endpoint, route, backend, base_url, "timeout", started)
-    except httpx.HTTPError as exc:
-        return _route_result(endpoint, route, backend, base_url, "network_error", started, message=str(exc))
+    else:
+        return _route_result(endpoint, route, backend, base_url, "ok", started)
 
     status = probe_status(answer, model_not_found_status="invalid_model", probed_backend=wire)
     return RouteProbeResult(
@@ -247,6 +264,70 @@ async def probe_official_call_method(
         latency_ms=latency_ms,
         message=message,
     )
+
+
+class _OneKeyCredentials:
+    """The key this probe was handed, in the shape a factory asks for.
+
+    A probe is given a secret directly — it is testing a key the user just
+    typed as often as one already stored. The factory resolves keys through a
+    provider, so the secret is presented as one, rather than teaching the
+    factory a second way to be given a key.
+    """
+
+    def __init__(self, secret: str) -> None:
+        self._secret = secret
+
+    def get(self, ref: str) -> SecretStr:
+        del ref
+        return SecretStr(self._secret)
+
+
+def _production_factory(secret: str) -> RouteChatModelFactory:
+    return RouteChatModelFactory(credential_provider=_OneKeyCredentials(secret))
+
+
+def _route_as_a_run_would_resolve_it(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    runtime_settings: Mapping[str, Any] | None,
+) -> ResolvedRoute:
+    """The route the factory would be handed if this probe were a run.
+
+    A probe is often asked about a pairing that no stored route describes yet —
+    "can this endpoint run this model" — so the object is assembled here rather
+    than looked up. That is not a pretence: it is exactly the route a run would
+    resolve to if the user saved this pairing and used it.
+    """
+
+    return ResolvedRoute(
+        role_name="probe",
+        route_id=route.route_id,
+        endpoint_id=endpoint.endpoint_id,
+        protocol=endpoint.protocol,
+        base_url=endpoint.base_url,
+        credential_ref=endpoint.credential_ref or f"endpoint:{endpoint.endpoint_id}",
+        credential_fingerprint="probe",
+        timeout_seconds=endpoint.timeout_seconds,
+        trust_env=endpoint.trust_env,
+        proxy_env=endpoint.proxy_env,
+        provider_model_id=route.provider_model_id,
+        canonical_id=route.provider_model_id,
+        capabilities=dict(route.capabilities),
+        runtime_settings=RuntimeSettings.model_validate(dict(runtime_settings or {})),
+    )
+
+
+def _status_without_an_answer(exc: BaseException) -> ProviderProbeStatus:
+    """What to report when the provider never answered at all.
+
+    Timeouts are named separately from other connection failures because they
+    are the one failure a user can act on by waiting or raising the limit.
+    """
+
+    if isinstance(exc, TimeoutError | httpx.TimeoutException):
+        return "timeout"
+    return "network_error"
 
 
 def _answer_from(response: httpx.Response) -> ProviderAnswer:

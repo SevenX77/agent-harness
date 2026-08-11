@@ -3,8 +3,9 @@ from graph_agent_gateway.registry import (
     call_method_client_compatibility,
     call_method_ids_for_client,
     call_method_ids_for_endpoint,
+    call_method_is_officially_probeable,
     official_call_method_ids,
-    provider_probe_backend_for_method,
+    provider_backend_for_method,
 )
 
 
@@ -32,9 +33,18 @@ def test_call_method_catalog_marks_anthropic_client_compatible_methods() -> None
 
 
 def test_call_method_catalog_owns_probe_backend_and_base_url_transform() -> None:
-    assert provider_probe_backend_for_method("deepseek_anthropic_messages") == "deepseek"
-    assert provider_probe_backend_for_method("ark_anthropic_messages") == "ark"
+    assert provider_backend_for_method("deepseek_anthropic_messages") == "deepseek"
+    assert provider_backend_for_method("ark_anthropic_messages") == "ark"
     assert "openrouter_anthropic_messages" not in official_call_method_ids()
+
+
+def test_a_method_the_official_probe_skips_still_names_its_provider() -> None:
+    # Whether a method can be sent and whether the official-method probe offers
+    # it are two questions: an OpenRouter endpoint is still reachable, and
+    # asking who stands behind its method must not fail because no official
+    # probe lists it.
+    assert not call_method_is_officially_probeable("openrouter_anthropic_messages")
+    assert provider_backend_for_method("openrouter_anthropic_messages") == "claude"
 
     assert (
         apply_call_method_base_url("deepseek_anthropic_messages", "https://api.deepseek.com/v1")

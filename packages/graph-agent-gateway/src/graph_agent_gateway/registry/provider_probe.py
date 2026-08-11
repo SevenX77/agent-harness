@@ -21,7 +21,9 @@ from graph_agent_gateway.dialect import (
 from graph_agent_gateway.registry.call_methods import (
     ProviderProbeBackend,
     apply_call_method_base_url,
-    provider_probe_backend_for_method,
+    call_method_is_officially_probeable,
+    preferred_call_method_for_endpoint,
+    provider_backend_for_method,
 )
 from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderKind, ProviderRoute
 
@@ -86,6 +88,7 @@ async def test_provider_endpoint(
     """Test one endpoint by asking its provider protocol for a model list."""
 
     backend = endpoint_probe_backend(endpoint)
+    wire = probe_wire_backend(endpoint.protocol)
     base_url = endpoint_probe_base_url(endpoint)
     secret = _endpoint_secret(endpoint, api_key)
     if not base_url:
@@ -111,13 +114,13 @@ async def test_provider_endpoint(
     started = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
-            response = await _request_models(client, backend, secret, base_url)
+            response = await _request_models(client, wire, secret, base_url)
     except httpx.TimeoutException:
         return _endpoint_result(endpoint, backend, base_url, "timeout", started, message="Endpoint test timed out.")
     except httpx.HTTPError as exc:
         return _endpoint_result(endpoint, backend, base_url, "network_error", started, message=str(exc))
 
-    status = _probe_status(response, model_not_found_status="error", probed_backend=backend)
+    status = _probe_status(response, model_not_found_status="error", probed_backend=wire)
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
@@ -154,6 +157,7 @@ async def test_provider_route(
     """Probe one concrete provider route with a minimal generation request."""
 
     backend = endpoint_probe_backend(endpoint)
+    wire = probe_wire_backend(endpoint.protocol)
     base_url = endpoint_probe_base_url(endpoint)
     secret = _endpoint_secret(endpoint, api_key)
     if not base_url:
@@ -184,7 +188,7 @@ async def test_provider_route(
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
             response = await _request_model_generation(
                 client,
-                backend,
+                wire,
                 secret,
                 base_url,
                 route.provider_model_id,
@@ -195,7 +199,7 @@ async def test_provider_route(
     except httpx.HTTPError as exc:
         return _route_result(endpoint, route, backend, base_url, "network_error", started, message=str(exc))
 
-    status = _probe_status(response, model_not_found_status="invalid_model", probed_backend=backend)
+    status = _probe_status(response, model_not_found_status="invalid_model", probed_backend=wire)
     return RouteProbeResult(
         endpoint_id=endpoint.endpoint_id,
         route_id=route.route_id,
@@ -226,6 +230,9 @@ async def probe_official_call_method(
     接受图像输入(input_modalities 含 image),4xx 拒绝=不支持。老式 completions
     接口无多模态能力,``multimodal=True`` 时直接 ``ValueError``。
     """
+
+    if not call_method_is_officially_probeable(method_id):
+        raise ValueError(f"Not an officially probeable call method: {method_id}")
 
     normalized_base_url = base_url.rstrip("/")
     started = time.perf_counter()
@@ -269,22 +276,42 @@ async def probe_official_call_method(
     )
 
 
-def endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
-    """Infer the provider probe backend from endpoint protocol and identity."""
+# The two protocols DeepSeek publishes a surface for. A url on that host saying
+# anything else is not a DeepSeek surface, whatever the host suggests.
+_DEEPSEEK_SURFACES = ("openai_compatible", "anthropic_compatible")
 
-    base_host = _url_hostname(endpoint.base_url)
-    endpoint_id = endpoint.endpoint_id.lower()
-    if endpoint.protocol == "ark_runtime":
-        return "ark"
-    if "deepseek" in base_host:
+
+def endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
+    """Whose official API an endpoint belongs to.
+
+    A question about the vendor, not about the wire: it decides which official
+    methods and capability ladders are offered for this endpoint, while
+    `probe_wire_backend` decides how to speak to it. DeepSeek publishes its own
+    method list on both an OpenAI-compatible and an Anthropic-compatible
+    surface, and its url is the only place that identity appears.
+
+    The endpoint's NAME is not consulted. It is a label the user typed, and it
+    used to change which token budget field the probe sent.
+    """
+
+    if endpoint.protocol in _DEEPSEEK_SURFACES and _host_matches(
+        _url_hostname(endpoint.base_url), "deepseek.com"
+    ):
         return "deepseek"
-    if endpoint.protocol == "anthropic_compatible":
-        return "claude"
-    if endpoint.protocol == "google_genai":
-        return "gemini"
-    if "deepseek" in endpoint_id:
-        return "deepseek"
-    return "openai"
+    return probe_wire_backend(endpoint.protocol)
+
+
+def probe_wire_backend(protocol: str) -> ProviderProbeBackend:
+    """How to speak to an endpoint: the protocol it declares.
+
+    The protocol is the user's statement about the wire and the thing
+    production dispatches on (`call/dispatch.py`), so a hostname never
+    overrules it — an endpoint declaring `anthropic_compatible` is probed with
+    Anthropic's wire wherever it is hosted.
+    """
+
+    # No base url on purpose: host rules answer the vendor question, not this one.
+    return provider_backend_for_method(preferred_call_method_for_endpoint(protocol, base_url=None))
 
 
 def endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
@@ -305,13 +332,11 @@ async def _request_models(
                 "anthropic-version": "2023-06-01",
             },
         )
-    if backend in ("ark", "openai", "deepseek"):
+    if backend in ("ark", "openai"):
         url = (
             join_base_url_and_path(base_url, "/api/v3/models")
             if backend == "ark"
             else VersionedPath("/models").url(base_url)
-            if backend == "openai"
-            else join_base_url_and_path(base_url, "/v1/models")
         )
         return await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     return await client.get(
@@ -378,16 +403,12 @@ async def _request_model_generation(
     payload = {
         "model": model_id,
         "messages": [{"role": "user", "content": "."}],
-        "max_completion_tokens" if backend == "openai" else "max_tokens": max_tokens,
+        "max_tokens": max_tokens,
     }
     if effort:
         payload["reasoning_effort"] = effort
     return await client.post(
-        (
-            VersionedPath("/chat/completions").url(base_url)
-            if backend == "openai"
-            else join_base_url_and_path(base_url, "/v1/chat/completions")
-        ),
+        VersionedPath("/chat/completions").url(base_url),
         headers={"Authorization": f"Bearer {api_key}"},
         json=payload,
     )
@@ -803,7 +824,9 @@ def _google_thinking_config(reasoning: Mapping[str, Any]) -> dict[str, object] |
 
 
 def _official_method_backend(method_id: OfficialCallMethod) -> ProviderProbeBackend:
-    return provider_probe_backend_for_method(method_id)
+    return provider_backend_for_method(method_id)
+
+
 
 
 def _url_hostname(raw_url: str) -> str:
@@ -827,6 +850,7 @@ __all__ = [
     "endpoint_probe_backend",
     "endpoint_probe_base_url",
     "probe_official_call_method",
+    "probe_wire_backend",
     "test_provider_endpoint",
     "test_provider_route",
 ]

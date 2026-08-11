@@ -123,7 +123,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **决策 + 动机**：
   - **F3 — 截断升级重试保留 + 搬到编排层**:**决策 = 保留 token escalation,由编排层承担**。它不是某个 SDK 的消息转换能力,而是 Gateway 对"输出被截断"的运行时策略(error-handling 铁律第 7 条要求"截断必须自动重试");ChatX 自身不做这件事,所以它**不能随 `_call_*` 消息转换一起被删**。决策成立至今,只是落点变了:当年的 `_invoke_with_token_escalation` 已不存在,同一策略现由 `_Attempt` 在 `_answer` 循环里执行(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:123-152`、`:401-408`);消费的轮数字段 `RuntimePolicy.token_escalation_rounds` 在 `registry/schema.py:93-98`(字段权威源归 [[04-orch-registry-schema]])。
 - **测试点**：**截断升级重试(F3)** — 遇截断 finish reason → 按 `token_escalation_rounds` 扩大 token budget 重试,且发生在**编排层**(包住 ChatX invoke),不随旧 `_call_*` 删除。
-- **status**：ChatX 主路径的 `_invoke_with_token_escalation` 已落地,包住每条 ChatX invoke；generic ordinary path 的 `_call_with_token_escalation` 保留在 `call/dispatch.py`,不再挂在 `LLMCircuitAndUsageLedger`。
+- **status**：截断升级已落地,现由 `_Attempt` 在 `_answer` 循环里执行(`call/chat_model.py:123-152`、`:401-408`;原文写的 `_invoke_with_token_escalation` 已不存在)。原文并列的 generic ordinary path `_call_with_token_escalation` 随 `call/dispatch.py` 一并已删(决议 D10-1);不用 LangChain 的消费方今天走 `call/plain.py:chat_plainly`,它复用同一条编排,因此也复用同一套截断升级。
 - **归属**：③b `packages/graph-agent-gateway`;轮数字段权威源归 [[04-orch-registry-schema]]。
 
 ### F6 usage 归属（`record_usage` + metadata 注入）
@@ -174,7 +174,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 - **代码下沉**(后续工程,非本轮):`llm_health_store` 熔断持久化内核 → gateway 包(SQLite 路径留 ③a 注入);批量探测编排 → gateway 包(进度 UI 留 ③a)。
 - **已落地**:ChatX 重试耗尽后抛出的核心异常形状已用确定性测试喂给 fallback loop / `classify_exception` 路径,覆盖 fake 401、wrapped network、400 non-capability 与真实 OpenAI SDK 401/400 error shape;分类器当前会沿异常链找 `status_code` 和 `response.status_code`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/resolve/error_classification.py:223-239`，测试见 `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py`。
-- **疑点**:ChatX 主路径 token escalation 当前包住 factory build + ChatX invoke,usage 在 `_generate` 收到最终 `AIMessage` 后读取;generic ordinary path 的 `_call_with_token_escalation` 每轮都会 `_record_usage_from_result`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:653-687`。两条路径的中间轮 usage 记账策略是否需要完全一致,留实现期定。
+- **疑点(已不成立)**:原疑点记的是——ChatX 主路径 token escalation 包住 factory build + invoke、usage 在收到最终 `AIMessage` 后读一次;而 generic ordinary path 的 `_call_with_token_escalation` 每轮都 `_record_usage_from_result`(该文件已删)。**这条疑点已不成立**:原疑点问的是"ChatX 主路径与 generic ordinary path 两条路径的中间轮 usage 记账策略是否需要完全一致";今天只有一条路径,普通 chat 面复用它(决议 D10),留实现期定。
 - **待办 / 反转后定调**:Studio 的 `SqliteLlmHealthStore` 与执行期 `LLMCircuitAndUsageLedger._provider_down_cache` 的关系——**判据已定二者都属 ③b**(一个是持久化、一个是执行期 TTL 缓存),下沉后应在 gateway 包内统一为同一运行时健康源;当前无源码连接,现状分别在 `apps/studio/backend/app/services/llm_health_store.py:26-124` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:49-52`。**注**:此项原 baseline 记作"疑点:二者是否合并",反转后已不是归属疑点(都 ③b),只剩"下沉后如何合并"的工程问题。
 - **疑点(去重)已随代码消失**:原疑点是「`_probe_provider` 已 `_mark_provider_down`,`_generate` 的 `probe_ok=False` 分支又 `_mark_down` 一次」。两个探活函数都不存在了,现在的前置探问根本不写熔断状态(拒绝≠路由挂,见 F8 ⚠),所以没有第二次 mark_down 可去重。熔断只由真实调用失败后的 `_mark_down` 写入(`packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:835-844`)。
 - **疑点**:`LLMCircuitAndUsageLedger.is_provider_marked_down` 接收 `runtime_policy` 但当前立即 `del runtime_policy`,实际 TTL 判断只看已写入的过期时间;如果 MVP1 要让查询逻辑也感知 policy,需要实现任务另行处理,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-61`。
@@ -230,7 +230,7 @@ client 层 A' 重设计的四条决策(D1 保留 `GatewayChatModel`、D2 编排/
 - `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:53-76`:MVP1 保留的 health/probe 对外接口(③b)。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:68-77`:MVP1 保留的 mark_down 对外接口(③b)。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:545-587`:ChatX 主路径的截断升级重试 helper(③b)。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:653-673`:generic ordinary path 的截断升级重试 helper(③b,调用层兜底路径)。
+- (已删) `call/dispatch.py:_call_with_token_escalation`:原 generic ordinary path 的截断升级重试 helper(③b,调用层兜底路径)。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:88-98`:MVP1 继续消费的 `RuntimePolicy`(字段权威源归 04)。
 - `apps/studio/backend/app/services/llm_health_store.py:26-124`:熔断持久化 SQLite store——**本轮反转判 ③b 待下沉**(存储介质 SQLite 路径留 ③a 注入)。
 - `apps/studio/backend/app/services/model_probe.py:18`(`ModelProbeResult`)+ `apps/studio/backend/app/routers/llm.py:1490`(`_probe_official_call_method`):`copilot_test.py` 拆解后留在 studio 的两块——**= ③a 应用**(绑 SDK 调用方式),不是 `_generate` 的执行期 fallback loop。`_probe_model` 已随通用探测一起进 gateway `probing` 域。

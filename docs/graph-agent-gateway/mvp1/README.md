@@ -47,7 +47,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 
 ## 模块清单(覆盖代码来自 Explore 清点,100%)
 
-> ⚠️ 标「共享」的文件:`call/chat_model.py` 的 fallback / probe / 熔断 / usage 编排步骤写进 07,单 route ChatX invoke / 结果桥接写进 09;`call/clients.py` 现只覆盖 probe / 熔断 / usage 健康职责,旧 `_call_*` provider 调用已迁到 `call/dispatch.py` / `call/factory.py`。
+> ⚠️ 标「共享」的文件:`call/chat_model.py` 的 fallback / probe / 熔断 / usage 编排步骤写进 07,单 route ChatX invoke / 结果桥接写进 09;`call/clients.py` 现只覆盖 probe / 熔断 / usage 健康职责,旧 `_call_*` provider 调用已由 `call/factory.py` 造出的官方 ChatX 取代(中途的 `call/dispatch.py` 也已删)。
 
 ### 编排层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
@@ -63,8 +63,8 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 ### 调用层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
-| `09-inv-invocation-runtime` | `call/chat_model.py:_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message`、`call/dispatch.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 已记录旧 `client_manager._call_*` 退役;MVP1 主路径为原生 ChatX,generic ordinary path 在 `call/dispatch.py` |
-| `10-inv-route-chat-model-factory` | `call/factory.py:RouteChatModelFactory`、`models.py:GenericRouteChatModel`、`call/profiles.py` | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。WS-1 后模块源码已存在,剩余为 generic 完整性 deferred |
+| `09-inv-invocation-runtime` | `call/chat_model.py:_dispatch/_answer/_Attempt/_build_chat_result/_build_chat_result_from_ai_message`、`call/dispatch.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 已记录旧 `client_manager._call_*` 退役;MVP1 主路径为原生 ChatX,generic ordinary path 在 `call/dispatch.py` |
+| `10-inv-route-chat-model-factory` | `call/factory.py:RouteChatModelFactory`、`call/plain.py:chat_plainly`(原表并列的 `models.py:GenericRouteChatModel` 与 `call/profiles.py` | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。WS-1 后模块源码已存在,剩余为 generic 完整性 deferred |
 | `11-inv-provider-profiles` | `call/profiles.py:ProviderProfile/apply_provider_profile_layers`、`call/factory.py:_apply_profiles` | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。WS-1 后最小 profile registry 已存在,后续按需收束 provider-specific thinking |
 
 > **copilot SDK 调用（原模块 12）已移交 studio**：按判据它是 ③a 应用（copilot 的实际调用方式，绑 `claude_agent_sdk`），gateway 库不感知 copilot——只把 `copilot_chat` 当普通 role 解析成 route（[`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md) 的 route 级 API）。SDK 调用 / session / env 注入 / 事件翻译 / 假测试见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `01_workflows/00_settings-ux-spec.md` §3.8/§3.4；两个 base_url 归一化助手归 [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)（③b 归一化原语）。

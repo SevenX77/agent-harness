@@ -581,6 +581,94 @@ route 那 80 条**删掉,不重录**,理由不是嫌麻烦:
   但它是全仓唯一一处工具循环测试——**P5 的 T3 必须在真实模型上重新建这份覆盖,
   不能以为已经有了**。已记进台账。
 
+#### D5 的 P4 开工补记(2026-08-11 实测:P4 的题面比立项时窄,也比立项时准)
+
+立项时 P4 写的是"`questions`/`runner` 落地,四个 HTTP 入口改成选题"。开工前把四个入口
+逐个读了一遍,得到三件必须先写明的事实——它们不推翻 P4,但把它收窄成一件具体的事。
+
+**事实一:问题清单和答案词表已经在网关里,只有"怎么问"漏在 studio。**
+
+以 effort 为例,三件东西各在一处:
+
+| 东西 | 在哪 | 归属对不对 |
+|---|---|---|
+| 该问哪些档位 | `registry/bounds.py:187` `effort_probe_candidates(protocol)` | ✅ 网关 |
+| 答案怎么记 | `registry/capabilities.py:205` `measured_effort_capability(levels)` | ✅ 网关 |
+| **怎么问、什么算问出来了** | `apps/studio/backend/app/routers/llm.py:3345` `_accepted_effort_levels` | ❌ studio |
+
+中间那一段("并发发 N 次、`rate_limited`/`network_error` 这类status 一出现就整批作废、
+只有 `ok` 的档位才算这条路由卖")是**判据**,不是 HTTP 编排。它现在写在 router 里,
+意味着第二个入口想问同一个问题就得抄一遍。P4 要搬的正是这一段。
+
+**事实二:effort 现在挂在一个用户几乎按不到的入口上。**
+
+`_probed_route_capabilities`(唯一测 effort 的地方)只有一个调用点:
+`llm.py:3279`,在 `_force_probe_route` 里,也就是 `POST /routes/{id}/probe`。
+而这个接口在前端只有一个触发点——`AvailableModelsSidebar.tsx:529` 那个
+**挂在"已弃用模型"上的 Re-probe 图标按钮**。
+
+正常路径添加的模型走的是"测试模型"(`POST /endpoints/{id}/models/test`,
+前端 `ManualModelTestPanel.tsx:280` `testProviderModels`),而那条路写能力用的是
+`_third_party_probe_capabilities`(`llm.py:5282`)——它**只把 list-models 的字段抄进来,
+或退回一份硬编码默认值,一次 effort 都不问**。
+
+所以"effort 测量归位到测试模型"不是搬家偏好,是修一个漏:**按正常流程加进来的模型,
+它的 effort 档位永远不会被测**。
+
+**事实三:四个入口问的问题清单,今天各写各的。**
+
+| 入口 | 问什么 | 写在哪 |
+|---|---|---|
+| `POST /endpoints/{id}/test` | 列模型(1 次 GET) | `probing/wire.py::probe_provider_endpoint` |
+| `POST /endpoints/{id}/models/test` | 每个模型生成一次;official 端点另加"哪些官方调用方式成立" | studio router + `probing/wire.py::probe_official_call_method` |
+| `POST /routes/{id}/probe` | 生成一次 → 若声明会思考,再逐档问 effort | studio router `_probed_route_capabilities` |
+| `POST /roles/{name}/test-jobs` | 拿角色解析出的 runtime_settings 生成一次 | studio router `_probe_role_route` |
+
+四份清单没有共同结构,所以 P5 的工具调用要接进来,得改四个地方。
+
+**据此把 P4 拆成三步,每步一个 PR。**
+
+- **P4b(已做)**:删掉不发请求就写实测证据的分支。它是 D6 里最独立的一条,先清掉,
+  这样"探测"这个词在 studio 侧只剩一种含义。
+- **P4c**:`probing/questions.py` 落地。一个 *question* 是纯数据:问哪个候选值、
+  带哪份 `runtime_settings`;判据也是纯函数:`accepted_effort_levels` 读一批答案,
+  整批里只要有一条 `rate_limited`/`network_error` 之类就整批作废。
+  `ask_each(questions, ask)` 并发问,并**把每个答案和它回答的那个问题钉在一起**返回。
+
+  **`ask_each` 收一个 asker,而不是自己去调探针。** 这不是为了可测试性,是因为
+  studio 每次问都要套两件属于它的事:端点被用户禁用要当场拒、要给前端发 probe active
+  事件(`llm.py::_probe_route_generation_atom`)。网关自己发请求,这两件事要么在网关里
+  被重写一遍(studio 关注点漏进 SDK,仓规明令禁止),要么被悄悄跳过。
+
+  **立项写的 `probing/runner.py` 没有单独建。** 今天只有一种执行形状,`ask_each` 就是它的
+  全部内容;拆成两个薄模块不如一个(KISS)。P5 接工具调用带来第二种执行形状时再看。
+- **P4d**:"测试模型"也测 effort,事实二那个漏随之补上。对外响应契约不变
+  (决议"不做什么"第 2 条)。
+
+  **这里对立项措辞做一次收窄,理由写明。** 立项写的是"四个入口改成选题"。做完 P4c 才看清:
+  今天**只有一组题**(effort)。为一个元素造一个选择器,正是仓规 KISS/YAGNI 挡的那种
+  "为将来可能用到而写的扩展点"——也是 P4c 里没有单独建 `runner.py` 的同一条理由。
+  所以 P4d 只做那件确凿的事:让正常路径加进来的模型也被测 effort。
+  **"入口选题"这个形状等 P5 带来第二组题(工具调用)时再立**,那时它是从两个真实用例里
+  长出来的,而不是从一个用例外推出来的。
+
+**顺带查出一件必须单独立项的事:D3 说的"唯一写入口"今天不成立。**
+
+D3 写的是"`Measurement[] → CapabilityValue(source=\"probed_verified\")` 的转换只允许存在一处"。
+按 `grep -rn '"probed_verified"'` 实点,能写出这个来源的地方有 **19 处**,分布在网关的
+`registry/capabilities.py`、`registry/catalog.py`、`role/materialization.py`,以及 studio 的
+`routers/llm.py`(5 处)、`services/llm_route_capabilities.py`(4 处)、
+`services/llm_credentials.py`。其中至少三处不是"测出来的",而是**从状态标志推出来的**——
+`llm.py:2746`、`llm.py:5495`、`llm_credentials.py:451` 都写成
+`"probed_verified" if <状态 == verified/ok> else "api_list"`。这是 B7 退一层的同一个物种:
+不是从请求体里拿证据,而是从"这条路由被标成 verified 过"倒推出"它的每一项能力都是实测的"。
+
+这件事不塞进 P4c/P4d——它要先把 19 处逐个判过(哪些确实来自一次测量、哪些是倒推),
+再决定收口形状,属于独立一期。记作 **P4e**,不阻塞 P4c/P4d。
+
+**判据**:studio 全套 + 网关全套绿;真机点四个 Test 各一次,产出逐项报告;
+一个新加的模型在"测试模型"之后,`reasoning_effort` 能力从 `unknown` 变成实测档位。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);
@@ -600,9 +688,39 @@ route 那 80 条**删掉,不重录**,理由不是嫌麻烦:
 | P3 | 生产 `dispatch` 切到同一组 dialect | 切换前先给现有 6 个 `_call_*` 补齐请求体契约测试(录制当前 body 作为基线),切换后逐字段不变;真机跑一次完整 run |
 | P4 | `questions`/`runner` 落地,四个 HTTP 入口改成选题;effort 测量归位到"测试模型";删 B7 分支 | 真机点四个 Test 各一次,产出逐项报告(动作/预期/实测/截图);effort 档位在"测试模型"后可见变化 |
 | P5 | T3:ToolCall(L1) → ReactLoop(L2);copilot CLI 收编为第三种执行器 | 真机对至少两家 provider 各跑一次 L1/L2,结果写进路由能力 |
+| P6 | 权威文档与使用手册跟上这棵树 | 网关 MVP1 设计源里指向已不存在文件的引用清零(机械可核);`packages/graph-agent-gateway/README.md` 讲清六个域各自负责什么、从哪个入口进;新增一份使用手册:宿主怎么注入存储、怎么解析角色、怎么发一次调用、怎么探一条路由 |
 
 P3 不押后。它动的是所有真实推理的出口,风险最高,但"探测=生产"这条保证只有它能给;
 押后就等于前面几期做完仍不知道探出来的结论算不算数。风险由契约测试兜底,不由延期兜底。
+
+#### D7 的 P6 补记(2026-08-11 机械点清:设计源里有 14 个指向不存在文件的路径)
+
+用户目标里"同步相关的权威文档、使用手册"这一条,先量再做。把 `docs/graph-agent-gateway/`
+下 42 篇 md 里出现的每一个模块路径抓出来,逐个去四个真实目录
+(网关 src、studio app、两边 tests)里找,结果:**62 个被点名的路径里,14 个哪里都不存在**。
+
+按文档是否自称描述"现在的系统"分开看——**baseline / mvp0 / _impl 那 18 篇是历史记录,不扫**
+(P1z 立的规矩:只扫自称描述当前系统的文档,否则活指针和死指针就分不出来了)。
+剩下 **17 篇自称当前/目标的文档**里有死路径,而且**全是 `mvp1-alignment.md` 这一档**——
+按 AGENTS.md,那正是"MVP1 design = source of truth"里的 source of truth。
+
+死路径分三类:
+
+| 类 | 路径 | 现在在哪 |
+|---|---|---|
+| 搬了家 | `registry/resolver.py`(15 篇点名) | 拆成 `resolve/resolver.py`(`resolve_role`)与 `call/resolver.py`(运行时平面) |
+| 搬了家 | `registry/error_classification.py` · `registry/lint.py` · `registry/profile_selector.py` | 同名文件在 `resolve/` |
+| 搬了家 | `registry/canonical.py` · `registry/storage.py` | 符号在 `registry/identity.py` · `registry/fingerprint.py` |
+| 被删了 | `call/dispatch.py` · `call/models.py`(P3c)· `registry/probe_contracts.py`(P1a) | 无——那条路任何合法路由都走不到 |
+| 被删了 | `services/copilot_test.py` · `services/llm_import_drafts.py` · `services/llm_probe_catalog.py` · `services/migrations.py` · `models/llm_client_manager.py` | 概念多数还在(import draft / probe catalog 现在住 `registry/catalog.py`),文件不在了 |
+
+**这不是改个路径就完的事。** 第二类("被删了")意味着那几篇 alignment 文档描述的是一个
+**已经不存在的结构**,不是路径写错。所以 P6 不是 sed 替换,是**逐篇判**:该改路径的改路径,
+描述的东西整个没了的,把那一节改写成现在的结构并写明是哪一期删的。
+
+另外:`packages/graph-agent-gateway/README.md` 与整个 `docs/graph-agent-gateway/` 里
+**没有一份"怎么用这个 SDK"的手册**——宿主怎么注入存储 provider、怎么从角色解析出路由、
+怎么发一次调用、怎么探一条路由,今天只能靠读源码。用户目标点名要的就是这个,一并进 P6。
 
 ## 3. 不做什么
 

@@ -15,7 +15,19 @@ from graph_agent_gateway.probing import (
     OfficialCallMethod as OfficialCallMethod,
 )
 from graph_agent_gateway.probing import (
+    Question as Question,
+)
+from graph_agent_gateway.probing import (
     RouteProbeResult as RouteProbeResult,
+)
+from graph_agent_gateway.probing import (
+    accepted_effort_levels as accepted_effort_levels,
+)
+from graph_agent_gateway.probing import (
+    ask_each as ask_each,
+)
+from graph_agent_gateway.probing import (
+    effort_questions as effort_questions,
 )
 from graph_agent_gateway.probing import (
     endpoint_probe_base_url as endpoint_probe_base_url,
@@ -919,6 +931,10 @@ __all__ = [
     "normalize_route_capabilities",
     "measured_effort_capability",
     "effort_probe_candidates",
+    "effort_questions",
+    "accepted_effort_levels",
+    "ask_each",
+    "Question",
     "build_runtime_setting_descriptors",
     "ProfileSelectionError",
     "select_verified_profile",

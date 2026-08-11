@@ -44,9 +44,6 @@ from app.core.adapters.gateway import (
     select_verified_profile,
 )
 from app.core.adapters.gateway import (
-    endpoint_probe_backend as _gateway_endpoint_probe_backend,
-)
-from app.core.adapters.gateway import (
     endpoint_probe_base_url as _gateway_endpoint_probe_base_url,
 )
 from app.core.adapters.gateway import (
@@ -57,6 +54,9 @@ from app.core.adapters.gateway import (
 )
 from app.core.adapters.gateway import (
     probe_provider_route as _gateway_test_provider_route_request,
+)
+from app.core.adapters.gateway import (
+    provider_backend_for_endpoint as _gateway_provider_backend_for_endpoint,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.core.backends import get_backend_config, get_metadata
@@ -809,7 +809,7 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
-    probe_backend = _endpoint_probe_backend(endpoint)
+    probe_backend = _provider_backend_for_endpoint(endpoint)
     logger.warning(
         "testing LLM endpoint protocol=%s backend=%s",
         endpoint.protocol,
@@ -2788,7 +2788,7 @@ def _normalize_route_for_registry_response(
 def _normalize_endpoint_metadata_for_registry_response(
     endpoint: ProviderEndpoint,
 ) -> ProviderEndpoint:
-    if _endpoint_probe_backend(endpoint) != "gemini":
+    if _provider_backend_for_endpoint(endpoint) != "gemini":
         return endpoint
     library = endpoint.metadata.get("capability_library")
     if not isinstance(library, list):
@@ -4097,7 +4097,7 @@ def _official_language_probe_candidates(
 ) -> list[OfficialLanguageProbeCandidate]:
     if not _is_official_language_model_candidate(endpoint, model_id):
         return []
-    backend = _endpoint_probe_backend(endpoint)
+    backend = _provider_backend_for_endpoint(endpoint)
     # openai + gemini pick candidates from the model id (reasoning-effort ladders,
     # thinking tiers) -> data-driven via the rules interpreter
     # (app/data/probe_candidates_dynamic.json), NOT hardcoded if/else.
@@ -4244,7 +4244,7 @@ def _official_catalog_candidate_methods(
 ) -> list[str]:
     methods: set[str] = {candidate.method_id for candidate in _official_language_probe_candidates(endpoint, model_id)}
     model = model_id.lower()
-    backend = _endpoint_probe_backend(endpoint)
+    backend = _provider_backend_for_endpoint(endpoint)
     if backend == "openai":
         if model_type == "image_generation":
             methods.add("openai_images")
@@ -5060,7 +5060,7 @@ def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
     official = official_provider_key_for_host(hostname)
     if official is not None:
         return official
-    return _endpoint_probe_backend(endpoint)
+    return _provider_backend_for_endpoint(endpoint)
 
 
 def _endpoint_catalog_provider_key(endpoint: ProviderEndpoint) -> str:
@@ -6167,8 +6167,8 @@ def _capability_key(value: str) -> str:
     }.get(value, value)
 
 
-def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
-    return _gateway_endpoint_probe_backend(endpoint)
+def _provider_backend_for_endpoint(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
+    return _gateway_provider_backend_for_endpoint(endpoint)
 
 
 def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
@@ -6187,7 +6187,7 @@ def _disabled_endpoint_probe_result(endpoint: ProviderEndpoint) -> EndpointProbe
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
-        backend=_endpoint_probe_backend(endpoint),
+        backend=_provider_backend_for_endpoint(endpoint),
         base_url=_endpoint_probe_base_url(endpoint),
         status="error",
         message=DISABLED_ENDPOINT_PROBE_MESSAGE,
@@ -6203,7 +6203,7 @@ def _disabled_route_probe_result(
         endpoint_id=endpoint.endpoint_id,
         route_id=route.route_id,
         provider_kind=endpoint.provider_kind,
-        backend=_endpoint_probe_backend(endpoint),
+        backend=_provider_backend_for_endpoint(endpoint),
         base_url=_endpoint_probe_base_url(endpoint),
         model_id=route.provider_model_id,
         status="error",

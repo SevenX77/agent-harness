@@ -85,7 +85,7 @@ def _record_asked(
             endpoint_id=endpoint.endpoint_id,
             route_id=route.route_id,
             provider_kind=endpoint.provider_kind,
-            backend=llm_router._endpoint_probe_backend(endpoint),
+            backend=llm_router._provider_backend_for_endpoint(endpoint),
             base_url=llm_router._endpoint_probe_base_url(endpoint),
             model_id=route.provider_model_id,
             status=refusal_status if refused else "ok",  # type: ignore[arg-type]

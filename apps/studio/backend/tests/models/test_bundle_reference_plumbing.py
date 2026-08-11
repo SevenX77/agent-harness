@@ -24,7 +24,7 @@ from app.models.llm_config import (
 )
 from app.services.llm_roles import InvalidRoleReference, validate_references
 from graph_agent_gateway.registry import RegistrySnapshot
-from graph_agent_gateway.registry.resolver import materialize_role_entry
+from graph_agent_gateway.resolve import materialize_role_entry
 
 
 def _credentials() -> LLMCredentialsFile:

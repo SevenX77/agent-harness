@@ -51,25 +51,6 @@ def test_project_route_state_uses_credential_evidence_refs_for_history() -> None
     assert projection.evidence_refs == ["probe-openai-gpt5"]
 
 
-def test_materialize_role_skips_failed_routes_and_returns_terminal_error() -> None:
-    from graph_agent_gateway.registry import (
-        ProviderModelStateProjection,
-        materialize_role,
-    )
-
-    route = _resolved_route()
-    materialized = materialize_role(
-        role="graph_agent",
-        routes=[route],
-        projections={
-            route.route_id: ProviderModelStateProjection(
-                route_id=route.route_id,
-                ui_state="failed",
-                reason_code="model_failed",
-            )
-        },
-    )
-
-    assert materialized.fallback_chain == []
-    assert materialized.error_code == "resource.no_available_route"
-    assert materialized.error_payload["role"] == "graph_agent"
+# "Failed routes are skipped, and a chain that came out empty says why" now
+# lives with the one role materialization that produces it:
+# tests/test_role_materialization_terminal_error.py.

@@ -52,7 +52,7 @@ class _EmptyCredentials:
 
 
 def test_unknown_route_is_skipped_but_reported_as_warning() -> None:
-    from graph_agent_gateway.role_materialization import (
+    from graph_agent_gateway.role import (
         MaterializeRoleRequest,
         materialize_role,
     )

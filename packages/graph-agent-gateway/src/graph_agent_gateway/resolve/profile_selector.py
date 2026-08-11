@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from graph_agent_gateway.registry.schema import ProviderRoute, RuntimeSettings, VerifiedProfile
+from graph_agent_gateway.registry import ProviderRoute, RuntimeSettings, VerifiedProfile
 
 
 class ProfileSelectionError(ValueError):

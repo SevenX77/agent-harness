@@ -31,7 +31,7 @@ def _report() -> dict[str, Any]:
 
 
 def test_a_role_that_chose_an_effort_puts_it_on_the_route() -> None:
-    from graph_agent_gateway.role_materialization import _apply_intent
+    from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
     _apply_intent(report, {"intent": {"reasoning_effort": "low"}}, None, _route(), "openai_compatible")
@@ -42,7 +42,7 @@ def test_a_role_that_chose_an_effort_puts_it_on_the_route() -> None:
 def test_a_role_that_chose_no_effort_leaves_the_provider_default_alone() -> None:
     """Every provider has its own default; writing one of ours over it is a choice
     nobody made."""
-    from graph_agent_gateway.role_materialization import _apply_intent
+    from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
     _apply_intent(report, {"intent": {}}, None, _route(), "openai_compatible")
@@ -53,7 +53,7 @@ def test_a_role_that_chose_no_effort_leaves_the_provider_default_alone() -> None
 def test_an_effort_the_model_does_not_sell_becomes_one_it_does() -> None:
     """The same fitting the request path does, done once at materialization so the
     settings the UI reads back are the settings that will be sent."""
-    from graph_agent_gateway.role_materialization import _apply_intent
+    from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
     _apply_intent(
@@ -75,7 +75,7 @@ def test_an_effort_the_model_does_not_sell_becomes_one_it_does() -> None:
 def test_a_route_nobody_probed_is_still_held_to_its_protocol_vocabulary() -> None:
     """Anthropic's request cannot spell ``none``; sending it costs a round trip to
     be told what the protocol already said."""
-    from graph_agent_gateway.role_materialization import _apply_intent
+    from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
     _apply_intent(
@@ -91,7 +91,7 @@ def test_a_route_nobody_probed_is_still_held_to_its_protocol_vocabulary() -> Non
 
 def test_choosing_an_effort_does_not_by_itself_turn_reasoning_on() -> None:
     """Effort says how hard, the thinking switch says whether — two questions."""
-    from graph_agent_gateway.role_materialization import _apply_intent
+    from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
     _apply_intent(report, {"intent": {"reasoning_effort": "low"}}, None, _route(), "openai_compatible")

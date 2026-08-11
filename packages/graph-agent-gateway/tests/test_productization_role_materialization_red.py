@@ -19,7 +19,7 @@ class NoCircuits:
 
 def test_thinking_true_supported_enables_reasoning() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = _route(
         capabilities={
@@ -46,7 +46,7 @@ def test_thinking_true_supported_enables_reasoning() -> None:
 
 def test_thinking_true_unsupported_warns_but_still_fits() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = _route(
         capabilities={
@@ -73,7 +73,7 @@ def test_thinking_true_unsupported_warns_but_still_fits() -> None:
 
 def test_thinking_false_does_nothing() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = _route(
         capabilities={
@@ -97,7 +97,7 @@ def test_thinking_false_does_nothing() -> None:
 
 def test_max_output_tokens_none_uses_route_max() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = _route(
         capabilities={
@@ -121,7 +121,7 @@ def test_max_output_tokens_none_uses_route_max() -> None:
 
 def test_max_output_tokens_above_route_max_is_clamped_down() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = _route(
         capabilities={
@@ -146,7 +146,7 @@ def test_max_output_tokens_above_route_max_is_clamped_down() -> None:
 
 def test_max_output_tokens_below_route_min_is_clamped_up() -> None:
     from graph_agent_gateway.registry import CapabilityValue
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     route = _route(
         capabilities={
@@ -169,7 +169,7 @@ def test_max_output_tokens_below_route_min_is_clamped_up() -> None:
 
 
 def test_temperature_is_applied_to_resolved_settings() -> None:
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     materialized = materialize_role(
         MaterializeRoleRequest(
@@ -185,7 +185,7 @@ def test_temperature_is_applied_to_resolved_settings() -> None:
 
 def test_materializer_accepts_credential_ref_only_endpoint() -> None:
     from graph_agent_gateway.registry import ProviderEndpoint
-    from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
+    from graph_agent_gateway.role import MaterializeRoleRequest, materialize_role
 
     materialized = materialize_role(
         MaterializeRoleRequest(

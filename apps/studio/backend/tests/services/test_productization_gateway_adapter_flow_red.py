@@ -107,7 +107,7 @@ def test_gateway_adapter_in_process_decides_fallback_route() -> None:
 def test_gateway_adapter_delegates_fallback_decision_to_gateway_owner(monkeypatch) -> None:
     import app.core.adapters.gateway as gateway_module
     from app.core.adapters.gateway import GatewayAdapter
-    from graph_agent_gateway.fallback_decision import FallbackDecision
+    from graph_agent_gateway.resolve import FallbackDecision
 
     captured: dict[str, object] = {}
 
@@ -146,7 +146,7 @@ def test_gateway_adapter_surfaces_gateway_fail_fast_without_give_up_conflation(m
     import app.core.adapters.gateway as gateway_module
     from app.core.adapters.gateway import GatewayAdapter
     from app.core.adapters.http_transport import StudioAdapterError
-    from graph_agent_gateway.fallback_decision import FallbackDecision
+    from graph_agent_gateway.resolve import FallbackDecision
 
     def _fail_fast(_request: object) -> FallbackDecision:
         return FallbackDecision(
@@ -209,6 +209,7 @@ def test_gateway_adapter_delegates_role_materialization_to_gateway_owner(monkeyp
                 "warnings": [],
                 "skipped_provider_details": [],
             },
+            error_code=None,
         )
 
     monkeypatch.setattr(gateway_module, "gateway_materialize_role", _spy, raising=False)
@@ -664,7 +665,7 @@ def test_gateway_adapter_resolve_routes_returns_route_chain_not_resolved_role() 
         RoleRouteEntry,
         RolesData,
     )
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
+    from graph_agent_gateway.resolve import ResolvedRouteChain, RouteSkipDiagnostic
 
     credentials = LLMCredentialsFile(
         provider_endpoints={
@@ -783,7 +784,7 @@ def test_gateway_adapter_resolve_routes_forwards_route_override() -> None:
 
 def test_gateway_adapter_http_loopback_resolve_routes_validates_route_chain_response() -> None:
     from app.core.adapters.gateway import GatewayAdapter
-    from graph_agent_gateway.route_handoff import ResolvedRouteChain
+    from graph_agent_gateway.resolve import ResolvedRouteChain
 
     class FakeHttpTransport:
         def post(self, path: str, payload: dict[str, object]) -> dict[str, object]:

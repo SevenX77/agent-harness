@@ -44,7 +44,7 @@ from graph_agent_gateway.registry import (
 from graph_agent_gateway.registry import (
     RoleEntry as GatewayRoleEntry,
 )
-from graph_agent_gateway.registry.resolver import materialize_role_entry
+from graph_agent_gateway.resolve import materialize_role_entry
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]

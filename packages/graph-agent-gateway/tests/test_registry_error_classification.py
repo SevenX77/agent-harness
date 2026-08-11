@@ -6,7 +6,7 @@ import httpx
 
 
 def test_network_timeout_and_retryable_provider_errors_allow_fallback() -> None:
-    from graph_agent_gateway.registry.error_classification import classify_exception
+    from graph_agent_gateway.resolve import classify_exception
 
     connect = classify_exception(httpx.ConnectError("dns"), route_id="r")
     timeout = classify_exception(httpx.TimeoutException("slow"), route_id="r")
@@ -23,7 +23,7 @@ def test_network_timeout_and_retryable_provider_errors_allow_fallback() -> None:
 
 
 def test_endpoint_scoped_errors_allow_fallback_but_bad_requests_fail() -> None:
-    from graph_agent_gateway.registry.error_classification import classify_exception
+    from graph_agent_gateway.resolve import classify_exception
 
     response = httpx.Response(401, request=httpx.Request("POST", "https://example.test"))
     auth = classify_exception(
@@ -55,7 +55,7 @@ def test_endpoint_scoped_errors_allow_fallback_but_bad_requests_fail() -> None:
 
 
 def test_provider_sdk_status_code_attribute_is_classified() -> None:
-    from graph_agent_gateway.registry.error_classification import classify_exception
+    from graph_agent_gateway.resolve import classify_exception
 
     class ProviderStatusError(RuntimeError):
         status_code = 404
@@ -69,7 +69,7 @@ def test_provider_sdk_status_code_attribute_is_classified() -> None:
 
 
 def test_wrapped_network_error_allows_fallback() -> None:
-    from graph_agent_gateway.registry.error_classification import classify_exception
+    from graph_agent_gateway.resolve import classify_exception
 
     try:
         raise RuntimeError("Connection error.") from httpx.ConnectError("connection refused")
@@ -80,7 +80,7 @@ def test_wrapped_network_error_allows_fallback() -> None:
 
 
 def test_error_context_classifies_stream_and_unsupported_parameter() -> None:
-    from graph_agent_gateway.registry.error_classification import (
+    from graph_agent_gateway.resolve import (
         ErrorContext,
         classify_error_context,
     )

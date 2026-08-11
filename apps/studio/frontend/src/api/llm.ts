@@ -473,6 +473,9 @@ export interface MaterializationReport {
   entries: MaterializationReportEntry[]
   warnings: Array<Record<string, unknown>>
   skipped_provider_details: Array<Record<string, unknown>>
+  // The verdict on the whole role: set when every route it names was excluded,
+  // so nothing is left to run. The per-route reasons stay in the lists above.
+  error_code?: string | null
 }
 
 export type RoleTestStatus = 'ok' | 'warning' | 'blocked' | 'failed'

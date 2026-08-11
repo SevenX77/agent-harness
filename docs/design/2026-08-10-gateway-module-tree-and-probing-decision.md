@@ -573,8 +573,9 @@ route 那 80 条**删掉,不重录**,理由不是嫌麻烦:
 > 第 ① 条就是"普通 chat 面返回非-LangChain 结果"。全仓查过,没有更晚的决策废止它。
 >
 > 所以下面那句"没用的就删"的裁决,是用户在我给的错误前提上作出的,
-> 我不把它当成删除这张脸的授权。**处置待用户裁决**,两条路记在
-> `docs/development/DELIVERY_LEDGER.md` 的 `P6-阻` 行。这也正是仓内早有的那条教训:
+> 我不把它当成删除这张脸的授权。**已在正确前提上重新裁决:恢复**——用户原话
+> "当然要咯，我的那句话现在问你还是成立啊",即 2026-06-04 那句反诘今天依然成立。
+> 恢复成什么形状、为什么不是照旧还原,见下面的 **D10**。这也正是仓内早有的那条教训:
 > 别拿"我们自己不调它"论证"这东西没价值"。
 
 
@@ -694,6 +695,55 @@ D3 写的是"`Measurement[] → CapabilityValue(source=\"probed_verified\")` 的
 
 **判据**:studio 全套 + 网关全套绿;真机点四个 Test 各一次,产出逐项报告;
 一个新加的模型在"测试模型"之后,`reasoning_effort` 能力从 `unknown` 变成实测档位。
+
+### D10. P3c 订正的处置:第二张脸怎么恢复(已裁决,2026-08-11)
+
+**裁决(用户,2026-08-11,在 D9 订正后的正确前提上重问一次)**:恢复。
+原话:"当然要咯，我的那句话现在问你还是成立啊"——即 2026-06-04 那句反诘
+("现在市面上没有用 chat 协议的 app 了？全部都用 chatX 了？")今天依然成立,
+不用 LangChain 的消费方实打实存在,所以这张脸不是过时,是被我判错删掉的。
+
+恢复的形状按下面六条落,每条都不是"照旧还原":
+
+- **D10-1 不是 revert #718。** `GenericRouteChatModel` 和 `call/dispatch.py` 里
+  那六个 `_call_*`(1026 行自研序列化)不回来。P3 的教训是"两条线路会各说各话",
+  探针改走生产同一个工厂就是为了根治它;把自研序列化拉回来等于把病灶请回来。
+
+- **D10-2 按 09 的意图落,不按它的字面落。** 09 写"普通 chat 面与
+  `GenericRouteChatModel` **共用 `call/dispatch.py` 内核**",这句的意图是
+  **两张脸共用一个内核、不要两套实现**;写成 `dispatch.py` 只因为当时那就是内核。
+  今天内核是 `RouteChatModelFactory` + `GatewayChatModel` 的编排,所以第二张脸
+  复用它,在边界上把结果转成朴素数据。同一句设计要求,落到今天的内核上。
+
+- **D10-3 要求是"消费方不依赖 LangChain",不是"网关内部不碰 LangChain"。**
+  langchain-core 是本包的硬依赖,这一点消费方无从感知:它拿到的是 dataclass 和
+  dict,不需要 import 任何 LangChain 类型。判据就写成测试——入参出参没有一个
+  LangChain 类型(= 09 测试关键点①)。
+
+- **D10-4 这张脸吃整条 fallback 链,不是单条路由。** 旧签名吃一条 `ResolvedRoute`,
+  那样它比第三张脸(handoff)只多做一次序列化,不值得单独存在。网关的产品价值是
+  fallback + 熔断 + 用量归属;一个不用 LangChain 的 app 装上网关却拿不到 fallback,
+  等于没装。改吃 `ResolvedRole` 之后三张脸才真正正交:要 LangChain 生态 →
+  `GatewayChatModel`;不要 LangChain 但要网关全部本事 → 本面;全自己调、只要一条
+  解析好的路由 → handoff。
+
+- **D10-5 不重建 19 个形参。** 旧签名那 19 个是 `call/settings.py` 出现之前的形状,
+  设置早已由 role 物化好。新入口只收调用方真正要覆盖的少数几个。
+
+- **D10-6 只给同步版。** 编排一路到底是同步的(`GatewayChatModel._generate`,
+  没有 `_agenerate`),异步版只能是 `asyncio.to_thread` 的包装——那是消费方一行就能
+  写的东西,由网关提供反而像是在假装有真异步。等真出现异步需求再加,不预留。
+
+**接口**:`chat_plainly(resolved_role, messages, ...) -> PlainAnswer`,
+`call` 域与根 `__init__` 都导出。`PlainAnswer` 带 text / reasoning /
+route_id / endpoint_id / model / protocol / finish_reason / usage。
+**不带** settings outcomes:`judge_settings` 的结果现在只进事件不上结果,
+要它得改另一条管线,按 YAGNI 不预铺。
+
+**验收判据**:① 一条测试证明入参出参无 LangChain 类型;② 一条测试证明首选路由
+失败时本面照样 fallback 到下一条(证明 D10-4 不是空话);③ `USAGE.md` 增第五条
+路径;④ 09 全篇按实情改写(它现在还在指 `dispatch.py`/`ordinary_chat`);
+⑤ mypy --strict + gateway 全套 + studio 全套绿。
 
 ### D6. 同期删除(不留别名、不留兼容)
 

@@ -35,7 +35,7 @@ from claude_agent_sdk.types import (
     ToolUseBlock,
     UserMessage,
 )
-from graph_agent_gateway.registry.schema import VerifiedProfile
+from graph_agent_gateway.registry import VerifiedProfile
 from pydantic import SecretStr
 
 

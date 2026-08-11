@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from graph_agent_gateway.registry.resolver import materialize_role_entry
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
+    AUTHORED_TEMPERATURE_MAX,
     CapabilityValue,
     EffectiveRuntimeSetting,
     EndpointCandidate,
@@ -27,24 +27,24 @@ from graph_agent_gateway.registry.schema import (
     RouteCandidate,
     RuntimePolicy,
     RuntimeSettingDescriptor,
+    compute_credential_fingerprint,
 )
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     ModelBundle as GatewayModelBundle,
 )
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     ModelProfile as GatewayModelProfile,
 )
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     ProviderEndpoint as GatewayProviderEndpoint,
 )
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     ProviderRoute as GatewayProviderRoute,
 )
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     RoleEntry as GatewayRoleEntry,
 )
-from graph_agent_gateway.registry.storage import compute_credential_fingerprint
-from graph_agent_gateway.settings_bounds import AUTHORED_TEMPERATURE_MAX
+from graph_agent_gateway.registry.resolver import materialize_role_entry
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]

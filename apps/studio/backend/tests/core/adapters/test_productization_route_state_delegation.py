@@ -2,7 +2,7 @@
 
 Hard architectural constraint: Studio only renders gateway facts; it never
 self-computes the 6-state vocabulary. These tests pin that the Studio adapter
-calls the canonical ``graph_agent_gateway.state_projection.project_route_state``
+calls the canonical ``graph_agent_gateway.registry.projection.project_route_state``
 (rather than reimplementing the branching inline) and faithfully maps every
 state — including ``historical_ready`` — back into the Studio-facing shape.
 """
@@ -16,8 +16,8 @@ import app.core.adapters.gateway as gateway_module
 from app.core.adapters.gateway import GatewayAdapter, ProviderModelStateProjection
 from app.models.llm_config import ProviderEndpoint, ProviderRoute
 from app.services.llm_health_store import RuntimeCircuit
-from graph_agent_gateway.registry.schema import EvidenceRecord
-from graph_agent_gateway.state_projection import (
+from graph_agent_gateway.registry import EvidenceRecord
+from graph_agent_gateway.registry import (
     ProviderModelStateProjection as GatewayProjection,
 )
 

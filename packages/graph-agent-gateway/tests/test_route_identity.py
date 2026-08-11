@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from graph_agent_gateway.registry.route_identity import (
+from graph_agent_gateway.registry import (
     route_slug,
     stable_endpoint_id,
     stable_route_id,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def test_transport_normalization_strips_known_proxy_prefix() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry import canonicalize_model
 
     result = canonicalize_model(
         endpoint_id="openrouter-prod",
@@ -17,8 +17,7 @@ def test_transport_normalization_strips_known_proxy_prefix() -> None:
 
 
 def test_transport_normalized_canonical_equals_route_slug_invariant() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
-    from graph_agent_gateway.registry.route_identity import route_slug
+    from graph_agent_gateway.registry import canonicalize_model, route_slug
 
     result = canonicalize_model(
         endpoint_id="openrouter-prod",
@@ -33,7 +32,7 @@ def test_transport_normalized_canonical_equals_route_slug_invariant() -> None:
 
 
 def test_variant_suffix_stays_a_distinct_canonical() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry import canonicalize_model
 
     base = canonicalize_model(
         endpoint_id="ep",
@@ -50,7 +49,7 @@ def test_variant_suffix_stays_a_distinct_canonical() -> None:
 
 
 def test_official_and_proxy_forms_share_one_canonical() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry import canonicalize_model
 
     official = canonicalize_model(endpoint_id="official", provider_model_id="claude-opus-4-8")
     proxy = canonicalize_model(endpoint_id="openrouter", provider_model_id="anthropic/claude-opus-4.8")
@@ -59,7 +58,7 @@ def test_official_and_proxy_forms_share_one_canonical() -> None:
 
 
 def test_explicit_alias_can_merge_variant() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry import canonicalize_model
 
     result = canonicalize_model(
         endpoint_id="custom",
@@ -72,7 +71,7 @@ def test_explicit_alias_can_merge_variant() -> None:
 
 
 def test_canonicalize_model_uses_endpoint_scoped_explicit_aliases() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry import canonicalize_model
 
     aliases = {
         "endpoint-a:vendor/model": "alpha-model",
@@ -97,7 +96,7 @@ def test_canonicalize_model_uses_endpoint_scoped_explicit_aliases() -> None:
 
 
 def test_variants_remain_orphans_without_explicit_alias() -> None:
-    from graph_agent_gateway.registry.canonical import canonicalize_model
+    from graph_agent_gateway.registry import canonicalize_model
 
     latest = canonicalize_model(endpoint_id="x", provider_model_id="claude-latest")
     thinking = canonicalize_model(endpoint_id="x", provider_model_id="claude-thinking")

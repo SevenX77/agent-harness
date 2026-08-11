@@ -5,15 +5,6 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from graph_agent_gateway.credential_resolver import (
-    CredentialResolveError as GatewayCredentialResolveError,
-)
-from graph_agent_gateway.credential_resolver import (
-    CredentialResolveRequest as GatewayCredentialResolveRequest,
-)
-from graph_agent_gateway.credential_resolver import (
-    resolve_credential as gateway_resolve_credential,
-)
 from graph_agent_gateway.fallback_decision import (
     FallbackDecision as GatewayFallbackDecision,
 )
@@ -23,66 +14,119 @@ from graph_agent_gateway.fallback_decision import (
 from graph_agent_gateway.fallback_decision import (
     decide_fallback as gateway_decide_fallback,
 )
-from graph_agent_gateway.probe_catalog import (
+from graph_agent_gateway.registry import (
     EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
-from graph_agent_gateway.probe_catalog import ProbeCatalogStore as ProbeCatalogStore
-from graph_agent_gateway.probe_catalog import (
+from graph_agent_gateway.registry import (
+    CapabilitySource as CapabilitySource,
+)
+from graph_agent_gateway.registry import CredentialProviderProtocol as CredentialProviderProtocol
+from graph_agent_gateway.registry import (
+    CredentialResolveError as GatewayCredentialResolveError,
+)
+from graph_agent_gateway.registry import (
+    CredentialResolveRequest as GatewayCredentialResolveRequest,
+)
+from graph_agent_gateway.registry import EndpointCredentialProvider as EndpointCredentialProvider
+from graph_agent_gateway.registry import (
+    EvidenceRecord as EvidenceRecord,
+)
+from graph_agent_gateway.registry import (
+    InMemoryConfigTruthStore as InMemoryConfigTruthStore,
+)
+from graph_agent_gateway.registry import ProbeCatalogStore as ProbeCatalogStore
+from graph_agent_gateway.registry import (
     PromotableRouteUpdate as PromotableRouteUpdate,
 )
-from graph_agent_gateway.probe_catalog import (
-    known_model_ids_for_endpoint as known_model_ids_for_endpoint,
+from graph_agent_gateway.registry import (
+    ProviderImportDraft as ProviderImportDraft,
 )
-from graph_agent_gateway.probe_catalog import (
-    known_verified_capabilities as known_verified_capabilities,
+from graph_agent_gateway.registry import (
+    ProviderRoute as GatewayProviderRoute,
 )
-from graph_agent_gateway.probe_catalog import (
-    materialize_probe_catalog_candidates as materialize_probe_catalog_candidates,
+from graph_agent_gateway.registry import (
+    ProviderRoute as ProviderRoute,
 )
-from graph_agent_gateway.probe_catalog import (
-    merge_evidence_library as merge_evidence_library,
+from graph_agent_gateway.registry import ResolvedRoute as ResolvedRoute
+from graph_agent_gateway.registry import (
+    RoleEntry as GatewayRoleEntry,
 )
-from graph_agent_gateway.probe_catalog import (
-    new_evidence_library as new_evidence_library,
+from graph_agent_gateway.registry import (
+    RouteCandidate as RouteCandidate,
 )
-from graph_agent_gateway.probe_catalog import (
-    probe_priority as probe_priority,
+from graph_agent_gateway.registry import (
+    RuntimeSettings as RuntimeSettings,
 )
-from graph_agent_gateway.probe_catalog import (
-    promotable_route_update as promotable_route_update,
-)
-from graph_agent_gateway.registry.base_url import (
-    canonicalize_base_url as canonicalize_base_url,
-)
-from graph_agent_gateway.registry.call_methods import (
+from graph_agent_gateway.registry import VerifiedProfile as VerifiedProfile
+from graph_agent_gateway.registry import (
     apply_call_method_base_url as apply_call_method_base_url,
 )
-from graph_agent_gateway.registry.call_methods import (
-    call_method_auth_token_env as call_method_auth_token_env,
-)
-from graph_agent_gateway.registry.call_methods import (
-    call_method_client_compatibility as call_method_client_compatibility,
-)
-from graph_agent_gateway.registry.call_methods import (
-    call_method_ids_for_client as call_method_ids_for_client,
-)
-from graph_agent_gateway.registry.call_methods import (
-    call_method_ids_for_endpoint as call_method_ids_for_endpoint,
-)
-from graph_agent_gateway.registry.canonical import (
-    canonicalize_model as canonicalize_model,
-)
-from graph_agent_gateway.registry.capabilities import (
+from graph_agent_gateway.registry import (
     build_runtime_setting_descriptors as build_runtime_setting_descriptors,
 )
-from graph_agent_gateway.registry.capabilities import (
+from graph_agent_gateway.registry import (
+    call_method_auth_token_env as call_method_auth_token_env,
+)
+from graph_agent_gateway.registry import (
+    call_method_client_compatibility as call_method_client_compatibility,
+)
+from graph_agent_gateway.registry import (
+    call_method_ids_for_client as call_method_ids_for_client,
+)
+from graph_agent_gateway.registry import (
+    call_method_ids_for_endpoint as call_method_ids_for_endpoint,
+)
+from graph_agent_gateway.registry import (
+    canonicalize_base_url as canonicalize_base_url,
+)
+from graph_agent_gateway.registry import (
+    canonicalize_model as canonicalize_model,
+)
+from graph_agent_gateway.registry import (
+    compute_evidence_content_hash as compute_evidence_content_hash,
+)
+from graph_agent_gateway.registry import (
+    documented_effort_levels as documented_effort_levels,
+)
+from graph_agent_gateway.registry import (
+    effort_probe_candidates as effort_probe_candidates,
+)
+from graph_agent_gateway.registry import (
+    known_model_ids_for_endpoint as known_model_ids_for_endpoint,
+)
+from graph_agent_gateway.registry import (
+    known_verified_capabilities as known_verified_capabilities,
+)
+from graph_agent_gateway.registry import (
+    materialize_probe_catalog_candidates as materialize_probe_catalog_candidates,
+)
+from graph_agent_gateway.registry import (
     measured_effort_capability as measured_effort_capability,
 )
-from graph_agent_gateway.registry.capabilities import (
+from graph_agent_gateway.registry import (
+    merge_evidence_library as merge_evidence_library,
+)
+from graph_agent_gateway.registry import (
+    new_evidence_library as new_evidence_library,
+)
+from graph_agent_gateway.registry import (
     normalize_route_capabilities as normalize_route_capabilities,
 )
-from graph_agent_gateway.registry.contracts import CredentialProviderProtocol as CredentialProviderProtocol
-from graph_agent_gateway.registry.credentials import EndpointCredentialProvider as EndpointCredentialProvider
+from graph_agent_gateway.registry import (
+    probe_priority as probe_priority,
+)
+
+# Canonical 6-state route-state projector owned by the gateway package. Studio
+# renders gateway facts and must NOT recompute the state vocabulary inline.
+from graph_agent_gateway.registry import (
+    project_route_state as gateway_project_route_state,
+)
+from graph_agent_gateway.registry import (
+    promotable_route_update as promotable_route_update,
+)
+from graph_agent_gateway.registry import (
+    resolve_credential as gateway_resolve_credential,
+)
 from graph_agent_gateway.registry.lint import lint_role_routes as lint_role_routes
 from graph_agent_gateway.registry.profile_selector import (
     ProfileSelectionError as ProfileSelectionError,
@@ -118,35 +162,6 @@ from graph_agent_gateway.registry.provider_probe import (
     test_provider_route as test_provider_route,
 )
 from graph_agent_gateway.registry.resolver import RegistryResolutionError as RegistryResolutionError
-from graph_agent_gateway.registry.schema import (
-    CapabilitySource as CapabilitySource,
-)
-from graph_agent_gateway.registry.schema import (
-    EvidenceRecord as EvidenceRecord,
-)
-from graph_agent_gateway.registry.schema import (
-    ProviderImportDraft as ProviderImportDraft,
-)
-from graph_agent_gateway.registry.schema import (
-    ProviderRoute as GatewayProviderRoute,
-)
-from graph_agent_gateway.registry.schema import (
-    ProviderRoute as ProviderRoute,
-)
-from graph_agent_gateway.registry.schema import ResolvedRoute as ResolvedRoute
-from graph_agent_gateway.registry.schema import (
-    RoleEntry as GatewayRoleEntry,
-)
-from graph_agent_gateway.registry.schema import (
-    RouteCandidate as RouteCandidate,
-)
-from graph_agent_gateway.registry.schema import (
-    RuntimeSettings as RuntimeSettings,
-)
-from graph_agent_gateway.registry.schema import VerifiedProfile as VerifiedProfile
-from graph_agent_gateway.registry.schema import (
-    compute_evidence_content_hash as compute_evidence_content_hash,
-)
 
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.resolver import ModelResolver as ModelResolver
@@ -158,26 +173,11 @@ from graph_agent_gateway.role_materialization import (
     materialize_role as gateway_materialize_role,
 )
 from graph_agent_gateway.route_handoff import ResolvedRouteChain
-from graph_agent_gateway.settings_bounds import (
-    documented_effort_levels as documented_effort_levels,
-)
-from graph_agent_gateway.settings_bounds import (
-    effort_probe_candidates as effort_probe_candidates,
-)
-
-# Canonical 6-state route-state projector owned by the gateway package. Studio
-# renders gateway facts and must NOT recompute the state vocabulary inline.
-from graph_agent_gateway.state_projection import (
-    project_route_state as gateway_project_route_state,
-)
-from graph_agent_gateway.storage_contracts import (
-    InMemoryConfigTruthStore as InMemoryConfigTruthStore,
-)
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
-ImportDraftStore = ProbeCatalogStore
-materialize_import_draft_candidates = materialize_probe_catalog_candidates
+ProbeCatalogStore = ProbeCatalogStore
+materialize_probe_catalog_candidates = materialize_probe_catalog_candidates
 
 ProviderUiState = Literal["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]
 _OPAQUE_SECRET_HANDLE_RE = re.compile(r"^secret-handle://studio-local/[a-f0-9]{32}$")
@@ -894,14 +894,14 @@ __all__ = [
     "EvidenceRecord",
     "compute_evidence_content_hash",
     "EVIDENCE_LIBRARY_DRAFT_ID",
-    "ImportDraftStore",
+    "ProbeCatalogStore",
     "ProbeCatalogStore",
     "ProviderImportDraft",
     "PromotableRouteUpdate",
     "RouteCandidate",
     "known_model_ids_for_endpoint",
     "known_verified_capabilities",
-    "materialize_import_draft_candidates",
+    "materialize_probe_catalog_candidates",
     "materialize_probe_catalog_candidates",
     "merge_evidence_library",
     "new_evidence_library",

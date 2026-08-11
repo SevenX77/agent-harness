@@ -24,7 +24,7 @@ def _route(
     capabilities: dict[str, Any] | None = None,
     settings: dict[str, Any] | None = None,
 ) -> Any:
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         CapabilityValue,
         EffectiveRuntimeSetting,
         ResolvedRoute,
@@ -65,7 +65,7 @@ def _defaults() -> Any:
 
 def test_a_temperature_above_the_scale_arrives_as_the_ceiling_not_above_it() -> None:
     """3.0 on a 0..2 dial means "as hot as it goes", not "past the end of it"."""
-    from graph_agent_gateway.settings_bounds import provider_temperature_from_authored
+    from graph_agent_gateway.registry import provider_temperature_from_authored
 
     anthropic = _route(protocol="anthropic_compatible")
     openai = _route(protocol="openai_compatible")
@@ -77,7 +77,7 @@ def test_a_temperature_above_the_scale_arrives_as_the_ceiling_not_above_it() -> 
 
 def test_the_routes_own_temperature_ceiling_wins_over_the_protocol_default() -> None:
     """A model that says its own ceiling is answering a question the protocol guessed at."""
-    from graph_agent_gateway.settings_bounds import provider_temperature_from_authored
+    from graph_agent_gateway.registry import provider_temperature_from_authored
 
     route = _route(capabilities={"temperature": {"supported": True, "max": 1.0}})
 
@@ -106,7 +106,7 @@ def test_an_effort_the_model_does_not_have_becomes_the_most_it_does_below_it() -
     took, so folding (DeepSeek reads ``xhigh`` as ``max``) stays the provider's
     to do.
     """
-    from graph_agent_gateway.settings_bounds import bounds_for, fit
+    from graph_agent_gateway.registry import bounds_for, fit
 
     route = _route(
         capabilities={
@@ -128,7 +128,7 @@ def test_a_protocol_that_documents_its_effort_levels_bounds_them_without_a_probe
     ``ChatAnthropic.effort`` is typed ``low|medium|high|xhigh|max`` and
     ``ChatGoogleGenerativeAI.thinking_level`` ``minimal|low|medium|high``.
     """
-    from graph_agent_gateway.settings_bounds import bounds_for, fit
+    from graph_agent_gateway.registry import bounds_for, fit
 
     anthropic = bounds_for(_route(protocol="anthropic_compatible"), "reasoning.effort")
     google = bounds_for(_route(protocol="google_genai"), "reasoning.effort")
@@ -141,7 +141,7 @@ def test_a_protocol_that_documents_its_effort_levels_bounds_them_without_a_probe
 
 def test_what_the_model_was_measured_to_take_wins_over_what_the_protocol_documents() -> None:
     """A measured refusal outranks a documented level the model turned out to lack."""
-    from graph_agent_gateway.settings_bounds import bounds_for, fit
+    from graph_agent_gateway.registry import bounds_for, fit
 
     route = _route(
         protocol="anthropic_compatible",
@@ -153,7 +153,7 @@ def test_what_the_model_was_measured_to_take_wins_over_what_the_protocol_documen
 
 def test_an_effort_nobody_can_rank_is_left_for_the_provider_to_judge() -> None:
     """A word off the ladder has no "nearest" — guessing one invents a bound."""
-    from graph_agent_gateway.settings_bounds import bounds_for, fit
+    from graph_agent_gateway.registry import bounds_for, fit
 
     route = _route(
         capabilities={
@@ -166,7 +166,7 @@ def test_an_effort_nobody_can_rank_is_left_for_the_provider_to_judge() -> None:
 
 def test_a_top_p_above_one_arrives_at_one() -> None:
     """Nucleus sampling is a share of the distribution; there is no more than all of it."""
-    from graph_agent_gateway.settings_bounds import bounds_for, fit
+    from graph_agent_gateway.registry import bounds_for, fit
 
     bounds = bounds_for(_route(), "top_p")
 
@@ -220,7 +220,7 @@ def test_a_setting_that_fits_reports_no_asked_for_value() -> None:
 
 def test_a_setting_with_no_known_bound_is_sent_as_written() -> None:
     """Inventing a bound to clamp against is worse than not clamping."""
-    from graph_agent_gateway.settings_bounds import bounds_for, fit
+    from graph_agent_gateway.registry import bounds_for, fit
 
     bounds = bounds_for(_route(), "reasoning.effort")
 

@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 
 def _endpoint(protocol: str = "anthropic_compatible"):
-    from graph_agent_gateway.registry.schema import ProviderEndpoint
+    from graph_agent_gateway.registry import ProviderEndpoint
 
     return ProviderEndpoint(
         endpoint_id="provider",
@@ -18,7 +18,7 @@ def _endpoint(protocol: str = "anthropic_compatible"):
 
 
 def _route(provider_model_id: str, profiles: list[object], protocol: str = "anthropic_compatible"):
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderRoute
+    from graph_agent_gateway.registry import CapabilityValue, ProviderRoute
 
     return ProviderRoute(
         route_id="provider:model",
@@ -45,7 +45,7 @@ def _profile(
     runtime_overrides: dict[str, object] | None = None,
     input_modalities: list[str] | None = None,
 ):
-    from graph_agent_gateway.registry.schema import VerifiedProfile
+    from graph_agent_gateway.registry import VerifiedProfile
 
     return VerifiedProfile(
         profile_id=profile_id,
@@ -62,7 +62,7 @@ def _profile(
 
 
 def _snapshot(route: object, *, protocol: str = "anthropic_compatible", runtime_settings=None):
-    from graph_agent_gateway.registry.schema import RegistrySnapshot, RoleEntry, RoleRouteEntry
+    from graph_agent_gateway.registry import RegistrySnapshot, RoleEntry, RoleRouteEntry
 
     return RegistrySnapshot(
         provider_endpoints={"provider": _endpoint(protocol)},
@@ -244,8 +244,8 @@ def test_ark_chat_only_model_selects_ark_chat_profile() -> None:
 
 
 def test_selector_can_require_image_input_and_thinking_for_deepseek_compatibility() -> None:
+    from graph_agent_gateway.registry import RuntimeSettings
     from graph_agent_gateway.registry.profile_selector import select_verified_profile
-    from graph_agent_gateway.registry.schema import RuntimeSettings
 
     route = _route(
         "deepseek-v4-pro",

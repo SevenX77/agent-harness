@@ -15,7 +15,7 @@ from stream_fakes import as_one_piece
 
 
 def _snapshot():
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         ProviderEndpoint,
         ProviderRoute,
         RegistrySnapshot,
@@ -191,8 +191,8 @@ def _resolver_from_payloads(
     roles: dict[str, Any],
     **kwargs: Any,
 ) -> Any:
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore
     from graph_agent_gateway.resolver import ModelResolver
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 
     store = InMemoryConfigTruthStore()
     user_id = "test-user"
@@ -376,7 +376,7 @@ def test_resolve_routes_projects_resource_terminal_error() -> None:
 
 
 def test_model_resolver_maps_filtered_empty_chain_to_resource_terminal_error() -> None:
-    from graph_agent_gateway.registry.schema import RoleEntry
+    from graph_agent_gateway.registry import RoleEntry
     from graph_agent_gateway.resolver import ResourceTerminalError
 
     snapshot = _snapshot()
@@ -471,7 +471,7 @@ def test_runtime_uses_route_secret_and_no_provider_env(
 def test_thinking_protocol_uses_capability_value_not_field_presence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue
+    from graph_agent_gateway.registry import CapabilityValue
 
     snapshot = _snapshot()
     route = snapshot.provider_routes["openai-direct:gpt-5"]
@@ -497,7 +497,7 @@ def test_thinking_protocol_uses_capability_value_not_field_presence(
 def test_route_runtime_setting_not_capability_enables_thinking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
+    from graph_agent_gateway.registry import CapabilityValue, RoleRouteEntry
 
     snapshot = _snapshot()
     route = snapshot.provider_routes["openai-direct:gpt-5"]

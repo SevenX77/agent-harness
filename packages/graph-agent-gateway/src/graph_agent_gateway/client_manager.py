@@ -13,8 +13,7 @@ from anthropic import Anthropic
 from openai import OpenAI
 from pydantic import SecretStr
 
-from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
-from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
+from graph_agent_gateway.registry import CredentialProviderProtocol, ResolvedRoute, RuntimePolicy
 
 logger = logging.getLogger(__name__)
 

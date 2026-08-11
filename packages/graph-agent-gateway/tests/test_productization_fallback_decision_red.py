@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def _resolved_route(route_id: str):
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     endpoint_id, route_slug = route_id.split(":", 1)
     return ResolvedRoute(

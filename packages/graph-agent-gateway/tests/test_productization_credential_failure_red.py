@@ -8,7 +8,7 @@ import pytest
 
 
 def _resolved_route(credential_ref: str):
-    from graph_agent_gateway.registry.schema import ResolvedRoute
+    from graph_agent_gateway.registry import ResolvedRoute
 
     return ResolvedRoute(
         role_name="graph_agent",

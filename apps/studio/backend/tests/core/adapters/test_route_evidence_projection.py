@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from app.core.adapters.gateway import GatewayAdapter
 from app.models.llm_config import ProviderRoute
-from graph_agent_gateway.registry.schema import EvidenceRecord
+from graph_agent_gateway.registry import EvidenceRecord
 
 
 def _route(

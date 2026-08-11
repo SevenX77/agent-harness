@@ -55,7 +55,7 @@ def test_gateway_adapter_resolve_routes_does_not_seed_temp_truth_store_without_c
         RoleRouteEntry,
         RolesData,
     )
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore
 
     store = InMemoryConfigTruthStore()
     store.put_config(

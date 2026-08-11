@@ -11,7 +11,7 @@ from graph_agent_gateway.events import (
     LLMRouteDecisionEvent,
     RouteDecision,
 )
-from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.registry import ResolvedRoute
 from graph_agent_gateway.settings_outcome import SettingOutcome
 
 logger = logging.getLogger(__name__)

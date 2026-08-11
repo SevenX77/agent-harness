@@ -27,7 +27,7 @@ def test_legacy_registry_snapshot_loader_is_removed_from_gateway_owner_path() ->
 
 
 def test_config_truth_store_rejects_second_writer_with_stale_if_match() -> None:
-    from graph_agent_gateway.storage_contracts import (
+    from graph_agent_gateway.registry import (
         ConfigConflictError,
         InMemoryConfigTruthStore,
     )

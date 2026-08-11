@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     ProviderEndpoint,
     ProviderRoute,
     RegistrySnapshot,
@@ -43,7 +43,7 @@ def _mock_registry_snapshot() -> RegistrySnapshot:
 
 
 def _resolver_from_snapshot(snapshot: RegistrySnapshot, **kwargs: Any) -> ModelResolver:
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore
 
     payload = snapshot.model_dump(mode="python")
     store = InMemoryConfigTruthStore()

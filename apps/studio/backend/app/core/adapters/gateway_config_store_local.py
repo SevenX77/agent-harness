@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from graph_agent_gateway.storage_contracts import ConfigRecord as GatewayConfigRecord
+from graph_agent_gateway.registry import ConfigRecord as GatewayConfigRecord
 
 from app.core.adapters.http_transport import StudioAdapterError
 

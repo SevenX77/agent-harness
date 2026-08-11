@@ -14,7 +14,7 @@ from app.models.llm_config import (
 from app.services.llm_credentials import save_credentials
 from app.services.llm_roles import save_roles_file
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.schema import VerifiedProfile
+from graph_agent_gateway.registry import VerifiedProfile
 
 
 def _provider_endpoint(

@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from graph_agent_gateway.import_draft_store import (
-    known_model_ids_for_endpoint,
-    known_verified_capabilities,
-    probe_priority,
-    promotable_route_update,
-)
-from graph_agent_gateway.registry.schema import (
+from graph_agent_gateway.registry import (
     CapabilityValue,
     EvidenceRecord,
     ProviderImportDraft,
     ProviderRoute,
     RouteCandidate,
+    known_model_ids_for_endpoint,
+    known_verified_capabilities,
+    probe_priority,
+    promotable_route_update,
 )
 
 

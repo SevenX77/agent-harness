@@ -292,7 +292,7 @@ def _private_build_gateway_model_resolver() -> Any:
     else:
         roles_data = RolesData()
 
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore
 
     from app.core.adapters.gateway import _filter_gateway_credentials, _filter_gateway_roles, _put_config_if_absent
     from app.services.llm_credentials import _credentials_payload_for_storage

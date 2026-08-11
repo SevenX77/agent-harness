@@ -60,7 +60,7 @@ def test_canonicalize_base_url_is_idempotent_per_protocol(
     protocol: str,
     expected: str,
 ) -> None:
-    from graph_agent_gateway.registry.base_url import canonicalize_base_url
+    from graph_agent_gateway.registry import canonicalize_base_url
 
     assert canonicalize_base_url(url, protocol) == expected
     assert canonicalize_base_url(expected, protocol) == expected

@@ -12,7 +12,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.protocol import PredictContext
-from graph_agent_gateway.registry.schema import ResolvedRole
+from graph_agent_gateway.registry import ResolvedRole
 
 
 class PredictGatewayChatModel(GatewayChatModel):

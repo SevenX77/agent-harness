@@ -222,7 +222,11 @@ effort 进 UI、top_p 不进)。前决议管「被拒之后怎么办」,本决�
 | 步 | 在做什么 | 状态 | 关键设计决定 |
 |---|---|---|---|
 | P0 | 决议落盘 | 🚧 进行中 | 立项证据:①"effort 怎么进请求体"这一句规则在仓里有 8 处赋值、分布在 5 个函数(生产 3 + 探测 5),生产走官方 SDK、探测手搓 httpx——**探测通过不等于生产能跑**;②`provider_probe.py` 全文无 `tools` 字样,四个 Test 按钮没有一个能回答"这条路由能不能进 ReAct 循环",而这正是引擎唯一真正依赖的能力;③外部对网关的 import 共 531 条、绝大多数深入内部文件(`registry.schema` 一处被 import 146 次),内部结构因此变成了公共契约 |
-| P1 | 按域成树的纯搬迁(自底向上,一域一 PR) | ⏳ 待办 | 保留 `registry` 这个名字(AGENTS.md 与 MVP1 设计源的既定术语),改的是它的范围:解析/探测/调用迁出,只留真相。域级契约 = 包 `__init__`,域外只许 `from graph_agent_gateway.<域> import X`,由一条 lint 测试守住 |
+| P1a | registry 域归位 + 域级契约门禁 | 🚧 待合并 | 保留 `registry` 这个名字(AGENTS.md 与 MVP1 设计源的既定术语),改的是它的范围:解析/探测/调用迁出,只留真相。七个模块搬进域内(`storage_contracts`→`config_store`、`registry/storage`→`fingerprint`、`canonical`+`route_identity`合并为`identity`、`import_draft_store`→`catalog`、`state_projection`→`projection`、`settings_bounds`→`bounds`、`credential_resolver`),`probe_catalog` 别名壳删除。域级契约 = `registry/__init__` 的 93 个导出,域外只许 `from graph_agent_gateway.registry import X`——78 个文件的深导入已改写,新增 `test_nobody_outside_the_registry_domain_imports_its_files` 扫全仓守住,尚未归位的六个模块列在 `_AWAITING_REHOME` 并标了各自的期数(只许减不许加)。**实施中三处订正已写回决议 D5**:两个 storage 是两件事不合并;删别名后保留 catalog 命名、legacy `ImportDraft*` 名整体消失;发现 `materialize_role` 同名两物(设计源 `01-design.md:102` 只定义一个),本期不裁决、留给 P1b |
+| P1b | resolve/ + role/ 两域归位 | ⏳ 待办 | 顺带按设计源裁决 `materialize_role` 同名两物 |
+| P1c | call/ 域归位 | ⏳ 待办 | |
+| P1d | probing/ + observe/ 两域归位 | ⏳ 待办 | |
+| P1z | 全仓文档旧路径一次性回写 | ⏳ 待办(树定形后) | 约 120 处,多处在带哈希锁的 audited 设计文件里;每期扫一遍是五倍工作量且反复重钉哈希,故一次做完 |
 | P2 | 抽 `dialect/` + `judge`,探测侧先切 | ⏳ 待办 | 方言的选择由 `protocol` 显式决定,删掉按主机名猜(`endpoint_probe_backend` 里的 `"deepseek" in base_host`) |
 | P3 | 生产 dispatch 切到同一组 dialect | ⏳ 待办 | 不押后:它动的是所有真实推理的出口,但"探测=生产"这条保证只有它能给。风险由请求体契约测试兜底(切换前先录制当前 body 作基线),不由延期兜底 |
 | P4 | `questions`/`runner` 落地,四入口改成选题;effort 测量归位;删伪造证据分支 | ⏳ 待办 | T2 不拆成"跑通一次"与"全量测绘"两个能力,而是同一能力的深度参数——判据/方言/写入口三者相同,拆开必然长出第二份实现 |

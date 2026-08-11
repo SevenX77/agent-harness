@@ -8,7 +8,7 @@ from pydantic import SecretStr
 
 
 def _snapshot():
-    from graph_agent_gateway.registry.schema import (
+    from graph_agent_gateway.registry import (
         ModelBundle,
         ProviderEndpoint,
         ProviderRoute,
@@ -77,8 +77,8 @@ def _snapshot():
 
 
 def _resolver_from_snapshot(snapshot: Any, *, store: Any | None = None) -> Any:
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore
     from graph_agent_gateway.resolver import ModelResolver
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 
     payload = snapshot.model_dump(mode="json")
     config_store = store or InMemoryConfigTruthStore()
@@ -115,7 +115,7 @@ def _runtime_payload(chain: Any) -> list[dict[str, Any]]:
 
 
 def test_temporary_role_materializes_like_equivalent_persisted_role() -> None:
-    from graph_agent_gateway.registry.schema import RoleEntry, RoleRouteEntry
+    from graph_agent_gateway.registry import RoleEntry, RoleRouteEntry
 
     resolver = _resolver_from_snapshot(_snapshot())
     temporary_role = RoleEntry(
@@ -135,8 +135,7 @@ def test_temporary_role_materializes_like_equivalent_persisted_role() -> None:
 
 
 def test_temporary_role_resolution_does_not_write_config_truth() -> None:
-    from graph_agent_gateway.registry.schema import RoleEntry
-    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+    from graph_agent_gateway.registry import InMemoryConfigTruthStore, RoleEntry
 
     class RecordingConfigTruthStore(InMemoryConfigTruthStore):
         def __init__(self) -> None:
@@ -178,7 +177,7 @@ def test_temporary_role_resolution_does_not_write_config_truth() -> None:
 
 
 def test_resolver_resolves_multiple_temporary_roles_for_model_comparison() -> None:
-    from graph_agent_gateway.registry.schema import RoleEntry, RoleRouteEntry
+    from graph_agent_gateway.registry import RoleEntry, RoleRouteEntry
 
     resolver = _resolver_from_snapshot(_snapshot())
 

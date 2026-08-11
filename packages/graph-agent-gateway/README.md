@@ -83,11 +83,11 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
   - **role 级**（✅ `ModelResolver`）——应用给一个 role name，gateway 解析 → 自动按 fallback 链调用，失败按错误码熔断 / 重试 / 切下一条。
   - **route 级**（🔻 待提升为一等公共 API）——应用给一条 route，gateway 直接调用（不需要编排的应用用这个）。
 - **原生 ChatX 调用**（✅ `call/chat_model.py`、`call/clients.py`）：每条路线用原生 langchain ChatX 调通，外层保留 fallback / 熔断 / 前置探问 / usage / 路线归属编排。
-- **错误分类**（✅ `registry/error_classification.py`）：把 HTTP 状态码 / 异常映射成"该 fallback / 该 fail-fast / 该重试"——应用也可以只要这个错误码语义，自己决定怎么处理。
+- **错误分类**（✅ `resolve/error_classification.py`）：把 HTTP 状态码 / 异常映射成"该 fallback / 该 fail-fast / 该重试"——应用也可以只要这个错误码语义，自己决定怎么处理。
 - **前置探问 + 瞬时重试 + 截断升级重试**：三件事今天各有各的家——前置探问 `call/pre_call_probe.py`（问的是「这条路收不收这些设置」，**不是**探活，见 `docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/mvp1-alignment.md` F3）、瞬时重试由 ChatX 自己做（有界，只对 429/5xx/连接）、截断升级重试 `call/chat_model.py` 的 `_Attempt`。
 
 ### G. 可观测
-- **usage / metadata、fallback 事件、tracing、结构化异常**（✅ `events.py` / `tracing.py` / `exceptions.py`）。
+- **usage / metadata、路由决策事件、调用设置事件、结构化异常**（✅ `events.py` / `call/tracing.py` / `errors.py`）：网关每次跳过、探问失败、丢设置重试、同路由重试、加预算重来、换路由、终止、答出、全灭，都发**同一种**事件（`LLMRouteDecisionEvent`，判别字段是封闭枚举）；答案收口时另发一条 `LLMCallSettingsEvent` 说这次要求的每项设置落到什么下场。设计见 `docs/graph-agent-gateway/mvp1/13-x-tracing-events-exceptions/mvp1-alignment.md`。
 
 ---
 

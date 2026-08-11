@@ -19,7 +19,7 @@ from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, Provider
 from app.routers import llm as llm_router
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.provider_probe import EndpointProbeResult, RouteProbeResult
+from graph_agent_gateway.probing import EndpointProbeResult, RouteProbeResult
 
 
 def _seed_third_party_endpoint(

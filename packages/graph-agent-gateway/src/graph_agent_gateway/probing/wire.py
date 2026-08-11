@@ -1,14 +1,19 @@
-"""Gateway-owned provider endpoint and route probe primitives."""
+"""Sending one probe and reporting what came back.
+
+Each entry point asks one question of one provider: what does this endpoint
+list, can this route generate, does this official method work for this model.
+The request is rendered by `dialect`, the answer read by `judge`; what is left
+here is which question to ask and how to describe the attempt.
+"""
 
 from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
 
 from graph_agent_gateway.dialect import (
     Image,
@@ -18,67 +23,30 @@ from graph_agent_gateway.dialect import (
     dialect_for_method,
     join_base_url_and_path,
 )
-from graph_agent_gateway.registry.call_methods import (
+from graph_agent_gateway.registry import (
+    ProviderEndpoint,
     ProviderProbeBackend,
+    ProviderRoute,
     apply_call_method_base_url,
     call_method_is_officially_probeable,
     preferred_call_method_for_endpoint,
     provider_backend_for_method,
 )
-from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderKind, ProviderRoute
 
-ProviderProbeStatus = Literal[
-    "ok",
-    "invalid_key",
-    "invalid_model",
-    "protocol_unsupported",
-    "rate_limited",
-    "quota_exceeded",
-    "network_error",
-    "timeout",
-    "error",
-]
+from .judge import (
+    ProviderProbeStatus,
+    model_capabilities,
+    model_ids,
+    probe_status,
+    provider_response_message,
+    vendor_error_code,
+)
+from .results import EndpointProbeResult, RouteProbeResult
+
 OfficialCallMethod = str
 
 
-class EndpointProbeResult(BaseModel):
-    """Connectivity result for one provider endpoint."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    endpoint_id: str
-    provider_kind: ProviderKind
-    backend: ProviderProbeBackend
-    base_url: str
-    status: ProviderProbeStatus
-    latency_ms: int | None = None
-    model_ids: tuple[str, ...] = ()
-    model_capabilities: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    message: str | None = None
-    error_code: str | None = None
-
-    @property
-    def model_seen(self) -> str | None:
-        return self.model_ids[0] if self.model_ids else None
-
-
-class RouteProbeResult(BaseModel):
-    """Generation probe result for one provider route."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    endpoint_id: str
-    route_id: str
-    provider_kind: ProviderKind
-    backend: ProviderProbeBackend
-    base_url: str
-    model_id: str
-    status: ProviderProbeStatus
-    latency_ms: int | None = None
-    message: str | None = None
-
-
-async def test_provider_endpoint(
+async def probe_provider_endpoint(
     endpoint: ProviderEndpoint,
     *,
     api_key: str | None = None,
@@ -120,7 +88,7 @@ async def test_provider_endpoint(
     except httpx.HTTPError as exc:
         return _endpoint_result(endpoint, backend, base_url, "network_error", started, message=str(exc))
 
-    status = _probe_status(response, model_not_found_status="error", probed_backend=wire)
+    status = probe_status(response, model_not_found_status="error", probed_backend=wire)
     return EndpointProbeResult(
         endpoint_id=endpoint.endpoint_id,
         provider_kind=endpoint.provider_kind,
@@ -128,9 +96,9 @@ async def test_provider_endpoint(
         base_url=base_url,
         status=status,
         latency_ms=_elapsed_ms(started),
-        model_ids=_model_ids(response) if status == "ok" else (),
-        model_capabilities=_model_capabilities(response) if status == "ok" else {},
-        message=None if status == "ok" else _provider_response_message(response),
+        model_ids=model_ids(response) if status == "ok" else (),
+        model_capabilities=model_capabilities(response) if status == "ok" else {},
+        message=None if status == "ok" else provider_response_message(response),
         error_code=(
             None
             if status == "ok"
@@ -140,12 +108,12 @@ async def test_provider_endpoint(
             # and UI key off.
             else "protocol_unsupported"
             if status == "protocol_unsupported"
-            else _extract_vendor_error_code(response, default=status)
+            else vendor_error_code(response, default=status)
         ),
     )
 
 
-async def test_provider_route(
+async def probe_provider_route(
     endpoint: ProviderEndpoint,
     route: ProviderRoute,
     *,
@@ -199,7 +167,7 @@ async def test_provider_route(
     except httpx.HTTPError as exc:
         return _route_result(endpoint, route, backend, base_url, "network_error", started, message=str(exc))
 
-    status = _probe_status(response, model_not_found_status="invalid_model", probed_backend=wire)
+    status = probe_status(response, model_not_found_status="invalid_model", probed_backend=wire)
     return RouteProbeResult(
         endpoint_id=endpoint.endpoint_id,
         route_id=route.route_id,
@@ -209,7 +177,7 @@ async def test_provider_route(
         model_id=route.provider_model_id,
         status=status,
         latency_ms=_elapsed_ms(started),
-        message=None if status == "ok" else _provider_response_message(response),
+        message=None if status == "ok" else provider_response_message(response),
     )
 
 
@@ -259,8 +227,8 @@ async def probe_official_call_method(
         message = str(exc)
         latency_ms = _elapsed_ms(started)
     else:
-        status = _probe_status(response, model_not_found_status="invalid_model")
-        message = None if status == "ok" else _provider_response_message(response)
+        status = probe_status(response, model_not_found_status="invalid_model")
+        message = None if status == "ok" else provider_response_message(response)
         latency_ms = _elapsed_ms(started)
 
     return RouteProbeResult(
@@ -469,229 +437,6 @@ def _probe_prompt(multimodal: bool) -> Prompt:
     )
 
 
-# Providers report an exhausted balance in provider-specific ways that do not
-# follow the 402/403 status convention — Anthropic answers HTTP 400
-# invalid_request_error with "credit balance is too low". A billing failure hits
-# every model on the endpoint, so it must classify as structural quota_exceeded,
-# never as a model-level invalid_model.
-_BILLING_ERROR_MARKERS = (
-    "credit balance",
-    "insufficient balance",
-    "insufficient credit",
-    "insufficient_quota",
-    "quota exceeded",
-    "billing",
-)
-
-
-def _is_billing_error(response: httpx.Response) -> bool:
-    try:
-        payload = response.json()
-    except ValueError:
-        return False
-    if not isinstance(payload, dict):
-        return False
-    error = payload.get("error")
-    source = error if isinstance(error, dict) else payload
-    text = " ".join(
-        str(value).lower()
-        for value in (source.get("type"), source.get("code"), source.get("message"))
-        if value is not None
-    )
-    return any(marker in text for marker in _BILLING_ERROR_MARKERS)
-
-
-# A URL that does not serve the probed protocol at all answers with wrong-path
-# signatures instead of a provider-shaped model error. Two observed families
-# (design §1.2 protocol matrix, live-verified on qiniu): explicit guidance to the
-# correct path ("Use /v1/messages instead", any HTTP status) and bare path-level
-# 404/405 text ("not found or method not allowed"). These are protocol-level
-# facts about the (URL, protocol) combination — classifying them as
-# invalid_model conflates "this URL cannot speak the protocol" with "the model
-# id is wrong" and poisons every consumer downstream.
-_PROTOCOL_MISMATCH_MARKERS = (
-    "use /v1/messages",
-    "use /v1/chat/completions",
-    "method not allowed",
-    # A host with no handler for the probed protocol's path answers with a
-    # route-level rejection (live 2026-07-02, anthropic.qnaigc.com × google:
-    # GET /v1beta/models -> HTTP 500 "Unsupported fixed route: /v1beta/models").
-    "unsupported fixed route",
-    "unknown route",
-    "route not found",
-)
-
-
-def _has_protocol_mismatch_guidance(response: httpx.Response) -> bool:
-    text = response.text.lower()
-    return any(marker in text for marker in _PROTOCOL_MISMATCH_MARKERS)
-
-
-# A host with no backend for the probed protocol may silently MISROUTE the
-# request to a different protocol's upstream and surface that upstream's error
-# verbatim (live 2026-07-02, anthropic.qnaigc.com × google: the gemini probe
-# 500s wrapping "OpenAI API error: 401 invalid api key"). A probe for backend X
-# that comes back describing backend Y's API is proof the host does not speak X.
-# Each marker maps to the backends for which it is NATIVE — seeing it on any
-# OTHER backend is a protocol mismatch, not a transient error or a real auth
-# failure on the matching protocol.
-_FOREIGN_API_ERROR_SIGNATURES: dict[str, tuple[ProviderProbeBackend, ...]] = {
-    "openai api error": ("openai", "deepseek", "ark"),
-    "anthropic api error": ("claude",),
-    "gemini api error": ("gemini",),
-    "google api error": ("gemini",),
-}
-
-
-def _has_foreign_protocol_error(
-    response: httpx.Response,
-    probed_backend: ProviderProbeBackend,
-) -> bool:
-    text = response.text.lower()
-    return any(
-        marker in text and probed_backend not in native_backends
-        for marker, native_backends in _FOREIGN_API_ERROR_SIGNATURES.items()
-    )
-
-
-def _is_provider_error_payload(response: httpx.Response) -> bool:
-    """True when the body is the protocol's own structured error schema.
-
-    Every supported protocol (openai / anthropic / google / ark) wraps request
-    errors in a JSON object with an ``error`` member. A 404 carrying that shape
-    proves the protocol handler answered — the failure is about the request
-    (model id), not about the URL not speaking the protocol.
-    """
-    try:
-        payload = response.json()
-    except ValueError:
-        return False
-    return isinstance(payload, dict) and payload.get("error") is not None
-
-
-def _probe_status(
-    response: httpx.Response,
-    *,
-    model_not_found_status: Literal["invalid_model", "error"],
-    probed_backend: ProviderProbeBackend | None = None,
-) -> ProviderProbeStatus:
-    code = response.status_code
-    if 200 <= code < 300:
-        return "ok"
-    if code == 405 or _has_protocol_mismatch_guidance(response):
-        return "protocol_unsupported"
-    if probed_backend is not None and _has_foreign_protocol_error(response, probed_backend):
-        # Misrouted to a different protocol's upstream — the (URL, protocol) cell
-        # cannot speak the probed protocol. This precedes the 401 branch so a
-        # foreign-protocol auth error is not mistaken for THIS key being invalid.
-        return "protocol_unsupported"
-    if code == 401:
-        return "invalid_key"
-    if code == 429:
-        return "rate_limited"
-    if code in (402, 403):
-        return "quota_exceeded"
-    if code in (400, 404):
-        if _is_billing_error(response):
-            return "quota_exceeded"
-        if code == 404 and not _is_provider_error_payload(response):
-            return "protocol_unsupported"
-        return model_not_found_status
-    return "error"
-
-
-def _model_ids(response: httpx.Response) -> tuple[str, ...]:
-    try:
-        payload = response.json()
-    except ValueError:
-        return ()
-    values: list[str] = []
-    if isinstance(payload, dict):
-        data = payload.get("data")
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]:
-                    values.append(item["id"])
-        models = payload.get("models")
-        if isinstance(models, list):
-            for item in models:
-                if isinstance(item, dict):
-                    model_name = item.get("name")
-                    if isinstance(model_name, str) and model_name:
-                        values.append(model_name.removeprefix("models/"))
-    return tuple(dict.fromkeys(values))
-
-
-def _model_capabilities(response: httpx.Response) -> dict[str, dict[str, Any]]:
-    try:
-        payload = response.json()
-    except ValueError:
-        return {}
-    capabilities: dict[str, dict[str, Any]] = {}
-    if not isinstance(payload, dict):
-        return capabilities
-    entries = payload.get("data")
-    if not isinstance(entries, list):
-        entries = payload.get("models")
-    if not isinstance(entries, list):
-        return capabilities
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        model_id = entry.get("id")
-        if not isinstance(model_id, str) or not model_id:
-            name = entry.get("name")
-            if not isinstance(name, str) or not name:
-                continue
-            model_id = name.removeprefix("models/")
-        capabilities[model_id] = {key: value for key, value in entry.items() if key not in {"id", "name"}}
-    return capabilities
-
-
-def _provider_response_message(response: httpx.Response) -> str:
-    error_code = _extract_vendor_error_code(response, default="")
-    vendor_message = _extract_vendor_error_message(response)
-    if error_code:
-        message = f"Provider returned HTTP {response.status_code} ({error_code})."
-    else:
-        message = f"Provider returned HTTP {response.status_code}."
-    if vendor_message:
-        message = f"{message} {vendor_message}"
-    return message
-
-
-def _extract_vendor_error_code(response: httpx.Response, *, default: str) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return default
-    if not isinstance(payload, dict):
-        return default
-    error = payload.get("error")
-    if isinstance(error, dict):
-        for key in ("code", "type", "status"):
-            value = error.get(key)
-            if isinstance(value, str) and value:
-                return value
-    return default
-
-
-def _extract_vendor_error_message(response: httpx.Response) -> str | None:
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    error = payload.get("error")
-    if isinstance(error, dict):
-        message = error.get("message")
-        if isinstance(message, str) and message:
-            return message
-    message = payload.get("message")
-    return message if isinstance(message, str) and message else None
-
-
 def _endpoint_secret(endpoint: ProviderEndpoint, api_key: str | None) -> str:
     if api_key is not None:
         return api_key
@@ -851,6 +596,6 @@ __all__ = [
     "endpoint_probe_base_url",
     "probe_official_call_method",
     "probe_wire_backend",
-    "test_provider_endpoint",
-    "test_provider_route",
+    "probe_provider_endpoint",
+    "probe_provider_route",
 ]

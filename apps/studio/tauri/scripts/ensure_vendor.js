@@ -113,9 +113,13 @@ function canImportVendoredPackages({
   target = sitePackages(),
   backend = path.join(VENDOR_DIR, 'backend'),
   modules = REQUIRED_VENDOR_IMPORTS,
+  // Injectable for the same reason rebuildVendor's is: whether ensureVendor
+  // rebuilds is a decision about its own branches, and a test of that decision
+  // should not depend on a Python runtime being provisioned on the machine.
+  spawn = spawnSync,
 } = {}) {
   if (!fs.existsSync(python) || !fs.existsSync(target)) return false
-  const result = spawnSync(
+  const result = spawn(
     python,
     ['-c', `import ${modules.join(', ')}`],
     {

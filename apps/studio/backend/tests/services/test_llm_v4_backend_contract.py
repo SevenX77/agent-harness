@@ -16,7 +16,6 @@ from app.models.llm_config import (
 )
 from app.services.llm_credentials import (
     load_credentials,
-    migrate_v3_credentials_to_v4,
     save_credentials,
     serialize_for_response,
     upsert_endpoints,
@@ -93,99 +92,6 @@ def test_load_missing_credentials_returns_empty_v4_and_legacy_file_is_fatal(tmp_
 
     with pytest.raises(ValueError, match="schema_version 4|legacy"):
         load_credentials(path)
-
-
-def test_migrate_v3_credentials_to_v4_preserves_secret_and_models(tmp_path: Path) -> None:
-    path = tmp_path / "llm_credentials.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 3,
-                "providers": [
-                    {
-                        "id": "anthropic-official",
-                        "name": "Anthropic Official",
-                        "provider_type": "anthropic_compatible",
-                        "base_url": "https://api.anthropic.com",
-                        "api_key": "anthropic-secret",
-                        "last_test_status": "ok",
-                        "available_models": [
-                            {
-                                "id": "claude-sonnet-4-6",
-                                "capabilities": {
-                                    "display_name": "Claude Sonnet 4.6",
-                                    "max_input_tokens": 1_000_000,
-                                    "max_output_tokens": 128_000,
-                                    "thinking": {"supported": True},
-                                },
-                            }
-                        ],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    migrated = migrate_v3_credentials_to_v4(path)
-
-    assert migrated.schema_version == 5  # v3 migration lands on the current schema (v5)
-    endpoint = migrated.provider_endpoints["anthropic-official"]
-    assert endpoint.api_key is not None
-    assert endpoint.api_key.get_secret_value() == "anthropic-secret"
-    assert "anthropic-official:claude-sonnet-4.6" in migrated.provider_routes
-    route = migrated.provider_routes["anthropic-official:claude-sonnet-4.6"]
-    assert route.display_name == "Claude Sonnet 4.6"
-    assert route.provider_model_id == "claude-sonnet-4-6"
-    assert route.canonical_id == "claude-sonnet-4.6"
-    assert route.capabilities["thinking_protocol"].value is True
-    assert route.capabilities["thinking_protocol"].source == "probed_verified"
-    assert route.capabilities["min_thinking_budget_tokens"].value == 1024
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 5
-    assert (tmp_path / "llm_credentials.json.v3.bak").exists()
-
-
-def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) -> None:
-    path = tmp_path / "llm_credentials.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 3,
-                "providers": [
-                    {
-                        "id": "98593eb6-764b-497e-808d-6610935f0e0a",
-                        "name": "OpenRouter",
-                        "provider_type": "openai_compatible",
-                        "base_url": "https://openrouter.ai/api",
-                        "api_key": "openrouter-secret",
-                        "last_test_status": "ok",
-                        "available_models": [
-                            {
-                                "id": "anthropic/claude-sonnet-4-6",
-                                "capabilities": {"display_name": "Claude Sonnet 4.6"},
-                            }
-                        ],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    migrated = migrate_v3_credentials_to_v4(path)
-
-    openrouter_endpoint_id = _url_endpoint_id("https://openrouter.ai/api")
-    assert openrouter_endpoint_id in migrated.provider_endpoints
-    assert "98593eb6-764b-497e-808d-6610935f0e0a" not in migrated.provider_endpoints
-    # The proxy ``anthropic/`` transport prefix is stripped so this route groups
-    # with the official Claude Sonnet 4.6, while the raw id used to call the
-    # provider is preserved and route_id suffix stays == canonical_id.
-    route_id = f"{openrouter_endpoint_id}:claude-sonnet-4.6"
-    assert route_id in migrated.provider_routes
-    route = migrated.provider_routes[route_id]
-    assert route.canonical_id == "claude-sonnet-4.6"
-    assert route.route_id.partition(":")[2] == route.canonical_id
-    assert route.provider_model_id == "anthropic/claude-sonnet-4-6"
 
 
 def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secret(

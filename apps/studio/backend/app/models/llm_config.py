@@ -45,7 +45,7 @@ from graph_agent_gateway.registry import (
     RoleEntry as GatewayRoleEntry,
 )
 from graph_agent_gateway.resolve import materialize_role_entry
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
 DEFAULT_ROLE_TEMPERATURE = 1.4
@@ -89,6 +89,33 @@ class ProviderEndpoint(GatewayProviderEndpoint):
     # truth. Studio-only presentation field: stripped from the gateway runtime endpoint.
     registrable_provider_name: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_derived_api_key_length(cls, data: Any) -> Any:
+        """Drop an incoming ``api_key_length`` so the derivation can never be lied to.
+
+        api_key_length is a pure function of the secret (see the computed field
+        below). A client echoing a GET registry payload back into PUT carries it;
+        popping it here — instead of leaving ``extra='forbid'`` to reject the whole
+        upsert — mirrors the gateway ``ProviderRoute._strip_persisted_canonical_id``
+        pattern for computed projections.
+        """
+        if isinstance(data, dict):
+            data.pop("api_key_length", None)
+        return data
+
+    # 2026-08-12 决议: the secret's TRUE character count, so the UI masks with the
+    # key's real length instead of the SecretStr placeholder's fixed 10 chars.
+    # Derived live from the secret (never persisted — see
+    # ``_credentials_payload_for_storage``) and stripped from the gateway runtime
+    # endpoint like every Studio-only presentation field.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def api_key_length(self) -> int | None:
+        if self.api_key is None:
+            return None
+        return len(self.api_key.get_secret_value()) or None
+
 
 class ProviderRoute(GatewayProviderRoute):
     """Studio-owned route DTO with optional admin/display label."""
@@ -119,7 +146,7 @@ def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
     return GatewayProviderEndpoint.model_validate(
         endpoint.model_dump(
             mode="python",
-            exclude={"display_name", "last_error_code", "registrable_provider_name"},
+            exclude={"display_name", "last_error_code", "registrable_provider_name", "api_key_length"},
         )
     )
 

@@ -37,6 +37,10 @@ export interface ProviderEndpoint {
   base_url: string
   credential_ref?: string | null
   api_key?: string | null
+  // 2026-08-12 决议: true character count of the stored secret — the masked
+  // input draws this many dots, since api_key itself is a fixed 10-char
+  // redaction placeholder. null when no key is stored.
+  api_key_length?: number | null
   status: RouteStatus
   last_test_at?: string | null
   last_test_message?: string | null
@@ -299,6 +303,7 @@ export interface CredentialProviderState {
   id: string
   name: string
   api_key: string
+  api_key_length?: number | null
   base_url?: string
   runtime_base_url?: string
   provider_type?: ProviderType | null
@@ -1164,6 +1169,7 @@ function endpointToCredential(
     id: endpoint.endpoint_id,
     name: endpoint.display_name,
     api_key: endpoint.api_key ?? '',
+    api_key_length: endpoint.api_key_length ?? null,
     base_url: endpointStudioBaseUrl(endpoint),
     runtime_base_url: endpoint.base_url,
     provider_type: providerType,

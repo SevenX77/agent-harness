@@ -20,6 +20,7 @@ import {
   verifiedSiblingProtocolsOnSameHost,
   type EndpointSummary,
 } from "./ProviderCard"
+import { REDACTED_ENDPOINT_SECRET } from "../../../api/llm"
 import type { CredentialsState, ModelInfo, TestStatus } from "../../../api/llm"
 import { providerTestParamsFingerprint } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
@@ -128,6 +129,25 @@ describe("ProviderCard API key masking", () => {
     expect(apiKeyDisplayValue("sk-secret-123", true)).toBe("sk-secret-123")
     expect(apiKeyDisplayValue("sk-secret-123", false, true)).toBe("sk-secret-123")
     expect(apiKeyDisplayValue("", false)).toBe("")
+  })
+
+  it("masks a redacted secret with the registry-reported real key length", () => {
+    // 2026-08-12 \u51b3\u8bae: the redacted registry value is a fixed 10-char SecretStr
+    // placeholder \u2014 the dot count must come from api_key_length (the secret's
+    // true character count), or users read the 10 dots as a truncated key.
+    expect(apiKeyDisplayValue(REDACTED_ENDPOINT_SECRET, false, false, 51)).toBe("\u2022".repeat(51))
+    // Once the field holds a real value (revealed / freshly typed), its own
+    // length wins \u2014 the registry length only describes the redacted placeholder.
+    expect(apiKeyDisplayValue("sk-secret-123", false, false, 51)).toBe("\u2022".repeat("sk-secret-123".length))
+    expect(apiKeyDisplayValue(REDACTED_ENDPOINT_SECRET, true, false, 51)).toBe(REDACTED_ENDPOINT_SECRET)
+  })
+
+  it("renders the true-length mask for a redacted persisted key", () => {
+    const html = renderCardHtml({
+      nextDraft: makeDraft({ api_key: REDACTED_ENDPOINT_SECRET }),
+      persisted: makePersisted({ api_key: REDACTED_ENDPOINT_SECRET, api_key_length: 51 }),
+    })
+    expect(html).toContain(`value="${"\u2022".repeat(51)}"`)
   })
 
   it("keeps the input type=text in both hidden and visible states", () => {

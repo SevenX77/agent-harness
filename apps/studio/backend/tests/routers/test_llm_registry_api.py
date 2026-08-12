@@ -358,6 +358,73 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
 
 
+def test_registry_projects_api_key_length_but_never_persists_it(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """2026-08-12 决议: the redacted registry carries the secret's TRUE character
+    count so the UI can mask with the key's real length instead of the SecretStr
+    placeholder's fixed 10 chars. The length is a live derivation — it must never
+    reach the credentials file (extra="forbid" would reject it on reload)."""
+    credentials_file, _ = _seed(tmp_path, monkeypatch)
+
+    endpoint = client.get("/api/llm/registry").json()["provider_endpoints"]["openai-direct"]
+    assert endpoint["api_key"] == "**********"
+    assert endpoint["api_key_length"] == len("secret")
+
+    put_body = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "anthropic-official": {
+                    "endpoint_id": "anthropic-official",
+                    "display_name": "Anthropic",
+                    "protocol": "anthropic_compatible",
+                    "base_url": "https://api.anthropic.com",
+                    "api_key": "anthropic-secret",
+                },
+                "keyless": {
+                    "endpoint_id": "keyless",
+                    "display_name": "Keyless",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://keyless.example/v1",
+                },
+            }
+        },
+    ).json()
+    assert put_body["provider_endpoints"]["anthropic-official"]["api_key_length"] == len("anthropic-secret")
+    keyless = next(
+        endpoint
+        for endpoint in put_body["provider_endpoints"].values()
+        if endpoint["display_name"] == "Keyless"
+    )
+    assert keyless["api_key_length"] is None
+
+    stored = json.loads(credentials_file.read_text(encoding="utf-8"))
+    for stored_endpoint in stored["provider_endpoints"].values():
+        assert "api_key_length" not in stored_endpoint
+    reloaded = client.get("/api/llm/registry").json()
+    assert reloaded["provider_endpoints"]["openai-direct"]["api_key_length"] == len("secret")
+
+    # A client echoing the GET payload back into PUT carries api_key_length; the
+    # server strips and re-derives it — a forged value can never enter state.
+    # (The upsert may re-key a non-curated endpoint id, so look it up by name.)
+    echoed = dict(reloaded["provider_endpoints"]["openai-direct"], api_key_length=999)
+    echo_response = client.put(
+        "/api/llm/registry/endpoints",
+        json={"provider_endpoints": {"openai-direct": echoed}},
+    )
+    assert echo_response.status_code == 200
+    openai_endpoint = next(
+        endpoint
+        for endpoint in echo_response.json()["provider_endpoints"].values()
+        if endpoint["display_name"] == "OpenAI"
+    )
+    assert openai_endpoint["api_key"] == "**********"
+    assert openai_endpoint["api_key_length"] == len("secret")
+
+
 def test_registry_community_summary_derives_from_credentials(
     client: TestClient,
     tmp_path: Path,

@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import { SKILL_ID, SKILL_NAME, installStudioBridge, openSkillWorkspace } from './_n2bridge'
 
-// Real-machine screenshot capture for the N2.1 canvas operations (handbook
-// n2_canvas slice). Each test seeds a faithful skill-detail mock (the exact
-// shape the shipping sidecar returns) and drives the real canvas UI, saving a
-// screenshot into test-results/ for curation into the handbook screenshots dir.
+// Real-machine screenshot capture for the N2.1 canvas operations. Each test
+// seeds a faithful skill-detail mock (the exact shape the shipping sidecar
+// returns) and drives the real canvas UI, saving a screenshot into
+// test-results/ as evidence for a per-item verification report.
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5199'
 const SUB_PATH = '/workspace/n2-canvas-demo/phases/expand/expand-sub'

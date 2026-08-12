@@ -287,20 +287,6 @@ one-page orientation, not the full design.
     global overview — read it first for orientation, then the body above.
 - **MVP1 integration baseline**:
   `docs/studio/mvp1/_impl/STUDIO-MVP1-INTEGRATION-BASELINE.md`
-- **12D node repair handbook (HTML)**:
-  `docs/studio/mvp1/_impl/wave2/studio-mvp1-12d-repair-framework-2026-06-15.html`
-  — parent/child node interface + repair guide.
-- **N6 frontend implementation handbook (HTML, committed & authoritative)**:
-  `docs/studio/mvp1/_impl/frontend-handbook/index.html` — the guide future
-  frontend work continues to follow. (Different from the local-only `temp/`
-  handbook noted below — that one is NOT it.)
-  - **唯一真相源 + 唯一网络出口 = `main` 主仓根。** 手册(`tpl-*.json` 切片 +
-    `screenshots/` 真机图 + 生成出的 `index.html`)只认 `main` 这一份。改手册跟
-    改代码一样:在 worktree 里改切片 / 加截图 / 重生成,走 PR 合进 `main` —— **不在
-    worktree 或 `/tmp` 留第二份手册、也不为它单开第二条隧道**。对外那一个网页固定从
-    **主仓根**(`main` 工作树)伺服;合并后主仓根 `git pull` 即刷新。截图必须随切片一起
-    提交进 git(不许只烤进 `index.html` 而源 PNG 不入库)。操作配方见
-    `docs/development/RUN_AND_SCREENSHOT.md` §4。
 - **Frontend UI spec**: `docs/development/FRONTEND_UI_SPEC.md`
 - **Cross-platform / encoding policy**: `docs/development/CROSS_PLATFORM.md` —
   三平台（Windows/macOS/Linux）兼容铁律：文本一律 UTF-8 + LF、`subprocess`/文件
@@ -318,17 +304,19 @@ one-page orientation, not the full design.
 - **Feature handoff prompt (template, single source)**:
   `docs/development/FRONTEND_HANDOFF_PROMPT.md` — the canonical copy-paste brief
   for handing a Studio feature task (frontend-driven, full-stack) to an agent
-  (必读清单 + 开发原则 + 边界纪律 + 收尾回写手册/状态点)。Rule changes update
-  this file via PR, not chat.
-- **Handbook authoring methodology**: `docs/studio/mvp1/handbook-methodology/` —
-  `frontend-page-authoring-methodology.md` (内容/页面骨架/写作规则/一色一义) +
-  `handbook-operations-schema-lifecycle.md` (怎么看/怎么改/何时改跟代码 reconcile/
-  测试截图怎么截/切片字段 schema/状态点配色锁定). Read these before editing the N6
-  handbook (`tpl-*.json` slices → `build_template_slice.py` → `index.html`).
-- Note: a separate live "N-node implementation handbook" (`#handbook_overview`)
-  is generated locally by `temp/build_ux_handbook.py` into `temp/` (gitignored)
-  — NOT committed, exists only on the authoring machine. Follow the committed N6
-  handbook above instead.
+  (必读清单 + 开发原则 + 边界纪律)。Rule changes update this file via PR, not chat.
+- **退役(2026-08-12,用户裁决「下线」):N6 前端实施手册与 12D 修复框架。** 曾经
+  这里列着三条手册相关条目——生成出来的 `index.html`、它的 295 个切片与截图、
+  两份撰写方法论,以及 12D 修复框架那张 HTML。它们**全部删除**,连带生成器
+  `build_template_slice.py`、模板、校验脚本、两条只做子串断言的测试,以及 `temp/`
+  下那 13 个当年误入库、生成器不在仓里的 N2 切片与撰写报告。**没有另存
+  一份归档目录**:git 历史本身就是归档,再留一个 `_archive/` 只会变成下一处需要被
+  排除、被解释、被遗忘的死配置。
+  下线的理由是成本与收益不对等:手册**声明上从来就是 MVP1 设计源的派生视图,不是
+  设计真相**(旧规则原话:「手册设计页是 MVP1 设计文档的派生视图,不是设计真相
+  本身」),但它让每个前端任务都背上「回写切片 + 重新生成 + 截图入库」的义务。
+  取消它之后,凡是从前指向手册的地方**一律直接指向 MVP1 设计源**——那本来就是
+  权威所在,这一步是收敛,不是留洞。
 
 ## Studio Feature Development
 
@@ -367,12 +355,11 @@ not water a feature down to keep it frontend-only.
   one applies.
 - Before reporting done, boot the app from your own worktree
   (`scripts/wt-dev.sh`, `--backend` when backend/engine/gateway changed) and
-  smoke-check that the touched screens open without errors, capturing the
-  handbook screenshots along the way. After merge, the agent ALSO runs the
+  smoke-check that the touched screens open without errors. After merge, the agent ALSO runs the
   detailed per-item click-through verification itself on the real main app
   (decision 2026-08-06, replacing 2026-07-06's "verification belongs to the
   PM"): drive the real window (WebView2/CDP recipe:
-  `docs/development/RUN_AND_SCREENSHOT.md` §5), test every delivered item, and
+  `docs/development/RUN_AND_SCREENSHOT.md` §4), test every delivered item, and
   hand the PM a per-item verification REPORT — item / action / expected /
   observed result / screenshot — instead of a checklist for the PM to click
   through. The PM reviews the report and screenshots; any item the PM
@@ -393,8 +380,8 @@ not water a feature down to keep it frontend-only.
     against `main`'s backend by accident.
   Verify YOUR changes on YOUR port (`http://localhost:<port>/#tkn=<token>`),
   never on 5173. Do not start a second Tauri from a worktree. Shared files
-  (design tokens, `components/ui/`, regenerated handbook `index.html`)
-  conflict across parallel PRs — sequence those changes or assign one owner.
+  (design tokens, `components/ui/`) conflict across parallel PRs — sequence
+  those changes or assign one owner.
 
 ## Studio Tauri Dev
 

@@ -1,14 +1,14 @@
 import { expect, test, type Page } from '@playwright/test'
 
 // Real-machine screenshot capture for the N3 Compile node — the bottom Compile
-// error drawer (n3_drawer slice) and the center action-bar build-stage gating
-// (n3_gating slice). Drives the REAL Workspace state machine (compileSkillById /
+// error drawer and the center action-bar build-stage gating. Drives the REAL
+// Workspace state machine (compileSkillById /
 // handlePredict / deriveBuildStage / CompileErrorDrawer / center-action-bar)
 // through the committed `dev-harness/lint-projection.html` entry, which mounts
 // `<Workspace skillId=…>` directly (post-#162 the home recents list is Tauri-
 // native only, so this harness is the browser-reachable door to in-workspace UI).
 // The backend is mocked at the network layer (page.route). Each test saves a PNG
-// into test-results/ for curation into the handbook screenshots dir.
+// into test-results/ as evidence for a per-item verification report.
 //
 // Driving contract (read from Workspace.tsx + center-action-bar.tsx):
 //   POST /skills/:id/compile  -> 200 {status:'ok',...}           => stage compile-pass (Predict lights)

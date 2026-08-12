@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import pytest
+from app.core.adapters import atomic_file
 from app.models.llm_config import (
     CapabilityValue,
     LLMCredentialsFile,
@@ -320,10 +321,13 @@ def test_save_credentials_atomic_write_preserves_file_on_replace_error(
     save_credentials(LLMCredentialsFile(provider_endpoints={"openai-direct": _endpoint()}), path)
     before = path.read_text(encoding="utf-8")
 
-    def fail_replace(_src: Path, _dst: Path) -> None:
+    def fail_rename(_src: Path, _dst: Path) -> None:
         raise OSError("rename failed")
 
-    monkeypatch.setattr(os, "replace", fail_replace)
+    # Patched at the publisher's own rename, not at `os.replace`: on Windows the
+    # rename is `SetFileInformationByHandle`, so patching `os.replace` would
+    # intercept nothing and this test would pass by not testing anything.
+    monkeypatch.setattr(atomic_file, "_rename_over", fail_rename)
 
     with pytest.raises(OSError):
         save_credentials(

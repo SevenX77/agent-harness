@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -161,7 +159,7 @@ class LocalJsonMetadataStore:
             if not settings_path.exists():
                 return AppSettings()
             try:
-                raw = json.loads(settings_path.read_text(encoding="utf-8"))
+                raw = json.loads(read_published_text(settings_path))
             except json.JSONDecodeError:
                 logger.warning("Invalid app settings JSON at %s; using defaults", settings_path)
                 return AppSettings()
@@ -219,21 +217,4 @@ class LocalJsonMetadataStore:
         with self._app_settings_lock:
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             settings_path.parent.chmod(0o700)
-            fd, tmp_name = tempfile.mkstemp(
-                prefix=f".{settings_path.name}.",
-                suffix=".tmp",
-                dir=settings_path.parent,
-            )
-            tmp_path = Path(tmp_name)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
-                    tmp_file.write(serialized)
-                    tmp_file.write("\n")
-                    tmp_file.flush()
-                    os.fsync(tmp_file.fileno())
-                tmp_path.chmod(0o600)
-                os.replace(tmp_path, settings_path)
-                settings_path.chmod(0o600)
-            finally:
-                if tmp_path.exists():
-                    tmp_path.unlink()
+            write_text_atomically(settings_path, serialized + "\n")

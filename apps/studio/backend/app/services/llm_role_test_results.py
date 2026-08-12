@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.services.llm_paths import role_test_results_path
 
 _WRITE_LOCK = threading.Lock()
@@ -70,7 +69,7 @@ def save_result(
 def _load_all(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(read_published_text(path))
     if not isinstance(payload, dict):
         raise ValueError(f"role test result store must contain an object: {path}")
     raw_results = payload.get("results", payload)
@@ -88,20 +87,7 @@ def _save_all(path: Path, results: dict[str, dict[str, Any]]) -> None:
     serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.parent.chmod(0o700)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
-            tmp_file.write(serialized)
-            tmp_file.write("\n")
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-        tmp_path.chmod(0o600)
-        os.replace(tmp_path, path)
-        path.chmod(0o600)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    write_text_atomically(path, serialized + "\n")
 
 
 def _now_iso() -> str:

@@ -11,6 +11,8 @@ files constantly, so "currently being read" is the normal case, not the rare one
 
 from __future__ import annotations
 
+import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,3 +40,18 @@ def test_a_publish_goes_through_while_a_reader_holds_the_file_open(tmp_path: Pat
 def test_reading_a_file_that_is_not_there_says_so(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         read_published_text(tmp_path / "never-written.json")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits are not what Windows enforces")
+def test_a_published_file_is_readable_only_by_its_owner(tmp_path: Path) -> None:
+    """Some of these documents hold API keys, so the mode is part of publishing.
+
+    Asserted here rather than at each call site: a caller that has to remember
+    to chmod afterwards is a caller that can forget, and the window between the
+    rename and the chmod would be real either way.
+    """
+    path = tmp_path / "llm_credentials.json"
+
+    write_text_atomically(path, '{"api_key": "secret"}')
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600

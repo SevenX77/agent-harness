@@ -116,9 +116,21 @@ export function apiKeyInputType(): "text" {
   return "text"
 }
 
-export function apiKeyDisplayValue(value: string, visible: boolean, editing = false): string {
+export function apiKeyDisplayValue(
+  value: string,
+  visible: boolean,
+  editing = false,
+  redactedKeyLength?: number | null,
+): string {
   if (visible || editing || !value) return value
-  return apiKeyMaskChar.repeat(value.length)
+  // 2026-08-12 决议: a redacted registry value is a fixed 10-char placeholder,
+  // not the key — mask with the secret's true length so the dot count never
+  // reads as a truncated key. A real value (revealed / freshly typed) masks by
+  // its own length.
+  const maskLength = isRedactedEndpointSecret(value) && redactedKeyLength
+    ? redactedKeyLength
+    : value.length
+  return apiKeyMaskChar.repeat(maskLength)
 }
 
 export function apiKeyInputClassName(
@@ -2287,7 +2299,7 @@ export function ProviderCard({
                 ref={apiKeyInputRef}
                 id={`api-key-${draft.id}`}
                 type={apiKeyInputType()}
-                value={apiKeyDisplayValue(draft.api_key, visible, apiKeyEditing)}
+                value={apiKeyDisplayValue(draft.api_key, visible, apiKeyEditing, persisted?.api_key_length)}
                 onChange={(event) => {
                   if (!visible) setApiKeyEditing(true)
                   if (apiKeyError) setApiKeyError("")

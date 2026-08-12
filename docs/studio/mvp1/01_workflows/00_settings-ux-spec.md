@@ -489,7 +489,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | **③b gateway 库（公共能力内核）** | **协议探测**（对 URL 打各协议推理端点 + 对应 auth header：native anthropic=`x-api-key`、anthropic 兼容第三方=`Authorization: Bearer`）；**list-models 解析 per protocol**（OpenAI `data[].id` / Gemini `models[].name` 去 `models/` / 去重保序）；**capability 从 list-models 富字段归一化**（anthropic/gemini/openrouter 带；openai/阉割网关缺则 probe 兜底）；**base_url 按 protocol 保存时归一化**；route probe（1-token 真请求）；错误分类（结构错 404/500/400-invalid ↔ 瞬时 401/429/timeout）；**endpoint 标准化拆分 + 生成 canonical id；批量探测策略（短路·汇总）；Probe Knowledge Catalog 内核（记录/复用/共享证据、provider 分区、probe priority）；6 态标准总结**。不碰应用加工四件事，不知 card 录入交互 |
 
 **三处握手（API 契约）：**
-- **① ↔ ③a**：`GET /api/llm/registry`（RegistrySnapshot，api_key **redacted**）· `GET …/endpoints/{id}/secret`（单条明文，scoped reveal）· `PUT …/registry/endpoints`（upsert ③b 拆好的 endpoint 列表）· `POST …/endpoints/{id}/test`（批量模型探测）· `POST …/routes/{id}/probe[?force=true]`（单 route 真探 / Manual / Test Now）。DTO：endpoint/route + 6 态 `ui_state`，api_key 一律 redact。
+- **① ↔ ③a**：`GET /api/llm/registry`（RegistrySnapshot，api_key **redacted**，endpoint DTO 另带 `api_key_length` = 真实字符数的非敏感元数据、无 key 时 null，掩码点数按它画——不按 redacted 占位符的 10 位画，2026-08-12 决议）· `GET …/endpoints/{id}/secret`（单条明文，scoped reveal）· `PUT …/registry/endpoints`（upsert ③b 拆好的 endpoint 列表）· `POST …/endpoints/{id}/test`（批量模型探测）· `POST …/routes/{id}/probe[?force=true]`（单 route 真探 / Manual / Test Now）。DTO：endpoint/route + 6 态 `ui_state`，api_key 一律 redact。
 - **③a ↔ ③b**（进程内）：③a 调库做 endpoint 拆分 / 协议探测 / list-models 解析 / capability 归一化 / route probe / base_url 归一化 / 批量探测策略 / Probe Knowledge Catalog 读写 / 6 态总结；**③b 返回标准结果（标准 endpoint list、批量探测结果、catalog/state 投影结果）**，③a 只包装 job/HTTP + 落存储。
 - **③b ↔ provider**：协议探测 + route probe 的真实 HTTP（打推理端点）。
 
@@ -505,7 +505,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | A7 capability 回填 | 显示能力 | 投影 | **list-models 富字段归一化** + 缺则 probe |
 | A8 Probe Knowledge Catalog 赋能/写回 | 蓝标签渲染 | 调 ③b 读写 + 远端源 + 上传审批/脱敏 | **catalog 读写语义 + probe 结果合并 + provider 分区 + probe priority** |
 | A9 6 态标签 | 渲染色 | 6 态结果转 DTO | **6 态标准总结（含读 catalog 出蓝）+ RouteStatus + 熔断** |
-| A10 secret reveal | Eye/Copy 等显式用户动作才换单条真值；进 tab 只投影 redacted registry | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
+| A10 secret reveal | Eye/Copy 等显式用户动作才换单条真值；进 tab 只投影 redacted registry（掩码点数 = `api_key_length` 真实位数，非占位符 10 位） | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
 | A11 删 endpoint | 二次确认 | `PUT endpoints`（整表 upsert） | — |
 | A12 save-status badge | 统一 badge ← saveStatus | save 端点返回状态 | — |
 

@@ -64,7 +64,7 @@
    "n": 22,
    "cap": "secret-mask-toggle",
    "design_ref": "atom-22",
-   "current": "现状:已实现且符合。API Key 输入框始终 type=text。ProviderCard 对已有 key 的隐藏且未编辑态使用 apiKeyDisplayValue(ProviderCard.tsx)渲染同长度 mask 字符串,不把真实 key 放进 input 的可见 value;如果当前只有 redacted 占位,点 Eye 会先通过 resolveApiKeyForSensitiveAction 触发 onRevealProviderSecret scoped reveal 单条 secret,拿到后才切到明文显示。用户聚焦输入框或开始录入时进入编辑态,用当前草稿值作为受控 value 并明文显示;失焦后回到等长 mask 字符串。AddProviderForm 录入新 key 时同样保持明文可读;空输入不 mask placeholder,所以新建 third-party provider 时 `Enter the provider API Key` 保持可读。",
+   "current": "现状:已实现且符合。API Key 输入框始终 type=text。ProviderCard 对已有 key 的隐藏且未编辑态使用 apiKeyDisplayValue(ProviderCard.tsx)渲染与真实 key 等长的 mask 字符串,不把真实 key 放进 input 的可见 value;值仍是 redacted 占位(固定 10 位)时点数取 persisted.api_key_length(registry endpoint DTO 携带的真实位数,后端 computed field,2026-08-12 决议)——此前按占位符长度恒画 10 个点属实现漂移,已修。如果当前只有 redacted 占位,点 Eye 会先通过 resolveApiKeyForSensitiveAction 触发 onRevealProviderSecret scoped reveal 单条 secret,拿到后才切到明文显示。用户聚焦输入框或开始录入时进入编辑态,用当前草稿值作为受控 value 并明文显示;失焦后回到等长 mask 字符串。AddProviderForm 录入新 key 时同样保持明文可读;空输入不 mask placeholder,所以新建 third-party provider 时 `Enter the provider API Key` 保持可读。",
    "gap": "✅ 本次已实施并通过两层测试,符合设计。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。redacted 占位首次显示明文时会按需走 GET /registry/endpoints/{id}/secret;已有真实 key 在内存中时仍是纯前端显隐。"
@@ -295,6 +295,7 @@
     "RED:当前掩码态 input.type='password' → 断言『type 恒为 text』失败。",
     "GREEN:断言 API Key Input 的 type 恒为 'text'(可见/掩码两态都是 text)。",
     "点眼睛 → 断言隐藏态等长 mask value / 显示态真实 value 切换;聚焦隐藏输入框进入明文编辑态后可直接编辑。",
+    "redacted 占位态 → 断言点数 = registry api_key_length(真实位数)而非占位符的 10 位;reveal 后/新输入值按自身长度画点(2026-08-12)。",
     "回归:任何状态 input.type≠'password'(防触发浏览器密码管理器)。"
    ],
    "layer2": [
@@ -305,6 +306,14 @@
     {
      "file": "apikeys-19-22-add-mask.png",
      "caption": "API Key 字段隐藏态显示等长圆点(永 type=text)"
+    },
+    {
+     "file": "apikeys-22-masked-true-length.png",
+     "caption": "redacted 态掩码点数=key 真实位数(Anthropic 108 点/OpenAI 164 点,来自 registry api_key_length,2026-08-12;此前恒为占位符的 10 点)"
+    },
+    {
+     "file": "apikeys-22-masked-true-length-closeup.png",
+     "caption": "DeepSeek 卡特写:35 位 key 显示 35 个圆点"
     }
    ]
   },

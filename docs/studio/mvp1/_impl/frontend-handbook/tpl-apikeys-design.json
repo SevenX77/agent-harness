@@ -184,7 +184,7 @@
    "module": "凭证录入与管理",
    "func": "设计:用眼睛图标在明文与掩码间切换 API Key 显示,方便核对又默认不外泄。",
    "action": "用户点 API Key 输入框旁的 Eye / EyeOff 图标。",
-   "fe_design": "点眼睛图标 → 若当前值仍是 redacted 占位,先走 #16 scoped reveal 取当前 provider 的单条真实 key;拿到后翻转可见态。输入框始终是 type=text,掩码态用 CSS 把字符遮成圆点(不切浏览器原生 password 输入框)。这样既能切换显隐,又不触发浏览器密码管理器、不与「抑制密码管理器」属性冲突。配合复制按钮(#23)使用。",
+   "fe_design": "点眼睛图标 → 若当前值仍是 redacted 占位,先走 #16 scoped reveal 取当前 provider 的单条真实 key;拿到后翻转可见态。输入框始终是 type=text,掩码态用 CSS 把字符遮成圆点(不切浏览器原生 password 输入框)。掩码点数 = key 的真实位数:值仍是 redacted 占位(固定 10 位)时按 registry endpoint DTO 的 api_key_length 元数据画点,不按占位符长度画(2026-08-12 决议,设计源 00_settings-ux-spec.md §③a——恒定 10 个点会被用户误读成 key 被截断)。这样既能切换显隐,又不触发浏览器密码管理器、不与「抑制密码管理器」属性冲突。配合复制按钮(#23)使用。",
    "fe_modules": [
     {
      "name": "provider-utils",
@@ -201,7 +201,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计。2026-06-24:代码已落地并回填。输入框永远 type=text——apiKeyInputType()(ProviderCard.tsx)恒返回字面 'text'(再无 'password')。已有 key 的 ProviderCard 隐藏态由 apiKeyDisplayValue 渲染与真实 key 等长的 mask value,并设 readOnly;点 Eye 显示后才渲染真实 key。2026-07-06:若生命周期只拿到 redacted 占位,点 Eye 先 scoped reveal 单条 secret,不在打开 API Keys 时批量 hydrate。AddProviderForm 等正在录入的新 key 仍可复用 apiKeyInputClassName 的 CSS mask,空值不 mask placeholder。无原生 type=password 残留,不触发浏览器密码管理器。",
+   "gap_brief": "符合设计。2026-06-24:代码已落地并回填。输入框永远 type=text——apiKeyInputType()(ProviderCard.tsx)恒返回字面 'text'(再无 'password')。已有 key 的 ProviderCard 隐藏态由 apiKeyDisplayValue 渲染与真实 key 等长的 mask value,并设 readOnly;点 Eye 显示后才渲染真实 key。2026-07-06:若生命周期只拿到 redacted 占位,点 Eye 先 scoped reveal 单条 secret,不在打开 API Keys 时批量 hydrate。AddProviderForm 等正在录入的新 key 仍可复用 apiKeyInputClassName 的 CSS mask,空值不 mask placeholder。无原生 type=password 残留,不触发浏览器密码管理器。2026-08-12:发现「等长 mask」在 redacted 态是漂移——值是 10 位 SecretStr 占位符,点数恒为 10 而非 key 真实位数;已修:registry endpoint DTO 新增 api_key_length(后端 computed field),apiKeyDisplayValue 对 redacted 值按它画点(决议 docs/design/2026-08-12-masked-key-length-decision.md)。",
    "impl_ref": "fn-22"
   },
   {

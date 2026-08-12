@@ -448,12 +448,16 @@ def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) 
 
 
 def _credentials_payload_for_storage(data: LLMCredentialsFile) -> dict[str, Any]:
-    # canonical_id is a computed field on every ProviderRoute (derived live from
-    # provider_model_id); persisting it would re-introduce the stale-grouping drift
-    # this design removed, so it is excluded from the on-disk payload.
+    # canonical_id / api_key_length are computed fields (derived live from
+    # provider_model_id / the secret itself); persisting either would re-introduce
+    # stale-derivation drift and be rejected as extra_forbidden on reload, so both
+    # are excluded from the on-disk payload.
     payload = data.model_dump(
         mode="json",
-        exclude={"provider_routes": {"__all__": {"canonical_id"}}},
+        exclude={
+            "provider_routes": {"__all__": {"canonical_id"}},
+            "provider_endpoints": {"__all__": {"api_key_length"}},
+        },
     )
     for endpoint_id, endpoint in data.provider_endpoints.items():
         api_key = endpoint.api_key

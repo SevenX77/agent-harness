@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Download, Loader2, RefreshCw } from "lucide-react"
+import { Download, KeyRound, Loader2, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -12,7 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cliDependencyStatus, launchCliInstaller, type CliDependencyRow } from "@/lib/tauri"
+import {
+  cliDependencyStatus,
+  launchCliInstaller,
+  launchCliLogin,
+  launchCliUpdate,
+  type CliDependencyRow,
+} from "@/lib/tauri"
 import type { CliSessionProviderSettings, CliSessionSettings } from "@/api/types"
 
 // 与 copilot 路由灯同一套语义 token(bg-success / bg-warning / bg-destructive /
@@ -24,36 +29,52 @@ function lightClass(state: CliDependencyRow["state"]): string {
   return "bg-destructive ring-destructive-border"
 }
 
-// claude --effort 的合法档位(CLI --help 实测 2026-08-06);codex 的
-// model_reasoning_effort 档位取 codex 文档词汇。空串 = 跟随 CLI 默认。
+// effort/模型档位与目录(修订 2026-08-12,证据与决策:
+// docs/design/2026-08-12-cli-settings-revision.md)。空串 = 跟随 CLI 默认。
+// claude effort:`claude --help` 实测(2026-08-06,2026-08-12 复核仍准)。
+// codex effort:0.147.0 TUI 五档 Light/Medium/High/Extra High/Ultra 的持久化词表
+// (config.toml 实测 Extra High → "xhigh";二进制 strings 含 light/xhigh/ultra)。
 const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const
-const CODEX_EFFORT_LEVELS = ["minimal", "low", "medium", "high"] as const
+const CODEX_EFFORT_LEVELS = ["light", "medium", "high", "xhigh", "ultra"] as const
+// 模型目录 = UI 选择目录,不是 gateway 凭据/route 真相。claude 用官方别名
+// (--help 原文举例 'fable'/'opus'/'sonnet';别名指向 latest,不随小版本过期);
+// codex 用 0.147.0 二进制里的当前 gpt-5.6 家族。
+const CLAUDE_MODEL_CHOICES = ["fable", "opus", "sonnet", "haiku"] as const
+const CODEX_MODEL_CHOICES = [
+  "gpt-5.6",
+  "gpt-5.6-sol",
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+  "gpt-5.6-pro",
+] as const
 const MOIRAI_WORKER_AGENTS = ["clotho", "lachesis", "atropos"] as const
 
-function EffortSelect({
+function DefaultChoiceSelect({
   value,
-  levels,
+  choices,
   placeholder,
   onChange,
   label,
+  className,
 }: {
   value: string
-  levels: readonly string[]
+  choices: readonly string[]
   placeholder: string
   onChange: (next: string) => void
   label: string
+  className: string
 }) {
-  // Radix Select 的 item 值不允许空串;用 "default" 哨兵表示「跟随 CLI 默认」。
+  // Radix Select 的 item 值不允许空串;用 "default" 哨兵表示「跟随默认」。
   return (
     <Select value={value || "default"} onValueChange={(next) => onChange(next === "default" ? "" : next)}>
-      <SelectTrigger size="sm" aria-label={label} className="w-32">
+      <SelectTrigger size="sm" aria-label={label} className={className}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="default">{placeholder}</SelectItem>
-        {levels.map((level) => (
-          <SelectItem key={level} value={level}>
-            {level}
+        {choices.map((choice) => (
+          <SelectItem key={choice} value={choice}>
+            {choice}
           </SelectItem>
         ))}
       </SelectContent>
@@ -61,12 +82,27 @@ function EffortSelect({
   )
 }
 
+type CliRowAction = { kind: "update" | "login"; provider: "claude" | "codex" }
+
+// 行内动作按钮判定表(修订 2026-08-12):CLI 行过时 → 更新(CLI 自带 update 命令);
+// 登录行缺失/损坏 → 登录。ah 行的修复入口仍是区头「安装 / 修复」。
+function cliRowAction(row: CliDependencyRow): CliRowAction | null {
+  if ((row.id === "claude" || row.id === "codex") && row.state === "outdated") {
+    return { kind: "update", provider: row.id }
+  }
+  if (row.state !== "missing" && row.state !== "broken") return null
+  if (row.id === "claude_auth") return { kind: "login", provider: "claude" }
+  if (row.id === "codex_auth") return { kind: "login", provider: "codex" }
+  return null
+}
+
 /**
- * Settings → Copilot →「CLI」区(设计 00_settings-ux-spec.md §3.9):
- * ① Open in CLI 依赖链 + 登录态的只读探测(owner = Tauri,分 OS);
- * ② 一键安装 = 拉起真控制台跑仓内安装脚本(含交互式 OAuth,只读流不承载);
- * ③ 会话配置(claude/codex 默认 model/effort + MoirAI worker 模型覆盖),
- *    truth 在 backend settings,经 useAppSettings 同一实例 autosave。
+ * Settings → Copilot →「CLI」区(设计 00_settings-ux-spec.md §3.9,修订 2026-08-12):
+ * ① Open in CLI 依赖链 + 登录态 + 最新版检查的只读探测(owner = Tauri,分 OS);
+ * ② 一键安装 = 拉起真控制台跑仓内安装脚本;行内「更新/登录」= 拉起真控制台跑
+ *    对应 CLI 自己的 update/login 命令(交互式 OAuth,只读流不承载);
+ * ③ 会话配置(claude/codex 默认 model/effort + MoirAI worker model/effort 覆盖,
+ *    全部下拉选择),truth 在 backend settings,经 useAppSettings 同一实例 autosave。
  */
 export function CliSection({
   settings,
@@ -111,6 +147,23 @@ export function CliSection({
     }
     toast.info(t("cli.installStarted"), { description: t("cli.installStartedDetail") })
   }, [t])
+
+  const handleRowAction = useCallback(
+    async (action: CliRowAction) => {
+      const error =
+        action.kind === "update"
+          ? await launchCliUpdate(action.provider)
+          : await launchCliLogin(action.provider)
+      if (error) {
+        toast.error(t("cli.actionFailed"), { description: error })
+        return
+      }
+      toast.info(t(action.kind === "update" ? "cli.updateStarted" : "cli.loginStarted"), {
+        description: t("cli.actionStartedDetail"),
+      })
+    },
+    [t],
+  )
 
   const patchProvider = useCallback(
     (provider: "claude" | "codex", patch: Partial<CliSessionProviderSettings>) => {
@@ -187,28 +240,52 @@ export function CliSection({
         </div>
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
-          {(rows ?? []).map((row) => (
-            <li key={row.id} className="flex items-center gap-3 px-3 py-2" data-cli-dependency={row.id}>
-              <span
-                aria-hidden="true"
-                className={`size-2 shrink-0 rounded-full ring-1 ${lightClass(row.state)}`}
-              />
-              <span className="min-w-28 text-sm font-medium text-foreground">
-                {t(`cli.deps.${row.id}`, { defaultValue: row.id })}
-              </span>
-              <span className="text-xs text-muted-foreground" data-cli-dependency-state={row.state}>
-                {t(`cli.states.${row.state}`, { defaultValue: row.state })}
-              </span>
-              {row.version ? (
-                <span className="truncate text-xs text-muted-foreground">{row.version}</span>
-              ) : null}
-              {row.detail ? (
-                <span className="ml-auto truncate text-xs text-destructive" title={row.detail}>
-                  {row.detail}
+          {(rows ?? []).map((row) => {
+            const action = cliRowAction(row)
+            return (
+              <li key={row.id} className="flex items-center gap-3 px-3 py-2" data-cli-dependency={row.id}>
+                <span
+                  aria-hidden="true"
+                  className={`size-2 shrink-0 rounded-full ring-1 ${lightClass(row.state)}`}
+                />
+                <span className="min-w-28 text-sm font-medium text-foreground">
+                  {t(`cli.deps.${row.id}`, { defaultValue: row.id })}
                 </span>
-              ) : null}
-            </li>
-          ))}
+                <span className="text-xs text-muted-foreground" data-cli-dependency-state={row.state}>
+                  {t(`cli.states.${row.state}`, { defaultValue: row.state })}
+                </span>
+                {row.version ? (
+                  <span className="truncate text-xs text-muted-foreground">{row.version}</span>
+                ) : null}
+                <span className="ml-auto flex shrink-0 items-center gap-2">
+                  {row.detail ? (
+                    <span
+                      className={`max-w-80 truncate text-xs ${row.state === "outdated" ? "text-warning" : "text-destructive"}`}
+                      title={row.detail}
+                    >
+                      {row.detail}
+                    </span>
+                  ) : null}
+                  {action ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-cli-row-action={action.kind}
+                      onClick={() => void handleRowAction(action)}
+                    >
+                      {action.kind === "update" ? (
+                        <Download data-icon="inline-start" />
+                      ) : (
+                        <KeyRound data-icon="inline-start" />
+                      )}
+                      {t(action.kind === "update" ? "cli.update" : "cli.login")}
+                    </Button>
+                  ) : null}
+                </span>
+              </li>
+            )
+          })}
         </ul>
       )}
 
@@ -221,18 +298,20 @@ export function CliSection({
               <span className="min-w-28 text-sm text-foreground">
                 {t(`cli.deps.${provider}`, { defaultValue: provider })}
               </span>
-              <Input
+              <DefaultChoiceSelect
                 value={settings.value[provider].model}
+                choices={provider === "claude" ? CLAUDE_MODEL_CHOICES : CODEX_MODEL_CHOICES}
                 placeholder={t("cli.sessionConfig.modelPlaceholder")}
-                aria-label={t("cli.sessionConfig.modelAria", { provider })}
-                className="h-8 max-w-64 text-sm"
-                onChange={(event) => patchProvider(provider, { model: event.target.value })}
+                label={t("cli.sessionConfig.modelAria", { provider })}
+                className="w-56"
+                onChange={(model) => patchProvider(provider, { model })}
               />
-              <EffortSelect
+              <DefaultChoiceSelect
                 value={settings.value[provider].effort}
-                levels={provider === "claude" ? CLAUDE_EFFORT_LEVELS : CODEX_EFFORT_LEVELS}
+                choices={provider === "claude" ? CLAUDE_EFFORT_LEVELS : CODEX_EFFORT_LEVELS}
                 placeholder={t("cli.sessionConfig.effortDefault")}
                 label={t("cli.sessionConfig.effortAria", { provider })}
+                className="w-32"
                 onChange={(effort) => patchProvider(provider, { effort })}
               />
             </div>
@@ -241,12 +320,21 @@ export function CliSection({
           {MOIRAI_WORKER_AGENTS.map((agent) => (
             <div key={agent} className="flex items-center gap-3" data-cli-agent-config={agent}>
               <span className="min-w-28 text-sm text-foreground">{agent}</span>
-              <Input
+              <DefaultChoiceSelect
                 value={settings.value.agents[agent]?.model ?? ""}
-                placeholder={t("cli.sessionConfig.agentModelPlaceholder")}
-                aria-label={t("cli.sessionConfig.agentModelAria", { agent })}
-                className="h-8 max-w-64 text-sm"
-                onChange={(event) => patchAgent(agent, { model: event.target.value })}
+                choices={CLAUDE_MODEL_CHOICES}
+                placeholder={t("cli.sessionConfig.agentDefaultPlaceholder")}
+                label={t("cli.sessionConfig.agentModelAria", { agent })}
+                className="w-56"
+                onChange={(model) => patchAgent(agent, { model })}
+              />
+              <DefaultChoiceSelect
+                value={settings.value.agents[agent]?.effort ?? ""}
+                choices={CLAUDE_EFFORT_LEVELS}
+                placeholder={t("cli.sessionConfig.agentDefaultPlaceholder")}
+                label={t("cli.sessionConfig.agentEffortAria", { agent })}
+                className="w-32"
+                onChange={(effort) => patchAgent(agent, { effort })}
               />
             </div>
           ))}

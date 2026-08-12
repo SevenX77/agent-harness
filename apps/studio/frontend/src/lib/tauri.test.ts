@@ -218,7 +218,7 @@ describe('desktop shell helpers', () => {
       resume: false,
       model: '',
       effort: '',
-      agentModels: {},
+      agentOverrides: {},
       onEvent: expect.anything(),
     })
   })
@@ -243,7 +243,7 @@ describe('desktop shell helpers', () => {
       resume: true,
       model: '',
       effort: '',
-      agentModels: {},
+      agentOverrides: {},
       onEvent: expect.anything(),
     })
   })

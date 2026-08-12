@@ -692,12 +692,12 @@ export function CopilotPanel({
       () => null,
     )
     const provider = cliDefaults?.[assistant]
-    const agentModels =
+    const agentOverrides =
       assistant === 'claude' && cliDefaults
         ? Object.fromEntries(
             Object.entries(cliDefaults.agents)
-              .filter(([, entry]) => entry.model.trim() !== '')
-              .map(([name, entry]) => [name, entry.model]),
+              .filter(([, entry]) => entry.model.trim() !== '' || entry.effort.trim() !== '')
+              .map(([name, entry]) => [name, { model: entry.model.trim(), effort: entry.effort.trim() }]),
           )
         : undefined
     const session = await startCliTerminalSession({
@@ -705,7 +705,7 @@ export function CopilotPanel({
       assistant,
       mode,
       sessionOptions: provider
-        ? { model: provider.model, effort: provider.effort, agentModels }
+        ? { model: provider.model, effort: provider.effort, agentOverrides }
         : undefined,
       // The renderer reports its measured grid as soon as it mounts; this only
       // shapes the very first frame.

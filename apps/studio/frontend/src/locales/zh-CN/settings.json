@@ -424,9 +424,9 @@
       "shell": "Shell",
       "ah": "ah",
       "tmux": "tmux",
-      "claude": "Claude CLI",
+      "claude": "Claude Code CLI",
       "codex": "Codex CLI",
-      "claude_auth": "Claude 登录",
+      "claude_auth": "Claude Code 登录",
       "codex_auth": "Codex 登录"
     },
     "states": {
@@ -440,16 +440,23 @@
     "installStarted": "安装控制台已打开",
     "installStartedDetail": "在控制台完成各步骤(含登录),装完点「重新检测」。",
     "installFailed": "安装器启动失败",
+    "update": "更新",
+    "login": "登录",
+    "updateStarted": "更新控制台已打开",
+    "loginStarted": "登录控制台已打开",
+    "actionStartedDetail": "在控制台完成后,点「重新检测」刷新状态。",
+    "actionFailed": "控制台启动失败",
     "sessionConfig": {
       "title": "会话默认值",
-      "description": "注入新 CLI 会话的模型与 effort;留空 = 跟随 CLI 自身默认。",
-      "modelPlaceholder": "CLI 默认模型",
+      "description": "注入新 CLI 会话的模型与 effort;跟随默认 = 不注入,由 CLI 自己决定。",
+      "modelPlaceholder": "跟随 CLI 默认",
       "modelAria": "{{provider}} 的默认模型",
       "effortDefault": "默认 effort",
       "effortAria": "{{provider}} 的 effort",
-      "agentsHint": "MoirAI worker 模型覆盖(仅 Claude 会话生效;留空 = 跟随 provider 默认):",
-      "agentModelPlaceholder": "跟随 provider 默认",
-      "agentModelAria": "{{agent}} 的模型覆盖"
+      "agentsHint": "MoirAI worker 覆盖(仅 Claude Code 会话生效;跟随 provider 默认 = 不注入):",
+      "agentDefaultPlaceholder": "跟随 provider 默认",
+      "agentModelAria": "{{agent}} 的模型覆盖",
+      "agentEffortAria": "{{agent}} 的 effort 覆盖"
     }
   },
   "copilot": {

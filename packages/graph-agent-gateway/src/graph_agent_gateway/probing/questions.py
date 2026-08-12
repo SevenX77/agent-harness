@@ -74,9 +74,14 @@ EFFORT_CONTROL_LEVEL: Final[str] = "graph-agent-gateway-control-effort-level"
 
 A route that takes this one takes anything: it is not reading the field. Without
 it in the batch, "accepted every level" and "never looked at the value" arrive as
-the same list of accepted levels, and the record cannot tell them apart. Live
-2026-08-11: deepseek-v4-pro accepted all seven candidates, `none` and `max`
-included, and that list was written down as what the model supports.
+the same list of accepted levels, and the record cannot tell them apart.
+
+The control is what tells those two apart, and a route that passes it has been
+measured, not merely asked. deepseek-v4-pro is the worked example of passing:
+docs/design/2026-08-10-preferences-fit-the-route-decision.md records a captured
+request where an invented level came back 400 `unknown variant`, listing the
+seven names it does take — the same seven the probe had just been given. Its
+7/7 is a measurement.
 """
 
 

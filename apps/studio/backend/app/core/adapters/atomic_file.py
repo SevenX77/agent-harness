@@ -46,6 +46,13 @@ def write_text_atomically(path: Path, text: str) -> None:
     The temporary file is created in the destination's own directory because a
     rename is only atomic within a filesystem, and a system temp dir is often a
     different one.
+
+    The published file is readable only by its owner, because ``mkstemp``
+    creates it that way and the rename carries the mode over. Some of these
+    documents hold API keys, so that is a guarantee this function owes its
+    callers rather than something each one remembers to re-assert afterwards —
+    a ``chmod`` after the rename would also leave a window where the mode was
+    whatever the old file had.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)

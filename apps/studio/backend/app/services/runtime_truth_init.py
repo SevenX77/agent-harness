@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from app.core import config
+from app.core.adapters.atomic_file import write_text_atomically
 from app.models.llm_config import LLMCredentialsFile, RolesData
 from app.models.settings import AppSettings
 from app.services.llm_credentials import save_credentials
@@ -160,18 +159,7 @@ def _ensure_text_file(
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
-            tmp_file.write(content)
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    write_text_atomically(path, content)
 
 
 __all__ = ["ensure_runtime_truth_sources"]

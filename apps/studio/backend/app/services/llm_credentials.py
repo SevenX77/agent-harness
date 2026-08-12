@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -18,6 +16,7 @@ from graph_agent_gateway.registry import (
 )
 from pydantic import SecretStr, ValidationError
 
+from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.core.adapters.gateway import (
     canonicalize_base_url,
 )
@@ -54,7 +53,7 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     if not credential_path.exists():
         return LLMCredentialsFile()
     try:
-        payload = json.loads(credential_path.read_text(encoding="utf-8"))
+        payload = json.loads(read_published_text(credential_path))
     except json.JSONDecodeError as exc:
         raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}") from exc
     try:
@@ -445,24 +444,7 @@ def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) 
     serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
     credential_path.parent.mkdir(parents=True, exist_ok=True)
     credential_path.parent.chmod(0o700)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{credential_path.name}.",
-        suffix=".tmp",
-        dir=credential_path.parent,
-    )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
-            tmp_file.write(serialized)
-            tmp_file.write("\n")
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-        tmp_path.chmod(0o600)
-        os.replace(tmp_path, credential_path)
-        credential_path.chmod(0o600)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    write_text_atomically(credential_path, serialized + "\n")
 
 
 def _credentials_payload_for_storage(data: LLMCredentialsFile) -> dict[str, Any]:

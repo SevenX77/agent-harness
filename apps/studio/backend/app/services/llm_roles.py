@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -11,6 +9,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
+from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.models.llm_config import RoleEntry, RolesData
 from app.services.llm_paths import roles_path
 
@@ -23,7 +22,7 @@ class InvalidRoleReference(ValueError):
 
 def load_roles_file(path: Path) -> RolesData:
     """Load a roles YAML file; legacy short-code schemas are fatal."""
-    payload = _yaml().load(path.read_text(encoding="utf-8")) or {}
+    payload = _yaml().load(read_published_text(path)) or {}
     if not isinstance(payload, dict):
         raise ValueError(f"llm_roles.yaml must contain a mapping: {path}")
     _reject_legacy_roles(payload, path)
@@ -185,20 +184,8 @@ def _runtime_response_exclude(data: RolesData) -> dict[str, Any]:
 
 def _atomic_write(path: Path, text: str) -> None:
     with _WRITE_LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-        tmp_path = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
-                tmp_file.write(text)
-                if text and not text.endswith("\n"):
-                    tmp_file.write("\n")
-                tmp_file.flush()
-                os.fsync(tmp_file.fileno())
-            os.replace(tmp_path, path)
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
+        ends_with_newline = text if not text or text.endswith("\n") else text + "\n"
+        write_text_atomically(path, ends_with_newline)
 
 
 def _plain(value: Any) -> Any:

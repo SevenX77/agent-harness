@@ -450,6 +450,18 @@ fn launch_cli_installer() -> Result<(), String> {
     Ok(())
 }
 
+/// 一环境一凭据链(ah 决议 0006 / ah #18):Claude 写凭据走 rename,旧的「WSL 软链到
+/// Windows `.credentials.json`」桥第一次刷新就会把链分叉,迟早杀死另一侧的登录。
+/// 任何在本环境跑 `claude auth login` 的入口(login-doorman、设置页「登录」按钮)
+/// 都必须先拆掉残留的桥接软链——同一份定义,两处共用,不许各抄一遍。
+const CLAUDE_LEGACY_CRED_LINK_CLEANUP_SH: &str = r#"CLAUDE_CRED="$HOME/.claude/.credentials.json"
+mkdir -p "$HOME/.claude"
+if [ -L "$CLAUDE_CRED" ]; then
+  printf '%s
+' "Removing the legacy Windows credential link (one login per environment)."
+  rm -f "$CLAUDE_CRED"
+fi"#;
+
 /// 更新/登录按钮共用的命令表:动作 × provider 枚举定死在这里,前端只传标识——
 /// 不存在把任意字符串递进 shell 的通道。命令与 launcher login-doorman、安装脚本
 /// B2 步同源(claude auth login / codex login;update 是两 CLI 自带的检查+安装一体)。
@@ -465,10 +477,16 @@ fn cli_console_action_command(action: &str, provider: &str) -> Result<&'static s
 
 /// 与 run_ah_version 同一理由显式补 PATH(非交互 shell 不一定带 ~/.local/bin);
 /// 结尾 read 留窗——用户看完结果自己关,回 Studio 点「重新检测」刷新状态。
+/// claude 登录前先做与 login-doorman 完全相同的旧桥拆链(常量注释里的凭据链纪律)。
 fn cli_console_action_script(action: &str, provider: &str) -> Result<String, String> {
     let command = cli_console_action_command(action, provider)?;
+    let preamble = if action == "login" && provider == "claude" {
+        format!("{CLAUDE_LEGACY_CRED_LINK_CLEANUP_SH}\n")
+    } else {
+        String::new()
+    };
     Ok(format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; {command}; status=$?; echo; read -rp \"[{command}] finished with exit $status - press Enter to close\" _",
+        "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; {preamble}{command}; status=$?; echo; read -rp \"[{command}] finished with exit $status - press Enter to close\" _",
     ))
 }
 
@@ -2576,13 +2594,8 @@ fi
     // chain, and killed the other side's login later (ah #18). A leftover
     // bridge link is removed so the environment can hold its own login.
     let claude_auth_bridge = if matches!(assistant, CodeAssistant::Claude) {
-        r#"CLAUDE_CRED="$HOME/.claude/.credentials.json"
-mkdir -p "$HOME/.claude"
-if [ -L "$CLAUDE_CRED" ]; then
-  printf '%s
-' "Removing the legacy Windows credential link (one login per environment)."
-  rm -f "$CLAUDE_CRED"
-fi
+        format!(
+            r#"{CLAUDE_LEGACY_CRED_LINK_CLEANUP_SH}
 if [ ! -f "$CLAUDE_CRED" ]; then
   printf '%s
 ' "No Claude login in this WSL environment yet; starting claude auth login..."
@@ -2597,7 +2610,7 @@ if [ ! -f "$CLAUDE_CRED" ]; then
   fi
 fi
 "#
-        .to_string()
+        )
     } else {
         String::new()
     };
@@ -5042,6 +5055,17 @@ mod tests {
         let script = cli_console_action_script("login", "claude").expect("script");
         assert!(script.contains("$HOME/.local/bin"), "非交互 shell 需要显式补 PATH: {script}");
         assert!(script.contains("read -rp"), "控制台必须留窗给用户看结果: {script}");
+        // 一环境一凭据链(ah #18):按钮入口必须与 login-doorman 同款拆桥,否则在
+        // 残留旧软链的机器上登录会把凭据写穿到 Windows 侧,复活共享链死亡。
+        assert!(
+            script.contains("Removing the legacy Windows credential link"),
+            "claude 登录脚本缺 doorman 同款旧桥拆链: {script}"
+        );
+        let codex_script = cli_console_action_script("login", "codex").expect("script");
+        assert!(
+            !codex_script.contains("CLAUDE_CRED"),
+            "codex 登录不涉及 claude 凭据桥: {codex_script}"
+        );
     }
 
     /// 提案 §3(PR-2)—— 安装脚本沿祖先目录定位;找不到明确报错不猜路径。

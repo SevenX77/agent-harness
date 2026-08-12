@@ -368,4 +368,5 @@ def test_mcp_server_exposes_full_parity_toolset() -> None:
         "test_llm_endpoint",
         "test_llm_endpoint_models",
         "probe_llm_route",
+        "fetch_web_page",
     } == tool_names

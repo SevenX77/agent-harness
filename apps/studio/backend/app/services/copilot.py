@@ -127,6 +127,9 @@ _DECLARATIVE_ALLOWED_TOOLS = [
     "mcp__studio__test_llm_endpoint",
     "mcp__studio__test_llm_endpoint_models",
     "mcp__studio__probe_llm_route",
+    # 读一个网页。副作用可以说全:一次导航 + 一次读文本(app/services/web_access.py
+    # 的动词表对写动作是封闭的),所以它和别的读工具同档,不必每读一页弹一次卡。
+    "mcp__studio__fetch_web_page",
 ]
 _ZERO_APPROVAL_TOOLS = frozenset(_DECLARATIVE_ALLOWED_TOOLS)
 

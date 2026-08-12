@@ -1232,7 +1232,8 @@ const CLAUDE_STUDIO_ALLOWED_TOOLS: &str = concat!(
     "mcp__studio__run_role_test,",
     "mcp__studio__test_llm_endpoint,",
     "mcp__studio__test_llm_endpoint_models,",
-    "mcp__studio__probe_llm_route"
+    "mcp__studio__probe_llm_route,",
+    "mcp__studio__fetch_web_page"
 );
 
 /// The master runs under ahd, which does NOT inherit the environment of the shell that ran
@@ -4555,6 +4556,7 @@ mod tests {
         // no write/execute tool may ever be pre-allowed here.
         assert!(cmd.contains("mcp__studio__get_skill_output_contract"));
         assert!(cmd.contains("mcp__studio__probe_llm_route"));
+        assert!(cmd.contains("mcp__studio__fetch_web_page"));
         assert!(!cmd.contains("mcp__studio__run_skill"));
         assert!(!cmd.contains("mcp__studio__pause_run"));
         assert!(!cmd.contains("mcp__studio__stop_run"));

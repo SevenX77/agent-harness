@@ -147,13 +147,19 @@ async function openCodeAssistant(
   }
 }
 
+/** 单个 MoirAI worker 的会话覆盖(修订 2026-08-12):空串 = 跟随 provider 默认。 */
+export interface CliAgentOverride {
+  model: string
+  effort: string
+}
+
 export interface CliSessionLaunchOptions {
   resumeLastConversation?: boolean
   /** 会话配置(设计 §3.9):truth 在 backend settings,open 时读出传入。 */
   model?: string
   effort?: string
-  /** MoirAI worker 模型覆盖,仅 claude provider 生效。 */
-  agentModels?: Record<string, string>
+  /** MoirAI worker 覆盖(model + effort),仅 claude provider 生效。 */
+  agentOverrides?: Record<string, CliAgentOverride>
 }
 
 export async function openClaudeCode(
@@ -166,7 +172,7 @@ export async function openClaudeCode(
     resume: options.resumeLastConversation ?? false,
     model: options.model ?? '',
     effort: options.effort ?? '',
-    agentModels: options.agentModels ?? {},
+    agentOverrides: options.agentOverrides ?? {},
   })
 }
 
@@ -177,7 +183,7 @@ export async function openCodexCli(
   options: CliSessionLaunchOptions = {},
 ): Promise<string | null> {
   // codex 的恢复走它自己的 `resume --last`(按 cwd 过滤),语义与 claude 的
-  // `--continue` 对齐(决议 2026-08-06 D-G3)。agentModels 对 codex 不适用(§3.9)。
+  // `--continue` 对齐(决议 2026-08-06 D-G3)。agentOverrides 对 codex 不适用(§3.9)。
   return openCodeAssistant(workspaceRoot, 'open_codex_cli', 'Codex', grid, handlers, {
     resume: options.resumeLastConversation ?? false,
     model: options.model ?? '',
@@ -194,6 +200,33 @@ export async function launchCliInstaller(): Promise<string | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     await invoke('launch_cli_installer')
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** 行内「更新」钮(修订 2026-08-12):拉起真控制台跑 `claude update` / `codex update`。
+ *  成功返回 null,失败返回错误消息(调用方 toast,不吞)。 */
+export async function launchCliUpdate(provider: 'claude' | 'codex'): Promise<string | null> {
+  return invokeCliConsoleAction('launch_cli_update', provider)
+}
+
+/** 行内「登录」钮(修订 2026-08-12):拉起真控制台跑 `claude auth login` / `codex login`。 */
+export async function launchCliLogin(provider: 'claude' | 'codex'): Promise<string | null> {
+  return invokeCliConsoleAction('launch_cli_login', provider)
+}
+
+async function invokeCliConsoleAction(
+  command: 'launch_cli_update' | 'launch_cli_login',
+  provider: 'claude' | 'codex',
+): Promise<string | null> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    return 'Desktop-only feature'
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke(command, { provider })
     return null
   } catch (error) {
     return error instanceof Error ? error.message : String(error)

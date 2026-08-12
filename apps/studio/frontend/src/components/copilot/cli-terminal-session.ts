@@ -102,8 +102,8 @@ interface StartCliTerminalSessionParams {
   mode: CliTerminalMode
   /** Grid to start at; the renderer re-reports its real one once it mounts. */
   grid: CliTerminalGrid
-  /** 会话配置(设计 §3.9):model/effort/agentModels,open 时从 settings 读出。 */
-  sessionOptions?: Pick<CliSessionLaunchOptions, 'model' | 'effort' | 'agentModels'>
+  /** 会话配置(设计 §3.9):model/effort/agentOverrides,open 时从 settings 读出。 */
+  sessionOptions?: Pick<CliSessionLaunchOptions, 'model' | 'effort' | 'agentOverrides'>
   onExit: () => void
 }
 

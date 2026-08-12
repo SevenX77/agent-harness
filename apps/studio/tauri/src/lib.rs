@@ -187,7 +187,15 @@ impl CliDependencyStatus {
 /// `id<TAB>state<TAB>version<TAB>detail`。Windows 下经 wsl 跑,macOS/Linux 直接跑
 /// (分 OS 的差异只在入口 shell,脚本本体同一份)。/mnt 检测沿用 launcher 的
 /// Windows-binary 陷阱判据;登录态只读存在性/有效期,不碰凭据内容。
+/// 最新版检查(修订 2026-08-12)同乘这一次探测:curl 后台并行查三源,本地探测跑完
+/// 才 wait,慢网只慢不卡;查询失败不发 `latest:` 行——查不到 ≠ 版本旧。
 const CLI_DEPENDENCY_PROBE_SCRIPT: &str = r#"host_home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6); [ -n "$host_home" ] || host_home="$HOME"
+latest_dir=""
+if command -v curl >/dev/null 2>&1 && latest_dir=$(mktemp -d 2>/dev/null); then
+  curl -fsS --max-time 4 https://registry.npmjs.org/@anthropic-ai/claude-code/latest -o "$latest_dir/claude" 2>/dev/null &
+  curl -fsS --max-time 4 https://registry.npmjs.org/@openai/codex/latest -o "$latest_dir/codex" 2>/dev/null &
+  curl -fsS --max-time 4 https://api.github.com/repos/SevenX77/ah/releases/latest -o "$latest_dir/ah" 2>/dev/null &
+fi
 if v=$(tmux -V 2>/dev/null); then printf 'tmux\tok\t%s\t\n' "$v"; else printf 'tmux\tmissing\t\t\n'; fi
 probe_cli() {
   name="$1"; fallback="$2"
@@ -209,7 +217,17 @@ if [ -s "$cred" ] && grep -q '"accessToken"' "$cred" 2>/dev/null; then
   if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\n'
   else printf 'claude_auth\tbroken\t\ttoken expired\n'; fi
 else printf 'claude_auth\tmissing\t\t\n'; fi
-if [ -s "$host_home/.codex/auth.json" ]; then printf 'codex_auth\tok\t\t\n'; else printf 'codex_auth\tmissing\t\t\n'; fi"#;
+if [ -s "$host_home/.codex/auth.json" ]; then printf 'codex_auth\tok\t\t\n'; else printf 'codex_auth\tmissing\t\t\n'; fi
+if [ -n "$latest_dir" ]; then
+  wait
+  for tool in claude codex; do
+    v=$(grep -o '"version":"[^"]*"' "$latest_dir/$tool" 2>/dev/null | head -1 | cut -d'"' -f4)
+    [ -n "$v" ] && printf 'latest:%s\tok\t%s\t\n' "$tool" "$v"
+  done
+  v=$(grep -o '"tag_name": *"[^"]*"' "$latest_dir/ah" 2>/dev/null | head -1 | cut -d'"' -f4)
+  [ -n "$v" ] && printf 'latest:ah\tok\t%s\t\n' "${v#v}"
+  rm -rf "$latest_dir"
+fi"#;
 
 fn parse_cli_dependency_lines(raw: &str) -> Vec<CliDependencyStatus> {
     raw.lines()
@@ -235,6 +253,64 @@ fn parse_cli_dependency_lines(raw: &str) -> Vec<CliDependencyStatus> {
         .collect()
 }
 
+/// 版本串主体里的第一个 x.y.z(claude 形如 "2.1.228 (Claude Code)"、codex 形如
+/// "codex-cli 0.147.0",各带装饰,这里只认第一个语义化版本号)。
+fn parse_semver(text: &str) -> Option<(u32, u32, u32)> {
+    for token in text.split(|c: char| !(c.is_ascii_digit() || c == '.')) {
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        if let (Ok(major), Ok(minor), Ok(patch)) = (parts[0].parse(), parts[1].parse(), parts[2].parse()) {
+            return Some((major, minor, patch));
+        }
+    }
+    None
+}
+
+/// 已装 < 最新才算过时;任一侧解析不出版本号都不下"过时"结论(查不到 ≠ 旧)。
+fn version_is_older(installed: &str, latest: &str) -> bool {
+    match (parse_semver(installed), parse_semver(latest)) {
+        (Some(installed), Some(latest)) => installed < latest,
+        _ => false,
+    }
+}
+
+/// 探测脚本用 `latest:<id>` 行捎带查到的最新版本(查询失败不发行);把它们从依赖行
+/// 里摘出来,变成 id → 最新版本 的映射。
+fn split_latest_versions(
+    rows: Vec<CliDependencyStatus>,
+) -> (Vec<CliDependencyStatus>, BTreeMap<String, String>) {
+    let mut deps = Vec::new();
+    let mut latest = BTreeMap::new();
+    for row in rows {
+        match row.id.strip_prefix("latest:") {
+            Some(id) => {
+                if let Some(version) = row.version {
+                    latest.insert(id.to_string(), version);
+                }
+            }
+            None => deps.push(row),
+        }
+    }
+    (deps, latest)
+}
+
+/// ok 行发现更新版本 → outdated(黄)+ detail 标注最新版号。非 ok 行维持原判:
+/// missing/broken 的修复入口不是"更新",ah 低于 AH_VERSION_MIN 的判定(Studio 没法
+/// 用)也比"有新版"重要。
+fn mark_outdated_against_latest(row: &mut CliDependencyStatus, latest: Option<&String>) {
+    let Some(latest) = latest else { return };
+    if row.state != "ok" {
+        return;
+    }
+    let Some(installed) = row.version.as_deref() else { return };
+    if version_is_older(installed, latest) {
+        row.state = "outdated".to_string();
+        row.detail = Some(format!("latest {latest} available"));
+    }
+}
+
 /// ah 行独立于探测脚本:版本门禁逻辑已有唯一定义(run_ah_version + ah_version_gate),
 /// 不在 shell 里再抄一份。
 fn ah_dependency_status() -> CliDependencyStatus {
@@ -256,13 +332,16 @@ fn ah_dependency_status() -> CliDependencyStatus {
 }
 
 fn run_cli_dependency_probe() -> Result<String, String> {
+    // 与 launcher/run_ah_version 同用 login shell(-lc):CLI 会话真正跑在登录 shell
+    // 里(profile 带 PATH/代理镜像),探测必须观察同一个环境——2026-08-12 实测非登录
+    // shell 没有代理环境变量,最新版查询在代理机型上全部静默失败。
     let output = if cfg!(target_os = "windows") {
         let mut command = Command::new("wsl.exe");
-        command.args(["-e", "bash", "-c", CLI_DEPENDENCY_PROBE_SCRIPT]);
+        command.args(["-e", "bash", "-lc", CLI_DEPENDENCY_PROBE_SCRIPT]);
         command.output().map_err(|error| format!("failed to execute wsl.exe: {error}"))?
     } else {
         let mut command = Command::new("bash");
-        command.args(["-c", CLI_DEPENDENCY_PROBE_SCRIPT]);
+        command.args(["-lc", CLI_DEPENDENCY_PROBE_SCRIPT]);
         command.output().map_err(|error| format!("failed to execute bash: {error}"))?
     };
     if !output.status.success() {
@@ -281,11 +360,18 @@ fn cli_dependency_status() -> Vec<CliDependencyStatus> {
     let mut rows: Vec<CliDependencyStatus> = Vec::new();
     match run_cli_dependency_probe() {
         Ok(raw) => {
+            let (mut deps, latest) = split_latest_versions(parse_cli_dependency_lines(&raw));
             if cfg!(target_os = "windows") {
                 rows.push(CliDependencyStatus::new("wsl", "ok", None, None));
             }
-            rows.push(ah_dependency_status());
-            rows.extend(parse_cli_dependency_lines(&raw));
+            let mut ah = ah_dependency_status();
+            mark_outdated_against_latest(&mut ah, latest.get("ah"));
+            rows.push(ah);
+            for row in &mut deps {
+                let newest = latest.get(&row.id);
+                mark_outdated_against_latest(row, newest);
+            }
+            rows.append(&mut deps);
         }
         Err(error) => {
             // Windows 下探测入口就是 wsl:入口失败 = WSL 不可用,链上其余项无从谈起,
@@ -309,9 +395,19 @@ fn cli_dependency_status() -> Vec<CliDependencyStatus> {
 struct CliSessionLaunchConfig {
     model: String,
     effort: String,
-    /// MoirAI worker 角色名 → 模型覆盖。仅 claude provider 生效(经 [agents.X.env]
-    /// 的 ANTHROPIC_MODEL 注入);codex worker 无证据支持的模型环境变量,不注入。
-    agent_models: BTreeMap<String, String>,
+    /// MoirAI worker 角色名 → 会话覆盖。仅 claude provider 生效(经 [agents.X.env]
+    /// 的 ANTHROPIC_MODEL / CLAUDE_CODE_EFFORT_LEVEL 注入,修订 2026-08-12);
+    /// codex worker 无证据支持的环境变量,不注入。
+    agent_overrides: BTreeMap<String, CliAgentOverride>,
+}
+
+/// 单个 MoirAI worker 的会话覆盖:模型 + effort,空串 = 跟随 provider 默认。
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+struct CliAgentOverride {
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    effort: String,
 }
 
 /// 仓内安装脚本定位:dev 阶段 app 从仓里跑,沿祖先目录找;打包构建找不到时明确报错,
@@ -352,6 +448,69 @@ fn launch_cli_installer() -> Result<(), String> {
         .spawn()
         .map_err(|error| format!("failed to launch installer console: {error}"))?;
     Ok(())
+}
+
+/// 更新/登录按钮共用的命令表:动作 × provider 枚举定死在这里,前端只传标识——
+/// 不存在把任意字符串递进 shell 的通道。命令与 launcher login-doorman、安装脚本
+/// B2 步同源(claude auth login / codex login;update 是两 CLI 自带的检查+安装一体)。
+fn cli_console_action_command(action: &str, provider: &str) -> Result<&'static str, String> {
+    match (action, provider) {
+        ("update", "claude") => Ok("claude update"),
+        ("update", "codex") => Ok("codex update"),
+        ("login", "claude") => Ok("claude auth login"),
+        ("login", "codex") => Ok("codex login"),
+        _ => Err(format!("unsupported CLI console action: {action}/{provider}")),
+    }
+}
+
+/// 与 run_ah_version 同一理由显式补 PATH(非交互 shell 不一定带 ~/.local/bin);
+/// 结尾 read 留窗——用户看完结果自己关,回 Studio 点「重新检测」刷新状态。
+fn cli_console_action_script(action: &str, provider: &str) -> Result<String, String> {
+    let command = cli_console_action_command(action, provider)?;
+    Ok(format!(
+        "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; {command}; status=$?; echo; read -rp \"[{command}] finished with exit $status - press Enter to close\" _",
+    ))
+}
+
+/// 更新/登录 = 拉起真控制台跑对应 CLI 自己的命令(修订 2026-08-12:更新/登录含
+/// 进度与交互,后台静默承载不了,与一键安装同策略)。Windows 经 WSL 新开控制台;
+/// 其余平台与安装钮一致——明确报错引导手动命令,不猜终端。
+fn launch_cli_console_action(action: &str, provider: &str) -> Result<(), String> {
+    let command = cli_console_action_command(action, provider)?;
+    if !cfg!(target_os = "windows") {
+        return Err(format!(
+            "Run `{command}` in your terminal; Studio only automates this on Windows/WSL."
+        ));
+    }
+    spawn_wsl_console(&cli_console_action_script(action, provider)?)
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_wsl_console(script: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    // GUI 进程没有控制台;CREATE_NEW_CONSOLE 给 wsl.exe 一个真窗口承载交互。
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    Command::new("wsl.exe")
+        .args(["-e", "bash", "-lc", script])
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .map_err(|error| format!("failed to open the WSL console: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn spawn_wsl_console(_script: &str) -> Result<(), String> {
+    Err("WSL console is Windows-only".to_string())
+}
+
+#[tauri::command]
+fn launch_cli_update(provider: String) -> Result<(), String> {
+    launch_cli_console_action("update", &provider)
+}
+
+#[tauri::command]
+fn launch_cli_login(provider: String) -> Result<(), String> {
+    launch_cli_console_action("login", &provider)
 }
 
 struct SidecarAppState {
@@ -1369,20 +1528,29 @@ fn transient_ah_config_content(
     let atropos_skills = skills_for_agent(&map, "atropos")?;
     // ah >= 1.3.4 injects worker sandbox env natively. Studio only keeps the
     // Claude master root escape via `export IS_SANDBOX=1` in its cmd string.
-    // MoirAI worker 的模型覆盖(提案 §4,PR-4):claude provider 经 [agents.X.env] 的
-    // ANTHROPIC_MODEL 注入(claude CLI 标准模型环境变量;ah AgentConfig.env 原生透传,
-    // config.rs:217);codex worker 无证据支持的模型环境变量,不注入。effort 对 worker
-    // 同理暂不注入(无 env 证据)。
+    // MoirAI worker 的会话覆盖(提案 §4 PR-4 + 修订 2026-08-12):claude provider 经
+    // [agents.X.env] 注入——模型走 ANTHROPIC_MODEL(claude CLI 标准模型环境变量),
+    // effort 走 CLAUDE_CODE_EFFORT_LEVEL(claude 2.1.228 二进制 strings 实证);
+    // ah AgentConfig.env 原生透传(config.rs:217)。codex worker 无证据支持的
+    // 环境变量,不注入。
     let agent_env_line = |name: &str| -> String {
         if assistant != CodeAssistant::Claude {
             return String::new();
         }
-        match session.agent_models.get(name) {
-            Some(model) if !model.is_empty() => {
-                format!("env = {{ ANTHROPIC_MODEL = {} }}\n", toml_string(model))
-            }
-            _ => String::new(),
+        let Some(overrides) = session.agent_overrides.get(name) else {
+            return String::new();
+        };
+        let mut entries = Vec::new();
+        if !overrides.model.is_empty() {
+            entries.push(format!("ANTHROPIC_MODEL = {}", toml_string(&overrides.model)));
         }
+        if !overrides.effort.is_empty() {
+            entries.push(format!("CLAUDE_CODE_EFFORT_LEVEL = {}", toml_string(&overrides.effort)));
+        }
+        if entries.is_empty() {
+            return String::new();
+        }
+        format!("env = {{ {} }}\n", entries.join(", "))
     };
     Ok(format!(
         "version = \"1\"\n\n[master]\nenabled = true\nprovider = {provider_toml}\ncmd = {cmd}\nreadiness_timeout_s = 180\nwindow_size = \"follow\"\nskills = {master_skills}\n{master_env}\n[agents.clotho]\nprovider = {provider_toml}\nskills = {clotho_skills}\n{clotho_env}\n[agents.lachesis]\nprovider = {provider_toml}\nskills = {lachesis_skills}\n{lachesis_env}\n[agents.atropos]\nprovider = {provider_toml}\nskills = {atropos_skills}\n{atropos_env}",
@@ -3099,7 +3267,7 @@ fn open_claude_code(
     resume: Option<bool>,
     model: Option<String>,
     effort: Option<String>,
-    agent_models: Option<BTreeMap<String, String>>,
+    agent_overrides: Option<BTreeMap<String, CliAgentOverride>>,
     on_event: tauri::ipc::Channel<cli_terminal::CliTerminalEvent>,
 ) -> Result<String, String> {
     let mode = if resume.unwrap_or(false) {
@@ -3110,7 +3278,7 @@ fn open_claude_code(
     let session = CliSessionLaunchConfig {
         model: model.unwrap_or_default(),
         effort: effort.unwrap_or_default(),
-        agent_models: agent_models.unwrap_or_default(),
+        agent_overrides: agent_overrides.unwrap_or_default(),
     };
     open_code_assistant_command(
         app,
@@ -3144,11 +3312,11 @@ fn open_codex_cli(
     } else {
         MasterLaunchMode::Fresh
     };
-    // codex worker 无模型环境变量证据,agent 覆盖不适用(提案 §4 边界)。
+    // codex worker 无模型/effort 环境变量证据,agent 覆盖不适用(提案 §4 边界)。
     let session = CliSessionLaunchConfig {
         model: model.unwrap_or_default(),
         effort: effort.unwrap_or_default(),
-        agent_models: BTreeMap::new(),
+        agent_overrides: BTreeMap::new(),
     };
     open_code_assistant_command(
         app,
@@ -3507,6 +3675,8 @@ pub fn run() {
             last_opened_code_assistant,
             cli_dependency_status,
             launch_cli_installer,
+            launch_cli_update,
+            launch_cli_login,
             attach_code_assistant,
             cli_terminal_write,
             cli_terminal_resize,
@@ -4727,7 +4897,7 @@ mod tests {
         let cfg = CliSessionLaunchConfig {
             model: "claude-opus-4-8".into(),
             effort: "high".into(),
-            agent_models: BTreeMap::new(),
+            agent_overrides: BTreeMap::new(),
         };
         for mode in [MasterLaunchMode::Fresh, MasterLaunchMode::ResumeLastConversation] {
             let cmd = claude_master_cmd(None, mode, &cfg);
@@ -4748,7 +4918,7 @@ mod tests {
         let cfg = CliSessionLaunchConfig {
             model: "gpt-5.3-codex-spark".into(),
             effort: "low".into(),
-            agent_models: BTreeMap::new(),
+            agent_overrides: BTreeMap::new(),
         };
         let fresh = codex_master_cmd(None, MasterLaunchMode::Fresh, &cfg);
         assert!(fresh.contains(" -m ") && fresh.contains("gpt-5.3-codex-spark"), "{fresh}");
@@ -4759,28 +4929,117 @@ mod tests {
         assert!(m_at > resume_exec_at, "-m 只许出现在回落 exec(resume --last 之后的文本): {resume}");
     }
 
-    /// 提案 §4(PR-4)—— MoirAI worker 模型覆盖:claude provider 经 [agents.X.env]
-    /// 的 ANTHROPIC_MODEL 注入;codex provider 不注入;未覆盖的角色无 env 行。
+    /// 提案 §4(PR-4)+ 修订 2026-08-12 —— MoirAI worker 覆盖:claude provider 经
+    /// [agents.X.env] 注入 ANTHROPIC_MODEL / CLAUDE_CODE_EFFORT_LEVEL;codex provider
+    /// 不注入;未覆盖的角色无 env 行;两字段都空也无 env 行。
     #[test]
-    fn test_agent_model_overrides_reach_the_agents_env() {
-        let mut agent_models = BTreeMap::new();
-        agent_models.insert("clotho".to_string(), "claude-haiku-4-5".to_string());
-        let cfg = CliSessionLaunchConfig { model: String::new(), effort: String::new(), agent_models };
+    fn test_agent_overrides_reach_the_agents_env() {
+        let mut agent_overrides = BTreeMap::new();
+        agent_overrides.insert(
+            "clotho".to_string(),
+            CliAgentOverride { model: "claude-haiku-4-5".to_string(), effort: "low".to_string() },
+        );
+        agent_overrides.insert(
+            "lachesis".to_string(),
+            CliAgentOverride { model: String::new(), effort: "xhigh".to_string() },
+        );
+        agent_overrides.insert("atropos".to_string(), CliAgentOverride::default());
+        let cfg = CliSessionLaunchConfig { model: String::new(), effort: String::new(), agent_overrides };
         let toml = transient_ah_config_content(
             CodeAssistant::Claude, None, None, MasterLaunchMode::Fresh, &cfg,
         ).expect("claude config");
         assert!(
-            toml.contains("env = { ANTHROPIC_MODEL = \"claude-haiku-4-5\" }"),
-            "clotho 的模型覆盖必须进 env: {toml}"
+            toml.contains("env = { ANTHROPIC_MODEL = \"claude-haiku-4-5\", CLAUDE_CODE_EFFORT_LEVEL = \"low\" }"),
+            "clotho 的模型+effort 覆盖必须同进 env: {toml}"
+        );
+        assert!(
+            toml.contains("env = { CLAUDE_CODE_EFFORT_LEVEL = \"xhigh\" }"),
+            "lachesis 只覆盖 effort 时 env 不得夹带空模型: {toml}"
         );
         let clotho_at = toml.find("[agents.clotho]").expect("clotho section");
         let lachesis_at = toml.find("[agents.lachesis]").expect("lachesis section");
         let env_at = toml.find("ANTHROPIC_MODEL").expect("env line");
         assert!(clotho_at < env_at && env_at < lachesis_at, "env 行必须落在 clotho 段内: {toml}");
+        let atropos_section = &toml[toml.find("[agents.atropos]").expect("atropos section")..];
+        assert!(!atropos_section.contains("env = {"), "全空覆盖不得产生 env 行: {atropos_section}");
         let codex_toml = transient_ah_config_content(
             CodeAssistant::Codex, None, None, MasterLaunchMode::Fresh, &cfg,
         ).expect("codex config");
         assert!(!codex_toml.contains("ANTHROPIC_MODEL"), "codex provider 不注入模型 env: {codex_toml}");
+        assert!(!codex_toml.contains("CLAUDE_CODE_EFFORT_LEVEL"), "codex provider 不注入 effort env: {codex_toml}");
+    }
+
+    /// 修订 2026-08-12 —— 版本串解析只认第一个 x.y.z,装饰文字不干扰;解析不出的
+    /// 一侧不得得出"过时"结论(查不到 ≠ 旧)。
+    #[test]
+    fn test_version_compare_only_trusts_parsed_semver() {
+        assert_eq!(parse_semver("2.1.228 (Claude Code)"), Some((2, 1, 228)));
+        assert_eq!(parse_semver("codex-cli 0.147.0"), Some((0, 147, 0)));
+        assert_eq!(parse_semver("1.14.3"), Some((1, 14, 3)));
+        assert_eq!(parse_semver("tmux 3.4"), None, "两段版本号不当语义化版本");
+        assert!(version_is_older("2.1.228 (Claude Code)", "2.1.230"));
+        assert!(version_is_older("codex-cli 0.147.0", "0.148.0"));
+        assert!(!version_is_older("2.1.228", "2.1.228"));
+        assert!(!version_is_older("2.1.228", "garbled"), "最新版解析不出不算过时");
+        assert!(!version_is_older("garbled", "2.1.228"), "已装版解析不出不算过时");
+    }
+
+    /// 修订 2026-08-12 —— `latest:` 行从依赖行中摘出成映射;ok 行落后最新才转
+    /// outdated + detail;非 ok 行(broken/missing/低于 AH_VERSION_MIN 的 outdated)
+    /// 维持原判不被覆盖。
+    #[test]
+    fn test_latest_rows_split_and_mark_only_ok_rows_outdated() {
+        let rows = parse_cli_dependency_lines(
+            "claude\tok\t2.1.100 (Claude Code)\t\nlatest:claude\tok\t2.1.228\t\nlatest:codex\tok\t0.147.0\t\ncodex\tok\tcodex-cli 0.147.0\t\n",
+        );
+        let (mut deps, latest) = split_latest_versions(rows);
+        assert_eq!(latest.get("claude").map(String::as_str), Some("2.1.228"));
+        assert_eq!(deps.len(), 2, "latest 行不得混进依赖行: {deps:?}");
+        for row in &mut deps {
+            let newest = latest.get(&row.id);
+            mark_outdated_against_latest(row, newest);
+        }
+        assert_eq!(deps[0].state, "outdated");
+        assert_eq!(deps[0].detail.as_deref(), Some("latest 2.1.228 available"));
+        assert_eq!(deps[1].state, "ok", "已是最新的行不得转黄: {deps:?}");
+
+        let mut broken = CliDependencyStatus::new("claude", "broken", None, Some("Windows binary".into()));
+        mark_outdated_against_latest(&mut broken, Some(&"9.9.9".to_string()));
+        assert_eq!(broken.state, "broken", "broken 行的修复入口不是更新,不得改判");
+        let mut ah_below_min = CliDependencyStatus::new(
+            "ah", "outdated", Some("1.7.0".into()), Some(format!("Studio requires ah >= {AH_VERSION_MIN}")),
+        );
+        mark_outdated_against_latest(&mut ah_below_min, Some(&"1.14.3".to_string()));
+        assert!(
+            ah_below_min.detail.as_deref().unwrap_or("").contains("Studio requires"),
+            "低于门槛的判定比有新版重要,detail 不得被覆盖"
+        );
+    }
+
+    /// 修订 2026-08-12 —— 探测脚本捎带最新版查询:三源都在、后台并行、失败不发行
+    /// (脚本级行为在真机 bash 上另行实测,此处锁结构)。
+    #[test]
+    fn test_probe_script_carries_latest_lookups() {
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("registry.npmjs.org/@anthropic-ai/claude-code/latest"));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("registry.npmjs.org/@openai/codex/latest"));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("api.github.com/repos/SevenX77/ah/releases/latest"));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("--max-time 4"), "网络查询必须限时,不得拖死探测");
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("latest:ah"), "ah 最新版行缺失");
+    }
+
+    /// 修订 2026-08-12 —— 更新/登录命令表枚举定死;未知组合明确报错;脚本带 PATH
+    /// 补齐与留窗 read。
+    #[test]
+    fn test_cli_console_action_commands_are_a_closed_table() {
+        assert_eq!(cli_console_action_command("update", "claude"), Ok("claude update"));
+        assert_eq!(cli_console_action_command("update", "codex"), Ok("codex update"));
+        assert_eq!(cli_console_action_command("login", "claude"), Ok("claude auth login"));
+        assert_eq!(cli_console_action_command("login", "codex"), Ok("codex login"));
+        assert!(cli_console_action_command("login", "ah").is_err(), "表外组合必须拒绝");
+        assert!(cli_console_action_command("rm -rf /", "claude").is_err());
+        let script = cli_console_action_script("login", "claude").expect("script");
+        assert!(script.contains("$HOME/.local/bin"), "非交互 shell 需要显式补 PATH: {script}");
+        assert!(script.contains("read -rp"), "控制台必须留窗给用户看结果: {script}");
     }
 
     /// 提案 §3(PR-2)—— 安装脚本沿祖先目录定位;找不到明确报错不猜路径。
@@ -4799,6 +5058,21 @@ mod tests {
         assert!(
             source.contains("launch_cli_installer,"),
             "launch_cli_installer must be registered in the Tauri invoke handler"
+        );
+    }
+
+    /// 修订 2026-08-12 —— 更新/登录按钮的两个命令必须注册,否则前端 invoke 只会
+    /// 拿到 "unknown command" 而按钮永远失效。
+    #[test]
+    fn invoke_handler_registers_cli_update_and_login_commands() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("launch_cli_update,"),
+            "launch_cli_update must be registered in the Tauri invoke handler"
+        );
+        assert!(
+            source.contains("launch_cli_login,"),
+            "launch_cli_login must be registered in the Tauri invoke handler"
         );
     }
 

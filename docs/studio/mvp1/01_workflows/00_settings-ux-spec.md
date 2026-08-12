@@ -298,7 +298,9 @@
 > 需求原话:「加一个与Claude sdk平行的设置,cli的设置,把在copilot里面使用open in cli
 > 所需要的所有的包安装、登录鉴权等状态和一键安装功能都做上去,还得分不同操作系统。
 > 再加上一些配置选项,比如使用的默认模型,effort等配置,Moirai的不同角色的不同配置」。
-> 完整设计:`docs/design/2026-08-06-cli-settings-section-proposal.md`(已批,四期交付)。
+> 完整设计:`docs/design/2026-08-06-cli-settings-section-proposal.md`(已批,四期交付);
+> 修订:`docs/design/2026-08-12-cli-settings-revision.md`(已批——版本检查/更新与登录
+> 按钮/全称文案/codex effort 修正/模型下拉/worker effort)。
 
 - **形态**:Copilot 页内与「Claude Agent SDK」并列的 CatalogAccordion section「CLI」。
 - **依赖与鉴权状态(PR-1)**:Tauri 命令 `cli_dependency_status()` 一次探测整条链——
@@ -308,22 +310,49 @@
   存在性/有效期,不读凭据内容);macOS/Linux 去掉 WSL 层同脚本直跑。状态词汇:
   ok/missing/broken/outdated/unknown,颜色沿用 route 灯 token(success/warning/
   destructive/muted)。进区冷加载一次 + 显式「重新检测」;探测失败入口层如实标
-  broken,链上其余项标 unknown 不猜。
+  broken,链上其余项标 unknown 不猜。依赖行文案写产品全称(修订 2026-08-12):
+  `Claude Code CLI` / `Claude Code 登录`——"Claude" 与 "Claude Code" 是两个产品,
+  UI 不得用简称。
+- **版本最新检查(修订 2026-08-12)**:并入同一次探测动作(不加定时器,守 SSOT
+  revalidation 边界)。探测脚本内 `curl --max-time 4` 后台并行查三源:claude →
+  npm `@anthropic-ai/claude-code`、codex → npm `@openai/codex`、ah → GitHub
+  `SevenX77/ah` releases/latest;已装 < 最新 → 该行 `outdated`(黄)+ detail 标注
+  最新版号;查询失败(断网/超时)只显示已装版本,绝不据此标 outdated。ah 低于
+  `AH_VERSION_MIN` 的既有判定(Studio 没法用)优先于"有新版"。
+- **行内动作按钮(修订 2026-08-12;可见控制台承载,理由同一键安装:更新/登录有
+  进度与交互,后台静默失败不可见)**:`claude`/`codex` 行 `outdated` → 「更新」→
+  控制台跑 `claude update` / `codex update`;`claude_auth`/`codex_auth` 行
+  `missing|broken` → 「登录」→ 控制台跑 `claude auth login` / `codex login`
+  (与 launcher login-doorman、安装脚本 B2 同款命令);ah 行继续走「安装 / 修复」
+  控制台(脚本幂等,兼任 ah 升级)。命令在 Rust 侧按 provider 枚举定死,前端只传
+  provider 标识。非 Windows 与安装按钮同策略:明确报错引导手动命令。
 - **一键安装(设计修订 2026-08-06 后落地)**:任一行 missing/broken/outdated 时区头
   显示「安装 / 修复」钮,点击 = Tauri 拉起**可见 PowerShell 控制台**跑仓内
   `scripts/install-claude-code-wsl.ps1`(全链:WSL/tmux/ah/claude/codex)。原提案的
   「流式输出到只读视图」被否:安装含**交互式 OAuth 登录**步骤,只读流承载不了;装完
   用户点「重新检测」刷新。脚本沿祖先目录定位,打包构建找不到时明确报错。macOS/Linux
   无此脚本,按钮报错引导包管理器。
-- **会话配置(落地)**:truth 在 backend settings(`AppSettings.cli_sessions`:
-  claude/codex 各 {model, effort} + agents 字典),经 `useAppSettings` 同一实例
-  autosave;open 是显式用户命令,点击时读 settings 传入 invoke。注入:claude
-  `--model`/`--effort`(全部 exec 位点,含 --continue),codex `-m`/
-  `-c model_reasoning_effort=`(只注入全新启动,resume 沿用会话记录的模型);
-  claude 的 effort 档位 low/medium/high/xhigh/max(--help 实测),codex 档位
-  minimal/low/medium/high。**MoirAI worker 覆盖**:仅 claude provider,经 ah.toml
-  `[agents.X].env` 的 `ANTHROPIC_MODEL`(ah AgentConfig.env 原生透传);codex worker
-  与 worker 级 effort 均无环境变量证据,不注入(能力扩展另议)。
+- **会话配置(落地;模型/effort 全部下拉,修订 2026-08-12)**:truth 在 backend
+  settings(`AppSettings.cli_sessions`:claude/codex 各 {model, effort} + agents
+  字典),经 `useAppSettings` 同一实例 autosave;open 是显式用户命令,点击时读
+  settings 传入 invoke。注入:claude `--model`/`--effort`(全部 exec 位点,含
+  --continue),codex `-m`/`-c model_reasoning_effort=`(只注入全新启动,resume
+  沿用会话记录的模型)。模型与 effort 均为下拉选择(不自由填写),首项恒为
+  「跟随 CLI 默认」(空串哨兵):
+  - claude effort 档位 low/medium/high/xhigh/max(--help 实测 2026-08-06 复核
+    2026-08-12);codex effort 档位 **light/medium/high/xhigh/ultra**(0.147.0
+    TUI 五档 + config.toml `xhigh` 持久化实测 + 二进制 strings,2026-08-12;
+    旧词表 minimal/low/medium/high 作废)。
+  - claude 模型目录 = 官方别名 `fable/opus/sonnet/haiku`(别名指向 latest,
+    不随小版本过期);codex 模型目录 = `gpt-5.6` 家族
+    (`gpt-5.6/-sol/-luna/-terra/-pro`,0.147.0 二进制 strings)。目录是 UI 选择
+    目录(CliSection 常量、带证据注释),不是 gateway 凭据/route 真相。
+  **MoirAI worker 覆盖**:仅 claude provider;三行(clotho/lachesis/atropos)
+  各为 模型+effort 双下拉,默认项「跟随 provider 默认」。注入经 ah.toml
+  `[agents.X].env`:模型 → `ANTHROPIC_MODEL`,effort → `CLAUDE_CODE_EFFORT_LEVEL`
+  (claude 2.1.228 二进制 strings 实证,推翻 2026-08-06「worker 级 effort 无环境
+  变量证据」前提);launch 形状 `agent_overrides: Map<agent, {model, effort}>`。
+  codex worker 仍无模型/effort 环境变量证据,不注入。
 - **边界**:绝不代填凭据;凭据共享唯一通道仍是 ah `shared_credentials_dir`;
   MoirAI 角色的 prompt/技能不在本区(归 `.ah/` 与 agent-skill-map)。
 

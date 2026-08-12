@@ -95,7 +95,7 @@ tmp/
 
 # Node / frontend caches
 /node_modules/
-/.vite/
+.vite/
 
 # OS
 .DS_Store

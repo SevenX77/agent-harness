@@ -385,13 +385,19 @@ class EndpointSecretResponse(BaseModel):
 
 
 class RouteEditableUpdate(BaseModel):
+    """What a person may edit about a route: how it is named and whether it is on.
+
+    Capabilities and metadata are deliberately absent. They are what probing
+    measured and what probing recorded, so the only honest way to change one is
+    to measure again — and a full-replace body makes a caller destroy them by
+    omission, which is what happened on every approved rename.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     display_name: str
     canonical_id: str
     status: Literal["verified", "unverified_manual", "disabled", "failed"]
-    capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RoleApplyProfileRequest(BaseModel):
@@ -1472,8 +1478,6 @@ async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> Reg
             "display_name": request.display_name,
             "canonical_id": request.canonical_id,
             "status": request.status,
-            "capabilities": request.capabilities,
-            "metadata": request.metadata,
         }
     )
     upsert_routes({route_id: updated})

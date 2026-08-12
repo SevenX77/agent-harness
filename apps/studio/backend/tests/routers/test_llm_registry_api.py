@@ -5592,8 +5592,6 @@ def test_route_metadata_probe_and_profile_apply_conflict(
             "display_name": "GPT-5 Updated",
             "canonical_id": "gpt-5",
             "status": "verified",
-            "capabilities": {},
-            "metadata": {"provider_brand": "openai"},
         },
     )
     assert update_response.status_code == 200

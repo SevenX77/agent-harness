@@ -122,12 +122,11 @@ def test_a_route_that_takes_every_level_records_no_effort_capability(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """Live 2026-08-11: deepseek-v4-pro took all seven, `none` and `max` included.
+    """A provider that never reads the field answers like one that sells them all.
 
-    A provider that never reads the field answers exactly like one that sells
-    every level, so the run must end with nothing recorded rather than with a
-    list nobody checked. Leaving the capability absent is what the record
-    already means by "unmeasured".
+    So the run must end with nothing recorded rather than with a list nobody
+    checked. Leaving the capability absent is what the record already means by
+    "unmeasured".
     """
     _seed(tmp_path, monkeypatch, thinking=True, protocol="openai_compatible")
     asked = _record_asked(monkeypatch, accepted=set())

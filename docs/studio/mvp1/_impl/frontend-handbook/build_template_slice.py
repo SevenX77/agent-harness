@@ -9,7 +9,6 @@ Pages: tpl_overview / apikeys_design / mech_cred / fe_modules / apikeys_impl / a
 """
 from __future__ import annotations
 
-import base64
 import html
 import json
 import re
@@ -18,7 +17,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE / "module-review-handbook-template.html"
 OUT = HERE / "index.html"  # 服务于 http://<lan>:8902/ 根路径，固定一个 URL，不再新建文件
-SHOTS = HERE / "screenshots"  # 真机测试截图，构建时 base64 内联进 index.html（自包含）
+SHOTS = HERE / "screenshots"  # 真机测试截图，页面按相对路径引用（与 index.html 同目录伺服）
 D12 = "studio-mvp1-12d-repair-framework-2026-06-15.html"
 
 FONT_LINKS = (
@@ -100,7 +99,7 @@ CSS = """
   /* ── shot placeholder ── */
   .shot-ph { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px dashed var(--border-hover); border-radius:8px; background:#fbfcfe; padding:8px 11px; margin-bottom:6px; }
   .shot-cap { font-size:12.3px; color:#49515d; } .shot-todo { font-size:10.5px; font-weight:700; color:var(--text-muted); background:#eef1f6; border-radius:5px; padding:1px 7px; flex:none; }
-  /* ── real test screenshot (base64-inlined) ── */
+  /* ── real test screenshot (referenced from screenshots/) ── */
   .shot-fig { margin:0 0 10px; border:1px solid var(--border-hover); border-radius:10px; overflow:hidden; background:#fff; box-shadow:0 1px 3px rgba(20,30,50,.06); }
   .shot-img { display:block; width:100%; height:auto; cursor:zoom-in; }
   .shot-figcap { font-size:12px; color:#1f7a3d; background:#f0faf3; border-top:1px solid var(--border-hover); padding:6px 11px; }
@@ -201,7 +200,13 @@ def code(s: str) -> str:
 
 
 def embed_shot(filename, caption=""):
-    """Inline a real test screenshot as a base64 data URI (self-contained HTML).
+    """Reference a real test screenshot by a path relative to the page.
+
+    The page is always served from this directory (``:8902`` points here), so a
+    relative src resolves against the committed ``screenshots/`` folder. Inlining
+    the PNGs as base64 instead would make every regeneration rewrite ~18 MB of
+    high-entropy text that git cannot delta-compress, duplicating bytes that are
+    already committed one directory down.
 
     Missing file → empty string (graceful; the test card still renders its text
     shots). Used by render_tests when a test declares a ``screenshots`` list.
@@ -209,11 +214,10 @@ def embed_shot(filename, caption=""):
     path = SHOTS / filename
     if not path.exists():
         return ""
-    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
     figcap = f'<figcaption class="shot-figcap">✅ 真机实测 · {code(caption)}</figcaption>' if caption else ""
     return (
         '<figure class="shot-fig">'
-        f'<img class="shot-img" loading="lazy" alt="{ESC(caption)}" src="data:image/png;base64,{b64}"/>'
+        f'<img class="shot-img" loading="lazy" alt="{ESC(caption)}" src="{SHOTS.name}/{ESC(filename)}"/>'
         f'{figcap}</figure>'
     )
 

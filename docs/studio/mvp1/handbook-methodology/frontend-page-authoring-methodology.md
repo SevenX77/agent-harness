@@ -27,7 +27,7 @@
 
 ### 0.2 最终产物长什么样
 
-一个**自包含的静态 HTML 手册**（样板成品：`temp/studio-mvp1-template-slice.html`），由一个 Python 生成器（`build_template_slice.py`，把数据 JSON 渲染成 HTML 的脚本）+ 若干**数据 JSON**（每页一份，如 `tpl-apikeys-design.json` 是设计页数据、`tpl-mech-cred.json` 是机制页数据）驱动。
+一个**静态 HTML 手册**（页面 + 同目录 `screenshots/`）（样板成品：`temp/studio-mvp1-template-slice.html`），由一个 Python 生成器（`build_template_slice.py`，把数据 JSON 渲染成 HTML 的脚本）+ 若干**数据 JSON**（每页一份，如 `tpl-apikeys-design.json` 是设计页数据、`tpl-mech-cred.json` 是机制页数据）驱动。
 
 - **数据与渲染分离**：内容写在 JSON 里（这是「写页面」的主战场），样式/结构写在生成器里（这是「定组件」的主战场）。改内容只动 JSON，改观感只动生成器。
 - **左导航 + 右单列阅读**：sticky 侧栏导航 + 阅读进度 + hash 路由分页，不做营销式 hero。读者一次只看一页。

@@ -9,7 +9,7 @@
 
 ## 0. 心智模型（先读这条）
 
-**手册 = 「数据（切片 JSON） → 生成器（build 脚本） → 自包含 HTML」的单向流水线。**
+**手册 = 「数据（切片 JSON） → 生成器（build 脚本） → HTML + 同目录 `screenshots/`」的单向流水线。**
 
 - **真相在切片**：所有文字、状态、截图引用都写在 `tpl-*.json` 里。
 - **观感在生成器**：布局、配色、导航、交互都在 `build_template_slice.py` 里。
@@ -26,7 +26,8 @@
 故文字要机器可消费、字段级精确，不能只给人看的比喻）。
 
 ### 1.2 物理结构
-- 单个**自包含** `index.html`（截图已 base64 内联，无外链依赖，可直接发/可本地起 http）。
+- 单个 `index.html` + 同目录 `screenshots/`（图按相对路径 `screenshots/<名>.png` 引用，
+  不内联；本地起 http 伺服该目录即可看图，**整目录一起发**，单发 HTML 会缺图）。
 - 是 SPA：所有页面是 `.doc-section`，靠 JS `showPage(i)` 切换；全局 `PAGES` 数组
   + `showPage` 挂在 window 上（可被 Playwright `p.evaluate(()=>showPage(PAGES.indexOf('n1_tests'),false))` 驱动）。
 - 左侧 `#toc` 导航 = S0 总览 + 7 个节点组，每组 = 节点主页（parent）+ 子页列表。
@@ -170,7 +171,9 @@ python3 build_template_slice.py        # 无参数；读 tpl-*.json + screenshot
 - 真机图一律放 `docs/studio/mvp1/_impl/frontend-handbook/screenshots/`。
 - 命名：`n<节点>-<序号>-<语义>.png`（如 `n1-12-newskill-error.png`）；
   **特写**用 `-closeup` 后缀（如 `n1-12b-error-closeup.png`），由 Pillow 从全图裁框 + 放大生成。
-- 生成器构建时把图 base64 内联进 `index.html`（`embed_shot`），所以图必须先在 `screenshots/` 落盘。
+- 生成器只写相对路径引用（`embed_shot`），不内联图片字节：图必须先在 `screenshots/` 落盘
+  且随切片一起提交，否则页面会缺图。内联曾让每次重生成都改写约 18 MB 高熵文本，
+  git 无法增量压缩，132 个版本累计 1.9 GB。
 
 ### 4.3 怎么挂进切片（test 字段）
 test 项字段：

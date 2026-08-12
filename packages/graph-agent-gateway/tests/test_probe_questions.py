@@ -95,9 +95,9 @@ def test_the_levels_a_route_accepted_are_the_ones_that_answered_ok() -> None:
 def test_a_route_that_takes_a_level_that_does_not_exist_settles_nothing() -> None:
     """Taking every level including the invented one is indifference, not support.
 
-    Live 2026-08-11: deepseek-v4-pro accepted all seven levels, `none` and `max`
-    among them. A provider that never validates the field answers exactly that
-    way, so the list said nothing about what the model actually sells.
+    Two providers produce the same list of accepted levels: one whose vocabulary
+    really is that wide, and one that never reads the field. The invented level
+    is the only thing that separates them, and only the second one takes it.
     """
     questions = effort_questions("openai_compatible")
     answers = [_result("ok")] * len(questions)

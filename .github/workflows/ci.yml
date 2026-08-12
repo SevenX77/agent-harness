@@ -168,6 +168,19 @@ jobs:
       - name: frontend build
         run: npm --prefix apps/studio/frontend run build
 
+      # Python had pip-audit from the start; npm had nothing, so the one open
+      # advisory on this tree (Dependabot #85) was found by GitHub rather than
+      # by us. Two thresholds, because the two dependency trees carry different
+      # risk: anything that reaches a user ships in the bundle and is held at
+      # zero, while the dev toolchain (shadcn's CLI and its transitive deps)
+      # only blocks on high/critical. A single strict gate would have been red
+      # on arrival, and a gate that is always red is a gate nobody reads.
+      - name: frontend dependency audit
+        working-directory: apps/studio/frontend
+        run: |
+          npm audit --omit=dev --audit-level=low
+          npm audit --audit-level=high
+
   e2e-tests:
     # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,
     # which requires a dedicated runner setup. Disabled on PR/push for now;

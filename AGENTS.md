@@ -41,11 +41,17 @@ way and nothing drifts onto stray branches/worktrees.
    Preview: `scripts/wt-dev.sh` (see "Studio Feature Development" below).
 3. **Ship** — `scripts/wt-ship.sh ["PR title"]` pushes the branch, opens a PR to
    `main`, and arms GitHub **auto-merge** (squash).
-4. **CI + merge** — CI runs on the PR. When the 5 required checks pass
-   (`quality-gates`, `graph-agent-tests` ×3 Python, `frontend-gates`), GitHub
-   squash-merges into `main` automatically — no approval, no manual click. To
-   review before it lands, skip `wt-ship` (or `gh pr merge --disable-auto`) and
-   merge from the PR page yourself.
+4. **CI + merge** — CI runs on the PR. When the 7 required checks pass
+   (`quality-gates`, `graph-agent-tests` ×3 Python, `frontend-gates`,
+   `cross-platform-smoke` ×2), GitHub squash-merges into `main` automatically —
+   no approval, no manual click. To review before it lands, skip `wt-ship` (or
+   `gh pr merge --disable-auto`) and merge from the PR page yourself.
+   `cross-platform-smoke (windows-latest)` / `(macos-latest)` became required on
+   2026-08-12: it is the only job that runs the test suite anywhere but Linux,
+   the primary dev machine is Windows, and it had been advisory — so it sat red
+   unnoticed before #743 (a real Windows-only defect), and #749 auto-merged
+   while it was still running. "CI will catch it on Windows" was not true of a
+   check that could not block.
 5. **Cleanup (only your OWN worktree — never others')** — on merge GitHub deletes
    the remote branch. Clean up your finished worktree EXPLICITLY:
    `scripts/wt-clean.sh <your-branch-or-worktree-dir>` removes it (local worktree +
@@ -97,10 +103,17 @@ way and nothing drifts onto stray branches/worktrees.
    changing is exactly the case that needs a rebuild too).
 
 **Repo settings backing this** (already configured): `main` protected with
-`enforce_admins` on (no bypass), PR required with **0** approvals, the 5 checks
-above required (security scanners CodeQL / Scorecard / SonarCloud and the
-manual-only `e2e-tests` are NOT required); squash-only merges; auto-merge and
-delete-branch-on-merge on. The only path onto `main` is a green PR.
+`enforce_admins` on (no bypass), PR required with **0** approvals, the 7 checks
+above required; squash-only merges; auto-merge and delete-branch-on-merge on.
+The only path onto `main` is a green PR.
+
+Still advisory, and each for a stated reason: `e2e-tests` is manual-only;
+CodeQL and Scorecard report upstream-scored findings we do not control the
+cadence of; **SonarCloud is advisory only until its existing findings have been
+triaged** — 1535 open issues (9 BLOCKER) on 2026-08-12, none of which anyone
+had ever ruled on. Making it required in that state would turn every PR red on
+arrival, and a gate that is always red is a gate nobody reads. Triage first,
+then promote it — see `docs/development/DELIVERY_LEDGER.md`.
 
 ## CI Gates — run locally BEFORE pushing
 
@@ -118,9 +131,16 @@ before you push or you WILL turn `main` red:
   `uv run pytest packages/graph-agent/tests`
 - **Frontend** (in `apps/studio/frontend`): `npm run lint` · `npm run typecheck`
   · `npm test` · `npm run build`
-- **Dependency audit**: `uv run --with pip-audit pip-audit` (must report 0 CVEs;
-  pinned versions accrue new upstream CVEs over time — bump within constraints
-  when flagged).
+- **Dependency audit — both ecosystems**:
+  - Python: `uv run --with pip-audit pip-audit` (must report 0 CVEs; pinned
+    versions accrue new upstream CVEs over time — bump within constraints when
+    flagged).
+  - npm (in `apps/studio/frontend`): `npm audit --omit=dev --audit-level=low`
+    **and** `npm audit --audit-level=high`. Two thresholds on purpose: what
+    reaches a user ships in the bundle and is held at zero, while the dev
+    toolchain only blocks on high/critical. Added 2026-08-12 — until then npm
+    had no audit at all, which is why an advisory on this tree was found by
+    GitHub's Dependabot rather than by our own gates.
 
 ## Development Principles (pre-release: first principles, no backward compat)
 

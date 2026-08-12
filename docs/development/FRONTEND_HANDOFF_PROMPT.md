@@ -5,7 +5,7 @@
 >
 > **这份是交接模板的单一真相源。** 规则变了就改这份、走 PR 进 `main`，别再把交接
 > 话术散落在聊天里。它只是把仓库里既有规则（功能 SOP `apps/studio/frontend/CLAUDE.md`、
-> `AGENTS.md`、`docs/development/FRONTEND_UI_SPEC.md`、手册方法论两份）串成一段
+> `AGENTS.md`、`docs/development/FRONTEND_UI_SPEC.md`、MVP1 设计源）串成一段
 > "开工须知"——真相仍在那些文档，模板与它们冲突时以那些文档为准。
 
 ---- 模板正文 ----
@@ -20,8 +20,8 @@ Rust 层(apps/studio/tauri)或顶层架构调整才退回全局重型 SOP。
 必读(按顺序;真相在文档,这里只是索引):
 1. apps/studio/frontend/CLAUDE.md —— 单 agent 功能 SOP,必读第一份。你一个 agent
    直接写代码(不派 subagent、不走 12 步审计、不写 kiro spec);照其「五、端到端
-   SOP」走:锁范围 → 开 worktree → 设计对齐 → 实施 → 验证环境&截图 → 门禁 →
-   回写手册 → 发 PR+收尾 → 自己逐项点验 → 报 done 附逐项验证报告+截图。
+   SOP」走:锁范围 → 开 worktree → 设计对齐 → 实施 → 验证环境&smoke → 门禁 →
+   发 PR+收尾 → 自己逐项点验 → 报 done 附逐项验证报告+截图。
 2. AGENTS.md(每会话自动加载)——「Development Principles」三条原则(不向后兼容 /
    第一性原理不打补丁 / 模块边界不是禁区也不是借口)+「Three-Module Architecture」
    两条 SSOT 铁律:数据读取 SSOT(mount/focus/轮询/重连都不许 refetch mutable
@@ -30,30 +30,26 @@ Rust 层(apps/studio/tauri)或顶层架构调整才退回全局重型 SOP。
    即使测试全绿。
 3. docs/development/FRONTEND_UI_SPEC.md(尤其 §2)—— 样式/组件/布局唯一真相;优先
    复用 src/components/ui/ 现有 shadcn/Radix 封装,缺原语先补封装再用,不硬编码颜色。
-4. N6 手册 docs/studio/mvp1/_impl/frontend-handbook/index.html —— 活的实施追踪器;
-   状态标签手维护、会滞后,用代码核对再信;看/改方法见
-   docs/studio/mvp1/handbook-methodology/ 两份方法论。
-5. MVP1 设计 = 真理(与代码冲突时设计赢):studio → docs/studio/mvp1/,engine →
+4. MVP1 设计 = 真理(与代码冲突时设计赢):studio → docs/studio/mvp1/,engine →
    docs/engine/mvp1/,gateway → docs/graph-agent-gateway/mvp1/(各自
-   mvp1-alignment.md)。
+   mvp1-alignment.md)。**「现在到哪了」不看任何文档,直接 grep 前后端代码现读**
+   ——二手状态记录一律不作数(N6 手册已于 2026-08-12 下线,理由见 AGENTS.md
+   「Standard Documents → 退役」)。
 
 纪律(不可省;细则以 SOP 为准):
-- 设计先于实施:先用手册设计页对齐需求;设计页缺/不全 → 回 MVP1 设计源补;设计源也
-  没有 → 先设计(必要时跟我对齐方向)、写回设计源,再补手册设计页。绝不对着缺失或
-  自创的设计写代码;backend/engine/gateway 接口定稿同样写回对应模块设计源。
+- 设计先于实施:先去 MVP1 设计源对齐需求;设计源缺/不全 → 先设计(必要时跟我对齐
+  方向)、写回设计源,再动手。绝不对着缺失或自创的设计写代码;backend/engine/gateway
+  接口定稿同样写回对应模块设计源,且与代码同一个 PR。
 - 一任务一 worktree:scripts/wt-new.sh <type>/<short-desc> 开工,所有改动只在自己的
-  树里;不动主仓根、不动别人的树。design token、components/ui/、手册 index.html 这类
-  共享文件并行必冲突,要动先跟我对调度。
+  树里;不动主仓根、不动别人的树。design token、components/ui/ 这类共享文件并行必
+  冲突,要动先跟我对调度。
 - 业务逻辑走 TDD:前端数据流/状态/API、后端、engine/gateway 先写失败测试再写生产
   代码;纯视觉不新增测试,只锁视觉细节的旧测试同步删/收窄。
-- 手册随代码同步:收尾据代码真相回写切片状态(fe_status / be_status / 机制卡
-  backend_status[].status / tests / 截图 / shot_na),重生成 index.html,与代码同一个
-  PR;状态老实标——导航圆点 = 全页徽章取最差。
 - 验证环境自己备,逐项点验也自己做(PM 决策 2026-08-06,取代 2026-07-06 的「点验归
   PM」):在自己 worktree 起 scripts/wt-dev.sh(改了 backend/engine/gateway 用
   --backend 起本树私有 sidecar,绝不拿 main 的后端充数),确认 app 能起、受影响界面
-  能打开不报错,顺手截手册要的真机图;不在 5173 验自己的活、不起第二套 Tauri。合并
-  收尾后在主 app 上逐项点验(webview UI 用 CDP 驱动真窗口,RUN_AND_SCREENSHOT.md §5)。
+  能打开不报错;不在 5173 验自己的活、不起第二套 Tauri。合并
+  收尾后在主 app 上逐项点验(webview UI 用 CDP 驱动真窗口,RUN_AND_SCREENSHOT.md §4)。
 - 推送前门禁全绿:前端四件套(lint/typecheck/test/build)+ 按 AGENTS.md「CI Gates」
   的 ruff / mypy(SDK --strict)/ pytest。scripts/wt-ship.sh 发 PR、上 auto-merge;
   不直接 push main。

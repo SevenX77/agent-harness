@@ -681,17 +681,13 @@ frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled 
 1. `apps/studio/frontend/CLAUDE.md` —— Studio 功能开发单 agent SOP。它覆盖全局重型多 agent PM 流程;
    本任务一个 agent 直接写代码,不派 ccb/subagent,不走 12 步 PR 审计,不写 kiro spec,不开 60s loop。
    主干按其中"五、一个完整 功能任务的端到端 SOP"执行:Phase 0 锁范围 → 1 开 worktree → 2 设计对齐
-   → 3 实施 → 4 亲眼验证 → 5 门禁 → 6 回写手册 → 7 发 PR → 8 报 done 附 PM 验证清单。
+   → 3 实施 → 4 验证环境&smoke → 5 门禁 → 6 发 PR+收尾 → 7 报 done 附逐项验证报告。
 2. `AGENTS.md` 的 Development Principles —— 不向后兼容、第一性原理修复、模块边界决定落点这三条高于速度。
 3. `docs/development/FRONTEND_UI_SPEC.md`(尤其 §2) —— Studio 样式、组件、布局基准的唯一真相。
-4. `docs/studio/mvp1/_impl/frontend-handbook/index.html` —— N6 前端实施说明书,是活的实施追踪器;状态标签手维护,
-   默认可能滞后代码,必须用代码核对。
-5. `docs/studio/mvp1/handbook-methodology/frontend-page-authoring-methodology.md` 与
-   `docs/studio/mvp1/handbook-methodology/handbook-operations-schema-lifecycle.md` —— 手册怎么看、怎么改、何时改、
-   截图怎么截、切片 schema、状态点配色。
-6. MVP1 设计源 —— Studio 看 `docs/studio/mvp1/README.md` + `DESIGN_UNITS_INDEX.md`;engine 看
+4. MVP1 设计源 —— Studio 看 `docs/studio/mvp1/README.md` + `DESIGN_UNITS_INDEX.md`;engine 看
    `docs/engine/mvp1/`;gateway 看 `docs/graph-agent-gateway/mvp1/`。设计与代码冲突时设计赢。
-7. `apps/studio/frontend/src/components/ui/` 下现有 shadcn/Radix 封装、相关组件与 design token。优先复用;
+   "现在实现到哪了"不查任何文档,直接 grep 前后端代码现读。
+5. `apps/studio/frontend/src/components/ui/` 下现有 shadcn/Radix 封装、相关组件与 design token。优先复用;
    缺原语先补 shadcn 风格 wrapper,再用到业务组件里;不硬编码颜色。
 
 **开发原则**:
@@ -707,15 +703,11 @@ frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled 
 
 - 仅当任务是纯 engine/gateway 内部重构、Rust 层(`apps/studio/tauri`)或顶层架构调整时,才退回全局重型 SOP。
   正常功能开发(前端 ↔ Studio backend ↔ 必要 SDK 改动)走本轻量流程。
-- 设计先于实施。开工前用手册设计页对齐需求;手册缺失/不全则回 MVP1 设计源补;设计源也没有则先设计并写回设计源。
-  涉及 backend/engine/gateway 接口调整时,同样写回对应模块设计源。
-- 手册随代码同步。收尾按代码真相回写对应切片状态(`fe_status` / `be_status` /
-  `backend_status[].status=ok|partial|bad|review` / `tests` / 截图 / `shot_na`),跑
-  `python3 build_template_slice.py` 重生成 `index.html`,与代码放同一个 PR。导航状态点取页面全部徽章最差值,
-  机制卡也计入,不得留下乐观状态。
+- 设计先于实施。开工前去 MVP1 设计源对齐需求;设计源缺失/不全则先设计并写回设计源,再动手。
+  涉及 backend/engine/gateway 接口调整时,同样写回对应模块设计源,且与代码放同一个 PR。
 - 一任务一 worktree。用 `scripts/wt-new.sh <type>/<short-desc>` 从 `origin/main` 切专属 worktree;
   所有改动只在自己的 worktree;不动主仓根、不动其他 agent worktree、不因别处不干净去 reset/checkout/pull。
-  design token、`components/ui/`、手册 `index.html` 等共享文件容易冲突,要动前先对调度。
+  design token、`components/ui/` 等共享文件容易冲突,要动前先对调度。
 - 业务逻辑走 TDD。前端数据流/状态/API、后端、engine/gateway 改动先写失败测试,再写生产代码。纯视觉/样式调整
   不新增测试;只锁死视觉细节的旧测试要同步删除或收窄。
 

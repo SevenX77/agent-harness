@@ -52,7 +52,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
   6. **图标语义(R5-C,PM「UserCog 违和,他不是一个真的 role」)**:role picker 触发器图标 = lucide `BrainCircuit`——选的是"这次对话背后的模型 persona/脑子",不是用户配置齿轮。
   7. **role 锚点永不消失(2026-07-02 R6-1,PM「为什么我删了两个 role,copilot 面板的模型选择没有了?能不能不管怎么样都显示着,哪怕没有模型」)**:落定后 role picker(`RolePicker`)**始终渲染一个可见锚点**——这**推翻**了旧 F6「no dead placeholder controls / options ≤1 就 render null」规则(它导致删到只剩 1 个浮出默认时整个模型选择消失)。三态:①**0 个**可用角色 → 渲染禁用态空锚点(`BrainCircuit` + "No copilot role" + tooltip 指向 Settings→Copilot);②**≥1 个** → 渲染下拉(1 个时下拉里就 1 项,但锚点+当前角色名可见);route picker(`ModelPicker`,次要)可在 role 缺失或链上 ≤1 条路时继续隐藏——锚点职责由 role picker 承担。
 - 决策: route/role config comes from Settings; chat only consumes it — consuming 的派生函数也必须同一份,不许面板自养第二套判定。
-- 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot settings; `01_workflows/00_settings-ux-spec.md:395` assigns role mapping; 浮出/物化语义见 settings copilot 设计 atom-55/56(`docs/studio/mvp1/_impl/frontend-handbook/tpl-copilot-design.json` 派生视图,源头 `00_settings-ux-spec.md` §3.2)。
+- 原话/来源: `01_workflows/00_settings-ux-spec.md:433` assigns Copilot settings; `01_workflows/00_settings-ux-spec.md:395` assigns role mapping; 浮出/物化语义见 `01_workflows/00_settings-ux-spec.md` §3.2。
 - 测试: composer 选项集合 == Settings displayRoles(配置完成子集);空草稿不出现;浮出角色首发消息触发物化并用持久化 key;changing route affects future messages; unavailable config shows scoped error; Settings 增删/换组后 composer 经事件刷新对齐。
 - Status: live(2026-07-01 收敛落地:面板 registry.roles 第二真相 / 浮出角色被滤 / 空草稿可选 / copilot_chat 写死默认均已删,composer 与 Settings 同源)。
 - 归属: region `copilot`; capability `studio-settings`.

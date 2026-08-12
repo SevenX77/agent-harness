@@ -19,12 +19,15 @@ canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpServerConfig
+
+from app.services import web_access
 
 COPILOT_MCP_SERVER_NAME = "studio"
 COPILOT_MCP_TOOL_PREFIX = f"mcp__{COPILOT_MCP_SERVER_NAME}__"
@@ -1932,6 +1935,45 @@ async def probe_llm_route_tool(args: dict[str, Any]) -> dict[str, Any]:
     return _text_result(response.model_dump(mode="json"))
 
 
+@tool(
+    "fetch_web_page",
+    "读一个网页,返回 markdown 正文。走的是**用户自己那个已经登录好的 Chrome**"
+    "(OpenCLI Browser Bridge),所以厂商文档、控制台、需要账号才看得到的页面都能读。"
+    "只做两件事:打开 URL、读文本;不会点击、不会填表、不会提交,更不会索取密码或 cookie。"
+    "长页面分块返回,响应里的 continues_at 非空时,用它当 start 再读一次接着往下。"
+    "浏览器桥没就绪时返回的是「请用户做什么」,不是空页面——**不要把它当作"
+    "「这个站点没有内容」**,要把那句话转达给用户,等他弄好再重试。",
+    {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+            "start": {"type": "integer", "description": "上一次返回的 continues_at"},
+        },
+        "required": ["url"],
+    },
+)
+async def fetch_web_page_tool(args: dict[str, Any]) -> dict[str, Any]:
+    url = str(args.get("url") or "").strip()
+    if not url:
+        return _text_result("url 不能为空", is_error=True)
+    start = int(args.get("start") or 0)
+    try:
+        # 阻塞的子进程调用不能占住事件循环:copilot 的流式回话跑在同一个 loop 上。
+        outcome = await asyncio.to_thread(web_access.fetch_page, url, start=start)
+    except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都落成 is_error
+        return _text_result(f"fetch_web_page 失败: {exc}", is_error=True)
+    if isinstance(outcome, web_access.BridgeNotReady):
+        return _text_result(outcome.what_the_person_must_do, is_error=True)
+    return _text_result(
+        {
+            "url": outcome.url,
+            "title": outcome.title,
+            "content": outcome.content,
+            "continues_at": outcome.continues_at,
+        }
+    )
+
+
 def _copilot_mcp_tools() -> list[Any]:
     """MoirAI 面向 Settings 鼠标能力的 MCP 工具全集(读写对称 + 探测复用)。
     写工具经 can_use_tool 挂起审批(见 copilot._MCP_APPROVAL_WRITE_TOOLS),读/探测
@@ -1979,6 +2021,7 @@ def _copilot_mcp_tools() -> list[Any]:
         test_llm_endpoint_tool,
         test_llm_endpoint_models_tool,
         probe_llm_route_tool,
+        fetch_web_page_tool,
     ]
 
 

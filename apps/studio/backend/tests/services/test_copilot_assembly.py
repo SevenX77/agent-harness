@@ -33,6 +33,7 @@ _MCP_TOOL_NAMES = [
     "mcp__studio__test_llm_endpoint",
     "mcp__studio__test_llm_endpoint_models",
     "mcp__studio__probe_llm_route",
+    "mcp__studio__fetch_web_page",
 ]
 
 _MCP_APPROVAL_WRITE_TOOL_NAMES = [

@@ -924,6 +924,55 @@ route (different account/provider) must get its chance」。**凭据那一支不
 Gemini key 探一次,端点结论从 `error/INVALID_ARGUMENT` 变成 `invalid_key`,路由探测不再回
 `invalid_model`。
 
+### D13. 判对了还要送到眼前:禁令压过证据(已裁决,2026-08-12)
+
+D12 合并后**在真机上点验它时发现的**,所以它属于同一条线的收尾:答案判对了、记对了,
+却停在界面前一步。
+
+**证据(真机,2026-08-12,主 app)。** 在 Settings → API Keys 点 Gemini Official 的「测试」:
+
+| | 点击前 | 点击后 |
+|---|---|---|
+| `last_test_message` | `Endpoint test failed (INVALID_ARGUMENT).` | `Invalid API key (INVALID_ARGUMENT).` |
+| endpoint `status` | `failed` | `disabled` |
+| 该端点的 50 条 route | 全部存活 | 全部 `disabled` |
+| **界面上的端点 chip** | 绿色 | **仍然绿色** |
+
+第三行是 D12 顺带修好的一处**从未生效过的后端规则**:`app/routers/llm.py` 的 R-E2
+(注释原话「an invalid API key makes the whole endpoint unusable until the key is fixed
+=> disable the endpoint AND all its routes」)由 `result.status == "invalid_key"` 触发,
+而 Google 的 key 错误从来没被判成 `invalid_key`——**所以一把死掉的 Google key,50 条路由
+照样挂着等角色选用**。D12 让这条规则第一次对 Google 生效。
+
+第四行是本节要裁的题。根因在 `apps/studio/frontend/src/api/llm.ts` 的 `routeIsUsable`:
+它的五个条件里**没有一个读 `route.status === 'disabled'`**,而其中一条
+(`verified_profiles.some(p => p.status === 'ready')`)在 50 条停用路由里**恰好有一条**
+仍然成立——那是 key 还有效时铸下的 profile。于是 `routeCanProveEndpointUsable` 为真,
+`endpointTestVerdict` 判 `ok`,chip 保持绿色。**一条陈旧证据顶掉了一个明确的当前禁令。**
+
+同一个页面里路由 chip 是灰的(`ProviderCard.tsx:1013`,`disabled → "muted"`)。同一份事实,
+两个界面说法相反。
+
+**决策(两条)。**
+
+1. **`routeIsUsable` 先问禁令,再看证据。** `status === 'disabled'` 直接出局,写在其余五个
+   条件之前。理由是这两类事实性质不同:`disabled` 是**系统当下的决定**(密钥被拒时整端点
+   连同路由一起停用,下次测试成功再恢复),其余五个都是**它曾经能用的证据**;关于过去的证据
+   不能推翻当下的禁令。
+2. **`failed` 保持在证据之下,不动。** 它是**探测结论**,可能只针对某个模型、可能是抖动,
+   现有设计刻意允许 ready profile / `ui_state: 'ready'` 压过它,那是对的。
+   (copilot 的 `model-picker.tsx:45` 把 `disabled` 和 `failed` 一起排除——那是另一个问题
+   「这条路由现在要不要提供给用户选」,更严是合理的,两处**不合并**。)
+
+**这两条修改合起来才有意义**:D12 让后端说出「Invalid API key」,本节让这句话走到 chip 上——
+`endpointTestStatus`(`llm.ts:1475-1487`)正是靠 `message.includes('invalid api key')` 判出
+`invalid_key` 的,而那句话是 D12 才开始写的。
+
+**验收判据**:① 一条前端测试复刻真机形状(端点 `disabled` + 唯一一条停用路由带 ready
+profile),断言端点判成 `invalid_key`、`available_sdks` 为空、`model_seen` 为空;
+② 既有的「陈旧 failed 不该拖垮端点」测试仍绿(证明没有误伤 `failed` 那一档);
+③ 前端全套 + lint + typecheck + build 绿;④ **真机**:同一个 Gemini 卡片,chip 不再是绿色。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

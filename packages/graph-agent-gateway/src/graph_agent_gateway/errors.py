@@ -4,14 +4,24 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from graph_agent import ModelProviderError
-except Exception:  # pragma: no cover - fallback for standalone package import
-    ModelProviderError = RuntimeError  # type: ignore[misc,assignment]
+from graph_agent import ModelProviderError
 
 
 class GatewayError(ModelProviderError):
-    """Base class for gateway failures with a stable error code."""
+    """Base class for gateway failures with a stable error code.
+
+    Membership of the engine's public error catalog is a contract, not a
+    convenience: ``docs/engine/public-api-contract.md`` states as a
+    postcondition of ``ModelProviderError`` that this class and its leaves are
+    ``isinstance(..., ModelProviderError)``, so a host catches one of five
+    families instead of a long tail of leaves. That is why the import below is
+    unconditional. It used to sit behind a ``try/except`` that fell back to
+    ``RuntimeError``, which turned a missing dependency into a second, silent
+    mode where the documented postcondition simply did not hold and a caller's
+    ``except ModelProviderError`` stopped catching anything. The dependency is
+    declared in this package's ``pyproject.toml``; if it is absent the install
+    is broken and should say so here.
+    """
 
     code: str
 
@@ -24,10 +34,7 @@ class GatewayError(ModelProviderError):
     ) -> None:
         self.code = code
         self.context = dict(context or {})
-        try:
-            super().__init__(f"{code} {message}", context=self.context)
-        except TypeError:  # pragma: no cover - standalone RuntimeError fallback
-            super().__init__(f"{code} {message}")
+        super().__init__(f"{code} {message}", context=self.context)
 
 
 class AllProvidersFailedError(GatewayError):

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
+import tomllib
 from pathlib import Path
 
 GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "graph_agent_gateway"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_DECISION_EVENT_CODE = "[F-v3-gateway-llm-route-decision]"
 
 
@@ -48,6 +51,27 @@ def test_gateway_errors_do_not_inherit_engine_execution_error() -> None:
     from graph_agent_gateway.errors import GatewayError
 
     assert "ExecutionError" not in {base.__name__ for base in GatewayError.__mro__}
+
+
+def test_gateway_errors_join_the_engine_family_unconditionally() -> None:
+    """Catalog membership is a postcondition, so it may not have an off switch.
+
+    ``docs/engine/public-api-contract.md`` states that ``GatewayError`` and its
+    leaves are ``isinstance(..., ModelProviderError)``. That base used to be
+    imported under ``try/except`` with a ``RuntimeError`` fallback, so a host
+    whose install lacked the engine got a gateway whose errors quietly left the
+    catalog — the postcondition held or not depending on the environment, and
+    nothing said which. The import is now plain, and this test fails if a
+    fallback is reintroduced.
+    """
+    import graph_agent
+    from graph_agent_gateway import errors
+
+    assert issubclass(errors.GatewayError, graph_agent.ModelProviderError)
+
+    module = ast.parse((GATEWAY_SRC / "errors.py").read_text(encoding="utf-8"))
+    guarded = [node.lineno for node in module.body if isinstance(node, ast.Try)]
+    assert guarded == []
 
 
 def test_gateway_runtime_surface_does_not_export_factory() -> None:
@@ -138,17 +162,84 @@ def test_registry_surface_exports_skipped_route_diagnostics() -> None:
     assert "SkippedRoute" in registry.__all__
 
 
-def test_gateway_phase1_has_no_engine_internal_imports() -> None:
-    forbidden = {
-        "errors.py": "graph_agent.core.exceptions",
-        "call/tracing.py": "graph_agent.callbacks.events",
-        "call/resolver.py": "graph_agent.core._predict_internal",
-        "__init__.py": "from graph_agent_gateway import factory",
-    }
+def test_the_gateway_reaches_the_engine_only_through_its_public_surface() -> None:
+    """The rule is which door, not a list of the doors already tried.
 
-    for relative_path, forbidden_text in forbidden.items():
-        source = (GATEWAY_SRC / relative_path).read_text(encoding="utf-8")
-        assert forbidden_text not in source
+    This replaced a table of three (file, forbidden spelling) pairs — one per
+    engine submodule somebody had reached into. A table like that only bars the
+    spellings already thought of, while the rule it stands for is the engine's
+    own: exactly five error families and a named public surface, imported from
+    ``graph_agent`` and nowhere below it.
+    """
+    offenders: list[str] = []
+
+    for path in sorted(GATEWAY_SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                offenders.extend(
+                    f"{path.relative_to(GATEWAY_SRC).as_posix()}:{node.lineno}:{alias.name}"
+                    for alias in node.names
+                    if _is_engine_submodule(alias.name)
+                )
+            elif isinstance(node, ast.ImportFrom) and _is_engine_submodule(node.module or ""):
+                offenders.append(
+                    f"{path.relative_to(GATEWAY_SRC).as_posix()}:{node.lineno}:{node.module}"
+                )
+
+    assert offenders == []
+
+
+def test_the_engine_does_not_declare_the_gateway_it_may_not_import() -> None:
+    """A dependency nothing may import is not a dependency.
+
+    The engine's own ``test_engine_source_has_no_gateway_concrete_imports``
+    forbids its source from importing the gateway, yet its manifest declared
+    ``graph-agent-gateway`` — an edge no engine code was allowed to use, in the
+    opposite direction from the one the error catalog actually needs. It also
+    handed the gateway to anyone who installed the engine, which is how the
+    Studio backend came to import a distribution it never named. Declaring the
+    gateway's own edge to the engine (see the manifest test below) would have
+    closed that pair into a cycle.
+    """
+    engine = _declared_distributions(REPO_ROOT / "packages" / "graph-agent" / "pyproject.toml")
+
+    assert "graph-agent-gateway" not in engine
+
+
+def test_the_gateway_declares_the_engine_its_errors_inherit_from() -> None:
+    gateway = _declared_distributions(
+        REPO_ROOT / "packages" / "graph-agent-gateway" / "pyproject.toml"
+    )
+
+    assert "graph-agent" in gateway
+
+
+def test_gateway_init_does_not_import_the_factory_module() -> None:
+    source = (GATEWAY_SRC / "__init__.py").read_text(encoding="utf-8")
+
+    assert "from graph_agent_gateway import factory" not in source
+
+
+def _is_engine_submodule(name: str) -> bool:
+    # `graph_agent` itself is the public surface and allowed;
+    # `graph_agent_gateway` shares the prefix and is not the engine at all.
+    return name.startswith("graph_agent.")
+
+
+def _declared_distributions(manifest: Path) -> set[str]:
+    project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+    requirements: list[str] = list(project.get("dependencies") or [])
+    for extra in (project.get("optional-dependencies") or {}).values():
+        requirements.extend(extra)
+    return {_distribution_name(requirement) for requirement in requirements}
+
+
+def _distribution_name(requirement: str) -> str:
+    name = requirement.strip()
+    for separator in ("[", "<", ">", "=", "!", "~", ";", " "):
+        name = name.split(separator, 1)[0]
+    return name.strip().lower().replace("_", "-")
 
 
 # A domain answers for itself through the package it lives in. Reaching past

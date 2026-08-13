@@ -3,7 +3,7 @@ module: 04-orch-registry-schema
 doc: baseline
 status: drafted
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RegistrySnapshot/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:canonicalize_model · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py · apps/studio/backend/app/models/llm_config.py:to_registry_snapshot
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RegistrySnapshot/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/identity.py:canonicalize_model · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py · apps/studio/backend/app/models/llm_config.py:to_registry_snapshot
 units: [registry-schema-contract]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---

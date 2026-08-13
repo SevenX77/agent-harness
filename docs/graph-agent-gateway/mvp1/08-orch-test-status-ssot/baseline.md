@@ -3,7 +3,7 @@ module: 08-orch-test-status-ssot
 doc: baseline
 status: drafted
 binds_design: ./mvp1-alignment.md
-binds_code: apps/studio/backend/app/services/llm_state_projection.py:ProviderUiState/ProviderModelStateProjection/project_provider_model_state/has_historical_probe_verified/_setup_reason/_select_active_circuit · apps/studio/backend/app/services/llm_import_drafts.py:create_draft/load_draft/load_evidence_library/append_evidence_record/apply_draft/sync_remote_evidence_library/DraftNotFound/DraftExpired/DraftApplyConflict/DEFAULT_CATALOG_URL · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:EvidenceRecord/ProviderImportDraft/ProbeResult
+binds_code: apps/studio/backend/app/services/llm_state_projection.py:ProviderUiState/ProviderModelStateProjection/project_provider_model_state/has_historical_probe_verified/_setup_reason/_select_active_circuit · packages/graph-agent-gateway/src/graph_agent_gateway/registry/catalog.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:EvidenceRecord/ProviderImportDraft/ProbeResult
 units: [test-status-ssot-evidence]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---

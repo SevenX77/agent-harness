@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-02
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_is_marked_down/_probe/_invoke_with_token_escalation/_mark_down/_usage_total_calls/_record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:LLMClientManager/probe_provider/is_provider_marked_down/mark_provider_down/record_usage/_probe_provider/_is_provider_marked_down/_mark_provider_down · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RuntimePolicy/ProbeResult · apps/studio/backend/app/services/copilot_test.py:ModelProbeResult/_probe_model/_probe_official_call_method · apps/studio/backend/app/services/llm_health_store.py:RuntimeCircuit/SqliteLlmHealthStore
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_is_marked_down/_probe/_invoke_with_token_escalation/_mark_down/_usage_total_calls/_record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:LLMClientManager/probe_provider/is_provider_marked_down/mark_provider_down/record_usage/_probe_provider/_is_provider_marked_down/_mark_provider_down · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RuntimePolicy/ProbeResult · packages/graph-agent-gateway/src/graph_agent_gateway/probing/wire.py:probe_provider_route/probe_official_call_method · apps/studio/backend/app/services/model_probe.py:ModelProbeResult · apps/studio/backend/app/services/llm_health_store.py:RuntimeCircuit/SqliteLlmHealthStore
 units: [fallback-circuit-probe-health]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---

@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import queue
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -777,6 +778,65 @@ def _close_ctx_queue(results_queue) -> None:
     """
     results_queue.close()
     results_queue.join_thread()
+
+
+def test_the_run_file_lock_waits_however_long_the_holder_takes(tmp_path: Path) -> None:
+    """The lock has to mean the same thing on every platform: wait your turn.
+
+    On POSIX `fcntl.flock(LOCK_EX)` waits as long as it takes. On Windows
+    `msvcrt.locking(LK_LOCK)` does not — it retries ten times a second apart and
+    then raises `OSError [Errno 36] Resource deadlock avoided`, measured at 9.1s
+    on Windows 11. So a holder that keeps the lock through a slow write turned
+    every other waiter's legitimate wait into an untyped OSError, on Windows
+    only, escaping the StudioAdapterError contract the callers are written to.
+
+    Seen in CI, not in review: `cross-platform-smoke (windows-latest)` failed one
+    of eight lease-race workers with `{None, 'state.lease_conflict'}` — the None
+    being an error carrying no error_code, because it was not the typed error at
+    all. The hold below is deliberately longer than that internal cap; a lock
+    that gives up cannot pass this.
+    """
+
+    LocalRuntimeStateStore = _load_symbol(
+        "app.core.adapters.runtime_state_store_local",
+        "LocalRuntimeStateStore",
+    )
+    hold_seconds = 12.0  # > the ~9s cap LK_LOCK gives up at
+    run_dir = tmp_path / "runs" / "run-lock-wait"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    held = threading.Event()
+    release = threading.Event()
+    waiter_result: list[BaseException | None] = []
+
+    def hold() -> None:
+        with LocalRuntimeStateStore(root=tmp_path)._run_file_lock(run_dir):
+            held.set()
+            release.wait(hold_seconds + 10)
+
+    def wait_for_the_lock() -> None:
+        held.wait(10)
+        try:
+            with LocalRuntimeStateStore(root=tmp_path)._run_file_lock(run_dir):
+                waiter_result.append(None)
+        except BaseException as exc:  # noqa: BLE001 - the point is that nothing is raised
+            waiter_result.append(exc)
+
+    holder = threading.Thread(target=hold, daemon=True)
+    waiter = threading.Thread(target=wait_for_the_lock, daemon=True)
+    holder.start()
+    assert held.wait(10), "the holder never took the lock"
+    waiter.start()
+
+    try:
+        time.sleep(hold_seconds)
+        assert waiter_result == [], f"the waiter gave up while the lock was held: {waiter_result}"
+    finally:
+        release.set()
+        holder.join(timeout=10)
+        waiter.join(timeout=10)
+
+    assert waiter_result == [None], f"the waiter never got the lock: {waiter_result}"
 
 
 def test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner(

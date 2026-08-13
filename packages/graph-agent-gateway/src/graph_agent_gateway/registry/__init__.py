@@ -69,6 +69,7 @@ from graph_agent_gateway.registry.config_store import (
 from graph_agent_gateway.registry.contracts import (
     CredentialDescriptor,
     CredentialProviderProtocol,
+    RouteRegistry,
     SecretLifetimePolicy,
     SnapshotVersion,
     StandardTerminalRetrySettings,
@@ -215,6 +216,7 @@ __all__ = [
     "ResolvedRoute",
     "RoleEntry",
     "RoleRouteEntry",
+    "RouteRegistry",
     "RouteCandidate",
     "RuntimePolicy",
     "RuntimeSettingDescriptor",

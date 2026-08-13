@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+if TYPE_CHECKING:
+    # Only the annotations below need these, and importing them for real would
+    # close a cycle: the schema models are built on this file's contracts.
+    from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderRoute
 
 CredentialStatus = Literal["available", "missing", "disabled", "expired", "scope_denied", "unknown"]
 
@@ -27,6 +33,24 @@ class CredentialDescriptor(BaseModel):
         if not self.exists and self.status == "available":
             raise ValueError("available credentials must exist")
         return self
+
+
+class RouteRegistry(Protocol):
+    """Where a route and its endpoint are looked up by id.
+
+    A Protocol rather than a base class because the registry a host keeps is its
+    own file: Studio's is an on-disk credentials file carrying a schema version
+    and a catalog-sync marker, this package's is ``RegistrySnapshot``, and
+    neither should have to become the other to have a route looked up in it.
+    Read-only on purpose — resolving a role reads the registry, and anything
+    that writes to one is not doing this job.
+    """
+
+    @property
+    def provider_endpoints(self) -> Mapping[str, ProviderEndpoint]: ...
+
+    @property
+    def provider_routes(self) -> Mapping[str, ProviderRoute]: ...
 
 
 @runtime_checkable

@@ -16,7 +16,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from graph_agent_gateway.registry import (
+    ProviderEndpoint,
+    ProviderRoute,
     RoleRouteEntry,
+    RouteRegistry,
     effort_bounds,
     fit,
     project_route_state,
@@ -37,8 +40,12 @@ _PROJECTABLE_EVIDENCE_TRUST_STATES = frozenset({"probe-verified"})
 
 @dataclass(frozen=True)
 class MaterializeRoleRequest:
+    # ``role`` cannot be typed here yet: the fields materialization reads off a
+    # role — model_groups / intent / model_fallback_enabled — are not on this
+    # package's RoleEntry, they are on Studio's subclass of it. Deciding where
+    # the role model belongs is a change across two modules, not an annotation.
     role: Any
-    credentials: Any
+    credentials: RouteRegistry
     health_store: Any | None = None
     now: datetime | None = None
 
@@ -96,7 +103,7 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
             route_id = _value(provider_model, "route_id")
             if not isinstance(route_id, str):
                 continue
-            route = _mapping_get(_value(credentials, "provider_routes", {}), route_id)
+            route = credentials.provider_routes.get(route_id)
             if route is None:
                 # The role references a route the current registry does not know
                 # (route deleted / credential expired / model retired). It cannot
@@ -117,7 +124,7 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
                 }
                 report["warnings"].append(warning)
                 continue
-            endpoint = _mapping_get(_value(credentials, "provider_endpoints", {}), _value(route, "endpoint_id"))
+            endpoint = credentials.provider_endpoints.get(route.endpoint_id)
             if endpoint is None:
                 continue
 
@@ -156,7 +163,7 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
                 report["warnings"].append(warning)
 
             role_fit = _apply_intent(
-                entry_report, role, group, route, _value(endpoint, "protocol")
+                entry_report, role, group, route, endpoint.protocol
             )
             entry_report["role_fit"] = role_fit
             for warning in entry_report["warnings"]:
@@ -180,8 +187,8 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
 
 
 def _materialization_projection(
-    endpoint: Any,
-    route: Any,
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
     health_store: Any | None,
     current_time: datetime,
 ) -> _ProjectionFacts:
@@ -192,9 +199,9 @@ def _materialization_projection(
         current_time,
     )
     gateway_projection = project_route_state(
-        route_id=_value(route, "route_id"),
-        endpoint_status=_value(endpoint, "status"),
-        route_status=_value(route, "status"),
+        route_id=route.route_id,
+        endpoint_status=endpoint.status,
+        route_status=route.status,
         credential_available=_credential_available(endpoint),
         circuit_retry_at=_value(active_circuit, "retry_at") if active_circuit is not None else None,
         credential_evidence_refs=_route_credential_evidence_refs(route),
@@ -211,17 +218,17 @@ def _materialization_projection(
         )
 
     if ui_state == "failed":
-        endpoint_status = _value(endpoint, "status")
-        route_status = _value(route, "status")
+        endpoint_status = endpoint.status
+        route_status = route.status
         if endpoint_status == "failed":
             reason_code = _failure_reason_code(
-                _value(endpoint, "metadata", {}),
+                endpoint.metadata,
                 reason_code,
                 "endpoint_unreachable",
             )
         elif route_status == "failed":
             reason_code = _failure_reason_code(
-                _value(route, "metadata", {}),
+                route.metadata,
                 reason_code,
                 "model_failed",
             )
@@ -231,7 +238,7 @@ def _materialization_projection(
 
 
 def _failure_reason_code(
-    metadata: Any,
+    metadata: dict[str, Any],
     fallback: _FailedReasonCode | None,
     default: _FailedReasonCode,
 ) -> _FailedReasonCode:
@@ -245,16 +252,14 @@ def _failure_reason_code(
     return fallback or default
 
 
-def _metadata_reason_code(metadata: Any) -> str | None:
-    if not isinstance(metadata, dict):
-        return None
+def _metadata_reason_code(metadata: dict[str, Any]) -> str | None:
     reason_code = metadata.get("reason_code")
     return reason_code if isinstance(reason_code, str) else None
 
 
 def _active_circuits(
-    endpoint: Any,
-    route: Any,
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
     health_store: Any | None,
     current_time: datetime,
 ) -> list[Any]:
@@ -262,18 +267,17 @@ def _active_circuits(
         return []
     return list(
         health_store.get_active_circuits(
-            route_id=_value(route, "route_id"),
-            endpoint_id=_value(endpoint, "endpoint_id"),
-            rate_limit_bucket=_value(endpoint, "rate_limit_bucket")
-            or _value(endpoint, "endpoint_id"),
+            route_id=route.route_id,
+            endpoint_id=endpoint.endpoint_id,
+            rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
             now=current_time,
         )
     )
 
 
 def _select_active_circuit(
-    endpoint: Any,
-    route: Any,
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
     circuits: list[Any],
     current_time: datetime,
 ) -> Any | None:
@@ -301,48 +305,39 @@ def _select_active_circuit(
     )
 
 
-def _circuit_matches(endpoint: Any, route: Any, circuit: Any) -> bool:
+def _circuit_matches(endpoint: ProviderEndpoint, route: ProviderRoute, circuit: Any) -> bool:
     if _value(circuit, "scope") == "route":
-        return bool(_value(circuit, "scope_id") == _value(route, "route_id"))
+        return bool(_value(circuit, "scope_id") == route.route_id)
     if _value(circuit, "scope") == "endpoint":
-        return bool(_value(circuit, "scope_id") == _value(endpoint, "endpoint_id"))
-    effective_bucket = _value(endpoint, "rate_limit_bucket") or _value(endpoint, "endpoint_id")
+        return bool(_value(circuit, "scope_id") == endpoint.endpoint_id)
+    effective_bucket = endpoint.rate_limit_bucket or endpoint.endpoint_id
     return bool(_value(circuit, "scope_id") == effective_bucket)
 
 
-def _credential_available(endpoint: Any) -> bool:
-    credential_ref = _value(endpoint, "credential_ref")
-    if isinstance(credential_ref, str) and credential_ref:
+def _credential_available(endpoint: ProviderEndpoint) -> bool:
+    if endpoint.credential_ref:
         return True
-    api_key = _value(endpoint, "api_key")
-    if api_key is None:
-        return False
-    if hasattr(api_key, "get_secret_value"):
-        return bool(api_key.get_secret_value())
-    return bool(api_key)
+    return bool(endpoint.api_key and endpoint.api_key.get_secret_value())
 
 
-def _route_credential_evidence_refs(route: Any) -> list[str]:
+def _route_credential_evidence_refs(route: ProviderRoute) -> list[str]:
     # Phase 3: refs come from probe-verified evidence embedded ON the route
     # (``route.evidence``) — the credentials SSOT — NOT ``route.metadata`` (the
     # retired link). Keeps the role-materialization read path in lockstep with the
     # Studio adapter's UI projection, so an endpoint-failed route carrying
     # probe-verified evidence stays historical_ready instead of being skipped.
-    refs: list[str] = []
-    for evidence in _value(route, "evidence", None) or []:
-        if _value(evidence, "trust_state", None) not in _PROJECTABLE_EVIDENCE_TRUST_STATES:
-            continue
-        ref = _value(evidence, "content_hash", None) or _value(evidence, "evidence_id", None)
-        if isinstance(ref, str):
-            refs.append(ref)
-    return refs
+    return [
+        evidence.content_hash or evidence.evidence_id
+        for evidence in route.evidence
+        if evidence.trust_state in _PROJECTABLE_EVIDENCE_TRUST_STATES
+    ]
 
 
 def _apply_intent(
     entry_report: dict[str, Any],
     role: Any,
     group: Any,
-    route: Any,
+    route: ProviderRoute,
     protocol: str | None,
 ) -> str:
     """PR3: apply the role-level generation params. Role-only — group and
@@ -356,13 +351,13 @@ def _apply_intent(
 
     if _value(role_intent, "thinking", False) is True:
         capability = route_effective_capabilities(route).get("thinking_protocol")
-        if capability is not None and _capability_value(capability) is True:
+        if capability is not None and capability.value is True:
             _enable_reasoning(entry_report)
         else:
             entry_report["warnings"].append(
                 {
                     "code": "thinking_unsupported",
-                    "route_id": _value(route, "route_id"),
+                    "route_id": route.route_id,
                     "message": (
                         "Thinking is enabled for this role but not supported by this "
                         "provider model; the request runs without reasoning."
@@ -386,7 +381,7 @@ def _apply_intent(
 def _apply_reasoning_effort(
     entry_report: dict[str, Any],
     requested: Any,
-    route: Any,
+    route: ProviderRoute,
     protocol: str | None,
 ) -> None:
     """Write the chosen effort through, fitted to the levels this route sells.
@@ -407,10 +402,10 @@ def _apply_reasoning_effort(
     )
 
 
-def _route_effort_levels(route: Any) -> tuple[str, ...]:
+def _route_effort_levels(route: ProviderRoute) -> tuple[str, ...]:
     """The effort levels a probe measured on this route, if one has run."""
     capability = route_effective_capabilities(route).get("reasoning_effort")
-    value = _capability_value(capability) if capability is not None else None
+    value = capability.value if capability is not None else None
     levels = value.get("values") if isinstance(value, dict) else None
     if not isinstance(levels, list):
         return ()
@@ -425,7 +420,7 @@ def _enable_reasoning(entry_report: dict[str, Any]) -> None:
 def _apply_output_tokens(
     entry_report: dict[str, Any],
     requested: Any,
-    route: Any,
+    route: ProviderRoute,
 ) -> None:
     """None → route max available; a number → clamped into the route [min, max]
     range. Never not_fit, never downgraded."""
@@ -444,17 +439,17 @@ def _apply_output_tokens(
     entry_report["resolved_settings"]["max_output_tokens"] = resolved
 
 
-def _max_output_tokens(route: Any) -> int | None:
+def _max_output_tokens(route: ProviderRoute) -> int | None:
     return _output_token_bound(route, "max")
 
 
-def _min_output_tokens(route: Any) -> int | None:
+def _min_output_tokens(route: ProviderRoute) -> int | None:
     return _output_token_bound(route, "min")
 
 
-def _output_token_bound(route: Any, bound: str) -> int | None:
-    capability = (_value(route, "capabilities", {}) or {}).get("max_output_tokens")
-    value = _capability_value(capability) if capability is not None else None
+def _output_token_bound(route: ProviderRoute, bound: str) -> int | None:
+    capability = route.capabilities.get("max_output_tokens")
+    value = capability.value if capability is not None else None
     if isinstance(value, int | float):
         # A scalar capability only expresses the maximum; no explicit minimum.
         return int(value) if bound == "max" else None
@@ -462,20 +457,6 @@ def _output_token_bound(route: Any, bound: str) -> int | None:
         return None
     bound_value = value.get(bound)
     return int(bound_value) if isinstance(bound_value, int | float) else None
-
-
-def _capability_value(capability: Any) -> Any:
-    if isinstance(capability, dict):
-        return capability.get("value")
-    return _value(capability, "value")
-
-
-def _mapping_get(mapping: Any, key: Any) -> Any:
-    if not isinstance(key, str):
-        return None
-    if isinstance(mapping, dict):
-        return mapping.get(key)
-    return None
 
 
 def _value(obj: Any, name: str, default: Any = None) -> Any:

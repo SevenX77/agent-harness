@@ -379,15 +379,15 @@ cred="$host_home/.claude/.credentials.json"
 if [ -s "$cred" ] && grep -q '"accessToken"' "$cred" 2>/dev/null; then
   exp=$(grep -o '"expiresAt":[0-9]*' "$cred" | head -1 | cut -d: -f2)
   now_ms=$(( $(date +%s) * 1000 ))
-  acct=$(grep -o '"emailAddress":"[^"]*"' "$host_home/.claude.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  acct=$(grep -o '"emailAddress": *"[^"]*"' "$host_home/.claude.json" 2>/dev/null | head -1 | cut -d'"' -f4)
   if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\t%s\n' "$acct"
   else printf 'claude_auth\tbroken\t\ttoken expired\n'; fi
 else printf 'claude_auth\tmissing\t\t\n'; fi
 if [ -s "$host_home/.codex/auth.json" ]; then
-  idt=$(grep -o '"id_token":"[^"]*"' "$host_home/.codex/auth.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  idt=$(grep -o '"id_token": *"[^"]*"' "$host_home/.codex/auth.json" 2>/dev/null | head -1 | cut -d'"' -f4)
   payload=$(printf '%s' "$idt" | cut -d. -f2 | tr '_-' '/+')
   while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="$payload="; done
-  acct=$(printf '%s' "$payload" | base64 -d 2>/dev/null | grep -o '"email":"[^"]*"' | head -1 | cut -d'"' -f4)
+  acct=$(printf '%s' "$payload" | base64 -d 2>/dev/null | grep -o '"email": *"[^"]*"' | head -1 | cut -d'"' -f4)
   printf 'codex_auth\tok\t\t\t%s\n' "$acct"
 else printf 'codex_auth\tmissing\t\t\n'; fi
 if [ -n "$latest_dir" ]; then
@@ -6065,13 +6065,67 @@ mod tests {
     /// JWT payload;token 本体照旧不出脚本。
     #[test]
     fn test_probe_script_reads_account_identity_not_tokens() {
-        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains(r#""emailAddress":"[^"]*""#));
-        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains(r#""id_token":"[^"]*""#));
-        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains(r#""email":"[^"]*""#));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("emailAddress"));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains("id_token"));
         assert!(
             !CLI_DEPENDENCY_PROBE_SCRIPT.contains("accessToken\":\"")
                 && !CLI_DEPENDENCY_PROBE_SCRIPT.contains("refresh_token"),
             "凭据 token 值不得被提取或打印"
+        );
+    }
+
+    /// 账号提取必须吃得下真实落盘形状:`.claude.json` 是 pretty-print(冒号后带
+    /// 空格),写死 `":\""` 的模式在真机上永远空手而归(2026-08-12 点验现场)。
+    /// 文本断言挡不住这种腐烂——把整份探测脚本喂真 sh,对着 fixture 文件断言
+    /// 登录行第 5 列真的吐出邮箱。
+    #[test]
+    fn test_probe_script_extracts_accounts_from_real_world_json_shapes() {
+        let home = std::env::temp_dir().join(format!("studio-probe-acct-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        // claude CLI 真实写法:pretty-print,`"emailAddress": "…"` 冒号后有空格。
+        std::fs::write(
+            home.join(".claude.json"),
+            "{\n  \"oauthAccount\": {\n    \"emailAddress\": \"probe-test@example.com\"\n  }\n}\n",
+        )
+        .unwrap();
+        // .credentials.json 真机是紧凑 JSON;expiresAt 取远未来让 claude_auth 走 ok 分支。
+        std::fs::write(
+            home.join(".claude/.credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"test-not-a-real-token","expiresAt":99999999999999}}"#,
+        )
+        .unwrap();
+        // id_token 的 payload 段 = base64url({"email":"codex-probe@example.com"});
+        // 文件本身也用 pretty-print 的狠形状。
+        std::fs::write(
+            home.join(".codex/auth.json"),
+            "{\n  \"tokens\": {\n    \"id_token\": \"eyJh.eyJlbWFpbCI6ImNvZGV4LXByb2JlQGV4YW1wbGUuY29tIn0.sig\"\n  }\n}\n",
+        )
+        .unwrap();
+        // getent 压空让 host_home 落到 $HOME;command 压败让 curl 分支(联网查最新版)
+        // 与 PATH 探测全部短路;tmux 压败求确定性。其余(grep/cut/base64/date)走真实现。
+        let harness = format!(
+            "getent() {{ :; }}\ncommand() {{ return 1; }}\ntmux() {{ return 1; }}\n{}",
+            CLI_DEPENDENCY_PROBE_SCRIPT
+        );
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&harness)
+            .env("HOME", home.to_string_lossy().replace('\\', "/"))
+            .output();
+        let _ = std::fs::remove_dir_all(&home);
+        let Ok(output) = output else {
+            return; // 没有 POSIX sh 的机器上跳过(同门禁测试)。
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("claude_auth\tok\t\t\tprobe-test@example.com"),
+            "claude 登录行第 5 列必须是邮箱;实际输出: {stdout}"
+        );
+        assert!(
+            stdout.contains("codex_auth\tok\t\t\tcodex-probe@example.com"),
+            "codex 登录行第 5 列必须是 id_token payload 里的邮箱;实际输出: {stdout}"
         );
     }
 

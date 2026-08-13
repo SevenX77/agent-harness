@@ -47,7 +47,10 @@ from app.core.adapters.gateway import (
     lint_role_routes,
     measured_effort_capability,
     measured_image_input,
+    normalize_model_group_key,
     normalize_route_capabilities,
+    project_model_group_identity,
+    project_model_identity,
     route_effective_capabilities,
     select_verified_profile,
     verified_profile_capabilities,
@@ -126,11 +129,6 @@ from app.services.llm_health_store import (
     RuntimeCircuit,
     SqliteLlmHealthStore,
 )
-from app.services.llm_model_groups import (
-    normalize_model_group_key,
-    project_model_group_identity,
-)
-from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
 from app.services.llm_provider_identity import registrable_provider_name
 from app.services.llm_role_test_results import (
@@ -1891,7 +1889,11 @@ async def _run_role_test_targets(
             warnings.extend(provider_result["warnings"])
         aggregate_status = _merge_role_test_status(aggregate_status, provider_result)
         canonical_id = str(target.report_entry.get("canonical_id") or target.route.canonical_id)
-        identity = project_model_identity(route=target.route, endpoint=target.endpoint)
+        identity = project_model_identity(
+            route=target.route,
+            endpoint=target.endpoint,
+            provider_label=target.endpoint.display_name,
+        )
         group = model_groups.setdefault(
             canonical_id,
             {
@@ -2906,7 +2908,9 @@ def _model_group_identity_key(
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         return normalize_model_group_key(route.canonical_id or route.route_slug)
-    projection = project_model_group_identity(route=route, endpoint=endpoint)
+    projection = project_model_group_identity(
+        route=route, endpoint=endpoint, provider_label=endpoint.display_name
+    )
     return projection.key or normalize_model_group_key(route.canonical_id or route.route_slug)
 
 
@@ -2985,7 +2989,9 @@ def _model_group_identity(
         endpoint = credentials.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             continue
-        projection = project_model_group_identity(route=route, endpoint=endpoint)
+        projection = project_model_group_identity(
+        route=route, endpoint=endpoint, provider_label=endpoint.display_name
+    )
         projections.append(
             (
                 route,
@@ -3173,7 +3179,9 @@ def _provider_route_ui_capabilities(
     endpoint: ProviderEndpoint,
 ) -> dict[str, CapabilityValue]:
     capabilities = dict(route_effective_capabilities(route))
-    group_identity = project_model_group_identity(route=route, endpoint=endpoint)
+    group_identity = project_model_group_identity(
+        route=route, endpoint=endpoint, provider_label=endpoint.display_name
+    )
     if "thinking" in group_identity.capability_tokens and "thinking_protocol" not in capabilities:
         capabilities["thinking_protocol"] = CapabilityValue(
             value=True,

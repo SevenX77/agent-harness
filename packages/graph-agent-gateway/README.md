@@ -59,8 +59,8 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 ### B. 模型知识（available models）
 - **单路线探测契约**（✅ `registry/schema.py:ProbeResult`）：1-token 真实探测的结果契约。
 - **list-models 解析（每协议）+ 批量探测编排**（🔻）：把端点支持的模型列出来 / 探出来。
-- **按同类分组（model group）**（🔻 现 `services/llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"，让应用查找 / 选择更方便。
-- **品牌 / 家族识别（identity）**（🔻 现 `services/llm_model_identity.py`）：把原始 model id 客观归类到厂商 / 家族（Anthropic·Claude、OpenAI·GPT…）。
+- **按同类分组（model group）**（✅ `registry/model_naming.py:project_model_group_identity`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"，让应用查找 / 选择更方便。**这是给人看的粗分组，不是执行身份**——`registry/identity.py` 的 `canonical_id` 必须和 route_id 后缀逐字节一致，所以带日期快照的 `claude-opus-4-1-20250805` 在那边自成一组；这里刻意把快照折掉，让选择器只显示一行。两者不可互相顶替。
+- **品牌 / 家族识别（identity）**（✅ `registry/model_naming.py:project_model_identity`）：把原始 model id 客观归类到厂商 / 家族（Anthropic·Claude、OpenAI·GPT…）。宿主给端点起的**用户可见标签**由 `provider_label` 参数显式传入，不从 endpoint 上读——网关的 `ProviderEndpoint` 没有展示字段，假设它有就只服务于长得像 Studio 的宿主。
 - **Probe Knowledge Catalog（探测知识库）**（✅ `registry/catalog.py`；数据结构 `EvidenceRecord` / `ProviderImportDraft` 在 `registry/schema.py`）：记住"哪些 endpoint 连通过 / 哪些模型存在 / 哪些能力被探测证实 / 哪些模型值得优先试"、每条路线历次探测的证据，可**远端共享**。这是 gateway 背后可沉淀、可共享的知识资产；Import Draft（待导入草稿 → apply）不属于 MVP1 主线。
 - **notable models（值得优先试的模型）**（🔻 现 `services/llm_notable_models.py`）：读一份人工维护的清单，告诉应用先试哪些模型。
 
@@ -180,8 +180,9 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
   | materialize 编排核心 | `role/materialization.py:materialize_role` | ✅ 已下沉 |
   | Probe Knowledge Catalog | `registry/catalog.py`（见 §3.B） | ✅ 已下沉 |
   | 能力合并 | `registry/capabilities.py:route_effective_capabilities` · `registry/capabilities.py:verified_profile_capabilities` | ✅ 已下沉 |
-  | model group 分组 | `apps/studio/backend/app/services/llm_model_groups.py` | 🔻 待下沉 |
-  | identity | `apps/studio/backend/app/services/llm_model_identity.py` · `app/services/llm_provider_identity.py` · `app/services/provider_config.py` | 🔻 待下沉 |
+  | model group 分组 | `registry/model_naming.py:project_model_group_identity` | ✅ 已下沉 |
+  | identity（模型名） | `registry/model_naming.py:project_model_identity` | ✅ 已下沉 |
+  | identity（provider 名 / 配置） | `apps/studio/backend/app/services/llm_provider_identity.py` · `apps/studio/backend/app/services/provider_config.py` | 🔻 待下沉（后者的**匹配规则**属公共，但它读 studio 自己的 `app/data/*.json`，按"存储由宿主注入"要先把规则与介质拆开） |
   | notable | `apps/studio/backend/app/services/llm_notable_models.py` | 🔻 待下沉 |
   | 熔断持久化 | `apps/studio/backend/app/services/llm_health_store.py` | 🔻 待下沉（判据属公共的是**熔断策略**；sqlite 存储本身按"存储由宿主注入"留在 studio） |
 

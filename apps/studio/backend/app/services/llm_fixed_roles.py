@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.core.adapters.engine import required_builtin_roles as _engine_required_builtin_roles
+from app.core.adapters.gateway import normalize_model_group_key, project_model_group_identity
 from app.models.llm_config import (
     LLMCredentialsFile,
     ProviderRoute,
@@ -23,7 +24,6 @@ from app.models.llm_config import (
     RoleProviderModel,
     RolesData,
 )
-from app.services.llm_model_groups import normalize_model_group_key, project_model_group_identity
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "llm_fixed_roles.json"
 
@@ -204,7 +204,11 @@ def _role_group_identity_keys(role: RoleEntry | None, credentials: LLMCredential
             endpoint = credentials.provider_endpoints.get(route.endpoint_id)
             if endpoint is None:
                 continue
-            keys.add(project_model_group_identity(route=route, endpoint=endpoint).key)
+            keys.add(
+                project_model_group_identity(
+                    route=route, endpoint=endpoint, provider_label=endpoint.display_name
+                ).key
+            )
     return keys
 
 
@@ -236,7 +240,9 @@ def _model_groups_for_recommended_models(
         endpoint = credentials.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             continue
-        key = project_model_group_identity(route=route, endpoint=endpoint).key
+        key = project_model_group_identity(
+            route=route, endpoint=endpoint, provider_label=endpoint.display_name
+        ).key
         routes_by_key.setdefault(key, []).append(route)
 
     groups: list[RoleModelGroup] = []
@@ -249,7 +255,11 @@ def _model_groups_for_recommended_models(
         representative_endpoint = credentials.provider_endpoints.get(representative.endpoint_id)
         group_canonical = representative.canonical_id or representative.route_slug
         group_display = (
-            project_model_group_identity(route=representative, endpoint=representative_endpoint).display_name
+            project_model_group_identity(
+                route=representative,
+                endpoint=representative_endpoint,
+                provider_label=representative_endpoint.display_name,
+            ).display_name
             if representative_endpoint is not None
             else group_canonical
         )

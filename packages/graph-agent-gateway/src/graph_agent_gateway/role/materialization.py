@@ -16,8 +16,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from graph_agent_gateway.registry import (
+    ActiveCircuit,
+    HealthStore,
     ProviderEndpoint,
     ProviderRoute,
+    RoleEntry,
+    RoleIntent,
     RoleRouteEntry,
     RouteRegistry,
     effort_bounds,
@@ -40,13 +44,9 @@ _PROJECTABLE_EVIDENCE_TRUST_STATES = frozenset({"probe-verified"})
 
 @dataclass(frozen=True)
 class MaterializeRoleRequest:
-    # ``role`` cannot be typed here yet: the fields materialization reads off a
-    # role — model_groups / intent / model_fallback_enabled — are not on this
-    # package's RoleEntry, they are on Studio's subclass of it. Deciding where
-    # the role model belongs is a change across two modules, not an annotation.
-    role: Any
+    role: RoleEntry
     credentials: RouteRegistry
-    health_store: Any | None = None
+    health_store: HealthStore | None = None
     now: datetime | None = None
 
 
@@ -94,15 +94,13 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
         "skipped_provider_details": [],
     }
 
-    groups = list(_value(role, "model_groups", []))
-    if not _value(role, "model_fallback_enabled", True):
+    groups = list(role.model_groups)
+    if not role.model_fallback_enabled:
         groups = groups[:1]
 
     for group in groups:
-        for provider_model in list(_value(group, "provider_models", [])):
-            route_id = _value(provider_model, "route_id")
-            if not isinstance(route_id, str):
-                continue
+        for provider_model in group.provider_models:
+            route_id = provider_model.route_id
             route = credentials.provider_routes.get(route_id)
             if route is None:
                 # The role references a route the current registry does not know
@@ -112,10 +110,10 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
                 # broken. Surface a diagnostic warning the host can project into
                 # the UI instead (data-loss fix: authoring intent is preserved on
                 # disk; the UI must be able to explain why it is not resolving).
-                warning = {
+                warning: dict[str, str | None] = {
                     "code": "route_not_in_registry",
                     "route_id": route_id,
-                    "canonical_id": _value(group, "canonical_id"),
+                    "canonical_id": group.canonical_id,
                     "message": (
                         f"Route {route_id} is not in the current registry; the "
                         "model group is kept but cannot be used until the route "
@@ -145,7 +143,7 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
                 continue
 
             entry_report: dict[str, Any] = {
-                "canonical_id": _value(group, "canonical_id"),
+                "canonical_id": group.canonical_id,
                 "route_id": route_id,
                 "requested": {},
                 "resolved_settings": {},
@@ -162,9 +160,7 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
                 entry_report["warnings"].append(warning)
                 report["warnings"].append(warning)
 
-            role_fit = _apply_intent(
-                entry_report, role, group, route, endpoint.protocol
-            )
+            role_fit = _apply_intent(entry_report, role.intent, route, endpoint.protocol)
             entry_report["role_fit"] = role_fit
             for warning in entry_report["warnings"]:
                 if warning not in report["warnings"]:
@@ -189,7 +185,7 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRole:
 def _materialization_projection(
     endpoint: ProviderEndpoint,
     route: ProviderRoute,
-    health_store: Any | None,
+    health_store: HealthStore | None,
     current_time: datetime,
 ) -> _ProjectionFacts:
     active_circuit = _select_active_circuit(
@@ -203,7 +199,7 @@ def _materialization_projection(
         endpoint_status=endpoint.status,
         route_status=route.status,
         credential_available=_credential_available(endpoint),
-        circuit_retry_at=_value(active_circuit, "retry_at") if active_circuit is not None else None,
+        circuit_retry_at=active_circuit.retry_at if active_circuit is not None else None,
         credential_evidence_refs=_route_credential_evidence_refs(route),
     )
 
@@ -212,9 +208,9 @@ def _materialization_projection(
     if ui_state == "cooling_down" and active_circuit is not None:
         return _ProjectionFacts(
             ui_state="cooling_down",
-            reason_code=_value(active_circuit, "reason_code"),
-            retry_at=_value(active_circuit, "retry_at").isoformat(),
-            ui_detail=_value(active_circuit, "message"),
+            reason_code=active_circuit.reason_code,
+            retry_at=active_circuit.retry_at.isoformat(),
+            ui_detail=active_circuit.message,
         )
 
     if ui_state == "failed":
@@ -260,9 +256,9 @@ def _metadata_reason_code(metadata: dict[str, Any]) -> str | None:
 def _active_circuits(
     endpoint: ProviderEndpoint,
     route: ProviderRoute,
-    health_store: Any | None,
+    health_store: HealthStore | None,
     current_time: datetime,
-) -> list[Any]:
+) -> list[ActiveCircuit]:
     if health_store is None:
         return []
     return list(
@@ -278,13 +274,13 @@ def _active_circuits(
 def _select_active_circuit(
     endpoint: ProviderEndpoint,
     route: ProviderRoute,
-    circuits: list[Any],
+    circuits: list[ActiveCircuit],
     current_time: datetime,
-) -> Any | None:
+) -> ActiveCircuit | None:
     relevant = [
         circuit
         for circuit in circuits
-        if _value(circuit, "retry_at") > current_time and _circuit_matches(endpoint, route, circuit)
+        if circuit.retry_at > current_time and _circuit_matches(endpoint, route, circuit)
     ]
     if not relevant:
         return None
@@ -299,19 +295,18 @@ def _select_active_circuit(
     return min(
         relevant,
         key=lambda circuit: (
-            -_value(circuit, "retry_at").timestamp(),
-            _scope_priority(_value(circuit, "scope")),
+            -circuit.retry_at.timestamp(),
+            _scope_priority(circuit.scope),
         ),
     )
 
 
-def _circuit_matches(endpoint: ProviderEndpoint, route: ProviderRoute, circuit: Any) -> bool:
-    if _value(circuit, "scope") == "route":
-        return bool(_value(circuit, "scope_id") == route.route_id)
-    if _value(circuit, "scope") == "endpoint":
-        return bool(_value(circuit, "scope_id") == endpoint.endpoint_id)
-    effective_bucket = endpoint.rate_limit_bucket or endpoint.endpoint_id
-    return bool(_value(circuit, "scope_id") == effective_bucket)
+def _circuit_matches(endpoint: ProviderEndpoint, route: ProviderRoute, circuit: ActiveCircuit) -> bool:
+    if circuit.scope == "route":
+        return circuit.scope_id == route.route_id
+    if circuit.scope == "endpoint":
+        return circuit.scope_id == endpoint.endpoint_id
+    return circuit.scope_id == (endpoint.rate_limit_bucket or endpoint.endpoint_id)
 
 
 def _credential_available(endpoint: ProviderEndpoint) -> bool:
@@ -335,21 +330,16 @@ def _route_credential_evidence_refs(route: ProviderRoute) -> list[str]:
 
 def _apply_intent(
     entry_report: dict[str, Any],
-    role: Any,
-    group: Any,
+    intent: RoleIntent,
     route: ProviderRoute,
     protocol: str | None,
 ) -> str:
-    """PR3: apply the role-level generation params. Role-only — group and
-    provider intent are gone. thinking is best-effort (warn, never not_fit),
-    max_output_tokens clamps into the route range (never not_fit), temperature
-    is written through, reasoning effort is fitted to the levels the route
-    sells. role_fit stays "using" (cooling_down is stamped by the caller as a
-    warning, not here)."""
-    del group  # role-only: per-group / per-provider intent is removed.
-    role_intent = _value(role, "intent")
-
-    if _value(role_intent, "thinking", False) is True:
+    """Apply the role-level generation params. thinking is best-effort (warn,
+    never not_fit), max_output_tokens clamps into the route range (never
+    not_fit), temperature is written through, reasoning effort is fitted to the
+    levels the route sells. role_fit stays "using" (cooling_down is stamped by
+    the caller as a warning, not here)."""
+    if intent.thinking:
         capability = route_effective_capabilities(route).get("thinking_protocol")
         if capability is not None and capability.value is True:
             _enable_reasoning(entry_report)
@@ -365,22 +355,16 @@ def _apply_intent(
                 }
             )
 
-    _apply_output_tokens(entry_report, _value(role_intent, "max_output_tokens"), route)
-
-    temperature = _value(role_intent, "temperature")
-    if temperature is not None:
-        entry_report["resolved_settings"]["temperature"] = temperature
-
-    _apply_reasoning_effort(
-        entry_report, _value(role_intent, "reasoning_effort"), route, protocol
-    )
+    _apply_output_tokens(entry_report, intent.max_output_tokens, route)
+    entry_report["resolved_settings"]["temperature"] = intent.temperature
+    _apply_reasoning_effort(entry_report, intent.reasoning_effort, route, protocol)
 
     return "using"
 
 
 def _apply_reasoning_effort(
     entry_report: dict[str, Any],
-    requested: Any,
+    requested: str | None,
     route: ProviderRoute,
     protocol: str | None,
 ) -> None:
@@ -393,7 +377,7 @@ def _apply_reasoning_effort(
     Left alone when nothing was chosen: every provider has its own default, and
     writing one of ours over it would be a choice nobody made.
     """
-    if not isinstance(requested, str) or not requested:
+    if not requested:
         return
     reasoning = entry_report["resolved_settings"].setdefault("reasoning", {})
     reasoning["effort"] = fit(
@@ -419,13 +403,13 @@ def _enable_reasoning(entry_report: dict[str, Any]) -> None:
 
 def _apply_output_tokens(
     entry_report: dict[str, Any],
-    requested: Any,
+    requested: int | None,
     route: ProviderRoute,
 ) -> None:
     """None → route max available; a number → clamped into the route [min, max]
     range. Never not_fit, never downgraded."""
     max_tokens = _max_output_tokens(route)
-    if not isinstance(requested, int):
+    if requested is None:
         if max_tokens is not None:
             entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
         return
@@ -458,8 +442,3 @@ def _output_token_bound(route: ProviderRoute, bound: str) -> int | None:
     bound_value = value.get(bound)
     return int(bound_value) if isinstance(bound_value, int | float) else None
 
-
-def _value(obj: Any, name: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)

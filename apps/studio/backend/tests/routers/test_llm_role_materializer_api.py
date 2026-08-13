@@ -142,11 +142,15 @@ def test_put_role_v3_skips_failed_and_off_provider_models(
     }
 
 
-def test_put_role_v3_legacy_ready_first_migrates_to_manual_order_without_reordering(
+def test_put_role_with_a_legacy_provider_preference_is_rejected_at_the_boundary(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """``ready_first`` / ``official_first`` were silently rewritten by a
+    migration shim; the shim guarded data that no longer exists (measured
+    2026-08-13: zero occurrences in the live roles file) and shims are barred
+    from the SDK the model now lives in, so the value fails validation."""
     credentials = LLMCredentialsFile(
         provider_endpoints={
             "untested-provider": _provider_endpoint(
@@ -185,12 +189,8 @@ def test_put_role_v3_legacy_ready_first_migrates_to_manual_order_without_reorder
         },
     )
 
-    assert response.status_code == 200
-    assert [entry["route_id"] for entry in response.json()["fallback_chain"]] == [
-        "untested-provider:gpt-5",
-        "ready-provider:gpt-5",
-    ]
-    assert response.json()["intent"]["provider_preference"] == "manual_order"
+    assert response.status_code == 422
+    assert "provider_preference" in response.text
 
 
 def test_put_role_v3_manual_order_preserves_user_provider_order(

@@ -15,12 +15,11 @@ from app.models.llm_config import (
     ModelBundle,
     ProviderEndpoint,
     ProviderRoute,
-    RoleModelGroup,
-    RoleProviderModel,
     RolesData,
 )
 from app.services.llm_credentials import save_credentials
 from app.services.llm_roles import load_roles_file, roles_path, save_roles_file
+from graph_agent_gateway.registry import RoleModelGroup, RoleProviderModel
 
 
 def _seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

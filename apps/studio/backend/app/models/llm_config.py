@@ -11,13 +11,13 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from graph_agent_gateway.registry import (
-    AUTHORED_TEMPERATURE_MAX,
     CapabilityValue,
     EffectiveRuntimeSetting,
     EndpointCandidate,
     EvidenceRecord,
     FieldSource,
     LintResult,
+    LintSeverity,
     ProbeResult,
     ProviderImportDraft,
     RegistrySnapshot,
@@ -44,11 +44,19 @@ from graph_agent_gateway.registry import (
 from graph_agent_gateway.registry import (
     RoleEntry as GatewayRoleEntry,
 )
+
+# Deliberate re-exports (the ``X as X`` idiom marks them): the role
+# authoring model is the gateway's — see
+# docs/design/2026-08-13-gateway-role-model-and-section-truth-decision.md —
+# and business code keeps importing it from this facade per the SDK import
+# boundary (tests/core/adapters/test_productization_import_boundary_red.py).
+from graph_agent_gateway.registry import RoleIntent as RoleIntent
+from graph_agent_gateway.registry import RoleModelGroup as RoleModelGroup
+from graph_agent_gateway.registry import RoleProviderModel as RoleProviderModel
 from graph_agent_gateway.resolve import materialize_role_entry
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
-DEFAULT_ROLE_TEMPERATURE = 1.4
 
 TestStatus = Annotated[
     Literal[
@@ -247,88 +255,14 @@ class LLMCredentialsFile(BaseModel):
         return compute_credential_fingerprint(self.provider_endpoints[endpoint_id])
 
 
-class RoleIntent(BaseModel):
-    """User intent stored at the Role level.
+class RoleEntry(GatewayRoleEntry):
+    """Studio Role entry: the gateway's role plus Studio-only projections.
 
-    The role-level generation params. ``thinking`` is a best-effort switch
-    (enable reasoning when the model supports it, else warn — never a fit
-    downgrade). ``max_output_tokens`` is a plain number clamped into the route's
-    output-token range (or the route max when unset). ``temperature`` defaults
-    to 70% on Studio's authored 0..2 slider and is written through to the route
-    runtime settings. ``reasoning_effort`` names how hard the model should work
-    when it reasons — a separate question from whether it reasons at all — and
-    is fitted to the levels each route sells while the role is materialized;
-    unset leaves the provider's own default, which no level of ours can stand
-    in for. The old thinking 3-tier, TokenIntent modes / downgrade,
-    ``target_context_tokens`` and ``cost_priority`` are gone (no backward compat
-    — old paths deleted).
+    The authoring model itself (intent / model groups / fallback toggle) is the
+    gateway's — see docs/design/2026-08-13-gateway-role-model-and-section-truth-decision.md.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
-    provider_preference: Literal["manual_order"] = "manual_order"
-    thinking: bool = False
-    max_output_tokens: int | None = Field(default=None, ge=1)
-    temperature: float = DEFAULT_ROLE_TEMPERATURE
-    reasoning_effort: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_provider_preference(cls, value: object) -> object:
-        return _migrate_provider_preference(value)
-
-    @field_validator("temperature")
-    @classmethod
-    def _keep_temperature_on_the_dial(cls, value: float) -> float:
-        """Store what the dial can express, rather than rejecting the save.
-
-        Studio's authored temperature is a share of whatever ceiling the route
-        turns out to have, so a value off the dial has no share to name. The
-        ends of the dial are what "past the end" means; a 422 here would make a
-        preference fail a save, which is the same mistake as letting one fail a
-        call.
-        """
-        return min(max(value, 0.0), AUTHORED_TEMPERATURE_MAX)
-
-
-class RoleProviderModel(BaseModel):
-    """One selected provider model option inside a Model Group.
-
-    Model-only: generation params live at the role level (see ``RoleIntent``),
-    so a provider model carries no per-provider intent."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    route_id: str
-
-
-class RoleModelGroup(BaseModel):
-    """One user-authored Model Group in a Role.
-
-    Model-only: no per-group intent — generation params are role-level."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    canonical_id: str
-    display_name: str
-    provider_models: list[RoleProviderModel] = Field(default_factory=list)
-
-
-def _migrate_provider_preference(value: object) -> object:
-    if not isinstance(value, dict):
-        return value
-    if value.get("provider_preference") in {"official_first", "ready_first"}:
-        return {**value, "provider_preference": "manual_order"}
-    return value
-
-
-class RoleEntry(GatewayRoleEntry):
-    """Studio Role entry with authoring fields plus generated fallback chain."""
-
     role_kind: Literal["graph_agent", "copilot"] = "graph_agent"
-    model_fallback_enabled: bool = True
-    intent: RoleIntent = Field(default_factory=RoleIntent)
-    model_groups: list[RoleModelGroup] = Field(default_factory=list)
     materialization_report: dict[str, Any] = Field(
         default_factory=lambda: {
             "entries": [],
@@ -351,7 +285,7 @@ class ModelBundle(BaseModel):
     intent: RoleIntent = Field(default_factory=RoleIntent)
     model_groups: list[RoleModelGroup] = Field(default_factory=list)
     fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
-    lint_requirements: dict[str, Literal["off", "warn", "error"]] = Field(default_factory=dict)
+    lint_requirements: dict[str, LintSeverity] = Field(default_factory=dict)
     materialization_report: dict[str, Any] = Field(
         default_factory=lambda: {
             "entries": [],

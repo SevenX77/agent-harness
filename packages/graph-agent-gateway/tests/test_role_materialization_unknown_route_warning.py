@@ -11,44 +11,12 @@ the group vanishing without explanation.
 
 from __future__ import annotations
 
-
-class NoCircuits:
-    def get_active_circuits(self, **kwargs: object) -> list[object]:
-        return []
-
-
-class _RoleIntent:
-    def __init__(self) -> None:
-        self.provider_preference = "manual_order"
-        self.thinking = False
-        self.max_output_tokens = None
-        self.temperature = None
-
-
-class _ProviderModel:
-    def __init__(self, route_id: str) -> None:
-        self.route_id = route_id
-
-
-class _Group:
-    def __init__(self, canonical_id: str, route_id: str) -> None:
-        self.canonical_id = canonical_id
-        self.provider_models = [_ProviderModel(route_id)]
-
-
-class _Role:
-    def __init__(self, group: _Group) -> None:
-        self.model_fallback_enabled = True
-        self.intent = _RoleIntent()
-        self.model_groups = [group]
-
-
-class _EmptyCredentials:
-    """A registry that does not know the role's referenced route."""
-
-    def __init__(self) -> None:
-        self.provider_routes: dict[str, object] = {}
-        self.provider_endpoints: dict[str, object] = {}
+from graph_agent_gateway.registry import (
+    RegistrySnapshot,
+    RoleEntry,
+    RoleModelGroup,
+    RoleProviderModel,
+)
 
 
 def test_unknown_route_is_skipped_but_reported_as_warning() -> None:
@@ -57,13 +25,23 @@ def test_unknown_route_is_skipped_but_reported_as_warning() -> None:
         materialize_role,
     )
 
-    role = _Role(_Group("anthropic.claude-opus-4.8", "anthropic-official:claude-opus-4-8"))
+    role = RoleEntry(
+        model_groups=[
+            RoleModelGroup(
+                canonical_id="anthropic.claude-opus-4.8",
+                display_name="Claude Opus 4.8",
+                provider_models=[
+                    RoleProviderModel(route_id="anthropic-official:claude-opus-4-8")
+                ],
+            )
+        ],
+    )
 
     materialized = materialize_role(
         MaterializeRoleRequest(
             role=role,
-            credentials=_EmptyCredentials(),
-            health_store=NoCircuits(),
+            # A registry that does not know the role's referenced route.
+            credentials=RegistrySnapshot(),
         )
     )
 

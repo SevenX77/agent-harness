@@ -5819,7 +5819,7 @@ def _materialize_one_role_for_response(
     role: RoleEntry,
     materialized_bundles: dict[str, ModelBundle],
     credentials: LLMCredentialsFile,
-    adapter: Any,
+    adapter: GatewayAdapter,
 ) -> RoleEntry:
     """Materialize one role for the registry response.
 
@@ -5831,15 +5831,12 @@ def _materialize_one_role_for_response(
     delta the overlay applies. The shell never hand-rolls the merge.
     """
     if role.model_groups:
-        return cast(
-            RoleEntry,
-            adapter.materialize_role(
+        return adapter.materialize_role(
                 {
                     "role": role,
                     "credentials": credentials,
                 }
-            ),
-        )
+            )
     if not role.bundle_id:
         return role
     bundle = materialized_bundles.get(role.bundle_id)
@@ -5878,15 +5875,12 @@ def _materialize_role_for_response(
     if not role.model_groups:
         return role
     adapter = build_gateway_adapter()
-    return cast(
-        RoleEntry,
-        adapter.materialize_role(
+    return adapter.materialize_role(
             {
                 "role": role,
                 "credentials": credentials or load_credentials(),
             }
-        ),
-    )
+        )
 
 
 def bundle_role_name(bundle_id: str) -> str:
@@ -5979,15 +5973,12 @@ def _materialize_bundle_for_response(
     if not bundle.model_groups:
         return bundle
     adapter = build_gateway_adapter()
-    return cast(
-        ModelBundle,
-        adapter.materialize_model_bundle(
+    return adapter.materialize_model_bundle(
             {
                 "bundle": bundle,
                 "credentials": credentials or load_credentials(),
             }
-        ),
-    )
+        )
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:

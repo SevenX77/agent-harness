@@ -187,9 +187,9 @@ def test_gateway_adapter_delegates_role_materialization_to_gateway_owner(monkeyp
         ProviderEndpoint,
         ProviderRoute,
         RoleEntry,
-        RoleModelGroup,
         RoleRouteEntry,
     )
+    from graph_agent_gateway.registry import RoleModelGroup
 
     class NoCircuits:
         def get_active_circuits(self, **kwargs: object) -> list[object]:

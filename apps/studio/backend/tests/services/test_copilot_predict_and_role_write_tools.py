@@ -198,7 +198,8 @@ def test_create_llm_role_rejects_existing_name(monkeypatch: pytest.MonkeyPatch) 
 def test_update_llm_role_returns_success_and_applies_ops(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.models.llm_config import RoleEntry, RoleModelGroup, RoleProviderModel
+    from app.models.llm_config import RoleEntry
+    from graph_agent_gateway.registry import RoleModelGroup, RoleProviderModel
 
     state = _fake_roles_env(monkeypatch)
     state["data"].roles["writer"] = RoleEntry(

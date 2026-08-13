@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -368,18 +367,26 @@ def test_role_materialization_uses_credential_evidence_refs_for_historical_ready
 
     monkeypatch.setattr(role_materialization, "project_route_state", _spy)
 
+    from graph_agent_gateway.registry import (
+        ProviderRoute,
+        RegistrySnapshot,
+        RoleEntry,
+        RoleModelGroup,
+        RoleProviderModel,
+    )
+
     result = materialize_role(
         MaterializeRoleRequest(
-            role=SimpleNamespace(
+            role=RoleEntry(
                 model_groups=[
-                    SimpleNamespace(
+                    RoleModelGroup(
                         canonical_id="gpt-5",
-                        provider_models=[SimpleNamespace(route_id="openai:gpt-5")],
+                        display_name="GPT 5",
+                        provider_models=[RoleProviderModel(route_id="openai:gpt-5")],
                     )
                 ],
-                model_fallback_enabled=True,
             ),
-            credentials=SimpleNamespace(
+            credentials=RegistrySnapshot(
                 provider_endpoints={
                     "openai": ProviderEndpoint(
                         endpoint_id="openai",
@@ -390,16 +397,13 @@ def test_role_materialization_uses_credential_evidence_refs_for_historical_ready
                     )
                 },
                 provider_routes={
-                    "openai:gpt-5": SimpleNamespace(
+                    "openai:gpt-5": ProviderRoute(
                         route_id="openai:gpt-5",
                         endpoint_id="openai",
                         route_slug="gpt-5",
                         provider_model_id="gpt-5",
                         canonical_id="gpt-5",
                         status="unverified_manual",
-                        capabilities={},
-                        verified_profiles=[],
-                        metadata={},
                         evidence=[
                             EvidenceRecord(
                                 evidence_id="probe-openai-gpt5",
@@ -410,7 +414,6 @@ def test_role_materialization_uses_credential_evidence_refs_for_historical_ready
                     )
                 },
             ),
-            health_store=SimpleNamespace(get_active_circuits=lambda **_: []),
             now=datetime.now(UTC),
         )
     )

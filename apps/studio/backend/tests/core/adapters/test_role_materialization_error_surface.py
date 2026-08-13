@@ -17,9 +17,8 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
-    RoleModelGroup,
-    RoleProviderModel,
 )
+from graph_agent_gateway.registry import RoleModelGroup, RoleProviderModel
 from pydantic import SecretStr
 
 

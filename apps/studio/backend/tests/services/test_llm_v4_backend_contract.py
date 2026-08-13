@@ -542,62 +542,28 @@ def test_roles_v2_schema_rejects_legacy_short_code_shape() -> None:
         RoleEntry.model_validate({"system_prompt_prefix": None, "fallback_chain": []})
 
 
-def test_roles_v3_authoring_schema_migrates_legacy_provider_preferences_to_manual_order() -> None:
-    data = RolesData.model_validate(
-        {
-            "schema_version": 3,
-            "model_bundles": {},
-            "roles": {
-                "analyst": {
-                    "role_kind": "graph_agent",
-                    "system_prompt_prefix": "",
-                    "model_fallback_enabled": True,
-                    "intent": {
-                        "provider_preference": "official_first",
-                        "thinking": True,
-                        "max_output_tokens": 128000,
-                        "temperature": 0.2,
-                    },
-                    "model_groups": [
-                        {
-                            "canonical_id": "claude-sonnet-4-7",
-                            "display_name": "Claude Sonnet 4.7",
-                            "provider_models": [
-                                {
-                                    "route_id": "anthropic-official:claude-sonnet-4-7",
-                                },
-                                {
-                                    "route_id": "openrouter-prod:anthropic.claude-sonnet-4-7",
-                                },
-                            ],
-                        }
-                    ],
-                },
-                "copilot_chat": {
-                    "role_kind": "copilot",
-                    "system_prompt_prefix": "",
-                    "model_fallback_enabled": True,
-                    "intent": {"provider_preference": "ready_first"},
-                    "model_groups": [],
-                },
-            },
-        }
-    )
+def test_a_legacy_provider_preference_no_longer_parses() -> None:
+    """``official_first`` / ``ready_first`` were rewritten by a migration shim.
+    The shim guarded data that no longer exists (measured 2026-08-13: zero
+    occurrences in the live roles file), and shims are barred from the SDK the
+    intent model now lives in — so the legacy value is invalid input, loudly."""
 
-    assert data.schema_version == 3
-    assert data.roles["analyst"].role_kind == "graph_agent"
-    assert data.roles["analyst"].model_fallback_enabled is True
-    assert data.roles["analyst"].intent.provider_preference == "manual_order"
-    assert data.roles["analyst"].intent.thinking is True
-    assert data.roles["analyst"].intent.max_output_tokens == 128000
-    assert data.roles["analyst"].intent.temperature == 0.2
-    assert data.roles["analyst"].model_groups[0].canonical_id == "claude-sonnet-4-7"
-    assert data.roles["analyst"].model_groups[0].provider_models[0].route_id == (
-        "anthropic-official:claude-sonnet-4-7"
-    )
-    assert data.roles["copilot_chat"].role_kind == "copilot"
-    assert data.roles["copilot_chat"].intent.provider_preference == "manual_order"
-    assert data.roles["copilot_chat"].intent.temperature == 1.4
+    with pytest.raises(ValidationError, match="provider_preference"):
+        RolesData.model_validate(
+            {
+                "schema_version": 3,
+                "model_bundles": {},
+                "roles": {
+                    "analyst": {
+                        "role_kind": "graph_agent",
+                        "system_prompt_prefix": "",
+                        "model_fallback_enabled": True,
+                        "intent": {"provider_preference": "official_first"},
+                        "model_groups": [],
+                    },
+                },
+            }
+        )
 
 
 def test_role_intent_defaults_temperature_to_seventy_percent() -> None:

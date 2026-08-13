@@ -11,7 +11,6 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
-    RoleModelGroup,
     RolesData,
 )
 from app.services.llm_credentials import credentials_path, save_credentials
@@ -26,6 +25,7 @@ from app.services.llm_fixed_roles import (
 from app.services.llm_paths import roles_path
 from app.services.llm_roles import load_roles_file, save_roles_file
 from fastapi.testclient import TestClient
+from graph_agent_gateway.registry import RoleModelGroup
 
 
 def _haiku_deepseek_credentials() -> LLMCredentialsFile:

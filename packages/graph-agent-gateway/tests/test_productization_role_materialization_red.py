@@ -9,7 +9,12 @@ needs_test / downgraded).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic import SecretStr
+
+if TYPE_CHECKING:
+    from graph_agent_gateway.registry import ProviderEndpoint, ProviderRoute, RegistrySnapshot, RoleEntry
 
 
 class NoCircuits:
@@ -210,46 +215,9 @@ def test_materializer_accepts_credential_ref_only_endpoint() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — the role/group shape the materializer walks (duck-typed).
+# Fixtures — the gateway's own models. Materialization used to be duck-typed
+# and these were hand-rolled fake classes; the package can now name its input.
 # ---------------------------------------------------------------------------
-
-
-class _RoleIntent:
-    def __init__(
-        self,
-        *,
-        thinking: bool,
-        max_output_tokens: int | None,
-        temperature: float | None,
-    ) -> None:
-        self.provider_preference = "manual_order"
-        self.thinking = thinking
-        self.max_output_tokens = max_output_tokens
-        self.temperature = temperature
-
-
-class _ProviderModel:
-    def __init__(self, route_id: str) -> None:
-        self.route_id = route_id
-
-
-class _Group:
-    def __init__(self) -> None:
-        self.canonical_id = "gpt-5"
-        self.provider_models = [_ProviderModel("openai:gpt-5")]
-
-
-class _Role:
-    def __init__(self, intent: _RoleIntent) -> None:
-        self.model_fallback_enabled = True
-        self.intent = intent
-        self.model_groups = [_Group()]
-
-
-class _Credentials:
-    def __init__(self, endpoint: object, route: object) -> None:
-        self.provider_endpoints = {"openai": endpoint}
-        self.provider_routes = {"openai:gpt-5": route}
 
 
 def _role(
@@ -257,17 +225,30 @@ def _role(
     thinking: bool = False,
     max_output_tokens: int | None = None,
     temperature: float | None = None,
-) -> _Role:
-    return _Role(
-        _RoleIntent(
-            thinking=thinking,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-        )
+) -> RoleEntry:
+    from graph_agent_gateway.registry import (
+        RoleEntry,
+        RoleIntent,
+        RoleModelGroup,
+        RoleProviderModel,
+    )
+
+    intent = RoleIntent(thinking=thinking, max_output_tokens=max_output_tokens)
+    if temperature is not None:
+        intent = intent.model_copy(update={"temperature": temperature})
+    return RoleEntry(
+        intent=intent,
+        model_groups=[
+            RoleModelGroup(
+                canonical_id="gpt-5",
+                display_name="GPT 5",
+                provider_models=[RoleProviderModel(route_id="openai:gpt-5")],
+            )
+        ],
     )
 
 
-def _endpoint() -> object:
+def _endpoint() -> ProviderEndpoint:
     from graph_agent_gateway.registry import ProviderEndpoint
 
     return ProviderEndpoint(
@@ -279,7 +260,7 @@ def _endpoint() -> object:
     )
 
 
-def _route(*, capabilities: dict[str, object]) -> object:
+def _route(*, capabilities: dict[str, object]) -> ProviderRoute:
     from graph_agent_gateway.registry import ProviderRoute
 
     return ProviderRoute(
@@ -293,5 +274,10 @@ def _route(*, capabilities: dict[str, object]) -> object:
     )
 
 
-def _credentials(*, endpoint: object, route: object) -> _Credentials:
-    return _Credentials(endpoint, route)
+def _credentials(*, endpoint: ProviderEndpoint, route: ProviderRoute) -> RegistrySnapshot:
+    from graph_agent_gateway.registry import RegistrySnapshot
+
+    return RegistrySnapshot(
+        provider_endpoints={"openai": endpoint},
+        provider_routes={"openai:gpt-5": route},
+    )

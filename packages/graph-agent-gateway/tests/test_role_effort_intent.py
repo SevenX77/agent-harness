@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from graph_agent_gateway.registry import RoleIntent
+
 
 def _route(**capabilities: Any) -> Any:
     # A real ProviderRoute, not a hand-built dict: what these tests poke at
@@ -43,7 +45,7 @@ def test_a_role_that_chose_an_effort_puts_it_on_the_route() -> None:
     from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
-    _apply_intent(report, {"intent": {"reasoning_effort": "low"}}, None, _route(), "openai_compatible")
+    _apply_intent(report, RoleIntent(reasoning_effort="low"), _route(), "openai_compatible")
 
     assert report["resolved_settings"]["reasoning"]["effort"] == "low"
 
@@ -54,7 +56,7 @@ def test_a_role_that_chose_no_effort_leaves_the_provider_default_alone() -> None
     from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
-    _apply_intent(report, {"intent": {}}, None, _route(), "openai_compatible")
+    _apply_intent(report, RoleIntent(), _route(), "openai_compatible")
 
     assert "effort" not in report["resolved_settings"].get("reasoning", {})
 
@@ -67,8 +69,7 @@ def test_an_effort_the_model_does_not_sell_becomes_one_it_does() -> None:
     report = _report()
     _apply_intent(
         report,
-        {"intent": {"reasoning_effort": "xhigh"}},
-        None,
+        RoleIntent(reasoning_effort="xhigh"),
         _route(
             reasoning_effort={
                 "value": {"supported": True, "values": ["low", "high"]},
@@ -89,8 +90,7 @@ def test_a_route_nobody_probed_is_still_held_to_its_protocol_vocabulary() -> Non
     report = _report()
     _apply_intent(
         report,
-        {"intent": {"reasoning_effort": "none"}},
-        None,
+        RoleIntent(reasoning_effort="none"),
         _route(),
         "anthropic_compatible",
     )
@@ -103,6 +103,6 @@ def test_choosing_an_effort_does_not_by_itself_turn_reasoning_on() -> None:
     from graph_agent_gateway.role.materialization import _apply_intent
 
     report = _report()
-    _apply_intent(report, {"intent": {"reasoning_effort": "low"}}, None, _route(), "openai_compatible")
+    _apply_intent(report, RoleIntent(reasoning_effort="low"), _route(), "openai_compatible")
 
     assert "enabled" not in report["resolved_settings"]["reasoning"]

@@ -10,8 +10,6 @@ a silent fallback_chain hole.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from graph_agent_gateway.registry import EvidenceRecord, ProviderEndpoint, ProviderRoute
 from pydantic import SecretStr
 
@@ -86,21 +84,30 @@ def test_materialize_role_keeps_endpoint_failed_route_with_probe_verified_eviden
         status="failed",  # endpoint FAILED
         api_key=SecretStr("secret"),
     )
-    role = SimpleNamespace(
+    from graph_agent_gateway.registry import (
+        RegistrySnapshot,
+        RoleEntry,
+        RoleModelGroup,
+        RoleProviderModel,
+    )
+
+    role = RoleEntry(
         model_groups=[
-            SimpleNamespace(canonical_id="gpt-5", provider_models=[SimpleNamespace(route_id="openai:gpt-5")])
+            RoleModelGroup(
+                canonical_id="gpt-5",
+                display_name="GPT 5",
+                provider_models=[RoleProviderModel(route_id="openai:gpt-5")],
+            )
         ],
-        model_fallback_enabled=True,
     )
 
     materialized = materialize_role(
         MaterializeRoleRequest(
             role=role,
-            credentials=SimpleNamespace(
+            credentials=RegistrySnapshot(
                 provider_endpoints={"openai": endpoint},
                 provider_routes={"openai:gpt-5": route},
             ),
-            health_store=SimpleNamespace(get_active_circuits=lambda **_: []),
         )
     )
 

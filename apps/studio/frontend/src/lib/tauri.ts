@@ -238,6 +238,8 @@ export interface CliDependencyRow {
   state: 'ok' | 'missing' | 'broken' | 'outdated' | 'unknown'
   version: string | null
   detail: string | null
+  /** 登录行的账号身份(邮箱;修订 2026-08-12),非登录行恒为 null。 */
+  account: string | null
 }
 
 /** ah 行「部署」钮(决议 2026-08-12,ah 随 app 打包):把 vendored ah 布署进

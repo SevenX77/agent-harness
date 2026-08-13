@@ -335,11 +335,16 @@ struct CliDependencyStatus {
     state: String,
     version: Option<String>,
     detail: Option<String>,
+    /// 登录行的账号身份(修订 2026-08-12,用户:「能否读取登录的账号,显式在
+    /// UI 上」):claude 读 `~/.claude.json` oauthAccount.emailAddress,codex 解
+    /// auth.json 里 id_token 的 JWT payload email 声明——都是只读身份字段,
+    /// 凭据/token 本体照旧不出探测脚本。
+    account: Option<String>,
 }
 
 impl CliDependencyStatus {
     fn new(id: &str, state: &str, version: Option<String>, detail: Option<String>) -> Self {
-        Self { id: id.to_string(), state: state.to_string(), version, detail }
+        Self { id: id.to_string(), state: state.to_string(), version, detail, account: None }
     }
 }
 
@@ -374,10 +379,17 @@ cred="$host_home/.claude/.credentials.json"
 if [ -s "$cred" ] && grep -q '"accessToken"' "$cred" 2>/dev/null; then
   exp=$(grep -o '"expiresAt":[0-9]*' "$cred" | head -1 | cut -d: -f2)
   now_ms=$(( $(date +%s) * 1000 ))
-  if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\n'
+  acct=$(grep -o '"emailAddress":"[^"]*"' "$host_home/.claude.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\t%s\n' "$acct"
   else printf 'claude_auth\tbroken\t\ttoken expired\n'; fi
 else printf 'claude_auth\tmissing\t\t\n'; fi
-if [ -s "$host_home/.codex/auth.json" ]; then printf 'codex_auth\tok\t\t\n'; else printf 'codex_auth\tmissing\t\t\n'; fi
+if [ -s "$host_home/.codex/auth.json" ]; then
+  idt=$(grep -o '"id_token":"[^"]*"' "$host_home/.codex/auth.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+  payload=$(printf '%s' "$idt" | cut -d. -f2 | tr '_-' '/+')
+  while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="$payload="; done
+  acct=$(printf '%s' "$payload" | base64 -d 2>/dev/null | grep -o '"email":"[^"]*"' | head -1 | cut -d'"' -f4)
+  printf 'codex_auth\tok\t\t\t%s\n' "$acct"
+else printf 'codex_auth\tmissing\t\t\n'; fi
 if [ -n "$latest_dir" ]; then
   wait
   for tool in claude codex; do
@@ -403,12 +415,15 @@ fn parse_cli_dependency_lines(raw: &str) -> Vec<CliDependencyStatus> {
             }
             let version = cols.next().unwrap_or("").trim();
             let detail = cols.next().unwrap_or("").trim();
-            Some(CliDependencyStatus::new(
+            let account = cols.next().unwrap_or("").trim();
+            let mut row = CliDependencyStatus::new(
                 id,
                 state,
                 (!version.is_empty()).then(|| version.to_string()),
                 (!detail.is_empty()).then(|| detail.to_string()),
-            ))
+            );
+            row.account = (!account.is_empty()).then(|| account.to_string());
+            Some(row)
         })
         .collect()
 }
@@ -6039,6 +6054,25 @@ mod tests {
             )
         );
         assert_eq!(rows[2], CliDependencyStatus::new("claude_auth", "missing", None, None));
+        // 修订 2026-08-12:登录行第 5 列带账号身份。
+        let with_account = parse_cli_dependency_lines("claude_auth\tok\t\t\tme@example.com\n");
+        assert_eq!(with_account[0].account.as_deref(), Some("me@example.com"));
+        assert_eq!(with_account[0].state, "ok");
+    }
+
+    /// 修订 2026-08-12(用户:「能否读取登录的账号,显式在 UI 上」)——探测脚本
+    /// 只读身份字段:claude 取 oauthAccount.emailAddress,codex 解 id_token 的
+    /// JWT payload;token 本体照旧不出脚本。
+    #[test]
+    fn test_probe_script_reads_account_identity_not_tokens() {
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains(r#""emailAddress":"[^"]*""#));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains(r#""id_token":"[^"]*""#));
+        assert!(CLI_DEPENDENCY_PROBE_SCRIPT.contains(r#""email":"[^"]*""#));
+        assert!(
+            !CLI_DEPENDENCY_PROBE_SCRIPT.contains("accessToken\":\"")
+                && !CLI_DEPENDENCY_PROBE_SCRIPT.contains("refresh_token"),
+            "凭据 token 值不得被提取或打印"
+        );
     }
 
     /// 探测脚本必须覆盖提案 §2 的整条链(tmux/claude/codex/两个登录态),且 /mnt

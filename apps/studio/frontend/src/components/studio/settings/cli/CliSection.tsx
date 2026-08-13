@@ -88,18 +88,18 @@ type CliRowAction =
   | { kind: "deploy" }
 
 // 行内动作按钮判定表(修订 2026-08-12):CLI 行过时 → 更新(CLI 自带 update 命令);
-// 登录行缺失/损坏 → 登录;ah 行缺失/过时 → 部署(ah 随 app 打包,决议
+// 登录行**任何状态**都给「登录」——已登录也可能要换账号(用户裁决 2026-08-12);
+// ah 行缺失/过时 → 部署(ah 随 app 打包,决议
 // docs/design/2026-08-12-ah-vendored-auto-deploy.md——它不再是用户去装的外部依赖)。
 function cliRowAction(row: CliDependencyRow): CliRowAction | null {
+  if (row.id === "claude_auth") return { kind: "login", provider: "claude" }
+  if (row.id === "codex_auth") return { kind: "login", provider: "codex" }
   if (row.id === "ah" && (row.state === "missing" || row.state === "outdated")) {
     return { kind: "deploy" }
   }
   if ((row.id === "claude" || row.id === "codex") && row.state === "outdated") {
     return { kind: "update", provider: row.id }
   }
-  if (row.state !== "missing" && row.state !== "broken") return null
-  if (row.id === "claude_auth") return { kind: "login", provider: "claude" }
-  if (row.id === "codex_auth") return { kind: "login", provider: "codex" }
   return null
 }
 
@@ -275,6 +275,11 @@ export function CliSection({
                 </span>
                 {row.version ? (
                   <span className="truncate text-xs text-muted-foreground">{row.version}</span>
+                ) : null}
+                {row.account ? (
+                  <span className="truncate text-xs text-muted-foreground" data-cli-account={row.id}>
+                    {row.account}
+                  </span>
                 ) : null}
                 <span className="ml-auto flex shrink-0 items-center gap-2">
                   {row.detail ? (

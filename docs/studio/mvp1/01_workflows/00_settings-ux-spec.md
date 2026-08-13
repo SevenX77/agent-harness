@@ -324,7 +324,11 @@
 - **行内动作按钮(修订 2026-08-12;可见控制台承载,理由同一键安装:更新/登录有
   进度与交互,后台静默失败不可见)**:`claude`/`codex` 行 `outdated` → 「更新」→
   控制台跑 `claude update` / `codex update`;`claude_auth`/`codex_auth` 行
-  `missing|broken` → 「登录」→ 控制台跑 `claude auth login` / `codex login`
+  **任何状态**都有「登录」(修订 2026-08-12,用户:「登录按钮不要消失,万一用户要
+  换账号呢?」)→ 控制台跑 `claude auth login` / `codex login`;登录行同时显示
+  **当前登录账号**(修订同日,用户:「能否读取登录的账号,显式在 UI 上」):
+  claude 读 `~/.claude.json` oauthAccount.emailAddress,codex 解 `auth.json`
+  id_token 的 JWT payload email 声明——只读身份字段,token 本体照旧不出探测脚本
   (与 launcher login-doorman、安装脚本 B2 同款命令)。**登录控制台的剪贴板
   快捷键(修订 2026-08-12,决议 `2026-08-12-login-console-clipboard-keys.md`)**:
   设置页「登录」控制台与两个 login-doorman 的登录命令统一经 pty 包装器跑——

@@ -193,7 +193,7 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
   | 单模型探测结果类型 | 探测本体在 `probing/`；`apps/studio/backend/app/services/model_probe.py` 只剩宿主侧 DTO | ✅ 已下沉（29 行：router 把网关 `RouteProbeResult` 适配成这个形状交给自己的调用方，属宿主自用，不再搬） |
   | identity（provider 名 / 配置） | `apps/studio/backend/app/services/llm_provider_identity.py` · `apps/studio/backend/app/services/provider_config.py` | 🔻 待下沉（后者的**匹配规则**属公共，但它读 studio 自己的 `app/data/*.json`，按"存储由宿主注入"要先把规则与介质拆开） |
   | 厂商官方能力文档源 | `apps/studio/backend/app/services/official_capability_sources.py` | 🔻 待下沉（291 行纯知识：按 provider × 能力主题存官方文档 URL 与取值规则，四件事一条都不绑，任何应用装上都能直接用） |
-  | 证据外发脱敏红线 | `apps/studio/backend/app/services/community_catalog.py` | 🔻 待下沉（网关 owns 探测知识库，却不 owns「什么可以离开这台机器」：白名单构造上传体、私有 / 内网主机整段丢弃端点身份。这条规则和它守护的知识库不该分居两地） |
+  | 证据外发脱敏红线 | `registry/evidence_wire.py` | ✅ 已下沉（白名单构造上传体、私有 / 内网主机整段丢弃端点身份；发布用的 `published_base_url` 与调用用的 `registry/base_url.py:canonicalize_base_url` **是两件事**，模块开头写明了不可互喂。上传的 HTTP 传输与同步调度仍在 studio 的 `apps/studio/backend/app/services/community_catalog_upload.py` / `apps/studio/backend/app/services/community_catalog_sync.py`——那是介质，按判据留给宿主） |
   | 证据读取 + 探测排序 | `apps/studio/backend/app/services/llm_credentials_evidence.py` | 🔻 待下沉（其中 `endpoint_probe_priority` 与网关 `registry/catalog.py:probe_priority` 吃同一份输入、目标相反：一个要最快见绿所以领头放已验证的，一个要发现新能力所以跳过已验证的。并排放进网关，这个差别才看得见） |
   | evidence id 铸造 | `apps/studio/backend/app/services/llm_evidence_ids.py` | 🔻 待下沉（19 行，给网关 `EvidenceRecord` 铸 ID） |
   | notable | `apps/studio/backend/app/services/llm_notable_models.py` | 🔻 待下沉 |

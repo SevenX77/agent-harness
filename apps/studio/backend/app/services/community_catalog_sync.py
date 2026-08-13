@@ -19,8 +19,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import BaseModel, ConfigDict
 
-from app.core.adapters.gateway import EvidenceRecord
-from app.services.community_catalog import parse_catalog_evidence
+from app.core.adapters.gateway import EvidenceRecord, parse_catalog_evidence
 
 
 class VerifiedSyncError(RuntimeError):

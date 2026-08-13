@@ -41,12 +41,12 @@ def test_verified_sync_merges_matching_evidence_into_credentials(
     """Phase 5: a verified sync MERGES matching community evidence straight into the
     credential route's ``evidence`` (no cache file, no metadata refs) and persists a
     tiny last-sync marker. historical_ready then projects from route.evidence."""
+    from app.core.adapters.gateway import parse_catalog_evidence
     from app.models.llm_config import (
         LLMCredentialsFile,
         ProviderEndpoint,
         ProviderRoute,
     )
-    from app.services.community_catalog import parse_catalog_evidence
     from app.services.llm_credentials import (
         credentials_path,
         load_credentials,
@@ -133,12 +133,12 @@ def test_verified_sync_blues_a_route_added_after_an_earlier_sync(
     """Phase 5 (locked: no cache, no etag short-circuit). A route added AFTER an earlier
     sync must still go blue on the NEXT sync — even though the remote etag is unchanged.
     We keep no unmatched evidence, so every sync re-fetches and re-attempts the merge."""
+    from app.core.adapters.gateway import parse_catalog_evidence
     from app.models.llm_config import (
         LLMCredentialsFile,
         ProviderEndpoint,
         ProviderRoute,
     )
-    from app.services.community_catalog import parse_catalog_evidence
     from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 
     # A verified endpoint with NO matching route yet.

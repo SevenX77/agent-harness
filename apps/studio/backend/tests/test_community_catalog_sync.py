@@ -12,7 +12,7 @@ import json
 
 import httpx
 import pytest
-from app.services.community_catalog import COMMUNITY_PROVENANCE
+from app.core.adapters.gateway import COMMUNITY_PROVENANCE
 from app.services.community_catalog_sync import (
     CatalogManifest,
     FetchResult,

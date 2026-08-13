@@ -9,14 +9,13 @@ unknown forward-compat fields, and fails closed on unexpected types.
 from __future__ import annotations
 
 import pytest
-from app.services.community_catalog import (
+from graph_agent_gateway.registry import (
     COMMUNITY_PROVENANCE,
     build_upload_record,
     from_wire_evidence_type,
     parse_catalog_evidence,
     to_wire_evidence_type,
 )
-
 from tests.helpers_community_catalog import probe_record  # type: ignore[import-not-found]
 
 

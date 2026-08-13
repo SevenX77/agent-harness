@@ -51,7 +51,13 @@ from graph_agent_gateway.probing import (
     probe_provider_route as probe_provider_route,
 )
 from graph_agent_gateway.registry import (
+    COMMUNITY_PROVENANCE as COMMUNITY_PROVENANCE,
+)
+from graph_agent_gateway.registry import (
     EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
+)
+from graph_agent_gateway.registry import (
+    UPLOADABLE_TRUST_STATE as UPLOADABLE_TRUST_STATE,
 )
 from graph_agent_gateway.registry import (
     CapabilitySource as CapabilitySource,
@@ -66,6 +72,9 @@ from graph_agent_gateway.registry import (
 from graph_agent_gateway.registry import EndpointCredentialProvider as EndpointCredentialProvider
 from graph_agent_gateway.registry import (
     EvidenceRecord as EvidenceRecord,
+)
+from graph_agent_gateway.registry import (
+    EvidenceUpload as EvidenceUpload,
 )
 from graph_agent_gateway.registry import (
     InMemoryConfigTruthStore as InMemoryConfigTruthStore,
@@ -104,6 +113,9 @@ from graph_agent_gateway.registry import (
     build_runtime_setting_descriptors as build_runtime_setting_descriptors,
 )
 from graph_agent_gateway.registry import (
+    build_upload_record as build_upload_record,
+)
+from graph_agent_gateway.registry import (
     call_method_auth_token_env as call_method_auth_token_env,
 )
 from graph_agent_gateway.registry import (
@@ -129,6 +141,21 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     effort_probe_candidates as effort_probe_candidates,
+)
+from graph_agent_gateway.registry import (
+    endpoint_fingerprint as endpoint_fingerprint,
+)
+from graph_agent_gateway.registry import (
+    endpoint_host as endpoint_host,
+)
+from graph_agent_gateway.registry import (
+    from_wire_evidence_type as from_wire_evidence_type,
+)
+from graph_agent_gateway.registry import (
+    is_safe_to_publish as is_safe_to_publish,
+)
+from graph_agent_gateway.registry import (
+    is_uploadable as is_uploadable,
 )
 from graph_agent_gateway.registry import (
     known_model_ids_for_endpoint as known_model_ids_for_endpoint,
@@ -158,6 +185,9 @@ from graph_agent_gateway.registry import (
     normalize_route_capabilities as normalize_route_capabilities,
 )
 from graph_agent_gateway.registry import (
+    parse_catalog_evidence as parse_catalog_evidence,
+)
+from graph_agent_gateway.registry import (
     probe_priority as probe_priority,
 )
 from graph_agent_gateway.registry import (
@@ -179,10 +209,16 @@ from graph_agent_gateway.registry import (
     provider_backend_for_endpoint as provider_backend_for_endpoint,
 )
 from graph_agent_gateway.registry import (
+    published_base_url as published_base_url,
+)
+from graph_agent_gateway.registry import (
     resolve_credential as gateway_resolve_credential,
 )
 from graph_agent_gateway.registry import (
     route_effective_capabilities as route_effective_capabilities,
+)
+from graph_agent_gateway.registry import (
+    to_wire_evidence_type as to_wire_evidence_type,
 )
 from graph_agent_gateway.registry import (
     verified_profile_capabilities as verified_profile_capabilities,

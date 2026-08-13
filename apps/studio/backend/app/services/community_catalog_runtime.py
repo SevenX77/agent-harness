@@ -6,10 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.core.adapters.gateway import EvidenceRecord
+from app.core.adapters.gateway import UPLOADABLE_TRUST_STATE, EvidenceRecord, endpoint_host
 from app.core.backends import get_backend_config
 from app.models.llm_config import LLMCredentialsFile, RemoteCatalogSyncMarker
-from app.services.community_catalog import UPLOADABLE_TRUST_STATE, endpoint_host
 from app.services.community_catalog_sync import make_httpx_fetcher, sync_verified_catalog
 from app.services.llm_credentials_evidence import merge_route_evidence
 from app.services.runtime_activity import record_runtime_activity

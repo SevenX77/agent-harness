@@ -10,9 +10,8 @@ no new endpoints/routes, no green.
 
 from __future__ import annotations
 
-from app.core.adapters.gateway import compute_evidence_content_hash
+from app.core.adapters.gateway import COMMUNITY_PROVENANCE, compute_evidence_content_hash, parse_catalog_evidence
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
-from app.services.community_catalog import COMMUNITY_PROVENANCE, parse_catalog_evidence
 
 
 def _credentials_with_route(*, base_url: str = "https://api.openai.com/v1", model_id: str = "gpt-4o") -> LLMCredentialsFile:

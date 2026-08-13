@@ -11,14 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from app.core.adapters.gateway import EvidenceRecord, compute_evidence_content_hash
-from app.models.llm_config import LLMCredentialsFile, ProviderRoute
-from app.services.community_catalog import (
+from app.core.adapters.gateway import (
     COMMUNITY_PROVENANCE,
+    EvidenceRecord,
     EvidenceUpload,
     build_upload_record,
+    compute_evidence_content_hash,
     is_uploadable,
 )
+from app.models.llm_config import LLMCredentialsFile, ProviderRoute
 
 _PROBE_EVIDENCE_TYPE = "probe"
 _PROBE_VERIFIED = "probe-verified"

@@ -152,10 +152,19 @@ from graph_agent_gateway.registry import (
     new_evidence_library as new_evidence_library,
 )
 from graph_agent_gateway.registry import (
+    normalize_model_group_key as normalize_model_group_key,
+)
+from graph_agent_gateway.registry import (
     normalize_route_capabilities as normalize_route_capabilities,
 )
 from graph_agent_gateway.registry import (
     probe_priority as probe_priority,
+)
+from graph_agent_gateway.registry import (
+    project_model_group_identity as project_model_group_identity,
+)
+from graph_agent_gateway.registry import (
+    project_model_identity as project_model_identity,
 )
 
 # Canonical 6-state route-state projector owned by the gateway package. Studio

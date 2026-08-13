@@ -103,6 +103,13 @@ from graph_agent_gateway.registry.identity import (
     stable_route_id,
     strip_transport_prefix,
 )
+from graph_agent_gateway.registry.model_naming import (
+    ModelGroupIdentityProjection,
+    ModelIdentityProjection,
+    normalize_model_group_key,
+    project_model_group_identity,
+    project_model_identity,
+)
 from graph_agent_gateway.registry.projection import (
     ProviderModelStateProjection,
     project_provider_route_ui_state,
@@ -169,6 +176,8 @@ __all__ = [
     "LintResult",
     "MaterializedProbeCatalogCandidates",
     "ModelBundle",
+    "ModelGroupIdentityProjection",
+    "ModelIdentityProjection",
     "ModelProfile",
     "ProbeCatalogStore",
     "ProbeResult",
@@ -222,12 +231,15 @@ __all__ = [
     "measured_image_input",
     "merge_evidence_library",
     "new_evidence_library",
+    "normalize_model_group_key",
     "normalize_route_capabilities",
     "route_effective_capabilities",
     "verified_profile_capabilities",
     "official_call_method_ids",
     "probe_priority",
     "project_provider_route_ui_state",
+    "project_model_group_identity",
+    "project_model_identity",
     "project_route_state",
     "promotable_route_update",
     "ProviderProbeBackend",

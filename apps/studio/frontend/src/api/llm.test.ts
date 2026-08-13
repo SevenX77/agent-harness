@@ -141,6 +141,7 @@ describe('API Keys v4 registry adapter', () => {
           {
             canonical_id: 'gpt-5',
             display_name: 'GPT-5',
+            section_label: 'gpt',
             provider_models: [
               {
                 route_id: route.route_id,
@@ -448,6 +449,7 @@ describe('API Keys v4 registry adapter', () => {
           {
             canonical_id: 'gpt-5',
             display_name: 'GPT-5',
+            section_label: 'gpt',
             provider_models: [
               {
                 route_id: route.route_id,
@@ -636,6 +638,7 @@ describe('API Keys v4 registry adapter', () => {
           {
             canonical_id: 'gpt-5',
             display_name: 'GPT-5',
+            section_label: 'gpt',
             provider_models: [
               {
                 route_id: route.route_id,
@@ -1732,6 +1735,7 @@ describe('API Keys v4 registry adapter', () => {
         {
           canonical_id: 'gpt-5',
           display_name: 'GPT-5',
+          section_label: 'gpt',
           provider_models: [
             {
               route_id: route.route_id,
@@ -1791,6 +1795,7 @@ describe('API Keys v4 registry adapter', () => {
         {
           canonical_id: 'backend-only',
           display_name: 'Backend Only',
+          section_label: 'backend',
           provider_models: [],
           status_summary: {
             ready: 0,
@@ -1831,6 +1836,7 @@ describe('API Keys v4 registry adapter', () => {
             {
               canonical_id: 'gpt-5',
               display_name: 'GPT-5',
+              section_label: 'gpt',
               provider_models: [
                 {
                   route_id: route.route_id,
@@ -1894,6 +1900,7 @@ describe('API Keys v4 registry adapter', () => {
               {
                 canonical_id: 'gpt-5',
                 display_name: 'GPT-5',
+                section_label: 'gpt',
                 provider_models: [
                   {
                     route_id: route.route_id,
@@ -1935,6 +1942,7 @@ describe('API Keys v4 registry adapter', () => {
           {
             canonical_id: 'gpt-5',
             display_name: 'GPT-5',
+            section_label: 'gpt',
             provider_models: [
               {
                 route_id: route.route_id,
@@ -2032,6 +2040,7 @@ describe('API Keys v4 registry adapter', () => {
               {
                 canonical_id: 'gpt-5',
                 display_name: 'GPT-5',
+                section_label: 'gpt',
                 provider_models: [
                   {
                     route_id: route.route_id,
@@ -2073,6 +2082,7 @@ describe('API Keys v4 registry adapter', () => {
           {
             canonical_id: 'gpt-5',
             display_name: 'GPT-5',
+            section_label: 'gpt',
             provider_models: [
               {
                 route_id: route.route_id,
@@ -2193,6 +2203,7 @@ describe('API Keys v4 registry adapter', () => {
         {
           canonical_id: 'gpt-5',
           display_name: 'GPT-5',
+          section_label: 'gpt',
           provider_models: [
             {
               route_id: route.route_id,
@@ -2310,6 +2321,7 @@ describe('API Keys v4 registry adapter', () => {
           {
             canonical_id: 'gpt-5',
             display_name: 'GPT-5',
+            section_label: 'gpt',
             provider_models: [
               {
                 route_id: route.route_id,

@@ -59,6 +59,7 @@ function routeGroup(canonicalId: string, displayName: string): ModelGroup {
   return {
     canonical_id: canonicalId,
     display_name: displayName,
+    section_label: 'anthropic',
     provider_models: [
       {
         route_id: `anthropic-official:${canonicalId}`,

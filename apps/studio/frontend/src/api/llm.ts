@@ -143,7 +143,10 @@ export interface ModelGroupCapabilitySummary {
 export interface ModelGroup {
   canonical_id: string
   display_name: string
-  section_label?: string
+  // Elected by the gateway over the whole group (declarations outrank endpoint
+  // guesses) and never empty — the backend answers "unknown" before it answers
+  // nothing, so the UI keeps no vendor-guessing fallback of its own.
+  section_label: string
   provider_models: ProviderModelOption[]
   status_summary: ModelGroupStatusSummary
   capability_summary: ModelGroupCapabilitySummary

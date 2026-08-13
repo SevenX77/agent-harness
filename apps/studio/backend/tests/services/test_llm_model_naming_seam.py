@@ -72,3 +72,21 @@ def test_the_label_studio_passes_is_the_one_that_reaches_the_projection() -> Non
 
     assert identity.section_label == "mistral"
     assert group.section_label == "mistral"
+
+
+def test_studio_keeps_no_vendor_chain_of_its_own() -> None:
+    """"Who made this model" is answered once, in the gateway.
+
+    Studio used to keep a second copy of the vendor if-chain
+    (``_section_label_from_display_name``, applied OVER the gateway's answer)
+    plus an equal-weight majority vote (``_dominant_section_label``) that let
+    two endpoint guesses outvote one declared vendor. Both are replaced by the
+    gateway's ``elect_model_group_section``. Decision record:
+    docs/design/2026-08-13-gateway-role-model-and-section-truth-decision.md 决策二.
+    """
+
+    source = (_BACKEND_APP / "routers" / "llm.py").read_text(encoding="utf-8")
+
+    assert "_section_label_from_display_name" not in source
+    assert "_dominant_section_label" not in source
+    assert "elect_model_group_section(" in source

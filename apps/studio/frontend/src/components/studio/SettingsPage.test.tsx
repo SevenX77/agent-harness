@@ -226,6 +226,7 @@ describe('refreshLoadedLlmRolesProjection', () => {
       {
         canonical_id: 'gpt-5',
         display_name: 'GPT-5',
+        section_label: 'gpt',
         provider_models: [],
         status_summary: { ready: 0, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
@@ -302,6 +303,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
       {
         canonical_id: 'aion-1',
         display_name: 'Aion 1.0',
+        section_label: 'aion',
         provider_models: [
           {
             route_id: 'openrouter:aion-1',
@@ -332,6 +334,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
       {
         canonical_id: 'deepseek-v4-flash',
         display_name: 'DeepSeek V4 Flash',
+        section_label: 'deepseek',
         provider_models: [
           {
             route_id: 'DS:deepseek-v4-flash',

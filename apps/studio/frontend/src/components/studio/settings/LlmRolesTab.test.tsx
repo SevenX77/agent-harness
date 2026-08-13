@@ -75,6 +75,7 @@ const modelGroups: ModelGroup[] = [
   {
     canonical_id: "claude-sonnet-4-7",
     display_name: "Claude Sonnet 4.7",
+    section_label: "anthropic",
     provider_models: [
       {
         route_id: "anthropic-official:claude-sonnet-4-7",
@@ -1405,6 +1406,7 @@ describe("LlmRolesTab controls", () => {
       {
         canonical_id: "antigravity-preview-05-2026",
         display_name: "Antigravity Preview 05 2026",
+        section_label: "gemini",
         provider_models: [
           {
             route_id: "gemini-official:antigravity-preview-05-2026",
@@ -1440,6 +1442,34 @@ describe("LlmRolesTab controls", () => {
     const groups = buildAvailableModelGroups(mixedModelGroups)
 
     expect(groups.map((group) => group.section)).toEqual(["anthropic", "gemini"])
+  })
+
+  it("files a group under the section the gateway elected, not one guessed from its labels", () => {
+    // The MiniMax-M1 shape: the gateway elected "minimax" (declared vendor)
+    // even though every provider serving it is anthropic-flavoured. The UI
+    // used to keep its own vendor-keyword fallback that would have re-filed
+    // this under "anthropic"; the backend's answer is now taken verbatim.
+    // Decision: docs/design/2026-08-13-gateway-role-model-and-section-truth-decision.md 决策二.
+    const declaredGroups: ModelGroup[] = [
+      {
+        ...modelGroups[0],
+        canonical_id: "minimax-m1",
+        display_name: "Minimax M1",
+        section_label: "minimax",
+        provider_models: [
+          {
+            ...modelGroups[0].provider_models[0],
+            route_id: "anthropic-proxy:minimax-m1",
+            provider_label: "Anthropic Proxy",
+            provider_model_id: "minimax-m1",
+          },
+        ],
+      },
+    ]
+
+    const groups = buildAvailableModelGroups(declaredGroups)
+
+    expect(groups.map((group) => group.section)).toEqual(["minimax"])
   })
 
   it("uses backend model identity projection without changing backend ids", () => {

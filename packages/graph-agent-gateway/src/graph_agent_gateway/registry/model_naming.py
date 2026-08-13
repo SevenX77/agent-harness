@@ -26,9 +26,17 @@ would only work for hosts shaped like Studio.
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderRoute
+
+# Where an owner answer came from: the model id named a maker this package
+# knows, the id carried a ``vendor/`` prefix no table here recognises, or the
+# id declared nothing and the endpoint it is served from was consulted.
+OwnerSource = Literal["model_id", "declared_vendor", "endpoint_context"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +44,7 @@ class ModelIdentityProjection:
     display_name: str
     section_label: str
     confidence: str
+    owner_source: OwnerSource
     tokens: tuple[str, ...] = ()
     display_tokens: tuple[str, ...] = ()
     unknown_tokens: tuple[str, ...] = ()
@@ -43,16 +52,10 @@ class ModelIdentityProjection:
 
 @dataclass(frozen=True)
 class _OwnerReading:
-    """Who made a model, and which text said so.
-
-    ``source`` is one of ``model_id`` (the id names a maker this package knows),
-    ``declared_vendor`` (the id carries a ``vendor/`` prefix no table here
-    recognises), or ``endpoint_context`` (the id declares nothing, so the
-    endpoint it is served from was consulted).
-    """
+    """Who made a model, and which text said so."""
 
     owner: str | None
-    source: str
+    source: OwnerSource
     declared_vendor: str
 
 
@@ -61,6 +64,7 @@ class ModelGroupIdentityProjection:
     key: str
     display_name: str
     section_label: str
+    owner_source: OwnerSource
     route_display_name: str
     release_tokens: tuple[str, ...] = ()
     capability_tokens: tuple[str, ...] = ()
@@ -163,6 +167,7 @@ def project_model_identity(
         display_name=display_name,
         section_label=_section_for_owner(reading, family, tokens),
         confidence=_confidence(reading, family),
+        owner_source=reading.source,
         tokens=tuple(tokens),
         display_tokens=tuple(display_tokens),
         unknown_tokens=_unrecognized_tokens(tokens, reading.owner, family),
@@ -190,11 +195,31 @@ def project_model_group_identity(
         key=normalize_model_group_key(display_name),
         display_name=display_name,
         section_label=identity.section_label,
+        owner_source=identity.owner_source,
         route_display_name=identity.display_name,
         release_tokens=split["release_tokens"],
         capability_tokens=split["capability_tokens"],
         route_channel_tokens=split["route_channel_tokens"],
     )
+
+
+def elect_model_group_section(projections: Sequence[ModelGroupIdentityProjection]) -> str:
+    """Which section a group of same-model routes files under.
+
+    A declaration outranks a guess, groupwide — the same rule
+    ``project_model_identity`` applies per route. Routes whose owner came from
+    the model id itself vote first, then routes carrying a declared vendor;
+    routes whose owner was guessed from their endpoint only speak when nobody
+    declared anything, because a proxy fleet sharing a vanity domain agrees
+    with itself for free. Majority rules within a tier, and a tie falls to
+    lexicographic order so the answer is deterministic.
+    """
+
+    for tier in ("model_id", "declared_vendor", "endpoint_context"):
+        votes = Counter(projection.section_label for projection in projections if projection.owner_source == tier)
+        if votes:
+            return sorted(votes, key=lambda section: (-votes[section], section))[0]
+    return "unknown"
 
 
 def normalize_model_group_key(value: str) -> str:
@@ -575,6 +600,8 @@ def _normalize_key(value: str) -> str:
 __all__ = [
     "ModelGroupIdentityProjection",
     "ModelIdentityProjection",
+    "OwnerSource",
+    "elect_model_group_section",
     "normalize_model_group_key",
     "project_model_group_identity",
     "project_model_identity",

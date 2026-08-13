@@ -37,6 +37,7 @@ function registryModelGroups(): ModelGroup[] {
     {
       canonical_id: "claude-opus-4.7",
       display_name: "Claude Opus 4.7",
+      section_label: "anthropic",
       provider_models: [
         {
           route_id: "anthropic-official:claude-opus-4-7",
@@ -93,6 +94,7 @@ function openAiModelGroup(): ModelGroup {
   return {
     canonical_id: "gpt-4.1",
     display_name: "GPT 4.1",
+    section_label: "openai",
     provider_models: [
       {
         route_id: "openai-official:gpt-4.1",
@@ -133,6 +135,7 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
   return {
     canonical_id: "claude-opus-4.8",
     display_name: "Claude Opus 4.8",
+    section_label: "anthropic",
     provider_models: [
       {
         route_id: "anthropic-official:claude-opus-4.8",
@@ -209,6 +212,7 @@ function deepseekV4ModelGroup(): ModelGroup {
   return {
     canonical_id: "deepseek-v4-flash",
     display_name: "DeepSeek V4 Flash",
+    section_label: "deepseek",
     provider_models: [
       {
         route_id: "deepseek-official:deepseek-v4-flash",
@@ -581,6 +585,7 @@ function opusGroup(canonicalId: string, displayName: string): ModelGroup {
   return {
     canonical_id: canonicalId,
     display_name: displayName,
+    section_label: "anthropic",
     provider_models: [
       {
         route_id: `anthropic-official:${canonicalId}`,
@@ -1306,6 +1311,7 @@ describe("R-F11 6-state copilot route lights", () => {
       {
         canonical_id: "claude-opus-4.7",
         display_name: "Claude Opus 4.7",
+        section_label: "anthropic",
         provider_models: states.map(({ id, ui_state }) => ({
           route_id: id,
           endpoint_id: "anthropic-official",

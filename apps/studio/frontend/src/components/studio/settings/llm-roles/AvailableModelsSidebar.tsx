@@ -567,7 +567,7 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
       return {
         id: group.canonical_id,
         label: group.display_name || group.canonical_id,
-        section: group.section_label || fallbackModelGroupSection(group),
+        section: group.section_label,
         // #35(b): off/disabled routes move into the collapsible "Deprecated"
         // section; all other 6-state routes stay in the draggable provider row.
         providers: collapseDuplicateProviderLabels(allProviders.filter((provider) => provider.state !== "off")),
@@ -605,25 +605,6 @@ function collapseDuplicateProviderLabels(providers: AvailableModelProvider[]): A
     .map((duplicates) => [...duplicates].sort(compareAvailableModelProviders)[0])
     .filter((provider): provider is AvailableModelProvider => Boolean(provider))
     .sort(compareAvailableModelProviders)
-}
-
-function fallbackModelGroupSection(group: ModelGroup): string {
-  const haystack = [
-    group.display_name,
-    group.canonical_id,
-    ...group.provider_models.flatMap((providerModel) => [
-      providerModel.provider_label,
-      providerModel.provider_model_id,
-    ]),
-  ].join(" ").toLowerCase()
-
-  if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic"
-  if (haystack.includes("deepseek")) return "deepseek"
-  if (haystack.includes("openai") || /\bgpt[-_\s.]?\d/.test(haystack)) return "openai"
-  if (haystack.includes("gemini") || haystack.includes("antigravity") || /\baqa\b/.test(haystack)) return "gemini"
-  if (haystack.includes("qwen") || haystack.includes("dashscope") || haystack.includes("alibaba")) return "qwen"
-  if (haystack.includes("doubao") || haystack.includes("volcengine") || haystack.includes("ark")) return "ark"
-  return group.canonical_id.split(/[-_.]/)[0] || "unknown"
 }
 
 export function filterAvailableModelGroups(

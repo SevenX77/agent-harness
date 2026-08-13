@@ -63,6 +63,7 @@ function modelGroup(overrides: Partial<ModelGroup> = {}): ModelGroup {
   return {
     canonical_id: 'llama3',
     display_name: 'Llama 3',
+    section_label: 'meta',
     provider_models: [providerModel()],
     status_summary: {
       ready: 1,
@@ -499,6 +500,9 @@ describe('PropertiesPanel - node compare model group picker', () => {
       modelGroup({
         canonical_id: 'deepseek-v4',
         display_name: 'A DeepSeek via proxy',
+        // What the gateway elects for a model that names itself, however
+        // anthropic-flavoured the proxy serving it looks.
+        section_label: 'deepseek',
         provider_models: [
           providerModel({
             route_id: 'anthropic-proxy:deepseek-v4',
@@ -511,6 +515,7 @@ describe('PropertiesPanel - node compare model group picker', () => {
       modelGroup({
         canonical_id: 'claude-opus-4-8',
         display_name: 'Z Claude Opus 4.8',
+        section_label: 'anthropic',
         provider_models: [
           providerModel({
             route_id: 'anthropic:claude-opus-4-8',

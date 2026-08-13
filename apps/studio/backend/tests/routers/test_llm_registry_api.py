@@ -1799,6 +1799,98 @@ def test_registry_merges_model_groups_by_projected_display_name(
     } == set(routes)
 
 
+def test_a_groups_section_is_elected_declarations_over_guesses(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The MiniMax-M1 shape from the #779 real-app verification: the same model
+    declared ``minimax/`` on OpenRouter and served bare on two anthropic-named
+    proxies. Equal-weight majority voting filed the group under ``anthropic``;
+    the gateway's group election (a declaration outranks a guess, groupwide)
+    must file it under ``minimax``. Decision record:
+    docs/design/2026-08-13-gateway-role-model-and-section-truth-decision.md 决策二.
+    """
+
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    endpoints = {
+        "openrouter": ProviderEndpoint(
+            endpoint_id="openrouter",
+            display_name="OpenRouter",
+            protocol="openai_compatible",
+            base_url="https://openrouter.ai/api/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+        "anthropic-proxy-a": ProviderEndpoint(
+            endpoint_id="anthropic-proxy-a",
+            display_name="Proxy A",
+            protocol="openai_compatible",
+            base_url="https://anthropic-a.example/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+        "anthropic-proxy-b": ProviderEndpoint(
+            endpoint_id="anthropic-proxy-b",
+            display_name="Proxy B",
+            protocol="openai_compatible",
+            base_url="https://anthropic-b.example/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+    }
+    routes = {
+        "openrouter:minimax.minimax-m1": ProviderRoute(
+            route_id="openrouter:minimax.minimax-m1",
+            endpoint_id="openrouter",
+            route_slug="minimax.minimax-m1",
+            provider_model_id="minimax/minimax-m1",
+            status="verified",
+        ),
+        "anthropic-proxy-a:minimax-m1": ProviderRoute(
+            route_id="anthropic-proxy-a:minimax-m1",
+            endpoint_id="anthropic-proxy-a",
+            route_slug="minimax-m1",
+            provider_model_id="minimax-m1",
+            status="verified",
+        ),
+        "anthropic-proxy-b:minimax-m1": ProviderRoute(
+            route_id="anthropic-proxy-b:minimax-m1",
+            endpoint_id="anthropic-proxy-b",
+            route_slug="minimax-m1",
+            provider_model_id="minimax-m1",
+            status="verified",
+        ),
+    }
+    save_credentials(
+        LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes),
+        active_credentials_path,
+    )
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    matching_groups = [
+        group
+        for group in response.json()["model_groups"]
+        if group["display_name"] == "Minimax M1"
+    ]
+    assert len(matching_groups) == 1, "the three routes must fold into one group"
+    model_group = matching_groups[0]
+    assert {
+        option["route_id"] for option in model_group["provider_models"]
+    } == set(routes)
+    assert model_group["section_label"] == "minimax"
+
+
 def test_registry_merges_same_display_name_across_provider_sections(
     client: TestClient,
     tmp_path: Path,

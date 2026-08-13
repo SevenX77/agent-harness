@@ -26,6 +26,7 @@ from app.core.adapters.gateway import (
     GatewayAdapter,
     GatewayProviderRoute,
     GatewayRoleEntry,
+    ModelGroupIdentityProjection,
     OfficialCallMethod,
     ProfileSelectionError,
     ProviderModelStateProjection,
@@ -45,6 +46,7 @@ from app.core.adapters.gateway import (
     call_method_ids_for_endpoint,
     documented_effort_levels,
     effort_questions,
+    elect_model_group_section,
     lint_role_routes,
     measured_effort_capability,
     measured_image_input,
@@ -2984,72 +2986,32 @@ def _model_group_identity(
     routes: list[ProviderRoute],
     credentials: LLMCredentialsFile,
 ) -> dict[str, str]:
-    projections: list[tuple[ProviderRoute, dict[str, str]]] = []
+    projections: list[tuple[ProviderRoute, ModelGroupIdentityProjection]] = []
     for route in routes:
         endpoint = credentials.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             continue
-        projection = project_model_group_identity(
-        route=route, endpoint=endpoint, provider_label=endpoint.display_name
-    )
         projections.append(
             (
                 route,
-                {
-                    "display_name": projection.display_name,
-                    "section_label": projection.section_label,
-                },
+                project_model_group_identity(
+                    route=route, endpoint=endpoint, provider_label=endpoint.display_name
+                ),
             )
         )
-    if projections:
-        route, identity = sorted(
-            projections,
-            key=lambda item: _route_preference_rank(item[0], credentials),
-        )[0]
-        del route
-        return {
-            **identity,
-            "section_label": _section_label_from_display_name(identity["display_name"])
-            or _dominant_section_label(projections),
-        }
-    return {"display_name": canonical_id, "section_label": "unknown"}
-
-
-def _dominant_section_label(
-    projections: list[tuple[ProviderRoute, dict[str, str]]],
-) -> str:
-    counts: dict[str, int] = {}
-    for _, identity in projections:
-        section_label = identity["section_label"]
-        counts[section_label] = counts.get(section_label, 0) + 1
-    return sorted(counts, key=lambda section: (-counts[section], section))[0]
-
-
-def _section_label_from_display_name(display_name: str) -> str:
-    haystack = display_name.lower()
-    if "anthropic" in haystack or "claude" in haystack:
-        return "anthropic"
-    if "deepseek" in haystack:
-        return "deepseek"
-    if "openai" in haystack or re.search(r"\bgpt[-_\s.]?\d", haystack):
-        return "openai"
-    if "gemini" in haystack or "antigravity" in haystack or re.search(r"\baqa\b", haystack):
-        return "gemini"
-    if "qwen" in haystack:
-        return "qwen"
-    if "doubao" in haystack or "ark" in haystack:
-        return "ark"
-    if "glm" in haystack:
-        return "zhipu"
-    if "kimi" in haystack:
-        return "moonshot"
-    if "llama" in haystack or "meta" in haystack:
-        return "meta"
-    if "mistral" in haystack or "mixtral" in haystack:
-        return "mistral"
-    if "grok" in haystack or "xai" in haystack:
-        return "xai"
-    return ""
+    if not projections:
+        return {"display_name": canonical_id, "section_label": "unknown"}
+    preferred = sorted(
+        projections,
+        key=lambda item: _route_preference_rank(item[0], credentials),
+    )[0][1]
+    # The display name follows the preferred route; the section is elected by
+    # the gateway over ALL of the group's routes, so one declared vendor beats
+    # any number of endpoint guesses (decision record 2026-08-13, 决策二).
+    return {
+        "display_name": preferred.display_name,
+        "section_label": elect_model_group_section([projection for _, projection in projections]),
+    }
 
 
 def _provider_model_option(

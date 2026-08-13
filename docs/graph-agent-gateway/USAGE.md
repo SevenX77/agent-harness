@@ -298,7 +298,8 @@ name = project_model_identity(
 )
 # name.display_name  -> "Claude Opus 4.1 20250805"
 # name.section_label -> "anthropic"          分区用
-# name.confidence    -> "high"               这个答案是模型 id 自己给的
+# name.owner_source  -> "model_id"           答案从哪儿来:model_id / declared_vendor / endpoint_context
+# name.confidence    -> "high"               上面来源的另一种说法(由 owner_source 派生)
 # name.unknown_tokens-> ()                   这个 id 里没有本包不认识的词
 
 group = project_model_group_identity(route=route, endpoint=endpoint)
@@ -319,13 +320,31 @@ group = project_model_group_identity(route=route, endpoint=endpoint)
 = `low`),而不是"归给这台代理域名里的那个词"。只有一个厂商都没声明的 id
 (`large-2411`)才会去看它挂的端点。
 
-`confidence` 说的是**这个答案是从哪儿来的**,不是它有多可能对:
+`owner_source` 是这个来源的原始事实,`confidence` 由它派生、说的同样是**这个答案是
+从哪儿来的**,不是它有多可能对:
 
-| 值 | 谁说的 | 例 |
-|---|---|---|
-| `high` | 模型 id 自己点了名 | `claude-opus-4-1-20250805`、`openai/o3-mini` |
-| `medium` | id 没声明,是从它挂的端点(`endpoint_id` / `provider_label`)猜的 | 端点标着 "Mistral Cloud",模型叫 `large-2411` |
-| `low` | 声明了一个本包不认识的厂商,或者什么都认不出 | `xiaomi/mimo-v2.5` |
+| `owner_source` | `confidence` | 谁说的 | 例 |
+|---|---|---|---|
+| `model_id` | `high` | 模型 id 自己点了名 | `claude-opus-4-1-20250805`、`openai/o3-mini` |
+| `endpoint_context` | `medium`(全认不出时 `low`) | id 没声明,是从它挂的端点(`endpoint_id` / `provider_label`)猜的 | 端点标着 "Mistral Cloud",模型叫 `large-2411` |
+| `declared_vendor` | `low` | 声明了一个本包不认识的厂商 | `xiaomi/mimo-v2.5` |
+
+**一组路由归到哪个分区,也在本包作答**——同一个模型经官方、经代理各来一条时,别对
+每条路由的 `section_label` 自己数票:
+
+```python
+from graph_agent_gateway.registry import elect_model_group_section
+
+section = elect_model_group_section(group_projections)
+# group_projections: 这一组里每条路由的 project_model_group_identity(...) 投影
+```
+
+选举按 `owner_source` 分层:`model_id` 层先投,其次 `declared_vendor`,最后才轮到
+`endpoint_context`;同层内多数票,平票取字典序保证确定性。**声明压过猜测在组级同样
+成立**:`minimax/MiniMax-M1` 在 OpenRouter 上带声明、在两台 anthropic 域名的代理上
+裸名——等权多数票会把这组归给 `anthropic`(两票猜测赢一票声明),选举把它归给
+`minimax`,因为只要有人声明了,猜测就不投票:一片共享 vanity 域名的代理群自己同意
+自己,不构成证据。
 
 `unknown_tokens` 是**这个 id 里没有任何一张表认领的词**——也就是"想让本包认得更多,
 下一个该往词表里加什么"的清单。它不会列出已经被用掉的词:`opus` 推出了 family=Claude、

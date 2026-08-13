@@ -82,6 +82,9 @@ from graph_agent_gateway.registry import (
 from graph_agent_gateway.registry import (
     InMemoryConfigTruthStore as InMemoryConfigTruthStore,
 )
+from graph_agent_gateway.registry import (
+    ModelGroupIdentityProjection as ModelGroupIdentityProjection,
+)
 from graph_agent_gateway.registry import ProbeCatalogStore as ProbeCatalogStore
 from graph_agent_gateway.registry import (
     PromotableRouteUpdate as PromotableRouteUpdate,
@@ -144,6 +147,9 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     effort_probe_candidates as effort_probe_candidates,
+)
+from graph_agent_gateway.registry import (
+    elect_model_group_section as elect_model_group_section,
 )
 from graph_agent_gateway.registry import (
     endpoint_fingerprint as endpoint_fingerprint,

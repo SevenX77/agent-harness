@@ -162,27 +162,6 @@ function modelGroupPickerLabel(group: ModelGroup): string {
   return group.display_name.trim() || group.canonical_id.trim()
 }
 
-function modelGroupSectionLabel(group: ModelGroup): string {
-  const explicit = group.section_label?.trim()
-  if (explicit) return explicit
-  const haystack = [
-    group.display_name,
-    group.canonical_id,
-    ...group.provider_models.flatMap((providerModel) => [
-      providerModel.provider_label,
-      providerModel.provider_model_id,
-    ]),
-  ].join(" ").toLowerCase()
-
-  if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic"
-  if (haystack.includes("deepseek")) return "deepseek"
-  if (haystack.includes("openai") || /\bgpt[-_\s.]?\d/.test(haystack)) return "openai"
-  if (haystack.includes("gemini") || haystack.includes("antigravity") || /\baqa\b/.test(haystack)) return "gemini"
-  if (haystack.includes("qwen") || haystack.includes("dashscope") || haystack.includes("alibaba")) return "qwen"
-  if (haystack.includes("doubao") || haystack.includes("volcengine") || haystack.includes("ark")) return "ark"
-  return group.canonical_id.split(/[-_.]/)[0] || "unknown"
-}
-
 export function compareModelGroupsForPicker(groups: readonly ModelGroup[]): ModelGroup[] {
   return [...groups]
     .filter((group) => {
@@ -192,7 +171,7 @@ export function compareModelGroupsForPicker(groups: readonly ModelGroup[]): Mode
       return Boolean(id && label && hasRoute)
     })
     .sort((left, right) => (
-      modelGroupSectionLabel(left).localeCompare(modelGroupSectionLabel(right), undefined, { numeric: true, sensitivity: "base" })
+      left.section_label.localeCompare(right.section_label, undefined, { numeric: true, sensitivity: "base" })
       || modelGroupPickerLabel(left).localeCompare(modelGroupPickerLabel(right), undefined, { numeric: true, sensitivity: "base" })
     ))
 }
@@ -3327,7 +3306,7 @@ function LlmNodeCompareField({
         label: modelGroupPickerLabel(group),
         searchValue: llmCompareModelGroupSearchValue(group),
       }
-      option.section = modelGroupSectionLabel(group)
+      option.section = group.section_label
       return option
     }),
     [modelGroups],

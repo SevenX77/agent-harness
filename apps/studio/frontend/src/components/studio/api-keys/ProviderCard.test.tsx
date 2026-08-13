@@ -349,6 +349,54 @@ describe("ProviderCard test status badge", () => {
   })
 })
 
+describe("ProviderCard api key reachability mark", () => {
+  // 00_settings-ux-spec.md §"格子永不删除": 状态 = 最近观察的投影, and its colour
+  // mind-model is "绿=好；蓝=以前好" — green means good NOW. A key the provider
+  // rejected on the latest test is at best "was good before", so the model list
+  // left over from when it worked must not keep the ✓ green.
+  it("marks the key invalid when the latest test rejected it, even with models still listed", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        last_test_status: "invalid_key",
+        last_error_code: "INVALID_ARGUMENT",
+        last_test_message: "Invalid API key (INVALID_ARGUMENT).",
+        available_models: [{ id: "gemini-2.0-flash" }],
+      }),
+    })
+
+    expect(html).toContain('data-api-key-status="invalid"')
+    expect(html).not.toContain('data-api-key-status="valid"')
+  })
+
+  // The vendor decides what its own error code says: Google answers a rejected
+  // key with INVALID_ARGUMENT, DeepSeek with a 401. Reading the classified
+  // `last_test_status` keeps that decision in the one place that already makes
+  // it, instead of matching a literal code string here.
+  it("does not depend on the vendor spelling of the error code", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        last_test_status: "invalid_key",
+        last_error_code: "unauthorized",
+        available_models: [{ id: "deepseek-chat" }],
+      }),
+    })
+
+    expect(html).toContain('data-api-key-status="invalid"')
+  })
+
+  it("keeps the key valid while the latest test says the model list came back", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        last_test_status: "ok",
+        available_models: [{ id: "openai/gpt-5" }],
+      }),
+    })
+
+    expect(html).toContain('data-api-key-status="valid"')
+    expect(html).not.toContain('data-api-key-status="invalid"')
+  })
+})
+
 describe("ProviderCard provider kind badge", () => {
   it("does not duplicate the Official label when providerKind is official", () => {
     const html = renderToStaticMarkup(

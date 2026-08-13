@@ -126,6 +126,17 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 - ❌ 不知道 **copilot 是什么**——它只解析一个叫 `copilot_chat` 的 role 的 route，谁拿去、用什么 SDK 怎么调，与它无关。
 - ❌ 不绑定**存储位置**——数据结构与读写由它定义，存到哪个介质由应用注入。
 
+**它依赖引擎的哪一点，只有这一点**：本包异常继承引擎的公开错误家族 `ModelProviderError`
+（`errors.py:GatewayError` 及其三个叶子），这是引擎公开 API 契约写死的后置条件——
+见 `docs/engine/public-api-contract.md`「ModelProviderError」一节，宿主因此只需要 catch
+五个家族而不是一串叶子异常。所以 `pyproject.toml` 显式声明了 `graph-agent` 依赖，
+`errors.py` 的导入是无条件的。**反过来不成立**：引擎不依赖本包，它自己的
+`test_engine_source_has_no_gateway_concrete_imports` 禁止引擎源码 import 本包；
+宿主用自己的适配器把两者接起来（Studio 是 `app/core/adapters/engine.py` 与
+`app/core/adapters/gateway.py`）。本包只走引擎的**公开门面** `graph_agent`，
+不 import 它的任何子模块，`packages/graph-agent-gateway/tests/test_gateway_package_boundary.py`
+逐文件扫描这一条。
+
 ---
 
 ## 6. 消费方示例：Studio 设置页（与本包配套，不脱钩）

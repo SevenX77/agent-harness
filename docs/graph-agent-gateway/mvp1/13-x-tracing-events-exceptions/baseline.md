@@ -53,7 +53,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ## 异常类型语义(现状)
 
-`GatewayError` 是结构化异常基类：它先尝试继承 `graph_agent.ModelProviderError`，独立导入时退回 `RuntimeError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:7` 和 `errors.py:13`。
+`GatewayError` 是结构化异常基类：它继承 `graph_agent.ModelProviderError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/errors.py:7` 和 `errors.py:10`。这条继承是引擎公开 API 契约的后置条件（`docs/engine/public-api-contract.md:205`：`GatewayError` 及其叶子必须 `isinstance(..., ModelProviderError)`），所以导入是无条件的，本包也在 `pyproject.toml` 里显式声明了 `graph-agent` 依赖。此前它写成「先 try 继承、独立导入时退回 `RuntimeError`」，那个退路一旦触发就等于让上面这条后置条件在某些环境里静默失效，已于 2026-08-12 删除。
 
 | 异常 | 语义 | payload | 触发线索 |
 |---|---|---|---|

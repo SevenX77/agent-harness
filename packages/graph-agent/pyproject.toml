@@ -10,7 +10,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "graph-agent-gateway",
     "langchain>=1.3.9,<1.4.0",
     "langchain-core>=1.3.1,<1.5.0",
     "langchain-deepseek>=1.0.1,<1.1.0",

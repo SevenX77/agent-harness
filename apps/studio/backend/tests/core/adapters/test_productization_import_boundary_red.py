@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -110,6 +111,27 @@ def test_studio_business_layer_does_not_import_sdk_internals_directly() -> None:
     assert offenders == []
 
 
+def test_the_backend_declares_every_sdk_it_imports() -> None:
+    """A dependency you use but never name is one somebody else can take away.
+
+    The backend imports both SDKs (through the adapters allowlisted above) and
+    named only ``graph-agent`` — the gateway arrived as a transitive gift from
+    the engine, which held only while the engine kept declaring a package its
+    own tests forbid it to import.
+    """
+    imported = {
+        prefix
+        for path in _production_files()
+        for module in _imported_modules(path)
+        for prefix in SDK_PREFIXES
+        if module == prefix or module.startswith(f"{prefix}.")
+    }
+    declared = _declared_distributions(BACKEND_ROOT / "pyproject.toml")
+
+    undeclared = sorted(prefix for prefix in imported if prefix.replace("_", "-") not in declared)
+    assert undeclared == []
+
+
 def test_boundary_guard_auto_discovers_all_production_modules() -> None:
     scanned_paths = {path.relative_to(BACKEND_ROOT) for path in _production_files()}
 
@@ -197,6 +219,21 @@ def _production_files(package_dirs: Iterable[Path] | None = None) -> list[Path]:
 
 def _is_allowed_sdk_import(path: Path) -> bool:
     return path.as_posix() in SDK_IMPORT_ALLOWLIST
+
+
+def _declared_distributions(manifest: Path) -> set[str]:
+    project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+    requirements: list[str] = list(project.get("dependencies") or [])
+    for extra in (project.get("optional-dependencies") or {}).values():
+        requirements.extend(extra)
+    return {_distribution_name(requirement) for requirement in requirements}
+
+
+def _distribution_name(requirement: str) -> str:
+    name = requirement.strip()
+    for separator in ("[", "<", ">", "=", "!", "~", ";", " "):
+        name = name.split(separator, 1)[0]
+    return name.strip().lower().replace("_", "-")
 
 
 def _imported_modules(path: Path) -> set[str]:

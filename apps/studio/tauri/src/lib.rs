@@ -622,6 +622,367 @@ if [ -L "$CLAUDE_CRED" ]; then
   rm -f "$CLAUDE_CRED"
 fi"#;
 
+/// 登录界面的 pty 包装器(决议 docs/design/2026-08-12-login-console-clipboard-keys.md):
+/// 扫描登录命令的输出,第一条 https URL 出现时经剪贴板桥自动复制并打确认行;
+/// `c` 重新复制最近一条 URL,`v` 把 Windows 剪贴板注入命令输入(粘 OAuth code)。
+/// `c`/`v` 只在当前输入行为空且为孤立按键(60ms 内无后续字节)时当命令——
+/// 粘贴突发与正常输入原样透传,不吞用户数据。桥协议(copy/paste 两向 seq+ack
+/// 文件握手、alive 心跳、done 收尾)的另一半在 login_bridge_watch_loop。
+const LOGIN_CONSOLE_WRAPPER_PY: &str = r#"import fcntl, os, pty, re, select, signal, sys, termios, time, tty
+
+BRIDGE = sys.argv[1]
+CMD = sys.argv[sys.argv.index('--') + 1:]
+OSC_CSI = re.compile(rb'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~]')
+URL = re.compile(rb'https://[^\s\x07\x1b"\'<>]+')
+
+def bridge_write(name, data):
+    tmp = os.path.join(BRIDGE, name + '.tmp')
+    with open(tmp, 'wb') as handle:
+        handle.write(data)
+    os.replace(tmp, os.path.join(BRIDGE, name))
+
+def bridge_read(name):
+    try:
+        with open(os.path.join(BRIDGE, name), 'rb') as handle:
+            return handle.read().decode('utf-8-sig', 'replace')
+    except OSError:
+        return None
+
+def wait_ack(name, want):
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        got = bridge_read(name)
+        if got is not None and got.strip() == str(want):
+            return True
+        time.sleep(0.1)
+    return False
+
+def notice(text):
+    os.write(1, ('\r\n[' + text + ']\r\n').encode())
+
+class State:
+    urls = []
+    copy_seq = 0
+    paste_seq = 0
+    line_empty = True
+
+def copy_url(url):
+    State.copy_seq += 1
+    bridge_write('copy.txt', url)
+    bridge_write('copy.seq', str(State.copy_seq).encode())
+    if wait_ack('copy.ack', State.copy_seq):
+        notice('sign-in link copied to the Windows clipboard - press c to copy it again')
+    else:
+        notice('clipboard bridge offline - select the URL manually')
+
+def paste_clipboard(master):
+    State.paste_seq += 1
+    bridge_write('paste.req', str(State.paste_seq).encode())
+    if not wait_ack('paste.ack', State.paste_seq):
+        notice('clipboard bridge offline - right-click to paste')
+        return
+    text = bridge_read('paste.txt') or ''
+    try:
+        os.unlink(os.path.join(BRIDGE, 'paste.txt'))
+    except OSError:
+        pass
+    text = text.rstrip('\r\n')
+    if text:
+        os.write(master, text.encode())
+    else:
+        notice('the Windows clipboard is empty')
+
+def main():
+    pid, master = pty.fork()
+    if pid == 0:
+        os.execvp(CMD[0], CMD)
+    stdin_fd = 0
+    saved = None
+    try:
+        saved = termios.tcgetattr(stdin_fd)
+        tty.setraw(stdin_fd)
+    except Exception:
+        saved = None
+
+    def sync_winsize(*_args):
+        try:
+            size = fcntl.ioctl(stdin_fd, termios.TIOCGWINSZ, b'\x00' * 8)
+            fcntl.ioctl(master, termios.TIOCSWINSZ, size)
+        except Exception:
+            pass
+
+    try:
+        signal.signal(signal.SIGWINCH, sync_winsize)
+    except Exception:
+        pass
+    sync_winsize()
+
+    fds = [stdin_fd, master]
+    tail = b''
+    copied_first = False
+    last_beat = 0.0
+    while True:
+        if time.monotonic() - last_beat > 2.0:
+            bridge_write('alive', str(int(time.time())).encode())
+            last_beat = time.monotonic()
+        try:
+            ready = select.select(fds, [], [], 0.2)[0]
+        except (OSError, ValueError):
+            break
+        if master in ready:
+            try:
+                data = os.read(master, 4096)
+            except OSError:
+                data = b''
+            if not data:
+                break
+            os.write(1, data)
+            tail = (tail + data)[-8192:]
+            for match in URL.finditer(OSC_CSI.sub(b' ', tail)):
+                url = match.group(0).rstrip(b'.,);')
+                if url not in State.urls:
+                    State.urls.append(url)
+                    if not copied_first:
+                        copied_first = True
+                        copy_url(url)
+                    else:
+                        notice('new link shown - press c to copy it')
+        if stdin_fd in ready:
+            try:
+                data = os.read(stdin_fd, 4096)
+            except OSError:
+                data = b''
+            if not data:
+                fds = [master]
+                continue
+            if data in (b'c', b'v') and State.line_empty:
+                if select.select([stdin_fd], [], [], 0.06)[0]:
+                    data += os.read(stdin_fd, 4096)
+            if data == b'c' and State.line_empty and State.urls:
+                copy_url(State.urls[-1])
+                continue
+            if data == b'v' and State.line_empty:
+                paste_clipboard(master)
+                continue
+            os.write(master, data)
+            if data.endswith((b'\r', b'\n')):
+                State.line_empty = True
+            elif data.strip():
+                State.line_empty = False
+    status = 1
+    try:
+        status = os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+        if status < 0:
+            status = 128 - status
+    except (ChildProcessError, OSError):
+        status = 0
+    if saved is not None:
+        try:
+            termios.tcsetattr(stdin_fd, termios.TCSADRAIN, saved)
+        except Exception:
+            pass
+    bridge_write('done', b'1')
+    return status
+
+sys.exit(main())"#;
+
+/// 登录命令的 shell 包装函数:桥可用且有 python3 → pty 包装器;任一环节缺失
+/// → 裸跑命令(降级语义,决议 §3.4)。heredoc 落包装器,免文件分发。
+fn login_console_shell_block(bridge_wsl_dir: &str) -> String {
+    let bridge = sh_single_quote_str(bridge_wsl_dir);
+    format!(
+        r#"export STUDIO_LOGIN_BRIDGE={bridge}
+studio_login_console() {{
+  if [ -d "${{STUDIO_LOGIN_BRIDGE:-}}" ] && command -v python3 >/dev/null 2>&1 \
+    && studio_login_wrap="$(mktemp 2>/dev/null)" && [ -n "$studio_login_wrap" ]; then
+    cat > "$studio_login_wrap" <<'STUDIO_LOGIN_PY'
+{LOGIN_CONSOLE_WRAPPER_PY}
+STUDIO_LOGIN_PY
+    python3 "$studio_login_wrap" "$STUDIO_LOGIN_BRIDGE" -- "$@"
+    studio_login_status=$?
+    rm -f "$studio_login_wrap"
+    return "$studio_login_status"
+  fi
+  "$@"
+}}
+"#
+    )
+}
+
+/// 登录控制台与 Studio 之间的剪贴板桥。为什么是文件握手:本机 WSL 进程互通
+/// 关闭(`/etc/wsl.conf [interop] enabled=false`,ah e2e 测试床既定配置)且
+/// Windows Terminal 对 OSC 52 实测无效(2026-08-12,wt.exe 强制承载下 BEL/ST
+/// 两种终结符均不落剪贴板)——/mnt 挂载文件是 WSL 侧唯一可靠通道,剪贴板
+/// 读写只能由 Windows 侧完成。
+struct LoginBridge {
+    dir: PathBuf,
+    wsl_dir: String,
+}
+
+static LOGIN_BRIDGE_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn provision_login_bridge() -> Option<LoginBridge> {
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+        .join("AgentStudio")
+        .join("login-bridge");
+    let nonce = format!(
+        "{}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis(),
+        LOGIN_BRIDGE_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    );
+    let dir = base.join(nonce);
+    std::fs::create_dir_all(&dir).ok()?;
+    let wsl_dir = windows_path_to_wsl(&dir);
+    if !wsl_dir.starts_with("/mnt/") {
+        let _ = std::fs::remove_dir_all(&dir);
+        return None;
+    }
+    Some(LoginBridge { dir, wsl_dir })
+}
+
+/// 看护线程的节奏。生命周期由桥文件驱动而不是进程句柄:包装器每 ~2s touch
+/// `alive`、结束写 `done`,所以外部控制台与内嵌终端两类承载完全同构,
+/// 不需要把子进程句柄穿过 spawn 管线。
+struct LoginBridgeTiming {
+    poll: Duration,
+    first_heartbeat_grace: Duration,
+    heartbeat_stale: Duration,
+    deadline: Duration,
+}
+
+impl Default for LoginBridgeTiming {
+    fn default() -> Self {
+        Self {
+            poll: Duration::from_millis(300),
+            // 已登录时 doorman 不跑包装器,永远没有心跳——宽限期后自行退场。
+            first_heartbeat_grace: Duration::from_secs(180),
+            heartbeat_stale: Duration::from_secs(10),
+            deadline: Duration::from_secs(45 * 60),
+        }
+    }
+}
+
+fn login_bridge_read_seq(dir: &Path, name: &str) -> Option<u64> {
+    std::fs::read_to_string(dir.join(name)).ok()?.trim().parse().ok()
+}
+
+fn login_bridge_watch_loop(
+    dir: &Path,
+    set_clipboard: &dyn Fn(&str) -> Result<(), String>,
+    get_clipboard: &dyn Fn() -> Result<String, String>,
+    timing: &LoginBridgeTiming,
+) {
+    let started = Instant::now();
+    let mut last_copy = 0u64;
+    let mut last_paste = 0u64;
+    loop {
+        std::thread::sleep(timing.poll);
+        if dir.join("done").is_file() || started.elapsed() > timing.deadline {
+            break;
+        }
+        match std::fs::metadata(dir.join("alive")).ok().and_then(|meta| meta.modified().ok()) {
+            Some(modified) => {
+                if modified.elapsed().map(|age| age > timing.heartbeat_stale).unwrap_or(false) {
+                    break;
+                }
+            }
+            None => {
+                if started.elapsed() > timing.first_heartbeat_grace {
+                    break;
+                }
+            }
+        }
+        if let Some(seq) = login_bridge_read_seq(dir, "copy.seq") {
+            if seq > last_copy {
+                // 包装器先写 copy.txt 再写 copy.seq,读到 seq 时正文必已就位。
+                last_copy = seq;
+                if let Ok(text) = std::fs::read_to_string(dir.join("copy.txt")) {
+                    if set_clipboard(text.trim()).is_ok() {
+                        let _ = std::fs::write(dir.join("copy.ack"), seq.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(seq) = login_bridge_read_seq(dir, "paste.req") {
+            if seq > last_paste {
+                last_paste = seq;
+                if let Ok(text) = get_clipboard() {
+                    if std::fs::write(dir.join("paste.txt"), text.as_bytes()).is_ok() {
+                        let _ = std::fs::write(dir.join("paste.ack"), seq.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn spawn_login_bridge_watcher(dir: PathBuf) {
+    std::thread::spawn(move || {
+        let io = dir.join("clip-io.txt");
+        let set_io = io.clone();
+        let set = move |text: &str| -> Result<(), String> {
+            std::fs::write(&set_io, text).map_err(|error| error.to_string())?;
+            windows_clipboard_set_from_file(&set_io)
+        };
+        let get = move || -> Result<String, String> {
+            windows_clipboard_get_to_file(&io)?;
+            std::fs::read_to_string(&io).map_err(|error| error.to_string())
+        };
+        login_bridge_watch_loop(&dir, &set, &get, &LoginBridgeTiming::default());
+    });
+}
+
+/// 剪贴板值经文件递交,不上 powershell 命令行(引号安全,也不进进程表)。
+#[cfg(target_os = "windows")]
+fn run_hidden_powershell(command: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", command])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|error| format!("failed to run powershell: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_clipboard_set_from_file(file: &Path) -> Result<(), String> {
+    let path = file.display().to_string().replace('\'', "''");
+    run_hidden_powershell(&format!(
+        "Set-Clipboard -Value ([System.IO.File]::ReadAllText('{path}'))"
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_clipboard_get_to_file(file: &Path) -> Result<(), String> {
+    let path = file.display().to_string().replace('\'', "''");
+    run_hidden_powershell(&format!(
+        "[System.IO.File]::WriteAllText('{path}', [string](Get-Clipboard -Raw))"
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_clipboard_set_from_file(_file: &Path) -> Result<(), String> {
+    Err("Windows clipboard is Windows-only".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_clipboard_get_to_file(_file: &Path) -> Result<(), String> {
+    Err("Windows clipboard is Windows-only".to_string())
+}
+
 /// 更新/登录按钮共用的命令表:动作 × provider 枚举定死在这里,前端只传标识——
 /// 不存在把任意字符串递进 shell 的通道。命令与 launcher login-doorman、安装脚本
 /// B2 步同源(claude auth login / codex login;update 是两 CLI 自带的检查+安装一体)。
@@ -638,15 +999,28 @@ fn cli_console_action_command(action: &str, provider: &str) -> Result<&'static s
 /// 与 run_ah_version 同一理由显式补 PATH(非交互 shell 不一定带 ~/.local/bin);
 /// 结尾 read 留窗——用户看完结果自己关,回 Studio 点「重新检测」刷新状态。
 /// claude 登录前先做与 login-doorman 完全相同的旧桥拆链(常量注释里的凭据链纪律)。
-fn cli_console_action_script(action: &str, provider: &str) -> Result<String, String> {
+/// 登录动作在有剪贴板桥时经 studio_login_console 包装(URL 自动复制 + c/v 键);
+/// 更新控制台没有 URL/code 交互,桥参数对它无效。
+fn cli_console_action_script(
+    action: &str,
+    provider: &str,
+    login_bridge_wsl: Option<&str>,
+) -> Result<String, String> {
     let command = cli_console_action_command(action, provider)?;
     let preamble = if action == "login" && provider == "claude" {
         format!("{CLAUDE_LEGACY_CRED_LINK_CLEANUP_SH}\n")
     } else {
         String::new()
     };
+    let (login_console_block, run) = match login_bridge_wsl {
+        Some(bridge) if action == "login" => (
+            login_console_shell_block(bridge),
+            format!("studio_login_console {command}"),
+        ),
+        _ => (String::new(), command.to_string()),
+    };
     Ok(format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; {preamble}{command}; status=$?; echo; read -rp \"[{command}] finished with exit $status - press Enter to close\" _",
+        "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"\n{login_console_block}{preamble}{run}; status=$?; echo; read -rp \"[{command}] finished with exit $status - press Enter to close\" _",
     ))
 }
 
@@ -660,7 +1034,14 @@ fn launch_cli_console_action(action: &str, provider: &str) -> Result<(), String>
             "Run `{command}` in your terminal; Studio only automates this on Windows/WSL."
         ));
     }
-    spawn_wsl_console(&cli_console_action_script(action, provider)?)
+    let bridge = if action == "login" { provision_login_bridge() } else { None };
+    let script =
+        cli_console_action_script(action, provider, bridge.as_ref().map(|b| b.wsl_dir.as_str()))?;
+    spawn_wsl_console(&script)?;
+    if let Some(bridge) = bridge {
+        spawn_login_bridge_watcher(bridge.dir);
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -2731,8 +3112,20 @@ fn wsl_payload_script(
     _windows_claude_home: Option<&str>,
     studio_mcp: Option<&StudioMcpEndpoint>,
     patch_transient_claude_config: bool,
+    login_bridge_wsl: Option<&str>,
 ) -> String {
     let ah_bootstrap = wsl_ah_bootstrap_block(&ah_auto_deploy_script());
+    // doorman 的登录命令与设置页「登录」控制台同一套包装(URL 自动复制 + c/v,
+    // 决议 2026-08-12-login-console-clipboard-keys);没有桥就裸跑,行为不变。
+    let login_console_block =
+        login_bridge_wsl.map(login_console_shell_block).unwrap_or_default();
+    let codex_login_cmd =
+        if login_bridge_wsl.is_some() { "studio_login_console codex login" } else { "codex login" };
+    let claude_login_cmd = if login_bridge_wsl.is_some() {
+        "studio_login_console claude auth login"
+    } else {
+        "claude auth login"
+    };
 
     // One credential chain per environment (ah decision 0006): refresh tokens
     // rotate on every use, so a Windows auth.json copied into WSL forks the
@@ -2741,12 +3134,13 @@ fn wsl_payload_script(
     // a real machine. The WSL login is authoritative; when it is missing, the
     // launcher runs Codex's own sign-in right here in this terminal.
     let codex_auth_sync = if matches!(assistant, CodeAssistant::Codex) {
-        r#"if [ ! -f "$HOME/.codex/auth.json" ]; then
+        format!(
+            r#"if [ ! -f "$HOME/.codex/auth.json" ]; then
   printf '%s
 ' "No Codex login in this WSL environment yet; starting codex login..."
   printf '%s
 ' "Complete the sign-in in the browser, then the launch continues."
-  if ! codex login; then
+  if ! {codex_login_cmd}; then
     printf '%s
 ' "Codex login did not complete."
     printf '%s
@@ -2755,7 +3149,7 @@ fn wsl_payload_script(
   fi
 fi
 "#
-        .to_string()
+        )
     } else {
         String::new()
     };
@@ -2772,7 +3166,7 @@ if [ ! -f "$CLAUDE_CRED" ]; then
 ' "No Claude login in this WSL environment yet; starting claude auth login..."
   printf '%s
 ' "Complete the sign-in in the browser, then the launch continues."
-  if ! claude auth login; then
+  if ! {claude_login_cmd}; then
     printf '%s
 ' "Claude login did not complete."
     printf '%s
@@ -2810,7 +3204,7 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 WS={workspace}
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
-{studio_mcp_env}{codex_auth_sync}{claude_auth_bridge}
+{login_console_block}{studio_mcp_env}{codex_auth_sync}{claude_auth_bridge}
 {ah_bootstrap}
 {claude_cli_refresh}{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - "$WS" <<'PY'
@@ -3092,7 +3486,10 @@ fn write_code_assistant_launcher_script(
     let content = if cfg!(target_os = "windows") {
         // ah + claude live inside WSL2 on Windows, so the launcher IS the bash
         // payload; paths are translated to the /mnt/... form the distro sees.
-        wsl_payload_script(
+        // doorman 可能要跑交互式登录 → 配一座剪贴板桥;已登录时包装器不跑,
+        // 看护线程等不到第一跳心跳,宽限期后自行退场并清目录。
+        let login_bridge = provision_login_bridge();
+        let payload = wsl_payload_script(
             &windows_path_to_wsl(workspace_root),
             &windows_path_to_wsl(config_path),
             assistant,
@@ -3100,7 +3497,12 @@ fn write_code_assistant_launcher_script(
             windows_claude_home_wsl().as_deref(),
             studio_mcp,
             patch_transient_claude_config,
-        )
+            login_bridge.as_ref().map(|bridge| bridge.wsl_dir.as_str()),
+        );
+        if let Some(bridge) = login_bridge {
+            spawn_login_bridge_watcher(bridge.dir);
+        }
+        payload
     } else {
         unix_code_assistant_launcher_script(
             workspace_root,
@@ -4782,6 +5184,7 @@ mod tests {
                 token: "tkn-abc".to_string(),
             }),
             false,
+            None,
         );
 
         assert!(payload.contains("export STUDIO_MCP_URL=\"http://127.0.0.1:8787/mcp\""));
@@ -4802,6 +5205,7 @@ mod tests {
             None,
             None,
             true,
+            None,
         );
 
         assert!(payload.contains("[providers.claude]"));
@@ -4821,6 +5225,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
 
         assert!(!payload.contains("[providers.claude]"));
@@ -4836,6 +5241,7 @@ mod tests {
             None,
             None,
             true,
+            None,
         );
 
         assert!(!payload.contains("[providers.claude]"));
@@ -4855,6 +5261,7 @@ mod tests {
             None,
             None,
             true,
+            None,
         );
 
         let update_index = payload
@@ -4899,6 +5306,7 @@ mod tests {
             None,
             None,
             true,
+            None,
         );
         assert!(
             !codex_payload.contains("claude install latest"),
@@ -4929,6 +5337,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
 
         assert!(!payload.contains("STUDIO_MCP_URL"));
@@ -5217,7 +5626,7 @@ mod tests {
         assert_eq!(cli_console_action_command("login", "codex"), Ok("codex login"));
         assert!(cli_console_action_command("login", "ah").is_err(), "表外组合必须拒绝");
         assert!(cli_console_action_command("rm -rf /", "claude").is_err());
-        let script = cli_console_action_script("login", "claude").expect("script");
+        let script = cli_console_action_script("login", "claude", None).expect("script");
         assert!(script.contains("$HOME/.local/bin"), "非交互 shell 需要显式补 PATH: {script}");
         assert!(script.contains("read -rp"), "控制台必须留窗给用户看结果: {script}");
         // 一环境一凭据链(ah #18):按钮入口必须与 login-doorman 同款拆桥,否则在
@@ -5226,11 +5635,271 @@ mod tests {
             script.contains("Removing the legacy Windows credential link"),
             "claude 登录脚本缺 doorman 同款旧桥拆链: {script}"
         );
-        let codex_script = cli_console_action_script("login", "codex").expect("script");
+        let codex_script = cli_console_action_script("login", "codex", None).expect("script");
         assert!(
             !codex_script.contains("CLAUDE_CRED"),
             "codex 登录不涉及 claude 凭据桥: {codex_script}"
         );
+    }
+
+    /// 决议 2026-08-12-login-console-clipboard-keys —— 登录控制台在有桥时经
+    /// studio_login_console 包装(URL 自动复制 + c/v);无桥/更新动作维持原样。
+    #[test]
+    fn test_login_console_script_wires_the_clipboard_bridge() {
+        let script =
+            cli_console_action_script("login", "claude", Some("/mnt/c/x/bridge")).expect("script");
+        assert!(script.contains("export STUDIO_LOGIN_BRIDGE='/mnt/c/x/bridge'"));
+        assert!(script.contains("STUDIO_LOGIN_PY"), "包装器必须以 heredoc 落进脚本");
+        assert!(script.contains("studio_login_console claude auth login"));
+        // 拆链纪律先于登录本体,与 doorman 顺序一致。
+        let cleanup = script.find("Removing the legacy Windows credential link").unwrap();
+        let login = script.find("studio_login_console claude auth login").unwrap();
+        assert!(cleanup < login, "旧桥拆链必须发生在登录命令之前");
+        // 无桥 = 现行为:裸命令,无包装器痕迹。
+        let bare = cli_console_action_script("login", "claude", None).expect("script");
+        assert!(!bare.contains("STUDIO_LOGIN_BRIDGE"));
+        assert!(bare.contains("claude auth login;"));
+        // 更新控制台没有 URL/code 交互,桥参数对它无效。
+        let update =
+            cli_console_action_script("update", "codex", Some("/mnt/c/x/bridge")).expect("script");
+        assert!(!update.contains("STUDIO_LOGIN_BRIDGE"));
+    }
+
+    /// 同一决议 —— 两个 doorman(claude/codex)与设置页按钮共用同一个包装函数;
+    /// 没有桥时逐字维持历史行为。
+    #[test]
+    fn test_wsl_payload_wires_the_login_console_for_doormen() {
+        let claude = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/d/cfg",
+            CodeAssistant::Claude,
+            None,
+            None,
+            None,
+            false,
+            Some("/mnt/c/x/bridge"),
+        );
+        assert!(claude.contains("export STUDIO_LOGIN_BRIDGE='/mnt/c/x/bridge'"));
+        assert!(claude.contains("if ! studio_login_console claude auth login; then"));
+        let codex = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/d/cfg",
+            CodeAssistant::Codex,
+            None,
+            None,
+            None,
+            false,
+            Some("/mnt/c/x/bridge"),
+        );
+        assert!(codex.contains("if ! studio_login_console codex login; then"));
+        let bare = wsl_payload_script(
+            "/mnt/d/ws",
+            "/mnt/d/cfg",
+            CodeAssistant::Claude,
+            None,
+            None,
+            None,
+            false,
+            None,
+        );
+        assert!(!bare.contains("STUDIO_LOGIN_BRIDGE"));
+        assert!(bare.contains("if ! claude auth login; then"));
+    }
+
+    fn login_bridge_test_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("studio-login-bridge-test-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 桥协议双向握手 + done 收尾 + 目录清理(注入假剪贴板,免 powershell)。
+    #[test]
+    fn test_login_bridge_watch_loop_serves_copy_and_paste_then_cleans_up() {
+        let dir = login_bridge_test_dir("protocol");
+        let clipboard = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let set_clip = {
+            let clipboard = clipboard.clone();
+            move |text: &str| -> Result<(), String> {
+                *clipboard.lock().unwrap() = text.to_string();
+                Ok(())
+            }
+        };
+        let get_clip = {
+            let clipboard = clipboard.clone();
+            move || -> Result<String, String> { Ok(clipboard.lock().unwrap().clone()) }
+        };
+        let timing = LoginBridgeTiming {
+            poll: Duration::from_millis(20),
+            first_heartbeat_grace: Duration::from_secs(10),
+            heartbeat_stale: Duration::from_secs(10),
+            deadline: Duration::from_secs(30),
+        };
+        let loop_dir = dir.clone();
+        let watcher = std::thread::spawn(move || {
+            login_bridge_watch_loop(&loop_dir, &set_clip, &get_clip, &timing);
+        });
+        std::fs::write(dir.join("alive"), "1").unwrap();
+        // copy:包装器先写正文再写 seq。
+        std::fs::write(dir.join("copy.txt"), "https://example.com/auth").unwrap();
+        std::fs::write(dir.join("copy.seq"), "1").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !dir.join("copy.ack").is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.join("copy.ack")).unwrap().trim(),
+            "1",
+            "copy 必须以 ack 回执"
+        );
+        assert_eq!(clipboard.lock().unwrap().as_str(), "https://example.com/auth");
+        // paste:用户在浏览器拿到 code 复制进剪贴板,然后按 v。
+        *clipboard.lock().unwrap() = String::from("CODE-FROM-WIN");
+        std::fs::write(dir.join("paste.req"), "1").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !dir.join("paste.ack").is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.join("paste.txt")).unwrap(),
+            "CODE-FROM-WIN",
+            "paste.txt 必须先于 ack 就位"
+        );
+        std::fs::write(dir.join("done"), "1").unwrap();
+        watcher.join().unwrap();
+        assert!(!dir.exists(), "看护线程退出时必须清掉桥目录");
+    }
+
+    /// 已登录时 doorman 不跑包装器 → 永远没有心跳;看护线程宽限期后自行退场。
+    #[test]
+    fn test_login_bridge_watch_loop_exits_when_the_heartbeat_never_arrives() {
+        let dir = login_bridge_test_dir("no-heartbeat");
+        let timing = LoginBridgeTiming {
+            poll: Duration::from_millis(20),
+            first_heartbeat_grace: Duration::from_millis(200),
+            heartbeat_stale: Duration::from_secs(10),
+            deadline: Duration::from_secs(30),
+        };
+        let set = |_: &str| -> Result<(), String> { Ok(()) };
+        let get = || -> Result<String, String> { Ok(String::new()) };
+        let started = Instant::now();
+        login_bridge_watch_loop(&dir, &set, &get, &timing);
+        assert!(started.elapsed() < Duration::from_secs(5), "宽限期后必须尽快退出");
+        assert!(!dir.exists(), "无心跳退场同样要清目录");
+    }
+
+    /// 包装器行为测试:真 python3 跑真协议(本测试线程扮演看护侧)。覆盖
+    /// URL 自动复制、v 注入剪贴板、子进程回显与退出、done 收尾。
+    /// Windows 无 pty/python3 组合,跳过(与门禁 sh 测试同策略)。
+    #[cfg(unix)]
+    #[test]
+    fn test_login_wrapper_copies_urls_and_pastes_clipboard() {
+        use std::io::{Read, Write};
+        if !Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let dir = login_bridge_test_dir("wrapper");
+        let wrapper_path = dir.join("wrapper.py");
+        std::fs::write(&wrapper_path, LOGIN_CONSOLE_WRAPPER_PY).unwrap();
+        let mut child = Command::new("python3")
+            .arg(&wrapper_path)
+            .arg(&dir)
+            .arg("--")
+            .args([
+                "sh",
+                "-c",
+                "printf 'visit https://example.com/authz?x=1 to continue\\n'; read line; printf 'GOT:%s\\n' \"$line\"",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("wrapper spawns");
+        // 本线程扮演看护:copy 到达即 ack;paste.req 到达即供给 code。
+        let bridge = dir.clone();
+        let fake_watcher = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let mut acked_copy = false;
+            let mut served_paste = false;
+            while Instant::now() < deadline && !(acked_copy && served_paste) {
+                if !acked_copy {
+                    if let Ok(seq) = std::fs::read_to_string(bridge.join("copy.seq")) {
+                        let url = std::fs::read_to_string(bridge.join("copy.txt")).unwrap_or_default();
+                        assert!(
+                            url.contains("https://example.com/authz?x=1"),
+                            "包装器复制的必须是输出里的 URL: {url}"
+                        );
+                        std::fs::write(bridge.join("copy.ack"), seq.trim()).unwrap();
+                        acked_copy = true;
+                    }
+                }
+                if !served_paste {
+                    if let Ok(seq) = std::fs::read_to_string(bridge.join("paste.req")) {
+                        std::fs::write(bridge.join("paste.txt"), "CODE123").unwrap();
+                        std::fs::write(bridge.join("paste.ack"), seq.trim()).unwrap();
+                        served_paste = true;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            (acked_copy, served_paste)
+        });
+        // 汇流 stdout:等复制确认行出现后按 v,再回车提交注入的 code。
+        let mut stdout = child.stdout.take().unwrap();
+        let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = collected.clone();
+        let reader = std::thread::spawn(move || {
+            let mut buffer = [0u8; 1024];
+            loop {
+                match stdout.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => sink.lock().unwrap().push_str(&String::from_utf8_lossy(&buffer[..n])),
+                }
+            }
+        });
+        let wait_for = |needle: &str| -> bool {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline {
+                if collected.lock().unwrap().contains(needle) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            false
+        };
+        assert!(
+            wait_for("sign-in link copied"),
+            "URL 出现后必须自动复制并打确认行;输出: {}",
+            collected.lock().unwrap()
+        );
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(b"v").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        stdin.write_all(b"\r").unwrap();
+        stdin.flush().unwrap();
+        assert!(
+            wait_for("GOT:CODE123"),
+            "v 必须把剪贴板注入子进程输入;输出: {}",
+            collected.lock().unwrap()
+        );
+        let (acked_copy, served_paste) = fake_watcher.join().unwrap();
+        assert!(acked_copy && served_paste);
+        let status = child.wait().expect("wrapper exits");
+        assert!(status.success(), "子进程正常结束时包装器透传退出码 0");
+        reader.join().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !dir.join("done").is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(dir.join("done").is_file(), "包装器退出时必须写 done 收尾");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 提案 §3(PR-2)—— 安装脚本沿祖先目录定位;找不到明确报错不猜路径。
@@ -5654,6 +6323,7 @@ mod tests {
             Some("/mnt/c/Users/u/.claude"),
             None,
             false,
+            None,
         );
         assert!(windows_payload.contains("ah_version="));
         assert!(windows_payload.contains(&format!("requires ah >= {AH_VERSION_MIN}")));
@@ -5834,7 +6504,8 @@ mod tests {
                 Some("/mnt/c/Users/u/.claude"),
                 None,
                 false,
-            ),
+            None,
+        ),
             wsl_attach_payload_script("/mnt/c/tmp/ah.toml", "/mnt/d/skill", CodeAssistant::Claude),
             unix_code_assistant_launcher_script(
                 Path::new("/tmp/skill"),
@@ -6934,6 +7605,7 @@ mod tests {
             Some("/mnt/c/Users/u/.claude"),
             None,
             false,
+            None,
         );
         assert!(!payload.contains("WIN_CLAUDE_HOME"));
         assert!(!payload.contains("ln -sfn \"$WIN_CLAUDE_HOME"));
@@ -6953,6 +7625,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
         assert!(!codex_payload.contains("WIN_CLAUDE_HOME"));
         assert!(codex_payload.contains("auth.json"));
@@ -8068,6 +8741,7 @@ sessions
             Some("/mnt/c/Users/Test User/.claude"),
             None,
             false,
+            None,
         );
 
         assert!(script.contains("WS='/mnt/c/Users/Test User/skill'"));
@@ -8099,6 +8773,7 @@ sessions
             None,
             None,
             false,
+            None,
         );
 
         assert!(!script.contains("WIN_CODEX_HOME"));
@@ -8161,7 +8836,8 @@ sessions
                 None,
                 None,
                 false,
-            ),
+            None,
+        ),
             wsl_attach_payload_script("/mnt/c/tmp/ah.toml", "/mnt/d/skill", CodeAssistant::Claude),
             unix_code_assistant_launcher_script(
                 Path::new("/tmp/skill"),

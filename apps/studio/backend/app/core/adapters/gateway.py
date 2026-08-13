@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+if TYPE_CHECKING:
+    from app.models.llm_config import ModelBundle, RoleEntry
 
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.call import ModelResolver as ModelResolver
@@ -339,7 +342,7 @@ class GatewayAdapter:
         resolver = ModelResolver(config_store=config_store, user_id=config.DEFAULT_USER_ID)
         return resolver.resolve_routes(role_name, route_override=payload.get("route_override"))
 
-    def materialize_role(self, payload: dict[str, Any]) -> Any:
+    def materialize_role(self, payload: dict[str, Any]) -> RoleEntry:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
@@ -359,6 +362,8 @@ class GatewayAdapter:
         role = payload["role"]
         if isinstance(role, dict):
             role = RoleEntry.model_validate(role)
+        if not isinstance(role, RoleEntry):
+            raise TypeError(f"materialize_role expects a RoleEntry, got {type(role).__name__}")
         credentials = payload["credentials"]
         if isinstance(credentials, dict):
             credentials = validate_credentials_payload(credentials)
@@ -392,7 +397,7 @@ class GatewayAdapter:
             }
         )
 
-    def materialize_model_bundle(self, payload: dict[str, Any]) -> Any:
+    def materialize_model_bundle(self, payload: dict[str, Any]) -> ModelBundle:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
@@ -412,6 +417,8 @@ class GatewayAdapter:
         bundle = payload["bundle"]
         if isinstance(bundle, dict):
             bundle = ModelBundle.model_validate(bundle)
+        if not isinstance(bundle, ModelBundle):
+            raise TypeError(f"materialize_model_bundle expects a ModelBundle, got {type(bundle).__name__}")
         credentials = payload["credentials"]
         if isinstance(credentials, dict):
             credentials = validate_credentials_payload(credentials)

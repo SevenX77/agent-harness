@@ -18,13 +18,12 @@ from app.core import config
 from app.models.llm_config import (
     LLMCredentialsFile,
     RoleEntry,
-    RoleModelGroup,
-    RoleProviderModel,
     RolesData,
 )
 from app.services.llm_credentials import save_credentials
 from app.services.llm_paths import roles_path
 from app.services.llm_roles import load_roles_file
+from graph_agent_gateway.registry import RoleModelGroup, RoleProviderModel
 
 
 def _seed_empty_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

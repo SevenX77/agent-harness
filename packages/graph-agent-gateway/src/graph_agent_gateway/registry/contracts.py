@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -33,6 +34,47 @@ class CredentialDescriptor(BaseModel):
         if not self.exists and self.status == "available":
             raise ValueError("available credentials must exist")
         return self
+
+
+class ActiveCircuit(Protocol):
+    """One open circuit, as role materialization reads it.
+
+    Only what the projection consumes is named here: which scope tripped, when
+    it may be retried, and what to tell a person. Everything else a host's
+    store records (opened_at, failure counts, TTLs) is its own business.
+    """
+
+    @property
+    def scope(self) -> str: ...
+
+    @property
+    def scope_id(self) -> str: ...
+
+    @property
+    def retry_at(self) -> datetime: ...
+
+    @property
+    def reason_code(self) -> str: ...
+
+    @property
+    def message(self) -> str | None: ...
+
+
+class HealthStore(Protocol):
+    """Where open circuits are looked up while a role is resolved.
+
+    A Port, not a base class: circuit persistence is host-owned (Studio's is a
+    sqlite file), and resolving a role only ever asks one question of it.
+    """
+
+    def get_active_circuits(
+        self,
+        *,
+        route_id: str,
+        endpoint_id: str,
+        rate_limit_bucket: str,
+        now: datetime | None = None,
+    ) -> Sequence[ActiveCircuit]: ...
 
 
 class RouteRegistry(Protocol):

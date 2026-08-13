@@ -20,8 +20,6 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
-    RoleModelGroup,
-    RoleProviderModel,
     RoleRouteEntry,
     RolesData,
 )
@@ -36,7 +34,7 @@ from app.services.model_probe import ModelProbeResult
 from fastapi.testclient import TestClient
 from graph_agent_gateway.probing import EndpointProbeResult, RouteProbeResult
 from graph_agent_gateway.probing import wire as gateway_provider_probe
-from graph_agent_gateway.registry import EvidenceRecord, VerifiedProfile
+from graph_agent_gateway.registry import EvidenceRecord, RoleModelGroup, RoleProviderModel, VerifiedProfile
 
 
 def _endpoint_probe_ok(

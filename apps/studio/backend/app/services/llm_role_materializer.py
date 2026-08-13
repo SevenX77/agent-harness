@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.llm_config import (
     LLMCredentialsFile,
@@ -20,13 +18,13 @@ def materialize_role(
 ) -> RoleEntry:
     """Generate a gateway-compatible fallback chain and report from Role authoring."""
     adapter = build_gateway_adapter()
-    return cast(RoleEntry, adapter.materialize_role(
+    return adapter.materialize_role(
         {
             "role": role,
             "credentials": credentials,
             "health_store": health_store,
         }
-    ))
+    )
 
 
 def materialize_model_bundle(
@@ -36,10 +34,10 @@ def materialize_model_bundle(
 ) -> ModelBundle:
     """Generate a flat route chain for a user-authored model bundle."""
     adapter = build_gateway_adapter()
-    return cast(ModelBundle, adapter.materialize_model_bundle(
+    return adapter.materialize_model_bundle(
         {
             "bundle": bundle,
             "credentials": credentials,
             "health_store": health_store,
         }
-    ))
+    )

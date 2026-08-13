@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import (
     BaseModel,
@@ -309,6 +309,72 @@ class RoleRouteEntry(BaseModel):
         return value
 
 
+# Studio's authored temperature dial runs 0..2 and the frontend shows it as
+# 0-100%; provider scales are reached by taking that share of the route's
+# ceiling (registry/bounds.py). 1.4 is the 70% default the dial opens on.
+AUTHORED_TEMPERATURE_MAX: Final = 2.0
+DEFAULT_ROLE_TEMPERATURE: Final = 1.4
+
+
+class RoleIntent(BaseModel):
+    """The generation params a role asks for, stored at the role level.
+
+    ``thinking`` is a best-effort switch: enable reasoning when the model
+    supports it, else warn — never a fit downgrade. ``max_output_tokens`` is a
+    plain number clamped into the route's output-token range (or the route max
+    when unset). ``temperature`` is a share of the authored dial, written
+    through to the route runtime settings. ``reasoning_effort`` names how hard
+    the model should work when it reasons — a separate question from whether it
+    reasons at all — and is fitted to the levels each route sells while the
+    role is materialized; unset leaves the provider's own default, which no
+    level of ours can stand in for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_preference: Literal["manual_order"] = "manual_order"
+    thinking: bool = False
+    max_output_tokens: int | None = Field(default=None, ge=1)
+    temperature: float = DEFAULT_ROLE_TEMPERATURE
+    reasoning_effort: str | None = None
+
+    @field_validator("temperature")
+    @classmethod
+    def _keep_temperature_on_the_dial(cls, value: float) -> float:
+        """Store what the dial can express, rather than rejecting the save.
+
+        The authored temperature is a share of whatever ceiling the route turns
+        out to have, so a value off the dial has no share to name. The ends of
+        the dial are what "past the end" means; a 422 here would make a
+        preference fail a save, which is the same mistake as letting one fail a
+        call.
+        """
+        return min(max(value, 0.0), AUTHORED_TEMPERATURE_MAX)
+
+
+class RoleProviderModel(BaseModel):
+    """One selected provider model option inside a Model Group.
+
+    Model-only: generation params live at the role level (see ``RoleIntent``),
+    so a provider model carries no per-provider intent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    route_id: str
+
+
+class RoleModelGroup(BaseModel):
+    """One user-authored Model Group in a Role.
+
+    Model-only: no per-group intent — generation params are role-level."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_id: str
+    display_name: str
+    provider_models: list[RoleProviderModel] = Field(default_factory=list)
+
+
 class RoleEntry(BaseModel):
     """Executable role config using explicit route IDs."""
 
@@ -318,6 +384,9 @@ class RoleEntry(BaseModel):
     source_profile_id: str | None = None
     source_profile_snapshot: dict[str, Any] | None = None
     bundle_id: str | None = None
+    model_fallback_enabled: bool = True
+    intent: RoleIntent = Field(default_factory=RoleIntent)
+    model_groups: list[RoleModelGroup] = Field(default_factory=list)
     fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
     lint_requirements: dict[str, LintSeverity] = Field(default_factory=dict)
 

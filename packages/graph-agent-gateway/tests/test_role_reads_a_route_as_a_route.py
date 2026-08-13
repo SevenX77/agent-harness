@@ -15,11 +15,9 @@ registry a host keeps is its own file: Studio's is an on-disk credentials file
 with a schema version and a sync marker, this package's is ``RegistrySnapshot``,
 and neither should have to become the other to have a route looked up in it.
 
-The role itself is still ``Any``. That one cannot be typed here yet: the fields
-``materialize_role`` reads off a role — ``model_groups``, ``intent``,
-``model_fallback_enabled`` — are not on this package's ``RoleEntry`` at all,
-they are on Studio's subclass, and deciding where the role model belongs is a
-change across two modules rather than an annotation.
+The role is this package's own ``RoleEntry`` — the model sink-down is
+decided in docs/design/2026-08-13-gateway-role-model-and-section-truth-decision.md
+and asserted in test_role_model_belongs_to_the_gateway.py.
 """
 
 from __future__ import annotations
@@ -31,30 +29,24 @@ from graph_agent_gateway.registry import (
     ProviderEndpoint,
     ProviderRoute,
     RegistrySnapshot,
+    RoleEntry,
+    RoleModelGroup,
+    RoleProviderModel,
     RouteRegistry,
 )
 from graph_agent_gateway.role import MaterializeRoleRequest, materialization, materialize_role
 
 
-class _Intent:
-    def __init__(self) -> None:
-        self.thinking = False
-        self.max_output_tokens = None
-        self.temperature = None
-        self.reasoning_effort = None
-
-
-class _Group:
-    def __init__(self) -> None:
-        self.canonical_id = "gpt-5"
-        self.provider_models = [type("_ProviderModel", (), {"route_id": "openai:gpt-5"})()]
-
-
-class _Role:
-    def __init__(self) -> None:
-        self.model_fallback_enabled = True
-        self.intent = _Intent()
-        self.model_groups = [_Group()]
+def _gateway_role() -> RoleEntry:
+    return RoleEntry(
+        model_groups=[
+            RoleModelGroup(
+                canonical_id="gpt-5",
+                display_name="GPT 5",
+                provider_models=[RoleProviderModel(route_id="openai:gpt-5")],
+            )
+        ],
+    )
 
 
 def _snapshot() -> RegistrySnapshot:
@@ -104,7 +96,7 @@ def test_what_this_package_defines_is_read_as_what_it_defined(reader: str) -> No
 
 def test_a_role_resolves_over_this_package_s_own_registry() -> None:
     materialized = materialize_role(
-        MaterializeRoleRequest(role=_Role(), credentials=_snapshot())
+        MaterializeRoleRequest(role=_gateway_role(), credentials=_snapshot())
     )
 
     assert [entry.route_id for entry in materialized.fallback_chain] == ["openai:gpt-5"]

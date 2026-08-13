@@ -15,7 +15,6 @@ from graph_agent_gateway.registry.base_url import (
     canonicalize_base_url,
 )
 from graph_agent_gateway.registry.bounds import (
-    AUTHORED_TEMPERATURE_MAX,
     EFFORT_LADDER,
     Bounds,
     bounds_for,
@@ -67,8 +66,10 @@ from graph_agent_gateway.registry.config_store import (
     InMemoryConfigTruthStore,
 )
 from graph_agent_gateway.registry.contracts import (
+    ActiveCircuit,
     CredentialDescriptor,
     CredentialProviderProtocol,
+    HealthStore,
     RouteRegistry,
     SecretLifetimePolicy,
     SnapshotVersion,
@@ -132,6 +133,8 @@ from graph_agent_gateway.registry.projection import (
     project_route_state,
 )
 from graph_agent_gateway.registry.schema import (
+    AUTHORED_TEMPERATURE_MAX,
+    DEFAULT_ROLE_TEMPERATURE,
     CapabilitySource,
     CapabilityValue,
     EffectiveRuntimeSetting,
@@ -139,6 +142,7 @@ from graph_agent_gateway.registry.schema import (
     EvidenceRecord,
     FieldSource,
     LintResult,
+    LintSeverity,
     ModelBundle,
     ModelProfile,
     ProbeResult,
@@ -153,6 +157,9 @@ from graph_agent_gateway.registry.schema import (
     ResolvedRole,
     ResolvedRoute,
     RoleEntry,
+    RoleIntent,
+    RoleModelGroup,
+    RoleProviderModel,
     RoleRouteEntry,
     RouteCandidate,
     RuntimePolicy,
@@ -166,6 +173,7 @@ from graph_agent_gateway.registry.schema import (
 
 __all__ = [
     "AUTHORED_TEMPERATURE_MAX",
+    "ActiveCircuit",
     "Bounds",
     "COMMUNITY_PROVENANCE",
     "CanonicalConfidence",
@@ -180,6 +188,7 @@ __all__ = [
     "CredentialResolveError",
     "CredentialResolveRequest",
     "CredentialResolveResponse",
+    "DEFAULT_ROLE_TEMPERATURE",
     "EFFORT_LADDER",
     "EVIDENCE_LIBRARY_DRAFT_ID",
     "EffectiveRuntimeSetting",
@@ -190,8 +199,10 @@ __all__ = [
     "EvidenceUpload",
     "FallbackCredentialProvider",
     "FieldSource",
+    "HealthStore",
     "InMemoryConfigTruthStore",
     "LintResult",
+    "LintSeverity",
     "MaterializedProbeCatalogCandidates",
     "ModelBundle",
     "ModelGroupIdentityProjection",
@@ -215,9 +226,12 @@ __all__ = [
     "ResolvedRole",
     "ResolvedRoute",
     "RoleEntry",
+    "RoleIntent",
+    "RoleModelGroup",
+    "RoleProviderModel",
     "RoleRouteEntry",
-    "RouteRegistry",
     "RouteCandidate",
+    "RouteRegistry",
     "RuntimePolicy",
     "RuntimeSettingDescriptor",
     "RuntimeSettings",

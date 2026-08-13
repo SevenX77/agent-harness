@@ -27,12 +27,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from graph_agent_gateway.registry.schema import ResolvedRoute
-
-# Studio's own dial, which the frontend shows as 0-100%. Provider scales are
-# reached by taking that share of the route's ceiling, so a value past the end
-# of the dial means "as hot as this route goes", never "hotter than it goes".
-AUTHORED_TEMPERATURE_MAX: Final = 2.0
+from graph_agent_gateway.registry.schema import AUTHORED_TEMPERATURE_MAX, ResolvedRoute
 
 _PROTOCOL_TEMPERATURE_MAX: Final[Mapping[str, float]] = {
     "anthropic_compatible": 1.0,

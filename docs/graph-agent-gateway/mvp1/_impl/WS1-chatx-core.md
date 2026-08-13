@@ -7,7 +7,7 @@ owns_files:
   - packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py    # 新建(步骤0:canonicalize_base_url 共享原语;WS-2 import)
   - packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py   # 新建(11)
   - packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py  # 新建(10),或并入 models.py
-  - packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py              # 改(10 落点候选)
+  - packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py              # 改(10 落点候选)
   - packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py  # 改(09/07)
   - packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py      # 改(09 _call_*/dispatch · 07 token-escalation)
   - packages/graph-agent-gateway/src/graph_agent_gateway/call/resolver.py            # 改(09:resolve 构造 ChatX 那段)

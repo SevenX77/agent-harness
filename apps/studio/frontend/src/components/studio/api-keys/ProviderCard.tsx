@@ -1943,16 +1943,27 @@ export function ProviderCard({
   const hasEmptyModelListWarning = hasReachableModelList && !hasAvailableModels
   // W2-C: L1 api-key reachability is its OWN tri-state (✓ valid / ✗ invalid /
   // testing), not just "show a ✓ once models loaded". get_models succeeding proves
-  // the key; an invalid_api_key code proves it was rejected; anything else is unknown
+  // the key; a rejection proves it was refused; anything else is unknown
   // (e.g. the base_url itself was unreachable, so the key was never really tested).
+  //
+  // A rejection outranks the model list, because the list outlives the key that
+  // fetched it: `canShowDiscoveredModels` deliberately keeps showing models after
+  // a failed test, so "we have models" answers "did this key EVER work", not "does
+  // it work now". 00_settings-ux-spec.md fixes which of those the mark shows —
+  // 状态 = 最近观察的投影, and 绿=好 / 蓝=以前好 — so a key the provider just
+  // refused may not stay green on the strength of what it fetched last week.
+  // The rejection is read from the classified `last_test_status`, not from a
+  // vendor error code: providers spell that their own way (Google answers a bad
+  // key with `INVALID_ARGUMENT`, DeepSeek with a 401), and comparing one literal
+  // spelling here left every other one showing a green ✓.
   const apiKeyReachabilityState: ApiKeyReachabilityState = !hasRequiredConfig
     ? "unknown"
     : isGettingModels
       ? "testing"
-      : hasReachableModelList
-        ? "valid"
-        : matchedErrorCode === "invalid_api_key"
-          ? "invalid"
+      : matchedStatus === "invalid_key"
+        ? "invalid"
+        : hasReachableModelList
+          ? "valid"
           : "unknown"
   const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"

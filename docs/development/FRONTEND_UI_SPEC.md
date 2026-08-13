@@ -206,6 +206,23 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
   `api/llm.ts` 的 `routeIsUsable` 从不读 `route.status === 'disabled'`——其中**一条**停用
   路由上还留着 key 有效时铸下的 ready profile，于是它"证明"了端点可用，chip 保持绿色。
   一条陈旧证据顶掉了一个明确的当前禁令。
+- **推论：手里还留着某样东西，不等于取它的凭据现在还好使。** 探测拿回来的产物（模型列表、
+  profile、能力表）会**故意**在测试失败后继续展示（`ProviderCard.tsx` 的
+  `canShowDiscoveredModels` 就是这么写的，让用户失败时也看得见上次的结果）。所以
+  "有模型列表"只回答了"这把 key **曾经**通过"，不回答"它现在通不通"——把它当成"通"的
+  依据，就等于让产物替它的来源作证。判据顺序必须是：**最近一次观察为负 → 直接出局**，
+  只有没有负面观察时，产物才可以充当"好"的证据。
+- **判据只读分类后的状态，不比对厂商原始错误码。** 同一件事各家写法不同（Google 用
+  HTTP 400 `INVALID_ARGUMENT` 报 key 无效，DeepSeek 用 401），分类工作已经有唯一出口
+  （`api/llm.ts` 的 `endpointTestStatus` → `last_test_status`）。在某个组件里另写一句
+  `errorCode === 'invalid_api_key'`，等于把分类规则复制了一份不完整的，只认得当初写它时
+  见过的那一种拼法。
+- 反例（2026-08-12，同一张卡片，Settings → API Keys → Gemini Official）：端点 chip 是红的、
+  头部徽章写着 "Invalid API key"，而 `API Key` 标签旁的勾仍然是绿的、提示语写"已被模型
+  列表端点接受"。两处都从同一份 `matchedResult` 渲染，却各自判断：chip 走
+  `endpointTestStatus`（读状态 + 报文），勾走 `hasReachableModelList → 有模型就算好`，
+  其后那一支比对的还是字面量 `invalid_api_key`，而 Google 报的是 `INVALID_ARGUMENT`——
+  两道口子叠在一起，被拒的 key 拿到了绿勾。
 
 ### 2.8 输入框、搜索与行内动作
 - 带图标、清空、复制、显示/隐藏等行内动作的输入框，优先使用本地 `InputGroup` / `InputGroupButton` / `InputGroupAddon`。不要用绝对定位按钮硬盖在 `Input` 上；这种做法容易被 input 拦截点击，也更难保证窄宽度布局。

@@ -1001,7 +1001,12 @@ fn cli_console_action_command(action: &str, provider: &str) -> Result<&'static s
         ("update", "claude") => Ok("claude update"),
         ("update", "codex") => Ok("codex update"),
         ("login", "claude") => Ok("claude auth login"),
-        ("login", "codex") => Ok("codex login"),
+        // codex 一律走设备码流:裸 `codex login` 要在 localhost:1455 等浏览器
+        // 回调,装了 Codex 桌面 app 的机器上该端口被 app 的 codex.exe 先占,
+        // 回调被桌面 app 吃掉、WSL 侧永远等不到,还会把 WSL 旧凭据清掉
+        // (2026-08-12 真机事故);设备码流(浏览器开固定页 + 输一次性代码)
+        // 没有本地回调,与桌面 app 零接触——ah/Zeroth 已验证的登录配方。
+        ("login", "codex") => Ok("codex login --device-auth"),
         _ => Err(format!("unsupported CLI console action: {action}/{provider}")),
     }
 }
@@ -3129,8 +3134,13 @@ fn wsl_payload_script(
     // 决议 2026-08-12-login-console-clipboard-keys);没有桥就裸跑,行为不变。
     let login_console_block =
         login_bridge_wsl.map(login_console_shell_block).unwrap_or_default();
-    let codex_login_cmd =
-        if login_bridge_wsl.is_some() { "studio_login_console codex login" } else { "codex login" };
+    // 设备码流,与设置页「登录」按钮同一条理由(cli_console_action_command 的
+    // codex 分支注释):不起 localhost 回调,不与 Codex 桌面 app 争 1455。
+    let codex_login_cmd = if login_bridge_wsl.is_some() {
+        "studio_login_console codex login --device-auth"
+    } else {
+        "codex login --device-auth"
+    };
     let claude_login_cmd = if login_bridge_wsl.is_some() {
         "studio_login_console claude auth login"
     } else {
@@ -3154,7 +3164,7 @@ fn wsl_payload_script(
     printf '%s
 ' "Codex login did not complete."
     printf '%s
-' "Run codex login in WSL, then reopen Studio's Codex menu item."
+' "Run codex login --device-auth in WSL, then reopen Studio's Codex menu item."
     exec bash -i
   fi
 fi
@@ -5633,7 +5643,14 @@ mod tests {
         assert_eq!(cli_console_action_command("update", "claude"), Ok("claude update"));
         assert_eq!(cli_console_action_command("update", "codex"), Ok("codex update"));
         assert_eq!(cli_console_action_command("login", "claude"), Ok("claude auth login"));
-        assert_eq!(cli_console_action_command("login", "codex"), Ok("codex login"));
+        // codex 用设备码流:裸 `codex login` 起 localhost:1455 回调服务器,装了
+        // Codex 桌面 app 的机器上该端口被 app 的 codex.exe 先占,浏览器回调被
+        // 桌面 app 吃掉、WSL 侧永远等不到(2026-08-12 真机事故);设备码流没有
+        // 本地回调,与桌面 app 零接触——与 ah/Zeroth 已验证的登录配方一致。
+        assert_eq!(
+            cli_console_action_command("login", "codex"),
+            Ok("codex login --device-auth")
+        );
         assert!(cli_console_action_command("login", "ah").is_err(), "表外组合必须拒绝");
         assert!(cli_console_action_command("rm -rf /", "claude").is_err());
         let script = cli_console_action_script("login", "claude", None).expect("script");
@@ -5701,7 +5718,7 @@ mod tests {
             false,
             Some("/mnt/c/x/bridge"),
         );
-        assert!(codex.contains("if ! studio_login_console codex login; then"));
+        assert!(codex.contains("if ! studio_login_console codex login --device-auth; then"));
         let bare = wsl_payload_script(
             "/mnt/d/ws",
             "/mnt/d/cfg",
@@ -8874,7 +8891,7 @@ sessions
         assert!(!script.contains("WIN_CODEX_HOME"));
         assert!(!script.contains("cp \"$WIN_CODEX_HOME/auth.json\""));
         assert!(script.contains("if [ ! -f \"$HOME/.codex/auth.json\" ]"));
-        assert!(script.contains("codex login"));
+        assert!(script.contains("codex login --device-auth"));
         assert!(script.contains("Starting Codex through ah"));
     }
 

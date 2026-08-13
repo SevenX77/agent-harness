@@ -52,31 +52,32 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 
 ### A. 凭证 & 端点
 - **凭证 / 端点 schema + 读写规范**（✅ `registry/schema.py`、`registry/credentials.py`、`registry/contracts.py`）：gateway 定义 `ProviderEndpoint` / `ProviderRoute` / 凭证引用 `credential_ref` 的数据结构与读写契约；应用只提供一个存储介质（文件）插上。
-- **base_url 按协议归一化**（✅ 通用部分 `registry/storage.py:_normalize_base_url`；每协议规则待补全）：把同一端点的等价 URL 收敛成确定的 canonical 形式，保证测试 / 缓存 / 调用一致。
-- **凭证指纹**（✅ `registry/storage.py:compute_credential_fingerprint`）：算一个不可逆缓存键，凭证一变就让相关验证证据失效。
+- **base_url 按协议归一化**（✅ 通用部分 `registry/fingerprint.py:_normalize_base_url`；每协议规则待补全）：把同一端点的等价 URL 收敛成确定的 canonical 形式，保证测试 / 缓存 / 调用一致。
+- **凭证指纹**（✅ `registry/fingerprint.py:compute_credential_fingerprint`）：算一个不可逆缓存键，凭证一变就让相关验证证据失效。
 - **原始端点信息 → 标准 endpoint list**（🔻）：应用收集到的零散 / 混合凭证（多 key、多 URL、多协议混在一起）交给 gateway，由它用内置协议 SDK **自动匹配协议 + 测试连通 + 拆成多条标准 endpoint**。应用只负责"怎么收集原始输入"。
 
 ### B. 模型知识（available models）
-- **单路线探测契约**（✅ `registry/probe_contracts.py`）：1-token 真实探测的结果契约 `ProbeResult`。
+- **单路线探测契约**（✅ `registry/schema.py:ProbeResult`）：1-token 真实探测的结果契约。
 - **list-models 解析（每协议）+ 批量探测编排**（🔻）：把端点支持的模型列出来 / 探出来。
-- **按同类分组（model group）**（🔻 现 `llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"，让应用查找 / 选择更方便。
-- **品牌 / 家族识别（identity）**（🔻 现 `llm_model_identity.py`）：把原始 model id 客观归类到厂商 / 家族（Anthropic·Claude、OpenAI·GPT…）。
-- **Probe Knowledge Catalog（探测知识库 + notable）**（🔻 canonical API 现为 `probe_catalog.py` / `llm_probe_catalog.py`，legacy 实现仍含 `llm_import_drafts.py` / `ProviderImportDraft`；数据结构 `EvidenceRecord` 已在 ✅ `registry/schema.py`）：记住"哪些 endpoint 连通过 / 哪些模型存在 / 哪些能力被探测证实 / 哪些模型值得优先试"、每条路线历次探测的证据，可**远端共享**。这是 gateway 背后可沉淀、可共享的知识资产；Import Draft（待导入草稿 → apply）不属于 MVP1 主线。
+- **按同类分组（model group）**（🔻 现 `services/llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"，让应用查找 / 选择更方便。
+- **品牌 / 家族识别（identity）**（🔻 现 `services/llm_model_identity.py`）：把原始 model id 客观归类到厂商 / 家族（Anthropic·Claude、OpenAI·GPT…）。
+- **Probe Knowledge Catalog（探测知识库）**（✅ `registry/catalog.py`；数据结构 `EvidenceRecord` / `ProviderImportDraft` 在 `registry/schema.py`）：记住"哪些 endpoint 连通过 / 哪些模型存在 / 哪些能力被探测证实 / 哪些模型值得优先试"、每条路线历次探测的证据，可**远端共享**。这是 gateway 背后可沉淀、可共享的知识资产；Import Draft（待导入草稿 → apply）不属于 MVP1 主线。
+- **notable models（值得优先试的模型）**（🔻 现 `services/llm_notable_models.py`）：读一份人工维护的清单，告诉应用先试哪些模型。
 
 ### C. 能力
 - **能力归一化**（✅ `registry/capabilities.py:normalize_route_capabilities`）：把各厂商参差的能力字段（模态、最大 token、thinking…）归一成统一表示。
 - **能力描述符**（✅ `registry/capabilities.py:build_runtime_setting_descriptors`）：把能力翻译成"机器可读的可配置项"（哪个是布尔开关、哪个是数值上限），驱动应用的设置控件——应用只需选"我关心哪几种能力"。
-- **能力对比 / 合并**（🔻 现 `llm_route_capabilities.py`）：把路线静态声明的能力 + 探测验证出的能力合并成一份有效能力。
+- **能力对比 / 合并**（🔻 现 `services/llm_route_capabilities.py`）：把路线静态声明的能力 + 探测验证出的能力合并成一份有效能力。
 
 ### D. 状态
-- **客观健康态 + 熔断**（✅ 熔断决策 `call/clients.py:LLMCircuitAndUsageLedger`、探测结果契约 `registry/schema.py:ProbeResult`）：一条路线现在是否验证通过 / 失败 / 熔断冷却中。（原文点名的 `registry/probe_contracts.py` 已随 #713 删除——它只是七行 re-export，`ProbeResult` 本来就定义在 `registry/schema.py`。）
-- **熔断状态持久化**（🔻 现 `llm_health_store.py`）：把冷却事实存起来跨进程复用。
-- **标准状态总结（6 态）**（🔻 现 `llm_state_projection.py`）：把"配置 + 健康 + 熔断"总结成一套标准状态集（6 态：`ready / 以前联通过(蓝) / untested / failed(带 reason) / cooling_down / off`）——这是 gateway 从自身机制提炼的最佳状态方案，应用选用全套 / 部分 / 不用，**不必自己研究机制重新发明**。
+- **客观健康态 + 熔断**（✅ 熔断决策 `call/clients.py:LLMCircuitAndUsageLedger`、探测结果契约 `registry/schema.py:ProbeResult`）：一条路线现在是否验证通过 / 失败 / 熔断冷却中。
+- **熔断状态持久化**（🔻 现 `services/llm_health_store.py`）：把冷却事实存起来跨进程复用。
+- **标准状态总结（6 态）**（🔻 现 `services/llm_state_projection.py`）：把"配置 + 健康 + 熔断"总结成一套标准状态集（6 态：`ready / 以前联通过(蓝) / untested / failed(带 reason) / cooling_down / off`）——这是 gateway 从自身机制提炼的最佳状态方案，应用选用全套 / 部分 / 不用，**不必自己研究机制重新发明**。
 
 ### E. 编排
-- **角色 → fallback 链（materialize）**（🔻 编排核心现 `llm_role_materializer.py`）：按角色的"意图"（对模型能力的偏好 / 约束，如 thinking 要 / 不要 / 必须、输出 token 上限）过滤路线、降级、排成有序 fallback 链。意图驱动的能力编排是 fallback 机制的内在需求，不是某个应用的发明。
-- **角色 → 路线解析**（✅ `resolver.py:ModelResolver`、`registry/resolver.py:resolve_role`）：接收已编排好的角色定义，解析出有序 `ResolvedRoute` + 跳过诊断。
-- **lint 校验**（✅ `registry/lint.py:lint_role_routes`）：检查路线配置是否满足能力要求，只 warn / block，不替应用选型。
+- **角色 → fallback 链（materialize）**（🔻 编排核心现 `services/llm_role_materializer.py`）：按角色的"意图"（对模型能力的偏好 / 约束，如 thinking 要 / 不要 / 必须、输出 token 上限）过滤路线、降级、排成有序 fallback 链。意图驱动的能力编排是 fallback 机制的内在需求，不是某个应用的发明。
+- **角色 → 路线解析**（✅ `resolve/resolver.py:resolve_role` 是编排面的解析；`call/resolver.py:ModelResolver` 是执行面按 fallback 链取下一条的那层）：接收已编排好的角色定义，解析出有序 `ResolvedRoute` + 跳过诊断。
+- **lint 校验**（✅ `resolve/lint.py:lint_role_routes`）：检查路线配置是否满足能力要求，只 warn / block，不替应用选型。
 
 ### F. 调用
 - **两级对外接口**：
@@ -151,8 +152,8 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
 - **对外 API**：六个域各有自己的包入口并各自维护 `__all__`，顶层 `__init__` 只是极薄的
   re-export。域入口就是契约：`registry` / `resolve` / `role` / `call` / `dialect` / `probing`。
 - **待下沉**（按判据属公共，当前实现仍散在 `apps/studio/backend`）：endpoint 标准化拆分、
-  list-models 解析、model group 分组、identity、notable / Probe Knowledge Catalog、
-  6 态投影、熔断持久化、materialize 编排核心、能力合并。
+  list-models 解析、model group 分组、identity、notable、6 态投影、熔断持久化、
+  materialize 编排核心、能力合并。（Probe Knowledge Catalog 已下沉，见 §3.B。）
 - **模块级现状 vs 目标**详见 `docs/graph-agent-gateway/mvp1/`；域树是怎么定下来的、
   每一期改了什么，见
   [`docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md`](../../docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md)。

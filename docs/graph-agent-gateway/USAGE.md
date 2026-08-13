@@ -273,7 +273,7 @@ _refuses_the_capability_asked(answer)  -> "capability_unsupported"   # 被拒的
 而 `message` 是给人读的散文且可本地化)。
 
 **同一件事在运行时也认得**:账单与凭据这两条**账户级条件**的词表放在
-`graph_agent_gateway/account_conditions.py`,探测判据(`probing/judge.py`)与运行时判据
+`account_conditions.py`,探测判据(`probing/judge.py`)与运行时判据
 (`resolve/error_classification.py`)读同一份——一句话不能因为谁读到而有两种含义。运行时
 认出它的后果是**继续走 fallback 链**:key 坏了值得换一个账户再试,重试同一个没有意义。
 

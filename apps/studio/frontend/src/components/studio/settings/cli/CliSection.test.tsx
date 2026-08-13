@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   launchCliInstaller: vi.fn(),
   launchCliUpdate: vi.fn(),
   launchCliLogin: vi.fn(),
+  deployVendoredAh: vi.fn(),
 }))
 
 vi.mock("@/lib/tauri", () => ({
@@ -18,6 +19,7 @@ vi.mock("@/lib/tauri", () => ({
   launchCliInstaller: mocks.launchCliInstaller,
   launchCliUpdate: mocks.launchCliUpdate,
   launchCliLogin: mocks.launchCliLogin,
+  deployVendoredAh: mocks.deployVendoredAh,
 }))
 
 vi.mock("react-i18next", () => ({
@@ -60,6 +62,7 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
     mocks.launchCliInstaller.mockReset()
     mocks.launchCliUpdate.mockReset()
     mocks.launchCliLogin.mockReset()
+    mocks.deployVendoredAh.mockReset()
   })
 
   it("renders one row per dependency with the state light vocabulary", async () => {
@@ -106,7 +109,10 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
     const { container, root } = await renderSection()
 
     expect(container.querySelector('[data-cli-dependency="claude"] [data-cli-row-action]')).toBeNull()
-    expect(container.querySelector('[data-cli-dependency="ah"] [data-cli-row-action]')).toBeNull()
+    // ah 行的动作是「部署」不是「更新」(决议 2026-08-12,ah 随 app 打包)。
+    expect(
+      container.querySelector('[data-cli-dependency="ah"] [data-cli-row-action="deploy"]'),
+    ).toBeTruthy()
     const updateButton = container.querySelector<HTMLButtonElement>(
       '[data-cli-dependency="codex"] [data-cli-row-action="update"]',
     )
@@ -138,6 +144,33 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
       loginButton?.click()
     })
     expect(mocks.launchCliLogin).toHaveBeenCalledWith("claude")
+
+    unmount(container, root)
+  })
+
+  // 决议 2026-08-12(docs/design/2026-08-12-ah-vendored-auto-deploy.md §2.4):
+  // ah 随 app 打包,缺失行给「部署」;部署成功后整体重新探测(显式用户命令,
+  // 属允许的 revalidation 触发)。
+  it("offers a deploy button on a missing ah row, wires it to the bundled deploy, then re-probes", async () => {
+    mocks.cliDependencyStatus.mockResolvedValue([
+      { id: "ah", state: "missing", version: null, detail: "wsl.exe returned error" },
+    ])
+    mocks.deployVendoredAh.mockResolvedValue({
+      row: { id: "ah", state: "ok", version: "1.14.3", detail: null },
+    })
+    const { container, root } = await renderSection()
+
+    const deployButton = container.querySelector<HTMLButtonElement>(
+      '[data-cli-dependency="ah"] [data-cli-row-action="deploy"]',
+    )
+    expect(deployButton).toBeTruthy()
+    expect(mocks.cliDependencyStatus).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      deployButton?.click()
+    })
+    expect(mocks.deployVendoredAh).toHaveBeenCalledTimes(1)
+    expect(mocks.cliDependencyStatus).toHaveBeenCalledTimes(2)
 
     unmount(container, root)
   })

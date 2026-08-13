@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Download, KeyRound, Loader2, RefreshCw } from "lucide-react"
+import { Download, KeyRound, Loader2, PackageCheck, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select"
 import {
   cliDependencyStatus,
+  deployVendoredAh,
   launchCliInstaller,
   launchCliLogin,
   launchCliUpdate,
@@ -82,11 +83,17 @@ function DefaultChoiceSelect({
   )
 }
 
-type CliRowAction = { kind: "update" | "login"; provider: "claude" | "codex" }
+type CliRowAction =
+  | { kind: "update" | "login"; provider: "claude" | "codex" }
+  | { kind: "deploy" }
 
 // 行内动作按钮判定表(修订 2026-08-12):CLI 行过时 → 更新(CLI 自带 update 命令);
-// 登录行缺失/损坏 → 登录。ah 行的修复入口仍是区头「安装 / 修复」。
+// 登录行缺失/损坏 → 登录;ah 行缺失/过时 → 部署(ah 随 app 打包,决议
+// docs/design/2026-08-12-ah-vendored-auto-deploy.md——它不再是用户去装的外部依赖)。
 function cliRowAction(row: CliDependencyRow): CliRowAction | null {
+  if (row.id === "ah" && (row.state === "missing" || row.state === "outdated")) {
+    return { kind: "deploy" }
+  }
   if ((row.id === "claude" || row.id === "codex") && row.state === "outdated") {
     return { kind: "update", provider: row.id }
   }
@@ -150,6 +157,18 @@ export function CliSection({
 
   const handleRowAction = useCallback(
     async (action: CliRowAction) => {
+      // 部署是无声后台动作(不开控制台),完成即整体重新探测——显式用户命令,
+      // 属 SSOT 读取原则允许的 revalidation 触发。
+      if (action.kind === "deploy") {
+        const result = await deployVendoredAh()
+        if ("error" in result) {
+          toast.error(t("cli.actionFailed"), { description: result.error })
+          return
+        }
+        toast.success(t("cli.deployDone"), { description: result.row.version ?? undefined })
+        void probe()
+        return
+      }
       const error =
         action.kind === "update"
           ? await launchCliUpdate(action.provider)
@@ -162,7 +181,7 @@ export function CliSection({
         description: t("cli.actionStartedDetail"),
       })
     },
-    [t],
+    [t, probe],
   )
 
   const patchProvider = useCallback(
@@ -274,12 +293,20 @@ export function CliSection({
                       data-cli-row-action={action.kind}
                       onClick={() => void handleRowAction(action)}
                     >
-                      {action.kind === "update" ? (
+                      {action.kind === "deploy" ? (
+                        <PackageCheck data-icon="inline-start" />
+                      ) : action.kind === "update" ? (
                         <Download data-icon="inline-start" />
                       ) : (
                         <KeyRound data-icon="inline-start" />
                       )}
-                      {t(action.kind === "update" ? "cli.update" : "cli.login")}
+                      {t(
+                        action.kind === "deploy"
+                          ? "cli.deploy"
+                          : action.kind === "update"
+                            ? "cli.update"
+                            : "cli.login",
+                      )}
                     </Button>
                   ) : null}
                 </span>

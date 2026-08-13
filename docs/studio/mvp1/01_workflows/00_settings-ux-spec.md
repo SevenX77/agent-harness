@@ -300,7 +300,9 @@
 > 再加上一些配置选项,比如使用的默认模型,effort等配置,Moirai的不同角色的不同配置」。
 > 完整设计:`docs/design/2026-08-06-cli-settings-section-proposal.md`(已批,四期交付);
 > 修订:`docs/design/2026-08-12-cli-settings-revision.md`(已批——版本检查/更新与登录
-> 按钮/全称文案/codex effort 修正/模型下拉/worker effort)。
+> 按钮/全称文案/codex effort 修正/模型下拉/worker effort);
+> `docs/design/2026-08-12-ah-vendored-auto-deploy.md`(已批——ah 随 app 打包 +
+> 运行期自动布署,ah 行动作改「部署」)。
 
 - **形态**:Copilot 页内与「Claude Agent SDK」并列的 CatalogAccordion section「CLI」。
 - **依赖与鉴权状态(PR-1)**:Tauri 命令 `cli_dependency_status()` 一次探测整条链——
@@ -323,9 +325,17 @@
   进度与交互,后台静默失败不可见)**:`claude`/`codex` 行 `outdated` → 「更新」→
   控制台跑 `claude update` / `codex update`;`claude_auth`/`codex_auth` 行
   `missing|broken` → 「登录」→ 控制台跑 `claude auth login` / `codex login`
-  (与 launcher login-doorman、安装脚本 B2 同款命令);ah 行继续走「安装 / 修复」
-  控制台(脚本幂等,兼任 ah 升级)。命令在 Rust 侧按 provider 枚举定死,前端只传
-  provider 标识。非 Windows 与安装按钮同策略:明确报错引导手动命令。
+  (与 launcher login-doorman、安装脚本 B2 同款命令);ah 行 `missing|outdated` →
+  「部署」(修订 2026-08-12,决议 `2026-08-12-ah-vendored-auto-deploy.md`):无声
+  布署 app 自带的 vendored ah 后返回复查结果并整体重新探测——ah 是本项目自有产物、
+  随 app 打包,不再是用户去装的外部依赖。命令在 Rust 侧按 provider 枚举定死,前端
+  只传 provider 标识。非 Windows 与安装按钮同策略:明确报错引导手动命令。
+- **ah 随 app 打包 + 自动布署(修订 2026-08-12)**:钉版 ah 二进制(`ah`+`ahd`)
+  经 `apps/studio/tauri/ah-vendor.lock.json` + `scripts/ensure_ah_vendor.js`
+  vendor 进 `vendor/ah/`,随 `bundle.resources` 进打包产物。Open in CLI 的 Rust
+  前置检查与 WSL 启动脚本在 ah 缺失/低于 vendored 版本时**自动布署**(只升不降,
+  不覆盖更新的开发版;检查结果只缓存成功);vendored 不可用时整体降级为原行为。
+  设计与验收判据见决议文档。
 - **一键安装(设计修订 2026-08-06 后落地)**:任一行 missing/broken/outdated 时区头
   显示「安装 / 修复」钮,点击 = Tauri 拉起**可见 PowerShell 控制台**跑仓内
   `scripts/install-claude-code-wsl.ps1`(全链:WSL/tmux/ah/claude/codex)。原提案的

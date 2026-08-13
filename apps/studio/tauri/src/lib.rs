@@ -39,7 +39,19 @@ const QUIT_FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// 换成一句明确的版本要求。
 const AH_VERSION_MIN: &str = "1.8.2";
 
-static AH_VERSION_CACHE: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+/// Open in CLI 的 Rust 侧 ah 就绪缓存:**只缓存成功**。旧实现(AH_VERSION_CACHE)把
+/// 失败也永久缓存,用户装好 ah 之后必须重启 Studio 才能启动会话;自动布署落地后
+/// 失败态更是随时可以被修好,缓存它只会把修好的环境继续挡在门外
+/// (决议 docs/design/2026-08-12-ah-vendored-auto-deploy.md)。
+static AH_READY: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// 打包进 app 的 ah 快照目录(setup 阶段按 resource root 解析;dev 下即
+/// `apps/studio/tauri/vendor/ah`,由 scripts/ensure_ah_vendor.js 产出)。
+static VENDORED_AH_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// 单一发布 tarball 携带的两个二进制(官方安装器装的就是这两个);
+/// 快照缺任一即视为不完整。
+const AH_VENDOR_BINARIES: [&str; 2] = ["ah", "ahd"];
 
 /// launcher 脚本里的 ah 版本门禁。四个模板（Windows/WSL × unix，open × attach）此前
 /// **各自复制一份**，然后各自腐烂：其中两份混进了拿同一个东西跟自己比的垃圾条件——
@@ -52,25 +64,13 @@ static AH_VERSION_CACHE: std::sync::OnceLock<Result<(), String>> = std::sync::On
 /// 恒真恒假的条件。版本串不是纯数字时（ah 缺失时那句 "unknown"）落进 case 的拒绝分支，
 /// 照旧报版本不足，而不是让 `$(( ))` 炸在用户脸上。
 fn ah_version_gate_script(remediation: &str, fallback_shell: &str) -> String {
-    let parts: Vec<&str> = AH_VERSION_MIN.split('.').collect();
-    let major: u64 = parts.first().and_then(|p| p.parse().ok()).unwrap_or(1);
-    let minor: u64 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
-    let patch: u64 = parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0);
-    let min_num = major * 1_000_000 + minor * 1_000 + patch;
+    let min_num = ah_version_num(AH_VERSION_MIN).unwrap_or(1_000_000);
+    let to_num = sh_version_to_num("ah_version", "ah_num");
     format!(
         r#"ah_version="$(ah version 2>/dev/null)"
 # requires ah >= {AH_VERSION_MIN}
-ah_major="${{ah_version%%.*}}"
-ah_rest="${{ah_version#*.}}"
-ah_minor="${{ah_rest%%.*}}"
-ah_patch="${{ah_rest#*.}}"
-[ "$ah_patch" = "$ah_rest" ] && ah_patch=0
-ah_ok=0
-case "$ah_major$ah_minor$ah_patch" in
-  ''|*[!0-9]*) ;;
-  *) [ "$(( ah_major * 1000000 + ah_minor * 1000 + ah_patch ))" -ge {min_num} ] && ah_ok=1 ;;
-esac
-if [ "$ah_ok" -ne 1 ]; then
+{to_num}
+if [ "$ah_num" -lt {min_num} ]; then
   printf 'ah %s is installed; Studio requires ah >= {AH_VERSION_MIN} for runtime inventory, starting status, and native worker sandbox env.\n' "${{ah_version:-unknown}}"
   printf '%s\n' "{remediation}"
   exec {fallback_shell}
@@ -78,9 +78,129 @@ fi"#
     )
 }
 
+/// `x.y[.z]` → major*1e6 + minor*1e3 + patch。Rust 侧与 shell 片段用同一个折算
+/// 公式,门禁与自动布署比较的是同一种数。
+fn ah_version_num(version: &str) -> Option<u64> {
+    let mut parts = version.trim().split('.');
+    let major: u64 = parts.next()?.parse().ok()?;
+    let minor: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some(major * 1_000_000 + minor * 1_000 + patch)
+}
+
+/// 生成「把 $<var> 里的版本串折算成数值变量 <out>」的 POSIX 片段;非数字串 →
+/// <out>=0(任何门槛都过不了)。版本门禁与自动布署共用这一份定义——上面
+/// 2026-08-04 教训的延伸:比较逻辑每多一份手抄,恒真恒假的垃圾条件就多一个藏身处。
+fn sh_version_to_num(var: &str, out: &str) -> String {
+    format!(
+        r#"{out}_major="${{{var}%%.*}}"
+{out}_rest="${{{var}#*.}}"
+{out}_minor="${{{out}_rest%%.*}}"
+{out}_patch="${{{out}_rest#*.}}"
+[ "${out}_patch" = "${out}_rest" ] && {out}_patch=0
+{out}=0
+case "${out}_major${out}_minor${out}_patch" in
+  ''|*[!0-9]*) ;;
+  *) {out}=$(( {out}_major * 1000000 + {out}_minor * 1000 + {out}_patch )) ;;
+esac"#
+    )
+}
+
 const AH_GATE_REMEDIATION_WSL: &str = "Run scripts/install-claude-code-wsl.ps1, then reopen Studio.";
 const AH_GATE_REMEDIATION_UNIX: &str =
     "Install ah from https://github.com/SevenX77/ah, then reopen Studio.";
+
+struct VendoredAh {
+    dir: PathBuf,
+    version: String,
+}
+
+fn vendored_ah_dir() -> PathBuf {
+    VENDORED_AH_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| sidecar::default_tauri_dir().join("vendor").join("ah"))
+}
+
+/// VERSION 由 ensure_ah_vendor.js 在校验+解压成功后**最后**写入:它在,旁边的
+/// 二进制就完整;缺 VERSION 或缺任一二进制 → 视为没有 vendored ah。
+fn vendored_ah_in(dir: &Path) -> Option<VendoredAh> {
+    let version = std::fs::read_to_string(dir.join("VERSION")).ok()?;
+    let version = version.trim().to_string();
+    if version.is_empty() {
+        return None;
+    }
+    if AH_VENDOR_BINARIES.iter().any(|binary| !dir.join(binary).is_file()) {
+        return None;
+    }
+    Some(VendoredAh { dir: dir.to_path_buf(), version })
+}
+
+fn vendored_ah() -> Option<VendoredAh> {
+    vendored_ah_in(&vendored_ah_dir())
+}
+
+/// vendored ah 的自动布署片段(决议 2026-08-12):已装 ≥ vendored 版本就不动
+/// (只升不降——ah 开发者机器上的开发版不得被 Studio 降级);缺失/更旧则把
+/// ah+ahd 拷到现有 ah 所在目录(旧二进制若留在 PATH 更前面会继续遮蔽新拷贝),
+/// 全新环境落 ~/.local/bin。任何失败只打一行警告,后面的存在性检查与版本门禁
+/// 按现状兜底——vendor 是增强,不是新的单点故障。
+fn ah_deploy_script(vendored_wsl_dir: &str, vendored_version: &str) -> String {
+    let Some(vendored_num) = ah_version_num(vendored_version) else {
+        return String::new();
+    };
+    let to_num = sh_version_to_num("studio_ah_cur", "studio_ah_cur_num");
+    let ah_src = sh_single_quote_str(&format!("{vendored_wsl_dir}/ah"));
+    let ahd_src = sh_single_quote_str(&format!("{vendored_wsl_dir}/ahd"));
+    format!(
+        r#"studio_deploy_bundled_ah() {{
+  studio_ah_cur="$(ah version 2>/dev/null)"
+{to_num}
+  [ "$studio_ah_cur_num" -ge {vendored_num} ] && return 0
+  studio_ah_dest="$HOME/.local/bin"
+  studio_ah_existing="$(command -v ah 2>/dev/null || true)"
+  [ -n "$studio_ah_existing" ] && studio_ah_dest="$(dirname "$studio_ah_existing")"
+  printf '%s\n' "Deploying the bundled ah {vendored_version} into $studio_ah_dest ..."
+  if mkdir -p "$studio_ah_dest" \
+    && cp {ah_src} {ahd_src} "$studio_ah_dest/" \
+    && chmod +x "$studio_ah_dest/ah" "$studio_ah_dest/ahd"; then
+    hash -r 2>/dev/null || true
+  else
+    printf '%s\n' "Bundled ah deploy failed; continuing with the existing checks."
+  fi
+}}
+studio_deploy_bundled_ah
+"#
+    )
+}
+
+/// 组合本机实况:没有快照 / 路径换算不出 → 空串(模板与 Rust 前置检查都据此降级)。
+fn ah_auto_deploy_script() -> String {
+    let Some(vendored) = vendored_ah() else {
+        return String::new();
+    };
+    // 复用 launcher 的 Windows→WSL 路径换算(含 `\\?\` 扩展前缀);换算不出
+    // /mnt 形态(UNC、unix 路径)= 本机没有可布署的 vendored ah,整体降级。
+    let wsl_dir = windows_path_to_wsl(&vendored.dir);
+    if !wsl_dir.starts_with("/mnt/") {
+        return String::new();
+    }
+    ah_deploy_script(&wsl_dir, &vendored.version)
+}
+
+/// 两个 WSL launcher 模板共用的 ah 引导块:自动布署(可用时)→ 存在性检查 →
+/// 版本门禁。后两段是布署不可用/失败时的兜底,文案与历史行为一字不动。
+fn wsl_ah_bootstrap_block(deploy_script: &str) -> String {
+    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_WSL, "bash -i");
+    format!(
+        r#"{deploy_script}if ! command -v ah >/dev/null 2>&1; then
+  printf '%s\n' "ah CLI was not found in WSL."
+  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
+  exec bash -i
+fi
+{version_gate}"#
+    )
+}
 
 fn run_ah_version() -> Result<String, String> {
     if cfg!(target_os = "windows") {
@@ -156,14 +276,54 @@ fn ah_version_gate(version_output: &str) -> Result<(), String> {
     }
 }
 
-fn check_ah_version_cached() -> Result<(), String> {
-    AH_VERSION_CACHE.get_or_init(|| {
-        let output = match run_ah_version() {
-            Ok(out) => out,
-            Err(e) => return Err(e),
-        };
-        ah_version_gate(&output)
-    }).clone()
+/// Open in CLI 的 ah 前置检查:失败先尝试布署 vendored ah 再复查,复查仍不过
+/// 才拒绝;结果只缓存成功(理由见 AH_READY 注释)。
+fn ensure_ah_ready() -> Result<(), String> {
+    if AH_READY.get().is_some() {
+        return Ok(());
+    }
+    let first = run_ah_version().and_then(|output| ah_version_gate(&output));
+    let result = match first {
+        Ok(()) => Ok(()),
+        Err(first_error) => match try_deploy_vendored_ah() {
+            None => Err(first_error),
+            Some(Err(deploy_error)) => {
+                Err(format!("{first_error} (bundled ah deploy failed: {deploy_error})"))
+            }
+            Some(Ok(())) => run_ah_version().and_then(|output| ah_version_gate(&output)),
+        },
+    };
+    if result.is_ok() {
+        let _ = AH_READY.set(());
+    }
+    result
+}
+
+/// 无声(不开控制台)跑一遍布署片段。None = 本机没有可布署的 vendored ah,
+/// 调用方维持现行为。仅 Windows/WSL:vendored 二进制是 linux-gnu 目标。
+fn try_deploy_vendored_ah() -> Option<Result<(), String>> {
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+    let deploy = ah_auto_deploy_script();
+    if deploy.is_empty() {
+        return None;
+    }
+    let script = format!("export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"\n{deploy}");
+    let output = match Command::new("wsl.exe").args(["-e", "bash", "-lc", &script]).output() {
+        Ok(output) => output,
+        Err(error) => return Some(Err(format!("failed to execute wsl.exe: {error}"))),
+    };
+    if output.status.success() {
+        Some(Ok(()))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Some(Err(format!(
+            "deploy script exited with {:?}: {}",
+            output.status.code(),
+            stderr.trim()
+        )))
+    }
 }
 
 /// Settings → Copilot →「CLI」区的一行依赖状态(决议 2026-08-06,提案 §2)。
@@ -529,6 +689,17 @@ fn launch_cli_update(provider: String) -> Result<(), String> {
 #[tauri::command]
 fn launch_cli_login(provider: String) -> Result<(), String> {
     launch_cli_console_action("login", &provider)
+}
+
+/// Settings → CLI 区 ah 行「部署」:布署 vendored ah 并返回复查后的 ah 行,
+/// 前端据此报版本、随后整体重新探测(显式用户命令,属允许的 revalidation 触发)。
+#[tauri::command]
+fn deploy_vendored_ah() -> Result<CliDependencyStatus, String> {
+    match try_deploy_vendored_ah() {
+        None => Err("No bundled ah is available in this build.".to_string()),
+        Some(Err(error)) => Err(error),
+        Some(Ok(())) => Ok(ah_dependency_status()),
+    }
 }
 
 struct SidecarAppState {
@@ -1786,7 +1957,7 @@ fn cleanup_code_assistant_config(
     // `ensure_lifecycle_command_allowed` the single authority guarding every path
     // that can emit a lifecycle command.
     ensure_lifecycle_command_allowed(config_path)?;
-    check_ah_version_cached()?;
+    ensure_ah_ready()?;
 
     let stopped = stop_ah_config(config_path)?;
 
@@ -2114,7 +2285,7 @@ fn start_code_assistant_status_stream(
     config_path: PathBuf,
     workspace_root: PathBuf,
 ) -> Result<CodeAssistantStatusStream, String> {
-    check_ah_version_cached()?;
+    ensure_ah_ready()?;
     let stop = Arc::new(AtomicBool::new(false));
     let child_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let thread_stop = Arc::clone(&stop);
@@ -2561,7 +2732,7 @@ fn wsl_payload_script(
     studio_mcp: Option<&StudioMcpEndpoint>,
     patch_transient_claude_config: bool,
 ) -> String {
-    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_WSL, "bash -i");
+    let ah_bootstrap = wsl_ah_bootstrap_block(&ah_auto_deploy_script());
 
     // One credential chain per environment (ah decision 0006): refresh tokens
     // rotate on every use, so a Windows auth.json copied into WSL forks the
@@ -2640,12 +2811,7 @@ WS={workspace}
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
 {studio_mcp_env}{codex_auth_sync}{claude_auth_bridge}
-if ! command -v ah >/dev/null 2>&1; then
-  printf '%s\n' "ah CLI was not found in WSL."
-  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
-  exec bash -i
-fi
-{version_gate}
+{ah_bootstrap}
 {claude_cli_refresh}{claude_config_patch}if command -v python3 >/dev/null 2>&1; then
 python3 - "$WS" <<'PY'
 {preseed}
@@ -2712,19 +2878,14 @@ fn wsl_attach_payload_script(
     wsl_workspace: &str,
     assistant: CodeAssistant,
 ) -> String {
-    let version_gate = ah_version_gate_script(AH_GATE_REMEDIATION_WSL, "bash -i");
+    let ah_bootstrap = wsl_ah_bootstrap_block(&ah_auto_deploy_script());
 
     format!(
         r#"#!/usr/bin/env bash
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 CFG={config}
 export SYSTEMD_LOG_LEVEL=err
-if ! command -v ah >/dev/null 2>&1; then
-  printf '%s\n' "ah CLI was not found in WSL."
-  printf '%s\n' "Install it from https://github.com/SevenX77/ah then reopen Studio."
-  exec bash -i
-fi
-{version_gate}
+{ah_bootstrap}
 {tmux_mouse}printf '%s\n' "Attaching {assistant_name} master pane (detach: Ctrl-b then d)."
 ah --config "$CFG" attach master
 printf '[attach ended; exit=%s]\n' "$?"
@@ -2981,7 +3142,7 @@ fn prepare_code_assistant_open(
     workspace_root: &Path,
     requested: CodeAssistant,
 ) -> Result<CodeAssistantOpenAction, String> {
-    check_ah_version_cached()?;
+    ensure_ah_ready()?;
 
     let cached_snapshot = |config: &Path| -> Option<AhRuntimeSnapshot> {
         state
@@ -3085,7 +3246,7 @@ fn open_code_assistant(
     cols: u16,
     rows: u16,
 ) -> Result<OpenedCodeAssistant, String> {
-    check_ah_version_cached()?;
+    ensure_ah_ready()?;
     // Read the id off the registry rather than trusting the opener: the session
     // must be told which skill it is bound to, and it must be the registered one.
     let skill = native_fs::registered_skill_id_for_root(&resolve_config_dir(), workspace_root).map(
@@ -3140,7 +3301,7 @@ fn attach_code_assistant_terminal(
     cols: u16,
     rows: u16,
 ) -> Result<String, String> {
-    check_ah_version_cached()?;
+    ensure_ah_ready()?;
     let workspace_root = existing_directory(&workspace_root)?;
     let Some(config_path) = ah_config_for_status(&workspace_root, assistant) else {
         return Err(format!("{} is not running", assistant.display_name()));
@@ -3691,6 +3852,7 @@ pub fn run() {
             launch_cli_installer,
             launch_cli_update,
             launch_cli_login,
+            deploy_vendored_ah,
             attach_code_assistant,
             cli_terminal_write,
             cli_terminal_resize,
@@ -3743,6 +3905,9 @@ pub fn run() {
                     .unwrap_or_else(|_| sidecar::default_tauri_dir());
                 let resource_root = sidecar::resource_root_for_runtime(resolved_resource_root);
                 register_studio_resource_root(&resource_root);
+                // vendored ah 与 sidecar 同一个 resource root(dev = 仓内 tauri 目录,
+                // 打包 = 安装目录资源);launcher/布署按这里解析到的快照工作。
+                let _ = VENDORED_AH_DIR.set(resource_root.join("vendor").join("ah"));
                 let config = sidecar::SidecarLaunchConfig::from_resource_root(resource_root)
                     .with_config_dir(resolve_config_dir());
                 match sidecar::SidecarManager::start(config) {
@@ -5100,6 +5265,85 @@ mod tests {
             source.contains("launch_cli_login,"),
             "launch_cli_login must be registered in the Tauri invoke handler"
         );
+        assert!(
+            source.contains("deploy_vendored_ah,"),
+            "deploy_vendored_ah must be registered in the Tauri invoke handler"
+        );
+    }
+
+    /// 只升不降 + 双二进制 + 目标目录回退:布署片段的三条决议级约束
+    /// (docs/design/2026-08-12-ah-vendored-auto-deploy.md §3)。
+    #[test]
+    fn test_ah_deploy_script_upgrades_only_and_copies_both_binaries() {
+        let script = ah_deploy_script("/mnt/d/app/vendor/ah", "1.14.3");
+        // 1.14.3 → 1*1e6 + 14*1e3 + 3;已装 >= vendored 直接 return,不降级。
+        assert!(script.contains("-ge 1014003 ] && return 0"));
+        assert!(script.contains("'/mnt/d/app/vendor/ah/ah'"));
+        assert!(script.contains("'/mnt/d/app/vendor/ah/ahd'"));
+        assert!(script.contains("$HOME/.local/bin"));
+        // 版本串解析不出 → 生成空片段,调用方整体降级。
+        assert!(ah_deploy_script("/mnt/d/app/vendor/ah", "garbage").is_empty());
+    }
+
+    /// 与门禁测试同法:生成的布署片段喂真 sh 跑,按**判断结果**断言只升不降
+    /// ——文本断言挡不住比较逻辑腐烂(2026-08-04 教训)。
+    #[test]
+    fn test_generated_deploy_script_only_fires_when_older_or_missing() {
+        let script = ah_deploy_script("/mnt/d/app/vendor/ah", "1.14.3");
+        // (已装版本串, 是否应当布署);"" 模拟 ah 缺失时 `ah version` 的空输出。
+        let cases = [
+            ("1.14.3", false),
+            ("1.14.4", false),
+            ("2.0.0", false),
+            ("1.14.2", true),
+            ("1.8.2", true),
+            ("", true),
+        ];
+        for (installed, expect_deploy) in cases {
+            // 假 ah 顶掉真命令;cp/mkdir/chmod 改写成打标记,不真动文件系统。
+            let harness = format!(
+                "ah() {{ printf '%s\\n' '{installed}'; }}\n\
+                 command() {{ return 1; }}\n\
+                 mkdir() {{ :; }}\ncp() {{ printf 'DEPLOYED\\n'; }}\nchmod() {{ :; }}\n\
+                 {script}"
+            );
+            let output = std::process::Command::new("sh").arg("-c").arg(&harness).output();
+            let Ok(output) = output else {
+                return; // 没有 POSIX sh 的机器上跳过(同门禁测试)。
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                stdout.contains("DEPLOYED"),
+                expect_deploy,
+                "已装 ah '{installed}' 对 vendored 1.14.3 的布署判断错了;输出: {stdout}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_wsl_ah_bootstrap_deploys_before_the_existence_check() {
+        let block = wsl_ah_bootstrap_block("DEPLOY_MARKER\n");
+        let deploy = block.find("DEPLOY_MARKER").expect("deploy snippet present");
+        let check = block.find("command -v ah").expect("existence check present");
+        let gate = block.find("requires ah >=").expect("version gate present");
+        assert!(deploy < check && check < gate, "布署必须先于存在性检查与门禁");
+        // 没有 vendored ah(空片段)时,块内容即历史行为:检查 + 门禁,一字不动。
+        assert!(wsl_ah_bootstrap_block("").starts_with("if ! command -v ah"));
+    }
+
+    #[test]
+    fn test_vendored_ah_requires_version_file_and_both_binaries() {
+        let dir = std::env::temp_dir().join(format!("studio-ah-vendor-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(vendored_ah_in(&dir).is_none(), "空目录不算快照");
+        std::fs::write(dir.join("VERSION"), "1.14.3\n").unwrap();
+        assert!(vendored_ah_in(&dir).is_none(), "只有 VERSION、缺二进制不算快照");
+        std::fs::write(dir.join("ah"), b"bin").unwrap();
+        std::fs::write(dir.join("ahd"), b"bin").unwrap();
+        let vendored = vendored_ah_in(&dir).expect("完整快照必须被识别");
+        assert_eq!(vendored.version, "1.14.3");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 提案 §2 —— 探测输出解析:合法行进表、残行丢弃、空 version/detail 归 None。
@@ -5518,11 +5762,19 @@ mod tests {
             1,
             "门禁只能有一处定义,复制就是腐烂的开始"
         );
-        // 四个模板都从它取,没有谁再手写一段比较。
+        // 取用点收敛到 3 处:两个 unix 模板直接取,两个 WSL 模板经共用的
+        // wsl_ah_bootstrap_block(自动布署 + 存在性检查 + 门禁)取同一份——
+        // 没有谁再手写一段比较(修订 2026-08-12,vendored ah 自动布署)。
         assert_eq!(
             source.matches(call.as_str()).count(),
-            4,
-            "四个 launcher 模板都必须用同一份门禁"
+            3,
+            "launcher 模板必须经唯一入口取同一份门禁"
+        );
+        let bootstrap_call = format!("wsl_ah_bootstrap{}(&ah_auto_deploy_script())", "_block");
+        assert_eq!(
+            source.matches(bootstrap_call.as_str()).count(),
+            2,
+            "两个 WSL 模板都必须走同一个 ah 引导块"
         );
         assert!(
             !source.contains("ah_ok=1\nelif"),

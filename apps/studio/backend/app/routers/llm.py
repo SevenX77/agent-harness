@@ -48,7 +48,9 @@ from app.core.adapters.gateway import (
     measured_effort_capability,
     measured_image_input,
     normalize_route_capabilities,
+    route_effective_capabilities,
     select_verified_profile,
+    verified_profile_capabilities,
 )
 from app.core.adapters.gateway import (
     endpoint_probe_base_url as _gateway_endpoint_probe_base_url,
@@ -144,10 +146,6 @@ from app.services.llm_roles import (
     roles_path,
     save_roles_file,
     validate_references,
-)
-from app.services.llm_route_capabilities import (
-    route_effective_capabilities,
-    verified_profile_route_capabilities,
 )
 from app.services.model_probe import ModelProbeResult
 from app.services.official_capability_sources import (
@@ -3667,7 +3665,7 @@ def _build_official_profile_probe_evidence(
                 profile_result.probe_attempts,
                 catalog_capabilities,
             ),
-            candidate_capabilities=verified_profile_route_capabilities(profile_result.profiles),
+            candidate_capabilities=verified_profile_capabilities(profile_result.profiles),
             scope=_probe_evidence_scope(
                 endpoint_id=endpoint.endpoint_id,
                 route_id=route_id,
@@ -5523,7 +5521,7 @@ def _upsert_discovered_routes(
             updates["status"] = "verified"
             updates["capabilities"] = _merge_profile_capabilities(
                 base_capabilities,
-                verified_profile_route_capabilities((verified_profiles_by_model or {}).get(model_id, [])),
+                verified_profile_capabilities((verified_profiles_by_model or {}).get(model_id, [])),
             )
         if probe_attempts_by_model and probe_attempts_by_model.get(model_id):
             updates["metadata"] = {
@@ -5680,7 +5678,7 @@ def _provider_route(
                     )
                 ),
             },
-            verified_profile_route_capabilities(verified_profiles or []),
+            verified_profile_capabilities(verified_profiles or []),
         ),
         verified_profiles=verified_profiles or [],
         metadata={"probe_attempts": probe_attempts} if probe_attempts else {},

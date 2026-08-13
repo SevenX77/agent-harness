@@ -15,7 +15,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from graph_agent_gateway.registry import CapabilityValue, RoleRouteEntry, effort_bounds, fit, project_route_state
+from graph_agent_gateway.registry import (
+    RoleRouteEntry,
+    effort_bounds,
+    fit,
+    project_route_state,
+    route_effective_capabilities,
+)
 
 # The one terminal outcome materialization can reach: every route this role
 # names was excluded, so there is nothing left to try. The runtime raises the
@@ -352,7 +358,7 @@ def _apply_intent(
     role_intent = _value(role, "intent")
 
     if _value(role_intent, "thinking", False) is True:
-        capability = _route_thinking_capability(route)
+        capability = route_effective_capabilities(route).get("thinking_protocol")
         if capability is not None and _capability_value(capability) is True:
             _enable_reasoning(entry_report)
         else:
@@ -406,7 +412,7 @@ def _apply_reasoning_effort(
 
 def _route_effort_levels(route: Any) -> tuple[str, ...]:
     """The effort levels a probe measured on this route, if one has run."""
-    capability = _route_effective_capabilities(route).get("reasoning_effort")
+    capability = route_effective_capabilities(route).get("reasoning_effort")
     value = _capability_value(capability) if capability is not None else None
     levels = value.get("values") if isinstance(value, dict) else None
     if not isinstance(levels, list):
@@ -459,71 +465,6 @@ def _output_token_bound(route: Any, bound: str) -> int | None:
         return None
     bound_value = value.get(bound)
     return int(bound_value) if isinstance(bound_value, int | float) else None
-
-
-def _route_thinking_capability(route: Any) -> Any | None:
-    return _route_effective_capabilities(route).get("thinking_protocol")
-
-
-def _route_effective_capabilities(route: Any) -> dict[str, Any]:
-    return {
-        **(_value(route, "capabilities", {}) or {}),
-        **_verified_profile_route_capabilities(_value(route, "verified_profiles", [])),
-    }
-
-
-def _verified_profile_route_capabilities(profiles: list[Any]) -> dict[str, CapabilityValue]:
-    ready_profiles = [profile for profile in profiles if _value(profile, "status") == "ready"]
-    if not ready_profiles:
-        return {}
-
-    input_modalities = sorted(
-        {
-            modality
-            for profile in ready_profiles
-            for modality in (_value(profile, "input_modalities", []) or [])
-        }
-    )
-    output_modalities = sorted(
-        {
-            modality
-            for profile in ready_profiles
-            for modality in (_value(profile, "output_modalities", []) or [])
-        }
-    )
-    capabilities: dict[str, CapabilityValue] = {
-        "verified_methods": CapabilityValue(
-            value=sorted({_value(profile, "method_id") for profile in ready_profiles}),
-            source="probed_verified",
-        ),
-    }
-    if input_modalities:
-        capabilities["input_modalities"] = CapabilityValue(
-            value=input_modalities,
-            source="probed_verified",
-        )
-    if output_modalities:
-        capabilities["output_modalities"] = CapabilityValue(
-            value=output_modalities,
-            source="probed_verified",
-        )
-    if any(_profile_supports_reasoning(profile) for profile in ready_profiles):
-        capabilities["thinking_protocol"] = CapabilityValue(
-            value=True,
-            source="probed_verified",
-        )
-    return capabilities
-
-
-def _profile_supports_reasoning(profile: Any) -> bool:
-    haystack = " ".join(
-        [
-            str(_value(profile, "capability", "")),
-            str(_value(profile, "profile_id", "")),
-            str(_value(profile, "request_mapper_id", "")),
-        ]
-    ).lower()
-    return "thinking" in haystack or "reasoning" in haystack
 
 
 def _capability_value(capability: Any) -> Any:

@@ -44,6 +44,8 @@ from graph_agent_gateway.registry.capabilities import (
     measured_effort_capability,
     measured_image_input,
     normalize_route_capabilities,
+    route_effective_capabilities,
+    verified_profile_capabilities,
 )
 from graph_agent_gateway.registry.catalog import (
     EVIDENCE_LIBRARY_DRAFT_ID,
@@ -221,6 +223,8 @@ __all__ = [
     "merge_evidence_library",
     "new_evidence_library",
     "normalize_route_capabilities",
+    "route_effective_capabilities",
+    "verified_profile_capabilities",
     "official_call_method_ids",
     "probe_priority",
     "project_provider_route_ui_state",

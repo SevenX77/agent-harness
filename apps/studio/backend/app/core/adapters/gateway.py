@@ -172,6 +172,12 @@ from graph_agent_gateway.registry import (
 from graph_agent_gateway.registry import (
     resolve_credential as gateway_resolve_credential,
 )
+from graph_agent_gateway.registry import (
+    route_effective_capabilities as route_effective_capabilities,
+)
+from graph_agent_gateway.registry import (
+    verified_profile_capabilities as verified_profile_capabilities,
+)
 from graph_agent_gateway.resolve import (
     FallbackDecision as GatewayFallbackDecision,
 )

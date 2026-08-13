@@ -67,7 +67,12 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 ### C. 能力
 - **能力归一化**（✅ `registry/capabilities.py:normalize_route_capabilities`）：把各厂商参差的能力字段（模态、最大 token、thinking…）归一成统一表示。
 - **能力描述符**（✅ `registry/capabilities.py:build_runtime_setting_descriptors`）：把能力翻译成"机器可读的可配置项"（哪个是布尔开关、哪个是数值上限），驱动应用的设置控件——应用只需选"我关心哪几种能力"。
-- **能力对比 / 合并**（🔻 现 `services/llm_route_capabilities.py`）：把路线静态声明的能力 + 探测验证出的能力合并成一份有效能力。
+- **能力合并**（✅ `registry/capabilities.py:route_effective_capabilities`）：把路由静态声明的能力
+  与探测真正验证出的能力合并成一份有效能力，**实测压过声称**——路由清单上写着不支持 thinking、
+  而一次 thinking 探测回了 `ready`，以探测为准。哪些属于"验证出的"由
+  `registry/capabilities.py:verified_profile_capabilities` 单独作答：只有 `ready` 的档案算数，
+  且是否算"会思考"看候选**声明的 capability**，不看名字里有没有 thinking 字样——这个结论要盖
+  `probed_verified` 章，不能从标签上猜。
 
 ### D. 状态
 - **客观健康态 + 熔断**（✅ 熔断决策 `call/clients.py:LLMCircuitAndUsageLedger`、探测结果契约 `registry/schema.py:ProbeResult`）：一条路线现在是否验证通过 / 失败 / 熔断冷却中。
@@ -174,7 +179,7 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
   | 6 态投影 | `registry/projection.py:project_route_state` | ✅ 已下沉 |
   | materialize 编排核心 | `role/materialization.py:materialize_role` | ✅ 已下沉 |
   | Probe Knowledge Catalog | `registry/catalog.py`（见 §3.B） | ✅ 已下沉 |
-  | 能力合并 | `apps/studio/backend/app/services/llm_route_capabilities.py` | 🔻 待下沉 |
+  | 能力合并 | `registry/capabilities.py:route_effective_capabilities` · `registry/capabilities.py:verified_profile_capabilities` | ✅ 已下沉 |
   | model group 分组 | `apps/studio/backend/app/services/llm_model_groups.py` | 🔻 待下沉 |
   | identity | `apps/studio/backend/app/services/llm_model_identity.py` · `app/services/llm_provider_identity.py` · `app/services/provider_config.py` | 🔻 待下沉 |
   | notable | `apps/studio/backend/app/services/llm_notable_models.py` | 🔻 待下沉 |

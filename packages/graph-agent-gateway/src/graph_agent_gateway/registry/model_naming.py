@@ -42,6 +42,21 @@ class ModelIdentityProjection:
 
 
 @dataclass(frozen=True)
+class _OwnerReading:
+    """Who made a model, and which text said so.
+
+    ``source`` is one of ``model_id`` (the id names a maker this package knows),
+    ``declared_vendor`` (the id carries a ``vendor/`` prefix no table here
+    recognises), or ``endpoint_context`` (the id declares nothing, so the
+    endpoint it is served from was consulted).
+    """
+
+    owner: str | None
+    source: str
+    declared_vendor: str
+
+
+@dataclass(frozen=True)
 class ModelGroupIdentityProjection:
     key: str
     display_name: str
@@ -135,37 +150,22 @@ def project_model_identity(
 
     raw_name = _first_non_empty(route.provider_model_id, route.canonical_id, route.route_slug)
     tokens = _tokenize_model_name(_strip_route_prefix(raw_name))
-    owner = _infer_owner(
-        [
-            endpoint.endpoint_id,
-            provider_label or "",
-            route.provider_model_id,
-            route.canonical_id,
-        ],
-        tokens,
+    reading = _read_owner(
+        tokens=tokens,
+        model_ids=[route.provider_model_id, route.canonical_id],
+        declared_vendor=_declared_vendor(raw_name),
+        context=[endpoint.endpoint_id, provider_label or ""],
     )
-    family = _infer_family(owner, tokens)
-    display_tokens = _compact_display_tokens(tokens, owner)
+    family = _infer_family(reading.owner, tokens)
+    display_tokens = _compact_display_tokens(tokens, reading.owner)
     display_name = " ".join(display_tokens) if display_tokens else _titleize_model_name(route.canonical_id)
-    section_label = _section_for_owner(owner, family, tokens)
-    known = _recognized_tokens(owner, family)
-    unknown_tokens = tuple(
-        dict.fromkeys(
-            token.lower()
-            for token in tokens
-            if token.lower() not in known
-            and token.lower() not in _VARIANT_TOKENS
-            and token.lower() not in _CAPABILITY_TOKENS
-            and not _is_version_or_snapshot(token)
-        )
-    )
     return ModelIdentityProjection(
         display_name=display_name,
-        section_label=section_label,
-        confidence="high" if owner else "medium" if family != "unknown" else "low",
+        section_label=_section_for_owner(reading, family, tokens),
+        confidence=_confidence(reading, family),
         tokens=tuple(tokens),
         display_tokens=tuple(display_tokens),
-        unknown_tokens=unknown_tokens,
+        unknown_tokens=_unrecognized_tokens(tokens, reading.owner, family),
     )
 
 
@@ -264,7 +264,7 @@ def _is_terminal_mmdd_release_token(tokens: tuple[str, ...], index: int) -> bool
 
 
 def _tokens_include_version_number(tokens: tuple[str, ...]) -> bool:
-    return any(re.fullmatch(r"(?:V|R)?\d+(?:\.\d+)?", token, flags=re.IGNORECASE) for token in tokens)
+    return any(_is_version_number_token(token) for token in tokens)
 
 
 def _is_preview_month_year_pair(tokens: tuple[str, ...], index: int) -> bool:
@@ -366,11 +366,47 @@ def _tokens_include_model_brand(previous_tokens: list[str]) -> bool:
     return any(token.lower() in _MODEL_BRAND_CONTEXT_TOKENS for token in previous_tokens)
 
 
-def _infer_owner(values: list[str], tokens: list[str]) -> str | None:
-    token_owner = _infer_owner_from_text(" ".join(tokens))
-    if token_owner:
-        return token_owner
-    return _infer_owner_from_text(" ".join(values))
+def _read_owner(
+    *,
+    tokens: list[str],
+    model_ids: list[str],
+    declared_vendor: str,
+    context: list[str],
+) -> _OwnerReading:
+    """Decide who made a model, and record what said so.
+
+    The model's own text is asked first. A ``vendor/`` prefix it carries is an
+    answer even when no table here recognises the vendor: "made by someone this
+    package does not know" is true, while "made by whoever runs the host it is
+    served from" is a guess that a proxy's vanity hostname can win outright.
+    Only an id that declares nothing falls through to its surroundings.
+    """
+
+    owner = _infer_owner_from_text(" ".join([*tokens, *model_ids]))
+    if owner:
+        return _OwnerReading(owner=owner, source="model_id", declared_vendor=declared_vendor)
+    if declared_vendor:
+        return _OwnerReading(owner=None, source="declared_vendor", declared_vendor=declared_vendor)
+    return _OwnerReading(
+        owner=_infer_owner_from_text(" ".join(context)),
+        source="endpoint_context",
+        declared_vendor="",
+    )
+
+
+def _confidence(reading: _OwnerReading, family: str) -> str:
+    """How the owner was arrived at, not how likely it is to be right.
+
+    ``high`` is reserved for a model that named its maker. Anything read off the
+    endpoint is a guess about the neighbourhood, however good, and a host that
+    wants to show a name unedited needs to be able to tell the two apart.
+    """
+
+    if reading.source == "model_id":
+        return "high"
+    if reading.owner or family != "unknown":
+        return "medium"
+    return "low"
 
 
 def _infer_owner_from_text(value: str) -> str | None:
@@ -381,7 +417,12 @@ def _infer_owner_from_text(value: str) -> str | None:
         return "DeepSeek"
     if "openai" in haystack or re.search(r"\bgpt[-_\s]?\d", haystack) or "chatgpt" in haystack:
         return "OpenAI"
-    if "gemini" in haystack or "antigravity" in haystack or re.search(r"\baqa\b", haystack):
+    if (
+        "gemini" in haystack
+        or "google" in haystack
+        or "antigravity" in haystack
+        or re.search(r"\baqa\b", haystack)
+    ):
         return "Google"
     if "qwen" in haystack or "dashscope" in haystack or "alibaba" in haystack:
         return "Alibaba"
@@ -440,7 +481,8 @@ def _compact_display_tokens(tokens: list[str], owner: str | None) -> list[str]:
     return [token for index, token in enumerate(compacted) if token.lower() != compacted[index - 1].lower()]
 
 
-def _section_for_owner(owner: str | None, family: str, tokens: list[str]) -> str:
+def _section_for_owner(reading: _OwnerReading, family: str, tokens: list[str]) -> str:
+    owner = reading.owner
     if owner == "Anthropic":
         return "anthropic"
     if owner == "OpenAI":
@@ -465,20 +507,56 @@ def _section_for_owner(owner: str | None, family: str, tokens: list[str]) -> str
         return "zhipu"
     if family != "unknown":
         return _normalize_key(family)
+    if reading.declared_vendor:
+        return _normalize_key(reading.declared_vendor)
     return _normalize_key(tokens[0] if tokens else "unknown") or "unknown"
 
 
-def _recognized_tokens(owner: str | None, family: str) -> set[str]:
-    return {token.lower() for token in [owner or "", family] if token}
+def _unrecognized_tokens(tokens: list[str], owner: str | None, family: str) -> tuple[str, ...]:
+    """The words in a model id that no table here claims.
+
+    This is what a maintainer reads to learn which token to teach the module
+    next, so it must not name words the module already used. Every other
+    classification is consulted rather than re-derived: the group splitter says
+    which tokens are release snapshots, capabilities, or route channels, and the
+    brand / model-line / variant tables and the owner inference say the rest.
+    Re-deriving "recognised" as the owner and family NAMES was the whole defect
+    — ``opus`` proves the family is Claude and does not spell it.
+    """
+
+    remaining = _split_model_group_tokens(tuple(tokens))["group_tokens"]
+    claimed = {token.lower() for token in [owner or "", family] if token}
+    return tuple(dict.fromkeys(token.lower() for token in remaining if not _is_claimed_token(token, claimed)))
 
 
-def _is_version_or_snapshot(token: str) -> bool:
-    return bool(
-        re.fullmatch(r"V?\d+(?:\.\d+)+", token)
-        or re.fullmatch(r"20\d{2}-\d{2}-\d{2}", token)
-        or re.fullmatch(r"20\d{6}", token)
-        or re.fullmatch(r"\d{6}", token)
+def _is_claimed_token(token: str, claimed: set[str]) -> bool:
+    normalized = token.lower()
+    return (
+        normalized in claimed
+        or normalized in _BRAND_TOKENS
+        or normalized in _MODEL_BRAND_CONTEXT_TOKENS
+        or normalized in _VARIANT_TOKENS
+        or _is_version_number_token(normalized)
+        or _infer_owner_from_text(normalized) is not None
     )
+
+
+def _is_version_number_token(token: str) -> bool:
+    """A version component as this module writes them: ``4``, ``4.1``, ``V3``, ``R1``.
+
+    Bounded to one or two digits because that is what every other version rule
+    here reads — the tokenizer only merges ``\\d{1,2}`` pairs into a version, so
+    a longer run of digits is a date or a marker this module does not model.
+    """
+
+    return bool(re.fullmatch(r"(?:V|R)?\d{1,2}(?:\.\d{1,2})?", token, flags=re.IGNORECASE))
+
+
+def _declared_vendor(value: str) -> str:
+    """The ``vendor/`` prefix a model id carries, or "" when it carries none."""
+
+    slash_index = value.find("/")
+    return value[:slash_index].strip().lower() if slash_index > 0 else ""
 
 
 def _strip_route_prefix(value: str) -> str:

@@ -85,3 +85,47 @@ def test_the_probe_image_clears_the_smallest_dimension_a_provider_demands() -> N
     width, height = struct.unpack(">II", png[16:24])
 
     assert width >= 16 and height >= 16, f"probe image is {width}x{height}"
+
+
+def test_a_model_that_says_it_only_takes_text_is_answering_the_question() -> None:
+    """Ark's answer is about the model's modalities, and it is a definite no.
+
+    Live 2026-08-11T19:00:42Z, ark-official route of the DeepSeek V4 Flash
+    group: HTTP 400 InvalidParameter, "Model only support text input". The
+    model is there and its text calls work — the route's status is `verified`
+    to this day. Reading that as invalid_model records "there is no such model"
+    from an answer that names the model's capability, and that record is
+    shareable evidence.
+
+    The mirror of `INCONCLUSIVE_PROBE_STATUSES`: that set stops "we could not
+    ask" from passing as "the answer was no", and this stops "the answer was
+    no" from passing as "the model is broken".
+    """
+    answer = ProviderAnswer(
+        status_code=400,
+        body='{"error": {"code": "InvalidParameter", "message": "Model only support text input"}}',
+    )
+
+    assert probe_status(answer, model_not_found_status="invalid_model") == "capability_unsupported"
+
+
+def test_a_model_id_that_does_not_exist_is_still_invalid_model() -> None:
+    """The new member must not swallow the case it sits next to."""
+    answer = ProviderAnswer(
+        status_code=404,
+        body='{"error": {"message": "The model `gpt-nonexistent` does not exist", "type": "invalid_request_error"}}',
+    )
+
+    assert probe_status(answer, model_not_found_status="invalid_model") == "invalid_model"
+
+
+def test_a_refusal_of_the_capability_asked_is_a_fact_about_the_route() -> None:
+    """So it must not be read as an answer about the moment.
+
+    A batch of questions is voided by an inconclusive answer, because a rate
+    limit deletes nothing. A definite "it does not support this" deletes
+    exactly one thing, on purpose — it belongs on the conclusive side.
+    """
+    from graph_agent_gateway.probing import INCONCLUSIVE_PROBE_STATUSES
+
+    assert "capability_unsupported" not in INCONCLUSIVE_PROBE_STATUSES

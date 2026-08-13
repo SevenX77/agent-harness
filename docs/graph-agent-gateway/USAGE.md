@@ -200,6 +200,42 @@ levels = accepted_effort_levels(answers)   # None = 这批答案什么也没定
 「怎么告诉用户正在问」是应用的事**:端点被用户禁用要当场拒、界面要显示探测进行中,
 这些网关不该知道,也不该替你跳过。
 
+### 3.6 答案有三种,不是两种
+
+`ProviderProbeStatus`(`probing/judge.py`)里,**只有两个成员是「问出答案了」**:
+
+| status | 意思 |
+|---|---|
+| `ok` | 问出来了,答案是能 |
+| `capability_unsupported` | 问出来了,答案是不能——模型自己说它不支持 |
+| 其余七个 | 没问出答案,区别只在为什么(key / 余额 / URL / 时机 / 模型 id) |
+
+第二行是容易被吃掉的那一个。实测(2026-08-11,Ark):塞图进去,provider 答
+HTTP 400 "Model only support text input" —— 模型在、文本调用照常能跑,它只是不吃图。
+这句话若落进 `invalid_model`,记下的是「没有这个模型」;若落进 `error`,记下的是
+「我们没问出来」。两种都是把一个确定的回答改写成别的事,而这份记录是要往社区分享的。
+
+**答案怎么变成能力,由网关给**,宿主不要自己拼:
+
+```python
+from graph_agent_gateway.registry import measured_image_input
+
+measured = measured_image_input(accepted=result.status == "ok")
+# 认图:{"vision": True, "input_modalities": ["text", "image"]}
+# 不认:{"vision": False}                     ——都带 source="probed_verified"
+route.capabilities.update(measured)
+```
+
+**正反两个答案都要写下来**,和 `measured_effort_capability` 同一条理由:能力位空着
+读作「还没人问过」,会招来同一笔重复开销;而 catalog 那句 `provider_doc` 的「支持图像」
+若不被实测覆盖,就会一直站在那儿。
+
+**落点不对称,这是有意的**:`vision` 是「认不认图」的是非答案,两个方向都写它;
+`input_modalities` 是一份**下界**清单(宿主通常把文档声称与已验证 profile 的清单并起来),
+所以正答往里加 `image` 撑得住,负答却不能把它改写成 `["text"]` —— 一次被拒的图证明不了
+音频、pdf 或文档列的其他任何一项。**要判断一条 route 是不是实测认图,读 `vision` 且要求
+`source == "probed_verified"`,不要去数模态清单里有没有 `image`**:清单里那一项可能来自文档。
+
 ---
 
 ## 4. 这个包不做什么

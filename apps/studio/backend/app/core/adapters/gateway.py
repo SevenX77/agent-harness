@@ -21,6 +21,9 @@ from graph_agent_gateway.probing import (
     OfficialCallMethod as OfficialCallMethod,
 )
 from graph_agent_gateway.probing import (
+    ProviderProbeStatus as ProviderProbeStatus,
+)
+from graph_agent_gateway.probing import (
     Question as Question,
 )
 from graph_agent_gateway.probing import (
@@ -138,6 +141,9 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     measured_effort_capability as measured_effort_capability,
+)
+from graph_agent_gateway.registry import (
+    measured_image_input as measured_image_input,
 )
 from graph_agent_gateway.registry import (
     merge_evidence_library as merge_evidence_library,
@@ -936,6 +942,7 @@ __all__ = [
     "canonicalize_model",
     "normalize_route_capabilities",
     "measured_effort_capability",
+    "measured_image_input",
     "effort_probe_candidates",
     "effort_questions",
     "EFFORT_CONTROL_LEVEL",

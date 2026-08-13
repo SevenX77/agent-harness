@@ -11,23 +11,17 @@ back into this shape for its callers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+
+from app.core.adapters.gateway import ProviderProbeStatus
 
 
 @dataclass(frozen=True)
 class ModelProbeResult:
     model_id: str
-    status: Literal[
-        "ok",
-        "invalid_model",
-        "invalid_key",
-        "protocol_unsupported",
-        "rate_limited",
-        "quota_exceeded",
-        "network_error",
-        "timeout",
-        "error",
-    ]
+    # The vocabulary belongs to whoever reads provider answers, and that is the
+    # gateway's judge. Re-listing the members here made adding one a three-file
+    # edit that only tests kept honest.
+    status: ProviderProbeStatus
     latency_ms: int | None = None
     message: str | None = None
 

@@ -72,6 +72,7 @@ def answer_from_failed_call(exc: BaseException) -> ProviderAnswer | None:
 
 ProviderProbeStatus = Literal[
     "ok",
+    "capability_unsupported",
     "invalid_key",
     "invalid_model",
     "protocol_unsupported",
@@ -81,6 +82,16 @@ ProviderProbeStatus = Literal[
     "timeout",
     "error",
 ]
+"""What one answer settled.
+
+`ok` and `capability_unsupported` are the two conclusive answers to the question
+that was asked — yes and no. The rest say the question did not get answered, and
+they differ only in why: the key, the balance, the URL, the moment, the model id.
+
+`capability_unsupported` exists because a provider that answers "this model only
+takes text" has told us something certain about the model, and the only place to
+put it used to be `invalid_model` — which says the model is not there at all.
+"""
 
 
 # Providers report an exhausted balance in provider-specific ways that do not
@@ -128,6 +139,37 @@ _PAYLOAD_REJECTION_MARKERS = (
     "unsupported image format",
     "invalid image",
 )
+
+
+# The other thing a provider can refuse: not the payload we built, but the
+# capability the question was about. "Model only support text input" (live
+# 2026-08-11, Ark, HTTP 400 InvalidParameter) is a complete answer — the model
+# is there, its text calls work, and it does not take images. Recording that as
+# invalid_model claims the model does not exist; recording it as `error` claims
+# we never found out. Markers are added from observed provider wording, the same
+# way the billing and payload tables above grew.
+_CAPABILITY_REFUSAL_MARKERS = (
+    "only support text input",
+    "only supports text input",
+    "does not support image",
+    "does not support images",
+    "image input is not supported",
+    "vision is not supported",
+)
+
+
+def _refuses_the_capability_asked(answer: ProviderAnswer) -> bool:
+    payload = answer.payload()
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    source = error if isinstance(error, dict) else payload
+    text = " ".join(
+        str(value).lower()
+        for value in (source.get("type"), source.get("code"), source.get("message"))
+        if value is not None
+    )
+    return any(marker in text for marker in _CAPABILITY_REFUSAL_MARKERS)
 
 
 def _rejects_our_payload(answer: ProviderAnswer) -> bool:
@@ -236,6 +278,8 @@ def probe_status(
             return "quota_exceeded"
         if _rejects_our_payload(answer):
             return "error"
+        if _refuses_the_capability_asked(answer):
+            return "capability_unsupported"
         if code == 404 and not _is_provider_error_payload(answer):
             return "protocol_unsupported"
         return model_not_found_status

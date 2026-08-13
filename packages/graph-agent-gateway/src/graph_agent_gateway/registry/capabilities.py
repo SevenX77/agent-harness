@@ -221,6 +221,44 @@ def measured_effort_capability(levels: Sequence[str]) -> CapabilityValue:
     )
 
 
+def measured_image_input(*, accepted: bool) -> dict[str, CapabilityValue]:
+    """What sending a route one real image settles.
+
+    Both answers are recorded, for the reason `measured_effort_capability` gives
+    above: a refusal is an answer, while leaving the capability alone reads as
+    "nobody has asked yet". Here the stakes are higher than an unspent probe — a
+    catalog's `provider_doc` claim of image support would otherwise stand forever
+    against a model that has said, in words, that it takes text only.
+
+    The answer always lands on `vision`, because that capability holds a yes/no
+    about image input and a measured `False` cannot be blended away. It lands on
+    `input_modalities` only when the answer is yes, and that asymmetry is the
+    point: a modality list is a lower bound (hosts union it — the docs list one
+    modality, a verified profile proves another, the route does both), so adding
+    `image` to it is a claim the probe can support, while writing `["text"]` into
+    it would state a completeness this probe never established. A refusal bounds
+    images from above, and `vision` is where an upper bound belongs.
+
+    Text rides along in the accepted case because the probe uses the route's own
+    verified call method: reaching the model at all is a text call that worked.
+    """
+    message = (
+        "Measured by sending this route an image: it was accepted."
+        if accepted
+        else "Measured by sending this route an image: it answered that it takes text only."
+    )
+    measured = {
+        "vision": CapabilityValue(value=accepted, source="probed_verified", message=message),
+    }
+    if accepted:
+        measured["input_modalities"] = CapabilityValue(
+            value=["text", "image"],
+            source="probed_verified",
+            message=message,
+        )
+    return measured
+
+
 def build_runtime_setting_descriptors(
     route: ProviderRoute,
 ) -> dict[str, RuntimeSettingDescriptor]:
@@ -386,5 +424,6 @@ def _anthropic_adaptive_thinking_supported(provider_model_id: str) -> bool:
 __all__ = [
     "build_runtime_setting_descriptors",
     "measured_effort_capability",
+    "measured_image_input",
     "normalize_route_capabilities",
 ]

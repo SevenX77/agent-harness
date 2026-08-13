@@ -1,7 +1,7 @@
 # graph-agent-gateway 使用手册
 
 > **这份文档回答的问题**:我是一个要调大模型的应用,装上这个包之后,**具体怎么用它**——
-> 我要自己提供什么、从哪个入口进、五件常做的事各写几行代码。
+> 我要自己提供什么、从哪个入口进、常做的每件事各写几行代码。
 >
 > **它不回答**:这个包为什么这样划分(那是
 > [`README.md`](../../packages/graph-agent-gateway/README.md) §2 的边界判据),
@@ -68,7 +68,7 @@ class CredentialProviderProtocol(Protocol):
 
 | 域 | 一句话职责 | 什么时候你会用到它 |
 |---|---|---|
-| `registry` | **真相**:端点/路由/凭证/能力的定义、身份、边界、状态投影 | 造快照、算端点 id、读能力、投影 UI 状态 |
+| `registry` | **真相**:端点/路由/凭证/能力的定义、身份、边界、状态投影,以及模型名与分组的客观加工 | 造快照、算端点 id、读有效能力、把几百条路由整理成人能挑的清单、投影 UI 状态 |
 | `resolve` | **选路**:从角色推出一条有序的路由链,含 lint / profile 选择 / fallback 决策 / 错误分类 | 要知道「这个角色该用哪条路由」 |
 | `role` | **角色物化**:角色 → 已贴合这条路由的调用设置 | 要把角色的意图落成具体参数 |
 | `call` | **调用**:拿路由真正发一次请求(两张脸:LangChain 的和不要 LangChain 的) | 要真的调模型 |
@@ -77,7 +77,7 @@ class CredentialProviderProtocol(Protocol):
 
 ---
 
-## 3. 五条常做的路径
+## 3. 常做的路径
 
 ### 3.1 角色 → 路由链
 
@@ -279,6 +279,79 @@ _refuses_the_capability_asked(answer)  -> "capability_unsupported"   # 被拒的
 
 收进那份词表的门槛是「**与请求无关**」:余额和 key 对每个模型、每次调用都给同一个答案。
 「这个模型不吃图」「这个参数不认识」换个模型换次调用就变,不进去,留在各自的消费者那里。
+
+### 3.8 一堆路由 → 一份人能挑的清单
+
+真实的凭证库里几百条路由是常态:同一个模型有带日期的快照、有 `-thinking` 后缀的变体、
+经官方和经代理各一条。直接摆给人挑没法看。
+
+```python
+from graph_agent_gateway.registry import (
+    project_model_identity,
+    project_model_group_identity,
+)
+
+name = project_model_identity(
+    route=route,
+    endpoint=endpoint,
+    provider_label=my_label_for_this_endpoint,   # 可选;你自己给端点起的名字
+)
+# name.display_name  -> "Claude Opus 4.1 20250805"
+# name.section_label -> "anthropic"          分区用
+# name.unknown_tokens-> ("opus",)            见下面那条警告,别照字面理解
+
+group = project_model_group_identity(route=route, endpoint=endpoint)
+# group.key              -> "claude-opus-4-1"   同一组的路由拿到同一个 key
+# group.display_name     -> "Claude Opus 4.1"   快照日期被折掉了
+# group.route_display_name-> "Claude Opus 4.1 20250805"  这一条自己的名字
+# group.release_tokens / capability_tokens / route_channel_tokens
+#     -> 被折掉的分别是什么,想在卡片上补一行小字就读它
+```
+
+`provider_label` 是**你**给端点起的用户可见名字,由参数传进来而不是从 endpoint 上读——
+网关的 `ProviderEndpoint` 没有展示字段。它只在模型 id 自己认不出品牌时当线索用。
+
+> **`unknown_tokens` 今天名不副实,别拿它当「这个模型我不认识」的判据。** 实测
+> (2026-08-13,`claude-opus-4-1-20250805`)它返回 `("opus",)`——而 `opus` 正是推出
+> family=Claude 的那个词。原因是 `_recognized_tokens` 只把 owner 与 family 的名字
+> (`anthropic` / `claude`)算作认识的,没把**促成这次归类的证据 token**算进去,所以
+> `opus` / `sonnet` / `haiku` 这类家族成员词一律落进"不认识"。这是本包的已知缺陷,
+> 不是有意设计;在它修好之前,要判断"这个模型认不认得出",读 `confidence`
+> (`high` = 认出厂商 / `medium` = 只认出家族 / `low` = 都没认出)。
+
+**这里有两个「同一个模型」,别弄混**:
+
+| | 谁答 | `claude-opus-4-1-20250805` 与 `claude-opus-4-1` |
+|---|---|---|
+| **执行身份** | `registry/identity.py` 的 `canonical_id` | **两个**——它必须与 route_id 后缀逐字节一致 |
+| **人可见分组** | `project_model_group_identity().key` | **一个**——刻意把快照折掉,好让选择器只显示一行 |
+
+要真正跑一个模型,认 `route_id`;要画一份清单,认组 key。**互相顶替会得到一个看起来
+对的错答案。**
+
+### 3.9 这条路由到底支持什么:实测压过声称
+
+路由清单上写的能力是**声称**,探测回来的是**实测**。合并的规矩只有一条:实测赢。
+
+```python
+from graph_agent_gateway.registry import route_effective_capabilities
+
+caps = route_effective_capabilities(route)
+# caps["thinking_protocol"].value   -> True
+# caps["thinking_protocol"].source  -> "probed_verified"
+```
+
+清单上写着不支持 thinking、而一次 thinking 探测回了 `ready`,以探测为准。
+
+哪些算「实测出来的」由 `registry/capabilities.py:verified_profile_capabilities` 单独作答,
+它有两条不肯让步的判据:
+
+- **只有 `status == "ready"` 的候选算数**。探过但没通过的不产生任何能力事实。
+- **「会不会思考」看候选声明的 `capability`,不看名字**。一个 `capability="text_chat"`
+  但 mapper 叫 `openai_thinking_chat` 的候选,**不**算会思考——这个结论要盖
+  `probed_verified` 章,不能从标签上猜。这条判据是从一次真实分歧里收敛出来的:
+  曾经有两份实现,一份读声明、一份对拼起来的字符串做子串搜索,同一个候选在两边
+  得到相反的判定。
 
 ---
 

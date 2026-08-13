@@ -323,6 +323,12 @@ effort 进 UI、top_p 不进)。前决议管「被拒之后怎么办」,本决�
 | F4 | 登录行常驻「登录」+ 显示当前账号(用户 2026-08-12:「登录按钮不要消失,万一用户要换账号呢?」「能否读取登录的账号,显式在 UI 上」):cliRowAction 登录行任何状态都给「登录」;探测脚本第 5 列带账号身份(claude=oauthAccount.emailAddress,codex=id_token JWT email,只读身份字段、token 不出脚本,有测试钉死),行内 muted 文本显示 | ✅ 已合并(#765 主体 + #769 补缺)+ 真机点验完成(2026-08-13) | §3.9 同步修订。#765 曾零 CI:与 #764 在 main 上冲突(mergeStateStatus=DIRTY)——GitHub 对生成不了 merge commit 的 PR 不触发 pull_request 工作流,rebase 后 CI 即跑(教训入册)。首轮点验暴露账号列恒空 → #769 修:探测 grep 模式写死 `":\""` 而真实 `.claude.json` 是 pretty-print(冒号后带空格),三处提取全改 `: *"` + 喂真 sh 的行为测试(fixture 按真实落盘形状,红转绿,cargo 225 绿)。合并后真机点验(CDP 截图 cli-auth-rows-with-accounts.png):两条登录行均 就绪+traveluxi.com@gmail.com+常驻「登录」钮 ✅ |
 | F5 | codex 登录改设备码流(用户 2026-08-12 事故报告:「我点 codex 的 sign-in 为什么会影响我桌面端的 codex?」+ 裁决「查 ah/Zeroth 已成功的登录方法,不要自己探索」):裸 `codex login` 在 localhost:1455 等浏览器回调,桌面 Codex app(商店包 OpenAI.Codex)的内核 codex.exe 常驻监听同端口,回调被桌面 app 截胡——WSL 侧死等且开场清掉 WSL 旧 auth.json;interop 关闭故反向不可能。改用 ah/Zeroth 既证配方 `codex login --device-auth`(设备码流:浏览器开固定页+输一次性代码,无本地回调),设置页「登录」+ doorman 两处同改;claude 的授权码粘贴流本无回调,不动 | ✅ 已合并(#770)+ 真机复验(2026-08-13) | 决议 `2026-08-12-login-console-clipboard-keys.md` §6 + §3.9 同步落盘。已过门:三处测试钉住 `--device-auth`(闭表命令 + doorman 接线,红转绿,cargo 224 绿);flag 在 0.147.0 实测接受(help 隐藏),WSL 实跑输出与 Zeroth 采集 markers 逐字吻合。真机:用户已重登 codex(探测行 就绪+邮箱,见 F4 截图);「登录」钮实点验证略过——codex 已在登录态,`codex login` 开场即清 auth.json,实点会打掉用户刚建好的凭据链,接线正确性由钉死测试与 WSL 实跑双证据覆盖 |
 
+### 用户功能批次 2026-08-13:媒体生成设置页(media generation)
+
+| # | 项 | 状态 | 处置 |
+|---|---|---|---|
+| M1 | 媒体生成模型独立设置页(用户裁决 2026-08-13:类别名 `media_generation`;不进 API Keys 页,原页改名「LLM API-Key」;新页含 RunningHub 凭据、零成本探活 accountStatus(余额展示)、10 条证据锚定模型目录(按模态分组,任务/渠道/价格徽章)、声明式参数 schema 驱动的能力胶囊与默认参数;L3 真实生成测试与调用运行时显式后置为 `media-invocation-runtime` 单元) | 进行中(feat/media-generation-settings) | 决议 `docs/studio/mvp1/02_capabilities/media-generation/design-decision.md` + gateway 侧 `docs/graph-agent-gateway/mvp1/14-media-generation/design-decision.md`。gateway 新增 `media` 域(schema/catalog/probing,与 LLM registry 类型隔离,role→route 不可见);backend `/api/media/*` 5 端点;前端新 tab。已过门(本地):gateway 15 测试 + mypy --strict + ruff;backend 9 测试 + mypy + 全量 604 gateway 套件;前端四门禁 + worktree Playwright smoke(截图)。待:全量 backend/engine 套件、PR、合并后 vendor 重建 + 主 app CDP 逐项点验 |
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

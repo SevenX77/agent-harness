@@ -33,6 +33,7 @@ from app.routers import (
     lint,
     llm,
     loopback,
+    media,
     node_llm_params,
     runs,
     runtime_config,
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     studio_app.include_router(runtime_config.router)
     studio_app.include_router(copilot.router)
     studio_app.include_router(llm.router)
+    studio_app.include_router(media.router)
     studio_app.include_router(loopback.router)
     studio_app.include_router(audit.router)
     studio_app.include_router(debug.router)

@@ -1143,7 +1143,7 @@ describe("copilot empty-state + untested-warning text routed through i18n", () =
   it("zh-CN bundle defines the same keys with translated copy", async () => {
     const zh = (await import("@/locales/zh-CN/settings.json")).default
     expect(zh.copilot.emptyState.title).toContain("Anthropic Messages")
-    expect(zh.copilot.emptyState.cta).toContain("API Keys")
+    expect(zh.copilot.emptyState.cta).toContain("LLM API-Key")
     expect(zh.copilot.addModelTooltip).toContain("模型组")
     expect(zh.copilot.roleCard.untestedWarning).toContain("{{n}}")
     expect(zh.copilot.roleCard.untestedWarning).toContain("未测试")

@@ -1084,7 +1084,7 @@ describe('SettingsPageContent (api_keys)', () => {
 
   it('renders official and third-party provider cards with primary test actions', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    expect(html).toContain('API Keys')
+    expect(html).toContain('LLM API-Key')
     expect(html).toContain('data-slot="catalog-accordion"')
     expect(html).toContain('data-slot="catalog-accordion-content"')
     expect(html).toContain('Official Providers')

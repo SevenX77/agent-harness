@@ -6,9 +6,10 @@
   },
   "tabs": {
     "general": "General",
-    "apiKeys": "API Keys",
+    "apiKeys": "LLM API-Key",
     "llmRoles": "LLM Roles",
-    "copilot": "Copilot"
+    "copilot": "Copilot",
+    "mediaGeneration": "Media Generation"
   },
   "saveStatus": {
     "pending": "Pending",
@@ -150,7 +151,7 @@
     }
   },
   "apiKeys": {
-    "title": "API Keys",
+    "title": "LLM API-Key",
     "description": "Local LLM provider credentials used by Studio runtime. Changes auto-save.",
     "loadFailedTitle": "API Keys load failed",
     "loadFailedDescription": "{{error}}. Stored provider values are not shown until the credentials document loads.",
@@ -470,7 +471,7 @@
     "emptyState": {
       "title": "No Anthropic Messages route yet",
       "description": "Add a credential that supports the anthropic-messages protocol in API Keys (Anthropic Official / Ark / DeepSeek / OpenRouter, etc.). It appears here once single-model testing passes.",
-      "cta": "Configure in API Keys"
+      "cta": "Configure in LLM API-Key"
     },
     "roleCard": {
       "description": "Coding copilot role synced with backend fallback chain.",
@@ -529,6 +530,47 @@
     "aria": {
       "testing": "Testing {{title}}...",
       "ready": "{{title}} ready: {{ready}}/{{total}} routes"
+    }
+  },
+  "mediaGen": {
+    "title": "Media Generation",
+    "description": "Credentials, model catalog and connectivity tests for image/video generation providers",
+    "loading": "Loading…",
+    "loadFailedTitle": "Failed to load media generation config",
+    "providerRunninghub": "RunningHub",
+    "apiKeyLabel": "API Key",
+    "apiKeyPlaceholder": "Enter RunningHub API key",
+    "baseUrlLabel": "Base URL",
+    "revealKey": "Reveal key",
+    "testConnection": "Test connection (free)",
+    "probing": "Testing…",
+    "untested": "Untested",
+    "keyNotSet": "Set an API key first",
+    "probeOk": "Connected",
+    "probeAuthFailed": "Auth failed",
+    "probeNetworkError": "Network error",
+    "balanceCoins": "Balance {{coins}} RH coins",
+    "balanceMoney": "≈¥{{money}}",
+    "lastChecked": "Last checked {{time}}",
+    "imageModels": "Image models",
+    "videoModels": "Video models",
+    "channelEconomy": "Economy",
+    "channelOfficial": "Official",
+    "statusCataloged": "Cataloged (untested)",
+    "enabled": "Enabled",
+    "defaultsTitle": "Default params",
+    "defaultUnset": "Unset",
+    "noDefaultParams": "This model has no defaultable params",
+    "docSource": "Doc source",
+    "pricingPerImage": "¥{{amount}}/image",
+    "pricingPerSecond": "¥{{amount}}/second",
+    "pricingPerRun": "¥{{amount}}/run",
+    "taskNames": {
+      "t2i": "Text to image",
+      "i2i": "Image to image",
+      "i2v": "Image to video",
+      "flf2v": "First/last frame to video",
+      "ref2v": "Reference to video"
     }
   }
 }

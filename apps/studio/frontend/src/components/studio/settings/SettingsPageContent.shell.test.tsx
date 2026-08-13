@@ -142,7 +142,7 @@ describe("Settings shell chrome", () => {
 })
 
 describe("Settings shell error boundaries", () => {
-  const tabs: SettingsTab[] = ["general", "api_keys", "llm_roles", "copilot"]
+  const tabs: SettingsTab[] = ["general", "api_keys", "media_generation", "llm_roles", "copilot"]
   it.each(tabs)("renders %s tab content without crashing", (activeTab) => {
     const html = render({ activeTab })
     expect(html.length).toBeGreaterThan(0)

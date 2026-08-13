@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Bot, KeyRound, Plug, Settings, X } from "lucide-react"
+import { Bot, Clapperboard, KeyRound, Plug, Settings, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -8,6 +8,7 @@ import { CopilotTab } from "./copilot/CopilotTab"
 import { GeneralTab } from "./GeneralTab"
 import { GeneralTabSkeleton } from "./GeneralTabSkeleton"
 import { LlmRolesTab } from "./LlmRolesTab"
+import { MediaGenerationTab } from "./media-generation/MediaGenerationTab"
 import { RolesTabSkeleton } from "./RolesTabSkeleton"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
 import { NavButton } from "./shared"
@@ -86,6 +87,13 @@ export function SettingsPageContent({
           <NavButton active={activeTab === "api_keys"} icon={<KeyRound />} onClick={() => onTabChange("api_keys")}>
             {t("tabs.apiKeys")}
           </NavButton>
+          <NavButton
+            active={activeTab === "media_generation"}
+            icon={<Clapperboard />}
+            onClick={() => onTabChange("media_generation")}
+          >
+            {t("tabs.mediaGeneration")}
+          </NavButton>
           <NavButton active={activeTab === "llm_roles"} icon={<Plug />} onClick={() => onTabChange("llm_roles")}>
             {t("tabs.llmRoles")}
           </NavButton>
@@ -141,6 +149,20 @@ export function SettingsPageContent({
                   onCancelAddProvider={onCancelAddProvider}
                   onProviderModelsUpdated={onProviderModelsUpdated}
                 />
+              </SettingsErrorBoundary>
+            </div>
+          </ScrollArea>
+        ) : null}
+
+        {isMounted("media_generation") ? (
+          <ScrollArea
+            className="flex-1"
+            data-settings-tab-panel="media_generation"
+            hidden={activeTab !== "media_generation"}
+          >
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
+              <SettingsErrorBoundary label="Media Generation">
+                <MediaGenerationTab />
               </SettingsErrorBoundary>
             </div>
           </ScrollArea>

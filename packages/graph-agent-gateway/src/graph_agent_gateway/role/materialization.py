@@ -314,9 +314,6 @@ def _credential_available(endpoint: Any) -> bool:
     credential_ref = _value(endpoint, "credential_ref")
     if isinstance(credential_ref, str) and credential_ref:
         return True
-    secret_handle = _value(endpoint, "secret_handle")
-    if isinstance(secret_handle, str) and secret_handle:
-        return True
     api_key = _value(endpoint, "api_key")
     if api_key is None:
         return False

@@ -74,3 +74,27 @@ c 就是直接 copy 网页,v 就是把剪贴板的内容复制上去」),本文�
 - 登录界面清单:`cli_console_action_script`(设置页按钮控制台)、
   `wsl_payload_script` 的 codex_auth_sync / claude_auth_bridge(doorman)。
 - 内嵌终端 = `cli_terminal.rs`(ConPTY)+ 裸 `@xterm/xterm`,无自定义剪贴板接线。
+
+## 6. 修订(2026-08-12 深夜):codex 登录改设备码流
+
+**事故**:用户点设置页 codex「登录」后,Windows 桌面 Codex app(微软商店包
+`OpenAI.Codex`,进程 ChatGPT.exe)弹出登录窗;WSL 侧登录永远等不到回调,且开场
+清掉了 WSL 旧 `auth.json`。用户证词:桌面 app 一直日常在用,以前的 CLI 登录从未
+干扰过它。
+
+**根因(实测)**:裸 `codex login` 起 `localhost:1455` 回调服务器等浏览器跳回;
+而桌面 Codex app 的内核 `codex.exe` 也监听 Windows 侧 1455(实测
+`Get-NetTCPConnection`:pid 属 OpenAI.Codex 包)。浏览器回调永远先命中 Windows
+本机监听者,WSL 侧被截胡。反向不可能:interop 关闭,WSL 拉不起任何 Windows 进程。
+
+**为什么以前没事**:ah/Zeroth 已验证的登录配方是 **`codex login --device-auth`**
+(设备码流:浏览器开固定页 `auth.openai.com/codex/device` + 输一次性代码,无本地
+回调服务器,不占 1455)——Zeroth `provider_runtime/codex.rs` 的
+`headless_argv: ["codex","login","--device-auth"]` 及其真机采集的 challenge
+markers 是既证。本机 codex-cli 0.147.0 实测接受该 flag(help 里隐藏)。
+
+**决议**:Studio 全部 codex 登录入口(设置页「登录」按钮 + doorman 的
+codex_auth_sync)一律 `codex login --device-auth`;claude 的
+`claude auth login` 本就是授权码粘贴流(无本地回调),不变。设备码流下 URL 自动
+复制照常生效;一次性代码由用户从控制台读出输进浏览器,`v` 键对 codex 登录不再
+必需(包装器共用,保留无害)。

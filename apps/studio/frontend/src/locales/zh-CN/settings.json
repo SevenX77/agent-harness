@@ -192,6 +192,7 @@
       "status": {
         "ok": "可用",
         "invalidModel": "未找到模型",
+        "capabilityUnsupported": "模型不支持这项能力",
         "invalidKey": "API Key 无效",
         "rateLimited": "已限流",
         "quotaExceeded": "配额超限",

@@ -52,6 +52,8 @@ export function manualModelStatusLabel(status: ProviderModelTestResult["status"]
       return i18n.t("apiKeys.manualTest.status.ok")
     case "invalid_model":
       return i18n.t("apiKeys.manualTest.status.invalidModel")
+    case "capability_unsupported":
+      return i18n.t("apiKeys.manualTest.status.capabilityUnsupported")
     case "invalid_key":
       return i18n.t("apiKeys.manualTest.status.invalidKey")
     case "rate_limited":

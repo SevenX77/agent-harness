@@ -374,7 +374,20 @@ export interface ProviderModelTestRequest {
 
 export interface ProviderModelTestResult {
   model_id: string
-  status: 'ok' | 'invalid_model' | 'invalid_key' | 'rate_limited' | 'quota_exceeded' | 'network_error' | 'timeout' | 'error'
+  // Mirrors the gateway's ProviderProbeStatus (probing/judge.py), the only
+  // place this vocabulary is defined; `capability_unsupported` is the answer
+  // a model gives when it says outright that it does not do what was asked.
+  status:
+    | 'ok'
+    | 'capability_unsupported'
+    | 'invalid_model'
+    | 'invalid_key'
+    | 'protocol_unsupported'
+    | 'rate_limited'
+    | 'quota_exceeded'
+    | 'network_error'
+    | 'timeout'
+    | 'error'
   latency_ms?: number | null
   message?: string | null
   route_id?: string | null
@@ -1672,12 +1685,15 @@ export async function probeRouteMultimodal(routeId: string): Promise<ProviderRou
   return routeFromRegistryResponse(response.data, routeId)
 }
 
-// 只有 probed_verified(真探测通过)且 input_modalities 含 image 才算"认图";
-// provider_doc/api_list 只是 catalog 声称,是"可能带多模态"的提示,不是实测判据。
+// 只有 probed_verified(真塞图问过)的 vision 才算"认图";provider_doc/api_list
+// 只是 catalog 声称,是"可能带多模态"的提示,不是实测判据。
+//
+// 读 vision 而不是 input_modalities:模态清单是**下界**——宿主会把文档声称和已验证
+// profile 的清单并起来,所以"清单里有 image"可能来自文档。vision 才是这个问题的
+// 是非答案,而且实测的「不认图」只可能写在这里(一次被拒的图证明不了整张清单)。
 export function routeAcceptsImageVerified(route: ProviderRoute): boolean {
-  const cap = route.capabilities?.input_modalities
-  if (!cap || cap.source !== 'probed_verified' || !Array.isArray(cap.value)) return false
-  return cap.value.some((modality) => modality === 'image')
+  const cap = route.capabilities?.vision
+  return Boolean(cap && cap.source === 'probed_verified' && cap.value === true)
 }
 
 export async function getCredentials({

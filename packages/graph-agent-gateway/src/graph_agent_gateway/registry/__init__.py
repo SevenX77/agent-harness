@@ -42,6 +42,7 @@ from graph_agent_gateway.registry.call_methods import (
 from graph_agent_gateway.registry.capabilities import (
     build_runtime_setting_descriptors,
     measured_effort_capability,
+    measured_image_input,
     normalize_route_capabilities,
 )
 from graph_agent_gateway.registry.catalog import (
@@ -216,6 +217,7 @@ __all__ = [
     "known_verified_capabilities",
     "materialize_probe_catalog_candidates",
     "measured_effort_capability",
+    "measured_image_input",
     "merge_evidence_library",
     "new_evidence_library",
     "normalize_route_capabilities",

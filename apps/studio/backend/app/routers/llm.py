@@ -29,6 +29,7 @@ from app.core.adapters.gateway import (
     ProfileSelectionError,
     ProviderModelStateProjection,
     ProviderProbeBackend,
+    ProviderProbeStatus,
     Question,
     RegistryResolutionError,
     ResolvedRoute,
@@ -45,6 +46,7 @@ from app.core.adapters.gateway import (
     effort_questions,
     lint_role_routes,
     measured_effort_capability,
+    measured_image_input,
     normalize_route_capabilities,
     select_verified_profile,
 )
@@ -429,17 +431,7 @@ class EndpointModelTestResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_id: str
-    status: Literal[
-        "ok",
-        "invalid_model",
-        "invalid_key",
-        "protocol_unsupported",
-        "rate_limited",
-        "quota_exceeded",
-        "network_error",
-        "timeout",
-        "error",
-    ]
+    status: ProviderProbeStatus
     route_id: str | None = None
     message: str | None = None
 
@@ -1462,8 +1454,37 @@ async def probe_route_multimodal(route_id: str) -> RegistryResponse:
     _merge_probe_evidence_into_route(
         credentials, endpoint, result, route_id=route_id, multimodal=True
     )
+    _record_measured_capabilities(
+        credentials,
+        route_id,
+        measured=_settled_probe_capability_values(endpoint, result, multimodal=True),
+    )
     save_credentials(credentials)
     return await _write_registry_response(credentials)
+
+
+def _record_measured_capabilities(
+    credentials: LLMCredentialsFile,
+    route_id: str,
+    *,
+    measured: dict[str, CapabilityValue],
+) -> None:
+    """Put a measurement where the capability lives, not only in the evidence log.
+
+    `route_effective_capabilities` reads `route.capabilities` and ready profiles
+    and never reads evidence, so a probe whose answer stops at an evidence record
+    changes nothing anyone displays or lints against — which is how a route could
+    pass a real image probe and still tell the UI, forever, that its image
+    support was only a `provider_doc` claim.
+    """
+    if not measured:
+        return
+    route = credentials.provider_routes.get(route_id)
+    if route is None:
+        return
+    credentials.provider_routes[route_id] = route.model_copy(
+        update={"capabilities": {**route.capabilities, **measured}}
+    )
 
 
 @router.put("/routes/{route_id}", response_model=RegistryResponse)
@@ -2841,8 +2862,12 @@ def _route_is_language_capable(route: ProviderRoute, *, allow_unknown: bool) -> 
     capabilities = route_effective_capabilities(route)
     input_modalities = _capability_string_list(capabilities, "input_modalities")
     output_modalities = _capability_string_list(capabilities, "output_modalities")
-    if input_modalities or output_modalities:
-        return "text" in input_modalities and "text" in output_modalities
+    # Only the lists we actually have get a vote: an absent modality list means
+    # nobody has asked, and reading it as "it emits no text" would drop a working
+    # text route the moment an image probe measured its inputs and nothing else.
+    known_modalities = [modalities for modalities in (input_modalities, output_modalities) if modalities]
+    if known_modalities:
+        return all("text" in modalities for modalities in known_modalities)
     capability_family = _capability_string(capabilities, "capability_family") or _capability_string(
         capabilities, "model_type"
     )
@@ -3684,6 +3709,45 @@ def _merge_official_profile_evidence_into_route(
     credentials.provider_routes[route_id] = merge_route_evidence(route, record)
 
 
+def _probe_settled_the_question(result: ModelProbeResult) -> bool:
+    """Whether the provider answered the question, either way.
+
+    Yes and no are both answers, and a record built on one is as trustworthy as a
+    record built on the other — `trust_state` says how a record was established,
+    not which way it came out. Recording a definite "this model takes text only"
+    as `probe-failed` publishes it, to the community catalog too, as a route that
+    could not be probed.
+    """
+    return result.status in ("ok", "capability_unsupported")
+
+
+def _settled_probe_capability_values(
+    endpoint: ProviderEndpoint,
+    result: ModelProbeResult,
+    *,
+    multimodal: bool,
+) -> dict[str, CapabilityValue]:
+    """The capabilities this probe's answer settles, or none when it settled nothing.
+
+    The image probe's two answers both settle the same pair of capabilities, so
+    they come from one gateway call — what a provider answer means is the
+    gateway's to say, the same seam that took `_accepted_effort_levels` out of
+    this router.
+    """
+    if multimodal:
+        if not _probe_settled_the_question(result):
+            return {}
+        return dict(measured_image_input(accepted=result.status == "ok"))
+    if result.status != "ok":
+        return {}
+    return _third_party_route_capability_values(
+        endpoint,
+        result.model_id,
+        _successful_generation_probe_capabilities(),
+        source="probed_verified",
+    )
+
+
 def _build_model_probe_evidence(
     endpoint: ProviderEndpoint,
     result: ModelProbeResult,
@@ -3693,26 +3757,12 @@ def _build_model_probe_evidence(
 ) -> EvidenceRecord:
     verified = result.status == "ok"
     reason = None if verified else _model_probe_failure_message(result)
-    probe_capabilities = (
-        _successful_multimodal_probe_capabilities()
-        if multimodal
-        else _successful_generation_probe_capabilities()
-    )
-    capability_values = (
-        _third_party_route_capability_values(
-            endpoint,
-            result.model_id,
-            probe_capabilities,
-            source="probed_verified",
-        )
-        if verified
-        else {}
-    )
+    capability_values = _settled_probe_capability_values(endpoint, result, multimodal=multimodal)
     return (
         EvidenceRecord(
             evidence_id=new_evidence_id("probe"),
             evidence_type="probe",
-            trust_state="probe-verified" if verified else "probe-failed",
+            trust_state="probe-verified" if _probe_settled_the_question(result) else "probe-failed",
             observed_at=_now_iso(),
             attempted_at=_now_iso(),
             endpoint_id=endpoint.endpoint_id,
@@ -4948,17 +4998,6 @@ def _successful_generation_probe_capabilities() -> dict[str, Any]:
         "model_type": "language_reasoning",
         "capability_family": "language_reasoning",
         "input_modalities": ["text"],
-        "output_modalities": ["text"],
-    }
-
-
-def _successful_multimodal_probe_capabilities() -> dict[str, Any]:
-    """成功的多模态探测(provider 接受图输入)断言 input_modalities 含 image;
-    normalize_route_capabilities 会据此自动派生 vision=True(capabilities.py)。"""
-    return {
-        "model_type": "language_reasoning",
-        "capability_family": "language_reasoning",
-        "input_modalities": ["text", "image"],
         "output_modalities": ["text"],
     }
 

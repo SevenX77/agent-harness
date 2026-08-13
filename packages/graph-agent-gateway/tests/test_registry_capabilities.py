@@ -187,3 +187,50 @@ def test_a_route_that_sells_no_level_records_that_rather_than_staying_silent() -
 
     assert capability.value == {"supported": False, "values": []}
     assert "refused every" in (capability.message or "")
+
+
+def test_an_image_a_route_accepted_becomes_the_capability_the_ui_reads() -> None:
+    """The measurement has to land on the capability or nothing changed.
+
+    Studio's image button asks whether image input is verified, and only a
+    `probed_verified` answer counts; a probe whose answer stops at the evidence
+    log leaves that button unable to ever say yes.
+    """
+    from graph_agent_gateway.registry import measured_image_input
+
+    measured = measured_image_input(accepted=True)
+
+    assert measured["vision"].value is True
+    assert measured["vision"].source == "probed_verified"
+    assert measured["input_modalities"].value == ["text", "image"]
+    assert measured["input_modalities"].source == "probed_verified"
+
+
+def test_a_route_that_refused_the_image_records_the_refusal_on_vision() -> None:
+    """"It only takes text" is an answer, and it outranks the document claim.
+
+    Same rule `measured_effort_capability` states for an empty measurement: an
+    absent capability reads as "nobody has asked yet" and invites the same spend
+    again, while a catalog's `provider_doc` claim of image support would stand
+    unchallenged forever. Role lint reads `vision` and treats a falsy value as
+    unmet, so the refusal is enforceable where it lands.
+    """
+    from graph_agent_gateway.registry import measured_image_input
+
+    measured = measured_image_input(accepted=False)
+
+    assert measured["vision"].value is False
+    assert measured["vision"].source == "probed_verified"
+
+
+def test_a_refusal_does_not_rewrite_the_modality_list_it_cannot_settle() -> None:
+    """A modality list is a lower bound that hosts union together.
+
+    One refused image proves images are out; it proves nothing about audio, pdf
+    or anything else a document might list, so writing `["text"]` into the list
+    would state a completeness this probe never established — and any host that
+    unions lists would blend it back into the document's claim anyway.
+    """
+    from graph_agent_gateway.registry import measured_image_input
+
+    assert "input_modalities" not in measured_image_input(accepted=False)

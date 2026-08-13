@@ -192,6 +192,7 @@
       "status": {
         "ok": "Available",
         "invalidModel": "Model not found",
+        "capabilityUnsupported": "Model does not support this",
         "invalidKey": "Invalid API key",
         "rateLimited": "Rate limited",
         "quotaExceeded": "Quota exceeded",

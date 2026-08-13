@@ -749,6 +749,95 @@ route_id / endpoint_id / model / protocol / finish_reason / usage。
 路径;④ 09 全篇按实情改写(它现在还在指 `dispatch.py`/`ordinary_chat`);
 ⑤ mypy --strict + gateway 全套 + studio 全套绿。
 
+### D11. 一个明确的「不支持」是答案,不是失败(已裁决,2026-08-12)
+
+裁的是台账 P9 与 P12 那道共同的题:**多模态探测问出来的结论,两个方向都到不了
+能力位**。P12 记档时写明「先裁 P9,再一起改」,这一节就是那个裁决。
+
+**证据一:答案词表里没有「不」。**
+
+`probing/judge.py:73-83` 的 `ProviderProbeStatus` 九个成员——`ok` 加八种失败原因。
+一个 provider 明确回答「这个模型只吃文本」时,词表里没有任何成员表示它,于是
+`probe_status` 在 400/404 分支落到 `model_not_found_status`(`judge.py:234-241`),
+而 `wire.py:190` 传的正是 `"invalid_model"`。实测(台账 P12,2026-08-11T19:00:42Z,
+Ark):HTTP 400 InvalidParameter,原文 "Model only support text input" —— 模型在、
+文本能用(那条 route 的 `status` 至今是 `verified`),被记成「这个模型是无效的」。
+
+同一个仓里已经有一半的分辨力:`probing/questions.py:62-69` 的
+`INCONCLUSIVE_PROBE_STATUSES` 注释写着「Answers that say something about the moment,
+not about the route」,studio 侧 `app/routers/llm.py:3749-3759` 据它挡下
+「lets "we could not ask" masquerade as "the answer was no"」。缺的是镜像那一半:
+**别让「答案是不」冒充「这个模型是坏的」**。
+
+**证据二:答对了也到不了能力位。**
+
+探通(`ok`)时,`_build_model_probe_evidence`(`llm.py:3687-3710`)只把
+`input_modalities: [text, image]` 写进 **evidence**;而
+`app/services/llm_route_capabilities.py:9-14` 的 `route_effective_capabilities`
+只读 `route.capabilities` + ready profile,**不读 evidence**。前端
+`routeAcceptsImageVerified`(`apps/studio/frontend/src/api/llm.ts:1677-1681`)要求
+`capabilities.input_modalities.source === 'probed_verified'` 且值里含 `image` —— 这条
+判据**今天不可能为真**,哪怕图真的探通了。
+
+**决策(四条)。**
+
+1. **词表加一个成员 `capability_unsupported`**:provider 答了,答案确定,答案是「不」。
+   它归在「说的是这条路由」那一族(因此不进 `INCONCLUSIVE_PROBE_STATUSES`),只是
+   方向为负。取这个名字而不是 `unsupported_input`,因为 P5 要问的工具调用是同一物种
+   ——「这个模型不支持工具」和「这个模型不吃图」在判据上没有区别。
+2. **判据落在 gateway 的 judge**,和 `_rejects_our_payload` 并列:后者说「被拒的是**我们**
+   发的东西」,新的那条说「被拒的是**问题本身**」。词表按实测原文起,新 provider 的措辞
+   实测到一条加一条——与 `_BILLING_ERROR_MARKERS` / `_PAYLOAD_REJECTION_MARKERS` 同一纪律。
+3. **答案怎么变成能力,归 gateway 的 `registry/capabilities.py`**,与
+   `measured_effort_capability`(`:205-221`)同一形状。那个函数的注释已经把本条的道理
+   写完了:「An empty measurement is recorded too: "it sells none of them" is an answer,
+   while an absent capability reads as "nobody has asked yet"」。所以新增
+   `measured_image_input(accepted=...)`:**正负两个答案都写**,但**落点不对称**——
+   - 两个答案都写 `vision`(`True` / `False`,`source="probed_verified"`):这个能力
+     本来就是「认不认图」的是非答案,布尔值不会被任何合并规则揉掉,角色 lint 读的
+     也是它。
+   - **只有正答写 `input_modalities`**(`[text, image]`)。模态清单是**下界**:宿主
+     会把文档声称与已验证 profile 的清单**并起来**(`_merge_profile_capabilities`),
+     所以「加一项 image」是探测撑得住的主张,而写 `["text"]` 是在声称一份这次探测
+     从未确立的**完备清单**——一次被拒的图证明不了音频、pdf 或文档列的任何其他项,
+     而且并集规则会把它和文档声称重新揉在一起。上界属于 `vision`。
+
+   studio 的 `_successful_multimodal_probe_capabilities` 随之删除——「什么算问出来了」
+   是 provider 知识,和 P4c 把 `_accepted_effort_levels` 搬走是同一条边界。
+4. **前端的「认图」判据改读 `vision`。** `routeAcceptsImageVerified` 原来读
+   `input_modalities` 里有没有 `image`,按上一条那就是在拿一个下界当是非答案:清单里
+   那个 `image` 可能来自文档。改成 `vision.value === true && source === 'probed_verified'`。
+5. **正答不另铸 profile。** P9 记档时倾向「探通了就建一条 ready profile,借
+   `verified_profile_route_capabilities` 那条既有通道升级能力」。做本条时否掉了:负答
+   无论如何都没有 profile 可建(什么都没跑通),只能写能力;若正答走 profile、负答走
+   能力,同一个问题的两个答案就落在两套机制上。**统一走能力写入**,一个问题一条通道。
+   多模态探测用的调用方式本来就是已验证过的那条,它带来的新事实只关乎模态,不关乎
+   方法可用性——profile 不是它该产出的东西。
+
+**连带纠正一处重复定义**:`ProviderProbeStatus` 这份封闭词表今天在 studio 被手抄了两遍
+(`app/routers/llm.py` 的 `EndpointModelTestResult.status`、
+`app/services/model_probe.py` 的 `ModelProbeResult.status`)。加成员要改三处正是重复
+定义的代价,按仓规「同一业务规则只允许一个权威定义」,两处改为直接引用网关的
+`ProviderProbeStatus`。前端那份(`api/llm.ts`)跨语言,只能手工同步。
+
+**验收判据**:① 一条测试证明 Ark 那句原文判成 `capability_unsupported` 而不是
+`invalid_model`;② 一条测试证明负答之后路由的 `vision` 是 `probed_verified` 的 `False`,
+且这次探测**没有**去改它settle 不了的模态清单;③ 一条测试证明正答之后
+`routeAcceptsImageVerified` 能为真;④ 负答写下的 evidence 不是 `probe-failed`;
+⑤ studio 全套 + 网关全套 + mypy --strict 绿;⑥ **真机**:在 Settings → Copilot 上点
+那条 Ark route 的多模态按钮,盘上记录从 `probe-failed/invalid_model` 变成
+`probe-verified/capability_unsupported`。
+
+**落地时被真机推翻的一处设计(2026-08-12,已按上面写法定稿)**:先写的版本让正负两答
+都改 `input_modalities`。真机点完发现盘上确实写成了 `probed_verified`,但
+`GET /api/llm/registry` 把它交回来时又变回 `provider_doc` ——
+`_merge_profile_capabilities`(`llm.py:5690`)对模态清单取并集且**保留 base 那条记录的
+元数据**。当时的第一反应是改那条并集规则让实测覆盖文档,写完测试才看清那是错的:
+文本生成探测写下的 `input_modalities: ["text"]` 同样带 `probed_verified`,而它只证明
+「文本能用」、根本没问过图,拿它去覆盖文档会**删掉**文档已知的 image/pdf。
+真正的分歧不在「测没测过」,而在**这条记录是下界还是上界**——于是并集规则原样保留,
+改成上面那条不对称落点。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

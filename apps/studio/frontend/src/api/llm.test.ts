@@ -2322,31 +2322,34 @@ describe('API Keys v4 registry adapter', () => {
     expect(credentials.providers[0].available_models).toEqual([])
   })
 
-  it('routeAcceptsImageVerified is true only for probe-verified image input', () => {
+  it('routeAcceptsImageVerified is true only for a probe-verified vision answer', () => {
     const base = { ...route }
+    expect(
+      routeAcceptsImageVerified({
+        ...base,
+        capabilities: { vision: { value: true, source: 'probed_verified' } },
+      }),
+    ).toBe(true)
+    // catalog 声称(api_list/provider_doc)不算实测通过。
+    expect(
+      routeAcceptsImageVerified({
+        ...base,
+        capabilities: { vision: { value: true, source: 'api_list' } },
+      }),
+    ).toBe(false)
+    // 实测答"我只吃文本"= 不认图。
+    expect(
+      routeAcceptsImageVerified({
+        ...base,
+        capabilities: { vision: { value: false, source: 'probed_verified' } },
+      }),
+    ).toBe(false)
+    // 模态清单是下界,可能来自文档,不能拿它当认图判据。
     expect(
       routeAcceptsImageVerified({
         ...base,
         capabilities: {
           input_modalities: { value: ['text', 'image'], source: 'probed_verified' },
-        },
-      }),
-    ).toBe(true)
-    // catalog 声称(provider_doc)不算实测通过。
-    expect(
-      routeAcceptsImageVerified({
-        ...base,
-        capabilities: {
-          input_modalities: { value: ['text', 'image'], source: 'provider_doc' },
-        },
-      }),
-    ).toBe(false)
-    // 没图 = 不认图。
-    expect(
-      routeAcceptsImageVerified({
-        ...base,
-        capabilities: {
-          input_modalities: { value: ['text'], source: 'probed_verified' },
         },
       }),
     ).toBe(false)

@@ -14,16 +14,25 @@ from __future__ import annotations
 from typing import Any
 
 
-def _route(**capabilities: Any) -> dict[str, Any]:
-    return {
-        "route_id": "deepseek-official:deepseek-v4-pro",
-        "endpoint_id": "deepseek-official",
-        "provider_model_id": "deepseek-v4-pro",
-        "capabilities": {
-            "thinking_protocol": {"value": True, "source": "provider_doc"},
-            **capabilities,
+def _route(**capabilities: Any) -> Any:
+    # A real ProviderRoute, not a hand-built dict: what these tests poke at
+    # reads capabilities through `registry.route_effective_capabilities`, which
+    # is typed against the schema the gateway itself defines.
+    from graph_agent_gateway.registry import CapabilityValue, ProviderRoute
+
+    return ProviderRoute(
+        route_id="deepseek-official:deepseek-v4-pro",
+        route_slug="deepseek-v4-pro",
+        endpoint_id="deepseek-official",
+        provider_model_id="deepseek-v4-pro",
+        capabilities={
+            "thinking_protocol": CapabilityValue(value=True, source="provider_doc"),
+            **{
+                name: (value if isinstance(value, CapabilityValue) else CapabilityValue(**value))
+                for name, value in capabilities.items()
+            },
         },
-    }
+    )
 
 
 def _report() -> dict[str, Any]:

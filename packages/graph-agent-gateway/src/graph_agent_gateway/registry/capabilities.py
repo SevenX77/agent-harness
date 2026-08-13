@@ -15,7 +15,18 @@ from graph_agent_gateway.registry.schema import (
     Protocol,
     ProviderRoute,
     RuntimeSettingDescriptor,
+    VerifiedProfile,
 )
+
+_REASONING_CAPABILITIES = frozenset({"thinking", "reasoning"})
+"""The capability names a probe candidate declares when it asks the model to think.
+
+Reading the declared capability is what makes ``thinking_protocol`` measured: a
+candidate declared ``thinking`` that came back ``ready`` means a request shaped
+for thinking was accepted. Searching a profile's identifiers for the substring
+"thinking" would not — a name is a label, and this conclusion is stamped
+``probed_verified``.
+"""
 
 RUNTIME_SETTING_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
     ("temperature", "temperature", "number"),
@@ -30,6 +41,56 @@ RUNTIME_SETTING_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
     ("reasoning.effort", "reasoning_effort", "string"),
     ("reasoning.budget_tokens", "reasoning_budget_tokens", "integer"),
 )
+
+
+def verified_profile_capabilities(
+    profiles: Sequence[VerifiedProfile],
+) -> dict[str, CapabilityValue]:
+    """What the ready profiles among these PROVE about the route.
+
+    Only ``ready`` profiles count: a failed or catalog-candidate profile is a
+    question, not an answer, and everything returned here is stamped
+    ``probed_verified``.
+    """
+    ready_profiles = [profile for profile in profiles if profile.status == "ready"]
+    if not ready_profiles:
+        return {}
+
+    capabilities: dict[str, CapabilityValue] = {
+        "verified_methods": CapabilityValue(
+            value=sorted({profile.method_id for profile in ready_profiles}),
+            source="probed_verified",
+        ),
+    }
+    for direction in ("input", "output"):
+        modalities = sorted(
+            {
+                modality
+                for profile in ready_profiles
+                for modality in (getattr(profile, f"{direction}_modalities") or [])
+            }
+        )
+        if modalities:
+            capabilities[f"{direction}_modalities"] = CapabilityValue(
+                value=modalities,
+                source="probed_verified",
+            )
+    if any(profile.capability in _REASONING_CAPABILITIES for profile in ready_profiles):
+        capabilities["thinking_protocol"] = CapabilityValue(
+            value=True,
+            source="probed_verified",
+        )
+    return capabilities
+
+
+def route_effective_capabilities(route: ProviderRoute) -> dict[str, CapabilityValue]:
+    """The route's capabilities with what its ready profiles measured applied on top.
+
+    Measurement outranks the claim: a route may be listed as not supporting
+    thinking while a thinking probe on it came back ``ready``, and the probe is
+    the one that actually asked.
+    """
+    return {**route.capabilities, **verified_profile_capabilities(route.verified_profiles)}
 
 
 def normalize_route_capabilities(
@@ -423,7 +484,9 @@ def _anthropic_adaptive_thinking_supported(provider_model_id: str) -> bool:
 
 __all__ = [
     "build_runtime_setting_descriptors",
+    "route_effective_capabilities",
     "measured_effort_capability",
     "measured_image_input",
     "normalize_route_capabilities",
+    "verified_profile_capabilities",
 ]

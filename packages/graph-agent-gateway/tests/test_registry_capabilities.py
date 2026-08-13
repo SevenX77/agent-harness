@@ -234,3 +234,88 @@ def test_a_refusal_does_not_rewrite_the_modality_list_it_cannot_settle() -> None
     from graph_agent_gateway.registry import measured_image_input
 
     assert "input_modalities" not in measured_image_input(accepted=False)
+
+
+def _profile(**overrides: object) -> object:
+    from graph_agent_gateway.registry import VerifiedProfile
+
+    payload: dict[str, object] = {
+        "profile_id": "p1",
+        "capability": "text_chat",
+        "method_id": "openai_chat_completions",
+        "request_mapper_id": "openai_chat_completions_text",
+        "status": "ready",
+    }
+    payload.update(overrides)
+    return VerifiedProfile(**payload)  # type: ignore[arg-type]
+
+
+def test_ready_profiles_become_measured_route_capabilities() -> None:
+    from graph_agent_gateway.registry import verified_profile_capabilities
+
+    capabilities = verified_profile_capabilities(
+        [
+            _profile(method_id="openai_chat_completions", input_modalities=["text", "image"]),
+            _profile(profile_id="p2", method_id="openai_responses", output_modalities=["text"]),
+        ]
+    )
+
+    assert capabilities["verified_methods"].value == [
+        "openai_chat_completions",
+        "openai_responses",
+    ]
+    assert capabilities["verified_methods"].source == "probed_verified"
+    assert capabilities["input_modalities"].value == ["image", "text"]
+    assert capabilities["output_modalities"].value == ["text"]
+    assert "thinking_protocol" not in capabilities
+
+
+def test_only_ready_profiles_count_as_measured() -> None:
+    from graph_agent_gateway.registry import verified_profile_capabilities
+
+    assert verified_profile_capabilities([_profile(status="failed")]) == {}
+    assert verified_profile_capabilities([_profile(status="catalog_candidate")]) == {}
+
+
+def test_a_profile_that_asked_the_model_to_think_and_got_a_yes_proves_thinking() -> None:
+    from graph_agent_gateway.registry import verified_profile_capabilities
+
+    # The candidate declares what it asked for; the conclusion is stamped
+    # `probed_verified`, so it may not be guessed from an id that happens to
+    # contain the word.
+    thinking = verified_profile_capabilities([_profile(capability="thinking")])
+    reasoning = verified_profile_capabilities([_profile(capability="reasoning")])
+    named_but_not_asked = verified_profile_capabilities(
+        [_profile(capability="text_chat", method_id="openai_thinking_chat")]
+    )
+
+    assert thinking["thinking_protocol"].value is True
+    assert reasoning["thinking_protocol"].value is True
+    assert "thinking_protocol" not in named_but_not_asked
+
+
+def test_measured_facts_win_over_what_the_route_merely_claims() -> None:
+    from graph_agent_gateway.registry import (
+        CapabilityValue,
+        ProviderRoute,
+        route_effective_capabilities,
+    )
+
+    route = ProviderRoute(
+        route_id="openai:gpt-5",
+        route_slug="gpt-5",
+        endpoint_id="openai",
+        provider_model_id="gpt-5",
+        capabilities={
+            "thinking_protocol": CapabilityValue(value=False, source="api_list"),
+            "max_output_tokens": CapabilityValue(value=8192, source="api_list"),
+        },
+        verified_profiles=[_profile(capability="thinking")],  # type: ignore[list-item]
+    )
+
+    capabilities = route_effective_capabilities(route)
+
+    assert capabilities["thinking_protocol"].value is True
+    assert capabilities["thinking_protocol"].source == "probed_verified"
+    # A claim nothing measured is left exactly as the route stated it.
+    assert capabilities["max_output_tokens"].value == 8192

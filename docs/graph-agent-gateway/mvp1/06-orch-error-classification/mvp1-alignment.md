@@ -36,12 +36,15 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 | 500/502/503/504/529 | `retry_same_route` / `endpoint` | `fallback_allowed` | `resolve/error_classification.py:133-143` |
 | **401/402/403** | `fallback_route` / `credential` | `fallback_allowed`（**不是 fail-fast**） | `resolve/error_classification.py:144-154` |
 | **404** | `fallback_route` / `route` | `fallback_allowed`（**不是 fail-fast**） | `resolve/error_classification.py:144-154` |
-| **400 + capability 标记**（unsupported/not supported/unknown parameter/invalid model/model not found） | `fallback_route` / `route` | `fallback_allowed` | `resolve/error_classification.py:155-168`, `:272-290` |
-| **非 capability 400 / 413 / 422** | `fail_request` / `request` | `fail_fast` | `resolve/error_classification.py:169-178`, `:87-88` |
+| **400 + capability 标记**（unsupported/not supported/unknown parameter/invalid model/model not found） | `fallback_route` / `route` | `fallback_allowed` | `resolve/error_classification.py:157-170`, `:292-310` |
+| **400 + 账户级条件标记**（余额/凭据） | `fallback_route` / `credential` | `fallback_allowed` | `resolve/error_classification.py:171-188`, `:313-327`, 词表 `account_conditions.py` |
+| **既非 capability 也非账户级的 400 / 413 / 422** | `fail_request` / `request` | `fail_fast` | `resolve/error_classification.py:189-198`, `:87-88` |
 | 未知异常 | `fail_request` / `unknown`, `unclassified_default=True` | `fail_fast_with_route_context` | `resolve/error_classification.py:179-188`, `:85-86` |
 | 200 后 SSE 中断 | `fallback_route` / `stream` | 直接 action 语义；legacy 映射为 fallback | `resolve/error_classification.py:111-121`, `:83-84` |
 
-> ⚠️ **状态码语义铁律（写代码/改文档必守）**：401/402/403/404 → **fallback**（不是 fail-fast）；400+capability → **fallback**；400非capability/413/422 → **fail_fast**；429/5xx/网络错 → retry(`fallback_allowed`)；未知 → `fail_fast_with_route_context`。旧文档把 401/403/404/422 写成 fail-fast 是**过时简写、已被 client 层 A' 重设计决策 M5 纠正**（完整 PM 原话见 §4），以源码 `resolve/error_classification.py:15-17`/`:133-188` + 本文 §4 留底为准。
+> ⚠️ **状态码语义铁律（写代码/改文档必守）**：401/402/403/404 → **fallback**（不是 fail-fast）；400+capability → **fallback**；400+账户级条件 → **fallback**（credential scope）；其余 400/413/422 → **fail_fast**；429/5xx/网络错 → retry(`fallback_allowed`)；未知 → `fail_fast_with_route_context`。旧文档把 401/403/404/422 写成 fail-fast 是**过时简写、已被 client 层 A' 重设计决策 M5 纠正**（完整 PM 原话见 §4），以源码 `resolve/error_classification.py:15-17`/`:135-198` + 本文 §4 留底为准。
+
+> ⚠️ **状态码是 provider 的选择，条件的含义不是（2026-08-12 补，见 `docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md` D12）**：上表按状态码分组，但 provider 并不都守约定——Anthropic 用 HTTP 400 报余额耗尽，Google 用 HTTP 400 报 key 无效（实测 2026-08-12，同日 DeepSeek 用 401 报同一件事）。所以「401/402/403 → fallback（credential scope）」这条语义**必须靠 body 里的说法兜住**，否则只有守约定的 provider 才享受得到它，而不守约定的那些会让整条 fallback 链在第一站就死掉。词表在 `graph_agent_gateway/account_conditions.py`，探测判据（`probing/judge.py`）读的是同一份——同一句话在运行时和探测时不能有两种含义。
 
 ### 2.2 编号执行流程（**保留原"编号执行流程"全部**）
 

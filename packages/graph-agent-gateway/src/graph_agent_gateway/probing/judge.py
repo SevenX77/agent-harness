@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from graph_agent_gateway.account_conditions import BILLING_MARKERS, CREDENTIAL_MARKERS, says_any
 from graph_agent_gateway.registry import ProviderProbeBackend
 
 
@@ -94,33 +95,32 @@ put it used to be `invalid_model` — which says the model is not there at all.
 """
 
 
-# Providers report an exhausted balance in provider-specific ways that do not
-# follow the 402/403 status convention — Anthropic answers HTTP 400
-# invalid_request_error with "credit balance is too low". A billing failure hits
-# every model on the endpoint, so it must classify as structural quota_exceeded,
-# never as a model-level invalid_model.
-_BILLING_ERROR_MARKERS = (
-    "credit balance",
-    "insufficient balance",
-    "insufficient credit",
-    "insufficient_quota",
-    "quota exceeded",
-    "billing",
-)
+def _error_text(answer: ProviderAnswer) -> str:
+    """Everything the provider said about what went wrong, as one lowercase line.
 
+    Which JSON member a provider chose to put the condition in is a fact about
+    that provider's schema, not about the meaning: OpenAI-shaped bodies name it
+    in `type`/`code`, Google names it in `details[].reason` — a
+    `google.rpc.ErrorInfo` identifier, machine-readable in a way `message`
+    (prose, and localizable) is not. Flattening them into one text is what lets
+    every marker table below be a plain list of observed wording instead of a
+    per-provider parser.
 
-def _is_billing_error(answer: ProviderAnswer) -> bool:
+    `status` is deliberately left out: it carries the coarse category
+    (`INVALID_ARGUMENT`) that is true of every 400, so admitting it could only
+    make a marker match for the wrong reason.
+    """
+
     payload = answer.payload()
     if not isinstance(payload, dict):
-        return False
+        return ""
     error = payload.get("error")
     source = error if isinstance(error, dict) else payload
-    text = " ".join(
-        str(value).lower()
-        for value in (source.get("type"), source.get("code"), source.get("message"))
-        if value is not None
-    )
-    return any(marker in text for marker in _BILLING_ERROR_MARKERS)
+    values = [source.get("type"), source.get("code"), source.get("message")]
+    details = source.get("details")
+    if isinstance(details, list):
+        values.extend(item.get("reason") for item in details if isinstance(item, dict))
+    return " ".join(str(value).lower() for value in values if value is not None)
 
 
 # A provider can reject the probe's own payload for a rule that has nothing to
@@ -158,32 +158,20 @@ _CAPABILITY_REFUSAL_MARKERS = (
 )
 
 
+def _is_billing_error(answer: ProviderAnswer) -> bool:
+    return says_any(_error_text(answer), BILLING_MARKERS)
+
+
+def _is_credential_error(answer: ProviderAnswer) -> bool:
+    return says_any(_error_text(answer), CREDENTIAL_MARKERS)
+
+
 def _refuses_the_capability_asked(answer: ProviderAnswer) -> bool:
-    payload = answer.payload()
-    if not isinstance(payload, dict):
-        return False
-    error = payload.get("error")
-    source = error if isinstance(error, dict) else payload
-    text = " ".join(
-        str(value).lower()
-        for value in (source.get("type"), source.get("code"), source.get("message"))
-        if value is not None
-    )
-    return any(marker in text for marker in _CAPABILITY_REFUSAL_MARKERS)
+    return says_any(_error_text(answer), _CAPABILITY_REFUSAL_MARKERS)
 
 
 def _rejects_our_payload(answer: ProviderAnswer) -> bool:
-    payload = answer.payload()
-    if not isinstance(payload, dict):
-        return False
-    error = payload.get("error")
-    source = error if isinstance(error, dict) else payload
-    text = " ".join(
-        str(value).lower()
-        for value in (source.get("type"), source.get("code"), source.get("message"))
-        if value is not None
-    )
-    return any(marker in text for marker in _PAYLOAD_REJECTION_MARKERS)
+    return says_any(_error_text(answer), _PAYLOAD_REJECTION_MARKERS)
 
 
 # A URL that does not serve the probed protocol at all answers with wrong-path
@@ -274,8 +262,15 @@ def probe_status(
     if code in (402, 403):
         return "quota_exceeded"
     if code in (400, 404):
+        # Account-wide conditions first: a balance or a key answers for every
+        # model on the endpoint, so neither can be read as a verdict on the one
+        # model that happened to be asked. Both arrive here rather than on their
+        # conventional 402/401 because providers do not keep that convention —
+        # see `account_conditions` for the observed cases.
         if _is_billing_error(answer):
             return "quota_exceeded"
+        if _is_credential_error(answer):
+            return "invalid_key"
         if _rejects_our_payload(answer):
             return "error"
         if _refuses_the_capability_asked(answer):

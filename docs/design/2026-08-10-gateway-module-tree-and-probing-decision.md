@@ -838,6 +838,92 @@ not about the route」,studio 侧 `app/routers/llm.py:3749-3759` 据它挡下
 真正的分歧不在「测没测过」,而在**这条记录是下界还是上界**——于是并集规则原样保留,
 改成上面那条不对称落点。
 
+### D12. HTTP 状态码是 provider 的选择,答案的含义不是(已裁决,2026-08-12)
+
+**证据(实测,2026-08-12,同一天同一台机器)。** 两个 provider,同一件事——key 是坏的:
+
+| provider | HTTP | body 里的说法 | `probe_status` 判成 |
+|---|---|---|---|
+| deepseek-official | 401 | `invalid_request_error` / "Authentication Fails, Your api key: \*\*\*\*de40 is invalid" | `invalid_key` ✅ |
+| gemini-official | **400** | `status: INVALID_ARGUMENT`,`message: "API key not valid. Please pass a valid API key."`,`details[0].reason: "API_KEY_INVALID"` | **`invalid_model`** ❌ |
+
+`probe_status`(`probing/judge.py`)只在 `code == 401` 那一支判 `invalid_key`;Google 的
+400 走进 400/404 分支,过完账单、payload、能力三张表都不匹配,最后落到
+`model_not_found_status` —— 路由探测传的是 `"invalid_model"`,端点探测传的是 `"error"`。
+于是同一件事在两条探测路径上得到两个名字,而且**没有一个是真的**。
+
+**这不是措辞问题,有两层实际损害。**
+
+① `invalid_model` 说的是「这个模型不存在」。key 是**端点级**的,一把坏 key 会让该端点
+下**每一个**模型都这样答;`app/routers/llm.py` 的 `_STRUCTURAL_PROBE_STATUSES`
+(`{invalid_key, quota_exceeded, protocol_unsupported}`)本来就是为「会拒掉端点上每一个
+模型」的情况准备的短路闸,注释原话:「invalid_model is NOT structural — it is
+model-specific」。判错名字,闸就不响:批量探测会逐个模型烧掉最多 6 次请求,每次都在
+路由上落一条「此模型无效」的证据。
+
+② `invalid_model` 是**确定的**答案,不在 `INCONCLUSIVE_PROBE_STATUSES` 里。所以一批
+连门都没进的能力探测(逐档 effort、工具形状)会被读成「这条路由就卖这几档」——D11 刚
+立起来的那条纪律(别让「没问出来」冒充「答案是不」)在这里被从另一侧绕过去了。
+
+**证据三:同一件事在运行时也判错,而且更贵。**
+
+`resolve/error_classification.py` 是运行时的判据(探测之外的另一个读 provider 报错的地方),
+它有一模一样的形状:`FALLBACK_STATUS_CODES = {401, 402, 403, 404}`,外加一支
+「400 且看着像账单」的例外,注释原话——「Anthropic encodes account-credit exhaustion as 400
+invalid_request_error; semantically it is a 402-class endpoint/billing failure, so the next
+route (different account/provider) must get its chance」。**凭据那一支不存在**,于是 Google 的
+400 落进 `FAIL_REQUEST_STATUS_CODES` → `fail_request`。
+
+这与本模块自己写下的语义直接打架:`docs/graph-agent-gateway/mvp1/06-orch-error-classification/mvp1-alignment.md:44`
+的状态码铁律写着「401/402/403 → **fallback**(credential scope)」,并解释为什么——
+「把它们当 fail-fast 会让 credential 失效时**不再尝试下一条 route**,丢掉本可恢复的机会」。
+代码只在 provider 用了约定状态码时守这条规则。实际后果:一个 role 的 fallback 链里第一条
+是 Gemini 且 key 坏了,整个请求当场失败,后面几条备用 route 一条都不试。
+
+**决策(四条)。**
+
+1. **账户级条件的词表独立成一个叶子模块** `graph_agent_gateway/account_conditions.py`
+   (`BILLING_MARKERS` / `CREDENTIAL_MARKERS` / `says_any`)。理由不是「有两处重复」,而是
+   **这不是任何一个域的知识**:探测判据要认它,运行时判据也要认它,谁也不该从对方那里 import。
+   边界写在模块文档里——**收进来的条件必须是「与请求无关」的**:余额和 key 对每个模型、每次
+   调用都给同一个答案;而「这个模型不吃图」「这个参数不认识」换个模型换次调用就变,留在各自
+   的消费者那里(所以 `_looks_like_route_capability_error` 原样不动)。
+   合并同时修掉一处已发生的漂移:两份账单词表早就不一样了——`purchase credits` 只在运行时那份、
+   `quota exceeded` 只在 judge 那份,同一句话看谁读到而有不同结论。取并集。
+2. **judge 里,凭据判据与账单判据并列**,在 400/404 分支里紧挨 `_is_billing_error` 之后判
+   `invalid_key`;两条排在最前,因为余额与 key 替整个端点作答,那次恰好被问到的模型是谁并不重要。
+3. **运行时判据合成一支**:原来的「400 且像账单」改为「400 且是账户级条件」
+   (`_is_account_condition`),落点仍是 `fallback_route` / `credential` / fallback-eligible。
+   合成一支而不是加一支,是因为两者**得到的是同一个结论**:都值得换一个账户再试,重试同一个
+   都没有意义。
+4. **judge 读机器可读的那一份。** 四张标记表原先各自把 `type`/`code`/`message` 摊平成一行
+   文本,四份同样的代码——按仓规「相似逻辑第三次出现即抽公共层」,抽出 `_error_text`,
+   并把 Google 放条件的地方 `details[].reason` 一并读进来。`reason` 是
+   `google.rpc.ErrorInfo` 的标识符,天生是给程序读的,而 `message` 是给人读的散文(且可
+   本地化)。`status` 故意不读:它装的是 `INVALID_ARGUMENT` 这种**每个 400 都成立**的粗
+   分类,收进去只会让标记因为错误的理由命中。运行时那一侧不需要读 `details`——它拿到的
+   `message` 已经带了标记;**不为将来可能的措辞预留没人用的解析**。
+5. **句子跟着答案走(顺手纠正 D11 落地时留下的一处)。**
+   `app/routers/llm.py` 的 `_model_probe_failure_message` 把状态名塞进固定句式
+   「Endpoint model probe **failed** (…)」,而 D11 之后 `capability_unsupported` 的记录
+   `trust_state` 是 `probe-verified`——同一条记录一边说验证通过、一边说探测失败。改名为
+   `_model_probe_outcome_message`,动词由「问出答案了吗」决定:settled → `answered`,
+   否则 `failed`。这与本节是同一条理由——**状态词表在每一层都要说出真正发生的事**。
+
+**前端不需要改,这是核对过的结论不是省略**:studio 早就把 `invalid_key` 当结构性失败短路
+(`_STRUCTURAL_PROBE_STATUSES`)、端点提示语早就写「Invalid API key」,前端 `routeFailureScope`
+对 endpoint 级与 unknown 走同一分支。判对名字,下游全部自动接上——没有为它新增任何前端逻辑。
+
+**验收判据**:① 一条测试拿 Google 原文 body 证明判成 `invalid_key`(路由探测与端点探测
+两种 `model_not_found_status` 都要);② 一条测试证明只靠 `details[].reason` 也能判出来
+(message 换成不含任何标记的措辞);③ 一条测试证明 `invalid_key` 在
+`INCONCLUSIVE_PROBE_STATUSES` 里;④ 一条测试证明运行时同一个 body 走 `fallback_route` /
+`credential`,而一个真正格式错误的 400 仍然 `fail_request`;⑤ 一条测试证明两份词表合并后
+两边都认得原先只在对方那里的词;⑥ 一条测试证明 `capability_unsupported` 的记录里句子不再
+出现 "failed";⑦ 网关全套 + studio 全套 + `mypy --strict` 绿;⑧ **真机**:拿盘上那把坏掉的
+Gemini key 探一次,端点结论从 `error/INVALID_ARGUMENT` 变成 `invalid_key`,路由探测不再回
+`invalid_model`。
+
 ### D6. 同期删除(不留别名、不留兼容)
 
 - `probe_catalog.py` 整个别名层(B4);

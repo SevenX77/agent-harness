@@ -301,7 +301,11 @@ def test_a_model_that_answers_text_only_lands_on_the_capability_not_on_a_failure
     assert records
     assert [r.trust_state for r in records] == ["probe-verified"]
     assert records[0].probe_status == "capability_unsupported"
-    assert records[0].reason
+    # And the sentence must agree with the field next to it: a record that
+    # says probe-verified and "probe failed" in one breath is unreadable.
+    reason = records[0].reason or ""
+    assert "failed" not in reason.lower(), reason
+    assert "capability_unsupported" in reason
 
 
 def test_an_accepted_image_reaches_the_capability_the_button_reads(

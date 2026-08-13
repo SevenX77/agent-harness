@@ -1345,7 +1345,7 @@ async def test_endpoint_models(
                 update={
                     "status": "failed",
                     "last_test_at": _now_iso(),
-                    "last_test_message": _model_probe_failure_message(probe_results[0]),
+                    "last_test_message": _model_probe_outcome_message(probe_results[0]),
                 }
             )
             save_credentials(latest_credentials)
@@ -3756,7 +3756,7 @@ def _build_model_probe_evidence(
     multimodal: bool = False,
 ) -> EvidenceRecord:
     verified = result.status == "ok"
-    reason = None if verified else _model_probe_failure_message(result)
+    reason = None if verified else _model_probe_outcome_message(result)
     capability_values = _settled_probe_capability_values(endpoint, result, multimodal=multimodal)
     return (
         EvidenceRecord(
@@ -4068,7 +4068,7 @@ def _official_probe_attempt_record(
         "request_mapper_id": candidate.request_mapper_id,
         "status": result.status,
         "latency_ms": result.latency_ms,
-        "message": _model_probe_failure_message(result) if result.status != "ok" else None,
+        "message": _model_probe_outcome_message(result) if result.status != "ok" else None,
         "input_modalities": list(candidate.input_modalities),
         "output_modalities": list(candidate.output_modalities),
         "runtime_overrides": candidate.runtime_settings,
@@ -4082,8 +4082,8 @@ def _official_profile_probe_failure_message(
         return None
     for result in failed_results:
         if result.message:
-            return _model_probe_failure_message(result)
-    return _model_probe_failure_message(failed_results[0])
+            return _model_probe_outcome_message(result)
+    return _model_probe_outcome_message(failed_results[0])
 
 
 async def _probe_official_call_method(
@@ -5273,7 +5273,7 @@ async def _verify_endpoint_by_generation_probe(
     return EndpointGenerationVerification(
         status="failed",
         verified_model_id=None,
-        message=_model_probe_failure_message(
+        message=_model_probe_outcome_message(
             _model_probe_result_from_route_probe(last_failure)
         ),
         failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
@@ -5309,7 +5309,7 @@ def _endpoint_message_from_model_probe_results(probe_results: list[ModelProbeRes
     if successful:
         return f"Connected. Model seen: {successful[0].model_id}."
     if probe_results:
-        return _model_probe_failure_message(probe_results[-1])
+        return _model_probe_outcome_message(probe_results[-1])
     return "Endpoint reachable but no model ids were available to probe."
 
 
@@ -5562,7 +5562,7 @@ def _upsert_third_party_model_probe_routes(
         raw_capabilities = (raw_capabilities_by_model or {}).get(result.model_id, {})
         metadata = {
             **(existing.metadata if existing is not None else {}),
-            "last_probe_message": None if result.status == "ok" else _model_probe_failure_message(result),
+            "last_probe_message": None if result.status == "ok" else _model_probe_outcome_message(result),
             "reason_code": result.status,
             "probe_attempts": [
                 {
@@ -6415,8 +6415,17 @@ def _endpoint_probe_failure_message(result: EndpointProbeResult) -> str:
     return _provider_probe_error_message("Endpoint test failed", result)
 
 
-def _model_probe_failure_message(result: ModelProbeResult) -> str:
-    message = f"Endpoint model probe failed ({result.status})."
+def _model_probe_outcome_message(result: ModelProbeResult) -> str:
+    """What the probe produced, in the same words the record's fields use.
+
+    A probe that reached the provider and got a definite "this model does not
+    take that" did not fail — it is filed as probe-verified evidence. Calling
+    it a failure in the sentence contradicts the field beside it and reads as
+    a broken probe rather than a settled answer.
+    """
+
+    verb = "answered" if _probe_settled_the_question(result) else "failed"
+    message = f"Endpoint model probe {verb} ({result.status})."
     if result.message:
         message = f"{message} {result.message}"
     return message

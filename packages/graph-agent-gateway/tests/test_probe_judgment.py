@@ -129,3 +129,86 @@ def test_a_refusal_of_the_capability_asked_is_a_fact_about_the_route() -> None:
     from graph_agent_gateway.probing import INCONCLUSIVE_PROBE_STATUSES
 
     assert "capability_unsupported" not in INCONCLUSIVE_PROBE_STATUSES
+
+
+GOOGLE_INVALID_KEY_BODY = """
+{
+  "error": {
+    "code": 400,
+    "message": "API key not valid. Please pass a valid API key.",
+    "status": "INVALID_ARGUMENT",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "API_KEY_INVALID",
+        "domain": "googleapis.com",
+        "metadata": {"service": "generativelanguage.googleapis.com"}
+      },
+      {
+        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",
+        "locale": "en-US",
+        "message": "API key not valid. Please pass a valid API key."
+      }
+    ]
+  }
+}
+"""
+"""Google's answer to a bad key, captured verbatim.
+
+Live 2026-08-12, gemini-official × gemini-3.5-flash, POST
+`/v1beta/models/gemini-3.5-flash:generateContent`. Note the HTTP code: 400,
+not the 401 every other configured provider uses for the same situation
+(deepseek-official the same day: HTTP 401 "Authentication Fails").
+"""
+
+
+def test_a_bad_key_answered_as_four_hundred_is_still_a_bad_key() -> None:
+    """The status convention is the provider's choice; the meaning is not.
+
+    Before this, Google's answer fell through to `model_not_found_status` and
+    a Gemini route probed with a bad key was recorded as invalid_model — "there
+    is no such model" — from an answer that names the key. Same species as the
+    billing table: an endpoint-wide account failure that arrives as HTTP 400
+    must not be filed as a model-level verdict.
+    """
+    answer = ProviderAnswer(status_code=400, body=GOOGLE_INVALID_KEY_BODY)
+
+    assert probe_status(answer, model_not_found_status="invalid_model") == "invalid_key"
+
+
+def test_the_endpoint_probe_reads_a_bad_key_the_same_way() -> None:
+    """The endpoint probe passes `model_not_found_status="error"`, so before
+    this the same body produced a bare `error` there and `invalid_model` on the
+    route probe — two names for one situation, neither of them the true one."""
+    answer = ProviderAnswer(status_code=400, body=GOOGLE_INVALID_KEY_BODY)
+
+    assert probe_status(answer, model_not_found_status="error") == "invalid_key"
+
+
+def test_a_bad_key_is_read_from_the_machine_readable_reason_too() -> None:
+    """`error.message` is prose for a human; `details[].reason` is Google's
+    own identifier for the condition (`google.rpc.ErrorInfo`). Matching the
+    identifier is what keeps the verdict from depending on wording we do not
+    control — the message here is deliberately one no marker matches."""
+    answer = ProviderAnswer(
+        status_code=400,
+        body=(
+            '{"error": {"code": 400, "message": "\\u8bf7\\u6c42\\u53c2\\u6570\\u6709\\u8bef",'
+            ' "status": "INVALID_ARGUMENT", "details": [{"@type":'
+            ' "type.googleapis.com/google.rpc.ErrorInfo", "reason": "API_KEY_INVALID"}]}}'
+        ),
+    )
+
+    assert probe_status(answer, model_not_found_status="invalid_model") == "invalid_key"
+
+
+def test_a_bad_key_is_never_read_as_an_answer_about_the_route() -> None:
+    """Which is the second half of the damage this fixes.
+
+    `invalid_model` is conclusive, so a capability batch that hit a bad key was
+    read as "these are the values the route sells". `invalid_key` is in the
+    inconclusive set, so the same batch is voided instead.
+    """
+    from graph_agent_gateway.probing import INCONCLUSIVE_PROBE_STATUSES
+
+    assert "invalid_key" in INCONCLUSIVE_PROBE_STATUSES

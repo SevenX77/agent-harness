@@ -457,7 +457,9 @@
       "agentDefaultPlaceholder": "跟随 provider 默认",
       "agentModelAria": "{{agent}} 的模型覆盖",
       "agentEffortAria": "{{agent}} 的 effort 覆盖"
-    }
+    },
+    "deploy": "部署",
+    "deployDone": "已部署内置 ah"
   },
   "copilot": {
     "title": "Copilot",

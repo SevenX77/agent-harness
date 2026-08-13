@@ -240,6 +240,20 @@ export interface CliDependencyRow {
   detail: string | null
 }
 
+/** ah 行「部署」钮(决议 2026-08-12,ah 随 app 打包):把 vendored ah 布署进
+ *  WSL(只升不降),成功返回复查后的 ah 行,失败返回错误消息串。 */
+export async function deployVendoredAh(): Promise<{ row: CliDependencyRow } | { error: string }> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) {
+    return { error: 'Desktop-only feature' }
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return { row: await invoke<CliDependencyRow>('deploy_vendored_ah') }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 /** Settings →「CLI」区的依赖链探测(提案 2026-08-06 §2;owner = Tauri,分 OS)。
  *  非桌面环境返回 null——组件据此显示 desktop-only 空态,不渲染假数据。 */
 export async function cliDependencyStatus(): Promise<CliDependencyRow[] | null> {

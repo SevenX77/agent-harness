@@ -457,7 +457,9 @@
       "agentDefaultPlaceholder": "Provider default",
       "agentModelAria": "Model override for {{agent}}",
       "agentEffortAria": "Effort override for {{agent}}"
-    }
+    },
+    "deploy": "Deploy",
+    "deployDone": "Bundled ah deployed"
   },
   "copilot": {
     "title": "Copilot",

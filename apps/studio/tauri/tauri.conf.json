@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.sevenx.skill-studio",
   "build": {
-    "beforeDevCommand": "node tauri/scripts/sync_resources.js && node tauri/scripts/ensure_vendor.js && node tauri/scripts/dev_frontend.js",
-    "beforeBuildCommand": "cd frontend && npm run build && cd .. && node tauri/scripts/download_runtime.js && python3 backend/scripts/build_vendor.py && node tauri/scripts/sync_resources.js",
+    "beforeDevCommand": "node tauri/scripts/sync_resources.js && node tauri/scripts/ensure_vendor.js && node tauri/scripts/ensure_ah_vendor.js && node tauri/scripts/dev_frontend.js",
+    "beforeBuildCommand": "cd frontend && npm run build && cd .. && node tauri/scripts/download_runtime.js && node tauri/scripts/ensure_ah_vendor.js --strict && python3 backend/scripts/build_vendor.py && node tauri/scripts/sync_resources.js",
     "frontendDist": "../frontend/dist",
     "devUrl": "http://127.0.0.1:5173"
   },

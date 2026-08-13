@@ -235,6 +235,7 @@ if (require.main === module) {
 module.exports = {
   REQUIRED_TARGETS,
   artifactFor,
+  download,
   hostTargetTriple,
   loadLock,
   main,

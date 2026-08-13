@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py:ProviderProfile/apply_provider_profile · packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py:canonicalize_base_url · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py:chat_plainly · packages/graph-agent-gateway/src/graph_agent_gateway/call/profiles.py:ProviderProfile/apply_provider_profile · packages/graph-agent-gateway/src/graph_agent_gateway/registry/base_url.py:canonicalize_base_url · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:Protocol/ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_dispatch/_invoke_with_token_escalation
 units: [route-chat-model-factory]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
